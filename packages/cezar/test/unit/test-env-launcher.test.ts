@@ -60,6 +60,13 @@ function makeFixture(withSetsid: boolean): { root: string; path: string } {
     `#!/bin/sh
 set -eu
 mkdir -p node_modules/zod packages/cezar/dist packages/cezar/web/dist
+if [ "\${1-}" = run ] && [ "\${2-}" = build ]; then
+  printf 'build\\n' >> .ai/build-invocations
+  rm -f packages/cezar/web/dist/.cez-e2e-build
+  if [ "\${VITE_CEZ_E2E-}" = 1 ]; then
+    printf 'e2e\\n' > packages/cezar/web/dist/.cez-e2e-build
+  fi
+fi
 printf '{"name":"zod"}' > node_modules/zod/package.json
 cat > packages/cezar/dist/index.js <<'EOF'
 const http = require('node:http');
@@ -95,6 +102,52 @@ done
   );
   return { root, path: join(root, 'bin') };
 }
+
+test('a production web rebuild invalidates both live reuse and the build cache', () => {
+  const fixture = makeFixture(false);
+  const env = { ...process.env, PATH: fixture.path, TEST_ENV_CACHE_TTL_SECONDS: '600' };
+  const up = join(fixture.root, '.ai/scripts/test-env-up.sh');
+  const down = join(fixture.root, '.ai/scripts/test-env-down.sh');
+  const npm = join(fixture.root, 'bin/npm');
+  const builds = () => readFileSync(join(fixture.root, '.ai/build-invocations'), 'utf8').trim().split('\n').length;
+  const productionBuild = () => {
+    const result = spawnSync(npm, ['run', 'build'], { cwd: fixture.root, encoding: 'utf8', env: { ...env, VITE_CEZ_E2E: '' } });
+    assert.equal(result.status, 0, result.stderr);
+  };
+
+  const cold = spawnSync('/bin/sh', [up], { encoding: 'utf8', env, timeout: 20_000 });
+  assert.equal(cold.status, 0, cold.stderr);
+  const first = descriptor(fixture.root);
+  launchedPids.add(first.app.pid);
+  assert.equal(builds(), 1);
+
+  const valid = spawnSync('/bin/sh', [up], { encoding: 'utf8', env, timeout: 20_000 });
+  assert.equal(valid.status, 0, valid.stderr);
+  assert.match(valid.stdout, /TEST_ENV_REUSED=1/);
+  assert.equal(builds(), 1);
+
+  productionBuild();
+  const liveOverwrite = spawnSync('/bin/sh', [up], { encoding: 'utf8', env, timeout: 20_000 });
+  assert.equal(liveOverwrite.status, 0, liveOverwrite.stderr);
+  assert.match(liveOverwrite.stdout, /TEST_ENV_REUSED=0/);
+  assert.equal(builds(), 3);
+  launchedPids.delete(first.app.pid);
+  const second = descriptor(fixture.root);
+  launchedPids.add(second.app.pid);
+
+  const stopped = spawnSync('/bin/sh', [down], { encoding: 'utf8', env, timeout: 20_000 });
+  assert.equal(stopped.status, 0, stopped.stderr);
+  launchedPids.delete(second.app.pid);
+  productionBuild();
+  const stoppedOverwrite = spawnSync('/bin/sh', [up], { encoding: 'utf8', env, timeout: 20_000 });
+  assert.equal(stoppedOverwrite.status, 0, stoppedOverwrite.stderr);
+  assert.match(stoppedOverwrite.stdout, /TEST_ENV_REUSED=0/);
+  assert.equal(builds(), 5);
+  const third = descriptor(fixture.root);
+  launchedPids.add(third.app.pid);
+  spawnSync('/bin/sh', [down], { encoding: 'utf8', env, timeout: 20_000 });
+  launchedPids.delete(third.app.pid);
+});
 
 function descriptor(root: string): {
   baseUrl: string;
@@ -362,4 +415,3 @@ exit 1
   spawnSync('/bin/sh', [down], { encoding: 'utf8', env, timeout: 20_000 });
   launchedPids.delete(descriptor(fixture.root).app.pid);
 });
-

@@ -179,7 +179,10 @@ function parkAndSettleHistoryStart(): HistoryAnchor {
     // Unpin while still at the live tail so a later wheel at the boundary cannot load a page.
     main.dispatchEvent(new WheelEvent('wheel', { deltaY: -120, bubbles: true }))
     // Virtua ignores a raw scrollTop write; the e2e seam goes through the scroll owner.
-    window.__cezThreadScrollTo?.(0)
+    if (typeof window.__cezThreadScrollTo !== 'function') {
+      throw new Error('e2e thread scroll seam is missing from the cockpit bundle')
+    }
+    window.__cezThreadScrollTo(0)
   })()`)
   browser.waitForValue(
     `document.querySelector('[data-slot="main"]')?.scrollTop ?? null`,

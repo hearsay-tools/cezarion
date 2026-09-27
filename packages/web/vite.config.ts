@@ -2,7 +2,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
-import { defineConfig } from 'vite'
+import { defineConfig, type Plugin } from 'vite'
 
 const appDir = dirname(fileURLToPath(import.meta.url))
 const packagesDir = resolve(appDir, '..')
@@ -22,11 +22,28 @@ export const reactRuntimeChunk = {
   test: /node_modules\/(?:react(?:-dom)?|scheduler)\//,
 }
 
+function e2eBuildMarker(): Plugin {
+  let e2eBuild = false
+  return {
+    name: 'cez-e2e-build-marker',
+    apply: 'build' as const,
+    configResolved(config) {
+      // Read Vite's resolved env, the same value compiled into isCockpitE2e().
+      const value = config.env.VITE_CEZ_E2E
+      e2eBuild = value === '1' || value === 'true'
+    },
+    generateBundle() {
+      // #649: a later production build empties outDir and removes this proof of the e2e bundle.
+      if (e2eBuild) this.emitFile({ type: 'asset', fileName: '.cez-e2e-build', source: 'e2e\n' })
+    },
+  }
+}
+
 export default defineConfig({
   root: appDir,
   base: '/',
   // Tailwind v4 is CSS-first: the whole theme lives in src/styles/index.css, there is no tailwind.config.js.
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), e2eBuildMarker()],
   // `@/…` → packages/web/src — the alias shadcn/ui components import `cn` through. Mirrored in
   // tsconfig.json `paths`.
   //
