@@ -1493,7 +1493,7 @@ export class RunManager {
 
   private parkCiWait(runId: string, state: ActiveRun): boolean {
     const wait = this.store.getRun(runId)?.ciWait;
-    if (!wait || !state.session?.open || state.cancelled || state.pendingHumanAsk || this.ciWakeAdmitted.has(runId)) return false;
+    if (!wait || !state.session?.open || state.cancelled || state.pendingHumanAsk) return false;
     if (wait.phase === 'registered') this.store.commitCiWait(runId, { ...wait, phase: 'parked' });
     this.clearIdleTimer(state); this.clearMonitoringWakeTimer(state, runId);
     this.waiting.add(runId); this.monitoring.add(runId);
@@ -1507,9 +1507,14 @@ export class RunManager {
   private queueCiWake(runId: string): void {
     const run = this.store.getRun(runId);
     const wait = run?.ciWait;
-    if (this.disposed || this.recovering || !run || !wait?.result || !wait.wakeId || this.ciWakeQueuedAt.has(runId) ||
-      this.ciWakeAdmitted.has(runId) || !['running', 'waiting', 'queued'].includes(run.status) || run.stopping ||
+    if (this.disposed || this.recovering || !run || !wait?.result || !wait.wakeId ||
+      !['running', 'waiting', 'queued'].includes(run.status) || run.stopping ||
       this.hasPendingHumanAsk(runId) || this.workerExecutionStopped(runId) || this.executionBlockedByRootFinish(run)) return;
+    // Settlement ends the watcher. Keep a bounded-rate wake source until ACK,
+    // withdrawal or termination, including refusals with no runner-ready callback.
+    this.retryCiAdmission(runId);
+    if (this.ciWakeAdmitted.has(runId)) { this.flushAgentInputs(runId); return; }
+    if (this.ciWakeQueuedAt.has(runId)) { this.releaseSlot(); return; }
     const state = this.active.get(runId);
     if (state) {
       if (!this.monitoring.has(runId) || state.atTurnBoundary !== state.session || state.pendingHumanAsk) return;
@@ -1756,7 +1761,9 @@ export class RunManager {
    */
   private busySlots(): number {
     const ordinaryWaiting = this.waiting.size - this.monitoring.size;
-    const exemptMonitoring = Math.min(this.monitoring.size, this.semaphore.maxMonitoringSessions());
+    // An admitted CI wake reserves its slot while remaining visibly parked until ACK.
+    const admittedMonitoring = [...this.ciWakeAdmitted].filter(id => this.monitoring.has(id)).length;
+    const exemptMonitoring = Math.min(this.monitoring.size - admittedMonitoring, this.semaphore.maxMonitoringSessions());
     return this.active.size + this.starting.size - ordinaryWaiting - exemptMonitoring - this.workerWaiting.size;
   }
 
@@ -1849,7 +1856,7 @@ export class RunManager {
         const defaultRunner = anyHold ? (await loadConfig(this.repoRoot)).defaultRunner : undefined;
         // Removing one monitor above the exemption cap needs no new slot: it already holds one.
         const chargedCiWake = (id: string) => this.ciWakeQueuedAt.has(id) && this.monitoring.has(id) &&
-          this.monitoring.size > this.semaphore.maxMonitoringSessions();
+          this.monitoring.size - [...this.ciWakeAdmitted].filter(id => this.monitoring.has(id)).length > this.semaphore.maxMonitoringSessions();
         while (this.queue.length > 0) {
           // FIFO among the runs that CAN start; a held one keeps its place in the queue rather
           // than being dequeued and re-queued (which would churn its position and its record).
@@ -1883,8 +1890,14 @@ export class RunManager {
             const state = this.active.get(runId)!;
             if (!state.pendingHumanAsk && this.store.getRun(runId)?.ciWait?.result && state.atTurnBoundary === state.session) {
               this.ciWakeAdmitted.add(runId);
-              this.waiting.delete(runId); this.monitoring.delete(runId);
               this.flushAgentInputs(runId);
+            } else if (this.store.getRun(runId)?.ciWait?.result) {
+              // The runner may lose its boundary between queueing and admission.
+              // Retain the wake, but do not spin on it in this pump pass.
+              this.ciWakeQueuedAt.set(runId, Date.now());
+              this.queue.push(runId);
+              this.retryCiAdmission(runId);
+              break;
             }
             continue;
           }
@@ -4153,6 +4166,11 @@ export class RunManager {
             if (inputIds.length !== 1) throw new Error('CI observation must be delivered separately');
             this.store.commitCiWaitDelivery(runId, ciWakeId);
             this.ciWakeAdmitted.delete(runId);
+            const retry = this.ciRetries.get(runId);
+            if (retry) clearTimeout(retry);
+            this.ciRetries.delete(runId);
+            this.waiting.delete(runId); this.monitoring.delete(runId);
+            this.store.updateRun(runId, { status: 'running', activity: undefined });
           } else {
             const deliveredAt = new Date().toISOString();
             // An observable harness still owes a read: mark it so a restart replays it (#505).
@@ -4293,6 +4311,9 @@ export class RunManager {
     this.workerWaiting.delete(runId);
     this.clearIdleTimer(state);
     this.clearMonitoringWakeTimer(state, runId);
+    // A CI command can emit activity before its transport ACK. Keep its park
+    // until the durable delivery checkpoint; admission already reserves capacity.
+    if (this.store.getRun(runId)?.ciWait && this.ciWakeAdmitted.has(runId)) return;
     this.waiting.delete(runId);
     this.monitoring.delete(runId);
     this.store.updateRun(runId, { status: 'running', activity: undefined });

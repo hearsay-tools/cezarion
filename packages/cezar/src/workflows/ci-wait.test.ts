@@ -2,6 +2,9 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { RUNNER_IDS } from '../core/agent-runner.ts';
+import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
+import { QUICK_TASK_WORKFLOW } from './types.ts';
 import type { AgentSession } from '../core/agent-runner.ts';
 import type { CiWait, CiWaitResult } from '@open-mercato/cezar-contract';
 import { controlledWire, manager, parent, root, restart, semaphore, store, until, worker, waitOf, useWorkerWaitFixture } from './worker-wait.testkit.ts';
@@ -77,6 +80,138 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     expect(store.getRun(run.id)?.ciWait).toBeUndefined();
     expect(store.getRun(run.id)?.agentInputs?.filter(input => input.id === receipt.id)).toHaveLength(1);
     expect(store.getRun(run.id)?.status).not.toBe('done');
+  });
+
+  // Exhaustive native-wire regression matrix for #494. A new runner must supply
+  // its own adapter; no normalized event injection or backend-only exemption.
+  it('CI retry matrix covers every runner with a native hold scenario', () => {
+    for (const runner of RUNNER_IDS) {
+      expect(HARNESS_ADAPTERS[runner].mockBin).toBeTruthy();
+      expect(HARNESS_ADAPTERS[runner].scenarios.hold).toBeDefined();
+    }
+  });
+
+  it.each(RUNNER_IDS)('%s retries a refused settled CI observation without human input', async runner => {
+    const external = github();
+    process.env.CEZ_DRY_RUN = '0';
+    const adapter = HARNESS_ADAPTERS[runner];
+    process.env[adapter.binEnv] = adapter.mockBin;
+    const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: adapter.scenarios.hold!, runner });
+    await until(() => store.getRun(run.id)?.status === 'waiting');
+    const receipt = await register(run.id);
+    const engine = manager as unknown as { monitoring: Set<string>; active: Map<string, { session: AgentSession }> };
+    const session = engine.active.get(run.id)!.session;
+    const send = vi.spyOn(session, 'sendAgentMessage').mockReturnValueOnce(false);
+    external.settle(success());
+    await until(() => send.mock.calls.length > 0);
+    expect.soft(engine.monitoring.has(run.id)).toBe(true);
+    expect.soft(store.getRun(run.id)?.activity).toBe('monitoring');
+    expect(store.getRun(run.id)?.agentInputs?.find(input => input.id === receipt.id)?.deliveredAt).toBeUndefined();
+    expect.soft(semaphore.busy()).toBe(1); // Admission reserves capacity even while parked.
+    await until(() => !!store.getRun(run.id)?.lastCiWait?.deliveredAt);
+    expect(store.getRun(run.id)?.ciWait).toBeUndefined();
+    expect(store.getRun(run.id)?.agentInputs?.filter(input => input.id === receipt.id)).toHaveLength(1);
+    expect(store.readEvents(run.id).filter(event => event.type === 'human-input-delivered')).toEqual([]);
+  });
+
+  it('requeues a settled wake dequeued after losing its turn boundary', async () => {
+    const external = github();
+    const run = await parent(); await until(() => store.getRun(run.id)?.status === 'waiting');
+    await register(run.id);
+    const engine = manager as unknown as {
+      active: Map<string, { session: AgentSession; atTurnBoundary?: AgentSession }>;
+      queue: string[]; ciWakeQueuedAt: Map<string, number>; pump(): Promise<void>;
+    };
+    const state = engine.active.get(run.id)!;
+    // Hold scheduler capacity until the observation is queued, then lose the
+    // boundary before admission (a backend can resume autonomously).
+    const capacity = vi.spyOn(semaphore, 'busy').mockReturnValue(1);
+    external.settle(success());
+    await until(() => engine.ciWakeQueuedAt.has(run.id));
+    state.atTurnBoundary = undefined;
+    capacity.mockRestore();
+    await engine.pump();
+    expect.soft(engine.queue).toContain(run.id);
+    state.atTurnBoundary = state.session;
+    await until(() => !!store.getRun(run.id)?.lastCiWait?.deliveredAt);
+  });
+
+  it('keeps an accepted CI wake parked and charged until acknowledgement', async () => {
+    const external = github();
+    const run = await parent(); await until(() => store.getRun(run.id)?.status === 'waiting');
+    await register(run.id);
+    const engine = manager as unknown as { monitoring: Set<string>; active: Map<string, { session: AgentSession }> };
+    const session = engine.active.get(run.id)!.session;
+    const original = session.sendAgentMessage.bind(session);
+    let acknowledge!: () => void;
+    const ack = new Promise<void>(resolve => { acknowledge = resolve; });
+    const send = vi.spyOn(session, 'sendAgentMessage').mockImplementation((...args) => {
+      const accepted = original(...args);
+      return accepted && accepted.then(() => ack);
+    });
+    try {
+      external.settle(success());
+      await until(() => send.mock.calls.length === 1);
+      // Native activity and turn-end happen before the held transport ACK.
+      await until(() => store.readEvents(run.id).filter(event => event.type === 'turn-end').length === 2);
+      expect(engine.monitoring.has(run.id)).toBe(true);
+      expect(store.getRun(run.id)?.activity).toBe('monitoring');
+      expect(semaphore.busy()).toBe(1);
+      expect(store.getRun(run.id)?.ciWait?.phase).toBe('wake-pending');
+      acknowledge();
+      await until(() => !!store.getRun(run.id)?.lastCiWait?.deliveredAt);
+      expect(engine.monitoring.has(run.id)).toBe(false);
+    } finally { acknowledge(); }
+  });
+
+  it.each(['withdraw', 'cancel'] as const)('stops refused CI retries on %s', async action => {
+    const external = github();
+    const run = await parent(); await until(() => store.getRun(run.id)?.status === 'waiting');
+    const wait = await register(run.id);
+    const engine = manager as unknown as { ciRetries: Map<string, unknown>; active: Map<string, { session: AgentSession }> };
+    const send = vi.spyOn(engine.active.get(run.id)!.session, 'sendAgentMessage').mockReturnValue(false);
+    external.settle(success());
+    await until(() => send.mock.calls.length >= 2);
+    if (action === 'withdraw') expect(manager.sendMessage(run.id, [{ type: 'text', text: 'mock:hold' }])).toBe(true);
+    else expect(manager.cancel(run.id)).toBe(true);
+    expect(engine.ciRetries.has(run.id)).toBe(false);
+    expect(store.getRun(run.id)?.ciWait).toBeUndefined();
+    expect(store.getRun(run.id)?.agentInputs?.some(input => input.id === wait.id)).toBe(false);
+  });
+
+  it('does not count an admitted monitor as another charged wake at the exemption cap', async () => {
+    const external = github();
+    vi.spyOn(semaphore, 'maxMonitoringSessions').mockReturnValue(1);
+    const first = await parent(); await until(() => store.getRun(first.id)?.status === 'waiting');
+    await register(first.id);
+    const second = await parent(); await until(() => store.getRun(second.id)?.status === 'waiting');
+    await register(second.id);
+    const engine = manager as unknown as { active: Map<string, { session: AgentSession }> };
+    const firstSend = vi.spyOn(engine.active.get(first.id)!.session, 'sendAgentMessage').mockReturnValue(false);
+    const secondSend = vi.spyOn(engine.active.get(second.id)!.session, 'sendAgentMessage');
+    external.settle(success());
+    await until(() => firstSend.mock.calls.length >= 2);
+    expect(secondSend).not.toHaveBeenCalled();
+    expect(semaphore.busy()).toBe(1);
+    firstSend.mockRestore();
+    await until(() => !!store.getRun(first.id)?.lastCiWait?.deliveredAt);
+    await until(() => !!store.getRun(second.id)?.lastCiWait?.deliveredAt);
+  });
+
+  it.each(RUNNER_IDS)('%s charges native activity before CI admission', async runner => {
+    github();
+    process.env.CEZ_DRY_RUN = '0';
+    const adapter = HARNESS_ADAPTERS[runner];
+    process.env[adapter.binEnv] = adapter.mockBin;
+    const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: adapter.scenarios.hold!, runner });
+    await until(() => store.getRun(run.id)?.status === 'waiting');
+    await register(run.id);
+    const engine = manager as unknown as { active: Map<string, { session: AgentSession }> };
+    // Resume the backend itself, bypassing the manager's human-input path.
+    // Native frames must charge work even when no CI result has settled.
+    expect(engine.active.get(run.id)!.session.sendMessage([{ type: 'text', text: adapter.scenarios.hold! }])).toBe(true);
+    await until(() => store.readEvents(run.id).filter(event => event.type === 'turn.started').length >= 2);
+    expect(semaphore.busy()).toBe(1);
   });
 
   it('deduplicates matching registrations without extending the deadline', async () => {
