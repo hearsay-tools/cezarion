@@ -429,6 +429,7 @@ entries:
       conflicts: 2
     fork:
       issue: 429
+      pr: 648
       commits: [5847c4282c26ba56fb95d833efc4f391e53b8600]
     decided: 2026-09-27
   - sha: 456859a499dc3f87ec9f938fbac12727956f428c
