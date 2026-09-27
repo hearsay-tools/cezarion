@@ -5,7 +5,7 @@ Generated from `ledger.yaml` by `node .github/scripts/upstream-scan.cjs render`.
 - Upstream: [open-mercato/cezar](https://github.com/open-mercato/cezar) `main`
 - Fork point: `feb85666` (2026-08-31)
 - Last scan: 2026-09-25 to `6a919f82` ([report](scans/2026-09-25.md))
-- Entries: 55 · pending: 19 · planned: 10 · ported: 13 · diverged: 6 · n/a: 7
+- Entries: 55 · pending: 19 · planned: 8 · ported: 15 · diverged: 6 · n/a: 7
 
 ## Pending (19)
 
@@ -31,7 +31,7 @@ Generated from `ledger.yaml` by `node .github/scripts/upstream-scan.cjs render`.
 | [#1069](https://github.com/open-mercato/cezar/pull/1069) | 2026-09-24 | feat(thread): live clock on the Working… indicator (#1069) | 3 |  |
 | [#1045](https://github.com/open-mercato/cezar/pull/1045) | 2026-09-25 | feat(trackers): browse Jira and Linear issues and automate tracker events (#1045) | 32 |  |
 
-## Planned (10)
+## Planned (8)
 
 | Upstream | Date | Title | Fork | Decided | Reason / note |
 | --- | --- | --- | --- | --- | --- |
@@ -43,9 +43,8 @@ Generated from `ledger.yaml` by `node .github/scripts/upstream-scan.cjs render`.
 | [#973](https://github.com/open-mercato/cezar/pull/973) | 2026-09-14 | feat(ui): filter the new-task base branch picker (#973) | [issue #436](https://github.com/hearsay-tools/cezarion/issues/436) | 2026-09-18 | absent here; 3 hunks in picker-pill |
 | [#984](https://github.com/open-mercato/cezar/pull/984) | 2026-09-14 | fix(workflows): park intermediate asks for input (#984) | [issue #427](https://github.com/hearsay-tools/cezarion/issues/427) | 2026-09-18 | bug present here: resolveAskTurn is gated on interactive, so a CEZ:ASK from a non-final workflow step is dropped and the next step runs; upstream patch references dispatch code that must be stripped |
 | [#968](https://github.com/open-mercato/cezar/pull/968) | 2026-09-14 | fix(clone): recover from GitHub organization SAML auth (#968) | [issue #437](https://github.com/hearsay-tools/cezarion/issues/437) | 2026-09-18 | absent here; server side applies clean, 1 hunk in the clone dialog |
-| [#1009](https://github.com/open-mercato/cezar/pull/1009) | 2026-09-17 | fix(server-deploy): fail the deploy when the service did not actually restart (#1009) | [issue #430](https://github.com/hearsay-tools/cezarion/issues/430) | 2026-09-18 |  |
 
-## Ported (13)
+## Ported (15)
 
 | Upstream | Date | Title | Fork | Decided | Reason / note |
 | --- | --- | --- | --- | --- | --- |
@@ -62,6 +61,7 @@ Generated from `ledger.yaml` by `node .github/scripts/upstream-scan.cjs render`.
 | [#942](https://github.com/open-mercato/cezar/pull/942) | 2026-09-14 | feat(thread): per-message timestamps in the task conversation (#942) | [PR #588](https://github.com/hearsay-tools/cezarion/pull/588) | 2026-09-25 | absent here; new files apply clean, 1 hunk in thread-items |
 | [#993](https://github.com/open-mercato/cezar/pull/993) | 2026-09-16 | fix(automations): a stale poll lock no longer silences every project for ten minutes (#993) | [PR #651](https://github.com/hearsay-tools/cezarion/pull/651), [issue #428](https://github.com/hearsay-tools/cezarion/issues/428), [0f47bdfa](https://github.com/hearsay-tools/cezarion/commit/0f47bdfa), [3ff408df](https://github.com/hearsay-tools/cezarion/commit/3ff408df) | 2026-09-27 |  |
 | [#1014](https://github.com/open-mercato/cezar/pull/1014) | 2026-09-17 | fix(providers): a runtime auth rejection verifies itself before it sticks (#1014) | [PR #598](https://github.com/hearsay-tools/cezarion/pull/598), [issue #431](https://github.com/hearsay-tools/cezarion/issues/431) | 2026-09-25 |  |
+| [#1009](https://github.com/open-mercato/cezar/pull/1009) | 2026-09-17 | fix(server-deploy): fail the deploy when the service did not actually restart (#1009) | [PR #644](https://github.com/hearsay-tools/cezarion/pull/644), [issue #430](https://github.com/hearsay-tools/cezarion/issues/430), [2d328382](https://github.com/hearsay-tools/cezarion/commit/2d328382), [0dfb93c6](https://github.com/hearsay-tools/cezarion/commit/0dfb93c6), [3e676ecd](https://github.com/hearsay-tools/cezarion/commit/3e676ecd) | 2026-09-27 |  |
 | [#994](https://github.com/open-mercato/cezar/pull/994) | 2026-09-18 | fix(server-install): ubuntu-vps vhost emits a standalone http2 directive nginx < 1.25.1 rejects (#994) | [PR #648](https://github.com/hearsay-tools/cezarion/pull/648), [issue #429](https://github.com/hearsay-tools/cezarion/issues/429), [5847c428](https://github.com/hearsay-tools/cezarion/commit/5847c4282c26ba56fb95d833efc4f391e53b8600) | 2026-09-27 |  |
 
 ## Diverged (6)

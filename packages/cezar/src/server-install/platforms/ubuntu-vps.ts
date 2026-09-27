@@ -723,6 +723,43 @@ async function readExecStart(ctx: InstallContext, scope: 'user' | 'system', unit
   return stdout;
 }
 
+type ServiceSnapshot = { active: string | null; started: bigint | null };
+
+/** Read-only even for a system unit; no sudo prompt during diagnosis. */
+async function serviceSnapshot(ctx: InstallContext, scope: 'user' | 'system', unit: string): Promise<ServiceSnapshot> {
+  const args = [...(scope === 'user' ? ['--user'] : []), 'show', unit, '-p', 'ActiveState', '-p', 'ExecMainStartTimestampMonotonic'];
+  const result = await ctx.runner.capture('systemctl', args);
+  if (result.code !== 0) return { active: null, started: null };
+  const fields = new Map(result.stdout.trim().split('\n').map((line) => {
+    const at = line.indexOf('=');
+    return [line.slice(0, at), line.slice(at + 1)];
+  }));
+  const raw = fields.get('ExecMainStartTimestampMonotonic');
+  return {
+    active: fields.get('ActiveState') ?? null,
+    started: raw && /^\d+$/.test(raw) ? BigInt(raw) : null,
+  };
+}
+
+async function failedRestart(ctx: InstallContext, scope: 'user' | 'system', unit: string, reason: string, sudoUsed = false): Promise<never> {
+  let recent = 'recent journal unavailable';
+  const args = [...(scope === 'user' ? ['--user'] : []), '-u', unit, '-n', '30', '--no-pager', '--output=short'];
+  try {
+    const ordinary = await ctx.runner.capture('journalctl', args);
+    if (ordinary.code === 0 && ordinary.stdout.trim()) recent = ordinary.stdout.trim().split('\n').slice(-30).join('\n').slice(-6000);
+  } catch { /* Diagnostics must not hide the restart failure. */ }
+  // An unprivileged journalctl may exit 0 with "-- No entries --" and a
+  // permission hint on stderr. Once this deploy used sudo for the restart,
+  // prefer its noninteractive journal read; keep ordinary output on failure.
+  if (scope === 'system' && sudoUsed) {
+    try {
+      const privileged = await ctx.runner.capture('sudo', ['-n', 'journalctl', ...args]);
+      if (privileged.code === 0 && privileged.stdout.trim()) recent = privileged.stdout.trim().split('\n').slice(-30).join('\n').slice(-6000);
+    } catch { /* Never let journal access hide the restart failure. */ }
+  }
+  throw new StepAborted(`${unit}: ${reason}\nRecent journal:\n${recent}`);
+}
+
 const autostartStep: InstallStep = {
   id: 'autostart',
   // Required: after install the cockpit must actually be serving, so cezar runs
@@ -1044,23 +1081,66 @@ export const ubuntuVps: PlatformStrategy = {
       ctx.ui.info(`DRY RUN — would reload+restart the cezar ${scope} service and re-verify the cockpit.`);
       return;
     }
+    const before = await serviceSnapshot(ctx, scope, UNIT_NAME);
+    let sudoUsed = false;
+    const fail = (reason: string): Promise<never> => failedRestart(ctx, scope, UNIT_NAME, reason, sudoUsed);
+    const assertFreshActive = async (snapshot: ServiceSnapshot): Promise<void> => {
+      if (snapshot.active !== 'active') await fail(`service is ${snapshot.active ?? 'inactive or unreadable'}`);
+      if (before.started === null || snapshot.started === null || snapshot.started === 0n) {
+        await fail('start timestamp unavailable; cannot verify a fresh restart');
+      }
+      if (before.started !== null && snapshot.started !== null && snapshot.started <= before.started) {
+        await fail('start timestamp unchanged after restart');
+      }
+    };
     ctx.ui.info(`Redeploying — restarting the cezar ${scope} service to pick up the new version.`);
+    let after: ServiceSnapshot;
     if (scope === 'user') {
       await ctx.runner.interactive('systemctl', ['--user', 'daemon-reload']);
       const code = await ctx.runner.interactive('systemctl', ['--user', 'restart', UNIT_NAME]);
-      if (code !== 0) ctx.ui.warn('systemctl --user restart returned non-zero — check `systemctl --user status cezar`.');
+      if (code !== 0) await fail(`restart returned code ${code}`);
+      after = await serviceSnapshot(ctx, scope, UNIT_NAME);
     } else {
-      await sudoStep(ctx, {
-        description: 'Reload systemd and restart the cezar service.',
-        command: `systemctl daemon-reload && systemctl restart ${UNIT_NAME}`,
-        verify: (c) => verifyCommand(c, 'systemctl', ['is-active', UNIT_NAME]),
-      });
+      let verified: ServiceSnapshot | undefined;
+      let restartCode: number | undefined;
+      try {
+        await sudoStep(ctx, {
+          description: 'Reload systemd and restart the cezar service.',
+          command: `systemctl daemon-reload && systemctl restart ${UNIT_NAME}`,
+          verify: async (c, commandCode) => {
+            restartCode = commandCode;
+            if (commandCode !== undefined) sudoUsed = true;
+            verified = await serviceSnapshot(c, scope, UNIT_NAME);
+            return (commandCode === undefined || commandCode === 0) &&
+              verified.active === 'active' && before.started !== null && verified.started !== null && verified.started > before.started;
+          },
+        });
+      } catch (err) {
+        if (!(err instanceof StepAborted)) throw err;
+        const reason = restartCode !== undefined && restartCode !== 0
+          ? `restart returned code ${restartCode}`
+          : verified?.active !== 'active'
+          ? `service is ${verified?.active ?? 'inactive or unreadable'}`
+          : before.started === null || verified.started === null
+            ? 'start timestamp unavailable; cannot verify a fresh restart'
+            : 'start timestamp unchanged after restart';
+        await fail(reason);
+      }
+      after = verified ?? await serviceSnapshot(ctx, scope, UNIT_NAME);
     }
+    await assertFreshActive(after);
     await confirmCezarRunning(
       ctx,
-      scope === 'user' ? 'systemctl --user status cezar' : 'sudo systemctl status cezar',
-      scope === 'user' ? 'journalctl --user -u cezar -n 50 --no-pager' : 'sudo journalctl -u cezar -n 50 --no-pager',
+      scope === 'user' ? `systemctl --user status ${UNIT_NAME}` : `sudo systemctl status ${UNIT_NAME}`,
+      scope === 'user' ? `journalctl --user -u ${UNIT_NAME} -n 50 --no-pager` : `sudo journalctl -u ${UNIT_NAME} -n 50 --no-pager`,
     );
-    await identityStep.run(ctx); // throws StepAborted if the cockpit isn't fully working
+    try {
+      await identityStep.run(ctx);
+    } catch (err) {
+      if (!(err instanceof StepAborted)) throw err;
+      const current = await serviceSnapshot(ctx, scope, UNIT_NAME);
+      await fail(`cockpit verification failed: ${err.message}; service is ${current.active ?? 'unreadable'}`);
+    }
+    await assertFreshActive(await serviceSnapshot(ctx, scope, UNIT_NAME));
   },
 };
