@@ -6,6 +6,7 @@ import type { RunRecord, RunStatus } from '@open-mercato/cezar-api-client'
 import type { StatusDotTone } from '@/components/status-dot'
 import {
   ATTENTION_RANK,
+  delegationWaitLabel,
   deriveAttention,
   wantsAttention,
   type Attention,
@@ -269,6 +270,19 @@ describe('status key (#617)', () => {
     // The slim index projection (global Tasks, palette) has only the phase: no count to claim.
     const slim = run({ status: 'waiting', delegation: { role: 'root', wait: { phase: 'parked' } } } as unknown as Partial<RunRecord>)
     expect(deriveAttention(slim)).toMatchObject({ shape: 'workers', label: 'waiting on workers' })
+  })
+
+  // Review round 5: a parked wait-for-all stays `parked` after one worker has reported, so the
+  // count is the workers still owed an outcome, not every id the wait names.
+  it('counts only the workers that have not reported yet', () => {
+    const outcome = (workerId: string) => ({ workerId, status: 'done', observedAt: '2026-09-05T00:00:00.000Z' })
+    const one = parkedRoot({ mode: 'all', outcomes: [outcome('00000000-0000-4000-8000-000000000001')] })
+    expect(deriveAttention(one).label).toBe('waiting on 1 worker')
+    expect(delegationWaitLabel(one.delegation)).toBe('waiting on 1 worker')
+    const all = parkedRoot({ mode: 'all', outcomes: [outcome('00000000-0000-4000-8000-000000000001'), outcome('00000000-0000-4000-8000-000000000002')] })
+    expect(deriveAttention(all).label).toBe('waiting on workers')
+    // An outcome for an id the wait does not name resolves nothing.
+    expect(deriveAttention(parkedRoot({ outcomes: [outcome('00000000-0000-4000-8000-000000000009')] })).label).toBe('waiting on 2 workers')
   })
 
   it('a root waiting on worker replies is still its own workers; a worker waiting on its parent is a ring', () => {

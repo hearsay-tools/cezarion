@@ -101,7 +101,12 @@ export function delegationWaitLabel(delegation: AttentionInput['delegation']): s
   if (delegation.role !== 'root') return undefined
   // A full `RunRecord` carries the worker ids (#617: "waiting on 2 workers"); the slim index
   // projection the global list and the palette read does not, and there the count is not claimed.
-  const workers = (delegation.wait as { workerIds?: readonly string[] }).workerIds?.length
+  // The count is the workers still OWED an outcome: a wait-for-all stays `parked` after one of two
+  // has reported, and "waiting on 2" would then overstate it. None left, or nothing to count
+  // from, says no number.
+  const wait = delegation.wait as { workerIds?: readonly string[]; outcomes?: readonly { workerId: string }[] }
+  const reported = new Set(wait.outcomes?.map((outcome) => outcome.workerId))
+  const workers = wait.workerIds?.filter((id) => !reported.has(id)).length
   return workers ? `waiting on ${workers} worker${workers === 1 ? '' : 's'}` : 'waiting on workers'
 }
 
