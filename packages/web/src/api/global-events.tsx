@@ -230,21 +230,24 @@ function createRunListBatcher(queryClient: QueryClient) {
     timer = undefined
     if (frame !== undefined) cancelAnimationFrame(frame)
     frame = undefined
+    const reconcileKeys: Array<readonly [string, 'runs', 'list']> = []
     for (const { key, baseList, runs } of pending.values()) {
+      // Another write may have replaced this list while the archive frame waited. Its contents
+      // cannot tell us whether it was fetched before or after the event: an absent or unarchived
+      // row may be a newer deletion/unarchive, or a stale response. Keep that result and ask the
+      // server again. Invalidating also marks an inactive list stale for its next mount.
+      if (queryClient.getQueryData<ApiRun[]>(key) !== baseList) {
+        reconcileKeys.push(key)
+        continue
+      }
       queryClient.setQueryData<ApiRun[]>(key, list => {
         let next = list
-        for (const run of runs.values()) {
-          // A post-archive REST refetch may finish before this frame. If it has already archived
-          // the row, its full record wins over the older transition event. A stale pre-archive
-          // fetch still says unarchived, so the event must repair that result.
-          const current = next?.find(row => row.id === run.id)
-          if (list !== baseList && current?.archived) continue
-          next = applyRunEvent(next, run)
-        }
+        for (const run of runs.values()) next = applyRunEvent(next, run)
         return next
       })
     }
     pending.clear()
+    for (const key of reconcileKeys) void queryClient.invalidateQueries({ queryKey: key, exact: true })
   }
 
   const keysFor = (project: string): Array<readonly [string, 'runs', 'list']> => {

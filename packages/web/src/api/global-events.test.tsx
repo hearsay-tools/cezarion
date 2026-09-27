@@ -207,6 +207,62 @@ describe('useGlobalEvents — connection', () => {
 })
 
 describe('useGlobalEvents — archived run bursts (#657)', () => {
+  it('does not resurrect a row absent from a newer REST list', () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+    const run = runRecord('r1', { status: 'done' })
+    client.setQueryData(queryKeys.runs.list(), [run])
+    const { source } = mount()
+    source.emit('run', stampedRun({ ...run, archived: true }))
+    client.setQueryData(queryKeys.runs.list(), [])
+
+    act(() => vi.advanceTimersByTime(50))
+
+    expect(client.getQueryData(queryKeys.runs.list())).toEqual([])
+  })
+
+  it('does not reverse an unarchive returned by newer REST', () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+    const run = runRecord('r1', { status: 'done' })
+    client.setQueryData(queryKeys.runs.list(), [run])
+    const { source } = mount()
+    source.emit('run', stampedRun({ ...run, archived: true }))
+    client.setQueryData(queryKeys.runs.list(), [{ ...run, title: 'Renamed after unarchive', archived: false }])
+
+    act(() => vi.advanceTimersByTime(50))
+
+    expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())?.[0]).toMatchObject({
+      title: 'Renamed after unarchive', archived: false,
+    })
+  })
+
+  it('reconciles a pre-event REST response that lands after the archive frame', async () => {
+    vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+    const run = runRecord('r1', { status: 'done' })
+    const stale = deferredResponse()
+    const fresh = deferredResponse()
+    vi.mocked(fetch).mockReturnValueOnce(stale.promise).mockReturnValueOnce(fresh.promise)
+    client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [run])
+    renderHook(() => useRuns(), { wrapper })
+    await act(async () => { void client.invalidateQueries({ queryKey: queryKeys.runs.list() }) }) // starts before the event
+    expect(fetch).toHaveBeenCalledTimes(1)
+    const { source } = mount()
+    source.emit('run', stampedRun({ ...run, archived: true }))
+
+    await act(async () => stale.resolve(json([{ ...run, tokensUsed: 42 }])))
+    expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())?.[0]?.tokensUsed).toBe(42)
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2))
+    await act(async () => fresh.resolve(json([{ ...run, archived: true, tokensUsed: 42 }])))
+
+    await waitFor(() => expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())?.[0]).toMatchObject({
+      archived: true, tokensUsed: 42,
+    }))
+  })
+
   it('renders the actual overview once for a parent-and-worker archive burst', async () => {
     vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
     vi.stubGlobal('cancelAnimationFrame', vi.fn())
