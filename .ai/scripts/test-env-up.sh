@@ -51,6 +51,8 @@ TEST_ENV_CACHE_TTL_SECONDS=${TEST_ENV_CACHE_TTL_SECONDS:-600}
 # in the served bundle. Production `npm run build` leaves the flag unset.
 BUILD_COMMAND="npm ci && VITE_CEZ_E2E=1 npm run build"
 BUILD_ARTIFACTS="node_modules/zod/package.json packages/cezar/dist/index.js packages/cezar/web/dist/index.html"
+# A normal web build clears this Vite-emitted marker while leaving source fingerprints intact.
+E2E_BUILD_MARKER="$REPO_ROOT/packages/cezar/web/dist/.cez-e2e-build"
 # Fingerprint inputs — a change to any of these invalidates the cached build. Each workspace
 # contributes its own sources AND its own manifest: a dependency moved between packages
 # changes what gets bundled without touching a single source file.
@@ -179,6 +181,7 @@ try_reuse() {
   [ "$FORCE" = 1 ] && { log "not reusing: --force was passed"; return 1; }
   [ -f "$ENV_DESCRIPTOR" ] || { log "not reusing: no descriptor at $ENV_DESCRIPTOR"; return 1; }
   [ "$(json_get "$ENV_DESCRIPTOR" status)" = running ] || { log "not reusing: descriptor status is not running"; return 1; }
+  [ -f "$E2E_BUILD_MARKER" ] || { log "not reusing: cockpit bundle is not an e2e build"; return 1; }
 
   pid=$(json_get "$ENV_DESCRIPTOR" app.pid)
   url=$(json_get "$ENV_DESCRIPTOR" baseUrl)
@@ -250,7 +253,7 @@ ensure_build() {
   fp=$(fingerprint)
   cached=""
   [ -f "$CACHE_FILE" ] && cached=$(cat "$CACHE_FILE" 2>/dev/null || true)
-  if [ "$FORCE_REBUILD" = 0 ] && [ -n "$fp" ] && [ "$fp" = "$cached" ] && artifacts_present; then
+  if [ "$FORCE_REBUILD" = 0 ] && [ -n "$fp" ] && [ "$fp" = "$cached" ] && artifacts_present && [ -f "$E2E_BUILD_MARKER" ]; then
     log "build cache hit — skipping $BUILD_COMMAND"
     return 0
   fi
@@ -261,6 +264,7 @@ ensure_build() {
     exit 1
   }
   artifacts_present || { log "build produced no artifacts ($BUILD_ARTIFACTS)"; exit 1; }
+  [ -f "$E2E_BUILD_MARKER" ] || { log "build produced no e2e cockpit marker ($E2E_BUILD_MARKER)"; exit 1; }
   printf '%s' "$fp" > "$CACHE_FILE"
 }
 
