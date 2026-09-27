@@ -5,8 +5,9 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { stopFixtureServer } from './fixture-server'
+import { expectGroupRowHeightMatchesTaskRow } from './row-height'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
-import { applyContrastQaVariant, contrastQaVariants, contrastSampleExpression, focusWithKeyboard, hoverVisiblePoint, type ContrastSample } from './contrast'
+import { applyContrastQaVariant, contrastQaVariants, type ContrastQaVariant, contrastSampleExpression, focusWithKeyboard, hoverVisiblePoint, type ContrastSample } from './contrast'
 
 const originalBrowserArgs = process.env.AGENT_BROWSER_ARGS
 const artifacts = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_e2e')
@@ -27,10 +28,26 @@ beforeAll(async () => {
   mkdirSync(join(root, '.ai/cezar'), { recursive: true })
   mkdirSync(join(root, '.ai/skills'), { recursive: true })
   for (const name of ['review', 'ship']) writeFileSync(join(root, `.ai/skills/${name}.md`), `---\ndescription: ${name} the changes\n---\nCheck the work.\n`)
-  writeFileSync(join(root, '.ai/cezar/runs.json'), JSON.stringify(['one', 'two'].map((id) => ({
+  writeFileSync(join(root, '.ai/cezar/runs.json'), JSON.stringify([...['one', 'two'].map((id) => ({
     id, title: `Review task ${id}`, task: 'Check the work', workflow: 'default', status: 'review', tokensUsed: 0,
     createdAt: new Date().toISOString(), finishedAt: new Date().toISOString(), archived: false, steps: [],
-  }))))
+    // One reference, on the row this spec hovers: the pointer path keeps it a real link (#617 01b).
+    ...(id === 'two' ? { referencedPullRequestUrl: 'https://github.com/o/r/pull/594' } : {}),
+  })),
+    // A variant group sharing one issue (#617 review round 4): its reference lives on the group
+    // row's line 2 and must stay a real link with the status panel on a pointer device.
+    ...['ga', 'gb'].map((id, index) => ({
+      id, title: `Grouped task (${index ? 'B' : 'A'})`, task: 'Check the work', workflow: 'default', status: 'review', tokensUsed: 0,
+      createdAt: new Date(Date.now() - 3_600_000).toISOString(), finishedAt: new Date(Date.now() - 3_600_000).toISOString(), archived: false, steps: [],
+      groupId: 'g-sel', variant: index ? 'B' : 'A', referencedIssueUrl: 'https://github.com/o/r/issues/425',
+    })),
+    // An unread finished run (#617 01c): the flat nav's Tasks `tasks-unread` count. Never opened
+    // by this spec, so it stays unread.
+    { id: 'fin', title: 'Finished task', task: 'Check the work', workflow: 'default', status: 'done', tokensUsed: 0,
+      createdAt: new Date(Date.now() - 7_200_000).toISOString(), finishedAt: new Date(Date.now() - 7_200_000).toISOString(), archived: false, steps: [] },
+  ]))
+  // Two follow-ups for the Inbox nav count (#617 01c); the inbox itself is opt-in (CEZ_FOLLOWUPS).
+  writeFileSync(join(root, '.ai/cezar/todos.json'), JSON.stringify([{ id: 'sel-1', summary: 'Review the PR' }, { id: 'sel-2', summary: 'Rerun the checks' }]))
   const probe = createServer()
   const port = await new Promise<number>((done) => probe.listen(0, '127.0.0.1', () => {
     const address = probe.address() as { port: number }
@@ -38,13 +55,13 @@ beforeAll(async () => {
   }))
   baseUrl = `http://127.0.0.1:${port}`
   server = spawn(process.execPath, [cezarCli, 'serve', '--repo', root, '--port', String(port), '--no-open'], {
-    env: fixtureServeEnv(root), stdio: 'ignore',
+    env: fixtureServeEnv(root, { CEZ_FOLLOWUPS: '1' }), stdio: 'ignore',
   })
   for (let attempt = 0; attempt < 60; attempt++) {
     try { if ((await fetch(`${baseUrl}/api/v1/health`)).ok) break } catch { /* booting */ }
     await new Promise((done) => setTimeout(done, 250))
   }
-  expect((await (await fetch(`${baseUrl}/api/v1/runs`)).json()).map((run: { id: string }) => run.id).sort()).toEqual(['one', 'two'])
+  expect((await (await fetch(`${baseUrl}/api/v1/runs`)).json()).map((run: { id: string }) => run.id).sort()).toEqual(['fin', 'ga', 'gb', 'one', 'two'])
   project = await bootProjectId(baseUrl)
   browser = AgentBrowser.open(`states-${process.pid}`)
 })
@@ -94,6 +111,192 @@ function focus(selector: string): void {
   expect(sample.ratio, JSON.stringify(sample)).toBeGreaterThanOrEqual(3)
 }
 
+/*
+ * #617 addendum 01c: one selection language. A selected nav item, New task on /new and a selected
+ * task row resolve to the SAME fill; hover is the neutral row hover; badges follow their meaning.
+ * Every value comes from the real stylesheet in this theme and density, in the desktop sidebar
+ * and in the mobile drawer (the same nav component).
+ */
+function checkNavSelection(variant: ContrastQaVariant, { base, projectId, nav: navSelector }: {
+  base: string; projectId: string; nav: string
+}): void {
+  variantId = variant.id
+  const mobile = variant.viewport.width === 360
+  const container = mobile ? '[role="dialog"] ' : ''
+  const fill = variant.theme === 'dark'
+    ? { hover: 'rgb(27, 33, 48)', selected: 'rgb(38, 44, 62)' }
+    : { hover: 'rgb(244, 245, 248)', selected: 'rgb(234, 237, 243)' }
+  // The addendum's hex values, as the browser serialises them (0x26 → 0.15, 0x40 → 0.25).
+  const amber = variant.theme === 'dark'
+    ? { fill: 'rgba(244, 197, 66, 0.15)', ink: 'rgb(244, 197, 66)' }
+    : { fill: 'rgba(244, 197, 66, 0.25)', ink: 'rgb(122, 82, 0)' }
+  const open = (path: string, ready: string) => {
+    browser.setViewport(variant.viewport.width, variant.viewport.height)
+    browser.goto(`${base}/p/${projectId}${path}`)
+    browser.waitForFunction(`document.querySelector('[data-slot="mobile-top-bar"]') !== null`)
+    applyContrastQaVariant(browser, variant)
+    browser.moveTo(0, 0)
+    if (mobile) browser.click('[data-slot="mobile-top-bar"] button')
+    browser.waitForFunction(`document.querySelector(${JSON.stringify(container + ready)})?.getBoundingClientRect().width > 0`)
+  }
+  const record = (target: string, state: string, min: number, property = 'color', source: 'element' | 'parent' = 'element') => {
+    const sample = browser.evaluate(contrastSampleExpression(target, property, source)) as ContrastSample
+    samples.push({ variant: variantId, target, state, ...sample })
+    expect(sample.ratio, `${state}: ${JSON.stringify(sample)}`).toBeGreaterThanOrEqual(min)
+  }
+  // Dry-run reports a tracked skills installation as absent, so no update marker can exist
+  // there (skills-update.e2e.ts). The route the nav reads is stubbed instead, with a body the
+  // contract accepts; nothing in the rendered DOM is written.
+  const skillsRoute = '**/api/v1/workspace/skills-update?*'
+  browser.routeJson(skillsRoute, { status: 'available', available: true, autoUpdateEnabled: false, inherited: true,
+    checkedAt: new Date().toISOString(), updatedAt: null, needsUpgradeNotes: false,
+    scopes: [{ scope: 'project', status: 'available', available: true, skills: ['om-review'], checkedAt: new Date().toISOString(), updatedAt: null }] })
+  try {
+    checkNavBody(variant, { base, projectId, container, navSelector, fill, amber, open, record })
+    checkFlatNavUnread(variant, { base, projectId, container, open, record })
+  } finally {
+    browser.unroute(skillsRoute)
+  }
+}
+
+type Open = (path: string, ready: string) => void
+type Record_ = (target: string, state: string, min: number, property?: string, source?: 'element' | 'parent') => void
+const resolveFn = `const resolve = (value) => { const probe = document.createElement('span'); probe.style.color = value
+    document.body.appendChild(probe); const out = getComputedStyle(probe).color; probe.remove(); return out }`
+
+function checkNavBody(variant: ContrastQaVariant, { base, projectId, container, navSelector, fill, amber, open, record }: {
+  base: string; projectId: string; container: string; navSelector: string; fill: { hover: string; selected: string }
+  amber: { fill: string; ink: string }; open: Open; record: Record_
+}): void {
+  const mobile = variant.viewport.width === 360
+  const nav = `${container}${navSelector}`
+  const tasksNav = `${nav} a[aria-current="page"]`
+  const taskRow = `${container}[data-slot="task-row"][data-run-id="one"][data-active="true"]`
+  type Facts = { tasks: string; row: string; label: string; icon: string; weight: string; ink: string
+    height: number; inbox: { bg: string; color: string; text: string } | null }
+  // One expression, polled whole (#409): the state checked is the state read.
+  const facts = `(() => {
+    const q = (sel) => document.querySelector(sel), cs = (sel) => getComputedStyle(q(sel))
+    ${resolveFn}
+    const inboxEl = q(${JSON.stringify(`${nav} [data-slot="nav-badge"]`)})
+    return { tasks: cs(${JSON.stringify(tasksNav)}).backgroundColor, row: q(${JSON.stringify(taskRow)}) ? cs(${JSON.stringify(taskRow)}).backgroundColor : '',
+      label: cs(${JSON.stringify(tasksNav)}).color, icon: cs(${JSON.stringify(`${tasksNav} svg`)}).color,
+      weight: cs(${JSON.stringify(tasksNav)}).fontWeight, ink: resolve('var(--foreground)'),
+      height: q(${JSON.stringify(tasksNav)}).getBoundingClientRect().height,
+      inbox: inboxEl && { bg: getComputedStyle(inboxEl).backgroundColor, color: getComputedStyle(inboxEl).color, text: inboxEl.textContent } }
+  })()`
+  open('/tasks/one', '[data-slot="task-row"][data-run-id="one"][data-active="true"]')
+  // Waited, not sampled: the inbox count lands from its own query.
+  const f = browser.waitForValue(facts, (v: Facts | null) => v !== null && v.inbox?.text === '2' && v.tasks === fill.selected) as Facts
+  expect({ tasks: f.tasks, row: f.row }).toEqual({ tasks: fill.selected, row: fill.selected })
+  expect({ label: f.label, icon: f.icon, weight: f.weight }).toEqual({ label: f.ink, icon: f.ink, weight: '500' })
+  expect({ bg: f.inbox?.bg, color: f.inbox?.color }).toEqual({ bg: amber.fill, color: amber.ink })
+  // Below 48rem the unlayered floor keeps `nav a` at 44px in every density.
+  if (mobile) expect(f.height).toBeGreaterThanOrEqual(44)
+  record(tasksNav, 'selected nav label', 4.5)
+  record(`${tasksNav} svg`, 'selected nav icon', 3)
+  record(`${nav} [data-slot="nav-badge"]`, 'inbox-count number', 4.5)
+
+  // The skills update marker, rendered by the real nav from the stubbed skills-update route: a
+  // 6px --info dot, 3:1 against the row it sits on — at rest here, then hovered and selected.
+  const skills = `${nav} a[href$="/skills"]`
+  const dot = `${skills} [data-slot="nav-update-marker"] > span[aria-hidden]`
+  type Marker = { width: number; height: number; bg: string; info: string; row: string }
+  const marker = `(() => {
+    const el = document.querySelector(${JSON.stringify(dot)}); if (!el || el.getBoundingClientRect().width === 0) return null
+    ${resolveFn}
+    const r = el.getBoundingClientRect()
+    return { width: r.width, height: r.height, bg: getComputedStyle(el).backgroundColor, info: resolve('var(--info)'),
+      row: getComputedStyle(document.querySelector(${JSON.stringify(skills)})).backgroundColor }
+  })()`
+  const atRest = browser.waitForValue(marker) as Marker
+  expect({ width: atRest.width, height: atRest.height, bg: atRest.bg, row: atRest.row })
+    .toEqual({ width: 6, height: 6, bg: atRest.info, row: 'rgba(0, 0, 0, 0)' })
+  record(dot, 'update marker at rest', 3, 'background-color', 'parent')
+
+  // Hover, any nav item: the neutral row hover, with foreground label and icon (and the marker
+  // still readable on that fill).
+  hoverVisiblePoint(browser, skills)
+  type Ink = { bg: string; label: string; icon: string; ink: string; weight: string; width: number; height: number }
+  const ink = (selector: string) => `(() => {
+    const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return null
+    ${resolveFn}
+    const s = getComputedStyle(el), r = el.getBoundingClientRect()
+    return { bg: s.backgroundColor, label: s.color, icon: getComputedStyle(el.querySelector('svg')).color, ink: resolve('var(--foreground)'),
+      weight: s.fontWeight, width: r.width, height: r.height }
+  })()`
+  const hovered = browser.waitForValue(ink(skills), (v: Ink | null) => v !== null && v.bg === fill.hover) as Ink
+  expect({ label: hovered.label, icon: hovered.icon }).toEqual({ label: hovered.ink, icon: hovered.ink })
+  record(skills, 'hover nav label', 4.5)
+  record(`${skills} svg`, 'hover nav icon', 3)
+  record(dot, 'update marker on hover', 3, 'background-color', 'parent')
+  browser.screenshot(`${artifacts}/states-nav-${variant.id}.png`, { viewport: true })
+
+  // Selected: the Skills page lights its own row, marker and all.
+  open('/skills', '[data-slot="nav-update-marker"]')
+  const onSelected = browser.waitForValue(marker, (v: Marker | null) => v !== null && v.row === fill.selected) as Marker
+  expect({ width: onSelected.width, height: onSelected.height, bg: onSelected.bg }).toEqual({ width: 6, height: 6, bg: onSelected.info })
+  record(dot, 'update marker on the selected row', 3, 'background-color', 'parent')
+
+  // New task on /new: the same fill as the selected nav item and the selected task row.
+  const newTask = `${container}[data-sidebar-item="new-task"]`
+  open('/new', '[data-sidebar-item="new-task"][aria-current="page"]')
+  const composer = browser.waitForValue(ink(newTask), (v: Ink | null) => v !== null && v.bg === fill.selected) as Ink
+  expect({ label: composer.label, icon: composer.icon, weight: composer.weight }).toEqual({ label: composer.ink, icon: composer.ink, weight: '500' })
+  record(newTask, 'new task on /new', 4.5)
+
+  // The footer's active icon: a 36px square on the selected fill, foreground icon. Desktop only:
+  // the drawer renders the same footer component, and its touch rules are not this slice's.
+  if (!mobile) {
+    browser.goto(`${base}/settings/global`)
+    applyContrastQaVariant(browser, variant)
+    const gear = '[data-slot="global-settings-link"][aria-current="page"]'
+    const footer = browser.waitForValue(ink(gear), (v: Ink | null) => v !== null && v.bg === fill.selected) as Ink
+    expect({ width: footer.width, height: footer.height, icon: footer.icon }).toEqual({ width: 36, height: 36, icon: footer.ink })
+    record(`${gear} svg`, 'active footer icon', 3)
+  }
+}
+
+/*
+ * tasks-unread lives only in the flat nav, which the shell renders while the project registry is
+ * empty (app-shell-container.tsx). The registry route is stubbed empty for this part only; the
+ * runs come from the fixture's real runs.json, where `fin` is an unseen finished run.
+ */
+function checkFlatNavUnread(variant: ContrastQaVariant, { base, projectId, container, open, record }: {
+  base: string; projectId: string; container: string; open: Open; record: Record_
+}): void {
+  const projectsRoute = '**/api/v1/projects'
+  browser.routeJson(projectsRoute, { projects: [], bootProject: projectId, projectsDir: '/tmp' })
+  try {
+    const nav = `${container}[data-slot="single-project-navigation"] nav[aria-label="Main"]`
+    const chip = `${nav} [data-slot="nav-unread-badge"]`
+    type Chip = { bg: string; color: string; size: string; weight: string; padding: string; radius: string; text: string
+      ink: string; muted: string; sidebar: string; selected: boolean }
+    const facts = `(() => {
+      const el = document.querySelector(${JSON.stringify(chip)}); if (!el || el.getBoundingClientRect().width === 0) return null
+      ${resolveFn}
+      const s = getComputedStyle(el)
+      return { bg: s.backgroundColor, color: s.color, size: s.fontSize, weight: s.fontWeight, padding: s.padding, radius: s.borderRadius,
+        text: el.textContent, ink: resolve('var(--foreground)'), muted: resolve('var(--muted)'), sidebar: resolve('var(--sidebar)'),
+        selected: el.closest('a')?.getAttribute('aria-current') === 'page' }
+    })()`
+    const shape = { size: '11px', weight: '600', padding: '1px 6px', radius: '9px', text: '1' }
+    const pick = (c: Chip) => ({ bg: c.bg, color: c.color, size: c.size, weight: c.weight, padding: c.padding, radius: c.radius, text: c.text })
+    // Tasks selected (its area owns /tasks/:id): the chip takes --sidebar on the selected fill.
+    open('/tasks/one', '[data-slot="single-project-navigation"] [data-slot="nav-unread-badge"]')
+    const onSelected = browser.waitForValue(facts, (v: Chip | null) => v !== null && v.selected) as Chip
+    expect(pick(onSelected)).toEqual({ ...shape, bg: onSelected.sidebar, color: onSelected.ink })
+    record(chip, 'tasks-unread number on the selected row', 4.5)
+    // Tasks at rest (Git is the page): the neutral --muted chip.
+    open('/git', '[data-slot="single-project-navigation"] [data-slot="nav-unread-badge"]')
+    const atRest = browser.waitForValue(facts, (v: Chip | null) => v !== null && !v.selected) as Chip
+    expect(pick(atRest)).toEqual({ ...shape, bg: atRest.muted, color: atRest.ink })
+    record(chip, 'tasks-unread number at rest', 4.5)
+  } finally {
+    browser.unroute(projectsRoute)
+  }
+}
+
 describe('selection and control states (#171)', () => {
   for (const variant of contrastQaVariants) {
     it(`${variant.id}: task and skill selection have persistent selected states and accessible state`, () => {
@@ -135,6 +338,102 @@ describe('selection and control states (#171)', () => {
       expect(browser.url()).toContain('skill=ship')
       browser.waitForFunction(`document.querySelector('[data-slot="skills-detail"]')?.textContent.includes('ship')`)
       expect(style('[data-slot="skill-row"][data-skill="review"]', '::before').content).toBe('none')
+    })
+
+    // The calmer sidebar row (#617). Desktop only: the drawer at 360px is the same component,
+    // and this spec's primaryHoverType=2 flag is what makes `hover:` CSS resolve at all.
+    if (variant.viewport.width === 1440) it(`${variant.id}: the sidebar row keeps its geometry under the pointer and its ink readable (#617)`, () => {
+      variantId = variant.id
+      browser.goto(`${baseUrl}/p/${project}/tasks/one`)
+      browser.waitForFunction(`document.querySelector('[data-slot="task-row"][data-run-id="one"][data-active="true"] [data-slot="task-row-meta"]') !== null`)
+      applyContrastQaVariant(browser, variant)
+      browser.moveTo(0, 0)
+      const selected = '[data-slot="task-row"][data-run-id="one"]'
+      const other = '[data-slot="task-row"][data-run-id="two"]'
+      // The tokens the issue names, resolved by the real stylesheet in this theme.
+      const fill = variant.theme === 'dark'
+        ? { hover: 'rgb(27, 33, 48)', selected: 'rgb(38, 44, 62)' }
+        : { hover: 'rgb(244, 245, 248)', selected: 'rgb(234, 237, 243)' }
+      type Geometry = { title: string; row: number; bg: string; pin: string | null }
+      const geometry = (selector: string) => `(() => {
+        const row = document.querySelector(${JSON.stringify(selector)})
+        const t = row.querySelector('[data-slot="task-row-title"]').getBoundingClientRect()
+        const pin = row.querySelector('[data-slot="pin-toggle"]')
+        return { title: [t.left, t.top, t.width, t.height].map(Math.round).join(','), row: Math.round(row.getBoundingClientRect().height),
+          bg: getComputedStyle(row).backgroundColor, pin: pin && getComputedStyle(pin).opacity }
+      })()`
+      // At rest: no fill, pin invisible (its slot is still reserved).
+      const rest = browser.waitForValue(geometry(other), (g: Geometry) => g.bg === 'rgba(0, 0, 0, 0)' && g.pin === '0') as Geometry
+      expect(browser.evaluate(`getComputedStyle(document.querySelector('${selected}')).backgroundColor`)).toBe(fill.selected)
+      hoverVisiblePoint(browser, other)
+      // Hovered: the neutral hover fill and the pin revealed — and the title box and the row
+      // height identical to rest, to the pixel. This is the jump the old w-0→w-5 pin caused.
+      const hovered = browser.waitForValue(geometry(other), (g: Geometry) => g.bg === fill.hover && g.pin === '1') as Geometry
+      expect({ title: hovered.title, row: hovered.row }).toEqual({ title: rest.title, row: rest.row })
+      // The row as the issue specifies it, from the resolved stylesheet rather than the classes:
+      // nothing in a later sheet may restyle it (an override layer once clamped the title to two
+      // 12px lines and painted the selected title teal).
+      const resolved = browser.evaluate(`(() => {
+        const row = document.querySelector('${selected}'), s = getComputedStyle(row)
+        const t = getComputedStyle(row.querySelector('[data-slot="task-row-title"]'))
+        const m = getComputedStyle(row.querySelector('[data-slot="task-row-meta"]'))
+        const d = getComputedStyle(row.querySelector('[data-slot="status-dot"]'))
+        const probe = document.createElement('span'); probe.style.color = 'var(--foreground)'
+        document.body.append(probe); const ink = getComputedStyle(probe).color; probe.remove()
+        return { padding: s.padding, radius: s.borderRadius, titleSize: t.fontSize, titleWeight: t.fontWeight,
+          titleWrap: t.whiteSpace, titleOverflow: t.textOverflow, titleInk: t.color === ink, metaSize: m.fontSize,
+          metaWrap: m.whiteSpace, dot: d.width + ' ' + d.height, metaHeight: m.height,
+          dotSlot: getComputedStyle(row.querySelector('[data-slot="task-row-dot"]')).width,
+          trailing: getComputedStyle(row.querySelector('[data-slot="task-row-trailing"]')).width }
+      })()`) as Record<string, string | boolean>
+      // Padding follows the density scale (`ultra` shrinks `--spacing`); the rest is fixed px.
+      expect(resolved).toEqual({ padding: variant.density === 'comfortable' ? '6px 8px 6px 10px' : resolved.padding, radius: '6px',
+        titleSize: '13px', titleWeight: '500', titleWrap: 'nowrap', titleOverflow: 'ellipsis', titleInk: true, metaSize: '11.5px',
+        metaWrap: 'nowrap', dot: '7px 7px', metaHeight: '16px', dotSlot: '12px', trailing: '16px' })
+      // With a hover-capable pointer the reference is a real link (on touch it is plain text).
+      expect(browser.evaluate(`(() => { const a = document.querySelector('${other} [data-slot="task-row-meta"] [data-slot="pr-chip"]'); return a && { tag: a.tagName, href: a.getAttribute('href') } })()`))
+        .toEqual({ tag: 'A', href: 'https://github.com/o/r/pull/594' })
+      // Every row is the same two-line height.
+      expect(browser.evaluate(`Math.round(document.querySelector('${selected}').getBoundingClientRect().height)`)).toBe(rest.row)
+      // Ink on both fills: text at 4.5:1, the status dot as a non-text mark at 3:1.
+      for (const [row, state] of [[selected, 'selected'], [other, 'hover']] as const) {
+        for (const part of ['[data-slot="task-row-title"]', '[data-slot="task-row-meta"]']) {
+          const sample = browser.evaluate(contrastSampleExpression(`${row} ${part}`)) as ContrastSample
+          samples.push({ variant: variantId, target: `${row} ${part}`, state: `${state} row text`, ...sample })
+          expect(sample.ratio, `${state} ${part}: ${JSON.stringify(sample)}`).toBeGreaterThanOrEqual(4.5)
+        }
+        const dot = browser.evaluate(contrastSampleExpression(`${row} [data-slot="status-dot"]`, 'background-color', 'parent')) as ContrastSample
+        samples.push({ variant: variantId, target: `${row} status-dot`, state: `${state} row dot`, ...dot })
+        expect(dot.ratio, `${state} dot: ${JSON.stringify(dot)}`).toBeGreaterThanOrEqual(3)
+      }
+      const pin = browser.evaluate(contrastSampleExpression(`${other} [data-slot="pin-toggle"]`, 'color', 'parent')) as ContrastSample
+      samples.push({ variant: variantId, target: `${other} pin`, state: 'hover pin', ...pin })
+      expect(pin.ratio, `pin: ${JSON.stringify(pin)}`).toBeGreaterThanOrEqual(3)
+      browser.screenshot(`${artifacts}/states-sidebar-row-${variant.id}.png`, { viewport: true })
+    })
+
+    // #617 addendum 01c, in the default grouped navigation (see checkNavSelection).
+    it(`${variant.id}: grouped nav items share the task row's selection, and badges follow their meaning (#617 01c)`, () => {
+      checkNavSelection(variant, { base: baseUrl, projectId: project, nav: '[data-slot="project-group-body"] nav' })
+    })
+
+    if (variant.id === 'desktop-dark-comfortable') it(`${variant.id}: the group row's shared reference is a link with the status panel (#617)`, () => {
+      variantId = variant.id
+      browser.goto(`${baseUrl}/p/${project}/tasks/one`)
+      const group = '[data-slot="group-row"][data-group-id="g-sel"]'
+      const link = `${group} [data-slot="group-meta"] a[data-slot="issue-chip"]`
+      browser.waitForFunction(`document.querySelector(${JSON.stringify(link)}) !== null`)
+      applyContrastQaVariant(browser, variant)
+      browser.waitForFunction(`document.querySelector(${JSON.stringify(link)})?.getBoundingClientRect().width > 0`)
+      expect(browser.evaluate(`(() => { const a = document.querySelector(${JSON.stringify(link)}); return { href: a.getAttribute('href'), inToggle: a.closest('button') !== null, text: a.textContent } })()`))
+        .toEqual({ href: 'https://github.com/o/r/issues/425', inToggle: false, text: '#425' })
+      // Keyboard focus opens the same status panel a task row's reference has.
+      focusWithKeyboard(browser, link)
+      browser.waitForFunction(`document.querySelector('[data-slot="reference-status-card"]') !== null`)
+      // …and focusing the link did not toggle the group.
+      expect(browser.evaluate(`document.querySelector('${group} [data-slot="group-tile"]').getAttribute('aria-expanded')`)).toBe('false')
+      browser.press('Escape')
+      browser.waitForFunction(`document.querySelector('[data-slot="reference-status-card"]') === null`)
     })
 
     it(`${variant.id}: enabled control icons contrast and disabled selectors remain unavailable`, () => {
@@ -199,6 +498,12 @@ describe('selection and control states (#171)', () => {
       browser.screenshot(`${artifacts}/states-composer-${variant.id}.png`, { viewport: true })
     })
   }
+  // With a hover-capable pointer (this spec's primaryHoverType=2), the mobile shell still floors
+  // every button at 44px (#166): the group toggle must span both lines there, not grow the row.
+  it("keeps the group row a task row's height at 1440, 520 and 390px with a pointer (#617)", () => {
+    expectGroupRowHeightMatchesTaskRow(browser, { url: `${baseUrl}/p/${project}/tasks/one`, groupId: 'g-sel', widths: [1440, 520, 390] })
+  })
+
   it('keeps the same selection cue in the grouped project navigation', () => {
     const configPath = join(root, '.cez-home/config.json')
     const config = JSON.parse(readFileSync(configPath, 'utf8'))

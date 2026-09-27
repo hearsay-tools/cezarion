@@ -37,6 +37,9 @@ beforeAll(async () => {
   writeFileSync(join(root, '.ai/cezar/runs.json'), JSON.stringify([{
     id: runId, title: 'Touch target fixture', task: 'Touch target fixture', workflow: 'quick-task',
     runner: 'claude', status: 'done', archived: false, createdAt: new Date().toISOString(), tokensUsed: 0,
+    // Both references (#617 01b): the sidebar row shows them as plain text on touch, and the
+    // task header carries them as the real 44px links.
+    pullRequestUrl: 'https://github.com/o/r/pull/594', referencedIssueUrl: 'https://github.com/o/r/issues/451',
     steps: [{ id: 'task', name: 'Task', kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0, sessionId: 'touch-fixture-session' }],
   } satisfies RunRecord]))
   const probe = createServer()
@@ -373,5 +376,69 @@ describe('density-independent mobile action targets (#166)', () => {
         }, 60_000)
       }
     }
+  }
+})
+
+describe('references on a device that cannot hover (#617 01b)', () => {
+  for (const [width, height] of [[360, 640], [390, 844]] as const) {
+    it(`${width}px: the sidebar row is the tap target, and the task header carries the 44px links`, () => {
+      browser.setViewport(width, height)
+      browser.goto(`${baseUrl}/p/${project}/tasks/${runId}`)
+      browser.waitForFunction(`document.querySelector('[aria-label="Show run details"]') !== null`)
+      // The matrix above leaves its last density and theme on the root; start from the defaults.
+      appearance('comfortable', 'dark')
+      // Below md the run details start collapsed; the chips live in them. Focus + Enter from the
+      // start, as task-thread.e2e.ts:579-580 (and :663-664) do for the same phone header. Not a
+      // flake fix: at 360px a pointer click on "Show run details" fails every time. The thread
+      // scrolls `main[data-slot="main"]` to its latest message on arrival, which leaves the header
+      // above the viewport (the button's rect y was -32 and -53 in two probes), and
+      // `browser.click` then leaves the details closed. It does NOT fail with a "covered by"
+      // refusal: after a minimal `scrollIntoView({ block: 'nearest' })` the button sits at y=52,
+      // just under the 52px sticky top bar, and nothing covers it.
+      // Reproduced with the click swapped in, this test only (`-t "the sidebar row is the tap
+      // target"`): 360px failed 2/2, 390px passed 1/1. Local bundle (gitignored):
+      // .ai/qa/failures/touch-targets/360px-the-sidebar-row-is-the-tap-target-and-the-task-header-carries-the-44px-lin-1/
+      // — probe.json: kind "wait-value" for the two header chips, lastValue null; snapshot.txt:
+      // `button "Show run details" [expanded=false]`. Focus + Enter does not depend on where the
+      // thread has scrolled.
+      browser.evaluate(`document.querySelector('[aria-label="Show run details"]').focus()`)
+      browser.press('Enter')
+      type Header = { noHover: boolean; chips: Array<{ w: number; h: number; top: number; right: number }>; inner: number; scroll: number }
+      const header = browser.waitForValue(`(() => {
+        const chips = [...document.querySelectorAll('[data-slot="run-meta"] :is([data-slot="pr-chip"], [data-slot="issue-chip"])')]
+        if (chips.length !== 2 || chips.some((chip) => chip.getBoundingClientRect().width === 0)) return null
+        return { noHover: matchMedia('(hover: none)').matches, inner: innerWidth, scroll: document.documentElement.scrollWidth,
+          chips: chips.map((chip) => { const r = chip.getBoundingClientRect(); return { w: r.width, h: r.height, top: Math.round(r.top), right: r.right } }) }
+      })()`) as Header
+      // The whole point is the touch path; a pointer-capable run would prove nothing here.
+      expect(header.noHover).toBe(true)
+      for (const chip of header.chips) {
+        expect(chip.w, JSON.stringify(chip)).toBeGreaterThanOrEqual(44)
+        expect(chip.h, JSON.stringify(chip)).toBeGreaterThanOrEqual(44)
+        expect(chip.right, JSON.stringify(chip)).toBeLessThanOrEqual(header.inner)
+      }
+      // No wrap between the two chips, and no horizontal overflow from the bigger targets.
+      expect(header.chips[0]!.top).toBe(header.chips[1]!.top)
+      expect(header.scroll).toBeLessThanOrEqual(header.inner)
+      browser.screenshot(`${artifacts}/${width}-touch-header-references.png`, { viewport: true })
+
+      browser.goto(`${baseUrl}/p/${project}`)
+      browser.waitForFunction(`document.querySelector('[aria-label="Open menu"]') !== null`)
+      browser.click('[aria-label="Open menu"]')
+      const row = `[data-slot="mobile-nav-drawer"] [data-slot="task-row"][data-run-id="${runId}"]`
+      const meta = browser.waitForValue(`(() => {
+        const meta = document.querySelector('${row} [data-slot="task-row-meta"]')
+        if (!meta || document.querySelector('[data-slot="mobile-nav-drawer"]').getBoundingClientRect().x !== 0) return null
+        return { text: meta.textContent, links: meta.querySelectorAll('a').length, focusable: meta.querySelectorAll('[tabindex], a, button').length,
+          inert: [...meta.querySelectorAll('[data-slot="pr-chip"], [data-slot="issue-chip"]')].map((chip) => chip.dataset.inert) }
+      })()`) as { text: string; links: number; focusable: number; inert: string[] }
+      expect(meta.text).toMatch(/^PR #594 · #451 · /)
+      expect(meta).toMatchObject({ links: 0, focusable: 0, inert: ['true', 'true'] })
+      // Tapping the reference text opens the task: the row is the one target. A plain click on
+      // the text, not `tapEdge`: on the 390px run its right-edge hit test missed this inline
+      // span (hits [true, false, true, true, true]); the edge probes are for block controls.
+      browser.click(`${row} [data-slot="task-row-meta"] [data-slot="pr-chip"]`)
+      browser.waitForFunction(`location.pathname.endsWith('/tasks/${runId}')`)
+    })
   }
 })

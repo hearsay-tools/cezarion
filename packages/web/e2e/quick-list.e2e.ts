@@ -7,6 +7,7 @@ import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { stopFixtureServer } from './fixture-server'
+import { expectGroupRowHeightMatchesTaskRow } from './row-height'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import {
   applyContrastQaVariant,
@@ -291,7 +292,8 @@ describe('task quick-list', () => {
       return { review: of('fix-review-pr'), done: of('fix-done'), failed: of('fix-failed') }
     })()`) as Record<string, { tone: string; pulses: boolean }>
 
-    expect(tones.review).toEqual({ tone: 'accent', pulses: true })
+    // Review is info blue since the #617 status key (it used to be brand teal, which read as done).
+    expect(tones.review).toEqual({ tone: 'info', pulses: true })
     // Terminal rows are still — the pulse means "transitioning", and these are not.
     expect(tones.done).toEqual({ tone: 'success', pulses: false })
     expect(tones.failed).toEqual({ tone: 'danger', pulses: false })
@@ -301,7 +303,7 @@ describe('task quick-list', () => {
       browser.evaluate(
         `getComputedStyle(document.querySelector('[data-run-id="fix-done"] [data-slot="status-dot"]')).width`
       )
-    ).toBe('10px')
+    ).toBe('7px')
   })
 
   it('links a row to its task, and the PR chip to the PR', () => {
@@ -309,12 +311,15 @@ describe('task quick-list', () => {
       scoped('/tasks/fix-done')
     )
 
+    // This spec's headless Chrome reports `hover: none`, which is the touch path (#617 01b): the
+    // sidebar reference is plain text there, and the whole row is the tap target. The pointer
+    // path (a real link with the status panel) is pinned in selection-states, which forces a
+    // hover-capable pointer, and in the unit suite.
     const chip = browser.evaluate(`(() => {
       const el = document.querySelector('[data-run-id="fix-review-pr"] [data-slot="pr-chip"]')
-      return { href: el.href, target: el.target }
-    })()`) as { href: string; target: string }
-    expect(chip.href).toBe('https://github.com/open-mercato/cezar/pull/396')
-    expect(chip.target).toBe('_blank')
+      return { noHover: matchMedia('(hover: none)').matches, tag: el.tagName, inert: el.dataset.inert ?? null, text: el.textContent }
+    })()`) as { noHover: boolean; tag: string; inert: string | null; text: string }
+    expect(chip).toEqual({ noHover: true, tag: 'SPAN', inert: 'true', text: 'PR #396' })
 
     // Only the run that has one.
     expect(browser.count('[data-run-id="fix-done"] [data-slot="pr-chip"]')).toBe(0)
@@ -328,8 +333,9 @@ describe('task quick-list', () => {
     browser.click(TILE)
     browser.waitForFunction(`document.querySelector('${ROW}[data-run-id="fix-var-a"]') !== null`)
     // Historical fixtures have no directional counters: show each backend, never invent usage.
-    expect(textOf(`${ROW}[data-run-id="fix-var-a"]`)).toBe('Aclaude')
-    expect(textOf(`${ROW}[data-run-id="fix-var-b"]`)).toBe('Bcodex')
+    // Line two is the meta line — the state word, no age (#617).
+    expect(textOf(`${ROW}[data-run-id="fix-var-a"]`)).toBe('Aclaudeneeds review')
+    expect(textOf(`${ROW}[data-run-id="fix-var-b"]`)).toBe('Bcodexneeds review')
     // Each variant is still its own deep link.
     expect(
       browser.evaluate(`document.querySelector('${ROW}[data-run-id="fix-var-b"] a').getAttribute('href')`)
@@ -339,6 +345,81 @@ describe('task quick-list', () => {
 
     browser.click(TILE)
     browser.waitForFunction(`document.querySelector('${ROW}[data-run-id="fix-var-a"]') === null`)
+  })
+
+  it('keeps the group row two fixed lines through expand and collapse, each member dot under its title (#617)', () => {
+    const group = '[data-slot="group-row"][data-group-id="fix-group-1"]'
+    type Geometry = { expanded: string | null; height: number; titleLeft: number; meta: string }
+    const geometry = `(() => {
+      const row = document.querySelector('${group}')
+      if (!row) return null
+      return { expanded: row.querySelector('${TILE}').getAttribute('aria-expanded'),
+        height: Math.round(row.getBoundingClientRect().height),
+        titleLeft: row.querySelector('[data-slot="group-title"]').getBoundingClientRect().left,
+        meta: row.querySelector('[data-slot="group-meta"]').textContent }
+    })()`
+    const collapsed = browser.waitForValue(geometry, (g: Geometry | null) => g?.expanded === 'false') as Geometry
+    // Two review members, no shared reference: the aggregate in words, then the latest age.
+    expect(collapsed.meta).toBe('2 needs review · 11m')
+    browser.click(TILE)
+    const open = browser.waitForValue(geometry, (g: Geometry | null) => g?.expanded === 'true') as Geometry
+    expect(open.height).toBe(collapsed.height)
+    const dots = browser.waitForValue(`(() => {
+      const slots = ['fix-var-a', 'fix-var-b'].map((id) => document.querySelector('${ROW}[data-run-id="' + id + '"] [data-slot="task-row-dot"]'))
+      return slots.every(Boolean) ? slots.map((slot) => slot.getBoundingClientRect().left) : null
+    })()`) as number[]
+    for (const left of dots) expect(Math.abs(left - collapsed.titleLeft), `dot at ${left}, title at ${collapsed.titleLeft}`).toBeLessThanOrEqual(1)
+    browser.click(TILE)
+    const closed = browser.waitForValue(geometry, (g: Geometry | null) => g?.expanded === 'false') as Geometry
+    expect(closed.height).toBe(collapsed.height)
+  })
+
+  // This spec's headless browser reports `hover: none`: the touch structure (one toggle over
+  // both lines) must hold the task row's height at desktop and phone widths alike.
+  it("keeps the group row a task row's height at 1440, 520 and 390px on hover:none (#617)", () => {
+    expectGroupRowHeightMatchesTaskRow(browser, { url: `${baseUrl}${scoped('/')}`, groupId: 'fix-group-1', widths: [1440, 520, 390] })
+  })
+
+  it('keeps the group and member rows readable, at rest and selected, in both themes (#617)', () => {
+    const group = '[data-slot="group-row"][data-group-id="fix-group-1"]'
+    const member = `${ROW}[data-run-id="fix-var-a"]`
+    const read = (selector: string, state: string) => {
+      const sample = browser.evaluate(contrastSampleExpression(selector)) as ContrastSample
+      expect(sample.ratio, `${state} ${selector}: ${sample.foreground} on ${sample.background}`).toBeGreaterThanOrEqual(4.5)
+    }
+    const mark = (selector: string, state: string) => {
+      const sample = browser.evaluate(contrastSampleExpression(selector, 'background-color', 'parent')) as ContrastSample
+      expect(sample.ratio, `${state} ${selector}: ${sample.foreground} on ${sample.background}`).toBeGreaterThanOrEqual(3)
+    }
+    try {
+      for (const variant of contrastQaVariants.filter(({ viewport }) => viewport.width === 1440)) {
+        // The compare page selects the group; a member's thread (expanded) selects the member.
+        for (const [path, groupSelected] of [[scoped('/compare/fix-group-1'), true], [scoped('/tasks/fix-var-a'), false]] as const) {
+          browser.goto(`${baseUrl}${path}`)
+          browser.waitForFunction(`document.querySelector('${group} ${TILE}')?.getAttribute('aria-expanded') === 'false'`)
+          applyContrastQaVariant(browser, variant)
+          browser.click(TILE)
+          browser.waitForFunction(`document.querySelector('${member}') !== null && (document.querySelector('${group}').dataset.active === 'true') === ${groupSelected} && (document.querySelector('${member}').dataset.active === 'true') === ${!groupSelected}`)
+          const state = `${variant.id} ${groupSelected ? 'group selected' : 'member selected'}`
+          for (const part of ['group-title', 'group-meta', 'group-count']) read(`${group} [data-slot="${part}"]`, state)
+          for (const part of ['task-row-title', 'task-row-meta', 'task-row-variant-letter']) read(`${member} [data-slot="${part}"]`, state)
+          // The letter chip as resolved: a 16px circle saying `A`. The compare view's sheet
+          // styles its own `variant-letter` slot globally (`Variant ` prefix, 18px), which is
+          // why this one has a slot of its own.
+          expect(browser.evaluate(`(() => {
+            const chip = document.querySelector('${member} [data-slot="task-row-variant-letter"]'), s = getComputedStyle(chip)
+            return { size: s.width + ' ' + s.height, before: getComputedStyle(chip, '::before').content, text: chip.textContent }
+          })()`), state).toEqual({ size: '16px 16px', before: 'none', text: 'A' })
+          mark(`${group} [data-slot="status-dot"]`, state)
+          mark(`${member} [data-slot="status-dot"]`, state)
+          browser.screenshot(`${artifactsDir}/quick-list-group-${variant.id}-${groupSelected ? 'group' : 'member'}.png`, { viewport: true })
+        }
+      }
+    } finally {
+      restoreContrastQaDefaults(browser)
+      browser.goto(`${baseUrl}${scoped('/')}`)
+      browser.waitForFunction(`document.querySelector('[data-slot="quick-list-bucket"]') !== null`)
+    }
   })
 
   it('lights the row for the task the route has open', () => {
@@ -407,6 +488,48 @@ describe('tasks table overview', () => {
     browser.setViewport(1440, 900)
     browser.goto(`${baseUrl}${scoped('/')}`)
     browser.waitForFunction(`document.querySelectorAll('${TABLE_ROW}').length > 0`)
+  })
+
+  it('paints a done pill with the status key — a visible green dot, no teal chip — on every task list (#617)', () => {
+    type PillFacts = { dotShown: boolean; dotGreen: boolean; teal: boolean; background: string; mutedBackground: string; label: string }
+    // Resolved by the real stylesheet: a sheet once turned a done pill into a teal "Done" chip
+    // and hid its dot on the table, the mobile card and the global rows (and every dot on the
+    // grouped global cards).
+    const facts = (selector: string) => `(() => {
+      const pill = document.querySelector(${JSON.stringify(selector)})
+      const dot = pill?.querySelector('[data-slot="status-dot"]')
+      if (!pill || !dot) return null
+      const resolve = (prop, value) => { const probe = document.createElement('span'); probe.style[prop] = value
+        document.body.append(probe); const out = getComputedStyle(probe)[prop]; probe.remove(); return out }
+      const d = getComputedStyle(dot), p = getComputedStyle(pill)
+      return { dotShown: d.display !== 'none' && dot.getBoundingClientRect().width > 0,
+        dotGreen: d.backgroundColor === resolve('color', 'var(--success)'),
+        teal: p.color === resolve('color', 'var(--accent-text)'),
+        background: p.backgroundColor, mutedBackground: resolve('backgroundColor', 'var(--muted)'), label: pill.textContent }
+    })()`
+    const check = (surface: string, selector: string, background: 'muted' | 'none') => {
+      const f = browser.waitForValue(facts(selector)) as PillFacts
+      expect(f.dotShown, `${surface}: dot shown`).toBe(true)
+      expect(f.dotGreen, `${surface}: dot green`).toBe(true)
+      expect(f.teal, `${surface}: teal ink`).toBe(false)
+      expect(f.label, `${surface}: label`).toBe('done')
+      expect(f.background, `${surface}: pill fill`).toBe(background === 'muted' ? f.mutedBackground : 'rgba(0, 0, 0, 0)')
+    }
+    try {
+      check('table', `${TABLE_ROW}[data-run-id="fix-done"] [data-slot="pill"]`, 'muted')
+      browser.setViewport(360, 640)
+      check('mobile card', '[data-slot="task-card"][data-run-id="fix-done"] [data-slot="pill"]', 'muted')
+      browser.setViewport(1440, 900)
+      browser.goto(`${baseUrl}/tasks`)
+      check('global row', '[data-route="global-tasks"][data-presentation="summary"] [data-slot="global-task-row"][data-run-id="fix-done"] [data-slot="pill"]', 'muted')
+      // Grouped cards keep their text-only pill (no fill), and still show the dot.
+      browser.goto(`${baseUrl}/tasks?group=project`)
+      check('grouped card', '[data-route="global-tasks"][data-presentation="cards"] [data-slot="global-task-row"][data-run-id="fix-done"] [data-slot="pill"]', 'none')
+    } finally {
+      browser.setViewport(1440, 900)
+      browser.goto(`${baseUrl}${scoped('/')}`)
+      browser.waitForFunction(`document.querySelectorAll('${TABLE_ROW}').length > 0`)
+    }
   })
 
   it('is the home: the table renders every active fixture run with its status', () => {
@@ -748,6 +871,31 @@ describe('the tasks table under worst-case row content', () => {
     browser.waitForFunction(`document.querySelector('[data-slot="quick-list-bucket"]') !== null`)
   })
 
+  it('keeps the waiting-on-workers robot and the pin at 12px under every density (#617)', () => {
+    const sidebarRow = '[data-slot="task-row"][data-run-id="worst-wrapping"]'
+    type Glyphs = { lucide: boolean; label: string | null; box: string; bot: string; pin: string }
+    try {
+      for (const density of ['comfortable', 'compact', 'ultra'] as const) {
+        browser.evaluate(`(() => {
+          if (${JSON.stringify(density)} === 'comfortable') delete document.documentElement.dataset.density
+          else document.documentElement.dataset.density = ${JSON.stringify(density)}
+        })()`)
+        const glyphs = browser.waitForValue(`(() => {
+          const dataset = document.documentElement.dataset.density ?? 'comfortable'
+          if (dataset !== ${JSON.stringify(density)}) return null
+          const dot = document.querySelector('${sidebarRow} [data-slot="status-dot"][data-shape="workers"]')
+          const bot = dot?.querySelector('svg'), pin = document.querySelector('${sidebarRow} [data-slot="pin-icon"]')
+          if (!dot || !bot || !pin) return null
+          const size = (el) => { const r = el.getBoundingClientRect(); return Math.round(r.width) + 'x' + Math.round(r.height) }
+          return { lucide: bot.classList.contains('lucide-bot'), label: dot.getAttribute('aria-label'), box: size(dot), bot: size(bot), pin: size(pin) }
+        })()`) as Glyphs
+        expect(glyphs, density).toEqual({ lucide: true, label: 'waiting on 1 worker', box: '12x12', bot: '12x12', pin: '12x12' })
+      }
+    } finally {
+      browser.evaluate(`delete document.documentElement.dataset.density`)
+    }
+  })
+
   it('serves the worst case as data the real store parsed', async () => {
     // If a record here were wrong, zod would have dropped the index and every measurement below
     // would be measuring an empty table that "passes" nothing. The parked delegation is the one
@@ -900,8 +1048,9 @@ describe('the tasks table under worst-case row content', () => {
         expect(facts.unbrokenContained, `${theme}/${density}: unbroken title`).toBe(true)
         expect(facts.workflowContained, `${theme}/${density}: workflow ellipsis`).toBe(true)
         // The longest label the status column can be asked to print, and it comes from the
-        // record's own parked delegation rather than from a rewritten pill.
-        expect(facts.statusLabel, `${theme}/${density}: parked status label`).toBe('waiting on workers')
+        // record's own parked delegation rather than from a rewritten pill. A full record
+        // carries its worker ids, so the count is said (#617).
+        expect(facts.statusLabel, `${theme}/${density}: parked status label`).toBe('waiting on 1 worker')
         expect.soft(facts.statusContained, `${theme}/${density}: status pill`).toBe(true)
         expect.soft(facts.referenceContained, `${theme}/${density}: reference chip`).toBe(true)
         expect(facts.referenceLabel, `${theme}/${density}: compact reference label`).toBe('#1234')
@@ -1106,14 +1255,16 @@ describe('a row under width contention, in a column the user can widen', () => {
       return {
         title: row.querySelector('[data-slot="task-row-title"]').textContent,
         chip: chip.textContent,
-        chipHref: chip.href,
+        chipInert: chip.dataset.inert ?? null,
         tooltip: row.querySelector('a[href$="/tasks/wide-load"]').getAttribute('title'),
       }
-    })()`) as { title: string; chip: string; chipHref: string; tooltip: string }
+    })()`) as { title: string; chip: string; chipInert: string | null; tooltip: string }
 
     expect(painted.title).toBe('implementing comment threads across the whole thread view')
-    expect(painted.chip).toBe('#775')
-    expect(painted.chipHref).toBe('https://github.com/open-mercato/cezar/pull/775')
+    // Plain text on the meta line since #617, spelled as the kind and the number.
+    expect(painted.chip).toBe('PR #775')
+    // Plain text on this spec's `hover: none` browser (#617 01b); the task header has the link.
+    expect(painted.chipInert).toBe('true')
     // The number was moved, not deleted — the stored title is still one hover away.
     expect(painted.tooltip).toBe(FULL_TITLE)
   })
@@ -1234,6 +1385,143 @@ describe('a row under width contention, in a column the user can widen', () => {
 })
 
 /** The other half of the truth: with no runs, the sidebar says so rather than inventing any. */
+/**
+ * Variant rows and the group row at the default 264px column (#617 fix round). Its own fixture:
+ * a short-token opencode variant is the case where line 1 (`opencode · $0.40`) runs out of room
+ * while line 2's tokens would still fit, and only a real layout can say which gives way.
+ */
+describe('variant rows and the group row under width pressure', () => {
+  let varServer: ChildProcess
+  let varRoot: string
+  let varUrl: string
+  let varProject: string
+  const GROUP = '[data-slot="group-row"][data-group-id="g-wide"]'
+  const member = (id: string) => `[data-slot="task-row"][data-run-id="${id}"]`
+  const VARIANTS = ['wa', 'wb'].map((id, index) => ({
+    id, title: `Ledger scan (${index ? 'B' : 'A'})`, workflow: 'default', task: 'scan the ledger', status: 'review',
+    createdAt: ago((20 - index) * 60_000), finishedAt: ago((10 - index) * 60_000), tokensUsed: 2,
+    runner: 'opencode', costUsd: 0.4, inputTokens: 1, outputTokens: 1,
+    // Shared by both, so it belongs to the group row's line 2 (#617 01a).
+    referencedIssueUrl: 'https://github.com/open-mercato/cezar/issues/425',
+    groupId: 'g-wide', variant: index ? 'B' : 'A', archived: false, steps: [],
+  }))
+
+  beforeAll(async () => {
+    varRoot = mkdtempSync(join(tmpdir(), 'cezar-e2e-variants-'))
+    mkdirSync(join(varRoot, '.ai/cezar'), { recursive: true })
+    writeFileSync(join(varRoot, '.ai/cezar/runs.json'), JSON.stringify(VARIANTS, null, 2), 'utf8')
+    const port = await freePort()
+    varUrl = `http://localhost:${port}`
+    varServer = spawn(process.execPath, [cezarCli, 'serve', '--repo', varRoot, '--port', String(port), '--no-open'], {
+      env: fixtureServeEnv(varRoot), stdio: 'ignore',
+    })
+    await waitForHealth(varUrl, 'the variant-width fixture server')
+    varProject = await bootProjectId(varUrl)
+  }, 90_000)
+
+  afterAll(async () => {
+    browser.evaluate(`localStorage.removeItem('cez-sidebar-width')`)
+    await stopFixtureServer(varServer)
+    if (varRoot) rmSync(varRoot, { recursive: true, force: true })
+    browser.setViewport(1440, 900)
+    browser.goto(`${baseUrl}${scoped('/')}`)
+    browser.waitForFunction(`document.querySelector('[data-slot="quick-list-bucket"]') !== null`)
+  })
+
+  const open = (width: number) => {
+    browser.setViewport(1440, 900)
+    browser.goto(`${varUrl}/p/${varProject}/`)
+    browser.evaluate(`localStorage.setItem('cez-sidebar-width', '${width}')`)
+    browser.goto(`${varUrl}/p/${varProject}/`)
+    browser.waitForFunction(`document.querySelector('${GROUP} [data-slot="group-tile"]')?.getAttribute('aria-expanded') === 'false'`)
+    browser.click(`${GROUP} [data-slot="group-tile"]`)
+  }
+
+  type Line = { text: string; rendered: string; overflows: boolean; tokens: boolean; costShown: boolean }
+  const lineOf = (id: string) => `(() => {
+    const row = document.querySelector(${JSON.stringify(member(id))})
+    const title = row?.querySelector('[data-slot="task-row-title"]')
+    if (!title) return null
+    const cost = title.querySelector('[data-slot="variant-cost"]')
+    return { text: title.textContent, rendered: title.innerText, overflows: title.scrollWidth > title.clientWidth,
+      tokens: row.querySelector('[data-slot="task-row-tokens"]') !== null,
+      costShown: cost !== null && cost.getBoundingClientRect().right <= title.getBoundingClientRect().right + 0.5 }
+  })()`
+
+  it('at 264px, never shows the tokens while the cost is cut, and reads "opencode · $0.40"', () => {
+    open(264)
+    for (const id of ['wa', 'wb']) {
+      // The layout settles after the ResizeObserver's first pass: wait for a stable answer.
+      const line = browser.waitForStable(lineOf(id), { holdMs: 300, matcher: (l: Line | null) => l !== null && !(l.overflows && l.tokens) }) as Line
+      expect(line.text, id).toBe('opencode · $0.40')
+      // Rendered text keeps the separator's spaces (a flex item dropped the leading one).
+      expect(line.rendered, id).toBe('opencode · $0.40')
+      // Tokens drop first: either the whole cost is visible, or the tokens are gone.
+      expect(line.costShown || !line.tokens, JSON.stringify(line)).toBe(true)
+    }
+    browser.screenshot(`${artifactsDir}/quick-list-variants-264.png`, { viewport: true })
+  })
+
+  it('at 420px, has room for both: the full cost and the tokens', () => {
+    open(420)
+    for (const id of ['wa', 'wb']) {
+      const line = browser.waitForStable(lineOf(id), { holdMs: 300, matcher: (l: Line | null) => l !== null && l.tokens && !l.overflows }) as Line
+      expect(line.costShown, JSON.stringify(line)).toBe(true)
+    }
+  })
+
+  it("puts the shared reference on the group row's line 2, and keeps the row's height through expand", () => {
+    browser.setViewport(1440, 900)
+    browser.goto(`${varUrl}/p/${varProject}/`)
+    type Group = { expanded: string | null; height: number; meta: string; inert: string | null; links: number; inToggle: boolean }
+    const group = `(() => {
+      const row = document.querySelector('${GROUP}')
+      const meta = row?.querySelector('[data-slot="group-meta"]')
+      if (!meta) return null
+      const chip = meta.querySelector('[data-slot="issue-chip"]')
+      return { expanded: row.querySelector('[data-slot="group-tile"]').getAttribute('aria-expanded'),
+        height: Math.round(row.getBoundingClientRect().height), meta: meta.textContent,
+        inert: chip?.dataset.inert ?? null, links: meta.querySelectorAll('a').length, inToggle: chip?.closest('button') != null }
+    })()`
+    const collapsed = browser.waitForValue(group, (g: Group | null) => g?.expanded === 'false') as Group
+    expect(collapsed.meta).toBe('2 needs review · #425 · 9m')
+    // This spec's browser reports `hover: none`, so the reference is inert text here; the
+    // pointer path (a link with the status panel) is pinned in selection-states.
+    // …and inside the one toggle that spans both lines (#617 mobile regression): inert text is
+    // not interactive, so nothing is nested in the button.
+    expect(collapsed).toMatchObject({ inert: 'true', links: 0, inToggle: true })
+    browser.click(`${GROUP} [data-slot="group-tile"]`)
+    const expanded = browser.waitForValue(group, (g: Group | null) => g?.expanded === 'true') as Group
+    expect(expanded.height).toBe(collapsed.height)
+    // The members no longer repeat the reference their group row carries.
+    const memberMeta = browser.waitForValue(`document.querySelector('${member('wa')} [data-slot="task-row-meta"]')?.textContent ?? null`) as string
+    expect(memberMeta).toMatch(/^needs review/)
+    expect(memberMeta).not.toContain('#425')
+  })
+
+  it('gives the compare link a real 44px touch target beside the disclosure, and a tap opens compare', () => {
+    open(264)
+    type Target = { noHover: boolean; w: number; h: number; clearOfDisclosure: boolean; hits: boolean[]; x: number; y: number }
+    const target = browser.waitForValue(`(() => {
+      const link = document.querySelector('${GROUP} [data-slot="group-compare"]')
+      const chevron = document.querySelector('${GROUP} [data-slot="group-disclosure"]')
+      if (!link || !chevron) return null
+      const r = link.getBoundingClientRect(), c = chevron.getBoundingClientRect()
+      const cx = r.left + r.width / 2, cy = r.top + r.height / 2
+      const points = [[r.left + 1, cy], [r.right - 1, cy], [cx, r.top + 1], [cx, r.bottom - 1], [cx, cy]]
+      return { noHover: matchMedia('(hover: none)').matches, w: r.width, h: r.height, clearOfDisclosure: r.right <= c.left + 0.5,
+        hits: points.map(([x, y]) => link.contains(document.elementFromPoint(x, y))), x: Math.round(cx), y: Math.round(cy) }
+    })()`) as Target
+    // This spec's browser reports `hover: none` — the touch path this target exists for.
+    expect(target.noHover).toBe(true)
+    expect([target.w, target.h]).toEqual([44, 44])
+    expect(target.clearOfDisclosure).toBe(true)
+    expect(target.hits).toEqual([true, true, true, true, true])
+    browser.tapAt(target.x, target.y)
+    browser.waitForFunction(`location.pathname.endsWith('/compare/g-wide')`)
+  })
+})
+
 describe('empty quick-list', () => {
   let emptyServer: ChildProcess
   let emptyRoot: string

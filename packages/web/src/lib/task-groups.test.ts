@@ -723,3 +723,43 @@ describe('owned workers are not list rows (#312)', () => {
     expect(sidebarActiveRunId('missing', [])).toBe('missing')
   })
 })
+
+describe("a variant group's lead dot (#617): the loudest member by attention, not the list's first", () => {
+  const groupOf = (members: RunRecord[]) => {
+    const row = groupRuns(members, 'active').flatMap((bucket) => bucket.rows).find((r) => r.kind === 'group')
+    if (!row || row.kind !== 'group') throw new Error('no group row')
+    return row
+  }
+
+  it('shows a failed member over a done one, though sortRuns ranks done first', () => {
+    const lead = groupOf([
+      run({ id: 'd', groupId: 'g', variant: 'A', status: 'done', finishedAt: '2026-07-14T11:00:00.000Z' }),
+      run({ id: 'f', groupId: 'g', variant: 'B', status: 'failed', finishedAt: '2026-07-14T11:00:00.000Z' }),
+    ]).lead
+    expect(lead.id).toBe('f')
+  })
+
+  it('shows a needs-you member over a pinned done one, and keeps the group in Pinned', () => {
+    const members = [
+      run({ id: 'pd', groupId: 'g', variant: 'A', status: 'done', pinned: true }),
+      run({ id: 'w', groupId: 'g', variant: 'B', status: 'waiting' }),
+    ]
+    expect(groupOf(members).lead.id).toBe('w')
+    // Placement is unchanged: the pin still decides the bucket.
+    expect(groupRuns(members, 'active').map((bucket) => bucket.label)).toEqual(['Pinned'])
+  })
+
+  it('breaks a tie on the same attention rung deterministically — status weight, then variant letter', () => {
+    const twoRunning = [
+      run({ id: 'b', groupId: 'g', variant: 'B', status: 'running', createdAt: '2026-07-14T10:05:00.000Z' }),
+      run({ id: 'a', groupId: 'g', variant: 'A', status: 'running' }),
+    ]
+    expect(groupOf(twoRunning).lead.id).toBe('a')
+    expect(groupOf([...twoRunning].reverse()).lead.id).toBe('a')
+    // Same `none` rung: queued (still to happen) outranks done.
+    expect(groupOf([
+      run({ id: 'dd', groupId: 'g', variant: 'A', status: 'done' }),
+      run({ id: 'q', groupId: 'g', variant: 'B', status: 'queued' }),
+    ]).lead.id).toBe('q')
+  })
+})

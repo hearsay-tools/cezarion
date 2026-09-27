@@ -162,7 +162,7 @@ export function RunHeader({
             {run.delegation?.role === 'worker' ? 'Worker session' : run.delegation?.role === 'root' ? 'Parent session' : 'Task session'}
           </p>
           <EditableTitle run={run} />
-          <Pill dot={attention.tone} pulse={attention.pulse}>
+          <Pill dot={attention.tone} shape={attention.shape} pulse={attention.pulse}>
             {attention.label}{queuePosition !== undefined ? ` #${queuePosition}` : ''}
           </Pill>
           <span className="ml-auto flex shrink-0 items-center gap-1 md:gap-2.5">
@@ -558,7 +558,10 @@ function MetaRow({
         key={`pr-${reference.number}`}
         reference={reference}
         taskTitle={runTitle(run)}
-        className="h-5"
+        // 44px on touch (#617 01b): the sidebar row shows references as plain text there, so
+        // this header is where they are tapped. CSS px, not `min-h-11`: spacing units follow
+        // density, and ultra would make that 33px.
+        className="h-5 no-hover:min-h-[44px] no-hover:min-w-[44px]"
         // Shown only on a chip that IS conflicting — the chip decides that, being the thing that
         // knows — and mounted only while its panel is open. The same component the Tasks table
         // hands its chips, so both send the same prompt on the same seam.
@@ -579,7 +582,7 @@ function MetaRow({
         key="pr"
         reference={{ kind: 'PR', url: prUrl }}
         taskTitle={runTitle(run)}
-        className="h-5"
+        className="h-5 no-hover:min-h-[44px] no-hover:min-w-[44px]"
       />,
     )
   }
@@ -591,7 +594,7 @@ function MetaRow({
         key="issue"
         reference={{ kind: 'Issue', ...(number ? { number: Number(number) } : {}), url: issueUrl }}
         taskTitle={runTitle(run)}
-        className="h-5"
+        className="h-5 no-hover:min-h-[44px] no-hover:min-w-[44px]"
       />,
     )
   }

@@ -25,6 +25,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Sheet, SheetClose, SheetContent, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
 import { activeNavItem, activeNavPath, visibleNavItems, type NavItem } from '@/components/nav-items'
+import { FOOTER_ICON_ACTIVE_CLASS, NAV_INBOX_COUNT_CLASS, NAV_UPDATE_DOT_CLASS, SIDEBAR_SELECTED_CLASS, navIconClass, navRowClass, navUnreadCountClass } from '@/components/nav-row-styles'
 import {
   DEFAULT_SIDEBAR_WIDTH,
   MAX_SIDEBAR_WIDTH,
@@ -276,7 +277,8 @@ export function AppShell({
             <FolderIcon aria-hidden="true" className="size-4 shrink-0" />
             {(breadcrumb?.project ?? repo?.name) ? <><span className="truncate font-medium text-foreground">{breadcrumb?.project ?? repo?.name}</span><span aria-hidden="true">/</span></> : null}
             <span className="min-w-0 truncate">{breadcrumb?.page ?? current?.label ?? 'Cezarion'}</span>
-            {(breadcrumb?.branch ?? repo?.branch) ? <span className="ml-auto flex shrink-0 items-center gap-2 text-[11px]"><ShieldCheckIcon aria-hidden="true" className="size-4 text-accent-text" />{breadcrumb?.branch ?? repo?.branch}</span> : null}
+            {(breadcrumb?.branch ?? repo?.branch) ? <span className="ml-auto flex shrink-0 items-center gap-2 text-[11px]">{/* The one teal left beside the sidebar, deliberately (#617 01c): the header's ShieldCheck
+                sits outside the sidebar list and waits for the brand accent's own review. */}<ShieldCheckIcon aria-hidden="true" className="size-4 text-accent-text" />{breadcrumb?.branch ?? repo?.branch}</span> : null}
           </header>
 
           {banner ? (
@@ -559,12 +561,15 @@ function SidebarContent({
       </div>
 
       <div className="flex gap-1.5 px-4 pb-2">
-        <Button asChild variant="ghost" className={cn("relative h-[42px] min-w-0 flex-1 justify-start gap-2.5 px-2.5 text-[13px] font-medium text-muted-foreground", activeTo === "/new" && "bg-[var(--task-brand-selected)] text-accent-text")}>
+        {/* On /new it wears a selected nav item's fill and ink (#617 01c); its hover is the rows'. */}
+        <Button asChild variant="ghost" className={cn("relative h-[42px] min-w-0 flex-1 justify-start gap-2.5 px-2.5 text-[13px] font-medium text-muted-foreground hover:bg-sidebar-row-hover hover:text-foreground", activeTo === "/new" && SIDEBAR_SELECTED_CLASS)}>
           {/* A Router Link since R4 Step 1.1: the React /new composer is real, so deliberate
               New task affordances stay inside the SPA. Full document loads of /new (the
               bookmarklet contract) land on the shell like any route (static-ui.ts) — the
               React composer has owned auto-start parity since R4 Step 1.3. */}
-          <Link to="/new" onClick={onNavigate}>
+          {/* `data-sidebar-item`, not `data-slot`: Slot would let it replace the Button's
+              `data-slot="button"`, which is what holds the mobile 44px floor. */}
+          <Link to="/new" onClick={onNavigate} data-sidebar-item="new-task" aria-current={activeTo === '/new' ? 'page' : undefined}>
             <PlusIcon className="size-[18px]" aria-hidden="true" />
             New task
             {/* Decorative: the `c`-to-create accelerator is registered in the command palette.
@@ -612,30 +617,25 @@ function SidebarContent({
                   to={item.to}
                   onClick={onNavigate}
                   aria-current={isActive ? 'page' : undefined}
-                  className={cn(
-                    // h-[34px] is the mockup's desktop row. In the drawer these are touch targets, so
-                    // they relax to 44px — the one place the two framings legitimately differ.
-                    'selection-row focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground flex h-11 w-full items-center gap-2.5 rounded-md px-2.5 text-[13px] font-normal text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:h-[30px]',
-                    isActive && 'bg-[var(--task-brand-selected)] text-[var(--accent-text)]'
-                  )}
+                  className={navRowClass(isActive)}
                 >
-                  <Icon className="size-[15px] shrink-0 text-soft-foreground" aria-hidden="true" />
+                  <Icon className={navIconClass(isActive)} aria-hidden="true" />
                   {item.label}
                   {item.badge === 'inbox-count' && inboxCount ? (
                     <span
                       data-slot="nav-badge"
-                      className="ml-auto rounded-full bg-accent-strong px-1.5 py-px text-[11px] font-semibold tabular-nums text-accent-strong-foreground"
+                      className={NAV_INBOX_COUNT_CLASS}
                     >
                       {inboxCount}
                     </span>
                   ) : null}
-                  {/* Unread done items (#unread-done-items): same violet count grammar as the
-                      Inbox badge — the two share the "needs a human" hue. */}
+                  {/* Unread done items (#unread-done-items): a neutral count (#617). It is a
+                      number, not a status, and the status hues now each mean one thing. */}
                   {item.badge === 'tasks-unread' && unreadCount ? (
                     <span
                       data-slot="nav-unread-badge"
                       title={`${unreadCount} unread finished ${unreadCount === 1 ? 'task' : 'tasks'}`}
-                      className="ml-auto rounded-full bg-accent-strong px-1.5 py-px text-[11px] font-semibold tabular-nums text-accent-strong-foreground"
+                      className={navUnreadCountClass(isActive)}
                     >
                       {unreadCount}
                     </span>
@@ -645,7 +645,7 @@ function SidebarContent({
                       data-slot="nav-update-marker"
                       className="ml-auto flex items-center"
                     >
-                      <span className="size-1.5 rounded-full bg-accent-strong" aria-hidden="true" />
+                      <span className={NAV_UPDATE_DOT_CLASS} aria-hidden="true" />
                       <span className="sr-only">Skills update available</span>
                     </span>
                   ) : null}
@@ -703,19 +703,15 @@ function AllTasksLink({ onNavigate }: { onNavigate?: () => void }) {
       title="All tasks"
       onClick={onNavigate}
       aria-current={isActive ? 'page' : undefined}
-      // Reads at the weight of a section header rather than a nav row: full-strength foreground
-      // and semibold, where the project groups below it are semibold-on-default and their nav
-      // rows are muted. The violet icon is the one spot of accent — the same hue the tag chips
-      // and this page's own selected filters use, so the door and the room match.
+      // Active, it is a 36px square on the selected nav item's fill with foreground ink (#617
+      // 01c), fixed px so no density shrinks it. Not a Button, so the mobile 44px floor in
+      // `styles/index.css` never reached it; this slice leaves that as it was.
       className={cn(
-        'selection-row flex size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted',
-        isActive && 'bg-muted',
+        'selection-row flex size-[36px] shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted',
+        isActive && FOOTER_ICON_ACTIVE_CLASS,
       )}
     >
-      <LayersIcon
-        className={cn('size-4 shrink-0', isActive ? 'text-accent-text' : 'text-muted-foreground')}
-        aria-hidden="true"
-      />
+      <LayersIcon className="size-4 shrink-0" aria-hidden="true" />
       <span className="sr-only">All tasks</span>
     </RouterLink>
   )
@@ -736,14 +732,19 @@ function GlobalSettingsLink({
   className?: string
   onNavigate?: () => void
 }) {
+  const { pathname } = useLocation()
+  const isActive = pathname === '/settings/global' || pathname.startsWith('/settings/global/')
   return (
-    <Button asChild variant="ghost" size="icon" className={cn('size-9', className)}>
+    // 36px in fixed px so no density shrinks the active square (#617 01c). Its own `data-slot`
+    // replaces the Button's, so the mobile `a[data-slot='button']` floor never reached it; unchanged.
+    <Button asChild variant="ghost" size="icon" className={cn('size-[36px]', isActive && FOOTER_ICON_ACTIVE_CLASS, className)}>
       <RouterLink
         to="/settings/global"
         data-slot="global-settings-link"
         aria-label="Global settings"
         title="Global settings"
         onClick={onNavigate}
+        aria-current={isActive ? 'page' : undefined}
       >
         <Settings2Icon className="size-4" aria-hidden="true" />
         <span className="sr-only">Global settings</span>

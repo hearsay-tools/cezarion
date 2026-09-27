@@ -28,14 +28,26 @@ export const ATTENTION_RANK = {
 
 export type AttentionBucket = keyof typeof ATTENTION_RANK
 
-/** The dot tones the design system defines (`--success`/`--pending`/`--danger`/`--accent-strong`/`--running`, plus
- *  the neutral `--soft-foreground`). Named here rather than imported from `StatusDot` to keep
- *  this module UI-free; `attention.test.ts` asserts the two sets stay identical. */
-export type AttentionTone = 'success' | 'pending' | 'danger' | 'accent' | 'running' | 'neutral'
+/** The dot tones the design system defines (`--success`/`--pending`/`--danger`/`--accent-strong`/`--info`/
+ *  `--status-running`, plus the neutral `--soft-foreground`). Named here rather than imported from
+ *  `StatusDot` to keep this module UI-free; `attention.test.ts` asserts the two sets stay identical.
+ *  `accent` stays in the vocabulary for non-status dots (a reference's "closed as completed");
+ *  no status rung uses it since #617, because brand teal read as "done". */
+export type AttentionTone = 'success' | 'pending' | 'danger' | 'accent' | 'info' | 'running' | 'neutral'
+
+/**
+ * The status key's second channel (#617): hue says the family, SHAPE says whether it is waiting.
+ *  - `filled` — it is moving, or it has ended.
+ *  - `ring` — it is waiting on something outside it (a monitored command, a free slot, a clock).
+ *  - `workers` — it is waiting on its own workers (the robot glyph).
+ * Shape is what separates rungs that share a hue: running vs monitoring, queued vs cancelled.
+ */
+export type AttentionShape = 'filled' | 'ring' | 'workers'
 
 export interface Attention {
   bucket: AttentionBucket
   tone: AttentionTone
+  shape: AttentionShape
   /** True while the run is *transitioning* — the spec's "pulsing while transitioning" rule. */
   pulse: boolean
   /** Lower-case human phrase for the dot's tooltip / accessible name. */
@@ -86,7 +98,16 @@ export function delegationWaitLabel(delegation: AttentionInput['delegation']): s
   if (delegation.wait.requestIds?.length) {
     return delegation.role === 'worker' ? 'waiting on parent reply' : 'waiting on worker replies'
   }
-  return delegation.role === 'root' ? 'waiting on workers' : undefined
+  if (delegation.role !== 'root') return undefined
+  // A full `RunRecord` carries the worker ids (#617: "waiting on 2 workers"); the slim index
+  // projection the global list and the palette read does not, and there the count is not claimed.
+  // The count is the workers still OWED an outcome: a wait-for-all stays `parked` after one of two
+  // has reported, and "waiting on 2" would then overstate it. None left, or nothing to count
+  // from, says no number.
+  const wait = delegation.wait as { workerIds?: readonly string[]; outcomes?: readonly { workerId: string }[] }
+  const reported = new Set(wait.outcomes?.map((outcome) => outcome.workerId))
+  const workers = wait.workerIds?.filter((id) => !reported.has(id)).length
+  return workers ? `waiting on ${workers} worker${workers === 1 ? '' : 's'}` : 'waiting on workers'
 }
 
 /**
@@ -96,15 +117,16 @@ export function delegationWaitLabel(delegation: AttentionInput['delegation']): s
  * lower rung. Tones follow the mockups (`mockups/tasks-home.html`):
  *
  *  - `waiting` → amber/pending: the agent stopped and is asking you something.
- *  - `review` → violet, matching the violet PR chip beside it: there is work to look at.
- *    (The legacy UI painted both amber; the redesign splits them, per the mockup.)
- *  - `running` → reserved purple (`--running`), pulsing. Not brand teal, not review-required blue.
- *  - `queued` → neutral and still: parked, not transitioning. Its row shows `#2` instead.
+ *  - `review`/permission → blue `--info`: there is work to look at (was brand teal until #617).
+ *  - `running` → the violet family (`--status-running`), pulsing and filled; `monitoring` is the
+ *    same hue as a ring, and a parked parent is the same hue as the robot (#617 status key).
+ *  - `queued`/`scheduled` → neutral ring, still: parked, not transitioning. `cancelled` shares the
+ *    neutral hue but is filled — it has ended.
  *  - `done`/`failed` → the green/red outcome, still.
  */
 export function deriveAttention(run: AttentionInput, hasPendingHumanAsk = false): Attention {
   if (hasPendingPermission(run)) {
-    return { bucket: 'permission', tone: 'accent', pulse: true, label: 'needs permission' }
+    return { bucket: 'permission', tone: 'info', shape: 'filled', pulse: true, label: 'needs permission' }
   }
   // A run a provider usage limit stopped is `failed` on the record, but it is not an outcome —
   // it is a task with an appointment (spec 2026-08-03-auto-resume-after-usage-limit). Painting
@@ -113,40 +135,42 @@ export function deriveAttention(run: AttentionInput, hasPendingHumanAsk = false)
   // like `queued`: amber, still, and asking for nothing. Ahead of the `failed` rung because the
   // chain is first-match-wins.
   if (run.status === 'failed' && run.autoResumeAt) {
-    return { bucket: 'none', tone: 'pending', pulse: false, label: 'scheduled' }
+    return { bucket: 'none', tone: 'neutral', shape: 'ring', pulse: false, label: 'scheduled' }
   }
   if (run.status === 'failed') {
-    return { bucket: 'error', tone: 'danger', pulse: false, label: 'failed' }
+    return { bucket: 'error', tone: 'danger', shape: 'filled', pulse: false, label: 'failed' }
   }
   const dependencyLabel = delegationWaitLabel(run.delegation)
   if (!hasPendingHumanAsk && !run.hasPendingHumanAsk && run.status === 'waiting' && run.delegation?.role !== 'invalid' && run.delegation?.wait?.phase === 'parked' && dependencyLabel) {
-    return { bucket: 'none', tone: 'accent', pulse: false, label: dependencyLabel }
+    // Its own workers → the robot; a worker waiting on its parent is waiting on something
+    // outside it → a ring. Both violet: still in motion, just not on this turn.
+    return { bucket: 'none', tone: 'running', shape: run.delegation.role === 'root' ? 'workers' : 'ring', pulse: false, label: dependencyLabel }
   }
   if (run.status === 'waiting') {
-    return { bucket: 'waiting', tone: 'pending', pulse: true, label: 'needs you' }
+    return { bucket: 'waiting', tone: 'pending', shape: 'filled', pulse: true, label: 'needs you' }
   }
   if (run.status === 'review') {
-    return { bucket: 'waiting', tone: 'accent', pulse: true, label: 'needs review' }
+    return { bucket: 'waiting', tone: 'info', shape: 'filled', pulse: true, label: 'needs review' }
   }
   if (run.status === 'running' && run.activity === 'monitoring') {
     // Still working, but on its OWN downstream work (a sub-agent / a monitored
     // command), not on you (#490). A sub-state of `running`, so it stays in the
     // `running` bucket — no notification, no "Needs you" — with its own label.
-    return { bucket: 'running', tone: 'running', pulse: true, label: 'monitoring' }
+    return { bucket: 'running', tone: 'running', shape: 'ring', pulse: true, label: 'monitoring' }
   }
   if (run.status === 'running') {
-    return { bucket: 'running', tone: 'running', pulse: true, label: 'running' }
+    return { bucket: 'running', tone: 'running', shape: 'filled', pulse: true, label: 'running' }
   }
   if (isUnseen(run)) {
-    return { bucket: 'unseen', tone: 'accent', pulse: false, label: 'unseen' }
+    return { bucket: 'unseen', tone: 'accent', shape: 'filled', pulse: false, label: 'unseen' }
   }
   if (run.status === 'queued') {
-    return { bucket: 'none', tone: 'neutral', pulse: false, label: 'queued' }
+    return { bucket: 'none', tone: 'neutral', shape: 'ring', pulse: false, label: 'queued' }
   }
   if (run.status === 'done') {
-    return { bucket: 'none', tone: 'success', pulse: false, label: 'done' }
+    return { bucket: 'none', tone: 'success', shape: 'filled', pulse: false, label: 'done' }
   }
-  return { bucket: 'none', tone: 'neutral', pulse: false, label: 'cancelled' }
+  return { bucket: 'none', tone: 'neutral', shape: 'filled', pulse: false, label: 'cancelled' }
 }
 
 /**

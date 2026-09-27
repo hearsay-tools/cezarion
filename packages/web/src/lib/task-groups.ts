@@ -1,4 +1,4 @@
-import { deriveAttention } from './attention'
+import { ATTENTION_RANK, deriveAttention } from './attention'
 import type { RunRecord } from '@open-mercato/cezar-api-client'
 
 /**
@@ -51,6 +51,20 @@ const statusWeight = (run: RunRecord): number =>
     ? SCHEDULED_WEIGHT
     : STATUS_ORDER[run.status] ?? 9
 
+/**
+ * The member a variant group's row shows the dot of (#617 01a): the loudest by attention —
+ * `ATTENTION_RANK[deriveAttention(member).bucket]`, so a failed or needs-you member is never
+ * hidden behind a done one. Deliberately NOT the group's list position: `sortRuns` puts pins
+ * first and ranks done ahead of failed, which is right for placement and wrong for the dot.
+ * Ties break on status weight (queued before done inside the quiet rung), then variant letter.
+ */
+export function loudestMember(members: readonly RunRecord[]): RunRecord {
+  const rank = (run: RunRecord) => ATTENTION_RANK[deriveAttention(run).bucket]
+  return [...members].sort(
+    (a, b) => rank(a) - rank(b) || statusWeight(a) - statusWeight(b) || (a.variant ?? '').localeCompare(b.variant ?? ''),
+  )[0]!
+}
+
 /** One row of the quick-list: either a single run, or a collapsed variant group (spec 010). */
 export type QuickListRow =
   | {
@@ -66,6 +80,9 @@ export type QuickListRow =
       title: string
       /** Every member, ordered by variant letter (A, B, C). Always ≥ 2 — see `groupRuns`. */
       members: RunRecord[]
+      /** The member whose dot the group row shows — the loudest by attention (`loudestMember`),
+       *  which is not necessarily the one that picked the bucket (#617 01a). */
+      lead: RunRecord
     }
 
 export interface QuickListBucket {
@@ -287,7 +304,7 @@ export function groupRuns(runs: readonly RunRecord[], view: ListView): QuickList
         .filter((member) => member.groupId === run.groupId)
         .sort((a, b) => (a.variant ?? '').localeCompare(b.variant ?? ''))
       if (members.length > 1) {
-        push(bucketOf(run, view), { kind: 'group', groupId: run.groupId, title: groupTitle(run), members })
+        push(bucketOf(run, view), { kind: 'group', groupId: run.groupId, title: groupTitle(run), members, lead: loudestMember(members) })
         continue
       }
     }

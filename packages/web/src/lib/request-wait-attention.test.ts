@@ -25,7 +25,8 @@ it.each([
   const record = waiting(role)
   const projected = { ...record, delegation: runDelegationSummarySchema.parse(record.delegation) }
   for (const input of [record, projected]) {
-    expect(deriveAttention(input)).toEqual({ bucket: 'none', tone: 'accent', pulse: false, label })
+    // Violet family (#617): a root waits on its own workers (robot); a worker on its parent (ring).
+    expect(deriveAttention(input)).toEqual({ bucket: 'none', tone: 'running', shape: role === 'root' ? 'workers' : 'ring', pulse: false, label })
   }
   expect(wantsAttention(record)).toBe(false)
   expect(bucketOf(record, 'active')).toBe('Working')

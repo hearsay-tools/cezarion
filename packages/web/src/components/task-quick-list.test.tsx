@@ -1,5 +1,5 @@
 import { QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -92,7 +92,7 @@ describe('TaskQuickList', () => {
 
     const headers = [...document.querySelectorAll('[data-slot="quick-list-bucket"] h2')].map((h) => h.textContent)
     expect(headers).toEqual(['Recent'])
-    expect(rowsIn('Recent')).toEqual(['Structured changes endpoint1m', 'Normalize agent-event protocol1m', 'README parallel-agents tagline1m'])
+    expect(rowsIn('Recent')).toEqual(['Structured changes endpointneeds review · 1m', 'Normalize agent-event protocolrunning · 1m', 'README parallel-agents tagline1m'])
   })
 
   it('links every row to its task', () => {
@@ -124,8 +124,6 @@ describe('TaskQuickList', () => {
     expect(chip.getAttribute('href')).toBe('https://github.com/o/r/pull/7')
     expect(chip.getAttribute('target')).toBe('_blank')
     expect(chip.getAttribute('rel')).toBe('noopener noreferrer')
-    expect(chip.className).toContain('no-hover:min-h-11')
-    expect(chip.className).toContain('no-hover:min-w-11')
 
     const stopJsdomNav = (event: Event) => event.preventDefault()
     document.addEventListener('click', stopJsdomNav)
@@ -244,7 +242,7 @@ describe('TaskQuickList', () => {
         ],
       })
       expect(dotOf('w')?.getAttribute('data-tone')).toBe('pending')
-      expect(dotOf('v')?.getAttribute('data-tone')).toBe('accent')
+      expect(dotOf('v')?.getAttribute('data-tone')).toBe('info')
       expect(dotOf('r')?.getAttribute('data-tone')).toBe('running')
       expect(dotOf('d')?.getAttribute('data-tone')).toBe('success')
       expect(dotOf('f')?.getAttribute('data-tone')).toBe('danger')
@@ -306,13 +304,12 @@ describe('TaskQuickList', () => {
       expect(chip.closest('[data-slot="task-row"]')).toBe(row('x'))
     })
 
-    it('leads the row and takes the age slot, spelling the number rather than the word "PR" (#788)', () => {
+    it('sits on the meta line as plain text, after the state word and before the age (#617)', () => {
       renderList({
         runs: [run({ id: 'x', title: 'Has a PR', status: 'review', pullRequestUrl: 'https://github.com/o/r/pull/7' })],
       })
-      // Chip first, then the name: the number is the row's leading identifier, and the age it
-      // displaces was the weaker of the two signals.
-      expect(rowsIn('Recent')).toEqual(['#7Has a PR'])
+      // Title on line one; state word, reference and age on line two.
+      expect(rowsIn('Recent')).toEqual(['Has a PRneeds review · PR #7 · 1m'])
     })
 
     it('carries the issue when no PR exists yet — the number the title prefix was about', () => {
@@ -340,7 +337,7 @@ describe('TaskQuickList', () => {
       renderList({ runs: [run({ id: 'noturl', title: '402: no url for this one', prNumber: 402 })] })
       const chip = document.querySelector('[data-run-id="noturl"] [data-slot="pr-chip"]') as HTMLElement
       expect(chip.tagName).toBe('SPAN')
-      expect(chip.textContent).toBe('#402')
+      expect(chip.textContent).toBe('PR #402')
     })
   })
 
@@ -360,7 +357,7 @@ describe('TaskQuickList', () => {
       const title = document.querySelector('[data-run-id="dedup"] [data-slot="task-row-title"]')
       expect(title?.textContent).toBe('implementing comment threads')
       // Nothing is lost: the number is a chip, and the stored title is still the row's tooltip.
-      expect(document.querySelector('[data-run-id="dedup"] [data-slot="pr-chip"]')?.textContent).toBe('#775')
+      expect(document.querySelector('[data-run-id="dedup"] [data-slot="pr-chip"]')?.textContent).toBe('PR #775')
       expect(
         document.querySelector('[data-run-id="dedup"] a[href="/tasks/dedup"]')?.getAttribute('title')
       ).toBe('775: implementing comment threads')
@@ -383,7 +380,7 @@ describe('TaskQuickList', () => {
       expect(document.querySelector('[data-run-id="two"] [data-slot="task-row-title"]')?.textContent).toBe(
         '788: implementing readable task names'
       )
-      expect(document.querySelector('[data-run-id="two"] [data-slot="pr-chip"]')?.textContent).toBe('#790')
+      expect(document.querySelector('[data-run-id="two"] [data-slot="pr-chip"]')?.textContent).toBe('PR #790')
     })
 
     it('keeps a leading number that is not a reference at all', () => {
@@ -427,20 +424,23 @@ describe('TaskQuickList', () => {
       // Dropped from view, never from reach — the exact numbers stay in its tooltip.
       expect(diff.getAttribute('title')).toBe('+59514 −12160 across 208 files')
 
-      // Everything the row paints, in reading order: reference, name, diff, unread marker. No
-      // age — the reference took that slot.
-      expect(rowsIn('Recent')).toEqual(['#775implementing comment threads across the whole thread view+59,514 −12,160'])
+      // Everything the row paints, in reading order: name and diff on line one; reference and
+      // age on the meta line (a done row has no state word — its green dot says it).
+      expect(rowsIn('Recent')).toEqual(['implementing comment threads across the whole thread view+59,514 −12,160PR #775 · 1m'])
     })
 
-    it('gives the collapsed variant tile the same floor', () => {
+    it('lets the collapsed group title truncate before its ×N chip does', () => {
       renderList({
         runs: [
           run({ id: 'ga', title: 'Add skills autocomplete (A)', groupId: 'g', variant: 'A' }),
           run({ id: 'gb', title: 'Add skills autocomplete (B)', groupId: 'g', variant: 'B' }),
         ],
       })
-      const tileTitle = document.querySelector('[data-slot="group-tile"] span') as HTMLElement
-      expect(tileTitle.className).toContain('min-w-[7rem]')
+      // #617 01a: the group title flexes and truncates; its ×N chip is what never gives way.
+      const tileTitle = document.querySelector('[data-slot="group-title"]') as HTMLElement
+      expect(tileTitle.className).toContain('truncate')
+      expect(tileTitle.className).toContain('min-w-0')
+      expect(document.querySelector('[data-slot="group-count"]')?.className).toContain('shrink-0')
     })
   })
 
@@ -459,10 +459,11 @@ describe('TaskQuickList', () => {
         ],
       })
       expect(metadataText(row('old'))).toBe('Old2h')
-      const age = Array.from(row('old')!.querySelectorAll('span')).find(el => el.textContent === '2h') as HTMLElement
+      const age = row('old')!.querySelector('[data-slot="task-row-age"]') as HTMLElement
+      expect(age.textContent).toBe('2h')
       expect(age.classList.contains('sr-only')).toBe(false)
-      expect(age.className).toContain('text-[12px]')
-      expect(metadataText(row('new'))).toBe('New4m')
+      expect(age.closest('[data-slot="task-row-meta"]')?.className).toContain('text-[11.5px]')
+      expect(metadataText(row('new'))).toBe('Newrunning · 4m')
     })
 
     it('shows the queue position instead of an age for queued runs', () => {
@@ -472,8 +473,9 @@ describe('TaskQuickList', () => {
           run({ id: 'q2', title: 'Second', status: 'queued', createdAt: ago(60_000) }),
         ],
       })
-      expect(metadataText(row('q1'))).toBe('First#1')
-      expect(metadataText(row('q2'))).toBe('Second#2')
+      // The position rides in the state word (`queued #2`), in place of an age.
+      expect(metadataText(row('q1'))).toBe('Firstqueued #1')
+      expect(metadataText(row('q2'))).toBe('Secondqueued #2')
     })
 
     it('keeps the queue position even when the row has a reference chip', () => {
@@ -491,10 +493,10 @@ describe('TaskQuickList', () => {
           }),
         ],
       })
-      expect(metadataText(row('qref'))).toBe('#788queued on an issue#1')
+      expect(metadataText(row('qref'))).toBe('queued on an issuequeued #1 · #788')
     })
 
-    it('still drops the age for a referenced row that is not queued', () => {
+    it('keeps the age beside the reference on the meta line — there is room for both now (#617)', () => {
       renderList({
         runs: [
           run({
@@ -506,7 +508,7 @@ describe('TaskQuickList', () => {
           }),
         ],
       })
-      expect(metadataText(row('aged'))).toBe('#9Finished with a PR')
+      expect(metadataText(row('aged'))).toBe('Finished with a PRPR #9 · 2h')
     })
   })
 
@@ -542,7 +544,10 @@ describe('TaskQuickList', () => {
       renderList({ runs: variants() })
 
       const tile = screen.getByRole('button', { expanded: false })
+      // The toggle is line 1 only; line 2 (the aggregate in words, #617 01a) sits beside it,
+      // because it can hold reference links and a link inside a button is invalid.
       expect(tile.textContent).toBe('Add skills autocomplete×2')
+      expect(document.querySelector('[data-slot="group-meta"]')?.textContent).toBe('2 working · 1m')
       // Collapsed: the members are not rows of their own.
       expect(row('va')).toBeNull()
       expect(row('vb')).toBeNull()
@@ -555,8 +560,10 @@ describe('TaskQuickList', () => {
       expect(screen.getByRole('button', { expanded: true })).not.toBeNull()
 
       // The letter chip, its own dot, and what actually differs between the variants.
-      expect(metadataText(row('va'))).toBe('Aclaude · IN 92.0k · OUT 4.2k · $0.31')
-      expect(metadataText(row('vb'))).toBe('Bcodex · IN 40.0k · OUT 1.8k · $0.12')
+      // Line two is the meta line: state word (and references), never an age (#617 decision 1).
+      // Line 1 `runner · $cost`, line 2 state · tokens (#617 01a).
+      expect(metadataText(row('va'))).toBe('Aclaude · $0.31running · IN 92.0k · OUT 4.2k')
+      expect(metadataText(row('vb'))).toBe('Bcodex · $0.12running · IN 40.0k · OUT 1.8k')
       expect(dotOf('va')?.getAttribute('data-tone')).toBe('running')
       // Each variant is still its own deep link.
       expect(row('vb')?.querySelector('a')?.getAttribute('href')).toBe('/tasks/vb')
@@ -581,14 +588,14 @@ describe('TaskQuickList', () => {
         ),
       })
       fireEvent.click(screen.getByRole('button', { expanded: false }))
-      expect(metadataText(row('va'))).toBe('Aclaude · $0.31')
+      expect(metadataText(row('va'))).toBe('Aclaude · $0.31running')
     })
 
     it('gates variant token directions and cost independently', () => {
       renderList({ runs: variants(), showTokens: false, showCost: true })
       fireEvent.click(screen.getByRole('button', { expanded: false }))
-      expect(metadataText(row('va'))).toBe('Aclaude · $0.31')
-      expect(metadataText(row('vb'))).toBe('Bcodex · $0.12')
+      expect(metadataText(row('va'))).toBe('Aclaude · $0.31running')
+      expect(metadataText(row('vb'))).toBe('Bcodex · $0.12running')
     })
   })
 
@@ -631,11 +638,11 @@ describe('TaskQuickList', () => {
       })
       const pin = row('open')!.querySelector('[data-slot="pin-toggle"]') as HTMLElement
       expect(pin.getAttribute('data-pinned')).toBeNull()
-      expect(pin.className).toContain('w-0')
       expect(pin.className).toContain('opacity-0')
       expect(pin.className).not.toContain('group-focus-within')
       expect(pin.className).toContain('group-hover/task-row:opacity-100')
-      expect(pin.className).toContain('data-[pinned=true]:opacity-100')
+      // Keyboard focus anywhere in the row reveals it; a click's lingering `:focus` does not.
+      expect(pin.className).toContain('group-has-[:focus-visible]/task-row:opacity-100')
     })
 
     it('stays reachable on a device that cannot hover — the drawer has no pointer', () => {
@@ -646,11 +653,13 @@ describe('TaskQuickList', () => {
       renderList({ runs: [run({ id: 'plain', status: 'done' })], onTogglePin: vi.fn() })
       const pin = document.querySelector('[data-slot="pin-toggle"]') as HTMLElement
       expect(pin.className).toContain('no-hover:opacity-100')
-      // …and big enough for a thumb there, where 20px is not a target.
-      expect(pin.className).toContain('no-hover:size-11')
-      // The quiet default survives for pointer devices: still zero-width until hovered.
-      expect(pin.className).toContain('w-0')
-      expect(pin.className).toContain('group-hover/task-row:w-5')
+      // …and big enough for a thumb there, where 20px is not a target — in a slot that is
+      // 44px wide on that device all the time, so the reveal still moves nothing.
+      expect(pin.className).toContain('no-hover:min-h-11')
+      expect(pin.className).toContain('no-hover:min-w-11')
+      expect(pin.closest('[data-slot="task-row-trailing"]')?.className).toContain('no-hover:w-11')
+      // The quiet default survives for pointer devices: invisible until hovered.
+      expect(pin.className).toContain('opacity-0')
     })
 
     it('paints no pin control at all when no container wired one', () => {
@@ -977,10 +986,534 @@ it('marks the parent row active when currentRunId is the worker', () => {
   expect(row('parent')?.getAttribute('data-active')).toBe('true')
 })
 
-it('shows both tracker references on the separate badge line', () => {
+it('shows both tracker references on the meta line, never a line of their own', () => {
   renderList({ runs: [run({ id: 'both', pullRequestUrl: 'https://github.com/o/r/pull/217', referencedIssueUrl: 'https://github.com/o/r/issues/214' })] })
-  const badges = row('both')?.querySelector('[data-slot="session-references"]')
-  expect(badges?.querySelector('[data-slot="pr-chip"]')?.textContent).toBe('#217')
-  expect(badges?.querySelector('[data-slot="issue-chip"]')?.textContent).toBe('#214')
+  const meta = row('both')?.querySelector('[data-slot="task-row-meta"]')
+  expect(meta?.querySelector('[data-slot="pr-chip"]')?.textContent).toBe('PR #217')
+  expect(meta?.querySelector('[data-slot="issue-chip"]')?.textContent).toBe('#214')
+  expect(meta?.textContent).toBe('PR #217 · #214 · 1m')
   expect(row('both')?.querySelector('a a')).toBeNull()
 })
+
+describe('the calmer row (#617)', () => {
+  const parked = (id: string, workers = 2) => run({
+    id,
+    title: 'Assessing reviewer agent',
+    status: 'waiting',
+    delegation: {
+      role: 'root', permissions: [], receipts: [],
+      wait: { id: 'wait', workerIds: Array.from({ length: workers }, (_, i) => `00000000-0000-4000-8000-00000000000${i + 1}`), deadline: '2026-09-06T00:00:00.000Z', phase: 'parked', outcomes: [] },
+    },
+  } as Partial<RunRecord>)
+
+  it('is two fixed lines — a truncated title and a truncated meta line — whatever the reference count', () => {
+    renderList({
+      runs: [
+        run({ id: 'long', title: 'A very long task title that will never fit into a 232px sidebar column at all', pullRequestUrl: 'https://github.com/o/r/pull/217', referencedIssueUrl: 'https://github.com/o/r/issues/214' }),
+        run({ id: 'short', title: 'Short' }),
+      ],
+    })
+    for (const id of ['long', 'short']) {
+      const el = row(id) as HTMLElement
+      const title = el.querySelector('[data-slot="task-row-title"]') as HTMLElement
+      const meta = el.querySelector('[data-slot="task-row-meta"]') as HTMLElement
+      expect(title.className).toContain('truncate')
+      expect(title.className).toContain('text-[13px]')
+      expect(title.className).toContain('leading-[1.45]')
+      expect(meta.className).toContain('truncate')
+      expect(meta.className).toContain('h-[16px]')
+      expect(meta.className).toContain('text-soft-foreground')
+      // The title line is a fixed 19px box and the meta line a fixed 16px one, so height is
+      // independent of content; no reference is ever a line of its own.
+      expect(title.closest('a')?.className).toContain('h-[19px]')
+      expect(el.querySelector('[data-slot="session-references"]')).toBeNull()
+      for (const chip of el.querySelectorAll('[data-slot="pr-chip"], [data-slot="issue-chip"]')) {
+        expect(chip.parentElement).toBe(meta)
+      }
+    }
+  })
+
+  it('reserves the 16px trailing slot on every row, pin or not, unread or not', () => {
+    renderList({ runs: [run({ id: 'bare' }), run({ id: 'unread', finishedAt: ago(1_000) })], onTogglePin: vi.fn() })
+    renderList({ runs: [run({ id: 'nopin' })] })
+    for (const id of ['bare', 'unread', 'nopin']) {
+      const slot = row(id)?.querySelector('[data-slot="task-row-trailing"]') as HTMLElement
+      expect(slot, id).not.toBeNull()
+      expect(slot.className).toContain('w-[16px]')
+      expect(slot.className).toContain('shrink-0')
+    }
+  })
+
+  it('reveals the pin by opacity only, inside the slot — hovering changes no width or margin', () => {
+    renderList({ runs: [run({ id: 'r' })], onTogglePin: vi.fn() })
+    const el = row('r') as HTMLElement
+    const pin = el.querySelector('[data-slot="pin-toggle"]') as HTMLElement
+    expect(pin.closest('[data-slot="task-row-trailing"]')).not.toBeNull()
+    expect(pin.className).toContain('absolute')
+    // Nothing in the row may change its box under the pointer or on focus (the old pin grew
+    // from w-0 to w-5 and pushed the title into a rewrap).
+    for (const node of [el, ...el.querySelectorAll('*')]) {
+      const cls = node.getAttribute('class') ?? ''
+      expect(cls, cls).not.toMatch(/(group-hover\/task-row|focus-visible|group-has-\[:focus-visible\]\/task-row):(w|mr|ml|size|px|pl|pr)-/)
+    }
+  })
+
+  it('pin: 12px, soft-foreground, never teal; filled when pinned', () => {
+    renderList({ runs: [run({ id: 'plain' }), run({ id: 'kept', pinned: true })], onTogglePin: vi.fn() })
+    const plain = row('plain')?.querySelector('[data-slot="pin-toggle"]') as HTMLElement
+    const kept = row('kept')?.querySelector('[data-slot="pin-toggle"]') as HTMLElement
+    for (const pin of [plain, kept]) {
+      expect(pin.className).toContain('text-soft-foreground')
+      expect(pin.className).toContain('hover:text-foreground')
+      expect(pin.className).not.toContain('accent')
+      // Explicit px: `size-3` follows `--spacing` and would render 9px under ultra density.
+      expect(pin.querySelector('[data-slot="pin-icon"]')?.getAttribute('class')).toContain('size-[12px]')
+      expect(pin.className).toContain('size-5')
+    }
+    expect(plain.querySelector('[data-slot="pin-icon"]')?.getAttribute('fill')).toBe('none')
+    expect(kept.querySelector('[data-slot="pin-icon"]')?.getAttribute('fill')).toBe('currentColor')
+  })
+
+  it('Pinned bucket: the pin is hidden at rest and shows filled (unpin) on hover', () => {
+    renderList({ runs: [run({ id: 'kept', pinned: true })], onTogglePin: vi.fn() })
+    const pin = bucket('Pinned').querySelector('[data-run-id="kept"] [data-slot="pin-toggle"]') as HTMLElement
+    expect(pin.getAttribute('aria-label')).toBe('Unpin task')
+    expect(pin.className).toContain('opacity-0')
+    expect(pin.className).toContain('group-hover/task-row:opacity-100')
+    expect(pin.className).not.toContain('data-[pinned=true]:opacity-100')
+    expect(pin.querySelector('[data-slot="pin-icon"]')?.getAttribute('fill')).toBe('currentColor')
+  })
+
+  it('puts the unread marker in the trailing slot, in the outcome colour', () => {
+    renderList({
+      runs: [
+        run({ id: 'd', status: 'done', finishedAt: ago(1_000) }),
+        run({ id: 'f', status: 'failed', finishedAt: ago(1_000) }),
+      ],
+      onTogglePin: vi.fn(),
+    })
+    const marker = (id: string) => row(id)?.querySelector('[data-slot="unread-marker"]') as HTMLElement
+    expect(marker('d').getAttribute('data-tone')).toBe('success')
+    expect(marker('f').getAttribute('data-tone')).toBe('danger')
+    for (const id of ['d', 'f']) {
+      expect(marker(id).closest('[data-slot="task-row-trailing"]')).not.toBeNull()
+      // The pin takes the slot on hover; the marker steps aside rather than stacking.
+      expect(marker(id).className).toContain('group-hover/task-row:opacity-0')
+      expect(row(id)?.querySelector('[data-slot="task-row-title"]')?.className).toContain('font-semibold')
+    }
+  })
+
+  it('shows the violet robot for a parent waiting on its workers, with a counted label, in the same dot slot', () => {
+    renderList({ runs: [parked('p'), run({ id: 'r', status: 'running' })] })
+    const dot = dotOf('p') as HTMLElement
+    expect(dot.getAttribute('data-shape')).toBe('workers')
+    expect(dot.getAttribute('data-tone')).toBe('running')
+    expect(dot.getAttribute('aria-label')).toBe('waiting on 2 workers')
+    expect(dot.querySelector('svg')).not.toBeNull()
+    // Both glyphs sit in the same fixed 12px dot slot, so the titles start at the same x.
+    for (const id of ['p', 'r']) {
+      expect(dotOf(id)?.parentElement?.getAttribute('data-slot')).toBe('task-row-dot')
+      expect(dotOf(id)?.parentElement?.className).toContain('w-[12px]')
+    }
+    expect(row('p')?.querySelector('[data-slot="task-row-meta"]')?.textContent).toBe('waiting on 2 workers · 1m')
+  })
+
+  it('paints the monitoring ring and the queued ring apart from running and cancelled', () => {
+    renderList({ runs: [
+      run({ id: 'm', status: 'running', activity: 'monitoring' }),
+      run({ id: 'q', status: 'queued' }),
+      run({ id: 'c', status: 'cancelled' }),
+    ] })
+    expect(dotOf('m')?.getAttribute('data-shape')).toBe('ring')
+    expect(dotOf('q')?.getAttribute('data-shape')).toBe('ring')
+    expect(dotOf('c')?.getAttribute('data-shape')).toBe('filled')
+    expect(row('m')?.querySelector('[data-slot="task-row-state"]')?.textContent).toBe('monitoring')
+  })
+
+  it('makes references keyboard-reachable links on the meta line', () => {
+    renderList({ runs: [run({ id: 'x', title: 'Has refs', pullRequestUrl: 'https://github.com/o/r/pull/594', referencedIssueUrl: 'https://github.com/o/r/issues/451' })] })
+    const links = within(row('x') as HTMLElement).getAllByRole('link').filter(a => a.getAttribute('href')?.startsWith('https://'))
+    expect(links.map(a => a.textContent)).toEqual(['PR #594', '#451'])
+    for (const link of links) {
+      expect(link.getAttribute('tabindex')).not.toBe('-1')
+      expect(link.closest('a[href^="/tasks/"]')).toBeNull()
+    }
+  })
+
+  it('uses the neutral hover and selected fills — no teal anywhere on the row', () => {
+    renderList({ runs: [run({ id: 'open', pullRequestUrl: 'https://github.com/o/r/pull/7' }), run({ id: 'other' })], currentRunId: 'open', onTogglePin: vi.fn() })
+    const open = row('open') as HTMLElement
+    expect(open.className).toContain('bg-sidebar-row-selected')
+    // Selected holds under the pointer; the other rows take the hover fill.
+    expect(open.className).toContain('hover:bg-sidebar-row-selected')
+    expect(row('other')?.className).toContain('hover:bg-sidebar-row-hover')
+    expect(open.className).not.toContain('task-brand-selected')
+    expect(open.querySelector('[data-slot="task-row-title"]')?.className).toContain('text-foreground')
+    // …and the meta line steps up one ink on the selected fill, to hold 4.5:1.
+    expect(open.querySelector('[data-slot="task-row-meta"]')?.className).toContain('text-muted-foreground')
+    expect(row('other')?.querySelector('[data-slot="task-row-meta"]')?.className).toContain('text-soft-foreground')
+    expect(row('other')?.className).not.toContain('bg-sidebar-row-selected')
+    expect(row('other')?.querySelector('[data-slot="task-row-title"]')?.className).toContain('text-muted-foreground')
+    for (const node of [open, ...open.querySelectorAll('*')]) {
+      expect(node.getAttribute('class') ?? '').not.toMatch(/accent-text|task-brand|accent-strong\/35/)
+    }
+  })
+})
+
+describe('meta-line state words (#617, the issue\'s list exactly)', () => {
+  const ref = { pullRequestUrl: 'https://github.com/o/r/pull/594' }
+  const stateOf = (id: string) => row(id)?.querySelector('[data-slot="task-row-state"]')?.textContent ?? null
+  const metaOf = (id: string) => row(id)?.querySelector('[data-slot="task-row-meta"]')?.textContent
+
+  it('omits the state word where the dot already says it — needs you, done, cancelled — and keeps references and age', () => {
+    renderList({ runs: [
+      run({ id: 'you', status: 'waiting', ...ref }),
+      run({ id: 'done', status: 'done', ...ref }),
+      run({ id: 'gone', status: 'cancelled', ...ref }),
+    ] })
+    for (const id of ['you', 'done', 'gone']) {
+      expect(stateOf(id), id).toBeNull()
+      expect(metaOf(id), id).toBe('PR #594 · 1m')
+    }
+  })
+
+  it('says it for every state the issue lists', () => {
+    const workers = { role: 'root', permissions: [], receipts: [], wait: { id: 'w', workerIds: ['00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000002'], deadline: '2026-09-06T00:00:00.000Z', phase: 'parked', outcomes: [] } }
+    renderList({ runs: [
+      run({ id: 'mon', status: 'running', activity: 'monitoring' }),
+      run({ id: 'run', status: 'running' }),
+      run({ id: 'rev', status: 'review' }),
+      run({ id: 'fail', status: 'failed' }),
+      // Already due: no time left to name, so the word falls back to `scheduled`.
+      run({ id: 'sched', status: 'failed', autoResumeAt: ago(60_000) }),
+      run({ id: 'q', status: 'queued' }),
+      run({ id: 'wk', status: 'waiting', delegation: workers } as Partial<RunRecord>),
+      run({ id: 'rep', status: 'waiting', delegation: { ...workers, wait: { ...workers.wait, requestIds: ['00000000-0000-4000-8000-000000000009'] } } } as Partial<RunRecord>),
+    ] })
+    expect(stateOf('mon')).toBe('monitoring')
+    expect(stateOf('run')).toBe('running')
+    expect(stateOf('rev')).toBe('needs review')
+    expect(stateOf('fail')).toBe('failed')
+    expect(stateOf('sched')).toBe('scheduled')
+    expect(stateOf('q')).toBe('queued #1')
+    expect(stateOf('wk')).toBe('waiting on 2 workers')
+    expect(stateOf('rep')).toBe('waiting on worker replies')
+  })
+})
+
+describe('the variant group and its members (#617 addendum 01a)', () => {
+  const ISSUE = 'https://github.com/o/r/issues/425'
+  const members = (over: [Partial<RunRecord>, Partial<RunRecord>] = [{}, {}]) => [
+    run({ id: 'va', groupId: 'g1', variant: 'A', title: 'Upstream ledger (A)', status: 'running', runner: 'claude', costUsd: 0.4, inputTokens: 12_000, outputTokens: 3_000, createdAt: ago(12 * 60_000), referencedIssueUrl: ISSUE, ...over[0] }),
+    run({ id: 'vb', groupId: 'g1', variant: 'B', title: 'Upstream ledger (B)', status: 'running', runner: 'codex', costUsd: 0.22, inputTokens: 9_000, outputTokens: 2_000, createdAt: ago(12 * 60_000), referencedIssueUrl: ISSUE, ...over[1] }),
+  ]
+  const tile = () => document.querySelector('[data-slot="group-row"]') as HTMLElement
+  const expand = () => fireEvent.click(screen.getByRole('button', { expanded: false }))
+
+  it('shows the loudest member\'s status, the title with a non-truncating ×N chip, the aggregate line and a 36px trailing slot', () => {
+    renderList({ runs: members([{}, { status: 'waiting' }]) })
+    const row = tile()
+    // Needs you beats running: B picks the bucket, so B's dot leads the group.
+    const dot = row.querySelector('[data-slot="task-row-dot"] [data-slot="status-dot"]') as HTMLElement
+    expect(dot.getAttribute('data-tone')).toBe('pending')
+    const count = row.querySelector('[data-slot="group-count"]') as HTMLElement
+    expect(count.textContent).toBe('×2')
+    expect(count.className).toContain('shrink-0')
+    expect(count.className).toContain('bg-muted')
+    expect(count.className).toContain('text-muted-foreground')
+    expect(row.querySelector('[data-slot="group-title"]')?.className).toContain('truncate')
+    expect(row.querySelector('[data-slot="group-meta"]')?.textContent).toBe('1 needs you · 1 working · #425 · 12m')
+    const trailing = row.querySelector('[data-slot="group-trailing"]') as HTMLElement
+    expect(trailing.className).toContain('w-[36px]')
+    const [compare, chevron] = [...trailing.children]
+    expect(compare?.getAttribute('data-slot')).toBe('group-compare')
+    expect(chevron?.getAttribute('data-slot')).toBe('group-disclosure')
+    expect(chevron?.getAttribute('data-expanded')).toBe('false')
+    // Compare stays a link, never inside the toggle button.
+    expect(compare?.closest('button')).toBeNull()
+  })
+
+  it('joins only the parts that exist, and drops a reference only some members carry', () => {
+    renderList({ runs: members([{ referencedIssueUrl: undefined }, { referencedIssueUrl: undefined, pullRequestUrl: 'https://github.com/o/r/pull/611' }]) })
+    expect(tile().querySelector('[data-slot="group-meta"]')?.textContent).toBe('2 working · 12m')
+  })
+
+  it('toggles from anywhere on the row but the compare link, and flips the chevron', () => {
+    renderList({ runs: members() })
+    fireEvent.click(tile().querySelector('[data-slot="group-disclosure"]') as HTMLElement)
+    expect(row('va')).not.toBeNull()
+    expect(tile().querySelector('[data-slot="group-disclosure"]')?.getAttribute('data-expanded')).toBe('true')
+    fireEvent.click(tile().querySelector('[data-slot="group-meta"]') as HTMLElement)
+    expect(row('va')).toBeNull()
+  })
+
+  it('keeps the compare hover neutral and paints no teal on the group or its variants', () => {
+    renderList({ runs: members(), currentGroupId: 'g1' })
+    expand()
+    const compare = tile().querySelector('[data-slot="group-compare"]') as HTMLElement
+    expect(compare.className).toContain('hover:bg-sidebar-row-hover')
+    for (const node of [tile(), ...tile().querySelectorAll('*'), ...document.querySelectorAll('[data-slot="variant-list"] *')]) {
+      expect(node.getAttribute('class') ?? '').not.toMatch(/accent/)
+    }
+  })
+
+  it('indents the members 15.5px behind a 1px guide line, so each dot sits under the group title', () => {
+    renderList({ runs: members() })
+    expand()
+    const list = document.querySelector('[data-slot="variant-list"]') as HTMLElement
+    expect(list.className).toContain('ml-[15.5px]')
+    expect(list.className).toContain('border-l')
+    expect(list.className).toContain('border-border')
+    expect(list.className).toContain('pl-[6px]')
+    expect(row('va')?.className).not.toContain('pl-[26px]')
+    expect(row('va')?.className).toContain('pl-2.5')
+  })
+
+  it('variant line 1 is the neutral letter chip and runner · cost; line 2 is state, its own reference, tokens', () => {
+    renderList({ runs: members([{}, { pullRequestUrl: 'https://github.com/o/r/pull/611' }]) })
+    expand()
+    const chip = row('va')?.querySelector('[data-slot="task-row-variant-letter"]') as HTMLElement
+    expect(chip.textContent).toBe('A')
+    expect(chip.className).toContain('bg-muted')
+    expect(chip.className).toContain('text-muted-foreground')
+    expect(row('va')?.querySelector('[data-slot="task-row-title"]')?.textContent).toBe('claude · $0.40')
+    // The shared issue is the group's; each variant shows only a reference of its own.
+    expect(row('va')?.querySelector('[data-slot="task-row-meta"]')?.textContent).toBe('running · IN 12.0k · OUT 3.0k')
+    expect(row('vb')?.querySelector('[data-slot="task-row-meta"]')?.textContent).toBe('running · PR #611 · IN 9.0k · OUT 2.0k')
+  })
+
+  it('keeps honouring showTokens and showCost, across both lines', () => {
+    renderList({ runs: members(), showTokens: false, showCost: false })
+    expand()
+    expect(row('va')?.querySelector('[data-slot="task-row-title"]')?.textContent).toBe('claude')
+    expect(row('va')?.querySelector('[data-slot="task-row-meta"]')?.textContent).toBe('running')
+  })
+
+  it('a needs-you variant says no state word — unless line 2 would otherwise be empty', () => {
+    renderList({ runs: members([{ status: 'waiting' }, {}]) })
+    expand()
+    expect(row('va')?.querySelector('[data-slot="task-row-meta"]')?.textContent).toBe('IN 12.0k · OUT 3.0k')
+    cleanup()
+    renderList({ runs: members([{ status: 'waiting' }, {}]), showTokens: false })
+    expand()
+    expect(row('va')?.querySelector('[data-slot="task-row-meta"]')?.textContent).toBe('needs you')
+  })
+
+  describe('selection: one highlighted row', () => {
+    it('selects the group while its compare page is open', () => {
+      renderList({ runs: members(), currentGroupId: 'g1' })
+      expect(tile().getAttribute('data-active')).toBe('true')
+      expect(tile().className).toContain('bg-sidebar-row-selected')
+    })
+
+    it('selects the collapsed group while a member\'s thread is open', () => {
+      renderList({ runs: members(), currentRunId: 'vb' })
+      expect(tile().getAttribute('data-active')).toBe('true')
+    })
+
+    it('once expanded, selects the member and not the group', () => {
+      renderList({ runs: members(), currentRunId: 'vb' })
+      expand()
+      expect(tile().getAttribute('data-active')).toBeNull()
+      expect(row('vb')?.getAttribute('data-active')).toBe('true')
+      expect(document.querySelectorAll('[data-active="true"]')).toHaveLength(1)
+      const chip = row('vb')?.querySelector('[data-slot="task-row-variant-letter"]') as HTMLElement
+      expect(chip.className).toContain('bg-sidebar')
+      expect(chip.className).toContain('text-foreground')
+    })
+  })
+})
+
+describe('references on a device that cannot hover (#617 01b)', () => {
+  const stubHover = (none: boolean, desktop = true) => stubMedia({ noHover: none, desktop })
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('renders them as plain text, not links, so the whole row is the tap target', () => {
+    stubHover(true)
+    renderList({ runs: [run({ id: 't', title: 'Touch', pullRequestUrl: 'https://github.com/o/r/pull/594', referencedIssueUrl: 'https://github.com/o/r/issues/451' })] })
+    const meta = row('t')?.querySelector('[data-slot="task-row-meta"]') as HTMLElement
+    expect(meta.textContent).toBe('PR #594 · #451 · 1m')
+    expect(meta.querySelector('a')).toBeNull()
+    expect(meta.querySelector('[tabindex]')).toBeNull()
+    fireEvent.click(meta.querySelector('[data-slot="pr-chip"]') as HTMLElement)
+    expect(location()).toBe('/tasks/t')
+  })
+
+  it('keeps them links with a pointer', () => {
+    stubHover(false)
+    renderList({ runs: [run({ id: 't', pullRequestUrl: 'https://github.com/o/r/pull/594' })] })
+    expect(row('t')?.querySelector('[data-slot="task-row-meta"] a[href="https://github.com/o/r/pull/594"]')).not.toBeNull()
+  })
+
+  it('renders them as plain text in the mobile shell, even with a pointer', () => {
+    stubHover(false, false)
+    renderList({ runs: [run({ id: 't', pullRequestUrl: 'https://github.com/o/r/pull/594' })] })
+    const meta = row('t')?.querySelector('[data-slot="task-row-meta"]') as HTMLElement
+    expect(meta.querySelector('a')).toBeNull()
+    expect(meta.querySelector('[data-slot="pr-chip"]')?.getAttribute('data-inert')).toBe('true')
+  })
+})
+
+it('says when a scheduled run resumes, in the meta line (#617 01b)', () => {
+  renderList({ runs: [run({ id: 's', status: 'failed', autoResumeAt: new Date(NOW + 12 * 60_000).toISOString() })] })
+  expect(row('s')?.querySelector('[data-slot="task-row-state"]')?.textContent).toBe('resumes in 12m')
+})
+
+describe('variant line 1 under width pressure (#617 fix round)', () => {
+  const pair = () => [
+    run({ id: 'oa', groupId: 'g2', variant: 'A', title: 'Ledger (A)', status: 'running', runner: 'opencode', costUsd: 0.4, inputTokens: 1, outputTokens: 1 }),
+    run({ id: 'ob', groupId: 'g2', variant: 'B', title: 'Ledger (B)', status: 'running', runner: 'claude', costUsd: 0.4, inputTokens: 1, outputTokens: 1 }),
+  ]
+  const expand = () => fireEvent.click(screen.getByRole('button', { expanded: false }))
+
+  it('reads "runner · $cost" as inline text — the separator keeps its spaces', () => {
+    renderList({ runs: pair() })
+    expand()
+    const title = row('oa')?.querySelector('[data-slot="task-row-title"]') as HTMLElement
+    expect(title.textContent).toBe('opencode · $0.40')
+    // Inline, not a flex row: a flex item would drop the separator's leading space ("claude· $0.40").
+    expect(title.className).not.toMatch(/(^|\s)flex(\s|$)/)
+  })
+
+  it('drops the tokens once the cost no longer fits, so the cost is never cut while tokens show', () => {
+    const observers: Array<() => void> = []
+    vi.stubGlobal('ResizeObserver', class { constructor(cb: () => void) { observers.push(cb) } observe() {} unobserve() {} disconnect() {} })
+    const widths = { scroll: 0, client: 0 }
+    const scroll = vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockImplementation(function (this: HTMLElement) { return this.dataset.slot === 'task-row-title' ? widths.scroll : 0 })
+    const client = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) { return this.dataset.slot === 'task-row-title' ? widths.client : 0 })
+    try {
+      renderList({ runs: pair() })
+      expand()
+      expect(row('oa')?.querySelector('[data-slot="task-row-tokens"]')?.textContent).toBe('IN 1 · OUT 1')
+      // Line 1 overflows: 43px of text in a 24px box.
+      widths.scroll = 43
+      widths.client = 24
+      act(() => observers.forEach((cb) => cb()))
+      expect(row('oa')?.querySelector('[data-slot="task-row-tokens"]')).toBeNull()
+      expect(row('oa')?.querySelector('[data-slot="task-row-meta"]')?.textContent).toBe('running')
+      // Room again: the tokens come back.
+      widths.scroll = 24
+      act(() => observers.forEach((cb) => cb()))
+      expect(row('oa')?.querySelector('[data-slot="task-row-tokens"]')?.textContent).toBe('IN 1 · OUT 1')
+    } finally {
+      scroll.mockRestore()
+      client.mockRestore()
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('gives the compare link a dedicated 44px target on touch, in a slot that reserves the room', () => {
+    renderList({ runs: pair() })
+    const compare = document.querySelector('[data-slot="group-compare"]') as HTMLElement
+    expect(compare.className).toContain('no-hover:size-[44px]')
+    const trailing = document.querySelector('[data-slot="group-trailing"]') as HTMLElement
+    expect(trailing.className).toContain('w-[36px]')
+    expect(trailing.className).toContain('no-hover:w-[60px]')
+  })
+})
+
+describe("the group row's shared reference (#617 review round 4)", () => {
+  const ISSUE = 'https://github.com/o/r/issues/425'
+  const pair = () => [
+    run({ id: 'sa', groupId: 'g3', variant: 'A', title: 'Shared (A)', status: 'running', referencedIssueUrl: ISSUE }),
+    run({ id: 'sb', groupId: 'g3', variant: 'B', title: 'Shared (B)', status: 'running', referencedIssueUrl: ISSUE }),
+  ]
+  const groupRow = () => document.querySelector('[data-slot="group-row"][data-group-id="g3"]') as HTMLElement
+
+  it('is a real link on line 2, outside the toggle button, with nothing interactive nested', () => {
+    renderList({ runs: pair() })
+    const link = groupRow().querySelector('[data-slot="group-meta"] a[data-slot="issue-chip"]') as HTMLElement
+    expect(link?.getAttribute('href')).toBe(ISSUE)
+    expect(link.textContent).toBe('#425')
+    expect(link.closest('button')).toBeNull()
+    const toggle = groupRow().querySelector('[data-slot="group-tile"]') as HTMLElement
+    expect(toggle.querySelector('a, button')).toBeNull()
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    expect(groupRow().querySelector('[data-slot="group-meta"]')?.textContent).toBe('2 working · #425 · 1m')
+  })
+
+  it('keeps same-numbered references from two repositories on their own variants (review round 6)', () => {
+    renderList({ runs: [
+      run({ id: 'ra', groupId: 'g4', variant: 'A', title: 'Repos (A)', status: 'running', pullRequestUrl: 'https://github.com/o/a/pull/7' }),
+      run({ id: 'rb', groupId: 'g4', variant: 'B', title: 'Repos (B)', status: 'running', pullRequestUrl: 'https://github.com/o/b/pull/7' }),
+    ] })
+    const group = document.querySelector('[data-slot="group-row"][data-group-id="g4"]') as HTMLElement
+    expect(group.querySelector('[data-slot="group-meta"]')?.textContent).toBe('2 working · 1m')
+    fireEvent.click(group.querySelector('[data-slot="group-tile"]') as HTMLElement)
+    expect(row('ra')?.querySelector('[data-slot="task-row-meta"] a')?.getAttribute('href')).toBe('https://github.com/o/a/pull/7')
+    expect(row('rb')?.querySelector('[data-slot="task-row-meta"] a')?.getAttribute('href')).toBe('https://github.com/o/b/pull/7')
+  })
+
+  it('does not toggle the group when the link is clicked', () => {
+    renderList({ runs: pair() })
+    const link = groupRow().querySelector('[data-slot="group-meta"] a') as HTMLElement
+    const stopJsdomNav = (event: Event) => event.preventDefault()
+    document.addEventListener('click', stopJsdomNav)
+    fireEvent.click(link)
+    document.removeEventListener('click', stopJsdomNav)
+    expect(groupRow().querySelector('[data-slot="group-tile"]')?.getAttribute('aria-expanded')).toBe('false')
+    // …while a click elsewhere on line 2 still toggles, as before.
+    fireEvent.click(groupRow().querySelector('[data-slot="group-meta"]') as HTMLElement)
+    expect(groupRow().querySelector('[data-slot="group-tile"]')?.getAttribute('aria-expanded')).toBe('true')
+  })
+
+  it('is inert text on a device that cannot hover', () => {
+    stubMedia({ noHover: true, desktop: true })
+    try {
+      renderList({ runs: pair() })
+      const meta = groupRow().querySelector('[data-slot="group-meta"]') as HTMLElement
+      expect(meta.querySelector('a')).toBeNull()
+      expect(meta.querySelector('[data-slot="issue-chip"]')?.getAttribute('data-inert')).toBe('true')
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  // The mobile stylesheet floors every button at 44px (#166). A line-1-only toggle there grew the
+  // row from 47px to ~72px, so off the desktop+hover pair the button spans both lines instead.
+  describe('which structure renders (#617 mobile regression)', () => {
+    afterEach(() => vi.unstubAllGlobals())
+    const structure = () => {
+      const toggle = groupRow().querySelector('[data-slot="group-tile"]') as HTMLElement
+      const meta = groupRow().querySelector('[data-slot="group-meta"]') as HTMLElement
+      return {
+        structure: groupRow().dataset.structure,
+        metaInToggle: toggle.contains(meta),
+        links: meta.querySelectorAll('a').length,
+        nested: toggle.querySelectorAll('a, button, [tabindex]').length,
+      }
+    }
+
+    it('desktop + hover: the button is line 1, line 2 a sibling with a real link', () => {
+      stubMedia({ noHover: false, desktop: true })
+      renderList({ runs: pair() })
+      expect(structure()).toEqual({ structure: 'pointer', metaInToggle: false, links: 1, nested: 0 })
+    })
+
+    for (const [name, media] of [
+      ['mobile shell with a pointer', { noHover: false, desktop: false }],
+      ['desktop width, no hover', { noHover: true, desktop: true }],
+      ['mobile shell, no hover', { noHover: true, desktop: false }],
+    ] as const) {
+      it(`${name}: one button over both lines, the reference inert inside it`, () => {
+        stubMedia(media)
+        renderList({ runs: pair() })
+        expect(structure()).toEqual({ structure: 'touch', metaInToggle: true, links: 0, nested: 0 })
+        expect(groupRow().querySelector('[data-slot="group-meta"]')?.textContent).toBe('2 working · #425 · 1m')
+        // The row's vertical padding moved into the button, so the button is the row's height.
+        expect(groupRow().className).toContain('py-0')
+        expect(groupRow().querySelector('[data-slot="group-tile"]')?.className).toContain('py-1.5')
+        fireEvent.click(groupRow().querySelector('[data-slot="issue-chip"]') as HTMLElement)
+        expect(groupRow().querySelector('[data-slot="group-tile"]')?.getAttribute('aria-expanded')).toBe('true')
+      })
+    }
+  })
+})
+
+function stubMedia({ noHover, desktop }: { noHover: boolean; desktop: boolean }) {
+  vi.stubGlobal('matchMedia', (query: string) => ({
+    matches: query === '(hover: none)' ? noHover : query === '(min-width: 768px)' ? desktop : false,
+    media: query, onchange: null,
+    addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false,
+  }))
+}

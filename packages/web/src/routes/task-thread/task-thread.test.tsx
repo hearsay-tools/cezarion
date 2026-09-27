@@ -1347,7 +1347,8 @@ describe('TaskThreadRoute — read receipts', () => {
 it.each(['registered', 'parked', 'wake-pending'] as const)('uses honest dock copy for %s worker waits', phase => {
   renderView(<ThreadView run={run('waiting', { delegation: { role: 'root', permissions: [], receipts: [], wait: { id: 'wait', workerIds: ['worker'], deadline: '2026-09-06T00:00:00.000Z', phase, outcomes: [] } } })} thread={reduceThread([])} />)
   const hint = document.querySelector('[data-slot="paused-hint"]')
-  expect(hint?.textContent).toContain(phase === 'parked' ? 'Waiting on workers' : 'waiting for your reply')
+  // A full record carries the worker ids, so the count is said (#617).
+  expect(hint?.textContent).toContain(phase === 'parked' ? 'Waiting on 1 worker' : 'waiting for your reply')
 })
 it('keeps a visible human ask above parked worker context in the header and dock', () => {
   const thread = reduceThread([line(1, 'ask.requested', { requestId: 'ask', questions: [{ header: 'Choice', question: 'Choose a path', options: [{ label: 'Proceed', description: 'Continue' }] }] })])
@@ -1369,8 +1370,8 @@ it.each([false, true].flatMap(fallback => (['pending', 'refused-human-attempt', 
   const history: import('@/api/run-history').RunHistoryState = { visibleEvents, currentEvents, isPending: false, contextPending: false, fallback, hasOlder: true, isFetchingOlder: false, olderError: undefined, loadOlder: async () => {}, jumpToLatest: async () => {}, retainedPages: 1 }
   renderView(<ThreadView run={run('waiting', { delegation: { role: 'root', permissions: [], receipts: [], wait: { id: 'wait', workerIds: ['worker'], deadline: '2026-09-07T12:00:00.000Z', phase: 'parked', outcomes: [] } } })} thread={reduceThread(visibleEvents)} currentThread={reduceThread(currentEvents)} history={history} />)
   const expectedPending = mode !== 'matched-answer' && mode !== 'old-history'
-  expect(document.querySelector('[data-slot="paused-hint"]')?.textContent).toContain(expectedPending ? 'waiting for your reply' : 'Waiting on workers')
-  expect(document.querySelector('[data-slot="pill"]')?.textContent).toContain(expectedPending ? 'needs you' : 'waiting on workers')
+  expect(document.querySelector('[data-slot="paused-hint"]')?.textContent).toContain(expectedPending ? 'waiting for your reply' : 'Waiting on 1 worker')
+  expect(document.querySelector('[data-slot="pill"]')?.textContent).toContain(expectedPending ? 'needs you' : 'waiting on 1 worker')
 })
 
 describe('composer execution actions (#201)', () => {

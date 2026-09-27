@@ -1202,6 +1202,24 @@ describe('meta line, tabs, pill and resume hint', () => {
   // and its own page is the last place that should have to pick one. Order is `taskReferences`
   // order — the PR it created, then the PR it is about — the same order the global Tasks table
   // paints.
+  // #617 01b: on touch the sidebar's references are plain text and the whole row is the tap
+  // target, which only holds because the task header carries them as real 44px links.
+  it('gives its tracker chips a 44px target on a device that cannot hover', () => {
+    stubFetch()
+    renderHeader(run('done', {
+      branch: 'cez/r1',
+      pullRequestUrl: 'https://github.com/open-mercato/cezar/pull/534',
+      referencedIssueUrl: 'https://github.com/open-mercato/cezar/issues/544',
+    }))
+    const meta = document.querySelector('[data-slot="run-meta"]') as HTMLElement
+    const chips = [...meta.querySelectorAll('[data-slot="pr-chip"], [data-slot="issue-chip"]')]
+    expect(chips).toHaveLength(2)
+    for (const chip of chips) {
+      expect(chip.className, chip.textContent ?? '').toContain('no-hover:min-h-[44px]')
+      expect(chip.className, chip.textContent ?? '').toContain('no-hover:min-w-[44px]')
+    }
+  })
+
   it('shows every PR the task points at, not only the strongest one', () => {
     stubFetch()
     renderHeader(

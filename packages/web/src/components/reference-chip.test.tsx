@@ -335,3 +335,34 @@ describe('the conflict chip’s offered action', () => {
     expect(onMount).not.toHaveBeenCalled()
   })
 })
+
+describe('ReferenceChip plain (the sidebar meta line, #617)', () => {
+  it('is muted text — no border, no tone, no glyph — spelling PR #N and #N', () => {
+    const pr = chipOf(<ReferenceChip reference={PR} taskTitle="Add checkout" status="checks-failing" plain />)
+    expect(pr.textContent).toBe('PR #402')
+    expect(pr.className).not.toMatch(/\bborder\b/)
+    expect(pr.className).not.toContain('text-accent-text')
+    expect(pr.className).not.toContain('text-danger')
+    expect(pr.querySelector('svg, [data-slot="status-dot"]')).toBeNull()
+    expect(pr.className).toContain('hover:underline')
+    expect(pr.className).toContain('focus-visible:underline')
+    cleanup()
+    const issue = chipOf(<ReferenceChip reference={{ kind: 'Issue', number: 451, url: 'https://github.com/o/r/issues/451' }} taskTitle="t" plain />)
+    expect(issue.textContent).toBe('#451')
+  })
+
+  it('stays a keyboard-reachable link whose name still carries the status', () => {
+    render(<ReferenceChip reference={PR} taskTitle="Add checkout" status="checks-failing" plain />)
+    const link = screen.getByRole('link', { name: `Open the pull request for Add checkout — ${REFERENCE_STATUS['checks-failing'].label}` })
+    expect(link.getAttribute('href')).toBe('https://github.com/o/r/pull/402')
+    expect(link.getAttribute('tabindex')).not.toBe('-1')
+  })
+
+  it('opens the same status panel on focus', async () => {
+    render(<ReferenceChip reference={PR} taskTitle="t" status="changes-requested" plain />)
+    fireEvent.focus(screen.getByRole('link'))
+    await waitFor(() => {
+      expect(panelText()).toContain(REFERENCE_STATUS['changes-requested'].hint)
+    })
+  })
+})

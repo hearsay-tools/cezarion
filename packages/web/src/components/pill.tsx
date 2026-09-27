@@ -1,6 +1,6 @@
 import * as React from "react"
 
-import { StatusDot, type StatusDotTone } from "@/components/status-dot"
+import { StatusDot, type StatusDotShape, type StatusDotTone } from "@/components/status-dot"
 import { cn } from "@/lib/utils"
 
 /* The neutral status chip from the mockups' `.pill` class.
@@ -10,12 +10,16 @@ import { cn } from "@/lib/utils"
 function Pill({
   className,
   dot,
+  shape = "filled",
   pulse = false,
   children,
   ...props
 }: React.ComponentProps<"span"> & {
   /** Render a leading StatusDot in this tone. Omit for a plain chip. */
   dot?: StatusDotTone
+  /** The dot's shape — the status key's second channel (#617). Pass `attention.shape` alongside
+   *  `attention.tone` wherever the pill states a run status. Ignored without `dot`. */
+  shape?: StatusDotShape
   /** Pulse the dot to mark a transitioning state. Ignored without `dot`. */
   pulse?: boolean
 }) {
@@ -28,7 +32,7 @@ function Pill({
       )}
       {...props}
     >
-      {dot ? <StatusDot tone={dot} pulse={pulse} /> : null}
+      {dot ? <StatusDot tone={dot} shape={shape} pulse={pulse} /> : null}
       {children}
     </span>
   )

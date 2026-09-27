@@ -280,7 +280,7 @@ function TaskItem({
       data-project-id={task.projectId ?? undefined}
       onSelect={() => onSelect(task)}
     >
-      <StatusDot tone={attention.tone} pulse={attention.pulse} aria-label={attention.label} role="img" />
+      <StatusDot tone={attention.tone} shape={attention.shape} pulse={attention.pulse} aria-label={attention.label} role="img" />
       {task.delegation?.role === 'worker' ? <span className="shrink-0 text-xs text-muted-foreground">Worker</span> : null}
       <span className="min-w-0 flex-1 truncate">{label}</span>
       {/* Only in a multi-project workspace: with one project the label would name the only

@@ -106,3 +106,13 @@ export function isReadDoneItem(run: ReadStateInput): boolean {
 export function unreadDoneCount(runs: readonly ReadStateInput[]): number {
   return runs.reduce((total, run) => (isOwnedWorker(run) || !isUnread(run) ? total : total + 1), 0)
 }
+
+/**
+ * The unread marker's colour (#617): the run's OUTCOME, not a colour of its own. Violet now means
+ * running, so a violet "unread" dot beside a finished run said the wrong thing; green for an
+ * unread done run and red for an unread failed one repeat the outcome the marker is about.
+ * Returned as a StatusDot tone name so this module stays UI-free.
+ */
+export function unreadMarkerTone(run: Pick<RunRecord, 'status'>): 'success' | 'danger' {
+  return run.status === 'failed' ? 'danger' : 'success'
+}

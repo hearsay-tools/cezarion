@@ -587,7 +587,9 @@ describe('Recently finished group', () => {
     expect(groups).not.toContain('Recently finished')
     // And it wears the parked dot the rest of the cockpit gives it, not the failure red.
     const row = document.querySelector('[data-run-id="r-parked"]')
-    expect(row?.querySelector('[data-slot="status-dot"]')?.getAttribute('data-tone')).toBe('pending')
+    // #617: parked on a clock is the status key's still neutral ring.
+    expect(row?.querySelector('[data-slot="status-dot"]')?.getAttribute('data-tone')).toBe('neutral')
+    expect(row?.querySelector('[data-slot="status-dot"]')?.getAttribute('data-shape')).toBe('ring')
   })
 
   it('leaves archived runs out — archiving is a stronger "done with this" than reading', async () => {
@@ -768,8 +770,8 @@ describe('Tasks across projects', () => {
 
     const tasks = [...document.querySelectorAll('[data-slot="palette-task"]')]
     expect(tasks.map((task) => task.getAttribute('data-run-id'))).toEqual(['r-mine', 'r-shop'])
-    // review → violet, not the index's stale running.
-    expect(tasks[0]?.querySelector('[data-slot="status-dot"]')?.getAttribute('data-tone')).toBe('accent')
+    // review → info blue (#617), not the index's stale running.
+    expect(tasks[0]?.querySelector('[data-slot="status-dot"]')?.getAttribute('data-tone')).toBe('info')
   })
 
   it('lists the boot project once from an unscoped screen like global settings', async () => {

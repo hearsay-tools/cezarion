@@ -345,11 +345,31 @@ describe('design guardian', () => {
     for (const [name, value] of [...Object.entries(dark), ...Object.entries(light)]) {
       if (reservedPurple.has(value)) {
         expect(
-          name.startsWith('merged') || name === 'running',
+          name.startsWith('merged') || name === 'running' || name === 'status-running',
           `${name} still carries reserved purple ${value}`,
         ).toBe(true)
       }
     }
+  })
+
+  it('lets no stylesheet hide or restyle a status dot or a status pill (#617: one status key everywhere)', () => {
+    // The dot's tone and shape are the status; a sheet that hides the dot (or paints a done pill
+    // as a teal chip) replaces the key with a second, surface-local one. StatusDot and Pill own
+    // their look; a sheet may only position them.
+    const offenders: string[] = []
+    for (const file of sources.filter(f => f.ext === '.css')) {
+      const css = file.lines.join('\n')
+      for (const match of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+        const selector = match[1]!.trim(), body = match[2]!
+        const dot = /data-slot=["']status-dot["']/.test(selector)
+        const statusPill = /\[data-status=[^\]]+\][^,{]*\[data-slot=["']pill["']\]/.test(selector)
+        if ((dot && /display:\s*none|background|color|width|height/.test(body)) ||
+            (statusPill && /background|color:|display:\s*none/.test(body))) {
+          offenders.push(`${file.rel}: ${selector.replace(/\s+/g, ' ')}`)
+        }
+      }
+    }
+    expect(offenders).toEqual([])
   })
 
   it('paints live-run dots with dedicated running purple, not review-required info', () => {
@@ -361,9 +381,13 @@ describe('design guardian', () => {
     expect(dark['info']).toBe('#83baff')
     expect(light['info']).toBe('#2366b1')
 
+    // #617: the status dot's violet family has its own sidebar-safe token; `--running` above is
+    // unchanged for its other users.
+    expect(dark['status-running']).toBe('#a78bfa')
+    expect(light['status-running']).toBe('#7c3aed')
     const source = readFileSync(path.join(APP_ROOT, 'src/components/status-dot.tsx'), 'utf8')
-    expect(source).toMatch(/running:\s*"bg-running"/)
-    expect(source).not.toMatch(/running:\s*"bg-info"/)
+    expect(source).toMatch(/tone:\s*"running",\s*className:\s*"bg-status-running"/)
+    expect(source).not.toMatch(/tone:\s*"running",\s*className:\s*"bg-info"/)
   })
 
   it('keeps summary merged chips on reserved purple, not brand accent', () => {

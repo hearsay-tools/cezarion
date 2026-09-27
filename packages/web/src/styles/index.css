@@ -81,6 +81,18 @@
   /* Live-run fill. Same hex as --merged-strong (the pre-#373 accent-strong); own role so
    * running/monitoring dots are not merged chips and not review-required --info. */
   --running: #7c3aed;
+  /* The status key's violet family (#617): running and monitoring dots and the waiting-on-workers
+   * robot. Its own token rather than a new --running, which other surfaces keep: #7c3aed is
+   * 3.15:1 on the dark sidebar and 2.44:1 on a selected row, under the 3:1 non-text minimum. */
+  --status-running: #a78bfa;
+  /* The sidebar task row (#617): neutral hover and selected fills, replacing the teal
+   * --task-brand-selected on the row so "selected" stops reading as loud. */
+  --sidebar-row-hover: #1b2130;
+  --sidebar-row-selected: #262c3e;
+  /* The Inbox nav count (#617 01c): soft amber, because follow-ups wait for you. A tinted fill
+   * with amber ink rather than the teal brand chip; 8.1:1 on the dark sidebar. */
+  --inbox-count: #f4c54226;
+  --inbox-count-foreground: #f4c542;
 
   /* Cezarion surfaces from design.pen. Elevation comes from surface steps, not shadows. */
   --surface-base: #0b0f17;
@@ -218,6 +230,12 @@
   --merged-strong: #7c3aed;
   --merged-text: #6d28d9;
   --running: #7c3aed;
+  --status-running: #7c3aed;
+  --sidebar-row-hover: #f4f5f8;
+  --sidebar-row-selected: #eaedf3;
+  /* amber-400 ink on white is ~1.6:1, so the light count darkens its number (6.0:1 on the tint). */
+  --inbox-count: #f4c54240;
+  --inbox-count-foreground: #7a5200;
 
   --message-user-bg: #fff9e8;
   --message-user-border: #ddc978;
@@ -412,6 +430,11 @@
   --color-merged-strong: var(--merged-strong);
   --color-merged-text: var(--merged-text);
   --color-running: var(--running);
+  --color-status-running: var(--status-running);
+  --color-sidebar-row-hover: var(--sidebar-row-hover);
+  --color-sidebar-row-selected: var(--sidebar-row-selected);
+  --color-inbox-count: var(--inbox-count);
+  --color-inbox-count-foreground: var(--inbox-count-foreground);
   --color-ring: var(--ring);
 
   --color-danger: var(--danger);
@@ -735,13 +758,11 @@
   .new-task-editor:focus-within { box-shadow: none; }
   .new-task-editor textarea { min-height: 96px; }
 }
-/* Approved current193 sidebar: title-aligned state dot, tracker-only second row. */
-[data-slot='task-row'] { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; column-gap: 8px; row-gap: 4px; align-items: start; padding: 8px; border-radius: 8px; }
-[data-slot='task-row'] > a:not([data-slot]) { grid-column: 2; grid-row: 1; padding: 0; min-height: 17px; }
-[data-slot='task-row'] > [data-slot='status-dot'] { grid-column: 1; grid-row: 1; margin-top: 4px; width: 10px; height: 10px; }
-[data-slot='task-row-title'] { white-space: normal; min-width: 0; font-size: 12px; line-height: 17px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-[data-slot='session-references'] { grid-column: 2; grid-row: 2; }
-[data-slot='task-row'] > button { grid-column: 3; grid-row: 1 / span 2; }
+/* The sidebar task row (#617) is laid out entirely by its own utilities in
+ * `task-quick-list.tsx`: two fixed lines, a 12px dot slot, a reserved 16px trailing slot, and
+ * the neutral --sidebar-row-hover / --sidebar-row-selected fills. The earlier override layer
+ * here (a grid, a 10px dot, a two-line clamped title and a teal selected title) is gone — do not
+ * restyle the row from this sheet, or the geometry the row guarantees stops holding. */
 
 .new-task-composer [data-slot='composer-feedback'] { grid-row: 6; }
 @media (min-width: 1280px) {
@@ -764,15 +785,6 @@
 
 [data-slot='sidebar-footer-controls'] svg { width: 17px; height: 17px; }
 [data-slot='sidebar-footer-controls'] [data-design-icon='chevron-down'] { width: 10px; height: 10px; }
-[data-slot='session-references'] > [data-slot$='chip'] { border-radius: 6px; border-color: currentColor; font-weight: 400; }
-[data-slot='session-references'] svg { width: 12px; height: 12px; }
-
-[data-slot='task-row'][data-active='true'] [data-slot='task-row-title'] { color: var(--accent-text); }
-
-/* Unpinned sessions expose Pin on hover/focus; mobile also has the task action menu. */
-@media (hover: hover) {
-  [data-slot='task-row'] > [data-slot='pin-toggle']:not([data-pinned]) { min-width: 0; min-height: 0; }
-}
 
 /* The close control sits on the dark nav scrim, not on an accent fill. */
 [data-slot='mobile-nav-drawer'] button[aria-label='Close menu'] { color: #f8fafc; }
@@ -789,8 +801,6 @@
   content: ''; position: absolute; top: 0; bottom: 0; left: -12px; right: -12px;
 }
 [data-slot='mobile-top-bar'] > div { height: 51px; }
-/* Leading activity dots use the readable accent; unread completions keep brand teal. */
-[data-slot='task-row'] > [data-slot='status-dot'][data-tone='accent'] { background-color: var(--accent-text); }
 
 [data-slot='mobile-status']:empty { display: none; }
 /* The menu's 44px hit region needs the source's fixed 14px screen gutter even
