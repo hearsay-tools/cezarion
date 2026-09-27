@@ -387,9 +387,20 @@ describe('references on a device that cannot hover (#617 01b)', () => {
       browser.waitForFunction(`document.querySelector('[aria-label="Show run details"]') !== null`)
       // The matrix above leaves its last density and theme on the root; start from the defaults.
       appearance('comfortable', 'dark')
-      // Below md the run details start collapsed; the chips live in them. Focus + Enter, as
-      // task-thread.e2e does: the thread scrolls the header under the sticky top bar, so a
-      // pointer click lands on the top bar (failure bundle 360px-…-3, `covered by span.max-w-28`).
+      // Below md the run details start collapsed; the chips live in them. Focus + Enter from the
+      // start, as task-thread.e2e.ts:579-580 (and :663-664) do for the same phone header. Not a
+      // flake fix: at 360px a pointer click on "Show run details" fails every time. The thread
+      // scrolls `main[data-slot="main"]` to its latest message on arrival, which leaves the header
+      // above the viewport (the button's rect y was -32 and -53 in two probes), and
+      // `browser.click` then leaves the details closed. It does NOT fail with a "covered by"
+      // refusal: after a minimal `scrollIntoView({ block: 'nearest' })` the button sits at y=52,
+      // just under the 52px sticky top bar, and nothing covers it.
+      // Reproduced with the click swapped in, this test only (`-t "the sidebar row is the tap
+      // target"`): 360px failed 2/2, 390px passed 1/1. Local bundle (gitignored):
+      // .ai/qa/failures/touch-targets/360px-the-sidebar-row-is-the-tap-target-and-the-task-header-carries-the-44px-lin-1/
+      // — probe.json: kind "wait-value" for the two header chips, lastValue null; snapshot.txt:
+      // `button "Show run details" [expanded=false]`. Focus + Enter does not depend on where the
+      // thread has scrolled.
       browser.evaluate(`document.querySelector('[aria-label="Show run details"]').focus()`)
       browser.press('Enter')
       type Header = { noHover: boolean; chips: Array<{ w: number; h: number; top: number; right: number }>; inner: number; scroll: number }
