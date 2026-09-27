@@ -223,10 +223,26 @@ function createRunListBatcher(queryClient: QueryClient) {
     key: readonly [string, 'runs', 'list']; baseList: ApiRun[] | undefined
     baseQuery: object | undefined; baseUpdateCount: number | undefined; runs: Map<string, RunRecord>
   }>()
+  const needsReconcile = new Map<string, readonly [string, 'runs', 'list']>()
+  const unsubscribe = queryClient.getQueryCache().subscribe(event => {
+    if (!needsReconcile.size || event.type !== 'updated' || event.action.type !== 'success') return
+    const cacheKey = JSON.stringify(event.query.queryKey)
+    const key = needsReconcile.get(cacheKey)
+    if (!key) return
+    if (!event.action.manual) {
+      // Only the list's own query function can establish the authoritative answer. A live SSE
+      // patch is a manual cache success and would otherwise clear TanStack's invalidated flag.
+      needsReconcile.delete(cacheKey)
+      return
+    }
+    // A reconciliation fetch may already be in flight. Keep it and its eventual authoritative
+    // result instead of cancelling/restarting a GET for every live worker event.
+    void queryClient.invalidateQueries({ queryKey: key, exact: true }, { cancelRefetch: false })
+  })
   let frame: number | undefined
   let timer: ReturnType<typeof setTimeout> | undefined
 
-  const flush = (): void => {
+  const flush = (deferReconcile = false): Array<readonly [string, 'runs', 'list']> => {
     if (timer !== undefined) clearTimeout(timer)
     timer = undefined
     if (frame !== undefined) cancelAnimationFrame(frame)
@@ -239,6 +255,7 @@ function createRunListBatcher(queryClient: QueryClient) {
       const query = queryClient.getQueryCache().find({ queryKey: key, exact: true })
       if (query !== baseQuery || query?.state.dataUpdateCount !== baseUpdateCount || query?.state.data !== baseList) {
         reconcileKeys.push(key)
+        needsReconcile.set(JSON.stringify(key), key)
         continue
       }
       queryClient.setQueryData<ApiRun[]>(key, list => {
@@ -248,7 +265,10 @@ function createRunListBatcher(queryClient: QueryClient) {
       })
     }
     pending.clear()
-    for (const key of reconcileKeys) void queryClient.invalidateQueries({ queryKey: key, exact: true })
+    if (!deferReconcile) {
+      for (const key of reconcileKeys) void queryClient.invalidateQueries({ queryKey: key, exact: true })
+    }
+    return reconcileKeys
   }
 
   const keysFor = (project: string): Array<readonly [string, 'runs', 'list']> => {
@@ -279,19 +299,30 @@ function createRunListBatcher(queryClient: QueryClient) {
           entry.runs.set(event.run.id, event.run)
         }
         if (timer === undefined) {
-          timer = setTimeout(flush, 50)
-          if (typeof requestAnimationFrame === 'function') frame = requestAnimationFrame(flush)
+          timer = setTimeout(() => { flush() }, 50)
+          if (typeof requestAnimationFrame === 'function') frame = requestAnimationFrame(() => { flush() })
         }
         return
       }
       // A newer live update or deletion must win over an archived record still in the queue.
-      flush()
+      const reconcileAfterWrite = flush(true)
       for (const key of keys) {
         if (event.type === 'run') queryClient.setQueryData<ApiRun[]>(key, list => applyRunEvent(list, event.run))
         else queryClient.setQueryData<ApiRun[]>(key, list => applyRunDeleted(list, event.id))
       }
+      // The current event may have patched one of the ambiguous lists above; its manual success
+      // re-invalidated that key. Cover any other pending scope whose key this event did not write.
+      for (const key of reconcileAfterWrite) {
+        if (!queryClient.getQueryState(key)?.isInvalidated) {
+          void queryClient.invalidateQueries({ queryKey: key, exact: true })
+        }
+      }
     },
     flush,
+    cancel(): void {
+      unsubscribe()
+      needsReconcile.clear()
+    },
   }
 }
 
@@ -580,6 +611,7 @@ export function useGlobalEvents(usage: UsageStore, url: string = SSE_URL): void 
       disposed = true
       clearTimeout(reopenTimer)
       runListBatcher.flush()
+      runListBatcher.cancel()
       runsIndexRefresher.cancel()
       runDetailRefresher.cancel()
       document.removeEventListener('visibilitychange', onVisibilityChange)

@@ -207,6 +207,78 @@ describe('useGlobalEvents — connection', () => {
 })
 
 describe('useGlobalEvents — archived run bursts (#657)', () => {
+  it('refetches an inactive list after a later SSE patches an ambiguous archive', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+    const a = runRecord('a')
+    const b = runRecord('b')
+    client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [a, b])
+    const { source } = mount()
+    source.emit('run', stampedRun({ ...a, archived: true }))
+    client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [{ ...a }, { ...b }])
+    source.emit('run', stampedRun({ ...a, status: 'done', archived: true }))
+    source.emit('run', stampedRun({ ...b, tokensUsed: 42 }))
+    act(() => vi.advanceTimersByTime(50))
+    expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())?.[0]?.archived).toBe(false)
+    expect(client.getQueryState(queryKeys.runs.list())?.isInvalidated).toBe(true)
+
+    const fresh = deferredResponse()
+    vi.mocked(fetch).mockReturnValue(fresh.promise)
+    renderHook(() => useRuns(), { wrapper })
+    expect(fetch).toHaveBeenCalledTimes(1)
+    await act(async () => fresh.resolve(json([{ ...a, status: 'done', archived: true }, { ...b, tokensUsed: 42 }])))
+    expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())?.[0]?.archived).toBe(true)
+  })
+
+  it('keeps active reconciliation pending through a later SSE and clears it after REST succeeds', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+    const a = runRecord('a')
+    const b = runRecord('b')
+    client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [a, b])
+    renderHook(() => useRuns(), { wrapper })
+    const fresh = deferredResponse()
+    vi.mocked(fetch).mockReturnValue(fresh.promise)
+    const { source } = mount()
+    source.emit('run', stampedRun({ ...a, archived: true }))
+    client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [{ ...a }, { ...b }])
+    act(() => vi.advanceTimersByTime(50))
+    expect(fetch).toHaveBeenCalledTimes(1)
+
+    for (let tokensUsed = 40; tokensUsed <= 42; tokensUsed++) {
+      source.emit('run', stampedRun({ ...b, tokensUsed }))
+    }
+    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(fetch).mock.calls[0]?.[1]?.signal?.aborted).toBe(false)
+    expect(client.getQueryState(queryKeys.runs.list())?.isInvalidated).toBe(true)
+    expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())?.[1]?.tokensUsed).toBe(42)
+    await act(async () => fresh.resolve(json([{ ...a, archived: true }, { ...b, tokensUsed: 42 }])))
+    expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())?.[0]?.archived).toBe(true)
+    expect(client.getQueryState(queryKeys.runs.list())?.isInvalidated).toBe(false)
+
+    source.emit('run', stampedRun({ ...b, tokensUsed: 43 }))
+    expect(fetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('stops watching dirty list writes after the stream unmounts', () => {
+    vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+    const run = runRecord('r1')
+    client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [run])
+    const { source, unmount } = mount()
+    source.emit('run', stampedRun({ ...run, archived: true }))
+    client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [{ ...run, tokensUsed: 1 }])
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+    unmount() // flushes the ambiguous archive, then removes the cache subscription
+    invalidate.mockClear()
+
+    client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [{ ...run, tokensUsed: 2 }])
+
+    expect(invalidate).not.toHaveBeenCalled()
+  })
+
   it('keeps a structurally equal unarchive returned by REST after the event', async () => {
     vi.useFakeTimers()
     vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
