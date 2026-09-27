@@ -113,7 +113,9 @@ export interface SudoStepOpts {
   input?: string;
   /** Human name for the stdin payload, e.g. "credential line". */
   inputLabel?: string;
-  /** Prove the command actually took effect. Runs after every attempt. */
+  /** Prove the command actually took effect. Runs after every attempt.
+   * `commandCode` is the exit code in sudo mode; it is undefined when the
+   * operator ran the displayed command in a separate root shell. */
   verify: (ctx: InstallContext, commandCode?: number) => Promise<boolean>;
 }
 

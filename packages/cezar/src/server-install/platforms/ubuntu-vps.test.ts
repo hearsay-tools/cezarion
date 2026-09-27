@@ -405,12 +405,17 @@ describe('ubuntu-vps redeploy restart verification (#430)', () => {
   function redeployContext(opts: {
     before?: string;
     after?: string;
+    final?: string;
     restartCode?: number;
     scope?: 'user' | 'system';
     instance?: string;
     dryRun?: boolean;
     journal?: string;
     journalThrows?: boolean;
+    journalUnreadable?: boolean;
+    sudoJournal?: string;
+    sudoAllowed?: boolean;
+    curlCode?: string;
   } = {}) {
     const calls: string[] = [];
     let shows = 0;
@@ -419,14 +424,16 @@ describe('ubuntu-vps redeploy restart verification (#430)', () => {
         calls.push(`${program} ${args.join(' ')}`);
         if (program === 'systemctl' && args.includes('ExecStart')) return { code: 0, stdout: '', stderr: '' };
         if (program === 'systemctl' && args.includes('show')) {
-          const stdout = shows++ === 0 ? opts.before : opts.after;
+          const stdout = shows++ === 0 ? opts.before : shows === 2 ? opts.after : opts.final ?? opts.after;
           return { code: stdout === undefined ? 1 : 0, stdout: stdout ?? '', stderr: '' };
         }
         if (program === 'journalctl') {
           if (opts.journalThrows) throw new Error('journal unavailable');
-          return { code: 0, stdout: opts.journal ?? 'recent service failure\n', stderr: '' };
+          return { code: opts.journalUnreadable ? 1 : 0, stdout: opts.journalUnreadable ? '' : opts.journal ?? 'recent service failure\n', stderr: '' };
         }
-        if (program === 'curl') return { code: 0, stdout: '200', stderr: '' };
+        if (program === 'sudo' && args.includes('journalctl')) return { code: 0, stdout: opts.sudoJournal ?? '', stderr: '' };
+        if (program === 'sudo' && args.includes('true')) return { code: opts.sudoAllowed === false ? 1 : 0, stdout: '', stderr: '' };
+        if (program === 'curl') return { code: 0, stdout: opts.curlCode ?? '200', stderr: '' };
         return { code: 0, stdout: '', stderr: '' };
       },
       interactive: async (program, args) => {
@@ -478,6 +485,16 @@ describe('ubuntu-vps redeploy restart verification (#430)', () => {
     await expect(ubuntuVps.redeploy!(ctx)).resolves.toBeUndefined();
   });
 
+  it('fails when the unit dies after the initial restart check', async () => {
+    const { ctx } = redeployContext({ before, after, final: 'ActiveState=failed\nExecMainStartTimestampMonotonic=200\n' });
+    await expect(ubuntuVps.redeploy!(ctx)).rejects.toThrow(/cezar\.service.*service is failed[\s\S]*recent service failure/);
+  });
+
+  it('includes journal diagnostics when HTTP readiness fails', async () => {
+    const { ctx } = redeployContext({ before, after, curlCode: '000' });
+    await expect(ubuntuVps.redeploy!(ctx)).rejects.toThrow(/cezar\.service.*cockpit verification failed[\s\S]*recent service failure/);
+  });
+
   it('fails when the before or after service identity is unreadable', async () => {
     for (const snapshots of [{ before: undefined, after }, { before, after: 'ActiveState=active\n' }]) {
       const { ctx } = redeployContext(snapshots);
@@ -499,6 +516,18 @@ describe('ubuntu-vps redeploy restart verification (#430)', () => {
   it('fails a nonzero system restart even if systemd reports an advanced timestamp', async () => {
     const { ctx } = redeployContext({ before, after, scope: 'system', restartCode: 7 });
     await expect(ubuntuVps.redeploy!(ctx)).rejects.toThrow(/cezar\.service.*restart.*code 7/);
+  });
+
+  it('uses noninteractive sudo for system logs only after sudo ran the restart', async () => {
+    const { ctx, calls } = redeployContext({ before, after: before, scope: 'system', journalUnreadable: true, sudoJournal: 'root journal detail\n' });
+    await expect(ubuntuVps.redeploy!(ctx)).rejects.toThrow(/root journal detail/);
+    expect(calls.join('\n')).toContain('sudo -n journalctl -u cezar.service -n 30');
+  });
+
+  it('does not use sudo for logs after a delegated system restart', async () => {
+    const { ctx, calls } = redeployContext({ before, after: before, scope: 'system', journalUnreadable: true, sudoAllowed: false });
+    await expect(ubuntuVps.redeploy!(ctx)).rejects.toThrow(/recent journal unavailable/);
+    expect(calls.some((call) => call.includes('sudo -n journalctl'))).toBe(false);
   });
 
   it('accepts a healthy named system restart', async () => {
