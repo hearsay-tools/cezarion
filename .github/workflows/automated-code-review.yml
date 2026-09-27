@@ -489,7 +489,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
-      contents: read
+      # GraphQL thread resolution refuses the workflow token without it. This job
+      # checks out only the trusted base and never persists credentials.
+      contents: write
       pull-requests: write
     outputs:
       new_threads: ${{ steps.post.outputs.new_threads }}

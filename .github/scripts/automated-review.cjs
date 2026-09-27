@@ -148,7 +148,11 @@ const REVIEW_THREADS_QUERY = `query($owner: String!, $repo: String!, $number: In
     pullRequest(number: $number) {
       reviewThreads(first: 100, after: $cursor) {
         pageInfo { hasNextPage endCursor }
-        nodes { id isResolved comments(first: 1) { nodes { databaseId author { login } } } }
+        nodes {
+          id isResolved
+          comments(first: 1) { nodes { databaseId author { login } } }
+          latest: comments(last: 1) { nodes { body author { login } } }
+        }
       }
     }
   }
@@ -162,7 +166,14 @@ async function listReviewThreads({ github, owner, repo, pullNumber }) {
     if (!page || !Array.isArray(page.nodes)) throw new Error('Could not read review threads.');
     for (const node of page.nodes) {
       const root = node?.comments?.nodes?.[0];
-      threads.push({ id: node?.id, isResolved: node?.isResolved === true, rootCommentId: root?.databaseId ?? null, automated: AUTOMATED_AUTHORS.has(root?.author?.login) });
+      const latest = node?.latest?.nodes?.[0];
+      threads.push({
+        id: node?.id,
+        isResolved: node?.isResolved === true,
+        rootCommentId: root?.databaseId ?? null,
+        automated: AUTOMATED_AUTHORS.has(root?.author?.login),
+        latestAutomatedBody: AUTOMATED_AUTHORS.has(latest?.author?.login) && typeof latest?.body === 'string' ? latest.body : null,
+      });
     }
     cursor = page.pageInfo?.hasNextPage ? page.pageInfo.endCursor : null;
   } while (cursor);
@@ -180,8 +191,12 @@ async function applyVerdicts({ github, owner, repo, pullNumber, threads, verdict
   for (const { commentId, verdict, reason } of verdicts) {
     const thread = byRoot.get(commentId);
     if (!thread) continue;
-    const label = verdict === 'addressed' ? 'Addressed' : 'Still unresolved';
-    await github.rest.pulls.createReplyForReviewComment({ owner, repo, pull_number: pullNumber, comment_id: commentId, body: `${label}: ${reason}` });
+    const body = `${verdict === 'addressed' ? 'Addressed' : 'Still unresolved'}: ${reason}`;
+    // A re-run after a failed resolve must not post the same verdict twice.
+    if (thread.latestAutomatedBody !== body) {
+      await github.rest.pulls.createReplyForReviewComment({ owner, repo, pull_number: pullNumber, comment_id: commentId, body });
+      thread.latestAutomatedBody = body;
+    }
     if (verdict === 'addressed') {
       await github.graphql('mutation($threadId: ID!) { resolveReviewThread(input: { threadId: $threadId }) { thread { isResolved } } }', { threadId: thread.id });
       thread.isResolved = true;
