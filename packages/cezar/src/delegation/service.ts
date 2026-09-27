@@ -590,7 +590,7 @@ export class DelegationService {
         project.store.commitWorkerResult(evidence.result.parentRunId, evidence.result, evidence.diffSnapshot);
         assertAttached();
         check();
-        result = await removeOwnedWorkspace(project.root, workspace, project.manager.getWorkerNoMaterializationProof(workerId));
+        result = await removeOwnedWorkspace(project.root, workspace, project.manager.getWorkerNoMaterializationProof(workerId), assertAttached);
         // An already-started checked Git operation may finish after detach. Its
         // checkpoint makes a new controller's retry safe; the old store must not
         // publish a result after ownership of the project has moved.

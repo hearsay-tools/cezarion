@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { QUICK_TASK_WORKFLOW } from '../workflows/types.ts';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -362,6 +362,65 @@ describe('delegation service durable authority', () => {
     expect(existsSync(workspace.path)).toBe(true);
     detachReplacement();
     replacementManager.dispose();
+  });
+  it('revokes cleanup inside Git preflight before an old project removes owned resources', async () => {
+    const { workerId } = await f.service.spawn(f.caller, input());
+    const worker = f.store.getRun(workerId)!;
+    const generation = f.store.commitWorkerExecutionStart(workerId);
+    const workspace = await ensureOwnedWorkspace(f.root, worker);
+    f.store.updateRun(workerId, { status: 'review', worktreePath: workspace.path, branch: workspace.branch });
+    expect(f.store.commitWorkerExecutionComplete(workerId, generation)).toBe(true);
+
+    const bin = join(f.root, 'git-shim');
+    const armed = join(bin, 'armed');
+    const blocked = join(bin, 'blocked');
+    const release = join(bin, 'release');
+    mkdirSync(bin);
+    const wrapper = join(bin, 'git');
+    writeFileSync(wrapper, [
+      '#!/bin/sh',
+      'if [ -e "$TEST_OWNED_GIT_ARMED" ] && [ "$1" = "worktree" ] && [ "$2" = "list" ] && [ ! -e "$TEST_OWNED_GIT_BLOCKED" ]; then',
+      '  : > "$TEST_OWNED_GIT_BLOCKED"',
+      '  while [ ! -e "$TEST_OWNED_GIT_RELEASE" ]; do sleep 0.01; done',
+      'fi',
+      'exec "$TEST_OWNED_REAL_GIT" "$@"',
+    ].join('\n'));
+    chmodSync(wrapper, 0o755);
+    vi.stubEnv('TEST_OWNED_REAL_GIT', execFileSync('which', ['git'], { encoding: 'utf8' }).trim());
+    vi.stubEnv('TEST_OWNED_GIT_ARMED', armed);
+    vi.stubEnv('TEST_OWNED_GIT_BLOCKED', blocked);
+    vi.stubEnv('TEST_OWNED_GIT_RELEASE', release);
+    vi.stubEnv('PATH', `${bin}:${process.env.PATH}`);
+    const originalCommit = f.store.commitWorkerResult.bind(f.store);
+    const results = vi.spyOn(f.store, 'commitWorkerResult').mockImplementation((parentId, value, diff) => {
+      const committed = originalCommit(parentId, value, diff);
+      writeFileSync(armed, '');
+      return committed;
+    });
+
+    const destroying = f.service.destroy(f.caller, { workerId });
+    void destroying.catch(() => {});
+    let detachReplacement: (() => void) | undefined;
+    let replacementManager: RunManager | undefined;
+    try {
+      await vi.waitFor(() => expect(existsSync(blocked)).toBe(true), { timeout: 5_000 });
+      replacementManager = new RunManager(f.store, f.root);
+      detachReplacement = f.service.registerProject({ id: 'project', root: f.root, store: f.store, manager: replacementManager });
+      const oldResults = results.mock.calls.length;
+      const writes = vi.spyOn(f.store, 'commitDelegation');
+      const events = vi.spyOn(f.store, 'appendEvent');
+      writeFileSync(release, '');
+      await expect(destroying).rejects.toMatchObject({ code: 'denied_scope' });
+      expect(writes).not.toHaveBeenCalled();
+      expect(events).not.toHaveBeenCalled();
+      expect(results).toHaveBeenCalledTimes(oldResults);
+      expect(existsSync(workspace.path)).toBe(true);
+      expect(execFileSync('git', ['branch', '--list', workspace.branch], { cwd: f.root, encoding: 'utf8' }).trim()).not.toBe('');
+    } finally {
+      writeFileSync(release, '');
+      detachReplacement?.();
+      replacementManager?.dispose();
+    }
   });
   it('retains already-cleaned resources across an incomplete termination retry', async () => {
     const { workerId } = await f.service.spawn(f.caller, input());
