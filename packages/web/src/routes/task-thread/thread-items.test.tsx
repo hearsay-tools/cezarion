@@ -717,3 +717,42 @@ describe('conversation delivery replay', () => {
     expect(senderEntries[0]).toMatchObject({ kind: 'conversation', delivery: 'delivered' });
   });
 });
+
+describe('conversation card delivery guidance', () => {
+  const parent = '11111111-1111-4111-8111-111111111111'
+  const recipient = '22222222-2222-4222-8222-222222222222'
+  const message = { id: '33333333-3333-4333-8333-333333333333', senderRunId: parent, recipientRunId: recipient,
+    kind: 'progress', text: 'Status update', createdAt: '2026-09-22T12:00:00.000Z', state: 'accepted', requestHash: 'a'.repeat(64) }
+
+  function renderDelivery(delivery: 'queued' | 'delivered' | 'consumed', backend?: 'codex' | 'cursor') {
+    const entries = reduceThread(asRunEvents([{ type: 'conversation-message', message, delivery }])).turns.flatMap(turn => turn.items)
+    render(<MemoryRouter><SessionTranscript runId={parent} viewId="main"
+      sections={[{ id: 'turn', entries }]} mode="document"
+      recipientBackends={backend ? { [recipient]: backend } : undefined} /></MemoryRouter>)
+    return document.querySelector('[data-slot="worker-conversation-card"]')!
+  }
+
+  it('says a queued message can reach a steering runner during its current turn', () => {
+    const card = renderDelivery('queued', 'codex')
+    expect(card.querySelector('[data-slot="conversation-delivery-explanation"]')?.textContent).toMatch(/during (its|the) current turn/)
+    expect(card.textContent).not.toMatch(/wait.*turn.*end|next safe turn/i)
+  })
+
+  it('reserves turn-end guidance for Cursor', () => {
+    const card = renderDelivery('queued', 'cursor')
+    expect(card.querySelector('[data-slot="conversation-delivery-explanation"]')?.textContent).toContain('waits for that turn to end')
+  })
+
+  it('does not claim a turn boundary when the recipient backend is unknown', () => {
+    const card = renderDelivery('queued')
+    expect(card.querySelector('[data-slot="conversation-delivery-explanation"]')?.textContent).toMatch(/Queued for delivery/)
+    expect(card.textContent).not.toMatch(/turn.*end|next safe turn/i)
+  })
+
+  it.each(['delivered', 'consumed'] as const)('keeps the %s receipt without queued guidance', delivery => {
+    const card = renderDelivery(delivery, 'cursor')
+    expect(card.querySelector('[data-slot="conversation-delivery-explanation"]')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /Details/ }))
+    expect(card.textContent).toContain(delivery === 'consumed' ? 'Read' : 'Delivered')
+  })
+})

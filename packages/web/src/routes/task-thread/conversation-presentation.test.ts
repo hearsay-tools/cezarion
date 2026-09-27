@@ -9,6 +9,7 @@ import {
   conversationStatusLabel,
   taskTitleFor,
   titlesFromRuns,
+  recipientBackendsFromRuns,
 } from './conversation-presentation'
 
 function run(over: Pick<ApiRun, 'id' | 'title'> & Partial<ApiRun>): ApiRun {
@@ -49,6 +50,20 @@ describe('conversation presentation titles', () => {
     expect(conversationStatusLabel({ messageKind: 'request', delivery: 'not-delivered' })).toBe('Not delivered')
     expect(conversationStatusLabel({ messageKind: 'progress', delivery: 'not-delivered' })).toBe('Not delivered')
     expect(conversationStatusLabel({ messageKind: 'request', delivery: 'queued' })).toBeUndefined()
+  })
+})
+
+describe('recipient backend for queued guidance', () => {
+  it('uses the active step backend before the run default, and keeps absent data unknown', () => {
+    const parent = run({ id: 'parent', title: 'Parent', runner: 'codex' })
+    const cursor = run({ id: 'cursor', title: 'Cursor worker', runner: 'codex', currentStepId: 'task', steps: [
+      { id: 'task', name: 'Task', kind: 'agent', status: 'running', iterations: 1, tokensUsed: 0, backend: 'cursor' },
+    ] })
+    const unknown = run({ id: 'unknown', title: 'Old worker' })
+    const backends = recipientBackendsFromRuns(parent, [cursor, unknown])
+    expect(backends.parent).toBe('codex')
+    expect(backends.cursor).toBe('cursor')
+    expect(backends.unknown).toBeUndefined()
   })
 })
 
