@@ -428,12 +428,14 @@ entries:
     pr: 994
     title: "fix(server-install): ubuntu-vps vhost emits a standalone http2 directive nginx < 1.25.1 rejects (#994)"
     date: 2026-09-18
-    status: planned
+    status: ported
     hint:
       conflicts: 2
     fork:
       issue: 429
-    decided: 2026-09-18
+      pr: 648
+      commits: [5847c4282c26ba56fb95d833efc4f391e53b8600]
+    decided: 2026-09-27
   - sha: 456859a499dc3f87ec9f938fbac12727956f428c
     pr: 995
     title: 'fix(runs): a turn parked on its own dispatched subagents stops reading as "needs you" (#995)'
