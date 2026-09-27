@@ -21,6 +21,7 @@ import {
   conversationKindLabel,
   conversationStatusLabel,
   taskTitleFor,
+  type RecipientBackendMap,
   type TaskTitleMap,
 } from './conversation-presentation'
 
@@ -307,15 +308,17 @@ export function WorkerConversationGroup({
   block,
   runId,
   taskTitles,
+  recipientBackends,
 }: {
   block: WorkerConversationBlock
   runId: string
   taskTitles?: TaskTitleMap
+  recipientBackends?: RecipientBackendMap
 }) {
   return (
     <div data-slot="worker-conversation" className="flex min-w-0 flex-col gap-2">
       {block.batches.map((batch) => (
-        <WorkerConversationBatchCard key={batch.id} batch={batch} runId={runId} taskTitles={taskTitles} />
+        <WorkerConversationBatchCard key={batch.id} batch={batch} runId={runId} taskTitles={taskTitles} recipientBackends={recipientBackends} />
       ))}
     </div>
   )
@@ -325,10 +328,12 @@ function WorkerConversationBatchCard({
   batch,
   runId,
   taskTitles,
+  recipientBackends,
 }: {
   batch: WorkerConversationBatch
   runId: string
   taskTitles?: TaskTitleMap
+  recipientBackends?: RecipientBackendMap
 }) {
   const direction = conversationDirection(batch.messages[0] ?? { senderRunId: batch.senderRunId }, runId)
   const surface = CONVERSATION_SURFACE[direction]
@@ -381,7 +386,11 @@ function WorkerConversationBatchCard({
       </div>
       {[...new Set(batch.messages.map(message =>
         message.instruction ?? (message.delivery === 'queued'
-          ? 'Queued for the next safe turn. Pending messages are delivered together within the batch size limit; human questions and scheduler capacity can delay delivery.'
+          ? `${recipientBackends?.[message.recipientRunId] === 'cursor'
+            ? 'Queued for delivery. If Cursor is in a turn, delivery waits for that turn to end.'
+            : recipientBackends?.[message.recipientRunId]
+              ? 'Queued for delivery. This agent can receive messages during its current turn.'
+              : 'Queued for delivery. Timing depends on the recipient agent.'} Pending messages are batched within the size limit; human questions and scheduler capacity can delay delivery.`
           : message.state === 'continuation-required'
             ? 'Not delivered. The recipient needs a new instruction to resume. A parent can resume its owned worker with --resume; workers cannot resume parents.'
             : message.state === 'destroyed' ? 'Not delivered. This worker was destroyed.' : undefined)

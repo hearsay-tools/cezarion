@@ -139,6 +139,7 @@ export const automationLogResultSchema = z.enum([
   'error',
   'baseline',
   'preview',
+  'skipped',
 ]);
 export type AutomationLogResult = z.infer<typeof automationLogResultSchema>;
 
