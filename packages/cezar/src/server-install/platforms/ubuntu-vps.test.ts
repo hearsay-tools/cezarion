@@ -3,6 +3,7 @@ import { execFileSync, execSync, spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   isForeignNpxExecStart,
   isNpxExecStart,
@@ -293,10 +294,12 @@ describe('ubuntu-vps HTTP/2 install wiring', () => {
       const sed = join(dir, 'sed');
       writeFileSync(sed, '#!/bin/sh\nexit 1\n');
       chmodSync(sed, 0o755);
+      const repoRoot = fileURLToPath(new URL('../../../../../', import.meta.url));
       const result = spawnSync(process.execPath, [
-        resolve('node_modules/vitest/vitest.mjs'), 'run', 'packages/cezar/src/server-install/platforms/ubuntu-vps.test.ts',
+        resolve(repoRoot, 'node_modules/vitest/vitest.mjs'), 'run', 'packages/cezar/src/server-install/platforms/ubuntu-vps.test.ts',
         '-t', 'can collect this suite when GNU sed is unavailable',
       ], {
+        cwd: repoRoot,
         env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, CEZ_TEST_NO_GNU_SED: '1' },
         encoding: 'utf8',
       });
