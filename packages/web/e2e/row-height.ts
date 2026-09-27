@@ -30,8 +30,14 @@ export function expectGroupRowHeightMatchesTaskRow(
       if (mobile) {
         browser.click('[data-slot="mobile-top-bar"] button[aria-label="Open menu"]')
         // The sheet slides in from the left. A click aimed at a row mid-slide lands on the scrim
-        // and dismisses the drawer (seen in this helper's first failure bundle: the drawer gone
-        // after the expand click), so wait until its left edge has settled at 0 and stayed there.
+        // and dismisses the drawer, so wait until its left edge has settled at 0 and stayed there.
+        // Provenance: the local failure bundle (gitignored) from this helper's first run,
+        // .ai/qa/failures/selection-states/keeps-the-group-row-a-task-row-s-height-at-1440-520-and-390px-with-a-pointer-617-1/
+        // — probe.json: kind "wait-value" on the expanded group row inside the drawer at 520px,
+        // lastValue null, openDialogs []; snapshot.txt: `button "Open menu" [expanded=false]`,
+        // i.e. the expand click had dismissed the drawer. Reproduced with this single test
+        // (`-t "keeps the group row a task row"`, primaryHoverType=2): unfixed 3/3 failed the same
+        // way (lastValue null, drawer closed), fixed 3/3 passed.
         browser.waitForStable(
           `Math.round(document.querySelector('[data-slot="mobile-nav-drawer"]')?.getBoundingClientRect().left ?? -1)`,
           { holdMs: 200, matcher: (left: number) => left === 0 },
