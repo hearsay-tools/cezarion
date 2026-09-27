@@ -1325,10 +1325,7 @@ describe('the variant group and its members (#617 addendum 01a)', () => {
 })
 
 describe('references on a device that cannot hover (#617 01b)', () => {
-  const stubHover = (none: boolean) => vi.stubGlobal('matchMedia', (query: string) => ({
-    matches: query === '(hover: none)' ? none : false, media: query, onchange: null,
-    addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false,
-  }))
+  const stubHover = (none: boolean, desktop = true) => stubMedia({ noHover: none, desktop })
   afterEach(() => vi.unstubAllGlobals())
 
   it('renders them as plain text, not links, so the whole row is the tap target', () => {
@@ -1346,6 +1343,14 @@ describe('references on a device that cannot hover (#617 01b)', () => {
     stubHover(false)
     renderList({ runs: [run({ id: 't', pullRequestUrl: 'https://github.com/o/r/pull/594' })] })
     expect(row('t')?.querySelector('[data-slot="task-row-meta"] a[href="https://github.com/o/r/pull/594"]')).not.toBeNull()
+  })
+
+  it('renders them as plain text in the mobile shell, even with a pointer', () => {
+    stubHover(false, false)
+    renderList({ runs: [run({ id: 't', pullRequestUrl: 'https://github.com/o/r/pull/594' })] })
+    const meta = row('t')?.querySelector('[data-slot="task-row-meta"]') as HTMLElement
+    expect(meta.querySelector('a')).toBeNull()
+    expect(meta.querySelector('[data-slot="pr-chip"]')?.getAttribute('data-inert')).toBe('true')
   })
 })
 
@@ -1441,10 +1446,7 @@ describe("the group row's shared reference (#617 review round 4)", () => {
   })
 
   it('is inert text on a device that cannot hover', () => {
-    vi.stubGlobal('matchMedia', (query: string) => ({
-      matches: query === '(hover: none)', media: query, onchange: null,
-      addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false,
-    }))
+    stubMedia({ noHover: true, desktop: true })
     try {
       renderList({ runs: pair() })
       const meta = groupRow().querySelector('[data-slot="group-meta"]') as HTMLElement
@@ -1454,4 +1456,52 @@ describe("the group row's shared reference (#617 review round 4)", () => {
       vi.unstubAllGlobals()
     }
   })
+
+  // The mobile stylesheet floors every button at 44px (#166). A line-1-only toggle there grew the
+  // row from 47px to ~72px, so off the desktop+hover pair the button spans both lines instead.
+  describe('which structure renders (#617 mobile regression)', () => {
+    afterEach(() => vi.unstubAllGlobals())
+    const structure = () => {
+      const toggle = groupRow().querySelector('[data-slot="group-tile"]') as HTMLElement
+      const meta = groupRow().querySelector('[data-slot="group-meta"]') as HTMLElement
+      return {
+        structure: groupRow().dataset.structure,
+        metaInToggle: toggle.contains(meta),
+        links: meta.querySelectorAll('a').length,
+        nested: toggle.querySelectorAll('a, button, [tabindex]').length,
+      }
+    }
+
+    it('desktop + hover: the button is line 1, line 2 a sibling with a real link', () => {
+      stubMedia({ noHover: false, desktop: true })
+      renderList({ runs: pair() })
+      expect(structure()).toEqual({ structure: 'pointer', metaInToggle: false, links: 1, nested: 0 })
+    })
+
+    for (const [name, media] of [
+      ['mobile shell with a pointer', { noHover: false, desktop: false }],
+      ['desktop width, no hover', { noHover: true, desktop: true }],
+      ['mobile shell, no hover', { noHover: true, desktop: false }],
+    ] as const) {
+      it(`${name}: one button over both lines, the reference inert inside it`, () => {
+        stubMedia(media)
+        renderList({ runs: pair() })
+        expect(structure()).toEqual({ structure: 'touch', metaInToggle: true, links: 0, nested: 0 })
+        expect(groupRow().querySelector('[data-slot="group-meta"]')?.textContent).toBe('2 working · #425 · 1m')
+        // The row's vertical padding moved into the button, so the button is the row's height.
+        expect(groupRow().className).toContain('py-0')
+        expect(groupRow().querySelector('[data-slot="group-tile"]')?.className).toContain('py-1.5')
+        fireEvent.click(groupRow().querySelector('[data-slot="issue-chip"]') as HTMLElement)
+        expect(groupRow().querySelector('[data-slot="group-tile"]')?.getAttribute('aria-expanded')).toBe('true')
+      })
+    }
+  })
 })
+
+function stubMedia({ noHover, desktop }: { noHover: boolean; desktop: boolean }) {
+  vi.stubGlobal('matchMedia', (query: string) => ({
+    matches: query === '(hover: none)' ? noHover : query === '(min-width: 768px)' ? desktop : false,
+    media: query, onchange: null,
+    addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false,
+  }))
+}

@@ -15,6 +15,7 @@ import { StatusDot } from '@/components/status-dot'
 import { deriveAttention, type Attention } from '@/lib/attention'
 import { groupMetaParts, referenceKey, resumeLabel, sharedReferenceKeys } from '@/lib/group-summary'
 import { useNoHover } from '@/lib/use-no-hover'
+import { useIsDesktop } from '@/lib/use-desktop'
 import { shortAge } from '@/lib/format'
 import { isUnread, unreadMarkerTone } from '@/lib/read-state'
 import { directionalUsageText } from '@/components/directional-usage'
@@ -280,16 +281,30 @@ function Row({
 }
 
 /**
+ * Whether a list row's references render as inert text (#617 01b): on a device that cannot hover,
+ * and in the mobile shell, where the row itself is the tap target. One condition for task,
+ * variant and group rows alike, so a reference is never a link in one and text in its neighbour.
+ */
+function useRowReferencesInert(): boolean {
+  const noHover = useNoHover()
+  const desktop = useIsDesktop()
+  return noHover || !desktop
+}
+
+/**
  * The variant group's row (#617 addendum 01a): the task row's skeleton — a 12px status slot, two
  * fixed lines, a reserved trailing slot — so a group and a task read as the same kind of thing.
  *
  *   [lead dot] [title ×N                     ] [compare ›]
  *              [1 needs you · 1 working · #425 · 12m]
  *
- * The toggle is a real `<button>` over line 1 (keyboard and screen readers get `aria-expanded`),
- * and a click anywhere else on the row but a link toggles too. The compare link and line 2's
- * shared references are SIBLINGS of that button, never its children: a link inside a button is
- * invalid. The trailing slot is a constant 36px (60px on touch), and both lines are fixed boxes,
+ * The toggle is a real `<button>` (keyboard and screen readers get `aria-expanded`), and a click
+ * anywhere else on the row but a link toggles too. Two structures: with a hover pointer on the
+ * desktop shell the button covers line 1 only, and line 2's shared references are real links
+ * BESIDE it (a link inside a button is invalid); on touch or in the mobile shell the references
+ * are inert text and the button covers both lines at full row height, which is what keeps the
+ * mobile 44px button floor (#166) from growing the row. The compare link is always a sibling.
+ * The trailing slot is a constant 36px (60px on touch), and both lines are fixed boxes,
  * so expanding or collapsing changes nothing about this row's height.
  */
 function GroupRow({
@@ -309,7 +324,10 @@ function GroupRow({
 }) {
   const lead = deriveAttention(row.lead)
   const { families, shared, age } = groupMetaParts(row.members, now)
-  const noHover = useNoHover()
+  // Touch, or the mobile shell (#617 01b): references are inert text, and the toggle spans both
+  // lines — the mobile stylesheet floors every button at 44px (#166), so a line-1-only button
+  // would push this row from 47px to ~72px. The whole-row button meets that floor by itself.
+  const touch = useRowReferencesInert()
   const first = row.members[0]!
   const sharedReferences = taskReferences(first).filter((reference) => shared.has(referenceKey(reference)))
   // Line 2 in the task row's own grammar: words, then the shared references as the same plain
@@ -322,17 +340,38 @@ function GroupRow({
         run={first}
         reference={reference}
         plain
-        inert={noHover}
+        inert={touch}
       />
     )),
     ...(age ? [<span key="age" className="tabular-nums">{age}</span>] : []),
   ]
   const Disclosure = expanded ? ChevronDownIcon : ChevronRightIcon
+  const lineOne = (
+    <>
+      <span
+        data-slot="group-title"
+        className={cn('min-w-0 truncate text-[13px] leading-[1.45] font-medium text-muted-foreground', active && 'text-foreground')}
+      >
+        {row.title}
+      </span>
+      {/* Never truncates: the count is the one thing that says this row is several tasks. */}
+      <span data-slot="group-count" className="shrink-0 rounded-[9px] bg-muted px-1.5 py-px font-mono text-[11px] leading-[1.3] font-semibold tabular-nums text-muted-foreground">
+        ×{row.members.length}
+      </span>
+    </>
+  )
+  const lineTwoClass = cn(
+    'block h-[16px] w-full min-w-0 truncate text-[11.5px] leading-[1.4] font-normal text-soft-foreground',
+    active && 'text-muted-foreground',
+  )
+  const lineTwo = meta.length ? meta.flatMap((part, index) => (index ? [<MetaSeparator key={`sep-${index}`} />, part] : [part])) : '\u00a0'
+  const toggleClass = 'w-full min-w-0 rounded-[2px] text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground'
   return (
     <div
       data-slot="group-row"
       data-group-id={row.groupId}
       data-active={active ? 'true' : undefined}
+      data-structure={touch ? 'touch' : 'pointer'}
       onClick={(event) => {
         if (!event.currentTarget.contains(event.target as Node)) return
         if ((event.target as Element).closest('a, button')) return
@@ -340,50 +379,60 @@ function GroupRow({
       }}
       className={cn(
         'selection-row flex cursor-pointer items-start gap-2.5 rounded-[6px] py-1.5 pr-2 pl-2.5 hover:bg-sidebar-row-hover',
+        // On touch the row's vertical padding moves INTO the button, so the button's box is the
+        // row's full height (47px, ≥ the 44px floor) and the row does not grow around it.
+        touch && 'py-0',
         active && 'bg-sidebar-row-selected hover:bg-sidebar-row-selected',
       )}
     >
-      <span data-slot="task-row-dot" className="flex h-[19px] w-[12px] shrink-0 items-center justify-center">
+      <span data-slot="task-row-dot" className={cn('flex h-[19px] w-[12px] shrink-0 items-center justify-center', touch && 'mt-1.5')}>
         <StatusDot tone={lead.tone} shape={lead.shape} pulse={lead.pulse} aria-label={lead.label} title={lead.label} role="img" />
       </span>
-      {/* The text column. The toggle `<button>` is line 1 only (its accessible name is the title
-          and count, and it carries `aria-expanded`); line 2 sits beside it, not inside, because
-          it holds reference LINKS and a link inside a button is invalid. A click on line 2
-          outside a link still toggles through the row handler above. */}
-      <div className="flex min-w-0 flex-1 flex-col">
+      {touch ? (
+        // Touch: one button over both lines. Line 2's references are inert spans here, so
+        // nothing interactive is nested, and the button's name reads the aggregate too.
         <button
           type="button"
           data-slot="group-tile"
           data-group-id={row.groupId}
           aria-expanded={expanded}
           onClick={() => onToggle(row.groupId)}
-          className="flex h-[19px] w-full min-w-0 items-center gap-1.5 rounded-[2px] text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground"
+          className={cn('flex flex-1 flex-col py-1.5', toggleClass)}
         >
-          <span
-            data-slot="group-title"
-            className={cn('min-w-0 truncate text-[13px] leading-[1.45] font-medium text-muted-foreground', active && 'text-foreground')}
-          >
-            {row.title}
-          </span>
-          {/* Never truncates: the count is the one thing that says this row is several tasks. */}
-          <span data-slot="group-count" className="shrink-0 rounded-[9px] bg-muted px-1.5 py-px font-mono text-[11px] leading-[1.3] font-semibold tabular-nums text-muted-foreground">
-            ×{row.members.length}
-          </span>
+          <span className="flex h-[19px] w-full min-w-0 items-center gap-1.5">{lineOne}</span>
+          <span data-slot="group-meta" className={lineTwoClass}>{lineTwo}</span>
         </button>
-        <div
-          data-slot="group-meta"
-          className={cn(
-            'h-[16px] w-full min-w-0 truncate text-[11.5px] leading-[1.4] font-normal text-soft-foreground',
-            active && 'text-muted-foreground',
-          )}
-        >
-          {meta.length ? meta.flatMap((part, index) => (index ? [<MetaSeparator key={`sep-${index}`} />, part] : [part])) : '\u00a0'}
+      ) : (
+        /* Pointer: the toggle `<button>` is line 1 only (its accessible name is the title and
+           count, and it carries `aria-expanded`); line 2 sits beside it, not inside, because it
+           holds reference LINKS and a link inside a button is invalid. A click on line 2 outside
+           a link still toggles through the row handler above. */
+        <div className="flex min-w-0 flex-1 flex-col">
+          <button
+            type="button"
+            data-slot="group-tile"
+            data-group-id={row.groupId}
+            aria-expanded={expanded}
+            onClick={() => onToggle(row.groupId)}
+            className={cn('flex h-[19px] items-center gap-1.5', toggleClass)}
+          >
+            {lineOne}
+          </button>
+          <div data-slot="group-meta" className={lineTwoClass}>{lineTwo}</div>
         </div>
-      </div>
+      )}
       {/* 36px on a pointer device; on touch the compare link is a 44px target of its own, beside
           (never over) the disclosure, and the slot reserves that room permanently — px, not
           spacing units, so density cannot shrink it. */}
-      <span data-slot="group-trailing" className="flex h-[19px] w-[36px] shrink-0 items-center justify-end gap-0.5 no-hover:h-auto no-hover:w-[60px] no-hover:self-stretch">
+      <span
+        data-slot="group-trailing"
+        className={cn(
+          'flex h-[19px] w-[36px] shrink-0 items-center justify-end gap-0.5 no-hover:h-auto no-hover:w-[60px] no-hover:self-stretch',
+          // Level with the title line once the row's padding has moved into the button; on a
+          // no-hover device the slot stretches over the full row for the 44px compare target.
+          touch && 'mt-1.5 no-hover:mt-0',
+        )}
+      >
         <Link
           to={scopeTo(scope, `/compare/${row.groupId}`)}
           data-slot="group-compare"
@@ -577,9 +626,9 @@ function RunRow({
   onTogglePin?: (run: RunRecord, pinned: boolean) => void
 }) {
   const navigate = useNavigate()
-  // On a device that cannot hover, the references are plain text and the whole row is the tap
-  // target (#617 01b); the task header keeps them as 44px links.
-  const noHover = useNoHover()
+  // On a device that cannot hover, or in the mobile shell, the references are plain text and the
+  // whole row is the tap target (#617 01b); the task header keeps them as 44px links.
+  const inertReferences = useRowReferencesInert()
   const to = scopeTo(scope, `/tasks/${run.id}`)
   const attention = deriveAttention(run)
   const isActive = run.id === currentRunId
@@ -622,7 +671,7 @@ function RunRow({
         run={run}
         reference={ref}
         plain
-        inert={noHover}
+        inert={inertReferences}
       />,
     )
   }

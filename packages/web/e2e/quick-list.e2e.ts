@@ -7,6 +7,7 @@ import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { stopFixtureServer } from './fixture-server'
+import { expectGroupRowHeightMatchesTaskRow } from './row-height'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import {
   applyContrastQaVariant,
@@ -371,6 +372,12 @@ describe('task quick-list', () => {
     browser.click(TILE)
     const closed = browser.waitForValue(geometry, (g: Geometry | null) => g?.expanded === 'false') as Geometry
     expect(closed.height).toBe(collapsed.height)
+  })
+
+  // This spec's headless browser reports `hover: none`: the touch structure (one toggle over
+  // both lines) must hold the task row's height at desktop and phone widths alike.
+  it("keeps the group row a task row's height at 1440, 520 and 390px on hover:none (#617)", () => {
+    expectGroupRowHeightMatchesTaskRow(browser, { url: `${baseUrl}${scoped('/')}`, groupId: 'fix-group-1', widths: [1440, 520, 390] })
   })
 
   it('keeps the group and member rows readable, at rest and selected, in both themes (#617)', () => {
@@ -1480,7 +1487,9 @@ describe('variant rows and the group row under width pressure', () => {
     expect(collapsed.meta).toBe('2 needs review · #425 · 9m')
     // This spec's browser reports `hover: none`, so the reference is inert text here; the
     // pointer path (a link with the status panel) is pinned in selection-states.
-    expect(collapsed).toMatchObject({ inert: 'true', links: 0, inToggle: false })
+    // …and inside the one toggle that spans both lines (#617 mobile regression): inert text is
+    // not interactive, so nothing is nested in the button.
+    expect(collapsed).toMatchObject({ inert: 'true', links: 0, inToggle: true })
     browser.click(`${GROUP} [data-slot="group-tile"]`)
     const expanded = browser.waitForValue(group, (g: Group | null) => g?.expanded === 'true') as Group
     expect(expanded.height).toBe(collapsed.height)

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { stopFixtureServer } from './fixture-server'
+import { expectGroupRowHeightMatchesTaskRow } from './row-height'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { applyContrastQaVariant, contrastQaVariants, contrastSampleExpression, focusWithKeyboard, hoverVisiblePoint, type ContrastSample } from './contrast'
 
@@ -300,6 +301,12 @@ describe('selection and control states (#171)', () => {
       browser.screenshot(`${artifacts}/states-composer-${variant.id}.png`, { viewport: true })
     })
   }
+  // With a hover-capable pointer (this spec's primaryHoverType=2), the mobile shell still floors
+  // every button at 44px (#166): the group toggle must span both lines there, not grow the row.
+  it("keeps the group row a task row's height at 1440, 520 and 390px with a pointer (#617)", () => {
+    expectGroupRowHeightMatchesTaskRow(browser, { url: `${baseUrl}/p/${project}/tasks/one`, groupId: 'g-sel', widths: [1440, 520, 390] })
+  })
+
   it('keeps the same selection cue in the grouped project navigation', () => {
     const configPath = join(root, '.cez-home/config.json')
     const config = JSON.parse(readFileSync(configPath, 'utf8'))
