@@ -225,13 +225,16 @@ entries:
     pr: 956
     title: "feat(tasks): copy branch name from task header (#956)"
     date: 2026-09-14
-    status: planned
+    status: ported
     hint:
       conflicts: 2
-    note: "absent here; run header was redesigned in #235, 2 hunks to re-place"
+    note: "Branch-adjacent copy control adapted to the fork header, with keyboard and theme coverage"
     fork:
       issue: 434
-    decided: 2026-09-18
+      pr: 645
+      commits:
+        - 2dbe279966c804cf3be2942dc28b8b6dc8871b95
+    decided: 2026-09-27
   - sha: d15a8bef98ed3c52215071ac6a403f5dfc136432
     pr: 942
     title: "feat(thread): per-message timestamps in the task conversation (#942)"
