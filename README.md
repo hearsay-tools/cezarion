@@ -605,7 +605,11 @@ Without either flag, `start` still runs `quick-task`.
 
 `start` is retry-safe: it sends a request id (`--request-id <UUID>` to pick your own), and a
 retry with the same id and task answers with the run the first one created (`created: false`)
-instead of starting a second. Also: `list`, `stop`, `finish`, `diff [--stat]`, `open`. Exit codes:
+instead of starting a second. Also: `list`, `stop`, `finish`, `diff [--stat]`, `open`.
+Use `archive <id>` to hide a task from `list`, `unarchive <id>` to restore it, and
+`list --all` to include archived tasks. `archive-finished` sweeps finished tasks and prints
+`{"archived": count}`. The single-task commands print `{"id": "…", "archived": true|false}`.
+Exit codes:
 `0` ok, `1` task failed/cancelled or a message was not delivered, `2` no cockpit or the cockpit
 refused (its `error` is passed through), `3` timed out, `64` usage error. `cez task --help` lists
 every flag.
