@@ -135,25 +135,44 @@ async function confirmCezarRunning(ctx: InstallContext, statusCmd: string, logsC
   }
 }
 
+/** nginx -v prints its version banner on stderr. Unknown versions use the compatible syntax. */
+function supportsStandaloneHttp2(version: string | null): boolean {
+  const match = version && /^(\d+)\.(\d+)\.(\d+)$/.exec(version);
+  if (!match) return false;
+  const [major, minor, patch] = match.slice(1).map(Number);
+  return major! > 1 || (major === 1 && (minor! > 25 || (minor === 25 && patch! >= 1)));
+}
+
+async function installedNginxVersion(ctx: InstallContext): Promise<string | null> {
+  const result = await ctx.runner.capture('nginx', ['-v']);
+  if (result.code !== 0) return null;
+  return /nginx\/(\d+\.\d+\.\d+)/.exec(`${result.stderr}\n${result.stdout}`)?.[1] ?? null;
+}
+
+/** Add HTTP/2 only to Certbot's TLS listeners, preserving its trailing comments. */
+export function enableHttp2OnTlsListenerSed(vhostPath: string): string {
+  const program = `/^[[:space:]]*listen[[:space:]].*443.*[[:space:]]ssl([[:space:]]|;)/{/http2/!s/;/ http2;/;}`;
+  return `sed -i -E ${shquote(program)} ${shquote(vhostPath)}`;
+}
+
 /**
  * The nginx server block: auth_basic identity + SSE-safe proxy to loopback.
  * `serverName` defaults to the catch-all `_`; the SSL step rewrites it to the
  * real domain so the `certbot --nginx` plugin can find this vhost to edit.
  */
-export function nginxVhost(port: number, serverName = '_', htpasswd = '/etc/cezar/htpasswd'): string {
+export function nginxVhost(port: number, serverName = '_', htpasswd = '/etc/cezar/htpasswd', nginxVersion: string | null = null): string {
+  // Older nginx rejects `http2 on;` outright. Its SSL step adds `http2` to
+  // Certbot's TLS listener instead, retaining multiplexing for SSE streams.
+  const http2 = supportsStandaloneHttp2(nginxVersion)
+    ? `\n    # Multiplex long-lived SSE streams over one TLS connection.\n    http2 on;\n`
+    : '';
   return `# Managed by cezar server-install — do not edit by hand.
 server {
     listen 80;
     listen [::]:80;
     server_name ${serverName};
 
-    # HTTP/2 multiplexes every request over ONE TCP connection. Without it the
-    # browser's ~6-connections-per-origin HTTP/1.1 cap is exhausted by cezar's
-    # long-lived SSE run streams, and further requests block until tabs close.
-    # Valid on the plain :80 block too; it only takes effect once the SSL step
-    # adds a 443 ssl listener (certbot preserves this directive).
-    http2 on;
-
+${http2}
     auth_basic "cezar";
     auth_basic_user_file ${htpasswd};
 
@@ -328,7 +347,8 @@ const nginxProxyStep: InstallStep = {
     //    instance keeps the catch-all `_` until the SSL step sets a domain.
     const vhostAvail = vhostAvailable(ctx);
     const vhostEnbl = vhostEnabled(ctx);
-    const vhost = nginxVhost(ctx.state.primaryPort, ctx.state.domain ?? '_', htpasswd);
+    const nginxVersion = await installedNginxVersion(ctx);
+    const vhost = nginxVhost(ctx.state.primaryPort, ctx.state.domain ?? '_', htpasswd, nginxVersion);
     await writeFileStep(ctx, {
       description: 'Write the cezar nginx site, enable it, and reload nginx.',
       path: vhostAvail,
@@ -477,6 +497,7 @@ const sslStep: InstallStep = {
     const vhostAvail = vhostAvailable(ctx);
     const vhostEnbl = vhostEnabled(ctx);
     const vhostHasTls = await verifyCommand(ctx, 'sh', ['-c', `grep -qs ssl_certificate ${vhostAvail}`]);
+    const nginxVersion = await installedNginxVersion(ctx);
     if (vhostHasTls) {
       await sudoStep(ctx, {
         description: `Update server_name to ${trimmedDomain} in the existing TLS-enabled nginx site (certbot config preserved).`,
@@ -485,7 +506,7 @@ const sslStep: InstallStep = {
           verifyCommand(c, 'sh', ['-c', `grep -qF ${shquote(`server_name ${trimmedDomain}`)} ${vhostAvail}`]),
       });
     } else {
-      const domainVhost = nginxVhost(ctx.state.primaryPort, trimmedDomain, htpasswdPath(ctx));
+      const domainVhost = nginxVhost(ctx.state.primaryPort, trimmedDomain, htpasswdPath(ctx), nginxVersion);
       await writeFileStep(ctx, {
         description: `Point the nginx site at ${trimmedDomain} so certbot can configure TLS for it.`,
         path: vhostAvail,
@@ -512,6 +533,23 @@ const sslStep: InstallStep = {
       // is world-readable, so grepping it works without root.
       verify: (c) => verifyCommand(c, 'sh', ['-c', `grep -qs ssl_certificate ${vhostAvail} ${vhostEnbl}`]),
     });
+
+    if (!supportsStandaloneHttp2(nginxVersion)) {
+      // Certbot has now installed the TLS listeners. Keep the existing TLS site
+      // intact on reconfiguration; the edit is idempotent and touches only :443.
+      try {
+        await sudoStep(ctx, {
+          description: 'Enable HTTP/2 on the nginx TLS listeners.',
+          command: `${enableHttp2OnTlsListenerSed(vhostAvail)} && nginx -t && systemctl reload nginx`,
+          skippable: true,
+          skipHint: `add http2 to the TLS listen lines in ${vhostAvail}, then reload nginx`,
+          verify: (c) => verifyCommand(c, 'sh', ['-c', `grep -Eqs '^[[:space:]]*listen.*443.*http2' ${vhostAvail}`]),
+        });
+      } catch (error) {
+        if (!(error instanceof StepSkipped)) throw error;
+        ctx.ui.warn('HTTPS is configured, but HTTP/2 is unavailable; long-lived SSE streams may exhaust the browser connection pool.');
+      }
+    }
 
     ctx.state.publicUrl = `https://${trimmedDomain}`;
     // The cert + its auto-renewal timer are `shared`: uninstall lists them, it

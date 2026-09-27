@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync, execSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   isForeignNpxExecStart,
   isNpxExecStart,
   nginxVhost,
+  enableHttp2OnTlsListenerSed,
   refreshNpxCacheForRedeploy,
   serviceExecStart,
   systemdUnit,
@@ -151,8 +153,14 @@ describe('nginxVhost', () => {
     expect(nginxVhost(4321, 'cezar.example.com')).toContain('server_name cezar.example.com;');
   });
 
-  it('enables HTTP/2 so long-lived SSE streams do not exhaust the browser connection pool', () => {
-    expect(nginxVhost(4321)).toContain('http2 on;');
+  it('uses standalone HTTP/2 only from nginx 1.25.1 and defaults to compatible syntax', () => {
+    for (const version of ['1.24.0', '1.25.0', null]) {
+      expect(nginxVhost(4321, '_', '/etc/cezar/htpasswd', version), String(version)).not.toMatch(/^\s*http2\s/m);
+    }
+    for (const version of ['1.25.1', '1.26.0']) {
+      expect(nginxVhost(4321, '_', '/etc/cezar/htpasswd', version)).toContain('http2 on;');
+    }
+    expect(nginxVhost(4321)).not.toMatch(/^\s*http2\s/m);
   });
 
   it('defaults to the legacy htpasswd path but accepts an instance-scoped one', () => {
@@ -160,6 +168,95 @@ describe('nginxVhost', () => {
     expect(nginxVhost(4322, 'shop.example.com', '/etc/cezar/htpasswd-shop-example-com')).toContain(
       'auth_basic_user_file /etc/cezar/htpasswd-shop-example-com;',
     );
+  });
+});
+
+describe('ubuntu-vps HTTP/2 install wiring', () => {
+  function runnerFor(version: string | null, nginxExit = 0) {
+    const commands: string[] = [];
+    let versionChecks = 0;
+    const runner: Runner = {
+      capture: async (program, args) => {
+        if (program === 'nginx' && args[0] === '-v') {
+          versionChecks += 1;
+          return { code: nginxExit && versionChecks >= 3 ? nginxExit : 0, stdout: '', stderr: version ? `nginx version: nginx/${version} (Ubuntu)\n` : '' };
+        }
+        if (program === 'openssl') return { code: 0, stdout: '$apr1$salt$hash', stderr: '' };
+        if (args.some((arg) => arg.includes('ssl_certificate'))) return { code: commands.some((c) => c.startsWith('certbot')) ? 0 : 1, stdout: '', stderr: '' };
+        return { code: 0, stdout: '', stderr: '' };
+      },
+      interactive: async (_program, args) => { commands.push(args[2]!); return 0; },
+    };
+    const ui = { ...createAutoUi(), text: async (o: { message: string }) => o.message.includes('Domain') ? 'cezar.example.com' : o.message.includes('Email') ? 'ops@example.com' : 'ops', password: async () => 'longenough' } as Ui;
+    const context = { ...ctxWith({ runner, ui }), assumeYes: true };
+    function writtenVhost() {
+      const cmd = commands.find((c) => c.includes("base64 --decode > '/etc/nginx/sites-available/cezar'"));
+      if (!cmd) throw new Error('vhost was not written');
+      const encoded = /printf %s '([A-Za-z0-9+/=]+)'/.exec(cmd)?.[1];
+      if (!encoded) throw new Error('vhost payload missing');
+      return Buffer.from(encoded, 'base64').toString('utf8');
+    }
+    return { context, commands, writtenVhost };
+  }
+
+  it('proxy step uses the nginx -v stderr banner after installing nginx', async () => {
+    for (const [version, directive] of [['1.24.0', false], ['1.25.1', true]] as const) {
+      const run = runnerFor(version);
+      await stepById('nginx-proxy').run(run.context);
+      expect(/^\s*http2\s/m.test(run.writtenVhost()), version).toBe(directive);
+    }
+  });
+
+  it('failed or unreadable version probe keeps the proxy vhost parseable', async () => {
+    for (const [version, exit] of [[null, 0], [null, 127]] as const) {
+      const run = runnerFor(version, exit);
+      await stepById('nginx-proxy').run(run.context);
+      expect(run.writtenVhost()).not.toMatch(/^\s*http2\s/m);
+    }
+  });
+
+  it('SSL step adds HTTP/2 after certbot on older or unknown nginx', async () => {
+    for (const version of ['1.24.0', null]) {
+      const run = runnerFor(version);
+      await stepById('ssl').run(run.context);
+      expect(run.writtenVhost()).not.toMatch(/^\s*http2\s/m);
+      const certbot = run.commands.findIndex((c) => c.startsWith('certbot'));
+      const listenerEdit = run.commands.findIndex((c) => c.startsWith('sed -i -E') && c.includes('http2'));
+      expect(certbot).toBeGreaterThanOrEqual(0);
+      expect(listenerEdit).toBeGreaterThan(certbot);
+      expect(run.commands[listenerEdit]).toContain('nginx -t && systemctl reload nginx');
+    }
+    const modern = runnerFor('1.25.1');
+    await stepById('ssl').run(modern.context);
+    expect(modern.writtenVhost()).toContain('http2 on;');
+    expect(modern.commands.some((c) => c.startsWith('sed -i -E') && c.includes('http2'))).toBe(false);
+  });
+
+  it('SSL uses the named instance site for the TLS listener edit', async () => {
+    const run = runnerFor('1.24.0');
+    run.context.instance = 'shop-example-com';
+    run.context.state.domain = 'shop.example.com';
+    await stepById('ssl').run(run.context);
+    const edit = run.commands.find((c) => c.startsWith('sed -i -E') && c.includes('http2'));
+    expect(edit).toContain("'/etc/nginx/sites-available/cezar-shop-example-com'");
+    expect(edit).not.toContain("'/etc/nginx/sites-available/cezar' &&");
+  });
+
+  it.runIf(/GNU sed/.test(execFileSync('sed', ['--version'], { encoding: 'utf8' })))('edits only TLS listeners and is idempotent', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cez-http2-'));
+    try {
+      const path = join(dir, 'vhost.conf');
+      writeFileSync(path, 'server {\n    listen [::]:443 ssl ipv6only=on; # managed by Certbot\n    listen 443 ssl; # managed by Certbot\n    ssl_certificate /cert.pem;\n}\nserver {\n    listen 80;\n    listen [::]:80;\n}\n');
+      const command = enableHttp2OnTlsListenerSed(path);
+      execSync(command);
+      const once = readFileSync(path, 'utf8');
+      execSync(command);
+      expect(readFileSync(path, 'utf8')).toBe(once);
+      expect(once).toContain('listen 443 ssl http2; # managed by Certbot');
+      expect(once).toContain('listen [::]:443 ssl ipv6only=on http2; # managed by Certbot');
+      expect(once).toContain('listen 80;');
+      expect(once).toContain('listen [::]:80;');
+    } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 });
 
@@ -585,6 +682,7 @@ describe('ubuntu-vps review fixes (PR #423)', () => {
     const seds = commands.filter((c) => c.includes('sed -i') && c.includes('server_name'));
     expect(rewrites).toHaveLength(0); // never wipes certbot's 443 config
     expect(seds).toHaveLength(1);
+    expect(commands.filter((c) => c.includes('sed -i -E') && c.includes('http2'))).toHaveLength(1);
   });
 
   it('uninstall reverses linger only when install recorded enabling it', async () => {
