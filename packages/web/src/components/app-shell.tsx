@@ -118,6 +118,11 @@ export function routeOwnsScrollArrival(pathname: string): boolean {
   return matchPath({ path: '/tasks/:id', end: true }, stripProjectPrefix(pathname)) !== null
 }
 
+function isGithubPath(pathname: string): boolean {
+  const path = stripProjectPrefix(pathname)
+  return path === '/github' || path.startsWith('/github/')
+}
+
 /**
  * The cockpit's app shell: a fixed sidebar plus a single scrolling main region.
  *
@@ -173,6 +178,7 @@ export function AppShell({
   const [menuOpen, setMenuOpen] = React.useState(false)
   const mobileNavTrigger = React.useRef<HTMLButtonElement | null>(null)
   const mainRef = React.useRef<HTMLElement>(null)
+  const previousPathname = React.useRef<string | null>(null)
   const routeOwnsArrival = routeOwnsScrollArrival(pathname)
   // The desktop column's width (#788). Read once, lazily, from `localStorage` — it is a
   // browser-local preference like the theme, so there is nothing to fetch and nothing to wait
@@ -189,11 +195,13 @@ export function AppShell({
   // The scroller PERSISTS across routes (it is the shell's, not the view's), so without this
   // a deep scroll on one page carries into the next — most visibly on mobile, where Tasks or
   // GitHub opened mid-list. Layout effect: the reset lands before the new view paints. The main
-  // task transcript is the exception: its own layout effect restores the cached offset or live
-  // tail before paint, so a competing shell reset would expose the exact top-to-tail jump it is
-  // responsible for preventing.
+  // task transcript owns its arrival offset. GitHub keeps the same docked page while picking an
+  // item, so its main scroll stays put when both routes are inside GitHub.
   React.useLayoutEffect(() => {
+    const previous = previousPathname.current
+    previousPathname.current = pathname
     if (routeOwnsArrival) return
+    if (previous !== null && isGithubPath(previous) && isGithubPath(pathname)) return
     const main = mainRef.current
     if (main) main.scrollTop = 0
   }, [pathname, routeOwnsArrival])
