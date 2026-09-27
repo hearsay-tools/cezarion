@@ -35,8 +35,8 @@
     "server-uninstall": "tsx src/index.ts server-uninstall",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:unit": "node --import tsx --test test/unit/*.test.ts",
-    "test:package": "node --import tsx --test test/e2e/*.test.ts",
+    "test:unit": "node --import ../../scripts/test-git-env.mjs --import tsx --test test/unit/*.test.ts",
+    "test:package": "node --import ../../scripts/test-git-env.mjs --import tsx --test test/e2e/*.test.ts",
     "typecheck": "tsc --noEmit -p tsconfig.test.json",
     "postbuild": "node scripts/inline-contract.mjs"
   },
