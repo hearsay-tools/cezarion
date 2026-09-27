@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
+import { stopFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { waitForHealth, waitForStatus } from './poll'
 import { focusWithKeyboard } from './contrast'
@@ -103,9 +104,9 @@ beforeAll(async () => {
   browser.setViewport(1440, 900)
 }, 180_000)
 
-afterAll(() => {
+afterAll(async () => {
   browser?.close()
-  server?.kill()
+  await stopFixtureServer(server)
   if (dataRoot) rmSync(dataRoot, { recursive: true, force: true })
 })
 

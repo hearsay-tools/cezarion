@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, expect, it } from 'vitest'
 
+import { stopFixtureServer } from './fixture-server'
 import { AgentBrowser, cezarCli, fixtureServeEnv } from './agent-browser'
 import { waitForHealth } from './poll'
 
@@ -56,11 +57,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   browser?.close()
-  if (server?.pid && server.exitCode === null && server.signalCode === null) {
-    const exit = once(server, 'exit')
-    server.kill()
-    await exit
-  }
+  await stopFixtureServer(server)
   if (root) rmSync(root, { recursive: true, force: true })
 })
 
@@ -215,9 +212,7 @@ it('lets Model occupy the freed desktop track when Runner is unavailable', () =>
 })
 
 it('shows the fractional-width Model prefix when pi / grok-4.6 fits at three-column width', async () => {
-  const exit = once(server, 'exit')
-  server.kill()
-  await exit
+  await stopFixtureServer(server)
   writeFileSync(join(root, '.ai/cezar/config.json'), JSON.stringify({
     defaultModels: { pi: 'grok-4.6' },
   }))

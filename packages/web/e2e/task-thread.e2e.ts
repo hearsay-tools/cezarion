@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
+import { stopFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import {
   applyContrastQaVariant,
@@ -114,9 +115,9 @@ beforeAll(async () => {
   browser.waitForFunction(`document.querySelectorAll('[data-slot="user-bubble"]').length >= 2`)
 }, 120_000)
 
-afterAll(() => {
+afterAll(async () => {
   browser?.close()
-  server?.kill()
+  await stopFixtureServer(server)
   if (dataRoot) rmSync(dataRoot, { recursive: true, force: true })
 })
 

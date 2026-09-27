@@ -254,12 +254,6 @@
       "count": 1
     },
     {
-      "file": "settings-monitoring.e2e.ts",
-      "rule": "sleep",
-      "site": "const timer = setTimeout(() => child.kill('SIGKILL'), 5_000)",
-      "count": 1
-    },
-    {
       "file": "skill-search-ranking.e2e.ts",
       "rule": "one-shot-read",
       "site": "expect(browser.evaluate(`document.activeElement?.dataset.slot`)).toBe('command-input')",

@@ -80,6 +80,16 @@ done
 
 mkdir -p "$QA_DIR"
 
+# The shared E2E server also runs Git. Give it an empty config source and a
+# deterministic commit identity before boot, independent of the host machine.
+: > "$QA_DIR/gitconfig"
+export GIT_CONFIG_GLOBAL="$QA_DIR/gitconfig"
+export GIT_CONFIG_NOSYSTEM=1
+export GIT_AUTHOR_NAME='Cezar Tests'
+export GIT_AUTHOR_EMAIL='tests@cezar.invalid'
+export GIT_COMMITTER_NAME='Cezar Tests'
+export GIT_COMMITTER_EMAIL='tests@cezar.invalid'
+
 log() { echo "[test-env] $*" >&2; }
 
 # Never assume python3 exists — cascade through whatever the machine has.

@@ -6,6 +6,7 @@ import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, expect, it } from 'vitest'
+import { stopFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 
 const artifacts = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_e2e')
@@ -70,7 +71,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   browser?.close()
-  if (server && server.exitCode === null) { const exit = once(server, 'exit'); server.kill('SIGTERM'); await exit }
+  await stopFixtureServer(server)
   mkdirSync(artifacts, { recursive: true })
   writeFileSync(join(artifacts, 'worker-relationships-server.log'), diagnostic)
   writeFileSync(join(artifacts, 'worker-relationships-observations.json'), JSON.stringify(observations, null, 2))

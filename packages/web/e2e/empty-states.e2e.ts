@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
+import { stopFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { waitForHealth } from './poll'
 
@@ -61,17 +62,10 @@ beforeAll(async () => {
   browser.setViewport(1440, 900)
 }, 90_000)
 
-afterAll(() => {
+afterAll(async () => {
   browser?.close()
-  server?.kill()
-  // The killed server may still be flushing into dataRoot, which races rmSync and
-  // throws ENOTEMPTY — a suite-level failure on a run whose every test passed.
-  // A temp dir that outlives the run is litter, not a failure; the OS reaps it.
-  try {
-    if (dataRoot) rmSync(dataRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
-  } catch {
-    /* the OS reaps it */
-  }
+  await stopFixtureServer(server)
+  if (dataRoot) rmSync(dataRoot, { recursive: true, force: true })
 })
 
 describe('tasks overview — no tasks yet', () => {

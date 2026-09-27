@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync, realpathSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
@@ -18,6 +18,14 @@ function gitRoot() {
   execFileSync('git', ['init', '-q', path])
   return path
 }
+
+it('uses an empty sandbox Git config and fixed identity in web tests', () => {
+  expect(readFileSync(process.env.GIT_CONFIG_GLOBAL!, 'utf8')).toBe('')
+  expect(process.env.GIT_CONFIG_NOSYSTEM).toBe('1')
+  const path = gitRoot()
+  expect(execFileSync('git', ['-C', path, 'var', 'GIT_AUTHOR_IDENT'], { encoding: 'utf8' }))
+    .toMatch(/^Cezar Tests <tests@cezar.invalid> /)
+})
 
 // These exercise only the pre-spawn environment helper: no Cezar process is ever started.
 it('rejects a non-Git fixture below an ambient Git repository before a server can start', () => {
@@ -57,7 +65,17 @@ it('removes inherited and caller-supplied Git redirection from both discovery an
   vi.stubEnv('GIT_CONFIG_KEY_0', 'core.worktree')
   vi.stubEnv('GIT_CONFIG_VALUE_0', foreign)
   const env = fixtureServeEnv(path, { GIT_COMMON_DIR: join(foreign, '.git') })
-  expect(Object.keys(env).filter(key => key.startsWith('GIT_'))).toEqual(['GIT_CEILING_DIRECTORIES'])
+  expect(Object.keys(env).filter(key => key.startsWith('GIT_'))).toEqual([
+    'GIT_CEILING_DIRECTORIES',
+    'GIT_CONFIG_GLOBAL',
+    'GIT_CONFIG_NOSYSTEM',
+    'GIT_AUTHOR_NAME',
+    'GIT_AUTHOR_EMAIL',
+    'GIT_COMMITTER_NAME',
+    'GIT_COMMITTER_EMAIL',
+  ])
+  expect(readFileSync(env.GIT_CONFIG_GLOBAL!, 'utf8')).toBe('')
+  expect(env.GIT_CONFIG_NOSYSTEM).toBe('1')
   expect(env.GIT_CEILING_DIRECTORIES).toBe(realpathSync(tmpdir()))
   expect(env.CEZ_HOME).toBe(join(realpathSync(path), '.cez-home'))
 })

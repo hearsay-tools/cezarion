@@ -41,9 +41,10 @@ export const e2eDir = resolve(import.meta.dirname, '../../e2e')
 export const baselinePath = resolve(import.meta.dirname, 'e2e-wait-discipline.baseline.json')
 
 /** The seam defines the waits and its `getJson` retry is a fetch backoff, not a browser
- *  sleep; `poll.ts` is where every spec-side HTTP poll sleeps (#416); the config drives
- *  nothing. Everything else under `e2e/` drives the browser. */
-const excluded = new Set(['agent-browser.ts', 'poll.ts', 'vitest.config.ts'])
+ *  sleep; `poll.ts` is where every spec-side HTTP poll sleeps (#416); fixture-server.ts
+ *  bounds process shutdown, and the config drives nothing. Everything else under `e2e/`
+ *  drives the browser. */
+const excluded = new Set(['agent-browser.ts', 'fixture-server.ts', 'poll.ts', 'vitest.config.ts'])
 
 /** An action: a seam interaction, or a contrast helper that performs one. */
 const action =

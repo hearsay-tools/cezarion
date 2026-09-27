@@ -571,3 +571,30 @@ test('applies verdicts only to open threads this workflow started', async () => 
   assert.deepEqual(applied, { resolved: 1, unresolved: 1 });
   assert.equal(countOpenAutomatedThreads(threads), 1, 'the addressed thread no longer counts as open');
 });
+
+test('a re-run after a failed resolve does not post the same verdict twice', async () => {
+  const calls = [];
+  const github = {
+    rest: { pulls: { createReplyForReviewComment: async (input) => calls.push(['reply', input.comment_id]) } },
+    graphql: async (query, variables) => {
+      if (query.includes('reviewThreads')) {
+        return threadPage([
+          { id: 'T1', isResolved: false, comments: { nodes: [{ databaseId: 1, author: { login: 'github-actions' } }] },
+            latest: { nodes: [{ body: 'Addressed: Guarded now.', author: { login: 'github-actions' } }] } },
+          { id: 'T2', isResolved: false, comments: { nodes: [{ databaseId: 2, author: { login: 'github-actions' } }] },
+            latest: { nodes: [{ body: 'Addressed: Guarded now.', author: { login: 'octocat' } }] } },
+        ]);
+      }
+      calls.push(['resolve', variables.threadId]);
+      return {};
+    },
+  };
+  const threads = await listReviewThreads({ github, owner: 'o', repo: 'r', pullNumber: 7 });
+  assert.equal(threads[0].latestAutomatedBody, 'Addressed: Guarded now.');
+  assert.equal(threads[1].latestAutomatedBody, null, 'only the workflow\'s own last reply counts');
+  await applyVerdicts({ github, owner: 'o', repo: 'r', pullNumber: 7, threads, verdicts: [
+    { commentId: 1, verdict: 'addressed', reason: 'Guarded now.' },
+    { commentId: 2, verdict: 'addressed', reason: 'Guarded now.' },
+  ] });
+  assert.deepEqual(calls, [['resolve', 'T1'], ['reply', 2], ['resolve', 'T2']]);
+});

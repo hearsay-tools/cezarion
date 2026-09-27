@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { AgentBrowser, cezarCli, fixtureServeEnv, getJson } from './agent-browser'
+import { stopFixtureServer } from './fixture-server'
 import { pollFor, waitForHealth } from './poll'
 
 /**
@@ -58,18 +59,6 @@ function startServer(): ChildProcess {
     [cezarCli, 'serve', '--repo', dataRoot, '--port', String(port), '--no-open'],
     { env: fixtureServeEnv(dataRoot), stdio: 'ignore' },
   )
-}
-
-async function stopServer(child: ChildProcess): Promise<void> {
-  if (child.exitCode !== null || child.signalCode !== null) return
-  await new Promise<void>((resolveStop) => {
-    const timer = setTimeout(() => child.kill('SIGKILL'), 5_000)
-    child.once('exit', () => {
-      clearTimeout(timer)
-      resolveStop()
-    })
-    child.kill('SIGTERM')
-  })
 }
 
 async function workspaceConfig(): Promise<WorkspaceConfig> {
@@ -205,7 +194,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   browser?.close()
-  if (server) await stopServer(server)
+  await stopFixtureServer(server)
   if (dataRoot) rmSync(dataRoot, { recursive: true, force: true })
 })
 
@@ -235,7 +224,7 @@ describe('global Resources monitoring controls', () => {
     }, 'interval')
     await waitForResources((resources) => resources.monitoringWakeIntervalMinutes === 7, 'interval')
 
-    await stopServer(server)
+    await stopFixtureServer(server)
     server = startServer()
     await waitForHealth(baseUrl)
     const restored = (await workspaceConfig()).resources
