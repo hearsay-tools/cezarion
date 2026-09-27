@@ -887,14 +887,34 @@ describe('reduceThread — AskUser cards (#473)', () => {
     expect(msg?.text).toBe('Pick one.')
   })
 
+  it('deduplicates a server-stripped v1 twin when prose mentions ASK before the final marker (#548)', () => {
+    const prose = 'Using the CEZ:ASK structured question format instead:'
+    const raw = `${prose}\n\nCEZ:ASK ${JSON.stringify({ questions: ASK.questions })}`
+    const messages = allItems([
+      line(1, 'item.completed', { item: { kind: 'message', id: 'm1', role: 'assistant', text: raw } }),
+      line(2, 'text', { text: prose }),
+      line(3, 'ask.requested', ASK),
+    ]).filter((item): item is UiMessageItem => item.kind === 'message')
+    expect(messages.map((message) => message.text)).toEqual([prose])
+  })
+
+  it('keeps an ordinary ASK mention in a message beside a separate ask card', () => {
+    const prose = 'The log said `CEZ:ASK {not json}`.'
+    const messages = allItems([
+      line(1, 'item.completed', { item: { kind: 'message', id: 'm1', role: 'assistant', text: prose } }),
+      line(2, 'ask.requested', ASK),
+    ]).filter((item): item is UiMessageItem => item.kind === 'message')
+    expect(messages.map((message) => message.text)).toEqual([prose])
+  })
+
   it.each(['text', 'item.completed'])('hides a recovered %s marker only when its card exists', (type) => {
-    const raw = `Pick one.\nCEZ:ASK ${JSON.stringify({ questions: ASK.questions }).slice(0, -1)}`
+    const raw = `Pick one with CEZ:ASK.\nCEZ:ASK ${JSON.stringify({ questions: ASK.questions }).slice(0, -1)}`
     const event = type === 'text'
       ? line(1, type, { text: raw })
       : line(1, type, { item: { kind: 'message', id: 'm1', role: 'assistant', text: raw } })
     const message = (events: RunEvent[]) => allItems(events).find((i) => i.kind === 'message') as { text: string }
     expect(message([event]).text).toBe(raw)
-    expect(message([event, line(2, 'ask.requested', ASK)]).text).toBe('Pick one.')
+    expect(message([event, line(2, 'ask.requested', ASK)]).text).toBe('Pick one with CEZ:ASK.')
   })
 
   it('suppresses a complete provisional marker during the active turn', () => {

@@ -773,6 +773,7 @@ it, so no existing marker is renamed. A new runner declares its own map:
 | `subagent` | child work and a child terminal signal the parent survives, then parent `CEZ:MONITORING` text followed by child text before parent turn-end |
 | `subagent-after-park` | wait for the manager to park, then emit native child updates without a new parent turn |
 | `ask-snapshot` | a complete parent assistant ASK snapshot, without earlier text deltas where the wire supports snapshots |
+| `ask-prose` | code-span and quoted-log ASK mentions with no final-line marker; no card or rejection note |
 
 S9 also pins parent-only v1/result text while child messages remain nested on v2.
 R12 asserts the `subagent` turn parks as `running`/`monitoring`, never `waiting`
@@ -795,6 +796,11 @@ A future runner that can carry independent final text must exercise the v2-only
 case instead. The isolated manager fallback tests remain in `run.test.ts`; the
 wire rows do not pretend to reproduce a missing-v1 envelope these protocols do
 not supply.
+
+R18/R19 (#548) use every runner's native message wire to check final-line ASK
+selection after an earlier prose mention, and quoted ASK examples without a
+marker. Parsing and transcript stripping must select the same final line;
+ordinary examples leave no question card or rejection note.
 
 `worker-parent-attention.test.ts` (#249/#401) loops every runner for fresh and
 Continue sessions: markerless turns with live workers stay monitoring, and real

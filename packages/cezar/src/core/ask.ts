@@ -47,15 +47,21 @@ export function parseAskRequest(value: unknown): AskRequest | null {
 /**
  * The AskUser control marker: a trailing `CEZ:ASK <compact-json>` line (a
  * sibling of `CEZ:DONE` / `CEZ:MONITORING`). Detected on the *assembled* turn
- * text so delta-streaming backends can't split it — uniform across all three
- * backends. The JSON is greedily captured from the first `{` after the keyword
- * to the last `}` at end-of-text.
+ * text so delta-streaming backends can't split it. The marker must begin the
+ * last nonempty line; mentions in prose or quoted logs are ordinary text.
  */
-export const ASK_MARKER_RE = /CEZ:ASK[ \t]+(\{[\s\S]*\})\s*$/;
+export const ASK_MARKER_RE = /(?:^|\n)CEZ:ASK[ \t]+(\{[^\r\n]*\})\s*$/;
 
 /** Looser than `ASK_MARKER_RE` so diagnostics can distinguish a malformed
  * trailing marker from ordinary assistant prose. */
-const ASK_MARKER_CANDIDATE_RE = /CEZ:ASK[ \t]+([\s\S]*)$/;
+const ASK_MARKER_CANDIDATE_RE = /^CEZ:ASK[ \t]+(.*)$/;
+
+function finalAskLine(text: string): { prefix: string; payload: string } | null {
+  const trimmed = text.trimEnd();
+  const lineStart = trimmed.lastIndexOf('\n') + 1;
+  const match = ASK_MARKER_CANDIDATE_RE.exec(trimmed.slice(lineStart));
+  return match?.[1] === undefined ? null : { prefix: trimmed.slice(0, lineStart), payload: match[1] };
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -171,14 +177,14 @@ function issuesOf(error: z.ZodError): AskParseIssue[] {
  * rejected so the raw fallback stays readable.
  */
 export function parseAskMarkerResult(turnText: string): AskMarkerParseResult {
-  const match = ASK_MARKER_CANDIDATE_RE.exec(turnText.trimEnd());
-  if (!match || match[1] === undefined) return { kind: 'none' };
+  const match = finalAskLine(turnText);
+  if (!match) return { kind: 'none' };
   let raw: unknown;
   let repaired = false;
   try {
-    raw = JSON.parse(match[1]);
+    raw = JSON.parse(match.payload);
   } catch (error) {
-    const closed = closeUnbalancedJson(match[1]);
+    const closed = closeUnbalancedJson(match.payload);
     try {
       if (closed === null) throw error;
       raw = JSON.parse(closed);
@@ -234,5 +240,6 @@ export function parseAskMarker(turnText: string): AskRequest | null {
 export function stripAskMarker(text: string, allowRepair = true): string {
   const result = parseAskMarkerResult(text);
   if (result.kind !== 'valid' || (!allowRepair && result.repaired)) return text;
-  return text.replace(/\s*CEZ:ASK[ \t]+[\s\S]*$/, '');
+  const marker = finalAskLine(text);
+  return marker ? marker.prefix.trimEnd() : text;
 }

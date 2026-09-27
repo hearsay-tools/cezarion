@@ -136,7 +136,7 @@ describe('chronological worker conversation', () => {
   })
 
   for (const variant of contrastQaVariants.filter(v => v.density === 'comfortable')) {
-    it(`shows actionable delivery feedback and distinct clocks: ${variant.id}`, () => {
+    it(`shows actionable delivery feedback and distinct clocks: ${variant.id}`, async () => {
       browser.goto(`${base}/p/${project}/tasks/${diagnostics}?thread=flat`)
       browser.waitForFunction(`document.querySelectorAll('${card}').length === 3`)
       applyContrastQaVariant(browser, variant)
@@ -145,7 +145,56 @@ describe('chronological worker conversation', () => {
       expect(explanations.some(text => text.includes('Not delivered: worker is done') && text.includes('--resume'))).toBe(true)
       const rejected = browser.waitForValue<string>(`[...document.querySelectorAll('${card}')].find(el => el.textContent.includes('Correct the returned result'))?.textContent`)
       expect(rejected).toContain('Not delivered')
+      // #548 verification reproduction: `npm run test:e2e -- worker-conversation.e2e.ts
+      // -t 'shows actionable delivery feedback and distinct clocks: desktop-dark-comfortable'`.
+      // Bundle: .ai/qa/failures/worker-conversation/
+      // shows-actionable-delivery-feedback-and-distinct-clocks-desktop-dark-comfortable-1/.
+      // Its probe reports the sticky header covering Details. A local geometry probe showed
+      // hover repinning main.scrollTop from 16 to 449 and moving Details from y=459.53 to
+      // y=26.53. The old CLI wheel failed the inMain assertion below; explicit wheelAt
+      // reached main and reduced scrollTop by 100 in all four viewport/theme variants.
+      const scroller = browser.waitForStable<{ x: number; y: number; top: number; height: number; scrollHeight: number }>(`(() => {
+        const main = document.querySelector('[data-slot="main"]');
+        const rect = main.getBoundingClientRect();
+        return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2,
+          top: main.scrollTop, height: main.clientHeight, scrollHeight: main.scrollHeight };
+      })()`, {
+        holdMs: 100,
+        matcher: (state: { top: number; height: number; scrollHeight: number }) =>
+          state.scrollHeight > state.height && state.top >= state.scrollHeight - state.height - 24,
+      })
+      browser.evaluate(`window.__cezWheelProbe = null; window.addEventListener('wheel', event => {
+        window.__cezWheelProbe = {
+          trusted: event.isTrusted,
+          inMain: document.querySelector('[data-slot="main"]').contains(event.target),
+          target: event.target.tagName,
+          deltaY: event.deltaY,
+        };
+      }, { once: true, capture: true })`)
+      // The thread arrives pinned to its live tail. A trusted wheel inside its scroll owner
+      // records reader intent to move upward; the CLI's plain wheel command fires at (0, 0).
+      await browser.wheelAt(scroller.x, scroller.y, -100)
+      const wheel = browser.waitForValue<{ trusted: boolean; inMain: boolean; target: string; deltaY: number }>('window.__cezWheelProbe')
+      expect(wheel.trusted).toBe(true)
+      expect(wheel.inMain).toBe(true)
+      expect(wheel.deltaY).toBeLessThan(0)
+      browser.waitForStable(`document.querySelector('[data-slot="main"]').scrollTop`, {
+        holdMs: 100,
+        matcher: (top: number) => top < scroller.top,
+      })
       hoverVisiblePoint(browser, `${request} [data-slot="collapsible-trigger"]`)
+      browser.waitForStable(`(() => {
+        const target = document.querySelector('${request} [data-slot="collapsible-trigger"]');
+        const rect = target.getBoundingClientRect();
+        const x = rect.left + rect.width / 2;
+        const y = rect.top + rect.height / 2;
+        const hit = document.elementFromPoint(x, y);
+        return { y, headerBottom: document.querySelector('[data-slot="run-header"]').getBoundingClientRect().bottom,
+          visible: hit === target || target.contains(hit) };
+      })()`, {
+        holdMs: 100,
+        matcher: (point: { y: number; headerBottom: number; visible: boolean }) => point.visible && point.y > point.headerBottom,
+      })
       browser.click(`${request} [data-slot="collapsible-trigger"]`)
       const detail = browser.waitForValue<string>(`document.querySelector('${request}').textContent`, value => value.includes('Delivery acknowledged'))
       expect(detail).toContain('2026-09-20T12:00:00Z')

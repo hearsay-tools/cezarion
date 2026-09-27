@@ -163,7 +163,12 @@ rl.on('line', async (line) => {
     }
     // #401: agentMessage completion without deltas (same item envelope as baseline).
     if (turnText.includes('mock:ask-snapshot')) {
-      emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: 'ask-snapshot', text: 'Choose a test library.\nCEZ:ASK {"questions":[{"header":"Library","question":"Which test library?","options":[{"label":"Vitest"},{"label":"Node test"}]}]}' } } });
+      emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: 'ask-snapshot', text: 'Using the CEZ:ASK structured question format instead:\n\nCEZ:ASK {"questions":[{"header":"Library","question":"Which test library?","options":[{"label":"Vitest"},{"label":"Node test"}]}]}' } } });
+      emit({ method: 'turn/completed', params: { threadId: 'th_mock_1', turn: { id: 'turn_mock_1', status: 'completed' } } });
+      return;
+    }
+    if (turnText.includes('mock:ask-prose')) {
+      emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: 'ask-prose', text: 'Use `CEZ:ASK {"questions":[]}` in your reply.\n> CEZ:ASK {not valid json' } } });
       emit({ method: 'turn/completed', params: { threadId: 'th_mock_1', turn: { id: 'turn_mock_1', status: 'completed' } } });
       return;
     }

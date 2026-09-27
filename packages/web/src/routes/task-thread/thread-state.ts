@@ -285,7 +285,13 @@ function stripDoneMarker(text: string, stripAsk: boolean): string {
   let trailing = text
     .replace(/\s*CEZ:DONE\s*$/, '')
     .replace(/\s*CEZ:MONITORING\s*$/, '')
-  if (stripAsk) trailing = trailing.replace(/\s*CEZ:ASK[ \t]+[\s\S]*$/, '')
+  if (stripAsk) {
+    const trimmed = trailing.trimEnd()
+    const lineStart = trimmed.lastIndexOf('\n') + 1
+    if (/^CEZ:ASK[ \t]+.+$/.test(trimmed.slice(lineStart))) {
+      trailing = trimmed.slice(0, lineStart).trimEnd()
+    }
+  }
   if (!trailing.includes('CEZ:')) return trailing
   return trailing
     .split('\n')
