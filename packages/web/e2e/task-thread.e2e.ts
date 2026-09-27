@@ -416,6 +416,52 @@ describe('task thread', () => {
     ).toBe('cez/fcd519dd')
   })
 
+  it('copies the branch by keyboard with readable light and dark controls at phone and desktop widths', () => {
+    const copy = '[data-slot="run-meta"] [aria-label="Copy branch name"]'
+    const variants = contrastQaVariants.filter((variant) => variant.density === 'comfortable')
+    const measurements: Array<{ variant: string; branch: string; buttonHeight: number; headerOverflow: number; textRatio: number; focusRatio: number }> = []
+    try {
+      for (const variant of variants) {
+        const runId = variant.viewport.width === 360 ? LONG_RUN.id : RUN_ID
+        browser.goto(`${baseUrl}${scoped(`/tasks/${runId}`)}`)
+        browser.waitForFunction(`document.querySelector('[data-slot="branch-chip"]') !== null`)
+        applyContrastQaVariant(browser, variant)
+        if (variant.viewport.width === 360) {
+          browser.evaluate(`document.querySelector('[data-slot="main"]').scrollTop = 0`)
+          browser.evaluate(`document.querySelector('[aria-label="Show run details"]').focus()`)
+          browser.press('Enter')
+          browser.waitForFunction(`document.querySelector('[aria-label="Hide run details"]') !== null`)
+          browser.waitForFunction(`document.querySelector(${JSON.stringify(copy)})?.getClientRects().length > 0`)
+        }
+        const layout = browser.waitForValue<{ height: number; overflow: number }>(`(() => {
+          const button = document.querySelector(${JSON.stringify(copy)})
+          if (!button?.getClientRects().length) return null
+          return { height: button.getBoundingClientRect().height,
+            overflow: document.querySelector('[data-slot="run-header"]').scrollWidth - document.querySelector('[data-slot="run-header"]').clientWidth }
+        })()`)
+        if (variant.viewport.width === 360) expect(layout.height).toBeGreaterThanOrEqual(44)
+        expect(layout.overflow, variant.id).toBeLessThanOrEqual(1)
+        const text = browser.evaluate(contrastSampleExpression(`${copy} span`)) as ContrastSample
+        expect(text.ratio, `${variant.id} copy text`).toBeGreaterThanOrEqual(4.5)
+        focusWithKeyboard(browser, copy)
+        const focus = browser.evaluate(contrastSampleExpression(copy, 'outline-color', 'parent')) as ContrastSample
+        expect(focus.ratio, `${variant.id} focus ring`).toBeGreaterThanOrEqual(3)
+        measurements.push({ variant: variant.id, branch: runId === LONG_RUN.id ? 'long' : 'short',
+          buttonHeight: layout.height, headerOverflow: layout.overflow, textRatio: text.ratio, focusRatio: focus.ratio })
+        browser.press('Enter')
+        browser.waitForFunction(`document.querySelector('[aria-label="Copied branch name"]') !== null`)
+        browser.screenshot(`${artifactsDir}/branch-copy-${variant.id}.png`, { viewport: true })
+        browser.waitForFunction(`document.querySelector(${JSON.stringify(copy)}) !== null`)
+      }
+      mkdirSync(artifactsDir, { recursive: true })
+      writeFileSync(join(artifactsDir, 'branch-copy-qa.json'), JSON.stringify(measurements, null, 2))
+    } finally {
+      restoreContrastQaDefaults(browser)
+      browser.goto(`${baseUrl}${scoped(`/tasks/${RUN_ID}`)}`)
+      browser.waitForFunction(`document.querySelector('[data-slot="branch-chip"]') !== null`)
+    }
+  })
+
   it('tabs point at the routed Session/Changes/Files surfaces; the done run offers the closed-run actions', () => {
     const tabs = browser.evaluate(`[...document.querySelectorAll('[data-slot="run-tabs"] a')].map((a) => ({
       text: a.textContent,
