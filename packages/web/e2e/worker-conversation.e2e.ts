@@ -145,6 +145,10 @@ describe('chronological worker conversation', () => {
       expect(explanations.some(text => text.includes('Not delivered: worker is done') && text.includes('--resume'))).toBe(true)
       const rejected = browser.waitForValue<string>(`[...document.querySelectorAll('${card}')].find(el => el.textContent.includes('Correct the returned result'))?.textContent`)
       expect(rejected).toContain('Not delivered')
+      // The thread arrives pinned to its live tail. Scroll upward as a reader would before
+      // bringing an earlier request into view, so the pin does not pull it under the header.
+      browser.moveTo(variant.viewport.width / 2, variant.viewport.height / 2)
+      browser.wheel(-100)
       hoverVisiblePoint(browser, `${request} [data-slot="collapsible-trigger"]`)
       browser.click(`${request} [data-slot="collapsible-trigger"]`)
       const detail = browser.waitForValue<string>(`document.querySelector('${request}').textContent`, value => value.includes('Delivery acknowledged'))
