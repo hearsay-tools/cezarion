@@ -9,7 +9,7 @@ import { CloneProjectDialog } from '@/components/clone-project-dialog'
 import { openCommandPalette } from '@/components/command-palette'
 import { GithubIcon } from '@/components/icons'
 import { commandShortcutHint } from '@/lib/use-command-shortcut'
-import { Link, stripProjectPrefix } from '@/lib/project-router'
+import { Link, pathnameProjectId, stripProjectPrefix } from '@/lib/project-router'
 import { StatusDot } from '@/components/status-dot'
 import { ThemeToggle } from '@/components/theme-toggle'
 import { ApplicationUpdateControl, ApplicationUpdateFeedback } from '@/components/application-update-control'
@@ -196,12 +196,14 @@ export function AppShell({
   // a deep scroll on one page carries into the next — most visibly on mobile, where Tasks or
   // GitHub opened mid-list. Layout effect: the reset lands before the new view paints. The main
   // task transcript owns its arrival offset. GitHub keeps the same docked page while picking an
-  // item, so its main scroll stays put when both routes are inside GitHub.
+  // item, so its main scroll stays put when both routes are inside the same project's GitHub.
   React.useLayoutEffect(() => {
     const previous = previousPathname.current
     previousPathname.current = pathname
     if (routeOwnsArrival) return
-    if (previous !== null && isGithubPath(previous) && isGithubPath(pathname)) return
+    if (previous !== null &&
+      pathnameProjectId(previous) === pathnameProjectId(pathname) &&
+      isGithubPath(previous) && isGithubPath(pathname)) return
     const main = mainRef.current
     if (main) main.scrollTop = 0
   }, [pathname, routeOwnsArrival])

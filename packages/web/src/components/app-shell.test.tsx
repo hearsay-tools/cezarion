@@ -211,6 +211,17 @@ describe('AppShell', () => {
     expect(main.scrollTop).toBe(0)
   })
 
+  it('resets the main scroller when GitHub navigation switches projects (#580)', () => {
+    renderShell('/p/alpha/github/issues/42', {}, <RouterLink to="/p/beta/github/issues/43">Other project</RouterLink>)
+    const main = screen.getByRole('main')
+    main.scrollTop = 640
+
+    fireEvent.click(within(main).getByRole('link', { name: 'Other project' }))
+
+    expect(screen.getByTestId('location').textContent).toBe('/p/beta/github/issues/43')
+    expect(main.scrollTop).toBe(0)
+  })
+
   it('leaves task-to-task arrival to the destination transcript owner (#761)', () => {
     renderShell(
       '/tasks/source',
