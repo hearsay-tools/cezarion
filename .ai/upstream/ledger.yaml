@@ -185,6 +185,7 @@ entries:
     note: keyboard selection scroll ported with ArrowUp and ArrowDown regression coverage
     fork:
       issue: 433
+      pr: 653
       commits:
         - 3c27a8c80d1838de919fd80ad17ca8274e712534
     decided: 2026-09-27
