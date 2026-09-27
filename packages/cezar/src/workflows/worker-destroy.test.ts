@@ -1,12 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import fs from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RunStore, type RunRecord } from '../runs/store.ts';
-import { resolveAgentTmpDir } from '../runs/agent-tmpdir.ts';
-import { planOwnedWorkspace, removeOwnedWorkspace } from '../delegation/workspace.ts';
+import { agentTmpDirLocations, resolveAgentTmpDir } from '../runs/agent-tmpdir.ts';
+import { ensureOwnedWorkspace, planOwnedWorkspace, removeOwnedWorkspace } from '../delegation/workspace.ts';
 import { isReclaimable, rematerializeReclaimedWorktree } from '../runs/retention.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import * as config from '../config.ts';
@@ -15,7 +17,7 @@ import * as runners from '../core/runner-factory.ts';
 import { CLAUDE_SPEC_SUPPORT } from '../core/claude-cli-runner.ts';
 import { RunManager } from './run.ts';
 import { DelegationService } from '../delegation/service.ts';
-import { processStartToken } from '../delegation/process-liveness.ts';
+import { parseProcStat, processStartToken } from '../delegation/process-liveness.ts';
 
 const until = async (predicate: () => boolean) => vi.waitFor(() => expect(predicate()).toBe(true), { timeout: 15_000, interval: 10 });
 function gate() { let release!: () => void; const promise = new Promise<void>(resolve => { release = resolve; }); return { promise, release }; }
@@ -632,24 +634,152 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
       } finally { other.dispose(); reopened.flush(); }
     });
 
-    it('a survivor found only by the working-directory scan is never signalled and keeps the worktree', async () => {
-      const { w, child, prior, reopened, other, service } = await crashed('failed');
-      // The survivor never exits, so each destroy waits out its deadline (#469); keep it short.
-      (service as unknown as { terminationTimeoutMs: number }).terminationTimeoutMs = 1_500;
+    it('scan-only survivors are reported exactly, never signalled, and keep the worktree', async () => {
+      const w = await worker();
+      // Finish every Git operation before the scan. No original manager owns a live execution,
+      // so the fixture cannot launch an autosave while destroy probes the orphan.
+      await ensureOwnedWorkspace(root, w);
+      store.commitWorkerExecutionStart(w.id);
+      store.updateRun(w.id, { status: 'failed' }); store.flush();
+      manager.dispose();
+      const signalSensitive = "process.on('SIGTERM',()=>process.exit(42)); console.log('ready'); setInterval(()=>{},1000)";
+      const worktreeHolder = await spawnReady(workspace(w).path, signalSensitive);
+      const scratch = resolveAgentTmpDir(join(root, '.ai/cezar'), w.id); mkdirSync(scratch, { recursive: true });
+      const scratchHolder = await spawnReady(scratch, signalSensitive);
+      const expectedPids = [worktreeHolder.proc.pid!, scratchHolder.proc.pid!].sort((a, b) => a - b);
+      const processKills = vi.spyOn(process, 'kill');
+      const worktreeKills = vi.spyOn(worktreeHolder.proc, 'kill');
+      const scratchKills = vi.spyOn(scratchHolder.proc, 'kill');
+      const mutatingSignals = () => [
+        ...processKills.mock.calls.filter(([pid, signal]) => expectedPids.includes(pid) && signal !== 0),
+        ...worktreeKills.mock.calls.filter(([signal]) => signal !== 0),
+        ...scratchKills.mock.calls.filter(([signal]) => signal !== 0),
+      ];
+      // A missing record makes these two real cwd holders scan-only evidence.
+      rmSync(recordPath(w.id));
+      const prior = store.readWorkerExecution(w.id);
+      const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
+      const other = new RunManager(reopened, root);
+      const service = new DelegationService(); service.registerProject({ id: 'reopened', root, store: reopened, manager: other });
+      const since = Date.parse(w.createdAt) - 1_000;
+      const bootTimeMs = process.platform === 'linux' ? Number(/^btime (\d+)$/m.exec(readFileSync('/proc/stat', 'utf8'))?.[1]) * 1_000 : 0;
+      const clockTicks = process.platform === 'linux' ? Number(execFileSync('getconf', ['CLK_TCK'], { encoding: 'utf8' }).trim()) || 100 : 0;
+      type ScanRead = { cwd?: string; readlinkError?: string; uid?: number; startToken?: string };
+      const scanReads = new Map<number, ScanRead>();
+      const observed = (pid: number) => {
+        let entry = scanReads.get(pid);
+        if (!entry) { entry = {}; scanReads.set(pid, entry); }
+        return entry;
+      };
+      // Pass through the exact fs calls the Linux scanner makes. A second /proc read after
+      // destroy can see a process that has exited or changed dumpability.
+      const realReadlink = fs.readlinkSync;
+      vi.spyOn(fs, 'readlinkSync').mockImplementation(((...args: unknown[]) => {
+        const pid = /^\/proc\/(\d+)\/cwd$/.exec(String(args[0]))?.[1];
+        // Each cwd read starts a fresh probe for this PID; an earlier pass's uid/start token
+        // must not stand in when the current pass cannot read them.
+        if (pid) scanReads.set(Number(pid), {});
+        try {
+          const result = Reflect.apply(realReadlink, fs, args);
+          if (pid) { const entry = observed(Number(pid)); entry.cwd = String(result); entry.readlinkError = undefined; }
+          return result;
+        } catch (error) {
+          if (pid) { const entry = observed(Number(pid)); entry.cwd = undefined; entry.readlinkError = (error as NodeJS.ErrnoException).code; }
+          throw error;
+        }
+      }) as typeof fs.readlinkSync);
+      const realStat = fs.statSync;
+      vi.spyOn(fs, 'statSync').mockImplementation(((...args: unknown[]) => {
+        const result = Reflect.apply(realStat, fs, args);
+        const pid = /^\/proc\/(\d+)$/.exec(String(args[0]))?.[1];
+        if (pid) observed(Number(pid)).uid = result.uid;
+        return result;
+      }) as typeof fs.statSync);
+      const realReadFile = fs.readFileSync;
+      vi.spyOn(fs, 'readFileSync').mockImplementation(((...args: unknown[]) => {
+        const result = Reflect.apply(realReadFile, fs, args);
+        const pid = /^\/proc\/(\d+)\/stat$/.exec(String(args[0]))?.[1];
+        if (pid) observed(Number(pid)).startToken = parseProcStat(String(result))?.startToken;
+        return result;
+      }) as typeof fs.readFileSync);
+      syncBuiltinESMExports();
       try {
-        rmSync(recordPath(w.id));
+        const describePid = (pid: number) => {
+          const file = `/proc/${pid}`;
+          const read = (path: string) => { try { return readFileSync(path, 'utf8').trim().slice(0, 160); } catch (error) { return (error as NodeJS.ErrnoException).code; } };
+          let cwd: string | undefined;
+          try { cwd = readlinkSync(`${file}/cwd`); } catch (error) { cwd = `readlink:${(error as NodeJS.ErrnoException).code}`; }
+          const stat = read(`${file}/stat`);
+          const ppid = stat?.includes(')') ? stat.slice(stat.lastIndexOf(')') + 1).trim().split(/\s+/)[1] : undefined;
+          let uid: number | undefined;
+          try { uid = statSync(file).uid; } catch { /* The PID may have exited since the scan. */ }
+          return { pid, ppid, cwd, comm: read(`${file}/comm`), startToken: processStartToken(pid), uid };
+        };
+        // Snapshot the returned blocker immediately, before a transient PID can disappear.
+        let blockerDiagnostics: ReturnType<typeof describePid>[] = [];
+        let blockerPids: number[] = [];
+        let blockerReads = new Map<number, ScanRead>();
+        const takeBlocker = other.takeWorkerTerminationBlocker.bind(other);
+        vi.spyOn(other, 'takeWorkerTerminationBlocker').mockImplementation(runId => {
+          const taken = takeBlocker(runId);
+          if (taken?.blocker.kind === 'processes') {
+            blockerPids = [...taken.blocker.pids];
+            blockerReads = new Map(blockerPids.map(pid => [pid, { ...scanReads.get(pid) }]));
+            blockerDiagnostics = blockerPids.map(describePid);
+          }
+          return taken;
+        });
+        // Neither holder exits on its own, so each destroy waits out its deadline (#469).
+        (service as unknown as { terminationTimeoutMs: number }).terminationTimeoutMs = 1_500;
         await other.recover();
+        expect(mutatingSignals()).toEqual([]);
         expect(reopened.readWorkerExecution(w.id)).toEqual(prior);
-        expect(await service.destroyForHuman('reopened', w.id)).toMatchObject({ state: 'incomplete', remaining: expect.arrayContaining(['process', 'worktree', 'branch']),
-          error: expect.stringMatching(new RegExp(`^Worker termination is not proven: process(es)? (\\d+, )*${child.proc.pid}(, \\d+)* still holds? the worker's worktree or scratch; retry cleanup later$`)) });
-        // A retry with the same blocker set appends no second event.
-        expect(await service.destroyForHuman('reopened', w.id)).toMatchObject({ state: 'incomplete' });
+        scanReads.clear();
+        const blocked = await service.destroyForHuman('reopened', w.id);
+        expect(blocked).toMatchObject({ state: 'incomplete', remaining: ['process', 'worktree', 'branch'] });
+        const assertReported = (error: string | undefined) => {
+          const reason = /^Worker termination is not proven: (processes [\d, ]+ still hold the worker's worktree or scratch); retry cleanup later$/.exec(error ?? '')?.[1];
+          expect(reason).toBeDefined();
+          const reported = reason!.match(/\d+/g)!.map(Number).sort((a, b) => a - b);
+          const boundedDiagnostics = blockerDiagnostics.slice(0, 8).map(entry => ({ ...entry, cwd: entry.cwd?.slice(0, 160) }));
+          expect(reported, JSON.stringify(boundedDiagnostics)).toEqual([...blockerPids].sort((a, b) => a - b));
+          for (const pid of expectedPids) expect(reported).toContain(pid);
+          // Every reported PID must have been observed by the real scan as a cwd holder or
+          // under its conservative same-user unreadable-cwd rule.
+          if (process.platform === 'linux') {
+            const targets = [workspace(w).path, ...agentTmpDirLocations(join(root, '.ai/cezar'), w.id)]
+              .map(path => { try { return realpathSync(path); } catch { return path; } });
+            for (const entry of blockerDiagnostics) {
+              const scan = blockerReads.get(entry.pid);
+              expect(scan, JSON.stringify({ ...entry, cwd: entry.cwd?.slice(0, 160) })).toBeDefined();
+              const startTick = Number(scan?.startToken);
+              const eligibleStart = !scan?.startToken || !Number.isFinite(bootTimeMs) ||
+                !Number.isFinite(startTick) || bootTimeMs + startTick / clockTicks * 1_000 >= since;
+              const cwd = scan?.cwd?.replace(/ \(deleted\)$/, '');
+              expect(((scan?.readlinkError === 'EACCES' || scan?.readlinkError === 'EPERM') &&
+                scan.uid === process.getuid?.() && eligibleStart) ||
+                (cwd !== undefined && targets.some(target => cwd === target || cwd.startsWith(target + sep))),
+                JSON.stringify({ pid: entry.pid, ...scan, cwd: cwd?.slice(0, 160) })).toBe(true);
+            }
+          }
+          return reason!;
+        };
+        const reason = assertReported(blocked.error);
+        expect(mutatingSignals()).toEqual([]);
+        scanReads.clear();
+        const retried = await service.destroyForHuman('reopened', w.id);
+        expect(retried).toMatchObject({ state: 'incomplete', remaining: ['process', 'worktree', 'branch'] });
+        const retryReason = assertReported(retried.error);
+        expect(mutatingSignals()).toEqual([]);
+        // An unchanged blocker set appends no second event; a changed set is reported exactly.
         expect(reopened.readEvents(w.id).filter(event => event.type === 'lifecycle' && String(event.message).startsWith('destroy blocked:'))).toEqual([
-          expect.objectContaining({ message: `destroy blocked: process ${child.proc.pid} still holds the worker's worktree or scratch` })]);
+          expect.objectContaining({ message: `destroy blocked: ${reason}` }),
+          ...(retryReason === reason ? [] : [expect.objectContaining({ message: `destroy blocked: ${retryReason}` })])]);
         expect(existsSync(workspace(w).path)).toBe(true);
-        expect(child.proc.exitCode).toBeNull(); expect(child.proc.signalCode).toBeNull();
+        expect(worktreeHolder.proc.exitCode).toBeNull(); expect(worktreeHolder.proc.signalCode).toBeNull();
+        expect(scratchHolder.proc.exitCode).toBeNull(); expect(scratchHolder.proc.signalCode).toBeNull();
         expect(reopened.readWorkerExecution(w.id)).toEqual(prior);
-      } finally { other.dispose(); reopened.flush(); }
+      } finally { other.dispose(); reopened.flush(); vi.restoreAllMocks(); syncBuiltinESMExports(); }
     });
 
     it('a live foreign controller keeps the generation: nothing is finalized or signalled', async () => {
