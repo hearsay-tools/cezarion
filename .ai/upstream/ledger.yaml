@@ -403,6 +403,7 @@ entries:
       conflicts: 0
     fork:
       issue: 430
+      pr: 644
       commits: [2d328382, 0dfb93c6, 3e676ecd]
     decided: 2026-09-27
   - sha: 7fd4221f5f8abea3774814ece822a70fcc720a07
