@@ -1,3 +1,4 @@
+import { discoveredRunners, missingModelChoices, type HostDiscovery } from '../discovery/catalog.ts';
 import { reconcileConversationState, projectConversationEvents } from './conversations.ts';
 import { openQuestions } from './questions.ts';
 import { collectWorkerEvidence, revalidateRetainedWorkerResult, workerRevision } from './results.ts';
@@ -6,6 +7,7 @@ import { prepareWorkerContext, workerContextTask } from './context.ts';
 import { acceptedWorkerIdentitySchema, workerContextHash, workerWorkflowHash } from './execution-identity.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import {
+  discoveryRequestSchema, type DiscoveryRequest, type DiscoveryResponse,
   conversationSendRequestSchema, conversationInspectRequestSchema, conversationCancelRequestSchema, inboxReceiptRequestSchema, requestWaitRequestSchema,
   type ConversationSendRequest, type ConversationSendResult, type ConversationInspectRequest, type ConversationInspectResult, type ConversationCancelRequest, type ConversationState, type InboxReserveResult, type InboxReceiptRequest, type InboxReceiptResult, type RequestWaitRequest, type RequestOutcome,
   workerSpawnRequestSchema, workerSteerRequestSchema, workerWaitRequestSchema, workerParamsSchema, workerCancelWaitRequestSchema, type WorkerCancelWaitRequest,
@@ -64,7 +66,7 @@ type ResolvedSpawnStep = { step: WorkflowStepDef; settings: DelegationExecutionS
  * only what a step leaves unset; a step's own runner, model, effort and account win. Equal
  * selections share one resolution so a ten-step single-runner chain reads the registry once.
  */
-async function resolveSpawnSteps(manager: RunManager, parentId: string, request: WorkerSpawnRequest, workflow: WorkflowDef): Promise<ResolvedSpawnStep[]> {
+async function resolveSpawnSteps(manager: RunManager, parentId: string, request: WorkerSpawnRequest, workflow: WorkflowDef, validateModel: (step: WorkflowStepDef, settings: DelegationExecutionSettings) => Promise<void>): Promise<ResolvedSpawnStep[]> {
   const cache = new Map<string, Promise<DelegationExecutionSettings>>();
   const resolved: ResolvedSpawnStep[] = [];
   for (const step of workflow.steps) {
@@ -77,7 +79,7 @@ async function resolveSpawnSteps(manager: RunManager, parentId: string, request:
     };
     const key = JSON.stringify(selection);
     let pending = cache.get(key);
-    if (!pending) { pending = manager.selectDelegationExecutionSettings(parentId, selection); cache.set(key, pending); }
+    if (!pending) { pending = manager.selectDelegationExecutionSettings(parentId, selection, settings => validateModel(step, settings)); cache.set(key, pending); }
     const settings = await pending;
     resolved.push({ step, settings, grants: narrowGrants({ ...(settings.allowedTools === undefined ? {} : { allowedTools: settings.allowedTools }),
       ...(settings.bashAllowlist === undefined ? {} : { bashAllowlist: settings.bashAllowlist }) }, step, settings.runner) });
@@ -92,6 +94,36 @@ export const delegationEnabled = () => process.env.CEZ_DELEGATION === '1';
 
 /** A single controller's shared policy adapter; managers retain scheduling and lifecycle ownership. */
 export class DelegationService {
+  private discovery?: HostDiscovery;
+  setDiscovery(discovery: HostDiscovery): void { this.discovery = discovery; }
+  async discover(caller: Caller, value: DiscoveryRequest): Promise<DiscoveryResponse> {
+    const project = this.context(caller);
+    // Discovery accompanies spawn authority, including roots persisted before this command existed.
+    authorizeSpawnReplay(caller, project.store.getRun(caller.runId), project.id);
+    const request = discoveryRequestSchema.parse(value);
+    if (!this.discovery) throw new DelegationPolicyError('unavailable_transport', 'Host discovery is unavailable');
+    return request.kind === 'models' ? this.discovery.models.get(request.runner) : discoveredRunners(await this.discovery.providers());
+  }
+  private async validateModels(request: WorkerSpawnRequest, resolved: Pick<ResolvedSpawnStep, 'step' | 'settings'>[]): Promise<void> {
+    if (!this.discovery) return;
+    const checked = new Set<string>();
+    for (const { step, settings } of resolved) {
+      // The host catalog says nothing authoritative about a different named account.
+      if (settings.accountBinding?.profileId !== 'default') continue;
+      const model = (step.model ?? request.model)?.trim();
+      if (!model) continue; // Inherited/default models keep their existing resolution path.
+      const runner = settings.runner;
+      const key = JSON.stringify([runner, model]);
+      if (checked.has(key)) continue;
+      checked.add(key);
+      const choices = await missingModelChoices(this.discovery, runner, model, settings.model, settings.modelIdentity);
+      if (!choices) continue;
+      const alternatives = choices.otherRunners.join(', ') || 'none';
+      const available = choices.availableModels.map(row => `${row.id}${row.effortLevels ? ` (effort: ${row.effortLevels.join(', ') || 'none advertised'})` : ''}`).join('; ');
+      // Full choices remain structured even when the human-readable error reaches its bound.
+      throw new DelegationPolicyError('invalid_input', `Model "${model}" is not in the ${runner} catalog. Available models: ${available.slice(0, 1200)}. Other runners listing "${model}": ${alternatives}. Use cez discover models --runner=${runner}.`, choices);
+    }
+  }
   private projects = new Map<string, DelegationProject>();
   private serial = new Map<string, Promise<unknown>>();
   /** How long destroy waits for proven termination; private and overridable so tests need not wait it out. */
@@ -352,7 +384,7 @@ export class DelegationService {
       }
       authorizeSpawn(caller, parent, project.id);
       const catalog = await resolveSpawnWorkflow(project.root, request);
-      const resolvedSteps = await resolveSpawnSteps(project.manager, parent.id, request, catalog);
+      const resolvedSteps = await resolveSpawnSteps(project.manager, parent.id, request, catalog, (step, settings) => this.validateModels(request, [{ step, settings }]));
       // Run-level fields hold the first agent step (cockpit columns, pre-#452 evidence readers);
       // the per-step list is what each launch binds.
       const first = resolvedSteps[0]!;

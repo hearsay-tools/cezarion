@@ -1,12 +1,12 @@
 import { delegationStateSchema } from '@open-mercato/cezar-contract';
-import type { DelegationErrorResponse, WorkerOperation, WorkerCollectedResult } from '@open-mercato/cezar-contract';
+import type { DelegationErrorResponse, WorkerOperation, WorkerCollectedResult, ModelChoices } from '@open-mercato/cezar-contract';
 import type { RunRecord } from '../runs/store.ts';
 import { isAuthenticatedCaller, type Caller } from './credentials.ts';
 
 export type { WorkerOperation } from '@open-mercato/cezar-contract';
 
 export class DelegationPolicyError extends Error {
-  constructor(readonly code: DelegationErrorResponse['code'], message: string) {
+  constructor(readonly code: DelegationErrorResponse['code'], message: string, readonly modelChoices?: ModelChoices) {
     super(message);
     this.name = 'DelegationPolicyError';
   }
