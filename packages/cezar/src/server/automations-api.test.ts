@@ -137,7 +137,7 @@ describe('GitHub automation API', () => {
 
   it('accepts preview as an automation-log result filter', async () => {
     const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
-    automationStore.appendLog({
+    await automationStore.appendLog({
       automationId: 'previewed',
       revision: 1,
       result: 'preview',
