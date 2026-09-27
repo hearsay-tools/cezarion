@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { homedir, userInfo } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -153,6 +154,17 @@ async function installedNginxVersion(ctx: InstallContext): Promise<string | null
 export function enableHttp2OnTlsListenerSed(vhostPath: string): string {
   const program = `/^[[:space:]]*listen[[:space:]].*443.*[[:space:]]ssl([[:space:]]|;)/{/http2/!s/;/ http2;/;}`;
   return `sed -i -E ${shquote(program)} ${shquote(vhostPath)}`;
+}
+
+/** Roll back the file if validation or reload fails; mark only a completed edit. */
+export function enableHttp2OnTlsCommand(vhostPath: string, marker: string): string {
+  const backup = `${vhostPath}.cezar-http2-${randomUUID()}`;
+  return `cp -p ${shquote(vhostPath)} ${shquote(backup)} && ` +
+    `if ${enableHttp2OnTlsListenerSed(vhostPath)} && nginx -t && systemctl reload nginx && ` +
+    `printf '\n%s\n' ${shquote(marker)} >> ${shquote(vhostPath)}; then ` +
+    `rm -f ${shquote(backup)} || true; ` +
+    `else cp -p ${shquote(backup)} ${shquote(vhostPath)} && rm -f ${shquote(backup)} && ` +
+    `nginx -t && systemctl reload nginx; false; fi`;
 }
 
 /**
@@ -538,12 +550,18 @@ const sslStep: InstallStep = {
       // Certbot has now installed the TLS listeners. Keep the existing TLS site
       // intact on reconfiguration; the edit is idempotent and touches only :443.
       try {
+        const marker = `# cezar-http2-validated ${randomUUID()}`;
         await sudoStep(ctx, {
           description: 'Enable HTTP/2 on the nginx TLS listeners.',
-          command: `${enableHttp2OnTlsListenerSed(vhostAvail)} && nginx -t && systemctl reload nginx`,
+          command: enableHttp2OnTlsCommand(vhostAvail, marker),
           skippable: true,
           skipHint: `add http2 to the TLS listen lines in ${vhostAvail}, then reload nginx`,
-          verify: (c) => verifyCommand(c, 'sh', ['-c', `grep -Eqs '^[[:space:]]*listen.*443.*http2' ${vhostAvail}`]),
+          // A matching listener alone cannot prove `nginx -t` and reload ran:
+          // sudoStep deliberately ignores a command's exit when verification
+          // succeeds, and delegate mode has no exit status to inspect at all.
+          verify: (c) => verifyCommand(c, 'sh', ['-c',
+            `grep -qF ${shquote(marker)} ${shquote(vhostAvail)} && grep -Eqs '^[[:space:]]*listen.*443.*http2' ${shquote(vhostAvail)}`,
+          ]),
         });
       } catch (error) {
         if (!(error instanceof StepSkipped)) throw error;
