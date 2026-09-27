@@ -375,8 +375,11 @@ test('automated review workflow keeps its round cap, provider, permission, and c
   assert.match(poster, /open_threads: \$\{\{ steps\.post\.outputs\.open_threads \}\}/);
   assert.match(poster, /CAN_REVIEW: \$\{\{ needs\.review-round\.outputs\.can_review \}\}/);
   assert.match(poster, /timeout-minutes: 5/);
-  assert.match(poster, /permissions:\n      contents: read\n      pull-requests: write/);
+  assert.match(poster, /permissions:\n(?: +#.*\n)+      contents: write\n      pull-requests: write/, 'resolving a thread needs contents: write on the workflow token');
   assert.equal((workflow.match(/pull-requests: write/g) || []).length, 1, 'post-review is the sole write-scoped job');
+  assert.equal((workflow.match(/contents: write/g) || []).length, 1, 'post-review is the sole contents-write job');
+  assert.equal((poster.match(/actions\/checkout@/g) || []).length, 1, 'post-review checks out only the trusted base');
+  assert.match(poster, /ref: \$\{\{ needs\.review-round\.outputs\.base_sha \}\}\n\s+persist-credentials: false/);
   assert.match(poster, /name: Checkout trusted validator/);
   assert.match(poster, /ref: \$\{\{ needs\.review-round\.outputs\.base_sha \}\}/);
   assert.doesNotMatch(poster, /refs\/pull\/\$\{\{ github\.event\.pull_request\.number \}\}\/merge/);
