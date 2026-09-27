@@ -1,0 +1,12 @@
+[
+  {
+    "type": "session.error",
+    "message": "Reconnecting... 2/5 \u2014 stream disconnected before completion: invalid peer certificate: UnknownIssuer",
+    "fatal": false
+  },
+  {
+    "type": "session.error",
+    "message": "Reconnecting... waiting for network \u2014 Connection failed: error sending request",
+    "fatal": false
+  }
+]

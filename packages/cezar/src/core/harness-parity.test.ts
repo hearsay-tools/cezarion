@@ -230,6 +230,7 @@ interface RunCriterion {
   readonly id: string;
   readonly name: string;
   readonly scenario: ScenarioName;
+  readonly timeoutMs?: number;
   readonly settled: (record: RunObservation['record']) => boolean;
   readonly assert: (obs: RunObservation) => void;
 }
@@ -240,6 +241,27 @@ const askEvents = (obs: RunObservation) =>
   obs.events.filter((e) => e.type === 'ask.requested');
 
 const RUN_CRITERIA: readonly RunCriterion[] = [
+  {
+    // #550: Codex keeps its turn open and emits retryable errors; other wires
+    // use their native provider rejection. Every runner must leave running.
+    id: 'R17',
+    name: 'R17 bounds an unavailable provider and preserves its failure reason',
+    scenario: 'provider-unavailable',
+    timeoutMs: 75_000,
+    settled: record => TERMINAL.includes(record?.status ?? '') || record?.status === 'waiting',
+    assert: obs => {
+      expect(obs.record?.status).toBe('failed');
+      expect(obs.statuses).not.toContain('waiting');
+      expect(obs.record?.error?.trim()).toBeTruthy();
+      if (obs.record?.runner === 'codex') {
+        expect(obs.record.error).toContain('Connection failed: error sending request');
+        expect(obs.events).toContainEqual(expect.objectContaining({
+          type: 'session.error', fatal: false,
+          message: 'Reconnecting... 2/5 — stream disconnected before completion: invalid peer certificate: UnknownIssuer',
+        }));
+      }
+    },
+  },
   {
     // Group 7 — a run whose agent DECLARED completion reaches cezar's review
     // gate, which is a non-attention terminal state (cezar never auto-merges).
@@ -568,11 +590,11 @@ describe('harness parity — run tier', () => {
           ? `${backend} is exempt from ${criterion.id} — ${exempt.reason}`
           : `${backend} ${criterion.name}`,
         async () => {
-          const obs = await driveRun(backend, criterion.scenario, criterion.settled);
+          const obs = await driveRun(backend, criterion.scenario, criterion.settled, criterion.timeoutMs);
           if (exempt) expect(() => criterion.assert(obs)).toThrow();
           else criterion.assert(obs);
         },
-        60_000,
+        (criterion.timeoutMs ?? 55_000) + 5_000,
       );
     }
   }

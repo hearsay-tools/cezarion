@@ -22,6 +22,8 @@
  * `completed→completed`, `failed→failed`, `declined→declined`.
  */
 
+import { codexStreamError } from './codex-stream-error.ts';
+
 import type {
   FileDiff,
   PlanEntry,
@@ -155,6 +157,14 @@ export function mapCodexNotification(frame: unknown, state: CodexUiMapperState):
   if (frame.id !== undefined) return { events: [], state };
   const params = isRecord(frame.params) ? frame.params : {};
   switch (frame.method) {
+    case 'error': {
+      const message = codexStreamError(params);
+      return { events: message ? [{ type: 'session.error', message, fatal: params.willRetry === false }] : [], state };
+    }
+    case 'warning': {
+      const message = str(params.message);
+      return { events: message ? [{ type: 'session.error', message, fatal: false }] : [], state };
+    }
     case 'thread/started':
       return codexSessionStarted(threadIdOf(params) ?? '', state);
     case 'turn/started':
