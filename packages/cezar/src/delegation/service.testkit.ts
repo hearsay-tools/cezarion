@@ -37,9 +37,10 @@ export function fixture(): { root: string; sha: string; store: RunStore; manager
   const caller = credentials.authenticate(token)!;
   vi.spyOn(manager, 'delegationExecutionSettings').mockReturnValue({ cwd: root, runner: 'claude', model: 'opus', effort: 'high', agentProfile: 'default', accountBinding: { provider: 'claude', profileId: 'default', homePath: root, claudeLayout: { kind: 'relocated' } } });
   const service = new DelegationService();
-  service.registerProject({ id: 'project', root, store, manager });
+  const unregister = service.registerProject({ id: 'project', root, store, manager });
   return { root, sha, store, manager, parent, credentials, caller, token, service,
     async close() {
+      unregister();
       credentials.close();
       await removeAfterOwnedWork(root, waitForOwnedWork(manager, store).then(() => { manager.dispose(); store.flush(); }));
     } };

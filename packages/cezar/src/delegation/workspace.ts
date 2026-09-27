@@ -250,7 +250,7 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
   let remaining: Array<'worktree' | 'branch'> = ['worktree', 'branch'];
   let provisioned = false;
   const result = (): WorkerDestroyResult => ({ workerId: value.ownerRunId, state: remaining.length ? 'incomplete' : 'complete', remaining,
-    ...(remaining.length ? { error: 'Owned resources remain; resource identity or cleanup could not be verified' } : {}),
+    ...(remaining.length ? { error: 'Owned resources remain: resource identity or Git cleanup could not be verified. Check the worker worktree, Git lock and ownership receipt, then retry destroy after correcting the blocker' } : {}),
     ...(provisioned ? { deleted: [
       ...(!remaining.includes('worktree') ? [{ kind: 'worktree' as const, path: value.path }] : []),
       ...(!remaining.includes('branch') ? [{ kind: 'branch' as const, ref: `refs/heads/${value.branch}` }] : []),

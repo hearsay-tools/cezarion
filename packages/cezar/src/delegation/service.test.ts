@@ -10,6 +10,8 @@ import { mergeWriteAgentAccounts } from '../workspace/agent-accounts.ts';
 import type { Caller } from './credentials.ts';
 
 import { fixture } from './service.testkit.ts';
+import { ensureOwnedWorkspace } from './workspace.ts';
+import { DelegationService } from './service.ts';
 
 describe('delegation service durable authority', () => {
   let f: ReturnType<typeof fixture>;
@@ -272,6 +274,94 @@ describe('delegation service durable authority', () => {
     vi.spyOn(f.manager, 'awaitRunTermination').mockResolvedValue(false);
     expect(await f.service.destroy(f.caller, { workerId })).toMatchObject({ state: 'incomplete', remaining: ['process', 'worktree', 'branch'] });
     expect(f.store.getRun(workerId)?.delegation).toMatchObject({ destroy: { phase: 'incomplete', remaining: ['process', 'worktree', 'branch'] } });
+  });
+  it('retries a persisted incomplete destroy after termination becomes proven', async () => {
+    Object.assign(f.service, { destroyRetryDelayMs: 50 });
+    const { workerId } = await f.service.spawn(f.caller, input());
+    f.store.commitWorkerExecutionStart(workerId);
+    const worker = f.store.getRun(workerId)!;
+    const workspace = await ensureOwnedWorkspace(f.root, worker);
+    f.store.updateRun(workerId, { status: 'review', worktreePath: workspace.path, branch: workspace.branch });
+    const termination = vi.spyOn(f.manager, 'awaitRunTermination').mockResolvedValue(false);
+    expect(await f.service.destroy(f.caller, { workerId })).toMatchObject({ state: 'incomplete', remaining: ['process', 'worktree', 'branch'] });
+    expect(f.store.getRun(workerId)?.delegation).toMatchObject({ destroy: { phase: 'incomplete' } });
+    termination.mockRestore();
+    // Recovery supplied the real process proof. The accepted destroy intent must finish itself.
+    const generation = f.store.readWorkerExecution(workerId)?.generation;
+    expect(generation).toBeDefined();
+    expect(f.store.commitWorkerExecutionComplete(workerId, generation!)).toBe(true);
+    await vi.waitFor(() => expect(f.store.getRun(workerId)?.delegation).toMatchObject({ destroy: { phase: 'complete', remaining: [] } }), { timeout: 3_000 });
+  });
+  it('resumes a persisted destroy after recovery and cancels pending retries on detach', async () => {
+    const { workerId } = await f.service.spawn(f.caller, input());
+    const worker = f.store.getRun(workerId)!;
+    const generation = f.store.commitWorkerExecutionStart(workerId);
+    const workspace = await ensureOwnedWorkspace(f.root, worker);
+    f.store.updateRun(workerId, { status: 'review', worktreePath: workspace.path, branch: workspace.branch });
+    expect(f.store.commitWorkerExecutionComplete(workerId, generation)).toBe(true);
+    const current = f.store.getRun(workerId)!;
+    if (current.delegation?.role !== 'worker') throw Error('worker');
+    f.store.commitDelegation([{ id: workerId, delegation: { ...current.delegation, destroy: {
+      requestedAt: new Date().toISOString(), phase: 'incomplete', remaining: ['worktree', 'branch'],
+    } } }]);
+
+    const restarted = new DelegationService();
+    Object.assign(restarted, { destroyRetryDelayMs: 50 });
+    const detach = restarted.registerProject({ id: 'project', root: f.root, store: f.store, manager: f.manager });
+    restarted.armDestroyRetries('project');
+    detach();
+    await new Promise(resolve => setTimeout(resolve, 120));
+    expect(f.store.getRun(workerId)?.delegation).toMatchObject({ destroy: { phase: 'incomplete' } });
+    expect(existsSync(workspace.path)).toBe(true);
+
+    const stale = restarted.registerProject({ id: 'project', root: f.root, store: f.store, manager: f.manager });
+    restarted.armDestroyRetries('project');
+    const replacementManager = new RunManager(f.store, f.root);
+    const replaced = restarted.registerProject({ id: 'project', root: f.root, store: f.store, manager: replacementManager });
+    stale(); // a stale detach must not detach the replacement
+    await new Promise(resolve => setTimeout(resolve, 120));
+    expect(f.store.getRun(workerId)?.delegation).toMatchObject({ destroy: { phase: 'incomplete' } });
+    replaced();
+    replacementManager.dispose();
+
+    const attach = restarted.registerProject({ id: 'project', root: f.root, store: f.store, manager: f.manager });
+    restarted.armDestroyRetries('project');
+    await vi.waitFor(() => expect(f.store.getRun(workerId)?.delegation).toMatchObject({ destroy: { phase: 'complete', remaining: [] } }), { timeout: 3_000 });
+    expect(existsSync(workspace.path)).toBe(false);
+    attach();
+  });
+  it.each([false, true])('revokes an in-flight retry after project replacement when termination resolves %s', async terminated => {
+    Object.assign(f.service, { destroyRetryDelayMs: 50 });
+    const { workerId } = await f.service.spawn(f.caller, input());
+    const worker = f.store.getRun(workerId)!;
+    const generation = f.store.commitWorkerExecutionStart(workerId);
+    const workspace = await ensureOwnedWorkspace(f.root, worker);
+    f.store.updateRun(workerId, { status: 'review', worktreePath: workspace.path, branch: workspace.branch });
+    expect(f.store.commitWorkerExecutionComplete(workerId, generation)).toBe(true);
+    const current = f.store.getRun(workerId)!;
+    if (current.delegation?.role !== 'worker') throw Error('worker');
+    f.store.commitDelegation([{ id: workerId, delegation: { ...current.delegation, destroy: {
+      requestedAt: new Date().toISOString(), phase: 'incomplete', remaining: ['worktree', 'branch'],
+    } } }]);
+    let release!: (value: boolean) => void;
+    const held = new Promise<boolean>(resolve => { release = resolve; });
+    const termination = vi.spyOn(f.manager, 'awaitRunTermination').mockReturnValue(held);
+    f.service.armDestroyRetries('project');
+    await vi.waitFor(() => expect(termination).toHaveBeenCalledOnce(), { timeout: 3_000 });
+    const replacementManager = new RunManager(f.store, f.root);
+    const detachReplacement = f.service.registerProject({ id: 'project', root: f.root, store: f.store, manager: replacementManager });
+    const writes = vi.spyOn(f.store, 'commitDelegation');
+    const results = vi.spyOn(f.store, 'commitWorkerResult');
+    const events = vi.spyOn(f.store, 'appendEvent');
+    release(terminated);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(writes).not.toHaveBeenCalled();
+    expect(results).not.toHaveBeenCalled();
+    expect(events).not.toHaveBeenCalled();
+    expect(f.store.getRun(workerId)?.delegation).toMatchObject({ destroy: { phase: 'terminating' } });
+    expect(existsSync(workspace.path)).toBe(true);
+    detachReplacement();
+    replacementManager.dispose();
   });
   it('retains already-cleaned resources across an incomplete termination retry', async () => {
     const { workerId } = await f.service.spawn(f.caller, input());

@@ -1235,6 +1235,7 @@ export function createApp(deps: ServerDeps) {
       taskWebhooks.attach(project);
       return deps.delegation?.attachProject(project);
     },
+    afterRecover: (project) => deps.delegation?.service.armDestroyRetries(project.id),
   });
   // Workspace-level SSE bus (step 2.8) — the registry mutators and the
   // checkout flow (Phase 4) emit here; /api/workspace/events relays.
@@ -5888,6 +5889,7 @@ export function startServer(deps: ServerDeps, port: number): ServerType & { shut
       taskWebhooks.attach(project);
       return deps.delegation?.attachProject(project);
     },
+    afterRecover: (project) => deps.delegation?.service.armDestroyRetries(project.id),
   });
   // #801: GitHub automations are opt-in. Off, the flag must remove the BEHAVIOR and not merely
   // the UI — no scheduler, no GitHub polling, no launched runs — so every entry point into the

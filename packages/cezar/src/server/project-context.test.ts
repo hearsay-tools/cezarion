@@ -61,6 +61,19 @@ describe('ProjectContexts', () => {
     expect(one).toBe(two);
   });
 
+  it('arms project cleanup only after recovery and once per live context', async () => {
+    const order: string[] = [];
+    const contexts = new ProjectContexts({
+      listProjects: async () => [{ id: 'a', root: rootA, status: 'not-git' }],
+      prepareManager: () => { order.push('prepare'); },
+      afterRecover: () => { order.push('recovered'); },
+    });
+    await contexts.context('a');
+    await contexts.context('a');
+    expect(order).toEqual(['prepare', 'recovered']);
+    contexts.disposeAll();
+  });
+
   it('uses the injected coordinator-owned automation store', async () => {
     const automationStore = AutomationStore.open(join(rootA, '.ai/cezar'));
     const resolveAutomationStore = vi.fn(() => automationStore);

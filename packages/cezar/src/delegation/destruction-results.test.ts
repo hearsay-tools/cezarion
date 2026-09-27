@@ -44,6 +44,16 @@ describe('verified destruction retains results through explicit history deletion
     expect(readFileSync(join(workspace.path, 'result.txt'), 'utf8')).toBe('retained patch');
     expect(execFileSync('git', ['rev-parse', `refs/heads/${workspace.branch}`], { cwd: f.root, encoding: 'utf8' }).trim()).toBe(f.sha);
   });
+  it('retries a locked owned worktree after the Git lock is removed', async () => {
+    Object.assign(f.service, { destroyRetryDelayMs: 50 });
+    const { workerId, workspace } = await completed();
+    execFileSync('git', ['worktree', 'lock', workspace.path], { cwd: f.root });
+    expect(await f.service.destroy(f.caller, { workerId })).toMatchObject({ state: 'incomplete', remaining: ['worktree', 'branch'] });
+    expect(existsSync(workspace.path)).toBe(true);
+    execFileSync('git', ['worktree', 'unlock', workspace.path], { cwd: f.root });
+    await vi.waitFor(() => expect(f.store.getRun(workerId)?.delegation).toMatchObject({ destroy: { phase: 'complete', remaining: [] } }), { timeout: 3_000 });
+    expect(existsSync(workspace.path)).toBe(false);
+  });
   it('preserves a settled summary and diff after destruction, child deletion and restart', async () => {
     const { workerId, workspace, generation, files } = await completed();
     expect(await f.service.destroy(f.caller, { workerId })).toMatchObject({ state: 'complete', deleted: [
