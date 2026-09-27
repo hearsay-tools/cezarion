@@ -44,11 +44,13 @@ async function verifyBranch(repoRoot: string, workspace: WorkerWorkspace, receip
       hash(log.content.subarray(0, initial.prefixBytes)) !== initial.prefixHash) throw new Error('Branch ownership changed');
   return { sha: await checkedGit(repoRoot, ['rev-parse', '--verify', `refs/heads/${workspace.branch}`]), log };
 }
-async function writeCleanup(path: string, value: Cleanup): Promise<void> {
+async function writeCleanup(path: string, value: Cleanup, assertCurrent?: () => void): Promise<void> {
+  assertCurrent?.();
   if (await exists(path)) await readIdentityFile(path, RECEIPT_CAP);
+  assertCurrent?.();
   const temporary = `${path}.${randomUUID()}.tmp`;
   await writeIdentityFile(temporary, JSON.stringify(value));
-  try { await rename(temporary, path); } finally { await rm(temporary, { force: true }); }
+  try { assertCurrent?.(); await rename(temporary, path); } finally { await rm(temporary, { force: true }); }
 }
 
 type Receipt = z.infer<typeof receiptSchema>;
@@ -246,17 +248,19 @@ export type WorkerNoMaterializationProof = (workspace: WorkerWorkspace) => boole
 /** Checked cleanup only. Caller must first persist destruction intent and prove termination.
  * The private checkpoint survives removal of the linked Git directory and records
  * the exact ref/log identity whose compare-and-swap deletion may be retried. */
-export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorkspace, neverMaterialized?: WorkerNoMaterializationProof): Promise<WorkerDestroyResult> {
+export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorkspace, neverMaterialized?: WorkerNoMaterializationProof,
+  assertCurrent?: () => void): Promise<WorkerDestroyResult> {
   let remaining: Array<'worktree' | 'branch'> = ['worktree', 'branch'];
   let provisioned = false;
   const result = (): WorkerDestroyResult => ({ workerId: value.ownerRunId, state: remaining.length ? 'incomplete' : 'complete', remaining,
-    ...(remaining.length ? { error: 'Owned resources remain; resource identity or cleanup could not be verified' } : {}),
+    ...(remaining.length ? { error: 'Owned resources remain: resource identity or Git cleanup could not be verified. Check the worker worktree, Git lock and ownership receipt, then retry destroy after correcting the blocker' } : {}),
     ...(provisioned ? { deleted: [
       ...(!remaining.includes('worktree') ? [{ kind: 'worktree' as const, path: value.path }] : []),
       ...(!remaining.includes('branch') ? [{ kind: 'branch' as const, ref: `refs/heads/${value.branch}` }] : []),
     ] } : {}),
   });
   try {
+    assertCurrent?.();
     const workspace = await validateIntent(repoRoot, value);
     const path = await receiptLocation(repoRoot, workspace);
     const receipt = await readReceipt(path);
@@ -300,23 +304,26 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
       const current = await verifyBranch(repoRoot, workspace, receipt);
       if (checkpoint && (checkpoint.sha !== current.sha || !same(checkpoint.logFile, current.log.file) || checkpoint.logHash !== hash(current.log.content))) return result();
       checkpoint ??= { workspace, gitDir: receipt.gitDir, sha: current.sha, logFile: current.log.file, logHash: hash(current.log.content), phase: 'prepared' };
-      await writeCleanup(checkpointPath, checkpoint);
+      await writeCleanup(checkpointPath, checkpoint, assertCurrent);
+      assertCurrent?.();
       const removed = await git(repoRoot, ['worktree', 'remove', '--force', workspace.path]);
       if (!removed.ok) return result();
+      remaining = ['branch'];
     }
     if (!checkpoint || await exists(workspace.path) || await exists(receipt.gitDir) || (await registered()).includes(`worktree ${workspace.path}`)) return result();
     remaining = ['branch'];
     checkpoint = { ...checkpoint, phase: 'worktree-removed' };
-    await writeCleanup(checkpointPath, checkpoint);
+    await writeCleanup(checkpointPath, checkpoint, assertCurrent);
     if (await branchExists()) {
       if ((await registered()).includes(`branch refs/heads/${workspace.branch}`)) return result();
       const current = await verifyBranch(repoRoot, workspace, receipt);
       if (current.sha !== checkpoint.sha || !same(current.log.file, checkpoint.logFile) || hash(current.log.content) !== checkpoint.logHash) return result();
       // Ref CAS: never delete a branch advanced after our verified snapshot.
+      assertCurrent?.();
       const removed = await git(repoRoot, ['update-ref', '-d', `refs/heads/${workspace.branch}`, checkpoint.sha]);
       if (!removed.ok || await branchExists()) return result();
     }
-    await writeCleanup(checkpointPath, { ...checkpoint, phase: 'complete' });
+    await writeCleanup(checkpointPath, { ...checkpoint, phase: 'complete' }, assertCurrent);
     remaining = [];
   } catch { /* Ambiguous ownership and every failed Git/filesystem operation fail closed. */ }
   return result();

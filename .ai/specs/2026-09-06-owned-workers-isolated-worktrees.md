@@ -340,8 +340,20 @@ History, stop and explicit verified-cleanup attempts remain reachable.
 
 Each Git/process operation has a bounded timeout. A failed cleanup never gets a
 success response just because cancellation was sent. Partial cleanup survives
-restart and permits a later retry; no autonomous destructive retry after a
-restart without a new request.
+restart. Issue #642 changes the retry rule: an already persisted destroy request
+authorizes automatic retries in the current controller and after restart, after
+manager recovery has reconstructed execution proof. The delegation service owns
+one unref'd timer per pending worker and serializes each retry with explicit
+destroy calls. Detaching or replacing a project cancels its timers and revokes
+an in-flight retry before its next store write or new cleanup step. A checked Git
+removal already in progress may finish; its checkpoint lets the new controller
+resume without publishing stale results from the detached store. Every attempt
+must repeat process termination proof, ownership checks, the parent result
+checkpoint and checked Git removal; incomplete remains incomplete if any proof
+fails. A fresh request is still required to begin destruction of a worker that
+has no recorded destroy intent. This supersedes the former prohibition on
+autonomous retry after restart, without granting generic prune or retention
+permission to delete owned resources.
 
 Existing retention/orphan sweeps must respect worker ownership and destruction
 state. Finished owned-worker *directories* are reclaimable under the same keep-N

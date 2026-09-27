@@ -248,6 +248,7 @@ export function Composer({
   const mobileOpen = mobileDisclosures.get(disclosureKey) ?? false
   const mobileCompact = mobileCollapsible && !mobileOpen
   const rootRef = useRef<HTMLDivElement>(null)
+  const menuListRef = useRef<HTMLDivElement>(null)
   const pendingCaretRef = useRef<number | null>(null)
 
   const skills = useSkills(autocompleteSkills && skillsWanted)
@@ -326,6 +327,15 @@ export function Composer({
     ? menuValue
     : candidates[0]?.value
   const menuOpen = trigger !== null
+
+  // Arrow keys are handled by the textarea, so cmdk never gets its own keyboard event to
+  // scroll the active result. Read the committed selection before paint and keep it visible.
+  useLayoutEffect(() => {
+    if (!menuOpen || !activeValue) return
+    const selected = [...(menuListRef.current?.querySelectorAll('[data-slot="composer-menu-item"]') ?? [])]
+      .find((item) => item.getAttribute('data-value') === activeValue)
+    selected?.scrollIntoView({ block: 'nearest' })
+  }, [activeValue, menuOpen])
 
   const closeMenu = useCallback(() => setTrigger(null), [])
 
@@ -842,6 +852,7 @@ export function Composer({
       >
         <Command shouldFilter={false} value={activeValue ?? ''} onValueChange={setMenuValue}>
           <CommandList
+            ref={menuListRef}
             data-slot="composer-menu"
             data-trigger={trigger?.trigger}
             // Clamped to the popper's reported space so the open keyboard (collisionPadding

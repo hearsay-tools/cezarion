@@ -54,6 +54,8 @@ export interface ProjectContextSource {
 export interface ProjectContextDeps {
   /** Install controller session capabilities before recovery starts any backend. */
   prepareManager?: (project: Pick<ProjectContext, 'id' | 'root' | 'store' | 'manager'>) => (() => void) | void;
+  /** Arm persisted cleanup only after recovered execution/process state is available. */
+  afterRecover?: (project: Pick<ProjectContext, 'id' | 'root' | 'store' | 'manager'>) => void;
   /** Registry lookup — the workspace `listProjects()` in production. */
   listProjects: () => Promise<readonly ProjectContextSource[]>;
   /** Resolve the one automation store owned by this project. Production
@@ -240,6 +242,7 @@ export class ProjectContexts {
         await reclaimWorktrees(project.root, store, keep).catch(() => [] as string[]);
       }
       await manager.recover();
+      this.deps.afterRecover?.({ id: project.id, root: project.root, store, manager });
       // Which repository this project IS (#945), so the referenced tier stops adopting another
       // repo's PR/issue as a task's subject. Fire-and-forget on purpose — it costs a `gh` spawn
       // and building a context must not wait on the network. `project.root` is already realpath'd.

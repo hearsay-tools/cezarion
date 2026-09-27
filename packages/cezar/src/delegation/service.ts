@@ -1,3 +1,4 @@
+import { discoveredRunners, missingModelChoices, type HostDiscovery } from '../discovery/catalog.ts';
 import { reconcileConversationState, projectConversationEvents } from './conversations.ts';
 import { openQuestions } from './questions.ts';
 import { collectWorkerEvidence, revalidateRetainedWorkerResult, workerRevision } from './results.ts';
@@ -6,6 +7,7 @@ import { prepareWorkerContext, workerContextTask } from './context.ts';
 import { acceptedWorkerIdentitySchema, workerContextHash, workerWorkflowHash } from './execution-identity.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import {
+  discoveryRequestSchema, type DiscoveryRequest, type DiscoveryResponse,
   conversationSendRequestSchema, conversationInspectRequestSchema, conversationCancelRequestSchema, inboxReceiptRequestSchema, requestWaitRequestSchema,
   type ConversationSendRequest, type ConversationSendResult, type ConversationInspectRequest, type ConversationInspectResult, type ConversationCancelRequest, type ConversationState, type InboxReserveResult, type InboxReceiptRequest, type InboxReceiptResult, type RequestWaitRequest, type RequestOutcome,
   workerSpawnRequestSchema, workerSteerRequestSchema, workerWaitRequestSchema, workerParamsSchema, workerCancelWaitRequestSchema, type WorkerCancelWaitRequest,
@@ -64,7 +66,7 @@ type ResolvedSpawnStep = { step: WorkflowStepDef; settings: DelegationExecutionS
  * only what a step leaves unset; a step's own runner, model, effort and account win. Equal
  * selections share one resolution so a ten-step single-runner chain reads the registry once.
  */
-async function resolveSpawnSteps(manager: RunManager, parentId: string, request: WorkerSpawnRequest, workflow: WorkflowDef): Promise<ResolvedSpawnStep[]> {
+async function resolveSpawnSteps(manager: RunManager, parentId: string, request: WorkerSpawnRequest, workflow: WorkflowDef, validateModel: (step: WorkflowStepDef, settings: DelegationExecutionSettings) => Promise<void>): Promise<ResolvedSpawnStep[]> {
   const cache = new Map<string, Promise<DelegationExecutionSettings>>();
   const resolved: ResolvedSpawnStep[] = [];
   for (const step of workflow.steps) {
@@ -77,7 +79,7 @@ async function resolveSpawnSteps(manager: RunManager, parentId: string, request:
     };
     const key = JSON.stringify(selection);
     let pending = cache.get(key);
-    if (!pending) { pending = manager.selectDelegationExecutionSettings(parentId, selection); cache.set(key, pending); }
+    if (!pending) { pending = manager.selectDelegationExecutionSettings(parentId, selection, settings => validateModel(step, settings)); cache.set(key, pending); }
     const settings = await pending;
     resolved.push({ step, settings, grants: narrowGrants({ ...(settings.allowedTools === undefined ? {} : { allowedTools: settings.allowedTools }),
       ...(settings.bashAllowlist === undefined ? {} : { bashAllowlist: settings.bashAllowlist }) }, step, settings.runner) });
@@ -92,15 +94,89 @@ export const delegationEnabled = () => process.env.CEZ_DELEGATION === '1';
 
 /** A single controller's shared policy adapter; managers retain scheduling and lifecycle ownership. */
 export class DelegationService {
+  private discovery?: HostDiscovery;
+  setDiscovery(discovery: HostDiscovery): void { this.discovery = discovery; }
+  async discover(caller: Caller, value: DiscoveryRequest): Promise<DiscoveryResponse> {
+    const project = this.context(caller);
+    // Discovery accompanies spawn authority, including roots persisted before this command existed.
+    authorizeSpawnReplay(caller, project.store.getRun(caller.runId), project.id);
+    const request = discoveryRequestSchema.parse(value);
+    if (!this.discovery) throw new DelegationPolicyError('unavailable_transport', 'Host discovery is unavailable');
+    return request.kind === 'models' ? this.discovery.models.get(request.runner) : discoveredRunners(await this.discovery.providers());
+  }
+  private async validateModels(request: WorkerSpawnRequest, resolved: Pick<ResolvedSpawnStep, 'step' | 'settings'>[]): Promise<void> {
+    if (!this.discovery) return;
+    const checked = new Set<string>();
+    for (const { step, settings } of resolved) {
+      // The host catalog says nothing authoritative about a different named account.
+      if (settings.accountBinding?.profileId !== 'default') continue;
+      const model = (step.model ?? request.model)?.trim();
+      if (!model) continue; // Inherited/default models keep their existing resolution path.
+      const runner = settings.runner;
+      const key = JSON.stringify([runner, model]);
+      if (checked.has(key)) continue;
+      checked.add(key);
+      const choices = await missingModelChoices(this.discovery, runner, model, settings.model, settings.modelIdentity);
+      if (!choices) continue;
+      const alternatives = choices.otherRunners.join(', ') || 'none';
+      const available = choices.availableModels.map(row => `${row.id}${row.effortLevels ? ` (effort: ${row.effortLevels.join(', ') || 'none advertised'})` : ''}`).join('; ');
+      // Full choices remain structured even when the human-readable error reaches its bound.
+      throw new DelegationPolicyError('invalid_input', `Model "${model}" is not in the ${runner} catalog. Available models: ${available.slice(0, 1200)}. Other runners listing "${model}": ${alternatives}. Use cez discover models --runner=${runner}.`, choices);
+    }
+  }
   private projects = new Map<string, DelegationProject>();
   private serial = new Map<string, Promise<unknown>>();
+  private destroyRetryTimers = new Map<string, Map<string, NodeJS.Timeout>>();
+  private destroyRetryInFlight = new Map<string, Set<string>>();
+  private destroyRetryDelayMs = 60_000;
   /** How long destroy waits for proven termination; private and overridable so tests need not wait it out. */
   private terminationTimeoutMs = 30_000;
   registerProject(project: DelegationProject): () => void {
     const existing = this.projects.get(project.id);
     if (existing?.store === project.store && existing.manager === project.manager) return () => {};
+    this.clearDestroyRetries(project.id);
     this.projects.set(project.id, project);
-    return () => { if (this.projects.get(project.id) === project) this.projects.delete(project.id); };
+    return () => { if (this.projects.get(project.id) === project) { this.clearDestroyRetries(project.id); this.projects.delete(project.id); } };
+  }
+  private clearDestroyRetries(projectId: string): void {
+    for (const timer of this.destroyRetryTimers.get(projectId)?.values() ?? []) clearTimeout(timer);
+    this.destroyRetryTimers.delete(projectId);
+    this.destroyRetryInFlight.delete(projectId);
+  }
+  /** Called only after manager recovery, when persisted destroy intents may be retried. */
+  armDestroyRetries(projectId: string): void {
+    const project = this.projects.get(projectId);
+    if (!project) return;
+    for (const run of project.store.listRuns()) this.scheduleDestroyRetry(project, run.id);
+  }
+  private scheduleDestroyRetry(project: DelegationProject, workerId: string): void {
+    if (this.projects.get(project.id) !== project) return;
+    const run = project.store.getRun(workerId);
+    if (run?.delegation?.role !== 'worker' || !run.delegation.destroy || run.delegation.destroy.phase === 'complete') return;
+    let timers = this.destroyRetryTimers.get(project.id);
+    if (!timers) { timers = new Map(); this.destroyRetryTimers.set(project.id, timers); }
+    if (timers.has(workerId) || this.destroyRetryInFlight.get(project.id)?.has(workerId)) return;
+    const timer = setTimeout(() => {
+      timers.delete(workerId);
+      if (this.projects.get(project.id) !== project) return;
+      let inFlight = this.destroyRetryInFlight.get(project.id);
+      if (!inFlight) { inFlight = new Set(); this.destroyRetryInFlight.set(project.id, inFlight); }
+      inFlight.add(workerId);
+      const check = () => {
+        if (this.projects.get(project.id) !== project) throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
+        const current = project.store.getRun(workerId);
+        if (current?.delegation?.role !== 'worker' || current.delegation.workspace.ownerRunId !== workerId || !current.delegation.destroy || current.delegation.destroy.phase === 'complete') {
+          throw new DelegationPolicyError('incompatible_state', 'Worker destroy is no longer pending');
+        }
+        return current;
+      };
+      void this.destroySerialized(project, workerId, check).catch(() => undefined).finally(() => {
+        inFlight.delete(workerId);
+        this.scheduleDestroyRetry(project, workerId);
+      });
+    }, this.destroyRetryDelayMs);
+    timer.unref?.();
+    timers.set(workerId, timer);
   }
   private context(caller: Caller) {
     if (!delegationEnabled()) throw new DelegationPolicyError('unavailable_transport', 'Delegation is unavailable');
@@ -352,7 +428,7 @@ export class DelegationService {
       }
       authorizeSpawn(caller, parent, project.id);
       const catalog = await resolveSpawnWorkflow(project.root, request);
-      const resolvedSteps = await resolveSpawnSteps(project.manager, parent.id, request, catalog);
+      const resolvedSteps = await resolveSpawnSteps(project.manager, parent.id, request, catalog, (step, settings) => this.validateModels(request, [{ step, settings }]));
       // Run-level fields hold the first agent step (cockpit columns, pre-#452 evidence readers);
       // the per-step list is what each launch binds.
       const first = resolvedSteps[0]!;
@@ -498,6 +574,10 @@ export class DelegationService {
   }
   private destroySerialized(project: DelegationProject, workerId: string, check: () => RunRecord) {
     return this.serialized(`worker:${project.id}:${workerId}`, async (): Promise<WorkerDestroyResult> => {
+      const assertAttached = () => {
+        if (this.projects.get(project.id) !== project) throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
+      };
+      assertAttached();
       let worker = check();
       if (worker.delegation?.role !== 'worker') throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
       const parent = project.store.getRun(worker.delegation.parentRunId);
@@ -508,6 +588,7 @@ export class DelegationService {
       const requestedAt = worker.delegation.destroy?.requestedAt ?? new Date().toISOString();
       const resources = (worker.delegation.destroy?.remaining ?? ['worktree', 'branch']).filter((resource): resource is 'worktree' | 'branch' => resource !== 'process');
       const persist = (phase: WorkerDestroy['phase'], remaining: WorkerDestroy['remaining'], error?: string) => {
+        assertAttached();
         worker = project.store.getRun(workerId)!;
         if (worker.delegation?.role !== 'worker') throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
         project.store.commitDelegation([{ id: workerId, delegation: { ...worker.delegation, destroy: { requestedAt, phase, remaining, ...(error ? { error: error.slice(0, 2_000) } : {}) } } }]);
@@ -516,7 +597,9 @@ export class DelegationService {
       persist('terminating', ['process', ...resources]);
       project.manager.requestWorkerStop(workerId);
       let result: WorkerDestroyResult;
-      if (!await project.manager.awaitRunTermination(workerId, this.terminationTimeoutMs, { reapOrphans: true })) {
+      const terminated = await project.manager.awaitRunTermination(workerId, this.terminationTimeoutMs, { reapOrphans: true });
+      assertAttached();
+      if (!terminated) {
         // #469: name what blocks a crashed generation; other causes keep the generic message.
         const taken = project.manager.takeWorkerTerminationBlocker(workerId);
         const reason = taken && (taken.blocker.kind === 'unreadable' ? 'worker process record is unreadable; termination cannot be proven'
@@ -530,13 +613,20 @@ export class DelegationService {
         const snapshot = structuredClone(check());
         const proof = project.store.readWorkerExecution(workerId);
         const evidence = await collectWorkerEvidence(project.root, project.store, snapshot);
+        assertAttached();
         const current = check();
         if (proof?.phase !== 'complete' || project.store.readWorkerExecution(workerId)?.generation !== proof.generation ||
           project.store.readWorkerExecution(workerId)?.phase !== 'complete' || current.status !== snapshot.status ||
           JSON.stringify(current.delegation) !== JSON.stringify(snapshot.delegation)) throw new Error('Worker changed before cleanup checkpoint');
         // This immutable parent payload must be durable before the first destructive operation.
         project.store.commitWorkerResult(evidence.result.parentRunId, evidence.result, evidence.diffSnapshot);
-        result = await removeOwnedWorkspace(project.root, workspace, project.manager.getWorkerNoMaterializationProof(workerId));
+        assertAttached();
+        check();
+        result = await removeOwnedWorkspace(project.root, workspace, project.manager.getWorkerNoMaterializationProof(workerId), assertAttached);
+        // An already-started checked Git operation may finish after detach. Its
+        // checkpoint makes a new controller's retry safe; the old store must not
+        // publish a result after ownership of the project has moved.
+        assertAttached();
         persist(result.state, result.remaining, result.error);
         // Preserve the captured bytes even if Git removal was only partially successful.
         const removed = !result.remaining.includes('worktree');
@@ -550,6 +640,6 @@ export class DelegationService {
       }
       persist(result.state, result.remaining, result.error);
       return result;
-    });
+    }).finally(() => this.scheduleDestroyRetry(project, workerId));
   }
 }

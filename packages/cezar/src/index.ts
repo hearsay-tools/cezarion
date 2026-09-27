@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { createHostDiscovery } from './discovery/catalog.ts';
 import { DelegationController } from './delegation/provision.ts';
 import { parseArgs } from 'node:util';
 import { execFileSync } from 'node:child_process';
@@ -54,6 +55,7 @@ Usage:
   cez projects              list the projects this cockpit serves
                             (also: projects add [<dir>] · projects remove|rm <id> ·
                              projects tag <id> [<tag>…])
+  cez discover              list host runners, models, and advertised effort levels
   cez worker                manage owned workers (see: worker --help)
   cez task                  start/watch/steer cockpit tasks from the terminal (see: task --help)
   cez artifact publish <path> publish a local task artifact (see: artifact --help)
@@ -91,6 +93,11 @@ Skills live in .ai/skills/, .ai/cezar/skills/ and your team skills repo
 workflows in .ai/cezar/workflows/.`;
 
 async function main(): Promise<void> {
+  if (process.argv[2] === 'discover') {
+    const { runDiscoverCommand } = await import('./discovery/cli.ts');
+    process.exitCode = await runDiscoverCommand(process.argv.slice(3), process.env);
+    return;
+  }
   if (process.argv[2] === 'artifact') {
     const { runArtifactCommand } = await import('./artifacts/cli.ts');
     process.exitCode = await runArtifactCommand(process.argv.slice(3), process.env);
@@ -252,6 +259,8 @@ async function serveCommand(
   const delegation = await DelegationController.start();
   delegation.attachProject({ id: bootProjectId ?? 'default', root: repoRoot, store, manager });
   const providerAuth = new ProviderAuthService();
+  const discovery = createHostDiscovery(repoRoot, providerAuth);
+  delegation.service.setDiscovery(discovery);
   const workspaceEvents = new WorkspaceEventBus();
   const providerRuntimeAuth = new ProviderRuntimeAuthObserver(providerAuth, (status) => {
     workspaceEvents.emit('provider-status', status);
@@ -287,6 +296,7 @@ async function serveCommand(
     () => manager.recover(),
     providerRuntimeAuth,
   );
+  delegation.service.armDestroyRetries(bootProjectId ?? 'default');
   if (recovered > 0) console.log(`  recovered ${recovered} run(s) from the previous session`);
 
   // Update discovery (#368) — fire-and-forget; the banner prints whenever the
@@ -338,6 +348,7 @@ async function serveCommand(
     semaphore,
     bindHost,
     providerAuth,
+    modelCatalog: discovery.models,
     providerRuntimeAuth,
     workspaceEvents,
     taskWebhooks,
@@ -477,6 +488,7 @@ async function runCommand(
   const repoHandleController = new AbortController();
   const store = openStore(repoRoot, { repoHandleSignal: repoHandleController.signal });
   const delegation = await DelegationController.start();
+  delegation.service.setDiscovery(createHostDiscovery(repoRoot, providerAuth));
   try {
     // Headless tasks still appear in the cockpit later, so persist the same
     // task-local recovery event when a credential expires after the preflight.

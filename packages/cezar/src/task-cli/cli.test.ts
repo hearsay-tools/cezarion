@@ -344,7 +344,37 @@ describe('cez task', () => {
     });
   });
 
-  describe('stop, finish, diff, open', () => {
+  describe('archive, stop, finish, diff, open', () => {
+    it('archives and unarchives a task through the cockpit', async () => {
+      const id = await start();
+      expect(await run(['archive', id])).toBe(0);
+      expect(last()).toEqual({ id, archived: true });
+      expect(store.getRun(id)?.archived).toBe(true);
+      expect(await run(['list'])).toBe(0);
+      expect(last().runs).toEqual([]);
+
+      expect(await run(['unarchive', id])).toBe(0);
+      expect(last()).toEqual({ id, archived: false });
+      expect(store.getRun(id)?.archived).toBe(false);
+      expect(await run(['list'])).toBe(0);
+      expect((last().runs as Array<{ id: string }>).map((row) => row.id)).toEqual([id]);
+    });
+
+    it('archives finished tasks and reports the count', async () => {
+      const finished = await start('finished');
+      const active = await start('active');
+      store.updateRun(finished, { status: 'done' });
+      expect(await run(['archive-finished'])).toBe(0);
+      expect(last()).toEqual({ archived: 1 });
+      expect(store.getRun(finished)?.archived).toBe(true);
+      expect(store.getRun(active)?.archived).toBe(false);
+    });
+
+    it.each(['archive', 'unarchive'])('%s passes an unknown id through as exit 2', async (operation) => {
+      expect(await run([operation, 'bogus'])).toBe(2);
+      expect(last()).toEqual({ code: 'refused', status: 404, error: 'not found' });
+    });
+
     it('notify hands a task to the webhook with a note, and --off stops it (#589)', async () => {
       await withWebhook();
       const id = await start();
@@ -404,6 +434,9 @@ describe('cez task', () => {
     it('prints help text without discovering a cockpit', async () => {
       expect(await run(['--help'])).toBe(0);
       expect(out.join('\n')).toContain('cez task start');
+      expect(out.at(-1)).toContain('cez task archive <id>');
+      expect(out.at(-1)).toContain('cez task unarchive <id>');
+      expect(out.at(-1)).toContain('cez task archive-finished');
       expect(await run(['start', '--help'])).toBe(0);
       expect(out.at(-1)).toContain('--request-id');
       expect(out.at(-1)).toMatch(/--workflow[^\n]*\n  --skill /);

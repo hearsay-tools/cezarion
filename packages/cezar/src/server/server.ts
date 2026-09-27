@@ -1235,6 +1235,7 @@ export function createApp(deps: ServerDeps) {
       taskWebhooks.attach(project);
       return deps.delegation?.attachProject(project);
     },
+    afterRecover: (project) => deps.delegation?.service.armDestroyRetries(project.id),
   });
   // Workspace-level SSE bus (step 2.8) — the registry mutators and the
   // checkout flow (Phase 4) emit here; /api/workspace/events relays.
@@ -3612,6 +3613,7 @@ export function createApp(deps: ServerDeps) {
 
   // ---- chained family: runs lifecycle + artifacts (project-scoped) ----
   const delegationService = deps.delegation?.service ?? new DelegationService();
+  delegationService.setDiscovery({ models: modelCatalog, providers: providerStatus });
   const runsRoutes = new Hono<ProjectApiEnv>()
     .get('/runs', (c) => c.json(c.get('project').store.listRuns().map(run => withUsage(run))))
     .get('/runs/:id/relationships', paramZodValidator(runIdParamSchema), queryZodValidator(workerEmptyRequestSchema), (c) => {
@@ -5888,6 +5890,7 @@ export function startServer(deps: ServerDeps, port: number): ServerType & { shut
       taskWebhooks.attach(project);
       return deps.delegation?.attachProject(project);
     },
+    afterRecover: (project) => deps.delegation?.service.armDestroyRetries(project.id),
   });
   // #801: GitHub automations are opt-in. Off, the flag must remove the BEHAVIOR and not merely
   // the UI — no scheduler, no GitHub polling, no launched runs — so every entry point into the

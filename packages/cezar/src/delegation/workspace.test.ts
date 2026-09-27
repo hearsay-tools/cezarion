@@ -395,6 +395,43 @@ describe('owned workspace continuation and queued recovery', () => {
 
 
 describe('removeOwnedWorkspace verified retryable destruction', () => {
+  it('preserves owned resources when cleanup authority is revoked during preflight', async () => {
+    const { root, first } = await fixture();
+    const workspace = await createOwnedWorkspace(root, randomUUID(), first);
+    let attached = true;
+    const assertAttached = () => {
+      if (!attached) throw new Error('project detached');
+      queueMicrotask(() => { attached = false; });
+    };
+
+    expect(await removeOwnedWorkspace(root, workspace, undefined, assertAttached)).toMatchObject({
+      state: 'incomplete', remaining: ['worktree', 'branch'],
+    });
+    expect(existsSync(workspace.path)).toBe(true);
+    expect(git(root, 'branch', '--list', workspace.branch)).not.toBe('');
+    expect(existsSync(receiptPath(root, workspace).replace(/\.json$/, '.cleanup.json'))).toBe(false);
+  });
+
+  it('preserves the branch when cleanup authority is revoked after worktree removal', async () => {
+    const { root, first } = await fixture();
+    const workspace = await createOwnedWorkspace(root, randomUUID(), first);
+    let revokedAfterRemoval = false;
+    const assertAttached = () => {
+      if (!existsSync(workspace.path)) {
+        revokedAfterRemoval = true;
+        throw new Error('project detached');
+      }
+    };
+
+    expect(await removeOwnedWorkspace(root, workspace, undefined, assertAttached)).toMatchObject({
+      state: 'incomplete', remaining: ['branch'],
+    });
+    expect(revokedAfterRemoval).toBe(true);
+    expect(existsSync(workspace.path)).toBe(false);
+    expect(git(root, 'branch', '--list', workspace.branch)).not.toBe('');
+    expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'complete', remaining: [] });
+  });
+
   it.each(['externally removed', 'moved and pruned', 'externally advanced'] as const)(
     '%s without a cleanup checkpoint cannot authorize resource deletion', async shape => {
       const { root, first, second } = await fixture();

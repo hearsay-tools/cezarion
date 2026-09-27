@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import {
   apiRunSchema,
+  archiveFinishedResponseSchema,
   cancelResponseSchema,
   changesPayloadSchema,
   finishResponseSchema,
@@ -140,6 +141,9 @@ export const OPERATIONS: Record<string, Operation> = {
   },
   stop: { args: '<id>', description: 'Cancel a task.', positionals: [1, 1], flags: {} },
   finish: { args: '<id>', description: 'Close a waiting session as done.', positionals: [1, 1], flags: {} },
+  archive: { args: '<id>', description: 'Archive a task.', positionals: [1, 1], flags: {} },
+  unarchive: { args: '<id>', description: 'Restore an archived task.', positionals: [1, 1], flags: {} },
+  'archive-finished': { args: '', description: 'Archive all finished tasks.', positionals: [0, 0], flags: {} },
   diff: {
     args: '<id>',
     description: "Show a task's changes.",
@@ -486,6 +490,24 @@ async function execute(
       if (result.status !== 200) refuse(result);
       if (!finishResponseSchema.safeParse(result.data).success) invalidResponse('finish');
       print({ id, finished: true });
+      return EXIT.ok;
+    }
+    case 'archive':
+    case 'unarchive': {
+      const archived = name === 'archive';
+      const result = await request(cockpit, `${path}/archive`, { body: { archived } });
+      if (result.status !== 200) refuse(result);
+      const run = runRecordSchema.safeParse(result.data);
+      if (!run.success) invalidResponse('archive');
+      print({ id: run.data.id, archived: run.data.archived === true });
+      return EXIT.ok;
+    }
+    case 'archive-finished': {
+      const result = await request(cockpit, '/runs/archive-finished', { method: 'POST' });
+      if (result.status !== 200) refuse(result);
+      const answer = archiveFinishedResponseSchema.safeParse(result.data);
+      if (!answer.success) invalidResponse('archive-finished');
+      print(answer.data);
       return EXIT.ok;
     }
     case 'diff': {

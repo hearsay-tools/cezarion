@@ -759,6 +759,69 @@ describe('notes panel', () => {
 let detailsRunSeq = 0
 const freshRunId = () => `details-r${++detailsRunSeq}`
 
+describe('branch copy (#434)', () => {
+  it('waits for the clipboard write before claiming success', async () => {
+    stubFetch()
+    let finishWrite!: () => void
+    const writeText = vi.fn(() => new Promise<void>((resolve) => { finishWrite = resolve }))
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } })
+    renderHeader(run('done', { id: freshRunId(), branch: 'cez/feature-434' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Show run details' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Copy branch name' }))
+    expect(screen.queryByRole('button', { name: 'Copied branch name' })).toBeNull()
+    await act(async () => { finishWrite() })
+    expect(screen.getByRole('button', { name: 'Copied branch name' })).not.toBeNull()
+  })
+
+  it('copies the exact branch and resets the success confirmation after two seconds', async () => {
+    stubFetch()
+    vi.useFakeTimers()
+    const writeText = vi.fn(async () => undefined)
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } })
+    try {
+      renderHeader(run('done', { id: freshRunId(), branch: 'cez/feature-434' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Show run details' }))
+      const copy = screen.getByRole('button', { name: 'Copy branch name' })
+      await act(async () => { fireEvent.click(copy) })
+      expect(writeText).toHaveBeenCalledWith('cez/feature-434')
+      expect(screen.getByRole('button', { name: 'Copied branch name' })).toBe(copy)
+      act(() => { vi.advanceTimersByTime(1999) })
+      expect(screen.getByRole('button', { name: 'Copied branch name' })).toBe(copy)
+      act(() => { vi.advanceTimersByTime(1) })
+      expect(screen.getByRole('button', { name: 'Copy branch name' })).toBe(copy)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps a native focusable button inside mobile details', () => {
+    stubFetch()
+    renderHeader(run('done', { id: freshRunId(), branch: 'cez/feature-434' }))
+    const details = document.querySelector('[data-slot="run-details"]') as HTMLElement
+    expect(details.className).toContain('hidden')
+    fireEvent.click(screen.getByRole('button', { name: 'Show run details' }))
+    const copy = within(details).getByRole('button', { name: 'Copy branch name' })
+    expect(copy.tagName).toBe('BUTTON')
+    expect(copy.getAttribute('type')).toBe('button')
+    copy.focus()
+    expect(document.activeElement).toBe(copy)
+  })
+
+  it.each(['missing', 'denied'] as const)('shows the branch for manual copying when clipboard is %s', async (failure) => {
+    stubFetch()
+    vi.stubGlobal('navigator', failure === 'missing'
+      ? { ...navigator, clipboard: undefined }
+      : { ...navigator, clipboard: { writeText: vi.fn(async () => { throw new Error('denied') }) } })
+    renderHeader(run('done', { id: freshRunId(), branch: 'cez/feature-434' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Show run details' }))
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Copy branch name' })) })
+    expect(screen.getByRole('status').textContent).toContain('cez/feature-434')
+    expect(screen.getByRole('status').getAttribute('data-tone')).toBe('default')
+    expect(screen.getByRole('button', { name: 'Copy branch name' })).not.toBeNull()
+    expect(screen.queryByRole('button', { name: 'Copied branch name' })).toBeNull()
+  })
+})
+
 describe('dense run details (#765)', () => {
   it('collapses the meta row at phone width, and leaves the desktop header as it was', () => {
     stubFetch()
@@ -1094,7 +1157,7 @@ describe('meta line, tabs, pill and resume hint', () => {
     if (prChip) {
       expect(prChip.getAttribute('href')).toBe('https://github.com/open-mercato/cezar/pull/534')
       expect(prChip.textContent).toContain('#534')
-      expect(branch?.nextElementSibling?.nextElementSibling).toBe(prChip)
+      expect(branch?.parentElement?.nextElementSibling?.nextElementSibling).toBe(prChip)
     }
     if (issueChip) {
       expect(issueChip.getAttribute('href')).toBe('https://github.com/open-mercato/cezar/issues/544')
