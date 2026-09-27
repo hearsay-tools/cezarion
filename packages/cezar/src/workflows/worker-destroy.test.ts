@@ -567,15 +567,17 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     const setController = (id: string, controller: { pid: number; startToken?: string }) => writeFileSync(recordPath(id), JSON.stringify({ ...readRecord(id), controller }));
     const branchExists = (branch: string) => execFileSync('git', ['branch', '--list', branch], { cwd: root, encoding: 'utf8' }).includes(branch);
 
-    /** Launch 1 is a real child in the worktree; later launches (recovery's Continue) close at once. */
-    async function crashed(status: RunRecord['status'] = 'running') {
+    /** Launch 1 is a real child in the worker's worktree or scratch; later launches close at once. */
+    async function crashed(status: RunRecord['status'] = 'running', holderLocation: 'worktree' | 'scratch' = 'worktree') {
       const w = await worker(); let first: Awaited<ReturnType<typeof spawnReady>> | undefined; let launches = 0; let ready!: () => void;
       const started = new Promise<void>(resolve => { ready = resolve; });
       vi.spyOn(runners, 'createRunner').mockReturnValue({ backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT, interrupt: async () => undefined,
         run: async () => { throw Error('unused'); }, startSession: () => {
           if (++launches > 1) return { result: Promise.resolve({ text: 'resumed', toolCalls: [], tokensUsed: 0 }), open: false,
             sendMessage: () => false, sendAgentMessage: () => false, discardQueuedMessages: () => {}, interrupt() {}, end() {} };
-          const proc = spawn(process.execPath, ['-e', TERM_IGNORING], { cwd: workspace(w).path, stdio: ['ignore', 'pipe', 'ignore'] });
+          const cwd = holderLocation === 'scratch' ? resolveAgentTmpDir(join(root, '.ai/cezar'), w.id) : workspace(w).path;
+          if (holderLocation === 'scratch') mkdirSync(cwd, { recursive: true });
+          const proc = spawn(process.execPath, ['-e', TERM_IGNORING], { cwd, stdio: ['ignore', 'pipe', 'ignore'] });
           releases.push(() => proc.kill('SIGKILL'));
           const exited = new Promise<void>(resolve => proc.once('exit', () => resolve()));
           first = { proc, exited }; proc.stdout!.once('data', () => ready());
@@ -632,22 +634,31 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
       } finally { other.dispose(); reopened.flush(); }
     });
 
-    it('a survivor found only by the working-directory scan is never signalled and keeps the worktree', async () => {
-      const { w, child, prior, reopened, other, service } = await crashed('failed');
+    it('scan-only survivors are reported exactly, never signalled, and keep the worktree', async () => {
+      // Scratch is scanned for the same generation; keeping holders there excludes transient
+      // git children working in the worktree from this exact-PID assertion.
+      const { w, child, prior, reopened, other, service } = await crashed('failed', 'scratch');
+      const scratch = resolveAgentTmpDir(join(root, '.ai/cezar'), w.id);
+      const second = await spawnReady(scratch);
+      const expectedPids = [child.proc.pid!, second.proc.pid!].sort((a, b) => a - b);
       // The survivor never exits, so each destroy waits out its deadline (#469); keep it short.
       (service as unknown as { terminationTimeoutMs: number }).terminationTimeoutMs = 1_500;
       try {
         rmSync(recordPath(w.id));
         await other.recover();
         expect(reopened.readWorkerExecution(w.id)).toEqual(prior);
-        expect(await service.destroyForHuman('reopened', w.id)).toMatchObject({ state: 'incomplete', remaining: expect.arrayContaining(['process', 'worktree', 'branch']),
-          error: expect.stringMatching(new RegExp(`^Worker termination is not proven: process(es)? (\\d+, )*${child.proc.pid}(, \\d+)* still holds? the worker's worktree or scratch; retry cleanup later$`)) });
+        const blocked = await service.destroyForHuman('reopened', w.id);
+        expect(blocked).toMatchObject({ state: 'incomplete', remaining: ['process', 'worktree', 'branch'] });
+        const reason = /^Worker termination is not proven: (processes [\d, ]+ still hold the worker's worktree or scratch); retry cleanup later$/.exec(blocked.error ?? '')?.[1];
+        expect(reason).toBeDefined();
+        expect(reason!.match(/\d+/g)?.map(Number).sort((a, b) => a - b)).toEqual(expectedPids);
         // A retry with the same blocker set appends no second event.
         expect(await service.destroyForHuman('reopened', w.id)).toMatchObject({ state: 'incomplete' });
         expect(reopened.readEvents(w.id).filter(event => event.type === 'lifecycle' && String(event.message).startsWith('destroy blocked:'))).toEqual([
-          expect.objectContaining({ message: `destroy blocked: process ${child.proc.pid} still holds the worker's worktree or scratch` })]);
+          expect.objectContaining({ message: `destroy blocked: ${reason}` })]);
         expect(existsSync(workspace(w).path)).toBe(true);
         expect(child.proc.exitCode).toBeNull(); expect(child.proc.signalCode).toBeNull();
+        expect(second.proc.exitCode).toBeNull(); expect(second.proc.signalCode).toBeNull();
         expect(reopened.readWorkerExecution(w.id)).toEqual(prior);
       } finally { other.dispose(); reopened.flush(); }
     });
