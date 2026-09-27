@@ -27,7 +27,7 @@ import {
   type ThreadScrollControls,
 } from './thread-scroller'
 import type { ThreadAsk, ThreadEntry, ThreadState } from './thread-state'
-import type { TaskTitleMap } from './conversation-presentation'
+import type { RecipientBackendMap, TaskTitleMap } from './conversation-presentation'
 import { ConversationNavigation, type ConversationTarget } from './conversation-navigation'
 
 export interface TranscriptUserMessage {
@@ -84,6 +84,7 @@ export interface SessionTranscriptProps {
   scrollControls?: ThreadScrollControls
   renderMode?: 'flat' | 'virtual'
   taskTitles?: TaskTitleMap
+  recipientBackends?: RecipientBackendMap
 }
 
 /** The main run record plus reduced turns, without rendering or backend inspection. */
@@ -226,6 +227,7 @@ export function SessionTranscript({
   scrollControls,
   renderMode,
   taskTitles,
+  recipientBackends,
 }: SessionTranscriptProps) {
   const rowModels = useMemo(() => buildTranscriptRows(sections, runId), [sections, runId])
   const internalScroll = useThreadScroll(`${runId}:${viewId}`, { surface: mode })
@@ -252,9 +254,9 @@ export function SessionTranscript({
     () =>
       rowModels.map((row) => ({
         key: row.key,
-        node: renderRowContent(row, messageActions?.[row.key], renderAsk, runId, taskTitles),
+        node: renderRowContent(row, messageActions?.[row.key], renderAsk, runId, taskTitles, recipientBackends),
       })),
-    [messageActions, renderAsk, rowModels, runId, taskTitles],
+    [messageActions, renderAsk, rowModels, runId, taskTitles, recipientBackends],
   )
   const rowMode = renderMode ?? threadRenderMode('', rows.length)
 
@@ -301,6 +303,7 @@ function renderRowContent(
   renderAsk: ((ask: ThreadAsk) => ReactNode) | undefined,
   runId: string,
   taskTitles?: TaskTitleMap,
+  recipientBackends?: RecipientBackendMap,
 ): ReactNode {
   switch (row.content.kind) {
     case 'user-message':
@@ -322,6 +325,7 @@ function renderRowContent(
           renderAsk={renderAsk}
           runId={runId}
           taskTitles={taskTitles}
+          recipientBackends={recipientBackends}
         />
       )
     default:
@@ -356,16 +360,18 @@ function ThreadBlockRenderer({
   renderAsk,
   runId,
   taskTitles,
+  recipientBackends,
 }: {
   block: ThreadBlock
   scope: string
   renderAsk?: (ask: ThreadAsk) => ReactNode
   runId: string
   taskTitles?: TaskTitleMap
+  recipientBackends?: RecipientBackendMap
 }): ReactNode {
   switch (block.kind) {
     case 'entry':
-      return <ThreadEntryRenderer entry={block.entry} scope={scope} renderAsk={renderAsk} runId={runId} taskTitles={taskTitles} />
+      return <ThreadEntryRenderer entry={block.entry} scope={scope} renderAsk={renderAsk} runId={runId} taskTitles={taskTitles} recipientBackends={recipientBackends} />
     case 'tool-card':
       return (
         <ToolCard
@@ -373,7 +379,7 @@ function ThreadBlockRenderer({
           nested={block.children}
           cacheKey={`${scope}:${block.id}`}
           renderNested={(entries, nestedScope) => (
-            <GroupedEntries entries={entries} scope={nestedScope} renderAsk={renderAsk} runId={runId} taskTitles={taskTitles} />
+            <GroupedEntries entries={entries} scope={nestedScope} renderAsk={renderAsk} runId={runId} taskTitles={taskTitles} recipientBackends={recipientBackends} />
           )}
         />
       )
@@ -383,12 +389,12 @@ function ThreadBlockRenderer({
       return (
         <ToolStreak count={block.count}>
           {block.blocks.map((inner) => (
-            <ThreadBlockRenderer key={inner.id} block={inner} scope={scope} renderAsk={renderAsk} runId={runId} taskTitles={taskTitles} />
+            <ThreadBlockRenderer key={inner.id} block={inner} scope={scope} renderAsk={renderAsk} runId={runId} taskTitles={taskTitles} recipientBackends={recipientBackends} />
           ))}
         </ToolStreak>
       )
     case 'worker-conversation':
-      return <WorkerConversationGroup block={block} runId={runId} taskTitles={taskTitles} />
+      return <WorkerConversationGroup block={block} runId={runId} taskTitles={taskTitles} recipientBackends={recipientBackends} />
     default:
       return assertNever(block)
   }
@@ -400,15 +406,17 @@ function GroupedEntries({
   renderAsk,
   runId,
   taskTitles,
+  recipientBackends,
 }: {
   entries: readonly ThreadEntry[]
   scope: string
   renderAsk?: (ask: ThreadAsk) => ReactNode
   runId: string
   taskTitles?: TaskTitleMap
+  recipientBackends?: RecipientBackendMap
 }) {
   return groupThreadItems([...entries]).map((block) => (
-    <ThreadBlockRenderer key={block.id} block={block} scope={scope} renderAsk={renderAsk} runId={runId} taskTitles={taskTitles} />
+    <ThreadBlockRenderer key={block.id} block={block} scope={scope} renderAsk={renderAsk} runId={runId} taskTitles={taskTitles} recipientBackends={recipientBackends} />
   ))
 }
 
@@ -418,12 +426,14 @@ function ThreadEntryRenderer({
   renderAsk,
   runId,
   taskTitles,
+  recipientBackends,
 }: {
   entry: ThreadEntry
   scope: string
   renderAsk?: (ask: ThreadAsk) => ReactNode
   runId: string
   taskTitles?: TaskTitleMap
+  recipientBackends?: RecipientBackendMap
 }): ReactNode {
   switch (entry.kind) {
     case 'message':
@@ -448,6 +458,7 @@ function ThreadEntryRenderer({
         <WorkerConversationGroup
           runId={runId}
           taskTitles={taskTitles}
+          recipientBackends={recipientBackends}
           block={{
             kind: 'worker-conversation',
             id: entry.id,

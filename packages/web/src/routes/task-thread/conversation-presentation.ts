@@ -1,9 +1,19 @@
 import { runTitle } from '@/lib/task-groups'
-import type { ApiRun } from '@open-mercato/cezar-api-client'
+import type { ApiRun, Runner } from '@open-mercato/cezar-api-client'
 
 import type { ThreadConversationMessage } from './thread-state'
 
 export type TaskTitleMap = Readonly<Record<string, string>>
+export type RecipientBackendMap = Readonly<Record<string, Runner | undefined>>
+
+/** The current session's backend can override the run's original runner. */
+export function recipientBackendsFromRuns(current: ApiRun, runs: readonly ApiRun[] | undefined): RecipientBackendMap {
+  const backends: Record<string, Runner | undefined> = {}
+  for (const run of [...(runs ?? []), current]) {
+    backends[run.id] = run.steps.find(step => step.id === run.currentStepId)?.backend ?? run.runner
+  }
+  return backends
+}
 
 export function titlesFromRuns(current: ApiRun, runs: readonly ApiRun[] | undefined): Record<string, string> {
   const titles: Record<string, string> = { [current.id]: runTitle(current) }

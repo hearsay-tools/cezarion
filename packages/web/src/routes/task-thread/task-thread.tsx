@@ -53,7 +53,7 @@ import {
   mainTranscriptSections,
   type TranscriptMessageActions,
 } from './session-transcript'
-import { titlesFromRuns } from './conversation-presentation'
+import { recipientBackendsFromRuns, titlesFromRuns } from './conversation-presentation'
 import {
   reduceThread,
   threadFilePaths,
@@ -280,6 +280,7 @@ export function ThreadView({
   const sections = useMemo(() => mainTranscriptSections(run, thread), [run, thread])
   const rows = useMemo(() => buildTranscriptRows(sections, run.id), [sections, run.id])
   const taskTitles = useMemo(() => titlesFromRuns(run, runs.data), [run, runs.data])
+  const recipientBackends = useMemo(() => recipientBackendsFromRuns(run, runs.data), [run, runs.data])
   const renderAsk = useCallback((ask: ThreadAsk) => <AskCard ask={ask} run={run} />, [run])
   const messageActions = useMemo<Readonly<Record<string, TranscriptMessageActions>> | undefined>(() => {
     if (edit === undefined) return undefined
@@ -334,6 +335,7 @@ export function ThreadView({
           scrollControls={scroll}
           renderMode={mode}
           taskTitles={taskTitles}
+          recipientBackends={recipientBackends}
         />
 
         {thread.turns.length === 0 ? (
@@ -408,6 +410,7 @@ export function ThreadView({
         agent={openAgent}
         entries={openAgentChildren}
         taskTitles={taskTitles}
+        recipientBackends={recipientBackends}
         onClose={() => setOpenAgentId(undefined)}
       />
 
