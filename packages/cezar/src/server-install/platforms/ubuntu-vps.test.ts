@@ -640,6 +640,167 @@ describe('ubuntu-vps redeploy npx-cache refresh (#696)', () => {
   });
 });
 
+describe('ubuntu-vps redeploy restart verification (#430)', () => {
+  function redeployContext(opts: {
+    before?: string;
+    after?: string;
+    final?: string;
+    restartCode?: number;
+    scope?: 'user' | 'system';
+    instance?: string;
+    dryRun?: boolean;
+    journal?: string;
+    journalStderr?: string;
+    journalThrows?: boolean;
+    journalUnreadable?: boolean;
+    sudoJournal?: string;
+    sudoJournalCode?: number;
+    sudoAllowed?: boolean;
+    curlCode?: string;
+  } = {}) {
+    const calls: string[] = [];
+    let shows = 0;
+    const runner: Runner = {
+      capture: async (program, args) => {
+        calls.push(`${program} ${args.join(' ')}`);
+        if (program === 'systemctl' && args.includes('ExecStart')) return { code: 0, stdout: '', stderr: '' };
+        if (program === 'systemctl' && args.includes('show')) {
+          const stdout = shows++ === 0 ? opts.before : shows === 2 ? opts.after : opts.final ?? opts.after;
+          return { code: stdout === undefined ? 1 : 0, stdout: stdout ?? '', stderr: '' };
+        }
+        if (program === 'journalctl') {
+          if (opts.journalThrows) throw new Error('journal unavailable');
+          return { code: opts.journalUnreadable ? 1 : 0, stdout: opts.journalUnreadable ? '' : opts.journal ?? 'recent service failure\n', stderr: opts.journalStderr ?? '' };
+        }
+        if (program === 'sudo' && args.includes('journalctl')) return { code: opts.sudoJournalCode ?? 0, stdout: opts.sudoJournal ?? '', stderr: '' };
+        if (program === 'sudo' && args.includes('true')) return { code: opts.sudoAllowed === false ? 1 : 0, stdout: '', stderr: '' };
+        if (program === 'curl') return { code: 0, stdout: opts.curlCode ?? '200', stderr: '' };
+        return { code: 0, stdout: '', stderr: '' };
+      },
+      interactive: async (program, args) => {
+        calls.push(`${program} ${args.join(' ')}`);
+        return args.some((arg) => arg.includes('restart')) ? (opts.restartCode ?? 0) : 0;
+      },
+    };
+    const ctx = ctxWith({
+      runner,
+      dryRun: opts.dryRun,
+      state: {
+        externalProxy: true,
+        steps: { autostart: { status: 'done', created: { artifacts: [{ kind: 'owned', type: 'service', name: 'cezar.service', scope: opts.scope ?? 'user' }] } } },
+      },
+    });
+    ctx.instance = opts.instance ?? 'default';
+    return { ctx, calls };
+  }
+
+  const before = 'ActiveState=active\nExecMainStartTimestampMonotonic=100\n';
+  const after = 'ActiveState=active\nExecMainStartTimestampMonotonic=200\n';
+
+  it('fails an inactive user unit even when the old HTTP endpoint answers', async () => {
+    const { ctx, calls } = redeployContext({ before, after: 'ActiveState=failed\nExecMainStartTimestampMonotonic=200\n' });
+    await expect(ubuntuVps.redeploy!(ctx)).rejects.toThrow(/cezar\.service.*inactive|cezar\.service.*failed/);
+    expect(calls.join('\n')).toContain('journalctl --user -u cezar.service');
+  });
+
+  it('includes bounded journal output without hiding the restart failure', async () => {
+    const journal = Array.from({ length: 50 }, (_, i) => `line ${i}`).join('\n');
+    const { ctx } = redeployContext({ before, after, restartCode: 1, journal });
+    await expect(ubuntuVps.redeploy!(ctx)).rejects.toThrow(/line 20[\s\S]*line 49/);
+    const unavailable = redeployContext({ before, after, restartCode: 1, journalThrows: true });
+    await expect(ubuntuVps.redeploy!(unavailable.ctx)).rejects.toThrow(/cezar\.service.*restart returned code 1/);
+  });
+
+  it('fails an unchanged start timestamp even if the process ID could differ', async () => {
+    const { ctx } = redeployContext({ before, after: 'ActiveState=active\nExecMainStartTimestampMonotonic=100\nMainPID=999\n' });
+    await expect(ubuntuVps.redeploy!(ctx)).rejects.toThrow(/cezar\.service.*start timestamp.*unchanged/);
+  });
+
+  it('fails a nonzero user restart despite a healthy old endpoint', async () => {
+    const { ctx } = redeployContext({ before, after, restartCode: 1 });
+    await expect(ubuntuVps.redeploy!(ctx)).rejects.toThrow(/cezar\.service.*restart.*code 1/);
+  });
+
+  it('accepts an active service with an advanced timestamp even when PID is reused', async () => {
+    const { ctx } = redeployContext({ before: `${before}MainPID=42\n`, after: `${after}MainPID=42\n` });
+    await expect(ubuntuVps.redeploy!(ctx)).resolves.toBeUndefined();
+  });
+
+  it('fails when the unit dies after the initial restart check', async () => {
+    const { ctx } = redeployContext({ before, after, final: 'ActiveState=failed\nExecMainStartTimestampMonotonic=200\n' });
+    await expect(ubuntuVps.redeploy!(ctx)).rejects.toThrow(/cezar\.service.*service is failed[\s\S]*recent service failure/);
+  });
+
+  it('includes journal diagnostics when HTTP readiness fails', async () => {
+    const { ctx } = redeployContext({ before, after, curlCode: '000' });
+    await expect(ubuntuVps.redeploy!(ctx)).rejects.toThrow(/cezar\.service.*cockpit verification failed[\s\S]*recent service failure/);
+  });
+
+  it('fails when the before or after service identity is unreadable', async () => {
+    for (const snapshots of [{ before: undefined, after }, { before, after: 'ActiveState=active\n' }]) {
+      const { ctx } = redeployContext(snapshots);
+      await expect(ubuntuVps.redeploy!(ctx)).rejects.toThrow(/cezar\.service.*timestamp.*unavailable/);
+    }
+  });
+
+  it('fails when the after snapshot cannot be read at all', async () => {
+    const { ctx } = redeployContext({ before, after: undefined });
+    await expect(ubuntuVps.redeploy!(ctx)).rejects.toThrow(/cezar\.service.*inactive or unreadable/);
+  });
+
+  it('uses the named system unit and fails an unchanged timestamp', async () => {
+    const { ctx, calls } = redeployContext({ before, after: before, scope: 'system', instance: 'shop' });
+    await expect(ubuntuVps.redeploy!(ctx)).rejects.toThrow(/cezar-shop\.service.*start timestamp.*unchanged/);
+    expect(calls.join('\n')).toContain('journalctl -u cezar-shop.service');
+  });
+
+  it('fails a nonzero system restart even if systemd reports an advanced timestamp', async () => {
+    const { ctx } = redeployContext({ before, after, scope: 'system', restartCode: 7 });
+    await expect(ubuntuVps.redeploy!(ctx)).rejects.toThrow(/cezar\.service.*restart.*code 7/);
+  });
+
+  it('uses noninteractive sudo for system logs only after sudo ran the restart', async () => {
+    const { ctx, calls } = redeployContext({ before, after: before, scope: 'system', journalUnreadable: true, sudoJournal: 'root journal detail\n' });
+    await expect(ubuntuVps.redeploy!(ctx)).rejects.toThrow(/root journal detail/);
+    expect(calls.join('\n')).toContain('sudo -n journalctl -u cezar.service -n 30');
+  });
+
+  it('uses authorized sudo when ordinary journalctl reports no entries with a permission warning', async () => {
+    const { ctx, calls } = redeployContext({
+      before, after: before, scope: 'system', journal: '-- No entries --\n',
+      journalStderr: 'Hint: You are currently not seeing messages from other users and the system.\n',
+      sudoJournal: 'root journal detail\n',
+    });
+    await expect(ubuntuVps.redeploy!(ctx)).rejects.toThrow(/root journal detail/);
+    expect(calls.join('\n')).toContain('sudo -n journalctl -u cezar.service -n 30');
+  });
+
+  it('retains ordinary journal output when authorized sudo cannot read it', async () => {
+    const { ctx, calls } = redeployContext({
+      before, after: before, scope: 'system', journal: 'ordinary detail\n', sudoJournalCode: 1,
+    });
+    await expect(ubuntuVps.redeploy!(ctx)).rejects.toThrow(/ordinary detail/);
+    expect(calls.join('\n')).toContain('sudo -n journalctl -u cezar.service -n 30');
+  });
+
+  it('does not use sudo for logs after a delegated system restart', async () => {
+    const { ctx, calls } = redeployContext({ before, after: before, scope: 'system', journalUnreadable: true, sudoAllowed: false });
+    await expect(ubuntuVps.redeploy!(ctx)).rejects.toThrow(/recent journal unavailable/);
+    expect(calls.some((call) => call.includes('sudo -n journalctl'))).toBe(false);
+  });
+
+  it('accepts a healthy named system restart', async () => {
+    const { ctx } = redeployContext({ before, after, scope: 'system', instance: 'shop' });
+    await expect(ubuntuVps.redeploy!(ctx)).resolves.toBeUndefined();
+  });
+
+  it('keeps dry run free of restart probes', async () => {
+    const { ctx, calls } = redeployContext({ dryRun: true });
+    await expect(ubuntuVps.redeploy!(ctx)).resolves.toBeUndefined();
+    expect(calls.some((call) => call.includes('ExecMainStartTimestampMonotonic'))).toBe(false);
+  });
+});
+
 describe('ubuntu-vps autostart step (dry-run)', () => {
   it('records a user-scoped service artifact and writes nothing to disk', async () => {
     const created = await stepById('autostart').run(ctxWith({ dryRun: true }));

@@ -668,7 +668,9 @@ function TableRow({
       {columns.map((column) => {
         if (column.id === 'memory') return null
         if (column.id === 'cpu') {
-          return queuePosition !== null ? (
+          const cpuExpanded = isColumnExpanded('cpu', expandedColumns)
+          const memoryExpanded = isColumnExpanded('memory', expandedColumns)
+          return queuePosition !== null && (cpuExpanded || memoryExpanded) ? (
             <td
               key={column.id}
               data-slot="queue-note"
@@ -682,8 +684,8 @@ function TableRow({
             <UsageTds
               key={column.id}
               run={run}
-              cpuExpanded={isColumnExpanded('cpu', expandedColumns)}
-              memoryExpanded={isColumnExpanded('memory', expandedColumns)}
+              cpuExpanded={cpuExpanded}
+              memoryExpanded={memoryExpanded}
             />
           )
         }

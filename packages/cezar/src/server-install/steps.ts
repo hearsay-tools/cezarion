@@ -113,8 +113,10 @@ export interface SudoStepOpts {
   input?: string;
   /** Human name for the stdin payload, e.g. "credential line". */
   inputLabel?: string;
-  /** Prove the command actually took effect. Runs after every attempt. */
-  verify: (ctx: InstallContext) => Promise<boolean>;
+  /** Prove the command actually took effect. Runs after every attempt.
+   * `commandCode` is the exit code in sudo mode; it is undefined when the
+   * operator ran the displayed command in a separate root shell. */
+  verify: (ctx: InstallContext, commandCode?: number) => Promise<boolean>;
 }
 
 /**
@@ -200,13 +202,14 @@ export async function sudoStep(ctx: InstallContext, opts: SudoStepOpts): Promise
       ctx.prefs.sudoMode = choice; // reuse this choice for every later privileged command
     }
 
+    let commandCode: number | undefined;
     if (mode === 'sudo') {
-      const code = await ctx.runner.interactive(
+      commandCode = await ctx.runner.interactive(
         'sudo',
         ['bash', '-lc', opts.command],
         opts.input != null ? { input: opts.input } : undefined,
       );
-      if (code !== 0) ui.warn(`command exited with code ${code}`);
+      if (commandCode !== 0) ui.warn(`command exited with code ${commandCode}`);
     } else {
       ui.info('Copy the command above and run it as root on the server (paste into a root shell, or prefix with sudo), then confirm below.');
       if (opts.input != null) {
@@ -220,7 +223,7 @@ export async function sudoStep(ctx: InstallContext, opts: SudoStepOpts): Promise
       }
     }
 
-    if (await opts.verify(ctx)) {
+    if (await opts.verify(ctx, commandCode)) {
       ui.success('Verified.');
       return;
     }
