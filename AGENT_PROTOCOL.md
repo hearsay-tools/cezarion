@@ -649,6 +649,9 @@ Early settlement queues an observation without interrupting the active turn.
 A parked result requests scheduler admission before `sendAgentMessage`; a monitor
 already charged for capacity must not wait for its own slot. Provider acknowledgement
 checkpoints delivery and retires `ciWait` into bounded `lastCiWait` history.
+Until that checkpoint, monitoring remains set while admission reserves capacity.
+Settled observations retry admission and refused delivery once per second without
+human input; withdrawal, terminal state and disposal stop retries.
 
 Human input withdraws the wait and removes its undelivered lifecycle input. A
 pending human question takes precedence and must never be answered with CI data.
