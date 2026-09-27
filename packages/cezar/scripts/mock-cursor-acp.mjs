@@ -73,8 +73,9 @@ async function prompt(id, content) {
   if (input.includes('mock:provider-error') && !input.includes('mock:provider-error-')) { text('\n\nError: [unauthenticated] Backend rejected authentication.'); complete(id); return; }
   // #401: ACP has chunks only, so completion must flush the same text to v1/v2.
   if (input.includes('mock:ask-snapshot')) {
-    text('Choose a test library.\nCEZ:ASK {"questions":[{"header":"Library","question":"Which test library?","options":[{"label":"Vitest"},{"label":"Node test"}]}]}'); complete(id); return;
+    text('Using the CEZ:ASK structured question format instead:\n\nCEZ:ASK {"questions":[{"header":"Library","question":"Which test library?","options":[{"label":"Vitest"},{"label":"Node test"}]}]}'); complete(id); return;
   }
+  if (input.includes('mock:ask-prose')) { text('Use `CEZ:ASK {"questions":[]}` in your reply.\n> CEZ:ASK {not valid json'); complete(id); return; }
   if (input.includes('mock:ask-bad')) { pendingAsk = { id }; emit({ id: 'bad-question', method: 'cursor/ask_question', params: { questions: [] } }); return; }
   if (input.includes('mock:plan')) { pendingAsk = { id, input }; emit({ id: 'plan-1', method: 'cursor/create_plan', params: { name: 'Test plan', overview: 'Approve the changes?', plan: 'Implement the change and run tests.' } }); return; }
   if (input.includes('mock:multi-ask')) { pendingAsk = { id }; emit({ id: 'multi-question', method: 'cursor/ask_question', params: { title: 'Choices', questions: [question, { ...question, id: 'build', prompt: 'Which build tool?', options: [{ id: 'vite', label: 'Vite' }, { id: 'webpack', label: 'Webpack' }] }] } }); return; }

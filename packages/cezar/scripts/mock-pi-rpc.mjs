@@ -186,7 +186,13 @@ async function handle(command) {
     send({ id: command.id, type: 'response', command: 'prompt', success: true });
     send({ type: 'agent_start' });
     send({ type: 'turn_start' });
-    send({ type: 'message_update', message: {}, assistantMessageEvent: { type: 'text_end', contentIndex: 0, content: 'Choose a test library.\nCEZ:ASK {"questions":[{"header":"Library","question":"Which test library?","options":[{"label":"Vitest"},{"label":"Node test"}]}]}', partial: {} } });
+    send({ type: 'message_update', message: {}, assistantMessageEvent: { type: 'text_end', contentIndex: 0, content: 'Using the CEZ:ASK structured question format instead:\n\nCEZ:ASK {"questions":[{"header":"Library","question":"Which test library?","options":[{"label":"Vitest"},{"label":"Node test"}]}]}', partial: {} } });
+    sendTurnEnd();
+  } else if (command.type === 'prompt' && command.message.includes('mock:ask-prose')) {
+    send({ id: command.id, type: 'response', command: 'prompt', success: true });
+    send({ type: 'agent_start' });
+    send({ type: 'turn_start' });
+    sendText(['Use `CEZ:ASK {"questions":[]}` in your reply.\n> CEZ:ASK {not valid json']);
     sendTurnEnd();
   } else if (command.type === 'prompt' && command.message.includes('mock:ask-bad')) {
     // A marker whose JSON body is invalid. `parseAskMarker` must render no card

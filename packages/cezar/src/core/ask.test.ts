@@ -130,6 +130,32 @@ describe('parseAskRequest', () => {
 const askJson = JSON.stringify(valid);
 
 describe('parseAskMarker', () => {
+  it('uses the marker on the final nonempty line even when prose mentions CEZ:ASK earlier', () => {
+    const turn = `Using the CEZ:ASK structured question format instead:\n\nCEZ:ASK ${askJson}\n`;
+    expect(parseAskMarkerResult(turn)).toMatchObject({ kind: 'valid', request: valid });
+    expect(stripAskMarker(turn)).toBe('Using the CEZ:ASK structured question format instead:');
+  });
+
+  it('keeps bounded repair and raw rejection on the final marker after an earlier mention', () => {
+    const prefix = 'The CEZ:ASK format is below.\n\n';
+    const cut = 'CEZ:ASK {"questions":[{"header":"H","question":"Q?","options":[{"label":"a"},{"label":"b"}]}]';
+    expect(parseAskMarkerResult(prefix + cut)).toMatchObject({ kind: 'valid', repaired: true });
+    expect(stripAskMarker(prefix + cut)).toBe('The CEZ:ASK format is below.');
+    expect(stripAskMarker(prefix + cut, false)).toBe(prefix + cut);
+    const invalid = prefix + 'CEZ:ASK {not valid json';
+    expect(parseAskMarkerResult(invalid)).toMatchObject({ kind: 'invalid-json' });
+    expect(stripAskMarker(invalid)).toBe(invalid);
+  });
+
+  it.each([
+    'Using the CEZ:ASK structured question format instead:',
+    'Use `CEZ:ASK {"questions":[]}` in your reply.',
+    '> CEZ:ASK {not valid json',
+  ])('ignores marker mentions outside an unquoted final line: %s', (turn) => {
+    expect(parseAskMarkerResult(turn)).toEqual({ kind: 'none' });
+    expect(stripAskMarker(turn)).toBe(turn);
+  });
+
   it('extracts a valid request from a trailing CEZ:ASK marker', () => {
     const turn = `Here are the options.\nCEZ:ASK ${askJson}`;
     expect(parseAskMarker(turn)).toEqual(valid);

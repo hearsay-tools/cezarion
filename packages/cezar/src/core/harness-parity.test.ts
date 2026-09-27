@@ -300,6 +300,33 @@ const RUN_CRITERIA: readonly RunCriterion[] = [
     },
   },
   {
+    // #548: an earlier prose mention must not consume the real final-line ASK.
+    id: 'R17',
+    name: 'R17 resolves a final-line ASK after prose mentions the marker',
+    scenario: 'ask-snapshot',
+    settled: (record) => record?.status === 'waiting' || TERMINAL.includes(record?.status ?? ''),
+    assert: (obs) => {
+      expect(obs.record?.status).toBe('waiting');
+      expect(askEvents(obs)).toHaveLength(1);
+      expect(obs.events.some(e => e.type === 'note' && String(e.message).includes('structured question ignored'))).toBe(false);
+      expect(obs.events.some(e => e.type === 'text' && String(e.text).includes('Using the CEZ:ASK structured question format instead:'))).toBe(true);
+      expect(obs.events.some(e => e.type === 'text' && String(e.text).includes('\nCEZ:ASK {'))).toBe(false);
+    },
+  },
+  {
+    // #548: code spans and quoted logs alone are prose, never rejected ASK.
+    id: 'R18',
+    name: 'R18 leaves quoted ASK examples as plain text without a rejection',
+    scenario: 'ask-prose',
+    settled: (record) => record?.status === 'waiting' || TERMINAL.includes(record?.status ?? ''),
+    assert: (obs) => {
+      expect(obs.record?.status).toBe('waiting');
+      expect(askEvents(obs)).toHaveLength(0);
+      expect(obs.events.some(e => e.type === 'note' && String(e.message).includes('structured question ignored'))).toBe(false);
+      expect(obs.events.some(e => e.type === 'text' && String(e.text).includes('> CEZ:ASK {not valid json'))).toBe(true);
+    },
+  },
+  {
     // Group 6 / #48 — a declared park is a non-attention state. The same
     // scenario S8 asserts survives the seam: the cause below, the effect here.
     id: 'R5',
