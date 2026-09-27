@@ -5,7 +5,7 @@ import { cn } from '@/lib/utils'
 import type { SubagentSummary } from './subagent-dock'
 import type { ThreadAsk, ThreadEntry } from './thread-state'
 import { SessionTranscript, agentTranscriptSections } from './session-transcript'
-import type { TaskTitleMap } from './conversation-presentation'
+import type { RecipientBackendMap, TaskTitleMap } from './conversation-presentation'
 
 /**
  * The sub-agent drill-down (spec `.ai/specs/2026-07-20-grouped-subagent-display.md`
@@ -24,6 +24,7 @@ export function SubagentSheet({
   entries,
   onClose,
   taskTitles,
+  recipientBackends,
 }: {
   runId: string
   renderAsk?: (ask: ThreadAsk) => ReactNode
@@ -33,6 +34,7 @@ export function SubagentSheet({
   entries: ThreadEntry[]
   onClose: () => void
   taskTitles?: TaskTitleMap
+  recipientBackends?: RecipientBackendMap
 }) {
   return (
     <Sheet open={agent !== undefined} onOpenChange={(open) => { if (!open) onClose() }}>
@@ -44,7 +46,7 @@ export function SubagentSheet({
         className="flex min-h-0 w-full gap-0 p-0 sm:max-w-xl"
       >
         {agent !== undefined ? (
-          <SheetBody runId={runId} renderAsk={renderAsk} agent={agent} entries={entries} taskTitles={taskTitles} />
+          <SheetBody runId={runId} renderAsk={renderAsk} agent={agent} entries={entries} taskTitles={taskTitles} recipientBackends={recipientBackends} />
         ) : null}
       </SheetContent>
     </Sheet>
@@ -57,12 +59,14 @@ function SheetBody({
   agent,
   entries,
   taskTitles,
+  recipientBackends,
 }: {
   runId: string
   renderAsk?: (ask: ThreadAsk) => ReactNode
   agent: SubagentSummary
   entries: ThreadEntry[]
   taskTitles?: TaskTitleMap
+  recipientBackends?: RecipientBackendMap
 }) {
   return (
     <>
@@ -92,6 +96,7 @@ function SheetBody({
         mode="panel"
         renderAsk={renderAsk}
         taskTitles={taskTitles}
+        recipientBackends={recipientBackends}
         empty={
           <div data-slot="subagent-empty" className="py-2 text-[13px] text-muted-foreground">
             No attributed output — see the thread card for this agent&apos;s result.

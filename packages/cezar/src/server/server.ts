@@ -3464,7 +3464,7 @@ export function createApp(deps: ServerDeps) {
       return c.body(null, 204);
     })
 
-    .post('/automations/:id/enable', (c) => {
+    .post('/automations/:id/enable', async (c) => {
       const store = c.get('project').automationStore;
       const current = store.get(c.req.param('id'));
       if (!current) return c.json({ error: 'not found' }, 404);
@@ -3477,7 +3477,7 @@ export function createApp(deps: ServerDeps) {
         cursor: { timestamp: baselineAt },
         nextCheckAt: new Date(Date.now() + automation.intervalSeconds * 1_000).toISOString(),
       });
-      store.appendLog({ automationId: automation.id, revision: automation.revision, result: 'baseline', reason: 'Enabled from a current-time baseline; existing records were not launched.' });
+      await store.appendLog({ automationId: automation.id, revision: automation.revision, result: 'baseline', reason: 'Enabled from a current-time baseline; existing records were not launched.' });
       emitAutomationChange(c.get('project'), automation.id, automation.revision);
       automationsChanged();
       return c.json({ automation });
