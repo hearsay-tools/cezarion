@@ -1,5 +1,5 @@
 import { QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, waitForElementToBeRemoved } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -13,6 +13,7 @@ let requests: Array<{ method: string; url: string; body?: unknown }> = []
 function serve(
   overrides: Partial<WorkspaceConfigResponse> = {},
   updateOverrides: Partial<SkillsUpdateState> = {},
+  configGate?: Promise<void>,
 ) {
   requests = []
   const config: WorkspaceConfigResponse = {
@@ -79,7 +80,10 @@ function serve(
       const method = init?.method ?? 'GET'
       const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : undefined
       requests.push({ method, url, body })
-      if (url === '/api/v1/workspace/config' && method === 'GET') return json(config)
+      if (url === '/api/v1/workspace/config' && method === 'GET') {
+        await configGate
+        return json(config)
+      }
       if (url === '/api/v1/workspace/config' && method === 'PUT') {
         if (body && 'skillsAutoUpdate' in body) {
           config.skillsAutoUpdate = body.skillsAutoUpdate as boolean | null
@@ -118,10 +122,15 @@ const puts = () => requests.filter((request) => request.method === 'PUT')
 
 describe('Global settings → Skills', () => {
   it('links installation status to the boot project skill catalog', async () => {
-    serve()
+    let releaseConfig!: () => void
+    const configGate = new Promise<void>((resolve) => { releaseConfig = resolve })
+    serve({}, {}, configGate)
     renderSkills()
-    const link = await screen.findByRole('link', { name: 'Open Skills' })
-    expect(link.getAttribute('href')).toBe('/p/boot/skills')
+    expect(screen.getByText('Loading skill settings…')).toBeTruthy()
+    expect(screen.queryByRole('link', { name: 'Open Skills' })).toBeNull()
+    releaseConfig()
+    await waitForElementToBeRemoved(() => screen.queryByText('Loading skill settings…'), { timeout: 5000 })
+    expect(screen.getByRole('link', { name: 'Open Skills' }).getAttribute('href')).toBe('/p/boot/skills')
   })
   it('renders the inherited default and quiet no-installation state', async () => {
     serve()
