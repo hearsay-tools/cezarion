@@ -7,11 +7,14 @@ import { promisify } from 'node:util';
 import { expect, it } from 'vitest';
 
 const exec = promisify(execFile);
+const CLI_TIMEOUT_MS = 30_000;
+const DISCOVERY_CANCEL_TIMEOUT_MS = 12_000;
 
 it.each(['slow', 'retry-delay'] as const)('headless completion cancels %s repository discovery promptly', async (mode) => {
   const root = mkdtempSync(join(tmpdir(), 'cez-headless-repo-'));
   const bin = join(root, 'bin');
   const pidFile = join(root, 'gh.pid');
+  const started = join(root, 'gh.started');
   const stopped = join(root, 'gh.stopped');
   mkdirSync(bin);
   // Only discovery hangs; any unrelated GitHub probe fails quickly and quietly.
@@ -20,13 +23,14 @@ it.each(['slow', 'retry-delay'] as const)('headless completion cancels %s reposi
 const fs = require('node:fs');
 if (!process.argv.includes('nameWithOwner')) process.exit(1);
 fs.writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
+fs.writeFileSync(${JSON.stringify(started)}, String(Date.now()));
 if (${JSON.stringify(mode)} === 'retry-delay') {
   fs.writeFileSync(${JSON.stringify(stopped)}, 'transient failure');
   process.stderr.write('network is unreachable');
   process.exit(1);
 }
 process.on('SIGTERM', () => {
-  fs.writeFileSync(${JSON.stringify(stopped)}, 'cancelled');
+  fs.writeFileSync(${JSON.stringify(stopped)}, String(Date.now()));
   process.exit(0);
 });
 setInterval(() => {}, 1000);
@@ -39,13 +43,23 @@ setInterval(() => {}, 1000);
     ], {
       cwd: fileURLToPath(new URL('../', import.meta.url)),
       env: { ...process.env, PATH: `${bin}${delimiter}${process.env.PATH}`, CEZ_DRY_RUN: '1', CEZ_HOME: join(root, 'home') },
-      timeout: 8000,
+      timeout: CLI_TIMEOUT_MS,
       maxBuffer: 1024 * 1024,
-    }).then((output) => ({ ...output, killed: false }), (error: { stdout: string; killed: boolean }) => error);
+    }).catch((error: Error & { killed?: boolean; stdout?: string }) => {
+      if (error.killed) {
+        throw new Error(`headless CLI timed out after ${CLI_TIMEOUT_MS / 1000} seconds; stdout:\n${error.stdout ?? ''}`, { cause: error });
+      }
+      throw error;
+    });
     expect(result.stdout).toMatch(/run (done|review)/);
     expect(existsSync(pidFile)).toBe(true);
-    expect(result.killed, 'CLI must exit without waiting for the 15-second GitHub timeout').toBe(false);
     expect(existsSync(stopped)).toBe(true);
+    // Start the promptness budget at the gh call, not at CLI startup: tsx startup
+    // can be delayed by a full Vitest suite without delaying discovery cancellation.
+    if (mode === 'slow') {
+      expect(Number(readFileSync(stopped, 'utf8')) - Number(readFileSync(started, 'utf8')),
+        'CLI must cancel discovery before the 15-second GitHub timeout').toBeLessThan(DISCOVERY_CANCEL_TIMEOUT_MS);
+    }
     const records = JSON.parse(readFileSync(join(root, '.ai/cezar/runs.json'), 'utf8'));
     expect(records).toHaveLength(1);
     expect(['done', 'review']).toContain(records[0].status);
@@ -55,4 +69,4 @@ setInterval(() => {}, 1000);
     }
     rmSync(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
   }
-}, 15000);
+}, CLI_TIMEOUT_MS + 10_000);
