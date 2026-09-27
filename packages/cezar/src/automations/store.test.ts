@@ -41,7 +41,7 @@ describe('AutomationStore', () => {
     const persisted = JSON.parse(readFileSync(path, 'utf8'));
     expect(persisted.future).toEqual({ kept: true });
     expect(persisted.automations[0].futureDefinition).toBe(true);
-    expect((await import('node:fs/promises')).stat(path).then((stat) => stat.mode & 0o777)).resolves.toBe(
+    await expect((await import('node:fs/promises')).stat(path).then((stat) => stat.mode & 0o777)).resolves.toBe(
       0o600,
     );
   });
@@ -92,5 +92,48 @@ describe('AutomationStore', () => {
     first?.release();
     expect(store.acquireLease()).toBeDefined();
     chmodSync(dir, 0o700);
+  });
+});
+
+describe('AutomationStore.acquireLease', () => {
+  it('reclaims a fresh lock when its writer is gone', async () => {
+    const dir = await directory();
+    writeFileSync(join(dir, 'automation-poll.lock'), JSON.stringify({ pid: 424242, startedAt: new Date().toISOString() }));
+    const probed: number[] = [];
+    const store = AutomationStore.open(dir, { processAlive: (pid) => { probed.push(pid); return false; } });
+    const lease = store.acquireLease();
+    expect(lease).toBeDefined();
+    expect(probed).toEqual([424242]);
+    lease?.release();
+  });
+
+  it('respects a fresh lock held by a live process', async () => {
+    const dir = await directory();
+    writeFileSync(join(dir, 'automation-poll.lock'), JSON.stringify({ pid: 424242, startedAt: new Date().toISOString() }));
+    const store = AutomationStore.open(dir, { processAlive: () => true });
+    expect(store.acquireLease()).toBeUndefined();
+    expect(JSON.parse(readFileSync(join(dir, 'automation-poll.lock'), 'utf8')).pid).toBe(424242);
+  });
+
+  it('retains the age fallback when lock metadata is unreadable', async () => {
+    const dir = await directory();
+    writeFileSync(join(dir, 'automation-poll.lock'), '{half-written');
+    const store = AutomationStore.open(dir, { processAlive: () => false });
+    expect(store.acquireLease()).toBeUndefined();
+    const lease = store.acquireLease(-1);
+    expect(lease).toBeDefined();
+    lease?.release();
+  });
+
+  it('uses the real liveness probe for live and absent processes', async () => {
+    const dir = await directory();
+    const path = join(dir, 'automation-poll.lock');
+    writeFileSync(path, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }));
+    const store = AutomationStore.open(dir);
+    expect(store.acquireLease()).toBeUndefined();
+    writeFileSync(path, JSON.stringify({ pid: 2147483647, startedAt: new Date().toISOString() }));
+    const lease = store.acquireLease();
+    expect(lease).toBeDefined();
+    lease?.release();
   });
 });

@@ -1,6 +1,6 @@
 import type { AutomationCoordinator } from './coordinator.ts';
 import type { GithubCandidate, GithubPoller, GithubPollResult } from './github-poller.ts';
-import type { AutomationStore } from './store.ts';
+import type { AutomationLease, AutomationStore } from './store.ts';
 import type { AutomationDefinition } from './types.ts';
 
 export interface AutomationLaunchResult { runId: string }
@@ -32,18 +32,25 @@ class GithubRequestArbiter {
 }
 const githubRequests = new GithubRequestArbiter();
 
+/** A different process currently owns this project's poll lock. */
+export class LeaseHeldError extends Error {
+  constructor() { super('automation polling lease is held by another process'); }
+}
+
 export class ProjectAutomationScheduler {
   constructor(private readonly handle: ProjectAutomationHandle) {}
 
   async check(definition: AutomationDefinition, mode: 'preview' | 'execute' = 'execute'): Promise<GithubPollResult> {
     const detectionOnly = mode === 'execute' && !this.handle.launch;
     if (detectionOnly) mode = 'preview';
+    const scheduled = mode === 'execute' || detectionOnly;
     const { store } = this.handle;
-    const lease = store.acquireLease();
-    if (!lease) throw new Error('automation polling lease is held by another process');
     const started = Date.now();
     let completion: { result: 'preview' | 'no-match'; reason: string } | undefined;
+    let lease: AutomationLease | undefined;
     try {
+      lease = store.acquireLease();
+      if (!lease) throw new LeaseHeldError();
       const state = store.state(definition.id) ?? {};
       if (state.backoffUntil && Date.parse(state.backoffUntil) > Date.now()) {
         throw new Error(`automation is backed off until ${state.backoffUntil}`);
@@ -95,13 +102,16 @@ export class ProjectAutomationScheduler {
         : { result: 'no-match', reason: 'Scheduled check completed.' };
       return { ...result, candidates: eligible };
     } catch (error) {
-      if (mode === 'execute') this.recordFailure(definition, error);
+      if (error instanceof LeaseHeldError) this.recordSkip(definition, error, scheduled);
+      else if (mode === 'execute') this.recordFailure(definition, error);
       else store.appendLog({ automationId: definition.id, revision: definition.revision, result: 'error', reason: error instanceof Error ? error.message : String(error) });
       throw error;
     } finally {
       if (completion) store.appendLog({ automationId: definition.id, revision: definition.revision, ...completion, durationMs: Date.now() - started });
-      try { store.maybeCompact(); } catch { /* append-only state remains readable; next check retries */ }
-      lease.release();
+      if (lease) {
+        try { store.maybeCompact(); } catch { /* append-only state remains readable; next check retries */ }
+        lease.release();
+      }
     }
   }
 
@@ -119,6 +129,17 @@ export class ProjectAutomationScheduler {
       this.handle.store.appendReceipt({ ...receipt, status: 'launch-error', error: error instanceof Error ? error.message : String(error), updatedAt: new Date().toISOString() });
       throw error;
     }
+  }
+
+  private recordSkip(definition: AutomationDefinition, error: LeaseHeldError, scheduled: boolean): void {
+    const { store } = this.handle;
+    store.appendLog({ automationId: definition.id, revision: definition.revision, result: 'skipped', reason: error.message });
+    if (!scheduled) return;
+    store.setState(definition.id, {
+      ...store.state(definition.id),
+      nextCheckAt: new Date(Date.now() + definition.intervalSeconds * 1_000).toISOString(),
+    });
+    this.handle.onChange?.(definition.id, definition.revision);
   }
 
   private recordFailure(definition: AutomationDefinition, error: unknown): void {
@@ -147,6 +168,8 @@ function laterCursor(
   return order > 0 ? observed : current;
 }
 
+const MIN_RETRY_MS = 60_000;
+
 export interface WorkspaceAutomationSchedulerOptions {
   coordinator: AutomationCoordinator;
   handle: (projectId: string, store: AutomationStore) => ProjectAutomationHandle | undefined;
@@ -158,6 +181,7 @@ export class WorkspaceAutomationScheduler {
   private timer?: ReturnType<typeof setTimeout>;
   private stopped = true;
   private scheduleGeneration = 0;
+  private readonly retryAfter = new Map<string, number>();
   constructor(private readonly options: WorkspaceAutomationSchedulerOptions) {}
 
   async start(): Promise<void> {
@@ -186,22 +210,30 @@ export class WorkspaceAutomationScheduler {
 
   private schedule(): void {
     if (this.stopped) return;
-    const due: Array<{ at: number; definition: AutomationDefinition; scheduler: ProjectAutomationScheduler }> = [];
+    const due: Array<{ key: string; at: number; retryAfterMs: number; definition: AutomationDefinition; scheduler: ProjectAutomationScheduler }> = [];
+    const live = new Set<string>();
     for (const projectId of this.options.coordinator.enabledProjectIds()) {
       const store = this.options.coordinator.store(projectId);
       if (!store) continue;
       const handle = this.options.handle(projectId, store);
       if (!handle) continue;
       for (const definition of store.list().filter((item) => item.enabled)) {
-        due.push({ at: Date.parse(store.state(definition.id)?.nextCheckAt ?? new Date().toISOString()), definition, scheduler: new ProjectAutomationScheduler(handle) });
+        const key = `${projectId}:${definition.id}`;
+        live.add(key);
+        const at = Date.parse(store.state(definition.id)?.nextCheckAt ?? new Date().toISOString());
+        due.push({ key, at: Math.max(at, this.retryAfter.get(key) ?? 0), retryAfterMs: Math.max(definition.intervalSeconds * 1_000, MIN_RETRY_MS), definition, scheduler: new ProjectAutomationScheduler(handle) });
       }
     }
+    for (const key of this.retryAfter.keys()) if (!live.has(key)) this.retryAfter.delete(key);
     if (!due.length) return;
     due.sort((a, b) => a.at - b.at);
     const next = due[0]!;
     this.timer = setTimeout(() => {
       this.timer = undefined;
-      void next.scheduler.check(next.definition).catch(() => undefined).finally(() => this.schedule());
+      void next.scheduler.check(next.definition).then(
+        () => { this.retryAfter.delete(next.key); },
+        () => { this.retryAfter.set(next.key, (this.options.now?.() ?? Date.now()) + next.retryAfterMs); },
+      ).finally(() => this.schedule());
     }, Math.max(0, next.at - (this.options.now?.() ?? Date.now())));
   }
 }

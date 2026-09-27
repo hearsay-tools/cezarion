@@ -2,8 +2,9 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { automationLogRecordSchema as contractLogRecordSchema } from '@open-mercato/cezar-contract';
 import { AutomationStore } from './store.ts';
-import { ProjectAutomationScheduler, WorkspaceAutomationScheduler } from './scheduler.ts';
+import { LeaseHeldError, ProjectAutomationScheduler, WorkspaceAutomationScheduler } from './scheduler.ts';
 
 const dirs: string[] = [];
 afterEach(async () => Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))));
@@ -47,6 +48,37 @@ describe('ProjectAutomationScheduler', () => {
     await expect(scheduler.check(definition)).rejects.toThrow('rate limited');
     expect(store.state(definition.id)?.cursor?.timestamp).toBe('2026-07-26T01:00:00.000Z');
     expect(store.state(definition.id)).toMatchObject({ consecutiveFailures: 1, backoffUntil: expect.any(String) });
+  });
+
+  it('records a held lease as skipped and advances the scheduled check without failure backoff', async () => {
+    const { store, definition } = await setup();
+    const held = store.acquireLease();
+    const poll = vi.fn(async () => ({ candidates: [], truncated: false, pages: 1 }));
+    const scheduler = new ProjectAutomationScheduler({ projectId: 'p', owner: 'acme', repo: 'demo', store, poller: { poll } as never, launch: async () => ({ runId: 'unused' }) });
+    const before = Date.now();
+    try {
+      const error = await scheduler.check(definition).catch((cause: unknown) => cause);
+      expect(error).toBeInstanceOf(LeaseHeldError);
+      expect((error as Error).message).toContain('lease is held by another process');
+      expect(poll).not.toHaveBeenCalled();
+      expect(store.logs({ automationId: definition.id })[0]).toMatchObject({ result: 'skipped', reason: 'automation polling lease is held by another process' });
+      expect(contractLogRecordSchema.safeParse(store.logs({ automationId: definition.id })[0]).success).toBe(true);
+      const state = store.state(definition.id)!;
+      expect(Date.parse(state.nextCheckAt!)).toBeGreaterThanOrEqual(before + 300_000);
+      expect(state.consecutiveFailures).toBeUndefined();
+      expect(state.backoffUntil).toBeUndefined();
+    } finally { held?.release(); }
+  });
+
+  it('records a preview blocked by a held lease without changing state', async () => {
+    const { store, definition } = await setup();
+    const held = store.acquireLease();
+    const scheduler = new ProjectAutomationScheduler({ projectId: 'p', owner: 'acme', repo: 'demo', store, poller: { poll: async () => ({ candidates: [], truncated: false, pages: 1 }) } as never, launch: async () => ({ runId: 'unused' }) });
+    try {
+      await expect(scheduler.check(definition, 'preview')).rejects.toThrow('lease is held by another process');
+      expect(store.logs({ automationId: definition.id })[0]).toMatchObject({ result: 'skipped' });
+      expect(store.state(definition.id)).toBeUndefined();
+    } finally { held?.release(); }
   });
 
   it('starts provider discovery from the durable cursor overlap', async () => {
@@ -147,5 +179,35 @@ describe('WorkspaceAutomationScheduler', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('defers a rejected project so another due project can run', async () => {
+    vi.useFakeTimers();
+    try {
+      const now = Date.parse('2026-09-14T06:00:00Z');
+      vi.setSystemTime(now);
+      const a = await setup();
+      const b = await setup();
+      a.store.setState(a.definition.id, { nextCheckAt: new Date(now - 60_000).toISOString() });
+      b.store.setState(b.definition.id, { nextCheckAt: new Date(now + 30_000).toISOString() });
+      a.store.setState = () => { throw new Error('read-only automation state'); };
+      const failing = vi.fn(async () => { throw new Error('rate limited'); });
+      const healthy = vi.fn(async () => ({ candidates: [], truncated: false, pages: 1 }));
+      const stores = { a: a.store, b: b.store };
+      const scheduler = new WorkspaceAutomationScheduler({
+        coordinator: { refresh: async () => undefined, enabledProjectIds: () => ['a', 'b'], store: (id: 'a' | 'b') => stores[id] } as never,
+        handle: (id, store) => ({ projectId: id, owner: 'acme', repo: 'demo', store, poller: { poll: id === 'a' ? failing : healthy } as never, launch: async () => ({ runId: 'unused' }) }),
+        now: () => Date.now(),
+      });
+      await scheduler.start();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(failing).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(healthy).toHaveBeenCalledTimes(1);
+      expect(failing).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(270_000);
+      expect(failing).toHaveBeenCalledTimes(2);
+      scheduler.stop();
+    } finally { vi.useRealTimers(); }
   });
 });

@@ -31,6 +31,7 @@ const RECEIPTS = 'automation-receipts.ndjson';
 const LOG = 'automation-log.ndjson';
 const POLL_LOCK = 'automation-poll.lock';
 const RETENTION_MS = 90 * 24 * 60 * 60 * 1_000;
+const LEASE_RECLAIM_ATTEMPTS = 1;
 
 type DefinitionsFile = ReturnType<typeof automationDefinitionsFileSchema.parse>;
 type StateFile = ReturnType<typeof automationStateFileSchema.parse>;
@@ -38,6 +39,7 @@ type StateFile = ReturnType<typeof automationStateFileSchema.parse>;
 export interface AutomationStoreOptions {
   warn?: (message: string) => void;
   now?: () => Date;
+  processAlive?: (pid: number) => boolean;
 }
 
 export class AutomationStore {
@@ -207,22 +209,33 @@ export class AutomationStore {
 
   acquireLease(staleAfterMs = 10 * 60_000): AutomationLease | undefined {
     mkdirSync(this.dataDir, { recursive: true });
-    const path = join(this.dataDir, POLL_LOCK);
+    return this.tryAcquireLease(join(this.dataDir, POLL_LOCK), staleAfterMs, 0);
+  }
+
+  private tryAcquireLease(path: string, staleAfterMs: number, attempt: number): AutomationLease | undefined {
     try {
       const fd = openSync(path, 'wx', 0o600);
       writeFileSync(fd, JSON.stringify({ pid: process.pid, startedAt: this.now().toISOString() }));
       return new AutomationLease(path, fd);
     } catch {
+      if (attempt >= LEASE_RECLAIM_ATTEMPTS) return undefined;
       try {
-        if (this.now().getTime() - statSync(path).mtimeMs > staleAfterMs) {
+        if (this.isLeaseAbandoned(path, staleAfterMs)) {
           unlinkSync(path);
-          return this.acquireLease(staleAfterMs);
+          return this.tryAcquireLease(path, staleAfterMs, attempt + 1);
         }
       } catch {
         // A contender removed the lock or the directory is read-only.
       }
       return undefined;
     }
+  }
+
+  private isLeaseAbandoned(path: string, staleAfterMs: number): boolean {
+    if (this.now().getTime() - statSync(path).mtimeMs > staleAfterMs) return true;
+    const pid = readLeasePid(path);
+    if (pid === undefined || pid === process.pid) return false;
+    return !(this.options.processAlive ?? isProcessAlive)(pid);
   }
 
   private load(): void {
@@ -337,6 +350,26 @@ export class AutomationStore {
     if (this.warned.has(key)) return;
     this.warned.add(key);
     this.options.warn?.(message);
+  }
+}
+
+function readLeasePid(path: string): number | undefined {
+  try {
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as { pid?: unknown } | null;
+    const pid = parsed?.pid;
+    return typeof pid === 'number' && Number.isInteger(pid) && pid > 0 ? pid : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** An unknown probe error is treated like a live process; only ESRCH proves absence. */
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== 'ESRCH';
   }
 }
 
