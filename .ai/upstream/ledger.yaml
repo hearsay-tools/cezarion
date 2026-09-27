@@ -360,6 +360,7 @@ entries:
       conflicts: 3
     fork:
       issue: 428
+      pr: 651
       commits:
         - 0f47bdfa
         - 3ff408df
