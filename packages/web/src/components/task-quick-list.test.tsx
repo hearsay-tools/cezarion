@@ -1432,6 +1432,18 @@ describe("the group row's shared reference (#617 review round 4)", () => {
     expect(groupRow().querySelector('[data-slot="group-meta"]')?.textContent).toBe('2 working · #425 · 1m')
   })
 
+  it('keeps same-numbered references from two repositories on their own variants (review round 6)', () => {
+    renderList({ runs: [
+      run({ id: 'ra', groupId: 'g4', variant: 'A', title: 'Repos (A)', status: 'running', pullRequestUrl: 'https://github.com/o/a/pull/7' }),
+      run({ id: 'rb', groupId: 'g4', variant: 'B', title: 'Repos (B)', status: 'running', pullRequestUrl: 'https://github.com/o/b/pull/7' }),
+    ] })
+    const group = document.querySelector('[data-slot="group-row"][data-group-id="g4"]') as HTMLElement
+    expect(group.querySelector('[data-slot="group-meta"]')?.textContent).toBe('2 working · 1m')
+    fireEvent.click(group.querySelector('[data-slot="group-tile"]') as HTMLElement)
+    expect(row('ra')?.querySelector('[data-slot="task-row-meta"] a')?.getAttribute('href')).toBe('https://github.com/o/a/pull/7')
+    expect(row('rb')?.querySelector('[data-slot="task-row-meta"] a')?.getAttribute('href')).toBe('https://github.com/o/b/pull/7')
+  })
+
   it('does not toggle the group when the link is clicked', () => {
     renderList({ runs: pair() })
     const link = groupRow().querySelector('[data-slot="group-meta"] a') as HTMLElement

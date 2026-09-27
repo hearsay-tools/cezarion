@@ -63,15 +63,31 @@ describe('groupFamilies (the aggregate in words)', () => {
 describe('shared references', () => {
   const issue = { referencedIssueUrl: 'https://github.com/o/r/issues/425' }
   it('is the reference every member carries', () => {
-    expect([...sharedReferenceKeys([run(issue), run(issue)])]).toEqual(['Issue#425'])
+    expect([...sharedReferenceKeys([run(issue), run(issue)])]).toEqual(['Issue#425@github.com/o/r'])
   })
   it('drops a reference only some members carry (each variant shows its own PR instead)', () => {
     const shared = sharedReferenceKeys([
       run({ ...issue, pullRequestUrl: 'https://github.com/o/r/pull/611' }),
       run({ ...issue, pullRequestUrl: 'https://github.com/o/r/pull/612' }),
     ])
-    expect([...shared]).toEqual(['Issue#425'])
+    expect([...shared]).toEqual(['Issue#425@github.com/o/r'])
     expect([...sharedReferenceKeys([run({ pullRequestUrl: 'https://github.com/o/r/pull/611' }), run()])]).toEqual([])
+  })
+  // Review round 6: kind + number alone called two repositories' #7 the same reference.
+  it('keeps the same number in two repositories apart', () => {
+    expect([...sharedReferenceKeys([
+      run({ pullRequestUrl: 'https://github.com/o/a/pull/7' }),
+      run({ pullRequestUrl: 'https://github.com/o/b/pull/7' }),
+    ])]).toEqual([])
+    expect([...sharedReferenceKeys([
+      run({ referencedIssueUrl: 'https://github.com/o/a/issues/7' }),
+      run({ referencedIssueUrl: 'https://github.com/o/b/issues/7' }),
+    ])]).toEqual([])
+  })
+  it('shares the same URL on every member, and a number-only reference by kind and number', () => {
+    const pr = { pullRequestUrl: 'https://github.com/o/a/pull/7' }
+    expect(sharedReferenceKeys([run(pr), run(pr)]).size).toBe(1)
+    expect(sharedReferenceKeys([run({ issueNumber: 9 }), run({ issueNumber: 9 })]).size).toBe(1)
   })
 })
 
