@@ -812,7 +812,7 @@ export class RunManager {
     // finalization and reaping; only an absent one is legacy, scan-only evidence.
     if (record === 'unknown') return { state: 'unknown' };
     if (record !== 'absent' && isCurrentProcess(record.controller)) return { state: 'none' };
-    // Finalization deletes the scratch too, so a process working there keeps the generation alive.
+    // Finalization may reap terminal task scratch, so a process working there keeps the generation alive.
     return { state: 'orphan', generation: proof.generation, ...(record === 'absent' ? {} : { record }),
       paths: [run.delegation.workspace.path, ...agentTmpDirLocations(this.dataDir, runId)],
       // No process of this worker can predate its record (1 s slack for tick rounding).
