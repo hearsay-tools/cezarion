@@ -1659,18 +1659,113 @@ describe('GlobalEventsProvider', () => {
   })
 })
 
-it.each(['run', 'run-deleted', 'reconnect'] as const)('invalidates relationships for an invisible worker on %s without crossing projects', event => {
+/** A worker of `parent`, as the stream carries it: the record the relationships readers care about. */
+function workerOf(parent: string, id: string, over: Partial<RunRecord> = {}): RunRecord {
+  return runRecord(id, {
+    delegation: { role: 'worker', parentRunId: parent, permissions: [],
+      workspace: { ownerRunId: id, resourceId: id, kind: 'owned-isolated', path: `/${id}`, branch: id, baselineSha: 'a'.repeat(40) } },
+    ...over,
+  })
+}
+
+describe('relationships refresh (#659)', () => {
   const key = ['default', 'runs', 'relationships', 'parent']
   const otherKey = ['other', 'runs', 'relationships', 'parent']
-  client.setQueryData(key, { workers: [] }); client.setQueryData(otherKey, { workers: [] })
-  client.setQueryData(queryKeys.runs.list(), [])
-  const { source } = mount()
-  source.open()
-  // Opening reconciles; establish a fresh snapshot before the event being tested.
-  client.setQueryData(key, { workers: [] }); client.setQueryData(otherKey, { workers: [] })
-  if (event === 'run') source.emit('run', stampedRun(runRecord('off-page')))
-  else if (event === 'run-deleted') source.emit('run-deleted', JSON.stringify({ id: 'off-page', project: BOOT }))
-  else { source.drop(); source.open() }
-  expect(client.getQueryState(key)?.isInvalidated).toBe(true)
-  expect(client.getQueryState(otherKey)?.isInvalidated).toBe(false)
+  const siblingKey = ['default', 'runs', 'relationships', 'sibling']
+
+  function seed(): void {
+    for (const k of [key, otherKey, siblingKey]) client.setQueryData(k, { workers: [] })
+  }
+  const invalidated = (k: readonly unknown[]) => client.getQueryState(k)?.isInvalidated
+
+  it.each(['run', 'run-deleted', 'reconnect'] as const)('invalidates relationships for an invisible worker on %s without crossing projects', async event => {
+    vi.useFakeTimers()
+    seed()
+    client.setQueryData(queryKeys.runs.list(), [])
+    const { source } = mount()
+    source.open()
+    // Opening reconciles; establish a fresh snapshot before the event being tested.
+    seed()
+    if (event === 'run') source.emit('run', stampedRun(workerOf('parent', 'off-page')))
+    // Never seen on this stream, so no parent is known: the whole family refreshes, once.
+    else if (event === 'run-deleted') source.emit('run-deleted', JSON.stringify({ id: 'off-page', project: BOOT }))
+    else { source.drop(); source.open() }
+    if (event !== 'reconnect') {
+      // Debounced: nothing fires on the event itself.
+      expect(invalidated(key)).toBe(false)
+      await act(async () => { await vi.advanceTimersByTimeAsync(400) })
+    }
+    expect(invalidated(key)).toBe(true)
+    expect(invalidated(otherKey)).toBe(false)
+  })
+
+  it('refreshes only the touched parent, and nothing for an ordinary run', async () => {
+    vi.useFakeTimers()
+    seed()
+    const { source } = mount()
+    source.open()
+    seed()
+    source.emit('run', stampedRun(runRecord('ordinary')))
+    source.emit('run', stampedRun(workerOf('parent', 'w1')))
+    await act(async () => { await vi.advanceTimersByTimeAsync(400) })
+    expect(invalidated(key)).toBe(true)
+    expect(invalidated(siblingKey)).toBe(false)
+    expect(invalidated(otherKey)).toBe(false)
+  })
+
+  it('drops a token-only tick and refreshes on a change the response carries', async () => {
+    vi.useFakeTimers()
+    seed()
+    const { source } = mount()
+    source.open()
+    seed()
+    source.emit('run', stampedRun(workerOf('parent', 'w1', { tokensUsed: 1 })))
+    await act(async () => { await vi.advanceTimersByTimeAsync(400) })
+    expect(invalidated(key)).toBe(true)
+    seed()
+    // Same status, step, activity and delegation: the relationships answer cannot have moved.
+    source.emit('run', stampedRun(workerOf('parent', 'w1', { tokensUsed: 2 })))
+    source.emit('run', stampedRun(workerOf('parent', 'w1', { tokensUsed: 3, title: 'renamed' })))
+    await act(async () => { await vi.advanceTimersByTimeAsync(400) })
+    expect(invalidated(key)).toBe(false)
+    source.emit('run', stampedRun(workerOf('parent', 'w1', { tokensUsed: 4, status: 'done' })))
+    await act(async () => { await vi.advanceTimersByTimeAsync(400) })
+    expect(invalidated(key)).toBe(true)
+  })
+
+  it('coalesces a burst of real changes into one refresh per quiet window', async () => {
+    vi.useFakeTimers()
+    seed()
+    const { source } = mount()
+    source.open()
+    seed()
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+    for (let i = 0; i < 20; i++) {
+      source.emit('run', stampedRun(workerOf('parent', 'w1', { currentStepId: `step-${i}` })))
+      await act(async () => { await vi.advanceTimersByTimeAsync(20) })
+    }
+    await act(async () => { await vi.advanceTimersByTimeAsync(400) })
+    const parentRefreshes = invalidate.mock.calls.filter(([filters]) => JSON.stringify(filters?.queryKey) === JSON.stringify(key))
+    expect(parentRefreshes.length).toBeLessThanOrEqual(2)
+    expect(parentRefreshes.length).toBeGreaterThan(0)
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it('refreshes the known parent of a deleted worker and drops the worker\'s own entry', async () => {
+    vi.useFakeTimers()
+    seed()
+    const workerKey = ['default', 'runs', 'relationships', 'w1']
+    client.setQueryData(workerKey, { parentRunId: 'parent', workers: [] })
+    const { source } = mount()
+    source.open()
+    seed()
+    source.emit('run', stampedRun(workerOf('parent', 'w1')))
+    await act(async () => { await vi.advanceTimersByTimeAsync(400) })
+    seed()
+    source.emit('run-deleted', JSON.stringify({ id: 'w1', project: BOOT }))
+    await act(async () => { await vi.advanceTimersByTimeAsync(400) })
+    expect(invalidated(key)).toBe(true)
+    expect(invalidated(siblingKey)).toBe(false)
+    expect(client.getQueryState(workerKey)).toBeUndefined()
+  })
 })

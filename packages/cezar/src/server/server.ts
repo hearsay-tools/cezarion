@@ -3620,11 +3620,14 @@ export function createApp(deps: ServerDeps) {
       const { store } = c.get('project');
       const run = store.getRun(c.req.valid('param').id);
       if (!run) return c.json({ error: 'not found' }, 404);
-      // Full project store: archived/off-page workers still belong to this parent.
+      // Off the parent's receipts, not a scan of the project index (#659): archived/off-page
+      // workers still belong to this parent, and the cockpit asks on every run event, so the
+      // read has to cost O(workers) whatever the store holds — and nothing at all for the
+      // ordinary run that owns none, delegation on or off.
       // Human reads use the bound project, never agent credentials or private evidence.
-      const workers = store.listRuns().flatMap(worker => {
+      const workers = store.listOwnedWorkers(run.id).flatMap(worker => {
         const owned = worker.delegation;
-        if (owned?.role !== 'worker' || owned.parentRunId !== run.id) return [];
+        if (owned?.role !== 'worker') return [];
         return [{ workerId: worker.id, parentRunId: run.id, status: worker.status, workspace: owned.workspace,
           ...(worker.currentStepId === undefined ? {} : { currentStepId: worker.currentStepId }),
           ...(worker.activity === undefined ? {} : { activity: worker.activity }),
