@@ -856,6 +856,26 @@ export class RunStore extends EventEmitter {
     return this.runs.get(id);
   }
 
+  /**
+   * The workers a root run owns, newest first, read off its own `receipts` (#659). Every
+   * `createOwnedRun` writes the receipt and the worker record in one transaction, and the
+   * receipt list is capped at 32, so this is a bounded lookup rather than a walk of the whole
+   * project index. An ordinary or worker run owns nothing and costs one map read; a receipt
+   * whose record has been deleted is skipped, never invented. A parent quarantined to
+   * `invalid` has no readable receipts and reports none, which is also what the cockpit
+   * assumes for that role.
+   */
+  listOwnedWorkers(parentId: string): RunRecord[] {
+    const parent = this.runs.get(parentId);
+    if (parent?.delegation?.role !== 'root') return [];
+    const workers: RunRecord[] = [];
+    for (const receipt of parent.delegation.receipts) {
+      const worker = this.runs.get(receipt.workerId);
+      if (worker?.delegation?.role === 'worker' && worker.delegation.parentRunId === parentId) workers.push(worker);
+    }
+    return workers.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
   /** The run an idempotent start already created (#504), archived or not. A deleted run is gone
    *  with its record, so a retry after deletion honestly creates a fresh one. */
   findRunByClientRequestId(clientRequestId: string): RunRecord | undefined {
