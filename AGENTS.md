@@ -182,7 +182,7 @@ npm test            # vitest — server + cockpit unit suites
 npm run test:unit   # node:test — fast core-module coverage (packages/cezar/test/unit/)
 npm run build       # tsc → dist/, vite → packages/cezar/web/dist/, then the check:pack tarball gate
 npm run test:package # pack/install the release tarball and exercise the built CLI (packages/cezar/test/e2e/)
-npm run test:e2e    # real-browser cockpit suite (agent-browser); CI rejects skipped
+npm run test:e2e:local # full local browser suite: four isolated lanes; skipped is not a pass
 ```
 
 For web-only verification, use `npm run typecheck:web` or
@@ -219,7 +219,14 @@ drives it in a real Chrome through the `agent-browser` provider (`.ai/browsers/a
 
 ```bash
 npm run test:e2e    # .ai/scripts/e2e.sh → test-env-up.sh + vitest (packages/web/e2e/)
+npm run test:e2e:local # full local browser suite in four isolated lanes (~8 GiB peak)
 ```
+
+Use `npm run test:e2e:local` for the final local full-suite gate. Keep `npm run test:e2e`
+for focused local specs and CI's serial shards. The four-lane command prints the same
+`TEST_E2E_STATUS` marker, exits nonzero on `skipped` or `failed`, and retains per-lane
+logs under `.ai/qa/local-runs/`; see
+`packages/web/e2e/README.md` for its isolation and cleanup details.
 
 It boots the app on a free port with `CEZ_DRY_RUN=1` (agent CLIs mocked — no login, no
 network), reuses an already-healthy instance instead of double-booting, and writes
@@ -270,7 +277,7 @@ row's value when the thing it names changes, rather than its label.
 | CI provider | GitHub Actions |
 | Issue tracker | GitHub Issues |
 | Stack | TypeScript (Node ≥20), npm workspaces; Hono + Zod server; React 19 + Vite + Tailwind v4 cockpit |
-| Verification | `npm run typecheck`, `npm test`, `npm run test:unit`, `npm run build`, `npm run test:package`, `npm run test:e2e` |
+| Verification | `npm run typecheck`, `npm test`, `npm run test:unit`, `npm run build`, `npm run test:package`, `npm run test:e2e:local` |
 | Automated reviewer | `AUTOMATED_REVIEWER=codex` |
 | Automated review rounds | `AUTOMATED_REVIEW_ROUNDS` (default 3) |
 | Commit convention | Conventional Commits |
