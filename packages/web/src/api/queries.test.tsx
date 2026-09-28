@@ -126,6 +126,44 @@ class FakeHealthSocket {
 }
 
 describe('useRunnerModels', () => {
+  it('subscribes an active local Cursor picker and releases it on unmount', async () => {
+    const wsModule = await import('./ws')
+    let receive!: (data: unknown) => void
+    const release = vi.fn()
+    const subscribe = vi.spyOn(wsModule, 'subscribeTopic').mockImplementation((_topic, listener) => {
+      receive = listener
+      return release
+    })
+    const client = createQueryClient()
+    client.setQueryData(queryKeys.health, { capabilities: { localHandoff: true } })
+    fetchMock.mockResolvedValue(json({ runner: 'cursor', models: [], source: 'unavailable', stale: false }))
+    const { result, unmount } = renderHook(() => useRunnerModels('cursor'), {
+      wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
+    })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(result.current.data?.models).toEqual([])
+    expect(subscribe).toHaveBeenCalledWith('models:cursor', expect.any(Function))
+    act(() => receive({ runner: 'cursor', models: [{ id: 'auto', label: 'Auto', description: '' }], source: 'live', stale: false }))
+    await waitFor(() => expect(result.current.data?.models[0]?.id).toBe('auto'))
+    unmount()
+    expect(release).toHaveBeenCalledOnce()
+    subscribe.mockRestore()
+  })
+
+  it.each([false, undefined])('keeps Cursor off WebSocket when localHandoff is %s', async (localHandoff) => {
+    const wsModule = await import('./ws')
+    const subscribe = vi.spyOn(wsModule, 'subscribeTopic')
+    const client = createQueryClient()
+    client.setQueryData(queryKeys.health, { capabilities: { localHandoff } })
+    fetchMock.mockResolvedValue(json({ runner: 'cursor', models: [], source: 'unavailable', stale: false }))
+    const { result } = renderHook(() => useRunnerModels('cursor'), {
+      wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
+    })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(subscribe).not.toHaveBeenCalled()
+    subscribe.mockRestore()
+  })
+
   it('loads the workspace Codex catalog', async () => {
     fetchMock.mockResolvedValue(json({ runner: 'codex', models: [{ id: 'gpt-future', label: 'Future', description: '' }], source: 'live', stale: false }))
     const { result } = renderHook(() => useRunnerModels('codex'), { wrapper: wrapper() })

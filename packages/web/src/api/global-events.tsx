@@ -13,7 +13,7 @@ import {
   type GlobalEvent,
   type UsageStore,
 } from './events'
-import { apiPath, getApiScope } from '@open-mercato/cezar-api-client'
+import { runnerModelCatalogResponseSchema, apiPath, getApiScope } from '@open-mercato/cezar-api-client'
 import { queryKeys, useHealthSubscription, workspaceQueryKeys } from './queries'
 import type {
   ApiRun,
@@ -158,6 +158,15 @@ function isRunListQueryKey(queryKey: readonly unknown[]): boolean {
   return queryKey[1] === 'runs' && queryKey[2] === 'list'
 }
 
+function reconcileCursorModels(queryClient: QueryClient): Promise<void> {
+  const key = workspaceQueryKeys.models('cursor')
+  // With no cached data, invalidation reuses an in-flight cold request. Cancel
+  // it first so a completion missed during disconnect cannot leave the picker empty.
+  return queryClient.cancelQueries({ queryKey: key }).then(() =>
+    queryClient.invalidateQueries({ queryKey: key }),
+  )
+}
+
 function reconcile(queryClient: QueryClient): void {
   trackSseReconcile(() => [
     queryClient.invalidateQueries({ queryKey: queryKeys.runs.all }),
@@ -174,6 +183,7 @@ function reconcile(queryClient: QueryClient): void {
     // The worktree panel's list/total (#483) — a run finishing or a reclaim changes it.
     queryClient.invalidateQueries({ queryKey: queryKeys.worktrees }),
     queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.providerStatus }),
+    reconcileCursorModels(queryClient),
     // GitHub edits never enter this stream. Reconnect (including server restart) must
     // invalidate every project's list, leaving inactive caches stale until revisited.
     // Restrict this to list keys: comments/checks/search have separate cache policies.
@@ -598,6 +608,14 @@ export function useGlobalEvents(usage: UsageStore, url: string = SSE_URL): void 
           runListBatcher.flush()
           reconcile(queryClient)
         }
+        if (!everOpened) {
+          // Discovery can finish between the cold HTTP read and SSE connection.
+          // Cancel that read and reconcile once after the completion listener is attached.
+          const key = workspaceQueryKeys.models('cursor')
+          void queryClient.cancelQueries({ queryKey: key }).then(() => {
+            if (!disposed) void queryClient.invalidateQueries({ queryKey: key })
+          })
+        }
         everOpened = true
       })
 
@@ -642,6 +660,16 @@ export function useGlobalEvents(usage: UsageStore, url: string = SSE_URL): void 
           for (const listener of [...workspaceListeners]) listener(name, payload)
         })
       }
+
+      source.addEventListener('model-catalog', (event) => {
+        let payload: unknown
+        try { payload = JSON.parse((event as MessageEvent<string>).data) } catch { return }
+        const result = runnerModelCatalogResponseSchema.safeParse(payload)
+        if (!result.success || result.data.runner !== 'cursor') return
+        const key = workspaceQueryKeys.models('cursor')
+        void queryClient.cancelQueries({ queryKey: key })
+        queryClient.setQueryData(key, result.data)
+      })
 
       source.addEventListener('provider-status', (event) => {
         let payload: unknown

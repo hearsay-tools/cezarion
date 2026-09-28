@@ -140,9 +140,9 @@ describe('health topic + cache (live-server path)', () => {
     return ((await res.json()) as { defaultRunner?: string }).defaultRunner;
   };
 
-  it('registers exactly one `health` topic', () => {
+  it('registers the health and Cursor models topics', () => {
     const { topics } = build();
-    expect([...topics.keys()]).toEqual(['health']);
+    expect([...topics.keys()]).toEqual(['health', 'models:cursor']);
   });
 
   it('pre-warms the cache at boot so the first GET is already warm', async () => {
