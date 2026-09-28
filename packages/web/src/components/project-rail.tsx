@@ -11,6 +11,7 @@ import { FOOTER_ICON_ACTIVE_CLASS } from '@/components/nav-row-styles'
 import { useTheme } from '@/components/theme-provider'
 import { ThemeToggle } from '@/components/theme-toggle'
 import { pathnameProjectId, scopeTo } from '@/lib/project-router'
+import { useIsDesktop } from '@/lib/use-desktop'
 import { projectInitials, projectSignalLabel, signalsByProject, type ProjectSignal } from '@/lib/project-signal'
 import { cn } from '@/lib/utils'
 
@@ -260,7 +261,11 @@ export function ProjectRail({ projects, signals, truncated, version, singleProje
 export function ProjectRailContainer({ version }: { version: string | null }) {
   const queryClient = useQueryClient()
   const projects = useProjects().data?.projects
-  const index = useRunsIndex().data
+  // The rail exists from `md` up, so below it nothing should keep the index observed: run events
+  // invalidate it, and a phone would re-read up to 200 runs per project for a column it never
+  // paints. Disabled, it fetches nothing; widening the window enables it and fetches then.
+  const desktop = useIsDesktop()
+  const index = useRunsIndex(desktop).data
   const singleProject = useHealth().data?.capabilities.singleProject === true
   const signals = React.useMemo(() => (index ? signalsByProject(index.runs) : null), [index])
   const truncated = React.useMemo(() => new Set(index?.truncated ?? []), [index?.truncated])

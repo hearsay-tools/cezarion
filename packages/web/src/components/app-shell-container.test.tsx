@@ -20,9 +20,10 @@ beforeEach(() => {
   document.title = 'cezar'
   vi.stubGlobal('fetch', fetchMock)
   // jsdom ships no matchMedia; the shell's breakpoint effect and the theme toggle need one.
+  // md-and-up is the desktop shell (the project rail reads it); every other query stays false.
   vi.stubGlobal(
     'matchMedia',
-    () => ({ matches: false, addEventListener: () => {}, removeEventListener: () => {} }),
+    (query: string) => ({ matches: query === '(min-width: 768px)', addEventListener: () => {}, removeEventListener: () => {} }),
   )
 })
 
@@ -770,6 +771,28 @@ describe('project rail wiring', () => {
 
     await waitFor(() => expect(railMark('shop')?.querySelector('[data-segment="amber"]')?.textContent).toBe('1'))
     expect(indexCalls()).toBe(2)
+  })
+
+  it('does not read the runs index below md, where the rail is not drawn', async () => {
+    vi.stubGlobal(
+      'matchMedia',
+      () => ({ matches: false, addEventListener: () => {}, removeEventListener: () => {} }),
+    )
+    serve({
+      '/api/v1/health': HEALTH,
+      '/api/v1/todos': [],
+      '/api/v1/projects': TWO_PROJECTS,
+      '/api/v1/workspace/ui-state': {},
+      '/api/v1/workspace/runs-index': railIndex([]),
+      '/api/v1/runs': [],
+      '/api/v1/p/cezar/runs': [],
+      '/api/v1/p/shop/runs': [],
+    })
+    renderShell('/p/cezar/')
+
+    await rail()
+    await waitFor(() => expect(within(railMark('shop')).getByRole('link')).toBeTruthy())
+    expect(fetchMock.mock.calls.filter(([input]) => String(input) === '/api/v1/workspace/runs-index')).toHaveLength(0)
   })
 
   // The capability, not the project count: one registered project in the default multi-project
