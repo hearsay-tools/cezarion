@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { stopFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv, getJson } from './agent-browser'
-import { waitForHealth } from './poll'
+import { pollFor, waitForHealth } from './poll'
 
 /**
  * The full-screen /new composer (R4 Steps 1.1 + 1.3) end-to-end against a LIVE dry-run server:
@@ -129,18 +129,31 @@ describe('the full-screen /new against a live dry-run server', () => {
     expect(browser.evaluate(
       `document.querySelector('[data-slot="source-pill"]')?.dataset.sourceKind`,
     )).toBe('none')
-    // Health must have SETTLED before judging the runner pill — the version chip renders from
-    // the same response, so it is the "health arrived" signal.
+    // The version chip proves health arrived, but availability now refreshes in
+    // the background. Wait for the first sweep before deriving the expected pill.
+    // Local reproduction (2026-09-28, issue #666): cold health returned checks: []
+    // while the composer already showed one runner pill; the old assertion failed
+    // with "expected 1 to be +0". Failure bundle: .ai/qa/failures/new-task/
+    // the-pill-row-resolves-no-source-picked-runner-pill-iff-1-backend-base-main-1-1/
+    // probe.json (capturedAt 2026-09-28T15:29:49.105Z).
     browser.waitForFunction(`document.querySelector('[data-slot="version-chip"]') !== null`)
     // The rule under test is legacy's: pill iff the HOST offers >1 backend. The host's own
     // CLIs are what they are (codex/opencode may genuinely be installed here), so assert
     // consistency with the live health answer rather than assuming a bare machine.
-    const health = (await (await fetch(`${baseUrl}/api/v1/health`)).json()) as {
-      checks: Array<{ name: string; available: boolean }>
-    }
+    const health = await pollFor(async () => {
+      const snapshot = await getJson<{ checks: Array<{ name: string; available: boolean }> }>(
+        `${baseUrl}/api/v1/health`,
+      )
+      return snapshot.checks.length > 0 ? snapshot : undefined
+    }, () => 'runner availability never finished its first background sweep', { tries: 120 })
     const runners = ['claude', 'codex', 'cursor', 'opencode', 'pi'].filter((id) =>
       health.checks.some((c) => c.name === id && c.available),
     )
+    const expectedPills = runners.length > 1 ? 1 : 0
+    expect(browser.waitForValue<number>(
+      `document.querySelectorAll('[data-slot="runner-pill"]').length`,
+      (count) => count === expectedPills,
+    )).toBe(expectedPills)
     if (runners.length > 1) {
       expect(browser.count('[data-slot="runner-pill"]')).toBe(1)
       expect(browser.text('[data-slot="runner-pill"]')).toContain('claude')

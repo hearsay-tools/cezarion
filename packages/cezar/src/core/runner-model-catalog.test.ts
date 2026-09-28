@@ -20,6 +20,43 @@ const models: ModelOption[] = [
 ];
 
 describe('RunnerModelCatalog', () => {
+  it('serves stale Cursor models during a deduplicated refresh and retains them on failure', async () => {
+    let now = 0;
+    let reject!: (error: Error) => void;
+    const discover = vi.fn().mockResolvedValueOnce(models)
+      .mockImplementationOnce(() => new Promise((_, fail) => { reject = fail; }));
+    const catalog = new RunnerModelCatalog({ adapters: { cursor: { discover } }, now: () => now, ttlMs: 10 });
+    await catalog.get('cursor');
+    now = 10;
+    expect(catalog.getCached('cursor')).toMatchObject({ models, source: 'cache', stale: true });
+    expect(catalog.getCached('cursor')).toMatchObject({ models, stale: true });
+    expect(discover).toHaveBeenCalledTimes(2);
+    const completed = catalog.get('cursor');
+    reject(new Error('private CLI output'));
+    await completed;
+    expect(catalog.getCached('cursor')).toMatchObject({ models, stale: true, reason: 'Cursor model discovery is temporarily unavailable' });
+    expect(discover).toHaveBeenCalledTimes(2);
+  });
+
+  it('only announces the current generation and releases refresh listeners', async () => {
+    let finish!: (value: ModelOption[]) => void;
+    const discover = vi.fn().mockImplementationOnce(() => new Promise<ModelOption[]>((resolve) => { finish = resolve; }))
+      .mockResolvedValue(models);
+    const catalog = new RunnerModelCatalog({ adapters: { cursor: { discover } } });
+    const listener = vi.fn();
+    const off = catalog.onRefresh(listener);
+    const old = catalog.get('cursor');
+    catalog.invalidate('cursor');
+    await catalog.get('cursor');
+    finish([]);
+    await old;
+    expect(listener).toHaveBeenCalledExactlyOnceWith({ runner: 'cursor', models, source: 'live', stale: false });
+    off();
+    catalog.invalidate('cursor');
+    await catalog.get('cursor');
+    expect(listener).toHaveBeenCalledOnce();
+  });
+
   it('returns a live discovery, then a cached value for five minutes', async () => {
     let now = 1_000;
     const discover = vi.fn(async () => models);

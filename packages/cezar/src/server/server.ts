@@ -548,6 +548,8 @@ export type WorkspaceEventName =
   | 'project-added'
   | 'project-removed'
   | 'checkout-progress'
+  | 'health'
+  | 'model-catalog'
   | 'provider-status'
   | 'automation-change';
 
@@ -1517,9 +1519,30 @@ export function createApp(deps: ServerDeps) {
   // hand, the handler was checked against it, and `AppType` then reported the hand-written type
   // back as if the server had proven it. Inferring here means the route says what it actually
   // sends, which is what lets the DTO be derived instead of maintained.
+  // Availability has its own lifetime: even a cold/max-stale health read must not
+  // await agent startup. Repository/config freshness below remains independently bounded.
+  let backendChecks: Awaited<ReturnType<typeof detectEnvironment>> = [];
+  let backendChecksAt = -Infinity;
+  let backendChecksPending: Promise<void> | undefined;
+  const readBackendChecks = () => {
+    if (!backendChecksPending && Date.now() - backendChecksAt >= 5_000) {
+      backendChecksPending = detectEnvironment().then(async (checks) => {
+        const changed = JSON.stringify(checks) !== JSON.stringify(backendChecks);
+        backendChecks = checks;
+        if (!changed) return;
+        // A cold snapshot may still be assembling with the previous checks. Let
+        // it finish, then replace it and notify remote SSE readers as well as WS.
+        await healthInFlight?.catch(() => {});
+        await refreshHealth();
+      })
+        .catch(() => {})
+        .finally(() => { backendChecksAt = Date.now(); backendChecksPending = undefined; });
+    }
+    return backendChecks;
+  };
   const healthSnapshot = async () => {
     const [checks, repo, config, workspace] = await Promise.all([
-      detectEnvironment(),
+      readBackendChecks(),
       getRepoInfo(bootRoot),
       loadConfig(bootRoot),
       workspaceSummary(),
@@ -1566,8 +1589,8 @@ export function createApp(deps: ServerDeps) {
     };
   };
   // ---- server-side health cache (stale-while-revalidate) -------------------
-  // The snapshot is expensive: ~0.8 s of agent-CLI `--version` probes plus
-  // ~0.4 s of git. Paying that on the browser's FIRST `GET /api/health` is
+  // The snapshot still reads git and workspace state. Agent-CLI availability
+  // probes have their own nonblocking cache above. Paying that on the browser's FIRST `GET /api/health` is
   // exactly the few-seconds-blank the cockpit showed at load. So on the live
   // server the snapshot is computed at the server's OWN pace: both the GET and
   // the WS `health` topic serve the cached value immediately and revalidate
@@ -1597,7 +1620,7 @@ export function createApp(deps: ServerDeps) {
 
   const refreshHealth = (): Promise<HealthPayload> => {
     // Dedupe: a GET's background revalidation and the topic's interval tick
-    // share ONE compute (and one set of CLI spawns) rather than racing two.
+    // share ONE repository/workspace compute rather than racing two.
     if (healthInFlight) return healthInFlight;
     healthInFlight = (async () => {
       try {
@@ -1605,7 +1628,10 @@ export function createApp(deps: ServerDeps) {
         const body = JSON.stringify(payload);
         const changed = body !== healthCache?.body;
         healthCache = { at: Date.now(), payload, body };
-        if (changed) publishHealth(payload); // only a real change reaches the wire
+        if (changed) {
+          publishHealth(payload);
+          workspaceEvents.emit('health', payload);
+        } // only a real change reaches either transport
         return payload;
       } finally {
         healthInFlight = undefined;
@@ -1671,7 +1697,30 @@ export function createApp(deps: ServerDeps) {
   // app in tests does not, so tests never spawn the probes here): the cache
   // fills while the browser is still downloading the bundle, so its first
   // `GET /api/health` reads a warm value instead of the cold ~1 s compute.
-  if (deps.socketHub) void refreshHealth();
+  if (deps.socketHub) {
+    void refreshHealth();
+    void modelCatalog.get('cursor');
+  }
+  // Authenticated SSE carries completion to remote cockpits too. Reuse the HTTP
+  // contract; no CLI output, paths or account data enter this payload.
+  modelCatalog.onRefresh((result) => {
+    if (result.runner === 'cursor') workspaceEvents.emit('model-catalog', result);
+  });
+  deps.socketHub?.registerTopic('models:cursor', {
+    snapshot: async () => modelCatalog.getCached('cursor'),
+    start: (publish) => {
+      let previous = '';
+      const off = modelCatalog.onRefresh((result) => {
+        if (result.runner !== 'cursor') return;
+        const body = JSON.stringify(result);
+        if (body !== previous) { previous = body; publish(result); }
+      });
+      // Only active pickers keep discovery warm. Last unsubscribe stops all work.
+      const timer = setInterval(() => { void modelCatalog.get('cursor'); }, 5 * 60_000);
+      timer.unref?.();
+      return () => { clearInterval(timer); off(); };
+    },
+  });
   /**
    * Warm the whole of cezar's agent knowledge — the three discovered defaults AND every extra
    * account — so no reader ever pays the first shell-out.
@@ -1712,7 +1761,9 @@ export function createApp(deps: ServerDeps) {
     // validates, including Claude stream-json discovery (#89).
     .get('/models', queryZodValidator(z.object({ runner: z.union([z.string(), z.array(z.string()).transform((v) => v[0] as string)]).pipe(modelDiscoveryRunnerSchema) }), { message: `runner must be ${MODEL_DISCOVERY_RUNNERS.slice(0, -1).join(', ')}, or ${MODEL_DISCOVERY_RUNNERS.at(-1)}` }), async (c) => {
       const query = { data: c.req.valid('query') };
-      return c.json(await modelCatalog.get(query.data.runner));
+      return c.json(query.data.runner === 'cursor'
+        ? modelCatalog.getCached('cursor')
+        : await modelCatalog.get(query.data.runner));
     });
 
   /**

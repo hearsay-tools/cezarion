@@ -43,6 +43,7 @@ export class RunnerModelCatalog {
   readonly #ttlMs: number;
   readonly #cache = new Map<RunnerId, CachedCatalog>();
   readonly #inFlight = new Map<RunnerId, Promise<RunnerModelCatalogResult>>();
+  readonly #listeners = new Set<(result: RunnerModelCatalogResult) => void>();
   readonly #generation = new Map<RunnerId, number>();
 
   constructor(options: RunnerModelCatalogOptions) {
@@ -56,6 +57,24 @@ export class RunnerModelCatalog {
     if (cached) cached.expiresAt = 0;
     this.#inFlight.delete(runner);
     this.#generation.set(runner, (this.#generation.get(runner) ?? 0) + 1);
+  }
+
+  /** Nonblocking cockpit read; authoritative discovery callers continue to await get(). */
+  getCached(runner: RunnerId): RunnerModelCatalogResult {
+    const cached = this.#cache.get(runner);
+    void this.get(runner);
+    if (!cached) return { runner, models: [], source: 'unavailable', stale: false, reason: unavailableReason(runner) };
+    return {
+      runner, models: cached.models,
+      source: cached.failureReason && cached.models.length === 0 ? 'unavailable' : 'cache',
+      stale: this.#now() >= cached.expiresAt || (!!cached.failureReason && cached.models.length > 0),
+      ...(cached.failureReason ? { reason: cached.failureReason } : {}),
+    };
+  }
+
+  onRefresh(listener: (result: RunnerModelCatalogResult) => void): () => void {
+    this.#listeners.add(listener);
+    return () => { this.#listeners.delete(listener); };
   }
 
   get(runner: RunnerId): Promise<RunnerModelCatalogResult> {
@@ -77,7 +96,12 @@ export class RunnerModelCatalog {
     if (pending) return pending;
 
     const generation = this.#generation.get(runner) ?? 0;
-    const refresh = this.#refresh(runner, cached, generation).finally(() => {
+    const refresh = this.#refresh(runner, cached, generation).then((result) => {
+      if ((this.#generation.get(runner) ?? 0) === generation) {
+        for (const listener of this.#listeners) listener(result);
+      }
+      return result;
+    }).finally(() => {
       if ((this.#generation.get(runner) ?? 0) === generation) this.#inFlight.delete(runner);
     });
     this.#inFlight.set(runner, refresh);

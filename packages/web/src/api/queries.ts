@@ -1,3 +1,4 @@
+import { runnerModelCatalogResponseSchema } from '@open-mercato/cezar-api-client'
 import { toast } from '@/components/ui/toaster'
 import { useMutation, useQueries, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo } from 'react'
@@ -289,6 +290,30 @@ export function invalidateRunnerModels(
  * cannot be called conditionally) skip the fetch when it definitely won't.
  */
 export function useRunnerModels(runner: Runner, enabled = true) {
+  const queryClient = useQueryClient()
+  useEffect(() => {
+    if (!enabled || runner !== 'cursor') return
+    let releaseTopic: (() => void) | undefined
+    const syncTransport = () => {
+      const local = queryClient.getQueryData<HealthResponse>(queryKeys.health)?.capabilities?.localHandoff === true
+      if (local && !releaseTopic) {
+        releaseTopic = subscribeTopic('models:cursor', (data) => {
+          const result = runnerModelCatalogResponseSchema.safeParse(data)
+          if (result.success && result.data.runner === 'cursor') {
+            // Cancel an older cold HTTP response before installing discovery's completed result.
+            void queryClient.cancelQueries({ queryKey: workspaceQueryKeys.models('cursor') })
+            queryClient.setQueryData(workspaceQueryKeys.models('cursor'), result.data)
+          }
+        })
+      } else if (!local && releaseTopic) {
+        releaseTopic()
+        releaseTopic = undefined
+      }
+    }
+    syncTransport()
+    const releaseCache = queryClient.getQueryCache().subscribe(syncTransport)
+    return () => { releaseCache(); releaseTopic?.() }
+  }, [enabled, runner, queryClient])
   return useQuery({
     queryKey: workspaceQueryKeys.models(runner),
     // The narrowing IS the guard — the query is disabled for a runner with no host catalog, so

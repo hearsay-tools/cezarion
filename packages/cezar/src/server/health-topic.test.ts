@@ -128,6 +128,8 @@ describe('health topic + cache (live-server path)', () => {
     await vi.waitFor(
       async () => {
         expect(await runner()).toBeDefined();
+        const response = await apiRequest(currentApp!, '/api/v1/health');
+        expect(((await response.json()) as { checks: unknown[] }).checks.length).toBeGreaterThan(0);
       },
       { timeout: PROBE_BUDGET_MS, interval: 50 },
     );
@@ -140,9 +142,9 @@ describe('health topic + cache (live-server path)', () => {
     return ((await res.json()) as { defaultRunner?: string }).defaultRunner;
   };
 
-  it('registers exactly one `health` topic', () => {
+  it('registers the health and Cursor models topics', () => {
     const { topics } = build();
-    expect([...topics.keys()]).toEqual(['health']);
+    expect([...topics.keys()]).toEqual(['health', 'models:cursor']);
   });
 
   it('pre-warms the cache at boot so the first GET is already warm', async () => {

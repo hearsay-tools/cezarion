@@ -43,7 +43,7 @@ describe('workspace model catalog API', () => {
       }),
     });
 
-  it.each(['claude', 'codex', 'cursor'])('returns the %s catalog and reuses its cache', async (runner) => {
+  it.each(['claude', 'codex'])('returns the %s catalog and reuses its cache', async (runner) => {
     let calls = 0;
     const server = app(async () => {
       calls += 1;

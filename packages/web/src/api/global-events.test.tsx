@@ -8,7 +8,7 @@ import { createUsageStore, type UsageStore } from './events'
 import { GlobalEventsProvider, useGlobalEvents, useRunUsage, useUsage } from './global-events'
 import { setApiScope } from '@open-mercato/cezar-api-client'
 import { createQueryClient } from './query-client'
-import { queryKeys, useRun, useRuns, useProviderStatus, workspaceQueryKeys } from './queries'
+import { queryKeys, useHealth, useRunnerModels, useRun, useRuns, useProviderStatus, workspaceQueryKeys } from './queries'
 import { TasksOverview } from '../routes/tasks-overview'
 import type { ApiRun, ProviderStatusResponse, RunRecord } from '@open-mercato/cezar-api-client'
 
@@ -1121,6 +1121,55 @@ describe('useGlobalEvents — usage', () => {
 })
 
 describe('useGlobalEvents — provider status', () => {
+  it('delivers completed remote health over SSE without letting a cold HTTP response overwrite it', async () => {
+    const health = {
+      version: 'test', repoRoot: 'repo', repo: null, defaultRunner: 'claude', forge: null,
+      projects: [], bootProject: BOOT,
+      capabilities: { localHandoff: false, followups: false, singleProject: false, automations: false, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true },
+      checks: [{ name: 'cursor', available: true }],
+    }
+    client.removeQueries({ queryKey: queryKeys.health })
+    const initial = deferredResponse()
+    vi.mocked(fetch).mockReturnValue(initial.promise)
+    const { source } = mount()
+    const { result } = renderHook(() => useHealth(), { wrapper })
+    source.emit('health', 'invalid json')
+    source.emit('health', JSON.stringify({ checks: [] }))
+    expect(result.current.data).toBeUndefined()
+    source.emit('health', JSON.stringify(health))
+    await waitFor(() => expect(result.current.data?.checks).toEqual(health.checks))
+    await act(async () => initial.resolve(json({ ...health, checks: [] })))
+    expect(result.current.data?.checks).toEqual(health.checks)
+    expect(fetch).toHaveBeenCalledOnce()
+  })
+
+  it('replaces a pending cold Cursor HTTP response after SSE reconnect', async () => {
+    const { source } = mount()
+    await act(async () => source.open())
+    const initial = deferredResponse()
+    const fresh = { runner: 'cursor', models: [{ id: 'auto', label: 'Auto', description: '' }], source: 'cache', stale: false }
+    vi.mocked(fetch).mockReturnValueOnce(initial.promise).mockResolvedValue(json(fresh))
+    const { result } = renderHook(() => useRunnerModels('cursor'), { wrapper })
+    expect(result.current.data).toBeUndefined()
+    source.drop()
+    source.open()
+    await waitFor(() => expect(result.current.data?.models[0]?.id).toBe('auto'))
+    await act(async () => initial.resolve(json({ runner: 'cursor', models: [], source: 'unavailable', stale: false })))
+    expect(result.current.data?.models[0]?.id).toBe('auto')
+  })
+
+  it('fills the Cursor catalog from authenticated SSE completion and rejects malformed events', () => {
+    const { source } = mount()
+    const key = workspaceQueryKeys.models('cursor')
+    source.emit('model-catalog', 'not json')
+    source.emit('model-catalog', JSON.stringify({ runner: 'cursor', models: 'invalid' }))
+    expect(client.getQueryData(key)).toBeUndefined()
+    const result = { runner: 'cursor', models: [{ id: 'auto', label: 'Auto', description: '' }], source: 'live', stale: false }
+    source.emit('model-catalog', JSON.stringify(result))
+    expect(client.getQueryData(key)).toEqual(result)
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
   it('patches the provider cache immediately from a workspace provider-status event', () => {
     client.setQueryData(workspaceQueryKeys.providerStatus, CONNECTED_PROVIDERS)
     const { source } = mount()
@@ -1477,18 +1526,18 @@ describe('useGlobalEvents — reconcile doctrine', () => {
       .filter((key) => key !== undefined)
   }
 
-  it('does not reconcile on the first open — the queries are already fetching', () => {
+  it('reconciles background discovery on first open', async () => {
     const invalidate = vi.spyOn(client, 'invalidateQueries')
     const { source } = mount()
 
     source.open()
 
-    expect(invalidate).not.toHaveBeenCalled()
+    await waitFor(() => expect(invalidatedKeys(invalidate)).toEqual([workspaceQueryKeys.models('cursor'), queryKeys.health]))
   })
 
-  it('refetches the authoritative endpoints on reconnect', () => {
+  it('refetches the authoritative endpoints on reconnect', async () => {
     const { source } = mount()
-    source.open()
+    await act(async () => source.open())
     const invalidate = vi.spyOn(client, 'invalidateQueries')
 
     // The socket dropped; EventSource retried it on its own and got back in. Whatever happened in
@@ -1496,16 +1545,17 @@ describe('useGlobalEvents — reconcile doctrine', () => {
     source.drop()
     source.open()
 
-    expect(invalidatedKeys(invalidate)).toEqual([
+    await waitFor(() => expect(invalidatedKeys(invalidate)).toEqual([
       queryKeys.runs.all, // covers the list and every detail under it
       // The cross-project index behind the global Tasks page. Nothing else here covers it: the
       // scoped caches hold one project, and this spans the workspace.
       workspaceQueryKeys.runsIndex,
       queryKeys.todos,
-      queryKeys.health, // the repo/branch chip — health is not on the stream (#369)
       queryKeys.worktrees, // the Resources panel's list/total (#483)
       workspaceQueryKeys.providerStatus,
-    ])
+      workspaceQueryKeys.models('cursor'),
+      queryKeys.health,
+    ]))
   })
 
   it('invalidates cached GitHub lists across projects on reconnect without invalidating threads', () => {
@@ -1539,9 +1589,9 @@ describe('useGlobalEvents — reconcile doctrine', () => {
     )
   })
 
-  it('refetches when a hidden tab comes back', () => {
+  it('refetches when a hidden tab comes back', async () => {
     const { source } = mount()
-    source.open()
+    await act(async () => source.open())
     const invalidate = vi.spyOn(client, 'invalidateQueries')
 
     setVisibility('hidden')
@@ -1550,15 +1600,16 @@ describe('useGlobalEvents — reconcile doctrine', () => {
     // A phone that slept: the tab was frozen, no error handler ever ran, and the stream may have
     // been dead for an hour. What is on screen is about to be read as true.
     setVisibility('visible')
-    expect(invalidatedKeys(invalidate)).toEqual([
+    await waitFor(() => expect(invalidatedKeys(invalidate)).toEqual([
       queryKeys.runs.all,
       // The cross-project index behind the global Tasks page — nothing else here covers it.
       workspaceQueryKeys.runsIndex,
       queryKeys.todos,
-      queryKeys.health,
       queryKeys.worktrees,
       workspaceQueryKeys.providerStatus,
-    ])
+      workspaceQueryKeys.models('cursor'),
+      queryKeys.health,
+    ]))
   })
 
   it('stops listening for visibility once unmounted', () => {
