@@ -4,7 +4,21 @@
     "headSha": "078ec9e0c1fb3add955e9706944978052753a9b4",
     "source": "https://github.com/hearsay-tools/cezarion/actions/runs/34990192576",
     "aggregation": "reported per-file suite duration from one successful four-shard run; milliseconds",
-    "root": "packages/web/e2e"
+    "root": "packages/web/e2e",
+    "githubSplit": {
+      "source": "#665 warm four-lane local run 1790622950121-2797732, 2026-09-28; CEZ_REMOTE=0",
+      "aggregation": "Vitest JSON per-file endTime minus startTime; milliseconds",
+      "browser": "Chrome for Testing 151.0.7922.34 / agent-browser 0.36.0",
+      "passedTests": 473,
+      "failedTests": 0,
+      "skippedTests": 6,
+      "durationsMs": {
+        "github-states.e2e.ts": 11492,
+        "github-layout.e2e.ts": 17249,
+        "github-core.e2e.ts": 7449,
+        "github-pr-review.e2e.ts": 65759
+      }
+    }
   },
   "durationsMs": {
     "agents-dock.e2e.ts": 6528,
@@ -15,7 +29,10 @@
     "composer.e2e.ts": 15928,
     "diff-scroll.e2e.ts": 11488,
     "empty-states.e2e.ts": 11883,
-    "github.e2e.ts": 164239,
+    "github-core.e2e.ts": 7449,
+    "github-layout.e2e.ts": 17249,
+    "github-pr-review.e2e.ts": 65759,
+    "github-states.e2e.ts": 11492,
     "inbox.e2e.ts": 1550,
     "ios-sweep.e2e.ts": 18943,
     "mobile-task-controls.e2e.ts": 18404,

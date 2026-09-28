@@ -26,25 +26,25 @@
       "count": 1
     },
     {
-      "file": "github.e2e.ts",
+      "file": "github-layout.e2e.ts",
       "rule": "one-shot-read",
       "site": "expect(browser.evaluate(`document.querySelector('[data-slot=\"gh-custom-prompt\"]').value`)).toBe('Review this issue and keep this draft')",
       "count": 1
     },
     {
-      "file": "github.e2e.ts",
+      "file": "github-layout.e2e.ts",
       "rule": "sleep",
       "site": "browser.evaluate('new Promise(resolve => setTimeout(resolve, 250))')",
       "count": 1
     },
     {
-      "file": "github.e2e.ts",
+      "file": "github-pr-review.e2e.ts",
       "rule": "sleep",
       "site": "stateBrowser.evaluate(`document.documentElement.classList.toggle('light', ${theme === 'light'}); document.documentElement.dataset.width = 'wide'; document.querySelector('[data-slot=\"gh-merge-box\"]').scrollIntoView({block:'center'}); new Promise(resolve => setTimeout(resolve, 250))`)",
       "count": 1
     },
     {
-      "file": "github.e2e.ts",
+      "file": "github-states.e2e.ts",
       "rule": "sleep",
       "site": "stateBrowser.evaluate(`document.documentElement.classList.toggle('light', ${theme === 'light'}); document.documentElement.dataset.width = 'wide'; new Promise(resolve => setTimeout(resolve, 250))`)",
       "count": 1
