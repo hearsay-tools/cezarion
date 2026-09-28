@@ -342,9 +342,10 @@ describe('useGlobalEvents — archived run bursts (#657)', () => {
     const c = runRecord('c')
     const first = deferredResponse()
     const second = deferredResponse()
+    const trailing = deferredResponse()
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [a, b, c])
     renderHook(() => useRuns(), { wrapper })
-    vi.mocked(fetch).mockReturnValueOnce(first.promise).mockReturnValue(second.promise)
+    vi.mocked(fetch).mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise).mockReturnValue(trailing.promise)
     const { source } = mount()
     source.emit('run', stampedRun({ ...a, archived: true }))
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [{ ...a }, b, c])
@@ -362,6 +363,11 @@ describe('useGlobalEvents — archived run bursts (#657)', () => {
     await act(async () => first.resolve(json([a, b, c])))
     await act(async () => second.resolve(json([{ ...a, archived: true }, b, { ...c, archived: true }])))
     expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())?.filter(run => run.archived)).toHaveLength(2)
+    // The token update overlapped the replacement GET, so it also needs a trailing snapshot.
+    expect(fetch).toHaveBeenCalledTimes(3)
+    expect(client.getQueryState(queryKeys.runs.list())?.isInvalidated).toBe(true)
+    await act(async () => trailing.resolve(json([{ ...a, archived: true }, { ...b, tokensUsed: 43 }, { ...c, archived: true }])))
+    expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())?.[1]?.tokensUsed).toBe(43)
     expect(client.getQueryState(queryKeys.runs.list())?.isInvalidated).toBe(false)
   })
 
@@ -389,7 +395,7 @@ describe('useGlobalEvents — archived run bursts (#657)', () => {
     expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())?.[0]?.archived).toBe(true)
   })
 
-  it('keeps active reconciliation pending through a later SSE and clears it after REST succeeds', async () => {
+  it('follows an overlapping recovery GET with one trailing fetch for later SSE writes', async () => {
     vi.useFakeTimers()
     vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
     vi.stubGlobal('cancelAnimationFrame', vi.fn())
@@ -398,7 +404,8 @@ describe('useGlobalEvents — archived run bursts (#657)', () => {
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [a, b])
     renderHook(() => useRuns(), { wrapper })
     const fresh = deferredResponse()
-    vi.mocked(fetch).mockReturnValue(fresh.promise)
+    const trailing = deferredResponse()
+    vi.mocked(fetch).mockReturnValueOnce(fresh.promise).mockReturnValue(trailing.promise)
     const { source } = mount()
     source.emit('run', stampedRun({ ...a, archived: true }))
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [{ ...a }, { ...b }])
@@ -412,12 +419,18 @@ describe('useGlobalEvents — archived run bursts (#657)', () => {
     expect(vi.mocked(fetch).mock.calls[0]?.[1]?.signal?.aborted).toBe(false)
     expect(client.getQueryState(queryKeys.runs.list())?.isInvalidated).toBe(true)
     expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())?.[1]?.tokensUsed).toBe(42)
-    await act(async () => fresh.resolve(json([{ ...a, archived: true }, { ...b, tokensUsed: 42 }])))
+    // Recovery captured its snapshot before the live updates. Its success must not
+    // settle recovery with b's old value or start one request per intervening event.
+    await act(async () => fresh.resolve(json([{ ...a, archived: true }, b])))
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(client.getQueryState(queryKeys.runs.list())?.isInvalidated).toBe(true)
+    await act(async () => trailing.resolve(json([{ ...a, archived: true }, { ...b, tokensUsed: 42 }])))
     expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())?.[0]?.archived).toBe(true)
+    expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())?.[1]?.tokensUsed).toBe(42)
     expect(client.getQueryState(queryKeys.runs.list())?.isInvalidated).toBe(false)
 
     source.emit('run', stampedRun({ ...b, tokensUsed: 43 }))
-    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(fetch).toHaveBeenCalledTimes(2)
   })
 
   it('stops watching dirty list writes after the stream unmounts', () => {

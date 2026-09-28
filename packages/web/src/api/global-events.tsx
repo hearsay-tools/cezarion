@@ -223,7 +223,10 @@ function createRunListBatcher(queryClient: QueryClient) {
     key: readonly [string, 'runs', 'list']; baseList: ApiRun[] | undefined
     baseQuery: object | undefined; baseUpdateCount: number | undefined; runs: Map<string, RunRecord>
   }>()
-  type Reconciliation = { key: readonly [string, 'runs', 'list']; phase: 'needs-start' | 'awaiting-fetch' | 'fetching' }
+  type Reconciliation = {
+    key: readonly [string, 'runs', 'list']; phase: 'needs-start' | 'awaiting-fetch' | 'fetching'
+    dirty: boolean
+  }
   const needsReconcile = new Map<string, Reconciliation>()
   const startRecovery = (key: readonly [string, 'runs', 'list']): void => {
     const entry = needsReconcile.get(JSON.stringify(key))
@@ -231,6 +234,7 @@ function createRunListBatcher(queryClient: QueryClient) {
     const query = queryClient.getQueryCache().find({ queryKey: key, exact: true })
     const previousRequest = query?.promise
     entry.phase = 'awaiting-fetch'
+    entry.dirty = false
     // The first GET must start after the discarded archive. An already-running request may have
     // captured the old list; TanStack cancels and replaces it for an active query.
     void queryClient.invalidateQueries({ queryKey: key, exact: true })
@@ -253,19 +257,22 @@ function createRunListBatcher(queryClient: QueryClient) {
     }
     if (event.action.type === 'fetch') {
       if (entry.phase === 'awaiting-fetch') entry.phase = 'fetching'
+      entry.dirty = false
       return
     }
     if (event.action.type !== 'success') return
     if (!event.action.manual) {
       // A response from a pre-event GET cannot satisfy this obligation. Only a fetch that began
       // after the first recovery invalidation can clear it.
-      if (entry.phase === 'fetching') needsReconcile.delete(cacheKey)
+      if (entry.phase === 'fetching' && !entry.dirty) needsReconcile.delete(cacheKey)
       else startRecovery(entry.key)
       return
     }
     if (entry.phase === 'needs-start') return // the current live event finishes before first recovery
+    if (entry.phase === 'fetching') entry.dirty = true
     // A reconciliation fetch may already be in flight. Keep it and its eventual authoritative
-    // result instead of cancelling/restarting a GET for every live worker event.
+    // result instead of cancelling/restarting a GET for every live worker event. If a write
+    // overlaps it, success starts one trailing fetch: that snapshot may predate this write.
     void queryClient.invalidateQueries({ queryKey: entry.key, exact: true }, { cancelRefetch: false })
   })
   let frame: number | undefined
@@ -284,7 +291,7 @@ function createRunListBatcher(queryClient: QueryClient) {
       const query = queryClient.getQueryCache().find({ queryKey: key, exact: true })
       if (query !== baseQuery || query?.state.dataUpdateCount !== baseUpdateCount || query?.state.data !== baseList) {
         reconcileKeys.push(key)
-        needsReconcile.set(JSON.stringify(key), { key, phase: 'needs-start' })
+        needsReconcile.set(JSON.stringify(key), { key, phase: 'needs-start', dirty: false })
         continue
       }
       queryClient.setQueryData<ApiRun[]>(key, list => {
