@@ -9,6 +9,7 @@ import { CommandPalette } from '@/components/command-palette'
 import { ListViewProvider } from '@/components/list-view'
 import { ProviderBannerContainer } from '@/components/provider-banner-container'
 import { ProjectGroups } from '@/components/project-groups'
+import { ProjectRailContainer } from '@/components/project-rail'
 import { SidebarSessionScope, TaskQuickListContainer } from '@/components/task-quick-list'
 import { ToolsMenu } from '@/components/tools-menu'
 import { useDocumentTitle } from '@/lib/use-document-title'
@@ -158,6 +159,7 @@ export function AppShellContainer({ children }: { children: ReactNode }) {
           ) : undefined
         }
         toolsMenu={<ToolsMenu health={health.data} sessionScope={<SidebarSessionScope />} />}
+        projectRail={<ProjectRailContainer version={shellHealth?.version ?? null} />}
       >
         {children}
       </AppShell>

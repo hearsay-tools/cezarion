@@ -61,6 +61,11 @@ afterAll(async () => {
   if (root) rmSync(root, { recursive: true, force: true })
 })
 
+/** The project rail (#618) is a 60px column left of the sidebar from `md` up. These sizes name the
+ *  width the New Task column gets, so desktop viewports grow by the rail and keep that column. */
+const RAIL_WIDTH = 60
+const viewportWidth = (width: number): number => (width >= 768 ? width + RAIL_WIDTH : width)
+
 type Box = { left: number; right: number; top: number; bottom: number; width: number; height: number }
 type Layout = { runner: Box; model: Box; effort: Box; group: Box; sidebarWidth: number; viewportOverflow: boolean; clipped: string[]; truncated: string[]; incorrectPrefixes: string[] }
 
@@ -97,7 +102,7 @@ it('lays out New Task pickers in reading order without clipping at desktop, narr
   for (const theme of ['dark', 'light']) {
     const sizes: Array<[number, number]> = [[1440, 264], [1440, 420], [1280, 264], [768, 420], [767, 0], [375, 0], [360, 0], [500, 0]]
     for (const [width, sidebar] of sizes) {
-      browser.setViewport(width, 900)
+      browser.setViewport(viewportWidth(width), 900)
       browser.evaluate(`localStorage.setItem('cez-sidebar-width', '${sidebar}')`)
       browser.goto(`${baseUrl}/new`)
       browser.waitForFunction(`document.querySelector('[data-slot="runner-pill"]')?.checkVisibility() === true`)
@@ -167,7 +172,7 @@ it('Tabs through picker controls in their visual reading order across compact an
     [1440, 420, ['runner-pill', 'model-pill', 'effort-pill']],
     [1440, 264, ['runner-pill', 'model-pill', 'effort-pill']],
   ] as const) {
-    browser.setViewport(width, 900)
+    browser.setViewport(viewportWidth(width), 900)
     browser.evaluate(`localStorage.setItem('cez-sidebar-width', '${sidebar}')`)
     browser.goto(`${baseUrl}/new`)
     browser.waitForFunction(`document.querySelector('[data-slot="runner-pill"]')?.checkVisibility() === true`)
@@ -220,7 +225,7 @@ it('shows the fractional-width Model prefix when pi / grok-4.6 fits at three-col
     env: fixtureServeEnv(root, { CEZ_OPENCODE_BIN: join(root, 'opencode-fixture'), CEZ_PI_BIN: join(root, 'pi-fixture') }), stdio: 'ignore',
   })
   await waitForHealth(baseUrl)
-  browser.setViewport(1440, 900)
+  browser.setViewport(viewportWidth(1440), 900)
   browser.evaluate(`localStorage.setItem('cez-sidebar-width', '420')`)
   browser.goto(`${baseUrl}/new`)
   browser.waitForFunction(`document.querySelector('[data-slot="runner-pill"]')?.checkVisibility() === true`)

@@ -93,6 +93,10 @@
    * with amber ink rather than the teal brand chip; 8.1:1 on the dark sidebar. */
   --inbox-count: #f4c54226;
   --inbox-count-foreground: #f4c542;
+  /* The project rail's pill numbers (#618). Amber is bright enough for dark ink in both themes
+   * (11.0:1); red, violet and green take dark ink on the dark theme (4.76 / 6.59 / 10.05:1). */
+  --signal-ink-amber: #121722;
+  --signal-ink: #121722;
 
   /* Cezarion surfaces from design.pen. Elevation comes from surface steps, not shadows. */
   --surface-base: #0b0f17;
@@ -236,6 +240,10 @@
   /* amber-400 ink on white is ~1.6:1, so the light count darkens its number (6.0:1 on the tint). */
   --inbox-count: #f4c54240;
   --inbox-count-foreground: #7a5200;
+  /* Rail pill numbers on the light theme: dark ink on amber only, white on the darker red, violet
+   * and green fills (4.83 / 5.70 / 5.79:1). */
+  --signal-ink-amber: #121722;
+  --signal-ink: #ffffff;
 
   --message-user-bg: #fff9e8;
   --message-user-border: #ddc978;
@@ -435,6 +443,8 @@
   --color-sidebar-row-selected: var(--sidebar-row-selected);
   --color-inbox-count: var(--inbox-count);
   --color-inbox-count-foreground: var(--inbox-count-foreground);
+  --color-signal-ink: var(--signal-ink);
+  --color-signal-ink-amber: var(--signal-ink-amber);
   --color-ring: var(--ring);
 
   --color-danger: var(--danger);
