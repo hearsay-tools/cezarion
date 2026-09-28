@@ -215,14 +215,147 @@ function runListCacheKey(project: string, bootProject: string | undefined): read
   return [project === bootProject ? 'default' : project, 'runs', 'list'] as const
 }
 
-function applyStampedRunList(queryClient: QueryClient, project: string, event: GlobalEvent): void {
-  if (event.type !== 'run' && event.type !== 'run-deleted') return
-  const key = runListCacheKey(project, bootProjectOf(queryClient))
-  if (event.type === 'run') {
-    queryClient.setQueryData<ApiRun[]>(key, (list) => applyRunEvent(list, event.run))
-    return
+/** Archive cascades can send dozens of full records before a frame paints. Keep their list writes
+ * together while detail/permission handling stays immediate. Keys are captured at receipt time:
+ * changing project scope before the frame must not move an earlier project's update. */
+function createRunListBatcher(queryClient: QueryClient) {
+  const pending = new Map<string, {
+    key: readonly [string, 'runs', 'list']; baseList: ApiRun[] | undefined
+    baseQuery: object | undefined; baseUpdateCount: number | undefined; runs: Map<string, RunRecord>
+  }>()
+  type Reconciliation = {
+    key: readonly [string, 'runs', 'list']; phase: 'needs-start' | 'awaiting-fetch' | 'fetching'
+    dirty: boolean
   }
-  queryClient.setQueryData<ApiRun[]>(key, (list) => applyRunDeleted(list, event.id))
+  const needsReconcile = new Map<string, Reconciliation>()
+  const startRecovery = (key: readonly [string, 'runs', 'list']): void => {
+    const entry = needsReconcile.get(JSON.stringify(key))
+    if (!entry) return
+    const query = queryClient.getQueryCache().find({ queryKey: key, exact: true })
+    const previousRequest = query?.promise
+    entry.phase = 'awaiting-fetch'
+    entry.dirty = false
+    // The first GET must start after the discarded archive. An already-running request may have
+    // captured the old list; TanStack cancels and replaces it for an active query.
+    void queryClient.invalidateQueries({ queryKey: key, exact: true })
+    // Query.fetch can silently replace a running request without dispatching a new `fetch`
+    // action when fetchStatus and metadata stay the same. The promise identity still changes.
+    if (query?.promise && query.promise !== previousRequest) entry.phase = 'fetching'
+  }
+  const unsubscribe = queryClient.getQueryCache().subscribe(event => {
+    if (!needsReconcile.size || event.type !== 'updated') return
+    const cacheKey = JSON.stringify(event.query.queryKey)
+    const entry = needsReconcile.get(cacheKey)
+    if (!entry) return
+    if (event.action.type === 'setState') {
+      // Cancelling the last observer can revert to a manual SSE write's fresh-looking snapshot.
+      // Preserve the obligation without fetching a list that nobody is observing.
+      if (!event.query.state.isInvalidated) {
+        void queryClient.invalidateQueries({ queryKey: entry.key, exact: true, refetchType: 'none' })
+      }
+      return
+    }
+    if (event.action.type === 'fetch') {
+      if (entry.phase === 'awaiting-fetch') entry.phase = 'fetching'
+      entry.dirty = false
+      return
+    }
+    if (event.action.type !== 'success') return
+    if (!event.action.manual) {
+      // A response from a pre-event GET cannot satisfy this obligation. Only a fetch that began
+      // after the first recovery invalidation can clear it.
+      if (entry.phase === 'fetching' && !entry.dirty) needsReconcile.delete(cacheKey)
+      else startRecovery(entry.key)
+      return
+    }
+    if (entry.phase === 'needs-start') return // the current live event finishes before first recovery
+    if (entry.phase === 'fetching') entry.dirty = true
+    // A reconciliation fetch may already be in flight. Keep it and its eventual authoritative
+    // result instead of cancelling/restarting a GET for every live worker event. If a write
+    // overlaps it, success starts one trailing fetch: that snapshot may predate this write.
+    void queryClient.invalidateQueries({ queryKey: entry.key, exact: true }, { cancelRefetch: false })
+  })
+  let frame: number | undefined
+  let timer: ReturnType<typeof setTimeout> | undefined
+
+  const flush = (deferReconcile = false): Array<readonly [string, 'runs', 'list']> => {
+    if (timer !== undefined) clearTimeout(timer)
+    timer = undefined
+    if (frame !== undefined) cancelAnimationFrame(frame)
+    frame = undefined
+    const reconcileKeys: Array<readonly [string, 'runs', 'list']> = []
+    for (const { key, baseList, baseQuery, baseUpdateCount, runs } of pending.values()) {
+      // A successful write during the wait may be older or newer than the archive event. Even
+      // when REST returns the original row, structural sharing can retain the same list object.
+      // The query identity also catches removal followed by recreation with the same data.
+      const query = queryClient.getQueryCache().find({ queryKey: key, exact: true })
+      if (query !== baseQuery || query?.state.dataUpdateCount !== baseUpdateCount || query?.state.data !== baseList) {
+        reconcileKeys.push(key)
+        needsReconcile.set(JSON.stringify(key), { key, phase: 'needs-start', dirty: false })
+        continue
+      }
+      queryClient.setQueryData<ApiRun[]>(key, list => {
+        let next = list
+        for (const run of runs.values()) next = applyRunEvent(next, run)
+        return next
+      })
+    }
+    pending.clear()
+    if (!deferReconcile) {
+      for (const key of reconcileKeys) startRecovery(key)
+    }
+    return reconcileKeys
+  }
+
+  const keysFor = (project: string): Array<readonly [string, 'runs', 'list']> => {
+    const stamped = runListCacheKey(project, bootProjectOf(queryClient))
+    const scoped = project === activeProject(queryClient) ? queryKeys.runs.list() : undefined
+    return scoped && JSON.stringify(scoped) !== JSON.stringify(stamped) ? [stamped, scoped] : [stamped]
+  }
+
+  return {
+    onEvent(project: string, event: Extract<GlobalEvent, { type: 'run' | 'run-deleted' }>): void {
+      const keys = keysFor(project)
+      // Batch only the first archive transition. Archived workers remain live and can continue
+      // changing status or title without changing archivedAt; those updates still land now.
+      const firstArchive = event.type === 'run' && event.run.archived && keys.every(key =>
+        !queryClient.getQueryData<ApiRun[]>(key)?.find(row => row.id === event.run.id)?.archived)
+      if (firstArchive && event.type === 'run') {
+        for (const key of keys) {
+          const cacheKey = JSON.stringify(key)
+          let entry = pending.get(cacheKey)
+          if (!entry) {
+            const query = queryClient.getQueryCache().find({ queryKey: key, exact: true })
+            entry = {
+              key, baseList: query?.state.data as ApiRun[] | undefined,
+              baseQuery: query, baseUpdateCount: query?.state.dataUpdateCount, runs: new Map(),
+            }
+            pending.set(cacheKey, entry)
+          }
+          entry.runs.set(event.run.id, event.run)
+        }
+        if (timer === undefined) {
+          timer = setTimeout(() => { flush() }, 50)
+          if (typeof requestAnimationFrame === 'function') frame = requestAnimationFrame(() => { flush() })
+        }
+        return
+      }
+      // A newer live update or deletion must win over an archived record still in the queue.
+      const reconcileAfterWrite = flush(true)
+      for (const key of keys) {
+        if (event.type === 'run') queryClient.setQueryData<ApiRun[]>(key, list => applyRunEvent(list, event.run))
+        else queryClient.setQueryData<ApiRun[]>(key, list => applyRunDeleted(list, event.id))
+      }
+      // Start recovery only after the current event's manual write. A pre-event GET must be
+      // replaced once; subsequent SSE writes keep that new request in flight.
+      for (const key of reconcileAfterWrite) startRecovery(key)
+    },
+    flush,
+    cancel(): void {
+      unsubscribe()
+      needsReconcile.clear()
+    },
+  }
 }
 
 /** Keep permission unknown immediately, but fetch only after the event burst settles.
@@ -339,10 +472,7 @@ function applyGlobalEvent(
       // relationship readers without discarding their last successful data (#659: only the
       // entries this run can change, only on a change they carry, and debounced).
       relationships.onRun(event.run)
-      // Stamp-addressed write already hit the owner's sidebar key. Also patch this scope's
-      // list: when the boot project is mounted under its real id (registry unavailable),
-      // that key is `[bootId, 'runs', 'list']`, not `'default'`.
-      queryClient.setQueryData<ApiRun[]>(queryKeys.runs.list(), (list) => applyRunEvent(list, event.run))
+      // The stamped list handler patches both the owner key and any active-scope alias.
       // Only a detail cache that exists: `setQueryData` would happily create one, leaving an entry
       // for a run nobody opened — and, worse, one built from a summary rather than from
       // `GET /api/runs/:id`, which the next reader would then be served as if it were fetched.
@@ -377,7 +507,7 @@ function applyGlobalEvent(
     }
     case 'run-deleted': {
       relationships.onDeleted(event.id)
-      queryClient.setQueryData<ApiRun[]>(queryKeys.runs.list(), (list) => applyRunDeleted(list, event.id))
+      // The stamped list handler removes the row from both list aliases first.
       // Removed, not set to undefined: the run is gone server-side, so its detail and diff caches
       // are garbage. Anything still mounted on them refetches and gets the server's 404 — the
       // truth — instead of rendering a record that no longer exists.
@@ -421,6 +551,7 @@ export function useGlobalEvents(usage: UsageStore, url: string = SSE_URL): void 
     let source: EventSource | null = null
     const runsIndexRefresher = createRunsIndexRefresher(queryClient)
     const runDetailRefresher = createRunDetailRefresher(queryClient)
+    const runListBatcher = createRunListBatcher(queryClient)
     const relationshipsRefresher = createRelationshipsRefresher(queryClient)
     let reopenTimer: ReturnType<typeof setTimeout> | undefined
     let everOpened = false
@@ -463,7 +594,10 @@ export function useGlobalEvents(usage: UsageStore, url: string = SSE_URL): void 
         // Not the first one: at boot the queries are fetching anyway, and invalidating them here
         // would only ask the same questions twice. Every later open is a *re*connect — we were
         // disconnected, events happened without us, and the cache is now a guess.
-        if (everOpened) reconcile(queryClient)
+        if (everOpened) {
+          runListBatcher.flush()
+          reconcile(queryClient)
+        }
         everOpened = true
       })
 
@@ -482,7 +616,9 @@ export function useGlobalEvents(usage: UsageStore, url: string = SSE_URL): void 
           // stay active-scope-only: those caches are the current project's, and the
           // reconcile-on-switch (3.2's provider swap) refetches the rest.
           // `ping` (project null) always passes — liveness is not project-owned.
-          if (parsed.project !== null) applyStampedRunList(queryClient, parsed.project, parsed.event)
+          if (parsed.project !== null && (parsed.event.type === 'run' || parsed.event.type === 'run-deleted')) {
+            runListBatcher.onEvent(parsed.project, parsed.event)
+          }
           if (parsed.project !== null && parsed.project !== activeProject(queryClient)) return
           applyGlobalEvent(queryClient, usage, parsed.event, runDetailRefresher.refresh, relationshipsRefresher)
         })
@@ -548,6 +684,7 @@ export function useGlobalEvents(usage: UsageStore, url: string = SSE_URL): void 
       // The phone-in-a-pocket case: mobile browsers freeze background tabs, so the stream may have
       // been dead for an hour with no error handler ever running. Whatever is on screen right now
       // is what the reader is about to trust, so ask the server before they read it.
+      runListBatcher.flush()
       reconcile(queryClient)
       if (!source || source.readyState === CLOSED) {
         // Don't make them wait out a backoff that started while they were away.
@@ -564,6 +701,7 @@ export function useGlobalEvents(usage: UsageStore, url: string = SSE_URL): void 
       // free socket. Close eagerly; pageshow reopens if the document ever comes back.
       clearTimeout(reopenTimer)
       reopenTimer = undefined
+      runListBatcher.flush()
       source?.close()
     }
 
@@ -583,6 +721,8 @@ export function useGlobalEvents(usage: UsageStore, url: string = SSE_URL): void 
     return () => {
       disposed = true
       clearTimeout(reopenTimer)
+      runListBatcher.flush()
+      runListBatcher.cancel()
       runsIndexRefresher.cancel()
       runDetailRefresher.cancel()
       relationshipsRefresher.cancel()
