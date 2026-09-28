@@ -31,6 +31,15 @@ test('desktop Linux keeps sandboxed defaults and leaves a short TMPDIR alone', (
   assert.equal(resolved.namespace, 'cez-e2e');
 });
 
+test('parallel E2E lane selects its own browser namespace', () => {
+  const resolved = resolveBrowserLaunch({
+    env: { E2E_BROWSER_NAMESPACE: 'cez-e2e-local-1' },
+    host: desktopHost,
+    platform: 'linux',
+  });
+  assert.equal(resolved.namespace, 'cez-e2e-local-1');
+});
+
 test('Docker, Podman, Kubernetes and cgroup containers resolve --no-sandbox', () => {
   const cases = [
     { dockerenv: true },

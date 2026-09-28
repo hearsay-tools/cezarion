@@ -149,6 +149,33 @@ test('a production web rebuild invalidates both live reuse and the build cache',
   launchedPids.delete(third.app.pid);
 });
 
+test('a prebuilt lane boots without rebuilding shared assets and records its namespace', () => {
+  const fixture = makeFixture(false);
+  const env = {
+    ...process.env,
+    PATH: fixture.path,
+    E2E_PREBUILT_ASSETS: '1',
+    E2E_BROWSER_NAMESPACE: 'cez-e2e-lane-2',
+  };
+  const npm = join(fixture.root, 'bin/npm');
+  const built = spawnSync(npm, ['run', 'build'], {
+    cwd: fixture.root, encoding: 'utf8', env: { ...env, VITE_CEZ_E2E: '1' },
+  });
+  assert.equal(built.status, 0, built.stderr);
+  rmSync(join(fixture.root, '.ai/build-invocations'));
+
+  const up = spawnSync('/bin/sh', [join(fixture.root, '.ai/scripts/test-env-up.sh')], {
+    encoding: 'utf8', env, timeout: 20_000,
+  });
+  assert.equal(up.status, 0, up.stderr);
+  assert.equal(descriptor(fixture.root).browser.namespace, 'cez-e2e-lane-2');
+  assert.equal(descriptor(fixture.root).browser.installed, true);
+  assert.equal(spawnSync('/bin/sh', ['-c', 'test ! -e .ai/build-invocations'], { cwd: fixture.root }).status, 0);
+  launchedPids.add(descriptor(fixture.root).app.pid);
+  spawnSync('/bin/sh', [join(fixture.root, '.ai/scripts/test-env-down.sh')], { encoding: 'utf8', env, timeout: 20_000 });
+  launchedPids.delete(descriptor(fixture.root).app.pid);
+});
+
 function descriptor(root: string): {
   baseUrl: string;
   app: { pid: number };

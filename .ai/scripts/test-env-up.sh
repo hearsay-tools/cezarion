@@ -250,6 +250,16 @@ artifacts_present() {
 }
 
 ensure_build() {
+  # Local parallel lanes link to a single, already-built source checkout. Never run npm in
+  # a lane: it would replace shared symlink targets while other lanes are reading them.
+  if [ "${E2E_PREBUILT_ASSETS:-}" = 1 ]; then
+    artifacts_present && [ -f "$E2E_BUILD_MARKER" ] || {
+      log "prebuilt lane is missing e2e build artifacts"
+      exit 1
+    }
+    log "using prebuilt e2e assets"
+    return 0
+  fi
   fp=$(fingerprint)
   cached=""
   [ -f "$CACHE_FILE" ] && cached=$(cat "$CACHE_FILE" 2>/dev/null || true)

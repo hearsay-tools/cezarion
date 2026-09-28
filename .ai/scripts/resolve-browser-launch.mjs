@@ -55,7 +55,7 @@ export function resolveBrowserLaunch(input = {}) {
     inContainer,
     launchArgs,
     runtimeEnv,
-    namespace: 'cez-e2e',
+    namespace: env.E2E_BROWSER_NAMESPACE || 'cez-e2e',
   };
 }
 
