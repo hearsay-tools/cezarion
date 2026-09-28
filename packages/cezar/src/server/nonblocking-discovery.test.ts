@@ -117,3 +117,22 @@ it('a Cursor topic snapshot does not wait on an obsolete discovery generation', 
   finish[0]!([]);
   expect(await topics.get('models:cursor')!.snapshot()).toMatchObject({ models: [{ id: 'new' }] });
 }, 1500);
+
+it.each([false, true])('publishes completed availability without a health subscriber (early=%s)', async (early) => {
+  const checks: BackendCheck[] = [{ name: 'cursor', available: true, version: '1' }];
+  let finish!: (checks: BackendCheck[]) => void;
+  vi.mocked(detectEnvironment).mockReturnValue(early ? Promise.resolve(checks) : new Promise((resolve) => { finish = resolve; }));
+  const events = new WorkspaceEventBus();
+  const published = vi.fn(); events.on(published);
+  const app = build(undefined, {
+    workspaceEvents: events,
+    providerAuth: new ProviderAuthService({ runCommand: async () => ({ stdout: '', stderr: '', exitCode: 1 }) }),
+    socketHub: { registerTopic: () => {}, attach: () => {}, close: () => {} },
+  });
+  if (!early) {
+    expect(await (await apiRequest(app, '/api/v1/health')).json()).toMatchObject({ checks: [] });
+    finish(checks);
+  }
+  await vi.waitFor(() => expect(published).toHaveBeenCalledWith('health', expect.objectContaining({ checks })));
+  expect(await (await apiRequest(app, '/api/v1/health')).json()).toMatchObject({ checks });
+});

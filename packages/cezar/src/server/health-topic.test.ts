@@ -128,6 +128,8 @@ describe('health topic + cache (live-server path)', () => {
     await vi.waitFor(
       async () => {
         expect(await runner()).toBeDefined();
+        const response = await apiRequest(currentApp!, '/api/v1/health');
+        expect(((await response.json()) as { checks: unknown[] }).checks.length).toBeGreaterThan(0);
       },
       { timeout: PROBE_BUDGET_MS, interval: 50 },
     );

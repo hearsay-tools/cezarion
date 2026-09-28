@@ -13,7 +13,7 @@ import {
   type GlobalEvent,
   type UsageStore,
 } from './events'
-import { runnerModelCatalogResponseSchema, apiPath, getApiScope } from '@open-mercato/cezar-api-client'
+import { healthResponseSchema, runnerModelCatalogResponseSchema, apiPath, getApiScope } from '@open-mercato/cezar-api-client'
 import { queryKeys, useHealthSubscription, workspaceQueryKeys } from './queries'
 import type {
   ApiRun,
@@ -142,11 +142,8 @@ function createRunsIndexRefresher(queryClient: QueryClient): {
  * - runs: the summaries the stream patches (`invalidate(['runs'])` covers the list and every
  *   single-run query under it — that is what the hierarchical keys in queries.ts are for);
  * - todos: the inbox the `todos` event replaces;
- * - health: the repo/branch chip. Health is not on the stream — nothing server-side watches for a
- *   branch switch — so this reconcile alone only catches a switch across a reconnect or a tab
- *   coming back; a checkout in a foreground, connected tab is covered by `useHealth`'s own poll
- *   instead (#369). Invalidating it here too costs nothing extra and keeps this list a complete
- *   "everything the stream can leave stale" note;
+ * - health: probe completion pushes a refreshed snapshot over SSE; reconciliation catches
+ *   snapshots missed while disconnected and refreshes repository state on return;
  * - worktrees: run terminal transitions and reclaim operations change the resources panel;
  * - provider status: runtime authentication failures patch this workspace-wide cache live.
  *
@@ -158,10 +155,9 @@ function isRunListQueryKey(queryKey: readonly unknown[]): boolean {
   return queryKey[1] === 'runs' && queryKey[2] === 'list'
 }
 
-function reconcileCursorModels(queryClient: QueryClient): Promise<void> {
-  const key = workspaceQueryKeys.models('cursor')
+function reconcileBackgroundQuery(queryClient: QueryClient, key: readonly unknown[]): Promise<void> {
   // With no cached data, invalidation reuses an in-flight cold request. Cancel
-  // it first so a completion missed during disconnect cannot leave the picker empty.
+  // it first so a completion missed during disconnect cannot leave discovery empty.
   return queryClient.cancelQueries({ queryKey: key }).then(() =>
     queryClient.invalidateQueries({ queryKey: key }),
   )
@@ -179,11 +175,11 @@ function reconcile(queryClient: QueryClient): void {
     // here covers it.
     queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.runsIndex }),
     queryClient.invalidateQueries({ queryKey: queryKeys.todos }),
-    queryClient.invalidateQueries({ queryKey: queryKeys.health }),
+    reconcileBackgroundQuery(queryClient, queryKeys.health),
     // The worktree panel's list/total (#483) — a run finishing or a reclaim changes it.
     queryClient.invalidateQueries({ queryKey: queryKeys.worktrees }),
     queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.providerStatus }),
-    reconcileCursorModels(queryClient),
+    reconcileBackgroundQuery(queryClient, workspaceQueryKeys.models('cursor')),
     // GitHub edits never enter this stream. Reconnect (including server restart) must
     // invalidate every project's list, leaving inactive caches stale until revisited.
     // Restrict this to list keys: comments/checks/search have separate cache policies.
@@ -611,10 +607,11 @@ export function useGlobalEvents(usage: UsageStore, url: string = SSE_URL): void 
         if (!everOpened) {
           // Discovery can finish between the cold HTTP read and SSE connection.
           // Cancel that read and reconcile once after the completion listener is attached.
-          const key = workspaceQueryKeys.models('cursor')
-          void queryClient.cancelQueries({ queryKey: key }).then(() => {
-            if (!disposed) void queryClient.invalidateQueries({ queryKey: key })
-          })
+          for (const key of [queryKeys.health, workspaceQueryKeys.models('cursor')]) {
+            void queryClient.cancelQueries({ queryKey: key }).then(() => {
+              if (!disposed) void queryClient.invalidateQueries({ queryKey: key })
+            })
+          }
         }
         everOpened = true
       })
@@ -660,6 +657,15 @@ export function useGlobalEvents(usage: UsageStore, url: string = SSE_URL): void 
           for (const listener of [...workspaceListeners]) listener(name, payload)
         })
       }
+
+      source.addEventListener('health', (event) => {
+        let payload: unknown
+        try { payload = JSON.parse((event as MessageEvent<string>).data) } catch { return }
+        const result = healthResponseSchema.safeParse(payload)
+        if (!result.success) return
+        void queryClient.cancelQueries({ queryKey: queryKeys.health })
+        queryClient.setQueryData(queryKeys.health, result.data)
+      })
 
       source.addEventListener('model-catalog', (event) => {
         let payload: unknown

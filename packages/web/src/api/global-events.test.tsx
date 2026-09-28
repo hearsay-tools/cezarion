@@ -8,7 +8,7 @@ import { createUsageStore, type UsageStore } from './events'
 import { GlobalEventsProvider, useGlobalEvents, useRunUsage, useUsage } from './global-events'
 import { setApiScope } from '@open-mercato/cezar-api-client'
 import { createQueryClient } from './query-client'
-import { queryKeys, useRunnerModels, useRun, useRuns, useProviderStatus, workspaceQueryKeys } from './queries'
+import { queryKeys, useHealth, useRunnerModels, useRun, useRuns, useProviderStatus, workspaceQueryKeys } from './queries'
 import { TasksOverview } from '../routes/tasks-overview'
 import type { ApiRun, ProviderStatusResponse, RunRecord } from '@open-mercato/cezar-api-client'
 
@@ -1121,6 +1121,28 @@ describe('useGlobalEvents — usage', () => {
 })
 
 describe('useGlobalEvents — provider status', () => {
+  it('delivers completed remote health over SSE without letting a cold HTTP response overwrite it', async () => {
+    const health = {
+      version: 'test', repoRoot: 'repo', repo: null, defaultRunner: 'claude', forge: null,
+      projects: [], bootProject: BOOT,
+      capabilities: { localHandoff: false, followups: false, singleProject: false, automations: false, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true },
+      checks: [{ name: 'cursor', available: true }],
+    }
+    client.removeQueries({ queryKey: queryKeys.health })
+    const initial = deferredResponse()
+    vi.mocked(fetch).mockReturnValue(initial.promise)
+    const { source } = mount()
+    const { result } = renderHook(() => useHealth(), { wrapper })
+    source.emit('health', 'invalid json')
+    source.emit('health', JSON.stringify({ checks: [] }))
+    expect(result.current.data).toBeUndefined()
+    source.emit('health', JSON.stringify(health))
+    await waitFor(() => expect(result.current.data?.checks).toEqual(health.checks))
+    await act(async () => initial.resolve(json({ ...health, checks: [] })))
+    expect(result.current.data?.checks).toEqual(health.checks)
+    expect(fetch).toHaveBeenCalledOnce()
+  })
+
   it('replaces a pending cold Cursor HTTP response after SSE reconnect', async () => {
     const { source } = mount()
     await act(async () => source.open())
@@ -1504,13 +1526,13 @@ describe('useGlobalEvents — reconcile doctrine', () => {
       .filter((key) => key !== undefined)
   }
 
-  it('reconciles only Cursor on first open to recover discovery completed before SSE connected', async () => {
+  it('reconciles background discovery on first open', async () => {
     const invalidate = vi.spyOn(client, 'invalidateQueries')
     const { source } = mount()
 
     source.open()
 
-    await waitFor(() => expect(invalidatedKeys(invalidate)).toEqual([workspaceQueryKeys.models('cursor')]))
+    await waitFor(() => expect(invalidatedKeys(invalidate)).toEqual([workspaceQueryKeys.models('cursor'), queryKeys.health]))
   })
 
   it('refetches the authoritative endpoints on reconnect', async () => {
@@ -1529,10 +1551,10 @@ describe('useGlobalEvents — reconcile doctrine', () => {
       // scoped caches hold one project, and this spans the workspace.
       workspaceQueryKeys.runsIndex,
       queryKeys.todos,
-      queryKeys.health, // the repo/branch chip — health is not on the stream (#369)
       queryKeys.worktrees, // the Resources panel's list/total (#483)
       workspaceQueryKeys.providerStatus,
       workspaceQueryKeys.models('cursor'),
+      queryKeys.health,
     ]))
   })
 
@@ -1583,10 +1605,10 @@ describe('useGlobalEvents — reconcile doctrine', () => {
       // The cross-project index behind the global Tasks page — nothing else here covers it.
       workspaceQueryKeys.runsIndex,
       queryKeys.todos,
-      queryKeys.health,
       queryKeys.worktrees,
       workspaceQueryKeys.providerStatus,
       workspaceQueryKeys.models('cursor'),
+      queryKeys.health,
     ]))
   })
 

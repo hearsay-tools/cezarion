@@ -547,6 +547,7 @@ export type WorkspaceEventName =
   | 'project-added'
   | 'project-removed'
   | 'checkout-progress'
+  | 'health'
   | 'model-catalog'
   | 'provider-status'
   | 'automation-change';
@@ -1524,7 +1525,15 @@ export function createApp(deps: ServerDeps) {
   let backendChecksPending: Promise<void> | undefined;
   const readBackendChecks = () => {
     if (!backendChecksPending && Date.now() - backendChecksAt >= 5_000) {
-      backendChecksPending = detectEnvironment().then((checks) => { backendChecks = checks; })
+      backendChecksPending = detectEnvironment().then(async (checks) => {
+        const changed = JSON.stringify(checks) !== JSON.stringify(backendChecks);
+        backendChecks = checks;
+        if (!changed) return;
+        // A cold snapshot may still be assembling with the previous checks. Let
+        // it finish, then replace it and notify remote SSE readers as well as WS.
+        await healthInFlight?.catch(() => {});
+        await refreshHealth();
+      })
         .catch(() => {})
         .finally(() => { backendChecksAt = Date.now(); backendChecksPending = undefined; });
     }
@@ -1618,7 +1627,10 @@ export function createApp(deps: ServerDeps) {
         const body = JSON.stringify(payload);
         const changed = body !== healthCache?.body;
         healthCache = { at: Date.now(), payload, body };
-        if (changed) publishHealth(payload); // only a real change reaches the wire
+        if (changed) {
+          publishHealth(payload);
+          workspaceEvents.emit('health', payload);
+        } // only a real change reaches either transport
         return payload;
       } finally {
         healthInFlight = undefined;
