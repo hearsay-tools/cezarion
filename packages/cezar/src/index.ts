@@ -45,6 +45,7 @@ import { restartEndpoint } from './application-update/helper.ts';
 import { readNpmConfiguration } from './application-update/npm-process.ts';
 import { cezarHomeDir } from './paths.ts';
 import { openUrl } from './open-url.ts';
+import { CockpitOwnership } from './server/cockpit-ownership.ts';
 
 const HELP = `cezar — local cockpit for AI agent tasks in your repo
 
@@ -241,6 +242,9 @@ async function serveCommand(
   bindHost?: string,
   restartExact = false,
 ): Promise<void> {
+  const ownership = new CockpitOwnership();
+  process.once('exit', () => ownership.releaseAll());
+  await ownership.acquire(join(repoRoot, '.ai/cezar'));
   const bootProjectId = await initWorkspace(repoRoot);
   // ONE workspace semaphore for the whole process (spec 2026-07-20, step 2.5):
   // the boot manager and every lazily-built project context count their runs
@@ -337,6 +341,7 @@ async function serveCommand(
       handoff: () => { void server.shutdownForRestart().then(() => process.exit(0)); },
     }) : undefined;
   server = startServer({
+    ownership,
     delegation,
     repoRoot,
     store,
@@ -363,6 +368,8 @@ async function serveCommand(
       () => process.disconnect?.());
   }
   const url = `http://${boundHost.includes(':') ? `[${boundHost}]` : boundHost}:${boundPort}`;
+
+  ownership.publishUrl(url);
 
   console.log(`\n  cezar v${version} — ${repoRoot}`);
   console.log(`  ${repo ? `branch ${repo.branch}` : 'not a git repository (tasks run in place, one at a time; repo view is empty)'}`);
@@ -780,6 +787,7 @@ function ensureDataGitignore(repoRoot: string): void {
     'todos.json',
     'todos.json.tmp',
     'launch-key',
+    'cockpit.lock*',
     'automations.json',
     'automations.json.tmp',
     'automation-state.json',

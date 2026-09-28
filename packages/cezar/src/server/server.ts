@@ -190,6 +190,7 @@ import { browseDirectory, isInsideBrowseRoot, isLexicallyInsideBrowseRoot, resol
 import { parseRemote, resolveForge, type ForgeAvailability } from './forge/index.ts';
 import { fetchGithub, fetchGithubProjects, fetchGithubChecks, fetchGithubComments, fetchGithubPrDiff, fetchGithubRefStatus, forgetRefStatus, readCachedRefStatuses, refNumberFromUrl, searchGithubItems, GithubPrNotFoundError, GH_CHECKS_MAX, GH_REF_STATUS_MAX } from './github.ts';
 import { ensureLaunchKey } from './launch-key.ts';
+import { CockpitAlreadyRunningError, type CockpitOwnership } from './cockpit-ownership.ts';
 import { openInTerminal } from './open-in-terminal.ts';
 import { agentCliRunner, detectOpenTargets, openFileInDefaultApp, openInApp } from './open-in-app.ts';
 import { createDraftPr } from './pr.ts';
@@ -209,6 +210,8 @@ import {
 } from './static-ui.ts';
 
 export interface ServerDeps {
+  /** CLI lifetime ownership, shared with secondary project contexts. */
+  ownership?: CockpitOwnership;
   /** The task-webhook subscribers (#589). Boot creates it and attaches the boot store BEFORE
    *  `manager.recover()`, so recovery's transitions are reported; `startServer` sets its origin
    *  from the port it binds. Absent (tests, embedded apps), `createApp` makes its own. */
@@ -1416,6 +1419,7 @@ export function createApp(deps: ServerDeps) {
     try {
       c.set('project', await contexts.context(raw));
     } catch (err) {
+      if (err instanceof CockpitAlreadyRunningError) return c.json({ error: err.message }, 409);
       if (err instanceof ProjectContextError) {
         return err.reason === 'missing-root'
           ? c.json({ error: `project folder not found: ${err.projectId}` }, 409)
@@ -5942,6 +5946,7 @@ export function startServer(deps: ServerDeps, port: number): ServerType & { shut
   const bootAutomationStore = automationCoordinator.store(bootProjectId, deps.repoRoot)!;
   const taskWebhooks = deps.taskWebhooks ?? new TaskWebhooks({ fetch: deps.taskWebhookFetch });
   const sharedContexts = deps.contexts ?? new ProjectContexts({
+    ownership: deps.ownership,
     listProjects,
     semaphore: deps.semaphore,
     automationStore: (projectId, root) => automationCoordinator.store(projectId, root)!,
