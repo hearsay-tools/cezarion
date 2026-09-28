@@ -1033,15 +1033,21 @@ export class RunManager {
   private readonly workerWaitTimers = new Map<string, NodeJS.Timeout>();
   private readonly inboxClaimTimers = new Map<string, NodeJS.Timeout>();
   private reconcilingWorkers = false;
+  private reconcilingFamily: string | undefined;
+  private readonly pendingReconciliations = new Set<string | undefined>();
   private recovering = false;
   /** Quiet window before unread input is resubmitted or left unconfirmed (#505). */
   private readonly unreadInputGraceMs: number;
   private disposed = false;
-  private readonly onDelegationRun = (run: RunRecord): void => {
+  private readonly onDelegationRun = (run: RunRecord, source?: 'delegation-checkpoint'): void => {
     if (!this.disposed && !['queued', 'running', 'waiting'].includes(run.status)) this.withdrawCiWait(run.id);
     if (run.delegation && !['queued', 'running', 'waiting'].includes(run.status)) this.active.get(run.id)?.revokeDelegation?.();
-    if (this.disposed || this.recovering || this.reconcilingWorkers) return;
-    if (run.delegation && !['queued', 'running', 'waiting'].includes(run.status)) this.reconcileWorkerWaits();
+    // Cleanup checkpoints emit terminal records too. With delegation disabled,
+    // these observations must not replay the project's conversation histories.
+    if (this.disposed || this.recovering || (source === 'delegation-checkpoint' && process.env.CEZ_DELEGATION !== '1')) return;
+    if (run.delegation && run.delegation.role !== 'invalid' && !['queued', 'running', 'waiting'].includes(run.status)) {
+      this.reconcileWorkerWaits(run.delegation.role === 'root' ? run.id : run.delegation.parentRunId);
+    }
   };
   private readonly pendingJobs = new Map<string, { workflow: WorkflowDef; input: StartRunInput; startAt?: number }>();
   /** Interrupted agent turns recovered after a process restart. Unlike an
@@ -3662,9 +3668,9 @@ export class RunManager {
   }
 
   /** Request deadlines share the existing reconciliation timer registry, never a polling loop. */
-  private reconcileConversations(): void {
+  private reconcileConversations(family: readonly RunRecord[]): void {
     const now = new Date().toISOString();
-    for (const root of this.store.listRuns()) {
+    for (const root of family) {
       if (root.delegation?.role !== 'root' || !root.delegation.conversation) continue;
       const next = reconcileConversationState(root, this.store.listRuns(), now, run =>
         run.delegation?.role === 'worker' ? this.store.readWorkerExecution(run.id)?.phase === 'complete' : !this.isActive(run.id));
@@ -3695,12 +3701,32 @@ export class RunManager {
   }
 
   /** Authority and wait live on disk; these collections are admission/timer caches only. */
-  reconcileWorkerWaits(): void {
-    if (this.disposed || this.reconcilingWorkers) return;
+  reconcileWorkerWaits(familyRootId?: string): void {
+    if (this.disposed) return;
+    if (this.reconcilingWorkers) {
+      // The current pass already observes its own writes. A different family
+      // (or an explicit global pass) must not disappear behind the recursion guard.
+      if (this.reconcilingFamily !== undefined && this.reconcilingFamily !== familyRootId) {
+        this.pendingReconciliations.add(familyRootId);
+      }
+      return;
+    }
+    this.pendingReconciliations.add(familyRootId);
+    for (const pending of this.pendingReconciliations) {
+      this.pendingReconciliations.delete(pending);
+      if (this.disposed) break;
+      this.reconcileWorkerFamily(pending);
+    }
+  }
+
+  private reconcileWorkerFamily(familyRootId?: string): void {
     this.reconcilingWorkers = true;
+    this.reconcilingFamily = familyRootId;
     try {
-      this.reconcileConversations();
-      for (const parent of this.store.listRuns()) {
+      const inFamily = (run: RunRecord) => familyRootId === undefined || run.id === familyRootId ||
+        (run.delegation?.role === 'worker' && run.delegation.parentRunId === familyRootId);
+      this.reconcileConversations(this.store.listRuns().filter(inFamily));
+      for (const parent of this.store.listRuns().filter(inFamily)) {
         if (!parent.delegation || parent.delegation.role === 'invalid' || this.historyDeletionPending(parent.id)) continue;
         if (parent.status === 'cancelled' && parent.delegation.role === 'root' && parent.delegation.finishRequestedAt) {
           this.store.commitRootFinishCancellation(parent.id);
@@ -3832,7 +3858,7 @@ export class RunManager {
           arm(Math.max(0, Date.parse(next.deadline) - Date.now()));
         }
       }
-    } finally { this.reconcilingWorkers = false; }
+    } finally { this.reconcilingWorkers = false; this.reconcilingFamily = undefined; }
   }
 
   queueWorkerWake(parentId: string): void {
