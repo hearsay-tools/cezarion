@@ -337,15 +337,15 @@ describe('the conflict chip’s offered action', () => {
 })
 
 describe('ReferenceChip plain (the sidebar meta line, #617)', () => {
-  it('is muted text — no border, no tone, no glyph — spelling PR #N and #N', () => {
+  it('keeps the label muted without a chip border, spelling PR #N and #N', () => {
     const pr = chipOf(<ReferenceChip reference={PR} taskTitle="Add checkout" status="checks-failing" plain />)
     expect(pr.textContent).toBe('PR #402')
     expect(pr.className).not.toMatch(/\bborder\b/)
     expect(pr.className).not.toContain('text-accent-text')
     expect(pr.className).not.toContain('text-danger')
-    expect(pr.querySelector('svg, [data-slot="status-dot"]')).toBeNull()
-    expect(pr.className).toContain('hover:underline')
-    expect(pr.className).toContain('focus-visible:underline')
+    expect(pr.querySelector('svg')).not.toBeNull()
+    expect(pr.querySelector('span')?.className).toContain('group-hover/reference:underline')
+    expect(pr.querySelector('span')?.className).toContain('group-focus-visible/reference:underline')
     cleanup()
     const issue = chipOf(<ReferenceChip reference={{ kind: 'Issue', number: 451, url: 'https://github.com/o/r/issues/451' }} taskTitle="t" plain />)
     expect(issue.textContent).toBe('#451')
@@ -364,5 +364,70 @@ describe('ReferenceChip plain (the sidebar meta line, #617)', () => {
     await waitFor(() => {
       expect(panelText()).toContain(REFERENCE_STATUS['changes-requested'].hint)
     })
+  })
+})
+
+
+// Literal expectations from #677: a wrong tone, missing glyph or full-chip palette leak fails.
+const PLAIN_STATUSES = [
+  ['draft', 'git-pull-request-draft', 'text-soft-foreground'],
+  ['review-required', 'git-pull-request', 'text-info'],
+  ['changes-requested', 'message-square-warning', 'text-danger'],
+  ['checks-pending', 'circle', 'text-pending-strong'],
+  ['checks-failing', 'circle-x', 'text-danger'],
+  ['ready', 'circle-check', 'text-success'],
+  ['merged', 'git-merge', 'text-merged-text'],
+  ['closed', 'git-pull-request-closed', 'text-danger'],
+  ['open', 'circle-dot', 'text-success'],
+  ['completed', 'circle-check', 'text-merged-text'],
+  ['not-planned', 'circle-slash', 'text-soft-foreground'],
+] as const
+
+describe.each([false, true])('plain status visibility (#677), inert=%s', (inert) => {
+  it.each(PLAIN_STATUSES)('%s shows its %s glyph in %s', (status, icon, tone) => {
+    const kind = ['open', 'completed', 'not-planned'].includes(status) ? 'Issue' : 'PR'
+    const chip = chipOf(<ReferenceChip reference={{ ...PR, kind }} taskTitle="t" status={status} plain inert={inert} />)
+    const glyph = chip.querySelector('svg')
+    expect(glyph?.getAttribute('data-design-icon')).toBe(icon)
+    expect(glyph?.getAttribute('class')).toContain(tone)
+    expect(glyph?.getAttribute('class')).toContain('size-2.5')
+    expect(chip.firstElementChild).toBe(glyph)
+    expect(chip.className).toContain('gap-1')
+    expect(chip.className).toContain('text-inherit')
+    expect(chip.className).not.toMatch(/text-(accent|danger|success|merged|pending|info)/)
+    expect(chip.querySelector('span')?.className).not.toMatch(/text-(accent|danger|success|merged|pending|info)/)
+    if (status === 'checks-pending') {
+      expect(glyph?.getAttribute('class')).toContain('animate-pulse')
+      expect(glyph?.getAttribute('class')).toContain('motion-reduce:animate-none')
+    }
+    if (inert) {
+      expect(chip.tagName).toBe('SPAN')
+      expect(chip.hasAttribute('href')).toBe(false)
+      expect(chip.hasAttribute('tabindex')).toBe(false)
+      fireEvent.focus(chip)
+      fireEvent.pointerEnter(chip, { pointerType: 'touch' })
+      expect(document.querySelector('[data-slot="reference-status-card"]')).toBeNull()
+    }
+  })
+
+  it('covers the complete status vocabulary', () => {
+    expect(PLAIN_STATUSES.map(([status]) => status).sort()).toEqual(Object.keys(REFERENCE_STATUS).sort())
+  })
+
+  it.each(['ready', 'checks-pending', undefined, 'future-status'] as const)('conflict overrides %s for both glyph and label', (status) => {
+    const chip = chipOf(<ReferenceChip reference={PR} taskTitle="t" status={status as ReferenceStatus} conflicting plain inert={inert} />)
+    expect(chip.getAttribute('data-conflicting')).toBe('true')
+    expect(chip.querySelector('svg')?.getAttribute('data-design-icon')).toBe('triangle-alert')
+    expect(chip.className).toContain('text-conflict')
+    expect(chip.className).toContain('font-medium')
+    expect(chip.querySelector('[data-slot="status-dot"]')).toBeNull()
+    expect(chip.className).not.toContain('hover:text-muted-foreground')
+  })
+
+  it.each([undefined, 'future-status'] as const)('keeps %s status muted without a glyph', (status) => {
+    const chip = chipOf(<ReferenceChip reference={PR} taskTitle="t" status={status as ReferenceStatus} plain inert={inert} />)
+    expect(chip.querySelector('svg')).toBeNull()
+    expect(chip.className).toContain('text-inherit')
+    expect(chip.outerHTML).not.toContain('text-accent')
   })
 })

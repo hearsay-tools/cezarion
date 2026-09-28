@@ -34,6 +34,19 @@ const TONE_CLASS: Record<ReferenceStatusTone, string> = {
   conflict: 'border-conflict/45 text-conflict',
 }
 
+/** Sidebar glyphs carry status without colouring the meta label. Completed issues use
+ * purple here only; full chips keep their brand accent (#677). */
+const PLAIN_GLYPH_CLASS: Record<ReferenceStatusTone, string> = {
+  success: 'text-success',
+  danger: 'text-danger',
+  accent: 'text-merged-text',
+  merged: 'text-merged-text',
+  info: 'text-info',
+  neutral: 'text-soft-foreground',
+  pending: 'text-pending-strong',
+  conflict: 'text-conflict',
+}
+
 /** The hover wash, per tone — a LINK chip only; the inert one has nothing to hover into. It
  *  follows the tone rather than staying accented, or a red "checks failing" chip would light up
  *  with brand color under the pointer. */
@@ -117,9 +130,9 @@ export function ReferenceChip({
   compact?: boolean
   /**
    * The sidebar row's meta line (#617): the reference as plain muted text — `PR #594`, `#451` —
-   * with no border, no tone colour and no glyph, underlined on hover and focus. It is still the
-   * same link with the same status panel and the same accessible name (which carries the
-   * status), so nothing the chip said is lost; the row just stops painting it in teal.
+   * with a coloured status glyph and no border or background (#677). Only conflicts colour the
+   * label too. The label underlines on hover and focus; the status panel and accessible name
+   * stay the same as the full chip.
    */
   plain?: boolean
   /**
@@ -151,7 +164,9 @@ export function ReferenceChip({
   const presentation = conflicting ? REFERENCE_CONFLICT : statusPresentation
   const chipClass = plain
     ? cn(
-        'rounded-[2px] text-inherit underline-offset-2 hover:text-muted-foreground hover:underline focus-visible:underline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-link-foreground',
+        'inline-flex items-center gap-1 rounded-[2px] text-inherit',
+        conflicting && 'text-conflict font-medium',
+        !inert && 'group/reference focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-link-foreground',
         className,
       )
     : cn(
@@ -168,33 +183,34 @@ export function ReferenceChip({
   // The accessible name carries the status too — a screen reader gets what the color says.
   const ariaLabel = `Open the ${kindWord} for ${taskTitle}${presentation ? ` — ${presentation.label}` : ''}`
 
+  const glyphClass = plain && presentation ? PLAIN_GLYPH_CLASS[presentation.tone] : undefined
+  const body = (
+    <>
+      {/* Unknown statuses paint nothing; a conflict overrides even the pending dot. */}
+      {conflicting ? (
+        <TriangleAlertIcon className={cn('size-2.5 shrink-0', glyphClass)} aria-hidden="true" />
+      ) : (
+        <StatusGlyph status={presentation ? status : undefined} className={plain ? cn('size-2.5', glyphClass) : undefined} />
+      )}
+      {plain ? (
+        <span className={inert ? undefined : 'underline-offset-2 group-hover/reference:underline group-focus-visible/reference:underline'}>{label}</span>
+      ) : label}
+    </>
+  )
+
   if (plain && inert) {
     return (
       <span
         data-slot={kind === 'PR' ? 'pr-chip' : 'issue-chip'}
         data-status={status}
         data-inert="true"
-        className={cn('text-inherit', className)}
+        {...(conflicting ? { 'data-conflicting': 'true' } : {})}
+        className={chipClass}
       >
-        {label}
+        {body}
       </span>
     )
   }
-
-  const body = plain ? label : (
-    <>
-      {/* `presentation ? status : undefined` — one gate for every status channel, so an unknown
-          value cannot paint a glyph either. The conflict overrides the glyph as it overrides the
-          colour, including `checks-pending`'s pulsing dot: a branch that will not merge is not a
-          state that is still moving. */}
-      {conflicting ? (
-        <TriangleAlertIcon className="size-2.5 shrink-0" aria-hidden="true" />
-      ) : (
-        <StatusGlyph status={presentation ? status : undefined} />
-      )}
-      {label}
-    </>
-  )
 
   // href protocol guard (#431): a transcript-scraped non-http URL degrades to inert text.
   const chip =
@@ -487,11 +503,11 @@ function lowerFirst(text: string): string {
 
 /** The status channel that is not color: an icon, or — for checks still running — the pulsing dot
  *  the design system reserves for a transitioning state, inside its now-amber chip. */
-function StatusGlyph({ status }: { status?: ReferenceStatus }) {
+function StatusGlyph({ status, className }: { status?: ReferenceStatus; className?: string }) {
   if (!status) return null
   if (status === 'checks-pending') {
-    return <CircleIcon data-slot="status-dot" data-tone="pending" className="size-3 animate-pulse motion-reduce:animate-none" aria-hidden="true" />
+    return <CircleIcon data-slot="status-dot" data-tone="pending" className={cn('size-3 animate-pulse motion-reduce:animate-none', className)} aria-hidden="true" />
   }
   const Icon = STATUS_ICON[status]
-  return Icon ? <Icon className="size-2.5 shrink-0" aria-hidden="true" /> : null
+  return Icon ? <Icon className={cn('size-2.5 shrink-0', className)} aria-hidden="true" /> : null
 }
