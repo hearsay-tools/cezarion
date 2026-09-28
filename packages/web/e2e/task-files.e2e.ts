@@ -110,6 +110,46 @@ afterAll(async () => {
   if (dataRoot) rmSync(dataRoot, { recursive: true, force: true })
 })
 
+const transcriptLink = '[data-slot="user-bubble"] a[data-streamdown="link"]'
+
+// #664: programmatic scroll leaves follow-tail armed, so a resize can invalidate
+// the native click's coordinates. Scroll upward as a reader before resolving the link.
+async function scrollToTranscriptLink() {
+  const scroller = browser.waitForValue<{ x: number; y: number; height: number }>(`(() => {
+    const main = document.querySelector('[data-slot="main"]');
+    if (!main || !document.querySelector(${JSON.stringify(transcriptLink)})) return null;
+    const rect = main.getBoundingClientRect();
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, height: main.scrollHeight };
+  })()`)
+  browser.evaluate(`window.__fileLinkWheel = null; window.addEventListener('wheel', event => {
+    window.__fileLinkWheel = {
+      trusted: event.isTrusted,
+      inMain: document.querySelector('[data-slot="main"]').contains(event.target),
+      deltaY: event.deltaY,
+    };
+  }, { once: true, capture: true })`)
+  await browser.wheelAt(scroller.x, scroller.y, -scroller.height)
+  const wheel = browser.waitForValue<{ trusted: boolean; inMain: boolean; deltaY: number }>('window.__fileLinkWheel')
+  expect(wheel.trusted).toBe(true)
+  expect(wheel.inMain).toBe(true)
+  expect(wheel.deltaY).toBeLessThan(0)
+  browser.evaluate(`document.querySelector(${JSON.stringify(transcriptLink)}).scrollIntoView({ block: 'center', behavior: 'instant' })`)
+  return waitForTranscriptLink()
+}
+
+function waitForTranscriptLink() {
+  return browser.waitForStable<{ x: number; y: number; top: number } | null>(`(() => {
+    const link = document.querySelector(${JSON.stringify(transcriptLink)});
+    const main = document.querySelector('[data-slot="main"]');
+    if (!link || !main) return null;
+    const rect = link.getBoundingClientRect();
+    const x = rect.left + rect.width / 2, y = rect.top + rect.height / 2;
+    const hit = document.elementFromPoint(x, y);
+    return rect.width > 0 && rect.height > 0 && hit && link.contains(hit)
+      ? { x, y, top: main.scrollTop } : null;
+  })()`, { holdMs: 150 })!
+}
+
 describe('the Files tab against a live dry-run worktree', () => {
   it('deep-linking /tasks/:id/files renders the root listing and the select-a-file prompt', () => {
     browser.goto(`${baseUrl}${scoped(`/tasks/${runId}/files`)}`)
@@ -174,16 +214,18 @@ describe('the Files tab against a live dry-run worktree', () => {
     browser.waitForFunction(`document.querySelector('[data-slot="file-preview-image"]')?.naturalWidth === 1`)
   })
 
-  it('follows a transcript file link into a bookmarkable Markdown preview', () => {
+  it('follows a transcript file link into a bookmarkable Markdown preview', async () => {
     browser.goto(`${baseUrl}${scoped(`/tasks/${runId}`)}`)
-    const selector = '[data-slot="user-bubble"] a[data-streamdown="link"]'
-    browser.waitForFunction(`document.querySelector(${JSON.stringify(selector)}) !== null`)
-    browser.click(selector)
+    await scrollToTranscriptLink()
+    browser.click(transcriptLink)
+    const url = browser.waitForValue<string>('location.href', value => {
+      const target = new URL(value)
+      return target.pathname === scoped(`/tasks/${runId}/files`) && target.searchParams.has('path')
+    })
+    expect(url).toContain('#files-tab-e2e-fixture-repo')
     const text = browser.waitForValue(`document.querySelector('[data-slot="file-preview"]')?.textContent`, value => typeof value === 'string' && value.includes('files-tab e2e fixture repo'))
     expect(text).toContain('files-tab e2e fixture repo')
-    expect(browser.url()).toContain('/files?path=')
-    expect(browser.url()).toContain('#files-tab-e2e-fixture-repo')
-    browser.goto(browser.url())
+    browser.goto(url)
     browser.waitForFunction(`document.querySelector('[data-slot="file-preview"]')?.textContent.includes('files-tab e2e fixture repo')`)
   })
 
