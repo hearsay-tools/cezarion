@@ -4,10 +4,10 @@ Generated from `ledger.yaml` by `node .github/scripts/upstream-scan.cjs render`.
 
 - Upstream: [open-mercato/cezar](https://github.com/open-mercato/cezar) `main`
 - Fork point: `feb85666` (2026-08-31)
-- Last scan: 2026-09-25 to `6a919f82` ([report](scans/2026-09-25.md))
-- Entries: 55 · pending: 19 · planned: 5 · ported: 18 · diverged: 6 · n/a: 7
+- Last scan: 2026-09-28 to `ff27c45e` ([report](scans/2026-09-28.md))
+- Entries: 91 · pending: 55 · planned: 5 · ported: 18 · diverged: 6 · n/a: 7
 
-## Pending (19)
+## Pending (55)
 
 | Upstream | Date | Title | Conflicts | Note |
 | --- | --- | --- | --- | --- |
@@ -30,6 +30,42 @@ Generated from `ledger.yaml` by `node .github/scripts/upstream-scan.cjs render`.
 | [#1064](https://github.com/open-mercato/cezar/pull/1064) | 2026-09-24 | fix(claude): keep .cmd shims away from the spawn sites, and validate CEZ_CLAUDE_BIN for the handoff (#1064) | 2 |  |
 | [#1069](https://github.com/open-mercato/cezar/pull/1069) | 2026-09-24 | feat(thread): live clock on the Working… indicator (#1069) | 3 |  |
 | [#1045](https://github.com/open-mercato/cezar/pull/1045) | 2026-09-25 | feat(trackers): browse Jira and Linear issues and automate tracker events (#1045) | 32 |  |
+| [#1088](https://github.com/open-mercato/cezar/pull/1088) | 2026-09-26 | docs(readme): retitle header and rewrite the tagline (#1088) | 1 |  |
+| [#1090](https://github.com/open-mercato/cezar/pull/1090) | 2026-09-26 | feat(web): refresh cockpit brand icon and favicon (#1090) | 8 |  |
+| [#1083](https://github.com/open-mercato/cezar/pull/1083) | 2026-09-26 | docs(changelog): draft the 0.12.0 entry for PRs merged since 0.11.1 (#1083) | 1 |  |
+| [#1042](https://github.com/open-mercato/cezar/pull/1042) | 2026-09-26 | feat(resources): effective host capacity from the process cgroup, with a sidebar glance (#1042) | 7 |  |
+| [#1072](https://github.com/open-mercato/cezar/pull/1072) | 2026-09-26 | fix(cockpit): settle the plan dock once the run's session is closed (#1072) | 4 |  |
+| [#1086](https://github.com/open-mercato/cezar/pull/1086) | 2026-09-26 | docs: add Simplified and Traditional Chinese READMEs (#1086) | 1 |  |
+| [#1010](https://github.com/open-mercato/cezar/pull/1010) | 2026-09-26 | fix(codex): keep a compaction-ended turn working and surface a rejected follow-up (#1010) | 6 |  |
+| [#1006](https://github.com/open-mercato/cezar/pull/1006) | 2026-09-26 | test(runs): pin the Continue tool-policy invariant end to end (#1006) | 0 |  |
+| [#1091](https://github.com/open-mercato/cezar/pull/1091) | 2026-09-26 | docs: add SECURITY.md with vulnerability reporting policy (#1091) | 0 |  |
+| [#1018](https://github.com/open-mercato/cezar/pull/1018) | 2026-09-26 | fix(cockpit): select a project from the sidebar, and carry the composition across a project switch (#1018) | 7 |  |
+| [#1075](https://github.com/open-mercato/cezar/pull/1075) | 2026-09-26 | feat(settings): integer stepper for parallel-task and monitoring limits (#1075) | 4 |  |
+| [#1060](https://github.com/open-mercato/cezar/pull/1060) | 2026-09-26 | fix(web): keep shell task lists in their project scope (#1060) | 5 |  |
+| [#1002](https://github.com/open-mercato/cezar/pull/1002) | 2026-09-26 | fix(automations): a saturated overlap band no longer pins the poll cursor forever (#1002) | 6 |  |
+| [#996](https://github.com/open-mercato/cezar/pull/996) | 2026-09-26 | fix(forge): merge state survives an unreadable statusCheckRollup (#969) (#996) | 0 |  |
+| [#1035](https://github.com/open-mercato/cezar/pull/1035) | 2026-09-26 | docs(specs): live host resource telemetry - the Machine card (#1035) | 0 |  |
+| [#1092](https://github.com/open-mercato/cezar/pull/1092) | 2026-09-26 | ci: add CodeQL advanced-setup workflow (#1092) | 0 |  |
+| [#1047](https://github.com/open-mercato/cezar/pull/1047) | 2026-09-26 | feat(dashboard): add workspace overview, reported costs and exports (#1047) | 13 |  |
+| [#1100](https://github.com/open-mercato/cezar/pull/1100) | 2026-09-27 | fix(server-install): verify cockpit instance identity (#1100) | 3 |  |
+| [#1097](https://github.com/open-mercato/cezar/pull/1097) | 2026-09-27 | test(web): target project disclosure button (#1097) | 0 |  |
+| [#1093](https://github.com/open-mercato/cezar/pull/1093) | 2026-09-27 | fix(security): close CodeQL alerts #10, #12 and #18 (#1093) | 2 |  |
+| [#1098](https://github.com/open-mercato/cezar/pull/1098) | 2026-09-27 | fix(runs): make cancellation terminal for stale sessions (#1098) | 5 |  |
+| [#1099](https://github.com/open-mercato/cezar/pull/1099) | 2026-09-27 | fix(automations): make abandoned lease reclaim exclusive (#1099) | 3 |  |
+| [#1101](https://github.com/open-mercato/cezar/pull/1101) | 2026-09-27 | fix(pi): distinguish assistant message item ids (#1101) | 3 |  |
+| [#1102](https://github.com/open-mercato/cezar/pull/1102) | 2026-09-27 | fix(runs): preserve non-final monitoring steps (#1102) | 1 |  |
+| [#1108](https://github.com/open-mercato/cezar/pull/1108) | 2026-09-27 | docs(changelog): complete the 0.12.0 entry and stamp the release set (#1108) | 6 |  |
+| [#1110](https://github.com/open-mercato/cezar/pull/1110) | 2026-09-27 | feat(web): collapsible subtasks in the task lists (#1110) | 3 |  |
+| [#1112](https://github.com/open-mercato/cezar/pull/1112) | 2026-09-27 | feat(web): recolour brand icon to a black tile with a white mark (#1112) | 0 |  |
+| [#1115](https://github.com/open-mercato/cezar/pull/1115) | 2026-09-27 | feat(release): publish a cezar-run npx alias alongside cezar-cli (#1115) | 21 |  |
+| [#1116](https://github.com/open-mercato/cezar/pull/1116) | 2026-09-27 | fix(web): match the sidebar Dashboard row to All tasks (#1116) | 1 |  |
+| [#1118](https://github.com/open-mercato/cezar/pull/1118) | 2026-09-27 | fix(web): keep sheet header text clear of the close button (#1118) | 2 |  |
+| [#1119](https://github.com/open-mercato/cezar/pull/1119) | 2026-09-27 | fix(web): paint a project row's chevron and name on one background (#1119) | 3 |  |
+| [#1120](https://github.com/open-mercato/cezar/pull/1120) | 2026-09-27 | feat(web): labelled CPU/RAM meters for the sidebar usage glance (#1120) | 0 |  |
+| [#1121](https://github.com/open-mercato/cezar/pull/1121) | 2026-09-27 | docs(changelog): add the PRs merged after the 0.12.0 draft (#1121) | 1 |  |
+| [#1123](https://github.com/open-mercato/cezar/pull/1123) | 2026-09-28 | docs(brand): add brand guidelines and logo files (#1123) | 0 |  |
+| [#1130](https://github.com/open-mercato/cezar/pull/1130) | 2026-09-28 | fix(docs): drop the permalink icons from the README hero on mobile (#1130) | 1 |  |
+| [#1131](https://github.com/open-mercato/cezar/pull/1131) | 2026-09-28 | fix(docs): put the README hero back on headings, with the black brand icon (#1131) | 1 |  |
 
 ## Planned (5)
 
