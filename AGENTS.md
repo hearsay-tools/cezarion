@@ -224,7 +224,8 @@ npm run test:e2e:local # full local browser suite in four isolated lanes (~8 GiB
 
 Use `npm run test:e2e:local` for the final local full-suite gate. Keep `npm run test:e2e`
 for focused local specs and CI's serial shards. The four-lane command prints the same
-`TEST_E2E_STATUS` marker and retains per-lane logs under `.ai/qa/local-runs/`; see
+`TEST_E2E_STATUS` marker, exits nonzero on `skipped` or `failed`, and retains per-lane
+logs under `.ai/qa/local-runs/`; see
 `packages/web/e2e/README.md` for its isolation and cleanup details.
 
 It boots the app on a free port with `CEZ_DRY_RUN=1` (agent CLIs mocked — no login, no

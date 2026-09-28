@@ -99,7 +99,8 @@ Cockpit shards run on separate VMs, each owning its server, `CEZ_HOME`, test-env
 Local `npm run test:e2e:local` builds once and runs four duration-weighted shards
 concurrently, with separate worktrees, app ports, `CEZ_HOME` directories, descriptors,
 and browser namespaces. It is the final local full-suite gate and retains lane logs
-under `.ai/qa/local-runs/`. CI keeps four separate serial shards on its matrix.
+under `.ai/qa/local-runs/`. A skipped browser exits nonzero there, since it did not
+verify the full suite. CI keeps four separate serial shards on its matrix.
 `npm run test:e2e` without arguments still runs the full sequential suite,
 with the existing environment reuse and skip-exit-0 behavior. For iteration use
 `npm run test:e2e -- smoke.e2e.ts -t 'test name'`. Optional `--force` and
