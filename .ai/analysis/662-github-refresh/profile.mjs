@@ -41,9 +41,18 @@ async function sample(name, paths) {
   const results = await Promise.all(paths.map(async path=> {
     const start=performance.now(); const res=await fetch(origin+path); const headers=performance.now();
     const body=await res.json(); if (body.available !== true) throw new Error('Profile request did not return available data: '+body.reason);
-    return {status:res.status, ttfbMs:+(headers-start).toFixed(2), totalMs:+(performance.now()-start).toFixed(2), available:body.available, ...(body.reason ? {reason:body.reason} : {}), prs:Object.keys(body.prs??{}).length, issues:Object.keys(body.issues??{}).length};
+    return {status:res.status, ttfbMs:+(headers-start).toFixed(2), totalMs:+(performance.now()-start).toFixed(2), available:body.available, ...(body.projectsGeneration ? {projectsGeneration:body.projectsGeneration, projectsState:body.projectsState} : {}), ...(body.reason ? {reason:body.reason} : {}), prs:Object.keys(body.prs??{}).length, issues:Object.keys(body.issues??{}).length};
   }));
-  samples.push({name,paths,ms:+(performance.now()-epoch).toFixed(2),results,calls:[...calls]});
+  const ms = +(performance.now()-epoch).toFixed(2);
+  // Drain optional work before resetting the span epoch for the next sample. First-list
+  // timings above retain the diagnosis boundary (HTTP request through body parse).
+  const hydration = [];
+  for (const result of results) if (result.projectsGeneration && result.projectsState === 'refreshing') {
+    const response = await fetch(origin+'/api/v1/github/projects?generation='+result.projectsGeneration);
+    const metadata = await response.json();
+    hydration.push({state:metadata.state, completedMs:+(performance.now()-epoch).toFixed(2)});
+  }
+  samples.push({name,paths,ms,results,calls:[...calls],...(hydration.length ? {hydration} : {})});
 }
 try {
   const ref='/api/v1/github/ref-status?prs=670&issues=662';

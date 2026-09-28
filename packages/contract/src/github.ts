@@ -68,6 +68,8 @@ export const githubDataSchema = z.object({
   /** Repository-linked Projects v2. Absent when lookup is unavailable; [] means none. */
   projects: z.array(githubProjectSchema).optional(),
   projectsReason: z.string().optional(),
+  projectsState: z.enum(['refreshing', 'ready', 'unavailable']).optional(),
+  projectsGeneration: z.string().optional(),
 });
 export type GithubData = z.infer<typeof githubDataSchema>;
 
@@ -396,3 +398,20 @@ export const githubPrChangesDataSchema = z.discriminatedUnion('available', [
   z.object({ available: z.literal(false), reason: z.string() }),
 ]);
 export type GithubPrChangesData = z.infer<typeof githubPrChangesDataSchema>;
+
+/** Follow-up for the exact list generation; awaiting it never delays the list. */
+export const githubProjectsQuerySchema = z.object({ generation: z.string().uuid() });
+export const githubProjectsDataSchema = z.discriminatedUnion('state', [
+  z.object({
+    generation: z.string().uuid(),
+    state: z.literal('ready'),
+    projects: z.array(githubProjectSchema),
+    membership: z.record(z.string(), z.array(z.string())),
+  }),
+  z.object({
+    generation: z.string().uuid(),
+    state: z.literal('unavailable'),
+    reason: z.string(),
+  }),
+]);
+export type GithubProjectsData = z.infer<typeof githubProjectsDataSchema>;

@@ -486,7 +486,7 @@ describe('fetchGithub per-project list-cache isolation (step 2.6)', () => {
     // Per-key TTL semantics survive the scoping: A is still served from cache…
     const calls = execFileMock.mock.calls.length;
     const a2 = await fetchGithub('/repo/list-iso/proj-a');
-    expect(a2).toBe(a); // same cached object, no new gh calls
+    expect(a2.issues).toEqual(a.issues); // metadata may settle; list rows stay cached
     expect(execFileMock.mock.calls.length).toBe(calls);
     // …and it is A's data, not B's (B's fetch didn't overwrite A's key).
     expect(a2.issues[0]?.title).toBe('a-issue');
@@ -3168,5 +3168,42 @@ describe('refNumberFromUrl', () => {
     expect(refNumberFromUrl('https://example.com/')).toBeNull();
     expect(refNumberFromUrl('')).toBeNull();
     expect(refNumberFromUrl('https://github.com/o/r/pull/0')).toBeNull();
+  });
+});
+
+describe('asynchronous list project metadata (#662)', () => {
+  afterEach(() => vi.unstubAllEnvs());
+  it('delivers the list while memberships are pending, then hydrates the cached generation', async () => {
+    vi.stubEnv('CEZ_DRY_RUN', '');
+    let finishMembership!: () => void;
+    execFileMock.mockImplementation((...args: unknown[]) => {
+      const argv = args[1] as string[];
+      const cb = args.at(-1) as (e: unknown, r: unknown) => void;
+      const send = (value: unknown) => cb(null, { stdout: JSON.stringify(value), stderr: '' });
+      const query = argv.join(' ');
+      if (argv[0] === 'repo') return cb(null, { stdout: 'owner/async', stderr: '' });
+      if (argv[0] === 'issue') return send([{ number: 1, title: 'One', author: null, createdAt: '', labels: [], url: 'https://github.com/owner/async/issues/1' }]);
+      if (argv[0] === 'pr') return send([]);
+      if (query.includes('projectsV2')) return send({ data: { repository: { projectsV2: { nodes: [{ id: 'P1', title: 'Board', url: 'https://github.com/orgs/owner/projects/1' }], pageInfo: { hasNextPage: false, endCursor: null } } } } });
+      if (query.includes('projectItems')) {
+        finishMembership = () => send({ data: { repository: { i1: { projectItems: { nodes: [{ project: { id: 'P1' } }], pageInfo: { hasNextPage: false, endCursor: null } } } } } });
+        return;
+      }
+      send({});
+    });
+    const pending = fetchGithub('/repo/async-662', true);
+    let delivered = false;
+    void pending.then(() => { delivered = true; });
+    await vi.waitFor(() => expect(finishMembership).toBeTypeOf('function'));
+    try {
+      await vi.waitFor(() => expect(delivered).toBe(true), { timeout: 100 });
+      const initial = await pending;
+      expect(initial).toMatchObject({ projectsState: 'refreshing', issues: [{ number: 1 }] });
+      expect(initial.issues[0]?.projectIds).toBeUndefined();
+    } finally { finishMembership(); }
+    await vi.waitFor(async () => {
+      const hydrated = await fetchGithub('/repo/async-662');
+      expect(hydrated).toMatchObject({ projectsState: 'ready', issues: [{ projectIds: ['P1'] }] });
+    });
   });
 });

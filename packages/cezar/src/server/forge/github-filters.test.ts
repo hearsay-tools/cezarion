@@ -4,7 +4,7 @@ vi.mock('node:child_process', async (original) => ({
   ...await original<typeof import('node:child_process')>(),
   execFile: (...args: unknown[]) => run(...args),
 }));
-import { fetchGithub } from './github.ts';
+import { fetchGithub, fetchGithubProjects } from './github.ts';
 import { githubDataSchema } from '@open-mercato/cezar-contract';
 const pageInfo = { hasNextPage: false, endCursor: null };
 const board = { id: 'P1', title: 'Delivery', url: 'https://github.com/users/o/projects/1' };
@@ -27,7 +27,9 @@ beforeEach(() => { vi.stubEnv('CEZ_DRY_RUN', ''); run.mockReset(); });
 afterEach(() => vi.unstubAllEnvs());
 it('delivers assignees, viewer and linked project membership through the list contract', async () => {
   mockGh();
-  const data = githubDataSchema.parse(await fetchGithub('/filters-test', true));
+  const first = await fetchGithub('/filters-test', true);
+  await fetchGithubProjects('/filters-test', first.projectsGeneration!);
+  const data = githubDataSchema.parse(await fetchGithub('/filters-test'));
   expect(data.available).toBe(true);
   expect(data.issues[0]).toMatchObject({ assignees: ['alice'], projectIds: ['P1'] });
   expect(data.viewerLogin).toBe('alice');
@@ -35,7 +37,9 @@ it('delivers assignees, viewer and linked project membership through the list co
 });
 it('project access failure preserves the issue list, assignees and independent viewer', async () => {
   mockGh(true);
-  const data = await fetchGithub('/filters-test', true);
+  const first = await fetchGithub('/filters-fail', true);
+  await fetchGithubProjects('/filters-fail', first.projectsGeneration!);
+  const data = await fetchGithub('/filters-fail');
   expect(data.available).toBe(true);
   expect(data.issues[0]?.assignees).toEqual(['alice']);
   expect(data.viewerLogin).toBe('alice');
@@ -44,7 +48,9 @@ it('project access failure preserves the issue list, assignees and independent v
 });
 it('viewer failure leaves project filtering usable', async () => {
   mockGh(false, true);
-  const data = await fetchGithub('/filters-test', true);
+  const first = await fetchGithub('/filters-viewer-fail', true);
+  await fetchGithubProjects('/filters-viewer-fail', first.projectsGeneration!);
+  const data = await fetchGithub('/filters-viewer-fail');
   expect(data.projects).toEqual([board]);
   expect(data.viewerLogin).toBeUndefined();
 });
@@ -148,3 +154,98 @@ it.each(['API rate limit exceeded (HTTP 403)', 'Too Many Requests (HTTP 429)'])(
     expect(result).toEqual({ projectsReason: expect.stringContaining('rate-limiting') });
   },
 );
+
+it('preserves verified memberships on failure and recovers on the next refresh', async () => {
+  mockGh();
+  const first = await fetchGithub('/filters-recovery', true);
+  await fetchGithubProjects('/filters-recovery', first.projectsGeneration!);
+  mockGh(true);
+  const refreshing = await fetchGithub('/filters-recovery', true);
+  expect(refreshing).toMatchObject({ projectsState: 'refreshing', projects: [board], issues: [{ projectIds: ['P1'] }] });
+  const failure = await fetchGithubProjects('/filters-recovery', refreshing.projectsGeneration!);
+  expect(failure).toMatchObject({ state: 'unavailable', reason: expect.any(String) });
+  expect(await fetchGithub('/filters-recovery')).toMatchObject({ projectsState: 'unavailable', projects: [board], issues: [{ projectIds: ['P1'] }] });
+  mockGh();
+  const next = await fetchGithub('/filters-recovery', true);
+  expect(await fetchGithubProjects('/filters-recovery', next.projectsGeneration!)).toMatchObject({ state: 'ready', membership: { 1: ['P1'] } });
+});
+
+it('isolates generations and repositories, so an older completion cannot replace newer metadata', async () => {
+  mockGh();
+  const immediate = run.getMockImplementation()!;
+  let finish!: () => void;
+  run.mockImplementation((...args: unknown[]) => {
+    if ((args[1] as string[]).join(' ').includes('projectItems')) {
+      finish = () => immediate(...args);
+      return;
+    }
+    return immediate(...args);
+  });
+  const first = await fetchGithub('/filters-generation', true);
+  const waiting = fetchGithubProjects('/filters-generation', first.projectsGeneration!);
+  await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
+  mockGh(true);
+  const next = await fetchGithub('/filters-generation', true);
+  await fetchGithubProjects('/filters-generation', next.projectsGeneration!);
+  finish();
+  expect(await waiting).toMatchObject({ generation: first.projectsGeneration, state: 'ready' });
+  expect(await fetchGithub('/filters-generation')).toMatchObject({ projectsGeneration: next.projectsGeneration, projectsState: 'unavailable' });
+  expect(await fetchGithubProjects('/filters-generation', first.projectsGeneration!)).toMatchObject({ state: 'unavailable' });
+  expect(await fetchGithubProjects('/another-repository', next.projectsGeneration!)).toMatchObject({ state: 'unavailable' });
+});
+
+it('does not install an older list after a newer list has already completed', async () => {
+  mockGh();
+  const immediate = run.getMockImplementation()!;
+  let finishList!: () => void;
+  run.mockImplementation((...args: unknown[]) => {
+    if ((args[1] as string[])[0] === 'issue') {
+      finishList = () => immediate(...args);
+      return;
+    }
+    return immediate(...args);
+  });
+  const older = fetchGithub('/filters-list-order', true);
+  await vi.waitFor(() => expect(finishList).toBeTypeOf('function'));
+  mockGh(true);
+  const newer = await fetchGithub('/filters-list-order', true);
+  await fetchGithubProjects('/filters-list-order', newer.projectsGeneration!);
+  finishList();
+  await older;
+  const cached = await fetchGithub('/filters-list-order');
+  expect(cached.projectsGeneration).toBe(newer.projectsGeneration);
+  expect(cached.projectsState).toBe('unavailable');
+});
+
+it.each(['GH_HOST', 'GH_CONFIG_DIR'] as const)('isolates deferred hydration by %s and retains its original context', async variable => {
+  const root = `/filters-context-${variable}`;
+  vi.stubEnv(variable, 'context-a');
+  mockGh();
+  const immediate = run.getMockImplementation()!;
+  let finish!: () => void;
+  run.mockImplementation((...args: unknown[]) => {
+    if ((args[1] as string[]).join(' ').includes('projectItems')) {
+      finish = () => immediate(...args);
+      return;
+    }
+    return immediate(...args);
+  });
+  const first = await fetchGithub(root, true);
+  expect(first).toMatchObject({ available: true, projectsState: 'refreshing' });
+  expect(first.issues[0]?.projectIds).toBeUndefined();
+  await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
+  vi.stubEnv(variable, 'context-b');
+  const foreign = fetchGithubProjects(root, first.projectsGeneration!);
+  finish();
+  expect(await foreign).toMatchObject({ state: 'unavailable' });
+  mockGh(true);
+  const second = await fetchGithub(root, true);
+  expect(second.issues[0]?.projectIds).toBeUndefined();
+  await fetchGithubProjects(root, second.projectsGeneration!);
+  finish();
+  vi.stubEnv(variable, 'context-a');
+  expect(await fetchGithubProjects(root, first.projectsGeneration!)).toMatchObject({ state: 'ready', membership: { 1: ['P1'] } });
+  expect(await fetchGithub(root)).toMatchObject({ projectsGeneration: first.projectsGeneration, projectsState: 'ready', issues: [{ projectIds: ['P1'] }] });
+  vi.stubEnv(variable, 'context-b');
+  expect(await fetchGithub(root)).toMatchObject({ projectsGeneration: second.projectsGeneration, projectsState: 'unavailable' });
+});

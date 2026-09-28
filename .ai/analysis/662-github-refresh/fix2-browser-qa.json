@@ -1,0 +1,70 @@
+[
+  {
+    "width": 360,
+    "theme": "light",
+    "pending": {
+      "right": 342,
+      "rows": 2,
+      "selected": "P1",
+      "targetHeight": 44,
+      "text": "AssigneesAssigned to meRefreshing project boards. Previous memberships are shown; issues with unknown membership remain visible.All boardsDelivery",
+      "viewport": 360,
+      "x": 18
+    },
+    "ready": {
+      "rows": 1,
+      "selected": "P1"
+    }
+  },
+  {
+    "width": 360,
+    "theme": "dark",
+    "pending": {
+      "right": 342,
+      "rows": 2,
+      "selected": "P1",
+      "targetHeight": 44,
+      "text": "AssigneesAssigned to meRefreshing project boards. Previous memberships are shown; issues with unknown membership remain visible.All boardsDelivery",
+      "viewport": 360,
+      "x": 18
+    },
+    "ready": {
+      "rows": 1,
+      "selected": "P1"
+    }
+  },
+  {
+    "width": 1280,
+    "theme": "light",
+    "pending": {
+      "right": 1244,
+      "rows": 2,
+      "selected": "P1",
+      "targetHeight": 44,
+      "text": "AssigneesAssigned to meRefreshing project boards. Previous memberships are shown; issues with unknown membership remain visible.All boardsDelivery",
+      "viewport": 1280,
+      "x": 300
+    },
+    "ready": {
+      "rows": 1,
+      "selected": "P1"
+    }
+  },
+  {
+    "width": 1280,
+    "theme": "dark",
+    "pending": {
+      "right": 1244,
+      "rows": 2,
+      "selected": "P1",
+      "targetHeight": 44,
+      "text": "AssigneesAssigned to meRefreshing project boards. Previous memberships are shown; issues with unknown membership remain visible.All boardsDelivery",
+      "viewport": 1280,
+      "x": 300
+    },
+    "ready": {
+      "rows": 1,
+      "selected": "P1"
+    }
+  }
+]

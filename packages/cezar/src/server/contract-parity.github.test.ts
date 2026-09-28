@@ -24,6 +24,7 @@ import type {
   worktreeEntrySchema,
   worktreesResponseSchema,
 } from '@open-mercato/cezar-contract';
+import { githubProjectsDataSchema } from '@open-mercato/cezar-contract';
 import type { AppType } from './app-type.ts';
 
 /**
@@ -108,6 +109,7 @@ describe('src/contract github + repo schemas match the routes exactly', () => {
 
   type _Checks = [
     Assert<Exact<z.infer<typeof githubDataSchema>, Github200>>,
+    Assert<Exact<z.infer<typeof githubProjectsDataSchema>, InferResponseType<typeof client.api.v1.github.projects.$get, 200>>>,
     Assert<Exact<z.infer<typeof githubCommentsDataSchema>, GithubComments200>>,
     Assert<Exact<z.infer<typeof githubChecksDataSchema>, GithubChecks200>>,
     Assert<Exact<z.infer<typeof githubSearchDataSchema>, GithubSearch200>>,
@@ -135,5 +137,25 @@ describe('src/contract github + repo schemas match the routes exactly', () => {
     const wider: Mutual<{ a: string }, { a: string; b: number }> = 'schema-is-wider';
     const narrower: Mutual<{ a: string; b: number }, { a: string }> = 'route-is-wider';
     expect([wider, narrower]).toEqual(['schema-is-wider', 'route-is-wider']);
+  });
+});
+
+
+describe('project hydration response contract', () => {
+  const generation = '123e4567-e89b-42d3-a456-426614174000';
+  it.each([
+    { generation, state: 'ready', projects: [] },
+    { generation, state: 'ready', membership: {} },
+    { generation, state: 'unavailable' },
+    { generation: 'not-a-uuid', state: 'ready', projects: [], membership: {} },
+    { generation: 'not-a-uuid', state: 'unavailable', reason: 'Expired' },
+  ])('rejects incomplete or invalid hydration payload %j', payload => {
+    expect(githubProjectsDataSchema.safeParse(payload).success).toBe(false);
+  });
+  it.each([
+    { generation, state: 'ready', projects: [], membership: {} },
+    { generation, state: 'unavailable', reason: 'Expired' },
+  ])('accepts complete hydration payload %j', payload => {
+    expect(githubProjectsDataSchema.parse(payload)).toEqual(payload);
   });
 });

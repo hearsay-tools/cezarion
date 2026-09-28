@@ -19,6 +19,7 @@ import {
   getAgentProfiles,
   getConfig,
   getGithub,
+  getGithubProjects,
   getGithubChecks,
   getGithubSearch,
   getGithubComments,
@@ -1513,7 +1514,9 @@ export function useRemoveQueuedMessage(id: string) {
  * cache, so an upstream edit appears within 120 s plus request time while online/visible.
  * Explicit Refresh remains the only list-cache bypass. */
 export function useGithub(params: { limit?: number } = {}, enabled = true) {
-  return useQuery({
+  const client = useQueryClient()
+  const key = queryKeys.github(params)
+  const list = useQuery({
     queryKey: queryKeys.github(params),
     queryFn: ({ signal }) => getGithub({ limit: params.limit }, { signal }),
     enabled,
@@ -1522,6 +1525,30 @@ export function useGithub(params: { limit?: number } = {}, enabled = true) {
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: true,
   })
+  const generation = list.data?.projectsGeneration
+  const metadata = useQuery({
+    queryKey: [...key, 'projects', generation],
+    queryFn: ({ signal }) => getGithubProjects(generation!, { signal }),
+    enabled: enabled && list.data?.projectsState === 'refreshing' && !!generation,
+    staleTime: Infinity,
+    retry: false,
+  })
+  useEffect(() => {
+    if (!generation || (!metadata.data && !metadata.error)) return
+    client.setQueryData<typeof list.data>(key, current => {
+      if (!current || current.projectsGeneration !== generation || current.projectsState !== 'refreshing') return current
+      const result = metadata.data
+      if (result?.generation && result.generation !== generation) return current
+      return result?.state === 'ready' ? {
+        ...current, projectsState: 'ready', projects: result.projects,
+        issues: current.issues.map(issue => ({ ...issue, projectIds: result.membership?.[issue.number] ?? [] })),
+      } : {
+        ...current, projectsState: 'unavailable',
+        projectsReason: result?.reason ?? 'Project boards unavailable. Refresh to try again.',
+      }
+    })
+  }, [client, generation, metadata.data, metadata.error, key])
+  return list
 }
 
 /** Lazy PR checks glyphs (`/api/github/checks`, #664). The list call no longer ships
