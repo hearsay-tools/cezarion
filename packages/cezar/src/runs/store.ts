@@ -1247,7 +1247,9 @@ export class RunStore extends EventEmitter {
       proposed.set(patch.id, { ...run, delegation });
       changed.add(patch.id);
     }
-    this.commitIndex(proposed, changed);
+    // In-process cause only: consumers can skip metadata replay when delegation
+    // is disabled without dropping real status or termination-proof notifications.
+    this.commitIndex(proposed, changed, 'delegation-checkpoint');
   }
 
   /** Accepted execution revision is public lifecycle identity, separate from process generations. */
@@ -1415,7 +1417,7 @@ export class RunStore extends EventEmitter {
   }
 
   /** Atomic file replacement is the durability boundary; flush() is deliberately best-effort. */
-  private commitIndex(proposed: Map<string, RunRecord>, changed: ReadonlySet<string>): void {
+  private commitIndex(proposed: Map<string, RunRecord>, changed: ReadonlySet<string>, source?: 'delegation-checkpoint'): void {
     this.writeIndex([...proposed.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
     if (this.saveTimer) {
       clearTimeout(this.saveTimer);
@@ -1431,7 +1433,7 @@ export class RunStore extends EventEmitter {
     }
     for (const id of changed) {
       const run = this.runs.get(id);
-      if (run) this.emit('run', run); else this.emit('deleted', id);
+      if (run) this.emit('run', run, source); else this.emit('deleted', id);
     }
   }
 

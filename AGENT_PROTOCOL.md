@@ -797,6 +797,11 @@ case instead. The isolated manager fallback tests remain in `run.test.ts`; the
 wire rows do not pretend to reproduce a missing-v1 envelope these protocols do
 not supply.
 
+R20/R21 (#661) complete an owned worker over each native mock wire, then commit a
+cleanup checkpoint. Enabled delegation reads only that worker's family; disabled
+delegation enters no terminal-checkpoint reconciliation and reads no histories.
+The persisted execution proof remains complete in both cases.
+
 R18/R19 (#548) use every runner's native message wire to check final-line ASK
 selection after an earlier prose mention, and quoted ASK examples without a
 marker. Parsing and transcript stripping must select the same final line;

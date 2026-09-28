@@ -38,6 +38,7 @@ import {
 import { createRunner } from './runner-factory.ts';
 import { inputDeliveryOf } from './agent-runner.ts';
 import { appendTurnText } from '../workflows/run.ts';
+import { cleanupCheckpoint, seedSettledFamily } from '../workflows/delegation-reconcile.testkit.ts';
 import { supportsProfiles } from './agent-profiles.ts';
 import type { WorkflowDef } from '../workflows/types.ts';
 import { workerWorkflowHash, type WorkerAccountBinding, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
@@ -391,6 +392,8 @@ const CONTROL_CRITERIA = [
   { id: 'R11', scenario: 'baseline' },
   { id: 'R15', scenario: 'subagent-after-park' },
   { id: 'R16', scenario: 'ask-snapshot' },
+  { id: 'R20', scenario: 'baseline' },
+  { id: 'R21', scenario: 'baseline' },
 ] as const;
 
 /**
@@ -1346,5 +1349,37 @@ describe('harness parity — AgentRunSpec support declarations', () => {
         });
       }
     });
+  }
+});
+
+// #661: native runner completion precedes the real durable cleanup checkpoint.
+// Every adapter supplies baseline; there is no wire exemption for this path.
+describe('harness parity — terminal cleanup reconciliation', () => {
+  for (const backend of RUNNER_IDS) {
+    for (const enabled of [true, false]) {
+      const criterion = enabled ? 'R20' : 'R21';
+      it(`${backend} ${criterion} cleanup checkpoints ${enabled ? 'read only their family' : 'skip reconciliation with delegation disabled'}`, async () => {
+        vi.stubEnv('CEZ_DELEGATION', '1');
+        try {
+          await withOwnedInputRun(backend, 'baseline', async ({ store, manager, runId, repoRoot }) => {
+            manager.enqueueOwnedRun(runId);
+            await waitFor(() => store.getRun(runId)?.status === 'waiting');
+            if (!enabled) vi.stubEnv('CEZ_DELEGATION', '0');
+            expect(manager.finish(runId)).toBe(true);
+            await waitFor(() => !manager.isActive(runId) && store.readWorkerExecution(runId)?.phase === 'complete');
+            const unrelated = seedSettledFamily(store, repoRoot);
+            const reads = vi.spyOn(store, 'readEvents');
+            const reconcile = vi.spyOn(manager, 'reconcileWorkerWaits');
+            try {
+              cleanupCheckpoint(store, runId);
+              expect(store.readWorkerExecution(runId)?.phase).toBe('complete');
+              expect(reads.mock.calls.map(([id]) => id)).not.toContain(unrelated.parentId);
+              expect(reads.mock.calls.map(([id]) => id)).not.toContain(unrelated.workerId);
+              if (!enabled) { expect(reconcile).not.toHaveBeenCalled(); expect(reads).not.toHaveBeenCalled(); }
+            } finally { reads.mockRestore(); reconcile.mockRestore(); }
+          });
+        } finally { vi.unstubAllEnvs(); }
+      }, 60_000);
+    }
   }
 });
