@@ -1,7 +1,9 @@
 import * as React from 'react'
 import { Link as RouterLink, useLocation } from 'react-router'
 
-import { useHealth, useProjects, useRunsIndex } from '@/api/queries'
+import { useQueryClient } from '@tanstack/react-query'
+
+import { useHealth, useProjects, useRunsIndex, workspaceQueryKeys } from '@/api/queries'
 import type { ProjectListEntry } from '@open-mercato/cezar-api-client'
 import { AddProjectMenu } from '@/components/app-shell'
 import { LayersIcon, PlusIcon, Settings2Icon } from '@/components/design-icons'
@@ -85,15 +87,17 @@ function SignalPill({
 function ProjectMark({
   project,
   signal,
+  known,
   truncated,
   current,
 }: {
   project: ProjectListEntry
   signal: ProjectSignal | undefined
+  known: boolean
   truncated: boolean
   current: boolean
 }) {
-  const label = projectSignalLabel(project.name, signal, { truncated })
+  const label = projectSignalLabel(project.name, signal, { truncated, unknown: !known })
   return (
     <div data-slot="rail-project" data-project-id={project.id} className="relative flex h-[52px] w-full shrink-0 items-center justify-center">
       {current ? (
@@ -168,7 +172,9 @@ function RailIconLink({
 export type ProjectRailProps = {
   /** Registry order. */
   projects: readonly ProjectListEntry[]
-  signals: ReadonlyMap<string, ProjectSignal>
+  /** Null while the runs index has not loaded: every mark then says its activity is unknown
+   *  rather than idle. A loaded index with no entry for a project is a project with no runs. */
+  signals: ReadonlyMap<string, ProjectSignal> | null
   /** Ids of the projects whose runs index hit its per-project cap. */
   truncated: ReadonlySet<string>
   version: string | null
@@ -214,7 +220,8 @@ export function ProjectRail({ projects, signals, truncated, version, singleProje
           <ProjectMark
             key={project.id}
             project={project}
-            signal={signals.get(project.id)}
+            signal={signals?.get(project.id)}
+            known={signals !== null}
             truncated={truncated.has(project.id)}
             current={project.id === currentProjectId}
           />
@@ -251,11 +258,28 @@ export function ProjectRail({ projects, signals, truncated, version, singleProje
  * browser WebSocket, and a WS-driven rail would go stale in hosted cockpits.
  */
 export function ProjectRailContainer({ version }: { version: string | null }) {
+  const queryClient = useQueryClient()
   const projects = useProjects().data?.projects
   const index = useRunsIndex().data
   const singleProject = useHealth().data?.capabilities.singleProject === true
-  const signals = React.useMemo(() => signalsByProject(index?.runs ?? []), [index?.runs])
+  const signals = React.useMemo(() => (index ? signalsByProject(index.runs) : null), [index])
   const truncated = React.useMemo(() => new Set(index?.truncated ?? []), [index?.truncated])
+
+  // The index is refreshed by run events and reconnects, and none of those fire when the registry
+  // changes. A project registered (or cloned, or removed) with runs already on disk would show no
+  // signal until the next run event, so a change in WHICH projects exist asks for a fresh index.
+  // Keyed on the id set so a rename or a `lastOpenedAt` bump does not refetch.
+  const registry = projects?.map((project) => project.id).join('\n')
+  const seenRegistry = React.useRef<string | undefined>(undefined)
+  React.useEffect(() => {
+    if (registry === undefined) return
+    // The first sighting is the index's own initial fetch; only a later change needs a refresh.
+    if (seenRegistry.current !== undefined && seenRegistry.current !== registry) {
+      void queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.runsIndex })
+    }
+    seenRegistry.current = registry
+  }, [queryClient, registry])
+
   if (!projects) return null
   return <ProjectRail projects={projects} signals={signals} truncated={truncated} version={version} singleProject={singleProject} />
 }

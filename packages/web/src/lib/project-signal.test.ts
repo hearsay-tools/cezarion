@@ -135,6 +135,13 @@ describe('projectSignalLabel', () => {
   })
 })
 
+describe('projectSignalLabel when the index is unknown', () => {
+  it('says the activity is unknown, never idle', () => {
+    expect(projectSignalLabel('toolkit-dev', undefined, { unknown: true })).toBe('toolkit-dev · activity unknown')
+    expect(projectSignalLabel('toolkit-dev', idle, { unknown: true, truncated: true })).toBe('toolkit-dev · activity unknown')
+  })
+})
+
 describe('projectInitials', () => {
   it.each([
     ['toolkit-dev', 'td'],

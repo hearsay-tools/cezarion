@@ -211,6 +211,13 @@ describe('ProjectRail accessible name', () => {
     expect(link.getAttribute('title')).toBe(link.getAttribute('aria-label'))
   })
 
+  it('says the activity is unknown, not idle, while the runs index has not loaded', () => {
+    renderRail({ signals: null })
+    expect(within(mark('toolkit-dev')).getByRole('link').getAttribute('aria-label')).toBe('toolkit-dev · activity unknown')
+    expect(within(mark('open_mercato')).getByRole('link').getAttribute('title')).toBe('open_mercato · activity unknown')
+    expect(document.querySelector('[data-slot="rail-pill-top"], [data-slot="rail-pill-bottom"]')).toBeNull()
+  })
+
   it('says idle for a quiet project, and says so when only recent runs were counted', () => {
     renderRail({ truncated: new Set(['open_mercato']) })
     expect(within(mark('toolkit-dev')).getByRole('link').getAttribute('aria-label')).toBe('toolkit-dev · idle')

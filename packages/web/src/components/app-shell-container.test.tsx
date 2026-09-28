@@ -712,6 +712,66 @@ describe('project rail wiring', () => {
     expect(within(railMark('cezar')).getByRole('link').getAttribute('aria-label')).toBe('cezar · idle')
   })
 
+  it('says the activity is unknown, not idle, when the runs index request fails', async () => {
+    serve({
+      '/api/v1/health': HEALTH,
+      '/api/v1/todos': [],
+      '/api/v1/projects': TWO_PROJECTS,
+      '/api/v1/workspace/ui-state': {},
+      '/api/v1/runs': [],
+      '/api/v1/p/cezar/runs': [],
+      '/api/v1/p/shop/runs': [],
+    })
+    renderShell('/p/cezar/')
+
+    await rail()
+    await waitFor(() =>
+      expect(within(railMark('shop')).getByRole('link').getAttribute('aria-label')).toBe('shop · activity unknown'),
+    )
+  })
+
+  it('refreshes the runs index when a project is registered, so its mark does not stay blank', async () => {
+    const indexCalls = () => fetchMock.mock.calls.filter(([input]) => String(input) === '/api/v1/workspace/runs-index').length
+    serve({
+      '/api/v1/health': HEALTH,
+      '/api/v1/todos': [],
+      '/api/v1/projects': { projects: [PROJECT], bootProject: 'cezar', projectsDir: '/home/me/cezar/projects' },
+      '/api/v1/workspace/ui-state': {},
+      '/api/v1/workspace/runs-index': railIndex([]),
+      '/api/v1/runs': [],
+      '/api/v1/p/cezar/runs': [],
+      '/api/v1/p/shop/runs': [],
+    })
+    const { client } = renderShell('/p/cezar/')
+
+    await waitFor(() => expect(railMark('cezar')).not.toBeNull())
+    await waitFor(() => expect(indexCalls()).toBe(1))
+
+    // A rename or reorder is not a new project: no refetch.
+    act(() => {
+      client.setQueryData(workspaceQueryKeys.projects, { ...TWO_PROJECTS, projects: [{ ...PROJECT, name: 'renamed' }] })
+    })
+    await waitFor(() => expect(railMark('cezar')).not.toBeNull())
+    expect(indexCalls()).toBe(1)
+
+    serve({
+      '/api/v1/health': HEALTH,
+      '/api/v1/todos': [],
+      '/api/v1/projects': TWO_PROJECTS,
+      '/api/v1/workspace/ui-state': {},
+      '/api/v1/workspace/runs-index': railIndex([indexRow({ projectId: 'shop', id: 's1', status: 'waiting' })]),
+      '/api/v1/runs': [],
+      '/api/v1/p/cezar/runs': [],
+      '/api/v1/p/shop/runs': [],
+    })
+    act(() => {
+      client.setQueryData(workspaceQueryKeys.projects, TWO_PROJECTS)
+    })
+
+    await waitFor(() => expect(railMark('shop')?.querySelector('[data-segment="amber"]')?.textContent).toBe('1'))
+    expect(indexCalls()).toBe(2)
+  })
+
   // The capability, not the project count: one registered project in the default multi-project
   // mode is the zero-config first run, and it must teach where projects live.
   it('keeps Add project and All projects on the rail with one project and the capability off', async () => {
