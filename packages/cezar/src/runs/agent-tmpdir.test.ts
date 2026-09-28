@@ -13,7 +13,7 @@ import {
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { createServer } from 'node:net';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   AgentTempDirError,
@@ -326,6 +326,48 @@ describe('socket-safe temp directory length (#387)', () => {
     const resolved = resolveAgentTmpDir(dir, 'run-a');
     expect(resolved).not.toBe(local);
     expect(Buffer.byteLength(resolved)).toBeLessThanOrEqual(MAX_SOCKET_SAFE_DIR_LENGTH);
+  });
+
+  it.each(['terminal', 'deleted'] as const)('keeps the recorded fallback after a host temp change, then reaps it when %s', (end) => {
+    const data = deepDataDir();
+    const firstRoot = mkdtempSync(join(realpathSync('/tmp'), 'cez-a-'));
+    const nextRoot = mkdtempSync(join(realpathSync('/tmp'), 'cez-b-'));
+    const runId = 'persistent-fallback';
+    try {
+      for (const key of ['TMPDIR', 'TEMP', 'TMP']) vi.stubEnv(key, firstRoot);
+      const original = mint(data, runId);
+      expect(original.startsWith(firstRoot)).toBe(true);
+      writeFileSync(join(original, 'note.txt'), 'keep across restart');
+      for (const key of ['TMPDIR', 'TEMP', 'TMP']) vi.stubEnv(key, nextRoot);
+      sweepAgentTmpDirs(data, [runId]);
+      const resumed = mint(data, runId);
+      expect(resumed).toBe(original);
+      expect(readFileSync(join(resumed, 'note.txt'), 'utf8')).toBe('keep across restart');
+      if (end === 'terminal') removeAgentTmpDir(data, runId);
+      else sweepAgentTmpDirs(data, []);
+      expect(existsSync(original)).toBe(false);
+      expect(existsSync(agentTmpDir(data, runId))).toBe(false);
+    } finally {
+      vi.unstubAllEnvs();
+      rmSync(firstRoot, { recursive: true, force: true });
+      rmSync(nextRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a replaced location record without deleting its target', () => {
+    const data = deepDataDir();
+    const runId = 'invalid-fallback';
+    mint(data, runId);
+    const unrelated = mkdtempSync(join(realpathSync('/tmp'), 'cez-foreign-'));
+    try {
+      writeFileSync(join(unrelated, 'note'), 'foreign');
+      writeFileSync(join(agentTmpDir(data, runId), '.cez-fallback'), unrelated);
+      expect(() => agentTmpEnv(data, runId, {})).toThrow('invalid recorded fallback');
+      sweepAgentTmpDirs(data, []);
+      expect(readFileSync(join(unrelated, 'note'), 'utf8')).toBe('foreign');
+    } finally {
+      rmSync(unrelated, { recursive: true, force: true });
+    }
   });
 
   it('reaps the fallback when the run ends', () => {

@@ -1397,26 +1397,40 @@ describe('harness parity — live task scratch', () => {
             dataDir: string;
             active: Map<string, { idleTimer?: NodeJS.Timeout }>;
           };
-          const dirs = new Set([agentTmpDir(internal.dataDir, runId), resolveAgentTmpDir(internal.dataDir, runId)]);
-          for (const dir of dirs) {
-            mkdirSync(dir, { recursive: true });
-            writeFileSync(join(dir, 'notes'), 'keep across turns');
-          }
-          for (let turn = 0; turn < 2; turn++) {
-            const timer = internal.active.get(runId)?.idleTimer as NodeJS.Timeout & { _onTimeout(): void };
-            expect(timer).toBeDefined();
-            timer._onTimeout();
+          const original = resolveAgentTmpDir(internal.dataDir, runId);
+          const dirs = new Set([agentTmpDir(internal.dataDir, runId), original]);
+          const nextRoot = mkdtempSync(join(realpathSync('/tmp'), 'cez-next-'));
+          const keys = ['TMPDIR', 'TEMP', 'TMP'] as const;
+          const previous = keys.map(key => process.env[key]);
+          try {
+            for (const key of keys) process.env[key] = nextRoot;
+            for (const dir of dirs) {
+              mkdirSync(dir, { recursive: true });
+              writeFileSync(join(dir, 'notes'), 'keep across turns');
+            }
+            for (let turn = 0; turn < 2; turn++) {
+              const timer = internal.active.get(runId)?.idleTimer as NodeJS.Timeout & { _onTimeout(): void };
+              expect(timer).toBeDefined();
+              timer._onTimeout();
+              await waitFor(() => !manager.isActive(runId));
+              expect(store.getRun(runId)?.status).toBe('waiting');
+              for (const dir of dirs) expect(readFileSync(join(dir, 'notes'), 'utf8')).toBe('keep across turns');
+              expect(resolveAgentTmpDir(internal.dataDir, runId)).toBe(original);
+              expect(manager.continueRun(runId, { text: promptFor(backend, 'baseline') }).ok).toBe(true);
+              await waitFor(() => manager.isActive(runId) && store.getRun(runId)?.status === 'waiting');
+              for (const dir of dirs) expect(readFileSync(join(dir, 'notes'), 'utf8')).toBe('keep across turns');
+            }
+            expect(manager.finish(runId)).toBe(true);
             await waitFor(() => !manager.isActive(runId));
-            expect(store.getRun(runId)?.status).toBe('waiting');
-            for (const dir of dirs) expect(readFileSync(join(dir, 'notes'), 'utf8')).toBe('keep across turns');
-            expect(manager.continueRun(runId, { text: promptFor(backend, 'baseline') }).ok).toBe(true);
-            await waitFor(() => manager.isActive(runId) && store.getRun(runId)?.status === 'waiting');
-            for (const dir of dirs) expect(readFileSync(join(dir, 'notes'), 'utf8')).toBe('keep across turns');
+            expect(['done', 'review']).toContain(store.getRun(runId)?.status);
+            for (const dir of dirs) expect(existsSync(dir)).toBe(false);
+          } finally {
+            keys.forEach((key, index) => {
+              if (previous[index] === undefined) delete process.env[key];
+              else process.env[key] = previous[index];
+            });
+            rmSync(nextRoot, { recursive: true, force: true });
           }
-          expect(manager.finish(runId)).toBe(true);
-          await waitFor(() => !manager.isActive(runId));
-          expect(['done', 'review']).toContain(store.getRun(runId)?.status);
-          for (const dir of dirs) expect(existsSync(dir)).toBe(false);
         });
     }, 60_000);
 
