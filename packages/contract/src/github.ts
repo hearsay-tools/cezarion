@@ -401,11 +401,17 @@ export type GithubPrChangesData = z.infer<typeof githubPrChangesDataSchema>;
 
 /** Follow-up for the exact list generation; awaiting it never delays the list. */
 export const githubProjectsQuerySchema = z.object({ generation: z.string().uuid() });
-export const githubProjectsDataSchema = z.object({
-  generation: z.string(),
-  state: z.enum(['ready', 'unavailable']),
-  projects: z.array(githubProjectSchema).optional(),
-  membership: z.record(z.string(), z.array(z.string())).optional(),
-  reason: z.string().optional(),
-});
+export const githubProjectsDataSchema = z.discriminatedUnion('state', [
+  z.object({
+    generation: z.string().uuid(),
+    state: z.literal('ready'),
+    projects: z.array(githubProjectSchema),
+    membership: z.record(z.string(), z.array(z.string())),
+  }),
+  z.object({
+    generation: z.string().uuid(),
+    state: z.literal('unavailable'),
+    reason: z.string(),
+  }),
+]);
 export type GithubProjectsData = z.infer<typeof githubProjectsDataSchema>;
