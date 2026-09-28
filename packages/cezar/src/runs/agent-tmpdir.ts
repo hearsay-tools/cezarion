@@ -326,9 +326,9 @@ export function agentTmpDirLocations(dataDir: string, runId: string): string[] {
 }
 
 /**
- * Reap one run's directory. Scratch, not an artifact: nothing reads it once the
- * agent is gone, and a Continue re-creates it through `agentTmpEnv`. Never
- * throws — reaping must not break a terminal transition.
+ * Reap one task's directory after terminal completion or history deletion.
+ * Session close alone is not completion: a live task's Continue must retain
+ * its files. Never throws — reaping must not break a terminal transition.
  *
  * The repo-local directory and the digest name under EVERY root are tried,
  * because the resolution depends on the lengths of `dataDir` and the ambient

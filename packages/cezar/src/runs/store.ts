@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import { removeAgentTmpDir } from './agent-tmpdir.ts';
 import { removeArtifacts } from '../artifacts/lifecycle.ts';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
@@ -2212,6 +2213,7 @@ export class RunStore extends EventEmitter {
         const proposed = new Map(this.runs); proposed.delete(id);
         this.commitIndex(proposed, new Set([id]));
       } else return false;
+      removeAgentTmpDir(this.dataDir, id);
       this.seqs.delete(id);
       return true;
     } catch { return false; }
@@ -2240,6 +2242,7 @@ export class RunStore extends EventEmitter {
         rmSync(this.imagesDir(id), { recursive: true, force: true });
         removeArtifacts(this.dataDir, id);
       } catch { /* Ordinary run deletion preserves its existing best-effort behavior. */ }
+      removeAgentTmpDir(this.dataDir, id);
       this.seqs.delete(id);
       this.scheduleSave();
       this.emit('deleted', id);
@@ -2317,6 +2320,7 @@ export class RunStore extends EventEmitter {
       } catch {
         // best effort
       }
+      removeAgentTmpDir(this.dataDir, stale.id);
     }
   }
 
