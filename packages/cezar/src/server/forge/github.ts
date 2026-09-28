@@ -257,9 +257,18 @@ export function rollupToChecks(rollup: z.infer<typeof ghStatusCheckRollup>): Git
   return 'passing';
 }
 
-async function gh(repoRoot: string, args: string[], timeout = 15_000, signal?: AbortSignal): Promise<string> {
+// Keep account-directory and host selection attached to shared work. Never key by owner/name:
+// separate local roots (including different remotes/accounts) must not share results.
+function githubContext(repoRoot: string) {
+  const env = { GH_HOST: process.env.GH_HOST, GH_CONFIG_DIR: process.env.GH_CONFIG_DIR };
+  return { key: JSON.stringify([repoRoot, env.GH_HOST, env.GH_CONFIG_DIR]), env };
+}
+type GithubContext = ReturnType<typeof githubContext>;
+
+async function gh(repoRoot: string, args: string[], timeout = 15_000, signal?: AbortSignal, context?: GithubContext): Promise<string> {
   const { stdout } = await exec('gh', args, {
     cwd: repoRoot,
+    ...(context ? { env: { ...process.env, ...context.env } } : {}),
     timeout,
     maxBuffer: 50 * 1024 * 1024,
     ...(signal ? { signal } : {}),
@@ -372,8 +381,9 @@ export const GH_MAX_LIMIT = 1000;
 
 export async function fetchGithub(repoRoot: string, refresh = false, limit = 30): Promise<GithubData> {
   if (process.env.CEZ_DRY_RUN === '1') return mockGithub();
+  const context = githubContext(repoRoot);
   const capped = Math.min(Math.max(limit, 1), GH_MAX_LIMIT);
-  const hit = listCache.get(repoRoot);
+  const hit = listCache.get(context.key);
   if (!refresh && hit && Date.now() - hit.at < CACHE_MS && hit.limit >= capped) {
     return hit.data;
   }
@@ -387,12 +397,11 @@ export async function fetchGithub(repoRoot: string, refresh = false, limit = 30)
     const fields = 'number,title,author,createdAt,labels,body,url';
     // The repo handle first (cheap) so the counts GraphQL query — which needs owner/name —
     // can run parallel to the two expensive list calls below.
-    const repoOut = await gh(repoRoot, ['repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner'], timeout);
-    const ownerName = parseOwnerName(repoOut);
+    const ownerName = await resolveRepoHandleStrict(repoRoot, context);
     const runGraphql: GraphqlRunner = (query, variables) => {
       const args = ['api', 'graphql', '-f', `query=${query}`];
       for (const [key, value] of Object.entries(variables)) args.push('-f', `${key}=${value}`);
-      return gh(repoRoot, args, timeout);
+      return gh(repoRoot, args, timeout, undefined, context);
     };
     // Bound the counts pagination to the rows actually being fetched: a page is 100, so
     // `ceil(capped / 100)` pages (still capped at GH_COUNTS_MAX_PAGES) cover exactly the visible
@@ -407,22 +416,22 @@ export async function fetchGithub(repoRoot: string, refresh = false, limit = 30)
       if (remaining <= 0) return Promise.reject(new Error('Project lookup timed out'));
       const args = ['api', 'graphql', '-f', `query=${query}`];
       for (const [key, value] of Object.entries(variables)) args.push('-f', `${key}=${value}`);
-      return gh(repoRoot, args, Math.min(remaining, 8_000));
+      return gh(repoRoot, args, Math.min(remaining, 8_000), undefined, context);
     };
-    const issueList = gh(repoRoot, ['issue', 'list', '--limit', String(capped), '--json', `${fields},assignees`], timeout);
+    const issueList = gh(repoRoot, ['issue', 'list', '--limit', String(capped), '--json', `${fields},assignees`], timeout, undefined, context);
     const projectLookup = ownerName
       ? fetchIssueProjects(projectGraphql, ownerName.owner, ownerName.name,
           async () => z.array(ghIssueSchema).parse(JSON.parse(await issueList)).map(i => i.number))
       : Promise.resolve({ projectsReason: 'Project boards unavailable for this repository.' });
     const [issuesOut, prsOut, counts, viewerLogin, projectData] = await Promise.all([
       issueList,
-      gh(repoRoot, ['pr', 'list', '--limit', String(capped), '--json', `${fields},isDraft,additions,deletions`], timeout),
+      gh(repoRoot, ['pr', 'list', '--limit', String(capped), '--json', `${fields},isDraft,additions,deletions`], timeout, undefined, context),
       // Real comment counts (#499). Degrades to empty maps on its own — a failure here leaves
       // every count at 0, never fails the tab. Skipped entirely if the handle isn't parseable.
       ownerName
         ? fetchCommentCounts(runGraphql, ownerName.owner, ownerName.name, countsMaxPages)
         : Promise.resolve<{ issues: Record<number, number>; prs: Record<number, number> }>({ issues: {}, prs: {} }),
-      fetchViewerLogin((query) => gh(repoRoot, ['api', 'graphql', '-f', `query=${query}`], 8_000)),
+      fetchViewerLogin((query) => gh(repoRoot, ['api', 'graphql', '-f', `query=${query}`], 8_000, undefined, context)),
       projectLookup,
     ]);
     // One repo-wide label→color map, filled as we flatten each item's labels.
@@ -474,7 +483,7 @@ export async function fetchGithub(repoRoot: string, refresh = false, limit = 30)
     }
     const data: GithubData = {
       available: true,
-      repo: repoOut.trim() || undefined,
+      ...(ownerName ? { repo: `${ownerName.owner}/${ownerName.name}` } : {}),
       syncedAt: new Date().toISOString(),
       issues,
       prs,
@@ -483,8 +492,8 @@ export async function fetchGithub(repoRoot: string, refresh = false, limit = 30)
       ...('projects' in projectData ? { projects: projectData.projects } : {}),
       ...('projectsReason' in projectData ? { projectsReason: projectData.projectsReason } : {}),
     };
-    listCache.delete(repoRoot); // re-insert so this key becomes the newest
-    listCache.set(repoRoot, { at: Date.now(), limit: capped, data });
+    listCache.delete(context.key); // re-insert so this key becomes the newest
+    listCache.set(context.key, { at: Date.now(), limit: capped, data });
     while (listCache.size > LIST_CACHE_MAX) {
       const oldest = listCache.keys().next().value;
       if (oldest === undefined) break;
@@ -1076,11 +1085,69 @@ const TIMELINE_PER_PAGE = 100;
 // `null` is a cached permanent negative for malformed identity. Local absence is not cached (#102).
 // Network, authentication and timeout failures are deliberately NOT cached: caching them would
 // disable glyphs until process restart on one transient failure.
-const repoHandleCache = new Map<string, { owner: string; name: string } | null>();
+type RepoHandle = { owner: string; name: string } | null;
+const repoHandleCache = new Map<string, RepoHandle>();
+type RepoDiscoveryFlight = {
+  controller: AbortController;
+  promise: Promise<RepoHandle>;
+  owners: number;
+};
+const repoDiscoveryFlights = new Map<string, RepoDiscoveryFlight>();
+
+/** Each subscriber owns a lease, not the subprocess. Only the last cancellation aborts it.
+ * Keep the rejecting promise intact so strict callers retain gh's diagnostic. */
+function sharedRepoHandle(repoRoot: string, signal?: AbortSignal, context = githubContext(repoRoot)): Promise<RepoHandle> {
+  if (signal?.aborted) return Promise.reject(signal.reason);
+  const memo = repoHandleCache.get(context.key);
+  if (memo !== undefined) return Promise.resolve(memo);
+  let flight = repoDiscoveryFlights.get(context.key);
+  if (!flight) {
+    const controller = new AbortController();
+    const created: RepoDiscoveryFlight = {
+      controller, owners: 0,
+      promise: gh(repoRoot, ['repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner'], 15_000, controller.signal, context)
+        .then(parseOwnerName),
+    };
+    created.promise = created.promise.then(handle => {
+      // A disposed owner may complete late; it must not overwrite a replacement discovery.
+      if (!controller.signal.aborted && repoDiscoveryFlights.get(context.key) === created) {
+        repoHandleCache.set(context.key, handle);
+      }
+      return handle;
+    }).finally(() => {
+      if (repoDiscoveryFlights.get(context.key) === created) repoDiscoveryFlights.delete(context.key);
+    });
+    flight = created;
+    repoDiscoveryFlights.set(context.key, flight);
+  }
+  const owned = flight;
+  owned.owners++;
+  return new Promise((resolve, reject) => {
+    let released = false;
+    const release = () => {
+      if (released) return false;
+      released = true;
+      signal?.removeEventListener('abort', cancel);
+      if (--owned.owners === 0 && repoDiscoveryFlights.get(context.key) === owned) {
+        repoDiscoveryFlights.delete(context.key);
+        owned.controller.abort();
+      }
+      return true;
+    };
+    const cancel = () => { if (release()) reject(signal?.reason); };
+    signal?.addEventListener('abort', cancel, { once: true });
+    owned.promise.then(
+      handle => { if (release()) resolve(handle); },
+      error => { if (release()) reject(error); },
+    );
+  });
+}
 
 /** Test-only: drop the memoized repo handles. */
 export function __clearRepoHandleCacheForTests(): void {
   repoHandleCache.clear();
+  for (const flight of repoDiscoveryFlights.values()) flight.controller.abort();
+  repoDiscoveryFlights.clear();
 }
 
 /** Internal discovery outcome: callers that own a lifecycle can retry only transient failures. */
@@ -1102,21 +1169,17 @@ function isPermanentRepoFailure(error: unknown): boolean {
 /** Share the existing memo with ordinary discovery, but retain failure classification (#102).
  * An aborted owner must never publish its late result into this shared cache. */
 export async function discoverRepoHandle(repoRoot: string, signal?: AbortSignal): Promise<RepoHandleDiscovery> {
+  const context = githubContext(repoRoot);
   if (signal?.aborted) return { status: 'cancelled' };
-  const memo = repoHandleCache.get(repoRoot);
-  if (memo !== undefined) return memo ? { status: 'resolved', handle: memo } : { status: 'unknown' };
   try {
-    const handle = parseOwnerName(
-      await gh(repoRoot, ['repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner'], 15_000, signal),
-    );
+    const handle = await sharedRepoHandle(repoRoot, signal, context);
     if (signal?.aborted) return { status: 'cancelled' };
-    repoHandleCache.set(repoRoot, handle);
     return handle ? { status: 'resolved', handle } : { status: 'unknown' };
   } catch (error) {
     if (signal?.aborted) return { status: 'cancelled' };
     if (isPermanentRepoFailure(error)) {
       // Do not replace a successful discovery another caller completed while this one failed.
-      const recovered = repoHandleCache.get(repoRoot);
+      const recovered = repoHandleCache.get(context.key);
       if (recovered) return { status: 'resolved', handle: recovered };
       // The live arming loop stops on unknown. Do not memoize local failures here: later cold
       // index/status requests must still discover an installed gh or a newly added remote.
@@ -1907,6 +1970,7 @@ const REF_STATUS_CACHE_MAX = 500;
 /** Test-only: drop the per-reference cache so cases don't leak state into each other. */
 export function __clearRefStatusCacheForTests(): void {
   refStatusCache.clear();
+  refStatusFlights.clear();
 }
 
 /** Test-only: warm the cache the way the lazy route would have, so a reader can be tested
@@ -1937,6 +2001,7 @@ export function __seedRefStatusCacheForTests(
  */
 export function forgetRefStatus(repoRoot: string, number: number): void {
   refStatusCache.delete(refStatusKey(repoRoot, number));
+  refStatusFlights.delete(refStatusKey(repoRoot, number));
 }
 
 /**
@@ -2076,12 +2141,12 @@ const REF_STATUS_RETRY_MS = 5 * 60_000;
  * means the repo handle itself did not resolve — rethrows, so a real failure still degrades to
  * `{available: false}` instead of masquerading as "none of these exist".
  */
-function refStatusGraphql(repoRoot: string): GraphqlRunner {
+function refStatusGraphql(repoRoot: string, context = githubContext(repoRoot)): GraphqlRunner {
   return async (query, variables) => {
     const args = ['api', 'graphql', '-f', `query=${query}`];
     for (const [key, value] of Object.entries(variables)) args.push('-f', `${key}=${value}`);
     try {
-      return await gh(repoRoot, args);
+      return await gh(repoRoot, args, 15_000, undefined, context);
     } catch (err) {
       const stdout = (err as { stdout?: unknown }).stdout;
       if (typeof stdout === 'string' && hasResolvedRepository(stdout)) return stdout;
@@ -2100,15 +2165,8 @@ function refStatusGraphql(repoRoot: string): GraphqlRunner {
  * `gh` error into the payload's `reason` — "gh CLI not found — install it and run `gh auth login`"
  * is what the chip's tooltip now shows a user — and a `null` would erase which failure it was.
  */
-async function resolveRepoHandleStrict(repoRoot: string): Promise<{ owner: string; name: string } | null> {
-  const memo = repoHandleCache.get(repoRoot);
-  if (memo !== undefined) return memo;
-  // Failures here stay uncached: demand-driven status reads retain the diagnostic and may recover.
-  const handle = parseOwnerName(
-    await gh(repoRoot, ['repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner']),
-  );
-  repoHandleCache.set(repoRoot, handle); // includes the permanent negative
-  return handle;
+async function resolveRepoHandleStrict(repoRoot: string, context = githubContext(repoRoot)): Promise<{ owner: string; name: string } | null> {
+  return sharedRepoHandle(repoRoot, undefined, context);
 }
 
 /** Is this a reply we can still read aliases out of? `repository: null` says the handle did not
@@ -2121,6 +2179,53 @@ function hasResolvedRepository(stdout: string): boolean {
   } catch {
     return false;
   }
+}
+
+type RefStatusResult = { resolved: ResolvedReference | null; unknownSince?: number } | { reason: string };
+// Ownership is per reference, before discovery starts. Overlapping requests join just the
+// numbers they need; extra numbers form their own batch without a batching timer or new delay.
+// At capacity, untracked work answers its callers without caching: it has no ownership token
+// to protect publication against invalidation or newer requests. Retained ownership is at most 500.
+const refStatusFlights = new Map<string, Promise<RefStatusResult>>();
+
+async function sharedRefStatusMisses(repoRoot: string, numbers: number[], context: GithubContext): Promise<Array<[number, RefStatusResult]>> {
+  const pending = new Map<number, Promise<RefStatusResult>>();
+  const owned: number[] = [];
+  for (const n of numbers) {
+    const flight = refStatusFlights.get(refStatusKey(repoRoot, n, context));
+    if (flight) pending.set(n, flight);
+    else owned.push(n);
+  }
+  if (owned.length) {
+    const batch = (async () => {
+      const handle = await resolveRepoHandleStrict(repoRoot, context);
+      if (!handle) throw new Error('repository handle unavailable');
+      return fetchRefStatuses(refStatusGraphql(repoRoot, context), handle.owner, handle.name, owned);
+    })();
+    for (const n of owned) {
+      const key = refStatusKey(repoRoot, n, context);
+      const tracked = refStatusFlights.size < REF_STATUS_CACHE_MAX;
+      const promise: Promise<RefStatusResult> = batch.then(result => {
+        if (result.failed.includes(n)) return { reason: result.reason ?? 'GitHub could not be reached' };
+        // Date fresh results at arrival; keep the original unknown-mergeability retry window.
+        const storedAt = Date.now();
+        const entry = result.resolved[n] ?? null;
+        const unknownSince = entry?.mergeable === 'unknown'
+          ? (refStatusCache.get(key)?.unknownSince ?? storedAt) : undefined;
+        const value = { resolved: entry, ...(unknownSince === undefined ? {} : { unknownSince }) };
+        if (tracked && refStatusFlights.get(key) === promise) {
+          refStatusCache.set(key, { at: storedAt, ...value });
+          while (refStatusCache.size > REF_STATUS_CACHE_MAX) refStatusCache.delete(refStatusCache.keys().next().value!);
+        }
+        return value;
+      }).finally(() => {
+        if (refStatusFlights.get(key) === promise) refStatusFlights.delete(key);
+      });
+      if (tracked) refStatusFlights.set(key, promise);
+      pending.set(n, promise);
+    }
+  }
+  return Promise.all(numbers.map(async n => [n, await pending.get(n)!] as [number, RefStatusResult]));
 }
 
 /**
@@ -2137,6 +2242,7 @@ export async function fetchGithubRefStatus(
   repoRoot: string,
   input: { prs?: number[]; issues?: number[] },
 ): Promise<GithubRefStatusData> {
+  const context = githubContext(repoRoot);
   const asPrs = sanitizeRefNumbers(input.prs);
   const asIssues = sanitizeRefNumbers(input.issues);
   if (process.env.CEZ_DRY_RUN === '1') return mockGithubRefStatus(asPrs, asIssues);
@@ -2159,7 +2265,7 @@ export async function fetchGithubRefStatus(
   const misses: number[] = [];
   const now = Date.now();
   for (const n of wanted) {
-    const hit = refStatusCache.get(refStatusKey(repoRoot, n));
+    const hit = refStatusCache.get(refStatusKey(repoRoot, n, context));
     if (!hit || now - hit.at >= refStatusTtl(hit.resolved, hit.unknownSince, now)) misses.push(n);
     else file(n, hit.resolved, hit.unknownSince);
   }
@@ -2173,49 +2279,21 @@ export async function fetchGithubRefStatus(
     };
   }
   try {
-    const ownerName = await resolveRepoHandleStrict(repoRoot);
-    if (!ownerName) {
-      return { available: false, reason: 'repository handle unavailable', recheckAfterMs: REF_STATUS_RETRY_MS };
-    }
-    const batch = await fetchRefStatuses(refStatusGraphql(repoRoot), ownerName.owner, ownerName.name, misses);
-    const failed = new Set(batch.failed);
-    // Stamped when the answer ARRIVED, not when the request was assembled: `now` above predates
-    // the round trip, and dating an entry by it would age a slow query's results by its own
-    // duration — shortening the TTL of exactly the answers that cost the most to get.
-    const storedAt = Date.now();
-    for (const n of misses) {
-      // A number we could not ask about is NOT cached: caching it would pin "this repository has
-      // no such number" for a minute on the strength of a network blip.
-      if (failed.has(n)) continue;
-      const entry = batch.resolved[n] ?? null;
-      // Kept from the previous answer, not restarted: the fast cadence is bounded from when this
-      // reference FIRST came back still-computing, so a forge that never resolves it cannot hold
-      // the batch on a five-second poll indefinitely.
-      const unknownSince =
-        entry?.mergeable === 'unknown'
-          ? (refStatusCache.get(refStatusKey(repoRoot, n))?.unknownSince ?? storedAt)
-          : undefined;
-      file(n, entry, unknownSince);
-      refStatusCache.set(refStatusKey(repoRoot, n), {
-        at: storedAt,
-        resolved: entry,
-        ...(unknownSince === undefined ? {} : { unknownSince }),
-      });
-    }
-    while (refStatusCache.size > REF_STATUS_CACHE_MAX) {
-      const oldest = refStatusCache.keys().next().value;
-      if (oldest === undefined) break;
-      refStatusCache.delete(oldest);
+    const entries = await sharedRefStatusMisses(repoRoot, misses, context);
+    let failure: string | undefined;
+    for (const [n, result] of entries) {
+      if ('reason' in result) failure ??= result.reason;
+      else file(n, result.resolved, result.unknownSince);
     }
     // Anything unasked makes the whole answer `unavailable`, deliberately. The alternative is a
     // payload where a number we could not reach is indistinguishable from one that does not exist,
     // and the cockpit would paint "not found on this repository" over a perfectly good PR — the
     // exact defect this route was reported for. The successes are cached either way, so the next
     // request costs only the numbers that failed and usually answers in full.
-    if (failed.size > 0) {
+    if (failure !== undefined) {
       return {
         available: false,
-        reason: batch.reason ?? 'GitHub could not be reached',
+        reason: failure,
         recheckAfterMs: REF_STATUS_RETRY_MS,
       };
     }
@@ -2239,8 +2317,8 @@ export async function fetchGithubRefStatus(
 }
 
 /** NUL separator, as everywhere else here: two projects each having a #42 must not collide. */
-function refStatusKey(repoRoot: string, number: number): string {
-  return `${repoRoot}\0#${number}`;
+function refStatusKey(repoRoot: string, number: number, context = githubContext(repoRoot)): string {
+  return `${context.key}\0#${number}`;
 }
 
 function sanitizeRefNumbers(numbers: number[] | undefined): number[] {
@@ -2887,7 +2965,7 @@ async function fetchPrMergeState(
 }
 
 export function evictGithubProjectCaches(repoRoot: string): void {
-  listCache.delete(repoRoot);
+  listCache.delete(githubContext(repoRoot).key);
   mergeStateCache.forEach((_value, key) => {
     if (key.startsWith(`${repoRoot}:`)) mergeStateCache.delete(key);
   });

@@ -160,7 +160,7 @@ describe('live repository identity recovery', () => {
     let release!: Callback;
     execFileMock.mockImplementationOnce(reply(new Error('timeout'))).mockImplementationOnce((...args: unknown[]) => {
       release = args.at(-1) as Callback;
-      expect((args[2] as { signal: AbortSignal }).signal).toBe(controller.signal);
+      expect((args[2] as { signal: AbortSignal }).signal.aborted).toBe(false);
     });
     const run = create(store);
     store.appendEvent(run.id, { type: 'result', result: foreignPr });

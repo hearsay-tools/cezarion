@@ -1,0 +1,102 @@
+[
+  {
+    "name": "startup",
+    "ms": 56.74,
+    "bytes": 81
+  },
+  {
+    "name": "repo",
+    "ms": 362.86,
+    "bytes": 23
+  },
+  {
+    "name": "light",
+    "ms": 478.95,
+    "bytes": 138
+  },
+  {
+    "name": "rich",
+    "ms": 633.23,
+    "bytes": 487
+  },
+  {
+    "name": "startup",
+    "ms": 50.54,
+    "bytes": 81
+  },
+  {
+    "name": "repo",
+    "ms": 1204.73,
+    "bytes": 23
+  },
+  {
+    "name": "light",
+    "ms": 431.04,
+    "bytes": 138
+  },
+  {
+    "name": "rich",
+    "ms": 639.9,
+    "bytes": 487
+  },
+  {
+    "name": "startup",
+    "ms": 55,
+    "bytes": 81
+  },
+  {
+    "name": "repo",
+    "ms": 366.81,
+    "bytes": 23
+  },
+  {
+    "name": "light",
+    "ms": 662.93,
+    "bytes": 138
+  },
+  {
+    "name": "rich",
+    "ms": 570.91,
+    "bytes": 487
+  },
+  {
+    "name": "startup",
+    "ms": 49.42,
+    "bytes": 81
+  },
+  {
+    "name": "repo",
+    "ms": 371.73,
+    "bytes": 23
+  },
+  {
+    "name": "light",
+    "ms": 507.63,
+    "bytes": 138
+  },
+  {
+    "name": "rich",
+    "ms": 647.92,
+    "bytes": 487
+  },
+  {
+    "name": "startup",
+    "ms": 49.15,
+    "bytes": 81
+  },
+  {
+    "name": "repo",
+    "ms": 353.83,
+    "bytes": 23
+  },
+  {
+    "name": "light",
+    "ms": 433.74,
+    "bytes": 138
+  },
+  {
+    "name": "rich",
+    "ms": 580.7,
+    "bytes": 487
+  }
+]
