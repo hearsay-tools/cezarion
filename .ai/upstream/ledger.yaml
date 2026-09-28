@@ -22,6 +22,11 @@ scans:
     since: 4763447f36b05e0c3934c77798335827f4398de4
     added: 11
     report: scans/2026-09-25.md
+  - date: 2026-09-28
+    upstreamHead: ff27c45e97c766d709cb8f5f6bb212d30031de32
+    since: 6a919f82c41b15c7564c9208db383e2e608f0f10
+    added: 36
+    report: scans/2026-09-28.md
 entries:
   - sha: 3c8657688d48b7391d985560e1b0acda28e5ad9e
     pr: 943
@@ -210,7 +215,8 @@ entries:
     fork:
       issue: 432
       pr: 652
-      commits: [2b66db1d]
+      commits:
+        - 2b66db1d
     decided: 2026-09-27
   - sha: 14226c4aa894dc31a525a8db004ebc39aecc8289
     pr: 963
@@ -228,7 +234,7 @@ entries:
     status: ported
     hint:
       conflicts: 2
-    note: "Branch-adjacent copy control adapted to the fork header, with keyboard and theme coverage"
+    note: Branch-adjacent copy control adapted to the fork header, with keyboard and theme coverage
     fork:
       issue: 434
       pr: 645
@@ -416,7 +422,10 @@ entries:
     fork:
       issue: 430
       pr: 644
-      commits: [2d328382, 0dfb93c6, 3e676ecd]
+      commits:
+        - 2d328382
+        - 0dfb93c6
+        - 3e676ecd
     decided: 2026-09-27
   - sha: 7fd4221f5f8abea3774814ece822a70fcc720a07
     pr: 1022
@@ -444,7 +453,8 @@ entries:
     fork:
       issue: 429
       pr: 648
-      commits: [5847c4282c26ba56fb95d833efc4f391e53b8600]
+      commits:
+        - 5847c4282c26ba56fb95d833efc4f391e53b8600
     decided: 2026-09-27
   - sha: 456859a499dc3f87ec9f938fbac12727956f428c
     pr: 995
@@ -550,3 +560,255 @@ entries:
     status: pending
     hint:
       conflicts: 32
+  - sha: 33aee0ee88c509df4e589f18cb1264ffba594e2b
+    pr: 1088
+    title: "docs(readme): retitle header and rewrite the tagline (#1088)"
+    date: 2026-09-26
+    status: pending
+    hint:
+      conflicts: 1
+  - sha: 05e00904c956e382b68315555d7bc50e1c30b69c
+    pr: 1090
+    title: "feat(web): refresh cockpit brand icon and favicon (#1090)"
+    date: 2026-09-26
+    status: pending
+    hint:
+      conflicts: 8
+  - sha: 0a6b250b10ca41186121ec75c59131426d91add5
+    pr: 1083
+    title: "docs(changelog): draft the 0.12.0 entry for PRs merged since 0.11.1 (#1083)"
+    date: 2026-09-26
+    status: pending
+    hint:
+      conflicts: 1
+  - sha: 61cb9bbec59446f6d2f2ec05f638b9def5e3be8a
+    pr: 1042
+    title: "feat(resources): effective host capacity from the process cgroup, with a sidebar glance (#1042)"
+    date: 2026-09-26
+    status: pending
+    hint:
+      conflicts: 7
+  - sha: 6f24ae0b442f61ee238e065fee13db2407f487e6
+    pr: 1072
+    title: "fix(cockpit): settle the plan dock once the run's session is closed (#1072)"
+    date: 2026-09-26
+    status: pending
+    hint:
+      conflicts: 4
+  - sha: ab431176d89df0d03dc5b79f5a576401050b3ac7
+    pr: 1086
+    title: "docs: add Simplified and Traditional Chinese READMEs (#1086)"
+    date: 2026-09-26
+    status: pending
+    hint:
+      conflicts: 1
+  - sha: aee35df9b95cd48e09210a91795fe6e3c4025b38
+    pr: 1010
+    title: "fix(codex): keep a compaction-ended turn working and surface a rejected follow-up (#1010)"
+    date: 2026-09-26
+    status: pending
+    hint:
+      conflicts: 6
+  - sha: 6ceaf0833692011f7effc9178f7f3e01bfd47b22
+    pr: 1006
+    title: "test(runs): pin the Continue tool-policy invariant end to end (#1006)"
+    date: 2026-09-26
+    status: pending
+    hint:
+      conflicts: 0
+  - sha: 94d9922cb34a86d59bf78398673ecd7b40c0cfe8
+    pr: 1091
+    title: "docs: add SECURITY.md with vulnerability reporting policy (#1091)"
+    date: 2026-09-26
+    status: pending
+    hint:
+      conflicts: 0
+  - sha: 3a0078e4bc0baa6ca4d01f6a0700bbe02a20d2d7
+    pr: 1018
+    title: "fix(cockpit): select a project from the sidebar, and carry the composition across a project switch (#1018)"
+    date: 2026-09-26
+    status: pending
+    hint:
+      conflicts: 7
+  - sha: 13a41eae55440d4fcd9b6bd52464451d8be73f3a
+    pr: 1075
+    title: "feat(settings): integer stepper for parallel-task and monitoring limits (#1075)"
+    date: 2026-09-26
+    status: pending
+    hint:
+      conflicts: 4
+  - sha: 021494c257a765241a668d3cc206eee9e40eba51
+    pr: 1060
+    title: "fix(web): keep shell task lists in their project scope (#1060)"
+    date: 2026-09-26
+    status: pending
+    hint:
+      conflicts: 5
+  - sha: ff6d9f40d26dd8f1b964bb4254ff93f9e5b137c2
+    pr: 1002
+    title: "fix(automations): a saturated overlap band no longer pins the poll cursor forever (#1002)"
+    date: 2026-09-26
+    status: pending
+    hint:
+      conflicts: 6
+  - sha: 7061d3f52b9d990a3185814293848193f0c6bc5d
+    pr: 996
+    title: "fix(forge): merge state survives an unreadable statusCheckRollup (#969) (#996)"
+    date: 2026-09-26
+    status: pending
+    hint:
+      conflicts: 0
+  - sha: 35325d911dddf7b074dd814c661af69ca6268183
+    pr: 1035
+    title: "docs(specs): live host resource telemetry - the Machine card (#1035)"
+    date: 2026-09-26
+    status: pending
+    hint:
+      conflicts: 0
+  - sha: 1e42a59b0300ed835b5c0b8ec7a4b913b97aa320
+    pr: 1092
+    title: "ci: add CodeQL advanced-setup workflow (#1092)"
+    date: 2026-09-26
+    status: pending
+    hint:
+      conflicts: 0
+  - sha: 336be3040581c2fdfda1b242095c83ffa554e514
+    pr: 1047
+    title: "feat(dashboard): add workspace overview, reported costs and exports (#1047)"
+    date: 2026-09-26
+    status: pending
+    hint:
+      conflicts: 13
+  - sha: d39d69cac97a5fa4f1686cc2ee6e083cb76c03fa
+    pr: 1100
+    title: "fix(server-install): verify cockpit instance identity (#1100)"
+    date: 2026-09-27
+    status: pending
+    hint:
+      conflicts: 3
+  - sha: 2f12d4fa95764d4c01caabcbf59c9899f9942a34
+    pr: 1097
+    title: "test(web): target project disclosure button (#1097)"
+    date: 2026-09-27
+    status: pending
+    hint:
+      conflicts: 0
+  - sha: 8598520203842636a75d6932597573d896892d6f
+    pr: 1093
+    title: "fix(security): close CodeQL alerts #10, #12 and #18 (#1093)"
+    date: 2026-09-27
+    status: pending
+    hint:
+      conflicts: 2
+  - sha: c1bd55a3047b3d76dbd23cfe2a03ec32175202ab
+    pr: 1098
+    title: "fix(runs): make cancellation terminal for stale sessions (#1098)"
+    date: 2026-09-27
+    status: pending
+    hint:
+      conflicts: 5
+  - sha: 6992946907e6d0ca8389a3b6d643f074c29f37b9
+    pr: 1099
+    title: "fix(automations): make abandoned lease reclaim exclusive (#1099)"
+    date: 2026-09-27
+    status: pending
+    hint:
+      conflicts: 3
+  - sha: 497f2974b98ed9b1e81afb3b0d7e243e89532815
+    pr: 1101
+    title: "fix(pi): distinguish assistant message item ids (#1101)"
+    date: 2026-09-27
+    status: pending
+    hint:
+      conflicts: 3
+  - sha: 232df09ff266e322c659027d4c6e83c1c389029d
+    pr: 1102
+    title: "fix(runs): preserve non-final monitoring steps (#1102)"
+    date: 2026-09-27
+    status: pending
+    hint:
+      conflicts: 1
+  - sha: 107aad76eb8bb65c9668dc7890442599a6b0fa20
+    pr: 1108
+    title: "docs(changelog): complete the 0.12.0 entry and stamp the release set (#1108)"
+    date: 2026-09-27
+    status: pending
+    hint:
+      conflicts: 6
+  - sha: da9013f5652c84eabcef9c629be9d8b7fe798705
+    pr: 1110
+    title: "feat(web): collapsible subtasks in the task lists (#1110)"
+    date: 2026-09-27
+    status: pending
+    hint:
+      conflicts: 3
+  - sha: 8f42eaf88abcd0613b866b15f9466c337a9bc101
+    pr: 1112
+    title: "feat(web): recolour brand icon to a black tile with a white mark (#1112)"
+    date: 2026-09-27
+    status: pending
+    hint:
+      conflicts: 0
+  - sha: cf305078eb60f9241ca9e130c50550c36c8e22f2
+    pr: 1115
+    title: "feat(release): publish a cezar-run npx alias alongside cezar-cli (#1115)"
+    date: 2026-09-27
+    status: pending
+    hint:
+      conflicts: 21
+  - sha: f76e6ef26fefb0a8175006cacd30f0d6e59ac595
+    pr: 1116
+    title: "fix(web): match the sidebar Dashboard row to All tasks (#1116)"
+    date: 2026-09-27
+    status: pending
+    hint:
+      conflicts: 1
+  - sha: 5d2940665a8d1feb6c0d2626a45d65c082d6e239
+    pr: 1118
+    title: "fix(web): keep sheet header text clear of the close button (#1118)"
+    date: 2026-09-27
+    status: pending
+    hint:
+      conflicts: 2
+  - sha: a4e27128089899d7a4aa7399047147edb53a7283
+    pr: 1119
+    title: "fix(web): paint a project row's chevron and name on one background (#1119)"
+    date: 2026-09-27
+    status: pending
+    hint:
+      conflicts: 3
+  - sha: 78706293d8158ee0f800ec4e99c533362a37a400
+    pr: 1120
+    title: "feat(web): labelled CPU/RAM meters for the sidebar usage glance (#1120)"
+    date: 2026-09-27
+    status: pending
+    hint:
+      conflicts: 0
+  - sha: b987fad5c4d3b78f8c33b76ac9d6194232aa0bd3
+    pr: 1121
+    title: "docs(changelog): add the PRs merged after the 0.12.0 draft (#1121)"
+    date: 2026-09-27
+    status: pending
+    hint:
+      conflicts: 1
+  - sha: da3ab0b214b8f9308ba759be48cfe4d52ce943f3
+    pr: 1123
+    title: "docs(brand): add brand guidelines and logo files (#1123)"
+    date: 2026-09-28
+    status: pending
+    hint:
+      conflicts: 0
+  - sha: 2cdc9c8942fccb7cfa317616a2e02692f73f21b1
+    pr: 1130
+    title: "fix(docs): drop the permalink icons from the README hero on mobile (#1130)"
+    date: 2026-09-28
+    status: pending
+    hint:
+      conflicts: 1
+  - sha: ff27c45e97c766d709cb8f5f6bb212d30031de32
+    pr: 1131
+    title: "fix(docs): put the README hero back on headings, with the black brand icon (#1131)"
+    date: 2026-09-28
+    status: pending
+    hint:
+      conflicts: 1
