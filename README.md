@@ -1090,7 +1090,12 @@ npm run test:changed # iteration only: tests related to branch + working-tree ch
 npm run test:unit    # node:test — fast core-module tests
 npm run test:package # pack/install and exercise the built CLI
 npm run test:e2e     # real-browser cockpit suite (agent-browser)
+npm run test:e2e:local # full browser suite in four isolated, concurrent lanes
 ```
+
+The four-lane local browser run needs roughly 8 GiB of RAM at peak. It keeps CI's
+serial-per-shard policy unchanged. See [cockpit E2E testing](packages/web/e2e/README.md#full-local-suite-in-four-lanes)
+for lane isolation, logs, and cleanup.
 
 For iteration, run affected test files or `npm run test:changed` (inspect with
 `-- --plan`; override the local main comparison with `-- --base=<ref>`).

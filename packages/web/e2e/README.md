@@ -164,6 +164,25 @@ are passed intact to Vitest. A literal `--` ends wrapper option parsing.
 With no arguments the full sequential suite still runs. A filtered run's
 `TEST_E2E_STATUS=passed` verifies only that selection, not the full browser gate.
 
+## Full local suite in four lanes
+
+Run `npm run test:e2e:local` for the complete suite on a machine with roughly **8 GiB
+of free RAM**. It builds the E2E cockpit once, then runs four duration-weighted Vitest
+shards (`--shard=1/4` through `4/4`) at the same time. The existing `npm run test:e2e`
+command remains the single-environment runner used by CI and focused local runs.
+
+Each lane is a temporary Git worktree at the current `HEAD` with this checkout's tracked
+edits and untracked source files copied in. It gets a private `.ai/qa` directory, `CEZ_HOME`,
+port, environment descriptor, and agent-browser namespace. `node_modules` and the two built
+asset directories are symlinks to the source checkout; the lane bootstrap checks the E2E
+build marker and cannot rebuild through those links. Do not edit source or rebuild the
+shared assets while a four-lane run is active.
+
+The command stops all four test servers and removes the worktrees when it finishes.
+Shard output, boot logs, descriptors, app logs, and failure bundles remain under
+`.ai/qa/local-runs/<run-id>/`. A failed lane makes the command exit nonzero and print
+`TEST_E2E_STATUS=failed`; an unavailable browser prints `TEST_E2E_STATUS=skipped`.
+
 To force a race that CI hits and your machine does not, slow the server down behind an
 environment variable rather than editing the spec. Specs that boot their own cezar spawn
 `packages/cezar/dist/index.js`, so patch the built route in
