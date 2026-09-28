@@ -114,6 +114,8 @@ const transcriptLink = '[data-slot="user-bubble"] a[data-streamdown="link"]'
 
 // #664: programmatic scroll leaves follow-tail armed, so a resize can invalidate
 // the native click's coordinates. Scroll upward as a reader before resolving the link.
+// Failure trace and controlled resize reproduction:
+// https://github.com/hearsay-tools/cezarion/issues/664#issuecomment-5873034765
 async function scrollToTranscriptLink() {
   const scroller = browser.waitForValue<{ x: number; y: number; height: number }>(`(() => {
     const main = document.querySelector('[data-slot="main"]');
