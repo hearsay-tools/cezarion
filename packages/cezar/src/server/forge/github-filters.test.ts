@@ -216,3 +216,36 @@ it('does not install an older list after a newer list has already completed', as
   expect(cached.projectsGeneration).toBe(newer.projectsGeneration);
   expect(cached.projectsState).toBe('unavailable');
 });
+
+it.each(['GH_HOST', 'GH_CONFIG_DIR'] as const)('isolates deferred hydration by %s and retains its original context', async variable => {
+  const root = `/filters-context-${variable}`;
+  vi.stubEnv(variable, 'context-a');
+  mockGh();
+  const immediate = run.getMockImplementation()!;
+  let finish!: () => void;
+  run.mockImplementation((...args: unknown[]) => {
+    if ((args[1] as string[]).join(' ').includes('projectItems')) {
+      finish = () => immediate(...args);
+      return;
+    }
+    return immediate(...args);
+  });
+  const first = await fetchGithub(root, true);
+  expect(first).toMatchObject({ available: true, projectsState: 'refreshing' });
+  expect(first.issues[0]?.projectIds).toBeUndefined();
+  await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
+  vi.stubEnv(variable, 'context-b');
+  const foreign = fetchGithubProjects(root, first.projectsGeneration!);
+  finish();
+  expect(await foreign).toMatchObject({ state: 'unavailable' });
+  mockGh(true);
+  const second = await fetchGithub(root, true);
+  expect(second.issues[0]?.projectIds).toBeUndefined();
+  await fetchGithubProjects(root, second.projectsGeneration!);
+  finish();
+  vi.stubEnv(variable, 'context-a');
+  expect(await fetchGithubProjects(root, first.projectsGeneration!)).toMatchObject({ state: 'ready', membership: { 1: ['P1'] } });
+  expect(await fetchGithub(root)).toMatchObject({ projectsGeneration: first.projectsGeneration, projectsState: 'ready', issues: [{ projectIds: ['P1'] }] });
+  vi.stubEnv(variable, 'context-b');
+  expect(await fetchGithub(root)).toMatchObject({ projectsGeneration: second.projectsGeneration, projectsState: 'unavailable' });
+});
