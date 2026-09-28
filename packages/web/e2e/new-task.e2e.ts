@@ -131,6 +131,11 @@ describe('the full-screen /new against a live dry-run server', () => {
     )).toBe('none')
     // The version chip proves health arrived, but availability now refreshes in
     // the background. Wait for the first sweep before deriving the expected pill.
+    // Local reproduction (2026-09-28, issue #666): cold health returned checks: []
+    // while the composer already showed one runner pill; the old assertion failed
+    // with "expected 1 to be +0". Failure bundle: .ai/qa/failures/new-task/
+    // the-pill-row-resolves-no-source-picked-runner-pill-iff-1-backend-base-main-1-1/
+    // probe.json (capturedAt 2026-09-28T15:29:49.105Z).
     browser.waitForFunction(`document.querySelector('[data-slot="version-chip"]') !== null`)
     // The rule under test is legacy's: pill iff the HOST offers >1 backend. The host's own
     // CLIs are what they are (codex/opencode may genuinely be installed here), so assert
