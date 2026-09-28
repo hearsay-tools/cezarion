@@ -21,6 +21,7 @@ import type {
   ProcessUsage,
   ProjectsResponse,
   ProviderStatusResponse,
+  RunRecord,
 } from '@open-mercato/cezar-api-client'
 
 /**
@@ -252,14 +253,92 @@ function createRunDetailRefresher(queryClient: QueryClient) {
   }
 }
 
+/**
+ * The relationships readers (`useRunRelationships`, `useWorkersVerdict` on every activity dock)
+ * ask `GET /runs/:id/relationships`, and a live worker emits a `run` event per token tick.
+ * Invalidating every mounted relationships query on each of those was a refetch storm against a
+ * one-core serve (#659). Three rules replace the blanket:
+ *
+ * - only the entries the event can change: the run's own, and its parent's when the run is a
+ *   worker — a parent's answer is its workers' records, a worker's answer is its parent id;
+ * - only when the event moves something the answer carries — status, step, activity or
+ *   delegation metadata. A token tick or a rename changes none of them and is dropped at the
+ *   door, judged against the last record this stream saw for that run rather than against a
+ *   cache the sidebar stamp may already have overwritten;
+ * - at most one refetch per entry per quiet window, on the runs-index refresher's cadence and
+ *   with the same hold-then-fire shape, so a run that never goes quiet still refreshes.
+ *
+ * A deleted run refreshes the parent it was last seen under. One the stream never saw has no
+ * known parent, and that rare case keeps the old whole-family refresh, debounced under one key.
+ * Reconnect is untouched: `reconcile` invalidates `runs.all`, which these keys sit under.
+ */
+const RELATIONSHIPS_REFRESH_DEBOUNCE_MS = 400
+
+function relationshipsShapeOf(run: RunRecord): string {
+  return JSON.stringify([run.status, run.currentStepId, run.activity, run.delegation])
+}
+
+function createRelationshipsRefresher(queryClient: QueryClient): {
+  onRun: (run: RunRecord) => void
+  onDeleted: (id: string) => void
+  cancel: () => void
+} {
+  const seen = new Map<string, { shape: string; parentRunId?: string }>()
+  const pending = new Map<string, ReturnType<typeof setTimeout>>()
+  /** `exact` keys refresh only when a reader has ever asked — an entry nobody holds has
+   *  nothing to refetch. The prefix key of the family fallback matches nothing exactly. */
+  const schedule = (key: readonly unknown[], exact: boolean): void => {
+    if (exact && !queryClient.getQueryState(key)) return
+    const cacheKey = JSON.stringify(key)
+    if (pending.has(cacheKey)) return
+    pending.set(cacheKey, setTimeout(() => {
+      pending.delete(cacheKey)
+      void queryClient.invalidateQueries({ queryKey: key })
+    }, RELATIONSHIPS_REFRESH_DEBOUNCE_MS))
+  }
+  return {
+    onRun(run) {
+      const parentRunId = run.delegation?.role === 'worker' ? run.delegation.parentRunId : undefined
+      const shape = relationshipsShapeOf(run)
+      const previous = seen.get(run.id)
+      seen.set(run.id, parentRunId === undefined ? { shape } : { shape, parentRunId })
+      if (previous?.shape === shape) return
+      schedule(queryKeys.runs.relationships(run.id), true)
+      if (parentRunId !== undefined) schedule(queryKeys.runs.relationships(parentRunId), true)
+    },
+    onDeleted(id) {
+      const previous = seen.get(id)
+      seen.delete(id)
+      // Gone server-side, like its detail and diff below: a reader left on it gets the 404.
+      queryClient.removeQueries({ queryKey: queryKeys.runs.relationships(id) })
+      if (previous?.parentRunId !== undefined) schedule(queryKeys.runs.relationships(previous.parentRunId), true)
+      else schedule([...queryKeys.runs.all, 'relationships'], false)
+    },
+    cancel() {
+      for (const timer of pending.values()) clearTimeout(timer)
+      pending.clear()
+      seen.clear()
+    },
+  }
+}
+
+type RelationshipsRefresher = ReturnType<typeof createRelationshipsRefresher>
+
 /** Fold one stream message into the cache. The reducers it calls are pure and table-tested in
  *  events.ts; this is only the wiring from an event to the cache it belongs in. */
-function applyGlobalEvent(queryClient: QueryClient, usage: UsageStore, event: GlobalEvent, refreshRunDetail: (id: string) => void): void {
+function applyGlobalEvent(
+  queryClient: QueryClient,
+  usage: UsageStore,
+  event: GlobalEvent,
+  refreshRunDetail: (id: string) => void,
+  relationships: Pick<RelationshipsRefresher, 'onRun' | 'onDeleted'>,
+): void {
   switch (event.type) {
     case 'run': {
       // A changed worker may be absent from the visible list. Refresh this project's mounted
-      // relationship readers without discarding their last successful data.
-      void queryClient.invalidateQueries({ queryKey: [...queryKeys.runs.all, 'relationships'] })
+      // relationship readers without discarding their last successful data (#659: only the
+      // entries this run can change, only on a change they carry, and debounced).
+      relationships.onRun(event.run)
       // Stamp-addressed write already hit the owner's sidebar key. Also patch this scope's
       // list: when the boot project is mounted under its real id (registry unavailable),
       // that key is `[bootId, 'runs', 'list']`, not `'default'`.
@@ -297,7 +376,7 @@ function applyGlobalEvent(queryClient: QueryClient, usage: UsageStore, event: Gl
       return
     }
     case 'run-deleted': {
-      void queryClient.invalidateQueries({ queryKey: [...queryKeys.runs.all, 'relationships'] })
+      relationships.onDeleted(event.id)
       queryClient.setQueryData<ApiRun[]>(queryKeys.runs.list(), (list) => applyRunDeleted(list, event.id))
       // Removed, not set to undefined: the run is gone server-side, so its detail and diff caches
       // are garbage. Anything still mounted on them refetches and gets the server's 404 — the
@@ -342,6 +421,7 @@ export function useGlobalEvents(usage: UsageStore, url: string = SSE_URL): void 
     let source: EventSource | null = null
     const runsIndexRefresher = createRunsIndexRefresher(queryClient)
     const runDetailRefresher = createRunDetailRefresher(queryClient)
+    const relationshipsRefresher = createRelationshipsRefresher(queryClient)
     let reopenTimer: ReturnType<typeof setTimeout> | undefined
     let everOpened = false
     let disposed = false
@@ -404,7 +484,7 @@ export function useGlobalEvents(usage: UsageStore, url: string = SSE_URL): void 
           // `ping` (project null) always passes — liveness is not project-owned.
           if (parsed.project !== null) applyStampedRunList(queryClient, parsed.project, parsed.event)
           if (parsed.project !== null && parsed.project !== activeProject(queryClient)) return
-          applyGlobalEvent(queryClient, usage, parsed.event, runDetailRefresher.refresh)
+          applyGlobalEvent(queryClient, usage, parsed.event, runDetailRefresher.refresh, relationshipsRefresher)
         })
       }
 
@@ -505,6 +585,7 @@ export function useGlobalEvents(usage: UsageStore, url: string = SSE_URL): void 
       clearTimeout(reopenTimer)
       runsIndexRefresher.cancel()
       runDetailRefresher.cancel()
+      relationshipsRefresher.cancel()
       document.removeEventListener('visibilitychange', onVisibilityChange)
       window.removeEventListener('pagehide', onPageHide)
       window.removeEventListener('pageshow', onPageShow)

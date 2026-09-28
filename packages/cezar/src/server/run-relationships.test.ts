@@ -44,3 +44,24 @@ it('retains parent identity without a parent record and distinguishes unknown ru
   expect((await app.request(`http://127.0.0.1/api/v1/runs/${workerId}/relationships?parentRunId=forged`, { headers: { host: '127.0.0.1' } })).status).toBe(400);
   expect((await app.request(`http://127.0.0.1/api/v1/p/other/runs/${workerId}/relationships`, { headers: { host: '127.0.0.1' } })).status).toBe(404);
 });
+// #659: the human read is O(receipts), never a walk of the whole project index. A store with
+// many unrelated (and archived) records must cost the same as one with none.
+it('serves a parent\'s workers off its receipts without walking the run index', async () => {
+  const spawned = await f.service.spawn(f.caller, { task: 'child', baseline: 'HEAD', requestId: randomUUID() });
+  const unrelated = f.store.createRun({ title: 'unrelated', task: 'unrelated', workflow: 'quick-task', steps: [] });
+  f.store.updateRun(unrelated.id, { archived: true, status: 'done' });
+  const app = createApp({ repoRoot: f.root, store: f.store, manager: f.manager, version: 'test', bootProjectId: 'project' });
+  const scan = vi.spyOn(f.store, 'listRuns');
+  const read = (id: string) => app.request(`http://127.0.0.1/api/v1/runs/${id}/relationships`, { headers: { host: '127.0.0.1' } });
+  expect(await (await read(f.parent.id)).json()).toEqual({ workers: [expect.objectContaining({ workerId: spawned.workerId, parentRunId: f.parent.id })] });
+  // A worker owns no workers, and an ordinary run owns none: neither reads a single other record.
+  expect(await (await read(spawned.workerId)).json()).toEqual({ parentRunId: f.parent.id, workers: [] });
+  expect(await (await read(unrelated.id)).json()).toEqual({ workers: [] });
+  expect(scan).not.toHaveBeenCalled();
+  // A receipt whose record is gone is skipped, not invented.
+  const root = f.store.getRun(f.parent.id)!.delegation;
+  if (root?.role !== 'root') throw new Error('missing root fixture');
+  const stale = { ...root.receipts[0]!, requestId: randomUUID(), workerId: randomUUID() };
+  f.store.updateRun(f.parent.id, { delegation: { ...root, receipts: [...root.receipts, stale] } });
+  expect(await (await read(f.parent.id)).json()).toEqual({ workers: [expect.objectContaining({ workerId: spawned.workerId })] });
+});
