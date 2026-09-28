@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -126,4 +126,41 @@ test('cleanup removes task worktrees that a lane leaves inside its temporary roo
   assert.equal(registered.includes(scratch), false, registered);
   const branches = execFileSync('git', ['-C', repo, 'branch', '--list', 'fixture-*'], { encoding: 'utf8' });
   assert.equal(branches.trim(), '');
+});
+
+test('a failed server stop fails the run and retains the lane for cleanup', async (t) => {
+  const { root, repo } = fixture(t);
+  writeFileSync(join(repo, '.ai/scripts/test-env-up.sh'), '#!/bin/sh\nmkdir -p .ai/qa\nprintf \'{"browser":{"installed":true},"baseUrl":"http://127.0.0.1:%s"}\\n\' "${E2E_BROWSER_NAMESPACE}" > .ai/qa/test-env.json\n');
+  writeFileSync(join(repo, '.ai/scripts/test-env-down.sh'), '#!/bin/sh\necho cannot-stop >&2\nexit 1\n');
+  writeFileSync(join(repo, '.ai/scripts/e2e.sh'), '#!/bin/sh\necho TEST_E2E_STATUS=passed\n');
+  const scratch = join(root, 'scratch');
+  try {
+    await assert.rejects(
+      runLocalSuite({ repoRoot: repo, scratchRoot: scratch, buildSource: async () => {} }),
+      /server stop failed/,
+    );
+    assert.equal(existsSync(join(scratch, 'lane-1')), true);
+  } finally {
+    for (let index = 1; index <= 4; index += 1) {
+      const lane = join(scratch, `lane-${index}`);
+      if (existsSync(lane)) removeLane({ repoRoot: repo, laneRoot: lane });
+    }
+  }
+});
+
+test('teardown closes only each lane browser namespace', async (t) => {
+  const { root, repo } = fixture(t);
+  const browser = join(root, 'fake-browser.sh');
+  writeFileSync(browser, `#!/bin/sh
+printf '%s\\n' "$*" >> "${join(root, 'browser-close.log')}"
+`);
+  chmodSync(browser, 0o755);
+  writeFileSync(join(repo, '.ai/scripts/test-env-up.sh'), `#!/bin/sh
+mkdir -p .ai/qa
+printf '{"browser":{"installed":true,"command":"${browser}"},"baseUrl":"http://127.0.0.1:%s"}\\n' "$E2E_BROWSER_NAMESPACE" > .ai/qa/test-env.json
+`);
+  writeFileSync(join(repo, '.ai/scripts/e2e.sh'), '#!/bin/sh\necho TEST_E2E_STATUS=passed\n');
+  const result = await runLocalSuite({ repoRoot: repo, scratchRoot: join(root, 'scratch'), buildSource: async () => {} });
+  const calls = readFileSync(join(root, 'browser-close.log'), 'utf8').trim().split('\n');
+  assert.deepEqual(calls.sort(), result.lanes.map((lane) => `--namespace ${lane.namespace} close --all`).sort());
 });

@@ -89,7 +89,7 @@ async function runProcess(command, args, { cwd, env, logPath, running }) {
         cwd, env, detached: process.platform !== 'win32', stdio: ['ignore', output, output],
       });
       running.add(child);
-      child.once('error', rejectRun);
+      child.once('error', (error) => { running.delete(child); rejectRun(error); });
       child.once('close', (code, signal) => {
         running.delete(child);
         resolveRun(signal ? 1 : code ?? 1);
@@ -121,11 +121,13 @@ function retainEvidence(lane, logDir) {
 }
 
 export function buildSource(repoRoot) {
+  // Windows exposes npm as a .cmd shim, which execFileSync cannot launch directly.
+  const npmOptions = { cwd: repoRoot, stdio: 'inherit', shell: process.platform === 'win32' };
   if (!existsSync(join(repoRoot, 'node_modules/zod/package.json'))) {
-    execFileSync('npm', ['ci'], { cwd: repoRoot, stdio: 'inherit' });
+    execFileSync('npm', ['ci'], npmOptions);
   }
   execFileSync('npm', ['run', 'build'], {
-    cwd: repoRoot, env: { ...process.env, VITE_CEZ_E2E: '1' }, stdio: 'inherit',
+    ...npmOptions, env: { ...process.env, VITE_CEZ_E2E: '1' },
   });
 }
 
@@ -166,6 +168,7 @@ export async function runLocalSuite({ repoRoot = ownRoot, scratchRoot, buildSour
       if (bootExit !== 0) throw new Error(`lane ${index} boot failed; see ${lane.bootLogPath}`);
       const descriptor = JSON.parse(readFileSync(join(root, '.ai/qa/test-env.json'), 'utf8'));
       lane.baseUrl = descriptor.baseUrl;
+      lane.browser = descriptor.browser;
       if (!descriptor.browser?.installed) {
         lane.status = 'skipped';
         return { status: 'skipped', lanes, logDir };
@@ -191,16 +194,32 @@ export async function runLocalSuite({ repoRoot = ownRoot, scratchRoot, buildSour
     process.off('SIGINT', interrupt);
     process.off('SIGTERM', interrupt);
     terminateChildren(running);
+    const teardownFailures = [];
+    let retainedLane = false;
     for (const lane of [...lanes].reverse()) {
       try { retainEvidence(lane, logDir); } catch (error) { process.stderr.write(`E2E evidence: ${error}\n`); }
+      if (lane.browser?.installed && lane.browser.command) {
+        try {
+          const exit = await runProcess(lane.browser.command, ['--namespace', lane.namespace, 'close', '--all'], {
+            cwd: lane.root, env: { ...lane.env, ...lane.browser.runtimeEnv },
+            logPath: join(logDir, `lane-${lane.index}-browser-down.log`), running,
+          });
+          if (exit !== 0) teardownFailures.push(`lane ${lane.index} browser close failed (exit ${exit})`);
+        } catch (error) { teardownFailures.push(`lane ${lane.index} browser close failed: ${error}`); }
+      }
       try {
-        await runProcess('sh', ['.ai/scripts/test-env-down.sh'], {
+        const exit = await runProcess('sh', ['.ai/scripts/test-env-down.sh'], {
           cwd: lane.root, env: lane.env, logPath: join(logDir, `lane-${lane.index}-down.log`), running,
         });
-      } catch (error) { process.stderr.write(`E2E teardown: ${error}\n`); }
-      removeLane({ repoRoot, laneRoot: lane.root });
+        if (exit !== 0) throw new Error(`exit ${exit}`);
+        removeLane({ repoRoot, laneRoot: lane.root });
+      } catch (error) {
+        retainedLane = true;
+        teardownFailures.push(`lane ${lane.index} server stop failed: ${error}`);
+      }
     }
-    rmSync(scratch, { recursive: true, force: true });
+    if (!retainedLane) rmSync(scratch, { recursive: true, force: true });
+    if (teardownFailures.length) throw new Error(`${teardownFailures.join('; ')}${retainedLane ? `; retained lanes in ${scratch}` : ''}`);
   }
 }
 
