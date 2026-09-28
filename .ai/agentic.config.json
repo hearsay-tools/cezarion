@@ -12,7 +12,7 @@
       "npm run test:unit",
       "npm run build",
       "npm run test:package",
-      "npm run test:e2e"
+      "npm run test:e2e:local"
     ]
   },
   "labels": {

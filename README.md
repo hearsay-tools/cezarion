@@ -163,7 +163,10 @@ npx cezarion               # start the cockpit for the current repo
 ```
 
 The cockpit opens at `http://localhost:4321` (auto-picks the next free port if
-busy). Type a task, pick a workflow, hit **Start**. That's it.
+busy). If another cockpit already serves this repository, the command prints its
+URL and exits with an error. Different repositories can run side by side; after
+a cockpit exits or crashes, its repository can start again without cleanup.
+Type a task, pick a workflow, hit **Start**. That's it.
 
 ```bash
 npx cezarion run "add a --json flag to the export command"   # headless, CI-friendly

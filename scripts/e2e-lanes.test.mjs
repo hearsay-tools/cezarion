@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -113,6 +113,16 @@ test('missing browser reports skipped without claiming a full-suite pass', async
   assert.equal(result.status, 'skipped');
   assert.equal(result.lanes.length, 1);
   assert.equal(existsSync(result.lanes[0].root), false);
+});
+
+test('CLI exits nonzero when the full local suite skips for a missing browser', (t) => {
+  const { repo } = fixture(t);
+  writeFileSync(join(repo, 'package.json'), JSON.stringify({ private: true, scripts: { build: 'node -e "process.exit(0)"' } }));
+  writeFileSync(join(repo, '.ai/scripts/e2e-lanes.mjs'), readFileSync(new URL('../.ai/scripts/e2e-lanes.mjs', import.meta.url)));
+  writeFileSync(join(repo, '.ai/scripts/test-env-up.sh'), '#!/bin/sh\nmkdir -p .ai/qa\necho \'{"browser":{"installed":false},"baseUrl":"http://127.0.0.1:1"}\' > .ai/qa/test-env.json\n');
+  const run = spawnSync(process.execPath, [join(repo, '.ai/scripts/e2e-lanes.mjs')], { cwd: repo, encoding: 'utf8' });
+  assert.equal(run.status, 1, run.stdout + run.stderr);
+  assert.match(run.stdout, /TEST_E2E_STATUS=skipped/);
 });
 
 test('cleanup removes task worktrees that a lane leaves inside its temporary root', async (t) => {

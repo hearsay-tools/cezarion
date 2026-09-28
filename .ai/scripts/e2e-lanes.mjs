@@ -228,7 +228,8 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     const result = await runLocalSuite();
     for (const lane of result.lanes) process.stdout.write(`lane ${lane.shard}: ${lane.status} (${lane.logPath})\n`);
     process.stdout.write(`E2E lane logs: ${result.logDir}\nTEST_E2E_STATUS=${result.status}\n`);
-    if (result.status === 'failed') process.exitCode = 1;
+    // This command is the final local full-suite gate: a skipped browser is unverified.
+    if (result.status !== 'passed') process.exitCode = 1;
   } catch (error) {
     process.stderr.write(`${error}\nTEST_E2E_STATUS=failed\n`);
     process.exitCode = 1;

@@ -32,6 +32,8 @@ and review of unchanged inputs. Later code edits require affected gates again;
 shared configuration, dependencies, contract changes, or uncertain impact require
 the full gate. Review-only/Markdown-only edits do not invalidate runtime results.
 The handoff records revision/diff, commands, results and subsequent changes.
+The final local browser command is `npm run test:e2e:local`; it runs the full suite
+in four isolated lanes on a machine with about 8 GiB of free RAM.
 
 `test:changed` uses the merge-base against local `origin/main` (falling back to
 `main`), plus staged, unstaged and untracked files; it never fetches. Override with
@@ -94,7 +96,12 @@ after waiting.
 
 Cockpit shards run on separate VMs, each owning its server, `CEZ_HOME`, test-env descriptor and browser namespace. The browser sequencer uses measured durations in `.github/cockpit-test-durations.json` to select each slice; `fileParallelism: false` keeps tests sequential within each shard. The matrix uses `fail-fast: false` so a failure does not cancel evidence from the other shards. The aggregate waits on the entire matrix and requires its result to be `success`.
 
-Local `npm run test:e2e` without arguments still runs the full sequential suite,
+Local `npm run test:e2e:local` builds once and runs four duration-weighted shards
+concurrently, with separate worktrees, app ports, `CEZ_HOME` directories, descriptors,
+and browser namespaces. It is the final local full-suite gate and retains lane logs
+under `.ai/qa/local-runs/`. A skipped browser exits nonzero there, since it did not
+verify the full suite. CI keeps four separate serial shards on its matrix.
+`npm run test:e2e` without arguments still runs the full sequential suite,
 with the existing environment reuse and skip-exit-0 behavior. For iteration use
 `npm run test:e2e -- smoke.e2e.ts -t 'test name'`. Optional `--force` and
 `--force-rebuild` go only to environment bootstrap; other arguments (including
