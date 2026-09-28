@@ -182,6 +182,7 @@ The command stops all four test servers and removes the worktrees when it finish
 Shard output, boot logs, descriptors, app logs, and failure bundles remain under
 `.ai/qa/local-runs/<run-id>/`. A failed lane makes the command exit nonzero and print
 `TEST_E2E_STATUS=failed`; an unavailable browser prints `TEST_E2E_STATUS=skipped`.
+Both statuses exit nonzero for this final local gate.
 
 To force a race that CI hits and your machine does not, slow the server down behind an
 environment variable rather than editing the spec. Specs that boot their own cezar spawn

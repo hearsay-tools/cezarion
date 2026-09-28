@@ -10,6 +10,7 @@ import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { RunManager } from '../workflows/run.ts';
 import { ensureLaunchKey } from './launch-key.ts';
 import { getRepoInfo } from './git.ts';
+import type { CockpitOwnership } from './cockpit-ownership.ts';
 
 /**
  * Per-project server context (spec 2026-07-20-multi-project-workspace,
@@ -52,6 +53,8 @@ export interface ProjectContextSource {
 }
 
 export interface ProjectContextDeps {
+  /** CLI process ownership, acquired before opening any secondary store. */
+  ownership?: CockpitOwnership;
   /** Install controller session capabilities before recovery starts any backend. */
   prepareManager?: (project: Pick<ProjectContext, 'id' | 'root' | 'store' | 'manager'>) => (() => void) | void;
   /** Arm persisted cleanup only after recovered execution/process state is available. */
@@ -217,6 +220,7 @@ export class ProjectContexts {
     if (project.status === 'missing') throw new ProjectContextError('missing-root', projectId);
 
     const dataDir = join(project.root, '.ai/cezar');
+    await this.deps.ownership?.acquire(dataDir);
     // keepLive + recover() (#367), same as serveCommand: runs that were live
     // when this project's context last existed are re-queued or resumed.
     const store = RunStore.open(dataDir, { keepLive: true });
