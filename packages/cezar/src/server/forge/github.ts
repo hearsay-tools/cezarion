@@ -1,7 +1,8 @@
+import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { z } from 'zod';
-import { GITHUB_SEARCH_MAX, REFERENCE_STATUS_MAX } from '@open-mercato/cezar-contract';
+import { GITHUB_SEARCH_MAX, REFERENCE_STATUS_MAX, type GithubProjectsData } from '@open-mercato/cezar-contract';
 import { fetchIssueProjects, fetchViewerLogin } from './github-filters.ts';
 import { autosaveCommit } from '../../git-worktree.ts';
 import type {
@@ -365,7 +366,8 @@ export function parseOwnerName(nameWithOwner: string): { owner: string; name: st
    (multi-project workspace, step 2.6): one project's — possibly private —
    issues/PRs must never be served under another project's scope. Bounded like
    `commentsCache` so an unbounded workspace can't grow it without limit. */
-const listCache = new Map<string, { at: number; limit: number; data: GithubData }>();
+let listRequestOrder = 0;
+const listCache = new Map<string, { order: number; at: number; limit: number; data: GithubData; projects: Promise<GithubProjectsData> }>();
 const LIST_CACHE_MAX = 50;
 const CACHE_MS = 60_000;
 export const GH_MAX_LIMIT = 1000;
@@ -377,6 +379,7 @@ export async function fetchGithub(repoRoot: string, refresh = false, limit = 30)
   if (!refresh && hit && Date.now() - hit.at < CACHE_MS && hit.limit >= capped) {
     return hit.data;
   }
+  const order = ++listRequestOrder;
   try {
     // No `comments` field — `gh … --json comments` ships full comment bodies.
     // No `statusCheckRollup` either (#664): the CI rollup for every open PR was the
@@ -414,7 +417,7 @@ export async function fetchGithub(repoRoot: string, refresh = false, limit = 30)
       ? fetchIssueProjects(projectGraphql, ownerName.owner, ownerName.name,
           async () => z.array(ghIssueSchema).parse(JSON.parse(await issueList)).map(i => i.number))
       : Promise.resolve({ projectsReason: 'Project boards unavailable for this repository.' });
-    const [issuesOut, prsOut, counts, viewerLogin, projectData] = await Promise.all([
+    const [issuesOut, prsOut, counts, viewerLogin] = await Promise.all([
       issueList,
       gh(repoRoot, ['pr', 'list', '--limit', String(capped), '--json', `${fields},isDraft,additions,deletions`], timeout),
       // Real comment counts (#499). Degrades to empty maps on its own — a failure here leaves
@@ -423,7 +426,6 @@ export async function fetchGithub(repoRoot: string, refresh = false, limit = 30)
         ? fetchCommentCounts(runGraphql, ownerName.owner, ownerName.name, countsMaxPages)
         : Promise.resolve<{ issues: Record<number, number>; prs: Record<number, number> }>({ issues: {}, prs: {} }),
       fetchViewerLogin((query) => gh(repoRoot, ['api', 'graphql', '-f', `query=${query}`], 8_000)),
-      projectLookup,
     ]);
     // One repo-wide label→color map, filled as we flatten each item's labels.
     const labelColors: Record<string, string> = {};
@@ -469,9 +471,13 @@ export async function fetchGithub(repoRoot: string, refresh = false, limit = 30)
         };
       },
     );
-    if ('membership' in projectData && projectData.membership) {
-      for (const issue of issues) issue.projectIds = projectData.membership[issue.number] ?? [];
+    // Only verified values from the same repository may survive a refresh.
+    const previous = hit?.data.repo === repoOut.trim() ? hit.data : undefined;
+    for (const issue of issues) {
+      const known = previous?.issues.find(row => row.number === issue.number)?.projectIds;
+      if (known !== undefined) issue.projectIds = known;
     }
+    const generation = randomUUID();
     const data: GithubData = {
       available: true,
       repo: repoOut.trim() || undefined,
@@ -480,11 +486,33 @@ export async function fetchGithub(repoRoot: string, refresh = false, limit = 30)
       prs,
       labelColors,
       ...(viewerLogin ? { viewerLogin } : {}),
-      ...('projects' in projectData ? { projects: projectData.projects } : {}),
-      ...('projectsReason' in projectData ? { projectsReason: projectData.projectsReason } : {}),
+      projectsState: 'refreshing',
+      projectsGeneration: generation,
+      ...(previous?.projects ? { projects: previous.projects } : {}),
     };
-    listCache.delete(repoRoot); // re-insert so this key becomes the newest
-    listCache.set(repoRoot, { at: Date.now(), limit: capped, data });
+    const projects = projectLookup.then((result): GithubProjectsData => {
+      const metadata: GithubProjectsData = 'membership' in result
+        ? { generation, state: 'ready', projects: result.projects, membership: result.membership }
+        : { generation, state: 'unavailable', reason: result.projectsReason };
+      const current = listCache.get(repoRoot);
+      if (current?.data.projectsGeneration === generation) {
+        current.data = {
+          ...current.data,
+          projectsState: metadata.state,
+          ...(metadata.state === 'ready' ? {
+            projects: metadata.projects,
+            issues: current.data.issues.map(issue => ({ ...issue, projectIds: metadata.membership?.[issue.number] ?? [] })),
+          } : { projectsReason: metadata.reason }),
+        };
+      }
+      return metadata;
+    });
+    // Concurrent refreshes may finish in reverse order. An older list must not evict
+    // the newer generation (and invalidate the newer client's metadata follow-up).
+    if ((listCache.get(repoRoot)?.order ?? -1) < order) {
+      listCache.delete(repoRoot); // re-insert so this key becomes the newest
+      listCache.set(repoRoot, { order, at: Date.now(), limit: capped, data, projects });
+    }
     while (listCache.size > LIST_CACHE_MAX) {
       const oldest = listCache.keys().next().value;
       if (oldest === undefined) break;
@@ -498,6 +526,15 @@ export async function fetchGithub(repoRoot: string, refresh = false, limit = 30)
       : firstLine(message);
     return { available: false, reason, issues: [], prs: [] };
   }
+}
+
+/** Bounded lookup already started by the list. Never launch work for an expired generation. */
+export async function fetchGithubProjects(repoRoot: string, generation: string): Promise<GithubProjectsData> {
+  const entry = listCache.get(repoRoot);
+  if (!entry || entry.data.projectsGeneration !== generation) {
+    return { generation, state: 'unavailable', reason: 'Project metadata expired. Refresh to try again.' };
+  }
+  return entry.projects;
 }
 
 function firstLine(s: string): string {

@@ -49,6 +49,7 @@ import type {
   GithubRefStatusData,
   GithubCommentsData,
   GithubData,
+  GithubProjectsData,
   GithubMergeMethod,
   GithubMergeResponse,
   GithubPrMergeStateResponse,
@@ -838,6 +839,12 @@ export async function getGithub(
     ),
     '/github',
   )
+}
+
+export async function getGithubProjects(generation: string, opts?: ReadOptions): Promise<GithubProjectsData> {
+  return unwrap(await cez.api.v1.p[':projectId'].github.projects.$get({
+    param: { projectId: queryScope() }, query: { generation },
+  }, init(opts)), '/github/projects')
 }
 
 /** Lazy PR checks glyphs for on-screen rows (#664). The list call no longer ships

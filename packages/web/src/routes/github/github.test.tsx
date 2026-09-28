@@ -3542,3 +3542,33 @@ it('lets a mobile detail preview reveal every issue without losing its selected 
   expect(compactHiddenFlags()).toEqual([false, false, false])
   expect(rows()[0]?.getAttribute('aria-current')).toBe('page')
 })
+
+it.each(['ready', 'unavailable', 'network'] as const)('keeps the board filter and unknown rows while project metadata refreshes, then settles as %s', async state => {
+  const generation = '00000000-0000-4000-8000-000000000662'
+  const boardData = { ...GITHUB, projects: [{ id: 'P1', title: 'Delivery', url: 'https://github.com/orgs/acme/projects/1' }], issues: [
+    { ...ISSUE_142, projectIds: ['P1'] }, { ...ISSUE_139, projectIds: [] },
+  ] }
+  let finish!: (value: Response) => void
+  stubFetch({
+    'GET /api/v1/github?limit=1000': () => jsonResponse(boardData),
+    'GET /api/v1/github?limit=1000&refresh=1': () => jsonResponse({ ...boardData, projectsState: 'refreshing', projectsGeneration: generation,
+      issues: [boardData.issues[0], { ...ISSUE_139 }] }),
+    [`GET /api/v1/github/projects?generation=${generation}`]: () => new Promise<Response>(resolve => { finish = resolve }),
+  })
+  renderAt('/github')
+  const picker = await screen.findByRole('combobox', { name: 'Project board' })
+  fireEvent.change(picker, { target: { value: 'P1' } })
+  expect(rows()).toHaveLength(1)
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
+  await screen.findByText(/Refreshing project boards/)
+  expect((picker as HTMLSelectElement).value).toBe('P1')
+  expect(rows()).toHaveLength(2)
+  await waitFor(() => expect(finish).toBeTypeOf('function'))
+  finish(state === 'network' ? new Response('offline', { status: 503 }) : jsonResponse(state === 'ready'
+    ? { generation, state, projects: boardData.projects, membership: { 142: ['P1'], 139: [] } }
+    : { generation, state, reason: 'Project lookup failed.' }))
+  await waitFor(() => expect(screen.queryByText(/Refreshing project boards/)).toBeNull())
+  expect((picker as HTMLSelectElement).value).toBe('P1')
+  expect(rows()).toHaveLength(state === 'ready' ? 1 : 2)
+  if (state !== 'ready') expect(screen.getByText(/Previous memberships are shown/)).toBeTruthy()
+})

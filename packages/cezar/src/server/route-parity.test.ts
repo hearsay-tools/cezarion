@@ -102,6 +102,16 @@ describe('project-route alias parity (unprefixed vs /api/v1/p/<boot> vs /api/v1/
     else process.env.CEZ_DRY_RUN = savedDryRun;
   });
 
+  it('validates project generations and returns honest unavailable metadata through every alias', async () => {
+    const generation = '00000000-0000-4000-8000-000000000662';
+    for (const path of spellings(bootId, '/github/projects')) {
+      expect((await apiRequest(app, path + '?generation=invalid')).status).toBe(400);
+      const response = await apiRequest(app, path + '?generation=' + generation);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ generation, state: 'unavailable', reason: 'Project metadata expired. Refresh to try again.' });
+    }
+  });
+
   /** Substitute representative values for a manifest path's params. */
   const fillParams = (path: string): string =>
     path

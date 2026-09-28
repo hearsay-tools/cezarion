@@ -32,7 +32,7 @@ export function filterGithubItems(
   return items.filter((item) => {
     if (required.length > 0 && !required.every((label) => item.labels.includes(label))) return false
     if (opts.assignees?.length && !item.assignees?.some(login => opts.assignees!.some(selected => selected.toLowerCase() === login.toLowerCase()))) return false
-    if (opts.projectId && !item.projectIds?.includes(opts.projectId)) return false
+    if (opts.projectId && item.projectIds !== undefined && !item.projectIds.includes(opts.projectId)) return false
     if (query === '') return true
     if (idOnly) return String(item.number).includes(numeric)
     const haystack = `#${item.number} ${item.title} ${item.author} ${item.body}`.toLowerCase()

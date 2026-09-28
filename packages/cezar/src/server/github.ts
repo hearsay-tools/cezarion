@@ -6,6 +6,7 @@
  */
 export {
   fetchGithub,
+  fetchGithubProjects,
   fetchGithubChecks,
   fetchGithubComments,
   fetchGithubPrDiff,

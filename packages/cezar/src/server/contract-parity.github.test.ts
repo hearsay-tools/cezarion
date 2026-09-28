@@ -7,6 +7,7 @@ import type {
   githubSearchDataSchema,
   githubCommentsDataSchema,
   githubDataSchema,
+  githubProjectsDataSchema,
   githubMergeResponseSchema,
   githubPrChangesDataSchema,
   githubPrMergeStateResponseSchema,
@@ -108,6 +109,7 @@ describe('src/contract github + repo schemas match the routes exactly', () => {
 
   type _Checks = [
     Assert<Exact<z.infer<typeof githubDataSchema>, Github200>>,
+    Assert<Exact<z.infer<typeof githubProjectsDataSchema>, InferResponseType<typeof client.api.v1.github.projects.$get, 200>>>,
     Assert<Exact<z.infer<typeof githubCommentsDataSchema>, GithubComments200>>,
     Assert<Exact<z.infer<typeof githubChecksDataSchema>, GithubChecks200>>,
     Assert<Exact<z.infer<typeof githubSearchDataSchema>, GithubSearch200>>,

@@ -1,0 +1,803 @@
+{
+  "commit": "e97c6314629502298e89919b8774762307fb1b77",
+  "samples": [
+    {
+      "name": "cold-ref",
+      "paths": [
+        "/api/v1/github/ref-status?prs=670&issues=662"
+      ],
+      "ms": 7500.7,
+      "results": [
+        {
+          "status": 200,
+          "ttfbMs": 7499.01,
+          "totalMs": 7500.65,
+          "available": true,
+          "prs": 1,
+          "issues": 1
+        }
+      ],
+      "calls": [
+        {
+          "label": "repo view",
+          "startMs": 30.08,
+          "ms": 843.44,
+          "bytes": 23,
+          "ok": true
+        },
+        {
+          "label": "ref-graphql",
+          "startMs": 873.84,
+          "ms": 6614.58,
+          "bytes": 487,
+          "ok": true
+        }
+      ]
+    },
+    {
+      "name": "warm-ref",
+      "paths": [
+        "/api/v1/github/ref-status?prs=670&issues=662"
+      ],
+      "ms": 4.29,
+      "results": [
+        {
+          "status": 200,
+          "ttfbMs": 3.96,
+          "totalMs": 4.28,
+          "available": true,
+          "prs": 1,
+          "issues": 1
+        }
+      ],
+      "calls": []
+    },
+    {
+      "name": "warm-handle-cold-ref",
+      "paths": [
+        "/api/v1/github/ref-status?prs=670&issues=662"
+      ],
+      "ms": 892.27,
+      "results": [
+        {
+          "status": 200,
+          "ttfbMs": 892.07,
+          "totalMs": 892.26,
+          "available": true,
+          "prs": 1,
+          "issues": 1
+        }
+      ],
+      "calls": [
+        {
+          "label": "ref-graphql",
+          "startMs": 1.21,
+          "ms": 889.61,
+          "bytes": 487,
+          "ok": true
+        }
+      ]
+    },
+    {
+      "name": "cold-ref",
+      "paths": [
+        "/api/v1/github/ref-status?prs=670&issues=662"
+      ],
+      "ms": 1107.87,
+      "results": [
+        {
+          "status": 200,
+          "ttfbMs": 1107.63,
+          "totalMs": 1107.86,
+          "available": true,
+          "prs": 1,
+          "issues": 1
+        }
+      ],
+      "calls": [
+        {
+          "label": "repo view",
+          "startMs": 1.04,
+          "ms": 422.24,
+          "bytes": 23,
+          "ok": true
+        },
+        {
+          "label": "ref-graphql",
+          "startMs": 423.37,
+          "ms": 683.06,
+          "bytes": 487,
+          "ok": true
+        }
+      ]
+    },
+    {
+      "name": "warm-ref",
+      "paths": [
+        "/api/v1/github/ref-status?prs=670&issues=662"
+      ],
+      "ms": 1.77,
+      "results": [
+        {
+          "status": 200,
+          "ttfbMs": 1.55,
+          "totalMs": 1.76,
+          "available": true,
+          "prs": 1,
+          "issues": 1
+        }
+      ],
+      "calls": []
+    },
+    {
+      "name": "warm-handle-cold-ref",
+      "paths": [
+        "/api/v1/github/ref-status?prs=670&issues=662"
+      ],
+      "ms": 3218.51,
+      "results": [
+        {
+          "status": 200,
+          "ttfbMs": 3218.28,
+          "totalMs": 3218.5,
+          "available": true,
+          "prs": 1,
+          "issues": 1
+        }
+      ],
+      "calls": [
+        {
+          "label": "ref-graphql",
+          "startMs": 0.64,
+          "ms": 3216.52,
+          "bytes": 487,
+          "ok": true
+        }
+      ]
+    },
+    {
+      "name": "cold-ref",
+      "paths": [
+        "/api/v1/github/ref-status?prs=670&issues=662"
+      ],
+      "ms": 1434.9,
+      "results": [
+        {
+          "status": 200,
+          "ttfbMs": 1434.68,
+          "totalMs": 1434.88,
+          "available": true,
+          "prs": 1,
+          "issues": 1
+        }
+      ],
+      "calls": [
+        {
+          "label": "repo view",
+          "startMs": 1.16,
+          "ms": 393.62,
+          "bytes": 23,
+          "ok": true
+        },
+        {
+          "label": "ref-graphql",
+          "startMs": 394.94,
+          "ms": 1038.6,
+          "bytes": 487,
+          "ok": true
+        }
+      ]
+    },
+    {
+      "name": "warm-ref",
+      "paths": [
+        "/api/v1/github/ref-status?prs=670&issues=662"
+      ],
+      "ms": 1.44,
+      "results": [
+        {
+          "status": 200,
+          "ttfbMs": 1.31,
+          "totalMs": 1.43,
+          "available": true,
+          "prs": 1,
+          "issues": 1
+        }
+      ],
+      "calls": []
+    },
+    {
+      "name": "warm-handle-cold-ref",
+      "paths": [
+        "/api/v1/github/ref-status?prs=670&issues=662"
+      ],
+      "ms": 690.31,
+      "results": [
+        {
+          "status": 200,
+          "ttfbMs": 690.06,
+          "totalMs": 690.29,
+          "available": true,
+          "prs": 1,
+          "issues": 1
+        }
+      ],
+      "calls": [
+        {
+          "label": "ref-graphql",
+          "startMs": 0.8,
+          "ms": 687.94,
+          "bytes": 487,
+          "ok": true
+        }
+      ]
+    },
+    {
+      "name": "cold-ref",
+      "paths": [
+        "/api/v1/github/ref-status?prs=670&issues=662"
+      ],
+      "ms": 971.23,
+      "results": [
+        {
+          "status": 200,
+          "ttfbMs": 971.01,
+          "totalMs": 971.21,
+          "available": true,
+          "prs": 1,
+          "issues": 1
+        }
+      ],
+      "calls": [
+        {
+          "label": "repo view",
+          "startMs": 0.99,
+          "ms": 368.63,
+          "bytes": 23,
+          "ok": true
+        },
+        {
+          "label": "ref-graphql",
+          "startMs": 369.69,
+          "ms": 600.08,
+          "bytes": 487,
+          "ok": true
+        }
+      ]
+    },
+    {
+      "name": "warm-ref",
+      "paths": [
+        "/api/v1/github/ref-status?prs=670&issues=662"
+      ],
+      "ms": 1.29,
+      "results": [
+        {
+          "status": 200,
+          "ttfbMs": 1.13,
+          "totalMs": 1.29,
+          "available": true,
+          "prs": 1,
+          "issues": 1
+        }
+      ],
+      "calls": []
+    },
+    {
+      "name": "warm-handle-cold-ref",
+      "paths": [
+        "/api/v1/github/ref-status?prs=670&issues=662"
+      ],
+      "ms": 664.53,
+      "results": [
+        {
+          "status": 200,
+          "ttfbMs": 664.36,
+          "totalMs": 664.52,
+          "available": true,
+          "prs": 1,
+          "issues": 1
+        }
+      ],
+      "calls": [
+        {
+          "label": "ref-graphql",
+          "startMs": 0.49,
+          "ms": 662.94,
+          "bytes": 487,
+          "ok": true
+        }
+      ]
+    },
+    {
+      "name": "cold-ref",
+      "paths": [
+        "/api/v1/github/ref-status?prs=670&issues=662"
+      ],
+      "ms": 1089.11,
+      "results": [
+        {
+          "status": 200,
+          "ttfbMs": 1088.67,
+          "totalMs": 1089.1,
+          "available": true,
+          "prs": 1,
+          "issues": 1
+        }
+      ],
+      "calls": [
+        {
+          "label": "repo view",
+          "startMs": 0.74,
+          "ms": 356.85,
+          "bytes": 23,
+          "ok": true
+        },
+        {
+          "label": "ref-graphql",
+          "startMs": 357.69,
+          "ms": 729.78,
+          "bytes": 487,
+          "ok": true
+        }
+      ]
+    },
+    {
+      "name": "warm-ref",
+      "paths": [
+        "/api/v1/github/ref-status?prs=670&issues=662"
+      ],
+      "ms": 1.49,
+      "results": [
+        {
+          "status": 200,
+          "ttfbMs": 1.36,
+          "totalMs": 1.49,
+          "available": true,
+          "prs": 1,
+          "issues": 1
+        }
+      ],
+      "calls": []
+    },
+    {
+      "name": "warm-handle-cold-ref",
+      "paths": [
+        "/api/v1/github/ref-status?prs=670&issues=662"
+      ],
+      "ms": 669.85,
+      "results": [
+        {
+          "status": 200,
+          "ttfbMs": 669.66,
+          "totalMs": 669.84,
+          "available": true,
+          "prs": 1,
+          "issues": 1
+        }
+      ],
+      "calls": [
+        {
+          "label": "ref-graphql",
+          "startMs": 0.4,
+          "ms": 668.14,
+          "bytes": 487,
+          "ok": true
+        }
+      ]
+    },
+    {
+      "name": "concurrent-overlap",
+      "paths": [
+        "/api/v1/github/ref-status?prs=670&issues=662",
+        "/api/v1/github/ref-status?prs=670&issues=661,662"
+      ],
+      "ms": 1264.82,
+      "results": [
+        {
+          "status": 200,
+          "ttfbMs": 1264.67,
+          "totalMs": 1264.81,
+          "available": true,
+          "prs": 1,
+          "issues": 1
+        },
+        {
+          "status": 200,
+          "ttfbMs": 1071.73,
+          "totalMs": 1071.9,
+          "available": true,
+          "prs": 1,
+          "issues": 2
+        }
+      ],
+      "calls": [
+        {
+          "label": "repo view",
+          "startMs": 5.9,
+          "ms": 397.5,
+          "bytes": 23,
+          "ok": true
+        },
+        {
+          "label": "repo view",
+          "startMs": 1.4,
+          "ms": 420.39,
+          "bytes": 23,
+          "ok": true
+        },
+        {
+          "label": "ref-graphql",
+          "startMs": 403.45,
+          "ms": 667.48,
+          "bytes": 558,
+          "ok": true
+        },
+        {
+          "label": "ref-graphql",
+          "startMs": 421.84,
+          "ms": 841.83,
+          "bytes": 487,
+          "ok": true
+        }
+      ]
+    },
+    {
+      "name": "20-recent-prs-warm-handle",
+      "paths": [
+        "/api/v1/github/ref-status?prs=673,672,671,670,669,668,660,658,656,655,654,653,652,651,650,648,646,645,644,643&issues=662"
+      ],
+      "ms": 1639.86,
+      "results": [
+        {
+          "status": 200,
+          "ttfbMs": 1639.72,
+          "totalMs": 1639.85,
+          "available": true,
+          "prs": 20,
+          "issues": 1
+        }
+      ],
+      "calls": [
+        {
+          "label": "ref-graphql",
+          "startMs": 1.13,
+          "ms": 1637.16,
+          "bytes": 8098,
+          "ok": true
+        }
+      ]
+    },
+    {
+      "name": "20-recent-prs-warm-handle",
+      "paths": [
+        "/api/v1/github/ref-status?prs=673,672,671,670,669,668,660,658,656,655,654,653,652,651,650,648,646,645,644,643&issues=662"
+      ],
+      "ms": 2159.67,
+      "results": [
+        {
+          "status": 200,
+          "ttfbMs": 2159.54,
+          "totalMs": 2159.66,
+          "available": true,
+          "prs": 20,
+          "issues": 1
+        }
+      ],
+      "calls": [
+        {
+          "label": "ref-graphql",
+          "startMs": 0.66,
+          "ms": 2157.69,
+          "bytes": 8098,
+          "ok": true
+        }
+      ]
+    },
+    {
+      "name": "20-recent-prs-warm-handle",
+      "paths": [
+        "/api/v1/github/ref-status?prs=673,672,671,670,669,668,660,658,656,655,654,653,652,651,650,648,646,645,644,643&issues=662"
+      ],
+      "ms": 1909.43,
+      "results": [
+        {
+          "status": 200,
+          "ttfbMs": 1909.3,
+          "totalMs": 1909.43,
+          "available": true,
+          "prs": 20,
+          "issues": 1
+        }
+      ],
+      "calls": [
+        {
+          "label": "ref-graphql",
+          "startMs": 0.63,
+          "ms": 1907.61,
+          "bytes": 8098,
+          "ok": true
+        }
+      ]
+    },
+    {
+      "name": "list-refresh-1000",
+      "paths": [
+        "/api/v1/github?refresh=1&limit=1000"
+      ],
+      "ms": 2201.85,
+      "results": [
+        {
+          "status": 200,
+          "ttfbMs": 2200.78,
+          "totalMs": 2201.84,
+          "available": true,
+          "prs": 2,
+          "issues": 56
+        }
+      ],
+      "calls": [
+        {
+          "label": "repo view",
+          "startMs": 1.23,
+          "ms": 616.84,
+          "bytes": 23,
+          "ok": true
+        },
+        {
+          "label": "projects-graphql",
+          "startMs": 622.57,
+          "ms": 448.56,
+          "bytes": 206,
+          "ok": true
+        },
+        {
+          "label": "counts-graphql",
+          "startMs": 631.57,
+          "ms": 506.43,
+          "bytes": 242,
+          "ok": true
+        },
+        {
+          "label": "viewer-graphql",
+          "startMs": 635.34,
+          "ms": 517.09,
+          "bytes": 38,
+          "ok": true
+        },
+        {
+          "label": "pr list",
+          "startMs": 625.63,
+          "ms": 594.42,
+          "bytes": 9551,
+          "ok": true
+        },
+        {
+          "label": "issue list",
+          "startMs": 618.13,
+          "ms": 764.65,
+          "bytes": 169427,
+          "ok": true
+        },
+        {
+          "label": "counts-graphql",
+          "startMs": 628.67,
+          "ms": 927.79,
+          "bytes": 2558,
+          "ok": true
+        },
+        {
+          "label": "membership-graphql",
+          "startMs": 1384.47,
+          "ms": 810.74,
+          "bytes": 6824,
+          "ok": true
+        }
+      ]
+    },
+    {
+      "name": "list-warm-1000",
+      "paths": [
+        "/api/v1/github?limit=1000"
+      ],
+      "ms": 2.92,
+      "results": [
+        {
+          "status": 200,
+          "ttfbMs": 2.04,
+          "totalMs": 2.91,
+          "available": true,
+          "prs": 2,
+          "issues": 56
+        }
+      ],
+      "calls": []
+    },
+    {
+      "name": "list-refresh-1000",
+      "paths": [
+        "/api/v1/github?refresh=1&limit=1000"
+      ],
+      "ms": 3803.63,
+      "results": [
+        {
+          "status": 200,
+          "ttfbMs": 3802.31,
+          "totalMs": 3803.62,
+          "available": true,
+          "prs": 2,
+          "issues": 56
+        }
+      ],
+      "calls": [
+        {
+          "label": "repo view",
+          "startMs": 0.55,
+          "ms": 489.07,
+          "bytes": 23,
+          "ok": true
+        },
+        {
+          "label": "viewer-graphql",
+          "startMs": 507.59,
+          "ms": 388.6,
+          "bytes": 38,
+          "ok": true
+        },
+        {
+          "label": "projects-graphql",
+          "startMs": 493.65,
+          "ms": 470.71,
+          "bytes": 206,
+          "ok": true
+        },
+        {
+          "label": "counts-graphql",
+          "startMs": 504.56,
+          "ms": 500.94,
+          "bytes": 242,
+          "ok": true
+        },
+        {
+          "label": "pr list",
+          "startMs": 497.04,
+          "ms": 785.53,
+          "bytes": 9551,
+          "ok": true
+        },
+        {
+          "label": "counts-graphql",
+          "startMs": 499.78,
+          "ms": 1140.66,
+          "bytes": 2558,
+          "ok": true
+        },
+        {
+          "label": "issue list",
+          "startMs": 489.69,
+          "ms": 1187.57,
+          "bytes": 169427,
+          "ok": true
+        },
+        {
+          "label": "membership-graphql",
+          "startMs": 1677.89,
+          "ms": 2118.25,
+          "bytes": 6824,
+          "ok": true
+        }
+      ]
+    },
+    {
+      "name": "list-warm-1000",
+      "paths": [
+        "/api/v1/github?limit=1000"
+      ],
+      "ms": 3.68,
+      "results": [
+        {
+          "status": 200,
+          "ttfbMs": 2.82,
+          "totalMs": 3.67,
+          "available": true,
+          "prs": 2,
+          "issues": 56
+        }
+      ],
+      "calls": []
+    },
+    {
+      "name": "list-refresh-1000",
+      "paths": [
+        "/api/v1/github?refresh=1&limit=1000"
+      ],
+      "ms": 2109.65,
+      "results": [
+        {
+          "status": 200,
+          "ttfbMs": 2108.48,
+          "totalMs": 2109.64,
+          "available": true,
+          "prs": 2,
+          "issues": 56
+        }
+      ],
+      "calls": [
+        {
+          "label": "repo view",
+          "startMs": 0.55,
+          "ms": 394.69,
+          "bytes": 23,
+          "ok": true
+        },
+        {
+          "label": "projects-graphql",
+          "startMs": 399.87,
+          "ms": 396.38,
+          "bytes": 206,
+          "ok": true
+        },
+        {
+          "label": "viewer-graphql",
+          "startMs": 415.23,
+          "ms": 395.94,
+          "bytes": 38,
+          "ok": true
+        },
+        {
+          "label": "counts-graphql",
+          "startMs": 410.71,
+          "ms": 576.27,
+          "bytes": 242,
+          "ok": true
+        },
+        {
+          "label": "pr list",
+          "startMs": 402.94,
+          "ms": 786.32,
+          "bytes": 9551,
+          "ok": true
+        },
+        {
+          "label": "issue list",
+          "startMs": 395.34,
+          "ms": 1014.85,
+          "bytes": 169427,
+          "ok": true
+        },
+        {
+          "label": "counts-graphql",
+          "startMs": 406.99,
+          "ms": 1484.56,
+          "bytes": 2558,
+          "ok": true
+        },
+        {
+          "label": "membership-graphql",
+          "startMs": 1411.34,
+          "ms": 692.84,
+          "bytes": 6824,
+          "ok": true
+        }
+      ]
+    },
+    {
+      "name": "list-warm-1000",
+      "paths": [
+        "/api/v1/github?limit=1000"
+      ],
+      "ms": 4.58,
+      "results": [
+        {
+          "status": 200,
+          "ttfbMs": 3.46,
+          "totalMs": 4.57,
+          "available": true,
+          "prs": 2,
+          "issues": 56
+        }
+      ],
+      "calls": []
+    }
+  ]
+}

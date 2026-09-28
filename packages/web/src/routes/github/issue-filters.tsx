@@ -43,6 +43,8 @@ export function IssueFilters({ data, assignees, projectId, onAssigneesChange, on
         Assigned to me
       </button>
       {!data.viewerLogin ? <p className="w-full text-xs text-muted-foreground">GitHub login unavailable.</p> : null}
+      {data.projectsState === 'refreshing' ? <p role="status" className="w-full text-xs text-muted-foreground">Refreshing project boards. Previous memberships are shown; issues with unknown membership remain visible.</p> : null}
+      {data.projectsState === 'unavailable' && data.projects ? <p role="status" className="w-full text-xs text-muted-foreground">{data.projectsReason} Previous memberships are shown; issues with unknown membership remain visible.</p> : null}
       {data.projects?.length ? (
         <select aria-label="Project board" className={control} value={projectId}
           onChange={event => onProjectChange(event.target.value)}>
@@ -53,7 +55,7 @@ export function IssueFilters({ data, assignees, projectId, onAssigneesChange, on
         <select aria-label="Project board" className={control} disabled value="">
           <option value="">No boards</option>
         </select>
-      ) : <p className="w-full text-xs text-muted-foreground">{data.projectsReason ?? 'Project boards unavailable.'}</p>}
+      ) : <p className="w-full text-xs text-muted-foreground">{data.projectsReason ?? (data.projectsState === 'refreshing' ? 'Project memberships pending.' : 'Project boards unavailable.')}</p>}
     </div>
   )
 }

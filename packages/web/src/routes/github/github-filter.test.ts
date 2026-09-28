@@ -88,7 +88,7 @@ describe('issue assignment and project filters', () => {
   })
   it('ANDs project membership with assignees, labels and search', () => {
     expect(filterGithubItems(rows, { assignees: ['alice', 'bob'], projectId: 'P2', labels: ['bug'], query: 'fix' }).map(i => i.number)).toEqual([2])
-    expect(filterGithubItems(rows, { projectId: 'missing' })).toEqual([])
+    expect(filterGithubItems(rows, { projectId: 'missing' }).map(i => i.number)).toEqual([4])
     expect(filterGithubItems(rows, { projectId: 'P1', query: 'docs' })).toEqual([])
   })
   it('keeps legacy and unassigned rows with no filters', () => {

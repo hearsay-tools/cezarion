@@ -37,6 +37,7 @@ import {
   notifyRunInputSchema,
   type TestProjectWebhookResponse,
   githubSearchQuerySchema,
+  githubProjectsQuerySchema,
   setWorkspaceUiStateInputSchema,
   type GroupResponse,
   type GroupVariant,
@@ -187,7 +188,7 @@ import { ApplicationUpdateConflictError, ApplicationUpdateFailureError, type App
 import { createSocketHub, type SocketHub, type WsUpgradeVerdict } from './ws.ts';
 import { browseDirectory, isInsideBrowseRoot, isLexicallyInsideBrowseRoot, resolveBrowseRoot } from './fs-browse.ts';
 import { parseRemote, resolveForge, type ForgeAvailability } from './forge/index.ts';
-import { fetchGithub, fetchGithubChecks, fetchGithubComments, fetchGithubPrDiff, fetchGithubRefStatus, forgetRefStatus, readCachedRefStatuses, refNumberFromUrl, searchGithubItems, GithubPrNotFoundError, GH_CHECKS_MAX, GH_REF_STATUS_MAX } from './github.ts';
+import { fetchGithub, fetchGithubProjects, fetchGithubChecks, fetchGithubComments, fetchGithubPrDiff, fetchGithubRefStatus, forgetRefStatus, readCachedRefStatuses, refNumberFromUrl, searchGithubItems, GithubPrNotFoundError, GH_CHECKS_MAX, GH_REF_STATUS_MAX } from './github.ts';
 import { ensureLaunchKey } from './launch-key.ts';
 import { openInTerminal } from './open-in-terminal.ts';
 import { agentCliRunner, detectOpenTargets, openFileInDefaultApp, openInApp } from './open-in-app.ts';
@@ -5167,6 +5168,10 @@ export function createApp(deps: ServerDeps) {
         return c.json(await fetchGithub(repoRoot, query.refresh === '1', Number.isFinite(limit) ? limit : 30));
       },
     )
+
+    .get('/github/projects', queryZodValidator(githubProjectsQuerySchema), async (c) => {
+      return c.json(await fetchGithubProjects(c.get('project').root, c.req.valid('query').generation));
+    })
 
     .get('/github/comments/:kind/:number', queryZodValidator(refreshQuery), async (c) => {
       const { root: repoRoot } = c.get('project');
