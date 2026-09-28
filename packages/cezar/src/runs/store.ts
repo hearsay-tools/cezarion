@@ -2309,6 +2309,8 @@ export class RunStore extends EventEmitter {
       ...all.filter((r) => r.archived).slice(MAX_ARCHIVED_KEPT),
     ];
     for (const stale of stalePool) {
+      // Retention must not evict a live task's history or scratch between turns.
+      if (['queued', 'running', 'waiting'].includes(stale.status)) continue;
       // Delegation promises history and parent snapshots until explicit deletion.
       if (stale.delegation || !this.canDeleteRun(stale.id)) continue;
       this.runs.delete(stale.id);
