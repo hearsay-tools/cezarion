@@ -107,6 +107,9 @@ describe('Hand off to webhook', () => {
   it('is a bottom sheet with a full-width 44px action at 360×640', () => {
     browser.setViewport(360, 640)
     openThread('mobile')
+    // #621: below md the pushed top bar owns the title row, so Hand off lives in the run-details
+    // disclosure (lane-4 bundle task-handoff/is-a-bottom-sheet-…-1: trigger present, zero-size).
+    browser.click('[data-slot="mobile-top-bar"] [aria-label="Show run details"]')
     const trigger = box(handoff)
     expect(trigger.width).toBeGreaterThanOrEqual(44)
     expect(trigger.height).toBeGreaterThanOrEqual(44)
