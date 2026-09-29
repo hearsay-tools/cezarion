@@ -1,6 +1,6 @@
 import { runnerModelCatalogResponseSchema } from '@open-mercato/cezar-api-client'
 import { toast } from '@/components/ui/toaster'
-import { useMutation, useQueries, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
+import { useMutation, useQueries, useQuery, useQueryClient, type QueryClient, type MutateOptions } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo } from 'react'
 
 import { mergeProviderStatusResponse } from '@/lib/provider-status'
@@ -141,8 +141,8 @@ export const queryKeys = {
       return [queryScope(), 'runs'] as const
     },
     relationships: (id: string) => [queryScope(), 'runs', 'relationships', id] as const,
-    list: () => [queryScope(), 'runs', 'list'] as const,
-    detail: (id: string) => [queryScope(), 'runs', 'detail', id] as const,
+    list: (scope = queryScope()) => [scope, 'runs', 'list'] as const,
+    detail: (id: string, scope = queryScope()) => [scope, 'runs', 'detail', id] as const,
     diff: (id: string) => [queryScope(), 'runs', 'diff', id] as const,
     changes: (id: string) => [queryScope(), 'runs', 'changes', id] as const,
     file: (id: string, path: string) => [queryScope(), 'runs', 'files', id, path] as const,
@@ -1324,58 +1324,83 @@ function invalidateRunsIndex(queryClient: QueryClient): void {
  * detail caches are stamped with `seenAt` optimistically, then reconciled to the server's exact
  * value (which also arrives independently over the `run` SSE). On error the optimistic stamp is
  * rolled back, so a run that could not be marked read honestly stays unread.
+ * Optional projectId pins the endpoint; cacheScope defaults to it and can be `default`
+ * for the boot-project cache. Omitted scopes are captured when mutate is called.
  */
-export function useMarkRunSeen() {
+export function useMarkRunSeen(projectId?: string, cacheScope?: string) {
   const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: (id: string) => markRunSeen(id),
-    onMutate: async (id: string) => {
-      // Cancel BOTH caches this stamps: an in-flight refetch of either that settles after the
-      // optimistic write would otherwise put the unread dot straight back.
-      await queryClient.cancelQueries({ queryKey: queryKeys.runs.list() })
-      await queryClient.cancelQueries({ queryKey: queryKeys.runs.detail(id) })
-      const prevList = queryClient.getQueryData<RunRecord[]>(queryKeys.runs.list())
-      const prevDetail = queryClient.getQueryData<RunRecord>(queryKeys.runs.detail(id))
+  type Receipt = {
+    id: string
+    projectId: string
+    listKey: ReturnType<typeof queryKeys.runs.list>
+    detailKey: ReturnType<typeof queryKeys.runs.detail>
+  }
+  type Snapshot = { id: string; prevList: RunRecord[] | undefined; prevDetail: RunRecord | undefined }
+  const mutation = useMutation<RunRecord, Error, Receipt, Snapshot>({
+    mutationFn: ({ id, projectId: target }) => markRunSeen(id, target),
+    onMutate: async ({ id, listKey, detailKey }) => {
+      // These keys were captured synchronously by mutate/mutateAsync, before React Query
+      // awaits its own callbacks or cancellation. Navigation cannot retarget any phase.
+      await queryClient.cancelQueries({ queryKey: listKey })
+      await queryClient.cancelQueries({ queryKey: detailKey })
+      const prevList = queryClient.getQueryData<RunRecord[]>(listKey)
+      const prevDetail = queryClient.getQueryData<RunRecord>(detailKey)
       const now = new Date().toISOString()
-      queryClient.setQueryData<RunRecord[]>(queryKeys.runs.list(), (list) =>
+      queryClient.setQueryData<RunRecord[]>(listKey, (list) =>
         list?.map((run) => (run.id === id ? { ...run, seenAt: now } : run)),
       )
-      queryClient.setQueryData<RunRecord>(queryKeys.runs.detail(id), (run) =>
+      queryClient.setQueryData<RunRecord>(detailKey, (run) =>
         run ? { ...run, seenAt: now } : run,
       )
-      return { prevList, prevDetail, id }
+      return { id, prevList, prevDetail }
     },
-    onError: (_error, id, context) => {
-      // Both restores are guarded: with no snapshot there is nothing to roll back TO, and
-      // writing `undefined` would evict a cache entry the mutation never touched.
-      if (context?.prevList) queryClient.setQueryData(queryKeys.runs.list(), context.prevList)
-      if (context?.prevDetail) queryClient.setQueryData(queryKeys.runs.detail(id), context.prevDetail)
-    },
-    onSuccess: (updated) => {
-      // Take ONLY the receipt out of the answer — never the whole record.
-      //
-      // `POST /runs/:id/read` answers with a SNAPSHOT taken while the request was in flight, and
-      // this mutation fires at the exact moment a run finishes, which is also the busiest moment
-      // on the run stream. Writing the snapshot wholesale therefore reverts every field the
-      // stream advanced in that window, permanently — nothing refetches afterwards, so the
-      // thread stays wrong until the next reload.
-      //
-      // The case that exposed it (spec 2026-08-03-auto-resume-after-usage-limit): a run fails on
-      // a usage limit and, a beat later, publishes the instant it will resume itself. The read
-      // receipt raced that beat and put back a record with no `autoResumeAt`, so the thread's
-      // resume hint vanished on every LIVE schedule while a page refresh always showed it.
-      //
-      // `seenAt` is the only field this mutation changes, so it is the only one worth taking
-      // from its answer; everything else belongs to the stream and the authoritative fetch.
-      const stampReceipt = (run: RunRecord): RunRecord =>
-        run.id === updated.id ? { ...run, seenAt: updated.seenAt } : run
-      queryClient.setQueryData<RunRecord[]>(queryKeys.runs.list(), (list) => list?.map(stampReceipt))
-      queryClient.setQueryData<RunRecord>(queryKeys.runs.detail(updated.id), (current) =>
-        current ? stampReceipt(current) : updated,
+    onError: (_error, { id, listKey, detailKey }, snapshot) => {
+      // Roll back only the receipt. The stream may have advanced unrelated fields or
+      // inserted another run while the request was in flight; those changes belong to it.
+      const restore = (current: RunRecord, previous: RunRecord): RunRecord => {
+        const { seenAt: _receipt, ...rest } = current
+        return previous.seenAt === undefined ? rest : { ...rest, seenAt: previous.seenAt }
+      }
+      const previous = snapshot?.prevList?.find((run) => run.id === id)
+      if (previous) queryClient.setQueryData<RunRecord[]>(listKey, (list) =>
+        list?.map((run) => run.id === id ? restore(run, previous) : run),
       )
+      const previousDetail = snapshot?.prevDetail
+      if (previousDetail) queryClient.setQueryData<RunRecord>(detailKey, (run) =>
+        run ? restore(run, previousDetail) : run,
+      )
+    },
+    onSuccess: (updated, { id, listKey, detailKey }) => {
+      // A receipt response is an older snapshot: accept its receipt only, preserving
+      // newer stream fields such as autoResumeAt and token totals (#auto-resume).
+      const stampReceipt = (run: RunRecord): RunRecord =>
+        run.id === id ? { ...run, seenAt: updated.seenAt } : run
+      queryClient.setQueryData<RunRecord[]>(listKey, (list) => list?.map(stampReceipt))
+      queryClient.setQueryData<RunRecord>(detailKey, (current) => current ? stampReceipt(current) : updated)
       invalidateRunsIndex(queryClient)
     },
   })
+  const capture = useCallback((id: string): Receipt => {
+    const target = projectId ?? queryScope()
+    const scope = cacheScope ?? target
+    return { id, projectId: target, listKey: queryKeys.runs.list(scope), detailKey: queryKeys.runs.detail(id, scope) }
+  }, [projectId, cacheScope])
+  // Preserve the existing string-variable API, including per-call callbacks and variables.
+  type Options = MutateOptions<RunRecord, Error, string, Snapshot>
+  const callbacks = useCallback((options?: Options): MutateOptions<RunRecord, Error, Receipt, Snapshot> => ({
+    onSuccess: (data, receipt, snapshot, context) => options?.onSuccess?.(data, receipt.id, snapshot, context),
+    onError: (error, receipt, snapshot, context) => options?.onError?.(error, receipt.id, snapshot, context),
+    onSettled: (data, error, receipt, snapshot, context) => options?.onSettled?.(data, error, receipt.id, snapshot, context),
+  }), [])
+  const { mutate, mutateAsync } = mutation
+  const mutateSeen = useCallback((id: string, options?: Options) => mutate(capture(id), callbacks(options)), [mutate, capture, callbacks])
+  const mutateSeenAsync = useCallback((id: string, options?: Options) => mutateAsync(capture(id), callbacks(options)), [mutateAsync, capture, callbacks])
+  return {
+    ...mutation,
+    variables: mutation.variables?.id,
+    mutate: mutateSeen,
+    mutateAsync: mutateSeenAsync,
+  }
 }
 
 /**
