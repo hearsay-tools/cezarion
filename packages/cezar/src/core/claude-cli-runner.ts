@@ -366,12 +366,14 @@ export class ClaudeCliRunner implements AgentRunner {
         if (!timedOut) throw err;
       } finally {
         if (deadline) clearTimeout(deadline);
-        if (killTimer) clearTimeout(killTimer);
         if (autoEndTimer) clearTimeout(autoEndTimer);
         stdinOpen = false;
       }
 
       const exitCode = await waitForExit(child);
+      // Draining/destroying stdout is not process exit. Keep timeout escalation
+      // armed until the child has actually settled.
+      if (killTimer) clearTimeout(killTimer);
       if (eofTermTimer) clearTimeout(eofTermTimer);
       if (eofKillTimer) clearTimeout(eofKillTimer);
 
@@ -690,7 +692,8 @@ function handleClaudeMessage(
 // ---- subprocess plumbing --------------------------------------------------
 
 function waitForExit(child: ChildProcessWithoutNullStreams): Promise<number | null> {
-  if (child.exitCode != null) return Promise.resolve(child.exitCode);
+  // A signal exit leaves exitCode null; its events may precede stdout drain.
+  if (child.exitCode != null || child.signalCode != null) return Promise.resolve(child.exitCode);
   return new Promise((resolve) => {
     let done = false;
     const fin = (code: number | null) => {
