@@ -65,7 +65,7 @@ import { materializeSkillDir } from '../skills-remote.ts';
 import { seedAgentConfigLocalLayer } from '../agent-config/seed.ts';
 import { readAgentModelSettings, readAgentModelProvider } from '../agent-config/models.ts';
 import { loadConfig, resolveWorktreeRetention } from '../config.ts';
-import { autosaveCommit, createWorktree, resolveBaseRef, worktreeDiff, worktreeShortstat } from '../git-worktree.ts';
+import { autosaveCommit, type AutosaveReason, createWorktree, resolveBaseRef, worktreeDiff, worktreeShortstat } from '../git-worktree.ts';
 import { getHeadCommit, getRepoInfo } from '../server/git.ts';
 import { ensureOwnedWorkspace, verifyOwnedWorkspace, type WorkerNoMaterializationProof } from '../delegation/workspace.ts';
 import { verifyWorkerContext } from '../delegation/context.ts';
@@ -5417,7 +5417,7 @@ export class RunManager {
       this.recordUsagePeaks(runId);
       this.clearIdleTimer(state);
       this.clearAutosaveTimer(state);
-      if (state.cwd !== this.repoRoot) await autosaveCommit(state.cwd, 'turn end');
+      await this.saveWorktree(runId, state, 'turn end');
       // Cancellation may be accepted while final autosave is yielding after
       // the remainder was prepared. Retire that durable queue intent before
       // dropping the active state, otherwise pump can launch the tail with a
@@ -5784,7 +5784,7 @@ export class RunManager {
 
     // Final autosave: the branch always ends holding the finished state.
     this.clearAutosaveTimer(state);
-    if (state.cwd !== this.repoRoot) await autosaveCommit(state.cwd, 'run finalize');
+    await this.saveWorktree(runId, state, 'run finalize');
 
     if (this.preserveRunAfterDisposal(runId, state)) {
       this.clearIdleTimer(state);
@@ -6840,13 +6840,22 @@ export class RunManager {
     if (runId) this.store.updateRun(runId, { monitoringWakeAt: undefined });
   }
 
+  /** Keep the active/execution guard until autosave proves its processes exited. */
+  private async saveWorktree(runId: string, state: ActiveRun, reason: AutosaveReason): Promise<void> {
+    if (state.cwd === this.repoRoot) return;
+    const note = (message: string) => this.store.appendEvent(runId, { type: 'note', message });
+    const result = await autosaveCommit(state.cwd, reason, { onWarning: note });
+    if (result === 'failed') note(`${reason} autosave failed; working files remain in ${state.cwd}`);
+    else if (result === 'refused') note(`${reason} autosave refused because of unresolved conflicts; working files remain in ${state.cwd}`);
+  }
+
   /** Autosave-commit the worktree every 90 s while the run lives (spec 006).
    *  Opt-in via CEZ_AUTOSAVE=1 (#471) — see periodicAutosaveEnabled. */
   private armAutosave(runId: string, state: ActiveRun): void {
     if (!periodicAutosaveEnabled()) return;
     if (state.cwd === this.repoRoot || state.autosaveTimer) return;
     state.autosaveTimer = setInterval(() => {
-      const task = autosaveCommit(state.cwd, 'periodic').then(() => undefined);
+      const task = this.saveWorktree(runId, state, 'periodic');
       const turns = this.executions.get(runId)?.turns;
       turns?.add(task);
       void task.catch(() => undefined).finally(() => turns?.delete(task));

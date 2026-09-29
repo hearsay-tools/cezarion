@@ -397,6 +397,9 @@ const CONTROL_CRITERIA = [
   { id: 'R21', scenario: 'baseline' },
   { id: 'R22', scenario: 'baseline' },
   { id: 'R23', scenario: 'ask' },
+  // harness-autosave.test.ts drives both cleanup paths with native runner wires.
+  { id: 'R24', scenario: 'baseline' },
+  { id: 'R25', scenario: 'baseline' },
 ] as const;
 
 /**
