@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { PickerPill } from './picker-pill'
+import { PickerPill, PickerPillGroup } from './picker-pill'
 
 afterEach(cleanup)
 
@@ -85,6 +85,88 @@ describe('PickerPill fieldLabel (#522)', () => {
     expect(control.getAttribute('aria-label')).toBe('Model · Fable')
     expect(control.getAttribute('title')).toContain('Model · Fable')
     expect(control.getAttribute('title')).toContain('Managed by agent settings')
+  })
+})
+
+describe('PickerPillGroup (#541)', () => {
+  // jsdom has no layout: `full` is each pill's prefixed label width (keyed by slot), `available`
+  // the row's width. The group compares the sum of the first with the second.
+  const full: Record<string, number> = {}
+  let available = 500
+  const observers: Array<() => void> = []
+
+  beforeEach(() => {
+    for (const key of Object.keys(full)) delete full[key]
+    Object.assign(full, { 'runner-pill': 150, 'model-pill': 150, 'effort-pill': 150 })
+    available = 500
+    observers.length = 0
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const slot = this.closest('[data-slot$="pill"]')?.getAttribute('data-slot') ?? ''
+      return { width: this.classList.contains('invisible') ? full[slot] : 0, top: 0 } as DOMRect
+    })
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(() => available)
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(callback: () => void) { observers.push(callback) }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    })
+  })
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
+
+  const LONG = 'opencode/muse-spark-1.3-contributor-free'
+  const pillFor = (slot: string, ariaLabel: string, label: string) => (
+    <PickerPill fieldLabel slot={slot} ariaLabel={ariaLabel} label={label} value={label} onPick={() => {}} options={[{ value: label, label }]} />
+  )
+  const row = (model = 'Fable') => (
+    <PickerPillGroup>
+      {pillFor('runner-pill', 'Runner', 'opencode')}
+      {pillFor('model-pill', 'Model', model)}
+      {pillFor('effort-pill', 'Effort', 'medium')}
+    </PickerPillGroup>
+  )
+  const labels = () => [...document.querySelectorAll('[data-slot="picker-label"]')].map((el) => el.textContent)
+  const resize = () => act(() => observers.forEach((notify) => notify()))
+
+  it('keeps every prefix while the row holds all of them, including an exact fit', () => {
+    available = 450
+    render(row())
+    expect(labels()).toEqual(['Runner · opencode', 'Model · Fable', 'Effort · medium'])
+  })
+
+  it('drops every sibling prefix when one value would truncate, and restores them together', () => {
+    full['model-pill'] = 350
+    render(row(LONG))
+    expect(labels()).toEqual(['opencode', LONG, 'medium'])
+    available = 650
+    resize()
+    expect(labels()).toEqual(['Runner · opencode', `Model · ${LONG}`, 'Effort · medium'])
+    available = 649
+    resize()
+    expect(labels()).toEqual(['opencode', LONG, 'medium'])
+  })
+
+  it('keeps full-value tooltips and accessible names after the prefixes drop', () => {
+    full['model-pill'] = 350
+    render(row(LONG))
+    expect(document.querySelector('[data-slot="runner-pill"]')!.getAttribute('title')).toBe('Runner · opencode')
+    expect(screen.getByRole('button', { name: `Model · ${LONG}` }).title).toBe(`Model · ${LONG}`)
+  })
+
+  it('rechecks the row when the selected value changes', () => {
+    const view = render(row())
+    expect(labels()).toEqual(['Runner · opencode', 'Model · Fable', 'Effort · medium'])
+    full['model-pill'] = 350
+    view.rerender(row(LONG))
+    expect(labels()).toEqual(['opencode', LONG, 'medium'])
+  })
+
+  it('stops counting a pill once it unmounts', () => {
+    full['model-pill'] = 350
+    const view = render(row(LONG))
+    expect(labels()).toEqual(['opencode', LONG, 'medium'])
+    view.rerender(<PickerPillGroup>{pillFor('runner-pill', 'Runner', 'opencode')}</PickerPillGroup>)
+    expect(labels()).toEqual(['Runner · opencode'])
   })
 })
 
