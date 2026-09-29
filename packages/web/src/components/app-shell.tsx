@@ -1,13 +1,12 @@
-import { ChevronDownIcon, FolderIcon, FolderPlusIcon, MenuIcon, PlusIcon, SearchIcon, ShieldCheckIcon, XIcon } from '@/components/design-icons'
+import { ChevronDownIcon, FolderIcon, MenuIcon, PlusIcon, SearchIcon, ShieldCheckIcon } from '@/components/design-icons'
 
 import * as React from 'react'
 import type { ReactNode } from 'react'
 import { Link as RouterLink, matchPath, useLocation } from 'react-router'
 
-import { AddProjectDialog } from '@/components/add-project-dialog'
-import { CloneProjectDialog } from '@/components/clone-project-dialog'
 import { openCommandPalette } from '@/components/command-palette'
-import { GithubIcon } from '@/components/icons'
+import { DrawerGlobal, DrawerIdentity, DrawerProjects, MenuButtonPills, elsewhereSignal, menuButtonLabel, type MobileProjectNav } from '@/components/mobile-projects'
+import { projectInitials, type ProjectSignal } from '@/lib/project-signal'
 import { commandShortcutHint } from '@/lib/use-command-shortcut'
 import { Link, pathnameProjectId, stripProjectPrefix } from '@/lib/project-router'
 import { StatusDot } from '@/components/status-dot'
@@ -17,14 +16,7 @@ import { API_PREFIX, type ApplicationUpdateState } from '@open-mercato/cezar-api
 import { ProjectScopeContext, useProjectScope } from '@/api/project-scope-context'
 import { isNewerVersion } from '@/lib/is-newer-version'
 import { Button } from '@/components/ui/button'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
-import { Sheet, SheetClose, SheetContent, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
+import { Sheet, SheetContent, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
 import { activeNavItem, activeNavPath, visibleNavItems, type NavItem } from '@/components/nav-items'
 import { SIDEBAR_SELECTED_CLASS } from '@/components/nav-row-styles'
 import {
@@ -41,6 +33,9 @@ import { cn } from '@/lib/utils'
  *  `md:hidden` / `md:flex` classes below — they are the same breakpoint expressed twice, once
  *  for CSS and once for the state machine. */
 const DESKTOP_MEDIA_QUERY = '(min-width: 768px)'
+
+// The one home of the add-project menu is its own file; it stays importable from here.
+export { AddProjectMenu } from '@/components/add-project-menu'
 
 export type RepoChip = {
   name: string
@@ -88,8 +83,9 @@ export type AppShellProps = {
    *  the slot is generic and currently unused (the #391 skills promo it once held is gone,
    *  replaced by the opt-in Import panel on the Skills page). */
   banner?: ReactNode
-  /** Workspace controls preserved in the mobile drawer while the desktop rail is hidden. */
-  mobileWorkspace?: ReactNode
+  /** The registry and every project's signal, for the phone's menu button and drawer (#620). Plain
+   *  data rather than a slot: the shell reads no query itself. Absent renders no project UI. */
+  mobileProjects?: MobileProjectNav | null
   projectHeader?: ReactNode
   /** Navigation belongs to the project displayed here, even on workspace routes. */
   sidebarProjectId?: string
@@ -165,7 +161,7 @@ export function AppShell({
   inboxAvailable = true,
   automationsAvailable = true,
   banner,
-  mobileWorkspace,
+  mobileProjects,
   projectHeader,
   sidebarProjectId,
   needsYou,
@@ -177,6 +173,8 @@ export function AppShell({
   const areaPathname = stripProjectPrefix(pathname)
   const activeTo = areaPathname === '/new' ? '/new' : activeNavPath(areaPathname)
   const current = activeNavItem(areaPathname)
+  // The URL's own scope, as on the rail: global routes carry none, so every project is "elsewhere".
+  const currentProjectId = pathnameProjectId(pathname)
   const [menuOpen, setMenuOpen] = React.useState(false)
   const mobileNavTrigger = React.useRef<HTMLButtonElement | null>(null)
   const mainRef = React.useRef<HTMLElement>(null)
@@ -248,7 +246,6 @@ export function AppShell({
     taskQuickList,
     sessionScope,
     toolsMenu,
-    mobileWorkspace,
     projectHeader,
     sidebarProjectId,
     needsYou,
@@ -266,7 +263,7 @@ export function AppShell({
         {projectRail}
         <Sidebar {...nav} width={sidebarWidth} onWidthChange={changeSidebarWidth} />
         {/* The drawer leaves a visible dismissal strip beside the shared navigation. */}
-        <MobileNavDrawer {...nav} onNavigate={() => setMenuOpen(false)} onCloseAutoFocus={(event) => {
+        <MobileNavDrawer {...nav} mobileProjects={mobileProjects} currentProjectId={currentProjectId} onNavigate={() => setMenuOpen(false)} onCloseAutoFocus={(event) => {
           // Both mobile controls open the same drawer. Restore the actual opener, rather
           // than Radix's single trigger ref (which otherwise points at the last mount).
           if (mobileNavTrigger.current?.isConnected) {
@@ -276,7 +273,7 @@ export function AppShell({
         }} />
 
         <div className="grid min-w-0 flex-1 grid-rows-[auto_auto_1fr_auto] overflow-hidden">
-          <MobileTopBar title={current?.label ?? 'cezar'} repo={repo} onTrigger={(button) => { mobileNavTrigger.current = button }} />
+          <MobileTopBar title={current?.label ?? 'cezar'} repo={repo} elsewhere={elsewhereSignal(mobileProjects, currentProjectId)} onTrigger={(button) => { mobileNavTrigger.current = button }} />
           <header data-slot="desktop-breadcrumb" className={cn("row-start-1 hidden min-w-0 items-center gap-3 border-b border-border text-[13px] text-muted-foreground md:flex", areaPathname === '/new' ? 'h-[72px] px-11' : 'h-16 px-9')}>
             <FolderIcon aria-hidden="true" className="size-4 shrink-0" />
             {(breadcrumb?.project ?? repo?.name) ? <><span className="truncate font-medium text-foreground">{breadcrumb?.project ?? repo?.name}</span><span aria-hidden="true">/</span></> : null}
@@ -329,7 +326,6 @@ type NavProps = {
   taskQuickList?: ReactNode
   sessionScope?: ReactNode
   toolsMenu?: ReactNode
-  mobileWorkspace?: ReactNode
   projectHeader?: ReactNode
   /** Navigation belongs to the project displayed here, even on workspace routes. */
   sidebarProjectId?: string
@@ -467,7 +463,12 @@ function SidebarResizeHandle({ width, onWidthChange }: SidebarResize) {
  * dismiss-on-tap, and `aria-hidden` on everything outside the portal — which is how it delivers
  * modality (it does not set `aria-modal`; `hideOthers` is the stronger guarantee).
  */
-function MobileNavDrawer({ onNavigate, onCloseAutoFocus, ...props }: NavProps & { onNavigate: () => void; onCloseAutoFocus?: React.ComponentProps<typeof SheetContent>['onCloseAutoFocus'] }) {
+function MobileNavDrawer({ onNavigate, onCloseAutoFocus, mobileProjects, currentProjectId, ...props }: NavProps & {
+  onNavigate: () => void
+  onCloseAutoFocus?: React.ComponentProps<typeof SheetContent>['onCloseAutoFocus']
+  mobileProjects?: MobileProjectNav | null
+  currentProjectId: string | null
+}) {
   return (
     <SheetContent
       side="left"
@@ -476,25 +477,22 @@ function MobileNavDrawer({ onNavigate, onCloseAutoFocus, ...props }: NavProps & 
       overlayClassName="bg-[var(--nav-scrim)]"
       showCloseButton={false}
       // The drawer is the sidebar: same width, same surface token, and no padding of its own —
-      // SidebarContent brings its own. `sm:max-w-none` sheds the primitive's sheet width cap.
+      // its rows bring their own. `sm:max-w-none` sheds the primitive's sheet width cap.
       className="w-[calc(100%-68px)] max-w-[334px] gap-0 border-border bg-sidebar p-0 sm:max-w-[334px] md:hidden"
       // Nav needs no prose description, and Radix warns when it cannot find the one it links to.
       aria-describedby={undefined}
     >
-      {/* The dialog's accessible name. Visually redundant with the brand lockup below. */}
+      {/* The dialog's accessible name. Visually redundant with the identity row below. */}
       <SheetTitle className="sr-only">Navigation</SheetTitle>
-      <SidebarContent
-        {...props}
-        onNavigate={onNavigate}
-        headerAction={
-          <>{props.mobileWorkspace}<SheetClose asChild>
-            {/* size-11: the ≥44px touch target the spec's mobile rules require. */}
-            <Button variant="ghost" size="icon" aria-label="Close menu" className="absolute top-5 -right-14 size-11">
-              <XIcon className="size-[22px]" aria-hidden="true" />
-            </Button>
-          </SheetClose></>
-        }
-      />
+      <DrawerIdentity version={props.version} />
+      {/* One scroll: Projects, workspace links, then today's sidebar content (nav, quick list, New
+          task) until slice 5 gives those a new home. The safe-area insets are the identity row's
+          and the global rows', so the content between them takes none of its own. */}
+      <div data-slot="drawer-scroll" className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain">
+        {mobileProjects ? <DrawerProjects nav={mobileProjects} currentProjectId={currentProjectId} onNavigate={onNavigate} /> : null}
+        <SidebarContent {...props} onNavigate={onNavigate} embedded />
+      </div>
+      <DrawerGlobal onNavigate={onNavigate} />
     </SheetContent>
   )
 }
@@ -528,14 +526,17 @@ function SidebarContent({
   sidebarProjectId,
   needsYou,
   onNavigate,
-  headerAction,
+  embedded = false,
 }: NavProps & {
   /** Fires on any in-drawer navigation. The route-change effect already closes the drawer for
    *  every *changed* route; this also covers re-clicking the active item (per the spec, Tasks
    *  navigates home even when already active), which changes no pathname at all. */
   onNavigate?: () => void
-  /** The drawer's close button. Absent on desktop, which has nothing to close. */
-  headerAction?: ReactNode
+  /** Inside the drawer's one scroll (#620): the content takes its natural height and lets the
+   *  drawer scroll it, and the safe-area padding goes to the identity row above and the global rows
+   *  below. Its own list scroller and pinned footer would otherwise squeeze the task list into
+   *  whatever height the Projects section left. */
+  embedded?: boolean
 }) {
   const inheritedScope = useProjectScope()
   // Context only: the routed view owns the mutable API scope. Sidebar queries bind their
@@ -552,11 +553,10 @@ function SidebarContent({
       // can afford to paint is a question about THIS column, not about the viewport. Everything
       // inside that is droppable metadata — the quick-list's diff pair today — hides itself with
       // an `@min-[…]/sidebar:` query and returns when the user drags the column wider.
-      className="@container/sidebar flex min-h-0 flex-1 flex-col pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]"
+      className={cn('@container/sidebar flex flex-col', embedded ? 'shrink-0' : 'min-h-0 flex-1 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]')}
     >
       <div data-slot="sidebar-header" className="shrink-0">
         {projectHeader ?? (repo ? <div className="px-[14px] pt-[14px] pb-2.5"><div className="truncate text-sm font-semibold">{repo.name}</div><div className="truncate font-mono text-[10.5px] text-soft-foreground">{repo.branch}</div></div> : null)}
-        {headerAction}
       </div>
 
       <div className="px-4 pb-2">
@@ -591,7 +591,7 @@ function SidebarContent({
 
       {sessionScope ? <div className="shrink-0 px-4 pb-3">{sessionScope}</div> : null}
       <SidebarViewTabs items={items} activeTo={activeTo} needsYou={needsYou} inboxCount={inboxCount} skillsUpdateAvailable={skillsUpdateAvailable} onNavigate={onNavigate} />
-      <div data-slot="project-task-navigation" className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-2">
+      <div data-slot="project-task-navigation" className={cn('px-2 pb-2', !embedded && 'min-h-0 flex-1 overflow-y-auto overscroll-contain')}>
         <SidebarNavigateContext.Provider value={onNavigate}>
           <div data-slot="task-quick-list">{taskQuickList}</div>
         </SidebarNavigateContext.Provider>
@@ -613,75 +613,6 @@ function SidebarContent({
       </div>
     </div></SidebarNavigateContext.Provider>
     </ProjectScopeContext.Provider>
-  )
-}
-
-/**
- * The "Add project" dropdown beside the New task CTA (multi-project spec, "Sidebar → Header").
- *
- * "Open local folder…" opens the folder-browser dialog (step 4.2); "Clone from GitHub…" opens
- * the checkout dialog (step 4.3).
- *
- * Neither item is gh-gated here, deliberately. The spec's "disabled with a reason when `gh` is
- * unavailable" would mean reading `GET /api/health` from this component — and the dialogs are
- * mounted only while open precisely BECAUSE this shell must keep rendering where no QueryClient
- * is provided. So the degradation lands one click later instead, in the dialog, which shows the
- * server's own `gh CLI not found — install it and run 'gh auth login'` verbatim: the same
- * information, at the moment it is actionable, without a query in the shell.
- *
- * The dialogs are mounted only while open, ON PURPOSE: they are the one part of this shell that
- * talks to the API (queries + a mutation), and the shell itself must keep rendering in the
- * places that mount it without a QueryClient. The cost is no close animation, which is the
- * cheaper half of the trade.
- */
-export function AddProjectMenu({
-  triggerClassName,
-  icon: Icon = FolderPlusIcon,
-  iconClassName = 'size-4',
-  side,
-  origin,
-}: {
-  /** Extra trigger classes, merged over the footer's. The project rail (#618) restyles it. */
-  triggerClassName?: string
-  icon?: typeof FolderPlusIcon
-  iconClassName?: string
-  /** Which side the menu opens on; the rail opens it to the right, over the sidebar. */
-  side?: 'right'
-  /** Where this mount lives, as `data-origin` on the trigger, so a second mount (the rail) stays
-   *  addressable. Not a `data-slot`: that would replace the Button's, which holds the 44px floor. */
-  origin?: string
-} = {}) {
-  const [browsing, setBrowsing] = React.useState(false)
-  const [cloning, setCloning] = React.useState(false)
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        {/* size-11 in the drawer (touch target), the CTA's height on desktop. */}
-        <Button
-          variant="ghost"
-          aria-label="Add project"
-          title="Add project"
-          data-origin={origin}
-          className={cn('size-9 p-0 text-muted-foreground', triggerClassName)}
-        >
-          <Icon className={iconClassName} aria-hidden="true" />
-          <span className="sr-only">Add project</span>
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" side={side} className="w-56">
-        <DropdownMenuLabel className="text-xs text-soft-foreground">Add project</DropdownMenuLabel>
-        <DropdownMenuItem data-slot="add-project-local" onSelect={() => setBrowsing(true)}>
-          <FolderIcon aria-hidden="true" />
-          Open local folder…
-        </DropdownMenuItem>
-        <DropdownMenuItem data-slot="add-project-clone" onSelect={() => setCloning(true)}>
-          <GithubIcon aria-hidden="true" />
-          Clone from GitHub…
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-      {browsing ? <AddProjectDialog open onOpenChange={setBrowsing} /> : null}
-      {cloning ? <CloneProjectDialog open onOpenChange={setCloning} /> : null}
-    </DropdownMenu>
   )
 }
 
@@ -742,14 +673,22 @@ function VersionChip({ version, latestVersion }: { version: string; latestVersio
   )
 }
 
-/** Mobile chrome (<md): the sidebar's replacement. Its menu button opens `MobileNavDrawer`. */
-function MobileTopBar({ title, repo, onTrigger }: { title: string; repo: RepoChip | null; onTrigger: (button: HTMLButtonElement) => void }) {
+/** Mobile chrome (<md): the sidebar's replacement. Its menu button and project button open `MobileNavDrawer`. */
+function MobileTopBar({ title, repo, elsewhere, onTrigger }: {
+  title: string
+  repo: RepoChip | null
+  /** The other projects' four counts summed; null while activity is unknown. */
+  elsewhere: ProjectSignal | null
+  onTrigger: (button: HTMLButtonElement) => void
+}) {
   return (
     <header
       data-slot="mobile-top-bar"
-      className="row-start-1 border-b border-border bg-card pt-[env(safe-area-inset-top)] md:hidden"
+      // `min-w-0`: a grid item sizes its column to its min-content by default, and a long project name
+      // (nowrap) would widen the whole shell past the phone. The name truncates instead.
+      className="row-start-1 min-w-0 border-b border-border bg-card pt-[env(safe-area-inset-top)] md:hidden"
     >
-      <div className="flex h-[52px] items-center gap-3 px-3.5">
+      <div className="flex h-[56px] min-w-0 items-center gap-[8px] px-[8px]">
         {/* A real SheetTrigger rather than an onClick that flips our state: it is what registers
             the button as the dialog's trigger, which is what Radix restores focus to on close —
             with a bare onClick, closing the drawer drops focus on <body>. It also carries the
@@ -757,37 +696,49 @@ function MobileTopBar({ title, repo, onTrigger }: { title: string; repo: RepoChi
         <SheetTrigger asChild>
           <Button
             variant="ghost"
-            size="icon"
-            aria-label="Open menu"
+            aria-label={menuButtonLabel(elsewhere)}
             onClick={(event) => onTrigger(event.currentTarget)}
-            // 44px: the minimum touch target, overriding the 36px desktop icon-button size.
-            className="-ml-1.5 size-11"
+            // 64×44: the icon at the left, the other projects' two pills stacked on the right like
+            // a small rail mark. 44px tall is the minimum touch target.
+            className="relative h-[44px] w-[64px] shrink-0 justify-start rounded-md p-0 pl-[10px] text-foreground"
           >
-            <MenuIcon className="size-[17px]" aria-hidden="true" />
+            <MenuIcon className="size-[20px]" aria-hidden="true" />
+            <MenuButtonPills elsewhere={elsewhere} />
           </Button>
         </SheetTrigger>
-        <span className="shrink-0 text-[19px] font-semibold tracking-[-0.03em]">Cezarion</span>
         {repo ? (
           <SheetTrigger asChild>
+            {/* No count, ever: a signal beside the project name would read as that project's. */}
             <button type="button" data-slot="mobile-project-picker" aria-label={`Switch project: ${repo.name}`}
               onClick={(event) => onTrigger(event.currentTarget)}
-              className="ml-auto flex h-11 min-w-0 items-center gap-2 text-[13px] focus-visible:outline-2 focus-visible:outline-ring">
-              <FolderIcon aria-hidden="true" className="size-4 shrink-0" />
-              <span className="max-w-28 truncate">{repo.name}</span>
-              <ChevronDownIcon aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
+              className="flex h-[44px] min-w-0 flex-1 items-center justify-start gap-[10px] rounded-md text-left focus-visible:outline-2 focus-visible:outline-ring">
+              <span aria-hidden="true" className="flex size-[28px] shrink-0 items-center justify-center rounded-[8px] border border-soft-foreground bg-sidebar-row-selected text-[11px] leading-none font-semibold text-foreground">
+                {projectInitials(repo.name)}
+              </span>
+              <span className="flex min-w-0 flex-col">
+                <span className="truncate text-[15px] leading-tight font-semibold text-foreground">{repo.name}</span>
+                {repo.branch ? <span className="truncate font-mono text-[10.5px] leading-tight text-soft-foreground">{repo.branch}</span> : null}
+              </span>
+              <ChevronDownIcon aria-hidden="true" className="size-3.5 shrink-0 text-soft-foreground" />
             </button>
           </SheetTrigger>
         ) : null}
         {title !== 'cezar' ? (
-          <>
-            <span aria-hidden="true" className={cn("text-soft-foreground", repo && "hidden")}>·</span>
-            <span data-slot="mobile-route-title" className={cn("truncate text-[13px] font-medium text-muted-foreground", repo && "sr-only")}>
-              {title}
-            </span>
-          </>
-        ) : null}
-        {/* SLOT — the run status dot / kebab land with the thread view (Step R3). */}
-        <div data-slot="mobile-status" className="ml-auto flex items-center gap-2" />
+          // Beside a project the page title is redundant with the view itself, so it stays for
+          // screen readers only; with no project (global routes) it is the bar's label.
+          <span data-slot="mobile-route-title" className={cn('truncate text-[15px] font-semibold text-foreground', repo ? 'sr-only' : 'min-w-0 flex-1 pl-[8px]')}>
+            {title}
+          </span>
+        ) : repo ? null : <span className="flex-1" />}
+        <Button
+          variant="ghost"
+          aria-label="Search"
+          data-slot="mobile-search"
+          onClick={() => openCommandPalette()}
+          className="ml-auto size-[44px] shrink-0 p-0 text-foreground"
+        >
+          <SearchIcon className="size-[19px]" aria-hidden="true" />
+        </Button>
       </div>
     </header>
   )

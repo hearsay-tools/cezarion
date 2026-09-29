@@ -76,11 +76,12 @@ function appearance(density: string, theme: string) {
   })()`)
 }
 
-// The mobile menu keeps a 20px icon box with an explicit 44px ::after hit region.
+// The workbench grip and actions keep a small glyph box with an explicit 44px ::after hit region.
 // Measure that authored region, then region() verifies all eight perimeter points through elementFromPoint.
+// The mobile menu button is a real 64x44 box (#620), so it is measured as it is.
 const hitRectExpression = `(el) => {
   const box = el.getBoundingClientRect();
-  if (!el.matches('[aria-label="Open menu"], [data-slot="wb-step-grip"], [data-slot="wb-step-actions"]')) return box;
+  if (!el.matches('[data-slot="wb-step-grip"], [data-slot="wb-step-actions"]')) return box;
   const pseudo = getComputedStyle(el, '::after');
   if (pseudo.content === 'none' || pseudo.position !== 'absolute') return box;
   const left = box.left + parseFloat(pseudo.left), top = box.top + parseFloat(pseudo.top);
@@ -131,7 +132,7 @@ function region(selector: string, mobile: boolean) {
     const r = (${hitRectExpression})(el);
     const cx=r.left+r.width/2, cy=r.top+r.height/2;
     const points = [[r.left+1,cy], [r.right-1,cy], [cx,r.top+1], [cx,r.bottom-1], [cx,cy]];
-    if (el.matches('[aria-label="Open menu"], [data-slot="wb-step-grip"], [data-slot="wb-step-actions"]'))
+    if (el.matches('[data-slot="wb-step-grip"], [data-slot="wb-step-actions"]'))
       points.push([r.left+1,r.top+1], [r.right-1,r.top+1], [r.left+1,r.bottom-1], [r.right-1,r.bottom-1]);
     return {width:r.width, height:r.height, x:r.left+2, y:cy,
       contained:r.left>=0 && r.top>=0 && r.right<=innerWidth && r.bottom<=innerHeight,
@@ -175,7 +176,7 @@ describe('density-independent mobile action targets (#166)', () => {
           browser.evaluate(`document.querySelector('.settings-section-picker').open = true`)
           for (const selector of ['[data-slot="settings-nav-mobile"] a:last-child', '[data-slot="appearance-density"] button:nth-child(2)', '[data-slot="mobile-nav-drawer"] nav a:last-child', '[data-slot="mobile-nav-drawer"] a[data-slot="button"]']) {
             if (selector.includes('mobile-nav-drawer') && !browser.count('[data-slot="mobile-nav-drawer"]')) {
-              browser.click('[aria-label="Open menu"]')
+              browser.click('[aria-label^="Open projects"]')
               browser.waitForFunction(`document.querySelector('[data-slot="mobile-nav-drawer"]')?.getBoundingClientRect().x === 0`)
             }
             focusWithKeyboard(browser, selector)
@@ -272,7 +273,7 @@ describe('density-independent mobile action targets (#166)', () => {
           expect(browser.text('[data-slot="model-pill"]')).toBe(model)
           browser.screenshot(`${artifacts}/${width}-${density}-${theme}-composer.png`, { viewport: true })
           if (mobile) {
-            tapEdge('[aria-label="Open menu"]', true)
+            tapEdge('[aria-label^="Open projects"]', true)
             browser.waitForFunction(`document.querySelector('[data-slot="mobile-nav-drawer"]')?.getBoundingClientRect().x === 0`)
             region('[aria-label="Close menu"]', true)
             focus('[aria-label="Close menu"]')
@@ -398,7 +399,7 @@ describe('references on a device that cannot hover (#617 01b)', () => {
       // above the viewport (the button's rect y was -32 and -53 in two probes), and
       // `browser.click` then leaves the details closed. It does NOT fail with a "covered by"
       // refusal: after a minimal `scrollIntoView({ block: 'nearest' })` the button sits at y=52,
-      // just under the 52px sticky top bar, and nothing covers it.
+      // just under the 57px sticky top bar, and nothing covers it.
       // Reproduced with the click swapped in, this test only (`-t "the sidebar row is the tap
       // target"`): 360px failed 2/2, 390px passed 1/1. Local bundle (gitignored):
       // .ai/qa/failures/touch-targets/360px-the-sidebar-row-is-the-tap-target-and-the-task-header-carries-the-44px-lin-1/
@@ -427,8 +428,8 @@ describe('references on a device that cannot hover (#617 01b)', () => {
       browser.screenshot(`${artifacts}/${width}-touch-header-references.png`, { viewport: true })
 
       browser.goto(`${baseUrl}/p/${project}`)
-      browser.waitForFunction(`document.querySelector('[aria-label="Open menu"]') !== null`)
-      browser.click('[aria-label="Open menu"]')
+      browser.waitForFunction(`document.querySelector('[aria-label^="Open projects"]') !== null`)
+      browser.click('[aria-label^="Open projects"]')
       const row = `[data-slot="mobile-nav-drawer"] [data-slot="task-row"][data-run-id="${runId}"]`
       const meta = browser.waitForValue(`(() => {
         const meta = document.querySelector('${row} [data-slot="task-row-meta"]')
@@ -441,6 +442,8 @@ describe('references on a device that cannot hover (#617 01b)', () => {
       // Tapping the reference text opens the task: the row is the one target. A plain click on
       // the text, not `tapEdge`: on the 390px run its right-edge hit test missed this inline
       // span (hits [true, false, true, true, true]); the edge probes are for block controls.
+      // The task list follows the Projects section in the drawer's one scroll: bring it up first.
+      browser.evaluate(`document.querySelector('${row}').scrollIntoView({ block: 'center' })`)
       browser.click(`${row} [data-slot="task-row-meta"] [data-slot="pr-chip"]`)
       browser.waitForFunction(`location.pathname.endsWith('/tasks/${runId}')`)
     })

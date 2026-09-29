@@ -126,7 +126,7 @@ describe('automatic Open Mercato skills updates', () => {
     browser.setViewport(IPHONE.width, IPHONE.height)
     browser.goto(`${baseUrl}/p/${projectId}/`)
     browser.waitForFunction(`document.querySelector('[data-slot="mobile-top-bar"]') !== null`)
-    browser.click('[data-slot="mobile-top-bar"] button[aria-label="Open menu"]')
+    browser.click('[data-slot="mobile-top-bar"] button[aria-label^="Open projects"]')
     browser.waitForFunction(`document.querySelector('[role="dialog"] nav a[aria-label="Skills"]') !== null`)
 
     expect(browser.evaluate(`document.querySelector('[role="dialog"] nav a[aria-label="Skills"]')?.getAttribute('href')`)).toBe(`/p/${projectId}/skills`)

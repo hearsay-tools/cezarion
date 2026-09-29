@@ -8,9 +8,9 @@ import { useApplicationUpdate } from '@/components/use-application-update'
 import { CommandPalette } from '@/components/command-palette'
 import { ListViewProvider } from '@/components/list-view'
 import { ProviderBannerContainer } from '@/components/provider-banner-container'
-import { MobileWorkspaceNavigation } from '@/components/mobile-workspace-navigation'
 import { SidebarProjectHeader } from '@/components/sidebar-project-header'
-import { ProjectRailContainer } from '@/components/project-rail'
+import { ProjectRail } from '@/components/project-rail'
+import { useWorkspaceSignals } from '@/components/use-workspace-signals'
 import { TaskQuickListContainer } from '@/components/task-quick-list'
 import { ToolsMenu } from '@/components/tools-menu'
 import { useDocumentTitle } from '@/lib/use-document-title'
@@ -74,6 +74,9 @@ export function AppShellContainer({ children }: { children: ReactNode }) {
   // Unread done items (#unread-done-items) for the Tasks badge. Reads the same active-scope run
   // list the sidebar quick-list and Tasks table already hold — one cache entry, no extra fetch.
   const registry = useProjects().data
+  // The registry and every project's counts, read once: the rail (md+) and the phone's menu button
+  // and drawer paint from this one result.
+  const workspace = useWorkspaceSignals()
   const titleContext = pageTitleContext(pathname)
   const bootProjectId = registry?.bootProject ?? health.data?.bootProject ?? null
   const sidebarProjectId = projectId ?? bootProjectId ?? 'default'
@@ -137,10 +140,10 @@ export function AppShellContainer({ children }: { children: ReactNode }) {
         taskQuickList={<TaskQuickListContainer projectId={sidebarProjectId} boot={sidebarBoot} />}
         sidebarProjectId={sidebarProjectId}
         projectHeader={<SidebarProjectHeader />}
-        mobileWorkspace={<MobileWorkspaceNavigation />}
+        mobileProjects={workspace}
         needsYou={listCounts(runs.data ?? []).waiting > 0}
         toolsMenu={<ToolsMenu health={health.data} />}
-        projectRail={<ProjectRailContainer version={shellHealth?.version ?? null} />}
+        projectRail={workspace ? <ProjectRail {...workspace} version={shellHealth?.version ?? null} /> : null}
       >
         {children}
       </AppShell>

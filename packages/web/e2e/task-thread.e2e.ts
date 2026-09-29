@@ -761,7 +761,7 @@ describe('task thread', () => {
     }
     // Navigate through the real phone drawer; a full browser.goto would reset module memory.
     for (const [id, label] of [[RUN_ID, 'Show run details'], [LONG_RUN.id, 'Hide run details']]) {
-      browser.click('[aria-label="Open menu"]')
+      browser.click('[aria-label^="Open projects"]')
       browser.waitForFunction(`document.querySelector('[data-slot="mobile-nav-drawer"]')?.getBoundingClientRect().left >= 0`)
       browser.evaluate(`document.querySelector('[data-slot="mobile-nav-drawer"] a[href="${scoped(`/tasks/${id}`)}"]').scrollIntoView({ block: 'center' })`)
       browser.evaluate(`document.querySelector('[data-slot="mobile-nav-drawer"] a[href="${scoped(`/tasks/${id}`)}"]').focus()`)

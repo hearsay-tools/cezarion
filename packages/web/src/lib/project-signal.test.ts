@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { RunIndexEntry } from '@open-mercato/cezar-api-client'
 
-import { projectInitials, projectSignal, projectSignalLabel, signalsByProject, type ProjectSignal } from './project-signal'
+import { projectInitials, projectSignal, projectSignalLabel, projectSignalParts, signalsByProject, sumSignals, type ProjectSignal } from './project-signal'
 
 /** A minimal index row; every case overrides only what it is about. */
 function entry(overrides: Partial<RunIndexEntry> = {}): RunIndexEntry {
@@ -155,5 +155,27 @@ describe('projectInitials', () => {
     ['', ''],
   ])('%s → %s', (name, initials) => {
     expect(projectInitials(name)).toBe(initials)
+  })
+})
+
+describe('projectSignalParts / sumSignals', () => {
+  it('lists non-zero counts in pill order, tagged with the segment colour', () => {
+    expect(projectSignalParts({ needsYou: 1, failedUnread: 0, inMotion: 2, finishedUnread: 1 })).toEqual([
+      { tone: 'amber', text: '1 needs you' },
+      { tone: 'violet', text: '2 working' },
+      { tone: 'green', text: '1 finished' },
+    ])
+    expect(projectSignalParts(undefined)).toEqual([])
+  })
+
+  it('sums all four counts and skips projects with no runs', () => {
+    expect(
+      sumSignals([
+        { needsYou: 1, failedUnread: 1, inMotion: 0, finishedUnread: 0 },
+        undefined,
+        { needsYou: 0, failedUnread: 0, inMotion: 2, finishedUnread: 1 },
+      ]),
+    ).toEqual({ needsYou: 1, failedUnread: 1, inMotion: 2, finishedUnread: 1 })
+    expect(sumSignals([])).toEqual({ needsYou: 0, failedUnread: 0, inMotion: 0, finishedUnread: 0 })
   })
 })

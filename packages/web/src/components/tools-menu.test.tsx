@@ -299,7 +299,7 @@ describe('ToolsMenu in the app shell', () => {
 
   it('comes along into the mobile drawer — same component, both framings', async () => {
     renderShell()
-    fireEvent.click(screen.getByRole('button', { name: 'Open menu' }))
+    fireEvent.click(screen.getByRole('button', { name: /^Open projects/ }))
 
     const drawer = await screen.findByRole('dialog', { name: 'Navigation' })
     expect(drawer.querySelector('[data-slot="tools-menu-trigger"]')).not.toBeNull()

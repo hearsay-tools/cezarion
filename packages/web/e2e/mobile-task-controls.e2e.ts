@@ -91,10 +91,12 @@ describe('mobile Tasks controls', () => {
   it('retains the query while page and drawer selection stay independent across resize', () => {
     browser.fill(search, 'Needle')
     browser.click(tab('archived'))
-    browser.click('[aria-label="Open menu"]')
+    browser.click('[aria-label^="Open projects"]')
     settle(drawer)
     settle(`${drawer} [data-slot="quick-list"]`)
     const drawerTab = `${drawer} [data-slot="view-tab"]`
+    // The view tabs sit below the Projects section in the drawer's one scroll (#620).
+    browser.evaluate(`document.querySelector('${drawerTab}[data-view="active"]').scrollIntoView({ block: 'center' })`)
     expect(browser.evaluate(`document.querySelector('${drawerTab}[data-view="active"]').getAttribute('aria-pressed')`)).toBe('true')
     browser.click(`${drawerTab}[data-view="archived"]`)
     expect(browser.evaluate(`document.querySelector('${tab('archived')}').getAttribute('aria-pressed')`)).toBe('true')

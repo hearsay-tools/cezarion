@@ -407,19 +407,21 @@ describe('mobile shell', () => {
     expect(browser.text('[data-slot="mobile-top-bar"]')).toContain('Tasks')
 
     const bar = browser.evaluate(`(() => {
-      const menu = document.querySelector('[data-slot="mobile-top-bar"] button')
+      const top = document.querySelector('[data-slot="mobile-top-bar"]')
+      const menu = top.querySelector('button')
       const rect = menu.getBoundingClientRect()
-      // The approved 20px glyph reserves a 44px hit region through ::after.
-      const hit = getComputedStyle(menu, '::after')
-      const left = rect.left + Number.parseFloat(hit.left)
-      const right = rect.right - Number.parseFloat(hit.right)
       const y = rect.top + rect.height / 2
-      return { width: right - left, height: rect.height, label: menu.getAttribute('aria-label'),
-        edgesHit: [left + 1, right - 1].every(x => menu.contains(document.elementFromPoint(x, y))) }
-    })()`) as { width: number; height: number; label: string; edgesHit: boolean }
+      return { width: rect.width, height: rect.height, label: menu.getAttribute('aria-label'),
+        barHeight: top.firstElementChild.getBoundingClientRect().height,
+        wordmark: [...top.querySelectorAll('span')].some(node => node.textContent.trim() === 'Cezarion'),
+        edgesHit: [rect.left + 1, rect.right - 1].every(x => menu.contains(document.elementFromPoint(x, y))) }
+    })()`) as { width: number; height: number; label: string; barHeight: number; wordmark: boolean; edgesHit: boolean }
 
+    // The bar is 56px, the menu button 64x44, and the wordmark lives in the drawer now (#620).
+    expect(bar.label).toMatch(/^Open projects/)
+    expect(bar.barHeight).toBe(56)
+    expect(bar.wordmark).toBe(false)
     // Touch targets ≥44px (spec's mobile rules).
-    expect(bar.label).toBe('Open menu')
     expect(bar.width).toBeGreaterThanOrEqual(44)
     expect(bar.height).toBeGreaterThanOrEqual(44)
     expect(bar.edgesHit).toBe(true)
@@ -441,7 +443,7 @@ describe('mobile shell', () => {
 
   describe('nav drawer', () => {
     const DRAWER = '[data-slot="mobile-nav-drawer"]'
-    const MENU_BUTTON = '[data-slot="mobile-top-bar"] button[aria-label="Open menu"]'
+    const MENU_BUTTON = '[data-slot="mobile-top-bar"] button[aria-label^="Open projects"]'
 
     // The drawer slides in over 500ms and out over 300ms, so every assertion has to wait for the
     // transition to settle. "Settled open" is specifically `left === 0`: mid-flight it is already
@@ -523,7 +525,7 @@ describe('mobile shell', () => {
         expect(light.color).toBe(light.foreground)
         expect(light.headerOverflow).toBeLessThanOrEqual(0)
 
-        browser.click(`${DRAWER} [data-slot="mobile-workspace-navigation"] [data-slot="theme-toggle"]`)
+        browser.click(`${DRAWER} [data-slot="drawer-global"] [data-slot="theme-toggle"]`)
         browser.waitForFunction(`!document.documentElement.classList.contains('light')`)
         const dark = brandFacts(DRAWER)
         expect(dark.text).toBe(light.text)
