@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { mkdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { apiRunSchema } from '@open-mercato/cezar-contract';
@@ -47,6 +48,24 @@ describe('cez task', () => {
   const start = async (task = 'do the thing') => {
     expect(await run(['start', task])).toBe(0);
     return last().id as string;
+  };
+  /** A delegated worker owned by `parentId`, as the delegation layer creates one (#635). */
+  const worker = (parentId: string) => {
+    const workerId = randomUUID();
+    if (!store.getRun(parentId)?.delegation) store.updateRun(parentId, { delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
+    return store.createOwnedRun(
+      { title: 'worker', task: 'worker', workflow: 'quick-task', runner: 'claude', steps: [{ id: 'task', name: 'Task', kind: 'agent' }] },
+      parentId,
+      randomUUID(),
+      {
+        role: 'worker', permissions: [], parentRunId: parentId,
+        workspace: {
+          ownerRunId: workerId, resourceId: randomUUID(), kind: 'owned-isolated',
+          path: `/managed/${workerId}`, branch: `cez/${workerId.slice(0, 8)}`, baselineSha: 'a'.repeat(40),
+        },
+      },
+      'a'.repeat(64),
+    ).id;
   };
 
   describe('start', () => {
@@ -261,15 +280,30 @@ describe('cez task', () => {
       expect(await run(['status', id])).toBe(0);
       const printed = last();
       expect(Object.keys(printed).sort()).toEqual(
-        ['id', 'title', 'status', 'hasPendingHumanAsk', 'tokensUsed', 'url'].sort(),
+        ['id', 'title', 'status', 'attention', 'attentionLabel', 'hasPendingHumanAsk', 'tokensUsed', 'url'].sort(),
       );
-      expect(printed).toMatchObject({ id, status: 'queued', hasPendingHumanAsk: false });
+      expect(printed).toMatchObject({ id, status: 'queued', hasPendingHumanAsk: false, attention: 'none', attentionLabel: 'queued' });
     });
 
-    it('prints the contract ApiRun with --full', async () => {
+    // #609: the operator who cleared on `hasPendingHumanAsk: false` read the wrong field. The
+    // default projection now carries the cockpit's own answer, and `waiting` is attention with
+    // or without a structured question; `running` + `monitoring` is neither settled nor attention.
+    it('carries the cockpit attention bucket and label, from the shared function', async () => {
+      const id = await start();
+      store.updateRun(id, { status: 'waiting', hasPendingHumanAsk: false });
+      expect(await run(['status', id])).toBe(0);
+      expect(last()).toMatchObject({ status: 'waiting', hasPendingHumanAsk: false, attention: 'waiting', attentionLabel: 'needs you' });
+      store.updateRun(id, { status: 'running', activity: 'monitoring' });
+      expect(await run(['status', id])).toBe(0);
+      expect(last()).toMatchObject({ status: 'running', activity: 'monitoring', attention: 'running', attentionLabel: 'monitoring' });
+    });
+
+    it('prints the contract ApiRun with --full, without the derived attention fields', async () => {
       const id = await start();
       expect(await run(['status', '--full', id])).toBe(0);
       expect(apiRunSchema.safeParse(last()).success).toBe(true);
+      expect(last()).not.toHaveProperty('attention');
+      expect(last()).not.toHaveProperty('attentionLabel');
     });
 
     it('passes an unknown run id through as the cockpit refusal, exit 2', async () => {
@@ -306,7 +340,37 @@ describe('cez task', () => {
       expect(await run(['list', '--status', 'done'])).toBe(0);
       const rows = last().runs as Array<Record<string, unknown>>;
       expect(rows.map((row) => row.id)).toEqual([b]);
-      expect(Object.keys(rows[0]!).sort()).toEqual(['id', 'title', 'status', 'hasPendingHumanAsk', 'updatedAt'].sort());
+      expect(Object.keys(rows[0]!).sort()).toEqual(['id', 'title', 'status', 'attention', 'attentionLabel', 'hasPendingHumanAsk', 'updatedAt'].sort());
+      expect(rows[0]).toMatchObject({ attention: 'none', attentionLabel: 'done' });
+    });
+
+    it('carries attention + attentionLabel on default rows only, never on --full rows (#609)', async () => {
+      const a = await start('a');
+      const b = await start('b');
+      store.updateRun(a, { status: 'waiting', hasPendingHumanAsk: false });
+      store.updateRun(b, { status: 'running', activity: 'monitoring' });
+      expect(await run(['list'])).toBe(0);
+      const rows = last().runs as Array<Record<string, unknown>>;
+      expect(rows.find((row) => row.id === a)).toMatchObject({ status: 'waiting', hasPendingHumanAsk: false, attention: 'waiting', attentionLabel: 'needs you' });
+      expect(rows.find((row) => row.id === b)).toMatchObject({ status: 'running', activity: 'monitoring', attention: 'running', attentionLabel: 'monitoring' });
+      expect(await run(['list', '--full'])).toBe(0);
+      for (const row of last().runs as Array<Record<string, unknown>>) {
+        expect(apiRunSchema.safeParse(row).success).toBe(true);
+        expect(row).not.toHaveProperty('attention');
+      }
+    });
+
+    it('leaves workers out of the list and its total, with or without --all (#635)', async () => {
+      const parent = await start('parent');
+      const child = worker(parent);
+      for (const argv of [['list'], ['list', '--all'], ['list', '--full']]) {
+        expect(await run(argv)).toBe(0);
+        expect((last().runs as Array<{ id: string }>).map((row) => row.id)).toEqual([parent]);
+        expect(last().total).toBe(1);
+      }
+      // Still id-addressed: the operator had to get the id from somewhere.
+      expect(await run(['status', child])).toBe(0);
+      expect(last()).toMatchObject({ id: child });
     });
   });
 
@@ -393,6 +457,30 @@ describe('cez task', () => {
       expect(await run(['notify', id, '--off', '--message', 'x'])).toBe(64);
     });
 
+    it('notify on a worker is a usage error naming the parent, and subscribes nothing (#635)', async () => {
+      await withWebhook();
+      const parent = await start('parent');
+      const child = worker(parent);
+      expect(await run(['notify', child])).toBe(64);
+      expect(last()).toMatchObject({ code: 'invalid_input', parentId: parent });
+      expect(last().error).toContain(`cez task notify ${parent}`);
+      expect(store.getRun(child)?.notify).not.toBe(true);
+      // --off still undoes a subscription made before this guard existed.
+      store.updateRun(child, { notify: true });
+      expect(await run(['notify', child, '--off'])).toBe(0);
+      expect(last()).toEqual({ id: child, notify: false });
+    });
+
+    it('send --notify on a worker is the same usage error and delivers nothing (#635)', async () => {
+      await withWebhook();
+      const parent = await start('parent');
+      const child = worker(parent);
+      expect(await run(['send', child, 'more', '--notify'])).toBe(64);
+      expect(last()).toMatchObject({ code: 'invalid_input', parentId: parent });
+      expect(store.getRun(child)?.notify).not.toBe(true);
+      expect(store.getRun(child)?.queuedMessages ?? []).toEqual([]);
+    });
+
     it('send --notify turns the webhook on before delivering', async () => {
       await withWebhook();
       const id = await start();
@@ -455,6 +543,22 @@ describe('cez task', () => {
       expect(discoveries).toBe(0);
     });
 
+    // #553/#609: the help is where a bot learns the clear contract, so it is pinned.
+    it.each([[['--help']], [['wait', '--help']], [['start', '--help']], [['status', '--help']], [['list', '--help']]])(
+      'states the attention contract and the wait default in %j (#553, #609)', async (argv) => {
+        expect(await run(argv)).toBe(0);
+        const help = out.at(-1)!;
+        expect(help).toContain('attention (default)');
+        expect(help).toContain('--until settled');
+        expect(help).toMatch(/`waiting` is attention even when hasPendingHumanAsk is false/);
+        expect(help).toMatch(/never clear a task on hasPendingHumanAsk alone/);
+        expect(help).toMatch(/`running` with activity `monitoring` is neither settled nor attention/);
+        expect(help).toContain('cez task wait <id>                   # default: stops when the task needs you');
+        expect(help).toContain('cez task wait <id> --until settled   # terminal status only');
+        expect(help).toContain('cez task start \'…\' --wait --autonomous --until settled');
+        expect(discoveries).toBe(0);
+      });
+
     it('describes the webhook flags and the notify operation (#589)', async () => {
       expect(await run(['--help'])).toBe(0);
       const all = out.at(-1)!;
@@ -478,7 +582,7 @@ describe('cez task', () => {
       },
     );
 
-    it.each([[['list', '--limit', '0']], [['list', '--status', 'nope']], [['wait', 'x', '--mode', 'some']], [['log', 'x', '--since', '-1']], [['log', 'x', '--max-chars', '0']], [['start', 'x', '--wait', '--timeout-seconds', '0']]])(
+    it.each([[['list', '--limit', '0']], [['list', '--status', 'nope']], [['wait', 'x', '--mode', 'some']], [['log', 'x', '--since', '-1']], [['log', 'x', '--max-chars', '0']], [['start', 'x', '--wait', '--timeout-seconds', '0']], [['start', 'x', '--until', 'settled']], [['start', 'x', '--wait', '--until', 'later']]])(
       'judges %j as a usage error before looking for a cockpit', async (argv) => {
         expect(await run(argv)).toBe(64);
         expect(discoveries).toBe(0);

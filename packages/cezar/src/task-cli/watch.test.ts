@@ -55,7 +55,65 @@ describe('cez task watching', () => {
       const id = create();
       later(40, () => harness.store.updateRun(id, { status: 'waiting' }));
       expect(await run(['wait', id, '--until', 'attention', '--timeout-seconds', '10'])).toBe(0);
-      expect(last()).toMatchObject({ runs: [{ id, status: 'waiting' }] });
+      expect(last()).toMatchObject({ until: 'attention', runs: [{ id, status: 'waiting', attention: 'waiting', attentionLabel: 'needs you' }] });
+    });
+
+    /**
+     * #553/#609: the CLI judges "does this run want me" with the cockpit's own attention
+     * function, and `attention` is the default `--until`. A parked interactive task ends the
+     * wait promptly; a root parked on its own workers and a monitoring run do not.
+     */
+    describe('attention is the default, derived from the shared function', () => {
+      const parkedOnWorkers = (id: string) => harness.store.updateRun(id, {
+        status: 'waiting',
+        delegation: { role: 'root', permissions: [], receipts: [], wait: { id: '00000000-0000-4000-8000-0000000000aa', workerIds: ['00000000-0000-4000-8000-000000000001'], deadline: '2026-09-06T00:00:00.000Z', phase: 'parked', outcomes: [] } },
+      } as never);
+
+      it('ends the default wait as soon as an interactive task parks, exit 0, with "needs you"', async () => {
+        const id = create();
+        later(40, () => harness.store.updateRun(id, { status: 'waiting', hasPendingHumanAsk: false }));
+        const started = Date.now();
+        expect(await run(['wait', id, '--timeout-seconds', '10'])).toBe(0);
+        expect(Date.now() - started).toBeLessThan(5_000);
+        expect(last()).toMatchObject({
+          until: 'attention', timedOut: false,
+          runs: [{ id, status: 'waiting', hasPendingHumanAsk: false, attention: 'waiting', attentionLabel: 'needs you' }],
+        });
+      });
+
+      it('does not end an attention wait on a root parked on its own workers', async () => {
+        const id = create();
+        later(40, () => parkedOnWorkers(id));
+        expect(await run(['wait', id, '--timeout-seconds', '1'])).toBe(3);
+        expect(last()).toMatchObject({ until: 'attention', timedOut: true, runs: [{ id, status: 'waiting', attention: 'none', attentionLabel: 'waiting on 1 worker' }] });
+      });
+
+      it('does not end an attention wait on a running or monitoring run', async () => {
+        const id = create();
+        later(40, () => harness.store.updateRun(id, { status: 'running', activity: 'monitoring' }));
+        expect(await run(['wait', id, '--timeout-seconds', '1'])).toBe(3);
+        expect(last()).toMatchObject({ timedOut: true, runs: [{ id, status: 'running', activity: 'monitoring', attention: 'running', attentionLabel: 'monitoring' }] });
+        harness.store.updateRun(id, { status: 'running', activity: undefined });
+        expect(await run(['wait', id, '--timeout-seconds', '1'])).toBe(3);
+        expect(last()).toMatchObject({ timedOut: true, runs: [{ id, status: 'running', attention: 'running', attentionLabel: 'running' }] });
+      });
+
+      it('--until settled is unchanged: it waits through a waiting park and stops on a terminal status', async () => {
+        const id = create();
+        later(40, () => harness.store.updateRun(id, { status: 'waiting' }));
+        expect(await run(['wait', id, '--until', 'settled', '--timeout-seconds', '1'])).toBe(3);
+        expect(last()).toMatchObject({ until: 'settled', timedOut: true, runs: [{ id, status: 'waiting', attention: 'waiting', attentionLabel: 'needs you' }] });
+        later(40, () => harness.store.updateRun(id, { status: 'done' }));
+        expect(await run(['wait', id, '--until', 'settled', '--timeout-seconds', '10'])).toBe(0);
+        expect(last()).toMatchObject({ until: 'settled', timedOut: false, runs: [{ id, status: 'done', attention: 'none', attentionLabel: 'done' }] });
+      });
+
+      it('stops on a failed run under either until, exit 1, with the error bucket', async () => {
+        const id = create();
+        later(40, () => harness.store.updateRun(id, { status: 'failed' }));
+        expect(await run(['wait', id, '--timeout-seconds', '10'])).toBe(1);
+        expect(last()).toMatchObject({ runs: [{ id, status: 'failed', attention: 'error', attentionLabel: 'failed' }] });
+      });
     });
 
     it('reports a run that disappears as missing, exit 1, without waiting for the timeout', async () => {
@@ -83,7 +141,29 @@ describe('cez task watching', () => {
       }, 20);
       expect(await waiting).toBe(0);
       expect(out).toHaveLength(1);
-      expect(last()).toMatchObject({ created: true, status: 'done', timedOut: false });
+      expect(last()).toMatchObject({ created: true, status: 'done', timedOut: false, until: 'attention', attention: 'none', attentionLabel: 'done' });
+    });
+
+    it('returns promptly, exit 0, once an interactive task parks for follow-up (#553)', async () => {
+      const waiting = run(['start', 'go', '--wait', '--timeout-seconds', '10']);
+      const poll = setInterval(() => {
+        const created = harness.store.listRuns()[0];
+        if (created) { harness.store.updateRun(created.id, { status: 'waiting' }); clearInterval(poll); }
+      }, 20);
+      const started = Date.now();
+      expect(await waiting).toBe(0);
+      expect(Date.now() - started).toBeLessThan(5_000);
+      expect(last()).toMatchObject({ created: true, status: 'waiting', timedOut: false, until: 'attention', attention: 'waiting', attentionLabel: 'needs you' });
+    });
+
+    it('--until settled keeps waiting through the park', async () => {
+      const waiting = run(['start', 'go', '--wait', '--until', 'settled', '--timeout-seconds', '1']);
+      const poll = setInterval(() => {
+        const created = harness.store.listRuns()[0];
+        if (created) { harness.store.updateRun(created.id, { status: 'waiting' }); clearInterval(poll); }
+      }, 20);
+      expect(await waiting).toBe(3);
+      expect(last()).toMatchObject({ created: true, status: 'waiting', timedOut: true, until: 'settled' });
     });
   });
 
