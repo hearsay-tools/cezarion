@@ -123,3 +123,39 @@ Hardening acceptance checks:
 - Two explicit worktree opt-out runs still serialize repository-root access by
   default; with `CEZ_DISABLE_REPO_LOCK=1`, two root runs may overlap and each
   emits a visible unsafe-mode note.
+
+## Hardening 2026-09-29 — issue #502
+
+Cezar serializes creation (including fresh-only owned creation), reattachment,
+removal and orphan pruning by the canonical Git common directory. This covers
+separate Cezar processes and linked or symlinked checkouts of the same repository.
+The existing adoption, stale-registration recovery, branch-collision and ownership
+checks run inside that critical section; unrelated repositories remain independent.
+
+Each operation starts a temporary Node keeper over IPC. The keeper publishes an
+atomic, uniquely named ticket under `<git-common-dir>/cezar-worktree-mutations/`
+and waits for earlier tickets (Lamport's bakery protocol). It also runs the
+operation's Git commands. If the caller exits, the keeper waits for its current Git
+command to exit before removing its ticket. Tickets have no age-based expiry:
+a slow or suspended Git operation must never lose protection. Waiting for a busy
+repository is bounded at two minutes; creation reports a coordination error and
+best-effort cleanup skips if coordination cannot be established.
+
+On POSIX, the keeper creates a process group before publishing its ticket. A dead
+keeper's ticket is reclaimed only when the kernel confirms the whole group is
+gone, including surviving Git children; PID-only and process-table snapshot checks
+cannot prove that. On Windows, an idle dead keeper can be recovered, but a keeper
+killed during Git execution leaves an ambiguous claim and fails closed. Ordinary
+caller death remains recoverable on both platforms because the keeper survives
+until Git exits. Unknown process-probe errors never grant pruning permission.
+No user-authored configuration, persistent daemon, or additional dependency is
+required. Arbitrary external Git commands do not participate in this protocol.
+
+The Linux regression pauses real Git immediately after it creates the worktree
+administrative directory, before `locked` or `gitdir` exists. A competing Cezar
+process exercises each pruning entry point through a linked checkout. Without
+coordination, prune deletes that directory and add fails; with coordination, both
+operations succeed. Additional cases cover fresh-only creation, reattachment,
+caller death, restart adoption, common-directory aliases, failure propagation and
+independent repositories. The libc probe needs the platform C compiler; ordinary
+recovery and coordination tests also run without that probe on other platforms.
