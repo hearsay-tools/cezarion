@@ -295,6 +295,11 @@ describe('cockpit app shell', () => {
     browser.goto(baseUrl + scoped('/'))
     // Wait for actual repo data, not the flat navigation's loading placeholder. Registry
     // arrival can replace that placeholder with groups between two separate browser reads.
+    // Reproduced with `TMPDIR=/tmp env -u CEZ_AUTOMATIONS npm run test:e2e:local`:
+    // 2026-09-29T11:08:21Z, run 1790679915687-823444, lane-4-failures/smoke/
+    // fills-the-repo-and-version-chips-from-the-live-api-v1-health-1. probe.json
+    // timed out waiting for repo-chip; snapshot.txt already showed "Toggle lane-4"
+    // and "lane-4 navigation". The old flat/group read had selected a vanished chip.
     const repoName = health.repoRoot.replace(/[\\/]+$/, '').split(/[\\/]/).pop()
     const rendered = browser.waitForValue(`(() => {
       const group = document.querySelector('[data-slot="sidebar"] [data-slot="project-group"]')
