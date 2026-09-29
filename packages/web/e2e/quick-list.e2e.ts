@@ -228,8 +228,8 @@ describe('task quick-list', () => {
     )
   })
 
-  it('groups unpinned runs in Recent while retaining independent status rows', () => {
-    expect(browser.evaluate(`[...document.querySelectorAll('[data-slot="quick-list-bucket"] h2')].map(h => h.textContent)`)).toEqual(['Recent'])
+  it('groups attention before recent outcomes while retaining independent status rows', () => {
+    expect(browser.evaluate(`[...document.querySelectorAll('[data-slot="quick-list-bucket"]')].map(h => h.dataset.bucket)`)).toEqual(['Needs you', 'Recent'])
     expect(browser.evaluate(`[...document.querySelectorAll('[data-slot="quick-list-bucket"] [data-slot="task-row"]')].map(row => row.dataset.runId)`)).toEqual(['fix-review-pr', 'fix-done', 'fix-failed'])
     expect(browser.count('[data-slot="quick-list-bucket"] [data-slot="group-tile"]')).toBe(1)
     expect(browser.text('[data-slot="quick-list-bucket"]')).toContain('Structured changes endpoint for the git view')
@@ -1548,7 +1548,7 @@ describe('empty quick-list', () => {
 
   it('shows the honest empty state — a fresh cezar has nothing to list', () => {
     browser.goto(`${emptyUrl}/p/${emptyProject}/`)
-    browser.waitForFunction(`document.querySelector('[data-slot="project-group-list"]') !== null`)
+    browser.waitForFunction(`document.querySelector('[data-slot="project-task-navigation"]') !== null && document.querySelector('[data-slot="main"]')?.textContent.includes('No tasks')`)
 
     expect(browser.text('[data-slot="main"]')).toContain('No tasks')
     expect(browser.count(ROW)).toBe(0)
@@ -1560,7 +1560,7 @@ describe('empty quick-list', () => {
 
 
 describe('persistent task pins (#93)', () => {
-  it('pins a visible variant group once from a 44px phone control and preserves siblings on reload', async () => {
+  it('pins a needs-you variant from a 44px phone control without moving it out of attention on reload', async () => {
     browser.setViewport(360, 640)
     browser.goto(`${baseUrl}${scoped('/')}`)
     browser.waitForFunction(`document.querySelector('[data-slot="task-card"][data-run-id="fix-var-b"]') !== null`)
@@ -1574,16 +1574,17 @@ describe('persistent task pins (#93)', () => {
     expect(browser.url()).toContain(scoped('/'))
     browser.setViewport(1280, 800)
     browser.goto(`${baseUrl}${scoped('/')}`)
-    browser.waitForFunction(`document.querySelector('[data-bucket="Pinned"] [data-slot="group-tile"]') !== null`)
+    browser.waitForFunction(`document.querySelector('[data-bucket="Needs you"] [data-slot="group-tile"]') !== null`)
     expect(browser.count('[data-slot="group-tile"][data-group-id="fix-group-1"]')).toBe(1)
-    browser.click('[data-bucket="Pinned"] [data-slot="group-tile"]')
-    browser.waitForFunction(`document.querySelector('[data-bucket="Pinned"] [data-run-id="fix-var-a"]') !== null`)
-    expect(browser.evaluate(`[...document.querySelectorAll('[data-bucket="Pinned"] [data-slot="task-row"]')].map(x => x.dataset.runId)`)).toEqual(['fix-var-a', 'fix-var-b'])
+    browser.click('[data-bucket="Needs you"] [data-slot="group-tile"]')
+    browser.waitForFunction(`document.querySelector('[data-bucket="Needs you"] [data-run-id="fix-var-a"]') !== null`)
+    expect(browser.evaluate(`[...document.querySelectorAll('[data-bucket="Needs you"] [data-slot="task-row"]')].map(x => x.dataset.runId)`)).toEqual(['fix-var-a', 'fix-var-b'])
     const runs = await (await fetch(`${baseUrl}/api/v1/runs`)).json() as Array<{ id: string; pinned?: boolean; pinnedAt?: string }>
     expect(runs.find(r => r.id === 'fix-var-a')).not.toHaveProperty('pinned')
     expect(runs.find(r => r.id === 'fix-var-b')).toMatchObject({ pinned: true, pinnedAt: expect.any(String) })
-    browser.click('[data-bucket="Pinned"] [data-run-id="fix-var-b"] [data-slot="pin-toggle"]')
-    browser.waitForFunction(`document.querySelector('[data-bucket="Pinned"]') === null`)
+    browser.click('[data-bucket="Needs you"] [data-run-id="fix-var-b"] [data-slot="pin-toggle"]')
+    browser.waitForFunction(`document.querySelector('[data-bucket="Needs you"] [data-run-id="fix-var-b"] [data-slot="pin-toggle"]')?.getAttribute('aria-pressed') === 'false'`)
+    expect(browser.count('[data-bucket="Pinned"]')).toBe(0)
     const unpinned = await (await fetch(`${baseUrl}/api/v1/runs/fix-var-b`)).json()
     expect(unpinned).not.toHaveProperty('pinned')
     expect(unpinned).not.toHaveProperty('pinnedAt')

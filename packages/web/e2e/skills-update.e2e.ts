@@ -96,9 +96,9 @@ describe('automatic Open Mercato skills updates', () => {
 
   it('keeps the navigation marker absent for the dry-run current state', () => {
     browser.goto(`${baseUrl}/p/${projectId}/`)
-    browser.waitForFunction(`document.querySelector('[data-slot="project-group-body"] nav, [data-slot="single-project-navigation"] nav[aria-label="Main"]') !== null`)
+    browser.waitForFunction(`document.querySelector('[data-slot="sidebar"] nav[aria-label="Main"]') !== null`)
     expect(browser.count('[data-slot="nav-update-marker"]')).toBe(0)
-    expect(browser.evaluate(`(document.querySelector('[data-slot="project-group-body"] nav') || document.querySelector('[data-slot="sidebar"] nav[aria-label="Main"]')).textContent`)).toContain('Skills')
+    expect(browser.count('[data-slot="sidebar"] nav[aria-label="Main"] a[aria-label="Skills"]')).toBe(1)
     browser.screenshot(`${artifactsDir}/skills-navigation-current.png`)
   })
 

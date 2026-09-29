@@ -7,20 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { AgentBrowser, bootProjectId, readTestEnv } from './agent-browser'
 import { readSharedProjects, snapshotSharedHome, writeSharedProjects } from './workspace-registry'
 
-/**
- * The grouped multi-project sidebar (multi-project spec, "Sidebar" / Step 3.3), end to end.
- *
- * This is the one spec that WANTS more than one registered project: the run's globalSetup pins
- * the shared env to the flat single-project shape, and this file overrides it for its own
- * duration by seeding two throwaway git repos into the registry alongside the boot project.
- * `GET /api/v1/projects` reads the registry per request, so the seed takes effect on the next page
- * load — no server restart — and `afterAll` puts the operator's scratch home back byte for byte.
- *
- * What is worth proving here rather than in `project-groups.test.tsx`: that the registry file,
- * the projects API, the per-project route prefixes and the collapse round-trip through a REAL
- * browser's localStorage (across a real reload) are one working chain. The component's own rules
- * (ordering, missing roots, badge attribution) are pinned in jsdom against fixtures.
- */
+/** Registry → rail → scoped project header, tabs and task list in a real browser. */
 
 const artifactsDir = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_e2e')
 const sessionId = `e2e-project-groups-${process.pid}`
@@ -41,8 +28,6 @@ let restoreHome: () => void
 let singleProject = false
 
 let forgeAvailable = false
-let followupsAvailable = false
-let automationsAvailable = false
 
 const scoped = (projectId: string, path: string) => `/p/${projectId}${path}`
 
@@ -52,9 +37,6 @@ function expectedNavHrefs(projectId: string): string[] {
     scoped(projectId, '/'),
     scoped(projectId, '/git'),
     ...(projectId === bootProject && forgeAvailable ? [scoped(projectId, '/github')] : []),
-    // #801: the automations opt-in is workspace-wide, the forge gate is per project — the item
-    // needs both.
-    ...(projectId === bootProject && forgeAvailable && automationsAvailable ? [scoped(projectId, '/automations')] : []),
     scoped(projectId, '/skills'),
     scoped(projectId, '/workflows'),
     scoped(projectId, '/settings'),
@@ -69,19 +51,6 @@ function makeRepo(name: string): string {
   return root
 }
 
-async function workspaceUiState(): Promise<{ sidebar?: { collapsed?: Record<string, boolean> } }> {
-  return (await (await fetch(`${baseUrl}/api/v1/workspace/ui-state`)).json()) as {
-    sidebar?: { collapsed?: Record<string, boolean> }
-  }
-}
-
-/** The collapse map as THIS browser holds it — the cockpit's own storage since the map stopped
- *  being a workspace-wide setting every client had to share. */
-function storedCollapse(): Record<string, boolean> {
-  const raw = browser.evaluate(`localStorage.getItem('cez-sidebar-collapsed')`)
-  return typeof raw === 'string' ? (JSON.parse(raw) as Record<string, boolean>) : {}
-}
-
 beforeAll(async () => {
   baseUrl = readTestEnv().baseUrl
   bootProject = await bootProjectId(baseUrl)
@@ -90,8 +59,6 @@ beforeAll(async () => {
     capabilities: { followups: boolean; singleProject: boolean; automations: boolean }
   }
   forgeAvailable = health.forge?.available === true
-  followupsAvailable = health.capabilities.followups
-  automationsAvailable = health.capabilities.automations
   singleProject = health.capabilities.singleProject
 
   // `ui-state.json` too: the collapse assertion below reads it to prove nothing was written
@@ -138,212 +105,67 @@ afterAll(() => {
   if (seedDir) rmSync(seedDir, { recursive: true, force: true })
 })
 
-/** Load the cockpit and wait for the registry query to have produced the seeded groups. Waits on
- *  the three ids rather than on a count, so a slow render and a wrong registry fail differently:
- *  this settles, and the assertions below say what the sidebar actually holds.
- *
- *  `persistCollapse` is for the reload round-trip: the default path drops leftover
- *  `cez-sidebar-collapsed` pins so a shared Chrome origin (one browser across cases, and across
- *  files that reuse the profile) cannot keep a previous test's explicit `false` open. */
-function gotoGrouped(path: string, { persistCollapse = false } = {}): void {
-  browser.goto(baseUrl + path)
-  if (!persistCollapse) {
-    const leftover = browser.evaluate(`localStorage.getItem('cez-sidebar-collapsed')`)
-    if (typeof leftover === 'string') {
-      browser.evaluate(`localStorage.removeItem('cez-sidebar-collapsed')`)
-      browser.goto(baseUrl + path)
-    }
-  }
-  browser.waitForFunction(
-    [bootProject, ALPHA.id, BETA.id]
-      // `!== null`, not a bare querySelector: the CLI serializes whatever the expression
-      // evaluates to, and handing it an Element back is a CDP error, not a wait.
-      .map((id) => `document.querySelector('[data-slot="project-group"][data-project="${id}"]') !== null`)
-      .join(' && ')
-  )
+const nav = '[data-slot="sidebar"] nav[aria-label="Main"]'
+const header = '[data-slot="sidebar"] [data-slot="project-header"]'
+const mark = (id: string) => `[data-slot="rail-project"][data-project-id="${id}"] a`
+
+function assertProject(projectId: string, path: string): void {
+  expect(browser.waitForValue(`location.pathname`, value => value === scoped(projectId, path))).toBe(scoped(projectId, path))
+  const expected = expectedNavHrefs(projectId)
+  expect(browser.waitForValue(`Array.from(document.querySelectorAll('${nav} a')).map(a => new URL(a.href).pathname)`,
+    value => JSON.stringify(value) === JSON.stringify(expected))).toEqual(expected)
+  expect(browser.waitForValue(`Array.from(document.querySelectorAll('${nav} a[aria-current="page"]')).map(a => new URL(a.href).pathname)`,
+    value => JSON.stringify(value) === JSON.stringify([scoped(projectId, path)]))).toEqual([scoped(projectId, path)])
+  expect(browser.count('[data-slot="sidebar"] [data-slot="project-header"]')).toBe(1)
+  expect(browser.count('[data-slot="sidebar"] [data-slot="task-quick-list"]')).toBe(1)
+  expect(browser.count('[data-slot="project-groups"], [data-slot="single-project-navigation"], [data-slot="repo-chip"]')).toBe(0)
 }
 
-const groupHeader = (projectId: string) =>
-  `[data-slot="project-group"][data-project="${projectId}"] [data-slot="project-group-header"]`
-const groupBody = (projectId: string) =>
-  `[data-slot="project-group"][data-project="${projectId}"] [data-slot="project-group-body"]`
+describe('the project sidebar in a multi-project workspace', () => {
+  it('keeps other projects on the rail and one scoped header and tab row in the sidebar', ({ skip }) => {
+    if (singleProject) skip()
+    browser.goto(baseUrl + scoped(bootProject, '/'))
+    browser.waitForFunction(`document.querySelector('${mark(BETA.id)}') !== null`)
+    assertProject(bootProject, '/')
+    expect(browser.count('[data-slot="sidebar"] [data-slot="brand-wordmark"]')).toBe(0)
+    expect(browser.waitForValue(`Array.from(document.querySelectorAll('[data-slot="rail-project"]')).map(el => el.dataset.projectId)`,
+      value => Array.isArray(value) && value.length === 3)).toEqual([bootProject, ALPHA.id, BETA.id])
+    browser.screenshot(`${artifactsDir}/sidebar-projects.png`)
+  })
 
-/**
- * Toggle a group to `expanded` and wait until it really is.
- *
- * A bare `click` + wait-for-body is a LAYOUT race, not a handler-wiring one. `browser.click`
- * resolves the element's centre coordinate and then dispatches a mouse event there; meanwhile the
- * boot group is expanded by default and its body is still filling as `useProjectRuns` resolves,
- * which pushes the groups below it down between those two steps. The click lands where the header
- * used to be. That is a harness artifact — React attaches its delegated listener to the root
- * container before any child exists, so a rendered header cannot miss a click for want of a
- * handler, and no real user is losing clicks here.
- *
- * Re-reading `aria-expanded` each attempt is what makes the retry safe: a click that DID register
- * is observed before the next one is sent, so a slow toggle is never double-fired. The helper is
- * also idempotent — call it on an already-open group and it returns without touching anything, so
- * a test never has to assume which state a previous test left behind.
- */
-function setGroupExpanded(projectId: string, expanded: boolean): void {
-  const header = groupHeader(projectId)
-  const state = `document.querySelector('${header}')?.getAttribute('aria-expanded')`
-  browser.waitForFunction(`${state} !== null && ${state} !== undefined`)
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    if (browser.evaluate(state) === String(expanded)) break
-    // The project name is a separate link over the header center; activate its toggle by keyboard.
-    browser.evaluate(`document.querySelector('${header}').focus()`)
-    browser.press('Enter')
+  it('switches every tab to the rail-selected project without inheriting its sibling forge', ({ skip }) => {
+    if (singleProject) skip()
+    browser.goto(baseUrl + scoped(bootProject, '/git'))
+    assertProject(bootProject, '/git')
+    browser.click(mark(ALPHA.id))
+    assertProject(ALPHA.id, '/')
+    expect(browser.waitForValue(`document.querySelector('${header} [data-slot="project-header-name"]')?.textContent`, value => value === ALPHA.name)).toBe(ALPHA.name)
+    browser.click(`${nav} a[href="${scoped(ALPHA.id, '/git')}"]`)
+    assertProject(ALPHA.id, '/git')
+    expect(browser.waitForValue(`document.querySelectorAll('${nav} a[aria-label="GitHub"]').length`, value => value === 0)).toBe(0)
+    browser.goto(baseUrl + scoped(ALPHA.id, '/git'))
+    assertProject(ALPHA.id, '/git')
+    browser.click(mark(bootProject))
+    assertProject(bootProject, '/')
+  })
+
+  it('ignores legacy collapse pins so the current project stays available after reload', ({ skip }) => {
+    if (singleProject) skip()
+    browser.goto(baseUrl + scoped(ALPHA.id, '/'))
+    browser.evaluate(`localStorage.setItem('cez-sidebar-collapsed', JSON.stringify({ '${ALPHA.id}': true, '${bootProject}': false }))`)
     try {
-      browser.waitForFunction(`${state} === '${expanded}'`)
-      break
-    } catch {
-      // Click landed before the handler did. Fall through and try again.
+      browser.goto(baseUrl + scoped(ALPHA.id, '/'))
+      assertProject(ALPHA.id, '/')
+      expect(browser.waitForValue(`document.querySelector('${header}')?.getBoundingClientRect().width > 0`)).toBe(true)
+      expect(browser.isVisible('[data-slot="project-task-navigation"]')).toBe(true)
+    } finally {
+      browser.evaluate(`localStorage.removeItem('cez-sidebar-collapsed')`)
     }
-  }
-  browser.waitForFunction(`${state} === '${expanded}'`)
-  browser.waitForFunction(
-    `document.querySelector('${groupBody(projectId)}') ${expanded ? '!==' : '==='} null`
-  )
-}
-
-describe('the grouped multi-project sidebar', () => {
-  it('replaces the flat nav with one group per registered project', ({ skip }) => {
-    if (singleProject) skip()
-    gotoGrouped(scoped(bootProject, '/'))
-
-    expect(browser.isVisible('[data-slot="project-groups"]')).toBe(true)
-    // The flat shell is genuinely gone, not merely covered: its nav and its single quick-list
-    // are the two surfaces `AppShell` swaps out for the group list.
-    expect(browser.count('[data-slot="sidebar"] nav[aria-label="Main"]')).toBe(0)
-    expect(browser.count('[data-slot="task-quick-list"]')).toBe(0)
-    // …and so is the repo chip, which the first group's header now says instead.
-    expect(browser.count('[data-slot="repo-chip"]')).toBe(0)
-
-    // Most-recently-opened first, and every seeded root probed `ok` — a wrong root would render
-    // the inert "folder not found" row and this would read `missing`.
-    expect(
-      browser.evaluate(`Array.from(document.querySelectorAll('[data-slot="project-group"]')).map(
-        (el) => [el.dataset.project, el.dataset.status]
-      )`)
-    ).toEqual([
-      [bootProject, 'ok'],
-      [ALPHA.id, 'ok'],
-      [BETA.id, 'ok'],
-    ])
-
-    // The project you are looking at is open, the rest are shut (the no-stored-state default).
-    expect(browser.evaluate(`Array.from(document.querySelectorAll('[data-slot="project-group-header"]'))
-      .map((el) => el.getAttribute('aria-expanded'))`)).toEqual(['true', 'false', 'false'])
-    expect(browser.count('[data-slot="project-group-body"]')).toBe(1)
-
-    browser.screenshot(`${artifactsDir}/sidebar-project-groups.png`)
-  })
-
-  it('scopes every group nav to its own project, and lights only the active one', ({ skip }) => {
-    if (singleProject) skip()
-    gotoGrouped(scoped(bootProject, '/git'))
-    setGroupExpanded(ALPHA.id, true)
-    // Only the boot repository has a GitHub remote. The empty Alpha fixture
-    // must not inherit the boot project's forge navigation (#698).
-    if (forgeAvailable) {
-      browser.waitForFunction(
-        `document.querySelector('${groupBody(bootProject)} a[href="${scoped(bootProject, '/github')}"]') !== null`
-      )
-    }
-
-    const hrefs = (projectId: string) =>
-      browser.evaluate(
-        `Array.from(document.querySelectorAll('${groupBody(projectId)} nav a')).map((a) => new URL(a.href).pathname)`
-      )
-
-    // The whole point of a group: it links into a project that is NOT the active one.
-    expect(hrefs(bootProject)).toEqual(expectedNavHrefs(bootProject))
-    expect(hrefs(ALPHA.id)).toEqual(expectedNavHrefs(ALPHA.id))
-
-    // `/git` is a flat, project-agnostic route, so exactly one Git row may claim the URL — the
-    // one in the scoped group. Alpha's Git link points elsewhere and must stay unmarked.
-    expect(
-      browser.evaluate(`Array.from(document.querySelectorAll('[data-slot="project-groups"] a[aria-current="page"]'))
-        .map((a) => new URL(a.href).pathname)`)
-    ).toEqual([scoped(bootProject, '/git')])
-
-    // The inactive project's Tasks link opens its scoped tasks. History updates before
-    // React reapplies collapse defaults, and Alpha's nav is already mounted from the expand
-    // above, so waiting on pathname + Alpha's nav does not mean the boot group has folded.
-    // The boot group has no stored pin — once the new URL is the collapse anchor it must
-    // unmount (the assertion that failed when this wait was missing).
-    browser.click(`${groupBody(ALPHA.id)} nav a[href="${scoped(ALPHA.id, '/')}"]`)
-    browser.waitForFunction(`location.pathname === '${scoped(ALPHA.id, '/')}'`)
-    browser.waitForFunction(`document.querySelector('${groupBody(bootProject)}') === null`)
-    browser.waitForFunction(`document.querySelector('${groupBody(ALPHA.id)} nav') !== null`)
-    expect(hrefs(ALPHA.id)).toEqual(expectedNavHrefs(ALPHA.id))
-    expect(hrefs(bootProject)).toEqual([])
-    browser.click(`${groupBody(ALPHA.id)} nav a[href="${scoped(ALPHA.id, '/git')}"]`)
-    browser.waitForFunction(`location.pathname === '${scoped(ALPHA.id, '/git')}'`)
-    browser.waitForFunction(`document.querySelector('${groupBody(ALPHA.id)} nav a[href="${scoped(ALPHA.id, '/git')}"]')?.getAttribute('aria-current') === 'page'`)
-    expect(browser.evaluate(`[...document.querySelectorAll('[data-slot="project-groups"] a[aria-current="page"]')].map(a => new URL(a.href).pathname)`)).toEqual([scoped(ALPHA.id, '/git')])
-
-  })
-
-  it('keeps an explicitly pinned project open across scoped navigation', ({ skip }) => {
-    if (singleProject) skip()
-    gotoGrouped(scoped(bootProject, '/git'))
-    // Default expand is not a pin. Collapse then re-open so storage holds `false`.
-    setGroupExpanded(bootProject, false)
-    setGroupExpanded(bootProject, true)
-    expect(storedCollapse()[bootProject]).toBe(false)
-    setGroupExpanded(ALPHA.id, true)
-    browser.click(`${groupBody(ALPHA.id)} nav a[href="${scoped(ALPHA.id, '/')}"]`)
-    browser.waitForFunction(`location.pathname === '${scoped(ALPHA.id, '/')}'`)
-    browser.waitForFunction(`document.querySelector('${groupBody(ALPHA.id)} nav') !== null`)
-    browser.waitForFunction(`document.querySelector('${groupBody(bootProject)} nav') !== null`)
-    const hrefs = (projectId: string) =>
-      browser.evaluate(
-        `Array.from(document.querySelectorAll('${groupBody(projectId)} nav a')).map((a) => new URL(a.href).pathname)`
-      )
-    expect(hrefs(bootProject)).toEqual(expectedNavHrefs(bootProject))
-    expect(hrefs(ALPHA.id)).toEqual(expectedNavHrefs(ALPHA.id))
-    expect(
-      browser.evaluate(`Array.from(document.querySelectorAll('[data-slot="project-groups"] a[aria-current="page"]'))
-        .map((a) => new URL(a.href).pathname)`),
-    ).toEqual([scoped(ALPHA.id, '/')])
-  })
-
-  it('persists a collapse in THIS browser, so a reload keeps it and the workspace file does not', async ({
-    skip,
-  }) => {
-    if (singleProject) skip()
-    // Whatever the shared home already holds under the legacy key, verbatim — the assertion at
-    // the end is that these toggles left it exactly there.
-    const workspaceSidebar = JSON.stringify((await workspaceUiState()).sidebar ?? null)
-    gotoGrouped(scoped(bootProject, '/'))
-
-    // Shut the active group — the one case the default would re-open on its own, so a reload
-    // that still finds it shut can only mean the state was stored and read back.
-    setGroupExpanded(bootProject, false)
-
-    // Stored locally and synchronously: there is no debounced PUT to wait on any more, so the
-    // value is already there when the chevron has turned.
-    expect(storedCollapse()[bootProject]).toBe(true)
-
-    gotoGrouped(scoped(bootProject, '/'), { persistCollapse: true })
-    expect(browser.count(groupBody(bootProject))).toBe(0)
-    expect(
-      browser.evaluate(`document.querySelector('${groupHeader(bootProject)}').getAttribute('aria-expanded')`)
-    ).toBe('false')
-
-    // And back: the same gesture re-opens it, so the stored `true` is a toggle and not a trap.
-    setGroupExpanded(bootProject, true)
-    expect(storedCollapse()[bootProject]).toBe(false)
-
-    // The whole point of the move: a second cockpit — a phone, another window — keeps its own
-    // answer, which it cannot do if either toggle reached the shared workspace file.
-    expect(JSON.stringify((await workspaceUiState()).sidebar ?? null)).toBe(workspaceSidebar)
   })
 })
 
 describe('the constrained single-project workspace', () => {
-  it('keeps flat navigation and removes every multi-project affordance', ({ skip }) => {
+  it('keeps the project header and tab navigation and removes every multi-project affordance', ({ skip }) => {
     if (!singleProject) skip()
 
     browser.goto(baseUrl + scoped(bootProject, '/'))

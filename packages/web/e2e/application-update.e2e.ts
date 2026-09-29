@@ -37,7 +37,7 @@ describe('application update chrome', () => {
   it.each([
     { width: 1024, theme: 'light' }, { width: 1024, theme: 'dark' },
     { width: 360, theme: 'light' }, { width: 360, theme: 'dark' },
-  ])('aligns preview versions at the trailing edge and keeps manual guidance in the header at $width/$theme', ({ width, theme }) => {
+  ])('aligns preview versions at the trailing edge and keeps manual guidance in the footer at $width/$theme', ({ width, theme }) => {
     const root = width < 768 ? drawer : desktop
     const preview = '0.14.8-pr501.7.abcdef1234567890'
     browser.setViewport(width, 640)
@@ -52,7 +52,7 @@ describe('application update chrome', () => {
       const root = document.querySelector('${root}')
       const chip = root?.querySelector('[data-slot="version-chip"]')
       if (!chip || root.getAnimations().some(a => a.playState === 'running')) return null
-      const row = root.querySelector('[data-slot="brand-wordmark"]').parentElement
+      const row = root.querySelector('[data-slot="version-action"]')
       const edge = row.getBoundingClientRect().right - parseFloat(getComputedStyle(row).paddingRight)
       return { gap: edge - chip.getBoundingClientRect().right, overflow: row.scrollWidth - row.clientWidth,
         version: chip.textContent, action: !!root.querySelector('[data-slot="application-update-action"]'),
@@ -67,18 +67,18 @@ describe('application update chrome', () => {
       const root = document.querySelector('${root}')
       const feedback = root?.querySelector('[data-slot="application-update-feedback"]')
       if (!feedback?.textContent.includes('Install the newer release')) return null
-      const row = root.querySelector('[data-slot="brand-wordmark"]').parentElement
-      return { text: feedback.textContent, inHeader: !!feedback.closest('[data-slot="sidebar-header"]'),
+      const row = root.querySelector('[data-slot="version-action"]')
+      return { text: feedback.textContent, inFooter: !!feedback.closest('[data-slot="sidebar-footer"]'),
         afterVersion: feedback.getBoundingClientRect().top >= row.getBoundingClientRect().bottom,
-        beforeSearch: feedback.getBoundingClientRect().bottom <= root.querySelector('[data-slot="command-palette-hint"]').getBoundingClientRect().top,
+        insideFooter: feedback.getBoundingClientRect().bottom <= root.querySelector('[data-slot="sidebar-footer"]').getBoundingClientRect().bottom,
         footerVisible: root.querySelector('[data-slot="sidebar-footer"]').getBoundingClientRect().bottom <= root.getBoundingClientRect().bottom + 1 }
     })()`)
-    expect(guidance).toMatchObject({ inHeader: true, afterVersion: true, beforeSearch: true, footerVisible: true })
+    expect(guidance).toMatchObject({ inFooter: true, afterVersion: true, insideFooter: true, footerVisible: true })
     expect((guidance as { text: string }).text).toContain('In-app updates are unavailable for this installation.')
     browser.screenshot(`${artifacts}/manual-update-${width}-${theme}.png`, { viewport: true })
   })
 
-  it('keeps the header steady through preparation, error and ready on a minimum desktop sidebar', () => {
+  it('keeps the version row steady through preparation, error and ready on a minimum desktop sidebar', () => {
     browser.setViewport(1024, 768)
     fixture({ status: 'idle', supported: true })
     browser.goto(`${baseUrl}/p/${project}/skills`)
@@ -87,7 +87,7 @@ describe('application update chrome', () => {
     browser.goto(`${baseUrl}/p/${project}/skills`)
     browser.waitForFunction(`document.documentElement.classList.contains('light')`)
     browser.waitForFunction(`document.querySelector('${desktop} [aria-label="Update application"]') !== null`)
-    const before = browser.waitForValue(`(() => { const root = document.querySelector('${desktop}'); const header = root.querySelector('[data-slot="brand-wordmark"]').parentElement.getBoundingClientRect(); const button = root.querySelector('[aria-label="Update application"]').getBoundingClientRect(); return { width: root.getBoundingClientRect().width, top: header.top, height: header.height, button: [button.width, button.height], title: root.querySelector('[aria-label="Update application"]').title, version: root.querySelector('[data-slot="version-chip"]').textContent }; })()`)
+    const before = browser.waitForValue(`(() => { const root = document.querySelector('${desktop}'); const header = root.querySelector('[data-slot="version-action"]').getBoundingClientRect(); const button = root.querySelector('[aria-label="Update application"]').getBoundingClientRect(); return { width: root.getBoundingClientRect().width, height: header.height, button: [button.width, button.height], title: root.querySelector('[aria-label="Update application"]').title, version: root.querySelector('[data-slot="version-chip"]').textContent }; })()`)
     expect(before).toMatchObject({ width: 264, button: [44, 44], title: 'Update from v1.0.0 to v2.0.0', version: 'v1.0.0' })
     browser.hover(`${desktop} [aria-label="Update application"]`)
     expect(browser.waitForValue(`document.querySelector('[data-slot="tooltip-content"]')?.textContent?.includes('Update from v1.0.0 to v2.0.0') ? true : null`)).toBe(true)
@@ -100,8 +100,8 @@ describe('application update chrome', () => {
     browser.screenshot(`${artifacts}/desktop-error-light.png`, { viewport: true })
     browser.click(`${desktop} [aria-label="Update application"]`)
     browser.waitForFunction(`document.querySelector('${desktop} [aria-label="Restart application"]') !== null`)
-    const after = browser.waitForValue(`(() => { const root = document.querySelector('${desktop}'); const header = root.querySelector('[data-slot="brand-wordmark"]').parentElement.getBoundingClientRect(); const button = root.querySelector('[aria-label="Restart application"]').getBoundingClientRect(); return { top: header.top, height: header.height, button: [button.width, button.height], title: root.querySelector('[aria-label="Restart application"]').title }; })()`)
-    expect(after).toEqual({ top: (before as { top: number }).top, height: (before as { height: number }).height, button: [44, 44], title: 'Restart required' })
+    const after = browser.waitForValue(`(() => { const root = document.querySelector('${desktop}'); const header = root.querySelector('[data-slot="version-action"]').getBoundingClientRect(); const button = root.querySelector('[aria-label="Restart application"]').getBoundingClientRect(); return { height: header.height, button: [button.width, button.height], title: root.querySelector('[aria-label="Restart application"]').title }; })()`)
+    expect(after).toEqual({ height: (before as { height: number }).height, button: [44, 44], title: 'Restart required' })
     browser.screenshot(`${artifacts}/desktop-ready-light.png`, { viewport: true })
   })
 
@@ -117,9 +117,9 @@ describe('application update chrome', () => {
     browser.click('[aria-label="Open menu"]')
     browser.waitForFunction(`(() => { const d = document.querySelector('${drawer}'); return !!d && d.getBoundingClientRect().left === 0 && !!d.querySelector('[aria-label="Restart application"]') })()`)
     browser.screenshot(`${artifacts}/mobile-ready-dark.png`, { viewport: true })
-    browser.click(`${drawer} [data-slot="theme-toggle"]`)
+    browser.click(`${drawer} [data-slot="mobile-workspace-navigation"] [data-slot="theme-toggle"]`)
     browser.waitForFunction(`document.querySelector('${drawer} [data-slot="theme-toggle"]')?.getAttribute('data-theme-pref') === 'system'`)
-    browser.click(`${drawer} [data-slot="theme-toggle"]`)
+    browser.click(`${drawer} [data-slot="mobile-workspace-navigation"] [data-slot="theme-toggle"]`)
     browser.waitForFunction(`document.documentElement.classList.contains('light')`)
     browser.goto(`${baseUrl}/p/${project}/skills`)
     browser.waitForFunction(`document.documentElement.classList.contains('light') && document.querySelector('button[aria-label="Open menu"]') !== null`)
@@ -196,7 +196,7 @@ describe('application update chrome', () => {
     browser.waitForFunction(`document.querySelector('${desktop} [aria-label="Update application"]')?.disabled === false`)
     browser.setReducedMotion()
     browser.evaluate(`document.documentElement.style.zoom = '2'`)
-    const geometry = browser.waitForValue(`(() => { const root = document.querySelector('${desktop}'); const action = root.querySelector('[aria-label="Update application"]'); const header = root.querySelector('[data-slot="brand-wordmark"]').parentElement; return { reduced: matchMedia('(prefers-reduced-motion: reduce)').matches, width: action.getBoundingClientRect().width, overflow: header.scrollWidth - header.clientWidth, title: action.title }; })()`)
+    const geometry = browser.waitForValue(`(() => { const root = document.querySelector('${desktop}'); const action = root.querySelector('[aria-label="Update application"]'); const header = root.querySelector('[data-slot="version-action"]'); return { reduced: matchMedia('(prefers-reduced-motion: reduce)').matches, width: action.getBoundingClientRect().width, overflow: header.scrollWidth - header.clientWidth, title: action.title }; })()`)
     expect(geometry).toMatchObject({ reduced: true, width: 88, title: 'Update from v1.0.0 to v2.0.0' })
     expect((geometry as { overflow: number }).overflow).toBeLessThanOrEqual(0)
     browser.screenshot(`${artifacts}/desktop-zoom-200-reduced-dark.png`, { viewport: true })
