@@ -2,7 +2,7 @@ import type { RunRecord } from '@open-mercato/cezar-api-client'
 
 import { deriveAttention } from './attention'
 import { shortAge } from './format'
-import { taskReferences } from './tasks-table'
+import { referenceKey, taskReferences } from './tasks-table'
 
 /**
  * The words a variant GROUP row says about its members (#617 addendum 01a). UI-free, like
@@ -52,34 +52,17 @@ export function familiesOfLabels(labels: readonly string[], limit = 2): string[]
     .map((family) => `${counts.get(family)} ${family}`)
 }
 
-/**
- * A reference's identity: kind, number AND where it points. Kind + number alone would call two
- * repositories' PR #7 the same reference, so the group row would link to the first variant's and
- * hide the other's (review round 6). With a URL the key carries its host and `owner/repo`
- * (lower-cased, so `github.com/O/R` and `github.com/o/r` agree); an unparseable URL counts as
- * itself; only a number-only reference falls back to kind + number. The group row's line 2 and
- * every variant's own-reference filter use this one key.
- */
-export function referenceKey(reference: { kind: string; number?: number; url?: string }): string {
-  const base = `${reference.kind}#${reference.number}`
-  if (!reference.url) return base
-  try {
-    const url = new URL(reference.url)
-    const repo = url.pathname.split('/').filter(Boolean).slice(0, 2).join('/')
-    return `${base}@${url.host.toLowerCase()}/${repo.toLowerCase()}`
-  } catch {
-    return `${base}@${reference.url}`
-  }
-}
+// Kept as a re-export for consumers of the group-summary helpers.
+export { referenceKey } from './tasks-table'
 
 /** The references EVERY member carries. The group row shows these; a variant shows only the ones
  *  not in this set (each variant that opened its own PR shows it). */
-export function sharedReferenceKeys(members: readonly RunRecord[]): Set<string> {
+export function sharedReferenceKeys(members: readonly (RunRecord & { projectId?: string })[], projectId?: string): Set<string> {
   const [first, ...rest] = members
   if (!first) return new Set()
-  const shared = new Set(taskReferences(first).map(referenceKey))
+  const shared = new Set(taskReferences(first, undefined, projectId).map(referenceKey))
   for (const member of rest) {
-    const own = new Set(taskReferences(member).map(referenceKey))
+    const own = new Set(taskReferences(member, undefined, projectId).map(referenceKey))
     for (const key of shared) if (!own.has(key)) shared.delete(key)
   }
   return shared
@@ -101,8 +84,8 @@ export function groupAge(members: readonly RunRecord[], now: number): string {
   return shortAge(latest, now)
 }
 
-export function groupMetaParts(members: readonly RunRecord[], now: number): { families: string[]; shared: Set<string>; age: string } {
-  return { families: groupFamilies(members), shared: sharedReferenceKeys(members), age: groupAge(members, now) }
+export function groupMetaParts(members: readonly RunRecord[], now: number, projectId?: string): { families: string[]; shared: Set<string>; age: string } {
+  return { families: groupFamilies(members), shared: sharedReferenceKeys(members, projectId), age: groupAge(members, now) }
 }
 
 /**

@@ -296,6 +296,21 @@ describe('taskPrUrl', () => {
 describe('taskReferences', () => {
   const REPO = 'https://github.com/o/r'
 
+  it('keeps same-number PR URLs from different repositories', () => {
+    const refs = taskReferences(run({ pullRequestUrl: `${REPO}/pull/7`, referencedPullRequestUrl: 'https://github.com/other/repo/pull/7' }))
+    expect(refs.map(ref => ref.url)).toEqual([`${REPO}/pull/7`, 'https://github.com/other/repo/pull/7'])
+  })
+
+  it.each([undefined, REPO])('does not turn URL-derived PR numbers into another chip (repo %s)', (repoBase) => {
+    const refs = taskReferences(run({ referencedPullRequestUrl: 'https://github.com/other/repo/pull/7', prNumber: 7, markerRefs: { pr: 7 } }), repoBase)
+    expect(refs).toEqual([{ kind: 'PR', number: 7, url: 'https://github.com/other/repo/pull/7' }])
+  })
+
+  it('does not turn a URL-derived issue number into an unrelated local link', () => {
+    const refs = taskReferences(run({ referencedIssueUrl: 'https://github.com/other/repo/issues/7', issueNumber: 7 }), REPO)
+    expect(refs).toEqual([{ kind: 'Issue', number: 7, url: 'https://github.com/other/repo/issues/7' }])
+  })
+
   it('returns every reference a task has, strongest first', () => {
     // The real multi-reference case: a review task opened on an issue, ABOUT one PR, having
     // created another. All three are true at once.
