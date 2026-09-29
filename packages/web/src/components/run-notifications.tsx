@@ -1,7 +1,7 @@
-import { hashKey, useQueryClient } from '@tanstack/react-query'
+import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef } from 'react'
 
-import { queryKeys, useWorkspaceUiState } from '@/api/queries'
+import { useWorkspaceUiState } from '@/api/queries'
 import type { ApiRun } from '@open-mercato/cezar-api-client'
 import {
   diffRunTransitions,
@@ -18,7 +18,7 @@ import {
  *
  * It watches the cached run list rather than opening its own listener on `/api/events`: the
  * global stream (api/global-events.tsx) already folds every `run` event into
- * `queryKeys.runs.list()`, and the reconnect/visibility reconciliation refetches it — so one
+ * the owning project’s run list, and the reconnect/visibility reconciliation refetches it — so one
  * cache subscription sees BOTH deliveries of the same truth. That second path is not a bonus,
  * it is the point: a hidden tab is exactly when the stream is most likely to have been frozen
  * (mobile background freeze, laptop lid), and the run that flipped to `waiting` while the socket
@@ -43,14 +43,36 @@ export function RunNotifications() {
   // cache subscription and lose the status map — the whole "never replay" guarantee.
   const enabledRef = useRef(enabled)
   enabledRef.current = enabled
-  const statusesRef = useRef<ReadonlyMap<string, RunNotificationState>>(new Map())
 
   useEffect(() => {
-    const listHash = hashKey(queryKeys.runs.list())
+    const cache = queryClient.getQueryCache()
+    const lists = new Map<string, ReadonlyMap<string, RunNotificationState>>()
+    const known = new Map<string, RunNotificationState>()
+    const isRunList = (key: readonly unknown[]) =>
+      key.length === 3 && typeof key[0] === 'string' && key[1] === 'runs' && key[2] === 'list'
 
-    const observe = (runs: readonly ApiRun[] | undefined): void => {
-      const { entering, statuses } = diffRunTransitions(statusesRef.current, runs)
-      statusesRef.current = statuses
+    // Retain other projects' history, but forget tasks once no cached list contains them.
+    const prune = () => {
+      const retained = new Set([...lists.values()].flatMap(states => [...states.keys()]))
+      for (const id of known.keys()) if (!retained.has(id)) known.delete(id)
+    }
+    const observe = (hash: string, runs: readonly ApiRun[], seed = false): void => {
+      const previous = lists.get(hash)
+      const { statuses } = diffRunTransitions(new Map(), runs)
+      // Compare within each alias first: a token tick on an old alias must not rewind the
+      // shared history. First sightings seed silently from the latest loaded snapshot.
+      const changed = runs.filter(run => {
+        const before = previous?.get(run.id)
+        const after = statuses.get(run.id)!
+        return before !== undefined &&
+          (before.status !== after.status || before.wantsAttention !== after.wantsAttention)
+      })
+      const { entering, statuses: updates } = diffRunTransitions(known, changed)
+      for (const [id, state] of statuses) if (!previous?.has(id)) known.set(id, state)
+      for (const [id, state] of updates) known.set(id, state)
+      lists.set(hash, statuses)
+      prune()
+      if (seed) return
       if (entering.length === 0) return
       const gate = {
         enabled: enabledRef.current,
@@ -61,13 +83,21 @@ export function RunNotifications() {
       for (const run of entering) fireRunNotification(run)
     }
 
-    // Seed from whatever the cache already holds: with an empty previous map nothing can
-    // "enter", so a mount mid-session records the current statuses and stays silent.
-    observe(queryClient.getQueryData<ApiRun[]>(queryKeys.runs.list()))
+    // Seed every project already loaded, silently, including aliases with different snapshots.
+    for (const query of cache.getAll().sort((a, b) => a.state.dataUpdatedAt - b.state.dataUpdatedAt)) {
+      if (isRunList(query.queryKey) && Array.isArray(query.state.data)) {
+        observe(query.queryHash, query.state.data as ApiRun[], true)
+      }
+    }
 
-    return queryClient.getQueryCache().subscribe((event) => {
-      if (event.query.queryHash !== listHash || event.type !== 'updated') return
-      observe(event.query.state.data as ApiRun[] | undefined)
+    return cache.subscribe((event) => {
+      if (!isRunList(event.query.queryKey)) return
+      if (event.type === 'removed') {
+        lists.delete(event.query.queryHash)
+        prune()
+      } else if (event.type === 'updated' && event.action.type === 'success' && Array.isArray(event.query.state.data)) {
+        observe(event.query.queryHash, event.query.state.data as ApiRun[])
+      }
     })
   }, [queryClient])
 
