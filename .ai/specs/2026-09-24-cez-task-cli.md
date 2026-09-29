@@ -93,9 +93,49 @@ operation prints text without a server. `--full` returns the contract shape.
   `seq`, dedupes by `seq`, and exits on a terminal `run` frame or at
   `--timeout-seconds`.
 - `wait` **polls** `GET /runs` every 1.5 s (owner decision, 2026-09-24): one
-  call covers any number of runs and holds no socket. `--until settled` waits
-  for `done`/`review`/`failed`/`cancelled`; `--until attention` also stops on
-  `waiting` or a pending human ask.
+  call covers any number of runs and holds no socket. What ends it is decided
+  by the cockpit's own attention function, shared through the contract since
+  #553/#609 (`packages/contract/src/attention.ts`, `deriveAttention`) — see
+  "The wait decision" below.
+
+### The wait decision (#553, #609)
+
+`wait` and `start --wait` take `--until attention` (the default) or
+`--until settled`:
+
+| `--until` | Ends the wait when a judged run is… |
+|---|---|
+| `attention` (default) | terminal (`done`/`review`/`failed`/`cancelled`), `missing`, **or** in an attention bucket that wants a human: `waiting` ("needs you", "needs review"), `error`, `permission` |
+| `settled` | terminal or `missing` only |
+
+Two `waiting` runs deliberately do **not** end an attention wait, because the
+cockpit does not show them as Needs You: a root parked on its own workers
+(bucket `none`, label "waiting on N workers") and — although it is not
+`waiting` at all — a `running` run with `activity: monitoring` (bucket
+`running`). The CLI used to decide with a two-line check of its own
+(`status === 'waiting' || hasPendingHumanAsk`), which stopped on a parked
+parent the cockpit showed as still working, and it defaulted to `settled`,
+which made every interactive `start --wait` run out its timeout (exit 3)
+although the agent had parked within seconds (#553). An operator reading
+`waiting` + `hasPendingHumanAsk: false` from the CLI while the cockpit showed
+Needs You cleared runs too early (#609).
+
+The fix is one function, not a second default: `deriveAttention` moved from
+`packages/web/src/lib/attention.ts` into the contract, the cockpit re-exports
+it unchanged, and the CLI reads the same bucket and label. Every `status` and
+`list` row, and every run in the `wait` output, carries `attention` (the
+bucket) and `attentionLabel` (the phrase); the `wait` output's top level says
+which `until` was in force. `--full` prints the contract `ApiRun` untouched.
+
+Why the default moved: a bot that calls `start --wait` on an ordinary task
+wants to know when the task next needs it, and a parked interactive run is
+exactly that moment. Terminal-only is the exception — autonomous runs and bots
+that want an outcome — so it is the opt-in (`--until settled`), not the
+default. No knob restores the old default; a caller that needs terminal state
+writes `--until settled`.
+
+The exit code table below is unchanged in shape; "success" for a wait now
+includes "stopped for attention".
 - `send` posts to `/messages`. A `409 { error: "session closed" }` without
   `--resume` prints `{ delivery: "not-delivered", reason, next }`, exit 1; with
   `--resume` it posts the text to `/continue`. Any other 409 passes through,
@@ -105,10 +145,10 @@ operation prints text without a server. `--full` returns the contract shape.
 
 | Code | Meaning |
 |---|---|
-| 0 | success; `wait`/`start --wait`: every awaited run ended `done` or `review` (`--mode all`) or one did (`--mode any`) |
+| 0 | success; `wait`/`start --wait`: every judged run ended `done`/`review` or stopped for attention (`--mode all`), or one did (`--mode any`) |
 | 1 | run ended `failed`/`cancelled`, or a send was not delivered |
 | 2 | no cockpit/project, or the cockpit refused (its `{ error }` passed through) |
-| 3 | `wait`/`log --follow` timed out; partial outcomes printed |
+| 3 | `wait`/`log --follow` timed out; partial outcomes printed (under `--until attention` this includes a run still `running`/`monitoring` or parked on its workers) |
 | 64 | usage error: `{ code: "invalid_input", error, usage }` |
 
 ## Around the edges

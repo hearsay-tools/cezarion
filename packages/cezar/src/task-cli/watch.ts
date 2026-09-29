@@ -1,4 +1,5 @@
 import {
+  ATTENTION_RANK,
   apiRunSchema,
   runHistoryPageSchema,
   runRecordSchema,
@@ -7,7 +8,7 @@ import {
   type RunStatus,
 } from '@open-mercato/cezar-contract';
 import { invalidResponse, refuse, request, TaskCliError, type Cockpit } from './http.ts';
-import { SUCCESS_STATUSES, TERMINAL_STATUSES } from './projections.ts';
+import { attentionFields, SUCCESS_STATUSES, TERMINAL_STATUSES, type AttentionFields } from './projections.ts';
 
 /**
  * Watching a task from a terminal (#504, spec 2026-09-24-cez-task-cli). Every loop here ends —
@@ -19,9 +20,19 @@ export const DEFAULT_POLL_MS = 1_500;
 const MAX_FIELD_CHARS = 2_000;
 
 export type WaitMode = 'any' | 'all';
+/**
+ * What ends a wait (#553/#609):
+ *  - `attention` (the default): a terminal status, a missing run, OR the cockpit's attention
+ *    function putting the run in a bucket that wants a human — `waiting` ("needs you"/"needs
+ *    review"), `error`, `permission`. A root parked on its own workers ("waiting on 2 workers")
+ *    and a `running`/`monitoring` run are NOT attention, exactly as the cockpit shows them.
+ *  - `settled`: a terminal status or a missing run only. The opt-in for autonomous runs and for
+ *    bots that want terminal state; a `waiting` park does not end it.
+ */
 export type WaitUntil = 'settled' | 'attention';
+export const DEFAULT_WAIT_UNTIL: WaitUntil = 'attention';
 
-export interface WaitEntry {
+export interface WaitEntry extends Partial<AttentionFields> {
   id: string;
   /** `unknown`: the deadline passed before any poll answered. */
   status: RunStatus | 'missing' | 'unknown';
@@ -31,6 +42,8 @@ export interface WaitEntry {
 
 export interface WaitResult {
   exitCode: number;
+  /** The `--until` that was in force, so a reader of the output knows what ended (or did not end) it. */
+  until: WaitUntil;
   runs: WaitEntry[];
   timedOut: boolean;
 }
@@ -41,15 +54,21 @@ function entryFor(id: string, run: ApiRun | undefined): WaitEntry {
     id,
     status: run.status,
     ...(run.activity === undefined ? {} : { activity: run.activity }),
+    ...attentionFields(run),
     hasPendingHumanAsk: run.hasPendingHumanAsk ?? false,
   };
 }
 
-/** Settled = nothing more will happen without a human; `missing` counts, it will never change. */
-function isSettled(entry: WaitEntry, until: WaitUntil): boolean {
+/**
+ * Whether this entry ends the wait. `settled` = nothing more will happen without a human;
+ * `missing` counts, it will never change. `attention` adds the buckets the cockpit's Needs You
+ * derives from — the SAME function, so the CLI and the cockpit cannot disagree about a run
+ * parked on its workers (bucket `none`, keeps waiting) or one monitoring (bucket `running`).
+ */
+export function endsWait(entry: WaitEntry, until: WaitUntil): boolean {
   if (entry.status === 'unknown') return false;
   if (entry.status === 'missing' || TERMINAL_STATUSES.includes(entry.status)) return true;
-  return until === 'attention' && (entry.status === 'waiting' || entry.hasPendingHumanAsk === true);
+  return until === 'attention' && entry.attention !== undefined && ATTENTION_RANK[entry.attention] <= ATTENTION_RANK.waiting;
 }
 
 /** A failure is only a terminal non-success; stopping for attention is not one. */
@@ -101,14 +120,15 @@ export async function waitForRuns(
   let entries: WaitEntry[] = ids.map((id) => ({ id, status: 'unknown' }));
   for (;;) {
     const budget = deadline - Date.now();
-    if (budget <= 0) return { exitCode: 3, runs: entries, timedOut: true };
+    const timedOut = (): WaitResult => ({ exitCode: 3, until: options.until, runs: entries, timedOut: true });
+    if (budget <= 0) return timedOut();
     const pollStart = Date.now();
     let result;
     try {
       result = await request(cockpit, '/runs', { timeoutMs: budget });
     } catch (error) {
-      if (Date.now() >= deadline) return { exitCode: 3, runs: entries, timedOut: true };
-      if (abortedPoll(error) && pollHitDeadline(pollStart, budget)) return { exitCode: 3, runs: entries, timedOut: true };
+      if (Date.now() >= deadline) return timedOut();
+      if (abortedPoll(error) && pollHitDeadline(pollStart, budget)) return timedOut();
       throw error;
     }
     if (result.status !== 200) refuse(result);
@@ -116,14 +136,15 @@ export async function waitForRuns(
     if (!runs.success) invalidResponse('run list');
     const byId = new Map(runs.data.map((run) => [run.id, run]));
     entries = ids.map((id) => entryFor(id, byId.get(id)));
-    const settled = entries.filter((entry) => isSettled(entry, options.until));
-    const done = options.mode === 'any' ? settled.length > 0 : settled.length === entries.length;
+    const ended = entries.filter((entry) => endsWait(entry, options.until));
+    const done = options.mode === 'any' ? ended.length > 0 : ended.length === entries.length;
     if (done) {
-      const judged = options.mode === 'any' ? settled : entries;
-      return { exitCode: judged.some(isFailure) && (options.mode === 'all' || judged.every(isFailure)) ? 1 : 0, runs: entries, timedOut: false };
+      // 0 when every judged run is done/review or stopped for attention; 1 on failed/cancelled/missing.
+      const judged = options.mode === 'any' ? ended : entries;
+      return { exitCode: judged.some(isFailure) && (options.mode === 'all' || judged.every(isFailure)) ? 1 : 0, until: options.until, runs: entries, timedOut: false };
     }
     const remaining = deadline - Date.now();
-    if (remaining <= 0) return { exitCode: 3, runs: entries, timedOut: true };
+    if (remaining <= 0) return timedOut();
     await sleep(Math.min(options.pollMs ?? DEFAULT_POLL_MS, remaining));
   }
 }

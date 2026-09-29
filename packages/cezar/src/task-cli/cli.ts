@@ -20,7 +20,7 @@ import { openUrl } from '../open-url.ts';
 import { discoverCockpit, type DiscoverOptions } from './discovery.ts';
 import { invalidResponse, refuse, request, TaskCliError, threadUrl, type Cockpit } from './http.ts';
 import { projectListRow, projectStatus } from './projections.ts';
-import { readLog, waitForRuns, type WaitMode, type WaitUntil } from './watch.ts';
+import { DEFAULT_WAIT_UNTIL, readLog, waitForRuns, type WaitMode, type WaitUntil } from './watch.ts';
 
 /**
  * `cez task` — start, watch and steer cockpit tasks from a terminal or a bot (#504, spec
@@ -59,6 +59,8 @@ const TASK_TEXT_MAX_CHARS = 100_000;
 const DEFAULT_TIMEOUT_SECONDS = 600;
 const MAX_TIMEOUT_SECONDS = 1_800;
 const TIMEOUT_FLAG: FlagSpec = { type: 'string', help: `<1-${MAX_TIMEOUT_SECONDS}>  Give up after this many seconds (default ${DEFAULT_TIMEOUT_SECONDS}).` };
+/** Shared by `wait` and `start --wait` (#553): attention is the default, settled the opt-in. */
+const UNTIL_FLAG: FlagSpec = { type: 'string', help: '<attention|settled> attention (default): stop when the task needs you or ends; settled: terminal status only.' };
 
 export const OPERATIONS: Record<string, Operation> = {
   start: {
@@ -75,7 +77,8 @@ export const OPERATIONS: Record<string, Operation> = {
       effort: { type: 'string', help: '<level>       Reasoning effort.' },
       autonomous: { type: 'boolean', help: '         Never park for input; run to completion.' },
       'no-worktree': { type: 'boolean', help: '      Run in the repo working tree, not a worktree.' },
-      wait: { type: 'boolean', help: '               Then wait until the task settles (see wait).' },
+      wait: { type: 'boolean', help: '               Then wait until the task needs you or ends (see wait).' },
+      until: UNTIL_FLAG,
       'timeout-seconds': TIMEOUT_FLAG,
       notify: { type: 'boolean', help: '             POST status changes to the project webhook (default when it has one).' },
       'no-notify': { type: 'boolean', help: '          Do not notify the project webhook.' },
@@ -111,11 +114,11 @@ export const OPERATIONS: Record<string, Operation> = {
   },
   wait: {
     args: '<id>...',
-    description: 'Block until the tasks settle; exit 0 done/review, 1 failed/cancelled, 3 timeout.',
+    description: 'Block until the tasks need you (default) or settle; exit 0 done/review/attention, 1 failed/cancelled, 3 timeout.',
     positionals: [1, 32],
     flags: {
       mode: { type: 'string', help: '<any|all>        Return on the first task or on all of them (default all).' },
-      until: { type: 'string', help: '<settled|attention> Also stop on waiting or a pending question (attention).' },
+      until: UNTIL_FLAG,
       'timeout-seconds': TIMEOUT_FLAG,
     },
   },
@@ -158,6 +161,32 @@ export const OPERATIONS: Record<string, Operation> = {
   },
 };
 
+/**
+ * The clear contract (#553, #609), printed on every command a bot reads a run's state from.
+ * `attention` and `attentionLabel` come from the cockpit's own attention function (the
+ * contract's `deriveAttention`), so what the CLI says a run needs is what Needs You shows.
+ */
+const ATTENTION_HELP_OPERATIONS = new Set(['start', 'wait', 'status', 'list']);
+const ATTENTION_HELP = [
+  'Attention — when a task needs you:',
+  '  status, list and wait carry `attention` (the cockpit bucket) and `attentionLabel` (its phrase),',
+  '  derived by the same function as the cockpit\'s Needs You. Read those, not the raw status:',
+  '  - `waiting` is attention even when hasPendingHumanAsk is false (a finished turn parks the task);',
+  '    never clear a task on hasPendingHumanAsk alone.',
+  '  - `running` with activity `monitoring` is neither settled nor attention: the agent is still',
+  '    working on its own sub-agents or a watched command. attention: running.',
+  '  - a task parked on its own workers ("waiting on 2 workers") is attention: none; keep waiting.',
+  '  - attention: waiting | error | permission ends a wait; attentionLabel says why ("needs you",',
+  '    "needs review", "failed").',
+  '  --until attention (default) stops when the task needs you or ends. --until settled is the',
+  '  opt-in for autonomous runs and bots that want terminal state only (done/review/failed/cancelled).',
+  '  cez task wait <id>                   # default: stops when the task needs you',
+  '  cez task wait <id> --until settled   # terminal status only',
+  "  cez task start '…' --wait            # returns as soon as the agent parks for follow-up",
+  "  cez task start '…' --wait --autonomous --until settled   # runs to completion, then returns",
+  '',
+];
+
 function usage() {
   return { operations: Object.entries(OPERATIONS).map(([name, op]) => ({ name, synopsis: `cez task ${name} ${op.args}`.trim() })) };
 }
@@ -178,6 +207,7 @@ export function taskHelp(operation?: string): string {
       return [`  cez task ${name} ${op.args}`.trimEnd(), `    ${op.description}`];
     }), '', 'Options:',
     ...[...flags].map(([flag, spec]) => `  --${flag} ${spec.help}`), '',
+    ...(names.some((name) => ATTENTION_HELP_OPERATIONS.has(name)) ? ATTENTION_HELP : []),
     ...(names.includes('start') ? [
       'Safe task input (file or stdin):',
       '  cez task start --task-file task.md',
@@ -192,8 +222,8 @@ export function taskHelp(operation?: string): string {
     'Commands find the running cockpit that serves this checkout (ports 4321-4370) and print JSON.',
     'notify: with a task webhook set in Settings → General, start notifies it unless --no-notify;',
     'the webhook gets task.status, task.question, task.activity and task.subscribed POSTs.',
-    'Exit codes: 0 ok · 1 task failed/cancelled or message not delivered · 2 no cockpit or refused ·',
-    '3 timed out · 64 usage error.',
+    'Exit codes: 0 ok (wait/start --wait: done, review, or stopped for attention) · 1 task failed/cancelled',
+    'or message not delivered · 2 no cockpit or refused · 3 timed out · 64 usage error.',
   ].join('\n');
 }
 
@@ -276,6 +306,10 @@ function oneOf<T extends string>(value: string | boolean | undefined, flag: stri
   return value as T;
 }
 
+function waitUntil(values: Values): WaitUntil {
+  return oneOf<WaitUntil>(values.until, 'until', ['settled', 'attention'], DEFAULT_WAIT_UNTIL);
+}
+
 function statuses(value: string | boolean | undefined) {
   if (typeof value !== 'string') return undefined;
   const list = value.split(',').map((entry) => entry.trim()).filter(Boolean);
@@ -296,10 +330,8 @@ function validateFlags(name: string, values: Values): void {
     if (values.off && (values.message !== undefined || values['message-file'] !== undefined)) usageError('--off takes no note');
   }
   if (name === 'list') { statuses(values.status); positiveInt(values.limit, 'limit', 1_000); }
-  if (name === 'wait') {
-    oneOf<WaitMode>(values.mode, 'mode', ['any', 'all'], 'all');
-    oneOf<WaitUntil>(values.until, 'until', ['settled', 'attention'], 'settled');
-  }
+  if (name === 'wait') oneOf<WaitMode>(values.mode, 'mode', ['any', 'all'], 'all');
+  if (name === 'wait' || name === 'start') waitUntil(values);
   if (name === 'log') { nonNegativeInt(values.since, 'since'); positiveInt(values['max-chars'], 'max-chars', 1_000_000); }
   if (name === 'wait' || name === 'log' || (name === 'start' && values.wait)) timeoutMs(values);
 }
@@ -388,9 +420,9 @@ async function start(cockpit: Cockpit, io: TaskIo, values: Values, task: string,
     ...(run.data.branch === undefined ? {} : { branch: run.data.branch }),
   };
   if (waitMs === undefined) { print(started); return EXIT.ok; }
-  const waited = await waitForRuns(cockpit, [run.data.id], { mode: 'all', until: 'settled', timeoutMs: waitMs, pollMs: io.pollMs });
+  const waited = await waitForRuns(cockpit, [run.data.id], { mode: 'all', until: waitUntil(values), timeoutMs: waitMs, pollMs: io.pollMs });
   const final = waited.runs[0]!;
-  print({ ...started, ...final, timedOut: waited.timedOut });
+  print({ ...started, ...final, until: waited.until, timedOut: waited.timedOut });
   return waited.exitCode;
 }
 
@@ -444,9 +476,8 @@ async function execute(
     }
     case 'wait': {
       const mode = oneOf<WaitMode>(values.mode, 'mode', ['any', 'all'], 'all');
-      const until = oneOf<WaitUntil>(values.until, 'until', ['settled', 'attention'], 'settled');
-      const waited = await waitForRuns(cockpit, positionals, { mode, until, timeoutMs: timeoutMs(values), pollMs: io.pollMs });
-      print({ runs: waited.runs, timedOut: waited.timedOut });
+      const waited = await waitForRuns(cockpit, positionals, { mode, until: waitUntil(values), timeoutMs: timeoutMs(values), pollMs: io.pollMs });
+      print({ until: waited.until, runs: waited.runs, timedOut: waited.timedOut });
       return waited.exitCode;
     }
     case 'log': {

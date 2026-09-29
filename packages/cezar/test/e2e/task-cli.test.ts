@@ -61,6 +61,7 @@ test('built cez task drives a dry-run cockpit it discovers from the checkout', {
 
     const runs = (await (await fetch(`${origin}/api/v1/runs`)).json()) as Array<{ id: string }>;
     assert.deepEqual(runs.map((run) => run.id), [id], 'the run lives in the cockpit, exactly once');
+    assert.equal(started.json.attention, 'none', 'a finished run wants nothing');
 
     const status = await task(['status', id]);
     assert.equal(status.code, 0);
@@ -80,6 +81,29 @@ test('built cez task drives a dry-run cockpit it discovers from the checkout', {
 
     const stopped = await task(['stop', id]);
     assert.equal(stopped.code, 0, stopped.stdout);
+
+    // #553: an ordinary interactive task (no `mock:done`, so the mock agent ends its turn without
+    // a marker and the run parks as `waiting`) ends the DEFAULT `start --wait` promptly with the
+    // cockpit's own attention answer, instead of running out the timeout (exit 3).
+    const parkStarted = Date.now();
+    const parked = await task(['start', 'mock:park-for-follow-up', '--wait', '--timeout-seconds', '120']);
+    assert.equal(parked.code, 0, parked.stdout + parked.stderr);
+    assert.ok(Date.now() - parkStarted < 60_000, 'start --wait returned well before its timeout');
+    assert.equal(parked.json.timedOut, false);
+    assert.equal(parked.json.until, 'attention');
+    assert.equal(parked.json.status, 'waiting');
+    assert.equal(parked.json.hasPendingHumanAsk, false, 'a finished turn is attention without a structured question (#609)');
+    assert.equal(parked.json.attention, 'waiting');
+    assert.equal(parked.json.attentionLabel, 'needs you');
+    const parkedStatus = await task(['status', String(parked.json.id)]);
+    assert.equal(parkedStatus.code, 0);
+    assert.equal(parkedStatus.json.attention, 'waiting');
+    assert.equal(parkedStatus.json.attentionLabel, 'needs you');
+    const parkedList = await task(['list', '--status', 'waiting']);
+    assert.equal(parkedList.code, 0);
+    const parkedRow = (parkedList.json.runs as Array<Record<string, unknown>>).find((row) => row.id === parked.json.id);
+    assert.equal(parkedRow?.attentionLabel, 'needs you');
+    assert.equal((await task(['stop', String(parked.json.id)])).code, 0);
 
     const headless = await execFile(process.execPath, [cli, 'run', 'mock:done', '--repo', repo], { cwd: repo, env, timeout: 60_000 });
     assert.match(headless.stderr, /a cockpit is running at http:\/\/127\.0\.0\.1:\d+; use "cez task start"/);
