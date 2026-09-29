@@ -138,6 +138,7 @@ function checkNavSelection(variant: ContrastQaVariant, { base, projectId, nav: n
     browser.moveTo(0, 0)
     if (mobile) {
       browser.click('[data-slot="mobile-top-bar"] button')
+      // Reproduction: selection-states-reproduction.md (2026-09-29 mobile ultra hover).
       // The compact row is ready before the drawer finishes sliding; sample pointer
       // coordinates only once its frame has settled.
       browser.waitForStable(`document.querySelector('[data-slot="mobile-nav-drawer"]')?.getBoundingClientRect().left ?? null`, { holdMs: 150, matcher: value => value === 0 })

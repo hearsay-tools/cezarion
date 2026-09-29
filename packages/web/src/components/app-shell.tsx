@@ -13,7 +13,8 @@ import { Link, pathnameProjectId, stripProjectPrefix } from '@/lib/project-route
 import { StatusDot } from '@/components/status-dot'
 import { SidebarViewTabs } from '@/components/sidebar-view-tabs'
 import { ApplicationUpdateControl, ApplicationUpdateFeedback } from '@/components/application-update-control'
-import type { ApplicationUpdateState } from '@open-mercato/cezar-api-client'
+import { API_PREFIX, type ApplicationUpdateState } from '@open-mercato/cezar-api-client'
+import { ProjectScopeContext, useProjectScope } from '@/api/project-scope-context'
 import { isNewerVersion } from '@/lib/is-newer-version'
 import { Button } from '@/components/ui/button'
 import {
@@ -90,6 +91,8 @@ export type AppShellProps = {
   /** Workspace controls preserved in the mobile drawer while the desktop rail is hidden. */
   mobileWorkspace?: ReactNode
   projectHeader?: ReactNode
+  /** Navigation belongs to the project displayed here, even on workspace routes. */
+  sidebarProjectId?: string
   needsYou?: boolean
   /** The desktop project rail (#618): a 60px workspace-level column left of the sidebar. A slot
    *  because the rail reads the registry and the runs index, and this shell must keep rendering
@@ -164,6 +167,7 @@ export function AppShell({
   banner,
   mobileWorkspace,
   projectHeader,
+  sidebarProjectId,
   needsYou,
   projectRail,
 }: AppShellProps) {
@@ -246,6 +250,7 @@ export function AppShell({
     toolsMenu,
     mobileWorkspace,
     projectHeader,
+    sidebarProjectId,
     needsYou,
     }
 
@@ -326,6 +331,8 @@ type NavProps = {
   toolsMenu?: ReactNode
   mobileWorkspace?: ReactNode
   projectHeader?: ReactNode
+  /** Navigation belongs to the project displayed here, even on workspace routes. */
+  sidebarProjectId?: string
   needsYou?: boolean
 
 }
@@ -518,6 +525,7 @@ function SidebarContent({
   sessionScope,
   toolsMenu,
   projectHeader,
+  sidebarProjectId,
   needsYou,
   onNavigate,
   headerAction,
@@ -529,7 +537,15 @@ function SidebarContent({
   /** The drawer's close button. Absent on desktop, which has nothing to close. */
   headerAction?: ReactNode
 }) {
+  const inheritedScope = useProjectScope()
+  // Context only: the routed view owns the mutable API scope. Sidebar queries bind their
+  // endpoints explicitly; links and row navigation share this displayed project's identity.
+  const navigationScope = sidebarProjectId === undefined ? inheritedScope : {
+    projectId: sidebarProjectId,
+    apiBase: `${API_PREFIX}/p/${encodeURIComponent(sidebarProjectId)}`,
+  }
   return (
+    <ProjectScopeContext.Provider value={navigationScope}>
     <SidebarNavigateContext.Provider value={onNavigate}><div
       data-slot="sidebar-content"
       // `@container/sidebar` (#788): the sidebar is no longer one fixed width, so what its rows
@@ -596,6 +612,7 @@ function SidebarContent({
         <ApplicationUpdateFeedback version={version} latestVersion={latestVersion} state={applicationUpdate} error={applicationUpdateError} offline={applicationUpdateOffline} busy={applicationUpdateBusy} />
       </div>
     </div></SidebarNavigateContext.Provider>
+    </ProjectScopeContext.Provider>
   )
 }
 

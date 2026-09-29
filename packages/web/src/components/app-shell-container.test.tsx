@@ -897,3 +897,25 @@ it('keeps sidebar data on the URL project when rendered above the route scope pr
   expect(document.querySelector('[data-slot="nav-needs-you-dot"]')).not.toBeNull()
   expect(document.querySelector('[data-slot="task-row"] a')?.getAttribute('href')).toBe('/p/shop/tasks/right')
 })
+
+it.each(['/tasks', '/settings/global/projects'])('keeps sidebar navigation on its displayed boot project from %s', async (entry) => {
+  setApiScope('shop')
+  serve({
+    '/api/v1/health': { ...HEALTH, bootProject: 'cezar' },
+    '/api/v1/todos': [],
+    '/api/v1/projects': { bootProject: 'cezar', projects: [PROJECT, { ...PROJECT, id: 'shop', name: 'Shop' }] },
+    '/api/v1/p/cezar/runs': [run({ id: 'boot-task', title: 'Boot task', titleSummary: undefined })],
+    '/api/v1/p/default/runs': [run({ id: 'boot-task', title: 'Boot task', titleSummary: undefined })],
+  })
+  renderShell(entry)
+  expect(await screen.findByText('Boot task')).toBeTruthy()
+  const sidebar = within(document.querySelector('[data-slot="sidebar"]') as HTMLElement)
+  expect(sidebar.getByRole('link', { name: 'All' }).getAttribute('href')).toBe('/p/cezar/')
+  expect(sidebar.getByRole('link', { name: 'Tasks' }).getAttribute('href')).toBe('/p/cezar/')
+  expect(sidebar.getByRole('link', { name: 'Git' }).getAttribute('href')).toBe('/p/cezar/git')
+  expect(sidebar.getByRole('link', { name: /New task/ }).getAttribute('href')).toBe('/p/cezar/new')
+  expect(document.querySelector('[data-slot="task-row"] a')?.getAttribute('href')).toBe('/p/cezar/tasks/boot-task')
+  // Publishing navigation context must not change the routed view's API scope.
+  const { queryScope } = await import('@open-mercato/cezar-api-client')
+  expect(queryScope()).toBe('shop')
+})

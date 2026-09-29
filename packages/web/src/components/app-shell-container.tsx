@@ -135,6 +135,7 @@ export function AppShellContainer({ children }: { children: ReactNode }) {
         automationsAvailable={automationsAvailable}
         banner={<ProviderBannerContainer />}
         taskQuickList={<TaskQuickListContainer projectId={sidebarProjectId} boot={sidebarBoot} />}
+        sidebarProjectId={sidebarProjectId}
         projectHeader={<SidebarProjectHeader />}
         mobileWorkspace={<MobileWorkspaceNavigation />}
         needsYou={listCounts(runs.data ?? []).waiting > 0}
