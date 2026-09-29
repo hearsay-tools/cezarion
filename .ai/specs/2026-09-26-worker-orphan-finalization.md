@@ -75,7 +75,8 @@ A synchronous, dependency-free module (a sync probe lets `continueRun` stay sync
 
 - `processStartToken(pid)` as above.
 - `processesWithCwdUnder(dirs)`: the worker's worktree and every agent tmp dir location
-  (`agentTmpDirLocations`), because finalization deletes that scratch. Linux reads `/proc/*/cwd`,
+  (`agentTmpDirLocations`), because finalization can delete terminal-task scratch. Live tasks retain
+  scratch across finalized process generations and restart (#515). Linux reads `/proc/*/cwd`,
   skipping `ENOENT` (the process vanished) and `EACCES` on another user's process. An
   unreadable process of our own user is non-dumpable (`systemd --user`, `sshd`,
   `gpg-agent`). It counts as a possible holder, reported by PID and never signalled, unless it

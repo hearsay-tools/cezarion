@@ -1,7 +1,7 @@
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { RunStore } from '../runs/store.ts';
 import {
@@ -9,6 +9,7 @@ import {
   MAX_SOCKET_SAFE_DIR_LENGTH,
   agentTmpDir,
   resolveAgentTmpDir,
+  removeAgentTmpDir,
 } from '../runs/agent-tmpdir.ts';
 import { registerProject } from '../workspace/projects.ts';
 import { RunManager, agentDirectories } from './run.ts';
@@ -51,6 +52,8 @@ describe('RunManager — task-scoped agent TMPDIR (#785)', () => {
   });
 
   afterEach(() => {
+    manager.dispose();
+    for (const run of store.listRuns()) removeAgentTmpDir(dataDir, run.id);
     store.flush();
     for (const dir of [home, repoRoot]) rmSync(dir, { recursive: true, force: true });
     if (savedHome === undefined) delete process.env.CEZ_HOME;
@@ -86,21 +89,63 @@ describe('RunManager — task-scoped agent TMPDIR (#785)', () => {
     expect(envA.TMPDIR).not.toBe(envB.TMPDIR);
   });
 
-  it('reaps the directory when the run leaves the active registry', async () => {
+  it.each(['done', 'review', 'failed', 'cancelled'] as const)('reaps the directory when a %s run leaves the active registry', async status => {
     const run = newRun();
     const { env } = await seam().agentEnvForStep(run.id, 'claude');
     writeFileSync(join(env.TMPDIR as string, 'scratch'), 'x', 'utf8');
+    store.updateRun(run.id, { status });
     seam().dropActive(run.id);
     expect(existsSync(env.TMPDIR as string)).toBe(false);
   });
 
-  it('a Continue after that reap mints the directory again', async () => {
+  it.each(['queued', 'running', 'waiting'] as const)('preserves %s scratch when a session drops and the next spawn reuses it', async status => {
     const run = newRun();
     const { env } = await seam().agentEnvForStep(run.id, 'claude');
+    store.updateRun(run.id, { status });
+    writeFileSync(join(env.TMPDIR!, 'scratch'), 'keep my notes');
     seam().dropActive(run.id);
     const again = await seam().agentEnvForStep(run.id, 'claude');
     expect(again.env.TMPDIR).toBe(env.TMPDIR);
-    expect(existsSync(again.env.TMPDIR as string)).toBe(true);
+    expect(readFileSync(join(again.env.TMPDIR!, 'scratch'), 'utf8')).toBe('keep my notes');
+  });
+
+  it('preserves waiting scratch through a fresh store and manager recovery', async () => {
+    const run = newRun();
+    store.updateRun(run.id, { status: 'waiting' });
+    const { env } = await seam().agentEnvForStep(run.id, 'claude');
+    const dirs = new Set([env.TMPDIR!, agentTmpDir(dataDir, run.id)]);
+    for (const dir of dirs) {
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, 'scratch'), 'survive restart');
+    }
+    manager.dispose();
+    store.flush();
+    store = RunStore.open(dataDir, { keepLive: true });
+    manager = new RunManager(store, repoRoot);
+    await manager.recover();
+    expect(store.getRun(run.id)?.status).toBe('waiting');
+    for (const dir of dirs) expect(readFileSync(join(dir, 'scratch'), 'utf8')).toBe('survive restart');
+  });
+
+  it('reaps scratch immediately when an inactive task history is deleted', async () => {
+    const run = newRun();
+    const { env } = await seam().agentEnvForStep(run.id, 'claude');
+    store.updateRun(run.id, { status: 'waiting' });
+    const local = agentTmpDir(dataDir, run.id);
+    mkdirSync(local, { recursive: true });
+    expect(store.deleteRun(run.id)).toBe(true);
+    expect(existsSync(env.TMPDIR!)).toBe(false);
+    expect(existsSync(local)).toBe(false);
+  });
+
+  it('reaps scratch when an idle-closed task is finished without another session', async () => {
+    const run = newRun();
+    const { env } = await seam().agentEnvForStep(run.id, 'claude');
+    store.updateStep(run.id, 's', { status: 'waiting' });
+    store.updateRun(run.id, { status: 'waiting', currentStepId: 's' });
+    expect(manager.finish(run.id)).toBe(true);
+    await vi.waitFor(() => expect(store.getRun(run.id)?.status).toBe('done'));
+    expect(existsSync(env.TMPDIR!)).toBe(false);
   });
 
   // The whole point of the preflight: refuse to start rather than spawn an agent
@@ -121,6 +166,10 @@ describe('RunManager — task-scoped agent TMPDIR (#785)', () => {
     const dead = newRun();
     const { env } = await seam().agentEnvForStep(dead.id, 'claude');
     store.updateRun(dead.id, { status: 'done', finishedAt: new Date().toISOString() });
+    // Seed leftovers from a crash that missed terminal cleanup.
+    mkdirSync(env.TMPDIR!, { recursive: true });
+    // The resolved fallback needs its owner marker for the sweep to claim it.
+    await seam().agentEnvForStep(dead.id, 'claude');
     expect(existsSync(env.TMPDIR as string)).toBe(true);
 
     await manager.recover();
@@ -230,6 +279,8 @@ describe('RunManager — deep checkout falls back to a socket-safe TMPDIR (#387)
   });
 
   afterEach(() => {
+    manager.dispose();
+    for (const run of store.listRuns()) removeAgentTmpDir(dataDir, run.id);
     store.flush();
     for (const dir of [home, repoRoot]) rmSync(dir, { recursive: true, force: true });
     if (savedHome === undefined) delete process.env.CEZ_HOME;
@@ -254,6 +305,7 @@ describe('RunManager — deep checkout falls back to a socket-safe TMPDIR (#387)
     expect(env.TEMP).toBe(env.TMPDIR);
     expect(env.TMP).toBe(env.TMPDIR);
     writeFileSync(join(env.TMPDIR as string, 'scratch'), 'x', 'utf8');
+    store.updateRun(run.id, { status: 'done' });
     seam().dropActive(run.id);
     expect(existsSync(env.TMPDIR as string)).toBe(false);
   });

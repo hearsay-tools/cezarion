@@ -37,6 +37,7 @@ import {
 } from './agent-runner.ts';
 import { createRunner } from './runner-factory.ts';
 import { inputDeliveryOf } from './agent-runner.ts';
+import { agentTmpDir, resolveAgentTmpDir } from '../runs/agent-tmpdir.ts';
 import { appendTurnText } from '../workflows/run.ts';
 import { cleanupCheckpoint, seedSettledFamily } from '../workflows/delegation-reconcile.testkit.ts';
 import { supportsProfiles } from './agent-profiles.ts';
@@ -396,6 +397,8 @@ const CONTROL_CRITERIA = [
   { id: 'R16', scenario: 'ask-snapshot' },
   { id: 'R20', scenario: 'baseline' },
   { id: 'R21', scenario: 'baseline' },
+  { id: 'R22', scenario: 'baseline' },
+  { id: 'R23', scenario: 'ask' },
 ] as const;
 
 /**
@@ -1389,5 +1392,75 @@ describe('harness parity — terminal cleanup reconciliation', () => {
         } finally { vi.unstubAllEnvs(); }
       }, 60_000);
     }
+  }
+});
+
+// #515: task scratch outlives a process, on both workflow and Continue paths.
+describe('harness parity — live task scratch', () => {
+  for (const backend of RUNNER_IDS) {
+    it(`${backend} R22 retains scratch across idle close and Continue, then reaps on finish`, async () => {
+      await driveRun(backend, 'baseline', record => record?.status === 'waiting', 30_000,
+        async ({ store, manager, runId }) => {
+          const internal = manager as unknown as {
+            dataDir: string;
+            active: Map<string, { idleTimer?: NodeJS.Timeout }>;
+          };
+          const original = resolveAgentTmpDir(internal.dataDir, runId);
+          const dirs = new Set([agentTmpDir(internal.dataDir, runId), original]);
+          const nextRoot = mkdtempSync(join(realpathSync('/tmp'), 'cez-next-'));
+          const keys = ['TMPDIR', 'TEMP', 'TMP'] as const;
+          const previous = keys.map(key => process.env[key]);
+          try {
+            for (const key of keys) process.env[key] = nextRoot;
+            for (const dir of dirs) {
+              mkdirSync(dir, { recursive: true });
+              writeFileSync(join(dir, 'notes'), 'keep across turns');
+            }
+            for (let turn = 0; turn < 2; turn++) {
+              const timer = internal.active.get(runId)?.idleTimer as NodeJS.Timeout & { _onTimeout(): void };
+              expect(timer).toBeDefined();
+              timer._onTimeout();
+              await waitFor(() => !manager.isActive(runId));
+              expect(store.getRun(runId)?.status).toBe('waiting');
+              for (const dir of dirs) expect(readFileSync(join(dir, 'notes'), 'utf8')).toBe('keep across turns');
+              expect(resolveAgentTmpDir(internal.dataDir, runId)).toBe(original);
+              expect(manager.continueRun(runId, { text: promptFor(backend, 'baseline') }).ok).toBe(true);
+              await waitFor(() => manager.isActive(runId) && store.getRun(runId)?.status === 'waiting');
+              for (const dir of dirs) expect(readFileSync(join(dir, 'notes'), 'utf8')).toBe('keep across turns');
+            }
+            expect(manager.finish(runId)).toBe(true);
+            await waitFor(() => !manager.isActive(runId));
+            expect(['done', 'review']).toContain(store.getRun(runId)?.status);
+            for (const dir of dirs) expect(existsSync(dir)).toBe(false);
+          } finally {
+            keys.forEach((key, index) => {
+              if (previous[index] === undefined) delete process.env[key];
+              else process.env[key] = previous[index];
+            });
+            rmSync(nextRoot, { recursive: true, force: true });
+          }
+        });
+    }, 60_000);
+
+    it(`${backend} R23 retains pending-question worker scratch after its process completes`, async () => {
+      await withOwnedInputRun(backend, 'ask', async ({ manager, store, runId, repoRoot }) => {
+        manager.enqueueOwnedRun(runId);
+        await waitFor(() => store.readEvents(runId).some(event => event.type === 'ask.requested'));
+        const scratch = resolveAgentTmpDir(join(repoRoot, '.ai/cezar'), runId);
+        writeFileSync(join(scratch, 'notes'), 'pending answer');
+        // Native asks can hold the turn open without an idle timer. Close the
+        // actual session through the same idle-close state, after its native ask.
+        const internal = manager as unknown as {
+          active: Map<string, { idleClosed: boolean; session: import('./agent-runner.ts').AgentSession }>;
+        };
+        const state = internal.active.get(runId)!;
+        state.idleClosed = true;
+        state.session.end();
+        await waitFor(() => !manager.isActive(runId));
+        expect(store.getRun(runId)?.status).toBe('waiting');
+        expect(store.readWorkerExecution(runId)?.phase).toBe('complete');
+        expect(readFileSync(join(scratch, 'notes'), 'utf8')).toBe('pending answer');
+      });
+    }, 60_000);
   }
 });

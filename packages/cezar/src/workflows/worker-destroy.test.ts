@@ -826,6 +826,23 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
       } finally { other.dispose(); reopened.flush(); }
     });
 
+    it('recovery preserves a live worker scratchpad after finalizing its dead generation (#515)', async () => {
+      const { w, child, reopened, other } = await crashed('waiting');
+      const scratch = resolveAgentTmpDir(join(root, '.ai/cezar'), w.id);
+      mkdirSync(scratch, { recursive: true });
+      writeFileSync(join(scratch, 'notes'), 'answer still needed');
+      reopened.appendEvent(w.id, { type: 'ask.requested', requestId: randomUUID(), questions: [{
+        header: 'Choice', question: 'Which option?', options: [{ label: 'A' }, { label: 'B' }],
+      }] });
+      try {
+        child.proc.kill('SIGKILL'); await child.exited;
+        await other.recover();
+        expect(reopened.readWorkerExecution(w.id)?.phase).toBe('complete');
+        expect(reopened.getRun(w.id)?.status).toBe('waiting');
+        expect(readFileSync(join(scratch, 'notes'), 'utf8')).toBe('answer still needed');
+      } finally { other.dispose(); reopened.flush(); }
+    });
+
     it('a process working in the run scratch keeps the generation alive', async () => {
       const { w, child, prior, reopened, other } = await crashed('failed');
       const scratch = resolveAgentTmpDir(join(root, '.ai/cezar'), w.id); mkdirSync(scratch, { recursive: true });

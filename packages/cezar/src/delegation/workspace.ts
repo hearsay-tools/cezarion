@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { delegationStateSchema, workerWorkspaceSchema } from '@open-mercato/cezar-contract';
 import type { WorkerDestroyResult, WorkerDiff, WorkerWorkspace } from '@open-mercato/cezar-contract';
 import { branchFor, createWorktree, DIFF_CAP, worktreePathFor } from '../git-worktree.ts';
+import { withWorktreeMutation } from '../git-worktree-lock.ts';
 import { resolveTaskDiffBase } from '../git-diff-base.ts';
 import { isSafeGitRef } from '../git-refs.ts';
 import type { RunRecord } from '../runs/store.ts';
@@ -260,71 +261,74 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
     ] } : {}),
   });
   try {
-    assertCurrent?.();
-    const workspace = await validateIntent(repoRoot, value);
-    const path = await receiptLocation(repoRoot, workspace);
-    const receipt = await readReceipt(path);
-    const registered = async () => (await checkedGit(repoRoot, ['worktree', 'list', '--porcelain', '-z'])).split('\0');
-    const branchExists = async () => {
-      const refs = await checkedGit(repoRoot, ['for-each-ref', '--format=%(refname)', `refs/heads/${workspace.branch}`]);
-      return refs.split('\n').includes(`refs/heads/${workspace.branch}`);
-    };
-    if (!receipt) {
-      // Absence alone cannot distinguish moved/rebranched resources. Only a
-      // private exact-generation no-materialization proof permits this no-op.
-      // Revalidate after asynchronous inspection; never delete inferred resources.
-      if (neverMaterialized?.(workspace) && !await exists(workspace.path) &&
-          !(await registered()).includes(`worktree ${workspace.path}`) && !await branchExists() &&
-          neverMaterialized(workspace)) remaining = [];
-      return result();
-    }
-    if (!same(receipt.workspace, workspace)) return result();
-    provisioned = true;
-    const checkpointPath = path.replace(/\.json$/, '.cleanup.json');
-    let checkpoint = await exists(checkpointPath) ? cleanupSchema.parse(JSON.parse(await readIdentityFile(checkpointPath, RECEIPT_CAP))) : undefined;
-    if (checkpoint && (!same(checkpoint.workspace, workspace) || checkpoint.gitDir !== receipt.gitDir)) return result();
-    if (checkpoint?.phase === 'complete') {
-      remaining = [];
-      if (await exists(workspace.path) || (await registered()).includes(`worktree ${workspace.path}`) || await exists(receipt.gitDir)) remaining.push('worktree');
-      if (await branchExists()) remaining.push('branch');
-      return result();
-    }
-    if (await exists(workspace.path)) {
-      if (checkpoint?.phase === 'worktree-removed') return result();
-      if (await liveGitDir(repoRoot, workspace) !== receipt.gitDir ||
-          await readIdentityFile(join(receipt.gitDir, 'cezar-owned-resource'), 36) !== workspace.resourceId) return result();
-      if (await checkedGit(workspace.path, ['symbolic-ref', '-q', 'HEAD']) !== `refs/heads/${workspace.branch}`) return result();
-      // Git permits duplicate checkouts with --force. Preserve both resources
-      // before the first removal if another registered path uses this branch.
-      let registeredPath: string | undefined;
-      for (const entry of await registered()) {
-        if (entry.startsWith('worktree ')) registeredPath = entry.slice('worktree '.length);
-        if (entry === `branch refs/heads/${workspace.branch}` && registeredPath !== workspace.path) return result();
+    return await withWorktreeMutation(repoRoot, async mutationGit => {
+      assertCurrent?.();
+      const workspace = await validateIntent(repoRoot, value);
+      const path = await receiptLocation(repoRoot, workspace);
+      const receipt = await readReceipt(path);
+      const registered = async () => (await checkedGit(repoRoot, ['worktree', 'list', '--porcelain', '-z'])).split('\0');
+      const branchExists = async () => {
+        const refs = await checkedGit(repoRoot, ['for-each-ref', '--format=%(refname)', `refs/heads/${workspace.branch}`]);
+        return refs.split('\n').includes(`refs/heads/${workspace.branch}`);
+      };
+      if (!receipt) {
+        // Absence alone cannot distinguish moved/rebranched resources. Only a
+        // private exact-generation no-materialization proof permits this no-op.
+        // Revalidate after asynchronous inspection; never delete inferred resources.
+        if (neverMaterialized?.(workspace) && !await exists(workspace.path) &&
+            !(await registered()).includes(`worktree ${workspace.path}`) && !await branchExists() &&
+            neverMaterialized(workspace)) remaining = [];
+        return result();
       }
-      const current = await verifyBranch(repoRoot, workspace, receipt);
-      if (checkpoint && (checkpoint.sha !== current.sha || !same(checkpoint.logFile, current.log.file) || checkpoint.logHash !== hash(current.log.content))) return result();
-      checkpoint ??= { workspace, gitDir: receipt.gitDir, sha: current.sha, logFile: current.log.file, logHash: hash(current.log.content), phase: 'prepared' };
-      await writeCleanup(checkpointPath, checkpoint, assertCurrent);
-      assertCurrent?.();
-      const removed = await git(repoRoot, ['worktree', 'remove', '--force', workspace.path]);
-      if (!removed.ok) return result();
+      if (!same(receipt.workspace, workspace)) return result();
+      provisioned = true;
+      const checkpointPath = path.replace(/\.json$/, '.cleanup.json');
+      let checkpoint = await exists(checkpointPath) ? cleanupSchema.parse(JSON.parse(await readIdentityFile(checkpointPath, RECEIPT_CAP))) : undefined;
+      if (checkpoint && (!same(checkpoint.workspace, workspace) || checkpoint.gitDir !== receipt.gitDir)) return result();
+      if (checkpoint?.phase === 'complete') {
+        remaining = [];
+        if (await exists(workspace.path) || (await registered()).includes(`worktree ${workspace.path}`) || await exists(receipt.gitDir)) remaining.push('worktree');
+        if (await branchExists()) remaining.push('branch');
+        return result();
+      }
+      if (await exists(workspace.path)) {
+        if (checkpoint?.phase === 'worktree-removed') return result();
+        if (await liveGitDir(repoRoot, workspace) !== receipt.gitDir ||
+            await readIdentityFile(join(receipt.gitDir, 'cezar-owned-resource'), 36) !== workspace.resourceId) return result();
+        if (await checkedGit(workspace.path, ['symbolic-ref', '-q', 'HEAD']) !== `refs/heads/${workspace.branch}`) return result();
+        // Git permits duplicate checkouts with --force. Preserve both resources
+        // before the first removal if another registered path uses this branch.
+        let registeredPath: string | undefined;
+        for (const entry of await registered()) {
+          if (entry.startsWith('worktree ')) registeredPath = entry.slice('worktree '.length);
+          if (entry === `branch refs/heads/${workspace.branch}` && registeredPath !== workspace.path) return result();
+        }
+        const current = await verifyBranch(repoRoot, workspace, receipt);
+        if (checkpoint && (checkpoint.sha !== current.sha || !same(checkpoint.logFile, current.log.file) || checkpoint.logHash !== hash(current.log.content))) return result();
+        checkpoint ??= { workspace, gitDir: receipt.gitDir, sha: current.sha, logFile: current.log.file, logHash: hash(current.log.content), phase: 'prepared' };
+        await writeCleanup(checkpointPath, checkpoint, assertCurrent);
+        assertCurrent?.();
+        const removed = await mutationGit(repoRoot, ['worktree', 'remove', '--force', workspace.path]);
+        if (!removed.ok) return result();
+        remaining = ['branch'];
+      }
+      if (!checkpoint || await exists(workspace.path) || await exists(receipt.gitDir) || (await registered()).includes(`worktree ${workspace.path}`)) return result();
       remaining = ['branch'];
-    }
-    if (!checkpoint || await exists(workspace.path) || await exists(receipt.gitDir) || (await registered()).includes(`worktree ${workspace.path}`)) return result();
-    remaining = ['branch'];
-    checkpoint = { ...checkpoint, phase: 'worktree-removed' };
-    await writeCleanup(checkpointPath, checkpoint, assertCurrent);
-    if (await branchExists()) {
-      if ((await registered()).includes(`branch refs/heads/${workspace.branch}`)) return result();
-      const current = await verifyBranch(repoRoot, workspace, receipt);
-      if (current.sha !== checkpoint.sha || !same(current.log.file, checkpoint.logFile) || hash(current.log.content) !== checkpoint.logHash) return result();
-      // Ref CAS: never delete a branch advanced after our verified snapshot.
-      assertCurrent?.();
-      const removed = await git(repoRoot, ['update-ref', '-d', `refs/heads/${workspace.branch}`, checkpoint.sha]);
-      if (!removed.ok || await branchExists()) return result();
-    }
-    await writeCleanup(checkpointPath, { ...checkpoint, phase: 'complete' }, assertCurrent);
-    remaining = [];
+      checkpoint = { ...checkpoint, phase: 'worktree-removed' };
+      await writeCleanup(checkpointPath, checkpoint, assertCurrent);
+      if (await branchExists()) {
+        if ((await registered()).includes(`branch refs/heads/${workspace.branch}`)) return result();
+        const current = await verifyBranch(repoRoot, workspace, receipt);
+        if (current.sha !== checkpoint.sha || !same(current.log.file, checkpoint.logFile) || hash(current.log.content) !== checkpoint.logHash) return result();
+        // Ref CAS: never delete a branch advanced after our verified snapshot.
+        assertCurrent?.();
+        const removed = await mutationGit(repoRoot, ['update-ref', '-d', `refs/heads/${workspace.branch}`, checkpoint.sha]);
+        if (!removed.ok || await branchExists()) return result();
+      }
+      await writeCleanup(checkpointPath, { ...checkpoint, phase: 'complete' }, assertCurrent);
+      remaining = [];
+      return result();
+    });
   } catch { /* Ambiguous ownership and every failed Git/filesystem operation fail closed. */ }
   return result();
 }

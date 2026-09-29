@@ -48,7 +48,7 @@ import { createHash } from 'node:crypto';
 import type { Dirent } from 'node:fs';
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, join } from 'node:path';
+import { basename, dirname, isAbsolute, join } from 'node:path';
 
 /** Run ids are uuids; anything else must never reach a recursive `rmSync`.
  *
@@ -178,6 +178,40 @@ function fallbackTmpDir(root: string, dataDir: string, runId: string): string {
   return join(root, FALLBACK_PREFIX + digest.slice(0, FALLBACK_NAME_LENGTH));
 }
 
+/** Persist the selected fallback in the task's local scratch directory. The
+ * host temp environment can change between sessions, so recomputing it loses
+ * the task's files. Only a digest-named absolute path is accepted on read. */
+const LOCATION_FILE = '.cez-fallback';
+
+function recordedFallback(dataDir: string, runId: string): string | undefined {
+  const marker = join(agentTmpDir(dataDir, runId), LOCATION_FILE);
+  let dir: string;
+  try {
+    dir = readFileSync(marker, 'utf8');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw new AgentTempDirError(marker, err);
+  }
+  if (!isAbsolute(dir) || dir !== fallbackTmpDir(dirname(dir), dataDir, runId)
+      || Buffer.byteLength(dir, 'utf8') > MAX_SOCKET_SAFE_DIR_LENGTH) {
+    throw new AgentTempDirError(marker, new Error('invalid recorded fallback directory'));
+  }
+  return dir;
+}
+
+function recordFallback(dataDir: string, runId: string, dir: string): void {
+  const local = agentTmpDir(dataDir, runId);
+  mkdirSync(local, { recursive: true });
+  try {
+    writeFileSync(join(local, LOCATION_FILE), dir, { encoding: 'utf8', flag: 'wx' });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+    if (recordedFallback(dataDir, runId) !== dir) {
+      throw new AgentTempDirError(local, new Error('recorded fallback directory changed'));
+    }
+  }
+}
+
 /** The first path whose UTF-8 byte length fits the socket budget, or
  *  `undefined` when none does. Pure on purpose (#440): resolution calls it
  *  with the real candidates, tests with synthetic ones, so the nothing-fits
@@ -191,10 +225,13 @@ export function firstSocketSafeDir(paths: readonly string[]): string | undefined
  * when it is short enough for unix-socket paths, and otherwise a short
  * digest-named directory under the first OS temp root whose candidate fits —
  * the env-honouring root first, the platform default when `TMPDIR` itself is
- * too deep (#387, #440). Pure resolution — nothing is created, nothing is
+ * too deep (#387, #440). A recorded location wins across host-env changes.
+ * Read-only resolution — nothing is created, nothing is
  * probed; `agentTmpEnv` owns the side effects.
  */
 export function resolveAgentTmpDir(dataDir: string, runId: string): string {
+  const recorded = recordedFallback(dataDir, runId);
+  if (recorded) return recorded;
   const local = agentTmpDir(dataDir, runId);
   if (Buffer.byteLength(local, 'utf8') <= MAX_SOCKET_SAFE_DIR_LENGTH) return local;
   const candidates = osTempRoots().map((root) => fallbackTmpDir(root, dataDir, runId));
@@ -312,7 +349,10 @@ export function agentTmpEnv(
     // In the shared OS root the directory carries its ownership marker, so a
     // startup sweep from another project can tell it apart from stale
     // scratch (the sweep skips anything whose marker is missing or foreign).
-    if (dir !== local) writeOwnerMarker(dir, dataDir);
+    if (dir !== local) {
+      writeOwnerMarker(dir, dataDir);
+      recordFallback(dataDir, runId, dir);
+    }
   } catch (err) {
     throw new AgentTempDirError(dir, err);
   }
@@ -320,15 +360,30 @@ export function agentTmpEnv(
   return { TMPDIR: dir, TEMP: dir, TMP: dir };
 }
 
+/** A persisted path is removal authority only while its owner marker agrees. */
+function ownedRecordedFallback(dataDir: string, runId: string): string | undefined {
+  try {
+    const recorded = recordedFallback(dataDir, runId);
+    if (recorded && readFileSync(join(recorded, OWNER_FILE), 'utf8').trim() === dataDirOwner(dataDir)) return recorded;
+  } catch {
+    // Invalid/unreadable metadata is not authority to remove another path.
+  }
+  return undefined;
+}
+
 /** Every place a run's scratch may live: the local directory and each OS-root fallback. */
 export function agentTmpDirLocations(dataDir: string, runId: string): string[] {
-  return safeRunId(runId) ? [agentTmpDir(dataDir, runId), ...osTempRoots().map((root) => fallbackTmpDir(root, dataDir, runId))] : [];
+  if (!safeRunId(runId)) return [];
+  const locations = [agentTmpDir(dataDir, runId), ...osTempRoots().map((root) => fallbackTmpDir(root, dataDir, runId))];
+  const recorded = ownedRecordedFallback(dataDir, runId);
+  if (recorded) locations.push(recorded);
+  return [...new Set(locations)];
 }
 
 /**
- * Reap one run's directory. Scratch, not an artifact: nothing reads it once the
- * agent is gone, and a Continue re-creates it through `agentTmpEnv`. Never
- * throws — reaping must not break a terminal transition.
+ * Reap one task's directory after terminal completion or history deletion.
+ * Session close alone is not completion: a live task's Continue must retain
+ * its files. Never throws — reaping must not break a terminal transition.
  *
  * The repo-local directory and the digest name under EVERY root are tried,
  * because the resolution depends on the lengths of `dataDir` and the ambient
@@ -378,8 +433,18 @@ export function sweepAgentTmpDirs(dataDir: string, keepRunIds: Iterable<string>)
     for (const name of entries) {
       if (keep.has(name) || !safeRunId(name)) continue;
       try {
-        rmSync(join(root, name), { recursive: true, force: true });
-        reaped.push(name);
+        // Resolve recorded locations before deleting their local marker. This
+        // also reaches fallback roots no longer present in the host environment.
+        const local = agentTmpDir(dataDir, name);
+        // Computed candidates are scanned below with ownership checks; this
+        // pass only adds the persisted location that scan cannot discover.
+        const recorded = ownedRecordedFallback(dataDir, name);
+        const locations = recorded ? [recorded, local] : [local];
+        for (const dir of locations) {
+          if (!existsSync(dir)) continue;
+          rmSync(dir, { recursive: true, force: true });
+          reaped.push(basename(dir));
+        }
       } catch {
         // best-effort: a locked directory is retried on the next boot.
       }

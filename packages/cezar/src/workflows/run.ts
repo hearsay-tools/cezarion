@@ -791,7 +791,7 @@ export class RunManager {
       if (this.stoppedWorkers.has(runId)) this.store.commitWorkerCancellation(runId);
       if (this.store.commitWorkerExecutionComplete(runId, generation)) {
         this.finalizedWorkers.delete(runId);
-        removeAgentTmpDir(this.dataDir, runId);
+        this.reapTerminalScratch(runId);
       }
     } catch { /* Finalized in this process; preserve exact generation for an explicit retry. */ }
   }
@@ -813,7 +813,7 @@ export class RunManager {
     // finalization and reaping; only an absent one is legacy, scan-only evidence.
     if (record === 'unknown') return { state: 'unknown' };
     if (record !== 'absent' && isCurrentProcess(record.controller)) return { state: 'none' };
-    // Finalization deletes the scratch too, so a process working there keeps the generation alive.
+    // Finalization may reap terminal task scratch, so a process working there keeps the generation alive.
     return { state: 'orphan', generation: proof.generation, ...(record === 'absent' ? {} : { record }),
       paths: [run.delegation.workspace.path, ...agentTmpDirLocations(this.dataDir, runId)],
       // No process of this worker can predate its record (1 s slack for tick rounding).
@@ -840,7 +840,7 @@ export class RunManager {
     try { if (!this.store.commitWorkerExecutionComplete(runId, orphan.generation)) return false; } catch { return false; }
     this.orphanProbes.delete(runId); this.orphanBlockers.delete(runId); this.reportedOrphanBlockers.delete(runId); this.clearOrphanReprobe(runId);
     this.store.appendEvent(runId, { type: 'lifecycle', message: "the interrupted worker's processes are gone; its execution was finalized" });
-    removeAgentTmpDir(this.dataDir, runId);
+    this.reapTerminalScratch(runId);
     return true;
   }
 
@@ -1046,6 +1046,8 @@ export class RunManager {
   private readonly unreadInputGraceMs: number;
   private disposed = false;
   private readonly onDelegationRun = (run: RunRecord, source?: 'delegation-checkpoint'): void => {
+    // Delegation metadata checkpoints do not change task status.
+    if (!this.disposed && source !== 'delegation-checkpoint') this.reapTerminalScratch(run.id);
     if (!this.disposed && !['queued', 'running', 'waiting'].includes(run.status)) this.withdrawCiWait(run.id);
     if (run.delegation && !['queued', 'running', 'waiting'].includes(run.status)) this.active.get(run.id)?.revokeDelegation?.();
     // Cleanup checkpoints emit terminal records too. With delegation disabled,
@@ -2134,7 +2136,7 @@ export class RunManager {
       }
     }
     // #469: a generation whose processes died with the old controller is finalized first, so it
-    // re-launches through the ordinary Continue path and its scratch is not retained.
+    // re-launches through the ordinary Continue path; live task scratch is retained.
     for (const run of this.store.listRuns()) if (run.delegation?.role === 'worker' && !this.settleOrphanedWorkerExecution(run.id)) this.armOrphanReprobe(run.id);
     this.reconcileWorkerWaits();
     const live = this.store
@@ -2150,9 +2152,8 @@ export class RunManager {
       this.store.readWorkerExecution(run.id)?.phase !== 'complete');
     // `dispose()` deliberately does not terminate live sessions, so a waiting
     // record may still own a process even while this manager is recovering.
-    // Idle-close reaps its own scratch through `dropActive`; recovery must keep
-    // every otherwise-live directory unless private worker evidence proves it
-    // finished.
+    // Idle-close ends a process, not its task. Preserve all live task scratch,
+    // including workers whose previous process generation has completed.
     sweepAgentTmpDirs(this.dataDir, [...live, ...retained].map(run => run.id));
     for (const run of live) {
       if (this.isActive(run.id)) continue;
@@ -2354,18 +2355,24 @@ export class RunManager {
     // Closed-session success may have parked a completion wait without a live wire.
     if (this.store.getRun(runId)?.delegation) this.reconcileWorkerWaits();
     this.releaseSlot();
-    // A run leaving the active registry is a terminal transition (done/review/
-    // failed/cancelled) — the one moment the finished-worktree count can grow.
+    // A run leaving the active registry may have reached a terminal transition
+    // (done/review/failed/cancelled), increasing the finished-worktree count.
     // Enforce count-based retention (#483) here so a single hook covers every
     // terminal path. Fire-and-forget: retention must never delay or throw into
     // the lifecycle.
     void this.enforceRetention();
-    // The run's temp directory (#785) goes on the same terminal transition, and
-    // for ordinary runs. Owned scratch waits for private execution completion.
-    // It is scratch, not an artifact, so unlike a worktree
-    // there is no keep-count to respect and nothing left to recover from it. A
-    // Continue (or an auto-resume) re-creates it through `agentEnv`.
-    if (this.store.getRun(runId)?.delegation?.role !== 'worker') removeAgentTmpDir(this.dataDir, runId);
+    this.reapTerminalScratch(runId);
+  }
+
+  /** Scratch belongs to the task, not its current agent process (#515).
+   * Terminal status alone is not process-exit proof: an active session or an
+   * unfinished private worker generation must retain its files until exit. */
+  private reapTerminalScratch(runId: string): void {
+    const run = this.store.getRun(runId);
+    if (!run || ['queued', 'running', 'waiting'].includes(run.status)) return;
+    if (this.active.has(runId) || this.starting.has(runId) || this.queue.includes(runId)) return;
+    if (run.delegation?.role === 'worker' && this.store.readWorkerExecution(runId)?.phase !== 'complete') return;
+    removeAgentTmpDir(this.dataDir, runId);
   }
 
   // ---- usage-limit auto-resume (spec 2026-08-03-auto-resume-after-usage-limit) --------------

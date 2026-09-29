@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import { removeAgentTmpDir } from './agent-tmpdir.ts';
 import { removeArtifacts } from '../artifacts/lifecycle.ts';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
@@ -2212,6 +2213,7 @@ export class RunStore extends EventEmitter {
         const proposed = new Map(this.runs); proposed.delete(id);
         this.commitIndex(proposed, new Set([id]));
       } else return false;
+      removeAgentTmpDir(this.dataDir, id);
       this.seqs.delete(id);
       return true;
     } catch { return false; }
@@ -2240,6 +2242,7 @@ export class RunStore extends EventEmitter {
         rmSync(this.imagesDir(id), { recursive: true, force: true });
         removeArtifacts(this.dataDir, id);
       } catch { /* Ordinary run deletion preserves its existing best-effort behavior. */ }
+      removeAgentTmpDir(this.dataDir, id);
       this.seqs.delete(id);
       this.scheduleSave();
       this.emit('deleted', id);
@@ -2306,6 +2309,8 @@ export class RunStore extends EventEmitter {
       ...all.filter((r) => r.archived).slice(MAX_ARCHIVED_KEPT),
     ];
     for (const stale of stalePool) {
+      // Retention must not evict a live task's history or scratch between turns.
+      if (['queued', 'running', 'waiting'].includes(stale.status)) continue;
       // Delegation promises history and parent snapshots until explicit deletion.
       if (stale.delegation || !this.canDeleteRun(stale.id)) continue;
       this.runs.delete(stale.id);
@@ -2317,6 +2322,7 @@ export class RunStore extends EventEmitter {
       } catch {
         // best effort
       }
+      removeAgentTmpDir(this.dataDir, stale.id);
     }
   }
 

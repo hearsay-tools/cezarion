@@ -823,6 +823,11 @@ case instead. The isolated manager fallback tests remain in `run.test.ts`; the
 wire rows do not pretend to reproduce a missing-v1 envelope these protocols do
 not supply.
 
+R22/R23 (#515) preserve task scratch across native session close and host temp-environment changes: ordinary
+runs keep files through fresh and continuation idle-close paths, and workers
+with a pending question keep files after private process completion. Terminal
+Finish still reaps both repo-local and fallback scratch. Every runner is covered.
+
 R20/R21 (#661) complete an owned worker over each native mock wire, then commit a
 cleanup checkpoint. Enabled delegation reads only that worker's family; disabled
 delegation enters no terminal-checkpoint reconciliation and reads no histories.
