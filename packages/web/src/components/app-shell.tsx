@@ -1,4 +1,4 @@
-import { ChevronDownIcon, FolderIcon, FolderPlusIcon, LayersIcon, MenuIcon, PlusIcon, SearchIcon, ShieldCheckIcon, Settings2Icon, XIcon } from '@/components/design-icons'
+import { ChevronDownIcon, FolderIcon, FolderPlusIcon, MenuIcon, PlusIcon, SearchIcon, ShieldCheckIcon, XIcon } from '@/components/design-icons'
 
 import * as React from 'react'
 import type { ReactNode } from 'react'
@@ -11,7 +11,7 @@ import { GithubIcon } from '@/components/icons'
 import { commandShortcutHint } from '@/lib/use-command-shortcut'
 import { Link, pathnameProjectId, stripProjectPrefix } from '@/lib/project-router'
 import { StatusDot } from '@/components/status-dot'
-import { ThemeToggle } from '@/components/theme-toggle'
+import { SidebarViewTabs } from '@/components/sidebar-view-tabs'
 import { ApplicationUpdateControl, ApplicationUpdateFeedback } from '@/components/application-update-control'
 import type { ApplicationUpdateState } from '@open-mercato/cezar-api-client'
 import { isNewerVersion } from '@/lib/is-newer-version'
@@ -25,7 +25,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Sheet, SheetClose, SheetContent, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
 import { activeNavItem, activeNavPath, visibleNavItems, type NavItem } from '@/components/nav-items'
-import { FOOTER_ICON_ACTIVE_CLASS, NAV_INBOX_COUNT_CLASS, NAV_UPDATE_DOT_CLASS, SIDEBAR_SELECTED_CLASS, navIconClass, navRowClass, navUnreadCountClass } from '@/components/nav-row-styles'
+import { SIDEBAR_SELECTED_CLASS } from '@/components/nav-row-styles'
 import {
   DEFAULT_SIDEBAR_WIDTH,
   MAX_SIDEBAR_WIDTH,
@@ -55,9 +55,6 @@ export type AppShellProps = {
   repo?: RepoChip | null
   /** Inbox badge count. Null/0 renders no badge. Step 3.2 feeds it from the SSE stream. */
   inboxCount?: number | null
-  /** Unread done-items count for the Tasks badge (#unread-done-items). Null/0 renders no badge;
-   *  the container derives it from the run list via `unreadDoneCount`. */
-  unreadCount?: number | null
   /** A quiet, accessible marker on Skills when a checked update remains actionable. */
   skillsUpdateAvailable?: boolean
   /** Running cezar version beside the wordmark. Null while health is unknown. */
@@ -86,19 +83,14 @@ export type AppShellProps = {
    *  opt-in via `CEZ_AUTOMATIONS=1`. Defaults to shown for the same reason as `forgeAvailable`;
    *  the container passes the health payload's truth. */
   automationsAvailable?: boolean
-  /** Single-project capability gating: hides workspace-expansion affordances. Defaults off so
-   *  standalone and older callers preserve the multi-project shell. */
-  singleProject?: boolean
   /** Global chrome banner, rendered in its own row above the scroller. Absent renders nothing —
    *  the slot is generic and currently unused (the #391 skills promo it once held is gone,
    *  replaced by the opt-in Import panel on the Skills page). */
   banner?: ReactNode
-  /** Step 3.3's multi-project sidebar: one collapsible group per registered project, each
-   *  carrying its own nav + task list. When present it REPLACES the flat nav and the
-   *  `taskQuickList` slot (each group brings its own copies of both); absent — the registry
-   *  still loading, or unreachable — the shell renders the single-project sidebar it always
-   *  did, which is the honest degradation, not a special case. */
-  projectGroups?: ReactNode
+  /** Workspace controls preserved in the mobile drawer while the desktop rail is hidden. */
+  mobileWorkspace?: ReactNode
+  projectHeader?: ReactNode
+  needsYou?: boolean
   /** The desktop project rail (#618): a 60px workspace-level column left of the sidebar. A slot
    *  because the rail reads the registry and the runs index, and this shell must keep rendering
    *  where no QueryClient is provided. Absent renders nothing; hidden below `md` by its own frame. */
@@ -107,7 +99,7 @@ export type AppShellProps = {
 
 /**
  * The drawer's close-on-navigate callback, published to whatever renders inside the sidebar's
- * slots (`projectGroups`, `taskQuickList`). The route-change effect already closes the drawer
+ * slots (`projectHeader`, `taskQuickList`). The route-change effect already closes the drawer
  * for every *changed* route; this covers re-clicking a link to the CURRENT route (per the spec,
  * Tasks navigates home even when already active), which changes no pathname at all. Undefined
  * on desktop, where there is nothing to close.
@@ -154,7 +146,6 @@ export function AppShell({
   breadcrumb,
   repo = null,
   inboxCount = null,
-  unreadCount = null,
   skillsUpdateAvailable = false,
   version = null,
   latestVersion = null,
@@ -170,9 +161,10 @@ export function AppShell({
   forgeAvailable = true,
   inboxAvailable = true,
   automationsAvailable = true,
-  singleProject = false,
   banner,
-  projectGroups,
+  mobileWorkspace,
+  projectHeader,
+  needsYou,
   projectRail,
 }: AppShellProps) {
   const { pathname } = useLocation()
@@ -240,7 +232,6 @@ export function AppShell({
     repo,
     // The badge belongs to the Inbox item — with the item gone there is nothing to badge.
     inboxCount: inboxAvailable ? inboxCount : null,
-    unreadCount,
     skillsUpdateAvailable,
     version,
     latestVersion,
@@ -253,9 +244,10 @@ export function AppShell({
     taskQuickList,
     sessionScope,
     toolsMenu,
-    projectGroups,
-    singleProject,
-  }
+    mobileWorkspace,
+    projectHeader,
+    needsYou,
+    }
 
   return (
     // The Sheet root renders no DOM of its own — it is the context that lets the top bar's menu
@@ -320,7 +312,6 @@ type NavProps = {
   items: NavItem[]
   repo: RepoChip | null
   inboxCount: number | null
-  unreadCount: number | null
   skillsUpdateAvailable: boolean
   version: string | null
   latestVersion: string | null
@@ -333,8 +324,10 @@ type NavProps = {
   taskQuickList?: ReactNode
   sessionScope?: ReactNode
   toolsMenu?: ReactNode
-  projectGroups?: ReactNode
-  singleProject: boolean
+  mobileWorkspace?: ReactNode
+  projectHeader?: ReactNode
+  needsYou?: boolean
+
 }
 
 /**
@@ -487,12 +480,12 @@ function MobileNavDrawer({ onNavigate, onCloseAutoFocus, ...props }: NavProps & 
         {...props}
         onNavigate={onNavigate}
         headerAction={
-          <SheetClose asChild>
+          <>{props.mobileWorkspace}<SheetClose asChild>
             {/* size-11: the ≥44px touch target the spec's mobile rules require. */}
             <Button variant="ghost" size="icon" aria-label="Close menu" className="absolute top-5 -right-14 size-11">
               <XIcon className="size-[22px]" aria-hidden="true" />
             </Button>
-          </SheetClose>
+          </SheetClose></>
         }
       />
     </SheetContent>
@@ -512,7 +505,6 @@ function SidebarContent({
   items,
   repo,
   inboxCount,
-  unreadCount,
   skillsUpdateAvailable,
   version,
   latestVersion,
@@ -525,8 +517,8 @@ function SidebarContent({
   taskQuickList,
   sessionScope,
   toolsMenu,
-  projectGroups,
-  singleProject,
+  projectHeader,
+  needsYou,
   onNavigate,
   headerAction,
 }: NavProps & {
@@ -538,7 +530,7 @@ function SidebarContent({
   headerAction?: ReactNode
 }) {
   return (
-    <div
+    <SidebarNavigateContext.Provider value={onNavigate}><div
       data-slot="sidebar-content"
       // `@container/sidebar` (#788): the sidebar is no longer one fixed width, so what its rows
       // can afford to paint is a question about THIS column, not about the viewport. Everything
@@ -547,19 +539,7 @@ function SidebarContent({
       className="@container/sidebar flex min-h-0 flex-1 flex-col pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]"
     >
       <div data-slot="sidebar-header" className="shrink-0">
-        <div className="flex min-w-0 items-center gap-[9px] px-4 pt-5 pb-2">
-          <span
-            data-slot="brand-wordmark"
-            className="shrink-0 text-[23px] leading-normal font-semibold tracking-[-0.03em] text-foreground"
-          >
-            Cezarion
-          </span>
-          <div className="ml-auto flex min-h-11 min-w-0 items-center justify-end" data-slot="version-action">
-            {version ? <VersionChip version={version} latestVersion={latestVersion} /> : <span className="min-w-0 flex-1" />}
-            <ApplicationUpdateControl version={version} latestVersion={latestVersion} state={applicationUpdate} onApplyUpdate={onApplyUpdate} onRestart={onRestart} error={applicationUpdateError} busy={applicationUpdateBusy} offline={applicationUpdateOffline} />
-          </div>
-        </div>
-        <ApplicationUpdateFeedback version={version} latestVersion={latestVersion} state={applicationUpdate} error={applicationUpdateError} offline={applicationUpdateOffline} busy={applicationUpdateBusy} />
+        {projectHeader ?? (repo ? <div className="px-[14px] pt-[14px] pb-2.5"><div className="truncate text-sm font-semibold">{repo.name}</div><div className="truncate font-mono text-[10.5px] text-soft-foreground">{repo.branch}</div></div> : null)}
         {headerAction}
       </div>
 
@@ -569,7 +549,7 @@ function SidebarContent({
 
       <div className="flex gap-1.5 px-4 pb-2">
         {/* On /new it wears a selected nav item's fill and ink (#617 01c); its hover is the rows'. */}
-        <Button asChild variant="ghost" className={cn("relative h-[42px] min-w-0 flex-1 justify-start gap-2.5 px-2.5 text-[13px] font-medium text-muted-foreground hover:bg-sidebar-row-hover hover:text-foreground", activeTo === "/new" && SIDEBAR_SELECTED_CLASS)}>
+        <Button asChild variant="ghost" className={cn("relative h-[34px] max-md:min-h-11 rounded-[7px] bg-muted min-w-0 flex-1 justify-start gap-2.5 px-2.5 text-[13px] font-medium text-foreground hover:bg-sidebar-row-hover hover:text-foreground", activeTo === "/new" && SIDEBAR_SELECTED_CLASS)}>
           {/* A Router Link since R4 Step 1.1: the React /new composer is real, so deliberate
               New task affordances stay inside the SPA. Full document loads of /new (the
               bookmarklet contract) land on the shell like any route (static-ui.ts) — the
@@ -577,7 +557,7 @@ function SidebarContent({
           {/* `data-sidebar-item`, not `data-slot`: Slot would let it replace the Button's
               `data-slot="button"`, which is what holds the mobile 44px floor. */}
           <Link to="/new" onClick={onNavigate} data-sidebar-item="new-task" aria-current={activeTo === '/new' ? 'page' : undefined}>
-            <PlusIcon className="size-[18px]" aria-hidden="true" />
+            <PlusIcon className="size-[15px]" aria-hidden="true" />
             New task
             {/* Decorative: the `c`-to-create accelerator is registered in the command palette.
                 (⌘N is also bound there, but only the desktop shell receives it — the browser
@@ -594,82 +574,12 @@ function SidebarContent({
 
 
       {sessionScope ? <div className="shrink-0 px-4 pb-3">{sessionScope}</div> : null}
-      {projectGroups ? (
-        <>
-          {/* Step 3.3: one collapsible group per registered project — nav + task list per group.
-              The whole area scrolls as one (per the sidebar mockup); collapsed groups are one row. */}
-          <div
-            data-slot="project-groups"
-            className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pt-0 pb-2"
-          >
-            <SidebarNavigateContext.Provider value={onNavigate}>
-              {projectGroups}
-            </SidebarNavigateContext.Provider>
-          </div>
-        </>
-      ) : (
-        <div data-slot="single-project-navigation" className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-          {repo ? <div className="mx-4 mb-1 flex min-h-[55px] items-center gap-2 rounded-md bg-muted px-2 text-[13px] font-semibold"><FolderIcon aria-hidden="true" className="size-[18px] shrink-0 text-muted-foreground" /><span className="min-w-0"><span data-slot="repo-chip" className="block truncate">{repo.name}</span><span className="block truncate font-mono text-[12px] font-normal text-soft-foreground">{repo.branch}</span></span></div> : null}
-          <nav aria-label="Main" className="flex flex-col gap-0.5 px-4">
-            {items.map((item) => {
-              const isActive = item.to === activeTo
-              const Icon = item.icon
-              // Link, not NavLink, on purpose. NavLink derives `aria-current` from its own prefix
-              // match against `to`, and that rule is wrong here: it would *not* light Tasks on
-              // /tasks/:id — which the spec requires. `aria-current` cannot be forced past NavLink's
-              // own matching, so the area rule lives in `activeNavPath` and this is a plain Link.
-              return (
-                <Link
-                  key={item.to}
-                  to={item.to}
-                  onClick={onNavigate}
-                  aria-current={isActive ? 'page' : undefined}
-                  className={navRowClass(isActive)}
-                >
-                  <Icon className={navIconClass(isActive)} aria-hidden="true" />
-                  {item.label}
-                  {item.badge === 'inbox-count' && inboxCount ? (
-                    <span
-                      data-slot="nav-badge"
-                      className={NAV_INBOX_COUNT_CLASS}
-                    >
-                      {inboxCount}
-                    </span>
-                  ) : null}
-                  {/* Unread done items (#unread-done-items): a neutral count (#617). It is a
-                      number, not a status, and the status hues now each mean one thing. */}
-                  {item.badge === 'tasks-unread' && unreadCount ? (
-                    <span
-                      data-slot="nav-unread-badge"
-                      title={`${unreadCount} unread finished ${unreadCount === 1 ? 'task' : 'tasks'}`}
-                      className={navUnreadCountClass(isActive)}
-                    >
-                      {unreadCount}
-                    </span>
-                  ) : null}
-                  {item.badge === 'skills-update' && skillsUpdateAvailable ? (
-                    <span
-                      data-slot="nav-update-marker"
-                      className="ml-auto flex items-center"
-                    >
-                      <span className={NAV_UPDATE_DOT_CLASS} aria-hidden="true" />
-                      <span className="sr-only">Skills update available</span>
-                    </span>
-                  ) : null}
-                </Link>
-              )
-            })}
-          </nav>
-
-          {/* The single-project quick-list (Needs you / Working / Recent). */}
-          <div
-            data-slot="task-quick-list"
-            className="px-4 pb-2"
-          >
-            {taskQuickList}
-          </div>
-        </div>
-      )}
+      <SidebarViewTabs items={items} activeTo={activeTo} needsYou={needsYou} inboxCount={inboxCount} skillsUpdateAvailable={skillsUpdateAvailable} onNavigate={onNavigate} />
+      <div data-slot="project-task-navigation" className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-2">
+        <SidebarNavigateContext.Provider value={onNavigate}>
+          <div data-slot="task-quick-list">{taskQuickList}</div>
+        </SidebarNavigateContext.Provider>
+      </div>
 
       <div
         data-slot="sidebar-footer"
@@ -677,86 +587,15 @@ function SidebarContent({
       >
 
         <div data-slot="sidebar-footer-controls" className="flex items-center justify-between gap-1 border-t border-border pt-3">
-          {!singleProject ? <><AllTasksLink onNavigate={onNavigate} /><AddProjectMenu /></> : null}
-          <GlobalSettingsLink onNavigate={onNavigate} />
-          {/* SLOT — Step 4.2 mounts the Tools dropdown (aggregate status dot + tool versions) here. */}
-          <div data-slot="tools-menu" className="shrink-0">
-            {toolsMenu}
+          <div data-slot="tools-menu" className="shrink-0">{toolsMenu}</div>
+          <div className="flex min-w-0 items-center gap-1" data-slot="version-action">
+            {version ? <VersionChip version={version} latestVersion={latestVersion} /> : null}
+            <ApplicationUpdateControl version={version} latestVersion={latestVersion} state={applicationUpdate} onApplyUpdate={onApplyUpdate} onRestart={onRestart} error={applicationUpdateError} busy={applicationUpdateBusy} offline={applicationUpdateOffline} />
           </div>
-          <ThemeToggle />
         </div>
+        <ApplicationUpdateFeedback version={version} latestVersion={latestVersion} state={applicationUpdate} error={applicationUpdateError} offline={applicationUpdateOffline} busy={applicationUpdateBusy} />
       </div>
-    </div>
-  )
-}
-
-/**
- * The way into the global Tasks page (`/tasks`) — every project's work in one table, filtered
- * and grouped by project, tag, status or workflow.
- *
- * A PLAIN router Link, like the footer's global-settings one and for the same reason: the page
- * sits outside every project, and the scoped `Link` this file otherwise uses would prefix it
- * with the active `/p/<id>`, which is not a route. Its own icon (layers, not the per-project
- * checklist) so the two Tasks surfaces never read as the same button.
- */
-function AllTasksLink({ onNavigate }: { onNavigate?: () => void }) {
-  const { pathname } = useLocation()
-  const isActive = pathname === '/tasks'
-  return (
-    <RouterLink
-      to="/tasks"
-      data-slot="all-tasks-link"
-      aria-label="All tasks"
-      title="All tasks"
-      onClick={onNavigate}
-      aria-current={isActive ? 'page' : undefined}
-      // Active, it is a 36px square on the selected nav item's fill with foreground ink (#617
-      // 01c), fixed px so no density shrinks it. Not a Button, so the mobile 44px floor in
-      // `styles/index.css` never reached it; this slice leaves that as it was.
-      className={cn(
-        'selection-row flex size-[36px] shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted',
-        isActive && FOOTER_ICON_ACTIVE_CLASS,
-      )}
-    >
-      <LayersIcon className="size-4 shrink-0" aria-hidden="true" />
-      <span className="sr-only">All tasks</span>
-    </RouterLink>
-  )
-}
-
-/**
- * The footer's way into `/settings/global/*` (multi-project spec, "Sidebar → Footer").
- *
- * A PLAIN router Link, deliberately: global settings sit outside every project, and the scoped
- * `Link` this file otherwise uses would prefix the target with the active `/p/<id>` — a path
- * that is not a route. Icon-only to keep the footer's one row intact; the accessible name and
- * the tooltip both carry the label.
- */
-function GlobalSettingsLink({
-  className,
-  onNavigate,
-}: {
-  className?: string
-  onNavigate?: () => void
-}) {
-  const { pathname } = useLocation()
-  const isActive = pathname === '/settings/global' || pathname.startsWith('/settings/global/')
-  return (
-    // 36px in fixed px so no density shrinks the active square (#617 01c). Its own `data-slot`
-    // replaces the Button's, so the mobile `a[data-slot='button']` floor never reached it; unchanged.
-    <Button asChild variant="ghost" size="icon" className={cn('size-[36px]', isActive && FOOTER_ICON_ACTIVE_CLASS, className)}>
-      <RouterLink
-        to="/settings/global"
-        data-slot="global-settings-link"
-        aria-label="Global settings"
-        title="Global settings"
-        onClick={onNavigate}
-        aria-current={isActive ? 'page' : undefined}
-      >
-        <Settings2Icon className="size-4" aria-hidden="true" />
-        <span className="sr-only">Global settings</span>
-      </RouterLink>
-    </Button>
+    </div></SidebarNavigateContext.Provider>
   )
 }
 
@@ -851,13 +690,13 @@ function CommandPaletteHint() {
       data-slot="command-palette-hint"
       title="Search — command palette (⌘K / Ctrl+K)"
       onClick={() => openCommandPalette()}
-      className="flex h-11 w-full items-center gap-2 rounded-lg border border-border bg-[var(--task-brand-bg)] px-2.5 text-left text-[13px] font-normal text-muted-foreground transition-colors hover:border-[var(--composer-border)] hover:text-foreground md:h-10"
+      className="flex h-[34px] max-md:min-h-11 w-full items-center gap-2 rounded-[7px] border border-border bg-background px-2.5 text-left text-[13px] font-normal text-soft-foreground transition-colors hover:border-border hover:text-foreground"
     >
-      <SearchIcon className="size-4 shrink-0" aria-hidden="true" />
+      <SearchIcon className="size-[14px] shrink-0" aria-hidden="true" />
       <span className="truncate">Search…</span>
       <kbd
         aria-hidden="true"
-        className="ml-auto shrink-0 font-sans text-[12px] font-normal text-soft-foreground"
+        className="ml-auto shrink-0 font-sans text-[11.5px] font-normal text-soft-foreground"
       >
         {commandShortcutHint('k')}
       </kbd>

@@ -3,7 +3,7 @@ import { CheckCheckIcon, CopyIcon, EllipsisIcon, ExternalLinkIcon, SettingsIcon 
 import { useRef, useState } from 'react'
 
 import { openProjectIn } from '@/api/client'
-import { useHealth, useMarkRunSeen, useOpenTargets, useProjects, useRuns } from '@/api/queries'
+import { useHealth, useMarkRunSeen, useOpenTargets, useProjects, useProjectRuns } from '@/api/queries'
 import { useSidebarNavigate } from '@/components/app-shell'
 import { cliTargetRunner, openInIcon } from '@/components/open-in-menu'
 import {
@@ -27,16 +27,17 @@ export function SidebarProjectHeader({ onNavigate }: { onNavigate?: () => void }
   const markRef = useRef<HTMLSpanElement>(null)
   const menuButtonRef = useRef<HTMLButtonElement>(null)
   const [menuOffset, setMenuOffset] = useState(0)
-  const projectId = useActiveProjectId()
+  const activeProjectId = useActiveProjectId()
   const health = useHealth()
   const registry = useProjects()
-  const runs = useRuns()
-  const seen = useMarkRunSeen()
   const [marking, setMarking] = useState(false)
+  const bootId = registry.data?.bootProject ?? health.data?.bootProject
+  const projectId = activeProjectId ?? bootId ?? null
+  const runs = useProjectRuns(projectId ?? 'default', projectId !== null, projectId === bootId)
+  const seen = useMarkRunSeen(projectId ?? 'default', projectId === bootId ? 'default' : projectId ?? 'default')
   const currentProject = useRef(projectId)
   currentProject.current = projectId
   const project = registry.data?.projects.find((entry) => entry.id === projectId)
-  const bootId = registry.data?.bootProject ?? health.data?.bootProject
   const bootRepo = projectId === bootId ? health.data?.repo : undefined
   const root = project?.root ?? bootRepo?.root
   const name = project?.name ?? root?.split(/[\\/]/).filter(Boolean).at(-1)
@@ -100,7 +101,7 @@ export function SidebarProjectHeader({ onNavigate }: { onNavigate?: () => void }
           </DropdownMenuItem>
           <DropdownMenuSeparator className="mx-0" />
           {local && <>
-            <ProjectOpenSubmenu disabled={!root || project?.status === 'missing'} />
+            <ProjectOpenSubmenu projectId={projectId ?? 'default'} disabled={!root || project?.status === 'missing'} />
             <DropdownMenuItem className={itemClass} disabled={!root} onSelect={() => { void copyPath() }}>
               <CopyIcon aria-hidden="true" /> Copy path
             </DropdownMenuItem>
@@ -116,10 +117,10 @@ export function SidebarProjectHeader({ onNavigate }: { onNavigate?: () => void }
 }
 
 /** Mount the machine-level query only when the local handoff capability allows it. */
-function ProjectOpenSubmenu({ disabled }: { disabled: boolean }) {
+function ProjectOpenSubmenu({ disabled, projectId }: { disabled: boolean; projectId: string }) {
   const targets = useOpenTargets()
   const open = useMutation({
-    mutationFn: openProjectIn,
+    mutationFn: (target: string) => openProjectIn(target, projectId),
     onError: (error: Error) => toast(error.message, { tone: 'danger' }),
     onSuccess: () => toast('Opening project folder'),
   })

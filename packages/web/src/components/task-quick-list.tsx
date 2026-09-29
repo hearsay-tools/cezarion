@@ -3,7 +3,7 @@ import { ScaleIcon } from 'lucide-react'
 import { useQueries } from '@tanstack/react-query'
 import * as React from 'react'
 import { queryScope } from '@open-mercato/cezar-api-client'
-import { useHealth, usePinRun, useProjects, useReferenceProjectId, useRuns } from '@/api/queries'
+import { useHealth, usePinRun, useProjectRuns, useProjects, useReferenceProjectId, useRuns } from '@/api/queries'
 import { Link, scopeTo, useNavigate, useProjectMatch } from '@/lib/project-router'
 import type { RunRecord } from '@open-mercato/cezar-api-client'
 import { DiffStatLabel } from '@/components/diff-stat'
@@ -20,6 +20,7 @@ import { shortAge } from '@/lib/format'
 import { isUnread, unreadMarkerTone } from '@/lib/read-state'
 import { directionalUsageText } from '@/components/directional-usage'
 import {
+  capBuckets,
   groupRuns,
   listCounts,
   refPrefixMatches,
@@ -54,6 +55,7 @@ export function TaskQuickList({
   showCost = true,
   onTogglePin,
   showViewControls = true,
+  rowLimit,
 }: {
   runs: RunRecord[]
   view: ListView
@@ -71,9 +73,10 @@ export function TaskQuickList({
    *  belongs to is a container's question — this list is painted for other projects too. */
   onTogglePin?: (run: RunRecord, pinned: boolean) => void
   showViewControls?: boolean
+  rowLimit?: number
 }) {
   const counts = listCounts(runs)
-  const buckets = groupRuns(runs, view)
+  const buckets = rowLimit === undefined ? groupRuns(runs, view) : capBuckets(groupRuns(runs, view), rowLimit)
   // Withheld in the archived view, where `groupRuns` answers one `Archived` bucket and never
   // reads `run.pinned` — the same call the thread header makes on an archived run.
   const pinToggle = view === 'archived' ? undefined : onTogglePin
@@ -831,9 +834,10 @@ function RunRow({
  * stream, Step 3.2), the router for which row is open, and the sidebar Active/Archived context —
  * independent of the Tasks table's own tabs.
  */
-export function TaskQuickListContainer({ showViewControls = true }: { showViewControls?: boolean }) {
-  const runs = useRuns()
-  const pin = usePinRun()
+export function TaskQuickListContainer({ showViewControls = true, projectId: explicitProjectId, boot = false }: { showViewControls?: boolean; projectId?: string; boot?: boolean }) {
+  const scope = explicitProjectId ?? queryScope()
+  const runs = useProjectRuns(scope, true, boot)
+  const pin = usePinRun(scope, boot ? 'default' : scope)
   const health = useHealth()
   const visibility = usageMetricVisibility(health.data)
   const [view, setView] = useListView()
@@ -845,15 +849,13 @@ export function TaskQuickListContainer({ showViewControls = true }: { showViewCo
   const now = useNow(30_000)
   // The sidebar's chips are the same chips as the tables', so they get their status the same way:
   // one batched request for the whole list, mounted here where the list is.
-  const projectId = useReferenceProjectId()
-  const referenceRequests = React.useMemo(
-    () =>
-      projectId === undefined
-        ? []
-        : (runs.data ?? []).flatMap((run) => {
-            return taskReferences(run).map(reference => ({ projectId, kind: reference.kind, number: reference.number }))
-          }),
-    [runs.data, projectId],
+  const referenceProjectId = useReferenceProjectId()
+  const projectId = explicitProjectId ?? referenceProjectId
+  const buckets = capBuckets(groupRuns(runs.data ?? [], view), 10)
+  const referenceRequests = projectId === undefined ? [] : buckets.flatMap(bucket =>
+    bucket.rows.flatMap(row => taskReferences(row.kind === 'run' ? row.run : row.members[0]!).map(
+      reference => ({ projectId, kind: reference.kind, number: reference.number }),
+    )),
   )
 
   // Nothing at all until the list has answered: a skeleton here would be inventing rows, and an
@@ -864,6 +866,7 @@ export function TaskQuickListContainer({ showViewControls = true }: { showViewCo
     <ReferenceStatusProvider projectId={projectId} requests={referenceRequests}>
       <TaskQuickList
         showViewControls={showViewControls}
+        rowLimit={10}
         runs={runs.data}
         view={view}
         onViewChange={setView}
@@ -873,8 +876,7 @@ export function TaskQuickListContainer({ showViewControls = true }: { showViewCo
         now={now}
         showTokens={visibility.tokens}
         showCost={visibility.cost}
-        // This list is the ACTIVE project's, so the mutation needs no explicit project: the
-        // scoped client already addresses the one the URL names.
+        // Bind the mutation to the same explicit project and cache as this list.
         onTogglePin={(run, pinned) =>
           pin.mutate({ id: run.id, pinned })
         }

@@ -370,10 +370,15 @@ Every view is project-scoped:
 
 `<projectId>` is a slug derived from the folder name (`my-app`, then `my-app-2`
 on a collision), and `/p/default/…` always means the project cezar was started
-in. The sidebar shows one collapsible group per project — each with its own nav
-and task list — and the new-task composer names the project it will run in.
+in. The desktop rail selects the project. Its sidebar shows the project header,
+view tabs and task list, with Needs you before Pinned, Working and Recent.
+Inbox and Automations appear in More views when enabled. The project menu
+offers Mark all read and project settings; local mode also offers Open in and
+Copy path. Active/Archived remains below the Tasks heading. The new-task
+composer names the project it will run in.
 
-**Adding a project** — the **+** button beside *New task*:
+**Adding a project** — the **+** button on the desktop rail (or in the mobile
+navigation drawer):
 
 - 📂 **Open local folder…** browses from the configured browse root
   (**Settings → Projects**, default `~/`) in a folder picker and
@@ -426,7 +431,7 @@ piece of work. Tags are trimmed, deduplicated case-insensitively (`API` and
 registry, so they are yours and this machine's, never something added to the
 repo.
 
-**All tasks** — the top item in the sidebar, `/tasks`, or `⌘K → All tasks` —
+**All tasks** — the layers icon on the desktop rail, `/tasks`, or `⌘K → All tasks` —
 then shows every registered project's work in one table:
 
 - **Filter** by tag, status and workflow. Tags are one-click chips; status and

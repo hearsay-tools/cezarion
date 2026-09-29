@@ -1,21 +1,21 @@
-import { useCallback, useRef, useState, type ReactNode } from 'react'
+import { useRef, type ReactNode } from 'react'
 import { useLocation } from 'react-router'
 
-import { useHealth, useProjectRuns, useProjects, useRuns, useSkillsUpdate, useTodos } from '@/api/queries'
+import { useHealth, useProjectRuns, useProjects, useSkillsUpdate, useTodos } from '@/api/queries'
 import type { HealthResponse, SkillsUpdateState } from '@open-mercato/cezar-api-client'
 import { AppShell, type RepoChip } from '@/components/app-shell'
 import { useApplicationUpdate } from '@/components/use-application-update'
 import { CommandPalette } from '@/components/command-palette'
 import { ListViewProvider } from '@/components/list-view'
 import { ProviderBannerContainer } from '@/components/provider-banner-container'
-import { ProjectGroups } from '@/components/project-groups'
+import { MobileWorkspaceNavigation } from '@/components/mobile-workspace-navigation'
+import { SidebarProjectHeader } from '@/components/sidebar-project-header'
 import { ProjectRailContainer } from '@/components/project-rail'
-import { SidebarSessionScope, TaskQuickListContainer } from '@/components/task-quick-list'
+import { TaskQuickListContainer } from '@/components/task-quick-list'
 import { ToolsMenu } from '@/components/tools-menu'
 import { useDocumentTitle } from '@/lib/use-document-title'
 import { useActiveProjectId } from '@/lib/project-router'
-import { unreadDoneCount } from '@/lib/read-state'
-import { runTitle } from '@/lib/task-groups'
+import { listCounts, runTitle } from '@/lib/task-groups'
 import { pageTitleContext } from '@/routes'
 
 /**
@@ -53,10 +53,6 @@ export function skillsUpdateMarkerOf(state: SkillsUpdateState | undefined): bool
  * health subscription remains the live source, with reconnect/visibility HTTP reconciliation.
  */
 export function AppShellContainer({ children }: { children: ReactNode }) {
-  // A new object for every activation, including another click on the current project's mark.
-  const [projectReveal, setProjectReveal] = useState<{ projectId: string } | null>(null)
-  const revealProject = useCallback((projectId: string) => setProjectReveal({ projectId }), [])
-  const finishProjectReveal = useCallback(() => setProjectReveal(null), [])
   const { pathname } = useLocation()
   const projectId = useActiveProjectId()
   const health = useHealth()
@@ -77,10 +73,12 @@ export function AppShellContainer({ children }: { children: ReactNode }) {
   const skillsUpdateAvailable = skillsUpdateMarkerOf(skillsUpdate.data)
   // Unread done items (#unread-done-items) for the Tasks badge. Reads the same active-scope run
   // list the sidebar quick-list and Tasks table already hold — one cache entry, no extra fetch.
-  const runs = useRuns()
   const registry = useProjects().data
   const titleContext = pageTitleContext(pathname)
   const bootProjectId = registry?.bootProject ?? health.data?.bootProject ?? null
+  const sidebarProjectId = projectId ?? bootProjectId ?? 'default'
+  const sidebarBoot = sidebarProjectId === bootProjectId
+  const runs = useProjectRuns(sidebarProjectId, true, sidebarBoot)
   const isBootProject = projectId !== null && projectId === bootProjectId
   const activeProject = registry?.projects.find((project) => project.id === projectId)
   const titleRuns = useProjectRuns(
@@ -107,10 +105,6 @@ export function AppShellContainer({ children }: { children: ReactNode }) {
 
   useDocumentTitle({ projectName, pageLabel })
 
-  // Registered projects share the same card navigation, including a one-project workspace.
-  // While the registry is absent, the presentational shell still renders its repo fallback.
-  const projects = registry && registry.projects.length > 0 ? registry : null
-
   return (
     // The sidebar's Active/Archived filter. The Tasks table owns a separate copy and is not a
     // consumer.
@@ -129,9 +123,6 @@ export function AppShellContainer({ children }: { children: ReactNode }) {
         // `?? null` rather than `?? 0`: no badge while the inbox is unknown, and no badge when it
         // is known to be empty — AppShell renders neither for a falsy count.
         inboxCount={todos.data?.length ?? null}
-        // Same `?? null` honesty: no badge while the list is unknown; a loaded list with none
-        // unread is 0, which AppShell also renders as no badge.
-        unreadCount={runs.data ? unreadDoneCount(runs.data) : null}
         skillsUpdateAvailable={skillsUpdateAvailable}
         // Hidden until health confirms the forge driver (R6 Step 1.1) — same honesty rule as
         // the chips: the nav must not claim a GitHub tab it cannot back. The Tools menu's
@@ -143,29 +134,12 @@ export function AppShellContainer({ children }: { children: ReactNode }) {
         // Hidden unless health reports the opt-in automations capability (#801).
         automationsAvailable={automationsAvailable}
         banner={<ProviderBannerContainer />}
-        singleProject={health.data?.capabilities.singleProject === true}
-        taskQuickList={<TaskQuickListContainer showViewControls={false} />}
-        // Present for every populated registry; `AppShell` renders the fallback nav and the
-        // quick-list above whenever this slot is absent.
-        projectGroups={
-          projects ? (
-            <ProjectGroups
-              projects={projects.projects}
-              bootProjectId={projects.bootProject}
-              revealRequest={projectReveal}
-              onRevealed={finishProjectReveal}
-              // No forge prop: each group gates its own GitHub tab on its registry entry's
-              // `forge` field (#698) — the boot folder's health-level answer says nothing
-              // about the other projects in the workspace.
-              inboxAvailable={inboxAvailable}
-              automationsAvailable={automationsAvailable}
-              inboxCount={todos.data?.length ?? null}
-              skillsUpdateAvailable={skillsUpdateAvailable}
-            />
-          ) : undefined
-        }
-        toolsMenu={<ToolsMenu health={health.data} sessionScope={<SidebarSessionScope />} />}
-        projectRail={<ProjectRailContainer version={shellHealth?.version ?? null} onSelectProject={revealProject} />}
+        taskQuickList={<TaskQuickListContainer projectId={sidebarProjectId} boot={sidebarBoot} />}
+        projectHeader={<SidebarProjectHeader />}
+        mobileWorkspace={<MobileWorkspaceNavigation />}
+        needsYou={listCounts(runs.data ?? []).waiting > 0}
+        toolsMenu={<ToolsMenu health={health.data} />}
+        projectRail={<ProjectRailContainer version={shellHealth?.version ?? null} />}
       >
         {children}
       </AppShell>

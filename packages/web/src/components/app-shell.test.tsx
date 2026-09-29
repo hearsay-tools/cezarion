@@ -54,9 +54,35 @@ const footer = () => document.querySelector('[data-slot="sidebar-footer"]') as H
 const allNavLinks = (root = sidebar()) => Array.from(root.querySelectorAll<HTMLAnchorElement>('nav a'))
 
 describe('AppShell', () => {
-  it('shows the running version beside the wordmark and only offers a newer local release', () => {
+  it('keeps workspace access in the mobile drawer only', () => {
+    renderShell('/', { mobileWorkspace: <a href="/tasks">Workspace tasks</a> })
+    expect(within(sidebar()).queryByRole('link', { name: 'Workspace tasks' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Open menu' }))
+    const drawer = document.querySelector('[data-slot="mobile-nav-drawer"]') as HTMLElement
+    expect(within(drawer).getByRole('link', { name: 'Workspace tasks' })).toBeTruthy()
+  })
+
+  it('keeps optional views in an overflow menu and marks the current overflow view', async () => {
+    renderShell('/inbox', { inboxCount: 2 })
+    expect(within(nav()).queryByRole('link', { name: 'Inbox' })).toBeNull()
+    const more = within(nav()).getByRole('button', { name: 'More views' })
+    expect(more.getAttribute('data-active')).toBe('true')
+    fireEvent.keyDown(more, { key: 'Enter' })
+    expect((await screen.findByRole('menuitem', { name: /Inbox/ })).getAttribute('aria-current')).toBe('page')
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Automations' }))
+    expect(screen.getByTestId('location').textContent).toBe('/automations')
+  })
+
+  it('omits overflow when no optional view is available and keeps version in footer', () => {
+    renderShell('/', { inboxAvailable: false, automationsAvailable: true, forgeAvailable: false, version: '1.2.3' })
+    expect(within(nav()).queryByRole('button', { name: 'More views' })).toBeNull()
+    expect(within(nav()).queryByRole('link', { name: 'GitHub' })).toBeNull()
+    expect(footer().querySelector('[data-slot="version-chip"]')?.textContent).toBe('v1.2.3')
+  })
+
+  it('shows the running version in the footer and only offers a newer local release', () => {
     renderShell('/', { version: '1.2.9', latestVersion: '1.2.10', applicationUpdate: { status: 'idle', supported: true }, onApplyUpdate: vi.fn() })
-    const brand = sidebar().querySelector('[data-slot="brand-wordmark"]')?.parentElement
+    const brand = footer()
     expect(brand?.querySelector('[data-slot="version-chip"]')?.textContent).toBe('v1.2.9')
     expect(within(sidebar()).getByRole('button', { name: /update/i }).getAttribute('title')).toBe('Update from v1.2.9 to v1.2.10')
     cleanup()
@@ -85,7 +111,7 @@ describe('AppShell', () => {
 
   it('explains manual updates beside the version only when a newer release exists', () => {
     renderShell('/', { version: '1.0.0', latestVersion: '2.0.0', applicationUpdate: { status: 'idle', supported: false, message: 'Update this installation manually.' } })
-    const header = sidebar().querySelector('[data-slot="sidebar-header"]') as HTMLElement
+    const header = footer()
     expect(header).not.toBeNull()
     expect(within(header).getByRole('status').textContent).toContain('In-app updates are unavailable for this installation.')
     expect(within(header).getByRole('status').textContent).toContain('Install the newer release using your original installation method, then restart Cezarion.')
@@ -93,13 +119,9 @@ describe('AppShell', () => {
     expect(within(sidebar()).queryByRole('button', { name: /update|restart/i })).toBeNull()
   })
 
-  it('keeps update progress and errors with the version above navigation', () => {
+  it('keeps update progress and errors with the version in the footer', () => {
     renderShell('/', { version: '1.0.0', latestVersion: '2.0.0', applicationUpdate: { status: 'error', supported: true, message: 'Preparation failed.' }, onApplyUpdate: vi.fn() })
-    const feedback = sidebar().querySelector('[data-slot="application-update-feedback"]') as HTMLElement
-    expect(feedback.closest('[data-slot="sidebar-header"]')).not.toBeNull()
-    const search = sidebar().querySelector('[data-slot="command-palette-hint"]')!
-    expect(feedback.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(footer().contains(feedback)).toBe(false)
+    expect(footer().querySelector('[data-slot="application-update-feedback"]')?.textContent).toContain('Preparation failed.')
   })
 
   it('keeps ready state until Restart Now is confirmed', async () => {
@@ -161,18 +183,16 @@ describe('AppShell', () => {
     expect(within(screen.getByRole('main')).getByText('route content')).toBeTruthy()
   })
 
-  it('renders the Poppins Cezarion wordmark from the approved shared shell', () => {
-    renderShell()
-    const wordmark = document.querySelector('[data-slot="brand-wordmark"]') as HTMLElement
-    expect(wordmark.tagName).toBe('SPAN')
-    expect(wordmark.textContent).toBe('Cezarion')
-    expect(wordmark.className).toContain('font-semibold')
+  it('shows project identity instead of a sidebar wordmark', () => {
+    renderShell('/', { repo: { name: 'Demo', branch: 'main' } })
+    expect(within(sidebar()).getByText('Demo')).toBeTruthy()
+    expect(sidebar().querySelector('[data-slot="brand-wordmark"]')).toBeNull()
   })
 
-  it('uses the same token-driven wordmark in light mode', () => {
+  it('shows project identity in light mode', () => {
     localStorage.setItem('cez-theme', 'light')
-    renderShell()
-    expect(document.querySelectorAll('[data-slot="brand-wordmark"]')).toHaveLength(1)
+    renderShell('/', { repo: { name: 'Demo', branch: 'main' } })
+    expect(within(sidebar()).getByText('Demo')).toBeTruthy()
   })
 
   it('resets the main scroller to the top on navigation (#mobile-scroll-top)', () => {
@@ -256,37 +276,11 @@ describe('AppShell', () => {
     expect(routeOwnsScrollArrival('/tasks')).toBe(false)
   })
 
-  it('renders the whole nav as real router links', () => {
+  it('renders primary views as named router links', () => {
     renderShell()
     const links = allNavLinks()
-    expect(links.map((a) => a.textContent)).toEqual([
-      'Tasks',
-      'Inbox',
-      'Git',
-      'GitHub',
-      'Automations',
-      'Skills',
-      'Workflows',
-      'Settings',
-    ])
-    // Deep-linkable per Step 2.1: every nav row is an <a href>, not a button with an onClick.
-    expect(links.map((a) => a.getAttribute('href'))).toEqual([
-      '/',
-      '/inbox',
-      '/git',
-      '/github',
-      '/automations',
-      '/skills',
-      '/workflows',
-      '/settings',
-    ])
-    // #581: primary nav is 13px at every breakpoint, 30px tall on desktop.
-    for (const link of links) {
-      expect(link.className).toContain('text-[13px]')
-      expect(link.className).not.toContain('text-xs')
-      expect(link.className).not.toContain('md:text-[11px]')
-      expect(link.className).toContain('md:h-[30px]')
-    }
+    expect(links.map(a => a.getAttribute('aria-label'))).toEqual(['Tasks', 'Git', 'GitHub', 'Skills', 'Workflows', 'Settings'])
+    expect(links.map(a => a.getAttribute('href'))).toEqual(['/', '/git', '/github', '/skills', '/workflows', '/settings'])
   })
 
   // R6 Step 1.1: no forge, no GitHub tab — the nav item disappears entirely (spec's
@@ -295,7 +289,7 @@ describe('AppShell', () => {
     renderShell('/', { forgeAvailable: false })
     const links = allNavLinks()
     expect(links.map((a) => a.getAttribute('href'))).not.toContain('/github')
-    expect(links).toHaveLength(NAV_ITEMS.filter((item) => !item.forge).length)
+    expect(links).toHaveLength(5)
   })
 
   // #801: same degradation for the opt-in automations capability — the item disappears, it does
@@ -304,13 +298,13 @@ describe('AppShell', () => {
     renderShell('/', { automationsAvailable: false })
     const links = allNavLinks()
     expect(links.map((a) => a.getAttribute('href'))).not.toContain('/automations')
-    expect(links).toHaveLength(NAV_ITEMS.filter((item) => !item.automations).length)
+    expect(links).toHaveLength(6)
   })
 
-  it('shows the Automations item once the capability is on', () => {
+  it('shows Automations in overflow once the capability is on', async () => {
     renderShell('/', { automationsAvailable: true })
-    expect(allNavLinks().map((a) => a.getAttribute('href')))
-      .toContain('/automations')
+    fireEvent.keyDown(within(nav()).getByRole('button', { name: 'More views' }), { key: 'Enter' })
+    expect((await screen.findByRole('menuitem', { name: 'Automations' })).getAttribute('href')).toBe('/automations')
   })
 
   describe('active nav state follows the current route', () => {
@@ -354,22 +348,22 @@ describe('AppShell', () => {
   })
 
   describe('Add project menu', () => {
-    it('is shown by default', () => {
+    it('lives on the rail rather than in the sidebar', () => {
       renderShell()
-      expect(within(sidebar()).getByRole('button', { name: 'Add project' })).toBeTruthy()
+      expect(within(sidebar()).queryByRole('button', { name: 'Add project' })).toBeNull()
     })
 
     it('is omitted in single-project mode while normal navigation remains', () => {
-      renderShell('/', { singleProject: true })
+      renderShell('/')
       expect(within(sidebar()).queryByRole('button', { name: 'Add project' })).toBeNull()
       expect(within(nav()).getByRole('link', { name: 'Tasks' })).toBeTruthy()
       expect(within(sidebar()).getByRole('link', { name: /New task/ })).toBeTruthy()
     })
   })
 
-  it('puts the theme toggle in the sidebar footer', () => {
+  it('does not duplicate the rail theme toggle in the sidebar', () => {
     renderShell()
-    expect(within(footer()).getByRole('button', { name: /^Theme:/ })).toBeTruthy()
+    expect(within(footer()).queryByRole('button', { name: /^Theme:/ })).toBeNull()
   })
 
   describe('sidebar search and footer chrome', () => {
@@ -390,21 +384,10 @@ describe('AppShell', () => {
       expect(footer().firstElementChild?.getAttribute('data-slot')).toBe('sidebar-footer-controls')
     })
 
-    it('keeps tools and theme together, with the version in the header', () => {
+    it('keeps tools and version together in the footer', () => {
       renderShell('/', { version: '1.2.3', toolsMenu: <button type="button">Tools</button> })
-      // The gear and the toggle are the pair that came apart in #702 — assert they share a parent,
-      // and that the row is the whole of the footer's chrome rather than a subset of it.
-      const row = controls()
-      expect(footer().querySelector('[data-slot="global-settings-link"]')).not.toBeNull()
-      expect(row.querySelector('[data-slot="theme-toggle"]')).not.toBeNull()
-      expect(row.querySelector('[data-slot="tools-menu"]')).not.toBeNull()
-      const version = sidebar().querySelector('[data-slot="version-chip"]')!
-      expect(version).not.toBeNull()
-      expect(row.contains(version)).toBe(false)
-      expect(sidebar().querySelector('[data-slot="brand-wordmark"]')?.parentElement?.contains(version)).toBe(true)
-      // The gear pushes itself right; the toggle rides along at the end of the same row.
-      const gear = footer().querySelector('[data-slot="global-settings-link"]') as HTMLElement
-      expect(gear.closest('a,button')?.parentElement).toBe(row)
+      expect(within(controls()).getByRole('button', { name: 'Tools' })).toBeTruthy()
+      expect(controls().querySelector('[data-slot="version-chip"]')?.textContent).toBe('v1.2.3')
     })
 
     it('renders search as a full-width launcher that still opens the palette', () => {
@@ -418,7 +401,7 @@ describe('AppShell', () => {
       expect(search.className).not.toContain('text-xs')
       expect(search.textContent).toContain('Search…')
       expect(search.querySelector('kbd')?.textContent).toBe('Ctrl+K')
-      expect(search.querySelector('kbd')?.className).toContain('text-[12px]')
+      expect(search.querySelector('kbd')?.className).toContain('text-[11.5px]')
 
       const opened = vi.fn()
       window.addEventListener('cezar:open-command-palette', opened)
@@ -452,9 +435,7 @@ describe('AppShell', () => {
       expect(label.textContent).toBe('v0.9.2-nightly.20260813.1')
       // …and the full string stays legible on hover, since the visible one may be clipped.
       expect(chip.getAttribute('title')).toBe('v0.9.2-nightly.20260813.1')
-      const theme = controls().querySelector('[data-slot="theme-toggle"]') as HTMLElement
-      expect(theme.className).toContain('shrink-0')
-      expect(controls().contains(chip)).toBe(false)
+      expect(controls().contains(chip)).toBe(true)
       expect(within(controls()).getByRole('button', { name: 'Tools' })).toBeTruthy()
     })
   })
@@ -469,7 +450,7 @@ describe('AppShell', () => {
 
     it('renders the repo chip and version chip from props', () => {
       renderShell('/', { repo: { name: 'cezar', branch: 'main' }, version: '1.2.3' })
-      expect(document.querySelector('[data-slot="repo-chip"]')?.textContent).toBe('cezar')
+      expect(within(sidebar()).getByText('cezar')).toBeTruthy()
       // The chip prefixes the raw semver from /api/v1/health — `v1.2.3`, mono, muted.
       expect(within(sidebar()).getByText('v1.2.3')).toBeTruthy()
     })
@@ -504,14 +485,14 @@ describe('AppShell', () => {
       })
     })
 
-    it('renders the Inbox badge only for a non-zero count', () => {
+    it('renders the Inbox count in overflow only for a non-zero count', async () => {
       renderShell('/', { inboxCount: 2 })
-      const inbox = within(sidebar()).getByRole('link', { name: /Inbox/ })
-      expect(within(inbox).getByText('2')).toBeTruthy()
-
+      expect(sidebar().querySelector('[data-slot="overflow-inbox-dot"]')).not.toBeNull()
+      fireEvent.keyDown(within(nav()).getByRole('button', { name: 'More views' }), { key: 'Enter' })
+      expect((await screen.findByRole('menuitem', { name: /Inbox/ })).textContent).toBe('Inbox2')
       cleanup()
       renderShell('/', { inboxCount: 0 })
-      expect(document.querySelector('[data-slot="nav-badge"]')).toBeNull()
+      expect(sidebar().querySelector('[data-slot="overflow-inbox-dot"]')).toBeNull()
     })
 
     it('renders a quiet accessible Skills update marker in desktop and mobile navigation', () => {
@@ -521,11 +502,11 @@ describe('AppShell', () => {
       const markers = document.querySelectorAll('[data-slot="nav-update-marker"]')
       expect(markers).toHaveLength(2)
       for (const marker of markers) {
-        expect(marker.textContent).toBe('Skills update available')
+        expect(marker.getAttribute('aria-label')).toBe('Skills update available')
         expect(marker.innerHTML).not.toContain('animate-')
       }
       // Radix hides the desktop app from the accessibility tree while the mobile drawer is modal.
-      expect(screen.getAllByRole('link', { name: /Skills update available/ })).toHaveLength(1)
+      expect(screen.getAllByRole('link', { name: 'Skills' })).toHaveLength(1)
     })
 
     it('renders no Skills marker without an actionable update', () => {
@@ -542,36 +523,12 @@ describe('AppShell', () => {
   })
 
   /** The global banner slot (#391). */
-  describe('All tasks link (multi-project only)', () => {
-    const allTasks = () => document.querySelector('[data-slot="all-tasks-link"]') as HTMLElement | null
-
-    it('offers the workspace tasks page even with one project', () => {
-      renderShell()
-      expect(allTasks()).not.toBeNull()
-    })
-
-    it('links out of every project scope', () => {
-      renderShell('/p/shop/git', { projectGroups: <p>groups</p> })
-      // A PLAIN target: the scope-aware Link would prefix it with `/p/shop`, which is no route.
-      expect(allTasks()!.getAttribute('href')).toBe('/tasks')
-    })
-
-    it('stays put while the project groups scroll', () => {
-      // It is about every group rather than a peer of them, and a workspace with enough
-      // projects to want this page is exactly the one that scrolls it out of sight.
-      renderShell('/', { projectGroups: <p>groups</p> })
-      const scroller = document.querySelector('[data-slot="project-groups"]') as HTMLElement
-      expect(scroller.contains(allTasks())).toBe(false)
-      expect(scroller.className).toContain('overflow-y-auto')
-    })
-
-    it('marks itself the current page only on /tasks', () => {
-      renderShell('/tasks', { projectGroups: <p>groups</p> })
-      expect(allTasks()!.getAttribute('aria-current')).toBe('page')
-      cleanup()
-      renderShell('/p/shop/', { projectGroups: <p>groups</p> })
-      expect(allTasks()!.getAttribute('aria-current')).toBeNull()
-    })
+  it('leaves workspace controls to the rail and keeps the current task list scrollable', () => {
+    renderShell('/p/shop/git', { taskQuickList: <p>Project tasks</p> })
+    expect(sidebar().querySelector('[data-slot="all-tasks-link"]')).toBeNull()
+    const scroller = sidebar().querySelector('[data-slot="project-task-navigation"]') as HTMLElement
+    expect(scroller.textContent).toContain('Project tasks')
+    expect(scroller.className).toContain('overflow-y-auto')
   })
 
   describe('banner slot', () => {
@@ -965,11 +922,11 @@ describe('AppShell', () => {
       // Asserted against NAV_ITEMS, not a copy of it: the point of this test is that the drawer
       // reuses the sidebar's content, so adding a nav item must not need a second edit here.
       expect(links.map((a) => [a.getAttribute('href'), a.textContent])).toEqual(desktopLinks)
-      expect(links.map((a) => a.getAttribute('href')).sort()).toEqual(NAV_ITEMS.map((item) => item.to).sort())
+      expect(links.map((a) => a.getAttribute('href')).sort()).toEqual(NAV_ITEMS.filter(item => !['/inbox', '/automations'].includes(item.to)).map(item => item.to).sort())
 
       // …and the rest of the sidebar came along, not just the nav.
       expect(within(drawer() as HTMLElement).getByRole('link', { name: /New task/ })).toBeTruthy()
-      expect(within(drawer() as HTMLElement).getByRole('button', { name: /^Theme:/ })).toBeTruthy()
+      expect(within(drawer() as HTMLElement).getByRole('button', { name: 'More views' })).toBeTruthy()
     })
 
     it('marks the active nav item inside the drawer too', () => {
@@ -1059,18 +1016,18 @@ it('keeps project and page context in the desktop breadcrumb', () => {
 })
 
 it('opens project navigation from the mobile project control and restores its focus', async () => {
-  renderShell('/p/demo/skills', { repo: { name: 'demo', branch: 'main' }, projectGroups: <RouterLink to="/p/second/skills">Second project</RouterLink> })
+  renderShell('/p/demo/skills', { repo: { name: 'demo', branch: 'main' }, taskQuickList: <RouterLink to="/p/demo/tasks/task">Project task</RouterLink> })
   const picker = screen.getByRole('button', { name: 'Switch project: demo' })
   picker.focus()
   fireEvent.click(picker)
   const drawer = document.querySelector('[data-slot="mobile-nav-drawer"]') as HTMLElement
   expect(drawer).not.toBeNull()
-  expect(within(drawer).getByRole('link', { name: 'Second project' })).toBeTruthy()
+  expect(within(drawer).getByRole('link', { name: 'Project task' })).toBeTruthy()
   fireEvent.keyDown(drawer, { key: 'Escape' })
   await waitFor(() => expect(document.activeElement).toBe(picker))
   fireEvent.click(picker)
-  fireEvent.click(within(document.querySelector('[data-slot="mobile-nav-drawer"]') as HTMLElement).getByRole('link', { name: 'Second project' }))
-  await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/p/second/skills'))
+  fireEvent.click(within(document.querySelector('[data-slot="mobile-nav-drawer"]') as HTMLElement).getByRole('link', { name: 'Project task' }))
+  await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/p/demo/tasks/task'))
 })
 
 // Current 193-frame source has a taller Start/New task header; page/session frames

@@ -820,6 +820,17 @@ describe('TaskQuickListContainer', () => {
     )
   })
 
+  it('caps sidebar history at ten rows while retaining every pinned task', async () => {
+    renderContainer([
+      ...Array.from({ length: 14 }, (_, i) => run({ id: `recent-${i}`, title: `Recent ${i}`, status: 'done' })),
+      run({ id: 'pinned', title: 'Pinned history', status: 'done', pinned: true }),
+      run({ id: 'attention-pin', title: 'Pinned attention', status: 'waiting', pinned: true }),
+    ])
+    await screen.findByText('Pinned history')
+    expect(document.querySelectorAll('[data-slot="task-row"]')).toHaveLength(12)
+    expect(screen.getByText('Pinned attention')).toBeTruthy()
+  })
+
   it('drives the sidebar Active/Archived view', async () => {
     renderContainer([run({ id: 'a', status: 'running' }), run({ id: 'b', status: 'done', archived: true })])
 

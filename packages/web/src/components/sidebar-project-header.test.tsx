@@ -153,3 +153,18 @@ it('uses live boot health for the boot branch while keeping the registered displ
   expect(screen.getByText('/boot · boot-main')).toBeTruthy()
   expect(screen.queryByText(/stale-branch/)).toBeNull()
 })
+
+it('uses URL project runs above the route provider even when the mutable scope is stale', async () => {
+  setApiScope('previous')
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
+  client.setQueryData(queryKeys.health, { bootProject: 'boot', capabilities: { localHandoff: true } })
+  client.setQueryData(workspaceQueryKeys.projects, { bootProject: 'boot', projects: [project] })
+  client.setQueryData(['previous', 'runs', 'list'], [{ id: 'wrong', status: 'done', finishedAt }])
+  client.setQueryData(['other', 'runs', 'list'], runs)
+  render(<QueryClientProvider client={client}><MemoryRouter initialEntries={['/p/other/git']}><SidebarProjectHeader /></MemoryRouter></QueryClientProvider>)
+  const mark = await menu()
+  expect(mark.textContent).toContain('2 unread')
+  fireEvent.click(mark)
+  await waitFor(() => expect(requests.filter(r => r.method === 'POST').map(r => r.url)).toEqual(['/api/v1/p/other/runs/done/read', '/api/v1/p/other/runs/failed/read']))
+  expect(client.getQueryData<{ seenAt?: string }[]>(['previous', 'runs', 'list'])?.[0]?.seenAt).toBeUndefined()
+})

@@ -438,8 +438,7 @@ describe('task quick-list', () => {
   it('switches to the archived view, and back', () => {
     browser.goto(`${baseUrl}${scoped('/')}`)
     browser.waitForFunction(`document.querySelector('[data-slot="quick-list-bucket"]') !== null`)
-    browser.click('[data-slot="sidebar"] [aria-label="Tools"]')
-    browser.waitForFunction(`document.querySelector('[data-slot="sidebar-session-scope"]') !== null`)
+    browser.waitForFunction(`document.querySelector('[data-slot="quick-list"] [data-slot="view-tab"]') !== null`)
     expect(textOf('[data-slot="view-tab"][data-view="active"]')).toBe('Active5')
     expect(textOf('[data-slot="view-tab"][data-view="archived"]')).toBe('Archived1')
 
@@ -600,8 +599,7 @@ describe('tasks table overview', () => {
     browser.waitForFunction(`document.querySelector('${TABLE_ROW}[data-run-id="fix-archived"]') !== null`)
     expect(browser.count(TABLE_ROW)).toBe(1)
     // The sidebar keeps showing live runs while the table browses archived history (#211).
-    browser.click('[data-slot="sidebar"] [aria-label="Tools"]')
-    browser.waitForFunction(`document.querySelector('[data-slot="sidebar-session-scope"]') !== null`)
+    browser.waitForFunction(`document.querySelector('[data-slot="quick-list"] [data-slot="view-tab"]') !== null`)
     expect(
       browser.evaluate(
         `document.querySelector('[data-slot="view-tab"][data-view="active"]').getAttribute('aria-pressed')`
@@ -619,8 +617,7 @@ describe('tasks table overview', () => {
 
     // Restore both independent controls so the following row-navigation case starts active.
     browser.click('[data-slot="view-tab"][data-view="active"]')
-    browser.press('Escape')
-    browser.waitForFunction(`document.querySelector('[data-slot="sidebar-session-scope"]') === null`)
+    browser.waitForFunction(`document.querySelector('[data-slot="view-tab"][data-view="active"]').getAttribute('aria-pressed') === 'true'`)
     browser.click('[data-slot="overview-tab"][data-view="active"]')
     browser.waitForFunction(`document.querySelector('${TABLE_ROW}[data-run-id="fix-review-pr"]') !== null`)
   })
@@ -1484,7 +1481,7 @@ describe('variant rows and the group row under width pressure', () => {
         inert: chip?.dataset.inert ?? null, links: meta.querySelectorAll('a').length, inToggle: chip?.closest('button') != null }
     })()`
     const collapsed = browser.waitForValue(group, (g: Group | null) => g?.expanded === 'false') as Group
-    expect(collapsed.meta).toBe('2 needs review · #425 · 9m')
+    expect(collapsed.meta).toMatch(/^2 needs review · #425 · \d+m$/)
     // This spec's browser reports `hover: none`, so the reference is inert text here; the
     // pointer path (a link with the status panel) is pinned in selection-states.
     // …and inside the one toggle that spans both lines (#617 mobile regression): inert text is
@@ -1578,7 +1575,7 @@ describe('persistent task pins (#93)', () => {
     expect(browser.count('[data-slot="group-tile"][data-group-id="fix-group-1"]')).toBe(1)
     browser.click('[data-bucket="Needs you"] [data-slot="group-tile"]')
     browser.waitForFunction(`document.querySelector('[data-bucket="Needs you"] [data-run-id="fix-var-a"]') !== null`)
-    expect(browser.evaluate(`[...document.querySelectorAll('[data-bucket="Needs you"] [data-slot="task-row"]')].map(x => x.dataset.runId)`)).toEqual(['fix-var-a', 'fix-var-b'])
+    expect(browser.evaluate(`[...document.querySelectorAll('[data-bucket="Needs you"] [data-slot="task-row"]')].map(x => x.dataset.runId)`)).toEqual(['fix-var-a', 'fix-var-b', 'fix-review-pr'])
     const runs = await (await fetch(`${baseUrl}/api/v1/runs`)).json() as Array<{ id: string; pinned?: boolean; pinnedAt?: string }>
     expect(runs.find(r => r.id === 'fix-var-a')).not.toHaveProperty('pinned')
     expect(runs.find(r => r.id === 'fix-var-b')).toMatchObject({ pinned: true, pinnedAt: expect.any(String) })

@@ -93,15 +93,13 @@ describe('mobile Tasks controls', () => {
     browser.click(tab('archived'))
     browser.click('[aria-label="Open menu"]')
     settle(drawer)
-    browser.click(`${drawer} [aria-label="Tools"]`)
-    settle('[data-slot="sidebar-session-scope"]')
-    const drawerTab = '[data-slot="sidebar-session-scope"] [data-slot="view-tab"]'
+    settle(`${drawer} [data-slot="quick-list"]`)
+    const drawerTab = `${drawer} [data-slot="view-tab"]`
     expect(browser.evaluate(`document.querySelector('${drawerTab}[data-view="active"]').getAttribute('aria-pressed')`)).toBe('true')
     browser.click(`${drawerTab}[data-view="archived"]`)
     expect(browser.evaluate(`document.querySelector('${tab('archived')}').getAttribute('aria-pressed')`)).toBe('true')
     browser.click(`${drawerTab}[data-view="active"]`)
-    browser.press('Escape')
-    browser.waitForFunction(`document.querySelector('[data-slot="tools-menu-content"]') === null`)
+    browser.waitForFunction(`document.querySelector('${drawerTab}[data-view="active"]').getAttribute('aria-pressed') === 'true'`)
     browser.click('[aria-label="Close menu"]')
     browser.waitForFunction(`document.querySelector('${drawer}') === null`)
     expect(browser.evaluate(`document.querySelector('${tab('archived')}').getAttribute('aria-pressed')`)).toBe('true')

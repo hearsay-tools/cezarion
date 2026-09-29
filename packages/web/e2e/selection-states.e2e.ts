@@ -136,7 +136,12 @@ function checkNavSelection(variant: ContrastQaVariant, { base, projectId, nav: n
     browser.waitForFunction(`document.querySelector('[data-slot="mobile-top-bar"]') !== null`)
     applyContrastQaVariant(browser, variant)
     browser.moveTo(0, 0)
-    if (mobile) browser.click('[data-slot="mobile-top-bar"] button')
+    if (mobile) {
+      browser.click('[data-slot="mobile-top-bar"] button')
+      // The compact row is ready before the drawer finishes sliding; sample pointer
+      // coordinates only once its frame has settled.
+      browser.waitForStable(`document.querySelector('[data-slot="mobile-nav-drawer"]')?.getBoundingClientRect().left ?? null`, { holdMs: 150, matcher: value => value === 0 })
+    }
     browser.waitForFunction(`document.querySelector(${JSON.stringify(container + ready)})?.getBoundingClientRect().width > 0`)
   }
   const record = (target: string, state: string, min: number, property = 'color', source: 'element' | 'parent' = 'element') => {
@@ -265,7 +270,8 @@ function checkNavBody(variant: ContrastQaVariant, { base, projectId, container, 
     applyContrastQaVariant(browser, variant)
     const gear = '[data-slot="rail-global-settings"][aria-current="page"]'
     const footer = browser.waitForValue(ink(gear), (v: Ink | null) => v !== null && v.bg === fill.selected) as Ink
-    expect({ width: footer.width, height: footer.height, icon: footer.icon }).toEqual({ width: 36, height: 36, icon: footer.ink })
+    const railControlSize = variant.density === 'ultra' ? 27 : 36
+    expect({ width: footer.width, height: footer.height, icon: footer.icon }).toEqual({ width: railControlSize, height: railControlSize, icon: footer.ink })
     record(`${gear} svg`, 'active footer icon', 3)
   }
 }
@@ -280,7 +286,7 @@ function checkNeedsYouDot(_variant: ContrastQaVariant, { container, open, record
     const el = document.querySelector(${JSON.stringify(dot)}); if (!el) return null
     ${resolveFn}
     const r = el.getBoundingClientRect(), s = getComputedStyle(el)
-    return { width: r.width, height: r.height, bg: s.backgroundColor, pending: resolve('var(--pending)') }
+    return { width: r.width, height: r.height, bg: s.backgroundColor, pending: resolve('var(--pending-strong)') }
   })()`) as { width: number; height: number; bg: string; pending: string }
   expect({ width: facts.width, height: facts.height, bg: facts.bg }).toEqual({ width: 7, height: 7, bg: facts.pending })
   record(dot, 'needs-you marker on inactive Tasks', 3, 'background-color', 'parent')

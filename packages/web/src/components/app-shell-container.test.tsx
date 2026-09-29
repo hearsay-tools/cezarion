@@ -4,6 +4,7 @@ import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { createQueryClient } from '@/api/query-client'
+import { setApiScope } from '@open-mercato/cezar-api-client'
 import { workspaceQueryKeys } from '@/api/queries'
 import type {
   HealthResponse,
@@ -29,6 +30,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
+  setApiScope(null)
   fetchMock.mockReset()
   vi.unstubAllGlobals()
 })
@@ -123,9 +125,9 @@ function run(overrides: Partial<RunRecord> = {}): RunRecord {
   }
 }
 
-const repoChip = () => document.querySelector('[data-slot="repo-chip"]')
+const repoChip = () => document.querySelector('[data-slot="project-header-name"]')
 const versionChip = () => document.querySelector('[data-slot="version-chip"]')
-const navBadge = () => document.querySelector('[data-slot="nav-badge"]')
+const navBadge = () => document.querySelector('[data-slot="overflow-inbox-dot"]')
 
 describe('repoChipOf', () => {
   it.each([
@@ -167,7 +169,7 @@ describe('sidebar wiring', () => {
     serve({ '/api/v1/health': HEALTH, '/api/v1/todos': [] })
     renderShell()
 
-    await waitFor(() => expect(repoChip()).not.toBeNull())
+    await waitFor(() => expect(repoChip()?.textContent).toBe('cezar'))
     // Basename of the root, then the branch — not the whole path.
     expect(repoChip()?.textContent).toBe('cezar')
     expect(versionChip()?.textContent).toBe('v0.1.3')
@@ -178,8 +180,8 @@ describe('sidebar wiring', () => {
     renderShell()
 
     await waitFor(() => expect(navBadge()).not.toBeNull())
-    expect(navBadge()?.textContent).toBe('2')
-    expect(screen.getByRole('link', { name: /Inbox/ })).toBeTruthy()
+    fireEvent.keyDown(screen.getByRole('button', { name: 'More views' }), { key: 'Enter' })
+    expect((await screen.findByRole('menuitem', { name: /Inbox/ })).textContent).toBe('Inbox2')
   })
 
   // #471 — the global inbox is opt-in; the shell must not offer what the server cannot fill.
@@ -235,7 +237,8 @@ describe('sidebar wiring', () => {
     renderShell()
 
     await waitFor(() => expect(versionChip()).not.toBeNull())
-    expect(screen.getByRole('link', { name: /Automations/ })).toBeTruthy()
+    fireEvent.keyDown(screen.getByRole('button', { name: 'More views' }), { key: 'Enter' })
+    expect(await screen.findByRole('menuitem', { name: 'Automations' })).toBeTruthy()
   })
 
   it('renders no badge for an empty inbox', async () => {
@@ -253,7 +256,7 @@ describe('sidebar wiring', () => {
     fetchMock.mockImplementation(() => new Promise<Response>(() => {}))
     renderShell()
 
-    expect(repoChip()).toBeNull()
+    expect(repoChip()?.textContent).toMatch(/Loading project|Project unavailable/)
     expect(versionChip()).toBeNull()
     expect(navBadge()).toBeNull()
     // …and the app itself is up. The chips being empty is not a loading screen.
@@ -268,7 +271,7 @@ describe('sidebar wiring', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalled())
     // The honest empty state: cezar cannot answer what repo it is on, so it says nothing.
     // It does not invent one, and it does not take the whole cockpit down with it.
-    expect(repoChip()).toBeNull()
+    expect(repoChip()?.textContent).toMatch(/Loading project|Project unavailable/)
     expect(versionChip()).toBeNull()
     expect(screen.getByText('route content')).toBeTruthy()
   })
@@ -288,9 +291,9 @@ describe('sidebar wiring', () => {
     })
     renderShell()
 
-    await waitFor(() => expect(document.querySelector('[data-slot="project-group-header"]')).not.toBeNull())
-    expect(screen.getByRole('navigation', { name: 'cezar navigation' })).toBeTruthy()
-    expect(document.querySelectorAll('[data-slot="project-group"]')).toHaveLength(1)
+    await waitFor(() => expect(repoChip()?.textContent).toBe('cezar'))
+    expect(screen.getByRole('navigation', { name: 'Main' })).toBeTruthy()
+    expect(document.querySelectorAll('[data-slot="project-header"]')).toHaveLength(1)
   })
 
   it('hides add-project chrome when health reports single-project mode', async () => {
@@ -308,10 +311,10 @@ describe('sidebar wiring', () => {
     await waitFor(() => expect(versionChip()).not.toBeNull())
     expect(screen.queryByRole('button', { name: 'Add project' })).toBeNull()
     expect(screen.getByRole('link', { name: /New task/ })).toBeTruthy()
-    expect(screen.getByRole('navigation', { name: 'cezar navigation' })).toBeTruthy()
+    expect(screen.getByRole('navigation', { name: 'Main' })).toBeTruthy()
   })
 
-  it('renders one collapsible group per project once the workspace has two', async () => {
+  it('renders one current-project sidebar with both projects on the rail', async () => {
     serve({
       '/api/v1/health': HEALTH,
       '/api/v1/todos': [],
@@ -325,17 +328,13 @@ describe('sidebar wiring', () => {
     })
     renderShell()
 
-    await waitFor(() =>
-      expect(document.querySelectorAll('[data-slot="project-group"]')).toHaveLength(2),
-    )
-    // The flat nav and the shared quick-list step aside — each group brings its own.
-    expect(screen.queryByRole('navigation', { name: 'Main' })).toBeNull()
-    expect(document.querySelector('[data-slot="task-quick-list"]')).toBeNull()
-    // …and so does the repo chip, which the boot project's own group header now carries.
-    expect(repoChip()).toBeNull()
+    await waitFor(() => expect(document.querySelectorAll('[data-slot="rail-project"]')).toHaveLength(2))
+    expect(screen.getByRole('navigation', { name: 'Main' })).toBeTruthy()
+    expect(document.querySelector('[data-slot="task-quick-list"]')).not.toBeNull()
+    expect(repoChip()?.textContent).toBe('cezar')
   })
 
-  it('keeps Inbox and Automations inside the only project card', async () => {
+  it('scopes overflow views to the only project', async () => {
     serve({
       '/api/v1/health': {
         ...HEALTH,
@@ -345,15 +344,15 @@ describe('sidebar wiring', () => {
       '/api/v1/projects': { projects: [{ ...PROJECT, forge: 'github' }], bootProject: 'cezar', projectsDir: '/home/me/cezar/projects' },
       '/api/v1/runs': [],
     })
-    renderShell()
-    await waitFor(() => expect(document.querySelector('[data-slot="project-group"][data-project="cezar"]')).not.toBeNull())
+    renderShell('/p/cezar/')
+    await waitFor(() => expect(repoChip()?.textContent).toBe('cezar'))
     expect(screen.queryByRole('navigation', { name: 'Workspace' })).toBeNull()
-    const cezar = within(document.querySelector('[data-slot="project-group"][data-project="cezar"]') as HTMLElement)
-    expect(cezar.getByRole('link', { name: 'Inbox' }).getAttribute('href')).toBe('/p/cezar/inbox')
-    expect(cezar.getByRole('link', { name: 'Automations' }).getAttribute('href')).toBe('/p/cezar/automations')
+    fireEvent.keyDown(screen.getByRole('button', { name: 'More views' }), { key: 'Enter' })
+    expect((await screen.findByRole('menuitem', { name: /Inbox/ })).getAttribute('href')).toBe('/p/cezar/inbox')
+    expect(screen.getByRole('menuitem', { name: 'Automations' }).getAttribute('href')).toBe('/p/cezar/automations')
   })
 
-  it('keeps Inbox and Automations inside project groups, not as workspace links', async () => {
+  it('scopes overflow views to the current project in a workspace', async () => {
     serve({
       '/api/v1/health': {
         ...HEALTH,
@@ -371,15 +370,15 @@ describe('sidebar wiring', () => {
       '/api/v1/workspace/ui-state': {},
       '/api/v1/p/cezar/runs': [],
     })
-    renderShell()
-    await waitFor(() => expect(document.querySelectorAll('[data-slot="project-group"]')).toHaveLength(2))
+    renderShell('/p/cezar/')
+    await waitFor(() => expect(repoChip()?.textContent).toBe('cezar'))
     expect(screen.queryByRole('navigation', { name: 'Workspace' })).toBeNull()
-    const cezar = within(document.querySelector('[data-slot="project-group"][data-project="cezar"]') as HTMLElement)
-    expect(cezar.getByRole('link', { name: 'Inbox' }).getAttribute('href')).toBe('/p/cezar/inbox')
-    expect(cezar.getByRole('link', { name: 'Automations' }).getAttribute('href')).toBe('/p/cezar/automations')
+    fireEvent.keyDown(screen.getByRole('button', { name: 'More views' }), { key: 'Enter' })
+    expect((await screen.findByRole('menuitem', { name: /Inbox/ })).getAttribute('href')).toBe('/p/cezar/inbox')
+    expect(screen.getByRole('menuitem', { name: 'Automations' }).getAttribute('href')).toBe('/p/cezar/automations')
   })
 
-  it('keeps the shared archive filter reachable in Tools for a multi-project session tree', async () => {
+  it('keeps the archive filter beside the current project tasks', async () => {
     const active = run({ id: 'active-session', titleSummary: 'Current session' })
     const archived = run({ id: 'archived-session', titleSummary: 'Archived session', status: 'done', archived: true })
     serve({
@@ -395,10 +394,9 @@ describe('sidebar wiring', () => {
     })
     renderShell('/p/cezar/new')
     await screen.findByRole('link', { name: /Current session/ })
-    fireEvent.pointerDown(screen.getByRole('button', { name: 'Tools' }), { button: 0, ctrlKey: false })
     const archivedTab = await screen.findByRole('button', { name: /^Archived/ })
-    const tree = document.querySelector('[data-slot="project-groups"]')!
-    expect(tree.contains(archivedTab)).toBe(false)
+    const tree = document.querySelector('[data-slot="project-task-navigation"]')!
+    expect(tree.contains(archivedTab)).toBe(true)
     fireEvent.click(archivedTab)
     await waitFor(() => expect(document.querySelector('[data-run-id="archived-session"]')).not.toBeNull())
     expect(screen.queryByRole('link', { name: /Current session/ })).toBeNull()
@@ -406,7 +404,7 @@ describe('sidebar wiring', () => {
     await waitFor(() => expect(document.querySelector('[data-run-id="active-session"]')).not.toBeNull())
   })
 
-  it('counts Active/Archived in Tools across every expanded project, not only boot', async () => {
+  it('counts only current-project sessions in Active/Archived', async () => {
     localStorage.setItem('cez-sidebar-collapsed', JSON.stringify({ shop: false }))
     const bootActive = run({ id: 'boot-active', titleSummary: 'Boot active' })
     const shopWaiting = run({ id: 'shop-wait', titleSummary: 'Shop waiting', status: 'waiting' })
@@ -424,12 +422,11 @@ describe('sidebar wiring', () => {
       '/api/v1/workspace/ui-state': {},
     })
     renderShell('/p/cezar/new')
-    await screen.findByRole('link', { name: /Shop waiting/ })
-    fireEvent.pointerDown(screen.getByRole('button', { name: 'Tools' }), { button: 0, ctrlKey: false })
-    const scope = await screen.findByRole('group', { name: 'Session scope' })
-    expect(within(scope).getByRole('button', { name: /^Active/ }).textContent).toContain('2')
-    fireEvent.click(within(scope).getByRole('button', { name: /^Archived/ }))
-    expect(scope.querySelector('[data-slot="waiting-dot"]')).not.toBeNull()
+    await screen.findByRole('link', { name: /Boot active/ })
+    expect(screen.queryByRole('link', { name: /Shop waiting/ })).toBeNull()
+    const list = within(document.querySelector('[data-slot="quick-list"]') as HTMLElement)
+    expect(list.getByRole('button', { name: /^Active/ }).textContent).toContain('1')
+    expect(list.getByRole('button', { name: /^Archived/ }).textContent).toBe('Archived')
     localStorage.removeItem('cez-sidebar-collapsed')
   })
 
@@ -441,7 +438,7 @@ describe('sidebar wiring', () => {
     // real and must not vanish with it.
     await waitFor(() => expect(versionChip()).not.toBeNull())
     expect(versionChip()?.textContent).toBe('v0.1.3')
-    expect(repoChip()).toBeNull()
+    expect(repoChip()?.textContent).toMatch(/Loading project|Project unavailable/)
   })
 
   it('wires the provider query into the AppShell banner slot', async () => {
@@ -662,29 +659,14 @@ describe('project rail wiring', () => {
     })
     renderShell('/p/cezar/')
     await rail()
-    const header = (id: string) => document.querySelector(`[data-slot="project-group"][data-project="${id}"] [data-slot="project-group-header"]`)!
     const selectShop = () => fireEvent.click(within(railMark('shop')).getByRole('link'))
-    try {
-      selectShop()
-      await waitFor(() => expect(header('shop').getAttribute('aria-expanded')).toBe('true'))
-      expect(header('cezar').getAttribute('aria-expanded')).toBe('false')
-      expect(header('third').getAttribute('aria-expanded')).toBe('false')
-      expect(JSON.parse(localStorage.getItem('cez-sidebar-collapsed')!)).toEqual({ cezar: true, shop: false, third: true })
-      expect(within(railMark('shop')).getByRole('link').getAttribute('aria-current')).toBe('page')
-
-      // Manual toggles stay independent; the next rail activation reapplies the accordion.
-      fireEvent.click(header('shop'))
-      fireEvent.click(header('cezar'))
-      expect(header('shop').getAttribute('aria-expanded')).toBe('false')
-      expect(header('cezar').getAttribute('aria-expanded')).toBe('true')
-      selectShop()
-      await waitFor(() => expect(header('shop').getAttribute('aria-expanded')).toBe('true'))
-      expect(header('cezar').getAttribute('aria-expanded')).toBe('false')
-      selectShop()
-      expect(header('shop').getAttribute('aria-expanded')).toBe('true')
-    } finally {
-      localStorage.removeItem('cez-sidebar-collapsed')
-    }
+    selectShop()
+    await waitFor(() => expect(repoChip()?.textContent).toBe('shop'))
+    expect(within(railMark('shop')).getByRole('link').getAttribute('aria-current')).toBe('page')
+    expect(document.querySelectorAll('[data-slot="project-header"]')).toHaveLength(1)
+    selectShop()
+    expect(repoChip()?.textContent).toBe('shop')
+    localStorage.removeItem('cez-sidebar-collapsed')
   })
 
   it.each([{ ctrlKey: true }, { metaKey: true }, { shiftKey: true }, { altKey: true }])(
@@ -703,7 +685,7 @@ describe('project rail wiring', () => {
       try {
         fireEvent.click(within(railMark('shop')).getByRole('link'), modifier)
         expect(JSON.parse(localStorage.getItem('cez-sidebar-collapsed')!)).toEqual({ cezar: false, shop: true })
-        expect(screen.getByRole('button', { name: 'Toggle cezar' }).getAttribute('aria-expanded')).toBe('true')
+        expect(repoChip()?.textContent).toBe('cezar')
       } finally {
         localStorage.removeItem('cez-sidebar-collapsed')
       }
@@ -896,4 +878,22 @@ describe('project rail wiring', () => {
     expect(within(nav).queryByRole('link', { name: 'All projects' })).toBeNull()
     expect(within(nav).getByRole('link', { name: 'Global settings' })).toBeTruthy()
   })
+})
+
+it('keeps sidebar data on the URL project when rendered above the route scope provider', async () => {
+  setApiScope('previous')
+  const client = createQueryClient()
+  client.setQueryData(['previous', 'runs', 'list'], [run({ id: 'wrong', title: 'Previous project task', titleSummary: undefined })])
+  client.setQueryData(['shop', 'runs', 'list'], [run({ id: 'right', title: 'Selected project task', titleSummary: undefined, status: 'waiting' })])
+  serve({
+    '/api/v1/health': HEALTH,
+    '/api/v1/todos': [],
+    '/api/v1/projects': { bootProject: 'cezar', projects: [PROJECT, { ...PROJECT, id: 'shop', name: 'Shop' }] },
+    '/api/v1/p/shop/runs': [run({ id: 'right', title: 'Selected project task', titleSummary: undefined, status: 'waiting' })],
+  })
+  renderShell('/p/shop/git', client)
+  expect(await screen.findByText('Selected project task')).toBeTruthy()
+  expect(screen.queryByText('Previous project task')).toBeNull()
+  expect(document.querySelector('[data-slot="nav-needs-you-dot"]')).not.toBeNull()
+  expect(document.querySelector('[data-slot="task-row"] a')?.getAttribute('href')).toBe('/p/shop/tasks/right')
 })

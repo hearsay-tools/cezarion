@@ -196,6 +196,10 @@ describe('density-independent mobile action targets (#166)', () => {
             expect(sample.ratio, `${accent} ${selector}: ${sample.foreground} on ${sample.background}`).toBeGreaterThanOrEqual(3)
           }
           browser.screenshot(`${artifacts}/focus-${density}-${theme}-${accent}.png`, { viewport: true })
+          // Icon-only view tabs now have tooltips. Let the departed tab's tooltip
+          // close before Escape addresses the drawer rather than that nested layer.
+          browser.moveTo(0, 0)
+          browser.waitForFunction(`document.querySelector('[data-slot="tooltip-content"]') === null`)
           browser.press('Escape')
           browser.waitForFunction(`document.querySelector('[data-slot="mobile-nav-drawer"]') === null`)
         }
