@@ -1,5 +1,6 @@
 import { ChevronDownIcon, FolderIcon, MenuIcon, PlusIcon, SearchIcon, ShieldCheckIcon } from '@/components/design-icons'
 
+import { ChevronLeftIcon } from 'lucide-react'
 import * as React from 'react'
 import type { ReactNode } from 'react'
 import { Link as RouterLink, matchPath, useLocation } from 'react-router'
@@ -8,7 +9,8 @@ import { openCommandPalette } from '@/components/command-palette'
 import { DrawerGlobal, DrawerIdentity, DrawerProjects, MenuButtonPills, elsewhereSignal, menuButtonLabel, type MobileProjectNav } from '@/components/mobile-projects'
 import { projectInitials, type ProjectSignal } from '@/lib/project-signal'
 import { commandShortcutHint } from '@/lib/use-command-shortcut'
-import { Link, pathnameProjectId, stripProjectPrefix } from '@/lib/project-router'
+import { Link, pathnameProjectId, stripProjectPrefix, useNavigate } from '@/lib/project-router'
+import { MobileRunBarSlotContext } from '@/components/mobile-run-bar'
 import { StatusDot } from '@/components/status-dot'
 import { SidebarViewTabs } from '@/components/sidebar-view-tabs'
 import { ApplicationUpdateControl, ApplicationUpdateFeedback } from '@/components/application-update-control'
@@ -185,6 +187,10 @@ export function AppShell({
   const showTabBar = !isPushedRoute(pathname) && !keyboardOpen
   const tabBarSignal = currentProjectId !== null ? mobileProjects?.signals?.get(currentProjectId) : undefined
   const [menuOpen, setMenuOpen] = React.useState(false)
+  // The pushed task screen (#621): its top bar carries back / title / state / run actions, and the
+  // routed `RunHeader` fills the slot below through `MobileRunBarSlotContext`.
+  const pushed = isPushedRoute(pathname)
+  const [runBarSlot, setRunBarSlot] = React.useState<HTMLElement | null>(null)
   const mobileNavTrigger = React.useRef<HTMLButtonElement | null>(null)
   const mainRef = React.useRef<HTMLElement>(null)
   const previousPathname = React.useRef<string | null>(null)
@@ -282,7 +288,7 @@ export function AppShell({
         }} />
 
         <div className="grid min-w-0 flex-1 grid-rows-[auto_auto_1fr_auto] overflow-hidden">
-          <MobileTopBar title={current?.label ?? 'cezar'} repo={repo} elsewhere={elsewhereSignal(mobileProjects, currentProjectId)} onTrigger={(button) => { mobileNavTrigger.current = button }} />
+          <MobileTopBar title={current?.label ?? 'cezar'} pushed={pushed ? { compare: areaPathname.startsWith('/compare/'), onSlot: setRunBarSlot } : null} repo={repo} elsewhere={elsewhereSignal(mobileProjects, currentProjectId)} onTrigger={(button) => { mobileNavTrigger.current = button }} />
           <header data-slot="desktop-breadcrumb" className={cn("row-start-1 hidden min-w-0 items-center gap-3 border-b border-border text-[13px] text-muted-foreground md:flex", areaPathname === '/new' ? 'h-[72px] px-11' : 'h-16 px-9')}>
             <FolderIcon aria-hidden="true" className="size-4 shrink-0" />
             {(breadcrumb?.project ?? repo?.name) ? <><span className="truncate font-medium text-foreground">{breadcrumb?.project ?? repo?.name}</span><span aria-hidden="true">/</span></> : null}
@@ -302,7 +308,9 @@ export function AppShell({
             data-slot="main"
             className="row-start-3 min-h-0 overflow-y-auto overscroll-contain"
           >
-            {children}
+            <MobileRunBarSlotContext.Provider value={pushed ? runBarSlot : null}>
+              {children}
+            </MobileRunBarSlotContext.Provider>
           </main>
 
           {/* Row 4 reserves whichever obstruction is taller: the home indicator or the visual
@@ -703,13 +711,17 @@ function VersionChip({ version, latestVersion }: { version: string; latestVersio
 }
 
 /** Mobile chrome (<md): the sidebar's replacement. Its menu button and project button open `MobileNavDrawer`. */
-function MobileTopBar({ title, repo, elsewhere, onTrigger }: {
+function MobileTopBar({ title, pushed, repo, elsewhere, onTrigger }: {
   title: string
+  /** Non-null on a pushed screen (a task or a variant compare): the bar swaps its project chrome for
+   *  back / title / actions. `onSlot` receives the element the routed view portals its content into. */
+  pushed: { compare: boolean; onSlot: (slot: HTMLElement | null) => void } | null
   repo: RepoChip | null
   /** The other projects' four counts summed; null while activity is unknown. */
   elsewhere: ProjectSignal | null
   onTrigger: (button: HTMLButtonElement) => void
 }) {
+  if (pushed) return <PushedTopBar compare={pushed.compare} onSlot={pushed.onSlot} />
   return (
     <header
       data-slot="mobile-top-bar"
@@ -768,6 +780,46 @@ function MobileTopBar({ title, repo, elsewhere, onTrigger }: {
         >
           <SearchIcon className="size-[19px]" aria-hidden="true" />
         </Button>
+      </div>
+    </header>
+  )
+}
+
+/**
+ * The pushed screen's bar: back, then whatever the routed view publishes into the slot (a task's
+ * title, state line and run actions — see `mobile-run-bar.tsx`). A compare route publishes
+ * nothing, so it titles itself.
+ *
+ * Back returns to where the user came from when the app has in-app history (react-router's
+ * `history.state.idx` counts entries pushed by this session), and falls to the Tasks list when the
+ * screen was opened cold — a deep link or a reload — where `navigate(-1)` would leave the app.
+ */
+function PushedTopBar({ compare, onSlot }: { compare: boolean; onSlot: (slot: HTMLElement | null) => void }) {
+  const navigate = useNavigate()
+  const goBack = () => {
+    const idx = (window.history.state as { idx?: unknown } | null)?.idx
+    if (typeof idx === 'number' && idx > 0) navigate(-1)
+    else navigate('/')
+  }
+  return (
+    <header
+      data-slot="mobile-top-bar"
+      data-mode="task"
+      className="row-start-1 min-w-0 border-b border-border bg-card pt-[env(safe-area-inset-top)] md:hidden"
+    >
+      <div className="flex h-[56px] min-w-0 items-center gap-[4px] px-[8px]">
+        <Button
+          variant="ghost"
+          aria-label="Back"
+          data-slot="mobile-back"
+          onClick={goBack}
+          className="size-[44px] shrink-0 p-0 text-foreground"
+        >
+          <ChevronLeftIcon className="size-[22px]" aria-hidden="true" />
+        </Button>
+        {compare ? <span className="min-w-0 flex-1 truncate text-[15px] font-semibold text-foreground">Compare variants</span> : null}
+        {/* The routed view's portal target; empty while the run loads. */}
+        <div data-slot="mobile-run-bar" ref={onSlot} className={cn('flex min-w-0 items-center gap-[4px]', compare ? 'shrink-0' : 'flex-1')} />
       </div>
     </header>
   )

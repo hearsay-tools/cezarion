@@ -30,6 +30,8 @@ import { ReferenceChip } from '@/components/reference-chip'
 import { ResolveConflictsButton } from '@/components/reference-conflict-action'
 import { ReferenceStatusProvider } from '@/components/reference-status'
 import { TabLink } from '@/components/tab-link'
+import { MobileRunBarPortal, useIsDesktopViewport, useMobileRunBarSlot } from '@/components/mobile-run-bar'
+import { StatusDot } from '@/components/status-dot'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -148,6 +150,24 @@ export function RunHeader({
   const queuePosition =
     run.status === 'queued' ? queuePositions(runs.data ?? []).get(run.id) : undefined
 
+  // Below md, on a pushed task route, the shell's top bar carries the title, state line and run
+  // actions (#621), so this header drops its own copy. Both halves are required: the slot exists
+  // only inside the shell, and only phone width shows the bar — a bare render or a desktop
+  // viewport keeps the header exactly as it was.
+  const mobileSlot = useMobileRunBarSlot()
+  const isDesktop = useIsDesktopViewport()
+  const barSlot = mobileSlot !== null && !isDesktop ? mobileSlot : null
+  const repoBase = useProjectRepoBase()
+  const primaryReference = useMemo(() => taskReferences(run, repoBase)[0], [run, repoBase])
+  const actionsKebab = (
+    <ActionsKebab
+      run={run}
+      actions={actions}
+      onOpenChooser={() => setOpenChooser(true)}
+      onToggleNotes={() => setNotesOpen((open) => !open)}
+    />
+  )
+
   return (
     <header
       data-slot="run-header"
@@ -158,13 +178,17 @@ export function RunHeader({
     >
       <div className="w-full">
         <div data-slot="run-title-row" className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 md:flex-nowrap">
-          <p data-slot="session-kind" className="text-[12px] font-semibold tracking-[0.14em] text-muted-foreground uppercase md:hidden">
-            {run.delegation?.role === 'worker' ? 'Worker session' : run.delegation?.role === 'root' ? 'Parent session' : 'Task session'}
-          </p>
-          <EditableTitle run={run} />
-          <Pill dot={attention.tone} shape={attention.shape} pulse={attention.pulse}>
-            {attention.label}{queuePosition !== undefined ? ` #${queuePosition}` : ''}
-          </Pill>
+          {barSlot ? null : (
+            <>
+              <p data-slot="session-kind" className="text-[12px] font-semibold tracking-[0.14em] text-muted-foreground uppercase md:hidden">
+                {run.delegation?.role === 'worker' ? 'Worker session' : run.delegation?.role === 'root' ? 'Parent session' : 'Task session'}
+              </p>
+              <EditableTitle run={run} />
+              <Pill dot={attention.tone} shape={attention.shape} pulse={attention.pulse}>
+                {attention.label}{queuePosition !== undefined ? ` #${queuePosition}` : ''}
+              </Pill>
+            </>
+          )}
           <span className="ml-auto flex shrink-0 items-center gap-1 md:gap-2.5">
             {/* Phone-width only: above `md` the meta row never collapses, so a control to expand
                 it would be a permanently disabled-looking chevron next to always-visible content.
@@ -191,12 +215,21 @@ export function RunHeader({
                 exactly one surface offers it on any given screen. */}
             {tab !== 'session' && flags.archive ? <ArchiveButton run={run} /> : null}
             <HandoffAction run={run} />
-            <ActionsKebab
-              run={run}
-              actions={actions}
-              onOpenChooser={() => setOpenChooser(true)}
-              onToggleNotes={() => setNotesOpen((open) => !open)}
-            />
+            {barSlot ? (
+              <MobileRunBarPortal slot={barSlot}>
+                <div data-slot="mobile-run-title" className="flex min-w-0 flex-1 flex-col">
+                  <span className="truncate text-[15px] leading-tight font-semibold text-foreground">{runTitle(run)}</span>
+                  <span data-slot="mobile-run-state" className="flex min-w-0 items-center gap-1.5 text-[11.5px] leading-tight text-soft-foreground">
+                    <StatusDot tone={attention.tone} shape={attention.shape} pulse={attention.pulse} />
+                    <span className="truncate">
+                      {attention.label}{queuePosition !== undefined ? ` #${queuePosition}` : ''}
+                      {primaryReference ? ` · #${primaryReference.number}` : ''}
+                    </span>
+                  </span>
+                </div>
+                {actionsKebab}
+              </MobileRunBarPortal>
+            ) : actionsKebab}
           </span>
         </div>
 
@@ -222,11 +255,16 @@ export function RunHeader({
         <CiWaitStatus run={run} />
         <MonitoringSchedule run={run} />
 
-        <div data-slot="run-tabs" className="mt-3 flex flex-wrap items-end gap-1 border-b border-border md:mt-5 max-md:[&>a]:min-h-11">
+        {/* Below md (#621): 13.5px labels and quiet counts, tabs spread across the row. The 44px
+            floor stays — the touch-target sweep measures these links — so the design's 40px is the
+            visual weight of the row, not a smaller hit area. Counts come only from data the record
+            already carries: the changed-file tally. A commit count is not on the record, and one
+            more query for a badge is not worth it, so Commits shows none. */}
+        <div data-slot="run-tabs" className="mt-3 flex flex-wrap items-end gap-1 border-b border-border md:mt-5 max-md:gap-0 max-md:[&>a]:min-h-11 max-md:[&>a]:px-3.5 max-md:[&>a]:text-[13.5px]">
           <TabLink to={`/tasks/${run.id}`} active={tab === 'session'}>
             Session
           </TabLink>
-          <TabLink to={`/tasks/${run.id}/changes`} active={tab === 'changes'}>
+          <TabLink to={`/tasks/${run.id}/changes`} active={tab === 'changes'} count={run.diffStat && run.diffStat.files > 0 ? run.diffStat.files : undefined}>
             Changes
           </TabLink>
           <TabLink to={`/tasks/${run.id}/commits`} active={tab === 'commits'}>
@@ -235,8 +273,6 @@ export function RunHeader({
           <TabLink to={`/tasks/${run.id}/files`} active={tab === 'files'}>
             Files
           </TabLink>
-
-
         </div>
 
         {tab !== 'session' ? <RunRelationshipsPanel run={run} /> : null}

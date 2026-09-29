@@ -4,6 +4,7 @@ import { ListTodoIcon } from '@/components/design-icons'
 import type { ComponentType, SVGProps } from 'react'
 
 import { GithubIcon } from '@/components/icons'
+import { stripProjectPrefix } from '@/lib/project-router'
 
 export type NavItem = {
   /** Where the item navigates. Also its identity — `activeNavPath` returns this. */
@@ -118,15 +119,15 @@ export function activeNavItem(pathname: string): NavItem | null {
 }
 
 /**
- * Is `pathname` a PUSHED screen (#621) — one the user opened from a list, so the mobile shell
- * shows its own back bar instead of the bottom tab bar? An opened task (`/tasks/:id`, with or
- * without a facet suffix) and a variant compare (`/compare/…`); `/tasks` alone is the overview
- * list. Takes any pathname, `/p/:projectId` prefix included. Below `md` this is the switch
- * between "list chrome" (tab bar, New task button) and "pushed chrome" (back, title, actions).
+ * Is `pathname` a mobile PUSHED screen — one opened from a list, that owns its own top bar (back,
+ * title, state) and facet tabs instead of the list chrome? A task (`/tasks/:id` and its
+ * `/changes` `/commits` `/files` sub-tabs) or a variant compare (`/compare/:groupId`).
+ *
+ * The `/tasks` INDEX is not one: that is the all-projects overview, a list like any other. A
+ * `/p/:projectId` prefix is stripped first, so the scoped and flat spellings answer alike.
  */
 export function isPushedRoute(pathname: string): boolean {
-  const path = stripProjectPrefix(pathname)
-  return path.startsWith('/tasks/') || path.startsWith('/compare/')
+  return /^\/(?:tasks|compare)\/[^/]+(?:\/|$)/.test(stripProjectPrefix(pathname))
 }
 
 /** The tab bar's fixed slots: the views that stay one tap away. Everything else lives in More. */

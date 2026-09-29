@@ -167,13 +167,30 @@ describe('visibleNavItems', () => {
 })
 
 describe('isPushedRoute', () => {
-  it.each(['/tasks/abc', '/tasks/abc/changes', '/tasks/abc/commits', '/tasks/abc/files', '/p/cezar/tasks/abc', '/compare/g1', '/p/cezar/compare/g1/x'])(
-    'is true for %s',
-    (path) => expect(isPushedRoute(path)).toBe(true),
-  )
-
-  it.each(['/', '/tasks', '/p/cezar/', '/p/cezar/tasks', '/git', '/github', '/settings', '/new', '/tasksfoo/1', '/p/tasks/git'])(
-    'is false for %s',
-    (path) => expect(isPushedRoute(path)).toBe(false),
-  )
+  const cases: Array<[pathname: string, pushed: boolean]> = [
+    ['/tasks/abc123', true],
+    ['/tasks/abc123/changes', true],
+    ['/tasks/abc123/commits', true],
+    ['/tasks/abc123/commits/deadbeef', true],
+    ['/tasks/abc123/files', true],
+    ['/compare/grp-1', true],
+    ['/p/cezar/tasks/abc123', true],
+    ['/p/cezar/tasks/abc123/files', true],
+    ['/p/cezar/compare/grp-1', true],
+    // The all-projects overview is a list, not a pushed screen.
+    ['/tasks', false],
+    ['/tasks/', false],
+    ['/compare', false],
+    ['/', false],
+    ['/p/cezar', false],
+    ['/git', false],
+    ['/p/cezar/git/commits', false],
+    ['/settings/agents', false],
+    ['/new', false],
+  ]
+  for (const [pathname, pushed] of cases) {
+    it(`${pathname} → ${pushed}`, () => {
+      expect(isPushedRoute(pathname)).toBe(pushed)
+    })
+  }
 })
