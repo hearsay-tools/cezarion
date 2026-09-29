@@ -26,6 +26,7 @@ const DESKTOP = { width: 1440, height: 900 }
 const MOBILE = { width: 390, height: 844 }
 
 const OTHER = { id: 'e2e-rail-other', name: 'e2e rail other' }
+const FILLERS = Array.from({ length: 14 }, (_, i) => ({ id: `e2e-rail-filler-${i}`, name: `Rail filler ${i}` }))
 
 let browser: AgentBrowser
 let baseUrl: string
@@ -67,6 +68,11 @@ beforeAll(async () => {
   )
 
   const existingBoot = readSharedProjects().find((project) => project.id === bootProject)
+  const fillers = FILLERS.map((project) => {
+    const root = join(seedDir, project.id)
+    execFileSync('git', ['init', '-q', '-b', 'main', root], { stdio: 'ignore' })
+    return { ...project, root, addedAt: '2026-07-20T00:00:00Z', lastOpenedAt: '2026-07-20T00:00:00Z', source: 'local' as const }
+  })
   writeSharedProjects([
     existingBoot ?? {
       id: bootProject,
@@ -76,6 +82,7 @@ beforeAll(async () => {
       lastOpenedAt: '2026-07-20T12:00:00Z',
       source: 'local',
     },
+    ...fillers,
     { ...OTHER, root: otherRoot, addedAt: '2026-07-19T00:00:00Z', lastOpenedAt: '2026-07-19T12:00:00Z', source: 'local' },
   ])
 
@@ -115,6 +122,53 @@ describe('project rail', () => {
       `${OTHER.name} · 1 needs you · 1 failed · 1 finished`,
     )
     expect(String(browser.evaluate(`document.querySelector('${mark(bootProject)} a').getAttribute('aria-current')`))).toBe('page')
+  })
+
+  it('rail activation unfolds only its project and scrolls its header into the sidebar viewport', () => {
+    gotoRail()
+    const initial = Object.fromEntries([bootProject, ...FILLERS.map(({ id }) => id)].map(id => [id, false]))
+    browser.evaluate(`localStorage.setItem('cez-sidebar-collapsed', ${JSON.stringify(JSON.stringify({ ...initial, [OTHER.id]: true }))})`)
+    gotoRail()
+    const group = `[data-slot="sidebar"] [data-slot="project-group"][data-project="${OTHER.id}"]`
+    const scroller = '[data-slot="sidebar"] [data-slot="project-groups"]'
+    expect(browser.waitForValue(`(() => {
+      const target = document.querySelector('${group}')
+      const viewport = document.querySelector('${scroller}')
+      return target && viewport && target.getBoundingClientRect().top >= viewport.getBoundingClientRect().bottom
+    })()`)).toBe(true)
+
+    const assertAccordion = () => {
+      expect(browser.waitForValue(`(() => {
+        const viewport = document.querySelector('${scroller}')
+        const header = document.querySelector('${group} [data-slot="project-group-header"]')
+        if (!viewport || !header) return false
+        const rect = header.getBoundingClientRect(), bounds = viewport.getBoundingClientRect()
+        const others = [...viewport.querySelectorAll('[data-slot="project-group"]')].filter(el => el.dataset.project !== '${OTHER.id}')
+        return header.getAttribute('aria-expanded') === 'true'
+          && others.every(el => el.querySelector('[data-slot="project-group-header"]').getAttribute('aria-expanded') === 'false')
+          && rect.top >= bounds.top && rect.bottom <= bounds.bottom
+      })()`)).toBe(true)
+    }
+    browser.evaluate(`document.querySelector('${mark(OTHER.id)} a').scrollIntoView({ block: 'nearest' })`)
+    browser.click(`${mark(OTHER.id)} a`)
+    assertAccordion()
+    expect(browser.waitForValue(`location.pathname`, value => value === `/p/${OTHER.id}/`)).toBe(`/p/${OTHER.id}/`)
+
+    // The URL now stays the same: reopening a manually folded current project must still work.
+    browser.evaluate(`document.querySelector('${group} [data-slot="project-group-header"]').focus()`)
+    browser.press('Space')
+    browser.waitForFunction(`document.querySelector('${group} [data-slot="project-group-header"]').getAttribute('aria-expanded') === 'false'`)
+    browser.evaluate(`document.querySelector('${scroller}').scrollTop = 0`)
+    browser.evaluate(`document.querySelector('${mark(OTHER.id)} a').focus()`)
+    browser.press('Enter')
+    assertAccordion()
+    browser.click(`${mark(OTHER.id)} a`)
+    assertAccordion()
+
+    browser.goto(baseUrl + `/p/${OTHER.id}/`)
+    expect(browser.waitForValue(`document.querySelector('${group} [data-slot="project-group-header"]')?.getAttribute('aria-expanded')`, value => value === 'true')).toBe('true')
+    expect(browser.waitForValue(`document.querySelector('[data-slot="sidebar"] [data-project="${bootProject}"] [data-slot="project-group-header"]')?.getAttribute('aria-expanded')`, value => value === 'false')).toBe('false')
+    browser.evaluate(`localStorage.removeItem('cez-sidebar-collapsed')`)
   })
 
   it('is a 60px column beside the sidebar, and resizing the sidebar leaves it alone', () => {

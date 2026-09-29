@@ -91,12 +91,14 @@ function ProjectMark({
   known,
   truncated,
   current,
+  onSelectProject,
 }: {
   project: ProjectListEntry
   signal: ProjectSignal | undefined
   known: boolean
   truncated: boolean
   current: boolean
+  onSelectProject?: (projectId: string) => void
 }) {
   const label = projectSignalLabel(project.name, signal, { truncated, unknown: !known })
   return (
@@ -108,6 +110,11 @@ function ProjectMark({
       <div className="relative size-9">
         <RouterLink
           to={scopeTo(project.id, '/')}
+          onClick={(event) => {
+            // New-tab/window gestures must not change the sidebar in this window.
+            if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+            onSelectProject?.(project.id)
+          }}
           aria-label={label}
           title={label}
           aria-current={current ? 'page' : undefined}
@@ -182,9 +189,10 @@ export type ProjectRailProps = {
   /** `capabilities.singleProject` (`CEZ_SINGLE_PROJECT=1`): the server refuses add, edit, browse
    *  and remove, so Add project and All projects go. Never inferred from the project count. */
   singleProject: boolean
+  onSelectProject?: (projectId: string) => void
 }
 
-export function ProjectRail({ projects, signals, truncated, version, singleProject }: ProjectRailProps) {
+export function ProjectRail({ projects, signals, truncated, version, singleProject, onSelectProject }: ProjectRailProps) {
   const { pathname } = useLocation()
   const { resolvedTheme } = useTheme()
   // The URL's own scope. Global routes (`/settings/global`, `/tasks`) carry none, so no mark is
@@ -225,6 +233,7 @@ export function ProjectRail({ projects, signals, truncated, version, singleProje
             known={signals !== null}
             truncated={truncated.has(project.id)}
             current={project.id === currentProjectId}
+            onSelectProject={onSelectProject}
           />
         ))}
         {!singleProject ? (
@@ -258,7 +267,10 @@ export function ProjectRail({ projects, signals, truncated, version, singleProje
  * current project's too — so they all read one source. No WebSocket topic: remote mode opens no
  * browser WebSocket, and a WS-driven rail would go stale in hosted cockpits.
  */
-export function ProjectRailContainer({ version }: { version: string | null }) {
+export function ProjectRailContainer({ version, onSelectProject }: {
+  version: string | null
+  onSelectProject?: (projectId: string) => void
+}) {
   const queryClient = useQueryClient()
   const projects = useProjects().data?.projects
   // The rail exists from `md` up, so below it nothing should keep the index observed: run events
@@ -286,5 +298,5 @@ export function ProjectRailContainer({ version }: { version: string | null }) {
   }, [queryClient, registry])
 
   if (!projects) return null
-  return <ProjectRail projects={projects} signals={signals} truncated={truncated} version={version} singleProject={singleProject} />
+  return <ProjectRail projects={projects} signals={signals} truncated={truncated} version={version} singleProject={singleProject} onSelectProject={onSelectProject} />
 }

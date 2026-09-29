@@ -293,18 +293,28 @@ describe('cockpit app shell', () => {
     expect(health.repo).not.toBeNull()
 
     browser.goto(baseUrl + scoped('/'))
-    browser.waitForFunction(`document.querySelector('[data-slot="project-groups"], [data-slot="single-project-navigation"]') !== null`)
+    // Wait for actual repo data, not the flat navigation's loading placeholder. Registry
+    // arrival can replace that placeholder with groups between two separate browser reads.
     const repoName = health.repoRoot.replace(/[\\/]+$/, '').split(/[\\/]/).pop()
-    const grouped = browser.count('[data-slot="project-groups"]') > 0
-    if (grouped) {
-      browser.waitForFunction(`document.querySelector('[data-slot="project-group"]') !== null`)
-      expect(browser.evaluate(`document.querySelector('[data-slot="project-group"]')?.dataset.project`)).toBeTruthy()
+    const rendered = browser.waitForValue(`(() => {
+      const group = document.querySelector('[data-slot="sidebar"] [data-slot="project-group"]')
+      const chip = document.querySelector('[data-slot="repo-chip"]')
+      const version = document.querySelector('[data-slot="version-chip"]')?.textContent
+      if ((!group && !chip) || !version) return null
+      return {
+        projectId: group?.dataset.project ?? null,
+        repoName: chip?.textContent ?? null,
+        branch: chip?.nextElementSibling?.textContent ?? null,
+        version,
+      }
+    })()`) as { projectId: string | null; repoName: string | null; branch: string | null; version: string }
+    if (rendered.projectId !== null) {
+      expect(rendered.projectId).toBe(bootProject)
     } else {
-      browser.waitForFunction(`document.querySelector('[data-slot="repo-chip"]') !== null`)
-      expect(browser.text('[data-slot="repo-chip"]')).toBe(repoName)
-      expect(browser.evaluate(`document.querySelector('[data-slot="repo-chip"]').nextElementSibling.textContent`)).toBe(health.repo?.branch)
+      expect(rendered.repoName).toBe(repoName)
+      expect(rendered.branch).toBe(health.repo?.branch)
     }
-    expect(browser.text('[data-slot="version-chip"]')).toBe(`v${health.version}`)
+    expect(rendered.version).toBe(`v${health.version}`)
 
     // Real values, not a placeholder that happens to match itself.
     expect(health.version).toMatch(/^\d+\.\d+\.\d+/)

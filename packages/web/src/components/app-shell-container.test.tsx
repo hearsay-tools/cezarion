@@ -648,6 +648,68 @@ describe('project rail wiring', () => {
   const rail = () => screen.findByRole('navigation', { name: 'Projects' })
   const railMark = (id: string) => document.querySelector(`[data-slot="rail-project"][data-project-id="${id}"]`) as HTMLElement
 
+  it('rail activation opens only that project, including repeated current-project clicks', async () => {
+    localStorage.setItem('cez-sidebar-collapsed', JSON.stringify({ cezar: false, shop: true, third: false }))
+    serve({
+      '/api/v1/health': HEALTH,
+      '/api/v1/todos': [],
+      '/api/v1/projects': { ...TWO_PROJECTS, projects: [...TWO_PROJECTS.projects, { ...PROJECT, id: 'third', name: 'third' }] },
+      '/api/v1/workspace/runs-index': railIndex([]),
+      '/api/v1/runs': [],
+      '/api/v1/p/cezar/runs': [],
+      '/api/v1/p/shop/runs': [],
+      '/api/v1/p/third/runs': [],
+    })
+    renderShell('/p/cezar/')
+    await rail()
+    const header = (id: string) => document.querySelector(`[data-slot="project-group"][data-project="${id}"] [data-slot="project-group-header"]`)!
+    const selectShop = () => fireEvent.click(within(railMark('shop')).getByRole('link'))
+    try {
+      selectShop()
+      await waitFor(() => expect(header('shop').getAttribute('aria-expanded')).toBe('true'))
+      expect(header('cezar').getAttribute('aria-expanded')).toBe('false')
+      expect(header('third').getAttribute('aria-expanded')).toBe('false')
+      expect(JSON.parse(localStorage.getItem('cez-sidebar-collapsed')!)).toEqual({ cezar: true, shop: false, third: true })
+      expect(within(railMark('shop')).getByRole('link').getAttribute('aria-current')).toBe('page')
+
+      // Manual toggles stay independent; the next rail activation reapplies the accordion.
+      fireEvent.click(header('shop'))
+      fireEvent.click(header('cezar'))
+      expect(header('shop').getAttribute('aria-expanded')).toBe('false')
+      expect(header('cezar').getAttribute('aria-expanded')).toBe('true')
+      selectShop()
+      await waitFor(() => expect(header('shop').getAttribute('aria-expanded')).toBe('true'))
+      expect(header('cezar').getAttribute('aria-expanded')).toBe('false')
+      selectShop()
+      expect(header('shop').getAttribute('aria-expanded')).toBe('true')
+    } finally {
+      localStorage.removeItem('cez-sidebar-collapsed')
+    }
+  })
+
+  it.each([{ ctrlKey: true }, { metaKey: true }, { shiftKey: true }, { altKey: true }])(
+    'modified rail clicks leave this window’s groups alone (%j)', async (modifier) => {
+      localStorage.setItem('cez-sidebar-collapsed', JSON.stringify({ cezar: false, shop: true }))
+      serve({
+        '/api/v1/health': HEALTH,
+        '/api/v1/todos': [],
+        '/api/v1/projects': TWO_PROJECTS,
+        '/api/v1/workspace/runs-index': railIndex([]),
+        '/api/v1/runs': [],
+        '/api/v1/p/cezar/runs': [],
+      })
+      renderShell('/p/cezar/')
+      await rail()
+      try {
+        fireEvent.click(within(railMark('shop')).getByRole('link'), modifier)
+        expect(JSON.parse(localStorage.getItem('cez-sidebar-collapsed')!)).toEqual({ cezar: false, shop: true })
+        expect(screen.getByRole('button', { name: 'Toggle cezar' }).getAttribute('aria-expanded')).toBe('true')
+      } finally {
+        localStorage.removeItem('cez-sidebar-collapsed')
+      }
+    },
+  )
+
   it('lights the top pill of a non-current project that has a run waiting on you', async () => {
     serve({
       '/api/v1/health': HEALTH,
