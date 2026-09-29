@@ -97,6 +97,14 @@ operation prints text without a server. `--full` returns the contract shape.
   by the cockpit's own attention function, shared through the contract since
   #553/#609 (`packages/contract/src/attention.ts`, `deriveAttention`) — see
   "The wait decision" below.
+- `list` leaves out runs whose `delegation.role` is `worker`, with or without
+  `--all` (`--all` means "include archived"), and `total` counts parents only
+  (#635). No flag brings workers back; add one only when someone asks.
+- `notify <id>` and `send <id> --notify` on a worker exit 64 with
+  `{ code: "invalid_input", error, parentId }`, naming the parent to notify
+  instead, before anything is subscribed or delivered. `notify --off` still
+  reaches a worker so an earlier subscription can be undone. Every other
+  id-addressed command still accepts a worker id (#635).
 
 ### The wait decision (#553, #609)
 

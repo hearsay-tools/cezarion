@@ -86,7 +86,7 @@ export const OPERATIONS: Record<string, Operation> = {
   },
   list: {
     args: '',
-    description: 'List tasks, newest first.',
+    description: 'List tasks, newest first. Workers are left out; address one by id.',
     positionals: [0, 0],
     flags: {
       status: { type: 'string', help: '<s>[,<s>…]     Only these statuses.' },
@@ -134,7 +134,7 @@ export const OPERATIONS: Record<string, Operation> = {
   },
   notify: {
     args: "<id> [--message '<note>' | --message-file <path|->]",
-    description: 'Hand a task to the project webhook (on), or stop notifying it (--off).',
+    description: 'Hand a task to the project webhook (on), or stop notifying it (--off). A worker is refused: notify its parent.',
     positionals: [1, 1],
     flags: {
       off: { type: 'boolean', help: '                Stop notifying the webhook about this task.' },
@@ -191,8 +191,8 @@ function usage() {
   return { operations: Object.entries(OPERATIONS).map(([name, op]) => ({ name, synopsis: `cez task ${name} ${op.args}`.trim() })) };
 }
 
-function usageError(error: string): never {
-  throw new TaskCliError(EXIT.usage, { code: 'invalid_input', error, usage: usage() });
+function usageError(error: string, detail: Record<string, unknown> = {}): never {
+  throw new TaskCliError(EXIT.usage, { code: 'invalid_input', error, ...detail, usage: usage() });
 }
 
 export function taskHelp(operation?: string): string {
@@ -351,6 +351,22 @@ async function listRuns(cockpit: Cockpit): Promise<ApiRun[]> {
   return runs.success ? runs.data : invalidResponse('run list');
 }
 
+/**
+ * Workers are steer targets of their parent, not tasks ops follows (#635): the list leaves them
+ * out, and subscribing one to the webhook is refused with the parent to subscribe instead. Every
+ * other id-addressed operation still reaches a worker.
+ */
+function workerParent(run: Pick<ApiRun, 'delegation'>): string | undefined {
+  return run.delegation?.role === 'worker' ? run.delegation.parentRunId : undefined;
+}
+
+async function refuseWorkerNotify(cockpit: Cockpit, id: string): Promise<void> {
+  const parentId = workerParent(await getRun(cockpit, id));
+  if (parentId !== undefined) {
+    usageError(`task ${id} is a worker of task ${parentId}; notify the parent instead: cez task notify ${parentId}`, { parentId });
+  }
+}
+
 /** The latest valid unanswered question, from the same derivation the cockpit renders. */
 async function pendingQuestion(cockpit: Cockpit, id: string): Promise<unknown> {
   const result = await request(cockpit, `/runs/${encodeURIComponent(id)}/history-context`);
@@ -438,6 +454,7 @@ async function setNotify(cockpit: Cockpit, id: string, notify: boolean, message:
 
 async function send(cockpit: Cockpit, values: Values, id: string, text: string, print: Printer): Promise<number> {
   const path = `/runs/${encodeURIComponent(id)}`;
+  if (values.notify) await refuseWorkerNotify(cockpit, id);
   // Before the message, so the status change it causes is already reported.
   const notified = values.notify ? { notify: (await setNotify(cockpit, id, true, undefined)).notify === true } : {};
   const delivered = await request(cockpit, `${path}/messages`, { body: { text } });
@@ -471,6 +488,8 @@ async function execute(
     case 'send':
       return send(cockpit, values, id, text!, print);
     case 'notify': {
+      // --off stays open so a subscription made before this guard can still be undone.
+      if (!values.off) await refuseWorkerNotify(cockpit, id);
       const run = await setNotify(cockpit, id, !values.off, text);
       print({ id, notify: run.notify === true, ...(text === undefined ? {} : { message: true }) });
       return EXIT.ok;
@@ -503,6 +522,7 @@ async function execute(
       const wanted = statuses(values.status);
       const limit = positiveInt(values.limit, 'limit', 1_000) ?? 20;
       const runs = (await listRuns(cockpit))
+        .filter((run) => workerParent(run) === undefined)
         .filter((run) => values.all || !run.archived)
         .filter((run) => !wanted || wanted.has(run.status))
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt));

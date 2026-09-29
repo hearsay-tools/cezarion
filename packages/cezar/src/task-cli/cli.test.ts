@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { mkdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { apiRunSchema } from '@open-mercato/cezar-contract';
@@ -47,6 +48,24 @@ describe('cez task', () => {
   const start = async (task = 'do the thing') => {
     expect(await run(['start', task])).toBe(0);
     return last().id as string;
+  };
+  /** A delegated worker owned by `parentId`, as the delegation layer creates one (#635). */
+  const worker = (parentId: string) => {
+    const workerId = randomUUID();
+    if (!store.getRun(parentId)?.delegation) store.updateRun(parentId, { delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
+    return store.createOwnedRun(
+      { title: 'worker', task: 'worker', workflow: 'quick-task', runner: 'claude', steps: [{ id: 'task', name: 'Task', kind: 'agent' }] },
+      parentId,
+      randomUUID(),
+      {
+        role: 'worker', permissions: [], parentRunId: parentId,
+        workspace: {
+          ownerRunId: workerId, resourceId: randomUUID(), kind: 'owned-isolated',
+          path: `/managed/${workerId}`, branch: `cez/${workerId.slice(0, 8)}`, baselineSha: 'a'.repeat(40),
+        },
+      },
+      'a'.repeat(64),
+    ).id;
   };
 
   describe('start', () => {
@@ -340,6 +359,19 @@ describe('cez task', () => {
         expect(row).not.toHaveProperty('attention');
       }
     });
+
+    it('leaves workers out of the list and its total, with or without --all (#635)', async () => {
+      const parent = await start('parent');
+      const child = worker(parent);
+      for (const argv of [['list'], ['list', '--all'], ['list', '--full']]) {
+        expect(await run(argv)).toBe(0);
+        expect((last().runs as Array<{ id: string }>).map((row) => row.id)).toEqual([parent]);
+        expect(last().total).toBe(1);
+      }
+      // Still id-addressed: the operator had to get the id from somewhere.
+      expect(await run(['status', child])).toBe(0);
+      expect(last()).toMatchObject({ id: child });
+    });
   });
 
   describe('send', () => {
@@ -423,6 +455,30 @@ describe('cez task', () => {
       expect(await run(['notify', id, '--message-file', '-'], 'from stdin')).toBe(0);
       expect(store.readEvents(id).find((event) => event.type === 'handoff')).toMatchObject({ message: 'from stdin' });
       expect(await run(['notify', id, '--off', '--message', 'x'])).toBe(64);
+    });
+
+    it('notify on a worker is a usage error naming the parent, and subscribes nothing (#635)', async () => {
+      await withWebhook();
+      const parent = await start('parent');
+      const child = worker(parent);
+      expect(await run(['notify', child])).toBe(64);
+      expect(last()).toMatchObject({ code: 'invalid_input', parentId: parent });
+      expect(last().error).toContain(`cez task notify ${parent}`);
+      expect(store.getRun(child)?.notify).not.toBe(true);
+      // --off still undoes a subscription made before this guard existed.
+      store.updateRun(child, { notify: true });
+      expect(await run(['notify', child, '--off'])).toBe(0);
+      expect(last()).toEqual({ id: child, notify: false });
+    });
+
+    it('send --notify on a worker is the same usage error and delivers nothing (#635)', async () => {
+      await withWebhook();
+      const parent = await start('parent');
+      const child = worker(parent);
+      expect(await run(['send', child, 'more', '--notify'])).toBe(64);
+      expect(last()).toMatchObject({ code: 'invalid_input', parentId: parent });
+      expect(store.getRun(child)?.notify).not.toBe(true);
+      expect(store.getRun(child)?.queuedMessages ?? []).toEqual([]);
     });
 
     it('send --notify turns the webhook on before delivering', async () => {
