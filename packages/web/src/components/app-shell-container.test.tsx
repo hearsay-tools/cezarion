@@ -127,6 +127,9 @@ function run(overrides: Partial<RunRecord> = {}): RunRecord {
 
 const repoChip = () => document.querySelector('[data-slot="project-header-name"]')
 const versionChip = () => document.querySelector('[data-slot="version-chip"]')
+// The desktop column only: below `md` the mobile tab bar renders the same view names (jsdom has no
+// media queries, so both trees are in the DOM), and these cases are about the sidebar's gating.
+const inSidebar = () => within(document.querySelector('[data-slot="sidebar"]') as HTMLElement)
 const navBadge = () => document.querySelector('[data-slot="overflow-inbox-dot"]')
 
 describe('repoChipOf', () => {
@@ -196,8 +199,8 @@ describe('sidebar wiring', () => {
     expect(screen.queryByRole('link', { name: /Inbox/ })).toBeNull()
     expect(navBadge()).toBeNull()
     // Every other view is untouched — the gate owns exactly one item.
-    expect(screen.getByRole('link', { name: /Tasks/ })).toBeTruthy()
-    expect(screen.getByRole('link', { name: /Settings/ })).toBeTruthy()
+    expect(inSidebar().getByRole('link', { name: /Tasks/ })).toBeTruthy()
+    expect(inSidebar().getByRole('link', { name: /Settings/ })).toBeTruthy()
   })
 
   it('never asks for todos on a server with the inbox off', async () => {
@@ -226,7 +229,7 @@ describe('sidebar wiring', () => {
     await waitFor(() => expect(versionChip()).not.toBeNull())
     expect(screen.queryByRole('link', { name: /Automations/ })).toBeNull()
     // The gate owns exactly one item — GitHub is forge-gated, not automations-gated.
-    expect(screen.getByRole('link', { name: /GitHub/ })).toBeTruthy()
+    expect(inSidebar().getByRole('link', { name: /GitHub/ })).toBeTruthy()
   })
 
   it('shows the Automations nav item once health reports the capability', async () => {
@@ -310,7 +313,7 @@ describe('sidebar wiring', () => {
 
     await waitFor(() => expect(versionChip()).not.toBeNull())
     expect(screen.queryByRole('button', { name: 'Add project' })).toBeNull()
-    expect(screen.getByRole('link', { name: /New task/ })).toBeTruthy()
+    expect(inSidebar().getByRole('link', { name: /New task/ })).toBeTruthy()
     expect(screen.getByRole('navigation', { name: 'Main' })).toBeTruthy()
   })
 
@@ -580,7 +583,7 @@ describe('document title wiring', () => {
     renderShell('/p/cezar/')
 
     await waitFor(() => expect(document.title).toBe('cezar — Tasks · cezar'))
-    fireEvent.click(screen.getByRole('link', { name: 'Git' }))
+    fireEvent.click(inSidebar().getByRole('link', { name: 'Git' }))
     await waitFor(() => expect(document.title).toBe('cezar — Git · cezar'))
   })
 

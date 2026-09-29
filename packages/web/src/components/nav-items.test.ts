@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { NAV_ITEMS, activeNavItem, activeNavPath, visibleNavItems } from './nav-items'
+import { NAV_ITEMS, activeNavItem, activeNavPath, isPushedRoute, visibleNavItems } from './nav-items'
 
 /** Which nav item owns a URL. This is the rule that decides what the user sees lit up, and it
  *  is not a plain equality check — items own areas, and the Settings area nests. */
@@ -164,4 +164,16 @@ describe('visibleNavItems', () => {
       }
     }
   })
+})
+
+describe('isPushedRoute', () => {
+  it.each(['/tasks/abc', '/tasks/abc/changes', '/tasks/abc/commits', '/tasks/abc/files', '/p/cezar/tasks/abc', '/compare/g1', '/p/cezar/compare/g1/x'])(
+    'is true for %s',
+    (path) => expect(isPushedRoute(path)).toBe(true),
+  )
+
+  it.each(['/', '/tasks', '/p/cezar/', '/p/cezar/tasks', '/git', '/github', '/settings', '/new', '/tasksfoo/1', '/p/tasks/git'])(
+    'is false for %s',
+    (path) => expect(isPushedRoute(path)).toBe(false),
+  )
 })

@@ -17,7 +17,9 @@ import { ProjectScopeContext, useProjectScope } from '@/api/project-scope-contex
 import { isNewerVersion } from '@/lib/is-newer-version'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
-import { activeNavItem, activeNavPath, visibleNavItems, type NavItem } from '@/components/nav-items'
+import { activeNavItem, activeNavPath, isPushedRoute, visibleNavItems, type NavItem } from '@/components/nav-items'
+import { MobileTabBar } from '@/components/mobile-tab-bar'
+import { useViewportInsets } from '@/lib/keyboard-inset'
 import { SIDEBAR_SELECTED_CLASS } from '@/components/nav-row-styles'
 import {
   DEFAULT_SIDEBAR_WIDTH,
@@ -175,6 +177,13 @@ export function AppShell({
   const current = activeNavItem(areaPathname)
   // The URL's own scope, as on the rail: global routes carry none, so every project is "elsewhere".
   const currentProjectId = pathnameProjectId(pathname)
+  // The tab bar belongs to list screens (#621): an opened task is a pushed screen whose composer
+  // owns the bottom edge, and while the keyboard is up (the visual viewport shrank below the
+  // layout viewport — the same source `--kb` is published from) it would only eat the room the
+  // composer needs.
+  const keyboardOpen = useViewportInsets().bottom > 0
+  const showTabBar = !isPushedRoute(pathname) && !keyboardOpen
+  const tabBarSignal = currentProjectId !== null ? mobileProjects?.signals?.get(currentProjectId) : undefined
   const [menuOpen, setMenuOpen] = React.useState(false)
   const mobileNavTrigger = React.useRef<HTMLButtonElement | null>(null)
   const mainRef = React.useRef<HTMLElement>(null)
@@ -301,8 +310,28 @@ export function AppShell({
               flow inside main; shrinking that viewport keeps it reachable without an overlay. */}
           <div
             data-slot="composer"
-            className="row-start-4 pb-[max(env(safe-area-inset-bottom),var(--kb,0px))]"
-          />
+            // On a list screen below `md` the row IS the tab bar's surface, so the inset padding
+            // sits under the bar on the bar's own fill, and it is the anchor the New task button
+            // floats from. `md:` sheds all of it: the desktop row stays the empty gutter it was.
+            className={cn(
+              'row-start-4 pb-[max(env(safe-area-inset-bottom),var(--kb,0px))]',
+              showTabBar && 'relative max-md:border-t max-md:border-border max-md:bg-sidebar',
+            )}
+          >
+            {showTabBar ? (
+              <div className="md:hidden">
+                <MobileTabBar
+                  items={nav.items}
+                  activeTo={activeTo}
+                  signal={tabBarSignal}
+                  projectName={mobileProjects?.projects.find((project) => project.id === currentProjectId)?.name ?? repo?.name ?? null}
+                  inboxCount={nav.inboxCount}
+                  skillsUpdateAvailable={skillsUpdateAvailable}
+                  showNewTask={areaPathname !== '/new'}
+                />
+              </div>
+            ) : null}
+          </div>
         </div>
       </div>
     </Sheet>
