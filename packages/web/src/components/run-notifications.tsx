@@ -1,7 +1,7 @@
-import { hashKey, useQueryClient } from '@tanstack/react-query'
+import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef } from 'react'
 
-import { queryKeys, useWorkspaceUiState } from '@/api/queries'
+import { useWorkspaceUiState } from '@/api/queries'
 import type { ApiRun } from '@open-mercato/cezar-api-client'
 import {
   diffRunTransitions,
@@ -18,7 +18,7 @@ import {
  *
  * It watches the cached run list rather than opening its own listener on `/api/events`: the
  * global stream (api/global-events.tsx) already folds every `run` event into
- * `queryKeys.runs.list()`, and the reconnect/visibility reconciliation refetches it — so one
+ * the owning project’s run list, and the reconnect/visibility reconciliation refetches it — so one
  * cache subscription sees BOTH deliveries of the same truth. That second path is not a bonus,
  * it is the point: a hidden tab is exactly when the stream is most likely to have been frozen
  * (mobile background freeze, laptop lid), and the run that flipped to `waiting` while the socket
@@ -43,14 +43,64 @@ export function RunNotifications() {
   // cache subscription and lose the status map — the whole "never replay" guarantee.
   const enabledRef = useRef(enabled)
   enabledRef.current = enabled
-  const statusesRef = useRef<ReadonlyMap<string, RunNotificationState>>(new Map())
 
   useEffect(() => {
-    const listHash = hashKey(queryKeys.runs.list())
+    const cache = queryClient.getQueryCache()
+    const lists = new Map<string, ReadonlyMap<string, RunNotificationState>>()
+    const known = new Map<string, RunNotificationState>()
+    const versions = new Map<string, number>()
+    const transitioned = new Set<string>()
+    const fetches = new Map<string, number>()
+    let revision = 0
+    const isRunList = (key: readonly unknown[]) =>
+      key.length === 3 && typeof key[0] === 'string' && key[1] === 'runs' && key[2] === 'list'
 
-    const observe = (runs: readonly ApiRun[] | undefined): void => {
-      const { entering, statuses } = diffRunTransitions(statusesRef.current, runs)
-      statusesRef.current = statuses
+    // Retain other projects' history, but forget tasks once no cached list contains them.
+    const prune = () => {
+      const retained = new Set([...lists.values()].flatMap(states => [...states.keys()]))
+      for (const id of known.keys()) {
+        if (!retained.has(id)) {
+          known.delete(id)
+          versions.delete(id)
+          transitioned.delete(id)
+        }
+      }
+    }
+    const observe = (hash: string, runs: readonly ApiRun[], seed = false, fetchedAt = Infinity): void => {
+      const previous = lists.get(hash)
+      const { statuses } = diffRunTransitions(new Map(), runs)
+      // Compare within each alias first: a token tick on an old alias must not rewind the
+      // shared history. Initial aliases establish the baseline only until a live transition
+      // is observed: a late first fetch may contain a pre-transition snapshot.
+      const changed = runs.filter(run => {
+        // A GET started before a newer baseline or transition cannot rewind that task. Other
+        // rows in the response still reconcile, and a subsequent fresh GET is authoritative.
+        if ((versions.get(run.id) ?? 0) > fetchedAt) return false
+        const before = previous?.get(run.id)
+        const after = statuses.get(run.id)!
+        // A fresh GET can confirm a row previously ignored as stale, even if that alias's
+        // cached value did not change. Manual cache ticks still compare within their alias.
+        const baseline = fetchedAt === Infinity ? before : known.get(run.id)
+        return before !== undefined && baseline !== undefined &&
+          (baseline.status !== after.status || baseline.wantsAttention !== after.wantsAttention)
+      })
+      const { entering, statuses: updates } = diffRunTransitions(known, changed)
+      for (const [id, state] of statuses) {
+        if (!previous?.has(id) && !transitioned.has(id) && (versions.get(id) ?? 0) <= fetchedAt) {
+          known.set(id, state)
+          versions.set(id, ++revision)
+        }
+      }
+      for (const [id, state] of updates) {
+        const before = known.get(id)
+        if (before?.status === state.status && before.wantsAttention === state.wantsAttention) continue
+        known.set(id, state)
+        versions.set(id, ++revision)
+        transitioned.add(id)
+      }
+      lists.set(hash, statuses)
+      prune()
+      if (seed) return
       if (entering.length === 0) return
       const gate = {
         enabled: enabledRef.current,
@@ -61,13 +111,28 @@ export function RunNotifications() {
       for (const run of entering) fireRunNotification(run)
     }
 
-    // Seed from whatever the cache already holds: with an empty previous map nothing can
-    // "enter", so a mount mid-session records the current statuses and stays silent.
-    observe(queryClient.getQueryData<ApiRun[]>(queryKeys.runs.list()))
+    // Seed every project already loaded, silently, including aliases with different snapshots.
+    for (const query of cache.getAll().sort((a, b) => a.state.dataUpdatedAt - b.state.dataUpdatedAt)) {
+      if (isRunList(query.queryKey) && Array.isArray(query.state.data)) {
+        observe(query.queryHash, query.state.data as ApiRun[], true)
+      }
+    }
 
-    return queryClient.getQueryCache().subscribe((event) => {
-      if (event.query.queryHash !== listHash || event.type !== 'updated') return
-      observe(event.query.state.data as ApiRun[] | undefined)
+    return cache.subscribe((event) => {
+      if (!isRunList(event.query.queryKey)) return
+      if (event.type === 'removed') {
+        lists.delete(event.query.queryHash)
+        fetches.delete(event.query.queryHash)
+        prune()
+      } else if (event.type === 'updated') {
+        if (event.action.type === 'fetch') fetches.set(event.query.queryHash, revision)
+        if (event.action.type === 'success' && Array.isArray(event.query.state.data)) {
+          // A fetch already in flight at mount predates every baseline observed here.
+          const fetchedAt = event.action.manual ? Infinity : (fetches.get(event.query.queryHash) ?? 0)
+          observe(event.query.queryHash, event.query.state.data as ApiRun[], false, fetchedAt)
+          if (!event.action.manual) fetches.delete(event.query.queryHash)
+        }
+      }
     })
   }, [queryClient])
 

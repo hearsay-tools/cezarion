@@ -9,6 +9,7 @@ import { GlobalEventsProvider, useGlobalEvents, useRunUsage, useUsage } from './
 import { setApiScope } from '@open-mercato/cezar-api-client'
 import { createQueryClient } from './query-client'
 import { queryKeys, useHealth, useRunnerModels, useRun, useRuns, useProviderStatus, workspaceQueryKeys } from './queries'
+import { RunNotifications } from '../components/run-notifications'
 import { TasksOverview } from '../routes/tasks-overview'
 import type { ApiRun, ProviderStatusResponse, RunRecord } from '@open-mercato/cezar-api-client'
 
@@ -1832,4 +1833,24 @@ describe('relationships refresh (#659)', () => {
     expect(invalidated(siblingKey)).toBe(false)
     expect(client.getQueryState(workerKey)).toBeUndefined()
   })
+})
+
+
+it('delivers a secondary-project structured ASK waiting transition to browser notifications', () => {
+  const notifications: string[] = []
+  function NotificationStub(title: string) { notifications.push(title) }
+  Object.assign(NotificationStub, { permission: 'granted' })
+  vi.stubGlobal('Notification', NotificationStub)
+  client.setQueryData(workspaceQueryKeys.uiState, { notifications: { enabled: true } })
+  const live = runRecord('structured-ask')
+  client.setQueryData(['secondary', 'runs', 'list'], [live])
+  render(<RunNotifications />, { wrapper })
+  const { source } = mount()
+  setVisibility('hidden')
+
+  // The server's CEZ:ASK turn-end path publishes this run summary on the workspace stream.
+  source.emit('run', stampedRun({ ...live, status: 'waiting', hasPendingHumanAsk: true }, 'secondary'))
+  expect(notifications).toEqual(['structured-ask'])
+  source.emit('run', stampedRun({ ...live, status: 'waiting', hasPendingHumanAsk: true, tokensUsed: 42 }, 'secondary'))
+  expect(notifications).toHaveLength(1)
 })

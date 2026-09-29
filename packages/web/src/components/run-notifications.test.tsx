@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { createQueryClient } from '@/api/query-client'
 import { queryKeys, workspaceQueryKeys } from '@/api/queries'
+import { setApiScope } from '@open-mercato/cezar-api-client'
 import type { RunRecord, RunStatus, WorkspaceUiState } from '@open-mercato/cezar-api-client'
 import { RunNotifications } from './run-notifications'
 
@@ -78,6 +79,7 @@ function mount(uiState: WorkspaceUiState, seed: RunRecord[]) {
 
 afterEach(() => {
   cleanup()
+  setApiScope(null)
   for (const client of clients) client.clear()
   clients = []
   vi.unstubAllGlobals()
@@ -226,4 +228,153 @@ it('notifies once when a parked worker wait gains a human ask without changing s
   expect(constructed).toHaveLength(1)
   patch([asking])
   expect(constructed).toHaveLength(2)
+})
+
+
+describe('project-owned run lists', () => {
+  it.each([false, true])('observes a secondary project seeded before mount: %s', (beforeMount) => {
+    const constructed = stubNotification()
+    hideTab()
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<never>(() => {})))
+    const client = makeClient({ notifications: { enabled: true } })
+    const key = ['secondary', 'runs', 'list']
+    if (beforeMount) client.setQueryData(key, [run()])
+    render(<QueryClientProvider client={client}><RunNotifications /></QueryClientProvider>)
+    if (!beforeMount) act(() => client.setQueryData(key, [run()]))
+    act(() => client.setQueryData(key, [run({ status: 'waiting' })]))
+    expect(constructed.map(n => n.options?.body)).toEqual(['Task needs you'])
+  })
+
+  it('keeps watching both projects after navigation without remounting', () => {
+    const constructed = stubNotification()
+    hideTab()
+    const { client, patch } = mount({ notifications: { enabled: true } }, [run()])
+    setApiScope('secondary')
+    patch([run({ id: 'secondary-run' })])
+    patch([run({ id: 'secondary-run', status: 'waiting' })])
+    act(() => client.setQueryData(['default', 'runs', 'list'], [run({ status: 'waiting' })]))
+    setApiScope(null)
+    patch([run({ status: 'running' })])
+    patch([run({ status: 'waiting' })])
+    expect(constructed.map(n => n.options?.tag)).toEqual([
+      'cezar-run-secondary-run', 'cezar-run-r1', 'cezar-run-r1',
+    ])
+  })
+
+  it('deduplicates aliases even when another project or an unchanged stale alias updates', () => {
+    const constructed = stubNotification()
+    hideTab()
+    const { client, patch } = mount({ notifications: { enabled: true } }, [run()])
+    const alias = ['boot', 'runs', 'list']
+    const other = ['secondary', 'runs', 'list']
+    act(() => client.setQueryData(alias, [run()]))
+    patch([run({ status: 'waiting' })])
+    act(() => client.setQueryData(other, [run({ id: 'other' })]))
+    // An unrelated tick must not let an alias's old running row rewind the task.
+    act(() => client.setQueryData(alias, [run({ tokensUsed: 2 })]))
+    act(() => client.setQueryData(alias, [run({ status: 'waiting' })]))
+    patch([run({ status: 'waiting', tokensUsed: 3 })])
+    expect(constructed).toHaveLength(1)
+    patch([run({ status: 'running' })])
+    act(() => client.setQueryData(alias, [run({ status: 'running' })]))
+    patch([run({ status: 'waiting' })])
+    act(() => client.setQueryData(alias, [run({ status: 'waiting' })]))
+    expect(constructed).toHaveLength(2)
+  })
+
+  it('seeds initial secondary lists silently and forgets removed lists', () => {
+    const constructed = stubNotification()
+    hideTab()
+    const { client } = mount({ notifications: { enabled: true } }, [])
+    const key = ['secondary', 'runs', 'list']
+    act(() => client.setQueryData(key, [run({ status: 'waiting' })]))
+    act(() => client.setQueryData(key, [run({ status: 'waiting', tokensUsed: 1 })]))
+    act(() => client.setQueryData(key, [run()]))
+    act(() => client.removeQueries({ queryKey: key, exact: true }))
+    act(() => client.setQueryData(key, [run({ status: 'waiting' })]))
+    expect(constructed).toHaveLength(0)
+  })
+})
+
+
+it.each([false, true])('uses the newest silent alias baseline (loaded before mount: %s)', (beforeMount) => {
+  const constructed = stubNotification()
+  hideTab()
+  vi.stubGlobal('fetch', vi.fn(() => new Promise<never>(() => {})))
+  const client = makeClient({ notifications: { enabled: true } })
+  const stale = ['default', 'runs', 'list']
+  const fresh = ['boot', 'runs', 'list']
+  // Insert fresh first to prove freshness, rather than cache insertion order, picks the baseline.
+  if (beforeMount) client.setQueryData(fresh, [run()], { updatedAt: 200 })
+  client.setQueryData(stale, [run({ status: 'waiting' })], { updatedAt: 100 })
+  render(<QueryClientProvider client={client}><RunNotifications /></QueryClientProvider>)
+  if (!beforeMount) act(() => client.setQueryData(fresh, [run()], { updatedAt: 200 }))
+  expect(constructed).toHaveLength(0)
+  act(() => client.setQueryData(stale, [run({ status: 'waiting' })]))
+  act(() => client.setQueryData(fresh, [run({ status: 'waiting' })]))
+  expect(constructed).toHaveLength(1)
+})
+
+
+it('does not rearm a notified transition when a newly loaded alias is stale', () => {
+  const constructed = stubNotification()
+  hideTab()
+  const { client, patch } = mount({ notifications: { enabled: true } }, [run()])
+  patch([run({ status: 'waiting' })])
+  expect(constructed).toHaveLength(1)
+  const alias = ['boot', 'runs', 'list']
+  // A first fetch can complete after SSE with a snapshot from before that transition.
+  act(() => client.setQueryData(alias, [run()]))
+  act(() => client.setQueryData(alias, [run({ status: 'waiting' })]))
+  expect(constructed).toHaveLength(1)
+  patch([run()])
+  patch([run({ status: 'waiting' })])
+  expect(constructed).toHaveLength(2)
+})
+
+
+it.each([false, true])('ignores a pre-transition fetch on an observed alias (catch-up: %s)', async (catchUp) => {
+  const constructed = stubNotification()
+  hideTab()
+  const { client, patch } = mount({ notifications: { enabled: true } }, [run()])
+  const alias = ['boot', 'runs', 'list']
+  act(() => client.setQueryData(alias, [run(), run({ id: 'other' })]))
+  let resolve!: (runs: RunRecord[]) => void
+  const response = new Promise<RunRecord[]>(done => { resolve = done })
+  let pending!: Promise<RunRecord[]>
+  act(() => { pending = client.fetchQuery({ queryKey: alias, queryFn: () => response, staleTime: 0 }) })
+  patch([run({ status: 'waiting' })])
+  act(() => client.setQueryData(alias, [run({ status: 'waiting' }), run({ id: 'other' })]))
+  await act(async () => {
+    resolve([run(), run({ id: 'other', status: 'waiting' })])
+    await pending
+  })
+  // The stale r1 row cannot rewind its live transition; the unaffected other row reconciles.
+  expect(constructed.map(n => n.options?.tag)).toEqual(['cezar-run-r1', 'cezar-run-other'])
+  if (catchUp) act(() => client.setQueryData(alias, [run({ status: 'waiting' }), run({ id: 'other', status: 'waiting' })]))
+  expect(constructed).toHaveLength(2)
+  // A fetch started after the transition is authoritative and may rearm the task.
+  await act(async () => { await client.fetchQuery({ queryKey: alias, queryFn: async () => [run()], staleTime: 0 }) })
+  await act(async () => { await client.fetchQuery({ queryKey: alias, queryFn: async () => [run({ status: 'waiting' })], staleTime: 0 }) })
+  expect(constructed).toHaveLength(3)
+})
+
+
+it('does not replace a silent baseline with an older first alias response', async () => {
+  const constructed = stubNotification()
+  hideTab()
+  vi.stubGlobal('fetch', vi.fn(() => new Promise<never>(() => {})))
+  const client = makeClient({ notifications: { enabled: true } })
+  const alias = ['boot', 'runs', 'list']
+  let resolve!: (runs: RunRecord[]) => void
+  const response = new Promise<RunRecord[]>(done => { resolve = done })
+  const pending = client.fetchQuery({ queryKey: alias, queryFn: () => response })
+  client.setQueryData(['default', 'runs', 'list'], [run({ status: 'waiting' })])
+  render(<QueryClientProvider client={client}><RunNotifications /></QueryClientProvider>)
+  await act(async () => { resolve([run()]); await pending })
+  act(() => client.setQueryData(alias, [run({ status: 'waiting' })]))
+  expect(constructed).toHaveLength(0)
+  act(() => client.setQueryData(alias, [run()]))
+  act(() => client.setQueryData(alias, [run({ status: 'waiting' })]))
+  expect(constructed).toHaveLength(1)
 })
