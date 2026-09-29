@@ -96,6 +96,14 @@ operation prints text without a server. `--full` returns the contract shape.
   call covers any number of runs and holds no socket. `--until settled` waits
   for `done`/`review`/`failed`/`cancelled`; `--until attention` also stops on
   `waiting` or a pending human ask.
+- `list` leaves out runs whose `delegation.role` is `worker`, with or without
+  `--all` (`--all` means "include archived"), and `total` counts parents only
+  (#635). No flag brings workers back; add one only when someone asks.
+- `notify <id>` and `send <id> --notify` on a worker exit 64 with
+  `{ code: "invalid_input", error, parentId }`, naming the parent to notify
+  instead, before anything is subscribed or delivered. `notify --off` still
+  reaches a worker so an earlier subscription can be undone. Every other
+  id-addressed command still accepts a worker id (#635).
 - `send` posts to `/messages`. A `409 { error: "session closed" }` without
   `--resume` prints `{ delivery: "not-delivered", reason, next }`, exit 1; with
   `--resume` it posts the text to `/continue`. Any other 409 passes through,

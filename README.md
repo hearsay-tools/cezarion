@@ -634,7 +634,9 @@ Without either flag, `start` still runs `quick-task`.
 retry with the same id and task answers with the run the first one created (`created: false`)
 instead of starting a second. Also: `list`, `stop`, `finish`, `diff [--stat]`, `open`.
 Use `archive <id>` to hide a task from `list`, `unarchive <id>` to restore it, and
-`list --all` to include archived tasks. `archive-finished` sweeps finished tasks and prints
+`list --all` to include archived tasks. `list` never shows owned workers, with or without
+`--all`: they are steer targets of their parent task. Id-addressed commands (`status`, `wait`,
+`send`, `log`, `stop`, …) still accept a worker's id. `archive-finished` sweeps finished tasks and prints
 `{"archived": count}`. The single-task commands print `{"id": "…", "archived": true|false}`.
 Exit codes:
 `0` ok, `1` task failed/cancelled or a message was not delivered, `2` no cockpit or the cockpit
@@ -648,7 +650,9 @@ in POSTs `task.status` on each status change, `task.question` when it asks somet
 body carries the same slim projection `cez task status` prints, under `task`. `cez task start`
 opts in whenever the project has a webhook (`--no-notify` to skip it); the cockpit's New task form
 has a **Notify webhook** toggle; and a running task's **Hand off** button (or
-`cez task notify <id> --message '…'`) turns it on later with a note for the bot. The note goes to
+`cez task notify <id> --message '…'`) turns it on later with a note for the bot. `notify` (and
+`send --notify`) on a worker's id is a usage error that names the parent to notify instead;
+`notify --off` still works on one. The note goes to
 the webhook only, never to the agent. Delivery is best-effort: 10 s timeout, 3 attempts, and a
 failure shows in the thread without touching the task. The token is stored in `~/.cezar` and never
 sent back to a browser. Under `CEZ_DRY_RUN=1` nothing is sent; the payload is logged in the thread.
