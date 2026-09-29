@@ -1485,6 +1485,7 @@ describe('variant rows and the group row under width pressure', () => {
     // ages against the live clock: a slow shard start legitimately shows 10m, 11m... So pin the
     // age to 9m plus the minutes elapsed since the fixture was built (one minute of rounding slack)
     // instead of the bare 9m, which was wall-clock dependent, or any digits, which would pass a wrong age.
+    // Reproduction (red with the bare 9m, green with this bound): quick-list-age-reproduction.md.
     const shown = /^2 needs review · #425 · (\d+)m$/.exec(collapsed.meta)
     const elapsedMin = Math.floor((Date.now() - now) / 60_000)
     expect(shown, collapsed.meta).not.toBeNull()
