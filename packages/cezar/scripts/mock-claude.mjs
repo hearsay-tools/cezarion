@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { watchdogStall } from './mock-watchdog.mjs';
 // Mock `claude` binary for CEZ_DRY_RUN=1 — emits a plausible stream-json
 // session so the engine / store / GUI can be exercised without tokens.
 // Mirrors the real CLI's contract in SESSION mode: keeps reading {type:user}
@@ -244,6 +245,12 @@ async function respond(userText, imageCount, uuid) {
   // content event, so the pause has to sit BEFORE the content: a runner that
   // closed the turn on a timer after writing the prompt would report it early.
   // Short on purpose — `mock:slow` above is the 25 s queue-state hold.
+  if (watchdogStall(userText)) return;
+  if (userText.includes('mock:busy-progress')) {
+    for (let i = 0; i < 24; i++) { emit({ type: 'ping' }); await sleep(100); }
+    emit({ type: 'result', subtype: 'success', result: 'busy complete' });
+    return;
+  }
   if (userText.includes('mock:hold')) {
     await sleep(250);
     const held = 'parity hold: content after the pause';

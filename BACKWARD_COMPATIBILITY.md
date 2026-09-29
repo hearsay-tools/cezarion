@@ -162,9 +162,13 @@ Breaking: renaming a key, tightening a refinement so previously valid files fail
 Authored agent steps may add `timeoutMs` (#470): an integer from 0 through
 2147483647 milliseconds. Omitted and zero mean no wall-clock cap for managed
 workflow sessions, across all runners. Skill shorthand and built-in tasks have
-no cap; standalone runners retain their 30-minute default. Save/export preserves
+no wall-clock cap; standalone runners retain their 30-minute default. Save/export preserves
 an explicit timeout in full `steps:` form. Check steps reject the field. A positive
 limit fails the step on expiry; it does not add automatic retry or workflow resume.
+Managed sessions (including Continue) separately terminate an open turn after
+30 minutes without native stream/tool/heartbeat activity. Turn boundaries and
+human questions pause this guard; subsequent turns and answers rearm it. This
+default liveness safeguard needs no configuration and is independent of `timeoutMs`.
 
 ## 5. Skills Markdown format (`packages/cezar/src/skills.ts`)
 

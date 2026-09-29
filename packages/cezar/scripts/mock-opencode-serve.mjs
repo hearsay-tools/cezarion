@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { watchdogStall } from './mock-watchdog.mjs';
 // Bundled dry-run mock of `opencode serve` — speaks just enough of the HTTP+SSE
 // API (§4 of agent-event-protocols.md) for the runner wiring test in
 // `opencode-ui-mapper.test.ts`: POST /session, GET /event (SSE bus), one
@@ -385,6 +386,15 @@ const server = createServer((req, res) => {
           }) } });
           setTimeout(() => send({ type: 'session.idle', properties: { sessionID: SESSION_ID } }), 30);
         }, 250);
+        return;
+      }
+      if (watchdogStall(body)) return;
+      if (body.includes('mock:busy-progress')) {
+        let ticks = 0;
+        const timer = setInterval(() => {
+          send({ type: 'server.heartbeat', properties: {} });
+          if (++ticks === 24) { clearInterval(timer); send({ type: 'session.idle', properties: { sessionID: SESSION_ID } }); }
+        }, 100);
         return;
       }
       if (body.includes('mock:hold')) {

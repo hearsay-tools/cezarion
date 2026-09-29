@@ -10,6 +10,7 @@ import {
   EOF_KILL_GRACE_MS,
   EOF_TERM_GRACE_MS,
   KILL_GRACE_MS,
+  boundOutputDrainAfterExit,
 } from './runner-runtime.ts';
 import type {
   AgentEvent,
@@ -131,10 +132,12 @@ export class ClaudeCliRunner implements AgentRunner {
       throw wrapSpawnError(err, this.bin);
     }
 
+    boundOutputDrainAfterExit(child);
     let stdinOpen = true;
     let autoEndTimer: NodeJS.Timeout | undefined;
     let eofTermTimer: NodeJS.Timeout | undefined;
     let eofKillTimer: NodeJS.Timeout | undefined;
+    let killTimer: NodeJS.Timeout | undefined;
 
     // Protocol v2 emission — additive alongside v1 (`onEvent` keeps flowing
     // byte-identical); the channel is `opts.onUiEvent` (RunManager wiring
@@ -250,7 +253,12 @@ export class ClaudeCliRunner implements AgentRunner {
 
     const interrupt = (): void => {
       stdinOpen = false;
-      if (!hasExited()) signalChild('SIGTERM');
+      if (hasExited() || killTimer) return;
+      signalChild('SIGTERM');
+      killTimer = setTimeout(() => {
+        if (!hasExited()) signalChild('SIGKILL');
+      }, KILL_GRACE_MS);
+      killTimer.unref?.();
     };
 
     // Seed the first user message — the same path every follow-up takes.
@@ -273,17 +281,12 @@ export class ClaudeCliRunner implements AgentRunner {
     // Optional wall-clock kill switch (disabled for interactive sessions).
     const limitMs = spec.timeoutMs ?? this.timeoutMs;
     let timedOut = false;
-    let killTimer: NodeJS.Timeout | undefined;
     let deadline: NodeJS.Timeout | undefined;
     if (limitMs > 0) {
       deadline = setTimeout(() => {
         timedOut = true;
         interrupt();
         child.stdout.destroy();
-        killTimer = setTimeout(() => {
-          if (!hasExited()) signalChild('SIGKILL');
-        }, KILL_GRACE_MS);
-        killTimer.unref?.();
       }, limitMs);
       deadline.unref?.();
     }
@@ -316,6 +319,7 @@ export class ClaudeCliRunner implements AgentRunner {
             if (ids.length) opts.onAgentInputConsumed?.(ids);
             continue;
           }
+          opts.onActivity?.();
           const mappedMessage = normalizeIntentionalTeardownResult(msg, terminatedByCezar);
           emitUi((state) => mapClaudeMessage(mappedMessage, state));
 
@@ -363,7 +367,7 @@ export class ClaudeCliRunner implements AgentRunner {
       } catch (err) {
         // A timeout destroys stdout, which surfaces here as a premature-close
         // error — expected; rethrow anything else.
-        if (!timedOut) throw err;
+        if (!timedOut && !hasExited()) throw err;
       } finally {
         if (deadline) clearTimeout(deadline);
         if (autoEndTimer) clearTimeout(autoEndTimer);

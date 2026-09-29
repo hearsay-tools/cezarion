@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { watchdogStall } from './mock-watchdog.mjs';
 // Offline Cursor ACP wire. Shapes: cursor.com/docs/cli/acp; ACP v1 schema.
 import { createInterface } from 'node:readline';
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
@@ -50,6 +51,11 @@ async function prompt(id, content) {
   prompts += 1;
   if (input.includes('mock:ci-wait')) { const { ciPrompt } = await import('./mock-ci-tool.mjs'); text(await ciPrompt('cursor', ciWire, input)); complete(id); return; }
   if (resumeDone) { resumeDone = false; text('Resumed work finished.\nCEZ:DONE'); complete(id); return; }
+  if (watchdogStall(input)) return;
+  if (input.includes('mock:busy-progress')) {
+    for (let i = 0; i < 24; i++) { text('working\n'); await new Promise(r => setTimeout(r, 100)); }
+    complete(id); return;
+  }
   if (input.includes('mock:hold')) await new Promise(r => setTimeout(r, 500));
   if (input.includes('mock:rpc-error')) { emit({ id, error: { code: -32603, message: 'Provider rejected request' } }); return; }
   // #443 provider-error envelopes: the specific scenarios must be matched BEFORE the

@@ -21,7 +21,7 @@ import { readNdjson } from './ndjson.js';
 import { createPiUiState, mapPiRpcMessage, piFlushProviderError, piProviderErrorMessage, piTurnStarted } from './pi-ui-mapper.js';
 import { V1TextCoalescer } from './v1-text-coalescer.js';
 import { InputSubmissions } from './input-submissions.ts';
-import { AUTO_END_DELAY_MS, DEFAULT_RUN_TIMEOUT_MS, KILL_GRACE_MS } from './runner-runtime.js';
+import { boundOutputDrainAfterExit, AUTO_END_DELAY_MS, DEFAULT_RUN_TIMEOUT_MS, KILL_GRACE_MS } from './runner-runtime.js';
 
 export interface PiRunnerOptions {
   /** Override the binary name/path; defaults to `pi` on PATH (`CEZ_PI_BIN`). */
@@ -93,11 +93,13 @@ export class PiRunner implements AgentRunner {
       cwd: spec.cwd,
       env: buildChildEnv({ backend: this.backend, extraEnv: spec.env }),
     });
+    boundOutputDrainAfterExit(child);
     let open = true;
     let timedOut = false;
     let terminatedByCezar = false;
     let autoEndTimer: NodeJS.Timeout | undefined;
     let killTimer: NodeJS.Timeout | undefined;
+    let interruptKillTimer: NodeJS.Timeout | undefined;
     let piUi = createPiUiState();
     const textChunks: string[] = [];
     /** Streamed `text_delta` tokens buffered per content block — v1 `text` is
@@ -261,6 +263,10 @@ export class PiRunner implements AgentRunner {
       rejectAgentAck();
       terminatedByCezar = true;
       child.kill('SIGTERM');
+      interruptKillTimer = setTimeout(() => {
+        if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+      }, KILL_GRACE_MS);
+      interruptKillTimer.unref?.();
     };
 
     write({ id: 'cezar-state', type: 'get_state' });
@@ -305,6 +311,7 @@ export class PiRunner implements AgentRunner {
           ) {
             value.message.errorMessage = restorePiDegradedServiceError(value.message.errorMessage);
           }
+          opts.onActivity?.();
           // Flush before real message/tool/turn boundaries so v2 UI events
           // never overtake a pending block. Do NOT flush on prompt/response
           // acks — mid-turn `steer` can land between text_deltas and would
@@ -419,6 +426,8 @@ export class PiRunner implements AgentRunner {
             onEvent?.({ type: 'note', message: string(value.error) ?? 'pi extension error' });
           }
         }
+      } catch (error) {
+        if (child.exitCode === null && child.signalCode === null) throw error;
       } finally {
         if (deadline) clearTimeout(deadline);
         if (autoEndTimer) clearTimeout(autoEndTimer);
@@ -431,6 +440,7 @@ export class PiRunner implements AgentRunner {
       emitLatchedProviderError();
       emitLatchedUiProviderError();
       const exitCode = await waitForExit(child);
+      if (interruptKillTimer) clearTimeout(interruptKillTimer);
       if (spawnError) throw spawnError;
       if (timedOut) {
         const message = `pi CLI timed out after ${Math.round((limitMs / 60_000) * 10) / 10}m and was killed`;
@@ -596,7 +606,7 @@ function rpcError(value: Record<string, unknown>): string {
 }
 
 function waitForExit(child: ChildProcessWithoutNullStreams): Promise<number | null> {
-  if (child.exitCode !== null) return Promise.resolve(child.exitCode);
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(child.exitCode);
   return new Promise((resolve) => child.once('close', resolve));
 }
 

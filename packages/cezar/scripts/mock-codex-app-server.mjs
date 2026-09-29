@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { watchdogStall } from './mock-watchdog.mjs';
 // Bundled dry-run mock of `codex app-server` — speaks just enough JSON-RPC 2.0
 // JSONL (§3 of agent-event-protocols.md) for the runner wiring test in
 // `codex-ui-mapper.test.ts`: initialize/thread/turn handshake, one scripted
@@ -141,8 +142,10 @@ rl.on('line', async (line) => {
     if (process.env.CEZ_MOCK_CODEX_LATE_START_ACK === '1' && startSerial++ > 0) lateStartAck = msg.id; else {
     emit({ id: msg.id, result: { turn: { id: 'turn_mock_1' } } });
     }
-    emit({ method: 'turn/started', params: { turn: { id: 'turn_mock_1', status: 'inProgress', items: [] } } });
     const turnText = msg.params?.input?.map?.((part) => part.text ?? '').join('\n') ?? '';
+    if (!turnText.includes('mock:no-progress-ack-only')) {
+    emit({ method: 'turn/started', params: { turn: { id: 'turn_mock_1', status: 'inProgress', items: [] } } });
+    }
     // The real app-server records the turn's own input as a userMessage item,
     // echoing clientUserMessageId as clientId (probe 0.155.1, #505).
     const opening = { type: 'userMessage', id: `item_user_open_${++steerEchoSerial}`, clientId: msg.params?.clientUserMessageId ?? null, content: [{ type: 'text', text: turnText }] };
@@ -246,6 +249,15 @@ rl.on('line', async (line) => {
       emit({ method: 'item/agentMessage/delta', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', itemId: 'item_d1', delta: full } });
       emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: 'item_d1', text: full } } });
       emit({ method: 'thread/tokenUsage/updated', params: { threadId: 'th_mock_1', tokenUsage: { total: { totalTokens: 30, inputTokens: 20, outputTokens: 10 }, last: { totalTokens: 30, inputTokens: 20, outputTokens: 10 } } } });
+      emit({ method: 'turn/completed', params: { turn: { id: 'turn_mock_1', status: 'completed' } } });
+      return;
+    }
+    if (watchdogStall(turnText)) return;
+    if (turnText.includes('mock:busy-progress')) {
+      for (let i = 0; i < 24; i++) {
+        emit({ method: 'item/commandExecution/outputDelta', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', itemId: 'busy', delta: 'working\n' } });
+        await new Promise(r => setTimeout(r, 100));
+      }
       emit({ method: 'turn/completed', params: { turn: { id: 'turn_mock_1', status: 'completed' } } });
       return;
     }
