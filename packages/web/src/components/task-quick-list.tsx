@@ -323,13 +323,14 @@ function GroupRow({
   active: boolean
 }) {
   const lead = deriveAttention(row.lead)
-  const { families, shared, age } = groupMetaParts(row.members, now)
+  const projectId = scope ?? undefined
+  const { families, shared, age } = groupMetaParts(row.members, now, projectId)
   // Touch, or the mobile shell (#617 01b): references are inert text, and the toggle spans both
   // lines — the mobile stylesheet floors every button at 44px (#166), so a line-1-only button
   // would push this row from 47px to ~72px. The whole-row button meets that floor by itself.
   const touch = useRowReferencesInert()
   const first = row.members[0]!
-  const sharedReferences = taskReferences(first).filter((reference) => shared.has(referenceKey(reference)))
+  const sharedReferences = taskReferences(first, undefined, projectId).filter((reference) => shared.has(referenceKey(reference)))
   // Line 2 in the task row's own grammar: words, then the shared references as the same plain
   // links (with the status panel) a task row uses — inert text on touch (#617 01b) — then the age.
   const meta: React.ReactNode[] = [
@@ -473,7 +474,7 @@ function ExpandedVariantMembers({
   showCost: boolean
   onTogglePin?: (run: RunRecord, pinned: boolean) => void
 }) {
-  const shared = sharedReferenceKeys(members)
+  const shared = sharedReferenceKeys(members, scope ?? undefined)
   // 15.5px in, a 1px guide line, then 6px: with the row's own 10px padding that puts each
   // member's dot directly under the group's title (#617 01a).
   const rows = (
@@ -636,7 +637,7 @@ function RunRow({
   // it was opened on. It is the reason the title may drop its `NNN: ` prefix (#788, option C):
   // the number is painted once, as a link on the meta line, instead of twice.
   const reference = taskReference(run)
-  const references = taskReferences(run).filter((ref) => !groupReferences?.has(referenceKey(ref)))
+  const references = taskReferences(run, undefined, scope ?? undefined).filter((ref) => !groupReferences?.has(referenceKey(ref)))
   const title = runTitle(run)
   // Only when the two numbers are the same number — see `refPrefixMatches`. A run opened on issue
   // #788 that shipped as PR #790 keeps its prefix, because the reference is not saying it.

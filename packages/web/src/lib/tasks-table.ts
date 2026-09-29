@@ -193,12 +193,35 @@ export type TaskReferenceInput = Pick<
   | 'issueNumber'
   | 'referencedIssueUrl'
   | 'markerRefs'
->
+> & { projectId?: string }
 
 export interface TaskReference {
   kind: 'PR' | 'Issue'
   number: number
   url?: string
+  /** Required for bare references crossing project boundaries. */
+  projectId?: string
+}
+
+/**
+ * A reference's identity: kind, number AND where it points. Kind + number alone would call two
+ * repositories' PR #7 the same reference, so the group row would link to the first variant's and
+ * hide the other's (review round 6). With a URL the key carries its host and `owner/repo`
+ * (lower-cased, so `github.com/O/R` and `github.com/o/r` agree); an unparseable URL counts as
+ * itself; a number-only reference uses its project identity. The default scope is local to
+ * a single-project caller; cross-project callers must supply projectId. The group row's line 2 and
+ * every variant's own-reference filter use this one key.
+ */
+export function referenceKey(reference: { kind: string; number?: number; url?: string; projectId?: string }): string {
+  const base = `${reference.kind}#${reference.number}`
+  if (!reference.url) return `${base}@project:${reference.projectId ?? 'default'}`
+  try {
+    const url = new URL(reference.url)
+    const repo = url.pathname.split('/').filter(Boolean).slice(0, 2).join('/')
+    return `${base}@${url.host.toLowerCase()}/${repo.toLowerCase()}`
+  } catch {
+    return `${base}@${reference.url}`
+  }
 }
 
 /**
@@ -246,9 +269,9 @@ export interface TaskReference {
  * enter: #526/#819/#854 stop a bare NUMBER being synthesized into a link (here, above), and #945
  * stops a foreign discovered URL being adopted as the subject (in `store.ts`).
  *
- * Deduped by kind+number, so one reference reached through two fields stays one chip.
+ * Deduped by scoped identity, so repeated fields stay one chip without hiding another repo.
  */
-export function taskReferences(run: TaskReferenceInput, repoBase?: string): TaskReference[] {
+export function taskReferences(run: TaskReferenceInput, repoBase?: string, projectId = run.projectId): TaskReference[] {
   const prs = prUrls(run)
   const declared = run.markerRefs?.pr
   const sources: { kind: TaskReference['kind']; url?: string; number?: number }[] = [
@@ -271,15 +294,25 @@ export function taskReferences(run: TaskReferenceInput, repoBase?: string): Task
   for (const source of sources) {
     const number = source.url ? Number(prNumber(source.url)) : source.number
     if (!number || !Number.isInteger(number)) continue
-    const key = `${source.kind}#${number}`
-    if (seen.has(key)) continue
-    seen.add(key)
+    // Numeric fields can be derived from an explicit URL, including a foreign repo.
+    // Keep that authoritative chip instead of synthesizing an unrelated local link.
+    if (!source.url && references.some((reference) =>
+      reference.url && reference.kind === source.kind && reference.number === number,
+    )) continue
     // A number with no URL becomes one from the PROJECT's own repo — the same synthesis rule
     // `taskIssueUrl` already applies, and the same hard limit: only ever the project's repo,
     // never a URL scraped from a transcript, which routinely names another repository (#526).
     // Without a `repoBase` the chip stays inert text rather than linking somewhere invented.
     const url = source.url ?? synthesizeUrl(source.kind, number, repoBase)
-    references.push({ kind: source.kind, number, ...(url ? { url } : {}) })
+    const reference: TaskReference = {
+      kind: source.kind,
+      number,
+      ...(url ? { url } : projectId !== undefined ? { projectId } : {}),
+    }
+    const key = referenceKey(reference)
+    if (seen.has(key)) continue
+    seen.add(key)
+    references.push(reference)
   }
   return references
 }

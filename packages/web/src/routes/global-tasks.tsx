@@ -31,6 +31,7 @@ import { shortAge } from '@/lib/format'
 import {
   formatCost,
   taskReferences,
+  referenceKey,
   usageCells,
   type TaskReference,
 } from '@/lib/tasks-table'
@@ -940,7 +941,7 @@ function ReferenceChips({
     <span className="flex flex-nowrap items-center gap-1">
       {shown.map((reference) => (
         <ReferenceChip
-          key={`${reference.kind}#${reference.number}`}
+          key={referenceKey(reference)}
           reference={reference}
           taskTitle={title}
           // Named per chip HERE and nowhere else: this page's rows come from different projects,
@@ -1066,7 +1067,7 @@ function ReferenceOverflow({
         <span className="flex flex-col items-start gap-1">
           {references.map((reference) => (
             <ReferenceChip
-              key={`${reference.kind}#${reference.number}`}
+              key={referenceKey(reference)}
               reference={reference}
               taskTitle={taskTitle}
               projectId={projectId}

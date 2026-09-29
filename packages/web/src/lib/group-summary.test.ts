@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { RunRecord } from '@open-mercato/cezar-api-client'
-import { GROUP_FAMILIES, attentionFamily, familiesOfLabels, groupAge, groupFamilies, groupMetaParts, resumeLabel, sharedReferenceKeys } from '@/lib/group-summary'
+import { GROUP_FAMILIES, attentionFamily, familiesOfLabels, groupAge, groupFamilies, groupMetaParts, resumeLabel, referenceKey, sharedReferenceKeys } from '@/lib/group-summary'
 
 const NOW = Date.parse('2026-07-14T12:00:00.000Z')
 const ago = (ms: number) => new Date(NOW - ms).toISOString()
@@ -61,6 +61,25 @@ describe('groupFamilies (the aggregate in words)', () => {
 })
 
 describe('shared references', () => {
+  it.each(['prNumber', 'issueNumber'] as const)('does not share bare %s across projects', (field) => {
+    const a = { ...run({ [field]: 711 }), projectId: 'cezarion' }
+    const b = { ...run({ [field]: 711 }), projectId: 'toolkit-dev' }
+    expect([...sharedReferenceKeys([a, b])]).toEqual([])
+    expect(sharedReferenceKeys([a, { ...a, id: 'another-task' }]).size).toBe(1)
+  })
+
+  it('uses the explicit project scope for project-local records', () => {
+    const members = [run({ issueNumber: 9 }), run({ issueNumber: 9 })]
+    expect([...sharedReferenceKeys(members, 'cezarion')]).toEqual(['Issue#9@project:cezarion'])
+    expect([...sharedReferenceKeys(members, 'toolkit-dev')]).toEqual(['Issue#9@project:toolkit-dev'])
+  })
+
+  it('scopes direct bare keys without changing URL identity', () => {
+    const bare = { kind: 'PR', number: 711, projectId: 'cezarion' }
+    expect(referenceKey(bare)).not.toBe(referenceKey({ ...bare, projectId: 'toolkit-dev' }))
+    expect(referenceKey({ ...bare, url: 'https://GitHub.com/O/R/pull/711' })).toBe('PR#711@github.com/o/r')
+  })
+
   const issue = { referencedIssueUrl: 'https://github.com/o/r/issues/425' }
   it('is the reference every member carries', () => {
     expect([...sharedReferenceKeys([run(issue), run(issue)])]).toEqual(['Issue#425@github.com/o/r'])
