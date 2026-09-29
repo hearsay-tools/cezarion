@@ -395,6 +395,19 @@ describe('owned workspace continuation and queued recovery', () => {
 
 
 describe('removeOwnedWorkspace verified retryable destruction', () => {
+  it('preserves owned resources when shared mutation coordination is unavailable', async () => {
+    const { root, first } = await fixture();
+    const workspace = await createOwnedWorkspace(root, randomUUID(), first);
+    const claims = join(root, '.git/cezar-worktree-mutations');
+    await rm(claims, { recursive: true });
+    await writeFile(claims, 'coordination unavailable');
+    expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'incomplete', remaining: ['worktree', 'branch'] });
+    expect(existsSync(workspace.path)).toBe(true);
+    expect(git(root, 'rev-parse', workspace.branch)).toBe(first);
+    await rm(claims);
+    expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'complete', remaining: [] });
+  });
+
   it('preserves owned resources when cleanup authority is revoked during preflight', async () => {
     const { root, first } = await fixture();
     const workspace = await createOwnedWorkspace(root, randomUUID(), first);

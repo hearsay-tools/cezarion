@@ -36,6 +36,28 @@ describe('RunStore save lifecycle (#124)', () => {
     rmSync(dataDir, { recursive: true, force: true });
   });
 
+  it.each([false, true])('retention preserves live history and scratch, but reaps terminal scratch (archived=%s)', (archived) => {
+    const statuses = ['queued', 'running', 'waiting', 'done', 'review', 'failed', 'cancelled'] as const;
+    const oldRuns = statuses.map((status) => ({ ...LEGACY_RUN, id: status, status, archived }));
+    const kept = Array.from({ length: archived ? 500 : 300 }, (_, index) => ({
+      ...LEGACY_RUN, id: `newer-${index}`, archived, createdAt: '2026-02-01T00:00:00.000Z',
+    }));
+    writeFileSync(join(dataDir, 'runs.json'), JSON.stringify([...oldRuns, ...kept]));
+    for (const { id } of oldRuns) {
+      mkdirSync(join(dataDir, 'tmp', id), { recursive: true });
+      writeFileSync(join(dataDir, 'tmp', id, 'note.txt'), id);
+    }
+    const store = RunStore.open(dataDir, { keepLive: true });
+    store.createRun({ title: 'trigger retention', workflow: 'w', task: 'task', steps: [] });
+    for (const status of statuses) {
+      const live = ['queued', 'running', 'waiting'].includes(status);
+      expect(store.getRun(status) !== undefined, status).toBe(live);
+      expect(existsSync(join(dataDir, 'tmp', status)), status).toBe(live);
+      if (live) expect(readFileSync(join(dataDir, 'tmp', status, 'note.txt'), 'utf8')).toBe(status);
+    }
+    store.flush();
+  });
+
   it.each(['timer', 'flush'] as const)('silently skips a %s save after the data directory is removed', (trigger) => {
     const store = RunStore.open(dataDir);
     store.createRun({ title: 't', workflow: 'w', task: 'task', steps: [] });

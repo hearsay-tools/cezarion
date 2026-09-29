@@ -5,6 +5,7 @@ import { lstat, mkdir, readdir, readFile, rm, stat } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { resolveTaskDiffBase } from './git-diff-base.ts';
 import { isSafeGitRef } from './git-refs.ts';
+import { withWorktreeMutation, type WorktreeGit } from './git-worktree-lock.ts';
 
 /**
  * Git worktree per task (spec 006). Each run gets its own branch
@@ -139,6 +140,13 @@ export async function createWorktree(
   runId: string,
   baseBranch: string,
   options: { freshOnly?: boolean } = {},
+): Promise<WorktreeInfo> {
+  return withWorktreeMutation(repoRoot, git => createWorktreeLocked(repoRoot, runId, baseBranch, options, git));
+}
+
+async function createWorktreeLocked(
+  repoRoot: string, runId: string, baseBranch: string,
+  options: { freshOnly?: boolean }, git: WorktreeGit,
 ): Promise<WorktreeInfo> {
   let base = baseBranch;
   if (!base || base === 'HEAD') {
@@ -319,6 +327,13 @@ export async function removeWorktree(
   worktreePath: string,
   branch?: string,
   opts?: { reclaimOwnedDirectory?: boolean },
+): Promise<void> {
+  await withWorktreeMutation(repoRoot, git => removeWorktreeLocked(repoRoot, worktreePath, branch, opts, git)).catch(() => undefined);
+}
+
+async function removeWorktreeLocked(
+  repoRoot: string, worktreePath: string, branch: string | undefined,
+  opts: { reclaimOwnedDirectory?: boolean } | undefined, git: WorktreeGit,
 ): Promise<void> {
   const protection = await ownedCleanupProtection(repoRoot);
   // Directory-only retention (#575) may reclaim a finished owned-worker checkout
@@ -671,6 +686,10 @@ export async function pruneOrphans(
   repoRoot: string,
   validIds: ReadonlySet<string>,
 ): Promise<string[]> {
+  return withWorktreeMutation(repoRoot, git => pruneOrphansLocked(repoRoot, validIds, git)).catch(() => []);
+}
+
+async function pruneOrphansLocked(repoRoot: string, validIds: ReadonlySet<string>, git: WorktreeGit): Promise<string[]> {
   const protection = await ownedCleanupProtection(repoRoot);
   if (protection.uncertain) return [];
   if (protection.paths.size === 0) await git(repoRoot, ['worktree', 'prune']);
@@ -683,7 +702,7 @@ export async function pruneOrphans(
   const removed: string[] = [];
   for (const entry of entries) {
     if (!entry.isDirectory() || validIds.has(entry.name) || protection.paths.has(worktreePathFor(repoRoot, entry.name))) continue;
-    await removeWorktree(repoRoot, worktreePathFor(repoRoot, entry.name), branchFor(entry.name));
+    await removeWorktreeLocked(repoRoot, worktreePathFor(repoRoot, entry.name), branchFor(entry.name), undefined, git);
     removed.push(entry.name);
   }
   return removed;
