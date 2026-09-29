@@ -314,3 +314,20 @@ it.each([false, true])('uses the newest silent alias baseline (loaded before mou
   act(() => client.setQueryData(fresh, [run({ status: 'waiting' })]))
   expect(constructed).toHaveLength(1)
 })
+
+
+it('does not rearm a notified transition when a newly loaded alias is stale', () => {
+  const constructed = stubNotification()
+  hideTab()
+  const { client, patch } = mount({ notifications: { enabled: true } }, [run()])
+  patch([run({ status: 'waiting' })])
+  expect(constructed).toHaveLength(1)
+  const alias = ['boot', 'runs', 'list']
+  // A first fetch can complete after SSE with a snapshot from before that transition.
+  act(() => client.setQueryData(alias, [run()]))
+  act(() => client.setQueryData(alias, [run({ status: 'waiting' })]))
+  expect(constructed).toHaveLength(1)
+  patch([run()])
+  patch([run({ status: 'waiting' })])
+  expect(constructed).toHaveLength(2)
+})

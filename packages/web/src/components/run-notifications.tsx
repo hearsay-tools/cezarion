@@ -48,19 +48,26 @@ export function RunNotifications() {
     const cache = queryClient.getQueryCache()
     const lists = new Map<string, ReadonlyMap<string, RunNotificationState>>()
     const known = new Map<string, RunNotificationState>()
+    const transitioned = new Set<string>()
     const isRunList = (key: readonly unknown[]) =>
       key.length === 3 && typeof key[0] === 'string' && key[1] === 'runs' && key[2] === 'list'
 
     // Retain other projects' history, but forget tasks once no cached list contains them.
     const prune = () => {
       const retained = new Set([...lists.values()].flatMap(states => [...states.keys()]))
-      for (const id of known.keys()) if (!retained.has(id)) known.delete(id)
+      for (const id of known.keys()) {
+        if (!retained.has(id)) {
+          known.delete(id)
+          transitioned.delete(id)
+        }
+      }
     }
     const observe = (hash: string, runs: readonly ApiRun[], seed = false): void => {
       const previous = lists.get(hash)
       const { statuses } = diffRunTransitions(new Map(), runs)
       // Compare within each alias first: a token tick on an old alias must not rewind the
-      // shared history. First sightings seed silently from the latest loaded snapshot.
+      // shared history. Initial aliases establish the baseline only until a live transition
+      // is observed: a late first fetch may contain a pre-transition snapshot.
       const changed = runs.filter(run => {
         const before = previous?.get(run.id)
         const after = statuses.get(run.id)!
@@ -68,8 +75,13 @@ export function RunNotifications() {
           (before.status !== after.status || before.wantsAttention !== after.wantsAttention)
       })
       const { entering, statuses: updates } = diffRunTransitions(known, changed)
-      for (const [id, state] of statuses) if (!previous?.has(id)) known.set(id, state)
-      for (const [id, state] of updates) known.set(id, state)
+      for (const [id, state] of statuses) {
+        if (!previous?.has(id) && !transitioned.has(id)) known.set(id, state)
+      }
+      for (const [id, state] of updates) {
+        known.set(id, state)
+        transitioned.add(id)
+      }
       lists.set(hash, statuses)
       prune()
       if (seed) return
