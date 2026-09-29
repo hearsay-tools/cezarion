@@ -1481,7 +1481,15 @@ describe('variant rows and the group row under width pressure', () => {
         inert: chip?.dataset.inert ?? null, links: meta.querySelectorAll('a').length, inToggle: chip?.closest('button') != null }
     })()`
     const collapsed = browser.waitForValue(group, (g: Group | null) => g?.expanded === 'false') as Group
-    expect(collapsed.meta).toMatch(/^2 needs review · #425 · \d+m$/)
+    // The fixture's newest member finished 9m before `now`, a module-load constant, while the row
+    // ages against the live clock: a slow shard start legitimately shows 10m, 11m... So pin the
+    // age to 9m plus the minutes elapsed since the fixture was built (one minute of rounding slack)
+    // instead of the bare 9m, which was wall-clock dependent, or any digits, which would pass a wrong age.
+    const shown = /^2 needs review · #425 · (\d+)m$/.exec(collapsed.meta)
+    const elapsedMin = Math.floor((Date.now() - now) / 60_000)
+    expect(shown, collapsed.meta).not.toBeNull()
+    expect(Number(shown?.[1]), collapsed.meta).toBeGreaterThanOrEqual(9 + elapsedMin - 1)
+    expect(Number(shown?.[1]), collapsed.meta).toBeLessThanOrEqual(9 + elapsedMin + 1)
     // This spec's browser reports `hover: none`, so the reference is inert text here; the
     // pointer path (a link with the status panel) is pinned in selection-states.
     // …and inside the one toggle that spans both lines (#617 mobile regression): inert text is
