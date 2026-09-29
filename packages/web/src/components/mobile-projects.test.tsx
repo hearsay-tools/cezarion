@@ -1,9 +1,11 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { MemoryRouter, useLocation } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ProjectListEntry } from '@open-mercato/cezar-api-client'
+import { queryKeys, workspaceQueryKeys } from '@/api/queries'
 import { AppShell } from '@/components/app-shell'
 import { elsewhereSignal, menuButtonLabel, type MobileProjectNav } from '@/components/mobile-projects'
 import { ThemeProvider } from '@/components/theme-provider'
@@ -59,15 +61,24 @@ function Probe(): ReactNode {
   return <span data-testid="location">{useLocation().pathname}</span>
 }
 
-function renderShell(entry: string, mobileProjects: MobileProjectNav | null, props: Partial<React.ComponentProps<typeof AppShell>> = {}) {
+// The current project's row carries the shared project menu (#621), which reads health, the
+// registry and runs from the query cache. Seeded, never fetched: a pending fetch stays pending.
+function renderShell(entry: string, mobileProjects: MobileProjectNav | null, props: Partial<React.ComponentProps<typeof AppShell>> = {}, localHandoff = true) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
+  client.setQueryData(queryKeys.health, { bootProject: 'cezarion', repo: { name: 'cezarion', root: '/home/me/cezarion', branch: 'main' }, capabilities: { localHandoff } })
+  client.setQueryData(workspaceQueryKeys.projects, { bootProject: 'cezarion', projects: PROJECTS })
+  client.setQueryData(queryKeys.runs.list(), [])
+  vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => {})))
   return render(
-    <ThemeProvider>
-      <MemoryRouter initialEntries={[entry]}>
-        <AppShell repo={{ name: 'cezarion', branch: 'main' }} version="0.14.9" mobileProjects={mobileProjects} {...props}>
-          <Probe />
-        </AppShell>
-      </MemoryRouter>
-    </ThemeProvider>,
+    <QueryClientProvider client={client}>
+      <ThemeProvider>
+        <MemoryRouter initialEntries={[entry]}>
+          <AppShell repo={{ name: 'cezarion', branch: 'main' }} version="0.14.9" mobileProjects={mobileProjects} {...props}>
+            <Probe />
+          </AppShell>
+        </MemoryRouter>
+      </ThemeProvider>
+    </QueryClientProvider>,
   )
 }
 
@@ -177,8 +188,8 @@ describe('mobile drawer', () => {
     expect(rows().map((row) => row.getAttribute('data-project-id'))).toEqual(PROJECTS.map((entry) => entry.id))
     for (const row of rows()) expect(row.className).toContain('h-[64px]')
 
-    const order = [...drawer().querySelectorAll('[data-slot="drawer-identity"], [data-slot="drawer-projects"], [data-slot="drawer-workspace"], [data-slot="sidebar-content"], [data-slot="drawer-global"]')].map((el) => el.getAttribute('data-slot'))
-    expect(order).toEqual(['drawer-identity', 'drawer-projects', 'drawer-workspace', 'sidebar-content', 'drawer-global'])
+    const order = [...drawer().querySelectorAll('[data-slot="drawer-identity"], [data-slot="drawer-projects"], [data-slot="drawer-workspace"], [data-slot="drawer-global"]')].map((el) => el.getAttribute('data-slot'))
+    expect(order).toEqual(['drawer-identity', 'drawer-projects', 'drawer-workspace', 'drawer-global'])
   })
 
   it('marks the current project, and paints each row’s pills and coloured state words', () => {
@@ -186,7 +197,7 @@ describe('mobile drawer', () => {
     fireEvent.click(menuButton())
     const [current, toolkit, failed, finished, idle] = rows() as [HTMLElement, HTMLElement, HTMLElement, HTMLElement, HTMLElement]
     expect(current.getAttribute('aria-current')).toBe('page')
-    expect(current.className).toContain('bg-sidebar-row-selected')
+    expect((current.closest('[data-slot="drawer-project-current"]') as HTMLElement).className).toContain('bg-sidebar-row-selected')
     expect(current.querySelector('svg[data-design-icon="check"]')).not.toBeNull()
     expect(toolkit.getAttribute('aria-current')).toBeNull()
 
@@ -249,13 +260,129 @@ describe('mobile drawer', () => {
     expect(theme.textContent).toBe('Theme · System')
   })
 
-  it('keeps every existing drawer destination reachable', () => {
+  it('no longer renders the sidebar content: nav, quick list and New task moved out (#621)', () => {
     renderShell('/p/cezarion/', nav(), { taskQuickList: <a href="/p/cezarion/tasks/x">A task</a> })
     fireEvent.click(menuButton())
-    const content = drawer().querySelector('[data-slot="sidebar-content"]') as HTMLElement
-    expect(within(content).getByRole('navigation', { name: 'Main' })).toBeTruthy()
-    expect(within(content).getByRole('link', { name: 'A task' })).toBeTruthy()
-    expect(within(content).getByRole('link', { name: /New task/ })).toBeTruthy()
+    expect(drawer().querySelector('[data-slot="sidebar-content"]')).toBeNull()
+    expect(within(drawer()).queryByRole('navigation', { name: 'Main' })).toBeNull()
+    expect(within(drawer()).queryByRole('link', { name: 'A task' })).toBeNull()
+    expect(within(drawer()).queryByRole('link', { name: /New task/ })).toBeNull()
+  })
+
+  describe('Tools row', () => {
+    const tools = () => drawer().querySelector('[data-slot="drawer-tools"]') as HTMLElement
+
+    it('opens /tools directly, above Global settings, and closes the drawer', async () => {
+      renderShell('/p/cezarion/', nav(), { toolsStatus: { blocked: false, note: null } })
+      fireEvent.click(menuButton())
+      const global = drawer().querySelector('[data-slot="drawer-global"]') as HTMLElement
+      expect([...global.children].map((el) => el.getAttribute('data-slot'))).toEqual(['drawer-tools', 'drawer-global-settings', 'theme-toggle'])
+      expect(tools().getAttribute('href')).toBe('/tools')
+      expect(tools().className).toContain('h-[48px]')
+      fireEvent.click(tools())
+      await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/tools'))
+      await waitFor(() => expect(drawer()).toBeNull())
+    })
+
+    it('carries the amber dot only when something blocks starting a task', () => {
+      renderShell('/p/cezarion/', nav(), { toolsStatus: { blocked: true, note: null } })
+      fireEvent.click(menuButton())
+      const dot = tools().querySelector('[data-slot="drawer-tools-dot"]')
+      expect(dot).not.toBeNull()
+      expect(dot?.className).toContain('pending')
+      cleanup()
+      renderShell('/p/cezarion/', nav(), { toolsStatus: { blocked: false, note: null } })
+      fireEvent.click(menuButton())
+      expect(tools().querySelector('[data-slot="drawer-tools-dot"]')).toBeNull()
+    })
+
+    it('shows the forge note as the row’s second line, and only when there is one', () => {
+      renderShell('/p/cezarion/', nav(), { toolsStatus: { blocked: false, note: 'No GitHub remote detected — the GitHub tab is hidden.' } })
+      fireEvent.click(menuButton())
+      expect(tools().querySelector('[data-slot="drawer-tools-note"]')?.textContent).toBe('No GitHub remote detected — the GitHub tab is hidden.')
+      cleanup()
+      renderShell('/p/cezarion/', nav(), { toolsStatus: { blocked: false, note: null } })
+      fireEvent.click(menuButton())
+      expect(tools().querySelector('[data-slot="drawer-tools-note"]')).toBeNull()
+    })
+
+    it('renders no row before health has answered', () => {
+      renderShell('/p/cezarion/', nav())
+      fireEvent.click(menuButton())
+      expect(drawer().querySelector('[data-slot="drawer-tools"]')).toBeNull()
+    })
+  })
+
+  describe('update row', () => {
+    const update = { applicationUpdate: { supported: true, status: 'idle' } as never, onApplyUpdate: async () => {} }
+
+    it('is absent when up to date: the identity row alone shows the version', () => {
+      renderShell('/p/cezarion/', nav(), { latestVersion: '0.14.9', ...update })
+      fireEvent.click(menuButton())
+      expect(drawer().querySelector('[data-slot="drawer-update"]')).toBeNull()
+    })
+
+    it('sits directly under the identity row with the 44px Update button', () => {
+      renderShell('/p/cezarion/', nav(), { latestVersion: '0.15.0', ...update })
+      fireEvent.click(menuButton())
+      const row = drawer().querySelector('[data-slot="drawer-update"]') as HTMLElement
+      expect(drawer().querySelector('[data-slot="drawer-identity"]')?.nextElementSibling).toBe(row)
+      expect(row.textContent).toContain('Update available · v0.15.0')
+      expect(within(row).getByRole('button', { name: 'Update application' }).className).toContain('size-11')
+    })
+
+    it('offers Restart, and hosts the feedback line, inside the row', () => {
+      renderShell('/p/cezarion/', nav(), { latestVersion: '0.15.0', applicationUpdate: { supported: true, status: 'ready' } as never, onRestart: async () => {}, applicationUpdateError: 'Update failed.' })
+      fireEvent.click(menuButton())
+      const row = drawer().querySelector('[data-slot="drawer-update"]') as HTMLElement
+      expect(within(row).getByRole('button', { name: 'Restart application' })).toBeTruthy()
+      expect(row.textContent).toContain('Update failed.')
+    })
+  })
+
+  describe('current project menu', () => {
+    const trigger = () => within(document.querySelector('[data-slot="drawer-project-current"]') as HTMLElement).getByRole('button', { name: 'Project menu' })
+    const open = () => fireEvent.pointerDown(trigger(), { button: 0, ctrlKey: false })
+
+    it('puts a 44px … beside the current row only, never inside its link', () => {
+      renderShell('/p/cezarion/', nav())
+      fireEvent.click(menuButton())
+      expect(document.querySelectorAll('[data-slot="project-menu-trigger"]')).toHaveLength(1)
+      expect(trigger().className).toContain('size-[44px]')
+      expect(rows()[0]!.contains(trigger())).toBe(false)
+      expect(rows()[0]!.parentElement).toBe(trigger().parentElement)
+      // Other rows stay bare links.
+      expect(rows()[1]!.parentElement?.getAttribute('data-slot')).toBe('drawer-projects-group')
+    })
+
+    it('opens the shared menu: Mark all read, Open in, Copy path, Project settings', async () => {
+      renderShell('/p/cezarion/', nav())
+      fireEvent.click(menuButton())
+      open()
+      expect(await screen.findByRole('menuitem', { name: /Mark all read/ })).toBeTruthy()
+      expect(screen.getByRole('menuitem', { name: /Open in/ })).toBeTruthy()
+      expect(screen.getByRole('menuitem', { name: 'Copy path' })).toBeTruthy()
+      expect(screen.getByRole('menuitem', { name: 'Project settings' }).getAttribute('href')).toBe('/p/cezarion/settings')
+    })
+
+    it('keeps the same localHandoff gate: no host actions remotely', async () => {
+      renderShell('/p/cezarion/', nav(), {}, false)
+      fireEvent.click(menuButton())
+      open()
+      await screen.findByRole('menuitem', { name: /Mark all read/ })
+      expect(screen.queryByRole('menuitem', { name: 'Copy path' })).toBeNull()
+      expect(screen.queryByRole('menuitem', { name: /Open in/ })).toBeNull()
+      expect(screen.getByRole('menuitem', { name: 'Project settings' })).toBeTruthy()
+    })
+
+    it('closes the drawer when Project settings navigates', async () => {
+      renderShell('/p/cezarion/', nav())
+      fireEvent.click(menuButton())
+      open()
+      fireEvent.click(await screen.findByRole('menuitem', { name: 'Project settings' }))
+      await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/p/cezarion/settings'))
+      await waitFor(() => expect(drawer()).toBeNull())
+    })
   })
 
   it('renders without project data, keeping identity and global rows', () => {

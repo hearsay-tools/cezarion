@@ -857,6 +857,33 @@ describe('project rail wiring', () => {
     expect(rows[1]!.querySelector('[data-slot="drawer-project-state"]')?.textContent).toBe('1 needs you·1 working')
   })
 
+  // #621: the drawer no longer renders the sidebar footer, so the Tools row's amber dot and the
+  // forge note are derived from the same health the desktop ToolsMenu reads.
+  it('feeds the drawer Tools row from health: forge note and the amber blocker dot', async () => {
+    vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener: () => {}, removeEventListener: () => {} }))
+    const health = { ...HEALTH, checks: [{ name: 'claude', available: false, hint: 'install' }] } as unknown as HealthResponse
+    serve({
+      '/api/v1/health': health,
+      '/api/v1/todos': [],
+      '/api/v1/projects': TWO_PROJECTS,
+      '/api/v1/workspace/ui-state': {},
+      '/api/v1/workspace/runs-index': railIndex([]),
+      '/api/v1/runs': [],
+      '/api/v1/p/cezar/runs': [],
+      '/api/v1/p/shop/runs': [],
+    })
+    renderShell('/p/cezar/')
+    fireEvent.click(await screen.findByRole('button', { name: /^Open projects/ }))
+    const row = await waitFor(() => {
+      const found = document.querySelector('[data-slot="mobile-nav-drawer"] [data-slot="drawer-tools"]')
+      expect(found).not.toBeNull()
+      return found as HTMLElement
+    })
+    expect(row.getAttribute('href')).toBe('/tools')
+    expect(row.querySelector('[data-slot="drawer-tools-dot"]')).not.toBeNull()
+    expect(row.querySelector('[data-slot="drawer-tools-note"]')?.textContent).toContain('No GitHub remote detected')
+  })
+
   // The capability, not the project count: one registered project in the default multi-project
   // mode is the zero-config first run, and it must teach where projects live.
   it('keeps Add project and All projects on the rail with one project and the capability off', async () => {

@@ -2,12 +2,16 @@ import { Link as RouterLink } from 'react-router'
 
 import type { ProjectListEntry } from '@open-mercato/cezar-api-client'
 import { AddProjectMenu } from '@/components/add-project-menu'
-import { CheckIcon, FolderPlusIcon, LayersIcon, Settings2Icon, SunMoonIcon, XIcon } from '@/components/design-icons'
+import { ApplicationUpdateControl, ApplicationUpdateFeedback, type ApplicationUpdateControlProps } from '@/components/application-update-control'
+import { CheckIcon, FolderPlusIcon, LayersIcon, Settings2Icon, SunMoonIcon, WrenchIcon, XIcon } from '@/components/design-icons'
+import { ProjectMenu } from '@/components/sidebar-project-header'
+import { StatusDot } from '@/components/status-dot'
 import { SignalPill, signalPillSegments } from '@/components/signal-pill'
 import { useTheme } from '@/components/theme-provider'
 import { NEXT_THEME } from '@/components/theme-toggle'
 import { Button } from '@/components/ui/button'
 import { SheetClose } from '@/components/ui/sheet'
+import { isNewerVersion } from '@/lib/is-newer-version'
 import { scopeTo } from '@/lib/project-router'
 import { projectInitials, projectSignalParts, sumSignals, type ProjectSignal, type SignalTone } from '@/lib/project-signal'
 import { cn } from '@/lib/utils'
@@ -81,6 +85,35 @@ export function DrawerIdentity({ version }: { version: string | null }) {
   )
 }
 
+/**
+ * The update row (#621): nothing while up to date, since the identity row already shows the
+ * version. When a newer release exists it earns a full-width row right under the identity, with
+ * the Update or Restart action and the progress/failure feedback that used to live in the
+ * sidebar footer this drawer no longer renders.
+ */
+export function DrawerUpdate({ version, latestVersion, ...update }: Omit<ApplicationUpdateControlProps, 'version' | 'latestVersion'> & {
+  version: string | null
+  latestVersion: string | null
+}) {
+  // A ready or restarting update outlives the version gap (the new version is installed but not
+  // running yet), so the state, not only the comparison, keeps the row visible.
+  const pending = update.state?.status === 'ready' || update.state?.status === 'preparing' || update.state?.status === 'restarting'
+  const available = Boolean(version && latestVersion && isNewerVersion(latestVersion, version))
+  if (!available && !pending) return null
+  return (
+    <div data-slot="drawer-update" className="shrink-0 border-b border-border px-[18px] py-[6px]">
+      <div className="flex min-h-[44px] items-center gap-[8px]">
+        <StatusDot tone="pending" className="size-[6px] shrink-0" />
+        <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground">
+          {available ? `Update available · v${latestVersion}` : 'Restart to finish updating'}
+        </span>
+        <ApplicationUpdateControl version={version} latestVersion={latestVersion} {...update} />
+      </div>
+      <ApplicationUpdateFeedback version={version} latestVersion={latestVersion} state={update.state} error={update.error} offline={update.offline} busy={update.busy} />
+    </div>
+  )
+}
+
 function DrawerProjectRow({ project, signal, known, truncated, current, onNavigate }: {
   project: ProjectListEntry
   signal: ProjectSignal | undefined
@@ -94,7 +127,7 @@ function DrawerProjectRow({ project, signal, known, truncated, current, onNaviga
   // The pills' ring is the surface they sit on, so they still read as cut-outs on the current row.
   const ring = current ? 'border-sidebar-row-selected' : 'border-sidebar'
   const placement = 'right-[-4px]'
-  return (
+  const link = (
     <RouterLink
       to={scopeTo(project.id, '/')}
       onClick={onNavigate}
@@ -102,8 +135,9 @@ function DrawerProjectRow({ project, signal, known, truncated, current, onNaviga
       data-project-id={project.id}
       aria-current={current ? 'page' : undefined}
       className={cn(
-        'flex h-[64px] items-center gap-[12px] rounded-[10px] px-[10px] text-foreground hover:bg-sidebar-row-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
-        current && 'bg-sidebar-row-selected hover:bg-sidebar-row-selected',
+        'flex h-[64px] min-w-0 flex-1 items-center gap-[12px] rounded-[10px] px-[10px] text-foreground hover:bg-sidebar-row-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
+        // With the menu button beside it the row's fill moves to the wrapper, so it runs under both.
+        current && 'hover:bg-sidebar-row-selected',
       )}
     >
       <span
@@ -133,7 +167,20 @@ function DrawerProjectRow({ project, signal, known, truncated, current, onNaviga
       {current ? <CheckIcon aria-hidden="true" className="size-[16px] shrink-0 text-foreground" /> : null}
     </RouterLink>
   )
+  if (!current) return link
+  // The `…` is a sibling of the link, never nested in the <a>: a button inside an anchor is
+  // invalid and would make one tap do both. 44px, and the same menu the desktop header opens.
+  return (
+    <div data-slot="drawer-project-current" className="flex items-center rounded-[10px] bg-sidebar-row-selected pr-[4px]">
+      {link}
+      <ProjectMenu projectId={project.id} onNavigate={onNavigate} triggerClassName="size-[44px]" align="end" />
+    </div>
+  )
 }
+
+/** What the drawer's Tools row needs from health: whether something blocks starting a task (the
+ *  amber dot) and the forge note, both derived by the container from `toolsBlocker`/`forgeNote`. */
+export type DrawerTools = { blocked: boolean; note: string | null }
 
 const ROW_CLASS = 'flex h-[48px] w-full items-center gap-[12px] rounded-[10px] px-[10px] text-[14.5px] font-normal text-foreground hover:bg-sidebar-row-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&_svg]:size-[18px] [&_svg]:shrink-0 [&_svg]:text-soft-foreground'
 
@@ -147,7 +194,7 @@ export function DrawerProjects({ nav, currentProjectId, onNavigate }: {
     <div data-slot="drawer-projects" className="shrink-0">
       <div className="px-[18px] pt-[14px] pb-[6px] text-[12px] font-medium text-soft-foreground" id="drawer-projects-label">Projects</div>
       {/* A group, not a `nav`: the drawer's one navigation landmark stays the Main nav. */}
-      <div role="group" aria-labelledby="drawer-projects-label" className="flex flex-col gap-[2px] px-[8px] pb-[8px]">
+      <div role="group" data-slot="drawer-projects-group" aria-labelledby="drawer-projects-label" className="flex flex-col gap-[2px] px-[8px] pb-[8px]">
         {nav.projects.map((project) => (
           <DrawerProjectRow
             key={project.id}
@@ -179,14 +226,28 @@ export function DrawerProjects({ nav, currentProjectId, onNavigate }: {
   )
 }
 
-/** The bottom rows: Global settings and the theme cycle. Pinned below the scroll; the home
+/** The bottom rows: Tools, Global settings and the theme cycle. Pinned below the scroll; the home
  *  indicator's inset is theirs, since the drawer runs under it. */
-export function DrawerGlobal({ onNavigate }: { onNavigate: () => void }) {
+export function DrawerGlobal({ onNavigate, tools }: { onNavigate: () => void; tools?: DrawerTools | null }) {
   const { theme, setTheme } = useTheme()
   const next = NEXT_THEME[theme]
   const label = theme.charAt(0).toUpperCase() + theme.slice(1)
   return (
     <div data-slot="drawer-global" className="flex shrink-0 flex-col gap-[2px] border-t border-border px-[8px] pt-[8px] pb-[max(8px,env(safe-area-inset-bottom))]">
+      {tools ? (
+        // The desktop footer's Tools dropdown, as a plain row to the page that lists the same
+        // probes. /tools does not itself explain a hidden GitHub tab, so the note rides here.
+        <RouterLink to="/tools" onClick={onNavigate} data-slot="drawer-tools" className={cn(ROW_CLASS, tools.note && 'h-auto min-h-[48px] py-[6px]')}>
+          <span className="relative flex shrink-0">
+            <WrenchIcon aria-hidden="true" />
+            {tools.blocked ? <StatusDot tone="pending" data-slot="drawer-tools-dot" className="absolute -top-[1px] -right-[2px] size-[6px]" /> : null}
+          </span>
+          <span className="flex min-w-0 flex-col">
+            <span>Tools</span>
+            {tools.note ? <span data-slot="drawer-tools-note" className="text-[11.5px] leading-tight text-soft-foreground">{tools.note}</span> : null}
+          </span>
+        </RouterLink>
+      ) : null}
       <RouterLink to="/settings/global" onClick={onNavigate} data-slot="drawer-global-settings" className={ROW_CLASS}>
         <Settings2Icon aria-hidden="true" />
         Global settings

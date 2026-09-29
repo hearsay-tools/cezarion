@@ -6,7 +6,7 @@ import type { ReactNode } from 'react'
 import { Link as RouterLink, matchPath, useLocation } from 'react-router'
 
 import { openCommandPalette } from '@/components/command-palette'
-import { DrawerGlobal, DrawerIdentity, DrawerProjects, MenuButtonPills, elsewhereSignal, menuButtonLabel, type MobileProjectNav } from '@/components/mobile-projects'
+import { DrawerGlobal, DrawerIdentity, DrawerProjects, DrawerUpdate, MenuButtonPills, elsewhereSignal, menuButtonLabel, type DrawerTools, type MobileProjectNav } from '@/components/mobile-projects'
 import { projectInitials, type ProjectSignal } from '@/lib/project-signal'
 import { commandShortcutHint } from '@/lib/use-command-shortcut'
 import { Link, pathnameProjectId, stripProjectPrefix, useNavigate } from '@/lib/project-router'
@@ -98,6 +98,9 @@ export type AppShellProps = {
    *  because the rail reads the registry and the runs index, and this shell must keep rendering
    *  where no QueryClient is provided. Absent renders nothing; hidden below `md` by its own frame. */
   projectRail?: ReactNode
+  /** The phone drawer's Tools row (#621): amber dot and forge note, derived from health by the
+   *  container. Null/absent renders no row, as `toolsMenu` renders no trigger without health. */
+  toolsStatus?: DrawerTools | null
 }
 
 /**
@@ -170,6 +173,7 @@ export function AppShell({
   sidebarProjectId,
   needsYou,
   projectRail,
+  toolsStatus,
 }: AppShellProps) {
   const { pathname } = useLocation()
   // The nav's area rules reason about the flat route map — strip any `/p/:projectId` prefix
@@ -278,7 +282,7 @@ export function AppShell({
         {projectRail}
         <Sidebar {...nav} width={sidebarWidth} onWidthChange={changeSidebarWidth} />
         {/* The drawer leaves a visible dismissal strip beside the shared navigation. */}
-        <MobileNavDrawer {...nav} mobileProjects={mobileProjects} currentProjectId={currentProjectId} onNavigate={() => setMenuOpen(false)} onCloseAutoFocus={(event) => {
+        <MobileNavDrawer {...nav} mobileProjects={mobileProjects} currentProjectId={currentProjectId} toolsStatus={toolsStatus} onNavigate={() => setMenuOpen(false)} onCloseAutoFocus={(event) => {
           // Both mobile controls open the same drawer. Restore the actual opener, rather
           // than Radix's single trigger ref (which otherwise points at the last mount).
           if (mobileNavTrigger.current?.isConnected) {
@@ -492,19 +496,27 @@ function SidebarResizeHandle({ width, onWidthChange }: SidebarResize) {
 }
 
 /**
- * The `<md` frame for the *same* `SidebarContent` the desktop column renders — the spec's mobile
- * rule is that the sidebar "becomes an overlay drawer", not that mobile gets its own nav.
+ * The `<md` drawer: the projects drawer and nothing else (#621). Views live in the tab bar and
+ * its More sheet, the task list on the Tasks screen, New task on the floating button and search
+ * in the top bar, so the desktop `SidebarContent` is no longer rendered here. The three things
+ * only it carried got new homes: Tools is a row in `DrawerGlobal`, the update action is
+ * `DrawerUpdate` under the identity row, and the project menu is the `…` on the current project.
  *
  * Radix's Dialog (via the Sheet primitive) supplies the parts that are easy to get wrong by hand:
  * `role="dialog"`, the accessible name, the focus trap, the Escape handler, the backdrop's
  * dismiss-on-tap, and `aria-hidden` on everything outside the portal — which is how it delivers
  * modality (it does not set `aria-modal`; `hideOthers` is the stronger guarantee).
  */
-function MobileNavDrawer({ onNavigate, onCloseAutoFocus, mobileProjects, currentProjectId, ...props }: NavProps & {
+function MobileNavDrawer({
+  onNavigate, onCloseAutoFocus, mobileProjects, currentProjectId, toolsStatus,
+  version, latestVersion, applicationUpdate, onApplyUpdate, onRestart,
+  applicationUpdateError, applicationUpdateBusy, applicationUpdateOffline,
+}: Pick<NavProps, 'version' | 'latestVersion' | 'applicationUpdate' | 'onApplyUpdate' | 'onRestart' | 'applicationUpdateError' | 'applicationUpdateBusy' | 'applicationUpdateOffline'> & {
   onNavigate: () => void
   onCloseAutoFocus?: React.ComponentProps<typeof SheetContent>['onCloseAutoFocus']
   mobileProjects?: MobileProjectNav | null
   currentProjectId: string | null
+  toolsStatus?: DrawerTools | null
 }) {
   return (
     <SheetContent
@@ -513,34 +525,39 @@ function MobileNavDrawer({ onNavigate, onCloseAutoFocus, mobileProjects, current
       onCloseAutoFocus={onCloseAutoFocus}
       overlayClassName="bg-[var(--nav-scrim)]"
       showCloseButton={false}
-      // The drawer is the sidebar: same width, same surface token, and no padding of its own —
-      // its rows bring their own. `sm:max-w-none` sheds the primitive's sheet width cap.
+      // Same width and surface token as the desktop sidebar, and no padding of its own — its
+      // rows bring their own. `sm:max-w-none` sheds the primitive's sheet width cap.
       className="w-[calc(100%-68px)] max-w-[334px] gap-0 border-border bg-sidebar p-0 sm:max-w-[334px] md:hidden"
       // Nav needs no prose description, and Radix warns when it cannot find the one it links to.
       aria-describedby={undefined}
     >
       {/* The dialog's accessible name. Visually redundant with the identity row below. */}
       <SheetTitle className="sr-only">Navigation</SheetTitle>
-      <DrawerIdentity version={props.version} />
-      {/* One scroll: Projects, workspace links, then today's sidebar content (nav, quick list, New
-          task) until slice 5 gives those a new home. The safe-area insets are the identity row's
-          and the global rows', so the content between them takes none of its own. */}
+      <DrawerIdentity version={version} />
+      <DrawerUpdate
+        version={version}
+        latestVersion={latestVersion}
+        state={applicationUpdate}
+        onApplyUpdate={onApplyUpdate}
+        onRestart={onRestart}
+        error={applicationUpdateError}
+        busy={applicationUpdateBusy}
+        offline={applicationUpdateOffline}
+      />
+      {/* One scroll: Projects, then the workspace links. The safe-area insets are the identity
+          row's and the global rows', so the content between them takes none of its own. */}
       <div data-slot="drawer-scroll" className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain">
         {mobileProjects ? <DrawerProjects nav={mobileProjects} currentProjectId={currentProjectId} onNavigate={onNavigate} /> : null}
-        <SidebarContent {...props} onNavigate={onNavigate} embedded />
       </div>
-      <DrawerGlobal onNavigate={onNavigate} />
+      <DrawerGlobal onNavigate={onNavigate} tools={toolsStatus} />
     </SheetContent>
   )
 }
 
 /**
  * Everything inside the sidebar: brand lockup, New task CTA, nav, quick-list, footer. Framed by
- * `Sidebar` on desktop and by `MobileNavDrawer` below `md` — the two callers differ only in the
- * box around this, which is what keeps the mobile nav from drifting away from the desktop one.
- *
- * The safe-area insets live here rather than on the frames because both need them: the drawer is
- * a full-height overlay under the same notch and home indicator the sidebar sits under.
+ * `Sidebar`, desktop only since #621 (the phone drawer is projects only). The `embedded` and
+ * safe-area branches below are the drawer-era framing and are inert until something embeds it again.
  */
 function SidebarContent({
   activeTo,
