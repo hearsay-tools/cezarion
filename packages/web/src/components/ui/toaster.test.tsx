@@ -47,10 +47,10 @@ describe('Toaster', () => {
     expect(className).toContain('md:top-[calc(16px+env(safe-area-inset-top))]')
     expect(className).toContain('right-[calc(16px+env(safe-area-inset-right))]')
     expect(className).toContain('items-end')
-    // Below `md` the app shell renders its own 52px header whose right end holds the run
+    // Below `md` the app shell renders its own 56px header whose right end holds the run
     // status dot and kebab; anchoring at 16px there would cover the very controls #818 is
     // about. The pair must stay a pair.
-    expect(className).toContain('top-[calc(61px+env(safe-area-inset-top))]')
+    expect(className).toContain('top-[calc(66px+env(safe-area-inset-top))]')
     // The bottom-centre anchor this replaced must not linger — it is what put the toast on
     // top of the thread's action row (#818).
     expect(className).not.toContain('items-center')

@@ -98,7 +98,7 @@ describe('project header actions', () => {
     browser.setViewport(360, 640)
     browser.goto(`${fixture.url}/p/${fixture.project}/`)
     browser.evaluate(`document.documentElement.classList.toggle('light', ${theme === 'light'})`)
-    browser.click('[aria-label="Open menu"]')
+    browser.click('[aria-label^="Open projects"]')
     const drawer = '[data-slot="mobile-nav-drawer"]'
     browser.waitForFunction(`document.querySelector('${drawer} [data-slot="project-header-detail"]')?.textContent.includes('main')`)
     browser.waitForStable(`(() => { const el = document.querySelector('${drawer}'); return el ? el.getBoundingClientRect().left : null })()`, { holdMs: 150, matcher: value => value === 0 })

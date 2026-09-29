@@ -91,7 +91,7 @@ describe('sidebar nav selection (#619)', () => {
 
   it('uses the same selected pill in the mobile drawer', () => {
     renderShell('/git')
-    fireEvent.click(screen.getByRole('button', { name: 'Open menu' }))
+    fireEvent.click(screen.getByRole('button', { name: /^Open projects/ }))
     const selected = document.querySelectorAll('nav[aria-label="Main"] a[aria-current="page"]')
     expect(selected).toHaveLength(2)
     for (const link of selected) expect(classes(link)).toEqual(expect.arrayContaining(['bg-sidebar-row-selected', 'text-foreground']))

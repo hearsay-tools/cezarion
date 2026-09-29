@@ -1,9 +1,5 @@
-import * as React from 'react'
 import { Link as RouterLink, useLocation } from 'react-router'
 
-import { useQueryClient } from '@tanstack/react-query'
-
-import { useHealth, useProjects, useRunsIndex, workspaceQueryKeys } from '@/api/queries'
 import type { ProjectListEntry } from '@open-mercato/cezar-api-client'
 import { AddProjectMenu } from '@/components/app-shell'
 import { LayersIcon, PlusIcon, Settings2Icon } from '@/components/design-icons'
@@ -11,78 +7,20 @@ import { FOOTER_ICON_ACTIVE_CLASS } from '@/components/nav-row-styles'
 import { useTheme } from '@/components/theme-provider'
 import { ThemeToggle } from '@/components/theme-toggle'
 import { pathnameProjectId, scopeTo } from '@/lib/project-router'
-import { useIsDesktop } from '@/lib/use-desktop'
-import { projectInitials, projectSignalLabel, signalsByProject, type ProjectSignal } from '@/lib/project-signal'
+import { SignalPill, signalPillSegments } from '@/components/signal-pill'
+import { projectInitials, projectSignalLabel, type ProjectSignal } from '@/lib/project-signal'
 import { cn } from '@/lib/utils'
 
 /**
  * The project rail (#618): a 60px, workspace-level column left of the desktop sidebar. Every
  * registered project gets a mark, and every mark carries two pills — top "for you" (amber needs
  * you, red failed), bottom "in motion and new" (violet working, green finished). The sidebar next
- * to it stays project-level. Mobile is untouched here (slice 4), so the whole column is `md`-up.
+ * to it stays project-level. The whole column is `md`-up; below it the drawer carries the same signal (slice 4).
  *
  * Presentational: it takes the registry rows and the four counts per project. `ProjectRailContainer`
  * wires the live data. The counts come from `lib/project-signal.ts`; nothing here decides what a
  * run means.
  */
-
-type SegmentTone = 'amber' | 'red' | 'violet' | 'green'
-
-/** Fill and ink per segment. The inks are tokens (`--signal-ink*`) because the light theme flips
- *  them: dark ink on amber only, white on the darker red, violet and green. */
-const SEGMENT_CLASS: Record<SegmentTone, string> = {
-  amber: 'bg-pending text-signal-ink-amber',
-  red: 'bg-danger text-signal-ink',
-  violet: 'bg-status-running text-signal-ink',
-  green: 'bg-success text-signal-ink',
-}
-
-/** Segment width in fixed px: 18 alone, 14 each when split, and `9+` widens to 22. */
-function segmentWidth(count: number, segments: number): number {
-  if (count > 9) return 22
-  return segments === 1 ? 18 : 14
-}
-
-/**
- * One pill. Same form top and bottom; only the position and the segment order differ. A 2px
- * border in the rail's own colour reads as a cut-out where it overhangs the mark. Decorative:
- * the mark's accessible name already spells the counts out in words.
- */
-function SignalPill({
-  position,
-  segments,
-}: {
-  position: 'top' | 'bottom'
-  segments: readonly { tone: SegmentTone; count: number }[]
-}) {
-  const shown = segments.filter((segment) => segment.count > 0)
-  if (shown.length === 0) return null
-  return (
-    <span
-      aria-hidden="true"
-      data-slot={`rail-pill-${position}`}
-      // `right: -4px` puts the pill's right edge 4px past the mark's; `y = -6px` at the top and
-      // `markHeight - 11px` (25px) at the bottom. `pointer-events-none`: the pill sits over the
-      // mark's link and must not eat its click.
-      className={cn(
-        'pointer-events-none absolute -right-[4px] box-border flex h-[17px] overflow-hidden rounded-[9px] border-2 border-background',
-        position === 'top' ? '-top-[6px]' : 'top-[25px]',
-      )}
-    >
-      {shown.map(({ tone, count }) => (
-        <span
-          key={tone}
-          data-segment={tone}
-          data-count={count}
-          style={{ width: segmentWidth(count, shown.length) }}
-          className={cn('flex items-center justify-center text-[10px] leading-[13px] font-bold tabular-nums', SEGMENT_CLASS[tone])}
-        >
-          {count > 9 ? '9+' : count}
-        </span>
-      ))}
-    </span>
-  )
-}
 
 /** One project's row: 52px tall so a pill above and below the mark never touches its neighbours. */
 function ProjectMark({
@@ -127,20 +65,8 @@ function ProjectMark({
         >
           {projectInitials(project.name)}
         </RouterLink>
-        <SignalPill
-          position="top"
-          segments={[
-            { tone: 'amber', count: signal?.needsYou ?? 0 },
-            { tone: 'red', count: signal?.failedUnread ?? 0 },
-          ]}
-        />
-        <SignalPill
-          position="bottom"
-          segments={[
-            { tone: 'violet', count: signal?.inMotion ?? 0 },
-            { tone: 'green', count: signal?.finishedUnread ?? 0 },
-          ]}
-        />
+        <SignalPill position="top" segments={signalPillSegments(signal).top} />
+        <SignalPill position="bottom" segments={signalPillSegments(signal).bottom} />
       </div>
     </div>
   )
@@ -262,41 +188,3 @@ export function ProjectRail({ projects, signals, truncated, version, singleProje
   )
 }
 
-/**
- * The rail, wired to live data. Every mark reads the SSE-patched workspace runs index — the
- * current project's too — so they all read one source. No WebSocket topic: remote mode opens no
- * browser WebSocket, and a WS-driven rail would go stale in hosted cockpits.
- */
-export function ProjectRailContainer({ version, onSelectProject }: {
-  version: string | null
-  onSelectProject?: (projectId: string) => void
-}) {
-  const queryClient = useQueryClient()
-  const projects = useProjects().data?.projects
-  // The rail exists from `md` up, so below it nothing should keep the index observed: run events
-  // invalidate it, and a phone would re-read up to 200 runs per project for a column it never
-  // paints. Disabled, it fetches nothing; widening the window enables it and fetches then.
-  const desktop = useIsDesktop()
-  const index = useRunsIndex(desktop).data
-  const singleProject = useHealth().data?.capabilities.singleProject === true
-  const signals = React.useMemo(() => (index ? signalsByProject(index.runs) : null), [index])
-  const truncated = React.useMemo(() => new Set(index?.truncated ?? []), [index?.truncated])
-
-  // The index is refreshed by run events and reconnects, and none of those fire when the registry
-  // changes. A project registered (or cloned, or removed) with runs already on disk would show no
-  // signal until the next run event, so a change in WHICH projects exist asks for a fresh index.
-  // Keyed on the id set so a rename or a `lastOpenedAt` bump does not refetch.
-  const registry = projects?.map((project) => project.id).join('\n')
-  const seenRegistry = React.useRef<string | undefined>(undefined)
-  React.useEffect(() => {
-    if (registry === undefined) return
-    // The first sighting is the index's own initial fetch; only a later change needs a refresh.
-    if (seenRegistry.current !== undefined && seenRegistry.current !== registry) {
-      void queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.runsIndex })
-    }
-    seenRegistry.current = registry
-  }, [queryClient, registry])
-
-  if (!projects) return null
-  return <ProjectRail projects={projects} signals={signals} truncated={truncated} version={version} singleProject={singleProject} onSelectProject={onSelectProject} />
-}

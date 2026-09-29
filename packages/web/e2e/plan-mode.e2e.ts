@@ -230,7 +230,7 @@ describe('plan mode against a live dry-run server', () => {
     browser.waitForFunction(
       `window.innerWidth === 390 &&
        document.querySelector('[data-slot="plan-review"]')?.getBoundingClientRect().width > 380 &&
-       Math.round(document.querySelector('[data-slot="plan-review"]').getBoundingClientRect().y) === 52`,
+       Math.round(document.querySelector('[data-slot="plan-review"]').getBoundingClientRect().y) === 57`,
     )
     // Rounded: Radix's zoom-in entrance leaves sub-pixel transform residue on the rect.
     const rect = browser.evaluate(
@@ -238,7 +238,7 @@ describe('plan mode against a live dry-run server', () => {
         return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width) } })()`,
     ) as { x: number; y: number; w: number }
     expect(rect.x).toBe(0)
-    expect(rect.y).toBe(52)
+    expect(rect.y).toBe(57)
     expect(rect.w).toBe(390)
 
     // The previous spec's "saved" toast sits over the step cards at this width — 360px of

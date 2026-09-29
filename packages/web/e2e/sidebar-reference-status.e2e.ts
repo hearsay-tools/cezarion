@@ -175,7 +175,7 @@ describe('sidebar reference status (#677)', () => {
     for (const theme of ['dark', 'light']) {
       browser.evaluate(`localStorage.setItem('cez-theme', ${JSON.stringify(theme)})`)
       browser.goto(`${base}/p/${project}`)
-      browser.click('[aria-label="Open menu"]')
+      browser.click('[aria-label^="Open projects"]')
       expect(browser.waitForValue(`matchMedia('(hover: none)').matches`)).toBe(true)
       browser.waitForFunction(`document.querySelector('[data-slot="mobile-nav-drawer"]')?.getBoundingClientRect().x === 0`)
       for (const status of cases) {
