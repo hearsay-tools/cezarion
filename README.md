@@ -663,6 +663,7 @@ steps:
     # model: opus                # optional per-step model override
     # effort: high               # optional per-step effort: low · medium · high · xhigh · max
     # runner: codex              # optional per-step backend: claude · codex · opencode · pi
+    # timeoutMs: 7200000          # optional agent-step wall-clock cap (2 hours); 0 = no limit
     # allowedTools: [Read, Edit, Write, Grep, Glob, Bash]
   - id: verify
     name: Verify
@@ -675,6 +676,22 @@ steps:
 `{{task}}` is replaced with the task text you typed. When a check fails and loops
 back, its failing output is appended to the retried agent's prompt so the next
 attempt can see what broke.
+
+Agent steps have no wall-clock limit by default, including steps before a check or
+another agent. This applies to cockpit tasks, owned workers and `cez run`, on every
+runner. Non-final agent steps still close after their turn and advance the chain.
+An authored agent step may opt into `timeoutMs`: an integer from `0` to `2147483647`
+milliseconds, with `0` disabling the cap. A positive limit measures the entire
+session from startup, including waiting; expiry fails the step and stops the chain.
+It does not add workflow retry/resume behavior. Check steps reject this field.
+Skill shorthand, default tasks and free-form Continue have no wall-clock cap.
+All managed sessions have a separate 30-minute no-progress safeguard: while a turn
+is open, native stream, tool or heartbeat activity refreshes it. A silent turn
+fails and its process is terminated, with SIGKILL escalation if needed. Busy turns
+can run longer than 30 minutes. Waiting at a turn boundary or for a human answer
+pauses this safeguard; the next turn or answer rearms it. Standalone runner calls
+keep their 30-minute wall-clock default. Startup protection and the existing
+parked-session lifecycle still apply.
 
 Prefer skills over steps? A workflow can also be written in the portable
 shorthand — an ordered list of skill names, each becoming one agent step:

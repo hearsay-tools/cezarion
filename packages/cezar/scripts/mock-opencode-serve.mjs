@@ -1,4 +1,22 @@
 #!/usr/bin/env node
+// Keep this fixture standalone: lifecycle tests copy the runner into a temp directory.
+import { spawn as watchdogSpawn } from 'node:child_process';
+import { writeFileSync as watchdogWritePid } from 'node:fs';
+function watchdogStall(prompt) {
+  if (!prompt.includes('mock:no-progress')) return false;
+  watchdogWritePid('watchdog.pid', String(process.pid));
+  if (prompt.includes('ignore-term')) {
+    process.removeAllListeners('SIGTERM');
+    process.on('SIGTERM', () => {});
+    // Test-cleanup backstop, deliberately longer than the asserted teardown bound.
+    setTimeout(() => process.exit(0), 12_000);
+  }
+  if (prompt.includes('held-pipe')) {
+    watchdogSpawn(process.execPath, ['-e', 'setTimeout(() => {}, 5000)'], { stdio: ['ignore', process.stdout, process.stderr] });
+  }
+  return true;
+}
+
 // Bundled dry-run mock of `opencode serve` — speaks just enough of the HTTP+SSE
 // API (§4 of agent-event-protocols.md) for the runner wiring test in
 // `opencode-ui-mapper.test.ts`: POST /session, GET /event (SSE bus), one
@@ -385,6 +403,15 @@ const server = createServer((req, res) => {
           }) } });
           setTimeout(() => send({ type: 'session.idle', properties: { sessionID: SESSION_ID } }), 30);
         }, 250);
+        return;
+      }
+      if (watchdogStall(body)) return;
+      if (body.includes('mock:busy-progress')) {
+        let ticks = 0;
+        const timer = setInterval(() => {
+          send({ type: 'server.heartbeat', properties: {} });
+          if (++ticks === 24) { clearInterval(timer); send({ type: 'session.idle', properties: { sessionID: SESSION_ID } }); }
+        }, 100);
         return;
       }
       if (body.includes('mock:hold')) {

@@ -1,4 +1,22 @@
 #!/usr/bin/env node
+// Keep this fixture standalone: lifecycle tests copy the runner into a temp directory.
+import { spawn as watchdogSpawn } from 'node:child_process';
+import { writeFileSync as watchdogWritePid } from 'node:fs';
+function watchdogStall(prompt) {
+  if (!prompt.includes('mock:no-progress')) return false;
+  watchdogWritePid('watchdog.pid', String(process.pid));
+  if (prompt.includes('ignore-term')) {
+    process.removeAllListeners('SIGTERM');
+    process.on('SIGTERM', () => {});
+    // Test-cleanup backstop, deliberately longer than the asserted teardown bound.
+    setTimeout(() => process.exit(0), 12_000);
+  }
+  if (prompt.includes('held-pipe')) {
+    watchdogSpawn(process.execPath, ['-e', 'setTimeout(() => {}, 5000)'], { stdio: ['ignore', process.stdout, process.stderr] });
+  }
+  return true;
+}
+
 import readline from 'node:readline';
 import { appendFileSync } from 'node:fs';
 if (process.env.CEZ_MOCK_ARGS_FILE) appendFileSync(process.env.CEZ_MOCK_ARGS_FILE, `${JSON.stringify(process.argv.slice(2))}\n`);
@@ -212,6 +230,14 @@ async function handle(command) {
     send({ type: 'turn_start' });
     sendText(['Pick one.\n\n', 'CEZ:ASK', ' ', ASK_MARKER_BODY]);
     sendTurnEnd();
+  } else if (command.type === 'prompt' && /mock:(no-progress|busy-progress)/.test(command.message)) {
+    send({ id: command.id, type: 'response', command: 'prompt', success: true });
+    send({ type: 'agent_start' }); send({ type: 'turn_start' });
+    watchdogStall(command.message);
+    if (command.message.includes('mock:busy-progress')) {
+      for (let i = 0; i < 24; i++) { send({ type: 'tool_execution_update', toolCallId: 'busy', toolName: 'bash', partialResult: { content: [{ type: 'text', text: 'working' }] } }); await sleep(100); }
+      sendTurnEnd();
+    }
   } else if (command.type === 'prompt' && command.message.includes('mock:hold')) {
     // The `response` below is the ack. Holding the content AND the terminal
     // quartet behind it is what makes harness parity S2 meaningful: a runner

@@ -225,6 +225,9 @@ export interface AgentRunResult {
 }
 
 export interface SessionOptions {
+  /** Native stdout/SSE activity, including progress and heartbeat frames that
+   * do not map to presentation events. Used by managed open-turn liveness. */
+  onActivity?: () => void;
   /** Close the session shortly after the first turn ends (single-turn
    *  behavior, used for non-interactive workflow steps). Interactive
    *  sessions omit this and control `end()` themselves. */

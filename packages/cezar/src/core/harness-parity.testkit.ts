@@ -57,6 +57,10 @@ export const SCENARIOS = [
   'baseline',
   'done',
   'hold',
+  'no-progress',
+  'no-progress-ignore-term',
+  'no-progress-held-pipe',
+  'busy-progress',
   'split-text',
   'provider-error',
   'provider-unavailable',
@@ -71,6 +75,28 @@ export const SCENARIOS = [
   'steer-late',
 ] as const;
 export type ScenarioName = (typeof SCENARIOS)[number];
+
+/** #470: exercised in workflow-timeout-parity.test.ts against every native wire. */
+export const WORKFLOW_TIMEOUT_CRITERIA = [
+  { id: 'T1', scenario: 'hold', name: 'default non-final steps outlive the runner deadline' },
+  { id: 'T2', scenario: 'hold', name: 'explicit zero disables the workflow deadline' },
+  { id: 'T3', scenario: 'hold', name: 'authored positive deadlines fail without running trailing checks' },
+  { id: 'T4', scenario: 'hold', name: 'standalone sessions retain the default deadline' },
+  { id: 'T5', scenario: 'hold', name: 'an authored longer limit replaces the runner default' },
+  { id: 'T6', scenario: 'hold', name: 'default tasks remain unlimited' },
+] as const;
+
+
+export const NO_PROGRESS_CRITERIA = [
+  { id: 'N1', scenario: 'no-progress', name: 'stalled nonfinal turns fail and release capacity' },
+  { id: 'N2', scenario: 'busy-progress', name: 'native progress keeps a long turn alive' },
+  { id: 'N3', scenario: 'baseline', name: 'parked sessions outlive inactivity and followups rearm it' },
+  { id: 'N5', scenario: 'no-progress-ignore-term', name: 'stalled processes ignoring TERM are killed before releasing capacity' },
+  { id: 'N6', scenario: 'ask', name: 'native questions or marker fallback pause protection until answered' },
+  { id: 'N7', scenario: 'no-progress-held-pipe', name: 'descendant-held pipes cannot retain capacity after CLI exit' },
+  { id: 'N8', scenario: 'baseline', name: 'agent input rearms protection even without a native turn-start notification' },
+  { id: 'N4', scenario: 'baseline', name: 'Continue sessions enforce inactivity' },
+] as const;
 
 export interface HarnessAdapter {
   readonly backend: RunnerId;
@@ -102,7 +128,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     scenarios: {
       baseline: BASELINE_PROMPT,
       done: 'mock:done',
-      hold: 'mock:hold',
+      hold: 'mock:hold', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'busy-progress': 'mock:busy-progress',
       'split-text': 'mock:split-text',
       // Claude's mock has carried an auth-rejection branch since #430.
       'provider-error': 'mock:auth-error',
@@ -126,7 +152,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     scenarios: {
       baseline: BASELINE_PROMPT,
       done: 'mock:done',
-      hold: 'mock:hold',
+      hold: 'mock:hold', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'busy-progress': 'mock:busy-progress',
       'split-text': 'mock:split-text',
       // #83: 0.147 reports provider rejection on turn/completed with turn.error.
       'provider-error': 'mock:provider-error',
@@ -150,7 +176,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     scenarios: {
       baseline: BASELINE_PROMPT,
       done: 'mock:done',
-      hold: 'mock:hold',
+      hold: 'mock:hold', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'busy-progress': 'mock:busy-progress',
       'split-text': 'mock:split-text',
       'provider-error': 'mock:provider-error',
       'provider-unavailable': 'mock:provider-error',
@@ -169,7 +195,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     backend: 'cursor',
     binEnv: 'CEZ_CURSOR_BIN',
     mockBin: join(HERE, '..', '..', 'scripts', 'mock-cursor-acp.mjs'),
-    scenarios: { baseline: BASELINE_PROMPT, done: 'mock:done', hold: 'mock:hold',
+    scenarios: { baseline: BASELINE_PROMPT, done: 'mock:done', hold: 'mock:hold', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'busy-progress': 'mock:busy-progress',
       'split-text': 'mock:split-text', 'provider-error': 'mock:provider-error',
       'provider-unavailable': 'mock:provider-error',
       ask: 'mock:ask', 'ask-snapshot': 'mock:ask-snapshot', 'ask-prose': 'mock:ask-prose', 'ask-bad': 'mock:ask-bad', 'ask-reply-late': 'mock:ask', subagent: 'mock:subagent',
@@ -182,7 +208,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     scenarios: {
       baseline: BASELINE_PROMPT,
       done: 'mock:done',
-      hold: 'mock:hold',
+      hold: 'mock:hold', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'busy-progress': 'mock:busy-progress',
       'split-text': 'mock:split-text',
       'provider-error': 'mock:provider-error',
       'provider-unavailable': 'mock:provider-error',

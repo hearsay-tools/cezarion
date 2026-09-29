@@ -284,6 +284,7 @@ class CodexSession implements AgentSession {
           if (this.isForeignTurnLifecycle(msg)) continue;
           // Stale/child retry errors must neither fail nor warn on this turn.
           if (msg.method === 'error' && !this.isCurrentTurn((msg.params ?? {}) as Record<string, unknown>)) continue;
+          this.opts.onActivity?.();
           this.emitUi((state) => mapCodexNotification(msg, state));
           this.dispatch(msg);
         }

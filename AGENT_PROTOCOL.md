@@ -723,6 +723,32 @@ this normative contract.
 
 ## 7. Harness parity — session and lifecycle (`packages/cezar/src/core/harness-parity.test.ts`)
 
+Workflow deadline rows **T1–T6** (#470) live in
+`core/workflow-timeout-parity.test.ts` and are registered in the shared parity
+guard. Each `RUNNER_IDS` backend uses its own `HARNESS_ADAPTERS` native wire:
+non-final managed steps outlive the default runner deadline, explicit zero disables
+it, authored positive limits fail before trailing checks, and standalone sessions
+retain their default cap. Longer authored limits override that cap, while default
+tasks retain no wall-clock cap. The tests shorten only `DEFAULT_RUN_TIMEOUT_MS`; the
+manager, runners, transports and terminal signals remain real.
+
+
+Open-turn inactivity rows **N1–N8** live in `core/workflow-no-progress-parity.test.ts`
+and the same parity guard. Every native adapter proves that stalled nonfinal turns
+fail without running trailing checks, native progress/heartbeats sustain a long
+turn, parked sessions do not time out, followups and Continue rearm protection,
+native questions pause until answered (Claude/Pi use their marker fallback),
+agent input rearms protection even when a backend omits a turn-start notification,
+and a process ignoring SIGTERM is killed before capacity is released. A descendant
+holding inherited stdout/stderr cannot retain capacity after the CLI exits.
+`startManagedSession` supplies the shared 30-minute guard to both RunManager
+construction paths. `SessionOptions.onActivity` reports native transport frames
+before presentation coalescing; it refreshes only an open turn. Native questions
+pause the guard until an answer, and turn-end pauses it until another turn starts.
+End, cancellation, provider failure and process settlement dispose it. The guard
+emits a failure and interrupts the runner; it never synthesizes process exit or
+releases capacity early. Standalone wall-clock limits remain unchanged.
+
 > Every criterion in the harness parity matrix MUST hold for **every** backend,
 > or carry a declared exemption naming the wire limitation that prevents it.
 

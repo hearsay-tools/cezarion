@@ -1,4 +1,22 @@
 #!/usr/bin/env node
+// Keep this fixture standalone: lifecycle tests copy the runner into a temp directory.
+import { spawn as watchdogSpawn } from 'node:child_process';
+import { writeFileSync as watchdogWritePid } from 'node:fs';
+function watchdogStall(prompt) {
+  if (!prompt.includes('mock:no-progress')) return false;
+  watchdogWritePid('watchdog.pid', String(process.pid));
+  if (prompt.includes('ignore-term')) {
+    process.removeAllListeners('SIGTERM');
+    process.on('SIGTERM', () => {});
+    // Test-cleanup backstop, deliberately longer than the asserted teardown bound.
+    setTimeout(() => process.exit(0), 12_000);
+  }
+  if (prompt.includes('held-pipe')) {
+    watchdogSpawn(process.execPath, ['-e', 'setTimeout(() => {}, 5000)'], { stdio: ['ignore', process.stdout, process.stderr] });
+  }
+  return true;
+}
+
 // Mock `claude` binary for CEZ_DRY_RUN=1 — emits a plausible stream-json
 // session so the engine / store / GUI can be exercised without tokens.
 // Mirrors the real CLI's contract in SESSION mode: keeps reading {type:user}
@@ -244,6 +262,12 @@ async function respond(userText, imageCount, uuid) {
   // content event, so the pause has to sit BEFORE the content: a runner that
   // closed the turn on a timer after writing the prompt would report it early.
   // Short on purpose — `mock:slow` above is the 25 s queue-state hold.
+  if (watchdogStall(userText)) return;
+  if (userText.includes('mock:busy-progress')) {
+    for (let i = 0; i < 24; i++) { emit({ type: 'ping' }); await sleep(100); }
+    emit({ type: 'result', subtype: 'success', result: 'busy complete' });
+    return;
+  }
   if (userText.includes('mock:hold')) {
     await sleep(250);
     const held = 'parity hold: content after the pause';

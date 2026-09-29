@@ -290,6 +290,58 @@ describe('SIGTERM→SIGKILL escalation for a CLI that survives SIGTERM', () => {
     });
   });
 
+  it('settles a timeout when signal exit precedes stdout drain (#470)', async () => {
+    const fake = signallableChild();
+    spawnHook.override = () => fake.child;
+    vi.useFakeTimers();
+    try {
+      fake.child.kill = signal => {
+        Object.assign(fake.child, { killed: true, signalCode: signal });
+        fake.child.emit('exit', null, signal);
+        fake.child.emit('close', null, signal);
+        return true;
+      };
+      const events: AgentEvent[] = [];
+      const session = new ClaudeCliRunner({ bin: 'claude', timeoutMs: 20 }).startSession({
+        userPrompt: 'do it', cwd: process.cwd(),
+      }, event => events.push(event));
+      let settled = false;
+      void session.result.then(() => { settled = true; });
+      await vi.advanceTimersByTimeAsync(21);
+      expect(settled).toBe(true);
+      expect(events.some(e => e.type === 'error' && e.message.includes('timed out'))).toBe(true);
+    } finally {
+      vi.clearAllTimers();
+      vi.useRealTimers();
+      spawnHook.override = null;
+    }
+  });
+
+  it('keeps timeout escalation alive after stdout has drained (#470)', async () => {
+    const fake = signallableChild();
+    spawnHook.override = () => fake.child;
+    vi.useFakeTimers();
+    try {
+      const session = new ClaudeCliRunner({ bin: 'claude', timeoutMs: 20 }).startSession({
+        userPrompt: 'do it', cwd: process.cwd(),
+      });
+      let settled = false;
+      void session.result.then(() => { settled = true; });
+      await vi.advanceTimersByTimeAsync(20);
+      expect(fake.child.stdout.destroyed).toBe(true);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(KILL_GRACE_MS);
+      expect(fake.signals).toEqual(['SIGTERM', 'SIGKILL']);
+      expect(settled).toBe(false);
+      fake.exit(137);
+      await session.result;
+    } finally {
+      vi.clearAllTimers();
+      vi.useRealTimers();
+      spawnHook.override = null;
+    }
+  });
+
   it('stops escalating once the CLI really exits after SIGTERM', () => {
     withFakeChild((fake) => {
       const session = new ClaudeCliRunner({ bin: 'claude', timeoutMs: 0 }).startSession({

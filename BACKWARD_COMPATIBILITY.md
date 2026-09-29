@@ -159,6 +159,17 @@ Users commit these files (`.ai/cezar/workflows/*.yaml`) and share them across re
 
 Breaking: renaming a key, tightening a refinement so previously valid files fail to load, changing `{{task}}` substitution, changing `onFail` semantics (retry target, `max` default of 2), or removing a `runner` value. Note the loader already degrades per file (bad files are reported in `issues` and skipped, `cez run` prints `! skipped …`) — but "your existing workflow is now skipped" is still a break. Required path: accept the old spelling alongside the new, and have `POST /api/workflows` keep writing the most portable form.
 
+Authored agent steps may add `timeoutMs` (#470): an integer from 0 through
+2147483647 milliseconds. Omitted and zero mean no wall-clock cap for managed
+workflow sessions, across all runners. Skill shorthand and built-in tasks have
+no wall-clock cap; standalone runners retain their 30-minute default. Save/export preserves
+an explicit timeout in full `steps:` form. Check steps reject the field. A positive
+limit fails the step on expiry; it does not add automatic retry or workflow resume.
+Managed sessions (including Continue) separately terminate an open turn after
+30 minutes without native stream/tool/heartbeat activity. Turn boundaries and
+human questions pause this guard; subsequent turns and answers rearm it. This
+default liveness safeguard needs no configuration and is independent of `timeoutMs`.
+
 ## 5. Skills Markdown format (`packages/cezar/src/skills.ts`)
 
 A skill is a `.md` file with optional YAML frontmatter (`name`, `description`); the body becomes the agent's extra system prompt. Protected: frontmatter keys; the `SKILL.md`-in-a-directory convention; the discovery locations and their precedence (`.ai/cezar/skills` → `.ai/skills` → `.agents/skills` + agent mirrors → `~/.agents/skills`, `~/.claude/skills` → team repos); name-collision resolution ("the user's repo is the source of truth"); the `config.json` `skillsRepos` source shape (`{repo, ref}` — GitHub shorthand, git URL, or local path).

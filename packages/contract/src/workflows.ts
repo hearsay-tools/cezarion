@@ -28,6 +28,9 @@ export const workflowStepDefSchema = z
     skill: z.string().optional(),
     model: z.string().optional(),
     effort: z.string().max(32).optional(),
+    /** Authored agent-step wall-clock limit in ms. Omitted or 0 means no limit.
+     *  Bound to Node's timer range so a larger value cannot become a 1ms kill. */
+    timeoutMs: z.number().int().min(0).max(2_147_483_647).optional(),
     /** Per-step agent backend override (falls back to the task / config default). */
     runner: runnerSchema.optional(),
     /** Agent account id for this step (spec 2026-07-29-agent-profiles); resolved per step for owned workers (#452). */
@@ -45,6 +48,10 @@ export const workflowStepDefSchema = z
   })
   .refine((s) => Boolean(s.command) !== Boolean(s.prompt ?? s.skill), {
     message: 'a step is either an agent step (prompt/skill) or a check step (command), not both',
+  })
+  .refine((s) => !s.command || s.timeoutMs === undefined, {
+    message: 'timeoutMs applies only to agent steps',
+    path: ['timeoutMs'],
   });
 export type WorkflowStepDef = z.infer<typeof workflowStepDefSchema>;
 

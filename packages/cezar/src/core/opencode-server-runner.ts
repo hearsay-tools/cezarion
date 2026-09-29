@@ -717,6 +717,7 @@ class OpencodeSession implements AgentSession {
     let buffer = '';
     try {
       for await (const chunk of res) {
+        this.opts.onActivity?.(); // Includes SSE heartbeat comments.
         buffer += chunk as string;
         let sep: number;
         while ((sep = buffer.indexOf('\n\n')) >= 0) {

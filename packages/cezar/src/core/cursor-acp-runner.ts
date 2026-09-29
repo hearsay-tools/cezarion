@@ -6,7 +6,7 @@ import { prependSystemPrompt, trackChildExit } from './agent-runner.ts';
 import { buildChildEnv } from './agent-env.ts';
 import { parseAskMarker, parseAskRequest, type AskQuestion } from './ask.ts';
 import { readNdjson } from './ndjson.ts';
-import { AUTO_END_DELAY_MS, DEFAULT_RUN_TIMEOUT_MS, EOF_TERM_GRACE_MS, EOF_KILL_GRACE_MS } from './runner-runtime.ts';
+import { boundOutputDrainAfterExit, AUTO_END_DELAY_MS, DEFAULT_RUN_TIMEOUT_MS, EOF_TERM_GRACE_MS, EOF_KILL_GRACE_MS } from './runner-runtime.ts';
 import { createCursorUiState, mapCursorMessage, cursorTurnStarted, cursorTurnCompleted } from './cursor-ui-mapper.ts';
 import { appendCursorStderr, classifyCursorProviderError, sanitizeCursorProviderError, type CursorProviderErrorClassification } from './cursor-provider-error.ts';
 import type { UiEvent } from './ui-events.ts';
@@ -148,6 +148,7 @@ class CursorSession implements AgentSession {
   }
   private attachChild(child: ChildProcessWithoutNullStreams): void {
     this.child = child;
+    boundOutputDrainAfterExit(child);
     this.hasExited = trackChildExit(child);
     child.stderr.setEncoding('utf8');
     child.stderr.on('data', (chunk: string) => { this.stderrBuf = appendCursorStderr(this.stderrBuf, chunk); });
@@ -551,6 +552,7 @@ class CursorSession implements AgentSession {
   private async read(): Promise<void> {
     for await (const line of readNdjson(this.child.stdout)) {
       let raw: unknown; try { raw = JSON.parse(line); } catch { continue; }
+      this.opts.onActivity?.();
       const msg = object(raw);
       const params = object(msg.params);
       const update = object(params.update);
