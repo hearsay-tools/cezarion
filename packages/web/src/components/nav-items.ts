@@ -4,7 +4,6 @@ import { ListTodoIcon } from '@/components/design-icons'
 import type { ComponentType, SVGProps } from 'react'
 
 import { GithubIcon } from '@/components/icons'
-import { stripProjectPrefix } from '@/lib/project-router'
 
 export type NavItem = {
   /** Where the item navigates. Also its identity — `activeNavPath` returns this. */
