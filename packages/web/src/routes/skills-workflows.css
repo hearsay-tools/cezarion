@@ -60,7 +60,7 @@
   [data-slot="skills-import-panel"] > h2 { font-size: 24px; }
   .sw-import-controls { flex-direction: column; align-items: flex-start; }
   .sw-import-controls .sw-search { width: 100%; }
-  [data-slot="wb-import-panel"] { position: fixed; inset: 52px 0 auto; max-height: calc(100dvh - 52px); overflow-y: auto; z-index: 50; }
+  [data-slot="wb-import-panel"] { position: fixed; inset: 57px 0 auto; max-height: calc(100dvh - 57px); overflow-y: auto; z-index: 50; }
 }
 @container (max-width: 649px) {
   [data-slot="skill-row"][aria-current="page"] { background: transparent; border-color: var(--border); }
@@ -91,7 +91,7 @@
 .sw-workflow-confirm button { min-height: 44px; }
 @media (max-width: 767px) {
   [data-slot="dialog-overlay"]:has(+ [data-slot="wb-import-panel"]) { background: transparent; }
-  [data-slot="wb-import-panel"] { width: 100%; max-width: 100%; translate: none; transform: none; top: 52px; left: 0; }
+  [data-slot="wb-import-panel"] { width: 100%; max-width: 100%; translate: none; transform: none; top: 57px; left: 0; }
 }
 [data-slot="skills-section"] > header a { font-size: 13px; font-weight: 600; }
 .sw-detail-source, [data-slot="skills-import-panel"] > p:first-child, [data-slot="wb-step-grip"] span { background: var(--task-brand-selected); }

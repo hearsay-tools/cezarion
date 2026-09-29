@@ -35,7 +35,7 @@ const sessionId = `e2e-ios-${process.pid}`
 const IPHONE = { width: 390, height: 844 } // iPhone 14/15 CSS pixels
 
 /** The one entry point to navigation below `md` (see app-shell.tsx MobileTopBar). */
-const MENU_BUTTON = '[data-slot="mobile-top-bar"] button[aria-label="Open menu"]'
+const MENU_BUTTON = '[data-slot="mobile-top-bar"] button[aria-label^="Open projects"]'
 
 let browser: AgentBrowser
 let baseUrl: string

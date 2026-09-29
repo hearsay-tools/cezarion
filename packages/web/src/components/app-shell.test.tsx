@@ -54,14 +54,6 @@ const footer = () => document.querySelector('[data-slot="sidebar-footer"]') as H
 const allNavLinks = (root = sidebar()) => Array.from(root.querySelectorAll<HTMLAnchorElement>('nav a'))
 
 describe('AppShell', () => {
-  it('keeps workspace access in the mobile drawer only', () => {
-    renderShell('/', { mobileWorkspace: <a href="/tasks">Workspace tasks</a> })
-    expect(within(sidebar()).queryByRole('link', { name: 'Workspace tasks' })).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: 'Open menu' }))
-    const drawer = document.querySelector('[data-slot="mobile-nav-drawer"]') as HTMLElement
-    expect(within(drawer).getByRole('link', { name: 'Workspace tasks' })).toBeTruthy()
-  })
-
   it('keeps optional views in an overflow menu and marks the current overflow view', async () => {
     renderShell('/inbox', { inboxCount: 2 })
     expect(within(nav()).queryByRole('link', { name: 'Inbox' })).toBeNull()
@@ -498,7 +490,7 @@ describe('AppShell', () => {
     it('renders a quiet accessible Skills update marker in desktop and mobile navigation', () => {
       renderShell('/', { skillsUpdateAvailable: true })
       expect(document.querySelectorAll('[data-slot="nav-update-marker"]')).toHaveLength(1)
-      fireEvent.click(screen.getByRole('button', { name: 'Open menu' }))
+      fireEvent.click(screen.getByRole('button', { name: /^Open projects/ }))
       const markers = document.querySelectorAll('[data-slot="nav-update-marker"]')
       expect(markers).toHaveLength(2)
       for (const marker of markers) {
@@ -730,7 +722,7 @@ describe('AppShell', () => {
     it('keeps the drawer independent of desktop resizing and reserves its dismissal strip', () => {
       localStorage.setItem('cez-sidebar-width', '400')
       renderShell('/', { taskQuickList: <p>list</p> })
-      fireEvent.click(screen.getByRole('button', { name: 'Open menu' }))
+      fireEvent.click(screen.getByRole('button', { name: /^Open projects/ }))
       const drawer = document.querySelector('[data-slot="mobile-nav-drawer"]') as HTMLElement
       expect(drawer.className).toContain('w-[calc(100%-68px)]')
       expect(drawer.className).toContain('max-w-[334px]')
@@ -825,7 +817,7 @@ describe('AppShell', () => {
    */
   describe('mobile nav drawer', () => {
     const drawer = () => screen.queryByRole('dialog', { name: 'Navigation' })
-    const openMenu = () => fireEvent.click(screen.getByRole('button', { name: 'Open menu' }))
+    const openMenu = () => fireEvent.click(screen.getByRole('button', { name: /^Open projects/ }))
 
     /** Radix arms its outside-pointer listener in a `setTimeout(…, 0)`, so a backdrop press fired
      *  in the same tick as the open would land before anything is listening. */
@@ -851,7 +843,7 @@ describe('AppShell', () => {
 
     it('advertises the drawer from the menu button', () => {
       renderShell()
-      const menuButton = screen.getByRole('button', { name: 'Open menu' })
+      const menuButton = screen.getByRole('button', { name: /^Open projects/ })
       expect(menuButton.getAttribute('aria-haspopup')).toBe('dialog')
       expect(menuButton.getAttribute('aria-expanded')).toBe('false')
 
@@ -875,7 +867,7 @@ describe('AppShell', () => {
 
     it('moves focus into the drawer and restores it to the menu button on close', async () => {
       renderShell()
-      const menuButton = screen.getByRole('button', { name: 'Open menu' })
+      const menuButton = screen.getByRole('button', { name: /^Open projects/ })
       // A real pointer click focuses the button it hits; fireEvent.click does not. Without this
       // the drawer opens while focus is on <body>, and "restore" would restore to <body> — the
       // test would pass or fail on a jsdom artifact rather than on Radix's focus scope.
@@ -994,14 +986,17 @@ describe('AppShell', () => {
     it('pads the drawer for the safe-area insets', () => {
       renderShell()
       openMenu()
-      const content = within(drawer() as HTMLElement)
-        .getByRole('navigation', { name: 'Main' })
-        .closest('[data-slot="sidebar-content"]') as HTMLElement
+      const root = drawer() as HTMLElement
 
       // The drawer is a full-height overlay under the same notch and home indicator as the
-      // sidebar — which is exactly why these insets live on the shared content, not on a frame.
-      expect(content.className).toContain('pt-[env(safe-area-inset-top)]')
-      expect(content.className).toContain('pb-[env(safe-area-inset-bottom)]')
+      // sidebar. Its identity row sits at the top and its global rows at the bottom, so those two
+      // own the insets; the sidebar content between them takes none (it would double them).
+      expect(root.querySelector('[data-slot="drawer-identity"]')?.className).toContain('pt-[env(safe-area-inset-top)]')
+      expect(root.querySelector('[data-slot="drawer-global"]')?.className).toContain('env(safe-area-inset-bottom)')
+      const content = root.querySelector('[data-slot="sidebar-content"]') as HTMLElement
+      expect(content.className).not.toContain('safe-area-inset')
+      // The desktop sidebar keeps its own.
+      expect((sidebar().querySelector('[data-slot="sidebar-content"]') as HTMLElement).className).toContain('pt-[env(safe-area-inset-top)]')
     })
   })
 })

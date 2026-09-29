@@ -1368,7 +1368,7 @@ describe('a row under width contention, in a column the user can widen', () => {
     // The aside is still in the DOM (display:none), so the handle inside it is unreachable
     // rather than absent — and the drawer that replaces it brings no handle of its own.
     expect(browser.isVisible(HANDLE)).toBe(false)
-    browser.click('[data-slot="mobile-top-bar"] button[aria-label="Open menu"]')
+    browser.click('[data-slot="mobile-top-bar"] button[aria-label^="Open projects"]')
     browser.waitForFunction(`document.querySelector('[data-slot="mobile-nav-drawer"]') !== null`)
     expect(
       browser.evaluate(`document.querySelectorAll('[data-slot="mobile-nav-drawer"] ${HANDLE}').length`)

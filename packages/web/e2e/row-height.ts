@@ -28,7 +28,7 @@ export function expectGroupRowHeightMatchesTaskRow(
       browser.setViewport(width, 900)
       browser.goto(url)
       if (mobile) {
-        browser.click('[data-slot="mobile-top-bar"] button[aria-label="Open menu"]')
+        browser.click('[data-slot="mobile-top-bar"] button[aria-label^="Open projects"]')
         // The sheet slides in from the left. A click aimed at a row mid-slide lands on the scrim
         // and dismisses the drawer, so wait until its left edge has settled at 0 and stayed there.
         // Provenance: the local failure bundle (gitignored) from this helper's first run,

@@ -817,7 +817,9 @@ describe('project rail wiring', () => {
     expect(indexCalls()).toBe(2)
   })
 
-  it('does not read the runs index below md, where the rail is not drawn', async () => {
+  // #620: the phone paints the same signal (menu button pills, drawer rows), so the index is read
+  // at every width, once.
+  it('reads the runs index once below md and paints it on the menu button and the drawer rows', async () => {
     vi.stubGlobal(
       'matchMedia',
       () => ({ matches: false, addEventListener: () => {}, removeEventListener: () => {} }),
@@ -827,16 +829,29 @@ describe('project rail wiring', () => {
       '/api/v1/todos': [],
       '/api/v1/projects': TWO_PROJECTS,
       '/api/v1/workspace/ui-state': {},
-      '/api/v1/workspace/runs-index': railIndex([]),
+      '/api/v1/workspace/runs-index': railIndex([
+        indexRow({ projectId: 'shop', id: 's1', status: 'waiting' }),
+        indexRow({ projectId: 'shop', id: 's2', status: 'running' }),
+        // The current project's own signal is not "elsewhere".
+        indexRow({ projectId: 'cezar', id: 'c1', status: 'running' }),
+      ]),
       '/api/v1/runs': [],
       '/api/v1/p/cezar/runs': [],
       '/api/v1/p/shop/runs': [],
     })
     renderShell('/p/cezar/')
 
-    await rail()
-    await waitFor(() => expect(within(railMark('shop')).getByRole('link')).toBeTruthy())
-    expect(fetchMock.mock.calls.filter(([input]) => String(input) === '/api/v1/workspace/runs-index')).toHaveLength(0)
+    const menu = await screen.findByRole('button', { name: 'Open projects. Elsewhere: 1 needs you, 1 working' })
+    expect(fetchMock.mock.calls.filter(([input]) => String(input) === '/api/v1/workspace/runs-index')).toHaveLength(1)
+    // The project button never carries a count: it would read as the current project's.
+    const picker = document.querySelector('[data-slot="mobile-project-picker"]') as HTMLElement
+    expect(picker.querySelector('[data-segment]')).toBeNull()
+    fireEvent.click(menu)
+    const drawer = document.querySelector('[data-slot="mobile-nav-drawer"]') as HTMLElement
+    const rows = within(drawer).getAllByRole('link').filter((link) => link.getAttribute('data-slot') === 'drawer-project')
+    expect(rows.map((row) => row.getAttribute('data-project-id'))).toEqual(['cezar', 'shop'])
+    expect(rows[0]!.getAttribute('aria-current')).toBe('page')
+    expect(rows[1]!.querySelector('[data-slot="drawer-project-state"]')?.textContent).toBe('1 needs you·1 working')
   })
 
   // The capability, not the project count: one registered project in the default multi-project

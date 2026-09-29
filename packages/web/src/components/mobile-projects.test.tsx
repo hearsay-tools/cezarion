@@ -1,0 +1,268 @@
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import type { ReactNode } from 'react'
+import { MemoryRouter, useLocation } from 'react-router'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+import type { ProjectListEntry } from '@open-mercato/cezar-api-client'
+import { AppShell } from '@/components/app-shell'
+import { elsewhereSignal, menuButtonLabel, type MobileProjectNav } from '@/components/mobile-projects'
+import { ThemeProvider } from '@/components/theme-provider'
+import type { ProjectSignal } from '@/lib/project-signal'
+
+beforeEach(() => {
+  vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener: () => {}, removeEventListener: () => {} }))
+  vi.stubGlobal('ResizeObserver', class { observe() {}; unobserve() {}; disconnect() {} })
+})
+
+afterEach(() => {
+  cleanup()
+  localStorage.clear()
+  vi.unstubAllGlobals()
+})
+
+const project = (id: string, name = id): ProjectListEntry => ({
+  id,
+  name,
+  root: `/home/me/${id}`,
+  addedAt: '2026-07-01T00:00:00.000Z',
+  lastOpenedAt: '2026-07-20T12:00:00.000Z',
+  source: 'local',
+  status: 'ok',
+  branch: 'main',
+})
+
+const signal = (overrides: Partial<ProjectSignal> = {}): ProjectSignal => ({
+  needsYou: 0,
+  failedUnread: 0,
+  inMotion: 0,
+  finishedUnread: 0,
+  ...overrides,
+})
+
+const PROJECTS = ['cezarion', 'toolkit-dev', 'api-platform', 'mvp-unveiled', 'ops-monitor'].map((id) => project(id))
+const SIGNALS = new Map<string, ProjectSignal>([
+  ['cezarion', signal({ needsYou: 1, inMotion: 3, finishedUnread: 1 })],
+  ['toolkit-dev', signal({ needsYou: 1, inMotion: 2 })],
+  ['api-platform', signal({ failedUnread: 1 })],
+  ['mvp-unveiled', signal({ finishedUnread: 1 })],
+])
+
+const nav = (overrides: Partial<MobileProjectNav> = {}): MobileProjectNav => ({
+  projects: PROJECTS,
+  signals: SIGNALS,
+  truncated: new Set(),
+  singleProject: false,
+  ...overrides,
+})
+
+function Probe(): ReactNode {
+  return <span data-testid="location">{useLocation().pathname}</span>
+}
+
+function renderShell(entry: string, mobileProjects: MobileProjectNav | null, props: Partial<React.ComponentProps<typeof AppShell>> = {}) {
+  return render(
+    <ThemeProvider>
+      <MemoryRouter initialEntries={[entry]}>
+        <AppShell repo={{ name: 'cezarion', branch: 'main' }} version="0.14.9" mobileProjects={mobileProjects} {...props}>
+          <Probe />
+        </AppShell>
+      </MemoryRouter>
+    </ThemeProvider>,
+  )
+}
+
+const menuButton = () => screen.getByRole('button', { name: /^Open projects/ })
+const drawer = () => document.querySelector('[data-slot="mobile-nav-drawer"]') as HTMLElement
+const rows = () => [...drawer().querySelectorAll<HTMLElement>('[data-slot="drawer-project"]')]
+const segs = (root: Element, position: 'top' | 'bottom') =>
+  [...(root.querySelector(`[data-slot="rail-pill-${position}"]`)?.querySelectorAll('[data-segment]') ?? [])].map((el) => `${el.getAttribute('data-segment')}:${el.textContent}`)
+
+describe('elsewhereSignal / menuButtonLabel', () => {
+  it('sums every project but the current one, all four counts', () => {
+    expect(elsewhereSignal(nav(), 'cezarion')).toEqual({ needsYou: 1, failedUnread: 1, inMotion: 2, finishedUnread: 1 })
+    // A global route has no current project, so every project is elsewhere.
+    expect(elsewhereSignal(nav(), null)).toEqual({ needsYou: 2, failedUnread: 1, inMotion: 5, finishedUnread: 2 })
+  })
+
+  it('is unknown, not zero, until the runs index has loaded', () => {
+    expect(elsewhereSignal(nav({ signals: null }), 'cezarion')).toBeNull()
+    expect(elsewhereSignal(null, 'cezarion')).toBeNull()
+  })
+
+  it('spells the aggregate out, and says plain "Open projects" when all four are zero', () => {
+    expect(menuButtonLabel(signal({ needsYou: 1, failedUnread: 1, inMotion: 2, finishedUnread: 1 }))).toBe(
+      'Open projects. Elsewhere: 1 needs you, 1 failed, 2 working, 1 finished',
+    )
+    expect(menuButtonLabel(signal())).toBe('Open projects')
+    expect(menuButtonLabel(null)).toBe('Open projects')
+  })
+})
+
+describe('mobile top bar', () => {
+  it('is 56px, drops the wordmark, and keeps the project button and search', () => {
+    renderShell('/p/cezarion/', nav())
+    const bar = document.querySelector('[data-slot="mobile-top-bar"]') as HTMLElement
+    expect(bar.firstElementChild?.className).toContain('h-[56px]')
+    expect(bar.firstElementChild?.className).toContain('px-[8px]')
+    expect(within(bar).queryByText('Cezarion')).toBeNull()
+    expect(within(bar).getByRole('button', { name: 'Search' })).toBeTruthy()
+    const picker = within(bar).getByRole('button', { name: 'Switch project: cezarion' })
+    expect(picker.textContent).toContain('cezarion')
+    expect(picker.textContent).toContain('main')
+  })
+
+  it('stacks the OTHER projects’ two pills on the menu button and spells them out', () => {
+    renderShell('/p/cezarion/', nav())
+    const button = menuButton()
+    expect(button.getAttribute('aria-label')).toBe('Open projects. Elsewhere: 1 needs you, 1 failed, 2 working, 1 finished')
+    expect(segs(button, 'top')).toEqual(['amber:1', 'red:1'])
+    expect(segs(button, 'bottom')).toEqual(['violet:2', 'green:1'])
+    const top = button.querySelector('[data-slot="rail-pill-top"]') as HTMLElement
+    const bottom = button.querySelector('[data-slot="rail-pill-bottom"]') as HTMLElement
+    expect(top.className).toContain('top-[3px]')
+    expect(top.className).toContain('right-[2px]')
+    expect(bottom.className).toContain('top-[24px]')
+    // The cut-out ring is the top bar's own colour.
+    expect(top.className).toContain('border-card')
+    // 64px wide, 44px tall, in px rather than spacing steps: density scales the steps, and the
+    // ultra scale shrank this to 48px and pushed the button off the top of the bar.
+    expect(button.className).toContain('w-[64px]')
+    expect(button.className).toContain('h-[44px]')
+  })
+
+  it('never lets a split pill reach the menu icon, whatever the counts', () => {
+    // 20px icon at left 10px ends at x=30; a 64px button leaves 34px, less the 2px inset and
+    // the pill's own 2px borders: two segments must stay 14px each (32px in all).
+    const big = new Map<string, ProjectSignal>([['toolkit-dev', signal({ needsYou: 12, failedUnread: 30, inMotion: 99, finishedUnread: 10 })]])
+    renderShell('/p/cezarion/', nav({ signals: big }))
+    const widths = [...menuButton().querySelectorAll<HTMLElement>('[data-segment]')].map((el) => el.style.width)
+    expect(widths).toEqual(['14px', '14px', '14px', '14px'])
+    expect(segs(menuButton(), 'top')).toEqual(['amber:9+', 'red:9+'])
+  })
+
+  it('carries no pills and a plain label while activity is unknown or nothing is elsewhere', () => {
+    renderShell('/p/cezarion/', nav({ signals: null }))
+    expect(menuButton().getAttribute('aria-label')).toBe('Open projects')
+    expect(menuButton().querySelector('[data-segment]')).toBeNull()
+    cleanup()
+    renderShell('/p/cezarion/', nav({ projects: [PROJECTS[0]!] }))
+    expect(menuButton().getAttribute('aria-label')).toBe('Open projects')
+  })
+
+  it('lets a long project name truncate instead of widening the shell', () => {
+    renderShell('/p/cezarion/', nav(), { repo: { name: 'cezar-e2e-new-task-a-very-long-project-name', branch: 'main' } })
+    const bar = document.querySelector('[data-slot="mobile-top-bar"]') as HTMLElement
+    // A grid item sizes its column to its min-content, so both levels must be allowed to shrink.
+    expect(bar.className).toContain('min-w-0')
+    expect(bar.firstElementChild?.className).toContain('min-w-0')
+  })
+
+  it('never puts a count on the project button', () => {
+    renderShell('/p/cezarion/', nav())
+    const picker = document.querySelector('[data-slot="mobile-project-picker"]') as HTMLElement
+    expect(picker.querySelector('[data-segment]')).toBeNull()
+    expect(picker.textContent).not.toMatch(/\d/)
+  })
+})
+
+describe('mobile drawer', () => {
+  it('opens on the identity row, then one row per project, then workspace and global rows', () => {
+    renderShell('/p/cezarion/', nav())
+    fireEvent.click(menuButton())
+    const identity = drawer().querySelector('[data-slot="drawer-identity"]') as HTMLElement
+    expect(identity.textContent).toContain('Cezarion')
+    expect(identity.textContent).toContain('v0.14.9')
+    expect(within(identity).getByRole('button', { name: 'Close menu' })).toBeTruthy()
+
+    expect(rows().map((row) => row.getAttribute('data-project-id'))).toEqual(PROJECTS.map((entry) => entry.id))
+    for (const row of rows()) expect(row.className).toContain('h-[64px]')
+
+    const order = [...drawer().querySelectorAll('[data-slot="drawer-identity"], [data-slot="drawer-projects"], [data-slot="drawer-workspace"], [data-slot="sidebar-content"], [data-slot="drawer-global"]')].map((el) => el.getAttribute('data-slot'))
+    expect(order).toEqual(['drawer-identity', 'drawer-projects', 'drawer-workspace', 'sidebar-content', 'drawer-global'])
+  })
+
+  it('marks the current project, and paints each row’s pills and coloured state words', () => {
+    renderShell('/p/cezarion/', nav())
+    fireEvent.click(menuButton())
+    const [current, toolkit, failed, finished, idle] = rows() as [HTMLElement, HTMLElement, HTMLElement, HTMLElement, HTMLElement]
+    expect(current.getAttribute('aria-current')).toBe('page')
+    expect(current.className).toContain('bg-sidebar-row-selected')
+    expect(current.querySelector('svg[data-design-icon="check"]')).not.toBeNull()
+    expect(toolkit.getAttribute('aria-current')).toBeNull()
+
+    expect(segs(current, 'top')).toEqual(['amber:1'])
+    expect(segs(current, 'bottom')).toEqual(['violet:3', 'green:1'])
+    expect(segs(failed, 'top')).toEqual(['red:1'])
+    expect(segs(idle, 'top')).toEqual([])
+    expect((toolkit.querySelector('[data-slot="rail-pill-bottom"]') as HTMLElement).className).toContain('top-[29px]')
+
+    const words = (row: HTMLElement) => [...row.querySelectorAll('[data-tone]')].map((el) => `${el.getAttribute('data-tone')}:${el.textContent}`)
+    expect(words(current)).toEqual(['amber:1 needs you', 'violet:3 working', 'green:1 finished'])
+    expect(words(failed)).toEqual(['red:1 failed'])
+    expect(words(finished)).toEqual(['green:1 finished'])
+    expect(idle.querySelector('[data-slot="drawer-project-state"]')?.textContent).toBe('idle')
+    expect(current.querySelector('[data-tone="amber"]')?.className).toContain('text-pending-strong')
+    expect(failed.querySelector('[data-tone="red"]')?.className).toContain('text-danger')
+    expect(current.querySelector('[data-tone="violet"]')?.className).toContain('text-status-running')
+    expect(finished.querySelector('[data-tone="green"]')?.className).toContain('text-success')
+  })
+
+  it('says the activity is unknown rather than idle before the index loads', () => {
+    renderShell('/p/cezarion/', nav({ signals: null }))
+    fireEvent.click(menuButton())
+    expect(rows()[1]!.querySelector('[data-slot="drawer-project-state"]')?.textContent).toBe('activity unknown')
+  })
+
+  it('opens a project on tap and closes the drawer', async () => {
+    renderShell('/p/cezarion/', nav())
+    fireEvent.click(menuButton())
+    fireEvent.click(rows()[1]!)
+    await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/p/toolkit-dev/'))
+    await waitFor(() => expect(drawer()).toBeNull())
+  })
+
+  it('shows All projects and Add project with the capability off, even for one project', () => {
+    renderShell('/p/cezarion/', nav({ projects: [PROJECTS[0]!] }))
+    fireEvent.click(menuButton())
+    expect(within(drawer()).getByRole('link', { name: 'All projects · task overview' }).getAttribute('href')).toBe('/tasks')
+    expect(within(drawer()).getByRole('button', { name: 'Add project' })).toBeTruthy()
+  })
+
+  it('drops both workspace rows and their divider with CEZ_SINGLE_PROJECT=1', () => {
+    renderShell('/p/cezarion/', nav({ projects: [PROJECTS[0]!], singleProject: true }))
+    fireEvent.click(menuButton())
+    expect(rows()).toHaveLength(1)
+    expect(within(drawer()).queryByRole('link', { name: /All projects/ })).toBeNull()
+    expect(within(drawer()).queryByRole('button', { name: 'Add project' })).toBeNull()
+    expect(drawer().querySelector('[data-slot="drawer-workspace"]')).toBeNull()
+  })
+
+  it('keeps Global settings and the theme cycle at the bottom', () => {
+    renderShell('/p/cezarion/', nav())
+    fireEvent.click(menuButton())
+    const global = drawer().querySelector('[data-slot="drawer-global"]') as HTMLElement
+    expect(within(global).getByRole('link', { name: 'Global settings' }).getAttribute('href')).toBe('/settings/global')
+    const theme = within(global).getByRole('button', { name: /^Theme:/ })
+    // The test provider starts on dark; the row cycles like the toggle does (dark → system).
+    expect(theme.textContent).toBe('Theme · Dark')
+    fireEvent.click(theme)
+    expect(theme.textContent).toBe('Theme · System')
+  })
+
+  it('keeps every existing drawer destination reachable', () => {
+    renderShell('/p/cezarion/', nav(), { taskQuickList: <a href="/p/cezarion/tasks/x">A task</a> })
+    fireEvent.click(menuButton())
+    const content = drawer().querySelector('[data-slot="sidebar-content"]') as HTMLElement
+    expect(within(content).getByRole('navigation', { name: 'Main' })).toBeTruthy()
+    expect(within(content).getByRole('link', { name: 'A task' })).toBeTruthy()
+    expect(within(content).getByRole('link', { name: /New task/ })).toBeTruthy()
+  })
+
+  it('renders without project data, keeping identity and global rows', () => {
+    renderShell('/settings/global', null, { repo: null })
+    fireEvent.click(menuButton())
+    expect(drawer().querySelector('[data-slot="drawer-projects"]')).toBeNull()
+    expect(drawer().querySelector('[data-slot="drawer-identity"]')).not.toBeNull()
+    expect(drawer().querySelector('[data-slot="drawer-global"]')).not.toBeNull()
+  })
+})

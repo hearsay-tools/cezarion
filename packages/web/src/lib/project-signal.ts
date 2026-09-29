@@ -78,14 +78,39 @@ export function projectSignalLabel(
   options: { truncated?: boolean; unknown?: boolean } = {},
 ): string {
   if (options.unknown) return `${name} · activity unknown`
-  const { needsYou, failedUnread, inMotion, finishedUnread } = signal ?? IDLE
-  const parts = [
-    needsYou > 0 ? `${needsYou} needs you` : null,
-    failedUnread > 0 ? `${failedUnread} failed` : null,
-    inMotion > 0 ? `${inMotion} working` : null,
-    finishedUnread > 0 ? `${finishedUnread} finished` : null,
-  ].filter((part): part is string => part !== null)
+  const parts = projectSignalParts(signal).map((part) => part.text)
   return [name, parts.length > 0 ? parts.join(' · ') : 'idle', ...(options.truncated ? ['recent runs only'] : [])].join(' · ')
+}
+
+/** Which of the rail's four segment colours a state word takes. */
+export type SignalTone = 'amber' | 'red' | 'violet' | 'green'
+
+/**
+ * The non-zero counts as words, in pill order (`1 needs you`, `1 failed`, `2 working`, `1 finished`).
+ * `projectSignalLabel` joins them; the mobile drawer paints each in its segment's colour, so both
+ * read one list and cannot word a state differently.
+ */
+export function projectSignalParts(signal: ProjectSignal | undefined): { tone: SignalTone; text: string }[] {
+  const { needsYou, failedUnread, inMotion, finishedUnread } = signal ?? IDLE
+  const parts: { tone: SignalTone; text: string }[] = []
+  if (needsYou > 0) parts.push({ tone: 'amber', text: `${needsYou} needs you` })
+  if (failedUnread > 0) parts.push({ tone: 'red', text: `${failedUnread} failed` })
+  if (inMotion > 0) parts.push({ tone: 'violet', text: `${inMotion} working` })
+  if (finishedUnread > 0) parts.push({ tone: 'green', text: `${finishedUnread} finished` })
+  return parts
+}
+
+/** Four counts summed across projects. The mobile menu button shows every project but the current one. */
+export function sumSignals(signals: readonly (ProjectSignal | undefined)[]): ProjectSignal {
+  const total = { ...IDLE }
+  for (const signal of signals) {
+    if (!signal) continue
+    total.needsYou += signal.needsYou
+    total.failedUnread += signal.failedUnread
+    total.inMotion += signal.inMotion
+    total.finishedUnread += signal.finishedUnread
+  }
+  return total
 }
 
 /**

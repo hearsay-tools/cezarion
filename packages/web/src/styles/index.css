@@ -796,23 +796,3 @@
 [data-slot='sidebar-footer-controls'] svg { width: 17px; height: 17px; }
 [data-slot='sidebar-footer-controls'] [data-design-icon='chevron-down'] { width: 10px; height: 10px; }
 
-/* The close control sits on the dark nav scrim, not on an accent fill. */
-[data-slot='mobile-nav-drawer'] button[aria-label='Close menu'] { color: #f8fafc; }
-[data-slot='mobile-nav-drawer'] button[aria-label='Close menu']:hover {
-  background-color: #f8fafc1a; color: #f8fafc;
-}
-
-/* The mobile design reserves 20px of layout for its menu glyph, with a 44px hit area. */
-[data-slot='mobile-top-bar'] { background: var(--task-brand-bg); }
-[data-slot='mobile-top-bar'] button[aria-label='Open menu'] {
-  position: relative; width: 20px; min-width: 20px; margin-left: 0;
-}
-[data-slot='mobile-top-bar'] button[aria-label='Open menu']::after {
-  content: ''; position: absolute; top: 0; bottom: 0; left: -12px; right: -12px;
-}
-[data-slot='mobile-top-bar'] > div { height: 51px; }
-
-[data-slot='mobile-status']:empty { display: none; }
-/* The menu's 44px hit region needs the source's fixed 14px screen gutter even
-   when density scales spacing tokens; ultra's 10.5px gutter clips its left edge. */
-[data-slot='mobile-top-bar'] > div { padding-inline: 14px; }

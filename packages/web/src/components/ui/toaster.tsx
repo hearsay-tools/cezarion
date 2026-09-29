@@ -87,11 +87,11 @@ export function Toaster() {
       // on the thread's action row. z-[60] clears the Radix overlay layer (z-50) — dialogs fire
       // toasts, and their portal sits later in <body>, so at an equal z-index the dialog wins.
       //
-      // The mobile offset clears the app shell's own header (app-shell.tsx: a 52px row plus its
+      // The mobile offset clears the app shell's own header (app-shell.tsx: a 56px row plus its
       // border, under the safe-area inset) whose right end holds the run status dot and kebab.
       // Anchoring at 16px on a phone would cover exactly the controls #818 is about, which is
       // the bug moved rather than fixed; `md:` is where that header stops rendering.
-      className="pointer-events-none fixed top-[calc(61px+env(safe-area-inset-top))] right-[calc(16px+env(safe-area-inset-right))] z-[60] flex flex-col items-end gap-2 md:top-[calc(16px+env(safe-area-inset-top))]"
+      className="pointer-events-none fixed top-[calc(66px+env(safe-area-inset-top))] right-[calc(16px+env(safe-area-inset-right))] z-[60] flex flex-col items-end gap-2 md:top-[calc(16px+env(safe-area-inset-top))]"
     >
       {current.map((item) => (
         <div
