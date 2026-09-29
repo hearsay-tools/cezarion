@@ -1777,7 +1777,7 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
     if (!session?.open || !idleTimer?._onTimeout) throw new Error('waiting session did not arm an idle timer');
 
     // Resolved, not hand-built: a deep sandbox checkout falls back to the short
-    // OS-temp location (#387), and the idle-close must release THAT directory.
+    // OS-temp location (#387), and idle-close must preserve THAT directory.
     const scratch = resolveAgentTmpDir(join(repoRoot, '.ai/cezar'), record.id);
     expect(existsSync(scratch)).toBe(true);
     idleTimer._onTimeout();
@@ -1790,7 +1790,7 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
     const waitingStep = idleClosed?.steps.find((step) => step.id === idleClosed.currentStepId);
     expect(waitingStep?.status).toBe('waiting');
     expect(waitingStep?.finishedAt).toBeUndefined();
-    expect(existsSync(scratch)).toBe(false); // terminal resources are released even though status is not terminal
+    expect(existsSync(scratch)).toBe(true); // task scratch outlives the idle-closed session (#515)
 
     // The idle-closed run no longer owns the in-place checkout lease.
     const successor = manager.startRun(SINGLE_STEP, { task: 'mock:done successor', worktree: false });

@@ -174,7 +174,7 @@ describe('verified destruction retains results through explicit history deletion
     f.store.updateRun(workerId, { createdAt: '2000-01-01T00:00:00.000Z' });
     f.store.updateRun(f.parent.id, { createdAt: '2000-01-01T00:00:00.000Z' });
     const ordinary = f.store.createRun({ task: 'old', title: 'old', workflow: 'quick-task', steps: [] });
-    f.store.updateRun(ordinary.id, { createdAt: '2000-01-01T00:00:00.000Z' });
+    f.store.updateRun(ordinary.id, { createdAt: '2000-01-01T00:00:00.000Z', status: 'done' });
     for (let i = 0; i < 302; i++) f.store.createRun({ task: 'new', title: 'new', workflow: 'quick-task', steps: [] });
     expect(f.store.getRun(ordinary.id)).toBeUndefined();
     expect(f.store.getRun(workerId)).toBeDefined();
