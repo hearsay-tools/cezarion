@@ -99,6 +99,10 @@ export type AppShellProps = {
    *  still loading, or unreachable — the shell renders the single-project sidebar it always
    *  did, which is the honest degradation, not a special case. */
   projectGroups?: ReactNode
+  /** The desktop project rail (#618): a 60px workspace-level column left of the sidebar. A slot
+   *  because the rail reads the registry and the runs index, and this shell must keep rendering
+   *  where no QueryClient is provided. Absent renders nothing; hidden below `md` by its own frame. */
+  projectRail?: ReactNode
 }
 
 /**
@@ -169,6 +173,7 @@ export function AppShell({
   singleProject = false,
   banner,
   projectGroups,
+  projectRail,
 }: AppShellProps) {
   const { pathname } = useLocation()
   // The nav's area rules reason about the flat route map — strip any `/p/:projectId` prefix
@@ -260,6 +265,8 @@ export function AppShell({
         data-slot="app-shell"
         className="flex h-dvh overflow-hidden bg-background text-foreground pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]"
       >
+        {/* Outside the resizable sidebar: SidebarResize only ever changes the aside's width. */}
+        {projectRail}
         <Sidebar {...nav} width={sidebarWidth} onWidthChange={changeSidebarWidth} />
         {/* The drawer leaves a visible dismissal strip beside the shared navigation. */}
         <MobileNavDrawer {...nav} onNavigate={() => setMenuOpen(false)} onCloseAutoFocus={(event) => {
@@ -771,7 +778,23 @@ function GlobalSettingsLink({
  * places that mount it without a QueryClient. The cost is no close animation, which is the
  * cheaper half of the trade.
  */
-function AddProjectMenu() {
+export function AddProjectMenu({
+  triggerClassName,
+  icon: Icon = FolderPlusIcon,
+  iconClassName = 'size-4',
+  side,
+  origin,
+}: {
+  /** Extra trigger classes, merged over the footer's. The project rail (#618) restyles it. */
+  triggerClassName?: string
+  icon?: typeof FolderPlusIcon
+  iconClassName?: string
+  /** Which side the menu opens on; the rail opens it to the right, over the sidebar. */
+  side?: 'right'
+  /** Where this mount lives, as `data-origin` on the trigger, so a second mount (the rail) stays
+   *  addressable. Not a `data-slot`: that would replace the Button's, which holds the 44px floor. */
+  origin?: string
+} = {}) {
   const [browsing, setBrowsing] = React.useState(false)
   const [cloning, setCloning] = React.useState(false)
   return (
@@ -782,13 +805,14 @@ function AddProjectMenu() {
           variant="ghost"
           aria-label="Add project"
           title="Add project"
-          className="size-9 p-0 text-muted-foreground"
+          data-origin={origin}
+          className={cn('size-9 p-0 text-muted-foreground', triggerClassName)}
         >
-          <FolderPlusIcon className="size-4" aria-hidden="true" />
+          <Icon className={iconClassName} aria-hidden="true" />
           <span className="sr-only">Add project</span>
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-56">
+      <DropdownMenuContent align="start" side={side} className="w-56">
         <DropdownMenuLabel className="text-xs text-soft-foreground">Add project</DropdownMenuLabel>
         <DropdownMenuItem data-slot="add-project-local" onSelect={() => setBrowsing(true)}>
           <FolderIcon aria-hidden="true" />

@@ -63,12 +63,22 @@ function useSidebarCollapse(activeProjectId: string | null) {
     [activeProjectId],
   )
 
-  return { collapsed, toggle }
+  const reveal = React.useCallback((projectId: string, projects: readonly ProjectListEntry[]) => {
+    const next = { ...latest.current }
+    for (const project of projects) next[project.id] = project.id !== projectId
+    latest.current = next
+    writeStoredCollapsed(next)
+    setCollapsed(next)
+  }, [])
+
+  return { collapsed, toggle, reveal }
 }
 
 export function ProjectGroups({
   projects,
   bootProjectId,
+  revealRequest,
+  onRevealed,
   inboxAvailable = false,
   automationsAvailable = false,
   inboxCount = null,
@@ -78,6 +88,9 @@ export function ProjectGroups({
   /** The project a flat, unprefixed URL resolves to — so the boot project is the one that
    *  auto-expands before the user has navigated into any `/p/<id>` scope. */
   bootProjectId: string
+  /** Rail activation, not route selection: a new request also reopens the current project. */
+  revealRequest?: { projectId: string } | null
+  onRevealed?: () => void
   inboxAvailable?: boolean
   /** `capabilities.automations` (#801) — workspace-wide, unlike the per-project forge gate:
    *  the opt-in is one env var on the one server that serves every group. */
@@ -98,7 +111,34 @@ export function ProjectGroups({
   // one?") and still want a project, so they keep the boot fallback: landing on a global page
   // must not fold the whole sidebar shut.
   const collapseAnchorId = scopedProjectId ?? bootProjectId
-  const { collapsed, toggle } = useSidebarCollapse(collapseAnchorId)
+  const { collapsed, toggle, reveal } = useSidebarCollapse(collapseAnchorId)
+  const listRef = React.useRef<HTMLDivElement>(null)
+  const handledReveal = React.useRef<typeof revealRequest>(undefined)
+  const pendingScroll = React.useRef<string | null>(null)
+
+  React.useLayoutEffect(() => {
+    if (!revealRequest || handledReveal.current === revealRequest) return
+    if (!projects.some(project => project.id === revealRequest.projectId)) return
+    handledReveal.current = revealRequest
+    pendingScroll.current = revealRequest.projectId
+    reveal(revealRequest.projectId, projects)
+  }, [revealRequest, projects, reveal])
+
+  React.useLayoutEffect(() => {
+    const id = pendingScroll.current
+    if (id === null || projects.some(project => collapsed[project.id] !== (project.id !== id))) return
+    // Measure after the accordion has committed. Scroll only the sidebar, never the page or
+    // rail; immediate scrolling also respects reduced motion. No selector interpolation of ids.
+    const list = listRef.current
+    const target = Array.from(list?.children ?? []).find(child => (child as HTMLElement).dataset.project === id)
+    const scroller = list?.closest<HTMLElement>('[data-slot="project-groups"]')
+    if (target && scroller) {
+      scroller.scrollTop += target.getBoundingClientRect().top - scroller.getBoundingClientRect().top - scroller.clientTop
+    }
+    pendingScroll.current = null
+    // Consume the request so opening the mobile drawer later cannot replay an old rail click.
+    onRevealed?.()
+  }, [collapsed, projects, revealRequest, onRevealed])
 
   // One filter for every sidebar group (`ListViewProvider`). Independent of the Tasks table:
   // switching that table to Archived must not hide the live runs these groups still navigate.
@@ -121,7 +161,7 @@ export function ProjectGroups({
   )
 
   return (
-    <div data-slot="project-group-list">
+    <div ref={listRef} data-slot="project-group-list">
       {ordered.map((project) => (
         <ProjectGroup
           key={project.id}

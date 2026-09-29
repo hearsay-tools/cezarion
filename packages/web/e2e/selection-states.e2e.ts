@@ -316,7 +316,7 @@ describe('selection and control states (#171)', () => {
       hoverVisiblePoint(browser, row)
       selectedSurface(row)
       focus(link)
-      const nav = `${container}nav a[aria-current="page"]`
+      const nav = `${container || '[data-slot="sidebar"] '}nav a[aria-current="page"]`
       selectedSurface(nav)
       focus(nav)
       browser.screenshot(`${artifacts}/states-tasks-${variant.id}.png`, { viewport: true })
@@ -520,7 +520,7 @@ describe('selection and control states (#171)', () => {
       applyContrastQaVariant(browser, variant)
       if (variant.viewport.width === 360) browser.click('[data-slot="mobile-top-bar"] button')
       const container = variant.viewport.width === 360 ? '[role="dialog"] ' : ''
-      const nav = `${container}nav a[aria-current="page"]`
+      const nav = `${container || '[data-slot="sidebar"] '}nav a[aria-current="page"]`
       browser.waitForFunction(`document.querySelector(${JSON.stringify(nav)})?.getBoundingClientRect().width > 0`)
       selectedSurface(nav)
       focus(nav)

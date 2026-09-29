@@ -657,6 +657,22 @@ describe('AppShell', () => {
       fireEvent.pointerUp(el, { pointerId: 1, clientX: to })
     }
 
+    it('mounts the project rail beside the sidebar, outside its width, and drags leave it alone (#618)', () => {
+      renderShell('/', { projectRail: <nav aria-label="Projects" data-slot="project-rail" /> })
+      const rail = document.querySelector('[data-slot="project-rail"]') as HTMLElement
+      expect(rail.parentElement).toBe(sidebar().parentElement)
+      expect(rail.nextElementSibling).toBe(sidebar())
+      expect(sidebar().contains(rail)).toBe(false)
+      drag(264, 300)
+      expect(sidebar().style.width).toBe('300px')
+      expect(rail.style.width).toBe('')
+    })
+
+    it('renders no rail when the slot is empty', () => {
+      renderShell()
+      expect(document.querySelector('[data-slot="project-rail"]')).toBeNull()
+    })
+
     it('starts at the approved 264px when nothing has been stored', () => {
       renderShell()
       expect(sidebar().style.width).toBe('264px')

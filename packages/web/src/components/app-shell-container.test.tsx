@@ -20,9 +20,10 @@ beforeEach(() => {
   document.title = 'cezar'
   vi.stubGlobal('fetch', fetchMock)
   // jsdom ships no matchMedia; the shell's breakpoint effect and the theme toggle need one.
+  // md-and-up is the desktop shell (the project rail reads it); every other query stays false.
   vi.stubGlobal(
     'matchMedia',
-    () => ({ matches: false, addEventListener: () => {}, removeEventListener: () => {} }),
+    (query: string) => ({ matches: query === '(min-width: 768px)', addEventListener: () => {}, removeEventListener: () => {} }),
   )
 })
 
@@ -617,5 +618,282 @@ describe('document title wiring', () => {
     await waitFor(() =>
       expect(document.title).toBe('Renamed storefront — Rename browser titles · cezar'),
     )
+  })
+})
+
+// #618 — the project rail, wired to the registry, health and the SSE-patched runs index.
+describe('project rail wiring', () => {
+  const indexRow = (overrides: Record<string, unknown>) => ({
+    projectId: 'cezar',
+    id: 'r1',
+    title: 'A task',
+    status: 'running',
+    hasPendingHumanAsk: false,
+    createdAt: '2026-07-21T12:00:00.000Z',
+    archived: false,
+    workflow: 'quick-task',
+    ...overrides,
+  })
+  const railIndex = (runs: unknown[], truncated: string[] = []) => ({
+    runs,
+    referenceStatuses: {},
+    perProjectLimit: 200,
+    truncated,
+  })
+  const TWO_PROJECTS = {
+    projects: [PROJECT, { ...PROJECT, id: 'shop', name: 'shop', lastOpenedAt: '2026-07-19T00:00:00.000Z' }],
+    bootProject: 'cezar',
+    projectsDir: '/home/me/cezar/projects',
+  }
+  const rail = () => screen.findByRole('navigation', { name: 'Projects' })
+  const railMark = (id: string) => document.querySelector(`[data-slot="rail-project"][data-project-id="${id}"]`) as HTMLElement
+
+  it('rail activation opens only that project, including repeated current-project clicks', async () => {
+    localStorage.setItem('cez-sidebar-collapsed', JSON.stringify({ cezar: false, shop: true, third: false }))
+    serve({
+      '/api/v1/health': HEALTH,
+      '/api/v1/todos': [],
+      '/api/v1/projects': { ...TWO_PROJECTS, projects: [...TWO_PROJECTS.projects, { ...PROJECT, id: 'third', name: 'third' }] },
+      '/api/v1/workspace/runs-index': railIndex([]),
+      '/api/v1/runs': [],
+      '/api/v1/p/cezar/runs': [],
+      '/api/v1/p/shop/runs': [],
+      '/api/v1/p/third/runs': [],
+    })
+    renderShell('/p/cezar/')
+    await rail()
+    const header = (id: string) => document.querySelector(`[data-slot="project-group"][data-project="${id}"] [data-slot="project-group-header"]`)!
+    const selectShop = () => fireEvent.click(within(railMark('shop')).getByRole('link'))
+    try {
+      selectShop()
+      await waitFor(() => expect(header('shop').getAttribute('aria-expanded')).toBe('true'))
+      expect(header('cezar').getAttribute('aria-expanded')).toBe('false')
+      expect(header('third').getAttribute('aria-expanded')).toBe('false')
+      expect(JSON.parse(localStorage.getItem('cez-sidebar-collapsed')!)).toEqual({ cezar: true, shop: false, third: true })
+      expect(within(railMark('shop')).getByRole('link').getAttribute('aria-current')).toBe('page')
+
+      // Manual toggles stay independent; the next rail activation reapplies the accordion.
+      fireEvent.click(header('shop'))
+      fireEvent.click(header('cezar'))
+      expect(header('shop').getAttribute('aria-expanded')).toBe('false')
+      expect(header('cezar').getAttribute('aria-expanded')).toBe('true')
+      selectShop()
+      await waitFor(() => expect(header('shop').getAttribute('aria-expanded')).toBe('true'))
+      expect(header('cezar').getAttribute('aria-expanded')).toBe('false')
+      selectShop()
+      expect(header('shop').getAttribute('aria-expanded')).toBe('true')
+    } finally {
+      localStorage.removeItem('cez-sidebar-collapsed')
+    }
+  })
+
+  it.each([{ ctrlKey: true }, { metaKey: true }, { shiftKey: true }, { altKey: true }])(
+    'modified rail clicks leave this window’s groups alone (%j)', async (modifier) => {
+      localStorage.setItem('cez-sidebar-collapsed', JSON.stringify({ cezar: false, shop: true }))
+      serve({
+        '/api/v1/health': HEALTH,
+        '/api/v1/todos': [],
+        '/api/v1/projects': TWO_PROJECTS,
+        '/api/v1/workspace/runs-index': railIndex([]),
+        '/api/v1/runs': [],
+        '/api/v1/p/cezar/runs': [],
+      })
+      renderShell('/p/cezar/')
+      await rail()
+      try {
+        fireEvent.click(within(railMark('shop')).getByRole('link'), modifier)
+        expect(JSON.parse(localStorage.getItem('cez-sidebar-collapsed')!)).toEqual({ cezar: false, shop: true })
+        expect(screen.getByRole('button', { name: 'Toggle cezar' }).getAttribute('aria-expanded')).toBe('true')
+      } finally {
+        localStorage.removeItem('cez-sidebar-collapsed')
+      }
+    },
+  )
+
+  it('lights the top pill of a non-current project that has a run waiting on you', async () => {
+    serve({
+      '/api/v1/health': HEALTH,
+      '/api/v1/todos': [],
+      '/api/v1/projects': TWO_PROJECTS,
+      '/api/v1/workspace/ui-state': {},
+      '/api/v1/workspace/runs-index': railIndex([indexRow({ projectId: 'shop', id: 's1', status: 'waiting' })]),
+      '/api/v1/runs': [],
+      '/api/v1/p/cezar/runs': [],
+      '/api/v1/p/shop/runs': [],
+    })
+    renderShell('/p/cezar/')
+
+    await rail()
+    await waitFor(() => expect(railMark('shop').querySelector('[data-slot="rail-pill-top"]')).not.toBeNull())
+    const segment = railMark('shop').querySelector('[data-segment="amber"]')
+    expect(segment?.textContent).toBe('1')
+    // The current project reads the same index and has nothing to say.
+    expect(railMark('cezar').querySelector('[data-slot="rail-pill-top"]')).toBeNull()
+    expect(within(railMark('shop')).getByRole('link').getAttribute('aria-label')).toBe('shop · 1 needs you')
+  })
+
+  it('shrinks a pill when the index says the run was opened, with no reload', async () => {
+    const done = indexRow({ id: 'd1', status: 'done', finishedAt: '2026-07-21T13:00:00.000Z' })
+    serve({
+      '/api/v1/health': HEALTH,
+      '/api/v1/todos': [],
+      '/api/v1/projects': TWO_PROJECTS,
+      '/api/v1/workspace/ui-state': {},
+      '/api/v1/workspace/runs-index': railIndex([done]),
+      '/api/v1/runs': [],
+      '/api/v1/p/cezar/runs': [],
+      '/api/v1/p/shop/runs': [],
+    })
+    const { client } = renderShell('/p/shop/')
+
+    await waitFor(() => expect(railMark('cezar')?.querySelector('[data-segment="green"]')).not.toBeNull())
+
+    act(() => {
+      client.setQueryData(workspaceQueryKeys.runsIndex, railIndex([{ ...done, seenAt: '2026-07-21T14:00:00.000Z' }]))
+    })
+
+    await waitFor(() => expect(railMark('cezar').querySelector('[data-slot="rail-pill-bottom"]')).toBeNull())
+  })
+
+  it('says recent runs only for a project the index truncated', async () => {
+    serve({
+      '/api/v1/health': HEALTH,
+      '/api/v1/todos': [],
+      '/api/v1/projects': TWO_PROJECTS,
+      '/api/v1/workspace/ui-state': {},
+      '/api/v1/workspace/runs-index': railIndex([], ['shop']),
+      '/api/v1/runs': [],
+      '/api/v1/p/cezar/runs': [],
+      '/api/v1/p/shop/runs': [],
+    })
+    renderShell('/p/cezar/')
+
+    await rail()
+    await waitFor(() =>
+      expect(within(railMark('shop')).getByRole('link').getAttribute('aria-label')).toBe('shop · idle · recent runs only'),
+    )
+    expect(within(railMark('cezar')).getByRole('link').getAttribute('aria-label')).toBe('cezar · idle')
+  })
+
+  it('says the activity is unknown, not idle, when the runs index request fails', async () => {
+    serve({
+      '/api/v1/health': HEALTH,
+      '/api/v1/todos': [],
+      '/api/v1/projects': TWO_PROJECTS,
+      '/api/v1/workspace/ui-state': {},
+      '/api/v1/runs': [],
+      '/api/v1/p/cezar/runs': [],
+      '/api/v1/p/shop/runs': [],
+    })
+    renderShell('/p/cezar/')
+
+    await rail()
+    await waitFor(() =>
+      expect(within(railMark('shop')).getByRole('link').getAttribute('aria-label')).toBe('shop · activity unknown'),
+    )
+  })
+
+  it('refreshes the runs index when a project is registered, so its mark does not stay blank', async () => {
+    const indexCalls = () => fetchMock.mock.calls.filter(([input]) => String(input) === '/api/v1/workspace/runs-index').length
+    serve({
+      '/api/v1/health': HEALTH,
+      '/api/v1/todos': [],
+      '/api/v1/projects': { projects: [PROJECT], bootProject: 'cezar', projectsDir: '/home/me/cezar/projects' },
+      '/api/v1/workspace/ui-state': {},
+      '/api/v1/workspace/runs-index': railIndex([]),
+      '/api/v1/runs': [],
+      '/api/v1/p/cezar/runs': [],
+      '/api/v1/p/shop/runs': [],
+    })
+    const { client } = renderShell('/p/cezar/')
+
+    await waitFor(() => expect(railMark('cezar')).not.toBeNull())
+    await waitFor(() => expect(indexCalls()).toBe(1))
+
+    // A rename or reorder is not a new project: no refetch.
+    act(() => {
+      client.setQueryData(workspaceQueryKeys.projects, { ...TWO_PROJECTS, projects: [{ ...PROJECT, name: 'renamed' }] })
+    })
+    await waitFor(() => expect(railMark('cezar')).not.toBeNull())
+    expect(indexCalls()).toBe(1)
+
+    serve({
+      '/api/v1/health': HEALTH,
+      '/api/v1/todos': [],
+      '/api/v1/projects': TWO_PROJECTS,
+      '/api/v1/workspace/ui-state': {},
+      '/api/v1/workspace/runs-index': railIndex([indexRow({ projectId: 'shop', id: 's1', status: 'waiting' })]),
+      '/api/v1/runs': [],
+      '/api/v1/p/cezar/runs': [],
+      '/api/v1/p/shop/runs': [],
+    })
+    act(() => {
+      client.setQueryData(workspaceQueryKeys.projects, TWO_PROJECTS)
+    })
+
+    await waitFor(() => expect(railMark('shop')?.querySelector('[data-segment="amber"]')?.textContent).toBe('1'))
+    expect(indexCalls()).toBe(2)
+  })
+
+  it('does not read the runs index below md, where the rail is not drawn', async () => {
+    vi.stubGlobal(
+      'matchMedia',
+      () => ({ matches: false, addEventListener: () => {}, removeEventListener: () => {} }),
+    )
+    serve({
+      '/api/v1/health': HEALTH,
+      '/api/v1/todos': [],
+      '/api/v1/projects': TWO_PROJECTS,
+      '/api/v1/workspace/ui-state': {},
+      '/api/v1/workspace/runs-index': railIndex([]),
+      '/api/v1/runs': [],
+      '/api/v1/p/cezar/runs': [],
+      '/api/v1/p/shop/runs': [],
+    })
+    renderShell('/p/cezar/')
+
+    await rail()
+    await waitFor(() => expect(within(railMark('shop')).getByRole('link')).toBeTruthy())
+    expect(fetchMock.mock.calls.filter(([input]) => String(input) === '/api/v1/workspace/runs-index')).toHaveLength(0)
+  })
+
+  // The capability, not the project count: one registered project in the default multi-project
+  // mode is the zero-config first run, and it must teach where projects live.
+  it('keeps Add project and All projects on the rail with one project and the capability off', async () => {
+    serve({
+      '/api/v1/health': HEALTH,
+      '/api/v1/todos': [],
+      '/api/v1/projects': { projects: [PROJECT], bootProject: 'cezar', projectsDir: '/home/me/cezar/projects' },
+      '/api/v1/workspace/ui-state': {},
+      '/api/v1/workspace/runs-index': railIndex([]),
+      '/api/v1/runs': [],
+      '/api/v1/p/cezar/runs': [],
+    })
+    renderShell('/p/cezar/')
+
+    const nav = await rail()
+    await waitFor(() => expect(within(nav).getByRole('link', { name: 'All projects' })).toBeTruthy())
+    expect(within(nav).getByRole('button', { name: 'Add project' })).toBeTruthy()
+    expect(nav.querySelectorAll('[data-slot="rail-project"]')).toHaveLength(1)
+  })
+
+  it('renders the rail without Add project and All projects when the capability is on', async () => {
+    serve({
+      '/api/v1/health': { ...HEALTH, capabilities: { ...HEALTH.capabilities, singleProject: true } },
+      '/api/v1/todos': [],
+      '/api/v1/projects': { projects: [PROJECT], bootProject: 'cezar', projectsDir: '/home/me/cezar/projects' },
+      '/api/v1/workspace/ui-state': {},
+      '/api/v1/workspace/runs-index': railIndex([]),
+      '/api/v1/runs': [],
+      '/api/v1/p/cezar/runs': [],
+    })
+    renderShell('/p/cezar/')
+
+    const nav = await rail()
+    await waitFor(() => expect(nav.querySelector('[data-slot="rail-app-mark"]')).not.toBeNull())
+    await waitFor(() => expect(within(nav).getByAltText('Cezarion v0.1.3')).toBeTruthy())
+    expect(within(nav).queryByRole('button', { name: 'Add project' })).toBeNull()
+    expect(within(nav).queryByRole('link', { name: 'All projects' })).toBeNull()
+    expect(within(nav).getByRole('link', { name: 'Global settings' })).toBeTruthy()
   })
 })

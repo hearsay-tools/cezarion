@@ -1020,7 +1020,9 @@ describe('responsive session composer', () => {
   }, 90_000)
 
   it('keeps the composer usable at 800px after widening the sidebar through its resize handle', () => {
-    browser.setViewport(800, 900)
+    // 800px of session column: the project rail (#618) takes 60px of the viewport from `md` up.
+    const viewport = 800 + 60
+    browser.setViewport(viewport, 900)
     browser.goto(`${baseUrl}${scoped(`/tasks/${LONG_RUN.id}`)}`)
     browser.waitForFunction(`document.querySelector('[data-slot="follow-up-model-pill"]')?.textContent?.includes('${LONG_RUN.model}') === true && !!document.querySelector('[data-slot="sidebar-resize-handle"]')`)
     const sidebarWidth = () => browser.evaluate(`document.querySelector('[data-slot="sidebar"]').getBoundingClientRect().width`) as number
@@ -1042,7 +1044,7 @@ describe('responsive session composer', () => {
       expect(model.right).toBeLessThan(effort.left)
       expect(facts.group.left).toBeGreaterThanOrEqual(facts.editor.left - 1)
       expect(facts.group.right).toBeLessThanOrEqual(facts.editor.right + 1)
-      expectUsableSessionControls(facts, 800, 900)
+      expectUsableSessionControls(facts, viewport, 900)
       expect(facts.archiveLabel).toBe('Archive task')
       browser.screenshot(`${artifactsDir}/responsive-session-800-wide-sidebar.png`, { viewport: true })
     } finally {

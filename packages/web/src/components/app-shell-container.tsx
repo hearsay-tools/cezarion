@@ -1,4 +1,4 @@
-import { useRef, type ReactNode } from 'react'
+import { useCallback, useRef, useState, type ReactNode } from 'react'
 import { useLocation } from 'react-router'
 
 import { useHealth, useProjectRuns, useProjects, useRuns, useSkillsUpdate, useTodos } from '@/api/queries'
@@ -9,6 +9,7 @@ import { CommandPalette } from '@/components/command-palette'
 import { ListViewProvider } from '@/components/list-view'
 import { ProviderBannerContainer } from '@/components/provider-banner-container'
 import { ProjectGroups } from '@/components/project-groups'
+import { ProjectRailContainer } from '@/components/project-rail'
 import { SidebarSessionScope, TaskQuickListContainer } from '@/components/task-quick-list'
 import { ToolsMenu } from '@/components/tools-menu'
 import { useDocumentTitle } from '@/lib/use-document-title'
@@ -52,6 +53,10 @@ export function skillsUpdateMarkerOf(state: SkillsUpdateState | undefined): bool
  * health subscription remains the live source, with reconnect/visibility HTTP reconciliation.
  */
 export function AppShellContainer({ children }: { children: ReactNode }) {
+  // A new object for every activation, including another click on the current project's mark.
+  const [projectReveal, setProjectReveal] = useState<{ projectId: string } | null>(null)
+  const revealProject = useCallback((projectId: string) => setProjectReveal({ projectId }), [])
+  const finishProjectReveal = useCallback(() => setProjectReveal(null), [])
   const { pathname } = useLocation()
   const projectId = useActiveProjectId()
   const health = useHealth()
@@ -147,6 +152,8 @@ export function AppShellContainer({ children }: { children: ReactNode }) {
             <ProjectGroups
               projects={projects.projects}
               bootProjectId={projects.bootProject}
+              revealRequest={projectReveal}
+              onRevealed={finishProjectReveal}
               // No forge prop: each group gates its own GitHub tab on its registry entry's
               // `forge` field (#698) — the boot folder's health-level answer says nothing
               // about the other projects in the workspace.
@@ -158,6 +165,7 @@ export function AppShellContainer({ children }: { children: ReactNode }) {
           ) : undefined
         }
         toolsMenu={<ToolsMenu health={health.data} sessionScope={<SidebarSessionScope />} />}
+        projectRail={<ProjectRailContainer version={shellHealth?.version ?? null} onSelectProject={revealProject} />}
       >
         {children}
       </AppShell>
