@@ -605,8 +605,8 @@ id=$(cez task start --task-file - <<'EOF' | jq -r .id
 Fix the `cez task` docs. Keep $(example) and "quotes" literal.
 EOF
 )
-cez task wait "$id" --until attention --timeout-seconds 900   # 0 done/review · 1 failed · 3 timeout
-cez task status "$id"                                         # slim JSON: status, question, branch, diffStat…
+cez task wait "$id" --timeout-seconds 900                     # 0 done/review/needs you · 1 failed · 3 timeout
+cez task status "$id"                                         # slim JSON: status, attention, question, branch…
 cez task send "$id" 'Use the retry helper instead'            # queued, delivered, or --resume to reopen
 cez task log "$id" --follow --timeout-seconds 300             # JSON lines until it ends
 ```
@@ -639,9 +639,43 @@ Use `archive <id>` to hide a task from `list`, `unarchive <id>` to restore it, a
 `send`, `log`, `stop`, …) still accept a worker's id. `archive-finished` sweeps finished tasks and prints
 `{"archived": count}`. The single-task commands print `{"id": "…", "archived": true|false}`.
 Exit codes:
-`0` ok, `1` task failed/cancelled or a message was not delivered, `2` no cockpit or the cockpit
-refused (its `error` is passed through), `3` timed out, `64` usage error. `cez task --help` lists
-every flag.
+`0` ok (`wait`/`start --wait`: the task ended `done`/`review` or stopped for attention), `1` task
+failed/cancelled or a message was not delivered, `2` no cockpit or the cockpit refused (its `error`
+is passed through), `3` timed out, `64` usage error. `cez task --help` lists every flag.
+
+**When a task needs you.** `status`, `list` and `wait` carry `attention` and `attentionLabel`,
+derived by the same function the cockpit's Needs You uses, so the CLI and the cockpit cannot
+disagree. Read those rather than the raw status:
+
+- `attention: waiting` (`attentionLabel` "needs you" / "needs review"), `error` or `permission`
+  means the task wants a human. A `waiting` task is attention **even when `hasPendingHumanAsk`
+  is false** — a finished turn parks the task for follow-up without a structured question. Never
+  clear a task on `hasPendingHumanAsk` alone.
+- `attention: running` with `attentionLabel` "monitoring" (`status: running`,
+  `activity: monitoring`) is neither settled nor attention: the agent is still working on its own
+  sub-agents or a watched command, whatever its last log line says.
+- `attention: none` with "waiting on 2 workers" is a task parked on its own workers; it will wake
+  by itself.
+
+`wait` and `start --wait` stop as soon as a task needs you or ends (`--until attention`, the
+default); `--until settled` waits for a terminal status only — for `--autonomous` runs, or a bot
+that wants an outcome:
+
+```bash
+cez task wait "$id"                                        # stops when the task needs you, or ends
+cez task wait "$id" --until settled                        # done/review/failed/cancelled only
+cez task start --task-file task.md --wait                  # returns as soon as the agent parks
+cez task start --task-file task.md --wait --autonomous --until settled   # runs to completion
+```
+
+*Migrating from `--until settled`.* Before 0.16, `wait` and `start --wait` defaulted to
+`settled`, so an ordinary interactive task ran out the timeout (exit 3) although the agent had
+parked within seconds. The default is now `attention`. A bot that polls for terminal state adds
+`--until settled` to its `wait` / `start --wait` calls; nothing else about `settled` changed. Each
+run in the `wait` output (and the `start --wait` object) now carries `attention` +
+`attentionLabel`, and the output's top level says which `until` was in force, so a caller can tell
+"parked for follow-up" (`status: waiting`, `attention: waiting`) from "finished" (`status: done`,
+`attention: none`) without knowing cezar's status vocabulary.
 
 **A bot that lives behind an HTTP endpoint** does not have to poll. Set a **Task webhook** (URL
 and an optional Bearer token) in the project's **Settings → General**, and every task that opts
