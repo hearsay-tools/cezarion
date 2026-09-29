@@ -1093,12 +1093,11 @@ describe('TasksOverview — mobile cards and FAB', () => {
     expect(location()).toBe('/tasks/c1')
   })
 
-  it('floats the New task FAB, linking to /new', () => {
-    // A non-empty list, so the FAB is the only "New task" link (the empty state carries its own).
+  it('renders no floating New task button of its own', () => {
+    // The phone's one floating New task button belongs to the shell's tab bar (#621); a second one
+    // here stacked two of them over the same corner of every phone Tasks list.
     renderOverview({ runs: [run()] })
-    const fab = document.querySelector('[data-slot="new-task-fab"]')
-    expect(fab?.getAttribute('href')).toBe('/new')
-    expect(fab?.getAttribute('aria-label')).toBe('New task')
+    expect(document.querySelector('[data-slot="new-task-fab"]')).toBeNull()
   })
 })
 

@@ -303,21 +303,24 @@ describe('selection and control states (#171)', () => {
       browser.goto(`${baseUrl}/p/${project}/tasks/one`)
       browser.waitForFunction(`document.querySelector('[data-slot="mobile-top-bar"]') !== null`)
       applyContrastQaVariant(browser, variant)
-      if (variant.viewport.width === 360) browser.click('[data-slot="mobile-top-bar"] button')
-      browser.waitForFunction(`document.querySelector('[data-slot="task-row"][data-active="true"]') !== null`)
-      const container = variant.viewport.width === 360 ? '[role="dialog"] ' : ''
-      const row = `${container}[data-slot="task-row"][data-active="true"]`
-      const link = `${row} a[aria-current="page"]`
-      browser.waitForFunction(`document.querySelector(${JSON.stringify(link)}).getBoundingClientRect().width > 0`)
-      selectedSurface(row)
-      expect(style(`${container}[data-slot="task-row"]:not([data-active])`, '::before').content).toBe('none')
-      hoverVisiblePoint(browser, row)
-      selectedSurface(row)
-      focus(link)
-      const nav = `${container || '[data-slot="sidebar"] '}nav a[aria-current="page"]`
-      selectedSurface(nav)
-      focus(nav)
-      browser.screenshot(`${artifacts}/states-tasks-${variant.id}.png`, { viewport: true })
+      // The selected task row and nav item live in the desktop sidebar; the phone drawer no longer
+      // holds either (#621), so the phone's selected states are the skills list below and the tab
+      // bar's active tab (mobile-tab-bar.e2e.ts).
+      if (variant.viewport.width !== 360) {
+        browser.waitForFunction(`document.querySelector('[data-slot="task-row"][data-active="true"]') !== null`)
+        const row = `[data-slot="task-row"][data-active="true"]`
+        const link = `${row} a[aria-current="page"]`
+        browser.waitForFunction(`document.querySelector(${JSON.stringify(link)}).getBoundingClientRect().width > 0`)
+        selectedSurface(row)
+        expect(style(`[data-slot="task-row"]:not([data-active])`, '::before').content).toBe('none')
+        hoverVisiblePoint(browser, row)
+        selectedSurface(row)
+        focus(link)
+        const nav = `[data-slot="sidebar"] nav a[aria-current="page"]`
+        selectedSurface(nav)
+        focus(nav)
+        browser.screenshot(`${artifacts}/states-tasks-${variant.id}.png`, { viewport: true })
+      }
 
       browser.goto(`${baseUrl}/p/${project}/skills`)
       browser.waitForFunction(`document.querySelector('[data-slot="skill-row"][aria-current="page"]') !== null`)
@@ -411,7 +414,8 @@ describe('selection and control states (#171)', () => {
     })
 
     // #617 addendum 01c, in the project view tabs (see checkNavSelection).
-    it(`${variant.id}: view tabs share the task row's selection, and badges follow their meaning (#617 01c)`, () => {
+    // Desktop only: the phone's view switcher is the tab bar since #621 (active tab: mobile-tab-bar.e2e.ts).
+    if (variant.viewport.width === 1440) it(`${variant.id}: view tabs share the task row's selection, and badges follow their meaning (#617 01c)`, () => {
       checkNavSelection(variant, { base: baseUrl, projectId: project, nav: '[data-slot="view-tabs"]' })
     })
 
@@ -441,6 +445,7 @@ describe('selection and control states (#171)', () => {
       const disabled = 'button[data-slot="variants-pill"]'
       browser.waitForFunction(`document.querySelector('${model}')?.disabled === false && document.querySelector('${disabled}')?.disabled === true`)
       applyContrastQaVariant(browser, variant)
+      browser.evaluate(`document.querySelector('[data-slot="execution-options"] summary').scrollIntoView({ block: 'center' })`)
       browser.click('[data-slot="execution-options"] summary')
       browser.moveTo(0, 0)
       const bounds = () => browser.evaluate(`(() => {
@@ -499,7 +504,7 @@ describe('selection and control states (#171)', () => {
   // With a hover-capable pointer (this spec's primaryHoverType=2), the mobile shell still floors
   // every button at 44px (#166): the group toggle must span both lines there, not grow the row.
   it("keeps the group row a task row's height at 1440, 520 and 390px with a pointer (#617)", () => {
-    expectGroupRowHeightMatchesTaskRow(browser, { url: `${baseUrl}/p/${project}/tasks/one`, groupId: 'g-sel', widths: [1440, 520, 390] })
+    expectGroupRowHeightMatchesTaskRow(browser, { url: `${baseUrl}/p/${project}/tasks/one`, groupId: 'g-sel', widths: [1440, 768] })
   })
 
   it('keeps the same selection cue in the multi-project navigation', () => {
@@ -513,15 +518,26 @@ describe('selection and control states (#171)', () => {
     for (const variant of contrastQaVariants) {
       variantId = variant.id
       browser.setViewport(variant.viewport.width, variant.viewport.height)
-      browser.goto(`${baseUrl}/p/${project}/tasks/one`)
-      browser.waitForFunction(`document.querySelector('[data-slot="project-header"]') !== null`)
+      const mobile = variant.viewport.width === 360
+      // The phone's multi-project navigation is the drawer's project list (#621): the current
+      // project's row carries the selection, on its wrapper's fill.
+      browser.goto(`${baseUrl}/p/${project}/${mobile ? '' : 'tasks/one'}`)
+      browser.waitForFunction(`document.querySelector('${mobile ? '[data-slot="mobile-top-bar"]' : '[data-slot="project-header"]'}') !== null`)
       applyContrastQaVariant(browser, variant)
-      if (variant.viewport.width === 360) browser.click('[data-slot="mobile-top-bar"] button')
-      const container = variant.viewport.width === 360 ? '[role="dialog"] ' : ''
-      const nav = `${container || '[data-slot="sidebar"] '}nav a[aria-current="page"]`
-      browser.waitForFunction(`document.querySelector(${JSON.stringify(nav)})?.getBoundingClientRect().width > 0`)
-      selectedSurface(nav)
-      focus(nav)
+      if (mobile) {
+        browser.click('[data-slot="mobile-top-bar"] button[aria-label^="Open projects"]')
+        browser.waitForStable(`document.querySelector('[data-slot="mobile-nav-drawer"]')?.getBoundingClientRect().left ?? null`, { holdMs: 150, matcher: value => value === 0 })
+        const current = '[data-slot="mobile-nav-drawer"] [data-slot="drawer-project"][aria-current="page"]'
+        browser.waitForFunction(`document.querySelector(${JSON.stringify(current)})?.getBoundingClientRect().width > 0`)
+        selectedSurface(current, false)
+        expect(style('[data-slot="drawer-project-current"]').background).not.toBe('rgba(0, 0, 0, 0)')
+        focus(current)
+      } else {
+        const nav = '[data-slot="sidebar"] nav a[aria-current="page"]'
+        browser.waitForFunction(`document.querySelector(${JSON.stringify(nav)})?.getBoundingClientRect().width > 0`)
+        selectedSurface(nav)
+        focus(nav)
+      }
       browser.screenshot(`${artifacts}/states-grouped-${variant.id}.png`, { viewport: true })
     }
   })

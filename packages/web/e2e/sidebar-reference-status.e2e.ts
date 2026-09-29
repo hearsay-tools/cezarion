@@ -163,23 +163,24 @@ describe('sidebar reference status (#677)', () => {
     browser.waitForFunction(`document.querySelector('[data-slot="reference-status-card"]') === null`)
   })
 
-  it('360px inert rows retain status while the task header keeps full chips', () => {
+  it('touch-pointer inert rows retain status while the 360px task header keeps full chips', () => {
     browser.close()
     if (originalArgs === undefined) delete process.env.AGENT_BROWSER_ARGS
     else process.env.AGENT_BROWSER_ARGS = originalArgs
     browser = AgentBrowser.open(`sidebar-reference-touch-${process.pid}`)
     browser.goto(base)
     mockForge()
-    browser.setViewport(360, 640)
+    // The inert row is a `hover: none` affordance, not a width one. The phone drawer no longer
+    // holds the quick list (#621), so the rows are measured in the desktop sidebar of this
+    // hover-less browser; the 360px half of the test is the task header below.
+    browser.setViewport(1440, 900)
     browser.setReducedMotion()
     for (const theme of ['dark', 'light']) {
       browser.evaluate(`localStorage.setItem('cez-theme', ${JSON.stringify(theme)})`)
       browser.goto(`${base}/p/${project}`)
-      browser.click('[aria-label^="Open projects"]')
       expect(browser.waitForValue(`matchMedia('(hover: none)').matches`)).toBe(true)
-      browser.waitForFunction(`document.querySelector('[data-slot="mobile-nav-drawer"]')?.getBoundingClientRect().x === 0`)
       for (const status of cases) {
-        const selector = `[data-slot="mobile-nav-drawer"] ${chip(status)}`
+        const selector = `[data-slot="sidebar"] ${chip(status)}`
         const inert = browser.waitForValue(`(() => {
           const el = document.querySelector(${JSON.stringify(selector)})
           if (!el?.querySelector('svg')) return null
@@ -190,12 +191,13 @@ describe('sidebar reference status (#677)', () => {
         expect(inert.rowHeight).toBeGreaterThanOrEqual(44)
         expect(inert.tone).not.toContain('text-accent')
       }
-      expect(browser.waitForValue(`getComputedStyle(document.querySelector('[data-slot="mobile-nav-drawer"] ${chip('checks-pending')} svg')).animationName`)).toBe('none')
-      browser.screenshot(join(artifacts, `${theme}-360-inert.png`), { viewport: true })
-      browser.evaluate(`document.querySelector('[data-slot="mobile-nav-drawer"] ${chip('conflict')}').scrollIntoView({ block: 'center' })`)
-      browser.waitForFunction(`document.querySelector('[data-slot="mobile-nav-drawer"] ${chip('conflict')}').getBoundingClientRect().bottom < innerHeight`)
-      browser.screenshot(join(artifacts, `${theme}-360-conflict.png`), { viewport: true })
+      expect(browser.waitForValue(`getComputedStyle(document.querySelector('[data-slot="sidebar"] ${chip('checks-pending')} svg')).animationName`)).toBe('none')
+      browser.screenshot(join(artifacts, `${theme}-touch-inert.png`), { viewport: true })
+      browser.evaluate(`document.querySelector('[data-slot="sidebar"] ${chip('conflict')}').scrollIntoView({ block: 'center' })`)
+      browser.waitForFunction(`document.querySelector('[data-slot="sidebar"] ${chip('conflict')}').getBoundingClientRect().bottom < innerHeight`)
+      browser.screenshot(join(artifacts, `${theme}-touch-conflict.png`), { viewport: true })
     }
+    browser.setViewport(360, 640)
     browser.goto(`${base}/p/${project}/tasks/ref-conflict`)
     browser.waitForFunction(`document.querySelector('[aria-label="Show run details"]') !== null`)
     browser.evaluate(`document.querySelector('[aria-label="Show run details"]').focus()`)

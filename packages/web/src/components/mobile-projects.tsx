@@ -74,7 +74,9 @@ export function DrawerIdentity({ version }: { version: string | null }) {
     <div data-slot="drawer-identity" className="flex shrink-0 items-center gap-[12px] border-b border-border pt-[env(safe-area-inset-top)] pr-[14px] pb-[14px] pl-[18px]">
       <img src={`/cezarion-mark-${resolvedTheme}.svg`} alt="" aria-hidden="true" className="mt-[14px] size-[32px] rounded-lg" />
       <span className="mt-[14px] text-[18px] leading-none font-bold tracking-[-0.02em] text-foreground">Cezarion</span>
-      {version ? <span data-slot="drawer-version" className="mt-[14px] text-[11px] leading-none text-soft-foreground">v{version}</span> : null}
+      {/* A nightly or preview build's version is long: it truncates (full text on hover) instead of
+          pushing the Close button out of the row. */}
+      {version ? <span data-slot="drawer-version" title={`v${version}`} className="mt-[14px] min-w-0 truncate text-[11px] leading-none text-soft-foreground">v{version}</span> : null}
       <SheetClose asChild>
         {/* 44px, not the mock's 40: the spec's mobile touch-target floor wins. */}
         <Button variant="ghost" size="icon" aria-label="Close menu" className="mt-[14px] ml-auto size-[44px] text-foreground">
@@ -142,9 +144,10 @@ function DrawerProjectRow({ project, signal, known, truncated, current, onNaviga
       data-project-id={project.id}
       aria-current={current ? 'page' : undefined}
       className={cn(
-        'flex h-[64px] min-w-0 flex-1 items-center gap-[12px] rounded-[10px] px-[10px] text-foreground hover:bg-sidebar-row-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
+        'flex h-[64px] min-w-0 items-center gap-[12px] rounded-[10px] px-[10px] text-foreground hover:bg-sidebar-row-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
         // With the menu button beside it the row's fill moves to the wrapper, so it runs under both.
-        current && 'hover:bg-sidebar-row-selected',
+        // `flex-1` only there: in the plain rows' column it would shrink the 64px height to content.
+        current && 'flex-1 hover:bg-sidebar-row-selected',
       )}
     >
       <span

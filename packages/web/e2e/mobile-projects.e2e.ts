@@ -148,10 +148,11 @@ describe('mobile top bar and project drawer', () => {
           order, rows, current: root.querySelectorAll('[data-slot="drawer-project"][aria-current="page"]').length,
           width: root.getBoundingClientRect().width, globalBottom: global.bottom, viewport: innerHeight,
           close: [close.width, close.height, close.right <= root.getBoundingClientRect().right],
-          globalRows: [...root.querySelectorAll('[data-slot="drawer-global"] a, [data-slot="drawer-global"] button')].map((row) => row.getBoundingClientRect().height),
+          globalRows: [...root.querySelectorAll('[data-slot="drawer-global"] a, [data-slot="drawer-global"] button')].map((row) => [row.getAttribute('data-slot'), row.getBoundingClientRect().height]),
         }
-      })()`) as { order: string[]; rows: number[]; current: number; width: number; globalBottom: number; viewport: number; close: [number, number, boolean]; globalRows: number[] }
-      expect(drawer.order).toEqual(['drawer-identity', 'drawer-projects', 'sidebar-content', 'drawer-global'])
+      })()`) as { order: string[]; rows: number[]; current: number; width: number; globalBottom: number; viewport: number; close: [number, number, boolean]; globalRows: [string, number][] }
+      // The drawer is projects only since #621: no `sidebar-content` (nav, quick list, New task) between them.
+      expect(drawer.order).toEqual(['drawer-identity', 'drawer-projects', 'drawer-global'])
       expect(drawer.rows.length).toBe(2)
       for (const height of drawer.rows) expect(height).toBe(64)
       expect(drawer.current).toBe(1)
@@ -160,7 +161,11 @@ describe('mobile top bar and project drawer', () => {
       expect(drawer.close[0]).toBeGreaterThanOrEqual(44)
       expect(drawer.close[1]).toBeGreaterThanOrEqual(44)
       expect(drawer.close[2]).toBe(true)
-      for (const height of drawer.globalRows) expect(height).toBe(48)
+      // The Tools row grows past 48 when it carries the forge note as a second line; every other row is 48.
+      for (const [slot, height] of drawer.globalRows) {
+        if (slot === 'drawer-tools') expect(height).toBeGreaterThanOrEqual(48)
+        else expect(height).toBe(48)
+      }
 
       const other = browser.evaluate(`(() => {
         const row = document.querySelector('${DRAWER} [data-slot="drawer-project"][data-project-id="${OTHER.id}"]')

@@ -187,6 +187,13 @@ describe('mobile drawer', () => {
 
     expect(rows().map((row) => row.getAttribute('data-project-id'))).toEqual(PROJECTS.map((entry) => entry.id))
     for (const row of rows()) expect(row.className).toContain('h-[64px]')
+    // `flex-1` belongs to the current row alone (beside its `…`): on the plain rows, in a flex
+    // column, it collapsed the 64px height to 40px in a real browser.
+    expect(rows().filter((row) => row.className.includes('flex-1')).map((row) => row.getAttribute('aria-current'))).toEqual(['page'])
+    // A long nightly version truncates instead of pushing Close out of the identity row.
+    const version = identity.querySelector('[data-slot="drawer-version"]') as HTMLElement
+    expect(version.className).toContain('truncate')
+    expect(version.getAttribute('title')).toBe('v0.14.9')
 
     const order = [...drawer().querySelectorAll('[data-slot="drawer-identity"], [data-slot="drawer-projects"], [data-slot="drawer-workspace"], [data-slot="drawer-global"]')].map((el) => el.getAttribute('data-slot'))
     expect(order).toEqual(['drawer-identity', 'drawer-projects', 'drawer-workspace', 'drawer-global'])
