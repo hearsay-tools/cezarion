@@ -80,10 +80,17 @@ export function TaskQuickList({
 
   return (
     <div data-slot="quick-list">
+      <div data-slot="quick-list-header" className="flex min-h-11 items-center gap-1.5 pr-[6px] pl-[10px] md:min-h-[26px]">
+        <h2 className="text-[13px] font-semibold text-foreground">Tasks</h2>
+        <span className="text-[11.5px] text-soft-foreground">{counts[view]}</span>
+        <Link to="/" className="ml-auto flex min-h-11 items-center gap-0.5 text-[12px] text-soft-foreground hover:text-foreground md:min-h-[26px]">
+          All<ChevronRightIcon className="size-[13px]" aria-hidden="true" />
+        </Link>
+      </div>
       {/* Sticky, not scrolled away: the tabs say what you are looking at, and a long Recent list
           must not be able to hide that the view is filtered. */}
       {showViewControls ? <div className="sticky top-0 z-10 bg-sidebar pt-2 pb-1">
-        <div className="inline-flex w-full gap-0.5 rounded-md bg-muted p-[3px]">
+        <div className="inline-flex w-full gap-0.5 rounded-md bg-muted p-[2px]">
           <ViewTab view="active" current={view} onSelect={onViewChange} count={counts.active}>
             Active
             {/* The one reason to look at a tab you are not on. */}
@@ -151,20 +158,14 @@ export function QuickListBuckets({
       return next
     })
 
-  // Sidebar organization is pin-based; the state remains on each row's independent dot.
-  const sidebarBuckets: QuickListBucket[] = []
-  for (const label of ['Pinned', 'Recent', 'Archived'] as const) {
-    const rows = buckets.filter(bucket => label === 'Recent' ? bucket.label !== 'Pinned' && bucket.label !== 'Archived' : bucket.label === label).flatMap(bucket => bucket.rows)
-    if (rows.length) sidebarBuckets.push({ label, rows })
-  }
   const renderRow = (row: QuickListRow) => <Row row={row} currentRunId={currentRunId} currentGroupId={currentGroupId} now={now} scope={scope} showTokens={showTokens} showCost={showCost} expanded={row.kind === 'group' && expanded.has(row.groupId)} onToggle={toggleGroup} onTogglePin={onTogglePin} />
 
   return (
-    <>
-      {sidebarBuckets.map((bucket) => (
+    <div className="flex flex-col gap-3">
+      {buckets.map((bucket) => (
         <div key={bucket.label} data-slot="quick-list-bucket" data-bucket={bucket.label}>
-          <h2 className="pl-9 pt-3 pb-2 text-[11px] font-medium tracking-[0.14em] text-soft-foreground uppercase">
-            {bucket.label}
+          <h2 className="px-[10px] pt-[2px] pb-[4px] text-[11px] font-medium text-soft-foreground">
+            {bucket.label}{' '}<span className="text-[11px] font-normal tabular-nums">{bucket.rows.length}</span>
           </h2>
           {bucket.rows.map((row) => (
             <div key={row.kind === 'group' ? row.groupId : row.run.id}>
@@ -173,7 +174,7 @@ export function QuickListBuckets({
           ))}
         </div>
       ))}
-    </>
+    </div>
   )
 }
 
@@ -201,7 +202,7 @@ function ViewTab({
       aria-pressed={isActive}
       onClick={() => onSelect(view)}
       className={cn(
-        'flex min-h-11 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-[7px] text-[11px] font-medium text-muted-foreground md:min-h-[30px]',
+        'flex min-h-11 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-[7px] text-[11px] font-medium text-muted-foreground md:min-h-[22px]',
         isActive && 'bg-card font-semibold text-foreground shadow-xs'
       )}
     >
