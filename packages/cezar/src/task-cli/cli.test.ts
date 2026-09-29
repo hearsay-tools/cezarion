@@ -526,7 +526,7 @@ describe('cez task', () => {
       },
     );
 
-    it.each([[['list', '--limit', '0']], [['list', '--status', 'nope']], [['wait', 'x', '--mode', 'some']], [['log', 'x', '--since', '-1']], [['log', 'x', '--max-chars', '0']], [['start', 'x', '--wait', '--timeout-seconds', '0']]])(
+    it.each([[['list', '--limit', '0']], [['list', '--status', 'nope']], [['wait', 'x', '--mode', 'some']], [['log', 'x', '--since', '-1']], [['log', 'x', '--max-chars', '0']], [['start', 'x', '--wait', '--timeout-seconds', '0']], [['start', 'x', '--until', 'settled']], [['start', 'x', '--wait', '--until', 'later']]])(
       'judges %j as a usage error before looking for a cockpit', async (argv) => {
         expect(await run(argv)).toBe(64);
         expect(discoveries).toBe(0);

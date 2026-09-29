@@ -324,6 +324,7 @@ function validateFlags(name: string, values: Values): void {
     if (values.skill !== undefined && values.workflow !== undefined) usageError('--skill and --workflow cannot be used together');
     if (typeof values.skill === 'string' && !values.skill.trim()) usageError('--skill must name a skill');
     if (values.notify && values['no-notify']) usageError('--notify and --no-notify cannot be used together');
+    if (values.until !== undefined && !values.wait) usageError('--until needs --wait');
   }
   if (name === 'notify') {
     if (values.message !== undefined && values['message-file'] !== undefined) usageError('notify takes the note as --message or --message-file, not both');
