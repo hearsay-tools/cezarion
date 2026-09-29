@@ -136,7 +136,13 @@ function checkNavSelection(variant: ContrastQaVariant, { base, projectId, nav: n
     browser.waitForFunction(`document.querySelector('[data-slot="mobile-top-bar"]') !== null`)
     applyContrastQaVariant(browser, variant)
     browser.moveTo(0, 0)
-    if (mobile) browser.click('[data-slot="mobile-top-bar"] button')
+    if (mobile) {
+      browser.click('[data-slot="mobile-top-bar"] button')
+      // Reproduction: selection-states-reproduction.md (2026-09-29 mobile ultra hover).
+      // The compact row is ready before the drawer finishes sliding; sample pointer
+      // coordinates only once its frame has settled.
+      browser.waitForStable(`document.querySelector('[data-slot="mobile-nav-drawer"]')?.getBoundingClientRect().left ?? null`, { holdMs: 150, matcher: value => value === 0 })
+    }
     browser.waitForFunction(`document.querySelector(${JSON.stringify(container + ready)})?.getBoundingClientRect().width > 0`)
   }
   const record = (target: string, state: string, min: number, property = 'color', source: 'element' | 'parent' = 'element') => {
@@ -153,7 +159,7 @@ function checkNavSelection(variant: ContrastQaVariant, { base, projectId, nav: n
     scopes: [{ scope: 'project', status: 'available', available: true, skills: ['om-review'], checkedAt: new Date().toISOString(), updatedAt: null }] })
   try {
     checkNavBody(variant, { base, projectId, container, navSelector, fill, amber, open, record })
-    checkFlatNavUnread(variant, { base, projectId, container, open, record })
+    checkNeedsYouDot(variant, { base, projectId, container, open, record })
   } finally {
     browser.unroute(skillsRoute)
   }
@@ -173,34 +179,30 @@ function checkNavBody(variant: ContrastQaVariant, { base, projectId, container, 
   const tasksNav = `${nav} a[aria-current="page"]`
   const taskRow = `${container}[data-slot="task-row"][data-run-id="one"][data-active="true"]`
   type Facts = { tasks: string; row: string; label: string; icon: string; weight: string; ink: string
-    height: number; inbox: { bg: string; color: string; text: string } | null }
+    height: number }
   // One expression, polled whole (#409): the state checked is the state read.
   const facts = `(() => {
     const q = (sel) => document.querySelector(sel), cs = (sel) => getComputedStyle(q(sel))
     ${resolveFn}
-    const inboxEl = q(${JSON.stringify(`${nav} [data-slot="nav-badge"]`)})
     return { tasks: cs(${JSON.stringify(tasksNav)}).backgroundColor, row: q(${JSON.stringify(taskRow)}) ? cs(${JSON.stringify(taskRow)}).backgroundColor : '',
       label: cs(${JSON.stringify(tasksNav)}).color, icon: cs(${JSON.stringify(`${tasksNav} svg`)}).color,
       weight: cs(${JSON.stringify(tasksNav)}).fontWeight, ink: resolve('var(--foreground)'),
-      height: q(${JSON.stringify(tasksNav)}).getBoundingClientRect().height,
-      inbox: inboxEl && { bg: getComputedStyle(inboxEl).backgroundColor, color: getComputedStyle(inboxEl).color, text: inboxEl.textContent } }
+      height: q(${JSON.stringify(tasksNav)}).getBoundingClientRect().height }
   })()`
   open('/tasks/one', '[data-slot="task-row"][data-run-id="one"][data-active="true"]')
   // Waited, not sampled: the inbox count lands from its own query.
-  const f = browser.waitForValue(facts, (v: Facts | null) => v !== null && v.inbox?.text === '2' && v.tasks === fill.selected) as Facts
+  const f = browser.waitForValue(facts, (v: Facts | null) => v !== null && v.tasks === fill.selected) as Facts
   expect({ tasks: f.tasks, row: f.row }).toEqual({ tasks: fill.selected, row: fill.selected })
-  expect({ label: f.label, icon: f.icon, weight: f.weight }).toEqual({ label: f.ink, icon: f.ink, weight: '500' })
-  expect({ bg: f.inbox?.bg, color: f.inbox?.color }).toEqual({ bg: amber.fill, color: amber.ink })
+  expect({ label: f.label, icon: f.icon, weight: f.weight }).toEqual({ label: f.ink, icon: f.ink, weight: '600' })
   // Below 48rem the unlayered floor keeps `nav a` at 44px in every density.
   if (mobile) expect(f.height).toBeGreaterThanOrEqual(44)
   record(tasksNav, 'selected nav label', 4.5)
   record(`${tasksNav} svg`, 'selected nav icon', 3)
-  record(`${nav} [data-slot="nav-badge"]`, 'inbox-count number', 4.5)
 
   // The skills update marker, rendered by the real nav from the stubbed skills-update route: a
-  // 6px --info dot, 3:1 against the row it sits on — at rest here, then hovered and selected.
+  // 7px --info dot, 3:1 against the row it sits on — at rest here, then hovered and selected.
   const skills = `${nav} a[href$="/skills"]`
-  const dot = `${skills} [data-slot="nav-update-marker"] > span[aria-hidden]`
+  const dot = `${skills} [data-slot="nav-update-marker"]`
   type Marker = { width: number; height: number; bg: string; info: string; row: string }
   const marker = `(() => {
     const el = document.querySelector(${JSON.stringify(dot)}); if (!el || el.getBoundingClientRect().width === 0) return null
@@ -211,7 +213,7 @@ function checkNavBody(variant: ContrastQaVariant, { base, projectId, container, 
   })()`
   const atRest = browser.waitForValue(marker) as Marker
   expect({ width: atRest.width, height: atRest.height, bg: atRest.bg, row: atRest.row })
-    .toEqual({ width: 6, height: 6, bg: atRest.info, row: 'rgba(0, 0, 0, 0)' })
+    .toEqual({ width: 7, height: 7, bg: atRest.info, row: 'rgba(0, 0, 0, 0)' })
   record(dot, 'update marker at rest', 3, 'background-color', 'parent')
 
   // Hover, any nav item: the neutral row hover, with foreground label and icon (and the marker
@@ -235,8 +237,25 @@ function checkNavBody(variant: ContrastQaVariant, { base, projectId, container, 
   // Selected: the Skills page lights its own row, marker and all.
   open('/skills', '[data-slot="nav-update-marker"]')
   const onSelected = browser.waitForValue(marker, (v: Marker | null) => v !== null && v.row === fill.selected) as Marker
-  expect({ width: onSelected.width, height: onSelected.height, bg: onSelected.bg }).toEqual({ width: 6, height: 6, bg: onSelected.info })
+  expect({ width: onSelected.width, height: onSelected.height, bg: onSelected.bg }).toEqual({ width: 7, height: 7, bg: onSelected.info })
   record(dot, 'update marker on the selected row', 3, 'background-color', 'parent')
+
+  open('/inbox', '[aria-label="More views"]')
+  const more = `${nav} [aria-label="More views"]`
+  const selectedMore = browser.waitForValue(ink(more), (v: Ink | null) => v !== null && v.bg === fill.selected) as Ink
+  expect(selectedMore.icon).toBe(selectedMore.ink)
+  expect(browser.count(`${nav} a[aria-current="page"]`)).toBe(0)
+  expect(browser.count(`${more} [data-slot="overflow-inbox-dot"]`)).toBe(1)
+  browser.click(more)
+  const badge = '[role="menu"] [data-slot="inbox-count"]'
+  const inbox = browser.waitForValue(`(() => {
+    const el = document.querySelector('${badge}'); if (!el) return null
+    return { text: el.textContent, bg: getComputedStyle(el).backgroundColor, color: getComputedStyle(el).color }
+  })()`, (v: { text: string } | null) => v?.text === '2')
+  expect(inbox).toEqual({ text: '2', bg: amber.fill, color: amber.ink })
+  record(badge, 'inbox-count number', 4.5)
+  browser.press('Escape')
+  browser.waitForFunction(`document.querySelector('[role="menu"]') === null && document.activeElement === document.querySelector(${JSON.stringify(more)})`)
 
   // New task on /new: the same fill as the selected nav item and the selected task row.
   const newTask = `${container}[data-sidebar-item="new-task"]`
@@ -250,51 +269,30 @@ function checkNavBody(variant: ContrastQaVariant, { base, projectId, container, 
   if (!mobile) {
     browser.goto(`${base}/settings/global`)
     applyContrastQaVariant(browser, variant)
-    const gear = '[data-slot="global-settings-link"][aria-current="page"]'
+    const gear = '[data-slot="rail-global-settings"][aria-current="page"]'
     const footer = browser.waitForValue(ink(gear), (v: Ink | null) => v !== null && v.bg === fill.selected) as Ink
-    expect({ width: footer.width, height: footer.height, icon: footer.icon }).toEqual({ width: 36, height: 36, icon: footer.ink })
+    const railControlSize = variant.density === 'ultra' ? 27 : 36
+    expect({ width: footer.width, height: footer.height, icon: footer.icon }).toEqual({ width: railControlSize, height: railControlSize, icon: footer.ink })
     record(`${gear} svg`, 'active footer icon', 3)
   }
 }
 
-/*
- * tasks-unread lives only in the flat nav, which the shell renders while the project registry is
- * empty (app-shell-container.tsx). The registry route is stubbed empty for this part only; the
- * runs come from the fixture's real runs.json, where `fin` is an unseen finished run.
- */
-function checkFlatNavUnread(variant: ContrastQaVariant, { base, projectId, container, open, record }: {
+/** Attention belongs to the Tasks icon only while a different project view is active. */
+function checkNeedsYouDot(_variant: ContrastQaVariant, { container, open, record }: {
   base: string; projectId: string; container: string; open: Open; record: Record_
 }): void {
-  const projectsRoute = '**/api/v1/projects'
-  browser.routeJson(projectsRoute, { projects: [], bootProject: projectId, projectsDir: '/tmp' })
-  try {
-    const nav = `${container}[data-slot="single-project-navigation"] nav[aria-label="Main"]`
-    const chip = `${nav} [data-slot="nav-unread-badge"]`
-    type Chip = { bg: string; color: string; size: string; weight: string; padding: string; radius: string; text: string
-      ink: string; muted: string; sidebar: string; selected: boolean }
-    const facts = `(() => {
-      const el = document.querySelector(${JSON.stringify(chip)}); if (!el || el.getBoundingClientRect().width === 0) return null
-      ${resolveFn}
-      const s = getComputedStyle(el)
-      return { bg: s.backgroundColor, color: s.color, size: s.fontSize, weight: s.fontWeight, padding: s.padding, radius: s.borderRadius,
-        text: el.textContent, ink: resolve('var(--foreground)'), muted: resolve('var(--muted)'), sidebar: resolve('var(--sidebar)'),
-        selected: el.closest('a')?.getAttribute('aria-current') === 'page' }
-    })()`
-    const shape = { size: '11px', weight: '600', padding: '1px 6px', radius: '9px', text: '1' }
-    const pick = (c: Chip) => ({ bg: c.bg, color: c.color, size: c.size, weight: c.weight, padding: c.padding, radius: c.radius, text: c.text })
-    // Tasks selected (its area owns /tasks/:id): the chip takes --sidebar on the selected fill.
-    open('/tasks/one', '[data-slot="single-project-navigation"] [data-slot="nav-unread-badge"]')
-    const onSelected = browser.waitForValue(facts, (v: Chip | null) => v !== null && v.selected) as Chip
-    expect(pick(onSelected)).toEqual({ ...shape, bg: onSelected.sidebar, color: onSelected.ink })
-    record(chip, 'tasks-unread number on the selected row', 4.5)
-    // Tasks at rest (Git is the page): the neutral --muted chip.
-    open('/git', '[data-slot="single-project-navigation"] [data-slot="nav-unread-badge"]')
-    const atRest = browser.waitForValue(facts, (v: Chip | null) => v !== null && !v.selected) as Chip
-    expect(pick(atRest)).toEqual({ ...shape, bg: atRest.muted, color: atRest.ink })
-    record(chip, 'tasks-unread number at rest', 4.5)
-  } finally {
-    browser.unroute(projectsRoute)
-  }
+  const dot = `${container}[data-slot="view-tabs"] [data-slot="nav-needs-you-dot"]`
+  open('/git', '[data-slot="nav-needs-you-dot"]')
+  const facts = browser.waitForValue(`(() => {
+    const el = document.querySelector(${JSON.stringify(dot)}); if (!el) return null
+    ${resolveFn}
+    const r = el.getBoundingClientRect(), s = getComputedStyle(el)
+    return { width: r.width, height: r.height, bg: s.backgroundColor, pending: resolve('var(--pending-strong)') }
+  })()`) as { width: number; height: number; bg: string; pending: string }
+  expect({ width: facts.width, height: facts.height, bg: facts.bg }).toEqual({ width: 7, height: 7, bg: facts.pending })
+  record(dot, 'needs-you marker on inactive Tasks', 3, 'background-color', 'parent')
+  open('/tasks/one', '[data-slot="task-row"][data-run-id="one"][data-active="true"]')
+  expect(browser.waitForValue(`document.querySelector(${JSON.stringify(dot)}) === null`)).toBe(true)
 }
 
 describe('selection and control states (#171)', () => {
@@ -412,9 +410,9 @@ describe('selection and control states (#171)', () => {
       browser.screenshot(`${artifacts}/states-sidebar-row-${variant.id}.png`, { viewport: true })
     })
 
-    // #617 addendum 01c, in the default grouped navigation (see checkNavSelection).
-    it(`${variant.id}: grouped nav items share the task row's selection, and badges follow their meaning (#617 01c)`, () => {
-      checkNavSelection(variant, { base: baseUrl, projectId: project, nav: '[data-slot="project-group-body"] nav' })
+    // #617 addendum 01c, in the project view tabs (see checkNavSelection).
+    it(`${variant.id}: view tabs share the task row's selection, and badges follow their meaning (#617 01c)`, () => {
+      checkNavSelection(variant, { base: baseUrl, projectId: project, nav: '[data-slot="view-tabs"]' })
     })
 
     if (variant.id === 'desktop-dark-comfortable') it(`${variant.id}: the group row's shared reference is a link with the status panel (#617)`, () => {
@@ -504,7 +502,7 @@ describe('selection and control states (#171)', () => {
     expectGroupRowHeightMatchesTaskRow(browser, { url: `${baseUrl}/p/${project}/tasks/one`, groupId: 'g-sel', widths: [1440, 520, 390] })
   })
 
-  it('keeps the same selection cue in the grouped project navigation', () => {
+  it('keeps the same selection cue in the multi-project navigation', () => {
     const configPath = join(root, '.cez-home/config.json')
     const config = JSON.parse(readFileSync(configPath, 'utf8'))
     const sibling = join(root, 'sibling')
@@ -516,7 +514,7 @@ describe('selection and control states (#171)', () => {
       variantId = variant.id
       browser.setViewport(variant.viewport.width, variant.viewport.height)
       browser.goto(`${baseUrl}/p/${project}/tasks/one`)
-      browser.waitForFunction(`document.querySelector('[data-slot="project-group-header"]') !== null`)
+      browser.waitForFunction(`document.querySelector('[data-slot="project-header"]') !== null`)
       applyContrastQaVariant(browser, variant)
       if (variant.viewport.width === 360) browser.click('[data-slot="mobile-top-bar"] button')
       const container = variant.viewport.width === 360 ? '[role="dialog"] ' : ''

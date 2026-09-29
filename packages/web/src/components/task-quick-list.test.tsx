@@ -84,15 +84,18 @@ describe('TaskQuickList', () => {
   it('renders the buckets in the mockup order with their runs', () => {
     renderList({
       runs: [
-        run({ id: 'a', title: 'Structured changes endpoint', status: 'review' }),
+        run({ id: 'a', title: 'Structured changes endpoint', status: 'review', pinned: true }),
+        run({ id: 'pin', title: 'Kept', pinned: true }),
         run({ id: 'b', title: 'Normalize agent-event protocol', status: 'running' }),
         run({ id: 'c', title: 'README parallel-agents tagline', status: 'done' }),
       ],
     })
 
     const headers = [...document.querySelectorAll('[data-slot="quick-list-bucket"] h2')].map((h) => h.textContent)
-    expect(headers).toEqual(['Recent'])
-    expect(rowsIn('Recent')).toEqual(['Structured changes endpointneeds review · 1m', 'Normalize agent-event protocolrunning · 1m', 'README parallel-agents tagline1m'])
+    expect(headers).toEqual(['Needs you 1', 'Pinned 1', 'Working 1', 'Recent 1'])
+    expect(rowsIn('Needs you')).toEqual(['Structured changes endpointneeds review · 1m'])
+    expect(rowsIn('Working')).toEqual(['Normalize agent-event protocolrunning · 1m'])
+    expect(rowsIn('Recent')).toEqual(['README parallel-agents tagline1m'])
   })
 
   it('links every row to its task', () => {
@@ -309,7 +312,7 @@ describe('TaskQuickList', () => {
         runs: [run({ id: 'x', title: 'Has a PR', status: 'review', pullRequestUrl: 'https://github.com/o/r/pull/7' })],
       })
       // Title on line one; state word, reference and age on line two.
-      expect(rowsIn('Recent')).toEqual(['Has a PRneeds review · PR #7 · 1m'])
+      expect(rowsIn('Needs you')).toEqual(['Has a PRneeds review · PR #7 · 1m'])
     })
 
     it('carries the issue when no PR exists yet — the number the title prefix was about', () => {
@@ -600,7 +603,7 @@ describe('TaskQuickList', () => {
   })
 
   describe('the pin (#935)', () => {
-    it('renders pinned runs under a Pinned header at the top, once', () => {
+    it('renders pinned runs under a Pinned header after Needs you, once', () => {
       renderList({
         runs: [
           run({ id: 'waiting', title: 'Wants you', status: 'waiting' }),
@@ -609,10 +612,10 @@ describe('TaskQuickList', () => {
         onTogglePin: vi.fn(),
       })
       const headers = [...document.querySelectorAll('[data-slot="quick-list-bucket"] h2')].map((h) => h.textContent)
-      expect(headers).toEqual(['Pinned', 'Recent'])
+      expect(headers).toEqual(['Needs you 1', 'Pinned 1'])
       expect(rowsIn('Pinned')).toHaveLength(1)
       expect(bucket('Pinned').querySelector('[data-run-id="kept"]')).not.toBeNull()
-      expect(bucket('Recent').querySelector('[data-run-id="kept"]')).toBeNull()
+      expect(bucket('Needs you').querySelector('[data-run-id="kept"]')).toBeNull()
     })
 
     it('offers Pin on an ordinary row and Unpin on a pinned one, reporting the state asked for', () => {
@@ -815,6 +818,17 @@ describe('TaskQuickListContainer', () => {
     await waitFor(() =>
       expect(sent).toEqual([{ path: '/api/v1/runs/live/pin', body: { pinned: true } }]),
     )
+  })
+
+  it('caps sidebar history at ten rows while retaining every pinned task', async () => {
+    renderContainer([
+      ...Array.from({ length: 14 }, (_, i) => run({ id: `recent-${i}`, title: `Recent ${i}`, status: 'done' })),
+      run({ id: 'pinned', title: 'Pinned history', status: 'done', pinned: true }),
+      run({ id: 'attention-pin', title: 'Pinned attention', status: 'waiting', pinned: true }),
+    ])
+    await screen.findByText('Pinned history')
+    expect(document.querySelectorAll('[data-slot="task-row"]')).toHaveLength(12)
+    expect(screen.getByText('Pinned attention')).toBeTruthy()
   })
 
   it('drives the sidebar Active/Archived view', async () => {
@@ -1517,3 +1531,15 @@ function stubMedia({ noHover, desktop }: { noHover: boolean; desktop: boolean })
     addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false,
   }))
 }
+
+it('shows the selected view count and a project-scoped All link above retained view controls', () => {
+  const { onViewChange } = renderList({ runs: [run(), run({ archived: true }), run({ archived: true })], view: 'archived' }, '/p/project/tasks/task')
+  const header = document.querySelector('[data-slot="quick-list-header"]') as HTMLElement
+  expect(header).not.toBeNull()
+  expect(header.textContent).toBe('Tasks2All')
+  expect(within(header).getByRole('link', { name: 'All' }).getAttribute('href')).toBe('/p/project/')
+  fireEvent.click(screen.getByRole('button', { name: /Active/ }))
+  expect(onViewChange).toHaveBeenCalledWith('active')
+  fireEvent.click(within(header).getByRole('link', { name: 'All' }))
+  expect(location()).toBe('/p/project/')
+})

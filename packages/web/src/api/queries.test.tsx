@@ -1375,3 +1375,85 @@ describe('GitHub list freshness (#152)', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 })
+
+describe('read receipts keep their invocation scope across navigation', () => {
+  afterEach(() => setApiScope(null))
+  const run = { id: 'same-id', status: 'done', finishedAt: '2026-09-01T00:00:00.000Z', tokensUsed: 1 }
+  const receipt = '2026-09-29T00:00:00.000Z'
+
+  it('keeps receipt callbacks stable for effects and preserves mutateAsync string callbacks', async () => {
+    const client = createQueryClient()
+    const { result, rerender } = renderHook(() => useMarkRunSeen('alpha', 'default'), {
+      wrapper: ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
+    })
+    const original = result.current.mutate
+    rerender()
+    expect(result.current.mutate).toBe(original)
+    const success = vi.fn()
+    fetchMock.mockResolvedValue(json({ ...run, seenAt: receipt }))
+    await act(async () => { await result.current.mutateAsync(run.id, { onSuccess: success }) })
+    expect(success.mock.calls[0]?.[1]).toBe('same-id')
+    await waitFor(() => expect(result.current.variables).toBe('same-id'))
+    expect(client.getQueryData(queryKeys.runs.detail(run.id, 'default'))).toEqual({ ...run, seenAt: receipt })
+  })
+
+  it.each([false, true])('freezes endpoint and caches before cancellation awaits (explicit=%s)', async (explicit) => {
+    const client = createQueryClient()
+    setApiScope('alpha-cache')
+    const list = queryKeys.runs.list()
+    const detail = queryKeys.runs.detail(run.id)
+    client.setQueryData(list, [run])
+    client.setQueryData(detail, run)
+    const gate = deferredResponse()
+    const cancel = vi.spyOn(client, 'cancelQueries').mockImplementationOnce(async () => { await gate.promise })
+    fetchMock.mockResolvedValue(json({ ...run, seenAt: receipt }))
+    setApiScope(explicit ? 'elsewhere' : 'alpha-cache')
+    const { result } = renderHook(() => useMarkRunSeen(explicit ? 'alpha' : undefined, explicit ? 'alpha-cache' : undefined), {
+      wrapper: ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
+    })
+    act(() => result.current.mutate(run.id))
+    // Switch even before onMutate's first await can finish.
+    setApiScope('beta')
+    client.setQueryData(queryKeys.runs.list(), [{ ...run, tokensUsed: 99 }])
+    client.setQueryData(queryKeys.runs.detail(run.id), { ...run, tokensUsed: 99 })
+    await waitFor(() => expect(cancel).toHaveBeenCalled())
+    await act(async () => gate.resolve(json({})))
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(`/api/v1/p/${explicit ? 'alpha' : 'alpha-cache'}/runs/same-id/read`)
+    expect(client.getQueryData(detail)).toEqual({ ...run, seenAt: receipt })
+    expect(client.getQueryData(list)).toEqual([{ ...run, seenAt: receipt }])
+    expect(client.getQueryData(queryKeys.runs.detail(run.id))).toEqual({ ...run, tokensUsed: 99 })
+    expect(client.getQueryData(queryKeys.runs.list())).toEqual([{ ...run, tokensUsed: 99 }])
+  })
+
+  it.each([false, true])('settles only the starting cache and preserves streamed fields (failure=%s)', async (failure) => {
+    const client = createQueryClient()
+    setApiScope('alpha')
+    const list = queryKeys.runs.list()
+    const detail = queryKeys.runs.detail(run.id)
+    client.setQueryData(list, [run])
+    client.setQueryData(detail, run)
+    client.setQueryData(workspaceQueryKeys.runsIndex, { runs: [] })
+    const response = deferredResponse()
+    fetchMock.mockReturnValue(response.promise)
+    const { result } = renderHook(() => useMarkRunSeen(), {
+      wrapper: ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
+    })
+    act(() => result.current.mutate(run.id))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce())
+    const streamed = { ...run, tokensUsed: 42, autoResumeAt: '2026-10-01T00:00:00.000Z' }
+    client.setQueryData(detail, { ...streamed, seenAt: 'optimistic' })
+    client.setQueryData(list, [{ ...streamed, seenAt: 'optimistic' }])
+    setApiScope('beta')
+    client.setQueryData(queryKeys.runs.detail(run.id), { ...run, tokensUsed: 99 })
+    client.setQueryData(queryKeys.runs.list(), [{ ...run, tokensUsed: 99 }])
+    await act(async () => response.resolve(failure ? new Response('{}', { status: 500 }) : json({ ...run, seenAt: receipt })))
+    await waitFor(() => expect(failure ? result.current.isError : result.current.isSuccess).toBe(true))
+    const expected = failure ? streamed : { ...streamed, seenAt: receipt }
+    expect(client.getQueryData(detail)).toEqual(expected)
+    expect(client.getQueryData(list)).toEqual([expected])
+    expect(client.getQueryData(queryKeys.runs.detail(run.id))).toEqual({ ...run, tokensUsed: 99 })
+    expect(client.getQueryData(queryKeys.runs.list())).toEqual([{ ...run, tokensUsed: 99 }])
+    if (!failure) expect(client.getQueryState(workspaceQueryKeys.runsIndex)?.isInvalidated).toBe(true)
+  })
+})

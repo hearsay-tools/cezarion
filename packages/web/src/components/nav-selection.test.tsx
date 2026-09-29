@@ -41,98 +41,60 @@ const classes = (el: Element | null | undefined) => (el?.getAttribute('class') ?
 const TEAL = /task-brand-selected|accent-(?:text|strong|icon)/
 const SELECTED = ['bg-sidebar-row-selected', 'text-foreground', 'font-medium']
 
-describe('sidebar nav selection (#617 01c)', () => {
-  it('fills a selected nav item like a selected task row, with foreground icon and label at 500', () => {
+describe('sidebar nav selection (#619)', () => {
+  it('shows a neutral active pill and accessible icon-only inactive links', () => {
     renderShell('/git')
-    const git = within(nav()).getByRole('link', { current: 'page' })
+    const git = within(nav()).getByRole('link', { name: 'Git' })
+    expect(git.getAttribute('aria-current')).toBe('page')
     expect(git.textContent).toBe('Git')
-    expect(classes(git)).toEqual(expect.arrayContaining([...SELECTED, 'hover:bg-sidebar-row-selected']))
-    expect(classes(git)).not.toContain('font-normal')
-    expect(classes(git.querySelector('svg'))).toContain('text-foreground')
-    expect(git.className).not.toMatch(TEAL)
-  })
-
-  it('keeps a default nav item muted at 400, and hovers every item onto the neutral hover fill', () => {
-    renderShell('/git')
-    for (const link of within(nav()).getAllByRole('link')) {
-      // A selected row keeps its selected fill under the pointer; every other row hovers neutral.
-      const fill = link.getAttribute('aria-current') ? 'hover:bg-sidebar-row-selected' : 'hover:bg-sidebar-row-hover'
-      expect(classes(link)).toEqual(expect.arrayContaining([fill, 'hover:text-foreground', 'group/nav']))
-      expect(classes(link.querySelector('svg'))).toContain('group-hover/nav:text-foreground')
-      expect(link.className).not.toMatch(TEAL)
-    }
+    expect(classes(git)).toEqual(expect.arrayContaining(['bg-sidebar-row-selected', 'text-foreground', 'font-semibold']))
     const skills = within(nav()).getByRole('link', { name: 'Skills' })
-    expect(classes(skills)).toEqual(expect.arrayContaining(['text-muted-foreground', 'font-normal']))
-    expect(classes(skills)).not.toContain('bg-sidebar-row-selected')
-    expect(classes(skills.querySelector('svg'))).toContain('text-soft-foreground')
+    expect(skills.textContent).toBe('')
+    expect(skills.className).toContain('text-soft-foreground')
+    for (const link of within(nav()).getAllByRole('link')) expect(link.className).not.toMatch(TEAL)
   })
 
-  it('selects New task on /new exactly like a nav item, and leaves it plain elsewhere', () => {
+  it('selects New task with the same neutral fill', () => {
     renderShell('/new')
-    const newTask = sidebar().querySelector('[data-sidebar-item="new-task"]') as HTMLElement
-    expect(newTask.getAttribute('aria-current')).toBe('page')
-    // Still a Button link: `a[data-slot='button']` is what holds the mobile 44px floor.
-    expect(newTask.getAttribute('data-slot')).toBe('button')
-    expect(classes(newTask)).toEqual(expect.arrayContaining([...SELECTED, 'hover:bg-sidebar-row-selected']))
-    expect(newTask.className).not.toMatch(TEAL)
-    cleanup()
-    renderShell('/git')
-    const plain = sidebar().querySelector('[data-sidebar-item="new-task"]') as HTMLElement
-    expect(plain.getAttribute('aria-current')).toBeNull()
-    expect(classes(plain)).not.toContain('bg-sidebar-row-selected')
-    expect(classes(plain)).toEqual(expect.arrayContaining(['hover:bg-sidebar-row-hover', 'hover:text-foreground']))
+    const item = sidebar().querySelector('[data-sidebar-item="new-task"]')!
+    expect(item.getAttribute('aria-current')).toBe('page')
+    expect(classes(item)).toEqual(expect.arrayContaining(SELECTED))
+    expect(item.className).not.toMatch(TEAL)
   })
 
-  it('draws tasks-unread as a neutral 11px/600 chip, on --sidebar when its row is selected', () => {
-    const shape = ['text-[11px]', 'font-semibold', 'px-[6px]', 'py-px', 'rounded-[9px]', 'text-foreground']
-    renderShell('/', { unreadCount: 2 })
-    const onSelected = sidebar().querySelector('[data-slot="nav-unread-badge"]')
-    expect(classes(onSelected)).toEqual(expect.arrayContaining([...shape, 'bg-sidebar']))
-    expect(classes(onSelected)).not.toContain('bg-muted')
+  it('shows attention only on the inactive Tasks tab', () => {
+    renderShell('/', { needsYou: true })
+    expect(sidebar().querySelector('[data-slot="nav-needs-you-dot"]')).toBeNull()
     cleanup()
-    renderShell('/git', { unreadCount: 2 })
-    const atRest = sidebar().querySelector('[data-slot="nav-unread-badge"]')
-    expect(classes(atRest)).toEqual(expect.arrayContaining([...shape, 'bg-muted']))
-    expect(atRest?.className).not.toMatch(/running|merged/)
-    expect(atRest?.className).not.toMatch(TEAL)
+    renderShell('/git', { needsYou: true })
+    expect(classes(sidebar().querySelector('[data-slot="nav-needs-you-dot"]'))).toEqual(expect.arrayContaining(['size-[7px]', 'bg-pending-strong']))
   })
 
-  it('draws the inbox count soft amber through its tokens, and the skills marker as a 6px --info dot', () => {
+  it('shows Inbox count in overflow and a Skills update dot', async () => {
     renderShell('/git', { inboxCount: 4, skillsUpdateAvailable: true })
-    const inbox = sidebar().querySelector('[data-slot="nav-badge"]')
-    expect(inbox?.textContent).toBe('4')
-    expect(classes(inbox)).toEqual(expect.arrayContaining(['bg-inbox-count', 'text-inbox-count-foreground', 'text-[11px]', 'font-semibold']))
-    expect(inbox?.className).not.toMatch(TEAL)
-    const dot = sidebar().querySelector('[data-slot="nav-update-marker"] > span[aria-hidden]')
-    expect(classes(dot)).toEqual(expect.arrayContaining(['size-[6px]', 'rounded-full', 'bg-info']))
+    expect(sidebar().querySelector('[data-slot="overflow-inbox-dot"]')).not.toBeNull()
+    expect(classes(sidebar().querySelector('[data-slot="nav-update-marker"]'))).toEqual(expect.arrayContaining(['size-[7px]', 'bg-info']))
+    fireEvent.keyDown(within(nav()).getByRole('button', { name: 'More views' }), { key: 'Enter' })
+    expect((await screen.findByRole('menuitem', { name: /Inbox/ })).textContent).toBe('Inbox4')
   })
 
-  it('gives the mobile drawer, the same nav, the same selected row', () => {
+  it('moves keyboard focus across the view row without changing routes', () => {
+    renderShell('/git')
+    const git = within(nav()).getByRole('link', { name: 'Git' })
+    git.focus()
+    fireEvent.keyDown(git, { key: 'ArrowRight' })
+    expect(document.activeElement).toBe(within(nav()).getByRole('link', { name: 'GitHub' }))
+    fireEvent.keyDown(document.activeElement!, { key: 'End' })
+    expect(document.activeElement).toBe(within(nav()).getByRole('button', { name: 'More views' }))
+    expect(git.getAttribute('aria-current')).toBe('page')
+  })
+
+  it('uses the same selected pill in the mobile drawer', () => {
     renderShell('/git')
     fireEvent.click(screen.getByRole('button', { name: 'Open menu' }))
     const selected = document.querySelectorAll('nav[aria-label="Main"] a[aria-current="page"]')
     expect(selected).toHaveLength(2)
-    for (const link of selected) expect(classes(link)).toEqual(expect.arrayContaining(SELECTED))
-  })
-
-  it('marks the active footer icon with a 36px square on the selected fill', () => {
-    renderShell('/settings/global/appearance', { projectGroups: <div /> })
-    const settings = sidebar().querySelector('[data-slot="global-settings-link"]') as HTMLElement
-    expect(settings.getAttribute('aria-current')).toBe('page')
-    expect(classes(settings)).toEqual(expect.arrayContaining(['size-[36px]', 'bg-sidebar-row-selected', 'text-foreground']))
-    const allTasks = sidebar().querySelector('[data-slot="all-tasks-link"]') as HTMLElement
-    expect(allTasks.getAttribute('aria-current')).toBeNull()
-    expect(classes(allTasks)).toContain('size-[36px]')
-    expect(classes(allTasks)).not.toContain('bg-sidebar-row-selected')
-    cleanup()
-    renderShell('/tasks', { projectGroups: <div /> })
-    const active = sidebar().querySelector('[data-slot="all-tasks-link"]') as HTMLElement
-    expect(active.getAttribute('aria-current')).toBe('page')
-    expect(classes(active)).toEqual(expect.arrayContaining(['size-[36px]', 'bg-sidebar-row-selected', 'text-foreground']))
-    expect(active.innerHTML).not.toMatch(TEAL)
-    const idle = sidebar().querySelector('[data-slot="global-settings-link"]') as HTMLElement
-    expect(idle.getAttribute('aria-current')).toBeNull()
-    expect(classes(idle)).not.toContain('bg-sidebar-row-selected')
+    for (const link of selected) expect(classes(link)).toEqual(expect.arrayContaining(['bg-sidebar-row-selected', 'text-foreground']))
   })
 })
 

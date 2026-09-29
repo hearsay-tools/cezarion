@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
   ApiError,
+  markRunSeen,
+  openProjectIn,
   archiveFinished,
   archiveRun,
   cancelRun,
@@ -670,5 +672,20 @@ describe('history responses are validated at the boundary (#827)', () => {
     const error = (await getRunHistory('nope').catch((e: unknown) => e)) as ApiError
     expect(error.status).toBe(404)
     expect(error.message).toBe('run not found')
+  })
+})
+
+
+describe('explicit project actions', () => {
+  afterEach(() => setApiScope(null))
+  it('addresses receipt and open actions to the explicit project, independent of active scope', async () => {
+    setApiScope('other')
+    fetchMock.mockResolvedValue(new Response('{}', { headers: { 'content-type': 'application/json' } }))
+    await markRunSeen('run-1', 'selected')
+    fetchMock.mockResolvedValue(new Response('{}', { headers: { 'content-type': 'application/json' } }))
+    await openProjectIn('vscode', 'selected')
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      '/api/v1/p/selected/runs/run-1/read', '/api/v1/p/selected/open-in',
+    ])
   })
 })

@@ -96,9 +96,9 @@ describe('automatic Open Mercato skills updates', () => {
 
   it('keeps the navigation marker absent for the dry-run current state', () => {
     browser.goto(`${baseUrl}/p/${projectId}/`)
-    browser.waitForFunction(`document.querySelector('[data-slot="project-group-body"] nav, [data-slot="single-project-navigation"] nav[aria-label="Main"]') !== null`)
+    browser.waitForFunction(`document.querySelector('[data-slot="sidebar"] nav[aria-label="Main"]') !== null`)
     expect(browser.count('[data-slot="nav-update-marker"]')).toBe(0)
-    expect(browser.evaluate(`(document.querySelector('[data-slot="project-group-body"] nav') || document.querySelector('[data-slot="sidebar"] nav[aria-label="Main"]')).textContent`)).toContain('Skills')
+    expect(browser.count('[data-slot="sidebar"] nav[aria-label="Main"] a[aria-label="Skills"]')).toBe(1)
     browser.screenshot(`${artifactsDir}/skills-navigation-current.png`)
   })
 
@@ -127,9 +127,9 @@ describe('automatic Open Mercato skills updates', () => {
     browser.goto(`${baseUrl}/p/${projectId}/`)
     browser.waitForFunction(`document.querySelector('[data-slot="mobile-top-bar"]') !== null`)
     browser.click('[data-slot="mobile-top-bar"] button[aria-label="Open menu"]')
-    browser.waitForFunction(`Boolean([...document.querySelectorAll('[role="dialog"] nav')].some((nav) => nav.textContent.includes('Skills')))`)
+    browser.waitForFunction(`document.querySelector('[role="dialog"] nav a[aria-label="Skills"]') !== null`)
 
-    expect(browser.evaluate(`[...document.querySelectorAll('[role="dialog"] nav')].map((nav) => nav.textContent).join(' ')`)).toContain('Skills')
+    expect(browser.evaluate(`document.querySelector('[role="dialog"] nav a[aria-label="Skills"]')?.getAttribute('href')`)).toBe(`/p/${projectId}/skills`)
     expect(browser.count('[role="dialog"] [data-slot="nav-update-marker"]')).toBe(0)
     browser.screenshot(`${artifactsDir}/skills-mobile-navigation.png`, { viewport: true })
   })

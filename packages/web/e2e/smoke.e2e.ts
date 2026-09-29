@@ -48,17 +48,12 @@ beforeAll(async () => {
   writeSharedProjects(readSharedProjects().filter((project) => project.id === bootProject))
 })
 
-/** The nav the shell renders — GitHub, Inbox and Automations all gate on live health
- *  capabilities, so the expectation must too. Order matches `NAV_ITEMS`: Tasks, Inbox, Git,
- *  GitHub, Automations, Skills, Workflows, Settings. Automations carries BOTH gates (#801):
- *  it needs a forge to poll AND the operator's opt-in to exist at all. */
+/** Primary view tabs; Inbox and Automations are checked separately in More views. */
 function expectedNavLabels(): string[] {
   return [
     'Tasks',
-    ...(followupsAvailable ? ['Inbox'] : []),
     'Git',
     ...(forgeAvailable ? ['GitHub'] : []),
-    ...(forgeAvailable && automationsAvailable ? ['Automations'] : []),
     'Skills',
     'Workflows',
     'Settings',
@@ -88,12 +83,13 @@ type BrandFacts = {
   headerOverflow: number
 }
 
-/** Measure the token-driven Poppins wordmark as the browser actually paints it. */
+/** Measure the token-driven Poppins project name as the browser actually paints it. */
 function brandFacts(scope: string): BrandFacts {
-  return browser.evaluate(`(() => {
+  return browser.waitForValue(`(() => {
     const root = document.querySelector(${JSON.stringify(scope)})
-    const wordmark = root.querySelector('[data-slot="brand-wordmark"]')
-    const header = wordmark.parentElement
+    const wordmark = root.querySelector('[data-slot="project-header-name"]')
+    if (!wordmark || wordmark.getBoundingClientRect().width === 0) return null
+    const header = root.querySelector('[data-slot="project-header"]')
     const rect = wordmark.getBoundingClientRect()
     const style = getComputedStyle(wordmark)
     const probe = document.createElement('span')
@@ -149,9 +145,9 @@ describe('cockpit app shell', () => {
     browser.goto(baseUrl + scoped('/'))
 
     expect(browser.isVisible('[data-slot="sidebar"]')).toBe(true)
-    expect(browser.isVisible('[data-slot="brand-wordmark"]')).toBe(true)
-    browser.waitForFunction(`document.querySelector('[data-slot="project-group-body"] nav, [data-slot="single-project-navigation"] nav[aria-label="Main"]') !== null`)
-    expect(browser.evaluate(`(document.querySelector('[data-slot="project-group-body"] nav') || document.querySelector('[data-slot="sidebar"] nav[aria-label="Main"]')).textContent`)).toContain('Tasks')
+    expect(browser.isVisible('[data-slot="project-header-name"]')).toBe(true)
+    browser.waitForFunction(`document.querySelector('[data-slot="sidebar"] nav[aria-label="Main"]') !== null`)
+    expect(browser.evaluate(`document.querySelector('[data-slot="sidebar"] nav[aria-label="Main"]').textContent`)).toContain('Tasks')
 
     // The GitHub item waits on the health answer — settle it before sampling the nav.
     if (forgeAvailable) {
@@ -160,10 +156,8 @@ describe('cockpit app shell', () => {
     // Read the label without the inbox badge — a populated shared env legitimately has todos,
     // and the badge digit must not leak into the nav-label assertion.
     const labels = browser.evaluate(
-      `Array.from((document.querySelector('[data-slot="project-group-body"] nav') || document.querySelector('[data-slot="sidebar"] nav[aria-label="Main"]')).querySelectorAll('a')).map(a => {
-        const clone = a.cloneNode(true)
-        clone.querySelector('[data-slot="nav-badge"], [data-slot="nav-unread-badge"]')?.remove()
-        return clone.textContent.trim()
+      `Array.from(document.querySelector('[data-slot="sidebar"] nav[aria-label="Main"]').querySelectorAll('a')).map(a => {
+        return a.getAttribute('aria-label')
       })`
     )
     expect(labels).toEqual(expectedNavLabels())
@@ -173,65 +167,80 @@ describe('cockpit app shell', () => {
     expect(browser.text(`[data-slot="sidebar"] a[href="${scoped('/new')}"]`)).toContain('New task')
     expect(browser.evaluate(`document.querySelector('[data-slot="sidebar"] a[href="${scoped('/new')}"] kbd').textContent`)).toBe('C')
 
-    // The theme toggle lives in the footer.
-    expect(browser.isVisible('[data-slot="sidebar-footer"] [data-slot="theme-toggle"]')).toBe(true)
-
-    // Search now leads the creation flow above New task; the footer's tools, version, settings,
-    // and theme controls remain on one row inside the 264px column. Only a real layout engine can
-    // answer this: jsdom measures nothing.
-    const footerRows = browser.evaluate(`(() => {
+    // Global controls belong to the rail; project tools and version stay in the footer.
+    expect(browser.isVisible('[data-slot="project-rail"] [data-slot="theme-toggle"]')).toBe(true)
+    const layout = browser.waitForValue(`(() => {
       const footer = document.querySelector('[data-slot="sidebar-footer"]')
-      // Centers, not tops: the gear (28px) and the toggle (30px) are different heights, and
-      // 'items-center' aligns them by center — comparing tops would fail a correct layout.
-      const centerOf = (el) => {
-        const rect = el.getBoundingClientRect()
-        return rect.top + rect.height / 2
-      }
-      const controls = [
-        '[data-slot="tools-menu-trigger"]',
-        '[data-slot="global-settings-link"]',
-        '[data-slot="theme-toggle"]',
-      ]
-      return {
-        search: centerOf(document.querySelector('[data-slot="command-palette-hint"]')),
-        create: centerOf(document.querySelector('[data-slot="sidebar"] a[href$="/new"]')),
-        gear: centerOf(footer.querySelector('[data-slot="global-settings-link"]')),
-        theme: centerOf(footer.querySelector('[data-slot="theme-toggle"]')),
-        rowCount: new Set(
-          [...footer.querySelectorAll(controls.join(','))].map((el) => Math.round(centerOf(el)))
-        ).size,
-      }
-    })()`) as { search: number; create: number; gear: number; theme: number; rowCount: number }
-
-    expect(footerRows.search).toBeLessThan(footerRows.create)
-    expect(footerRows.create).toBeLessThan(footerRows.gear)
-    expect(Math.abs(footerRows.theme - footerRows.gear)).toBeLessThanOrEqual(1)
-    expect(footerRows.rowCount).toBe(1)
+      const search = document.querySelector('[data-slot="command-palette-hint"]')
+      const create = document.querySelector('[data-slot="sidebar"] a[href$="/new"]')
+      if (!footer || !search || !create) return null
+      return { searchBeforeCreate: search.getBoundingClientRect().bottom <= create.getBoundingClientRect().top,
+        tools: !!footer.querySelector('[data-slot="tools-menu-trigger"]'),
+        version: !!footer.querySelector('[data-slot="version-chip"]'),
+        duplicateControls: footer.querySelectorAll('[data-slot="global-settings-link"], [data-slot="theme-toggle"], [aria-label="Add project"]').length }
+    })()`)
+    expect(layout).toEqual({ searchBeforeCreate: true, tools: true, version: true, duplicateControls: 0 })
   })
 
-  it('keeps the themed wordmark readable and geometry-stable at the minimum sidebar width', () => {
+  it('keeps primary tabs in one row and gates the keyboard-operable overflow by capabilities', () => {
+    browser.goto(baseUrl + scoped('/'))
+    const nav = '[data-slot="sidebar"] [data-slot="view-tabs"]'
+    browser.waitForFunction(`document.querySelector('${nav} a[aria-current="page"]') !== null`)
+    const expected = [
+      ...(followupsAvailable ? ['Inbox'] : []),
+      ...(forgeAvailable && automationsAvailable ? ['Automations'] : []),
+    ]
+    const trigger = `${nav} [aria-label="More views"]`
+    const facts = browser.waitForValue(`(() => {
+      const nav = document.querySelector('${nav}')
+      if (!nav || !window.__cezIdle) return null
+      const links = [...nav.querySelectorAll('a')]
+      return { labels: links.map(a => a.getAttribute('aria-label')),
+        visible: links.filter(a => a.textContent.trim()).map(a => a.getAttribute('aria-label')),
+        rows: new Set(links.map(a => Math.round(a.getBoundingClientRect().top))).size,
+        overflow: nav.scrollWidth > nav.clientWidth,
+        more: !!nav.querySelector('[aria-label="More views"]') }
+    })()`)
+    expect(facts).toEqual({ labels: expectedNavLabels(), visible: ['Tasks'], rows: 1, overflow: false, more: expected.length > 0 })
+    if (expected.length === 0) return
+    browser.evaluate(`document.querySelector('${trigger}').focus()`)
+    browser.press('ArrowDown')
+    expect(browser.waitForValue(`Array.from(document.querySelectorAll('[role="menu"] a[role="menuitem"]')).map(a => a.textContent.trim().replace(/\\d+$/, '').trim())`,
+      value => JSON.stringify(value) === JSON.stringify(expected))).toEqual(expected)
+    browser.press('Escape')
+    browser.waitForFunction(`document.querySelector('[role="menu"]') === null && document.activeElement === document.querySelector('${trigger}')`)
+    browser.press('ArrowDown')
+    browser.waitForFunction(`document.activeElement?.getAttribute('role') === 'menuitem'`)
+    browser.press('Enter')
+    const path = expected[0] === 'Inbox' ? '/inbox' : '/automations'
+    browser.waitForFunction(`location.pathname === '${scoped('')}' + '${path}' && document.querySelector('[role="menu"]') === null`)
+    expect(browser.count(`${nav} a[aria-current="page"]`)).toBe(0)
+    expect(browser.count(`${trigger}`)).toBe(1)
+  })
+
+  it('keeps the themed project name readable and geometry-stable at the minimum sidebar width', () => {
     browser.goto(baseUrl + scoped('/'))
     setTheme('light')
     const light = brandFacts('[data-slot="sidebar"]')
 
-    expect(light.text).toBe('Cezarion')
+    expect(light.text.length).toBeGreaterThan(0)
     expect(light.fontFamily).toContain('Poppins')
-    expect(light.fontSize).toBe('23px')
-    expect(light.height).toBeGreaterThanOrEqual(23)
+    expect(light.fontSize).toBe('14px')
+    expect(light.height).toBeGreaterThanOrEqual(14)
     expect(light.color).toBe(light.foreground)
     expect(light.headerOverflow).toBeLessThanOrEqual(0)
 
-    browser.click('[data-slot="sidebar"] [data-slot="theme-toggle"]')
+    browser.click('[data-slot="project-rail"] [data-slot="theme-toggle"]')
     browser.waitForFunction(`!document.documentElement.classList.contains('light')`)
     const dark = brandFacts('[data-slot="sidebar"]')
-    expect(dark.text).toBe('Cezarion')
+    expect(dark.text).toBe(light.text)
     expect({ width: dark.width, height: dark.height }).toEqual({ width: light.width, height: light.height })
     expect(dark.color).toBe(dark.foreground)
     expect(dark.color).not.toBe(light.color)
     expect(dark.headerOverflow).toBeLessThanOrEqual(0)
   })
 
-  it('keeps the header version inside the 264px column even on a nightly-length release', async () => {
+  it('keeps the footer version inside the 264px column even on a nightly-length release', async () => {
     const NIGHTLY = '0.9.2-nightly.20260813.1.abcdef1234567890'
     // The e2e server reports this checkout's own (short) semver, which never overflowed. The
     // regression first appeared with nightly releases (#876), and the CLI reads its version from
@@ -253,8 +262,8 @@ describe('cockpit app shell', () => {
       if (chip?.textContent !== ${JSON.stringify(`v${NIGHTLY}`)}) return null
       const label = chip.querySelector('span:not([data-slot])')
       if (!label) return null
-      const headerRight = document.querySelector('[data-slot="brand-wordmark"]').parentElement.getBoundingClientRect().right
-      const escaped = [...document.querySelectorAll('[data-slot="brand-wordmark"], [data-slot="version-action"]')]
+      const headerRight = document.querySelector('[data-slot="sidebar-footer"]').getBoundingClientRect().right
+      const escaped = [...document.querySelectorAll('[data-slot="sidebar-footer"] [data-slot="version-action"]')]
         .filter((el) => el.getBoundingClientRect().right > headerRight)
         .map((el) => el.dataset.slot)
       return {
@@ -293,39 +302,22 @@ describe('cockpit app shell', () => {
     expect(health.repo).not.toBeNull()
 
     browser.goto(baseUrl + scoped('/'))
-    // Wait for actual repo data, not the flat navigation's loading placeholder. Registry
-    // arrival can replace that placeholder with groups between two separate browser reads.
-    // Reproduced with `TMPDIR=/tmp env -u CEZ_AUTOMATIONS npm run test:e2e:local`:
-    // 2026-09-29T11:08:21Z, run 1790679915687-823444, lane-4-failures/smoke/
-    // fills-the-repo-and-version-chips-from-the-live-api-v1-health-1. probe.json
-    // timed out waiting for repo-chip; snapshot.txt already showed "Toggle lane-4"
-    // and "lane-4 navigation". The old flat/group read had selected a vanished chip.
     const repoName = health.repoRoot.replace(/[\\/]+$/, '').split(/[\\/]/).pop()
     const rendered = browser.waitForValue(`(() => {
-      const group = document.querySelector('[data-slot="sidebar"] [data-slot="project-group"]')
-      const chip = document.querySelector('[data-slot="repo-chip"]')
+      const name = document.querySelector('[data-slot="project-header-name"]')?.textContent
+      const detail = document.querySelector('[data-slot="project-header-detail"]')?.textContent
       const version = document.querySelector('[data-slot="version-chip"]')?.textContent
-      if ((!group && !chip) || !version) return null
-      return {
-        projectId: group?.dataset.project ?? null,
-        repoName: chip?.textContent ?? null,
-        branch: chip?.nextElementSibling?.textContent ?? null,
-        version,
-      }
-    })()`) as { projectId: string | null; repoName: string | null; branch: string | null; version: string }
-    if (rendered.projectId !== null) {
-      expect(rendered.projectId).toBe(bootProject)
-    } else {
-      expect(rendered.repoName).toBe(repoName)
-      expect(rendered.branch).toBe(health.repo?.branch)
-    }
+      return name && detail && version ? { name, detail, version } : null
+    })()`) as { name: string; detail: string; version: string }
+    expect(rendered.name).toBe(repoName)
+    expect(rendered.detail).toContain(health.repo?.branch)
     expect(rendered.version).toBe(`v${health.version}`)
 
     // Real values, not a placeholder that happens to match itself.
     expect(health.version).toMatch(/^\d+\.\d+\.\d+/)
     expect(repoName).toBeTruthy()
 
-    browser.screenshot(`${artifactsDir}/shell-repo-chip.png`)
+    browser.screenshot(`${artifactsDir}/shell-project-header.png`)
   })
 
   it('marks exactly one nav item active, following the route', () => {
@@ -338,9 +330,7 @@ describe('cockpit app shell', () => {
         `(() => {
         if (location.pathname !== '${pathname}') return null
         const labels = Array.from(document.querySelectorAll('[data-slot="sidebar"] nav a[aria-current="page"]')).map(a => {
-          const clone = a.cloneNode(true)
-          clone.querySelector('[data-slot="nav-badge"], [data-slot="nav-unread-badge"]')?.remove()
-          return clone.textContent.trim()
+          return a.getAttribute('aria-label')
         })
         return labels.length === 1 && labels[0] === '${label}' ? labels : null
       })()`,
@@ -497,9 +487,7 @@ describe('mobile shell', () => {
           overlayHeight: overlay.height,
           minLinkHeight: Math.min(...links.map((a) => a.getBoundingClientRect().height)),
           labels: links.map((a) => {
-            const clone = a.cloneNode(true)
-            clone.querySelector('[data-slot="nav-badge"], [data-slot="nav-unread-badge"]')?.remove()
-            return clone.textContent.trim()
+            return a.getAttribute('aria-label')
           }),
         }
       })()`) as Record<string, number | string[]>
@@ -521,24 +509,24 @@ describe('mobile shell', () => {
       browser.screenshot(`${artifactsDir}/drawer-iphone.png`)
     })
 
-    it('keeps the themed wordmark readable and unclipped at 360×640', () => {
+    it('keeps the themed project name readable and unclipped at 360×640', () => {
       browser.setViewport(360, 640)
       try {
         browser.goto(baseUrl + scoped('/'))
         setTheme('light')
         openDrawer()
         const light = brandFacts(DRAWER)
-        expect(light.text).toBe('Cezarion')
+        expect(light.text.length).toBeGreaterThan(0)
         expect(light.fontFamily).toContain('Poppins')
-        expect(light.fontSize).toBe('23px')
-        expect(light.height).toBeGreaterThanOrEqual(23)
+        expect(light.fontSize).toBe('14px')
+        expect(light.height).toBeGreaterThanOrEqual(14)
         expect(light.color).toBe(light.foreground)
         expect(light.headerOverflow).toBeLessThanOrEqual(0)
 
-        browser.click(`${DRAWER} [data-slot="theme-toggle"]`)
+        browser.click(`${DRAWER} [data-slot="mobile-workspace-navigation"] [data-slot="theme-toggle"]`)
         browser.waitForFunction(`!document.documentElement.classList.contains('light')`)
         const dark = brandFacts(DRAWER)
-        expect(dark.text).toBe('Cezarion')
+        expect(dark.text).toBe(light.text)
         expect({ width: dark.width, height: dark.height }).toEqual({ width: light.width, height: light.height })
         expect(dark.color).toBe(dark.foreground)
         expect(dark.color).not.toBe(light.color)
@@ -628,7 +616,7 @@ describe('global SSE stream', () => {
   // Where `src/index.ts` puts the data dir, for the server booted from this worktree.
   const dataDir = resolve(import.meta.dirname, '../../../.ai/cezar')
   const todosFile = resolve(dataDir, 'todos.json')
-  const BADGE = '[data-slot="nav-badge"]'
+  const BADGE = '[data-slot="inbox-count"]'
   let previousTodos: string | null = null
 
   beforeAll(() => {
@@ -669,7 +657,9 @@ describe('global SSE stream', () => {
     writeTodos([])
     browser.goto(baseUrl + scoped('/'))
     // The shell is up and its queries have answered — so the app's stream effect has run too.
-    browser.waitForFunction(`document.querySelector('[data-slot="repo-chip"]') !== null`)
+    browser.waitForFunction(`document.querySelector('[data-slot="project-header"]') !== null`)
+    browser.click('[data-slot="sidebar"] [aria-label="More views"]')
+    browser.waitForFunction(`document.querySelector('[role="menu"]') !== null`)
     expect(browser.count(BADGE)).toBe(0)
 
     // An agent files two follow-ups while the page just sits there.
@@ -693,7 +683,7 @@ describe('global SSE stream', () => {
     // The stream outliving several seconds of this is the "stays alive" assertion: the shell is
     // still the shell, not a blank root left by a handler that threw.
     expect(browser.isVisible('[data-slot="sidebar"]')).toBe(true)
-    expect(browser.text('[data-slot="sidebar"] nav')).toContain('Inbox')
+    expect(browser.text('[role="menu"]')).toContain('Inbox')
   })
 })
 

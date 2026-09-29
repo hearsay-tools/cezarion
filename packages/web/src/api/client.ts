@@ -1356,10 +1356,10 @@ export async function archiveFinished(): Promise<ArchiveFinishedResponse> {
 
 /** Read receipt (#unread-done-items): opening a task's thread marks it read. Bodyless —
  *  the server stamps `seenAt = now` and answers with the updated record. */
-export async function markRunSeen(id: string): Promise<RunRecord> {
+export async function markRunSeen(id: string, projectId = queryScope()): Promise<RunRecord> {
   return unwrap(
     await cez.api.v1.p[':projectId'].runs[':id'].read.$post({
-      param: { projectId: queryScope(), id: encodeURIComponent(id) },
+      param: { projectId, id: encodeURIComponent(id) },
     }),
     runPath(id, '/read'),
   )
@@ -1577,10 +1577,10 @@ export async function getOpenTargets(opts?: ReadOptions): Promise<OpenTargetsRes
 /** Open the ACTIVE PROJECT's own folder in the chosen local app (Settings → "Project folder").
  *  No path travels: the server opens the scoped project's registered root. 400 for an app this
  *  machine does not have or a `cli:` handoff, 409 in hosted mode or when the launch failed. */
-export async function openProjectIn(target: string): Promise<OpenProjectInResponse> {
+export async function openProjectIn(target: string, projectId = queryScope()): Promise<OpenProjectInResponse> {
   return unwrap(
     await cez.api.v1.p[':projectId']['open-in'].$post({
-      param: { projectId: queryScope() },
+      param: { projectId },
       json: { target },
     }),
     '/open-in',

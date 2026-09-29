@@ -3,7 +3,7 @@ import { ScaleIcon } from 'lucide-react'
 import { useQueries } from '@tanstack/react-query'
 import * as React from 'react'
 import { queryScope } from '@open-mercato/cezar-api-client'
-import { useHealth, usePinRun, useProjects, useReferenceProjectId, useRuns } from '@/api/queries'
+import { useHealth, usePinRun, useProjectRuns, useProjects, useReferenceProjectId, useRuns } from '@/api/queries'
 import { Link, scopeTo, useNavigate, useProjectMatch } from '@/lib/project-router'
 import type { RunRecord } from '@open-mercato/cezar-api-client'
 import { DiffStatLabel } from '@/components/diff-stat'
@@ -20,6 +20,7 @@ import { shortAge } from '@/lib/format'
 import { isUnread, unreadMarkerTone } from '@/lib/read-state'
 import { directionalUsageText } from '@/components/directional-usage'
 import {
+  capBuckets,
   groupRuns,
   listCounts,
   refPrefixMatches,
@@ -54,6 +55,7 @@ export function TaskQuickList({
   showCost = true,
   onTogglePin,
   showViewControls = true,
+  rowLimit,
 }: {
   runs: RunRecord[]
   view: ListView
@@ -71,19 +73,27 @@ export function TaskQuickList({
    *  belongs to is a container's question — this list is painted for other projects too. */
   onTogglePin?: (run: RunRecord, pinned: boolean) => void
   showViewControls?: boolean
+  rowLimit?: number
 }) {
   const counts = listCounts(runs)
-  const buckets = groupRuns(runs, view)
+  const buckets = rowLimit === undefined ? groupRuns(runs, view) : capBuckets(groupRuns(runs, view), rowLimit)
   // Withheld in the archived view, where `groupRuns` answers one `Archived` bucket and never
   // reads `run.pinned` — the same call the thread header makes on an archived run.
   const pinToggle = view === 'archived' ? undefined : onTogglePin
 
   return (
     <div data-slot="quick-list">
+      <div data-slot="quick-list-header" className="flex min-h-11 items-center gap-1.5 pr-[6px] pl-[10px] md:min-h-[26px]">
+        <h2 className="text-[13px] font-semibold text-foreground">Tasks</h2>
+        <span className="text-[11.5px] text-soft-foreground">{counts[view]}</span>
+        <Link to="/" className="ml-auto flex min-h-11 items-center gap-0.5 text-[12px] text-soft-foreground hover:text-foreground md:min-h-[26px]">
+          All<ChevronRightIcon className="size-[13px]" aria-hidden="true" />
+        </Link>
+      </div>
       {/* Sticky, not scrolled away: the tabs say what you are looking at, and a long Recent list
           must not be able to hide that the view is filtered. */}
       {showViewControls ? <div className="sticky top-0 z-10 bg-sidebar pt-2 pb-1">
-        <div className="inline-flex w-full gap-0.5 rounded-md bg-muted p-[3px]">
+        <div className="inline-flex w-full gap-0.5 rounded-md bg-muted p-[2px]">
           <ViewTab view="active" current={view} onSelect={onViewChange} count={counts.active}>
             Active
             {/* The one reason to look at a tab you are not on. */}
@@ -151,20 +161,14 @@ export function QuickListBuckets({
       return next
     })
 
-  // Sidebar organization is pin-based; the state remains on each row's independent dot.
-  const sidebarBuckets: QuickListBucket[] = []
-  for (const label of ['Pinned', 'Recent', 'Archived'] as const) {
-    const rows = buckets.filter(bucket => label === 'Recent' ? bucket.label !== 'Pinned' && bucket.label !== 'Archived' : bucket.label === label).flatMap(bucket => bucket.rows)
-    if (rows.length) sidebarBuckets.push({ label, rows })
-  }
   const renderRow = (row: QuickListRow) => <Row row={row} currentRunId={currentRunId} currentGroupId={currentGroupId} now={now} scope={scope} showTokens={showTokens} showCost={showCost} expanded={row.kind === 'group' && expanded.has(row.groupId)} onToggle={toggleGroup} onTogglePin={onTogglePin} />
 
   return (
-    <>
-      {sidebarBuckets.map((bucket) => (
+    <div className="flex flex-col gap-3">
+      {buckets.map((bucket) => (
         <div key={bucket.label} data-slot="quick-list-bucket" data-bucket={bucket.label}>
-          <h2 className="pl-9 pt-3 pb-2 text-[11px] font-medium tracking-[0.14em] text-soft-foreground uppercase">
-            {bucket.label}
+          <h2 className="px-[10px] pt-[2px] pb-[4px] text-[11px] font-medium text-soft-foreground">
+            {bucket.label}{' '}<span className="text-[11px] font-normal tabular-nums">{bucket.rows.length}</span>
           </h2>
           {bucket.rows.map((row) => (
             <div key={row.kind === 'group' ? row.groupId : row.run.id}>
@@ -173,7 +177,7 @@ export function QuickListBuckets({
           ))}
         </div>
       ))}
-    </>
+    </div>
   )
 }
 
@@ -201,7 +205,7 @@ function ViewTab({
       aria-pressed={isActive}
       onClick={() => onSelect(view)}
       className={cn(
-        'flex min-h-11 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-[7px] text-[11px] font-medium text-muted-foreground md:min-h-[30px]',
+        'flex min-h-11 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-[7px] text-[11px] font-medium text-muted-foreground md:min-h-[22px]',
         isActive && 'bg-card font-semibold text-foreground shadow-xs'
       )}
     >
@@ -830,9 +834,10 @@ function RunRow({
  * stream, Step 3.2), the router for which row is open, and the sidebar Active/Archived context —
  * independent of the Tasks table's own tabs.
  */
-export function TaskQuickListContainer({ showViewControls = true }: { showViewControls?: boolean }) {
-  const runs = useRuns()
-  const pin = usePinRun()
+export function TaskQuickListContainer({ showViewControls = true, projectId: explicitProjectId, boot = false }: { showViewControls?: boolean; projectId?: string; boot?: boolean }) {
+  const scope = explicitProjectId ?? queryScope()
+  const runs = useProjectRuns(scope, true, boot)
+  const pin = usePinRun(scope, boot ? 'default' : scope)
   const health = useHealth()
   const visibility = usageMetricVisibility(health.data)
   const [view, setView] = useListView()
@@ -844,15 +849,13 @@ export function TaskQuickListContainer({ showViewControls = true }: { showViewCo
   const now = useNow(30_000)
   // The sidebar's chips are the same chips as the tables', so they get their status the same way:
   // one batched request for the whole list, mounted here where the list is.
-  const projectId = useReferenceProjectId()
-  const referenceRequests = React.useMemo(
-    () =>
-      projectId === undefined
-        ? []
-        : (runs.data ?? []).flatMap((run) => {
-            return taskReferences(run).map(reference => ({ projectId, kind: reference.kind, number: reference.number }))
-          }),
-    [runs.data, projectId],
+  const referenceProjectId = useReferenceProjectId()
+  const projectId = explicitProjectId ?? referenceProjectId
+  const buckets = capBuckets(groupRuns(runs.data ?? [], view), 10)
+  const referenceRequests = projectId === undefined ? [] : buckets.flatMap(bucket =>
+    bucket.rows.flatMap(row => taskReferences(row.kind === 'run' ? row.run : row.members[0]!).map(
+      reference => ({ projectId, kind: reference.kind, number: reference.number }),
+    )),
   )
 
   // Nothing at all until the list has answered: a skeleton here would be inventing rows, and an
@@ -863,6 +866,7 @@ export function TaskQuickListContainer({ showViewControls = true }: { showViewCo
     <ReferenceStatusProvider projectId={projectId} requests={referenceRequests}>
       <TaskQuickList
         showViewControls={showViewControls}
+        rowLimit={10}
         runs={runs.data}
         view={view}
         onViewChange={setView}
@@ -872,8 +876,7 @@ export function TaskQuickListContainer({ showViewControls = true }: { showViewCo
         now={now}
         showTokens={visibility.tokens}
         showCost={visibility.cost}
-        // This list is the ACTIVE project's, so the mutation needs no explicit project: the
-        // scoped client already addresses the one the URL names.
+        // Bind the mutation to the same explicit project and cache as this list.
         onTogglePin={(run, pinned) =>
           pin.mutate({ id: run.id, pinned })
         }

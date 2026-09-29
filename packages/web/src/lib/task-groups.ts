@@ -19,7 +19,7 @@ export type ListView = 'active' | 'archived'
 export type BucketLabel = 'Pinned' | 'Needs you' | 'Working' | 'Recent' | 'Archived'
 
 /** Rendering order. Also the exhaustive set — `groupRuns` emits a subset of these, in this order. */
-export const BUCKET_ORDER: readonly BucketLabel[] = ['Pinned', 'Needs you', 'Working', 'Recent', 'Archived']
+export const BUCKET_ORDER: readonly BucketLabel[] = ['Needs you', 'Pinned', 'Working', 'Recent', 'Archived']
 
 /**
  * Sort weight per status: needs-you first, then the pipeline in the order it will actually
@@ -99,15 +99,13 @@ export interface QuickListBucket {
  * (`RunStore.setArchived`), so a pinned archived record is only reachable by hand-editing
  * `runs.json`, and even then history is what that view is showing.
  *
- * A pinned run appears under `Pinned` and ONLY there (#935) — never also under `Needs you`. It
- * keeps its status dot and its attention dot, so a pinned task that wants you still says so, and
- * `listCounts` counts by status rather than by bucket, so the Active tab's waiting count is
- * unchanged by pinning anything.
+ * Attention takes priority over a pin: a pinned task that wants you appears in Needs you.
+ * The pin stays on the record, including its exemption from the sidebar row cap.
  */
 export function bucketOf(run: RunRecord, view: ListView): BucketLabel {
   if (view === 'archived') return 'Archived'
-  if (run.pinned) return 'Pinned'
   if (deriveAttention(run).bucket === 'waiting') return 'Needs you'
+  if (run.pinned) return 'Pinned'
   if (run.status === 'waiting') return 'Working'
   if (run.status === 'running' || run.status === 'queued') return 'Working'
   // A run waiting out a provider usage limit is `failed` on the record but has an appointment to
@@ -224,9 +222,8 @@ export function sortRuns(runs: readonly RunRecord[], view: ListView): RunRecord[
     .filter((run) => (view === 'archived' ? run.archived : !run.archived))
     .sort((a, b) => {
       // Pinned first (#935), ahead of every status weight — that IS what a pin asks for, and it
-      // is one rule serving three surfaces: the `Pinned` bucket's contents, the flat Tasks
-      // table (which has no buckets), and which member represents a collapsed variant tile, so
-      // a group with a pinned variant rises to `Pinned` as a unit like every other bucket move.
+      // orders the flat Tasks table and rows within each bucket. Variant placement
+      // separately follows bucket priority so attention beats the pin.
       // Inside `Pinned` the ordinary rules below then apply unchanged.
       //
       // Ignored in the archived view, where `bucketOf` collapses everything into one bucket:
@@ -304,7 +301,10 @@ export function groupRuns(runs: readonly RunRecord[], view: ListView): QuickList
         .filter((member) => member.groupId === run.groupId)
         .sort((a, b) => (a.variant ?? '').localeCompare(b.variant ?? ''))
       if (members.length > 1) {
-        push(bucketOf(run, view), { kind: 'group', groupId: run.groupId, title: groupTitle(run), members, lead: loudestMember(members) })
+        // Bucket priority is independent of sortRuns' flat-table pin ordering: any
+        // attentive member lifts the whole group above even a pinned quiet sibling.
+        const label = BUCKET_ORDER.find((label) => members.some((member) => bucketOf(member, view) === label))!
+        push(label, { kind: 'group', groupId: run.groupId, title: groupTitle(run), members, lead: loudestMember(members) })
         continue
       }
     }
@@ -323,7 +323,8 @@ export function groupRuns(runs: readonly RunRecord[], view: ListView): QuickList
  * A collapsed variant-group tile counts as one row — it occupies one row of sidebar. Buckets
  * emptied by the cap are dropped, like `groupRuns` drops empty ones.
  *
- * `Pinned` is EXEMPT, and spends none of the budget the other buckets share (#935). A pin is an
+ * Pinned rows are EXEMPT, including attentive pins and groups containing a pin in Needs you.
+ * They spend none of the budget the other rows share (#935). A pin is an
  * explicit request for that row to be on screen, so trimming one is the one thing this cap must
  * not do — and the alternative, letting pins eat the ten rows, would let three pins hide every
  * task that needs you. The pathological case (thirty pins in one project) is one the user built
@@ -333,16 +334,15 @@ export function capBuckets(buckets: readonly QuickListBucket[], limit: number): 
   const capped: QuickListBucket[] = []
   let remaining = limit
   for (const bucket of buckets) {
-    if (bucket.label === 'Pinned') {
-      capped.push({ label: bucket.label, rows: [...bucket.rows] })
-      continue
-    }
-    // `continue`, not `break`: `BUCKET_ORDER` puts `Pinned` first today, but a cap that silently
-    // dropped the exempt bucket if that ever changed would be a bug nothing here would catch.
-    if (remaining <= 0) continue
-    const rows = bucket.rows.slice(0, remaining)
-    remaining -= rows.length
-    capped.push({ label: bucket.label, rows })
+    const rows = bucket.rows.filter((row) => {
+      const pinned = row.kind === 'run' ? row.run.pinned : row.members.some((member) => member.pinned)
+      // Archived records cannot use stale pin flags to escape the history cap.
+      if (bucket.label === 'Pinned' || (bucket.label !== 'Archived' && pinned)) return true
+      if (remaining <= 0) return false
+      remaining -= 1
+      return true
+    })
+    if (rows.length) capped.push({ label: bucket.label, rows })
   }
   return capped
 }
