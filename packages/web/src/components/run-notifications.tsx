@@ -48,7 +48,8 @@ export function RunNotifications() {
     const cache = queryClient.getQueryCache()
     const lists = new Map<string, ReadonlyMap<string, RunNotificationState>>()
     const known = new Map<string, RunNotificationState>()
-    const transitions = new Map<string, number>()
+    const versions = new Map<string, number>()
+    const transitioned = new Set<string>()
     const fetches = new Map<string, number>()
     let revision = 0
     const isRunList = (key: readonly unknown[]) =>
@@ -60,7 +61,8 @@ export function RunNotifications() {
       for (const id of known.keys()) {
         if (!retained.has(id)) {
           known.delete(id)
-          transitions.delete(id)
+          versions.delete(id)
+          transitioned.delete(id)
         }
       }
     }
@@ -71,9 +73,9 @@ export function RunNotifications() {
       // shared history. Initial aliases establish the baseline only until a live transition
       // is observed: a late first fetch may contain a pre-transition snapshot.
       const changed = runs.filter(run => {
-        // A GET started before a newer observed transition cannot rewind that task. Other
+        // A GET started before a newer baseline or transition cannot rewind that task. Other
         // rows in the response still reconcile, and a subsequent fresh GET is authoritative.
-        if ((transitions.get(run.id) ?? 0) > fetchedAt) return false
+        if ((versions.get(run.id) ?? 0) > fetchedAt) return false
         const before = previous?.get(run.id)
         const after = statuses.get(run.id)!
         // A fresh GET can confirm a row previously ignored as stale, even if that alias's
@@ -84,13 +86,17 @@ export function RunNotifications() {
       })
       const { entering, statuses: updates } = diffRunTransitions(known, changed)
       for (const [id, state] of statuses) {
-        if (!previous?.has(id) && !transitions.has(id)) known.set(id, state)
+        if (!previous?.has(id) && !transitioned.has(id) && (versions.get(id) ?? 0) <= fetchedAt) {
+          known.set(id, state)
+          versions.set(id, ++revision)
+        }
       }
       for (const [id, state] of updates) {
         const before = known.get(id)
         if (before?.status === state.status && before.wantsAttention === state.wantsAttention) continue
         known.set(id, state)
-        transitions.set(id, ++revision)
+        versions.set(id, ++revision)
+        transitioned.add(id)
       }
       lists.set(hash, statuses)
       prune()
@@ -121,7 +127,7 @@ export function RunNotifications() {
       } else if (event.type === 'updated') {
         if (event.action.type === 'fetch') fetches.set(event.query.queryHash, revision)
         if (event.action.type === 'success' && Array.isArray(event.query.state.data)) {
-          // A fetch already in flight at mount predates every transition observed here.
+          // A fetch already in flight at mount predates every baseline observed here.
           const fetchedAt = event.action.manual ? Infinity : (fetches.get(event.query.queryHash) ?? 0)
           observe(event.query.queryHash, event.query.state.data as ApiRun[], false, fetchedAt)
           if (!event.action.manual) fetches.delete(event.query.queryHash)

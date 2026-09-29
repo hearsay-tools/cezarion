@@ -358,3 +358,23 @@ it.each([false, true])('ignores a pre-transition fetch on an observed alias (cat
   await act(async () => { await client.fetchQuery({ queryKey: alias, queryFn: async () => [run({ status: 'waiting' })], staleTime: 0 }) })
   expect(constructed).toHaveLength(3)
 })
+
+
+it('does not replace a silent baseline with an older first alias response', async () => {
+  const constructed = stubNotification()
+  hideTab()
+  vi.stubGlobal('fetch', vi.fn(() => new Promise<never>(() => {})))
+  const client = makeClient({ notifications: { enabled: true } })
+  const alias = ['boot', 'runs', 'list']
+  let resolve!: (runs: RunRecord[]) => void
+  const response = new Promise<RunRecord[]>(done => { resolve = done })
+  const pending = client.fetchQuery({ queryKey: alias, queryFn: () => response })
+  client.setQueryData(['default', 'runs', 'list'], [run({ status: 'waiting' })])
+  render(<QueryClientProvider client={client}><RunNotifications /></QueryClientProvider>)
+  await act(async () => { resolve([run()]); await pending })
+  act(() => client.setQueryData(alias, [run({ status: 'waiting' })]))
+  expect(constructed).toHaveLength(0)
+  act(() => client.setQueryData(alias, [run()]))
+  act(() => client.setQueryData(alias, [run({ status: 'waiting' })]))
+  expect(constructed).toHaveLength(1)
+})
