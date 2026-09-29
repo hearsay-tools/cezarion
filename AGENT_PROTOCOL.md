@@ -817,8 +817,12 @@ Autosaves serialize per canonical worktree; Git auto-maintenance is disabled
 only for these commands. Holder discovery shares orphan recovery's cwd boundary,
 not OS containment: custom children that detach and leave the tree before they
 can be observed are outside that proof. Existing agent holders are left alone.
-Platforms without a holder probe (including Windows) report an unsuccessful
-autosave before spawning Git; cleanup continues with working files preserved.
+Windows uses bounded PowerShell process snapshots and creation-time checks,
+retaining observed ancestry after the Git leader exits and checking each process
+handle before shutdown. An intermediate process that appears and exits between
+snapshots can hide its descendants; this is observation, not kernel containment.
+If the platform probe is unavailable, autosave fails before spawning Git and
+cleanup continues with working files preserved.
 
 R18/R19 (#548) use every runner's native message wire to check final-line ASK
 selection after an earlier prose mention, and quoted ASK examples without a

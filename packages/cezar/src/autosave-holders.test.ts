@@ -21,7 +21,7 @@ describe('autosave cwd-holder proof', () => {
   });
   afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
-  it.each(['win32', 'freebsd'] as const)('refuses %s before spawning without a termination proof', async platform => {
+  it.each(['freebsd'] as const)('refuses %s before spawning without a termination proof', async platform => {
     vi.stubGlobal('process', { ...process, platform });
     expect(await watchAutosaveHolders('/worktree')).toBeUndefined();
     const spawn = vi.spyOn(childProcess, 'spawn');

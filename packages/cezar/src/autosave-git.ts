@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { readdir, readFile } from 'node:fs/promises';
 import { watchAutosaveHolders } from './autosave-holders.ts';
+import { watchWindowsAutosave } from './autosave-windows.ts';
 
 /** Internal budgets, shared by every autosave command; no user configuration required. */
 export interface AutosaveOptions {
@@ -44,7 +45,8 @@ async function groupAlive(pid: number): Promise<boolean> {
  * fabricates permission for another writer. Commands never reset/remove files.
  */
 export async function autosaveGit(cwd: string, args: string[], options: AutosaveOptions) {
-  const holdersAlive = await watchAutosaveHolders(cwd);
+  const windows = process.platform === 'win32' ? await watchWindowsAutosave() : undefined;
+  const holdersAlive = process.platform === 'win32' ? (windows ? async () => false : undefined) : await watchAutosaveHolders(cwd);
   return new Promise<{ ok: boolean; stdout: string; code: number | null }>((resolve) => {
     const timeoutMs = options.timeoutMs ?? 30_000;
     const killGraceMs = options.killGraceMs ?? 1_000;
@@ -76,7 +78,7 @@ export async function autosaveGit(cwd: string, args: string[], options: Autosave
     let pollTimer: NodeJS.Timeout | undefined;
     const signal = (name: NodeJS.Signals) => {
       if (finished || child.pid === undefined) return;
-      try { if (grouped) process.kill(-child.pid, name); else child.kill(name); }
+      try { if (windows) windows.stop(name === 'SIGKILL'); else process.kill(-child.pid, name); }
       catch { /* The observation below, not signal delivery, proves termination. */ }
     };
     const finish = () => {
@@ -93,14 +95,13 @@ export async function autosaveGit(cwd: string, args: string[], options: Autosave
       if (finished || checking) return;
       clearTimeout(pollTimer);
       checking = true;
-      // A failed spawn owns no process. On Windows an aborted process has no
-      // group proof; retain the guard instead of claiming its children exited.
-      const alive = child.pid !== undefined && (grouped ? await groupAlive(child.pid) : aborted || !exited);
+      // A failed spawn owns no process. Signals never substitute for observation.
+      const alive = child.pid !== undefined && (windows ? await windows.alive(child.pid, () => exited) : await groupAlive(child.pid));
       const holders = !alive && await holdersAlive();
       checking = false;
       if (finished) return;
       if (exited && !alive && !holders && (aborted || closed)) { finish(); return; }
-      pollTimer = setTimeout(() => { void observe(); }, process.platform === 'darwin' ? 500 : 50);
+      pollTimer = setTimeout(() => { void observe(); }, process.platform === 'linux' ? 50 : 500);
     };
     const abort = (reason: string) => {
       if (aborted || finished) return;
@@ -130,5 +131,6 @@ export async function autosaveGit(cwd: string, args: string[], options: Autosave
       else abort('process error');
     });
     child.on('exit', value => { exited = true; code = value; void observe(); });
+    if (windows) void observe(); // Observe ancestry while the leader is still running.
   });
 }
