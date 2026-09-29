@@ -257,7 +257,7 @@ export function TasksOverview({
           <p className="mt-4 text-xs text-muted-foreground">Saved automatically. Tokens and cost appear only when supported.</p>
           <Button variant="outline" className="mt-4" onClick={() => setDetailedTable((value) => !value)}>{detailedTable ? 'Summary view' : 'Resource columns'}</Button>
         </PopoverContent></Popover>
-        <Button asChild data-slot="new-task-inline" className="min-h-11 inline-flex"><Link to="/new"><PlusIcon aria-hidden="true" />New task</Link></Button>
+        <Button asChild data-slot="new-task-inline" className="min-h-11 inline-flex max-md:hidden"><Link to="/new"><PlusIcon aria-hidden="true" />New task</Link></Button>
         </div>
       </header>
 

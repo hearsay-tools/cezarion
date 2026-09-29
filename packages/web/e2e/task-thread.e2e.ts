@@ -777,7 +777,8 @@ describe('task thread', () => {
       browser.evaluate(`document.querySelector('${link}').scrollIntoView({ block: 'center' })`)
       browser.evaluate(`document.querySelector('${link}').focus()`)
       browser.press('Enter')
-      browser.waitForFunction(`document.querySelector('[data-run-id="${id}"] [aria-label="${label}"]') !== null`)
+      // The toggle lives in the shell's top bar below md (#621), outside the route's [data-run-id] wrapper.
+      browser.waitForFunction(`document.querySelector('[data-route="task-thread"][data-run-id="${id}"]') !== null && document.querySelector('[aria-label="${label}"]') !== null`)
       expect(browser.isVisible('[data-slot="run-details"]')).toBe(id === LONG_RUN.id)
       expect(browser.isVisible('[data-slot="session-controls"]')).toBe(true)
     }

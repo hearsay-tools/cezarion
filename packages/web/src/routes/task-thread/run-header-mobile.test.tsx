@@ -8,6 +8,9 @@ import { AppShell } from '@/components/app-shell'
 import { ThemeProvider } from '@/components/theme-provider'
 import type { ApiRun } from '@open-mercato/cezar-api-client'
 
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+
 import { RunHeader } from './run-header'
 
 /** The pushed task screen below md (#621): the shell's top bar carries back / title / state /
@@ -47,14 +50,14 @@ function Probe() {
   return <span data-testid="location">{useLocation().pathname}</span>
 }
 
-function renderScreen(entry = '/tasks/r1', run: ApiRun = record) {
+function renderScreen(entry = '/tasks/r1', run: ApiRun = record, tab: 'session' | 'changes' = 'session') {
   return render(
     <QueryClientProvider client={createQueryClient()}>
       <ThemeProvider>
         <MemoryRouter initialEntries={[entry]}>
           <AppShell>
             <Routes>
-              <Route path="/tasks/:id" element={<RunHeader run={run} />} />
+              <Route path="/tasks/:id" element={<RunHeader run={run} tab={tab} />} />
               <Route path="/" element={<p>tasks list</p>} />
             </Routes>
             <Probe />
@@ -155,13 +158,15 @@ describe('pushed task screen top bar', () => {
 })
 
 describe('RunHeader below md on a pushed task screen', () => {
-  it('drops its own title and status row, and the details toggle stays', () => {
+  it('drops its own title and status row, and the details toggle moves to the top bar', () => {
     renderScreen()
     const header = document.querySelector('[data-slot="run-header"]') as HTMLElement
     expect(header.querySelector('[data-slot="session-kind"]')).toBeNull()
     expect(within(header).queryByText('Reviewer agent presets')).toBeNull()
     expect(within(header).queryByText('running')).toBeNull()
-    expect(within(header).getByRole('button', { name: 'Show run details' })).toBeTruthy()
+    // The toggle moved into the top bar (#621); the header keeps no copy.
+    expect(within(header).queryByRole('button', { name: 'Show run details' })).toBeNull()
+    expect(within(topBar()).getByRole('button', { name: 'Show run details' })).toBeTruthy()
   })
 
   it('styles run-tabs for the phone and counts the changed files only', () => {
@@ -213,5 +218,51 @@ describe('RunHeader below md on a pushed task screen', () => {
     expect(document.querySelector('[data-slot="mobile-run-title"]')).toBeNull()
     // Desktop tabs stay plain labels; the changed-file tally is a phone-only signal.
     expect(document.querySelector('[data-slot="run-tabs"] [data-slot="tab-count"]')).toBeNull()
+  })
+})
+
+describe('RunHeader phone layout under the top bar (#621)', () => {
+  const finished: ApiRun = { ...record, status: 'done' }
+
+  it('renders no title row, so the facet tabs are the first thing under the top bar', () => {
+    renderScreen('/tasks/r1', finished, 'changes')
+    const header = document.querySelector('[data-slot="run-header"]') as HTMLElement
+    expect(header.querySelector('[data-slot="run-title-row"]')).toBeNull()
+    expect(header.className).toContain('pt-0')
+    expect(header.className).not.toContain('pt-[18px]')
+    const first = header.firstElementChild?.firstElementChild as HTMLElement
+    expect(first.getAttribute('data-slot')).toBe('run-details')
+  })
+
+  it('puts the details chevron in the top bar, before the … button, at 44px', () => {
+    renderScreen()
+    const bar = topBar()
+    const chevron = within(bar).getByRole('button', { name: 'Show run details' })
+    const kebab = within(bar).getByRole('button', { name: 'Run actions' })
+    expect(chevron.className).toContain('size-11')
+    expect(chevron.compareDocumentPosition(kebab) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(document.querySelectorAll('[aria-label="Show run details"]')).toHaveLength(1)
+    fireEvent.click(chevron)
+    expect(within(bar).getByRole('button', { name: 'Hide run details' }).getAttribute('aria-expanded')).toBe('true')
+    expect(document.querySelector('[data-slot="run-details"]')?.className).toContain('block')
+  })
+
+  it('carries Archive on the git tabs inside the details panel, not beside the tabs', () => {
+    renderScreen('/tasks/r1', finished, 'changes')
+    const header = document.querySelector('[data-slot="run-header"]') as HTMLElement
+    const archive = within(header).getByRole('button', { name: /archive/i })
+    expect(archive.closest('[data-slot="run-details"]')).not.toBeNull()
+    expect(within(topBar()).queryByRole('button', { name: /archive/i })).toBeNull()
+  })
+
+  it('marks the tabs for the phone styling, which is neutral ink with a 2px underline', () => {
+    renderScreen()
+    expect(document.querySelector('[data-slot="run-tabs"]')?.getAttribute('data-phone-bar')).toBe('true')
+    const css = readFileSync(resolve(import.meta.dirname, 'run-header.css'), 'utf8')
+    const block = css.slice(css.indexOf("[data-slot='run-tabs'][data-phone-bar] { margin-top: 0; }") - 40)
+    expect(block).toContain("[data-slot='run-tabs'][data-phone-bar] { margin-top: 0; }")
+    expect(block).toMatch(/\[aria-current='page'\] \{[^}]*color: var\(--foreground\)[^}]*border-bottom-color: var\(--foreground\)[^}]*border-bottom-width: 2px/)
+    expect(block).toMatch(/> a \{ color: var\(--soft-foreground\)/)
+    expect(block).toMatch(/tab-count'\] \{ font-size: 11\.5px; color: var\(--soft-foreground\)/)
   })
 })

@@ -82,6 +82,12 @@ const cellsOf = (id: string): string[] => [...(tableRow(id)?.querySelectorAll('t
 afterEach(cleanup)
 
 describe('TasksOverview — mobile actions', () => {
+  it('hides the inline New task button below md, where the shell\'s floating button owns the job (#621)', () => {
+    renderOverview({ runs: [run({ status: 'done' })] })
+    const inline = document.querySelector('[data-slot="new-task-inline"]') as HTMLElement
+    expect(inline.className).toContain('max-md:hidden')
+  })
+
   it('opens the keyboard actions menu and uses the existing archive handler', () => {
     const { onArchiveFinished } = renderOverview({ runs: [run({ status: 'done' })] })
     fireEvent.keyDown(screen.getByRole('button', { name: 'Task actions' }), { key: 'ArrowDown' })

@@ -171,70 +171,80 @@ export function RunHeader({
     />
   )
 
+  // Phone-width only: above `md` the meta row never collapses, so a control to expand
+  // it would be a permanently disabled-looking chevron next to always-visible content.
+  // On the Session tab of a run with a plan it lands in the slot #764 freed by hiding
+  // the plan mirror here; on the three `task-git` tabs no tally is passed at all, so
+  // there the row does grow by one control — the price of the collapse.
+  const detailsToggle = (
+    <Button
+      variant="ghost"
+      size="icon-sm"
+      className="size-11 md:hidden"
+      aria-label={detailsOpen ? 'Hide run details' : 'Show run details'}
+      aria-controls={detailsId}
+      aria-expanded={detailsOpen}
+      onClick={toggleDetails}
+    >
+      <ChevronDownIcon
+        aria-hidden="true"
+        className={cn('transition-transform motion-reduce:transition-none', detailsOpen && 'rotate-180')}
+      />
+    </Button>
+  )
+  // #281: Archive out of the kebab. The Session tab's composer carries it — within a
+  // thumb's reach, which this header is not on a phone, where it scrolls away by
+  // design. The three git tabs have no composer, so the header carries it there, and
+  // exactly one surface offers it on any given screen.
+  const archiveButton = tab !== 'session' && flags.archive ? <ArchiveButton run={run} /> : null
+
   return (
     <header
       data-slot="run-header"
       className={cn(
-        'relative z-20 bg-background px-[18px] pt-[18px] md:px-9 md:pt-7',
+        // Pushed phone screen: the facet tabs sit directly under the shell's top bar (#621), so
+        // the header has no top padding of its own there.
+        'relative z-20 bg-background px-[18px] md:px-9 md:pt-7',
+        phoneBar ? 'pt-0' : 'pt-[18px]',
         tab === 'session' && 'md:sticky md:top-0',
       )}
     >
       <div className="w-full">
-        <div data-slot="run-title-row" className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 md:flex-nowrap">
-          {barSlot ? null : (
-            <>
-              <p data-slot="session-kind" className="text-[12px] font-semibold tracking-[0.14em] text-muted-foreground uppercase md:hidden">
-                {run.delegation?.role === 'worker' ? 'Worker session' : run.delegation?.role === 'root' ? 'Parent session' : 'Task session'}
-              </p>
-              <EditableTitle run={run} />
-              <Pill dot={attention.tone} shape={attention.shape} pulse={attention.pulse}>
-                {attention.label}{queuePosition !== undefined ? ` #${queuePosition}` : ''}
-              </Pill>
-            </>
-          )}
-          <span className="ml-auto flex shrink-0 items-center gap-1 md:gap-2.5">
-            {/* Phone-width only: above `md` the meta row never collapses, so a control to expand
-                it would be a permanently disabled-looking chevron next to always-visible content.
-                On the Session tab of a run with a plan it lands in the slot #764 freed by hiding
-                the plan mirror here; on the three `task-git` tabs no tally is passed at all, so
-                there the row does grow by one control — the price of the collapse. */}
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              className="size-11 md:hidden"
-              aria-label={detailsOpen ? 'Hide run details' : 'Show run details'}
-              aria-controls={detailsId}
-              aria-expanded={detailsOpen}
-              onClick={toggleDetails}
-            >
-              <ChevronDownIcon
-                aria-hidden="true"
-                className={cn('transition-transform motion-reduce:transition-none', detailsOpen && 'rotate-180')}
-              />
-            </Button>
-            {/* #281: Archive out of the kebab. The Session tab's composer carries it — within a
-                thumb's reach, which this header is not on a phone, where it scrolls away by
-                design. The three git tabs have no composer, so the header carries it there, and
-                exactly one surface offers it on any given screen. */}
-            {tab !== 'session' && flags.archive ? <ArchiveButton run={run} /> : null}
-            <HandoffAction run={run} />
-            {barSlot ? (
-              <MobileRunBarPortal slot={barSlot}>
-                <div data-slot="mobile-run-title" className="flex min-w-0 flex-1 flex-col">
-                  <EditableTitle run={run} compact />
-                  <span data-slot="mobile-run-state" className="flex min-w-0 items-center gap-1.5 text-[11.5px] leading-tight text-soft-foreground">
-                    <StatusDot tone={attention.tone} shape={attention.shape} pulse={attention.pulse} />
-                    <span className="truncate">
-                      {attention.label}{queuePosition !== undefined ? ` #${queuePosition}` : ''}
-                      {primaryReference ? ` · #${primaryReference.number}` : ''}
-                    </span>
-                  </span>
-                </div>
-                {actionsKebab}
-              </MobileRunBarPortal>
-            ) : actionsKebab}
-          </span>
-        </div>
+        {/* On the pushed phone screen the row would hold only controls (details chevron, Archive,
+            Handoff) between the top bar and the facet tabs. The chevron moves into the top bar and
+            the rest into the disclosure below, so the row does not render at all. */}
+        {barSlot ? (
+          <MobileRunBarPortal slot={barSlot}>
+            <div data-slot="mobile-run-title" className="flex min-w-0 flex-1 flex-col">
+              <EditableTitle run={run} compact />
+              <span data-slot="mobile-run-state" className="flex min-w-0 items-center gap-1.5 text-[11.5px] leading-tight text-soft-foreground">
+                <StatusDot tone={attention.tone} shape={attention.shape} pulse={attention.pulse} />
+                <span className="truncate">
+                  {attention.label}{queuePosition !== undefined ? ` #${queuePosition}` : ''}
+                  {primaryReference ? ` · #${primaryReference.number}` : ''}
+                </span>
+              </span>
+            </div>
+            {detailsToggle}
+            {actionsKebab}
+          </MobileRunBarPortal>
+        ) : (
+          <div data-slot="run-title-row" className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 md:flex-nowrap">
+            <p data-slot="session-kind" className="text-[12px] font-semibold tracking-[0.14em] text-muted-foreground uppercase md:hidden">
+              {run.delegation?.role === 'worker' ? 'Worker session' : run.delegation?.role === 'root' ? 'Parent session' : 'Task session'}
+            </p>
+            <EditableTitle run={run} />
+            <Pill dot={attention.tone} shape={attention.shape} pulse={attention.pulse}>
+              {attention.label}{queuePosition !== undefined ? ` #${queuePosition}` : ''}
+            </Pill>
+            <span className="ml-auto flex shrink-0 items-center gap-1 md:gap-2.5">
+              {detailsToggle}
+              {archiveButton}
+              <HandoffAction run={run} />
+              {actionsKebab}
+            </span>
+          </div>
+        )}
 
         {/* #765: workflow, branch, tracker refs, diff, tokens and cost wrap across several rows on
             a phone. `hidden` rather than a visual-only class so the collapsed rows leave the
@@ -242,6 +252,13 @@ export function RunHeader({
             keeps the desktop header exactly as it was — this is a narrow-viewport fix, and a
             desktop reader who has always seen these at a glance should not have to click for them. */}
         <div id={detailsId} data-slot="run-details" className={cn(detailsOpen ? 'block' : 'hidden', 'md:block')}>
+          {/* Pushed phone screen (#621): the controls the dropped title row used to carry. */}
+          {barSlot ? (
+            <div data-slot="run-details-actions" className="flex flex-wrap items-center gap-2 pt-2">
+              {archiveButton}
+              <HandoffAction run={run} />
+            </div>
+          ) : null}
           <MetaRow
             run={run}
             showTokens={metricVisibility.tokens}
@@ -263,7 +280,7 @@ export function RunHeader({
             visual weight of the row, not a smaller hit area. The count is phone-only (desktop tabs are unchanged). Counts come only from data the record
             already carries: the changed-file tally. A commit count is not on the record, and one
             more query for a badge is not worth it, so Commits shows none. */}
-        <div data-slot="run-tabs" className="mt-3 flex flex-wrap items-end gap-1 border-b border-border md:mt-5 max-md:gap-0 max-md:[&>a]:min-h-11 max-md:[&>a]:px-3.5 max-md:[&>a]:text-[13.5px]">
+        <div data-slot="run-tabs" data-phone-bar={phoneBar || undefined} className="mt-3 flex flex-wrap items-end gap-1 border-b border-border md:mt-5 max-md:gap-0 max-md:[&>a]:min-h-11 max-md:[&>a]:px-3.5 max-md:[&>a]:text-[13.5px]">
           <TabLink to={`/tasks/${run.id}`} active={tab === 'session'} replace={phoneBar}>
             Session
           </TabLink>
