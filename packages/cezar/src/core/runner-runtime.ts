@@ -1,5 +1,5 @@
 /** Default wall-clock cap for a single run before SIGTERM → SIGKILL.
- *  Interactive sessions pass `timeoutMs: 0` to disable it entirely. */
+ *  Managed workflow sessions default to `timeoutMs: 0` to disable it entirely. */
 export const DEFAULT_RUN_TIMEOUT_MS = 30 * 60_000;
 /** Grace period between SIGTERM and SIGKILL when a timeout fires. */
 export const KILL_GRACE_MS = 10_000;

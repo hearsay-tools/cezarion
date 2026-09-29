@@ -8,6 +8,7 @@ import type { RunManager, StartRunInput } from '../workflows/run.ts';
 import type { WorkflowDef } from '../workflows/types.ts';
 import { createApp } from './server.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
+import { workflowsResponseSchema } from '@open-mercato/cezar-contract';
 import { connectedProviderAuth } from './provider-auth.testkit.ts';
 
 /**
@@ -149,6 +150,18 @@ describe('request validation bounds (#429)', () => {
     });
     expect(res.status).toBe(400);
     expect(((await res.json()) as { error: string }).error).toContain('description');
+  });
+
+  it.each([0, 7_200_000])('preserves authored timeoutMs %i through workflow save and reload (#470)', async timeoutMs => {
+    const response = await postJson('/api/v1/workflows', { name: 'timed-skill', steps: [
+      { id: 'implement', skill: 'implement', prompt: '{{task}}', timeoutMs },
+    ] });
+    expect(response.status).toBe(201);
+    const catalog = workflowsResponseSchema.parse(await (await apiRequest(app, '/api/v1/workflows')).json());
+    expect(catalog.issues).toEqual([]);
+    expect(catalog.workflows.find(w => w.name === 'timed-skill')?.steps).toEqual([
+      { id: 'implement', skill: 'implement', prompt: '{{task}}', timeoutMs },
+    ]);
   });
 
   // ---- archive schema ------------------------------------------------------

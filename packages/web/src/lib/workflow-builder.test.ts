@@ -154,6 +154,14 @@ describe('workflowYaml', () => {
     })
   })
 
+  it.each([0, 7_200_000])('authored timeoutMs %i survives export and save (#470)', timeoutMs => {
+    const step = { ...stackStep('implement'), timeoutMs }
+    expect(parse(workflowYaml('timed-work', '', [step]))).toEqual({
+      name: 'timed-work', steps: [{ id: 'implement', skill: 'implement', prompt: '{{task}}', timeoutMs }],
+    })
+    expect(saveBody('timed-work', '', [step])).toEqual({ name: 'timed-work', steps: [step] })
+  })
+
   it('a per-step effort round-trips in the full steps form', () => {
     const step = { ...stackStep('fix'), effort: 'high' }
     const text = workflowYaml('focused-fix', '', [step])

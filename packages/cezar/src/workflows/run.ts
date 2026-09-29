@@ -6141,8 +6141,9 @@ export class RunManager {
           model: backendModel,
           effort: effectiveEffort,
           sessionId,
-          // Interactive sessions have no wall clock — the idle timer rules.
-          timeoutMs: interactive ? 0 : undefined,
+          // Managed work has no default wall clock, including non-final steps.
+          // Only an authored step opts in; turn completion still advances the chain.
+          timeoutMs: step.timeoutMs ?? 0,
         },
         onEvent,
         {

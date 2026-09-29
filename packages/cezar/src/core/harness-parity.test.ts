@@ -51,6 +51,7 @@ import {
   textEvents,
   exemptionFor,
   HARNESS_ADAPTERS,
+  WORKFLOW_TIMEOUT_CRITERIA,
   PARITY_EXEMPTIONS,
   PINNED_SESSION_ID,
   type RunObservation,
@@ -1063,12 +1064,15 @@ describe('OpenCode durable input acknowledgements', () => {
 
 describe('harness parity — the matrix itself', () => {
   const allIds = [
+    ...WORKFLOW_TIMEOUT_CRITERIA.map((c) => c.id),
     ...SEAM_CRITERIA.map((c) => c.id),
     ...INPUT_CRITERIA.map((c) => c.id),
     ...CONTROL_CRITERIA.map((c) => c.id),
     ...RUN_CRITERIA.map((c) => c.id),
   ];
   const scenarioOf = (id: string): ScenarioName => {
+    const timeout = WORKFLOW_TIMEOUT_CRITERIA.find(c => c.id === id);
+    if (timeout) return timeout.scenario;
     const seam = SEAM_CRITERIA.find((c) => c.id === id) ?? INPUT_CRITERIA.find((c) => c.id === id);
     if (seam) return seam.scenario;
     const control = CONTROL_CRITERIA.find((c) => c.id === id);

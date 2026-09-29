@@ -723,6 +723,16 @@ this normative contract.
 
 ## 7. Harness parity — session and lifecycle (`packages/cezar/src/core/harness-parity.test.ts`)
 
+Workflow deadline rows **T1–T6** (#470) live in
+`core/workflow-timeout-parity.test.ts` and are registered in the shared parity
+guard. Each `RUNNER_IDS` backend uses its own `HARNESS_ADAPTERS` native wire:
+non-final managed steps outlive the default runner deadline, explicit zero disables
+it, authored positive limits fail before trailing checks, and standalone sessions
+retain their default cap. Longer authored limits override that cap, while default
+tasks remain unlimited. The tests shorten only `DEFAULT_RUN_TIMEOUT_MS`; the
+manager, runners, transports and terminal signals remain real.
+
+
 > Every criterion in the harness parity matrix MUST hold for **every** backend,
 > or carry a declared exemption naming the wire limitation that prevents it.
 

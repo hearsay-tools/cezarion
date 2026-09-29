@@ -19,6 +19,9 @@ export const workflowStepSchema = z
     skill: z.string().optional(),
     model: z.string().optional(),
     effort: z.string().max(32).optional(),
+    /** Authored agent-step wall-clock limit in ms. Omitted or 0 means no limit.
+     *  Bound to Node's timer range so a larger value cannot become a 1ms kill. */
+    timeoutMs: z.number().int().min(0).max(2_147_483_647).optional(),
     /** Per-step agent backend override (falls back to the task / config default).
      *
      *  Deliberately NOT widened to the legacy `claude-cli` the way the run store's
@@ -45,6 +48,10 @@ export const workflowStepSchema = z
   })
   .refine((s) => Boolean(s.command) !== Boolean(s.prompt ?? s.skill), {
     message: 'a step is either an agent step (prompt/skill) or a check step (command), not both',
+  })
+  .refine((s) => !s.command || s.timeoutMs === undefined, {
+    message: 'timeoutMs applies only to agent steps',
+    path: ['timeoutMs'],
   });
 
 /**
@@ -120,7 +127,7 @@ export function skillStackOf(steps: WorkflowStepDef[]): string[] | null {
     if (stepKind(s) !== 'agent' || !s.skill) return null;
     if (s.prompt !== undefined && s.prompt !== '{{task}}') return null;
     if (s.name !== undefined && s.name !== s.skill) return null;
-    if (s.model || s.effort !== undefined || s.runner || s.agentProfile || s.allowedTools || s.bashAllowlist || s.onFail) return null;
+    if (s.timeoutMs !== undefined || s.model || s.effort !== undefined || s.runner || s.agentProfile || s.allowedTools || s.bashAllowlist || s.onFail) return null;
     skills.push(s.skill);
   }
   return skills.length ? skills : null;

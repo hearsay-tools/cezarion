@@ -72,6 +72,17 @@ export const SCENARIOS = [
 ] as const;
 export type ScenarioName = (typeof SCENARIOS)[number];
 
+/** #470: exercised in workflow-timeout-parity.test.ts against every native wire. */
+export const WORKFLOW_TIMEOUT_CRITERIA = [
+  { id: 'T1', scenario: 'hold', name: 'default non-final steps outlive the runner deadline' },
+  { id: 'T2', scenario: 'hold', name: 'explicit zero disables the workflow deadline' },
+  { id: 'T3', scenario: 'hold', name: 'authored positive deadlines fail without running trailing checks' },
+  { id: 'T4', scenario: 'hold', name: 'standalone sessions retain the default deadline' },
+  { id: 'T5', scenario: 'hold', name: 'an authored longer limit replaces the runner default' },
+  { id: 'T6', scenario: 'hold', name: 'default tasks remain unlimited' },
+] as const;
+
+
 export interface HarnessAdapter {
   readonly backend: RunnerId;
   /** The env var this backend's runner already reads to locate its binary. */
