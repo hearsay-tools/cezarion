@@ -331,3 +331,30 @@ it('does not rearm a notified transition when a newly loaded alias is stale', ()
   patch([run({ status: 'waiting' })])
   expect(constructed).toHaveLength(2)
 })
+
+
+it.each([false, true])('ignores a pre-transition fetch on an observed alias (catch-up: %s)', async (catchUp) => {
+  const constructed = stubNotification()
+  hideTab()
+  const { client, patch } = mount({ notifications: { enabled: true } }, [run()])
+  const alias = ['boot', 'runs', 'list']
+  act(() => client.setQueryData(alias, [run(), run({ id: 'other' })]))
+  let resolve!: (runs: RunRecord[]) => void
+  const response = new Promise<RunRecord[]>(done => { resolve = done })
+  let pending!: Promise<RunRecord[]>
+  act(() => { pending = client.fetchQuery({ queryKey: alias, queryFn: () => response, staleTime: 0 }) })
+  patch([run({ status: 'waiting' })])
+  act(() => client.setQueryData(alias, [run({ status: 'waiting' }), run({ id: 'other' })]))
+  await act(async () => {
+    resolve([run(), run({ id: 'other', status: 'waiting' })])
+    await pending
+  })
+  // The stale r1 row cannot rewind its live transition; the unaffected other row reconciles.
+  expect(constructed.map(n => n.options?.tag)).toEqual(['cezar-run-r1', 'cezar-run-other'])
+  if (catchUp) act(() => client.setQueryData(alias, [run({ status: 'waiting' }), run({ id: 'other', status: 'waiting' })]))
+  expect(constructed).toHaveLength(2)
+  // A fetch started after the transition is authoritative and may rearm the task.
+  await act(async () => { await client.fetchQuery({ queryKey: alias, queryFn: async () => [run()], staleTime: 0 }) })
+  await act(async () => { await client.fetchQuery({ queryKey: alias, queryFn: async () => [run({ status: 'waiting' })], staleTime: 0 }) })
+  expect(constructed).toHaveLength(3)
+})

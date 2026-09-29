@@ -48,7 +48,9 @@ export function RunNotifications() {
     const cache = queryClient.getQueryCache()
     const lists = new Map<string, ReadonlyMap<string, RunNotificationState>>()
     const known = new Map<string, RunNotificationState>()
-    const transitioned = new Set<string>()
+    const transitions = new Map<string, number>()
+    const fetches = new Map<string, number>()
+    let revision = 0
     const isRunList = (key: readonly unknown[]) =>
       key.length === 3 && typeof key[0] === 'string' && key[1] === 'runs' && key[2] === 'list'
 
@@ -58,29 +60,37 @@ export function RunNotifications() {
       for (const id of known.keys()) {
         if (!retained.has(id)) {
           known.delete(id)
-          transitioned.delete(id)
+          transitions.delete(id)
         }
       }
     }
-    const observe = (hash: string, runs: readonly ApiRun[], seed = false): void => {
+    const observe = (hash: string, runs: readonly ApiRun[], seed = false, fetchedAt = Infinity): void => {
       const previous = lists.get(hash)
       const { statuses } = diffRunTransitions(new Map(), runs)
       // Compare within each alias first: a token tick on an old alias must not rewind the
       // shared history. Initial aliases establish the baseline only until a live transition
       // is observed: a late first fetch may contain a pre-transition snapshot.
       const changed = runs.filter(run => {
+        // A GET started before a newer observed transition cannot rewind that task. Other
+        // rows in the response still reconcile, and a subsequent fresh GET is authoritative.
+        if ((transitions.get(run.id) ?? 0) > fetchedAt) return false
         const before = previous?.get(run.id)
         const after = statuses.get(run.id)!
-        return before !== undefined &&
-          (before.status !== after.status || before.wantsAttention !== after.wantsAttention)
+        // A fresh GET can confirm a row previously ignored as stale, even if that alias's
+        // cached value did not change. Manual cache ticks still compare within their alias.
+        const baseline = fetchedAt === Infinity ? before : known.get(run.id)
+        return before !== undefined && baseline !== undefined &&
+          (baseline.status !== after.status || baseline.wantsAttention !== after.wantsAttention)
       })
       const { entering, statuses: updates } = diffRunTransitions(known, changed)
       for (const [id, state] of statuses) {
-        if (!previous?.has(id) && !transitioned.has(id)) known.set(id, state)
+        if (!previous?.has(id) && !transitions.has(id)) known.set(id, state)
       }
       for (const [id, state] of updates) {
+        const before = known.get(id)
+        if (before?.status === state.status && before.wantsAttention === state.wantsAttention) continue
         known.set(id, state)
-        transitioned.add(id)
+        transitions.set(id, ++revision)
       }
       lists.set(hash, statuses)
       prune()
@@ -106,9 +116,16 @@ export function RunNotifications() {
       if (!isRunList(event.query.queryKey)) return
       if (event.type === 'removed') {
         lists.delete(event.query.queryHash)
+        fetches.delete(event.query.queryHash)
         prune()
-      } else if (event.type === 'updated' && event.action.type === 'success' && Array.isArray(event.query.state.data)) {
-        observe(event.query.queryHash, event.query.state.data as ApiRun[])
+      } else if (event.type === 'updated') {
+        if (event.action.type === 'fetch') fetches.set(event.query.queryHash, revision)
+        if (event.action.type === 'success' && Array.isArray(event.query.state.data)) {
+          // A fetch already in flight at mount predates every transition observed here.
+          const fetchedAt = event.action.manual ? Infinity : (fetches.get(event.query.queryHash) ?? 0)
+          observe(event.query.queryHash, event.query.state.data as ApiRun[], false, fetchedAt)
+          if (!event.action.manual) fetches.delete(event.query.queryHash)
+        }
       }
     })
   }, [queryClient])
