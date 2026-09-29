@@ -7,7 +7,7 @@ import { ApiError, continueRun } from '@/api/client'
 import { queryKeys, useConfig, useRunnerModels } from '@/api/queries'
 import { DEFAULT_AGENT_ACCOUNT_ID } from '@open-mercato/cezar-api-client'
 import type { ApiRun, ContinueResponse, AttachmentInput, Runner } from '@open-mercato/cezar-api-client'
-import { PickerPill, RunnerPill } from '@/components/picker-pill'
+import { PickerPill, PickerPillGroup, RunnerPill } from '@/components/picker-pill'
 import {
   effortOptionsForModel,
   modelsForRunner,
@@ -176,6 +176,7 @@ export function useContinueAction(run: ApiRun): ContinueAction {
     providerPending: continuation.providerPending,
     pills: (
       <div data-slot="follow-up-engine" className="session-engine-controls">
+<PickerPillGroup>
         {/* Shown when there is a choice to make: more than one runner, or more than one login for
             one of them. A host with neither sees no pill, exactly as before. */}
         {runners.length > 1 || runners.some((id) => hasAccountChoice(accounts, id)) ? (
@@ -246,6 +247,7 @@ export function useContinueAction(run: ApiRun): ContinueAction {
             desc: option.desc,
           }))}
         />
+</PickerPillGroup>
       </div>
     ),
     continueWith: (text, images) => mutation.mutateAsync({ text, images }),

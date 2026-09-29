@@ -87,13 +87,21 @@ function layout(): Layout {
         const label = el.querySelector('[data-slot="picker-label"]');
         return label && label.scrollWidth > label.clientWidth + 1;
       }).map(el => el.getAttribute('data-slot')),
-      incorrectPrefixes: [...group.querySelectorAll('[data-slot$="pill"]')].filter(pill => {
-        const label = pill.querySelector('[data-slot="picker-label"]');
-        const full = pill.getAttribute('aria-label');
-        const value = full.slice(full.indexOf(' · ') + 3);
-        const fits = label.previousElementSibling.getBoundingClientRect().width <= label.getBoundingClientRect().width + 0.5;
-        return label.textContent !== (fits ? full : value) || pill.title !== full;
-      }).map(el => el.getAttribute('data-slot')),
+      incorrectPrefixes: (() => {
+        // Row-level rule (#541): a prefix shows only when EVERY pill in the row fits with its own.
+        const pills = [...group.querySelectorAll('[data-slot$="pill"]')];
+        const fitsWithPrefix = (pill) => {
+          const label = pill.querySelector('[data-slot="picker-label"]');
+          return label.previousElementSibling.getBoundingClientRect().width <= label.getBoundingClientRect().width + 0.5;
+        };
+        const allFit = pills.every(fitsWithPrefix);
+        return pills.filter(pill => {
+          const label = pill.querySelector('[data-slot="picker-label"]');
+          const full = pill.getAttribute('aria-label');
+          const value = full.slice(full.indexOf(' · ') + 3);
+          return label.textContent !== (allFit ? full : value) || pill.title !== full;
+        }).map(el => el.getAttribute('data-slot'));
+      })(),
     };
   })()`) as Layout
 }

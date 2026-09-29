@@ -1,5 +1,5 @@
 import { ChevronDownIcon } from '@/components/design-icons'
-import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 
 import { DEFAULT_AGENT_ACCOUNT_ID, type Runner } from '@open-mercato/cezar-api-client'
@@ -26,17 +26,117 @@ export const chevron = (
   <ChevronDownIcon aria-hidden="true" className="size-2.5 shrink-0 text-supporting-foreground" />
 )
 
+interface GroupMember {
+  pill: HTMLElement
+  box: HTMLElement
+  full: HTMLElement
+}
+interface PrefixGroup {
+  register: (id: string, member: GroupMember) => () => void
+  /** True while every pill in the row fits with its prefix. */
+  showPrefixes: boolean
+}
+const PrefixGroupContext = createContext<PrefixGroup | null>(null)
+
+const px = (value: string): number => Number.parseFloat(value) || 0
+
+/** The width a pill needs with its full `Field · value` label: everything around the label box
+ * (icon, chevron, gaps, padding, border) plus the label's own intrinsic width. Independent of
+ * whether the prefix is currently shown, so the decision cannot feed back into itself. */
+function naturalWidth({ pill, box, full }: GroupMember): number {
+  const style = getComputedStyle(pill)
+  const items = [...pill.children].filter((child) => {
+    if (child === box) return false
+    const childStyle = getComputedStyle(child)
+    return childStyle.display !== 'none' && childStyle.position !== 'absolute'
+  })
+  const around = items.reduce((sum, child) => sum + child.getBoundingClientRect().width, 0)
+  const gaps = px(style.columnGap) * items.length
+  return around + gaps + full.getBoundingClientRect().width
+    + px(style.paddingLeft) + px(style.paddingRight) + px(style.borderLeftWidth) + px(style.borderRightWidth)
+}
+
+/** The row layout containing the pills: the nearest grid or flex ancestor. */
+function rowContainer(pill: HTMLElement): HTMLElement {
+  for (let node = pill.parentElement; node; node = node.parentElement) {
+    const display = getComputedStyle(node).display
+    if (display === 'grid' || display === 'flex') return node
+  }
+  return pill.parentElement!
+}
+
+/** Pills sharing a visual line must fit it together; separate lines fit independently. */
+function allRowsFit(members: GroupMember[]): boolean {
+  const lines = new Map<HTMLElement, Map<number, GroupMember[]>>()
+  for (const member of members) {
+    const container = rowContainer(member.pill)
+    const byTop = lines.get(container) ?? new Map<number, GroupMember[]>()
+    const top = Math.round(member.pill.getBoundingClientRect().top)
+    byTop.set(top, [...(byTop.get(top) ?? []), member])
+    lines.set(container, byTop)
+  }
+  for (const [container, byTop] of lines) {
+    const style = getComputedStyle(container)
+    const available = container.clientWidth - px(style.paddingLeft) - px(style.paddingRight)
+    for (const line of byTop.values()) {
+      const needed = line.reduce((sum, member) => sum + naturalWidth(member), 0) + px(style.columnGap) * (line.length - 1)
+      if (needed > available + 0.5) return false
+    }
+  }
+  return true
+}
+
+/**
+ * Coordinates the prefixes of sibling pills (#541). Wrap a runner/model/effort row in it: every
+ * prefix drops as soon as the row cannot hold all of them, so no value truncates while a sibling
+ * still spends width on a prefix, and they return together once everything fits. Outside a group
+ * each pill decides for itself (#522). Renders no DOM, so the row's own layout is untouched.
+ */
+export function PickerPillGroup({ children }: { children: ReactNode }) {
+  const members = useRef(new Map<string, GroupMember>())
+  const observer = useRef<ResizeObserver | null>(null)
+  const [showPrefixes, setShowPrefixes] = useState(true)
+  const evaluate = useCallback(() => setShowPrefixes(allRowsFit([...members.current.values()])), [])
+  const register = useCallback((id: string, member: GroupMember) => {
+    members.current.set(id, member)
+    if (typeof ResizeObserver !== 'undefined') {
+      observer.current ??= new ResizeObserver(evaluate)
+      for (const element of [member.box, member.full, rowContainer(member.pill)]) observer.current.observe(element)
+    }
+    evaluate()
+    return () => {
+      members.current.delete(id)
+      if (typeof ResizeObserver !== 'undefined') {
+        for (const element of [member.box, member.full]) observer.current?.unobserve(element)
+      }
+      evaluate()
+    }
+  }, [evaluate])
+  useLayoutEffect(() => () => observer.current?.disconnect(), [])
+  const value = useMemo(() => ({ register, showPrefixes }), [register, showPrefixes])
+  return <PrefixGroupContext.Provider value={value}>{children}</PrefixGroupContext.Provider>
+}
+
 /** Keep the intrinsic full-label width even when the prefix is hidden, avoiding a
  * shrink/restore loop on auto-sized pills. Both measurements follow the actual font
- * and container; a breakpoint cannot tell whether a particular value fits. */
+ * and container; a breakpoint cannot tell whether a particular value fits. In a group the
+ * hidden prefix releases its width to the row instead (#541): the group measures the natural
+ * width itself, so nothing here feeds back into the decision. */
 function FieldLabel({ field, children }: { field: string; children: ReactNode }) {
   const box = useRef<HTMLSpanElement>(null)
   const measure = useRef<HTMLSpanElement>(null)
-  const [showField, setShowField] = useState(true)
+  const group = useContext(PrefixGroupContext)
+  const register = group?.register
+  const id = useId()
+  const [fits, setFits] = useState(true)
   useLayoutEffect(() => {
     const container = box.current!
     const full = measure.current!
-    const update = () => setShowField(
+    if (register) {
+      const pill = container.closest<HTMLElement>('[data-slot$="pill"]')
+      return pill ? register(id, { pill, box: container, full }) : undefined
+    }
+    const update = () => setFits(
       full.getBoundingClientRect().width <= container.getBoundingClientRect().width + 0.5,
     )
     update()
@@ -45,11 +145,15 @@ function FieldLabel({ field, children }: { field: string; children: ReactNode })
     observer.observe(container)
     observer.observe(full)
     return () => observer.disconnect()
-  }, [field, children])
+  }, [field, children, id, register])
+  const grouped = group !== null
+  const showField = grouped ? group.showPrefixes : fits
+  // Grouped and prefix-less, the visible label carries the width itself so the row can reclaim it.
+  const releasing = grouped && !showField
   return (
     <span ref={box} className="relative min-w-0 overflow-hidden" aria-hidden="true">
-      <span ref={measure} className="invisible block w-max whitespace-nowrap">{field} · {children}</span>
-      <span data-slot="picker-label" className="absolute inset-0 block truncate">
+      <span ref={measure} className={cn('invisible w-max whitespace-nowrap', releasing ? 'absolute left-0 top-0' : 'block')}>{field} · {children}</span>
+      <span data-slot="picker-label" className={cn('block truncate', releasing ? 'relative' : 'absolute inset-0')}>
         {showField ? <span className="text-muted-foreground">{field} · </span> : null}{children}
       </span>
     </span>

@@ -1131,10 +1131,21 @@ it.each(TYPO_RUNS.flatMap(run => [360, 906, 1280].map(width => ({ run, width }))
         dockWidth: document.querySelector('[data-slot="thread-dock"]').getBoundingClientRect().width,
         chevronDisplay: getComputedStyle(group.querySelector('[data-slot="runner-pill"] > svg:last-child')).display };
     })()`) as { runner: { full: string; value: string; text: string; fullWidth: number; available: number }; model: { full: string; value: string; text: string; fullWidth: number; available: number; overflow: string; scrollWidth: number; clientWidth: number }; effort: { full: string; value: string; text: string; fullWidth: number; available: number }; groupWidth: number; grid: string; dockWidth: number; chevronDisplay: string }
-    for (const [field, pill] of Object.entries({ runner: facts.runner, model: facts.model, effort: facts.effort })) {
-      expect(pill.text, `${width}px ${run.model}: ${field} prefix reflects available room`).toBe(
-        pill.fullWidth <= pill.available + 0.5 ? pill.full : pill.value,
-      )
+    // Row-level rule (#541): a prefix shows only when every pill in the row fits with its own.
+    const pills = Object.entries({ runner: facts.runner, model: facts.model, effort: facts.effort })
+    const allFit = pills.every(([, pill]) => pill.fullWidth <= pill.available + 0.5)
+    for (const [field, pill] of pills) {
+      expect(pill.text, `${width}px ${run.model}: ${field} prefix follows the whole row`).toBe(allFit ? pill.full : pill.value)
+    }
+    if (width === 1280 && run.model.startsWith('opencode/')) {
+      expect(facts.model.scrollWidth, `${width}px: full model ID visible without an ellipsis`).toBeLessThanOrEqual(facts.model.clientWidth)
+      expect(facts.model.text).toBe(run.model)
+      expect(facts.runner.text).toBe('opencode')
+      expect(facts.effort.text).toBe('auto')
+    }
+    for (const slot of ['runner-pill', 'follow-up-model-pill', 'follow-up-effort-pill']) {
+      const pill = browser.evaluate(`document.querySelector('.session-engine-controls [data-slot="${slot}"]').title`) as string
+      expect(pill, `${width}px ${slot}: tooltip keeps the full value`).toContain(' · ')
     }
     if (width === 906 && run.model === 'grok-4.6') {
       expect(facts.groupWidth).toBeGreaterThan(300)

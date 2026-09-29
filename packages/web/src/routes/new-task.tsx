@@ -32,7 +32,7 @@ import type {
 } from '@open-mercato/cezar-api-client'
 import { TwinkleBackdrop } from '@/components/centered-state'
 import { Composer, type ComposerHandle } from '@/components/composer/composer'
-import { PickerPill, RunnerPill, chevron, chipClass } from '@/components/picker-pill'
+import { PickerPill, PickerPillGroup, RunnerPill, chevron, chipClass } from '@/components/picker-pill'
 import { PromptTemplateMenu } from '@/components/prompt-template-menu'
 import { SkillPreviewDialog } from '@/components/skill-detail'
 import {
@@ -747,7 +747,9 @@ export function NewTaskRoute() {
           agentOptions={
             <div ref={agentOptionsRef} data-slot="agent-options" role="group" aria-label="Agent settings" className="new-task-agent-options">
               {/* Controls stay with the editor; responsive DOM order follows their visual order. */}
-              {compactAgentOptions ? [runnerPill, effortPill, modelPill] : [runnerPill, modelPill, effortPill]}
+              <PickerPillGroup>
+                {compactAgentOptions ? [runnerPill, effortPill, modelPill] : [runnerPill, modelPill, effortPill]}
+              </PickerPillGroup>
             </div>
           }
           executionOptions={

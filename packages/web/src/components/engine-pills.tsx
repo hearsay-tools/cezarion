@@ -2,7 +2,7 @@ import { CpuIcon, GaugeIcon, TerminalIcon } from '@/components/design-icons'
 import { hasAccountChoice, useAgentAccounts } from '@/api/agent-accounts'
 import { useConfig, useProviderStatus, useRunnerModels } from '@/api/queries'
 import type { CreateRunInput, Runner } from '@open-mercato/cezar-api-client'
-import { PickerPill, RunnerPill, type RunnerAccountChoice } from '@/components/picker-pill'
+import { PickerPill, PickerPillGroup, RunnerPill, type RunnerAccountChoice } from '@/components/picker-pill'
 import { usableRunners } from '@/lib/provider-status'
 import {
   effortOptionsForModel,
@@ -196,7 +196,7 @@ export function EnginePills({
     runners.length > 1 || runners.some((id) => hasAccountChoice(accountChoices, id))
 
   return (
-    <>
+    <PickerPillGroup>
       {showRunnerPill ? (
         <RunnerPill
           icon={<TerminalIcon aria-hidden="true" className="size-[18px] shrink-0 text-accent-text" />}
@@ -257,6 +257,6 @@ export function EnginePills({
         onPick={(next) => onChange({ ...pick, effort: next })}
         options={effortOptions.map((option) => ({ value: option.value, label: option.label, desc: option.desc }))}
       />
-    </>
+    </PickerPillGroup>
   )
 }
