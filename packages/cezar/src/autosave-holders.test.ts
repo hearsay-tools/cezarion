@@ -2,6 +2,7 @@ import * as childProcess from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as liveness from './delegation/process-liveness.ts';
 import { watchAutosaveHolders } from './autosave-holders.ts';
+import { autosaveGit } from './autosave-git.ts';
 
 vi.mock('node:child_process', async importOriginal => ({
   ...await importOriginal<typeof import('node:child_process')>(), execFile: vi.fn(),
@@ -20,6 +21,15 @@ describe('autosave cwd-holder proof', () => {
   });
   afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
+  it.each(['win32', 'freebsd'] as const)('refuses %s before spawning without a termination proof', async platform => {
+    vi.stubGlobal('process', { ...process, platform });
+    expect(await watchAutosaveHolders('/worktree')).toBeUndefined();
+    const spawn = vi.spyOn(childProcess, 'spawn');
+    const warning = vi.fn();
+    expect(await autosaveGit('/worktree', ['status'], { onWarning: warning })).toEqual({ ok: false, stdout: '', code: null });
+    expect(spawn).not.toHaveBeenCalled();
+    expect(warning).toHaveBeenCalledWith(expect.stringContaining('no Git command started'));
+  });
   it('retains a Darwin holder seen by lsof but missing from the independent ps snapshot', async () => {
     vi.stubGlobal('process', { ...process, platform: 'darwin' });
     vi.spyOn(process, 'kill').mockReturnValue(true);

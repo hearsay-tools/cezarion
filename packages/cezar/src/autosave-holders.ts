@@ -23,7 +23,9 @@ async function snapshot(cwd: string, since: number): Promise<Snapshot> {
     const pids = processesWithCwdUnder(cwd, process.platform, undefined, since);
     return pids === 'unknown' ? pids : new Map(pids.map(pid => [pid, processStartToken(pid)]));
   }
-  if (process.platform !== 'darwin') return new Map();
+  // No process-tree proof exists on other platforms. Refuse before spawning,
+  // rather than start work whose shutdown could retain the guard forever.
+  if (process.platform !== 'darwin') return 'unknown';
   const uid = process.getuid?.();
   if (uid === undefined) return 'unknown';
   const [lsof, ps] = await Promise.all([
