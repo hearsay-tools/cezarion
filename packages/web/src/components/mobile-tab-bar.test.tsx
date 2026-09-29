@@ -1,6 +1,6 @@
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
-import { MemoryRouter, useLocation } from 'react-router'
-import { afterEach, describe, expect, it } from 'vitest'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { MemoryRouter, useLocation, useNavigate } from 'react-router'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { MobileTabBar } from '@/components/mobile-tab-bar'
 import { activeNavPath, visibleNavItems } from '@/components/nav-items'
@@ -138,5 +138,56 @@ describe('More sheet', () => {
     expect(row.getAttribute('aria-current')).toBe('page')
     fireEvent.click(row)
     expect(screen.queryByRole('dialog', { name: 'More' })).toBeNull()
+  })
+})
+
+describe('More sheet lifecycle', () => {
+  const open = () => fireEvent.click(within(bar()).getByRole('button', { name: 'More' }))
+
+  it('returns focus to the More tab on Escape', async () => {
+    renderBar('/')
+    open()
+    fireEvent.keyDown(screen.getByRole('dialog', { name: 'More' }), { key: 'Escape' })
+    expect(screen.queryByRole('dialog', { name: 'More' })).toBeNull()
+    // Radix restores focus on a zero-delay timer after the content unmounts.
+    await waitFor(() => expect(document.activeElement).toBe(within(bar()).getByRole('button', { name: 'More' })))
+  })
+
+  it('closes on a route change that did not come from a row (back/forward, palette)', () => {
+    function Jump() {
+      const navigate = useNavigate()
+      return <button onClick={() => navigate('/git')}>jump</button>
+    }
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <MobileTabBar items={visibleNavItems({ forge: true })} activeTo="/" />
+        <Jump />
+      </MemoryRouter>,
+    )
+    open()
+    expect(screen.getByRole('dialog', { name: 'More' })).toBeTruthy()
+    fireEvent.click(screen.getByText('jump'))
+    expect(screen.queryByRole('dialog', { name: 'More' })).toBeNull()
+  })
+
+  it('closes when the viewport widens past md', async () => {
+    const listeners = new Set<(event: MediaQueryListEvent) => void>()
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      matches: false,
+      media: query,
+      addEventListener: (_: string, fn: (event: MediaQueryListEvent) => void) => listeners.add(fn),
+      removeEventListener: (_: string, fn: (event: MediaQueryListEvent) => void) => listeners.delete(fn),
+    }))
+    try {
+      renderBar('/')
+      open()
+      expect(screen.getByRole('dialog', { name: 'More' })).toBeTruthy()
+      act(() => {
+        for (const fn of listeners) fn({ matches: true } as MediaQueryListEvent)
+      })
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: 'More' })).toBeNull())
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 })

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   keyboardAwareCollisionPadding,
   keyboardInset,
+  keyboardOpen,
   useViewportInsets,
   viewportInsets,
   watchKeyboardInset,
@@ -19,6 +20,7 @@ class StubViewport implements KeyboardViewport {
   constructor(
     public height: number,
     public offsetTop = 0,
+    public scale = 1,
   ) {}
   addEventListener(type: 'resize' | 'scroll', listener: () => void) {
     const set = this.listeners.get(type) ?? new Set()
@@ -221,5 +223,22 @@ describe('watchKeyboardInset — the stubbed adapter', () => {
     const stop = watchKeyboardInset(win(null), (px) => applied.push(px))
     expect(applied).toEqual([0])
     stop() // must not throw
+  })
+})
+
+describe('keyboardOpen — what hides the phone tab bar', () => {
+  it.each([
+    // [innerHeight, vv.height, vv.offsetTop, vv.scale, expected]
+    [800, 800, 0, 1, false], // closed
+    [800, 460, 0, 1, true], // iOS keyboard
+    [800, 740, 0, 1, false], // 60px of browser chrome is not a keyboard
+    [800, 500, 0, 2.5, false], // pinch-zoomed: shorter visual viewport, no keyboard
+    [800, 500, 0, 1.02, true], // rounding noise around 1 still counts as 1
+  ])('inner %d, vv %d @ %d, scale %d → %s', (innerHeight, height, offsetTop, scale, expected) => {
+    expect(keyboardOpen(win(new StubViewport(height, offsetTop, scale), innerHeight))).toBe(expected)
+  })
+
+  it('is false without a visualViewport', () => {
+    expect(keyboardOpen(win(null))).toBe(false)
   })
 })

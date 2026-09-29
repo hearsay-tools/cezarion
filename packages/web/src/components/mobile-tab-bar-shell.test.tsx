@@ -10,6 +10,7 @@ const insets = vi.hoisted(() => ({ bottom: 0 }))
 vi.mock('@/lib/keyboard-inset', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/keyboard-inset')>()),
   useViewportInsets: () => ({ top: 0, bottom: insets.bottom }),
+  useKeyboardOpen: () => insets.bottom > 80,
 }))
 
 beforeEach(() => {
@@ -97,5 +98,16 @@ describe('AppShell mobile tab bar (#621)', () => {
     renderShell('/p/cezarion/new')
     expect(tabBar()).not.toBeNull()
     expect(fab()).toBeNull()
+  })
+
+  it('pads main clear of the New task button while it is shown, and only then', () => {
+    renderShell('/p/cezarion/')
+    expect(document.querySelector('[data-slot="main"]')?.className).toContain('max-md:pb-20')
+    cleanup()
+    renderShell('/p/cezarion/new')
+    expect(document.querySelector('[data-slot="main"]')?.className).not.toContain('max-md:pb-20')
+    cleanup()
+    renderShell('/p/cezarion/tasks/r1')
+    expect(document.querySelector('[data-slot="main"]')?.className).not.toContain('max-md:pb-20')
   })
 })

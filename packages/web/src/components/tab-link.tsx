@@ -13,6 +13,7 @@ export function TabLink({
   active = false,
   onClick,
   count,
+  replace,
   className,
   children,
 }: {
@@ -23,12 +24,15 @@ export function TabLink({
   onClick?: () => void
   /** A quiet trailing tally ("Changes 12"). Omitted, not zeroed, when the caller has no number. */
   count?: number
+  /** Swap the current history entry instead of pushing one. */
+  replace?: boolean
   className?: string
   children: ReactNode
 }) {
   return (
     <Link
       to={to}
+      replace={replace}
       aria-current={active ? 'page' : undefined}
       onClick={onClick}
       className={cn(

@@ -16,6 +16,7 @@ import { useEffect, useRef, useState } from 'react'
 /** The subset of `VisualViewport` the math needs — stubbable. */
 export interface KeyboardViewport {
   height: number
+  scale?: number
   offsetTop: number
   addEventListener(type: 'resize' | 'scroll', listener: () => void): void
   removeEventListener(type: 'resize' | 'scroll', listener: () => void): void
@@ -162,4 +163,25 @@ export function useKeyboardInsetVar(onSettle?: (px: number) => void): void {
       (px) => onSettleRef.current?.(px),
     )
   }, [])
+}
+
+/** Below this a bottom inset is browser chrome or a pan, not a keyboard (the shortest iOS
+ *  keyboard is ~200px, the URL-bar wobble a few dozen). */
+export const KEYBOARD_MIN_INSET = 80
+
+/** Whether the on-screen keyboard is up: a tall bottom inset at normal zoom. A pinch-zoomed page
+ *  also has a shorter visual viewport, which is not a keyboard and must not hide fixed chrome. */
+export function keyboardOpen(win: KeyboardWindow): boolean {
+  const scale = win.visualViewport?.scale ?? 1
+  return Math.abs(scale - 1) < 0.05 && keyboardInset(win) > KEYBOARD_MIN_INSET
+}
+
+/** The React binding for {@link keyboardOpen}; false where `visualViewport` is absent. */
+export function useKeyboardOpen(): boolean {
+  const [open, setOpen] = useState(false)
+  useEffect(() => {
+    const win = window as unknown as KeyboardWindow
+    return watchViewportInsets(win, () => setOpen(keyboardOpen(win)))
+  }, [])
+  return open
 }

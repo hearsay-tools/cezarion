@@ -36,6 +36,7 @@ const ROW_CLASS =
 export function MoreSheet({
   open,
   onOpenChange,
+  onCloseAutoFocus,
   projectName,
   items,
   activeTo,
@@ -44,6 +45,8 @@ export function MoreSheet({
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
+  /** Where focus goes on close; the tab bar's More button is not a SheetTrigger. */
+  onCloseAutoFocus?: (event: Event) => void
   /** The current project's name, beside the title. Absent on global routes. */
   projectName?: string | null
   /** `visibleNavItems(...)` — the source of the icons and of the Inbox/Automations gates. */
@@ -98,6 +101,7 @@ export function MoreSheet({
         side="bottom"
         data-slot="more-sheet"
         showCloseButton={false}
+        onCloseAutoFocus={onCloseAutoFocus}
         // Nothing to describe beyond the rows; Radix warns when it cannot find a description.
         aria-describedby={undefined}
         className="gap-0 rounded-t-[20px] border-border bg-sidebar px-[14px] pt-[10px] pb-[max(14px,env(safe-area-inset-bottom))] md:hidden"

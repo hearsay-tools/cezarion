@@ -100,12 +100,19 @@ export function DrawerUpdate({ version, latestVersion, ...update }: Omit<Applica
   const pending = update.state?.status === 'ready' || update.state?.status === 'preparing' || update.state?.status === 'restarting'
   const available = Boolean(version && latestVersion && isNewerVersion(latestVersion, version))
   if (!available && !pending) return null
+  const status = update.state?.status
+  // Per state: "restart" is only true once the new version is installed; while it is still being
+  // fetched the row says so.
+  const label =
+    status === 'preparing' ? 'Preparing update…'
+    : status === 'ready' || status === 'restarting' ? 'Restart to finish updating'
+    : `Update available · v${latestVersion}`
   return (
     <div data-slot="drawer-update" className="shrink-0 border-b border-border px-[18px] py-[6px]">
       <div className="flex min-h-[44px] items-center gap-[8px]">
         <StatusDot tone="pending" className="size-[6px] shrink-0" />
         <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground">
-          {available ? `Update available · v${latestVersion}` : 'Restart to finish updating'}
+          {label}
         </span>
         <ApplicationUpdateControl version={version} latestVersion={latestVersion} {...update} />
       </div>
@@ -193,7 +200,7 @@ export function DrawerProjects({ nav, currentProjectId, onNavigate }: {
   return (
     <div data-slot="drawer-projects" className="shrink-0">
       <div className="px-[18px] pt-[14px] pb-[6px] text-[12px] font-medium text-soft-foreground" id="drawer-projects-label">Projects</div>
-      {/* A group, not a `nav`: the drawer's one navigation landmark stays the Main nav. */}
+      {/* A group, not a `nav`: the drawer has no navigation landmark of its own. */}
       <div role="group" data-slot="drawer-projects-group" aria-labelledby="drawer-projects-label" className="flex flex-col gap-[2px] px-[8px] pb-[8px]">
         {nav.projects.map((project) => (
           <DrawerProjectRow

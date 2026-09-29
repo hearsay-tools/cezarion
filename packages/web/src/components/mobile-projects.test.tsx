@@ -331,6 +331,24 @@ describe('mobile drawer', () => {
       expect(within(row).getByRole('button', { name: 'Update application' }).className).toContain('size-11')
     })
 
+    it.each([
+      ['preparing', 'Preparing update…'],
+      ['ready', 'Restart to finish updating'],
+      ['restarting', 'Restart to finish updating'],
+    ])('labels the %s state honestly when the version gap is already closed', (status, label) => {
+      renderShell('/p/cezarion/', nav(), { latestVersion: '0.14.9', applicationUpdate: { supported: true, status } as never, onRestart: async () => {} })
+      fireEvent.click(menuButton())
+      expect(drawer().querySelector('[data-slot="drawer-update"]')?.textContent).toContain(label)
+    })
+
+    it('says Preparing, not Restart, while a newer version is still downloading', () => {
+      renderShell('/p/cezarion/', nav(), { latestVersion: '0.15.0', applicationUpdate: { supported: true, status: 'preparing' } as never })
+      fireEvent.click(menuButton())
+      const text = drawer().querySelector('[data-slot="drawer-update"]')?.textContent ?? ''
+      expect(text).toContain('Preparing update…')
+      expect(text).not.toContain('Restart to finish')
+    })
+
     it('offers Restart, and hosts the feedback line, inside the row', () => {
       renderShell('/p/cezarion/', nav(), { latestVersion: '0.15.0', applicationUpdate: { supported: true, status: 'ready' } as never, onRestart: async () => {}, applicationUpdateError: 'Update failed.' })
       fireEvent.click(menuButton())

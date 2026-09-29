@@ -6,7 +6,11 @@ import { MORE_SHEET_PATHS, TAB_BAR_PATHS, type NavItem } from '@/components/nav-
 import { SignalPill, signalPillSegments } from '@/components/signal-pill'
 import type { ProjectSignal } from '@/lib/project-signal'
 import { Link } from '@/lib/project-router'
+import { useLocation } from 'react-router'
 import { cn } from '@/lib/utils'
+
+/** Tailwind's `md`, the same breakpoint the wrapper's `md:hidden` expresses in CSS. */
+const DESKTOP_MEDIA_QUERY = '(min-width: 768px)'
 
 /**
  * The phone's view switcher (#621), mirroring the desktop view tabs: Tasks, Git, GitHub (only
@@ -40,6 +44,24 @@ export function MobileTabBar({
   showNewTask?: boolean
 }) {
   const [moreOpen, setMoreOpen] = React.useState(false)
+  const moreButton = React.useRef<HTMLButtonElement | null>(null)
+  const { pathname } = useLocation()
+  // Same two guards as the shell's drawer: the sheet must not survive the navigation that
+  // replaced its view (back/forward, ⌘K), nor the viewport widening past `md`, where its overlay
+  // would keep dimming and trapping an already-visible desktop layout.
+  React.useEffect(() => {
+    setMoreOpen(false)
+  }, [pathname])
+  React.useEffect(() => {
+    const query = window.matchMedia?.(DESKTOP_MEDIA_QUERY)
+    if (!query) return
+    if (query.matches) setMoreOpen(false)
+    const onChange = (event: MediaQueryListEvent) => {
+      if (event.matches) setMoreOpen(false)
+    }
+    query.addEventListener('change', onChange)
+    return () => query.removeEventListener('change', onChange)
+  }, [])
   const tabs = items.filter((item) => TAB_BAR_PATHS.includes(item.to))
   const moreActive = activeTo !== null && MORE_SHEET_PATHS.includes(activeTo)
   const { top } = signalPillSegments(signal)
@@ -87,6 +109,7 @@ export function MobileTabBar({
           )
         })}
         <button
+          ref={moreButton}
           type="button"
           data-tab="more"
           aria-haspopup="dialog"
@@ -104,6 +127,14 @@ export function MobileTabBar({
       <MoreSheet
         open={moreOpen}
         onOpenChange={setMoreOpen}
+        onCloseAutoFocus={(event) => {
+          // The button is a plain onClick, not a SheetTrigger, so Radix has no trigger to give
+          // focus back to and would drop it on <body>.
+          if (moreButton.current?.isConnected) {
+            event.preventDefault()
+            moreButton.current.focus()
+          }
+        }}
         projectName={projectName}
         items={items}
         activeTo={activeTo}

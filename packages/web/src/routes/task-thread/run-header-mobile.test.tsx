@@ -80,6 +80,19 @@ describe('pushed task screen top bar', () => {
     expect(bar.querySelector('[data-slot="mobile-project-picker"]')).toBeNull()
   })
 
+  it('keeps the one rename control, in the bar, at the compact size', () => {
+    renderScreen()
+    const bar = topBar()
+    const rename = within(bar).getByRole('button', { name: 'Rename task' })
+    expect(document.querySelectorAll('[aria-label="Rename task"]')).toHaveLength(1)
+    const title = bar.querySelector('h1') as HTMLElement
+    expect(title.textContent).toBe('Reviewer agent presets')
+    expect(title.className).toContain('text-[15px]')
+    expect(title.className).toContain('font-semibold')
+    fireEvent.click(rename)
+    expect(within(bar).getByRole('textbox')).toBeTruthy()
+  })
+
   it('opens the same run actions menu from the … button', () => {
     renderScreen()
     const kebab = within(topBar()).getByRole('button', { name: 'Run actions' })
@@ -96,7 +109,7 @@ describe('pushed task screen top bar', () => {
     render(
       <QueryClientProvider client={createQueryClient()}>
         <ThemeProvider>
-          <MemoryRouter initialEntries={['/', '/tasks/r1']} initialIndex={1}>
+          <MemoryRouter initialEntries={['/git', '/tasks/r1']} initialIndex={1}>
             <AppShell>
               <Probe />
             </AppShell>
@@ -105,7 +118,8 @@ describe('pushed task screen top bar', () => {
       </QueryClientProvider>,
     )
     fireEvent.click(within(topBar()).getByRole('button', { name: 'Back' }))
-    expect(screen.getByTestId('location').textContent).toBe('/')
+    // Not '/' (the cold-open fallback): with history, Back goes where the user came from.
+    expect(screen.getByTestId('location').textContent).toBe('/git')
   })
 
   it('falls back to the Tasks list when the screen was opened cold', () => {
@@ -162,6 +176,29 @@ describe('RunHeader below md on a pushed task screen', () => {
     expect(links[2]!.querySelector('[data-slot="tab-count"]')).toBeNull()
   })
 
+  it('swaps facet tabs in place below md, so Back still returns to the list', () => {
+    window.history.replaceState({ idx: 1 }, '')
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <ThemeProvider>
+          <MemoryRouter initialEntries={['/git', '/tasks/r1']} initialIndex={1}>
+            <AppShell>
+              <Routes>
+                <Route path="/tasks/:id/*" element={<RunHeader run={record} />} />
+              </Routes>
+              <Probe />
+            </AppShell>
+          </MemoryRouter>
+        </ThemeProvider>
+      </QueryClientProvider>,
+    )
+    const tabs = document.querySelector('[data-slot="run-tabs"]') as HTMLElement
+    fireEvent.click(within(tabs).getByRole('link', { name: /Changes/ }))
+    expect(screen.getByTestId('location').textContent).toBe('/tasks/r1/changes')
+    fireEvent.click(within(topBar()).getByRole('button', { name: 'Back' }))
+    expect(screen.getByTestId('location').textContent).toBe('/git')
+  })
+
   it('omits the Changes count when the run has no diff', () => {
     renderScreen('/tasks/r1', { ...record, diffStat: undefined })
     expect(document.querySelector('[data-slot="run-tabs"] [data-slot="tab-count"]')).toBeNull()
@@ -174,5 +211,7 @@ describe('RunHeader below md on a pushed task screen', () => {
     expect(within(header).getByText('Reviewer agent presets')).toBeTruthy()
     expect(within(header).getByRole('button', { name: 'Run actions' })).toBeTruthy()
     expect(document.querySelector('[data-slot="mobile-run-title"]')).toBeNull()
+    // Desktop tabs stay plain labels; the changed-file tally is a phone-only signal.
+    expect(document.querySelector('[data-slot="run-tabs"] [data-slot="tab-count"]')).toBeNull()
   })
 })

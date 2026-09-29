@@ -21,7 +21,7 @@ import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
 import { activeNavItem, activeNavPath, isPushedRoute, visibleNavItems, type NavItem } from '@/components/nav-items'
 import { MobileTabBar } from '@/components/mobile-tab-bar'
-import { useViewportInsets } from '@/lib/keyboard-inset'
+import { useKeyboardOpen } from '@/lib/keyboard-inset'
 import { SIDEBAR_SELECTED_CLASS } from '@/components/nav-row-styles'
 import {
   DEFAULT_SIDEBAR_WIDTH,
@@ -187,7 +187,9 @@ export function AppShell({
   // owns the bottom edge, and while the keyboard is up (the visual viewport shrank below the
   // layout viewport — the same source `--kb` is published from) it would only eat the room the
   // composer needs.
-  const keyboardOpen = useViewportInsets().bottom > 0
+  // A pinch-zoom also leaves the visual viewport shorter than the layout one, so a real keyboard
+  // is the bottom inset that is both large and seen at scale ~1.
+  const keyboardOpen = useKeyboardOpen()
   const showTabBar = !isPushedRoute(pathname) && !keyboardOpen
   const tabBarSignal = currentProjectId !== null ? mobileProjects?.signals?.get(currentProjectId) : undefined
   const [menuOpen, setMenuOpen] = React.useState(false)
@@ -310,7 +312,9 @@ export function AppShell({
           <main
             ref={mainRef}
             data-slot="main"
-            className="row-start-3 min-h-0 overflow-y-auto overscroll-contain"
+            // The New task button floats over the bottom of main, so leave its height (48px + 16px
+            // gap) plus air clear while it is shown, or the last row sits under it at full scroll.
+            className={cn('row-start-3 min-h-0 overflow-y-auto overscroll-contain', showTabBar && areaPathname !== '/new' && 'max-md:pb-20')}
           >
             <MobileRunBarSlotContext.Provider value={pushed ? runBarSlot : null}>
               {children}
@@ -556,8 +560,7 @@ function MobileNavDrawer({
 
 /**
  * Everything inside the sidebar: brand lockup, New task CTA, nav, quick-list, footer. Framed by
- * `Sidebar`, desktop only since #621 (the phone drawer is projects only). The `embedded` and
- * safe-area branches below are the drawer-era framing and are inert until something embeds it again.
+ * `Sidebar`, desktop only since #621 (the phone drawer is projects only).
  */
 function SidebarContent({
   activeTo,
@@ -580,17 +583,11 @@ function SidebarContent({
   sidebarProjectId,
   needsYou,
   onNavigate,
-  embedded = false,
 }: NavProps & {
   /** Fires on any in-drawer navigation. The route-change effect already closes the drawer for
    *  every *changed* route; this also covers re-clicking the active item (per the spec, Tasks
    *  navigates home even when already active), which changes no pathname at all. */
   onNavigate?: () => void
-  /** Inside the drawer's one scroll (#620): the content takes its natural height and lets the
-   *  drawer scroll it, and the safe-area padding goes to the identity row above and the global rows
-   *  below. Its own list scroller and pinned footer would otherwise squeeze the task list into
-   *  whatever height the Projects section left. */
-  embedded?: boolean
 }) {
   const inheritedScope = useProjectScope()
   // Context only: the routed view owns the mutable API scope. Sidebar queries bind their
@@ -607,7 +604,7 @@ function SidebarContent({
       // can afford to paint is a question about THIS column, not about the viewport. Everything
       // inside that is droppable metadata — the quick-list's diff pair today — hides itself with
       // an `@min-[…]/sidebar:` query and returns when the user drags the column wider.
-      className={cn('@container/sidebar flex flex-col', embedded ? 'shrink-0' : 'min-h-0 flex-1 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]')}
+      className={'@container/sidebar flex min-h-0 flex-1 flex-col pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]'}
     >
       <div data-slot="sidebar-header" className="shrink-0">
         {projectHeader ?? (repo ? <div className="px-[14px] pt-[14px] pb-2.5"><div className="truncate text-sm font-semibold">{repo.name}</div><div className="truncate font-mono text-[10.5px] text-soft-foreground">{repo.branch}</div></div> : null)}
@@ -645,7 +642,7 @@ function SidebarContent({
 
       {sessionScope ? <div className="shrink-0 px-4 pb-3">{sessionScope}</div> : null}
       <SidebarViewTabs items={items} activeTo={activeTo} needsYou={needsYou} inboxCount={inboxCount} skillsUpdateAvailable={skillsUpdateAvailable} onNavigate={onNavigate} />
-      <div data-slot="project-task-navigation" className={cn('px-2 pb-2', !embedded && 'min-h-0 flex-1 overflow-y-auto overscroll-contain')}>
+      <div data-slot="project-task-navigation" className={'min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-2'}>
         <SidebarNavigateContext.Provider value={onNavigate}>
           <div data-slot="task-quick-list">{taskQuickList}</div>
         </SidebarNavigateContext.Provider>

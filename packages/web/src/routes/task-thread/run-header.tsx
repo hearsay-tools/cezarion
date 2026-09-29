@@ -157,6 +157,9 @@ export function RunHeader({
   const mobileSlot = useMobileRunBarSlot()
   const isDesktop = useIsDesktopViewport()
   const barSlot = mobileSlot !== null && !isDesktop ? mobileSlot : null
+  // Below md the facets swap in place, so Back from the pushed screen returns to the list the
+  // user came from rather than stepping through every tab they visited; desktop keeps its history.
+  const phoneBar = barSlot !== null
   const repoBase = useProjectRepoBase()
   const primaryReference = useMemo(() => taskReferences(run, repoBase)[0], [run, repoBase])
   const actionsKebab = (
@@ -218,7 +221,7 @@ export function RunHeader({
             {barSlot ? (
               <MobileRunBarPortal slot={barSlot}>
                 <div data-slot="mobile-run-title" className="flex min-w-0 flex-1 flex-col">
-                  <span className="truncate text-[15px] leading-tight font-semibold text-foreground">{runTitle(run)}</span>
+                  <EditableTitle run={run} compact />
                   <span data-slot="mobile-run-state" className="flex min-w-0 items-center gap-1.5 text-[11.5px] leading-tight text-soft-foreground">
                     <StatusDot tone={attention.tone} shape={attention.shape} pulse={attention.pulse} />
                     <span className="truncate">
@@ -257,20 +260,20 @@ export function RunHeader({
 
         {/* Below md (#621): 13.5px labels and quiet counts, tabs spread across the row. The 44px
             floor stays — the touch-target sweep measures these links — so the design's 40px is the
-            visual weight of the row, not a smaller hit area. Counts come only from data the record
+            visual weight of the row, not a smaller hit area. The count is phone-only (desktop tabs are unchanged). Counts come only from data the record
             already carries: the changed-file tally. A commit count is not on the record, and one
             more query for a badge is not worth it, so Commits shows none. */}
         <div data-slot="run-tabs" className="mt-3 flex flex-wrap items-end gap-1 border-b border-border md:mt-5 max-md:gap-0 max-md:[&>a]:min-h-11 max-md:[&>a]:px-3.5 max-md:[&>a]:text-[13.5px]">
-          <TabLink to={`/tasks/${run.id}`} active={tab === 'session'}>
+          <TabLink to={`/tasks/${run.id}`} active={tab === 'session'} replace={phoneBar}>
             Session
           </TabLink>
-          <TabLink to={`/tasks/${run.id}/changes`} active={tab === 'changes'} count={run.diffStat && run.diffStat.files > 0 ? run.diffStat.files : undefined}>
+          <TabLink to={`/tasks/${run.id}/changes`} active={tab === 'changes'} replace={phoneBar} count={phoneBar && run.diffStat && run.diffStat.files > 0 ? run.diffStat.files : undefined}>
             Changes
           </TabLink>
-          <TabLink to={`/tasks/${run.id}/commits`} active={tab === 'commits'}>
+          <TabLink to={`/tasks/${run.id}/commits`} active={tab === 'commits'} replace={phoneBar}>
             Commits
           </TabLink>
-          <TabLink to={`/tasks/${run.id}/files`} active={tab === 'files'}>
+          <TabLink to={`/tasks/${run.id}/files`} active={tab === 'files'} replace={phoneBar}>
             Files
           </TabLink>
         </div>
@@ -461,7 +464,9 @@ async function copyToClipboard(text: string, doneMessage: string): Promise<void>
  * (the server stores it as both `title` and `titleSummary`), Escape abandons the draft.
  * The rename machine itself is shared with the Tasks table (`components/editable-title.tsx`).
  */
-function EditableTitle({ run }: { run: ApiRun }) {
+/** `compact` is the phone top bar's variant (#621): the same rename control at 15px/600 on one
+ *  line, with a touch-sized button that is always visible (there is no hover on a phone). */
+function EditableTitle({ run, compact = false }: { run: ApiRun; compact?: boolean }) {
   const patch = usePatchRun(run.id)
   const title = runTitle(run)
   const editor = useTitleEditor(title, (next) =>
@@ -469,19 +474,28 @@ function EditableTitle({ run }: { run: ApiRun }) {
   )
 
   if (editor.editing) {
-    return <TitleEditInput editor={editor} className="flex-1 text-[16px] font-semibold" />
+    return <TitleEditInput editor={editor} className={cn('flex-1 font-semibold', compact ? 'text-[15px]' : 'text-[16px]')} />
   }
 
   return (
     <span className="group flex min-w-0 items-center gap-1">
-      <h1 className="line-clamp-2 min-w-0 break-words text-2xl font-semibold tracking-tight" title={run.task}>
+      <h1
+        className={cn(
+          'min-w-0',
+          compact ? 'truncate text-[15px] leading-tight font-semibold text-foreground' : 'line-clamp-2 break-words text-2xl font-semibold tracking-tight',
+        )}
+        title={run.task}
+      >
         {title}
       </h1>
       <button
         type="button"
         aria-label="Rename task"
         onClick={editor.begin}
-        className="shrink-0 rounded-sm p-1 text-soft-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:bg-muted hover:text-foreground focus-visible:opacity-100 focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+        className={cn(
+          'shrink-0 rounded-sm p-1 text-soft-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:bg-muted hover:text-foreground focus-visible:opacity-100 focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none',
+          compact && 'flex size-11 items-center justify-center opacity-100',
+        )}
       >
         <PencilIcon className="size-3.5" aria-hidden="true" />
       </button>
