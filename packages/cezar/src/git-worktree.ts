@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { autosaveGit, type AutosaveOptions } from './autosave-git.ts';
 import { workerWorkspaceSchema } from '@open-mercato/cezar-contract';
 import { existsSync, realpathSync, type Dirent } from 'node:fs';
 import { lstat, mkdir, readdir, readFile, rm, stat } from 'node:fs/promises';
@@ -417,6 +418,9 @@ function hasConflictMarkers(text: string): boolean {
   return false;
 }
 
+/** Serialize all autosave entry points, including periodic/final flush overlap. */
+const autosaves = new Map<string, Promise<AutosaveResult>>();
+
 /**
  * Stage and commit everything in the worktree as a "cezar autosave" commit
  * (janitor pattern) — the agent's progress is always recoverable from the
@@ -430,35 +434,54 @@ function hasConflictMarkers(text: string): boolean {
  * markers: the incident behind #471 was an autosave capturing a half-resolved
  * merge, and a blind `git add -A` would do it again.
  */
-export async function autosaveCommit(dir: string, reason: AutosaveReason): Promise<AutosaveResult> {
-  const status = await git(dir, ['status', '--porcelain']);
-  if (!status.ok || !status.stdout.trim()) return 'nothing-to-do';
-  const unresolved = await unresolvedConflicts(dir, status.stdout);
-  if (unresolved) {
-    // Losing one recovery point beats poisoning the branch with a commit that
-    // does not build. For the periodic and turn-end flushes the next one picks
-    // the work up once the merge resolves; the pre-PR flush has no next one,
-    // which is why callers get `refused` rather than a bare `false`.
-    console.warn(`[cezar] skipping ${reason} autosave in ${dir}: ${unresolved}`);
-    return 'refused';
+export async function autosaveCommit(dir: string, reason: AutosaveReason, options: AutosaveOptions = {}): Promise<AutosaveResult> {
+  let key = resolve(dir);
+  try { key = realpathSync(dir); } catch { /* Missing/unreadable dir fails through Git. */ }
+  const previous = autosaves.get(key);
+  const task = (async () => {
+    if (previous) await previous;
+    return save();
+  })();
+  autosaves.set(key, task);
+  try { return await task; }
+  finally { if (autosaves.get(key) === task) autosaves.delete(key); }
+
+  async function save(): Promise<AutosaveResult> {
+    const git = (cwd: string, args: string[]) => autosaveGit(cwd, args, options);
+    const status = await git(dir, ['status', '--porcelain']);
+    if (!status.ok) return 'failed';
+    if (!status.stdout.trim()) return 'nothing-to-do';
+    const unresolved = await unresolvedConflicts(dir, status.stdout);
+    if (unresolved) {
+      // Losing one recovery point beats poisoning the branch with a commit that
+      // does not build. For the periodic and turn-end flushes the next one picks
+      // the work up once the merge resolves; the pre-PR flush has no next one,
+      // which is why callers get `refused` rather than a bare `false`.
+      console.warn(`[cezar] skipping ${reason} autosave in ${dir}: ${unresolved}`);
+      return 'refused';
+    }
+    if (!(await git(dir, ['add', '-A'])).ok) return 'failed';
+    // Commit as the CURRENT git user, so the branch's commits (and any PR opened from it) are
+    // attributed to the real author and pass CLA / attribution checks. The old hardcoded
+    // `cezar <cezar@local>` identity made every autosave look like a non-GitHub user. Fall back to
+    // that identity ONLY when the machine has no git identity configured — otherwise `git commit`
+    // would fail and the autosave (the run's recovery point) would be lost.
+    const name = await git(dir, ['config', 'user.name']);
+    if (!name.ok && name.code !== 1) return 'failed';
+    const email = await git(dir, ['config', 'user.email']);
+    if (!email.ok && email.code !== 1) return 'failed';
+    const identityArgs = (name.ok && name.stdout.trim() && email.ok && email.stdout.trim())
+      ? []
+      : ['-c', 'user.name=cezar', '-c', 'user.email=cezar@local'];
+    const commit = await git(dir, [
+      ...identityArgs,
+      'commit',
+      '--no-verify',
+      '-m',
+      `cezar autosave (${reason})`,
+    ]);
+    return commit.ok ? 'committed' : 'failed';
   }
-  await git(dir, ['add', '-A']);
-  // Commit as the CURRENT git user, so the branch's commits (and any PR opened from it) are
-  // attributed to the real author and pass CLA / attribution checks. The old hardcoded
-  // `cezar <cezar@local>` identity made every autosave look like a non-GitHub user. Fall back to
-  // that identity ONLY when the machine has no git identity configured — otherwise `git commit`
-  // would fail and the autosave (the run's recovery point) would be lost.
-  const identityArgs = (await gitHasIdentity(dir))
-    ? []
-    : ['-c', 'user.name=cezar', '-c', 'user.email=cezar@local'];
-  const commit = await git(dir, [
-    ...identityArgs,
-    'commit',
-    '--no-verify',
-    '-m',
-    `cezar autosave (${reason})`,
-  ]);
-  return commit.ok ? 'committed' : 'failed';
 }
 
 /**
@@ -546,16 +569,6 @@ function unquotePath(path: string): string {
     i += 1;
   }
   return Buffer.from(bytes).toString('utf8');
-}
-
-/** Does this repo/worktree resolve a git author identity (name + email)? Ambient config wins so
- *  autosave commits carry the user's own identity — see autosaveCommit. */
-async function gitHasIdentity(dir: string): Promise<boolean> {
-  const [name, email] = await Promise.all([
-    git(dir, ['config', 'user.name']),
-    git(dir, ['config', 'user.email']),
-  ]);
-  return name.ok && name.stdout.trim() !== '' && email.ok && email.stdout.trim() !== '';
 }
 
 /**

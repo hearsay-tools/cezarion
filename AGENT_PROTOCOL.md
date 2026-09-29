@@ -807,6 +807,23 @@ cleanup checkpoint. Enabled delegation reads only that worker's family; disabled
 delegation enters no terminal-checkpoint reconciliation and reads no histories.
 The persisted execution proof remains complete in both cases.
 
+R24/R25 (#495, `core/harness-autosave.test.ts`) keep initial and Continue cleanup
+active across stalled autosave Git commands on every native runner wire. Each
+command gets 30 seconds, then TERM and (after one second) KILL. An unsuccessful
+save is reported without deleting working files. Two further seconds without
+termination proof produce a warning, not a released worktree: observation
+continues until the owned group and newly observed worktree holders are gone.
+Autosaves serialize per canonical worktree; Git auto-maintenance is disabled
+only for these commands. Holder discovery shares orphan recovery's cwd boundary,
+not OS containment: custom children that detach and leave the tree before they
+can be observed are outside that proof. Existing agent holders are left alone.
+Windows uses bounded PowerShell process snapshots and creation-time checks,
+retaining observed ancestry after the Git leader exits and checking each process
+handle before shutdown. An intermediate process that appears and exits between
+snapshots can hide its descendants; this is observation, not kernel containment.
+If the platform probe is unavailable, autosave fails before spawning Git and
+cleanup continues with working files preserved.
+
 R18/R19 (#548) use every runner's native message wire to check final-line ASK
 selection after an earlier prose mention, and quoted ASK examples without a
 marker. Parsing and transcript stripping must select the same final line;
