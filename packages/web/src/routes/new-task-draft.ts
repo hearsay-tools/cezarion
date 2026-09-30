@@ -31,8 +31,9 @@ export interface NewTaskDraft {
   /** Worktree opt-out (#worktree-toggle): false runs in the repo working tree. null → the
    *  remembered `lastWorktree` / default (isolated worktree). */
   worktree: boolean | null
-  /** Autonomous (#autonomous): true never pauses for the user. null → remembered
-   *  `lastAutonomous` / default (off). */
+  /** Explicit autonomous choice, retained across navigation and successful launches.
+   *  null → interactive-skill hint, then workspace/env policy (skills default on).
+   *  Plan-first overrides every choice. See resolveComposerRunMode. */
   autonomous: boolean | null
   /** Follow-up generation is default-on. null → remembered value / on. */
   generateFollowups: boolean | null

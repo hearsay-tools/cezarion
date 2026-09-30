@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RunStore } from '../runs/store.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { RunManager } from './run.ts';
@@ -40,6 +40,7 @@ describe('recover() and the autonomous flag (#489)', () => {
   const frozen = () => new WorkspaceSemaphore({ initial: { maxParallel: 0 } });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     store.flush();
     rmSync(repoRoot, { recursive: true, force: true });
   });
@@ -51,7 +52,7 @@ describe('recover() and the autonomous flag (#489)', () => {
     steps: [{ id: 'work', name: 'Work', prompt: '{{task}}' }],
   };
 
-  const queuedRun = (autonomous: boolean): string => {
+  const queuedRun = (autonomous: boolean | undefined): string => {
     const { id } = store.createRun({
       title: 't',
       workflow: 'quick-task',
@@ -78,5 +79,42 @@ describe('recover() and the autonomous flag (#489)', () => {
     const id = queuedRun(false);
     await new RunManager(store, repoRoot, { semaphore: frozen() }).recover();
     expect(store.getRun(id)?.autonomous).toBe(false);
+  });
+
+  it.each([true, false, undefined])('preserves saved %s through deferred Continue and restart (#458)', async (autonomous) => {
+    // Changing the composer seed after launch must not re-resolve an existing run's mode.
+    vi.stubEnv('CEZ_AUTONOMOUS_DEFAULT', autonomous ? '0' : '1');
+    const id = queuedRun(autonomous);
+    store.updateStep(id, 'work', { status: 'done', sessionId: 'previous-session', backend: 'claude' });
+    store.updateRun(id, { status: 'done', runner: 'claude' });
+    const manager = new RunManager(store, repoRoot, { semaphore: frozen() });
+    try {
+      expect(manager.continueRun(id, { text: 'Continue setup' }, true)).toEqual({ ok: true });
+      expect(store.getRun(id)?.autonomous).toBe(autonomous);
+      expect(store.getRun(id)?.status).toBe('queued');
+    } finally {
+      manager.dispose();
+      store.flush();
+    }
+    store = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true });
+    const recovered = new RunManager(store, repoRoot, { semaphore: frozen() });
+    try {
+      await recovered.recover();
+      expect(store.getRun(id)?.autonomous).toBe(autonomous);
+      expect(store.getRun(id)?.status).toBe('queued');
+      expect(store.readEvents(id).some(event => event.type === 'lifecycle' &&
+        typeof event.message === 'string' && event.message.includes('cezar restarted'))).toBe(true);
+      const continuation = (recovered as unknown as {
+        pendingContinuations: Map<string, { stepId: string; sessionId?: string; prompt: string }>;
+      }).pendingContinuations.get(id);
+      expect(continuation).toMatchObject({
+        stepId: 'continue-1', sessionId: 'previous-session', prompt: 'Continue setup',
+      });
+      store.flush();
+      expect(RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true }).getRun(id)?.autonomous)
+        .toBe(autonomous);
+    } finally {
+      recovered.dispose();
+    }
   });
 });

@@ -197,11 +197,11 @@ export const runRecordSchema = z.object({
   /** Per-task follow-up inbox contract (spec 007, #444). Missing on old runs
    *  means enabled — the historical behavior. */
   generateFollowups: z.boolean().optional(),
-  /** Autonomous mode (#489): the run was started with the "autonomous" checkbox,
-   *  so it never parks at `waiting` (auto-nudge) and — once persisted here —
-   *  never parks at the terminal `review` gate either (`settleSuccess` + the
-   *  group-pick winner-park read it). Additive-safe: absent = falsy = not
-   *  autonomous. Set at creation from `WorkflowInput.autonomous`. */
+  /** Effective autonomous mode (#489), set at creation from StartRunInput.autonomous.
+   *  This records the resolved launch mode, not whether a user clicked a checkbox:
+   *  the composer may select it through a skill or workspace default (#458).
+   *  Used by the autonomous nudge and terminal review policy. Continue/recovery
+   *  preserve it; absent on legacy records means non-autonomous. */
   autonomous: z.boolean().optional(),
   /** Task webhook opt-in (#589). Absent = off; `POST /runs/:id/notify` flips it at any time. */
   notify: z.boolean().optional().catch(undefined),
