@@ -559,6 +559,8 @@ describe('mobile shell', () => {
 
     it('navigates from the tab bar', () => {
       browser.goto(baseUrl + scoped('/'))
+      // Local run 1790758761212-3950840, lane-4-failures/smoke/navigates-from-the-tab-bar-1:
+      // probe.json records the focused, visible Git link but URL /p/lane-4/ after the click.
       // Wait for bootstrap before tapping: it can replace the initial navigation tree.
       browser.waitForFunction('window.__cezIdle === true')
       // The views the drawer used to list: a tab is one tap from any list screen (#621).
