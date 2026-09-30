@@ -943,24 +943,25 @@ it('keeps sidebar data on the URL project when rendered above the route scope pr
   expect(document.querySelector('[data-slot="task-row"] a')?.getAttribute('href')).toBe('/p/shop/tasks/right')
 })
 
-it('shows the Git view\'s task worktrees, read for the URL project, instead of the task list', async () => {
+it('shows the Git view\'s checkout and sections, read for the URL project, instead of the task list', async () => {
   setApiScope('previous')
   serve({
     '/api/v1/health': HEALTH,
     '/api/v1/todos': [],
     '/api/v1/projects': { bootProject: 'cezar', projects: [PROJECT, { ...PROJECT, id: 'shop', name: 'Shop' }] },
-    '/api/v1/p/shop/worktrees': { worktrees: [{ runId: 'wt-1', title: 'Shop worktree', status: 'review', branch: 'cez/wt-1', sizeBytes: null, finishedAt: null, reclaimable: false }], totalBytes: null, keep: 0 },
-    '/api/v1/p/shop/runs': [run({ id: 'wt-1', title: 'Shop task', titleSummary: undefined, diffStat: { files: 1, adds: 4, dels: 2 } })],
+    '/api/v1/p/shop/repo': { info: { root: '/shop', branch: 'shop-main', remote: null }, status: [], log: [], branches: ['shop-main'], baseBranch: null },
+    '/api/v1/p/shop/worktrees': { worktrees: [], totalBytes: 2 * 1024 ** 3, keep: 0 },
   })
   renderShell('/p/shop/git')
-  const row = await waitFor(() => {
-    const el = document.querySelector('[data-slot="git-worktree-row"]')
-    if (!el) throw new Error('no worktree row yet')
+  const branch = await waitFor(() => {
+    const el = document.querySelector('[data-slot="git-sidebar"] [data-slot="git-checkout-branch"]')
+    if (!el) throw new Error('no checkout block yet')
     return el
   })
-  expect(row.getAttribute('href')).toBe('/p/shop/tasks/wt-1/changes')
-  expect(row.textContent).toContain('cez/wt-1')
-  expect(row.textContent).toContain('Shop task')
+  expect(branch.textContent).toBe('shop-main')
+  await waitFor(() => expect(document.querySelector('[data-git-section="cleanup"] [data-slot="git-section-count"]')?.textContent).toBe('2.0 GB'))
+  expect(document.querySelector('[data-git-section="main"]')?.getAttribute('href')).toBe('/p/shop/git')
+  expect(document.querySelector('[data-slot="git-worktree-row"]')).toBeNull()
   expect(document.querySelector('[data-slot="quick-list"]')).toBeNull()
 })
 

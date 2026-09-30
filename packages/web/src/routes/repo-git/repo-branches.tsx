@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { GitBranchIcon, GitPullRequestIcon, PlusIcon, SearchIcon } from '@/components/design-icons'
 import { useState, type FormEvent } from 'react'
 
-import { createRepoBranch, putConfig } from '@/api/client'
+import { createRepoBranch } from '@/api/client'
 import { queryKeys, useGithub, useHealth } from '@/api/queries'
 import type { GithubItem, HealthResponse, RepoInfo, RepoResponse } from '@open-mercato/cezar-api-client'
 import { Button } from '@/components/ui/button'
@@ -11,11 +11,10 @@ import { toast } from '@/components/ui/toaster'
 import { cn, isHttpUrl } from '@/lib/utils'
 
 /**
- * The repo view's Branches segment (R5 Step 1.7): the branch list `GET /api/repo` already
- * carries, with switch/create wired to `POST /api/repo/branch` (1.3) — every predictable git
- * refusal (dirty tree, invalid name) comes back as a 409 whose reason surfaces verbatim as a
- * danger toast. The agents' base-branch picker rides the same payload's `baseBranch` +
- * `PUT /api/config`, exactly like the legacy Repo tab did.
+ * The Git view's All branches section (R5 Step 1.7, issue 06 §3): the branch list `GET /api/repo`
+ * already carries, with switch/create wired to `POST /api/repo/branch` (1.3) — every predictable
+ * git refusal (dirty tree, invalid name) comes back as a 409 whose reason surfaces verbatim as a
+ * danger toast. The agents' base-branch picker lives in the checkout block, so it is listed once.
  *
  * Forge-specific rows (open PRs with checks badges) render ONLY when `/api/health` reports
  * the forge driver available — no driver, no PR surface, per the forge-seam doctrine. The
@@ -46,19 +45,6 @@ export function RepoBranchesSection({ repo, info }: { repo: RepoResponse; info: 
           ? { ...current, repo: { ...current.repo, branch: result.branch } }
           : current,
       )
-    },
-    onError,
-  })
-
-  const setBase = useMutation({
-    mutationFn: (baseBranch: string | null) => putConfig({ baseBranch }),
-    onSuccess: (result) => {
-      toast(
-        result.baseBranch
-          ? `Agents now branch from ${result.baseBranch}`
-          : 'Agents now fork from the checked-out branch',
-      )
-      void queryClient.invalidateQueries({ queryKey: queryKeys.repo })
     },
     onError,
   })
@@ -152,32 +138,6 @@ export function RepoBranchesSection({ repo, info }: { repo: RepoResponse; info: 
             Create branch
           </Button>
         </form>
-        <div className="mt-5">
-          <label
-            htmlFor="base-branch-picker"
-            className="text-sm font-medium"
-          >
-            Agents’ base branch
-          </label>
-          <p className="mt-2 text-xs text-muted-foreground">New task worktrees branch from this.</p>
-          {/* A native <select>: a handful of branch names needs no popover machinery, and the
-              OS picker is the better control on phones. */}
-          <select
-            id="base-branch-picker"
-            data-slot="base-branch-picker"
-            value={repo.baseBranch ?? ''}
-            disabled={setBase.isPending}
-            onChange={(event) => setBase.mutate(event.target.value === '' ? null : event.target.value)}
-            className="mt-1.5 block min-h-11 w-full rounded-md border border-input bg-card px-3 py-1.5 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-50"
-          >
-            <option value="">follow checked-out branch (default)</option>
-            {repo.branches.map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
-          </select>
-        </div>
         <p className="mt-3 border-t border-border pt-4 text-xs leading-relaxed text-muted-foreground">Switching branches changes your working tree. Review uncommitted changes first.</p>
       </div>
 

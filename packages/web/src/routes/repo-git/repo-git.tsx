@@ -3,42 +3,49 @@ import { GitBranchIcon, TriangleAlertIcon } from '@/components/design-icons'
 
 import { useSearchParams } from 'react-router'
 
-import { useRepo } from '@/api/queries'
+import { useRepo, useWorktrees } from '@/api/queries'
 import type { RepoInfo, RepoResponse } from '@open-mercato/cezar-api-client'
 import { CenteredState } from '@/components/centered-state'
-import { TabLink } from '@/components/tab-link'
+import { formatMem } from '@/lib/tasks-table'
 import { useIsDesktop } from '@/lib/use-desktop'
 
+import { GitScreen } from './git-screen'
+import { gitSectionLabel } from './git-section-list'
+import type { GitSection } from './git-sections'
+import { RepoBackLink } from './repo-back-link'
 import { RepoBranchesSection } from './repo-branches'
 import { RepoChangesSection } from './repo-changes'
 import { RepoCommitsSection } from './repo-commits'
-import { RepoBackLink } from './repo-back-link'
-import { GitWorktreeScreen } from './git-worktree-screen'
 import { RepoGitLoading } from './repo-git-loading'
-import { RepoPull } from './repo-pull'
+import { WorktreesPanel } from './worktrees-panel'
 
 /**
- * `/git` — the repo view rebuilt on the task git view's own components (spec §"Session git
- * view — Changes & Files tabs (#390)" last bullet, R5 Step 1.7): the MAIN working tree's
- * structured diff through the same `<Diff>` facade and tree, the recent-commit log with a
- * structured per-commit diff, and the branch list with switch/create + the agents'
- * base-branch picker. Forge-specific rows (PR links, checks) render only when
- * `/api/health` says the forge driver is available.
+ * `/git…` — the Git view (issue 06 §3, #622): is the base my agents start from right, and what
+ * came back into it? The sections live in the sidebar (desktop) or the phone's Git screen; the
+ * main area shows the open one under a header with a title and a meta line, and no tabs:
  *
- * The sections are underline segments — the same `TabLink` grammar as the run header's
- * Session | Changes | Files row — and each one is a URL (`/git`, `/git/commits[/:sha]`,
- * `/git/branches`), so every surface deep-links and survives a refresh.
+ * - Recently on main (`/git`, and the old `/git/commits[/:sha]`): the log grouped by day; a
+ *   commit opens inside it.
+ * - Cleanup (`/git/cleanup`): the worktrees on disk, moved here from Settings.
+ * - All branches (`/git/branches`): the branch list with switch/create.
+ * - Uncommitted changes (`/git/changes`): the main tree's diff, reached from the checkout block.
+ *
+ * Every section is a URL, so each deep-links and survives a refresh.
  */
-export type RepoTab = 'changes' | 'commits' | 'branches'
-
-export function RepoGitRoute({ tab }: { tab: RepoTab }) {
+export function RepoGitRoute({ section, index = false }: {
+  section: GitSection
+  /** The bare `/git` route: a phone shows the Git screen there unless `?view=repo`. */
+  index?: boolean
+}) {
   const repo = useRepo()
   const isDesktop = useIsDesktop()
   const [params] = useSearchParams()
 
-  // A phone's bare /git is the task worktree screen; the repository is `?view=repo`. Commits,
-  // Branches and every deep link keep their URLs, and desktop never leaves the repository.
-  if (tab === 'changes' && !isDesktop && params.get('view') !== 'repo') return <GitWorktreeScreen />
+  // A phone's bare /git is the Git screen; Recently on main is `?view=repo`. Every other section
+  // and deep link keeps its URL, and desktop never shows the screen.
+  if (index && !isDesktop && params.get('view') !== 'repo') {
+    return <GitScreen />
+  }
   if (repo.isPending) return <RepoGitLoading />
   if (repo.isError) {
     return (
@@ -67,49 +74,62 @@ export function RepoGitRoute({ tab }: { tab: RepoTab }) {
       </div>
     )
   }
-  return <RepoView repo={repo.data} info={info} tab={tab} />
+  return <RepoView repo={repo.data} info={info} section={section} />
 }
 
-function RepoView({ repo, info, tab }: { repo: RepoResponse; info: RepoInfo; tab: RepoTab }) {
+function RepoView({ repo, info, section }: { repo: RepoResponse; info: RepoInfo; section: GitSection }) {
   return (
-    <div data-route="repo-git" className="flex min-h-full flex-col">
+    <div data-route="repo-git" data-git-section={section} className="flex min-h-full flex-col">
       <RepoBackLink />
       <header
         data-slot="repo-header"
-        className="px-[18px] pt-[18px] md:flex md:flex-col md:gap-[10px] md:border-b md:border-border md:px-7 md:pt-4"
+        className="flex flex-col gap-1 px-[18px] pt-[18px] md:min-h-[61px] md:flex-row md:items-center md:gap-[10px] md:border-b md:border-border md:px-7 md:py-4"
       >
-        <div className="md:flex md:min-h-[28px] md:items-center md:justify-between md:gap-4">
-          <h1 className="text-2xl font-semibold tracking-tight md:text-[15px] md:tracking-normal">
-            Repository · <span data-slot="branch-chip">{info.branch}</span>
-          </h1>
-          <p data-slot="repo-remote" className="mt-2 break-all text-[13px] text-muted-foreground md:hidden">
-            {info.root.split('/').filter(Boolean).at(-1)}{info.remote ? ` · ${info.remote}` : ''}
-          </p>
-          <div className="my-[22px] flex min-w-0 items-start gap-2.5 md:my-0">
-            <RepoPull repo={repo} info={info} />
-          </div>
-        </div>
-
-        <div data-slot="repo-tabs" className="flex items-end gap-6 border-b border-border md:gap-[22px] md:border-b-0 [&>a]:min-h-11 md:[&>a]:min-h-0">
-          <TabLink to="/git?view=repo" active={tab === 'changes'}>
-            Changes
-          </TabLink>
-          <TabLink to="/git/commits" active={tab === 'commits'}>
-            Commits
-          </TabLink>
-          <TabLink to="/git/branches" active={tab === 'branches'}>
-            Branches
-          </TabLink>
-        </div>
+        <h1 className="min-w-0 flex-1 truncate text-2xl font-semibold tracking-tight md:text-[15px] md:tracking-normal">
+          {gitSectionLabel(section, info.branch)}
+        </h1>
+        <p data-slot="repo-meta" className="min-w-0 truncate text-[12px] text-soft-foreground md:text-[11.5px]">
+          <SectionMeta repo={repo} info={info} section={section} />
+        </p>
       </header>
 
-      {tab === 'changes' ? (
-        <RepoChangesSection />
-      ) : tab === 'commits' ? (
+      {section === 'main' ? (
         <RepoCommitsSection log={repo.log} />
-      ) : (
+      ) : section === 'cleanup' ? (
+        <div data-slot="repo-cleanup" className="px-[18px] pt-[12px] pb-[calc(90px+env(safe-area-inset-bottom))] md:px-[20px] md:pb-[20px]">
+          <WorktreesPanel />
+        </div>
+      ) : section === 'branches' ? (
         <RepoBranchesSection repo={repo} info={info} />
+      ) : (
+        <RepoChangesSection />
       )}
     </div>
+  )
+}
+
+/** The header's meta line: one fact about the open section, in the soft ink the board uses. */
+function SectionMeta({ repo, info, section }: { repo: RepoResponse; info: RepoInfo; section: GitSection }) {
+  switch (section) {
+    case 'main':
+      return <>{repo.log.length === 0 ? 'no commits yet' : `latest ${repo.log.length} commit${repo.log.length === 1 ? '' : 's'} in the main checkout`}</>
+    case 'branches':
+      return <>{repo.branches.length} local branch{repo.branches.length === 1 ? '' : 'es'} · on {info.branch}</>
+    case 'changes':
+      return <>{repo.status.length} uncommitted file{repo.status.length === 1 ? '' : 's'} in the main checkout</>
+    case 'cleanup':
+      return <CleanupMeta />
+  }
+}
+
+function CleanupMeta() {
+  const worktrees = useWorktrees()
+  if (!worktrees.data) return <>task checkouts on disk</>
+  const { worktrees: rows, totalBytes } = worktrees.data
+  return (
+    <>
+      {rows.length} task checkout{rows.length === 1 ? '' : 's'} on disk
+      {totalBytes ? ` · ${formatMem(totalBytes)}` : ''}
+    </>
   )
 }

@@ -126,14 +126,6 @@ function stubFetch(overrides: Record<string, () => Response | Promise<Response>>
   return sent
 }
 
-function deferredResponse() {
-  let resolve!: (response: Response) => void
-  const promise = new Promise<Response>((done) => {
-    resolve = done
-  })
-  return { promise, resolve }
-}
-
 /** Cold-load the repo view at a URL, with the same route map routes.tsx registers. */
 function renderAt(entry: string) {
   const client = createQueryClient()
@@ -141,10 +133,12 @@ function renderAt(entry: string) {
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[entry]}>
         <Routes>
-          <Route path="/git" element={<RepoGitRoute tab="changes" />} />
-          <Route path="/git/commits" element={<RepoGitRoute tab="commits" />} />
-          <Route path="/git/commits/:sha" element={<RepoGitRoute tab="commits" />} />
-          <Route path="/git/branches" element={<RepoGitRoute tab="branches" />} />
+          <Route path="/git" element={<RepoGitRoute section="main" index />} />
+          <Route path="/git/commits" element={<RepoGitRoute section="main" />} />
+          <Route path="/git/commits/:sha" element={<RepoGitRoute section="main" />} />
+          <Route path="/git/cleanup" element={<RepoGitRoute section="cleanup" />} />
+          <Route path="/git/branches" element={<RepoGitRoute section="branches" />} />
+          <Route path="/git/changes" element={<RepoGitRoute section="changes" />} />
         </Routes>
         <Toaster />
       </MemoryRouter>
@@ -155,25 +149,17 @@ function renderAt(entry: string) {
 
 // ---- changes ----------------------------------------------------------------------------------
 
-describe('the repo view Changes segment', () => {
-  it('renders the header, the segment tabs and the working-tree diff from /api/v1/repo/changes', async () => {
-    stubFetch()
-    renderAt('/git')
+describe('the Git view Uncommitted changes section (/git/changes)', () => {
+  it('renders a title-and-meta header with no section tabs, and the working-tree diff from /api/v1/repo/changes', async () => {
+    stubFetch({ 'GET /api/v1/repo': () => jsonResponse({ ...REPO, status: [{ status: 'M', path: 'notes.md' }, { status: 'M', path: 'src/util/a.ts' }] }) })
+    renderAt('/git/changes')
 
     await waitFor(() => expect(document.querySelector('[data-slot="repo-header"]')).not.toBeNull())
-    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Repository · main')
-    expect(document.querySelector('[data-slot="branch-chip"]')?.textContent).toContain('main')
-
-    const tabs = [...document.querySelectorAll('[data-slot="repo-tabs"] a')].map((a) => ({
-      text: a.textContent,
-      href: a.getAttribute('href'),
-      current: a.getAttribute('aria-current'),
-    }))
-    expect(tabs).toEqual([
-      { text: 'Changes', href: '/git?view=repo', current: 'page' },
-      { text: 'Commits', href: '/git/commits', current: null },
-      { text: 'Branches', href: '/git/branches', current: null },
-    ])
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Uncommitted changes')
+    expect(document.querySelector('[data-slot="repo-meta"]')?.textContent).toBe('2 uncommitted files in the main checkout')
+    // Issue 06 §3: the sections live in the sidebar; the main header has no Changes/Commits/Branches tabs.
+    expect(document.querySelector('[data-slot="repo-tabs"]')).toBeNull()
+    expect(screen.queryByRole('link', { name: 'Commits' })).toBeNull()
 
     // The SAME tree + facade the task Changes tab uses: compacted folder, per-file ±.
     await waitFor(() => expect(document.querySelector('[data-slot="changes-tree"]')).not.toBeNull())
@@ -197,7 +183,7 @@ describe('the repo view Changes segment', () => {
     stubFetch({
       'GET /api/v1/repo/changes': () => jsonResponse({ files: [], stat: { adds: 0, dels: 0, files: 0 } }),
     })
-    renderAt('/git')
+    renderAt('/git/changes')
     await waitFor(() =>
       expect(screen.getByRole('heading', { level: 2, name: 'Working tree clean' })).toBeTruthy(),
     )
@@ -207,7 +193,7 @@ describe('the repo view Changes segment', () => {
     stubFetch({
       'GET /api/v1/repo/changes': () => jsonResponse({ error: 'not a git repository' }, 409),
     })
-    renderAt('/git')
+    renderAt('/git/changes')
     await waitFor(() =>
       expect(screen.getByRole('heading', { level: 2, name: 'No changes to show' })).toBeTruthy(),
     )
@@ -221,8 +207,7 @@ describe('the repo view Changes segment', () => {
       vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })),
     )
     stubFetch()
-    // `?view=repo`: a phone's bare /git is the worktree screen, not the repository.
-    renderAt('/git?view=repo')
+    renderAt('/git/changes')
     await waitFor(() => expect(document.querySelector('[data-slot="diff"]')).not.toBeNull())
 
     fireEvent.click(document.querySelector('[data-slot="diff-mode-toggle"] [data-mode="split"]')!)
@@ -243,225 +228,36 @@ describe('the repo view Changes segment', () => {
   })
 })
 
-// ---- pull -------------------------------------------------------------------------------------
-
-describe('the repo header pull control', () => {
-  it('defaults to the configured base branch and explains that a different branch stays checked out', async () => {
-    stubFetch({
-      'GET /api/v1/repo': () => jsonResponse({ ...REPO, baseBranch: 'feature' }),
-    })
-    renderAt('/git')
-
-    const picker = (await screen.findByLabelText('Branch to pull')) as HTMLSelectElement
-    await waitFor(() => expect([...picker.options].map((option) => option.value)).toEqual(['feature', 'main']))
-    expect(picker.value).toBe('feature')
-    expect(screen.getByRole('button', { name: /^Switch & pull$/ })).toBeTruthy()
-    expect(document.querySelector('[data-slot="repo-pull-note"]')?.textContent).toContain(
-      'feature stays checked out',
-    )
-  })
-
-  it('falls back to the checked-out branch and changes the action label with the picker', async () => {
-    stubFetch()
-    renderAt('/git')
-
-    const picker = (await screen.findByLabelText('Branch to pull')) as HTMLSelectElement
-    const pullButton = screen.getByRole('button', { name: /^Pull$/ }) as HTMLButtonElement
-    await waitFor(() => expect(pullButton.disabled).toBe(false))
-    expect(picker.value).toBe('main')
-
-    fireEvent.change(picker, { target: { value: 'feature' } })
-    expect(screen.getByRole('button', { name: /^Switch & pull$/ })).toBeTruthy()
-    expect(document.querySelector('[data-slot="repo-pull-note"]')?.textContent).toContain(
-      'feature stays checked out',
-    )
-  })
-
-  it('keeps a nonlocal configured default visible but cannot pull it', async () => {
-    stubFetch({
-      'GET /api/v1/repo': () => jsonResponse({ ...REPO, baseBranch: 'origin/release' }),
-    })
-    renderAt('/git')
-
-    const picker = (await screen.findByLabelText('Branch to pull')) as HTMLSelectElement
-    await waitFor(() => expect([...picker.options].map((option) => option.value)).toEqual([
-      'origin/release',
-      'feature',
-      'main',
-    ]))
-    const unavailable = picker.options[0]!
-    expect(unavailable.disabled).toBe(true)
-    expect(picker.value).toBe('origin/release')
-    const button = screen.getByRole('button', { name: /^Switch & pull$/ }) as HTMLButtonElement
-    expect(button.disabled).toBe(true)
-    expect(button.title).toContain('not a local branch')
-    expect(document.querySelector('[data-slot="repo-pull-note"]')?.textContent).toContain(
-      'Choose a local branch',
-    )
-
-    fireEvent.change(picker, { target: { value: 'main' } })
-    expect(button.disabled).toBe(false)
-    expect([...picker.options].filter((option) => !option.disabled).map((option) => option.value)).toEqual([
-      'feature',
-      'main',
-    ])
-  })
-
-  it.each([
-    ['active_runs', 'active session'],
-    ['dirty_tree', 'dirty files'],
-  ] as const)('asks for explicit confirmation when the server reports %s', async (risk, copy) => {
-    let attempts = 0
-    const sent = stubFetch({
-      'POST /api/v1/repo/pull': () => {
-        attempts += 1
-        return attempts === 1
-          ? jsonResponse({ error: 'Confirmation required', branch: 'main', risks: [risk] }, 409)
-          : jsonResponse({ branch: 'main', pulled: true, summary: 'Already up to date.' })
-      },
-    })
-    renderAt('/git')
-
-    const pullButton = (await screen.findByRole('button', { name: /^Pull$/ })) as HTMLButtonElement
-    await waitFor(() => expect(pullButton.disabled).toBe(false))
-    fireEvent.click(pullButton)
-    const dialog = await screen.findByRole('alertdialog')
-    expect(dialog.textContent).toContain(copy)
-    fireEvent.click(screen.getByRole('button', { name: 'Pull anyway' }))
-
-    await waitFor(() => expect(attempts).toBe(2))
-    const posts = sent.filter((request) => request.method === 'POST' && request.path === '/api/v1/repo/pull')
-    expect(posts.map((request) => request.body)).toEqual([
-      { branch: 'main' },
-      { branch: 'main', confirm: true },
-    ])
-  })
-
-  it('shows both reported risks and Cancel leaves the repository untouched', async () => {
-    let attempts = 0
-    stubFetch({
-      'POST /api/v1/repo/pull': () => {
-        attempts += 1
-        return jsonResponse(
-          { error: 'Confirmation required', branch: 'main', risks: ['active_runs', 'dirty_tree'] },
-          409,
-        )
-      },
-    })
-    renderAt('/git')
-
-    const pullButton = (await screen.findByRole('button', { name: /^Pull$/ })) as HTMLButtonElement
-    await waitFor(() => expect(pullButton.disabled).toBe(false))
-    fireEvent.click(pullButton)
-    const dialog = await screen.findByRole('alertdialog')
-    expect(dialog.textContent).toContain('active session')
-    expect(dialog.textContent).toContain('dirty files')
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
-
-    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
-    expect(attempts).toBe(1)
-  })
-
-  it('returns keyboard focus to Pull after cancelling the confirmation dialog', async () => {
-    stubFetch({
-      'POST /api/v1/repo/pull': () =>
-        jsonResponse({ error: 'Confirmation required', branch: 'main', risks: ['dirty_tree'] }, 409),
-    })
-    renderAt('/git')
-
-    const pullButton = (await screen.findByRole('button', { name: /^Pull$/ })) as HTMLButtonElement
-    await waitFor(() => expect(pullButton.disabled).toBe(false))
-    pullButton.focus()
-    expect(document.activeElement).toBe(pullButton)
-    fireEvent.click(pullButton)
-    await screen.findByRole('alertdialog')
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
-
-    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
-    await waitFor(() => expect(document.activeElement).toBe(pullButton))
-  })
-
-  it('pulls a clean checkout without a dialog, toasts the summary, and refreshes repo and health', async () => {
-    const sent = stubFetch({
-      'POST /api/v1/repo/pull': () =>
-        jsonResponse({ branch: 'main', pulled: true, summary: 'Fast-forwarded by 2 commits.' }),
-    })
-    renderAt('/git/branches')
-    await screen.findByLabelText('Branch to pull')
-    await waitFor(() =>
-      expect((screen.getByRole('button', { name: /^Pull$/ }) as HTMLButtonElement).disabled).toBe(false),
-    )
-    await waitFor(() => expect(sent.some((request) => request.path === '/api/v1/health')).toBe(true))
-    const repoReadsBefore = sent.filter((request) => request.path === '/api/v1/repo').length
-    const healthReadsBefore = sent.filter((request) => request.path === '/api/v1/health').length
-
-    fireEvent.click(screen.getByRole('button', { name: /^Pull$/ }))
-
-    await waitFor(() => expect(document.body.textContent).toContain('Fast-forwarded by 2 commits.'))
-    expect(screen.queryByRole('alertdialog')).toBeNull()
-    await waitFor(() => {
-      expect(sent.filter((request) => request.path === '/api/v1/repo').length).toBeGreaterThan(repoReadsBefore)
-      expect(sent.filter((request) => request.path === '/api/v1/health').length).toBeGreaterThan(healthReadsBefore)
-    })
-  })
-
-  it('surfaces an ordinary pull error and still refreshes repo and health after the attempted mutation', async () => {
-    const sent = stubFetch({
-      'POST /api/v1/repo/pull': () => jsonResponse({ error: 'No upstream configured for feature' }, 409),
-    })
-    renderAt('/git/branches')
-    const picker = (await screen.findByLabelText('Branch to pull')) as HTMLSelectElement
-    await waitFor(() => expect(picker.disabled).toBe(false))
-    await waitFor(() => expect(sent.some((request) => request.path === '/api/v1/health')).toBe(true))
-    fireEvent.change(picker, { target: { value: 'feature' } })
-    const repoReadsBefore = sent.filter((request) => request.path === '/api/v1/repo').length
-    const healthReadsBefore = sent.filter((request) => request.path === '/api/v1/health').length
-
-    fireEvent.click(screen.getByRole('button', { name: /^Switch & pull$/ }))
-
-    await waitFor(() => expect(document.body.textContent).toContain('No upstream configured for feature'))
-    await waitFor(() => {
-      expect(sent.filter((request) => request.path === '/api/v1/repo').length).toBeGreaterThan(repoReadsBefore)
-      expect(sent.filter((request) => request.path === '/api/v1/health').length).toBeGreaterThan(healthReadsBefore)
-    })
-  })
-
-  it('keeps the control in place and disables both inputs while a pull is pending', async () => {
-    const pending = deferredResponse()
-    stubFetch({ 'POST /api/v1/repo/pull': () => pending.promise })
-    renderAt('/git')
-    const picker = (await screen.findByLabelText('Branch to pull')) as HTMLSelectElement
-    const button = screen.getByRole('button', { name: /^Pull$/ }) as HTMLButtonElement
-    await waitFor(() => expect(button.disabled).toBe(false))
-
-    fireEvent.click(button)
-    await waitFor(() => expect(button.disabled).toBe(true))
-    expect(picker.disabled).toBe(true)
-    expect(document.querySelector('[data-slot="repo-pull"]')).not.toBeNull()
-
-    pending.resolve(jsonResponse({ branch: 'main', pulled: true, summary: 'Already up to date.' }))
-    await waitFor(() => expect(button.disabled).toBe(false))
-  })
-
-  it('disables pulling with an actionable reason when no remote is configured', async () => {
-    const sent = stubFetch({
-      'GET /api/v1/repo': () => jsonResponse({ ...REPO, info: { ...REPO.info!, remote: null } }),
-    })
-    renderAt('/git')
-
-    const button = (await screen.findByRole('button', { name: /^Pull$/ })) as HTMLButtonElement
-    expect(button.disabled).toBe(true)
-    expect(button.title).toContain('No remote configured')
-    expect(document.querySelector('[data-slot="repo-pull-note"]')?.textContent).toContain(
-      'Add a Git remote',
-    )
-    expect(sent.some((request) => request.path === '/api/v1/repo/pull')).toBe(false)
-  })
-})
-
 // ---- commits ----------------------------------------------------------------------------------
 
-describe('the repo view Commits segment', () => {
+describe('the Git view Recently on main section', () => {
+  it.each(['/git', '/git/commits'])('%s is Recently on the checked-out branch, titled with a meta line and no tabs', async (entry) => {
+    stubFetch()
+    renderAt(entry)
+    await waitFor(() => expect(document.querySelector('[data-slot="repo-commits"]')).not.toBeNull())
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Recently on main')
+    expect(document.querySelector('[data-slot="repo-meta"]')?.textContent).toBe('latest 2 commits in the main checkout')
+    expect(document.querySelector('[data-slot="repo-tabs"]')).toBeNull()
+  })
+
+  it('groups the log by day, each 52px row reading subject then sha · author · age', async () => {
+    stubFetch()
+    renderAt('/git')
+    await waitFor(() => expect(document.querySelectorAll('[data-slot="repo-commit-day"]')).toHaveLength(2))
+    const days = [...document.querySelectorAll('[data-slot="repo-commit-day"]')].map((day) => ({
+      label: day.querySelector('h2')?.textContent,
+      shas: [...day.querySelectorAll('[data-slot="commit-row"]')].map((row) => row.getAttribute('data-sha')),
+    }))
+    // Fixed relative ages ("2 hours ago", "3 days ago"): the first lands Today unless the suite
+    // runs in the two hours after midnight, so pin only what cannot move.
+    expect(days[1]).toEqual({ label: 'This week', shas: ['def5678'] })
+    expect(days[0]?.shas).toEqual(['abc1234'])
+    const row = document.querySelector('[data-slot="commit-row"][data-sha="def5678"]')!
+    expect(row.className).toContain('min-h-[52px]')
+    expect(row.querySelector('[data-slot="commit-subject"]')?.textContent).toBe('fix: stop the bug')
+    expect(row.querySelector('[data-slot="commit-meta"]')?.textContent).toBe('def5678· Linus · 3d')
+  })
+
   it('lists the recent commits from /api/v1/repo, each row deep-linking to its diff', async () => {
     stubFetch()
     renderAt('/git/commits')
@@ -497,7 +293,9 @@ describe('the repo view Commits segment', () => {
       expect(document.querySelector('[data-slot="diff-file"][data-path="notes.md"]')).not.toBeNull(),
     )
     // And the way back is a link, not a dead end.
-    expect(document.querySelector('[data-slot="commit-back"]')?.getAttribute('href')).toBe('/git/commits')
+    // A commit opens inside Recently on main, and its way back is that section.
+    expect(document.querySelector('[data-slot="commit-back"]')?.getAttribute('href')).toBe('/git')
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Recently on main')
   })
 
   it('an unknown sha is a neutral "Commit not found" with the server reason', async () => {
@@ -526,7 +324,7 @@ describe('the repo view Commits segment', () => {
 
 // ---- branches ----------------------------------------------------------------------------------
 
-describe('the repo view Branches segment', () => {
+describe('the Git view All branches section', () => {
   it('lists branches with the checkout marked current and the rest switchable', async () => {
     stubFetch()
     renderAt('/git/branches')
@@ -554,20 +352,20 @@ describe('the repo view Branches segment', () => {
       expect(post?.body).toEqual({ name: 'feature' })
     })
     await waitFor(() => expect(document.body.textContent).toContain('Switched to feature'))
-    await waitFor(() => expect(document.querySelector('[data-slot="branch-chip"]')?.textContent).toBe('feature'))
+    await waitFor(() => expect(document.querySelector('[data-slot="repo-meta"]')?.textContent).toBe('2 local branches · on feature'))
     await waitFor(() => expect(client.getQueryData<HealthResponse>(queryKeys.health)?.repo?.branch).toBe('feature'))
   })
 
-  it('filters branch rows without narrowing the base-branch picker', async () => {
+  it('filters branch rows, and leaves the base-branch picker to the checkout block', async () => {
     stubFetch()
     renderAt('/git/branches')
     const filter = await screen.findByLabelText('Filter branches')
-    const picker = (await screen.findByLabelText('Agents’ base branch')) as HTMLSelectElement
+    // Listed once, in the checkout block (issue 06 §3).
+    expect(document.querySelector('[data-slot="base-branch-picker"]')).toBeNull()
 
     fireEvent.change(filter, { target: { value: 'FEAT' } })
     expect(document.querySelector('[data-slot="branch-row"][data-branch="feature"]')).not.toBeNull()
     expect(document.querySelector('[data-slot="branch-row"][data-branch="main"]')).toBeNull()
-    expect([...picker.options].map((option) => option.value)).toEqual(['', 'feature', 'main'])
 
     fireEvent.change(filter, { target: { value: 'missing' } })
     expect(document.querySelector('[data-slot="branch-empty"]')?.textContent).toContain(
@@ -609,22 +407,6 @@ describe('the repo view Branches segment', () => {
     await waitFor(() => expect(input.value).toBe(''))
   })
 
-  it('the base-branch picker PUTs /api/v1/config with the chosen branch (and null to clear)', async () => {
-    const sent = stubFetch({
-      'PUT /api/v1/config': () => jsonResponse({ baseBranch: 'feature', defaultRunner: 'claude' }),
-    })
-    renderAt('/git/branches')
-    const picker = (await screen.findByLabelText('Agents’ base branch')) as HTMLSelectElement
-    expect(picker.value).toBe('') // baseBranch: null = follow checked-out branch
-
-    fireEvent.change(picker, { target: { value: 'feature' } })
-    await waitFor(() => {
-      const put = sent.find((r) => r.method === 'PUT' && r.path === '/api/v1/config')
-      expect(put?.body).toEqual({ baseBranch: 'feature' })
-    })
-    await waitFor(() => expect(document.body.textContent).toContain('Agents now branch from feature'))
-  })
-
   it('forge available: the PR rows render with links and checks badges', async () => {
     stubFetch()
     renderAt('/git/branches')
@@ -660,5 +442,38 @@ describe('the repo view Branches segment', () => {
     await waitFor(() => expect(document.querySelector('[data-slot="repo-branch-list"]')).not.toBeNull())
     // available:false gates the section off entirely — PR links would all be dead ends.
     expect(document.querySelector('[data-slot="repo-prs"]')).toBeNull()
+  })
+})
+
+// ---- cleanup ----------------------------------------------------------------------------------
+
+describe('the Git view Cleanup section', () => {
+  it('renders the worktrees card moved from Settings, with Reclaim now and an honest per-row Delete', async () => {
+    stubFetch({
+      'GET /api/v1/open-targets': () => jsonResponse({ targets: [] }),
+      'GET /api/v1/worktrees': () =>
+        jsonResponse({
+          worktrees: [
+            { runId: 'r1', title: 'Upstream ledger scan', status: 'done', branch: 'cez/a41c0d2e', sizeBytes: 640 * 1024 ** 2, finishedAt: null, reclaimable: true },
+            { runId: 'r2', title: 'Reviewer agent presets', status: 'review', branch: 'cez/0c3de91f', sizeBytes: 590 * 1024 ** 2, finishedAt: null, reclaimable: false },
+          ],
+          totalBytes: 1230 * 1024 ** 2,
+          keep: 20,
+        }),
+    })
+    renderAt('/git/cleanup')
+    await waitFor(() => expect(document.querySelectorAll('[data-slot="worktree-row"]')).toHaveLength(2))
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Cleanup')
+    expect(document.querySelector('[data-slot="repo-meta"]')?.textContent).toBe('2 task checkouts on disk · 1.2 GB')
+    expect(screen.getByRole('heading', { level: 2, name: 'Worktrees on disk · 1.2 GB' })).toBeTruthy()
+    expect(document.querySelector('[data-action="worktrees-reclaim-now"]')?.textContent).toBe('Reclaim now')
+    expect(document.querySelector('[data-slot="worktrees-retention-link"]')?.getAttribute('href')).toBe('/settings/worktrees')
+    const deletes = [...document.querySelectorAll('[data-action="worktree-delete"]')].map((button) => button.getAttribute('aria-label'))
+    expect(deletes).toEqual([
+      'Delete worktree and branch for Upstream ledger scan',
+      'Delete worktree and branch for Reviewer agent presets',
+    ])
+    expect(document.querySelector('[data-slot="worktree-row"][data-run="r2"]')?.textContent).toContain('in use')
+    expect(document.querySelector('[data-slot="repo-tabs"]')).toBeNull()
   })
 })

@@ -34,9 +34,9 @@
 .settings-panel [data-slot="accounts-tabs"] { flex-wrap: wrap; height: auto; }
 /* Keep the complete table semantics/data while arranging each record as the
    reference's vertical card, so long paths and tag editors fit at any width. */
-.settings-panel :is([data-slot="projects-section"], [data-slot="worktrees-panel"]) table { display: block; }
-.settings-panel :is([data-slot="projects-section"], [data-slot="worktrees-panel"]) :is(tbody, tr) { display: grid; min-width: 0; }
-.settings-panel :is([data-slot="projects-section"], [data-slot="worktrees-panel"]) thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.settings-panel [data-slot="projects-section"] table { display: block; }
+.settings-panel [data-slot="projects-section"] :is(tbody, tr) { display: grid; min-width: 0; }
+.settings-panel [data-slot="projects-section"] thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 .settings-panel [data-slot="projects-section"] colgroup { display: none; }
 .settings-panel :is([data-slot="project-row"], [data-slot="worktree-row"]) { padding: 16px 0; gap: 8px; }
 .settings-panel :is([data-slot="project-row"], [data-slot="worktree-row"]) > :is(th, td) { display: block; max-width: none; width: 100%; min-width: 0; text-align: left; padding: 0 12px; }
@@ -151,7 +151,7 @@
 .settings-panel [data-slot=projects-section] .settings-field:has([data-slot=projects-checkout-root]) > div:nth-child(2) { flex-wrap: wrap; }
 .settings-panel [data-slot=projects-section] .settings-field:has([data-slot=projects-browse-root]) button,
 .settings-panel [data-slot=projects-section] .settings-field:has([data-slot=projects-checkout-root]) button { margin-top: 8px; }
-.settings-panel :is([data-slot=projects-section],[data-slot=worktrees-panel]) .overflow-x-auto { border: 0; }
+.settings-panel [data-slot=projects-section] .overflow-x-auto { border: 0; }
 .settings-panel :is([data-slot=project-row],[data-slot=worktree-row]) > :is(th,td) { padding-left: 0; padding-right: 0; }
 .settings-panel :is([data-slot=project-row],[data-slot=worktree-row]) > th { font-size: 14px; }
 .settings-panel :is([data-slot=project-row],[data-slot=worktree-row]) > td:nth-child(2) { padding: 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--background); }

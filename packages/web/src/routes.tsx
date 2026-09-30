@@ -361,13 +361,15 @@ export function AppRoutes() {
           }
         />
 
-        {/* The repo view (R5 Step 1.7): each segment is a URL — /git (working-tree changes),
-            /git/commits (+ /:sha for one commit's diff), /git/branches. */}
+        {/* The Git view (issue 06 §3): each section is a URL — /git (Recently on main; a phone's
+            Git screen unless ?view=repo), /git/commits (+ /:sha, one commit inside Recently on
+            main), /git/cleanup, /git/branches, and /git/changes (the main tree's uncommitted
+            files, from the checkout block). */}
         <Route
           path="git"
           element={
             <Suspense fallback={<RepoGitLoading />}>
-              <RepoGitRoute tab="changes" />
+              <RepoGitRoute section="main" index />
             </Suspense>
           }
         />
@@ -375,7 +377,7 @@ export function AppRoutes() {
           path="git/commits"
           element={
             <Suspense fallback={<RepoGitLoading />}>
-              <RepoGitRoute tab="commits" />
+              <RepoGitRoute section="main" />
             </Suspense>
           }
         />
@@ -383,7 +385,15 @@ export function AppRoutes() {
           path="git/commits/:sha"
           element={
             <Suspense fallback={<RepoGitLoading />}>
-              <RepoGitRoute tab="commits" />
+              <RepoGitRoute section="main" />
+            </Suspense>
+          }
+        />
+        <Route
+          path="git/cleanup"
+          element={
+            <Suspense fallback={<RepoGitLoading />}>
+              <RepoGitRoute section="cleanup" />
             </Suspense>
           }
         />
@@ -391,7 +401,15 @@ export function AppRoutes() {
           path="git/branches"
           element={
             <Suspense fallback={<RepoGitLoading />}>
-              <RepoGitRoute tab="branches" />
+              <RepoGitRoute section="branches" />
+            </Suspense>
+          }
+        />
+        <Route
+          path="git/changes"
+          element={
+            <Suspense fallback={<RepoGitLoading />}>
+              <RepoGitRoute section="changes" />
             </Suspense>
           }
         />
