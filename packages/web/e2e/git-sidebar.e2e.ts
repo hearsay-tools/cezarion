@@ -11,15 +11,19 @@ import { stopFixtureServer } from './fixture-server'
 import { waitForHealth } from './poll'
 
 /**
- * Issue 06 §3 (#622, Git slice): the Git view's sidebar (desktop) and Git screen (phone), in a
- * real browser against its own fixture server. No server or contract change: the checkout block
- * and the sections read `GET /repo` and `GET /worktrees`, and act through the existing
- * `POST /repo/pull`, `POST /repo/branch` and `PUT /config`.
+ * Issue 06 §3 (#622, Git slice) and issue 08 §C: the Git view's sidebar (desktop) and Git screen
+ * (phone), in a real browser against its own fixture server. The checkout block and the sections
+ * read `GET /repo`, `GET /repo/branches` and `GET /worktrees`, and act through `POST /repo/pull`,
+ * `POST /repo/branch`, `PUT /config` and `POST /repo/branches/delete`.
  *
  * The fixture pins what the view must show and what it must no longer show:
  *   - Project A is on `main` with a second branch (`feature`), commits made today, one
- *     uncommitted file, and task worktrees on disk. The sidebar lists the checkout block and the
- *     sections Recently on main / Cleanup / All branches — never a task-worktree row or a task link.
+ *     uncommitted file, and task worktrees on disk. Its `cez/*` branches cover issue 08's classes:
+ *     a finished task's unmerged work (`cez/nl-task`), a branch whose task was deleted
+ *     (`cez/orphan1`), and one already on main (`cez/merged1`). It has no remote, so the forge
+ *     cannot answer and classification is by ancestry only. The sidebar lists the checkout block
+ *     and the sections Recently on main / Not landed / Cleanup / All branches — never a
+ *     task-worktree row or a task link.
  *   - Project B is on `b-main` with its own worktree; neither project's checkout or worktrees
  *     may appear under the other.
  */
@@ -64,6 +68,16 @@ beforeAll(async () => {
   }
   seed(root, 'main', ['fixture: first', 'fixture: second', 'fixture: third'])
   execFileSync('git', ['-C', root, 'branch', 'feature'])
+  // Issue 08's classes: two branches with work main does not have, and one already on main.
+  const commitOn = (branch: string, subject: string) => {
+    execFileSync('git', ['-C', root, 'branch', branch, 'main'])
+    const tree = execFileSync('git', ['-C', root, 'rev-parse', 'main^{tree}'], { encoding: 'utf8' }).trim()
+    const sha = execFileSync('git', ['-C', root, '-c', 'user.name=E2E', '-c', 'user.email=e2e@example.test', 'commit-tree', tree, '-p', branch, '-m', subject], { encoding: 'utf8' }).trim()
+    execFileSync('git', ['-C', root, 'update-ref', `refs/heads/${branch}`, sha])
+  }
+  commitOn('cez/nl-task', 'feat: work that never landed')
+  commitOn('cez/orphan1', 'feat: work whose task was deleted')
+  execFileSync('git', ['-C', root, 'branch', 'cez/merged1', 'main~1'])
   writeFileSync(join(root, 'dirty.txt'), 'uncommitted\n')
   seed(rootB, 'b-main', ['fixture: b'])
 
@@ -81,6 +95,8 @@ beforeAll(async () => {
   writeFileSync(join(root, '.ai/cezar/runs.json'), JSON.stringify([
     run(root, 'wt-done', { title: 'Finished but retained' }),
     run(root, 'wt-review', { title: 'Waiting for review', status: 'review', finishedAt: undefined }),
+    // A finished task whose branch holds work main lacks, its worktree already reclaimed.
+    { ...run(root, 'nl-task', { title: 'Work that never landed', branch: 'cez/nl-task' }), worktreePath: undefined },
   ]))
   writeFileSync(join(rootB, '.ai/cezar/runs.json'), JSON.stringify([run(rootB, 'b-only', { title: 'B only worktree' })]))
 
@@ -156,6 +172,11 @@ describe('the fixture', () => {
     // Booting may add files of its own (cezar's data gitignore); ours is the one this spec names.
     expect(repo.status.map((entry) => entry.path)).toContain('dirty.txt')
     expect(repo.branches).toEqual(['feature', 'main'])
+    const branches = (await fetch(`${base}/api/v1/p/${project}/repo/branches`).then((r) => r.json())) as { prStateKnown: boolean; branches: Array<{ name: string; class: string }> }
+    expect(Object.fromEntries(branches.branches.map((entry) => [entry.name, entry.class]))).toEqual({
+      'cez/merged1': 'merged', 'cez/nl-task': 'not-landed', 'cez/orphan1': 'orphan', feature: 'other', main: 'active',
+    })
+    expect(branches.prStateKnown).toBe(false)
     const worktrees = (await fetch(`${base}/api/v1/p/${project}/worktrees`).then((r) => r.json())) as { worktrees: Array<{ runId: string }>; totalBytes: number | null }
     expect(worktrees.worktrees.map((entry) => entry.runId).sort()).toEqual(A_WORKTREES)
     expect(worktrees.totalBytes).toBeGreaterThan(0)
@@ -163,18 +184,22 @@ describe('the fixture', () => {
 })
 
 describe('Git desktop sidebar (issue 06 §3)', () => {
-  it('shows the checkout block, then Recently on main (lit), Cleanup and All branches with counts', async () => {
+  it('shows the checkout block, then Recently on main (lit), Not landed, Cleanup and All branches with counts', async () => {
     const dirty = ((await fetch(`${base}/api/v1/p/${project}/repo`).then((r) => r.json())) as { status: unknown[] }).status.length
     openDesktop()
-    const rows = browser.waitForValue<SectionRow[]>(sectionsJs(SIDEBAR), (value) => Array.isArray(value) && value[1]?.count !== null && value[2]?.count !== null)
+    const rows = browser.waitForValue<SectionRow[]>(sectionsJs(SIDEBAR), (value) => Array.isArray(value) && value[1]?.count !== null && value[2]?.count !== null && value[3]?.count !== null)
     expect(rows.map(({ section, label, href, current, height }) => ({ section, label, href, current, height }))).toEqual([
       { section: 'main', label: 'Recently on main', href: scoped('/git'), current: 'page', height: 32 },
+      { section: 'not-landed', label: 'Not landed', href: scoped('/git/not-landed'), current: null, height: 32 },
       { section: 'cleanup', label: 'Cleanup', href: scoped('/git/cleanup'), current: null, height: 32 },
       { section: 'branches', label: 'All branches', href: scoped('/git/branches'), current: null, height: 32 },
     ])
     expect(rows[0]?.count).toBeNull()
-    expect(rows[1]?.count).toMatch(/^\d+(\.\d)? (kB|MB|GB)$/)
-    expect(rows[2]?.count).toBe('2')
+    expect(rows[1]?.count).toBe('2')
+    expect(rows[2]?.count).toMatch(/^\d+(\.\d)? (kB|MB|GB)$/)
+    expect(rows[3]?.count).toBe('5')
+    // No upstream: no freshness line.
+    expect(browser.count(`${CHECKOUT} [data-slot="git-freshness"]`)).toBe(0)
 
     // The checkout block: branch, Pull (no remote here, so disabled with its reason), the base picker, the dirty line.
     expect(browser.text(`${CHECKOUT} [data-slot="git-checkout-branch"]`)).toBe('main')
@@ -197,6 +222,10 @@ describe('Git desktop sidebar (issue 06 §3)', () => {
     expect(browser.count('[data-slot="repo-tabs"]')).toBe(0)
     expect(browser.evaluate(`[...document.querySelectorAll('[data-slot="repo-commit-day"] h2')].map((h) => h.textContent)`)).toEqual(['Today'])
     expect(browser.count('[data-slot="commit-row"]')).toBe(3)
+    // No task produced these commits: each says so.
+    expect(browser.evaluate(`[...document.querySelectorAll('[data-slot="commit-source"]')].map((s) => s.textContent)`)).toEqual([
+      'committed by hand', 'committed by hand', 'committed by hand',
+    ])
   }, 90_000)
 
   it('paints the view in light and dark without horizontal overflow', () => {
@@ -214,23 +243,28 @@ describe('Git desktop sidebar (issue 06 §3)', () => {
     }
   }, 90_000)
 
-  it('Cleanup shows the worktrees card moved from Settings, sized like its sidebar count', () => {
+  it('Cleanup shows the worktrees card and the branches safe to delete, sized like its sidebar count', () => {
     openDesktop()
     browser.click(`${SIDEBAR} a[data-git-section="cleanup"]`)
     expect(browser.waitForValue(locationJs, (value) => value === scoped('/git/cleanup'))).toBe(scoped('/git/cleanup'))
     expect(browser.waitForValue(litJs, (value) => JSON.stringify(value) === '["cleanup"]')).toEqual(['cleanup'])
     const size = browser.waitForValue<string | null>(cardSizeJs, (value) => typeof value === 'string')
-    const rows = browser.waitForValue<SectionRow[]>(sectionsJs(SIDEBAR), (value) => Array.isArray(value) && value[1]?.count !== null)
-    expect(rows[1]?.count).toBe(size)
+    const rows = browser.waitForValue<SectionRow[]>(sectionsJs(SIDEBAR), (value) => Array.isArray(value) && value[2]?.count !== null)
+    expect(rows[2]?.count).toBe(size)
     expect(browser.text(`${HEADER} h1`)).toBe('Cleanup')
+    expect(browser.text(`${HEADER} [data-slot="repo-meta"]`)).toBe('nothing here can delete work that is not on main')
     expect(browser.evaluate(`[...document.querySelectorAll('[data-slot="worktree-row"]')].map((row) => row.dataset.run).sort()`)).toEqual(A_WORKTREES)
-    // Until issue 08 ships directory-only reclaim, the per-row action says what it really does.
-    expect(browser.evaluate(`[...document.querySelectorAll('[data-action="worktree-delete"]')].map((b) => b.getAttribute('aria-label')).sort()`)).toEqual([
-      'Delete worktree and branch for Finished but retained',
-      'Delete worktree and branch for Waiting for review',
+    // Issue 08: the per-row action is the directory-only Reclaim, and only on the finished row.
+    expect(browser.evaluate(`[...document.querySelectorAll('[data-action="worktree-reclaim"]')].map((b) => b.getAttribute('aria-label'))`)).toEqual([
+      'Reclaim the worktree of Finished but retained (branch kept)',
     ])
+    expect(browser.count('[data-action="worktree-delete"]')).toBe(0)
     expect(browser.count('[data-action="worktrees-reclaim-now"]')).toBe(1)
     expect(browser.text('[data-slot="worktree-row"][data-run="wt-review"]')).toContain('in use')
+    // The branch card: the merged branch only; the not-landed and orphan ones never appear here.
+    browser.waitForFunction(has('[data-slot="cleanup-branches"]'))
+    expect(browser.text('[data-slot="cleanup-branches"] h2')).toBe('Branches safe to delete · 1')
+    expect(browser.text('[data-slot="cleanup-branch-group"][data-group="merged"] button')).toContain('squash-merged branches may show as not landed without github')
     for (const theme of ['light', 'dark'] as const) {
       setTheme(theme)
       browser.screenshot(`${artifactsDir}/git-view-cleanup-${theme}.png`, { viewport: true })
@@ -242,7 +276,7 @@ describe('Git desktop sidebar (issue 06 §3)', () => {
     browser.click(`${SIDEBAR} a[data-git-section="branches"]`)
     expect(browser.waitForValue(locationJs, (value) => value === scoped('/git/branches'))).toBe(scoped('/git/branches'))
     browser.waitForFunction(has('[data-slot="repo-branch-list"]'))
-    expect(browser.count('[data-slot="branch-row"]')).toBe(2)
+    expect(browser.count('[data-slot="branch-row"]')).toBe(5)
     expect(browser.evaluate(litJs)).toEqual(['branches'])
 
     browser.click(`${CHECKOUT} [data-slot="git-uncommitted"]`)
@@ -296,15 +330,63 @@ describe('Git desktop sidebar (issue 06 §3)', () => {
   }, 90_000)
 })
 
+describe('Git → Not landed and the branch cleanup (issue 08 §C)', () => {
+  it('lists the unmerged work by what the user can do, with the no-forge note and no error', () => {
+    openDesktop('/git/not-landed')
+    browser.waitForFunction(has('[data-slot="not-landed-group"]'))
+    expect(browser.text(`${HEADER} h1`)).toBe('Not landed')
+    expect(browser.evaluate(litJs)).toEqual(['not-landed'])
+    expect(browser.evaluate(`[...document.querySelectorAll('[data-slot="not-landed-group"]')].map((group) => [group.dataset.group, [...group.querySelectorAll('[data-slot="not-landed-row"]')].map((row) => row.dataset.branch)])`)).toEqual([
+      ['no-pr', ['cez/nl-task']],
+      ['deleted', ['cez/orphan1']],
+    ])
+    expect(browser.text('[data-slot="git-no-forge"]')).toBe('Squash-merged branches may show as not landed without GitHub.')
+    expect(browser.evaluate(`document.querySelector('[data-branch="cez/nl-task"] [data-action="not-landed-open"]').getAttribute('href')`)).toBe(scoped('/tasks/nl-task'))
+    expect(browser.count('[data-branch="cez/orphan1"] [data-action="not-landed-copy"]')).toBe(1)
+    for (const theme of ['light', 'dark'] as const) {
+      setTheme(theme)
+      expect(browser.evaluate(`document.documentElement.scrollWidth > innerWidth`)).toBe(false)
+      browser.screenshot(`${artifactsDir}/git-view-not-landed-${theme}.png`, { viewport: true })
+    }
+  }, 90_000)
+
+  it('deletes an orphan branch only after its name is typed, and the branch is gone from git', () => {
+    openDesktop('/git/not-landed')
+    browser.click('[data-branch="cez/orphan1"] [data-action="not-landed-more"]')
+    browser.click('[data-action="not-landed-delete"]')
+    browser.waitForFunction(has('[data-slot="delete-branch-dialog"]'))
+    expect(browser.text('[data-slot="delete-branch-dropped"]')).toContain('1 commit will be dropped')
+    expect(browser.evaluate(`document.querySelector('[data-action="delete-branch-confirm"]').disabled`)).toBe(true)
+    browser.fill('[data-slot="delete-branch-confirm"]', 'cez/orphan1')
+    browser.waitForFunction(`document.querySelector('[data-action="delete-branch-confirm"]:not([disabled])') !== null`)
+    browser.click('[data-action="delete-branch-confirm"]')
+    expect(browser.waitForValue(`[...document.querySelectorAll('[data-slot="not-landed-row"]')].map((row) => row.dataset.branch)`, (value) => JSON.stringify(value) === '["cez/nl-task"]')).toEqual(['cez/nl-task'])
+    expect(execFileSync('git', ['-C', root, 'branch', '--list', 'cez/orphan1'], { encoding: 'utf8' }).trim()).toBe('')
+    expect(execFileSync('git', ['-C', root, 'branch', '--list', 'cez/nl-task'], { encoding: 'utf8' }).trim()).toBe('cez/nl-task')
+  }, 90_000)
+
+  it('Delete N branches removes the merged branch and nothing that is not on main', () => {
+    openDesktop('/git/cleanup')
+    browser.waitForFunction(`document.querySelector('[data-action="cleanup-branches-delete"]:not([disabled])') !== null`)
+    browser.click('[data-action="cleanup-branches-delete"]')
+    browser.click('[data-action="cleanup-branches-confirm"]')
+    expect(browser.waitForValue(`document.querySelector('[data-slot="cleanup-branches"] h2')?.textContent ?? null`, (value) => value === 'Branches safe to delete · 0')).toBe('Branches safe to delete · 0')
+    expect(execFileSync('git', ['-C', root, 'branch', '--list', 'cez/merged1'], { encoding: 'utf8' }).trim()).toBe('')
+    expect(execFileSync('git', ['-C', root, 'branch', '--list', 'cez/nl-task'], { encoding: 'utf8' }).trim()).toBe('cez/nl-task')
+  }, 90_000)
+})
+
 describe('the phone Git screen (issue 06 §3)', () => {
   it('opens the checkout block and the sections as 48px rows with chevrons; a section pushes its screen', () => {
     browser.setViewport(PHONE.width, PHONE.height)
     browser.goto(`${base}${scoped('/git')}`)
-    const rows = browser.waitForValue<SectionRow[]>(sectionsJs(SCREEN), (value) => Array.isArray(value) && value[1]?.count !== null)
+    const rows = browser.waitForValue<SectionRow[]>(sectionsJs(SCREEN), (value) => Array.isArray(value) && value[1]?.count !== null && value[2]?.count !== null)
+    // The earlier specs deleted the orphan and the merged branch: one not landed, three branches.
     expect(rows.map(({ section, label, count, href, height }) => ({ section, label, count, href, height }))).toEqual([
       { section: 'main', label: 'Recently on main', count: '3 today', href: `${scoped('/git')}?view=repo`, height: 48 },
-      { section: 'cleanup', label: 'Cleanup', count: rows[1]!.count, href: scoped('/git/cleanup'), height: 48 },
-      { section: 'branches', label: 'All branches', count: '2', href: scoped('/git/branches'), height: 48 },
+      { section: 'not-landed', label: 'Not landed', count: '1', href: scoped('/git/not-landed'), height: 48 },
+      { section: 'cleanup', label: 'Cleanup', count: rows[2]!.count, href: scoped('/git/cleanup'), height: 48 },
+      { section: 'branches', label: 'All branches', count: '3', href: scoped('/git/branches'), height: 48 },
     ])
     expect(browser.count(`${SCREEN} ${CHECKOUT}[data-variant="screen"]`)).toBe(1)
     expect(browser.count(`${SCREEN} [data-slot="git-uncommitted"]`)).toBe(1)
@@ -320,6 +402,8 @@ describe('the phone Git screen (issue 06 §3)', () => {
     expect(browser.waitForValue(locationJs, (value) => value === scoped('/git/cleanup'))).toBe(scoped('/git/cleanup'))
     browser.waitForFunction(has('[data-slot="worktrees-panel"]'))
     expect(browser.count(SCREEN)).toBe(0)
+    // A pushed section hides the tab bar (issue 08 §C, the slice 5 rule); Back to Git leads home.
+    expect(browser.count('[data-slot="mobile-tab-bar"]')).toBe(0)
     browser.click('[data-slot="git-back"]')
     expect(browser.waitForValue(locationJs, (value) => value === scoped('/git'))).toBe(scoped('/git'))
     browser.waitForFunction(has(`${SCREEN} ${SECTIONS}`))
