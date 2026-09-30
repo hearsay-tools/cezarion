@@ -164,7 +164,8 @@ beforeAll(async () => {
   }))
   base = `http://127.0.0.1:${port}`
   server = spawn(process.execPath, [cezarCli, 'serve', '--repo', root, '--port', String(port), '--no-open'], {
-    env: fixtureServeEnv(root), stdio: 'ignore',
+    // CEZ_FOLLOWUPS=1 adds Inbox, so the view tabs carry their widest set: six primary tabs + More.
+    env: { ...fixtureServeEnv(root), CEZ_FOLLOWUPS: '1' }, stdio: 'ignore',
   })
   await waitForHealth(base)
   project = await bootProjectId(base)
@@ -379,6 +380,25 @@ describe('GitHub desktop sidebar (#622)', () => {
       browser.screenshot(`${artifactsDir}/github-main-header-${theme}.png`, { viewport: true })
     }
   }, 90_000)
+
+  it('keeps six view tabs, More and a long active label inside the narrowest sidebar', () => {
+    browser.setViewport(DESKTOP.width, DESKTOP.height)
+    browser.goto(`${base}/workflows`)
+    browser.waitForFunction(`document.querySelector('[data-slot="view-tabs"] a[aria-current="page"][aria-label="Workflows"]') !== null && document.querySelector('[data-slot="view-tabs"] button[aria-label="More views"]') !== null`)
+    const fit = browser.evaluate(`(() => {
+      const nav = document.querySelector('[data-slot="view-tabs"]');
+      const inner = nav.getBoundingClientRect().right - parseFloat(getComputedStyle(nav).paddingRight);
+      const tabs = [...nav.querySelectorAll('[data-view-tab]')];
+      return {
+        tabs: tabs.length,
+        sidebar: Math.round(nav.getBoundingClientRect().width),
+        overflow: tabs.map((tab) => Math.round(tab.getBoundingClientRect().right - inner)).filter((over) => over > 0),
+      };
+    })()`) as { tabs: number; sidebar: number; overflow: number[] }
+    expect(fit.tabs).toBe(7)
+    expect(fit.sidebar).toBeLessThanOrEqual(264) // the default, narrowest column (its 1px border sits outside the nav)
+    expect(fit.overflow).toEqual([])
+  })
 
   it('shows the task sidebar on other views and the settings sidebar in Settings, never the GitHub one', async () => {
     browser.setViewport(DESKTOP.width, DESKTOP.height)

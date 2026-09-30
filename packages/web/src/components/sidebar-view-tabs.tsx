@@ -30,15 +30,17 @@ export function SidebarViewTabs({ items, activeTo, needsYou = false, inboxCount,
   }
   // Sized as the #622 final board's view tabs: 30px tall, 7px radius, 15px icons; the inactive
   // tab is a 28px square-ish icon and the active one wears its label (12px/600, 9px padding,
-  // 6px gap). The board draws six tabs; the overflow button is a seventh 28px slot. Workflows
-  // plus four icons and the button is 237px, inside the 239px the default column leaves.
+  // 6px gap). The icons and the overflow button never shrink; the ACTIVE tab does, truncating
+  // its label. With GitHub on and Inbox or Automations enabled there are six primary tabs plus
+  // More: five 28px icons, More and an active "Workflows" (~97px) need 265px of the 239px a
+  // 264px column leaves, so a fixed-width active tab spilled over the main area.
   return <TooltipProvider><nav ref={nav} aria-label="Main" data-slot="view-tabs" onKeyDown={moveFocus} className="flex shrink-0 items-center justify-between max-md:justify-start max-md:gap-1 max-md:overflow-x-auto border-b border-border px-3 pt-2.5 pb-2">
     {primary.map(item => {
       const active = item.to === activeTo
       const Icon = item.icon
       const dot = item.to === '/' && needsYou && !active ? 'bg-pending-strong' : item.to === '/skills' && skillsUpdateAvailable ? 'bg-info' : null
       return <Tooltip key={item.to}><TooltipTrigger asChild><Link to={item.to} onClick={onNavigate} data-view-tab aria-label={item.label} aria-current={active ? 'page' : undefined}
-        className={cn('relative flex h-[30px] min-w-0 items-center justify-center rounded-[7px] text-soft-foreground hover:bg-sidebar-row-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring max-md:min-h-11 max-md:min-w-11', active ? 'shrink-0 gap-1.5 bg-sidebar-row-selected px-[9px] text-[12px] font-semibold text-foreground' : 'w-7 shrink-0')}>
+        className={cn('relative flex h-[30px] min-w-0 items-center justify-center rounded-[7px] text-soft-foreground hover:bg-sidebar-row-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring max-md:min-h-11 max-md:min-w-11', active ? 'shrink gap-1.5 bg-sidebar-row-selected px-[9px] text-[12px] font-semibold text-foreground' : 'w-7 shrink-0')}>
         <span className="relative"><Icon className="size-[15px] shrink-0" aria-hidden="true" />{dot ? <span aria-label={item.to === '/' ? 'Tasks need you' : 'Skills update available'} data-slot={item.to === '/' ? 'nav-needs-you-dot' : 'nav-update-marker'} className={cn('absolute -top-1 -right-1 size-[7px] rounded-full border-[1.5px] border-sidebar', dot)} /> : null}</span>
         {active ? <span className="truncate">{item.label}</span> : null}
       </Link></TooltipTrigger><TooltipContent side="bottom" sideOffset={6} style={{ pointerEvents: 'none' }}>{item.label}</TooltipContent></Tooltip>
