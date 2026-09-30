@@ -18,6 +18,8 @@ beforeEach(() => {
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   Element.prototype.scrollIntoView = vi.fn()
   localStorage.clear()
+  // The workspace-geometry effect runs inside a `main` (the test wraps one); desktop by default.
+  setDesktop(true)
 })
 afterEach(() => {
   cleanup()
@@ -94,12 +96,12 @@ function renderAt(entry: string, extra?: React.ReactNode) {
   return render(
     <QueryClientProvider client={createQueryClient()}>
       <MemoryRouter initialEntries={[entry]}>
-        <Routes>
+        <main data-slot="main"><Routes>
           <Route path="/github" element={<GithubRoute view="issues" index />} />
           <Route path="/github/prs" element={<GithubRoute view="prs" />} />
           <Route path="/github/issues/:n" element={<GithubRoute view="issues" />} />
           <Route path="/github/prs/:n" element={<GithubRoute view="prs" />} />
-        </Routes>
+        </Routes></main>
         <Where />
         {extra}
       </MemoryRouter>
@@ -110,8 +112,9 @@ function renderAt(entry: string, extra?: React.ReactNode) {
 const numbers = () => [...document.querySelectorAll<HTMLElement>('[data-slot="gh-row"]')].map((row) => Number(row.dataset.number))
 const where = () => screen.getByTestId('where').textContent
 const hrefs = () => [...document.querySelectorAll<HTMLAnchorElement>('[data-slot="gh-row"]')].map((a) => a.getAttribute('href'))
-const setDesktop = (desktop: boolean) =>
+function setDesktop(desktop: boolean) {
   vi.stubGlobal('matchMedia', (query: string) => ({ matches: desktop && query === '(min-width: 768px)', addEventListener() {}, removeEventListener() {} }))
+}
 
 describe('Issues filters in the URL', () => {
   it('?filter=assigned shows the viewer’s issues, survives a reload, and keeps the filter in row links', async () => {
@@ -319,6 +322,25 @@ describe('the phone filter screen and entry rules', () => {
     renderAt('/github/issues/2')
     const back = await screen.findByText('Back to the list')
     expect(back.closest('a')?.getAttribute('href')).toBe('/github?filter=all')
+  })
+
+  it('binds the workspace geometry observer once the list replaces the filter screen', async () => {
+    const observed: Element[] = []
+    vi.stubGlobal('ResizeObserver', class {
+      observe(el: Element) { observed.push(el) }
+      unobserve() {}
+      disconnect() {}
+    })
+    setDesktop(false)
+    stub()
+    renderAt('/github')
+    await waitFor(() => expect(document.querySelector('[data-slot="github-filter-screen"]')).not.toBeNull())
+    const mains = () => observed.filter((el) => el.getAttribute('data-slot') === 'main')
+    // No workspace exists on the filter screen, so `main` is not observed yet.
+    expect(mains()).toEqual([])
+    fireEvent.click(document.querySelector('[data-gh-filter="assigned"]')!)
+    await waitFor(() => expect(numbers()).toEqual([1]))
+    await waitFor(() => expect(mains()).toHaveLength(1))
   })
 
   it('bare /github/prs stays a list on a phone (deep links keep working)', async () => {

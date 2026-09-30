@@ -340,7 +340,11 @@ export function GithubRoute({
     setGithubListWidth(width)
     writeStoredGithubListWidth(width)
   }
-  const workspaceAvailable = list.data?.available === true
+  // The phone's bare `/github` is the filter screen (#622), which renders none of the workspace.
+  // The geometry/wheel effect must follow the workspace's real mount lifetime: keyed on availability
+  // alone it ran once against null refs there and never again after a filter pushed the list.
+  const filterScreen = index && !isDesktop && rawFilterParam === null && n === undefined
+  const workspaceAvailable = list.data?.available === true && !filterScreen
   useEffect(() => {
     if (!workspaceAvailable) return
     const route = routeRef.current
@@ -605,7 +609,7 @@ export function GithubRoute({
 
   // On a phone the bare `/github` is the filter screen (#622): the sidebar's list as its own
   // screen. Picking a row pushes the list with an explicit `?filter=`, which this skips.
-  if (index && !isDesktop && rawFilterParam === null && n === undefined && gh.available) {
+  if (filterScreen && gh.available) {
     return <GithubFilterScreen repo={gh.repo} />
   }
 
