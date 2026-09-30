@@ -387,6 +387,7 @@ const CONTROL_CRITERIA = [
   { id: 'S11', scenario: 'ask' },
   { id: 'S12', scenario: 'hold' },
   { id: 'S13', scenario: 'hold' },
+  { id: 'S14', scenario: 'baseline' },
   { id: 'R6', scenario: 'ask' },
   { id: 'R7', scenario: 'ask' },
   { id: 'R8', scenario: 'hold' },
@@ -517,6 +518,27 @@ describe('harness parity — input delivery (#505)', () => {
 
 describe('harness parity — seam tier, session control', () => {
   for (const backend of RUNNER_IDS) {
+    // #708: permission discovery at startup must not break any runner's fresh,
+    // resumed or subsequent human turns. Codex's native wire enforces Baseline;
+    // other adapters exercise their own unchanged permissions and delivery.
+    for (const resume of [false, true]) {
+      it(`${backend} S14 ${resume ? 'resumes' : 'starts'} and completes repeated human messages under provider policy`, async () => {
+        const obs = await driveSeam(backend, 'baseline', {
+          spec: { resume, ...(backend === 'codex' ? { sessionId: 'th_mock_1' } : {}), env: { MOCK_CODEX_REQUIREMENTS: JSON.stringify({ allowedSandboxModes: ['read-only', 'workspace-write'] }), CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' } },
+          whileOpen: async (session, { v1 }) => {
+            for (let count = 1; count <= 3; count++) {
+              await waitFor(() => v1.filter(e => e.type === 'turn-end').length >= count);
+              if (count < 3) expect(session.sendMessage([{ type: 'text', text: `mock:agent-echo human follow-up ${count}` }])).toBe(true);
+            }
+          },
+        });
+        expect(obs.v1.filter(e => e.type === 'turn-end')).toHaveLength(3);
+        expect(obs.v1.filter(e => e.type === 'error')).toEqual([]);
+        expect(obs.v1.filter(e => e.type === 'note' && e.message.includes('disallowed'))).toEqual([]);
+        expect(textEvents(obs.v1).join('')).toContain('human follow-up 2');
+      }, 30_000);
+    }
+
     it(`${backend} S13 auto-end checks a late hold at execution and resumes after the next admitted turn`, async () => {
       let hold = false; let checks = 0;
       await driveSeam(backend, 'hold', {

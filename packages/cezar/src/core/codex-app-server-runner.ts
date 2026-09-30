@@ -25,6 +25,7 @@ import { V1TextCoalescer } from './v1-text-coalescer.ts';
 import { InputSubmissions } from './input-submissions.ts';
 import { codexStreamError } from './codex-stream-error.ts';
 import { codexTurnOutcome } from './codex-turn-outcome.ts';
+import { codexNetworkIsRestricted, codexPermissionOverrides } from './codex-permissions.ts';
 import {
   CodexAppServerRpc,
   CodexRpcResponseError,
@@ -68,17 +69,17 @@ export interface CodexRunnerOptions {
  * `thread/resume` to reopen a stored thread for "Continue".
  *
  * Auth = the host's logged-in ChatGPT/Codex session (or CODEX_API_KEY). The
- * agent runs with cezar's sandbox choice and leaves approval policy to the
- * app-server default, so enterprise-managed permission modes keep working.
+ * agent inherits managed permissions; confirmed unmanaged sessions keep cezar's
+ * full-access default. Approval policy always belongs to the app-server.
  * Codex has no per-tool allowlist, so
- * `spec.allowedTools` is ignored. `CEZ_CODEX_NETWORK=0` retains the previous
- * network-blocked `workspace-write` sandbox as an explicit restriction.
+ * `spec.allowedTools` is ignored. `CEZ_CODEX_NETWORK=0` requires a confirmed
+ * network restriction without replacing managed filesystem rules.
  */
 /**
  * What the codex app-server receives from each `AgentRunSpec` field (#284).
- * Tool access does not cross this wire: the `auto` preset runs with cezar's
- * sandbox choice and the app-server default approval policy, and the
- * app-server has no per-tool allowlist, so `allowedTools`/`bashAllowlist` are declared dropped
+ * Tool access does not cross this wire: managed permissions belong to Codex;
+ * unmanaged sessions use cezar's sandbox choice. The app-server has no per-tool
+ * allowlist, so `allowedTools`/`bashAllowlist` are declared dropped
  * rather than mapped (spec 2026-07-17-permission-modes). Held against the
  * recorded JSON-RPC by the harness parity matrix.
  */
@@ -88,10 +89,10 @@ export const CODEX_SPEC_SUPPORT: AgentRunSpecSupport = {
   userPrompt: { honored: true, via: 'turn/start input text' },
   images: { honored: false, reason: 'the adapter sends text input items only; image blocks are dropped' },
   cwd: { honored: true, via: 'spawn cwd, and the thread/start / thread/resume cwd' },
-  allowedTools: { honored: false, reason: 'no per-tool allowlist on the app-server; the auto preset is danger-full-access with approvalPolicy never' },
+  allowedTools: { honored: false, reason: 'no per-tool allowlist on the app-server; managed permissions and approval policy belong to Codex' },
   restrictNativeDelegation: { honored: true, via: 'thread/start and thread/resume config features.multi_agent=false, features.multi_agent_v2=false (D1)' },
   bashAllowlist: { honored: false, reason: 'no per-tool allowlist, so no command-prefix restriction either' },
-  additionalDirectories: { honored: false, reason: 'the sandbox is danger-full-access, or workspace-write on cwd; no extra-root mapping' },
+  additionalDirectories: { honored: false, reason: 'no extra-root mapping; managed filesystem permissions belong to Codex' },
   env: { honored: true, via: 'merged over the child env through buildCodexAppServerEnv' },
   model: { honored: true, via: 'thread/start and thread/resume model' },
   effort: { honored: true, via: 'turn/start effort, canonical level' },
@@ -539,30 +540,46 @@ class CodexSession implements AgentSession {
     await this.rpc.initialize();
     this.assertOpen();
 
+    this.startupWaitingFor('configRequirements/read');
+    // Read through the same authenticated app-server as the thread. Do not
+    // guess policy from a local config file: enterprise requirements may be remote.
+    let requirements: unknown;
+    try { requirements = await this.rpc.request('configRequirements/read', {}); }
+    catch (error) {
+      if (!(error instanceof CodexRpcResponseError)) throw error;
+      this.emit({ type: 'note', message: 'Codex requirements unavailable; using Codex permission defaults' });
+    }
+    this.assertOpen();
+    const restrictNetwork = process.env.CEZ_CODEX_NETWORK === '0';
+
     const overrides = {
       model: this.spec.model,
       cwd: this.spec.cwd,
-      // Full access is the `auto` preset shared by all backends. Besides avoiding prompts, this
-      // keeps container installs working when bubblewrap cannot create a UID map (#563).
-      // CEZ_CODEX_NETWORK=0 remains the backwards-compatible explicit sandbox opt-out.
-      sandbox: process.env.CEZ_CODEX_NETWORK === '0' ? 'workspace-write' : 'danger-full-access',
+      ...codexPermissionOverrides(requirements, restrictNetwork),
       // ThreadStartParams AND ThreadResumeParams accept dotted config overrides.
       // Both feature generations exist in Codex 0.153.4; no global config write.
-      ...((this.spec.restrictNativeDelegation || this.spec.cezarTools) ? { config: {
+      ...((restrictNetwork || this.spec.restrictNativeDelegation || this.spec.cezarTools) ? { config: {
+        ...(restrictNetwork ? { 'sandbox_workspace_write.network_access': false } : {}),
         ...(this.spec.restrictNativeDelegation ? { 'features.multi_agent': false, 'features.multi_agent_v2': false } : {}),
         ...(this.spec.cezarTools ? { [`mcp_servers.${this.spec.cezarTools.name}`]: { command: this.spec.cezarTools.command, args: this.spec.cezarTools.args, env_vars: ['CEZ_TOOL_TOKEN', 'CEZ_TOOL_SOCKET'] } } : {}),
       } } : {}),
     };
+    let threadResponse: Record<string, unknown>;
     if (this.spec.resume && this.spec.sessionId) {
       this.startupWaitingFor('thread/resume');
-      await this.rpc.request('thread/resume', { threadId: this.spec.sessionId, ...clean(overrides) });
+      threadResponse = await this.rpc.request('thread/resume', { threadId: this.spec.sessionId, ...clean(overrides) });
       this.assertOpen();
       this.threadId = this.spec.sessionId;
     } else {
       this.startupWaitingFor('thread/start');
-      const res = await this.rpc.request('thread/start', clean(overrides));
+      threadResponse = await this.rpc.request('thread/start', clean(overrides));
       this.assertOpen();
-      this.threadId = threadIdOf(res) ?? this.spec.sessionId;
+      this.threadId = threadIdOf(threadResponse) ?? this.spec.sessionId;
+    }
+    // Named managed profiles may ignore legacy sandbox settings. Do not silently
+    // run with network enabled, or replace their filesystem rules to disable it.
+    if (restrictNetwork && !codexNetworkIsRestricted(threadResponse)) {
+      throw new Error('CEZ_CODEX_NETWORK=0 requires a network-restricted Codex permission policy; the thread did not confirm one');
     }
     if (this.threadId) {
       this.emit({ type: 'session', sessionId: this.threadId });
