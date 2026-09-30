@@ -556,6 +556,22 @@
   }
 }
 
+/* ---------- project rail unfolding (#711) ----------
+ * The expanded rail's names and state words fade in only once the 160ms width transition has
+ * settled, so a name never shows mid-animation. A utility so it takes variants: it is applied
+ * under `motion-safe:` only, since with reduced motion there is no width animation to wait for. */
+@utility rail-text-in {
+  animation: rail-text-in 120ms ease-out 160ms both;
+}
+@keyframes rail-text-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 /* ---------- shimmer (mockup tokens.css) ----------
  * Running tool-card titles. Token-driven (muted-foreground → foreground sweep) so it follows
  * the theme; reduced-motion readers get a plain muted title instead of an animation. */

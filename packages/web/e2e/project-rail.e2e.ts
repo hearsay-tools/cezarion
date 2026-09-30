@@ -5,6 +5,7 @@ import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { AgentBrowser, bootProjectId, readTestEnv } from './agent-browser'
+import { contrastSampleExpression, type ContrastSample } from './contrast'
 import { readSharedProjects, snapshotSharedHome, writeSharedProjects } from './workspace-registry'
 
 /**
@@ -210,5 +211,124 @@ describe('project rail', () => {
     } finally {
       browser.setViewport(DESKTOP.width, DESKTOP.height)
     }
+  })
+})
+
+describe('expandable project rail (#711)', () => {
+  const RAIL = '[data-slot="project-rail"]'
+  const TOGGLE = '[data-slot="rail-expand-toggle"]'
+  const box = (selector: string) =>
+    browser.evaluate(`(() => { const r = document.querySelector(${JSON.stringify(selector)})?.getBoundingClientRect(); return r ? { left: r.left, width: r.width } : null })()`) as { left: number; width: number } | null
+  // The rail settles when its width stops moving AND the names have faded in (160ms width, then
+  // 120ms opacity after a 160ms delay). Waiting on both is by design, not a flake fix: the fade is
+  // this feature's own animation, and reading geometry or ink mid-fade is reading a frame.
+  const settledExpanded = () =>
+    browser.waitForValue(
+      `(() => { const rail = document.querySelector('${RAIL}'); const name = rail?.querySelector('[data-slot="rail-project-name"]'); return rail?.getBoundingClientRect().width === 232 && !!name && getComputedStyle(name.parentElement).opacity === '1' })()`,
+    )
+  const collapse = () => browser.evaluate(`localStorage.removeItem('cez-project-rail-expanded')`)
+
+  it('expands to 232px from the bottom group, pushes main, keeps the sidebar, and survives a reload', () => {
+    gotoRail()
+    collapse()
+    browser.goto(baseUrl + `/p/${bootProject}/`)
+    browser.waitForFunction(`document.querySelector('${TOGGLE}') !== null`)
+    expect(String(browser.evaluate(`document.querySelector('${TOGGLE}').getAttribute('aria-expanded')`))).toBe('false')
+    expect(String(browser.evaluate(`document.querySelector('[data-slot="rail-bottom"]').firstElementChild.getAttribute('data-slot')`))).toBe('rail-expand-toggle')
+    const sidebarBefore = box('[data-slot="sidebar"]')!
+    const mainBefore = box('main')!
+    browser.click(TOGGLE)
+    settledExpanded()
+    expect(String(browser.evaluate(`document.querySelector('${TOGGLE}').getAttribute('aria-expanded')`))).toBe('true')
+    expect(box('[data-slot="sidebar"]')!.width).toBe(sidebarBefore.width)
+    expect(box('[data-slot="sidebar"]')!.left).toBe(sidebarBefore.left + 172)
+    expect(box('main')!.width).toBe(mainBefore.width - 172)
+    const other = `${mark(OTHER.id)} a`
+    expect(browser.text(`${other} [data-slot="rail-project-name"]`)).toBe(OTHER.name)
+    // Two words at most; the third (finished) stays on the pill and in the accessible name.
+    expect(String(browser.evaluate(`document.querySelector('${other} [data-slot="rail-project-state"]').textContent`))).toBe('1 needs you·1 failed')
+    expect(String(browser.evaluate(`document.querySelector('${other}').getAttribute('aria-label')`))).toBe(`${OTHER.name} · 1 needs you · 1 failed · 1 finished`)
+    const row = box(other)!
+    // 232px less the 1px right border and 10px padding each side.
+    expect(row.width).toBe(211)
+    mkdirSync(artifactsDir, { recursive: true })
+    browser.screenshot(join(artifactsDir, 'project-rail-expanded-dark.png'), { viewport: true })
+
+    browser.goto(baseUrl + `/p/${bootProject}/`)
+    settledExpanded()
+    browser.click(TOGGLE)
+    browser.waitForFunction(`document.querySelector('${RAIL}').getBoundingClientRect().width === 60`)
+    expect(String(browser.evaluate(`localStorage.getItem('cez-project-rail-expanded')`))).toBe('0')
+  })
+
+  it('collapses and hides the toggle when main would drop under 640px, and restores on widening', () => {
+    gotoRail()
+    browser.evaluate(`localStorage.setItem('cez-project-rail-expanded', '1')`)
+    browser.goto(baseUrl + `/p/${bootProject}/`)
+    settledExpanded()
+    // 1100 - 232 - 264 = 604px for main: under the floor.
+    browser.setViewport(1100, DESKTOP.height)
+    try {
+      browser.waitForFunction(`document.querySelector('${RAIL}').getBoundingClientRect().width === 60 && document.querySelector('${TOGGLE}') === null`)
+      expect(String(browser.evaluate(`localStorage.getItem('cez-project-rail-expanded')`))).toBe('1')
+    } finally {
+      browser.setViewport(DESKTOP.width, DESKTOP.height)
+    }
+    settledExpanded()
+    collapse()
+  })
+
+  for (const theme of ['dark', 'light'] as const) {
+    it(`keeps names and state words at 4.5:1 on default, hover and selected rows, ${theme}`, () => {
+      gotoRail(theme)
+      browser.evaluate(`localStorage.setItem('cez-project-rail-expanded', '1')`)
+      const other = `${mark(OTHER.id)} a`
+      const targets = [
+        `${other} [data-slot="rail-project-name"]`,
+        `${other} [data-tone="amber"]`,
+        `${other} [data-tone="red"]`,
+      ]
+      const check = (state: string) => {
+        for (const target of targets) {
+          const sample = browser.evaluate(contrastSampleExpression(target)) as ContrastSample
+          expect(sample.ratio, `${theme} ${state} ${target} ${JSON.stringify(sample)}`).toBeGreaterThanOrEqual(4.5)
+        }
+      }
+      // Default and hover: the other project's row while standing in the boot project.
+      browser.goto(baseUrl + `/p/${bootProject}/`)
+      settledExpanded()
+      browser.evaluate(`document.querySelector('${other}').scrollIntoView({ block: 'nearest' })`)
+      check('default')
+      // Headless Chrome reports `(hover: none)`, and Tailwind v4 wraps `hover:` in
+      // `@media (hover: hover)`, so a real pointer hover never paints the fill here (local probe:
+      // `:hover` matched, background stayed transparent). Paint the row with the same token the
+      // `hover:bg-sidebar-row-hover` class uses, then sample.
+      browser.evaluate(`document.querySelector('${other}').style.backgroundColor = 'var(--sidebar-row-hover)'`)
+      check('hover')
+      browser.evaluate(`document.querySelector('${other}').style.removeProperty('background-color')`)
+      // Selected: the same row once it is the current project.
+      browser.goto(baseUrl + `/p/${OTHER.id}/`)
+      settledExpanded()
+      browser.waitForFunction(`document.querySelector('${other}')?.getAttribute('aria-current') === 'page'`)
+      browser.evaluate(`document.querySelector('${other}').scrollIntoView({ block: 'nearest' })`)
+      check('selected')
+      browser.screenshot(join(artifactsDir, `project-rail-expanded-selected-${theme}.png`), { viewport: true })
+      collapse()
+      browser.evaluate(`localStorage.setItem('cez-theme', 'dark')`)
+    })
+  }
+
+  // Last: reduced motion cannot be switched back off in this session.
+  it('does not animate the width under reduced motion', () => {
+    browser.setReducedMotion()
+    gotoRail()
+    collapse()
+    browser.goto(baseUrl + `/p/${bootProject}/`)
+    browser.waitForFunction(`matchMedia('(prefers-reduced-motion: reduce)').matches && document.querySelector('${TOGGLE}') !== null`)
+    expect(style(RAIL, 'transitionProperty')).toBe('none')
+    browser.click(TOGGLE)
+    // No transition: the width is final on the next frame, with no wait for a settle.
+    expect(browser.waitForValue(`document.querySelector('${RAIL}').getBoundingClientRect().width`, (width) => width === 232)).toBe(232)
+    collapse()
   })
 })

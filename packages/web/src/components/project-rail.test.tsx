@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -14,7 +14,14 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
+  localStorage.clear()
+  setViewport(1024)
 })
+
+/** jsdom's window is 1024px wide: too narrow for the expanded rail beside a 264px sidebar. */
+function setViewport(width: number) {
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: width })
+}
 
 const project = (id: string, name = id): ProjectListEntry => ({
   id,
@@ -65,7 +72,8 @@ describe('ProjectRail layout', () => {
   it('is a labelled nav with the app mark, a mark per project in registry order, and the bottom group', () => {
     renderRail()
     const nav = screen.getByRole('navigation', { name: 'Projects' })
-    expect(nav.className).toContain('w-[60px]')
+    expect(nav.style.width).toBe('60px')
+    expect(nav.getAttribute('data-expanded')).toBe('false')
     // Desktop only: the rail is `hidden` below md.
     expect(nav.className).toContain('hidden')
     expect(nav.className).toContain('md:flex')
@@ -222,5 +230,140 @@ describe('ProjectRail accessible name', () => {
     renderRail({ truncated: new Set(['open_mercato']) })
     expect(within(mark('toolkit-dev')).getByRole('link').getAttribute('aria-label')).toBe('toolkit-dev · idle')
     expect(within(mark('open_mercato')).getByRole('link').getAttribute('aria-label')).toBe('open_mercato · idle · recent runs only')
+  })
+})
+
+describe('ProjectRail expand toggle (#711)', () => {
+  const toggle = () => document.querySelector('[data-slot="rail-expand-toggle"]') as HTMLButtonElement | null
+  const nav = () => screen.getByRole('navigation', { name: 'Projects' })
+
+  it('defaults to collapsed, with a borderless icon toggle first in the bottom group', () => {
+    setViewport(1440)
+    renderRail()
+    expect(nav().style.width).toBe('60px')
+    const button = toggle()!
+    expect(button.getAttribute('aria-expanded')).toBe('false')
+    expect(button.getAttribute('aria-label')).toBe('Expand projects')
+    expect(button.getAttribute('title')).toBe('Expand projects')
+    expect(button.getAttribute('aria-controls')).toBe(nav().id)
+    expect(button.className).not.toMatch(/\bborder\b/)
+    expect(button.className).toContain('rounded-[8px]')
+    expect(button.className).toContain('hover:bg-sidebar-row-hover')
+    const bottom = document.querySelector('[data-slot="rail-bottom"]')!
+    expect(bottom.firstElementChild).toBe(button)
+  })
+
+  it('expands to 232px and back, remembering the choice in localStorage', () => {
+    setViewport(1440)
+    renderRail()
+    fireEvent.click(toggle()!)
+    expect(nav().style.width).toBe('232px')
+    expect(nav().getAttribute('data-expanded')).toBe('true')
+    expect(toggle()!.getAttribute('aria-expanded')).toBe('true')
+    expect(toggle()!.textContent).toBe('Collapse')
+    expect(localStorage.getItem('cez-project-rail-expanded')).toBe('1')
+    // The nav keeps its name when unfolded.
+    expect(nav().getAttribute('aria-label')).toBe('Projects')
+    fireEvent.click(toggle()!)
+    expect(nav().style.width).toBe('60px')
+    expect(localStorage.getItem('cez-project-rail-expanded')).toBe('0')
+  })
+
+  it('opens expanded after a reload when that was the stored choice', () => {
+    setViewport(1440)
+    localStorage.setItem('cez-project-rail-expanded', '1')
+    renderRail()
+    expect(nav().style.width).toBe('232px')
+  })
+
+  it('collapses and hides the toggle when main would drop under 640px, and restores on widening', () => {
+    localStorage.setItem('cez-project-rail-expanded', '1')
+    setViewport(1024)
+    renderRail()
+    expect(nav().style.width).toBe('60px')
+    expect(toggle()).toBeNull()
+    // The stored choice is kept for the wider window.
+    expect(localStorage.getItem('cez-project-rail-expanded')).toBe('1')
+    act(() => {
+      setViewport(1440)
+      window.dispatchEvent(new Event('resize'))
+    })
+    expect(nav().style.width).toBe('232px')
+    expect(toggle()!.getAttribute('aria-expanded')).toBe('true')
+  })
+
+  it('animates only the width, and not under reduced motion', () => {
+    setViewport(1440)
+    renderRail()
+    expect(nav().className).toContain('transition-[width]')
+    expect(nav().className).toContain('duration-[160ms]')
+    expect(nav().className).toContain('motion-reduce:transition-none')
+  })
+})
+
+describe('ProjectRail expanded rows (#711)', () => {
+  function renderExpanded(props: Partial<ProjectRailProps> = {}, entry?: string) {
+    setViewport(1440)
+    localStorage.setItem('cez-project-rail-expanded', '1')
+    return renderRail(props, entry)
+  }
+  const row = (id: string) => within(mark(id)).getByRole('link')
+
+  it('shows the mark with both pills, the full name, and at most two state words in priority order', () => {
+    renderExpanded({ signals: new Map([['toolkit-dev', signal({ needsYou: 1, failedUnread: 1, inMotion: 2, finishedUnread: 1 })]]) })
+    const link = row('toolkit-dev')
+    expect(link.querySelector('[data-slot="rail-project-name"]')?.textContent).toBe('toolkit-dev')
+    expect(link.querySelector('[data-slot="rail-pill-top"]')).not.toBeNull()
+    expect(link.querySelector('[data-slot="rail-pill-bottom"]')).not.toBeNull()
+    const words = [...link.querySelectorAll('[data-tone]')].map((el) => `${el.getAttribute('data-tone')}:${el.textContent}`)
+    expect(words).toEqual(['amber:1 needs you', 'red:1 failed'])
+    // The accessible name keeps all four; no tooltip, since the words are on screen.
+    expect(link.getAttribute('aria-label')).toBe('toolkit-dev · 1 needs you · 1 failed · 2 working · 1 finished')
+    expect(link.getAttribute('title')).toBeNull()
+  })
+
+  it('paints the words with the shared text inks, never the pill fills', () => {
+    renderExpanded({ signals: new Map([['toolkit-dev', signal({ needsYou: 1, failedUnread: 1 })], ['open_mercato', signal({ inMotion: 1, finishedUnread: 1 })]]) })
+    const cls = (id: string, tone: string) => (row(id).querySelector(`[data-tone="${tone}"]`) as HTMLElement).className
+    expect(cls('toolkit-dev', 'amber')).toContain('text-signal-word-amber')
+    expect(cls('toolkit-dev', 'red')).toContain('text-signal-word-red')
+    expect(cls('open_mercato', 'violet')).toContain('text-status-running')
+    expect(cls('open_mercato', 'green')).toContain('text-success')
+  })
+
+  it('fills the current row, borders its mark on --sidebar, and drops the left bar', () => {
+    renderExpanded()
+    const current = row('toolkit-dev')
+    expect(current.getAttribute('aria-current')).toBe('page')
+    expect(current.className).toContain('bg-sidebar-row-selected')
+    const markEl = current.querySelector('[data-slot="rail-mark"]') as HTMLElement
+    expect(markEl.className).toContain('border-soft-foreground')
+    expect(markEl.className).toContain('bg-sidebar')
+    expect(document.querySelector('[data-slot="rail-current-bar"]')).toBeNull()
+    expect(current.querySelector('[data-slot="rail-project-name"]')?.className).toContain('text-foreground')
+    const other = row('open_mercato')
+    expect(other.className).toContain('hover:bg-sidebar-row-hover')
+    expect(other.querySelector('[data-slot="rail-project-name"]')?.className).toContain('text-muted-foreground')
+    expect(other.querySelector('[data-slot="rail-project-state"]')?.textContent).toBe('idle')
+  })
+
+  it('shows the identity, the Projects label, a labelled Add project and the labelled bottom rows', () => {
+    renderExpanded()
+    const rail = screen.getByRole('navigation', { name: 'Projects' })
+    expect(within(rail).getByText('Cezarion')).toBeTruthy()
+    expect(within(rail).getByText('v0.15.0')).toBeTruthy()
+    expect(within(rail).getByText('Projects')).toBeTruthy()
+    expect(within(rail).getByRole('button', { name: 'Add project' }).textContent).toBe('Add project')
+    expect(within(rail).getByRole('link', { name: 'All projects' }).textContent).toBe('All projects')
+    expect(within(rail).getByRole('link', { name: 'Global settings' }).textContent).toBe('Global settings')
+    expect(within(rail).getByRole('button', { name: /^Theme:/ }).textContent).toMatch(/^Theme · (System|Light|Dark)$/)
+    expect(within(rail).getByRole('button', { name: 'Collapse projects' }).textContent).toBe('Collapse')
+  })
+
+  it('drops Add project and All projects under the single-project capability', () => {
+    renderExpanded({ singleProject: true })
+    expect(screen.queryByRole('button', { name: 'Add project' })).toBeNull()
+    expect(screen.queryByRole('link', { name: 'All projects' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Collapse projects' })).toBeTruthy()
   })
 })

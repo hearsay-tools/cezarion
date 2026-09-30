@@ -38,6 +38,11 @@ import { cn } from '@/lib/utils'
  *  for CSS and once for the state machine. */
 const DESKTOP_MEDIA_QUERY = '(min-width: 768px)'
 
+/** The desktop sidebar's current width, for the project rail (#711): it may unfold only while the
+ *  main column keeps its floor, and the sidebar's width is part of that sum. The shell owns the
+ *  width, so it provides it; outside a shell the rail reads the default. */
+export const ShellSidebarWidthContext = React.createContext(DEFAULT_SIDEBAR_WIDTH)
+
 // The one home of the add-project menu is its own file; it stays importable from here.
 export { AddProjectMenu } from '@/components/add-project-menu'
 
@@ -289,7 +294,7 @@ export function AppShell({
         className="flex h-dvh overflow-hidden bg-background text-foreground pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]"
       >
         {/* Outside the resizable sidebar: SidebarResize only ever changes the aside's width. */}
-        {projectRail}
+        <ShellSidebarWidthContext.Provider value={sidebarWidth}>{projectRail}</ShellSidebarWidthContext.Provider>
         <Sidebar {...nav} width={sidebarWidth} onWidthChange={changeSidebarWidth} />
         {/* The drawer leaves a visible dismissal strip beside the shared navigation. */}
         <MobileNavDrawer {...nav} mobileProjects={mobileProjects} currentProjectId={currentProjectId} toolsStatus={toolsStatus} onNavigate={() => setMenuOpen(false)} onCloseAutoFocus={(event) => {

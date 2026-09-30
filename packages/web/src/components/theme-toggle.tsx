@@ -13,7 +13,9 @@ import type { Theme } from '@/lib/theme'
 export const NEXT_THEME: Record<Theme, Theme> = { light: 'dark', dark: 'system', system: 'light' }
 const LABEL: Record<Theme, string> = { light: 'light', dark: 'dark', system: 'system' }
 
-export function ThemeToggle({ className }: { className?: string }) {
+/** `showLabel`: the expanded project rail (#711) spells the choice out beside the icon,
+ *  "Theme · System". The accessible name is the same either way. */
+export function ThemeToggle({ className, showLabel = false, labelClassName }: { className?: string; showLabel?: boolean; labelClassName?: string }) {
   const { theme, setTheme } = useTheme()
   const next = NEXT_THEME[theme]
   const Icon = SunMoonIcon
@@ -31,6 +33,7 @@ export function ThemeToggle({ className }: { className?: string }) {
       onClick={() => setTheme(next)}
     >
       <Icon aria-hidden="true" />
+      {showLabel ? <span className={labelClassName}>Theme · {theme.charAt(0).toUpperCase() + theme.slice(1)}</span> : null}
     </Button>
   )
 }
