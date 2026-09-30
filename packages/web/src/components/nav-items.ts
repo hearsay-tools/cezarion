@@ -1,3 +1,4 @@
+import { stripProjectPrefix } from '@/lib/project-router'
 import { GitBranchIcon, InboxIcon, SettingsIcon, SparklesIcon, WorkflowIcon, ZapIcon } from '@/components/design-icons'
 import { ListTodoIcon } from '@/components/design-icons'
 import type { ComponentType, SVGProps } from 'react'
@@ -115,3 +116,22 @@ export function activeNavItem(pathname: string): NavItem | null {
   const to = activeNavPath(pathname)
   return NAV_ITEMS.find((item) => item.to === to) ?? null
 }
+
+/**
+ * Is `pathname` a mobile PUSHED screen — one opened from a list, that owns its own top bar (back,
+ * title, state) and facet tabs instead of the list chrome? A task (`/tasks/:id` and its
+ * `/changes` `/commits` `/files` sub-tabs) or a variant compare (`/compare/:groupId`).
+ *
+ * The `/tasks` INDEX is not one: that is the all-projects overview, a list like any other. A
+ * `/p/:projectId` prefix is stripped first, so the scoped and flat spellings answer alike.
+ */
+export function isPushedRoute(pathname: string): boolean {
+  return /^\/(?:tasks|compare)\/[^/]+(?:\/|$)/.test(stripProjectPrefix(pathname))
+}
+
+/** The tab bar's fixed slots: the views that stay one tap away. Everything else lives in More. */
+export const TAB_BAR_PATHS: readonly string[] = ['/', '/git', '/github']
+
+/** The `to` of every nav item the More sheet lists (Skills, Workflows, Settings, and the flagged
+ *  Inbox and Automations) — used to light the More tab when the current route belongs to one. */
+export const MORE_SHEET_PATHS: readonly string[] = ['/skills', '/workflows', '/settings', '/inbox', '/automations']

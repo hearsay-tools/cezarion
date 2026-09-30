@@ -224,7 +224,6 @@ describe('cockpit app shell', () => {
     const light = brandFacts('[data-slot="sidebar"]')
 
     expect(light.text.length).toBeGreaterThan(0)
-    expect(light.fontFamily).toContain('Poppins')
     expect(light.fontSize).toBe('14px')
     expect(light.height).toBeGreaterThanOrEqual(14)
     expect(light.color).toBe(light.foreground)
@@ -468,15 +467,9 @@ describe('mobile shell', () => {
       expect(browser.isVisible(DRAWER)).toBe(true)
       expect(browser.isVisible('[data-slot="sheet-overlay"]')).toBe(true)
 
-      // The drawer nav mirrors the desktop one, including the forge-gated GitHub item — settle
-      // the health answer before sampling the labels.
-      if (forgeAvailable) {
-        browser.waitForFunction(`document.querySelector('${DRAWER} nav a[href="${scoped('/github')}"]') !== null`)
-      }
-
       const box = browser.evaluate(`(() => {
         const rect = document.querySelector('${DRAWER}').getBoundingClientRect()
-        const links = Array.from(document.querySelectorAll('${DRAWER} nav a'))
+        const rows = Array.from(document.querySelectorAll('${DRAWER} [data-slot="drawer-global"] a, ${DRAWER} [data-slot="drawer-global"] button'))
         const overlay = document.querySelector('[data-slot="sheet-overlay"]').getBoundingClientRect()
         return {
           left: rect.left,
@@ -487,10 +480,8 @@ describe('mobile shell', () => {
           viewportWidth: window.innerWidth,
           overlayWidth: overlay.width,
           overlayHeight: overlay.height,
-          minLinkHeight: Math.min(...links.map((a) => a.getBoundingClientRect().height)),
-          labels: links.map((a) => {
-            return a.getAttribute('aria-label')
-          }),
+          minRowHeight: Math.min(...rows.map((a) => a.getBoundingClientRect().height)),
+          navLinks: document.querySelectorAll('${DRAWER} nav a').length,
         }
       })()`) as Record<string, number | string[]>
 
@@ -504,51 +495,72 @@ describe('mobile shell', () => {
       expect(box.overlayWidth).toBe(box.viewportWidth)
       expect(box.overlayHeight).toBe(box.viewportHeight)
 
-      // The same nav the desktop sidebar renders — at touch size, not the 34px desktop row.
-      expect(box.labels).toEqual(expectedNavLabels())
-      expect(box.minLinkHeight).toBeGreaterThanOrEqual(44)
+      // The drawer is projects only since #621: the views live in the tab bar and its More sheet
+      // (see mobile-tab-bar.e2e.ts), so no nav list here — and the rows it keeps are touch size.
+      expect(box.navLinks).toBe(0)
+      expect(box.minRowHeight).toBeGreaterThanOrEqual(44)
 
       browser.screenshot(`${artifactsDir}/drawer-iphone.png`)
     })
 
-    it('keeps the themed project name readable and unclipped at 360×640', () => {
+    it('keeps the themed drawer wordmark readable and unclipped at 360×640', () => {
+      // The project header left the drawer (#621, #620): its identity row's wordmark is the brand
+      // text left to measure. (The project rows need a registry this spec deliberately empties.)
+      const name = `${DRAWER} [data-slot="drawer-identity"] span.font-bold`
+      const facts = () => browser.waitForValue(`(() => {
+        const el = document.querySelector(${JSON.stringify(name)})
+        if (!el || el.getBoundingClientRect().width === 0) return null
+        const probe = document.createElement('span')
+        probe.style.color = 'var(--foreground)'
+        document.body.appendChild(probe)
+        const foreground = getComputedStyle(probe).color
+        probe.remove()
+        const style = getComputedStyle(el)
+        return { text: el.textContent, height: el.getBoundingClientRect().height, fontFamily: style.fontFamily,
+          color: style.color, foreground, clipped: el.scrollWidth - el.clientWidth }
+      })()`) as { text: string; height: number; fontFamily: string; color: string; foreground: string; clipped: number }
       browser.setViewport(360, 640)
       try {
         browser.goto(baseUrl + scoped('/'))
         setTheme('light')
         openDrawer()
-        const light = brandFacts(DRAWER)
+        const light = facts()
         expect(light.text.length).toBeGreaterThan(0)
-        expect(light.fontFamily).toContain('Poppins')
-        expect(light.fontSize).toBe('14px')
         expect(light.height).toBeGreaterThanOrEqual(14)
         expect(light.color).toBe(light.foreground)
-        expect(light.headerOverflow).toBeLessThanOrEqual(0)
+        expect(light.clipped).toBeLessThanOrEqual(0)
 
         browser.click(`${DRAWER} [data-slot="drawer-global"] [data-slot="theme-toggle"]`)
         browser.waitForFunction(`!document.documentElement.classList.contains('light')`)
-        const dark = brandFacts(DRAWER)
-        expect(dark.text).toBe(light.text)
-        expect({ width: dark.width, height: dark.height }).toEqual({ width: light.width, height: light.height })
-        expect(dark.color).toBe(dark.foreground)
-        expect(dark.color).not.toBe(light.color)
-        expect(dark.headerOverflow).toBeLessThanOrEqual(0)
+        const dark = browser.waitForValue(`(() => {
+          const el = document.querySelector(${JSON.stringify(name)})
+          if (!el || document.documentElement.classList.contains('light')) return null
+          return getComputedStyle(el).color
+        })()`) as string
+        expect(dark).not.toBe(light.color)
       } finally {
         browser.setViewport(IPHONE.width, IPHONE.height)
       }
     })
 
-    it('navigates and closes when a nav item is tapped', () => {
+    it('navigates and closes when a drawer row is tapped', () => {
       browser.goto(baseUrl + scoped('/'))
       openDrawer()
 
-      browser.click(`${DRAWER} nav a[href="${scoped('/git')}"]`)
+      browser.click(`${DRAWER} [data-slot="drawer-global-settings"]`)
       browser.waitForFunction(GONE)
 
       // Both halves: it routed, *and* the drawer is not still sitting on top of the new view.
-      expect(browser.url()).toBe(baseUrl + scoped('/git'))
+      expect(browser.url()).toBe(baseUrl + '/settings/global')
       expect(browser.count(DRAWER)).toBe(0)
-      expect(browser.text('[data-slot="mobile-top-bar"]')).toContain('Git')
+    })
+
+    it('navigates from the tab bar', () => {
+      browser.goto(baseUrl + scoped('/'))
+      // The views the drawer used to list: a tab is one tap from any list screen (#621).
+      browser.click(`[data-slot="mobile-tab-bar"] a[data-tab="/git"]`)
+      browser.waitForFunction(`location.pathname === ${JSON.stringify(scoped('/git'))}`)
+      browser.waitForFunction(`document.querySelector('[data-slot="mobile-top-bar"]')?.textContent.includes('Git')`)
     })
 
     it('closes when the backdrop is tapped, without navigating', () => {

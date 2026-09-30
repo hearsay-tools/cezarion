@@ -12,6 +12,9 @@ export function TabLink({
   to,
   active = false,
   onClick,
+  count,
+  replace,
+  className,
   children,
 }: {
   to: string
@@ -19,11 +22,17 @@ export function TabLink({
   /** Fires alongside the navigation (e.g. persisting the choice, #417) — it does not
    *  intercept it; `<Link>` still navigates unless the handler itself prevents it. */
   onClick?: () => void
+  /** A quiet trailing tally ("Changes 12"). Omitted, not zeroed, when the caller has no number. */
+  count?: number
+  /** Swap the current history entry instead of pushing one. */
+  replace?: boolean
+  className?: string
   children: ReactNode
 }) {
   return (
     <Link
       to={to}
+      replace={replace}
       aria-current={active ? 'page' : undefined}
       onClick={onClick}
       className={cn(
@@ -31,9 +40,13 @@ export function TabLink({
         active
           ? 'border-foreground font-semibold text-foreground'
           : 'border-transparent text-muted-foreground hover:bg-muted hover:text-foreground',
+        className,
       )}
     >
       {children}
+      {count !== undefined ? (
+        <span data-slot="tab-count" className="ml-1.5 text-[11.5px] font-normal text-soft-foreground">{count}</span>
+      ) : null}
     </Link>
   )
 }

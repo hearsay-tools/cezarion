@@ -18,13 +18,11 @@
   [data-slot="global-task-row"] { padding: 16px; }
   [data-slot="global-task-row"] > [data-slot="global-task-workflow"] { display: block; }
   [data-slot="global-task-row"] [data-action] { min-height: 44px; }
-  [data-slot="new-task-fab"] { right: 20px; bottom: calc(24px + env(safe-area-inset-bottom)); }
   [data-slot="task-card"] { overflow-wrap: anywhere; }
 }
 @media (max-width: 767px) {
   [data-route="tasks"] h1, [data-route="global-tasks"] h1 { font-size: 24px; }
   [data-slot="mark-all-read"] { display: inline-flex; }
-  [data-slot="new-task-fab"] { background: var(--accent-strong); color: var(--accent-strong-foreground); }
 }
 
 /* Frame 5 is the ungrouped summary; frame 26 exposes grouped run-action cards. */

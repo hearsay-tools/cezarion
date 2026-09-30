@@ -82,6 +82,12 @@ const cellsOf = (id: string): string[] => [...(tableRow(id)?.querySelectorAll('t
 afterEach(cleanup)
 
 describe('TasksOverview — mobile actions', () => {
+  it('hides the inline New task button below md, where the shell\'s floating button owns the job (#621)', () => {
+    renderOverview({ runs: [run({ status: 'done' })] })
+    const inline = document.querySelector('[data-slot="new-task-inline"]') as HTMLElement
+    expect(inline.className).toContain('max-md:hidden')
+  })
+
   it('opens the keyboard actions menu and uses the existing archive handler', () => {
     const { onArchiveFinished } = renderOverview({ runs: [run({ status: 'done' })] })
     fireEvent.keyDown(screen.getByRole('button', { name: 'Task actions' }), { key: 'ArrowDown' })
@@ -1093,12 +1099,11 @@ describe('TasksOverview — mobile cards and FAB', () => {
     expect(location()).toBe('/tasks/c1')
   })
 
-  it('floats the New task FAB, linking to /new', () => {
-    // A non-empty list, so the FAB is the only "New task" link (the empty state carries its own).
+  it('renders no floating New task button of its own', () => {
+    // The phone's one floating New task button belongs to the shell's tab bar (#621); a second one
+    // here stacked two of them over the same corner of every phone Tasks list.
     renderOverview({ runs: [run()] })
-    const fab = document.querySelector('[data-slot="new-task-fab"]')
-    expect(fab?.getAttribute('href')).toBe('/new')
-    expect(fab?.getAttribute('aria-label')).toBe('New task')
+    expect(document.querySelector('[data-slot="new-task-fab"]')).toBeNull()
   })
 })
 

@@ -121,6 +121,13 @@ afterAll(async () => {
   if (dataRoot) rmSync(dataRoot, { recursive: true, force: true })
 })
 
+/** Back out of a pushed task screen to the list. Below md the facet tabs replace their history
+ *  entry (#621), so one Back is always enough, however many tabs were visited. */
+function backToList(): void {
+  browser.click('[data-slot="mobile-top-bar"] [data-slot="mobile-back"]')
+  browser.waitForFunction(`document.querySelector('[data-slot="task-card"]') !== null`)
+}
+
 describe('task thread', () => {
   it('renders the task and follow-up as labeled full-width user messages', () => {
     const bubbles = browser.evaluate(
@@ -630,7 +637,7 @@ describe('task thread', () => {
     browser.setViewport(1440, 900)
   })
 
-  it('mobile header: the action bar folds into the kebab next to the pill', () => {
+  it('mobile header: the action bar folds into the kebab in the top bar, beside the title and state', () => {
     browser.setViewport(390, 844)
     browser.goto(`${baseUrl}${scoped(`/tasks/${RUN_ID}`)}`)
     browser.waitForFunction(`document.querySelector('[data-slot="run-header"]') !== null`)
@@ -641,14 +648,17 @@ describe('task thread', () => {
         `document.querySelector('[data-slot="run-actions"]')`,
       ),
     ).toBe(null)
-    expect(
-      browser.evaluate(
-        `(() => { const el = document.querySelector('[aria-label="Run actions"]'); return el !== null && el.offsetParent !== null })()`,
-      ),
-    ).toBe(true)
-    // Title + pill still read in one compact row.
-    expect(browser.isVisible('[data-route="task-thread"] h1')).toBe(true)
-    expect(browser.evaluate(`document.querySelector('[data-slot="pill"]').textContent`)).toBe('done')
+    // The pushed screen's top bar carries the kebab, the title and the state line (#621); the
+    // run header drops its own title row below md, so there is no h1 or pill left in it.
+    const bar = browser.waitForValue(`(() => {
+      const top = document.querySelector('[data-slot="mobile-top-bar"]')
+      const kebab = top?.querySelector('[aria-label="Run actions"]')
+      const title = top?.querySelector('[data-slot="mobile-run-title"]')
+      if (!kebab || !title) return null
+      return { kebab: kebab.offsetParent !== null, state: title.querySelector('[data-slot="mobile-run-state"]').textContent,
+        h1: document.querySelector('[data-route="task-thread"] h1') !== null, pill: document.querySelector('[data-slot="run-header"] [data-slot="pill"]') !== null }
+    })()`) as { kebab: boolean; state: string; h1: boolean; pill: boolean }
+    expect(bar).toEqual({ kebab: true, state: expect.stringContaining('done'), h1: false, pill: false })
 
     browser.screenshot(`${artifactsDir}/thread-header-mobile.png`)
     browser.setViewport(1440, 900)
@@ -759,15 +769,16 @@ describe('task thread', () => {
       expect(browser.isVisible('[aria-label="Run actions"]')).toBe(true)
       expect(browser.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true)
     }
-    // Navigate through the real phone drawer; a full browser.goto would reset module memory.
+    // Navigate through the real phone UI (Back to the list, then the task card); a full browser.goto would reset module memory.
     for (const [id, label] of [[RUN_ID, 'Show run details'], [LONG_RUN.id, 'Hide run details']]) {
-      browser.click('[aria-label^="Open projects"]')
-      browser.waitForFunction(`document.querySelector('[data-slot="mobile-nav-drawer"]')?.getBoundingClientRect().left >= 0`)
-      browser.evaluate(`document.querySelector('[data-slot="mobile-nav-drawer"] a[href="${scoped(`/tasks/${id}`)}"]').scrollIntoView({ block: 'center' })`)
-      browser.evaluate(`document.querySelector('[data-slot="mobile-nav-drawer"] a[href="${scoped(`/tasks/${id}`)}"]').focus()`)
+      backToList()
+      const link = `[data-slot="task-card"][data-run-id="${id}"] a[href]`
+      browser.waitForFunction(`document.querySelector('${link}') !== null`)
+      browser.evaluate(`document.querySelector('${link}').scrollIntoView({ block: 'center' })`)
+      browser.evaluate(`document.querySelector('${link}').focus()`)
       browser.press('Enter')
-      browser.waitForFunction(`document.querySelector('[data-slot="mobile-nav-drawer"]') === null`)
-      browser.waitForFunction(`document.querySelector('[data-run-id="${id}"] [aria-label="${label}"]') !== null`)
+      // The toggle lives in the shell's top bar below md (#621), outside the route's [data-run-id] wrapper.
+      browser.waitForFunction(`document.querySelector('[data-route="task-thread"][data-run-id="${id}"]') !== null && document.querySelector('[aria-label="${label}"]') !== null`)
       expect(browser.isVisible('[data-slot="run-details"]')).toBe(id === LONG_RUN.id)
       expect(browser.isVisible('[data-slot="session-controls"]')).toBe(true)
     }

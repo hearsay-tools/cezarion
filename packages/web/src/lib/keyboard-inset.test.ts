@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   keyboardAwareCollisionPadding,
   keyboardInset,
+  keyboardOpen,
+  useKeyboardOpen,
   useViewportInsets,
   viewportInsets,
   watchKeyboardInset,
@@ -19,6 +21,7 @@ class StubViewport implements KeyboardViewport {
   constructor(
     public height: number,
     public offsetTop = 0,
+    public scale = 1,
   ) {}
   addEventListener(type: 'resize' | 'scroll', listener: () => void) {
     const set = this.listeners.get(type) ?? new Set()
@@ -221,5 +224,127 @@ describe('watchKeyboardInset — the stubbed adapter', () => {
     const stop = watchKeyboardInset(win(null), (px) => applied.push(px))
     expect(applied).toEqual([0])
     stop() // must not throw
+  })
+})
+
+describe('keyboardOpen — what hides the phone tab bar', () => {
+  it.each([
+    // [innerHeight, vv.height, vv.offsetTop, vv.scale, expected]
+    [800, 800, 0, 1, false], // closed
+    [800, 460, 0, 1, true], // iOS keyboard
+    [800, 740, 0, 1, false], // 60px of browser chrome is not a keyboard
+    [800, 500, 0, 2.5, false], // pinch-zoomed: shorter visual viewport, no keyboard
+    [800, 500, 0, 1.02, true], // rounding noise around 1 still counts as 1
+  ])('inner %d, vv %d @ %d, scale %d → %s', (innerHeight, height, offsetTop, scale, expected) => {
+    expect(keyboardOpen(win(new StubViewport(height, offsetTop, scale), innerHeight))).toBe(expected)
+  })
+
+  it('is false without a visualViewport', () => {
+    expect(keyboardOpen(win(null))).toBe(false)
+  })
+})
+
+describe('keyboardOpen — resizes-content keyboard (layout viewport shrinks)', () => {
+  const textarea = { tagName: 'TEXTAREA' }
+  const button = { tagName: 'BUTTON' }
+  /** vv tracks innerHeight, so the inset stays 0 — the Chromium resizes-content shape. */
+  const resized = (h: number, focused: unknown = null, w = 400): KeyboardWindow => ({
+    innerHeight: h,
+    innerWidth: w,
+    visualViewport: new StubViewport(h),
+    document: { activeElement: focused },
+  })
+  // One window per case; the baseline is per window, so each starts closed at 800.
+  const withClosed = (focused: unknown) => {
+    const w = resized(800, focused)
+    keyboardOpen(w)
+    return w
+  }
+
+  it('height drop + focused textarea → open', () => {
+    const w = withClosed(textarea)
+    w.innerHeight = 480
+    expect(keyboardOpen(w)).toBe(true)
+  })
+
+  it('height drop + focused text input / contenteditable → open; checkbox → closed', () => {
+    for (const el of [{ tagName: 'INPUT', type: 'email' }, { tagName: 'DIV', isContentEditable: true }]) {
+      const w = withClosed(el)
+      w.innerHeight = 480
+      expect(keyboardOpen(w)).toBe(true)
+    }
+    const w = withClosed({ tagName: 'INPUT', type: 'checkbox' })
+    w.innerHeight = 480
+    expect(keyboardOpen(w)).toBe(false)
+  })
+
+  it('height drop without a focused field → closed (narrow desktop window resized)', () => {
+    const w = withClosed(button)
+    w.innerHeight = 480
+    expect(keyboardOpen(w)).toBe(false)
+  })
+
+  it('focus without a height drop → closed (hardware keyboard)', () => {
+    const w = withClosed(textarea)
+    expect(keyboardOpen(w)).toBe(false)
+  })
+
+  it('a drop under the minimum is not a keyboard', () => {
+    const w = withClosed(textarea)
+    w.innerHeight = 740
+    expect(keyboardOpen(w)).toBe(false)
+  })
+
+  it('closes again when the height returns', () => {
+    const w = withClosed(textarea)
+    w.innerHeight = 480
+    expect(keyboardOpen(w)).toBe(true)
+    w.innerHeight = 800
+    expect(keyboardOpen(w)).toBe(false)
+  })
+
+  it('rotation (width change) resets the baseline', () => {
+    const w = withClosed(textarea)
+    w.innerWidth = 800 // landscape: shorter, but a new baseline
+    w.innerHeight = 400
+    expect(keyboardOpen(w)).toBe(false)
+  })
+})
+
+describe('useKeyboardOpen — the React binding', () => {
+  it('follows window resize + focus and removes every listener on unmount', () => {
+    const originalHeight = window.innerHeight
+    Object.defineProperty(window, 'innerHeight', { value: 800, configurable: true, writable: true })
+    Object.defineProperty(window, 'visualViewport', { value: null, configurable: true })
+    const area = document.createElement('textarea')
+    document.body.append(area)
+    const add = vi.spyOn(window, 'addEventListener')
+    const addDoc = vi.spyOn(document, 'addEventListener')
+    const remove = vi.spyOn(window, 'removeEventListener')
+    const removeDoc = vi.spyOn(document, 'removeEventListener')
+
+    const { result, unmount } = renderHook(() => useKeyboardOpen())
+    expect(result.current).toBe(false)
+    act(() => {
+      area.focus()
+      ;(window as { innerHeight: number }).innerHeight = 480
+      window.dispatchEvent(new Event('resize'))
+    })
+    expect(result.current).toBe(true)
+    act(() => {
+      area.blur()
+      document.dispatchEvent(new Event('focusout'))
+    })
+    expect(result.current).toBe(false)
+
+    unmount()
+    for (const [spy, type] of [[remove, 'resize'], [removeDoc, 'focusin'], [removeDoc, 'focusout']] as const) {
+      expect(spy.mock.calls.some((c) => c[0] === type)).toBe(true)
+    }
+    expect(add.mock.calls.some((c) => c[0] === 'resize')).toBe(true)
+    expect(addDoc.mock.calls.some((c) => c[0] === 'focusin')).toBe(true)
+    vi.restoreAllMocks()
+    area.remove()
+    Object.defineProperty(window, 'innerHeight', { value: originalHeight, configurable: true, writable: true })
   })
 })

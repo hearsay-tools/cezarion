@@ -12,7 +12,7 @@ import { SidebarProjectHeader } from '@/components/sidebar-project-header'
 import { ProjectRail } from '@/components/project-rail'
 import { useWorkspaceSignals } from '@/components/use-workspace-signals'
 import { TaskQuickListContainer } from '@/components/task-quick-list'
-import { ToolsMenu } from '@/components/tools-menu'
+import { ToolsMenu, forgeNote, toolsBlocker } from '@/components/tools-menu'
 import { useDocumentTitle } from '@/lib/use-document-title'
 import { useActiveProjectId } from '@/lib/project-router'
 import { listCounts, runTitle } from '@/lib/task-groups'
@@ -143,6 +143,7 @@ export function AppShellContainer({ children }: { children: ReactNode }) {
         mobileProjects={workspace}
         needsYou={listCounts(runs.data ?? []).waiting > 0}
         toolsMenu={<ToolsMenu health={health.data} />}
+        toolsStatus={health.data ? { blocked: toolsBlocker(health.data) !== null, note: forgeNote(health.data) } : null}
         projectRail={workspace ? <ProjectRail {...workspace} version={shellHealth?.version ?? null} /> : null}
       >
         {children}

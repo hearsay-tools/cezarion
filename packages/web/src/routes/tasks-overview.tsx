@@ -66,7 +66,7 @@ import { cn } from '@/lib/utils'
  * all come from the pure modules (`lib/task-groups.ts`, `lib/tasks-table.ts`,
  * `lib/attention.ts`). What lives here is markup, the router, and the local search text.
  *
- * Below `md` the table becomes a stacked card list plus a New-task FAB — same rows, same order,
+ * Below `md` the table becomes a stacked card list (the New task FAB is the shell's, #621) — same rows, same order,
  * same data, only the framing changes (mockup `tasks-home.html`, mobile section).
  */
 export function TasksOverview({
@@ -257,7 +257,7 @@ export function TasksOverview({
           <p className="mt-4 text-xs text-muted-foreground">Saved automatically. Tokens and cost appear only when supported.</p>
           <Button variant="outline" className="mt-4" onClick={() => setDetailedTable((value) => !value)}>{detailedTable ? 'Summary view' : 'Resource columns'}</Button>
         </PopoverContent></Popover>
-        <Button asChild data-slot="new-task-inline" className="min-h-11 inline-flex"><Link to="/new"><PlusIcon aria-hidden="true" />New task</Link></Button>
+        <Button asChild data-slot="new-task-inline" className="min-h-11 inline-flex max-md:hidden"><Link to="/new"><PlusIcon aria-hidden="true" />New task</Link></Button>
         </div>
       </header>
 
@@ -356,17 +356,6 @@ export function TasksOverview({
           </div>
         ))}
       </div>
-
-      {/* The mobile New-task FAB. The desktop CTA lives in the sidebar. A router Link since
-          R4 step 1.3 re-pointed /new at the React composer — no full page load needed. */}
-      <Link
-        to="/new"
-        data-slot="new-task-fab"
-        aria-label="New task"
-        className="fixed right-4 bottom-[calc(16px+env(safe-area-inset-bottom))] z-20 inline-flex size-14 items-center justify-center rounded-full bg-action text-action-foreground shadow-modal md:hidden"
-      >
-        <PlusIcon className="size-[22px]" aria-hidden="true" />
-      </Link>
     </div>
   )
 }

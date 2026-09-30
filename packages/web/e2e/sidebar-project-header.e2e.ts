@@ -8,7 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { stopFixtureServer } from './fixture-server'
 import { waitForHealth } from './poll'
-import { dismissWithEscape, focusWithKeyboard } from './contrast'
+import { focusWithKeyboard } from './contrast'
 
 const artifacts = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_e2e')
 const fixtures: Array<{ root: string; server: ChildProcess; url: string; project: string; remote: boolean }> = []
@@ -98,19 +98,29 @@ describe('project header actions', () => {
     browser.setViewport(360, 640)
     browser.goto(`${fixture.url}/p/${fixture.project}/`)
     browser.evaluate(`document.documentElement.classList.toggle('light', ${theme === 'light'})`)
+    // The view tabs moved out of the drawer (#621): the tab bar holds Tasks/Git/GitHub and its
+    // More sheet the rest, so "every view is reachable at 360px" is asserted there, at 44px.
+    const tabs = browser.waitForValue(`Array.from(document.querySelectorAll('[data-slot="mobile-tab-bar"] a, [data-slot="mobile-tab-bar"] button')).map(el => ({ width: el.getBoundingClientRect().width, height: el.getBoundingClientRect().height }))`, value => Array.isArray(value) && value.length > 0) as Array<{ width: number; height: number }>
+    expect(tabs.length).toBeGreaterThanOrEqual(3)
+    expect(tabs.every(size => size.width >= 44 && size.height >= 44)).toBe(true)
+    browser.click('[data-slot="mobile-tab-bar"] [data-tab="more"]')
+    const rows = browser.waitForValue(`Array.from(document.querySelectorAll('[data-slot="more-sheet"] [data-slot="more-row"]')).map(el => el.getAttribute('data-more-row'))`, value => Array.isArray(value) && value.length > 0) as string[]
+    expect(rows).toEqual(['/skills', '/workflows', '/settings', '/inbox'])
+    browser.press('Escape')
+    browser.waitForFunction(`document.querySelector('[data-slot="more-sheet"]') === null`)
+    // The drawer keeps the project menu, on the current project's row.
     browser.click('[aria-label^="Open projects"]')
     const drawer = '[data-slot="mobile-nav-drawer"]'
-    browser.waitForFunction(`document.querySelector('${drawer} [data-slot="project-header-detail"]')?.textContent.includes('main')`)
     browser.waitForStable(`(() => { const el = document.querySelector('${drawer}'); return el ? el.getBoundingClientRect().left : null })()`, { holdMs: 150, matcher: value => value === 0 })
-    const sizes = browser.waitForValue(`Array.from(document.querySelectorAll('${drawer} [data-view-tab]')).map(el => ({ width: el.getBoundingClientRect().width, height: el.getBoundingClientRect().height }))`, value => Array.isArray(value) && value.length > 0) as Array<{ width: number; height: number }>
-    expect(sizes).toHaveLength(7)
-    expect(sizes.every(size => size.width >= 44 && size.height >= 44)).toBe(true)
-    focusWithKeyboard(browser, `${drawer} [aria-label="More views"]`)
-    browser.click(`${drawer} [aria-label="More views"]`)
-    browser.waitForFunction(`document.querySelector('[role="menu"]')?.textContent.includes('Inbox')`)
-    dismissWithEscape(browser, { content: '[role="menu"]', focus: `${drawer} [aria-label="More views"]` })
-    browser.click(`${drawer} [data-slot="project-menu-trigger"]`)
-    browser.waitForFunction(`document.querySelector('[role="menu"]')?.textContent.includes('Copy path')`)
+    const trigger = `${drawer} [data-slot="drawer-project-current"] [data-slot="project-menu-trigger"]`
+    const size = browser.waitForValue(`(() => { const el = document.querySelector('${trigger}'); if (!el) return null; const box = el.getBoundingClientRect(); return { width: box.width, height: box.height, inLink: !!el.closest('a') } })()`) as { width: number; height: number; inLink: boolean }
+    expect(size.width).toBeGreaterThanOrEqual(44)
+    expect(size.height).toBeGreaterThanOrEqual(44)
+    expect(size.inLink).toBe(false)
+    browser.click(trigger)
+    const menu = browser.waitForValue(`document.querySelector('[role="menu"]')?.textContent`, value => typeof value === 'string' && value.includes('Copy path')) as string
+    expect(menu).toContain('Mark all read')
+    expect(menu).toContain('Open in')
     settleMenu()
     browser.screenshot(`${artifacts}/sidebar-mobile-${theme}.png`)
   })

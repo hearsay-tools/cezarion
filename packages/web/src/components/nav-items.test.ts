@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { NAV_ITEMS, activeNavItem, activeNavPath, visibleNavItems } from './nav-items'
+import { NAV_ITEMS, activeNavItem, activeNavPath, isPushedRoute, visibleNavItems } from './nav-items'
 
 /** Which nav item owns a URL. This is the rule that decides what the user sees lit up, and it
  *  is not a plain equality check — items own areas, and the Settings area nests. */
@@ -164,4 +164,33 @@ describe('visibleNavItems', () => {
       }
     }
   })
+})
+
+describe('isPushedRoute', () => {
+  const cases: Array<[pathname: string, pushed: boolean]> = [
+    ['/tasks/abc123', true],
+    ['/tasks/abc123/changes', true],
+    ['/tasks/abc123/commits', true],
+    ['/tasks/abc123/commits/deadbeef', true],
+    ['/tasks/abc123/files', true],
+    ['/compare/grp-1', true],
+    ['/p/cezar/tasks/abc123', true],
+    ['/p/cezar/tasks/abc123/files', true],
+    ['/p/cezar/compare/grp-1', true],
+    // The all-projects overview is a list, not a pushed screen.
+    ['/tasks', false],
+    ['/tasks/', false],
+    ['/compare', false],
+    ['/', false],
+    ['/p/cezar', false],
+    ['/git', false],
+    ['/p/cezar/git/commits', false],
+    ['/settings/agents', false],
+    ['/new', false],
+  ]
+  for (const [pathname, pushed] of cases) {
+    it(`${pathname} → ${pushed}`, () => {
+      expect(isPushedRoute(pathname)).toBe(pushed)
+    })
+  }
 })

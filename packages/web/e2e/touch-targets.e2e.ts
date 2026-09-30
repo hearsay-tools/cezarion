@@ -109,6 +109,9 @@ function overlappingTargets() {
       const a=nodes[i], b=nodes[j];
       // Row navigation contains its own pin; dnd-kit palette contains its Add action.
       if (a.contains(b) || b.contains(a)) continue;
+      // The tab bar (#621) is its own grid row: a control scrolled out of the main column's bottom edge is
+      // clipped there, not underneath the bar, so a rect overlap between the two is not one.
+      if ((a.closest('[data-slot="mobile-tab-bar"]') && b.closest('[data-slot="main"]')) || (b.closest('[data-slot="mobile-tab-bar"]') && a.closest('[data-slot="main"]'))) continue;
       const x=(${hitRectExpression})(a), y=(${hitRectExpression})(b);
       if (Math.min(x.right,y.right)-Math.max(x.left,y.left) > 1 &&
           Math.min(x.bottom,y.bottom)-Math.max(x.top,y.top) > 1)
@@ -174,7 +177,7 @@ describe('density-independent mobile action targets (#166)', () => {
         for (const accent of ['lime', 'violet']) {
           browser.evaluate(`document.documentElement.dataset.accent = ${JSON.stringify(accent)}`)
           browser.evaluate(`document.querySelector('.settings-section-picker').open = true`)
-          for (const selector of ['[data-slot="settings-nav-mobile"] a:last-child', '[data-slot="appearance-density"] button:nth-child(2)', '[data-slot="mobile-nav-drawer"] nav a:last-child', '[data-slot="mobile-nav-drawer"] a[data-slot="button"]']) {
+          for (const selector of ['[data-slot="settings-nav-mobile"] a:last-child', '[data-slot="appearance-density"] button:nth-child(2)', '[data-slot="mobile-nav-drawer"] [data-slot="drawer-global-settings"]', '[data-slot="mobile-nav-drawer"] a[data-slot="drawer-project"]']) {
             if (selector.includes('mobile-nav-drawer') && !browser.count('[data-slot="mobile-nav-drawer"]')) {
               browser.click('[aria-label^="Open projects"]')
               browser.waitForFunction(`document.querySelector('[data-slot="mobile-nav-drawer"]')?.getBoundingClientRect().x === 0`)
@@ -212,7 +215,11 @@ describe('density-independent mobile action targets (#166)', () => {
           browser.goto(`${baseUrl}${path}`)
           browser.waitForFunction(`document.querySelector('[data-slot="composer"] textarea, [data-slot="appearance-section"], [data-slot="wb-name"]') !== null`)
           appearance(density, theme)
-          if (path.endsWith('/new')) browser.click('[data-slot="execution-options"] summary')
+          // Below the fold at 360×640 the summary sits behind the tab bar's row until scrolled to.
+          if (path.endsWith('/new')) {
+            browser.evaluate(`document.querySelector('[data-slot="execution-options"] summary').scrollIntoView({ block: 'center' })`)
+            browser.click('[data-slot="execution-options"] summary')
+          }
           browser.evaluate(`document.querySelector('[data-slot="main"]').scrollTop = 0`)
           expect(smallTargets(), path).toEqual([])
           expect(overlappingTargets(), path).toEqual([])
@@ -386,7 +393,7 @@ describe('density-independent mobile action targets (#166)', () => {
 
 describe('references on a device that cannot hover (#617 01b)', () => {
   for (const [width, height] of [[360, 640], [390, 844]] as const) {
-    it(`${width}px: the sidebar row is the tap target, and the task header carries the 44px links`, () => {
+    it(`${width}px: the header carries the 44px links, and the touch sidebar row is the tap target`, () => {
       browser.setViewport(width, height)
       browser.goto(`${baseUrl}/p/${project}/tasks/${runId}`)
       browser.waitForFunction(`document.querySelector('[aria-label="Show run details"]') !== null`)
@@ -427,13 +434,15 @@ describe('references on a device that cannot hover (#617 01b)', () => {
       expect(header.scroll).toBeLessThanOrEqual(header.inner)
       browser.screenshot(`${artifacts}/${width}-touch-header-references.png`, { viewport: true })
 
+      // The sidebar row is a `hover: none` affordance, not a width one, and the phone drawer no
+      // longer holds the quick list (#621): measure it in the desktop sidebar of this hover-less
+      // browser. The phone half of the test is the task header above.
+      browser.setViewport(1440, 900)
       browser.goto(`${baseUrl}/p/${project}`)
-      browser.waitForFunction(`document.querySelector('[aria-label^="Open projects"]') !== null`)
-      browser.click('[aria-label^="Open projects"]')
-      const row = `[data-slot="mobile-nav-drawer"] [data-slot="task-row"][data-run-id="${runId}"]`
+      const row = `[data-slot="sidebar"] [data-slot="task-row"][data-run-id="${runId}"]`
       const meta = browser.waitForValue(`(() => {
         const meta = document.querySelector('${row} [data-slot="task-row-meta"]')
-        if (!meta || document.querySelector('[data-slot="mobile-nav-drawer"]').getBoundingClientRect().x !== 0) return null
+        if (!meta) return null
         return { text: meta.textContent, links: meta.querySelectorAll('a').length, focusable: meta.querySelectorAll('[tabindex], a, button').length,
           inert: [...meta.querySelectorAll('[data-slot="pr-chip"], [data-slot="issue-chip"]')].map((chip) => chip.dataset.inert) }
       })()`) as { text: string; links: number; focusable: number; inert: string[] }
@@ -442,8 +451,6 @@ describe('references on a device that cannot hover (#617 01b)', () => {
       // Tapping the reference text opens the task: the row is the one target. A plain click on
       // the text, not `tapEdge`: on the 390px run its right-edge hit test missed this inline
       // span (hits [true, false, true, true, true]); the edge probes are for block controls.
-      // The task list follows the Projects section in the drawer's one scroll: bring it up first.
-      browser.evaluate(`document.querySelector('${row}').scrollIntoView({ block: 'center' })`)
       browser.click(`${row} [data-slot="task-row-meta"] [data-slot="pr-chip"]`)
       browser.waitForFunction(`location.pathname.endsWith('/tasks/${runId}')`)
     })

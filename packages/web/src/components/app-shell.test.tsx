@@ -487,18 +487,17 @@ describe('AppShell', () => {
       expect(sidebar().querySelector('[data-slot="overflow-inbox-dot"]')).toBeNull()
     })
 
-    it('renders a quiet accessible Skills update marker in desktop and mobile navigation', () => {
+    it('renders a quiet accessible Skills update marker in the desktop navigation only', () => {
       renderShell('/', { skillsUpdateAvailable: true })
-      expect(document.querySelectorAll('[data-slot="nav-update-marker"]')).toHaveLength(1)
-      fireEvent.click(screen.getByRole('button', { name: /^Open projects/ }))
       const markers = document.querySelectorAll('[data-slot="nav-update-marker"]')
-      expect(markers).toHaveLength(2)
+      expect(markers).toHaveLength(1)
       for (const marker of markers) {
         expect(marker.getAttribute('aria-label')).toBe('Skills update available')
         expect(marker.innerHTML).not.toContain('animate-')
       }
-      // Radix hides the desktop app from the accessibility tree while the mobile drawer is modal.
-      expect(screen.getAllByRole('link', { name: 'Skills' })).toHaveLength(1)
+      // The phone drawer carries no nav (#621): the marker's mobile home is the tab bar's More.
+      fireEvent.click(screen.getByRole('button', { name: /^Open projects/ }))
+      expect(document.querySelectorAll('[data-slot="nav-update-marker"]')).toHaveLength(1)
     })
 
     it('renders no Skills marker without an actionable update', () => {
@@ -904,63 +903,54 @@ describe('AppShell', () => {
       await waitFor(() => expect(drawer()).toBeNull())
     })
 
-    it('renders the same nav as the desktop sidebar', () => {
-      renderShell()
-      const desktopLinks = allNavLinks().map((a) => [a.getAttribute('href'), a.textContent])
+    it('renders no SidebarContent: no nav, quick list, New task or search hint (#621)', () => {
+      renderShell('/', { taskQuickList: <p>list</p> })
       openMenu()
-
-      const links = allNavLinks(drawer() as HTMLElement)
-
-      // Asserted against NAV_ITEMS, not a copy of it: the point of this test is that the drawer
-      // reuses the sidebar's content, so adding a nav item must not need a second edit here.
-      expect(links.map((a) => [a.getAttribute('href'), a.textContent])).toEqual(desktopLinks)
-      expect(links.map((a) => a.getAttribute('href')).sort()).toEqual(NAV_ITEMS.filter(item => !['/inbox', '/automations'].includes(item.to)).map(item => item.to).sort())
-
-      // …and the rest of the sidebar came along, not just the nav.
-      expect(within(drawer() as HTMLElement).getByRole('link', { name: /New task/ })).toBeTruthy()
-      expect(within(drawer() as HTMLElement).getByRole('button', { name: 'More views' })).toBeTruthy()
+      const root = drawer() as HTMLElement
+      expect(root.querySelector('[data-slot="sidebar-content"]')).toBeNull()
+      expect(within(root).queryByRole('navigation', { name: 'Main' })).toBeNull()
+      expect(within(root).queryByRole('link', { name: 'Git' })).toBeNull()
+      expect(within(root).queryByRole('link', { name: /New task/ })).toBeNull()
+      expect(within(root).queryByText('list')).toBeNull()
+      // The desktop sidebar still carries all of it.
+      expect(allNavLinks().length).toBeGreaterThan(0)
     })
 
-    it('marks the active nav item inside the drawer too', () => {
-      renderShell('/skills')
+    it('closes when the Tools row navigates', async () => {
+      renderShell('/', { toolsStatus: { blocked: false, note: null } })
       openMenu()
-      const current = within(drawer() as HTMLElement).getAllByRole('link', { current: 'page' })
-      expect(current).toHaveLength(1)
-      expect(current[0]?.textContent).toBe('Skills')
-    })
-
-    it('closes when a nav item inside it navigates', async () => {
-      renderShell('/')
-      openMenu()
-
-      fireEvent.click(within(drawer() as HTMLElement).getByRole('link', { name: 'Git' }))
-
+      fireEvent.click(within(drawer() as HTMLElement).getByRole('link', { name: 'Tools' }))
       // Both halves matter: an open drawer sitting on top of the newly routed view is the whole
       // bug this guards, and a drawer that closed without navigating would be just as wrong.
       await waitFor(() => expect(drawer()).toBeNull())
-      expect(screen.getByTestId('location').textContent).toBe('/git')
+      expect(screen.getByTestId('location').textContent).toBe('/tools')
     })
 
-    it('closes when the already-active nav item is re-clicked', async () => {
-      // No pathname change, so the route-change effect cannot fire — the link's own onNavigate
-      // is what has to close it. Tasks navigating home while already active is a spec behavior.
-      renderShell('/')
+    it('closes when the Tools row is re-clicked on /tools', async () => {
+      // No pathname change, so the route-change effect cannot fire: the link's own onNavigate
+      // is what has to close it.
+      renderShell('/tools', { toolsStatus: { blocked: false, note: null } })
       openMenu()
-      fireEvent.click(within(drawer() as HTMLElement).getByRole('link', { name: 'Tasks' }))
+      fireEvent.click(within(drawer() as HTMLElement).getByRole('link', { name: 'Tools' }))
       await waitFor(() => expect(drawer()).toBeNull())
-      expect(screen.getByTestId('location').textContent).toBe('/')
+      expect(screen.getByTestId('location').textContent).toBe('/tools')
     })
 
-    it('closes before the New task anchor hands off to the legacy document', async () => {
-      renderShell('/')
+    it('shows no update row until a newer release exists, then one row with the action', () => {
+      renderShell('/', { version: '1.0.0', latestVersion: '1.0.0' })
       openMenu()
-      const link = within(drawer() as HTMLElement).getByRole('link', { name: /New task/ })
-      // jsdom does not implement full document navigation; suppress only that browser default.
-      link.addEventListener('click', (event) => event.preventDefault(), { once: true })
-      fireEvent.click(link)
-      await waitFor(() => expect(drawer()).toBeNull())
-      expect(link.getAttribute('href')).toBe('/new')
-      expect(screen.getByTestId('location').textContent).toBe('/')
+      expect(drawer()?.querySelector('[data-slot="drawer-update"]')).toBeNull()
+      expect(drawer()?.querySelector('[data-slot="drawer-version"]')?.textContent).toBe('v1.0.0')
+    })
+
+    it('renders the update row right under the identity row with the Update button', () => {
+      renderShell('/', { version: '1.0.0', latestVersion: '1.2.0', applicationUpdate: { supported: true, status: 'idle' } as never, onApplyUpdate: async () => {} })
+      openMenu()
+      const identity = drawer()?.querySelector('[data-slot="drawer-identity"]') as HTMLElement
+      const row = drawer()?.querySelector('[data-slot="drawer-update"]') as HTMLElement
+      expect(identity.nextElementSibling).toBe(row)
+      expect(row.textContent).toContain('Update available · v1.2.0')
+      expect(within(row).getByRole('button', { name: 'Update application' })).toBeTruthy()
     })
 
     it('closes when the viewport widens past md, where the real sidebar takes over', async () => {
@@ -990,11 +980,10 @@ describe('AppShell', () => {
 
       // The drawer is a full-height overlay under the same notch and home indicator as the
       // sidebar. Its identity row sits at the top and its global rows at the bottom, so those two
-      // own the insets; the sidebar content between them takes none (it would double them).
+      // own the insets; the scroll between them takes none (it would double them).
       expect(root.querySelector('[data-slot="drawer-identity"]')?.className).toContain('pt-[env(safe-area-inset-top)]')
       expect(root.querySelector('[data-slot="drawer-global"]')?.className).toContain('env(safe-area-inset-bottom)')
-      const content = root.querySelector('[data-slot="sidebar-content"]') as HTMLElement
-      expect(content.className).not.toContain('safe-area-inset')
+      expect(root.querySelector('[data-slot="drawer-scroll"]')?.className).not.toContain('safe-area-inset')
       // The desktop sidebar keeps its own.
       expect((sidebar().querySelector('[data-slot="sidebar-content"]') as HTMLElement).className).toContain('pt-[env(safe-area-inset-top)]')
     })
@@ -1011,18 +1000,18 @@ it('keeps project and page context in the desktop breadcrumb', () => {
 })
 
 it('opens project navigation from the mobile project control and restores its focus', async () => {
-  renderShell('/p/demo/skills', { repo: { name: 'demo', branch: 'main' }, taskQuickList: <RouterLink to="/p/demo/tasks/task">Project task</RouterLink> })
+  renderShell('/p/demo/skills', { repo: { name: 'demo', branch: 'main' }, toolsStatus: { blocked: false, note: null } })
   const picker = screen.getByRole('button', { name: 'Switch project: demo' })
   picker.focus()
   fireEvent.click(picker)
   const drawer = document.querySelector('[data-slot="mobile-nav-drawer"]') as HTMLElement
   expect(drawer).not.toBeNull()
-  expect(within(drawer).getByRole('link', { name: 'Project task' })).toBeTruthy()
+  expect(within(drawer).getByRole('link', { name: 'Tools' })).toBeTruthy()
   fireEvent.keyDown(drawer, { key: 'Escape' })
   await waitFor(() => expect(document.activeElement).toBe(picker))
   fireEvent.click(picker)
-  fireEvent.click(within(document.querySelector('[data-slot="mobile-nav-drawer"]') as HTMLElement).getByRole('link', { name: 'Project task' }))
-  await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/p/demo/tasks/task'))
+  fireEvent.click(within(document.querySelector('[data-slot="mobile-nav-drawer"]') as HTMLElement).getByRole('link', { name: 'Tools' }))
+  await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/tools'))
 })
 
 // Current 193-frame source has a taller Start/New task header; page/session frames

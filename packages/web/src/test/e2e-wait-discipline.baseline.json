@@ -83,7 +83,7 @@
       "file": "mobile-task-controls.e2e.ts",
       "rule": "one-shot-read",
       "site": "expect(browser.evaluate(`document.querySelector('${tab('archived')}').getAttribute('aria-pressed')`)).toBe('true')",
-      "count": 3
+      "count": 2
     },
     {
       "file": "mobile-task-controls.e2e.ts",

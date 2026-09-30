@@ -34,8 +34,11 @@ const sessionId = `e2e-ios-${process.pid}`
 
 const IPHONE = { width: 390, height: 844 } // iPhone 14/15 CSS pixels
 
-/** The one entry point to navigation below `md` (see app-shell.tsx MobileTopBar). */
+/** The entry point to the project drawer below `md` on list screens (see app-shell.tsx MobileTopBar). */
 const MENU_BUTTON = '[data-slot="mobile-top-bar"] button[aria-label^="Open projects"]'
+
+/** The pushed screen's way out (app-shell.tsx PushedTopBar). */
+const BACK_BUTTON = '[data-slot="mobile-top-bar"] [data-slot="mobile-back"]'
 
 let browser: AgentBrowser
 let baseUrl: string
@@ -102,14 +105,22 @@ afterAll(() => {
 /** One view's sweep: settle it, then assert the three phone invariants and shoot it.
  *  `ready` waits on real view content (not just the route div) because the lazy routes render
  *  a loading skeleton under the same `data-route` — sampling that would measure the wrong page. */
-function sweep(slug: string, path: string, ready: string): void {
+function sweep(slug: string, path: string, ready: string, chrome: 'list' | 'pushed' = 'list'): void {
   browser.goto(baseUrl + path)
   browser.waitForFunction(`document.querySelector(${JSON.stringify(ready)}) !== null`)
 
-  // The mobile chrome is reachable: the drawer trigger is there and visible — below `md` it is
-  // the only way to the nav, so its absence strands the user on whatever view they deep-linked.
-  expect(browser.count(MENU_BUTTON)).toBe(1)
-  expect(browser.isVisible(MENU_BUTTON)).toBe(true)
+  // The mobile chrome is reachable. A list screen has the drawer trigger (the way to the project
+  // list) — its absence strands the user on whatever view they deep-linked. A pushed screen (an
+  // opened task, #621) swaps it for Back, the way out to the list, and shows no tab bar.
+  if (chrome === 'pushed') {
+    expect(browser.count(BACK_BUTTON)).toBe(1)
+    expect(browser.isVisible(BACK_BUTTON)).toBe(true)
+    expect(browser.count(MENU_BUTTON)).toBe(0)
+    expect(browser.count('[data-slot="mobile-tab-bar"]')).toBe(0)
+  } else {
+    expect(browser.count(MENU_BUTTON)).toBe(1)
+    expect(browser.isVisible(MENU_BUTTON)).toBe(true)
+  }
 
   // `<=`, not `===`: the document may be narrower than the viewport, never wider.
   const [scrollWidth, innerWidth] = browser.evaluate(
@@ -180,6 +191,6 @@ describe('iOS sweep — every primary view at 390×844', () => {
   it('/tasks/:id (task thread)', () => {
     // The dock (composer area) renders only in the settled thread view, never in the
     // loading skeleton — so waiting on it means the transcript pipe has answered.
-    sweep('task-thread', `/tasks/${threadRunId}`, '[data-slot="thread-dock"]')
+    sweep('task-thread', `/tasks/${threadRunId}`, '[data-slot="thread-dock"]', 'pushed')
   })
 })
