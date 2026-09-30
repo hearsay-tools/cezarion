@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 
-import { openRunIn, reclaimWorktrees, removeRunWorktree } from '@/api/client'
+import { openRunIn, reclaimRunWorktree, reclaimWorktrees } from '@/api/client'
 import { queryKeys, useOpenTargets, useWorktrees } from '@/api/queries'
 import type { WorktreeInfo } from '@open-mercato/cezar-api-client'
 import {
@@ -14,7 +14,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { BrushIcon, Trash2Icon } from 'lucide-react'
+import { BrushIcon } from 'lucide-react'
 import { FolderOpenIcon } from '@/components/design-icons'
 import { toast } from '@/components/ui/toaster'
 import { formatMem } from '@/lib/tasks-table'
@@ -22,18 +22,15 @@ import { shortAge } from '@/lib/format'
 import { Link } from '@/lib/project-router'
 import { cn } from '@/lib/utils'
 
-/** What the confirm dialog is about — a bulk reclaim, or one row's delete. */
-type Confirming = { kind: 'reclaim' } | { kind: 'delete'; runId: string; title: string } | null
-
 /**
- * Git → Cleanup: the worktrees card (#483, moved from Settings by issue 06 §3). Lists every task
- * worktree materialized on disk with its size, age and retention state; a
- * per-row Delete (reclaims the directory AND branch, the spec-006 route), a
- * footer with disk used and the reclaimable-vs-keep budget (#566), and a
- * "Reclaim now" button that runs the count-based enforcer when reclaimable
- * finished worktrees exceed keep. Both destructive actions
- * confirm through the design-system AlertDialog (native confirm() is banned).
- * Live-updates through the global event stream (queryKeys.worktrees).
+ * Git → Cleanup: the worktrees card (#483, moved from Settings by issue 06 §3, reworked by issue
+ * 08 §C). Lists every task worktree materialized on disk with its size, age and retention state
+ * (`in use`, `reclaimable` past the keep limit, `kept · newest N` inside it). The per-row action
+ * is Reclaim: the DIRECTORY only, through retention's own rule (`POST /worktrees/:runId/reclaim`);
+ * the branch stays, so nothing on this card can delete work. Rows a live or reviewable task stands
+ * on show "in use" and have no action. The header's "Reclaim N GB now" is the bulk enforcer,
+ * sized from exactly the rows it will take (`pastKeep`), behind the design-system AlertDialog
+ * (native confirm() is banned). Live-updates through the global event stream (queryKeys.worktrees).
  */
 export function WorktreesPanel() {
   const worktrees = useWorktrees()
@@ -44,8 +41,12 @@ export function WorktreesPanel() {
     onError: (error: Error) => toast(error.message, { tone: 'danger' }),
   })
   const queryClient = useQueryClient()
-  const [confirming, setConfirming] = useState<Confirming>(null)
-  const refresh = () => queryClient.invalidateQueries({ queryKey: queryKeys.worktrees })
+  const [confirming, setConfirming] = useState(false)
+  const refresh = () =>
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: queryKeys.worktrees }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.repoBranches }),
+    ])
 
   const reclaim = useMutation({
     mutationFn: () => reclaimWorktrees(),
@@ -60,13 +61,16 @@ export function WorktreesPanel() {
     onError: (error: Error) => toast(error.message, { tone: 'danger' }),
   })
 
-  const remove = useMutation({
-    mutationFn: (runId: string) => removeRunWorktree(runId),
-    onSuccess: () => {
+  const reclaimOne = useMutation({
+    mutationFn: (worktree: WorktreeInfo) => reclaimRunWorktree(worktree.runId),
+    onSuccess: (_result, worktree) => {
       void refresh()
-      toast('Worktree removed')
+      toast(`Reclaimed the worktree of ${worktree.title} (branch kept)`)
     },
-    onError: (error: Error) => toast(error.message, { tone: 'danger' }),
+    onError: (error: Error) => {
+      void refresh()
+      toast(error.message, { tone: 'danger' })
+    },
   })
 
   if (worktrees.isPending) {
@@ -85,20 +89,21 @@ export function WorktreesPanel() {
   }
 
   const { worktrees: rows, totalBytes, keep } = worktrees.data
-  const busy = reclaim.isPending || remove.isPending
-  // Keep budget is reclaimable finished worktrees, not every on-disk dir (#566).
-  const reclaimableCount = rows.filter((row) => row.reclaimable).length
-  const canReclaim = keep > 0 && reclaimableCount > keep
+  const busy = reclaim.isPending || reclaimOne.isPending
+  // Exactly the rows the enforcer takes: reclaimable AND past the newest `keep` (#566).
+  const pastKeep = rows.filter((row) => row.pastKeep)
+  const canReclaim = pastKeep.length > 0
+  const pastKeepBytes = pastKeep.some((row) => row.sizeBytes === null)
+    ? null
+    : pastKeep.reduce((sum, row) => sum + (row.sizeBytes ?? 0), 0)
+  const reclaimLabel = !canReclaim
+    ? 'Reclaim now'
+    : pastKeepBytes
+      ? `Reclaim ${formatMem(pastKeepBytes)} now`
+      : `Reclaim ${pastKeep.length} now`
 
-  const runConfirmed = () => {
-    if (confirming?.kind === 'reclaim') reclaim.mutate()
-    else if (confirming?.kind === 'delete') remove.mutate(confirming.runId)
-    setConfirming(null)
-  }
-
-  const size = totalBytes !== null ? formatMem(totalBytes) || '0 kB' : null
   // The heading names a size only when there is one: "Worktrees on disk · 0 kB" reads as a glitch.
-  const headingSize = totalBytes ? size : null
+  const headingSize = totalBytes ? formatMem(totalBytes) : null
 
   return (
     <section data-slot="worktrees-panel" aria-labelledby="worktrees-panel-title" className="flex flex-col rounded-[8px] border border-border">
@@ -107,21 +112,15 @@ export function WorktreesPanel() {
           <h2 id="worktrees-panel-title" className="text-[13px] font-semibold text-foreground">
             Worktrees on disk{headingSize ? ` · ${headingSize}` : ''}
           </h2>
-          <p className="text-[11.5px] leading-[17px] text-soft-foreground">
+          <p data-slot="worktrees-retention" className="text-[11.5px] leading-[17px] text-soft-foreground">
             {keep === 0
-              ? 'Finished tasks keep their checkout for review. Retention is unlimited ('
-              : `Finished tasks keep their checkout for review; retention keeps the newest ${keep} (`}
+              ? 'Retention is unlimited ('
+              : `Retention keeps the newest ${keep} finished checkout${keep === 1 ? '' : 's'} (`}
             <Link to="/settings/worktrees" data-slot="worktrees-retention-link" className="underline-offset-2 hover:text-foreground hover:underline">
               Settings › Worktrees
             </Link>
             {keep === 0 ? '), so nothing is reclaimed on its own.' : ') and reclaims the rest.'}
-            {' '}Reclaiming a directory keeps its branch.
-          </p>
-          <p data-slot="worktrees-footer" className="text-[11.5px] leading-[17px] text-soft-foreground">
-            {rows.length} worktree{rows.length === 1 ? '' : 's'}
-            {size !== null ? ` · ${size} on disk` : ' · size unavailable'}
-            {' · '}
-            {keep === 0 ? 'keeping all (unlimited)' : `${reclaimableCount} reclaimable, keeping the last ${keep}`}
+            {' '}Reclaim removes the directory only; the branch stays, so its work stays recoverable.
           </p>
         </div>
         <button
@@ -129,11 +128,11 @@ export function WorktreesPanel() {
           data-action="worktrees-reclaim-now"
           disabled={busy || !canReclaim}
           title={canReclaim ? undefined : 'Nothing past the keep limit to reclaim'}
-          onClick={() => setConfirming({ kind: 'reclaim' })}
-          className="inline-flex h-[28px] shrink-0 items-center gap-[5px] self-start rounded-[6px] bg-muted px-[10px] text-[12px] font-medium text-foreground hover:brightness-110 focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50 disabled:hover:brightness-100 md:self-center"
+          onClick={() => setConfirming(true)}
+          className="inline-flex h-[28px] shrink-0 items-center gap-[5px] self-start rounded-[6px] bg-muted px-[10px] text-[12px] font-medium text-foreground hover:brightness-110 focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50 disabled:hover:brightness-100 max-md:h-11 md:self-center"
         >
           <BrushIcon aria-hidden="true" className="size-[12px]" />
-          Reclaim now
+          {reclaimLabel}
         </button>
       </div>
 
@@ -147,43 +146,36 @@ export function WorktreesPanel() {
             <WorktreeRow
               key={w.runId}
               worktree={w}
+              keep={keep}
               disabled={busy}
               onOpen={folderTarget ? () => openFolder.mutate(w.runId) : undefined}
               opening={openFolder.isPending}
-              onDelete={() => setConfirming({ kind: 'delete', runId: w.runId, title: w.title })}
+              onReclaim={() => reclaimOne.mutate(w)}
             />
           ))}
         </ul>
       )}
 
-      <AlertDialog open={confirming !== null} onOpenChange={(open) => !open && setConfirming(null)}>
+      <AlertDialog open={confirming} onOpenChange={setConfirming}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>
-              {confirming?.kind === 'delete' ? 'Delete this worktree and its branch?' : 'Reclaim old worktrees?'}
-            </AlertDialogTitle>
+            <AlertDialogTitle>Reclaim old worktrees?</AlertDialogTitle>
             <AlertDialogDescription>
-              {confirming?.kind === 'delete' ? (
-                <>
-                  This removes the worktree directory and its branch — the local-only work is not
-                  recoverable afterwards.
-                  <span className="mt-1 block truncate font-medium text-foreground" title={confirming.title}>
-                    {confirming.title}
-                  </span>
-                </>
-              ) : (
-                'Finished worktrees beyond the keep-limit are reclaimed now (directory only). Their branches are kept, so the work stays recoverable.'
-              )}
+              {pastKeep.length} finished worktree{pastKeep.length === 1 ? '' : 's'} beyond the keep limit
+              {pastKeepBytes ? ` (${formatMem(pastKeepBytes)})` : ''} {pastKeep.length === 1 ? 'is' : 'are'} reclaimed now,
+              directory only. Their branches are kept, so the work stays recoverable.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Keep it</AlertDialogCancel>
+            <AlertDialogCancel>Keep them</AlertDialogCancel>
             <AlertDialogAction
               data-action="worktrees-confirm"
-              className={confirming?.kind === 'delete' ? 'bg-danger text-danger-foreground hover:brightness-[0.96]' : undefined}
-              onClick={runConfirmed}
+              onClick={() => {
+                reclaim.mutate()
+                setConfirming(false)
+              }}
             >
-              {confirming?.kind === 'delete' ? 'Delete worktree and branch' : 'Reclaim now'}
+              {reclaimLabel}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -195,31 +187,35 @@ export function WorktreesPanel() {
 /** Statuses whose checkout a live or reviewable task still stands on. */
 const IN_USE = new Set<WorktreeInfo['status']>(['queued', 'running', 'waiting', 'review'])
 
-/** What retention will do with a row, in the listing's own terms (`reclaimable`, #566). */
-function retentionState(worktree: WorktreeInfo): { label: string; tone: 'in-use' | 'plain' } {
-  if (IN_USE.has(worktree.status)) return { label: 'in use', tone: 'in-use' }
-  return worktree.reclaimable ? { label: 'reclaimable', tone: 'plain' } : { label: 'kept', tone: 'plain' }
+/** What retention will do with a row, in the listing's own terms (`reclaimable`, `pastKeep`). */
+export function retentionState(worktree: WorktreeInfo, keep: number): { label: string; tone: 'in-use' | 'plain' } {
+  if (IN_USE.has(worktree.status) || !worktree.reclaimable) return { label: 'in use', tone: 'in-use' }
+  if (worktree.pastKeep) return { label: 'reclaimable', tone: 'plain' }
+  return { label: keep > 0 ? `kept · newest ${keep}` : 'kept', tone: 'plain' }
 }
 
 function WorktreeRow({
   worktree,
+  keep,
   disabled,
   onOpen,
   opening,
-  onDelete,
+  onReclaim,
 }: {
   worktree: WorktreeInfo
+  keep: number
   disabled: boolean
   onOpen?: () => void
   opening: boolean
-  onDelete: () => void
+  onReclaim: () => void
 }) {
-  const state = retentionState(worktree)
+  const state = retentionState(worktree, keep)
   const age = shortAge(worktree.finishedAt ?? undefined)
   const status = worktree.status === 'review' ? 'at review' : age ? `${worktree.status} ${age} ago` : worktree.status
   const stateLabel = (
     <span
-      data-slot={worktree.reclaimable ? 'worktree-reclaimable' : 'worktree-state'}
+      data-slot="worktree-state"
+      data-state={state.tone === 'in-use' ? 'in-use' : worktree.pastKeep ? 'reclaimable' : 'kept'}
       className={cn('text-[11.5px]', state.tone === 'in-use' ? 'text-status-running' : 'text-soft-foreground')}
     >
       {state.label}
@@ -244,19 +240,21 @@ function WorktreeRow({
           <FolderOpenIcon aria-hidden="true" className="size-[13px]" />
         </button>
       ) : null}
-      {/* Delete removes the directory AND the branch (the spec-006 route); issue 08 adds a
-          directory-only Reclaim here. Until then the label says exactly what it does. */}
-      <button
-        type="button"
-        data-action="worktree-delete"
-        aria-label={`Delete worktree and branch for ${worktree.title}`}
-        title="Delete worktree and branch"
-        disabled={disabled}
-        onClick={onDelete}
-        className={iconButton}
-      >
-        <Trash2Icon aria-hidden="true" className="size-[13px]" />
-      </button>
+      {/* Reclaim is the directory only (issue 08 §B4): the branch stays. The task screen keeps
+          "Remove worktree" (directory AND branch); this card never deletes a branch. */}
+      {state.tone === 'in-use' ? null : (
+        <button
+          type="button"
+          data-action="worktree-reclaim"
+          aria-label={`Reclaim the worktree of ${worktree.title} (branch kept)`}
+          title="Reclaim the directory (branch kept)"
+          disabled={disabled}
+          onClick={onReclaim}
+          className={iconButton}
+        >
+          <BrushIcon aria-hidden="true" className="size-[13px]" />
+        </button>
+      )}
     </li>
   )
 }

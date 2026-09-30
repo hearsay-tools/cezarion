@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { createQueryClient } from '@/api/query-client'
 import { queryKeys } from '@/api/queries'
-import type { ChangesPayload, GithubData, HealthResponse, RepoCommitPayload, RepoResponse } from '@open-mercato/cezar-api-client'
+import type { ChangesPayload, GithubData, HealthResponse, RepoBranchEntry, RepoBranchesResponse, RepoCommitPayload, RepoResponse } from '@open-mercato/cezar-api-client'
 import { Toaster, resetToasts } from '@/components/ui/toaster'
 
 import { RepoGitRoute } from './repo-git'
@@ -22,8 +22,8 @@ const REPO: RepoResponse = {
   info: { root: '/repo', branch: 'main', remote: 'git@github.com:acme/demo.git' },
   status: [],
   log: [
-    { hash: 'abc1234', subject: 'feat: add the thing', author: 'Ada', when: '2 hours ago', at: new Date(Date.now() - 2 * 3_600_000).toISOString() },
-    { hash: 'def5678', subject: 'fix: stop the bug', author: 'Linus', when: '3 days ago', at: new Date(Date.now() - 3 * 86_400_000).toISOString() },
+    { hash: 'abc1234', subject: 'feat: add the thing', author: 'Ada', when: '2 hours ago', at: '2026-09-30T10:00:00', source: { runId: 'run-698', title: 'Picker pill prefixes', prNumber: 698 } },
+    { hash: 'def5678', subject: 'fix: stop the bug', author: 'Linus', when: '3 days ago', at: '2026-09-27T12:00:00' },
   ],
   branches: ['feature', 'main'],
   baseBranch: null,
@@ -94,6 +94,35 @@ const GITHUB: GithubData = {
   ],
 }
 
+function branch(partial: Partial<RepoBranchEntry> & Pick<RepoBranchEntry, 'name' | 'class'>): RepoBranchEntry {
+  return {
+    runId: null,
+    title: null,
+    runStatus: null,
+    ahead: 0,
+    lastCommit: { sha: 'f00dfeed1234', subject: 'last commit', at: '2026-09-27T12:00:00Z' },
+    diffStat: null,
+    pr: null,
+    ...partial,
+  }
+}
+
+const BRANCHES: RepoBranchesResponse = {
+  base: 'main',
+  prStateKnown: true,
+  branches: [
+    branch({ name: 'main', class: 'active' }),
+    branch({ name: 'feature', class: 'other' }),
+    branch({ name: 'cez/51ab2d7e', class: 'not-landed', runId: 'run-51', title: 'Retention sweep for archived runs', runStatus: 'done', ahead: 4, diffStat: { additions: 212, deletions: 40 } }),
+    branch({ name: 'cez/7c1e09aa', class: 'not-landed', runId: 'run-7c', title: 'Webhook retries on 5xx', runStatus: 'done', ahead: 2, diffStat: { additions: 88, deletions: 12 }, pr: { number: 705, url: 'https://github.com/acme/demo/pull/705', state: 'open' } }),
+    branch({ name: 'cez/9d04c1f2', class: 'orphan', ahead: 3, diffStat: { additions: 140, deletions: 22 }, lastCommit: { sha: '9d04c1f2abcd', subject: 'feat(git): worktree sizes in the panel', at: '2026-09-25T12:00:00Z' } }),
+    branch({ name: 'cez/aaaaaaaa', class: 'merged', runId: 'run-aa', title: 'Merged one', pr: { number: 690, url: 'https://github.com/acme/demo/pull/690', state: 'merged' } }),
+    branch({ name: 'cez/bbbbbbbb', class: 'merged' }),
+    branch({ name: 'cez/cccccccc', class: 'empty', runId: 'run-cc', title: 'Never committed' }),
+  ],
+  counts: { notLanded: 3, cleanup: 3 },
+}
+
 interface SentRequest {
   path: string
   method: string
@@ -116,6 +145,8 @@ function stubFetch(overrides: Record<string, () => Response | Promise<Response>>
       const override = overrides[`${method} ${path}`]
       if (override) return override()
       if (method === 'GET' && path === '/api/v1/repo') return jsonResponse(REPO)
+      if (method === 'GET' && path === '/api/v1/repo/branches') return jsonResponse(BRANCHES)
+      if (method === 'GET' && path === '/api/v1/runs') return jsonResponse([])
       if (method === 'GET' && path === '/api/v1/repo/pull') return jsonResponse({ branches: ['feature', 'main'] })
       if (method === 'GET' && path === '/api/v1/repo/changes') return jsonResponse(CHANGES)
       if (method === 'GET' && path === '/api/v1/repo/commit/abc1234?structured=1') return jsonResponse(COMMIT)
@@ -137,9 +168,11 @@ function renderAt(entry: string) {
           <Route path="/git" element={<RepoGitRoute section="main" index />} />
           <Route path="/git/commits" element={<RepoGitRoute section="main" />} />
           <Route path="/git/commits/:sha" element={<RepoGitRoute section="main" />} />
+          <Route path="/git/not-landed" element={<RepoGitRoute section="not-landed" />} />
           <Route path="/git/cleanup" element={<RepoGitRoute section="cleanup" />} />
           <Route path="/git/branches" element={<RepoGitRoute section="branches" />} />
           <Route path="/git/changes" element={<RepoGitRoute section="changes" />} />
+          <Route path="/tasks/:id" element={<p data-testid="task-page">task</p>} />
         </Routes>
         <Toaster />
       </MemoryRouter>
@@ -241,18 +274,24 @@ describe('the Git view Recently on main section', () => {
     expect(document.querySelector('[data-slot="repo-tabs"]')).toBeNull()
   })
 
-  it('groups the log by day, each 52px row reading subject then sha · author · age', async () => {
-    stubFetch()
-    renderAt('/git')
-    await waitFor(() => expect(document.querySelectorAll('[data-slot="repo-commit-day"]')).toHaveLength(2))
-    const days = [...document.querySelectorAll('[data-slot="repo-commit-day"]')].map((day) => ({
-      label: day.querySelector('h2')?.textContent,
-      shas: [...day.querySelectorAll('[data-slot="commit-row"]')].map((row) => row.getAttribute('data-sha')),
-    }))
-    // Fixed relative ages ("2 hours ago", "3 days ago"): the first lands Today unless the suite
-    // runs in the two hours after midnight, so pin only what cannot move.
-    expect(days[1]).toEqual({ label: 'This week', shas: ['def5678'] })
-    expect(days[0]?.shas).toEqual(['abc1234'])
+  it('groups the log by the commit’s own day, each 52px row reading subject then sha · author · age', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-09-30T12:00:00'))
+    try {
+      stubFetch()
+      renderAt('/git')
+      await waitFor(() => expect(document.querySelectorAll('[data-slot="repo-commit-day"]')).toHaveLength(2))
+      const days = [...document.querySelectorAll('[data-slot="repo-commit-day"]')].map((day) => ({
+        label: day.querySelector('h2')?.textContent,
+        shas: [...day.querySelectorAll('[data-slot="commit-row"]')].map((row) => row.getAttribute('data-sha')),
+      }))
+      expect(days).toEqual([
+        { label: 'Today', shas: ['abc1234'] },
+        { label: 'Sun, Sep 27', shas: ['def5678'] },
+      ])
+    } finally {
+      vi.useRealTimers()
+    }
     const row = document.querySelector('[data-slot="commit-row"][data-sha="def5678"]')!
     expect(row.className).toContain('min-h-[52px]')
     expect(row.querySelector('[data-slot="commit-row-subject"]')?.textContent).toBe('fix: stop the bug')
@@ -260,6 +299,39 @@ describe('the Git view Recently on main section', () => {
     // `commit-meta` is the opened commit's header; a list row must not answer to it, or a wait for
     // the commit view passes on the list it is leaving (repo-git.e2e.ts, 2026-09-30 local run).
     expect(document.querySelector('[data-slot="commit-meta"]')).toBeNull()
+  })
+
+  it('names the task and PR a commit came from, linking to the task, and "committed by hand" otherwise', async () => {
+    stubFetch()
+    renderAt('/git')
+    await waitFor(() => expect(document.querySelectorAll('[data-slot="commit-source"]')).toHaveLength(2))
+    const [fromTask, byHand] = [...document.querySelectorAll<HTMLElement>('[data-slot="commit-source"]')]
+    expect(fromTask?.getAttribute('href')).toBe('/tasks/run-698')
+    expect(fromTask?.textContent).toBe('PR #698Picker pill prefixes')
+    expect(byHand?.tagName).toBe('SPAN')
+    expect(byHand?.textContent).toBe('committed by hand')
+    // The source is a sibling of the commit link, never nested inside it.
+    expect(document.querySelector('[data-slot="commit-row"] a')).toBeNull()
+  })
+
+  it('offers an Incoming bar with Pull when the base is behind its upstream, and none when it is not', async () => {
+    const sent = stubFetch({
+      'GET /api/v1/repo': () => jsonResponse({ ...REPO, tracking: { ref: 'origin/main', ahead: 0, behind: 2, fetchedAt: null } }),
+      'POST /api/v1/repo/pull': () => jsonResponse({ branch: 'main', pulled: true, summary: 'Fast-forwarded by 2 commits.' }),
+    })
+    renderAt('/git')
+    await waitFor(() => expect(document.querySelector('[data-slot="git-incoming"]')).not.toBeNull())
+    expect(document.querySelector('[data-slot="git-incoming"]')?.textContent).toBe('2 commits on origin/main are not in your checkout yetPull')
+    expect(document.querySelector('[data-slot="repo-meta"]')?.textContent).toBe('latest 2 commits in the main checkout · never fetched')
+    fireEvent.click(document.querySelector('[data-action="repo-pull-incoming"]')!)
+    await waitFor(() => expect(document.body.textContent).toContain('Fast-forwarded by 2 commits.'))
+    expect(sent.find((request) => request.method === 'POST')).toMatchObject({ path: '/api/v1/repo/pull', body: { branch: 'main' } })
+
+    cleanup()
+    stubFetch()
+    renderAt('/git')
+    await waitFor(() => expect(document.querySelector('[data-slot="repo-commits"]')).not.toBeNull())
+    expect(document.querySelector('[data-slot="git-incoming"]')).toBeNull()
   })
 
   it('lists the recent commits from /api/v1/repo, each row deep-linking to its diff', async () => {
@@ -341,6 +413,19 @@ describe('the Git view All branches section', () => {
     const other = document.querySelector('[data-slot="branch-row"][data-branch="feature"]')
     expect(other?.querySelector('[data-slot="branch-current"]')).toBeNull()
     expect(other?.querySelector('[data-action="switch-branch"]')).not.toBeNull()
+  })
+
+  it('labels each branch with its class and links a task branch to its task', async () => {
+    stubFetch({ 'GET /api/v1/repo': () => jsonResponse({ ...REPO, branches: ['cez/51ab2d7e', 'feature', 'main'] }) })
+    renderAt('/git/branches')
+    await waitFor(() => expect(document.querySelectorAll('[data-slot="branch-class"]')).toHaveLength(3))
+    const labels = [...document.querySelectorAll<HTMLElement>('[data-slot="branch-row"]')].map((row) => [
+      row.dataset.branch,
+      row.querySelector('[data-slot="branch-class"]')?.textContent,
+    ])
+    expect(labels).toEqual([['cez/51ab2d7e', 'not landed'], ['feature', 'yours'], ['main', 'in use']])
+    expect(document.querySelector('[data-branch="cez/51ab2d7e"] [data-slot="branch-task-link"]')?.getAttribute('href')).toBe('/tasks/run-51')
+    expect(document.querySelector('[data-branch="feature"] [data-slot="branch-task-link"]')).toBeNull()
   })
 
   it('Switch POSTs /api/v1/repo/branch and toasts the outcome', async () => {
@@ -452,32 +537,170 @@ describe('the Git view All branches section', () => {
 // ---- cleanup ----------------------------------------------------------------------------------
 
 describe('the Git view Cleanup section', () => {
-  it('renders the worktrees card moved from Settings, with Reclaim now and an honest per-row Delete', async () => {
+  const WORKTREES = {
+    worktrees: [
+      { runId: 'r1', title: 'Upstream ledger scan', status: 'done', branch: 'cez/a41c0d2e', sizeBytes: 640 * 1024 ** 2, finishedAt: null, reclaimable: true, pastKeep: true },
+      { runId: 'r2', title: 'Reviewer agent presets', status: 'review', branch: 'cez/0c3de91f', sizeBytes: 590 * 1024 ** 2, finishedAt: null, reclaimable: false, pastKeep: false },
+    ],
+    totalBytes: 1230 * 1024 ** 2,
+    keep: 20,
+  }
+
+  it('renders the worktrees card with a directory-only Reclaim per finished row, under the invariant', async () => {
     stubFetch({
       'GET /api/v1/open-targets': () => jsonResponse({ targets: [] }),
-      'GET /api/v1/worktrees': () =>
-        jsonResponse({
-          worktrees: [
-            { runId: 'r1', title: 'Upstream ledger scan', status: 'done', branch: 'cez/a41c0d2e', sizeBytes: 640 * 1024 ** 2, finishedAt: null, reclaimable: true },
-            { runId: 'r2', title: 'Reviewer agent presets', status: 'review', branch: 'cez/0c3de91f', sizeBytes: 590 * 1024 ** 2, finishedAt: null, reclaimable: false },
-          ],
-          totalBytes: 1230 * 1024 ** 2,
-          keep: 20,
-        }),
+      'GET /api/v1/worktrees': () => jsonResponse(WORKTREES),
     })
     renderAt('/git/cleanup')
     await waitFor(() => expect(document.querySelectorAll('[data-slot="worktree-row"]')).toHaveLength(2))
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Cleanup')
-    expect(document.querySelector('[data-slot="repo-meta"]')?.textContent).toBe('2 task checkouts on disk · 1.2 GB')
+    expect(document.querySelector('[data-slot="repo-meta"]')?.textContent).toBe('nothing here can delete work that is not on main')
     expect(screen.getByRole('heading', { level: 2, name: 'Worktrees on disk · 1.2 GB' })).toBeTruthy()
-    expect(document.querySelector('[data-action="worktrees-reclaim-now"]')?.textContent).toBe('Reclaim now')
+    expect(document.querySelector('[data-action="worktrees-reclaim-now"]')?.textContent).toBe('Reclaim 640 MB now')
     expect(document.querySelector('[data-slot="worktrees-retention-link"]')?.getAttribute('href')).toBe('/settings/worktrees')
-    const deletes = [...document.querySelectorAll('[data-action="worktree-delete"]')].map((button) => button.getAttribute('aria-label'))
-    expect(deletes).toEqual([
-      'Delete worktree and branch for Upstream ledger scan',
-      'Delete worktree and branch for Reviewer agent presets',
+    // Only the finished row can be reclaimed, and nothing on the card deletes a branch.
+    expect([...document.querySelectorAll('[data-action="worktree-reclaim"]')].map((button) => button.getAttribute('aria-label'))).toEqual([
+      'Reclaim the worktree of Upstream ledger scan (branch kept)',
     ])
+    expect(document.querySelector('[data-action="worktree-delete"]')).toBeNull()
     expect(document.querySelector('[data-slot="worktree-row"][data-run="r2"]')?.textContent).toContain('in use')
     expect(document.querySelector('[data-slot="repo-tabs"]')).toBeNull()
+  })
+
+  it('lists the branches safe to delete, each group expandable, and deletes them in one confirmed request', async () => {
+    const sent = stubFetch({
+      'GET /api/v1/open-targets': () => jsonResponse({ targets: [] }),
+      'GET /api/v1/worktrees': () => jsonResponse(WORKTREES),
+      'POST /api/v1/repo/branches/delete': () =>
+        jsonResponse({ deleted: ['cez/aaaaaaaa', 'cez/cccccccc'], refused: [{ name: 'cez/bbbbbbbb', reason: 'is not merged' }] }),
+    })
+    renderAt('/git/cleanup')
+    await waitFor(() => expect(document.querySelector('[data-slot="cleanup-branches"]')).not.toBeNull())
+    expect(screen.getByRole('heading', { level: 2, name: 'Branches safe to delete · 3' })).toBeTruthy()
+    const groups = [...document.querySelectorAll<HTMLElement>('[data-slot="cleanup-branch-group"]')]
+    expect(groups.map((group) => group.querySelector('button')?.textContent)).toEqual([
+      'Merged into main · 2including squash-merged PRs, read from the PR state',
+      'Empty · 1no commits beyond the fork point',
+    ])
+    // Collapsed until asked.
+    expect(document.querySelectorAll('[data-slot="cleanup-branch-row"]')).toHaveLength(0)
+    fireEvent.click(groups[0]!.querySelector('button')!)
+    expect([...document.querySelectorAll('[data-slot="cleanup-branch-row"]')].map((row) => row.getAttribute('data-branch'))).toEqual(['cez/aaaaaaaa', 'cez/bbbbbbbb'])
+
+    fireEvent.click(document.querySelector('[data-action="cleanup-branches-delete"]')!)
+    const dialog = await screen.findByRole('alertdialog')
+    expect(dialog.textContent).toContain('Delete 3 branches?')
+    fireEvent.click(document.querySelector('[data-action="cleanup-branches-confirm"]')!)
+    await waitFor(() => expect(sent.filter((request) => request.method === 'POST')).toHaveLength(1))
+    // Only merged and empty names are ever sent; the not-landed and orphan rows never are.
+    expect(sent.find((request) => request.method === 'POST')).toMatchObject({
+      path: '/api/v1/repo/branches/delete',
+      body: { names: ['cez/aaaaaaaa', 'cez/bbbbbbbb', 'cez/cccccccc'] },
+    })
+    await waitFor(() => expect(document.body.textContent).toContain('Deleted 2 branches; kept 1 that is no longer safe to delete'))
+  })
+
+  it('says squash merges may be missed when the forge could not answer', async () => {
+    stubFetch({
+      'GET /api/v1/open-targets': () => jsonResponse({ targets: [] }),
+      'GET /api/v1/worktrees': () => jsonResponse(WORKTREES),
+      'GET /api/v1/repo/branches': () => jsonResponse({ ...BRANCHES, prStateKnown: false }),
+    })
+    renderAt('/git/cleanup')
+    await waitFor(() => expect(document.querySelector('[data-slot="cleanup-branches"]')).not.toBeNull())
+    expect(document.querySelector('[data-slot="cleanup-branch-group"][data-group="merged"]')?.textContent).toContain(
+      'squash-merged branches may show as not landed without github',
+    )
+  })
+})
+
+// ---- not landed -------------------------------------------------------------------------------
+
+describe('the Git view Not landed section', () => {
+  const groups = () =>
+    [...document.querySelectorAll<HTMLElement>('[data-slot="not-landed-group"]')].map((group) => ({
+      title: group.querySelector('h2')?.textContent,
+      rows: [...group.querySelectorAll('[data-slot="not-landed-row"]')].map((row) => row.getAttribute('data-branch')),
+    }))
+
+  it('groups the finished tasks by what the user can do: no PR, a PR open, or the task deleted', async () => {
+    stubFetch()
+    renderAt('/git/not-landed')
+    await waitFor(() => expect(document.querySelectorAll('[data-slot="not-landed-group"]')).toHaveLength(3))
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Not landed')
+    expect(document.querySelector('[data-slot="repo-meta"]')?.textContent).toBe('finished tasks whose commits are not on main')
+    expect(groups()).toEqual([
+      { title: 'No pull request1· nobody sees this work until you act', rows: ['cez/51ab2d7e'] },
+      { title: 'Pull request open1', rows: ['cez/7c1e09aa'] },
+      { title: 'Task deleted1· this branch is the only copy of the work', rows: ['cez/9d04c1f2'] },
+    ])
+    const noPr = document.querySelector<HTMLElement>('[data-slot="not-landed-row"][data-branch="cez/51ab2d7e"]')!
+    expect(noPr.className).toContain('min-h-[56px]')
+    expect(noPr.querySelector('[data-slot="not-landed-title"]')?.textContent).toBe('Retention sweep for archived runs')
+    expect(noPr.querySelector('[data-slot="not-landed-meta"]')?.textContent).toMatch(/^cez\/51ab2d7e· 4 commits\+212−40· done \d+d ago$/)
+    expect(noPr.querySelector('[data-slot="status-dot"]')?.getAttribute('data-tone')).toBe('success')
+    expect(noPr.querySelector('[data-action="not-landed-open"]')?.getAttribute('href')).toBe('/tasks/run-51')
+    expect(noPr.querySelector('[data-action="not-landed-create-pr"]')).not.toBeNull()
+    const withPr = document.querySelector<HTMLElement>('[data-slot="not-landed-row"][data-branch="cez/7c1e09aa"]')!
+    expect(withPr.querySelector('[data-action="not-landed-create-pr"]')).toBeNull()
+    expect(withPr.querySelector('[data-slot="not-landed-pr"]')?.textContent).toContain('PR #705')
+    const orphan = document.querySelector<HTMLElement>('[data-slot="not-landed-row"][data-branch="cez/9d04c1f2"]')!
+    expect(orphan.querySelector('[data-slot="not-landed-title"]')?.textContent).toBe('No task · last commit “feat(git): worktree sizes in the panel”')
+    expect(orphan.querySelector('[data-action="not-landed-copy"]')).not.toBeNull()
+    expect(orphan.querySelector('[data-action="not-landed-open"]')).toBeNull()
+    expect(document.querySelector('[data-slot="git-no-forge"]')).toBeNull()
+  })
+
+  it('Create draft PR posts the task\'s own /runs/:id/pr', async () => {
+    const sent = stubFetch({ 'POST /api/v1/runs/run-51/pr': () => jsonResponse({ url: 'https://github.com/acme/demo/pull/710' }) })
+    renderAt('/git/not-landed')
+    await waitFor(() => expect(document.querySelector('[data-action="not-landed-create-pr"]')).not.toBeNull())
+    fireEvent.click(document.querySelector('[data-action="not-landed-create-pr"]')!)
+    await waitFor(() => expect(sent.filter((request) => request.method === 'POST').map((request) => request.path)).toEqual(['/api/v1/runs/run-51/pr']))
+    await waitFor(() => expect(document.body.textContent).toContain('Draft PR created — https://github.com/acme/demo/pull/710'))
+  })
+
+  it('Delete branch names what it drops and needs the branch name typed before it sends a lone confirmed name', async () => {
+    const sent = stubFetch({
+      'POST /api/v1/repo/branches/delete': () =>
+        jsonResponse({ deleted: ['cez/9d04c1f2'], refused: [], dropped: [{ sha: 'a', subject: 'x' }, { sha: 'b', subject: 'y' }, { sha: 'c', subject: 'z' }] }),
+    })
+    renderAt('/git/not-landed')
+    await waitFor(() => expect(document.querySelector('[data-branch="cez/9d04c1f2"] [data-action="not-landed-more"]')).not.toBeNull())
+    fireEvent.pointerDown(document.querySelector('[data-branch="cez/9d04c1f2"] [data-action="not-landed-more"]')!, { button: 0, ctrlKey: false, pointerType: 'mouse' })
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete branch…' }))
+    const dialog = await screen.findByRole('alertdialog')
+    expect(dialog.textContent).toContain('this branch is the only copy of the work')
+    expect(document.querySelector('[data-slot="delete-branch-dropped"]')?.textContent).toBe('3 commits will be dropped (+140 −22), the latest “feat(git): worktree sizes in the panel” (9d04c1f).')
+    const confirm = document.querySelector<HTMLButtonElement>('[data-action="delete-branch-confirm"]')!
+    expect(confirm.disabled).toBe(true)
+    const input = document.querySelector<HTMLInputElement>('[data-slot="delete-branch-confirm"]')!
+    fireEvent.change(input, { target: { value: 'cez/9d04c1f' } })
+    expect(confirm.disabled).toBe(true)
+    fireEvent.click(confirm)
+    expect(sent.filter((request) => request.method === 'POST')).toHaveLength(0)
+    fireEvent.change(input, { target: { value: 'cez/9d04c1f2' } })
+    expect(confirm.disabled).toBe(false)
+    fireEvent.click(confirm)
+    await waitFor(() => expect(sent.filter((request) => request.method === 'POST')).toHaveLength(1))
+    expect(sent.find((request) => request.method === 'POST')).toMatchObject({
+      path: '/api/v1/repo/branches/delete',
+      body: { names: ['cez/9d04c1f2'], confirm: 'cez/9d04c1f2' },
+    })
+    await waitFor(() => expect(document.body.textContent).toContain('Deleted cez/9d04c1f2 and 3 commits with it'))
+  })
+
+  it('without the forge it still lists the branches, with the squash-merge note and no error', async () => {
+    stubFetch({ 'GET /api/v1/repo/branches': () => jsonResponse({ ...BRANCHES, prStateKnown: false }) })
+    renderAt('/git/not-landed')
+    await waitFor(() => expect(document.querySelector('[data-slot="git-no-forge"]')).not.toBeNull())
+    expect(document.querySelector('[data-slot="git-no-forge"]')?.textContent).toBe('Squash-merged branches may show as not landed without GitHub.')
+    expect(document.querySelectorAll('[data-slot="not-landed-row"]')).toHaveLength(3)
+  })
+
+  it('says everything landed when nothing is left', async () => {
+    stubFetch({ 'GET /api/v1/repo/branches': () => jsonResponse({ ...BRANCHES, branches: [], counts: { notLanded: 0, cleanup: 0 } }) })
+    renderAt('/git/not-landed')
+    await waitFor(() => expect(screen.getByRole('heading', { level: 2, name: 'Everything landed' })).toBeTruthy())
   })
 })

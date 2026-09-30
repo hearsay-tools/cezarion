@@ -3,20 +3,21 @@ import { GitBranchIcon, TriangleAlertIcon } from '@/components/design-icons'
 
 import { useSearchParams } from 'react-router'
 
-import { useRepo, useWorktrees } from '@/api/queries'
+import { useRepo } from '@/api/queries'
 import type { RepoInfo, RepoResponse } from '@open-mercato/cezar-api-client'
 import { CenteredState } from '@/components/centered-state'
-import { formatMem } from '@/lib/tasks-table'
 import { useIsDesktop } from '@/lib/use-desktop'
 
 import { GitScreen } from './git-screen'
 import { gitSectionLabel } from './git-section-list'
-import type { GitSection } from './git-sections'
+import { fetchedAgo, type GitSection } from './git-sections'
 import { RepoBackLink } from './repo-back-link'
 import { RepoBranchesSection } from './repo-branches'
 import { RepoChangesSection } from './repo-changes'
 import { RepoCommitsSection } from './repo-commits'
+import { CleanupBranchesCard } from './repo-cleanup-branches'
 import { RepoGitLoading } from './repo-git-loading'
+import { RepoNotLandedSection } from './repo-not-landed'
 import { WorktreesPanel } from './worktrees-panel'
 
 /**
@@ -26,7 +27,9 @@ import { WorktreesPanel } from './worktrees-panel'
  *
  * - Recently on main (`/git`, and the old `/git/commits[/:sha]`): the log grouped by day; a
  *   commit opens inside it.
- * - Cleanup (`/git/cleanup`): the worktrees on disk, moved here from Settings.
+ * - Not landed (`/git/not-landed`, issue 08): finished tasks whose commits are not on the base.
+ * - Cleanup (`/git/cleanup`): the worktrees on disk (moved here from Settings) and the branches
+ *   safe to delete.
  * - All branches (`/git/branches`): the branch list with switch/create.
  * - Uncommitted changes (`/git/changes`): the main tree's diff, reached from the checkout block.
  *
@@ -94,10 +97,13 @@ function RepoView({ repo, info, section }: { repo: RepoResponse; info: RepoInfo;
       </header>
 
       {section === 'main' ? (
-        <RepoCommitsSection log={repo.log} />
+        <RepoCommitsSection repo={repo} info={info} />
+      ) : section === 'not-landed' ? (
+        <RepoNotLandedSection />
       ) : section === 'cleanup' ? (
-        <div data-slot="repo-cleanup" className="px-[18px] pt-[12px] pb-[calc(90px+env(safe-area-inset-bottom))] md:px-[20px] md:pb-[20px]">
+        <div data-slot="repo-cleanup" className="flex flex-col gap-[16px] px-[18px] pt-[12px] pb-[calc(90px+env(safe-area-inset-bottom))] md:px-[20px] md:pb-[20px]">
           <WorktreesPanel />
+          <CleanupBranchesCard base={repo.baseBranch ?? info.branch} />
         </div>
       ) : section === 'branches' ? (
         <RepoBranchesSection repo={repo} info={info} />
@@ -110,26 +116,20 @@ function RepoView({ repo, info, section }: { repo: RepoResponse; info: RepoInfo;
 
 /** The header's meta line: one fact about the open section, in the soft ink the board uses. */
 function SectionMeta({ repo, info, section }: { repo: RepoResponse; info: RepoInfo; section: GitSection }) {
+  const base = repo.baseBranch ?? info.branch
   switch (section) {
-    case 'main':
-      return <>{repo.log.length === 0 ? 'no commits yet' : `latest ${repo.log.length} commit${repo.log.length === 1 ? '' : 's'} in the main checkout`}</>
+    case 'main': {
+      const count = repo.log.length === 0 ? 'no commits yet' : `latest ${repo.log.length} commit${repo.log.length === 1 ? '' : 's'} in the main checkout`
+      return <>{count}{repo.tracking ? ` · ${fetchedAgo(repo.tracking)}` : ''}</>
+    }
+    case 'not-landed':
+      return <>finished tasks whose commits are not on {base}</>
     case 'branches':
       return <>{repo.branches.length} local branch{repo.branches.length === 1 ? '' : 'es'} · on {info.branch}</>
     case 'changes':
       return <>{repo.status.length} uncommitted file{repo.status.length === 1 ? '' : 's'} in the main checkout</>
     case 'cleanup':
-      return <CleanupMeta />
+      // The section's invariant, stated where it applies; the server enforces it (issue 08 §C).
+      return <>nothing here can delete work that is not on {base}</>
   }
-}
-
-function CleanupMeta() {
-  const worktrees = useWorktrees()
-  if (!worktrees.data) return <>task checkouts on disk</>
-  const { worktrees: rows, totalBytes } = worktrees.data
-  return (
-    <>
-      {rows.length} task checkout{rows.length === 1 ? '' : 's'} on disk
-      {totalBytes ? ` · ${formatMem(totalBytes)}` : ''}
-    </>
-  )
 }

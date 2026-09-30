@@ -1,4 +1,6 @@
-import type { LogEntry } from '@open-mercato/cezar-api-client'
+import type { LogEntry, RepoTracking } from '@open-mercato/cezar-api-client'
+
+import { shortAge } from '@/lib/format'
 
 import { stripProjectPrefix } from '@/lib/project-router'
 
@@ -8,12 +10,13 @@ import { stripProjectPrefix } from '@/lib/project-router'
  * main, which is where a commit opens). `changes` is the main tree's uncommitted files, reached
  * from the checkout block's warning rather than a row of its own.
  */
-export type GitSection = 'main' | 'cleanup' | 'branches' | 'changes'
+export type GitSection = 'main' | 'not-landed' | 'cleanup' | 'branches' | 'changes'
 
 /** The section a `/git…` pathname shows, or null outside the Git view. */
 export function gitSectionOf(pathname: string): GitSection | null {
   const flat = stripProjectPrefix(pathname)
   if (/^\/git\/branches(?:\/|$)/.test(flat)) return 'branches'
+  if (/^\/git\/not-landed(?:\/|$)/.test(flat)) return 'not-landed'
   if (/^\/git\/cleanup(?:\/|$)/.test(flat)) return 'cleanup'
   if (/^\/git\/changes(?:\/|$)/.test(flat)) return 'changes'
   return /^\/git(?:\/commits(?:\/[^/]+)?)?\/?$/.test(flat) ? 'main' : null
@@ -26,6 +29,7 @@ export function gitSectionOf(pathname: string): GitSection | null {
  */
 export const GIT_SECTION_PATH: Record<GitSection, string> = {
   main: '/git',
+  'not-landed': '/git/not-landed',
   cleanup: '/git/cleanup',
   branches: '/git/branches',
   changes: '/git/changes',
@@ -43,27 +47,6 @@ export function shortGitAge(when: string): string {
   return match ? `${match[1]}${GIT_AGE_UNITS[match[2]!]}` : when
 }
 
-const UNIT_MS: Record<string, number> = {
-  second: 1_000,
-  minute: 60_000,
-  hour: 3_600_000,
-  day: 86_400_000,
-  week: 7 * 86_400_000,
-  month: 30 * 86_400_000,
-  year: 365 * 86_400_000,
-}
-
-/**
- * The commit time `%cr` implies, or null when git worded it some other way ("1 year, 2 months
- * ago"). `GET /repo` carries only the relative age (the contract is out of scope here), so this
- * is an estimate: git rounds, which can misfile a commit made within about half an hour of
- * midnight. Good enough to group a log by day; never shown as a timestamp.
- */
-export function estimatedCommitTime(when: string, now: number): number | null {
-  const match = /^(\d+) (second|minute|hour|day|week|month|year)s? ago$/.exec(when.trim())
-  return match ? now - Number(match[1]) * UNIT_MS[match[2]!]! : null
-}
-
 export interface CommitDay {
   label: string
   commits: LogEntry[]
@@ -75,22 +58,30 @@ function startOfDay(time: number): number {
   return date.getTime()
 }
 
-/** Which day group a commit belongs to: Today, Yesterday, This week, or Earlier. */
-function dayLabel(when: string, now: number): string {
-  const time = estimatedCommitTime(when, now)
-  if (time === null) return 'Earlier'
+const DAY_FORMAT = new Intl.DateTimeFormat('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+const DAY_FORMAT_WITH_YEAR = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+
+/**
+ * Which day group a commit belongs to: Today, Yesterday, or its date ("Mon, Sep 28", with the
+ * year once it is not this one), all in the browser's own time zone. Grouped by the commit's
+ * absolute `at` (issue 08): git's relative `%cr` rounds, which misfiled commits made near
+ * midnight. A row whose `at` does not parse lands in "Earlier" rather than on a wrong day.
+ */
+export function commitDayLabel(at: string, now: number): string {
+  const time = Date.parse(at)
+  if (Number.isNaN(time)) return 'Earlier'
   const today = startOfDay(now)
   if (time >= today) return 'Today'
-  const yesterday = startOfDay(today - 1)
-  if (time >= yesterday) return 'Yesterday'
-  return time >= today - 6 * UNIT_MS.day! ? 'This week' : 'Earlier'
+  if (time >= startOfDay(today - 1)) return 'Yesterday'
+  const date = new Date(time)
+  return (date.getFullYear() === new Date(now).getFullYear() ? DAY_FORMAT : DAY_FORMAT_WITH_YEAR).format(date)
 }
 
 /** The log grouped by day, newest first. git already sorts the log, so groups are contiguous runs. */
 export function groupCommitsByDay(log: readonly LogEntry[], now = Date.now()): CommitDay[] {
   const days: CommitDay[] = []
   for (const commit of log) {
-    const label = dayLabel(commit.when, now)
+    const label = commitDayLabel(commit.at, now)
     const last = days.at(-1)
     if (last?.label === label) last.commits.push(commit)
     else days.push({ label, commits: [commit] })
@@ -100,5 +91,12 @@ export function groupCommitsByDay(log: readonly LogEntry[], now = Date.now()): C
 
 /** How many of the log's commits landed today (the phone row's "6 today"). */
 export function commitsToday(log: readonly LogEntry[], now = Date.now()): number {
-  return log.filter((commit) => dayLabel(commit.when, now) === 'Today').length
+  return log.filter((commit) => commitDayLabel(commit.at, now) === 'Today').length
+}
+
+/** "fetched 6m ago" from `tracking.fetchedAt`, or "never fetched" when the repository has no
+ *  `FETCH_HEAD`. Freshness is always as of the last fetch: nothing here fetches (issue 08 §B1). */
+export function fetchedAgo(tracking: RepoTracking, now = Date.now()): string {
+  const age = tracking.fetchedAt ? shortAge(tracking.fetchedAt, now) : ''
+  return age ? `fetched ${age} ago` : 'never fetched'
 }

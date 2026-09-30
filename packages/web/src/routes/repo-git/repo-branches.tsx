@@ -3,11 +3,12 @@ import { GitBranchIcon, GitPullRequestIcon, PlusIcon, SearchIcon } from '@/compo
 import { useState, type FormEvent } from 'react'
 
 import { createRepoBranch } from '@/api/client'
-import { queryKeys, useGithub, useHealth } from '@/api/queries'
-import type { GithubItem, HealthResponse, RepoInfo, RepoResponse } from '@open-mercato/cezar-api-client'
+import { queryKeys, useGithub, useHealth, useRepoBranches } from '@/api/queries'
+import type { BranchClass, GithubItem, HealthResponse, RepoBranchEntry, RepoInfo, RepoResponse } from '@open-mercato/cezar-api-client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { toast } from '@/components/ui/toaster'
+import { Link } from '@/lib/project-router'
 import { cn, isHttpUrl } from '@/lib/utils'
 
 /**
@@ -15,6 +16,8 @@ import { cn, isHttpUrl } from '@/lib/utils'
  * already carries, with switch/create wired to `POST /api/repo/branch` (1.3) — every predictable
  * git refusal (dirty tree, invalid name) comes back as a 409 whose reason surfaces verbatim as a
  * danger toast. The agents' base-branch picker lives in the checkout block, so it is listed once.
+ * Each row carries its class from `GET /repo/branches` (issue 08) as a small label, and a branch
+ * that belongs to a task links to it.
  *
  * Forge-specific rows (open PRs with checks badges) render ONLY when `/api/health` reports
  * the forge driver available — no driver, no PR surface, per the forge-seam doctrine. The
@@ -23,6 +26,8 @@ import { cn, isHttpUrl } from '@/lib/utils'
  */
 export function RepoBranchesSection({ repo, info }: { repo: RepoResponse; info: RepoInfo }) {
   const health = useHealth()
+  const classified = useRepoBranches()
+  const byName = new Map((classified.data?.branches ?? []).map((entry) => [entry.name, entry]))
   const queryClient = useQueryClient()
   const onError = (error: Error) => toast(error.message, { tone: 'danger' })
 
@@ -79,9 +84,24 @@ export function RepoBranchesSection({ repo, info }: { repo: RepoResponse; info: 
         <ul data-slot="repo-branch-list" className="mt-4 flex min-w-0 flex-col divide-y divide-border border-t border-border md:max-h-[40rem] md:overflow-y-auto md:overscroll-contain">
           {filteredBranches.map((name) => {
             const current = name === info.branch
+            const entry = byName.get(name)
             return (
-              <li key={name} data-slot="branch-row" data-branch={name} className="flex min-h-20 flex-col items-start justify-center gap-2 py-3 md:flex-row md:items-center md:justify-start md:py-2.5">
-                <span className={cn('min-w-0 truncate text-[13px]', current && 'font-normal')}>{name}</span>
+              <li key={name} data-slot="branch-row" data-branch={name} data-branch-class={entry?.class} className="flex min-h-20 flex-col items-start justify-center gap-2 py-3 md:flex-row md:items-center md:justify-start md:py-2.5">
+                <span className="flex min-w-0 items-center gap-[8px]">
+                  {entry?.runId ? (
+                    <Link
+                      to={`/tasks/${entry.runId}`}
+                      data-slot="branch-task-link"
+                      title={entry.title ? `Open the task ${entry.title}` : 'Open the task'}
+                      className="min-w-0 truncate rounded-[2px] text-[13px] underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-ring"
+                    >
+                      {name}
+                    </Link>
+                  ) : (
+                    <span className={cn('min-w-0 truncate text-[13px]', current && 'font-normal')}>{name}</span>
+                  )}
+                  {entry ? <BranchClassLabel entry={entry} /> : null}
+                </span>
                 {current ? (
                   <span
                     data-slot="branch-current"
@@ -213,6 +233,32 @@ function ChecksBadge({ checks }: { checks: 'passing' | 'failing' | 'pending' }) 
       )}
     >
       {checks}
+    </span>
+  )
+}
+
+/** The board's words for each class (issue 08 §C). `orphan` is not landed too: its task is gone. */
+const CLASS_LABEL: Record<BranchClass, string> = {
+  active: 'in use',
+  'not-landed': 'not landed',
+  orphan: 'not landed',
+  merged: 'merged',
+  empty: 'empty',
+  other: 'yours',
+}
+
+function BranchClassLabel({ entry }: { entry: RepoBranchEntry }) {
+  return (
+    <span
+      data-slot="branch-class"
+      className={cn(
+        'shrink-0 rounded-[4px] border px-[5px] py-[1px] text-[10.5px] leading-[14px]',
+        entry.class === 'active' ? 'border-status-running/40 text-status-running'
+          : entry.class === 'not-landed' || entry.class === 'orphan' ? 'border-inbox-count-foreground/40 text-inbox-count-foreground'
+          : 'border-border text-soft-foreground',
+      )}
+    >
+      {CLASS_LABEL[entry.class]}
     </span>
   )
 }

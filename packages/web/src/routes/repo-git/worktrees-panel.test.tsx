@@ -9,10 +9,11 @@ import { Toaster, resetToasts } from '@/components/ui/toaster'
 import { WorktreesPanel } from './worktrees-panel'
 
 /**
- * Git → Cleanup (moved from Settings by issue 06 §3): the worktrees management panel (#483). Renders rows,
- * per-row Delete and "Reclaim now" call their routes (behind a confirm), and the
- * empty state shows when there is nothing on disk. #566: footer, Reclaim now,
- * and the empty-reclaim toast share the reclaimable-vs-keep budget.
+ * Git → Cleanup (moved from Settings by issue 06 §3, reworked by issue 08 §C): the worktrees
+ * management panel (#483). Renders rows with their retention state, the per-row Reclaim calls
+ * the directory-only route (never the branch-deleting one), "Reclaim N now" calls the enforcer
+ * behind a confirm, and the empty state shows when there is nothing on disk. #566: the button and
+ * the empty-reclaim toast follow the listing's own flags (`reclaimable`, `pastKeep`).
  */
 
 let requests: Array<{ method: string; url: string }> = []
@@ -32,6 +33,8 @@ function serve(data: WorktreesResponse, reclaim: { reclaimed: string[] } = { rec
       if (url === '/api/v1/worktrees' && method === 'GET') return json(data)
       if (url === '/api/v1/worktrees/reclaim' && method === 'POST') return json(reclaim)
       if (/\/api\/v1\/runs\/.+\/remove-worktree$/.test(url) && method === 'POST') return json({ removed: true })
+      const one = /^\/api\/v1\/worktrees\/([^/]+)\/reclaim$/.exec(url)
+      if (one && one[1] !== 'reclaim' && method === 'POST') return json({ runId: one[1], worktreeReclaimedAt: '2026-09-30T00:00:00Z' })
       return new Promise<never>(() => {})
     }),
   )
@@ -52,7 +55,7 @@ const rows = () => document.querySelectorAll('[data-slot="worktree-row"]')
 const posts = (match: RegExp) => requests.filter((r) => r.method === 'POST' && match.test(r.url))
 const confirmButton = () => document.querySelector<HTMLButtonElement>('[data-action="worktrees-confirm"]')
 const reclaimNow = () => document.querySelector<HTMLButtonElement>('[data-action="worktrees-reclaim-now"]')
-const footer = () => document.querySelector('[data-slot="worktrees-footer"]')
+const states = () => [...document.querySelectorAll<HTMLElement>('[data-slot="worktree-state"]')].map((el) => el.textContent)
 
 function worktree(partial: Partial<WorktreeInfo> & Pick<WorktreeInfo, 'runId' | 'title'>): WorktreeInfo {
   return {
@@ -108,6 +111,8 @@ const overKeep: WorktreesResponse = {
       runId: 'cccccccc-3333-4333-8333-cccccccccccc',
       title: 'older finished task',
       reclaimable: true,
+      pastKeep: true,
+      sizeBytes: 15 * 1024 * 1024,
       finishedAt: '2026-06-01T00:00:00Z',
     }),
     sample.worktrees[1]!,
@@ -154,25 +159,38 @@ describe('Git → Cleanup: worktrees panel (#483)', () => {
     await waitFor(() => expect(posts(/bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb\/open-in$/)).toHaveLength(1))
   })
 
-  it('renders a row per worktree with size (or — when unavailable) and the keep footer', async () => {
+  it('renders a row per worktree with size (or — when unavailable) and its retention state', async () => {
     serve(sample)
     renderPanel()
     await waitFor(() => expect(rows()).toHaveLength(2))
     expect(document.body.textContent).toContain('fix the login bug')
     expect(document.body.textContent).toContain('5 MB')
-    // Null size degrades to an em dash; null total degrades the footer.
-    expect(footer()?.textContent).toContain('keeping the last 10')
-    expect(footer()?.textContent).toContain('size unavailable')
+    expect(document.body.textContent).toContain('—') // null size
+    // A reclaimable row inside the keep limit is kept; a review row is in use.
+    expect(states()).toEqual(['kept · newest 10', 'in use'])
+    expect(document.querySelector('[data-slot="worktrees-retention"]')?.textContent).toContain('Retention keeps the newest 10 finished checkouts')
   })
 
-  it('Delete calls the per-run remove-worktree route (after confirming the dialog)', async () => {
+  it('labels the rows past the keep limit reclaimable and sizes the button from exactly those', async () => {
+    serve(overKeep)
+    renderPanel()
+    await waitFor(() => expect(rows()).toHaveLength(3))
+    expect(states()).toEqual(['kept · newest 1', 'reclaimable', 'in use'])
+    expect(reclaimNow()?.textContent).toBe('Reclaim 15 MB now')
+  })
+
+  it('per-row Reclaim calls the directory-only route and never the branch-deleting one', async () => {
     serve(sample)
     renderPanel()
     await waitFor(() => expect(rows()).toHaveLength(2))
-    fireEvent.click(document.querySelector('[data-action="worktree-delete"]')!)
-    await waitFor(() => expect(confirmButton()).not.toBeNull())
-    fireEvent.click(confirmButton()!)
-    await waitFor(() => expect(posts(/\/remove-worktree$/)).toHaveLength(1))
+    // The review row is in use: no action at all.
+    const reclaimButtons = document.querySelectorAll<HTMLButtonElement>('[data-action="worktree-reclaim"]')
+    expect(reclaimButtons).toHaveLength(1)
+    expect(document.querySelector('[data-action="worktree-delete"]')).toBeNull()
+    fireEvent.click(reclaimButtons[0]!)
+    await waitFor(() => expect(posts(/\/worktrees\/aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa\/reclaim$/)).toHaveLength(1))
+    expect(posts(/remove-worktree$/)).toHaveLength(0)
+    await waitFor(() => expect(document.querySelector('[data-slot="toast"]')?.textContent).toBe('Reclaimed the worktree of fix the login bug (branch kept)'))
   })
 
   it('Reclaim now calls the reclaim route (after confirming the dialog)', async () => {
@@ -201,7 +219,7 @@ describe('Git → Cleanup: worktrees panel (#483)', () => {
     serve({ worktrees: [], totalBytes: 0, keep: 0 })
     renderPanel()
     await waitFor(() => expect(document.querySelector('[data-slot="worktrees-empty"]')).not.toBeNull())
-    expect(footer()?.textContent).toContain('unlimited')
+    expect(document.querySelector('[data-slot="worktrees-retention"]')?.textContent).toContain('Retention is unlimited')
   })
 
   it('disables Reclaim now when reclaimable finished worktrees are within keep', async () => {
@@ -215,22 +233,24 @@ describe('Git → Cleanup: worktrees panel (#483)', () => {
     serve(workerMajority)
     renderPanel()
     await waitFor(() => expect(rows()).toHaveLength(31))
-    expect(footer()?.textContent).toBe('31 worktrees · 8.1 GB on disk · 7 reclaimable, keeping the last 8')
-    expect(footer()?.className).toContain('text-soft-foreground')
+    // Workers the listing does not mark reclaimable read as in use, never as reclaimable.
+    expect(states().filter((state) => state === 'in use')).toHaveLength(24)
+    expect(states().filter((state) => state === 'kept · newest 8')).toHaveLength(7)
     expect(reclaimNow()?.disabled).toBe(true)
   })
 
-  it('counts finished workers toward Reclaim now when the listing marks them reclaimable (#575)', async () => {
+  it('counts finished workers toward Reclaim now when the listing puts them past the keep limit (#575)', async () => {
     serve({
       ...workerMajority,
       worktrees: workerMajority.worktrees.map((row) =>
-        row.runId.startsWith('worker-') ? { ...row, reclaimable: true } : row,
+        row.runId.startsWith('worker-') ? { ...row, reclaimable: true, pastKeep: true } : row,
       ),
     })
     renderPanel()
     await waitFor(() => expect(rows()).toHaveLength(31))
-    expect(footer()?.textContent).toBe('31 worktrees · 8.1 GB on disk · 30 reclaimable, keeping the last 8')
+    expect(states().filter((state) => state === 'reclaimable')).toHaveLength(23)
     expect(reclaimNow()?.disabled).toBe(false)
+    expect(reclaimNow()?.textContent).toBe('Reclaim 23 kB now')
   })
 
   it('empty reclaim toast does not claim every worktree is within the limit (#566)', async () => {
