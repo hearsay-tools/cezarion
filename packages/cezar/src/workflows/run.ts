@@ -1,4 +1,5 @@
-import { ciWaitRequestSchema, ciWaitResultSchema, type CiWait, type CiWaitRequest, type CiWaitResult } from '@open-mercato/cezar-contract';
+import { ciErrorMessage } from '../ci-wait/errors.ts';
+import { ciWaitRequestSchema, ciWaitResultSchema, type CiWait, type CiWaitRequest, type CiWaitResult, type CiWaitErrorCode } from '@open-mercato/cezar-contract';
 import { acquireCiResources } from '../ci-wait/resources.ts';
 import { artifactInstructions, provisionArtifactDirectory } from '../artifacts/lifecycle.ts';
 import type { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
@@ -1422,14 +1423,33 @@ export class RunManager {
   async registerCiWait(runId: string, request: CiWaitRequest, generation: string, capabilitySignal?: AbortSignal): Promise<CiWait> {
     const parsed = ciWaitRequestSchema.parse(request);
     const state = this.active.get(runId);
-    const authorized = () => {
-      const run = this.store.getRun(runId);
-      return !this.disposed && !capabilitySignal?.aborted && !!run && ['running', 'waiting'].includes(run.status) && !run.stopping &&
-        this.active.get(runId) === state && !!state?.session?.open && !state.cancelled && !state.finishRequested &&
-        state.ciGeneration === generation && !state.pendingHumanAsk && !this.hasUnansweredHumanAsk(runId) &&
-        !this.workerWait(runId) && !this.workerExecutionStopped(runId) && !this.executionBlockedByRootFinish(run);
+    const refuse = (code: CiWaitErrorCode): never => {
+      // Fixed codes only: no tool arguments, credentials or provider diagnostics.
+      console.warn(`[cez] CI wait registration refused: ${code}`);
+      throw Object.assign(new Error(ciErrorMessage(code)), { code });
     };
-    if (!authorized() || !state) throw Object.assign(new Error('Run cannot register a CI wait in its current state'), { code: 'unauthorized' });
+    const assertCanRegister = () => {
+      const run = this.store.getRun(runId);
+      if (this.disposed) refuse('manager_disposed');
+      if (capabilitySignal?.aborted) refuse('capability_revoked');
+      if (!run) return refuse('run_missing');
+      if (!['running', 'waiting'].includes(run.status)) refuse('run_not_running');
+      if (run.stopping) refuse('run_stopping');
+      if (!state || this.active.get(runId) !== state) return refuse('session_replaced');
+      if (!state.session?.open) refuse('session_closed');
+      if (state.cancelled) refuse('run_cancelled');
+      if (state.finishRequested) refuse('finish_requested');
+      if (state.ciGeneration !== generation) refuse('generation_mismatch');
+      if (state.pendingHumanAsk) refuse('human_ask_pending');
+      if (this.hasUnansweredHumanAsk(runId)) refuse('human_ask_unanswered');
+      // Settlement queues a wake; it does not prove provider delivery. Keep the
+      // wait until its acknowledgement, and tell the agent how to release it.
+      if (this.workerWait(runId)) refuse('worker_wait_pending');
+      if (this.workerExecutionStopped(runId)) refuse('worker_execution_stopped');
+      if (this.executionBlockedByRootFinish(run)) refuse('root_finish_pending');
+      return state;
+    };
+    const active = assertCanRegister();
     const current = this.store.getRun(runId)?.ciWait;
     if (current) {
       if (current.prUrl.toLowerCase() === parsed.pr.replace(/\/$/, '').toLowerCase() && current.timeoutSeconds === parsed.timeout_seconds) return current;
@@ -1440,19 +1460,27 @@ export class RunManager {
       if (pending.pr === parsed.pr && pending.seconds === parsed.timeout_seconds) return pending.promise;
       throw Object.assign(new Error('wait_conflict: a different CI registration is already in progress'), { code: 'wait_conflict' });
     }
-    const turnId = state.ciTurnId ??= randomUUID();
+    const turnId = active.ciTurnId ??= randomUUID();
     const abort = new AbortController();
     const signal = capabilitySignal ? AbortSignal.any([abort.signal, capabilitySignal]) : abort.signal;
     const promise = (async () => {
-      const identity = await this.ciSupervisor.resolve(parsed.pr, signal);
-      if (signal.aborted || !authorized() || state.ciTurnId !== turnId) throw Object.assign(new Error('Run cannot register a CI wait after interruption'), { code: 'unauthorized' });
+      const assertLookupCurrent = () => {
+        assertCanRegister();
+        if (signal.aborted) refuse('registration_aborted');
+        if (active.ciTurnId !== turnId) refuse('turn_changed');
+      };
+      const identity = await this.ciSupervisor.resolve(parsed.pr, signal).catch(error => {
+        assertLookupCurrent();
+        throw error;
+      });
+      assertLookupCurrent();
       const registeredAt = new Date().toISOString();
       const wait: CiWait = { ...identity, id: randomUUID(), generation, turnId, timeoutSeconds: parsed.timeout_seconds,
         registeredAt, deadline: new Date(Date.now() + parsed.timeout_seconds * 1000).toISOString(), phase: 'registered' };
       try { this.store.commitCiWait(runId, wait); }
       catch { throw Object.assign(new Error('CI registration could not be saved; retry when storage is writable'), { code: 'persistence' }); }
       this.startCiWatch(runId, wait);
-      if (state.atTurnBoundary === state.session || this.waiting.has(runId)) this.parkCiWait(runId, state);
+      if (active.atTurnBoundary === active.session || this.waiting.has(runId)) this.parkCiWait(runId, active);
       return this.store.getRun(runId)!.ciWait ?? wait;
     })();
     this.ciRegistrations.set(runId, { abort, pr: parsed.pr, seconds: parsed.timeout_seconds, promise });

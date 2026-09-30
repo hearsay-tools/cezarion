@@ -404,6 +404,8 @@ const CONTROL_CRITERIA = [
   { id: 'R24', scenario: 'baseline' },
   { id: 'R25', scenario: 'baseline' },
   { id: 'R26', scenario: 'ask-resume' },
+  // workflows/ci-wait-refusal.test.ts: settled worker wake, private CI IPC, then delivery.
+  { id: 'R27', scenario: 'hold' },
 ] as const;
 
 /**

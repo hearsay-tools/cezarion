@@ -24,7 +24,12 @@ export const ciPrIdentitySchema = z.object({
 }).strict();
 export type CiPrIdentity = z.infer<typeof ciPrIdentitySchema>;
 export const ciWaitOutcomeSchema = z.enum(['passed', 'failed', 'cancelled', 'skipped', 'no_checks', 'head_changed', 'deadline', 'error']);
-export const ciWaitErrorCodeSchema = z.enum(['invalid_request', 'unsupported_host', 'gh_missing', 'authentication', 'inaccessible_pr', 'malformed_data', 'output_limit', 'query_timeout', 'command_failed', 'wait_conflict', 'capacity', 'unavailable', 'unauthorized', 'persistence']);
+export const ciWaitErrorCodeSchema = z.enum(['invalid_request', 'unsupported_host', 'gh_missing', 'authentication', 'inaccessible_pr', 'malformed_data', 'output_limit', 'query_timeout', 'command_failed', 'wait_conflict', 'capacity', 'unavailable', 'unauthorized', 'persistence',
+  'manager_disposed', 'capability_revoked', 'run_missing', 'run_not_running', 'run_stopping',
+  'session_replaced', 'session_closed', 'run_cancelled', 'finish_requested', 'generation_mismatch',
+  'human_ask_pending', 'human_ask_unanswered', 'worker_wait_pending', 'worker_execution_stopped',
+  'root_finish_pending', 'registration_aborted', 'turn_changed',
+]);
 export const ciWaitErrorSchema = z.object({ code: ciWaitErrorCodeSchema, message: z.string().max(4096) }).strict();
 export type CiWaitError = z.infer<typeof ciWaitErrorSchema>;
 export type CiWaitErrorCode = z.infer<typeof ciWaitErrorCodeSchema>;

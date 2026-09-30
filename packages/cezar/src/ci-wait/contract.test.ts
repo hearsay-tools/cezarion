@@ -46,3 +46,15 @@ it('returns a bounded wire receipt without persisted authority or delivery state
   const { waitId, ...identity } = receipt;
   expect(ciWaitSchema.safeParse({ ...identity, id: waitId, generation: 'session-generation', turnId: 'originating-turn', timeoutSeconds: 1800 }).success).toBe(true);
 });
+
+it.each([
+  'manager_disposed', 'capability_revoked', 'run_missing', 'run_not_running', 'run_stopping',
+  'session_replaced', 'session_closed', 'run_cancelled', 'finish_requested', 'generation_mismatch',
+  'human_ask_pending', 'human_ask_unanswered', 'worker_wait_pending', 'worker_execution_stopped',
+  'root_finish_pending', 'registration_aborted', 'turn_changed',
+])('accepts the specific registration refusal %s without losing its diagnostic', async code => {
+  const { ciWaitErrorSchema } = await import('@open-mercato/cezar-contract');
+  expect(ciWaitErrorSchema.parse({ code, message: 'Blocking state; retry after resolving it.' }))
+    .toEqual({ code, message: 'Blocking state; retry after resolving it.' });
+  expect(ciWaitErrorSchema.safeParse({ code: 'invented_refusal', message: 'no' }).success).toBe(false);
+});

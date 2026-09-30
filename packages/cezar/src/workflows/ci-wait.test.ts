@@ -42,7 +42,7 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
   it('rejects registration outside an active run without writing a receipt', async () => {
     github();
     await expect(Promise.resolve().then(() => manager.registerCiWait('absent', { pr, timeout_seconds: 30 }, 'old')))
-      .rejects.toThrow(/cannot register/i);
+      .rejects.toMatchObject({ code: 'run_missing' });
     expect(store.listRuns()).toEqual([]);
   });
 
@@ -305,7 +305,7 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     const registration = register(run.id);
     expect(manager.sendMessage(run.id, [{ type: 'text', text: 'mock:hold new instruction' }])).toBe(true);
     resolve(identity);
-    await expect(registration).rejects.toThrow(/interruption/);
+    await expect(registration).rejects.toMatchObject({ code: 'registration_aborted' });
     expect(store.getRun(run.id)?.ciWait).toBeUndefined();
   });
 
@@ -330,7 +330,7 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
       expect(wait.phase).toBe('registered');
       expect(store.readEvents(p.id).filter(event => event.type === 'human-input-delivered')).toEqual([]);
       store.appendEvent(p.id, { type: 'ask.requested', requestId: randomUUID(), questions: [{ header: 'New', question: 'Approve?', options: [{ label: 'Yes' }, { label: 'No' }] }] });
-      await expect(register(p.id)).rejects.toThrow(/cannot register/);
+      await expect(register(p.id)).rejects.toMatchObject({ code: 'human_ask_unanswered' });
     } finally { writeFileSync(release, 'go'); }
   });
 

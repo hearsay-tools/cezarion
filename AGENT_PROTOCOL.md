@@ -698,6 +698,21 @@ prompts, persisted records, descriptor snapshots or user-authored settings.
 Capabilities are revoked on session replacement, stop and controller disposal.
 This is cooperative same-user authorization, not isolation from unrestricted shell.
 
+CI registration refusals name the blocking state (#713), with separate contract
+codes for manager disposal, capability revocation, missing/inactive/stopping runs,
+missing/replaced/closed sessions, cancellation/finish, stale session generation,
+pending/unanswered human questions, worker waits, stopped worker execution and
+parent finish. Registration checks again after metadata lookup, distinguishing an
+aborted registration from a changed turn. Only missing or revoked transport
+capabilities are `unauthorized`; an unknown registration failure is `unavailable`.
+Safe messages never forward request contents or raw provider errors.
+
+A settled worker wait still blocks CI registration until its wake is delivered.
+`worker_wait_pending` instructs the agent to end its turn and retry after delivery;
+settlement alone must not discard the result or start competing waits. Harness row
+R27 reproduces this sequence through every runner's native mock wire and the real
+private CI controller, then verifies CI registration succeeds after delivery.
+
 Startup and tool listing do no GitHub work. IPC failure preserves ordinary boot
 and execution, surfaces a bounded unavailable diagnostic, and never substitutes
 model polling. Explicit tool denial remains denial. Preserve existing MCP servers,
