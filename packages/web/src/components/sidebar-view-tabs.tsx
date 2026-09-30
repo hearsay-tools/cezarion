@@ -28,20 +28,24 @@ export function SidebarViewTabs({ items, activeTo, needsYou = false, inboxCount,
     const next = event.key === 'Home' ? 0 : event.key === 'End' ? controls.length - 1 : (current + (event.key === 'ArrowRight' ? 1 : -1) + controls.length) % controls.length
     controls[next]?.focus()
   }
+  // Sized as the #622 board's view tabs (32px, 16px icons, 12.5px label). The board's 10px
+  // label padding and 30px icon tabs do not fit "Workflows" beside five icons in a 263px
+  // sidebar, so the icon tabs stay 28px (24px beside the overflow button) and the label padding
+  // shrinks instead of the label truncating.
   return <TooltipProvider><nav ref={nav} aria-label="Main" data-slot="view-tabs" onKeyDown={moveFocus} className="flex shrink-0 items-center justify-between max-md:justify-start max-md:gap-1 max-md:overflow-x-auto border-b border-border px-2 pt-2.5 pb-2">
     {primary.map(item => {
       const active = item.to === activeTo
       const Icon = item.icon
       const dot = item.to === '/' && needsYou && !active ? 'bg-pending-strong' : item.to === '/skills' && skillsUpdateAvailable ? 'bg-info' : null
       return <Tooltip key={item.to}><TooltipTrigger asChild><Link to={item.to} onClick={onNavigate} data-view-tab aria-label={item.label} aria-current={active ? 'page' : undefined}
-        className={cn('relative flex h-[30px] min-w-0 items-center justify-center rounded-[7px] text-soft-foreground hover:bg-sidebar-row-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring max-md:min-h-11 max-md:min-w-11', active ? 'shrink-0 gap-1.5 bg-sidebar-row-selected px-2 text-[12px] font-semibold text-foreground' : overflow.length ? 'w-6 shrink-0' : 'w-7 shrink-0')}>
-        <span className="relative"><Icon className="size-[15px]" aria-hidden="true" />{dot ? <span aria-label={item.to === '/' ? 'Tasks need you' : 'Skills update available'} data-slot={item.to === '/' ? 'nav-needs-you-dot' : 'nav-update-marker'} className={cn('absolute -top-1 -right-1 size-[7px] rounded-full border-[1.5px] border-sidebar', dot)} /> : null}</span>
+        className={cn('relative flex h-[32px] min-w-0 items-center justify-center rounded-[7px] text-soft-foreground hover:bg-sidebar-row-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring max-md:min-h-11 max-md:min-w-11', active ? cn('shrink-0 gap-1.5 bg-sidebar-row-selected text-[12.5px] font-semibold text-foreground', overflow.length ? 'px-[7px]' : 'px-2') : overflow.length ? 'w-6 shrink-0' : 'w-7 shrink-0')}>
+        <span className="relative"><Icon className="size-[16px]" aria-hidden="true" />{dot ? <span aria-label={item.to === '/' ? 'Tasks need you' : 'Skills update available'} data-slot={item.to === '/' ? 'nav-needs-you-dot' : 'nav-update-marker'} className={cn('absolute -top-1 -right-1 size-[7px] rounded-full border-[1.5px] border-sidebar', dot)} /> : null}</span>
         {active ? <span className="truncate">{item.label}</span> : null}
       </Link></TooltipTrigger><TooltipContent side="bottom" sideOffset={6} style={{ pointerEvents: 'none' }}>{item.label}</TooltipContent></Tooltip>
     })}
     {overflow.length ? <DropdownMenu open={open} onOpenChange={setOpen}>
-      <Tooltip><TooltipTrigger asChild><DropdownMenuTrigger asChild><button type="button" data-view-tab aria-label="More views" data-active={overflowActive ? 'true' : undefined} className={cn('relative flex h-[30px] w-6 shrink-0 items-center justify-center rounded-[7px] text-soft-foreground hover:bg-sidebar-row-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring max-md:min-h-11 max-md:min-w-11', (open || overflowActive) && 'bg-sidebar-row-selected text-foreground')}>
-        <EllipsisIcon className="size-[15px]" aria-hidden="true" />{inboxCount && overflow.some(item => item.to === '/inbox') ? <span data-slot="overflow-inbox-dot" className="absolute top-1 right-0.5 size-[7px] rounded-full border-[1.5px] border-sidebar bg-pending-strong" /> : null}
+      <Tooltip><TooltipTrigger asChild><DropdownMenuTrigger asChild><button type="button" data-view-tab aria-label="More views" data-active={overflowActive ? 'true' : undefined} className={cn('relative flex h-[32px] w-6 shrink-0 items-center justify-center rounded-[7px] text-soft-foreground hover:bg-sidebar-row-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring max-md:min-h-11 max-md:min-w-11', (open || overflowActive) && 'bg-sidebar-row-selected text-foreground')}>
+        <EllipsisIcon className="size-[16px]" aria-hidden="true" />{inboxCount && overflow.some(item => item.to === '/inbox') ? <span data-slot="overflow-inbox-dot" className="absolute top-1 right-0.5 size-[7px] rounded-full border-[1.5px] border-sidebar bg-pending-strong" /> : null}
       </button></DropdownMenuTrigger></TooltipTrigger><TooltipContent side="bottom" sideOffset={6} style={{ pointerEvents: 'none' }}>More views</TooltipContent></Tooltip>
       <DropdownMenuContent align="end" sideOffset={4} className="w-48 rounded-[10px] border-border bg-sidebar p-[5px] shadow-[0_10px_28px_#00000047]">
         {overflow.map(item => { const Icon = item.icon; const active = item.to === activeTo

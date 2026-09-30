@@ -1,6 +1,7 @@
 import { useLocation, useSearchParams } from 'react-router'
 
 import { useSidebarNavigate } from '@/components/app-shell'
+import { SIDEBAR_LIST_BODY_CLASS } from '@/components/nav-row-styles'
 import { stripProjectPrefix } from '@/lib/project-router'
 
 import { GithubFilterList } from './github-filter-list'
@@ -25,7 +26,7 @@ export function GithubSidebar({ scope }: { scope: string }) {
   const view = githubViewOf(pathname)
   const active = rowIdOf(view, parseGithubFilter(view, params.get('filter')))
   return (
-    <div data-slot="github-sidebar" role="region" aria-label="GitHub" className="px-2 pt-4">
+    <div data-slot="github-sidebar" role="region" aria-label="GitHub" className={SIDEBAR_LIST_BODY_CLASS}>
       <GithubFilterList model={model} variant="sidebar" activeId={active} onNavigate={onNavigate} />
     </div>
   )

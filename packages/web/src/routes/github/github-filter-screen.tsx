@@ -1,5 +1,7 @@
 import { queryScope } from '@open-mercato/cezar-api-client'
 
+import { SCREEN_LIST_BODY_CLASS, SCREEN_LIST_TITLE_CLASS } from '@/components/nav-row-styles'
+
 import { GithubFilterList } from './github-filter-list'
 import { useGithubFilterModel } from './use-github-filter-model'
 
@@ -11,9 +13,9 @@ import { useGithubFilterModel } from './use-github-filter-model'
 export function GithubFilterScreen({ repo }: { repo?: string }) {
   const model = useGithubFilterModel(queryScope())
   return (
-    <div data-route="github" data-slot="github-filter-screen" className="flex min-h-full flex-col px-[18px] pt-[18px] pb-[calc(90px+env(safe-area-inset-bottom))]">
-      <h1 className="text-2xl font-semibold tracking-tight">GitHub</h1>
-      {repo ? <p className="truncate pb-4 text-[13px] text-muted-foreground" data-slot="gh-repo">{repo}</p> : <div className="pb-4" />}
+    <div data-route="github" data-slot="github-filter-screen" className={SCREEN_LIST_BODY_CLASS}>
+      <h1 className={SCREEN_LIST_TITLE_CLASS}>GitHub</h1>
+      {repo ? <p className="truncate px-[10px] pb-[16px] text-[13px] text-muted-foreground" data-slot="gh-repo">{repo}</p> : <div className="pb-[16px]" />}
       <GithubFilterList model={model} variant="screen" />
     </div>
   )

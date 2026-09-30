@@ -4,7 +4,10 @@ import { useLocation } from 'react-router'
 import { useProjectRepo } from '@/api/queries'
 import { useSidebarNavigate } from '@/components/app-shell'
 import { FileDiffIcon, GitBranchIcon, GitCommitHorizontalIcon } from '@/components/design-icons'
-import { SIDEBAR_SELECTED_CLASS } from '@/components/nav-row-styles'
+import {
+  SIDEBAR_LIST_BODY_CLASS, SIDEBAR_LIST_COUNT_CLASS, SIDEBAR_LIST_HEADING_CLASS, SIDEBAR_LIST_ICON_CLASS,
+  SIDEBAR_LIST_ROW_CLASS, SIDEBAR_LIST_ROW_HOVER_CLASS, SIDEBAR_LIST_UNLABELLED_GROUP_CLASS, SIDEBAR_SELECTED_CLASS,
+} from '@/components/nav-row-styles'
 import { Link, stripProjectPrefix } from '@/lib/project-router'
 import { cn } from '@/lib/utils'
 
@@ -45,8 +48,8 @@ export function GitSidebar({ scope }: { scope: string }) {
     branches: data ? data.branches.length : null,
   }
   return (
-    <div data-slot="git-sidebar" className="px-2 pt-4">
-      <h2 className="flex items-baseline px-2.5 pb-4 text-[13px] font-semibold">
+    <div data-slot="git-sidebar" className={SIDEBAR_LIST_BODY_CLASS}>
+      <h2 className={SIDEBAR_LIST_HEADING_CLASS}>
         Git
         {data ? (
           <span data-slot="git-sidebar-branch" className="ml-auto truncate pl-2 text-[12px] font-normal text-muted-foreground">
@@ -54,7 +57,7 @@ export function GitSidebar({ scope }: { scope: string }) {
           </span>
         ) : null}
       </h2>
-      <nav aria-label="Repository" data-slot="git-repo-nav" className="mb-5">
+      <nav aria-label="Repository" data-slot="git-repo-nav" className={SIDEBAR_LIST_UNLABELLED_GROUP_CLASS}>
         {REPO_ROWS.map(({ id, label, to, icon: Icon }) => {
           const count = counts[id]
           const current = active === id
@@ -65,15 +68,12 @@ export function GitSidebar({ scope }: { scope: string }) {
               data-git-facet={id}
               aria-current={current ? 'page' : undefined}
               onClick={onNavigate}
-              className={cn(
-                'group flex h-[32px] items-center gap-[10px] rounded-[6px] px-[10px] text-[13px] text-muted-foreground hover:bg-sidebar-row-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring',
-                current && SIDEBAR_SELECTED_CLASS,
-              )}
+              className={cn(SIDEBAR_LIST_ROW_CLASS, SIDEBAR_LIST_ROW_HOVER_CLASS, current && SIDEBAR_SELECTED_CLASS)}
             >
-              <Icon aria-hidden="true" className="size-[15px] shrink-0 text-soft-foreground group-aria-[current=page]:text-foreground" />
+              <Icon aria-hidden="true" className={SIDEBAR_LIST_ICON_CLASS} />
               <span className="truncate">{label}</span>
               {count ? (
-                <span data-slot="git-facet-count" className="ml-auto text-[11.5px] tabular-nums text-soft-foreground">{count}</span>
+                <span data-slot="git-facet-count" className={SIDEBAR_LIST_COUNT_CLASS}>{count}</span>
               ) : null}
             </Link>
           )

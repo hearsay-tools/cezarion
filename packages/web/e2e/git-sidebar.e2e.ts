@@ -297,8 +297,8 @@ describe('Git desktop sidebar (#622)', () => {
           overflow: document.documentElement.scrollWidth > innerWidth,
         };
       })()`)
-      // The sidebar lays two-line rows at 48px whatever they hold: titles and branches truncate, never wrap.
-      expect(facts).toEqual({ light: theme === 'light', heights: [48], branchSize: '12px', branchMono: true, longClipped: true, overflow: false })
+      // The sidebar lays two-line rows at 49px (the board's 6 + 19 + 1 + 17 + 6) whatever they hold: titles and branches truncate, never wrap.
+      expect(facts).toEqual({ light: theme === 'light', heights: [49], branchSize: '12px', branchMono: true, longClipped: true, overflow: false })
       browser.waitForFunction(repositorySettled)
       browser.screenshot(`${artifactsDir}/git-sidebar-desktop-${theme}.png`, { viewport: true })
     }

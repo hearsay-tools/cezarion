@@ -4,7 +4,12 @@ import type { ComponentType, SVGProps } from 'react'
 import {
   BotIcon, ChevronRightIcon, CircleDotIcon, CircleXIcon, GitPullRequestIcon, UserRoundIcon,
 } from '@/components/design-icons'
-import { SIDEBAR_SELECTED_CLASS } from '@/components/nav-row-styles'
+import {
+  SCREEN_LIST_CHEVRON_CLASS, SCREEN_LIST_COUNT_CLASS, SCREEN_LIST_GROUP_CLASS, SCREEN_LIST_GROUP_LABEL_CLASS,
+  SCREEN_LIST_ICON_CLASS, SCREEN_LIST_ROW_CLASS, SIDEBAR_LIST_COUNT_CLASS, SIDEBAR_LIST_GROUP_CLASS,
+  SIDEBAR_LIST_GROUP_LABEL_CLASS, SIDEBAR_LIST_ICON_CLASS, SIDEBAR_LIST_ROW_CLASS, SIDEBAR_LIST_ROW_HOVER_CLASS,
+  SIDEBAR_SELECTED_CLASS,
+} from '@/components/nav-row-styles'
 import { Link } from '@/lib/project-router'
 import { cn } from '@/lib/utils'
 
@@ -54,8 +59,8 @@ export function GithubFilterList({ model, variant, activeId, onNavigate }: {
   return (
     <>
       {groups.map((group) => (
-        <nav key={group.key} aria-label={group.label} data-slot="github-filter-group" data-group={group.key} className={screen ? 'mb-6' : 'mb-5'}>
-          <h3 className={cn('px-2.5 pb-1.5 text-[11px] font-medium text-soft-foreground', screen && 'px-1 pb-2')}>{group.label}</h3>
+        <nav key={group.key} aria-label={group.label} data-slot="github-filter-group" data-group={group.key} className={screen ? SCREEN_LIST_GROUP_CLASS : SIDEBAR_LIST_GROUP_CLASS}>
+          <h3 className={screen ? SCREEN_LIST_GROUP_LABEL_CLASS : SIDEBAR_LIST_GROUP_LABEL_CLASS}>{group.label}</h3>
           {group.rows.map(({ id, label }) => {
             const Icon = ICONS[id]
             const active = activeId === id
@@ -63,20 +68,18 @@ export function GithubFilterList({ model, variant, activeId, onNavigate }: {
             const count = model.counts[id]
             const text = formatCount(count)
             const className = cn(
-              'group flex items-center rounded-[6px] focus-visible:outline-2 focus-visible:outline-ring',
-              screen ? 'text-foreground' : 'text-muted-foreground',
-              screen ? 'h-12 gap-[10px] px-[10px] text-[15px]' : 'h-[32px] gap-[10px] px-[10px] text-[13px]',
-              reason ? 'cursor-not-allowed opacity-60' : 'hover:bg-sidebar-row-hover hover:text-foreground',
+              screen ? SCREEN_LIST_ROW_CLASS : SIDEBAR_LIST_ROW_CLASS,
+              reason ? 'cursor-not-allowed opacity-60' : SIDEBAR_LIST_ROW_HOVER_CLASS,
               active && SIDEBAR_SELECTED_CLASS,
             )
             const content = (
               <>
-                <Icon aria-hidden="true" className={cn('shrink-0 text-soft-foreground group-aria-[current=page]:text-foreground', screen ? 'size-[18px]' : 'size-[15px]')} />
+                <Icon aria-hidden="true" className={screen ? SCREEN_LIST_ICON_CLASS : SIDEBAR_LIST_ICON_CLASS} />
                 <span className="truncate">{label}</span>
                 {text ? (
-                  <span data-slot="gh-filter-count" title={countTitle(id, count)} className="ml-auto text-[11.5px] tabular-nums text-soft-foreground">{text}</span>
+                  <span data-slot="gh-filter-count" title={countTitle(id, count)} className={screen ? SCREEN_LIST_COUNT_CLASS : SIDEBAR_LIST_COUNT_CLASS}>{text}</span>
                 ) : null}
-                {screen ? <ChevronRightIcon aria-hidden="true" className={cn('size-[18px] shrink-0 text-soft-foreground', text ? '' : 'ml-auto')} /> : null}
+                {screen ? <ChevronRightIcon aria-hidden="true" className={cn(SCREEN_LIST_CHEVRON_CLASS, !text && 'ml-auto')} /> : null}
               </>
             )
             if (reason) {

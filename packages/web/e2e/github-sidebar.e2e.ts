@@ -457,7 +457,7 @@ describe('GitHub phone filter index at 360x640 (#622)', () => {
     await remember('issues')
   }, 90_000)
 
-  it('lists all seven filters at 48px with 18px icons and chevrons, and the same honest counts', () => {
+  it('lists all seven filters at 48px with 18px icons and 15px chevrons, and the same honest counts', () => {
     for (const theme of ['light', 'dark'] as const) {
       openIndex()
       browser.evaluate(`document.documentElement.classList.remove('light', 'dark'); document.documentElement.classList.add('${theme}')`)
@@ -467,17 +467,18 @@ describe('GitHub phone filter index at 360x640 (#622)', () => {
       const facts = browser.waitForValue<Record<string, unknown>>(`(() => {
         const rows = [...document.querySelectorAll('${SCREEN} [data-gh-filter]')];
         if (rows.length === 0) return null;
-        const icons = rows.flatMap((row) => [...row.querySelectorAll('svg')].map((svg) => svg.getBoundingClientRect()));
+        // The mobile board's 18px leading icon and 15px chevron.
+        const size = (svg) => { const rect = svg.getBoundingClientRect(); return rect.width + 'x' + rect.height; };
         return {
           light: document.documentElement.classList.contains('light'),
           heights: [...new Set(rows.map((row) => row.getBoundingClientRect().height))],
-          svgSizes: [...new Set(icons.map((rect) => rect.width + 'x' + rect.height))],
+          svgSizes: [...new Set(rows.map((row) => [...row.querySelectorAll('svg')].map(size).join(' ')))],
           hasChevron: rows.every((row) => row.querySelectorAll('svg').length >= 2),
           overflow: document.documentElement.scrollWidth > innerWidth,
           sidebarHidden: !(document.querySelector('${SIDEBAR}')?.checkVisibility() ?? false),
         };
       })()`)
-      expect(facts).toEqual({ light: theme === 'light', heights: [48], svgSizes: ['18x18'], hasChevron: true, overflow: false, sidebarHidden: true })
+      expect(facts).toEqual({ light: theme === 'light', heights: [48], svgSizes: ['18x18 15x15'], hasChevron: true, overflow: false, sidebarHidden: true })
       browser.screenshot(`${artifactsDir}/github-filter-screen-${theme}.png`, { viewport: true })
     }
   }, 90_000)

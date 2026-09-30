@@ -1,7 +1,12 @@
 import { queryScope } from '@open-mercato/cezar-api-client'
 
 import { ChevronRightIcon, GitBranchIcon } from '@/components/design-icons'
+import {
+  SCREEN_LIST_BODY_CLASS, SCREEN_LIST_CHEVRON_CLASS, SCREEN_LIST_ICON_CLASS, SCREEN_LIST_ROW_CLASS, SCREEN_LIST_TITLE_CLASS,
+  SIDEBAR_LIST_ROW_HOVER_CLASS,
+} from '@/components/nav-row-styles'
 import { Link } from '@/lib/project-router'
+import { cn } from '@/lib/utils'
 
 import { GitWorktreeList } from './git-worktree-list'
 import { useGitWorktreeModel } from './use-git-worktree-model'
@@ -14,16 +19,16 @@ import { useGitWorktreeModel } from './use-git-worktree-model'
 export function GitWorktreeScreen() {
   const model = useGitWorktreeModel(queryScope())
   return (
-    <div data-route="repo-git" data-slot="git-worktree-screen" className="flex min-h-full flex-col px-[18px] pt-[18px] pb-[calc(90px+env(safe-area-inset-bottom))]">
-      <h1 className="pb-4 text-2xl font-semibold tracking-tight">Git</h1>
+    <div data-route="repo-git" data-slot="git-worktree-screen" className={SCREEN_LIST_BODY_CLASS}>
+      <h1 className={cn(SCREEN_LIST_TITLE_CLASS, 'pb-[16px]')}>Git</h1>
       <Link
         to="/git?view=repo"
         data-slot="git-open-repository"
-        className="mb-6 flex h-12 items-center gap-[10px] rounded-[6px] px-[10px] text-[15px] text-muted-foreground hover:bg-sidebar-row-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+        className={cn(SCREEN_LIST_ROW_CLASS, SIDEBAR_LIST_ROW_HOVER_CLASS, 'mb-[16px] text-muted-foreground')}
       >
-        <GitBranchIcon aria-hidden="true" className="size-[18px] shrink-0 text-soft-foreground" />
+        <GitBranchIcon aria-hidden="true" className={SCREEN_LIST_ICON_CLASS} />
         <span className="truncate">Open repository</span>
-        <ChevronRightIcon aria-hidden="true" className="ml-auto size-[18px] shrink-0 text-soft-foreground" />
+        <ChevronRightIcon aria-hidden="true" className={cn(SCREEN_LIST_CHEVRON_CLASS, 'ml-auto')} />
       </Link>
       <GitWorktreeList model={model} variant="screen" />
     </div>
