@@ -191,3 +191,55 @@ describe('mobile top bar and project drawer', () => {
     })
   }
 })
+
+describe('phone Tools page (#621 follow-up)', () => {
+  for (const variant of phoneVariants.filter((v) => v.density !== 'ultra')) {
+    it(`reaches /tools from the drawer with status dots and the settings link, ${variant.theme}`, async () => {
+      // One real probe answer with the last tool turned into a missing one, so the hint and
+      // "Set up ›" have something to render whatever this machine has installed.
+      const health = (await fetch(`${baseUrl}/api/v1/health`).then((r) => r.json())) as { checks: Array<Record<string, unknown>> }
+      const missing = health.checks.length - 1
+      health.checks[missing] = { name: health.checks[missing]!.name, available: false, hint: 'Install it and reload the cockpit.' }
+      browser.routeJson('**/api/v1/health', health)
+      try {
+        browser.goto(`${baseUrl}/p/${projectId}/`)
+        applyContrastQaVariant(browser, variant)
+        browser.waitForFunction(`document.querySelector(${JSON.stringify(MENU)}) !== null`)
+        browser.click(MENU)
+        // The drawer slides in: tap only once it has come to rest, or the tap lands on the overlay.
+        browser.waitForFunction(`document.querySelector(${JSON.stringify(DRAWER)})?.getBoundingClientRect().left === 0`)
+        browser.click(`${DRAWER} [data-slot="drawer-tools"]`)
+        browser.waitForFunction(`document.querySelector(${JSON.stringify(DRAWER)}) === null && document.querySelector('[data-route="workspace-tools"] [data-slot="tool-row"]') !== null`)
+        // Bring the section under the top bar: the floating New task button sits over the lower-right otherwise.
+        browser.evaluate(`document.querySelector('#tools-heading').scrollIntoView({ block: 'start' })`)
+        browser.waitForFunction(`document.querySelector('[data-slot="tools-settings"]').getBoundingClientRect().top < 200`)
+
+        const page = browser.evaluate(`(() => {
+          const rows = [...document.querySelectorAll('[data-route="workspace-tools"] [data-slot="tool-row"]')]
+          return {
+            rows: rows.map((row) => ({ available: row.getAttribute('data-available'), tone: row.querySelector('[data-slot="status-dot"]')?.getAttribute('data-tone'), size: row.querySelector('[data-slot="status-dot"]')?.getBoundingClientRect().width, state: row.querySelector('dd')?.textContent, hint: row.querySelector('[data-slot="tool-hint"]')?.textContent ?? null, setup: row.querySelector('[data-slot="tool-setup"]')?.getBoundingClientRect().height ?? null })),
+            settings: document.querySelector('[data-slot="tools-settings"]')?.getBoundingClientRect().height,
+            overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+          }
+        })()`) as { rows: Array<{ available: string; tone: string; size: number; state: string; hint: string | null; setup: number | null }>; settings: number; overflow: boolean }
+        expect(page.rows.length).toBe(health.checks.length)
+        for (const row of page.rows) {
+          expect(row.size).toBe(7)
+          if (row.available === 'true') expect([row.tone, row.state?.startsWith('Installed'), row.setup]).toEqual(['success', true, null])
+          else expect([row.tone, row.state, row.hint]).toEqual(['danger', 'Not installed', 'Install it and reload the cockpit.'])
+        }
+        expect(page.rows.filter((row) => row.setup !== null)).toHaveLength(1)
+        expect(page.rows.find((row) => row.setup !== null)!.setup).toBeGreaterThanOrEqual(44)
+        expect(page.settings).toBeGreaterThanOrEqual(44)
+        expect(page.overflow).toBe(false)
+        mkdirSync('/tmp/i621/tools-shots', { recursive: true })
+        browser.screenshot(`/tmp/i621/tools-shots/tools-360x640-${variant.theme}.png`, { viewport: true })
+
+        browser.click('[data-slot="tools-settings"]')
+        browser.waitForFunction(`location.pathname.endsWith('/settings/agents')`)
+      } finally {
+        browser.unroute('**/api/v1/health')
+      }
+    })
+  }
+})

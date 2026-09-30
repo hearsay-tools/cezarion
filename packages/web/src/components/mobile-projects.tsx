@@ -247,14 +247,14 @@ export function DrawerGlobal({ onNavigate, tools }: { onNavigate: () => void; to
       {tools ? (
         // The desktop footer's Tools dropdown, as a plain row to the page that lists the same
         // probes. /tools does not itself explain a hidden GitHub tab, so the note rides here.
-        <RouterLink to="/tools" onClick={onNavigate} data-slot="drawer-tools" className={cn(ROW_CLASS, tools.note && 'h-auto min-h-[48px] py-[6px]')}>
+        <RouterLink to="/tools" onClick={onNavigate} data-slot="drawer-tools" aria-label={tools.blocked ? 'Tools, needs setup' : undefined} aria-describedby={tools.blocked && tools.note ? 'drawer-tools-note' : undefined} className={cn(ROW_CLASS, tools.note && 'h-auto min-h-[48px] py-[6px]')}>
           <span className="relative flex shrink-0">
             <WrenchIcon aria-hidden="true" />
-            {tools.blocked ? <StatusDot tone="pending" data-slot="drawer-tools-dot" className="absolute -top-[1px] -right-[2px] size-[6px]" /> : null}
+            {tools.blocked ? <StatusDot tone="pending" data-slot="drawer-tools-dot" className="absolute -top-[2px] -right-[3px] ring-[1.5px] ring-sidebar" /> : null}
           </span>
           <span className="flex min-w-0 flex-col">
             <span>Tools</span>
-            {tools.note ? <span data-slot="drawer-tools-note" className="text-[11.5px] leading-tight text-soft-foreground">{tools.note}</span> : null}
+            {tools.note ? <span id="drawer-tools-note" data-slot="drawer-tools-note" className="text-[11.5px] leading-tight text-soft-foreground">{tools.note}</span> : null}
           </span>
         </RouterLink>
       ) : null}

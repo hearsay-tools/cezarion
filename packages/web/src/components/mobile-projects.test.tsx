@@ -297,10 +297,14 @@ describe('mobile drawer', () => {
       const dot = tools().querySelector('[data-slot="drawer-tools-dot"]')
       expect(dot).not.toBeNull()
       expect(dot?.className).toContain('pending')
+      expect(dot?.className).toContain('ring-[1.5px]')
+      expect(dot?.className).toContain('ring-sidebar')
+      expect(tools().getAttribute('aria-label')).toBe('Tools, needs setup')
       cleanup()
       renderShell('/p/cezarion/', nav(), { toolsStatus: { blocked: false, note: null } })
       fireEvent.click(menuButton())
       expect(tools().querySelector('[data-slot="drawer-tools-dot"]')).toBeNull()
+      expect(tools().hasAttribute('aria-label')).toBe(false)
     })
 
     it('shows the forge note as the row’s second line, and only when there is one', () => {
