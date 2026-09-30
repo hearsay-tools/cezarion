@@ -82,6 +82,9 @@ describe('automatic Open Mercato skills updates', () => {
       config = await api('/api/v1/workspace/config')
     }
     expect(config.skillsAutoUpdate).toBe(false)
+    // Local run 1790759265447-4156089, lane-3-failures/skills-update/
+    // shows-the-inherited-global-preference-and-persists-an-explicit-override-1:
+    // the override persisted, but the disclosure stayed closed and its visible text omitted it.
     browser.waitForFunction('window.__cezIdle === true')
     browser.click('[data-slot="skills-settings-section"] details summary')
     const explanation = browser.waitForValue(`(() => {

@@ -88,6 +88,7 @@ function brandFacts(scope: string): BrandFacts {
   return browser.waitForValue(`(() => {
     const root = document.querySelector(${JSON.stringify(scope)})
     const wordmark = root.querySelector('[data-slot="project-header-name"]')
+    // Local run 1790758761212-3950840 lane-4.log: theme samples were "Loading project…" and "lane-4".
     // Registry loading paints a real placeholder with a different width. Measure identity
     // only after bootstrap settles, so the two theme samples describe the same project.
     if (window.__cezIdle !== true || !wordmark || wordmark.getBoundingClientRect().width === 0) return null
