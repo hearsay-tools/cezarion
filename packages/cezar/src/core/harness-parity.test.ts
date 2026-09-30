@@ -14,7 +14,7 @@
  *
  * Two tiers. The seam tier drives each real runner class against that backend's
  * own offline mock. The run tier drives a real `RunManager`, because
- * `ask.requested` comes from the RUNNER for codex and opencode and from
+ * `ask.requested` comes from the RUNNER for codex, opencode and cursor and from
  * `workflows/run.ts` for claude and pi — groups 1, 3 and 6 are only uniform
  * above the seam.
  */
@@ -114,7 +114,7 @@ const SEAM_CRITERIA: readonly SeamCriterion[] = [
     // and the run parks as "needs you" instead of monitoring.
     //
     // Each mock streams the strongest split its own wire permits: codex, opencode
-    // and pi split INSIDE the marker (deltas, growing snapshots, tokens), which
+    // cursor and pi split INSIDE the marker (deltas, growing snapshots, tokens), which
     // only a coalescer can reassemble; claude's stream-json has no deltas, so it
     // sends the marker as its own whole assistant block — the multi-block reply
     // that has to park correctly all the same.
@@ -152,7 +152,7 @@ const SEAM_CRITERIA: readonly SeamCriterion[] = [
       expect(errors[0]?.message.trim() ?? '').not.toBe('');
       // v2 must signal it too, but the CHANNEL is legitimately per-wire:
       // opencode and pi have a session-level error frame, codex reports a
-      // failed turn, and claude only has the result envelope's stop reason.
+      // failed turn (as does cursor), and claude only has the result envelope's stop reason.
       // What is uniform — and what #53/#54 were — is that v2 never reports the
       // rejection as a clean end of turn.
       expect(
@@ -195,7 +195,7 @@ const SEAM_CRITERIA: readonly SeamCriterion[] = [
   {
     // Group 7 — `resumeCommand()` and "open in CLI" need a session id after
     // every run. The two wires differ and both are legitimate: codex, opencode
-    // and pi mint their own and echo a v1 `session` event, while claude pins
+    // cursor and pi mint their own and echo a v1 `session` event, while claude pins
     // the id cezar supplied (`--session-id`, claude-cli-runner.ts:385) and
     // returns it on the result. What must never happen is neither — that is a
     // run nobody can resume.
@@ -299,7 +299,7 @@ const RUN_CRITERIA: readonly RunCriterion[] = [
   {
     // Group 3 / #6, #473 — an ask has to reach the cockpit as exactly one card
     // and park the run for the user. The two wires differ underneath: codex and
-    // opencode have a native question tool their runners map, claude and pi go
+    // opencode and cursor have native asks their runners map; claude and pi go
     // through the `CEZ:ASK` marker in `workflows/run.ts`. Above the seam that
     // difference must be invisible.
     id: 'R3',
@@ -402,6 +402,7 @@ const CONTROL_CRITERIA = [
   // harness-autosave.test.ts drives both cleanup paths with native runner wires.
   { id: 'R24', scenario: 'baseline' },
   { id: 'R25', scenario: 'baseline' },
+  { id: 'R26', scenario: 'ask-resume' },
 ] as const;
 
 /**
@@ -721,6 +722,59 @@ describe('harness parity — stored assistant ASK', () => {
       expect(askEvents(run)[0]?.questions).toMatchObject([{ header: 'Library', question: 'Which test library?' }]);
       expect(run.events.some(event => event.type === 'item.completed' && JSON.stringify(event.item).includes('CEZ:ASK'))).toBe(true);
     }, 60_000);
+  }
+});
+
+// #398: a native answer's turn boundary must not ask the human to prompt again.
+// R6 deliberately tests markerless owned-input draining; it cannot prove completion.
+describe('harness parity — answer to completion run tier', () => {
+  for (const backend of RUNNER_IDS) {
+    const exempt = exemptionFor('R26', backend);
+    if (exempt) {
+      it(`${backend} is exempt from R26 — ${exempt.reason}`, () => {
+        expect(exempt.kind).toBe('scenario-unconstructible');
+        expect(HARNESS_ADAPTERS[backend].askResumeCases).toEqual([]);
+        expect(HARNESS_ADAPTERS[backend].scenarios['ask-resume']).toBeUndefined();
+      });
+      continue;
+    }
+    for (const ask of HARNESS_ADAPTERS[backend].askResumeCases) {
+      it(`${backend} R26 completes after ${ask.kind} without another needs-you park`, async () => {
+        await withOwnedInputRun(backend, ask.scenario, async ({ store, manager, runId }) => {
+          manager.enqueueOwnedRun(runId);
+          await waitFor(() => store.getRun(runId)?.status === 'waiting');
+          expect(store.getRun(runId)?.hasPendingHumanAsk).toBe(true);
+          // Check the real ask card too: relabelling the question fixture as a
+          // plan fixture must not silently remove create_plan coverage.
+          const expectedHeader = ask.kind === 'cursor/create_plan' ? 'Plan'
+            : ask.kind === 'cursor/ask_question' ? 'Tests' : 'Library';
+          expect(store.readEvents(runId).find(event => event.type === 'ask.requested')?.questions)
+            .toMatchObject([{ header: expectedHeader }]);
+          const statuses: string[] = [];
+          const recordStatus = (run: { id: string; status: string }) => {
+            if (run.id === runId) statuses.push(run.status);
+          };
+          store.on('run', recordStatus);
+          try {
+            expect(manager.sendMessage(runId, [{ type: 'text', text: ask.answer }])).toBe(true);
+            expect(store.getRun(runId)?.status).toBe('running');
+            // The synchronous delivery checkpoint precedes the unpark.
+            statuses.length = 0;
+            await waitFor(() => !manager.isActive(runId) || statuses.includes('waiting'));
+            expect(statuses).not.toContain('waiting');
+            expect(store.getRun(runId)?.status).toBe('done');
+            expect(store.getRun(runId)?.steps[0]?.status).toBe('done');
+            expect(store.getRun(runId)?.hasPendingHumanAsk).toBe(false);
+          } finally {
+            store.off('run', recordStatus);
+          }
+          const events = store.readEvents(runId);
+          expect(events.filter(event => event.type === 'ask.requested')).toHaveLength(1);
+          expect(events.filter(event => event.type === 'user-message').map(event => event.text)).toEqual([ask.answer]);
+          expect(events.filter(event => event.type === 'human-input-delivered')).toHaveLength(1);
+        });
+      }, 45_000);
+    }
   }
 });
 
@@ -1104,6 +1158,41 @@ describe('harness parity — the matrix itself', () => {
     expect(missing).toEqual([]);
   });
 
+  it('R26 enumerates each runner ask path with a live prompt or a named exemption', () => {
+    // Independent wire inventory: deleting an adapter variant must fail this
+    // guard, even when another ask kind still exercises the same backend.
+    const expectedKinds: Record<RunnerId, readonly string[]> = {
+      claude: ['CEZ:ASK'],
+      codex: ['item/tool/requestUserInput'],
+      opencode: ['question.asked'],
+      pi: ['CEZ:ASK'],
+      cursor: ['cursor/ask_question', 'cursor/create_plan'],
+    };
+    for (const backend of RUNNER_IDS) {
+      const cases = HARNESS_ADAPTERS[backend]?.askResumeCases;
+      expect(cases).toBeDefined();
+      if (exemptionFor('R26', backend)) continue;
+      expect(cases.map(ask => ask.kind)).toEqual(expectedKinds[backend]);
+      expect(cases.length).toBeGreaterThan(0);
+      expect(new Set(cases.map(ask => ask.kind)).size).toBe(cases.length);
+      expect(cases.some(ask => ask.scenario === 'ask-resume')).toBe(true);
+      for (const ask of cases) {
+        expect(ask.kind.trim()).not.toBe('');
+        expect(ask.answer.trim()).not.toBe('');
+        expect(promptFor(backend, ask.scenario).trim()).not.toBe('');
+      }
+    }
+  });
+
+  it('protocol and matrix prose name runners without a counted roster', () => {
+    const countedRunners = /\b(?:[2-9]\d*|1\d+|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+(?:(?:real|offline|native|supported|existing|unrelated|passing|per-runner|wire)\s+)*(?:runners?|backends?|mocks?|mock selectors|test files)\b/gi;
+    for (const path of ['AGENT_PROTOCOL.md', '.ai/specs/2026-09-04-harness-parity-matrix.md',
+      'packages/cezar/src/core/harness-parity.test.ts', 'packages/cezar/src/core/harness-parity.testkit.ts']) {
+      const source = readFileSync(new URL(`../../../../${path}`, import.meta.url), 'utf8');
+      expect(source.match(countedRunners) ?? [], path).toEqual([]);
+    }
+  });
+
   it('every runner id has an adapter', () => {
     for (const backend of RUNNER_IDS) {
       expect(HARNESS_ADAPTERS[backend]?.backend).toBe(backend);
@@ -1290,7 +1379,7 @@ describe('harness parity — AgentRunSpec support declarations', () => {
   it('every runner id builds its own runner, declaring every AgentRunSpec field with a reason', () => {
     for (const backend of RUNNER_IDS) {
       const runner = createRunner(backend);
-      // A fifth id with no factory case falls through to claude; that is not a declaration.
+      // A new RUNNER_IDS member with no factory case falls through to claude; that is not a declaration.
       expect(runner.backend).toBe(backend);
       expect(Object.keys(runner.specSupport).sort()).toEqual([...AGENT_RUN_SPEC_FIELDS].sort());
       for (const field of AGENT_RUN_SPEC_FIELDS) {

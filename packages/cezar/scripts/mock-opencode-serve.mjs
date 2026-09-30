@@ -356,7 +356,7 @@ const server = createServer((req, res) => {
       }
       if (body.includes('mock:ask')) {
         lateQuestionReply = body.includes('mock:ask-reply-late');
-        answerDone = body.includes('mock:ask-reply-late-done');
+        answerDone = body.includes('mock:ask-reply-late-done') || body.includes('mock:resume-done');
         // The native question tool (#6). No `session.idle` follows: a real ask
         // holds the turn open until the answer is routed back.
         send({ type: 'message.updated', properties: { info: info({}) } });

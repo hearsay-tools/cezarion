@@ -59,6 +59,7 @@ if (process.env.CEZ_MOCK_CI_PR) { const { probeCiTool } = await import('./mock-c
 emit({ type: 'system', subtype: 'init' });
 
 let turn = 0;
+let resumeAfterAsk = false;
 // #505: `--replay-user-messages` echoes each stdin line when the model consumes it.
 const replay = process.argv.includes('--replay-user-messages') && process.env.CEZ_MOCK_CLAUDE_NO_REPLAY !== '1';
 const emitReplay = (uuid, text) => {
@@ -164,7 +165,9 @@ async function respond(userText, imageCount, uuid) {
   await sleep(250);
   // `mock:done` anywhere in the message → the reply ends with the CEZ:DONE
   // completion marker (#347), so the auto-close path is testable dry.
-  const doneMarker = userText.includes('mock:done') ? '\n\nCEZ:DONE' : '';
+  const answered = resumeAfterAsk && userText.trim() === 'Library: Vitest';
+  resumeAfterAsk = userText.includes('mock:ask') && userText.includes('mock:resume-done');
+  const doneMarker = (userText.includes('mock:done') || answered) ? '\n\nCEZ:DONE' : '';
   // `mock:monitoring` → the reply ends with CEZ:MONITORING, the "still working
   // on downstream work" marker (#490), so the monitoring-status path is testable dry.
   const monitoringMarker = userText.includes('mock:monitoring') ? '\n\nCEZ:MONITORING' : '';

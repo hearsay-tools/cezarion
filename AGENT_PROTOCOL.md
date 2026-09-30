@@ -400,8 +400,9 @@ two, so drift fails `npm run typecheck` (the gate) rather than the UI at runtime
 ### Design rules baked in
 
 1. **Item-lifecycle model** (Codex/ACP style): one stable `id` per item with
-   `started → delta → updated → completed` phases. Two of the three backends are
-   natively item-shaped; claude maps trivially.
+   `started → delta → updated → completed` phases. Codex and OpenCode are
+   natively item-shaped; Claude maps trivially. Every `RUNNER_IDS` backend implements
+   this lifecycle through its mapper.
 2. **ACP vocabulary** wherever a choice is arbitrary (tool status/kind, plan
    entries, diff shape, stop reasons) — ecosystem alignment.
 3. **Per-capability degradation, never per-backend** — see §6.
@@ -463,7 +464,7 @@ type UiEvent =
 backend-neutral: the agent asks a structured
 multiple-choice question by ending a turn with a `CEZ:ASK <json>` control marker
 (a sibling of `CEZ:DONE` / `CEZ:MONITORING`); the RunManager detects it on the
-*assembled* turn text — uniform across claude, codex and opencode with no mapper
+*assembled* turn text — uniform across `RUNNER_IDS` with no mapper
 work — validates the payload (`packages/cezar/src/core/ask.ts`, modeled on Claude Code's
 `AskUserQuestion`: 1–4 questions, 2–4 options each, `header` ≤12 chars), emits
   `ask.requested` and parks the run `waiting`. A mid-turn `sendMessage` that a
@@ -776,7 +777,7 @@ that another runner constructs or attributes that event correctly.
 backend's own offline mock and asserts over the v1 and v2 streams plus the
 settled result. The run tier drives a real `RunManager` run in a temp git repo.
 The second tier is not redundant: `ask.requested` is emitted by the RUNNER for
-codex and opencode (`codex-app-server-runner.ts`, `opencode-server-runner.ts`)
+codex, opencode and cursor (`codex-app-server-runner.ts`, `opencode-server-runner.ts`, `cursor-acp-runner.ts`)
 and by `workflows/run.ts` for claude and pi, and whether a provider failure
 fails the run or parks it is decided in the orchestrator either way. Provider
 failures, asks and park declarations are only uniform above the seam.
@@ -794,6 +795,8 @@ it, so no existing marker is renamed. A new runner declares its own map:
 | `split-text` | stream the reply in pieces, ending with a trailing `CEZ:MONITORING` |
 | `provider-error` | a runtime provider rejection in its own native error shape |
 | `ask` | an ask — native where the wire has one, a `CEZ:ASK` marker otherwise |
+| `ask-resume` | ask, accept a human answer, then complete work with `CEZ:DONE` without another human prompt |
+| `plan-resume` | Cursor’s `cursor/create_plan` variant of `ask-resume` |
 | `ask-bad` | a malformed ask, and then still end the turn |
 | `ask-reply-late` | the same ask, with OpenCode SSE idle preceding the independent reply HTTP acknowledgement |
 | `subagent` | child work and a child terminal signal the parent survives, then parent `CEZ:MONITORING` text followed by child text before parent turn-end |
@@ -807,6 +810,16 @@ R12 asserts the `subagent` turn parks as `running`/`monitoring`, never `waiting`
 session transcript. Codex filters both child message deltas and completions;
 Claude excludes child assistant text from v1 and its result fallback buffer;
 the v2 fallback uses the same parent-only guard.
+
+R26 (#398) runs every `HARNESS_ADAPTERS.askResumeCases` entry for every
+`RUNNER_IDS` backend: Claude/Pi `CEZ:ASK`, Codex `item/tool/requestUserInput`,
+OpenCode `question.asked`, and Cursor `cursor/ask_question` plus `cursor/create_plan`.
+One human answer must reach completion with no later `waiting` transition and no
+second human prompt. R3 proves parking; R6 deliberately returns to markerless
+waiting to test owned-input draining. Neither replaces R26. New runners must
+supply a nonempty ask-kind inventory and native prompts, or a named executable
+wire exemption. The prose guard rejects counted runner rosters in this contract,
+the #68 spec and harness-parity comments so adding an id cannot stale their counts.
 
 R15 (#121/#401) releases native child updates only after the run has parked,
 then checks that status, activity and the monitoring wake deadline survive.
@@ -1111,7 +1124,12 @@ To be first-class:
    A native bridge must keep its pending request in that runner's `AgentSession` state and
    route the next human answer through the same state back to the provider. Harness rows R3
    and R4 pin valid and malformed asks; R6 and R7 pin human-answer routing, queued agent
-   input, and recovery with an unanswered ask.
+   input, and recovery with an unanswered ask. R26 pins completion after answering
+   every exposed human ask kind in `askResumeCases`. A native-answer `end_turn`
+   does not hand off to the human: resume the work unless the agent declares a
+   terminal state, monitoring or another ask. Extra native kinds such as
+   `create_plan` (and permissions if exposed as human asks) need the same resume
+   coverage. Cursor permissions currently auto-resolve and do not create human asks.
    CI-wait exposure must also satisfy the CI-wait contract above: declare
    `cezarTools` in `specSupport`, preserve user configuration, prove discovery and
    actual invocation on fresh/resumed/recovered sessions, and verify the installed
@@ -1189,7 +1207,7 @@ To be first-class:
 ## 11. The plan channel (PR #443)
 
 PR #443 (`fix/issue-433-render-plan-todo`, open at the time of writing) hardens
-`plan.updated` across all three backends after finding the plan never reached the
+`plan.updated` across Claude, Codex and OpenCode after finding the plan never reached the
 cockpit dock — for a different reason on each backend. Its direction, which any
 new runner should follow:
 
@@ -1231,4 +1249,4 @@ breaking change requiring the documented deprecation path.
 
 A CEZ:ASK payload missing only closing braces/brackets after a complete structural value gets one bounded repair, then the existing schema validation. Mid-string truncation, mismatched delimiters and invalid question structures remain rejected. Fresh and continuation turns persist a danger note for recovery or rejection; a recovered card warns users to check the options and how many they may pick, since repair cannot restore missing meaning. The raw recovered marker stays in the audit stream until the cockpit hides it alongside a validated card, preserving rejected split-stream fallback. Existing and unknown note tones stay dim. DONE/ASK precedence, Claude wakeups and monitoring serialization are unchanged.
 
-Harness row S13 verifies the late auto-end veto and subsequent reply completion against all four real offline runner wires.
+Harness row S13 verifies the late auto-end veto and subsequent reply completion against every `RUNNER_IDS` backend’s real offline wire.

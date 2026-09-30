@@ -63,6 +63,7 @@ const emit = (obj) => {
 };
 let lateStartAck;
 let startSerial = 0;
+let resumeAfterAsk = false;
 const rl = createInterface({ input: process.stdin });
 let echoSerial = 0;
 let ciWire;
@@ -99,6 +100,13 @@ rl.on('line', async (line) => {
   } else if (msg.id === 'ask-1' && msg.result) {
     const answer = msg.result.answers?.library?.answers;
     const freeText = msg.result.answers?.first?.answers;
+    if (resumeAfterAsk && Array.isArray(answer) && answer[0] === 'Vitest') {
+      resumeAfterAsk = false;
+      const text = 'Implemented the choice.\nCEZ:DONE';
+      emit({ method: 'item/started', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: 'item_answer', text: '' } } });
+      emit({ method: 'item/agentMessage/delta', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', itemId: 'item_answer', delta: text } });
+      emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: 'item_answer', text } } });
+    }
     emit((Array.isArray(answer) && answer[0] === 'Vitest') || (Array.isArray(freeText) && freeText[0] === 'Use sensible defaults')
       ? { method: 'turn/completed', params: { turn: { id: 'turn_mock_1', status: 'completed' } } }
       : { method: 'turn/failed', params: { turn: { id: 'turn_mock_1', status: 'failed' }, error: { message: 'bad answer' } } });
@@ -355,6 +363,7 @@ rl.on('line', async (line) => {
       return;
     }
     if (process.env.MOCK_CODEX_ASK === '1' || turnText.includes('mock:native-codex-ask')) {
+      resumeAfterAsk = turnText.includes('mock:resume-done');
       const questions = turnText.includes('multi free text')
         ? [{ id: 'first', header: 'First', question: 'First choice?', isOther: true, isSecret: false,
             options: [{ label: 'A', description: 'Option A.' }, { label: 'B', description: 'Option B.' }] },
