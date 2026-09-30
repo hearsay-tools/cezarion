@@ -44,8 +44,9 @@ const VIEWER = 'octocat'
 const SEARCH_MAX = 50
 const REVIEW_QUERY = '**/github/search?*review-requested*'
 const FAILING_QUERY = '**/github/search?*status*'
-// API only: a bare `**/github?*` also matches the page's own document URL (`/p/x/github?filter=all`).
-const LIST_ROUTE = '**/api/v1/**/github?*'
+// The list request is the only one carrying `limit=`; a bare `**/github?*` would also match the
+// page's own document URL (`/p/x/github?filter=all`), and the boot project is served unscoped.
+const LIST_ROUTE = '**/github?limit=*'
 
 let root: string
 let base: string
