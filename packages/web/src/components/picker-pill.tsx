@@ -1,5 +1,5 @@
-import { ChevronDownIcon } from '@/components/design-icons'
-import { createContext, useCallback, useContext, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { ChevronDownIcon, SearchIcon } from '@/components/design-icons'
+import { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 
 import { DEFAULT_AGENT_ACCOUNT_ID, type Runner } from '@open-mercato/cezar-api-client'
@@ -174,6 +174,7 @@ export function PickerPill({
   hint,
   disabledHint,
   status,
+  searchPlaceholder,
   icon,
   fieldLabel = false,
 }: {
@@ -194,7 +195,27 @@ export function PickerPill({
   disabledHint?: string
   /** Quiet non-selectable catalog state, kept inside the menu's accessible reading order. */
   status?: string
+  /** Add a name filter above longer option catalogs. */
+  searchPlaceholder?: string
 }) {
+  const [open, setOpen] = useState(false)
+  const [search, setSearch] = useState('')
+  const searchRef = useRef<HTMLInputElement>(null)
+  const contentRef = useRef<HTMLDivElement>(null)
+  const visibleOptions = searchPlaceholder
+    ? options.filter((option) => option.label.toLowerCase().includes(search.trim().toLowerCase()))
+    : options
+
+  useEffect(() => {
+    if (!open || !searchPlaceholder) return
+    const timeout = window.setTimeout(() => searchRef.current?.focus())
+    return () => window.clearTimeout(timeout)
+  }, [open, searchPlaceholder])
+
+  const retainSearchFocus = (event: PointerEvent<HTMLElement>) => {
+    if (searchRef.current && document.activeElement === searchRef.current) event.preventDefault()
+  }
+
   const presentation = icon ? ' h-11 gap-2 rounded-lg border-border px-3 text-foreground' : ''
   const fullLabel = fieldLabel
     ? `${ariaLabel} · ${typeof label === 'string' ? label : options.find(option => option.value === value)?.label ?? value}`
@@ -241,12 +262,61 @@ export function PickerPill({
     )
   }
   return (
-    <DropdownMenu>
+    <DropdownMenu
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next)
+        if (!next) setSearch('')
+      }}
+    >
       <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>
-      <DropdownMenuContent align="start" data-testid={`${slot}-menu`}>
+      <DropdownMenuContent ref={contentRef} align="start" data-testid={`${slot}-menu`}>
+        {searchPlaceholder ? (
+          <div className="mb-1 flex min-h-11 items-center gap-2 border-b border-border px-2">
+            <SearchIcon aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
+            <input
+              ref={searchRef}
+              type="search"
+              aria-label={searchPlaceholder}
+              placeholder={searchPlaceholder}
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                  event.preventDefault()
+                  event.stopPropagation()
+                  const options = contentRef.current?.querySelectorAll<HTMLElement>(
+                    '[role="menuitemradio"]:not([data-disabled])',
+                  )
+                  const next = event.key === 'ArrowDown' ? options?.[0] : options?.[options.length - 1]
+                  next?.focus()
+                } else if (event.key !== 'Escape') {
+                  // Keep printable keys out of Radix's typeahead. Once an arrow moves focus into
+                  // the menu, Radix owns the usual ArrowUp/ArrowDown/Enter interaction again.
+                  event.stopPropagation()
+                }
+              }}
+              className="h-11 w-48 min-w-0 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+            />
+          </div>
+        ) : null}
         <DropdownMenuRadioGroup value={value} onValueChange={onPick}>
-          {options.map((option) => (
-            <DropdownMenuRadioItem key={option.value} value={option.value} className="gap-2.5">
+          {visibleOptions.map((option) => (
+            <DropdownMenuRadioItem
+              key={option.value}
+              value={option.value}
+              className={cn('gap-2.5', searchPlaceholder && 'min-h-11')}
+              onPointerMove={retainSearchFocus}
+              onPointerLeave={retainSearchFocus}
+              onKeyDown={(event) => {
+                if (searchRef.current && ((event.key === 'ArrowUp' && option === visibleOptions[0])
+                  || (event.key === 'Tab' && event.shiftKey))) {
+                  event.preventDefault()
+                  event.stopPropagation()
+                  searchRef.current.focus()
+                }
+              }}
+            >
               <span className="flex min-w-0 flex-col">
                 <span className="text-[13px] font-medium">{option.label}</span>
                 {option.desc ? (
@@ -256,8 +326,11 @@ export function PickerPill({
             </DropdownMenuRadioItem>
           ))}
         </DropdownMenuRadioGroup>
+        {searchPlaceholder && visibleOptions.length === 0 ? (
+          <p role="status" className="px-2 py-5 text-center text-xs text-muted-foreground">No matches found.</p>
+        ) : null}
         {status ? (
-          <DropdownMenuItem disabled className="border-t border-border text-[11px] text-muted-foreground">
+          <DropdownMenuItem disabled onPointerMove={retainSearchFocus} onPointerLeave={retainSearchFocus} className="border-t border-border text-[11px] text-muted-foreground">
             {status}
           </DropdownMenuItem>
         ) : null}

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
+import { dismissWithEscape } from './contrast'
 import { stopFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv, getJson } from './agent-browser'
 import { pollFor, waitForHealth } from './poll'
@@ -55,6 +56,8 @@ beforeAll(async () => {
   writeFileSync(join(dataRoot, 'README.md'), '# new-task e2e fixture repo\n', 'utf8')
   git('add', '.')
   git('commit', '-qm', 'init')
+  git('branch', 'feature/searchable-base')
+  git('branch', 'develop')
 
   // TWO project skills, so the spec can prove an actual PICK (not just the default): the
   // picker defaults to the first project skill, then we choose the other one.
@@ -102,6 +105,73 @@ afterAll(async () => {
 })
 
 describe('the full-screen /new against a live dry-run server', () => {
+  it.each([
+    { width: 1440, height: 900, theme: 'light' },
+    { width: 360, height: 640, theme: 'dark' },
+  ])('filters base branches with keyboard selection at $width px in $theme', async ({ width, height, theme }) => {
+    try {
+      browser.goto(`${baseUrl}${scoped('/new')}`)
+      browser.evaluate(`localStorage.setItem('cez-theme', ${JSON.stringify(theme)})`)
+      browser.goto(`${baseUrl}${scoped('/new')}`)
+      browser.setViewport(width, height)
+      const trigger = '[data-slot="base-pill"]'
+      const search = 'input[type="search"][aria-label="Search branches…"]'
+      browser.click(trigger)
+      browser.waitForFunction(`document.activeElement === document.querySelector('${search}')`)
+      browser.fill(search, ' SEARCH')
+      browser.hover('[role="menuitemradio"]')
+      browser.waitForFunction(`document.activeElement === document.querySelector('${search}')`)
+      browser.press('A')
+      browser.waitForFunction(`document.querySelector('${search}')?.value.toLowerCase().includes('searcha')`)
+      browser.fill(search, ' SEARCHABLE ')
+      expect(browser.waitForValue(`Array.from(document.querySelectorAll('[role="menuitemradio"]')).map(el => el.textContent)`,
+        value => Array.isArray(value) && value.length === 1)).toEqual(['feature/searchable-base'])
+      const geometry = browser.waitForValue(`(() => {
+        const menu = document.querySelector('[data-testid="base-pill-menu"]')
+        const input = document.querySelector('${search}')
+        const option = document.querySelector('[role="menuitemradio"]')
+        if (!menu || !input || !option || menu.getAnimations().some(animation => animation.playState === 'running')) return null
+        const box = menu.getBoundingClientRect()
+        return { left: box.left, right: box.right, inputHeight: input.getBoundingClientRect().height, optionHeight: option.getBoundingClientRect().height }
+      })()`) as { left: number; right: number; inputHeight: number; optionHeight: number }
+      expect(geometry.left).toBeGreaterThanOrEqual(0)
+      expect(geometry.right).toBeLessThanOrEqual(width)
+      expect(geometry.inputHeight).toBeGreaterThanOrEqual(44)
+      expect(geometry.optionHeight).toBeGreaterThanOrEqual(44)
+      browser.screenshot(`${artifactsDir}/base-branch-filter-${theme}.png`, { viewport: true })
+      // agent-browser fill('') clears the DOM without the input event React needs.
+      browser.click(search)
+      browser.press('Control+a')
+      browser.press('Backspace')
+      expect(browser.waitForValue(`document.querySelectorAll('[role="menuitemradio"]').length`, value => value === 4)).toBe(4)
+      browser.fill(search, 'no-match')
+      browser.waitForFunction(`document.querySelector('[data-testid="base-pill-menu"] [role="status"]') !== null`)
+      browser.press('ArrowDown')
+      browser.waitForFunction(`document.activeElement === document.querySelector('${search}')`)
+      dismissWithEscape(browser, { content: '[data-testid="base-pill-menu"]', focus: trigger })
+      browser.click(trigger)
+      expect(browser.waitForValue(`document.querySelector('${search}')?.value`, value => value === '')).toBe('')
+      browser.fill(search, 'searchable')
+      browser.press('ArrowDown')
+      browser.waitForFunction(`document.activeElement?.getAttribute('role') === 'menuitemradio'`)
+      browser.press('ArrowUp')
+      browser.waitForFunction(`document.activeElement === document.querySelector('${search}')`)
+      browser.fill(search, 'SEARCHABLE')
+      browser.press('ArrowDown')
+      browser.waitForFunction(`document.activeElement?.getAttribute('role') === 'menuitemradio'`)
+      browser.press('Enter')
+      browser.waitForFunction(`document.querySelector('${trigger}')?.textContent.includes('feature/searchable-base') && !document.querySelector('[data-testid="base-pill-menu"]')`)
+      expect((await getJson<{ baseBranch: string }>(`${baseUrl}/api/v1/config`)).baseBranch).toBe('feature/searchable-base')
+    } finally {
+      browser.setViewport(1440, 900)
+      const reset = await fetch(`${baseUrl}/api/v1/config`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ baseBranch: null }),
+      })
+      expect(reset.ok).toBe(true)
+      browser.evaluate("localStorage.setItem('cez-theme', 'light')")
+    }
+  })
+
   it('the sidebar CTA client-navigates to the React hero, focus already in the textarea', () => {
     browser.goto(`${baseUrl}${scoped('/')}`)
     browser.waitForFunction(

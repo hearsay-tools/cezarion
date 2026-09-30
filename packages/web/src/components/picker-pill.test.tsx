@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PickerPill, PickerPillGroup } from './picker-pill'
 
@@ -185,6 +185,61 @@ describe('PickerPill catalog status', () => {
     )
     fireEvent.pointerDown(screen.getByRole('button', { name: 'Model' }))
     expect(await screen.findAllByRole('menuitemradio')).toHaveLength(2)
+    expect(screen.queryByRole('searchbox')).toBeNull()
     expect(screen.getByText('Using cached Codex model list').closest('[data-disabled]')).not.toBeNull()
+  })
+
+  it('keeps typing focus when the pointer crosses options and lets keyboard users refine a query', async () => {
+    render(<PickerPill slot="branch-pill" ariaLabel="Base branch" label="main" value="main"
+      onPick={() => {}} options={[{ value: 'main', label: 'main' }, { value: 'feature/search', label: 'feature/search' }]}
+      searchPlaceholder="Search branches…" />)
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Base branch' }))
+    const search = await screen.findByRole('searchbox')
+    await waitFor(() => expect(document.activeElement).toBe(search))
+    fireEvent.change(search, { target: { value: 'feature' } })
+    const option = screen.getByRole('menuitemradio', { name: 'feature/search' })
+    fireEvent.pointerMove(option, { pointerType: 'mouse' })
+    expect(document.activeElement).toBe(search)
+    fireEvent.pointerLeave(option, { pointerType: 'mouse' })
+    expect(document.activeElement).toBe(search)
+    fireEvent.keyDown(search, { key: 'ArrowDown' })
+    expect(document.activeElement).toBe(option)
+    fireEvent.keyDown(option, { key: 'ArrowUp' })
+    await waitFor(() => expect(document.activeElement).toBe(search))
+    fireEvent.change(search, { target: { value: 'main' } })
+    expect(screen.getAllByRole('menuitemradio').map(el => el.textContent)).toEqual(['main'])
+  })
+
+  it.each([['ArrowDown', 'feature/search'], ['ArrowUp', 'feature/second']])('uses %s to enter filtered options for keyboard selection', async (key, selected) => {
+    const onPick = vi.fn()
+    render(
+      <PickerPill
+        slot="branch-pill"
+        ariaLabel="Base branch"
+        label="main"
+        value="main"
+        onPick={onPick}
+        options={[
+          { value: 'main', label: 'main' },
+          { value: 'feature/search', label: 'feature/search' },
+          { value: 'feature/second', label: 'feature/second' },
+        ]}
+        searchPlaceholder="Search branches…"
+      />,
+    )
+
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Base branch' }))
+    const search = await screen.findByRole('searchbox', { name: 'Search branches…' })
+    await waitFor(() => expect(document.activeElement).toBe(search))
+    fireEvent.change(search, { target: { value: 'missing' } })
+    fireEvent.keyDown(search, { key })
+    expect(document.activeElement).toBe(search)
+    fireEvent.change(search, { target: { value: 'feature' } })
+    fireEvent.keyDown(search, { key })
+
+    const option = screen.getByRole('menuitemradio', { name: selected })
+    expect(document.activeElement).toBe(option)
+    fireEvent.keyDown(option, { key: 'Enter' })
+    await waitFor(() => expect(onPick).toHaveBeenCalledWith(selected))
   })
 })
