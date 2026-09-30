@@ -111,13 +111,13 @@ describe('settings → appearance against the live dry-run server', () => {
   it('compact density measurably tightens the spacing scale', async () => {
     const header = `document.querySelector('[data-route="settings-global-appearance"] header')`
     const section = `document.querySelector('[data-slot="appearance-section"]')`
-    expect(Number(browser.evaluate(`${header}.offsetHeight`))).toBe(70)
+    expect(Number(browser.evaluate(`${header}.offsetHeight`))).toBe(94)
     expect(Number(browser.evaluate(`parseFloat(getComputedStyle(${section}).rowGap)`))).toBe(28)
 
     browser.click('[data-slot="appearance-density"] [data-value="compact"]')
     browser.waitForFunction(`document.documentElement.dataset.density === 'compact'`)
-    // Compact spacing reduces the route header gap by 1px while preserving its title/context.
-    expect(Number(browser.evaluate(`${header}.offsetHeight`))).toBe(69)
+    // The relocated storage note adds a third header row; compact reduces both gaps by 1px.
+    expect(Number(browser.evaluate(`${header}.offsetHeight`))).toBe(92)
     expect(Number(browser.evaluate(`parseFloat(getComputedStyle(${section}).rowGap)`))).toBe(24.5)
     await waitForServerAppearance(baseUrl, (a) => a.density === 'compact')
 

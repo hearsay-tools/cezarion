@@ -943,7 +943,7 @@ it('keeps sidebar data on the URL project when rendered above the route scope pr
   expect(document.querySelector('[data-slot="task-row"] a')?.getAttribute('href')).toBe('/p/shop/tasks/right')
 })
 
-it.each(['/tasks', '/settings/global/projects'])('keeps sidebar navigation on its displayed boot project from %s', async (entry) => {
+it.each(['/tasks', '/tools'])('keeps sidebar navigation on its displayed boot project from %s', async (entry) => {
   setApiScope('shop')
   serve({
     '/api/v1/health': { ...HEALTH, bootProject: 'cezar' },
@@ -963,4 +963,36 @@ it.each(['/tasks', '/settings/global/projects'])('keeps sidebar navigation on it
   // Publishing navigation context must not change the routed view's API scope.
   const { queryScope } = await import('@open-mercato/cezar-api-client')
   expect(queryScope()).toBe('shop')
+})
+
+it.each(['/p/shop/settings/agents', '/settings/global/appearance'])('shows scoped Settings groups instead of tasks at %s', async (entry) => {
+  serve({
+    '/api/v1/health': { ...HEALTH, bootProject: 'cezar' },
+    '/api/v1/todos': [],
+    '/api/v1/projects': { bootProject: 'cezar', projects: [PROJECT, { ...PROJECT, id: 'shop', name: 'Shop' }] },
+  })
+  renderShell(entry)
+  const project = entry.startsWith('/p/shop') ? 'shop' : 'cezar'
+  const group = await screen.findByRole('navigation', { name: `This project · ${project === 'shop' ? 'Shop' : 'cezar'}` })
+  expect(within(group).getByRole('link', { name: 'Agents' }).getAttribute('href')).toBe(`/p/${project}/settings/agents`)
+  expect(within(group).getByRole('link', { name: 'General' }).getAttribute('href')).toBe(`/p/${project}/settings`)
+  const global = screen.getByRole('navigation', { name: 'Global · every project' })
+  expect(within(global).getByRole('link', { name: 'Appearance' }).getAttribute('href')).toBe('/settings/global/appearance')
+  expect(within(global).getByRole('link', { name: 'General' }).getAttribute('href')).toBe('/settings/global')
+  expect(within(global).queryByRole('link', { name: 'Keyboard' })).toBeNull()
+  const selected = document.querySelector('[data-slot="settings-sidebar"] [aria-current="page"]')
+  expect(selected?.getAttribute('href')).toBe(entry)
+  expect(document.querySelector('[data-slot="task-quick-list"]')).toBeNull()
+})
+
+it('applies single-project visibility to the Settings sidebar', async () => {
+  serve({
+    '/api/v1/health': { ...HEALTH, capabilities: { ...HEALTH.capabilities, singleProject: true } },
+    '/api/v1/todos': [],
+    '/api/v1/projects': { bootProject: 'cezar', projects: [PROJECT] },
+  })
+  renderShell('/settings/global/resources')
+  const group = await screen.findByRole('navigation', { name: 'Global · every project' })
+  await waitFor(() => expect(within(group).queryByRole('link', { name: 'Projects' })).toBeNull())
+  expect(within(group).getByRole('link', { name: 'Resources' }).getAttribute('aria-current')).toBe('page')
 })

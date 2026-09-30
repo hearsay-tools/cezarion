@@ -14,7 +14,8 @@ import { useWorkspaceSignals } from '@/components/use-workspace-signals'
 import { TaskQuickListContainer } from '@/components/task-quick-list'
 import { ToolsMenu, forgeNote, toolsBlocker } from '@/components/tools-menu'
 import { useDocumentTitle } from '@/lib/use-document-title'
-import { useActiveProjectId } from '@/lib/project-router'
+import { SettingsSidebar } from '@/routes/settings/settings-sidebar'
+import { useActiveProjectId, stripProjectPrefix } from '@/lib/project-router'
 import { listCounts, runTitle } from '@/lib/task-groups'
 import { pageTitleContext } from '@/routes'
 
@@ -137,6 +138,13 @@ export function AppShellContainer({ children }: { children: ReactNode }) {
         // Hidden unless health reports the opt-in automations capability (#801).
         automationsAvailable={automationsAvailable}
         banner={<ProviderBannerContainer />}
+        sidebarList={/^\/settings(?:\/|$)/.test(stripProjectPrefix(pathname)) ? (
+          <SettingsSidebar
+            projectId={sidebarProjectId}
+            projectName={registry?.projects.find((project) => project.id === sidebarProjectId)?.name ?? (sidebarBoot ? repoChipOf(health.data)?.name ?? null : null)}
+            capabilities={health.data?.capabilities}
+          />
+        ) : undefined}
         taskQuickList={<TaskQuickListContainer projectId={sidebarProjectId} boot={sidebarBoot} />}
         sidebarProjectId={sidebarProjectId}
         projectHeader={<SidebarProjectHeader />}

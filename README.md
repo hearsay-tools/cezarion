@@ -406,11 +406,17 @@ These read and write `~/.cezar/config.json` directly, so they work with the
 server stopped, and `CEZ_HOME` selects which workspace they operate on.
 
 Settings split along the same line: **General** (the project's folder, its
-registry facts, its parallel-task ceiling, and Remove), **Agents**,
-**Worktrees**, **Bookmarklets**, **Prompt templates** and **MCP** describe one
+registry facts, its parallel-task ceiling, and Remove), **Agents**, **Agent config**,
+**Worktrees**, **Bookmarklets** and **Prompt templates** describe one
 repo and live under `/p/<projectId>/settings`; **Appearance**,
-**Notifications**, **Resources**, **Projects** and **Keyboard** are yours or the
-machine's and live at `/settings/global`.
+**Notifications**, **Resources**, **Skills**, **Agent accounts** and **Projects**
+are yours or the machine's and live at `/settings/global`.
+
+On desktop, Settings replaces the sidebar task list with two groups: **This project**
+and **Global · every project**. Each group includes General and its available sections;
+the current section is highlighted, and the main page shows its content. On mobile,
+the section picker and General page's section cards provide navigation. Other views
+continue to show tasks in the sidebar.
 
 ### Grouping connected repositories: tags and the All tasks page
 
