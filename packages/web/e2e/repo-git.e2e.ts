@@ -70,9 +70,11 @@ describe('the repo view against the live dry-run server', () => {
 
     // Three segment tabs, Changes active.
     expect(browser.count('[data-slot="repo-tabs"] a')).toBe(3)
+    // The Changes segment may carry `?view=repo` (#622) so it does not bounce to the phone's
+    // worktree screen; the path is what identifies the segment.
     expect(
       browser.evaluate(
-        `document.querySelector('[data-slot="repo-tabs"] a[aria-current="page"]').getAttribute('href')`,
+        `new URL(document.querySelector('[data-slot="repo-tabs"] a[aria-current="page"]').getAttribute('href'), location.href).pathname`,
       ),
     ).toBe(scoped('/git'))
 
@@ -162,7 +164,8 @@ describe('the repo view against the live dry-run server', () => {
     browser.setViewport(IPHONE.width, IPHONE.height)
     try {
       const changes = await api<{ files: unknown[] }>('/api/v1/repo/changes')
-      browser.goto(`${baseUrl}${scoped('/git')}`)
+      // Bare /git is the worktree screen below md (#622); the repository is one link away.
+      browser.goto(`${baseUrl}${scoped('/git')}?view=repo`)
       browser.waitForFunction(`document.querySelector('[data-slot="repo-changes"]') !== null`)
 
       if (changes.files.length > 0) {
