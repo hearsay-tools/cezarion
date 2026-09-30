@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
+import { focusWithKeyboard } from './contrast'
 import { artifactsDir } from './github-fixture'
 import { stopFixtureServer } from './fixture-server'
 import { waitForHealth } from './poll'
@@ -193,6 +194,8 @@ const EXPECTED_COUNTS = {
   assigned: '2', 'no-task': '4', 'has-task': '2', all: '6', review: '2', mine: '2', failing: `${SEARCH_MAX}+`, 'all-prs': '5',
 }
 
+const EXPECTED_ZEROS = { assigned: '0', 'no-task': '0', 'has-task': '0', all: '0', review: '0', mine: '0', failing: '0', 'all-prs': '0' }
+
 describe('GitHub desktop sidebar (#622)', () => {
   it('lists all seven filters with honest counts, joined to same-project, non-archived, same-repo tasks', async () => {
     await remember('issues')
@@ -302,6 +305,8 @@ describe('GitHub desktop sidebar (#622)', () => {
       browser.goto(`${base}${scoped('/github?filter=all')}`)
       browser.waitForFunction(`document.querySelector(${JSON.stringify(SIDEBAR)}) !== null`)
       browser.evaluate(`document.documentElement.classList.remove('light', 'dark'); document.documentElement.classList.add('${theme}')`)
+      // The shot must show the loaded list, not the route's "Loading GitHub…" placeholder.
+      browser.waitForFunction(`document.querySelectorAll(${JSON.stringify(ROWS)}).length === ${ISSUES.length} && !document.querySelector('[data-route="github"]').textContent.includes('Loading GitHub')`)
       const facts = browser.waitForValue<Record<string, unknown>>(`(() => {
         const sidebar = document.querySelector(${JSON.stringify(SIDEBAR)});
         const row = sidebar?.querySelector('[data-gh-filter="assigned"]');
@@ -415,6 +420,9 @@ describe('GitHub counts that cannot be known (#622)', () => {
       failing: { available: false, reason: 'gh is not installed', items: [] },
     })
     offline.goto(`${base}${scoped('/github?filter=all')}`)
+    // Wait for the answer that says GitHub is unavailable, not just for the static rows: the rows
+    // exist before any response, and "no digits yet" would pass for a still-pending count.
+    offline.waitForFunction(`document.body.textContent.includes('gh is not installed')`)
     offline.waitForFunction(`document.querySelector(${JSON.stringify(SIDEBAR)} + ' [data-gh-filter]') !== null`)
     const unavailable = offline.waitForValue<Record<string, string | null>>(countsJs(SIDEBAR), (value) => Boolean(value && Object.keys(value).length === ALL_FILTERS.length))
     for (const filter of ALL_FILTERS) expect(unavailable[filter] ?? '', `${filter} must not show a number`).not.toMatch(/\d/)
@@ -422,8 +430,8 @@ describe('GitHub counts that cannot be known (#622)', () => {
     const empty = session('empty')
     route(empty, { list: listPayload({ issues: [], prs: [] }), review: searchPayload([]), failing: searchPayload([]) })
     empty.goto(`${base}${scoped('/github?filter=all')}`)
-    const zeros = empty.waitForValue<Record<string, string | null>>(countsJs(SIDEBAR), (value) => Boolean(value && value.all === '0'))
-    expect(zeros).toEqual({ assigned: '0', 'no-task': '0', 'has-task': '0', all: '0', review: '0', mine: '0', failing: '0', 'all-prs': '0' })
+    const zeros = empty.waitForValue<Record<string, string | null>>(countsJs(SIDEBAR), sameJson(EXPECTED_ZEROS))
+    expect(zeros).toEqual(EXPECTED_ZEROS)
   }, 90_000)
 })
 
@@ -479,7 +487,7 @@ describe('GitHub phone filter index at 360x640 (#622)', () => {
     expect(browser.waitForValue(locationJs, (value) => value === listUrl)).toBe(listUrl)
     expect(browser.waitForValue(rowNumbersJs, sameJson([102, 104, 105, 106]))).toEqual([102, 104, 105, 106])
     expect(browser.count(SCREEN)).toBe(0)
-    // The pushed screen swaps the tab bar for a Back that says where it goes.
+    // The pushed list keeps the bottom tabs and adds an in-page Back that says where it goes.
     const back = browser.waitForValue<string>(`(() => {
       const el = document.querySelector('${BACK}');
       return el ? (el.getAttribute('aria-label') ?? '') + ' ' + el.textContent : null;
@@ -517,6 +525,80 @@ describe('GitHub phone filter index at 360x640 (#622)', () => {
     browser.click('[data-slot="gh-back"]')
     expect(browser.waitForValue(locationJs, (value) => value === listUrl)).toBe(listUrl)
     expect(browser.waitForValue(rowNumbersJs, sameJson([203, 210]))).toEqual([203, 210])
+  }, 90_000)
+
+  it('scrolls the last filter row clear of the New task button and the tab bar, and it stays clickable', () => {
+    openIndex()
+    expect(browser.waitForValue(countsJs(SCREEN), sameJson(EXPECTED_COUNTS))).toEqual(EXPECTED_COUNTS)
+    const facts = browser.waitForValue<Record<string, boolean>>(`(() => {
+      const main = document.querySelector('[data-slot="main"]');
+      const row = document.querySelector('${SCREEN} [data-gh-filter="all-prs"]');
+      if (!main || !row) return null;
+      main.scrollTop = main.scrollHeight;
+      const rect = row.getBoundingClientRect();
+      const fab = document.querySelector('[data-slot="mobile-new-task"]')?.getBoundingClientRect();
+      const tabs = document.querySelector('${TAB_BAR}')?.getBoundingClientRect();
+      const hits = [0.1, 0.5, 0.9].map((x) => document.elementFromPoint(rect.left + rect.width * x, rect.top + rect.height / 2));
+      return {
+        inViewport: rect.top >= 0 && rect.bottom <= innerHeight,
+        aboveTabBar: !tabs || rect.bottom <= tabs.top + 1,
+        clearOfFab: !fab || rect.bottom <= fab.top + 1 || rect.top >= fab.bottom || rect.right <= fab.left || rect.left >= fab.right,
+        hitsRow: hits.every((hit) => hit !== null && row.contains(hit)),
+      };
+    })()`, (value) => Boolean(value?.inViewport))
+    browser.screenshot(`${artifactsDir}/github-filter-screen-scrolled.png`, { viewport: true })
+    expect(facts).toEqual({ inViewport: true, aboveTabBar: true, clearOfFab: true, hitsRow: true })
+    browser.click(`${SCREEN} [data-gh-filter="all-prs"]`)
+    expect(browser.waitForValue(locationJs, (value) => String(value).startsWith(`${scoped('/github/prs')}`))).toContain('/github/prs')
+  }, 90_000)
+
+  it('is keyboard operable: Tab reaches a row with a visible focus ring and Enter opens its filter', () => {
+    openIndex()
+    expect(browser.waitForValue(countsJs(SCREEN), sameJson(EXPECTED_COUNTS))).toEqual(EXPECTED_COUNTS)
+    focusWithKeyboard(browser, `${SCREEN} [data-gh-filter="mine"]`)
+    const ring = browser.waitForValue<Record<string, unknown>>(`(() => {
+      const el = document.activeElement;
+      if (!el || el.getAttribute('data-gh-filter') !== 'mine') return null;
+      const style = getComputedStyle(el);
+      return { focusVisible: el.matches(':focus-visible'), ring: style.outlineStyle !== 'none' && parseFloat(style.outlineWidth) > 0 || style.boxShadow !== 'none' };
+    })()`)
+    expect(ring).toEqual({ focusVisible: true, ring: true })
+    browser.press('Enter')
+    const url = `${scoped('/github/prs')}?filter=mine`
+    expect(browser.waitForValue(locationJs, (value) => value === url)).toBe(url)
+    expect(browser.waitForValue(rowNumbersJs, sameJson([201, 202]))).toEqual([201, 202])
+  }, 90_000)
+
+  it('is keyboard operable on the desktop sidebar too', () => {
+    browser.setViewport(DESKTOP.width, DESKTOP.height)
+    browser.goto(`${base}${scoped('/github?filter=all')}`)
+    browser.waitForFunction(`document.querySelectorAll(${JSON.stringify(ROWS)}).length === ${ISSUES.length}`)
+    focusWithKeyboard(browser, `${SIDEBAR} [data-gh-filter="has-task"]`)
+    expect(browser.waitForValue(`document.activeElement?.matches(':focus-visible') && document.activeElement.getAttribute('data-gh-filter') === 'has-task' ? true : null`)).toBe(true)
+    browser.press('Enter')
+    const url = `${scoped('/github')}?filter=has-task`
+    expect(browser.waitForValue(locationJs, (value) => value === url)).toBe(url)
+    expect(browser.waitForValue(currentJs(SIDEBAR), sameJson(['has-task']))).toEqual(['has-task'])
+  }, 90_000)
+
+  it('runs no animation or transition on the filter index under reduced motion', () => {
+    const calm = session('reduced', PHONE)
+    route(calm)
+    calm.setReducedMotion()
+    calm.goto(`${base}${scoped('/github')}`)
+    calm.waitForFunction(`document.querySelector(${JSON.stringify(SCREEN)}) !== null`)
+    expect(calm.waitForValue(countsJs(SCREEN), sameJson(EXPECTED_COUNTS))).toEqual(EXPECTED_COUNTS)
+    const facts = calm.waitForValue<Record<string, unknown>>(`(() => {
+      const box = document.querySelector('${SCREEN}');
+      if (!box) return null;
+      const nodes = [box, ...box.querySelectorAll('*')];
+      return {
+        reduced: matchMedia('(prefers-reduced-motion: reduce)').matches,
+        animations: nodes.flatMap((node) => node.getAnimations()).length,
+        transitions: [...new Set(nodes.map((node) => getComputedStyle(node).transitionDuration))].filter((d) => d.split(',').some((part) => parseFloat(part) > 0.001)),
+      };
+    })()`)
+    expect(facts).toEqual({ reduced: true, animations: 0, transitions: [] })
   }, 90_000)
 
   it('docks the workspace after a phone filter index is resized to desktop', () => {
