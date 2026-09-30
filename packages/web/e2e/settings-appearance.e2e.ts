@@ -111,13 +111,14 @@ describe('settings → appearance against the live dry-run server', () => {
   it('compact density measurably tightens the spacing scale', async () => {
     const header = `document.querySelector('[data-route="settings-global-appearance"] header')`
     const section = `document.querySelector('[data-slot="appearance-section"]')`
-    expect(Number(browser.evaluate(`${header}.offsetHeight`))).toBe(94)
+    // The #622 board's one-line header is a fixed 16/28 bar, so density leaves it alone; the
+    // section gap below is what compact tightens.
+    expect(Number(browser.evaluate(`${header}.offsetHeight`))).toBe(56)
     expect(Number(browser.evaluate(`parseFloat(getComputedStyle(${section}).rowGap)`))).toBe(28)
 
     browser.click('[data-slot="appearance-density"] [data-value="compact"]')
     browser.waitForFunction(`document.documentElement.dataset.density === 'compact'`)
-    // The relocated storage note adds a third header row; compact reduces both gaps by 1px.
-    expect(Number(browser.evaluate(`${header}.offsetHeight`))).toBe(92)
+    expect(Number(browser.evaluate(`${header}.offsetHeight`))).toBe(56)
     expect(Number(browser.evaluate(`parseFloat(getComputedStyle(${section}).rowGap)`))).toBe(24.5)
     await waitForServerAppearance(baseUrl, (a) => a.density === 'compact')
 
