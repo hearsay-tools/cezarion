@@ -1195,6 +1195,11 @@ export function useProjectWorktrees(scope: string) {
   return useQuery({
     queryKey: [scope, 'worktrees'] as const,
     queryFn: ({ signal }) => getWorktrees({ signal }, scope),
+    // Existence must be current on every activation: an inactive project's run stream is
+    // ignored, so a worktree deleted or recreated while another project was on screen would
+    // otherwise be trusted for the default five minutes when the user comes back (A → B → A).
+    // Zero staleness only refetches on mount, key change and focus — no polling.
+    staleTime: 0,
   })
 }
 

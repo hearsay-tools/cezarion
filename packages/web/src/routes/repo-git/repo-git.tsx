@@ -7,13 +7,12 @@ import { useRepo } from '@/api/queries'
 import type { RepoInfo, RepoResponse } from '@open-mercato/cezar-api-client'
 import { CenteredState } from '@/components/centered-state'
 import { TabLink } from '@/components/tab-link'
-import { ArrowLeftIcon } from '@/components/design-icons'
-import { Link } from '@/lib/project-router'
 import { useIsDesktop } from '@/lib/use-desktop'
 
 import { RepoBranchesSection } from './repo-branches'
 import { RepoChangesSection } from './repo-changes'
 import { RepoCommitsSection } from './repo-commits'
+import { RepoBackLink } from './repo-back-link'
 import { GitWorktreeScreen } from './git-worktree-screen'
 import { RepoGitLoading } from './repo-git-loading'
 import { RepoPull } from './repo-pull'
@@ -40,10 +39,11 @@ export function RepoGitRoute({ tab }: { tab: RepoTab }) {
   // A phone's bare /git is the task worktree screen; the repository is `?view=repo`. Commits,
   // Branches and every deep link keep their URLs, and desktop never leaves the repository.
   if (tab === 'changes' && !isDesktop && params.get('view') !== 'repo') return <GitWorktreeScreen />
-  if (repo.isPending) return <RepoGitLoading />
+  if (repo.isPending) return <RepoGitLoading back />
   if (repo.isError) {
     return (
       <div data-route="repo-git" className="flex min-h-full flex-col">
+        <RepoBackLink />
         <CenteredState
           icon={<TriangleAlertIcon size={16} />}
           tone="danger"
@@ -57,6 +57,7 @@ export function RepoGitRoute({ tab }: { tab: RepoTab }) {
   if (!info) {
     return (
       <div data-route="repo-git" className="flex min-h-full flex-col">
+        <RepoBackLink />
         <CenteredState
           icon={<GitBranchIcon size={16} />}
           tone="neutral"
@@ -72,14 +73,11 @@ export function RepoGitRoute({ tab }: { tab: RepoTab }) {
 function RepoView({ repo, info, tab }: { repo: RepoResponse; info: RepoInfo; tab: RepoTab }) {
   return (
     <div data-route="repo-git" className="flex min-h-full flex-col">
+      <RepoBackLink />
       <header
         data-slot="repo-header"
         className="px-[18px] pt-[18px] md:px-9 md:pt-9"
       >
-        <Link to="/git" data-slot="git-back-worktrees" className="-mt-2 mb-1 inline-flex min-h-11 items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground md:hidden">
-          <ArrowLeftIcon size={16} aria-hidden="true" className="size-3.5" />
-          Back to worktrees
-        </Link>
         <h1 className="text-2xl font-semibold tracking-tight md:text-[30px]">
           Git · {tab === 'changes' ? 'Changes' : tab === 'commits' ? 'Commits' : 'Branches'}
         </h1>

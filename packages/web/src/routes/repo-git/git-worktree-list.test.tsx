@@ -164,6 +164,25 @@ describe('GitSidebar', () => {
     expect(sentTwo).toContain('/api/v1/p/proj-2/runs')
   })
 
+  it('revisiting a project refetches its worktrees instead of trusting the cached membership (A → B → A)', async () => {
+    const client = createQueryClient()
+    stub({ worktrees: [wt('x')] })
+    const tree = (scope: string) => (
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={['/git']}><GitSidebar scope={scope} /></MemoryRouter>
+      </QueryClientProvider>
+    )
+    const view = render(tree('a'))
+    await waitFor(() => expect(rows().map((row) => row.dataset.runId)).toEqual(['x']))
+    stub({ worktrees: [wt('other')] })
+    view.rerender(tree('b'))
+    await waitFor(() => expect(rows().map((row) => row.dataset.runId)).toEqual(['other']))
+    // While B was on screen, A's worktree was deleted and another one created (A's SSE was ignored).
+    stub({ worktrees: [wt('y')] })
+    view.rerender(tree('a'))
+    await waitFor(() => expect(rows().map((row) => row.dataset.runId)).toEqual(['y']))
+  })
+
   it('makes one worktrees and one runs request, not one per row', async () => {
     const sent = stub({ worktrees: [wt('a'), wt('b'), wt('c')] })
     renderSidebar()
@@ -214,6 +233,29 @@ describe('the phone Git index', () => {
       expect(q('[data-slot="git-worktree-screen"]')).toBeNull()
       view.unmount()
     }
+  })
+
+  it.each([
+    ['loading', () => stub({ worktrees: [] }), false],
+    ['error', () => { stub(); vi.stubGlobal('fetch', vi.fn(async () => json({ error: 'nope' }, 400))) }, true],
+  ])('keeps Back to worktrees through the repository %s gate', async (_name, arrange) => {
+    setDesktop(false)
+    arrange()
+    renderRoute('/git?view=repo')
+    // The first paint is the loading gate; the error one follows.
+    expect(q('[data-slot="git-back-worktrees"]')?.getAttribute('href')).toBe('/git')
+    await waitFor(() => expect(q('[data-slot="repo-tabs"]') !== null || q('[data-slot="centered-state"]') !== null).toBe(true))
+    expect(q('[data-slot="git-back-worktrees"]')?.getAttribute('href')).toBe('/git')
+  })
+
+  it('keeps Back to worktrees when the project is not a git repository', async () => {
+    setDesktop(false)
+    stub()
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) =>
+      /\/repo$/.test(String(input)) ? json({ ...REPO, info: null }) : json({})))
+    renderRoute('/git?view=repo')
+    await waitFor(() => expect(document.body.textContent).toContain('Not a git repository'))
+    expect(q('[data-slot="git-back-worktrees"]')?.getAttribute('href')).toBe('/git')
   })
 
   it('an empty screen still offers the repository', async () => {
