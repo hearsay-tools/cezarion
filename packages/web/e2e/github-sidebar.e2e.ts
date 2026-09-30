@@ -38,7 +38,7 @@ const BACK = '[data-slot="gh-back-filters"]'
 const COUNT = '[data-slot="gh-filter-count"]'
 const ROWS = '[data-slot="gh-rows"] [data-slot="gh-row"]'
 
-const ALL_FILTERS = ['assigned', 'no-task', 'has-task', 'all', 'review', 'mine', 'failing']
+const ALL_FILTERS = ['assigned', 'no-task', 'has-task', 'all', 'review', 'mine', 'failing', 'all-prs']
 const REPO = 'example/sidebar-fixture'
 const VIEWER = 'octocat'
 
@@ -192,13 +192,13 @@ async function remember(githubView: 'issues' | 'prs'): Promise<void> {
 }
 
 const EXPECTED_COUNTS = {
-  assigned: '2', 'no-task': '4', 'has-task': '2', all: '6', review: '2', mine: '2', failing: `${SEARCH_MAX}+`,
+  assigned: '2', 'no-task': '4', 'has-task': '2', all: '6', review: '2', mine: '2', failing: `${SEARCH_MAX}+`, 'all-prs': '5',
 }
 
-const EXPECTED_ZEROS = { assigned: '0', 'no-task': '0', 'has-task': '0', all: '0', review: '0', mine: '0', failing: '0' }
+const EXPECTED_ZEROS = { assigned: '0', 'no-task': '0', 'has-task': '0', all: '0', review: '0', mine: '0', failing: '0', 'all-prs': '0' }
 
 describe('GitHub desktop sidebar (#622)', () => {
-  it('lists all seven filters with honest counts, joined to same-project, non-archived, same-repo tasks', async () => {
+  it('lists all eight filters with honest counts, joined to same-project, non-archived, same-repo tasks', async () => {
     await remember('issues')
     browser.setViewport(DESKTOP.width, DESKTOP.height)
     browser.goto(`${base}${scoped('/github?filter=all')}`)
@@ -247,9 +247,8 @@ describe('GitHub desktop sidebar (#622)', () => {
       expect(browser.waitForValue(locationJs, (value) => value === `${scoped('/github/prs')}?filter=${filter}`)).toBe(`${scoped('/github/prs')}?filter=${filter}`)
       expect(browser.waitForValue(currentJs(SIDEBAR), sameJson([filter]))).toEqual([filter])
     }
-    // The board has no PR "All open" row: every PR is the main header's Pull requests tab.
-    expect(browser.count(`${SIDEBAR} [data-gh-filter="all-prs"]`)).toBe(0)
-    browser.click('[data-slot="gh-tabs"] a[href$="/github/prs"]')
+    // The extra escape hatch: every PR, whatever the filter.
+    browser.click(`${SIDEBAR} [data-gh-filter="all-prs"]`)
     expect(browser.waitForValue(locationJs, (value) => String(value).startsWith(`${scoped('/github/prs')}`))).toContain('/github/prs')
     expect(browser.waitForValue(rowNumbersJs, sameJson([201, 202, 203, 204, 205]))).toEqual([201, 202, 203, 204, 205])
   }, 90_000)
@@ -455,6 +454,8 @@ describe('GitHub counts that cannot be known (#622)', () => {
     // 1000 is the fetch cap, not the repository's total: the cap must show.
     expect(counts.all).toBe('1000+')
     expect(counts.assigned).toBe('250+')
+    // Search-backed counts with zero hits are a real, complete zero; the open PR list is empty.
+    expect(counts['all-prs']).toBe('0')
     capped.screenshot(`${artifactsDir}/github-sidebar-capped.png`, { viewport: true })
   }, 90_000)
 
@@ -520,7 +521,7 @@ describe('GitHub phone filter index at 360x640 (#622)', () => {
     await remember('issues')
   }, 90_000)
 
-  it('lists all seven filters at 48px with 18px icons and 15px chevrons, and the same honest counts', () => {
+  it('lists all eight filters at 48px with 18px icons and 15px chevrons, and the same honest counts', () => {
     for (const theme of ['light', 'dark'] as const) {
       openIndex()
       browser.evaluate(`document.documentElement.classList.remove('light', 'dark'); document.documentElement.classList.add('${theme}')`)
@@ -602,7 +603,7 @@ describe('GitHub phone filter index at 360x640 (#622)', () => {
     expect(browser.waitForValue(countsJs(SCREEN), sameJson(EXPECTED_COUNTS))).toEqual(EXPECTED_COUNTS)
     const facts = browser.waitForValue<Record<string, boolean>>(`(() => {
       const main = document.querySelector('[data-slot="main"]');
-      const row = document.querySelector('${SCREEN} [data-gh-filter="failing"]');
+      const row = document.querySelector('${SCREEN} [data-gh-filter="all-prs"]');
       if (!main || !row) return null;
       main.scrollTop = main.scrollHeight;
       const rect = row.getBoundingClientRect();
@@ -618,7 +619,7 @@ describe('GitHub phone filter index at 360x640 (#622)', () => {
     })()`, (value) => Boolean(value?.inViewport))
     browser.screenshot(`${artifactsDir}/github-filter-screen-scrolled.png`, { viewport: true })
     expect(facts).toEqual({ inViewport: true, aboveTabBar: true, clearOfFab: true, hitsRow: true })
-    browser.click(`${SCREEN} [data-gh-filter="failing"]`)
+    browser.click(`${SCREEN} [data-gh-filter="all-prs"]`)
     expect(browser.waitForValue(locationJs, (value) => String(value).startsWith(`${scoped('/github/prs')}`))).toContain('/github/prs')
   }, 90_000)
 

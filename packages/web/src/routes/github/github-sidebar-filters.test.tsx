@@ -292,7 +292,7 @@ describe('filter list visuals (#622)', () => {
   const iconOf = (id: string) => document.querySelector(`[data-gh-filter="${id}"] svg`)?.outerHTML
   const rowClasses = (id: string) => (document.querySelector(`[data-gh-filter="${id}"]`)?.className ?? '').split(/\s+/)
 
-  it('desktop: no GitHub heading, a named region, muted rows at 12.5px, and no pull-request All open row', async () => {
+  it('desktop: no GitHub heading, a named region, muted rows at 12.5px, and a pull-request All open row', async () => {
     setDesktop(true)
     stub()
     renderAt('/github?filter=all', <GithubSidebar scope="default" />)
@@ -305,10 +305,11 @@ describe('filter list visuals (#622)', () => {
     expect(new Set(['no-task', 'has-task', 'review', 'mine', 'all'].map(iconOf)).size).toBe(5)
     expect(rowClasses('assigned')).toContain('text-[12.5px]')
     expect(rowClasses('assigned')).not.toContain('text-[13px]')
-    // The board's three pull-request rows; every open PR is the main header's own tab.
+    // The board's three pull-request rows plus All open, kept on purpose as the Issues row's twin.
     expect([...document.querySelectorAll('[data-gh-filter]')].map((row) => row.getAttribute('data-gh-filter')))
-      .toEqual(['assigned', 'no-task', 'has-task', 'all', 'review', 'mine', 'failing'])
-    expect(document.querySelector('[data-gh-filter="all-prs"]')).toBeNull()
+      .toEqual(['assigned', 'no-task', 'has-task', 'all', 'review', 'mine', 'failing', 'all-prs'])
+    expect(iconOf('all-prs')).toBe(iconOf('all'))
+    expect(iconOf('all-prs')).not.toBe(iconOf('mine'))
   })
 
   it('phone: the title row carries a refresh icon button and no repository line', async () => {
@@ -403,7 +404,7 @@ describe('GithubSidebar', () => {
   const row = (id: string) => document.querySelector<HTMLElement>(`[data-gh-filter="${id}"]`)!
   const count = (id: string) => row(id).querySelector('[data-slot="gh-filter-count"]')?.textContent
 
-  it('lists the seven filters with counts, exact and lower-bound, and never a fake zero', async () => {
+  it('lists the eight filters with counts, exact and lower-bound, and never a fake zero', async () => {
     stub({
       runs: [run({ issueNumber: 3 })],
       search: (q) => (q.includes('review')
