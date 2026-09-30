@@ -56,15 +56,15 @@ export const FOOTER_ICON_ACTIVE_CLASS = 'bg-sidebar-row-selected text-foreground
  * "Sidebar v3 · per-project views" and "Sidebar v4 · project rail"), in fixed px so a density
  * that shrinks `--spacing` cannot shrink a list the mockups draw at one size.
  *
- * The body sits 12px under the view tabs; its optional heading is a 26px bar with 12px beneath
- * it. A group is a column of rows 1px apart, led by its label (2px above, 4px below the text).
- * A labelled group that follows another one starts 18px lower (the board's 12px body gap plus
- * the group's own 6px top padding); an unlabelled nav hands over to the next group at 12px.
+ * The body is the board's 12px-padded column with 12px between its children (the heading bar and
+ * each group); the padding lives on the shell's scroll container (`project-task-navigation`) so
+ * the Tasks list and these bodies share one inset. A group is a column of rows 1px apart, led by
+ * its label (2px above, 4px below the text).
  */
-export const SIDEBAR_LIST_BODY_CLASS = 'px-2 pt-[12px]'
-export const SIDEBAR_LIST_HEADING_CLASS = 'mb-[12px] flex h-[26px] items-center pr-[6px] pl-[10px] text-[13px] font-semibold'
-export const SIDEBAR_LIST_GROUP_CLASS = 'mb-[18px] flex flex-col gap-px'
-export const SIDEBAR_LIST_UNLABELLED_GROUP_CLASS = 'mb-[12px] flex flex-col gap-px'
+export const SIDEBAR_LIST_BODY_CLASS = 'flex flex-col gap-[12px]'
+export const SIDEBAR_LIST_HEADING_CLASS = 'flex h-[26px] items-center pr-[6px] pl-[10px] text-[13px] font-semibold'
+export const SIDEBAR_LIST_GROUP_CLASS = 'flex flex-col gap-px'
+export const SIDEBAR_LIST_UNLABELLED_GROUP_CLASS = 'flex flex-col gap-px'
 export const SIDEBAR_LIST_GROUP_LABEL_CLASS = 'truncate px-[10px] pt-[2px] pb-[4px] text-[11px] font-medium text-soft-foreground'
 /** A 32px row: 15px icon, 13px label, 10px padding and gap. Add the hover, or a disabled look. */
 export const SIDEBAR_LIST_ROW_CLASS = 'group flex h-[32px] items-center gap-[10px] rounded-[6px] px-[10px] text-[13px] text-muted-foreground focus-visible:outline-2 focus-visible:outline-ring'
