@@ -501,7 +501,9 @@ export function GithubRoute({
     [openItems, debouncedQuery, labelFilter, view, effectiveAssignees, activeProject, narrow],
   )
   const querySettled = query.trim() === debouncedQuery.trim()
-  const searchWanted = gh?.available === true && querySettled && shouldSearchForge(debouncedQuery, localMatches)
+  // A blocked/loading sidebar filter cannot be applied, so the cross-state fallback is off with it:
+  // its hits would be filtered by an empty `narrow` and appear as rows under a filter that is not on.
+  const searchWanted = gh?.available === true && !filterGate && querySettled && shouldSearchForge(debouncedQuery, localMatches)
   const forgeSearch = useGithubSearch(view === 'issues' ? 'issue' : 'pr', debouncedQuery, searchWanted)
 
   const allItems = openItems
@@ -537,14 +539,21 @@ export function GithubRoute({
   // Scope/kind/number checks prevent a retained item leaking across projects or tabs.
   const scope = queryKeys.github()[0]
   const selectedNumber = n === undefined ? null : Number.parseInt(n, 10)
-  const selectedSearchItem = forgeSearch.data?.available
+  const selectedSearchItem = !filterGate && forgeSearch.data?.available
     ? forgeSearch.data.items.find(item => item.number === selectedNumber)
     : undefined
+  // A qualifier-selected PR (Review requested / Checks failing) that the open list does not hold is
+  // retained exactly like a text-search hit: clearing the filter or a refresh that drops it from
+  // the results must not take the detail pane away from a URL that still names it.
+  const selectedFilterItem = filterRows && selectedNumber !== null && !fullList.some(item => item.number === selectedNumber)
+    ? filterRows.find(item => item.number === selectedNumber)
+    : undefined
+  const retainCandidate = selectedSearchItem ?? selectedFilterItem
   const [retainedDetail, setRetainedDetail] = useState<{ scope: string; view: GithubView; item: GithubItem } | null>(null)
   useEffect(() => {
-    if (selectedSearchItem) setRetainedDetail({ scope, view, item: selectedSearchItem })
-  }, [scope, view, selectedSearchItem])
-  const remoteDetail = selectedSearchItem ?? (
+    if (retainCandidate) setRetainedDetail({ scope, view, item: retainCandidate })
+  }, [scope, view, retainCandidate])
+  const remoteDetail = retainCandidate ?? (
     retainedDetail?.scope === scope && retainedDetail.view === view && retainedDetail.item.number === selectedNumber
       ? retainedDetail.item : null
   )

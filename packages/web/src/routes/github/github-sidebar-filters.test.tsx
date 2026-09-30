@@ -218,6 +218,73 @@ describe('Pull request filters', () => {
   })
 })
 
+describe('a blocked filter never lets the cross-state search leak rows', () => {
+  const type = (label: string, value: string) =>
+    fireEvent.change(screen.getByRole('searchbox', { name: label }), { target: { value } })
+
+  it('unavailable runs + typed text: no forge search, no Found on GitHub rows', async () => {
+    const sent = stub({
+      runs: 'error',
+      search: () => ({ available: true, items: [issue(77, { title: 'Unrelated closed hit' })] }),
+    })
+    renderAt('/github?filter=no-task')
+    await screen.findByText(/task list is unavailable/)
+    type('Search issues', 'unrelated')
+    await new Promise((resolve) => setTimeout(resolve, 900))
+    expect(sent.some((path) => path.includes('/github/search'))).toBe(false)
+    expect(document.querySelector('[data-slot="gh-search-hits"]')).toBeNull()
+    expect(numbers()).toEqual([])
+    expect(document.querySelector('[data-slot="gh-filter-gate"]')).not.toBeNull()
+  })
+
+  it('unknown identity + typed text behaves the same for Mine', async () => {
+    const sent = stub({ gh: { ...GITHUB, viewerLogin: undefined }, search: () => ({ available: true, items: [pr(88)] }) })
+    renderAt('/github/prs?filter=mine')
+    await waitFor(() => expect(document.querySelector('[data-slot="gh-filter-gate"]')).not.toBeNull())
+    type('Search prs', 'anything')
+    await new Promise((resolve) => setTimeout(resolve, 900))
+    expect(sent.some((path) => path.includes('/github/search'))).toBe(false)
+    expect(numbers()).toEqual([])
+  })
+
+  it('normal cross-state search still works under an applicable filter', async () => {
+    stub({ search: () => ({ available: true, items: [issue(1234, { title: 'Closed zebra', assignees: ['alice'] })] }) })
+    renderAt('/github?filter=assigned')
+    await waitFor(() => expect(numbers()).toEqual([1]))
+    type('Search issues', 'zebra')
+    await waitFor(() => expect(numbers()).toEqual([1234]), { timeout: 3000 })
+  })
+})
+
+describe('a qualifier-selected PR stays open after it leaves the results', () => {
+  const beyond = pr(9999, { title: 'Far beyond the cap' })
+  const openBeyond = async (search: Stub['search']) => {
+    stub({ search })
+    renderAt('/github/prs?filter=review')
+    await waitFor(() => expect(numbers()).toEqual([9999]))
+    fireEvent.click(document.querySelector('[data-slot="gh-row"][data-number="9999"]')!)
+    expect(await screen.findByRole('heading', { name: /#9999 Far beyond the cap/ })).not.toBeNull()
+  }
+
+  it('survives clearing the filter', async () => {
+    await openBeyond(() => ({ available: true, items: [beyond] }))
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }))
+    await waitFor(() => expect(where()).toBe('/github/prs/9999?filter=all'))
+    expect(numbers()).toEqual([10, 11, 12])
+    expect(screen.getByRole('heading', { name: /#9999 Far beyond the cap/ })).not.toBeNull()
+    expect(document.querySelector('[data-slot="gh-detail"] [data-slot="gh-custom-prompt"]')).not.toBeNull()
+  })
+
+  it('survives a refresh that no longer returns it', async () => {
+    let hits: GithubItem[] = [beyond]
+    await openBeyond(() => ({ available: true, items: hits }))
+    hits = []
+    fireEvent.click(document.querySelector('[data-slot="gh-refresh"]')!)
+    await waitFor(() => expect(numbers()).toEqual([]))
+    expect(screen.getByRole('heading', { name: /#9999 Far beyond the cap/ })).not.toBeNull()
+  })
+})
+
 describe('the phone filter screen and entry rules', () => {
   it('bare /github on a phone is the filter screen; a row pushes the list with a way back', async () => {
     setDesktop(false)
