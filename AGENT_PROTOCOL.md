@@ -1250,3 +1250,27 @@ breaking change requiring the documented deprecation path.
 A CEZ:ASK payload missing only closing braces/brackets after a complete structural value gets one bounded repair, then the existing schema validation. Mid-string truncation, mismatched delimiters and invalid question structures remain rejected. Fresh and continuation turns persist a danger note for recovery or rejection; a recovered card warns users to check the options and how many they may pick, since repair cannot restore missing meaning. The raw recovered marker stays in the audit stream until the cockpit hides it alongside a validated card, preserving rejected split-stream fallback. Existing and unknown note tones stay dim. DONE/ASK precedence, Claude wakeups and monitoring serialization are unchanged.
 
 Harness row S13 verifies the late auto-end veto and subsequent reply completion against every `RUNNER_IDS` backend’s real offline wire.
+
+
+### Codex managed permissions (#708)
+
+Before fresh or resumed threads, query `configRequirements/read` on the session's
+own app-server. Only `requirements: null` selects Cezar's unmanaged full-access
+sandbox (needed by containers without UID maps). Managed requirements, including
+unknown future fields, retain Codex's permissions. Codex resolves saved profiles
+and managed defaults on resume; Cezar never replaces an allowed read-only profile
+with a writable default. Unavailable or malformed discovery never
+selects full access. Approval policy is never overridden.
+
+`CEZ_CODEX_NETWORK=0` disables legacy workspace network access without replacing
+managed filesystem rules. The thread response must confirm restricted network
+access before any turn starts; incompatible profiles stop with a clear error.
+Follow-up `turn/start` and `turn/steer` do not set permission overrides.
+
+Registered harness row S14 exercises fresh/resumed sessions and repeated human
+messages through every `RUNNER_IDS` member's `HARNESS_ADAPTERS` native wire. The
+Codex mock models a rejected override retained and revalidated on later turns;
+this reproduces the reported diagnostic pattern, not an independently captured
+enterprise-account trace. `codex-permissions.test.ts` additionally covers sandbox
+and profile requirements, read-only policy, unknown discovery, network restriction
+and mid-turn steering. Removing the startup selection must fail the managed cells.

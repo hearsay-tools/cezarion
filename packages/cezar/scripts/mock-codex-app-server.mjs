@@ -76,6 +76,14 @@ const completeSteerTurn = (turnId) => {
   emit({ method: 'turn/completed', params: { threadId: 'th_mock_1', turn: { id: turnId, status: 'completed' } } });
 };
 
+// #708: requirements shape from Codex's generated ConfigRequirementsReadResponse.
+// Retain an invalid requested override to reproduce fallback warnings on later turns.
+const managedRequirements = process.env.MOCK_CODEX_REQUIREMENTS
+  ? JSON.parse(process.env.MOCK_CODEX_REQUIREMENTS) : null;
+let rejectedPermissionOverride = false;
+const permissionWarning = () => emit({ method: 'warning', params: { message:
+  "Configured value for 'permission_profile' is disallowed by requirements; falling back to required value Managed. DangerFullAccess is not in the allowed set [ReadOnly, WorkspaceWrite]",
+} });
 const ignoreEof = process.env.MOCK_CODEX_IGNORE_EOF === '1';
 if (ignoreEof) {
   process.on('SIGTERM', () => process.exit(143));
@@ -140,11 +148,21 @@ rl.on('line', async (line) => {
     emit({ id: msg.id, result: {} });
   } else if (msg.method === 'initialize') {
     emit({ id: msg.id, result: { userAgent: 'mock-codex/0.0.0' } });
+  } else if (msg.method === 'configRequirements/read') {
+    if (process.env.MOCK_CODEX_REQUIREMENTS_ERROR) {
+      emit({ id: msg.id, error: { code: -32601, message: 'Method not found' } });
+    } else {
+      emit({ id: msg.id, result: process.env.MOCK_CODEX_REQUIREMENTS_MALFORMED
+        ? { requirements: 'invalid' } : { requirements: managedRequirements } });
+    }
   } else if (msg.method === 'thread/start' || msg.method === 'thread/resume') {
     if (process.env.CEZ_MOCK_CI_PR) { const { probeCiTool } = await import('./mock-ci-tool.mjs'); await probeCiTool('codex', msg.params); }
     ciWire = msg.params;
     const expectedSandbox = process.env.CEZ_CODEX_NETWORK === '0' ? 'workspace-write' : 'danger-full-access';
-    if (msg.params?.sandbox !== expectedSandbox || msg.params?.approvalPolicy !== undefined) {
+    rejectedPermissionOverride = managedRequirements !== null && msg.params?.sandbox !== undefined;
+    if (rejectedPermissionOverride) permissionWarning();
+    const unknownRequirements = process.env.MOCK_CODEX_REQUIREMENTS_ERROR || process.env.MOCK_CODEX_REQUIREMENTS_MALFORMED;
+    if ((!managedRequirements && !unknownRequirements && msg.params?.sandbox !== expectedSandbox) || msg.params?.approvalPolicy !== undefined) {
       emit({ id: msg.id, error: { code: -32602, message: `expected ${expectedSandbox} managed permissions` } });
       return;
     }
@@ -152,16 +170,27 @@ rl.on('line', async (line) => {
       emit({ id: msg.id, error: { code: -32602, message: 'workspace-write override is obsolete in full-access mode' } });
       return;
     }
+    // Codex retains an allowed persisted profile unless the client explicitly
+    // selects another (thread_processor::load_and_apply_persisted_resume_metadata).
+    if (msg.method === 'thread/resume' && process.env.MOCK_CODEX_PERSISTED_PROFILE === ':read-only' && msg.params?.permissions && msg.params.permissions !== ':read-only') {
+      emit({ id: msg.id, error: { code: -32602, message: 'client widened a persisted read-only profile' } });
+      return;
+    }
+    const sandbox = managedRequirements
+      ? { type: 'readOnly', networkAccess: process.env.MOCK_CODEX_MANAGED_NETWORK === '1' }
+      : msg.params?.sandbox === 'danger-full-access' ? { type: 'dangerFullAccess' }
+      : { type: 'workspaceWrite', networkAccess: false, writableRoots: [], excludeTmpdirEnvVar: false, excludeSlashTmp: false };
     if (msg.method === 'thread/start') {
       emit({ method: 'thread/started', params: { thread: { id: 'th_mock_1' } } });
-      emit({ id: msg.id, result: { thread: { id: 'th_mock_1' } } });
+      emit({ id: msg.id, result: { thread: { id: 'th_mock_1' }, sandbox } });
     } else if (process.env.MOCK_CODEX_REJECT_RESUME === '1') {
       emit({ id: msg.id, error: { code: -32603, message: `no rollout found for thread id ${msg.params?.threadId ?? ''}` } });
       rl.close();
     } else {
-      emit({ id: msg.id, result: { thread: { id: msg.params?.threadId } } });
+      emit({ id: msg.id, result: { thread: { id: msg.params?.threadId }, sandbox } });
     }
   } else if (msg.method === 'turn/start') {
+    if (rejectedPermissionOverride) permissionWarning();
     activeTurnId = 'turn_mock_1';
     // owned-input-delivery.testkit.ts patches the exact `emit(...)` line below; keep it verbatim.
     if (process.env.CEZ_MOCK_CODEX_LATE_START_ACK === '1' && startSerial++ > 0) lateStartAck = msg.id; else {
