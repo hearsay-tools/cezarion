@@ -67,6 +67,8 @@ export type AppShellProps = {
   applicationUpdateError?: string | null
   applicationUpdateBusy?: boolean
   applicationUpdateOffline?: boolean
+  /** View-specific desktop navigation; unconverted views fall back to the task list. */
+  sidebarList?: ReactNode
   /** Step 3.3's grouped task quick-list. */
   taskQuickList?: ReactNode
   sessionScope?: ReactNode
@@ -161,6 +163,7 @@ export function AppShell({
   applicationUpdateError,
   applicationUpdateBusy,
   applicationUpdateOffline,
+  sidebarList,
   taskQuickList,
   sessionScope,
   toolsMenu,
@@ -264,6 +267,7 @@ export function AppShell({
     applicationUpdateError,
     applicationUpdateBusy,
     applicationUpdateOffline,
+    sidebarList,
     taskQuickList,
     sessionScope,
     toolsMenu,
@@ -368,6 +372,7 @@ type NavProps = {
   applicationUpdateError?: string | null
   applicationUpdateBusy?: boolean
   applicationUpdateOffline?: boolean
+  sidebarList?: ReactNode
   taskQuickList?: ReactNode
   sessionScope?: ReactNode
   toolsMenu?: ReactNode
@@ -576,6 +581,7 @@ function SidebarContent({
   applicationUpdateError,
   applicationUpdateBusy,
   applicationUpdateOffline,
+  sidebarList,
   taskQuickList,
   sessionScope,
   toolsMenu,
@@ -644,7 +650,7 @@ function SidebarContent({
       <SidebarViewTabs items={items} activeTo={activeTo} needsYou={needsYou} inboxCount={inboxCount} skillsUpdateAvailable={skillsUpdateAvailable} onNavigate={onNavigate} />
       <div data-slot="project-task-navigation" className={'min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-2'}>
         <SidebarNavigateContext.Provider value={onNavigate}>
-          <div data-slot="task-quick-list">{taskQuickList}</div>
+          {sidebarList ?? <div data-slot="task-quick-list">{taskQuickList}</div>}
         </SidebarNavigateContext.Provider>
       </div>
 

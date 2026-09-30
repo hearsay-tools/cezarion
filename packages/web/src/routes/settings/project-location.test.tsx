@@ -113,10 +113,10 @@ describe('the project folder in settings', () => {
     expect(field.querySelector('[data-slot="project-location-path"]')?.textContent).toBe(ROOT)
   })
 
-  it('every project section keeps the root in the nav footer', async () => {
+  it('every project section keeps the root in its desktop header', async () => {
     renderAt('/settings/worktrees')
     const nav = await waitFor(() => {
-      const el = document.querySelector('[data-slot="settings-nav"] [data-slot="project-location"]')
+      const el = document.querySelector('.settings-route-header [data-slot="project-location"]')
       expect(el).not.toBeNull()
       return el!
     })

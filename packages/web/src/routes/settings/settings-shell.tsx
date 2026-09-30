@@ -4,7 +4,6 @@ import { ChevronDownIcon, ChevronRightIcon } from '@/components/design-icons'
 import { Link as RouterLink, NavLink as RouterNavLink } from 'react-router'
 import type { Capabilities } from '@open-mercato/cezar-api-client'
 import { Link as ScopedLink, NavLink as ScopedNavLink } from '@/lib/project-router'
-import { cn } from '@/lib/utils'
 import { ProjectGeneral } from './project-general'
 import { ProjectLocationNav } from './project-location'
 import { visibleSettingsSections, type SettingsScope, type SettingsSection } from './registry'
@@ -13,7 +12,7 @@ import { visibleSettingsSections, type SettingsScope, type SettingsSection } fro
  * The registry-driven Settings shell (R6 Step 1.3, spec §"Settings").
  *
  * Layout, both driven by the same `visibleSettingsSections(scope)` so they can never disagree:
- *  - desktop (`md:`): a left section nav beside the section's content;
+ *  - desktop (`md:`): section navigation lives in the app sidebar;
  *  - mobile: a section disclosure above the content (the area index renders the stacked
  *    section list instead — the drill-in page small screens expect).
  *
@@ -31,7 +30,7 @@ import { visibleSettingsSections, type SettingsScope, type SettingsSection } fro
  * about; "Settings" is the area. Hidden registry entries are not routed, so their URLs are
  * honest 404s until the section ships.
  *
- * Both navs lead with a "General" entry pointing at the area INDEX. It is not a registry section
+ * Both the sidebar and mobile nav lead with a "General" entry pointing at the area INDEX. It is not a registry section
  * — it has no settings of its own — but without it the index is a page you can only reach by
  * arriving: every section links to its siblings and none links back, so the project folder and
  * the cross-link to the other area became unreachable the moment a user clicked anything.
@@ -53,65 +52,6 @@ function navComponents(scope: SettingsScope) {
     : { Link: ScopedLink, NavLink: ScopedNavLink }
 }
 
-function SectionNav({
-  scope,
-  activeId,
-  capabilities,
-}: {
-  scope: SettingsScope
-  activeId: SettingsSection['id'] | null
-  capabilities?: Pick<Capabilities, 'singleProject'>
-}) {
-  const { NavLink } = navComponents(scope)
-  return (
-    <nav
-      aria-label="Settings sections"
-      data-slot="settings-nav"
-      data-scope={scope}
-      className="hidden w-[180px] shrink-0 flex-col gap-1 md:flex"
-    >
-      <NavLink
-        to={settingsIndexPath(scope)}
-        end
-        data-slot="settings-nav-index"
-        aria-current={activeId === null ? 'page' : undefined}
-        className={cn(
-          'flex min-h-11 items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] font-medium transition-colors',
-          activeId === null
-            ? 'bg-accent-strong/10 text-accent-text'
-            : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
-        )}
-      >
-        General
-      </NavLink>
-      {visibleSettingsSections(scope, capabilities).map((section) => (
-        <NavLink
-          key={section.id}
-          to={settingsSectionPath(scope, section.id)}
-          data-section={section.id}
-          aria-current={section.id === activeId ? 'page' : undefined}
-          className={cn(
-            'flex min-h-11 items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] font-medium transition-colors',
-            section.id === activeId
-              ? 'bg-accent-strong/10 text-accent-text'
-              : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
-          )}
-        >
-          {section.title}
-        </NavLink>
-      ))}
-      {/* The nav footer answers "what am I editing?" — and each area answers it differently.
-          Global: settings are per USER, not per repo, said once where the choice to write there
-          is being made. Project: WHICH repo, by its absolute path on disk. */}
-      {scope === 'global' ? (
-        <p className="mt-auto px-2.5 pt-3 text-[11px] text-soft-foreground">Stored in ~/.cezar</p>
-      ) : (
-        <ProjectLocationNav />
-      )}
-    </nav>
-  )
-}
-
 /** Mobile sections use the reference's single disclosure, with ordinary scoped links. */
 function SectionPills({ scope, activeId, capabilities }: {
   scope: SettingsScope
@@ -126,7 +66,7 @@ function SectionPills({ scope, activeId, capabilities }: {
         {sections.find((section) => section.id === activeId)?.title ?? 'General'}
         <ChevronDownIcon aria-hidden="true" className="size-5 text-muted-foreground" />
       </summary>
-      <nav aria-label="Settings sections" data-slot="settings-nav-mobile">
+      <nav aria-label="Settings sections" data-slot="settings-nav-mobile" data-scope={scope}>
         <NavLink to={settingsIndexPath(scope)} end data-slot="settings-nav-index">General</NavLink>
         {sections.map((section) => (
           <NavLink key={section.id} to={settingsSectionPath(scope, section.id)} data-section={section.id}>
@@ -164,9 +104,9 @@ export function SettingsSectionRoute({
             Global settings
           </span>
         ) : null}
+        <div className="hidden md:block">{scope === 'project' ? <ProjectLocationNav /> : <p className="text-[11px] text-soft-foreground">Stored in ~/.cezar</p>}</div>
       </header>
       <div className="settings-route-body flex min-w-0 flex-1 flex-col md:flex-row">
-        <SectionNav scope={scope} activeId={section.id} capabilities={capabilities} />
         <SectionPills scope={scope} activeId={section.id} capabilities={capabilities} />
         <section className="settings-panel min-w-0 self-start md:flex-1" aria-label={section.title}>
           <h2 className="settings-panel-title">{section.title}</h2>
@@ -178,7 +118,7 @@ export function SettingsSectionRoute({
 }
 
 /** The area's index: the same registry rendered as a stacked list of cards (the mobile drill-in
- *  page; on desktop it sits beside the nav as a plain directory). */
+ *  page; desktop navigation lives in the app sidebar). */
 export function SettingsIndexRoute({ scope, capabilities }: {
   scope: SettingsScope
   capabilities?: Pick<Capabilities, 'singleProject'>
@@ -194,28 +134,23 @@ export function SettingsIndexRoute({ scope, capabilities }: {
             ? 'Preferences for you and this machine, shared by every project.'
             : 'Configure this project and its agents.'}
         </p>
+        <div className="hidden md:block">{scope === 'project' ? <ProjectLocationNav /> : <p className="text-[11px] text-soft-foreground">Stored in ~/.cezar</p>}</div>
       </header>
       <div className="settings-route-body flex min-w-0 flex-1 flex-col md:flex-row">
-        <SectionNav scope={scope} activeId={null} capabilities={capabilities} />
         <SectionPills scope={scope} activeId={null} capabilities={capabilities} />
         {/* No second h1 for small screens: the app shell's mobile top bar already titles the
             page "Settings" from the nav registry. */}
         <div className="flex min-w-0 flex-1 flex-col">
           {/* The project area's index is a PAGE, not a menu: the folder, the registry facts, the
               concurrency ceiling and Remove. The global area has no such dashboard — nothing about
-              the machine is per-project — so there the cards are the whole page.
+              the machine is per-project — so it explains the scope of these settings.
               `capabilities` travels because the registry half of that page is exactly what
               single-project mode disables, the same gate `visibleSettingsSections` applies. */}
           {global ? <section className="mb-5 rounded-lg border border-border bg-card p-5"><span className="inline-flex rounded bg-accent-strong/10 px-2 py-1 text-[11px] text-accent-text">Stored locally · ~/.cezar</span><p className="mt-4 text-[13px] text-muted-foreground">Changes here apply across every connected project. Agent instructions and worktree settings remain project-specific.</p></section> : <ProjectGeneral capabilities={capabilities} />}
           {!global ? <h2 className="settings-other-title mt-6 rounded-t-lg border border-b-0 border-border bg-card px-5 pt-5 text-base font-semibold md:hidden">Other project settings</h2> : null}
           <ul
             data-slot="settings-index"
-            className={cn(
-              'flex w-full flex-col gap-5',
-              // On desktop the left nav already lists every section, so in the project area the
-              // cards would be the same menu twice. Small screens have no nav — there they ARE it.
-              global ? null : 'mt-7 md:hidden',
-            )}
+            className="mt-7 flex w-full flex-col gap-5 md:hidden"
           >
             {visibleSettingsSections(scope, capabilities).map((section) => (
               <li key={section.id}>

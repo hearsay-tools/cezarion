@@ -166,16 +166,14 @@ describe('the section registry', () => {
 })
 
 describe('the settings shell', () => {
-  it('renders the PROJECT nav from the registry — project sections only', () => {
+  it('renders the mobile PROJECT nav from the registry — project sections only', () => {
     renderAt('/settings/agents')
-    const nav = document.querySelector('[data-slot="settings-nav"]')!
+    const nav = document.querySelector('[data-slot="settings-nav-mobile"]')!
     const ids = [...nav.querySelectorAll('[data-section]')].map((el) => el.getAttribute('data-section'))
     expect(ids).toEqual(PROJECT_SECTIONS)
     // The active section is marked for assistive tech, not just by color.
     expect(nav.querySelector('[aria-current="page"]')?.getAttribute('data-section')).toBe('agents')
-    // The mobile pill row renders through the same registry — the two can never disagree.
-    const pills = document.querySelector('[data-slot="settings-nav-mobile"]')!
-    expect([...pills.querySelectorAll('[data-section]')].length).toBe(PROJECT_SECTIONS.length)
+    expect(document.querySelector('[data-slot="settings-nav"]')).toBeNull()
   })
 
   it('names the directly linked section in the mobile disclosure', () => {
@@ -199,10 +197,6 @@ describe('the settings shell', () => {
     renderAt('/settings/worktrees')
     // Project scope: scoped like every other project link, and pointing at the area index.
     expect(
-      document.querySelector('[data-slot="settings-nav"] [data-slot="settings-nav-index"]')?.getAttribute('href'),
-    ).toBe('/p/boot/settings')
-    // The mobile pill row carries it too — the index is the ONLY place small screens see it.
-    expect(
       document.querySelector('[data-slot="settings-nav-mobile"] [data-slot="settings-nav-index"]')?.getAttribute('href'),
     ).toBe('/p/boot/settings')
     // A section is open, so "General" is not the current page.
@@ -212,19 +206,19 @@ describe('the settings shell', () => {
   it('"General" is the current page on the index itself, and unprefixed in the global area', () => {
     renderAt('/settings')
     expect(
-      document.querySelector('[data-slot="settings-nav"] [data-slot="settings-nav-index"]')?.getAttribute('aria-current'),
+      document.querySelector('[data-slot="settings-nav-mobile"] [data-slot="settings-nav-index"]')?.getAttribute('aria-current'),
     ).toBe('page')
     cleanup()
 
     renderAt('/settings/global/resources')
     expect(
-      document.querySelector('[data-slot="settings-nav"] [data-slot="settings-nav-index"]')?.getAttribute('href'),
+      document.querySelector('[data-slot="settings-nav-mobile"] [data-slot="settings-nav-index"]')?.getAttribute('href'),
     ).toBe('/settings/global')
   })
 
-  it('renders the GLOBAL nav at /settings/global — global sections, unprefixed links', () => {
+  it('renders the mobile GLOBAL nav at /settings/global — global sections, unprefixed links', () => {
     renderAt('/settings/global/appearance')
-    const nav = document.querySelector('[data-slot="settings-nav"]')!
+    const nav = document.querySelector('[data-slot="settings-nav-mobile"]')!
     expect(nav.getAttribute('data-scope')).toBe('global')
     const ids = [...nav.querySelectorAll('[data-section]')].map((el) => el.getAttribute('data-section'))
     expect(ids).toEqual(GLOBAL_SECTIONS)
@@ -266,7 +260,7 @@ describe('the settings shell', () => {
   it('single-project mode removes Projects from the global index and navigation', () => {
     renderAt('/settings/global', { singleProject: true })
     expect(document.querySelector('[data-slot="settings-index"] [data-section="projects"]')).toBeNull()
-    expect(document.querySelector('[data-slot="settings-nav"] [data-section="projects"]')).toBeNull()
+    expect(document.querySelector('[data-slot="settings-nav-mobile"] [data-section="projects"]')).toBeNull()
     expect(document.querySelector('[data-section="resources"]')).not.toBeNull()
   })
 
