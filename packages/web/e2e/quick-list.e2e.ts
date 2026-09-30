@@ -1166,10 +1166,11 @@ describe('a row under width contention, in a column the user can widen', () => {
     )
 
   /** The row title's measured width — how much of the column the NAME actually got.
-   *  Wait, then read as one step: the row wait in `beforeEach` can settle on a render that a
-   *  refetch replaces before this read lands. A four-lane run caught a `null` title under load
-   *  (lane-4 `quick-list` bundle, `grows the name as the column grows`; four unloaded reruns were
-   *  green), so the read waits for the node instead of assuming the earlier wait still holds. */
+   *  Wait, then read as one step: the row existed at the `beforeEach` wait, was absent at the
+   *  measurement, and was present again in the failure snapshot. The trigger was not reproduced
+   *  in four targeted reruns. Evidence: .ai/qa/local-runs/1790767992591-919007/lane-4-failures/
+   *  quick-list/grows-the-name-as-the-column-grows-without-ever-shrinking-it-1/{probe.json,snapshot.txt}.
+   *  Read only while the measured node exists; keep the width assertions unchanged. */
   const titleWidth = () =>
     Number(
       browser.waitForValue(
