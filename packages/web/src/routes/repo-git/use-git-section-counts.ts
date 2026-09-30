@@ -5,12 +5,13 @@ import { formatMem } from '@/lib/tasks-table'
 
 import type { GitListSection } from './git-section-list'
 import { commitsToday } from './git-sections'
+import { allBranchNames } from './repo-branches'
 
 /**
  * The counts on the Git section rows (issue 08 §C): Not landed is `counts.notLanded` from
  * `GET /repo/branches`; Cleanup is the worktrees' total size on disk (the same `/worktrees` entry
  * the Cleanup card reads, so the two never disagree), or the safe-to-delete branch count when the
- * size degraded; All branches the local branch count; and, on the phone only, as the board draws
+ * size degraded; All branches every branch that section lists; and, on the phone only, as the board draws
  * it, how many commits landed today. `scope` is explicit (the sidebar sits above the
  * `ProjectScopeProvider`).
  */
@@ -25,6 +26,6 @@ export function useGitSectionCounts(scope: string, repo: RepoResponse | null, va
     // A known zero draws no count, like an empty list; null is unknown and draws nothing either.
     'not-landed': counts?.notLanded ? String(counts.notLanded) : null,
     cleanup: totalBytes ? formatMem(totalBytes) : worktrees.data && totalBytes === null && counts?.cleanup ? String(counts.cleanup) : null,
-    branches: repo ? String(repo.branches.length) : null,
+    branches: repo ? String(allBranchNames(repo, branches.data?.branches).length) : null,
   }
 }

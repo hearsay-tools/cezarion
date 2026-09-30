@@ -3,7 +3,7 @@ import { GitBranchIcon, TriangleAlertIcon } from '@/components/design-icons'
 
 import { useSearchParams } from 'react-router'
 
-import { useRepo } from '@/api/queries'
+import { useRepo, useRepoBranches } from '@/api/queries'
 import type { RepoInfo, RepoResponse } from '@open-mercato/cezar-api-client'
 import { CenteredState } from '@/components/centered-state'
 import { useIsDesktop } from '@/lib/use-desktop'
@@ -12,7 +12,7 @@ import { GitScreen } from './git-screen'
 import { gitSectionLabel } from './git-section-list'
 import { fetchedAgo, type GitSection } from './git-sections'
 import { RepoBackLink } from './repo-back-link'
-import { RepoBranchesSection } from './repo-branches'
+import { allBranchNames, RepoBranchesSection } from './repo-branches'
 import { RepoChangesSection } from './repo-changes'
 import { RepoCommitsSection } from './repo-commits'
 import { CleanupBranchesCard } from './repo-cleanup-branches'
@@ -125,11 +125,16 @@ function SectionMeta({ repo, info, section }: { repo: RepoResponse; info: RepoIn
     case 'not-landed':
       return <>finished tasks whose commits are not on {base}</>
     case 'branches':
-      return <>{repo.branches.length} local branch{repo.branches.length === 1 ? '' : 'es'} · on {info.branch}</>
+      return <BranchesMeta repo={repo} info={info} />
     case 'changes':
       return <>{repo.status.length} uncommitted file{repo.status.length === 1 ? '' : 's'} in the main checkout</>
     case 'cleanup':
       // The section's invariant, stated where it applies; the server enforces it (issue 08 §C).
       return <>nothing here can delete work that is not on {base}</>
   }
+}
+
+function BranchesMeta({ repo, info }: { repo: RepoResponse; info: RepoInfo }) {
+  const count = allBranchNames(repo, useRepoBranches().data?.branches).length
+  return <>{count} branch{count === 1 ? '' : 'es'} · on {info.branch}</>
 }

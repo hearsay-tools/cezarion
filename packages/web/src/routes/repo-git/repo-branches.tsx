@@ -17,7 +17,9 @@ import { cn, isHttpUrl } from '@/lib/utils'
  * git refusal (dirty tree, invalid name) comes back as a 409 whose reason surfaces verbatim as a
  * danger toast. The agents' base-branch picker lives in the checkout block, so it is listed once.
  * Each row carries its class from `GET /repo/branches` (issue 08) as a small label, and a branch
- * that belongs to a task links to it.
+ * that belongs to a task links to it. `GET /repo` leaves the task branches (`cez/*`) out of its
+ * switch list; the classified list puts them back here, without a Switch: a task's branch is
+ * opened through its task, and is usually checked out in its worktree anyway.
  *
  * Forge-specific rows (open PRs with checks badges) render ONLY when `/api/health` reports
  * the forge driver available — no driver, no PR surface, per the forge-seam doctrine. The
@@ -57,9 +59,10 @@ export function RepoBranchesSection({ repo, info }: { repo: RepoResponse; info: 
   const [newName, setNewName] = useState('')
   const [branchQuery, setBranchQuery] = useState('')
   const normalizedBranchQuery = branchQuery.trim().toLowerCase()
+  const allBranches = allBranchNames(repo, classified.data?.branches)
   const filteredBranches = normalizedBranchQuery
-    ? repo.branches.filter((name) => name.toLowerCase().includes(normalizedBranchQuery))
-    : repo.branches
+    ? allBranches.filter((name) => name.toLowerCase().includes(normalizedBranchQuery))
+    : allBranches
   const submitCreate = (event: FormEvent) => {
     event.preventDefault()
     const name = newName.trim()
@@ -102,7 +105,7 @@ export function RepoBranchesSection({ repo, info }: { repo: RepoResponse; info: 
                   )}
                   {entry ? <BranchClassLabel entry={entry} /> : null}
                 </span>
-                {current ? (
+                {name.startsWith('cez/') && !current ? null : current ? (
                   <span
                     data-slot="branch-current"
                     className="md:ml-auto flex shrink-0 items-center rounded-md bg-accent-strong/10 px-2 py-1.5 text-[12px] font-medium text-accent-text"
@@ -261,4 +264,13 @@ function BranchClassLabel({ entry }: { entry: RepoBranchEntry }) {
       {CLASS_LABEL[entry.class]}
     </span>
   )
+}
+
+/** Every branch the view lists: `GET /repo`'s switchable names (local and remote, `cez/*` left
+ *  out) plus every classified local branch, which is where the `cez/*` ones come from. Sorted
+ *  the way `GET /repo` sorts. Also the All branches count, so the sidebar and the list agree. */
+export function allBranchNames(repo: RepoResponse, classified: readonly RepoBranchEntry[] | undefined): string[] {
+  const names = new Set<string>(repo.branches)
+  for (const entry of classified ?? []) names.add(entry.name)
+  return [...names].sort((a, b) => a.localeCompare(b))
 }

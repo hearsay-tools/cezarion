@@ -415,15 +415,28 @@ describe('the Git view All branches section', () => {
     expect(other?.querySelector('[data-action="switch-branch"]')).not.toBeNull()
   })
 
-  it('labels each branch with its class and links a task branch to its task', async () => {
-    stubFetch({ 'GET /api/v1/repo': () => jsonResponse({ ...REPO, branches: ['cez/51ab2d7e', 'feature', 'main'] }) })
+  it('lists every local branch, task branches included, labelled with its class and linked to its task', async () => {
+    stubFetch()
     renderAt('/git/branches')
-    await waitFor(() => expect(document.querySelectorAll('[data-slot="branch-class"]')).toHaveLength(3))
+    await waitFor(() => expect(document.querySelectorAll('[data-slot="branch-class"]')).toHaveLength(8))
+    expect(document.querySelector('[data-slot="repo-meta"]')?.textContent).toBe('8 branches · on main')
     const labels = [...document.querySelectorAll<HTMLElement>('[data-slot="branch-row"]')].map((row) => [
       row.dataset.branch,
       row.querySelector('[data-slot="branch-class"]')?.textContent,
     ])
-    expect(labels).toEqual([['cez/51ab2d7e', 'not landed'], ['feature', 'yours'], ['main', 'in use']])
+    expect(labels).toEqual([
+      ['cez/51ab2d7e', 'not landed'],
+      ['cez/7c1e09aa', 'not landed'],
+      ['cez/9d04c1f2', 'not landed'],
+      ['cez/aaaaaaaa', 'merged'],
+      ['cez/bbbbbbbb', 'merged'],
+      ['cez/cccccccc', 'empty'],
+      ['feature', 'yours'],
+      ['main', 'in use'],
+    ])
+    // A task branch opens through its task, never through Switch.
+    expect(document.querySelector('[data-branch="cez/51ab2d7e"] [data-action="switch-branch"]')).toBeNull()
+    expect(document.querySelector('[data-branch="feature"] [data-action="switch-branch"]')).not.toBeNull()
     expect(document.querySelector('[data-branch="cez/51ab2d7e"] [data-slot="branch-task-link"]')?.getAttribute('href')).toBe('/tasks/run-51')
     expect(document.querySelector('[data-branch="feature"] [data-slot="branch-task-link"]')).toBeNull()
   })
@@ -441,7 +454,7 @@ describe('the Git view All branches section', () => {
       expect(post?.body).toEqual({ name: 'feature' })
     })
     await waitFor(() => expect(document.body.textContent).toContain('Switched to feature'))
-    await waitFor(() => expect(document.querySelector('[data-slot="repo-meta"]')?.textContent).toBe('2 local branches · on feature'))
+    await waitFor(() => expect(document.querySelector('[data-slot="repo-meta"]')?.textContent).toBe('8 branches · on feature'))
     await waitFor(() => expect(client.getQueryData<HealthResponse>(queryKeys.health)?.repo?.branch).toBe('feature'))
   })
 

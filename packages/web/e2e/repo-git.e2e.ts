@@ -133,13 +133,22 @@ describe('the repo view against the live dry-run server', () => {
     const repo = await api<RepoPayload>('/api/v1/repo')
     expect(repo.branches.length).toBeGreaterThan(0)
 
+    // Issue 08: the list is `GET /repo`'s switch list plus every classified local branch, which is
+    // where the `cez/*` task branches come from.
+    const classified = await api<{ branches: Array<{ name: string }> }>('/api/v1/repo/branches')
+    const listed = new Set([...repo.branches, ...classified.branches.map((entry) => entry.name)])
+
     browser.goto(`${baseUrl}${scoped('/git/branches')}`)
     browser.waitForFunction(`document.querySelector('[data-slot="repo-branch-list"]') !== null`)
 
-    expect(browser.count('[data-slot="branch-row"]')).toBe(repo.branches.length)
+    // The classified half is a second request that lands after the list first paints, so the
+    // count is waited for, not read once (.ai/qa/failures/repo-git/git-branches-renders-the-live-
+    // branch-list-with-the-checkout-marked-current-1, 2026-09-30 local run: 910 rows rendered
+    // against the 289 names `GET /repo` alone carries).
+    expect(browser.waitForValue(`document.querySelectorAll('[data-slot="branch-row"]').length`, (value) => value === listed.size)).toBe(listed.size)
     // An attached checkout marks exactly its current branch. CI may run this suite from a
     // detached task worktree; then git honestly reports no branch and no row may be marked.
-    const expectedCurrent = repo.info?.branch && repo.branches.includes(repo.info.branch) ? 1 : 0
+    const expectedCurrent = repo.info?.branch && listed.has(repo.info.branch) ? 1 : 0
     expect(browser.count('[data-slot="branch-current"]')).toBe(expectedCurrent)
     if (expectedCurrent === 1 && repo.info) {
       expect(
