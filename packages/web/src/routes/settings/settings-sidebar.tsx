@@ -23,7 +23,7 @@ export function SettingsSidebar({ projectId, projectName, capabilities }: {
         ]
         return (
           <nav key={scope} aria-label={label} data-slot="settings-nav" data-scope={scope} className="mb-5">
-            <h3 className="px-2.5 pb-1.5 text-[11px] font-medium text-soft-foreground">{label}</h3>
+            <h3 title={label} className="truncate px-2.5 pb-1.5 text-[11px] font-medium text-soft-foreground">{label}</h3>
             {entries.map(({ id, title, icon: Icon, to }) => (
               <NavLink
                 key={id}

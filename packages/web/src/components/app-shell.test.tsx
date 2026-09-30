@@ -65,6 +65,12 @@ describe('AppShell', () => {
     expect(screen.getByTestId('location').textContent).toBe('/automations')
   })
 
+  it('never shrinks the active tab so its label is not truncated beside the overflow button', () => {
+    renderShell('/settings', { inboxCount: 2 })
+    const active = within(nav()).getByRole('link', { current: 'page' })
+    expect(active.className).toContain('shrink-0')
+  })
+
   it('omits overflow when no optional view is available and keeps version in footer', () => {
     renderShell('/', { inboxAvailable: false, automationsAvailable: true, forgeAvailable: false, version: '1.2.3' })
     expect(within(nav()).queryByRole('button', { name: 'More views' })).toBeNull()
