@@ -140,6 +140,11 @@ const openDesktop = (path = '/git', id = project) => {
   browser.setViewport(DESKTOP.width, DESKTOP.height)
   browser.goto(`${base}${scoped(path, id)}`)
   browser.waitForFunction(has(`${SIDEBAR} ${SECTIONS}`))
+  // The sections render before `/repo` answers and the checkout block then mounts ABOVE them,
+  // pushing every section row down. Clicking a section before that lands on the checkout's
+  // uncommitted line instead (CI failure bundle, PR #716 run 36772703613 shard 4:
+  // git-sidebar/All-branches-lists-the-branches-…-1 — focus on git-uncommitted, URL /git/changes).
+  browser.waitForFunction(has(`${SIDEBAR} ${CHECKOUT}`))
 }
 const setTheme = (theme: 'light' | 'dark') =>
   browser.evaluate(`document.documentElement.classList.remove('light', 'dark'); document.documentElement.classList.add('${theme}')`)
