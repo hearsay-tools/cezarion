@@ -1,13 +1,14 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import type { ApiRun, CreateRunInput, RunRecord, WorkspaceConfigResponse } from '@open-mercato/cezar-api-client'
 
 import { stopFixtureServer } from './fixture-server'
-import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
-import { waitForHealth } from './poll'
+import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv, getJson } from './agent-browser'
+import { pollFor, waitForHealth } from './poll'
 
 const sessionId = `e2e-composer-defaults-${process.pid}`
 
@@ -62,6 +63,8 @@ beforeAll(async () => {
     '---\ndescription: Review a proposal with the user\ninteractive: true\n---\n\nAsk questions before writing the review.\n',
     'utf8',
   )
+  writeFileSync(join(dataRoot, '.ai/skills/setup.md'),
+    '---\ndescription: Set up SDLC\n---\n\nSet up this project.\n', 'utf8')
   git('add', '.')
   git('commit', '-qm', 'init')
 
@@ -70,7 +73,7 @@ beforeAll(async () => {
   server = spawn(
     process.execPath,
     [cezarCli, 'serve', '--repo', dataRoot, '--port', String(port), '--no-open'],
-    { env: fixtureServeEnv(dataRoot), stdio: 'ignore' },
+    { env: { ...fixtureServeEnv(dataRoot), CEZ_AUTONOMOUS_DEFAULT: '' }, stdio: 'ignore' },
   )
   await waitForHealth(baseUrl)
   bootProject = await bootProjectId(baseUrl)
@@ -155,4 +158,60 @@ describe('configurable composer run defaults', () => {
       await putDefaults(null, null)
     }
   })
+
+  it.each([
+    { choice: 'unset', clicks: 0, expected: true },
+    { choice: 'off', clicks: 1, expected: false },
+    { choice: 'on', clicks: 2, expected: true },
+  ])('/setup $choice: toggle, request and saved record agree (#458)', async ({ clicks, expected }) => {
+    await putDefaults(null, null)
+    const defaults = await getJson<WorkspaceConfigResponse>(`${baseUrl}/api/v1/workspace/config`)
+    expect(defaults.composerDefaults.inheritedAutonomous).toBe('source-dependent')
+    browser.goto(`${baseUrl}/p/${bootProject}/new`)
+    browser.waitForFunction(`document.querySelector('[data-slot="composer"] textarea') !== null`)
+    browser.evaluate(`localStorage.removeItem('cez-new-task-draft')`)
+    // A full navigation resets the in-memory draft as well as browser storage.
+    browser.goto(`${baseUrl}/p/${bootProject}/new?skill=setup`)
+    browser.waitForFunction(`document.querySelector('[data-slot="source-pill"]')?.textContent.includes('setup')`)
+    browser.evaluate(`{ document.querySelector('[data-slot="execution-options"]').open = true }`)
+    browser.waitForFunction(`document.querySelector('[data-slot="autonomous-toggle"]')?.getAttribute('aria-checked') === 'true'`)
+    for (let i = 0; i < clicks; i++) browser.click('[data-slot="autonomous-toggle"]')
+    expect(browser.waitForValue(
+      `document.querySelector('[data-slot="autonomous-toggle"]')?.getAttribute('aria-checked')`,
+      value => value === String(expected),
+    )).toBe(String(expected))
+    // Retained draft choices survive a real reload, including an explicit false.
+    browser.goto(`${baseUrl}/p/${bootProject}/new`)
+    browser.waitForFunction(`document.querySelector('[data-slot="source-pill"]')?.textContent.includes('setup')`)
+    expect(browser.waitForValue(
+      `document.querySelector('[data-slot="autonomous-toggle"]')?.getAttribute('aria-checked')`,
+      value => value === String(expected),
+    )).toBe(String(expected))
+    // Observe the real fetch without changing its body, response or destination.
+    browser.evaluate(`(() => {
+      const original = window.fetch.bind(window)
+      window.fetch = (input, init) => {
+        if (init?.method === 'POST' && String(input).endsWith('/runs')) {
+          window.__autonomousLaunch = JSON.parse(init.body)
+        }
+        return original(input, init)
+      }
+    })()`)
+    browser.fill('[data-slot="composer"] textarea', 'Set up SDLC for this project')
+    browser.click('[aria-label="Start task"]')
+    const pathname = browser.waitForValue('location.pathname', value => typeof value === 'string' && value.includes('/tasks/')) as string
+    const runId = pathname.split('/').pop()!
+    const payload = browser.evaluate('window.__autonomousLaunch') as CreateRunInput
+    expect(payload.autonomous).toBe(expected ? true : undefined)
+    const record = await getJson<ApiRun>(
+      `${baseUrl}/api/v1/runs/${runId}`,
+    )
+    expect(record.autonomous).toBe(expected)
+    expect(record.workflowDef?.steps[0]?.skill).toBe('setup')
+    // API agreement alone could miss a store write regression; inspect the flushed index too.
+    await pollFor(() => {
+      const records = JSON.parse(readFileSync(join(dataRoot, '.ai/cezar/runs.json'), 'utf8')) as RunRecord[]
+      return records.find(run => run.id === runId)?.autonomous === expected ? true : undefined
+    }, () => `Run ${runId} did not persist autonomous=${expected}`)
+  }, 90_000)
 })

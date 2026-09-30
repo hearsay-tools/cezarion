@@ -1148,6 +1148,42 @@ describe('provider authentication gate', () => {
 // ---- submit bodies (the wire contract) ---------------------------------------------------------
 
 describe('submit', () => {
+  // #458: an untouched /setup is allowed to default on; a retained explicit off must
+  // survive remount and win over both workspace policy and skill selection.
+  it.each([
+    { choice: null, configured: null, interactive: false, expected: true },
+    { choice: false, configured: true, interactive: false, expected: false },
+    { choice: true, configured: false, interactive: false, expected: true },
+    { choice: null, configured: false, interactive: false, expected: false },
+    { choice: null, configured: true, interactive: false, expected: true },
+    { choice: null, configured: true, interactive: true, expected: false },
+    { choice: false, configured: null, interactive: true, expected: false },
+    { choice: true, configured: null, interactive: true, expected: true },
+  ])('/setup choice=$choice policy=$configured interactive=$interactive agrees with its payload', async ({
+    choice, configured, interactive, expected,
+  }) => {
+    writeDraft({ ...readDraft(), autonomous: choice })
+    serve({
+      skills: [{ name: 'setup', description: 'Set up SDLC', body: '', path: '/p/setup.md',
+        source: 'ai', ...(interactive ? { interactive: true as const } : {}) }],
+      workspaceConfig: { ...WORKSPACE_CONFIG, composerDefaults: {
+        ...WORKSPACE_CONFIG.composerDefaults, autonomous: configured,
+      } },
+    })
+    renderNewTask('/new?skill=setup')
+    await pillReady('setup')
+    await waitFor(() => expect(document.querySelector('[data-slot="autonomous-toggle"]')
+      ?.getAttribute('aria-checked')).toBe(String(expected)))
+    fireEvent.change(textarea(), { target: { value: 'Set up SDLC' } })
+    await startTask()
+
+    const body = postedBody() as Record<string, unknown>
+    expect(body.steps).toEqual([{ id: 'task', name: 'setup', skill: 'setup', prompt: '{{task}}' }])
+    // Off is omitted on the wire and normalizes to false at startRun, never to a server default.
+    expect(body.autonomous).toBe(expected ? true : undefined)
+    expect(readDraft().autonomous).toBe(choice)
+  })
+
   it('a SKILL source posts the one-step inline chain and persists lastTask, then navigates', async () => {
     draftSource({ source: 'skill', ref: 'om-fix' })
     serve({ createRun: { id: 'run-9' } })
