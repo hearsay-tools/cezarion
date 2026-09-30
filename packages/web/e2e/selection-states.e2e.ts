@@ -268,8 +268,11 @@ function checkNavBody(variant: ContrastQaVariant, { base, projectId, container, 
   // the drawer renders the same footer component, and its touch rules are not this slice's.
   if (!mobile) {
     browser.goto(`${base}/settings/global`)
-    applyContrastQaVariant(browser, variant)
     const gear = '[data-slot="rail-global-settings"][aria-current="page"]'
+    // A cold navigation can hydrate default appearance after the QA override,
+    // restoring a 36px control while this variant expects ultra density's 27px.
+    browser.waitForStable(`document.querySelector(${JSON.stringify(gear)}) !== null && window.__cezIdle === true`, { holdMs: 150 })
+    applyContrastQaVariant(browser, variant)
     const footer = browser.waitForValue(ink(gear), (v: Ink | null) => v !== null && v.bg === fill.selected) as Ink
     const railControlSize = variant.density === 'ultra' ? 27 : 36
     expect({ width: footer.width, height: footer.height, icon: footer.icon }).toEqual({ width: railControlSize, height: railControlSize, icon: footer.ink })

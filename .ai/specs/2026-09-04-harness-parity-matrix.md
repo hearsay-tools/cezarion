@@ -6,26 +6,26 @@
 
 `ui-parity.test.ts` pins one thing: every mapper emits every v2 UI capability. Everything else a
 runner owes cezar — session lifecycle, provider-failure surfacing, `sendMessage`, ask routing, park
-declarations — is asserted per runner, ad hoc, in four unrelated test files. Nine recent fixes
+declarations — is asserted per runner, ad hoc, in per-runner test files. Nine recent fixes
 (#2, #3, #4, #5, #6, #46, #48, #53, #54) each repaired a failure mode that no shared contract
 covered, so the next one repeats on the next backend.
 
-This spec adds a second executable matrix beside the first: one criterion catalog, two tiers, four
-backends, and an exemption table the test itself validates. Adding a runner becomes "make your mock
+This spec adds a second executable matrix beside the first: one criterion catalog, two tiers, every
+`RUNNER_IDS` backend, and an exemption table the test itself validates. Adding a runner becomes "make your mock
 answer the shared scenario catalog and pass every row".
 
 ## Resolved assumptions
 
 | # | Question | Applied default | Why | Confirm? |
 |---|---|---|---|---|
-| Q1 | Where do rows assert? | Two tiers: the `AgentRunner`/`AgentSession` seam, and a real `RunManager` run. | `ask.requested` is emitted by the RUNNER for codex and opencode, and by `workflows/run.ts` for claude and pi. Groups 1, 3 and 6 are only uniform above the seam; a seam-only matrix would exempt half the backends on exactly the rows the recent fixes were about. | confirmed by owner |
+| Q1 | Where do rows assert? | Two tiers: the `AgentRunner`/`AgentSession` seam, and a real `RunManager` run. | `ask.requested` is emitted by the RUNNER for codex, opencode and cursor, and by `workflows/run.ts` for claude and pi. Groups 1, 3 and 6 are only uniform above the seam; a seam-only matrix would exempt the marker-based ask paths on exactly the rows the recent fixes were about. | confirmed by owner |
 | Q2 | A cell a backend cannot satisfy? | A declared `PARITY_EXEMPTIONS` entry carrying a reason, asserted INVERTED so a stale exemption fails. | An `it.skip` is invisible; an inverted assertion is a ratchet. AC #6 needs exemptions to be data the suite validates, not a comment. | confirmed by owner |
 | Q3 | What transport drives a row? | Each backend's real runner class against its own existing mock binary, selected by the `CEZ_*_BIN` var it already reads. | A test-owned fake transport would be a second wire-shape source of truth, drifting from the mocks. `AGENT_PROTOCOL.md` §7 names that drift as PR #443's root cause. | ok |
 | Q4 | Shared scenario names, or shared markers? | Shared NAMES; the adapter maps each to that backend's own `mock:` spelling. | Renaming `mock:turn-failed` or `mock:auth-error` would churn passing runner tests for no gain, and the existing markers are already wire-faithful. | ok |
 | Q6 | S3 — every backend echoes a `session` event? | No: the criterion is a RESUMABLE id, from the v1 `session` event or the settled `AgentRunResult`. | Codex, opencode and pi mint their own id and echo it; claude pins the id cezar supplied (`--session-id`) and returns it. Both are how `resumeCommand()` gets an id, and demanding the event would have failed claude for conforming to its own documented wire. | applied during implementation |
 | Q7 | S7 — every backend emits `session.error`? | No: v2 must signal the failure, and the CHANNEL is per-wire. | opencode and pi have a session-level error frame, codex reports a failed turn, claude has only the result envelope's stop reason. What #53 and #54 both WERE is the run looking finished, so that is what the row pins. | applied during implementation |
-| Q8 | R1 — does a clean run reach a terminal status? | Only when the agent DECLARES completion, so R1 needs its own `done` scenario. | A markerless turn-end parks as `waiting` on every backend, and that is correct cezar behaviour. R1's first draft asserted a terminal status off `baseline` and failed all four for the wrong reason. | applied during implementation |
-| Q5 | New env var for the matrix? | None. | The four mock selectors (`CEZ_CLAUDE_BIN`, `CEZ_CODEX_BIN`, `CEZ_OPENCODE_BIN`, `CEZ_PI_BIN`) already exist and are documented. Zero-config: never trade a working default for a knob. | ok |
+| Q8 | R1 — does a clean run reach a terminal status? | Only when the agent DECLARES completion, so R1 needs its own `done` scenario. | A markerless turn-end parks as `waiting` on every backend, and that is correct cezar behaviour. R1's first draft asserted a terminal status off `baseline` and failed every backend for the wrong reason. | applied during implementation |
+| Q5 | New env var for the matrix? | None. | The mock selectors in `HARNESS_ADAPTERS` already exist and are documented. Zero-config: never trade a working default for a knob. | ok |
 
 ## Problem Statement
 
@@ -49,10 +49,10 @@ backend, after the same class of bug had already been fixed on another:
 
 Groups 1, 3 and 6 share a structural property that decides this spec's shape: **their uniform
 behavior does not exist at the seam.** `ask.requested` comes from the runner in
-`codex-app-server-runner.ts:416` and `opencode-server-runner.ts:743`, and from `workflows/run.ts:145`
+`codex-app-server-runner.ts`, `opencode-server-runner.ts` and `cursor-acp-runner.ts`, and from `workflows/run.ts`
 for claude and pi. Whether a provider failure fails the run or parks it is decided in
 `workflows/run.ts`, not in the runner. A seam-only matrix would have to exempt claude and pi, or
-codex and opencode, on precisely the rows the last nine fixes were about.
+codex, opencode and cursor, on precisely the rows the last nine fixes were about.
 
 ## Research
 
@@ -63,13 +63,14 @@ binary that the runner selects from an env var it already reads, and each mock i
 | Backend | Mock binary | Selector | Scenarios today |
 |---|---|---|---|
 | claude | `packages/cezar/scripts/mock-claude.mjs` | `CEZ_CLAUDE_BIN`, or `CEZ_DRY_RUN=1` | `done`, `monitoring`, `ask`, `ask-bad`, `ask-invalid`, `ask-near`, `refs`, `slow`, `auth-error`, `limit`, `md`, `subagents`, `schedule-wakeup` |
-| codex | `packages/cezar/src/core/__fixtures__/codex/mock-codex-app-server.mjs` | `CEZ_CODEX_BIN` | `turn-failed`, `subagent-activity`, `child-turn`, `native-codex-ask` |
-| opencode | `packages/cezar/src/core/__fixtures__/opencode/mock-opencode-serve.mjs` | `CEZ_OPENCODE_BIN` | none — one hard-coded turn |
+| codex | `packages/cezar/scripts/mock-codex-app-server.mjs` | `CEZ_CODEX_BIN` | `turn-failed`, `subagent-activity`, `child-turn`, `native-codex-ask` |
+| opencode | `packages/cezar/scripts/mock-opencode-serve.mjs` | `CEZ_OPENCODE_BIN` | `ask`, `ask-reply-late`, `resume-done`, `done`, `provider-error` |
+| cursor | `packages/cezar/scripts/mock-cursor-acp.mjs` | `CEZ_CURSOR_BIN` | `ask`, `plan`, `resume-done` |
 | pi | `packages/cezar/scripts/mock-pi-rpc.mjs` | `CEZ_PI_BIN`, or `CEZ_DRY_RUN=1` | `monitoring`, `backend-resume`, `backend-resume-text` |
 
 `workflows/run.test.ts` already proves the second tier is reachable offline: its #565 suite points
 `CEZ_CODEX_BIN` at the codex mock, inits a temp git repo, and drives a real `RunManager` run to a
-parked state. The matrix generalizes that one suite across four backends instead of inventing a
+parked state. The matrix generalizes that one suite across `RUNNER_IDS` instead of inventing a
 mechanism.
 
 The scenario markers are also, usefully, already wire-faithful — they were written alongside the
@@ -90,7 +91,8 @@ It exports:
 
 - `SCENARIOS` — the shared scenario-name catalog. A name, not a marker.
 - `HARNESS_ADAPTERS: Record<RunnerId, HarnessAdapter>` — per backend, the env var and mock path that
-  make it offline, plus a scenario-name → prompt-text map.
+  make it offline, plus a scenario-name → prompt-text map and `askResumeCases` naming
+  every exposed human ask kind and its answer.
 - `PARITY_EXEMPTIONS: ReadonlyArray<{ criterion: string; backend: RunnerId; reason: string }>`.
 - `driveSeam()` — start a real session against the mock, collect v1 `AgentEvent[]`, v2 `UiEvent[]`
   and the settled `AgentRunResult`.
@@ -127,7 +129,7 @@ opencode: { 'provider-error': 'mock:provider-error',  'ask': 'mock:ask' }
 pi:       { 'provider-error': 'mock:provider-error',  'ask': 'mock:ask' }
 ```
 
-This is the whole reason the change lands without churning four passing test files: no existing
+This is the whole reason the change lands without churning the passing per-runner test files: no existing
 marker is renamed, and the criterion catalog stays free of backend vocabulary.
 
 The catalog:
@@ -140,11 +142,13 @@ The catalog:
 | `split-text` | stream the reply as three or more token-sized deltas, ending with a trailing `CEZ:MONITORING` | S8, R5 |
 | `provider-error` | a runtime provider rejection in the backend's native error shape | S7, R2 |
 | `ask` | an ask — native where the wire has one, a `CEZ:ASK` marker otherwise | R3 |
+| `ask-resume` / `plan-resume` | accept one human answer and finish with `CEZ:DONE`, without another prompt | R26 |
+| `ask-reply-late` | native ask whose reply acknowledgement can lag the resumed turn | R9 |
 | `ask-bad` | a malformed ask, and then still end the turn | R4 |
 | `subagent` | child work attributed to a parent, and a child terminal signal | S9 |
 
 `baseline` is every mock's existing default turn, so it costs nothing. A second turn needs no
-scenario either: all four mocks already loop on their transport, so `sendMessage` reuses `baseline`.
+scenario either: the mocks for every `RUNNER_IDS` backend already loop on their transport, so `sendMessage` reuses `baseline`.
 
 ### Tier 1 — seam rows
 
@@ -181,6 +185,16 @@ Driven by `driveRun()`: a real `RunManager` run in a temp git repo, the shape
 | R3 | `ask` | status `waiting`, and exactly one `ask.requested` carrying at least one question | 3 |
 | R4 | `ask-bad` | the run reaches a terminal status and emits no `ask.requested` | 3 |
 | R5 | `split-text` | status `running` with `activity: 'monitoring'` — not `waiting` | 6 |
+
+| R26 | `ask-resume`, plus `plan-resume` for Cursor | every exposed ask kind reaches completion after one human answer; no later `waiting` or second human prompt | #398 |
+
+R26 loops `RUNNER_IDS` and each adapter’s `askResumeCases`: native question wires
+for Codex/OpenCode, question and plan wires for Cursor, and `CEZ:ASK` for Claude/Pi.
+The total-coverage guard requires a live prompt and nonempty inventory or a named
+exemption. A native-answer `end_turn` is a wire boundary, not a human handoff;
+Cursor must resume work after it. R6 keeps its markerless owned-input drain contract.
+A prose guard rejects counted runner rosters in `AGENT_PROTOCOL.md`, this spec and
+harness-parity comments; use `RUNNER_IDS` or explicit backend names instead.
 
 R2 and R5 are the two rows that would have caught #53, #54 and #48 on any backend rather than on the
 one that shipped the bug.
@@ -242,7 +256,8 @@ The matrix IS the test. Two things about it need their own proof:
 
 ## Cost
 
-Tier 2 is 5 rows × 4 backends = 20 short child-process runs, roughly 30–60 s added to `npm test`.
+Tier 2 runs each run criterion against every `RUNNER_IDS` backend, with an additional
+cell for each exposed ask kind in R26. Keep these offline child-process runs bounded.
 That keeps the suite inside AGENTS.md's "no server, no browser" fast-gate rule — a spawned mock CLI is
 what `workflows/run.test.ts` already does — but it is the change's whole runtime cost and it is
 deliberate: the owner chose the orchestrator tier precisely because groups 1, 3 and 6 are not uniform
@@ -266,11 +281,11 @@ red the same way.
 
 ## Out of Scope
 
-- **cursor-cli and grok-cli runners.** File separate issues once the matrix lands; this spec only
-  makes the target they must hit explicit.
+- **Shipping new runners.** Every existing `RUNNER_IDS` backend, including Cursor, is in scope
+  for parity; new runner implementations belong in their own issues.
 - **Live network E2E against real vendor CLIs in default CI.** Mock children only.
 - **Changing `ui-parity.test.ts`.** It keeps mapper parity unchanged; it gains a pointer comment to
   its sibling and nothing else.
-- **A new `CEZ_*` env var.** The four mock selectors already exist.
-- **Reworking the four per-runner test files.** They keep their backend-specific cases; the matrix
+- **A new `CEZ_*` env var.** The mock selectors in `HARNESS_ADAPTERS` already exist.
+- **Reworking the per-runner test files.** They keep their backend-specific cases; the matrix
   adds the shared floor beneath them rather than absorbing them.

@@ -380,7 +380,10 @@ it.each(['done', 'monitoring', 'ask', 'cancelled'])('does not auto-resume across
   });
 });
 
-it.each([['mock:plan', 'Plan: Approve'], ['mock:ask', 'Tests: Vitest'], ['mock:ask', 'Use a custom runner']])('takes %s from cockpit answer to completed work without another needs-you park', async (prompt, answer) => {
+// R26 covers option answers for both native ask kinds across RUNNER_IDS.
+it('takes a free-text cockpit answer to completed work without another needs-you park', async () => {
+  const prompt = 'mock:ask';
+  const answer = 'Use a custom runner';
   await withOwnedInputRun('cursor', 'ask', async ({ store, manager, runId }) => {
     store.updateRun(runId, { task: `${prompt} mock:resume-done` });
     manager.enqueueOwnedRun(runId);

@@ -48,6 +48,9 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  * | `split-text` | stream the reply in pieces, ending with a trailing `CEZ:MONITORING` |
  * | `provider-error` | a runtime provider rejection in its native error shape |
  * | `ask` | an ask — native where the wire has one, a `CEZ:ASK` marker otherwise |
+ * | `ask-resume` | accept one human answer, then finish with `CEZ:DONE` without another prompt |
+ * | `plan-resume` | Cursor’s `cursor/create_plan` variant of `ask-resume` |
+ * | `ask-reply-late` | native ask whose reply acknowledgement can lag the resumed turn |
  * | `ask-bad` | a malformed ask, and then still end the turn |
  * | `subagent` | child work and terminal signal, then parent monitoring text followed by late child text |
  * | `steer-tool` | one slow tool; agent input sent while it runs is read before the turn ends (#505) |
@@ -65,6 +68,8 @@ export const SCENARIOS = [
   'provider-error',
   'provider-unavailable',
   'ask',
+  'ask-resume',
+  'plan-resume',
   'ask-snapshot',
   'ask-prose',
   'ask-bad',
@@ -100,6 +105,12 @@ export const NO_PROGRESS_CRITERIA = [
 
 export interface HarnessAdapter {
   readonly backend: RunnerId;
+  /** Every human ask wire this runner exposes; marker fallback when none exists. */
+  readonly askResumeCases: readonly {
+    kind: string;
+    scenario: 'ask-resume' | 'plan-resume';
+    answer: string;
+  }[];
   /** The env var this backend's runner already reads to locate its binary. */
   readonly binEnv: string;
   /** Absolute path to the offline mock binary. */
@@ -123,6 +134,7 @@ export const PINNED_SESSION_ID = '0e5f1a7c-1c3e-4d2a-9b64-2f7a5c8d1e90';
 export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
   claude: {
     backend: 'claude',
+    askResumeCases: [{ kind: 'CEZ:ASK', scenario: 'ask-resume', answer: 'Library: Vitest' }],
     binEnv: 'CEZ_CLAUDE_BIN',
     mockBin: CLAUDE_MOCK,
     scenarios: {
@@ -134,6 +146,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'provider-error': 'mock:auth-error',
       'provider-unavailable': 'mock:auth-error',
       ask: 'mock:ask',
+      'ask-resume': 'mock:ask mock:resume-done',
       'ask-reply-late': 'mock:ask',
       'ask-snapshot': 'mock:ask-snapshot',
       'ask-prose': 'mock:ask-prose',
@@ -147,6 +160,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
   },
   codex: {
     backend: 'codex',
+    askResumeCases: [{ kind: 'item/tool/requestUserInput', scenario: 'ask-resume', answer: 'Library: Vitest' }],
     binEnv: 'CEZ_CODEX_BIN',
     mockBin: CODEX_MOCK,
     scenarios: {
@@ -158,6 +172,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'provider-error': 'mock:provider-error',
       'provider-unavailable': 'mock:stream-retry',
       ask: 'mock:native-codex-ask',
+      'ask-resume': 'mock:native-codex-ask mock:resume-done',
       'ask-reply-late': 'mock:native-codex-ask',
       'ask-snapshot': 'mock:ask-snapshot',
       'ask-prose': 'mock:ask-prose',
@@ -171,6 +186,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
   },
   opencode: {
     backend: 'opencode',
+    askResumeCases: [{ kind: 'question.asked', scenario: 'ask-resume', answer: 'Library: Vitest' }],
     binEnv: 'CEZ_OPENCODE_BIN',
     mockBin: OPENCODE_MOCK,
     scenarios: {
@@ -181,6 +197,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'provider-error': 'mock:provider-error',
       'provider-unavailable': 'mock:provider-error',
       ask: 'mock:ask',
+      'ask-resume': 'mock:ask mock:resume-done',
       'ask-reply-late': 'mock:ask-reply-late',
       'ask-snapshot': 'mock:ask-snapshot',
       'ask-prose': 'mock:ask-prose',
@@ -193,16 +210,24 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
   },
   cursor: {
     backend: 'cursor',
+    askResumeCases: [
+      { kind: 'cursor/ask_question', scenario: 'ask-resume', answer: 'Tests: Vitest' },
+      { kind: 'cursor/create_plan', scenario: 'plan-resume', answer: 'Plan: Approve' },
+    ],
     binEnv: 'CEZ_CURSOR_BIN',
     mockBin: join(HERE, '..', '..', 'scripts', 'mock-cursor-acp.mjs'),
     scenarios: { baseline: BASELINE_PROMPT, done: 'mock:done', hold: 'mock:hold', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'busy-progress': 'mock:busy-progress',
       'split-text': 'mock:split-text', 'provider-error': 'mock:provider-error',
       'provider-unavailable': 'mock:provider-error',
-      ask: 'mock:ask', 'ask-snapshot': 'mock:ask-snapshot', 'ask-prose': 'mock:ask-prose', 'ask-bad': 'mock:ask-bad', 'ask-reply-late': 'mock:ask', subagent: 'mock:subagent',
+      ask: 'mock:ask',
+      'ask-resume': 'mock:ask mock:resume-done',
+      'plan-resume': 'mock:plan mock:resume-done',
+      'ask-snapshot': 'mock:ask-snapshot', 'ask-prose': 'mock:ask-prose', 'ask-bad': 'mock:ask-bad', 'ask-reply-late': 'mock:ask', subagent: 'mock:subagent',
       'subagent-after-park': 'mock:subagent-after-park' },
   },
   pi: {
     backend: 'pi',
+    askResumeCases: [{ kind: 'CEZ:ASK', scenario: 'ask-resume', answer: 'Library: Vitest' }],
     binEnv: 'CEZ_PI_BIN',
     mockBin: PI_MOCK,
     scenarios: {
@@ -213,6 +238,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'provider-error': 'mock:provider-error',
       'provider-unavailable': 'mock:provider-error',
       ask: 'mock:ask',
+      'ask-resume': 'mock:ask mock:resume-done',
       'ask-reply-late': 'mock:ask',
       'ask-snapshot': 'mock:ask-snapshot',
       'ask-prose': 'mock:ask-prose',
@@ -465,7 +491,7 @@ export interface RunObservation {
  * Drive one backend through a real `RunManager` run against its offline mock.
  *
  * The run tier exists because three of the failure-mode groups are only uniform
- * ABOVE the seam: `ask.requested` comes from the runner for codex and opencode
+ * ABOVE the seam: `ask.requested` comes from the runner for codex, opencode and cursor
  * and from `workflows/run.ts` for claude and pi, and whether a provider failure
  * fails the run or parks it is decided in the orchestrator either way.
  *
@@ -570,7 +596,7 @@ function trackTurnBookkeeping(manager: RunManager): () => Promise<void> {
   return async () => { while (pending.size) await Promise.all(pending); };
 }
 
-/** An owned worker, using real disk/Git state and the same four wire mocks. */
+/** An owned worker, using real disk/Git state and the native wire mocks for `RUNNER_IDS`. */
 export async function withOwnedInputRun(
   backend: RunnerId,
   scenario: ScenarioName,

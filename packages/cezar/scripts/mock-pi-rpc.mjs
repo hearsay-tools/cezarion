@@ -36,6 +36,7 @@ let activeTurn = null;
 let steeringMode = 'one-at-a-time';
 // The prompt a queued handler is running; pi records it as the turn's user message.
 let currentPrompt;
+let resumeAfterAsk = false;
 const send = (value) => {
   if (value?.type === 'turn_start' && !activeTurn) {
     activeTurn = { steers: [], late: false };
@@ -190,7 +191,8 @@ async function handle(command) {
       errorMessage: 'Not Found',
     } });
     send({ type: 'agent_settled' });
-  } else if (command.type === 'prompt' && command.message.includes('mock:done')) {
+  } else if (command.type === 'prompt' && (command.message.includes('mock:done') || (resumeAfterAsk && command.message.trim() === 'Library: Vitest'))) {
+    resumeAfterAsk = false;
     // Declares the task complete so the run reaches cezar's review gate; a
     // markerless turn-end correctly parks as `waiting` instead (harness
     // parity R1).
@@ -222,6 +224,7 @@ async function handle(command) {
     sendText(['Pick one.\n\nCEZ:ASK {not valid json']);
     sendTurnEnd();
   } else if (command.type === 'prompt' && command.message.includes('mock:ask')) {
+    resumeAfterAsk = command.message.includes('mock:resume-done');
     // A well-formed `CEZ:ASK` marker, split so the marker and its JSON body land
     // in separate deltas — the #2 boundary that used to break assembly, and the
     // reason an ask row is worth driving through the real coalescer.
