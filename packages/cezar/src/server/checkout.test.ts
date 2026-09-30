@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import {
   existsSync,
   mkdirSync,
@@ -11,12 +12,20 @@ import {
 import { mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RunStore } from '../runs/store.ts';
 import type { RunManager } from '../workflows/run.ts';
 import { mergeWriteWorkspaceConfig } from '../workspace/config.ts';
 import { clearProjectProbeCache, registerProject } from '../workspace/projects.ts';
-import { checkoutRepo, cleanupCheckout, isValidCheckoutName, parseRepoRef, type CloneRunner } from './checkout.ts';
+import {
+  checkoutRepo,
+  cleanupCheckout,
+  ghCloneArgs,
+  ghCloneRunner,
+  isValidCheckoutName,
+  parseRepoRef,
+  type CloneRunner,
+} from './checkout.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
 import {
   WorkspaceEventBus,
@@ -54,6 +63,7 @@ describe('checkout — repo reference parsing', () => {
         owner: 'open-mercato',
         repo: 'cezar',
         slug: 'open-mercato/cezar',
+        cloneUrl: 'https://github.com/open-mercato/cezar.git',
       });
     }
   });
@@ -81,6 +91,110 @@ describe('checkout — repo reference parsing', () => {
     expect(isValidCheckoutName('my.repo_2-x')).toBe(true);
     for (const name of ['', '.', '..', '.ssh', 'a/b', 'a\\b', '../escape', '/abs', 'a'.repeat(200)]) {
       expect(isValidCheckoutName(name), name).toBe(false);
+    }
+  });
+
+});
+
+describe('checkout — GitHub transport', () => {
+  it('forces the validated HTTPS URL so a global SSH preference cannot bypass the OAuth grant', () => {
+    const ref = parseRepoRef('git@github.com:open-mercato/cezar.git');
+    expect(ref).not.toBeNull();
+    expect(ghCloneArgs(ref!, '/checkouts/cezar')).toEqual([
+      'repo',
+      'clone',
+      'https://github.com/open-mercato/cezar.git',
+      '/checkouts/cezar',
+      '--',
+      '--progress',
+      '--config',
+      'url.https://github.com/.insteadOf=git@github.com:',
+    ]);
+  });
+});
+
+describe('checkout — SAML error propagation', () => {
+  it('preserves an unterminated authorization URL, cleans up and allows retry', async () => {
+    const root = mkdtempSync(join(realpathSync(tmpdir()), 'cez-saml-'));
+    const bin = join(root, 'bin');
+    const projectsDir = join(root, 'projects');
+    const error = 'GraphQL: Resource protected by organization SAML enforcement.\nAuthorize in your web browser: https://github.com/orgs/Acme/sso?authorization_request=ABC';
+    mkdirSync(bin);
+    writeFileSync(join(bin, 'gh'), `#!/bin/sh\nprintf '%s' '${error}' >&2\nexit 1\n`, { mode: 0o755 });
+    vi.stubEnv('PATH', `${bin}:${process.env.PATH}`);
+    const events: unknown[] = [];
+    try {
+      const result = await checkoutRepo({ url: 'Acme/repo', projectsDir, run: ghCloneRunner, onProgress: (event) => events.push(event) });
+      expect(result).toEqual({ ok: false, status: 500, error });
+      expect(events.at(-1)).toMatchObject({ phase: 'error', error });
+      expect(existsSync(join(projectsDir, 'repo'))).toBe(false);
+      expect(await checkoutRepo({ url: 'Acme/repo', projectsDir, run: async () => ({ ok: true }), onProgress: () => {} })).toMatchObject({ ok: true });
+    } finally {
+      vi.unstubAllEnvs();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('checkout — fork parent transport', () => {
+  it('keeps a fork parent on HTTPS even when gh adds its remote using SSH', async () => {
+    const root = mkdtempSync(join(realpathSync(tmpdir()), 'cez-fork-'));
+    const bin = join(root, 'bin');
+    const source = join(root, 'source');
+    const repo = join(root, 'repo');
+    mkdirSync(bin);
+    execFileSync('git', ['init', '-q', source]);
+    // Stand in for gh's API and network, but use real git clone config handling.
+    // gh adds and fetches a fork parent AFTER the initial clone, using its own
+    // git_protocol preference even when the clone URL explicitly uses HTTPS.
+    writeFileSync(join(bin, 'gh'), `#!/bin/sh
+set -e
+target="$4"
+shift 5
+git clone '${source}' "$target" "$@"
+git -C "$target" remote set-url origin https://github.com/owner/fork.git
+git -C "$target" remote add upstream git@github.com:Acme/parent.git
+if [ "$(git -C "$target" remote get-url upstream)" != 'https://github.com/Acme/parent.git' ]; then
+  echo 'SAML: parent fetch selected unauthorized SSH key' >&2
+  exit 1
+fi
+`, { mode: 0o755 });
+    vi.stubEnv('PATH', `${bin}:${process.env.PATH}`);
+    vi.stubEnv('GIT_CONFIG_GLOBAL', '/dev/null');
+    vi.stubEnv('GIT_CONFIG_NOSYSTEM', '1');
+    try {
+      expect(await ghCloneRunner(parseRepoRef('owner/fork')!, repo, () => {}, undefined)).toEqual({ ok: true });
+      expect(execFileSync('git', ['-C', repo, 'remote', 'get-url', 'upstream'], { encoding: 'utf8' }).trim()).toBe('https://github.com/Acme/parent.git');
+    } finally {
+      vi.unstubAllEnvs();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('checkout — persisted GitHub credentials', () => {
+  it('leaves HTTPS origin and a local helper usable from task worktrees', async () => {
+    const root = mkdtempSync(join(realpathSync(tmpdir()), 'cez-credentials-'));
+    const bin = join(root, 'bin');
+    const repo = join(root, 'repo');
+    mkdirSync(bin);
+    // Substitute only gh: the runner and post-clone git configuration are real.
+    writeFileSync(join(bin, 'gh'), '#!/bin/sh\ngit init -q "$4" && git -C "$4" remote add origin "$3"\n', { mode: 0o755 });
+    vi.stubEnv('PATH', `${bin}:${process.env.PATH}`);
+    vi.stubEnv('GIT_CONFIG_GLOBAL', '/dev/null');
+    vi.stubEnv('GIT_CONFIG_NOSYSTEM', '1');
+    try {
+      expect(await ghCloneRunner(parseRepoRef('owner/repo')!, repo, () => {}, undefined)).toEqual({ ok: true });
+      const git = (...args: string[]) => execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8' });
+      expect(git('remote', 'get-url', 'origin').trim()).toBe('https://github.com/owner/repo.git');
+      expect(git('config', '--local', '--get-all', 'credential.https://github.com.helper')).toBe('\n!gh auth git-credential\n');
+      git('-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '--allow-empty', '-qm', 'initial');
+      const worktree = join(root, 'task');
+      git('worktree', 'add', '-qb', 'task', worktree);
+      expect(execFileSync('git', ['-C', worktree, 'config', '--get-all', 'credential.https://github.com.helper'], { encoding: 'utf8' })).toBe('\n!gh auth git-credential\n');
+    } finally {
+      vi.unstubAllEnvs();
+      rmSync(root, { recursive: true, force: true });
     }
   });
 });
