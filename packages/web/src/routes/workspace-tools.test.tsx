@@ -51,13 +51,25 @@ describe('Workspace tools', () => {
     expect(git.querySelector('[data-slot="tool-hint"]')).toBeNull()
   })
 
+  it('keeps every row a valid definition list: only dt/dd inside, the link inside the state dd, the hint indented past the dot', () => {
+    const { container } = render(<MemoryRouter><WorkspaceToolsRoute /></MemoryRouter>)
+    for (const row of container.querySelectorAll('[data-slot="tool-row"]')) {
+      expect([...row.children].every((el) => el.tagName === 'DT' || el.tagName === 'DD')).toBe(true)
+    }
+    const codex = container.querySelector('[data-slot="tool-row"][data-tool="codex"]')!
+    expect(codex.querySelector('[data-slot="tool-setup"]')?.parentElement?.tagName).toBe('DD')
+    expect(codex.querySelector('[data-slot="tool-hint"]')?.className).toContain('pl-[15px]')
+  })
+
   it('offers "Set up ›" only on unavailable rows, and both links go to Agents settings', () => {
-    const { container } = render(<MemoryRouter initialEntries={['/p/demo/tools']}><WorkspaceToolsRoute /></MemoryRouter>)
+    // /tools is mounted at the workspace level only: the links carry no scope and
+    // LegacyPathRedirect sends them to the boot project, as the desktop menu's link does.
+    const { container } = render(<MemoryRouter initialEntries={['/tools']}><WorkspaceToolsRoute /></MemoryRouter>)
     const setups = screen.getAllByRole('link', { name: 'Set up ›' })
     expect(setups).toHaveLength(1)
     expect(container.querySelector('[data-tool="codex"] [data-slot="tool-setup"]')).toBe(setups[0])
-    expect(setups[0]!.getAttribute('href')).toBe('/p/demo/settings/agents')
-    expect(screen.getByRole('link', { name: 'Tool settings ›' }).getAttribute('href')).toBe('/p/demo/settings/agents')
+    expect(setups[0]!.getAttribute('href')).toBe('/settings/agents')
+    expect(screen.getByRole('link', { name: 'Tool settings ›' }).getAttribute('href')).toBe('/settings/agents')
   })
 
   it('has no "Set up" link when every tool is available', () => {

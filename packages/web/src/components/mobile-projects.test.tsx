@@ -299,12 +299,22 @@ describe('mobile drawer', () => {
       expect(dot?.className).toContain('pending')
       expect(dot?.className).toContain('ring-[1.5px]')
       expect(dot?.className).toContain('ring-sidebar')
+      expect(dot?.className).toContain('size-[7px]')
       expect(tools().getAttribute('aria-label')).toBe('Tools, needs setup')
       cleanup()
       renderShell('/p/cezarion/', nav(), { toolsStatus: { blocked: false, note: null } })
       fireEvent.click(menuButton())
       expect(tools().querySelector('[data-slot="drawer-tools-dot"]')).toBeNull()
       expect(tools().hasAttribute('aria-label')).toBe(false)
+    })
+
+    it('still announces the forge note when the row is blocked and labelled', () => {
+      renderShell('/p/cezarion/', nav(), { toolsStatus: { blocked: true, note: 'No GitHub remote detected — the GitHub tab is hidden.' } })
+      fireEvent.click(menuButton())
+      const note = tools().querySelector('[data-slot="drawer-tools-note"]')!
+      expect(tools().getAttribute('aria-label')).toBe('Tools, needs setup')
+      expect(note.id).not.toBe('')
+      expect(tools().getAttribute('aria-describedby')).toBe(note.id)
     })
 
     it('shows the forge note as the row’s second line, and only when there is one', () => {

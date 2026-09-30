@@ -11,6 +11,9 @@ export const toolTone = (check: BackendCheck): StatusDotTone => (check.available
 /** The state word /tools prints beside the dot. */
 export const toolStateLabel = (check: BackendCheck): string => (check.available ? 'Installed' : 'Not installed')
 
+/** The server's hint for a missing tool, verbatim; null while the tool works or has none to give. */
+export const toolHint = (check: BackendCheck): string | null => (check.available ? null : (check.hint ?? null))
+
 /** Where a missing tool is set up: Settings → Agents, resolved by the project-router `Link`. */
 export const TOOL_SETTINGS_PATH = '/settings/agents'
 

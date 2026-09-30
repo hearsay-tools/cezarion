@@ -6,7 +6,7 @@ import { Link as RouterLink } from 'react-router'
 
 import type { BackendCheck, HealthResponse, Runner } from '@open-mercato/cezar-api-client'
 import { StatusDot } from '@/components/status-dot'
-import { TOOL_SETTINGS_PATH, toolTone } from '@/lib/tool-status'
+import { TOOL_SETTINGS_PATH, toolHint, toolTone } from '@/lib/tool-status'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -173,6 +173,7 @@ function AvailableToolRow({ check }: { check: BackendCheck }) {
  * Agents. The whole row is the link, so the DropdownMenuItem closes the menu on navigation.
  */
 function UnavailableToolRow({ check }: { check: BackendCheck }) {
+  const hint = toolHint(check)
   return (
     <DropdownMenuItem asChild>
       <Link
@@ -185,6 +186,7 @@ function UnavailableToolRow({ check }: { check: BackendCheck }) {
         <span className="flex items-center gap-2">
           <StatusDot tone={toolTone(check)} />
           <span className="font-mono text-[13px] font-medium">{check.name}</span>
+          {/* Terse on purpose in the compact menu; /tools spells the same state "Not installed". */}
           <span
             data-slot="tool-version"
             className="ml-auto font-mono text-[11px] font-medium text-muted-foreground"
@@ -193,9 +195,9 @@ function UnavailableToolRow({ check }: { check: BackendCheck }) {
           </span>
         </span>
         <span className="flex items-end justify-between gap-3 pl-[15px]">
-          {check.hint ? (
+          {hint ? (
             <span data-slot="tool-hint" className="min-w-0 text-[11px] leading-snug text-muted-foreground">
-              {check.hint}
+              {hint}
             </span>
           ) : null}
           <span data-slot="tool-setup" className="ml-auto shrink-0 text-[11px] font-semibold text-accent-text">

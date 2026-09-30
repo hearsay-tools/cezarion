@@ -217,7 +217,7 @@ describe('phone Tools page (#621 follow-up)', () => {
         const page = browser.evaluate(`(() => {
           const rows = [...document.querySelectorAll('[data-route="workspace-tools"] [data-slot="tool-row"]')]
           return {
-            rows: rows.map((row) => ({ available: row.getAttribute('data-available'), tone: row.querySelector('[data-slot="status-dot"]')?.getAttribute('data-tone'), size: row.querySelector('[data-slot="status-dot"]')?.getBoundingClientRect().width, state: row.querySelector('dd')?.textContent, hint: row.querySelector('[data-slot="tool-hint"]')?.textContent ?? null, setup: row.querySelector('[data-slot="tool-setup"]')?.getBoundingClientRect().height ?? null })),
+            rows: rows.map((row) => ({ available: row.getAttribute('data-available'), tone: row.querySelector('[data-slot="status-dot"]')?.getAttribute('data-tone'), size: row.querySelector('[data-slot="status-dot"]')?.getBoundingClientRect().width, state: row.querySelector('dd > span')?.textContent, hint: row.querySelector('[data-slot="tool-hint"]')?.textContent ?? null, setup: row.querySelector('[data-slot="tool-setup"]')?.getBoundingClientRect().height ?? null })),
             settings: document.querySelector('[data-slot="tools-settings"]')?.getBoundingClientRect().height,
             overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
           }
@@ -232,11 +232,10 @@ describe('phone Tools page (#621 follow-up)', () => {
         expect(page.rows.find((row) => row.setup !== null)!.setup).toBeGreaterThanOrEqual(44)
         expect(page.settings).toBeGreaterThanOrEqual(44)
         expect(page.overflow).toBe(false)
-        mkdirSync('/tmp/i621/tools-shots', { recursive: true })
-        browser.screenshot(`/tmp/i621/tools-shots/tools-360x640-${variant.theme}.png`, { viewport: true })
 
         browser.click('[data-slot="tools-settings"]')
-        browser.waitForFunction(`location.pathname.endsWith('/settings/agents')`)
+        // The unscoped link only becomes the project's page once LegacyPathRedirect has run and the section rendered.
+        browser.waitForFunction(`location.pathname === ${JSON.stringify(`/p/${projectId}/settings/agents`)} && document.querySelector('[data-route="settings-agents"]') !== null`)
       } finally {
         browser.unroute('**/api/v1/health')
       }

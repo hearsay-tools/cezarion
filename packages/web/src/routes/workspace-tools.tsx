@@ -6,7 +6,7 @@ import { StatusDot } from '@/components/status-dot'
 import { Button } from '@/components/ui/button'
 import { toast } from '@/components/ui/toaster'
 import { Link } from '@/lib/project-router'
-import { TOOL_LINK_CLASS, TOOL_SETTINGS_PATH, toolStateLabel, toolTone } from '@/lib/tool-status'
+import { TOOL_LINK_CLASS, TOOL_SETTINGS_PATH, toolHint, toolStateLabel, toolTone } from '@/lib/tool-status'
 import { githubRepoBase } from '@/lib/tasks-table'
 
 /** Shared navigation frame 24: existing project launchers and live tool diagnostics. */
@@ -55,15 +55,20 @@ export function WorkspaceToolsRoute() {
         {health.isError ? <p role="alert" className="text-sm text-destructive">Could not refresh tool diagnostics. Recheck to retry.</p> : null}
         {!health.data && !health.isError ? <p role="status" className="text-sm text-muted-foreground">Checking installed tools…</p> : null}
         {health.data ? <dl className="space-y-4 text-[13px] leading-[1.5] text-muted-foreground">
-          {health.data.checks.map((check) => <div key={check.name} data-slot="tool-row" data-tool={check.name} data-available={check.available} className="flex flex-wrap items-center gap-x-4 gap-y-1">
-            <dt className="flex items-center gap-2">
-              <StatusDot tone={toolTone(check)} />
-              <span className="font-mono text-[13px] font-medium text-foreground">{check.name}</span>
-            </dt>
-            <dd className="min-w-0 flex-1 break-words text-muted-foreground">{toolStateLabel(check)}{check.version ? ` · ${check.version}` : ''}</dd>
-            {check.available ? null : <Link to={TOOL_SETTINGS_PATH} data-slot="tool-setup" className={`${TOOL_LINK_CLASS} ml-auto`}>Set up ›</Link>}
-            {!check.available && check.hint ? <dd data-slot="tool-hint" className="basis-full min-w-0 break-words text-xs leading-snug text-muted-foreground">{check.hint}</dd> : null}
-          </div>)}
+          {health.data.checks.map((check) => {
+            const hint = toolHint(check)
+            return <div key={check.name} data-slot="tool-row" data-tool={check.name} data-available={check.available} className="flex flex-wrap items-center gap-x-4 gap-y-1">
+              <dt className="flex items-center gap-2">
+                <StatusDot tone={toolTone(check)} />
+                <span className="font-mono text-[13px] font-medium text-foreground">{check.name}</span>
+              </dt>
+              <dd className="flex min-w-0 flex-1 items-center gap-x-3 text-muted-foreground">
+                <span className="min-w-0 break-words">{toolStateLabel(check)}{check.version ? ` · ${check.version}` : ''}</span>
+                {check.available ? null : <Link to={TOOL_SETTINGS_PATH} data-slot="tool-setup" className={`${TOOL_LINK_CLASS} ml-auto`}>Set up ›</Link>}
+              </dd>
+              {hint ? <dd data-slot="tool-hint" className="basis-full min-w-0 break-words pl-[15px] text-xs leading-snug text-muted-foreground">{hint}</dd> : null}
+            </div>
+          })}
         </dl> : null}
         {health.data?.checks.length === 0 ? <p className="text-sm text-muted-foreground">No tool diagnostics reported by this server.</p> : null}
         <div className="flex flex-wrap gap-3">
