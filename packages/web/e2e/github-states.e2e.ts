@@ -47,6 +47,9 @@ it.each(['loading', 'empty', 'error'].flatMap(state => ['light', 'dark'].map(the
       };
       document.querySelector('a[href="${scoped('/github')}"]').click();
     })()`)
+    // 402px is a phone: the link opens the filter index (#622); choosing All issues pushes the list.
+    stateBrowser.waitForFunction(`document.querySelector('[data-slot="github-filter-screen"] [data-gh-filter="all"]') !== null`)
+    stateBrowser.click('[data-slot="github-filter-screen"] [data-gh-filter="all"]')
     const expected = state === 'loading' ? 'Loading GitHub' : state === 'error' ? 'Could not load GitHub' : 'No open issues'
     stateBrowser.waitForFunction(`document.querySelector('[data-route="github"]')?.textContent.includes(${JSON.stringify(expected)}) === true`)
     stateBrowser.evaluate(`document.documentElement.classList.toggle('light', ${theme === 'light'}); document.documentElement.dataset.width = 'wide'; new Promise(resolve => setTimeout(resolve, 250))`)

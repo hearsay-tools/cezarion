@@ -82,10 +82,14 @@ export async function createGitHubFixture(sessionId: string) {
     }
   }
 
+  /** `path` may carry a query (`/github?filter=all`): the surface wait reads the pathname only.
+   *  Below md a BARE `/github` is the filter index, so phone specs that want the list ask for an
+   *  explicit filter (#622). */
   async function openGitHub(path: string, target: AgentBrowser = browser): Promise<void> {
-    if (path === '/github') await rememberGithubView('issues')
+    const pathname = path.split('?')[0]!
+    if (pathname === '/github') await rememberGithubView('issues')
     target.goto(`${baseUrl}${scoped(path)}`)
-    waitForGitHubSurface(scoped(path), target)
+    waitForGitHubSurface(scoped(pathname), target)
   }
 
   function clickGitHubTab(path: '/github' | '/github/prs', target: AgentBrowser = browser): void {

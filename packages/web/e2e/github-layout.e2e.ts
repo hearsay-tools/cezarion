@@ -267,6 +267,11 @@ describe('the GitHub tab against the live dry-run server', () => {
             };
             document.querySelector('a[href="${scoped('/github')}"]').click();
           })()`)
+          if (viewport === REVIEW_PHONE) {
+            // A phone lands on the filter index (#622); All issues pushes the list under test.
+            browser.waitForFunction(`document.querySelector('[data-slot="github-filter-screen"] [data-gh-filter="all"]') !== null`)
+            browser.click('[data-slot="github-filter-screen"] [data-gh-filter="all"]')
+          }
           waitForGitHubSurface(scoped('/github'))
 
           for (const view of ['issues', 'prs'] as const) {

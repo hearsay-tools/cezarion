@@ -48,7 +48,8 @@ describe('Git page headings at the review viewports', () => {
       for (const theme of ['light', 'dark'] as const) {
         it(`${page.name} at ${viewport.width}x${viewport.height} in ${theme} keeps one visible title, context, and first-row access`, () => {
           browser.setViewport(viewport.width, viewport.height)
-          browser.goto(`${baseUrl}${scoped(page.path)}`)
+          // Below md a bare /github is the filter index (#622): the phone asks for the list itself.
+          browser.goto(`${baseUrl}${scoped(viewport === PHONE && page.name === 'GitHub' ? `${page.path}?filter=all` : page.path)}`)
           browser.waitForFunction(`document.querySelector(${JSON.stringify(page.content)}) !== null`)
           // Repo discovery is independent of route data. Before it resolves, the mobile
           // bar deliberately shows the route title in place of the project picker.

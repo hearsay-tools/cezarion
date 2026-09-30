@@ -227,7 +227,8 @@ describe('the GitHub tab against the live dry-run server', () => {
 
     browser.setViewport(IPHONE.width, IPHONE.height)
     try {
-      await openGitHub('/github')
+      // Bare /github is the filter index on a phone (#622); ask for the list itself.
+      await openGitHub('/github?filter=all')
       browser.waitForFunction(`document.querySelector('[data-slot="gh-row"]') !== null`)
       // List visible, detail pane hidden below md.
       browser.waitForFunction(
