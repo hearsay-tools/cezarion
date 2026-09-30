@@ -88,7 +88,8 @@ beforeAll(async () => {
 
   const withDir = (id: string, extra: Record<string, unknown>) =>
     run(id, { worktreePath: worktree(root, id), branch: `cez/${id}`, ...extra })
-  const filler = FILLERS.map((id, index) => withDir(id, { title: `Filler worktree ${index + 1}` }))
+  // Unfinished on purpose: retention reclaims finished worktrees beyond its keep-limit (10) at boot.
+  const filler = FILLERS.map((id, index) => withDir(id, { title: `Filler worktree ${index + 1}`, status: 'review', finishedAt: undefined }))
   const noBranch = withDir('wt-nobranch', { title: 'Worktree without a branch' })
   delete (noBranch as { branch?: string }).branch
   writeFileSync(join(root, '.ai/cezar/runs.json'), JSON.stringify([
@@ -185,7 +186,8 @@ const rowsReady = (container: string, count: number) =>
 const openDesktop = (path = '/git', id = project) => {
   browser.setViewport(DESKTOP.width, DESKTOP.height)
   browser.goto(`${base}${scoped(path, id)}`)
-  browser.waitForFunction(has(SIDEBAR))
+  // Only Git views carry the Git sidebar; anywhere else the caller waits for what it needs.
+  if (path.startsWith('/git')) browser.waitForFunction(has(SIDEBAR))
 }
 const openPhone = (path = '/git', target = browser) => {
   target.setViewport(PHONE.width, PHONE.height)
@@ -220,6 +222,7 @@ describe('Git desktop sidebar (#622)', () => {
     expect(browser.count('[data-slot="task-quick-list"]')).toBe(0)
     expect(browser.count(SCREEN)).toBe(0)
     // The main repository facets appear once, in the main header, and not in the sidebar.
+    browser.waitForFunction(has(REPO_TABS))
     expect(browser.count(REPO_TABS)).toBe(1)
     expect(browser.count(`${REPO_TABS} a`)).toBe(3)
     expect(browser.count(`${SIDEBAR} ${REPO_TABS}`)).toBe(0)
@@ -241,7 +244,8 @@ describe('Git desktop sidebar (#622)', () => {
     expect(facts['wt-done']).toMatchObject({ branch: 'cez/wt-done', diff: '+40 −7' })
     expect(['success', 'accent']).toContain(facts['wt-done']?.tone)
     expect(facts['wt-done']?.meta).toContain('Finished but retained')
-    expect(facts['wt-long']?.diff).toBe('+1,234 −56')
+    // DiffStatLabel is compact in a row: 1,234 reads "1k" (exact counts stay in its title).
+    expect(facts['wt-long']?.diff).toBe('+1k −56')
     browser.screenshot(`${artifactsDir}/git-sidebar-desktop-light.png`, { viewport: true })
   }, 90_000)
 
@@ -308,7 +312,8 @@ describe('Git desktop sidebar (#622)', () => {
     browser.waitForFunction(has('[data-slot="repo-header"]'))
     expect(browser.waitForValue(idsJs(SIDEBAR), sameJson(MEMBERS))).toEqual(MEMBERS)
     expect(browser.count(SCREEN)).toBe(0)
-    expect(browser.count(BACK)).toBe(0)
+    // The Back link is a phone affordance: present in the DOM at most, never on screen at desktop.
+    expect(browser.evaluate(`document.querySelector('${BACK}')?.checkVisibility() ?? false`)).toBe(false)
     expect(browser.count(REPO_TABS)).toBe(1)
   }, 90_000)
 
@@ -316,7 +321,7 @@ describe('Git desktop sidebar (#622)', () => {
     openDesktop()
     browser.waitForFunction(rowsReady(SIDEBAR, MEMBERS.length))
     const target = `${SIDEBAR} ${ROW}[data-run-id="wt-done"]`
-    focusWithKeyboard(browser, `${target} a, a${target}`)
+    focusWithKeyboard(browser, target)
     const ring = browser.waitForValue<Record<string, unknown>>(`(() => {
       const el = document.activeElement;
       const row = el?.closest(${JSON.stringify(ROW)});
@@ -425,6 +430,109 @@ describe('Git sidebar states and project scoping (#622)', () => {
     // And a cold load of the other project's URL.
     browser.goto(`${base}${scoped('/git', projectB)}`)
     expect(browser.waitForValue(idsJs(SIDEBAR), sameJson(B_MEMBERS))).toEqual(B_MEMBERS)
+  }, 90_000)
+})
+
+describe('Git view regressions found in review (#622)', () => {
+  it('A -> B -> A refetches membership that changed while away, without a reload', () => {
+    const doomed = join(root, '.ai/cezar/worktrees', 'wt-fill-09')
+    const nav = '[data-slot="sidebar"] nav[aria-label="Main"]'
+    const rail = (id: string) => `[data-slot="rail-project"][data-project-id="${id}"] a`
+    openDesktop('/')
+    browser.waitForFunction(has(rail(projectB)))
+    browser.click(`${nav} a[href="${scoped('/git')}"]`)
+    expect(browser.waitForValue(idsJs(SIDEBAR), sameJson(MEMBERS))).toEqual(MEMBERS)
+    browser.click(rail(projectB))
+    browser.waitForFunction(`location.pathname === ${JSON.stringify(scoped('/', projectB))}`)
+    browser.click(`${nav} a[href="${scoped('/git', projectB)}"]`)
+    expect(browser.waitForValue(idsJs(SIDEBAR), sameJson(B_MEMBERS))).toEqual(B_MEMBERS)
+    rmSync(doomed, { recursive: true, force: true })
+    try {
+      browser.click(rail(project))
+      browser.waitForFunction(`location.pathname === ${JSON.stringify(scoped('/'))}`)
+      browser.click(`${nav} a[href="${scoped('/git')}"]`)
+      const remaining = MEMBERS.filter((id) => id !== 'wt-fill-09')
+      expect(browser.waitForValue(idsJs(SIDEBAR), sameJson(remaining))).toEqual(remaining)
+    } finally {
+      mkdirSync(doomed, { recursive: true })
+    }
+  }, 90_000)
+
+  /** Install a fetch stub for one API path, then push the repository view CLIENT-side from the phone
+   *  screen so the stub is in place before the repository first asks. */
+  const repoViewWith = (target: AgentBrowser, stub: string) => {
+    openPhone('/git', target)
+    target.waitForFunction(has(SCREEN))
+    target.evaluate(`(() => {
+      const nativeFetch = window.fetch;
+      window.fetch = (input, init) => {
+        const url = typeof input === 'string' ? input : input instanceof Request ? input.url : String(input);
+        const path = new URL(url, location.href).pathname;
+        if (path.endsWith('/repo') || path.endsWith('/repo/changes')) { ${stub} }
+        return nativeFetch(input, init);
+      };
+    })()`)
+    target.click(OPEN_REPO)
+  }
+
+  it('the phone keeps Back to worktrees while the repository is loading', () => {
+    const slow = session('repo-loading', PHONE)
+    repoViewWith(slow, `return new Promise(() => {});`)
+    slow.waitForFunction(`location.search === '?view=repo'`)
+    slow.waitForFunction(has(BACK))
+    expect(slow.evaluate(`document.querySelector('${BACK}').getAttribute('href')`)).toBe(scoped('/git'))
+    slow.screenshot(`${artifactsDir}/git-repository-phone-loading.png`, { viewport: true })
+    slow.click(BACK)
+    slow.waitForFunction(has(SCREEN))
+  }, 90_000)
+
+  it('the phone keeps Back to worktrees when the repository request fails', () => {
+    const broken = session('repo-error', PHONE)
+    repoViewWith(broken, `return Promise.resolve(new Response('boom', { status: 500, statusText: 'Server Error' }));`)
+    broken.waitForFunction(`location.search === '?view=repo'`)
+    broken.waitForFunction(has(BACK))
+    expect(broken.count(SCREEN)).toBe(0)
+    broken.screenshot(`${artifactsDir}/git-repository-phone-error.png`, { viewport: true })
+    broken.click(BACK)
+    broken.waitForFunction(has(SCREEN))
+  }, 90_000)
+
+  /** Scroll the repository view down, leave it by `leave`, and expect the worktree screen at the top. */
+  const leavesAtTop = (leave: (target: AgentBrowser) => void) => {
+    const target = session(`scroll-${Math.random().toString(36).slice(2, 7)}`, PHONE)
+    openPhone('/git', target)
+    target.waitForFunction(has(SCREEN))
+    target.click(OPEN_REPO)
+    target.waitForFunction(has(BACK))
+    const scrolled = target.waitForValue<number>(`(() => {
+      const main = document.querySelector('[data-slot="main"]');
+      if (!main) return null;
+      main.scrollTop = main.scrollHeight;
+      return main.scrollTop;
+    })()`, (value) => typeof value === 'number' && value > 0)
+    expect(scrolled).toBeGreaterThan(0)
+    leave(target)
+    target.waitForFunction(has(SCREEN))
+    const facts = target.waitForValue<Record<string, unknown>>(`(() => {
+      const main = document.querySelector('[data-slot="main"]');
+      const open = document.querySelector('${OPEN_REPO}');
+      if (!main || !open) return null;
+      const rect = open.getBoundingClientRect();
+      return { top: main.scrollTop, openVisible: rect.top >= 0 && rect.bottom <= innerHeight };
+    })()`, (value) => Boolean(value && value.top === 0))
+    expect(facts).toEqual({ top: 0, openVisible: true })
+  }
+
+  it('a scrolled repository view returns to the top of the worktree screen via the Back link', () => {
+    leavesAtTop((target) => target.click(BACK))
+  }, 90_000)
+
+  it('a scrolled repository view returns to the top of the worktree screen via browser Back', () => {
+    leavesAtTop((target) => { target.evaluate(`history.back()`) })
+  }, 90_000)
+
+  it('a scrolled repository view returns to the top of the worktree screen via the Git tab', () => {
+    leavesAtTop((target) => target.click(`${TAB_BAR} a[data-tab="/git"]`))
   }, 90_000)
 })
 
@@ -570,7 +678,7 @@ describe('Git phone worktree screen at 360x640 (#622)', () => {
     browser.click(`${SCREEN} ${ROW}[data-run-id="wt-review"]`)
     const url = scoped('/tasks/wt-review/changes')
     expect(browser.waitForValue(locationJs, (value) => value === url)).toBe(url)
-    browser.waitForFunction(`document.querySelector('[data-route="task"], [data-route="task-thread"], [data-slot="task-changes"]') !== null`)
+    browser.waitForFunction(`document.querySelector('[data-route="task-changes"]') !== null`)
     browser.evaluate(`history.back()`)
     browser.waitForFunction(has(SCREEN))
     expect(browser.waitForValue(locationJs, (value) => value === scoped('/git'))).toBe(scoped('/git'))
@@ -639,12 +747,14 @@ describe('Git phone worktree screen at 360x640 (#622)', () => {
     browser.press('Enter')
     const url = `${scoped('/git')}?view=repo`
     expect(browser.waitForValue(locationJs, (value) => value === url)).toBe(url)
-    browser.waitForFunction(has(BACK))
+    // The Back link is also shown while the repository loads; wait for the loaded view's own link
+    // so the focus we place is not thrown away by the swap.
+    browser.waitForFunction(has(REPO_TABS))
     focusWithKeyboard(browser, BACK)
     browser.press('Enter')
     browser.waitForFunction(has(SCREEN))
 
-    focusWithKeyboard(browser, `${SCREEN} ${ROW}[data-run-id="wt-failed"] a, a${SCREEN} ${ROW}[data-run-id="wt-failed"]`)
+    focusWithKeyboard(browser, `${SCREEN} ${ROW}[data-run-id="wt-failed"]`)
     browser.press('Enter')
     const task = scoped('/tasks/wt-failed/changes')
     expect(browser.waitForValue(locationJs, (value) => value === task)).toBe(task)
