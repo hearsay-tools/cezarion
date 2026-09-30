@@ -7,6 +7,9 @@ import type { AgentBrowser } from './agent-browser'
  * at 44px (#166, `styles/index.css`), which is what once grew a line-1-only group toggle from 19px
  * to 44px and the row from 47px to ~72px — so this measures the phone widths, not only desktop.
  *
+ * Desktop widths only since #621: below md the quick list left the drawer, so the group row has no
+ * phone surface to measure (the 44px floor is still asserted where a toggle stays reachable).
+ *
  * Shared by `selection-states` (a hover-capable pointer) and `quick-list` (headless `hover: none`),
  * because the group row renders a different structure for each and both must keep the height.
  */
@@ -24,28 +27,9 @@ export function expectGroupRowHeightMatchesTaskRow(
   }
   try {
     for (const width of widths) {
-      const mobile = width < 768
       browser.setViewport(width, 900)
       browser.goto(url)
-      if (mobile) {
-        browser.click('[data-slot="mobile-top-bar"] button[aria-label^="Open projects"]')
-        // The sheet slides in from the left. A click aimed at a row mid-slide lands on the scrim
-        // and dismisses the drawer, so wait until its left edge has settled at 0 and stayed there.
-        // Provenance: the local failure bundle (gitignored) from this helper's first run,
-        // .ai/qa/failures/selection-states/keeps-the-group-row-a-task-row-s-height-at-1440-520-and-390px-with-a-pointer-617-1/
-        // — probe.json: kind "wait-value" on the expanded group row inside the drawer at 520px,
-        // lastValue null, openDialogs []; snapshot.txt: `button "Open menu" [expanded=false]`,
-        // i.e. the expand click had dismissed the drawer. Reproduced with this single test
-        // (`-t "keeps the group row a task row"`, primaryHoverType=2): unfixed 3/3 failed the same
-        // way (lastValue null, drawer closed), fixed 3/3 passed.
-        browser.waitForStable(
-          `Math.round(document.querySelector('[data-slot="mobile-nav-drawer"]')?.getBoundingClientRect().left ?? -1)`,
-          { holdMs: 200, matcher: (left: number) => left === 0 },
-        )
-      }
-      // Below md the aside is display:none and the drawer holds the list; measure the rows the
-      // user can actually see.
-      const scope = mobile ? '[data-slot="mobile-nav-drawer"] ' : '[data-slot="sidebar"] '
+      const scope = '[data-slot="sidebar"] '
       const group = `${scope}[data-slot="group-row"][data-group-id="${groupId}"]`
       for (const density of ['comfortable', 'compact', 'ultra'] as const) {
         browser.evaluate(`(() => {
@@ -77,7 +61,6 @@ export function expectGroupRowHeightMatchesTaskRow(
           expect(sample.group, label).toBe(sample.task)
           if (density === 'comfortable') expect(sample.group, label).toBe(47)
           expect(sample.toggle, label).toBeLessThanOrEqual(sample.group)
-          if (mobile) expect(sample.toggle, label).toBeGreaterThanOrEqual(44)
           expect(sample.overlap, label).toBe(false)
         }
         browser.click(`${group} [data-slot="group-tile"]`)

@@ -376,8 +376,10 @@ describe('task quick-list', () => {
 
   // This spec's headless browser reports `hover: none`: the touch structure (one toggle over
   // both lines) must hold the task row's height at desktop and phone widths alike.
-  it("keeps the group row a task row's height at 1440, 520 and 390px on hover:none (#617)", () => {
-    expectGroupRowHeightMatchesTaskRow(browser, { url: `${baseUrl}${scoped('/')}`, groupId: 'fix-group-1', widths: [1440, 520, 390] })
+  it("keeps the group row a task row's height at 1440 and 768px on hover:none (#617)", () => {
+    // 520 and 390 are gone: the phone drawer no longer holds the quick list (#621), so the group
+    // row has no surface below md. 768 is the narrowest width that still renders the sidebar.
+    expectGroupRowHeightMatchesTaskRow(browser, { url: `${baseUrl}${scoped('/')}`, groupId: 'fix-group-1', widths: [1440, 768] })
   })
 
   it('keeps the group and member rows readable, at rest and selected, in both themes (#617)', () => {
@@ -705,15 +707,17 @@ describe('tasks table overview', () => {
     expect(renamed?.titleSummary).toBe('Bump zod to v4 — second attempt')
   })
 
-  it('reflows to cards plus a New-task FAB at 360×640, with no horizontal overflow', () => {
+  it('reflows to cards plus the shell New-task FAB at 360×640, with no horizontal overflow', () => {
     browser.setViewport(360, 640)
     browser.goto(`${baseUrl}${scoped('/')}`)
     browser.waitForFunction(`document.querySelectorAll('[data-slot="task-card"]').length > 0`)
 
     expect(browser.count('[data-slot="task-card"]')).toBe(5)
-    expect(browser.isVisible('[data-slot="new-task-fab"]')).toBe(true)
+    // One floating button, and it is the tab bar's (#621): the list's own round FAB is gone.
+    expect(browser.isVisible('[data-slot="mobile-new-task"]')).toBe(true)
+    expect(browser.count('[data-slot="new-task-fab"]')).toBe(0)
     expect(
-      browser.evaluate(`document.querySelector('[data-slot="new-task-fab"]').getAttribute('href')`)
+      browser.evaluate(`document.querySelector('[data-slot="mobile-new-task"]').getAttribute('href')`)
     ).toBe(scoped('/new'))
     // The table is the desktop framing — at phone width the cards replace it, not join it.
     expect(

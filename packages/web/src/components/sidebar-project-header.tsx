@@ -1,6 +1,7 @@
 import { useMutation } from '@tanstack/react-query'
 import { CheckCheckIcon, CopyIcon, EllipsisIcon, ExternalLinkIcon, SettingsIcon } from 'lucide-react'
 import { useRef, useState } from 'react'
+import type * as React from 'react'
 
 import { openProjectIn } from '@/api/client'
 import { useHealth, useMarkRunSeen, useOpenTargets, useProjects, useProjectRuns } from '@/api/queries'
@@ -16,6 +17,7 @@ import { Link, useActiveProjectId } from '@/lib/project-router'
 import { projectInitials } from '@/lib/project-signal'
 import { isUnread } from '@/lib/read-state'
 import { isOwnedWorker } from '@/lib/task-groups'
+import { cn } from '@/lib/utils'
 
 const menuClass = 'w-[228px] rounded-[10px] border-border bg-sidebar p-[5px] text-foreground shadow-[0_10px_28px_#00000047] motion-reduce:animate-none'
 const itemClass = 'h-8 gap-2.5 rounded-[6px] px-[9px] py-0 text-[13px] focus:bg-sidebar-row-hover focus:text-foreground [&_svg]:size-[15px] [&_svg]:text-soft-foreground focus:[&_svg]:text-foreground max-md:min-h-11'
@@ -23,20 +25,14 @@ const itemClass = 'h-8 gap-2.5 rounded-[6px] px-[9px] py-0 text-[13px] focus:bg-
 /** This project's identity and actions. Workspace health describes only the boot project;
  * the registry is authoritative for every other project's name, root and branch. */
 export function SidebarProjectHeader({ onNavigate }: { onNavigate?: () => void } = {}) {
-  const sidebarNavigate = useSidebarNavigate()
   const markRef = useRef<HTMLSpanElement>(null)
   const menuButtonRef = useRef<HTMLButtonElement>(null)
   const [menuOffset, setMenuOffset] = useState(0)
   const activeProjectId = useActiveProjectId()
   const health = useHealth()
   const registry = useProjects()
-  const [marking, setMarking] = useState(false)
   const bootId = registry.data?.bootProject ?? health.data?.bootProject
   const projectId = activeProjectId ?? bootId ?? null
-  const runs = useProjectRuns(projectId ?? 'default', projectId !== null, projectId === bootId)
-  const seen = useMarkRunSeen(projectId ?? 'default', projectId === bootId ? 'default' : projectId ?? 'default')
-  const currentProject = useRef(projectId)
-  currentProject.current = projectId
   const project = registry.data?.projects.find((entry) => entry.id === projectId)
   const bootRepo = projectId === bootId ? health.data?.repo : undefined
   const root = project?.root ?? bootRepo?.root
@@ -45,6 +41,70 @@ export function SidebarProjectHeader({ onNavigate }: { onNavigate?: () => void }
   const local = health.data?.capabilities.localHandoff === true
   const identity = name ?? (registry.isPending ? 'Loading project…' : 'Project unavailable')
   const detail = [local ? root : undefined, branch].filter(Boolean).join(' · ')
+
+  return (
+    <div data-slot="project-header" className="flex min-w-0 items-center gap-2.5 px-[14px] pt-[14px] pb-2.5">
+      <span ref={markRef} aria-hidden="true" data-slot="project-header-mark" className="flex size-7 shrink-0 items-center justify-center rounded-[7px] border border-soft-foreground bg-sidebar-row-selected text-[11px] leading-none font-semibold text-foreground">
+        {name ? projectInitials(name) : '…'}
+      </span>
+      <div className="min-w-0 flex-1">
+        <div data-slot="project-header-name" className="truncate text-[14px] font-semibold text-foreground" title={identity}>{identity}</div>
+        {/* Keep the end (especially the branch) visible without reversing the actual text. */}
+        <div data-slot="project-header-detail" dir="rtl" className="truncate text-left font-mono text-[10.5px] text-soft-foreground" title={detail || undefined}>
+          <bdi dir="ltr">{detail || (registry.isPending ? 'Loading…' : 'Branch unavailable')}</bdi>
+        </div>
+      </div>
+      <ProjectMenu
+        projectId={projectId}
+        onNavigate={onNavigate}
+        triggerRef={menuButtonRef}
+        triggerClassName="size-7 max-md:size-11"
+        align="start"
+        alignOffset={menuOffset}
+        onOpenChange={(open) => {
+          if (open && markRef.current && menuButtonRef.current) {
+            setMenuOffset(markRef.current.getBoundingClientRect().left - menuButtonRef.current.getBoundingClientRect().left)
+          }
+        }}
+      />
+    </div>
+  )
+}
+
+/**
+ * The project's `…` menu: Mark all read, Open in / Copy path (local handoff only) and Project
+ * settings. One component for two homes, the desktop header above and the mobile drawer's
+ * current-project row (#621), so the items, the `localHandoff` gate and the Mark all read
+ * batching cannot drift apart. It reads its own data (health, registry, runs) from the query
+ * cache the shell already fills; `projectId` says which project it acts on.
+ *
+ * `onNavigate` closes the drawer when Project settings is chosen; the header falls back to the
+ * sidebar's own close-on-navigate context.
+ */
+export function ProjectMenu({ projectId, onNavigate, triggerRef, triggerClassName, align = 'start', alignOffset, side, onOpenChange }: {
+  projectId: string | null
+  onNavigate?: () => void
+  triggerRef?: React.Ref<HTMLButtonElement>
+  /** Size classes for the trigger; its colours and states are shared. */
+  triggerClassName?: string
+  align?: 'start' | 'center' | 'end'
+  alignOffset?: number
+  side?: 'top' | 'right' | 'bottom' | 'left'
+  onOpenChange?: (open: boolean) => void
+}) {
+  const sidebarNavigate = useSidebarNavigate()
+  const health = useHealth()
+  const registry = useProjects()
+  const [marking, setMarking] = useState(false)
+  const bootId = registry.data?.bootProject ?? health.data?.bootProject
+  const runs = useProjectRuns(projectId ?? 'default', projectId !== null, projectId === bootId)
+  const seen = useMarkRunSeen(projectId ?? 'default', projectId === bootId ? 'default' : projectId ?? 'default')
+  const currentProject = useRef(projectId)
+  currentProject.current = projectId
+  const project = registry.data?.projects.find((entry) => entry.id === projectId)
+  const bootRepo = projectId === bootId ? health.data?.repo : undefined
+  const root = project?.root ?? bootRepo?.root
+  const local = health.data?.capabilities.localHandoff === true
   const unread = (runs.data ?? []).filter((run) => !isOwnedWorker(run) && isUnread(run))
   const count = runs.isError ? 'Unavailable' : runs.data === undefined ? 'Loading…' : `${unread.length} unread`
 
@@ -73,46 +133,30 @@ export function SidebarProjectHeader({ onNavigate }: { onNavigate?: () => void }
   }
 
   return (
-    <div data-slot="project-header" className="flex min-w-0 items-center gap-2.5 px-[14px] pt-[14px] pb-2.5">
-      <span ref={markRef} aria-hidden="true" data-slot="project-header-mark" className="flex size-7 shrink-0 items-center justify-center rounded-[7px] border border-soft-foreground bg-sidebar-row-selected text-[11px] leading-none font-semibold text-foreground">
-        {name ? projectInitials(name) : '…'}
-      </span>
-      <div className="min-w-0 flex-1">
-        <div data-slot="project-header-name" className="truncate text-[14px] font-semibold text-foreground" title={identity}>{identity}</div>
-        {/* Keep the end (especially the branch) visible without reversing the actual text. */}
-        <div data-slot="project-header-detail" dir="rtl" className="truncate text-left font-mono text-[10.5px] text-soft-foreground" title={detail || undefined}>
-          <bdi dir="ltr">{detail || (registry.isPending ? 'Loading…' : 'Branch unavailable')}</bdi>
-        </div>
-      </div>
-      <DropdownMenu onOpenChange={(open) => {
-        if (open && markRef.current && menuButtonRef.current) {
-          setMenuOffset(markRef.current.getBoundingClientRect().left - menuButtonRef.current.getBoundingClientRect().left)
-        }
-      }}>
-        <DropdownMenuTrigger asChild>
-          <button data-slot="project-menu-trigger" ref={menuButtonRef} type="button" aria-label="Project menu" className="flex size-7 shrink-0 items-center justify-center rounded-[6px] text-soft-foreground hover:bg-sidebar-row-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring data-[state=open]:bg-sidebar-row-selected data-[state=open]:text-foreground max-md:size-11">
-            <EllipsisIcon aria-hidden="true" className="size-[15px]" />
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" alignOffset={menuOffset} sideOffset={4} className={menuClass}>
-          <DropdownMenuItem className={itemClass} disabled={marking || runs.isError || runs.data === undefined || unread.length === 0 || projectId === null} onSelect={() => { void markAllRead() }}>
-            <CheckCheckIcon aria-hidden="true" /> Mark all read
-            <span className="ml-auto text-[11.5px] text-soft-foreground">{marking ? 'Marking…' : count}</span>
+    <DropdownMenu onOpenChange={onOpenChange}>
+      <DropdownMenuTrigger asChild>
+        <button data-slot="project-menu-trigger" ref={triggerRef} type="button" aria-label="Project menu" className={cn('flex shrink-0 items-center justify-center rounded-[6px] text-soft-foreground hover:bg-sidebar-row-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring data-[state=open]:bg-sidebar-row-selected data-[state=open]:text-foreground', triggerClassName)}>
+          <EllipsisIcon aria-hidden="true" className="size-[15px]" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align={align} alignOffset={alignOffset} side={side} sideOffset={4} className={menuClass}>
+        <DropdownMenuItem className={itemClass} disabled={marking || runs.isError || runs.data === undefined || unread.length === 0 || projectId === null} onSelect={() => { void markAllRead() }}>
+          <CheckCheckIcon aria-hidden="true" /> Mark all read
+          <span className="ml-auto text-[11.5px] text-soft-foreground">{marking ? 'Marking…' : count}</span>
+        </DropdownMenuItem>
+        <DropdownMenuSeparator className="mx-0" />
+        {local && <>
+          <ProjectOpenSubmenu projectId={projectId ?? 'default'} disabled={!root || project?.status === 'missing'} />
+          <DropdownMenuItem className={itemClass} disabled={!root} onSelect={() => { void copyPath() }}>
+            <CopyIcon aria-hidden="true" /> Copy path
           </DropdownMenuItem>
           <DropdownMenuSeparator className="mx-0" />
-          {local && <>
-            <ProjectOpenSubmenu projectId={projectId ?? 'default'} disabled={!root || project?.status === 'missing'} />
-            <DropdownMenuItem className={itemClass} disabled={!root} onSelect={() => { void copyPath() }}>
-              <CopyIcon aria-hidden="true" /> Copy path
-            </DropdownMenuItem>
-            <DropdownMenuSeparator className="mx-0" />
-          </>}
-          <DropdownMenuItem asChild className={itemClass}>
-            <Link to="/settings" onClick={onNavigate ?? sidebarNavigate}><SettingsIcon aria-hidden="true" /> Project settings</Link>
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </div>
+        </>}
+        <DropdownMenuItem asChild className={itemClass}>
+          <Link to="/settings" onClick={onNavigate ?? sidebarNavigate}><SettingsIcon aria-hidden="true" /> Project settings</Link>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 

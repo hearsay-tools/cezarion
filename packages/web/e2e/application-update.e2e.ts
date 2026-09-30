@@ -38,28 +38,36 @@ describe('application update chrome', () => {
     { width: 1024, theme: 'light' }, { width: 1024, theme: 'dark' },
     { width: 360, theme: 'light' }, { width: 360, theme: 'dark' },
   ])('aligns preview versions at the trailing edge and keeps manual guidance in the footer at $width/$theme', ({ width, theme }) => {
-    const root = width < 768 ? drawer : desktop
+    const phone = width < 768
+    const root = phone ? drawer : desktop
+    // The desktop footer carries the chip in `version-action`; the phone drawer (#621) shows the
+    // version in its identity row and gives the update guidance its own row under it.
+    const versionChip = phone ? '[data-slot="drawer-version"]' : '[data-slot="version-chip"]'
     const preview = '0.14.8-pr501.7.abcdef1234567890'
     browser.setViewport(width, 640)
     fixture({ status: 'idle', supported: false, message: 'Update this installation manually.' }, preview, '0.14.8')
     browser.goto(`${baseUrl}/p/${project}/skills`)
-    browser.waitForFunction(`document.querySelector('[data-slot="version-chip"]') !== null`)
+    browser.waitForFunction(`document.querySelector('[data-slot="mobile-top-bar"]') !== null`)
     browser.evaluate(`localStorage.setItem('cez-theme', ${JSON.stringify(theme)})`)
     browser.goto(`${baseUrl}/p/${project}/skills`)
     browser.waitForFunction(`document.documentElement.classList.contains('light') === ${theme === 'light'}`)
-    if (width < 768) browser.click('[aria-label^="Open projects"]')
+    if (phone) browser.click('[aria-label^="Open projects"]')
     const aligned = browser.waitForValue(`(() => {
       const root = document.querySelector('${root}')
-      const chip = root?.querySelector('[data-slot="version-chip"]')
+      const chip = root?.querySelector('${versionChip}')
       if (!chip || root.getAnimations().some(a => a.playState === 'running')) return null
-      const row = root.querySelector('[data-slot="version-action"]')
+      const row = ${phone ? `root.querySelector('[data-slot="drawer-identity"]')` : `root.querySelector('[data-slot="version-action"]')`}
       const edge = row.getBoundingClientRect().right - parseFloat(getComputedStyle(row).paddingRight)
       return { gap: edge - chip.getBoundingClientRect().right, overflow: row.scrollWidth - row.clientWidth,
         version: chip.textContent, action: !!root.querySelector('[data-slot="application-update-action"]'),
         feedback: !!root.querySelector('[data-slot="application-update-feedback"]') }
-    })()`)
+    })()`) as { gap: number; overflow: number; version: string; action: boolean; feedback: boolean }
     expect(aligned).toMatchObject({ version: `v${preview}`, overflow: 0, action: false, feedback: false })
-    expect(Math.abs((aligned as { gap: number }).gap)).toBeLessThanOrEqual(1)
+    // Desktop pins the chip to the footer's trailing edge; the drawer's identity row leaves the
+    // trailing edge to the Close button, so only the no-overflow half applies there.
+    if (!phone) expect(Math.abs(aligned.gap)).toBeLessThanOrEqual(1)
+    // A preview build is not "older than latest", so the phone drawer draws no update row at all.
+    if (phone) expect(browser.evaluate(`document.querySelector('${drawer} [data-slot="drawer-update"]') === null`)).toBe(true)
     browser.screenshot(`${artifacts}/preview-${width}-${theme}.png`, { viewport: true })
     fixture({ status: 'idle', supported: false, message: 'Update this installation manually.' }, preview)
     reconcile()
@@ -67,16 +75,18 @@ describe('application update chrome', () => {
       const root = document.querySelector('${root}')
       const feedback = root?.querySelector('[data-slot="application-update-feedback"]')
       if (!feedback?.textContent.includes('Install the newer release')) return null
-      // In the phone drawer the footer ends the one scroll (#620), below the Projects section.
-      root.querySelector('[data-slot="sidebar-footer"]').scrollIntoView({ block: 'end' })
-      const row = root.querySelector('[data-slot="version-action"]')
-      return { text: feedback.textContent, inFooter: !!feedback.closest('[data-slot="sidebar-footer"]'),
+      const footer = root.querySelector('${phone ? '[data-slot="drawer-update"]' : '[data-slot="sidebar-footer"]'}')
+      footer.scrollIntoView({ block: 'end' })
+      const row = ${phone ? `root.querySelector('[data-slot="drawer-update"] > div')` : `root.querySelector('[data-slot="version-action"]')`}
+      return { text: feedback.textContent, inFooter: !!feedback.closest('${phone ? '[data-slot="drawer-update"]' : '[data-slot="sidebar-footer"]'}'),
         afterVersion: feedback.getBoundingClientRect().top >= row.getBoundingClientRect().bottom,
-        insideFooter: feedback.getBoundingClientRect().bottom <= root.querySelector('[data-slot="sidebar-footer"]').getBoundingClientRect().bottom,
-        footerVisible: root.querySelector('[data-slot="sidebar-footer"]').getBoundingClientRect().bottom <= root.getBoundingClientRect().bottom + 1 }
-    })()`)
+        insideFooter: feedback.getBoundingClientRect().bottom <= footer.getBoundingClientRect().bottom,
+        footerVisible: footer.getBoundingClientRect().bottom <= root.getBoundingClientRect().bottom + 1,
+        headline: ${phone ? `root.querySelector('[data-slot="drawer-update"] span.flex-1')?.textContent` : 'null'} }
+    })()`) as { text: string; headline: string | null }
     expect(guidance).toMatchObject({ inFooter: true, afterVersion: true, insideFooter: true, footerVisible: true })
-    expect((guidance as { text: string }).text).toContain('In-app updates are unavailable for this installation.')
+    if (phone) expect(guidance.headline).toBe('Update available · v2.0.0')
+    expect(guidance.text).toContain('In-app updates are unavailable for this installation.')
     browser.screenshot(`${artifacts}/manual-update-${width}-${theme}.png`, { viewport: true })
   })
 
@@ -135,8 +145,8 @@ describe('application update chrome', () => {
     browser.click('button[aria-label^="Open projects"]')
     browser.waitForFunction(`document.querySelector('${drawer}')?.getBoundingClientRect().left === 0`)
     const nightly = browser.waitForValue(`(() => {
-      const chip = document.querySelector('${drawer} [data-slot="version-chip"]')
-      const header = chip?.closest('[data-slot="version-action"]')?.parentElement
+      const chip = document.querySelector('${drawer} [data-slot="drawer-version"]')
+      const header = chip?.closest('[data-slot="drawer-identity"]')
       if (!chip || !header) return null
       return { version: chip.textContent, title: chip.title, overflow: header.scrollWidth - header.clientWidth }
     })()`)

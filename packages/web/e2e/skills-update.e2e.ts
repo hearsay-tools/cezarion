@@ -125,12 +125,12 @@ describe('automatic Open Mercato skills updates', () => {
   it('keeps Skills reachable in mobile navigation without a false marker', () => {
     browser.setViewport(IPHONE.width, IPHONE.height)
     browser.goto(`${baseUrl}/p/${projectId}/`)
-    browser.waitForFunction(`document.querySelector('[data-slot="mobile-top-bar"]') !== null`)
-    browser.click('[data-slot="mobile-top-bar"] button[aria-label^="Open projects"]')
-    browser.waitForFunction(`document.querySelector('[role="dialog"] nav a[aria-label="Skills"]') !== null`)
+    // Skills lives in the tab bar's More sheet since #621 (the drawer is projects only).
+    browser.click('[data-slot="mobile-tab-bar"] [data-tab="more"]')
+    browser.waitForFunction(`document.querySelector('[data-slot="more-sheet"] a[data-more-row="/skills"]') !== null`)
 
-    expect(browser.evaluate(`document.querySelector('[role="dialog"] nav a[aria-label="Skills"]')?.getAttribute('href')`)).toBe(`/p/${projectId}/skills`)
-    expect(browser.count('[role="dialog"] [data-slot="nav-update-marker"]')).toBe(0)
+    expect(browser.evaluate(`document.querySelector('[data-slot="more-sheet"] a[data-more-row="/skills"]')?.getAttribute('href')`)).toBe(`/p/${projectId}/skills`)
+    expect(browser.count('[data-slot="more-sheet"] [data-slot="skills-update"]')).toBe(0)
     browser.screenshot(`${artifactsDir}/skills-mobile-navigation.png`, { viewport: true })
   })
 

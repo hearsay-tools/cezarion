@@ -88,20 +88,16 @@ describe('mobile Tasks controls', () => {
     expect(browser.isVisible(search)).toBe(true)
   })
 
-  it('retains the query while page and drawer selection stay independent across resize', () => {
+  it('retains the query and the view selection across drawer and resize', () => {
     browser.fill(search, 'Needle')
     browser.click(tab('archived'))
     browser.click('[aria-label^="Open projects"]')
     settle(drawer)
-    settle(`${drawer} [data-slot="quick-list"]`)
-    const drawerTab = `${drawer} [data-slot="view-tab"]`
-    // The view tabs sit below the Projects section in the drawer's one scroll (#620).
-    browser.evaluate(`document.querySelector('${drawerTab}[data-view="active"]').scrollIntoView({ block: 'center' })`)
-    expect(browser.evaluate(`document.querySelector('${drawerTab}[data-view="active"]').getAttribute('aria-pressed')`)).toBe('true')
-    browser.click(`${drawerTab}[data-view="archived"]`)
-    expect(browser.evaluate(`document.querySelector('${tab('archived')}').getAttribute('aria-pressed')`)).toBe('true')
-    browser.click(`${drawerTab}[data-view="active"]`)
-    browser.waitForFunction(`document.querySelector('${drawerTab}[data-view="active"]').getAttribute('aria-pressed') === 'true'`)
+    // The drawer's own quick list and view tabs are gone (#621: the quick list is desktop-only and
+    // the page's Active/Archived tabs are the phone's one selector), so opening the drawer must
+    // leave the page's selection exactly as it was instead of mirroring it.
+    expect(browser.count(`${drawer} [data-slot="quick-list"]`)).toBe(0)
+    expect(browser.count(`${drawer} [data-slot="view-tab"]`)).toBe(0)
     browser.click('[aria-label="Close menu"]')
     browser.waitForFunction(`document.querySelector('${drawer}') === null`)
     expect(browser.evaluate(`document.querySelector('${tab('archived')}').getAttribute('aria-pressed')`)).toBe('true')

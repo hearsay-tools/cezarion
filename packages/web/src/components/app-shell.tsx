@@ -1,14 +1,16 @@
 import { ChevronDownIcon, FolderIcon, MenuIcon, PlusIcon, SearchIcon, ShieldCheckIcon } from '@/components/design-icons'
 
+import { ChevronLeftIcon } from 'lucide-react'
 import * as React from 'react'
 import type { ReactNode } from 'react'
 import { Link as RouterLink, matchPath, useLocation } from 'react-router'
 
 import { openCommandPalette } from '@/components/command-palette'
-import { DrawerGlobal, DrawerIdentity, DrawerProjects, MenuButtonPills, elsewhereSignal, menuButtonLabel, type MobileProjectNav } from '@/components/mobile-projects'
+import { DrawerGlobal, DrawerIdentity, DrawerProjects, DrawerUpdate, MenuButtonPills, elsewhereSignal, menuButtonLabel, type DrawerTools, type MobileProjectNav } from '@/components/mobile-projects'
 import { projectInitials, type ProjectSignal } from '@/lib/project-signal'
 import { commandShortcutHint } from '@/lib/use-command-shortcut'
-import { Link, pathnameProjectId, stripProjectPrefix } from '@/lib/project-router'
+import { Link, pathnameProjectId, stripProjectPrefix, useNavigate } from '@/lib/project-router'
+import { MobileRunBarSlotContext } from '@/components/mobile-run-bar'
 import { StatusDot } from '@/components/status-dot'
 import { SidebarViewTabs } from '@/components/sidebar-view-tabs'
 import { ApplicationUpdateControl, ApplicationUpdateFeedback } from '@/components/application-update-control'
@@ -17,7 +19,9 @@ import { ProjectScopeContext, useProjectScope } from '@/api/project-scope-contex
 import { isNewerVersion } from '@/lib/is-newer-version'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
-import { activeNavItem, activeNavPath, visibleNavItems, type NavItem } from '@/components/nav-items'
+import { activeNavItem, activeNavPath, isPushedRoute, visibleNavItems, type NavItem } from '@/components/nav-items'
+import { MobileTabBar } from '@/components/mobile-tab-bar'
+import { useKeyboardOpen } from '@/lib/keyboard-inset'
 import { SIDEBAR_SELECTED_CLASS } from '@/components/nav-row-styles'
 import {
   DEFAULT_SIDEBAR_WIDTH,
@@ -94,6 +98,9 @@ export type AppShellProps = {
    *  because the rail reads the registry and the runs index, and this shell must keep rendering
    *  where no QueryClient is provided. Absent renders nothing; hidden below `md` by its own frame. */
   projectRail?: ReactNode
+  /** The phone drawer's Tools row (#621): amber dot and forge note, derived from health by the
+   *  container. Null/absent renders no row, as `toolsMenu` renders no trigger without health. */
+  toolsStatus?: DrawerTools | null
 }
 
 /**
@@ -166,6 +173,7 @@ export function AppShell({
   sidebarProjectId,
   needsYou,
   projectRail,
+  toolsStatus,
 }: AppShellProps) {
   const { pathname } = useLocation()
   // The nav's area rules reason about the flat route map — strip any `/p/:projectId` prefix
@@ -175,7 +183,20 @@ export function AppShell({
   const current = activeNavItem(areaPathname)
   // The URL's own scope, as on the rail: global routes carry none, so every project is "elsewhere".
   const currentProjectId = pathnameProjectId(pathname)
+  // The tab bar belongs to list screens (#621): an opened task is a pushed screen whose composer
+  // owns the bottom edge, and while the keyboard is up (the visual viewport shrank below the
+  // layout viewport — the same source `--kb` is published from) it would only eat the room the
+  // composer needs.
+  // A pinch-zoom also leaves the visual viewport shorter than the layout one, so a real keyboard
+  // is the bottom inset that is both large and seen at scale ~1.
+  const keyboardOpen = useKeyboardOpen()
+  const showTabBar = !isPushedRoute(pathname) && !keyboardOpen
+  const tabBarSignal = currentProjectId !== null ? mobileProjects?.signals?.get(currentProjectId) : undefined
   const [menuOpen, setMenuOpen] = React.useState(false)
+  // The pushed task screen (#621): its top bar carries back / title / state / run actions, and the
+  // routed `RunHeader` fills the slot below through `MobileRunBarSlotContext`.
+  const pushed = isPushedRoute(pathname)
+  const [runBarSlot, setRunBarSlot] = React.useState<HTMLElement | null>(null)
   const mobileNavTrigger = React.useRef<HTMLButtonElement | null>(null)
   const mainRef = React.useRef<HTMLElement>(null)
   const previousPathname = React.useRef<string | null>(null)
@@ -263,7 +284,7 @@ export function AppShell({
         {projectRail}
         <Sidebar {...nav} width={sidebarWidth} onWidthChange={changeSidebarWidth} />
         {/* The drawer leaves a visible dismissal strip beside the shared navigation. */}
-        <MobileNavDrawer {...nav} mobileProjects={mobileProjects} currentProjectId={currentProjectId} onNavigate={() => setMenuOpen(false)} onCloseAutoFocus={(event) => {
+        <MobileNavDrawer {...nav} mobileProjects={mobileProjects} currentProjectId={currentProjectId} toolsStatus={toolsStatus} onNavigate={() => setMenuOpen(false)} onCloseAutoFocus={(event) => {
           // Both mobile controls open the same drawer. Restore the actual opener, rather
           // than Radix's single trigger ref (which otherwise points at the last mount).
           if (mobileNavTrigger.current?.isConnected) {
@@ -273,7 +294,7 @@ export function AppShell({
         }} />
 
         <div className="grid min-w-0 flex-1 grid-rows-[auto_auto_1fr_auto] overflow-hidden">
-          <MobileTopBar title={current?.label ?? 'cezar'} repo={repo} elsewhere={elsewhereSignal(mobileProjects, currentProjectId)} onTrigger={(button) => { mobileNavTrigger.current = button }} />
+          <MobileTopBar title={current?.label ?? 'cezar'} pushed={pushed ? { compare: areaPathname.startsWith('/compare/'), onSlot: setRunBarSlot } : null} repo={repo} elsewhere={elsewhereSignal(mobileProjects, currentProjectId)} onTrigger={(button) => { mobileNavTrigger.current = button }} />
           <header data-slot="desktop-breadcrumb" className={cn("row-start-1 hidden min-w-0 items-center gap-3 border-b border-border text-[13px] text-muted-foreground md:flex", areaPathname === '/new' ? 'h-[72px] px-11' : 'h-16 px-9')}>
             <FolderIcon aria-hidden="true" className="size-4 shrink-0" />
             {(breadcrumb?.project ?? repo?.name) ? <><span className="truncate font-medium text-foreground">{breadcrumb?.project ?? repo?.name}</span><span aria-hidden="true">/</span></> : null}
@@ -291,9 +312,13 @@ export function AppShell({
           <main
             ref={mainRef}
             data-slot="main"
-            className="row-start-3 min-h-0 overflow-y-auto overscroll-contain"
+            // The New task button floats over the bottom of main, so leave its height (48px + 16px
+            // gap) plus air clear while it is shown, or the last row sits under it at full scroll.
+            className={cn('row-start-3 min-h-0 overflow-y-auto overscroll-contain', showTabBar && areaPathname !== '/new' && 'max-md:pb-20')}
           >
-            {children}
+            <MobileRunBarSlotContext.Provider value={pushed ? runBarSlot : null}>
+              {children}
+            </MobileRunBarSlotContext.Provider>
           </main>
 
           {/* Row 4 reserves whichever obstruction is taller: the home indicator or the visual
@@ -301,8 +326,28 @@ export function AppShell({
               flow inside main; shrinking that viewport keeps it reachable without an overlay. */}
           <div
             data-slot="composer"
-            className="row-start-4 pb-[max(env(safe-area-inset-bottom),var(--kb,0px))]"
-          />
+            // On a list screen below `md` the row IS the tab bar's surface, so the inset padding
+            // sits under the bar on the bar's own fill, and it is the anchor the New task button
+            // floats from. `md:` sheds all of it: the desktop row stays the empty gutter it was.
+            className={cn(
+              'row-start-4 pb-[max(env(safe-area-inset-bottom),var(--kb,0px))]',
+              showTabBar && 'relative max-md:border-t max-md:border-border max-md:bg-sidebar',
+            )}
+          >
+            {showTabBar ? (
+              <div className="md:hidden">
+                <MobileTabBar
+                  items={nav.items}
+                  activeTo={activeTo}
+                  signal={tabBarSignal}
+                  projectName={mobileProjects?.projects.find((project) => project.id === currentProjectId)?.name ?? repo?.name ?? null}
+                  inboxCount={nav.inboxCount}
+                  skillsUpdateAvailable={skillsUpdateAvailable}
+                  showNewTask={areaPathname !== '/new'}
+                />
+              </div>
+            ) : null}
+          </div>
         </div>
       </div>
     </Sheet>
@@ -455,19 +500,27 @@ function SidebarResizeHandle({ width, onWidthChange }: SidebarResize) {
 }
 
 /**
- * The `<md` frame for the *same* `SidebarContent` the desktop column renders — the spec's mobile
- * rule is that the sidebar "becomes an overlay drawer", not that mobile gets its own nav.
+ * The `<md` drawer: the projects drawer and nothing else (#621). Views live in the tab bar and
+ * its More sheet, the task list on the Tasks screen, New task on the floating button and search
+ * in the top bar, so the desktop `SidebarContent` is no longer rendered here. The three things
+ * only it carried got new homes: Tools is a row in `DrawerGlobal`, the update action is
+ * `DrawerUpdate` under the identity row, and the project menu is the `…` on the current project.
  *
  * Radix's Dialog (via the Sheet primitive) supplies the parts that are easy to get wrong by hand:
  * `role="dialog"`, the accessible name, the focus trap, the Escape handler, the backdrop's
  * dismiss-on-tap, and `aria-hidden` on everything outside the portal — which is how it delivers
  * modality (it does not set `aria-modal`; `hideOthers` is the stronger guarantee).
  */
-function MobileNavDrawer({ onNavigate, onCloseAutoFocus, mobileProjects, currentProjectId, ...props }: NavProps & {
+function MobileNavDrawer({
+  onNavigate, onCloseAutoFocus, mobileProjects, currentProjectId, toolsStatus,
+  version, latestVersion, applicationUpdate, onApplyUpdate, onRestart,
+  applicationUpdateError, applicationUpdateBusy, applicationUpdateOffline,
+}: Pick<NavProps, 'version' | 'latestVersion' | 'applicationUpdate' | 'onApplyUpdate' | 'onRestart' | 'applicationUpdateError' | 'applicationUpdateBusy' | 'applicationUpdateOffline'> & {
   onNavigate: () => void
   onCloseAutoFocus?: React.ComponentProps<typeof SheetContent>['onCloseAutoFocus']
   mobileProjects?: MobileProjectNav | null
   currentProjectId: string | null
+  toolsStatus?: DrawerTools | null
 }) {
   return (
     <SheetContent
@@ -476,34 +529,38 @@ function MobileNavDrawer({ onNavigate, onCloseAutoFocus, mobileProjects, current
       onCloseAutoFocus={onCloseAutoFocus}
       overlayClassName="bg-[var(--nav-scrim)]"
       showCloseButton={false}
-      // The drawer is the sidebar: same width, same surface token, and no padding of its own —
-      // its rows bring their own. `sm:max-w-none` sheds the primitive's sheet width cap.
+      // Same width and surface token as the desktop sidebar, and no padding of its own — its
+      // rows bring their own. `sm:max-w-none` sheds the primitive's sheet width cap.
       className="w-[calc(100%-68px)] max-w-[334px] gap-0 border-border bg-sidebar p-0 sm:max-w-[334px] md:hidden"
       // Nav needs no prose description, and Radix warns when it cannot find the one it links to.
       aria-describedby={undefined}
     >
       {/* The dialog's accessible name. Visually redundant with the identity row below. */}
       <SheetTitle className="sr-only">Navigation</SheetTitle>
-      <DrawerIdentity version={props.version} />
-      {/* One scroll: Projects, workspace links, then today's sidebar content (nav, quick list, New
-          task) until slice 5 gives those a new home. The safe-area insets are the identity row's
-          and the global rows', so the content between them takes none of its own. */}
+      <DrawerIdentity version={version} />
+      <DrawerUpdate
+        version={version}
+        latestVersion={latestVersion}
+        state={applicationUpdate}
+        onApplyUpdate={onApplyUpdate}
+        onRestart={onRestart}
+        error={applicationUpdateError}
+        busy={applicationUpdateBusy}
+        offline={applicationUpdateOffline}
+      />
+      {/* One scroll: Projects, then the workspace links. The safe-area insets are the identity
+          row's and the global rows', so the content between them takes none of its own. */}
       <div data-slot="drawer-scroll" className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain">
         {mobileProjects ? <DrawerProjects nav={mobileProjects} currentProjectId={currentProjectId} onNavigate={onNavigate} /> : null}
-        <SidebarContent {...props} onNavigate={onNavigate} embedded />
       </div>
-      <DrawerGlobal onNavigate={onNavigate} />
+      <DrawerGlobal onNavigate={onNavigate} tools={toolsStatus} />
     </SheetContent>
   )
 }
 
 /**
  * Everything inside the sidebar: brand lockup, New task CTA, nav, quick-list, footer. Framed by
- * `Sidebar` on desktop and by `MobileNavDrawer` below `md` — the two callers differ only in the
- * box around this, which is what keeps the mobile nav from drifting away from the desktop one.
- *
- * The safe-area insets live here rather than on the frames because both need them: the drawer is
- * a full-height overlay under the same notch and home indicator the sidebar sits under.
+ * `Sidebar`, desktop only since #621 (the phone drawer is projects only).
  */
 function SidebarContent({
   activeTo,
@@ -526,17 +583,11 @@ function SidebarContent({
   sidebarProjectId,
   needsYou,
   onNavigate,
-  embedded = false,
 }: NavProps & {
   /** Fires on any in-drawer navigation. The route-change effect already closes the drawer for
    *  every *changed* route; this also covers re-clicking the active item (per the spec, Tasks
    *  navigates home even when already active), which changes no pathname at all. */
   onNavigate?: () => void
-  /** Inside the drawer's one scroll (#620): the content takes its natural height and lets the
-   *  drawer scroll it, and the safe-area padding goes to the identity row above and the global rows
-   *  below. Its own list scroller and pinned footer would otherwise squeeze the task list into
-   *  whatever height the Projects section left. */
-  embedded?: boolean
 }) {
   const inheritedScope = useProjectScope()
   // Context only: the routed view owns the mutable API scope. Sidebar queries bind their
@@ -553,7 +604,7 @@ function SidebarContent({
       // can afford to paint is a question about THIS column, not about the viewport. Everything
       // inside that is droppable metadata — the quick-list's diff pair today — hides itself with
       // an `@min-[…]/sidebar:` query and returns when the user drags the column wider.
-      className={cn('@container/sidebar flex flex-col', embedded ? 'shrink-0' : 'min-h-0 flex-1 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]')}
+      className={'@container/sidebar flex min-h-0 flex-1 flex-col pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]'}
     >
       <div data-slot="sidebar-header" className="shrink-0">
         {projectHeader ?? (repo ? <div className="px-[14px] pt-[14px] pb-2.5"><div className="truncate text-sm font-semibold">{repo.name}</div><div className="truncate font-mono text-[10.5px] text-soft-foreground">{repo.branch}</div></div> : null)}
@@ -591,7 +642,7 @@ function SidebarContent({
 
       {sessionScope ? <div className="shrink-0 px-4 pb-3">{sessionScope}</div> : null}
       <SidebarViewTabs items={items} activeTo={activeTo} needsYou={needsYou} inboxCount={inboxCount} skillsUpdateAvailable={skillsUpdateAvailable} onNavigate={onNavigate} />
-      <div data-slot="project-task-navigation" className={cn('px-2 pb-2', !embedded && 'min-h-0 flex-1 overflow-y-auto overscroll-contain')}>
+      <div data-slot="project-task-navigation" className={'min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-2'}>
         <SidebarNavigateContext.Provider value={onNavigate}>
           <div data-slot="task-quick-list">{taskQuickList}</div>
         </SidebarNavigateContext.Provider>
@@ -674,13 +725,17 @@ function VersionChip({ version, latestVersion }: { version: string; latestVersio
 }
 
 /** Mobile chrome (<md): the sidebar's replacement. Its menu button and project button open `MobileNavDrawer`. */
-function MobileTopBar({ title, repo, elsewhere, onTrigger }: {
+function MobileTopBar({ title, pushed, repo, elsewhere, onTrigger }: {
   title: string
+  /** Non-null on a pushed screen (a task or a variant compare): the bar swaps its project chrome for
+   *  back / title / actions. `onSlot` receives the element the routed view portals its content into. */
+  pushed: { compare: boolean; onSlot: (slot: HTMLElement | null) => void } | null
   repo: RepoChip | null
   /** The other projects' four counts summed; null while activity is unknown. */
   elsewhere: ProjectSignal | null
   onTrigger: (button: HTMLButtonElement) => void
 }) {
+  if (pushed) return <PushedTopBar compare={pushed.compare} onSlot={pushed.onSlot} />
   return (
     <header
       data-slot="mobile-top-bar"
@@ -739,6 +794,46 @@ function MobileTopBar({ title, repo, elsewhere, onTrigger }: {
         >
           <SearchIcon className="size-[19px]" aria-hidden="true" />
         </Button>
+      </div>
+    </header>
+  )
+}
+
+/**
+ * The pushed screen's bar: back, then whatever the routed view publishes into the slot (a task's
+ * title, state line and run actions — see `mobile-run-bar.tsx`). A compare route publishes
+ * nothing, so it titles itself.
+ *
+ * Back returns to where the user came from when the app has in-app history (react-router's
+ * `history.state.idx` counts entries pushed by this session), and falls to the Tasks list when the
+ * screen was opened cold — a deep link or a reload — where `navigate(-1)` would leave the app.
+ */
+function PushedTopBar({ compare, onSlot }: { compare: boolean; onSlot: (slot: HTMLElement | null) => void }) {
+  const navigate = useNavigate()
+  const goBack = () => {
+    const idx = (window.history.state as { idx?: unknown } | null)?.idx
+    if (typeof idx === 'number' && idx > 0) navigate(-1)
+    else navigate('/')
+  }
+  return (
+    <header
+      data-slot="mobile-top-bar"
+      data-mode="task"
+      className="row-start-1 min-w-0 border-b border-border bg-card pt-[env(safe-area-inset-top)] md:hidden"
+    >
+      <div className="flex h-[56px] min-w-0 items-center gap-[4px] px-[8px]">
+        <Button
+          variant="ghost"
+          aria-label="Back"
+          data-slot="mobile-back"
+          onClick={goBack}
+          className="size-[44px] shrink-0 p-0 text-foreground"
+        >
+          <ChevronLeftIcon className="size-[22px]" aria-hidden="true" />
+        </Button>
+        {compare ? <span className="min-w-0 flex-1 truncate text-[15px] font-semibold text-foreground">Compare variants</span> : null}
+        {/* The routed view's portal target; empty while the run loads. */}
+        <div data-slot="mobile-run-bar" ref={onSlot} className={cn('flex min-w-0 items-center gap-[4px]', compare ? 'shrink-0' : 'flex-1')} />
       </div>
     </header>
   )

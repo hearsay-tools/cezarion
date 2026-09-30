@@ -127,6 +127,9 @@ function run(overrides: Partial<RunRecord> = {}): RunRecord {
 
 const repoChip = () => document.querySelector('[data-slot="project-header-name"]')
 const versionChip = () => document.querySelector('[data-slot="version-chip"]')
+// The desktop column only: below `md` the mobile tab bar renders the same view names (jsdom has no
+// media queries, so both trees are in the DOM), and these cases are about the sidebar's gating.
+const inSidebar = () => within(document.querySelector('[data-slot="sidebar"]') as HTMLElement)
 const navBadge = () => document.querySelector('[data-slot="overflow-inbox-dot"]')
 
 describe('repoChipOf', () => {
@@ -196,8 +199,8 @@ describe('sidebar wiring', () => {
     expect(screen.queryByRole('link', { name: /Inbox/ })).toBeNull()
     expect(navBadge()).toBeNull()
     // Every other view is untouched — the gate owns exactly one item.
-    expect(screen.getByRole('link', { name: /Tasks/ })).toBeTruthy()
-    expect(screen.getByRole('link', { name: /Settings/ })).toBeTruthy()
+    expect(inSidebar().getByRole('link', { name: /Tasks/ })).toBeTruthy()
+    expect(inSidebar().getByRole('link', { name: /Settings/ })).toBeTruthy()
   })
 
   it('never asks for todos on a server with the inbox off', async () => {
@@ -226,7 +229,7 @@ describe('sidebar wiring', () => {
     await waitFor(() => expect(versionChip()).not.toBeNull())
     expect(screen.queryByRole('link', { name: /Automations/ })).toBeNull()
     // The gate owns exactly one item — GitHub is forge-gated, not automations-gated.
-    expect(screen.getByRole('link', { name: /GitHub/ })).toBeTruthy()
+    expect(inSidebar().getByRole('link', { name: /GitHub/ })).toBeTruthy()
   })
 
   it('shows the Automations nav item once health reports the capability', async () => {
@@ -310,7 +313,7 @@ describe('sidebar wiring', () => {
 
     await waitFor(() => expect(versionChip()).not.toBeNull())
     expect(screen.queryByRole('button', { name: 'Add project' })).toBeNull()
-    expect(screen.getByRole('link', { name: /New task/ })).toBeTruthy()
+    expect(inSidebar().getByRole('link', { name: /New task/ })).toBeTruthy()
     expect(screen.getByRole('navigation', { name: 'Main' })).toBeTruthy()
   })
 
@@ -580,7 +583,7 @@ describe('document title wiring', () => {
     renderShell('/p/cezar/')
 
     await waitFor(() => expect(document.title).toBe('cezar — Tasks · cezar'))
-    fireEvent.click(screen.getByRole('link', { name: 'Git' }))
+    fireEvent.click(inSidebar().getByRole('link', { name: 'Git' }))
     await waitFor(() => expect(document.title).toBe('cezar — Git · cezar'))
   })
 
@@ -852,6 +855,33 @@ describe('project rail wiring', () => {
     expect(rows.map((row) => row.getAttribute('data-project-id'))).toEqual(['cezar', 'shop'])
     expect(rows[0]!.getAttribute('aria-current')).toBe('page')
     expect(rows[1]!.querySelector('[data-slot="drawer-project-state"]')?.textContent).toBe('1 needs you·1 working')
+  })
+
+  // #621: the drawer no longer renders the sidebar footer, so the Tools row's amber dot and the
+  // forge note are derived from the same health the desktop ToolsMenu reads.
+  it('feeds the drawer Tools row from health: forge note and the amber blocker dot', async () => {
+    vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener: () => {}, removeEventListener: () => {} }))
+    const health = { ...HEALTH, checks: [{ name: 'claude', available: false, hint: 'install' }] } as unknown as HealthResponse
+    serve({
+      '/api/v1/health': health,
+      '/api/v1/todos': [],
+      '/api/v1/projects': TWO_PROJECTS,
+      '/api/v1/workspace/ui-state': {},
+      '/api/v1/workspace/runs-index': railIndex([]),
+      '/api/v1/runs': [],
+      '/api/v1/p/cezar/runs': [],
+      '/api/v1/p/shop/runs': [],
+    })
+    renderShell('/p/cezar/')
+    fireEvent.click(await screen.findByRole('button', { name: /^Open projects/ }))
+    const row = await waitFor(() => {
+      const found = document.querySelector('[data-slot="mobile-nav-drawer"] [data-slot="drawer-tools"]')
+      expect(found).not.toBeNull()
+      return found as HTMLElement
+    })
+    expect(row.getAttribute('href')).toBe('/tools')
+    expect(row.querySelector('[data-slot="drawer-tools-dot"]')).not.toBeNull()
+    expect(row.querySelector('[data-slot="drawer-tools-note"]')?.textContent).toContain('No GitHub remote detected')
   })
 
   // The capability, not the project count: one registered project in the default multi-project

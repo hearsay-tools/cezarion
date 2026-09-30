@@ -297,11 +297,11 @@ describe('ToolsMenu in the app shell', () => {
     expect(footer.querySelector('[data-slot="tools-menu-trigger"]')).not.toBeNull()
   })
 
-  it('comes along into the mobile drawer — same component, both framings', async () => {
+  it('leaves the dropdown to the desktop footer: the drawer has its own Tools row (#621)', async () => {
     renderShell()
     fireEvent.click(screen.getByRole('button', { name: /^Open projects/ }))
 
     const drawer = await screen.findByRole('dialog', { name: 'Navigation' })
-    expect(drawer.querySelector('[data-slot="tools-menu-trigger"]')).not.toBeNull()
+    expect(drawer.querySelector('[data-slot="tools-menu-trigger"]')).toBeNull()
   })
 })

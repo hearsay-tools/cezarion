@@ -89,11 +89,11 @@ describe('sidebar nav selection (#619)', () => {
     expect(git.getAttribute('aria-current')).toBe('page')
   })
 
-  it('uses the same selected pill in the mobile drawer', () => {
+  it('leaves the mobile drawer without a nav list, so only the desktop pill is selected (#621)', () => {
     renderShell('/git')
     fireEvent.click(screen.getByRole('button', { name: /^Open projects/ }))
     const selected = document.querySelectorAll('nav[aria-label="Main"] a[aria-current="page"]')
-    expect(selected).toHaveLength(2)
+    expect(selected).toHaveLength(1)
     for (const link of selected) expect(classes(link)).toEqual(expect.arrayContaining(['bg-sidebar-row-selected', 'text-foreground']))
   })
 })
