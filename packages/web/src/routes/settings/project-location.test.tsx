@@ -113,16 +113,6 @@ describe('the project folder in settings', () => {
     expect(field.querySelector('[data-slot="project-location-path"]')?.textContent).toBe(ROOT)
   })
 
-  it('every project section keeps the root in its desktop header', async () => {
-    renderAt('/settings/worktrees')
-    const nav = await waitFor(() => {
-      const el = document.querySelector('.settings-route-header [data-slot="project-location"]')
-      expect(el).not.toBeNull()
-      return el!
-    })
-    expect(nav.querySelector('[data-action="project-location-copy"]')?.textContent).toBe(ROOT)
-  })
-
   it('copies the path to the clipboard', async () => {
     const writeText = vi.fn(async () => {})
     vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } })

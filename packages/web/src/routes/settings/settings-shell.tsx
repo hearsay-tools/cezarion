@@ -3,9 +3,9 @@ import { ChevronDownIcon, ChevronRightIcon } from '@/components/design-icons'
 
 import { Link as RouterLink, NavLink as RouterNavLink } from 'react-router'
 import type { Capabilities } from '@open-mercato/cezar-api-client'
-import { Link as ScopedLink, NavLink as ScopedNavLink } from '@/lib/project-router'
+import { useProjects } from '@/api/queries'
+import { Link as ScopedLink, NavLink as ScopedNavLink, useActiveProjectId } from '@/lib/project-router'
 import { ProjectGeneral } from './project-general'
-import { ProjectLocationNav } from './project-location'
 import { visibleSettingsSections, type SettingsScope, type SettingsSection } from './registry'
 
 /**
@@ -52,6 +52,34 @@ function navComponents(scope: SettingsScope) {
     : { Link: ScopedLink, NavLink: ScopedNavLink }
 }
 
+/**
+ * The Settings main header (board "Main header"): one line, "<Section> · <project>" — or
+ * "· every project" in the global area, the same scope words the sidebar's group labels use.
+ * Desktop only; below `md` the route keeps its own "Project settings"/"Global settings" title.
+ * One h1 carries both so the page keeps a single heading; `display:none` drops the other
+ * from the accessible name.
+ */
+function SettingsMainHeader({ scope, title, mobileTitle }: { scope: SettingsScope; title: string; mobileTitle: string }) {
+  const projectId = useActiveProjectId()
+  const projects = useProjects().data
+  // Unprefixed `/settings/…` mounts the boot project, exactly as the sidebar's group label does.
+  const projectName = projects?.projects.find((project) => project.id === (projectId ?? projects.bootProject))?.name
+  const where = scope === 'global' ? 'every project' : (projectName ?? 'this project')
+  return (
+    <header data-slot="settings-main-header" className="settings-route-header flex shrink-0 flex-col gap-2">
+      <h1 className="text-[15px] font-semibold tracking-normal max-md:text-[24px] max-md:font-normal">
+        <span className="md:hidden">{mobileTitle}</span>
+        <span className="max-md:hidden">{title} · {where}</span>
+      </h1>
+      {scope === 'global' ? (
+        <span data-slot="settings-scope-chip" className="sr-only">
+          Global settings
+        </span>
+      ) : null}
+    </header>
+  )
+}
+
 /** Mobile sections use the reference's single disclosure, with ordinary scoped links. */
 function SectionPills({ scope, activeId, capabilities }: {
   scope: SettingsScope
@@ -94,18 +122,11 @@ export function SettingsSectionRoute({
       data-route={scope === 'global' ? `settings-global-${section.id}` : `settings-${section.id}`}
       className="settings-route mx-auto flex min-h-full w-full flex-col"
     >
-      {/* Desktop header — below `md` the shell's top bar already says "Settings". The
-          breadcrumb is what tells the two areas apart at a glance (mockup: "Global settings"). */}
-      <header className="settings-route-header flex shrink-0 flex-col gap-2">
-        <h1 className="text-[28px] font-semibold tracking-tight">{scope === 'global' ? 'Global settings' : 'Project settings'}</h1>
-        <p className="text-[13px] text-soft-foreground">{scope === 'global' ? 'Preferences for you and this machine, shared by every project.' : 'Configure this project and its agents.'}</p>
-        {scope === 'global' ? (
-          <span data-slot="settings-scope-chip" className="sr-only">
-            Global settings
-          </span>
-        ) : null}
-        <div className="hidden md:block">{scope === 'project' ? <ProjectLocationNav /> : <p className="text-[11px] text-soft-foreground">Stored in ~/.cezar</p>}</div>
-      </header>
+      <SettingsMainHeader
+        scope={scope}
+        title={section.title}
+        mobileTitle={scope === 'global' ? 'Global settings' : 'Project settings'}
+      />
       <div className="settings-route-body flex min-w-0 flex-1 flex-col md:flex-row">
         <SectionPills scope={scope} activeId={section.id} capabilities={capabilities} />
         <section className="settings-panel min-w-0 self-start md:flex-1" aria-label={section.title}>
@@ -127,15 +148,11 @@ export function SettingsIndexRoute({ scope, capabilities }: {
   const global = scope === 'global'
   return (
     <div data-route={global ? 'settings-global' : 'settings'} className="settings-route mx-auto flex min-h-full w-full flex-col">
-      <header className="settings-route-header flex shrink-0 flex-col gap-2">
-        <h1 className="text-[28px] font-semibold tracking-tight">{global ? 'Global settings' : 'Project settings'}</h1>
-        <p className="text-[13px] text-soft-foreground">
-          {global
-            ? 'Preferences for you and this machine, shared by every project.'
-            : 'Configure this project and its agents.'}
-        </p>
-        <div className="hidden md:block">{scope === 'project' ? <ProjectLocationNav /> : <p className="text-[11px] text-soft-foreground">Stored in ~/.cezar</p>}</div>
-      </header>
+      <SettingsMainHeader
+        scope={scope}
+        title="Settings"
+        mobileTitle={global ? 'Global settings' : 'Project settings'}
+      />
       <div className="settings-route-body flex min-w-0 flex-1 flex-col md:flex-row">
         <SectionPills scope={scope} activeId={null} capabilities={capabilities} />
         {/* No second h1 for small screens: the app shell's mobile top bar already titles the

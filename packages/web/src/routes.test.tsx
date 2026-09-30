@@ -244,8 +244,11 @@ describe('scoped route map (/p/:projectId)', () => {
       renderAt(`/p/${BOOT}${url}`)
       expect(routeName()).toBe(route)
       if (url.startsWith('/settings/')) {
-        expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Project settings')
+        expect(screen.getByRole('heading', { level: 1 }).textContent).toContain('Project settings')
         expect(screen.getByRole('heading', { level: 2, name: title })).toBeTruthy()
+      } else if (url === '/settings') {
+        // The index's h1 carries the mobile title and the desktop "Settings · <project>" one.
+        expect(screen.getByRole('heading', { level: 1 }).textContent).toContain(title)
       } else {
         expect(screen.getByRole('heading', { level: 1 }).textContent).toBe(title)
       }
@@ -355,7 +358,7 @@ describe('the global settings area (/settings/global)', () => {
       expect(routeName()).toBe(route)
       // Never redirected into a project: the pathname is the one that was asked for.
       expect(currentPathname()).toBe(url)
-      expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Global settings')
+      expect(screen.getByRole('heading', { level: 1 }).textContent).toContain('Global settings')
       if (url !== '/settings/global') expect(screen.getByRole('heading', { level: 2, name: title })).toBeTruthy()
     })
   }

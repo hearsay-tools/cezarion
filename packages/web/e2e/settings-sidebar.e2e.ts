@@ -31,15 +31,32 @@ describe('Settings view sidebar (#622)', () => {
           taskList: document.querySelector('[data-slot="task-quick-list"]') !== null };
       })()`)
       expect(facts).toEqual({ height: 32, groups: ['project', 'global'], duplicate: false, taskList: false })
+      // Board "Screen · Settings view, sections": 12px body padding and gap, no heading or General
+      // row, and a one-line "<Section> · <project>" main header with a rule below (15/600, 16/28).
+      const board = browser.waitForValue(`(() => {
+        const nav = document.querySelector('${sidebar}'); const header = document.querySelector('[data-slot="settings-main-header"]');
+        if (!nav || !header) return null;
+        const h1 = header.querySelector('h1'); const hs = getComputedStyle(header); const ns = getComputedStyle(nav);
+        return { pad: ns.padding, gap: ns.rowGap, heading: nav.querySelector('h2') !== null,
+          rows: [...nav.querySelectorAll('nav')].map(n => [...n.querySelectorAll('a')].map(a => a.textContent)),
+          headerPad: hs.padding, rule: hs.borderBottomWidth, title: h1.innerText.startsWith('Agents · '),
+          titleSize: getComputedStyle(h1).fontSize, titleWeight: getComputedStyle(h1).fontWeight };
+      })()`)
+      expect(board).toEqual({
+        pad: '12px', gap: '12px', heading: false,
+        rows: [['Agents', 'Agent config', 'Worktrees', 'Bookmarklets', 'Prompt templates'], ['Appearance', 'Notifications', 'Resources', 'Skills', 'Agent accounts', 'Projects']],
+        headerPad: '16px 28px', rule: '1px', title: true, titleSize: '15px', titleWeight: '600',
+      })
       browser.screenshot(`${artifacts}/settings-sidebar-${theme}.png`, { viewport: true })
       browser.click(`${sidebar} [data-section="appearance"]`)
       expect(browser.waitForValue(`document.querySelector('${sidebar} [data-section="appearance"][aria-current="page"]')?.getAttribute('href')`)).toBe('/settings/global/appearance')
       browser.waitForFunction(`document.querySelector('[data-route="settings-global-appearance"]') !== null`)
       browser.goto(`${base}/settings/global/appearance`)
       browser.waitForFunction(`document.querySelector('${sidebar} [data-section="appearance"][aria-current="page"]') !== null`)
-      browser.click(`${sidebar} [data-scope="project"] [data-slot="settings-nav-index"]`)
+      // The area index has no sidebar row (board): the Settings view tab is the way back to it.
+      browser.click('[data-slot="view-tabs"] a[aria-label="Settings"]')
       browser.waitForFunction(`document.querySelector('[data-route="settings"]') !== null`)
-      expect(browser.waitForValue(`document.querySelector('${sidebar} [data-scope="project"] [aria-current="page"]')?.textContent`)).toBe('General')
+      expect(browser.waitForValue(`document.querySelector('${sidebar} [aria-current="page"]') === null`)).toBe(true)
       browser.click('[data-slot="view-tabs"] a[aria-label="Tasks"]')
       browser.waitForFunction(`document.querySelector('[data-slot="task-quick-list"]') !== null && document.querySelector('${sidebar}') === null`)
     })
