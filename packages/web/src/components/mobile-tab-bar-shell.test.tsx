@@ -80,6 +80,19 @@ describe('AppShell mobile tab bar (#621)', () => {
     },
   )
 
+  it.each(['/p/cezarion/git?view=repo', '/p/cezarion/git/not-landed', '/p/cezarion/git/cleanup', '/git/branches'])(
+    'hides the tab bar on the pushed Git section screen %s (issue 08)',
+    (entry) => {
+      renderShell(entry)
+      expect(tabBar()).toBeNull()
+    },
+  )
+
+  it('keeps the tab bar on the Git screen itself, which is a list', () => {
+    renderShell('/p/cezarion/git')
+    expect(tabBar()).not.toBeNull()
+  })
+
   it('keeps them on the tasks overview, which is a list', () => {
     renderShell('/p/cezarion/tasks')
     expect(tabBar()).not.toBeNull()
