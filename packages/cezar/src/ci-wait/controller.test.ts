@@ -125,3 +125,24 @@ describe('private CI controller', () => {
     } finally { await client.close(); }
   }, 15000);
 });
+
+it.each([
+  ['manager_disposed', /manager.*disposed/i], ['capability_revoked', /capability.*revoked/i],
+  ['run_missing', /run.*no longer exists/i], ['run_not_running', /run.*not running/i],
+  ['run_stopping', /run.*stopping/i], ['session_replaced', /session.*replaced|no active session/i],
+  ['session_closed', /session.*closed/i], ['run_cancelled', /run.*cancelled/i],
+  ['finish_requested', /finish.*requested/i], ['generation_mismatch', /earlier session/i],
+  ['human_ask_pending', /human question.*pending/i], ['human_ask_unanswered', /human question.*unanswered/i],
+  ['worker_wait_pending', /worker wait.*[Ee]nd your turn/], ['worker_execution_stopped', /worker execution.*stopped/i],
+  ['root_finish_pending', /parent.*finishing/i], ['registration_aborted', /registration.*interrupted/i],
+  ['turn_changed', /turn.*changed/i], ['unauthorized', /capability.*missing|revoked/i],
+] as const)('returns a safe actionable message for %s', async (code, message) => {
+  const session = (await controller()).provision(async () => { throw Object.assign(new Error('secret-sensitive'), { code }); });
+  const response = await raw(session.env, JSON.stringify({ pr: wait.prUrl }));
+  expect(response.status).toBe(503);
+  const body = ciWaitErrorSchema.parse(JSON.parse(response.body));
+  expect(body.code).toBe(code);
+  expect(body.message).toMatch(message);
+  expect(body.message).not.toContain('secret-sensitive');
+  expect(body.message).not.toContain('authority expired');
+});

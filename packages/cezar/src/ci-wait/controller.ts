@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { getRequestListener } from '@hono/node-server';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
+import { ciErrorMessage } from './errors.ts';
 import { ciWaitRequestSchema, ciWaitReceiptSchema, ciWaitErrorCodeSchema, type CiWait, type CiWaitRequest } from '@open-mercato/cezar-contract';
 import { jsonZodValidator } from '../server/validators.ts';
 import type { AgentRunSpec } from '../core/agent-runner.ts';
@@ -15,7 +16,7 @@ import type { AgentRunSpec } from '../core/agent-runner.ts';
 type Registration = (request: CiWaitRequest, signal: AbortSignal) => Promise<CiWait>;
 type Capability = { register: Registration; lifetime: AbortController };
 export type CiToolSession = { descriptor: NonNullable<AgentRunSpec['cezarTools']>; env: Record<string, string>; revoke(): void };
-const unavailable = { code: 'unavailable' as const, message: 'CI tool unavailable: session authority expired or registration failed.' };
+const unavailable = { code: 'unavailable' as const, message: ciErrorMessage('unavailable') };
 
 /** Separate from the cockpit and delegation APIs. No TCP listener or durable credentials. */
 export class CiToolController {
@@ -88,7 +89,7 @@ export function ciToolRoutes(capabilities: Map<string, Capability>) {
       const authorization = c.req.header('authorization');
       const token = authorization?.startsWith('Bearer ') ? authorization.slice(7) : undefined;
       const capability = token ? capabilities.get(token) : undefined;
-      if (!capability || capability.lifetime.signal.aborted) return c.json({ ...unavailable, code: 'unauthorized' as const }, 401);
+      if (!capability || capability.lifetime.signal.aborted) return c.json({ code: 'unauthorized' as const, message: ciErrorMessage('unauthorized') }, 401);
       c.set('capability', capability);
       await next();
       // The shared middleware uses the public API error envelope. Normalize this
@@ -113,6 +114,7 @@ export function ciToolRoutes(capabilities: Map<string, Capability>) {
         const receipt = ciWaitReceiptSchema.parse({ waitId: wait.id, prUrl: wait.prUrl, repository: wait.repository, prNumber: wait.prNumber, headSha: wait.headSha, registeredAt: wait.registeredAt, deadline: wait.deadline, phase: wait.phase });
         return c.json(receipt);
       } catch (error) {
+        if (capability.lifetime.signal.aborted) return c.json({ code: 'capability_revoked' as const, message: ciErrorMessage('capability_revoked') }, 401);
         const code = ciWaitErrorCodeSchema.safeParse(error && typeof error === 'object' && 'code' in error ? error.code : undefined);
         if (code.success) return c.json({ code: code.data, message: ciErrorMessage(code.data) }, 503);
         return c.json(unavailable, 503);
@@ -120,18 +122,3 @@ export function ciToolRoutes(capabilities: Map<string, Capability>) {
     });
 }
 export type CiToolApp = ReturnType<typeof ciToolRoutes>;
-
-function ciErrorMessage(code: string): string {
-  const messages: Record<string, string> = {
-    wait_conflict: 'A different CI wait is already active for this run.',
-    unsupported_host: 'GitHub Enterprise host is not recognized; use a host configured with the existing GitHub authentication.',
-    gh_missing: 'Install GitHub CLI (gh) to wait for CI.',
-    authentication: 'Authenticate GitHub CLI with gh auth login and retry.',
-    inaccessible_pr: 'The pull request is inaccessible; check its URL and GitHub permissions.',
-    capacity: 'CI wait registration capacity is exhausted; retry later.',
-    persistence: 'CI wait could not be saved; check local storage and retry.',
-    query_timeout: 'GitHub metadata lookup timed out; check connectivity and retry.',
-    invalid_request: 'Invalid CI wait arguments.',
-  };
-  return messages[code] ?? unavailable.message;
-}
