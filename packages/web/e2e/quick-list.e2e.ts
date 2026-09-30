@@ -267,20 +267,25 @@ describe('task quick-list', () => {
   })
 
   it('renders the diff pair through the success/danger tokens, not as plain text', () => {
-    const pair = browser.evaluate(`(() => {
+    // Wait, then read as one step. The `beforeAll` only waits for the MAIN table's rows; the
+    // sidebar quick list is a separate render, so on a slow runner this read could land before
+    // the `fix-review-pr` row's diff pair existed (PR #712 CI shard 4: `pair` was null, so
+    // `adds` read `undefined`; the failure bundle's snapshot, taken moments later, shows the
+    // row painted with `+128 −14`). The content and colour assertions below are unchanged.
+    const pair = browser.waitForValue<{ adds: string; dels: string; addsColor: string; delsColor: string }>(`(() => {
       const el = document.querySelector('[data-slot="task-row"][data-run-id="fix-review-pr"] [data-slot="diff-stat"]')
-      if (!el) return null
-      const [adds, dels] = el.querySelectorAll('span')
+      const [adds, dels] = el?.querySelectorAll('span') ?? []
+      if (!adds || !dels) return null
       return {
         adds: adds.textContent, dels: dels.textContent,
         // Resolved by the real CSS: green ≠ red proves the two tokens actually applied.
         addsColor: getComputedStyle(adds).color, delsColor: getComputedStyle(dels).color,
       }
-    })()`) as { adds: string; dels: string; addsColor: string; delsColor: string } | null
+    })()`)
 
-    expect(pair?.adds).toBe('+128')
-    expect(pair?.dels).toBe('−14')
-    expect(pair?.addsColor).not.toBe(pair?.delsColor)
+    expect(pair.adds).toBe('+128')
+    expect(pair.dels).toBe('−14')
+    expect(pair.addsColor).not.toBe(pair.delsColor)
   })
 
   it('paints one dot per row, in the tone deriveAttention picked', () => {
