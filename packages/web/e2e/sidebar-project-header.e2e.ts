@@ -31,7 +31,7 @@ beforeAll(async () => {
     }))
     const url = `http://127.0.0.1:${port}`
     const server = spawn(process.execPath, [cezarCli, 'serve', '--repo', root, '--port', String(port), '--no-open'], {
-      env: fixtureServeEnv(root, { CEZ_REMOTE: remote ? '1' : '0', CEZ_FOLLOWUPS: '1', CEZ_AUTOMATIONS: '0' }), stdio: 'ignore',
+      env: fixtureServeEnv(root, { CEZ_REMOTE: remote ? '1' : '0', CEZ_FOLLOWUPS: '1', CEZ_AUTOMATIONS: '1' }), stdio: 'ignore',
     })
     fixtures.push({ root, server, url, project: '', remote })
     await waitForHealth(url)
@@ -105,7 +105,7 @@ describe('project header actions', () => {
     expect(tabs.every(size => size.width >= 44 && size.height >= 44)).toBe(true)
     browser.click('[data-slot="mobile-tab-bar"] [data-tab="more"]')
     const rows = browser.waitForValue(`Array.from(document.querySelectorAll('[data-slot="more-sheet"] [data-slot="more-row"]')).map(el => el.getAttribute('data-more-row'))`, value => Array.isArray(value) && value.length > 0) as string[]
-    expect(rows).toEqual(['/skills', '/workflows', '/settings', '/inbox'])
+    expect(rows).toEqual(['/skills', '/workflows', '/settings', '/inbox', '/automations'])
     browser.press('Escape')
     browser.waitForFunction(`document.querySelector('[data-slot="more-sheet"]') === null`)
     // The drawer keeps the project menu, on the current project's row.

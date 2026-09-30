@@ -43,7 +43,7 @@ function fakeChild() {
   };
 }
 
-type Phase = 'initialize' | 'thread/start' | 'thread/resume' | 'turn/start' | 'first turn';
+type Phase = 'initialize' | 'configRequirements/read' | 'thread/start' | 'thread/resume' | 'turn/start' | 'first turn';
 let fake: ReturnType<typeof fakeChild>;
 let session: AgentSession;
 let events: AgentEvent[];
@@ -59,7 +59,10 @@ function start(resume = false, timeoutMs = 0) {
   }, (event) => events.push(event), { onUiEvent: (event) => ui.push(event), onAgentInputReady: () => { readyHints += 1; } });
   void session.result.then(() => { outcome = 'resolved'; }, (error: unknown) => { failure = error; outcome = 'rejected'; });
 }
-async function initialize() { fake.respond('initialize', {}); await flush(); }
+async function initialize() {
+  fake.respond('initialize', {}); await flush();
+  fake.respond('configRequirements/read', { requirements: null }); await flush();
+}
 async function thread(resume = false) {
   fake.respond(resume ? 'thread/resume' : 'thread/start', { thread: { id: 'thread_1' } }); await flush();
 }
@@ -73,6 +76,7 @@ async function opening() {
 async function stall(phase: Phase) {
   start(phase === 'thread/resume');
   if (phase === 'initialize') return;
+  if (phase === 'configRequirements/read') { fake.respond('initialize', {}); await flush(); return; }
   await initialize();
   if (phase.startsWith('thread/')) return;
   await thread();
@@ -90,7 +94,7 @@ afterEach(async () => {
 
 describe('Codex startup and Stop (#493)', () => {
   // Removing early RPC shutdown would leave result pending after actual child exit.
-  it.each<Phase>(['initialize', 'thread/start', 'thread/resume', 'turn/start', 'first turn'])(
+  it.each<Phase>(['initialize', 'configRequirements/read', 'thread/start', 'thread/resume', 'turn/start', 'first turn'])(
     'Stop settles normally while waiting for %s, without a provider error', async (phase) => {
       await stall(phase);
       session.interrupt(); await flush();
@@ -168,7 +172,7 @@ describe('Codex startup and Stop (#493)', () => {
     expect(outcome).toBe('rejected'); expect(String(failure)).toMatch(/60s.*turn\/start/);
   });
 
-  it.each<Phase>(['initialize', 'thread/start', 'thread/resume', 'turn/start', 'first turn'])(
+  it.each<Phase>(['initialize', 'configRequirements/read', 'thread/start', 'thread/resume', 'turn/start', 'first turn'])(
     'bounds startup while waiting for %s', async (phase) => {
       await stall(phase); await vi.advanceTimersByTimeAsync(60_000);
       expect(fake.signals).toEqual(['SIGTERM']); fake.exit(); await flush();

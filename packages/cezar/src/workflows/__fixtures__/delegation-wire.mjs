@@ -44,6 +44,7 @@ export function runWire(control) {
   rl.on('line', line => {
     const message = JSON.parse(line);
     if (codex) {
+      if (message.method === 'configRequirements/read') emit({ id: message.id, result: { requirements: null } });
       if (message.method === 'initialize') emit({ id: message.id, result: { userAgent: 'delegation-integration' } });
       else if (message.method === 'thread/start' || message.method === 'thread/resume') emit({ id: message.id, result: { thread: { id: threadId } } });
       else if (message.method === 'turn/start') {
