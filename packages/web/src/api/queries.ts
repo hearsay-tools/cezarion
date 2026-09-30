@@ -185,6 +185,11 @@ export const queryKeys = {
     return [queryScope(), 'repo', 'changes'] as const
   },
   repoCommit: (sha: string) => [queryScope(), 'repo', 'commit', sha] as const,
+  /** The classified branch list (`GET /repo/branches`, issue 08). A child of `repo`, so a branch
+   *  switch or pull refreshes it too; run events invalidate it on their own (global-events). */
+  get repoBranches() {
+    return [queryScope(), 'repo', 'branches'] as const
+  },
   get uiState() {
     return [queryScope(), 'ui-state'] as const
   },

@@ -1527,6 +1527,17 @@ describe('useGlobalEvents — reconcile doctrine', () => {
       .filter((key) => key !== undefined)
   }
 
+  it('invalidates the Git view branch classes on run and run-deleted events (issue 08)', () => {
+    const { source } = mount()
+    source.open()
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+    source.emit('run', stampedRun({ ...runRecord('r1'), status: 'done' }))
+    expect(invalidatedKeys(invalidate)).toContainEqual(queryKeys.repoBranches)
+    invalidate.mockClear()
+    source.emit('run-deleted', JSON.stringify({ id: 'r1', project: BOOT }))
+    expect(invalidatedKeys(invalidate)).toContainEqual(queryKeys.repoBranches)
+  })
+
   it('reconciles background discovery on first open', async () => {
     const invalidate = vi.spyOn(client, 'invalidateQueries')
     const { source } = mount()
@@ -1553,6 +1564,7 @@ describe('useGlobalEvents — reconcile doctrine', () => {
       workspaceQueryKeys.runsIndex,
       queryKeys.todos,
       queryKeys.worktrees, // the Resources panel's list/total (#483)
+      queryKeys.repoBranches, // the Git view's branch classes (issue 08)
       workspaceQueryKeys.providerStatus,
       workspaceQueryKeys.models('cursor'),
       queryKeys.health,
@@ -1607,6 +1619,7 @@ describe('useGlobalEvents — reconcile doctrine', () => {
       workspaceQueryKeys.runsIndex,
       queryKeys.todos,
       queryKeys.worktrees,
+      queryKeys.repoBranches,
       workspaceQueryKeys.providerStatus,
       workspaceQueryKeys.models('cursor'),
       queryKeys.health,
