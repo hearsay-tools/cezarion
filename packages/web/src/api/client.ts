@@ -693,9 +693,11 @@ export async function getRepoPullBranches(opts?: ReadOptions): Promise<RepoPullB
  */
 export async function pullRepo(
   input: RepoPullInput,
+  /** For callers outside the routed view's scope (the shell's Git sidebar); else `queryScope()`. */
+  projectId?: string,
 ): Promise<RepoPullResponse | RepoPullConfirmation> {
   const response = await cez.api.v1.p[':projectId'].repo.pull.$post({
-    param: { projectId: queryScope() },
+    param: { projectId: projectId ?? queryScope() },
     json: input,
   })
   // The route type knows only its own 200/409 answers. The transport can still receive any HTTP
@@ -1705,10 +1707,14 @@ export async function removeQueuedMessage(
 /** Repo-view branch action (R5): switch to an existing branch, or create one (from `from` or
  *  HEAD) and switch. Invalid names, unknown start points and dirty-tree checkout conflicts
  *  all come back as 409 whose ApiError carries git's own reason. */
-export async function createRepoBranch(input: { name: string; from?: string }): Promise<RepoBranchResponse> {
+export async function createRepoBranch(
+  input: { name: string; from?: string },
+  /** For callers outside the routed view's scope (the shell's Git sidebar); else `queryScope()`. */
+  projectId?: string,
+): Promise<RepoBranchResponse> {
   return unwrap(
     await cez.api.v1.p[':projectId'].repo.branch.$post({
-      param: { projectId: queryScope() },
+      param: { projectId: projectId ?? queryScope() },
       json: input,
     }),
     '/repo/branch',
@@ -2078,10 +2084,14 @@ export async function putWorkspaceConfig(
 /** Set/clear the agents' config knobs — base branch, default runner, system prompt, per-runner
  *  model presets (Settings → Agents, R6 1.5). Merged into the raw config.json server-side so
  *  unrelated user keys survive; `null` clears a knob back to its default. */
-export async function putConfig(patch: SetConfigInput): Promise<SetConfigResponse> {
+export async function putConfig(
+  patch: SetConfigInput,
+  /** For callers outside the routed view's scope (the shell's Git sidebar); else `queryScope()`. */
+  projectId?: string,
+): Promise<SetConfigResponse> {
   return unwrap(
     await cez.api.v1.p[':projectId'].config.$put({
-      param: { projectId: queryScope() },
+      param: { projectId: projectId ?? queryScope() },
       json: patch,
     }),
     '/config',
