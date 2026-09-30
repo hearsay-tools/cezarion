@@ -37,7 +37,8 @@ describe('Settings view sidebar (#622)', () => {
         const nav = document.querySelector('${sidebar}'); const header = document.querySelector('[data-slot="settings-main-header"]');
         if (!nav || !header) return null;
         const h1 = header.querySelector('h1'); const hs = getComputedStyle(header); const ns = getComputedStyle(nav);
-        return { pad: ns.padding, gap: ns.rowGap, heading: nav.querySelector('h2') !== null,
+        // The shell's list container owns the 12px inset; the body only spaces its groups.
+        return { pad: getComputedStyle(nav.closest('[data-slot="project-task-navigation"]')).padding, gap: ns.rowGap, heading: nav.querySelector('h2') !== null,
           rows: [...nav.querySelectorAll('nav')].map(n => [...n.querySelectorAll('a')].map(a => a.textContent)),
           headerPad: hs.padding, rule: hs.borderBottomWidth, title: h1.innerText.startsWith('Agents · '),
           titleSize: getComputedStyle(h1).fontSize, titleWeight: getComputedStyle(h1).fontWeight };

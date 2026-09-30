@@ -328,7 +328,9 @@ describe('GitHub desktop sidebar (#622)', () => {
           countSize: getComputedStyle(count).fontSize,
           icon: [icon.getBoundingClientRect().width, icon.getBoundingClientRect().height],
           activeDiffers: getComputedStyle(active).backgroundColor !== style.backgroundColor && alpha(getComputedStyle(active).backgroundColor) > 0,
-          bodyPadding: [getComputedStyle(sidebar).paddingLeft, getComputedStyle(sidebar).paddingRight],
+          // The shell's list container owns every view's 12px inset (the body adds none).
+          bodyPadding: [getComputedStyle(sidebar.closest('[data-slot="project-task-navigation"]')).paddingLeft,
+            getComputedStyle(sidebar.closest('[data-slot="project-task-navigation"]')).paddingRight],
           overflow: document.documentElement.scrollWidth > innerWidth,
         };
       })()`)

@@ -1,7 +1,7 @@
 import { NavLink } from 'react-router'
 import type { Capabilities } from '@open-mercato/cezar-api-client'
 import {
-  SIDEBAR_LIST_GROUP_LABEL_CLASS, SIDEBAR_LIST_ICON_CLASS, SIDEBAR_LIST_ROW_CLASS, SIDEBAR_LIST_ROW_HOVER_CLASS, SIDEBAR_SELECTED_CLASS,
+  SIDEBAR_LIST_BODY_CLASS, SIDEBAR_LIST_GROUP_LABEL_CLASS, SIDEBAR_LIST_ICON_CLASS, SIDEBAR_LIST_ROW_CLASS, SIDEBAR_LIST_ROW_HOVER_CLASS, SIDEBAR_SELECTED_CLASS,
 } from '@/components/nav-row-styles'
 import { cn } from '@/lib/utils'
 import { visibleSettingsSections, type SettingsScope } from './registry'
@@ -20,7 +20,7 @@ export function SettingsSidebar({ projectId, projectName, capabilities }: {
   capabilities?: Pick<Capabilities, 'singleProject'>
 }) {
   return (
-    <div data-slot="settings-sidebar" className="flex flex-col gap-[12px] p-[12px]">
+    <div data-slot="settings-sidebar" className={SIDEBAR_LIST_BODY_CLASS}>
       {(['project', 'global'] as const).map((scope: SettingsScope) => {
         const label = scope === 'project' ? `This project${projectName ? ` · ${projectName}` : ''}` : 'Global · every project'
         const root = scope === 'project' ? `/p/${encodeURIComponent(projectId)}/settings` : '/settings/global'

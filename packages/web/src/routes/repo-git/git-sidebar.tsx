@@ -56,8 +56,8 @@ export function GitSidebar({ scope }: { scope: string }) {
   }
   const commits = repo.data?.info ? repo.data.log.slice(0, RECENT_COMMITS) : []
   return (
-    <div data-slot="git-sidebar" role="region" aria-label="Git" className={cn(SIDEBAR_LIST_BODY_CLASS, 'flex flex-col gap-[12px] px-3')}>
-      <nav aria-label="Repository" data-slot="git-repo-nav" className={cn(SIDEBAR_LIST_UNLABELLED_GROUP_CLASS, 'mb-0')}>
+    <div data-slot="git-sidebar" role="region" aria-label="Git" className={SIDEBAR_LIST_BODY_CLASS}>
+      <nav aria-label="Repository" data-slot="git-repo-nav" className={SIDEBAR_LIST_UNLABELLED_GROUP_CLASS}>
         {REPO_ROWS.map(({ id, label, to, icon: Icon }) => {
           const count = counts[id]
           const current = active === id
@@ -81,7 +81,7 @@ export function GitSidebar({ scope }: { scope: string }) {
       </nav>
       <GitWorktreeList model={model} variant="sidebar" onNavigate={onNavigate} />
       {commits.length > 0 ? (
-        <nav aria-label="Recent commits" data-slot="git-commit-list" className={cn(SIDEBAR_LIST_GROUP_CLASS, 'mb-0')}>
+        <nav aria-label="Recent commits" data-slot="git-commit-list" className={SIDEBAR_LIST_GROUP_CLASS}>
           <h3 className={SIDEBAR_LIST_GROUP_LABEL_CLASS}>Recent commits</h3>
           {commits.map((commit) => (
             <Link

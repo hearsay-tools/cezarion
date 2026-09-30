@@ -3,7 +3,6 @@ import { useLocation, useSearchParams } from 'react-router'
 import { useSidebarNavigate } from '@/components/app-shell'
 import { SIDEBAR_LIST_BODY_CLASS } from '@/components/nav-row-styles'
 import { stripProjectPrefix } from '@/lib/project-router'
-import { cn } from '@/lib/utils'
 
 import { GithubFilterList } from './github-filter-list'
 import { parseGithubFilter, rowIdOf, type GithubListView } from './github-sidebar-model'
@@ -28,7 +27,7 @@ export function GithubSidebar({ scope }: { scope: string }) {
   const active = rowIdOf(view, parseGithubFilter(view, params.get('filter')))
   return (
     <div data-slot="github-sidebar" role="region" aria-label="GitHub" // The board's body is 12px all round (the shared class says 8px horizontally).
-    className={cn(SIDEBAR_LIST_BODY_CLASS, 'px-3')}>
+    className={SIDEBAR_LIST_BODY_CLASS}>
       <GithubFilterList model={model} variant="sidebar" activeId={active} onNavigate={onNavigate} />
     </div>
   )
