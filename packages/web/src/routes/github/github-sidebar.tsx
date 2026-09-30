@@ -25,8 +25,7 @@ export function GithubSidebar({ scope }: { scope: string }) {
   const view = githubViewOf(pathname)
   const active = rowIdOf(view, parseGithubFilter(view, params.get('filter')))
   return (
-    <div data-slot="github-sidebar" className="px-2 pt-4">
-      <h2 className="px-2.5 pb-4 text-[13px] font-semibold">GitHub</h2>
+    <div data-slot="github-sidebar" role="region" aria-label="GitHub" className="px-2 pt-4">
       <GithubFilterList model={model} variant="sidebar" activeId={active} onNavigate={onNavigate} />
     </div>
   )

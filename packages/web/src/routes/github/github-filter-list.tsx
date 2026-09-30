@@ -1,8 +1,8 @@
+import { CircleDashed, Eye } from 'lucide-react'
 import type { ComponentType, SVGProps } from 'react'
 
 import {
-  ChevronRightIcon, CircleDotIcon, CircleIcon, CircleSlashIcon, CircleXIcon, FileSearchIcon,
-  GitPullRequestIcon, ListTodoIcon, UserRoundIcon,
+  BotIcon, ChevronRightIcon, CircleDotIcon, CircleXIcon, GitPullRequestIcon, UserRoundIcon,
 } from '@/components/design-icons'
 import { SIDEBAR_SELECTED_CLASS } from '@/components/nav-row-styles'
 import { Link } from '@/lib/project-router'
@@ -18,13 +18,13 @@ type Model = ReturnType<typeof useGithubFilterModel>
 
 const ICONS: Record<GithubRowId, ComponentType<SVGProps<SVGSVGElement>>> = {
   assigned: UserRoundIcon,
-  'no-task': CircleSlashIcon,
-  'has-task': ListTodoIcon,
+  'no-task': CircleDashed,
+  'has-task': BotIcon,
   all: CircleDotIcon,
-  review: FileSearchIcon,
-  mine: UserRoundIcon,
+  review: Eye,
+  mine: GitPullRequestIcon,
   failing: CircleXIcon,
-  'all-prs': GitPullRequestIcon,
+  'all-prs': CircleDotIcon,
 }
 
 /** Why a row cannot be opened at all. Loading and failed SEARCHES are not reasons: the list says
@@ -63,7 +63,8 @@ export function GithubFilterList({ model, variant, activeId, onNavigate }: {
             const count = model.counts[id]
             const text = formatCount(count)
             const className = cn(
-              'group flex items-center rounded-[6px] text-muted-foreground focus-visible:outline-2 focus-visible:outline-ring',
+              'group flex items-center rounded-[6px] focus-visible:outline-2 focus-visible:outline-ring',
+              screen ? 'text-foreground' : 'text-muted-foreground',
               screen ? 'h-12 gap-[10px] px-[10px] text-[15px]' : 'h-[32px] gap-[10px] px-[10px] text-[13px]',
               reason ? 'cursor-not-allowed opacity-60' : 'hover:bg-sidebar-row-hover hover:text-foreground',
               active && SIDEBAR_SELECTED_CLASS,

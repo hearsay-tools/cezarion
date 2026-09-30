@@ -288,6 +288,35 @@ describe('a qualifier-selected PR stays open after it leaves the results', () =>
   })
 })
 
+describe('filter list visuals (#622)', () => {
+  const iconOf = (id: string) => document.querySelector(`[data-gh-filter="${id}"] svg`)?.outerHTML
+  const rowClasses = (id: string) => (document.querySelector(`[data-gh-filter="${id}"]`)?.className ?? '').split(/\s+/)
+
+  it('desktop: no GitHub heading, a named region, muted rows, and distinct icons for Mine and PR All open', async () => {
+    setDesktop(true)
+    stub()
+    renderAt('/github?filter=all', <GithubSidebar scope="default" />)
+    await waitFor(() => expect(document.querySelector('[data-slot="github-sidebar"]')).not.toBeNull())
+    const sidebar = document.querySelector('[data-slot="github-sidebar"]')!
+    expect(sidebar.querySelector('h2')).toBeNull()
+    expect(screen.getByRole('region', { name: 'GitHub' })).toBe(sidebar)
+    expect(rowClasses('assigned')).toContain('text-muted-foreground')
+    expect(rowClasses('assigned')).not.toContain('text-foreground')
+    expect(new Set(['no-task', 'has-task', 'review', 'mine', 'all'].map(iconOf)).size).toBe(5)
+    expect(iconOf('all-prs')).toBe(iconOf('all'))
+    expect(iconOf('all-prs')).not.toBe(iconOf('mine'))
+  })
+
+  it('phone: row labels use the foreground colour', async () => {
+    setDesktop(false)
+    stub()
+    renderAt('/github')
+    await waitFor(() => expect(document.querySelector('[data-slot="github-filter-screen"]')).not.toBeNull())
+    expect(rowClasses('assigned')).toContain('text-foreground')
+    expect(rowClasses('assigned')).not.toContain('text-muted-foreground')
+  })
+})
+
 describe('the phone filter screen and entry rules', () => {
   it('bare /github on a phone is the filter screen; a row pushes the list with a way back', async () => {
     setDesktop(false)
