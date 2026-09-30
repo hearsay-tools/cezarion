@@ -6,6 +6,9 @@ import { cn } from '@/lib/utils'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip'
 
+/** Primary tabs that fit beside the More button with the widest active label unclipped. */
+const MAX_PRIMARY_WITH_MORE = 5
+
 export function SidebarViewTabs({ items, activeTo, needsYou = false, inboxCount, skillsUpdateAvailable, onNavigate }: {
   items: NavItem[]
   activeTo: string | null
@@ -16,7 +19,11 @@ export function SidebarViewTabs({ items, activeTo, needsYou = false, inboxCount,
 }) {
   const [open, setOpen] = useState(false)
   const nav = useRef<HTMLElement>(null)
-  const overflow = items.filter(item => item.to === '/inbox' || item.to === '/automations')
+  const optional = items.filter(item => item.to === '/inbox' || item.to === '/automations')
+  // Six primary tabs PLUS More cannot fit a 264px column without truncating the active label
+  // (a fixed "Workflows" needs 265px of 239px): when More exists, Workflows rides in it too.
+  const crowded = optional.length > 0 && items.length - optional.length > MAX_PRIMARY_WITH_MORE
+  const overflow = crowded ? items.filter(item => item.to === '/workflows' || optional.includes(item)) : optional
   const primary = items.filter(item => !overflow.includes(item))
   const overflowActive = overflow.some(item => item.to === activeTo)
   const moveFocus = (event: KeyboardEvent) => {
@@ -30,17 +37,16 @@ export function SidebarViewTabs({ items, activeTo, needsYou = false, inboxCount,
   }
   // Sized as the #622 final board's view tabs: 30px tall, 7px radius, 15px icons; the inactive
   // tab is a 28px square-ish icon and the active one wears its label (12px/600, 9px padding,
-  // 6px gap). The icons and the overflow button never shrink; the ACTIVE tab does, truncating
-  // its label. With GitHub on and Inbox or Automations enabled there are six primary tabs plus
-  // More: five 28px icons, More and an active "Workflows" (~97px) need 265px of the 239px a
-  // 264px column leaves, so a fixed-width active tab spilled over the main area.
+  // 6px gap). The board draws six tabs; the overflow button takes a 28px slot, so at most five
+  // primary tabs sit beside it: Workflows plus four icons and the button is 237px, inside the
+  // 239px the default column leaves.
   return <TooltipProvider><nav ref={nav} aria-label="Main" data-slot="view-tabs" onKeyDown={moveFocus} className="flex shrink-0 items-center justify-between max-md:justify-start max-md:gap-1 max-md:overflow-x-auto border-b border-border px-3 pt-2.5 pb-2">
     {primary.map(item => {
       const active = item.to === activeTo
       const Icon = item.icon
       const dot = item.to === '/' && needsYou && !active ? 'bg-pending-strong' : item.to === '/skills' && skillsUpdateAvailable ? 'bg-info' : null
       return <Tooltip key={item.to}><TooltipTrigger asChild><Link to={item.to} onClick={onNavigate} data-view-tab aria-label={item.label} aria-current={active ? 'page' : undefined}
-        className={cn('relative flex h-[30px] min-w-0 items-center justify-center rounded-[7px] text-soft-foreground hover:bg-sidebar-row-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring max-md:min-h-11 max-md:min-w-11', active ? 'shrink gap-1.5 bg-sidebar-row-selected px-[9px] text-[12px] font-semibold text-foreground' : 'w-7 shrink-0')}>
+        className={cn('relative flex h-[30px] min-w-0 items-center justify-center rounded-[7px] text-soft-foreground hover:bg-sidebar-row-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring max-md:min-h-11 max-md:min-w-11', active ? 'shrink-0 gap-1.5 bg-sidebar-row-selected px-[9px] text-[12px] font-semibold text-foreground' : 'w-7 shrink-0')}>
         <span className="relative"><Icon className="size-[15px] shrink-0" aria-hidden="true" />{dot ? <span aria-label={item.to === '/' ? 'Tasks need you' : 'Skills update available'} data-slot={item.to === '/' ? 'nav-needs-you-dot' : 'nav-update-marker'} className={cn('absolute -top-1 -right-1 size-[7px] rounded-full border-[1.5px] border-sidebar', dot)} /> : null}</span>
         {active ? <span className="truncate">{item.label}</span> : null}
       </Link></TooltipTrigger><TooltipContent side="bottom" sideOffset={6} style={{ pointerEvents: 'none' }}>{item.label}</TooltipContent></Tooltip>

@@ -164,7 +164,7 @@ beforeAll(async () => {
   }))
   base = `http://127.0.0.1:${port}`
   server = spawn(process.execPath, [cezarCli, 'serve', '--repo', root, '--port', String(port), '--no-open'], {
-    // CEZ_FOLLOWUPS=1 adds Inbox, so the view tabs carry their widest set: six primary tabs + More.
+    // CEZ_FOLLOWUPS=1 adds Inbox, so the view tabs carry their most crowded set: a More menu beside six views.
     env: { ...fixtureServeEnv(root), CEZ_FOLLOWUPS: '1' }, stdio: 'ignore',
   })
   await waitForHealth(base)
@@ -381,10 +381,10 @@ describe('GitHub desktop sidebar (#622)', () => {
     }
   }, 90_000)
 
-  it('keeps six view tabs, More and a long active label inside the narrowest sidebar', () => {
+  it('keeps every view tab and More inside the narrowest sidebar, the widest active label unclipped', () => {
     browser.setViewport(DESKTOP.width, DESKTOP.height)
-    browser.goto(`${base}/workflows`)
-    browser.waitForFunction(`document.querySelector('[data-slot="view-tabs"] a[aria-current="page"][aria-label="Workflows"]') !== null && document.querySelector('[data-slot="view-tabs"] button[aria-label="More views"]') !== null`)
+    browser.goto(`${base}/settings`)
+    browser.waitForFunction(`document.querySelector('[data-slot="view-tabs"] a[aria-current="page"][aria-label="Settings"]') !== null && document.querySelector('[data-slot="view-tabs"] button[aria-label="More views"]') !== null`)
     const fit = browser.evaluate(`(() => {
       const nav = document.querySelector('[data-slot="view-tabs"]');
       const inner = nav.getBoundingClientRect().right - parseFloat(getComputedStyle(nav).paddingRight);
@@ -395,7 +395,10 @@ describe('GitHub desktop sidebar (#622)', () => {
         overflow: tabs.map((tab) => Math.round(tab.getBoundingClientRect().right - inner)).filter((over) => over > 0),
       };
     })()`) as { tabs: number; sidebar: number; overflow: number[] }
-    expect(fit.tabs).toBe(7)
+    // Tasks, Git, GitHub, Skills, Settings and More: Workflows joins Inbox in the menu.
+    expect(fit.tabs).toBe(6)
+    const label = browser.evaluate(`(() => { const span = document.querySelector('[data-slot="view-tabs"] a[aria-current="page"] span.truncate'); return span.scrollWidth - span.clientWidth })()`)
+    expect(label).toBe(0)
     expect(fit.sidebar).toBeLessThanOrEqual(264) // the default, narrowest column (its 1px border sits outside the nav)
     expect(fit.overflow).toEqual([])
   })

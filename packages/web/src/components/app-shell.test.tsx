@@ -65,6 +65,15 @@ describe('AppShell', () => {
     expect(screen.getByTestId('location').textContent).toBe('/automations')
   })
 
+  it('moves Workflows into More when six views would crowd the overflow button', async () => {
+    renderShell('/workflows', { inboxCount: 2 })
+    expect(allNavLinks().map(a => a.getAttribute('aria-label'))).toEqual(['Tasks', 'Git', 'GitHub', 'Skills', 'Settings'])
+    const more = within(nav()).getByRole('button', { name: 'More views' })
+    expect(more.getAttribute('data-active')).toBe('true')
+    fireEvent.keyDown(more, { key: 'Enter' })
+    expect((await screen.findByRole('menuitem', { name: 'Workflows' })).getAttribute('aria-current')).toBe('page')
+  })
+
   it('never shrinks the active tab so its label is not truncated beside the overflow button', () => {
     renderShell('/settings', { inboxCount: 2 })
     const active = within(nav()).getByRole('link', { current: 'page' })
@@ -321,7 +330,8 @@ describe('AppShell', () => {
   })
 
   it('renders primary views as named router links', () => {
-    renderShell()
+    // No optional view, so no More button: all six views are tabs.
+    renderShell('/', { inboxAvailable: false, automationsAvailable: false })
     const links = allNavLinks()
     expect(links.map(a => a.getAttribute('aria-label'))).toEqual(['Tasks', 'Git', 'GitHub', 'Skills', 'Workflows', 'Settings'])
     expect(links.map(a => a.getAttribute('href'))).toEqual(['/', '/git', '/github', '/skills', '/workflows', '/settings'])
@@ -342,7 +352,8 @@ describe('AppShell', () => {
     renderShell('/', { automationsAvailable: false })
     const links = allNavLinks()
     expect(links.map((a) => a.getAttribute('href'))).not.toContain('/automations')
-    expect(links).toHaveLength(6)
+    // Inbox still needs More, which takes Workflows along (see the crowding test above).
+    expect(links).toHaveLength(5)
   })
 
   it('shows Automations in overflow once the capability is on', async () => {
