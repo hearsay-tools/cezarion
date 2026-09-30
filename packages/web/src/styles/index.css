@@ -793,6 +793,7 @@
 /* The approved navigation selection uses its surface, while focus remains outlined. */
 [data-slot='sidebar-content'] .selection-row::before { content: none; }
 
-[data-slot='sidebar-footer-controls'] svg { width: 17px; height: 17px; }
+/* The Tools wrench keeps the board's 15px (its own size class); this 17px floor is for the version/update side. */
+[data-slot='sidebar-footer-controls'] [data-slot='version-action'] svg { width: 17px; height: 17px; }
 [data-slot='sidebar-footer-controls'] [data-design-icon='chevron-down'] { width: 10px; height: 10px; }
 

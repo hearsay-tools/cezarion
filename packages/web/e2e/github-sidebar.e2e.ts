@@ -331,12 +331,17 @@ describe('GitHub desktop sidebar (#622)', () => {
           // The shell's list container owns every view's 12px inset (the body adds none).
           bodyPadding: [getComputedStyle(sidebar.closest('[data-slot="project-task-navigation"]')).paddingLeft,
             getComputedStyle(sidebar.closest('[data-slot="project-task-navigation"]')).paddingRight],
+          // Board: 12px body gap plus the second group's own 6px, from the last Issues row to the PR label.
+          groupGap: Math.round(sidebar.querySelector('[data-group="prs"] h3').getBoundingClientRect().top
+            - sidebar.querySelector('[data-gh-filter="all"]').getBoundingClientRect().bottom),
+          // The footer's Tools wrench is the board's 15px, not the 17px the version/update side uses.
+          toolsIcon: document.querySelector('[data-slot="tools-menu-trigger"] svg').getBoundingClientRect().width,
           overflow: document.documentElement.scrollWidth > innerWidth,
         };
       })()`)
       expect(facts).toEqual({
         light: theme === 'light', bodyPadding: ['12px', '12px'], height: 32, paddingX: ['10px', '10px'], radius: '6px', gap: '10px',
-        labelSize: '12.5px', countSize: '11.5px', icon: [15, 15], activeDiffers: true, overflow: false,
+        labelSize: '12.5px', countSize: '11.5px', icon: [15, 15], activeDiffers: true, groupGap: 18, toolsIcon: 15, overflow: false,
       })
       browser.screenshot(`${artifactsDir}/github-sidebar-desktop-${theme}.png`, { viewport: true })
     }

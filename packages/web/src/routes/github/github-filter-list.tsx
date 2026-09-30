@@ -59,7 +59,8 @@ export function GithubFilterList({ model, variant, activeId, onNavigate }: {
   return (
     <>
       {groups.map((group) => (
-        <nav key={group.key} aria-label={group.label} data-slot="github-filter-group" data-group={group.key} className={screen ? SCREEN_LIST_GROUP_CLASS : SIDEBAR_LIST_GROUP_CLASS}>
+        // Board: the second sidebar group adds 6px of its own to the body's 12px gap (as Settings does).
+        <nav key={group.key} aria-label={group.label} data-slot="github-filter-group" data-group={group.key} className={screen ? SCREEN_LIST_GROUP_CLASS : cn(SIDEBAR_LIST_GROUP_CLASS, group.key === 'prs' && 'pt-[6px]')}>
           <h3 className={screen ? SCREEN_LIST_GROUP_LABEL_CLASS : SIDEBAR_LIST_GROUP_LABEL_CLASS}>{group.label}</h3>
           {group.rows.map(({ id, label }) => {
             const Icon = ICONS[id]
