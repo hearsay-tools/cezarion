@@ -37,3 +37,13 @@ export function worktreeRows(worktrees: readonly WorktreeInfo[], runs: readonly 
     }
   })
 }
+
+const GIT_AGE_UNITS: Record<string, string> = {
+  second: 's', minute: 'm', hour: 'h', day: 'd', week: 'w', month: 'mo', year: 'y',
+}
+
+/** git's relative `%cr` ("3 hours ago") as the board's compact age ("3h"); anything git words otherwise stays as it is. */
+export function shortGitAge(when: string): string {
+  const match = /^(\d+) (second|minute|hour|day|week|month|year)s? ago$/.exec(when.trim())
+  return match ? `${match[1]}${GIT_AGE_UNITS[match[2]!]}` : when
+}

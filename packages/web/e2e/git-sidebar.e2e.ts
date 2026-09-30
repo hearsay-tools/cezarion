@@ -337,6 +337,15 @@ describe('Git desktop sidebar (#622)', () => {
     }
   }, 90_000)
 
+  it('lists the newest commits under the worktrees as rows to their commit diff, with no heading', () => {
+    openDesktop()
+    const sha = execFileSync('git', ['-C', root, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).trim()
+    const COMMIT = `${SIDEBAR} [data-slot="git-commit-list"] a[data-slot="git-commit-row"]`
+    expect(browser.waitForValue(`document.querySelector(${JSON.stringify(COMMIT)})?.getAttribute('href') ?? null`, (value) => value === scoped(`/git/commits/${sha}`))).toBe(scoped(`/git/commits/${sha}`))
+    expect(String(browser.evaluate(`document.querySelector(${JSON.stringify(COMMIT)}).textContent`))).toMatch(new RegExp(`^fixture${sha} · \\d+[smhdw]$`))
+    expect(browser.count(`${SIDEBAR} h2`)).toBe(0)
+  }, 90_000)
+
   it('/git?view=repo is harmless on desktop: still the repository Changes with the sidebar', () => {
     openDesktop('/git?view=repo')
     browser.waitForFunction(has('[data-slot="repo-header"]'))

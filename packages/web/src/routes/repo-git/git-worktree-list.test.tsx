@@ -111,7 +111,8 @@ describe('GitSidebar', () => {
     expect(facets.map((a) => a.textContent)).toEqual(['Changes2', 'Commits', 'Branches3'])
     expect(facets.map((a) => a.getAttribute('href'))).toEqual(['/git?view=repo', '/git/commits', '/git/branches'])
     expect(facets.map((a) => a.getAttribute('aria-current'))).toEqual([null, 'page', null])
-    expect(q('[data-slot="git-sidebar-branch"]')?.textContent).toBe('main')
+    // The board's body has no heading; the branch lives in the main header's title.
+    expect(q('[data-slot="git-sidebar"] h2')).toBeNull()
     // Repository first, Task worktrees below it.
     const nav = q('[data-slot="git-repo-nav"]')!
     expect(nav.compareDocumentPosition(q('[data-slot="git-worktree-list"]')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
@@ -125,6 +126,26 @@ describe('GitSidebar', () => {
     // A clean tree shows no count, not a 0.
     await waitFor(() => expect(q('[data-git-facet="branches"] [data-slot="git-facet-count"]')?.textContent).toBe('1'))
     expect(q('[data-git-facet="changes"] [data-slot="git-facet-count"]')).toBeNull()
+    // An empty log shows no Recent commits group.
+    expect(q('[data-slot="git-commit-list"]')).toBeNull()
+  })
+
+  it('lists Recent commits after the worktrees, as Task-row style links', async () => {
+    stub({ repo: { ...REPO, log: [
+      { hash: 'abc1234', subject: 'fix(ci): wait for the run', author: 'A', when: '3 hours ago' },
+      { hash: 'def5678', subject: 'chore: bump', author: 'A', when: '1 day ago' },
+      { hash: '1111111', subject: 'three', author: 'A', when: '2 weeks ago' },
+      { hash: '2222222', subject: 'four is cut', author: 'A', when: '2 months ago' },
+    ] } as RepoResponse })
+    renderSidebar('default', createQueryClient(), '/git/commits/def5678')
+    await waitFor(() => expect(qa('[data-slot="git-commit-row"]').length).toBe(3))
+    const rows = qa('[data-slot="git-commit-row"]')
+    expect(rows.map((a) => a.getAttribute('href'))).toEqual(['/git/commits/abc1234', '/git/commits/def5678', '/git/commits/1111111'])
+    expect(rows.map((a) => a.getAttribute('aria-current'))).toEqual([null, 'page', null])
+    expect(rows[0]!.querySelector('[data-slot="git-commit-subject"]')?.textContent).toBe('fix(ci): wait for the run')
+    expect(rows.map((a) => a.querySelector('[data-slot="git-commit-meta"]')?.textContent)).toEqual(['abc1234 · 3h', 'def5678 · 1d', '1111111 · 2w'])
+    expect(q('[data-slot="git-worktree-list"]')!.compareDocumentPosition(q('[data-slot="git-commit-list"]')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(q('[data-slot="git-commit-list"] h3')?.textContent).toBe('Recent commits')
   })
 
   it('lists on-disk worktrees only, each as a scoped link with branch, title, dot and diff', async () => {
@@ -149,7 +170,7 @@ describe('GitSidebar', () => {
     // Meta reads `title · +7 −3` in one soft colour; the branch line is the bright one.
     expect(a!.querySelector('[data-slot="git-worktree-meta"]')?.textContent).toBe('Fix login · +7 −3')
     expect(a!.querySelector('[data-slot="diff-stat"]')?.className).toContain('[&>span]:text-inherit')
-    expect(a!.querySelector('[data-slot="git-worktree-branch"]')?.className).toMatch(/\btext-foreground\b/)
+    expect(a!.querySelector('[data-slot="git-worktree-branch"]')?.className).not.toMatch(/\btext-foreground\b/)
     expect(q('[data-slot="git-worktree-list"] h3')?.textContent).toBe('Task worktrees2')
     expect(a!.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe('needs you')
     // No branch on record: say so, and no measured diff: unknown, never +0 −0.

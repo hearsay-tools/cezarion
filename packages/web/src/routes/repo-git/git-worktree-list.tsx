@@ -11,12 +11,15 @@ import { cn } from '@/lib/utils'
 import type { WorktreeRow } from './git-worktree-model'
 import type { useGitWorktreeModel } from './use-git-worktree-model'
 
+/** The board's Sidebar / Task row: 6px 8px 6px 10px, 10px between the dot slot, the text and the trailing slot. */
+export const GIT_TWO_LINE_ROW_CLASS = 'group flex items-center gap-[10px] rounded-[6px] py-[6px] pr-[8px] pl-[10px] text-muted-foreground focus-visible:outline-2 focus-visible:outline-ring'
+
 type Model = ReturnType<typeof useGitWorktreeModel>
 
 /**
  * The Task worktrees group, shared by the desktop sidebar (`variant="sidebar"`, 49px two-line rows) and the
  * phone's worktree screen (`variant="screen"`, 56px rows with chevrons). Each row is a native
- * link to that task's Changes tab: leading status dot, bright mono branch, then a soft `title · +adds −dels` line.
+ * link to that task's Changes tab: leading status dot, mono branch, then a soft `title · +adds −dels` line.
  */
 export function GitWorktreeList({ model, variant, onNavigate }: {
   model: Model
@@ -29,7 +32,7 @@ export function GitWorktreeList({ model, variant, onNavigate }: {
     <nav aria-label="Task worktrees" data-slot="git-worktree-list" className={screen ? SCREEN_LIST_GROUP_CLASS : SIDEBAR_LIST_GROUP_CLASS}>
       <h3 className={screen ? SCREEN_LIST_GROUP_LABEL_CLASS : SIDEBAR_LIST_GROUP_LABEL_CLASS}>
         Task worktrees
-        {count !== null ? <span data-slot="git-worktree-count" className="ml-1.5 tabular-nums">{count}</span> : null}
+        {count !== null ? <span data-slot="git-worktree-count" className="ml-1.5 font-normal tabular-nums">{count}</span> : null}
       </h3>
       {model.loading ? (
         <p data-slot="git-worktree-loading" role="status" className="px-2.5 py-2 text-xs text-soft-foreground">Loading worktrees…</p>
@@ -53,11 +56,7 @@ function WorktreeItem({ row, screen, onNavigate }: { row: WorktreeRow; screen: b
       data-run-id={row.runId}
       title={row.title}
       onClick={onNavigate}
-      className={cn(
-        'group flex items-center gap-[10px] rounded-[6px] px-[10px] py-[6px] text-muted-foreground focus-visible:outline-2 focus-visible:outline-ring',
-        SIDEBAR_LIST_ROW_HOVER_CLASS,
-        screen ? 'h-[56px]' : 'h-[49px]',
-      )}
+      className={cn(GIT_TWO_LINE_ROW_CLASS, SIDEBAR_LIST_ROW_HOVER_CLASS, screen ? 'h-[56px]' : 'h-[49px]')}
     >
       <span className="flex min-w-0 flex-1 items-start gap-[10px]">
         {/* As tall as the branch line (the board's 19px title line), so the dot centres on it, not on the row. */}
@@ -67,7 +66,7 @@ function WorktreeItem({ row, screen, onNavigate }: { row: WorktreeRow; screen: b
         <span className="flex min-w-0 flex-1 flex-col gap-px">
           <span
             data-slot="git-worktree-branch"
-            className={cn('truncate font-mono text-[12px] leading-[19px] text-foreground', row.branch === null && 'font-sans italic text-soft-foreground')}
+            className={cn('truncate font-mono text-[12px] leading-[19px]', row.branch === null && 'font-sans italic text-soft-foreground')}
           >
             {row.branch ?? 'no branch recorded'}
           </span>
@@ -82,7 +81,7 @@ function WorktreeItem({ row, screen, onNavigate }: { row: WorktreeRow; screen: b
           </span>
         </span>
       </span>
-      {screen ? <ChevronRightIcon aria-hidden="true" className={SCREEN_LIST_CHEVRON_CLASS} /> : null}
+      {screen ? <ChevronRightIcon aria-hidden="true" className={SCREEN_LIST_CHEVRON_CLASS} /> : <span aria-hidden="true" className="w-[16px] shrink-0" />}
     </Link>
   )
 }

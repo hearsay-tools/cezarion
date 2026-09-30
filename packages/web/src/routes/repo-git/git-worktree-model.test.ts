@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { RunRecord, WorktreeInfo } from '@open-mercato/cezar-api-client'
 
-import { worktreeRows } from './git-worktree-model'
+import { shortGitAge, worktreeRows } from './git-worktree-model'
 
 const wt = (over: Partial<WorktreeInfo> & { runId: string }): WorktreeInfo => ({
   title: `Title ${over.runId}`, status: 'done', branch: `cez/${over.runId}`, sizeBytes: null, finishedAt: null, reclaimable: false, ...over,
@@ -52,5 +52,13 @@ describe('worktreeRows', () => {
   it('a missing branch stays null for the component to say so', () => {
     const [row] = worktreeRows([wt({ runId: 'a', branch: null })], [])
     expect(row?.branch).toBeNull()
+  })
+})
+
+describe('shortGitAge', () => {
+  it('compacts git %cr and leaves other wording alone', () => {
+    expect(['5 seconds ago', '1 minute ago', '3 hours ago', '2 days ago', '2 weeks ago', '4 months ago', '1 year ago'].map(shortGitAge))
+      .toEqual(['5s', '1m', '3h', '2d', '2w', '4mo', '1y'])
+    expect(shortGitAge('in the future')).toBe('in the future')
   })
 })
