@@ -68,7 +68,8 @@ export function GithubFilterList({ model, variant, activeId, onNavigate }: {
             const count = model.counts[id]
             const text = formatCount(count)
             const className = cn(
-              screen ? SCREEN_LIST_ROW_CLASS : SIDEBAR_LIST_ROW_CLASS,
+              // The final board sets the sidebar label at 12.5px; the shared row class still says 13.
+              screen ? SCREEN_LIST_ROW_CLASS : cn(SIDEBAR_LIST_ROW_CLASS, 'text-[12.5px]'),
               reason ? 'cursor-not-allowed opacity-60' : SIDEBAR_LIST_ROW_HOVER_CLASS,
               active && SIDEBAR_SELECTED_CLASS,
             )

@@ -610,7 +610,7 @@ export function GithubRoute({
   // On a phone the bare `/github` is the filter screen (#622): the sidebar's list as its own
   // screen. Picking a row pushes the list with an explicit `?filter=`, which this skips.
   if (filterScreen && gh.available) {
-    return <GithubFilterScreen repo={gh.repo} />
+    return <GithubFilterScreen onRefresh={() => refresh.mutate()} refreshing={refresh.isPending} />
   }
 
   if (!gh.available) {

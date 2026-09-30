@@ -292,7 +292,7 @@ describe('filter list visuals (#622)', () => {
   const iconOf = (id: string) => document.querySelector(`[data-gh-filter="${id}"] svg`)?.outerHTML
   const rowClasses = (id: string) => (document.querySelector(`[data-gh-filter="${id}"]`)?.className ?? '').split(/\s+/)
 
-  it('desktop: no GitHub heading, a named region, muted rows, and distinct icons for Mine and PR All open', async () => {
+  it('desktop: no GitHub heading, a named region, muted rows at 12.5px, and no pull-request All open row', async () => {
     setDesktop(true)
     stub()
     renderAt('/github?filter=all', <GithubSidebar scope="default" />)
@@ -303,8 +303,22 @@ describe('filter list visuals (#622)', () => {
     expect(rowClasses('assigned')).toContain('text-muted-foreground')
     expect(rowClasses('assigned')).not.toContain('text-foreground')
     expect(new Set(['no-task', 'has-task', 'review', 'mine', 'all'].map(iconOf)).size).toBe(5)
-    expect(iconOf('all-prs')).toBe(iconOf('all'))
-    expect(iconOf('all-prs')).not.toBe(iconOf('mine'))
+    expect(rowClasses('assigned')).toContain('text-[12.5px]')
+    expect(rowClasses('assigned')).not.toContain('text-[13px]')
+    // The board's three pull-request rows; every open PR is the main header's own tab.
+    expect([...document.querySelectorAll('[data-gh-filter]')].map((row) => row.getAttribute('data-gh-filter')))
+      .toEqual(['assigned', 'no-task', 'has-task', 'all', 'review', 'mine', 'failing'])
+    expect(document.querySelector('[data-gh-filter="all-prs"]')).toBeNull()
+  })
+
+  it('phone: the title row carries a refresh icon button and no repository line', async () => {
+    setDesktop(false)
+    stub()
+    renderAt('/github')
+    await waitFor(() => expect(document.querySelector('[data-slot="github-filter-screen"]')).not.toBeNull())
+    const refresh = document.querySelector<HTMLButtonElement>('[data-slot="gh-screen-refresh"]')!
+    expect(refresh.getAttribute('aria-label')).toBe('Refresh from GitHub')
+    expect(document.querySelector('[data-slot="github-filter-screen"] [data-slot="gh-repo"]')).toBeNull()
   })
 
   it('phone: row labels use the foreground colour', async () => {
@@ -403,7 +417,6 @@ describe('GithubSidebar', () => {
     expect(count('no-task')).toBe('3')
     expect(count('all')).toBe('4')
     expect(count('mine')).toBe('1')
-    expect(count('all-prs')).toBe('3')
     // A failed search is unknown, not zero.
     expect(count('failing')).toBeUndefined()
     expect(row('all').getAttribute('aria-current')).toBe('page')

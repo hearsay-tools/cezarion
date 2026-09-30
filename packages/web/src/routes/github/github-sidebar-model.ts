@@ -78,11 +78,13 @@ export const ISSUE_ROWS: readonly { id: GithubRowId; label: string }[] = [
   { id: 'has-task', label: 'Has a task' },
   { id: 'all', label: 'All open' },
 ]
+/** The board lists three pull-request filters and no "All open": every open PR is one click away
+ *  on the main header's Pull requests tab, and `all-prs` stays a row id so a bare PR list still
+ *  resolves to a filter (it simply lights no sidebar row). */
 export const PR_ROWS: readonly { id: GithubRowId; label: string }[] = [
   { id: 'review', label: 'Review requested' },
   { id: 'mine', label: 'Mine' },
   { id: 'failing', label: 'Checks failing' },
-  { id: 'all-prs', label: 'All open' },
 ]
 
 export interface FilterCount {
