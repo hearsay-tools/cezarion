@@ -57,26 +57,15 @@ afterAll(() => {
 })
 
 describe('the repo view against the live dry-run server', () => {
-  it('/git renders the header from live git state and an honest Changes segment', async () => {
+  it('/git/changes renders a title-and-meta header and an honest uncommitted-changes section', async () => {
     const repo = await api<RepoPayload>('/api/v1/repo')
     expect(repo.info).not.toBeNull()
 
-    browser.goto(`${baseUrl}${scoped('/git')}`)
-    browser.waitForFunction(`document.querySelector('[data-slot="repo-header"]') !== null`)
-
-    // The branch chip carries the REAL current branch, not a fixture.
-    browser.waitForFunction(`document.querySelector('[data-slot="branch-chip"]') !== null`)
-    expect(browser.text('[data-slot="branch-chip"]')).toContain(repo.info?.branch ?? '')
-
-    // Three segment tabs, Changes active.
-    expect(browser.count('[data-slot="repo-tabs"] a')).toBe(3)
-    // The Changes segment may carry `?view=repo` (#622) so it does not bounce to the phone's
-    // worktree screen; the path is what identifies the segment.
-    expect(
-      browser.evaluate(
-        `new URL(document.querySelector('[data-slot="repo-tabs"] a[aria-current="page"]').getAttribute('href'), location.href).pathname`,
-      ),
-    ).toBe(scoped('/git'))
+    browser.goto(`${baseUrl}${scoped('/git/changes')}`)
+    browser.waitForFunction(`document.querySelector('[data-slot="repo-header"] [data-slot="repo-meta"]') !== null`)
+    expect(browser.text('[data-slot="repo-header"] h1')).toBe('Uncommitted changes')
+    // Issue 06 §3: the sections live in the sidebar; the main header carries no tabs.
+    expect(browser.count('[data-slot="repo-tabs"]')).toBe(0)
 
     // The working tree may be clean or dirty — assert the view tells the same story the API does.
     const changes = await api<{ files: Array<{ path: string }> }>('/api/v1/repo/changes')
@@ -91,12 +80,15 @@ describe('the repo view against the live dry-run server', () => {
     browser.screenshot(`${artifactsDir}/repo-git-desktop.png`)
   })
 
-  it('/git/commits lists this repository’s real commits', async () => {
+  it.each(['/git', '/git/commits'])('%s is Recently on the checkout: this repository’s real commits, grouped by day', async (path) => {
     const repo = await api<RepoPayload>('/api/v1/repo')
     expect(repo.log.length).toBeGreaterThan(0)
 
-    browser.goto(`${baseUrl}${scoped('/git/commits')}`)
-    browser.waitForFunction(`document.querySelector('[data-slot="repo-commits"]') !== null`)
+    browser.goto(`${baseUrl}${scoped(path)}`)
+    browser.waitForFunction(`document.querySelector('[data-slot="repo-commits"] [data-slot="repo-commit-day"]') !== null`)
+    // The title carries the REAL current branch, not a fixture (a detached CI checkout reads HEAD).
+    expect(browser.text('[data-slot="repo-header"] h1')).toBe(`Recently on ${repo.info?.branch ?? ''}`)
+    expect(browser.count('[data-slot="repo-tabs"]')).toBe(0)
 
     expect(browser.count('[data-slot="commit-row"]')).toBe(repo.log.length)
     const first = repo.log[0]!
@@ -129,10 +121,10 @@ describe('the repo view against the live dry-run server', () => {
     expect(browser.url()).toBe(`${baseUrl}${scoped(`/git/commits/${picked.hash}`)}`)
     expect(browser.text('[data-slot="commit-meta"]')).toContain(picked.subject)
     assertDiffCoverage(browser, picked.files, { tree: false })
-    // The way back is a link.
+    // A commit opens inside Recently on main, and the way back is that section.
     expect(
       browser.evaluate(`document.querySelector('[data-slot="commit-back"]').getAttribute('href')`),
-    ).toBe(scoped('/git/commits'))
+    ).toBe(scoped('/git'))
 
     browser.screenshot(`${artifactsDir}/repo-git-commit.png`)
   })
@@ -156,16 +148,17 @@ describe('the repo view against the live dry-run server', () => {
         ),
       ).toBe(repo.info.branch)
     }
-    // The base-branch picker exists — /api/v1/repo carries baseBranch, so the control is honest.
+    // The base-branch picker is listed once, in the sidebar's checkout block (issue 06 §3).
     expect(browser.count('[data-slot="base-branch-picker"]')).toBe(1)
+    expect(browser.count('[data-slot="git-sidebar"] [data-slot="base-branch-picker"]')).toBe(1)
   })
 
   it('below md the repo view forces unified+wrap, hides the toggles, and never overflows', async () => {
     browser.setViewport(IPHONE.width, IPHONE.height)
     try {
       const changes = await api<{ files: unknown[] }>('/api/v1/repo/changes')
-      // Bare /git is the worktree screen below md (#622); the repository is one link away.
-      browser.goto(`${baseUrl}${scoped('/git')}?view=repo`)
+      // The main tree's uncommitted files, as the checkout block's warning opens them.
+      browser.goto(`${baseUrl}${scoped('/git/changes')}`)
       browser.waitForFunction(`document.querySelector('[data-slot="repo-changes"]') !== null`)
 
       if (changes.files.length > 0) {
@@ -189,8 +182,9 @@ describe('the repo view against the live dry-run server', () => {
           `getComputedStyle(document.querySelector('[data-slot="diff-mode-toggle"]').parentElement).display`,
         ),
       ).toBe('none')
-      // The segments stay a tappable row and the page never scrolls sideways.
-      expect(browser.count('[data-slot="repo-tabs"] a')).toBe(3)
+      // No tab strip, a way back to the Git screen, and the page never scrolls sideways.
+      expect(browser.count('[data-slot="repo-tabs"]')).toBe(0)
+      expect(browser.count('[data-slot="git-back"]')).toBe(1)
       expect(browser.evaluate(`document.documentElement.scrollWidth <= window.innerWidth`)).toBe(true)
 
       browser.screenshot(`${artifactsDir}/repo-git-iphone.png`)

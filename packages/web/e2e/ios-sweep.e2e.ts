@@ -146,12 +146,12 @@ describe('iOS sweep — every primary view at 390×844', () => {
     sweep('inbox', '/inbox', '[data-slot="todo-card"], [data-route="inbox"] [data-slot="centered-state"]')
   })
 
-  it('/git (worktree screen)', () => {
-    // Bare /git is the worktree screen below md (#622).
-    sweep('git-worktrees', '/git', '[data-slot="git-worktree-screen"]')
+  it('/git (Git screen)', () => {
+    // Bare /git is the Git screen below md (issue 06 §3): the checkout block and the sections.
+    sweep('git-screen', '/git', '[data-slot="git-screen"] [data-slot="git-sections"]')
   })
 
-  it('/git?view=repo (repo changes)', () => {
+  it('/git?view=repo (Recently on main)', () => {
     sweep('git', '/git?view=repo', '[data-slot="repo-header"]')
   })
 
