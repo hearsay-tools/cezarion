@@ -29,7 +29,8 @@ describe('Git page headings at the review viewports', () => {
   for (const page of [
     {
       name: 'Git',
-      title: 'Git · Changes',
+      // The title carries the checked-out branch, which is whatever the suite runs on.
+      title: /^Repository · \S+$/,
       path: '/git',
       header: '[data-slot="repo-header"]',
       context: '[data-slot="branch-chip"]',
@@ -102,7 +103,8 @@ describe('Git page headings at the review viewports', () => {
           }
 
           expect(facts.light).toBe(theme === 'light')
-          expect(facts.routeTitleText).toBe(page.title)
+          if (typeof page.title === 'string') expect(facts.routeTitleText).toBe(page.title)
+          else expect(facts.routeTitleText).toMatch(page.title)
           expect(facts.routeTitleTag).toBe('H1')
           expect(facts.routeTitleAriaHidden).toBeNull()
           expect(browser.snapshot()).toContain(page.name)

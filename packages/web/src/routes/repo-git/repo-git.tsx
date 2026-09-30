@@ -76,19 +76,21 @@ function RepoView({ repo, info, tab }: { repo: RepoResponse; info: RepoInfo; tab
       <RepoBackLink />
       <header
         data-slot="repo-header"
-        className="px-[18px] pt-[18px] md:px-9 md:pt-9"
+        className="px-[18px] pt-[18px] md:flex md:flex-col md:gap-[10px] md:border-b md:border-border md:px-7 md:pt-4"
       >
-        <h1 className="text-2xl font-semibold tracking-tight md:text-[30px]">
-          Git · {tab === 'changes' ? 'Changes' : tab === 'commits' ? 'Commits' : 'Branches'}
-        </h1>
-        <p data-slot="repo-remote" className="mt-2 break-all text-[13px] text-muted-foreground">
-          {info.root.split('/').filter(Boolean).at(-1)}{info.remote ? ` · ${info.remote}` : ''} · <span data-slot="branch-chip">{info.branch}</span>
-        </p>
-        <div className="my-[22px] flex min-w-0 items-start gap-2.5">
-          <RepoPull repo={repo} info={info} />
+        <div className="md:flex md:min-h-[28px] md:items-center md:justify-between md:gap-4">
+          <h1 className="text-2xl font-semibold tracking-tight md:text-[15px] md:tracking-normal">
+            Repository · <span data-slot="branch-chip">{info.branch}</span>
+          </h1>
+          <p data-slot="repo-remote" className="mt-2 break-all text-[13px] text-muted-foreground md:hidden">
+            {info.root.split('/').filter(Boolean).at(-1)}{info.remote ? ` · ${info.remote}` : ''}
+          </p>
+          <div className="my-[22px] flex min-w-0 items-start gap-2.5 md:my-0">
+            <RepoPull repo={repo} info={info} />
+          </div>
         </div>
 
-        <div data-slot="repo-tabs" className="flex items-end gap-6 border-b border-border [&>a]:min-h-11">
+        <div data-slot="repo-tabs" className="flex items-end gap-6 border-b border-border md:gap-[22px] md:border-b-0 [&>a]:min-h-11 md:[&>a]:min-h-0">
           <TabLink to="/git?view=repo" active={tab === 'changes'}>
             Changes
           </TabLink>
