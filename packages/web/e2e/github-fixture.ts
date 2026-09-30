@@ -70,12 +70,15 @@ export async function createGitHubFixture(sessionId: string) {
 
   function waitForGitHubSurface(pathname: string, target: AgentBrowser = browser): void {
     try {
+      // Below md the Issues tab links `?filter=all` (#622: a bare /github is the filter index
+      // there), so the strip is ready with either spelling of that link.
+      const issuesHref = scoped('/github')
       target.waitForFunction(
-        githubSurfaceReadyJs({
-          pathname,
-          issuesHref: scoped('/github'),
-          prsHref: scoped('/github/prs'),
-        }),
+        githubSurfaceReadyJs({ pathname, issuesHref, prsHref: scoped('/github/prs') })
+          .replace(
+            `tabs.querySelector(${JSON.stringify(`a[href="${issuesHref}"]`)})`,
+            `tabs.querySelector(${JSON.stringify(`a[href="${issuesHref}"], a[href="${issuesHref}?filter=all"]`)})`,
+          ),
       )
     } catch (cause) {
       throw githubNavFailure(target, cause)
@@ -95,7 +98,8 @@ export async function createGitHubFixture(sessionId: string) {
   function clickGitHubTab(path: '/github' | '/github/prs', target: AgentBrowser = browser): void {
     const href = scoped(path)
     try {
-      target.click(`[data-slot="gh-tabs"] a[href="${href}"]`)
+      // See waitForGitHubSurface: the phone's Issues tab carries `?filter=all`.
+      target.click(`[data-slot="gh-tabs"] a[href="${href}"], [data-slot="gh-tabs"] a[href="${href}?filter=all"]`)
     } catch (cause) {
       throw githubNavFailure(target, cause)
     }

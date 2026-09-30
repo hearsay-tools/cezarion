@@ -242,9 +242,10 @@ describe('the GitHub tab against the live dry-run server', () => {
       browser.waitForFunction(
         `(() => { const list = document.querySelector('[data-slot="gh-list"]'); const detail = document.querySelector('[data-slot="gh-detail"]'); return list.offsetParent !== null && detail.getBoundingClientRect().top >= list.getBoundingClientRect().bottom })()`,
       )
+      // A phone's bare /github is the filter index, so the detail's way back names the list itself (#622).
       expect(
         browser.evaluate(`document.querySelector('[data-slot="gh-back"]').getAttribute('href')`),
-      ).toBe(scoped('/github'))
+      ).toBe(`${scoped('/github')}?filter=all`)
 
       if (gh.issues.length > 2) {
         const visibleRowsCountJs = (count: number) =>

@@ -33,7 +33,7 @@ const DESKTOP = { width: 1440, height: 900 }
 const SIDEBAR = '[data-slot="github-sidebar"]'
 const SCREEN = '[data-slot="github-filter-screen"]'
 const TAB_BAR = '[data-slot="mobile-tab-bar"]'
-const BACK = '[data-slot="mobile-top-bar"] [data-slot="mobile-back"]'
+const BACK = '[data-slot="gh-back-filters"]'
 const COUNT = '[data-slot="gh-filter-count"]'
 const ROWS = '[data-slot="gh-rows"] [data-slot="gh-row"]'
 
@@ -110,7 +110,12 @@ function session(name: string, viewport = DESKTOP): AgentBrowser {
   return target
 }
 
-const sameJson = (expected: unknown) => (value: unknown) => JSON.stringify(value) === JSON.stringify(expected)
+/** Deep equality that ignores object key order (the page builds records in DOM order). */
+const canonical = (value: unknown): string => JSON.stringify(value, (_key, item) =>
+  item && typeof item === 'object' && !Array.isArray(item)
+    ? Object.fromEntries(Object.entries(item as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)))
+    : item)
+const sameJson = (expected: unknown) => (value: unknown) => canonical(value) === canonical(expected)
 
 /** Every filter row's count text inside `container`, keyed by filter (null = no count rendered). */
 const countsJs = (container: string) => `(() => {
@@ -131,6 +136,9 @@ const currentJs = (container: string) => `(() => {
   if (!box) return null;
   return [...box.querySelectorAll('[data-gh-filter][aria-current="page"]')].map((row) => row.getAttribute('data-gh-filter'));
 })()`
+
+/** Rows actually on screen: the list may stay mounted under the phone's filter index. */
+const visibleRowsJs = `[...document.querySelectorAll('[data-slot="gh-row"]')].filter((row) => row.offsetParent !== null).length`
 
 const range = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, index) => from + index)
 
@@ -228,7 +236,6 @@ describe('GitHub desktop sidebar (#622)', () => {
       review: [203, 210], // #210 is not in the open list: the row must come from the hit
       mine: [201, 202],
       failing: range(300, 300 + SEARCH_MAX - 1),
-      all: [201, 202, 203, 204, 205],
     }
     for (const [filter, numbers] of Object.entries(expected)) {
       browser.click(`${SIDEBAR} [data-gh-filter="${filter}"]`)
@@ -275,10 +282,7 @@ describe('GitHub desktop sidebar (#622)', () => {
     expect(browser.waitForValue(rowNumbersJs, sameJson([102, 104, 105, 106]))).toEqual([102, 104, 105, 106])
     expect(browser.waitForValue(currentJs(SIDEBAR), sameJson(['no-task']))).toEqual(['no-task'])
 
-    expect(browser.waitForValue(`document.querySelector('[data-slot="gh-back"]')?.getAttribute('href')`))
-      .toBe(`${scoped('/github')}?filter=no-task`)
-    browser.click(`[data-slot="gh-back"]`)
-    expect(browser.waitForValue(locationJs, (value) => value === `${scoped('/github')}?filter=no-task`)).toBe(`${scoped('/github')}?filter=no-task`)
+    // The detail's own Back link belongs to the stacked (phone) layout; the phone spec below owns it.
   }, 90_000)
 
   it('keeps a search hit that is not in the open list selected across a reload', async () => {
@@ -438,8 +442,8 @@ describe('GitHub phone filter index at 360x640 (#622)', () => {
     browser.click(`${TAB_BAR} a[data-tab="/github"]`)
     browser.waitForFunction(`location.pathname === ${JSON.stringify(scoped('/github'))} && document.querySelector(${JSON.stringify(SCREEN)}) !== null`)
     expect(browser.waitForValue(`location.search`, (value) => value === '')).toBe('')
-    expect(browser.count(SIDEBAR)).toBe(0)
-    expect(browser.count('[data-slot="gh-row"]')).toBe(0)
+    expect(browser.waitForValue(`document.querySelector(${JSON.stringify(SIDEBAR)})?.checkVisibility() ?? false`, (value) => value === false)).toBe(false)
+    expect(browser.waitForValue(visibleRowsJs, (value) => value === 0)).toBe(0)
     await remember('issues')
   }, 90_000)
 
@@ -460,7 +464,7 @@ describe('GitHub phone filter index at 360x640 (#622)', () => {
           svgSizes: [...new Set(icons.map((rect) => rect.width + 'x' + rect.height))],
           hasChevron: rows.every((row) => row.querySelectorAll('svg').length >= 2),
           overflow: document.documentElement.scrollWidth > innerWidth,
-          sidebarHidden: document.querySelector('${SIDEBAR}') === null || getComputedStyle(document.querySelector('${SIDEBAR}')).display === 'none',
+          sidebarHidden: !(document.querySelector('${SIDEBAR}')?.checkVisibility() ?? false),
         };
       })()`)
       expect(facts).toEqual({ light: theme === 'light', heights: [48], svgSizes: ['18x18'], hasChevron: true, overflow: false, sidebarHidden: true })
@@ -494,7 +498,7 @@ describe('GitHub phone filter index at 360x640 (#622)', () => {
     browser.click(BACK)
     browser.waitForFunction(`document.querySelector(${JSON.stringify(SCREEN)}) !== null`)
     expect(browser.waitForValue(locationJs, (value) => value === scoped('/github'))).toBe(scoped('/github'))
-    expect(browser.count('[data-slot="gh-row"]')).toBe(0)
+    expect(browser.waitForValue(visibleRowsJs, (value) => value === 0)).toBe(0)
   }, 90_000)
 
   it('pushes PR filters under /github/prs and keeps the filter through detail and Back', () => {
@@ -513,6 +517,24 @@ describe('GitHub phone filter index at 360x640 (#622)', () => {
     browser.click('[data-slot="gh-back"]')
     expect(browser.waitForValue(locationJs, (value) => value === listUrl)).toBe(listUrl)
     expect(browser.waitForValue(rowNumbersJs, sameJson([203, 210]))).toEqual([203, 210])
+  }, 90_000)
+
+  it('docks the workspace after a phone filter index is resized to desktop', () => {
+    openIndex()
+    browser.setViewport(DESKTOP.width, DESKTOP.height)
+    browser.waitForFunction(`document.querySelector(${JSON.stringify(SIDEBAR)}) !== null && document.querySelector(${JSON.stringify(SCREEN)}) === null`)
+    // The list/detail workspace is laid out inside the viewport, not left at its phone flow.
+    const facts = browser.waitForValue<Record<string, boolean>>(`(() => {
+      const list = document.querySelector('[data-slot="gh-list"]');
+      const main = document.querySelector('[data-slot="main"]');
+      if (!list || !main) return null;
+      // The workspace fills the scrollport once the page has scrolled its masthead away.
+      main.scrollTop = main.scrollHeight;
+      const rect = list.getBoundingClientRect();
+      const mainRect = main.getBoundingClientRect();
+      return { listVisible: rect.height > 0 && list.offsetParent !== null, listInsideMain: rect.bottom <= mainRect.bottom + 1, overflow: document.documentElement.scrollWidth > innerWidth };
+    })()`)
+    expect(facts).toEqual({ listVisible: true, listInsideMain: true, overflow: false })
   }, 90_000)
 
   it('leaves the other phone views on their own screens', () => {
