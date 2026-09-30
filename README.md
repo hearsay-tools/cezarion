@@ -428,6 +428,13 @@ tasks, excluding references to other repositories. Counts show a `+` when the
 underlying list or search reaches its result limit; an unavailable count is not
 shown as zero. Views without their own navigation still show tasks in the sidebar.
 
+The Git sidebar lists **Task worktrees** that still exist on disk, including retained
+worktrees from finished tasks. Each row shows its branch, task title, status and
+available diff counts, and opens that task's Changes tab. Reclaimed worktrees disappear
+from the list. Changes, Commits and Branches remain tabs in the main repository header.
+On mobile, the Git tab opens the worktree list; **Open repository** opens the repository
+view, and **Back to worktrees** returns to the list.
+
 ### Grouping connected repositories: tags and the All tasks page
 
 Work rarely stops at a repo boundary. A storefront is an API, a web app and a
