@@ -54,8 +54,8 @@ export function RepoCommitsSection({ log }: { log: LogEntry[] }) {
                   data-sha={commit.hash}
                   className="flex min-h-[52px] flex-col justify-center gap-[3px] rounded-[6px] px-[10px] py-[6px] hover:bg-sidebar-row-hover focus-visible:outline-2 focus-visible:outline-ring"
                 >
-                  <span data-slot="commit-subject" className="truncate text-[13px] text-foreground">{commit.subject}</span>
-                  <span data-slot="commit-meta" className="flex min-w-0 items-center gap-[6px] text-[11px] text-soft-foreground">
+                  <span data-slot="commit-row-subject" className="truncate text-[13px] text-foreground">{commit.subject}</span>
+                  <span data-slot="commit-row-meta" className="flex min-w-0 items-center gap-[6px] text-[11px] text-soft-foreground">
                     <span className="shrink-0 font-mono">{commit.hash}</span>
                     <span className="truncate">· {commit.author} · {shortGitAge(commit.when)}</span>
                   </span>

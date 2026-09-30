@@ -254,8 +254,11 @@ describe('the Git view Recently on main section', () => {
     expect(days[0]?.shas).toEqual(['abc1234'])
     const row = document.querySelector('[data-slot="commit-row"][data-sha="def5678"]')!
     expect(row.className).toContain('min-h-[52px]')
-    expect(row.querySelector('[data-slot="commit-subject"]')?.textContent).toBe('fix: stop the bug')
-    expect(row.querySelector('[data-slot="commit-meta"]')?.textContent).toBe('def5678· Linus · 3d')
+    expect(row.querySelector('[data-slot="commit-row-subject"]')?.textContent).toBe('fix: stop the bug')
+    expect(row.querySelector('[data-slot="commit-row-meta"]')?.textContent).toBe('def5678· Linus · 3d')
+    // `commit-meta` is the opened commit's header; a list row must not answer to it, or a wait for
+    // the commit view passes on the list it is leaving (repo-git.e2e.ts, 2026-09-30 local run).
+    expect(document.querySelector('[data-slot="commit-meta"]')).toBeNull()
   })
 
   it('lists the recent commits from /api/v1/repo, each row deep-linking to its diff', async () => {
