@@ -267,13 +267,14 @@ entries:
     pr: 973
     title: "feat(ui): filter the new-task base branch picker (#973)"
     date: 2026-09-14
-    status: planned
+    status: ported
     hint:
       conflicts: 2
-    note: absent here; 3 hunks in picker-pill
+    note: Ported optional branch-name filtering, preserving fork picker presentation and keyboard query refinement.
     fork:
       issue: 436
-    decided: 2026-09-18
+      pr: 720
+    decided: 2026-10-01
   - sha: 3871db4778bbf350cd94fe9253cc23eb538530c9
     pr: 984
     title: "fix(workflows): park intermediate asks for input (#984)"
