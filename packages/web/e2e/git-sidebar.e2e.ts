@@ -320,6 +320,22 @@ describe('Git desktop sidebar (#622)', () => {
     expect(browser.waitForValue(idsJs(SIDEBAR), sameJson(MEMBERS))).toEqual(MEMBERS)
   }, 90_000)
 
+  it('the sidebar lists Changes, Commits and Branches above the worktrees and lights the open one', () => {
+    openDesktop()
+    const FACET = `${SIDEBAR} [data-slot="git-repo-nav"] a[data-git-facet]`
+    expect(browser.waitForValue(`[...document.querySelectorAll(${JSON.stringify(FACET)})].map((a) => a.textContent.replace(/\\d+$/, ''))`,
+      (value) => JSON.stringify(value) === JSON.stringify(['Changes', 'Commits', 'Branches']))).toEqual(['Changes', 'Commits', 'Branches'])
+    const current = `document.querySelector(${JSON.stringify(`${FACET}[aria-current="page"]`)})?.dataset.gitFacet ?? null`
+    expect(browser.waitForValue(current, (value) => value === 'changes')).toBe('changes')
+    for (const [facet, path] of [['commits', '/git/commits'], ['branches', '/git/branches']] as const) {
+      browser.click(`${FACET}[data-git-facet="${facet}"]`)
+      expect(browser.waitForValue(locationJs, (value) => value === scoped(path))).toBe(scoped(path))
+      expect(browser.waitForValue(current, (value) => value === facet)).toBe(facet)
+      // The facet's route is lazy: its header mounts after the URL changes (first run failed a one-shot count here).
+      expect(browser.waitForValue(`document.querySelectorAll(${JSON.stringify(REPO_TABS)}).length`, (value) => value === 1)).toBe(1)
+    }
+  }, 90_000)
+
   it('/git?view=repo is harmless on desktop: still the repository Changes with the sidebar', () => {
     openDesktop('/git?view=repo')
     browser.waitForFunction(has('[data-slot="repo-header"]'))

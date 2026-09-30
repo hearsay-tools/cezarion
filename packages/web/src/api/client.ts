@@ -664,9 +664,13 @@ export async function getTodos(opts?: ReadOptions): Promise<TodoItem[]> {
   )
 }
 
-export async function getRepo(opts?: ReadOptions): Promise<RepoResponse> {
+export async function getRepo(
+  opts?: ReadOptions,
+  /** For callers outside the routed view's scope (the shell's Git sidebar); else `queryScope()`. */
+  projectId?: string,
+): Promise<RepoResponse> {
   return unwrap(
-    await cez.api.v1.p[':projectId'].repo.$get({ param: { projectId: queryScope() } }, init(opts)),
+    await cez.api.v1.p[':projectId'].repo.$get({ param: { projectId: projectId ?? queryScope() } }, init(opts)),
     '/repo',
   )
 }

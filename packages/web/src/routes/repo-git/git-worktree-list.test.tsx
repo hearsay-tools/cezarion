@@ -46,6 +46,7 @@ const run = (over: Record<string, unknown> & { id: string }) =>
 interface Stub {
   worktrees?: WorktreeInfo[] | 'error' | Promise<Response>
   runs?: RunRecord[] | 'error'
+  repo?: RepoResponse
 }
 
 function stub(opts: Stub = {}) {
@@ -61,7 +62,7 @@ function stub(opts: Stub = {}) {
         : json({ worktrees: opts.worktrees ?? [], totalBytes: null, keep: 0 })
     }
     if (/\/runs$/.test(path)) return opts.runs === 'error' ? json({ error: 'boom' }, 500) : json(opts.runs ?? [])
-    if (/\/repo$/.test(path)) return json(REPO)
+    if (/\/repo$/.test(path)) return json(opts.repo ?? REPO)
     if (/\/repo\/changes$/.test(path)) return json({ files: [], stat: { adds: 0, dels: 0, files: 0 } })
     if (/\/health$/.test(path)) return json({ version: 't', projects: [], bootProject: 'default', repoRoot: '/repo', repo: REPO.info, checks: [], defaultRunner: 'claude', capabilities: {} })
     return json({})
@@ -74,10 +75,10 @@ function Where() {
   return <output data-testid="where">{pathname}{search}</output>
 }
 
-function renderSidebar(scope = 'default', client = createQueryClient()) {
+function renderSidebar(scope = 'default', client = createQueryClient(), entry = '/git') {
   return render(
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={['/git']}><GitSidebar scope={scope} /></MemoryRouter>
+      <MemoryRouter initialEntries={[entry]}><GitSidebar scope={scope} /></MemoryRouter>
     </QueryClientProvider>,
   )
 }
@@ -102,6 +103,30 @@ const qa = (selector: string) => [...document.querySelectorAll<HTMLElement>(sele
 const rows = () => qa('[data-slot="git-worktree-row"]')
 
 describe('GitSidebar', () => {
+  it('lists the repository facets above the worktrees, with counts and the open facet lit', async () => {
+    stub({ repo: { ...REPO, status: [{ status: 'M', path: 'a.ts' }, { status: '??', path: 'b.ts' }], branches: ['main', 'dev', 'x'] } as RepoResponse })
+    renderSidebar('default', createQueryClient(), '/git/commits/abc123')
+    await waitFor(() => expect(q('[data-slot="git-facet-count"]')).not.toBeNull())
+    const facets = qa('[data-git-facet]')
+    expect(facets.map((a) => a.textContent)).toEqual(['Changes2', 'Commits', 'Branches3'])
+    expect(facets.map((a) => a.getAttribute('href'))).toEqual(['/git?view=repo', '/git/commits', '/git/branches'])
+    expect(facets.map((a) => a.getAttribute('aria-current'))).toEqual([null, 'page', null])
+    expect(q('[data-slot="git-sidebar-branch"]')?.textContent).toBe('main')
+    // Repository first, Task worktrees below it.
+    const nav = q('[data-slot="git-repo-nav"]')!
+    expect(nav.compareDocumentPosition(q('[data-slot="git-worktree-list"]')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('reads the repository through the explicit scope and lights Changes on bare /git', async () => {
+    const sent = stub()
+    renderSidebar('cezar', createQueryClient(), '/p/cezar/git')
+    await waitFor(() => expect(sent.some((path) => /\/p\/cezar\/repo$/.test(path))).toBe(true))
+    expect(q('[data-git-facet="changes"]')?.getAttribute('aria-current')).toBe('page')
+    // A clean tree shows no count, not a 0.
+    await waitFor(() => expect(q('[data-git-facet="branches"] [data-slot="git-facet-count"]')?.textContent).toBe('1'))
+    expect(q('[data-git-facet="changes"] [data-slot="git-facet-count"]')).toBeNull()
+  })
+
   it('lists on-disk worktrees only, each as a scoped link with branch, title, dot and diff', async () => {
     stub({
       worktrees: [wt('a', { title: 'ignored' }), wt('b', { branch: null, status: 'failed' })],
@@ -191,13 +216,14 @@ describe('GitSidebar', () => {
     await waitFor(() => expect(rows().map((row) => row.dataset.runId)).toEqual(['y']))
   })
 
-  it('makes one worktrees and one runs request, not one per row', async () => {
+  it('makes one worktrees, one runs and one repo request, not one per row', async () => {
     const sent = stub({ worktrees: [wt('a'), wt('b'), wt('c')] })
     renderSidebar()
     await waitFor(() => expect(rows()).toHaveLength(3))
     expect(sent.filter((p) => /\/worktrees$/.test(p))).toHaveLength(1)
     expect(sent.filter((p) => /\/runs$/.test(p))).toHaveLength(1)
-    expect(sent.length).toBe(2)
+    expect(sent.filter((p) => /\/repo$/.test(p))).toHaveLength(1)
+    expect(sent.length).toBe(3)
   })
 })
 
