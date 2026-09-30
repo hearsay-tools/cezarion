@@ -340,6 +340,39 @@ describe('GitHub desktop sidebar (#622)', () => {
     }
   }, 90_000)
 
+  it('paints the board main header: a 15px title, 13px facet tabs, and a 32px toolbar of 12.5px controls', async () => {
+    await remember('issues')
+    for (const theme of ['light', 'dark'] as const) {
+      browser.setViewport(DESKTOP.width, DESKTOP.height)
+      browser.goto(`${base}${scoped('/github?filter=no-task')}`)
+      browser.evaluate(`document.documentElement.classList.remove('light', 'dark'); document.documentElement.classList.add('${theme}')`)
+      const facts = browser.waitForValue<Record<string, unknown>>(`(() => {
+        const title = document.querySelector('[data-slot="gh-masthead"] h1');
+        const tabs = [...document.querySelectorAll('[data-slot="gh-tabs"] > a')];
+        const controls = [...document.querySelectorAll('[data-slot="gh-filter-toolbar"] input[data-slot="gh-search"], [data-slot="gh-label-filter"], [data-slot="gh-filter-toolbar"] [data-slot="gh-issue-filters"] > button:first-of-type')];
+        const route = document.querySelector('[data-route="github"]');
+        if (!title || tabs.length < 2 || controls.length < 3 || !route) return null;
+        const active = tabs.find((tab) => tab.getAttribute('aria-current') === 'page');
+        return {
+          light: document.documentElement.classList.contains('light'),
+          title: [title.textContent.trim(), getComputedStyle(title).fontSize, getComputedStyle(title).fontWeight],
+          tabs: [getComputedStyle(tabs[0]).fontSize, getComputedStyle(active).fontWeight, getComputedStyle(tabs[0]).columnGap],
+          tabGap: Math.round(tabs[1].getBoundingClientRect().left - tabs[0].getBoundingClientRect().right),
+          controls: controls.map((el) => [Math.round(el.getBoundingClientRect().height), getComputedStyle(el).fontSize, getComputedStyle(el).borderTopLeftRadius]),
+          routePadding: [getComputedStyle(route).paddingLeft, getComputedStyle(route).paddingRight],
+          placeholder: document.querySelector('[data-slot="gh-search"]').getAttribute('placeholder'),
+          overflow: document.documentElement.scrollWidth > innerWidth,
+        };
+      })()`)
+      expect(facts).toMatchObject({
+        light: theme === 'light', title: ['Issues · No task yet', '15px', '600'], tabGap: 22,
+        controls: [[32, '12.5px', '7px'], [32, '12.5px', '7px'], [32, '12.5px', '7px']],
+        routePadding: ['28px', '28px'], placeholder: 'Filter issues…', overflow: false,
+      })
+      browser.screenshot(`${artifactsDir}/github-main-header-${theme}.png`, { viewport: true })
+    }
+  }, 90_000)
+
   it('shows the task sidebar on other views and the settings sidebar in Settings, never the GitHub one', async () => {
     browser.setViewport(DESKTOP.width, DESKTOP.height)
     // Git has its own sidebar since the Git slice of #622 (git-sidebar.e2e.ts); the Tasks view still

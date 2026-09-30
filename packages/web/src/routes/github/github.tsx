@@ -1,7 +1,7 @@
 import './github-layout.css'
 import { hashKey, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronLeftIcon, ExternalLinkIcon, MessageSquareIcon, LoaderCircleIcon, TagIcon,  } from 'lucide-react'
-import { ArrowLeftIcon, CheckIcon, CircleIcon, CircleDotIcon, CircleXIcon, ChevronRightIcon, GitPullRequestIcon, RefreshCwIcon, SearchIcon, TriangleAlertIcon } from '@/components/design-icons'
+import { ChevronLeftIcon, ExternalLinkIcon, MessageSquareIcon, LoaderCircleIcon } from 'lucide-react'
+import { ArrowLeftIcon, CheckIcon, CircleIcon, CircleDotIcon, CircleXIcon, ChevronDownIcon, ChevronRightIcon, GitPullRequestIcon, RefreshCwIcon, SearchIcon, TriangleAlertIcon } from '@/components/design-icons'
 import {
   useEffect,
   useMemo,
@@ -68,7 +68,7 @@ import { GithubFilterScreen } from './github-filter-screen'
 import { GithubLoading } from './github-loading'
 import {
   FAILING_QUERY, REVIEW_QUERY, githubFilterPath, isSearchBackedFilter, issueNumbersWithTask, parseGithubFilter,
-  rowsFromSearch, searchQueryFor, GITHUB_LIST_LIMIT, ISSUE_ROWS, PR_ROWS, type GithubFilter,
+  rowsFromSearch, searchQueryFor, GITHUB_LIST_LIMIT, ISSUE_ROWS, PR_ROWS, ACTIVE_FILTER_LABEL, type GithubFilter,
 } from './github-sidebar-model'
 import { useIsDesktop } from '@/lib/use-desktop'
 import { HandToAgent } from './hand-to-agent'
@@ -736,9 +736,12 @@ export function GithubRoute({
     // The route ends with one scrollport-height workspace, with no bottom padding:
     // at maximum page scroll its tabs align with main's top without sticky overlap.
     // Phone stays stacked document-flow. (#523)
-    <div ref={routeRef} data-route="github" className="flex min-h-full flex-col gap-3 px-[18px] pt-[18px] pb-[calc(90px+env(safe-area-inset-bottom))] md:gap-[22px] md:p-9 md:pb-4">
-        <div data-slot="gh-masthead" className="flex min-w-0 shrink-0 flex-col gap-1">
-          <h1 className="text-2xl font-semibold tracking-tight md:text-[30px]">GitHub</h1>
+    <div ref={routeRef} data-route="github" className="flex min-h-full flex-col gap-3 px-[18px] pt-[18px] pb-[calc(90px+env(safe-area-inset-bottom))] md:gap-[22px] md:px-7 md:pt-4 md:pb-4">
+        <div data-slot="gh-masthead" className="flex min-w-0 shrink-0 flex-col gap-1 md:flex-row md:items-baseline md:gap-3">
+          {/* The board's desktop title is the list on screen ("Issues · No task yet"), 15px; a phone keeps "GitHub". */}
+          <h1 className="text-2xl font-semibold tracking-tight md:text-[15px] md:tracking-normal">
+            {isDesktop ? `${view === 'issues' ? 'Issues' : 'Pull requests'} · ${ACTIVE_FILTER_LABEL[activeFilter]}` : 'GitHub'}
+          </h1>
           {rawFilterParam !== null && n === undefined ? (
             <div data-slot="gh-filter-context" className="flex min-w-0 items-center gap-3 md:hidden">
               <Link to="/github" data-slot="gh-back-filters" className="inline-flex min-h-11 items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground">
@@ -753,7 +756,7 @@ export function GithubRoute({
             </div>
           ) : null}
           {gh.repo ? (
-            <span className="min-w-0 truncate text-[13px] text-muted-foreground">
+            <span className="min-w-0 truncate text-[13px] text-muted-foreground md:text-[11px] md:text-soft-foreground">
               <span data-slot="gh-repo">{gh.repo}</span>
               <span data-slot="gh-synced"> · {gh.syncedAt ? `Synced ${shortAge(gh.syncedAt)} ago` : 'Not synced yet'}</span>
             </span>
@@ -805,7 +808,7 @@ export function GithubRoute({
                 type="search"
                 data-slot="gh-search"
                 aria-label={`Search ${view}`}
-                placeholder="Search #id, title, author…"
+                placeholder={view === 'issues' ? 'Filter issues…' : 'Filter pull requests…'}
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 className="min-h-11 w-full rounded-md border border-input bg-card py-1 pr-2 pl-7 text-[13px] outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
@@ -1098,8 +1101,8 @@ function LabelFilter({
             selected.length > 0 && 'border-accent-strong/60 text-foreground',
           )}
         >
-          <TagIcon aria-hidden="true" className="size-3.5" />
           {selected.length > 0 ? `Labels · ${selected.length}` : 'Labels'}
+          <ChevronDownIcon size={12} aria-hidden="true" className="size-3 shrink-0 text-soft-foreground" />
         </button>
       </PopoverTrigger>
       <PopoverContent align="end" sideOffset={6} className="w-60 p-0">

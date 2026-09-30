@@ -103,8 +103,10 @@ describe('Git page headings at the review viewports', () => {
           }
 
           expect(facts.light).toBe(theme === 'light')
-          if (typeof page.title === 'string') expect(facts.routeTitleText).toBe(page.title)
-          else expect(facts.routeTitleText).toMatch(page.title)
+          // The desktop GitHub title names the list on screen (#622 board); a phone keeps "GitHub".
+          const title = page.name === 'GitHub' && viewport !== PHONE ? 'Issues · All open' : page.title
+          if (typeof title === 'string') expect(facts.routeTitleText).toBe(title)
+          else expect(facts.routeTitleText).toMatch(title)
           expect(facts.routeTitleTag).toBe('H1')
           expect(facts.routeTitleAriaHidden).toBeNull()
           expect(browser.snapshot()).toContain(page.name)

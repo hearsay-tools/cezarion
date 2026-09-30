@@ -1,4 +1,5 @@
 import type { GithubData } from '@open-mercato/cezar-api-client'
+import { ChevronDownIcon } from '@/components/design-icons'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 
 const control = 'min-h-11 min-w-11 rounded-md border border-input bg-card px-3 text-sm text-foreground focus-visible:outline-ring disabled:opacity-50'
@@ -21,7 +22,8 @@ export function IssueFilters({ data, assignees, projectId, onAssigneesChange, on
       <Popover>
         <PopoverTrigger asChild>
           <button type="button" className={control} disabled={options.length === 0}>
-            Assignees{assignees.length ? ` · ${assignees.length}` : ''}
+            Assignee{assignees.length ? ` · ${assignees.length}` : ''}
+            <ChevronDownIcon size={12} aria-hidden="true" className="ml-1 inline size-3 shrink-0 align-[-1px] text-soft-foreground" />
           </button>
         </PopoverTrigger>
         <PopoverContent align="start" className="w-64 max-w-[calc(100vw-2rem)] p-2">

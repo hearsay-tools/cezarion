@@ -312,7 +312,7 @@ it('/github/prs/:n/changes renders PR-only file review navigation and completene
 it.each(['/github/prs/137', '/github/prs/137/changes'])('keeps the PR list beside %s, like Issues', async (route) => {
   stubFetch()
   renderAt(route)
-  await screen.findByRole('heading', { name: 'GitHub' })
+  await screen.findByRole('heading', { name: 'Pull requests · All open' })
   expect(document.querySelector('[data-route="github"]')?.hasAttribute('data-pr-detail')).toBe(false)
   expect(document.querySelector('[data-slot="gh-list"]')).not.toBeNull()
   expect(rows().length).toBeGreaterThan(0)
@@ -332,20 +332,20 @@ describe('the GitHub tab lists', () => {
     localStorage.setItem(GITHUB_LIST_WIDTH_STORAGE_KEY, '400')
     stubFetch()
     renderAt('/github')
-    await screen.findByRole('heading', { name: 'GitHub' })
+    await screen.findByRole('heading', { name: 'Issues · All open' })
     expect(ghList().style.getPropertyValue('--github-list-width')).toBe('400px')
 
     cleanup()
     stubFetch()
     renderAt('/github/prs')
-    await screen.findByRole('heading', { name: 'GitHub' })
+    await screen.findByRole('heading', { name: 'Pull requests · All open' })
     expect(ghList().style.getPropertyValue('--github-list-width')).toBe('400px')
   })
 
   it('exposes the separator range and persists pointer changes', async () => {
     stubFetch()
     renderAt('/github')
-    await screen.findByRole('heading', { name: 'GitHub' })
+    await screen.findByRole('heading', { name: 'Issues · All open' })
     const handle = ghListHandle()
     expect(handle.getAttribute('role')).toBe('separator')
     expect(handle.getAttribute('aria-orientation')).toBe('vertical')
@@ -369,7 +369,7 @@ describe('the GitHub tab lists', () => {
   it('supports keyboard bounds and reset while ignoring non-primary pointer input', async () => {
     stubFetch()
     renderAt('/github')
-    await screen.findByRole('heading', { name: 'GitHub' })
+    await screen.findByRole('heading', { name: 'Issues · All open' })
     const handle = ghListHandle()
     fireEvent.keyDown(handle, { key: 'ArrowRight' })
     expect(ghList().style.getPropertyValue('--github-list-width')).toBe('376px')
@@ -390,7 +390,7 @@ describe('the GitHub tab lists', () => {
   it('keeps the mobile structure and hides the resize handle below md', async () => {
     stubFetch()
     renderAt('/github')
-    await screen.findByRole('heading', { name: 'GitHub' })
+    await screen.findByRole('heading', { name: 'Issues · All open' })
     expect(ghList().className).toContain('w-full')
     expect(ghList().className).toContain('md:w-[var(--github-list-width)]')
     expect(ghListHandle().className).toContain('hidden')
@@ -399,7 +399,7 @@ describe('the GitHub tab lists', () => {
     cleanup()
     stubFetch()
     renderAt('/github/issues/142')
-    await screen.findByRole('heading', { name: 'GitHub' })
+    await screen.findByRole('heading', { name: 'Issues · All open' })
     expect(ghList().className).not.toContain('max-md:max-h-64')
     expect(ghList().className.split(' ')).not.toContain('hidden')
     expect(document.querySelector('[data-slot="gh-detail"]')?.className).toContain('flex')
@@ -410,7 +410,7 @@ describe('the GitHub tab lists', () => {
   it('lets the GitHub title leave while filters and panes stay in flow until dock (#523)', async () => {
     stubFetch()
     renderAt('/github')
-    await screen.findByRole('heading', { name: 'GitHub' })
+    await screen.findByRole('heading', { name: 'Issues · All open' })
 
     const route = document.querySelector('[data-route="github"]') as HTMLElement
     const masthead = document.querySelector('[data-slot="gh-masthead"]') as HTMLElement
@@ -420,7 +420,7 @@ describe('the GitHub tab lists', () => {
 
     expect(route.className.split(' ')).not.toContain('md:h-full')
     expect(masthead).not.toBeNull()
-    expect(masthead.contains(screen.getByRole('heading', { name: 'GitHub' }))).toBe(true)
+    expect(masthead.contains(screen.getByRole('heading', { name: 'Issues · All open' }))).toBe(true)
     expect(header.contains(document.querySelector('[data-slot="gh-tabs"]'))).toBe(true)
     expect(header.contains(document.querySelector('[data-slot="gh-filter-toolbar"]'))).toBe(true)
     expect(workspace.contains(header)).toBe(true)
@@ -439,7 +439,7 @@ describe('the GitHub tab lists', () => {
   it('compacts the phone header so the first result can share the 360×640 viewport (#325)', async () => {
     stubFetch()
     renderAt('/github')
-    const title = await screen.findByRole('heading', { name: 'GitHub' })
+    const title = await screen.findByRole('heading', { name: 'Issues · All open' })
     const route = document.querySelector('[data-route="github"]')
     const header = document.querySelector('[data-slot="gh-header"]')
     expect(route?.className).toMatch(/gap-3/)
@@ -447,14 +447,14 @@ describe('the GitHub tab lists', () => {
     expect(header?.className).toMatch(/gap-3/)
     expect(header?.className).toMatch(/md:gap-\[22px\]/)
     expect(title.className).toMatch(/text-2xl/)
-    expect(title.className).toMatch(/md:text-\[30px\]/)
+    expect(title.className).toMatch(/md:text-\[15px\]/)
     expect(document.querySelector('[data-slot="gh-repo"]')?.textContent).toBe('acme/demo')
     for (const control of [
       document.querySelector('[data-slot="gh-search"]'),
       document.querySelector('[data-slot="gh-label-filter"]'),
       document.querySelector('[data-slot="gh-refresh"]'),
       screen.getByRole('button', { name: 'Clear filters' }),
-      screen.getByRole('button', { name: 'Assignees' }),
+      screen.getByRole('button', { name: 'Assignee' }),
       screen.getByRole('button', { name: 'Assigned to me' }),
     ]) {
       expect(control?.className).toMatch(/min-h-11|gh-utility/)
@@ -467,7 +467,7 @@ describe('the GitHub tab lists', () => {
     renderAt('/github')
 
     await waitFor(() => expect(document.querySelector('[data-slot="gh-header"]')).not.toBeNull())
-    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('GitHub')
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Issues · All open')
     expect(document.querySelector('[data-slot="gh-repo"]')?.textContent).toBe('acme/demo')
 
     const tabs = [...document.querySelectorAll('[data-slot="gh-tabs"] a')].map((a) => ({
@@ -2778,7 +2778,7 @@ describe('issue assignee and board controls', () => {
     renderAt('/github')
     const me = await screen.findByRole('button', { name: 'Assigned to me' })
     expect(me.getAttribute('aria-pressed')).toBe('false')
-    fireEvent.click(screen.getByRole('button', { name: 'Assignees' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Assignee' }))
     fireEvent.click(screen.getByRole('checkbox', { name: 'alice' }))
     expect(me.getAttribute('aria-pressed')).toBe('true')
     fireEvent.click(screen.getByRole('checkbox', { name: 'bob' }))
@@ -2809,7 +2809,7 @@ it('selects multiple assignees and retains filter chrome during refresh', async 
     'GET /api/v1/github?limit=1000&refresh=1': () => new Promise(resolve => { finish = resolve }),
   })
   renderAt('/github')
-  fireEvent.click(await screen.findByRole('button', { name: 'Assignees' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Assignee' }))
   fireEvent.click(screen.getByRole('checkbox', { name: 'alice' }))
   expect(rows()).toHaveLength(1)
   fireEvent.click(screen.getByRole('checkbox', { name: 'bob' }))
@@ -2817,10 +2817,10 @@ it('selects multiple assignees and retains filter chrome during refresh', async 
   fireEvent.keyDown(screen.getByRole('checkbox', { name: 'bob' }), { key: 'Escape' })
   fireEvent.click(screen.getByTitle('Refresh from GitHub'))
   await waitFor(() => expect(finish).toBeTypeOf('function'))
-  expect(screen.getByRole('button', { name: 'Assignees · 2' })).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'Assignee · 2' })).toBeTruthy()
   expect(rows()).toHaveLength(2)
   await act(async () => finish(jsonResponse(data)))
-  expect(screen.getByRole('button', { name: 'Assignees · 2' })).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'Assignee · 2' })).toBeTruthy()
 })
 
 it('keeps legacy metadata usable with disabled personal filtering and no board picker', async () => {
@@ -3393,7 +3393,7 @@ describe('cross-state search preserves fork filters', () => {
     expect(hitTitles()).not.toContain('payment first')
     fireEvent.click(screen.getByRole('button', { name: 'Assigned to me' }))
     expect(hitTitles()).not.toContain('payment second')
-    fireEvent.click(screen.getByRole('button', { name: /Assignees/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Assignee/ }))
     fireEvent.click(screen.getByRole('checkbox', { name: 'bob' }))
     fireEvent.keyDown(screen.getByRole('checkbox', { name: 'bob' }), { key: 'Escape' })
     fireEvent.click(screen.getByRole('button', { name: /Labels/ }))

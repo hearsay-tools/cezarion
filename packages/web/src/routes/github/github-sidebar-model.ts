@@ -87,6 +87,11 @@ export const PR_ROWS: readonly { id: GithubRowId; label: string }[] = [
   { id: 'failing', label: 'Checks failing' },
 ]
 
+/** The filter's name as the main header's title says it ("Issues · No task yet"). */
+export const ACTIVE_FILTER_LABEL: Record<GithubFilter, string> = Object.fromEntries(
+  [...ISSUE_ROWS, ...PR_ROWS].map((row) => [row.id, row.label]),
+) as Record<GithubFilter, string>
+
 export interface FilterCount {
   value: number
   /** `atLeast` when the source was capped, so the real number may be higher. */
