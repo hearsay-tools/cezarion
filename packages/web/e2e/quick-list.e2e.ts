@@ -1165,17 +1165,21 @@ describe('a row under width contention, in a column the user can widen', () => {
       )
     )
 
-  /** The row title's measured width — how much of the column the NAME actually got. */
+  /** The row title's measured width — how much of the column the NAME actually got.
+   *  Wait, then read as one step: the row wait in `beforeEach` can settle on a render that a
+   *  refetch replaces before this read lands. A four-lane run caught a `null` title under load
+   *  (lane-4 `quick-list` bundle, `grows the name as the column grows`; four unloaded reruns were
+   *  green), so the read waits for the node instead of assuming the earlier wait still holds. */
   const titleWidth = () =>
     Number(
-      browser.evaluate(
-        `document.querySelector('${ROW_ID} [data-slot="task-row-title"]').getBoundingClientRect().width`
+      browser.waitForValue(
+        `document.querySelector('${ROW_ID} [data-slot="task-row-title"]')?.getBoundingClientRect().width ?? null`
       )
     )
 
   /** The diff pair's RESOLVED display — the container query's answer, not a class. */
   const diffDisplay = () =>
-    String(browser.evaluate(`getComputedStyle(document.querySelector('${ROW_ID} [data-slot="diff-stat"]')).display`))
+    String(browser.waitForValue(`(() => { const diff = document.querySelector('${ROW_ID} [data-slot="diff-stat"]'); return diff ? getComputedStyle(diff).display : null })()`))
 
   /** Set the width through the stored preference and reload — the non-pointer path to a width,
    *  used where the assertion is about the LAYOUT at that width rather than about dragging. */
