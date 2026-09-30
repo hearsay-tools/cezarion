@@ -223,12 +223,16 @@ describe('phone Tools page (#621 follow-up)', () => {
           }
         })()`) as { rows: Array<{ available: string; tone: string; size: number; state: string; hint: string | null; setup: number | null }>; settings: number; overflow: boolean }
         expect(page.rows.length).toBe(health.checks.length)
-        for (const row of page.rows) {
+        // Compare against the routed payload, not a fixed count: a CI runner may lack other tools too
+        // (run 36685908950 shard 4/4 had more than one missing, each with its own server hint).
+        page.rows.forEach((row, index) => {
+          const check = health.checks[index]!
           expect(row.size).toBe(7)
           if (row.available === 'true') expect([row.tone, row.state?.startsWith('Installed'), row.setup]).toEqual(['success', true, null])
-          else expect([row.tone, row.state, row.hint]).toEqual(['danger', 'Not installed', 'Install it and reload the cockpit.'])
-        }
-        expect(page.rows.filter((row) => row.setup !== null)).toHaveLength(1)
+          else expect([row.tone, row.state, row.hint]).toEqual(['danger', 'Not installed', (check.hint as string | undefined) ?? null])
+        })
+        expect(page.rows[missing]!.hint).toBe('Install it and reload the cockpit.')
+        expect(page.rows.filter((row) => row.setup !== null)).toHaveLength(health.checks.filter((check) => check.available !== true).length)
         expect(page.rows.find((row) => row.setup !== null)!.setup).toBeGreaterThanOrEqual(44)
         expect(page.settings).toBeGreaterThanOrEqual(44)
         expect(page.overflow).toBe(false)
