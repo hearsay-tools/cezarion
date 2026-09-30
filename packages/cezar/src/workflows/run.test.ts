@@ -594,6 +594,17 @@ describe('RunManager.continueRun override', () => {
     expect(store.getRun(id)?.agentProfile).toBe(after);
   });
 
+  it.each([true, false, undefined])('human Continue preserves saved autonomous=%s (#458)', (autonomous) => {
+    const id = resumableRun();
+    store.updateRun(id, { autonomous });
+    expect(manager.continueRun(id, { text: 'Continue setup' })).toEqual({ ok: true });
+    expect(store.getRun(id)?.status).toBe('running');
+    expect(store.getRun(id)?.autonomous).toBe(autonomous);
+    store.flush();
+    expect(RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true }).getRun(id)?.autonomous)
+      .toBe(autonomous);
+  });
+
   it('persists a runner + model override as the run current backend', () => {
     const id = resumableRun();
     expect(manager.continueRun(id, { runner: 'codex', model: 'gpt-5.1-codex' })).toEqual({ ok: true });
