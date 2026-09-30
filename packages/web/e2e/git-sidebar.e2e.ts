@@ -332,7 +332,9 @@ describe('Git desktop sidebar (#622)', () => {
       browser.click(`${FACET}[data-git-facet="${facet}"]`)
       expect(browser.waitForValue(locationJs, (value) => value === scoped(path))).toBe(scoped(path))
       expect(browser.waitForValue(current, (value) => value === facet)).toBe(facet)
-      // The facet's route is lazy: its header mounts after the URL changes (first run failed a one-shot count here).
+      // The facet's route is lazy: its header mounts after the URL changes. Local bundle
+      // .ai/qa/failures/git-sidebar/the-sidebar-lists-Changes-…-1 (2026-09-30T16:36Z): a one-shot
+      // count read 0 at /git/commits right after the URL matched, so the count is waited on.
       expect(browser.waitForValue(`document.querySelectorAll(${JSON.stringify(REPO_TABS)}).length`, (value) => value === 1)).toBe(1)
     }
   }, 90_000)
