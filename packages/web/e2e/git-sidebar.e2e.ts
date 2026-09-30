@@ -232,12 +232,13 @@ describe('Git desktop sidebar (#622)', () => {
     expect(text).not.toContain('Reclaimed worktree')
     expect(browser.count('[data-slot="task-quick-list"]')).toBe(0)
     expect(browser.count(SCREEN)).toBe(0)
-    // The main repository facets appear once, in the main header, and not in the sidebar.
+    // The main header keeps its facet tabs; the sidebar lists the same facets as its Repository
+    // group (rows, not a second tab strip).
     browser.waitForFunction(has(REPO_TABS))
     expect(browser.count(REPO_TABS)).toBe(1)
     expect(browser.count(`${REPO_TABS} a`)).toBe(3)
     expect(browser.count(`${SIDEBAR} ${REPO_TABS}`)).toBe(0)
-    expect(browser.count(`${SIDEBAR} a[href$="/git/commits"], ${SIDEBAR} a[href$="/git/branches"]`)).toBe(0)
+    expect(browser.count(`${SIDEBAR} [data-slot="git-repo-nav"] a[href$="/git/commits"], ${SIDEBAR} [data-slot="git-repo-nav"] a[href$="/git/branches"]`)).toBe(2)
     expect(browser.count('[data-slot="repo-header"]')).toBe(1)
   }, 90_000)
 
