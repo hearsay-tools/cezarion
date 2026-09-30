@@ -170,7 +170,7 @@ describe('the repo view Changes segment', () => {
       current: a.getAttribute('aria-current'),
     }))
     expect(tabs).toEqual([
-      { text: 'Changes', href: '/git', current: 'page' },
+      { text: 'Changes', href: '/git?view=repo', current: 'page' },
       { text: 'Commits', href: '/git/commits', current: null },
       { text: 'Branches', href: '/git/branches', current: null },
     ])
@@ -221,7 +221,8 @@ describe('the repo view Changes segment', () => {
       vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })),
     )
     stubFetch()
-    renderAt('/git')
+    // `?view=repo`: a phone's bare /git is the worktree screen, not the repository.
+    renderAt('/git?view=repo')
     await waitFor(() => expect(document.querySelector('[data-slot="diff"]')).not.toBeNull())
 
     fireEvent.click(document.querySelector('[data-slot="diff-mode-toggle"] [data-mode="split"]')!)

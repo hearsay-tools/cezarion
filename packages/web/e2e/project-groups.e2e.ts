@@ -117,7 +117,9 @@ function assertProject(projectId: string, path: string): void {
   expect(browser.waitForValue(`Array.from(document.querySelectorAll('${nav} a[aria-current="page"]')).map(a => new URL(a.href).pathname)`,
     value => JSON.stringify(value) === JSON.stringify([scoped(projectId, path)]))).toEqual([scoped(projectId, path)])
   expect(browser.count('[data-slot="sidebar"] [data-slot="project-header"]')).toBe(1)
-  expect(browser.count('[data-slot="sidebar"] [data-slot="task-quick-list"]')).toBe(1)
+  // Git carries its own worktree list instead of the task list (#622); every other view keeps the task list.
+  expect(browser.count('[data-slot="sidebar"] [data-slot="task-quick-list"]')).toBe(path === '/git' ? 0 : 1)
+  expect(browser.count('[data-slot="sidebar"] [data-slot="git-sidebar"]')).toBe(path === '/git' ? 1 : 0)
   expect(browser.count('[data-slot="project-groups"], [data-slot="single-project-navigation"], [data-slot="repo-chip"]')).toBe(0)
 }
 

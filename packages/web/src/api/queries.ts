@@ -1184,6 +1184,25 @@ export function useWorktrees() {
   })
 }
 
+/**
+ * `useWorktrees` for an EXPLICIT scope (`'default'` for the boot project, the id otherwise — the
+ * `useProjectRuns` convention). The Git sidebar renders in the shell, above the
+ * `ProjectScopeProvider`, so `queryScope()` there still names the previous project. Shares
+ * `queryKeys.worktrees`' entry for the project on screen, so the global stream's worktrees
+ * invalidation keeps it live.
+ */
+export function useProjectWorktrees(scope: string) {
+  return useQuery({
+    queryKey: [scope, 'worktrees'] as const,
+    queryFn: ({ signal }) => getWorktrees({ signal }, scope),
+    // Existence must be current on every activation: an inactive project's run stream is
+    // ignored, so a worktree deleted or recreated while another project was on screen would
+    // otherwise be trusted for the default five minutes when the user comes back (A → B → A).
+    // Zero staleness only refetches on mount, key change and focus — no polling.
+    staleTime: 0,
+  })
+}
+
 export function useUiState() {
   return useQuery({
     queryKey: queryKeys.uiState,

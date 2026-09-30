@@ -340,7 +340,9 @@ describe('GitHub desktop sidebar (#622)', () => {
 
   it('shows the task sidebar on other views and the settings sidebar in Settings, never the GitHub one', async () => {
     browser.setViewport(DESKTOP.width, DESKTOP.height)
-    browser.goto(`${base}${scoped('/git')}`)
+    // Git has its own sidebar since the Git slice of #622 (git-sidebar.e2e.ts); the Tasks view still
+    // carries the task list.
+    browser.goto(`${base}${scoped('/')}`)
     browser.waitForFunction(`document.querySelector('[data-slot="task-quick-list"]') !== null`)
     expect(browser.count(SIDEBAR)).toBe(0)
 

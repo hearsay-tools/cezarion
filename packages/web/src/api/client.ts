@@ -2086,10 +2086,14 @@ export async function putConfig(patch: SetConfigInput): Promise<SetConfigRespons
 
 /** The worktree management panel (#483): every materialized task worktree with disk usage,
  *  retention state, the total, and the current keep-limit. */
-export async function getWorktrees(opts?: ReadOptions): Promise<WorktreesResponse> {
+export async function getWorktrees(
+  opts?: ReadOptions,
+  /** For callers outside the routed view's scope (the shell's Git sidebar); else `queryScope()`. */
+  projectId?: string,
+): Promise<WorktreesResponse> {
   return unwrap(
     await cez.api.v1.p[':projectId'].worktrees.$get(
-      { param: { projectId: queryScope() } },
+      { param: { projectId: projectId ?? queryScope() } },
       init(opts),
     ),
     '/worktrees',

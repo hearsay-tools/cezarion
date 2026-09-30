@@ -1,14 +1,19 @@
 import './repo-git.css'
 import { GitBranchIcon, TriangleAlertIcon } from '@/components/design-icons'
 
+import { useSearchParams } from 'react-router'
+
 import { useRepo } from '@/api/queries'
 import type { RepoInfo, RepoResponse } from '@open-mercato/cezar-api-client'
 import { CenteredState } from '@/components/centered-state'
 import { TabLink } from '@/components/tab-link'
+import { useIsDesktop } from '@/lib/use-desktop'
 
 import { RepoBranchesSection } from './repo-branches'
 import { RepoChangesSection } from './repo-changes'
 import { RepoCommitsSection } from './repo-commits'
+import { RepoBackLink } from './repo-back-link'
+import { GitWorktreeScreen } from './git-worktree-screen'
 import { RepoGitLoading } from './repo-git-loading'
 import { RepoPull } from './repo-pull'
 
@@ -28,11 +33,17 @@ export type RepoTab = 'changes' | 'commits' | 'branches'
 
 export function RepoGitRoute({ tab }: { tab: RepoTab }) {
   const repo = useRepo()
+  const isDesktop = useIsDesktop()
+  const [params] = useSearchParams()
 
+  // A phone's bare /git is the task worktree screen; the repository is `?view=repo`. Commits,
+  // Branches and every deep link keep their URLs, and desktop never leaves the repository.
+  if (tab === 'changes' && !isDesktop && params.get('view') !== 'repo') return <GitWorktreeScreen />
   if (repo.isPending) return <RepoGitLoading />
   if (repo.isError) {
     return (
       <div data-route="repo-git" className="flex min-h-full flex-col">
+        <RepoBackLink />
         <CenteredState
           icon={<TriangleAlertIcon size={16} />}
           tone="danger"
@@ -46,6 +57,7 @@ export function RepoGitRoute({ tab }: { tab: RepoTab }) {
   if (!info) {
     return (
       <div data-route="repo-git" className="flex min-h-full flex-col">
+        <RepoBackLink />
         <CenteredState
           icon={<GitBranchIcon size={16} />}
           tone="neutral"
@@ -61,6 +73,7 @@ export function RepoGitRoute({ tab }: { tab: RepoTab }) {
 function RepoView({ repo, info, tab }: { repo: RepoResponse; info: RepoInfo; tab: RepoTab }) {
   return (
     <div data-route="repo-git" className="flex min-h-full flex-col">
+      <RepoBackLink />
       <header
         data-slot="repo-header"
         className="px-[18px] pt-[18px] md:px-9 md:pt-9"
@@ -76,7 +89,7 @@ function RepoView({ repo, info, tab }: { repo: RepoResponse; info: RepoInfo; tab
         </div>
 
         <div data-slot="repo-tabs" className="flex items-end gap-6 border-b border-border [&>a]:min-h-11">
-          <TabLink to="/git" active={tab === 'changes'}>
+          <TabLink to="/git?view=repo" active={tab === 'changes'}>
             Changes
           </TabLink>
           <TabLink to="/git/commits" active={tab === 'commits'}>

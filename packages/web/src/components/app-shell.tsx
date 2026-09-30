@@ -178,7 +178,7 @@ export function AppShell({
   projectRail,
   toolsStatus,
 }: AppShellProps) {
-  const { pathname } = useLocation()
+  const { pathname, search } = useLocation()
   // The nav's area rules reason about the flat route map — strip any `/p/:projectId` prefix
   // (multi-project spec, step 3.2) so `/p/cezar/git/commits` still lights Git.
   const areaPathname = stripProjectPrefix(pathname)
@@ -204,6 +204,10 @@ export function AppShell({
   const mainRef = React.useRef<HTMLElement>(null)
   const previousPathname = React.useRef<string | null>(null)
   const routeOwnsArrival = routeOwnsScrollArrival(pathname)
+  // Git's phone index and its repository share ONE pathname (`/git` vs `/git?view=repo`), so the
+  // pathname-only reset below misses that switch. A boolean, so unrelated search changes do not
+  // reset anything.
+  const gitRepositoryView = areaPathname === '/git' && new URLSearchParams(search).get('view') === 'repo'
   // The desktop column's width (#788). Read once, lazily, from `localStorage` — it is a
   // browser-local preference like the theme, so there is nothing to fetch and nothing to wait
   // for, and the first paint is already the user's width rather than a default that jumps.
@@ -230,7 +234,7 @@ export function AppShell({
       isGithubPath(previous) && isGithubPath(pathname)) return
     const main = mainRef.current
     if (main) main.scrollTop = 0
-  }, [pathname, routeOwnsArrival])
+  }, [pathname, routeOwnsArrival, gitRepositoryView])
 
   // Close on route change. Without this the drawer survives the navigation it triggered and sits
   // on top of the view the user just asked for — and back/forward and the ⌘K palette (Step 4.3)

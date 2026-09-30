@@ -249,6 +249,29 @@ describe('AppShell', () => {
     expect(main.scrollTop).toBe(640)
   })
 
+  it.each([
+    ['/git?view=repo', '/git'],
+    ['/git', '/git?view=repo'],
+  ])('resets the main scroller on the Git worktree/repository switch %s to %s', (from, to) => {
+    renderShell(from, {}, <RouterLink to={to}>Switch Git view</RouterLink>)
+    const main = screen.getByRole('main')
+    main.scrollTop = 640
+
+    fireEvent.click(within(main).getByRole('link', { name: 'Switch Git view' }))
+
+    expect(main.scrollTop).toBe(0)
+  })
+
+  it('keeps the main scroller for an unrelated Git search change', () => {
+    renderShell('/git', {}, <RouterLink to="/git?other=1">Filter</RouterLink>)
+    const main = screen.getByRole('main')
+    main.scrollTop = 640
+
+    fireEvent.click(within(main).getByRole('link', { name: 'Filter' }))
+
+    expect(main.scrollTop).toBe(640)
+  })
+
   it('restores the generic top reset when leaving a task thread (#761)', () => {
     renderShell('/tasks/source')
     const main = screen.getByRole('main')

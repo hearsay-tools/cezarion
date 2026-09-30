@@ -14,6 +14,7 @@ import { useWorkspaceSignals } from '@/components/use-workspace-signals'
 import { TaskQuickListContainer } from '@/components/task-quick-list'
 import { ToolsMenu, forgeNote, toolsBlocker } from '@/components/tools-menu'
 import { useDocumentTitle } from '@/lib/use-document-title'
+import { GitSidebar } from '@/routes/repo-git/git-sidebar'
 import { GithubSidebar } from '@/routes/github/github-sidebar'
 import { SettingsSidebar } from '@/routes/settings/settings-sidebar'
 import { useActiveProjectId, stripProjectPrefix } from '@/lib/project-router'
@@ -122,6 +123,8 @@ export function AppShellContainer({ children }: { children: ReactNode }) {
   ) : /^\/github(?:\/|$)/.test(flatPathname) && forgeAvailable ? (
     // Explicit scope, not `queryScope()`: this subtree sits above the ProjectScopeProvider.
     <GithubSidebar scope={sidebarBoot ? 'default' : sidebarProjectId} />
+  ) : /^\/git(?:\/|$)/.test(flatPathname) ? (
+    <GitSidebar scope={sidebarBoot ? 'default' : sidebarProjectId} />
   ) : undefined
 
   return (

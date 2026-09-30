@@ -936,11 +936,32 @@ it('keeps sidebar data on the URL project when rendered above the route scope pr
     '/api/v1/projects': { bootProject: 'cezar', projects: [PROJECT, { ...PROJECT, id: 'shop', name: 'Shop' }] },
     '/api/v1/p/shop/runs': [run({ id: 'right', title: 'Selected project task', titleSummary: undefined, status: 'waiting' })],
   })
-  renderShell('/p/shop/git', client)
+  renderShell('/p/shop/new', client)
   expect(await screen.findByText('Selected project task')).toBeTruthy()
   expect(screen.queryByText('Previous project task')).toBeNull()
   expect(document.querySelector('[data-slot="nav-needs-you-dot"]')).not.toBeNull()
   expect(document.querySelector('[data-slot="task-row"] a')?.getAttribute('href')).toBe('/p/shop/tasks/right')
+})
+
+it('shows the Git view\'s task worktrees, read for the URL project, instead of the task list', async () => {
+  setApiScope('previous')
+  serve({
+    '/api/v1/health': HEALTH,
+    '/api/v1/todos': [],
+    '/api/v1/projects': { bootProject: 'cezar', projects: [PROJECT, { ...PROJECT, id: 'shop', name: 'Shop' }] },
+    '/api/v1/p/shop/worktrees': { worktrees: [{ runId: 'wt-1', title: 'Shop worktree', status: 'review', branch: 'cez/wt-1', sizeBytes: null, finishedAt: null, reclaimable: false }], totalBytes: null, keep: 0 },
+    '/api/v1/p/shop/runs': [run({ id: 'wt-1', title: 'Shop task', titleSummary: undefined, diffStat: { files: 1, adds: 4, dels: 2 } })],
+  })
+  renderShell('/p/shop/git')
+  const row = await waitFor(() => {
+    const el = document.querySelector('[data-slot="git-worktree-row"]')
+    if (!el) throw new Error('no worktree row yet')
+    return el
+  })
+  expect(row.getAttribute('href')).toBe('/p/shop/tasks/wt-1/changes')
+  expect(row.textContent).toContain('cez/wt-1')
+  expect(row.textContent).toContain('Shop task')
+  expect(document.querySelector('[data-slot="quick-list"]')).toBeNull()
 })
 
 it.each(['/tasks', '/tools'])('keeps sidebar navigation on its displayed boot project from %s', async (entry) => {
