@@ -996,3 +996,40 @@ it('applies single-project visibility to the Settings sidebar', async () => {
   await waitFor(() => expect(within(group).queryByRole('link', { name: 'Projects' })).toBeNull())
   expect(within(group).getByRole('link', { name: 'Resources' }).getAttribute('aria-current')).toBe('page')
 })
+
+describe('GitHub view sidebar list (#622)', () => {
+  const shop = { ...PROJECT, id: 'shop', name: 'Shop', forge: 'github' as const }
+  const GH = { available: true, repo: 'acme/shop', viewerLogin: 'me', issues: [], prs: [] }
+
+  it('replaces the task list with the GitHub filters, bound to the URL project rather than the stale scope', async () => {
+    setApiScope(null)
+    serve({
+      '/api/v1/health': { ...HEALTH, forge: { available: true } },
+      '/api/v1/todos': [],
+      '/api/v1/projects': { bootProject: 'cezar', projects: [{ ...PROJECT, forge: 'github' }, shop] },
+      '/api/v1/p/shop/github?limit=1000': GH,
+      '/api/v1/p/shop/runs': [],
+    })
+    renderShell('/p/shop/github/prs?filter=review')
+    const sidebar = await screen.findByRole('navigation', { name: 'Pull requests' })
+    expect(document.querySelector('[data-slot="github-sidebar"]')).not.toBeNull()
+    expect(document.querySelector('[data-slot="task-quick-list"]')).toBeNull()
+    expect(sidebar.querySelector('[data-gh-filter="review"]')?.getAttribute('aria-current')).toBe('page')
+    expect(sidebar.querySelector('[data-gh-filter="mine"]')?.getAttribute('href')).toBe('/p/shop/github/prs?filter=mine')
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/v1/p/shop/github?limit=1000')).toBe(true))
+    // The shell never asked another project's GitHub while the URL names Shop.
+    expect(fetchMock.mock.calls.some(([url]) => /^\/api\/v1\/github\?/.test(String(url)))).toBe(false)
+  })
+
+  it('keeps the task list where GitHub has no sidebar list: other views and forge-less projects', async () => {
+    serve({
+      '/api/v1/health': HEALTH,
+      '/api/v1/todos': [],
+      '/api/v1/projects': { bootProject: 'cezar', projects: [PROJECT, { ...shop, forge: 'none' as const }] },
+      '/api/v1/p/shop/runs': [],
+    })
+    renderShell('/p/shop/github')
+    await waitFor(() => expect(document.querySelector('[data-slot="task-quick-list"]')).not.toBeNull())
+    expect(document.querySelector('[data-slot="github-sidebar"]')).toBeNull()
+  })
+})

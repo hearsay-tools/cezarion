@@ -23,7 +23,17 @@ export function allLabels(items: readonly GithubItem[]): string[] {
  */
 export function filterGithubItems(
   items: readonly GithubItem[],
-  opts: { query?: string; labels?: readonly string[]; assignees?: readonly string[]; projectId?: string } = {},
+  opts: {
+    query?: string
+    labels?: readonly string[]
+    assignees?: readonly string[]
+    projectId?: string
+    /** The GitHub sidebar's predicates (#622): author login, and number sets for the task join and
+     *  the search-backed PR filters. An empty `includeNumbers` is an answer ("nothing"), not absence. */
+    author?: string
+    includeNumbers?: ReadonlySet<number>
+    excludeNumbers?: ReadonlySet<number>
+  } = {},
 ): GithubItem[] {
   const query = (opts.query ?? '').trim().toLowerCase()
   const required = opts.labels ?? []
@@ -32,6 +42,9 @@ export function filterGithubItems(
   return items.filter((item) => {
     if (required.length > 0 && !required.every((label) => item.labels.includes(label))) return false
     if (opts.assignees?.length && !item.assignees?.some(login => opts.assignees!.some(selected => selected.toLowerCase() === login.toLowerCase()))) return false
+    if (opts.author !== undefined && item.author.toLowerCase() !== opts.author.toLowerCase()) return false
+    if (opts.includeNumbers && !opts.includeNumbers.has(item.number)) return false
+    if (opts.excludeNumbers?.has(item.number)) return false
     if (opts.projectId && item.projectIds !== undefined && !item.projectIds.includes(opts.projectId)) return false
     if (query === '') return true
     if (idOnly) return String(item.number).includes(numeric)

@@ -70,28 +70,36 @@ export async function createGitHubFixture(sessionId: string) {
 
   function waitForGitHubSurface(pathname: string, target: AgentBrowser = browser): void {
     try {
+      // Below md the Issues tab links `?filter=all` (#622: a bare /github is the filter index
+      // there), so the strip is ready with either spelling of that link.
+      const issuesHref = scoped('/github')
       target.waitForFunction(
-        githubSurfaceReadyJs({
-          pathname,
-          issuesHref: scoped('/github'),
-          prsHref: scoped('/github/prs'),
-        }),
+        githubSurfaceReadyJs({ pathname, issuesHref, prsHref: scoped('/github/prs') })
+          .replace(
+            `tabs.querySelector(${JSON.stringify(`a[href="${issuesHref}"]`)})`,
+            `tabs.querySelector(${JSON.stringify(`a[href="${issuesHref}"], a[href="${issuesHref}?filter=all"]`)})`,
+          ),
       )
     } catch (cause) {
       throw githubNavFailure(target, cause)
     }
   }
 
+  /** `path` may carry a query (`/github?filter=all`): the surface wait reads the pathname only.
+   *  Below md a BARE `/github` is the filter index, so phone specs that want the list ask for an
+   *  explicit filter (#622). */
   async function openGitHub(path: string, target: AgentBrowser = browser): Promise<void> {
-    if (path === '/github') await rememberGithubView('issues')
+    const pathname = path.split('?')[0]!
+    if (pathname === '/github') await rememberGithubView('issues')
     target.goto(`${baseUrl}${scoped(path)}`)
-    waitForGitHubSurface(scoped(path), target)
+    waitForGitHubSurface(scoped(pathname), target)
   }
 
   function clickGitHubTab(path: '/github' | '/github/prs', target: AgentBrowser = browser): void {
     const href = scoped(path)
     try {
-      target.click(`[data-slot="gh-tabs"] a[href="${href}"]`)
+      // See waitForGitHubSurface: the phone's Issues tab carries `?filter=all`.
+      target.click(`[data-slot="gh-tabs"] a[href="${href}"], [data-slot="gh-tabs"] a[href="${href}?filter=all"]`)
     } catch (cause) {
       throw githubNavFailure(target, cause)
     }

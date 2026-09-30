@@ -197,7 +197,16 @@ describe('phone Tools page (#621 follow-up)', () => {
     it(`reaches /tools from the drawer with status dots and the settings link, ${variant.theme}`, async () => {
       // One real probe answer with the last tool turned into a missing one, so the hint and
       // "Set up ›" have something to render whatever this machine has installed.
-      const health = (await fetch(`${baseUrl}/api/v1/health`).then((r) => r.json())) as { checks: Array<Record<string, unknown>> }
+      const health = (await fetch(`${baseUrl}/api/v1/health`).then((r) => r.json())) as { checks: Array<Record<string, unknown>>; capabilities: Record<string, unknown> }
+      // Keep the routed health fixture isolated from real WebSocket health snapshots, which can
+      // replace it in the query cache. CI run 36715710375 shard 2 read a null last-tool hint instead
+      // of the injected hint; its snapshot still contains three other "Set up" links.
+      // Evidence: artifact cockpit-failures-shard-2, mobile-projects/
+      // reaches-tools-from-the-drawer-with-status-dots-and-the-settings-link-light-1/{probe.json,snapshot.txt}.
+      // A separate local reproduction failed 1/6 runs with no "Set up" links, then passed 14/14
+      // with this isolation. As in smoke/application-update, localHandoff:false prevents the
+      // health subscription; these assertions do not depend on local handoff.
+      health.capabilities = { ...health.capabilities, localHandoff: false }
       const missing = health.checks.length - 1
       health.checks[missing] = { name: health.checks[missing]!.name, available: false, hint: 'Install it and reload the cockpit.' }
       browser.routeJson('**/api/v1/health', health)

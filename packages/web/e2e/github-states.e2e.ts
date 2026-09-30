@@ -45,7 +45,9 @@ it.each(['loading', 'empty', 'error'].flatMap(state => ['light', 'dark'].map(the
         }
         return nativeFetch(input, init);
       };
-      document.querySelector('a[href="${scoped('/github')}"]').click();
+      // 402px is a phone: the tab link opens the filter index (#622), which waits for data. These
+      // states are about the list route itself, so reach it by its explicit-filter URL.
+      history.pushState(null, '', '${scoped('/github?filter=all')}'); dispatchEvent(new PopStateEvent('popstate'));
     })()`)
     const expected = state === 'loading' ? 'Loading GitHub' : state === 'error' ? 'Could not load GitHub' : 'No open issues'
     stateBrowser.waitForFunction(`document.querySelector('[data-route="github"]')?.textContent.includes(${JSON.stringify(expected)}) === true`)

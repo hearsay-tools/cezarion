@@ -14,6 +14,7 @@ import { useWorkspaceSignals } from '@/components/use-workspace-signals'
 import { TaskQuickListContainer } from '@/components/task-quick-list'
 import { ToolsMenu, forgeNote, toolsBlocker } from '@/components/tools-menu'
 import { useDocumentTitle } from '@/lib/use-document-title'
+import { GithubSidebar } from '@/routes/github/github-sidebar'
 import { SettingsSidebar } from '@/routes/settings/settings-sidebar'
 import { useActiveProjectId, stripProjectPrefix } from '@/lib/project-router'
 import { listCounts, runTitle } from '@/lib/task-groups'
@@ -109,6 +110,20 @@ export function AppShellContainer({ children }: { children: ReactNode }) {
 
   useDocumentTitle({ projectName, pageLabel })
 
+  const forgeAvailable = activeProject ? activeProject.forge === 'github' : health.data?.forge?.available === true
+  const flatPathname = stripProjectPrefix(pathname)
+  // Views that have their own sidebar list; everything else keeps the task list.
+  const viewSidebar = /^\/settings(?:\/|$)/.test(flatPathname) ? (
+    <SettingsSidebar
+      projectId={sidebarProjectId}
+      projectName={registry?.projects.find((project) => project.id === sidebarProjectId)?.name ?? (sidebarBoot ? repoChipOf(health.data)?.name ?? null : null)}
+      capabilities={health.data?.capabilities}
+    />
+  ) : /^\/github(?:\/|$)/.test(flatPathname) && forgeAvailable ? (
+    // Explicit scope, not `queryScope()`: this subtree sits above the ProjectScopeProvider.
+    <GithubSidebar scope={sidebarBoot ? 'default' : sidebarProjectId} />
+  ) : undefined
+
   return (
     // The sidebar's Active/Archived filter. The Tasks table owns a separate copy and is not a
     // consumer.
@@ -131,20 +146,14 @@ export function AppShellContainer({ children }: { children: ReactNode }) {
         // Hidden until health confirms the forge driver (R6 Step 1.1) — same honesty rule as
         // the chips: the nav must not claim a GitHub tab it cannot back. The Tools menu's
         // forge note says why it is absent.
-        forgeAvailable={activeProject ? activeProject.forge === 'github' : health.data?.forge?.available === true}
+        forgeAvailable={forgeAvailable}
         // Hidden unless health reports the opt-in inbox (#471) — same honesty rule as above:
         // the nav must not offer an Inbox this server will never fill.
         inboxAvailable={inboxAvailable}
         // Hidden unless health reports the opt-in automations capability (#801).
         automationsAvailable={automationsAvailable}
         banner={<ProviderBannerContainer />}
-        sidebarList={/^\/settings(?:\/|$)/.test(stripProjectPrefix(pathname)) ? (
-          <SettingsSidebar
-            projectId={sidebarProjectId}
-            projectName={registry?.projects.find((project) => project.id === sidebarProjectId)?.name ?? (sidebarBoot ? repoChipOf(health.data)?.name ?? null : null)}
-            capabilities={health.data?.capabilities}
-          />
-        ) : undefined}
+        sidebarList={viewSidebar}
         taskQuickList={<TaskQuickListContainer projectId={sidebarProjectId} boot={sidebarBoot} />}
         sidebarProjectId={sidebarProjectId}
         projectHeader={<SidebarProjectHeader />}

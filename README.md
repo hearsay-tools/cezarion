@@ -415,8 +415,18 @@ are yours or the machine's and live at `/settings/global`.
 On desktop, Settings replaces the sidebar task list with two groups: **This project**
 and **Global · every project**. Each group includes General and its available sections;
 the current section is highlighted, and the main page shows its content. On mobile,
-the section picker and General page's section cards provide navigation. Other views
-continue to show tasks in the sidebar.
+the section picker and General page's section cards provide navigation.
+
+The GitHub sidebar groups **Issues** (Assigned to me, No task yet, Has a task,
+All open) and **Pull requests** (Review requested, Mine, Checks failing, All open).
+Selecting a filter updates the URL, so reloading keeps that selection. The issue
+list, detail pane and Hand to agent action stay in the main area. On mobile, the
+GitHub tab opens the filter screen; selecting a row opens its list.
+
+Has a task and No task yet use issue references from this project's non-archived
+tasks, excluding references to other repositories. Counts show a `+` when the
+underlying list or search reaches its result limit; an unavailable count is not
+shown as zero. Views without their own navigation still show tasks in the sidebar.
 
 ### Grouping connected repositories: tags and the All tasks page
 

@@ -267,20 +267,25 @@ describe('task quick-list', () => {
   })
 
   it('renders the diff pair through the success/danger tokens, not as plain text', () => {
-    const pair = browser.evaluate(`(() => {
+    // Wait, then read as one step. The setup waits for a quick-list bucket, which does not
+    // guarantee this particular diff pair exists at measurement time. PR #712 CI shard 4
+    // read before the `fix-review-pr` row's diff pair existed (`pair` was null, so
+    // `adds` read `undefined`; the failure bundle's snapshot, taken moments later, shows the
+    // row painted with `+128 −14`). The content and colour assertions below are unchanged.
+    const pair = browser.waitForValue<{ adds: string; dels: string; addsColor: string; delsColor: string }>(`(() => {
       const el = document.querySelector('[data-slot="task-row"][data-run-id="fix-review-pr"] [data-slot="diff-stat"]')
-      if (!el) return null
-      const [adds, dels] = el.querySelectorAll('span')
+      const [adds, dels] = el?.querySelectorAll('span') ?? []
+      if (!adds || !dels) return null
       return {
         adds: adds.textContent, dels: dels.textContent,
         // Resolved by the real CSS: green ≠ red proves the two tokens actually applied.
         addsColor: getComputedStyle(adds).color, delsColor: getComputedStyle(dels).color,
       }
-    })()`) as { adds: string; dels: string; addsColor: string; delsColor: string } | null
+    })()`)
 
-    expect(pair?.adds).toBe('+128')
-    expect(pair?.dels).toBe('−14')
-    expect(pair?.addsColor).not.toBe(pair?.delsColor)
+    expect(pair.adds).toBe('+128')
+    expect(pair.dels).toBe('−14')
+    expect(pair.addsColor).not.toBe(pair.delsColor)
   })
 
   it('paints one dot per row, in the tone deriveAttention picked', () => {
@@ -1165,17 +1170,22 @@ describe('a row under width contention, in a column the user can widen', () => {
       )
     )
 
-  /** The row title's measured width — how much of the column the NAME actually got. */
+  /** The row title's measured width — how much of the column the NAME actually got.
+   *  Wait, then read as one step: the row existed at the `beforeEach` wait, was absent at the
+   *  measurement, and was present again in the failure snapshot. The trigger was not reproduced
+   *  in four targeted reruns. Evidence: .ai/qa/local-runs/1790767992591-919007/lane-4-failures/
+   *  quick-list/grows-the-name-as-the-column-grows-without-ever-shrinking-it-1/{probe.json,snapshot.txt}.
+   *  Read only while the measured node exists; keep the width assertions unchanged. */
   const titleWidth = () =>
     Number(
-      browser.evaluate(
-        `document.querySelector('${ROW_ID} [data-slot="task-row-title"]').getBoundingClientRect().width`
+      browser.waitForValue(
+        `document.querySelector('${ROW_ID} [data-slot="task-row-title"]')?.getBoundingClientRect().width ?? null`
       )
     )
 
   /** The diff pair's RESOLVED display — the container query's answer, not a class. */
   const diffDisplay = () =>
-    String(browser.evaluate(`getComputedStyle(document.querySelector('${ROW_ID} [data-slot="diff-stat"]')).display`))
+    String(browser.waitForValue(`(() => { const diff = document.querySelector('${ROW_ID} [data-slot="diff-stat"]'); return diff ? getComputedStyle(diff).display : null })()`))
 
   /** Set the width through the stored preference and reload — the non-pointer path to a width,
    *  used where the assertion is about the LAYOUT at that width rather than about dragging. */

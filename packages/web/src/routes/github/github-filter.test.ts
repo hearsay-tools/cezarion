@@ -23,6 +23,23 @@ const items = [
   item({ number: 135, title: 'Flaky e2e cleanup', labels: ['bug', 'flaky-test'] }),
 ]
 
+describe('filterGithubItems sidebar predicates', () => {
+  const rows = [
+    item({ number: 1, title: 'a', author: 'Ada' }),
+    item({ number: 2, title: 'b', author: 'bob' }),
+    item({ number: 3, title: 'c', author: 'ada' }),
+  ]
+  it('narrows by author case-insensitively', () => {
+    expect(filterGithubItems(rows, { author: 'ADA' }).map((i) => i.number)).toEqual([1, 3])
+  })
+  it('includes or excludes by number set', () => {
+    expect(filterGithubItems(rows, { includeNumbers: new Set([2, 3]) }).map((i) => i.number)).toEqual([2, 3])
+    expect(filterGithubItems(rows, { excludeNumbers: new Set([2]) }).map((i) => i.number)).toEqual([1, 3])
+    // An empty include set is a real answer (nothing matches), not "no filter".
+    expect(filterGithubItems(rows, { includeNumbers: new Set() })).toEqual([])
+  })
+})
+
 describe('filterGithubItems', () => {
   it('matches a bare number or #id against the item number', () => {
     expect(filterGithubItems(items, { query: '142' }).map((i) => i.number)).toEqual([142])

@@ -110,7 +110,18 @@ describe('Hand off to webhook', () => {
     // #621: below md the pushed top bar owns the title row, so Hand off lives in the run-details
     // disclosure (lane-4 bundle task-handoff/is-a-bottom-sheet-…-1: trigger present, zero-size).
     browser.click('[data-slot="mobile-top-bar"] [aria-label="Show run details"]')
-    const trigger = box(handoff)
+    // Ensure the scrolling run-details trigger is on screen before clicking. CI run 36715710375
+    // shard 3 captured no open dialog at failure and a trigger outside the viewport. A tail-pin
+    // moving it before the click is an inference, not a proven sequence; five local runs did not
+    // reproduce it (four under CPU load). Evidence: artifact cockpit-failures-shard-3, task-handoff/
+    // is-a-bottom-sheet-with-a-full-width-44px-action-at-360-640-1/{probe.json,screenshot.png,snapshot.txt}.
+    const trigger = browser.waitForStable<{ top: number; bottom: number; width: number; height: number }>(`(() => {
+      const el = document.querySelector(${JSON.stringify(handoff)});
+      if (!el) return null;
+      el.scrollIntoView({ block: 'center', behavior: 'instant' });
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.top >= 0 && r.bottom <= window.innerHeight ? { top: r.top, bottom: r.bottom, width: r.width, height: r.height } : null;
+    })()`, { holdMs: 300 })
     expect(trigger.width).toBeGreaterThanOrEqual(44)
     expect(trigger.height).toBeGreaterThanOrEqual(44)
     browser.click(handoff)
