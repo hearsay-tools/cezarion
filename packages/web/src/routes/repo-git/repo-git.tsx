@@ -39,7 +39,7 @@ export function RepoGitRoute({ tab }: { tab: RepoTab }) {
   // A phone's bare /git is the task worktree screen; the repository is `?view=repo`. Commits,
   // Branches and every deep link keep their URLs, and desktop never leaves the repository.
   if (tab === 'changes' && !isDesktop && params.get('view') !== 'repo') return <GitWorktreeScreen />
-  if (repo.isPending) return <RepoGitLoading back />
+  if (repo.isPending) return <RepoGitLoading />
   if (repo.isError) {
     return (
       <div data-route="repo-git" className="flex min-h-full flex-col">

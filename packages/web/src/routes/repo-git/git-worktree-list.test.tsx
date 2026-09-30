@@ -1,4 +1,5 @@
 import { QueryClientProvider } from '@tanstack/react-query'
+import { Suspense, lazy, type ComponentType } from 'react'
 import { cleanup, render, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -8,6 +9,7 @@ import type { RepoResponse, RunRecord, WorktreeInfo } from '@open-mercato/cezar-
 
 import { GitSidebar } from './git-sidebar'
 import { RepoGitRoute } from './repo-git'
+import { RepoGitLoading } from './repo-git-loading'
 
 /**
  * The Git view's Task worktrees list (#622): the desktop sidebar group and the phone's own
@@ -235,16 +237,20 @@ describe('the phone Git index', () => {
     }
   })
 
-  it.each([
-    ['loading', () => stub({ worktrees: [] }), false],
-    ['error', () => { stub(); vi.stubGlobal('fetch', vi.fn(async () => json({ error: 'nope' }, 400))) }, true],
-  ])('keeps Back to worktrees through the repository %s gate', async (_name, arrange) => {
+  it('keeps Back to worktrees through the repository loading gate', async () => {
     setDesktop(false)
-    arrange()
+    stub({ worktrees: [] })
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => {})))
     renderRoute('/git?view=repo')
-    // The first paint is the loading gate; the error one follows.
+    await waitFor(() => expect(document.body.textContent).toContain('Loading repository'))
     expect(q('[data-slot="git-back-worktrees"]')?.getAttribute('href')).toBe('/git')
-    await waitFor(() => expect(q('[data-slot="repo-tabs"]') !== null || q('[data-slot="centered-state"]') !== null).toBe(true))
+  })
+
+  it('keeps Back to worktrees through the repository error gate', async () => {
+    setDesktop(false)
+    vi.stubGlobal('fetch', vi.fn(async () => json({ error: 'nope' }, 400)))
+    renderRoute('/git?view=repo')
+    await waitFor(() => expect(document.body.textContent).toContain('Could not load the repository'))
     expect(q('[data-slot="git-back-worktrees"]')?.getAttribute('href')).toBe('/git')
   })
 
@@ -264,5 +270,33 @@ describe('the phone Git index', () => {
     renderRoute('/git')
     await waitFor(() => expect(q('[data-slot="git-worktree-empty"]')).not.toBeNull())
     expect(q('[data-slot="git-open-repository"]')).not.toBeNull()
+  })
+})
+
+describe('the suspended lazy repository routes (routes.tsx fallbacks)', () => {
+  const Never = lazy((): Promise<{ default: ComponentType }> => new Promise(() => {}))
+  function renderFallback(entry: string) {
+    return render(
+      <MemoryRouter initialEntries={[entry]}>
+        <Routes>
+          <Route path="/git" element={<Suspense fallback={<RepoGitLoading />}><Never /></Suspense>} />
+          <Route path="/git/commits" element={<Suspense fallback={<RepoGitLoading />}><Never /></Suspense>} />
+          <Route path="/git/commits/:sha" element={<Suspense fallback={<RepoGitLoading />}><Never /></Suspense>} />
+          <Route path="/git/branches" element={<Suspense fallback={<RepoGitLoading />}><Never /></Suspense>} />
+        </Routes>
+      </MemoryRouter>,
+    )
+  }
+
+  it.each(['/git/commits', '/git/commits/abc1234', '/git/branches', '/git?view=repo'])('%s offers Back to worktrees while its chunk loads', (entry) => {
+    renderFallback(entry)
+    expect(document.body.textContent).toContain('Loading repository')
+    expect(q('[data-slot="git-back-worktrees"]')?.getAttribute('href')).toBe('/git')
+  })
+
+  it('the bare /git index never links to itself', () => {
+    renderFallback('/git')
+    expect(document.body.textContent).toContain('Loading repository')
+    expect(q('[data-slot="git-back-worktrees"]')).toBeNull()
   })
 })
