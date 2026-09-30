@@ -255,6 +255,16 @@ describe('scoped route map (/p/:projectId)', () => {
     })
   }
 
+  // A task worktree never registers itself, so the registry has no row for the boot project;
+  // the desktop title names it the way the sidebar header does, from the repo root (#622).
+  it('names an unregistered boot project in the Settings title from its repo root', () => {
+    const health = { ...HEALTH, repo: { root: '/home/u/worktrees/a5523045', branch: 'main' } } as unknown as typeof HEALTH
+    renderAt(`/p/${BOOT}/settings`, { health, registry: { ...REGISTRY, projects: [] } })
+    const title = screen.getByRole('heading', { level: 1 }).textContent
+    expect(title).toContain('Settings · a5523045')
+    expect(title).not.toContain('this project')
+  })
+
   // The tab lives in the path, so /tasks/:id/changes must not fall back to the thread.
   it('a task tab deep link renders the tab, not the thread', () => {
     renderAt(`/p/${BOOT}/tasks/abc123/changes`)

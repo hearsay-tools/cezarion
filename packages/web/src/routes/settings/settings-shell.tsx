@@ -3,8 +3,8 @@ import { ChevronDownIcon, ChevronRightIcon } from '@/components/design-icons'
 
 import { Link as RouterLink, NavLink as RouterNavLink } from 'react-router'
 import type { Capabilities } from '@open-mercato/cezar-api-client'
-import { useProjects } from '@/api/queries'
-import { Link as ScopedLink, NavLink as ScopedNavLink, useActiveProjectId } from '@/lib/project-router'
+import { useActiveProjectIdentity } from '@/components/sidebar-project-header'
+import { Link as ScopedLink, NavLink as ScopedNavLink } from '@/lib/project-router'
 import { ProjectGeneral } from './project-general'
 import { visibleSettingsSections, type SettingsScope, type SettingsSection } from './registry'
 
@@ -60,10 +60,8 @@ function navComponents(scope: SettingsScope) {
  * from the accessible name.
  */
 function SettingsMainHeader({ scope, title, mobileTitle }: { scope: SettingsScope; title: string; mobileTitle: string }) {
-  const projectId = useActiveProjectId()
-  const projects = useProjects().data
-  // Unprefixed `/settings/…` mounts the boot project, exactly as the sidebar's group label does.
-  const projectName = projects?.projects.find((project) => project.id === (projectId ?? projects.bootProject))?.name
+  // The same name the sidebar header shows; an unregistered boot project falls back to its root.
+  const projectName = useActiveProjectIdentity().name
   const where = scope === 'global' ? 'every project' : (projectName ?? 'this project')
   return (
     <header data-slot="settings-main-header" className="settings-route-header flex shrink-0 flex-col gap-2">

@@ -22,12 +22,9 @@ import { cn } from '@/lib/utils'
 const menuClass = 'w-[228px] rounded-[10px] border-border bg-sidebar p-[5px] text-foreground shadow-[0_10px_28px_#00000047] motion-reduce:animate-none'
 const itemClass = 'h-8 gap-2.5 rounded-[6px] px-[9px] py-0 text-[13px] focus:bg-sidebar-row-hover focus:text-foreground [&_svg]:size-[15px] [&_svg]:text-soft-foreground focus:[&_svg]:text-foreground max-md:min-h-11'
 
-/** This project's identity and actions. Workspace health describes only the boot project;
- * the registry is authoritative for every other project's name, root and branch. */
-export function SidebarProjectHeader({ onNavigate }: { onNavigate?: () => void } = {}) {
-  const markRef = useRef<HTMLSpanElement>(null)
-  const menuButtonRef = useRef<HTMLButtonElement>(null)
-  const [menuOffset, setMenuOffset] = useState(0)
+/** The open project's name, root and branch, read the way its sidebar header shows them: the
+ * registry first, then the boot project's own repo (a task worktree is never registered). */
+export function useActiveProjectIdentity() {
   const activeProjectId = useActiveProjectId()
   const health = useHealth()
   const registry = useProjects()
@@ -38,6 +35,16 @@ export function SidebarProjectHeader({ onNavigate }: { onNavigate?: () => void }
   const root = project?.root ?? bootRepo?.root
   const name = project?.name ?? root?.split(/[\\/]/).filter(Boolean).at(-1)
   const branch = bootRepo?.branch ?? project?.branch
+  return { health, registry, projectId, project, root, name, branch }
+}
+
+/** This project's identity and actions. Workspace health describes only the boot project;
+ * the registry is authoritative for every other project's name, root and branch. */
+export function SidebarProjectHeader({ onNavigate }: { onNavigate?: () => void } = {}) {
+  const markRef = useRef<HTMLSpanElement>(null)
+  const menuButtonRef = useRef<HTMLButtonElement>(null)
+  const [menuOffset, setMenuOffset] = useState(0)
+  const { health, registry, projectId, project, root, name, branch } = useActiveProjectIdentity()
   const local = health.data?.capabilities.localHandoff === true
   const identity = name ?? (registry.isPending ? 'Loading project…' : 'Project unavailable')
   const detail = [local ? root : undefined, branch].filter(Boolean).join(' · ')
