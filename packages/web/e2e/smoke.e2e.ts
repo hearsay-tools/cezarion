@@ -326,12 +326,13 @@ describe('cockpit app shell', () => {
     // Every URL below is a LEGACY flat one, so each load settles in two hops: the boot-project
     // redirect, then whatever the route itself redirects to. Pathname can update a tick before
     // React commits `aria-current`, so wait for both — sampling the nav on URL alone reads the
-    // previous screen's answer.
+    // previous screen's answer. Scoped to the Main landmark: a view's own sidebar list is a
+    // separate nav that marks its open row too (the Git Repository facets, #622).
     const settleAt = (pathname: string, label: string) =>
       browser.waitForStable(
         `(() => {
         if (location.pathname !== '${pathname}') return null
-        const labels = Array.from(document.querySelectorAll('[data-slot="sidebar"] nav a[aria-current="page"]')).map(a => {
+        const labels = Array.from(document.querySelectorAll('[data-slot="sidebar"] nav[aria-label="Main"] a[aria-current="page"]')).map(a => {
           return a.getAttribute('aria-label')
         })
         return labels.length === 1 && labels[0] === '${label}' ? labels : null
