@@ -306,6 +306,7 @@ entries:
     note: Ported SAML recovery, HTTPS credentials, fork-parent HTTPS transport, and unterminated error output.
     fork:
       issue: 437
+      pr: 719
       commits:
         - 01e6d382061c18095793ff256cb247229382a2aa
     decided: 2026-09-30
