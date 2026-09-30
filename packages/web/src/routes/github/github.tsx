@@ -13,12 +13,13 @@ import {
   type PointerEvent,
   type ReactNode,
 } from 'react'
-import { useParams } from 'react-router'
+import { useParams, useSearchParams } from 'react-router'
+import { queryScope } from '@open-mercato/cezar-api-client'
 
 import { Link, Navigate } from '@/lib/project-router'
 
 import { getGithub, getGithubComments, getGithubPrChanges, getGithubPrMergeState, mergeGithubPr, putUiState } from '@/api/client'
-import { queryKeys, useGithub, useGithubChecks, useGithubComments, useGithubPrChanges, useGithubSearch, useHealth, useSkills, useUiState, useWorkflows } from '@/api/queries'
+import { queryKeys, useGithub, useGithubChecks, useProjectRuns, useGithubComments, useGithubPrChanges, useGithubSearch, useHealth, useSkills, useUiState, useWorkflows } from '@/api/queries'
 import type {
   GithubComment,
   GithubItem,
@@ -63,7 +64,13 @@ import { cn, isHttpUrl } from '@/lib/utils'
 import { Markdown } from '../task-thread/markdown'
 import { IssueFilters } from './issue-filters'
 import { allLabels, filterGithubItems, labelChipStyle, shouldSearchForge } from './github-filter'
+import { GithubFilterScreen } from './github-filter-screen'
 import { GithubLoading } from './github-loading'
+import {
+  FAILING_QUERY, REVIEW_QUERY, githubFilterPath, isSearchBackedFilter, issueNumbersWithTask, parseGithubFilter,
+  rowsFromSearch, searchQueryFor, GITHUB_LIST_LIMIT, ISSUE_ROWS, PR_ROWS, type GithubFilter,
+} from './github-sidebar-model'
+import { useIsDesktop } from '@/lib/use-desktop'
 import { HandToAgent } from './hand-to-agent'
 import { readFollowupSelection, writeFollowupSelection } from './hand-to-agent-draft'
 
@@ -92,7 +99,7 @@ import { readFollowupSelection, writeFollowupSelection } from './hand-to-agent-d
 /** The single fast list fetch (`/api/github` limit). No longer split into a fast batch + a slow
  *  everything-open shot — dropping `statusCheckRollup` from the list made one fetch of the whole
  *  open set cheap. A count AT this cap still reads `N+`, since the open set may exceed it. */
-const LIST_LIMIT = 1000
+const LIST_LIMIT = GITHUB_LIST_LIMIT
 
 /** How many on-screen PR rows one checks request covers (matches the server's `GH_CHECKS_MAX`).
  *  The visible window is hydrated first; without virtualization (Phase 2) rows past this stay
@@ -213,6 +220,20 @@ export function GithubRoute({
   index?: boolean
 }) {
   const { n } = useParams()
+  // The sidebar list's state (#622) lives in the URL: `?filter=` names one of the view's filters.
+  // Absent = the legacy unfiltered list; present (even `all`) also means "the list, not the phone's
+  // filter screen, and not the remembered-tab redirect".
+  const [searchParams, setSearchParams] = useSearchParams()
+  const isDesktop = useIsDesktop()
+  const rawFilterParam = searchParams.get('filter')
+  const filter: GithubFilter | null = parseGithubFilter(view, rawFilterParam)
+  const activeFilter: GithubFilter = filter ?? 'all'
+  const setFilterParam = (value: GithubFilter | null) => setSearchParams((prev) => {
+    const next = new URLSearchParams(prev)
+    if (value === null) next.delete('filter')
+    else next.set('filter', value)
+    return next
+  }, { replace: true })
   // One fast shot now that the list dropped `statusCheckRollup` (#664) — no more fast/full swap.
   const list = useGithub({ limit: LIST_LIMIT })
   // #801: automations are opt-in, so the cross-link into them exists exactly while the server
@@ -259,6 +280,10 @@ export function GithubRoute({
       void queryClient.invalidateQueries({ queryKey: queryKeys.githubChecks(checkPrNumbers) })
       // Search has no server cache; refresh the active narrow as well as the open list.
       void queryClient.invalidateQueries({ queryKey: queryKeys.githubSearch(view === 'issues' ? 'issue' : 'pr', debouncedQuery) })
+      // The sidebar's qualifier searches (Review requested / Checks failing) have no server cache
+      // either; a refresh that left them stale would show yesterday's hits in a fresh list.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.githubSearch('pr', REVIEW_QUERY) })
+      void queryClient.invalidateQueries({ queryKey: queryKeys.githubSearch('pr', FAILING_QUERY) })
 
       // The open thread must be re-fetched with `refresh: true` (#525). Invalidating its key is
       // NOT enough, and was the bug in the first attempt: an invalidate re-requests
@@ -388,12 +413,38 @@ export function GithubRoute({
   useEffect(() => {
     if (gh && !projectsPending && projectFilter && !activeProject) setProjectFilter('')
   }, [gh, projectFilter, activeProject, projectsPending])
+  // `?filter=assigned` is the sidebar's "Assigned to me": the viewer as the one selected assignee,
+  // in the same predicate the Assignees control drives. Without a known login it cannot be applied
+  // (the gate below says so) rather than silently showing everything.
+  const isAssignedFilter = view === 'issues' && activeFilter === 'assigned'
+  const effectiveAssignees = isAssignedFilter ? (gh?.viewerLogin ? [gh.viewerLogin] : []) : assigneeFilter
+  const changeAssignees = (next: string[]) => {
+    setAssigneeFilter(next)
+    // Editing the selection by hand leaves the preset: the URL stops claiming "assigned".
+    if (isAssignedFilter) setFilterParam('all')
+  }
   const clearFilters = () => {
     setQuery('')
     setLabelFilter([])
     setAssigneeFilter([])
     setProjectFilter('')
+    if (filter !== null && filter !== 'all') setFilterParam('all')
   }
+
+  // Task join (Has a task / No task yet): this project's live runs, read through `taskReferences`.
+  // Fetched only while such a filter is on; the sidebar asks for the same cache entry anyway.
+  const projectScope = queryScope()
+  const taskFilter = view === 'issues' && (activeFilter === 'no-task' || activeFilter === 'has-task')
+  const runsQuery = useProjectRuns(projectScope, taskFilter, projectScope === 'default')
+  const taskNumbers = useMemo(
+    () => (runsQuery.data ? issueNumbersWithTask(runsQuery.data, gh?.repo, projectScope) : null),
+    [runsQuery.data, gh?.repo, projectScope],
+  )
+  // Review requested / Checks failing: the existing `gh search prs` route with a qualifier. The
+  // main rows are the HITS (capped at 50 by the server), never an intersection with the open list.
+  const backedQuery = isSearchBackedFilter(view, filter) ? searchQueryFor(filter) : null
+  const filterSearch = useGithubSearch('pr', backedQuery ?? '', backedQuery !== null && gh?.available === true)
+  const filterHits = backedQuery !== null && filterSearch.data?.available ? filterSearch.data.items : null
 
   // Cross-state search fallback (#730). The list tier only ever holds OPEN items, so a closed or
   // merged issue/PR is not "past the fetched window" — it was never fetched, and no amount of
@@ -401,29 +452,62 @@ export function GithubRoute({
   // ask the forge instead. Like the checks window below, these hooks must sit ABOVE the early
   // returns, so the open set is derived from the payload rather than from the post-filter `items`.
   const debouncedQuery = useDebouncedValue(query, SEARCH_DEBOUNCE_MS)
-  const openItems = useMemo(
+  const fullList = useMemo(
     () => (gh?.available ? (view === 'issues' ? gh.issues : gh.prs) : []),
     [gh, view],
   )
+  const filterRows = useMemo(() => (filterHits ? rowsFromSearch(filterHits, fullList) : null), [filterHits, fullList])
+  // A filter that cannot be applied yet (loading) or at all (blocked) must show NOTHING plus its
+  // reason, never the unfiltered list under a filter's name and never a fake "no matches".
+  const filterGate: { kind: 'loading' | 'blocked'; message: string } | null = (() => {
+    if (!gh?.available) return null
+    if ((isAssignedFilter || (view === 'prs' && activeFilter === 'mine')) && !gh.viewerLogin) {
+      return { kind: 'blocked', message: 'GitHub login unavailable, so this filter cannot be applied.' }
+    }
+    if (taskFilter && !taskNumbers) {
+      return runsQuery.isError
+        ? { kind: 'blocked', message: 'The task list is unavailable, so this filter cannot be applied.' }
+        : { kind: 'loading', message: 'Loading tasks…' }
+    }
+    if (backedQuery !== null && !filterHits) {
+      if (filterSearch.data?.available === false) return { kind: 'blocked', message: `GitHub could not be searched: ${filterSearch.data.reason ?? 'unknown reason'}.` }
+      if (filterSearch.isError) return { kind: 'blocked', message: `GitHub could not be searched: ${filterSearch.error instanceof Error ? filterSearch.error.message : 'the search request failed'}.` }
+      return { kind: 'loading', message: 'Searching GitHub…' }
+    }
+    return null
+  })()
+  const openItems = useMemo(() => (filterGate ? [] : (filterRows ?? fullList)), [filterGate, filterRows, fullList])
+  // Predicates the sidebar filters add on top of the text/label/assignee narrow, shared by the
+  // open rows, the local-match probe and the cross-state search hits.
+  const narrow = useMemo(() => {
+    if (view === 'issues') {
+      if (activeFilter === 'no-task' && taskNumbers) return { excludeNumbers: taskNumbers }
+      if (activeFilter === 'has-task' && taskNumbers) return { includeNumbers: taskNumbers }
+      return {}
+    }
+    if (activeFilter === 'mine' && gh?.viewerLogin) return { author: gh.viewerLogin }
+    if (filterHits) return { includeNumbers: new Set(filterHits.map((hit) => hit.number)) }
+    return {}
+  }, [view, activeFilter, taskNumbers, gh?.viewerLogin, filterHits])
   // Evaluated against the DEBOUNCED query, not the live one: the fallback must be decided by the
   // same text the request will carry, or a fast typist fires a `gh` subprocess per keystroke.
   // Memoized because this walks the whole open set — up to `LIST_LIMIT` rows — and only its three
   // inputs can change the answer; unmemoized it re-filtered that set on every unrelated render,
   // doubling the filtering the render body below already does for the live query (#838).
   const localMatches = useMemo(
-    () => filterGithubItems(openItems, { query: debouncedQuery, labels: labelFilter,
-      ...(view === 'issues' ? { assignees: assigneeFilter, projectId: activeProject } : {}),
+    () => filterGithubItems(openItems, { query: debouncedQuery, labels: labelFilter, ...narrow,
+      ...(view === 'issues' ? { assignees: effectiveAssignees, projectId: activeProject } : {}),
     }),
-    [openItems, debouncedQuery, labelFilter, view, assigneeFilter, activeProject],
+    [openItems, debouncedQuery, labelFilter, view, effectiveAssignees, activeProject, narrow],
   )
   const querySettled = query.trim() === debouncedQuery.trim()
   const searchWanted = gh?.available === true && querySettled && shouldSearchForge(debouncedQuery, localMatches)
   const forgeSearch = useGithubSearch(view === 'issues' ? 'issue' : 'pr', debouncedQuery, searchWanted)
 
   const allItems = openItems
-  const items = filterGithubItems(allItems, { query, labels: labelFilter, ...(view === 'issues' ? { assignees: assigneeFilter, projectId: activeProject } : {}) })
+  const items = filterGithubItems(allItems, { query, labels: labelFilter, ...narrow, ...(view === 'issues' ? { assignees: effectiveAssignees, projectId: activeProject } : {}) })
   const compactPreview = view === 'issues' && n !== undefined && !mobileListExpanded
-  const filtering = query.trim() !== '' || labelFilter.length > 0 || (view === 'issues' && (assigneeFilter.length > 0 || activeProject !== ''))
+  const filtering = query.trim() !== '' || labelFilter.length > 0 || (view === 'issues' && (effectiveAssignees.length > 0 || activeProject !== '')) || (filter !== null && filter !== 'all')
   // Only the settled query may contribute rows, filter metadata or error states. Disabling the
   // query does not evict its cached data, so never render data solely because it is available.
   const searchPayload = searchWanted && forgeSearch.data?.available ? forgeSearch.data : null
@@ -436,13 +520,13 @@ export function GithubRoute({
   const metadataFailure = view === 'issues' && searchPayload
     ? activeProject && searchPayload.items.some(item => item.projectIds === undefined)
       ? searchPayload.projectsReason ?? 'Project board data is incomplete. Refresh to try again.'
-      : assigneeFilter.length && searchPayload.items.some(item => item.assignees === undefined)
+      : effectiveAssignees.length && searchPayload.items.some(item => item.assignees === undefined)
         ? 'Assignee data is incomplete. Refresh to try again.'
         : null
     : null
   const searchHits = searchPayload && !metadataFailure
-    ? filterGithubItems(searchPayload.items, { labels: labelFilter,
-        ...(view === 'issues' ? { assignees: assigneeFilter, projectId: activeProject } : {}),
+    ? filterGithubItems(searchPayload.items, { labels: labelFilter, ...narrow,
+        ...(view === 'issues' ? { assignees: effectiveAssignees, projectId: activeProject } : {}),
       }).filter(
         (item) => !listedNumbers.has(item.number),
       )
@@ -471,7 +555,7 @@ export function GithubRoute({
     if (!gh?.available || view !== 'prs') return []
     const nums = new Set<number>()
     if (selectedNumber !== null && Number.isInteger(selectedNumber)) nums.add(selectedNumber)
-    for (const pr of [...searchHits, ...gh.prs]) {
+    for (const pr of [...searchHits, ...openItems, ...gh.prs]) {
       if (nums.size >= CHECKS_WINDOW) break
       nums.add(pr.number)
     }
@@ -487,7 +571,7 @@ export function GithubRoute({
   // clicked resolves to "not among the open issues". `/github/prs` and `/github/prs/:n` never had
   // the bug precisely because they already shared one element type. Below the hooks, like every
   // other early return in this component.
-  if (index && uiState.data?.githubView === 'prs') {
+  if (index && isDesktop && rawFilterParam === null && uiState.data?.githubView === 'prs') {
     return <Navigate to="/github/prs" replace />
   }
 
@@ -509,6 +593,12 @@ export function GithubRoute({
 
   // No thread is mounted on the unavailable path — keep the ref honest rather than stale.
   openThreadRef.current = null
+
+  // On a phone the bare `/github` is the filter screen (#622): the sidebar's list as its own
+  // screen. Picking a row pushes the list with an explicit `?filter=`, which this skips.
+  if (index && !isDesktop && rawFilterParam === null && n === undefined && gh.available) {
+    return <GithubFilterScreen repo={gh.repo} />
+  }
 
   if (!gh.available) {
     return (
@@ -548,7 +638,7 @@ export function GithubRoute({
   // A closed item often wears labels no open one does; its own colors win nothing over the repo
   // map, they only fill the gaps.
   const labelColors = { ...(searchPayload?.labelColors ?? {}), ...(gh.labelColors ?? {}) }
-  const labelOptions = allLabels([...allItems, ...(searchPayload?.items ?? [])])
+  const labelOptions = allLabels([...allItems, ...fullList, ...(searchPayload?.items ?? [])])
   const number = n === undefined ? null : Number.parseInt(n, 10)
   // No URL selection → the first item, like the legacy tab (rendered, not navigated-to). The
   // selection may point at an item outside the current filter — keep resolving it from the full
@@ -557,14 +647,19 @@ export function GithubRoute({
   const selected =
     number === null
       ? (items[0] ?? searchHits[0] ?? null)
-      : (allItems.find((item) => item.number === number) ??
+      : (fullList.find((item) => item.number === number) ??
+        filterRows?.find((item) => item.number === number) ??
         remoteDetail ??
         null)
   // Feed the refresh mutation the thread that is genuinely rendered — including the no-`:n`
   // fallback to items[0], which is what the bare /github and /github/prs routes show.
   openThreadRef.current = selected ? { kind: selected.kind, number: selected.number } : null
 
-  const listPath = view === 'issues' ? '/github' : '/github/prs'
+  // Every link out of a list keeps its filter, so Back and the detail tabs return to the same list.
+  const linkFilter = rawFilterParam === null ? null : activeFilter
+  // On a phone an unfiltered issue detail must still go Back to a LIST: the bare `/github` there is
+  // the filter screen, so it names `all` explicitly.
+  const listPath = githubFilterPath(view, linkFilter ?? (view === 'issues' && !isDesktop ? 'all' : null))
 
   // The forge was asked and could not answer. Two ways that happens, and only the first used to
   // be handled: the driver degraded in-payload (`available: false` + a reason), or the request
@@ -583,7 +678,12 @@ export function GithubRoute({
   // a padded `<div>`, a null verdict still rendered the padding, leaving an empty ~2rem gap above
   // that heading. The search-hits case stays below `searching` in the chain on purpose — while a
   // new query is in flight over stale hits, the spinner is the honest thing to show.
-  const emptyState = !filtering ? (
+  const emptyState = filterGate ? (
+    <p role="status" className="flex items-center gap-1.5" data-slot="gh-filter-gate" data-kind={filterGate.kind}>
+      {filterGate.kind === 'loading' ? <LoaderCircleIcon aria-hidden="true" className="size-3.5 motion-safe:animate-spin" /> : null}
+      {filterGate.message}
+    </p>
+  ) : !filtering ? (
     <p>No open {view === 'issues' ? 'issues' : 'pull requests'}.</p>
   ) : searching ? (
     <p className="flex items-center gap-1.5">
@@ -626,6 +726,19 @@ export function GithubRoute({
     <div ref={routeRef} data-route="github" className="flex min-h-full flex-col gap-3 px-[18px] pt-[18px] pb-[calc(90px+env(safe-area-inset-bottom))] md:gap-[22px] md:p-9 md:pb-4">
         <div data-slot="gh-masthead" className="flex min-w-0 shrink-0 flex-col gap-1">
           <h1 className="text-2xl font-semibold tracking-tight md:text-[30px]">GitHub</h1>
+          {rawFilterParam !== null && n === undefined ? (
+            <div data-slot="gh-filter-context" className="flex min-w-0 items-center gap-3 md:hidden">
+              <Link to="/github" data-slot="gh-back-filters" className="inline-flex min-h-11 items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground">
+                <ArrowLeftIcon size={16} aria-hidden="true" className="size-3.5" />
+                Back to filters
+              </Link>
+              {activeFilter !== 'all' ? (
+                <span data-slot="gh-active-filter" className="truncate text-xs text-soft-foreground">
+                  {[...ISSUE_ROWS, ...PR_ROWS].find((row) => row.id === activeFilter)?.label}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
           {gh.repo ? (
             <span className="min-w-0 truncate text-[13px] text-muted-foreground">
               <span data-slot="gh-repo">{gh.repo}</span>
@@ -639,7 +752,8 @@ export function GithubRoute({
           className="flex shrink-0 flex-col gap-3 bg-background md:gap-[22px]"
         >
           <div data-slot="gh-tabs" className="flex min-h-11 flex-wrap items-center gap-3">
-            <TabLink to="/github" active={view === 'issues'} onClick={() => saveGithubView('issues')}>
+            {/* On a phone the bare `/github` is the filter screen, so the Issues tab names `all`. */}
+            <TabLink to={isDesktop ? '/github' : '/github?filter=all'} active={view === 'issues'} onClick={() => saveGithubView('issues')}>
               Issues · {countLabel(gh.issues.length)}
             </TabLink>
             <TabLink to="/github/prs" active={view === 'prs'} onClick={() => saveGithubView('prs')}>
@@ -690,8 +804,8 @@ export function GithubRoute({
               selected={labelFilter}
               onChange={setLabelFilter}
             />
-          {view === 'issues' ? <IssueFilters data={{ ...gh, issues: [...gh.issues, ...(searchPayload?.items ?? [])] }} assignees={assigneeFilter} projectId={activeProject}
-            onAssigneesChange={setAssigneeFilter} onProjectChange={setProjectFilter} /> : null}
+          {view === 'issues' ? <IssueFilters data={{ ...gh, issues: [...gh.issues, ...(searchPayload?.items ?? [])] }} assignees={effectiveAssignees} projectId={activeProject}
+            onAssigneesChange={changeAssignees} onProjectChange={setProjectFilter} /> : null}
             <button type="button" disabled={!filtering} className="min-h-11 min-w-11 rounded-md border border-border bg-card px-4 text-xs disabled:opacity-50" onClick={clearFilters}>Clear filters</button>
           </div>
         </header>
@@ -725,6 +839,7 @@ export function GithubRoute({
                 key={item.url}
                 item={item}
                 view={view}
+                filter={linkFilter}
                 colors={labelColors}
                 active={selected?.url === item.url}
                 compactHidden={compactPreview && index >= 2 && selected?.url !== item.url}
@@ -734,6 +849,12 @@ export function GithubRoute({
             ))}
           </ul>
         )}
+
+        {backedQuery !== null && filterSearch.data?.available && filterSearch.data.truncated ? (
+          <div data-slot="gh-filter-note" role="status" className="px-4 py-3 text-xs text-soft-foreground">
+            Showing the first {filterSearch.data.items.length} matches from GitHub search; more may exist.
+          </div>
+        ) : null}
 
         {view === 'issues' && n !== undefined && items.length > 2 ? (
           <Button
@@ -766,6 +887,7 @@ export function GithubRoute({
                   key={item.url}
                   item={item}
                   view={view}
+                  filter={linkFilter}
                   colors={labelColors}
                   active={selected?.url === item.url}
                   queued={queued.has(item.url)}
@@ -790,6 +912,7 @@ export function GithubRoute({
           <GithubDetail
             item={selected}
             listPath={listPath}
+            filter={linkFilter}
             colors={labelColors}
             changes={changes}
             checks={selected.kind === 'pr' ? checksMap?.[selected.number] ?? selected.checks : selected.checks}
@@ -841,6 +964,7 @@ function countLabel(count: number): string {
 function GithubRow({
   item,
   view,
+  filter,
   colors,
   active,
   compactHidden,
@@ -849,6 +973,8 @@ function GithubRow({
 }: {
   item: GithubItem
   view: GithubView
+  /** The list's `?filter=`, carried into the detail URL so Back returns to the same list. */
+  filter: GithubFilter | null
   colors: Record<string, string>
   active: boolean
   compactHidden?: boolean
@@ -883,7 +1009,7 @@ function GithubRow({
   return (
     <li data-compact-hidden={compactHidden || undefined}>
       <Link
-        to={`${view === 'issues' ? '/github/issues' : '/github/prs'}/${item.number}`}
+        to={githubFilterPath(view, filter, item.number)}
         draggable
         onDragStart={onDragStart}
         onMouseEnter={prefetchThread}
@@ -1011,6 +1137,7 @@ function LabelChip({ label, color, plain = false }: { label: string; color: stri
 function GithubDetail({
   item,
   listPath,
+  filter,
   colors,
   children,
   changes,
@@ -1018,6 +1145,8 @@ function GithubDetail({
 }: {
   item: GithubItem
   listPath: string
+  /** The list's `?filter=`, kept on the Conversation/Changes tabs. */
+  filter: GithubFilter | null
   colors: Record<string, string>
   children: ReactNode
   changes: boolean
@@ -1080,8 +1209,8 @@ function GithubDetail({
 
       {item.kind === 'pr' ? (
         <nav aria-label="Pull request detail" className="mt-4 flex border-b border-border">
-          <TabLink to={`/github/prs/${item.number}`} active={!changes}>Conversation</TabLink>
-          <TabLink to={`/github/prs/${item.number}/changes`} active={changes}>Changes</TabLink>
+          <TabLink to={githubFilterPath('prs', filter, item.number)} active={!changes}>Conversation</TabLink>
+          <TabLink to={githubFilterPath('prs', filter, item.number, '/changes')} active={changes}>Changes</TabLink>
         </nav>
       ) : null}
 

@@ -821,13 +821,15 @@ export async function getRunCommit(
 /** Issues + PRs via the logged-in `gh`. Degrades to `{ available: false, reason }` server-side —
  *  an unreachable forge is a hint in the tab, not an ApiError. */
 export async function getGithub(
-  params: { limit?: number; refresh?: boolean } = {},
+  /** `projectId` is for callers that render outside the routed view's scope (the shell's sidebar
+   *  list, which sits above the provider); everyone else leaves it to `queryScope()`. */
+  params: { limit?: number; refresh?: boolean; projectId?: string } = {},
   opts?: ReadOptions,
 ): Promise<GithubData> {
   return unwrap(
     await cez.api.v1.p[':projectId'].github.$get(
       {
-        param: { projectId: queryScope() },
+        param: { projectId: params.projectId ?? queryScope() },
         // `refresh: false` sends nothing at all — the server tests `=== '1'`, and a parameter we
         // do not mean is how a "false" ends up read as truthy somewhere downstream.
         query: {
@@ -869,13 +871,13 @@ export async function getGithubChecks(
 export async function getGithubSearch(
   kind: 'issue' | 'pr',
   query: string,
-  params: { limit?: number } = {},
+  params: { limit?: number; projectId?: string } = {},
   opts?: ReadOptions,
 ): Promise<GithubSearchData> {
   return unwrap(
     await cez.api.v1.p[':projectId'].github.search.$get(
       {
-        param: { projectId: queryScope() },
+        param: { projectId: params.projectId ?? queryScope() },
         // The search route validates `limit` with `z.coerce.number()`, so the typed client's
         // query input is `number | undefined` — pass the number, not a stringified copy (the
         // `/github` list route below coerces from a bare string, hence the difference).

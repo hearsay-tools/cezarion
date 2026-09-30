@@ -1601,6 +1601,34 @@ export function useGithub(params: { limit?: number } = {}, enabled = true) {
   return list
 }
 
+/**
+ * The GitHub list for an EXPLICIT project scope — the sidebar's and the filter screen's read of
+ * the very cache entry `useGithub` fills for the routed view. `scope` is the cache/request scope
+ * (`'default'` for the boot project, the project id otherwise), the same convention as
+ * `useProjectRuns`: the shell sits above the `ProjectScopeProvider`, so `queryScope()` there still
+ * names the PREVIOUS project. Read-only on purpose — no polling and no project-board metadata
+ * follow-up; the routed view's own `useGithub` owns both, and this just shares what it stores.
+ */
+export function useProjectGithub(scope: string, params: { limit?: number } = {}, enabled = true) {
+  return useQuery({
+    queryKey: [scope, 'github', params.limit ?? null] as const,
+    queryFn: ({ signal }) => getGithub({ limit: params.limit, projectId: scope }, { signal }),
+    enabled,
+    staleTime: 60_000,
+    refetchOnWindowFocus: true,
+  })
+}
+
+/** `useGithubSearch` for an explicit scope (see `useProjectGithub`); shares its cache entry. */
+export function useProjectGithubSearch(scope: string, kind: 'issue' | 'pr', query: string, enabled = true) {
+  return useQuery({
+    queryKey: [scope, 'github', 'search', kind, query] as const,
+    queryFn: ({ signal }) => getGithubSearch(kind, query, { projectId: scope }, { signal }),
+    enabled: enabled && query.trim() !== '',
+    staleTime: 60_000,
+  })
+}
+
 /** Lazy PR checks glyphs (`/api/github/checks`, #664). The list call no longer ships
  *  `statusCheckRollup`, so the PR row's checks glyph is hydrated here for the on-screen rows only.
  *  `enabled` gates it to the PR view with a non-empty window; `staleTime` matches the 60 s server
