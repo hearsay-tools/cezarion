@@ -136,6 +136,7 @@ const REPO: RepoResponse = {
   log: [],
   branches: ['main'],
   baseBranch: null,
+  tracking: null,
 }
 const OTHER_REPO: RepoResponse = {
   info: { root: '/home/u/shop-frontend', branch: 'develop' },
@@ -143,6 +144,7 @@ const OTHER_REPO: RepoResponse = {
   log: [],
   branches: ['develop'],
   baseBranch: null,
+  tracking: null,
 }
 
 // ---- harness ---------------------------------------------------------------------------------

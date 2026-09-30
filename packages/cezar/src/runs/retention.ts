@@ -136,23 +136,41 @@ export async function reclaimWorktrees(
   keep: number,
   opts: ReclaimOptions = {},
 ): Promise<string[]> {
-  const now = opts.now ?? (() => new Date().toISOString());
-  const remove = opts.remove ?? ((root, path) => removeWorktree(root, path, undefined, { reclaimOwnedDirectory: true })); // branch kept
   const runs = store.listRuns();
   const byId = new Map(runs.map((r) => [r.id, r]));
   const reclaimed: string[] = [];
   for (const id of selectReclaimableWorktrees(runs, keep)) {
     const run = byId.get(id);
-    if (!run?.worktreePath) continue;
-    try {
-      if (!(await preserveWorkerResult(repoRoot, store, run).catch(() => false))) continue;
-      await remove(repoRoot, run.worktreePath);
-      if (existsSync(run.worktreePath)) continue; // reclaim failed; retry next pass
-      store.updateRun(id, { worktreeReclaimedAt: now() });
-      reclaimed.push(id);
-    } catch {
-      // best-effort: never let retention crash a terminal transition or startup.
-    }
+    if (run && (await reclaimWorktree(repoRoot, store, run, opts))) reclaimed.push(id);
   }
   return reclaimed;
+}
+
+/**
+ * Reclaim ONE run's worktree directory — the step `reclaimWorktrees` applies to each over-limit
+ * run, and what `POST /worktrees/:runId/reclaim` (issue 08 §B4) calls for a single row. The
+ * caller has already decided the run `isReclaimable`. Branch kept; owned workers get their
+ * evidence snapshotted first. Returns the stamp it wrote, or null when nothing was reclaimed
+ * (the directory survived, or evidence could not be preserved). Never throws.
+ */
+export async function reclaimWorktree(
+  repoRoot: string,
+  store: RetentionStore,
+  run: RunRecord,
+  opts: ReclaimOptions = {},
+): Promise<string | null> {
+  const now = opts.now ?? (() => new Date().toISOString());
+  const remove = opts.remove ?? ((root, path) => removeWorktree(root, path, undefined, { reclaimOwnedDirectory: true })); // branch kept
+  if (!run.worktreePath) return null;
+  try {
+    if (!(await preserveWorkerResult(repoRoot, store, run).catch(() => false))) return null;
+    await remove(repoRoot, run.worktreePath);
+    if (existsSync(run.worktreePath)) return null; // reclaim failed; retry next pass
+    const stamp = now();
+    store.updateRun(run.id, { worktreeReclaimedAt: stamp });
+    return stamp;
+  } catch {
+    // best-effort: never let retention crash a terminal transition or startup.
+    return null;
+  }
 }

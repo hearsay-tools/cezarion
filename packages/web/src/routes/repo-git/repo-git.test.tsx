@@ -27,6 +27,7 @@ const REPO: RepoResponse = {
   ],
   branches: ['feature', 'main'],
   baseBranch: null,
+  tracking: null,
 }
 
 const HEALTH: HealthResponse = {
@@ -218,7 +219,7 @@ describe('the Git view Uncommitted changes section (/git/changes)', () => {
   it('outside a git repository the whole view degrades honestly', async () => {
     stubFetch({
       'GET /api/v1/repo': () =>
-        jsonResponse({ info: null, status: [], log: [], branches: [], baseBranch: null }),
+        jsonResponse({ info: null, status: [], log: [], branches: [], baseBranch: null, tracking: null }),
     })
     renderAt('/git')
     await waitFor(() =>

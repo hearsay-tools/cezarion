@@ -1,5 +1,8 @@
 import { execFile } from 'node:child_process';
+import { stat } from 'node:fs/promises';
+import { isAbsolute, join } from 'node:path';
 import { promisify } from 'node:util';
+import { isSafeGitRef } from '../git-refs.ts';
 
 const exec = promisify(execFile);
 
@@ -19,6 +22,20 @@ export interface LogEntry {
   subject: string;
   author: string;
   when: string;
+}
+
+/** A log row plus its full parent SHAs — what `source` attribution reads (issue 08 §B5). The
+ *  parents never reach the wire: the route maps them away. */
+export interface LogEntryWithParents extends LogEntry {
+  parents: string[];
+}
+
+/** `GET /repo` `tracking` (issue 08 §B1). */
+export interface RepoTracking {
+  ref: string;
+  ahead: number;
+  behind: number;
+  fetchedAt: string | null;
 }
 
 async function git(root: string, args: string[]): Promise<string> {
@@ -112,16 +129,51 @@ export async function getCommit(root: string, sha: string, cap = 200_000): Promi
 }
 
 export async function getLog(root: string, count = 20): Promise<LogEntry[]> {
+  return (await getLogWithParents(root, count)).map(({ parents: _parents, ...entry }) => entry);
+}
+
+export async function getLogWithParents(root: string, count = 20): Promise<LogEntryWithParents[]> {
   const out = await git(root, [
     'log',
     `-${count}`,
-    '--pretty=format:%h%x1f%s%x1f%an%x1f%cr',
+    '--pretty=format:%h%x1f%s%x1f%an%x1f%cr%x1f%P',
   ]);
   return out
     .split('\n')
     .filter(Boolean)
     .map((line) => {
-      const [hash = '', subject = '', author = '', when = ''] = line.split('\x1f');
-      return { hash, subject, author, when };
+      const [hash = '', subject = '', author = '', when = '', parents = ''] = line.split('\x1f');
+      return { hash, subject, author, when, parents: parents.split(' ').filter(Boolean) };
     });
+}
+
+/**
+ * The base branch against its upstream, as of the LAST FETCH (issue 08 §B1). Reads refs only —
+ * never `fetch`, never the network — so it is as fresh as whatever last fetched, which is usually
+ * an agent (agents fetch, they never pull). Null when the base has no upstream or git cannot say;
+ * never throws.
+ */
+export async function getTracking(root: string, base: string): Promise<RepoTracking | null> {
+  if (!isSafeGitRef(base)) return null;
+  try {
+    const ref = (await git(root, ['for-each-ref', '--format=%(upstream:short)', `refs/heads/${base}`])).trim();
+    if (!ref) return null;
+    const counts = (await git(root, ['rev-list', '--left-right', '--count', `refs/heads/${base}...${ref}`])).trim();
+    const [ahead, behind] = counts.split(/\s+/).map(Number);
+    if (!Number.isFinite(ahead) || !Number.isFinite(behind)) return null;
+    return { ref, ahead: ahead as number, behind: behind as number, fetchedAt: await lastFetchedAt(root) };
+  } catch {
+    return null;
+  }
+}
+
+/** mtime of `FETCH_HEAD` in the COMMON git dir (a linked worktree shares its repository's). */
+async function lastFetchedAt(root: string): Promise<string | null> {
+  try {
+    const common = (await git(root, ['rev-parse', '--git-common-dir'])).trim();
+    const dir = isAbsolute(common) ? common : join(root, common);
+    return (await stat(join(dir, 'FETCH_HEAD'))).mtime.toISOString();
+  } catch {
+    return null;
+  }
 }

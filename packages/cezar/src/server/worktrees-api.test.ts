@@ -234,6 +234,39 @@ describe('the worktrees API', () => {
     expect(existsSync(workspace.path)).toBe(true);
   });
 
+  describe('POST /worktrees/:runId/reclaim (issue 08 §B4)', () => {
+    const reclaimOne = (id: string) => apiRequest(app, `/api/v1/worktrees/${id}/reclaim`, { method: 'POST' });
+    const branchExists = async (branch: string) =>
+      run('git', ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], { cwd: repoRoot }).then(() => true, () => false);
+
+    it('removes the directory, keeps the branch, and stamps worktreeReclaimedAt', async () => {
+      const id = await seed(randomUUID(), 'done', '2026-07-01T00:00:00Z');
+      const { worktreePath, branch } = store.getRun(id)!;
+      const res = await reclaimOne(id);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { runId: string; worktreeReclaimedAt: string };
+      expect(body.runId).toBe(id);
+      expect(existsSync(worktreePath!)).toBe(false);
+      expect(await branchExists(branch!)).toBe(true);
+      expect(store.getRun(id)?.worktreeReclaimedAt).toBe(body.worktreeReclaimedAt);
+      // Reclaimed once is reclaimed: a second press is a 409, not a second stamp.
+      expect((await reclaimOne(id)).status).toBe(409);
+    });
+
+    it('409s for a live run, a review run, and a run the manager still holds; 404s an unknown id', async () => {
+      const live = await seed(randomUUID(), 'running');
+      const review = await seed(randomUUID(), 'review', '2026-07-02T00:00:00Z');
+      const held = await seed(randomUUID(), 'done', '2026-07-03T00:00:00Z');
+      app = createApp({ repoRoot, store, manager: { isActive: (runId: string) => runId === held } as unknown as RunManager, version: '0.0.0-test' });
+      for (const id of [live, review, held]) {
+        expect((await reclaimOne(id)).status).toBe(409);
+        expect(existsSync(store.getRun(id)!.worktreePath!)).toBe(true);
+        expect(store.getRun(id)?.worktreeReclaimedAt).toBeUndefined();
+      }
+      expect((await reclaimOne(randomUUID())).status).toBe(404);
+    });
+  });
+
   it('human deletion still cleans an ordinary terminal run', async () => {
     const id = await seed(randomUUID(), 'done'); const path = store.getRun(id)!.worktreePath!;
     expect((await apiRequest(app, `/api/v1/runs/${id}`, { method: 'DELETE' })).status).toBe(200);

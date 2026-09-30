@@ -138,9 +138,10 @@ const REPO: RepoResponse = {
   log: [],
   branches: ['main', 'develop'],
   baseBranch: null,
+  tracking: null,
 }
 
-const REPO_NO_GIT: RepoResponse = { info: null, status: [], log: [], branches: [], baseBranch: null }
+const REPO_NO_GIT: RepoResponse = { info: null, status: [], log: [], branches: [], baseBranch: null, tracking: null }
 
 const CONFIG: ConfigResponse = {
   baseBranch: null,

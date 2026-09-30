@@ -276,7 +276,7 @@ export function worktreeSizeBytes(path: string): Promise<number | null> {
  *  branch is passed (retention #575: directory only, receipts and branch kept). */
 /** Ownership receipts survive a missing run index and a replaced directory.
  * Unreadable/malformed evidence disables generic deletion instead of granting it. */
-async function ownedCleanupProtection(repoRoot: string): Promise<{ paths: Set<string>; branches: Set<string>; uncertain: boolean }> {
+export async function ownedCleanupProtection(repoRoot: string): Promise<{ paths: Set<string>; branches: Set<string>; uncertain: boolean }> {
   const paths = new Set<string>(); const branches = new Set<string>();
   try {
     const common = await git(repoRoot, ['rev-parse', '--path-format=absolute', '--git-common-dir']);

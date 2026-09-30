@@ -92,7 +92,7 @@ const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2
  * A base that is already remote-tracking, a commit sha pinned from a detached
  * HEAD, or a repo with no `origin` all fall through unchanged.
  */
-async function freshestBaseRef(runGit: GitRunner, base: string): Promise<string> {
+export async function freshestBaseRef(runGit: GitRunner, base: string): Promise<string> {
   if (!isSafeGitRef(base) || base === 'HEAD' || base.startsWith('origin/')) return base;
   const remote = `origin/${base}`;
   const hasRemote = await runGit(['rev-parse', '--verify', '--quiet', `${remote}^{commit}`]);
