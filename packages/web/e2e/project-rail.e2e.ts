@@ -4,8 +4,8 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import { AgentBrowser, bootProjectId, readTestEnv } from './agent-browser'
-import { contrastSampleExpression, type ContrastSample } from './contrast'
+import { AgentBrowser, HOVER_POINTER_ARGS, bootProjectId, readTestEnv } from './agent-browser'
+import { contrastSampleExpression, hoverVisiblePoint, type ContrastSample } from './contrast'
 import { readSharedProjects, snapshotSharedHome, writeSharedProjects } from './workspace-registry'
 
 /**
@@ -87,7 +87,7 @@ beforeAll(async () => {
     { ...OTHER, root: otherRoot, addedAt: '2026-07-19T00:00:00Z', lastOpenedAt: '2026-07-19T12:00:00Z', source: 'local' },
   ])
 
-  browser = AgentBrowser.open(sessionId)
+  browser = AgentBrowser.open(sessionId, { launchArgs: HOVER_POINTER_ARGS })
   browser.setViewport(DESKTOP.width, DESKTOP.height)
 })
 
@@ -299,13 +299,11 @@ describe('expandable project rail (#711)', () => {
       settledExpanded()
       browser.evaluate(`document.querySelector('${other}').scrollIntoView({ block: 'nearest' })`)
       check('default')
-      // Headless Chrome reports `(hover: none)`, and Tailwind v4 wraps `hover:` in
-      // `@media (hover: hover)`, so a real pointer hover never paints the fill here (local probe:
-      // `:hover` matched, background stayed transparent). Paint the row with the same token the
-      // `hover:bg-sidebar-row-hover` class uses, then sample.
-      browser.evaluate(`document.querySelector('${other}').style.backgroundColor = 'var(--sidebar-row-hover)'`)
+      // A real pointer hover. The session launches with HOVER_POINTER_ARGS, so `(hover: hover)`
+      // matches and Tailwind's `hover:` fill really paints; wait for it before sampling.
+      hoverVisiblePoint(browser, other)
+      browser.waitForFunction(`getComputedStyle(document.querySelector('${other}')).backgroundColor !== 'rgba(0, 0, 0, 0)'`)
       check('hover')
-      browser.evaluate(`document.querySelector('${other}').style.removeProperty('background-color')`)
       // Selected: the same row once it is the current project.
       browser.goto(baseUrl + `/p/${OTHER.id}/`)
       settledExpanded()
