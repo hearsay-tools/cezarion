@@ -1,14 +1,20 @@
 import './repo-git.css'
 import { GitBranchIcon, TriangleAlertIcon } from '@/components/design-icons'
 
+import { useSearchParams } from 'react-router'
+
 import { useRepo } from '@/api/queries'
 import type { RepoInfo, RepoResponse } from '@open-mercato/cezar-api-client'
 import { CenteredState } from '@/components/centered-state'
 import { TabLink } from '@/components/tab-link'
+import { ArrowLeftIcon } from '@/components/design-icons'
+import { Link } from '@/lib/project-router'
+import { useIsDesktop } from '@/lib/use-desktop'
 
 import { RepoBranchesSection } from './repo-branches'
 import { RepoChangesSection } from './repo-changes'
 import { RepoCommitsSection } from './repo-commits'
+import { GitWorktreeScreen } from './git-worktree-screen'
 import { RepoGitLoading } from './repo-git-loading'
 import { RepoPull } from './repo-pull'
 
@@ -28,7 +34,12 @@ export type RepoTab = 'changes' | 'commits' | 'branches'
 
 export function RepoGitRoute({ tab }: { tab: RepoTab }) {
   const repo = useRepo()
+  const isDesktop = useIsDesktop()
+  const [params] = useSearchParams()
 
+  // A phone's bare /git is the task worktree screen; the repository is `?view=repo`. Commits,
+  // Branches and every deep link keep their URLs, and desktop never leaves the repository.
+  if (tab === 'changes' && !isDesktop && params.get('view') !== 'repo') return <GitWorktreeScreen />
   if (repo.isPending) return <RepoGitLoading />
   if (repo.isError) {
     return (
@@ -65,6 +76,10 @@ function RepoView({ repo, info, tab }: { repo: RepoResponse; info: RepoInfo; tab
         data-slot="repo-header"
         className="px-[18px] pt-[18px] md:px-9 md:pt-9"
       >
+        <Link to="/git" data-slot="git-back-worktrees" className="-mt-2 mb-1 inline-flex min-h-11 items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground md:hidden">
+          <ArrowLeftIcon size={16} aria-hidden="true" className="size-3.5" />
+          Back to worktrees
+        </Link>
         <h1 className="text-2xl font-semibold tracking-tight md:text-[30px]">
           Git · {tab === 'changes' ? 'Changes' : tab === 'commits' ? 'Commits' : 'Branches'}
         </h1>
@@ -76,7 +91,7 @@ function RepoView({ repo, info, tab }: { repo: RepoResponse; info: RepoInfo; tab
         </div>
 
         <div data-slot="repo-tabs" className="flex items-end gap-6 border-b border-border [&>a]:min-h-11">
-          <TabLink to="/git" active={tab === 'changes'}>
+          <TabLink to="/git?view=repo" active={tab === 'changes'}>
             Changes
           </TabLink>
           <TabLink to="/git/commits" active={tab === 'commits'}>
