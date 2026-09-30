@@ -193,6 +193,9 @@ const openPhone = (path = '/git', target = browser) => {
   target.setViewport(PHONE.width, PHONE.height)
   target.goto(`${base}${scoped(path)}`)
 }
+/** The completed desktop layout: the repository header, its tabs and the Changes body are mounted
+ *  (not the Suspense fallback), so a representative screenshot shows the finished page. */
+const repositorySettled = `document.querySelector('[data-slot="repo-header"]') !== null && document.querySelector('[data-slot="repo-tabs"]') !== null && document.querySelector('[data-slot="repo-changes"]') !== null`
 const setTheme = (target: AgentBrowser, theme: 'light' | 'dark') =>
   target.evaluate(`document.documentElement.classList.remove('light', 'dark'); document.documentElement.classList.add('${theme}')`)
 
@@ -246,6 +249,7 @@ describe('Git desktop sidebar (#622)', () => {
     expect(facts['wt-done']?.meta).toContain('Finished but retained')
     // DiffStatLabel is compact in a row: 1,234 reads "1k" (exact counts stay in its title).
     expect(facts['wt-long']?.diff).toBe('+1k −56')
+    browser.waitForFunction(repositorySettled)
     browser.screenshot(`${artifactsDir}/git-sidebar-desktop-light.png`, { viewport: true })
   }, 90_000)
 
@@ -287,6 +291,7 @@ describe('Git desktop sidebar (#622)', () => {
       })()`)
       // The sidebar lays rows at 32px whatever they hold: titles and branches truncate, never wrap.
       expect(facts).toEqual({ light: theme === 'light', heights: [32], branchSize: '12px', branchMono: true, longClipped: true, overflow: false })
+      browser.waitForFunction(repositorySettled)
       browser.screenshot(`${artifactsDir}/git-sidebar-desktop-${theme}.png`, { viewport: true })
     }
   }, 90_000)
