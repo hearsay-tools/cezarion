@@ -82,9 +82,13 @@ describe('automatic Open Mercato skills updates', () => {
       config = await api('/api/v1/workspace/config')
     }
     expect(config.skillsAutoUpdate).toBe(false)
+    browser.waitForFunction('window.__cezIdle === true')
     browser.click('[data-slot="skills-settings-section"] details summary')
-    browser.waitForFunction(`document.querySelector('[data-slot="skills-settings-section"]')?.textContent.includes('explicit workspace override')`)
-    expect(browser.text('[data-slot="skills-settings-section"]')).toContain('explicit workspace override')
+    const explanation = browser.waitForValue(`(() => {
+      const details = document.querySelector('[data-slot="skills-settings-section"] details')
+      return details?.open ? details.innerText : null
+    })()`, value => typeof value === 'string' && value.includes('explicit workspace override'))
+    expect(explanation).toContain('explicit workspace override')
 
     browser.click('[data-action="skills-use-default"]')
     for (let attempt = 0; config.skillsAutoUpdate !== null && attempt < 40; attempt += 1) {

@@ -31,7 +31,7 @@ beforeAll(async () => {
     }))
     const url = `http://127.0.0.1:${port}`
     const server = spawn(process.execPath, [cezarCli, 'serve', '--repo', root, '--port', String(port), '--no-open'], {
-      env: fixtureServeEnv(root, { CEZ_REMOTE: remote ? '1' : '0', CEZ_FOLLOWUPS: '1' }), stdio: 'ignore',
+      env: fixtureServeEnv(root, { CEZ_REMOTE: remote ? '1' : '0', CEZ_FOLLOWUPS: '1', CEZ_AUTOMATIONS: '0' }), stdio: 'ignore',
     })
     fixtures.push({ root, server, url, project: '', remote })
     await waitForHealth(url)
