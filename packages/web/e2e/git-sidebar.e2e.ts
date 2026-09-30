@@ -273,7 +273,7 @@ describe('Git desktop sidebar (#622)', () => {
     expect(facts['wt-nobranch']?.meta).toContain('Worktree without a branch')
   }, 90_000)
 
-  it('paints 32px two-line-safe rows with a 12px mono branch in light and dark, truncating long text', () => {
+  it('paints 48px two-line rows with a 12px mono branch in light and dark, truncating long text', () => {
     for (const theme of ['light', 'dark'] as const) {
       openDesktop()
       setTheme(browser, theme)
@@ -297,8 +297,8 @@ describe('Git desktop sidebar (#622)', () => {
           overflow: document.documentElement.scrollWidth > innerWidth,
         };
       })()`)
-      // The sidebar lays rows at 32px whatever they hold: titles and branches truncate, never wrap.
-      expect(facts).toEqual({ light: theme === 'light', heights: [32], branchSize: '12px', branchMono: true, longClipped: true, overflow: false })
+      // The sidebar lays two-line rows at 48px whatever they hold: titles and branches truncate, never wrap.
+      expect(facts).toEqual({ light: theme === 'light', heights: [48], branchSize: '12px', branchMono: true, longClipped: true, overflow: false })
       browser.waitForFunction(repositorySettled)
       browser.screenshot(`${artifactsDir}/git-sidebar-desktop-${theme}.png`, { viewport: true })
     }
@@ -617,7 +617,7 @@ describe('Git phone worktree screen at 360x640 (#622)', () => {
     expect(facts['wt-nobranch']?.branch).not.toMatch(/null|undefined|^$/i)
   }, 90_000)
 
-  it('paints 48px rows with the branch in mono, without overflow, in light and dark', () => {
+  it('paints 56px rows with the branch in mono, without overflow, in light and dark', () => {
     for (const theme of ['light', 'dark'] as const) {
       openScreen()
       setTheme(browser, theme)
@@ -637,7 +637,7 @@ describe('Git phone worktree screen at 360x640 (#622)', () => {
           overflow: document.documentElement.scrollWidth > innerWidth,
         };
       })()`)
-      expect(facts).toEqual({ light: theme === 'light', heights: [48], branchSize: '12px', branchMono: true, longClipped: true, overflow: false })
+      expect(facts).toEqual({ light: theme === 'light', heights: [56], branchSize: '12px', branchMono: true, longClipped: true, overflow: false })
       browser.screenshot(`${artifactsDir}/git-worktree-screen-${theme}.png`, { viewport: true })
     }
   }, 90_000)

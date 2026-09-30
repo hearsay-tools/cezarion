@@ -121,9 +121,15 @@ describe('GitSidebar', () => {
     expect(a!.querySelector('[data-slot="git-worktree-branch"]')?.textContent).toBe('cez/a')
     expect(a!.querySelector('[data-slot="git-worktree-meta"]')?.textContent).toContain('Fix login')
     expect(a!.querySelector('[data-slot="diff-stat"]')?.textContent).toBe('+7 −3')
+    // Meta reads `title · +7 −3` in one soft colour; the branch line is the bright one.
+    expect(a!.querySelector('[data-slot="git-worktree-meta"]')?.textContent).toBe('Fix login · +7 −3')
+    expect(a!.querySelector('[data-slot="diff-stat"]')?.className).toContain('[&>span]:text-inherit')
+    expect(a!.querySelector('[data-slot="git-worktree-branch"]')?.className).toMatch(/\btext-foreground\b/)
+    expect(q('[data-slot="git-worktree-list"] h3')?.textContent).toBe('Task worktrees2')
     expect(a!.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe('needs you')
     // No branch on record: say so, and no measured diff: unknown, never +0 −0.
     expect(b!.querySelector('[data-slot="git-worktree-branch"]')?.textContent).toBe('no branch recorded')
+    expect(b!.querySelector('[data-slot="git-worktree-branch"]')?.className).toContain('text-soft-foreground')
     expect(b!.querySelector('[data-slot="diff-stat"]')).toBeNull()
     expect(b!.textContent).not.toContain('+0')
   })
