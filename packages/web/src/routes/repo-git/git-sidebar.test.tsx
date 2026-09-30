@@ -191,6 +191,41 @@ describe('GitSidebar', () => {
     expect(sectionRows()[2]?.count).toBeNull()
   })
 
+  it('holds the checkout block\'s place and draws no section until /repo first answers', async () => {
+    let answer: (response: Response) => void = () => {}
+    stub({ 'GET /api/v1/repo': () => new Promise<Response>((resolve) => { answer = resolve }) })
+    renderSidebar()
+    await waitFor(() => expect(q('[data-slot="git-checkout-placeholder"]')).not.toBeNull())
+    // Drawing the sections now would slide them down when the block mounts above them.
+    expect(q('[data-slot="git-sections"]')).toBeNull()
+    await act(async () => answer(json(REPO)))
+    await waitFor(() => expect(q('[data-slot="git-checkout"]')).not.toBeNull())
+    expect(q('[data-slot="git-checkout-placeholder"]')).toBeNull()
+    expect(q('[data-slot="git-sections"]')).not.toBeNull()
+  })
+
+  it('a pending Pull confirmation does not follow the sidebar into another project', async () => {
+    stub({
+      'POST /api/v1/repo/pull': () => json({ error: 'Confirmation required', branch: 'main', risks: ['dirty_tree'] }, 409),
+    })
+    const client = createQueryClient()
+    const tree = (scope: string) => (
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={['/git']}>
+          <GitSidebar scope={scope} />
+        </MemoryRouter>
+      </QueryClientProvider>
+    )
+    const { rerender } = render(tree('default'))
+    await waitFor(() => expect(q('[data-action="repo-pull"]')).not.toBeNull())
+    // Warm the second project's cache so its checkout renders at once on the switch.
+    await client.prefetchQuery({ queryKey: ['beta', 'repo'], queryFn: () => REPO })
+    fireEvent.click(q('[data-action="repo-pull"]')!)
+    await screen.findByRole('alertdialog')
+    rerender(tree('beta'))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+  })
+
   it('reads and writes through the explicit scope, never the routed one', async () => {
     const sent = stub({
       'POST /api/v1/p/beta/repo/pull': () => json({ branch: 'main', pulled: true, summary: 'Already up to date.' }),

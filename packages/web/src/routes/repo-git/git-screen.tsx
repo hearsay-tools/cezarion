@@ -45,7 +45,7 @@ export function GitScreen() {
       </div>
       {data?.info ? (
         <div className="mb-[16px]">
-          <GitCheckoutBlock scope={scope} repo={data} info={data.info} variant="screen" />
+          <GitCheckoutBlock key={scope} scope={scope} repo={data} info={data.info} variant="screen" />
         </div>
       ) : repo.isPending ? (
         <p data-slot="git-screen-loading" role="status" className="mb-[16px] px-[10px] text-[13px] text-soft-foreground">Loading the checkout…</p>
@@ -54,7 +54,8 @@ export function GitScreen() {
       ) : (
         <p data-slot="git-screen-not-git" className="mb-[16px] px-[10px] text-[13px] text-soft-foreground">Not a git repository.</p>
       )}
-      <GitSectionList branch={data?.info?.branch ?? null} counts={counts} variant="screen" />
+      {/* Same rule as the sidebar: the sections wait for the checkout so they never shift under a tap. */}
+      {repo.isPending ? null : <GitSectionList branch={data?.info?.branch ?? null} counts={counts} variant="screen" />}
     </div>
   )
 }
