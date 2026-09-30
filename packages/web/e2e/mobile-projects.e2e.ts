@@ -197,7 +197,17 @@ describe('phone Tools page (#621 follow-up)', () => {
     it(`reaches /tools from the drawer with status dots and the settings link, ${variant.theme}`, async () => {
       // One real probe answer with the last tool turned into a missing one, so the hint and
       // "Set up ›" have something to render whatever this machine has installed.
-      const health = (await fetch(`${baseUrl}/api/v1/health`).then((r) => r.json())) as { checks: Array<Record<string, unknown>> }
+      const health = (await fetch(`${baseUrl}/api/v1/health`).then((r) => r.json())) as { checks: Array<Record<string, unknown>>; capabilities: Record<string, unknown> }
+      // A local cockpit also subscribes to the WebSocket `health` topic, whose snapshot and pushes are
+      // the server's REAL payload and are invisible to Chrome's route: one that landed after the
+      // fixture replaced it in the query cache, so the page showed every tool installed. Evidence: the
+      // failure bundle .ai/qa/failures/mobile-projects/reaches-tools-from-the-drawer-with-status-dots-and-the-settings-link-light-1
+      // (snapshot.txt has no "Set up" link although the route serves a missing tool; CI run 36715710375
+      // shard 2, artifact cockpit-failures-shard-2; reproduced 1 in 6 locally, 0 in 14 after this).
+      // Routing `localHandoff: false` keeps the
+      // socket closed (useHealthSubscription) so the routed HTTP answer is the only writer, as the
+      // smoke and application-update specs do. Nothing this test reads depends on local handoff.
+      health.capabilities = { ...health.capabilities, localHandoff: false }
       const missing = health.checks.length - 1
       health.checks[missing] = { name: health.checks[missing]!.name, available: false, hint: 'Install it and reload the cockpit.' }
       browser.routeJson('**/api/v1/health', health)
