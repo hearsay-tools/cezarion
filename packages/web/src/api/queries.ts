@@ -36,6 +36,7 @@ import {
   getProjects,
   getRunnerModels,
   getRepo,
+  getRepoBranches,
   getRunCommit,
   getRunCommits,
   getRepoChanges,
@@ -1156,6 +1157,25 @@ export function useProjectRepo(scope: string) {
   return useQuery({
     queryKey: [scope, 'repo'] as const,
     queryFn: ({ signal }) => getRepo({ signal }, scope),
+  })
+}
+
+/** The classified branch list (`GET /repo/branches`, issue 08): Not landed, Cleanup's branch card
+ *  and All branches' class labels. Invalidated by run events and every repo refresh. */
+export function useRepoBranches() {
+  return useQuery({
+    queryKey: queryKeys.repoBranches,
+    queryFn: ({ signal }) => getRepoBranches({ signal }),
+  })
+}
+
+/** The classified branch list (`GET /repo/branches`, issue 08) for an EXPLICIT scope: the Git
+ *  sidebar's Not landed count reads it above the `ProjectScopeProvider`. Shares
+ *  `queryKeys.repoBranches`' entry for the project on screen, so its invalidations reach both. */
+export function useProjectRepoBranches(scope: string) {
+  return useQuery({
+    queryKey: [scope, 'repo', 'branches'] as const,
+    queryFn: ({ signal }) => getRepoBranches({ signal }, scope),
   })
 }
 
