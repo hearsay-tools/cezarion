@@ -47,7 +47,7 @@ export function SidebarProjectHeader({ onNavigate }: { onNavigate?: () => void }
       <span ref={markRef} aria-hidden="true" data-slot="project-header-mark" className="flex size-7 shrink-0 items-center justify-center rounded-[7px] border border-soft-foreground bg-sidebar-row-selected text-[11px] leading-none font-semibold text-foreground">
         {name ? projectInitials(name) : '…'}
       </span>
-      <div className="min-w-0 flex-1">
+      <div className="flex min-w-0 flex-1 flex-col gap-px">
         <div data-slot="project-header-name" className="truncate text-[14px] font-semibold text-foreground" title={identity}>{identity}</div>
         {/* Keep the end (especially the branch) visible without reversing the actual text. */}
         <div data-slot="project-header-detail" dir="rtl" className="truncate text-left font-mono text-[10.5px] text-soft-foreground" title={detail || undefined}>
