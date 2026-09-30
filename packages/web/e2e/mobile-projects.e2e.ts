@@ -180,6 +180,10 @@ describe('mobile top bar and project drawer', () => {
       for (const [target, state] of [
         ['#drawer-projects-label', 'section label'],
         ['[data-slot="drawer-project"][aria-current="page"] span.font-semibold', 'current project name'],
+        // #711: the selected row's state line, which `--soft-foreground` missed at 4.45 / 4.25:1.
+        ['[data-slot="drawer-project"][aria-current="page"] [data-slot="drawer-project-state"]', 'current project state'],
+        [`[data-slot="drawer-project"][data-project-id="${OTHER.id}"] [data-tone="red"]`, 'red state word'],
+        [`[data-slot="drawer-project"][data-project-id="${OTHER.id}"] [data-tone="amber"]`, 'amber state word'],
       ] as const) {
         const sample = browser.evaluate(contrastSampleExpression(target)) as ContrastSample
         expect(sample.ratio, `${variant.id} ${state} ${JSON.stringify(sample)}`).toBeGreaterThanOrEqual(4.5)

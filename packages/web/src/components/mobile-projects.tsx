@@ -5,6 +5,7 @@ import { AddProjectMenu } from '@/components/add-project-menu'
 import { ApplicationUpdateControl, ApplicationUpdateFeedback, type ApplicationUpdateControlProps } from '@/components/application-update-control'
 import { CheckIcon, FolderPlusIcon, LayersIcon, Settings2Icon, SunMoonIcon, WrenchIcon, XIcon } from '@/components/design-icons'
 import { ProjectMenu } from '@/components/sidebar-project-header'
+import { ProjectStateWords } from '@/components/project-state-words'
 import { StatusDot } from '@/components/status-dot'
 import { SignalPill, signalPillSegments } from '@/components/signal-pill'
 import { useTheme } from '@/components/theme-provider'
@@ -13,7 +14,7 @@ import { Button } from '@/components/ui/button'
 import { SheetClose } from '@/components/ui/sheet'
 import { isNewerVersion } from '@/lib/is-newer-version'
 import { scopeTo } from '@/lib/project-router'
-import { projectInitials, projectSignalParts, sumSignals, type ProjectSignal, type SignalTone } from '@/lib/project-signal'
+import { projectInitials, projectSignalParts, sumSignals, type ProjectSignal } from '@/lib/project-signal'
 import { cn } from '@/lib/utils'
 
 /**
@@ -57,14 +58,6 @@ export function MenuButtonPills({ elsewhere }: { elsewhere: ProjectSignal | null
       <SignalPill position="bottom" segments={bottom} compact className={cn(placement, 'top-[24px]')} />
     </>
   )
-}
-
-const TONE_TEXT: Record<SignalTone, string> = {
-  // `--pending-strong` is the amber that reads on both themes (#F4C542 dark, #996400 light).
-  amber: 'text-pending-strong',
-  red: 'text-danger',
-  violet: 'text-status-running',
-  green: 'text-success',
 }
 
 /** Brand row: app mark, name, version and the close button. The brand lives here and on the rail. */
@@ -131,7 +124,6 @@ function DrawerProjectRow({ project, signal, known, truncated, current, onNaviga
   current: boolean
   onNavigate: () => void
 }) {
-  const parts = projectSignalParts(signal)
   const { top, bottom } = signalPillSegments(signal)
   // The pills' ring is the surface they sit on, so they still read as cut-outs on the current row.
   const ring = current ? 'border-sidebar-row-selected' : 'border-sidebar'
@@ -164,15 +156,7 @@ function DrawerProjectRow({ project, signal, known, truncated, current, onNaviga
       </span>
       <span className="flex min-w-0 flex-1 flex-col gap-[2px]">
         <span className="truncate text-[14.5px] leading-tight font-semibold">{project.name}</span>
-        <span data-slot="drawer-project-state" className="flex min-w-0 flex-wrap items-center gap-x-[6px] text-[11.5px] leading-tight font-medium text-soft-foreground">
-          {!known ? 'activity unknown' : parts.length === 0 ? 'idle' : parts.map((part, index) => (
-            <span key={part.tone} className="flex items-center gap-[6px]">
-              {index > 0 ? <span aria-hidden="true">·</span> : null}
-              <span data-tone={part.tone} className={TONE_TEXT[part.tone]}>{part.text}</span>
-            </span>
-          ))}
-          {known && truncated ? <span>· recent runs only</span> : null}
-        </span>
+        <ProjectStateWords signal={signal} known={known} truncated={truncated} current={current} slot="drawer-project-state" className="flex-wrap gap-x-[6px] text-[11.5px] leading-tight" />
       </span>
       {current ? <CheckIcon aria-hidden="true" className="size-[16px] shrink-0 text-foreground" /> : null}
     </RouterLink>
