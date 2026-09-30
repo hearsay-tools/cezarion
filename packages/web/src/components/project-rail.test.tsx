@@ -276,6 +276,16 @@ describe('ProjectRail expand toggle (#711)', () => {
     expect(nav().style.width).toBe('232px')
   })
 
+  it('says on hover when an expanded row counted recent runs only', () => {
+    setViewport(1440)
+    localStorage.setItem('cez-project-rail-expanded', '1')
+    renderRail({ truncated: new Set(['open_mercato']) })
+    const capped = within(mark('open_mercato')).getByRole('link')
+    expect(capped.getAttribute('title')).toBe('Counts cover recent runs only')
+    expect(capped.getAttribute('aria-label')).toBe('open_mercato · idle · recent runs only')
+    expect(within(mark('toolkit-dev')).getByRole('link').getAttribute('title')).toBeNull()
+  })
+
   it('collapses and hides the toggle when main would drop under 640px, and restores on widening', () => {
     localStorage.setItem('cez-project-rail-expanded', '1')
     setViewport(1024)

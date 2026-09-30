@@ -121,6 +121,9 @@ function ExpandedProjectRow({
           onSelectProject?.(project.id)
         }}
         aria-label={label}
+        // The state line has no room for "recent runs only" at 232px, so a capped index says so
+        // on hover instead; the counts it shows may miss older runs.
+        title={known && truncated ? 'Counts cover recent runs only' : undefined}
         aria-current={current ? 'page' : undefined}
         className={cn(
           'group flex h-[52px] w-full items-center gap-[10px] rounded-[8px] px-[6px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
