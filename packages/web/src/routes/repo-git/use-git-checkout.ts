@@ -3,6 +3,7 @@ import { useState } from 'react'
 
 import { createRepoBranch, pullRepo, putConfig } from '@/api/client'
 import type { HealthResponse, RepoInfo, RepoPullConfirmation, RepoResponse } from '@open-mercato/cezar-api-client'
+import { workspaceQueryKeys } from '@/api/queries'
 import { toast } from '@/components/ui/toaster'
 
 /**
@@ -20,10 +21,13 @@ export function useGitCheckout(scope: string, info: RepoInfo) {
   const [confirmation, setConfirmation] = useState<RepoPullConfirmation | null>(null)
   const onError = (error: Error) => toast(error.message, { tone: 'danger' })
 
+  // The project registry carries each project's checked-out branch too (the sidebar project
+  // header reads it there), so a switch or pull refreshes it along with this project's reads.
   const refresh = () =>
     Promise.all([
       queryClient.invalidateQueries({ queryKey: repoKey }),
       queryClient.invalidateQueries({ queryKey: healthKey }),
+      queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.projects }),
     ])
 
   const pullMutation = useMutation({

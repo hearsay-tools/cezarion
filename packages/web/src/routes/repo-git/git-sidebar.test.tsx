@@ -5,6 +5,7 @@ import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { createQueryClient } from '@/api/query-client'
+import { workspaceQueryKeys } from '@/api/queries'
 import type { RepoResponse, WorktreesResponse } from '@open-mercato/cezar-api-client'
 import { Toaster, resetToasts } from '@/components/ui/toaster'
 
@@ -332,6 +333,26 @@ describe('the checkout block', () => {
     expect(sent.find((request) => request.method === 'POST')?.path).toBe('/api/v1/repo/branch')
     await waitFor(() => expect(document.body.textContent).toContain('Switched to feature'))
     await waitFor(() => expect(q('[data-slot="git-checkout-branch"]')?.textContent).toBe('feature'))
+  })
+
+  it('a branch switch also refreshes the project registry the sidebar header reads', async () => {
+    stub({ 'POST /api/v1/p/beta/repo/branch': () => json({ branch: 'feature', created: false }) })
+    const client = createQueryClient()
+    client.setQueryData(workspaceQueryKeys.projects, { projects: [] })
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={['/p/beta/git']}>
+          <GitSidebar scope="beta" />
+          <Toaster />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+    await waitFor(() => expect(q('[data-slot="git-branch-menu"]')).not.toBeNull())
+    expect(client.getQueryState(workspaceQueryKeys.projects)?.isInvalidated).toBe(false)
+    openMenu(q('[data-slot="git-branch-menu"]')!)
+    fireEvent.click(await screen.findByRole('menuitemradio', { name: 'feature' }))
+    await waitFor(() => expect(document.body.textContent).toContain('Switched to feature'))
+    expect(client.getQueryState(workspaceQueryKeys.projects)?.isInvalidated).toBe(true)
   })
 
   it('the branch menu links to All branches to create one', async () => {
