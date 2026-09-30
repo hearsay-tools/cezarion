@@ -178,6 +178,14 @@ const factsJs = (container: string) => `(() => {
   return out;
 })()`
 
+/** Rows come from `/worktrees`; diff and attention arrive with the scoped `/runs`. A sample is only
+ *  trustworthy once the join has landed, so these gate on the enriched fields of known rows and the
+ *  caller asserts on that SAME sample (a null count then neither false-passes nor flakes). */
+const enriched = (value: Record<string, RowFacts> | null): boolean =>
+  Boolean(value && Object.keys(value).length === MEMBERS.length
+    && value['wt-review']?.diff === '+12 −3' && value['wt-review']?.tone === 'info'
+    && value['wt-failed']?.diff === '+5 −9' && value['wt-failed']?.tone === 'danger'
+    && value['wt-cancelled']?.diff === '+2 −0' && value['wt-done']?.diff === '+40 −7' && value['wt-long']?.diff !== null)
 type RowFacts = { href: string | null; branch: string | null; meta: string | null; tone: string | null; diff: string | null }
 const has = (container: string) => `document.querySelector(${JSON.stringify(container)}) !== null`
 const rowsReady = (container: string, count: number) =>
@@ -235,7 +243,7 @@ describe('Git desktop sidebar (#622)', () => {
 
   it('each row links to its scoped task Changes tab and carries branch, title, status and diff', () => {
     openDesktop()
-    const facts = browser.waitForValue<Record<string, RowFacts>>(factsJs(SIDEBAR), (value) => Boolean(value && Object.keys(value).length === MEMBERS.length))
+    const facts = browser.waitForValue<Record<string, RowFacts>>(factsJs(SIDEBAR), enriched)
     for (const id of MEMBERS) {
       expect(facts[id]?.href, `${id} links`).toBe(scoped(`/tasks/${id}/changes`))
     }
@@ -255,7 +263,7 @@ describe('Git desktop sidebar (#622)', () => {
 
   it('a missing diff stat is unknown, not +0 −0; a missing branch has an honest fallback', () => {
     openDesktop()
-    const facts = browser.waitForValue<Record<string, RowFacts>>(factsJs(SIDEBAR), (value) => Boolean(value && Object.keys(value).length === MEMBERS.length))
+    const facts = browser.waitForValue<Record<string, RowFacts>>(factsJs(SIDEBAR), enriched)
     expect(facts['wt-nodiff']?.diff).toBeNull()
     expect(browser.count(`${SIDEBAR} ${ROW}[data-run-id="wt-nodiff"] [data-slot="diff-stat"]`)).toBe(0)
     expect(String(browser.evaluate(`document.querySelector('${SIDEBAR} ${ROW}[data-run-id="wt-nodiff"]').textContent`))).not.toMatch(/\+0|−0/)
@@ -424,7 +432,7 @@ describe('Git sidebar states and project scoping (#622)', () => {
     browser.waitForFunction(`location.pathname === ${JSON.stringify(scoped('/', projectB))}`)
     browser.click(`${nav} a[href="${scoped('/git', projectB)}"]`)
     expect(browser.waitForValue(idsJs(SIDEBAR), sameJson(B_MEMBERS))).toEqual(B_MEMBERS)
-    const facts = browser.waitForValue<Record<string, RowFacts>>(factsJs(SIDEBAR))
+    const facts = browser.waitForValue<Record<string, RowFacts>>(factsJs(SIDEBAR), (value) => value?.['b-only']?.diff === '+7 −1')
     expect(facts['b-only']).toMatchObject({ href: scoped('/tasks/b-only/changes', projectB), diff: '+7 −1' })
     expect(facts['b-only']?.meta).toContain('B only worktree')
 
@@ -435,6 +443,27 @@ describe('Git sidebar states and project scoping (#622)', () => {
     // And a cold load of the other project's URL.
     browser.goto(`${base}${scoped('/git', projectB)}`)
     expect(browser.waitForValue(idsJs(SIDEBAR), sameJson(B_MEMBERS))).toEqual(B_MEMBERS)
+  }, 90_000)
+})
+
+describe('Git rows without the runs join (#622)', () => {
+  it('lists the disk with no invented diff when /runs knows nothing, and enriches once it answers', () => {
+    // A held /runs cannot be staged: the shell's own task list has already cached it by the time the
+    // Git view mounts. An empty answer is the deterministic stand-in for "the join has nothing yet".
+    const bare = session('runs-empty')
+    bare.routeJson('**/runs', [])
+    bare.goto(`${base}${scoped('/git')}`)
+    bare.waitForFunction(has(SIDEBAR))
+    expect(bare.waitForValue(idsJs(SIDEBAR), sameJson(MEMBERS))).toEqual(MEMBERS)
+    const before = bare.waitForValue<Record<string, RowFacts>>(factsJs(SIDEBAR), (value) => Boolean(value && Object.keys(value).length === MEMBERS.length))
+    // Membership is /worktrees' alone; nothing about a diff is claimed for rows the join cannot describe.
+    expect(Object.values(before).filter((row) => row.diff !== null)).toEqual([])
+    expect(String(bare.evaluate(`document.querySelector(${JSON.stringify(SIDEBAR)}).textContent`))).not.toMatch(/\+\d|−\d/)
+    bare.screenshot(`${artifactsDir}/git-sidebar-runs-empty.png`, { viewport: true })
+    bare.unroute('**/runs')
+    bare.goto(`${base}${scoped('/git')}`)
+    const after = bare.waitForValue<Record<string, RowFacts>>(factsJs(SIDEBAR), enriched)
+    expect(after['wt-review']).toMatchObject({ diff: '+12 −3', tone: 'info' })
   }, 90_000)
 })
 
@@ -466,17 +495,21 @@ describe('Git view regressions found in review (#622)', () => {
   /** Install a fetch stub for one API path, then push the repository view CLIENT-side from the phone
    *  screen so the stub is in place before the repository first asks. */
   const repoViewWith = (target: AgentBrowser, stub: string) => {
-    openPhone('/git', target)
-    target.waitForFunction(has(SCREEN))
+    // Installed on a non-Git route BEFORE the first Git navigation, so no cached or in-flight
+    // `/repo` answer can predate it; the Git tab and Open repository are then client-side pushes.
+    target.setViewport(PHONE.width, PHONE.height)
+    target.goto(`${base}${scoped('/')}`)
+    target.waitForFunction(has(`${TAB_BAR} a[data-tab="/git"]`))
     target.evaluate(`(() => {
       const nativeFetch = window.fetch;
       window.fetch = (input, init) => {
         const url = typeof input === 'string' ? input : input instanceof Request ? input.url : String(input);
-        const path = new URL(url, location.href).pathname;
-        if (path.endsWith('/repo') || path.endsWith('/repo/changes')) { ${stub} }
+        if (new URL(url, location.href).pathname.endsWith('/repo')) { ${stub} }
         return nativeFetch(input, init);
       };
     })()`)
+    target.click(`${TAB_BAR} a[data-tab="/git"]`)
+    target.waitForFunction(has(SCREEN))
     target.click(OPEN_REPO)
   }
 
@@ -484,7 +517,10 @@ describe('Git view regressions found in review (#622)', () => {
     const slow = session('repo-loading', PHONE)
     repoViewWith(slow, `return new Promise(() => {});`)
     slow.waitForFunction(`location.search === '?view=repo'`)
+    // The exact loading surface, not just a Back link that a finished view would also have.
+    slow.waitForFunction(`document.body.textContent.includes('Loading repository')`)
     slow.waitForFunction(has(BACK))
+    expect(slow.count(REPO_TABS)).toBe(0)
     expect(slow.evaluate(`document.querySelector('${BACK}').getAttribute('href')`)).toBe(scoped('/git'))
     slow.screenshot(`${artifactsDir}/git-repository-phone-loading.png`, { viewport: true })
     slow.click(BACK)
@@ -495,7 +531,9 @@ describe('Git view regressions found in review (#622)', () => {
     const broken = session('repo-error', PHONE)
     repoViewWith(broken, `return Promise.resolve(new Response('boom', { status: 500, statusText: 'Server Error' }));`)
     broken.waitForFunction(`location.search === '?view=repo'`)
+    broken.waitForFunction(`document.body.textContent.includes('Could not load the repository')`)
     broken.waitForFunction(has(BACK))
+    expect(broken.count(REPO_TABS)).toBe(0)
     expect(broken.count(SCREEN)).toBe(0)
     broken.screenshot(`${artifactsDir}/git-repository-phone-error.png`, { viewport: true })
     broken.click(BACK)
@@ -571,7 +609,7 @@ describe('Git phone worktree screen at 360x640 (#622)', () => {
     browser.click(`${TAB_BAR} a[data-tab="/git"]`)
     browser.waitForFunction(`location.pathname === ${JSON.stringify(scoped('/git'))} && document.querySelector(${JSON.stringify(SCREEN)}) !== null`)
     expect(browser.waitForValue(`location.search`, (value) => value === '')).toBe('')
-    const facts = browser.waitForValue<Record<string, RowFacts>>(factsJs(SCREEN), (value) => Boolean(value && Object.keys(value).length === MEMBERS.length))
+    const facts = browser.waitForValue<Record<string, RowFacts>>(factsJs(SCREEN), enriched)
     for (const id of MEMBERS) expect(facts[id]?.href, `${id} links`).toBe(scoped(`/tasks/${id}/changes`))
     expect(facts['wt-review']).toMatchObject({ branch: 'cez/wt-review', tone: 'info', diff: '+12 −3' })
     expect(facts['wt-failed']).toMatchObject({ tone: 'danger', diff: '+5 −9' })
