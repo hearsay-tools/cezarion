@@ -22,8 +22,8 @@ const REPO: RepoResponse = {
   info: { root: '/repo', branch: 'main', remote: 'git@github.com:acme/demo.git' },
   status: [],
   log: [
-    { hash: 'abc1234', subject: 'feat: add the thing', author: 'Ada', when: '2 hours ago' },
-    { hash: 'def5678', subject: 'fix: stop the bug', author: 'Linus', when: '3 days ago' },
+    { hash: 'abc1234', subject: 'feat: add the thing', author: 'Ada', when: '2 hours ago', at: new Date(Date.now() - 2 * 3_600_000).toISOString() },
+    { hash: 'def5678', subject: 'fix: stop the bug', author: 'Linus', when: '3 days ago', at: new Date(Date.now() - 3 * 86_400_000).toISOString() },
   ],
   branches: ['feature', 'main'],
   baseBranch: null,

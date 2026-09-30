@@ -113,7 +113,19 @@ describe('the repo branches API', () => {
     expect(body.tracking).toBeNull();
     expect(body.log[0]).toMatchObject({ subject: 'feat: squashed (#42)', source: { runId: rec.id, title: 'the squashed one', prNumber: 42 } });
     // Unattributed rows carry no `source` key at all — never `null`, never parents.
-    expect(body.log[1]).toEqual({ hash: expect.any(String), subject: 'base', author: expect.any(String), when: expect.any(String) });
+    expect(body.log[1]).toEqual({ hash: expect.any(String), subject: 'base', author: expect.any(String), when: expect.any(String), at: expect.any(String) });
+  });
+
+  it('GET /repo log rows carry the absolute committer date the cockpit groups by day', async () => {
+    writeFileSync(join(repoRoot, 'dated.txt'), 'x\n');
+    await git(repoRoot, 'add', '-A');
+    await exec('git', [...GIT_ID, 'commit', '-q', '-m', 'dated'], {
+      cwd: repoRoot,
+      env: { ...process.env, GIT_COMMITTER_DATE: '2026-09-29T23:50:00+02:00', GIT_AUTHOR_DATE: '2026-09-29T23:50:00+02:00' },
+    });
+    const body = (await (await apiRequest(app, '/api/v1/repo')).json()) as Extract<RepoResponse, { info: object }>;
+    expect(body.log[0]).toMatchObject({ subject: 'dated', at: '2026-09-29T23:50:00+02:00' });
+    expect(Date.parse(body.log[0]!.at)).toBe(Date.parse('2026-09-29T21:50:00Z'));
   });
 
   it('GET /repo/branches classifies, counts, and serves the cached answer while nothing changed', async () => {

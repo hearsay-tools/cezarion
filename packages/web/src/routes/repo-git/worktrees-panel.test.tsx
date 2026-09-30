@@ -61,6 +61,7 @@ function worktree(partial: Partial<WorktreeInfo> & Pick<WorktreeInfo, 'runId' | 
     sizeBytes: 1024,
     finishedAt: '2026-07-01T00:00:00Z',
     reclaimable: false,
+    pastKeep: false,
     ...partial,
   }
 }
@@ -82,6 +83,7 @@ const sample: WorktreesResponse = {
       sizeBytes: 5 * 1024 * 1024,
       finishedAt: '2026-07-01T00:00:00Z',
       reclaimable: true,
+      pastKeep: false,
     },
     {
       runId: 'bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb',
@@ -91,6 +93,7 @@ const sample: WorktreesResponse = {
       sizeBytes: null,
       finishedAt: null,
       reclaimable: false,
+      pastKeep: false,
     },
   ],
   totalBytes: null,

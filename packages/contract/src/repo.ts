@@ -27,13 +27,15 @@ export const logEntrySourceSchema = z.object({
 });
 export type LogEntrySource = z.infer<typeof logEntrySourceSchema>;
 
-/** One `git log` row; `when` is git's relative `%cr` ("3 hours ago"), not a timestamp. `source`
- *  is ABSENT (never `null`) when no task is known to have produced the commit. */
+/** One `git log` row; `when` is git's relative `%cr` ("3 hours ago"), `at` the committer date as
+ *  strict ISO 8601 (`%cI`), which is what a client groups by day. `source` is ABSENT (never
+ *  `null`) when no task is known to have produced the commit. */
 export const logEntrySchema = z.object({
   hash: z.string(),
   subject: z.string(),
   author: z.string(),
   when: z.string(),
+  at: z.string(),
   source: logEntrySourceSchema.optional(),
 });
 export type LogEntry = z.infer<typeof logEntrySchema>;
@@ -305,7 +307,8 @@ const worktreeRunStatusSchema = z.enum([
 
 /** One materialized task worktree in the management panel (#483). `sizeBytes` is null when `du`
  *  is unavailable (Windows / missing). `reclaimable` = finished, has a directory, not yet
- *  reclaimed (retention's rule). */
+ *  reclaimed (retention's rule). `pastKeep` = reclaimable AND outside the newest `keep`, i.e.
+ *  exactly the rows a "Reclaim now" would take; a reclaimable row that is not past it is kept. */
 export const worktreeInfoSchema = z.object({
   runId: z.string(),
   title: z.string(),
@@ -314,6 +317,7 @@ export const worktreeInfoSchema = z.object({
   sizeBytes: z.number().nullable(),
   finishedAt: z.string().nullable(),
   reclaimable: z.boolean(),
+  pastKeep: z.boolean(),
 });
 export type WorktreeInfo = z.infer<typeof worktreeInfoSchema>;
 

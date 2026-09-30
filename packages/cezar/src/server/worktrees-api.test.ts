@@ -75,6 +75,7 @@ describe('the worktrees API', () => {
         sizeBytes: number | null;
         finishedAt: string | null;
         reclaimable: boolean;
+        pastKeep: boolean;
       }>;
       totalBytes: number | null;
       keep: number;
@@ -121,7 +122,13 @@ describe('the worktrees API', () => {
   it('POST /reclaim reclaims down to the limit and returns the reclaimed ids', async () => {
     writeFileSync(join(repoRoot, '.ai/cezar/config.json'), JSON.stringify({ worktreeRetention: 1 }), 'utf8');
     const oldId = await seed('44444444-4444-4444-8444-444444444444', 'done', '2026-07-01T00:00:00Z');
-    await seed('55555555-5555-4555-8555-555555555555', 'done', '2026-07-09T00:00:00Z');
+    const newId = await seed('55555555-5555-4555-8555-555555555555', 'done', '2026-07-09T00:00:00Z');
+    const reviewId = await seed('77777777-7777-4777-8777-777777777777', 'review', '2026-06-01T00:00:00Z');
+
+    // `pastKeep` names exactly the rows Reclaim now takes: the older finished one. The newest is
+    // kept inside keep=1, and a review row is never past it however old it is.
+    const listed = Object.fromEntries((await getWorktrees()).worktrees.map((w) => [w.runId, w.pastKeep]));
+    expect(listed).toEqual({ [oldId]: true, [newId]: false, [reviewId]: false });
 
     const res = await apiRequest(app, '/api/v1/worktrees/reclaim', {
       method: 'POST',

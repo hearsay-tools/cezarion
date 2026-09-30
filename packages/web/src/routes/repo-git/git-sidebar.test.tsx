@@ -39,13 +39,14 @@ const json = (body: unknown, status = 200) =>
 const REPO: RepoResponse = {
   info: { root: '/repo', branch: 'main', remote: 'git@github.com:acme/demo.git' },
   status: [],
-  log: [{ hash: 'abc1234', subject: 'feat: add the thing', author: 'Ada', when: '5 minutes ago' }],
+  log: [{ hash: 'abc1234', subject: 'feat: add the thing', author: 'Ada', when: '5 minutes ago', at: new Date(Date.now() - 5 * 60_000).toISOString() }],
   branches: ['feature', 'main'],
   baseBranch: null,
+  tracking: null,
 }
 
 const WORKTREES: WorktreesResponse = {
-  worktrees: [{ runId: 'r1', title: 'A task', status: 'done', branch: 'cez/r1', sizeBytes: 4.2 * 1024 ** 3, finishedAt: null, reclaimable: true }],
+  worktrees: [{ runId: 'r1', title: 'A task', status: 'done', branch: 'cez/r1', sizeBytes: 4.2 * 1024 ** 3, finishedAt: null, reclaimable: true, pastKeep: false }],
   totalBytes: 4.2 * 1024 ** 3,
   keep: 20,
 }

@@ -112,7 +112,7 @@ import { artifactDirectory, listArtifacts, readArtifact } from '../artifacts/sto
 import { artifactPreview, loadFileLink, rasterMime } from '../artifacts/resolve.ts';
 import { isUntouchedCancelledRun, toPastedContent, type PastedContent, type RunManager } from '../workflows/run.ts';
 import { removeWorktree, worktreeDiff, worktreeDiffStat, worktreeSizeBytes } from '../git-worktree.ts';
-import { isReclaimable, reclaimWorktree, reclaimWorktrees } from '../runs/retention.ts';
+import { isReclaimable, reclaimWorktree, reclaimWorktrees, selectReclaimableWorktrees } from '../runs/retention.ts';
 import { getBranches, getCommit, getDiff, getLogWithParents, getRepoInfo, getStatus, getTracking } from './git.ts';
 import { attributeLog, deleteBranches, forgetRepoBranches, githubBranchForge, readRepoBranches, type BranchForge, type ClassifyInput } from './repo-branches.ts';
 import { claimRepoGitMutation, localPullBranches, pullRepoCheckout } from './repo-pull.ts';
@@ -4818,6 +4818,8 @@ export function createApp(deps: ServerDeps) {
       // Listing is on-disk dirs only; parent liveness for #575 uses the full store
       // so a live `worktree: false` parent is not treated as gone (#570 honesty).
       const runs = allRuns.filter((r) => r.worktreePath && existsSync(r.worktreePath));
+      // The rows the enforcer would reclaim right now: reclaimable AND past the newest `keep`.
+      const pastKeep = new Set(selectReclaimableWorktrees(allRuns, keep));
       const worktrees = await Promise.all(
         runs.map(async (r) => ({
           runId: r.id,
@@ -4828,6 +4830,7 @@ export function createApp(deps: ServerDeps) {
           sizeBytes: await worktreeSizeBytes(r.worktreePath as string),
           finishedAt: r.finishedAt ?? null,
           reclaimable: isReclaimable(r, allRuns),
+          pastKeep: pastKeep.has(r.id),
         })),
       );
       // Total is null when any size degraded, so the panel never shows a wrong sum.

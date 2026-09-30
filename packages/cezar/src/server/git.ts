@@ -22,6 +22,8 @@ export interface LogEntry {
   subject: string;
   author: string;
   when: string;
+  /** Committer date, strict ISO 8601 (`%cI`) — what the cockpit groups by day. */
+  at: string;
 }
 
 /** A log row plus its full parent SHAs — what `source` attribution reads (issue 08 §B5). The
@@ -136,14 +138,14 @@ export async function getLogWithParents(root: string, count = 20): Promise<LogEn
   const out = await git(root, [
     'log',
     `-${count}`,
-    '--pretty=format:%h%x1f%s%x1f%an%x1f%cr%x1f%P',
+    '--pretty=format:%h%x1f%s%x1f%an%x1f%cr%x1f%cI%x1f%P',
   ]);
   return out
     .split('\n')
     .filter(Boolean)
     .map((line) => {
-      const [hash = '', subject = '', author = '', when = '', parents = ''] = line.split('\x1f');
-      return { hash, subject, author, when, parents: parents.split(' ').filter(Boolean) };
+      const [hash = '', subject = '', author = '', when = '', at = '', parents = ''] = line.split('\x1f');
+      return { hash, subject, author, when, at, parents: parents.split(' ').filter(Boolean) };
     });
 }
 
