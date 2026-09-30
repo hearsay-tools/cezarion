@@ -267,9 +267,9 @@ describe('task quick-list', () => {
   })
 
   it('renders the diff pair through the success/danger tokens, not as plain text', () => {
-    // Wait, then read as one step. The `beforeAll` only waits for the MAIN table's rows; the
-    // sidebar quick list is a separate render, so on a slow runner this read could land before
-    // the `fix-review-pr` row's diff pair existed (PR #712 CI shard 4: `pair` was null, so
+    // Wait, then read as one step. The setup waits for a quick-list bucket, which does not
+    // guarantee this particular diff pair exists at measurement time. PR #712 CI shard 4
+    // read before the `fix-review-pr` row's diff pair existed (`pair` was null, so
     // `adds` read `undefined`; the failure bundle's snapshot, taken moments later, shows the
     // row painted with `+128 −14`). The content and colour assertions below are unchanged.
     const pair = browser.waitForValue<{ adds: string; dels: string; addsColor: string; delsColor: string }>(`(() => {
