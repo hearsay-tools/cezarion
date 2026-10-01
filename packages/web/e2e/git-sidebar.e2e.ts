@@ -370,8 +370,8 @@ describe('Git → Not landed and the branch cleanup (issue 08 §C)', () => {
     browser.waitForFunction(`document.querySelector('[data-action="cleanup-branches-delete"]:not([disabled])') !== null`)
     browser.click('[data-action="cleanup-branches-delete"]')
     // The confirm button mounts while the dialog is still fading and zooming in. A click in that
-    // window lands wherever the button is at that frame, and on the backdrop it dismisses the
-    // dialog without deleting (#736). Click once the animations have finished and a hit-test at
+    // window lands wherever the button is at that frame, and a click that misses it deletes
+    // nothing (#736). Click once the animations have finished and a hit-test at
     // the button's centre resolves to the button itself.
     browser.waitForValue(`(() => {
       const button = document.querySelector('[data-action="cleanup-branches-confirm"]')
