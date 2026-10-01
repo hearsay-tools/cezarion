@@ -4,6 +4,7 @@ import {
   getGroup,
   getAutomations,
   getProjectRun,
+  getRunCommit,
   getRepoCommit,
   getWorkflows,
 } from '@/api/client'
@@ -74,6 +75,16 @@ async function entityExists(
     pattern = route.pattern
     if (pattern.startsWith('/tasks/:id')) {
       await getProjectRun(projectId, params.id ?? '', { signal })
+      // The run is there; its child entity may not be (a rebased or amended commit, a
+      // detached issue/PR number).
+      if (pattern === '/tasks/:id/commits/:sha') {
+        await getRunCommit(params.id ?? '', params.sha ?? '', opts)
+      } else if (pattern === '/tasks/:id/issue/:n' || pattern === '/tasks/:id/pr/:n') {
+        const number = Number(params.n)
+        if (!Number.isSafeInteger(number) || number < 1) return false
+        const item = await getGithubItem(pattern.endsWith('/issue/:n') ? 'issue' : 'pr', number, {}, opts)
+        return item.available ? item.item !== null : null
+      }
     } else if (pattern === '/compare/:groupId') {
       await getGroup(params.groupId ?? '', opts)
     } else if (pattern === '/git/commits/:sha') {
@@ -84,8 +95,11 @@ async function entityExists(
       const item = await getGithubItem(pattern.startsWith('/github/issues') ? 'issue' : 'pr', number, {}, opts)
       return item.available ? item.item !== null : null
     } else if (pattern === '/workflows/:name') {
-      const { workflows } = await getWorkflows(opts)
-      return workflows.some((workflow) => workflow.name === params.name)
+      const { workflows, issues } = await getWorkflows(opts)
+      if (workflows.some((workflow) => workflow.name === params.name)) return true
+      // A file that failed to load (unreadable, unparseable) may be the very workflow in the
+      // URL, so an absent name proves nothing while the catalog reports problems.
+      return issues.length > 0 ? null : false
     } else if (pattern.startsWith('/automations/:automationId')) {
       const list = await getAutomations(opts)
       return list.available ? list.automations.some((entry) => entry.id === params.automationId) : null
@@ -107,7 +121,7 @@ const MISSING_COMMIT = /unknown revision|bad object|bad revision|unknown commit|
 function isMissing(error: unknown, pattern: string): boolean {
   if (!(error instanceof ApiError)) return false
   if (error.status === 404) return true
-  return pattern === '/git/commits/:sha' && error.status === 409 && MISSING_COMMIT.test(error.message)
+  return (pattern === '/git/commits/:sha' || pattern === '/tasks/:id/commits/:sha') && error.status === 409 && MISSING_COMMIT.test(error.message)
 }
 
 /** The path a click on `projectId` should navigate to: the remembered page unless its entity is

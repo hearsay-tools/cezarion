@@ -847,7 +847,7 @@ export async function getRunCommit(
 ): Promise<RepoCommitPayload> {
   return unwrap(
     await cez.api.v1.p[':projectId'].runs[':id'].commit[':sha'].$get(
-      { param: { projectId: queryScope(), id: encodeURIComponent(id), sha: encodeURIComponent(sha) } },
+      { param: { projectId: opts?.projectId ?? queryScope(), id: encodeURIComponent(id), sha: encodeURIComponent(sha) } },
       init(opts),
     ),
     runPath(id, `/commit/${encodeURIComponent(sha)}`),
