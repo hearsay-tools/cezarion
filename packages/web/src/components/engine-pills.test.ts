@@ -505,6 +505,24 @@ describe('EnginePills layout="row" (#724)', () => {
     expect(order(row())).toEqual(['runner-pill', 'effort-pill', 'model-pill'])
   })
 
+  it('flips by moving the same pill nodes and hands focus back to the focused pill', async () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 })
+    const { container } = setup({ layout: 'row' })
+    await screen.findByRole('button', { name: /^Runner · / })
+    const row = container.querySelector('[data-slot="engine-row"]')!
+    expect(row.getAttribute('role')).toBe('group')
+    expect(row.getAttribute('aria-label')).toBe('Agent settings')
+    const model = container.querySelector<HTMLElement>('[data-slot="model-pill"]')!
+    model.focus()
+    expect(document.activeElement).toBe(model)
+    boxWidth = 300
+    act(() => resize())
+    expect(order(row)).toEqual(['runner-pill', 'effort-pill', 'model-pill'])
+    // Same element, not a remount, and still the focused one (a moved node is blurred by Chrome).
+    expect(container.querySelector('[data-slot="model-pill"]')).toBe(model)
+    expect(document.activeElement).toBe(model)
+  })
+
   it('without the prop keeps the legacy flat markup: no row, no box', async () => {
     const { container } = setup()
     await screen.findByRole('button', { name: /^Runner · / })

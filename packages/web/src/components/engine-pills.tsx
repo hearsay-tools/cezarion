@@ -193,13 +193,21 @@ export function EnginePills({
   layout?: 'row'
 }) {
   const boxRef = useRef<HTMLDivElement>(null)
+  const focusedBeforeFlip = useRef<HTMLElement | null>(null)
   const [compact, setCompact] = useState(() => typeof window !== 'undefined' && window.innerWidth <= 767)
   // Keep keyboard order aligned with the compact visual order, including a wide sidebar on a
   // desktop viewport. engine-row.css uses the same 550px box-width boundary (as new-task.tsx).
   useLayoutEffect(() => {
     const box = boxRef.current
     if (layout !== 'row' || !box) return
-    const measure = () => setCompact(window.innerWidth <= 767 || box.getBoundingClientRect().width < 550)
+    const measure = () => {
+      const next = window.innerWidth <= 767 || box.getBoundingClientRect().width < 550
+      // The flip reorders keyed siblings, which moves a DOM node, and Chrome blurs a moved focused
+      // node. Remember the owner so the layout effect below can hand focus back.
+      const active = document.activeElement
+      focusedBeforeFlip.current = active instanceof HTMLElement && box.contains(active) ? active : null
+      setCompact(next)
+    }
     measure()
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
     observer?.observe(box)
@@ -209,6 +217,11 @@ export function EnginePills({
       window.removeEventListener('resize', measure)
     }
   }, [layout])
+  useLayoutEffect(() => {
+    const focused = focusedBeforeFlip.current
+    focusedBeforeFlip.current = null
+    if (focused && focused.isConnected && document.activeElement !== focused) focused.focus()
+  }, [compact])
   const resolved = useResolvedEngine(pick)
   const { runner, model, effort, effortOptions, runners, canRun, modelsLocked } = resolved
   const config = useConfig()
@@ -294,7 +307,7 @@ export function EnginePills({
   }
   return (
     <div ref={boxRef} data-slot="engine-row-box">
-      <div data-slot="engine-row" className="engine-row">
+      <div data-slot="engine-row" className="engine-row" role="group" aria-label="Agent settings">
         <PickerPillGroup>
           {compact ? [runnerPill, effortPill, modelPill] : [runnerPill, modelPill, effortPill]}
         </PickerPillGroup>

@@ -5,12 +5,14 @@
    boundaries so DOM order (keyboard focus, #492) matches the visual order below. */
 [data-slot='engine-row-box'] { container: engine-row / inline-size; min-width: 0; width: 100%; }
 .engine-row { display: grid; gap: 10px; grid-template-columns: max-content minmax(0, 1fr) max-content; }
-.engine-row:not(:has([data-slot='runner-pill'])) { grid-template-columns: minmax(0, 1fr) max-content; }
 /* A disabled pill is wrapped in a span that owns the grid cell; the button owns the slot. */
 .engine-row > :is([data-slot$='pill'], :has(> [data-slot$='pill'])) { min-width: 0; }
 .engine-row [data-slot$='pill'] { width: 100%; min-width: 0; min-height: 44px; border-color: var(--border); border-radius: 9px; }
 .engine-row [data-slot='model-pill'] { justify-content: flex-start; }
 .engine-row [data-slot$='pill'] > svg:last-child { margin-left: auto; }
+@container engine-row (min-width: 550px) {
+  .engine-row:not(:has([data-slot='runner-pill'])) { grid-template-columns: minmax(0, 1fr) max-content; }
+}
 @container engine-row (max-width: 549.99px) {
   .engine-row { grid-template-columns: max-content minmax(0, 1fr); }
   .engine-row > :is([data-slot='model-pill'], :has(> [data-slot='model-pill'])) { grid-column: 1 / -1; grid-row: 2; }

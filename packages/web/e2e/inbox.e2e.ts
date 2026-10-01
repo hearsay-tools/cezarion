@@ -143,40 +143,44 @@ describe('the inbox against the live dry-run server', () => {
       'the inbox is opt-in; run CEZ_FOLLOWUPS=1 npm run test:e2e -- --force',
     )
     browser.setViewport(360, 640)
-    const facts = browser.waitForValue<{
-      rowCount: number
-      domOrder: string[]
-      modelBelow: boolean
-      modelSpansRow: boolean
-      minHeight: number
-      cardOverflow: boolean
-      pageOverflow: boolean
-    }>(`(() => {
-      const card = document.querySelector('${CARD}[data-id="e2e-inbox-1"]');
-      const box = card?.querySelector('[data-slot="engine-row-box"]');
-      const rect = slot => card?.querySelector('[data-slot="' + slot + '"]')?.getBoundingClientRect();
-      const model = rect('model-pill'), effort = rect('effort-pill');
-      if (!card || !box || !model || !effort) return null;
-      // A single-backend host shows no Runner pill; the first slot is then the Effort pill.
-      const first = rect('runner-pill') ?? effort;
-      const near = (a, b) => Math.abs(a - b) <= 2;
-      return {
-        rowCount: card.querySelectorAll('[data-slot="engine-row"]').length,
-        domOrder: [...box.querySelectorAll('[data-slot$="pill"]')].map(el => el.getAttribute('data-slot')),
-        modelBelow: model.top >= Math.max(first.bottom, effort.bottom) - 2,
-        modelSpansRow: near(model.left, first.left) && near(model.right, effort.right),
-        minHeight: Math.min(first.height, model.height, effort.height),
-        cardOverflow: card.scrollWidth > card.clientWidth,
-        pageOverflow: document.documentElement.scrollWidth > innerWidth,
-      };
-    })()`)
-    expect(facts.rowCount).toBe(1)
-    // Effort precedes Model in the DOM whenever the row is compact, so Tab follows what is drawn.
-    expect(facts.domOrder.indexOf('effort-pill')).toBeLessThan(facts.domOrder.indexOf('model-pill'))
-    expect(facts).toMatchObject({ modelBelow: true, modelSpansRow: true, cardOverflow: false, pageOverflow: false })
-    expect(facts.minHeight).toBeGreaterThanOrEqual(44)
-    browser.screenshot(`${artifactsDir}/inbox-engine-row-phone.png`, { viewport: true })
-    browser.setViewport(DESKTOP.width, DESKTOP.height)
+    try {
+      const facts = browser.waitForStable<{
+        rowCount: number
+        domOrder: string[]
+        modelBelow: boolean
+        modelSpansRow: boolean
+        minHeight: number
+        cardOverflow: boolean
+        pageOverflow: boolean
+      } | null>(`(() => {
+        const card = document.querySelector('${CARD}[data-id="e2e-inbox-1"]');
+        const box = card?.querySelector('[data-slot="engine-row-box"]');
+        const rect = slot => card?.querySelector('[data-slot="' + slot + '"]')?.getBoundingClientRect();
+        const model = rect('model-pill'), effort = rect('effort-pill');
+        if (!card || !box || !model || !effort) return null;
+        // A single-backend host shows no Runner pill; the first slot is then the Effort pill.
+        const first = rect('runner-pill') ?? effort;
+        const near = (a, b) => Math.abs(a - b) <= 2;
+        return {
+          rowCount: card.querySelectorAll('[data-slot="engine-row"]').length,
+          domOrder: [...box.querySelectorAll('[data-slot$="pill"]')].map(el => el.getAttribute('data-slot')),
+          modelBelow: model.top >= Math.max(first.bottom, effort.bottom) - 2,
+          modelSpansRow: near(model.left, first.left) && near(model.right, effort.right),
+          minHeight: Math.min(first.height, model.height, effort.height),
+          cardOverflow: card.scrollWidth > card.clientWidth,
+          pageOverflow: document.documentElement.scrollWidth > innerWidth,
+        };
+      })()`, {
+        holdMs: 200,
+        // Effort precedes Model in the DOM whenever the row is compact, so Tab follows what is drawn.
+        matcher: (f) => f !== null && f.rowCount === 1 && f.domOrder.indexOf('effort-pill') < f.domOrder.indexOf('model-pill')
+          && f.modelBelow && f.modelSpansRow && !f.cardOverflow && !f.pageOverflow && f.minHeight >= 44,
+      })
+      expect(facts?.rowCount).toBe(1)
+      browser.screenshot(`${artifactsDir}/inbox-engine-row-phone.png`, { viewport: true })
+    } finally {
+      browser.setViewport(DESKTOP.width, DESKTOP.height)
+    }
   })
 
   it('Dismiss checks the entry off — card gone, server inbox down to one', async ({ skip }) => {
