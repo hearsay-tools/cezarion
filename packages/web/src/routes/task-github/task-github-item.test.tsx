@@ -268,4 +268,21 @@ describe('TaskGithubItemRoute', () => {
     await waitFor(() => expect(inRoute('[data-slot="gh-detail-inner"]')).not.toBeNull())
     expect(paths.filter((path) => path.includes('/github/checks'))).toEqual([])
   })
+
+  it('retries an unavailable answer past the item cache and renders the item', async () => {
+    // A gh/auth/transport failure is a 200 `{ available: false }`, cached for a minute client-side;
+    // Retry must ask gh again (refresh=1) rather than wait that out.
+    item = (path) =>
+      path.endsWith('refresh=1')
+        ? json({ available: true, item: PR_5 })
+        : json({ available: false, reason: 'gh auth token expired' })
+    renderAt('/p/other/tasks/r1/pr/5')
+    expect(await screen.findByText('gh auth token expired')).toBeTruthy()
+    // The way out to github.com stays beside the retry.
+    expect(screen.getByRole('link', { name: /open on GitHub/ }).getAttribute('href')).toBe(`${REPO}/pull/5`)
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    await waitFor(() => expect(itemRequests()).toContain('/api/v1/p/other/github/items/pr/5?refresh=1'))
+    await waitFor(() => expect(inRoute('[data-slot="gh-detail-inner"]')).not.toBeNull())
+    expect(screen.queryByText('gh auth token expired')).toBeNull()
+  })
 })

@@ -108,6 +108,14 @@ function ItemBody({
   const label = `${KIND_LABEL[kind]} #${number}`
   const KindIcon = kind === 'pr' ? GitPullRequestIcon : CircleDotIcon
 
+  // One Retry for both failures: a request that never landed, and gh answering `available: false`
+  // (auth, transport, no remote) — a 200 the client would otherwise keep for its whole staleTime.
+  const retryButton = (
+    <Button variant="outline" disabled={retry.isPending} onClick={() => retry.mutate(queryKeys.githubItem(kind, number))}>
+      Retry
+    </Button>
+  )
+
   if (item.isPending) return <TaskGithubItemLoading kind={kind} number={number} heading="h2" />
   if (item.isError) {
     const error = retry.error ?? item.error
@@ -118,11 +126,7 @@ function ItemBody({
         heading="h2"
         title={`Could not load ${KIND_LABEL[kind].toLowerCase()} #${number}`}
         subtitle={error.message}
-        actions={
-          <Button variant="outline" disabled={retry.isPending} onClick={() => retry.mutate(queryKeys.githubItem(kind, number))}>
-            Retry
-          </Button>
-        }
+        actions={retryButton}
       />
     )
   }
@@ -137,16 +141,20 @@ function ItemBody({
         tone="neutral"
         heading="h2"
         title="GitHub is unavailable"
-        subtitle={data.reason}
+        // A retry that itself failed in transport says so; one gh answered replaces `data`.
+        subtitle={retry.error?.message ?? data.reason}
         actions={
-          url && isHttpUrl(url) ? (
-            <Button asChild variant="outline">
-              <a href={url} target="_blank" rel="noopener noreferrer">
-                open on GitHub
-                <ExternalLinkIcon aria-hidden="true" />
-              </a>
-            </Button>
-          ) : undefined
+          <>
+            {retryButton}
+            {url && isHttpUrl(url) ? (
+              <Button asChild variant="outline">
+                <a href={url} target="_blank" rel="noopener noreferrer">
+                  open on GitHub
+                  <ExternalLinkIcon aria-hidden="true" />
+                </a>
+              </Button>
+            ) : null}
+          </>
         }
       />
     )
