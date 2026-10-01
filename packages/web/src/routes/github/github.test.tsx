@@ -3659,6 +3659,50 @@ describe('deep links to items outside the open list (#692)', () => {
     expect(screen.queryByRole('heading', { level: 2, name: 'Not found' })).toBeNull()
   })
 
+  it('Refresh from GitHub re-asks gh for the deep-linked item, past its cache', async () => {
+    let refreshed = false
+    const sent = stubFetch({
+      'GET /api/v1/github/items/pr/150': () => jsonResponse({ available: true, item: MERGED_PR }),
+      'GET /api/v1/github/items/pr/150?refresh=1': () => {
+        refreshed = true
+        return jsonResponse({ available: true, item: { ...MERGED_PR, title: 'Merged, then retitled' } })
+      },
+    })
+    renderAt('/github/prs/150')
+    await waitFor(() => expect(detail()?.textContent).toContain('Merged long ago'))
+    fireEvent.click(screen.getByTitle('Refresh from GitHub'))
+    await waitFor(() => expect(refreshed).toBe(true))
+    await waitFor(() => expect(detail()?.textContent).toContain('Merged, then retitled'))
+    expect(itemRequests(sent).map((request) => request.path)).toEqual([
+      '/api/v1/github/items/pr/150',
+      '/api/v1/github/items/pr/150?refresh=1',
+    ])
+  })
+
+  it('a failed exact fetch recovers through Refresh from GitHub', async () => {
+    stubFetch({
+      'GET /api/v1/github/items/pr/150': () => jsonResponse({ error: 'boom' }, 500),
+      'GET /api/v1/github/items/pr/150?refresh=1': () => jsonResponse({ available: true, item: MERGED_PR }),
+    })
+    renderAt('/github/prs/150')
+    // The client retries a 5xx once on its own (query-client.ts) before the error shows.
+    expect(await screen.findByRole('heading', { level: 2, name: 'Could not load #150' }, { timeout: 5000 })).toBeTruthy()
+    fireEvent.click(screen.getByTitle('Refresh from GitHub'))
+    await waitFor(() => expect(detail()?.textContent).toContain('Merged long ago'))
+  })
+
+  it('Could not load #N offers its own Retry, past the item cache', async () => {
+    const sent = stubFetch({
+      'GET /api/v1/github/items/pr/150': () => jsonResponse({ available: false, reason: 'gh is not logged in' }),
+      'GET /api/v1/github/items/pr/150?refresh=1': () => jsonResponse({ available: true, item: MERGED_PR }),
+    })
+    renderAt('/github/prs/150')
+    expect(await screen.findByText('gh is not logged in')).toBeTruthy()
+    fireEvent.click(within(document.querySelector('[data-slot="gh-detail"]') as HTMLElement).getByRole('button', { name: 'Retry' }))
+    await waitFor(() => expect(detail()?.textContent).toContain('Merged long ago'))
+    expect(itemRequests(sent).map((request) => request.path)).toContain('/api/v1/github/items/pr/150?refresh=1')
+  })
+
   it('does not ask GitHub for an item the open list already holds', async () => {
     const sent = stubFetch()
     renderAt('/github/prs/137/changes')

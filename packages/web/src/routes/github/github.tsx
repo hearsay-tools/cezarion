@@ -17,7 +17,7 @@ import { queryScope } from '@open-mercato/cezar-api-client'
 
 import { Link, Navigate } from '@/lib/project-router'
 
-import { getGithub, getGithubComments, putUiState } from '@/api/client'
+import { getGithub, getGithubComments, getGithubItem, putUiState } from '@/api/client'
 import { queryKeys, useGithub, useGithubChecks, useGithubItem, useProjectRuns, useGithubSearch, useHealth, useSkills, useUiState, useWorkflows } from '@/api/queries'
 import type {
   GithubItem,
@@ -257,9 +257,30 @@ export function GithubRoute({
   // routes, i.e. the default landing pages, refreshing nothing. A ref because this mutation is
   // defined before `selected` exists and reads it at click time, not render time.
   const openThreadRef = useRef<{ kind: 'issue' | 'pr'; number: number } | null>(null)
+  // The deep-linked item the open list does not hold (#692), with the key its query lives under —
+  // read when Refresh is PRESSED, so a refresh that lands after the reader moved on still writes
+  // to the project it was pressed in.
+  type ExactTarget = { kind: 'issue' | 'pr'; number: number; key: ReturnType<typeof queryKeys.githubItem> }
+  const exactTargetRef = useRef<ExactTarget | null>(null)
+  /** Ask gh for the exact item again, past the server's item cache, and file the answer under the
+   *  key captured with it. Resolves `false` when the request did not land. */
+  const refetchExact = (target: ExactTarget | null): Promise<boolean> =>
+    target
+      ? getGithubItem(target.kind, target.number, { refresh: true })
+          .then((data) => {
+            queryClient.setQueryData(target.key, data)
+            return true
+          })
+          .catch(() => false)
+      : Promise.resolve(true)
 
   const refresh = useMutation({
-    mutationFn: () => getGithub({ refresh: true, limit: LIST_LIMIT }),
+    mutationFn: (exact: ExactTarget | null) => {
+      // Started beside the list, not after it: the item has its own cache and its own failure, and
+      // a list refresh that fails must still be able to recover a failed exact fetch.
+      void refetchExact(exact)
+      return getGithub({ refresh: true, limit: LIST_LIMIT })
+    },
     onSuccess: (data) => {
       // One list query now (#664) — patch it directly, then re-hydrate the visible checks window
       // so glyphs track the fresh rows (they carry their own ≤60 s cache server-side).
@@ -563,6 +584,18 @@ export function GithubRoute({
   const exactItem = useGithubItem(itemKind, selectedNumber ?? 0, exactWanted)
   const exactDetail =
     exactWanted && exactItem.data?.available && exactItem.data.item?.kind === itemKind ? exactItem.data.item : null
+  exactTargetRef.current =
+    exactWanted && selectedNumber !== null
+      ? { kind: itemKind, number: selectedNumber, key: queryKeys.githubItem(itemKind, selectedNumber) }
+      : null
+  const [retryingExact, setRetryingExact] = useState(false)
+  const retryExact = () => {
+    setRetryingExact(true)
+    void refetchExact(exactTargetRef.current).then((landed) => {
+      setRetryingExact(false)
+      if (!landed) toast(`Could not reach GitHub for #${selectedNumber}`, { tone: 'danger' })
+    })
+  }
 
   // Pin the selected detail and visible search hits before filling from the open list. The
   // shared hook retains its project scope, cache and view lifetime; every request stays bounded.
@@ -612,7 +645,7 @@ export function GithubRoute({
   // On a phone the bare `/github` is the filter screen (#622): the sidebar's list as its own
   // screen. Picking a row pushes the list with an explicit `?filter=`, which this skips.
   if (filterScreen && gh.available) {
-    return <GithubFilterScreen onRefresh={() => refresh.mutate()} refreshing={refresh.isPending} />
+    return <GithubFilterScreen onRefresh={() => refresh.mutate(exactTargetRef.current)} refreshing={refresh.isPending} />
   }
 
   if (!gh.available) {
@@ -628,7 +661,7 @@ export function GithubRoute({
               variant="outline"
               data-action="gh-retry"
               disabled={refresh.isPending}
-              onClick={() => refresh.mutate()}
+              onClick={() => refresh.mutate(exactTargetRef.current)}
             >
               Try again
             </Button>
@@ -791,7 +824,7 @@ export function GithubRoute({
               data-slot="gh-refresh"
               title="Refresh from GitHub"
               disabled={refresh.isPending}
-              onClick={() => refresh.mutate()}
+              onClick={() => refresh.mutate(exactTargetRef.current)}
               className="gh-utility"
             >
               <RefreshCwIcon size={16}
@@ -973,6 +1006,11 @@ export function GithubRoute({
                 : exactItem.error instanceof Error
                   ? exactItem.error.message
                   : 'The request failed.'
+            }
+            actions={
+              <Button variant="outline" disabled={retryingExact} onClick={retryExact}>
+                Retry
+              </Button>
             }
           />
         ) : (
