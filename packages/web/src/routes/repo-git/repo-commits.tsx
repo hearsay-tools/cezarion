@@ -1,4 +1,4 @@
-import { ArrowDownToLineIcon, LoaderCircleIcon, SearchXIcon, UserIcon } from 'lucide-react'
+import { ArrowDownToLineIcon, LoaderCircleIcon, SearchXIcon } from 'lucide-react'
 import { ArrowDownIcon, ArrowLeftIcon, BotIcon, GitCommitHorizontalIcon, GitMergeIcon, TriangleAlertIcon } from '@/components/design-icons'
 import { useMemo, useRef, useState } from 'react'
 import { queryScope } from '@open-mercato/cezar-api-client'
@@ -27,7 +27,7 @@ import { useGitCheckout } from './use-git-checkout'
  * grouped by the commit's own day (`at`), each 52px row (subject, then `sha · author · age`)
  * deep-linking to `/git/commits/:sha`, where the structured commit diff renders through the same
  * `<Diff>` facade as everything else. A row names where the commit came from when the server knows
- * (`source`: the PR and the task, linking to the task) and says "committed by hand" when it does
+ * (`source`: the PR and the task, linking to the task) and says "no task found" when it does
  * not. When the base is behind its upstream, an Incoming bar offers the pull first. Same mobile
  * rule: unified+wrap forced below `md`.
  */
@@ -84,15 +84,16 @@ export function RepoCommitsSection({ repo, info }: { repo: RepoResponse; info: R
   )
 }
 
-/** `⑂ PR #698 🤖 Picker pill prefixes`, linking to the task; `👤 committed by hand` when no task is
- *  known. Hidden below `md`, where the row has no room beside its subject. */
+/** `⑂ PR #698 🤖 Picker pill prefixes`, linking to the task; `no task found` otherwise. An absent
+ *  `source` only means `attributeLog`'s best-effort match found no run (a cherry-pick, a merge
+ *  subject it does not recognise), never that a person wrote the commit, so it claims nothing about
+ *  authorship. Hidden below `md`, where the row has no room beside its subject. */
 function CommitSource({ source }: { source: LogEntry['source'] }) {
   const cell = 'hidden max-w-[45%] shrink-0 items-center gap-[5px] pr-[10px] text-[11.5px] text-soft-foreground md:flex'
   if (!source) {
     return (
-      <span data-slot="commit-source" data-source="hand" className={cell}>
-        <UserIcon aria-hidden="true" className="size-[12px] shrink-0" />
-        committed by hand
+      <span data-slot="commit-source" data-source="unknown" className={cell}>
+        no task found
       </span>
     )
   }

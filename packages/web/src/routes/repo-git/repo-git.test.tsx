@@ -301,15 +301,17 @@ describe('the Git view Recently on main section', () => {
     expect(document.querySelector('[data-slot="commit-meta"]')).toBeNull()
   })
 
-  it('names the task and PR a commit came from, linking to the task, and "committed by hand" otherwise', async () => {
+  it('names the task and PR a commit came from, linking to the task, and "no task found" otherwise', async () => {
     stubFetch()
     renderAt('/git')
     await waitFor(() => expect(document.querySelectorAll('[data-slot="commit-source"]')).toHaveLength(2))
-    const [fromTask, byHand] = [...document.querySelectorAll<HTMLElement>('[data-slot="commit-source"]')]
+    const [fromTask, unknown] = [...document.querySelectorAll<HTMLElement>('[data-slot="commit-source"]')]
     expect(fromTask?.getAttribute('href')).toBe('/tasks/run-698')
     expect(fromTask?.textContent).toBe('PR #698Picker pill prefixes')
-    expect(byHand?.tagName).toBe('SPAN')
-    expect(byHand?.textContent).toBe('committed by hand')
+    // Unmatched is not hand-made: a cherry-picked task commit is unmatched too.
+    expect(unknown?.tagName).toBe('SPAN')
+    expect(unknown?.dataset.source).toBe('unknown')
+    expect(unknown?.textContent).toBe('no task found')
     // The source is a sibling of the commit link, never nested inside it.
     expect(document.querySelector('[data-slot="commit-row"] a')).toBeNull()
   })

@@ -222,9 +222,9 @@ describe('Git desktop sidebar (issue 06 §3)', () => {
     expect(browser.count('[data-slot="repo-tabs"]')).toBe(0)
     expect(browser.evaluate(`[...document.querySelectorAll('[data-slot="repo-commit-day"] h2')].map((h) => h.textContent)`)).toEqual(['Today'])
     expect(browser.count('[data-slot="commit-row"]')).toBe(3)
-    // No task produced these commits: each says so.
+    // No task is known for these commits: each says so, without claiming who wrote them.
     expect(browser.evaluate(`[...document.querySelectorAll('[data-slot="commit-source"]')].map((s) => s.textContent)`)).toEqual([
-      'committed by hand', 'committed by hand', 'committed by hand',
+      'no task found', 'no task found', 'no task found',
     ])
   }, 90_000)
 
