@@ -1771,6 +1771,40 @@ describe('notifying glyph and age-first overflow on the meta line (#729)', () =>
       }
     })
 
+    it('re-measures when a reference changes width with the same identity (status hydrates, conflict weight)', () => {
+      // A second observer class that remembers what it watches, so the test can resize one child.
+      const watchers: Array<{ cb: (entries?: unknown[]) => void; targets: Element[] }> = []
+      vi.stubGlobal('ResizeObserver', class {
+        private w = { cb: undefined as unknown as (entries?: unknown[]) => void, targets: [] as Element[] }
+        constructor(cb: (entries?: unknown[]) => void) { this.w.cb = cb; watchers.push(this.w); observers.push(() => cb()) }
+        observe(target: Element) { this.w.targets.push(target) }
+        unobserve() {}
+        disconnect() {}
+      })
+      const resizeChip = (chip: Element, width: number) =>
+        act(() => watchers.filter((w) => w.targets.includes(chip)).forEach((w) => w.cb([{ target: chip, contentRect: { width } }])))
+      client = 130
+      renderList({ runs: [run({ id: 't', status: 'running', pullRequestUrl: 'https://github.com/o/r/pull/594' })] })
+      expect(age('t')).not.toBeNull()
+      const chip = metaEl('t').querySelector('[data-slot="pr-chip"]') as Element
+      expect(watchers.some((w) => w.targets.includes(chip))).toBe(true)
+      resizeChip(chip, 40) // baseline report on observe: not a change
+      expect(age('t')).not.toBeNull()
+      // The status glyph lands: the chip is wider, the line now needs 150 in a 130 box.
+      needsAge = 150
+      resizeChip(chip, 62)
+      expect(age('t')).toBeNull()
+      // Repeated reports at the same width are not changes: no loop, no flicker.
+      for (let i = 0; i < 3; i += 1) {
+        resizeChip(chip, 62)
+        expect(age('t')).toBeNull()
+      }
+      // The status settles back narrower: the line fits again and the age returns.
+      needsAge = 120
+      resizeChip(chip, 40)
+      expect(age('t')).not.toBeNull()
+    })
+
     it('leaves a variant row (no age) and the tokens order alone', () => {
       renderList({ runs: members(false), showTokens: false, showCost: false })
       expand()

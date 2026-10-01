@@ -637,6 +637,26 @@ function useAgeDropped(ref: React.RefObject<HTMLElement | null>, enabled: boolea
     check()
     const observer = new ResizeObserver(check)
     observer.observe(el)
+    // A reference chip can change width with the same identity — its status glyph lands after
+    // `useReferenceStatus` hydrates, a conflict turns it semibold — and neither moves the box
+    // or the key. Watch every child but the age; a width that differs from the last one seen
+    // invalidates the stored measurement. The first report per child is only a baseline, and the
+    // age is never watched, so taking it off cannot re-trigger this.
+    const seen = new WeakMap<Element, number>()
+    const children = new ResizeObserver((entries) => {
+      let changed = false
+      for (const entry of entries ?? []) {
+        const previous = seen.get(entry.target)
+        seen.set(entry.target, entry.contentRect.width)
+        if (previous !== undefined && previous !== entry.contentRect.width) changed = true
+      }
+      if (!changed || !live) return
+      needed.current = null
+      check()
+    })
+    for (const child of Array.from(el.children)) {
+      if ((child as HTMLElement).dataset.slot !== 'task-row-age') children.observe(child)
+    }
     // Web fonts change widths without resizing anything. Once per row, and only if they have not
     // landed: a resolved `ready` would otherwise re-fire on every effect run and re-measure
     // forever. A callback from a torn-down run does nothing (`live`); the current run's takes over.
@@ -651,6 +671,7 @@ function useAgeDropped(ref: React.RefObject<HTMLElement | null>, enabled: boolea
     return () => {
       live = false
       observer.disconnect()
+      children.disconnect()
     }
   }, [ref, enabled, key, tick, decide])
   return enabled && dropped
