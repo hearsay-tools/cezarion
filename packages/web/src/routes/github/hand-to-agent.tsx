@@ -299,14 +299,13 @@ export function HandToAgent({
         {/* `accounts`: this hand-off posts to `/api/v1/runs`, which takes `agentProfile` — so
             the runner pill may offer the agent's logins as rows (spec 2026-07-29-agent-profiles).
             The Inbox card deliberately does not; its endpoint has no such field yet. */}
-        <div className="gh-engine-fields"><EnginePills
+        <EnginePills
+          layout="row"
           pick={engine}
           onChange={onEngineChange}
           disabled={start.isPending || !resolved.canRun}
           accounts
         />
-        {resolved.runners.length <= 1 && !resolved.accounts.some(a => a.provider === resolved.runner && a.id !== DEFAULT_AGENT_ACCOUNT_ID) ? <div className="gh-fixed-runner"><span>Runner</span>{resolved.runner}</div> : null}
-        </div>
         <div className="gh-field"><span>Account</span><AccountPicker
           resolved={resolved}
           disabled={start.isPending || !resolved.canRun}

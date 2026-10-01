@@ -1,3 +1,4 @@
+import { useLayoutEffect, useRef, useState } from 'react'
 import { CpuIcon, GaugeIcon, TerminalIcon } from '@/components/design-icons'
 import { hasAccountChoice, useAgentAccounts } from '@/api/agent-accounts'
 import { useConfig, useProviderStatus, useRunnerModels } from '@/api/queries'
@@ -13,6 +14,7 @@ import {
   resolveRunner,
   runnerOverride,
 } from '@/routes/new-task-form'
+import './engine-row.css'
 
 /**
  * The runner + model pill pair for the surfaces that START a run outside the /new composer
@@ -170,6 +172,7 @@ export function EnginePills({
   onChange,
   disabled = false,
   accounts = false,
+  layout,
 }: {
   pick: EnginePick
   onChange: (pick: EnginePick) => void
@@ -182,7 +185,30 @@ export function EnginePills({
    * `agentProfile` field yet).
    */
   accounts?: boolean
+  /**
+   * `'row'` lays the pills out like New Task and Continue (#724): Runner · Model · Effort on one
+   * row when the box is wide, Runner + Effort over a full-width Model when it is narrow. Opt-in,
+   * so a caller that styles the flat pills itself keeps exactly today's markup.
+   */
+  layout?: 'row'
 }) {
+  const boxRef = useRef<HTMLDivElement>(null)
+  const [compact, setCompact] = useState(() => typeof window !== 'undefined' && window.innerWidth <= 767)
+  // Keep keyboard order aligned with the compact visual order, including a wide sidebar on a
+  // desktop viewport. engine-row.css uses the same 550px box-width boundary (as new-task.tsx).
+  useLayoutEffect(() => {
+    const box = boxRef.current
+    if (layout !== 'row' || !box) return
+    const measure = () => setCompact(window.innerWidth <= 767 || box.getBoundingClientRect().width < 550)
+    measure()
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
+    observer?.observe(box)
+    window.addEventListener('resize', measure)
+    return () => {
+      observer?.disconnect()
+      window.removeEventListener('resize', measure)
+    }
+  }, [layout])
   const resolved = useResolvedEngine(pick)
   const { runner, model, effort, effortOptions, runners, canRun, modelsLocked } = resolved
   const config = useConfig()
@@ -195,68 +221,84 @@ export function EnginePills({
   const showRunnerPill =
     runners.length > 1 || runners.some((id) => hasAccountChoice(accountChoices, id))
 
+  const runnerPill = showRunnerPill ? (
+    <RunnerPill
+      key="runner"
+      icon={<TerminalIcon aria-hidden="true" className="size-[18px] shrink-0 text-accent-text" />}
+      fieldLabel
+      runners={runners}
+      value={runner}
+      accounts={accountChoices}
+      account={accounts ? resolved.account : null}
+      repoAccount={accounts ? resolved.repoAccount : undefined}
+      disabled={unavailable}
+      // Changing the AGENT drops the model pick: the presets are per-runner, so a kept model
+      // would be a preset the new runner does not have (composer rule). Changing only the
+      // ACCOUNT keeps it — the catalog is identical across logins of the same runner.
+      // Without accounts every row IS an agent, so that surface keeps its unconditional
+      // reset rather than quietly gaining the re-pick-keeps-the-model behaviour.
+      onPick={(next, picked) =>
+        onChange(
+          accounts
+            ? { runner: next, account: picked, model: next === runner ? pick.model : null, effort: pick.effort }
+            : { runner: next, account: null, model: null, effort: pick.effort },
+        )
+      }
+    />
+  ) : null
+  const modelPill = (
+    <PickerPill
+      key="model"
+      icon={<CpuIcon aria-hidden="true" className="size-[18px] shrink-0 text-accent-text" />}
+      fieldLabel
+      slot="model-pill"
+      ariaLabel="Model"
+      // `resolveModel` only ever returns a member of `models` ('' is the auto preset), so
+      // the lookup cannot miss.
+      label={model === '' ? 'Default' : models.find((m) => m.id === model)!.label}
+      value={model}
+      disabled={unavailable}
+      readOnly={modelsLocked === true}
+      disabledHint={modelsLocked ? 'Model selection is locked to native coding-agent settings.' : undefined}
+      onPick={(next) => {
+        const nextOptions = effortOptionsForModel(runner, next, catalog.data)
+        onChange({
+          ...pick,
+          model: next,
+          effort: pick.effort === null ? null : resolveEffort(pick.effort, nextOptions),
+        })
+      }}
+      options={models.map((m) => ({ value: m.id, label: m.label, desc: m.desc }))}
+      status={modelCatalogStatus(runner, catalog.data, catalog.isError, catalog.isFetching)}
+    />
+  )
+  const effortPill = (
+    <PickerPill
+      key="effort"
+      icon={<GaugeIcon aria-hidden="true" className="size-[18px] shrink-0 text-accent-text" />}
+      fieldLabel
+      slot="effort-pill"
+      ariaLabel="Effort"
+      label={effortOptions.find((option) => option.value === effort)?.label ?? 'auto'}
+      value={effort}
+      disabled={unavailable}
+      readOnly={modelsLocked === true}
+      disabledHint={modelsLocked ? 'Effort selection is locked to native coding-agent settings.' : undefined}
+      onPick={(next) => onChange({ ...pick, effort: next })}
+      options={effortOptions.map((option) => ({ value: option.value, label: option.label, desc: option.desc }))}
+    />
+  )
+
+  if (layout !== 'row') {
+    return <PickerPillGroup>{runnerPill}{modelPill}{effortPill}</PickerPillGroup>
+  }
   return (
-    <PickerPillGroup>
-      {showRunnerPill ? (
-        <RunnerPill
-          icon={<TerminalIcon aria-hidden="true" className="size-[18px] shrink-0 text-accent-text" />}
-          fieldLabel
-          runners={runners}
-          value={runner}
-          accounts={accountChoices}
-          account={accounts ? resolved.account : null}
-          repoAccount={accounts ? resolved.repoAccount : undefined}
-          disabled={unavailable}
-          // Changing the AGENT drops the model pick: the presets are per-runner, so a kept model
-          // would be a preset the new runner does not have (composer rule). Changing only the
-          // ACCOUNT keeps it — the catalog is identical across logins of the same runner.
-          // Without accounts every row IS an agent, so that surface keeps its unconditional
-          // reset rather than quietly gaining the re-pick-keeps-the-model behaviour.
-          onPick={(next, picked) =>
-            onChange(
-              accounts
-                ? { runner: next, account: picked, model: next === runner ? pick.model : null, effort: pick.effort }
-                : { runner: next, account: null, model: null, effort: pick.effort },
-            )
-          }
-        />
-      ) : null}
-      <PickerPill
-        icon={<CpuIcon aria-hidden="true" className="size-[18px] shrink-0 text-accent-text" />}
-        fieldLabel
-        slot="model-pill"
-        ariaLabel="Model"
-        // `resolveModel` only ever returns a member of `models` ('' is the auto preset), so
-        // the lookup cannot miss.
-        label={model === '' ? 'Default' : models.find((m) => m.id === model)!.label}
-        value={model}
-        disabled={unavailable}
-        readOnly={modelsLocked === true}
-        disabledHint={modelsLocked ? 'Model selection is locked to native coding-agent settings.' : undefined}
-        onPick={(next) => {
-          const nextOptions = effortOptionsForModel(runner, next, catalog.data)
-          onChange({
-            ...pick,
-            model: next,
-            effort: pick.effort === null ? null : resolveEffort(pick.effort, nextOptions),
-          })
-        }}
-        options={models.map((m) => ({ value: m.id, label: m.label, desc: m.desc }))}
-        status={modelCatalogStatus(runner, catalog.data, catalog.isError, catalog.isFetching)}
-      />
-      <PickerPill
-        icon={<GaugeIcon aria-hidden="true" className="size-[18px] shrink-0 text-accent-text" />}
-        fieldLabel
-        slot="effort-pill"
-        ariaLabel="Effort"
-        label={effortOptions.find((option) => option.value === effort)?.label ?? 'auto'}
-        value={effort}
-        disabled={unavailable}
-        readOnly={modelsLocked === true}
-        disabledHint={modelsLocked ? 'Effort selection is locked to native coding-agent settings.' : undefined}
-        onPick={(next) => onChange({ ...pick, effort: next })}
-        options={effortOptions.map((option) => ({ value: option.value, label: option.label, desc: option.desc }))}
-      />
-    </PickerPillGroup>
+    <div ref={boxRef} data-slot="engine-row-box">
+      <div data-slot="engine-row" className="engine-row">
+        <PickerPillGroup>
+          {compact ? [runnerPill, effortPill, modelPill] : [runnerPill, modelPill, effortPill]}
+        </PickerPillGroup>
+      </div>
+    </div>
   )
 }

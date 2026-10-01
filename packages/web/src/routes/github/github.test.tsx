@@ -1411,16 +1411,16 @@ describe('GitHub handoff field chrome (#243)', () => {
     expect(pill.width).toBe('100%')
   })
 
-  it('gives the model picker the same bordered 44px field as Workflow', () => {
-    const model = cascadeCss(css, [
-      '.gh-engine-fields > button',
-      ".gh-engine-fields [data-slot='model-pill']",
-    ])
-    expect(model.border).toBe('1px solid var(--border)')
-    expect(model.background).toBe('var(--card)')
-    expect(model.height).toBe('44px')
-    expect(model.padding).toBe('0 12px')
-    expect(model['padding-left']).toBeUndefined()
+  it('lays the Runner · Model · Effort pills out in the shared engine row, not a GitHub-only grid (#724)', () => {
+    expect(css).not.toMatch(/gh-engine-fields|gh-fixed-runner/)
+    const rowCss = readFileSync(path.join(path.dirname(cssPath), '..', '..', 'components', 'engine-row.css'), 'utf8')
+    const pill = cascadeCss(rowCss, [".engine-row [data-slot$='pill']"])
+    expect(pill['border-color']).toBe('var(--border)')
+    expect(pill['min-height']).toBe('44px')
+    expect(pill.width).toBe('100%')
+    // Wide default is the one-row grid; the narrow rules live in the container query below it.
+    expect(rowCss).toMatch(/^\.engine-row \{[^}]*grid-template-columns: max-content minmax\(0, 1fr\) max-content;/m)
+    expect(rowCss).toMatch(/@container engine-row \(max-width: 549\.99px\)/)
   })
 
   it('does not paint in-button Model/Runner/Effort ::before labels — PickerPill fieldLabel owns the name (#272)', () => {

@@ -281,8 +281,8 @@ function TodoCard({
           Indented under the summary, above the instructions composer, so the two per-card
           Run knobs (engine + prompt) read as one group. */}
       {runnable ? (
-        <div data-slot="todo-engine" className="flex flex-wrap items-center gap-2 pl-5">
-          <EnginePills pick={engine} onChange={setEngine} disabled={busy || !resolved.canRun} />
+        <div data-slot="todo-engine" className="flex min-w-0 flex-col gap-2 pl-5">
+          <EnginePills layout="row" pick={engine} onChange={setEngine} disabled={busy || !resolved.canRun} />
           {!resolved.providerPending && !resolved.canRun ? (
             <span
               data-slot="todo-provider-gate"
