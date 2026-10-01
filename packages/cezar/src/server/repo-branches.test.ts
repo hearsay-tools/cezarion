@@ -75,6 +75,17 @@ function fakeForge(opts: { states?: Record<number, ForgePr['state']>; prs?: Forg
   return { forge, calls };
 }
 
+function mergedPr(number: number, branch: string, tip: string): ForgePr {
+  return {
+    number,
+    url: `https://github.com/acme/demo/pull/${number}`,
+    headRefName: branch,
+    baseRefName: 'main',
+    headRefOid: tip,
+    state: 'merged',
+  };
+}
+
 describe('the branch classifier (issue 08 §A)', () => {
   let root: string;
 
@@ -110,7 +121,7 @@ describe('the branch classifier (issue 08 §A)', () => {
     await taskBranch(root, 'cez/bbbbbbbb', 1);
     await taskBranch(root, 'cez/cccccccc', 1);
     await git(root, 'merge', '-q', '--no-ff', '-m', 'Merge cez/cccccccc', 'cez/cccccccc');
-    await taskBranch(root, 'cez/dddddddd', 1);
+    const squashTip = await taskBranch(root, 'cez/dddddddd', 1);
     await git(root, 'branch', 'cez/eeeeeeee', forkSha);
     await git(root, 'branch', 'cez/ffffffff');
     // The base moves on, so the empty branches' tips are ancestors of main but not its tip.
@@ -123,7 +134,10 @@ describe('the branch classifier (issue 08 §A)', () => {
       runRecord(ids.emptySha, 'failed', { baseBranch: forkSha }),
       runRecord(ids.emptyRef, 'cancelled', { baseBranch: 'main' }),
     ];
-    const { forge, calls } = fakeForge({ states: { 7: 'merged' } });
+    const { forge, calls } = fakeForge({
+      states: { 7: 'merged' },
+      prs: [mergedPr(7, 'cez/dddddddd', squashTip)],
+    });
     const { payload, cls } = await classesOf({ runs, forge });
 
     expect(cls['cez/aaaaaaaa']).toBe('not-landed');
@@ -148,13 +162,39 @@ describe('the branch classifier (issue 08 §A)', () => {
   });
 
   it('classifies a squash-merged orphan through the cached PR list', async () => {
-    await taskBranch(root, 'cez/bbbbbbbb', 1);
-    const { forge, calls } = fakeForge({
-      prs: [{ number: 9, url: 'https://github.com/acme/demo/pull/9', headRefName: 'cez/bbbbbbbb', state: 'merged' }],
-    });
+    const tip = await taskBranch(root, 'cez/bbbbbbbb', 1);
+    const { forge, calls } = fakeForge({ prs: [mergedPr(9, 'cez/bbbbbbbb', tip)] });
     const { cls } = await classesOf({ forge });
     expect(cls['cez/bbbbbbbb']).toBe('merged');
     expect(calls.listPrs).toBe(1);
+  });
+
+  it('a merged PR proves only the tip it merged, and only into this base', async () => {
+    const otherBase = await taskBranch(root, 'cez/aaaaaaaa', 1);
+    const created = await taskBranch(root, 'cez/bbbbbbbb', 1);
+    const merged = await taskBranch(root, 'cez/cccccccc', 1);
+    // Work added after the PR merged: the tip moved past the head GitHub merged.
+    await git(root, 'checkout', '-q', 'cez/cccccccc');
+    await commit(root, 'after.txt', 'after the merge');
+    await git(root, 'checkout', '-q', 'main');
+    const runs = [
+      runRecord('aaaaaaaa-1', 'done'),
+      runRecord('bbbbbbbb-1', 'done', { pullRequestUrl: 'https://github.com/acme/demo/pull/8' }),
+      runRecord('cccccccc-1', 'done'),
+    ];
+    const { forge } = fakeForge({
+      states: { 8: 'merged' },
+      prs: [
+        { ...mergedPr(7, 'cez/aaaaaaaa', otherBase), baseRefName: 'release' },
+        { ...mergedPr(8, 'cez/bbbbbbbb', created), baseRefName: 'release' },
+        mergedPr(9, 'cez/cccccccc', merged),
+      ],
+    });
+    const { payload, cls } = await classesOf({ runs, forge });
+    expect(cls).toMatchObject({ 'cez/aaaaaaaa': 'not-landed', 'cez/bbbbbbbb': 'not-landed', 'cez/cccccccc': 'not-landed' });
+    // The PR is still shown for what it is; it just does not decide the class.
+    expect(payload.branches.find((b) => b.name === 'cez/bbbbbbbb')?.pr?.state).toBe('merged');
+    expect(payload.counts).toEqual({ notLanded: 3, cleanup: 0 });
   });
 
   it('never classifies by prNumber — the PR a task is ABOUT is display-only', async () => {

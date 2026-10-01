@@ -47,6 +47,10 @@ export interface ForgePr {
   number: number;
   url: string;
   headRefName: string;
+  /** The branch the PR targets, and its head commit — at merge time, for a merged PR. Together
+   *  they are what proves a merged PR landed THIS tip on THIS base. */
+  baseRefName: string;
+  headRefOid: string;
   state: BranchPrState;
 }
 
@@ -57,7 +61,8 @@ export interface ForgePr {
 export interface BranchForge {
   /** States of the PRs runs CREATED (`pullRequestUrl`), by number — the ref-status cache. */
   prStates(repoRoot: string, numbers: number[]): Promise<{ available: boolean; states: Record<number, BranchPrState> }>;
-  /** Every PR of the repository, for branches with no `pullRequestUrl` — one cached list. */
+  /** Every PR of the repository — one cached list. It names each branch with no
+   *  `pullRequestUrl`, and carries the base and head that a `merged` verdict is checked against. */
   listPrs(repoRoot: string): Promise<{ available: boolean; prs: ForgePr[] }>;
 }
 
@@ -73,6 +78,8 @@ const ghPrListSchema = z.array(
     number: z.number(),
     url: z.string(),
     headRefName: z.string(),
+    baseRefName: z.string(),
+    headRefOid: z.string(),
     state: z.string(),
     isDraft: z.boolean().optional(),
   }),
@@ -102,7 +109,7 @@ export const githubBranchForge: BranchForge = {
     try {
       const { stdout } = await exec(
         'gh',
-        ['pr', 'list', '--state', 'all', '--limit', String(PR_LIST_LIMIT), '--json', 'number,headRefName,state,isDraft,url'],
+        ['pr', 'list', '--state', 'all', '--limit', String(PR_LIST_LIMIT), '--json', 'number,headRefName,baseRefName,headRefOid,state,isDraft,url'],
         { cwd: repoRoot, timeout: 15_000, maxBuffer: 16 * 1024 * 1024 },
       );
       const rows = ghPrListSchema.parse(JSON.parse(stdout));
@@ -112,6 +119,8 @@ export const githubBranchForge: BranchForge = {
           number: row.number,
           url: row.url,
           headRefName: row.headRefName,
+          baseRefName: row.baseRefName,
+          headRefOid: row.headRefOid,
           state: row.state === 'MERGED' ? 'merged' : row.state === 'CLOSED' ? 'closed' : row.isDraft ? 'draft' : 'open',
         })),
       };
@@ -293,6 +302,7 @@ export async function classifyBranches(input: ClassifyInput): Promise<Classifica
   const pending = drafts.filter((d) => d.cls === null);
   const prByBranch = new Map<string, RepoBranchEntry['pr']>();
   let prStateKnown = true;
+  const mergedByPr = new Set<string>();
   const taskRows = drafts.filter((d) => d.head.name.startsWith(TASK_PREFIX));
   if (pending.length > 0) {
     if (!input.hasRemote) {
@@ -306,25 +316,40 @@ export async function classifyBranches(input: ClassifyInput): Promise<Classifica
         if (url && n !== null) created.set(n, { url, branch: d.head.name });
         else needList.push(d);
       }
-      const [states, list] = await Promise.all([
-        created.size > 0 ? input.forge.prStates(root, [...created.keys()]) : Promise.resolve({ available: true, states: {} as Record<number, BranchPrState> }),
-        needList.length > 0 ? input.forge.listPrs(root) : Promise.resolve({ available: true, prs: [] as ForgePr[] }),
-      ]);
-      if (!states.available || !list.available) prStateKnown = false;
+      const states = created.size > 0
+        ? await input.forge.prStates(root, [...created.keys()])
+        : { available: true, states: {} as Record<number, BranchPrState> };
+      if (!states.available) prStateKnown = false;
       for (const [n, { url, branch }] of created) {
         const state = states.states[n];
         if (state) prByBranch.set(branch, { number: n, url, state });
       }
+      // A merged state alone proves nothing (below), so the list is also needed whenever a
+      // created PR reports merged — it carries the base and head the verdict is checked against.
+      const createdMerged = pending.some((d) => prByBranch.get(d.head.name)?.state === 'merged');
+      const list = needList.length > 0 || createdMerged
+        ? await input.forge.listPrs(root)
+        : { available: true, prs: [] as ForgePr[] };
+      if (!list.available) prStateKnown = false;
       const byHead = new Map<string, ForgePr[]>();
       for (const pr of list.prs) byHead.set(pr.headRefName, [...(byHead.get(pr.headRefName) ?? []), pr]);
       for (const d of needList) {
         const pr = pickPr(byHead.get(d.head.name) ?? []);
         if (pr) prByBranch.set(d.head.name, { number: pr.number, url: pr.url, state: pr.state });
       }
+      // A merged PR lands the tip only when it targeted this base AND merged this very commit: one
+      // into another branch, or a branch that gained commits after its PR merged, still holds work
+      // the base lacks, and `merged` would make that work bulk-deletable.
+      for (const d of pending) {
+        const landed = (byHead.get(d.head.name) ?? []).some(
+          (pr) => pr.state === 'merged' && pr.baseRefName === base && pr.headRefOid === d.head.sha,
+        );
+        if (landed) mergedByPr.add(d.head.name);
+      }
     }
   }
   for (const d of pending) {
-    if (prByBranch.get(d.head.name)?.state === 'merged') d.cls = 'merged';
+    if (mergedByPr.has(d.head.name)) d.cls = 'merged';
     else d.cls = d.run ? 'not-landed' : 'orphan';
   }
 
