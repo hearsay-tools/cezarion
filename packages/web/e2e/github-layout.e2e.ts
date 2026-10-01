@@ -454,6 +454,8 @@ it.each([{ width: 1440, height: 900 }, { width: 360, height: 640 }].flatMap(view
   const refreshingPopover = browser.waitForValue<{ text: string; lines: number; clipped: boolean; inside: boolean }>(readPopover, value => Boolean(value?.text.includes('Refreshing project boards')))
   browser.evaluate('window.__mark = performance.now()')
   browser.waitForFunction('performance.now() - window.__mark > 400')
+  // The delayed /github/projects request must have reached the interceptor before it can be released.
+  browser.waitForFunction("typeof window.__finishProjects === 'function'")
   browser.evaluate('window.__finishProjects()')
   browser.waitForFunction(outcome === 'ready'
     ? `!(${status}).includes('Refreshing project boards')`
@@ -537,6 +539,8 @@ it.each([{ width: 1440, height: 900 }, { width: 360, height: 640 }].flatMap(view
   })()`)
   browser.evaluate('window.__mark = performance.now()')
   browser.waitForFunction('performance.now() - window.__mark > 400')
+  // The delayed /github/projects request must have reached the interceptor before it can be released.
+  browser.waitForFunction("typeof window.__finishProjects === 'function'")
   browser.evaluate('window.__finishProjects()')
   browser.waitForFunction(outcome === 'long names'
     ? `[...document.querySelector('select[aria-label="Project board"]').options].some(option => option.textContent.includes('Delivery roadmap'))`
@@ -585,6 +589,8 @@ it.each([1440, 360].flatMap(width => ['status button', 'search'].map(focus => ({
   const target = focus === 'search' ? '[data-slot="gh-search"]' : '[aria-label="Project board status"]'
   browser.evaluate(`document.querySelector('${target}').focus()`)
   browser.waitForFunction(`document.activeElement?.matches('${target}')`)
+  // The delayed /github/projects request must have reached the interceptor before it can be released.
+  browser.waitForFunction("typeof window.__finishProjects === 'function'")
   browser.evaluate('window.__finishProjects()')
   browser.waitForFunction(`document.querySelector('select[aria-label="Project board"]') && !document.querySelector('[data-slot="gh-filter-toolbar"] [role="status"]').textContent.includes('Refreshing')`)
   browser.evaluate('window.__mark = performance.now()')
