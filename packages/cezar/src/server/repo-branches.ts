@@ -178,7 +178,7 @@ async function localHeads(root: string): Promise<HeadRow[]> {
   const res = await git(root, [
     'for-each-ref',
     'refs/heads',
-    '--format=%(refname:short)%00%(objectname)%00%(committerdate:iso-strict)%00%(subject)',
+    '--format=%(refname:lstrip=2)%00%(objectname)%00%(committerdate:iso-strict)%00%(subject)',
   ]);
   if (!res.ok) return [];
   return res.stdout
@@ -196,7 +196,7 @@ async function localHeads(root: string): Promise<HeadRow[]> {
 async function aheadCounts(root: string, heads: HeadRow[], baseSha: string | null): Promise<Map<string, number>> {
   const out = new Map<string, number>();
   if (baseSha) {
-    const batch = await git(root, ['for-each-ref', 'refs/heads', `--format=%(refname:short)%00%(ahead-behind:${baseSha})`]);
+    const batch = await git(root, ['for-each-ref', 'refs/heads', `--format=%(refname:lstrip=2)%00%(ahead-behind:${baseSha})`]);
     if (batch.ok) {
       for (const line of batch.stdout.split('\n')) {
         const [name = '', counts = ''] = line.split('\0');
@@ -664,7 +664,7 @@ export async function attributeLog(
   const refsAt = async (sha: string): Promise<string[]> => {
     if (!tips) {
       tips = new Map();
-      const res = await git(root, ['for-each-ref', '--format=%(objectname) %(refname:short)', 'refs/heads', 'refs/remotes']);
+      const res = await git(root, ['for-each-ref', '--format=%(objectname) %(refname:lstrip=2)', 'refs/heads', 'refs/remotes']);
       for (const line of res.stdout.split('\n')) {
         const [objectname = '', ref = ''] = line.split(' ');
         if (objectname && ref) tips.set(objectname, [...(tips.get(objectname) ?? []), ref.replace(/^[^/]+\/(?=cez\/)/, '')]);

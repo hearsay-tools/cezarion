@@ -332,6 +332,18 @@ describe('the branch classifier (issue 08 §A)', () => {
     expect(payload.branches.find((b) => b.name === 'cez/aaaaaaaa')?.ahead).toBe(1);
   });
 
+  it('names a task branch exactly when a tag shares its name', async () => {
+    await taskBranch(root, 'cez/aaaaaaaa', 1);
+    // `%(refname:short)` would spell the branch `heads/cez/aaaaaaaa` to disambiguate it from this tag.
+    await git(root, 'tag', 'cez/aaaaaaaa', 'main');
+    const runs = [runRecord('aaaaaaaa-1', 'done')];
+    const { payload, cls } = await classesOf({ runs });
+    expect(cls['cez/aaaaaaaa']).toBe('not-landed');
+    expect(payload.branches.find((b) => b.name === 'cez/aaaaaaaa')).toMatchObject({ runId: 'aaaaaaaa-1', ahead: 1 });
+    expect(payload.counts.notLanded).toBe(1);
+    expect((await deleteBranches(input({ runs }), ['cez/aaaaaaaa'], 'cez/aaaaaaaa')).deleted).toEqual(['cez/aaaaaaaa']);
+  });
+
   it('does not read an expired creation entry\'s survivor as the fork point', async () => {
     const tip = await taskBranch(root, 'cez/aaaaaaaa', 1);
     await git(root, 'branch', 'backup', tip);
