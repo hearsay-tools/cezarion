@@ -699,14 +699,17 @@ export async function attributeLog(
       const mergePr = MERGE_PR.exec(entry.subject);
       const prNumber = mergePr ? Number(mergePr[1]) : null;
       if (entry.parents.length >= 2) {
-        for (const ref of await refsAt(entry.parents[1] as string)) {
-          const run = byBranch.get(ref);
-          if (run) return source(run, prNumber);
-        }
+        // What the merge itself recorded comes first — the PR a task opened, then the branch the
+        // subject names. A ref at the second parent is only a fallback: a later task branched at
+        // that tip points there too, without having produced any of the work.
+        if (prNumber !== null && byPr.has(prNumber)) return source(byPr.get(prNumber) as RunRecord, prNumber);
         const named = mergePr?.[2] ?? MERGE_BRANCH.exec(entry.subject)?.[1];
         const run = named ? byBranch.get(named.replace(/^origin\//, '')) : undefined;
         if (run) return source(run, prNumber);
-        if (prNumber !== null && byPr.has(prNumber)) return source(byPr.get(prNumber) as RunRecord, prNumber);
+        for (const ref of await refsAt(entry.parents[1] as string)) {
+          const atTip = byBranch.get(ref);
+          if (atTip) return source(atTip, prNumber);
+        }
         return null;
       }
       const squash = SQUASH_PR.exec(entry.subject);

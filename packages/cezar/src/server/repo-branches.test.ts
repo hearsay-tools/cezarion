@@ -568,6 +568,21 @@ describe('log source attribution (issue 08 §B5)', () => {
     rmSync(root, { recursive: true, force: true });
   });
 
+  it('credits a merge to the task its PR records, not a later branch sitting at the same tip', async () => {
+    await taskBranch(root, 'cez/zzzzzzzz', 1);
+    await git(root, 'merge', '-q', '--no-ff', '-m', 'Merge pull request #41 from acme/cez/zzzzzzzz', 'cez/zzzzzzzz');
+    await git(root, 'branch', 'cez/aaaaaaaa', 'cez/zzzzzzzz'); // a later task, forked at that tip
+    await git(root, 'branch', '-D', 'cez/zzzzzzzz'); // cleaned up after merging
+    const runs = [
+      runRecord('zzzzzzzz-1', 'done', { title: 'the work', pullRequestUrl: 'https://github.com/acme/demo/pull/41' }),
+      runRecord('aaaaaaaa-1', 'done', { title: 'later, empty' }),
+    ];
+    const log = await getLogWithParents(root);
+    const sources = await attributeLog(root, log, runs);
+    const merge = log.findIndex((entry) => entry.subject.startsWith('Merge pull request #41'));
+    expect(sources[merge]).toEqual({ runId: 'zzzzzzzz-1', title: 'the work', prNumber: 41 });
+  });
+
   it('maps every merge row by its second parent, not only the first one to ask', async () => {
     await taskBranch(root, 'cez/aaaaaaaa', 1);
     await taskBranch(root, 'cez/bbbbbbbb', 1);
