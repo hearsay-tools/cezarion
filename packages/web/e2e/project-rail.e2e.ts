@@ -138,6 +138,7 @@ describe('project rail', () => {
     browser.evaluate(`document.querySelector('${mark(OTHER.id)} a').scrollIntoView({ block: 'nearest' })`)
     browser.click(`${mark(OTHER.id)} a`)
     assertProject()
+    browser.waitForFunction(`document.querySelector('${mark(OTHER.id)} a') !== null`)
     browser.evaluate(`document.querySelector('${mark(OTHER.id)} a').focus()`)
     browser.press('Enter')
     assertProject()
@@ -183,7 +184,14 @@ describe('project rail', () => {
     browser.evaluate(`document.querySelector('${mark(OTHER.id)} a').focus()`)
     browser.press('Enter')
     pathIs(`/p/${OTHER.id}/workflows`)
-    // A stale task page degrades to the project home.
+    // A task page that still exists comes back whole, query and hash included.
+    browser.goto(baseUrl + `/p/${OTHER.id}/tasks/rail-review?x=1#frag`)
+    remembered(OTHER.id, `/p/${OTHER.id}/tasks/rail-review`)
+    switchTo(bootProject)
+    pathIs(`/p/${bootProject}/skills`)
+    switchTo(OTHER.id)
+    pathIs(`/p/${OTHER.id}/tasks/rail-review?x=1`)
+    // A page the server confirms is gone degrades to the project home.
     browser.goto(baseUrl + `/p/${bootProject}/`)
     browser.waitForFunction(`document.querySelector('${mark(OTHER.id)} [data-slot="rail-pill-top"]') !== null`)
     remembered(bootProject, `/p/${bootProject}/`)

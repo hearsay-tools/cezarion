@@ -140,6 +140,7 @@ function renderPalette({
   automations = false,
   uiState = {} as Record<string, unknown>,
   entry = '/',
+  extraRoutes = {} as Record<string, unknown>,
 }: {
   runs?: RunRecord[]
   skills?: Skill[]
@@ -154,6 +155,8 @@ function renderPalette({
   uiState?: Record<string, unknown>
   /** The URL to mount at. `/p/<id>/…` is what gives the palette an ACTIVE project. */
   entry?: string
+  /** More API answers, by path — anything unlisted answers 404. */
+  extraRoutes?: Record<string, unknown>
 } = {}) {
   if (theme) localStorage.setItem(THEME_STORAGE_KEY, theme)
   serve({
@@ -163,6 +166,7 @@ function renderPalette({
     '/api/v1/ui-state': uiState,
     '/api/v1/projects': { projects, bootProject: projects[0]?.id ?? 'default', projectsDir: '/repos' },
     '/api/v1/workspace/runs-index': { runs: indexed, perProjectLimit: 200, truncated },
+    ...extraRoutes,
   })
   render(
     <QueryClientProvider client={createQueryClient()}>
@@ -378,7 +382,7 @@ describe('Projects group', () => {
     fireEvent.click(rows[1] as HTMLElement)
 
     // The tasks pane of the OTHER project — an explicit cross-project target, not the active scope.
-    expect(location()).toBe('/p/shop/')
+    await waitFor(() => expect(location()).toBe('/p/shop/'))
     await waitFor(() => expect(dialog()).toBeNull())
   })
 
@@ -402,6 +406,9 @@ describe('Projects group', () => {
     expect(rows.map((row) => row.getAttribute('data-project-id'))).toEqual(['cezar-fork'])
   })
 
+  const projectRow = (id: string) =>
+    [...document.querySelectorAll('[data-slot="palette-project"]')].find((r) => r.getAttribute('data-project-id') === id) as HTMLElement
+
   it('switches to the remembered page of the chosen project, query included', async () => {
     localStorage.setItem(
       'cez-project-locations',
@@ -410,15 +417,34 @@ describe('Projects group', () => {
     renderPalette({ projects: REGISTRY, entry: '/p/cezar/skills' })
     openWith({ metaKey: true })
     await screen.findByText('shop')
-    const rows = [...document.querySelectorAll('[data-slot="palette-project"]')]
 
-    fireEvent.click(rows.find((row) => row.getAttribute('data-project-id') === 'shop') as HTMLElement)
+    fireEvent.click(projectRow('shop'))
 
-    expect(location()).toBe('/p/shop/git/branches?q=x')
+    await waitFor(() => expect(location()).toBe('/p/shop/git/branches?q=x'))
     localStorage.clear()
   })
 
-  it('falls back to the project home when the remembered task is gone or the memory is another project\'s', async () => {
+  it('restores a remembered task page that still exists, even when the runs index lacks it', async () => {
+    localStorage.setItem(
+      'cez-project-locations',
+      JSON.stringify({ shop: { projectId: 'shop', pathname: '/p/shop/tasks/old-run/changes', search: '?file=a' } }),
+    )
+    renderPalette({
+      projects: REGISTRY,
+      entry: '/p/cezar/',
+      truncated: ['shop'],
+      extraRoutes: { '/api/v1/p/shop/runs/old-run': run({ id: 'old-run', title: 'Old' }) },
+    })
+    openWith({ metaKey: true })
+    await screen.findByText('shop')
+
+    fireEvent.click(projectRow('shop'))
+
+    await waitFor(() => expect(location()).toBe('/p/shop/tasks/old-run/changes?file=a'))
+    localStorage.clear()
+  })
+
+  it('falls back to the project home for a confirmed-deleted task or another project\'s memory', async () => {
     localStorage.setItem(
       'cez-project-locations',
       JSON.stringify({
@@ -426,22 +452,16 @@ describe('Projects group', () => {
         docs: { projectId: 'cezar', pathname: '/p/cezar/git' },
       }),
     )
-    renderPalette({
-      projects: REGISTRY,
-      indexed: [indexed({ id: 'other-run', projectId: 'shop', title: 'Other' })],
-      entry: '/p/cezar/',
-    })
+    renderPalette({ projects: REGISTRY, entry: '/p/cezar/' })
     openWith({ metaKey: true })
     await screen.findByText('shop')
-    const row = (id: string) =>
-      [...document.querySelectorAll('[data-slot="palette-project"]')].find((r) => r.getAttribute('data-project-id') === id) as HTMLElement
 
-    fireEvent.click(row('shop'))
-    expect(location()).toBe('/p/shop/')
+    fireEvent.click(projectRow('shop'))
+    await waitFor(() => expect(location()).toBe('/p/shop/'))
     openWith({ metaKey: true })
     await screen.findByText('docs')
-    fireEvent.click(row('docs'))
-    expect(location()).toBe('/p/docs/')
+    fireEvent.click(projectRow('docs'))
+    await waitFor(() => expect(location()).toBe('/p/docs/'))
     localStorage.clear()
   })
 

@@ -379,7 +379,10 @@ describe('ProjectRail expanded rows (#711)', () => {
 })
 
 describe('ProjectRail remembered pages', () => {
-  const target = (id: string) => (id === 'open_mercato' ? '/p/open_mercato/git/branches?q=x#h' : `/p/${id}/`)
+  const target = (id: string) => ({
+    href: id === 'open_mercato' ? '/p/open_mercato/git/branches?q=x#h' : `/p/${id}/`,
+    verify: false,
+  })
 
   it('links every mark to the resolved target, collapsed and expanded', () => {
     renderRail({ projectTarget: target })
@@ -393,6 +396,21 @@ describe('ProjectRail remembered pages', () => {
     renderRail({ projectTarget: target })
     expect(document.querySelector('[data-slot="project-rail"]')?.getAttribute('data-expanded')).toBe('true')
     expect(href('open_mercato')).toBe('/p/open_mercato/git/branches?q=x#h')
+  })
+
+  it('hands a plain click on an entity page to the resolver, but not a new-tab click', () => {
+    const onSwitchProject = vi.fn()
+    renderRail({
+      projectTarget: (id) => ({ href: `/p/${id}/tasks/run-1`, verify: true }),
+      onSwitchProject,
+    })
+    const link = mark('open_mercato').querySelector('a') as HTMLElement
+
+    fireEvent.click(link, { ctrlKey: true })
+    expect(onSwitchProject).not.toHaveBeenCalled()
+
+    fireEvent.click(link)
+    expect(onSwitchProject).toHaveBeenCalledWith('open_mercato')
   })
 
   it('keeps the home link when no resolver is given', () => {

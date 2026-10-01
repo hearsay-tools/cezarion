@@ -5,7 +5,7 @@ import {
   PROJECT_LOCATIONS_STORAGE_KEY,
   locationToRestore,
   locationToSave,
-  projectSwitchTarget,
+  rememberedProjectPage,
   readStoredProjectLocation,
   sameLastLocation,
   writeStoredProjectLocation,
@@ -158,8 +158,6 @@ describe('sameLastLocation', () => {
 })
 
 describe('per-project memories', () => {
-  const ctx = { registry: REGISTRY, runIds: new Set(['run-1']) }
-
   it('keeps one independent memory per project across a reload', () => {
     localStorage.clear()
     writeStoredProjectLocation({ projectId: 'boot', pathname: '/p/boot/git' })
@@ -191,61 +189,36 @@ describe('per-project memories', () => {
     })
     expect(readStoredProjectLocation('boot')).toBeNull()
     expect(() => writeStoredProjectLocation({ projectId: 'boot', pathname: '/p/boot/git' })).not.toThrow()
-    expect(projectSwitchTarget('boot', null, ctx)).toBe('/p/boot/')
+    expect(rememberedProjectPage('boot', readStoredProjectLocation('boot'), REGISTRY)).toBeNull()
     spy.mockRestore()
     vi.restoreAllMocks()
   })
 })
 
-describe('projectSwitchTarget', () => {
-  const ctx = { registry: REGISTRY, runIds: new Set(['run-1']) }
+describe('rememberedProjectPage', () => {
   const saved = (pathname: string, extra: object = {}) => ({ projectId: 'other', pathname, ...extra })
 
-  it('lands on the project home with no memory', () => {
-    expect(projectSwitchTarget('other', null, ctx)).toBe('/p/other/')
+  it('is null with no memory', () => {
+    expect(rememberedProjectPage('other', null, REGISTRY)).toBeNull()
   })
 
-  it('restores pathname, query and hash exactly', () => {
-    expect(projectSwitchTarget('other', saved('/p/other/skills', { search: '?skill=x', hash: '#top' }), ctx)).toBe(
-      '/p/other/skills?skill=x#top',
+  it('returns pathname, query and hash exactly', () => {
+    expect(rememberedProjectPage('other', saved('/p/other/git/', { search: '?q=x', hash: '#top' }), REGISTRY)).toBe(
+      '/p/other/git/?q=x#top',
     )
   })
 
-  it('ignores a memory that belongs to another project', () => {
-    expect(projectSwitchTarget('other', { projectId: 'boot', pathname: '/p/boot/git' }, ctx)).toBe('/p/other/')
-    expect(projectSwitchTarget('other', { projectId: 'other', pathname: '/p/boot/git' }, ctx)).toBe('/p/other/')
+  it('ignores a memory that belongs to another project or is malformed', () => {
+    expect(rememberedProjectPage('other', { projectId: 'boot', pathname: '/p/boot/git' }, REGISTRY)).toBeNull()
+    expect(rememberedProjectPage('other', saved('/p/boot/git'), REGISTRY)).toBeNull()
+    expect(rememberedProjectPage('other', saved('/p/other/tasks/%E0%A4%A'), REGISTRY)).not.toBeNull()
+    expect(rememberedProjectPage('other', saved('/p/%E0%A4%A/x', { projectId: '%E0%A4%A' }), REGISTRY)).toBeNull()
+    expect(rememberedProjectPage('other', 'junk', REGISTRY)).toBeNull()
   })
 
-  it('ignores a memory for a missing or unregistered project', () => {
-    expect(projectSwitchTarget('gone', { projectId: 'gone', pathname: '/p/gone/git' }, ctx)).toBe('/p/gone/')
-    expect(projectSwitchTarget('nope', { projectId: 'nope', pathname: '/p/nope/git' }, ctx)).toBe('/p/nope/')
+  it('ignores a memory for a missing or unregistered project, or before the registry loads', () => {
+    expect(rememberedProjectPage('gone', { projectId: 'gone', pathname: '/p/gone/git' }, REGISTRY)).toBeNull()
+    expect(rememberedProjectPage('nope', { projectId: 'nope', pathname: '/p/nope/git' }, REGISTRY)).toBeNull()
+    expect(rememberedProjectPage('other', saved('/p/other/git'), undefined)).toBeNull()
   })
-
-  it('keeps a task page only while the run still exists', () => {
-    expect(projectSwitchTarget('other', saved('/p/other/tasks/run-1/changes', { search: '?file=a' }), ctx)).toBe(
-      '/p/other/tasks/run-1/changes?file=a',
-    )
-    expect(projectSwitchTarget('other', saved('/p/other/tasks/deleted/changes'), ctx)).toBe('/p/other/')
-    // Index not loaded: cannot verify, so the safe destination.
-    expect(projectSwitchTarget('other', saved('/p/other/tasks/run-1'), { registry: REGISTRY })).toBe('/p/other/')
-  })
-
-  it.each([
-    ['/p/other/git/commits/abc123', '/p/other/git/commits'],
-    ['/p/other/github/prs/9/changes', '/p/other/github/prs'],
-    ['/p/other/github/issues/4', '/p/other/github'],
-    ['/p/other/workflows/gone', '/p/other/workflows'],
-    ['/p/other/automations/a1/log', '/p/other/automations'],
-    ['/p/other/compare/g1', '/p/other/'],
-    ['/p/other/no-such-page', '/p/other/'],
-  ])('falls back from entity or unknown page %s to %s', (pathname, expected) => {
-    expect(projectSwitchTarget('other', saved(pathname, { search: '?x=1', hash: '#h' }), ctx)).toBe(expected)
-  })
-
-  it.each(['/p/other/git/branches', '/p/other/settings/skills', '/p/other/new', '/p/other/inbox'])(
-    'keeps list-level page %s',
-    (pathname) => {
-      expect(projectSwitchTarget('other', saved(pathname), ctx)).toBe(pathname)
-    },
-  )
 })

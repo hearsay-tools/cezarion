@@ -9,6 +9,7 @@ import { FOOTER_ICON_ACTIVE_CLASS } from '@/components/nav-row-styles'
 import { useTheme } from '@/components/theme-provider'
 import { ThemeToggle } from '@/components/theme-toggle'
 import { pathnameProjectId, scopeTo } from '@/lib/project-router'
+import type { ProjectSwitchTarget } from '@/lib/project-switch'
 import { SignalPill, signalPillSegments } from '@/components/signal-pill'
 import { ProjectStateWords } from '@/components/project-state-words'
 import { projectInitials, projectSignalLabel, type ProjectSignal } from '@/lib/project-signal'
@@ -45,6 +46,7 @@ function ProjectMark({
   truncated,
   current,
   target,
+  onSwitchProject,
   onSelectProject,
 }: {
   project: ProjectListEntry
@@ -53,7 +55,8 @@ function ProjectMark({
   truncated: boolean
   current: boolean
   /** Where the mark goes: the project's remembered page, or its home. */
-  target: string
+  target: ProjectSwitchTarget
+  onSwitchProject?: (projectId: string) => void
   onSelectProject?: (projectId: string) => void
 }) {
   const label = projectSignalLabel(project.name, signal, { truncated, unknown: !known })
@@ -65,11 +68,15 @@ function ProjectMark({
       ) : null}
       <div className="relative size-9">
         <RouterLink
-          to={target}
+          to={target.href}
           onClick={(event) => {
             // New-tab/window gestures must not change the sidebar in this window.
             if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
             onSelectProject?.(project.id)
+            if (target.verify && onSwitchProject) {
+              event.preventDefault()
+              onSwitchProject(project.id)
+            }
           }}
           aria-label={label}
           title={label}
@@ -102,6 +109,7 @@ function ExpandedProjectRow({
   truncated,
   current,
   target,
+  onSwitchProject,
   onSelectProject,
 }: {
   project: ProjectListEntry
@@ -110,7 +118,8 @@ function ExpandedProjectRow({
   truncated: boolean
   current: boolean
   /** Where the mark goes: the project's remembered page, or its home. */
-  target: string
+  target: ProjectSwitchTarget
+  onSwitchProject?: (projectId: string) => void
   onSelectProject?: (projectId: string) => void
 }) {
   // The words are on screen, so no tooltip; the accessible name still spells all four counts.
@@ -121,7 +130,7 @@ function ExpandedProjectRow({
   return (
     <div data-slot="rail-project" data-project-id={project.id} className="w-full shrink-0">
       <RouterLink
-        to={target}
+        to={target.href}
         onClick={(event) => {
           if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
           onSelectProject?.(project.id)
@@ -236,13 +245,15 @@ export type ProjectRailProps = {
    *  and remove, so Add project and All projects go. Never inferred from the project count. */
   singleProject: boolean
   /** Where selecting a project goes. Defaults to each project's home. */
-  projectTarget?: (projectId: string) => string
+  projectTarget?: (projectId: string) => ProjectSwitchTarget
+  /** Called instead of the link's own navigation when `projectTarget(id).verify` is set. */
+  onSwitchProject?: (projectId: string) => void
   onSelectProject?: (projectId: string) => void
 }
 
-const homeOf = (projectId: string) => String(scopeTo(projectId, '/'))
+const homeOf = (projectId: string): ProjectSwitchTarget => ({ href: String(scopeTo(projectId, '/')), verify: false })
 
-export function ProjectRail({ projects, signals, truncated, version, singleProject, projectTarget = homeOf, onSelectProject }: ProjectRailProps) {
+export function ProjectRail({ projects, signals, truncated, version, singleProject, projectTarget = homeOf, onSwitchProject, onSelectProject }: ProjectRailProps) {
   const { pathname } = useLocation()
   const { resolvedTheme } = useTheme()
   const sidebarWidth = React.useContext(ShellSidebarWidthContext)
@@ -318,6 +329,7 @@ export function ProjectRail({ projects, signals, truncated, version, singleProje
             truncated: truncated.has(project.id),
             current: project.id === currentProjectId,
             target: projectTarget(project.id),
+            onSwitchProject,
             onSelectProject,
           }
           return expanded ? <ExpandedProjectRow key={project.id} {...rowProps} /> : <ProjectMark key={project.id} {...rowProps} />

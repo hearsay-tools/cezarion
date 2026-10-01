@@ -198,6 +198,9 @@ export class ApiError extends Error {
 export type ReadOptions = {
   /** Wired to TanStack Query's per-query signal, so an unmounted view stops its fetch. */
   signal?: AbortSignal
+  /** Read another project than the active one — only for the functions that say so (the
+   *  project-switch existence checks); everything else follows `queryScope()`. */
+  projectId?: string
 }
 
 type Json = Record<string, unknown>
@@ -598,7 +601,7 @@ export async function getUiState(opts?: ReadOptions): Promise<UiState> {
 export async function getWorkflows(opts?: ReadOptions): Promise<WorkflowsResponse> {
   return unwrap(
     await cez.api.v1.p[':projectId'].workflows.$get(
-      { param: { projectId: queryScope() } },
+      { param: { projectId: opts?.projectId ?? queryScope() } },
       init(opts),
     ),
     '/workflows',
@@ -818,7 +821,7 @@ export async function getRepoChanges(opts?: ReadOptions): Promise<ChangesPayload
 export async function getRepoCommit(sha: string, opts?: ReadOptions): Promise<RepoCommitPayload> {
   return unwrap(
     await cez.api.v1.p[':projectId'].repo.commit[':sha'].$get(
-      { param: { projectId: queryScope(), sha: encodeURIComponent(sha) }, query: { structured: '1' } },
+      { param: { projectId: opts?.projectId ?? queryScope(), sha: encodeURIComponent(sha) }, query: { structured: '1' } },
       init(opts),
     ),
     '/repo/commit/:sha',
@@ -988,7 +991,7 @@ export async function getGithubItem(
   return unwrap(
     await cez.api.v1.p[':projectId'].github.items[':kind'][':number'].$get(
       {
-        param: { projectId: queryScope(), kind, number: String(number) },
+        param: { projectId: opts?.projectId ?? queryScope(), kind, number: String(number) },
         // `refresh=1` busts the route's item cache, as it does for the comment thread above.
         query: { refresh: params.refresh ? '1' : undefined },
       },
@@ -1112,7 +1115,7 @@ export function runFileRawUrl(id: string, path: string): string {
 export async function getGroup(groupId: string, opts?: ReadOptions): Promise<GroupResponse> {
   return unwrap(
     await cez.api.v1.p[':projectId'].groups[':groupId'].$get(
-      { param: { projectId: queryScope(), groupId: encodeURIComponent(groupId) } },
+      { param: { projectId: opts?.projectId ?? queryScope(), groupId: encodeURIComponent(groupId) } },
       init(opts),
     ),
     `/groups/${encodeURIComponent(groupId)}`,
@@ -1794,7 +1797,7 @@ export async function postPlan(task: string): Promise<PlanResponse> {
 export async function getAutomations(opts?: ReadOptions): Promise<AutomationsResponse> {
   return unwrap(
     await cez.api.v1.p[':projectId'].automations.$get(
-      { param: { projectId: queryScope() } },
+      { param: { projectId: opts?.projectId ?? queryScope() } },
       init(opts),
     ),
     '/automations',

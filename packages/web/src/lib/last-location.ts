@@ -3,7 +3,7 @@ import type {
   WorkspaceLastLocation,
 } from '@open-mercato/cezar-api-client'
 
-import { pathnameProjectId, scopeTo, stripProjectPrefix } from './project-router'
+import { pathnameProjectId } from './project-router'
 
 export type LocationParts = Pick<Location, 'pathname' | 'search' | 'hash'>
 
@@ -180,63 +180,19 @@ export function writeStoredProjectLocation(location: WorkspaceLastLocation): voi
   }
 }
 
-/** What a switch can verify about a saved page. `runIds` are the target project's runs; absent
- *  while the runs index has not loaded, in which case a task page cannot be confirmed. */
-export type ProjectSwitchContext = {
-  registry: ProjectsResponse | undefined
-  runIds?: ReadonlySet<string>
-}
-
-/** Pages that exist whatever the project holds. */
-const LIST_PAGES = [
-  /^\/$/,
-  /^\/new$/,
-  /^\/git(?:\/(?:commits|not-landed|cleanup|branches|changes))?$/,
-  /^\/github(?:\/prs)?$/,
-  /^\/automations(?:\/new)?$/,
-  /^\/skills$/,
-  /^\/inbox$/,
-  /^\/workflows$/,
-  /^\/settings(?:\/[^/]+)?$/,
-]
-
-/** Entity pages whose entity may be gone, and the list they fall back to. */
-const ENTITY_PAGES: Array<[RegExp, string]> = [
-  [/^\/git\/commits\/[^/]+$/, '/git/commits'],
-  [/^\/github\/issues\/[^/]+$/, '/github'],
-  [/^\/github\/prs\/[^/]+(?:\/changes)?$/, '/github/prs'],
-  [/^\/workflows\/[^/]+$/, '/workflows'],
-  [/^\/automations\/[^/]+(?:\/log)?$/, '/automations'],
-]
-
-const TASK_PAGE = /^\/tasks\/([^/]+)(?:\/(?:changes|files|commits|commits\/[^/]+|issue\/[^/]+|pr\/[^/]+))?$/
-
 /**
- * Where selecting `projectId` in the rail or the palette goes: its remembered page when that page
- * still makes sense, otherwise its home. Always a `/p/<id>/…` path, so it can only ever stay in
- * the target project. A page whose entity cannot be confirmed (a deleted task, a commit that
- * rebased away) degrades to its list, never to a not-found screen; explicit links never pass
- * through here.
+ * The remembered page of `projectId` as a path, or null when there is nothing usable: no memory,
+ * corrupt storage, a page of another project, or a project that is gone or missing. This is the
+ * storage half of a project switch; whether the router actually serves the page, and whether its
+ * entity still exists, is `lib/project-switch.ts`.
  */
-export function projectSwitchTarget(
+export function rememberedProjectPage(
   projectId: string,
   stored: unknown,
-  context: ProjectSwitchContext,
-): string {
-  const home = String(scopeTo(projectId, '/'))
+  registry: ProjectsResponse | undefined,
+): string | null {
   const saved = parsedLastLocation(stored)
-  if (saved === null || saved.projectId !== projectId) return home
-  if (context.registry === undefined || !projectIsUsable(projectId, context.registry)) return home
-
-  const flat = stripProjectPrefix(saved.pathname)
-  const exact = `${saved.pathname}${saved.search ?? ''}${saved.hash ?? ''}`
-  if (LIST_PAGES.some((page) => page.test(flat))) return exact
-
-  const task = TASK_PAGE.exec(flat)
-  if (task !== null) {
-    return context.runIds?.has(decodeURIComponent(task[1] ?? '')) === true ? exact : home
-  }
-
-  const entity = ENTITY_PAGES.find(([page]) => page.test(flat))
-  return entity === undefined ? home : String(scopeTo(projectId, entity[1]))
+  if (saved === null || saved.projectId !== projectId) return null
+  if (registry === undefined || !projectIsUsable(projectId, registry)) return null
+  return `${saved.pathname}${saved.search ?? ''}${saved.hash ?? ''}`
 }
