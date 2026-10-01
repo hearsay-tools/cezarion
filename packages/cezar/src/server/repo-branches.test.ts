@@ -282,7 +282,66 @@ describe('the branch classifier (issue 08 §A)', () => {
     }
   });
 
+  it('anchors on the base BRANCH, never a same-named tag at an unlanded tip', async () => {
+    const tip = await taskBranch(root, 'cez/aaaaaaaa', 1);
+    // Unqualified, `main^{commit}` resolves to this tag before refs/heads/main.
+    await git(root, 'tag', 'main', tip);
+    const { payload, cls } = await classesOf({ runs: [runRecord('aaaaaaaa-1', 'done')] });
+    expect(payload.base).toBe('main');
+    expect(cls['cez/aaaaaaaa']).toBe('not-landed');
+    expect(payload.branches.find((b) => b.name === 'cez/aaaaaaaa')?.ahead).toBe(1);
+  });
+
+  it('does not read an expired creation entry\'s survivor as the fork point', async () => {
+    const tip = await taskBranch(root, 'cez/aaaaaaaa', 1);
+    await git(root, 'branch', 'backup', tip);
+    // Entries newest first: @{0} the task commit, @{1} the creation. Expire the creation.
+    await git(root, 'reflog', 'delete', 'refs/heads/cez/aaaaaaaa@{1}');
+    expect((await git(root, 'log', '-g', '--format=%H', 'refs/heads/cez/aaaaaaaa')).split('\n')).toEqual([tip]);
+    const { cls } = await classesOf({ runs: [runRecord('aaaaaaaa-1', 'done', { baseBranch: 'main' })] });
+    expect(cls['cez/aaaaaaaa']).toBe('not-landed');
+  });
+
   describe('deleteBranches', () => {
+    it('never lets two empty branches vouch for each other in one bulk delete', async () => {
+      // Both fork from an unmerged topic tip with no commits of their own; then the topic goes.
+      const tip = await taskBranch(root, 'topic', 1);
+      await git(root, 'branch', 'cez/aaaaaaaa', 'topic');
+      await git(root, 'branch', 'cez/bbbbbbbb', 'topic');
+      await git(root, 'branch', '-D', 'topic');
+      const runs = [runRecord('aaaaaaaa-1', 'done', { baseBranch: 'topic' }), runRecord('bbbbbbbb-1', 'done', { baseBranch: 'topic' })];
+      const { cls } = await classesOf({ runs });
+      expect(cls).toMatchObject({ 'cez/aaaaaaaa': 'empty', 'cez/bbbbbbbb': 'empty' });
+
+      const bulk = await deleteBranches(input({ runs }), ['cez/aaaaaaaa', 'cez/bbbbbbbb']);
+      expect(bulk.deleted).toEqual([]);
+      expect(bulk.refused.map((r) => r.name).sort()).toEqual(['cez/aaaaaaaa', 'cez/bbbbbbbb']);
+      // One at a time is fine while the other still holds the commit; the last one is then not-landed.
+      expect((await deleteBranches(input({ runs }), ['cez/aaaaaaaa'])).deleted).toEqual(['cez/aaaaaaaa']);
+      expect((await classesOf({ runs })).cls['cez/bbbbbbbb']).toBe('not-landed');
+      expect(await git(root, 'rev-parse', 'cez/bbbbbbbb')).toBe(tip);
+    });
+
+    it('refuses a merged branch when the base moved after it was classified', async () => {
+      const before = await git(root, 'rev-parse', 'main');
+      const mergedTip = await taskBranch(root, 'cez/cccccccc', 1);
+      await git(root, 'merge', '-q', '--no-ff', '-m', 'Merge', 'cez/cccccccc');
+      await taskBranch(root, 'cez/aaaaaaaa', 1); // pending, so the forge is asked mid-classification
+      const forge: BranchForge = {
+        prStates: async () => ({ available: true, states: {} }),
+        async listPrs() {
+          // main is reset after its sha was read, before the delete: the merge is gone from it.
+          await git(root, 'update-ref', 'refs/heads/main', before);
+          return { available: true, prs: [] };
+        },
+      };
+      const runs = [runRecord('cccccccc-1', 'done'), runRecord('aaaaaaaa-1', 'done')];
+      const result = await deleteBranches(input({ runs, forge }), ['cez/cccccccc']);
+      expect(result.deleted).toEqual([]);
+      expect(result.refused[0]?.reason).toContain('changed since it was classified');
+      expect(await git(root, 'rev-parse', 'cez/cccccccc')).toBe(mergedTip);
+    });
+
     it('bulk deletes only merged and empty; a not-landed name in the bulk loses nothing', async () => {
       const notLandedTip = await taskBranch(root, 'cez/aaaaaaaa', 2);
       await taskBranch(root, 'cez/cccccccc', 1);
