@@ -640,15 +640,17 @@ function useAgeDropped(ref: React.RefObject<HTMLElement | null>, enabled: boolea
     // A reference chip can change width with the same identity — its status glyph lands after
     // `useReferenceStatus` hydrates, a conflict turns it semibold — and neither moves the box
     // or the key. Watch every child but the age; a width that differs from the last one seen
-    // invalidates the stored measurement. The first report per child is only a baseline, and the
-    // age is never watched, so taking it off cannot re-trigger this.
+    // (seeded when the child is bound) invalidates the stored measurement. The age is never
+    // watched, so taking it off cannot re-trigger this.
     const seen = new WeakMap<Element, number>()
     const children = new ResizeObserver((entries) => {
       let changed = false
       for (const entry of entries ?? []) {
+        // The border box, the same convention `bind` seeds with.
+        const width = entry.borderBoxSize?.[0]?.inlineSize ?? entry.contentRect.width
         const previous = seen.get(entry.target)
-        seen.set(entry.target, entry.contentRect.width)
-        if (previous !== undefined && previous !== entry.contentRect.width) changed = true
+        seen.set(entry.target, width)
+        if (previous !== undefined && previous !== width) changed = true
       }
       if (!changed || !live) return
       needed.current = null
@@ -666,6 +668,9 @@ function useAgeDropped(ref: React.RefObject<HTMLElement | null>, enabled: boolea
         if (slot === 'task-row-age' || child.getAttribute('aria-hidden') === 'true') continue
         if (bound.has(child)) continue
         bound.add(child)
+        // Seeded now, so the first report is compared against what the measure saw: a status that
+        // hydrates between the measure and the observer's first delivery is a change, not a baseline.
+        seen.set(child, child.getBoundingClientRect().width)
         children.observe(child)
         fresh = true
       }

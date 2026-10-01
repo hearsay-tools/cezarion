@@ -1855,6 +1855,51 @@ describe('notifying glyph and age-first overflow on the meta line (#729)', () =>
       await waitFor(() => expect(age('t')).toBeNull())
     })
 
+    it('catches a status that hydrates after the full-age measure but before the first observer report', async () => {
+      const watchers: Array<{ cb: (entries?: unknown[]) => void; targets: Set<Element>; live: boolean }> = []
+      vi.stubGlobal('ResizeObserver', class {
+        private w = { cb: undefined as unknown as (entries?: unknown[]) => void, targets: new Set<Element>(), live: true }
+        constructor(cb: (entries?: unknown[]) => void) { this.w.cb = cb; watchers.push(this.w); observers.push(() => cb()) }
+        observe(target: Element) { this.w.targets.add(target) }
+        unobserve(target: Element) { this.w.targets.delete(target) }
+        disconnect() { this.w.live = false }
+      })
+      // The chip's border box as the browser would report it right now (jsdom has no layout).
+      let chipWidth = 40
+      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+        const inMeta = this.parentElement?.dataset.slot === 'task-row-meta' && this.dataset.slot !== 'task-row-age'
+        return { width: inMeta ? chipWidth : 0 } as DOMRect
+      })
+      const requests: Array<() => void> = []
+      vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((resolve) => {
+        requests.push(() => resolve(new Response(JSON.stringify({ available: true, recheckAfterMs: null, prs: { 594: 'merged' }, issues: {} }), { status: 200, headers: { 'content-type': 'application/json' } })))
+      })))
+      client = 130
+      render(
+        <QueryClientProvider client={createQueryClient()}>
+          <MemoryRouter>
+            <ReferenceStatusRegistry>
+              <ReferenceStatusProvider projectId="p" requests={[{ projectId: 'p', kind: 'PR', number: 594 }]}>
+                <TaskQuickList runs={[run({ id: 't', status: 'running', pullRequestUrl: 'https://github.com/o/r/pull/594' })]} view="active" now={NOW} onViewChange={vi.fn()} />
+              </ReferenceStatusProvider>
+            </ReferenceStatusRegistry>
+          </MemoryRouter>
+        </QueryClientProvider>,
+      )
+      await waitFor(() => expect(requests.length).toBeGreaterThan(0))
+      await act(async () => { await Promise.resolve() })
+      expect(age('t')).not.toBeNull()
+      // The answer lands and the glyph widens the chip BEFORE any observer has reported on it.
+      chipWidth = 62
+      needsAge = 150
+      await act(async () => { requests.forEach((answer) => answer()); await new Promise((r) => setTimeout(r, 0)) })
+      // Only now does the observer deliver its FIRST report for the chip — it is a change from the
+      // width seen at bind time, not a baseline.
+      const chip = Array.from(metaEl('t').children).find((c) => c.matches('[data-slot="pr-chip"]') || c.querySelector('[data-slot="pr-chip"]')) as Element
+      act(() => watchers.filter((w) => w.live && w.targets.has(chip)).forEach((w) => w.cb([{ target: chip, contentRect: { width: 62 } }])))
+      await waitFor(() => expect(age('t')).toBeNull())
+    })
+
     it('leaves a variant row (no age) and the tokens order alone', () => {
       renderList({ runs: members(false), showTokens: false, showCost: false })
       expand()
