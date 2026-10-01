@@ -1845,6 +1845,30 @@ describe('searchGithubItems (#730)', () => {
     expect(argvs.some((a) => a[0] === 'search')).toBe(true);
   });
 
+  it('falls back to a text search when the exact view call fails for another reason', async () => {
+    const argvs = ghSpy((argv) => {
+      if (argv[0] === 'repo') return 'owner/n\n';
+      if (argv[0] === 'pr' && argv[1] === 'view') return new Error('connection reset');
+      if (argv[0] === 'search') return JSON.stringify([searchHit({ title: 'mentions 4507' })]);
+      return '';
+    });
+    const res = await searchGithubItems('/repo/search-view-fail', 'pr', '4507');
+    expect(res.available).toBe(true);
+    expect(res.items[0]?.title).toBe('mentions 4507');
+    expect(argvs.some((a) => a[0] === 'search')).toBe(true);
+  });
+
+  it('falls back to a text search when the exact view output cannot be parsed', async () => {
+    ghSpy((argv) => {
+      if (argv[0] === 'repo') return 'owner/n\n';
+      if (argv[0] === 'pr' && argv[1] === 'view') return '{"unexpected":true}';
+      if (argv[0] === 'search') return JSON.stringify([searchHit({ title: 'mentions 4507' })]);
+      return '';
+    });
+    const res = await searchGithubItems('/repo/search-view-parse', 'pr', '4507');
+    expect(res.items[0]?.title).toBe('mentions 4507');
+  });
+
   it('marks the hit list truncated when it fills the cap', async () => {
     ghSpy((argv) => {
       if (argv[0] === 'repo') return 'owner/n\n';
@@ -3236,9 +3260,10 @@ describe('fetchGithubItem (#692)', () => {
     });
     return argvs;
   };
+  const itemView = (argv: string[]) => argv[0] !== 'repo' && argv[1] === 'view';
   const happy = (argv: string[]) =>
-    argv[1] === 'view' ? JSON.stringify(view()) : argv[0] === 'api' ? '5' : '';
-  const views = (argvs: string[][]) => argvs.filter((a) => a[1] === 'view').length;
+    itemView(argv) ? JSON.stringify(view()) : argv[0] === 'api' ? '5' : '';
+  const views = (argvs: string[][]) => argvs.filter((a) => a[0] !== 'repo' && a[1] === 'view').length;
 
   beforeEach(() => {
     vi.stubEnv('CEZ_DRY_RUN', '');
@@ -3257,11 +3282,39 @@ describe('fetchGithubItem (#692)', () => {
     });
   });
 
-  it('returns item null when gh reports not found', async () => {
-    ghSpy((argv) =>
-      argv[1] === 'view' ? new Error('GraphQL: Could not resolve to a PullRequest with the number of 42.') : '',
-    );
+  it.each([
+    'GraphQL: Could not resolve to a PullRequest with the number of 42. (repository.pullRequest)',
+    'no pull requests found for 42',
+  ])('returns item null when gh confirms the item is missing (%s)', async (message) => {
+    ghSpy((argv) => (itemView(argv) ? new Error(message) : ''));
     expect(await fetchGithubItem('/repo/item-missing', 'pr', 42)).toEqual({ available: true, item: null });
+  });
+
+  it('returns item null for a missing issue', async () => {
+    ghSpy((argv) =>
+      itemView(argv)
+        ? new Error('GraphQL: Could not resolve to an issue or pull request with the number of 7.')
+        : '',
+    );
+    expect(await fetchGithubItem('/repo/item-missing-issue', 'issue', 7)).toEqual({ available: true, item: null });
+  });
+
+  it.each([
+    "GraphQL: Could not resolve to a Repository with the name 'owner/n'.",
+    'HTTP 404: Not Found (https://api.github.com/repos/owner/n)',
+  ])('reports unavailable, uncached, when the repository cannot be resolved (%s)', async (message) => {
+    const argvs = ghSpy((argv) => (itemView(argv) ? new Error(message) : ''));
+    const res = await fetchGithubItem('/repo/item-norepo', 'pr', 42);
+    expect(res).toMatchObject({ available: false, reason: expect.stringContaining(message.slice(0, 20)) });
+    await fetchGithubItem('/repo/item-norepo', 'pr', 42);
+    expect(views(argvs)).toBe(2);
+  });
+
+  it('reports unavailable without viewing when the availability probe fails', async () => {
+    const argvs = ghSpy((argv) => (argv[0] === 'repo' ? new Error('no git remotes found') : happy(argv)));
+    const res = await fetchGithubItem('/repo/item-probe-fail', 'pr', 42);
+    expect(res).toMatchObject({ available: false, reason: expect.stringContaining('no git remotes') });
+    expect(views(argvs)).toBe(0);
   });
 
   it('degrades to available false when gh is missing', async () => {
@@ -3289,7 +3342,7 @@ describe('fetchGithubItem (#692)', () => {
   });
 
   it('does not cache an unavailable answer', async () => {
-    const argvs = ghSpy(() => new Error('connection reset'));
+    const argvs = ghSpy((argv) => (itemView(argv) ? new Error('connection reset') : ''));
     await fetchGithubItem('/repo/item-nocache', 'pr', 42);
     await fetchGithubItem('/repo/item-nocache', 'pr', 42);
     expect(views(argvs)).toBe(2);

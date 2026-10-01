@@ -634,19 +634,19 @@ function toSearchItem(
   return item;
 }
 
-/**
- * One issue or PR by number, in any state (#692; the exact-number path of `searchGithubItems`).
- * `null` when `gh` reports the number does not exist (or is not this kind); throws on any other
- * failure. `labelColors` is an optional out-param so a search can fold the item's colours into its
- * own map.
- */
-export async function viewGithubItem(
+/** `gh {pr,issue} view <n>` diagnostics that name the REQUESTED item as absent. A bare
+ *  "not found" / 404 or "Could not resolve to a Repository" also fails a view, but says the
+ *  repository (or auth) is the problem, not that the number does not exist. */
+const MISSING_ITEM_RE =
+  /could not resolve to an? (?:pullrequest|issue|issueorpullrequest|pull request|issue or pull request)\b|no (?:pull requests|issues) found/i;
+
+/** The exact `gh view` call plus its parse. `null` only for a confirmed-missing item; anything
+ *  else (transport, auth, repository, unparseable output) throws. */
+async function viewGithubHit(
   repoRoot: string,
   kind: 'issue' | 'pr',
   number: number,
-  labelColors: Record<string, string> = {},
-): Promise<ForgeItem | null> {
-  let hit: z.infer<typeof ghViewHitSchema>;
+): Promise<z.infer<typeof ghViewHitSchema> | null> {
   try {
     const out = await gh(repoRoot, [
       kind === 'pr' ? 'pr' : 'issue',
@@ -655,18 +655,40 @@ export async function viewGithubItem(
       '--json',
       kind === 'pr' ? `${SEARCH_FIELDS},isDraft,additions,deletions` : `${SEARCH_FIELDS},assignees`,
     ]);
-    hit = ghViewHitSchema.parse(JSON.parse(out));
+    return ghViewHitSchema.parse(JSON.parse(out));
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    if (/not found|could not resolve|no (?:pull requests|issues) found|\b404\b/i.test(message)) return null;
+    if (MISSING_ITEM_RE.test(err instanceof Error ? err.message : String(err))) return null;
     throw err;
   }
-  // `view` exposes comment bodies rather than a count. Read the single issue resource
-  // (PRs share this endpoint) instead of paginating a potentially enormous thread.
-  // gh resolves placeholders in repoRoot, just as it resolves the preceding view call.
+}
+
+/** `view` exposes comment bodies rather than a count. Read the single issue resource
+ *  (PRs share this endpoint) instead of paginating a potentially enormous thread.
+ *  gh resolves placeholders in repoRoot, just as it resolves the preceding view call. */
+async function finishViewHit(
+  repoRoot: string,
+  kind: 'issue' | 'pr',
+  number: number,
+  hit: z.infer<typeof ghViewHitSchema>,
+  labelColors: Record<string, string>,
+): Promise<ForgeItem> {
   const commentsCount = z.number().int().nonnegative().parse(JSON.parse(await gh(repoRoot,
     ['api', `repos/{owner}/{repo}/issues/${number}`, '--jq', '.comments'], 8_000)));
   return toSearchItem(kind, { ...hit, commentsCount }, labelColors);
+}
+
+/**
+ * One issue or PR by number, in any state (#692). `null` when `gh` confirms the item is absent;
+ * throws on every other failure. `labelColors` is an optional out-param.
+ */
+export async function viewGithubItem(
+  repoRoot: string,
+  kind: 'issue' | 'pr',
+  number: number,
+  labelColors: Record<string, string> = {},
+): Promise<ForgeItem | null> {
+  const hit = await viewGithubHit(repoRoot, kind, number);
+  return hit ? finishViewHit(repoRoot, kind, number, hit, labelColors) : null;
 }
 
 /**
@@ -723,10 +745,17 @@ export async function searchGithubItems(
       // `Number()` before interpolation: the regex already guarantees digits, but the number is
       // user input reaching an argv, so it is normalized rather than passed through verbatim.
       const number = Number(numeric);
-      // `null` (no such number in this repo, or not this kind) falls through to the text search
-      // below; a transport or count failure throws into the outer catch and reports unavailable.
-      const item = await viewGithubItem(repoRoot, kind, number, labelColors);
-      if (item) {
+      // Any failure of the exact view call or its parse (and a missing number) falls through to
+      // the text search below. The comment count is outside that guard: its failure reports
+      // unavailable rather than an invented zero.
+      let hit: z.infer<typeof ghViewHitSchema> | null = null;
+      try {
+        hit = await viewGithubHit(repoRoot, kind, number);
+      } catch {
+        // fall through
+      }
+      if (hit) {
+        const item = await finishViewHit(repoRoot, kind, number, hit, labelColors);
         return await hydrateSearchProjects(repoRoot, kind, { available: true, items: [item], labelColors });
       }
     }
@@ -1165,6 +1194,8 @@ export async function fetchGithubItem(
   const hit = itemCache.get(key);
   if (!refresh && hit && Date.now() - hit.at < CACHE_MS) return { available: true, item: hit.item };
   try {
+    const forge = await detectGithub(repoRoot);
+    if (!forge.available) return { available: false, reason: forge.reason ?? 'GitHub is unavailable' };
     const item = await viewGithubItem(repoRoot, kind, number);
     itemCache.delete(key); // re-insert so this key becomes the newest
     itemCache.set(key, { at: Date.now(), item });

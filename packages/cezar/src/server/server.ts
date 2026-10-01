@@ -2,7 +2,7 @@ import type { ApiRun } from '@open-mercato/cezar-contract';
 import { DelegationService } from '../delegation/service.ts';
 import type { DelegationController } from '../delegation/provision.ts';
 import { delegationFailure } from '../delegation/routes.ts';
-import { CLIENT_REQUEST_VARIANTS_ERROR, workerEmptyRequestSchema, runRelationshipsSchema, runDelegationSummarySchema } from '@open-mercato/cezar-contract';
+import { githubItemParamsSchema, CLIENT_REQUEST_VARIANTS_ERROR, workerEmptyRequestSchema, runRelationshipsSchema, runDelegationSummarySchema } from '@open-mercato/cezar-contract';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { AutomationStore } from '../automations/store.ts';
@@ -5195,10 +5195,6 @@ export function createApp(deps: ServerDeps) {
   // would be in its temporal dead zone. (The schemas below are all read inside a handler, or
   // passed as a thunk, which defers them past that point.)
   const mergeNumberParams = z.object({ number: z.coerce.number().int().positive() });
-  const itemParams = z.object({
-    kind: z.enum(['issue', 'pr']),
-    number: z.coerce.number().int().positive().safe(),
-  });
   /** A ref-status list: `null` means malformed (the caller answers 400), `[]` means "not asked
    *  for". Absent and empty are the same request — neither names a number. */
   const parseRefNumbers = (raw: string | undefined): number[] | null => {
@@ -5249,7 +5245,7 @@ export function createApp(deps: ServerDeps) {
     // ask"; never a 5xx.
     .get(
       '/github/items/:kind/:number',
-      paramZodValidator(itemParams, { message: 'invalid kind or number' }),
+      paramZodValidator(githubItemParamsSchema, { message: 'invalid kind or number' }),
       queryZodValidator(refreshQuery),
       async (c) => {
         const { root: repoRoot } = c.get('project');

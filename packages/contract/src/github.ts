@@ -48,6 +48,13 @@ export const githubItemResponseSchema = z.discriminatedUnion('available', [
   z.object({ available: z.literal(true), item: githubItemSchema.nullable() }),
   z.object({ available: z.literal(false), reason: z.string() }),
 ]);
+/** Path params of that route: a positive safe integer, so the number is safe to put on an argv. */
+export const githubItemParamsSchema = z.object({
+  kind: z.enum(['issue', 'pr']),
+  number: z.coerce.number().int().positive().safe(),
+});
+export type GithubItemParams = z.infer<typeof githubItemParamsSchema>;
+
 export type GithubItemResponse = z.infer<typeof githubItemResponseSchema>;
 
 /**
