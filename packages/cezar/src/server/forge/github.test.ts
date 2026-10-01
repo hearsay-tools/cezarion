@@ -36,6 +36,7 @@ import {
   fetchGithubItem,
   __clearGithubItemCacheForTests,
   forgetGithubItem,
+  evictGithubProjectCaches,
   GH_CHECKS_MAX,
   GH_SEARCH_MAX,
   ghCheckRunSchema,
@@ -522,6 +523,21 @@ describe('fetchGithubComments per-project cache isolation (step 2.6)', () => {
     const a2 = await fetchGithubComments('/repo/thread-iso/proj-a', 'pr', 42);
     expect(a2).toBe(a);
     expect(execFileMock.mock.calls.length).toBe(calls);
+  });
+
+  it('evictGithubProjectCaches drops only the selected root\'s comment threads (#733)', async () => {
+    // `/repo/thread-evict/a` is a string prefix of `/repo/thread-evict/a-other`: eviction must match
+    // the NUL-separated key exactly, not by loose prefix.
+    const a = await fetchGithubComments('/repo/thread-evict/a', 'pr', 42);
+    const sibling = await fetchGithubComments('/repo/thread-evict/a-other', 'pr', 42);
+
+    evictGithubProjectCaches('/repo/thread-evict/a');
+
+    const calls = execFileMock.mock.calls.length;
+    expect(await fetchGithubComments('/repo/thread-evict/a-other', 'pr', 42)).toBe(sibling);
+    expect(execFileMock.mock.calls.length).toBe(calls); // sibling still cached
+    expect(await fetchGithubComments('/repo/thread-evict/a', 'pr', 42)).not.toBe(a);
+    expect(execFileMock.mock.calls.length).toBeGreaterThan(calls); // evicted root refetched
   });
 });
 
@@ -3366,6 +3382,20 @@ describe('fetchGithubItem (#692)', () => {
     forgetGithubItem('/repo/item-forget', 'pr', 42);
     await fetchGithubItem('/repo/item-forget', 'pr', 42);
     expect(views(argvs)).toBe(2);
+  });
+
+  it('evictGithubProjectCaches drops only the selected root\'s item entries (#733)', async () => {
+    const argvs = ghSpy(happy);
+    await fetchGithubItem('/repo/item-evict/a', 'pr', 42);
+    await fetchGithubItem('/repo/item-evict/a-other', 'pr', 42);
+    expect(views(argvs)).toBe(2);
+
+    evictGithubProjectCaches('/repo/item-evict/a');
+
+    await fetchGithubItem('/repo/item-evict/a-other', 'pr', 42);
+    expect(views(argvs)).toBe(2); // sibling untouched
+    await fetchGithubItem('/repo/item-evict/a', 'pr', 42);
+    expect(views(argvs)).toBe(3); // evicted root refetched
   });
 
   it('in dry-run answers from the mock pools', async () => {
