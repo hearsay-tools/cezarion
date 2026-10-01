@@ -1,7 +1,10 @@
+import { useEffect, useRef, useState } from 'react'
 import type { GithubData } from '@open-mercato/cezar-api-client'
-import { ChevronDownIcon } from '@/components/design-icons'
+import { ChevronDownIcon, RefreshCwIcon, TriangleAlertIcon } from '@/components/design-icons'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 
+// The picker is sized by the control, never by its option text, so loading / unavailable / board names cannot move it.
+const picker = 'w-44 max-w-full'
 const control = 'min-h-11 min-w-11 rounded-md border border-input bg-card px-3 text-sm text-foreground focus-visible:outline-ring disabled:opacity-50'
 
 /** Issue-only controls. A metadata failure disables its own filter, never the list. */
@@ -12,13 +15,52 @@ export function IssueFilters({ data, assignees, projectId, onAssigneesChange, on
   onAssigneesChange: (next: string[]) => void
   onProjectChange: (next: string) => void
 }) {
+  const [statusOpen, setStatusOpen] = useState(false)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const contentRef = useRef<HTMLDivElement>(null)
+  const pickerRef = useRef<HTMLSelectElement>(null)
+  const meRef = useRef<HTMLButtonElement>(null)
   const logins = new Map<string, string>()
   for (const issue of data.issues) for (const login of issue.assignees ?? []) logins.set(login.toLowerCase(), login)
   for (const login of assignees) logins.set(login.toLowerCase(), login)
   const options = [...logins.values()].sort((a, b) => a.localeCompare(b))
   const isMe = !!data.viewerLogin && assignees.length === 1 && assignees[0]?.toLowerCase() === data.viewerLogin.toLowerCase()
+  const kept = ' Previous memberships are shown; issues with unknown membership remain visible.'
+  const status = data.projectsState === 'refreshing' && data.projects ? `Refreshing project boards.${kept}`
+    : data.projectsState === 'unavailable' && data.projects ? `${data.projectsReason}${kept}`
+    : data.projects ? '' : data.projectsReason ?? (data.projectsState === 'refreshing' ? 'Project memberships pending.' : 'Project boards unavailable.')
+  const message = [!data.viewerLogin ? 'GitHub login unavailable.' : '', status].filter(Boolean).join(' ')
+  const hasMessage = message !== ''
+  // The popover stays mounted for the frame in which focus is handed over, so keep its last words.
+  const lastMessage = useRef(message)
+  if (hasMessage) lastMessage.current = message
+  const messageGone = useRef(!hasMessage)
+  messageGone.current = !hasMessage
+  const handOffFocus = () => (pickerRef.current && !pickerRef.current.disabled ? pickerRef.current : meRef.current)?.focus()
+  useEffect(() => {
+    const node = triggerRef.current
+    if (!node) return
+    // Hiding the focused button blurs it while React is committing, where React drops its own focus
+    // events, so listen natively. The browser clears focus after this event, so hand over once it settled.
+    const onBlur = (event: FocusEvent) => {
+      if (messageGone.current && !event.relatedTarget) requestAnimationFrame(() => {
+        if (!document.activeElement || document.activeElement === document.body) handOffFocus()
+      })
+    }
+    node.addEventListener('blur', onBlur)
+    return () => node.removeEventListener('blur', onBlur)
+  }, [])
+  useEffect(() => {
+    if (hasMessage) return
+    // The status button hides itself once there is nothing to say. Close it, and if focus was in it
+    // hand focus to the control the message was about instead of letting it fall to <body>.
+    const active = document.activeElement
+    const held = !!active && (active === triggerRef.current || !!contentRef.current?.contains(active))
+    setStatusOpen(false)
+    if (held) handOffFocus()
+  }, [hasMessage])
   return (
-    <div className="flex flex-wrap items-center gap-2" data-slot="gh-issue-filters">
+    <div className="contents" data-slot="gh-issue-filters">
       <Popover>
         <PopoverTrigger asChild>
           <button type="button" className={control} disabled={options.length === 0}>
@@ -40,24 +82,35 @@ export function IssueFilters({ data, assignees, projectId, onAssigneesChange, on
           </fieldset>
         </PopoverContent>
       </Popover>
-      <button type="button" className={`${control} aria-pressed:border-foreground aria-pressed:bg-foreground aria-pressed:text-background`} disabled={!data.viewerLogin} aria-pressed={isMe}
+      <button ref={meRef} type="button" className={`${control} aria-pressed:border-foreground aria-pressed:bg-foreground aria-pressed:text-background`} disabled={!data.viewerLogin} aria-pressed={isMe}
         onClick={() => onAssigneesChange(isMe ? [] : [data.viewerLogin!])}>
         Assigned to me
       </button>
-      {!data.viewerLogin ? <p className="w-full text-xs text-muted-foreground">GitHub login unavailable.</p> : null}
-      {data.projectsState === 'refreshing' ? <p role="status" className="w-full text-xs text-muted-foreground">Refreshing project boards. Previous memberships are shown; issues with unknown membership remain visible.</p> : null}
-      {data.projectsState === 'unavailable' && data.projects ? <p role="status" className="w-full text-xs text-muted-foreground">{data.projectsReason} Previous memberships are shown; issues with unknown membership remain visible.</p> : null}
       {data.projects?.length ? (
-        <select aria-label="Project board" className={control} value={projectId}
+        <select ref={pickerRef} aria-label="Project board" className={`${control} ${picker}`} value={projectId}
           onChange={event => onProjectChange(event.target.value)}>
           <option value="">All boards</option>
           {data.projects.map(board => <option key={board.id} value={board.id}>{board.title}</option>)}
         </select>
-      ) : data.projects ? (
-        <select aria-label="Project board" className={control} disabled value="">
-          <option value="">No boards</option>
+      ) : data.projects || data.projectsState ? (
+        <select ref={pickerRef} aria-label="Project board" className={`${control} ${picker}`} disabled value="">
+          <option value="">{data.projects ? 'No boards' : data.projectsState === 'refreshing' ? 'Loading boards…' : 'Boards unavailable'}</option>
         </select>
-      ) : <p className="w-full text-xs text-muted-foreground">{data.projectsReason ?? (data.projectsState === 'refreshing' ? 'Project memberships pending.' : 'Project boards unavailable.')}</p>}
+      ) : null}
+      {/* Always mounted at one fixed size: a message that appeared or wrapped inline would move every
+          control and the list below it. The live text is read aloud from the status; sighted users
+          open the full wrapped text from the button, which works by touch as well as by hover. */}
+      <p role="status" className="sr-only">{message}</p>
+      <Popover open={statusOpen} onOpenChange={setStatusOpen}>
+        <PopoverTrigger asChild>
+          <button ref={triggerRef} type="button" className={`${control} inline-flex items-center justify-center ${message ? '' : 'invisible'}`} aria-label="Project board status" tabIndex={message ? undefined : -1}>
+            {data.projectsState === 'refreshing'
+              ? <RefreshCwIcon size={14} aria-hidden="true" className="size-3.5 motion-safe:animate-spin" />
+              : <TriangleAlertIcon size={14} aria-hidden="true" className="size-3.5" />}
+          </button>
+        </PopoverTrigger>
+        <PopoverContent ref={contentRef} align="start" data-slot="gh-issue-status" onCloseAutoFocus={event => { if (!hasMessage) event.preventDefault() }} className="w-72 max-w-[calc(100vw-2rem)] p-3 text-xs text-muted-foreground">{message || lastMessage.current}</PopoverContent>
+      </Popover>
     </div>
   )
 }

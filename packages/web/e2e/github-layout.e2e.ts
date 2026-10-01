@@ -395,3 +395,210 @@ it.each([1440, 402, 360].flatMap(width => ['light', 'dark'].map(theme => ({ widt
   browser.press('Escape')
   expect(browser.evaluate(`document.querySelector('[data-slot="gh-custom-prompt"]').value`)).toBe('Review this issue and keep this draft')
 }, 90_000)
+
+// #721: a metadata refresh used to insert a full-width status paragraph into the wrapping filter
+// controls, pushing the board picker and the list down and then back up. A DOM assertion cannot see
+// that, so a frame-by-frame sampler records the geometry across the whole delayed refresh.
+it.each([{ width: 1440, height: 900 }, { width: 360, height: 640 }].flatMap(viewport => ['light', 'dark'].flatMap(theme => ['ready', 'unavailable'].map(outcome => ({ ...viewport, theme, outcome })))))('keeps filter geometry still while project boards refresh then settle as $outcome at $width / $theme (#721)', async ({ width, height, theme, outcome }) => {
+  if (!forgeAvailable) return
+  const gh = await api<GithubPayload>('/api/v1/github')
+  const generation = '00000000-0000-4000-8000-000000000721'
+  const projects = [{ id: 'P1', title: 'Delivery', url: 'https://github.com/orgs/mock/projects/1' }]
+  const base = { ...gh, projectsState: 'ready', projects, issues: gh.issues.map(issue => ({ ...issue, projectIds: ['P1'] })) }
+  const refreshing = { ...base, projectsState: 'refreshing', projectsGeneration: generation }
+  const settled = outcome === 'ready'
+    ? { generation, state: 'ready', projects, membership: {} }
+    : { generation, state: 'unavailable', reason: 'Project lookup failed because GitHub rate limited the metadata request.' }
+  browser.setViewport(width, height)
+  browser.goto(`${baseUrl}${scoped('/')}`)
+  browser.waitForFunction(`document.querySelector('a[href="${scoped('/github')}"]') !== null`)
+  browser.evaluate(`(() => {
+    const nativeFetch = window.fetch;
+    window.fetch = (input, init) => {
+      const url = new URL(typeof input === 'string' ? input : input instanceof Request ? input.url : String(input), location.href);
+      const json = (body) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+      if (url.pathname.endsWith('/github/projects')) return new Promise(resolve => { window.__finishProjects = () => resolve(json(${JSON.stringify(settled)})); });
+      if (url.pathname.endsWith('/github')) return Promise.resolve(json(url.searchParams.get('refresh') === '1' ? ${JSON.stringify(refreshing)} : ${JSON.stringify(base)}));
+      return nativeFetch(input, init);
+    };
+    history.pushState(null, '', '${scoped('/github?filter=all')}'); dispatchEvent(new PopStateEvent('popstate'));
+  })()`)
+  browser.waitForFunction(`document.querySelector('select[aria-label="Project board"]') !== null`)
+  browser.evaluate(`document.documentElement.classList.toggle('light', ${theme === 'light'}); document.documentElement.dataset.width = 'wide'`)
+  // One sample per animation frame of everything the refresh must not move.
+  browser.evaluate(`(() => {
+    const seen = new Set();
+    window.__geometry = seen;
+    const box = el => { const r = el.getBoundingClientRect(); return [r.top, r.left, r.width, r.height].map(n => Math.round(n * 10) / 10).join(','); };
+    const tick = () => {
+      const toolbar = document.querySelector('[data-slot="gh-filter-toolbar"]');
+      const picker = document.querySelector('select[aria-label="Project board"]');
+      const list = document.querySelector('[data-slot="gh-list"]');
+      const search = document.querySelector('[data-slot="gh-search"]');
+      if (toolbar && picker && list && search) seen.add(JSON.stringify({ toolbar: box(toolbar), picker: box(picker), list: box(list), search: box(search) }));
+      window.__geometryFrame = requestAnimationFrame(tick);
+    };
+    tick();
+  })()`)
+  const status = `document.querySelector('[data-slot="gh-filter-toolbar"] [role="status"]')?.textContent ?? ''`
+  browser.click('[data-slot="gh-refresh"]')
+  browser.waitForFunction(`(${status}).includes('Refreshing project boards')`)
+  // The full text is one tap away and wraps instead of truncating; opening it must not move anything either.
+  browser.click('[aria-label="Project board status"]')
+  const readPopover = `(() => {
+    const el = document.querySelector('[data-slot="gh-issue-status"]');
+    if (!el) return null;
+    const r = el.getBoundingClientRect(), style = getComputedStyle(el);
+    return { text: el.textContent, lines: Math.round(el.clientHeight / parseFloat(style.lineHeight)), clipped: el.scrollHeight > el.clientHeight + 1 || el.scrollWidth > el.clientWidth + 1, inside: r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight };
+  })()`
+  const refreshingPopover = browser.waitForValue<{ text: string; lines: number; clipped: boolean; inside: boolean }>(readPopover, value => Boolean(value?.text.includes('Refreshing project boards')))
+  browser.evaluate('window.__mark = performance.now()')
+  browser.waitForFunction('performance.now() - window.__mark > 400')
+  // The delayed /github/projects request must have reached the interceptor before it can be released.
+  // Provenance: with registration of window.__finishProjects delayed 1500ms (setTimeout in the interceptor) and this guard removed,
+  // `-t "while project boards refresh then settle as .ready. at 1440 / .light."` fails with `TypeError: window.__finishProjects is not a function`
+  // (bundle .ai/qa/failures/github-layout/, CEZ_AUTOMATIONS=0); with the guard and the same delay it passes.
+  browser.waitForFunction("typeof window.__finishProjects === 'function'")
+  browser.evaluate('window.__finishProjects()')
+  browser.waitForFunction(outcome === 'ready'
+    ? `!(${status}).includes('Refreshing project boards')`
+    : `(${status}).includes('rate limited')`)
+  browser.evaluate('window.__mark = performance.now()')
+  browser.waitForFunction('performance.now() - window.__mark > 400')
+  const facts = browser.evaluate(`(() => {
+    cancelAnimationFrame(window.__geometryFrame);
+    const samples = [...window.__geometry].map(sample => JSON.parse(sample));
+    return {
+      distinct: samples.length,
+      toolbar: new Set(samples.map(s => s.toolbar)).size,
+      picker: new Set(samples.map(s => s.picker)).size,
+      list: new Set(samples.map(s => s.list)).size,
+      search: new Set(samples.map(s => s.search)).size,
+      pageOverflow: document.documentElement.scrollWidth > innerWidth,
+      pickerValue: document.querySelector('select[aria-label="Project board"]').value,
+      rows: document.querySelectorAll('[data-slot="gh-row"]').length,
+      focusOnPicker: document.activeElement?.matches('select[aria-label="Project board"]') === true,
+    };
+  })()`) as { distinct: number; toolbar: number; picker: number; list: number; search: number; pageOverflow: boolean; pickerValue: string; rows: number; focusOnPicker: boolean }
+  browser.screenshot(`${artifactsDir}/github-refresh-geometry-${width}-${theme}-${outcome}.png`, { viewport: true })
+  expect(facts).toMatchObject({ distinct: 1, toolbar: 1, picker: 1, list: 1, search: 1, pageOverflow: false })
+  expect(facts.rows).toBeGreaterThan(0)
+  // Success dismisses the open status popover; focus must land on a visible control, not <body>.
+  if (outcome === 'ready') expect(facts.focusOnPicker).toBe(true)
+  expect(refreshingPopover).toMatchObject({ clipped: false, inside: true })
+  expect(refreshingPopover.text).toContain('issues with unknown membership remain visible')
+  if (width === 360) expect(refreshingPopover.lines).toBeGreaterThan(2)
+  if (outcome === 'unavailable') {
+    const unavailablePopover = browser.waitForValue<{ text: string; lines: number; clipped: boolean; inside: boolean }>(readPopover, value => Boolean(value?.text.includes('rate limited')))
+    expect(unavailablePopover).toMatchObject({ clipped: false, inside: true })
+    if (width === 360) expect(unavailablePopover.lines).toBeGreaterThan(2)
+  }
+  browser.setViewport(DESKTOP.width, DESKTOP.height)
+}, 90_000)
+
+// Review of #721: with NO cached boards the picker used to be sized by its option text, so
+// "Loading boards…" -> "Boards unavailable" (or long board names) moved the picker and search.
+it.each([{ width: 1440, height: 900 }, { width: 360, height: 640 }].flatMap(viewport => ['light', 'dark'].flatMap(theme => ['unavailable', 'long names'].map(outcome => ({ ...viewport, theme, outcome })))))('keeps filter geometry still without cached boards, settling as $outcome at $width / $theme (#721)', async ({ width, height, theme, outcome }) => {
+  if (!forgeAvailable) return
+  const gh = await api<GithubPayload>('/api/v1/github')
+  const generation = '00000000-0000-4000-8000-000000000722'
+  const projects = [
+    { id: 'P1', title: 'Delivery roadmap for the entire platform engineering organisation', url: 'https://github.com/orgs/mock/projects/1' },
+    { id: 'P2', title: 'Q4', url: 'https://github.com/orgs/mock/projects/2' },
+  ]
+  const loading = { ...gh, projects: undefined, projectsState: 'refreshing', projectsGeneration: generation }
+  const settled = outcome === 'long names'
+    ? { generation, state: 'ready', projects, membership: {} }
+    : { generation, state: 'unavailable', reason: 'Project lookup failed.' }
+  browser.setViewport(width, height)
+  browser.goto(`${baseUrl}${scoped('/')}`)
+  browser.waitForFunction(`document.querySelector('a[href="${scoped('/github')}"]') !== null`)
+  browser.evaluate(`(() => {
+    const nativeFetch = window.fetch;
+    window.fetch = (input, init) => {
+      const url = new URL(typeof input === 'string' ? input : input instanceof Request ? input.url : String(input), location.href);
+      const json = (body) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+      if (url.pathname.endsWith('/github/projects')) return new Promise(resolve => { window.__finishProjects = () => resolve(json(${JSON.stringify(settled)})); });
+      if (url.pathname.endsWith('/github')) return Promise.resolve(json(${JSON.stringify(loading)}));
+      return nativeFetch(input, init);
+    };
+    history.pushState(null, '', '${scoped('/github?filter=all')}'); dispatchEvent(new PopStateEvent('popstate'));
+  })()`)
+  browser.waitForFunction(`document.querySelector('select[aria-label="Project board"]') !== null`)
+  browser.evaluate(`document.documentElement.classList.toggle('light', ${theme === 'light'}); document.documentElement.dataset.width = 'wide'`)
+  browser.evaluate(`(() => {
+    const seen = new Set();
+    window.__geometry = seen;
+    const box = el => { const r = el.getBoundingClientRect(); return [r.top, r.left, r.width, r.height].map(n => Math.round(n * 10) / 10).join(','); };
+    const tick = () => {
+      const toolbar = document.querySelector('[data-slot="gh-filter-toolbar"]');
+      const picker = document.querySelector('select[aria-label="Project board"]');
+      const list = document.querySelector('[data-slot="gh-list"]');
+      const search = document.querySelector('[data-slot="gh-search"]');
+      if (toolbar && picker && list && search) seen.add(JSON.stringify({ toolbar: box(toolbar), picker: box(picker), list: box(list), search: box(search) }));
+      window.__geometryFrame = requestAnimationFrame(tick);
+    };
+    tick();
+  })()`)
+  browser.evaluate('window.__mark = performance.now()')
+  browser.waitForFunction('performance.now() - window.__mark > 400')
+  // The delayed /github/projects request must have reached the interceptor before it can be released.
+  browser.waitForFunction("typeof window.__finishProjects === 'function'")
+  browser.evaluate('window.__finishProjects()')
+  browser.waitForFunction(outcome === 'long names'
+    ? `[...document.querySelector('select[aria-label="Project board"]').options].some(option => option.textContent.includes('Delivery roadmap'))`
+    : `document.querySelector('select[aria-label="Project board"]').options[0].textContent === 'Boards unavailable'`)
+  browser.evaluate('window.__mark = performance.now()')
+  browser.waitForFunction('performance.now() - window.__mark > 400')
+  const facts = browser.evaluate(`(() => {
+    cancelAnimationFrame(window.__geometryFrame);
+    const samples = [...window.__geometry].map(sample => JSON.parse(sample));
+    return {
+      distinct: samples.length,
+      pageOverflow: document.documentElement.scrollWidth > innerWidth,
+    };
+  })()`) as { distinct: number; pageOverflow: boolean }
+  browser.screenshot(`${artifactsDir}/github-no-boards-geometry-${width}-${theme}-${outcome.replace(' ', '-')}.png`, { viewport: true })
+  expect(facts).toEqual({ distinct: 1, pageOverflow: false })
+  browser.setViewport(DESKTOP.width, DESKTOP.height)
+}, 90_000)
+
+// Review of #721: a CLOSED status button holding keyboard focus is hidden by success; focus must be
+// handed to a visible control before that, and focus that was elsewhere must stay where it was.
+it.each([1440, 360].flatMap(width => ['status button', 'search'].map(focus => ({ width, focus }))))('hands focus on from the closed status button but leaves other focus alone at $width ($focus) (#721)', async ({ width, focus }) => {
+  if (!forgeAvailable) return
+  const gh = await api<GithubPayload>('/api/v1/github')
+  const generation = '00000000-0000-4000-8000-000000000723'
+  const projects = [{ id: 'P1', title: 'Delivery', url: 'https://github.com/orgs/mock/projects/1' }]
+  const base = { ...gh, projectsState: 'ready', projects, issues: gh.issues.map(issue => ({ ...issue, projectIds: ['P1'] })) }
+  const refreshing = { ...base, projectsState: 'refreshing', projectsGeneration: generation }
+  browser.setViewport(width, width === 360 ? 640 : 900)
+  browser.goto(`${baseUrl}${scoped('/')}`)
+  browser.waitForFunction(`document.querySelector('a[href="${scoped('/github')}"]') !== null`)
+  browser.evaluate(`(() => {
+    const nativeFetch = window.fetch;
+    window.fetch = (input, init) => {
+      const url = new URL(typeof input === 'string' ? input : input instanceof Request ? input.url : String(input), location.href);
+      const json = (body) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+      if (url.pathname.endsWith('/github/projects')) return new Promise(resolve => { window.__finishProjects = () => resolve(json(${JSON.stringify({ generation, state: 'ready', projects, membership: {} })})); });
+      if (url.pathname.endsWith('/github')) return Promise.resolve(json(url.searchParams.get('refresh') === '1' ? ${JSON.stringify(refreshing)} : ${JSON.stringify(base)}));
+      return nativeFetch(input, init);
+    };
+    history.pushState(null, '', '${scoped('/github?filter=all')}'); dispatchEvent(new PopStateEvent('popstate'));
+  })()`)
+  browser.waitForFunction(`document.querySelector('select[aria-label="Project board"]') !== null`)
+  browser.click('[data-slot="gh-refresh"]')
+  browser.waitForFunction(`document.querySelector('[data-slot="gh-filter-toolbar"] [role="status"]')?.textContent.includes('Refreshing project boards')`)
+  const target = focus === 'search' ? '[data-slot="gh-search"]' : '[aria-label="Project board status"]'
+  browser.evaluate(`document.querySelector('${target}').focus()`)
+  browser.waitForFunction(`document.activeElement?.matches('${target}')`)
+  // The delayed /github/projects request must have reached the interceptor before it can be released.
+  browser.waitForFunction("typeof window.__finishProjects === 'function'")
+  browser.evaluate('window.__finishProjects()')
+  browser.waitForFunction(`document.querySelector('select[aria-label="Project board"]') && !document.querySelector('[data-slot="gh-filter-toolbar"] [role="status"]').textContent.includes('Refreshing')`)
+  browser.evaluate('window.__mark = performance.now()')
+  browser.waitForFunction('performance.now() - window.__mark > 300')
+  const active = browser.evaluate(`(() => { const a = document.activeElement; return { body: a === document.body, picker: a?.matches('select[aria-label="Project board"]') === true, search: a?.matches('[data-slot="gh-search"]') === true }; })()`)
+  expect(active).toEqual(focus === 'search' ? { body: false, picker: false, search: true } : { body: false, picker: true, search: false })
+  browser.setViewport(DESKTOP.width, DESKTOP.height)
+}, 90_000)
