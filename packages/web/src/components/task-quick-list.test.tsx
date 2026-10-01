@@ -1597,3 +1597,185 @@ it('shows the selected view count and a project-scoped All link above retained v
   fireEvent.click(within(header).getByRole('link', { name: 'All' }))
   expect(location()).toBe('/p/project/')
 })
+
+describe('notifying glyph and age-first overflow on the meta line (#729)', () => {
+  const metaEl = (id: string) => row(id)?.querySelector('[data-slot="task-row-meta"]') as HTMLElement
+  const glyph = (id: string) => metaEl(id)?.querySelector('[data-slot="task-row-notify"]') as HTMLElement | null
+  const ISSUE = 'https://github.com/o/r/issues/425'
+  const expand = () => fireEvent.click(screen.getByRole('button', { expanded: false }))
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('leads the meta line with the send glyph for notify: true — and only then', () => {
+    renderList({ runs: [
+      run({ id: 'on', status: 'running', notify: true, pullRequestUrl: 'https://github.com/o/r/pull/594' }),
+      run({ id: 'off', status: 'running', notify: false }),
+      run({ id: 'unset', status: 'running' }),
+    ] })
+    const on = glyph('on')
+    expect(on).not.toBeNull()
+    expect(metaEl('on').firstElementChild).toBe(on)
+    // No separator after it: the text is what it was without the glyph.
+    expect(metaEl('on').textContent).toBe('running · PR #594 · 1m')
+    expect(on?.getAttribute('role')).toBe('img')
+    expect(on?.getAttribute('aria-label')).toBe('Notifying the task webhook')
+    expect(on?.getAttribute('title')).toBe('Notifying the task webhook')
+    // 10px, never shrinks, inherits the meta colour — no status tone, no teal.
+    expect(on?.getAttribute('class')).toMatch(/shrink-0/)
+    expect(on?.querySelector('svg')?.getAttribute('class')).toMatch(/size-\[10px\]/)
+    expect(on?.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true')
+    expect(on?.getAttribute('class')).not.toMatch(/text-(success|danger|warning|pending|link|accent|primary)/)
+    expect(glyph('off')).toBeNull()
+    expect(glyph('unset')).toBeNull()
+  })
+
+  it('keeps the meta line colour on the open row, so the glyph follows the selected step-up', () => {
+    renderList({ runs: [run({ id: 'on', status: 'running', notify: true })], currentRunId: 'on' })
+    expect(metaEl('on').className).toContain('text-muted-foreground')
+    expect(glyph('on')?.getAttribute('class')).not.toMatch(/text-/)
+  })
+
+  it('shows on a row with no other meta, and on a worker row', () => {
+    renderList({ runs: [
+      run({ id: 'solo', status: 'queued', notify: true }),
+      run({ id: 'w', status: 'running', notify: true, delegation: { role: 'worker', permissions: [], receipts: [] } as never }),
+    ] })
+    expect(glyph('solo')).not.toBeNull()
+    expect(glyph('w')).not.toBeNull()
+  })
+
+  it('renders the same glyph on a device that cannot hover', () => {
+    stubMedia({ noHover: true, desktop: true })
+    renderList({ runs: [run({ id: 'on', status: 'running', notify: true })] })
+    expect(glyph('on')).not.toBeNull()
+    expect(metaEl('on').textContent).toBe('running · 1m')
+  })
+
+  const members = (notify: boolean) => [
+    run({ id: 'va', groupId: 'g9', variant: 'A', title: 'Ledger (A)', status: 'waiting', runner: 'claude', createdAt: ago(60_000), referencedIssueUrl: ISSUE, notify }),
+    run({ id: 'vb', groupId: 'g9', variant: 'B', title: 'Ledger (B)', status: 'running', runner: 'codex', createdAt: ago(60_000), referencedIssueUrl: ISSUE }),
+  ]
+
+  it('a notifying needs-you variant keeps its "needs you" fallback — the glyph is not meta', () => {
+    renderList({ runs: members(true), showTokens: false, showCost: false })
+    expand()
+    expect(glyph('va')).not.toBeNull()
+    expect(metaEl('va').textContent).toBe('needs you')
+    expect(glyph('vb')).toBeNull()
+  })
+
+  describe('width priority: the age drops first, whole', () => {
+    let needsAge = 120
+    let needsBare = 80
+    let client = 100
+    let observers: Array<() => void> = []
+    beforeEach(() => {
+      needsAge = 120
+      needsBare = 80
+      client = 100
+      observers = []
+      vi.stubGlobal('ResizeObserver', class { constructor(cb: () => void) { observers.push(cb) } observe() {} unobserve() {} disconnect() {} })
+      vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockImplementation(function (this: HTMLElement) {
+        if (this.dataset.slot !== 'task-row-meta') return 0
+        return this.querySelector('[data-slot="task-row-age"]') ? needsAge : needsBare
+      })
+      vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) {
+        return this.dataset.slot === 'task-row-meta' ? client : 0
+      })
+    })
+    afterEach(() => vi.restoreAllMocks())
+    const resize = () => act(() => observers.forEach((cb) => cb()))
+    const age = (id: string) => metaEl(id).querySelector('[data-slot="task-row-age"]')
+
+    it('takes the age off together with its separator, never ellipsizing it', () => {
+      renderList({ runs: [run({ id: 't', status: 'running', notify: true, pullRequestUrl: 'https://github.com/o/r/pull/594' })] })
+      expect(age('t')).toBeNull()
+      expect(metaEl('t').textContent).toBe('running · PR #594')
+      expect(glyph('t')).not.toBeNull()
+    })
+
+    it('does the same for a row that is not notifying', () => {
+      renderList({ runs: [run({ id: 't', status: 'running' })] })
+      expect(age('t')).toBeNull()
+      expect(metaEl('t').textContent).toBe('running')
+    })
+
+    it('keeps the age while the line fits, and restores it when the column grows', () => {
+      client = 130
+      renderList({ runs: [run({ id: 't', status: 'running' })] })
+      expect(age('t')?.textContent).toBe('1m')
+      client = 100
+      resize()
+      expect(age('t')).toBeNull()
+      client = 130
+      resize()
+      expect(age('t')?.textContent).toBe('1m')
+    })
+
+    it('does not flicker at the boundary: the decision uses the width WITH the age, not the line it just shortened', () => {
+      renderList({ runs: [run({ id: 't', status: 'running' })] })
+      expect(age('t')).toBeNull()
+      // The bare line (80) fits in 100, but the age line (120) does not — repeated observer
+      // callbacks must keep the age off instead of toggling it every frame.
+      for (let i = 0; i < 4; i += 1) {
+        resize()
+        expect(age('t')).toBeNull()
+      }
+      client = 120
+      resize()
+      expect(age('t')).not.toBeNull()
+      resize()
+      expect(age('t')).not.toBeNull()
+    })
+
+    it('measures the content, not the box: scrollWidth floors at the box width when the line fits', () => {
+      const range = Object.getOwnPropertyDescriptor(Range.prototype, 'getBoundingClientRect')
+      Object.defineProperty(Range.prototype, 'getBoundingClientRect', {
+        configurable: true,
+        value(this: Range) {
+          const el = this.commonAncestorContainer as HTMLElement
+          return { width: el.querySelector('[data-slot="task-row-age"]') ? 120 : 80 }
+        },
+      })
+      // A fitting line reports its box (130), never its content (120).
+      vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockImplementation(function (this: HTMLElement) {
+        return this.dataset.slot === 'task-row-meta' ? client : 0
+      })
+      try {
+        client = 130
+        renderList({ runs: [run({ id: 't', status: 'running' })] })
+        expect(age('t')).not.toBeNull()
+        client = 125 // still fits 120: a box-measured width (130) would drop the age here
+        resize()
+        expect(age('t')).not.toBeNull()
+        client = 110
+        resize()
+        expect(age('t')).toBeNull()
+      } finally {
+        if (range) Object.defineProperty(Range.prototype, 'getBoundingClientRect', range)
+        else delete (Range.prototype as { getBoundingClientRect?: unknown }).getBoundingClientRect
+      }
+    })
+
+    it('does not loop when web fonts have already resolved', async () => {
+      Object.defineProperty(document, 'fonts', { configurable: true, value: { status: 'loading', ready: Promise.resolve() } })
+      try {
+        renderList({ runs: [run({ id: 't', status: 'running' })] })
+        await act(async () => { await Promise.resolve(); await Promise.resolve() })
+        expect(age('t')).toBeNull()
+        for (let i = 0; i < 3; i += 1) {
+          await act(async () => { await Promise.resolve(); resize() })
+          expect(age('t')).toBeNull()
+        }
+      } finally {
+        Reflect.deleteProperty(document, 'fonts')
+      }
+    })
+
+    it('leaves a variant row (no age) and the tokens order alone', () => {
+      renderList({ runs: members(false), showTokens: false, showCost: false })
+      expand()
+      expect(age('va')).toBeNull()
+      expect(metaEl('va').textContent).toBe('needs you')
+    })
+  })
+})
