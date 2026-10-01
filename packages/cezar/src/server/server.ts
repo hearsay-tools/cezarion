@@ -112,7 +112,7 @@ import { artifactDirectory, listArtifacts, readArtifact } from '../artifacts/sto
 import { artifactPreview, loadFileLink, rasterMime } from '../artifacts/resolve.ts';
 import { isUntouchedCancelledRun, toPastedContent, type PastedContent, type RunManager } from '../workflows/run.ts';
 import { removeWorktree, worktreeDiff, worktreeDiffStat, worktreeSizeBytes } from '../git-worktree.ts';
-import { isReclaimable, reclaimWorktree, reclaimWorktrees, selectReclaimableWorktrees } from '../runs/retention.ts';
+import { isReclaimable, reclaimWorktree, reclaimWorktrees, rematerializeReclaimedWorktree, selectReclaimableWorktrees } from '../runs/retention.ts';
 import { getBranches, getCommit, getDiff, getLogWithParents, getRepoInfo, getStatus, getTracking } from './git.ts';
 import { attributeLog, deleteBranches, forgetRepoBranches, githubBranchForge, readRepoBranches, type BranchForge, type ClassifyInput } from './repo-branches.ts';
 import { claimRepoGitMutation, localPullBranches, pullRepoCheckout } from './repo-pull.ts';
@@ -4570,9 +4570,13 @@ export function createApp(deps: ServerDeps) {
     .post('/runs/:id/pr', async (c) => {
       const { root: repoRoot, dataDir, store, manager } = c.get('project');
       const id = c.req.param('id');
+      if (!store.getRun(id)) return c.json({ error: 'not found' }, 404);
+      if (manager.isActive(id)) return c.json({ error: 'run is still active — wait for the review gate' }, 409);
+      // Reclaim (#483, issue 08 §B4) removed the directory and kept the branch, and Not landed
+      // offers this on exactly those rows: restore the checkout first, as Continue does.
+      await rematerializeReclaimedWorktree(repoRoot, store, id);
       const run = store.getRun(id);
       if (!run) return c.json({ error: 'not found' }, 404);
-      if (manager.isActive(id)) return c.json({ error: 'run is still active — wait for the review gate' }, 409);
       if (!run.worktreePath || !existsSync(run.worktreePath) || !run.branch) {
         return c.json(
           {

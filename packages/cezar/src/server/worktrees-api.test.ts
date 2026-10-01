@@ -335,6 +335,24 @@ describe('the worktrees API', () => {
       expect(manager.continueRun(id, { text: 'go on' }).ok).toBe(true);
     });
 
+    it('a reclaimed task can still open its draft PR: the checkout is restored first', async () => {
+      // The checkout under the run's OWN id, as a real task has it — what re-materializing rebuilds.
+      const id = store.createRun({ title: 'reclaimed', workflow: 'w', task: 't', steps: [] }).id;
+      const wt = await createWorktree(repoRoot, id, 'main');
+      store.updateRun(id, { status: 'done', finishedAt: '2026-07-01T00:00:00Z', worktreePath: wt.path, branch: wt.branch, baseBranch: 'main' });
+      const { worktreePath, branch } = store.getRun(id)!;
+      writeFileSync(join(worktreePath!, 'work.txt'), 'task work\n');
+      await run('git', ['add', '-A'], { cwd: worktreePath! });
+      await run('git', [...GIT_ID, 'commit', '-q', '-m', 'task work'], { cwd: worktreePath! });
+      expect((await reclaimOne(id)).status).toBe(200);
+      expect(existsSync(worktreePath!)).toBe(false);
+
+      const res = await apiRequest(app, `/api/v1/runs/${id}/pr`, { method: 'POST' });
+      expect(res.status).toBe(201);
+      expect(existsSync(join(worktreePath!, 'work.txt'))).toBe(true);
+      expect(store.getRun(id)).toMatchObject({ branch, worktreeReclaimedAt: undefined, pullRequestUrl: expect.any(String) });
+    });
+
     it('409s while a run is being Continued, and leaves its directory alone', async () => {
       const id = await resumable();
       expect(manager.continueRun(id, { text: 'go on' }).ok).toBe(true);
