@@ -377,3 +377,26 @@ describe('ProjectRail expanded rows (#711)', () => {
     expect(screen.getByRole('button', { name: 'Collapse projects' })).toBeTruthy()
   })
 })
+
+describe('ProjectRail remembered pages', () => {
+  const target = (id: string) => (id === 'open_mercato' ? '/p/open_mercato/git/branches?q=x#h' : `/p/${id}/`)
+
+  it('links every mark to the resolved target, collapsed and expanded', () => {
+    renderRail({ projectTarget: target })
+    const href = (id: string) => mark(id).querySelector('a')?.getAttribute('href')
+    expect(href('open_mercato')).toBe('/p/open_mercato/git/branches?q=x#h')
+    expect(href('toolkit-dev')).toBe('/p/toolkit-dev/')
+
+    localStorage.setItem('cez-project-rail-expanded', '1')
+    setViewport(1600)
+    cleanup()
+    renderRail({ projectTarget: target })
+    expect(document.querySelector('[data-slot="project-rail"]')?.getAttribute('data-expanded')).toBe('true')
+    expect(href('open_mercato')).toBe('/p/open_mercato/git/branches?q=x#h')
+  })
+
+  it('keeps the home link when no resolver is given', () => {
+    renderRail()
+    expect(mark('open_mercato').querySelector('a')?.getAttribute('href')).toBe('/p/open_mercato/')
+  })
+})

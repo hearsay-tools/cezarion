@@ -402,6 +402,49 @@ describe('Projects group', () => {
     expect(rows.map((row) => row.getAttribute('data-project-id'))).toEqual(['cezar-fork'])
   })
 
+  it('switches to the remembered page of the chosen project, query included', async () => {
+    localStorage.setItem(
+      'cez-project-locations',
+      JSON.stringify({ shop: { projectId: 'shop', pathname: '/p/shop/git/branches', search: '?q=x' } }),
+    )
+    renderPalette({ projects: REGISTRY, entry: '/p/cezar/skills' })
+    openWith({ metaKey: true })
+    await screen.findByText('shop')
+    const rows = [...document.querySelectorAll('[data-slot="palette-project"]')]
+
+    fireEvent.click(rows.find((row) => row.getAttribute('data-project-id') === 'shop') as HTMLElement)
+
+    expect(location()).toBe('/p/shop/git/branches?q=x')
+    localStorage.clear()
+  })
+
+  it('falls back to the project home when the remembered task is gone or the memory is another project\'s', async () => {
+    localStorage.setItem(
+      'cez-project-locations',
+      JSON.stringify({
+        shop: { projectId: 'shop', pathname: '/p/shop/tasks/deleted-run' },
+        docs: { projectId: 'cezar', pathname: '/p/cezar/git' },
+      }),
+    )
+    renderPalette({
+      projects: REGISTRY,
+      indexed: [indexed({ id: 'other-run', projectId: 'shop', title: 'Other' })],
+      entry: '/p/cezar/',
+    })
+    openWith({ metaKey: true })
+    await screen.findByText('shop')
+    const row = (id: string) =>
+      [...document.querySelectorAll('[data-slot="palette-project"]')].find((r) => r.getAttribute('data-project-id') === id) as HTMLElement
+
+    fireEvent.click(row('shop'))
+    expect(location()).toBe('/p/shop/')
+    openWith({ metaKey: true })
+    await screen.findByText('docs')
+    fireEvent.click(row('docs'))
+    expect(location()).toBe('/p/docs/')
+    localStorage.clear()
+  })
+
   it('renders no Projects group in a single-project workspace — there is nowhere to switch to', async () => {
     renderPalette({ projects: [project({ id: 'cezar' })], entry: '/p/cezar/' })
     openWith({ metaKey: true })

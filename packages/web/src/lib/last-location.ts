@@ -3,7 +3,7 @@ import type {
   WorkspaceLastLocation,
 } from '@open-mercato/cezar-api-client'
 
-import { pathnameProjectId } from './project-router'
+import { pathnameProjectId, scopeTo, stripProjectPrefix } from './project-router'
 
 export type LocationParts = Pick<Location, 'pathname' | 'search' | 'hash'>
 
@@ -138,4 +138,105 @@ export function sameLastLocation(left: unknown, right: WorkspaceLastLocation): b
     (parsed.search ?? '') === (right.search ?? '') &&
     (parsed.hash ?? '') === (right.hash ?? '')
   )
+}
+
+/**
+ * Where each project's own last page lives: `{ [projectId]: location }`, in THIS browser.
+ *
+ * `cez-last-location` answers one question — where does a bare-root launch land — and holds only
+ * the single latest page. Switching projects asks a different one (where was I in THAT project),
+ * so it gets its own key and the bare-root key is untouched. Global pages never reach it:
+ * `locationToSave` only yields project-scoped, registered locations.
+ */
+export const PROJECT_LOCATIONS_STORAGE_KEY = 'cez-project-locations'
+
+function readProjectLocations(): Record<string, unknown> {
+  try {
+    const raw = localStorage.getItem(PROJECT_LOCATIONS_STORAGE_KEY)
+    const value: unknown = raw === null ? null : JSON.parse(raw)
+    return typeof value === 'object' && value !== null && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {}
+  } catch {
+    // Absent, private mode or hand-edited: no memories, and the next write replaces it.
+    return {}
+  }
+}
+
+/** One project's stored memory, unvalidated — `projectSwitchTarget` decides whether it is usable. */
+export function readStoredProjectLocation(projectId: string): unknown {
+  const entry = readProjectLocations()[projectId]
+  return entry === undefined ? null : entry
+}
+
+export function writeStoredProjectLocation(location: WorkspaceLastLocation): void {
+  try {
+    localStorage.setItem(
+      PROJECT_LOCATIONS_STORAGE_KEY,
+      JSON.stringify({ ...readProjectLocations(), [location.projectId]: location }),
+    )
+  } catch {
+    // Private mode / storage full — switching just lands on the project home.
+  }
+}
+
+/** What a switch can verify about a saved page. `runIds` are the target project's runs; absent
+ *  while the runs index has not loaded, in which case a task page cannot be confirmed. */
+export type ProjectSwitchContext = {
+  registry: ProjectsResponse | undefined
+  runIds?: ReadonlySet<string>
+}
+
+/** Pages that exist whatever the project holds. */
+const LIST_PAGES = [
+  /^\/$/,
+  /^\/new$/,
+  /^\/git(?:\/(?:commits|not-landed|cleanup|branches|changes))?$/,
+  /^\/github(?:\/prs)?$/,
+  /^\/automations(?:\/new)?$/,
+  /^\/skills$/,
+  /^\/inbox$/,
+  /^\/workflows$/,
+  /^\/settings(?:\/[^/]+)?$/,
+]
+
+/** Entity pages whose entity may be gone, and the list they fall back to. */
+const ENTITY_PAGES: Array<[RegExp, string]> = [
+  [/^\/git\/commits\/[^/]+$/, '/git/commits'],
+  [/^\/github\/issues\/[^/]+$/, '/github'],
+  [/^\/github\/prs\/[^/]+(?:\/changes)?$/, '/github/prs'],
+  [/^\/workflows\/[^/]+$/, '/workflows'],
+  [/^\/automations\/[^/]+(?:\/log)?$/, '/automations'],
+]
+
+const TASK_PAGE = /^\/tasks\/([^/]+)(?:\/(?:changes|files|commits|commits\/[^/]+|issue\/[^/]+|pr\/[^/]+))?$/
+
+/**
+ * Where selecting `projectId` in the rail or the palette goes: its remembered page when that page
+ * still makes sense, otherwise its home. Always a `/p/<id>/…` path, so it can only ever stay in
+ * the target project. A page whose entity cannot be confirmed (a deleted task, a commit that
+ * rebased away) degrades to its list, never to a not-found screen; explicit links never pass
+ * through here.
+ */
+export function projectSwitchTarget(
+  projectId: string,
+  stored: unknown,
+  context: ProjectSwitchContext,
+): string {
+  const home = String(scopeTo(projectId, '/'))
+  const saved = parsedLastLocation(stored)
+  if (saved === null || saved.projectId !== projectId) return home
+  if (context.registry === undefined || !projectIsUsable(projectId, context.registry)) return home
+
+  const flat = stripProjectPrefix(saved.pathname)
+  const exact = `${saved.pathname}${saved.search ?? ''}${saved.hash ?? ''}`
+  if (LIST_PAGES.some((page) => page.test(flat))) return exact
+
+  const task = TASK_PAGE.exec(flat)
+  if (task !== null) {
+    return context.runIds?.has(decodeURIComponent(task[1] ?? '')) === true ? exact : home
+  }
+
+  const entity = ENTITY_PAGES.find(([page]) => page.test(flat))
+  return entity === undefined ? home : String(scopeTo(projectId, entity[1]))
 }

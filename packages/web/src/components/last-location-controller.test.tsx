@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createQueryClient } from '@/api/query-client'
 import { workspaceQueryKeys } from '@/api/queries'
 import type { ProjectsResponse, WorkspaceLastLocation } from '@open-mercato/cezar-api-client'
-import { LAST_LOCATION_STORAGE_KEY } from '@/lib/last-location'
+import { LAST_LOCATION_STORAGE_KEY, PROJECT_LOCATIONS_STORAGE_KEY } from '@/lib/last-location'
 import { LastLocationController } from './last-location-controller'
 
 const REGISTRY: ProjectsResponse = {
@@ -75,6 +75,11 @@ function stored(): unknown {
   return raw === null ? null : JSON.parse(raw)
 }
 
+function projectMemories(): unknown {
+  const raw = localStorage.getItem(PROJECT_LOCATIONS_STORAGE_KEY)
+  return raw === null ? null : JSON.parse(raw)
+}
+
 beforeEach(() => {
   localStorage.clear()
   vi.stubGlobal('fetch', vi.fn(() => new Promise<never>(() => {})))
@@ -121,6 +126,7 @@ describe('LastLocationController', () => {
       pathname: '/p/boot/tasks/run-1',
     }
     localStorage.setItem(LAST_LOCATION_STORAGE_KEY, JSON.stringify(lastLocation))
+    localStorage.setItem(PROJECT_LOCATIONS_STORAGE_KEY, JSON.stringify({ boot: lastLocation }))
     const setItem = vi.spyOn(Storage.prototype, 'setItem')
 
     mount('/p/boot/tasks/run-1')
@@ -141,6 +147,33 @@ describe('LastLocationController', () => {
     mount(entry)
 
     expect(stored()).toEqual(kept)
+  })
+
+  it('keeps an independent last page per project, surviving a remount', () => {
+    mount('/p/boot/git')
+    fireEvent.click(screen.getByRole('button', { name: 'Final' }))
+    cleanup()
+    mount('/settings/global/appearance')
+
+    expect(projectMemories()).toEqual({
+      boot: { projectId: 'boot', pathname: '/p/boot/git' },
+      other: { projectId: 'other', pathname: '/p/other/tasks/final', search: '?tab=events', hash: '#tool-3' },
+    })
+    // The bare-root key still holds only the latest page.
+    expect(stored()).toMatchObject({ projectId: 'other' })
+  })
+
+  it.each([
+    ['global settings', '/settings/global/appearance'],
+    ['an unscoped route', '/tasks/run-1'],
+    ['a missing project', '/p/gone/tasks/run-1'],
+  ])('does not let %s touch any project memory', (_case, entry) => {
+    const kept = { boot: { projectId: 'boot', pathname: '/p/boot/git' } }
+    localStorage.setItem(PROJECT_LOCATIONS_STORAGE_KEY, JSON.stringify(kept))
+
+    mount(entry)
+
+    expect(projectMemories()).toEqual(kept)
   })
 
   it('replaces a corrupted stored value with the current location', () => {

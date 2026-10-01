@@ -44,6 +44,7 @@ function ProjectMark({
   known,
   truncated,
   current,
+  target,
   onSelectProject,
 }: {
   project: ProjectListEntry
@@ -51,6 +52,8 @@ function ProjectMark({
   known: boolean
   truncated: boolean
   current: boolean
+  /** Where the mark goes: the project's remembered page, or its home. */
+  target: string
   onSelectProject?: (projectId: string) => void
 }) {
   const label = projectSignalLabel(project.name, signal, { truncated, unknown: !known })
@@ -62,7 +65,7 @@ function ProjectMark({
       ) : null}
       <div className="relative size-9">
         <RouterLink
-          to={scopeTo(project.id, '/')}
+          to={target}
           onClick={(event) => {
             // New-tab/window gestures must not change the sidebar in this window.
             if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
@@ -98,6 +101,7 @@ function ExpandedProjectRow({
   known,
   truncated,
   current,
+  target,
   onSelectProject,
 }: {
   project: ProjectListEntry
@@ -105,6 +109,8 @@ function ExpandedProjectRow({
   known: boolean
   truncated: boolean
   current: boolean
+  /** Where the mark goes: the project's remembered page, or its home. */
+  target: string
   onSelectProject?: (projectId: string) => void
 }) {
   // The words are on screen, so no tooltip; the accessible name still spells all four counts.
@@ -115,7 +121,7 @@ function ExpandedProjectRow({
   return (
     <div data-slot="rail-project" data-project-id={project.id} className="w-full shrink-0">
       <RouterLink
-        to={scopeTo(project.id, '/')}
+        to={target}
         onClick={(event) => {
           if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
           onSelectProject?.(project.id)
@@ -229,10 +235,14 @@ export type ProjectRailProps = {
   /** `capabilities.singleProject` (`CEZ_SINGLE_PROJECT=1`): the server refuses add, edit, browse
    *  and remove, so Add project and All projects go. Never inferred from the project count. */
   singleProject: boolean
+  /** Where selecting a project goes. Defaults to each project's home. */
+  projectTarget?: (projectId: string) => string
   onSelectProject?: (projectId: string) => void
 }
 
-export function ProjectRail({ projects, signals, truncated, version, singleProject, onSelectProject }: ProjectRailProps) {
+const homeOf = (projectId: string) => String(scopeTo(projectId, '/'))
+
+export function ProjectRail({ projects, signals, truncated, version, singleProject, projectTarget = homeOf, onSelectProject }: ProjectRailProps) {
   const { pathname } = useLocation()
   const { resolvedTheme } = useTheme()
   const sidebarWidth = React.useContext(ShellSidebarWidthContext)
@@ -307,6 +317,7 @@ export function ProjectRail({ projects, signals, truncated, version, singleProje
             known: signals !== null,
             truncated: truncated.has(project.id),
             current: project.id === currentProjectId,
+            target: projectTarget(project.id),
             onSelectProject,
           }
           return expanded ? <ExpandedProjectRow key={project.id} {...rowProps} /> : <ProjectMark key={project.id} {...rowProps} />
