@@ -670,17 +670,19 @@ export async function attributeLog(
     const n = run.pullRequestUrl ? refNumberFromUrl(run.pullRequestUrl) : null;
     if (n !== null) byPr.set(n, run);
   }
-  let tips: Map<string, string[]> | undefined;
+  // One scan, shared by every entry: the entries are attributed concurrently, so the cache holds
+  // the PROMISE — a map published before it was filled let later merge rows read it empty.
+  let tips: Promise<Map<string, string[]>> | undefined;
   const refsAt = async (sha: string): Promise<string[]> => {
-    if (!tips) {
-      tips = new Map();
-      const res = await git(root, ['for-each-ref', '--format=%(objectname) %(refname:lstrip=2)', 'refs/heads', 'refs/remotes']);
+    tips ??= git(root, ['for-each-ref', '--format=%(objectname) %(refname:lstrip=2)', 'refs/heads', 'refs/remotes']).then((res) => {
+      const map = new Map<string, string[]>();
       for (const line of res.stdout.split('\n')) {
         const [objectname = '', ref = ''] = line.split(' ');
-        if (objectname && ref) tips.set(objectname, [...(tips.get(objectname) ?? []), ref.replace(/^[^/]+\/(?=cez\/)/, '')]);
+        if (objectname && ref) map.set(objectname, [...(map.get(objectname) ?? []), ref.replace(/^[^/]+\/(?=cez\/)/, '')]);
       }
-    }
-    return tips.get(sha) ?? [];
+      return map;
+    });
+    return (await tips).get(sha) ?? [];
   };
   const source = (run: RunRecord, prNumber: number | null): LogSource => ({
     runId: run.id,

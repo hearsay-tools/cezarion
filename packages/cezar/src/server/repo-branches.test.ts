@@ -550,6 +550,20 @@ describe('log source attribution (issue 08 §B5)', () => {
     rmSync(root, { recursive: true, force: true });
   });
 
+  it('maps every merge row by its second parent, not only the first one to ask', async () => {
+    await taskBranch(root, 'cez/aaaaaaaa', 1);
+    await taskBranch(root, 'cez/bbbbbbbb', 1);
+    // Subjects that name no branch and no PR: only the second parent can attribute them.
+    await git(root, 'merge', '-q', '--no-ff', '-m', 'land the first', 'cez/aaaaaaaa');
+    await git(root, 'merge', '-q', '--no-ff', '-m', 'land the second', 'cez/bbbbbbbb');
+    const runs = [runRecord('aaaaaaaa-1', 'done', { title: 'first' }), runRecord('bbbbbbbb-1', 'done', { title: 'second' })];
+    const log = await getLogWithParents(root);
+    const sources = await attributeLog(root, log, runs);
+    const bySubject = Object.fromEntries(log.map((entry, i) => [entry.subject, sources[i]]));
+    expect(bySubject['land the first']).toMatchObject({ runId: 'aaaaaaaa-1' });
+    expect(bySubject['land the second']).toMatchObject({ runId: 'bbbbbbbb-1' });
+  });
+
   it('maps a merge commit by its second parent and a squash commit by its (#N)', async () => {
     await taskBranch(root, 'cez/aaaaaaaa', 1);
     await git(root, 'merge', '-q', '--no-ff', '-m', 'Merge pull request #41 from acme/cez/aaaaaaaa', 'cez/aaaaaaaa');
