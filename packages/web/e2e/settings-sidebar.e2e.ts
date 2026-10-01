@@ -31,8 +31,8 @@ describe('Settings view sidebar (#622)', () => {
           taskList: document.querySelector('[data-slot="task-quick-list"]') !== null };
       })()`)
       expect(facts).toEqual({ height: 32, groups: ['project', 'global'], duplicate: false, taskList: false })
-      // Board "Screen · Settings view, sections": 12px body padding and gap, no heading or General
-      // row, and a one-line "<Section> · <project>" main header with a rule below (15/600, 16/28).
+      // Board "Screen · Settings view, sections": 12px body padding and gap, no heading, a General
+      // row leading the project group only (owner request, beyond the board), and a one-line "<Section> · <project>" main header with a rule below (15/600, 16/28).
       const board = browser.waitForValue(`(() => {
         const nav = document.querySelector('${sidebar}'); const header = document.querySelector('[data-slot="settings-main-header"]');
         if (!nav || !header) return null;
@@ -45,7 +45,7 @@ describe('Settings view sidebar (#622)', () => {
       })()`)
       expect(board).toEqual({
         pad: '12px', gap: '12px', heading: false,
-        rows: [['Agents', 'Agent config', 'Worktrees', 'Bookmarklets', 'Prompt templates'], ['Appearance', 'Notifications', 'Resources', 'Skills', 'Agent accounts', 'Projects']],
+        rows: [['General', 'Agents', 'Agent config', 'Worktrees', 'Bookmarklets', 'Prompt templates'], ['Appearance', 'Notifications', 'Resources', 'Skills', 'Agent accounts', 'Projects']],
         headerPad: '16px 28px', rule: '1px', title: true, titleSize: '15px', titleWeight: '600',
       })
       browser.screenshot(`${artifacts}/settings-sidebar-${theme}.png`, { viewport: true })
@@ -54,10 +54,16 @@ describe('Settings view sidebar (#622)', () => {
       browser.waitForFunction(`document.querySelector('[data-route="settings-global-appearance"]') !== null`)
       browser.goto(`${base}/settings/global/appearance`)
       browser.waitForFunction(`document.querySelector('${sidebar} [data-section="appearance"][aria-current="page"]') !== null`)
-      // The area index has no sidebar row (board): the Settings view tab is the way back to it.
-      browser.click('[data-slot="view-tabs"] a[aria-label="Settings"]')
+      // The project index has its own sidebar row, General, and the Settings view tab lands there too.
+      browser.click(`${sidebar} [data-section="general"]`)
       browser.waitForFunction(`document.querySelector('[data-route="settings"]') !== null`)
-      expect(browser.waitForValue(`document.querySelector('${sidebar} [aria-current="page"]') === null`)).toBe(true)
+      expect(browser.waitForValue(`document.querySelector('${sidebar} [aria-current="page"]')?.dataset.section`)).toBe('general')
+      // In-app, not a goto: right after a cold load the view tabs are still settling, and a
+      // click there landed on Workflows (failure bundle light-navigates-…-2, probe.json).
+      browser.click(`${sidebar} [data-section="agents"]`)
+      browser.waitForFunction(`document.querySelector('[data-route="settings-agents"]') !== null`)
+      browser.click('[data-slot="view-tabs"] a[aria-label="Settings"]')
+      expect(browser.waitForValue(`document.querySelector('[data-route="settings"]') && document.querySelector('${sidebar} [aria-current="page"]')?.dataset.section`)).toBe('general')
       browser.click('[data-slot="view-tabs"] a[aria-label="Tasks"]')
       browser.waitForFunction(`document.querySelector('[data-slot="task-quick-list"]') !== null && document.querySelector('${sidebar}') === null`)
     })
@@ -77,9 +83,13 @@ describe('Settings view sidebar (#622)', () => {
         overflow: document.documentElement.scrollWidth > innerWidth };
     })()`)
     expect(facts).toEqual({ open: false, sidebarHidden: true, overflow: false })
+    // The global area has no index, so its picker has no General entry; the project one does.
+    expect(browser.count('[data-slot="settings-nav-mobile"] [data-slot="settings-nav-index"]')).toBe(0)
+    browser.goto(`${base}/settings/agents`)
+    browser.waitForFunction(`document.querySelector('[data-route="settings-agents"]') !== null`)
     browser.click('.settings-section-picker summary')
     browser.click('[data-slot="settings-nav-mobile"] [data-slot="settings-nav-index"]')
-    browser.waitForFunction(`document.querySelector('[data-route="settings-global"]') !== null`)
+    browser.waitForFunction(`document.querySelector('[data-route="settings"]') !== null`)
     expect(browser.isVisible('[data-slot="settings-index"]')).toBe(true)
     browser.screenshot(`${artifacts}/settings-sidebar-mobile.png`, { viewport: true })
   })

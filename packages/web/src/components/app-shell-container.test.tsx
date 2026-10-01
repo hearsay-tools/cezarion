@@ -997,14 +997,16 @@ it.each(['/p/shop/settings/agents', '/settings/global/appearance'])('shows scope
   const project = entry.startsWith('/p/shop') ? 'shop' : 'cezar'
   const group = await screen.findByRole('navigation', { name: `This project · ${project === 'shop' ? 'Shop' : 'cezar'}` })
   expect(within(group).getByRole('link', { name: 'Agents' }).getAttribute('href')).toBe(`/p/${project}/settings/agents`)
-  // Board: the body is the section lists only — no "General" row, no "Settings" heading.
-  expect(within(group).queryByRole('link', { name: 'General' })).toBeNull()
+  // The project group leads with General, the project index; no "Settings" heading.
+  expect(within(group).getByRole('link', { name: 'General' }).getAttribute('href')).toBe(`/p/${project}/settings`)
   expect(document.querySelector('[data-slot="settings-sidebar"] h2')).toBeNull()
-  expect([...group.querySelectorAll('a')].map((a) => a.textContent)).toEqual(['Agents', 'Agent config', 'Worktrees', 'Bookmarklets', 'Prompt templates'])
+  expect([...group.querySelectorAll('a')].map((a) => a.textContent)).toEqual(['General', 'Agents', 'Agent config', 'Worktrees', 'Bookmarklets', 'Prompt templates'])
   const global = screen.getByRole('navigation', { name: 'Global · every project' })
   expect(within(global).getByRole('link', { name: 'Appearance' }).getAttribute('href')).toBe('/settings/global/appearance')
   expect([...global.querySelectorAll('a')].map((a) => a.textContent)).toEqual(['Appearance', 'Notifications', 'Resources', 'Skills', 'Agent accounts', 'Projects'])
   expect(within(global).queryByRole('link', { name: 'Keyboard' })).toBeNull()
+  // The global area has no index page, so its group has no General row.
+  expect(within(global).queryByRole('link', { name: 'General' })).toBeNull()
   const selected = document.querySelector('[data-slot="settings-sidebar"] [aria-current="page"]')
   expect(selected?.getAttribute('href')).toBe(entry)
   expect(document.querySelector('[data-slot="task-quick-list"]')).toBeNull()

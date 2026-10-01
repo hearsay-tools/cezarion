@@ -555,7 +555,7 @@ describe('mobile shell', () => {
       browser.waitForFunction(GONE)
 
       // Both halves: it routed, *and* the drawer is not still sitting on top of the new view.
-      expect(browser.url()).toBe(baseUrl + '/settings/global')
+      expect(browser.url()).toBe(baseUrl + '/settings/global/appearance')
       expect(browser.count(DRAWER)).toBe(0)
     })
 

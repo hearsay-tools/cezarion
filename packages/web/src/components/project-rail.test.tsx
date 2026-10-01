@@ -83,7 +83,7 @@ describe('ProjectRail layout', () => {
       'open_mercato',
     ])
     expect(within(nav).getByRole('link', { name: 'All projects' }).getAttribute('href')).toBe('/tasks')
-    expect(within(nav).getByRole('link', { name: 'Global settings' }).getAttribute('href')).toBe('/settings/global')
+    expect(within(nav).getByRole('link', { name: 'Global settings' }).getAttribute('href')).toBe('/settings/global/appearance')
     expect(within(nav).getByRole('button', { name: /^Theme:/ })).toBeTruthy()
     expect(within(nav).getByRole('button', { name: 'Add project' })).toBeTruthy()
   })

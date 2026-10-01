@@ -29,6 +29,7 @@ import {
   SettingsIndexRoute,
   SettingsSectionRoute,
   settingsSectionPath,
+  GLOBAL_SETTINGS_HOME,
 } from './routes/settings/settings-shell'
 import { TasksOverviewRoute } from './routes/tasks-overview'
 import { GlobalTasksRoute } from './routes/global-tasks'
@@ -508,7 +509,7 @@ export function AppRoutes() {
 
             Only the PROJECT-scoped sections live here (multi-project spec, step 3.5); the
             global ones are the top-level `/settings/global/*` block below. */}
-        <Route path="settings" element={<SettingsIndexRoute scope="project" capabilities={capabilities} />} />
+        <Route path="settings" element={<SettingsIndexRoute capabilities={capabilities} />} />
         <Route path="settings/skills" element={<SettingsSkillsRedirect />} />
         {visibleSettingsSections('project', capabilities).map((section) => (
           <Route
@@ -551,7 +552,8 @@ export function AppRoutes() {
 
           Static segments outrank the `*` legacy redirect below in React Router's ranking, so
           these win regardless of order — listed here for readability. */}
-      <Route path="/settings/global" element={<SettingsIndexRoute scope="global" capabilities={capabilities} />} />
+      {/* No index page: the area lands on its first section (`GLOBAL_SETTINGS_HOME`). */}
+      <Route path="/settings/global" element={<Navigate to={GLOBAL_SETTINGS_HOME} replace />} />
       {visibleSettingsSections('global', capabilities).map((section) => (
         <Route
           key={section.id}

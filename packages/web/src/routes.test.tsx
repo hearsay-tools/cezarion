@@ -247,7 +247,7 @@ describe('scoped route map (/p/:projectId)', () => {
         expect(screen.getByRole('heading', { level: 1 }).textContent).toContain('Project settings')
         expect(screen.getByRole('heading', { level: 2, name: title })).toBeTruthy()
       } else if (url === '/settings') {
-        // The index's h1 carries the mobile title and the desktop "Settings · <project>" one.
+        // The index's h1 carries the mobile title and the desktop "General · <project>" one.
         expect(screen.getByRole('heading', { level: 1 }).textContent).toContain(title)
       } else {
         expect(screen.getByRole('heading', { level: 1 }).textContent).toBe(title)
@@ -261,7 +261,7 @@ describe('scoped route map (/p/:projectId)', () => {
     const health = { ...HEALTH, repo: { root: '/home/u/worktrees/a5523045', branch: 'main' } } as unknown as typeof HEALTH
     renderAt(`/p/${BOOT}/settings`, { health, registry: { ...REGISTRY, projects: [] } })
     const title = screen.getByRole('heading', { level: 1 }).textContent
-    expect(title).toContain('Settings · a5523045')
+    expect(title).toContain('General · a5523045')
     expect(title).not.toContain('this project')
   })
 
@@ -355,7 +355,6 @@ describe('scoped route map (/p/:projectId)', () => {
  */
 describe('the global settings area (/settings/global)', () => {
   const GLOBAL_CASES: Array<[string, string, string]> = [
-    ['/settings/global', 'settings-global', 'Global settings'],
     ['/settings/global/appearance', 'settings-global-appearance', 'Appearance'],
     ['/settings/global/notifications', 'settings-global-notifications', 'Notifications'],
     ['/settings/global/resources', 'settings-global-resources', 'Resources'],
@@ -369,9 +368,15 @@ describe('the global settings area (/settings/global)', () => {
       // Never redirected into a project: the pathname is the one that was asked for.
       expect(currentPathname()).toBe(url)
       expect(screen.getByRole('heading', { level: 1 }).textContent).toContain('Global settings')
-      if (url !== '/settings/global') expect(screen.getByRole('heading', { level: 2, name: title })).toBeTruthy()
+      expect(screen.getByRole('heading', { level: 2, name: title })).toBeTruthy()
     })
   }
+
+  it('/settings/global has no index page: it lands on Appearance', () => {
+    renderAt('/settings/global')
+    expect(routeName()).toBe('settings-global-appearance')
+    expect(currentPathname()).toBe('/settings/global/appearance')
+  })
 
   // #801: a bookmarked deep link into any of the four `/automations*` routes still resolves — the
   // route map is unchanged — but the view says the feature is off instead of rendering an editor

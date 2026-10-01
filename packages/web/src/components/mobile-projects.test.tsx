@@ -266,7 +266,7 @@ describe('mobile drawer', () => {
     renderShell('/p/cezarion/', nav())
     fireEvent.click(menuButton())
     const global = drawer().querySelector('[data-slot="drawer-global"]') as HTMLElement
-    expect(within(global).getByRole('link', { name: 'Global settings' }).getAttribute('href')).toBe('/settings/global')
+    expect(within(global).getByRole('link', { name: 'Global settings' }).getAttribute('href')).toBe('/settings/global/appearance')
     const theme = within(global).getByRole('button', { name: /^Theme:/ })
     // The test provider starts on dark; the row cycles like the toggle does (dark → system).
     expect(theme.textContent).toBe('Theme · Dark')

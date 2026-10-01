@@ -242,7 +242,7 @@ export function DrawerGlobal({ onNavigate, tools }: { onNavigate: () => void; to
           </span>
         </RouterLink>
       ) : null}
-      <RouterLink to="/settings/global" onClick={onNavigate} data-slot="drawer-global-settings" className={ROW_CLASS}>
+      <RouterLink to="/settings/global/appearance" onClick={onNavigate} data-slot="drawer-global-settings" className={ROW_CLASS}>
         <Settings2Icon aria-hidden="true" />
         Global settings
       </RouterLink>

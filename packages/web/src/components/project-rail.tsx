@@ -357,7 +357,7 @@ export function ProjectRail({ projects, signals, truncated, version, singleProje
             <LayersIcon className="size-4 shrink-0" aria-hidden="true" />
           </RailLink>
         ) : null}
-        <RailLink to="/settings/global" label="Global settings" slot="rail-global-settings" active={settingsActive} expanded={expanded}>
+        <RailLink to="/settings/global/appearance" label="Global settings" slot="rail-global-settings" active={settingsActive} expanded={expanded}>
           <Settings2Icon className="size-4 shrink-0" aria-hidden="true" />
         </RailLink>
         <ThemeToggle
