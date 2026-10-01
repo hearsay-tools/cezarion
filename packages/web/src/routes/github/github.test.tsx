@@ -618,7 +618,8 @@ describe('the GitHub tab lists', () => {
   })
 
   it('an unknown number renders the honest not-found state, not a crash', async () => {
-    stubFetch()
+    // Not in the open list, so the tab asks GitHub for it by number (#692); GitHub has none.
+    stubFetch({ 'GET /api/v1/github/items/issue/9999': () => jsonResponse({ available: true, item: null }) })
     renderAt('/github/issues/9999')
 
     await waitFor(() =>
@@ -3604,4 +3605,65 @@ it.each(['ready', 'unavailable', 'network'] as const)('keeps the board filter an
   expect((picker as HTMLSelectElement).value).toBe('P1')
   expect(rows()).toHaveLength(state === 'ready' ? 1 : 2)
   if (state !== 'ready') expect(screen.getByText(/Previous memberships are shown/)).toBeTruthy()
+})
+
+/** A deep link (a task tab's "Files changed", a pasted URL) can name an item the open list does
+ *  not hold — closed or merged. The tab then asks GitHub for that number alone (#692). */
+describe('deep links to items outside the open list (#692)', () => {
+  const MERGED_PR: GithubItem = {
+    ...PR_137,
+    number: 150,
+    title: 'Merged long ago',
+    url: 'https://github.com/acme/demo/pull/150',
+    body: 'This one already landed.',
+  }
+  const CLOSED_ISSUE: GithubItem = {
+    ...ISSUE_142,
+    number: 160,
+    title: 'Closed as completed',
+    url: 'https://github.com/acme/demo/issues/160',
+  }
+  const itemRequests = (sent: SentRequest[]) => sent.filter((request) => request.path.includes('/github/items/'))
+
+  it('renders a merged PR’s changes view from /github/prs/N/changes', async () => {
+    const sent = stubFetch({ 'GET /api/v1/github/items/pr/150': () => jsonResponse({ available: true, item: MERGED_PR }) })
+    renderAt('/github/prs/150/changes')
+    await waitFor(() => expect(detail()?.textContent).toContain('Merged long ago'))
+    await waitFor(() => expect(document.querySelector('[data-slot="gh-pr-changes"]')?.textContent).toContain('src/new.ts'))
+    expect(itemRequests(sent).map((request) => request.path)).toEqual(['/api/v1/github/items/pr/150'])
+  })
+
+  it('renders a merged PR’s conversation from /github/prs/N', async () => {
+    stubFetch({ 'GET /api/v1/github/items/pr/150': () => jsonResponse({ available: true, item: MERGED_PR }) })
+    renderAt('/github/prs/150')
+    await waitFor(() => expect(document.querySelector('[data-slot="gh-body"]')?.textContent).toContain('This one already landed.'))
+  })
+
+  it('renders a closed issue from /github/issues/N', async () => {
+    stubFetch({ 'GET /api/v1/github/items/issue/160': () => jsonResponse({ available: true, item: CLOSED_ISSUE }) })
+    renderAt('/github/issues/160')
+    await waitFor(() => expect(detail()?.textContent).toContain('Closed as completed'))
+  })
+
+  it('shows the detail loading state, not Not found, while the item is fetched', async () => {
+    stubFetch({ 'GET /api/v1/github/items/pr/150': () => new Promise<Response>(() => {}) })
+    renderAt('/github/prs/150')
+    await waitFor(() => expect(document.querySelector('[data-slot="gh-detail-loading"]')).not.toBeNull())
+    expect(screen.queryByRole('heading', { level: 2, name: 'Not found' })).toBeNull()
+  })
+
+  it('says why when GitHub cannot be asked', async () => {
+    stubFetch({ 'GET /api/v1/github/items/pr/150': () => jsonResponse({ available: false, reason: 'gh is not logged in' }) })
+    renderAt('/github/prs/150')
+    expect(await screen.findByText('gh is not logged in')).toBeTruthy()
+    expect(screen.queryByRole('heading', { level: 2, name: 'Not found' })).toBeNull()
+  })
+
+  it('does not ask GitHub for an item the open list already holds', async () => {
+    const sent = stubFetch()
+    renderAt('/github/prs/137/changes')
+    await waitFor(() => expect(detail()?.textContent).toContain('Stream tokens over SSE'))
+    await waitFor(() => expect(document.querySelector('[data-slot="gh-pr-changes"]')).not.toBeNull())
+    expect(itemRequests(sent)).toEqual([])
+  })
 })

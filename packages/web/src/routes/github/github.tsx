@@ -18,7 +18,7 @@ import { queryScope } from '@open-mercato/cezar-api-client'
 import { Link, Navigate } from '@/lib/project-router'
 
 import { getGithub, getGithubComments, putUiState } from '@/api/client'
-import { queryKeys, useGithub, useGithubChecks, useProjectRuns, useGithubSearch, useHealth, useSkills, useUiState, useWorkflows } from '@/api/queries'
+import { queryKeys, useGithub, useGithubChecks, useGithubItem, useProjectRuns, useGithubSearch, useHealth, useSkills, useUiState, useWorkflows } from '@/api/queries'
 import type {
   GithubItem,
   UiState,
@@ -548,6 +548,21 @@ export function GithubRoute({
     retainedDetail?.scope === scope && retainedDetail.view === view && retainedDetail.item.number === selectedNumber
       ? retainedDetail.item : null
   )
+  // A URL can name an item none of those hold — a closed or merged one, opened from a task tab's
+  // "Files changed" or a pasted link (#692). Once the list has answered, ask GitHub for that
+  // number alone, rather than calling a real item "Not found". Never for an item already held.
+  const itemKind = view === 'issues' ? 'issue' : 'pr'
+  const exactWanted =
+    gh?.available === true &&
+    selectedNumber !== null &&
+    Number.isSafeInteger(selectedNumber) &&
+    selectedNumber > 0 &&
+    !fullList.some((item) => item.number === selectedNumber) &&
+    !filterRows?.some((item) => item.number === selectedNumber) &&
+    remoteDetail === null
+  const exactItem = useGithubItem(itemKind, selectedNumber ?? 0, exactWanted)
+  const exactDetail =
+    exactWanted && exactItem.data?.available && exactItem.data.item?.kind === itemKind ? exactItem.data.item : null
 
   // Pin the selected detail and visible search hits before filling from the open list. The
   // shared hook retains its project scope, cache and view lifetime; every request stays bounded.
@@ -650,6 +665,7 @@ export function GithubRoute({
       : (fullList.find((item) => item.number === number) ??
         filterRows?.find((item) => item.number === number) ??
         remoteDetail ??
+        exactDetail ??
         null)
   // Feed the refresh mutation the thread that is genuinely rendered — including the no-`:n`
   // fallback to items[0], which is what the bare /github and /github/prs routes show.
@@ -935,6 +951,30 @@ export function GithubRoute({
               onQueued={(url, runId) => setQueued((current) => new Map(current).set(url, runId))}
             />
           </GithubItemDetail>
+        ) : exactWanted && exactItem.isPending ? (
+          <div data-slot="gh-detail-loading" className="flex min-h-full flex-1 flex-col">
+            <CenteredState
+              icon={<LoaderCircleIcon className="motion-safe:animate-spin" />}
+              tone="neutral"
+              heading="h2"
+              title={`Loading #${selectedNumber}…`}
+              subtitle="It is not among the open items, so the tab is asking GitHub for it."
+            />
+          </div>
+        ) : exactWanted && (exactItem.isError || exactItem.data?.available === false) ? (
+          <CenteredState
+            icon={<TriangleAlertIcon size={16} />}
+            tone={exactItem.isError ? 'danger' : 'neutral'}
+            heading="h2"
+            title={`Could not load #${selectedNumber}`}
+            subtitle={
+              exactItem.data?.available === false
+                ? exactItem.data.reason
+                : exactItem.error instanceof Error
+                  ? exactItem.error.message
+                  : 'The request failed.'
+            }
+          />
         ) : (
           <CenteredState
             icon={view === 'issues' ? <CircleDotIcon size={16} /> : <GitPullRequestIcon size={16} />}
