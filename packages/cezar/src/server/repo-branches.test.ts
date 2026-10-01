@@ -75,13 +75,15 @@ function fakeForge(opts: { states?: Record<number, ForgePr['state']>; prs?: Forg
   return { forge, calls };
 }
 
-function mergedPr(number: number, branch: string, tip: string): ForgePr {
+/** A PR merged into main at `tip`; `onMain` is the commit the merge put on the base. */
+function mergedPr(number: number, branch: string, tip: string, onMain: string): ForgePr {
   return {
     number,
     url: `https://github.com/acme/demo/pull/${number}`,
     headRefName: branch,
     baseRefName: 'main',
     headRefOid: tip,
+    mergeCommitOid: onMain,
     state: 'merged',
   };
 }
@@ -124,8 +126,9 @@ describe('the branch classifier (issue 08 §A)', () => {
     const squashTip = await taskBranch(root, 'cez/dddddddd', 1);
     await git(root, 'branch', 'cez/eeeeeeee', forkSha);
     await git(root, 'branch', 'cez/ffffffff');
-    // The base moves on, so the empty branches' tips are ancestors of main but not its tip.
-    await commit(root, 'later.txt', 'later on main');
+    // The base moves on, so the empty branches' tips are ancestors of main but not its tip. The
+    // same commit stands in for #7's squash, which is what a squash merge puts on main.
+    const squash = await commit(root, 'later.txt', 'later on main');
 
     const runs = [
       runRecord(ids.notLanded, 'done'),
@@ -136,7 +139,7 @@ describe('the branch classifier (issue 08 §A)', () => {
     ];
     const { forge, calls } = fakeForge({
       states: { 7: 'merged' },
-      prs: [mergedPr(7, 'cez/dddddddd', squashTip)],
+      prs: [mergedPr(7, 'cez/dddddddd', squashTip, squash)],
     });
     const { payload, cls } = await classesOf({ runs, forge });
 
@@ -163,7 +166,8 @@ describe('the branch classifier (issue 08 §A)', () => {
 
   it('classifies a squash-merged orphan through the cached PR list', async () => {
     const tip = await taskBranch(root, 'cez/bbbbbbbb', 1);
-    const { forge, calls } = fakeForge({ prs: [mergedPr(9, 'cez/bbbbbbbb', tip)] });
+    const squash = await commit(root, 'squash.txt', 'Squash cez/bbbbbbbb (#9)');
+    const { forge, calls } = fakeForge({ prs: [mergedPr(9, 'cez/bbbbbbbb', tip, squash)] });
     const { cls } = await classesOf({ forge });
     expect(cls['cez/bbbbbbbb']).toBe('merged');
     expect(calls.listPrs).toBe(1);
@@ -177,6 +181,7 @@ describe('the branch classifier (issue 08 §A)', () => {
     await git(root, 'checkout', '-q', 'cez/cccccccc');
     await commit(root, 'after.txt', 'after the merge');
     await git(root, 'checkout', '-q', 'main');
+    const onMain = await git(root, 'rev-parse', 'main');
     const runs = [
       runRecord('aaaaaaaa-1', 'done'),
       runRecord('bbbbbbbb-1', 'done', { pullRequestUrl: 'https://github.com/acme/demo/pull/8' }),
@@ -185,9 +190,9 @@ describe('the branch classifier (issue 08 §A)', () => {
     const { forge } = fakeForge({
       states: { 8: 'merged' },
       prs: [
-        { ...mergedPr(7, 'cez/aaaaaaaa', otherBase), baseRefName: 'release' },
-        { ...mergedPr(8, 'cez/bbbbbbbb', created), baseRefName: 'release' },
-        mergedPr(9, 'cez/cccccccc', merged),
+        { ...mergedPr(7, 'cez/aaaaaaaa', otherBase, onMain), baseRefName: 'release' },
+        { ...mergedPr(8, 'cez/bbbbbbbb', created, onMain), baseRefName: 'release' },
+        mergedPr(9, 'cez/cccccccc', merged, onMain),
       ],
     });
     const { payload, cls } = await classesOf({ runs, forge });
@@ -195,6 +200,21 @@ describe('the branch classifier (issue 08 §A)', () => {
     // The PR is still shown for what it is; it just does not decide the class.
     expect(payload.branches.find((b) => b.name === 'cez/bbbbbbbb')?.pr?.state).toBe('merged');
     expect(payload.counts).toEqual({ notLanded: 3, cleanup: 0 });
+  });
+
+  it('a merged PR counts only while its merge commit is on the base as read', async () => {
+    const tip = await taskBranch(root, 'cez/aaaaaaaa', 1);
+    const before = await git(root, 'rev-parse', 'main');
+    const squash = await commit(root, 'squash.txt', 'Squash cez/aaaaaaaa (#9)');
+    const runs = [runRecord('aaaaaaaa-1', 'done')];
+    const forge = fakeForge({ prs: [mergedPr(9, 'cez/aaaaaaaa', tip, squash)] }).forge;
+    expect((await classesOf({ runs, forge })).cls['cez/aaaaaaaa']).toBe('merged');
+    // main is reset (or force-pushed) back past the squash: the PR is history, the work is gone.
+    await git(root, 'reset', '-q', '--hard', before);
+    expect((await classesOf({ runs, forge })).cls['cez/aaaaaaaa']).toBe('not-landed');
+    // A merged PR with no merge commit the base can show proves nothing either.
+    const noMerge = fakeForge({ prs: [{ ...mergedPr(9, 'cez/aaaaaaaa', tip, squash), mergeCommitOid: null }] }).forge;
+    expect((await classesOf({ runs, forge: noMerge })).cls['cez/aaaaaaaa']).toBe('not-landed');
   });
 
   it('never classifies by prNumber — the PR a task is ABOUT is display-only', async () => {

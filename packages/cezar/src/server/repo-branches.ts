@@ -51,6 +51,8 @@ export interface ForgePr {
    *  they are what proves a merged PR landed THIS tip on THIS base. */
   baseRefName: string;
   headRefOid: string;
+  /** The commit the merge put on the base (a squash commit, or the merge commit), null until merged. */
+  mergeCommitOid: string | null;
   state: BranchPrState;
 }
 
@@ -80,6 +82,7 @@ const ghPrListSchema = z.array(
     headRefName: z.string(),
     baseRefName: z.string(),
     headRefOid: z.string(),
+    mergeCommit: z.object({ oid: z.string() }).nullable().optional(),
     state: z.string(),
     isDraft: z.boolean().optional(),
   }),
@@ -109,7 +112,7 @@ export const githubBranchForge: BranchForge = {
     try {
       const { stdout } = await exec(
         'gh',
-        ['pr', 'list', '--state', 'all', '--limit', String(PR_LIST_LIMIT), '--json', 'number,headRefName,baseRefName,headRefOid,state,isDraft,url'],
+        ['pr', 'list', '--state', 'all', '--limit', String(PR_LIST_LIMIT), '--json', 'number,headRefName,baseRefName,headRefOid,mergeCommit,state,isDraft,url'],
         { cwd: repoRoot, timeout: 15_000, maxBuffer: 16 * 1024 * 1024 },
       );
       const rows = ghPrListSchema.parse(JSON.parse(stdout));
@@ -121,6 +124,7 @@ export const githubBranchForge: BranchForge = {
           headRefName: row.headRefName,
           baseRefName: row.baseRefName,
           headRefOid: row.headRefOid,
+          mergeCommitOid: row.mergeCommit?.oid ?? null,
           state: row.state === 'MERGED' ? 'merged' : row.state === 'CLOSED' ? 'closed' : row.isDraft ? 'draft' : 'open',
         })),
       };
@@ -264,10 +268,21 @@ async function resolveBase(root: string, base: string): Promise<{ ref: string; f
   return { ref: base, fullRef: null, sha: null };
 }
 
-/** True when a local or remote-tracking ref OUTSIDE `excluded` (full ref names) also reaches `sha`. */
-async function reachableOutside(run: (args: string[]) => Promise<GitResult>, sha: string, excluded: ReadonlySet<string>): Promise<boolean> {
-  const res = await run(['for-each-ref', '--contains', sha, '--format=%(refname)', 'refs/heads', 'refs/remotes']);
-  return res.ok && res.stdout.split('\n').some((ref) => ref && !excluded.has(ref));
+/** A local or remote-tracking ref OUTSIDE `excluded` (full ref names) that also reaches `sha`, with
+ *  its own tip — the witness a delete verifies in its transaction — or null when none does. */
+async function retainingRef(
+  run: (args: string[]) => Promise<GitResult>,
+  sha: string,
+  excluded: ReadonlySet<string>,
+): Promise<{ ref: string; sha: string } | null> {
+  const res = await run(['for-each-ref', '--contains', sha, '--format=%(refname)%00%(objectname)', 'refs/heads', 'refs/remotes']);
+  if (!res.ok) return null;
+  for (const line of res.stdout.split('\n')) {
+    const [ref = '', tip = ''] = line.split('\0');
+    // A symbolic ref (origin/HEAD) cannot be verified by its own name in a transaction.
+    if (ref && tip && !excluded.has(ref) && !ref.endsWith('/HEAD')) return { ref, sha: tip };
+  }
+  return null;
 }
 
 function pickPr(prs: ForgePr[]): ForgePr | null {
@@ -321,7 +336,7 @@ export async function classifyBranches(input: ClassifyInput): Promise<Classifica
       .map(async (d) => {
         const fork = await forkPoint(root, d.run as RunRecord, d.head.name);
         if (fork !== d.head.sha) return;
-        if (d.ahead === 0 || (await reachableOutside((args) => git(root, args), d.head.sha, new Set([`refs/heads/${d.head.name}`])))) d.cls = 'empty';
+        if (d.ahead === 0 || (await retainingRef((args) => git(root, args), d.head.sha, new Set([`refs/heads/${d.head.name}`]))) !== null) d.cls = 'empty';
       }),
   );
   for (const d of drafts) if (d.cls === null && d.ahead === 0) d.cls = 'merged';
@@ -365,14 +380,20 @@ export async function classifyBranches(input: ClassifyInput): Promise<Classifica
         const pr = pickPr(byHead.get(d.head.name) ?? []);
         if (pr) prByBranch.set(d.head.name, { number: pr.number, url: pr.url, state: pr.state });
       }
-      // A merged PR lands the tip only when it targeted this base AND merged this very commit: one
-      // into another branch, or a branch that gained commits after its PR merged, still holds work
-      // the base lacks, and `merged` would make that work bulk-deletable.
+      // A merged PR lands the tip only when it targeted this base, merged this very commit, AND its
+      // merge is on the base as this classification reads it: one into another branch, a branch
+      // that gained commits after its PR merged, or a base reset (or never fetched) past the merge
+      // all leave work the base lacks, and `merged` would make that work bulk-deletable.
+      const onBase = async (sha: string | null) =>
+        !!sha && !!baseSha && FULL_SHA.test(sha) && (await git(root, ['merge-base', '--is-ancestor', sha, baseSha])).ok;
       for (const d of pending) {
-        const landed = (byHead.get(d.head.name) ?? []).some(
-          (pr) => pr.state === 'merged' && pr.baseRefName === base.replace(/^origin\//, '') && pr.headRefOid === d.head.sha,
-        );
-        if (landed) mergedByPr.add(d.head.name);
+        for (const pr of byHead.get(d.head.name) ?? []) {
+          if (pr.state !== 'merged' || pr.baseRefName !== base.replace(/^origin\//, '') || pr.headRefOid !== d.head.sha) continue;
+          if (await onBase(pr.mergeCommitOid)) {
+            mergedByPr.add(d.head.name);
+            break;
+          }
+        }
       }
     }
   }
@@ -537,7 +558,8 @@ export async function deleteBranches(
             refused.push({ name, reason: 'checked out in a worktree' });
             continue;
           }
-          if (candidate.keptElsewhere && !(await reachableOutside((args) => lockedGit(input.root, args), candidate.tip, requestedRefs))) {
+          const witness = candidate.keptElsewhere ? await retainingRef((args) => lockedGit(input.root, args), candidate.tip, requestedRefs) : null;
+          if (candidate.keptElsewhere && !witness) {
             refused.push({ name, reason: `its commits are not on ${payload.base} and only branches in this request keep them — delete it on its own, with confirmation` });
             continue;
           }
@@ -552,14 +574,16 @@ export async function deleteBranches(
             });
           }
           // Not `git branch -D`: a squash-merged branch is not an ancestor of the base, and only a
-          // ref transaction can make "the base did not move" part of the same atomic step.
+          // ref transaction can make "the base did not move" — and, for an empty branch, "the ref
+          // that keeps its commits did not move" — part of the same atomic step.
           const transaction = [
             ...(baseFullRef && baseSha ? [`verify ${baseFullRef} ${baseSha}`] : []),
+            ...(witness ? [`verify ${witness.ref} ${witness.sha}`] : []),
             `delete refs/heads/${name} ${candidate.tip}`,
           ].join('\n') + '\n';
           const res = await lockedGit(input.root, ['update-ref', '--stdin'], undefined, transaction);
           if (!res.ok) {
-            refused.push({ name, reason: `it or ${payload.base} changed since it was classified — refresh and try again` });
+            refused.push({ name, reason: `it, ${payload.base} or the branch that keeps its commits changed since it was classified — refresh and try again` });
             continue;
           }
           // What `branch -D` also drops; absent for most task branches, so a failure is expected.
