@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { stat } from 'node:fs/promises';
+import { readdir, stat } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import { promisify } from 'node:util';
 import { isSafeGitRef } from '../git-refs.ts';
@@ -169,12 +169,18 @@ export async function getTracking(root: string, base: string): Promise<RepoTrack
   }
 }
 
-/** mtime of `FETCH_HEAD` in the COMMON git dir (a linked worktree shares its repository's). */
+/** The newest `FETCH_HEAD` mtime in the repository. Each linked worktree writes its OWN
+ *  (`<common>/worktrees/<name>/FETCH_HEAD`), and agents fetch from task worktrees, so the main
+ *  checkout's alone would say "never fetched" right after an agent refreshed `origin/main`. */
 async function lastFetchedAt(root: string): Promise<string | null> {
   try {
     const common = (await git(root, ['rev-parse', '--git-common-dir'])).trim();
     const dir = isAbsolute(common) ? common : join(root, common);
-    return (await stat(join(dir, 'FETCH_HEAD'))).mtime.toISOString();
+    const linked = await readdir(join(dir, 'worktrees')).catch(() => [] as string[]);
+    const files = [join(dir, 'FETCH_HEAD'), ...linked.map((name) => join(dir, 'worktrees', name, 'FETCH_HEAD'))];
+    const times = await Promise.all(files.map((file) => stat(file).then((s) => s.mtimeMs, () => null)));
+    const newest = Math.max(...times.filter((t): t is number => t !== null));
+    return Number.isFinite(newest) ? new Date(newest).toISOString() : null;
   } catch {
     return null;
   }

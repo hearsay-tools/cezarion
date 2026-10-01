@@ -484,6 +484,27 @@ describe('tracking (issue 08 §B1)', () => {
     expect(log).toMatch(/rev-list/);
     expect(log).not.toMatch(/\bfetch\b/);
   });
+
+  it('dates the freshness by the newest fetch in ANY worktree — agents fetch from theirs', async () => {
+    const origin = mkdtempSync(join(tmpdir(), 'cez-tracking-origin-'));
+    try {
+      await git(origin, 'init', '-q', '--bare', '-b', 'main');
+      await git(root, 'remote', 'add', 'origin', origin);
+      await git(root, 'push', '-q', '-u', 'origin', 'main');
+      const task = join(root, '..', `cez-tracking-wt-${randomUUID()}`);
+      await git(root, 'worktree', 'add', '-q', '-b', 'cez/aaaaaaaa', task);
+      try {
+        // The main checkout never fetched; the task worktree just did.
+        expect((await getTracking(root, 'main'))?.fetchedAt).toBeNull();
+        await git(task, 'fetch', '-q', 'origin');
+        expect((await getTracking(root, 'main'))?.fetchedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+      } finally {
+        rmSync(task, { recursive: true, force: true });
+      }
+    } finally {
+      rmSync(origin, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('log source attribution (issue 08 §B5)', () => {
