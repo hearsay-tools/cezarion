@@ -93,7 +93,37 @@ describe('pushed task screen top bar', () => {
     expect(title.className).toContain('text-[15px]')
     expect(title.className).toContain('font-semibold')
     fireEvent.click(rename)
-    expect(within(bar).getByRole('textbox')).toBeTruthy()
+    // The input opens in a popover under the bar, so the bar keeps showing the state line.
+    expect(screen.getByRole('textbox', { name: 'Task title' })).toBeTruthy()
+    expect(bar.querySelector('[data-slot="mobile-run-state"]')).not.toBeNull()
+  })
+
+  const patches = () => (fetch as ReturnType<typeof vi.fn>).mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === 'PATCH')
+
+  it('Escape abandons a changed draft: no PATCH, title unchanged, focus back on the pencil', async () => {
+    renderScreen()
+    const rename = within(topBar()).getByRole('button', { name: 'Rename task' })
+    fireEvent.click(rename)
+    const input = screen.getByRole('textbox', { name: 'Task title' })
+    fireEvent.change(input, { target: { value: 'A different title' } })
+    fireEvent.keyDown(input, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('textbox', { name: 'Task title' })).toBeNull())
+    expect(patches()).toHaveLength(0)
+    expect(topBar().querySelector('h1')?.textContent).toBe('Reviewer agent presets')
+    await waitFor(() => expect(document.activeElement).toBe(rename))
+  })
+
+  it('Enter commits a changed draft exactly once and returns focus to the pencil', async () => {
+    renderScreen()
+    const rename = within(topBar()).getByRole('button', { name: 'Rename task' })
+    fireEvent.click(rename)
+    const input = screen.getByRole('textbox', { name: 'Task title' })
+    fireEvent.change(input, { target: { value: 'A different title' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    await waitFor(() => expect(patches()).toHaveLength(1))
+    await waitFor(() => expect(screen.queryByRole('textbox', { name: 'Task title' })).toBeNull())
+    expect(JSON.parse((patches()[0]![1] as RequestInit).body as string)).toEqual({ title: 'A different title' })
+    await waitFor(() => expect(document.activeElement).toBe(rename))
   })
 
   it('opens the same run actions menu from the … button', () => {

@@ -48,17 +48,42 @@ beforeAll(async () => {
   writeSharedProjects(readSharedProjects().filter((project) => project.id === bootProject))
 })
 
-/** Primary view tabs; Inbox and Automations are checked separately in More views. */
+/** More views in nav order (sidebar-view-tabs.tsx keeps NAV_ITEMS order): the opt-in Inbox and
+ *  Automations, plus Workflows once they crowd the row (see `isCrowded`). */
+function expectedOverflowLabels(): string[] {
+  return [
+    ...(followupsAvailable ? ['Inbox'] : []),
+    ...(forgeAvailable && automationsAvailable ? ['Automations'] : []),
+    ...(isCrowded() ? ['Workflows'] : []),
+  ]
+}
+
+/** Six non-optional views plus More cannot fit the 264px column unclipped, so with any optional
+ *  view present Workflows moves into More (MAX_PRIMARY_WITH_MORE = 5, sidebar-view-tabs.tsx).
+ *  Without GitHub there are only five, so nothing moves. */
+function isCrowded(): boolean {
+  const optional = (followupsAvailable ? 1 : 0) + (forgeAvailable && automationsAvailable ? 1 : 0)
+  return optional > 0 && expectedPrimaryCount() > 5
+}
+
+function expectedPrimaryCount(): number {
+  return forgeAvailable ? 6 : 5
+}
+
+/** The main row's tab links, in order. Workflows sits between Skills and Settings until it moves
+ *  into More; Inbox and Automations never appear here. */
 function expectedNavLabels(): string[] {
   return [
     'Tasks',
     'Git',
     ...(forgeAvailable ? ['GitHub'] : []),
     'Skills',
-    'Workflows',
+    ...(isCrowded() ? [] : ['Workflows']),
     'Settings',
   ]
 }
+
+const OVERFLOW_PATHS: Record<string, string> = { Inbox: '/inbox', Automations: '/automations', Workflows: '/workflows' }
 
 afterAll(() => {
   browser?.close()
@@ -189,10 +214,7 @@ describe('cockpit app shell', () => {
     browser.goto(baseUrl + scoped('/'))
     const nav = '[data-slot="sidebar"] [data-slot="view-tabs"]'
     browser.waitForFunction(`document.querySelector('${nav} a[aria-current="page"]') !== null`)
-    const expected = [
-      ...(followupsAvailable ? ['Inbox'] : []),
-      ...(forgeAvailable && automationsAvailable ? ['Automations'] : []),
-    ]
+    const expected = expectedOverflowLabels()
     const trigger = `${nav} [aria-label="More views"]`
     const facts = browser.waitForValue(`(() => {
       const nav = document.querySelector('${nav}')
@@ -215,10 +237,26 @@ describe('cockpit app shell', () => {
     browser.press('ArrowDown')
     browser.waitForFunction(`document.activeElement?.getAttribute('role') === 'menuitem'`)
     browser.press('Enter')
-    const path = expected[0] === 'Inbox' ? '/inbox' : '/automations'
+    const path = OVERFLOW_PATHS[expected[0]!]
     browser.waitForFunction(`location.pathname === '${scoped('')}' + '${path}' && document.querySelector('[role="menu"]') === null`)
     expect(browser.count(`${nav} a[aria-current="page"]`)).toBe(0)
     expect(browser.count(`${trigger}`)).toBe(1)
+    // An overflow route lights More itself, and the menu item announces the current page.
+    browser.waitForFunction(`document.querySelector('${trigger}').getAttribute('data-active') === 'true'`)
+
+    // Keyboard walk to the LAST overflow item (Workflows when crowded) and activate it.
+    const last = expected[expected.length - 1]!
+    browser.evaluate(`document.querySelector('${trigger}').focus()`)
+    browser.press('ArrowDown')
+    for (let i = 0; i < expected.length - 1; i++) browser.press('ArrowDown')
+    browser.waitForFunction(`document.activeElement?.getAttribute('role') === 'menuitem' && document.activeElement.textContent.trim().replace(/\\d+$/, '').trim() === '${last}'`)
+    browser.press('Enter')
+    browser.waitForFunction(`location.pathname === '${scoped('')}' + '${OVERFLOW_PATHS[last]}' && document.querySelector('[role="menu"]') === null`)
+    browser.waitForFunction(`document.querySelector('${trigger}').getAttribute('data-active') === 'true'`)
+    browser.press('ArrowDown')
+    expect(browser.waitForValue(`document.querySelector('[role="menu"] a[aria-current="page"]')?.textContent.trim().replace(/\\d+$/, '').trim() ?? null`,
+      value => value === last)).toBe(last)
+    browser.press('Escape')
   })
 
   it('keeps the themed project name readable and geometry-stable at the minimum sidebar width', () => {

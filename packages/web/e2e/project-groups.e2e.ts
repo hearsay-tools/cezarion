@@ -28,19 +28,37 @@ let restoreHome: () => void
 let singleProject = false
 
 let forgeAvailable = false
+let followupsAvailable = false
+let automationsAvailable = false
 
 const scoped = (projectId: string, path: string) => `/p/${projectId}${path}`
 
-/** The nav every group renders — the same health-gated list the flat shell uses. */
+/** Only the boot project has a forge; its seeded siblings are bare repos. */
+const hasForge = (projectId: string) => projectId === bootProject && forgeAvailable
+
+/** More views, in nav order. Inbox and Automations are opt-in; with them present, a project that
+ *  shows six other views (the forge one) also moves Workflows into More — sidebar-view-tabs.tsx
+ *  allows five primary tabs beside the button. A forge-less sibling has five and keeps Workflows. */
+function expectedOverflowHrefs(projectId: string): string[] {
+  const optional = [
+    ...(followupsAvailable ? ['/inbox'] : []),
+    ...(hasForge(projectId) && automationsAvailable ? ['/automations'] : []),
+  ]
+  const crowded = optional.length > 0 && hasForge(projectId)
+  return [...optional, ...(crowded ? ['/workflows'] : [])].map((path) => scoped(projectId, path))
+}
+
+/** The main-row tab links every group renders: the health-gated list minus the More views. */
 function expectedNavHrefs(projectId: string): string[] {
+  const overflow = expectedOverflowHrefs(projectId)
   return [
     scoped(projectId, '/'),
     scoped(projectId, '/git'),
-    ...(projectId === bootProject && forgeAvailable ? [scoped(projectId, '/github')] : []),
+    ...(hasForge(projectId) ? [scoped(projectId, '/github')] : []),
     scoped(projectId, '/skills'),
     scoped(projectId, '/workflows'),
     scoped(projectId, '/settings'),
-  ]
+  ].filter((href) => !overflow.includes(href))
 }
 
 /** A real (if empty) git repo, so the registry probe answers `ok` rather than `not-git` and the
@@ -59,6 +77,8 @@ beforeAll(async () => {
     capabilities: { followups: boolean; singleProject: boolean; automations: boolean }
   }
   forgeAvailable = health.forge?.available === true
+  followupsAvailable = health.capabilities.followups
+  automationsAvailable = health.capabilities.automations
   singleProject = health.capabilities.singleProject
 
   // `ui-state.json` too: the collapse assertion below reads it to prove nothing was written
@@ -116,6 +136,16 @@ function assertProject(projectId: string, path: string): void {
     value => JSON.stringify(value) === JSON.stringify(expected))).toEqual(expected)
   expect(browser.waitForValue(`Array.from(document.querySelectorAll('${nav} a[aria-current="page"]')).map(a => new URL(a.href).pathname)`,
     value => JSON.stringify(value) === JSON.stringify([scoped(projectId, path)]))).toEqual([scoped(projectId, path)])
+  // The More views scope to the same project: every path the main row does not carry is in the menu.
+  const overflow = expectedOverflowHrefs(projectId)
+  expect(browser.count(`${nav} [aria-label="More views"]`)).toBe(overflow.length ? 1 : 0)
+  if (overflow.length) {
+    browser.click(`${nav} [aria-label="More views"]`)
+    expect(browser.waitForValue(`Array.from(document.querySelectorAll('[role="menu"] a[role="menuitem"]')).map(a => new URL(a.href).pathname)`,
+      value => JSON.stringify(value) === JSON.stringify(overflow))).toEqual(overflow)
+    browser.press('Escape')
+    browser.waitForFunction(`document.querySelector('[role="menu"]') === null`)
+  }
   expect(browser.count('[data-slot="sidebar"] [data-slot="project-header"]')).toBe(1)
   // Git carries its own worktree list instead of the task list (#622); every other view keeps the task list.
   expect(browser.count('[data-slot="sidebar"] [data-slot="task-quick-list"]')).toBe(path === '/git' ? 0 : 1)
