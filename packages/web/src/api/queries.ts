@@ -236,6 +236,8 @@ export const queryKeys = {
   /** Every ref-status batch of one project — `githubRefStatus`'s prefix, which a merge
    *  invalidates so that project's chips and tab glyphs reread the PR it merged. */
   githubRefStatusOf: (projectId: string) => [projectId, 'github', 'ref-status'] as const,
+  /** A PR's changed files. Scoped, so the same number in two projects is two entries. */
+  githubPrChanges: (number: number) => [queryScope(), 'github', 'pr-changes', number] as const,
   githubMergeState: (number: number) => [queryScope(), 'github', 'merge-state', number] as const,
   get openTargets() {
     return [queryScope(), 'open-targets'] as const
@@ -2197,7 +2199,7 @@ export function useGithubItem(kind: 'issue' | 'pr', number: number, enabled = tr
 
 export function useGithubPrChanges(number: number | undefined) {
   return useQuery({
-    queryKey: ['github', 'pr-changes', number ?? 0],
+    queryKey: queryKeys.githubPrChanges(number ?? 0),
     queryFn: ({ signal }) => getGithubPrChanges(number as number, {}, { signal }),
     enabled: number !== undefined,
     staleTime: 60_000,
