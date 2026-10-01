@@ -1432,6 +1432,7 @@ function BaseBranchPill({ repo }: { repo: RepoResponse }) {
   const current = repo.baseBranch ?? repo.info.branch
   return (
     <PickerPill
+      searchPlaceholder="Search branches…"
       slot="base-pill"
       ariaLabel="Base branch"
       label={<span className="text-[11px]">{current}</span>}
