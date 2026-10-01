@@ -28,8 +28,9 @@ export function GitTabLoading({ tab }: { tab: GitTab }) {
 }
 
 /** The run fetch failed — same grammar as the thread route's error state (task-thread.tsx),
- *  because a dead `/tasks/:id/changes` link deserves the same honesty as a dead `/tasks/:id`. */
-export function GitTabLoadError({ tab, error }: { tab: GitTab; error: Error }) {
+ *  because a dead `/tasks/:id/changes` link deserves the same honesty as a dead `/tasks/:id`.
+ *  The item tabs (`github-item`, #692) share it: a dead `/tasks/:id/pr/5` is the same dead run. */
+export function GitTabLoadError({ tab, error }: { tab: GitTab | 'github-item'; error: Error }) {
   const notFound = error instanceof ApiError && error.status === 404
   return (
     <div data-route={`task-${tab}`} className="flex min-h-full flex-col">

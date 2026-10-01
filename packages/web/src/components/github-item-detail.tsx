@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link } from '@/lib/project-router'
 
 import { getGithubPrChanges, getGithubPrMergeState, mergeGithubPr } from '@/api/client'
-import { queryKeys, useGithubComments, useGithubPrChanges } from '@/api/queries'
+import { queryKeys, useGithubComments, useGithubPrChanges, useReferenceProjectId } from '@/api/queries'
 import type {
   GithubComment,
   GithubItem,
@@ -195,6 +195,8 @@ function MergeRequirementIcon({ state }: { state: MergeRequirementState }) {
 
 function GithubMergeBox({ number, onRunAgent }: { number: number; onRunAgent?: () => void }) {
   const queryClient = useQueryClient()
+  // Ref-status batches are keyed by the explicit project, not `queryScope()` (queries.ts).
+  const referenceProjectId = useReferenceProjectId()
   const mergeState = useQuery({
     queryKey: queryKeys.githubMergeState(number),
     queryFn: ({ signal }) => getGithubPrMergeState(number, {}, { signal }),
@@ -228,6 +230,12 @@ function GithubMergeBox({ number, onRunAgent }: { number: number; onRunAgent?: (
       // The single list query (#664) — a merged PR drops out of the open set on the next fetch.
       void queryClient.invalidateQueries({ queryKey: queryKeys.github({ limit: GITHUB_LIST_LIMIT }) })
       void queryClient.invalidateQueries({ queryKey: queryKeys.githubComments('pr', number) })
+      // The task tab's item (#692), and every chip and tab glyph of this project: the server
+      // forgot its cached status on merge, so a reread answers `merged` without a reload.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.githubItem('pr', number) })
+      if (referenceProjectId !== undefined) {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.githubRefStatusOf(referenceProjectId) })
+      }
     },
     onError: (error) => {
       toast(error instanceof Error ? error.message : String(error), { tone: 'danger' })

@@ -1,9 +1,13 @@
 import { QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { ProjectScopeContext } from '@/api/project-scope-context'
+import { queryKeys } from '@/api/queries'
 import { createQueryClient } from '@/api/query-client'
+import { ReferenceChip } from '@/components/reference-chip'
+import { ReferenceStatusProvider } from '@/components/reference-status'
 import type { GithubItem } from '@open-mercato/cezar-api-client'
 
 import { GithubItemDetail } from './github-item-detail'
@@ -113,5 +117,70 @@ describe('GithubItemDetail outside the GitHub view', () => {
     renderDetail(PR_42, onRunAgent)
     fireEvent.click(await screen.findByRole('button', { name: 'Run agent on this PR' }))
     expect(onRunAgent).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('merging from the detail (#692)', () => {
+  /** The merge flow's fetch: merge-state, the merge POST, and a ref-status answer that turns
+   *  `merged` once the POST has landed — what the server's `forgetRefStatus` makes true. */
+  function stubMergeFlow() {
+    let merged = false
+    const refStatusCalls: string[] = []
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL, init: RequestInit = {}) => {
+      const url = String(input)
+      let body: unknown = { available: true, comments: [] }
+      if (url.includes('/merge-state')) body = MERGE_STATE
+      else if (url.endsWith('/merge') && init.method === 'POST') {
+        merged = true
+        body = { merged: true, number: 42, url: PR_42.url, method: 'squash' }
+      } else if (url.includes('/ref-status')) {
+        refStatusCalls.push(url)
+        body = { available: true, prs: { 42: merged ? 'merged' : 'open' }, issues: {}, recheckAfterMs: null }
+      } else if (url.endsWith('/health')) body = { bootProject: 'p1' }
+      return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })
+    })
+    return refStatusCalls
+  }
+
+  async function merge() {
+    await waitFor(() => expect(document.querySelector('[data-slot="gh-merge-box"]')?.textContent).toContain('Ready to merge'))
+    fireEvent.click(screen.getByRole('button', { name: 'Squash and merge' }))
+    fireEvent.click(within(document.querySelector('[data-slot="gh-merge-confirm"]') as HTMLElement).getByRole('button', { name: 'Squash and merge' }))
+  }
+
+  it('invalidates the item query, so a task tab rereads the merged PR', async () => {
+    stubMergeFlow()
+    const client = createQueryClient()
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <GithubItemDetail item={PR_42} colors={{}} backLink={null} subNav={null} />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+    await merge()
+    await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.githubItem('pr', 42) }))
+  })
+
+  it('refetches the project’s reference statuses, so its chips turn merged without a reload', async () => {
+    const refStatusCalls = stubMergeFlow()
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <ProjectScopeContext.Provider value={{ projectId: 'p1', apiBase: '/api/v1/p/p1' }}>
+          <MemoryRouter>
+            <ReferenceStatusProvider projectId="p1" requests={[{ projectId: 'p1', kind: 'PR', number: 42 }]}>
+              <ReferenceChip reference={{ kind: 'PR', number: 42, url: PR_42.url }} taskTitle="Share the detail" />
+              <GithubItemDetail item={PR_42} colors={{}} backLink={null} subNav={null} />
+            </ReferenceStatusProvider>
+          </MemoryRouter>
+        </ProjectScopeContext.Provider>
+      </QueryClientProvider>,
+    )
+    const chip = () => document.querySelector('[data-slot="pr-chip"]')
+    await waitFor(() => expect(chip()?.getAttribute('data-status')).toBe('open'))
+    await merge()
+    await waitFor(() => expect(chip()?.getAttribute('data-status')).toBe('merged'))
+    expect(refStatusCalls.length).toBeGreaterThanOrEqual(2)
   })
 })

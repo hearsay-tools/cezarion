@@ -24,6 +24,7 @@ import {
   getGithubChecks,
   getGithubSearch,
   getGithubComments,
+  getGithubItem,
   getGithubPrChanges,
   getGithubRefStatus,
   getGroup,
@@ -222,6 +223,13 @@ export const queryKeys = {
     ] as const,
   githubComments: (kind: 'issue' | 'pr', number: number) =>
     [queryScope(), 'github', 'comments', kind, number] as const,
+  /** One issue/PR by number (`GET /api/github/items/…`, #692). Scoped, so the same number in two
+   *  projects is two entries — a task tab must never show another project's #5. */
+  githubItem: (kind: 'issue' | 'pr', number: number) =>
+    [queryScope(), 'github', 'item', kind, number] as const,
+  /** Every ref-status batch of one project — `githubRefStatus`'s prefix, which a merge
+   *  invalidates so that project's chips and tab glyphs reread the PR it merged. */
+  githubRefStatusOf: (projectId: string) => [projectId, 'github', 'ref-status'] as const,
   githubMergeState: (number: number) => [queryScope(), 'github', 'merge-state', number] as const,
   get openTargets() {
     return [queryScope(), 'open-targets'] as const
@@ -2140,6 +2148,17 @@ export function useGithubComments(kind: 'issue' | 'pr', number: number, enabled 
   return useQuery({
     queryKey: queryKeys.githubComments(kind, number),
     queryFn: ({ signal }) => getGithubComments(kind, number, {}, { signal }),
+    enabled,
+    staleTime: 60_000,
+  })
+}
+
+/** One issue/PR for a task's item tab (#692). `staleTime` matches the server's item cache, like
+ *  the comment thread's. */
+export function useGithubItem(kind: 'issue' | 'pr', number: number, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.githubItem(kind, number),
+    queryFn: ({ signal }) => getGithubItem(kind, number, {}, { signal }),
     enabled,
     staleTime: 60_000,
   })

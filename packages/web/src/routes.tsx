@@ -23,6 +23,7 @@ import { SkillsLoading } from './routes/skills-loading'
 import { UnknownProjectRoute } from './routes/unknown-project'
 import { WorkflowsLoading } from './routes/workflows/workflows-loading'
 import { GitTabLoading } from './routes/task-git/git-tab-loading'
+import { TaskGithubItemLoading } from './routes/task-github/task-github-loading'
 import { ThreadLoading } from './routes/task-thread/thread-loading'
 import { visibleSettingsSections, type SettingsSectionId } from './routes/settings/registry'
 import {
@@ -60,6 +61,11 @@ const TaskFilesRoute = lazy(() =>
 )
 const TaskCommitsRoute = lazy(() =>
   import('./routes/task-git/task-commits').then((m) => ({ default: m.TaskCommitsRoute })),
+)
+/** A task's linked issue/PR tab (#692) — lazy for the same reason: the run header and the GitHub
+ *  item detail (markdown, diff) are thread-chunk weight. */
+const TaskGithubItemRoute = lazy(() =>
+  import('./routes/task-github/task-github-item').then((m) => ({ default: m.TaskGithubItemRoute })),
 )
 
 /** Lazy because the repo view renders through the `<Diff>` facade and the Shiki singleton —
@@ -350,6 +356,22 @@ export function AppRoutes() {
           element={
             <Suspense fallback={<GitTabLoading tab="changes" />}>
               <TaskCommitsRoute />
+            </Suspense>
+          }
+        />
+        <Route
+          path="tasks/:id/issue/:n"
+          element={
+            <Suspense fallback={<TaskGithubItemLoading kind="issue" />}>
+              <TaskGithubItemRoute kind="issue" />
+            </Suspense>
+          }
+        />
+        <Route
+          path="tasks/:id/pr/:n"
+          element={
+            <Suspense fallback={<TaskGithubItemLoading kind="pr" />}>
+              <TaskGithubItemRoute kind="pr" />
             </Suspense>
           }
         />
