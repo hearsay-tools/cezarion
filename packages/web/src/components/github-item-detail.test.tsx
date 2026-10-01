@@ -263,3 +263,77 @@ describe('merging from the detail (#692)', () => {
     }
   })
 })
+
+describe('PR changes cache scope (#734)', () => {
+  const changesFor = (path: string, headSha: string) => ({
+    available: true, number: 42, headSha, additions: 1, deletions: 0, truncated: false,
+    files: [{ path, status: 'added', additions: 1, deletions: 0, patch: `@@ -0,0 +1 @@\n+${path}` }],
+  })
+  const respond = (body: unknown) =>
+    new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })
+  const A_HEAD = 'a'.repeat(40)
+  const B_HEAD = 'b'.repeat(40)
+  const renderChanges = (client = createQueryClient()) => render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter>
+        <GithubItemDetail item={PR_42} colors={{}} backLink={null} subNav={{ filter: null, changes: true }} />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  )
+
+  it('keeps the same PR number in two projects as two cache entries', async () => {
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/p/p1/') && url.includes('/changes')) return respond(changesFor('only-in-p1.ts', A_HEAD))
+      if (url.includes('/p/p2/') && url.includes('/changes')) return respond(changesFor('only-in-p2.ts', B_HEAD))
+      if (url.includes('/merge-state')) return respond(MERGE_STATE)
+      return respond({ available: true, comments: [] })
+    })
+    const client = createQueryClient()
+    setApiScope('p1')
+    try {
+      const first = renderChanges(client)
+      await waitFor(() => expect(document.querySelector('[data-slot="gh-pr-changes"]')?.textContent).toContain('only-in-p1.ts'))
+      first.unmount()
+      setApiScope('p2')
+      renderChanges(client)
+      await waitFor(() => expect(document.querySelector('[data-slot="gh-pr-changes"]')?.textContent).toContain('only-in-p2.ts'))
+      expect(document.querySelector('[data-slot="gh-pr-changes"]')?.textContent).not.toContain('only-in-p1.ts')
+    } finally {
+      setApiScope(null)
+    }
+  })
+
+  it('files a Refresh under the project it was pressed in, after a project switch', async () => {
+    let releaseRefresh: (() => void) | undefined
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/p/p1/') && url.includes('/changes?refresh=1')) {
+        await new Promise<void>((resolve) => { releaseRefresh = resolve })
+        return respond(changesFor('late-from-p1.ts', A_HEAD))
+      }
+      if (url.includes('/p/p1/') && url.includes('/changes')) return respond(changesFor('old-p1.ts', A_HEAD.replace(/a/g, 'c')))
+      if (url.includes('/p/p2/') && url.includes('/changes')) return respond(changesFor('diff-of-p2.ts', B_HEAD))
+      if (url.includes('/merge-state')) return respond(MERGE_STATE)
+      return respond({ available: true, comments: [] })
+    })
+    const client = createQueryClient()
+    setApiScope('p1')
+    try {
+      const first = renderChanges(client)
+      await waitFor(() => expect(document.querySelector('[data-slot="gh-pr-changes"]')?.textContent).toContain('old-p1.ts'))
+      fireEvent.click(within(document.querySelector('[data-slot="gh-pr-changes"]') as HTMLElement).getByRole('button', { name: 'Refresh' }))
+      await waitFor(() => expect(releaseRefresh).toBeDefined())
+      first.unmount()
+      setApiScope('p2')
+      renderChanges(client)
+      await waitFor(() => expect(document.querySelector('[data-slot="gh-pr-changes"]')?.textContent).toContain('diff-of-p2.ts'))
+      releaseRefresh!()
+      await waitFor(() => expect(JSON.stringify(client.getQueryData(['p1', 'github', 'pr-changes', 42]))).toContain('late-from-p1.ts'))
+      expect(document.querySelector('[data-slot="gh-pr-changes"]')?.textContent).toContain('diff-of-p2.ts')
+      expect(document.querySelector('[data-slot="gh-pr-changes"]')?.textContent).not.toContain('late-from-p1.ts')
+    } finally {
+      setApiScope(null)
+    }
+  })
+})

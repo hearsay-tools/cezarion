@@ -409,8 +409,11 @@ function GithubPrChanges({ item }: { item: GithubItem }) {
   }, [data?.available ? data.headSha : '', filter])
   const refresh = async () => {
     const oldHead = data?.available ? data.headSha : null
+    // Taken before the await: `queryKeys` reads the live project scope, and a refresh that lands
+    // after the reader switched projects belongs to the project it was pressed in.
+    const key = queryKeys.githubPrChanges(item.number)
     const next = await getGithubPrChanges(item.number, { refresh: true })
-    queryClient.setQueryData(['github', 'pr-changes', item.number], next)
+    queryClient.setQueryData(key, next)
     if (next.available && oldHead && oldHead !== next.headSha) {
       setSelected(next.files[0]?.path ?? null)
       toast('The reviewed revision changed.')
