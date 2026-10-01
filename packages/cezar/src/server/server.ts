@@ -2,7 +2,7 @@ import type { ApiRun } from '@open-mercato/cezar-contract';
 import { DelegationService } from '../delegation/service.ts';
 import type { DelegationController } from '../delegation/provision.ts';
 import { delegationFailure } from '../delegation/routes.ts';
-import { CLIENT_REQUEST_VARIANTS_ERROR, workerEmptyRequestSchema, runRelationshipsSchema, runDelegationSummarySchema } from '@open-mercato/cezar-contract';
+import { githubItemParamsSchema, CLIENT_REQUEST_VARIANTS_ERROR, workerEmptyRequestSchema, runRelationshipsSchema, runDelegationSummarySchema } from '@open-mercato/cezar-contract';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { AutomationStore } from '../automations/store.ts';
@@ -190,7 +190,7 @@ import { ApplicationUpdateConflictError, ApplicationUpdateFailureError, type App
 import { createSocketHub, type SocketHub, type WsUpgradeVerdict } from './ws.ts';
 import { browseDirectory, isInsideBrowseRoot, isLexicallyInsideBrowseRoot, resolveBrowseRoot } from './fs-browse.ts';
 import { parseRemote, resolveForge, type ForgeAvailability } from './forge/index.ts';
-import { fetchGithub, fetchGithubProjects, fetchGithubChecks, fetchGithubComments, fetchGithubPrDiff, fetchGithubRefStatus, forgetRefStatus, readCachedRefStatuses, refNumberFromUrl, searchGithubItems, GithubPrNotFoundError, GH_CHECKS_MAX, GH_REF_STATUS_MAX } from './github.ts';
+import { fetchGithub, fetchGithubProjects, fetchGithubChecks, fetchGithubComments, fetchGithubItem, forgetGithubItem, fetchGithubPrDiff, fetchGithubRefStatus, forgetRefStatus, readCachedRefStatuses, refNumberFromUrl, searchGithubItems, GithubPrNotFoundError, GH_CHECKS_MAX, GH_REF_STATUS_MAX } from './github.ts';
 import { ensureLaunchKey } from './launch-key.ts';
 import { CockpitAlreadyRunningError, type CockpitOwnership } from './cockpit-ownership.ts';
 import { openInTerminal } from './open-in-terminal.ts';
@@ -5288,6 +5288,20 @@ export function createApp(deps: ServerDeps) {
       );
     })
 
+    // One issue/PR by number, any state (#692) — the task page's item tabs. Same in-payload
+    // degrade as the siblings: `item: null` is "no such number", `available: false` is "could not
+    // ask"; never a 5xx.
+    .get(
+      '/github/items/:kind/:number',
+      paramZodValidator(githubItemParamsSchema, { message: 'invalid kind or number' }),
+      queryZodValidator(refreshQuery),
+      async (c) => {
+        const { root: repoRoot } = c.get('project');
+        const { kind, number } = c.req.valid('param');
+        return c.json(await fetchGithubItem(repoRoot, kind, number, c.req.valid('query').refresh === '1'));
+      },
+    )
+
     // Lazy checks glyphs for on-screen PR rows (#664). Additive sibling of /api/github — the list
     // call dropped `statusCheckRollup` (the dominant cost), so the glyph is hydrated here per
     // visible row. `prs` is a comma-separated list of positive integers, capped at GH_CHECKS_MAX;
@@ -5378,6 +5392,7 @@ export function createApp(deps: ServerDeps) {
           // a minute after the user watched this server merge it. Forget it; the next reader asks
           // the forge, gets `merged`, and then stops polling it at all.
           forgetRefStatus(repoRoot, parsedNumber.data.number);
+          forgetGithubItem(repoRoot, 'pr', parsedNumber.data.number);
           return c.json(result);
         }
         return c.json(

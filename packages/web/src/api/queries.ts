@@ -24,6 +24,7 @@ import {
   getGithubChecks,
   getGithubSearch,
   getGithubComments,
+  getGithubItem,
   getGithubPrChanges,
   getGithubRefStatus,
   getGroup,
@@ -228,6 +229,13 @@ export const queryKeys = {
     ] as const,
   githubComments: (kind: 'issue' | 'pr', number: number) =>
     [queryScope(), 'github', 'comments', kind, number] as const,
+  /** One issue/PR by number (`GET /api/github/items/…`, #692). Scoped, so the same number in two
+   *  projects is two entries — a task tab must never show another project's #5. */
+  githubItem: (kind: 'issue' | 'pr', number: number) =>
+    [queryScope(), 'github', 'item', kind, number] as const,
+  /** Every ref-status batch of one project — `githubRefStatus`'s prefix, which a merge
+   *  invalidates so that project's chips and tab glyphs reread the PR it merged. */
+  githubRefStatusOf: (projectId: string) => [projectId, 'github', 'ref-status'] as const,
   githubMergeState: (number: number) => [queryScope(), 'github', 'merge-state', number] as const,
   get openTargets() {
     return [queryScope(), 'open-targets'] as const
@@ -832,10 +840,16 @@ export function useHealth() {
  * over. Health stays the fallback, and stays boot-only, so an unregistered boot folder (or a
  * registry that has not loaded yet) keeps answering exactly as before.
  */
-export function useProjectRepoBase(): string | undefined {
+export function useProjectRepoBase(
+  explicitProjectId?: string,
+  options?: { retryOnMount?: boolean },
+): string | undefined {
   const health = useHealth().data
-  const projects = useProjects().data?.projects
-  const { projectId } = useProjectScope()
+  const projects = useProjects(options).data?.projects
+  const scope = useProjectScope()
+  // A surface standing in a project other than the routed one (the sidebar's per-project lists)
+  // names it; everyone else reads the route's.
+  const projectId = explicitProjectId ?? scope.projectId
   const scopedId = projectId ?? health?.bootProject
   const registered = scopedId === undefined ? undefined : projects?.find((project) => project.id === scopedId)
   if (registered?.repoUrl) return registered.repoUrl
@@ -2165,6 +2179,17 @@ export function useGithubComments(kind: 'issue' | 'pr', number: number, enabled 
   return useQuery({
     queryKey: queryKeys.githubComments(kind, number),
     queryFn: ({ signal }) => getGithubComments(kind, number, {}, { signal }),
+    enabled,
+    staleTime: 60_000,
+  })
+}
+
+/** One issue/PR for a task's item tab (#692). `staleTime` matches the server's item cache, like
+ *  the comment thread's. */
+export function useGithubItem(kind: 'issue' | 'pr', number: number, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.githubItem(kind, number),
+    queryFn: ({ signal }) => getGithubItem(kind, number, {}, { signal }),
     enabled,
     staleTime: 60_000,
   })

@@ -182,6 +182,8 @@ describe('pageTitleContext', () => {
     '/p/cezar/tasks/run-1/changes',
     '/p/cezar/tasks/run-1/files',
     '/p/cezar/tasks/run-1/commits/abc123',
+    '/p/cezar/tasks/run-1/pr/5',
+    '/p/cezar/tasks/run-1/issue/7',
   ])('returns the task lookup key for %s', (pathname) => {
     expect(pageTitleContext(pathname)).toEqual({ pageLabel: null, taskId: 'run-1' })
   })
@@ -203,6 +205,9 @@ const ROUTE_CASES: Array<[url: string, route: string, title: string]> = [
   // The real R5 tab routes: with fetch never answering they are honestly loading.
   ['/tasks/abc123/changes', 'task-changes', 'Loading changes…'],
   ['/tasks/abc123/files', 'task-files', 'Loading files…'],
+  // The linked-item tabs (#692): with fetch never answering they are honestly loading.
+  ['/tasks/abc123/pr/5', 'task-github-item', 'Loading pull request…'],
+  ['/tasks/abc123/issue/7', 'task-github-item', 'Loading issue…'],
   // The real compare view (Step R3 2.3): with fetch never answering it is honestly loading.
   ['/compare/grp-1', 'compare', 'Loading variants…'],
   // The real repo view (R5 Step 1.7): with fetch never answering it is honestly loading —
@@ -458,6 +463,12 @@ describe('legacy flat URLs redirect to the boot project', () => {
     expect(currentSearch()).toBe('?file=x')
     expect(currentHash()).toBe('#L2')
     expect(routeName()).toBe('task-changes')
+  })
+
+  it.each(['/tasks/run-2/pr/5', '/tasks/run-2/issue/7'])('keeps the linked-item tab of %s (#692)', (url) => {
+    renderAt(url)
+    expect(currentPathname()).toBe(`/p/${BOOT}${url}`)
+    expect(routeName()).toBe('task-github-item')
   })
 
   it('keeps an explicit legacy deep link even when another location was saved', () => {

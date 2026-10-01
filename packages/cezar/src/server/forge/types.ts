@@ -242,6 +242,9 @@ export interface ForgeDriver {
     query: string,
     opts?: { limit?: number },
   ): Promise<ForgeSearchData>;
+  /** One issue/PR by number, in any state (#692). `null` when the forge has no such item;
+   *  throws on transport failure. Optional like `searchItems`. */
+  viewItem?(kind: 'issue' | 'pr', number: number): Promise<ForgeItem | null>;
   /** Draft-PR creation for the review gate (spec 009). Never throws. */
   createPR(input: DraftPrInput): Promise<DraftPrOutcome>;
   /** The branch's open/merged PR, or null when none (or the forge is down). */

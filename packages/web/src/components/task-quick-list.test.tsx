@@ -9,6 +9,7 @@ import { workspaceQueryKeys } from '@/api/queries'
 import { setApiScope } from '@open-mercato/cezar-api-client'
 import type { RunRecord } from '@open-mercato/cezar-api-client'
 import { ListViewProvider } from '@/components/list-view'
+import { ReferenceStatusProvider } from '@/components/reference-status'
 import { SidebarSessionScope, TaskQuickList, TaskQuickListContainer } from '@/components/task-quick-list'
 
 const NOW = Date.parse('2026-07-14T12:00:00.000Z')
@@ -38,18 +39,33 @@ function LocationProbe() {
   return <output data-testid="location">{pathname}</output>
 }
 
-function renderList(props: Partial<Parameters<typeof TaskQuickList>[0]> = {}, route = '/') {
+function renderList(
+  props: Partial<Parameters<typeof TaskQuickList>[0]> = {},
+  route = '/',
+  repo?: { projectId: string; repoBase: string },
+) {
   const onViewChange = props.onViewChange ?? vi.fn()
+  const list = <TaskQuickList runs={[]} view="active" now={NOW} {...props} onViewChange={onViewChange} />
   const utils = render(
-    <MemoryRouter initialEntries={[route]}>
-      <LocationProbe />
-      <Routes>
-        <Route
-          path="*"
-          element={<TaskQuickList runs={[]} view="active" now={NOW} {...props} onViewChange={onViewChange} />}
-        />
-      </Routes>
-    </MemoryRouter>
+    <QueryClientProvider client={createQueryClient()}>
+      <MemoryRouter initialEntries={[route]}>
+        <LocationProbe />
+        <Routes>
+          <Route
+            path="*"
+            element={
+              repo ? (
+                <ReferenceStatusProvider projectId={repo.projectId} repoBase={repo.repoBase} requests={[]}>
+                  {list}
+                </ReferenceStatusProvider>
+              ) : (
+                list
+              )
+            }
+          />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>
   )
   return { ...utils, onViewChange }
 }
@@ -512,6 +528,44 @@ describe('TaskQuickList', () => {
         ],
       })
       expect(metadataText(row('aged'))).toBe('Finished with a PRPR #9 · 2h')
+    })
+  })
+
+  describe('item links (#692)', () => {
+    const REPO = { projectId: 'api', repoBase: 'https://github.com/o/r' }
+
+    it('opens the task item tab from an own-repo chip and keeps GitHub for a foreign one', () => {
+      renderList(
+        {
+          runs: [
+            run({ id: 'own', title: 'Own PR', status: 'review', pullRequestUrl: 'https://github.com/o/r/pull/7' }),
+            run({ id: 'foreign', title: 'Foreign PR', status: 'review', pullRequestUrl: 'https://github.com/x/y/pull/8' }),
+          ],
+        },
+        '/',
+        REPO,
+      )
+      const own = within(row('own') as HTMLElement).getByRole('link', { name: 'Open the pull request for Own PR' })
+      expect(own.getAttribute('href')).toBe('/p/api/tasks/own/pr/7')
+      expect(own.getAttribute('target')).toBeNull()
+      const foreign = within(row('foreign') as HTMLElement).getByRole('link', { name: 'Open the pull request for Foreign PR' })
+      expect(foreign.getAttribute('href')).toBe('https://github.com/x/y/pull/8')
+    })
+
+    it('points a group’s shared chip at the first member’s item tab', () => {
+      const shared = { pullRequestUrl: 'https://github.com/o/r/pull/7' }
+      renderList(
+        {
+          runs: [
+            run({ id: 'ga', groupId: 'g', variant: 'A', title: 'Group (A)', status: 'running', ...shared }),
+            run({ id: 'gb', groupId: 'g', variant: 'B', title: 'Group (B)', status: 'running', ...shared }),
+          ],
+        },
+        '/',
+        REPO,
+      )
+      const chip = document.querySelector('[data-slot="group-meta"] [data-slot="pr-chip"]')
+      expect(chip?.getAttribute('href')).toBe('/p/api/tasks/ga/pr/7')
     })
   })
 

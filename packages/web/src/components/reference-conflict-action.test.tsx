@@ -1,5 +1,6 @@
 import { QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ApiRun, RunStatus, StepState } from '@open-mercato/cezar-api-client'
@@ -7,7 +8,8 @@ import { createQueryClient } from '@/api/query-client'
 import { Toaster, resetToasts } from '@/components/ui/toaster'
 import { resolveConflictsPrompt } from '@/routes/task-thread/run-actions'
 
-import { ResolveConflictsButton } from './reference-conflict-action'
+import { ReferenceStatusProvider } from './reference-status'
+import { ResolveConflictsButton, TaskReferenceChip } from './reference-conflict-action'
 
 /**
  * The one button every surface hands a conflicting chip.
@@ -143,5 +145,41 @@ describe('ResolveConflictsButton', () => {
     fireEvent.click(button())
 
     await waitFor(() => expect(screen.getByText(/session closed/)).not.toBeNull())
+  })
+})
+
+describe('TaskReferenceChip item links (#692)', () => {
+  const OWN = { kind: 'PR' as const, number: 7, url: 'https://github.com/o/r/pull/7' }
+  const FOREIGN = { kind: 'PR' as const, number: 9, url: 'https://github.com/other/repo/pull/9' }
+
+  function renderChip(reference: typeof OWN, provider: { projectId: string; repoBase: string } | null) {
+    const chip = <TaskReferenceChip run={run('review')} reference={reference} />
+    return render(
+      <QueryClientProvider client={createQueryClient()}>
+        <MemoryRouter>
+          {provider ? (
+            <ReferenceStatusProvider projectId={provider.projectId} repoBase={provider.repoBase} requests={[]}>
+              {chip}
+            </ReferenceStatusProvider>
+          ) : (
+            chip
+          )}
+        </MemoryRouter>
+      </QueryClientProvider>,
+    ).container.querySelector('[data-slot="pr-chip"]') as HTMLElement
+  }
+
+  it('opens the task item tab for a reference in the surface project’s repo', () => {
+    const chip = renderChip(OWN, { projectId: 'api', repoBase: 'https://github.com/o/r' })
+    expect(chip.getAttribute('href')).toBe('/p/api/tasks/r1/pr/7')
+    expect(chip.getAttribute('target')).toBeNull()
+  })
+
+  it('keeps the GitHub link for a foreign repo and outside any provider', () => {
+    expect(renderChip(FOREIGN, { projectId: 'api', repoBase: 'https://github.com/o/r' }).getAttribute('href')).toBe(FOREIGN.url)
+    cleanup()
+    const bare = renderChip(OWN, null)
+    expect(bare.getAttribute('href')).toBe(OWN.url)
+    expect(bare.getAttribute('target')).toBe('_blank')
   })
 })

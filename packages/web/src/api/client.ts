@@ -52,6 +52,7 @@ import type {
   GithubSearchData,
   GithubRefStatusData,
   GithubCommentsData,
+  GithubItemResponse,
   GithubData,
   GithubProjectsData,
   GithubMergeMethod,
@@ -973,6 +974,27 @@ export async function getGithubComments(
       init(opts),
     ),
     `/github/comments/${kind}/${number}`,
+  )
+}
+
+/** One issue or PR by number, in any state (#692) — the task page's item tabs. Degrades to
+ *  `{ available: false, reason }` server-side; `item: null` means GitHub has no such number. */
+export async function getGithubItem(
+  kind: 'issue' | 'pr',
+  number: number,
+  params: { refresh?: boolean } = {},
+  opts?: ReadOptions,
+): Promise<GithubItemResponse> {
+  return unwrap(
+    await cez.api.v1.p[':projectId'].github.items[':kind'][':number'].$get(
+      {
+        param: { projectId: queryScope(), kind, number: String(number) },
+        // `refresh=1` busts the route's item cache, as it does for the comment thread above.
+        query: { refresh: params.refresh ? '1' : undefined },
+      },
+      init(opts),
+    ),
+    `/github/items/${kind}/${number}`,
   )
 }
 

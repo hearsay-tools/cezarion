@@ -10,11 +10,14 @@ import {
   formatCost,
   formatMem,
   githubRepoBase,
+  isOwnRepoReference,
   prNumber,
   scheduledResume,
   taskReference,
   taskPrUrl,
   taskIssueUrl,
+  taskItemPath,
+  taskItemTabs,
   taskReferences,
   usageCells,
   workflowLabel,
@@ -620,5 +623,42 @@ describe('compareGroups', () => {
 
   it('ignores ungrouped runs entirely', () => {
     expect(compareGroups([run(), run()], 'active')).toEqual([])
+  })
+})
+
+describe('taskItemTabs', () => {
+  const BASE = 'https://github.com/hearsay-tools/cezarion'
+
+  it('keeps own-repo references in taskReferences order, mapped to item tabs', () => {
+    const r = run({ pullRequestUrl: `${BASE}/pull/801`, issueNumber: 692 })
+    expect(taskItemTabs(r, BASE)).toEqual([
+      { kind: 'pr', number: 801 },
+      { kind: 'issue', number: 692 },
+    ])
+  })
+
+  it('excludes a foreign-repo PR, which also gets no item path', () => {
+    const foreign = 'https://github.com/other/repo/pull/7'
+    expect(taskItemTabs(run({ pullRequestUrl: foreign }), BASE)).toEqual([])
+    expect(taskItemPath('p1', 'r1', { kind: 'PR', number: 7, url: foreign }, BASE)).toBeUndefined()
+  })
+
+  it('keeps only number-only references when repoBase is unknown', () => {
+    const r = run({ pullRequestUrl: `${BASE}/pull/801`, issueNumber: 692 })
+    expect(taskItemTabs(r, undefined)).toEqual([{ kind: 'issue', number: 692 }])
+  })
+
+  it('matches owner/repo case-insensitively', () => {
+    const reference = { kind: 'PR' as const, number: 5, url: 'https://github.com/Hearsay-Tools/Cezarion/pull/5' }
+    expect(isOwnRepoReference(reference, BASE)).toBe(true)
+    expect(taskItemTabs(run({ pullRequestUrl: reference.url }), BASE)).toEqual([{ kind: 'pr', number: 5 }])
+  })
+
+  it('includes an uncorroborated CEZ:PR declaration', () => {
+    expect(taskItemTabs(run({ markerRefs: { pr: 9 } }), BASE)).toEqual([{ kind: 'pr', number: 9 }])
+  })
+
+  it('builds the task item path for an own-repo reference', () => {
+    expect(taskItemPath('p1', 'r1', { kind: 'Issue', number: 692 }, BASE)).toBe('/p/p1/tasks/r1/issue/692')
   })
 })

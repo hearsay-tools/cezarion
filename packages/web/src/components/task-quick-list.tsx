@@ -3,7 +3,7 @@ import { ScaleIcon } from 'lucide-react'
 import { useQueries } from '@tanstack/react-query'
 import * as React from 'react'
 import { queryScope } from '@open-mercato/cezar-api-client'
-import { useHealth, usePinRun, useProjectRuns, useProjects, useReferenceProjectId, useRuns } from '@/api/queries'
+import { useHealth, usePinRun, useProjectRuns, useProjectRepoBase, useProjects, useReferenceProjectId, useRuns } from '@/api/queries'
 import { Link, scopeTo, useNavigate, useProjectMatch } from '@/lib/project-router'
 import type { RunRecord } from '@open-mercato/cezar-api-client'
 import { DiffStatLabel } from '@/components/diff-stat'
@@ -851,6 +851,7 @@ export function TaskQuickListContainer({ showViewControls = true, projectId: exp
   // one batched request for the whole list, mounted here where the list is.
   const referenceProjectId = useReferenceProjectId()
   const projectId = explicitProjectId ?? referenceProjectId
+  const repoBase = useProjectRepoBase(projectId)
   const buckets = capBuckets(groupRuns(runs.data ?? [], view), 10)
   const referenceRequests = projectId === undefined ? [] : buckets.flatMap(bucket =>
     bucket.rows.flatMap(row => taskReferences(row.kind === 'run' ? row.run : row.members[0]!).map(
@@ -863,7 +864,7 @@ export function TaskQuickListContainer({ showViewControls = true, projectId: exp
   if (!runs.data) return null
 
   return (
-    <ReferenceStatusProvider projectId={projectId} requests={referenceRequests}>
+    <ReferenceStatusProvider projectId={projectId} repoBase={repoBase} requests={referenceRequests}>
       <TaskQuickList
         showViewControls={showViewControls}
         rowLimit={10}

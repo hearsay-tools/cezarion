@@ -9,6 +9,7 @@ import { queryKeys } from '@/api/queries'
 import { createQueryClient } from '@/api/query-client'
 import type { ProcessUsage, RunRecord } from '@open-mercato/cezar-api-client'
 import { ListViewProvider } from '@/components/list-view'
+import { ReferenceStatusProvider } from '@/components/reference-status'
 import { TaskQuickListContainer } from '@/components/task-quick-list'
 import { Toaster, resetToasts } from '@/components/ui/toaster'
 import { TasksOverview, TasksOverviewRoute } from '@/routes/tasks-overview'
@@ -40,18 +41,16 @@ function LocationProbe() {
   return <output data-testid="location">{pathname}</output>
 }
 
-function renderOverview(props: Partial<ComponentProps<typeof TasksOverview>> = {}, detailed = true) {
+function renderOverview(
+  props: Partial<ComponentProps<typeof TasksOverview>> = {},
+  detailed = true,
+  repo?: { projectId: string; repoBase: string },
+) {
   const onViewChange = props.onViewChange ?? vi.fn()
   const onArchiveFinished = props.onArchiveFinished ?? vi.fn()
   const onMarkAllRead = props.onMarkAllRead ?? vi.fn()
   const onRename = props.onRename ?? vi.fn()
-  const utils = render(
-    <MemoryRouter initialEntries={['/']}>
-      <LocationProbe />
-      <Routes>
-        <Route
-          path="/"
-          element={
+  const overview = (
             <TasksOverview
               runs={[]}
               view="active"
@@ -63,12 +62,29 @@ function renderOverview(props: Partial<ComponentProps<typeof TasksOverview>> = {
               onMarkAllRead={onMarkAllRead}
               onRename={onRename}
             />
-          }
-        />
-        {/* Row clicks land here; the probe above says where we ended up. */}
-        <Route path="*" element={null} />
-      </Routes>
-    </MemoryRouter>
+  )
+  const utils = render(
+    <QueryClientProvider client={createQueryClient()}>
+      <MemoryRouter initialEntries={['/']}>
+        <LocationProbe />
+        <Routes>
+          <Route
+            path="/"
+            element={
+              repo ? (
+                <ReferenceStatusProvider projectId={repo.projectId} repoBase={repo.repoBase} requests={[]}>
+                  {overview}
+                </ReferenceStatusProvider>
+              ) : (
+                overview
+              )
+            }
+          />
+          {/* Row clicks land here; the probe above says where we ended up. */}
+          <Route path="*" element={null} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>
   )
   if (detailed) { fireEvent.click(screen.getByRole("button", { name: "Columns" })); fireEvent.click(screen.getByRole("button", { name: "Resource columns" })); fireEvent.keyDown(document.activeElement!, { key: "Escape" }) }
   return { ...utils, onViewChange, onArchiveFinished, onMarkAllRead, onRename }
@@ -1053,6 +1069,23 @@ describe('TasksOverview — mobile cards and FAB', () => {
     expect(c.textContent).toContain('$0.31')
     expect(c.textContent).toContain('40m') // Started age, matching the desktop summary.
     expect(c.querySelector('[data-slot="pr-chip"]')?.getAttribute('href')).toBe('https://github.com/o/r/pull/402')
+  })
+
+  it('opens the item tab from an own-repo chip in the table and the card (#692)', () => {
+    renderOverview(
+      {
+        runs: [
+          run({ id: 'own', title: 'Own PR', status: 'review', pullRequestUrl: 'https://github.com/o/r/pull/402' }),
+          run({ id: 'foreign', title: 'Foreign PR', status: 'review', pullRequestUrl: 'https://github.com/x/y/pull/8' }),
+        ],
+      },
+      false,
+      { projectId: 'api', repoBase: 'https://github.com/o/r' },
+    )
+    const hrefOf = (container: Element | null) => container?.querySelector('[data-slot="pr-chip"]')?.getAttribute('href')
+    expect(hrefOf(tableRow('own'))).toBe('/p/api/tasks/own/pr/402')
+    expect(hrefOf(card('own'))).toBe('/p/api/tasks/own/pr/402')
+    expect(hrefOf(tableRow('foreign'))).toBe('https://github.com/x/y/pull/8')
   })
 
   it('removes token text and its separator from cards when metrics are hidden', () => {

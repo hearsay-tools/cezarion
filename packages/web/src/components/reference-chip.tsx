@@ -2,6 +2,7 @@ import { CircleIcon, CircleCheckIcon, CircleDotIcon, CircleSlashIcon, CircleXIco
 import type { ComponentType } from 'react'
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import type * as React from 'react'
+import { Link as RouterLink } from 'react-router'
 import type { ReferenceStatus } from '@open-mercato/cezar-api-client'
 
 import { useReferenceStatus } from '@/components/reference-status'
@@ -96,6 +97,7 @@ export function ReferenceChip({
   conflicting: explicitConflicting,
   conflictAction,
   projectId,
+  to,
   className,
   compact = false,
   plain = false,
@@ -117,6 +119,9 @@ export function ReferenceChip({
   /** Only the global Tasks page needs this: its rows come from different projects, and two of
    *  them may each have a #42. Elsewhere the provider's own project is right. */
   projectId?: string
+  /** An in-app destination (#692): the chip becomes a router link opening in the same tab instead
+   *  of an external GitHub link. Set only for a reference in the project's own repository. */
+  to?: string
   className?: string
   /**
    * The narrow sidebar row (#788, option C): the number ALONE — `#402` — with no `Issue ` word
@@ -214,7 +219,7 @@ export function ReferenceChip({
 
   // href protocol guard (#431): a transcript-scraped non-http URL degrades to inert text.
   const chip =
-    !url || !isHttpUrl(url) ? (
+    !to && (!url || !isHttpUrl(url)) ? (
       <span
         data-slot={kind === 'PR' ? 'pr-chip' : 'issue-chip'}
         // The STATUS stays here even when the conflict has taken the paint: it is still what the
@@ -228,13 +233,12 @@ export function ReferenceChip({
         {body}
       </span>
     ) : (
-      <a
+      <ChipAnchor
+        to={to}
+        url={url}
         data-slot={kind === 'PR' ? 'pr-chip' : 'issue-chip'}
         data-status={status}
         {...(conflicting ? { 'data-conflicting': 'true' } : {})}
-        href={url}
-        target="_blank"
-        rel="noopener noreferrer"
         // The native `title` is the URL only while there is no richer panel to show. Once the
         // hover card below owns the hover it carries the URL itself, and two tooltips on one
         // element is a browser popup fighting a designed one.
@@ -243,7 +247,7 @@ export function ReferenceChip({
         className={plain ? chipClass : cn(chipClass, TONE_HOVER[presentation?.tone ?? 'accent'])}
       >
         {body}
-      </a>
+      </ChipAnchor>
     )
 
   if (!tooltip) return chip
@@ -280,6 +284,22 @@ export function ReferenceChip({
     >
       {panel}
     </ReferenceChipCard>
+  )
+}
+
+/** The chip's link: a router link for an in-app destination, otherwise the external GitHub URL in a
+ *  new tab. Everything else (slot, status, aria) is the caller's, identical for both. */
+function ChipAnchor({
+  to,
+  url,
+  children,
+  ...props
+}: { to?: string; url?: string } & Omit<React.ComponentProps<'a'>, 'href'>) {
+  if (to) return <RouterLink to={to} {...props}>{children}</RouterLink>
+  return (
+    <a href={url} target="_blank" rel="noopener noreferrer" {...props}>
+      {children}
+    </a>
   )
 }
 
@@ -499,6 +519,46 @@ function statusTooltip(
  *  character, so an acronym a future label opens with keeps its case. */
 function lowerFirst(text: string): string {
   return text.charAt(0).toLowerCase() + text.slice(1)
+}
+
+/**
+ * A reference's status as a bare glyph, coloured like the sidebar's plain chip — for a surface
+ * that names the reference itself and wants only the state beside it (the task page's item tabs,
+ * #692). Reads the same provider the chips do, so it adds no request; outside one, or with nothing
+ * known, it renders nothing. A conflict takes the glyph over, as it takes the chip over.
+ */
+export function ReferenceStatusGlyph({
+  kind,
+  number,
+  className,
+}: {
+  kind: 'PR' | 'Issue'
+  number: number
+  className?: string
+}) {
+  const entry = useReferenceStatus(kind, number)
+  const statusPresentation = referenceStatusPresentation(entry.status)
+  const conflicting = kind === 'PR' && entry.conflicting === true
+  const presentation = conflicting ? REFERENCE_CONFLICT : statusPresentation
+  if (!presentation) return null
+  const glyphClass = cn('size-2.5', PLAIN_GLYPH_CLASS[presentation.tone])
+  return (
+    <span
+      data-slot="reference-status-glyph"
+      data-status={entry.status}
+      {...(conflicting ? { 'data-conflicting': 'true' } : {})}
+      // Hidden: the surface names the reference, and the spec pins that name ("Pull request
+      // #801"). A `title` here would leak into it through accname's tooltip fallback.
+      aria-hidden="true"
+      className={cn('inline-flex items-center', className)}
+    >
+      {conflicting ? (
+        <TriangleAlertIcon className={cn('shrink-0', glyphClass)} aria-hidden="true" />
+      ) : (
+        <StatusGlyph status={entry.status} className={glyphClass} />
+      )}
+    </span>
+  )
 }
 
 /** The status channel that is not color: an icon, or — for checks still running — the pulsing dot

@@ -334,6 +334,56 @@ export function taskReference(run: TaskReferenceInput): TaskReference | undefine
   return taskReferences(run)[0]
 }
 
+/** One item tab on a task page: an own-repo issue or PR the task references (#692). */
+export type TaskItemTab = { kind: 'issue' | 'pr'; number: number }
+
+/**
+ * Whether a reference names the PROJECT's own repository, so the cockpit can show it in place
+ * (#692). A number-only reference is own by construction — `taskReferences` synthesizes links from
+ * `repoBase` alone. A URL is own when its host and `owner/repo` equal `repoBase`'s, compared
+ * case-insensitively; with no `repoBase`, no URL can be proven own.
+ */
+export function isOwnRepoReference(reference: TaskReference, repoBase: string | undefined): boolean {
+  if (!reference.url) return true
+  if (!repoBase) return false
+  const own = repoIdentity(repoBase)
+  return own !== undefined && repoIdentity(reference.url) === own
+}
+
+/** `host/owner/repo`, lower-cased, of a forge URL; undefined when it does not parse. */
+function repoIdentity(url: string): string | undefined {
+  try {
+    const parsed = new URL(url)
+    const [owner, repo] = parsed.pathname.split('/').filter(Boolean)
+    return owner && repo ? `${parsed.host}/${owner}/${repo}`.toLowerCase() : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** The task page's item tabs: every own-repo reference, in `taskReferences` order (#692). */
+export function taskItemTabs(run: TaskReferenceInput, repoBase: string | undefined): TaskItemTab[] {
+  const tabs: TaskItemTab[] = []
+  for (const reference of taskReferences(run, repoBase)) {
+    if (!isOwnRepoReference(reference, repoBase)) continue
+    const kind = reference.kind === 'PR' ? 'pr' : 'issue'
+    if (tabs.some((tab) => tab.kind === kind && tab.number === reference.number)) continue
+    tabs.push({ kind, number: reference.number })
+  }
+  return tabs
+}
+
+/** The task item tab a reference opens; undefined for a reference outside the project's repo. */
+export function taskItemPath(
+  projectId: string,
+  runId: string,
+  reference: TaskReference,
+  repoBase: string | undefined,
+): string | undefined {
+  if (!isOwnRepoReference(reference, repoBase)) return undefined
+  return `/p/${projectId}/tasks/${runId}/${reference.kind === 'PR' ? 'pr' : 'issue'}/${reference.number}`
+}
+
 /** The PR chip's `#402`. Null when the URL's last segment is not a number — a forge we don't
  *  recognize still gets a working chip, just without a number we'd be inventing. */
 export function prNumber(url: string): string | null {

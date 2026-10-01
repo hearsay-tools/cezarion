@@ -3,8 +3,10 @@ import type { ApiRun } from '@open-mercato/cezar-api-client'
 
 import { useProjectRun } from '@/api/queries'
 import { ReferenceChip, useCloseReferenceCard } from '@/components/reference-chip'
+import { useReferenceScope } from '@/components/reference-status'
 import { Button } from '@/components/ui/button'
 import { toast } from '@/components/ui/toaster'
+import { taskItemPath } from '@/lib/tasks-table'
 import { runTitle } from '@/lib/task-groups'
 import { useAskAnswer } from '@/routes/task-thread/ask-answer'
 import { resolveConflictsPrompt } from '@/routes/task-thread/run-actions'
@@ -146,10 +148,18 @@ export function TaskReferenceChip({
   /** Plain text only — the sidebar row on a device that cannot hover (#617 01b). */
   inert?: boolean
 }) {
+  // The surface's own project and repository (#692): an own-repo reference opens the task's item
+  // tab. Outside a provider both are unknown and the chip links to GitHub as it always has.
+  const { projectId, repoBase } = useReferenceScope()
+  const to =
+    projectId !== undefined && reference.number !== undefined
+      ? taskItemPath(projectId, run.id, { kind: reference.kind, number: reference.number, url: reference.url }, repoBase)
+      : undefined
   return (
     <ReferenceChip
       reference={reference}
       taskTitle={runTitle(run)}
+      to={to}
       conflictAction={<ResolveConflictsButton run={run} prNumber={reference.number} />}
       className={className}
       compact={compact}

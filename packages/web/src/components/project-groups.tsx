@@ -368,7 +368,7 @@ function ProjectGroup({
 
           {/* This group's own project, explicitly: a collapsed sidebar can show six projects at
               once, and #42 means a different pull request in each of them. */}
-          <ReferenceStatusProvider projectId={project.id} requests={referenceRequests}>
+          <ReferenceStatusProvider projectId={project.id} repoBase={project.repoUrl} requests={referenceRequests}>
             <QuickListBuckets
               buckets={buckets}
               currentRunId={active ? sidebarActiveRunId(currentRunId, runs.data ?? []) : null}

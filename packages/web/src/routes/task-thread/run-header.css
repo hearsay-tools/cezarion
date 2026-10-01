@@ -27,6 +27,8 @@
 /* Confirmed 193-frame source: session tabs in 2A–2D and 3A–3D. */
 [data-slot='run-tabs'] { gap: calc(var(--spacing) * 6); }
 [data-slot='run-tabs'] > a { height: 44px; padding-inline: 4px; font-size: 12px; font-weight: 400; }
+/* The item tabs' "+N" overflow trigger (#692) is a button, not a link, but sits in the row as a tab. */
+[data-slot='run-tabs'] > [data-slot='run-tabs-more'] { height: 44px; padding-inline: 4px; font-size: 12px; font-weight: 400; }
 [data-slot='run-tabs'] > a[aria-current='page'] { color: var(--accent-text); border-bottom-color: var(--accent-strong); }
 @media (max-width: 767px) {
   [data-slot='run-tabs'] { gap: calc(var(--spacing) * 5); }
@@ -40,6 +42,7 @@
 @media (max-width: 767px) {
   [data-slot='run-tabs'][data-phone-bar] { margin-top: 0; }
   [data-slot='run-tabs'][data-phone-bar] > a { color: var(--soft-foreground); font-weight: 500; }
+  [data-slot='run-tabs'][data-phone-bar] > [data-slot='run-tabs-more'] { color: var(--soft-foreground); font-weight: 500; }
   [data-slot='run-tabs'][data-phone-bar] > a[aria-current='page'] { color: var(--foreground); font-weight: 600; border-bottom-color: var(--foreground); border-bottom-width: 2px; }
   [data-slot='run-tabs'][data-phone-bar] > a [data-slot='tab-count'] { font-size: 11.5px; color: var(--soft-foreground); }
 }

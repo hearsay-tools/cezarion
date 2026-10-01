@@ -8,7 +8,7 @@ import { createQueryClient } from '@/api/query-client'
 import type { ApiRun, RunStatus, StepState } from '@open-mercato/cezar-api-client'
 import { Toaster, resetToasts } from '@/components/ui/toaster'
 
-import { RunHeader } from './run-header'
+import { RunHeader, visibleItemTabs, type RunTab } from './run-header'
 import { resolveConflictsPrompt } from './run-actions'
 
 afterEach(() => {
@@ -87,7 +87,7 @@ function stubFetch(overrides: Record<string, () => Response> = {}): SentRequest[
 function renderHeader(
   record: ApiRun,
   onMarkedUnread?: () => void,
-  tab: 'session' | 'changes' | 'commits' | 'files' = 'session',
+  tab: RunTab = 'session',
 ) {
   return render(
     <QueryClientProvider client={createQueryClient()}>
@@ -1258,8 +1258,38 @@ describe('meta line, tabs, pill and resume hint', () => {
     const meta = document.querySelector('[data-slot="run-meta"]') as HTMLElement
     await waitFor(() => {
       const chip = meta.querySelector('[data-slot="pr-chip"]')
-      expect(chip?.getAttribute('href')).toBe('https://github.com/open-mercato/cezar/pull/901')
+      expect(chip?.getAttribute('href')).toBe('/p/boot-id/tasks/r1/pr/901')
     })
+  })
+
+  it('opens the item tab from an own-repo pill and keeps GitHub for a foreign one (#692)', async () => {
+    stubFetch({
+      '/api/v1/health': () => jsonResponse({ bootProject: 'boot-id', repo: {} }),
+      '/api/v1/projects': () =>
+        jsonResponse({
+          projects: [
+            { id: 'boot-id', name: 'cezar', root: '/home/me/cezar', repoUrl: 'https://github.com/open-mercato/cezar' },
+          ],
+        }),
+    })
+    renderHeader(
+      run('done', {
+        branch: 'cez/r1',
+        pullRequestUrl: 'https://github.com/open-mercato/cezar/pull/801',
+        referencedPullRequestUrl: 'https://github.com/someone/else/pull/5',
+        referencedIssueUrl: 'https://github.com/open-mercato/cezar/issues/692',
+      }),
+    )
+    const meta = document.querySelector('[data-slot="run-meta"]') as HTMLElement
+    await waitFor(() => {
+      const hrefs = [...meta.querySelectorAll('[data-slot="pr-chip"], [data-slot="issue-chip"]')].map((chip) => chip.getAttribute('href'))
+      expect(hrefs).toEqual([
+        '/p/boot-id/tasks/r1/pr/801',
+        'https://github.com/someone/else/pull/5',
+        '/p/boot-id/tasks/r1/issue/692',
+      ])
+    })
+    expect(meta.querySelector('[data-slot="pr-chip"]')?.getAttribute('target')).toBeNull()
   })
 
   // A PR URL whose last segment is not a number never becomes a `taskReferences` entry, so it is
@@ -1824,5 +1854,95 @@ describe('the promoted actions, per tab (#281)', () => {
       delegation: { role: 'root', permissions: [], receipts: [] },
     }), 'session')
     expect(actionBar().queryByRole('menuitem', { name: 'Finish' })).toBeNull()
+  })
+})
+
+describe('linked issue and PR tabs (#692)', () => {
+  const t = (kind: 'issue' | 'pr', number: number) => ({ kind, number })
+  const five = [t('pr', 1), t('pr', 2), t('pr', 3), t('pr', 4), t('issue', 5)]
+  const tabRow = () => document.querySelector('[data-slot="run-tabs"]') as HTMLElement
+  const tabNames = () => within(tabRow()).getAllByRole('link').map((link) => link.getAttribute('aria-label') ?? link.textContent)
+  const fiveRefs = (): Partial<ApiRun> => ({
+    markerRefs: { pr: 1 },
+    pullRequestUrl: 'https://github.com/acme/demo/pull/2',
+    referencedPullRequestUrl: 'https://github.com/acme/demo/pull/3',
+    prNumber: 4,
+    issueNumber: 5,
+  })
+  const withRepo = () => stubFetch({ '/api/v1/health': () => jsonResponse({ repo: { remote: 'git@github.com:acme/demo.git' } }) })
+
+  it('visibleItemTabs keeps the first three inline and the rest in the overflow', () => {
+    expect(visibleItemTabs(five, null)).toEqual({ inline: five.slice(0, 3), overflow: five.slice(3) })
+  })
+
+  it('visibleItemTabs moves an active overflow tab into the third inline slot', () => {
+    expect(visibleItemTabs(five, t('issue', 5))).toEqual({
+      inline: [five[0], five[1], five[4]],
+      overflow: [five[2], five[3]],
+    })
+    // An active tab already inline changes nothing.
+    expect(visibleItemTabs(five, t('pr', 2))).toEqual({ inline: five.slice(0, 3), overflow: five.slice(3) })
+  })
+
+  it('adds one tab per linked PR and issue after Files', () => {
+    stubFetch()
+    renderHeader(run('done', { prNumber: 801, issueNumber: 692 }))
+    const tabs = within(tabRow())
+    expect(tabs.getAllByRole('link').map((link) => link.textContent?.replace(/\s+/g, ' ').trim())).toEqual([
+      'Session', 'Changes', 'Commits', 'Files', 'Pull request #801', 'Issue #692',
+    ])
+    expect(tabs.getByRole('link', { name: 'Pull request #801' }).getAttribute('href')).toBe('/tasks/r1/pr/801')
+    expect(tabs.getByRole('link', { name: 'Issue #692' }).getAttribute('href')).toBe('/tasks/r1/issue/692')
+    expect(tabs.getByRole('link', { name: 'Pull request #801' }).getAttribute('aria-current')).toBeNull()
+  })
+
+  it('marks the item tab active and Session inactive', () => {
+    stubFetch()
+    renderHeader(run('done', { prNumber: 801, issueNumber: 692 }), undefined, { kind: 'pr', number: 801 })
+    const tabs = within(tabRow())
+    expect(tabs.getByRole('link', { name: 'Pull request #801' }).getAttribute('aria-current')).toBe('page')
+    expect(tabs.getByRole('link', { name: 'Issue #692' }).getAttribute('aria-current')).toBeNull()
+    expect(tabs.getByRole('link', { name: 'Session' }).getAttribute('aria-current')).toBeNull()
+  })
+
+  it('puts tabs past the third into a +N menu that links to them', async () => {
+    withRepo()
+    renderHeader(run('done', fiveRefs()))
+    const tabs = within(tabRow())
+    await waitFor(() => expect(tabs.getByRole('link', { name: 'Pull request #3' })).toBeTruthy())
+    expect(tabs.queryByRole('link', { name: 'Pull request #4' })).toBeNull()
+    const more = tabs.getByRole('button', { name: '2 more linked items' })
+    expect(more.textContent).toBe('+2')
+    fireEvent.pointerDown(more)
+    const menu = await screen.findByRole('menu')
+    expect(within(menu).getByRole('menuitem', { name: 'Pull request #4' }).getAttribute('href')).toBe('/tasks/r1/pr/4')
+    expect(within(menu).getByRole('menuitem', { name: 'Issue #5' }).getAttribute('href')).toBe('/tasks/r1/issue/5')
+  })
+
+  it('shows the active overflow tab inline', async () => {
+    withRepo()
+    renderHeader(run('done', fiveRefs()), undefined, { kind: 'issue', number: 5 })
+    const tabs = within(tabRow())
+    await waitFor(() => expect(tabs.getByRole('link', { name: 'Issue #5' }).getAttribute('aria-current')).toBe('page'))
+    expect(tabs.queryByRole('link', { name: 'Pull request #3' })).toBeNull()
+  })
+
+  it('a task with no own-repo references keeps exactly the four tabs', () => {
+    stubFetch()
+    // Without a repo base, a URL reference cannot be proven own, so it gets no tab.
+    renderHeader(run('done', { pullRequestUrl: 'https://github.com/other/repo/pull/9' }))
+    expect(tabNames()).toEqual(['Session', 'Changes', 'Commits', 'Files'])
+    expect(within(tabRow()).queryByRole('button')).toBeNull()
+  })
+
+  it('paints the reference status glyph on the item tab', async () => {
+    stubFetch({
+      '/api/v1/health': () => jsonResponse({ bootProject: 'acme' }),
+      '/api/v1/p/acme/github/ref-status?prs=801': () =>
+        jsonResponse({ available: true, prs: { 801: 'merged' }, issues: {}, recheckAfterMs: null }),
+    })
+    renderHeader(run('done', { prNumber: 801 }))
+    const tab = within(tabRow()).getByRole('link', { name: 'Pull request #801' })
+    await waitFor(() => expect(tab.querySelector('[data-slot="reference-status-glyph"]')?.getAttribute('data-status')).toBe('merged'))
   })
 })
