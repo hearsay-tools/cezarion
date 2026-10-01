@@ -285,8 +285,13 @@ async function retainingRef(
   return null;
 }
 
-function pickPr(prs: ForgePr[]): ForgePr | null {
-  const rank = (pr: ForgePr) => (pr.state === 'merged' ? 3 : pr.state === 'open' || pr.state === 'draft' ? 2 : 1);
+/** The PR a row SHOWS: one at the branch's current tip first, then an open one, then the newest.
+ *  A reused branch keeps its old merged PR in the list; showing that over the open PR carrying the
+ *  current work would file the row under "No pull request" and offer a duplicate. Display only —
+ *  the `merged` verdict reads every PR on its own terms. */
+function pickPr(prs: ForgePr[], tip: string): ForgePr | null {
+  const rank = (pr: ForgePr) =>
+    (pr.headRefOid === tip ? 4 : 0) + (pr.state === 'open' || pr.state === 'draft' ? 2 : pr.state === 'merged' ? 1 : 0);
   return [...prs].sort((a, b) => rank(b) - rank(a) || b.number - a.number)[0] ?? null;
 }
 
@@ -377,7 +382,7 @@ export async function classifyBranches(input: ClassifyInput): Promise<Classifica
       const byHead = new Map<string, ForgePr[]>();
       for (const pr of list.prs) byHead.set(pr.headRefName, [...(byHead.get(pr.headRefName) ?? []), pr]);
       for (const d of needList) {
-        const pr = pickPr(byHead.get(d.head.name) ?? []);
+        const pr = pickPr(byHead.get(d.head.name) ?? [], d.head.sha);
         if (pr) prByBranch.set(d.head.name, { number: pr.number, url: pr.url, state: pr.state });
       }
       // A merged PR lands the tip only when it targeted this base, merged this very commit, AND its

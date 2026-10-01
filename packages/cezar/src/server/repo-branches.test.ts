@@ -217,6 +217,19 @@ describe('the branch classifier (issue 08 §A)', () => {
     expect((await classesOf({ runs, forge: noMerge })).cls['cez/aaaaaaaa']).toBe('not-landed');
   });
 
+  it('shows the open PR at the current tip on a reused branch, not its old merged one', async () => {
+    const oldTip = await taskBranch(root, 'cez/aaaaaaaa', 1);
+    await git(root, 'checkout', '-q', 'cez/aaaaaaaa');
+    const tip = await commit(root, 'more.txt', 'more work after the merge');
+    await git(root, 'checkout', '-q', 'main');
+    const squash = await commit(root, 'squash.txt', 'Squash cez/aaaaaaaa (#1)');
+    const open: ForgePr = { ...mergedPr(2, 'cez/aaaaaaaa', tip, squash), mergeCommitOid: null, state: 'open' };
+    const { forge } = fakeForge({ prs: [mergedPr(1, 'cez/aaaaaaaa', oldTip, squash), open] });
+    const { payload, cls } = await classesOf({ runs: [runRecord('aaaaaaaa-1', 'done')], forge });
+    expect(cls['cez/aaaaaaaa']).toBe('not-landed');
+    expect(payload.branches.find((b) => b.name === 'cez/aaaaaaaa')?.pr).toMatchObject({ number: 2, state: 'open' });
+  });
+
   it('never classifies by prNumber — the PR a task is ABOUT is display-only', async () => {
     await taskBranch(root, 'cez/aaaaaaaa', 1);
     const { forge } = fakeForge({ states: { 12: 'merged' } });
