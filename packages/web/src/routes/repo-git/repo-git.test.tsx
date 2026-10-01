@@ -728,5 +728,18 @@ describe('the Git view Not landed section', () => {
     stubFetch({ 'GET /api/v1/repo/branches': () => jsonResponse({ ...BRANCHES, branches: [], counts: { notLanded: 0, cleanup: 0 } }) })
     renderAt('/git/not-landed')
     await waitFor(() => expect(screen.getByRole('heading', { level: 2, name: 'Everything landed' })).toBeTruthy())
+    expect(document.querySelector('[data-slot="not-landed-retained"]')).toBeNull()
+  })
+
+  it('never says everything landed while a finished task with unlanded commits keeps its worktree', async () => {
+    // Its branch is checked out in the retained worktree, so the classifier calls it active.
+    const retained = branch({ name: 'cez/7a7a7a7a', class: 'active', runId: 'run-7a', runStatus: 'done', ahead: 1 })
+    const live = branch({ name: 'cez/8b8b8b8b', class: 'active', runId: 'run-8b', runStatus: 'running', ahead: 2 })
+    stubFetch({ 'GET /api/v1/repo/branches': () => jsonResponse({ ...BRANCHES, branches: [retained, live], counts: { notLanded: 0, cleanup: 0 } }) })
+    renderAt('/git/not-landed')
+    await waitFor(() => expect(screen.getByRole('heading', { level: 2, name: 'Nothing else waiting to land' })).toBeTruthy())
+    expect(screen.queryByRole('heading', { level: 2, name: 'Everything landed' })).toBeNull()
+    expect(document.querySelector('[data-slot="not-landed-retained"]')?.textContent).toContain('1 finished task still has its worktree')
+    expect(document.querySelector('[data-slot="not-landed-retained"] a')?.getAttribute('href')).toBe('/git/cleanup')
   })
 })

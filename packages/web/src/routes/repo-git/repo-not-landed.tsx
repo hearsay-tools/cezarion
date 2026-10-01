@@ -23,6 +23,8 @@ import { toast } from '@/components/ui/toaster'
 import { shortAge } from '@/lib/format'
 import { Link } from '@/lib/project-router'
 import { cn } from '@/lib/utils'
+
+import { GIT_SECTION_PATH } from './git-sections'
 import { queryScope } from '@open-mercato/cezar-api-client'
 
 /** The note the whole Git view shows when the forge could not answer (issue 08 §A). */
@@ -47,6 +49,16 @@ export function notLandedGroups(branches: readonly RepoBranchEntry[]): Group[] {
     { key: 'deleted', title: 'Task deleted', note: 'this branch is the only copy of the work', rows: deleted },
   ]
   return groups.filter((group) => group.rows.length > 0)
+}
+
+/** Finished tasks this list cannot show yet: their worktree is still on disk, so the branch is
+ *  checked out and classed `active` (issue 08 §A), whatever its commits. Counted so the screen
+ *  never says "everything landed" over work it is hiding; reclaiming the worktree lists them. */
+export function retainedFinishedTasks(branches: readonly RepoBranchEntry[]): number {
+  return branches.filter((entry) =>
+    entry.class === 'active' && entry.runId !== null && entry.ahead > 0 &&
+    (entry.runStatus === 'done' || entry.runStatus === 'failed' || entry.runStatus === 'cancelled'),
+  ).length
 }
 
 const STATUS_TONE: Partial<Record<NonNullable<RepoBranchEntry['runStatus']>, StatusDotTone>> = {
@@ -82,6 +94,16 @@ export function RepoNotLandedSection() {
     )
   }
   const groups = notLandedGroups(branches.data.branches)
+  const retained = retainedFinishedTasks(branches.data.branches)
+  const retainedNote = retained > 0 ? (
+    <p data-slot="not-landed-retained" className="flex items-start gap-[6px] px-[10px] pt-[6px] text-[11.5px] leading-[17px] text-soft-foreground">
+      <InfoIcon aria-hidden="true" className="mt-[2.5px] size-[12px] shrink-0" />
+      <span>
+        {retained} finished task{retained === 1 ? ' still has its' : 's still have their'} worktree and commits not on the base, so {retained === 1 ? 'it is' : 'they are'} not listed here.
+        {' '}They show here once the worktree is reclaimed in <Link to={GIT_SECTION_PATH.cleanup} className="underline underline-offset-2 hover:text-foreground">Cleanup</Link>.
+      </span>
+    </p>
+  ) : null
   const finishedAt = new Map((runs.data ?? []).map((run) => [run.id, run.finishedAt]))
   const requests = groups.flatMap((group) => group.rows).flatMap((entry) =>
     entry.pr ? [{ projectId: scope, kind: 'PR' as const, number: entry.pr.number }] : [],
@@ -91,13 +113,16 @@ export function RepoNotLandedSection() {
     <ReferenceStatusProvider projectId={scope} requests={requests}>
       <div data-slot="repo-not-landed" className="flex flex-col gap-[2px] px-[8px] pt-[12px] pb-[calc(90px+env(safe-area-inset-bottom))] md:px-[20px] md:pb-[20px]">
         {!branches.data.prStateKnown ? <ForgeNote /> : null}
+        {retainedNote}
         {groups.length === 0 ? (
           <CenteredState
             icon={<GitPullRequestArrowIcon size={16} />}
             tone="neutral"
             heading="h2"
-            title="Everything landed"
-            subtitle="Every finished task's commits are on the base branch, or it made none."
+            title={retained > 0 ? 'Nothing else waiting to land' : 'Everything landed'}
+            subtitle={retained > 0
+              ? 'Every other finished task\'s commits are on the base branch, or it made none.'
+              : 'Every finished task\'s commits are on the base branch, or it made none.'}
           />
         ) : (
           <>
