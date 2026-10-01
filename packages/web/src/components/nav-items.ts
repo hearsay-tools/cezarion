@@ -129,6 +129,18 @@ export function isPushedRoute(pathname: string): boolean {
   return /^\/(?:tasks|compare)\/[^/]+(?:\/|$)/.test(stripProjectPrefix(pathname))
 }
 
+/**
+ * A Git section the phone's Git screen pushed (issue 08 §C mobile): every `/git/…` section, and
+ * Recently on main as `/git?view=repo`. The bare `/git` is the Git screen itself, a list, so it
+ * keeps the tab bar. Only the TAB BAR follows this: the top bar's pushed variant (back, title, run
+ * actions) stays the task screen's, via `isPushedRoute`.
+ */
+export function isPushedGitScreen(pathname: string, search: string): boolean {
+  const flat = stripProjectPrefix(pathname)
+  if (/^\/git\/?$/.test(flat)) return new URLSearchParams(search).get('view') === 'repo'
+  return /^\/git\//.test(flat)
+}
+
 /** The tab bar's fixed slots: the views that stay one tap away. Everything else lives in More. */
 export const TAB_BAR_PATHS: readonly string[] = ['/', '/git', '/github']
 

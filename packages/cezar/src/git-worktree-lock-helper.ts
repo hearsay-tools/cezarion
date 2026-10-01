@@ -93,14 +93,17 @@ async function keepWorktreeLock(): Promise<void> {
       if (Date.now() >= deadline) throw new Error('timed out waiting for worktree mutation lock');
       await wait();
     }
-    process.on('message', (message: { kind: string; id: number; cwd: string; args: string[]; timeout?: number }) => {
+    process.on('message', (message: { kind: string; id: number; cwd: string; args: string[]; timeout?: number; input?: string }) => {
       if (stopping || message.kind !== 'git') return;
       commands = commands.then(async () => {
         await write(ticket, true);
         const result = await new Promise<{ ok: boolean; stdout: string; stderr: string }>(resolve => {
-          execFile('git', message.args, { cwd: message.cwd, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, timeout: message.timeout }, (error, stdout, stderr) => {
+          const child = execFile('git', message.args, { cwd: message.cwd, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, timeout: message.timeout }, (error, stdout, stderr) => {
             resolve({ ok: !error, stdout: stdout ?? '', stderr: stderr || error?.message || '' });
           });
+          // Without input git sees an empty stdin, exactly as before.
+          child.stdin?.on('error', () => undefined);
+          child.stdin?.end(message.input ?? '');
         });
         await write(ticket);
         send({ kind: 'result', id: message.id, result });

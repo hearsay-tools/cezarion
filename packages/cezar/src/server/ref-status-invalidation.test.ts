@@ -55,7 +55,7 @@ describe('a reference cezar changes itself is forgotten, not waited out', () => 
     app = createApp({
       repoRoot,
       store,
-      manager: { isActive: () => false } as unknown as RunManager,
+      manager: { isActive: () => false, claimForPublish: () => () => undefined } as unknown as RunManager,
       version: '0.0.0-test',
     });
   });

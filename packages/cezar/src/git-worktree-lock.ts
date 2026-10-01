@@ -4,7 +4,8 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export interface WorktreeGitResult { ok: boolean; stdout: string; stderr: string }
-export type WorktreeGit = (cwd: string, args: string[], timeout?: number) => Promise<WorktreeGitResult>;
+/** `input` is written to git's stdin — what `update-ref --stdin` needs for a multi-ref transaction. */
+export type WorktreeGit = (cwd: string, args: string[], timeout?: number, input?: string) => Promise<WorktreeGitResult>;
 
 /**
  * Serialize worktree mutations by canonical Git common directory, across processes.
@@ -61,11 +62,11 @@ export async function withWorktreeMutation<T>(repoRoot: string, operation: (git:
     keeper.once('error', () => { if (keeper.pid === undefined) resolve(); });
   });
   let sequence = 0;
-  const git: WorktreeGit = (cwd, args, timeout) => new Promise((resolve, reject) => {
+  const git: WorktreeGit = (cwd, args, timeout, input) => new Promise((resolve, reject) => {
     if (failure) { reject(failure); return; }
     const id = ++sequence;
     pending.set(id, { resolve, reject });
-    keeper.send({ kind: 'git', id, cwd, args, timeout }, error => { if (error) fail(error); });
+    keeper.send({ kind: 'git', id, cwd, args, timeout, ...(input !== undefined ? { input } : {}) }, error => { if (error) fail(error); });
   });
   try {
     await ready;
