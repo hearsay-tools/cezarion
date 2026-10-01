@@ -455,6 +455,9 @@ it.each([{ width: 1440, height: 900 }, { width: 360, height: 640 }].flatMap(view
   browser.evaluate('window.__mark = performance.now()')
   browser.waitForFunction('performance.now() - window.__mark > 400')
   // The delayed /github/projects request must have reached the interceptor before it can be released.
+  // Provenance: with registration of window.__finishProjects delayed 1500ms (setTimeout in the interceptor) and this guard removed,
+  // `-t "while project boards refresh then settle as .ready. at 1440 / .light."` fails with `TypeError: window.__finishProjects is not a function`
+  // (bundle .ai/qa/failures/github-layout/, CEZ_AUTOMATIONS=0); with the guard and the same delay it passes.
   browser.waitForFunction("typeof window.__finishProjects === 'function'")
   browser.evaluate('window.__finishProjects()')
   browser.waitForFunction(outcome === 'ready'
