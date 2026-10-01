@@ -352,13 +352,22 @@ async function removeWorktreeLocked(
     );
     if (!registered) return;
   }
-  // Reclaim keeps the branch and calls the work recoverable, which holds only for what is
-  // COMMITTED: staged, unstaged and untracked files exist in this directory alone. Read under the
-  // lock, so nothing this process serializes can dirty it between the check and the removal; an
-  // unreadable status keeps the directory too. Ignored files (build output) do not count.
+  // Reclaim keeps the branch and calls the work recoverable, which holds only for what a REF keeps:
+  // staged, unstaged and untracked files, and commits made on a detached HEAD, exist in this
+  // checkout alone. So the HEAD must be reachable from a branch or remote-tracking ref, and the
+  // removal is git's own unforced one — git refuses a dirty tree at the moment it removes, which a
+  // status read beforehand cannot promise against an editor saving in between. Any refusal keeps
+  // the directory: no forced fallback, no `rm`. Ignored files (build output) never block it.
   if (opts?.onlyClean) {
-    const status = await git(worktreePath, ['status', '--porcelain', '--untracked-files=all']);
-    if (!status.ok || status.stdout.trim() !== '') return;
+    const head = await git(worktreePath, ['rev-parse', '--verify', '--quiet', 'HEAD^{commit}']);
+    const sha = head.stdout.trim();
+    if (!head.ok || !sha) return;
+    const kept = await git(repoRoot, ['for-each-ref', '--contains', sha, '--count=1', '--format=%(refname)', 'refs/heads', 'refs/remotes']);
+    if (!kept.ok || kept.stdout.trim() === '') return;
+    const removed = await git(repoRoot, ['worktree', 'remove', worktreePath]);
+    if (!removed.ok) return;
+    if (protection.paths.size === 0) await git(repoRoot, ['worktree', 'prune']);
+    return;
   }
   const removed = await git(repoRoot, ['worktree', 'remove', '--force', worktreePath]);
   // Owned-path reclaim must not `rm` a receipt path that is no longer a git

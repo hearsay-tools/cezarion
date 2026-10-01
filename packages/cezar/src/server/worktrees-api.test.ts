@@ -315,6 +315,28 @@ describe('the worktrees API', () => {
       expect(existsSync(join(pathOf(untracked), 'notes.md'))).toBe(true);
     });
 
+    it('refuses a checkout whose HEAD is a commit no branch keeps', async () => {
+      const id = await seed(randomUUID(), 'done', '2026-07-01T00:00:00Z');
+      const path = store.getRun(id)!.worktreePath!;
+      // Committed, but on a detached HEAD: the kept cez/ branch never saw it.
+      await run('git', ['checkout', '-q', '--detach'], { cwd: path });
+      writeFileSync(join(path, 'detached.txt'), 'only on HEAD\n');
+      await run('git', ['add', '-A'], { cwd: path });
+      await run('git', [...GIT_ID, 'commit', '-q', '-m', 'detached work'], { cwd: path });
+      expect((await reclaimOne(id)).status).toBe(409);
+      expect(existsSync(join(path, 'detached.txt'))).toBe(true);
+    });
+
+    it('still reclaims a checkout whose only extra files are ignored build output', async () => {
+      const id = await seed(randomUUID(), 'done', '2026-07-01T00:00:00Z');
+      const path = store.getRun(id)!.worktreePath!;
+      writeFileSync(join(repoRoot, '.git/info/exclude'), 'node_modules/\n');
+      mkdirSync(join(path, 'node_modules/pkg'), { recursive: true });
+      writeFileSync(join(path, 'node_modules/pkg/index.js'), 'module.exports = 1\n');
+      expect((await reclaimOne(id)).status).toBe(200);
+      expect(existsSync(path)).toBe(false);
+    });
+
     it('holds Continue off for the whole removal, and admits it again once the directory is gone', async () => {
       const id = await resumable();
       // Continue arrives the moment the handler holds its claim, while the removal is still awaiting.
