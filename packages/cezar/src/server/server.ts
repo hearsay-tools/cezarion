@@ -5493,7 +5493,12 @@ export function createApp(deps: ServerDeps) {
       const input = await branchClassifyInput(c.get('project'));
       if (!input) return c.json({ error: 'not a git repository', refused: [] }, 409);
       const body = c.req.valid('json');
-      const result = await deleteBranches(input, body.names, body.confirm);
+      // The cockpit's checkout switch and pull hold this, not the worktree lock: without it a switch
+      // could check a candidate out after the delete read the worktree list, and `update-ref` would
+      // delete the branch HEAD now names.
+      const release = claimRepoGitMutation(input.root);
+      if (!release) return c.json({ error: 'a branch switch or pull is running — try again when it finishes', refused: [] }, 409);
+      const result = await deleteBranches(input, body.names, body.confirm).finally(release);
       if (result.deleted.length === 0) {
         return c.json({ error: result.refused[0]?.reason ?? 'nothing was deleted', refused: result.refused }, 409);
       }

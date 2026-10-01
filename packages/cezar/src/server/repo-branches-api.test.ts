@@ -169,6 +169,27 @@ describe('the repo branches API', () => {
     expect((await pending).status).toBe(200);
   });
 
+  it('a branch switch cannot land on a branch while its delete is running', async () => {
+    const { branch } = await finishedTask(1);
+    const inFlight = new Promise<void>((resolve) => {
+      const claim = manager.claimForBranchCleanup.bind(manager);
+      vi.spyOn(manager, 'claimForBranchCleanup').mockImplementation((ids) => {
+        resolve();
+        return claim(ids);
+      });
+    });
+    const pending = del({ names: [branch], confirm: branch });
+    await inFlight;
+    const switched = await apiRequest(app, '/api/v1/repo/branch', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: branch }),
+    });
+    expect(switched.status).toBe(409);
+    expect((await pending).status).toBe(200);
+    expect(await git(repoRoot, 'symbolic-ref', '--short', 'HEAD')).toBe('main');
+  });
+
   it('refuses to delete a branch whose task another cleanup has claimed', async () => {
     const { id, branch } = await finishedTask(1);
     // The classification sees an idle, finished task; only the claim knows it is taken.
