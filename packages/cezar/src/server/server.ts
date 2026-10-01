@@ -5435,6 +5435,7 @@ export function createApp(deps: ServerDeps) {
       currentBranch: info.branch,
       hasRemote: Boolean(info.remote),
       forge: deps.branchForge ?? githubBranchForge,
+      claimRuns: (ids) => project.manager.claimForBranchCleanup(ids),
     };
   };
 

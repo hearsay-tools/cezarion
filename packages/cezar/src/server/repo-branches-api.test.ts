@@ -4,10 +4,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import type { Hono } from 'hono';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RepoBranchesResponse, RepoResponse } from '@open-mercato/cezar-contract';
 import { RunStore } from '../runs/store.ts';
-import type { RunManager } from '../workflows/run.ts';
+import { RunManager } from '../workflows/run.ts';
 import type { BranchForge } from './repo-branches.ts';
 import { createApp } from './server.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
@@ -27,6 +27,7 @@ describe('the repo branches API', () => {
   let cezHome: string;
   let store: RunStore;
   let app: Hono;
+  let manager: RunManager;
   let forgeCalls: number;
   const savedHome = process.env.CEZ_HOME;
   const savedDryRun = process.env.CEZ_DRY_RUN;
@@ -56,16 +57,19 @@ describe('the repo branches API', () => {
     mkdirSync(join(repoRoot, '.ai/cezar'), { recursive: true });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
     forgeCalls = 0;
+    // A real manager: a delete claims the owning runs through it, the claim Continue is refused by.
+    manager = new RunManager(store, repoRoot);
     app = createApp({
       repoRoot,
       store,
-      manager: { isActive: () => false } as unknown as RunManager,
+      manager,
       version: '0.0.0-test',
       branchForge: forge,
     });
   });
 
   afterEach(() => {
+    manager.dispose();
     store.flush();
     if (savedHome === undefined) delete process.env.CEZ_HOME;
     else process.env.CEZ_HOME = savedHome;
@@ -145,6 +149,36 @@ describe('the repo branches API', () => {
     expect(forgeCalls).toBe(calls); // cached: nothing moved
     await git(repoRoot, 'branch', 'mine');
     expect((await branches()).branches.map((b) => b.name)).toContain('mine'); // refs moved: recomputed
+  });
+
+  it('holds Continue off while a confirmed delete removes its task\'s branch', async () => {
+    process.env.CEZ_DRY_RUN = '1';
+    const { id, branch } = await finishedTask(1);
+    store.updateRun(id, { steps: [{ id: 'task', name: 'Task', kind: 'agent', status: 'done', sessionId: 'sess-1', backend: 'claude' }] } as never);
+    const claimed = new Promise<void>((resolve) => {
+      const claim = manager.claimForBranchCleanup.bind(manager);
+      vi.spyOn(manager, 'claimForBranchCleanup').mockImplementation((ids) => {
+        const release = claim(ids);
+        resolve();
+        return release;
+      });
+    });
+    const pending = del({ names: [branch], confirm: branch });
+    await claimed;
+    expect(manager.continueRun(id, { text: 'go on' })).toEqual({ ok: false, error: expect.stringContaining('being cleaned up') });
+    expect((await pending).status).toBe(200);
+  });
+
+  it('refuses to delete a branch whose task another cleanup has claimed', async () => {
+    const { id, branch } = await finishedTask(1);
+    // The classification sees an idle, finished task; only the claim knows it is taken.
+    const hold = manager.claimForBranchCleanup([id])!;
+    const res = await del({ names: [branch], confirm: branch });
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { error: string }).error).toContain('running or being continued');
+    expect(await git(repoRoot, 'rev-parse', '--verify', branch)).toMatch(/^[0-9a-f]{40}$/);
+    hold();
+    expect((await del({ names: [branch], confirm: branch })).status).toBe(200);
   });
 
   it('POST /repo/branches/delete bulk-deletes the safe rows and refuses the rest with 200', async () => {

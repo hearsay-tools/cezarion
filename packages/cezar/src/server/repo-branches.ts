@@ -156,6 +156,9 @@ export interface ClassifyInput {
   /** Whether the repo has a remote at all; without one the forge is not asked. */
   hasRemote: boolean;
   forge: BranchForge;
+  /** Claims the runs owning a branch for the length of its delete, or returns null when one is in
+   *  use (`RunManager.claimForBranchCleanup`). Absent, a delete trusts the classification alone. */
+  claimRuns?: (runIds: readonly string[]) => (() => void) | null;
 }
 
 export interface Classification {
@@ -547,6 +550,20 @@ export async function deleteBranches(
   }
   const deleted: string[] = [];
   let dropped: DeleteBranchesResult['dropped'];
+  // Claimed before the lock and held through the ref transaction, so no Continue is admitted
+  // between the verdict and the delete.
+  const releases: Array<() => void> = [];
+  for (const candidate of [...candidates]) {
+    if (!input.claimRuns) break;
+    const owners = input.runs.filter((run) => runBranch(run) === candidate.name).map((run) => run.id);
+    const release = input.claimRuns(owners);
+    if (release) {
+      releases.push(release);
+      continue;
+    }
+    candidates.splice(candidates.indexOf(candidate), 1);
+    refused.push({ name: candidate.name, reason: 'its task is running or being continued — try again once it settles' });
+  }
   if (candidates.length > 0) {
     try {
       await withWorktreeMutation(input.root, async (lockedGit) => {
@@ -605,6 +622,7 @@ export async function deleteBranches(
     }
     forgetRepoBranches(input.root);
   }
+  for (const release of releases) release();
   return { deleted, refused, ...(dropped ? { dropped } : {}) };
 }
 

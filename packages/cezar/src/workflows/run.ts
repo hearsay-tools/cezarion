@@ -1018,7 +1018,8 @@ export class RunManager {
   }
 
   private readonly starting = new Set<string>();
-  /** Runs whose worktree directory a reclaim is removing right now (`claimWorktreeReclaim`). */
+  /** Runs whose worktree a reclaim, or whose branch a delete, is removing right now
+   *  (`claimWorktreeReclaim`, `claimForBranchCleanup`). `continueRun` refuses them. */
   private readonly reclaiming = new Set<string>();
   // Runs parked at `waiting` (open session, ball in the user's court). They
   // don't consume a `maxParallel` slot (#347) — an idle claude process costs
@@ -2871,6 +2872,19 @@ export class RunManager {
   }
 
   /**
+   * Claim every run that owns a branch about to be deleted (issue 08 §B3), or null when any is in
+   * use: live, queued, at the review gate, or already claimed. The classification that allowed the
+   * delete read liveness before awaiting git and GitHub; this re-reads it and holds Continue off —
+   * its re-materialization would otherwise recreate the branch from the base under the delete.
+   */
+  claimForBranchCleanup(runIds: readonly string[]): (() => void) | null {
+    const unfinished = (id: string) => !['done', 'failed', 'cancelled'].includes(this.store.getRun(id)?.status ?? 'done');
+    if (runIds.some((id) => this.reclaiming.has(id) || this.isActive(id) || unfinished(id))) return null;
+    for (const id of runIds) this.reclaiming.add(id);
+    return () => { for (const id of runIds) this.reclaiming.delete(id); };
+  }
+
+  /**
    * Fold a queued run's persisted prompt — `run.task` plus everything stacked
    * onto it (#472) — into the job input that is about to execute.
    *
@@ -4603,7 +4617,7 @@ export class RunManager {
       return { ok: false, error: AGENT_MODELS_LOCKED_ERROR };
     }
     if (this.isActive(runId)) return { ok: false, error: 'run is still active' };
-    if (this.reclaiming.has(runId)) return { ok: false, error: 'its worktree is being reclaimed — retry in a moment' };
+    if (this.reclaiming.has(runId)) return { ok: false, error: 'its worktree or branch is being cleaned up — retry in a moment' };
     const run = this.store.getRun(runId);
     if (!run) return { ok: false, error: 'not found' };
     if (conversation && (!deferForCapacity || run.delegation?.role !== 'worker' || run.delegation.parentRunId !== conversation.rootId ||

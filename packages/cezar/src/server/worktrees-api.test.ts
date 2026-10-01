@@ -350,7 +350,7 @@ describe('the worktrees API', () => {
       });
       const pending = reclaimOne(id);
       await claimed;
-      expect(manager.continueRun(id, { text: 'go on' })).toEqual({ ok: false, error: expect.stringContaining('being reclaimed') });
+      expect(manager.continueRun(id, { text: 'go on' })).toEqual({ ok: false, error: expect.stringContaining('being cleaned up') });
       expect((await pending).status).toBe(200);
       expect(existsSync(store.getRun(id)!.worktreePath!)).toBe(false);
       // Released: the next Continue is admitted, and re-materializes the reclaimed tree.
