@@ -717,6 +717,13 @@
   font-size: 12px;
   line-height: 1.55;
 }
+/* Streamdown gives each source line's span `display: block` only in its line-number mode, and the
+ * thread renders with `lineNumbers={false}`: bare inline spans, so every line ran into the next
+ * and a blank line collapsed to one newline (#742). A block span holding just "\n" is one empty
+ * line box, so blank lines keep their height. */
+.thread-markdown [data-streamdown='code-block'] code > span {
+  display: block;
+}
 
 /* A persistent shape distinguishes current navigation from its hover fill. Positioned inside
  * the existing row: no layout shift, target-size change, or interference with focus rings. */
