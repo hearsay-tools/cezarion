@@ -26,6 +26,7 @@ import { hasAccountChoice, useAgentAccounts } from '@/api/agent-accounts'
 import { DiffStatLabel } from '@/components/diff-stat'
 import { TitleEditInput, useTitleEditor } from '@/components/editable-title'
 import { Pill } from '@/components/pill'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { ReferenceChip, ReferenceStatusGlyph } from '@/components/reference-chip'
 import { ResolveConflictsButton } from '@/components/reference-conflict-action'
 import { ReferenceStatusProvider } from '@/components/reference-status'
@@ -291,8 +292,7 @@ export function RunHeader({
             the rest into the disclosure below, so the row does not render at all. */}
         {barSlot ? (
           <MobileRunBarPortal slot={barSlot}>
-            <div data-slot="mobile-run-title" className="flex min-w-0 flex-1 flex-col">
-              <EditableTitle run={run} compact />
+            <MobileRunTitle run={run}>
               <span data-slot="mobile-run-state" className="flex min-w-0 items-center gap-1.5 text-[11.5px] leading-tight text-soft-foreground">
                 <StatusDot tone={attention.tone} shape={attention.shape} pulse={attention.pulse} />
                 <span className="truncate">
@@ -300,7 +300,7 @@ export function RunHeader({
                   {primaryReference ? ` · #${primaryReference.number}` : ''}
                 </span>
               </span>
-            </div>
+            </MobileRunTitle>
             {detailsToggle}
             {actionsKebab}
           </MobileRunBarPortal>
@@ -591,48 +591,87 @@ async function copyToClipboard(text: string, doneMessage: string): Promise<void>
   }
 }
 
+/** The rename machine bound to a run, shared by the desktop h1 and the phone top bar. */
+function useRunTitleEditor(run: ApiRun) {
+  const patch = usePatchRun(run.id)
+  const title = runTitle(run)
+  const editor = useTitleEditor(title, (next) =>
+    patch.mutate({ title: next }, { onError: (error) => toast(error.message, { tone: 'danger' }) }),
+  )
+  return { title, editor }
+}
+
 /**
  * The editable title (#389): a plain h1 with a pencil that only appears on hover (mockup
  * `.pencil-btn`), flipping into an inline input. Enter/blur commit through `usePatchRun`
  * (the server stores it as both `title` and `titleSummary`), Escape abandons the draft.
  * The rename machine itself is shared with the Tasks table (`components/editable-title.tsx`).
  */
-/** `compact` is the phone top bar's variant (#621): the same rename control at 15px/600 on one
- *  line, with a touch-sized button that is always visible (there is no hover on a phone). */
-function EditableTitle({ run, compact = false }: { run: ApiRun; compact?: boolean }) {
-  const patch = usePatchRun(run.id)
-  const title = runTitle(run)
-  const editor = useTitleEditor(title, (next) =>
-    patch.mutate({ title: next }, { onError: (error) => toast(error.message, { tone: 'danger' }) }),
-  )
+function EditableTitle({ run }: { run: ApiRun }) {
+  const { title, editor } = useRunTitleEditor(run)
 
   if (editor.editing) {
-    return <TitleEditInput editor={editor} className={cn('flex-1 font-semibold', compact ? 'text-[15px]' : 'text-[16px]')} />
+    return <TitleEditInput editor={editor} className="flex-1 text-[16px] font-semibold" />
   }
 
   return (
     <span className="group flex min-w-0 items-center gap-1">
-      <h1
-        className={cn(
-          'min-w-0',
-          compact ? 'truncate text-[15px] leading-tight font-semibold text-foreground' : 'line-clamp-2 break-words text-2xl font-semibold tracking-tight',
-        )}
-        title={run.task}
-      >
+      <h1 className="line-clamp-2 min-w-0 break-words text-2xl font-semibold tracking-tight" title={run.task}>
         {title}
       </h1>
       <button
         type="button"
         aria-label="Rename task"
         onClick={editor.begin}
-        className={cn(
-          'shrink-0 rounded-sm p-1 text-soft-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:bg-muted hover:text-foreground focus-visible:opacity-100 focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none',
-          compact && 'flex size-11 items-center justify-center opacity-100',
-        )}
+        className="shrink-0 rounded-sm p-1 text-soft-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:bg-muted hover:text-foreground focus-visible:opacity-100 focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
       >
         <PencilIcon className="size-3.5" aria-hidden="true" />
       </button>
     </span>
+  )
+}
+
+/** The phone top bar's title (#621, #737): the title + state stack (15px/600 over 11.5px, children
+ *  is the state line) and, as its SIBLING, the 44px rename button — so the touch target never adds
+ *  to the stack's height and never overlaps the state text, whatever its length. The 44px input
+ *  cannot sit in the 56px bar without hiding the state line, so renaming opens it in a popover
+ *  anchored under the pencil; the same `useTitleEditor` machine (Enter/blur commit, Escape cancel). */
+function MobileRunTitle({ run, children }: { run: ApiRun; children: ReactNode }) {
+  const { title, editor } = useRunTitleEditor(run)
+  return (
+    <Popover
+      open={editor.editing}
+      onOpenChange={(open) => {
+        if (open) editor.begin()
+        else editor.commit()
+      }}
+    >
+      <div data-slot="mobile-run-title" className="flex min-w-0 flex-1 flex-col gap-px">
+        <h1 className="truncate text-[15px] leading-tight font-semibold text-foreground" title={run.task}>{title}</h1>
+        {children}
+      </div>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label="Rename task"
+          className="flex size-11 shrink-0 items-center justify-center rounded-sm text-soft-foreground hover:bg-muted hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+        >
+          <PencilIcon className="size-3.5" aria-hidden="true" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="end"
+        className="w-64 max-w-[calc(100vw-16px)] p-2"
+        // Radix dismisses on a document-level Escape before the input's own handler runs, and a
+        // dismissal commits. Escape must abandon the draft, so cancel here and stop the dismissal.
+        onEscapeKeyDown={(event) => {
+          event.preventDefault()
+          editor.cancel()
+        }}
+      >
+        <TitleEditInput editor={editor} className="text-[16px] font-semibold" />
+      </PopoverContent>
+    </Popover>
   )
 }
 
