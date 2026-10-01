@@ -369,6 +369,24 @@ describe('Git → Not landed and the branch cleanup (issue 08 §C)', () => {
     openDesktop('/git/cleanup')
     browser.waitForFunction(`document.querySelector('[data-action="cleanup-branches-delete"]:not([disabled])') !== null`)
     browser.click('[data-action="cleanup-branches-delete"]')
+    // The confirm button mounts while the dialog is still fading and zooming in. A click in that
+    // window lands wherever the button is at that frame, and a click that misses it deletes
+    // nothing (#736). Click once the animations have finished and a hit-test at
+    // the button's centre resolves to the button itself.
+    // Verified locally: with animation-duration:1500ms !important injected for [role=alertdialog]
+    // and [data-slot=alert-dialog-overlay] before opening the dialog, `npm run test:e2e --
+    // git-sidebar.e2e.ts -t "Delete N branches"` failed without this wait (the confirm click was
+    // covered by the fixed inset-0 backdrop) and passed with it. Full recipe:
+    // https://github.com/hearsay-tools/cezarion/pull/739#discussion_r4158594664
+    browser.waitForValue(`(() => {
+      const button = document.querySelector('[data-action="cleanup-branches-confirm"]')
+      const dialog = document.querySelector('[role="alertdialog"]')
+      const overlay = document.querySelector('[data-slot="alert-dialog-overlay"]')
+      if (!button || !dialog || !overlay) return false
+      if ([button, dialog, overlay].some((el) => el.getAnimations().some((animation) => animation.playState === 'running'))) return false
+      const rect = button.getBoundingClientRect()
+      return button.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2))
+    })()`)
     browser.click('[data-action="cleanup-branches-confirm"]')
     expect(browser.waitForValue(`document.querySelector('[data-slot="cleanup-branches"] h2')?.textContent ?? null`, (value) => value === 'Branches safe to delete · 0')).toBe('Branches safe to delete · 0')
     expect(execFileSync('git', ['-C', root, 'branch', '--list', 'cez/merged1'], { encoding: 'utf8' }).trim()).toBe('')
