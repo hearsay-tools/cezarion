@@ -34,6 +34,7 @@ import {
   fetchGithubChecks,
   searchGithubItems,
   fetchGithubItem,
+  __clearGithubItemCacheForTests,
   forgetGithubItem,
   GH_CHECKS_MAX,
   GH_SEARCH_MAX,
@@ -3286,8 +3287,12 @@ describe('fetchGithubItem (#692)', () => {
     'GraphQL: Could not resolve to a PullRequest with the number of 42. (repository.pullRequest)',
     'no pull requests found for 42',
   ])('returns item null when gh confirms the item is missing (%s)', async (message) => {
-    ghSpy((argv) => (itemView(argv) ? new Error(message) : ''));
+    // Both rows ask about the same root and number, and a `null` answer is cached — so without
+    // this the second row would be answered from the first row's cache and never reach gh.
+    __clearGithubItemCacheForTests();
+    const argvs = ghSpy((argv) => (itemView(argv) ? new Error(message) : ''));
     expect(await fetchGithubItem('/repo/item-missing', 'pr', 42)).toEqual({ available: true, item: null });
+    expect(views(argvs)).toBe(1);
   });
 
   it('returns item null for a missing issue', async () => {

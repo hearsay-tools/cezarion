@@ -223,4 +223,43 @@ describe('merging from the detail (#692)', () => {
       setApiScope(null)
     }
   })
+
+  it('files a merge-state Refresh under the project it was pressed in, after a project switch', async () => {
+    let releaseRefresh: (() => void) | undefined
+    const refreshed = { ...MERGE_STATE, mergeState: { ...MERGE_STATE.mergeState, title: 'Refreshed in p1' } }
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL) => {
+      const url = String(input)
+      const respond = (body: unknown) =>
+        new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })
+      if (url.includes('/merge-state?refresh=1')) {
+        // Held open so the reader can leave for another project first.
+        await new Promise<void>((resolve) => { releaseRefresh = resolve })
+        return respond(refreshed)
+      }
+      if (url.includes('/merge-state')) return respond(MERGE_STATE)
+      if (url.endsWith('/health')) return respond({ bootProject: 'p1' })
+      return respond({ available: true, comments: [] })
+    })
+    setApiScope('p1')
+    try {
+      const client = createQueryClient()
+      const view = render(
+        <QueryClientProvider client={client}>
+          <MemoryRouter>
+            <GithubItemDetail item={PR_42} colors={{}} backLink={null} subNav={null} />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      )
+      await waitFor(() => expect(document.querySelector('[data-slot="gh-merge-box"]')?.textContent).toContain('Ready to merge'))
+      fireEvent.click(within(document.querySelector('[data-slot="gh-merge-box"]') as HTMLElement).getByRole('button', { name: 'Refresh' }))
+      await waitFor(() => expect(releaseRefresh).toBeDefined())
+      view.unmount()
+      setApiScope('p2')
+      releaseRefresh!()
+      await waitFor(() => expect(client.getQueryData(['p1', 'github', 'merge-state', 42])).toEqual(refreshed))
+      expect(client.getQueryData(['p2', 'github', 'merge-state', 42])).toBeUndefined()
+    } finally {
+      setApiScope(null)
+    }
+  })
 })

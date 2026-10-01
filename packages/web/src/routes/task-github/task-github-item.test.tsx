@@ -80,10 +80,13 @@ const json = (body: unknown, status = 200) =>
 let paths: string[] = []
 /** What the item route answers; `undefined` leaves it pending forever. */
 let item: ((path: string) => Response) | undefined
+/** What the lazy checks route answers; `undefined` leaves it pending forever. */
+let checks: ((path: string) => Response) | undefined
 
 beforeEach(() => {
   paths = []
   item = undefined
+  checks = undefined
   localStorage.clear()
   vi.stubGlobal(
     'fetch',
@@ -94,6 +97,7 @@ beforeEach(() => {
       if (path === '/api/v1/projects') return json(REGISTRY)
       if (/^\/api\/v1\/(?:p\/[^/]+\/)?runs\/r1$/.test(path)) return json(RUN)
       if (path.includes('/github/items/') && item) return item(path)
+      if (path.includes('/github/checks') && checks) return checks(path)
       // Everything else stays pending: this file is about the item route, not the shell's data.
       return new Promise<never>(() => {})
     }),
@@ -231,5 +235,37 @@ describe('TaskGithubItemRoute', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Open the other project’s PR tab' }))
     expect(await screen.findByRole('heading', { name: /The other project’s PR/ })).toBeTruthy()
     expect(itemRequests().length).toBe(before)
+  })
+
+  it('hydrates the PR’s checks badge, linking to its checks on GitHub', async () => {
+    // The item route answers `checks: null` (forge/github.ts); the badge comes from the lazy
+    // checks route, exactly as in the GitHub view.
+    item = () => json({ available: true, item: { ...PR_5, checks: null } })
+    checks = () => json({ available: true, checks: { 5: 'passing' } })
+    renderAt('/p/other/tasks/r1/pr/5')
+    const badge = await waitFor(() => {
+      const found = inRoute('[data-slot="gh-checks"]')
+      if (!found) throw new Error('no checks badge yet')
+      return found
+    })
+    expect(badge.getAttribute('data-checks')).toBe('passing')
+    expect(badge.getAttribute('href')).toBe(`${REPO}/pull/5/checks`)
+    expect(paths).toContain('/api/v1/p/other/github/checks?prs=5')
+  })
+
+  it('falls back to the item’s own rollup when checks are unavailable, like the GitHub view', async () => {
+    item = () => json({ available: true, item: { ...PR_5, checks: 'failing' } })
+    checks = () => json({ available: false, reason: 'gh is not installed' })
+    renderAt('/p/other/tasks/r1/pr/5')
+    await waitFor(() => expect(paths).toContain('/api/v1/p/other/github/checks?prs=5'))
+    await waitFor(() => expect(inRoute('[data-slot="gh-checks"]')?.getAttribute('data-checks')).toBe('failing'))
+  })
+
+  it('asks for no checks on an issue tab', async () => {
+    item = () => json({ available: true, item: { ...PR_5, kind: 'issue', number: 7, url: `${REPO}/issues/7` } })
+    checks = () => json({ available: true, checks: {} })
+    renderAt('/p/other/tasks/r1/issue/7')
+    await waitFor(() => expect(inRoute('[data-slot="gh-detail-inner"]')).not.toBeNull())
+    expect(paths.filter((path) => path.includes('/github/checks'))).toEqual([])
   })
 })

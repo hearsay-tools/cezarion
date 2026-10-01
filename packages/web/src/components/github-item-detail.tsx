@@ -206,9 +206,11 @@ function GithubMergeBox({ number, onRunAgent }: { number: number; onRunAgent?: (
   const [method, setMethod] = useState<GithubMergeMethod | null>(null)
   const [confirming, setConfirming] = useState(false)
   const [overrideRules, setOverrideRules] = useState(false)
+  // The key is taken when Refresh is PRESSED, like the merge's below: a reader who left for another
+  // project before the answer landed must not get this repository's merge state under theirs.
   const refreshMergeState = useMutation({
-    mutationFn: () => getGithubPrMergeState(number, { refresh: true }),
-    onSuccess: (data) => queryClient.setQueryData(queryKeys.githubMergeState(number), data),
+    mutationFn: (_key: ReturnType<typeof queryKeys.githubMergeState>) => getGithubPrMergeState(number, { refresh: true }),
+    onSuccess: (data, key) => queryClient.setQueryData(key, data),
     onError: (error) => toast(error instanceof Error ? error.message : String(error), { tone: 'danger' }),
   })
   const selectedMethod = method && state?.methods.includes(method)
@@ -298,7 +300,7 @@ function GithubMergeBox({ number, onRunAgent }: { number: number; onRunAgent?: (
               variant="ghost"
               size="sm"
               disabled={refreshMergeState.isPending}
-              onClick={() => refreshMergeState.mutate()}
+              onClick={() => refreshMergeState.mutate(queryKeys.githubMergeState(number))}
             >
               <RefreshCwIcon size={16} aria-hidden="true" className={cn('size-3.5', refreshMergeState.isPending && 'animate-spin')} />
               Refresh

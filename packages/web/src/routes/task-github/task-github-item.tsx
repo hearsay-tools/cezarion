@@ -6,7 +6,7 @@ import { useParams } from 'react-router'
 import { Link } from '@/lib/project-router'
 
 import { getGithubItem } from '@/api/client'
-import { queryKeys, useGithubItem, useHealth, useProjectRepoBase, useProjects, useRun } from '@/api/queries'
+import { queryKeys, useGithubChecks, useGithubItem, useHealth, useProjectRepoBase, useProjects, useRun } from '@/api/queries'
 import type { ApiRun } from '@open-mercato/cezar-api-client'
 import { CenteredState } from '@/components/centered-state'
 import { GithubItemDetail } from '@/components/github-item-detail'
@@ -98,6 +98,13 @@ function ItemBody({
     mutationFn: (_key: ReturnType<typeof queryKeys.githubItem>) => getGithubItem(kind, number, { refresh: true }),
     onSuccess: (data, key) => queryClient.setQueryData(key, data),
   })
+  // The checks badge: the item route answers `checks: null`, so the rollup comes from the lazy
+  // checks route for this one PR, exactly as the GitHub view hydrates its selection (#664).
+  // Unavailable or unknown falls back to the item's own value, as it does there. The tab glyphs
+  // keep reading the header's ref-status batch; this asks about the open PR alone.
+  const hasPr = kind === 'pr' && item.data?.available === true && item.data.item !== null
+  const checksQuery = useGithubChecks(hasPr ? [number] : [], hasPr)
+  const checksMap = checksQuery.data?.available ? checksQuery.data.checks : undefined
   const label = `${KIND_LABEL[kind]} #${number}`
   const KindIcon = kind === 'pr' ? GitPullRequestIcon : CircleDotIcon
 
@@ -158,7 +165,13 @@ function ItemBody({
   return (
     // The detail's own padding is the GitHub pane's; nudged so its edge lines up with the header's.
     <div className="min-w-0 px-0.5 md:px-2">
-      <GithubItemDetail item={data.item} colors={{}} backLink={null} subNav={null} />
+      <GithubItemDetail
+        item={data.item}
+        colors={{}}
+        checks={kind === 'pr' ? checksMap?.[number] ?? data.item.checks : data.item.checks}
+        backLink={null}
+        subNav={null}
+      />
     </div>
   )
 }
