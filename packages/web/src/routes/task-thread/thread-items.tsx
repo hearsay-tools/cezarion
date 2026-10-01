@@ -281,11 +281,14 @@ export function UserBubble({
   )
 }
 
-/** An assistant message item, as markdown. */
+/**
+ * An assistant message item, as markdown. `breaks` keeps the agent's single newlines visible
+ * (#730): replies are chat prose, and CommonMark's newline-as-space flattened them into one line.
+ */
 export function AssistantMessage({ text, ts }: { text: string; ts?: string }) {
   return (
     <ConversationMessage role="agent" ts={ts} data-slot="assistant-message">
-      <Markdown>{text}</Markdown>
+      <Markdown breaks>{text}</Markdown>
     </ConversationMessage>
   )
 }

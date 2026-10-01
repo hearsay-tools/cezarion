@@ -109,14 +109,14 @@ describe('Markdown', () => {
     expect(document.body.textContent).not.toContain('```')
   })
 
-  // `breaks` — hard line breaks for human-typed text (#524).
+  // `breaks` — hard line breaks for chat text: user (#524) and assistant (#730) messages.
   describe('breaks', () => {
-    it('off by default: a single newline is CommonMark paragraph glue', () => {
+    it('off by default (documents, previews): a single newline is CommonMark paragraph glue', () => {
       const { container } = render(<Markdown>{'line one\nline two'}</Markdown>)
       expect(container.querySelector('br')).toBeNull()
     })
 
-    it('on: a single newline becomes a hard break, so a typed message keeps its shape', () => {
+    it('on: a single newline becomes a hard break, so a chat message keeps its shape', () => {
       const { container } = render(<Markdown breaks>{'line one\nline two'}</Markdown>)
       expect(container.querySelectorAll('br')).toHaveLength(1)
       expect(container.querySelectorAll('p')).toHaveLength(1)
