@@ -343,6 +343,24 @@ describe('the branch classifier (issue 08 §A)', () => {
     expect(await git(root, 'symbolic-ref', 'refs/heads/cez/aaaaaaaa')).toBe('refs/heads/topic');
   });
 
+  it('an alias is never the ref that keeps a branch\'s commits, nor the base', async () => {
+    // (a) The only "other" ref holding the fork commit is an alias for the task branch itself.
+    await taskBranch(root, 'topic', 1);
+    await git(root, 'branch', 'cez/aaaaaaaa', 'topic');
+    await git(root, 'branch', '-D', 'topic');
+    await git(root, 'symbolic-ref', 'refs/heads/witness', 'refs/heads/cez/aaaaaaaa');
+    const runs = [runRecord('aaaaaaaa-1', 'done', { baseBranch: 'topic' })];
+    expect((await classesOf({ runs })).cls['cez/aaaaaaaa']).toBe('not-landed');
+    expect((await deleteBranches(input({ runs }), ['cez/aaaaaaaa'])).deleted).toEqual([]);
+
+    // (b) The configured base is an alias for a task branch with work main lacks.
+    await taskBranch(root, 'cez/bbbbbbbb', 1);
+    await git(root, 'symbolic-ref', 'refs/heads/base-alias', 'refs/heads/cez/bbbbbbbb');
+    const viaAlias = [runRecord('bbbbbbbb-1', 'done')];
+    expect((await classesOf({ runs: viaAlias, configuredBase: 'base-alias' })).cls['cez/bbbbbbbb']).toBe('not-landed');
+    expect((await deleteBranches(input({ runs: viaAlias, configuredBase: 'base-alias' }), ['cez/bbbbbbbb'])).deleted).toEqual([]);
+  });
+
   it('names a task branch exactly when a tag shares its name', async () => {
     await taskBranch(root, 'cez/aaaaaaaa', 1);
     // `%(refname:short)` would spell the branch `heads/cez/aaaaaaaa` to disambiguate it from this tag.

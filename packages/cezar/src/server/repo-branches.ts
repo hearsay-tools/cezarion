@@ -263,8 +263,12 @@ async function resolveBase(root: string, base: string): Promise<{ ref: string; f
   if (FULL_SHA.test(base)) return { ref: base, fullRef: null, sha: await at(base) };
   if (!isSafeGitRef(base)) return { ref: base, fullRef: null, sha: null };
   const name = base.startsWith('origin/') ? base.slice('origin/'.length) : base;
-  const local = base.startsWith('origin/') ? null : await at(`refs/heads/${name}`);
-  const remote = await at(`refs/remotes/origin/${name}`);
+  // A symbolic base is an alias for some other branch — possibly one about to be deleted — and a
+  // `--no-deref` verify of the alias protects nothing it points at. It resolves to nothing, so
+  // every branch reads "not on base": the safe direction.
+  const direct = async (ref: string) => ((await git(root, ['symbolic-ref', '-q', ref])).ok ? null : at(ref));
+  const local = base.startsWith('origin/') ? null : await direct(`refs/heads/${name}`);
+  const remote = await direct(`refs/remotes/origin/${name}`);
   // Exits 0 iff local is equal to or ahead of origin — local then carries unpushed base commits.
   if (local && (!remote || (await git(root, ['merge-base', '--is-ancestor', remote, local])).ok)) {
     return { ref: name, fullRef: `refs/heads/${name}`, sha: local };
@@ -280,12 +284,13 @@ async function retainingRef(
   sha: string,
   excluded: ReadonlySet<string>,
 ): Promise<{ ref: string; sha: string } | null> {
-  const res = await run(['for-each-ref', '--contains', sha, '--format=%(refname)%00%(objectname)', 'refs/heads', 'refs/remotes']);
+  const res = await run(['for-each-ref', '--contains', sha, '--format=%(refname)%00%(objectname)%00%(symref)', 'refs/heads', 'refs/remotes']);
   if (!res.ok) return null;
   for (const line of res.stdout.split('\n')) {
-    const [ref = '', tip = ''] = line.split('\0');
-    // A symbolic ref (origin/HEAD) cannot be verified by its own name in a transaction.
-    if (ref && tip && !excluded.has(ref) && !ref.endsWith('/HEAD')) return { ref, sha: tip };
+    const [ref = '', tip = '', symref = ''] = line.split('\0');
+    // Never an alias (origin/HEAD, a symbolic branch): it may point at the very branch being
+    // deleted, and a `--no-deref` verify of its name protects nothing it points at.
+    if (ref && tip && !symref && !excluded.has(ref)) return { ref, sha: tip };
   }
   return null;
 }
