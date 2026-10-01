@@ -57,7 +57,7 @@ describe('project settings → worktrees: retention against the live dry-run ser
     // Issue 06 §3: the worktrees panel is listed once, on Git → Cleanup.
     expect(browser.count('[data-slot="worktrees-panel"]')).toBe(0)
     browser.click('[data-slot="worktrees-manage-link"]')
-    browser.waitForFunction(`location.pathname.endsWith('/git/cleanup') && document.querySelector('[data-slot="worktrees-footer"]') !== null`)
+    browser.waitForFunction(`location.pathname.endsWith('/git/cleanup') && document.querySelector('[data-slot="worktrees-retention"]') !== null`)
     expect(browser.count('[data-slot="worktrees-panel"]')).toBe(1)
   })
 

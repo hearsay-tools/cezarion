@@ -31,8 +31,12 @@ import type {
   ChangesPayload,
   CheckoutProjectInput,
   ConfigResponse,
+  DeleteBranchesInput,
+  DeleteBranchesResponse,
+  ReclaimWorktreeResponse,
   ReclaimWorktreesResponse,
   RemoveWorktreeResponse,
+  RepoBranchesResponse,
   WorktreesResponse,
   ContinueResponse,
   CreatePrResponse,
@@ -673,6 +677,28 @@ export async function getRepo(
   return unwrap(
     await cez.api.v1.p[':projectId'].repo.$get({ param: { projectId: projectId ?? queryScope() } }, init(opts)),
     '/repo',
+  )
+}
+
+/** The Git view's classified branch list (issue 08 §B2): Not landed, Cleanup's branch card and
+ *  All branches' class labels all read it. Never an error outside a repository (an empty list). */
+export async function getRepoBranches(opts?: ReadOptions, projectId?: string): Promise<RepoBranchesResponse> {
+  return unwrap(
+    await cez.api.v1.p[':projectId'].repo.branches.$get({ param: { projectId: projectId ?? queryScope() } }, init(opts)),
+    '/repo/branches',
+  )
+}
+
+/** Delete local branches (issue 08 §B3). The server re-classifies every name: `merged`/`empty` go
+ *  in bulk, a `not-landed`/`orphan` branch only alone with `confirm` equal to its name. A 409
+ *  (nothing deleted) throws an `ApiError` carrying the server's reason. */
+export async function deleteRepoBranches(input: DeleteBranchesInput): Promise<DeleteBranchesResponse> {
+  return unwrap(
+    await cez.api.v1.p[':projectId'].repo.branches.delete.$post({
+      param: { projectId: queryScope() },
+      json: input,
+    }),
+    '/repo/branches/delete',
   )
 }
 
@@ -2145,6 +2171,17 @@ export async function reclaimWorktrees(): Promise<ReclaimWorktreesResponse> {
       json: {},
     }),
     '/worktrees/reclaim',
+  )
+}
+
+/** Cleanup's per-row Reclaim (issue 08 §B4): one finished run's worktree DIRECTORY, by
+ *  retention's own rule. The branch is kept. 409 while the run is live or at review. */
+export async function reclaimRunWorktree(runId: string): Promise<ReclaimWorktreeResponse> {
+  return unwrap(
+    await cez.api.v1.p[':projectId'].worktrees[':runId'].reclaim.$post({
+      param: { projectId: queryScope(), runId: encodeURIComponent(runId) },
+    }),
+    `/worktrees/${encodeURIComponent(runId)}/reclaim`,
   )
 }
 

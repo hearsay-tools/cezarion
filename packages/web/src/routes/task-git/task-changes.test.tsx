@@ -57,6 +57,7 @@ const REPO: RepoResponse = {
   log: [],
   branches: ['main'],
   baseBranch: null,
+  tracking: null,
 }
 
 const CHANGES: ChangesPayload = {

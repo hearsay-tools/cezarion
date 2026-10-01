@@ -81,7 +81,7 @@ import { answersQuestion, openQuestions, questionMessage } from '../delegation/q
 import { workerOutcome } from '../runs/delegation-state.ts';
 import { loadWorkflows } from './load.ts';
 import type { QueuedMessage, RunRecord, RunStore, StepState } from '../runs/store.ts';
-import { reclaimWorktrees, rematerializeReclaimedWorktree } from '../runs/retention.ts';
+import { isReclaimable, reclaimWorktrees, rematerializeReclaimedWorktree } from '../runs/retention.ts';
 import {
   AgentTempDirError,
   agentTmpEnv,
@@ -1018,6 +1018,9 @@ export class RunManager {
   }
 
   private readonly starting = new Set<string>();
+  /** Runs whose worktree a reclaim, or whose branch a delete, is removing right now
+   *  (`claimWorktreeReclaim`, `claimForBranchCleanup`). `continueRun` refuses them. */
+  private readonly reclaiming = new Set<string>();
   // Runs parked at `waiting` (open session, ball in the user's court). They
   // don't consume a `maxParallel` slot (#347) — an idle claude process costs
   // memory but no tokens, queued work progressing matters more, and the idle
@@ -2736,7 +2739,7 @@ export class RunManager {
   private async enforceRetention(): Promise<void> {
     try {
       const keep = await resolveWorktreeRetention(this.repoRoot);
-      await reclaimWorktrees(this.repoRoot, this.store, keep);
+      await reclaimWorktrees(this.repoRoot, this.store, keep, { claim: (run) => this.claimWorktreeReclaim(run.id) });
     } catch {
       // retention is best-effort; swallow so terminal transitions never break.
     }
@@ -2852,6 +2855,45 @@ export class RunManager {
 
   isActive(runId: string): boolean {
     return this.executions.has(runId) || this.active.has(runId) || this.starting.has(runId) || this.queue.includes(runId);
+  }
+
+  /**
+   * Claim a run's worktree for a reclaim (#483, issue 08 §B4), or null when it is in use or no
+   * longer reclaimable. The check and the claim are one synchronous step, and `continueRun`
+   * refuses a claimed run until the release, so a Continue can never resume into a directory a
+   * forced removal is deleting — nor a removal start under a session that was just admitted.
+   */
+  claimWorktreeReclaim(runId: string): (() => void) | null {
+    if (this.reclaiming.has(runId) || this.isActive(runId)) return null;
+    const run = this.store.getRun(runId);
+    if (!run || !isReclaimable(run, this.store.listRuns())) return null;
+    this.reclaiming.add(runId);
+    return () => { this.reclaiming.delete(runId); };
+  }
+
+  /**
+   * Claim every run that owns a branch about to be deleted (issue 08 §B3), or null when any is in
+   * use: live, queued, at the review gate, or already claimed. The classification that allowed the
+   * delete read liveness before awaiting git and GitHub; this re-reads it and holds Continue off —
+   * its re-materialization would otherwise recreate the branch from the base under the delete.
+   */
+  /**
+   * Claim a settled run while its draft PR is published (`POST /runs/:id/pr`), or null when it is
+   * live or already claimed. Publishing may first re-materialize a reclaimed checkout, which
+   * clears the reclaim stamp and makes the run reclaimable again; held, the claim keeps reclaim,
+   * branch cleanup and Continue off the checkout until the push and `gh` are done with it.
+   */
+  claimForPublish(runId: string): (() => void) | null {
+    if (this.reclaiming.has(runId) || this.isActive(runId)) return null;
+    this.reclaiming.add(runId);
+    return () => { this.reclaiming.delete(runId); };
+  }
+
+  claimForBranchCleanup(runIds: readonly string[]): (() => void) | null {
+    const unfinished = (id: string) => !['done', 'failed', 'cancelled'].includes(this.store.getRun(id)?.status ?? 'done');
+    if (runIds.some((id) => this.reclaiming.has(id) || this.isActive(id) || unfinished(id))) return null;
+    for (const id of runIds) this.reclaiming.add(id);
+    return () => { for (const id of runIds) this.reclaiming.delete(id); };
   }
 
   /**
@@ -4587,6 +4629,7 @@ export class RunManager {
       return { ok: false, error: AGENT_MODELS_LOCKED_ERROR };
     }
     if (this.isActive(runId)) return { ok: false, error: 'run is still active' };
+    if (this.reclaiming.has(runId)) return { ok: false, error: 'its worktree or branch is being cleaned up — retry in a moment' };
     const run = this.store.getRun(runId);
     if (!run) return { ok: false, error: 'not found' };
     if (conversation && (!deferForCapacity || run.delegation?.role !== 'worker' || run.delegation.parentRunId !== conversation.rootId ||

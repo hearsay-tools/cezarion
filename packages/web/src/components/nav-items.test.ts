@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { NAV_ITEMS, activeNavItem, activeNavPath, isPushedRoute, visibleNavItems } from './nav-items'
+import { NAV_ITEMS, activeNavItem, activeNavPath, isPushedGitScreen, isPushedRoute, visibleNavItems } from './nav-items'
 
 /** Which nav item owns a URL. This is the rule that decides what the user sees lit up, and it
  *  is not a plain equality check — items own areas, and the Settings area nests. */
@@ -191,6 +191,30 @@ describe('isPushedRoute', () => {
   for (const [pathname, pushed] of cases) {
     it(`${pathname} → ${pushed}`, () => {
       expect(isPushedRoute(pathname)).toBe(pushed)
+    })
+  }
+})
+
+describe('isPushedGitScreen', () => {
+  const cases: Array<[pathname: string, search: string, pushed: boolean]> = [
+    // The Git screen itself is a list and keeps the tab bar.
+    ['/git', '', false],
+    ['/p/cezar/git', '', false],
+    // Recently on main as the phone reaches it, and every other section, are pushed.
+    ['/git', '?view=repo', true],
+    ['/p/cezar/git', '?view=repo', true],
+    ['/git/not-landed', '', true],
+    ['/git/cleanup', '', true],
+    ['/git/branches', '', true],
+    ['/git/changes', '', true],
+    ['/git/commits/abc1234', '', true],
+    ['/p/cezar/git/cleanup', '', true],
+    ['/github', '', false],
+    ['/tasks', '', false],
+  ]
+  for (const [pathname, search, pushed] of cases) {
+    it(`${pathname}${search} → ${pushed}`, () => {
+      expect(isPushedGitScreen(pathname, search)).toBe(pushed)
     })
   }
 })

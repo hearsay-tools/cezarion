@@ -276,7 +276,7 @@ export function worktreeSizeBytes(path: string): Promise<number | null> {
  *  branch is passed (retention #575: directory only, receipts and branch kept). */
 /** Ownership receipts survive a missing run index and a replaced directory.
  * Unreadable/malformed evidence disables generic deletion instead of granting it. */
-async function ownedCleanupProtection(repoRoot: string): Promise<{ paths: Set<string>; branches: Set<string>; uncertain: boolean }> {
+export async function ownedCleanupProtection(repoRoot: string): Promise<{ paths: Set<string>; branches: Set<string>; uncertain: boolean }> {
   const paths = new Set<string>(); const branches = new Set<string>();
   try {
     const common = await git(repoRoot, ['rev-parse', '--path-format=absolute', '--git-common-dir']);
@@ -327,14 +327,14 @@ export async function removeWorktree(
   repoRoot: string,
   worktreePath: string,
   branch?: string,
-  opts?: { reclaimOwnedDirectory?: boolean },
+  opts?: { reclaimOwnedDirectory?: boolean; onlyClean?: boolean },
 ): Promise<void> {
   await withWorktreeMutation(repoRoot, git => removeWorktreeLocked(repoRoot, worktreePath, branch, opts, git)).catch(() => undefined);
 }
 
 async function removeWorktreeLocked(
   repoRoot: string, worktreePath: string, branch: string | undefined,
-  opts: { reclaimOwnedDirectory?: boolean } | undefined, git: WorktreeGit,
+  opts: { reclaimOwnedDirectory?: boolean; onlyClean?: boolean } | undefined, git: WorktreeGit,
 ): Promise<void> {
   const protection = await ownedCleanupProtection(repoRoot);
   // Directory-only retention (#575) may reclaim a finished owned-worker checkout
@@ -351,6 +351,23 @@ async function removeWorktreeLocked(
       (entry) => entry.startsWith('worktree ') && canonicalPath(entry.slice(9)) === canonicalPath(worktreePath),
     );
     if (!registered) return;
+  }
+  // Reclaim keeps the branch and calls the work recoverable, which holds only for what a REF keeps:
+  // staged, unstaged and untracked files, and commits made on a detached HEAD, exist in this
+  // checkout alone. So the HEAD must be reachable from a branch or remote-tracking ref, and the
+  // removal is git's own unforced one — git refuses a dirty tree at the moment it removes, which a
+  // status read beforehand cannot promise against an editor saving in between. Any refusal keeps
+  // the directory: no forced fallback, no `rm`. Ignored files (build output) never block it.
+  if (opts?.onlyClean) {
+    const head = await git(worktreePath, ['rev-parse', '--verify', '--quiet', 'HEAD^{commit}']);
+    const sha = head.stdout.trim();
+    if (!head.ok || !sha) return;
+    const kept = await git(repoRoot, ['for-each-ref', '--contains', sha, '--count=1', '--format=%(refname)', 'refs/heads', 'refs/remotes']);
+    if (!kept.ok || kept.stdout.trim() === '') return;
+    const removed = await git(repoRoot, ['worktree', 'remove', worktreePath]);
+    if (!removed.ok) return;
+    if (protection.paths.size === 0) await git(repoRoot, ['worktree', 'prune']);
+    return;
   }
   const removed = await git(repoRoot, ['worktree', 'remove', '--force', worktreePath]);
   // Owned-path reclaim must not `rm` a receipt path that is no longer a git

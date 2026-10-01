@@ -29,6 +29,7 @@ const REPO: RepoResponse = {
   log: [],
   branches: ['main', 'develop'],
   baseBranch: null,
+  tracking: null,
 }
 
 /** The boot project, as the registry answers it — the Account picker writes to this entry. */

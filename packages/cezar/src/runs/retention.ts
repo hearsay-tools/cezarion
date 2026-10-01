@@ -116,6 +116,15 @@ export interface ReclaimOptions {
    *  Injectable so tests can exercise the "removal failed" branch without brittle
    *  filesystem-permission tricks. */
   remove?: (repoRoot: string, worktreePath: string) => Promise<void>;
+  /** Claims the run for the whole reclaim, or returns null to skip it. A selection is made before
+   *  any await, so without a claim a Continue admitted in between would resume into the directory
+   *  the forced removal is about to delete. The run manager's `claimWorktreeReclaim` is the one
+   *  that also blocks admission; startup sweeps run before any run can start and omit it. */
+  claim?: (run: RunRecord) => (() => void) | null;
+  /** Require a clean, ref-kept checkout for an owned worker too. Retention (#575) relies on the
+   *  worker's evidence snapshot; a person pressing Reclaim on one row (issue 08 §B4) is not shown
+   *  that a diff snapshot drops binary content and caps its size, so that path asks for clean. */
+  requireClean?: boolean;
 }
 
 /** Snapshot parent-owned worker evidence before the checkout goes.
@@ -136,23 +145,50 @@ export async function reclaimWorktrees(
   keep: number,
   opts: ReclaimOptions = {},
 ): Promise<string[]> {
-  const now = opts.now ?? (() => new Date().toISOString());
-  const remove = opts.remove ?? ((root, path) => removeWorktree(root, path, undefined, { reclaimOwnedDirectory: true })); // branch kept
   const runs = store.listRuns();
   const byId = new Map(runs.map((r) => [r.id, r]));
   const reclaimed: string[] = [];
   for (const id of selectReclaimableWorktrees(runs, keep)) {
     const run = byId.get(id);
-    if (!run?.worktreePath) continue;
-    try {
-      if (!(await preserveWorkerResult(repoRoot, store, run).catch(() => false))) continue;
-      await remove(repoRoot, run.worktreePath);
-      if (existsSync(run.worktreePath)) continue; // reclaim failed; retry next pass
-      store.updateRun(id, { worktreeReclaimedAt: now() });
-      reclaimed.push(id);
-    } catch {
-      // best-effort: never let retention crash a terminal transition or startup.
-    }
+    if (run && (await reclaimWorktree(repoRoot, store, run, opts))) reclaimed.push(id);
   }
   return reclaimed;
+}
+
+/**
+ * Reclaim ONE run's worktree directory — the step `reclaimWorktrees` applies to each over-limit
+ * run, and what `POST /worktrees/:runId/reclaim` (issue 08 §B4) calls for a single row. The
+ * caller has already decided the run `isReclaimable`. Branch kept; owned workers get their
+ * evidence snapshotted first, and any other run's checkout must be clean — uncommitted work is
+ * not on the branch, so removing it would not be recoverable. Returns the stamp it wrote, or null
+ * when nothing was reclaimed (the directory survived or was dirty, or evidence could not be
+ * preserved). Never throws.
+ */
+export async function reclaimWorktree(
+  repoRoot: string,
+  store: RetentionStore,
+  run: RunRecord,
+  opts: ReclaimOptions = {},
+): Promise<string | null> {
+  const now = opts.now ?? (() => new Date().toISOString());
+  // Branch kept. An owned worker's evidence (uncommitted diff included) is snapshotted first; any
+  // other run's uncommitted work lives only in the directory, so a dirty one is left for later.
+  const onlyClean = opts.requireClean === true || run.delegation?.role !== 'worker';
+  const remove = opts.remove ?? ((root, path) => removeWorktree(root, path, undefined, { reclaimOwnedDirectory: true, onlyClean }));
+  if (!run.worktreePath) return null;
+  const release = opts.claim ? opts.claim(run) : () => undefined;
+  if (!release) return null; // in use since it was selected
+  try {
+    if (!(await preserveWorkerResult(repoRoot, store, run).catch(() => false))) return null;
+    await remove(repoRoot, run.worktreePath);
+    if (existsSync(run.worktreePath)) return null; // reclaim failed; retry next pass
+    const stamp = now();
+    store.updateRun(run.id, { worktreeReclaimedAt: stamp });
+    return stamp;
+  } catch {
+    // best-effort: never let retention crash a terminal transition or startup.
+    return null;
+  } finally {
+    release();
+  }
 }

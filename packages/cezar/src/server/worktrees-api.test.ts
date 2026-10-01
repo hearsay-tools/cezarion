@@ -5,11 +5,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import type { Hono } from 'hono';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createOwnedWorkspace } from '../delegation/workspace.ts';
 import { createWorktree } from '../git-worktree.ts';
 import { RunStore } from '../runs/store.ts';
-import type { RunManager } from '../workflows/run.ts';
+import { RunManager } from '../workflows/run.ts';
 import { createApp } from './server.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
 
@@ -27,6 +27,7 @@ describe('the worktrees API', () => {
   let cezHome: string;
   let store: RunStore;
   let app: Hono;
+  let manager: RunManager;
   const savedHome = process.env.CEZ_HOME;
 
   beforeEach(async () => {
@@ -41,10 +42,13 @@ describe('the worktrees API', () => {
     await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
     mkdirSync(join(repoRoot, '.ai/cezar'), { recursive: true });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    app = createApp({ repoRoot, store, manager: { isActive: () => false } as unknown as RunManager, version: '0.0.0-test' });
+    // A real manager: the reclaim routes claim through it, the same claim Continue is refused by.
+    manager = new RunManager(store, repoRoot);
+    app = createApp({ repoRoot, store, manager, version: '0.0.0-test' });
   });
 
   afterEach(() => {
+    manager.dispose();
     store.flush();
     if (savedHome === undefined) delete process.env.CEZ_HOME;
     else process.env.CEZ_HOME = savedHome;
@@ -75,6 +79,7 @@ describe('the worktrees API', () => {
         sizeBytes: number | null;
         finishedAt: string | null;
         reclaimable: boolean;
+        pastKeep: boolean;
       }>;
       totalBytes: number | null;
       keep: number;
@@ -121,7 +126,13 @@ describe('the worktrees API', () => {
   it('POST /reclaim reclaims down to the limit and returns the reclaimed ids', async () => {
     writeFileSync(join(repoRoot, '.ai/cezar/config.json'), JSON.stringify({ worktreeRetention: 1 }), 'utf8');
     const oldId = await seed('44444444-4444-4444-8444-444444444444', 'done', '2026-07-01T00:00:00Z');
-    await seed('55555555-5555-4555-8555-555555555555', 'done', '2026-07-09T00:00:00Z');
+    const newId = await seed('55555555-5555-4555-8555-555555555555', 'done', '2026-07-09T00:00:00Z');
+    const reviewId = await seed('77777777-7777-4777-8777-777777777777', 'review', '2026-06-01T00:00:00Z');
+
+    // `pastKeep` names exactly the rows Reclaim now takes: the older finished one. The newest is
+    // kept inside keep=1, and a review row is never past it however old it is.
+    const listed = Object.fromEntries((await getWorktrees()).worktrees.map((w) => [w.runId, w.pastKeep]));
+    expect(listed).toEqual({ [oldId]: true, [newId]: false, [reviewId]: false });
 
     const res = await apiRequest(app, '/api/v1/worktrees/reclaim', {
       method: 'POST',
@@ -186,6 +197,29 @@ describe('the worktrees API', () => {
     expect(existsSync(newWorkspace.path)).toBe(true);
   });
 
+  it('the row reclaim keeps a dirty owned-worker checkout: its diff snapshot would drop binary bytes', async () => {
+    const parent = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });
+    store.updateRun(parent.id, { status: 'done', finishedAt: '2026-07-09T00:00:00Z', delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
+    const sha = (await run('git', ['rev-parse', 'HEAD'], { cwd: repoRoot })).stdout.trim();
+    const dirty = await createOwnedWorkspace(repoRoot, randomUUID(), sha);
+    const clean = await createOwnedWorkspace(repoRoot, randomUUID(), sha);
+    const worker = (workspace: typeof dirty, seal: string) => {
+      const rec = store.createOwnedRun({ title: 'worker', task: 'worker', workflow: 'quick-task', steps: [] }, parent.id, randomUUID(),
+        { role: 'worker', parentRunId: parent.id, permissions: [], workspace }, seal);
+      store.updateRun(rec.id, { status: 'done', finishedAt: '2026-07-01T00:00:00Z', worktreePath: workspace.path, branch: workspace.branch });
+      return rec.id;
+    };
+    const dirtyId = worker(dirty, 'c'.repeat(64));
+    const cleanId = worker(clean, 'd'.repeat(64));
+    writeFileSync(join(dirty.path, 'uncommitted.bin'), Buffer.from([0, 1, 2, 255, 0, 7]));
+
+    const res = await apiRequest(app, `/api/v1/worktrees/${dirtyId}/reclaim`, { method: 'POST' });
+    expect(res.status).toBe(409);
+    expect(existsSync(join(dirty.path, 'uncommitted.bin'))).toBe(true);
+    expect((await apiRequest(app, `/api/v1/worktrees/${cleanId}/reclaim`, { method: 'POST' })).status).toBe(200);
+    expect(existsSync(clean.path)).toBe(false);
+  });
+
   it('does not mark a finished worker reclaimable while its parent is live without a worktree dir', async () => {
     const parent = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });
     store.updateRun(parent.id, {
@@ -232,6 +266,163 @@ describe('the worktrees API', () => {
     store.updateRun(worker.id, { delegation: { role: 'invalid' } });
     expect((await apiRequest(app, `/api/v1/runs/${worker.id}`, { method: 'DELETE' })).status).toBe(409);
     expect(existsSync(workspace.path)).toBe(true);
+  });
+
+  describe('POST /worktrees/:runId/reclaim (issue 08 §B4)', () => {
+    const reclaimOne = (id: string) => apiRequest(app, `/api/v1/worktrees/${id}/reclaim`, { method: 'POST' });
+    const branchExists = async (branch: string) =>
+      run('git', ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], { cwd: repoRoot }).then(() => true, () => false);
+
+    it('removes the directory, keeps the branch, and stamps worktreeReclaimedAt', async () => {
+      const id = await seed(randomUUID(), 'done', '2026-07-01T00:00:00Z');
+      const { worktreePath, branch } = store.getRun(id)!;
+      const res = await reclaimOne(id);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { runId: string; worktreeReclaimedAt: string };
+      expect(body.runId).toBe(id);
+      expect(existsSync(worktreePath!)).toBe(false);
+      expect(await branchExists(branch!)).toBe(true);
+      expect(store.getRun(id)?.worktreeReclaimedAt).toBe(body.worktreeReclaimedAt);
+      // Reclaimed once is reclaimed: a second press is a 409, not a second stamp.
+      expect((await reclaimOne(id)).status).toBe(409);
+    });
+
+    it('409s for a live run, a review run, and a run the manager still holds; 404s an unknown id', async () => {
+      const live = await seed(randomUUID(), 'running');
+      const review = await seed(randomUUID(), 'review', '2026-07-02T00:00:00Z');
+      const held = await seed(randomUUID(), 'done', '2026-07-03T00:00:00Z');
+      const isActive = manager.isActive.bind(manager);
+      vi.spyOn(manager, 'isActive').mockImplementation((runId) => runId === held || isActive(runId));
+      for (const id of [live, review, held]) {
+        expect((await reclaimOne(id)).status).toBe(409);
+        expect(existsSync(store.getRun(id)!.worktreePath!)).toBe(true);
+        expect(store.getRun(id)?.worktreeReclaimedAt).toBeUndefined();
+      }
+      expect((await reclaimOne(randomUUID())).status).toBe(404);
+    });
+
+    /** A finished run with an agent session, so Continue is admissible (the bundled mock serves it). */
+    const resumable = async () => {
+      const wt = await createWorktree(repoRoot, randomUUID(), 'main');
+      const rec = store.createRun({ title: 'resumable', workflow: 'w', task: 't', steps: [{ id: 'task', name: 'Task', kind: 'agent' }] });
+      store.updateStep(rec.id, 'task', { status: 'done', sessionId: 'sess-1', backend: 'claude' });
+      store.updateRun(rec.id, { status: 'done', finishedAt: '2026-07-01T00:00:00Z', worktreePath: wt.path, branch: wt.branch });
+      return rec.id;
+    };
+    const savedDryRun = process.env.CEZ_DRY_RUN;
+    beforeEach(() => { process.env.CEZ_DRY_RUN = '1'; });
+    afterEach(() => {
+      if (savedDryRun === undefined) delete process.env.CEZ_DRY_RUN;
+      else process.env.CEZ_DRY_RUN = savedDryRun;
+    });
+
+    it('refuses a checkout with uncommitted work, in the row reclaim and in Reclaim now', async () => {
+      writeFileSync(join(repoRoot, '.ai/cezar/config.json'), JSON.stringify({ worktreeRetention: 1 }), 'utf8');
+      const dirty = await seed(randomUUID(), 'done', '2026-07-01T00:00:00Z');
+      const untracked = await seed(randomUUID(), 'done', '2026-07-02T00:00:00Z');
+      await seed(randomUUID(), 'done', '2026-07-09T00:00:00Z');
+      const pathOf = (id: string) => store.getRun(id)!.worktreePath!;
+      writeFileSync(join(pathOf(dirty), 'base.txt'), 'edited after the run\n');
+      writeFileSync(join(pathOf(untracked), 'notes.md'), 'only here\n');
+
+      const res = await reclaimOne(dirty);
+      expect(res.status).toBe(409);
+      expect(((await res.json()) as { error: string }).error).toContain('1 uncommitted file');
+      // Both are over keep=1, and both stay: their work is on no branch.
+      const bulk = await apiRequest(app, '/api/v1/worktrees/reclaim', { method: 'POST' });
+      expect(await bulk.json()).toEqual({ reclaimed: [] });
+      for (const id of [dirty, untracked]) {
+        expect(existsSync(pathOf(id))).toBe(true);
+        expect(store.getRun(id)?.worktreeReclaimedAt).toBeUndefined();
+      }
+      expect(existsSync(join(pathOf(untracked), 'notes.md'))).toBe(true);
+    });
+
+    it('refuses a checkout whose HEAD is a commit no branch keeps', async () => {
+      const id = await seed(randomUUID(), 'done', '2026-07-01T00:00:00Z');
+      const path = store.getRun(id)!.worktreePath!;
+      // Committed, but on a detached HEAD: the kept cez/ branch never saw it.
+      await run('git', ['checkout', '-q', '--detach'], { cwd: path });
+      writeFileSync(join(path, 'detached.txt'), 'only on HEAD\n');
+      await run('git', ['add', '-A'], { cwd: path });
+      await run('git', [...GIT_ID, 'commit', '-q', '-m', 'detached work'], { cwd: path });
+      expect((await reclaimOne(id)).status).toBe(409);
+      expect(existsSync(join(path, 'detached.txt'))).toBe(true);
+    });
+
+    it('still reclaims a checkout whose only extra files are ignored build output', async () => {
+      const id = await seed(randomUUID(), 'done', '2026-07-01T00:00:00Z');
+      const path = store.getRun(id)!.worktreePath!;
+      writeFileSync(join(repoRoot, '.git/info/exclude'), 'node_modules/\n');
+      mkdirSync(join(path, 'node_modules/pkg'), { recursive: true });
+      writeFileSync(join(path, 'node_modules/pkg/index.js'), 'module.exports = 1\n');
+      expect((await reclaimOne(id)).status).toBe(200);
+      expect(existsSync(path)).toBe(false);
+    });
+
+    it('holds Continue off for the whole removal, and admits it again once the directory is gone', async () => {
+      const id = await resumable();
+      // Continue arrives the moment the handler holds its claim, while the removal is still awaiting.
+      const claimed = new Promise<void>((resolve) => {
+        const claim = manager.claimWorktreeReclaim.bind(manager);
+        vi.spyOn(manager, 'claimWorktreeReclaim').mockImplementation((runId) => {
+          const release = claim(runId);
+          resolve();
+          return release;
+        });
+      });
+      const pending = reclaimOne(id);
+      await claimed;
+      expect(manager.continueRun(id, { text: 'go on' })).toEqual({ ok: false, error: expect.stringContaining('being cleaned up') });
+      expect((await pending).status).toBe(200);
+      expect(existsSync(store.getRun(id)!.worktreePath!)).toBe(false);
+      // Released: the next Continue is admitted, and re-materializes the reclaimed tree.
+      expect(manager.continueRun(id, { text: 'go on' }).ok).toBe(true);
+    });
+
+    it('a reclaimed task can still open its draft PR: the checkout is restored first', async () => {
+      // The checkout under the run's OWN id, as a real task has it — what re-materializing rebuilds.
+      const id = store.createRun({ title: 'reclaimed', workflow: 'w', task: 't', steps: [] }).id;
+      const wt = await createWorktree(repoRoot, id, 'main');
+      store.updateRun(id, { status: 'done', finishedAt: '2026-07-01T00:00:00Z', worktreePath: wt.path, branch: wt.branch, baseBranch: 'main' });
+      const { worktreePath, branch } = store.getRun(id)!;
+      writeFileSync(join(worktreePath!, 'work.txt'), 'task work\n');
+      await run('git', ['add', '-A'], { cwd: worktreePath! });
+      await run('git', [...GIT_ID, 'commit', '-q', '-m', 'task work'], { cwd: worktreePath! });
+      expect((await reclaimOne(id)).status).toBe(200);
+      expect(existsSync(worktreePath!)).toBe(false);
+
+      const res = await apiRequest(app, `/api/v1/runs/${id}/pr`, { method: 'POST' });
+      expect(res.status).toBe(201);
+      expect(existsSync(join(worktreePath!, 'work.txt'))).toBe(true);
+      expect(store.getRun(id)).toMatchObject({ branch, worktreeReclaimedAt: undefined, pullRequestUrl: expect.any(String) });
+    });
+
+    it('holds reclaim off a restored checkout for as long as its draft PR is publishing', async () => {
+      const id = await seed(randomUUID(), 'done', '2026-07-01T00:00:00Z');
+      // Restored and unstamped, this is exactly what the PR route has just re-materialized.
+      const release = manager.claimForPublish(id)!;
+      expect((await reclaimOne(id)).status).toBe(409);
+      expect(manager.claimForBranchCleanup([id])).toBeNull();
+      expect(manager.continueRun(id, { text: 'go on' })).toMatchObject({ ok: false });
+      expect(existsSync(store.getRun(id)!.worktreePath!)).toBe(true);
+      release();
+      expect((await reclaimOne(id)).status).toBe(200);
+
+      // And the route holds that claim from before the restore until it answers.
+      const spy = vi.spyOn(manager, 'claimForPublish');
+      const other = await seed(randomUUID(), 'done', '2026-07-02T00:00:00Z');
+      await apiRequest(app, `/api/v1/runs/${other}/pr`, { method: 'POST' });
+      expect(spy).toHaveBeenCalledWith(other);
+      expect(manager.claimForPublish(other)).not.toBeNull(); // released afterwards
+    });
+
+    it('409s while a run is being Continued, and leaves its directory alone', async () => {
+      const id = await resumable();
+      expect(manager.continueRun(id, { text: 'go on' }).ok).toBe(true);
+      expect((await reclaimOne(id)).status).toBe(409);
+      expect(existsSync(store.getRun(id)!.worktreePath!)).toBe(true);
+    });
   });
 
   it('human deletion still cleans an ordinary terminal run', async () => {

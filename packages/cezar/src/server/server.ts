@@ -33,6 +33,7 @@ import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { z } from 'zod';
 import {
   repoPullInputSchema,
+  deleteBranchesInputSchema,
   pinRunInputSchema,
   notifyRunInputSchema,
   type TestProjectWebhookResponse,
@@ -111,8 +112,9 @@ import { artifactDirectory, listArtifacts, readArtifact } from '../artifacts/sto
 import { artifactPreview, loadFileLink, rasterMime } from '../artifacts/resolve.ts';
 import { isUntouchedCancelledRun, toPastedContent, type PastedContent, type RunManager } from '../workflows/run.ts';
 import { removeWorktree, worktreeDiff, worktreeDiffStat, worktreeSizeBytes } from '../git-worktree.ts';
-import { isReclaimable, reclaimWorktrees } from '../runs/retention.ts';
-import { getBranches, getCommit, getDiff, getLog, getRepoInfo, getStatus } from './git.ts';
+import { isReclaimable, reclaimWorktree, reclaimWorktrees, rematerializeReclaimedWorktree, selectReclaimableWorktrees } from '../runs/retention.ts';
+import { getBranches, getCommit, getDiff, getLogWithParents, getRepoInfo, getStatus, getTracking } from './git.ts';
+import { attributeLog, deleteBranches, forgetRepoBranches, githubBranchForge, readRepoBranches, type BranchForge, type ClassifyInput } from './repo-branches.ts';
 import { claimRepoGitMutation, localPullBranches, pullRepoCheckout } from './repo-pull.ts';
 import {
   collectChanges,
@@ -267,6 +269,9 @@ export interface ServerDeps {
    *  route's guards, cleanup and error surfacing are exercised for real
    *  against real temp dirs, without a network or a `gh` binary. */
   cloneRunner?: CloneRunner;
+  /** What the Git view's branch classifier asks GitHub (issue 08). Defaults to the ref-status
+   *  cache plus one cached `gh pr list`; tests inject a fake forge. */
+  branchForge?: BranchForge;
   /** Host-wide model discovery service. Tests inject a deterministic adapter. */
   modelCatalog?: RunnerModelCatalog;
   /** Host-wide provider authentication discovery. Tests inject deterministic probes. */
@@ -4565,40 +4570,50 @@ export function createApp(deps: ServerDeps) {
     .post('/runs/:id/pr', async (c) => {
       const { root: repoRoot, dataDir, store, manager } = c.get('project');
       const id = c.req.param('id');
-      const run = store.getRun(id);
-      if (!run) return c.json({ error: 'not found' }, 404);
+      if (!store.getRun(id)) return c.json({ error: 'not found' }, 404);
       if (manager.isActive(id)) return c.json({ error: 'run is still active — wait for the review gate' }, 409);
-      if (!run.worktreePath || !existsSync(run.worktreePath) || !run.branch) {
-        return c.json(
-          {
-            error: 'no worktree/branch to publish — this task ran in the repo working tree',
-          },
-          400,
-        );
+      const release = manager.claimForPublish(id);
+      if (!release) return c.json({ error: 'its worktree or branch is being cleaned up — retry in a moment' }, 409);
+      try {
+        // Reclaim (#483, issue 08 §B4) removed the directory and kept the branch, and Not landed
+        // offers this on exactly those rows: restore the checkout first, as Continue does.
+        await rematerializeReclaimedWorktree(repoRoot, store, id);
+        const run = store.getRun(id);
+        if (!run) return c.json({ error: 'not found' }, 404);
+        if (!run.worktreePath || !existsSync(run.worktreePath) || !run.branch) {
+          return c.json(
+            {
+              error: 'no worktree/branch to publish — this task ran in the repo working tree',
+            },
+            400,
+          );
+        }
+        const outcome = await createDraftPr({
+          repoRoot,
+          run,
+          handoffText: readHandoff(dataDir, id),
+        });
+        if (!outcome.ok) {
+          return c.json({ error: outcome.error, manual: `git merge ${run.branch}` }, 409);
+        }
+        // A number the cockpit asked about BEFORE the pull request existed is cached as "this
+        // repository has no such number" — which is exactly what a `CEZ:PR=901` marker declared
+        // ahead of the push looks like. It exists now.
+        const createdNumber = refNumberFromUrl(outcome.url);
+        if (createdNumber !== null) forgetRefStatus(repoRoot, createdNumber);
+        store.updateRun(id, {
+          pullRequestUrl: outcome.url,
+          status: 'done',
+          finishedAt: run.finishedAt ?? new Date().toISOString(),
+        });
+        store.appendEvent(id, {
+          type: 'note',
+          message: `draft PR created: ${outcome.url}${outcome.dryRun ? ' (dry run — no real PR)' : ''}`,
+        });
+        return c.json({ url: outcome.url, dryRun: outcome.dryRun }, 201);
+      } finally {
+        release();
       }
-      const outcome = await createDraftPr({
-        repoRoot,
-        run,
-        handoffText: readHandoff(dataDir, id),
-      });
-      if (!outcome.ok) {
-        return c.json({ error: outcome.error, manual: `git merge ${run.branch}` }, 409);
-      }
-      // A number the cockpit asked about BEFORE the pull request existed is cached as "this
-      // repository has no such number" — which is exactly what a `CEZ:PR=901` marker declared
-      // ahead of the push looks like. It exists now.
-      const createdNumber = refNumberFromUrl(outcome.url);
-      if (createdNumber !== null) forgetRefStatus(repoRoot, createdNumber);
-      store.updateRun(id, {
-        pullRequestUrl: outcome.url,
-        status: 'done',
-        finishedAt: run.finishedAt ?? new Date().toISOString(),
-      });
-      store.appendEvent(id, {
-        type: 'note',
-        message: `draft PR created: ${outcome.url}${outcome.dryRun ? ' (dry run — no real PR)' : ''}`,
-      });
-      return c.json({ url: outcome.url, dryRun: outcome.dryRun }, 201);
     })
 
     // Archived tasks keep their worktree for inspection; this is the explicit
@@ -4813,6 +4828,8 @@ export function createApp(deps: ServerDeps) {
       // Listing is on-disk dirs only; parent liveness for #575 uses the full store
       // so a live `worktree: false` parent is not treated as gone (#570 honesty).
       const runs = allRuns.filter((r) => r.worktreePath && existsSync(r.worktreePath));
+      // The rows the enforcer would reclaim right now: reclaimable AND past the newest `keep`.
+      const pastKeep = new Set(selectReclaimableWorktrees(allRuns, keep));
       const worktrees = await Promise.all(
         runs.map(async (r) => ({
           runId: r.id,
@@ -4823,6 +4840,7 @@ export function createApp(deps: ServerDeps) {
           sizeBytes: await worktreeSizeBytes(r.worktreePath as string),
           finishedAt: r.finishedAt ?? null,
           reclaimable: isReclaimable(r, allRuns),
+          pastKeep: pastKeep.has(r.id),
         })),
       );
       // Total is null when any size degraded, so the panel never shows a wrong sum.
@@ -4836,8 +4854,38 @@ export function createApp(deps: ServerDeps) {
       const { root: repoRoot, store } = c.get('project');
       // The body is validated (an empty or `{}` one is accepted) but carries nothing this
       // handler reads; retention is best-effort, so 200 always.
-      const reclaimed = await reclaimWorktrees(repoRoot, store, await resolveWorktreeRetention(repoRoot));
+      const { manager } = c.get('project');
+      const reclaimed = await reclaimWorktrees(repoRoot, store, await resolveWorktreeRetention(repoRoot), {
+        claim: (run) => manager.claimWorktreeReclaim(run.id),
+      });
+      if (reclaimed.length > 0) forgetRepoBranches(repoRoot);
       return c.json({ reclaimed });
+    })
+
+    // One row's reclaim (issue 08 §B4): the DIRECTORY only, by retention's own rule and helper —
+    // the `cez/<id8>` branch is kept, which is what makes this safe to offer on every finished
+    // row. `/runs/:id/remove-worktree` (directory AND branch) stays the task screen's action.
+    .post('/worktrees/:runId/reclaim', paramZodValidator(z.object({ runId: z.string().min(1) })), async (c) => {
+      const { root: repoRoot, store, manager } = c.get('project');
+      const run = store.getRun(c.req.valid('param').runId);
+      if (!run) return c.json({ error: 'not found' }, 404);
+      // Claimed, not merely checked: the claim holds Continue off until the directory is gone.
+      const release = manager.claimWorktreeReclaim(run.id);
+      if (!release) {
+        return c.json({ error: 'this worktree is in use or already reclaimed — only a finished task\'s worktree can be reclaimed' }, 409);
+      }
+      const worktreeReclaimedAt = await reclaimWorktree(repoRoot, store, run, { requireClean: true }).finally(release);
+      if (!worktreeReclaimedAt) {
+        // Reclaim keeps only what is committed, so it leaves a dirty checkout alone; say which case this was.
+        const dirty = run.worktreePath && existsSync(run.worktreePath) ? (await getStatus(run.worktreePath).catch(() => [])).length : 0;
+        return c.json({
+          error: dirty > 0
+            ? `the worktree has ${dirty} uncommitted file${dirty === 1 ? '' : 's'} that exist nowhere else — commit or discard them first`
+            : 'the worktree directory could not be removed',
+        }, 409);
+      }
+      forgetRepoBranches(repoRoot);
+      return c.json({ runId: run.id, worktreeReclaimedAt });
     });
 
   const reclaimBodySchema = z.object({}).passthrough();
@@ -5393,6 +5441,25 @@ export function createApp(deps: ServerDeps) {
     overrideRules: z.boolean().optional().default(false),
   }).strict();
 
+  /** What the branch classifier reads for one project, or null outside a repository. */
+  const branchClassifyInput = async (
+    project: { root: string; store: RunStore; manager: RunManager },
+  ): Promise<ClassifyInput | null> => {
+    const info = await getRepoInfo(project.root);
+    if (!info) return null;
+    const config = await loadConfig(project.root);
+    return {
+      root: info.root,
+      runs: project.store.listRuns(),
+      isActive: (id) => project.manager.isActive(id),
+      configuredBase: config.baseBranch,
+      currentBranch: info.branch,
+      hasRemote: Boolean(info.remote),
+      forge: deps.branchForge ?? githubBranchForge,
+      claimRuns: (ids) => project.manager.claimForBranchCleanup(ids),
+    };
+  };
+
   // ---- chained family: repo / git (project-scoped) ----
   const repoRoutes = new Hono<ProjectApiEnv>()
     .get('/repo', async (c) => {
@@ -5405,20 +5472,58 @@ export function createApp(deps: ServerDeps) {
           log: [],
           branches: [],
           baseBranch: null,
+          tracking: null,
         });
-      const [status, log, branches, config] = await Promise.all([
+      const [status, rawLog, branches, config] = await Promise.all([
         getStatus(info.root),
-        getLog(info.root),
+        getLogWithParents(info.root),
         getBranches(info.root),
         loadConfig(repoRoot),
       ]);
+      const [tracking, sources] = await Promise.all([
+        getTracking(info.root, config.baseBranch ?? info.branch),
+        attributeLog(info.root, rawLog, c.get('project').store.listRuns()),
+      ]);
+      // `source` is spread conditionally: absent, never `null`, when no task is known.
+      const log = rawLog.map(({ parents: _parents, ...entry }, i) => {
+        const source = sources[i];
+        return source ? { ...entry, source } : entry;
+      });
       return c.json({
         info,
         status,
         log,
         branches,
         baseBranch: config.baseBranch ?? null,
+        tracking,
       });
+    })
+
+    // Every local branch, classified (issue 08 §A/§B2) — cached on the refs state, so the
+    // sidebar's counts do not shell out on every render.
+    .get('/repo/branches', async (c) => {
+      const input = await branchClassifyInput(c.get('project'));
+      if (!input) return c.json({ base: '', prStateKnown: false, branches: [], counts: { notLanded: 0, cleanup: 0 } });
+      return c.json(await readRepoBranches(input));
+    })
+
+    // Delete local branches (issue 08 §B3). The server re-classifies and never trusts the
+    // client's class: nothing here can delete work that is not on the base without the typed
+    // confirmation, and nothing in use can be deleted at all.
+    .post('/repo/branches/delete', jsonZodValidator(deleteBranchesInputSchema), async (c) => {
+      const input = await branchClassifyInput(c.get('project'));
+      if (!input) return c.json({ error: 'not a git repository', refused: [] }, 409);
+      const body = c.req.valid('json');
+      // The cockpit's checkout switch and pull hold this, not the worktree lock: without it a switch
+      // could check a candidate out after the delete read the worktree list, and `update-ref` would
+      // delete the branch HEAD now names.
+      const release = claimRepoGitMutation(input.root);
+      if (!release) return c.json({ error: 'a branch switch or pull is running — try again when it finishes', refused: [] }, 409);
+      const result = await deleteBranches(input, body.names, body.confirm).finally(release);
+      if (result.deleted.length === 0) {
+        return c.json({ error: result.refused[0]?.reason ?? 'nothing was deleted', refused: result.refused }, 409);
+      }
+      return c.json(result, 200);
     })
 
     .get('/repo/diff', async (c) => {
@@ -5502,6 +5607,7 @@ export function createApp(deps: ServerDeps) {
       try {
         const input = c.req.valid('json');
         const result = await createOrSwitchBranch(info.root, input.name, input.from);
+        forgetRepoBranches(info.root);
         if (!result.ok) return c.json({ error: result.error }, 409);
         return c.json({ branch: result.branch, created: result.created });
       } finally {
