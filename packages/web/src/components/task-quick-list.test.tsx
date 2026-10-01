@@ -9,7 +9,7 @@ import { workspaceQueryKeys } from '@/api/queries'
 import { setApiScope } from '@open-mercato/cezar-api-client'
 import type { RunRecord } from '@open-mercato/cezar-api-client'
 import { ListViewProvider } from '@/components/list-view'
-import { ReferenceStatusProvider } from '@/components/reference-status'
+import { ReferenceStatusProvider, ReferenceStatusRegistry } from '@/components/reference-status'
 import { SidebarSessionScope, TaskQuickList, TaskQuickListContainer } from '@/components/task-quick-list'
 
 const NOW = Date.parse('2026-07-14T12:00:00.000Z')
@@ -1803,6 +1803,56 @@ describe('notifying glyph and age-first overflow on the meta line (#729)', () =>
       needsAge = 120
       resizeChip(chip, 40)
       expect(age('t')).not.toBeNull()
+    })
+
+    it('follows a chip the real registry replaces while it hydrates (idle anchor → hover card), not the detached first one', async () => {
+      // Live watchers only: a disconnected observer, or one on a detached node, reports nothing.
+      const watchers: Array<{ cb: (entries?: unknown[]) => void; targets: Set<Element>; live: boolean }> = []
+      vi.stubGlobal('ResizeObserver', class {
+        private w = { cb: undefined as unknown as (entries?: unknown[]) => void, targets: new Set<Element>(), live: true }
+        constructor(cb: (entries?: unknown[]) => void) { this.w.cb = cb; watchers.push(this.w); observers.push(() => cb()) }
+        observe(target: Element) { this.w.targets.add(target) }
+        unobserve(target: Element) { this.w.targets.delete(target) }
+        disconnect() { this.w.live = false }
+      })
+      const report = (el: Element, width: number) => act(() => watchers
+        .filter((w) => w.live && w.targets.has(el) && el.isConnected)
+        .forEach((w) => w.cb([{ target: el, contentRect: { width } }])))
+      const requests: Array<() => void> = []
+      vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((resolve) => {
+        requests.push(() => resolve(new Response(JSON.stringify({ available: true, recheckAfterMs: null, prs: { 594: 'merged' }, issues: {} }), { status: 200, headers: { 'content-type': 'application/json' } })))
+      })))
+      client = 130
+      // The idle anchor is mounted and unmounted inside render()'s own act: catch the removal.
+      const removed: Element[] = []
+      const mutations = new MutationObserver((records) => records.forEach((r) => r.removedNodes.forEach((n) => { if (n instanceof Element) removed.push(n) })))
+      mutations.observe(document.body, { childList: true, subtree: true })
+      render(
+        <QueryClientProvider client={createQueryClient()}>
+          <MemoryRouter>
+            <ReferenceStatusRegistry>
+              <ReferenceStatusProvider projectId="p" requests={[{ projectId: 'p', kind: 'PR', number: 594 }]}>
+                <TaskQuickList runs={[run({ id: 't', status: 'running', pullRequestUrl: 'https://github.com/o/r/pull/594' })]} view="active" now={NOW} onViewChange={vi.fn()} />
+              </ReferenceStatusProvider>
+            </ReferenceStatusRegistry>
+          </MemoryRouter>
+        </QueryClientProvider>,
+      )
+      const direct = () => Array.from(metaEl('t').children).find((c) => c.matches('[data-slot="pr-chip"], [data-slot="reference-status-trigger"]') || c.querySelector('[data-slot="pr-chip"]')) as Element
+      expect(age('t')).not.toBeNull()
+      // The request starts: the idle anchor is swapped for the hover-card subtree (a new node).
+      await waitFor(() => expect(requests.length).toBeGreaterThan(0))
+      await act(async () => { await Promise.resolve() })
+      expect(removed.some((n) => n.matches('[data-slot="pr-chip"]') || n.querySelector('[data-slot="pr-chip"]'))).toBe(true)
+      mutations.disconnect()
+      const replacement = direct()
+      report(replacement, 40) // baseline
+      expect(age('t')).not.toBeNull()
+      // The answer lands and the status glyph widens the REPLACEMENT: the line now needs 150.
+      needsAge = 150
+      await act(async () => { requests.forEach((answer) => answer()); await new Promise((r) => setTimeout(r, 0)) })
+      report(direct(), 62)
+      await waitFor(() => expect(age('t')).toBeNull())
     })
 
     it('leaves a variant row (no age) and the tokens order alone', () => {

@@ -654,9 +654,32 @@ function useAgeDropped(ref: React.RefObject<HTMLElement | null>, enabled: boolea
       needed.current = null
       check()
     })
-    for (const child of Array.from(el.children)) {
-      if ((child as HTMLElement).dataset.slot !== 'task-row-age') children.observe(child)
+    // The age and the separators are ours to toggle; everything else is content. A chip can be
+    // REPLACED, not just resized — `ReferenceChip` returns a bare anchor while idle and a hover-card
+    // subtree once its status request starts, after this effect ran — so the children are bound
+    // again whenever the line's own children change, and a node we have not seen is a change.
+    const bound = new Set<Element>()
+    const bind = (): boolean => {
+      let fresh = false
+      for (const child of Array.from(el.children)) {
+        const { slot } = (child as HTMLElement).dataset
+        if (slot === 'task-row-age' || child.getAttribute('aria-hidden') === 'true') continue
+        if (bound.has(child)) continue
+        bound.add(child)
+        children.observe(child)
+        fresh = true
+      }
+      return fresh
     }
+    bind()
+    const mutations = typeof MutationObserver === 'undefined'
+      ? null
+      : new MutationObserver(() => {
+          if (!bind() || !live) return
+          needed.current = null
+          check()
+        })
+    mutations?.observe(el, { childList: true })
     // Web fonts change widths without resizing anything. Once per row, and only if they have not
     // landed: a resolved `ready` would otherwise re-fire on every effect run and re-measure
     // forever. A callback from a torn-down run does nothing (`live`); the current run's takes over.
@@ -672,6 +695,7 @@ function useAgeDropped(ref: React.RefObject<HTMLElement | null>, enabled: boolea
       live = false
       observer.disconnect()
       children.disconnect()
+      mutations?.disconnect()
     }
   }, [ref, enabled, key, tick, decide])
   return enabled && dropped
