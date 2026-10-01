@@ -1,4 +1,4 @@
-import type { LogEntry, RepoTracking } from '@open-mercato/cezar-api-client'
+import type { LogEntry, RepoInfo, RepoResponse, RepoTracking } from '@open-mercato/cezar-api-client'
 
 import { shortAge } from '@/lib/format'
 
@@ -92,6 +92,16 @@ export function groupCommitsByDay(log: readonly LogEntry[], now = Date.now()): C
 /** How many of the log's commits landed today (the phone row's "6 today"). */
 export function commitsToday(log: readonly LogEntry[], now = Date.now()): number {
   return log.filter((commit) => commitDayLabel(commit.at, now) === 'Today').length
+}
+
+/**
+ * The base's tracking as the CHECKOUT's, or null. `repo.tracking` is the configured base against
+ * its upstream, but everything that shows it sits beside a Pull that acts on the checked-out
+ * branch; with another branch checked out, "2 behind" would describe one branch and Pull update
+ * another. Null then, the same as no upstream.
+ */
+export function checkoutTracking(repo: Pick<RepoResponse, 'baseBranch' | 'tracking'>, info: RepoInfo): RepoTracking | null {
+  return (repo.baseBranch ?? info.branch) === info.branch ? repo.tracking : null
 }
 
 /** "fetched 6m ago" from `tracking.fetchedAt`, or "never fetched" when the repository has no

@@ -19,7 +19,7 @@ import { cn } from '@/lib/utils'
 import { DiffViewToggles } from '../task-git/diff-controls'
 
 import { PullConfirmDialog } from './git-checkout-block'
-import { GIT_PHONE_MAIN_PATH, groupCommitsByDay, shortGitAge } from './git-sections'
+import { checkoutTracking, GIT_PHONE_MAIN_PATH, groupCommitsByDay, shortGitAge } from './git-sections'
 import { useGitCheckout } from './use-git-checkout'
 
 /**
@@ -37,7 +37,8 @@ export function RepoCommitsSection({ repo, info }: { repo: RepoResponse; info: R
   const days = useMemo(() => groupCommitsByDay(log), [log])
   if (sha) return <CommitDiffView sha={sha} />
 
-  const incoming = repo.tracking && repo.tracking.behind > 0 ? <IncomingBar info={info} tracking={repo.tracking} /> : null
+  const tracking = checkoutTracking(repo, info)
+  const incoming = tracking && tracking.behind > 0 ? <IncomingBar info={info} tracking={tracking} /> : null
   if (log.length === 0) {
     return (
       <>
@@ -116,7 +117,8 @@ function CommitSource({ source }: { source: LogEntry['source'] }) {
 }
 
 /** "2 commits on origin/main are not in your checkout yet" + Pull (issue 08 §C), as of the last
- *  fetch. Pulls the checked-out branch through the same hook and confirmation as the checkout block. */
+ *  fetch. Pulls the checked-out branch through the same hook and confirmation as the checkout block,
+ *  so it only renders while the base IS the checked-out branch (`checkoutTracking`). */
 function IncomingBar({ info, tracking }: { info: RepoInfo; tracking: RepoTracking }) {
   const checkout = useGitCheckout(queryScope(), info)
   const pullRef = useRef<HTMLButtonElement>(null)

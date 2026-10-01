@@ -334,6 +334,17 @@ describe('the Git view Recently on main section', () => {
     expect(document.querySelector('[data-slot="git-incoming"]')).toBeNull()
   })
 
+  it('offers no Incoming bar when the configured base is not the checked-out branch', async () => {
+    // Tracking describes `develop`, but Pull would update `main`, the checkout.
+    stubFetch({
+      'GET /api/v1/repo': () =>
+        jsonResponse({ ...REPO, baseBranch: 'develop', tracking: { ref: 'origin/develop', ahead: 0, behind: 2, fetchedAt: null } }),
+    })
+    renderAt('/git')
+    await waitFor(() => expect(document.querySelector('[data-slot="repo-commits"]')).not.toBeNull())
+    expect(document.querySelector('[data-slot="git-incoming"]')).toBeNull()
+  })
+
   it('lists the recent commits from /api/v1/repo, each row deep-linking to its diff', async () => {
     stubFetch()
     renderAt('/git/commits')

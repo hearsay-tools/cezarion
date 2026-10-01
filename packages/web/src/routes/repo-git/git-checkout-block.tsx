@@ -16,7 +16,7 @@ import {
 import { Link } from '@/lib/project-router'
 import { cn } from '@/lib/utils'
 
-import { fetchedAgo, GIT_SECTION_PATH } from './git-sections'
+import { checkoutTracking, fetchedAgo, GIT_SECTION_PATH } from './git-sections'
 import { useGitCheckout } from './use-git-checkout'
 
 /** The board's two sizes of one card: the desktop sidebar's and the phone Git screen's. */
@@ -65,6 +65,7 @@ export function GitCheckoutBlock({ scope, repo, info, variant, onNavigate }: {
   const checkout = useGitCheckout(scope, info)
   const base = repo.baseBranch ?? info.branch
   const dirty = repo.status.length
+  const tracking = checkoutTracking(repo, info)
   const noRemote = 'No remote configured. Add a Git remote before pulling.'
   const busy = checkout.switchBranch.isPending
   const pullRef = useRef<HTMLButtonElement>(null)
@@ -137,7 +138,7 @@ export function GitCheckoutBlock({ scope, repo, info, variant, onNavigate }: {
         </button>
       </div>
 
-      {repo.tracking ? <FreshnessLine tracking={repo.tracking} className={size.line} /> : null}
+      {tracking ? <FreshnessLine tracking={tracking} className={size.line} /> : null}
 
       <DropdownMenu>
         <DropdownMenuTrigger

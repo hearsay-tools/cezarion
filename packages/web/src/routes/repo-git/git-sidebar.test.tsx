@@ -424,6 +424,17 @@ describe('the checkout block', () => {
     expect(q('[data-slot="git-behind"]')).toBeNull()
   })
 
+  it('hides the freshness line when the configured base is not the checked-out branch', async () => {
+    // The line sits beside Pull, which acts on `main`; `develop`'s count would describe another branch.
+    stub({
+      'GET /api/v1/repo': () =>
+        json({ ...REPO, baseBranch: 'develop', tracking: { ref: 'origin/develop', ahead: 0, behind: 2, fetchedAt: null } }),
+    })
+    renderSidebar()
+    await waitFor(() => expect(q('[data-slot="git-checkout"]')).not.toBeNull())
+    expect(q('[data-slot="git-freshness"]')).toBeNull()
+  })
+
   it('hides the freshness line when the base has no upstream', async () => {
     stub()
     renderSidebar()
