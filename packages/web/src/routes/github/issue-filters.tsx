@@ -1,5 +1,5 @@
 import type { GithubData } from '@open-mercato/cezar-api-client'
-import { ChevronDownIcon } from '@/components/design-icons'
+import { ChevronDownIcon, RefreshCwIcon, TriangleAlertIcon } from '@/components/design-icons'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 
 const control = 'min-h-11 min-w-11 rounded-md border border-input bg-card px-3 text-sm text-foreground focus-visible:outline-ring disabled:opacity-50'
@@ -17,8 +17,13 @@ export function IssueFilters({ data, assignees, projectId, onAssigneesChange, on
   for (const login of assignees) logins.set(login.toLowerCase(), login)
   const options = [...logins.values()].sort((a, b) => a.localeCompare(b))
   const isMe = !!data.viewerLogin && assignees.length === 1 && assignees[0]?.toLowerCase() === data.viewerLogin.toLowerCase()
+  const kept = ' Previous memberships are shown; issues with unknown membership remain visible.'
+  const status = data.projectsState === 'refreshing' && data.projects ? `Refreshing project boards.${kept}`
+    : data.projectsState === 'unavailable' && data.projects ? `${data.projectsReason}${kept}`
+    : data.projects ? '' : data.projectsReason ?? (data.projectsState === 'refreshing' ? 'Project memberships pending.' : 'Project boards unavailable.')
+  const message = [!data.viewerLogin ? 'GitHub login unavailable.' : '', status].filter(Boolean).join(' ')
   return (
-    <div className="flex flex-wrap items-center gap-2" data-slot="gh-issue-filters">
+    <div className="contents" data-slot="gh-issue-filters">
       <Popover>
         <PopoverTrigger asChild>
           <button type="button" className={control} disabled={options.length === 0}>
@@ -44,20 +49,31 @@ export function IssueFilters({ data, assignees, projectId, onAssigneesChange, on
         onClick={() => onAssigneesChange(isMe ? [] : [data.viewerLogin!])}>
         Assigned to me
       </button>
-      {!data.viewerLogin ? <p className="w-full text-xs text-muted-foreground">GitHub login unavailable.</p> : null}
-      {data.projectsState === 'refreshing' ? <p role="status" className="w-full text-xs text-muted-foreground">Refreshing project boards. Previous memberships are shown; issues with unknown membership remain visible.</p> : null}
-      {data.projectsState === 'unavailable' && data.projects ? <p role="status" className="w-full text-xs text-muted-foreground">{data.projectsReason} Previous memberships are shown; issues with unknown membership remain visible.</p> : null}
       {data.projects?.length ? (
         <select aria-label="Project board" className={control} value={projectId}
           onChange={event => onProjectChange(event.target.value)}>
           <option value="">All boards</option>
           {data.projects.map(board => <option key={board.id} value={board.id}>{board.title}</option>)}
         </select>
-      ) : data.projects ? (
+      ) : data.projects || data.projectsState ? (
         <select aria-label="Project board" className={control} disabled value="">
-          <option value="">No boards</option>
+          <option value="">{data.projects ? 'No boards' : data.projectsState === 'refreshing' ? 'Loading boards…' : 'Boards unavailable'}</option>
         </select>
-      ) : <p className="w-full text-xs text-muted-foreground">{data.projectsReason ?? (data.projectsState === 'refreshing' ? 'Project memberships pending.' : 'Project boards unavailable.')}</p>}
+      ) : null}
+      {/* Always mounted at one fixed size: a message that appeared or wrapped inline would move every
+          control and the list below it. The live text is read aloud from the status; sighted users
+          open the full wrapped text from the button, which works by touch as well as by hover. */}
+      <p role="status" className="sr-only">{message}</p>
+      <Popover key={message ? 'message' : 'idle'}>
+        <PopoverTrigger asChild>
+          <button type="button" className={`${control} inline-flex items-center justify-center ${message ? '' : 'invisible'}`} aria-label="Project board status" tabIndex={message ? undefined : -1}>
+            {data.projectsState === 'refreshing'
+              ? <RefreshCwIcon size={14} aria-hidden="true" className="size-3.5 motion-safe:animate-spin" />
+              : <TriangleAlertIcon size={14} aria-hidden="true" className="size-3.5" />}
+          </button>
+        </PopoverTrigger>
+        <PopoverContent align="start" data-slot="gh-issue-status" className="w-72 max-w-[calc(100vw-2rem)] p-3 text-xs text-muted-foreground">{message}</PopoverContent>
+      </Popover>
     </div>
   )
 }
