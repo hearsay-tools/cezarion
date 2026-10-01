@@ -1227,6 +1227,23 @@ describe('a row under width contention, in a column the user can widen', () => {
             archived: false,
             steps: [],
           },
+          // #729: a handed-off row whose meta line (glyph, state, two references, age) is wider
+          // than the default column, so the age has to drop and come back with the width.
+          {
+            id: 'meta-load',
+            title: 'Webhook hand-off',
+            workflow: 'default',
+            task: 'hand off',
+            status: 'review',
+            createdAt: ago(2 * 3_600_000),
+            finishedAt: ago(3_600_000),
+            tokensUsed: 0,
+            notify: true,
+            pullRequestUrl: 'https://github.com/open-mercato/cezar/pull/12345',
+            referencedIssueUrl: 'https://github.com/open-mercato/cezar/issues/67890',
+            archived: false,
+            steps: [],
+          },
         ],
         null,
         2
@@ -1347,6 +1364,49 @@ describe('a row under width contention, in a column the user can widen', () => {
     browser.goto(`${wideUrl}/p/${wideProject}/`)
     browser.waitForFunction(`document.querySelector('${ROW_ID}') !== null`)
     expect(sidebarWidth()).toBe(420)
+  })
+
+  it('drops the age whole before anything else, keeps the glyph, and restores the age wider, without flicker (#729)', () => {
+    const META_ROW = '[data-slot="task-row"][data-run-id="meta-load"]'
+    type Meta = { age: string | null; text: string; glyphInside: boolean; ageInside: boolean; glyphFirst: boolean }
+    const read = () =>
+      browser.evaluate(`(() => {
+        const meta = document.querySelector('${META_ROW} [data-slot="task-row-meta"]')
+        const box = meta.getBoundingClientRect()
+        const glyph = meta.querySelector('[data-slot="task-row-notify"]').getBoundingClientRect()
+        const age = meta.querySelector('[data-slot="task-row-age"]')
+        const ageBox = age?.getBoundingClientRect()
+        return { age: age?.textContent ?? null, text: meta.textContent,
+          glyphInside: glyph.width > 0 && glyph.left >= box.left && glyph.right <= box.right,
+          ageInside: ageBox ? ageBox.right <= box.right + 0.5 : true,
+          glyphFirst: meta.firstElementChild.dataset.slot === 'task-row-notify' }
+      })()`) as Meta
+
+    expect(sidebarWidth()).toBe(264)
+    // Narrowest column: the age is gone whole (no "· 1…"), the glyph and the references are there.
+    const narrow = read()
+    expect(narrow.age).toBeNull()
+    expect(narrow.text).not.toMatch(/ · \d+[smhd]?…?$/)
+    expect(narrow.text).toContain('PR #12345')
+    expect(narrow.glyphInside && narrow.glyphFirst).toBe(true)
+    // Stable: the decision does not flip across repeated frames at the same width.
+    for (let i = 0; i < 8; i += 1) expect(read().age).toBeNull()
+    browser.screenshot(`${artifactsDir}/quick-list-notify-age-dropped-264.png`, { viewport: true })
+
+    dragHandle(156)
+    expect(sidebarWidth()).toBe(420)
+    const wide = browser.waitForValue(`document.querySelector('${META_ROW} [data-slot="task-row-age"]')?.textContent ?? null`)
+    expect(String(wide)).toMatch(/^\d+[smhd]$/)
+    const restored = read()
+    expect(restored.ageInside && restored.glyphInside && restored.glyphFirst).toBe(true)
+    for (let i = 0; i < 8; i += 1) expect(read().age).not.toBeNull()
+    browser.screenshot(`${artifactsDir}/quick-list-notify-age-restored-420.png`, { viewport: true })
+
+    // And back: the same stored width decides, so the age leaves again.
+    dragHandle(-156)
+    expect(sidebarWidth()).toBe(264)
+    browser.waitForValue(`document.querySelector('${META_ROW} [data-slot="task-row-age"]') === null`)
+    expect(read().glyphInside).toBe(true)
   })
 
   it('clamps at both ends — the column can never collapse or swallow the view', () => {

@@ -660,6 +660,39 @@ describe('task thread', () => {
     })()`) as { kebab: boolean; state: string; h1: boolean; pill: boolean }
     expect(bar).toEqual({ kebab: true, state: expect.stringContaining('done'), h1: false, pill: false })
 
+    // #737: title + state fit the 56px bar, the 44px rename target is a sibling of the text stack
+    // (so it can neither grow it nor overlap the state line), and while renaming the input opens
+    // below the bar without covering the title or state text.
+    const probe = `(() => {
+      const top = document.querySelector('[data-slot="mobile-top-bar"] > div')
+      const stack = top?.querySelector('[data-slot="mobile-run-title"]')
+      const state = stack?.querySelector('[data-slot="mobile-run-state"]')
+      const rename = top?.querySelector('[aria-label="Rename task"]')
+      const input = document.querySelector('[data-slot="title-input"]')
+      if (!top || !stack || !state) return null
+      const box = (e) => { const r = e.getBoundingClientRect(); return { l: r.left, r: r.right, t: r.top, b: r.bottom, w: r.width, h: r.height } }
+      const t = box(top), s = box(stack), st = box(state)
+      const hit = (e) => { const r = box(e); return Math.min(r.w, r.h) >= 44 && r.t >= t.t && r.b <= t.b }
+      const apart = (a, b) => a.r <= b.l || b.r <= a.l || a.b <= b.t || b.b <= a.t
+      const res = { bar: Math.round(t.h), stackFits: s.t >= t.t && s.b <= t.b, stackHeight: Math.round(s.h), stateInStack: st.b <= s.b + 0.5,
+        stateVisible: st.w > 0 && st.h > 0 }
+      if (rename) { const r = box(rename); res.renameHit = hit(rename); res.renameClearOfStack = apart(r, s); res.renameClearOfState = apart(r, st) }
+      if (input) { const i = box(input); res.input = { h: Math.round(i.h), belowBar: i.t >= t.b, clearOfState: apart(i, st), hitsOk: i.h >= 44, topmost: document.elementFromPoint(i.l + i.w / 2, i.t + i.h / 2) === input } }
+      return res
+    })()`
+    type Probe = { bar: number; stackFits: boolean; stackHeight: number; stateInStack: boolean; stateVisible: boolean
+      renameHit?: boolean; renameClearOfStack?: boolean; renameClearOfState?: boolean
+      input?: { h: number; belowBar: boolean; clearOfState: boolean; hitsOk: boolean; topmost: boolean } }
+    const resting = browser.waitForValue(probe, (v) => (v as Probe | null)?.renameHit !== undefined) as Probe
+    expect(resting).toMatchObject({ bar: 56, stackFits: true, stateInStack: true, stateVisible: true, renameHit: true, renameClearOfStack: true, renameClearOfState: true })
+    expect(resting.stackHeight).toBeLessThanOrEqual(40)
+    browser.click('[data-slot="mobile-top-bar"] [aria-label="Rename task"]')
+    // The popover animates in (zoom/slide): sample only once the geometry has held still.
+    const editing = browser.waitForStable<Probe | null>(probe, { holdMs: 400, matcher: (v) => v?.input !== undefined }) as Probe
+    expect(editing).toMatchObject({ bar: 56, stackFits: true, stateVisible: true, input: { belowBar: true, clearOfState: true, hitsOk: true, topmost: true } })
+    browser.press('Escape')
+    browser.waitForFunction(`document.querySelector('[data-slot="title-input"]') === null`)
+
     browser.screenshot(`${artifactsDir}/thread-header-mobile.png`)
     browser.setViewport(1440, 900)
   })
