@@ -264,7 +264,24 @@ describe('Git → Cleanup: worktrees panel (#483)', () => {
     await waitFor(() => expect(document.querySelector('[data-slot="toast"]')).not.toBeNull())
     const message = document.querySelector('[data-slot="toast"]')?.textContent ?? ''
     expect(message.toLowerCase()).not.toContain('all worktrees are within the limit')
-    expect(message).toBe('Nothing to reclaim — no finished worktrees exceed the keep limit')
+    // The rows past keep=1 are still listed; the server kept them (dirty or in use), so say so.
+    expect(message).toBe('Nothing was reclaimed — the worktrees past the keep limit have uncommitted work or are in use')
     expect(document.querySelector('[data-slot="toast"]')?.className).toContain('text-contrast-foreground')
+  })
+
+  it('a partial reclaim names how many past-keep rows the server kept', async () => {
+    // Two rows past the limit; the server reclaims one and keeps the other (dirty).
+    const twoPast = { ...overKeep, worktrees: overKeep.worktrees.map((row) => (row.reclaimable ? { ...row, pastKeep: true } : row)) }
+    const past = twoPast.worktrees.filter((row) => row.pastKeep)
+    expect(past.length).toBeGreaterThan(1)
+    serve(twoPast, { reclaimed: [past[0]!.runId] })
+    renderPanel()
+    await waitFor(() => expect(reclaimNow()?.disabled).toBe(false))
+    fireEvent.click(reclaimNow()!)
+    await waitFor(() => expect(confirmButton()).not.toBeNull())
+    fireEvent.click(confirmButton()!)
+    await waitFor(() => expect(document.querySelector('[data-slot="toast"]')).not.toBeNull())
+    const message = document.querySelector('[data-slot="toast"]')?.textContent ?? ''
+    expect(message).toBe(`Reclaimed 1 worktree (branch kept) · ${past.length - 1} kept: uncommitted work or in use`)
   })
 })

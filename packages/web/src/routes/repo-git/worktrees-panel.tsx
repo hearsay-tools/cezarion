@@ -49,13 +49,21 @@ export function WorktreesPanel() {
     ])
 
   const reclaim = useMutation({
-    mutationFn: () => reclaimWorktrees(),
-    onSuccess: (result) => {
+    // `expected` is how many rows were past the keep limit when the user confirmed. Reclaim keeps
+    // a checkout with uncommitted work, or one a task is using, so fewer can come back; saying
+    // "nothing exceeds the limit" then would contradict the rows still listed.
+    mutationFn: (_expected: number) => reclaimWorktrees(),
+    onSuccess: (result, expected) => {
       void refresh()
+      const done = result.reclaimed.length
+      const kept = Math.max(0, expected - done)
+      const why = 'uncommitted work or in use'
       toast(
-        result.reclaimed.length === 0
-          ? 'Nothing to reclaim — no finished worktrees exceed the keep limit'
-          : `Reclaimed ${result.reclaimed.length} worktree${result.reclaimed.length === 1 ? '' : 's'} (branch kept)`,
+        done === 0
+          ? kept > 0
+            ? 'Nothing was reclaimed — the worktrees past the keep limit have uncommitted work or are in use'
+            : 'Nothing to reclaim — no finished worktrees exceed the keep limit'
+          : `Reclaimed ${done} worktree${done === 1 ? '' : 's'} (branch kept)${kept > 0 ? ` · ${kept} kept: ${why}` : ''}`,
       )
     },
     onError: (error: Error) => toast(error.message, { tone: 'danger' }),
@@ -171,7 +179,7 @@ export function WorktreesPanel() {
             <AlertDialogAction
               data-action="worktrees-confirm"
               onClick={() => {
-                reclaim.mutate()
+                reclaim.mutate(pastKeep.length)
                 setConfirming(false)
               }}
             >
