@@ -203,17 +203,17 @@ describe('the settings shell', () => {
     expect(document.querySelector('[data-slot="settings-nav-index"][aria-current="page"]')).toBeNull()
   })
 
-  it('"General" is the current page on the index itself, and unprefixed in the global area', () => {
+  it('"General" is the current page on the index itself, and absent from the global area', () => {
     renderAt('/settings')
     expect(
       document.querySelector('[data-slot="settings-nav-mobile"] [data-slot="settings-nav-index"]')?.getAttribute('aria-current'),
     ).toBe('page')
     cleanup()
 
+    // The global area has no index page to go back to.
     renderAt('/settings/global/resources')
-    expect(
-      document.querySelector('[data-slot="settings-nav-mobile"] [data-slot="settings-nav-index"]')?.getAttribute('href'),
-    ).toBe('/settings/global')
+    expect(document.querySelector('[data-slot="settings-nav-mobile"]')).not.toBeNull()
+    expect(document.querySelector('[data-slot="settings-nav-index"]')).toBeNull()
   })
 
   it('renders the mobile GLOBAL nav at /settings/global — global sections, unprefixed links', () => {
@@ -243,23 +243,18 @@ describe('the settings shell', () => {
     )
     // …and the cross-link out of the project area is NOT prefixed.
     expect(document.querySelector('[data-slot="settings-global-link"]')?.getAttribute('href')).toBe(
-      '/settings/global',
+      '/settings/global/appearance',
     )
   })
 
-  it('/settings/global is the global registry as an index', () => {
+  it('/settings/global has no index: it lands on Appearance', () => {
     renderAt('/settings/global')
-    const index = document.querySelector('[data-slot="settings-index"]')!
-    const ids = [...index.querySelectorAll('[data-section]')].map((el) => el.getAttribute('data-section'))
-    expect(ids).toEqual(GLOBAL_SECTIONS)
-    expect(index.querySelector('[data-section="projects"]')?.getAttribute('href')).toBe(
-      '/settings/global/projects',
-    )
+    expect(document.querySelector('[data-route="settings-global-appearance"]')).not.toBeNull()
+    expect(document.querySelector('[data-slot="settings-index"]')).toBeNull()
   })
 
   it('single-project mode removes Projects from the global index and navigation', () => {
-    renderAt('/settings/global', { singleProject: true })
-    expect(document.querySelector('[data-slot="settings-index"] [data-section="projects"]')).toBeNull()
+    renderAt('/settings/global/appearance', { singleProject: true })
     expect(document.querySelector('[data-slot="settings-nav-mobile"] [data-section="projects"]')).toBeNull()
     expect(document.querySelector('[data-section="resources"]')).not.toBeNull()
   })

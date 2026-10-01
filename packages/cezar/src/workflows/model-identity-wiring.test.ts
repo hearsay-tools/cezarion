@@ -58,7 +58,10 @@ describe('model identity wiring (dry run)', () => {
       else process.env[key] = value;
     }
     store.flush();
-    rmSync(repoRoot, { recursive: true, force: true });
+    // Retries, as in git-worktree.test.ts: the runs create worktrees, and git's detached
+    // background work can still be writing into the tree as rm walks it (ENOTEMPTY on CI,
+    // PR #716 runs 36772703613 and 36784783175).
+    rmSync(repoRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   });
 
   // Agent step + trailing check, so the agent session auto-ends and the run

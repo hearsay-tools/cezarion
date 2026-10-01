@@ -38,6 +38,11 @@ import { cn } from '@/lib/utils'
  *  for CSS and once for the state machine. */
 const DESKTOP_MEDIA_QUERY = '(min-width: 768px)'
 
+/** The desktop sidebar's current width, for the project rail (#711): it may unfold only while the
+ *  main column keeps its floor, and the sidebar's width is part of that sum. The shell owns the
+ *  width, so it provides it; outside a shell the rail reads the default. */
+export const ShellSidebarWidthContext = React.createContext(DEFAULT_SIDEBAR_WIDTH)
+
 // The one home of the add-project menu is its own file; it stays importable from here.
 export { AddProjectMenu } from '@/components/add-project-menu'
 
@@ -289,7 +294,7 @@ export function AppShell({
         className="flex h-dvh overflow-hidden bg-background text-foreground pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]"
       >
         {/* Outside the resizable sidebar: SidebarResize only ever changes the aside's width. */}
-        {projectRail}
+        <ShellSidebarWidthContext.Provider value={sidebarWidth}>{projectRail}</ShellSidebarWidthContext.Provider>
         <Sidebar {...nav} width={sidebarWidth} onWidthChange={changeSidebarWidth} />
         {/* The drawer leaves a visible dismissal strip beside the shared navigation. */}
         <MobileNavDrawer {...nav} mobileProjects={mobileProjects} currentProjectId={currentProjectId} toolsStatus={toolsStatus} onNavigate={() => setMenuOpen(false)} onCloseAutoFocus={(event) => {
@@ -620,13 +625,11 @@ function SidebarContent({
         {projectHeader ?? (repo ? <div className="px-[14px] pt-[14px] pb-2.5"><div className="truncate text-sm font-semibold">{repo.name}</div><div className="truncate font-mono text-[10.5px] text-soft-foreground">{repo.branch}</div></div> : null)}
       </div>
 
-      <div className="px-4 pb-2">
+      {/* The board's Actions frame: 12px sides, 8px between Search and New task, both 32px. */}
+      <div data-slot="sidebar-actions" className="flex flex-col gap-2 px-3">
         <CommandPaletteHint />
-      </div>
-
-      <div className="flex gap-1.5 px-4 pb-2">
         {/* On /new it wears a selected nav item's fill and ink (#617 01c); its hover is the rows'. */}
-        <Button asChild variant="ghost" className={cn("relative h-[34px] max-md:min-h-11 rounded-[7px] bg-muted min-w-0 flex-1 justify-start gap-2.5 px-2.5 text-[13px] font-medium text-foreground hover:bg-sidebar-row-hover hover:text-foreground", activeTo === "/new" && SIDEBAR_SELECTED_CLASS)}>
+        <Button asChild variant="ghost" className={cn("relative h-[32px] max-md:min-h-11 rounded-[7px] bg-muted w-full min-w-0 justify-start gap-2 px-2.5 text-[12.5px] font-medium text-foreground hover:bg-sidebar-row-hover hover:text-foreground", activeTo === "/new" && SIDEBAR_SELECTED_CLASS)}>
           {/* A Router Link since R4 Step 1.1: the React /new composer is real, so deliberate
               New task affordances stay inside the SPA. Full document loads of /new (the
               bookmarklet contract) land on the shell like any route (static-ui.ts) — the
@@ -649,21 +652,17 @@ function SidebarContent({
         </Button>
       </div>
 
-
-      {sessionScope ? <div className="shrink-0 px-4 pb-3">{sessionScope}</div> : null}
+      {sessionScope ? <div className="shrink-0 px-3 pt-2">{sessionScope}</div> : null}
       <SidebarViewTabs items={items} activeTo={activeTo} needsYou={needsYou} inboxCount={inboxCount} skillsUpdateAvailable={skillsUpdateAvailable} onNavigate={onNavigate} />
-      <div data-slot="project-task-navigation" className={'min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-2'}>
+      <div data-slot="project-task-navigation" className={'min-h-0 flex-1 overflow-y-auto overscroll-contain p-3'}>
         <SidebarNavigateContext.Provider value={onNavigate}>
           {sidebarList ?? <div data-slot="task-quick-list">{taskQuickList}</div>}
         </SidebarNavigateContext.Provider>
       </div>
 
-      <div
-        data-slot="sidebar-footer"
-        className="shrink-0 px-4 pt-2 pb-3"
-      >
-
-        <div data-slot="sidebar-footer-controls" className="flex items-center justify-between gap-1 border-t border-border pt-3">
+      <div data-slot="sidebar-footer" className="shrink-0">
+        {/* The board's footer: a 44px bar, 12px sides, Tools at the left, version and update at the right. */}
+        <div data-slot="sidebar-footer-controls" className="flex h-11 items-center justify-between gap-1 border-t border-border px-3">
           <div data-slot="tools-menu" className="shrink-0">{toolsMenu}</div>
           <div className="flex min-w-0 items-center gap-1" data-slot="version-action">
             {version ? <VersionChip version={version} latestVersion={latestVersion} /> : null}
@@ -699,13 +698,13 @@ function CommandPaletteHint() {
       data-slot="command-palette-hint"
       title="Search — command palette (⌘K / Ctrl+K)"
       onClick={() => openCommandPalette()}
-      className="flex h-[34px] max-md:min-h-11 w-full items-center gap-2 rounded-[7px] border border-border bg-background px-2.5 text-left text-[13px] font-normal text-soft-foreground transition-colors hover:border-border hover:text-foreground"
+      className="flex h-[32px] max-md:min-h-11 w-full items-center gap-2 rounded-[7px] border border-border bg-background px-2.5 text-left text-[12.5px] font-normal text-soft-foreground transition-colors hover:border-border hover:text-foreground"
     >
       <SearchIcon className="size-[14px] shrink-0" aria-hidden="true" />
       <span className="truncate">Search…</span>
       <kbd
         aria-hidden="true"
-        className="ml-auto shrink-0 font-sans text-[11.5px] font-normal text-soft-foreground"
+        className="ml-auto shrink-0 font-sans text-[11px] font-normal text-soft-foreground"
       >
         {commandShortcutHint('k')}
       </kbd>
@@ -726,7 +725,7 @@ function VersionChip({ version, latestVersion }: { version: string; latestVersio
       data-slot="version-chip"
       data-update-available={updateAvailable ? 'true' : undefined}
       title={updateAvailable ? `v${version} — update available: v${latestVersion}` : `v${version}`}
-      className="flex min-w-0 items-center gap-1 text-[12px] text-muted-foreground"
+      className="flex min-w-0 items-center gap-1 font-mono text-[11px] text-soft-foreground"
     >
       {updateAvailable ? <StatusDot tone="pending" className="size-[5px] shrink-0" /> : null}
       <span className="truncate">v{version}</span>

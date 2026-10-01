@@ -164,7 +164,8 @@ beforeAll(async () => {
   }))
   base = `http://127.0.0.1:${port}`
   server = spawn(process.execPath, [cezarCli, 'serve', '--repo', root, '--port', String(port), '--no-open'], {
-    env: fixtureServeEnv(root), stdio: 'ignore',
+    // CEZ_FOLLOWUPS=1 adds Inbox, so the view tabs carry their most crowded set: a More menu beside six views.
+    env: { ...fixtureServeEnv(root), CEZ_FOLLOWUPS: '1' }, stdio: 'ignore',
   })
   await waitForHealth(base)
   project = await bootProjectId(base)
@@ -197,7 +198,7 @@ const EXPECTED_COUNTS = {
 const EXPECTED_ZEROS = { assigned: '0', 'no-task': '0', 'has-task': '0', all: '0', review: '0', mine: '0', failing: '0', 'all-prs': '0' }
 
 describe('GitHub desktop sidebar (#622)', () => {
-  it('lists all seven filters with honest counts, joined to same-project, non-archived, same-repo tasks', async () => {
+  it('lists all eight filters with honest counts, joined to same-project, non-archived, same-repo tasks', async () => {
     await remember('issues')
     browser.setViewport(DESKTOP.width, DESKTOP.height)
     browser.goto(`${base}${scoped('/github?filter=all')}`)
@@ -298,7 +299,7 @@ describe('GitHub desktop sidebar (#622)', () => {
     expect(browser.waitForValue(currentJs(SIDEBAR), sameJson(['review']))).toEqual(['review'])
   }, 90_000)
 
-  it('paints 32px rows, 13px labels, 11.5px counts and 15px icons in light and dark', async () => {
+  it('paints 32px rows, 12.5px labels, 11.5px counts, a 12px body and 15px icons in light and dark', async () => {
     await remember('issues')
     for (const theme of ['light', 'dark'] as const) {
       browser.setViewport(DESKTOP.width, DESKTOP.height)
@@ -327,16 +328,79 @@ describe('GitHub desktop sidebar (#622)', () => {
           countSize: getComputedStyle(count).fontSize,
           icon: [icon.getBoundingClientRect().width, icon.getBoundingClientRect().height],
           activeDiffers: getComputedStyle(active).backgroundColor !== style.backgroundColor && alpha(getComputedStyle(active).backgroundColor) > 0,
+          // The shell's list container owns every view's 12px inset (the body adds none).
+          bodyPadding: [getComputedStyle(sidebar.closest('[data-slot="project-task-navigation"]')).paddingLeft,
+            getComputedStyle(sidebar.closest('[data-slot="project-task-navigation"]')).paddingRight],
+          // Board: 12px body gap plus the second group's own 6px, from the last Issues row to the PR label.
+          groupGap: Math.round(sidebar.querySelector('[data-group="prs"] h3').getBoundingClientRect().top
+            - sidebar.querySelector('[data-gh-filter="all"]').getBoundingClientRect().bottom),
+          // The footer's Tools wrench is the board's 15px, not the 17px the version/update side uses.
+          toolsIcon: document.querySelector('[data-slot="tools-menu-trigger"] svg').getBoundingClientRect().width,
           overflow: document.documentElement.scrollWidth > innerWidth,
         };
       })()`)
       expect(facts).toEqual({
-        light: theme === 'light', height: 32, paddingX: ['10px', '10px'], radius: '6px', gap: '10px',
-        labelSize: '13px', countSize: '11.5px', icon: [15, 15], activeDiffers: true, overflow: false,
+        light: theme === 'light', bodyPadding: ['12px', '12px'], height: 32, paddingX: ['10px', '10px'], radius: '6px', gap: '10px',
+        labelSize: '12.5px', countSize: '11.5px', icon: [15, 15], activeDiffers: true, groupGap: 18, toolsIcon: 15, overflow: false,
       })
       browser.screenshot(`${artifactsDir}/github-sidebar-desktop-${theme}.png`, { viewport: true })
     }
   }, 90_000)
+
+  it('paints the board main header: a 15px title, 13px facet tabs, and a 32px toolbar of 12.5px controls', async () => {
+    await remember('issues')
+    for (const theme of ['light', 'dark'] as const) {
+      browser.setViewport(DESKTOP.width, DESKTOP.height)
+      browser.goto(`${base}${scoped('/github?filter=no-task')}`)
+      browser.evaluate(`document.documentElement.classList.remove('light', 'dark'); document.documentElement.classList.add('${theme}')`)
+      const facts = browser.waitForValue<Record<string, unknown>>(`(() => {
+        const title = document.querySelector('[data-slot="gh-masthead"] h1');
+        const tabs = [...document.querySelectorAll('[data-slot="gh-tabs"] > a')];
+        const controls = [...document.querySelectorAll('[data-slot="gh-filter-toolbar"] input[data-slot="gh-search"], [data-slot="gh-label-filter"], [data-slot="gh-filter-toolbar"] [data-slot="gh-issue-filters"] > button:first-of-type')];
+        const route = document.querySelector('[data-route="github"]');
+        if (!title || tabs.length < 2 || controls.length < 3 || !route) return null;
+        const active = tabs.find((tab) => tab.getAttribute('aria-current') === 'page');
+        return {
+          light: document.documentElement.classList.contains('light'),
+          title: [title.textContent.trim(), getComputedStyle(title).fontSize, getComputedStyle(title).fontWeight],
+          tabs: [getComputedStyle(tabs[0]).fontSize, getComputedStyle(active).fontWeight, getComputedStyle(tabs[0]).columnGap],
+          tabGap: Math.round(tabs[1].getBoundingClientRect().left - tabs[0].getBoundingClientRect().right),
+          controls: controls.map((el) => [Math.round(el.getBoundingClientRect().height), getComputedStyle(el).fontSize, getComputedStyle(el).borderTopLeftRadius]),
+          routePadding: [getComputedStyle(route).paddingLeft, getComputedStyle(route).paddingRight],
+          placeholder: document.querySelector('[data-slot="gh-search"]').getAttribute('placeholder'),
+          overflow: document.documentElement.scrollWidth > innerWidth,
+        };
+      })()`)
+      expect(facts).toMatchObject({
+        light: theme === 'light', title: ['Issues · No task yet', '15px', '600'], tabGap: 22,
+        controls: [[32, '12.5px', '7px'], [32, '12.5px', '7px'], [32, '12.5px', '7px']],
+        routePadding: ['28px', '28px'], placeholder: 'Filter issues…', overflow: false,
+      })
+      browser.screenshot(`${artifactsDir}/github-main-header-${theme}.png`, { viewport: true })
+    }
+  }, 90_000)
+
+  it('keeps every view tab and More inside the narrowest sidebar, the widest active label unclipped', () => {
+    browser.setViewport(DESKTOP.width, DESKTOP.height)
+    browser.goto(`${base}/settings`)
+    browser.waitForFunction(`document.querySelector('[data-slot="view-tabs"] a[aria-current="page"][aria-label="Settings"]') !== null && document.querySelector('[data-slot="view-tabs"] button[aria-label="More views"]') !== null`)
+    const fit = browser.evaluate(`(() => {
+      const nav = document.querySelector('[data-slot="view-tabs"]');
+      const inner = nav.getBoundingClientRect().right - parseFloat(getComputedStyle(nav).paddingRight);
+      const tabs = [...nav.querySelectorAll('[data-view-tab]')];
+      return {
+        tabs: tabs.length,
+        sidebar: Math.round(nav.getBoundingClientRect().width),
+        overflow: tabs.map((tab) => Math.round(tab.getBoundingClientRect().right - inner)).filter((over) => over > 0),
+      };
+    })()`) as { tabs: number; sidebar: number; overflow: number[] }
+    // Tasks, Git, GitHub, Skills, Settings and More: Workflows joins Inbox in the menu.
+    expect(fit.tabs).toBe(6)
+    const label = browser.evaluate(`(() => { const span = document.querySelector('[data-slot="view-tabs"] a[aria-current="page"] span.truncate'); return span.scrollWidth - span.clientWidth })()`)
+    expect(label).toBe(0)
+    expect(fit.sidebar).toBeLessThanOrEqual(264) // the default, narrowest column (its 1px border sits outside the nav)
+    expect(fit.overflow).toEqual([])
+  })
 
   it('shows the task sidebar on other views and the settings sidebar in Settings, never the GitHub one', async () => {
     browser.setViewport(DESKTOP.width, DESKTOP.height)
@@ -457,7 +521,7 @@ describe('GitHub phone filter index at 360x640 (#622)', () => {
     await remember('issues')
   }, 90_000)
 
-  it('lists all seven filters at 48px with 18px icons and chevrons, and the same honest counts', () => {
+  it('lists all eight filters at 48px with 18px icons and 15px chevrons, and the same honest counts', () => {
     for (const theme of ['light', 'dark'] as const) {
       openIndex()
       browser.evaluate(`document.documentElement.classList.remove('light', 'dark'); document.documentElement.classList.add('${theme}')`)
@@ -467,17 +531,22 @@ describe('GitHub phone filter index at 360x640 (#622)', () => {
       const facts = browser.waitForValue<Record<string, unknown>>(`(() => {
         const rows = [...document.querySelectorAll('${SCREEN} [data-gh-filter]')];
         if (rows.length === 0) return null;
-        const icons = rows.flatMap((row) => [...row.querySelectorAll('svg')].map((svg) => svg.getBoundingClientRect()));
+        // The mobile board's 18px leading icon and 15px chevron.
+        const size = (svg) => { const rect = svg.getBoundingClientRect(); return rect.width + 'x' + rect.height; };
         return {
           light: document.documentElement.classList.contains('light'),
           heights: [...new Set(rows.map((row) => row.getBoundingClientRect().height))],
-          svgSizes: [...new Set(icons.map((rect) => rect.width + 'x' + rect.height))],
+          svgSizes: [...new Set(rows.map((row) => [...row.querySelectorAll('svg')].map(size).join(' ')))],
           hasChevron: rows.every((row) => row.querySelectorAll('svg').length >= 2),
           overflow: document.documentElement.scrollWidth > innerWidth,
           sidebarHidden: !(document.querySelector('${SIDEBAR}')?.checkVisibility() ?? false),
+          // The board's title row: 22px bold title, a 17px refresh icon, and no repository line.
+          title: [getComputedStyle(document.querySelector('${SCREEN} h1')).fontSize, getComputedStyle(document.querySelector('${SCREEN} h1')).fontWeight],
+          refresh: (() => { const svg = document.querySelector('${SCREEN} [data-slot="gh-screen-refresh"] svg')?.getBoundingClientRect(); return svg ? svg.width + 'x' + svg.height : null; })(),
+          repoLine: document.querySelector('${SCREEN} [data-slot="gh-repo"]') !== null,
         };
       })()`)
-      expect(facts).toEqual({ light: theme === 'light', heights: [48], svgSizes: ['18x18'], hasChevron: true, overflow: false, sidebarHidden: true })
+      expect(facts).toEqual({ light: theme === 'light', heights: [48], svgSizes: ['18x18 15x15'], hasChevron: true, overflow: false, sidebarHidden: true, title: ['22px', '700'], refresh: '17x17', repoLine: false })
       browser.screenshot(`${artifactsDir}/github-filter-screen-${theme}.png`, { viewport: true })
     }
   }, 90_000)

@@ -1,4 +1,4 @@
-import { ChevronDownIcon, SettingsIcon, WrenchIcon } from '@/components/design-icons'
+import { SettingsIcon, WrenchIcon } from '@/components/design-icons'
 
 import type { ReactNode } from 'react'
 import { Link } from '@/lib/project-router'
@@ -95,12 +95,11 @@ export function ToolsMenu({ health, sessionScope }: { health: HealthResponse | u
           data-slot="tools-menu-trigger"
           aria-label="Tools"
           title={toolsTooltip(health)}
-          className="relative flex size-9 items-center justify-center gap-0.5 rounded-lg text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:min-h-9"
+          className="relative flex items-center gap-1.5 rounded-[6px] px-2 py-1.5 text-[12px] font-normal text-soft-foreground transition-colors hover:bg-sidebar-row-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring data-[state=open]:bg-sidebar-row-selected data-[state=open]:text-foreground"
         >
-          <WrenchIcon className="size-4" aria-hidden="true" />
-          {blocker ? <StatusDot tone="pending" className="absolute top-1 right-1 size-1.5" /> : null}
-          <span className="sr-only">Tools</span>
-          <ChevronDownIcon className="size-[11px]" aria-hidden="true" />
+          <WrenchIcon className="size-[15px]" aria-hidden="true" />
+          {blocker ? <StatusDot tone="pending" className="absolute top-1 left-5 size-1.5" /> : null}
+          Tools
         </button>
       </DropdownMenuTrigger>
 

@@ -158,6 +158,10 @@ describe('the GitHub tab against the live dry-run server', () => {
         `document.querySelector('[data-slot="gh-commit-group"] button').getAttribute('aria-expanded')`,
       ),
     ).toBe('false')
+    // At 1440x900 the group can sit on the viewport's bottom edge with its centre just below it
+    // (local repro on PR #716: button top 893px, height 16.5px, click lands off-page and the group
+    // stays closed). agent-browser does not scroll a partly visible target, so centre it first.
+    browser.evaluate(`document.querySelector('[data-slot="gh-commit-group"] button').scrollIntoView({ block: 'center', behavior: 'instant' })`)
     browser.click('[data-slot="gh-commit-group"] button')
 
     // Expanded: commit rows, each keeping its own message and CI glyph.

@@ -219,8 +219,15 @@ describe('mobile drawer', () => {
     expect(words(failed)).toEqual(['red:1 failed'])
     expect(words(finished)).toEqual(['green:1 finished'])
     expect(idle.querySelector('[data-slot="drawer-project-state"]')?.textContent).toBe('idle')
-    expect(current.querySelector('[data-tone="amber"]')?.className).toContain('text-pending-strong')
-    expect(failed.querySelector('[data-tone="red"]')?.className).toContain('text-danger')
+    // The state words' own text inks (#711), shared with the expanded rail: the pills' fills
+    // (`--danger`, `--pending-strong`) fail 4.5:1 as 11px text on the selected row.
+    expect(current.querySelector('[data-tone="amber"]')?.className).toContain('text-signal-word-amber')
+    expect(failed.querySelector('[data-tone="red"]')?.className).toContain('text-signal-word-red')
+    expect(current.querySelector('[data-tone="amber"]')?.className).not.toContain('text-pending-strong')
+    expect(failed.querySelector('[data-tone="red"]')?.className).not.toContain('text-danger')
+    // The neutral words step up on the selected row, where `--soft-foreground` is under 4.5:1.
+    expect(current.querySelector('[data-slot="drawer-project-state"]')?.className).toContain('text-muted-foreground')
+    expect(idle.querySelector('[data-slot="drawer-project-state"]')?.className).toContain('text-soft-foreground')
     expect(current.querySelector('[data-tone="violet"]')?.className).toContain('text-status-running')
     expect(finished.querySelector('[data-tone="green"]')?.className).toContain('text-success')
   })
@@ -259,7 +266,7 @@ describe('mobile drawer', () => {
     renderShell('/p/cezarion/', nav())
     fireEvent.click(menuButton())
     const global = drawer().querySelector('[data-slot="drawer-global"]') as HTMLElement
-    expect(within(global).getByRole('link', { name: 'Global settings' }).getAttribute('href')).toBe('/settings/global')
+    expect(within(global).getByRole('link', { name: 'Global settings' }).getAttribute('href')).toBe('/settings/global/appearance')
     const theme = within(global).getByRole('button', { name: /^Theme:/ })
     // The test provider starts on dark; the row cycles like the toggle does (dark → system).
     expect(theme.textContent).toBe('Theme · Dark')

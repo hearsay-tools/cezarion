@@ -16,7 +16,7 @@ import { waitForHealth } from './poll'
  * time out waiting for every `diff-file` card (#136).
  *
  * Two throwaway repos, each with its own cezar: a small auto-flat changeset and a large
- * auto-virtual one. Both carry a committed snapshot AND a dirty working tree so `/git` and
+ * auto-virtual one. Both carry a committed snapshot AND a dirty working tree so `/git/changes` and
  * `/git/commits/:sha` exercise the same checks. `?diff=` is not used — mode is the threshold
  * rule, not a forced override.
  */
@@ -140,7 +140,7 @@ describe('repo Git diffs on a small auto-flat fixture', () => {
   })
 
   it('working-tree totals, tree paths, and mounted cards match the API', () => {
-    browser.goto(`${baseUrl}${scoped('/git')}`)
+    browser.goto(`${baseUrl}${scoped('/git/changes')}`)
     const { virtualized } = assertDiffCoverage(browser, workingTree.files, { tree: true })
     expect(virtualized).toBe(false)
   }, 120_000)
@@ -184,7 +184,7 @@ describe('repo Git diffs on a large auto-virtual fixture', () => {
   })
 
   it('working-tree totals and tree match the API; last off-screen file mounts', () => {
-    browser.goto(`${baseUrl}${scoped('/git')}`)
+    browser.goto(`${baseUrl}${scoped('/git/changes')}`)
     const { virtualized } = assertDiffCoverage(browser, workingTree.files, { tree: true, expectWindow: true })
     expect(virtualized).toBe(true)
   }, 120_000)

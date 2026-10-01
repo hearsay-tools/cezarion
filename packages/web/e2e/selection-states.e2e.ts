@@ -267,7 +267,7 @@ function checkNavBody(variant: ContrastQaVariant, { base, projectId, container, 
   // The footer's active icon: a 36px square on the selected fill, foreground icon. Desktop only:
   // the drawer renders the same footer component, and its touch rules are not this slice's.
   if (!mobile) {
-    browser.goto(`${base}/settings/global`)
+    browser.goto(`${base}/settings/global/appearance`)
     const gear = '[data-slot="rail-global-settings"][aria-current="page"]'
     // A cold navigation can hydrate default appearance after the QA override,
     // restoring a 36px control while this variant expects ultra density's 27px.

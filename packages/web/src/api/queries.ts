@@ -1144,6 +1144,16 @@ export function useRepo() {
   })
 }
 
+/** `useRepo` with an EXPLICIT scope, for the Git sidebar above the `ProjectScopeProvider`. The key
+ *  is `queryKeys.repo`'s shape, so the sidebar and the routed view share one cache entry and every
+ *  `queryKeys.repo` invalidation reaches both. */
+export function useProjectRepo(scope: string) {
+  return useQuery({
+    queryKey: [scope, 'repo'] as const,
+    queryFn: ({ signal }) => getRepo({ signal }, scope),
+  })
+}
+
 /** The main working tree's structured diff behind the repo view's Changes section (R5 1.7).
  *  Same 409 stance as `useRunChanges`: "not a git repository" is an answer, not a hiccup. */
 export function useRepoChanges() {

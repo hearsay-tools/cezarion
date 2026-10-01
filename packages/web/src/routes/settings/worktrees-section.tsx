@@ -9,11 +9,13 @@ import { CenteredState } from '@/components/centered-state'
 import { Button } from '@/components/ui/button'
 import { toast } from '@/components/ui/toaster'
 import { SettingsField } from './settings-field'
-import { WorktreesPanel } from './worktrees-panel'
+import { ChevronRightIcon } from '@/components/design-icons'
+import { Link } from '@/lib/project-router'
 
 /**
- * Project settings → Worktrees: the retention count (#483) and the disk panel — what used to be
- * the bottom half of Settings → Resources.
+ * Project settings → Worktrees: configuration only — the retention count (#483) and a link to
+ * Git → Cleanup, where the worktrees on disk are listed and reclaimed (issue 06 §3 moved the
+ * panel there, so it is listed once).
  *
  * It stayed PROJECT-scoped when step 3.5 split Settings (spec §"Resource governance"): retention
  * sizes one repo's own worktree pool, so it describes the repo, not the machine. It still
@@ -90,7 +92,7 @@ function WorktreesForm({ config }: { config: ConfigResponse }) {
       className="mx-auto flex w-full max-w-2xl flex-col gap-7 p-4 pb-[calc(90px+env(safe-area-inset-bottom))] md:p-6 md:pb-6"
     >
       <SettingsField
-        title="Keep last N worktrees"
+        title="Keep N finished worktrees"
         hint="Older finished worktrees are reclaimed to free disk; their branch is kept so the work stays recoverable. 0 = unlimited. In-review and running tasks are never reclaimed, so the count on disk can exceed this."
       >
         <div className="flex items-center gap-2">
@@ -131,12 +133,14 @@ function WorktreesForm({ config }: { config: ConfigResponse }) {
         )}
       </SettingsField>
 
-      <SettingsField
-        title="Worktrees on disk"
-        hint="Task worktrees currently on disk. Delete one to reclaim its space now, or reclaim everything past the keep-limit at once. Branches are always kept, so the work stays recoverable."
+      <Link
+        to="/git/cleanup"
+        data-slot="worktrees-manage-link"
+        className="inline-flex min-h-11 items-center gap-1 self-start text-[13px] font-medium text-link-foreground hover:underline focus-visible:outline-2 focus-visible:outline-ring md:min-h-0"
       >
-        <WorktreesPanel />
-      </SettingsField>
+        Manage worktrees on Git
+        <ChevronRightIcon aria-hidden="true" className="size-[14px]" />
+      </Link>
     </div>
   )
 }

@@ -78,12 +78,19 @@ export const ISSUE_ROWS: readonly { id: GithubRowId; label: string }[] = [
   { id: 'has-task', label: 'Has a task' },
   { id: 'all', label: 'All open' },
 ]
+/** The board draws three pull-request filters; "All open" is kept on purpose (owner's call,
+ *  2026-10-01) as the PR twin of the Issues row, so every open PR is also a sidebar row. */
 export const PR_ROWS: readonly { id: GithubRowId; label: string }[] = [
   { id: 'review', label: 'Review requested' },
   { id: 'mine', label: 'Mine' },
   { id: 'failing', label: 'Checks failing' },
   { id: 'all-prs', label: 'All open' },
 ]
+
+/** The filter's name as the main header's title says it ("Issues · No task yet"). */
+export const ACTIVE_FILTER_LABEL: Record<GithubFilter, string> = Object.fromEntries(
+  [...ISSUE_ROWS, ...PR_ROWS].map((row) => [row.id, row.label]),
+) as Record<GithubFilter, string>
 
 export interface FilterCount {
   value: number

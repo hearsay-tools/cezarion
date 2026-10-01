@@ -1,6 +1,6 @@
 import { SearchXIcon } from 'lucide-react'
 import { ArrowLeftIcon, GitCommitHorizontalIcon, TriangleAlertIcon } from '@/components/design-icons'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useParams } from 'react-router'
 
 import { Link } from '@/lib/project-router'
@@ -14,17 +14,19 @@ import { DiffStatLabel } from '@/components/diff-stat'
 import { Button } from '@/components/ui/button'
 import { useIsDesktop } from '@/lib/use-desktop'
 
-import { CommitList } from '../task-git/commit-list'
 import { DiffViewToggles } from '../task-git/diff-controls'
 
+import { GIT_PHONE_MAIN_PATH, groupCommitsByDay, shortGitAge } from './git-sections'
+
 /**
- * The repo view's Commits segment (R5 Step 1.7): the recent-commit log the existing
- * `GET /api/repo` already carries, each row deep-linking to `/git/commits/:sha`, where the
- * structured commit diff (`?structured=1` on the legacy commit route) renders through the
- * same `<Diff>` facade as everything else. Same mobile rule: unified+wrap forced below `md`.
+ * Recently on main (issue 06 §3): the recent-commit log `GET /api/repo` already carries, grouped
+ * by day, each 52px row (subject, then `sha · author · age`) deep-linking to `/git/commits/:sha`,
+ * where the structured commit diff renders through the same `<Diff>` facade as everything else.
+ * The task/PR source on each commit is issue 08. Same mobile rule: unified+wrap forced below `md`.
  */
 export function RepoCommitsSection({ log }: { log: LogEntry[] }) {
   const { sha } = useParams<{ sha: string }>()
+  const days = useMemo(() => groupCommitsByDay(log), [log])
   if (sha) return <CommitDiffView sha={sha} />
 
   if (log.length === 0) {
@@ -39,18 +41,30 @@ export function RepoCommitsSection({ log }: { log: LogEntry[] }) {
     )
   }
   return (
-    <div className="px-[18px] py-[22px] md:px-9">
-      <CommitList
-        slot="repo-commits"
-        commits={log.map((commit) => ({
-          sha: commit.hash,
-          shaLabel: commit.hash,
-          subject: commit.subject,
-          author: commit.author,
-          when: commit.when,
-          href: `/git/commits/${commit.hash}`,
-        }))}
-      />
+    <div data-slot="repo-commits" className="flex flex-col gap-[2px] px-[8px] pt-[12px] pb-[20px] md:px-[20px]">
+      {days.map((day) => (
+        <section key={day.label} data-slot="repo-commit-day" aria-label={day.label} className="flex flex-col">
+          <h2 className="px-[10px] pt-[14px] pb-[4px] text-[11px] font-medium text-soft-foreground">{day.label}</h2>
+          <ul className="flex flex-col">
+            {day.commits.map((commit) => (
+              <li key={commit.hash}>
+                <Link
+                  to={`/git/commits/${commit.hash}`}
+                  data-slot="commit-row"
+                  data-sha={commit.hash}
+                  className="flex min-h-[52px] flex-col justify-center gap-[3px] rounded-[6px] px-[10px] py-[6px] hover:bg-sidebar-row-hover focus-visible:outline-2 focus-visible:outline-ring"
+                >
+                  <span data-slot="commit-row-subject" className="truncate text-[13px] text-foreground">{commit.subject}</span>
+                  <span data-slot="commit-row-meta" className="flex min-w-0 items-center gap-[6px] text-[11px] text-soft-foreground">
+                    <span className="shrink-0 font-mono">{commit.hash}</span>
+                    <span className="truncate">· {commit.author} · {shortGitAge(commit.when)}</span>
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ))}
     </div>
   )
 }
@@ -71,9 +85,9 @@ function CommitDiffView({ sha }: { sha: string }) {
     <section data-slot="repo-commit" data-sha={sha} className="flex min-h-0 flex-1 flex-col">
       <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 border-b border-border px-4 py-2 md:px-6">
         <Button asChild variant="ghost" size="sm" data-slot="commit-back">
-          <Link to="/git/commits">
+          <Link to={desktop ? '/git' : GIT_PHONE_MAIN_PATH}>
             <ArrowLeftIcon size={16} aria-hidden="true" />
-            All commits
+            All recent commits
           </Link>
         </Button>
         {commit.data ? <DiffStatLabel stat={commit.data.stat} /> : null}

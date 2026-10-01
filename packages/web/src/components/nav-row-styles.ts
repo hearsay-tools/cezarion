@@ -49,3 +49,39 @@ export const NAV_UPDATE_DOT_CLASS = 'size-[6px] rounded-full bg-info'
 
 /** The footer's active icon (All tasks, Global settings): a 36px square on the selected fill. */
 export const FOOTER_ICON_ACTIVE_CLASS = 'bg-sidebar-row-selected text-foreground hover:bg-sidebar-row-selected'
+
+/*
+ * The per-view sidebar lists (#622): Settings, GitHub and Git all build their body from these,
+ * so the three cannot drift apart. Numbers are the design board's (`cezarion-session.pen`,
+ * "Sidebar v3 · per-project views" and "Sidebar v4 · project rail"), in fixed px so a density
+ * that shrinks `--spacing` cannot shrink a list the mockups draw at one size.
+ *
+ * The body is the board's 12px-padded column with 12px between its children (the heading bar and
+ * each group); the padding lives on the shell's scroll container (`project-task-navigation`) so
+ * the Tasks list and these bodies share one inset. A group is a column of rows 1px apart, led by
+ * its label (2px above, 4px below the text).
+ */
+export const SIDEBAR_LIST_BODY_CLASS = 'flex flex-col gap-[12px]'
+export const SIDEBAR_LIST_HEADING_CLASS = 'flex h-[26px] items-center pr-[6px] pl-[10px] text-[13px] font-semibold'
+export const SIDEBAR_LIST_GROUP_CLASS = 'flex flex-col gap-px'
+export const SIDEBAR_LIST_UNLABELLED_GROUP_CLASS = 'flex flex-col gap-px'
+export const SIDEBAR_LIST_GROUP_LABEL_CLASS = 'truncate px-[10px] pt-[2px] pb-[4px] text-[11px] font-medium text-soft-foreground'
+/** A 32px row: 15px icon, 13px label, 10px padding and gap. Add the hover, or a disabled look. */
+export const SIDEBAR_LIST_ROW_CLASS = 'group flex h-[32px] items-center gap-[10px] rounded-[6px] px-[10px] text-[13px] text-muted-foreground focus-visible:outline-2 focus-visible:outline-ring'
+export const SIDEBAR_LIST_ROW_HOVER_CLASS = 'hover:bg-sidebar-row-hover hover:text-foreground'
+export const SIDEBAR_LIST_ICON_CLASS = 'size-[15px] shrink-0 text-soft-foreground group-aria-[current=page]:text-foreground'
+export const SIDEBAR_LIST_COUNT_CLASS = 'ml-auto text-[11.5px] tabular-nums text-soft-foreground'
+
+/*
+ * The same lists as their own phone screen (board "Mobile · same principles", GitHub screen):
+ * 14px screen padding, a 22px bold title, 16px between groups, 12px group labels, and 48px rows
+ * with an 18px icon, a 14px label, a 13px count and a 15px chevron.
+ */
+export const SCREEN_LIST_BODY_CLASS = 'flex min-h-full flex-col px-[14px] pt-[14px] pb-[calc(90px+env(safe-area-inset-bottom))]'
+export const SCREEN_LIST_TITLE_CLASS = 'px-[10px] text-[22px] leading-tight font-bold'
+export const SCREEN_LIST_GROUP_CLASS = 'mb-[16px] flex flex-col'
+export const SCREEN_LIST_GROUP_LABEL_CLASS = 'px-[10px] pt-[2px] pb-[4px] text-[12px] font-medium text-soft-foreground'
+export const SCREEN_LIST_ROW_CLASS = 'group flex h-[48px] items-center gap-[12px] rounded-[8px] px-[10px] text-[14px] text-foreground focus-visible:outline-2 focus-visible:outline-ring'
+export const SCREEN_LIST_ICON_CLASS = 'size-[18px] shrink-0 text-soft-foreground group-aria-[current=page]:text-foreground'
+export const SCREEN_LIST_COUNT_CLASS = 'ml-auto text-[13px] tabular-nums text-soft-foreground'
+export const SCREEN_LIST_CHEVRON_CLASS = 'size-[15px] shrink-0 text-soft-foreground'

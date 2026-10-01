@@ -95,3 +95,17 @@
   [data-route='github'] [data-slot='gh-tabs'] { gap: 12px; }
   [data-route='github'] [data-slot='gh-filter-toolbar'] > div:first-child { width: 100%; flex-basis: auto; }
 }
+
+/* #622 final board, desktop main header: a 15px title, 22px facet tabs with a full-bleed rule,
+   and a 32px toolbar of 12.5px controls (radius 7). A phone keeps the 44px touch targets above. */
+@media (min-width: 768px) {
+  [data-route='github'] [data-slot='gh-tabs'] { gap: 22px; min-height: 0; margin-inline: -28px; padding-inline: 28px; }
+  [data-route='github'] [data-slot='gh-tabs'] > a:not(.gh-utility) { min-height: 0; padding: 0 0 10px; margin-bottom: -1px; font-size: 13px; font-weight: 600; }
+  [data-route='github'] [data-slot='gh-tabs'] > a:not([aria-current='page']) { color: var(--muted-foreground); font-weight: 500; }
+  [data-route='github'] [data-slot='gh-tabs'] > a[aria-current='page'] { color: var(--foreground); border-color: var(--foreground); }
+  [data-route='github'] [data-slot='gh-tabs'] .gh-utility { min-height: 28px; padding: 0 10px; margin-bottom: 8px; border-radius: 7px; font-size: 12px; }
+  [data-route='github'] [data-slot='gh-filter-toolbar'] { gap: 8px; }
+  [data-route='github'] [data-slot='gh-filter-toolbar'] :is(input, button, select) { min-height: 32px; height: 32px; padding-block: 0; border-radius: 7px; font-size: 12.5px; }
+  [data-route='github'] [data-slot='gh-filter-toolbar'] :is(button, select):not([aria-pressed='true']) { color: var(--muted-foreground); }
+  [data-route='github'] [data-slot='gh-filter-toolbar'] [data-slot='gh-search'] { padding-left: 32px; color: var(--foreground); }
+}

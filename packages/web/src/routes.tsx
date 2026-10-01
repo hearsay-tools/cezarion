@@ -29,6 +29,7 @@ import {
   SettingsIndexRoute,
   SettingsSectionRoute,
   settingsSectionPath,
+  GLOBAL_SETTINGS_HOME,
 } from './routes/settings/settings-shell'
 import { TasksOverviewRoute } from './routes/tasks-overview'
 import { GlobalTasksRoute } from './routes/global-tasks'
@@ -361,13 +362,15 @@ export function AppRoutes() {
           }
         />
 
-        {/* The repo view (R5 Step 1.7): each segment is a URL — /git (working-tree changes),
-            /git/commits (+ /:sha for one commit's diff), /git/branches. */}
+        {/* The Git view (issue 06 §3): each section is a URL — /git (Recently on main; a phone's
+            Git screen unless ?view=repo), /git/commits (+ /:sha, one commit inside Recently on
+            main), /git/cleanup, /git/branches, and /git/changes (the main tree's uncommitted
+            files, from the checkout block). */}
         <Route
           path="git"
           element={
             <Suspense fallback={<RepoGitLoading />}>
-              <RepoGitRoute tab="changes" />
+              <RepoGitRoute section="main" index />
             </Suspense>
           }
         />
@@ -375,7 +378,7 @@ export function AppRoutes() {
           path="git/commits"
           element={
             <Suspense fallback={<RepoGitLoading />}>
-              <RepoGitRoute tab="commits" />
+              <RepoGitRoute section="main" />
             </Suspense>
           }
         />
@@ -383,7 +386,15 @@ export function AppRoutes() {
           path="git/commits/:sha"
           element={
             <Suspense fallback={<RepoGitLoading />}>
-              <RepoGitRoute tab="commits" />
+              <RepoGitRoute section="main" />
+            </Suspense>
+          }
+        />
+        <Route
+          path="git/cleanup"
+          element={
+            <Suspense fallback={<RepoGitLoading />}>
+              <RepoGitRoute section="cleanup" />
             </Suspense>
           }
         />
@@ -391,7 +402,15 @@ export function AppRoutes() {
           path="git/branches"
           element={
             <Suspense fallback={<RepoGitLoading />}>
-              <RepoGitRoute tab="branches" />
+              <RepoGitRoute section="branches" />
+            </Suspense>
+          }
+        />
+        <Route
+          path="git/changes"
+          element={
+            <Suspense fallback={<RepoGitLoading />}>
+              <RepoGitRoute section="changes" />
             </Suspense>
           }
         />
@@ -490,7 +509,7 @@ export function AppRoutes() {
 
             Only the PROJECT-scoped sections live here (multi-project spec, step 3.5); the
             global ones are the top-level `/settings/global/*` block below. */}
-        <Route path="settings" element={<SettingsIndexRoute scope="project" capabilities={capabilities} />} />
+        <Route path="settings" element={<SettingsIndexRoute capabilities={capabilities} />} />
         <Route path="settings/skills" element={<SettingsSkillsRedirect />} />
         {visibleSettingsSections('project', capabilities).map((section) => (
           <Route
@@ -533,7 +552,8 @@ export function AppRoutes() {
 
           Static segments outrank the `*` legacy redirect below in React Router's ranking, so
           these win regardless of order — listed here for readability. */}
-      <Route path="/settings/global" element={<SettingsIndexRoute scope="global" capabilities={capabilities} />} />
+      {/* No index page: the area lands on its first section (`GLOBAL_SETTINGS_HOME`). */}
+      <Route path="/settings/global" element={<Navigate to={GLOBAL_SETTINGS_HOME} replace />} />
       {visibleSettingsSections('global', capabilities).map((section) => (
         <Route
           key={section.id}

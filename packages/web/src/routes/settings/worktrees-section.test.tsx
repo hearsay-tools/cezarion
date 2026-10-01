@@ -99,6 +99,19 @@ afterEach(() => {
 })
 
 describe('Project settings → Worktrees: keep-last-N-worktrees (#483)', () => {
+  it('keeps only configuration: the retention count and a link to Git → Cleanup, never the disk panel', async () => {
+    serve({ worktreeRetention: 7 })
+    renderAt('/settings/worktrees')
+    await waitFor(() => expect(retentionInput()).not.toBeNull())
+    expect(screen.getByText('Keep N finished worktrees')).toBeTruthy()
+    const link = document.querySelector('[data-slot="worktrees-manage-link"]')
+    expect(link?.textContent).toBe('Manage worktrees on Git')
+    expect(link?.getAttribute('href')).toBe('/p/boot/git/cleanup')
+    // Issue 06 §3: the panel is listed once, on Git.
+    expect(document.querySelector('[data-slot="worktrees-panel"]')).toBeNull()
+    expect(requests.some((request) => request.url.endsWith('/worktrees'))).toBe(false)
+  })
+
   it('renders the configured value and disables Save until it changes', async () => {
     serve({ worktreeRetention: 7 })
     renderAt('/settings/worktrees')

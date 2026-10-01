@@ -39,6 +39,7 @@ export function AddProjectMenu({
   side,
   origin,
   label,
+  iconFrameClassName,
 }: {
   /** Extra trigger classes, merged over the footer's. The project rail (#618) restyles it. */
   triggerClassName?: string
@@ -52,6 +53,9 @@ export function AddProjectMenu({
   /** A visible label: the mobile drawer's row shows it beside the icon. Absent, the trigger is
    *  the icon alone and the name is screen-reader only. */
   label?: string
+  /** Wraps the icon in a framed box: the expanded project rail (#711) shows the collapsed rail's
+   *  bordered 36px square beside its label. */
+  iconFrameClassName?: string
 } = {}) {
   const [browsing, setBrowsing] = React.useState(false)
   const [cloning, setCloning] = React.useState(false)
@@ -66,7 +70,13 @@ export function AddProjectMenu({
           data-origin={origin}
           className={cn('size-9 p-0 text-muted-foreground', triggerClassName)}
         >
-          <Icon className={iconClassName} aria-hidden="true" />
+          {iconFrameClassName ? (
+            <span aria-hidden="true" className={iconFrameClassName}>
+              <Icon className={iconClassName} aria-hidden="true" />
+            </span>
+          ) : (
+            <Icon className={iconClassName} aria-hidden="true" />
+          )}
           {label ? <span>{label}</span> : <span className="sr-only">Add project</span>}
         </Button>
       </DropdownMenuTrigger>

@@ -65,6 +65,44 @@ describe('AppShell', () => {
     expect(screen.getByTestId('location').textContent).toBe('/automations')
   })
 
+  it('moves Workflows into More when six views would crowd the overflow button', async () => {
+    renderShell('/workflows', { inboxCount: 2 })
+    expect(allNavLinks().map(a => a.getAttribute('aria-label'))).toEqual(['Tasks', 'Git', 'GitHub', 'Skills', 'Settings'])
+    const more = within(nav()).getByRole('button', { name: 'More views' })
+    expect(more.getAttribute('data-active')).toBe('true')
+    fireEvent.keyDown(more, { key: 'Enter' })
+    expect((await screen.findByRole('menuitem', { name: 'Workflows' })).getAttribute('aria-current')).toBe('page')
+  })
+
+  it('never shrinks the active tab so its label is not truncated beside the overflow button', () => {
+    renderShell('/settings', { inboxCount: 2 })
+    const active = within(nav()).getByRole('link', { current: 'page' })
+    expect(active.className).toContain('shrink-0')
+  })
+
+  it('draws the view tabs as the #622 final board: 30px tall, 7px radius, 28px icon tabs, 9px-padded labelled tab', () => {
+    renderShell('/settings', { inboxCount: 2 })
+    const active = within(nav()).getByRole('link', { current: 'page' })
+    expect(active.className).toContain('h-[30px]')
+    expect(active.className).toContain('rounded-[7px]')
+    expect(active.className).toContain('px-[9px]')
+    expect(active.className).toContain('text-[12px]')
+    const inactive = within(nav()).getByRole('link', { name: 'Tasks' })
+    expect(inactive.className).toContain('w-7')
+    expect(inactive.className).toContain('h-[30px]')
+    expect(within(nav()).getByRole('button', { name: 'More views' }).className).toContain('w-7')
+    expect(nav().className).toContain('px-3')
+  })
+
+  it('stacks Search and New task as the board\'s 32px Actions frame', () => {
+    renderShell()
+    const actions = sidebar().querySelector('[data-slot="sidebar-actions"]') as HTMLElement
+    expect(actions.className).toContain('gap-2')
+    expect(actions.className).toContain('px-3')
+    expect(actions.querySelector('[data-slot="command-palette-hint"]')).not.toBeNull()
+    expect(actions.querySelector('[data-sidebar-item="new-task"]')).not.toBeNull()
+  })
+
   it('omits overflow when no optional view is available and keeps version in footer', () => {
     renderShell('/', { inboxAvailable: false, automationsAvailable: true, forgeAvailable: false, version: '1.2.3' })
     expect(within(nav()).queryByRole('button', { name: 'More views' })).toBeNull()
@@ -292,7 +330,8 @@ describe('AppShell', () => {
   })
 
   it('renders primary views as named router links', () => {
-    renderShell()
+    // No optional view, so no More button: all six views are tabs.
+    renderShell('/', { inboxAvailable: false, automationsAvailable: false })
     const links = allNavLinks()
     expect(links.map(a => a.getAttribute('aria-label'))).toEqual(['Tasks', 'Git', 'GitHub', 'Skills', 'Workflows', 'Settings'])
     expect(links.map(a => a.getAttribute('href'))).toEqual(['/', '/git', '/github', '/skills', '/workflows', '/settings'])
@@ -313,7 +352,8 @@ describe('AppShell', () => {
     renderShell('/', { automationsAvailable: false })
     const links = allNavLinks()
     expect(links.map((a) => a.getAttribute('href'))).not.toContain('/automations')
-    expect(links).toHaveLength(6)
+    // Inbox still needs More, which takes Workflows along (see the crowding test above).
+    expect(links).toHaveLength(5)
   })
 
   it('shows Automations in overflow once the capability is on', async () => {
@@ -352,7 +392,7 @@ describe('AppShell', () => {
       renderShell()
       const link = within(sidebar()).getByRole('link', { name: /New task/ })
       expect(link.getAttribute('href')).toBe('/new')
-      expect(link.className).toContain('text-[13px]')
+      expect(link.className).toContain('text-[12.5px]')
     })
 
     it('renders the C hint (the browser-usable accelerator; ⌘N only fires in the desktop shell)', () => {
@@ -390,6 +430,16 @@ describe('AppShell', () => {
       expect(footer().className).not.toContain('flex-wrap')
     })
 
+    it('draws the footer as the board\'s 44px bar with a 11px mono version', () => {
+      renderShell('/', { version: '1.2.3' })
+      expect(controls().className).toContain('h-11')
+      expect(controls().className).toContain('px-3')
+      expect(controls().className).toContain('border-t')
+      const chip = controls().querySelector('[data-slot="version-chip"]') as HTMLElement
+      expect(chip.className).toContain('font-mono')
+      expect(chip.className).toContain('text-[11px]')
+    })
+
     it('keeps search near the wordmark and outside the footer', () => {
       renderShell('/', { version: '1.2.3' })
       const content = sidebar().querySelector('[data-slot="sidebar-content"]') as HTMLElement
@@ -412,11 +462,12 @@ describe('AppShell', () => {
       const search = within(sidebar()).getByRole('button', { name: 'Search…' })
       expect(search.dataset.slot).toBe('command-palette-hint')
       expect(search.className).toContain('w-full')
-      expect(search.className).toContain('text-[13px]')
+      expect(search.className).toContain('text-[12.5px]')
+      expect(search.className).toContain('h-[32px]')
       expect(search.className).not.toContain('text-xs')
       expect(search.textContent).toContain('Search…')
       expect(search.querySelector('kbd')?.textContent).toBe('Ctrl+K')
-      expect(search.querySelector('kbd')?.className).toContain('text-[11.5px]')
+      expect(search.querySelector('kbd')?.className).toContain('text-[11px]')
 
       const opened = vi.fn()
       window.addEventListener('cezar:open-command-palette', opened)

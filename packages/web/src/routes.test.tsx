@@ -244,13 +244,26 @@ describe('scoped route map (/p/:projectId)', () => {
       renderAt(`/p/${BOOT}${url}`)
       expect(routeName()).toBe(route)
       if (url.startsWith('/settings/')) {
-        expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Project settings')
+        expect(screen.getByRole('heading', { level: 1 }).textContent).toContain('Project settings')
         expect(screen.getByRole('heading', { level: 2, name: title })).toBeTruthy()
+      } else if (url === '/settings') {
+        // The index's h1 carries the mobile title and the desktop "General · <project>" one.
+        expect(screen.getByRole('heading', { level: 1 }).textContent).toContain(title)
       } else {
         expect(screen.getByRole('heading', { level: 1 }).textContent).toBe(title)
       }
     })
   }
+
+  // A task worktree never registers itself, so the registry has no row for the boot project;
+  // the desktop title names it the way the sidebar header does, from the repo root (#622).
+  it('names an unregistered boot project in the Settings title from its repo root', () => {
+    const health = { ...HEALTH, repo: { root: '/home/u/worktrees/a5523045', branch: 'main' } } as unknown as typeof HEALTH
+    renderAt(`/p/${BOOT}/settings`, { health, registry: { ...REGISTRY, projects: [] } })
+    const title = screen.getByRole('heading', { level: 1 }).textContent
+    expect(title).toContain('General · a5523045')
+    expect(title).not.toContain('this project')
+  })
 
   // The tab lives in the path, so /tasks/:id/changes must not fall back to the thread.
   it('a task tab deep link renders the tab, not the thread', () => {
@@ -342,7 +355,6 @@ describe('scoped route map (/p/:projectId)', () => {
  */
 describe('the global settings area (/settings/global)', () => {
   const GLOBAL_CASES: Array<[string, string, string]> = [
-    ['/settings/global', 'settings-global', 'Global settings'],
     ['/settings/global/appearance', 'settings-global-appearance', 'Appearance'],
     ['/settings/global/notifications', 'settings-global-notifications', 'Notifications'],
     ['/settings/global/resources', 'settings-global-resources', 'Resources'],
@@ -355,10 +367,16 @@ describe('the global settings area (/settings/global)', () => {
       expect(routeName()).toBe(route)
       // Never redirected into a project: the pathname is the one that was asked for.
       expect(currentPathname()).toBe(url)
-      expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Global settings')
-      if (url !== '/settings/global') expect(screen.getByRole('heading', { level: 2, name: title })).toBeTruthy()
+      expect(screen.getByRole('heading', { level: 1 }).textContent).toContain('Global settings')
+      expect(screen.getByRole('heading', { level: 2, name: title })).toBeTruthy()
     })
   }
+
+  it('/settings/global has no index page: it lands on Appearance', () => {
+    renderAt('/settings/global')
+    expect(routeName()).toBe('settings-global-appearance')
+    expect(currentPathname()).toBe('/settings/global/appearance')
+  })
 
   // #801: a bookmarked deep link into any of the four `/automations*` routes still resolves — the
   // route map is unchanged — but the view says the feature is off instead of rendering an editor

@@ -943,24 +943,25 @@ it('keeps sidebar data on the URL project when rendered above the route scope pr
   expect(document.querySelector('[data-slot="task-row"] a')?.getAttribute('href')).toBe('/p/shop/tasks/right')
 })
 
-it('shows the Git view\'s task worktrees, read for the URL project, instead of the task list', async () => {
+it('shows the Git view\'s checkout and sections, read for the URL project, instead of the task list', async () => {
   setApiScope('previous')
   serve({
     '/api/v1/health': HEALTH,
     '/api/v1/todos': [],
     '/api/v1/projects': { bootProject: 'cezar', projects: [PROJECT, { ...PROJECT, id: 'shop', name: 'Shop' }] },
-    '/api/v1/p/shop/worktrees': { worktrees: [{ runId: 'wt-1', title: 'Shop worktree', status: 'review', branch: 'cez/wt-1', sizeBytes: null, finishedAt: null, reclaimable: false }], totalBytes: null, keep: 0 },
-    '/api/v1/p/shop/runs': [run({ id: 'wt-1', title: 'Shop task', titleSummary: undefined, diffStat: { files: 1, adds: 4, dels: 2 } })],
+    '/api/v1/p/shop/repo': { info: { root: '/shop', branch: 'shop-main', remote: null }, status: [], log: [], branches: ['shop-main'], baseBranch: null },
+    '/api/v1/p/shop/worktrees': { worktrees: [], totalBytes: 2 * 1024 ** 3, keep: 0 },
   })
   renderShell('/p/shop/git')
-  const row = await waitFor(() => {
-    const el = document.querySelector('[data-slot="git-worktree-row"]')
-    if (!el) throw new Error('no worktree row yet')
+  const branch = await waitFor(() => {
+    const el = document.querySelector('[data-slot="git-sidebar"] [data-slot="git-checkout-branch"]')
+    if (!el) throw new Error('no checkout block yet')
     return el
   })
-  expect(row.getAttribute('href')).toBe('/p/shop/tasks/wt-1/changes')
-  expect(row.textContent).toContain('cez/wt-1')
-  expect(row.textContent).toContain('Shop task')
+  expect(branch.textContent).toBe('shop-main')
+  await waitFor(() => expect(document.querySelector('[data-git-section="cleanup"] [data-slot="git-section-count"]')?.textContent).toBe('2.0 GB'))
+  expect(document.querySelector('[data-git-section="main"]')?.getAttribute('href')).toBe('/p/shop/git')
+  expect(document.querySelector('[data-slot="git-worktree-row"]')).toBeNull()
   expect(document.querySelector('[data-slot="quick-list"]')).toBeNull()
 })
 
@@ -996,11 +997,16 @@ it.each(['/p/shop/settings/agents', '/settings/global/appearance'])('shows scope
   const project = entry.startsWith('/p/shop') ? 'shop' : 'cezar'
   const group = await screen.findByRole('navigation', { name: `This project · ${project === 'shop' ? 'Shop' : 'cezar'}` })
   expect(within(group).getByRole('link', { name: 'Agents' }).getAttribute('href')).toBe(`/p/${project}/settings/agents`)
+  // The project group leads with General, the project index; no "Settings" heading.
   expect(within(group).getByRole('link', { name: 'General' }).getAttribute('href')).toBe(`/p/${project}/settings`)
+  expect(document.querySelector('[data-slot="settings-sidebar"] h2')).toBeNull()
+  expect([...group.querySelectorAll('a')].map((a) => a.textContent)).toEqual(['General', 'Agents', 'Agent config', 'Worktrees', 'Bookmarklets', 'Prompt templates'])
   const global = screen.getByRole('navigation', { name: 'Global · every project' })
   expect(within(global).getByRole('link', { name: 'Appearance' }).getAttribute('href')).toBe('/settings/global/appearance')
-  expect(within(global).getByRole('link', { name: 'General' }).getAttribute('href')).toBe('/settings/global')
+  expect([...global.querySelectorAll('a')].map((a) => a.textContent)).toEqual(['Appearance', 'Notifications', 'Resources', 'Skills', 'Agent accounts', 'Projects'])
   expect(within(global).queryByRole('link', { name: 'Keyboard' })).toBeNull()
+  // The global area has no index page, so its group has no General row.
+  expect(within(global).queryByRole('link', { name: 'General' })).toBeNull()
   const selected = document.querySelector('[data-slot="settings-sidebar"] [aria-current="page"]')
   expect(selected?.getAttribute('href')).toBe(entry)
   expect(document.querySelector('[data-slot="task-quick-list"]')).toBeNull()

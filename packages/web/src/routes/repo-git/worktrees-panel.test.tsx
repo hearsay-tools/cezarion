@@ -1,5 +1,6 @@
 import { QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { createQueryClient } from '@/api/query-client'
@@ -8,7 +9,7 @@ import { Toaster, resetToasts } from '@/components/ui/toaster'
 import { WorktreesPanel } from './worktrees-panel'
 
 /**
- * Settings → Resources: the worktrees management panel (#483). Renders rows,
+ * Git → Cleanup (moved from Settings by issue 06 §3): the worktrees management panel (#483). Renders rows,
  * per-row Delete and "Reclaim now" call their routes (behind a confirm), and the
  * empty state shows when there is nothing on disk. #566: footer, Reclaim now,
  * and the empty-reclaim toast share the reclaimable-vs-keep budget.
@@ -39,8 +40,10 @@ function serve(data: WorktreesResponse, reclaim: { reclaimed: string[] } = { rec
 function renderPanel() {
   render(
     <QueryClientProvider client={createQueryClient()}>
-      <WorktreesPanel />
-      <Toaster />
+      <MemoryRouter>
+        <WorktreesPanel />
+        <Toaster />
+      </MemoryRouter>
     </QueryClientProvider>,
   )
 }
@@ -140,7 +143,7 @@ const workerMajority: WorktreesResponse = {
   keep: 8,
 }
 
-describe('Settings → Resources: worktrees panel (#483)', () => {
+describe('Git → Cleanup: worktrees panel (#483)', () => {
   it('opens a worktree through the discovered local folder target', async () => {
     serve(sample)
     renderPanel()

@@ -18,14 +18,12 @@ import { SettingsField } from './settings-field'
  * `root`: absolute and realpath-normalized, the same string the server resolves worktrees and git
  * commands against, so it can be pasted straight into a terminal.
  *
- * Two renderings, both from this file so they cannot drift:
- *  - `ProjectFolderField` — the General dashboard's row: the path WRAPPED rather than truncated
- *    (seeing all of it is the point), plus the two things a user wants it for — Copy, and
- *    "Open with" (this machine's editors, file manager and terminal, via `POST /api/v1/open-in`);
- *  - `ProjectLocationNav` — the desktop section nav's footer, the project-scope twin of the
- *    global nav's "Stored in ~/.cezar": one truncated line that keeps the answer on every section.
+ * `ProjectFolderField` is the General dashboard's row: the path WRAPPED rather than truncated
+ * (seeing all of it is the point), plus the two things a user wants it for — Copy, and
+ * "Open with" (this machine's editors, file manager and terminal, via `POST /api/v1/open-in`).
+ * Every other section finds the path in the sidebar's project header (board: "path · branch").
  *
- * Both render NOTHING when the root is unknown (registry still loading, or an unscoped mount): a
+ * It renders NOTHING when the root is unknown (registry still loading, or an unscoped mount): a
  * placeholder path is worse than no path, and the registry answer arrives within a tick anyway.
  */
 
@@ -82,25 +80,6 @@ export function ProjectFolderField() {
         </div>
       </div>
     </SettingsField>
-  )
-}
-
-export function ProjectLocationNav() {
-  const root = useActiveProjectRoot()
-  if (root === null) return null
-  return (
-    <div data-slot="project-location" data-variant="nav" className="mt-auto px-2.5 pt-3">
-      <p className="text-[11px] text-soft-foreground">Project folder</p>
-      <button
-        type="button"
-        data-action="project-location-copy"
-        title={`${root} — click to copy`}
-        onClick={() => copyPath(root)}
-        className="block w-full truncate text-left font-mono text-[11px] text-muted-foreground transition-colors hover:text-foreground"
-      >
-        {root}
-      </button>
-    </div>
   )
 }
 

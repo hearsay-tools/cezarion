@@ -29,11 +29,12 @@ describe('Git page headings at the review viewports', () => {
   for (const page of [
     {
       name: 'Git',
-      title: 'Git · Changes',
+      // Recently on the checked-out branch (issue 06 §3), which is whatever the suite runs on.
+      title: /^Recently on \S+$/,
       path: '/git',
       header: '[data-slot="repo-header"]',
-      context: '[data-slot="branch-chip"]',
-      content: '[data-slot="repo-changes-toolbar"]',
+      context: '[data-slot="repo-meta"]',
+      content: '[data-slot="repo-commits"]',
     },
     {
       name: 'GitHub',
@@ -48,8 +49,8 @@ describe('Git page headings at the review viewports', () => {
       for (const theme of ['light', 'dark'] as const) {
         it(`${page.name} at ${viewport.width}x${viewport.height} in ${theme} keeps one visible title, context, and first-row access`, () => {
           browser.setViewport(viewport.width, viewport.height)
-          // Below md a bare /github is the filter index and a bare /git the worktree screen (#622):
-          // the phone asks for the list / the repository view itself.
+          // Below md a bare /github is the filter index and a bare /git the Git screen (#622):
+          // the phone asks for the list / Recently on main itself.
           const phoneQuery = page.name === 'GitHub' ? '?filter=all' : '?view=repo'
           browser.goto(`${baseUrl}${scoped(viewport === PHONE ? `${page.path}${phoneQuery}` : page.path)}`)
           browser.waitForFunction(`document.querySelector(${JSON.stringify(page.content)}) !== null`)
@@ -102,7 +103,10 @@ describe('Git page headings at the review viewports', () => {
           }
 
           expect(facts.light).toBe(theme === 'light')
-          expect(facts.routeTitleText).toBe(page.title)
+          // The desktop GitHub title names the list on screen (#622 board); a phone keeps "GitHub".
+          const title = page.name === 'GitHub' && viewport !== PHONE ? 'Issues · All open' : page.title
+          if (typeof title === 'string') expect(facts.routeTitleText).toBe(title)
+          else expect(facts.routeTitleText).toMatch(title)
           expect(facts.routeTitleTag).toBe('H1')
           expect(facts.routeTitleAriaHidden).toBeNull()
           expect(browser.snapshot()).toContain(page.name)

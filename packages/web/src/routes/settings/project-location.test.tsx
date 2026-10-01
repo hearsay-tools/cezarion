@@ -113,16 +113,6 @@ describe('the project folder in settings', () => {
     expect(field.querySelector('[data-slot="project-location-path"]')?.textContent).toBe(ROOT)
   })
 
-  it('every project section keeps the root in its desktop header', async () => {
-    renderAt('/settings/worktrees')
-    const nav = await waitFor(() => {
-      const el = document.querySelector('.settings-route-header [data-slot="project-location"]')
-      expect(el).not.toBeNull()
-      return el!
-    })
-    expect(nav.querySelector('[data-action="project-location-copy"]')?.textContent).toBe(ROOT)
-  })
-
   it('copies the path to the clipboard', async () => {
     const writeText = vi.fn(async () => {})
     vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } })
@@ -167,10 +157,8 @@ describe('the project folder in settings', () => {
   })
 
   it('global settings shows no project folder — it describes no project', async () => {
-    renderAt('/settings/global')
-    await waitFor(() => {
-      expect(document.querySelector('[data-slot="settings-index"]')).not.toBeNull()
-    })
+    renderAt('/settings/global/notifications')
+    await screen.findByRole('heading', { level: 2, name: 'Notifications' })
     expect(document.querySelector('[data-slot="project-location"]')).toBeNull()
   })
 })

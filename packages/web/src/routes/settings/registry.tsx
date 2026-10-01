@@ -1,5 +1,5 @@
-import { BellIcon, BotIcon, FoldersIcon, CpuIcon as GaugeIcon, NotebookPenIcon, PaletteIcon, SparklesIcon as PackageCheckIcon, KeyRoundIcon as IdCardIcon } from '@/components/design-icons'
-import { BookmarkIcon, FileCogIcon, FolderGit2Icon, KeyboardIcon } from 'lucide-react'
+import { BellIcon, BotIcon, FoldersIcon, GaugeIcon, KeyRoundIcon, PaletteIcon, SparklesIcon } from '@/components/design-icons'
+import { BookmarkIcon, FileCogIcon, FileTextIcon, FolderGit2Icon, KeyboardIcon } from 'lucide-react'
 import type { ComponentType, SVGProps } from 'react'
 
 import type { Capabilities } from '@open-mercato/cezar-api-client'
@@ -115,7 +115,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     id: 'prompt-templates',
     title: 'Prompt templates',
     description: 'Reusable snippets for follow-up instructions.',
-    icon: NotebookPenIcon,
+    icon: FileTextIcon,
     component: PromptTemplatesSection,
     scope: 'project',
   },
@@ -148,7 +148,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     id: 'skills',
     title: 'Skills',
     description: 'Updates for skills installed on this machine.',
-    icon: PackageCheckIcon,
+    icon: SparklesIcon,
     component: SkillsSection,
     scope: 'global',
   },
@@ -156,7 +156,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     id: 'accounts',
     title: 'Agent accounts',
     description: 'Second logins, and the agent and models a project uses when it has chosen none.',
-    icon: IdCardIcon,
+    icon: KeyRoundIcon,
     component: AccountsSection,
     scope: 'global',
   },
