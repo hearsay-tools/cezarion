@@ -172,21 +172,23 @@ export interface Classification {
   tips: Map<string, string>;
 }
 
-interface HeadRow { name: string; sha: string; at: string; subject: string }
+/** `symbolic`: the ref is an alias (`git symbolic-ref`) for another, so its name is not what a
+ *  delete would remove. */
+interface HeadRow { name: string; sha: string; at: string; subject: string; symbolic: boolean }
 
 async function localHeads(root: string): Promise<HeadRow[]> {
   const res = await git(root, [
     'for-each-ref',
     'refs/heads',
-    '--format=%(refname:lstrip=2)%00%(objectname)%00%(committerdate:iso-strict)%00%(subject)',
+    '--format=%(refname:lstrip=2)%00%(objectname)%00%(committerdate:iso-strict)%00%(symref)%00%(subject)',
   ]);
   if (!res.ok) return [];
   return res.stdout
     .split('\n')
     .filter(Boolean)
     .map((line) => {
-      const [name = '', sha = '', at = '', subject = ''] = line.split('\0');
-      return { name, sha, at, subject };
+      const [name = '', sha = '', at = '', symref = '', ...rest] = line.split('\0');
+      return { name, sha, at, subject: rest.join('\0'), symbolic: symref !== '' };
     })
     .filter((row) => row.name && row.sha);
 }
@@ -333,7 +335,9 @@ export async function classifyBranches(input: ClassifyInput): Promise<Classifica
       protection.branches.has(head.name) ||
       (task && protection.uncertain) ||
       (runs?.some(liveRun) ?? false);
-    const cls: BranchClass | null = inUse ? 'active' : task ? null : 'other';
+    // A symbolic alias is never a task branch, whatever its name says: deleting it by name would
+    // follow it to the branch it points at, which was classified (and protected) on its own.
+    const cls: BranchClass | null = inUse ? 'active' : task && !head.symbolic ? null : 'other';
     return { head, ...(run ? { run } : {}), cls, ahead: count };
   });
 
@@ -609,7 +613,13 @@ export async function deleteBranches(
             ...(witness ? [`verify ${witness.ref} ${witness.sha}`] : []),
             `delete refs/heads/${name} ${candidate.tip}`,
           ].join('\n') + '\n';
-          const res = await lockedGit(input.root, ['update-ref', '--stdin'], undefined, transaction);
+          // `--no-deref`, and a symbolic ref refused outright: the transaction may only ever remove the
+          // exact ref that was classified and named, never one an alias points at.
+          if ((await lockedGit(input.root, ['symbolic-ref', '-q', `refs/heads/${name}`])).ok) {
+            refused.push({ name, reason: 'not a cezar task branch' });
+            continue;
+          }
+          const res = await lockedGit(input.root, ['update-ref', '--no-deref', '--stdin'], undefined, transaction);
           if (!res.ok) {
             refused.push({ name, reason: `it, ${payload.base} or the branch that keeps its commits changed since it was classified — refresh and try again` });
             continue;

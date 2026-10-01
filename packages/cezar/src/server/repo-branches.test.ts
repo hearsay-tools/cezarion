@@ -332,6 +332,17 @@ describe('the branch classifier (issue 08 §A)', () => {
     expect(payload.branches.find((b) => b.name === 'cez/aaaaaaaa')?.ahead).toBe(1);
   });
 
+  it('never lets a symbolic alias delete the branch it points at', async () => {
+    const tip = await taskBranch(root, 'topic', 1);
+    await git(root, 'symbolic-ref', 'refs/heads/cez/aaaaaaaa', 'refs/heads/topic');
+    const { cls } = await classesOf();
+    expect(cls).toMatchObject({ topic: 'other', 'cez/aaaaaaaa': 'other' });
+    const result = await deleteBranches(input(), ['cez/aaaaaaaa'], 'cez/aaaaaaaa');
+    expect(result.deleted).toEqual([]);
+    expect(await git(root, 'rev-parse', 'refs/heads/topic')).toBe(tip);
+    expect(await git(root, 'symbolic-ref', 'refs/heads/cez/aaaaaaaa')).toBe('refs/heads/topic');
+  });
+
   it('names a task branch exactly when a tag shares its name', async () => {
     await taskBranch(root, 'cez/aaaaaaaa', 1);
     // `%(refname:short)` would spell the branch `heads/cez/aaaaaaaa` to disambiguate it from this tag.
