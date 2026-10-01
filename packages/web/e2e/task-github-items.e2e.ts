@@ -111,7 +111,18 @@ describe('task GitHub item tabs against the dry-run mock', () => {
     const active = openPrFromChip()
     expect(active).toContain(`#${PR}`)
     expect(browser.url()).toBe(`${baseUrl}${scoped(`/tasks/${runId}/pr/${PR}`)}`)
-    browser.waitForFunction(`document.querySelector('[data-slot="gh-merge-box"]') !== null`)
+    // Visible, not merely mounted: a nonzero box with a visible computed style, read as one sample.
+    const mergeBox = browser.waitForValue<{ width: number; height: number }>(
+      `(() => {
+        const box = document.querySelector('[data-slot="gh-merge-box"]')
+        if (!box) return null
+        const r = box.getBoundingClientRect()
+        const style = getComputedStyle(box)
+        const shown = r.width > 0 && r.height > 0 && style.display !== 'none' && style.visibility === 'visible'
+        return shown ? { width: r.width, height: r.height } : null
+      })()`,
+    )
+    expect(mergeBox.height).toBeGreaterThan(0)
 
     browser.click(`${tabs} a[href$="/issue/${ISSUE}"]`)
     const body = browser.waitForValue<string | null>(

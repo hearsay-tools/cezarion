@@ -434,7 +434,7 @@ describe.each([false, true])('plain status visibility (#677), inert=%s', (inert)
 })
 
 describe('ReferenceChip with an in-app destination (#692)', () => {
-  it('links to the internal path in the same tab, keeping the status panel and accessible name', () => {
+  it('links to the internal path in the same tab, with the accessible name', () => {
     const chip = chipOf(
       <MemoryRouter>
         <ReferenceChip reference={PR} taskTitle="Add checkout" status="ready" to="/p/api/tasks/r1/pr/402" />
@@ -445,6 +445,30 @@ describe('ReferenceChip with an in-app destination (#692)', () => {
     expect(chip.getAttribute('href')).toBe('/p/api/tasks/r1/pr/402')
     expect(chip.getAttribute('target')).toBeNull()
     expect(chip.getAttribute('aria-label')).toBe('Open the pull request for Add checkout — Ready to merge')
+  })
+
+  it('keeps the status panel and its conflict action keyboard-reachable on the router link', async () => {
+    render(
+      <MemoryRouter>
+        <ReferenceChip
+          reference={PR}
+          taskTitle="t"
+          status="ready"
+          conflicting
+          to="/p/api/tasks/r1/pr/402"
+          conflictAction={<button type="button">Resolve conflicts</button>}
+        />
+      </MemoryRouter>,
+    )
+    const link = screen.getByRole('link')
+    fireEvent.focus(link)
+    const button = await waitFor(() => screen.getByRole('button', { name: 'Resolve conflicts' }))
+
+    expect(panelText()).toContain(REFERENCE_CONFLICT.hint)
+    expect(panelText()).toContain(REFERENCE_STATUS.ready.hint)
+    expect(button.getAttribute('tabindex')).not.toBe('-1')
+    fireEvent.keyDown(link, { key: 'Tab' })
+    await waitFor(() => expect(document.activeElement).toBe(button))
   })
 
   it('still opens GitHub in a new tab without a destination', () => {
