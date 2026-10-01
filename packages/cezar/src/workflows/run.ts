@@ -2877,6 +2877,18 @@ export class RunManager {
    * delete read liveness before awaiting git and GitHub; this re-reads it and holds Continue off —
    * its re-materialization would otherwise recreate the branch from the base under the delete.
    */
+  /**
+   * Claim a settled run while its draft PR is published (`POST /runs/:id/pr`), or null when it is
+   * live or already claimed. Publishing may first re-materialize a reclaimed checkout, which
+   * clears the reclaim stamp and makes the run reclaimable again; held, the claim keeps reclaim,
+   * branch cleanup and Continue off the checkout until the push and `gh` are done with it.
+   */
+  claimForPublish(runId: string): (() => void) | null {
+    if (this.reclaiming.has(runId) || this.isActive(runId)) return null;
+    this.reclaiming.add(runId);
+    return () => { this.reclaiming.delete(runId); };
+  }
+
   claimForBranchCleanup(runIds: readonly string[]): (() => void) | null {
     const unfinished = (id: string) => !['done', 'failed', 'cancelled'].includes(this.store.getRun(id)?.status ?? 'done');
     if (runIds.some((id) => this.reclaiming.has(id) || this.isActive(id) || unfinished(id))) return null;

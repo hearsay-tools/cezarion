@@ -4572,42 +4572,48 @@ export function createApp(deps: ServerDeps) {
       const id = c.req.param('id');
       if (!store.getRun(id)) return c.json({ error: 'not found' }, 404);
       if (manager.isActive(id)) return c.json({ error: 'run is still active — wait for the review gate' }, 409);
-      // Reclaim (#483, issue 08 §B4) removed the directory and kept the branch, and Not landed
-      // offers this on exactly those rows: restore the checkout first, as Continue does.
-      await rematerializeReclaimedWorktree(repoRoot, store, id);
-      const run = store.getRun(id);
-      if (!run) return c.json({ error: 'not found' }, 404);
-      if (!run.worktreePath || !existsSync(run.worktreePath) || !run.branch) {
-        return c.json(
-          {
-            error: 'no worktree/branch to publish — this task ran in the repo working tree',
-          },
-          400,
-        );
+      const release = manager.claimForPublish(id);
+      if (!release) return c.json({ error: 'its worktree or branch is being cleaned up — retry in a moment' }, 409);
+      try {
+        // Reclaim (#483, issue 08 §B4) removed the directory and kept the branch, and Not landed
+        // offers this on exactly those rows: restore the checkout first, as Continue does.
+        await rematerializeReclaimedWorktree(repoRoot, store, id);
+        const run = store.getRun(id);
+        if (!run) return c.json({ error: 'not found' }, 404);
+        if (!run.worktreePath || !existsSync(run.worktreePath) || !run.branch) {
+          return c.json(
+            {
+              error: 'no worktree/branch to publish — this task ran in the repo working tree',
+            },
+            400,
+          );
+        }
+        const outcome = await createDraftPr({
+          repoRoot,
+          run,
+          handoffText: readHandoff(dataDir, id),
+        });
+        if (!outcome.ok) {
+          return c.json({ error: outcome.error, manual: `git merge ${run.branch}` }, 409);
+        }
+        // A number the cockpit asked about BEFORE the pull request existed is cached as "this
+        // repository has no such number" — which is exactly what a `CEZ:PR=901` marker declared
+        // ahead of the push looks like. It exists now.
+        const createdNumber = refNumberFromUrl(outcome.url);
+        if (createdNumber !== null) forgetRefStatus(repoRoot, createdNumber);
+        store.updateRun(id, {
+          pullRequestUrl: outcome.url,
+          status: 'done',
+          finishedAt: run.finishedAt ?? new Date().toISOString(),
+        });
+        store.appendEvent(id, {
+          type: 'note',
+          message: `draft PR created: ${outcome.url}${outcome.dryRun ? ' (dry run — no real PR)' : ''}`,
+        });
+        return c.json({ url: outcome.url, dryRun: outcome.dryRun }, 201);
+      } finally {
+        release();
       }
-      const outcome = await createDraftPr({
-        repoRoot,
-        run,
-        handoffText: readHandoff(dataDir, id),
-      });
-      if (!outcome.ok) {
-        return c.json({ error: outcome.error, manual: `git merge ${run.branch}` }, 409);
-      }
-      // A number the cockpit asked about BEFORE the pull request existed is cached as "this
-      // repository has no such number" — which is exactly what a `CEZ:PR=901` marker declared
-      // ahead of the push looks like. It exists now.
-      const createdNumber = refNumberFromUrl(outcome.url);
-      if (createdNumber !== null) forgetRefStatus(repoRoot, createdNumber);
-      store.updateRun(id, {
-        pullRequestUrl: outcome.url,
-        status: 'done',
-        finishedAt: run.finishedAt ?? new Date().toISOString(),
-      });
-      store.appendEvent(id, {
-        type: 'note',
-        message: `draft PR created: ${outcome.url}${outcome.dryRun ? ' (dry run — no real PR)' : ''}`,
-      });
-      return c.json({ url: outcome.url, dryRun: outcome.dryRun }, 201);
     })
 
     // Archived tasks keep their worktree for inspection; this is the explicit

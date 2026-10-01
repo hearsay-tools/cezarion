@@ -398,6 +398,25 @@ describe('the worktrees API', () => {
       expect(store.getRun(id)).toMatchObject({ branch, worktreeReclaimedAt: undefined, pullRequestUrl: expect.any(String) });
     });
 
+    it('holds reclaim off a restored checkout for as long as its draft PR is publishing', async () => {
+      const id = await seed(randomUUID(), 'done', '2026-07-01T00:00:00Z');
+      // Restored and unstamped, this is exactly what the PR route has just re-materialized.
+      const release = manager.claimForPublish(id)!;
+      expect((await reclaimOne(id)).status).toBe(409);
+      expect(manager.claimForBranchCleanup([id])).toBeNull();
+      expect(manager.continueRun(id, { text: 'go on' })).toMatchObject({ ok: false });
+      expect(existsSync(store.getRun(id)!.worktreePath!)).toBe(true);
+      release();
+      expect((await reclaimOne(id)).status).toBe(200);
+
+      // And the route holds that claim from before the restore until it answers.
+      const spy = vi.spyOn(manager, 'claimForPublish');
+      const other = await seed(randomUUID(), 'done', '2026-07-02T00:00:00Z');
+      await apiRequest(app, `/api/v1/runs/${other}/pr`, { method: 'POST' });
+      expect(spy).toHaveBeenCalledWith(other);
+      expect(manager.claimForPublish(other)).not.toBeNull(); // released afterwards
+    });
+
     it('409s while a run is being Continued, and leaves its directory alone', async () => {
       const id = await resumable();
       expect(manager.continueRun(id, { text: 'go on' }).ok).toBe(true);
