@@ -916,6 +916,7 @@ export function GithubRoute({
             item={selected}
             backLink={{ to: listPath }}
             subNav={{ filter: linkFilter, changes }}
+            onRunAgent={focusHandToAgentPrompt}
             colors={labelColors}
             checks={selected.kind === 'pr' ? checksMap?.[selected.number] ?? selected.checks : selected.checks}
           >
@@ -955,6 +956,13 @@ export function GithubRoute({
       </div>
     </div>
   )
+}
+
+/** The merge box's conflict action: bring the hand-to-agent prompt below it into view. */
+function focusHandToAgentPrompt() {
+  const prompt = document.querySelector<HTMLTextAreaElement>('[data-slot="gh-detail-inner"] [data-slot="gh-custom-prompt"]')
+  prompt?.scrollIntoView({ block: 'center' })
+  prompt?.focus({ preventScroll: true })
 }
 
 /** The exact open count from the single fast fetch — with a `+` only when it hit the list cap, so

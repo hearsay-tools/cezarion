@@ -1,5 +1,5 @@
 import { QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, render, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -43,10 +43,18 @@ const MERGE_STATE = {
   },
 }
 
+const CONFLICTING_STATE = {
+  ...MERGE_STATE,
+  mergeState: { ...MERGE_STATE.mergeState, mergeable: 'conflicting', eligibility: 'blocked', canMerge: false },
+}
+
+let mergeState: typeof MERGE_STATE = MERGE_STATE
+
 beforeEach(() => {
+  mergeState = MERGE_STATE
   vi.stubGlobal('fetch', async (input: RequestInfo | URL) => {
     const url = String(input)
-    const body = url.includes('/merge-state') ? MERGE_STATE : { available: true, comments: [] }
+    const body = url.includes('/merge-state') ? mergeState : { available: true, comments: [] }
     return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })
   })
 })
@@ -56,11 +64,11 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-function renderDetail(item: GithubItem) {
+function renderDetail(item: GithubItem, onRunAgent?: () => void) {
   render(
     <QueryClientProvider client={createQueryClient()}>
       <MemoryRouter initialEntries={['/p/p1/tasks/r1/pr/42']}>
-        <GithubItemDetail item={item} colors={{}} backLink={null} subNav={null} />
+        <GithubItemDetail item={item} colors={{}} backLink={null} subNav={null} onRunAgent={onRunAgent} />
       </MemoryRouter>
     </QueryClientProvider>,
   )
@@ -77,7 +85,7 @@ describe('GithubItemDetail outside the GitHub view', () => {
     expect(document.querySelector('nav[aria-label="Pull request detail"]')).toBeNull()
     const link = document.querySelector<HTMLAnchorElement>('[data-slot="gh-files-changed"]')
     expect(link?.textContent).toContain('Files changed')
-    expect(link?.getAttribute('href')).toMatch(/\/github\/prs\/42\/changes$/)
+    expect(link?.getAttribute('href')).toBe('/p/p1/github/prs/42/changes')
     // Conversation is always what shows: the body renders, not the diff.
     expect(document.querySelector('[data-slot="gh-body"]')?.textContent).toContain('Moves the detail pane.')
   })
@@ -90,5 +98,20 @@ describe('GithubItemDetail outside the GitHub view', () => {
   it('renders no Files changed link for an issue', () => {
     renderDetail({ ...PR_42, kind: 'issue', url: 'https://github.com/acme/demo/issues/42' })
     expect(document.querySelector('[data-slot="gh-files-changed"]')).toBeNull()
+  })
+
+  it('offers no agent action on a conflicting PR when the caller supplies none', async () => {
+    mergeState = CONFLICTING_STATE
+    renderDetail(PR_42)
+    await waitFor(() => expect(document.querySelector('[data-slot="gh-merge-box"]')?.textContent).toContain('Conflicts: present'))
+    expect(screen.queryByRole('button', { name: 'Run agent on this PR' })).toBeNull()
+  })
+
+  it('runs the caller-supplied agent action on a conflicting PR', async () => {
+    mergeState = CONFLICTING_STATE
+    const onRunAgent = vi.fn()
+    renderDetail(PR_42, onRunAgent)
+    fireEvent.click(await screen.findByRole('button', { name: 'Run agent on this PR' }))
+    expect(onRunAgent).toHaveBeenCalledTimes(1)
   })
 })

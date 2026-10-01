@@ -60,6 +60,7 @@ export function GithubItemDetail({
   checks,
   backLink,
   subNav,
+  onRunAgent,
   children,
 }: {
   item: GithubItem
@@ -71,6 +72,9 @@ export function GithubItemDetail({
   /** The PR Conversation/Changes tabs, keeping the list's `?filter=`; `null` renders a
    *  "Files changed" link to the GitHub view instead and always shows the conversation. */
   subNav: { filter: GithubFilter | null; changes: boolean } | null
+  /** The merge box's "Run agent on this PR" on a conflicting PR; absent renders no button, so a
+   *  surface with no agent panel never offers an inert control. */
+  onRunAgent?: () => void
   children?: ReactNode
 }) {
   const changes = subNav?.changes ?? false
@@ -167,7 +171,7 @@ export function GithubItemDetail({
 
       </>}
       </div>
-      {item.kind === 'pr' ? <GithubMergeBox number={item.number} /> : null}
+      {item.kind === 'pr' ? <GithubMergeBox number={item.number} onRunAgent={onRunAgent} /> : null}
       {children}
     </article>
   )
@@ -189,7 +193,7 @@ function MergeRequirementIcon({ state }: { state: MergeRequirementState }) {
   return <CircleIcon size={16} aria-hidden="true" data-slot="gh-merge-status-unknown" className={cn(iconClass, 'text-soft-foreground')} />
 }
 
-function GithubMergeBox({ number }: { number: number }) {
+function GithubMergeBox({ number, onRunAgent }: { number: number; onRunAgent?: () => void }) {
   const queryClient = useQueryClient()
   const mergeState = useQuery({
     queryKey: queryKeys.githubMergeState(number),
@@ -307,11 +311,7 @@ function GithubMergeBox({ number }: { number: number }) {
             ))}
             {state.blockers.map((blocker) => <li key={blocker.code} className="text-soft-foreground">{blocker.message}</li>)}
           </ul>
-          {state.mergeable === 'conflicting' ? <Button className="mt-4" onClick={event => {
-            const prompt = event.currentTarget.closest('article')?.querySelector<HTMLTextAreaElement>('[data-slot="gh-custom-prompt"]')
-            prompt?.scrollIntoView({ block: 'center' })
-            prompt?.focus({ preventScroll: true })
-          }}>Run agent on this PR</Button> : null}
+          {state.mergeable === 'conflicting' && onRunAgent ? <Button className="mt-4" onClick={onRunAgent}>Run agent on this PR</Button> : null}
           {state.canOverride ? (
             <label className="mt-4 flex cursor-pointer items-start gap-2 rounded-md border border-warning/40 bg-warning/5 p-3 text-xs">
               <input

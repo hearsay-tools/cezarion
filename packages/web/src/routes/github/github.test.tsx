@@ -856,6 +856,39 @@ describe('the GitHub detail pane', () => {
       overrideRules: true,
     }))
   })
+
+  it('focuses the hand-to-agent prompt from a conflicting PR\'s merge box', async () => {
+    stubFetch({
+      'GET /api/v1/github/prs/137/merge-state': () => jsonResponse({
+        available: true,
+        mergeState: {
+          number: 137,
+          title: PR_137.title,
+          url: PR_137.url,
+          state: 'open',
+          isDraft: false,
+          headRef: 'feat/sse',
+          baseRef: 'main',
+          headSha: '0123456789abcdef0123456789abcdef01234567',
+          mergeable: 'conflicting',
+          reviewDecision: 'approved',
+          checks: [],
+          methods: ['squash'],
+          defaultMethod: 'squash',
+          eligibility: 'blocked',
+          blockers: [],
+          canMerge: false,
+          canOverride: false,
+        },
+      }),
+    })
+    renderAt('/github/prs/137')
+
+    // The hand-to-agent panel has its own "Run agent on this PR" submit; this is the merge box's.
+    await waitFor(() => expect(document.querySelector('[data-slot="gh-merge-box"]')?.textContent).toContain('Conflicts: present'))
+    fireEvent.click(within(document.querySelector<HTMLElement>('[data-slot="gh-merge-box"]')!).getByRole('button', { name: 'Run agent on this PR' }))
+    expect(document.activeElement).toBe(document.querySelector('[data-slot="gh-custom-prompt"]'))
+  })
 })
 
 // ---- comment thread (#499) --------------------------------------------------------------------
