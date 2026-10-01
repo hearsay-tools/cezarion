@@ -11,7 +11,7 @@ import type { ApiRun } from '@open-mercato/cezar-api-client'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-import { RunHeader } from './run-header'
+import { RunHeader, type RunTab } from './run-header'
 
 /** The pushed task screen below md (#621): the shell's top bar carries back / title / state /
  *  run actions and RunHeader drops its own copy. jsdom has no media queries, so the viewport is a
@@ -50,7 +50,7 @@ function Probe() {
   return <span data-testid="location">{useLocation().pathname}</span>
 }
 
-function renderScreen(entry = '/tasks/r1', run: ApiRun = record, tab: 'session' | 'changes' = 'session') {
+function renderScreen(entry = '/tasks/r1', run: ApiRun = record, tab: RunTab = 'session') {
   return render(
     <QueryClientProvider client={createQueryClient()}>
       <ThemeProvider>
@@ -175,10 +175,35 @@ describe('RunHeader below md on a pushed task screen', () => {
     expect(tabs.className).toContain('max-md:[&>a]:min-h-11')
     expect(tabs.className).toContain('max-md:[&>a]:text-[13.5px]')
     const links = within(tabs).getAllByRole('link')
-    expect(links.map((a) => a.textContent)).toEqual(['Session', 'Changes12', 'Commits', 'Files'])
+    // `prNumber: 451` is an own-repo reference, so it adds its tab after Files (#692).
+    expect(links.map((a) => a.textContent)).toEqual(['Session', 'Changes12', 'Commits', 'Files', 'Pull request #451'])
     expect(links[1]!.querySelector('[data-slot="tab-count"]')?.className).toContain('text-[11.5px]')
     // Commits has no count on the record; none is invented.
     expect(links[2]!.querySelector('[data-slot="tab-count"]')).toBeNull()
+  })
+
+  it('scrolls the tab row sideways instead of wrapping it (#692)', () => {
+    renderScreen()
+    const tabs = document.querySelector('[data-slot="run-tabs"]') as HTMLElement
+    expect(tabs.getAttribute('data-phone-bar')).toBe('true')
+    expect(tabs.className).toContain('max-md:overflow-x-auto')
+    expect(tabs.className).toContain('max-md:flex-nowrap')
+    expect(tabs.className).toContain('max-md:[&>*]:shrink-0')
+  })
+
+  it('scrolls an active item tab into view on mount (#692)', () => {
+    const scrolled: Element[] = []
+    const original = Element.prototype.scrollIntoView
+    Element.prototype.scrollIntoView = function (this: Element) { scrolled.push(this) }
+    try {
+      renderScreen('/tasks/r1', { ...record, issueNumber: 692 }, { kind: 'issue', number: 692 })
+      const tabs = document.querySelector('[data-slot="run-tabs"]') as HTMLElement
+      const active = within(tabs).getByRole('link', { name: 'Issue #692' })
+      expect(active.getAttribute('aria-current')).toBe('page')
+      expect(scrolled).toContain(active)
+    } finally {
+      Element.prototype.scrollIntoView = original
+    }
   })
 
   it('swaps facet tabs in place below md, so Back still returns to the list', () => {

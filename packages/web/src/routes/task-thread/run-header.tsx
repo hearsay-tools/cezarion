@@ -1,7 +1,7 @@
 import './run-header.css'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { FileTextIcon, MailIcon, PencilIcon, PinOffIcon, SquareTerminalIcon } from 'lucide-react'
-import { BotIcon, ChevronDownIcon, CopyIcon, EllipsisIcon, PinIcon, Trash2Icon, XIcon } from '@/components/design-icons'
+import { BotIcon, ChevronDownIcon, CircleDotIcon, CopyIcon, EllipsisIcon, GitPullRequestIcon, PinIcon, Trash2Icon, XIcon } from '@/components/design-icons'
 import { Fragment, useEffect, useId, useMemo, useReducer, useRef, useState, type ReactNode } from 'react'
 import { Link, useActiveProjectId, useNavigate } from '@/lib/project-router'
 
@@ -26,7 +26,7 @@ import { hasAccountChoice, useAgentAccounts } from '@/api/agent-accounts'
 import { DiffStatLabel } from '@/components/diff-stat'
 import { TitleEditInput, useTitleEditor } from '@/components/editable-title'
 import { Pill } from '@/components/pill'
-import { ReferenceChip } from '@/components/reference-chip'
+import { ReferenceChip, ReferenceStatusGlyph } from '@/components/reference-chip'
 import { ResolveConflictsButton } from '@/components/reference-conflict-action'
 import { ReferenceStatusProvider } from '@/components/reference-status'
 import { TabLink } from '@/components/tab-link'
@@ -63,8 +63,10 @@ import {
   prNumber,
   taskIssueUrl,
   taskPrUrl,
+  taskItemTabs,
   taskReferences,
   workflowLabel,
+  type TaskItemTab,
 } from '@/lib/tasks-table'
 import { usageMetricVisibility } from '@/lib/token-metrics'
 import { cn, isHttpUrl } from '@/lib/utils'
@@ -96,8 +98,49 @@ import { WorkflowSteps } from './step-rail'
  *    (local-only) behavior — the gate goes in where the flags are read, `runActionFlags` callers.
  */
 /** Which run-detail tab this header instance sits above — drives the active underline.
- *  A prop rather than a route match so the header stays testable with a bare render. */
-export type RunTab = 'session' | 'changes' | 'commits' | 'files'
+ *  A prop rather than a route match so the header stays testable with a bare render. An object
+ *  is one of the task's linked issue/PR tabs (#692). */
+export type RunTab = 'session' | 'changes' | 'commits' | 'files' | TaskItemTab
+
+/** How many item tabs fit inline before the rest go into the "+N" menu (spec #692). */
+const MAX_INLINE_ITEM_TABS = 3
+
+const sameItemTab = (a: TaskItemTab, b: TaskItemTab) => a.kind === b.kind && a.number === b.number
+
+/**
+ * The item tabs split into what shows inline and what goes into the "+N" menu. The first `max`
+ * show inline — unless the ACTIVE tab sits past them, in which case it takes the last inline slot
+ * and the tab it displaced moves into the menu, so the tab the reader is on is always visible.
+ */
+export function visibleItemTabs(
+  tabs: TaskItemTab[],
+  active: TaskItemTab | null,
+  max = MAX_INLINE_ITEM_TABS,
+): { inline: TaskItemTab[]; overflow: TaskItemTab[] } {
+  const activeIndex = active ? tabs.findIndex((tab) => sameItemTab(tab, active)) : -1
+  if (tabs.length <= max || activeIndex < max) {
+    return { inline: tabs.slice(0, max), overflow: tabs.slice(max) }
+  }
+  const inline = [...tabs.slice(0, max - 1), tabs[activeIndex]!]
+  return { inline, overflow: tabs.filter((tab) => !inline.includes(tab)) }
+}
+
+const itemTabPath = (runId: string, tab: TaskItemTab) => `/tasks/${runId}/${tab.kind}/${tab.number}`
+
+/** An item tab's content: kind icon, `#n`, status glyph. The kind word is screen-reader text, so
+ *  the accessible name is "Pull request #801" while the row stays as short as the design draws. */
+function ItemTabLabel({ tab }: { tab: TaskItemTab }) {
+  const KindIcon = tab.kind === 'pr' ? GitPullRequestIcon : CircleDotIcon
+  return (
+    <>
+      <KindIcon aria-hidden="true" className="mr-1 size-3.5 shrink-0" />
+      {/* The space stays OUTSIDE the sr-only span: accname drops it from inside, and a flex
+          row trims it from the visible run, so it lands in the name alone. */}
+      <span className="sr-only">{tab.kind === 'pr' ? 'Pull request' : 'Issue'}</span> #{tab.number}
+      <ReferenceStatusGlyph kind={tab.kind === 'pr' ? 'PR' : 'Issue'} number={tab.number} className="ml-1" />
+    </>
+  )
+}
 
 /** Which project/run pairs the reader has expanded the phone-width meta row for (#765). A module-level map for
  *  the same reason `WorkflowSteps` keeps one (`openByRun` in step-rail.tsx) — and it has to be BOTH
@@ -161,7 +204,34 @@ export function RunHeader({
   // user came from rather than stepping through every tab they visited; desktop keeps its history.
   const phoneBar = barSlot !== null
   const repoBase = useProjectRepoBase()
-  const primaryReference = useMemo(() => taskReferences(run, repoBase)[0], [run, repoBase])
+  const references = useMemo(() => taskReferences(run, repoBase), [run, repoBase])
+  const primaryReference = references[0]
+  // One status batch for the whole header: the meta row's chips and the item tabs' glyphs read the
+  // same provider, so the tabs add no request (#692).
+  const referenceProjectId = useReferenceProjectId()
+  const referenceRequests = useMemo(
+    () =>
+      referenceProjectId === undefined
+        ? []
+        : references.map((reference) => ({
+            projectId: referenceProjectId,
+            kind: reference.kind,
+            number: reference.number,
+          })),
+    [references, referenceProjectId],
+  )
+  // The linked own-repo issues and PRs, one tab each after Files (#692).
+  const itemTabs = useMemo(() => taskItemTabs(run, repoBase), [run, repoBase])
+  const activeItem = typeof tab === 'object' ? tab : null
+  const { inline: inlineItemTabs, overflow: overflowItemTabs } = visibleItemTabs(itemTabs, activeItem)
+  // Below md the tab row scrolls sideways rather than wrapping, so a tab can sit past the right
+  // edge. The one the reader is on is brought into view — it may have been in the "+N" menu.
+  const tabRowRef = useRef<HTMLDivElement>(null)
+  const activeItemKey = activeItem ? `${activeItem.kind}#${activeItem.number}` : null
+  useEffect(() => {
+    if (!activeItemKey || isDesktop) return
+    tabRowRef.current?.querySelector('[aria-current="page"]')?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
+  }, [activeItemKey, isDesktop])
   const actionsKebab = (
     <ActionsKebab
       run={run}
@@ -199,6 +269,7 @@ export function RunHeader({
   const archiveButton = tab !== 'session' && flags.archive ? <ArchiveButton run={run} /> : null
 
   return (
+    <ReferenceStatusProvider projectId={referenceProjectId} requests={referenceRequests}>
     <header
       data-slot="run-header"
       className={cn(
@@ -280,7 +351,16 @@ export function RunHeader({
             visual weight of the row, not a smaller hit area. The count is phone-only (desktop tabs are unchanged). Counts come only from data the record
             already carries: the changed-file tally. A commit count is not on the record, and one
             more query for a badge is not worth it, so Commits shows none. */}
-        <div data-slot="run-tabs" data-phone-bar={phoneBar || undefined} className="mt-3 flex flex-wrap items-end gap-1 border-b border-border md:mt-5 max-md:gap-0 max-md:[&>a]:min-h-11 max-md:[&>a]:px-3.5 max-md:[&>a]:text-[13.5px]">
+        {/* Below md the row scrolls sideways instead of wrapping (#692): item tabs can push it past
+            the viewport, and a wrapped second row of tabs reads as a second tab bar. The divider
+            moves into an inset shadow there, because a scroll container clips the tabs' `-mb-px`
+            overlap — the underline then sits ON the divider exactly as it does on desktop. */}
+        <div
+          ref={tabRowRef}
+          data-slot="run-tabs"
+          data-phone-bar={phoneBar || undefined}
+          className="mt-3 flex flex-wrap items-end gap-1 border-b border-border md:mt-5 max-md:flex-nowrap max-md:overflow-x-auto max-md:border-b-0 max-md:shadow-[inset_0_-1px_0_var(--border)] max-md:gap-0 max-md:[&>*]:mb-0 max-md:[&>*]:shrink-0 max-md:[&>a]:min-h-11 max-md:[&>a]:px-3.5 max-md:[&>a]:text-[13.5px]"
+        >
           <TabLink to={`/tasks/${run.id}`} active={tab === 'session'} replace={phoneBar}>
             Session
           </TabLink>
@@ -293,6 +373,36 @@ export function RunHeader({
           <TabLink to={`/tasks/${run.id}/files`} active={tab === 'files'} replace={phoneBar}>
             Files
           </TabLink>
+          {inlineItemTabs.map((item) => (
+            <TabLink
+              key={`${item.kind}-${item.number}`}
+              to={itemTabPath(run.id, item)}
+              active={activeItem !== null && sameItemTab(item, activeItem)}
+              replace={phoneBar}
+            >
+              <ItemTabLabel tab={item} />
+            </TabLink>
+          ))}
+          {overflowItemTabs.length > 0 ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                data-slot="run-tabs-more"
+                aria-label={`${overflowItemTabs.length} more linked items`}
+                className="-mb-px flex h-8 items-center rounded-t-md border-b-2 border-transparent px-3 text-[13px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-link-foreground max-md:min-h-11 max-md:px-3.5 max-md:text-[13.5px]"
+              >
+                +{overflowItemTabs.length}
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {overflowItemTabs.map((item) => (
+                  <DropdownMenuItem key={`${item.kind}-${item.number}`} asChild>
+                    <Link to={itemTabPath(run.id, item)} replace={phoneBar}>
+                      <ItemTabLabel tab={item} />
+                    </Link>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : null}
         </div>
 
         {tab !== 'session' ? <RunRelationshipsPanel run={run} /> : null}
@@ -309,6 +419,7 @@ export function RunHeader({
 
       <ConfirmDialog run={run} actions={actions} />
     </header>
+    </ReferenceStatusProvider>
   )
 }
 
@@ -584,22 +695,10 @@ function MetaRow({
   // #526: the issue chip may be synthesized from the CEZ:ISSUE marker, and the only repository
   // such a link may name is the one on screen — never the transcript's.
   const repoBase = useProjectRepoBase()
-  // At most two references here, so this is a batch of one or two rather than of a table — but it
-  // goes through the same seam, which is what keeps the header's chip and the table's chip
-  // answering identically for the same PR.
-  const projectId = useReferenceProjectId()
+  // The chips' statuses come from the `ReferenceStatusProvider` `RunHeader` mounts around the
+  // whole header — the same seam the tables use, which keeps the header's chip and the table's
+  // chip answering identically for the same PR.
   const references = useMemo(() => taskReferences(run, repoBase), [run, repoBase])
-  const referenceRequests = useMemo(
-    () =>
-      projectId === undefined
-        ? []
-        : references.map((reference) => ({
-            projectId,
-            kind: reference.kind,
-            number: reference.number,
-          })),
-    [references, projectId],
-  )
   // `workflowLabel` so an inline chain shows its first step's name, not the bare "(planned)"
   // placeholder — which reads like a status next to the live status pill.
   const parts: ReactNode[] = [<span key="workflow" className="min-w-0 max-w-full break-all">{workflowLabel(run)}</span>]
@@ -711,7 +810,7 @@ function MetaRow({
   }
 
   return (
-    <ReferenceStatusProvider projectId={projectId} requests={referenceRequests}>
+    <>
       <div
         data-slot="run-meta"
         className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground md:mt-1.5 md:gap-y-1"
@@ -740,7 +839,7 @@ function MetaRow({
           <AgentBadge run={run} />
         </span>
       </div>
-    </ReferenceStatusProvider>
+    </>
   )
 }
 

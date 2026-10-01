@@ -501,6 +501,46 @@ function lowerFirst(text: string): string {
   return text.charAt(0).toLowerCase() + text.slice(1)
 }
 
+/**
+ * A reference's status as a bare glyph, coloured like the sidebar's plain chip — for a surface
+ * that names the reference itself and wants only the state beside it (the task page's item tabs,
+ * #692). Reads the same provider the chips do, so it adds no request; outside one, or with nothing
+ * known, it renders nothing. A conflict takes the glyph over, as it takes the chip over.
+ */
+export function ReferenceStatusGlyph({
+  kind,
+  number,
+  className,
+}: {
+  kind: 'PR' | 'Issue'
+  number: number
+  className?: string
+}) {
+  const entry = useReferenceStatus(kind, number)
+  const statusPresentation = referenceStatusPresentation(entry.status)
+  const conflicting = kind === 'PR' && entry.conflicting === true
+  const presentation = conflicting ? REFERENCE_CONFLICT : statusPresentation
+  if (!presentation) return null
+  const glyphClass = cn('size-2.5', PLAIN_GLYPH_CLASS[presentation.tone])
+  return (
+    <span
+      data-slot="reference-status-glyph"
+      data-status={entry.status}
+      {...(conflicting ? { 'data-conflicting': 'true' } : {})}
+      // Hidden: the surface names the reference, and the spec pins that name ("Pull request
+      // #801"). A `title` here would leak into it through accname's tooltip fallback.
+      aria-hidden="true"
+      className={cn('inline-flex items-center', className)}
+    >
+      {conflicting ? (
+        <TriangleAlertIcon className={cn('shrink-0', glyphClass)} aria-hidden="true" />
+      ) : (
+        <StatusGlyph status={entry.status} className={glyphClass} />
+      )}
+    </span>
+  )
+}
+
 /** The status channel that is not color: an icon, or — for checks still running — the pulsing dot
  *  the design system reserves for a transitioning state, inside its now-amber chip. */
 function StatusGlyph({ status, className }: { status?: ReferenceStatus; className?: string }) {
