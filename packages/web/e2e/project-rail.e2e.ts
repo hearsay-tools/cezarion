@@ -181,6 +181,7 @@ describe('project rail', () => {
     // Persisted: a reload lands the keyboard on the same remembered page.
     browser.goto(baseUrl + `/p/${bootProject}/skills`)
     pathIs(`/p/${bootProject}/skills`)
+    browser.waitForFunction(`document.querySelector('${mark(OTHER.id)} a') !== null`)
     browser.evaluate(`document.querySelector('${mark(OTHER.id)} a').focus()`)
     browser.press('Enter')
     pathIs(`/p/${OTHER.id}/workflows`)
