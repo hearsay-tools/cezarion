@@ -343,6 +343,21 @@ describe('the branch classifier (issue 08 §A)', () => {
     expect(await git(root, 'symbolic-ref', 'refs/heads/cez/aaaaaaaa')).toBe('refs/heads/topic');
   });
 
+  it('with the main checkout detached and no base configured, the base is the checkout commit', async () => {
+    await git(root, 'branch', 'cez/aaaaaaaa');
+    const tip = await taskBranch(root, 'cez/bbbbbbbb', 1);
+    await git(root, 'checkout', '-q', '--detach', 'main');
+    const runs = [runRecord('aaaaaaaa-1', 'done'), runRecord('bbbbbbbb-1', 'done')];
+    const { payload, cls } = await classesOf({ runs, currentBranch: 'HEAD' });
+    expect(payload.base).toBe('HEAD');
+    // Forked at the checkout and never committed: safe, like merged — not "the whole history is mine".
+    expect(cls['cez/aaaaaaaa']).toBe('empty');
+    expect(cls['cez/bbbbbbbb']).toBe('not-landed');
+    expect(payload.branches.find((b) => b.name === 'cez/bbbbbbbb')?.ahead).toBe(1);
+    expect((await deleteBranches(input({ runs, currentBranch: 'HEAD' }), ['cez/aaaaaaaa'])).deleted).toEqual(['cez/aaaaaaaa']);
+    expect(await git(root, 'rev-parse', 'cez/bbbbbbbb')).toBe(tip);
+  });
+
   it('an alias is never the ref that keeps a branch\'s commits, nor the base', async () => {
     // (a) The only "other" ref holding the fork commit is an alias for the task branch itself.
     await taskBranch(root, 'topic', 1);

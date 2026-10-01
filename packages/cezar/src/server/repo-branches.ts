@@ -261,6 +261,13 @@ async function resolveBase(root: string, base: string): Promise<{ ref: string; f
     return res.ok ? res.stdout.trim() || null : null;
   };
   if (FULL_SHA.test(base)) return { ref: base, fullRef: null, sha: await at(base) };
+  // A detached main checkout with no configured base: `RepoInfo.branch` is the literal `HEAD`, which
+  // names no branch. The base is then the checkout's commit, and a delete verifies HEAD still holds
+  // it (`--no-deref`: a HEAD switched back onto a branch is symbolic again, and refuses).
+  if (base === 'HEAD') {
+    const sha = (await git(root, ['symbolic-ref', '-q', 'HEAD'])).ok ? null : await at('HEAD');
+    return { ref: 'HEAD', fullRef: sha ? 'HEAD' : null, sha };
+  }
   if (!isSafeGitRef(base)) return { ref: base, fullRef: null, sha: null };
   const name = base.startsWith('origin/') ? base.slice('origin/'.length) : base;
   // A symbolic base is an alias for some other branch — possibly one about to be deleted — and a
