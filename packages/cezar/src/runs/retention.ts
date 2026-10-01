@@ -116,6 +116,11 @@ export interface ReclaimOptions {
    *  Injectable so tests can exercise the "removal failed" branch without brittle
    *  filesystem-permission tricks. */
   remove?: (repoRoot: string, worktreePath: string) => Promise<void>;
+  /** Claims the run for the whole reclaim, or returns null to skip it. A selection is made before
+   *  any await, so without a claim a Continue admitted in between would resume into the directory
+   *  the forced removal is about to delete. The run manager's `claimWorktreeReclaim` is the one
+   *  that also blocks admission; startup sweeps run before any run can start and omit it. */
+  claim?: (run: RunRecord) => (() => void) | null;
 }
 
 /** Snapshot parent-owned worker evidence before the checkout goes.
@@ -162,6 +167,8 @@ export async function reclaimWorktree(
   const now = opts.now ?? (() => new Date().toISOString());
   const remove = opts.remove ?? ((root, path) => removeWorktree(root, path, undefined, { reclaimOwnedDirectory: true })); // branch kept
   if (!run.worktreePath) return null;
+  const release = opts.claim ? opts.claim(run) : () => undefined;
+  if (!release) return null; // in use since it was selected
   try {
     if (!(await preserveWorkerResult(repoRoot, store, run).catch(() => false))) return null;
     await remove(repoRoot, run.worktreePath);
@@ -172,5 +179,7 @@ export async function reclaimWorktree(
   } catch {
     // best-effort: never let retention crash a terminal transition or startup.
     return null;
+  } finally {
+    release();
   }
 }

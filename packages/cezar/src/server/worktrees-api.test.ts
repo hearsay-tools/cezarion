@@ -5,11 +5,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import type { Hono } from 'hono';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createOwnedWorkspace } from '../delegation/workspace.ts';
 import { createWorktree } from '../git-worktree.ts';
 import { RunStore } from '../runs/store.ts';
-import type { RunManager } from '../workflows/run.ts';
+import { RunManager } from '../workflows/run.ts';
 import { createApp } from './server.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
 
@@ -27,6 +27,7 @@ describe('the worktrees API', () => {
   let cezHome: string;
   let store: RunStore;
   let app: Hono;
+  let manager: RunManager;
   const savedHome = process.env.CEZ_HOME;
 
   beforeEach(async () => {
@@ -41,10 +42,13 @@ describe('the worktrees API', () => {
     await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
     mkdirSync(join(repoRoot, '.ai/cezar'), { recursive: true });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    app = createApp({ repoRoot, store, manager: { isActive: () => false } as unknown as RunManager, version: '0.0.0-test' });
+    // A real manager: the reclaim routes claim through it, the same claim Continue is refused by.
+    manager = new RunManager(store, repoRoot);
+    app = createApp({ repoRoot, store, manager, version: '0.0.0-test' });
   });
 
   afterEach(() => {
+    manager.dispose();
     store.flush();
     if (savedHome === undefined) delete process.env.CEZ_HOME;
     else process.env.CEZ_HOME = savedHome;
@@ -264,13 +268,56 @@ describe('the worktrees API', () => {
       const live = await seed(randomUUID(), 'running');
       const review = await seed(randomUUID(), 'review', '2026-07-02T00:00:00Z');
       const held = await seed(randomUUID(), 'done', '2026-07-03T00:00:00Z');
-      app = createApp({ repoRoot, store, manager: { isActive: (runId: string) => runId === held } as unknown as RunManager, version: '0.0.0-test' });
+      const isActive = manager.isActive.bind(manager);
+      vi.spyOn(manager, 'isActive').mockImplementation((runId) => runId === held || isActive(runId));
       for (const id of [live, review, held]) {
         expect((await reclaimOne(id)).status).toBe(409);
         expect(existsSync(store.getRun(id)!.worktreePath!)).toBe(true);
         expect(store.getRun(id)?.worktreeReclaimedAt).toBeUndefined();
       }
       expect((await reclaimOne(randomUUID())).status).toBe(404);
+    });
+
+    /** A finished run with an agent session, so Continue is admissible (the bundled mock serves it). */
+    const resumable = async () => {
+      const wt = await createWorktree(repoRoot, randomUUID(), 'main');
+      const rec = store.createRun({ title: 'resumable', workflow: 'w', task: 't', steps: [{ id: 'task', name: 'Task', kind: 'agent' }] });
+      store.updateStep(rec.id, 'task', { status: 'done', sessionId: 'sess-1', backend: 'claude' });
+      store.updateRun(rec.id, { status: 'done', finishedAt: '2026-07-01T00:00:00Z', worktreePath: wt.path, branch: wt.branch });
+      return rec.id;
+    };
+    const savedDryRun = process.env.CEZ_DRY_RUN;
+    beforeEach(() => { process.env.CEZ_DRY_RUN = '1'; });
+    afterEach(() => {
+      if (savedDryRun === undefined) delete process.env.CEZ_DRY_RUN;
+      else process.env.CEZ_DRY_RUN = savedDryRun;
+    });
+
+    it('holds Continue off for the whole removal, and admits it again once the directory is gone', async () => {
+      const id = await resumable();
+      // Continue arrives the moment the handler holds its claim, while the removal is still awaiting.
+      const claimed = new Promise<void>((resolve) => {
+        const claim = manager.claimWorktreeReclaim.bind(manager);
+        vi.spyOn(manager, 'claimWorktreeReclaim').mockImplementation((runId) => {
+          const release = claim(runId);
+          resolve();
+          return release;
+        });
+      });
+      const pending = reclaimOne(id);
+      await claimed;
+      expect(manager.continueRun(id, { text: 'go on' })).toEqual({ ok: false, error: expect.stringContaining('being reclaimed') });
+      expect((await pending).status).toBe(200);
+      expect(existsSync(store.getRun(id)!.worktreePath!)).toBe(false);
+      // Released: the next Continue is admitted, and re-materializes the reclaimed tree.
+      expect(manager.continueRun(id, { text: 'go on' }).ok).toBe(true);
+    });
+
+    it('409s while a run is being Continued, and leaves its directory alone', async () => {
+      const id = await resumable();
+      expect(manager.continueRun(id, { text: 'go on' }).ok).toBe(true);
+      expect((await reclaimOne(id)).status).toBe(409);
+      expect(existsSync(store.getRun(id)!.worktreePath!)).toBe(true);
     });
   });
 

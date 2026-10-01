@@ -4844,7 +4844,10 @@ export function createApp(deps: ServerDeps) {
       const { root: repoRoot, store } = c.get('project');
       // The body is validated (an empty or `{}` one is accepted) but carries nothing this
       // handler reads; retention is best-effort, so 200 always.
-      const reclaimed = await reclaimWorktrees(repoRoot, store, await resolveWorktreeRetention(repoRoot));
+      const { manager } = c.get('project');
+      const reclaimed = await reclaimWorktrees(repoRoot, store, await resolveWorktreeRetention(repoRoot), {
+        claim: (run) => manager.claimWorktreeReclaim(run.id),
+      });
       if (reclaimed.length > 0) forgetRepoBranches(repoRoot);
       return c.json({ reclaimed });
     })
@@ -4856,10 +4859,12 @@ export function createApp(deps: ServerDeps) {
       const { root: repoRoot, store, manager } = c.get('project');
       const run = store.getRun(c.req.valid('param').runId);
       if (!run) return c.json({ error: 'not found' }, 404);
-      if (manager.isActive(run.id) || !isReclaimable(run, store.listRuns())) {
+      // Claimed, not merely checked: the claim holds Continue off until the directory is gone.
+      const release = manager.claimWorktreeReclaim(run.id);
+      if (!release) {
         return c.json({ error: 'this worktree is in use or already reclaimed — only a finished task\'s worktree can be reclaimed' }, 409);
       }
-      const worktreeReclaimedAt = await reclaimWorktree(repoRoot, store, run);
+      const worktreeReclaimedAt = await reclaimWorktree(repoRoot, store, run).finally(release);
       if (!worktreeReclaimedAt) return c.json({ error: 'the worktree directory could not be removed' }, 409);
       forgetRepoBranches(repoRoot);
       return c.json({ runId: run.id, worktreeReclaimedAt });

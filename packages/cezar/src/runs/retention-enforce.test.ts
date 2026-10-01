@@ -119,6 +119,34 @@ describe('reclaimWorktrees (real git, #483)', () => {
     expect(store.runs.find((r) => r.id === oldId)?.worktreeReclaimedAt).toBeUndefined();
   });
 
+  it('holds the claim through the removal, and skips a run the claim refuses', async () => {
+    const repo = await fixtureRepo();
+    const ids = ['66666666-6666-4666-8666-666666666666', '77777777-7777-4777-8777-777777777777', '88888888-8888-4888-8888-888888888888'];
+    const trees = await Promise.all(ids.map((id) => createWorktree(repo, id, 'main')));
+    const store = fakeStore(ids.map((id, i) => finishedRun(id, trees[i]!.path, `2026-07-0${i + 1}T00:00:00.000Z`)));
+    const held = new Set<string>();
+    const heldDuringRemove: boolean[] = [];
+
+    const reclaimed = await reclaimWorktrees(repo, store, 1, {
+      // The oldest became busy after selection — a Continue the manager admitted in between.
+      claim: (r) => {
+        if (r.id === ids[0]) return null;
+        held.add(r.id);
+        return () => held.delete(r.id);
+      },
+      remove: async (_root, path) => {
+        heldDuringRemove.push(held.has(ids[trees.findIndex((t) => t.path === path)]!));
+        rmSync(path, { recursive: true, force: true });
+      },
+    });
+
+    expect(reclaimed).toEqual([ids[1]]);
+    expect(existsSync(trees[0]!.path)).toBe(true);
+    expect(store.runs.find((r) => r.id === ids[0])?.worktreeReclaimedAt).toBeUndefined();
+    expect(heldDuringRemove).toEqual([true]);
+    expect(held.size).toBe(0); // released afterwards
+  });
+
   it('keep=0 reclaims nothing (unlimited)', async () => {
     const repo = await fixtureRepo();
     const id = '66666666-6666-4666-8666-666666666666';
