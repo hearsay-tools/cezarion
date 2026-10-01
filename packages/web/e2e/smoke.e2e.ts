@@ -237,7 +237,7 @@ describe('cockpit app shell', () => {
     browser.press('ArrowDown')
     browser.waitForFunction(`document.activeElement?.getAttribute('role') === 'menuitem'`)
     browser.press('Enter')
-    const path = OVERFLOW_PATHS[expected[0]]
+    const path = OVERFLOW_PATHS[expected[0]!]
     browser.waitForFunction(`location.pathname === '${scoped('')}' + '${path}' && document.querySelector('[role="menu"]') === null`)
     expect(browser.count(`${nav} a[aria-current="page"]`)).toBe(0)
     expect(browser.count(`${trigger}`)).toBe(1)
@@ -245,7 +245,7 @@ describe('cockpit app shell', () => {
     browser.waitForFunction(`document.querySelector('${trigger}').getAttribute('data-active') === 'true'`)
 
     // Keyboard walk to the LAST overflow item (Workflows when crowded) and activate it.
-    const last = expected[expected.length - 1]
+    const last = expected[expected.length - 1]!
     browser.evaluate(`document.querySelector('${trigger}').focus()`)
     browser.press('ArrowDown')
     for (let i = 0; i < expected.length - 1; i++) browser.press('ArrowDown')
