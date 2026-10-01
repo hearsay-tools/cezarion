@@ -214,8 +214,18 @@ function GithubMergeBox({ number, onRunAgent }: { number: number; onRunAgent?: (
   const selectedMethod = method && state?.methods.includes(method)
     ? method
     : state?.defaultMethod ?? state?.methods[0] ?? null
+  // Every key this merge touches, taken when it STARTS: `queryKeys` reads the live project scope,
+  // and a merge that lands after the reader switched projects must refresh the project it merged
+  // in, not the one now on screen (review g3 #1).
+  const mergeKeys = () => ({
+    mergeState: queryKeys.githubMergeState(number),
+    list: queryKeys.github({ limit: GITHUB_LIST_LIMIT }),
+    comments: queryKeys.githubComments('pr', number),
+    item: queryKeys.githubItem('pr', number),
+    refStatus: referenceProjectId === undefined ? undefined : queryKeys.githubRefStatusOf(referenceProjectId),
+  })
   const merge = useMutation({
-    mutationFn: () => {
+    mutationFn: (_keys: ReturnType<typeof mergeKeys>) => {
       if (!state || !selectedMethod) throw new Error('No merge method is available.')
       return mergeGithubPr(number, {
         method: selectedMethod,
@@ -223,23 +233,21 @@ function GithubMergeBox({ number, onRunAgent }: { number: number; onRunAgent?: (
         ...(overrideRules && state.canOverride ? { overrideRules: true } : {}),
       })
     },
-    onSuccess: () => {
+    onSuccess: (_data, keys) => {
       setConfirming(false)
       toast(`Pull request #${number} merged`)
-      void queryClient.invalidateQueries({ queryKey: queryKeys.githubMergeState(number) })
+      void queryClient.invalidateQueries({ queryKey: keys.mergeState })
       // The single list query (#664) — a merged PR drops out of the open set on the next fetch.
-      void queryClient.invalidateQueries({ queryKey: queryKeys.github({ limit: GITHUB_LIST_LIMIT }) })
-      void queryClient.invalidateQueries({ queryKey: queryKeys.githubComments('pr', number) })
+      void queryClient.invalidateQueries({ queryKey: keys.list })
+      void queryClient.invalidateQueries({ queryKey: keys.comments })
       // The task tab's item (#692), and every chip and tab glyph of this project: the server
       // forgot its cached status on merge, so a reread answers `merged` without a reload.
-      void queryClient.invalidateQueries({ queryKey: queryKeys.githubItem('pr', number) })
-      if (referenceProjectId !== undefined) {
-        void queryClient.invalidateQueries({ queryKey: queryKeys.githubRefStatusOf(referenceProjectId) })
-      }
+      void queryClient.invalidateQueries({ queryKey: keys.item })
+      if (keys.refStatus) void queryClient.invalidateQueries({ queryKey: keys.refStatus })
     },
-    onError: (error) => {
+    onError: (error, keys) => {
       toast(error instanceof Error ? error.message : String(error), { tone: 'danger' })
-      void queryClient.invalidateQueries({ queryKey: queryKeys.githubMergeState(number) })
+      void queryClient.invalidateQueries({ queryKey: keys.mergeState })
     },
   })
 
@@ -374,7 +382,7 @@ function GithubMergeBox({ number, onRunAgent }: { number: number; onRunAgent?: (
           {merge.error ? <p className="text-sm text-danger">{merge.error.message}</p> : null}
           <DialogFooter>
             <Button variant="outline" disabled={merge.isPending} onClick={() => setConfirming(false)}>Cancel</Button>
-            <Button disabled={merge.isPending} onClick={() => merge.mutate()}>
+            <Button disabled={merge.isPending} onClick={() => merge.mutate(mergeKeys())}>
               {merge.isPending ? 'Merging…' : selectedMethod ? mergeLabels[selectedMethod] : 'Merge'}
             </Button>
           </DialogFooter>

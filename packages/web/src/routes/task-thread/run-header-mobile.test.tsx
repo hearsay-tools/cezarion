@@ -1,5 +1,5 @@
 import { QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -201,6 +201,39 @@ describe('RunHeader below md on a pushed task screen', () => {
       const active = within(tabs).getByRole('link', { name: 'Issue #692' })
       expect(active.getAttribute('aria-current')).toBe('page')
       expect(scrolled).toContain(active)
+    } finally {
+      Element.prototype.scrollIntoView = original
+    }
+  })
+
+  it('scrolls the active tab into view once a late repo base makes it renderable (#692)', async () => {
+    // A URL-only reference is own only once the project's repository is known, so its tab does not
+    // exist until health answers. The scroll has to follow the tab, not the mount.
+    let releaseHealth: (() => void) | undefined
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const json = (body: unknown) => new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } })
+      if (String(input) === '/api/v1/health') {
+        await new Promise<void>((resolve) => { releaseHealth = resolve })
+        return json({ repo: { remote: 'git@github.com:acme/demo.git' } })
+      }
+      return json({})
+    }))
+    const scrolled: Element[] = []
+    const original = Element.prototype.scrollIntoView
+    Element.prototype.scrollIntoView = function (this: Element) { scrolled.push(this) }
+    try {
+      renderScreen(
+        '/tasks/r1',
+        { ...record, prNumber: undefined, pullRequestUrl: 'https://github.com/acme/demo/pull/9' },
+        { kind: 'pr', number: 9 },
+      )
+      const tabs = document.querySelector('[data-slot="run-tabs"]') as HTMLElement
+      expect(within(tabs).queryByRole('link', { name: 'Pull request #9' })).toBeNull()
+      await waitFor(() => expect(releaseHealth).toBeDefined())
+      releaseHealth!()
+      const active = await within(tabs).findByRole('link', { name: 'Pull request #9' })
+      expect(active.getAttribute('aria-current')).toBe('page')
+      await waitFor(() => expect(scrolled).toContain(active))
     } finally {
       Element.prototype.scrollIntoView = original
     }

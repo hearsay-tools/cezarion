@@ -44,7 +44,10 @@ function ItemView({ run, kind }: { run: ApiRun; kind: 'issue' | 'pr' }) {
   const repoBase = useProjectRepoBase()
   // `repoBase` decides which URL references count as own. Until the registry and health have
   // answered it is unknown, and judging "not linked" then would flash a refusal for a real tab.
-  const settling = useProjects().isPending || useHealth().isPending
+  // Both hooks run on every render: an `||` would skip the second while the first is pending.
+  const projects = useProjects()
+  const health = useHealth()
+  const settling = projects.isPending || health.isPending
   const linked = taskItemTabs(run, repoBase).some((tab) => tab.kind === kind && tab.number === number)
   const item = useGithubItem(kind, number, linked)
 
@@ -88,9 +91,12 @@ function ItemBody({
 }) {
   const queryClient = useQueryClient()
   // Retry asks gh again rather than the server's cache — the cached answer is what just failed.
+  // The key is taken when Retry is PRESSED: `queryKeys` reads the live project scope, and a reader
+  // who switched projects before the answer landed must not get this project's item filed under
+  // theirs (review g3 #1).
   const retry = useMutation({
-    mutationFn: () => getGithubItem(kind, number, { refresh: true }),
-    onSuccess: (data) => queryClient.setQueryData(queryKeys.githubItem(kind, number), data),
+    mutationFn: (_key: ReturnType<typeof queryKeys.githubItem>) => getGithubItem(kind, number, { refresh: true }),
+    onSuccess: (data, key) => queryClient.setQueryData(key, data),
   })
   const label = `${KIND_LABEL[kind]} #${number}`
   const KindIcon = kind === 'pr' ? GitPullRequestIcon : CircleDotIcon
@@ -106,7 +112,7 @@ function ItemBody({
         title={`Could not load ${KIND_LABEL[kind].toLowerCase()} #${number}`}
         subtitle={error.message}
         actions={
-          <Button variant="outline" disabled={retry.isPending} onClick={() => retry.mutate()}>
+          <Button variant="outline" disabled={retry.isPending} onClick={() => retry.mutate(queryKeys.githubItem(kind, number))}>
             Retry
           </Button>
         }

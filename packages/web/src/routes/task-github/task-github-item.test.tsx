@@ -113,6 +113,7 @@ function NavigationProbe() {
     <>
       <div data-testid="location" data-pathname={location.pathname} />
       <button onClick={() => navigate('/p/third/tasks/r1/pr/5')}>Open the third project’s PR tab</button>
+      <button onClick={() => navigate('/p/other/tasks/r1/pr/5')}>Open the other project’s PR tab</button>
     </>
   )
 }
@@ -201,5 +202,34 @@ describe('TaskGithubItemRoute', () => {
     await waitFor(() => expect(itemRequests()).toContain('/api/v1/p/other/github/items/pr/5'))
     fireEvent.click(screen.getByRole('button', { name: 'Open the third project’s PR tab' }))
     await waitFor(() => expect(itemRequests()).toContain('/api/v1/p/third/github/items/pr/5'))
+  })
+
+  it('files a Retry answer under the project it was asked in, after a project switch', async () => {
+    let releaseRetry: (() => void) | undefined
+    item = (path) => {
+      if (path.startsWith('/api/v1/p/third/')) return json({ available: true, item: { ...PR_5, title: 'The third project’s PR' } })
+      if (!path.endsWith('refresh=1')) return json({ error: 'boom' }, 500)
+      // Held open: the user switches projects before this answer lands.
+      return new Promise<Response>((resolve) => {
+        releaseRetry = () => resolve(json({ available: true, item: { ...PR_5, title: 'The other project’s PR' } }))
+      }) as unknown as Response
+    }
+    renderAt('/p/other/tasks/r1/pr/5')
+    fireEvent.click(await screen.findByRole('button', { name: 'Retry' }, { timeout: 5000 }))
+    await waitFor(() => expect(releaseRetry).toBeDefined())
+    fireEvent.click(screen.getByRole('button', { name: 'Open the third project’s PR tab' }))
+    expect(await screen.findByRole('heading', { name: /The third project’s PR/ })).toBeTruthy()
+
+    releaseRetry!()
+    // Give the late answer every chance to land in the wrong cache entry.
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(screen.getByRole('heading', { name: /The third project’s PR/ })).toBeTruthy()
+    expect(screen.queryByRole('heading', { name: /The other project’s PR/ })).toBeNull()
+
+    // And the project it was asked in has it: back there, the answer shows without a new request.
+    const before = itemRequests().length
+    fireEvent.click(screen.getByRole('button', { name: 'Open the other project’s PR tab' }))
+    expect(await screen.findByRole('heading', { name: /The other project’s PR/ })).toBeTruthy()
+    expect(itemRequests().length).toBe(before)
   })
 })

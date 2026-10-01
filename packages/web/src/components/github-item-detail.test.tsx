@@ -8,7 +8,7 @@ import { queryKeys } from '@/api/queries'
 import { createQueryClient } from '@/api/query-client'
 import { ReferenceChip } from '@/components/reference-chip'
 import { ReferenceStatusProvider } from '@/components/reference-status'
-import type { GithubItem } from '@open-mercato/cezar-api-client'
+import { setApiScope, type GithubItem } from '@open-mercato/cezar-api-client'
 
 import { GithubItemDetail } from './github-item-detail'
 
@@ -182,5 +182,45 @@ describe('merging from the detail (#692)', () => {
     await merge()
     await waitFor(() => expect(chip()?.getAttribute('data-status')).toBe('merged'))
     expect(refStatusCalls.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('invalidates the item of the project it merged in, even after the scope moved on', async () => {
+    let releaseMerge: (() => void) | undefined
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL, init: RequestInit = {}) => {
+      const url = String(input)
+      const respond = (body: unknown) =>
+        new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })
+      if (url.endsWith('/merge') && init.method === 'POST') {
+        // Held open so the scope can change while the merge is in flight.
+        await new Promise<void>((resolve) => { releaseMerge = resolve })
+        return respond({ merged: true, number: 42, url: PR_42.url, method: 'squash' })
+      }
+      if (url.includes('/merge-state')) return respond(MERGE_STATE)
+      if (url.endsWith('/health')) return respond({ bootProject: 'p1' })
+      return respond({ available: true, comments: [] })
+    })
+    setApiScope('p1')
+    try {
+      const client = createQueryClient()
+      const invalidate = vi.spyOn(client, 'invalidateQueries')
+      render(
+        <QueryClientProvider client={client}>
+          <MemoryRouter>
+            <GithubItemDetail item={PR_42} colors={{}} backLink={null} subNav={null} />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      )
+      await merge()
+      await waitFor(() => expect(releaseMerge).toBeDefined())
+      // The user has moved to another project before GitHub answered.
+      setApiScope('p2')
+      releaseMerge!()
+      await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ['p1', 'github', 'item', 'pr', 42] }))
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ['p1', 'github', 'merge-state', 42] })
+      const touched = invalidate.mock.calls.map(([filters]) => JSON.stringify(filters?.queryKey))
+      expect(touched.filter((key) => key.includes('"p2"'))).toEqual([])
+    } finally {
+      setApiScope(null)
+    }
   })
 })

@@ -227,11 +227,14 @@ export function RunHeader({
   // Below md the tab row scrolls sideways rather than wrapping, so a tab can sit past the right
   // edge. The one the reader is on is brought into view — it may have been in the "+N" menu.
   const tabRowRef = useRef<HTMLDivElement>(null)
+  // Keyed by the inline tab set too, not just the active item: a URL-only reference becomes a tab
+  // only once `repoBase` resolves, so the active link can appear after mount (review g3 #2).
   const activeItemKey = activeItem ? `${activeItem.kind}#${activeItem.number}` : null
+  const inlineItemSignature = inlineItemTabs.map((item) => `${item.kind}#${item.number}`).join(',')
   useEffect(() => {
     if (!activeItemKey || isDesktop) return
     tabRowRef.current?.querySelector('[aria-current="page"]')?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
-  }, [activeItemKey, isDesktop])
+  }, [activeItemKey, inlineItemSignature, isDesktop])
   const actionsKebab = (
     <ActionsKebab
       run={run}
