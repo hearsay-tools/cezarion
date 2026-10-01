@@ -188,7 +188,7 @@ import { ApplicationUpdateConflictError, ApplicationUpdateFailureError, type App
 import { createSocketHub, type SocketHub, type WsUpgradeVerdict } from './ws.ts';
 import { browseDirectory, isInsideBrowseRoot, isLexicallyInsideBrowseRoot, resolveBrowseRoot } from './fs-browse.ts';
 import { parseRemote, resolveForge, type ForgeAvailability } from './forge/index.ts';
-import { fetchGithub, fetchGithubProjects, fetchGithubChecks, fetchGithubComments, fetchGithubPrDiff, fetchGithubRefStatus, forgetRefStatus, readCachedRefStatuses, refNumberFromUrl, searchGithubItems, GithubPrNotFoundError, GH_CHECKS_MAX, GH_REF_STATUS_MAX } from './github.ts';
+import { fetchGithub, fetchGithubProjects, fetchGithubChecks, fetchGithubComments, fetchGithubItem, forgetGithubItem, fetchGithubPrDiff, fetchGithubRefStatus, forgetRefStatus, readCachedRefStatuses, refNumberFromUrl, searchGithubItems, GithubPrNotFoundError, GH_CHECKS_MAX, GH_REF_STATUS_MAX } from './github.ts';
 import { ensureLaunchKey } from './launch-key.ts';
 import { CockpitAlreadyRunningError, type CockpitOwnership } from './cockpit-ownership.ts';
 import { openInTerminal } from './open-in-terminal.ts';
@@ -5195,6 +5195,10 @@ export function createApp(deps: ServerDeps) {
   // would be in its temporal dead zone. (The schemas below are all read inside a handler, or
   // passed as a thunk, which defers them past that point.)
   const mergeNumberParams = z.object({ number: z.coerce.number().int().positive() });
+  const itemParams = z.object({
+    kind: z.enum(['issue', 'pr']),
+    number: z.coerce.number().int().positive().safe(),
+  });
   /** A ref-status list: `null` means malformed (the caller answers 400), `[]` means "not asked
    *  for". Absent and empty are the same request — neither names a number. */
   const parseRefNumbers = (raw: string | undefined): number[] | null => {
@@ -5239,6 +5243,20 @@ export function createApp(deps: ServerDeps) {
         await fetchGithubComments(repoRoot, parsed.data.kind, parsed.data.number, c.req.valid('query').refresh === '1'),
       );
     })
+
+    // One issue/PR by number, any state (#692) — the task page's item tabs. Same in-payload
+    // degrade as the siblings: `item: null` is "no such number", `available: false` is "could not
+    // ask"; never a 5xx.
+    .get(
+      '/github/items/:kind/:number',
+      paramZodValidator(itemParams, { message: 'invalid kind or number' }),
+      queryZodValidator(refreshQuery),
+      async (c) => {
+        const { root: repoRoot } = c.get('project');
+        const { kind, number } = c.req.valid('param');
+        return c.json(await fetchGithubItem(repoRoot, kind, number, c.req.valid('query').refresh === '1'));
+      },
+    )
 
     // Lazy checks glyphs for on-screen PR rows (#664). Additive sibling of /api/github — the list
     // call dropped `statusCheckRollup` (the dominant cost), so the glyph is hydrated here per
@@ -5330,6 +5348,7 @@ export function createApp(deps: ServerDeps) {
           // a minute after the user watched this server merge it. Forget it; the next reader asks
           // the forge, gets `merged`, and then stops polling it at all.
           forgetRefStatus(repoRoot, parsedNumber.data.number);
+          forgetGithubItem(repoRoot, 'pr', parsedNumber.data.number);
           return c.json(result);
         }
         return c.json(
