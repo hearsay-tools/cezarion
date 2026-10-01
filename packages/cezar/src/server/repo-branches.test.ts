@@ -228,6 +228,13 @@ describe('the branch classifier (issue 08 §A)', () => {
     const { payload, cls } = await classesOf({ runs: [runRecord('aaaaaaaa-1', 'done')], forge });
     expect(cls['cez/aaaaaaaa']).toBe('not-landed');
     expect(payload.branches.find((b) => b.name === 'cez/aaaaaaaa')?.pr).toMatchObject({ number: 2, state: 'open' });
+
+    // The same when the task RECORDED #1 as its own PR: the record is history, #2 is current.
+    const recorded = fakeForge({ states: { 1: 'merged' }, prs: [mergedPr(1, 'cez/aaaaaaaa', oldTip, squash), open] });
+    const runs = [runRecord('aaaaaaaa-1', 'done', { pullRequestUrl: 'https://github.com/acme/demo/pull/1' })];
+    const again = await classesOf({ runs, forge: recorded.forge });
+    expect(again.cls['cez/aaaaaaaa']).toBe('not-landed');
+    expect(again.payload.branches.find((b) => b.name === 'cez/aaaaaaaa')?.pr).toMatchObject({ number: 2, state: 'open' });
   });
 
   it('never classifies by prNumber — the PR a task is ABOUT is display-only', async () => {

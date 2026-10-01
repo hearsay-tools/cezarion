@@ -377,16 +377,22 @@ export async function classifyBranches(input: ClassifyInput): Promise<Classifica
       }
       // A merged state alone proves nothing (below), so the list is also needed whenever a
       // created PR reports merged — it carries the base and head the verdict is checked against.
-      const createdMerged = pending.some((d) => prByBranch.get(d.head.name)?.state === 'merged');
-      const list = needList.length > 0 || createdMerged
+      // A SETTLED recorded PR can also be obsolete: the branch was reused and a newer PR carries
+      // its current work, so the list is read for those rows' display as well.
+      const settled = (state: BranchPrState | undefined) => state === 'merged' || state === 'closed';
+      const recordedSettled = pending.filter((d) => created.size > 0 && settled(prByBranch.get(d.head.name)?.state));
+      const list = needList.length > 0 || recordedSettled.length > 0
         ? await input.forge.listPrs(root)
         : { available: true, prs: [] as ForgePr[] };
       if (!list.available) prStateKnown = false;
       const byHead = new Map<string, ForgePr[]>();
       for (const pr of list.prs) byHead.set(pr.headRefName, [...(byHead.get(pr.headRefName) ?? []), pr]);
-      for (const d of needList) {
+      for (const d of [...needList, ...recordedSettled]) {
         const pr = pickPr(byHead.get(d.head.name) ?? [], d.head.sha);
-        if (pr) prByBranch.set(d.head.name, { number: pr.number, url: pr.url, state: pr.state });
+        const recorded = prByBranch.get(d.head.name);
+        // A recorded PR is replaced only by one that is open, or that sits at the current tip.
+        if (!pr || (recorded && pr.number !== recorded.number && pr.headRefOid !== d.head.sha && settled(pr.state))) continue;
+        prByBranch.set(d.head.name, { number: pr.number, url: pr.url, state: pr.state });
       }
       // A merged PR lands the tip only when it targeted this base, merged this very commit, AND its
       // merge is on the base as this classification reads it: one into another branch, a branch
