@@ -197,6 +197,29 @@ describe('the worktrees API', () => {
     expect(existsSync(newWorkspace.path)).toBe(true);
   });
 
+  it('the row reclaim keeps a dirty owned-worker checkout: its diff snapshot would drop binary bytes', async () => {
+    const parent = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });
+    store.updateRun(parent.id, { status: 'done', finishedAt: '2026-07-09T00:00:00Z', delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
+    const sha = (await run('git', ['rev-parse', 'HEAD'], { cwd: repoRoot })).stdout.trim();
+    const dirty = await createOwnedWorkspace(repoRoot, randomUUID(), sha);
+    const clean = await createOwnedWorkspace(repoRoot, randomUUID(), sha);
+    const worker = (workspace: typeof dirty, seal: string) => {
+      const rec = store.createOwnedRun({ title: 'worker', task: 'worker', workflow: 'quick-task', steps: [] }, parent.id, randomUUID(),
+        { role: 'worker', parentRunId: parent.id, permissions: [], workspace }, seal);
+      store.updateRun(rec.id, { status: 'done', finishedAt: '2026-07-01T00:00:00Z', worktreePath: workspace.path, branch: workspace.branch });
+      return rec.id;
+    };
+    const dirtyId = worker(dirty, 'c'.repeat(64));
+    const cleanId = worker(clean, 'd'.repeat(64));
+    writeFileSync(join(dirty.path, 'uncommitted.bin'), Buffer.from([0, 1, 2, 255, 0, 7]));
+
+    const res = await apiRequest(app, `/api/v1/worktrees/${dirtyId}/reclaim`, { method: 'POST' });
+    expect(res.status).toBe(409);
+    expect(existsSync(join(dirty.path, 'uncommitted.bin'))).toBe(true);
+    expect((await apiRequest(app, `/api/v1/worktrees/${cleanId}/reclaim`, { method: 'POST' })).status).toBe(200);
+    expect(existsSync(clean.path)).toBe(false);
+  });
+
   it('does not mark a finished worker reclaimable while its parent is live without a worktree dir', async () => {
     const parent = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });
     store.updateRun(parent.id, {

@@ -121,6 +121,10 @@ export interface ReclaimOptions {
    *  the forced removal is about to delete. The run manager's `claimWorktreeReclaim` is the one
    *  that also blocks admission; startup sweeps run before any run can start and omit it. */
   claim?: (run: RunRecord) => (() => void) | null;
+  /** Require a clean, ref-kept checkout for an owned worker too. Retention (#575) relies on the
+   *  worker's evidence snapshot; a person pressing Reclaim on one row (issue 08 §B4) is not shown
+   *  that a diff snapshot drops binary content and caps its size, so that path asks for clean. */
+  requireClean?: boolean;
 }
 
 /** Snapshot parent-owned worker evidence before the checkout goes.
@@ -169,7 +173,7 @@ export async function reclaimWorktree(
   const now = opts.now ?? (() => new Date().toISOString());
   // Branch kept. An owned worker's evidence (uncommitted diff included) is snapshotted first; any
   // other run's uncommitted work lives only in the directory, so a dirty one is left for later.
-  const onlyClean = run.delegation?.role !== 'worker';
+  const onlyClean = opts.requireClean === true || run.delegation?.role !== 'worker';
   const remove = opts.remove ?? ((root, path) => removeWorktree(root, path, undefined, { reclaimOwnedDirectory: true, onlyClean }));
   if (!run.worktreePath) return null;
   const release = opts.claim ? opts.claim(run) : () => undefined;
