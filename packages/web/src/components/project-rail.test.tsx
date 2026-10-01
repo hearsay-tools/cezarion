@@ -413,6 +413,20 @@ describe('ProjectRail remembered pages', () => {
     expect(onSwitchProject).toHaveBeenCalledWith('open_mercato')
   })
 
+  it('the expanded rail hands an entity click to the resolver as well', () => {
+    localStorage.setItem('cez-project-rail-expanded', '1')
+    setViewport(1600)
+    const onSwitchProject = vi.fn()
+    renderRail({ projectTarget: (id) => ({ href: `/p/${id}/tasks/run-1`, verify: true }), onSwitchProject })
+    expect(document.querySelector('[data-slot="project-rail"]')?.getAttribute('data-expanded')).toBe('true')
+    const link = mark('open_mercato').querySelector('a') as HTMLElement
+
+    fireEvent.click(link, { metaKey: true })
+    expect(onSwitchProject).not.toHaveBeenCalled()
+    fireEvent.click(link)
+    expect(onSwitchProject).toHaveBeenCalledWith('open_mercato')
+  })
+
   it('keeps the home link when no resolver is given', () => {
     renderRail()
     expect(mark('open_mercato').querySelector('a')?.getAttribute('href')).toBe('/p/open_mercato/')

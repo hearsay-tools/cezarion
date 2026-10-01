@@ -134,6 +134,10 @@ function ExpandedProjectRow({
         onClick={(event) => {
           if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
           onSelectProject?.(project.id)
+          if (target.verify && onSwitchProject) {
+            event.preventDefault()
+            onSwitchProject(project.id)
+          }
         }}
         aria-label={label}
         // The state line has no room for "recent runs only" at 232px, so a capped index says so

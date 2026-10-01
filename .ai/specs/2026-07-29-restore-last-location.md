@@ -33,8 +33,12 @@
 >   confirmed answer sends the user home: a 404, a workflow/automation list that loaded without
 >   the name, a forge item that is `null`. Offline, a 5xx, an unavailable forge, a 2.5s timeout
 >   or the capped runs index never count as "gone": the page is restored and shows its own state.
->   New-tab gestures use the unverified `href`. A navigation is dropped if the user moved on
->   while the check ran.
+>   New-tab gestures use the unverified `href`. The commit route answers a missing sha with 409 +
+>   git's reason, so there (only) a 409 whose reason says the object is absent counts as gone.
+>   Switching intent is one app-lifetime controller (module state in `lib/project-switch.ts`, fed
+>   by `useSwitchHost`): the newest click across rail and palette wins, and a navigation of any
+>   kind (path, query, hash) or a later click drops a pending switch, even after the palette that
+>   started it has unmounted.
 > - **Freshness:** the current project's link reads the live location, not storage, because the
 >   controller files a page one effect after the render that shows it.
 > - **Not covered:** the phone drawer's project list still opens the project home.

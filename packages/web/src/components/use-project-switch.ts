@@ -6,9 +6,21 @@ import { readStoredProjectLocation } from '@/lib/last-location'
 import { pathnameProjectId } from '@/lib/project-router'
 import {
   projectSwitchTarget,
-  resolveProjectSwitch,
+  reportSwitchHost,
+  supersedeProjectSwitch,
+  switchToProject,
   type ProjectSwitchTarget,
 } from '@/lib/project-switch'
+
+/** Tells the app-lifetime switch controller where the router is now. Layout effect: a location
+ *  change must cancel a pending switch before any later click can run. */
+export function useSwitchHost(): void {
+  const navigate = useNavigate()
+  const location = useLocation()
+  React.useLayoutEffect(() => {
+    reportSwitchHost(`${location.key}|${location.pathname}${location.search}${location.hash}`, navigate)
+  }, [navigate, location.key, location.pathname, location.search, location.hash])
+}
 
 /**
  * The one behind every "switch to project X" control (the rail, expanded and collapsed, and the
@@ -24,11 +36,8 @@ export function useProjectSwitch(): {
 } {
   const registry = useProjects().data
   const capabilities = useHealth().data?.capabilities
-  const navigate = useNavigate()
+  useSwitchHost()
   const { pathname, search, hash } = useLocation()
-  const here = React.useRef(pathname)
-  here.current = pathname
-  const latest = React.useRef(0)
   const currentProjectId = pathnameProjectId(pathname)
   const currentHref = `${pathname}${search}${hash}`
 
@@ -44,13 +53,10 @@ export function useProjectSwitch(): {
   )
   const go = React.useCallback(
     async (projectId: string) => {
-      if (projectId === currentProjectId) return
-      const ticket = ++latest.current
-      const from = here.current
-      const to = await resolveProjectSwitch(projectId, readStoredProjectLocation(projectId), { registry, capabilities })
-      if (ticket === latest.current && here.current === from) navigate(to)
+      if (projectId === currentProjectId) return supersedeProjectSwitch()
+      await switchToProject(projectId, readStoredProjectLocation(projectId), { registry, capabilities })
     },
-    [registry, capabilities, navigate, currentProjectId],
+    [registry, capabilities, currentProjectId],
   )
   return { target, go }
 }

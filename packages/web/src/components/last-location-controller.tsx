@@ -1,6 +1,8 @@
 import { useEffect } from 'react'
 import { useLocation } from 'react-router'
 
+import { useSwitchHost } from '@/components/use-project-switch'
+
 import { useProjects } from '@/api/queries'
 import {
   locationToSave,
@@ -30,6 +32,9 @@ import {
 export function LastLocationController(): null {
   const location = useLocation()
   const projects = useProjects()
+  // Lives as long as the app, so a project switch still pending after the palette unmounts is
+  // cancelled by the next navigation.
+  useSwitchHost()
 
   useEffect(() => {
     const next = locationToSave(location, projects.data)

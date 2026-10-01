@@ -31,7 +31,7 @@ const registry = {
 const capabilities = undefined as Capabilities | undefined
 const ctx = { registry, capabilities }
 const saved = (pathname: string, extra: object = {}) => ({ projectId: 'other', pathname, ...extra })
-const apiError = (status: number) => new client.ApiError(status, `HTTP ${status}`)
+const apiError = (status: number, message = `HTTP ${status}`) => new client.ApiError(status, message)
 
 beforeEach(() => vi.resetAllMocks())
 
@@ -127,6 +127,22 @@ describe('resolveProjectSwitch', () => {
     vi.mocked(client.getRepoCommit).mockResolvedValue({} as never)
     await resolve('/p/other/git/commits/abc')
     expect(client.getRepoCommit).toHaveBeenCalledWith('abc', expect.objectContaining({ projectId: 'other' }))
+  })
+
+  it('treats the commit route\'s 409 as gone only when git says the object is absent', async () => {
+    vi.mocked(client.getRepoCommit).mockRejectedValue(
+      apiError(409, "fatal: ambiguous argument 'abc^{commit}': unknown revision or path not in the working tree."),
+    )
+    await expect(resolve('/p/other/git/commits/abc')).resolves.toBe('/p/other/')
+    vi.mocked(client.getRepoCommit).mockRejectedValue(apiError(409, 'not a commit hash: zz'))
+    await expect(resolve('/p/other/git/commits/zz')).resolves.toBe('/p/other/')
+    vi.mocked(client.getRepoCommit).mockRejectedValue(apiError(409, 'not a git repository'))
+    await expect(resolve('/p/other/git/commits/abc')).resolves.toBe('/p/other/git/commits/abc')
+    vi.mocked(client.getRepoCommit).mockRejectedValue(apiError(0, 'offline'))
+    await expect(resolve('/p/other/git/commits/abc')).resolves.toBe('/p/other/git/commits/abc')
+    // A 409 on any other route is not evidence of absence.
+    vi.mocked(client.getProjectRun).mockRejectedValue(apiError(409, 'unknown revision'))
+    await expect(resolve('/p/other/tasks/run-1')).resolves.toBe('/p/other/tasks/run-1')
   })
 
   it('verifies compare, commit, workflow, automation and forge pages', async () => {

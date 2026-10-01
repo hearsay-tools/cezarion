@@ -7,6 +7,7 @@ import {
   getRepoCommit,
   getWorkflows,
 } from '@/api/client'
+import type { NavigateFunction } from 'react-router'
 import type { Capabilities, ProjectsResponse } from '@open-mercato/cezar-api-client'
 import { rememberedProjectPage } from '@/lib/last-location'
 import { scopeTo } from '@/lib/project-router'
@@ -65,10 +66,12 @@ async function entityExists(
   signal: AbortSignal,
 ): Promise<boolean | null> {
   const opts = { projectId, signal }
+  let pattern = ''
   try {
     const route = matchProjectRoute(pathname, capabilities)
     if (route === null) return false
-    const { pattern, params } = route
+    const { params } = route
+    pattern = route.pattern
     if (pattern.startsWith('/tasks/:id')) {
       await getProjectRun(projectId, params.id ?? '', { signal })
     } else if (pattern === '/compare/:groupId') {
@@ -91,8 +94,20 @@ async function entityExists(
     }
     return true
   } catch (error) {
-    return error instanceof ApiError && error.status === 404 ? false : null
+    return isMissing(error, pattern) ? false : null
   }
+}
+
+/** git's one-line reasons for a sha the repo does not have (`collectCommitChanges`). */
+const MISSING_COMMIT = /unknown revision|bad object|bad revision|unknown commit|not a commit hash|needed a single revision/i
+
+/** A 404 is "gone" everywhere; the commit route answers a missing sha with 409 + git's reason, so
+ *  for that route (only) a 409 counts when the reason says the object is absent. Any other 409
+ *  ("not a git repository") or a dead connection proves nothing. */
+function isMissing(error: unknown, pattern: string): boolean {
+  if (!(error instanceof ApiError)) return false
+  if (error.status === 404) return true
+  return pattern === '/git/commits/:sha' && error.status === 409 && MISSING_COMMIT.test(error.message)
 }
 
 /** The path a click on `projectId` should navigate to: the remembered page unless its entity is
@@ -114,3 +129,39 @@ export async function resolveProjectSwitch(
   }
 }
 
+
+/**
+ * The newest-intent switch, app-lifetime. The rail, the palette and any future control all go
+ * through `switchToProject`, so "latest click wins" holds across them, and a check that was in
+ * flight when the user navigated by any other means (a link, back, a query/hash change) lands
+ * nowhere. State is module-level because the palette's hook instance unmounts on selection while
+ * its answer is still pending; the host is whichever mounted hook last reported the router.
+ */
+const host: { key: string; navigate: NavigateFunction | null; ticket: number } = {
+  key: '',
+  navigate: null,
+  ticket: 0,
+}
+
+/** Called by every mounted switch hook and the always-mounted location controller. */
+export function reportSwitchHost(key: string, navigate: NavigateFunction): void {
+  host.key = key
+  host.navigate = navigate
+}
+
+/** A click on a control that navigates by itself (the current project, a plain link) still
+ *  supersedes whatever check is pending. */
+export function supersedeProjectSwitch(): void {
+  host.ticket++
+}
+
+export async function switchToProject(
+  projectId: string,
+  stored: unknown,
+  context: ProjectSwitchContext,
+): Promise<void> {
+  const ticket = ++host.ticket
+  const from = host.key
+  const to = await resolveProjectSwitch(projectId, stored, context)
+  if (ticket === host.ticket && from === host.key) host.navigate?.(to)
+}
