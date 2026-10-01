@@ -327,14 +327,14 @@ export async function removeWorktree(
   repoRoot: string,
   worktreePath: string,
   branch?: string,
-  opts?: { reclaimOwnedDirectory?: boolean },
+  opts?: { reclaimOwnedDirectory?: boolean; onlyClean?: boolean },
 ): Promise<void> {
   await withWorktreeMutation(repoRoot, git => removeWorktreeLocked(repoRoot, worktreePath, branch, opts, git)).catch(() => undefined);
 }
 
 async function removeWorktreeLocked(
   repoRoot: string, worktreePath: string, branch: string | undefined,
-  opts: { reclaimOwnedDirectory?: boolean } | undefined, git: WorktreeGit,
+  opts: { reclaimOwnedDirectory?: boolean; onlyClean?: boolean } | undefined, git: WorktreeGit,
 ): Promise<void> {
   const protection = await ownedCleanupProtection(repoRoot);
   // Directory-only retention (#575) may reclaim a finished owned-worker checkout
@@ -351,6 +351,14 @@ async function removeWorktreeLocked(
       (entry) => entry.startsWith('worktree ') && canonicalPath(entry.slice(9)) === canonicalPath(worktreePath),
     );
     if (!registered) return;
+  }
+  // Reclaim keeps the branch and calls the work recoverable, which holds only for what is
+  // COMMITTED: staged, unstaged and untracked files exist in this directory alone. Read under the
+  // lock, so nothing this process serializes can dirty it between the check and the removal; an
+  // unreadable status keeps the directory too. Ignored files (build output) do not count.
+  if (opts?.onlyClean) {
+    const status = await git(worktreePath, ['status', '--porcelain', '--untracked-files=all']);
+    if (!status.ok || status.stdout.trim() !== '') return;
   }
   const removed = await git(repoRoot, ['worktree', 'remove', '--force', worktreePath]);
   // Owned-path reclaim must not `rm` a receipt path that is no longer a git

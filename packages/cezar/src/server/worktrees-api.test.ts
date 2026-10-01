@@ -293,6 +293,28 @@ describe('the worktrees API', () => {
       else process.env.CEZ_DRY_RUN = savedDryRun;
     });
 
+    it('refuses a checkout with uncommitted work, in the row reclaim and in Reclaim now', async () => {
+      writeFileSync(join(repoRoot, '.ai/cezar/config.json'), JSON.stringify({ worktreeRetention: 1 }), 'utf8');
+      const dirty = await seed(randomUUID(), 'done', '2026-07-01T00:00:00Z');
+      const untracked = await seed(randomUUID(), 'done', '2026-07-02T00:00:00Z');
+      await seed(randomUUID(), 'done', '2026-07-09T00:00:00Z');
+      const pathOf = (id: string) => store.getRun(id)!.worktreePath!;
+      writeFileSync(join(pathOf(dirty), 'base.txt'), 'edited after the run\n');
+      writeFileSync(join(pathOf(untracked), 'notes.md'), 'only here\n');
+
+      const res = await reclaimOne(dirty);
+      expect(res.status).toBe(409);
+      expect(((await res.json()) as { error: string }).error).toContain('1 uncommitted file');
+      // Both are over keep=1, and both stay: their work is on no branch.
+      const bulk = await apiRequest(app, '/api/v1/worktrees/reclaim', { method: 'POST' });
+      expect(await bulk.json()).toEqual({ reclaimed: [] });
+      for (const id of [dirty, untracked]) {
+        expect(existsSync(pathOf(id))).toBe(true);
+        expect(store.getRun(id)?.worktreeReclaimedAt).toBeUndefined();
+      }
+      expect(existsSync(join(pathOf(untracked), 'notes.md'))).toBe(true);
+    });
+
     it('holds Continue off for the whole removal, and admits it again once the directory is gone', async () => {
       const id = await resumable();
       // Continue arrives the moment the handler holds its claim, while the removal is still awaiting.

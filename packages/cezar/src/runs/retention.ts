@@ -155,8 +155,10 @@ export async function reclaimWorktrees(
  * Reclaim ONE run's worktree directory — the step `reclaimWorktrees` applies to each over-limit
  * run, and what `POST /worktrees/:runId/reclaim` (issue 08 §B4) calls for a single row. The
  * caller has already decided the run `isReclaimable`. Branch kept; owned workers get their
- * evidence snapshotted first. Returns the stamp it wrote, or null when nothing was reclaimed
- * (the directory survived, or evidence could not be preserved). Never throws.
+ * evidence snapshotted first, and any other run's checkout must be clean — uncommitted work is
+ * not on the branch, so removing it would not be recoverable. Returns the stamp it wrote, or null
+ * when nothing was reclaimed (the directory survived or was dirty, or evidence could not be
+ * preserved). Never throws.
  */
 export async function reclaimWorktree(
   repoRoot: string,
@@ -165,7 +167,10 @@ export async function reclaimWorktree(
   opts: ReclaimOptions = {},
 ): Promise<string | null> {
   const now = opts.now ?? (() => new Date().toISOString());
-  const remove = opts.remove ?? ((root, path) => removeWorktree(root, path, undefined, { reclaimOwnedDirectory: true })); // branch kept
+  // Branch kept. An owned worker's evidence (uncommitted diff included) is snapshotted first; any
+  // other run's uncommitted work lives only in the directory, so a dirty one is left for later.
+  const onlyClean = run.delegation?.role !== 'worker';
+  const remove = opts.remove ?? ((root, path) => removeWorktree(root, path, undefined, { reclaimOwnedDirectory: true, onlyClean }));
   if (!run.worktreePath) return null;
   const release = opts.claim ? opts.claim(run) : () => undefined;
   if (!release) return null; // in use since it was selected

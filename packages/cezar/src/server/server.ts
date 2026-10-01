@@ -4865,7 +4865,15 @@ export function createApp(deps: ServerDeps) {
         return c.json({ error: 'this worktree is in use or already reclaimed — only a finished task\'s worktree can be reclaimed' }, 409);
       }
       const worktreeReclaimedAt = await reclaimWorktree(repoRoot, store, run).finally(release);
-      if (!worktreeReclaimedAt) return c.json({ error: 'the worktree directory could not be removed' }, 409);
+      if (!worktreeReclaimedAt) {
+        // Reclaim keeps only what is committed, so it leaves a dirty checkout alone; say which case this was.
+        const dirty = run.worktreePath && existsSync(run.worktreePath) ? (await getStatus(run.worktreePath).catch(() => [])).length : 0;
+        return c.json({
+          error: dirty > 0
+            ? `the worktree has ${dirty} uncommitted file${dirty === 1 ? '' : 's'} that exist nowhere else — commit or discard them first`
+            : 'the worktree directory could not be removed',
+        }, 409);
+      }
       forgetRepoBranches(repoRoot);
       return c.json({ runId: run.id, worktreeReclaimedAt });
     });
