@@ -2,6 +2,7 @@ import * as React from 'react'
 import { useLocation, useNavigate } from 'react-router'
 
 import { useHealth, useProjects } from '@/api/queries'
+import { githubRepoBase } from '@/lib/tasks-table'
 import { readStoredProjectLocation } from '@/lib/last-location'
 import { pathnameProjectId } from '@/lib/project-router'
 import {
@@ -35,7 +36,15 @@ export function useProjectSwitch(): {
   go: (projectId: string) => Promise<void>
 } {
   const registry = useProjects().data
-  const capabilities = useHealth().data?.capabilities
+  const health = useHealth().data
+  const capabilities = health?.capabilities
+  // `useProjectRepoBase`, for a project other than the routed one.
+  const repoBaseOf = React.useCallback(
+    (projectId: string) =>
+      registry?.projects.find((project) => project.id === projectId)?.repoUrl ??
+      (projectId === (health?.bootProject ?? registry?.bootProject) ? githubRepoBase(health?.repo?.remote) : undefined),
+    [registry, health],
+  )
   useSwitchHost()
   const { pathname, search, hash } = useLocation()
   const currentProjectId = pathnameProjectId(pathname)
@@ -54,9 +63,9 @@ export function useProjectSwitch(): {
   const go = React.useCallback(
     async (projectId: string) => {
       if (projectId === currentProjectId) return supersedeProjectSwitch()
-      await switchToProject(projectId, readStoredProjectLocation(projectId), { registry, capabilities })
+      await switchToProject(projectId, readStoredProjectLocation(projectId), { registry, capabilities, repoBaseOf })
     },
-    [registry, capabilities, currentProjectId],
+    [registry, capabilities, repoBaseOf, currentProjectId],
   )
   return { target, go }
 }

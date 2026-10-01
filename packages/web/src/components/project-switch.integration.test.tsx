@@ -61,6 +61,7 @@ function Controls() {
     <>
       <button onClick={() => navigate('/p/boot/git?view=repo#top')}>go git</button>
       <button onClick={() => navigate('/p/boot/skills?q=1')}>explicit</button>
+      <button onClick={() => navigate(-1)}>back</button>
       <button onClick={() => setPalette(false)}>unmount palette</button>
       {palette ? <PaletteLike /> : null}
       <output data-testid="at">{location.pathname + location.search}</output>
@@ -197,6 +198,17 @@ describe('switch intent', () => {
     fireEvent.click(screen.getByRole('button', { name: 'explicit' }))
     await settle('b')
     expect(at()).toBe('/p/boot/skills?q=1')
+  })
+
+  it('going away and back to the same history entry still cancels a pending switch', async () => {
+    mount('/p/boot/git')
+    fireEvent.click(screen.getByRole('button', { name: 'palette other' }))
+    await waitFor(() => expect(pending.has('b')).toBe(true))
+    fireEvent.click(screen.getByRole('button', { name: 'explicit' }))
+    fireEvent.click(screen.getByRole('button', { name: 'back' }))
+    await waitFor(() => expect(at()).toBe('/p/boot/git'))
+    await settle('b')
+    expect(at()).toBe('/p/boot/git')
   })
 
   it('a pending switch outlives the palette that started it, unless the user navigates', async () => {

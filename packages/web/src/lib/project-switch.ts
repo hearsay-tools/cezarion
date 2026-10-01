@@ -11,6 +11,7 @@ import {
 import type { NavigateFunction } from 'react-router'
 import type { Capabilities, ProjectsResponse } from '@open-mercato/cezar-api-client'
 import { rememberedProjectPage } from '@/lib/last-location'
+import { taskItemTabs } from '@/lib/tasks-table'
 import { scopeTo } from '@/lib/project-router'
 import { matchProjectRoute } from '@/routes'
 
@@ -20,6 +21,9 @@ const CHECK_TIMEOUT_MS = 2_500
 export type ProjectSwitchContext = {
   registry: ProjectsResponse | undefined
   capabilities: Capabilities | undefined
+  /** The target project's repository base (`useProjectRepoBase`'s answer for it), which decides
+   *  which task references are its own. Absent when unknown. */
+  repoBaseOf?: (projectId: string) => string | undefined
 }
 
 export type ProjectSwitchTarget = {
@@ -65,6 +69,7 @@ async function entityExists(
   pathname: string,
   capabilities: Capabilities | undefined,
   signal: AbortSignal,
+  repoBase: string | undefined,
 ): Promise<boolean | null> {
   const opts = { projectId, signal }
   let pattern = ''
@@ -74,7 +79,7 @@ async function entityExists(
     const { params } = route
     pattern = route.pattern
     if (pattern.startsWith('/tasks/:id')) {
-      await getProjectRun(projectId, params.id ?? '', { signal })
+      const run = await getProjectRun(projectId, params.id ?? '', { signal })
       // The run is there; its child entity may not be (a rebased or amended commit, a
       // detached issue/PR number).
       if (pattern === '/tasks/:id/commits/:sha') {
@@ -82,6 +87,11 @@ async function entityExists(
       } else if (pattern === '/tasks/:id/issue/:n' || pattern === '/tasks/:id/pr/:n') {
         const number = Number(params.n)
         if (!Number.isSafeInteger(number) || number < 1) return false
+        const kind = pattern.endsWith('/issue/:n') ? 'issue' : 'pr'
+        // The route only opens items the TASK references (`taskItemTabs`), judged against the
+        // project's repository. Without that identity a detached link cannot be proven.
+        const linked = taskItemTabs(run, repoBase).some((tab) => tab.kind === kind && tab.number === number)
+        if (!linked) return repoBase === undefined ? null : false
         const item = await getGithubItem(pattern.endsWith('/issue/:n') ? 'issue' : 'pr', number, {}, opts)
         return item.available ? item.item !== null : null
       }
@@ -136,7 +146,7 @@ export async function resolveProjectSwitch(
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), CHECK_TIMEOUT_MS)
   try {
-    const exists = await entityExists(projectId, target.href.replace(/[?#].*$/, ''), context.capabilities, controller.signal)
+    const exists = await entityExists(projectId, target.href.replace(/[?#].*$/, ''), context.capabilities, controller.signal, context.repoBaseOf?.(projectId))
     return exists === false ? homeOf(projectId) : target.href
   } finally {
     clearTimeout(timer)
@@ -159,6 +169,10 @@ const host: { key: string; navigate: NavigateFunction | null; ticket: number } =
 
 /** Called by every mounted switch hook and the always-mounted location controller. */
 export function reportSwitchHost(key: string, navigate: NavigateFunction): void {
+  // Every CHANGED location supersedes a pending switch, so going away and back (history -1
+  // restores the same router key) cannot let the old answer land. Several hosts reporting the
+  // same location are one change.
+  if (key !== host.key) host.ticket++
   host.key = key
   host.navigate = navigate
 }

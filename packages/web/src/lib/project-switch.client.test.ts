@@ -13,8 +13,9 @@ const registry = {
     { id: 'other', name: 'other', root: '/work/other', addedAt: 'x', lastOpenedAt: 'x', source: 'local', status: 'ok' },
   ],
 } as ProjectsResponse
-const go = (pathname: string) =>
-  resolveProjectSwitch('other', { projectId: 'other', pathname }, { registry, capabilities: undefined })
+const OWN = 'https://github.com/acme/widgets'
+const go = (pathname: string, repoBaseOf: ((id: string) => string | undefined) | undefined = () => OWN) =>
+  resolveProjectSwitch('other', { projectId: 'other', pathname }, { registry, capabilities: undefined, repoBaseOf })
 
 function answer(routes: Record<string, { status?: number; body: unknown }>) {
   vi.stubGlobal(
@@ -51,5 +52,25 @@ describe('resolveProjectSwitch through the real client', () => {
     await expect(go('/p/other/tasks/run-1/commits/dead')).resolves.toBe('/p/other/')
     answer({ ...run, '/api/v1/p/other/runs/run-1/commit/dead': { status: 409, body: { error: 'no worktree — this task ran directly in the repo working tree' } } })
     await expect(go('/p/other/tasks/run-1/commits/dead')).resolves.toBe('/p/other/tasks/run-1/commits/dead')
+  })
+
+  describe('task issue/PR pages', () => {
+    const item = { '/api/v1/p/other/github/items/pr/7': { body: { available: true, item: { number: 7 } } } }
+    const withRun = (run: object) => ({ '/api/v1/p/other/runs/run-1': { body: { id: 'run-1', ...run } }, ...item })
+
+    it('restores a PR the task is linked to', async () => {
+      answer(withRun({ prNumber: 7 }))
+      await expect(go('/p/other/tasks/run-1/pr/7')).resolves.toBe('/p/other/tasks/run-1/pr/7')
+    })
+
+    it('goes home for a PR that exists but is not linked to the task', async () => {
+      answer(withRun({}))
+      await expect(go('/p/other/tasks/run-1/pr/7')).resolves.toBe('/p/other/')
+    })
+
+    it('keeps the page when the project\'s repository is unknown', async () => {
+      answer(withRun({}))
+      await expect(go('/p/other/tasks/run-1/pr/7', () => undefined)).resolves.toBe('/p/other/tasks/run-1/pr/7')
+    })
   })
 })

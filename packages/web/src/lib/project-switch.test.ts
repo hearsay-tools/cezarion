@@ -147,7 +147,9 @@ describe('resolveProjectSwitch', () => {
   })
 
   it('checks a task\'s child commit and issue/PR, not just the run', async () => {
-    vi.mocked(client.getProjectRun).mockResolvedValue({} as never)
+    vi.mocked(client.getProjectRun).mockResolvedValue({ prNumber: 7, issueNumber: 7 } as never)
+    const withRepo = (pathname: string) =>
+      resolveProjectSwitch('other', saved(pathname), { ...ctx, repoBaseOf: () => 'https://github.com/acme/widgets' })
     vi.mocked(client.getRunCommit).mockRejectedValue(apiError(409, 'fatal: bad object deadbeef'))
     await expect(resolve('/p/other/tasks/run-1/commits/deadbeef')).resolves.toBe('/p/other/')
     expect(client.getRunCommit).toHaveBeenCalledWith('run-1', 'deadbeef', expect.objectContaining({ projectId: 'other' }))
@@ -157,9 +159,9 @@ describe('resolveProjectSwitch', () => {
     await expect(resolve('/p/other/tasks/run-1/commits/abcd')).resolves.toBe('/p/other/tasks/run-1/commits/abcd')
 
     vi.mocked(client.getGithubItem).mockResolvedValue({ available: true, item: null } as never)
-    await expect(resolve('/p/other/tasks/run-1/pr/7')).resolves.toBe('/p/other/')
+    await expect(withRepo('/p/other/tasks/run-1/pr/7')).resolves.toBe('/p/other/')
     vi.mocked(client.getGithubItem).mockResolvedValue({ available: false, reason: 'no gh' } as never)
-    await expect(resolve('/p/other/tasks/run-1/issue/7')).resolves.toBe('/p/other/tasks/run-1/issue/7')
+    await expect(withRepo('/p/other/tasks/run-1/issue/7')).resolves.toBe('/p/other/tasks/run-1/issue/7')
   })
 
   it('keeps a workflow page when the catalog reported unreadable files', async () => {
