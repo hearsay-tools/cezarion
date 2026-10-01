@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { z } from 'zod';
-import { GITHUB_SEARCH_MAX, REFERENCE_STATUS_MAX, type GithubProjectsData } from '@open-mercato/cezar-contract';
+import { GITHUB_SEARCH_MAX, REFERENCE_STATUS_MAX, type GithubItemResponse, type GithubProjectsData } from '@open-mercato/cezar-contract';
 import { fetchIssueProjects, fetchViewerLogin } from './github-filters.ts';
 import { autosaveCommit } from '../../git-worktree.ts';
 import type {
@@ -635,6 +635,41 @@ function toSearchItem(
 }
 
 /**
+ * One issue or PR by number, in any state (#692; the exact-number path of `searchGithubItems`).
+ * `null` when `gh` reports the number does not exist (or is not this kind); throws on any other
+ * failure. `labelColors` is an optional out-param so a search can fold the item's colours into its
+ * own map.
+ */
+export async function viewGithubItem(
+  repoRoot: string,
+  kind: 'issue' | 'pr',
+  number: number,
+  labelColors: Record<string, string> = {},
+): Promise<ForgeItem | null> {
+  let hit: z.infer<typeof ghViewHitSchema>;
+  try {
+    const out = await gh(repoRoot, [
+      kind === 'pr' ? 'pr' : 'issue',
+      'view',
+      String(number),
+      '--json',
+      kind === 'pr' ? `${SEARCH_FIELDS},isDraft,additions,deletions` : `${SEARCH_FIELDS},assignees`,
+    ]);
+    hit = ghViewHitSchema.parse(JSON.parse(out));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (/not found|could not resolve|no (?:pull requests|issues) found|\b404\b/i.test(message)) return null;
+    throw err;
+  }
+  // `view` exposes comment bodies rather than a count. Read the single issue resource
+  // (PRs share this endpoint) instead of paginating a potentially enormous thread.
+  // gh resolves placeholders in repoRoot, just as it resolves the preceding view call.
+  const commentsCount = z.number().int().nonnegative().parse(JSON.parse(await gh(repoRoot,
+    ['api', `repos/{owner}/{repo}/issues/${number}`, '--jq', '.comments'], 8_000)));
+  return toSearchItem(kind, { ...hit, commentsCount }, labelColors);
+}
+
+/**
  * Find issues/PRs in ANY state (#730).
  *
  * Two query shapes, because they want different GitHub calls:
@@ -688,28 +723,11 @@ export async function searchGithubItems(
       // `Number()` before interpolation: the regex already guarantees digits, but the number is
       // user input reaching an argv, so it is normalized rather than passed through verbatim.
       const number = Number(numeric);
-      let hit: z.infer<typeof ghViewHitSchema> | undefined;
-      try {
-        const out = await gh(repoRoot, [
-          kind === 'pr' ? 'pr' : 'issue',
-          'view',
-          String(number),
-          '--json',
-          kind === 'pr' ? `${SEARCH_FIELDS},isDraft,additions,deletions` : `${SEARCH_FIELDS},assignees`,
-        ]);
-        hit = ghViewHitSchema.parse(JSON.parse(out));
-      } catch {
-        // Not a number in this repo (or not this kind) — fall through to the text search below.
-      }
-      if (hit) {
-        // `view` exposes comment bodies rather than a count. Read the single issue resource
-        // (PRs share this endpoint) instead of paginating a potentially enormous thread.
-        // gh resolves placeholders in repoRoot, just as it resolves the preceding view call.
-        const commentsCount = z.number().int().nonnegative().parse(JSON.parse(await gh(repoRoot,
-          ['api', `repos/{owner}/{repo}/issues/${number}`, '--jq', '.comments'], 8_000)));
-        return await hydrateSearchProjects(repoRoot, kind, {
-          available: true, items: [toSearchItem(kind, { ...hit, commentsCount }, labelColors)], labelColors,
-        });
+      // `null` (no such number in this repo, or not this kind) falls through to the text search
+      // below; a transport or count failure throws into the outer catch and reports unavailable.
+      const item = await viewGithubItem(repoRoot, kind, number, labelColors);
+      if (item) {
+        return await hydrateSearchProjects(repoRoot, kind, { available: true, items: [item], labelColors });
       }
     }
     // The memoized handle first (usually a hit). Its `null` is deliberately ambiguous — it swallows
@@ -1113,6 +1131,58 @@ function cacheComments(key: string, data: ForgeCommentsData): void {
 /** Test-only: drop the per-thread cache so cases don't leak state into each other. */
 export function __clearCommentsCacheForTests(): void {
   commentsCache.clear();
+}
+
+// Single-item cache (#692): same key shape, TTL and LRU bound as `commentsCache`. Only a real
+// answer (an item or a confirmed absence) is cached, never an unavailable one.
+const itemCache = new Map<string, { at: number; item: ForgeItem | null }>();
+
+function itemCacheKey(repoRoot: string, kind: 'issue' | 'pr', number: number): string {
+  return `${repoRoot}\0${kind}#${number}`;
+}
+
+export function forgetGithubItem(repoRoot: string, kind: 'issue' | 'pr', number: number): void {
+  itemCache.delete(itemCacheKey(repoRoot, kind, number));
+}
+
+/** Test-only: drop the single-item cache. */
+export function __clearGithubItemCacheForTests(): void {
+  itemCache.clear();
+}
+
+export async function fetchGithubItem(
+  repoRoot: string,
+  kind: 'issue' | 'pr',
+  number: number,
+  refresh = false,
+): Promise<GithubItemResponse> {
+  if (process.env.CEZ_DRY_RUN === '1') {
+    const mock = mockGithub();
+    const item = (kind === 'issue' ? mock.issues : mock.prs).find((i) => i.number === number);
+    return { available: true, item: item ?? null };
+  }
+  const key = itemCacheKey(repoRoot, kind, number);
+  const hit = itemCache.get(key);
+  if (!refresh && hit && Date.now() - hit.at < CACHE_MS) return { available: true, item: hit.item };
+  try {
+    const item = await viewGithubItem(repoRoot, kind, number);
+    itemCache.delete(key); // re-insert so this key becomes the newest
+    itemCache.set(key, { at: Date.now(), item });
+    while (itemCache.size > COMMENTS_CACHE_MAX) {
+      const oldest = itemCache.keys().next().value;
+      if (oldest === undefined) break;
+      itemCache.delete(oldest);
+    }
+    return { available: true, item };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      available: false,
+      reason: /ENOENT/.test(message)
+        ? 'gh CLI not found — install it and run `gh auth login`'
+        : firstLine(message),
+    };
+  }
 }
 
 const TIMELINE_PER_PAGE = 100;
@@ -3019,6 +3089,9 @@ export function evictGithubProjectCaches(repoRoot: string): void {
   commentsCache.forEach((_value, key) => {
     if (key.startsWith(`${repoRoot}:`)) commentsCache.delete(key);
   });
+  itemCache.forEach((_value, key) => {
+    if (key.startsWith(`${repoRoot}\0`)) itemCache.delete(key);
+  });
 }
 
 async function mergePullRequest(
@@ -3094,6 +3167,8 @@ export function createGithubDriver(repoRoot: string, repoRef: GithubRepoRef | nu
     // The open-only list tier's escape hatch (#730) — this is the only path that can reach a
     // closed or merged item.
     searchItems: (kind, query, opts) => searchGithubItems(repoRoot, kind, query, opts?.limit),
+
+    viewItem: (kind, number) => viewGithubItem(repoRoot, kind, number),
 
     prDiff: (number, opts) => fetchGithubPrDiff(repoRoot, number, opts?.refresh),
 

@@ -33,6 +33,8 @@ import {
   fetchGithub,
   fetchGithubChecks,
   searchGithubItems,
+  fetchGithubItem,
+  forgetGithubItem,
   GH_CHECKS_MAX,
   GH_SEARCH_MAX,
   ghCheckRunSchema,
@@ -3205,5 +3207,120 @@ describe('asynchronous list project metadata (#662)', () => {
       const hydrated = await fetchGithub('/repo/async-662');
       expect(hydrated).toMatchObject({ projectsState: 'ready', issues: [{ projectIds: ['P1'] }] });
     });
+  });
+});
+
+describe('fetchGithubItem (#692)', () => {
+  const view = (over: Record<string, unknown> = {}) => ({
+    number: 42,
+    title: 'linked pr',
+    author: { login: 'someone' },
+    createdAt: '2026-07-25T07:08:17Z',
+    labels: [],
+    body: 'b',
+    url: 'https://github.com/owner/n/pull/42',
+    isDraft: false,
+    additions: 3,
+    deletions: 1,
+    ...over,
+  });
+  const ghSpy = (answer: (argv: string[]) => string | Error) => {
+    const argvs: string[][] = [];
+    execFileMock.mockImplementation((...args: unknown[]) => {
+      const argv = args[1] as string[];
+      argvs.push(argv);
+      const cb = args[args.length - 1] as (e: unknown, r: unknown) => void;
+      const out = answer(argv);
+      if (out instanceof Error) cb(out, null);
+      else cb(null, { stdout: out, stderr: '' });
+    });
+    return argvs;
+  };
+  const happy = (argv: string[]) =>
+    argv[1] === 'view' ? JSON.stringify(view()) : argv[0] === 'api' ? '5' : '';
+  const views = (argvs: string[][]) => argvs.filter((a) => a[1] === 'view').length;
+
+  beforeEach(() => {
+    vi.stubEnv('CEZ_DRY_RUN', '');
+    execFileMock.mockReset();
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('returns the viewed PR', async () => {
+    ghSpy(happy);
+    const res = await fetchGithubItem('/repo/item-pr', 'pr', 42);
+    expect(res).toMatchObject({
+      available: true,
+      item: { kind: 'pr', number: 42, checks: null, isDraft: false, comments: 5 },
+    });
+  });
+
+  it('returns item null when gh reports not found', async () => {
+    ghSpy((argv) =>
+      argv[1] === 'view' ? new Error('GraphQL: Could not resolve to a PullRequest with the number of 42.') : '',
+    );
+    expect(await fetchGithubItem('/repo/item-missing', 'pr', 42)).toEqual({ available: true, item: null });
+  });
+
+  it('degrades to available false when gh is missing', async () => {
+    ghSpy(() => new Error('spawn gh ENOENT'));
+    const res = await fetchGithubItem('/repo/item-nogh', 'issue', 7);
+    expect(res.available).toBe(false);
+    expect(res.available === false && res.reason).toBeTruthy();
+  });
+
+  it('degrades to available false on a transport failure', async () => {
+    ghSpy(() => new Error('connection reset'));
+    expect(await fetchGithubItem('/repo/item-net', 'pr', 42)).toMatchObject({
+      available: false,
+      reason: expect.stringContaining('connection reset'),
+    });
+  });
+
+  it('serves a cache hit within the TTL and bypasses it on refresh', async () => {
+    const argvs = ghSpy(happy);
+    await fetchGithubItem('/repo/item-cache', 'pr', 42);
+    await fetchGithubItem('/repo/item-cache', 'pr', 42);
+    expect(views(argvs)).toBe(1);
+    await fetchGithubItem('/repo/item-cache', 'pr', 42, true);
+    expect(views(argvs)).toBe(2);
+  });
+
+  it('does not cache an unavailable answer', async () => {
+    const argvs = ghSpy(() => new Error('connection reset'));
+    await fetchGithubItem('/repo/item-nocache', 'pr', 42);
+    await fetchGithubItem('/repo/item-nocache', 'pr', 42);
+    expect(views(argvs)).toBe(2);
+  });
+
+  it('scopes the cache by repo root', async () => {
+    const argvs = ghSpy(happy);
+    await fetchGithubItem('/repo/item-a', 'pr', 42);
+    await fetchGithubItem('/repo/item-b', 'pr', 42);
+    expect(views(argvs)).toBe(2);
+  });
+
+  it('forgetGithubItem drops the cached entry', async () => {
+    const argvs = ghSpy(happy);
+    await fetchGithubItem('/repo/item-forget', 'pr', 42);
+    forgetGithubItem('/repo/item-forget', 'pr', 42);
+    await fetchGithubItem('/repo/item-forget', 'pr', 42);
+    expect(views(argvs)).toBe(2);
+  });
+
+  it('in dry-run answers from the mock pools', async () => {
+    vi.stubEnv('CEZ_DRY_RUN', '1');
+    expect(await fetchGithubItem('/repo/item-dry', 'pr', 128)).toMatchObject({
+      available: true,
+      item: { kind: 'pr', number: 128 },
+    });
+    expect(await fetchGithubItem('/repo/item-dry', 'issue', 142)).toMatchObject({
+      available: true,
+      item: { kind: 'issue', number: 142 },
+    });
+    expect(await fetchGithubItem('/repo/item-dry', 'pr', 99999)).toEqual({ available: true, item: null });
+    expect(execFileMock).not.toHaveBeenCalled();
   });
 });
