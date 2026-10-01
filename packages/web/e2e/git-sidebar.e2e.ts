@@ -373,6 +373,11 @@ describe('Git → Not landed and the branch cleanup (issue 08 §C)', () => {
     // window lands wherever the button is at that frame, and a click that misses it deletes
     // nothing (#736). Click once the animations have finished and a hit-test at
     // the button's centre resolves to the button itself.
+    // Verified locally: with animation-duration:1500ms !important injected for [role=alertdialog]
+    // and [data-slot=alert-dialog-overlay] before opening the dialog, `npm run test:e2e --
+    // git-sidebar.e2e.ts -t "Delete N branches"` failed without this wait (the confirm click was
+    // covered by the fixed inset-0 backdrop) and passed with it. Full recipe:
+    // https://github.com/hearsay-tools/cezarion/pull/739#discussion_r4158594664
     browser.waitForValue(`(() => {
       const button = document.querySelector('[data-action="cleanup-branches-confirm"]')
       const dialog = document.querySelector('[role="alertdialog"]')
