@@ -178,6 +178,8 @@ function reconcile(queryClient: QueryClient): void {
     reconcileBackgroundQuery(queryClient, queryKeys.health),
     // The worktree panel's list/total (#483) — a run finishing or a reclaim changes it.
     queryClient.invalidateQueries({ queryKey: queryKeys.worktrees }),
+    // Branch classes follow run state (issue 08): a finish, a delete or a reclaim moves them.
+    queryClient.invalidateQueries({ queryKey: queryKeys.repoBranches }),
     queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.providerStatus }),
     reconcileBackgroundQuery(queryClient, workspaceQueryKeys.models('cursor')),
     // GitHub edits never enter this stream. Reconnect (including server restart) must
@@ -509,6 +511,8 @@ function applyGlobalEvent(
       // A terminal transition can reclaim (or re-materialize) a worktree (#483); keep the
       // panel live. invalidateQueries only refetches while the panel is actually mounted.
       void queryClient.invalidateQueries({ queryKey: queryKeys.worktrees })
+      // A run's state is half of its branch's class (issue 08), so the Git view follows it.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.repoBranches })
       return
     }
     case 'run-deleted': {
@@ -521,6 +525,8 @@ function applyGlobalEvent(
       queryClient.removeQueries({ queryKey: queryKeys.runs.diff(event.id) })
       // Its worktree goes with it — refresh the panel (#483).
       void queryClient.invalidateQueries({ queryKey: queryKeys.worktrees })
+      // …and its branch becomes an orphan (issue 08).
+      void queryClient.invalidateQueries({ queryKey: queryKeys.repoBranches })
       return
     }
     case 'todos':

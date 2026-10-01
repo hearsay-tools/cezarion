@@ -19,7 +19,7 @@ import { ProjectScopeContext, useProjectScope } from '@/api/project-scope-contex
 import { isNewerVersion } from '@/lib/is-newer-version'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
-import { activeNavItem, activeNavPath, isPushedRoute, visibleNavItems, type NavItem } from '@/components/nav-items'
+import { activeNavItem, activeNavPath, isPushedGitScreen, isPushedRoute, visibleNavItems, type NavItem } from '@/components/nav-items'
 import { MobileTabBar } from '@/components/mobile-tab-bar'
 import { useKeyboardOpen } from '@/lib/keyboard-inset'
 import { SIDEBAR_SELECTED_CLASS } from '@/components/nav-row-styles'
@@ -198,7 +198,8 @@ export function AppShell({
   // A pinch-zoom also leaves the visual viewport shorter than the layout one, so a real keyboard
   // is the bottom inset that is both large and seen at scale ~1.
   const keyboardOpen = useKeyboardOpen()
-  const showTabBar = !isPushedRoute(pathname) && !keyboardOpen
+  // Pushed Git section screens hide it too (issue 08 §C, the slice 5 rule): each has its own Back to Git.
+  const showTabBar = !isPushedRoute(pathname) && !isPushedGitScreen(pathname, search) && !keyboardOpen
   const tabBarSignal = currentProjectId !== null ? mobileProjects?.signals?.get(currentProjectId) : undefined
   const [menuOpen, setMenuOpen] = React.useState(false)
   // The pushed task screen (#621): its top bar carries back / title / state / run actions, and the

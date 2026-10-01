@@ -1,4 +1,4 @@
-import { BrushIcon } from 'lucide-react'
+import { BrushIcon, GitPullRequestArrowIcon } from 'lucide-react'
 import type { ComponentType, SVGProps } from 'react'
 
 import { ChevronRightIcon, GitBranchIcon, GitCommitHorizontalIcon } from '@/components/design-icons'
@@ -16,6 +16,7 @@ export type GitListSection = Exclude<GitSection, 'changes'>
 
 const ICONS: Record<GitListSection, ComponentType<SVGProps<SVGSVGElement>>> = {
   main: GitCommitHorizontalIcon,
+  'not-landed': GitPullRequestArrowIcon,
   cleanup: BrushIcon,
   branches: GitBranchIcon,
 }
@@ -25,14 +26,15 @@ const ICONS: Record<GitListSection, ComponentType<SVGProps<SVGSVGElement>>> = {
 export function gitSectionLabel(section: GitSection, branch: string | null): string {
   switch (section) {
     case 'main': return branch ? `Recently on ${branch}` : 'Recent commits'
+    case 'not-landed': return 'Not landed'
     case 'cleanup': return 'Cleanup'
     case 'branches': return 'All branches'
     case 'changes': return 'Uncommitted changes'
   }
 }
 
-/** The order the board draws them in. Not landed sits between main and Cleanup once issue 08 ships it. */
-const ORDER: readonly GitListSection[] = ['main', 'cleanup', 'branches']
+/** The order the board draws them in. */
+const ORDER: readonly GitListSection[] = ['main', 'not-landed', 'cleanup', 'branches']
 
 /**
  * The Git sections (issue 06 §3), shared by the desktop sidebar (`variant="sidebar"`, 32px rows,

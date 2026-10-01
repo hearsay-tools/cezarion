@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { createQueryClient } from '@/api/query-client'
 import { workspaceQueryKeys } from '@/api/queries'
-import type { RepoResponse, WorktreesResponse } from '@open-mercato/cezar-api-client'
+import type { RepoBranchesResponse, RepoResponse, WorktreesResponse } from '@open-mercato/cezar-api-client'
 import { Toaster, resetToasts } from '@/components/ui/toaster'
 
 import { GitSidebar } from './git-sidebar'
@@ -15,8 +15,8 @@ import { RepoGitLoading } from './repo-git-loading'
 
 /**
  * The Git view's sidebar and phone screen (issue 06 §3, #622): the checkout block (branch menu,
- * Pull, base-branch picker, uncommitted warning) and the sections Recently on main, Cleanup and
- * All branches. No task-worktree list.
+ * Pull, base-branch picker, the issue 08 freshness line, uncommitted warning) and the sections
+ * Recently on main, Not landed, Cleanup and All branches. No task-worktree list.
  */
 
 beforeEach(() => {
@@ -39,15 +39,23 @@ const json = (body: unknown, status = 200) =>
 const REPO: RepoResponse = {
   info: { root: '/repo', branch: 'main', remote: 'git@github.com:acme/demo.git' },
   status: [],
-  log: [{ hash: 'abc1234', subject: 'feat: add the thing', author: 'Ada', when: '5 minutes ago' }],
+  log: [{ hash: 'abc1234', subject: 'feat: add the thing', author: 'Ada', when: '5 minutes ago', at: new Date(Date.now() - 5 * 60_000).toISOString() }],
   branches: ['feature', 'main'],
   baseBranch: null,
+  tracking: null,
 }
 
 const WORKTREES: WorktreesResponse = {
-  worktrees: [{ runId: 'r1', title: 'A task', status: 'done', branch: 'cez/r1', sizeBytes: 4.2 * 1024 ** 3, finishedAt: null, reclaimable: true }],
+  worktrees: [{ runId: 'r1', title: 'A task', status: 'done', branch: 'cez/r1', sizeBytes: 4.2 * 1024 ** 3, finishedAt: null, reclaimable: true, pastKeep: false }],
   totalBytes: 4.2 * 1024 ** 3,
   keep: 20,
+}
+
+const BRANCHES: RepoBranchesResponse = {
+  base: 'main',
+  prStateKnown: true,
+  branches: [],
+  counts: { notLanded: 3, cleanup: 23 },
 }
 
 interface Sent { method: string; path: string; body: unknown }
@@ -62,6 +70,7 @@ function stub(overrides: Record<string, () => Response | Promise<Response>> = {}
     if (override) return override()
     if (method !== 'GET') return json({})
     if (/\/worktrees$/.test(path)) return json(WORKTREES)
+    if (/\/repo\/branches$/.test(path)) return json(BRANCHES)
     if (/\/repo$/.test(path)) return json(REPO)
     if (/\/repo\/changes$/.test(path)) return json({ files: [], stat: { adds: 0, dels: 0, files: 0 } })
     if (/\/open-targets$/.test(path)) return json({ targets: [] })
@@ -96,6 +105,7 @@ function renderRoute(entry: string) {
           <Route path="/git" element={<RepoGitRoute section="main" index />} />
           <Route path="/git/commits" element={<RepoGitRoute section="main" />} />
           <Route path="/git/commits/:sha" element={<RepoGitRoute section="main" />} />
+          <Route path="/git/not-landed" element={<RepoGitRoute section="not-landed" />} />
           <Route path="/git/cleanup" element={<RepoGitRoute section="cleanup" />} />
           <Route path="/git/branches" element={<RepoGitRoute section="branches" />} />
           <Route path="/git/changes" element={<RepoGitRoute section="changes" />} />
@@ -123,16 +133,18 @@ function openMenu(trigger: HTMLElement) {
 }
 
 describe('GitSidebar', () => {
-  it('shows the checkout block, then Recently on main, Cleanup and All branches with their counts', async () => {
+  it('shows the checkout block, then Recently on main, Not landed, Cleanup and All branches with their counts', async () => {
     stub()
     renderSidebar()
     await waitFor(() => expect(q('[data-slot="git-checkout"]')).not.toBeNull())
     expect(q('[data-slot="git-checkout-branch"]')?.textContent).toBe('main')
     expect(q('[data-action="repo-pull"]')?.textContent).toBe('Pull')
     expect(q('[data-slot="base-branch-picker"]')?.textContent).toBe('New tasks start frommain')
-    await waitFor(() => expect(sectionRows()[1]?.count).toBe('4.2 GB'))
+    await waitFor(() => expect(sectionRows()[2]?.count).toBe('4.2 GB'))
+    await waitFor(() => expect(sectionRows()[1]?.count).toBe('3'))
     expect(sectionRows()).toEqual([
       { section: 'main', text: 'Recently on main', count: null, href: '/git', current: 'page' },
+      { section: 'not-landed', text: 'Not landed', count: '3', href: '/git/not-landed', current: null },
       { section: 'cleanup', text: 'Cleanup', count: '4.2 GB', href: '/git/cleanup', current: null },
       { section: 'branches', text: 'All branches', count: '2', href: '/git/branches', current: null },
     ])
@@ -145,7 +157,7 @@ describe('GitSidebar', () => {
   it('lists no task worktrees and never links a row to a task', async () => {
     stub()
     renderSidebar()
-    await waitFor(() => expect(sectionRows()[1]?.count).toBe('4.2 GB'))
+    await waitFor(() => expect(sectionRows()[2]?.count).toBe('4.2 GB'))
     expect(q('[data-slot="git-worktree-list"]')).toBeNull()
     expect(qa('[data-slot="git-sidebar"] a').some((link) => link.getAttribute('href')?.startsWith('/tasks/'))).toBe(false)
   })
@@ -154,6 +166,7 @@ describe('GitSidebar', () => {
     ['/git', 'main'],
     ['/git/commits', 'main'],
     ['/git/commits/abc1234', 'main'],
+    ['/git/not-landed', 'not-landed'],
     ['/git/cleanup', 'cleanup'],
     ['/git/branches', 'branches'],
     ['/p/beta/git/branches', 'branches'],
@@ -184,12 +197,25 @@ describe('GitSidebar', () => {
   })
 
   it('outside a git repository the sections still render, so the sidebar is never empty', async () => {
-    stub({ 'GET /api/v1/repo': () => json({ info: null, status: [], log: [], branches: [], baseBranch: null }) })
+    stub({ 'GET /api/v1/repo': () => json({ info: null, status: [], log: [], branches: [], baseBranch: null, tracking: null }) })
     renderSidebar()
-    await waitFor(() => expect(sectionRows()[1]?.count).toBe('4.2 GB'))
+    await waitFor(() => expect(sectionRows()[2]?.count).toBe('4.2 GB'))
     expect(q('[data-slot="git-checkout"]')).toBeNull()
-    expect(sectionRows().map((row) => row.text)).toEqual(['Recent commits', 'Cleanup', 'All branches'])
-    expect(sectionRows()[2]?.count).toBeNull()
+    expect(sectionRows().map((row) => row.text)).toEqual(['Recent commits', 'Not landed', 'Cleanup', 'All branches'])
+    expect(sectionRows()[3]?.count).toBeNull()
+  })
+
+  it('Cleanup counts the safe-to-delete branches when the worktree sizes degrade', async () => {
+    stub({ 'GET /api/v1/worktrees': () => json({ ...WORKTREES, totalBytes: null }) })
+    renderSidebar()
+    await waitFor(() => expect(sectionRows()[2]?.count).toBe('23'))
+  })
+
+  it('draws no Not landed count for a known zero', async () => {
+    stub({ 'GET /api/v1/repo/branches': () => json({ ...BRANCHES, counts: { notLanded: 0, cleanup: 0 } }) })
+    renderSidebar()
+    await waitFor(() => expect(sectionRows()[2]?.count).toBe('4.2 GB'))
+    expect(sectionRows()[1]?.count).toBeNull()
   })
 
   it('holds the checkout block\'s place and draws no section until /repo first answers', async () => {
@@ -235,6 +261,8 @@ describe('GitSidebar', () => {
     await waitFor(() => expect(q('[data-slot="git-checkout"]')).not.toBeNull())
     expect(sent.some((request) => request.path === '/api/v1/p/beta/repo')).toBe(true)
     expect(sent.some((request) => request.path === '/api/v1/p/beta/worktrees')).toBe(true)
+    await waitFor(() => expect(sent.some((request) => request.path === '/api/v1/p/beta/repo/branches')).toBe(true))
+    expect(sent.some((request) => request.path === '/api/v1/repo/branches')).toBe(false)
     fireEvent.click(q('[data-action="repo-pull"]')!)
     await waitFor(() => expect(document.body.textContent).toContain('Already up to date.'))
     expect(sent.filter((request) => request.method === 'POST').map((request) => [request.path, request.body])).toEqual([
@@ -377,6 +405,43 @@ describe('the checkout block', () => {
     await waitFor(() => expect(document.body.textContent).toContain('New tasks now start from feature'))
   })
 
+  it('says how far behind its upstream the base is, as of the last fetch', async () => {
+    const fetchedAt = new Date(Date.now() - 6 * 60_000 - 5_000).toISOString()
+    stub({ 'GET /api/v1/repo': () => json({ ...REPO, tracking: { ref: 'origin/main', ahead: 0, behind: 2, fetchedAt } }) })
+    renderSidebar()
+    await waitFor(() => expect(q('[data-slot="git-freshness"]')).not.toBeNull())
+    expect(q('[data-slot="git-freshness"]')?.textContent).toBe('2 behind origin· fetched 6m ago')
+    // The count is in the needs-you ink; the fetch age stays soft.
+    expect(q('[data-slot="git-behind"]')?.className).toContain('text-inbox-count-foreground')
+    expect(q('[data-slot="git-freshness"]')?.className).toContain('text-soft-foreground')
+  })
+
+  it('says up to date when nothing is behind, and never fetched without a FETCH_HEAD', async () => {
+    stub({ 'GET /api/v1/repo': () => json({ ...REPO, tracking: { ref: 'origin/main', ahead: 1, behind: 0, fetchedAt: null } }) })
+    renderSidebar()
+    await waitFor(() => expect(q('[data-slot="git-freshness"]')).not.toBeNull())
+    expect(q('[data-slot="git-freshness"]')?.textContent).toBe('up to date · never fetched')
+    expect(q('[data-slot="git-behind"]')).toBeNull()
+  })
+
+  it('hides the freshness line when the configured base is not the checked-out branch', async () => {
+    // The line sits beside Pull, which acts on `main`; `develop`'s count would describe another branch.
+    stub({
+      'GET /api/v1/repo': () =>
+        json({ ...REPO, baseBranch: 'develop', tracking: { ref: 'origin/develop', ahead: 0, behind: 2, fetchedAt: null } }),
+    })
+    renderSidebar()
+    await waitFor(() => expect(q('[data-slot="git-checkout"]')).not.toBeNull())
+    expect(q('[data-slot="git-freshness"]')).toBeNull()
+  })
+
+  it('hides the freshness line when the base has no upstream', async () => {
+    stub()
+    renderSidebar()
+    await waitFor(() => expect(q('[data-slot="git-checkout"]')).not.toBeNull())
+    expect(q('[data-slot="git-freshness"]')).toBeNull()
+  })
+
   it('names the configured base branch', async () => {
     stub({ 'GET /api/v1/repo': () => json({ ...REPO, baseBranch: 'feature' }) })
     renderSidebar()
@@ -393,9 +458,11 @@ describe('the phone Git screen', () => {
     await waitFor(() => expect(q('[data-slot="git-screen"] [data-slot="git-checkout"]')).not.toBeNull())
     expect(q('[data-slot="git-screen"] h1')?.textContent).toBe('Git')
     expect(q('[data-slot="git-checkout"]')?.getAttribute('data-variant')).toBe('screen')
-    await waitFor(() => expect(sectionRows()[1]?.count).toBe('4.2 GB'))
+    await waitFor(() => expect(sectionRows()[2]?.count).toBe('4.2 GB'))
+    await waitFor(() => expect(sectionRows()[1]?.count).toBe('3'))
     expect(sectionRows()).toEqual([
       { section: 'main', text: 'Recently on main', count: '1 today', href: '/git?view=repo', current: null },
+      { section: 'not-landed', text: 'Not landed', count: '3', href: '/git/not-landed', current: null },
       { section: 'cleanup', text: 'Cleanup', count: '4.2 GB', href: '/git/cleanup', current: null },
       { section: 'branches', text: 'All branches', count: '2', href: '/git/branches', current: null },
     ])
@@ -416,7 +483,7 @@ describe('the phone Git screen', () => {
     expect(q('[data-slot="git-back"]')?.textContent).toBe('Back to Git')
   })
 
-  it.each(['/git/commits', '/git/commits/abc1234', '/git/cleanup', '/git/branches', '/git/changes'])('%s stays its section, never the screen', async (entry) => {
+  it.each(['/git/commits', '/git/commits/abc1234', '/git/not-landed', '/git/cleanup', '/git/branches', '/git/changes'])('%s stays its section, never the screen', async (entry) => {
     stub()
     renderRoute(entry)
     await waitFor(() => expect(q('[data-slot="repo-header"]')).not.toBeNull())
@@ -433,10 +500,10 @@ describe('the phone Git screen', () => {
   })
 
   it('the screen degrades honestly outside a git repository and still offers the sections', async () => {
-    stub({ 'GET /api/v1/repo': () => json({ info: null, status: [], log: [], branches: [], baseBranch: null }) })
+    stub({ 'GET /api/v1/repo': () => json({ info: null, status: [], log: [], branches: [], baseBranch: null, tracking: null }) })
     renderRoute('/git')
     await waitFor(() => expect(q('[data-slot="git-screen-not-git"]')).not.toBeNull())
-    expect(sectionRows()).toHaveLength(3)
+    expect(sectionRows()).toHaveLength(4)
   })
 })
 
@@ -450,7 +517,7 @@ describe('the suspended lazy Git routes (routes.tsx fallbacks)', () => {
     )
   }
 
-  it.each(['/git/commits', '/git/commits/abc1234', '/git/cleanup', '/git/branches', '/git/changes', '/git?view=repo'])('%s offers Back to Git while its chunk loads', (entry) => {
+  it.each(['/git/commits', '/git/commits/abc1234', '/git/not-landed', '/git/cleanup', '/git/branches', '/git/changes', '/git?view=repo'])('%s offers Back to Git while its chunk loads', (entry) => {
     renderFallback(entry)
     expect(q('[data-slot="git-back"]')?.getAttribute('href')).toBe('/git')
   })

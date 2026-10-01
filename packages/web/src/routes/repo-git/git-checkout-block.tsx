@@ -1,7 +1,7 @@
 import { LoaderCircleIcon } from 'lucide-react'
-import { useRef } from 'react'
+import { useRef, type RefObject } from 'react'
 
-import type { RepoInfo, RepoResponse } from '@open-mercato/cezar-api-client'
+import type { RepoInfo, RepoResponse, RepoTracking } from '@open-mercato/cezar-api-client'
 import {
   ArrowDownIcon, ChevronDownIcon, ChevronRightIcon, GitBranchIcon, TriangleAlertIcon,
 } from '@/components/design-icons'
@@ -16,7 +16,7 @@ import {
 import { Link } from '@/lib/project-router'
 import { cn } from '@/lib/utils'
 
-import { GIT_SECTION_PATH } from './git-sections'
+import { checkoutTracking, fetchedAgo, GIT_SECTION_PATH } from './git-sections'
 import { useGitCheckout } from './use-git-checkout'
 
 /** The board's two sizes of one card: the desktop sidebar's and the phone Git screen's. */
@@ -48,8 +48,9 @@ const SIZES = {
 /**
  * The Git view's checkout block (issue 06 §3): which branch the main checkout is on, with the
  * branch menu (switch, via `POST /repo/branch`) and Pull; which branch new tasks start from (the
- * base-branch picker); and, when the checkout is dirty, a link to its uncommitted files. The
- * freshness line (behind origin, fetched N ago) is issue 08 and is not drawn.
+ * base-branch picker); the freshness line (issue 08: `2 behind origin · fetched 6m ago`, as of
+ * the last fetch, hidden when the base has no upstream); and, when the checkout is dirty, a link
+ * to its uncommitted files.
  *
  * `scope` is explicit: the desktop sidebar renders above the `ProjectScopeProvider`.
  */
@@ -64,6 +65,7 @@ export function GitCheckoutBlock({ scope, repo, info, variant, onNavigate }: {
   const checkout = useGitCheckout(scope, info)
   const base = repo.baseBranch ?? info.branch
   const dirty = repo.status.length
+  const tracking = checkoutTracking(repo, info)
   const noRemote = 'No remote configured. Add a Git remote before pulling.'
   const busy = checkout.switchBranch.isPending
   const pullRef = useRef<HTMLButtonElement>(null)
@@ -136,6 +138,8 @@ export function GitCheckoutBlock({ scope, repo, info, variant, onNavigate }: {
         </button>
       </div>
 
+      {tracking ? <FreshnessLine tracking={tracking} className={size.line} /> : null}
+
       <DropdownMenu>
         <DropdownMenuTrigger
           data-slot="base-branch-picker"
@@ -187,42 +191,78 @@ export function GitCheckoutBlock({ scope, repo, info, variant, onNavigate }: {
         </Link>
       ) : null}
 
-      <AlertDialog open={checkout.confirmation !== null} onOpenChange={(open) => !open && checkout.dismissConfirmation()}>
-        <AlertDialogContent
-          onCloseAutoFocus={(event) => {
-            // Pull was disabled while the first attempt ran, so Radix has nothing to return to.
-            event.preventDefault()
-            pullRef.current?.focus()
-          }}
-        >
-          <AlertDialogHeader>
-            <AlertDialogTitle>Pull {checkout.confirmation?.branch} anyway?</AlertDialogTitle>
-            <AlertDialogDescription asChild>
-              <div className="space-y-2">
-                {checkout.confirmation?.risks.includes('active_runs') ? (
-                  <p>An active session is using this repository. Pulling can change files while it works.</p>
-                ) : null}
-                {checkout.confirmation?.risks.includes('dirty_tree') ? (
-                  <p>The checkout has dirty files. Git may refuse the pull to protect them.</p>
-                ) : null}
-              </div>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel className="h-11" disabled={checkout.pulling}>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              className="h-11"
-              disabled={checkout.pulling || checkout.confirmation === null}
-              onClick={(event) => {
-                event.preventDefault()
-                void checkout.pull(true)
-              }}
-            >
-              {checkout.pulling ? 'Pulling…' : 'Pull anyway'}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <PullConfirmDialog checkout={checkout} returnFocus={pullRef} />
     </section>
+  )
+}
+
+/** `2 behind origin · fetched 6m ago` in the needs-you ink when the base is behind its upstream,
+ *  `up to date · fetched 6m ago` all soft otherwise. "origin" is the upstream's remote name. */
+function FreshnessLine({ tracking, className }: { tracking: RepoTracking; className: string }) {
+  const remote = tracking.ref.split('/')[0] || tracking.ref
+  const fetched = fetchedAgo(tracking)
+  return (
+    <p data-slot="git-freshness" className={cn('flex min-w-0 items-center gap-[4px] text-soft-foreground', className)}>
+      {tracking.behind > 0 ? (
+        <>
+          <span data-slot="git-behind" className="shrink-0 font-medium text-inbox-count-foreground">
+            {tracking.behind} behind {remote}
+          </span>
+          <span className="min-w-0 truncate">· {fetched}</span>
+        </>
+      ) : (
+        <span className="min-w-0 truncate">up to date · {fetched}</span>
+      )}
+    </p>
+  )
+}
+
+/**
+ * The pull's risk confirmation (`POST /repo/pull` answered 409 with `risks`). Shared by the
+ * checkout block and Recently on main's Incoming bar, each with its own `useGitCheckout`.
+ * `returnFocus` is the Pull button: it was disabled while the first attempt ran, so Radix has
+ * nothing to return focus to on its own.
+ */
+export function PullConfirmDialog({ checkout, returnFocus }: {
+  checkout: ReturnType<typeof useGitCheckout>
+  returnFocus: RefObject<HTMLButtonElement | null>
+}) {
+  return (
+    <AlertDialog open={checkout.confirmation !== null} onOpenChange={(open) => !open && checkout.dismissConfirmation()}>
+      <AlertDialogContent
+        onCloseAutoFocus={(event) => {
+          // Pull was disabled while the first attempt ran, so Radix has nothing to return to.
+          event.preventDefault()
+          returnFocus.current?.focus()
+        }}
+      >
+        <AlertDialogHeader>
+          <AlertDialogTitle>Pull {checkout.confirmation?.branch} anyway?</AlertDialogTitle>
+          <AlertDialogDescription asChild>
+            <div className="space-y-2">
+              {checkout.confirmation?.risks.includes('active_runs') ? (
+                <p>An active session is using this repository. Pulling can change files while it works.</p>
+              ) : null}
+              {checkout.confirmation?.risks.includes('dirty_tree') ? (
+                <p>The checkout has dirty files. Git may refuse the pull to protect them.</p>
+              ) : null}
+            </div>
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel className="h-11" disabled={checkout.pulling}>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            className="h-11"
+            disabled={checkout.pulling || checkout.confirmation === null}
+            onClick={(event) => {
+              event.preventDefault()
+              void checkout.pull(true)
+            }}
+          >
+            {checkout.pulling ? 'Pulling…' : 'Pull anyway'}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   )
 }

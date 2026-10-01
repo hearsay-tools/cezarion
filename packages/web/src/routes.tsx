@@ -364,7 +364,7 @@ export function AppRoutes() {
 
         {/* The Git view (issue 06 §3): each section is a URL — /git (Recently on main; a phone's
             Git screen unless ?view=repo), /git/commits (+ /:sha, one commit inside Recently on
-            main), /git/cleanup, /git/branches, and /git/changes (the main tree's uncommitted
+            main), /git/not-landed (issue 08), /git/cleanup, /git/branches, and /git/changes (the main tree's uncommitted
             files, from the checkout block). */}
         <Route
           path="git"
@@ -387,6 +387,14 @@ export function AppRoutes() {
           element={
             <Suspense fallback={<RepoGitLoading />}>
               <RepoGitRoute section="main" />
+            </Suspense>
+          }
+        />
+        <Route
+          path="git/not-landed"
+          element={
+            <Suspense fallback={<RepoGitLoading />}>
+              <RepoGitRoute section="not-landed" />
             </Suspense>
           }
         />
