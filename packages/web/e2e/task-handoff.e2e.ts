@@ -104,6 +104,31 @@ describe('Hand off to webhook', () => {
     expect(run.notify).toBe(true)
   })
 
+  it('adds and removes the sidebar glyph live, through the run SSE, with no reload (#729)', async () => {
+    const rowGlyph = (id: string) => `document.querySelector('[data-slot="task-row"][data-run-id="${id}"] [data-slot="task-row-meta"] [data-slot="task-row-notify"]')`
+    const post = (id: string, notify: boolean) => fetch(`${baseUrl}/api/v1/p/${project}/runs/${id}/notify`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ notify }),
+    })
+    // Independent of the dialog test above: `desktop` is handed off here, whatever ran before.
+    expect((await post('desktop', true)).ok).toBe(true)
+    browser.setViewport(1280, 800)
+    browser.goto(`${baseUrl}/p/${project}/tasks/desktop`)
+    browser.waitForFunction(`document.querySelector(${JSON.stringify(chip)}) !== null`)
+    browser.waitForFunction(`${rowGlyph('desktop')} !== null`)
+    expect(browser.evaluate(`${rowGlyph('desktop')}.getAttribute('aria-label')`)).toBe('Notifying the task webhook')
+    expect(browser.evaluate(`${rowGlyph('mobile')} === null`)).toBe(true)
+    // Stop notifying from the thread header: the glyph leaves the row without a reload.
+    browser.evaluate(`window.__noReload = true`)
+    browser.click(chip)
+    browser.click('[data-slot="notifying-menu"] [data-variant="destructive"]')
+    browser.waitForFunction(`${rowGlyph('desktop')} === null`)
+    // Hand off again, from outside the page: the run SSE alone brings it back.
+    expect((await post('desktop', true)).ok).toBe(true)
+    browser.waitForFunction(`${rowGlyph('desktop')} !== null`)
+    expect(browser.evaluate(`window.__noReload`)).toBe(true)
+    settledShot('desktop-sidebar-glyph.png')
+  })
+
   it('is a bottom sheet with a full-width 44px action at 360×640', () => {
     browser.setViewport(360, 640)
     openThread('mobile')

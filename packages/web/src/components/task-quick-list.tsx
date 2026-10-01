@@ -1,5 +1,5 @@
 import { ChevronDownIcon, ChevronRightIcon } from '@/components/design-icons'
-import { ScaleIcon } from 'lucide-react'
+import { ScaleIcon, SendIcon } from 'lucide-react'
 import { useQueries } from '@tanstack/react-query'
 import * as React from 'react'
 import { queryScope } from '@open-mercato/cezar-api-client'
@@ -584,6 +584,128 @@ function useOverflow(ref: React.RefObject<HTMLElement | null>, enabled: boolean,
   return overflows
 }
 
+/** The width `el`'s content needs, however wide its box is. `scrollWidth` floors at `clientWidth`
+ *  when the content fits, so a line measured in a wide box would "need" the whole box and drop its
+ *  age on the first small shrink; a Range around the contents reports the real extent. jsdom has no
+ *  Range rects: fall back to `scrollWidth`. */
+function contentWidth(el: HTMLElement): number {
+  const range = document.createRange()
+  range.selectNodeContents(el)
+  const width = range.getBoundingClientRect?.().width
+  return width ? Math.ceil(width) : el.scrollWidth
+}
+
+/** Whether the meta line should drop its age (#729): true while the line, WITH the age in place,
+ *  is wider than its box. Deciding on "does it overflow right now" would flip every frame —
+ *  dropping the age removes the overflow, which brings the age back — so the width the line needs
+ *  is measured once per content `key`, with the age rendered, and every resize compares the box
+ *  to that stored width. A key change (or the web fonts landing) while the age is off puts it back
+ *  for one layout pass to re-measure; a layout effect runs before paint, so nothing shows. The
+ *  effect depends on `key` and a re-measure tick only — never on the decision itself — so a flip
+ *  cannot re-subscribe and re-trigger it. No ResizeObserver (jsdom): never drops. */
+function useAgeDropped(ref: React.RefObject<HTMLElement | null>, enabled: boolean, key: string): boolean {
+  const [dropped, setDropped] = React.useState(false)
+  const [tick, setTick] = React.useState(0)
+  const droppedRef = React.useRef(false)
+  const fontsHandled = React.useRef(false)
+  const needed = React.useRef<{ key: string; width: number } | null>(null)
+  const decide = React.useCallback((next: boolean) => {
+    droppedRef.current = next
+    setDropped(next)
+  }, [])
+  React.useLayoutEffect(() => {
+    const el = ref.current
+    if (!enabled || !el || typeof ResizeObserver === 'undefined') {
+      needed.current = null
+      decide(false)
+      return
+    }
+    let live = true
+    const check = () => {
+      if (!live) return
+      if (needed.current?.key !== key) {
+        // Stale or never measured, and the age is off: render it again; `tick` re-runs this effect.
+        if (droppedRef.current) {
+          decide(false)
+          setTick((n) => n + 1)
+          return
+        }
+        needed.current = { key, width: contentWidth(el) }
+      }
+      decide(needed.current.width > el.clientWidth)
+    }
+    check()
+    const observer = new ResizeObserver(check)
+    observer.observe(el)
+    // A reference chip can change width with the same identity — its status glyph lands after
+    // `useReferenceStatus` hydrates, a conflict turns it semibold — and neither moves the box
+    // or the key. Watch every child but the age; a width that differs from the last one seen
+    // (seeded when the child is bound) invalidates the stored measurement. The age is never
+    // watched, so taking it off cannot re-trigger this.
+    const seen = new WeakMap<Element, number>()
+    const children = new ResizeObserver((entries) => {
+      let changed = false
+      for (const entry of entries ?? []) {
+        // The border box, the same convention `bind` seeds with.
+        const width = entry.borderBoxSize?.[0]?.inlineSize ?? entry.contentRect.width
+        const previous = seen.get(entry.target)
+        seen.set(entry.target, width)
+        if (previous !== undefined && previous !== width) changed = true
+      }
+      if (!changed || !live) return
+      needed.current = null
+      check()
+    })
+    // The age and the separators are ours to toggle; everything else is content. A chip can be
+    // REPLACED, not just resized — `ReferenceChip` returns a bare anchor while idle and a hover-card
+    // subtree once its status request starts, after this effect ran — so the children are bound
+    // again whenever the line's own children change, and a node we have not seen is a change.
+    const bound = new Set<Element>()
+    const bind = (): boolean => {
+      let fresh = false
+      for (const child of Array.from(el.children)) {
+        const { slot } = (child as HTMLElement).dataset
+        if (slot === 'task-row-age' || child.getAttribute('aria-hidden') === 'true') continue
+        if (bound.has(child)) continue
+        bound.add(child)
+        // Seeded now, so the first report is compared against what the measure saw: a status that
+        // hydrates between the measure and the observer's first delivery is a change, not a baseline.
+        seen.set(child, child.getBoundingClientRect().width)
+        children.observe(child)
+        fresh = true
+      }
+      return fresh
+    }
+    bind()
+    const mutations = typeof MutationObserver === 'undefined'
+      ? null
+      : new MutationObserver(() => {
+          if (!bind() || !live) return
+          needed.current = null
+          check()
+        })
+    mutations?.observe(el, { childList: true })
+    // Web fonts change widths without resizing anything. Once per row, and only if they have not
+    // landed: a resolved `ready` would otherwise re-fire on every effect run and re-measure
+    // forever. A callback from a torn-down run does nothing (`live`); the current run's takes over.
+    if (document.fonts && document.fonts.status !== 'loaded' && !fontsHandled.current) {
+      void document.fonts.ready.then(() => {
+        fontsHandled.current = true
+        if (!live) return
+        needed.current = null
+        check()
+      })
+    }
+    return () => {
+      live = false
+      observer.disconnect()
+      children.disconnect()
+      mutations?.disconnect()
+    }
+  }, [ref, enabled, key, tick, decide])
+  return enabled && dropped
+}
+
 /** The meta line's state word (#617): the attention label only for the states the issue lists,
  *  where the dot alone cannot say it — monitoring, the dependency waits (waiting on N workers,
  *  on worker replies, on a parent reply), needs review, needs permission, failed, scheduled,
@@ -667,6 +789,12 @@ function RunRow({
   const titleRef = React.useRef<HTMLSpanElement | null>(null)
   const lineOneOverflows = useOverflow(titleRef, variant, `${run.runner}|${cost}`)
 
+  // Width priority on the meta line, every row (#729): the age is the least important item and
+  // goes first, whole and with its separator, before anything is ellipsized. The hand-off glyph
+  // never goes: it leads the line, and the line truncates at its end.
+  const metaRef = React.useRef<HTMLDivElement | null>(null)
+  const ageDropped = useAgeDropped(metaRef, Boolean(age), `${age}|${stateWord ?? ''}|${references.map((ref) => `${ref.kind}-${ref.number}-${ref.url}`).join(',')}|${run.notify ? 1 : 0}`)
+
   const meta: React.ReactNode[] = []
   if (stateWord) meta.push(<span key="state" data-slot="task-row-state">{stateWord}</span>)
   for (const ref of references) {
@@ -680,7 +808,7 @@ function RunRow({
       />,
     )
   }
-  if (age) meta.push(<span key="age" data-slot="task-row-age" className="tabular-nums">{age}</span>)
+  if (age && !ageDropped) meta.push(<span key="age" data-slot="task-row-age" className="tabular-nums">{age}</span>)
   if (tokens && !lineOneOverflows) meta.push(<span key="tokens" data-slot="task-row-tokens" className="tabular-nums">{tokens}</span>)
   // A needs-you variant says no state word — its amber dot and the Needs you group say it —
   // unless its line 2 would otherwise be empty; the row keeps its two lines either way.
@@ -785,6 +913,7 @@ function RunRow({
         {/* The meta line: one line, truncated, never wrapped. References are plain muted links
             here (#617) — no chip border, no teal — but keep their status panel and their name. */}
         <div
+          ref={metaRef}
           data-slot="task-row-meta"
           className={cn(
             'h-[16px] min-w-0 truncate text-[11.5px] leading-[1.4] font-normal text-soft-foreground',
@@ -794,7 +923,24 @@ function RunRow({
             isActive && 'text-muted-foreground',
           )}
         >
-          {meta.length ? meta.flatMap((part, index) => (index ? [<MetaSeparator key={`sep-${index}`} />, part] : [part])) : ' '}
+          {/* Handed off to the task webhook (#729): first on the line, in the line's own colour
+              (`currentColor`: `--soft-foreground`, one step up when selected) — a fact, not a
+              status, so no tone. NOT part of `meta`: it must not count as content for the
+              needs-you fallback above, and it takes no separator. */}
+          {run.notify === true ? (
+            // A wrapper, not the bare svg: an HTML `title` is the tooltip, where an svg needs a
+            // `<title>` child that would leak into the line's text.
+            <span
+              data-slot="task-row-notify"
+              role="img"
+              aria-label="Notifying the task webhook"
+              title="Notifying the task webhook"
+              className="mr-[4px] inline-block shrink-0 align-[-1px]"
+            >
+              <SendIcon aria-hidden="true" className="size-[10px]" />
+            </span>
+          ) : null}
+          {meta.length ? meta.flatMap((part, index) => (index ? [<MetaSeparator key={`sep-${index}`} />, part] : [part])) : run.notify === true ? null : ' '}
         </div>
       </div>
       {run.delegation?.role === 'worker' ? <span className="sr-only">Worker · {attention.label}</span> : null}

@@ -33,6 +33,8 @@ beforeAll(async () => {
     createdAt: new Date().toISOString(), finishedAt: new Date().toISOString(), archived: false, steps: [],
     // One reference, on the row this spec hovers: the pointer path keeps it a real link (#617 01b).
     ...(id === 'two' ? { referencedPullRequestUrl: 'https://github.com/o/r/pull/594' } : {}),
+    // #729: both rows are handed off, so the glyph is sampled on the selected and the hover fill.
+    notify: true,
   })),
     // A variant group sharing one issue (#617 review round 4): its reference lives on the group
     // row's line 2 and must stay a real link with the status panel on a pointer device.
@@ -406,6 +408,12 @@ describe('selection and control states (#171)', () => {
           samples.push({ variant: variantId, target: `${row} ${part}`, state: `${state} row text`, ...sample })
           expect(sample.ratio, `${state} ${part}: ${JSON.stringify(sample)}`).toBeGreaterThanOrEqual(4.5)
         }
+        // The hand-off glyph (#729): the meta line's own ink (not a tone), a 3:1 non-text mark.
+        const glyph = browser.evaluate(contrastSampleExpression(`${row} [data-slot="task-row-notify"] svg`, 'stroke')) as ContrastSample
+        samples.push({ variant: variantId, target: `${row} task-row-notify`, state: `${state} row glyph`, ...glyph })
+        expect(glyph.ratio, `${state} glyph: ${JSON.stringify(glyph)}`).toBeGreaterThanOrEqual(3)
+        const ink = browser.evaluate(`(() => { const r = document.querySelector('${row}'); return [getComputedStyle(r.querySelector('[data-slot="task-row-notify"] svg')).stroke, getComputedStyle(r.querySelector('[data-slot="task-row-meta"]')).color] })()`) as [string, string]
+        expect(ink[0], `${state} glyph follows the meta ink`).toBe(ink[1])
         const dot = browser.evaluate(contrastSampleExpression(`${row} [data-slot="status-dot"]`, 'background-color', 'parent')) as ContrastSample
         samples.push({ variant: variantId, target: `${row} status-dot`, state: `${state} row dot`, ...dot })
         expect(dot.ratio, `${state} dot: ${JSON.stringify(dot)}`).toBeGreaterThanOrEqual(3)
