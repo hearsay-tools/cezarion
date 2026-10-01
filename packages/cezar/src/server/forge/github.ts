@@ -3118,7 +3118,7 @@ export function evictGithubProjectCaches(repoRoot: string): void {
     if (key.startsWith(`${repoRoot}:`)) mergeStateCache.delete(key);
   });
   commentsCache.forEach((_value, key) => {
-    if (key.startsWith(`${repoRoot}:`)) commentsCache.delete(key);
+    if (key.startsWith(`${repoRoot}\0`)) commentsCache.delete(key);
   });
   itemCache.forEach((_value, key) => {
     if (key.startsWith(`${repoRoot}\0`)) itemCache.delete(key);
