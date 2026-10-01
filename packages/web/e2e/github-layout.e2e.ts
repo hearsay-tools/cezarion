@@ -555,3 +555,41 @@ it.each([{ width: 1440, height: 900 }, { width: 360, height: 640 }].flatMap(view
   expect(facts).toEqual({ distinct: 1, pageOverflow: false })
   browser.setViewport(DESKTOP.width, DESKTOP.height)
 }, 90_000)
+
+// Review of #721: a CLOSED status button holding keyboard focus is hidden by success; focus must be
+// handed to a visible control before that, and focus that was elsewhere must stay where it was.
+it.each([1440, 360].flatMap(width => ['status button', 'search'].map(focus => ({ width, focus }))))('hands focus on from the closed status button but leaves other focus alone at $width ($focus) (#721)', async ({ width, focus }) => {
+  if (!forgeAvailable) return
+  const gh = await api<GithubPayload>('/api/v1/github')
+  const generation = '00000000-0000-4000-8000-000000000723'
+  const projects = [{ id: 'P1', title: 'Delivery', url: 'https://github.com/orgs/mock/projects/1' }]
+  const base = { ...gh, projectsState: 'ready', projects, issues: gh.issues.map(issue => ({ ...issue, projectIds: ['P1'] })) }
+  const refreshing = { ...base, projectsState: 'refreshing', projectsGeneration: generation }
+  browser.setViewport(width, width === 360 ? 640 : 900)
+  browser.goto(`${baseUrl}${scoped('/')}`)
+  browser.waitForFunction(`document.querySelector('a[href="${scoped('/github')}"]') !== null`)
+  browser.evaluate(`(() => {
+    const nativeFetch = window.fetch;
+    window.fetch = (input, init) => {
+      const url = new URL(typeof input === 'string' ? input : input instanceof Request ? input.url : String(input), location.href);
+      const json = (body) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+      if (url.pathname.endsWith('/github/projects')) return new Promise(resolve => { window.__finishProjects = () => resolve(json(${JSON.stringify({ generation, state: 'ready', projects, membership: {} })})); });
+      if (url.pathname.endsWith('/github')) return Promise.resolve(json(url.searchParams.get('refresh') === '1' ? ${JSON.stringify(refreshing)} : ${JSON.stringify(base)}));
+      return nativeFetch(input, init);
+    };
+    history.pushState(null, '', '${scoped('/github?filter=all')}'); dispatchEvent(new PopStateEvent('popstate'));
+  })()`)
+  browser.waitForFunction(`document.querySelector('select[aria-label="Project board"]') !== null`)
+  browser.click('[data-slot="gh-refresh"]')
+  browser.waitForFunction(`document.querySelector('[data-slot="gh-filter-toolbar"] [role="status"]')?.textContent.includes('Refreshing project boards')`)
+  const target = focus === 'search' ? '[data-slot="gh-search"]' : '[aria-label="Project board status"]'
+  browser.evaluate(`document.querySelector('${target}').focus()`)
+  browser.waitForFunction(`document.activeElement?.matches('${target}')`)
+  browser.evaluate('window.__finishProjects()')
+  browser.waitForFunction(`document.querySelector('select[aria-label="Project board"]') && !document.querySelector('[data-slot="gh-filter-toolbar"] [role="status"]').textContent.includes('Refreshing')`)
+  browser.evaluate('window.__mark = performance.now()')
+  browser.waitForFunction('performance.now() - window.__mark > 300')
+  const active = browser.evaluate(`(() => { const a = document.activeElement; return { body: a === document.body, picker: a?.matches('select[aria-label="Project board"]') === true, search: a?.matches('[data-slot="gh-search"]') === true }; })()`)
+  expect(active).toEqual(focus === 'search' ? { body: false, picker: false, search: true } : { body: false, picker: true, search: false })
+  browser.setViewport(DESKTOP.width, DESKTOP.height)
+}, 90_000)

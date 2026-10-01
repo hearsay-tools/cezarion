@@ -34,6 +34,22 @@ export function IssueFilters({ data, assignees, projectId, onAssigneesChange, on
   // The popover stays mounted for the frame in which focus is handed over, so keep its last words.
   const lastMessage = useRef(message)
   if (hasMessage) lastMessage.current = message
+  const messageGone = useRef(!hasMessage)
+  messageGone.current = !hasMessage
+  const handOffFocus = () => (pickerRef.current && !pickerRef.current.disabled ? pickerRef.current : meRef.current)?.focus()
+  useEffect(() => {
+    const node = triggerRef.current
+    if (!node) return
+    // Hiding the focused button blurs it while React is committing, where React drops its own focus
+    // events, so listen natively. The browser clears focus after this event, so hand over once it settled.
+    const onBlur = (event: FocusEvent) => {
+      if (messageGone.current && !event.relatedTarget) requestAnimationFrame(() => {
+        if (!document.activeElement || document.activeElement === document.body) handOffFocus()
+      })
+    }
+    node.addEventListener('blur', onBlur)
+    return () => node.removeEventListener('blur', onBlur)
+  }, [])
   useEffect(() => {
     if (hasMessage) return
     // The status button hides itself once there is nothing to say. Close it, and if focus was in it
@@ -41,7 +57,7 @@ export function IssueFilters({ data, assignees, projectId, onAssigneesChange, on
     const active = document.activeElement
     const held = !!active && (active === triggerRef.current || !!contentRef.current?.contains(active))
     setStatusOpen(false)
-    if (held) (pickerRef.current && !pickerRef.current.disabled ? pickerRef.current : meRef.current)?.focus()
+    if (held) handOffFocus()
   }, [hasMessage])
   return (
     <div className="contents" data-slot="gh-issue-filters">
