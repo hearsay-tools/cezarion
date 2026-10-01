@@ -588,7 +588,8 @@ describe('global tasks page', () => {
 
     // `a1` carries several — the plural case has its own test; here, the strongest leads.
     const prs = screen.getAllByRole('link', { name: /pull request for Add checkout endpoint/ })
-    expect(prs[0]!.getAttribute('href')).toBe('https://github.com/acme/api/pull/42')
+    expect(prs[0]!.getAttribute('href')).toBe('/p/api/tasks/a1/pr/42')
+    expect(prs[0]!.getAttribute('target')).toBeNull()
     expect(prs[0]!.textContent).toContain('#42')
 
     const issue = screen.getByRole('link', { name: /issue for Checkout page/ })
@@ -605,7 +606,7 @@ describe('global tasks page', () => {
     // The row itself paints the STRONGEST one — the width belongs to the task title — and the
     // rest are one hover away behind the `+N`.
     expect([...row.querySelectorAll('a[data-slot$="-chip"]')].map((chip) => chip.getAttribute('href'))).toEqual([
-      'https://github.com/acme/api/pull/42',
+      '/p/api/tasks/a1/pr/42',
     ])
     expect(row.querySelector('[data-slot="reference-overflow"]')?.textContent).toBe('+2')
   })
@@ -641,10 +642,10 @@ describe('global tasks page', () => {
       'Issue #12',
       'Issue #99',
     ])
-    expect(chips[2]!.getAttribute('href')).toBe('https://github.com/acme/api/issues/12')
+    expect(chips[2]!.getAttribute('href')).toBe('/p/api/tasks/a1/issue/12')
     // Known only by number, but the project's own repo makes it a real link too — every
-    // reference in the list is clickable.
-    expect(chips[3]!.getAttribute('href')).toBe('https://github.com/acme/api/issues/99')
+    // reference in the list is clickable, and each own-repo one opens the task's item tab (#692).
+    expect(chips[3]!.getAttribute('href')).toBe('/p/api/tasks/a1/issue/99')
   })
 
   it('links a reference known only by number, from the project’s own repo', async () => {
@@ -654,11 +655,12 @@ describe('global tasks page', () => {
 
     const chip = document.querySelector('[data-slot="pr-chip"]')!
     expect(chip.tagName).toBe('A')
-    expect(chip.getAttribute('href')).toBe('https://github.com/acme/api/pull/5127')
+    expect(chip.getAttribute('href')).toBe('/p/api/tasks/a1/pr/5127')
   })
 
-  it('leaves a number-only reference inert when its project has no known repo', async () => {
-    // Inert text beats a link that goes somewhere invented.
+  it('opens the in-app item tab for a number-only reference even when its project has no known repo', async () => {
+    // A number-only reference is the project's own by construction (#692), and the item tab needs
+    // no repo URL — the old inert text was only there to avoid a link to an invented GitHub URL.
     stubFetch({
       projects: PROJECTS.map((project) => ({ ...project, repoUrl: undefined })),
       runs: [{ ...RUNS[0]!, pullRequestUrl: undefined, referencedPullRequestUrl: undefined, referencedIssueUrl: undefined, markerRefs: undefined, prNumber: 5127 }],
@@ -666,7 +668,9 @@ describe('global tasks page', () => {
     renderPage()
     await screen.findByText('Add checkout endpoint')
 
-    expect(document.querySelector('[data-slot="pr-chip"]')!.tagName).toBe('SPAN')
+    const chip = document.querySelector('[data-slot="pr-chip"]')!
+    expect(chip.tagName).toBe('A')
+    expect(chip.getAttribute('href')).toBe('/p/api/tasks/a1/pr/5127')
   })
 
   it('paints chips from the INDEX, without waiting on a ref-status answer', async () => {

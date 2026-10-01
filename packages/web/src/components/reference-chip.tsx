@@ -2,6 +2,7 @@ import { CircleIcon, CircleCheckIcon, CircleDotIcon, CircleSlashIcon, CircleXIco
 import type { ComponentType } from 'react'
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import type * as React from 'react'
+import { Link as RouterLink } from 'react-router'
 import type { ReferenceStatus } from '@open-mercato/cezar-api-client'
 
 import { useReferenceStatus } from '@/components/reference-status'
@@ -96,6 +97,7 @@ export function ReferenceChip({
   conflicting: explicitConflicting,
   conflictAction,
   projectId,
+  to,
   className,
   compact = false,
   plain = false,
@@ -117,6 +119,9 @@ export function ReferenceChip({
   /** Only the global Tasks page needs this: its rows come from different projects, and two of
    *  them may each have a #42. Elsewhere the provider's own project is right. */
   projectId?: string
+  /** An in-app destination (#692): the chip becomes a router link opening in the same tab instead
+   *  of an external GitHub link. Set only for a reference in the project's own repository. */
+  to?: string
   className?: string
   /**
    * The narrow sidebar row (#788, option C): the number ALONE — `#402` — with no `Issue ` word
@@ -214,7 +219,7 @@ export function ReferenceChip({
 
   // href protocol guard (#431): a transcript-scraped non-http URL degrades to inert text.
   const chip =
-    !url || !isHttpUrl(url) ? (
+    !to && (!url || !isHttpUrl(url)) ? (
       <span
         data-slot={kind === 'PR' ? 'pr-chip' : 'issue-chip'}
         // The STATUS stays here even when the conflict has taken the paint: it is still what the
@@ -228,13 +233,12 @@ export function ReferenceChip({
         {body}
       </span>
     ) : (
-      <a
+      <ChipAnchor
+        to={to}
+        url={url}
         data-slot={kind === 'PR' ? 'pr-chip' : 'issue-chip'}
         data-status={status}
         {...(conflicting ? { 'data-conflicting': 'true' } : {})}
-        href={url}
-        target="_blank"
-        rel="noopener noreferrer"
         // The native `title` is the URL only while there is no richer panel to show. Once the
         // hover card below owns the hover it carries the URL itself, and two tooltips on one
         // element is a browser popup fighting a designed one.
@@ -243,7 +247,7 @@ export function ReferenceChip({
         className={plain ? chipClass : cn(chipClass, TONE_HOVER[presentation?.tone ?? 'accent'])}
       >
         {body}
-      </a>
+      </ChipAnchor>
     )
 
   if (!tooltip) return chip
@@ -280,6 +284,22 @@ export function ReferenceChip({
     >
       {panel}
     </ReferenceChipCard>
+  )
+}
+
+/** The chip's link: a router link for an in-app destination, otherwise the external GitHub URL in a
+ *  new tab. Everything else (slot, status, aria) is the caller's, identical for both. */
+function ChipAnchor({
+  to,
+  url,
+  children,
+  ...props
+}: { to?: string; url?: string } & Omit<React.ComponentProps<'a'>, 'href'>) {
+  if (to) return <RouterLink to={to} {...props}>{children}</RouterLink>
+  return (
+    <a href={url} target="_blank" rel="noopener noreferrer" {...props}>
+      {children}
+    </a>
   )
 }
 

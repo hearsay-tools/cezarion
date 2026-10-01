@@ -834,10 +834,16 @@ export function useHealth() {
  * over. Health stays the fallback, and stays boot-only, so an unregistered boot folder (or a
  * registry that has not loaded yet) keeps answering exactly as before.
  */
-export function useProjectRepoBase(): string | undefined {
+export function useProjectRepoBase(
+  explicitProjectId?: string,
+  options?: { retryOnMount?: boolean },
+): string | undefined {
   const health = useHealth().data
-  const projects = useProjects().data?.projects
-  const { projectId } = useProjectScope()
+  const projects = useProjects(options).data?.projects
+  const scope = useProjectScope()
+  // A surface standing in a project other than the routed one (the sidebar's per-project lists)
+  // names it; everyone else reads the route's.
+  const projectId = explicitProjectId ?? scope.projectId
   const scopedId = projectId ?? health?.bootProject
   const registered = scopedId === undefined ? undefined : projects?.find((project) => project.id === scopedId)
   if (registered?.repoUrl) return registered.repoUrl

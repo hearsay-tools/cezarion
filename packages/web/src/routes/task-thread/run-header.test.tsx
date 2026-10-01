@@ -1258,8 +1258,38 @@ describe('meta line, tabs, pill and resume hint', () => {
     const meta = document.querySelector('[data-slot="run-meta"]') as HTMLElement
     await waitFor(() => {
       const chip = meta.querySelector('[data-slot="pr-chip"]')
-      expect(chip?.getAttribute('href')).toBe('https://github.com/open-mercato/cezar/pull/901')
+      expect(chip?.getAttribute('href')).toBe('/p/boot-id/tasks/r1/pr/901')
     })
+  })
+
+  it('opens the item tab from an own-repo pill and keeps GitHub for a foreign one (#692)', async () => {
+    stubFetch({
+      '/api/v1/health': () => jsonResponse({ bootProject: 'boot-id', repo: {} }),
+      '/api/v1/projects': () =>
+        jsonResponse({
+          projects: [
+            { id: 'boot-id', name: 'cezar', root: '/home/me/cezar', repoUrl: 'https://github.com/open-mercato/cezar' },
+          ],
+        }),
+    })
+    renderHeader(
+      run('done', {
+        branch: 'cez/r1',
+        pullRequestUrl: 'https://github.com/open-mercato/cezar/pull/801',
+        referencedPullRequestUrl: 'https://github.com/someone/else/pull/5',
+        referencedIssueUrl: 'https://github.com/open-mercato/cezar/issues/692',
+      }),
+    )
+    const meta = document.querySelector('[data-slot="run-meta"]') as HTMLElement
+    await waitFor(() => {
+      const hrefs = [...meta.querySelectorAll('[data-slot="pr-chip"], [data-slot="issue-chip"]')].map((chip) => chip.getAttribute('href'))
+      expect(hrefs).toEqual([
+        '/p/boot-id/tasks/r1/pr/801',
+        'https://github.com/someone/else/pull/5',
+        '/p/boot-id/tasks/r1/issue/692',
+      ])
+    })
+    expect(meta.querySelector('[data-slot="pr-chip"]')?.getAttribute('target')).toBeNull()
   })
 
   // A PR URL whose last segment is not a number never becomes a `taskReferences` entry, so it is

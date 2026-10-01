@@ -92,22 +92,30 @@ interface ReferenceStatusContextValue {
    *  alone, which spans the whole registry and whose chips each name their own; every other
    *  surface stands in exactly one project, where repeating it per chip would be noise. */
   projectId?: string
+  /** The repository `projectId` lives in — what tells a chip whether its reference is the project's
+   *  own, and so can open in the cockpit (#692). Absent = unknown, and every chip links out. */
+  repoBase?: string
 }
 
 const ReferenceStatusContext = createContext<ReferenceStatusContextValue | null>(null)
 
 export function ReferenceStatusProvider({
   projectId,
+  repoBase,
   requests,
   children,
 }: {
   projectId?: string
+  /** The project's repository URL, for the chips' in-app item links (#692). A nested provider for
+   *  the SAME project inherits it, so a surface that only narrows the request list need not repeat it. */
+  repoBase?: string
   /** Every reference on this surface. Stable content matters, not identity — the hook keys off
    *  what is IN the list, so rebuilding it each render is free. */
   requests: readonly ReferenceStatusRequest[]
   children: ReactNode
 }) {
   const registry = useContext(ReferenceStatusRegistryContext)
+  const parent = useContext(ReferenceStatusContext)
   const id = useId()
   // The CONTENT is what the registry needs, and it is rebuilt every render — so the effect keys
   // off a signature rather than the array, or it would republish (and re-render the whole app)
@@ -127,7 +135,8 @@ export function ReferenceStatusProvider({
   // hooks cannot be skipped, and an empty list fetches nothing.
   const own = useReferenceStatuses(registry ? EMPTY_REQUESTS : requests)
   const lookup = registry?.lookup ?? own
-  const value = useMemo(() => ({ lookup, projectId }), [lookup, projectId])
+  const ownRepoBase = repoBase ?? (parent && parent.projectId === projectId ? parent.repoBase : undefined)
+  const value = useMemo(() => ({ lookup, projectId, repoBase: ownRepoBase }), [lookup, projectId, ownRepoBase])
   return <ReferenceStatusContext.Provider value={value}>{children}</ReferenceStatusContext.Provider>
 }
 
@@ -156,4 +165,11 @@ export function useReferenceStatus(
 /** Outside a provider (a bare render, a test, a surface that never mounted one) nothing has been
  *  asked and nothing is claimed — the pre-status chip, exactly. Frozen and shared so it is a
  *  stable identity rather than a new object per render. */
+/** The project and repository the surrounding provider stands in, for building a chip's in-app link
+ *  (#692). Both undefined outside a provider, which leaves every chip linking to GitHub. */
+export function useReferenceScope(): { projectId?: string; repoBase?: string } {
+  const context = useContext(ReferenceStatusContext)
+  return { projectId: context?.projectId, repoBase: context?.repoBase }
+}
+
 const IDLE: ReferenceStatusEntry = Object.freeze({ state: 'idle' })

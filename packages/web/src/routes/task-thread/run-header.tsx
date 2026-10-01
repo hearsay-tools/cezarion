@@ -63,10 +63,12 @@ import {
   prNumber,
   taskIssueUrl,
   taskPrUrl,
+  taskItemPath,
   taskItemTabs,
   taskReferences,
   workflowLabel,
   type TaskItemTab,
+  type TaskReference,
 } from '@/lib/tasks-table'
 import { usageMetricVisibility } from '@/lib/token-metrics'
 import { cn, isHttpUrl } from '@/lib/utils'
@@ -272,7 +274,7 @@ export function RunHeader({
   const archiveButton = tab !== 'session' && flags.archive ? <ArchiveButton run={run} /> : null
 
   return (
-    <ReferenceStatusProvider projectId={referenceProjectId} requests={referenceRequests}>
+    <ReferenceStatusProvider projectId={referenceProjectId} repoBase={repoBase} requests={referenceRequests}>
     <header
       data-slot="run-header"
       className={cn(
@@ -698,6 +700,10 @@ function MetaRow({
   // #526: the issue chip may be synthesized from the CEZ:ISSUE marker, and the only repository
   // such a link may name is the one on screen — never the transcript's.
   const repoBase = useProjectRepoBase()
+  // Own-repo pills open the task's item tab (#692); a foreign reference keeps its GitHub link.
+  const referenceProjectId = useReferenceProjectId()
+  const itemPath = (reference: TaskReference) =>
+    referenceProjectId === undefined ? undefined : taskItemPath(referenceProjectId, run.id, reference, repoBase)
   // The chips' statuses come from the `ReferenceStatusProvider` `RunHeader` mounts around the
   // whole header — the same seam the tables use, which keeps the header's chip and the table's
   // chip answering identically for the same PR.
@@ -726,6 +732,7 @@ function MetaRow({
       <ReferenceChip
         key={`pr-${reference.number}`}
         reference={reference}
+        to={itemPath(reference)}
         taskTitle={runTitle(run)}
         // 44px on touch (#617 01b): the sidebar row shows references as plain text there, so
         // this header is where they are tapped. CSS px, not `min-h-11`: spacing units follow
@@ -762,6 +769,7 @@ function MetaRow({
       <ReferenceChip
         key="issue"
         reference={{ kind: 'Issue', ...(number ? { number: Number(number) } : {}), url: issueUrl }}
+        to={number ? itemPath({ kind: 'Issue', number: Number(number), url: issueUrl }) : undefined}
         taskTitle={runTitle(run)}
         className="h-5 no-hover:min-h-[44px] no-hover:min-w-[44px]"
       />,

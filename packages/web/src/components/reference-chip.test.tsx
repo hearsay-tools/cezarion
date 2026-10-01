@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { MemoryRouter } from 'react-router'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 
 import type { ReferenceStatus } from '@open-mercato/cezar-api-client'
@@ -429,5 +430,27 @@ describe.each([false, true])('plain status visibility (#677), inert=%s', (inert)
     expect(chip.querySelector('svg')).toBeNull()
     expect(chip.className).toContain('text-inherit')
     expect(chip.outerHTML).not.toContain('text-accent')
+  })
+})
+
+describe('ReferenceChip with an in-app destination (#692)', () => {
+  it('links to the internal path in the same tab, keeping the status panel and accessible name', () => {
+    const chip = chipOf(
+      <MemoryRouter>
+        <ReferenceChip reference={PR} taskTitle="Add checkout" status="ready" to="/p/api/tasks/r1/pr/402" />
+      </MemoryRouter>,
+    )
+
+    expect(chip.tagName).toBe('A')
+    expect(chip.getAttribute('href')).toBe('/p/api/tasks/r1/pr/402')
+    expect(chip.getAttribute('target')).toBeNull()
+    expect(chip.getAttribute('aria-label')).toBe('Open the pull request for Add checkout — Ready to merge')
+  })
+
+  it('still opens GitHub in a new tab without a destination', () => {
+    const chip = chipOf(<ReferenceChip reference={PR} taskTitle="Add checkout" />)
+
+    expect(chip.getAttribute('href')).toBe('https://github.com/o/r/pull/402')
+    expect(chip.getAttribute('target')).toBe('_blank')
   })
 })

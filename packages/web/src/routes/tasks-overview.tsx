@@ -7,7 +7,7 @@ import { Link, useNavigate } from '@/lib/project-router'
 
 import { archiveFinished, markAllRunsSeen, patchRun } from '@/api/client'
 import { useRunUsage } from '@/api/global-events'
-import { queryKeys, useHealth, usePinRun, useProjects, useReferenceProjectId, useRuns } from '@/api/queries'
+import { queryKeys, useHealth, usePinRun, useProjects, useProjectRepoBase, useReferenceProjectId, useRuns } from '@/api/queries'
 import type { RunRecord } from '@open-mercato/cezar-api-client'
 import { CenteredState } from '@/components/centered-state'
 import { DiffStatLabel } from '@/components/diff-stat'
@@ -1133,6 +1133,8 @@ export function TasksOverviewRoute() {
   // provider wraps it instead, so the chips deep in the table and the cards read their status
   // from context and nothing in between has to relay it.
   const projectId = useReferenceProjectId()
+  // Same `retryOnMount: false` as the registry read below, for the same reason.
+  const repoBase = useProjectRepoBase(undefined, { retryOnMount: false })
   // The scope gate already owns registry loading. Retrying its failed query when this
   // child mounts would make the gate unmount us, then mount/retry forever offline.
   const projects = useProjects({ retryOnMount: false })
@@ -1151,7 +1153,7 @@ export function TasksOverviewRoute() {
   )
 
   return (
-    <ReferenceStatusProvider projectId={projectId} requests={referenceRequests}>
+    <ReferenceStatusProvider projectId={projectId} repoBase={repoBase} requests={referenceRequests}>
       <TasksOverview
         runs={runs.data}
         projectName={projectName}

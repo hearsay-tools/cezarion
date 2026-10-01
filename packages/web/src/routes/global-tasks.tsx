@@ -30,6 +30,7 @@ import { deriveAttention } from '@/lib/attention'
 import { shortAge } from '@/lib/format'
 import {
   formatCost,
+  taskItemPath,
   taskReferences,
   referenceKey,
   usageCells,
@@ -794,7 +795,7 @@ function TaskRow({
       </div>
       <div data-slot="global-task-references">
         {references.length > 0 ? (
-          <ReferenceChips references={references} run={run} />
+          <ReferenceChips references={references} run={run} repoBase={task.project?.repoUrl} />
         ) : (
           <Dash />
         )}
@@ -927,9 +928,12 @@ function ArchiveToggle({
 function ReferenceChips({
   references,
   run,
+  repoBase,
 }: {
   references: readonly TaskReference[]
   run: RunIndexEntry
+  /** The row's own project repository: an own-repo reference opens the task's item tab (#692). */
+  repoBase: string | undefined
 }) {
   const shown = references.slice(0, MAX_VISIBLE_REFERENCES)
   const hidden = references.length - shown.length
@@ -947,6 +951,7 @@ function ReferenceChips({
           // Named per chip HERE and nowhere else: this page's rows come from different projects,
           // and two of them may each have a #42.
           projectId={run.projectId}
+          to={taskItemPath(run.projectId, run.id, reference, repoBase)}
           // Same panel, same button, same prompt as the task's own page. The run record it needs
           // is fetched by the action itself, and only once the panel is open — this page's index
           // row is deliberately too slim to answer whether the task can be reopened.
@@ -966,6 +971,8 @@ function ReferenceChips({
           taskTitle={title}
           hidden={hidden}
           projectId={run.projectId}
+          runId={run.id}
+          repoBase={repoBase}
         />
       ) : null}
     </span>
@@ -995,11 +1002,15 @@ function ReferenceOverflow({
   taskTitle,
   hidden,
   projectId,
+  runId,
+  repoBase,
 }: {
   references: readonly TaskReference[]
   taskTitle: string
   hidden: number
   projectId: string
+  runId: string
+  repoBase: string | undefined
 }) {
   const [open, setOpen] = React.useState(false)
   // How it was opened decides whether focus moves into the list. A CLICK should hand the keyboard
@@ -1071,6 +1082,7 @@ function ReferenceOverflow({
               reference={reference}
               taskTitle={taskTitle}
               projectId={projectId}
+              to={taskItemPath(projectId, runId, reference, repoBase)}
             />
           ))}
         </span>
