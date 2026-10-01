@@ -386,7 +386,11 @@ navigation drawer):
 - ⬇️ **Clone from GitHub…** clones with your logged-in `gh` into the checkout
   root (**Settings → Projects**, default `~/cezar/projects`) with live progress,
   then registers the clone. Close the dialog and the clone is killed and its
-  partial directory removed.
+  partial directory removed. For a SAML-protected organization, follow **Authorize
+  this GitHub organization**, authorize in GitHub, then return to retry once (or
+  choose **Retry clone**). Original errors remain available under **Error details**.
+  Clones use HTTPS and save the GitHub CLI credential helper in the new repository
+  so later pushes use the same organization grant, even if `gh` prefers SSH.
 
 Removing a project (**Settings → Projects**) drops the registry entry only — the
 repo and its `.ai/cezar/` are never touched, so re-adding it later finds all its

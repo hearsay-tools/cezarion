@@ -300,13 +300,16 @@ entries:
     pr: 968
     title: "fix(clone): recover from GitHub organization SAML auth (#968)"
     date: 2026-09-14
-    status: planned
+    status: ported
     hint:
       conflicts: 1
-    note: absent here; server side applies clean, 1 hunk in the clone dialog
+    note: Ported SAML recovery, HTTPS credentials, fork-parent HTTPS transport, and unterminated error output.
     fork:
       issue: 437
-    decided: 2026-09-18
+      pr: 719
+      commits:
+        - 01e6d382061c18095793ff256cb247229382a2aa
+    decided: 2026-09-30
   - sha: 00b77b40cbbc98b2284ef3e11c9649196a06178c
     pr: 940
     title: "feat(tasks): in-task drafts survive leaving the task (#940)"
