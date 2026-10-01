@@ -138,7 +138,6 @@ describe('project rail', () => {
     browser.evaluate(`document.querySelector('${mark(OTHER.id)} a').scrollIntoView({ block: 'nearest' })`)
     browser.click(`${mark(OTHER.id)} a`)
     assertProject()
-    browser.waitForFunction(`document.querySelector('${mark(OTHER.id)} a') !== null`)
     browser.evaluate(`document.querySelector('${mark(OTHER.id)} a').focus()`)
     browser.press('Enter')
     assertProject()
