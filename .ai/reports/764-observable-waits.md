@@ -34,3 +34,9 @@ Raw iteration logs, screenshots, probes, reproduction patches, campaign script a
 An earlier loaded fixture startup failed before browser creation without sufficient child output to establish its cause. Bounded diagnostics were added without changing budgets; the following 80-invocation campaign had no recurrence. This is not a claimed startup fix. Controlled theme-click evidence demonstrates the missing ordering guarantee; the exact original CI event sequence was not retained.
 
 Latest main was merged normally before opening draft PR #773, with no conflicts. Review findings and addressing commits are recorded in the PR threads.
+
+## Review follow-ups
+
+The history observer now restores the exact previous fetch function in `finally` and removes its globals. The identity assertion failed before restoration; the full history file passes 7/7 afterward. A forced observation failure also confirmed restoration and clean globals before the following page-cap test passed.
+
+Plan-control evidence uses a controlled finite sheet animation with a transient transparent hit surface: without `settleVisual`, the native click rejects the covered target; with settlement, all six cases pass with one click and no interception. Removing the injection leaves the ordinary plan file 6/6 green. This proves the readiness requirement under controlled reflow; it does not claim to reproduce the exact historical silent-coordinate miss. The 52 helper/visual/scanner tests and web typecheck pass. [Follow-up logs, patches, bundles and exact commands](/tasks/a001c986-83f8-441e-9cb8-874e3a36cac5/files?artifact=f21b8b6b-a6a1-4ced-9cc4-b2bd2bf902a3) remain outside the source diff.
