@@ -2,7 +2,7 @@ import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { RunRecord } from '@open-mercato/cezar-api-client'
 
@@ -133,6 +133,31 @@ describe('task GitHub item tabs against the dry-run mock', () => {
     )
     expect(body).toContain('Repro: log in, hit reload')
     expect(browser.text(activeTab)).toContain(`#${ISSUE}`)
+  })
+
+  it('offers the same keyboard-accessible issue handoff at 360×640 in light and dark themes', () => {
+    browser.setViewport(360, 640)
+    browser.goto(`${baseUrl}${scoped(`/tasks/${runId}/issue/${ISSUE}`)}`)
+    for (const theme of ['light', 'dark']) {
+      browser.waitForValue(`document.querySelector('[data-slot="gh-custom-prompt"]') !== null`)
+      browser.evaluate(`document.documentElement.classList.remove('light', 'dark'); document.documentElement.classList.add('${theme}')`)
+      browser.fill('[data-slot="gh-custom-prompt"]', `Draft in ${theme}`)
+      browser.press('Tab')
+      const facts = browser.waitForValue<{ inside: boolean; overflow: boolean; height: number }>(`(() => {
+        const panel = document.querySelector('[data-slot="gh-hand"]')
+        const input = panel?.querySelector('textarea')
+        if (!panel || !input || !panel.contains(document.activeElement) || input === document.activeElement) return null
+        const rect = panel.getBoundingClientRect()
+        return { inside: rect.left >= 0 && rect.right <= innerWidth,
+          overflow: panel.scrollWidth > panel.clientWidth, height: input.getBoundingClientRect().height }
+      })()`)
+      expect(facts.inside).toBe(true)
+      expect(facts.overflow).toBe(false)
+      expect(facts.height).toBeGreaterThanOrEqual(44)
+      const evidence = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_e2e')
+      mkdirSync(evidence, { recursive: true })
+      browser.screenshot(join(evidence, `handoff-360-${theme}.png`), { viewport: true })
+    }
   })
 
   it('on a phone the chip lands on a PR tab that is inside the viewport', () => {
