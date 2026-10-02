@@ -88,7 +88,7 @@ its title only.
 | `chromium.ts` | Resolve the binary (PATH, Playwright cache, agent-browser's Chrome for Testing cache, then `~/.cache/cez/chromium`), download Chrome for Testing into that cache on request, launch headless with the task profile and `--remote-debugging-port=0`, read `DevToolsActivePort`, stop. Typed failures: `not-installed`, `sandbox` (stderr tail kept), `timeout`, `exited`. |
 | `cdp.ts` | Minimal CDP client over the `ws` package already in `packages/cezar` (Node's global `WebSocket` is not stable on the `>=20` engine floor). |
 | `session.ts` | One preview session per task: the page, screencast with one frame in flight and newest-frame-wins, the input whitelist (resize, mouse, key, insertText, nav, back, forward, `reload { ignoreCache? }`, dialog reply), dialog forwarding, the injected cursor-shape binding and same-tab popups (from the prototype's `INJECT`), one viewer. |
-| `dev-server.ts` | Supervisor for one registration: probe the port; if it answers, adopt; if it is silent, report `needs_approval` and spawn only on an explicit `run`. Spawn `command` in its own process group with `cwd`, the curated env (`buildCommandEnv`: the #427 allowlist without backend or `gh` credentials, plus `CEZ_ENV_PASSTHROUGH`) and stdin closed (`'ignore'`: nobody can answer a prompt from the cockpit, so an interactive prompt fails fast into `exited` with its log instead of hanging), log to the task's preview directory, TCP-probe until up. States `starting → up → exited`, plus `stalled`. Writes a pid record `{ pid, startToken }` and kills only what it started. |
+| `dev-server.ts` | Supervisor for one registration: probe the port; if it answers, adopt; if it is silent, report `needs-approval` and spawn only on an explicit `run`. Spawn `command` in its own process group with `cwd`, the curated env (`buildCommandEnv`: the #427 allowlist without backend or `gh` credentials, plus `CEZ_ENV_PASSTHROUGH`) and stdin closed (`'ignore'`: nobody can answer a prompt from the cockpit, so an interactive prompt fails fast into `exited` with its log instead of hanging), log to the task's preview directory, TCP-probe until up. States `starting → up → exited`, plus `stalled`. Writes a pid record `{ pid, startToken }` and kills only what it started. |
 | `manager.ts` | Map run → `{ servers, session }`. Owns every exit in the lifecycle table below, the boot sweep and shutdown. |
 
 On disk, per task: `.ai/cezar/preview/<runId>/` with `profile/`, `<port>.log`, `<port>.pid.json`.
@@ -180,7 +180,7 @@ back, the pop-out route, a read-only second viewer, port detection.
    `open { target: { port } }`. The socket being open is the demand; no other open/stop route
    exists.
 3. The manager probes the port again. If it answers, cezar adopts it. If it is silent, the pane
-   gets `needs_approval { command, cwd }` and shows Run and open; only the owner's `run { port }`
+   gets `state { stage: 'needs-approval', server, wasRunning }` and shows Run and open; only the owner's `run { port }`
    spawns the command. Adoption is decided here, at every Open, never from the registration
    probe: an agent's own copy dies with its session, and a stale "adopted" label must not turn
    into a silent spawn. The manager then waits for the port and ensures Chromium, streaming each
@@ -196,7 +196,7 @@ Every state has an exit that is on by default.
 |---|---|---|
 | Registration | stored on the run | The run is deleted. Re-registering a port replaces it. |
 | Dev server (cezar-owned) | `starting`, `up`, `stalled`, `exited` | `starting`: the port answers (→ `up`), the process exits (→ `exited`), 2 min without an answer (→ `stalled`, process left running, log shown). `up` and `stalled`: the process exits, the owner presses Stop, 15 min after the last viewer left, the worktree is removed, the run is deleted, cezar shuts down. |
-| Dev server (adopted) | probed only | Never killed by cezar. A port that stops answering shows the `needs_approval` state with Run and open. |
+| Dev server (adopted) | probed only | Never killed by cezar. A port that stops answering shows the `needs-approval` state with Run and open. |
 | Chromium | `launching`, `ready`, `streaming` | 2 min after the last viewer left, Chromium exits (→ "browser exited", manual Retry only; no automatic relaunch, so a page that crashes Chromium cannot loop), the run is deleted, cezar shuts down. |
 | Viewer | connected | Socket close, replaced by another tab (old tab gets `replaced`, renders 5.12), missed pings, cezar shuts down. |
 | Leftovers after a crash | pid records on disk: `<port>.pid.json` per dev server, `chromium.pid.json` per task browser | Boot sweep of every registered project's data dir, once per process: kill only when the pid is alive **and** its `startToken` matches (`delegation/process-liveness.ts`), so a reused pid is never killed. A dev server's whole group goes; Chromium shares cezar's group, so only its pid. What the live host runs is spared, and a data dir another live cockpit owns is skipped (its context build sweeps it later, after taking ownership). |
@@ -239,8 +239,8 @@ Each is a typed `state` message; the toolbar never moves.
 | Page dialog | 5.13 | The page's own buttons; Esc means Cancel. |
 | Upgrade never succeeded | 5.14, "The proxy in front of cezar didn't let the preview's WebSocket through." (cezar cannot tell Basic Auth from a proxy that drops `Upgrade`; the copy names Basic Auth only as the known case) | Close preview. Stops after 2 attempts, no loop (the #688 failure mode). |
 | Worktree removed | 5.15 | Close preview. The card stays in history, disabled. |
-| Registered, not running | 5.16 `needs_approval`: command, `cwd`, what runs where | Run and open. Reached from the card, the header toggle, the server switcher and the empty state's Review. |
-| Adopted port silent at Open | 5.17 `needs_approval`, same block | Run and open. |
+| Registered, not running | 5.16 `needs-approval`: command, `cwd`, what runs where | Run and open. Reached from the card, the header toggle, the server switcher and the empty state's Review. |
+| Adopted port silent at Open | 5.17 `needs-approval`, same block | Run and open. |
 | Using an adopted server | 5.18, "Not started by cezar" in the URL field | Stop server disabled with the reason. |
 | Typed URL fails | Chromium's error page inside the frame | none |
 | Invalid client message | Dropped, logged once per connection | none |
@@ -251,7 +251,7 @@ Each is a typed `state` message; the toolbar never moves.
   `DevToolsActivePort` parsing; frame backpressure against a fake CDP; the input whitelist through
   the contract schemas; the supervisor with a small Node script as the dev server; one test per row
   of the lifecycle table with fake timers; boot sweep pid reuse; port collision and adoption; Open on a registration that answered at
-  registration but is silent now yields `needs_approval` and spawns nothing until `run`; touch
+  registration but is silent now yields `needs-approval` and spawns nothing until `run`; touch
   tap and swipe mapping; every
   tool result code including its hint; the upgrade dispatcher (bus path unchanged, preview path
   routed, unknown destroyed, untrusted refused); flag off removes tool, tool route, WebSocket and
