@@ -144,10 +144,10 @@ function AutomationCard({ automation, timeZone, note, busy, onRun, onToggle, onP
       <div className="mt-4 flex flex-wrap gap-2">
         <Button variant="outline" asChild><Link to={`/automations/${automation.id}`}>Edit</Link></Button>
         <Button variant="outline" asChild><Link to={`/automations/${automation.id}/log`}>Execution log</Link></Button>
-        <Button variant="outline" disabled={busy} onClick={onToggle}>{automation.enabled ? 'Pause' : 'Enable'}</Button>
+        <Button variant="outline" data-slot="automation-toggle" disabled={busy} onClick={onToggle}>{automation.enabled ? 'Pause' : 'Enable'}</Button>
         {isSchedule
-          ? <Button variant="outline" disabled={busy} onClick={onRun}>Run now</Button>
-          : <Button variant="outline" disabled={busy} onClick={onPreview}>Test filter</Button>}
+          ? <Button variant="outline" data-slot="automation-run" disabled={busy} onClick={onRun}>Run now</Button>
+          : <Button variant="outline" data-slot="automation-preview" disabled={busy} onClick={onPreview}>Test filter</Button>}
       </div>
       {note ? (
         <p role={note.tone === 'error' ? 'alert' : 'status'} className={cn('mt-3 text-sm break-words', note.tone === 'error' ? 'text-destructive' : 'text-muted-foreground')}>

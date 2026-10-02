@@ -163,6 +163,18 @@ describe('iOS sweep — every primary view at 390×844', () => {
     sweep('github', '/github?filter=all', '[data-slot="gh-header"]')
   })
 
+  // Automations are opt-in (#801) and the shared environment runs without the flag, so these two
+  // sweep whichever state the live health payload reports: the editor and list when enabled, the
+  // "Automations are off" state otherwise. The opted-in editor at 390 px (GitHub segment disabled,
+  // one-column form) is asserted in automations.e2e.ts on its own fixture server.
+  it('/automations', () => {
+    sweep('automations', '/automations', '[data-route="automations"] h1, [data-route="automations"] [data-slot="centered-state"]')
+  })
+
+  it('/automations/new', () => {
+    sweep('automations-editor', '/automations/new', 'form.automation-editor, [data-route="automations"] [data-slot="centered-state"]')
+  })
+
   it('/workflows (builder)', () => {
     sweep('workflows', '/workflows', '[data-slot="wb-main"]')
   })

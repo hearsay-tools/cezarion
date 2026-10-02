@@ -55,6 +55,9 @@ export function AutomationsRoute({ mode = 'list' }: { mode?: 'list' | 'new' | 'e
   const saved = () => { navigate('/automations'); void refresh() }
   const found = data?.automations.find((item) => item.id === automationId)
 
+  // The list owns its loading and error states, so it renders before the data guard below.
+  if (mode === 'list') return <AutomationsList data={data} error={error} refresh={refresh} />
+
   // The editor and the log read the forge and the zone from the list, so they wait for it too. A
   // failed REFRESH with data already in hand must not tear the screen down under an open draft.
   if (!data) {

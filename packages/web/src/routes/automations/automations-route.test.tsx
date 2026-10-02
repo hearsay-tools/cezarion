@@ -104,3 +104,11 @@ it('keeps the typed name when another cockpit bumps the revision, and drops it o
   fireEvent.click(await screen.findByRole('button', { name: 'Reload' }))
   await waitFor(() => expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Edited elsewhere name'))
 })
+
+it('renders the automations list at /automations', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => json(listBody)))
+  mountAt('/automations', 'list')
+  expect(await screen.findByText('Saved trigger')).not.toBeNull()
+  expect(screen.getByRole('link', { name: 'New automation' })).not.toBeNull()
+  expect(screen.queryByText('Automation not found.')).toBeNull()
+})
