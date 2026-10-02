@@ -2,6 +2,8 @@ import { useId, useMemo } from 'react'
 import { queryScope } from '@open-mercato/cezar-api-client'
 
 import { useProjectRuns } from '@/api/queries'
+import { StatusDot } from '@/components/status-dot'
+import { deriveAttention } from '@/lib/attention'
 import { Button } from '@/components/ui/button'
 import { Link } from '@/lib/project-router'
 import { runTitle } from '@/lib/task-groups'
@@ -35,21 +37,24 @@ export function IssueLinkedTasks({ number, repo }: { number: number; repo?: stri
       ) : null}
       {tasks.length > 0 ? (
         <ul className="mt-2 flex flex-col gap-1">
-          {tasks.map((task) => (
-            <li key={task.id}>
-              <Link
-                to={`/tasks/${encodeURIComponent(task.id)}`}
-                className="flex min-h-11 min-w-0 flex-col justify-center gap-1 rounded-md px-2 py-2 hover:bg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-              >
-                <span className="text-sm font-medium break-words [overflow-wrap:anywhere]">{runTitle(task)}</span>
-                <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-                  <span>{task.status}</span>
-                  {task.archived ? <span className="rounded border border-border px-1">Archived</span> : null}
-                  <time dateTime={task.createdAt}>{new Date(task.createdAt).toLocaleDateString()}</time>
-                </span>
-              </Link>
-            </li>
-          ))}
+          {tasks.map((task) => {
+            const attention = deriveAttention(task)
+            return (
+              <li key={task.id}>
+                <Link
+                  to={`/tasks/${encodeURIComponent(task.id)}`}
+                  className="flex min-h-11 min-w-0 flex-col justify-center gap-1 rounded-md px-2 py-2 hover:bg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                >
+                  <span className="text-sm font-medium break-words [overflow-wrap:anywhere]">{runTitle(task)}</span>
+                  <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                    <StatusDot tone={attention.tone} shape={attention.shape} pulse={attention.pulse} role="img" aria-label={attention.label} title={attention.label} />
+                    {task.archived ? <span className="rounded border border-border px-1">Archived</span> : null}
+                    <time dateTime={task.createdAt}>{new Date(task.createdAt).toLocaleDateString()}</time>
+                  </span>
+                </Link>
+              </li>
+            )
+          })}
         </ul>
       ) : null}
     </section>
