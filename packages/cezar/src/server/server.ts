@@ -182,7 +182,7 @@ import {
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { mergeWriteWorkspaceUiState, readWorkspaceUiState } from '../workspace/ui-state.ts';
 import { checkoutRepo, type CloneRunner } from './checkout.ts';
-import { armPreview, ProjectContextError, ProjectContexts, type ProjectContext } from './project-context.ts';
+import { armPreview, ProjectContextError, ProjectContexts, sweepRegisteredPreviewLeftovers, type ProjectContext } from './project-context.ts';
 import { reviewGateEnabled } from '../runs/review-gate.ts';
 import { readUiState, uiStatePath } from '../ui-state.ts';
 import { agentHomePaths, expandTilde } from '../paths.ts';
@@ -6222,6 +6222,8 @@ export function startServer(deps: ServerDeps, port: number): ServerType & { shut
       const all = projects.some((project) => project.root === deps.repoRoot)
         ? projects : [{ id: deps.bootProjectId ?? 'default', root: deps.repoRoot, status: 'ok' as const }, ...projects];
       coordinator.start(all);
+      // #781: every registered project's preview leftovers, not only the boot project's.
+      void sweepRegisteredPreviewLeftovers(all, deps.previewHost).catch(() => 0);
       // #801: with automations off there is nothing to warm — no remote to resolve, no receipts
       // to reconcile, and above all no scheduler to start. The skills-update coordinator above is
       // a separate feature and starts either way.
@@ -6248,7 +6250,7 @@ export function startServer(deps: ServerDeps, port: number): ServerType & { shut
     unsubscribe(); coordinator.stop(); automationScheduler.stop(); sharedContexts.disposeAll(); void deps.delegation?.close();
     socketHub.close();
     previewSocket.close();
-    void deps.previewHost?.close();
+    void deps.previewHost?.close().catch(() => undefined);
   });
   // The one `upgrade` listener: the subscription bus and the preview pane's socket (#781).
   attachUpgradeRouter(server, [socketHubRoute(socketHub, (req) => verifyWsUpgrade(req, deps.bindHost)), previewSocket.route]);
@@ -6257,7 +6259,8 @@ export function startServer(deps: ServerDeps, port: number): ServerType & { shut
     deps.store.flush();
     socketHub.close();
     // Dev servers run in their own process groups: they outlive cezar unless stopped here.
-    await deps.previewHost?.close();
+    // A failed release must not abort the restart halfway, with the store flushed and the port still bound.
+    await deps.previewHost?.close().catch(() => undefined);
     previewSocket.close();
     await deps.delegation?.close();
     await new Promise<void>((resolve) => {

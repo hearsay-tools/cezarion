@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path';
 import type { PreviewServer } from '@open-mercato/cezar-contract';
 import { buildCommandEnv } from '../core/agent-env.ts';
 import { processStartToken, recordedProcessLive } from '../delegation/process-liveness.ts';
+import { CHROMIUM_PID_FILE } from './chromium.ts';
 
 /**
  * Supervisor for one cezar-owned dev server (#781, spec 2026-10-02-live-preview-v1): spawn the
@@ -54,6 +55,15 @@ function signalGroup(pgid: number, signal: 'SIGTERM' | 'SIGKILL'): boolean {
 function groupAlive(pgid: number): boolean {
   if (process.platform === 'win32') return false;
   try { process.kill(-pgid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code === 'EPERM'; }
+}
+
+/** SIGTERM one process, SIGKILL it if it is still there after the grace period. */
+async function terminatePid(pid: number): Promise<void> {
+  try { process.kill(pid, 'SIGTERM'); } catch { return; }
+  const alive = () => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  const deadline = Date.now() + KILL_GRACE_MS;
+  while (alive() && Date.now() < deadline) await sleep(50);
+  if (alive()) { try { process.kill(pid, 'SIGKILL'); } catch { /* gone meanwhile */ } }
 }
 
 /** SIGTERM the group, SIGKILL whatever is still there after the grace period. */
@@ -240,13 +250,15 @@ export class DevServer extends EventEmitter {
 }
 
 /**
- * Boot sweep: a crashed cezar leaves pid records behind. Kill a record's group only when its
- * leader is still the process we started (pid AND an exactly matching start token), so a reused
- * pid is never hit; a missing or unreadable token means skip.
- * The record goes either way, except one `keep` claims: a server the live host still runs.
- * Returns how many groups were killed.
+ * Boot sweep: a crashed cezar leaves pid records behind, `<port>.pid.json` for each dev server and
+ * `chromium.pid.json` for the task's browser. Kill only when the recorded pid is still the process
+ * we started (an exactly matching start token), so a reused pid is never hit; a missing or
+ * unreadable token means skip. A dev server's whole group goes; Chromium shares cezar's group, so
+ * only its pid is signalled.
+ * The record goes either way, except one `keep` claims: a server or browser the live host still runs.
+ * Returns how many processes were killed.
  */
-export async function sweepPreviewLeftovers(dataDir: string, opts: { keep?: (runId: string, port: number) => boolean } = {}): Promise<number> {
+export async function sweepPreviewLeftovers(dataDir: string, opts: { keep?: (runId: string, what: number | 'browser') => boolean } = {}): Promise<number> {
   const root = join(dataDir, 'preview');
   if (!existsSync(root)) return 0;
   const kills: Promise<void>[] = [];
@@ -254,20 +266,21 @@ export async function sweepPreviewLeftovers(dataDir: string, opts: { keep?: (run
     if (!run.isDirectory()) continue;
     for (const file of readdirSync(join(root, run.name))) {
       if (!file.endsWith('.pid.json')) continue;
-      if (opts.keep?.(run.name, Number(file.slice(0, -'.pid.json'.length)))) continue;
+      const what = file === CHROMIUM_PID_FILE ? 'browser' : Number(file.slice(0, -'.pid.json'.length));
+      if (opts.keep?.(run.name, what)) continue;
       const path = join(root, run.name, file);
       let record: unknown;
       try { record = JSON.parse(readFileSync(path, 'utf8')); } catch { /* unreadable: nothing to kill */ }
       rmSync(path, { force: true });
       const { pid, pgid, startToken } = (record ?? {}) as { pid?: unknown; pgid?: unknown; startToken?: unknown };
-      if (typeof pid !== 'number' || typeof pgid !== 'number' || typeof startToken !== 'string') continue;
+      if (typeof pid !== 'number' || typeof startToken !== 'string') continue;
       // A dev server leads its own group. The token verifies the pid only, so a record naming
       // another group is not one cezar wrote, and that group is never signalled.
-      if (pgid !== pid) continue;
+      if (what !== 'browser' && pgid !== pid) continue;
       // `recordedProcessLive` answers "alive" on any uncertainty; a kill needs an exact token match,
       // so a record without a token, or a pid whose token cannot be read now, is skipped.
       if (!recordedProcessLive({ pid, startToken }) || processStartToken(pid) !== startToken) continue;
-      kills.push(terminateGroup(pgid));
+      kills.push(what === 'browser' ? terminatePid(pid) : terminateGroup(pid));
     }
   }
   await Promise.all(kills);

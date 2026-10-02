@@ -363,6 +363,50 @@ describe('sweepPreviewLeftovers', () => {
     expect(existsSync(malformed)).toBe(false);
   });
 
+  describe("a task's Chromium (chromium.pid.json)", () => {
+    // Chromium is not detached: it shares cezar's process group, so only its pid may be signalled.
+    function strayBrowser(): ChildProcess {
+      const child = spawn(process.execPath, [FIXTURE, '--port', '0', '--delay', '600000'], { stdio: 'ignore' });
+      strays.push(child);
+      return child;
+    }
+    function writeBrowserRecord(runId: string, record: unknown): string {
+      const dir = join(root, 'preview', runId);
+      mkdirSync(dir, { recursive: true });
+      const path = join(dir, 'chromium.pid.json');
+      writeFileSync(path, JSON.stringify(record));
+      return path;
+    }
+
+    it('kills the recorded pid, never its group, and deletes the record', async () => {
+      const child = strayBrowser();
+      const pid = child.pid!;
+      const record = writeBrowserRecord('run-h', { pid, startToken: processStartToken(pid) });
+      expect(await sweepPreviewLeftovers(root)).toBe(1);
+      await exited(child);
+      expect(existsSync(record)).toBe(false);
+    });
+
+    it('spares a browser the live host owns, and keeps its record', async () => {
+      const child = strayBrowser();
+      const pid = child.pid!;
+      const record = writeBrowserRecord('run-i', { pid, startToken: processStartToken(pid) });
+      const keep = vi.fn((runId: string, what: number | 'browser') => runId === 'run-i' && what === 'browser');
+      expect(await sweepPreviewLeftovers(root, { keep })).toBe(0);
+      expect(() => process.kill(pid, 0)).not.toThrow();
+      expect(existsSync(record)).toBe(true);
+    });
+
+    it('skips a reused pid (another start token) but deletes the record', async () => {
+      const child = strayBrowser();
+      const pid = child.pid!;
+      const record = writeBrowserRecord('run-j', { pid, startToken: 'another-incarnation' });
+      expect(await sweepPreviewLeftovers(root)).toBe(0);
+      expect(() => process.kill(pid, 0)).not.toThrow();
+      expect(existsSync(record)).toBe(false);
+    });
+  });
+
   it('returns 0 when there is no preview directory', async () => {
     expect(await sweepPreviewLeftovers(join(root, 'absent'))).toBe(0);
   });

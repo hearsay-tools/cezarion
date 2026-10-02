@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { processStartToken } from '../delegation/process-liveness.ts';
 import {
   ChromiumError,
   chromiumArgs,
@@ -404,6 +405,26 @@ setInterval(()=>{},1000);`,
     } finally {
       proc.kill();
     }
+  });
+
+  it.skipIf(!posix)('records the pid with its start token beside the profile, and drops the record when Chromium exits', async () => {
+    const bin = script(
+      'fake-chrome-pid',
+      `const fs=require('fs');const path=require('path');
+const arg=process.argv.find(a=>a.startsWith('--user-data-dir='));
+fs.writeFileSync(path.join(arg.split('=')[1],'DevToolsActivePort'),'41235\\n/devtools/browser/abc\\n');
+setInterval(()=>{},1000);`,
+    );
+    const record = join(dir, 'chromium.pid.json');
+    const { proc } = await launchChromium(bin, join(dir, 'profile'), {});
+    const exited = new Promise(resolve => proc.once('exit', resolve));
+    try {
+      expect(JSON.parse(readFileSync(record, 'utf8'))).toEqual({ pid: proc.pid, startToken: processStartToken(proc.pid!) });
+    } finally {
+      proc.kill();
+    }
+    await exited;
+    expect(existsSync(record)).toBe(false);
   });
 
   it.skipIf(!posix)('does not trust a DevToolsActivePort left by an earlier launch', async () => {

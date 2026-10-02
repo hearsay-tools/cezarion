@@ -109,6 +109,17 @@ describe('PreviewHost', () => {
     expect(browsers).toHaveLength(0);
   });
 
+  it('owns a run\'s browser from launch until it is closed, so the boot sweep spares it', async () => {
+    const { host, ctx } = make([server(5173, { answeredAtRegistration: true })]);
+    expect(host.ownsBrowser('run-1')).toBe(false);
+    const viewer = fakeViewer();
+    await host.open(ctx, viewer, { url: 'http://localhost:3000/' });
+    await flush();
+    expect(host.ownsBrowser('run-1')).toBe(true);
+    await host.release('run-1');
+    expect(host.ownsBrowser('run-1')).toBe(false);
+  });
+
   it('spawns only on run, and streams the server once it is up', async () => {
     const { host, ctx, devServers, browsers, store } = make([server(5173, { path: '/admin' })]);
     const viewer = fakeViewer();

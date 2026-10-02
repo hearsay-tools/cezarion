@@ -279,6 +279,12 @@ export class PreviewHost implements PreviewHostLike {
     return live(this.entries.get(runId)?.servers.get(port));
   }
 
+  /** Whether this host runs the run's Chromium (`<runId>/chromium.pid.json`): the sweep spares it. */
+  ownsBrowser(runId: string): boolean {
+    const entry = this.entries.get(runId);
+    return entry !== undefined && (entry.browser !== undefined || entry.launching !== undefined);
+  }
+
   probe(port: number): Promise<boolean> {
     return this.deps.probe(port);
   }

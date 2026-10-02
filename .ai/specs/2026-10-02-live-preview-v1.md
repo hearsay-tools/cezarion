@@ -199,7 +199,7 @@ Every state has an exit that is on by default.
 | Dev server (adopted) | probed only | Never killed by cezar. A port that stops answering shows the `needs_approval` state with Run and open. |
 | Chromium | `launching`, `ready`, `streaming` | 2 min after the last viewer left, Chromium exits (→ "browser exited", manual Retry only; no automatic relaunch, so a page that crashes Chromium cannot loop), the run is deleted, cezar shuts down. |
 | Viewer | connected | Socket close, replaced by another tab (old tab gets `replaced`, renders 5.12), missed pings, cezar shuts down. |
-| Leftovers after a crash | pid records on disk | Boot sweep: kill the process group only when the pid is alive **and** its `startToken` matches (`delegation/process-liveness.ts`), so a reused pid is never killed. |
+| Leftovers after a crash | pid records on disk: `<port>.pid.json` per dev server, `chromium.pid.json` per task browser | Boot sweep of every registered project's data dir, once per process: kill only when the pid is alive **and** its `startToken` matches (`delegation/process-liveness.ts`), so a reused pid is never killed. A dev server's whole group goes; Chromium shares cezar's group, so only its pid. What the live host runs is spared, and a data dir another live cockpit owns is skipped (its context build sweeps it later, after taking ownership). |
 
 Exit triggers:
 

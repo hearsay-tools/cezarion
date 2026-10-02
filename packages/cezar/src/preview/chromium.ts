@@ -1,10 +1,11 @@
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { mkdir, open, rename, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { delimiter, join } from 'node:path';
+import { delimiter, dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { z } from 'zod';
+import { processStartToken } from '../delegation/process-liveness.ts';
 
 /**
  * The preview's Chromium: find one, download Chrome for Testing when there is none, launch it
@@ -316,8 +317,15 @@ export function chromiumArgs(profileDir: string, env: NodeJS.ProcessEnv): string
 }
 
 /**
+ * The task's Chromium pid record, `<runDir>/chromium.pid.json` beside its profile: `{ pid, startToken }`.
+ * A crashed cezar leaves the browser running; the boot sweep kills it by this record (#781).
+ */
+export const CHROMIUM_PID_FILE = 'chromium.pid.json';
+
+/**
  * Starts headless Chromium on a loopback DevTools port of its choosing and resolves once it has
- * written `DevToolsActivePort` into the profile. Failure kills the process and says why.
+ * written `DevToolsActivePort` into the profile. Failure kills the process and says why. While it
+ * runs, `CHROMIUM_PID_FILE` in the profile's parent names it.
  */
 export async function launchChromium(
   bin: string,
@@ -331,6 +339,17 @@ export async function launchChromium(
   rmSync(portFile, { force: true });
 
   const proc = spawn(bin, chromiumArgs(profileDir, env), { stdio: ['ignore', 'ignore', 'pipe'] });
+  const pid = proc.pid;
+  if (pid !== undefined) {
+    const record = join(dirname(profileDir), CHROMIUM_PID_FILE);
+    writeFileSync(record, JSON.stringify({ pid, startToken: processStartToken(pid) }), { mode: 0o600 });
+    proc.once('exit', () => {
+      try {
+        if ((JSON.parse(readFileSync(record, 'utf8')) as { pid?: unknown }).pid !== pid) return;
+      } catch { /* gone or unreadable: nothing of ours to keep */ }
+      rmSync(record, { force: true });
+    });
+  }
   let tail = Buffer.alloc(0);
   proc.stderr?.on('data', (chunk: Buffer) => {
     tail = Buffer.concat([tail, chunk]).subarray(-STDERR_TAIL_BYTES);

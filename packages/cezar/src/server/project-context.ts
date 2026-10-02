@@ -12,7 +12,7 @@ import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { RunManager } from '../workflows/run.ts';
 import { ensureLaunchKey } from './launch-key.ts';
 import { getRepoInfo } from './git.ts';
-import type { CockpitOwnership } from './cockpit-ownership.ts';
+import { ownedByAnotherCockpit, type CockpitOwnership } from './cockpit-ownership.ts';
 
 /**
  * Per-project server context (spec 2026-07-20-multi-project-workspace,
@@ -83,20 +83,47 @@ export interface ProjectContextDeps {
 /** Data dirs this process has swept: the sweep cleans up after a crashed cezar, never this one. */
 const sweptPreviewDirs = new Set<string>();
 
+/** One data dir's crash leftovers, once per process; whatever the live host runs is spared. */
+function sweepPreviewOnce(dataDir: string, host: PreviewHost | undefined): Promise<number> {
+  if (sweptPreviewDirs.has(dataDir)) return Promise.resolve(0);
+  sweptPreviewDirs.add(dataDir);
+  const keep = host
+    ? (runId: string, what: number | 'browser') => (what === 'browser' ? host.ownsBrowser(runId) : host.ownsServer(runId, what))
+    : undefined;
+  return sweepPreviewLeftovers(dataDir, { keep }).catch(() => 0);
+}
+
 /**
  * A project's preview exits that the store drives (#781, spec 2026-10-02-live-preview-v1):
- * dev servers a crashed cezar left behind are swept once per data dir per process (always, so
- * turning the flag off after a crash still cleans up; a project removed and re-added is not swept
- * again, and a server the live host runs is spared either way), and a deleted run's preview is
- * released with its profile.
+ * dev servers and browsers a crashed cezar left behind are swept once per data dir per process
+ * (always, so turning the flag off after a crash still cleans up; a project removed and re-added
+ * is not swept again, and what the live host runs is spared either way), and a deleted run's
+ * preview is released with its profile.
  */
 export function armPreview(store: RunStore, dataDir: string, host: PreviewHost | undefined): void {
-  if (!sweptPreviewDirs.has(dataDir)) {
-    sweptPreviewDirs.add(dataDir);
-    const keep = host ? (runId: string, port: number) => host.ownsServer(runId, port) : undefined;
-    void sweepPreviewLeftovers(dataDir, { keep }).catch(() => 0);
+  void sweepPreviewOnce(dataDir, host);
+  if (host) store.on('deleted', (runId: string) => void host.release(runId, { deleteProfile: true, dataDir }).catch(() => undefined));
+}
+
+/**
+ * Boot: the crash leftovers of every registered project, not only the boot project's, so a dev
+ * server left in a project nobody opens this session does not hold its port all session. A data
+ * dir another live cockpit owns holds that cockpit's servers, not a crash's: it is skipped and
+ * left unswept, so this process's own context build (which takes ownership first) sweeps it if
+ * that cockpit goes. Resolves with how many processes were killed.
+ */
+export async function sweepRegisteredPreviewLeftovers(
+  projects: ReadonlyArray<{ root: string; status?: string }>,
+  host: PreviewHost | undefined,
+): Promise<number> {
+  let killed = 0;
+  for (const project of projects) {
+    if (project.status === 'missing') continue;
+    const dataDir = join(project.root, '.ai/cezar');
+    if (sweptPreviewDirs.has(dataDir) || ownedByAnotherCockpit(dataDir)) continue;
+    killed += await sweepPreviewOnce(dataDir, host);
   }
-  if (host) store.on('deleted', (runId: string) => void host.release(runId, { deleteProfile: true, dataDir }));
+  return killed;
 }
 
 export type ProjectContextFailure = 'unknown-project' | 'missing-root';
