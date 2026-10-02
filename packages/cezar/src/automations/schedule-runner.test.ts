@@ -1,4 +1,4 @@
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -301,6 +301,54 @@ describe('ScheduleRunner', () => {
     expect(launch).not.toHaveBeenCalled();
     expect(store.latestReceipts().size).toBe(0);
     expect(store.state('nightly')?.nextRunAt).toBe(iso(FIRST_RUN));
+  });
+
+  it('the third failure does not resurrect a definition another process deleted during the launch', async () => {
+    const { dir, store, definition, runner, launch, clock } = await setup();
+    runner.dueAt(definition);
+    store.setState('nightly', (current) => ({ ...current, consecutiveFailures: 2 }));
+    launch.mockImplementationOnce(async () => {
+      AutomationStore.open(dir, { now: () => new Date(clock.now()) }).delete('nightly');
+      throw new Error('boom');
+    });
+    clock.set(FIRST_RUN + 1_000);
+    expect(await runner.fire(definition)).toMatchObject({ result: 'failed' });
+    const file = JSON.parse(readFileSync(join(dir, 'automations.json'), 'utf8'));
+    expect(file.automations).toEqual([]);
+    expect(store.get('nightly')).toBeUndefined();
+    expect(store.logs({ automationId: 'nightly' }).some((row) => row.reason?.startsWith('Paused after'))).toBe(false);
+  });
+
+  it('the third failure pauses the current on-disk revision when another process edited it during the launch', async () => {
+    const { dir, store, definition, runner, launch, clock } = await setup();
+    runner.dueAt(definition);
+    store.setState('nightly', (current) => ({ ...current, consecutiveFailures: 2 }));
+    launch.mockImplementationOnce(async () => {
+      AutomationStore.open(dir, { now: () => new Date(clock.now()) })
+        .update('nightly', 1, { name: 'Nightly (edited elsewhere)', enabled: true, kind: 'schedule', schedule: definition.schedule, task: { prompt: 'Bump deps, then lint' } });
+      throw new Error('boom');
+    });
+    clock.set(FIRST_RUN + 1_000);
+    expect(await runner.fire(definition)).toMatchObject({ result: 'failed' });
+    const file = JSON.parse(readFileSync(join(dir, 'automations.json'), 'utf8'));
+    expect(file.automations).toEqual([expect.objectContaining({ id: 'nightly', name: 'Nightly (edited elsewhere)', task: { prompt: 'Bump deps, then lint' }, enabled: false, revision: 3 })]);
+    expect(store.logs({ automationId: 'nightly' })[0]).toMatchObject({ result: 'failed', revision: 3, reason: expect.stringContaining('Paused after 3') });
+  });
+
+  it('the third failure leaves a definition another process paused during the launch alone', async () => {
+    const { dir, store, definition, runner, launch, clock } = await setup();
+    runner.dueAt(definition);
+    store.setState('nightly', (current) => ({ ...current, consecutiveFailures: 2 }));
+    launch.mockImplementationOnce(async () => {
+      AutomationStore.open(dir, { now: () => new Date(clock.now()) })
+        .update('nightly', 1, { name: 'Nightly', enabled: false, kind: 'schedule', schedule: definition.schedule, task: definition.task });
+      throw new Error('boom');
+    });
+    clock.set(FIRST_RUN + 1_000);
+    expect(await runner.fire(definition)).toMatchObject({ result: 'failed' });
+    const file = JSON.parse(readFileSync(join(dir, 'automations.json'), 'utf8'));
+    expect(file.automations).toEqual([expect.objectContaining({ id: 'nightly', enabled: false, revision: 2 })]);
+    expect(store.logs({ automationId: 'nightly' }).some((row) => row.reason?.startsWith('Paused after'))).toBe(false);
   });
 
   it('the third failure pauses the current revision when the definition was edited during the launch', async () => {

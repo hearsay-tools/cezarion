@@ -273,12 +273,14 @@ export class ScheduleRunner {
 
   /**
    * Pauses the CURRENT revision, not the one this fire started with: the definition may have been
-   * edited while the launch ran, and pausing the stale copy would either conflict or revert the
-   * edit. Already paused (or deleted) by then: nothing to do.
+   * edited while the launch ran — here or in another cockpit, hence the re-read — and the failure
+   * count belongs to the automation, not to a revision. Pausing the stale copy would either
+   * conflict or revert the edit. Already paused, deleted or no longer a schedule: nothing to do.
    */
   private pause(id: string): ScheduleAutomationDefinition | undefined {
+    this.handle.store.reload();
     const current = this.handle.store.get(id);
-    if (!current?.enabled) return undefined;
+    if (!current?.enabled || current.kind !== 'schedule') return undefined;
     const { revision, createdAt: _c, updatedAt: _u, id: _id, ...editable } = current;
     try {
       return this.handle.store.update(id, revision, { ...editable, enabled: false }) as ScheduleAutomationDefinition;
