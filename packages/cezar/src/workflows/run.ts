@@ -1452,7 +1452,8 @@ export class RunManager {
         enabled: previewToolEnabled(),
         headless: !this.preview,
       });
-      return { ...result, answer: () => previewResult(result.code, { ...parsed, ownerTitle: owner?.title }) };
+      const withoutWorktree = !!run && !run.worktreePath;
+      return { ...result, answer: () => previewResult(result.code, { ...parsed, ownerTitle: owner?.title, withoutWorktree }) };
     };
     const first = validate();
     if (!first.server || !this.preview) return first.answer();

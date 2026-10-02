@@ -125,4 +125,34 @@ describe('RunManager.registerPreviewServer (#781)', { timeout: 30_000 }, () => {
     expect(await register({ command: 'npm run dev', port: 5173 })).toMatchObject({ ok: false, code: 'headless' });
     expect(store.getRun(record.id)?.previewServers).toBeUndefined();
   });
+
+  it('tells a run that never had a worktree that preview is unavailable for it, not that it was removed', async () => {
+    const provision = vi.spyOn(CiToolController.prototype, 'provision');
+    const record = manager!.startRun(QUICK_TASK_WORKFLOW, { task: 'build the members page', worktree: false });
+    const register = await callbackAt(provision, 0);
+    expect(store.getRun(record.id)?.worktreePath).toBeUndefined();
+    expect(await register({ command: 'npm run dev', port: 5173 })).toEqual({
+      ok: false,
+      code: 'worktree_missing',
+      message: 'This task runs without its own worktree, so live preview is not available.',
+      hint: 'Do not retry. Report the command and port in your final message.',
+    });
+    expect(store.getRun(record.id)?.previewServers).toBeUndefined();
+  });
+
+  it('tells a run whose worktree was removed that it no longer exists', async () => {
+    const provision = vi.spyOn(CiToolController.prototype, 'provision');
+    const record = manager!.startRun(QUICK_TASK_WORKFLOW, { task: 'build the members page' });
+    const register = await callbackAt(provision, 0);
+    const worktreePath = store.getRun(record.id)?.worktreePath;
+    expect(worktreePath).toBeTruthy();
+    rmSync(worktreePath!, { recursive: true, force: true });
+    expect(await register({ command: 'npm run dev', port: 5173 })).toEqual({
+      ok: false,
+      code: 'worktree_missing',
+      message: 'This task\'s worktree no longer exists.',
+      hint: 'Do not retry.',
+    });
+    expect(store.getRun(record.id)?.previewServers).toBeUndefined();
+  });
 });

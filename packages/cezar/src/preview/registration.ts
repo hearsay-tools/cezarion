@@ -61,8 +61,12 @@ export function validateRegistration(input: PreviewRegistrationInput): { code: P
   return { code: replaced ? 'replaced' : 'registered', server };
 }
 
-/** What the agent called with, plus the holder's title for `port_held`. Never a path or an env value. */
-export type PreviewHintContext = { command: string; port: number; label?: string; ownerTitle?: string };
+/**
+ * What the agent called with, plus the holder's title for `port_held`. Never a path or an env value.
+ * `withoutWorktree` marks a run that never had a worktree (composer opt-out, non-Git directory):
+ * still `worktree_missing`, but not "no longer exists".
+ */
+export type PreviewHintContext = { command: string; port: number; label?: string; ownerTitle?: string; withoutWorktree?: boolean };
 
 const EXAMPLE_CALL = '{ "command": "npm run dev -- --port 5173 --strictPort", "port": 5173 }';
 
@@ -80,7 +84,7 @@ export function previewHint(code: PreviewResultCode, ctx: PreviewHintContext): s
       return `Task "${ctx.ownerTitle ?? 'another task'}" holds \`:${ctx.port}\`. Start your server on a free port (e.g. \`--port ${free} --strictPort\`) and register that port. Do not stop the other task's server.`;
     }
     case 'too_many': return 'Re-register an existing port to replace it instead of adding a new one.';
-    case 'worktree_missing': return 'Do not retry.';
+    case 'worktree_missing': return ctx.withoutWorktree ? 'Do not retry. Report the command and port in your final message.' : 'Do not retry.';
     case 'preview_disabled':
     case 'headless':
     case 'unavailable':
@@ -97,7 +101,7 @@ function previewMessage(code: PreviewResultCode, ctx: PreviewHintContext): strin
     case 'cezar_port': return `\`:${ctx.port}\` is cezar's own port.`;
     case 'port_held': return `\`:${ctx.port}\` is held by the dev server of task "${ctx.ownerTitle ?? 'another task'}".`;
     case 'too_many': return `This task already has ${PREVIEW_MAX_SERVERS} registered servers.`;
-    case 'worktree_missing': return 'This task\'s worktree no longer exists.';
+    case 'worktree_missing': return ctx.withoutWorktree ? 'This task runs without its own worktree, so live preview is not available.' : 'This task\'s worktree no longer exists.';
     case 'preview_disabled':
     case 'headless':
     case 'unavailable':

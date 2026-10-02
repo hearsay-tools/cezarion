@@ -73,6 +73,7 @@ the agent what to do next in one step, and says explicitly when not to retry.
 | `preview_disabled` | Live preview is not enabled in this cockpit. | Do not retry. Tell the user the server command and port so they can open it themselves. |
 | `headless` | No cockpit is attached to this run (`cez run`). | Do not retry. Report the command and port in your final message. |
 | `worktree_missing` | This task's worktree no longer exists. | Do not retry. |
+| `worktree_missing` (the run never had a worktree: composer opt-out, non-Git directory) | This task runs without its own worktree, so live preview is not available. | Do not retry. Report the command and port in your final message. |
 | `unavailable` | Cezar's tool server did not answer. | Retry once. If it fails again, continue without preview and report the command and port in your message. |
 
 Hints never contain secrets, environment values or other tasks' paths; the other task appears by

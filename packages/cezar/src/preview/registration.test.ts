@@ -79,6 +79,21 @@ describe('previewResult (#781)', () => {
     expect(previewResult('replaced', request)).toMatchObject({ ok: true, message: 'Replaced the registration for `:5173`.', hint: result.hint });
   });
 
+  it('distinguishes a run without a worktree from one whose worktree was removed', () => {
+    expect(previewResult('worktree_missing', { ...request, withoutWorktree: true })).toEqual({
+      ok: false,
+      code: 'worktree_missing',
+      message: 'This task runs without its own worktree, so live preview is not available.',
+      hint: 'Do not retry. Report the command and port in your final message.',
+    });
+    expect(previewResult('worktree_missing', request)).toEqual({
+      ok: false,
+      code: 'worktree_missing',
+      message: 'This task\'s worktree no longer exists.',
+      hint: 'Do not retry.',
+    });
+  });
+
   it('marks every refusal ok: false', () => {
     for (const code of ['cwd_outside_worktree', 'cezar_port', 'port_held', 'too_many', 'worktree_missing', 'headless'] as const) {
       expect(previewResult(code, { ...request, ownerTitle: 'Other' }).ok).toBe(false);
