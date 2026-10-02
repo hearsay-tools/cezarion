@@ -1,6 +1,7 @@
 // A stand-in dev server for the supervisor tests (#781): listens on a port after an optional delay,
 // optionally forks a child that holds the port (npm -> node -> vite), optionally prints N lines.
 //   --port N [--delay MS] [--host H] [--fork] [--lines N] [--exit-code C] [--stdin-eof]
+//   [--leader-exits] (with --fork: the leader exits once the holder listens) [--ignore-term] (the holder ignores SIGTERM)
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 import { fileURLToPath } from 'node:url';
@@ -22,9 +23,11 @@ if (flag('stdin-eof')) {
   process.stdin.on('end', () => { console.log('stdin-eof'); process.exit(0); });
 } else if (flag('fork') && !flag('holder')) {
   // Same process group as this process: a supervisor that kills only our pid leaves the holder up.
-  spawn(process.execPath, [fileURLToPath(import.meta.url), '--holder', '--port', String(port), '--delay', String(delay), '--host', host], { stdio: 'ignore' });
+  const holder = spawn(process.execPath, [fileURLToPath(import.meta.url), '--holder', '--port', String(port), '--delay', String(delay), '--host', host, ...(flag('ignore-term') ? ['--ignore-term'] : [])], { stdio: ['ignore', 'pipe', 'ignore'] });
+  if (flag('leader-exits')) holder.stdout.once('data', () => process.exit(3));
   setInterval(() => {}, 1 << 30);
 } else {
+  if (flag('ignore-term')) process.on('SIGTERM', () => {});
   setTimeout(() => createServer(socket => socket.end()).listen(port, host, () => console.log(`listening on ${host}:${port}`)), delay);
   setInterval(() => {}, 1 << 30);
 }

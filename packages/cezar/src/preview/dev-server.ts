@@ -123,7 +123,8 @@ export class DevServer extends EventEmitter {
   start(): void {
     if (this.child) return;
     mkdirSync(this.dir, { recursive: true });
-    trimLog(this.logPath);
+    // One log per start: after Start again, 5.8 must show this run's failure, not the last one's tail.
+    writeFileSync(this.logPath, '', { mode: 0o600 });
     const logFd = openSync(this.logPath, 'a');
     const cwd = resolve(this.worktreePath, this.server.cwd ?? '.');
     // stdin is closed: nobody can answer a prompt from the cockpit, so one fails fast into `exited` with its log.
@@ -143,9 +144,13 @@ export class DevServer extends EventEmitter {
       child.once('exit', (code) => {
         resolveExit();
         if (code !== null) this.exitCode = code;
-        // A leader that dies on its own can leave a forked server holding the port.
-        if (!this.stopping && child.pid !== undefined) signalGroup(child.pid, 'SIGTERM');
-        this.finish(this.stopping ? 'stopped' : 'exited');
+        const pid = child.pid;
+        if (this.stopping || pid === undefined) return this.finish(this.stopping ? 'stopped' : 'exited');
+        // A leader that dies on its own can leave a forked server holding the port. Reap the group
+        // the way a stop does (SIGKILL after the grace period, so a holder that ignores SIGTERM goes
+        // too), and keep the pid record until the group is gone: `stop()` is a no-op from here on.
+        this.finish('exited', { keepRecord: true });
+        void terminateGroup(pid).finally(() => this.removeRecord(pid));
       });
     });
     if (child.pid !== undefined) {
@@ -211,13 +216,21 @@ export class DevServer extends EventEmitter {
     }
   }
 
-  /** A terminal state: the process is gone, so timers and the pid record go with it. */
-  private finish(state: 'exited' | 'stopped'): void {
+  /** A terminal state: the process is gone, so timers and (unless its group is still being reaped) the pid record go with it. */
+  private finish(state: 'exited' | 'stopped', opts: { keepRecord?: boolean } = {}): void {
     if (this.state === 'exited' || this.state === 'stopped') return;
     this.endWaiting();
     clearInterval(this.logTimer);
-    rmSync(this.pidPath, { force: true });
+    if (!opts.keepRecord && this.child?.pid !== undefined) this.removeRecord(this.child.pid);
     this.setState(state);
+  }
+
+  /** Only our own record: a Start again on the same port may already have written its successor's. */
+  private removeRecord(pid: number): void {
+    try {
+      if ((JSON.parse(readFileSync(this.pidPath, 'utf8')) as { pid?: unknown }).pid !== pid) return;
+    } catch { /* missing or unreadable: nothing of ours to keep */ }
+    rmSync(this.pidPath, { force: true });
   }
 
   private setState(state: DevServerState): void {
@@ -248,6 +261,9 @@ export async function sweepPreviewLeftovers(dataDir: string, opts: { keep?: (run
       rmSync(path, { force: true });
       const { pid, pgid, startToken } = (record ?? {}) as { pid?: unknown; pgid?: unknown; startToken?: unknown };
       if (typeof pid !== 'number' || typeof pgid !== 'number' || typeof startToken !== 'string') continue;
+      // A dev server leads its own group. The token verifies the pid only, so a record naming
+      // another group is not one cezar wrote, and that group is never signalled.
+      if (pgid !== pid) continue;
       // `recordedProcessLive` answers "alive" on any uncertainty; a kill needs an exact token match,
       // so a record without a token, or a pid whose token cannot be read now, is skipped.
       if (!recordedProcessLive({ pid, startToken }) || processStartToken(pid) !== startToken) continue;

@@ -223,6 +223,29 @@ describe('DevServer', () => {
     }
   });
 
+  it('a leader that exits on its own takes its SIGTERM-ignoring holder with it, and keeps the pid record until the group is gone', async () => {
+    const port = await freePort();
+    const supervisor = supervise(port, ['--fork', '--leader-exits', '--ignore-term'], { probeMs: 50 });
+    supervisor.start();
+    const recordPath = join(root, 'preview', `${port}.pid.json`);
+    await until(() => supervisor.state === 'exited');
+    expect(supervisor.exitCode).toBe(3);
+    expect(existsSync(recordPath)).toBe(true);
+    await until(() => !existsSync(recordPath), 8_000);
+    expect(await probePort(port)).toBe(false);
+  }, 15_000);
+
+  it('Start again shows only the new run in the log tail', async () => {
+    const port = await freePort();
+    const first = supervise(port, ['--lines', '3', '--exit-code', '1'], { probeMs: 50 });
+    first.start();
+    await until(() => first.state === 'exited');
+    const again = supervise(port, ['--exit-code', '2'], { probeMs: 50 });
+    again.start();
+    await until(() => again.state === 'exited');
+    expect(again.logTail()).toEqual([]);
+  });
+
   it('stop is idempotent and safe after the process exited by itself', async () => {
     const port = await freePort();
     const supervisor = supervise(port, ['--exit-code', '2'], { probeMs: 50 });
@@ -318,6 +341,17 @@ describe('sweepPreviewLeftovers', () => {
       vi.mocked(processStartToken).mockRestore();
     }
     expect(() => process.kill(pid, 0)).not.toThrow();
+    expect(existsSync(record)).toBe(false);
+  });
+
+  it('skips a record whose pgid is not its verified pid, but deletes it', async () => {
+    const child = strayFixture();
+    const pid = child.pid!;
+    const other = strayFixture();
+    const record = writeRecord(root, 'run-f', 5180, { pid, pgid: other.pid!, startToken: processStartToken(pid) });
+    expect(await sweepPreviewLeftovers(root)).toBe(0);
+    expect(() => process.kill(pid, 0)).not.toThrow();
+    expect(() => process.kill(other.pid!, 0)).not.toThrow();
     expect(existsSync(record)).toBe(false);
   });
 
