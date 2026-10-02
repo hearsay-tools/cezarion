@@ -45,7 +45,7 @@ describe('RunManager.registerPreviewServer (#781)', { timeout: 30_000 }, () => {
   beforeEach(async () => {
     vi.stubEnv('CEZ_PREVIEW', '1');
     sessions.release.length = 0;
-    preview = { portOwner: () => undefined, probe: async () => false };
+    preview = { portOwner: () => undefined, probe: async () => false, release: async () => undefined };
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-preview-reg-'));
     await run('git', ['init', '-q', '-b', 'main'], { cwd: repoRoot });
     writeFileSync(join(repoRoot, 'a.txt'), 'one\n');

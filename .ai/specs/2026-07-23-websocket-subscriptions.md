@@ -6,7 +6,8 @@ server does the work behind a topic **only while someone is subscribed**. It rep
 per-tab `GET /api/health` poll (#369) and is the pattern every future live signal should use
 instead of a `refetchInterval`.
 
-- Server hub: `src/server/ws.ts` (built and attached in `src/server/server.ts` `startServer`).
+- Server hub: `src/server/ws.ts` (built in `src/server/server.ts` `startServer`, reached through
+  the upgrade router in `src/server/upgrade-router.ts`).
 - Frontend client: `web/app/src/api/ws.ts`.
 - First consumer: the `health` topic → `useHealth` in `web/app/src/api/queries.ts`.
 
@@ -52,6 +53,14 @@ bus is that a tab pays for exactly the streams it is looking at and **nothing el
   connection-budget reason as the SSE stream). Never open your own `new WebSocket` for a feature;
   add a topic and subscribe to it. N components subscribing to the same topic share **one**
   server-side publisher and **one** subscribe frame — the client ref-counts listeners per topic.
+
+  **Named exception: the live preview pane** (#781, spec `2026-10-02-live-preview-v1`,
+  `src/server/preview-socket.ts`). Its socket, `/api/v1/p/:projectId/runs/:id/preview/ws`,
+  carries one viewer's JPEG screencast frames and input for one run, lives only while that pane
+  is open, and requires a `trusted` upgrade. None of that fits a shared topic: frames are binary
+  and per viewer, and a topic's untrusted-readable mode must never apply to a task's page. Both
+  sockets share the server's one `upgrade` listener (`src/server/upgrade-router.ts`), which routes
+  by path and destroys every other upgrade. This is the only exception; anything else is a topic.
 - **Publish only on change.** A publisher must broadcast only when its payload actually changed
   (the `health` topic diffs the serialized snapshot before pushing). Re-broadcasting an unchanged
   value is exactly the bloat this design exists to prevent — it wakes every subscriber's reducer
@@ -123,8 +132,9 @@ deps.socketHub?.registerTopic('my-topic', {
 Rules: publish **only on change**; make `start`/stop symmetric (whatever `start` opens, the
 returned function must close); keep `snapshot` cheap (cache if it is not — see the `health` cache
 in `server.ts`). Topic names carry workspace-level data, so the hub is single-mount on `/api/ws`
-and never mirrored under `/api/p/:projectId`. `attach` is boot-time wiring like `registerTopic`:
-calling it twice throws rather than silently orphaning the first heartbeat interval.
+and never mirrored under `/api/p/:projectId`. The hub never listens on the HTTP server itself:
+`socketHubRoute` is its route in the one upgrade router (#781), and the hub starts its heartbeat
+on the first upgrade, so a hub nobody connects to holds no timer.
 
 A third argument controls who may read the topic — and its default is the safe one:
 
@@ -232,7 +242,8 @@ A dropped connection must not leave a publisher running server-side or a stale s
 - `src/server/ws.test.ts` drives the hub over real sockets: publisher start/stop on the
   subscriber count, broadcast fan-out, unknown/malformed frames, the 403 pre-handshake rejection,
   the app-level heartbeat, reaping a client that stops answering the protocol ping
-  (`autoPong: false`), and the double-`attach` throw. `verifyWsUpgrade` has its own unit table —
+  (`autoPong: false`). `src/server/upgrade-router.test.ts` pins the dispatcher: the bus path
+  still reaches the hub, the preview path its handler, anything else is destroyed. `verifyWsUpgrade` has its own unit table —
   which controls `CEZ_REMOTE`, because the guard's whole Host half is skipped in hosted mode and
   an ambient var on the dev box must not decide what the table sees.
 - `src/server/health-topic.test.ts` covers the **live-server** path — the one `createApp` only

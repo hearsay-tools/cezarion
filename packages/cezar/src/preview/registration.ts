@@ -10,12 +10,14 @@ import { previewRefusal } from '../ci-wait/errors.ts';
 
 export const PREVIEW_MAX_SERVERS = 8;
 
-/** What registration needs from the workspace-wide preview host; `PreviewHost` implements it. */
+/** What the run manager needs from the workspace-wide preview host; `PreviewHost` implements it. */
 export interface PreviewHostLike {
   /** The task whose dev server holds `port`, across every project. */
   portOwner(port: number): { runId: string; title: string } | undefined;
   /** One TCP probe: does anything answer on `port` now? */
   probe(port: number): Promise<boolean>;
+  /** The run's worktree is going: stop its servers and close its browser. */
+  release(runId: string): Promise<void>;
 }
 
 export type PreviewRegistrationInput = {

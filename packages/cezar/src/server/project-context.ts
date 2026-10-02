@@ -3,6 +3,8 @@ import { AutomationStore } from '../automations/store.ts';
 import { reconcileAutomationReceipts } from '../automations/task-template.ts';
 import { DEFAULT_WORKTREE_RETENTION, resolveWorktreeRetention } from '../config.ts';
 import { pruneOrphans } from '../git-worktree.ts';
+import { sweepPreviewLeftovers } from '../preview/dev-server.ts';
+import type { PreviewHost } from '../preview/host.ts';
 import { armRepoHandle } from '../runs/arm-repo-handle.ts';
 import { reclaimWorktrees } from '../runs/retention.ts';
 import { RunStore } from '../runs/store.ts';
@@ -71,6 +73,21 @@ export interface ProjectContextDeps {
    *  When omitted, the map still shares one private instance across the
    *  managers it builds (workspace defaults, never refreshed). */
   semaphore?: WorkspaceSemaphore;
+  /** The ONE workspace preview host (#781, present under `CEZ_PREVIEW=1`): every project's
+   *  manager registers against it, because ports are host-global. */
+  preview?: PreviewHost;
+  /** The cockpit's listening port, for the preview tool's `cezar_port` refusal. */
+  cezarPort?: () => number | undefined;
+}
+
+/**
+ * A project's preview exits that the store drives (#781, spec 2026-10-02-live-preview-v1):
+ * dev servers a crashed cezar left behind are swept (always, so turning the flag off after a
+ * crash still cleans up), and a deleted run's preview is released with its profile.
+ */
+export function armPreview(store: RunStore, dataDir: string, host: PreviewHost | undefined): void {
+  void sweepPreviewLeftovers(dataDir).catch(() => 0);
+  if (host) store.on('deleted', (runId: string) => void host.release(runId, { deleteProfile: true, dataDir }));
 }
 
 export type ProjectContextFailure = 'unknown-project' | 'missing-root';
@@ -228,7 +245,8 @@ export class ProjectContexts {
       ?? AutomationStore.open(dataDir);
     reconcileAutomationReceipts(automationStore, store);
     this.notifyStoreCreated(store);
-    const manager = new RunManager(store, project.root, { semaphore: this.semaphore });
+    armPreview(store, dataDir, this.deps.preview);
+    const manager = new RunManager(store, project.root, { semaphore: this.semaphore, preview: this.deps.preview, cezarPort: this.deps.cezarPort });
     try {
       const cleanup = this.deps.prepareManager?.({ id: project.id, root: project.root, store, manager });
       if (cleanup) this.managerCleanups.set(manager, cleanup);
@@ -243,7 +261,7 @@ export class ProjectContexts {
         const keep = await resolveWorktreeRetention(project.root).catch(
           () => DEFAULT_WORKTREE_RETENTION,
         );
-        await reclaimWorktrees(project.root, store, keep).catch(() => [] as string[]);
+        await reclaimWorktrees(project.root, store, keep, { previewHost: this.deps.preview }).catch(() => [] as string[]);
       }
       await manager.recover();
       this.deps.afterRecover?.({ id: project.id, root: project.root, store, manager });

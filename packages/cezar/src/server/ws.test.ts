@@ -4,8 +4,10 @@ import type { AddressInfo } from 'node:net';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import WebSocket from 'ws';
 import { verifyWsUpgrade } from './server.ts';
+import { attachUpgradeRouter } from './upgrade-router.ts';
 import {
   createSocketHub,
+  socketHubRoute,
   WS_PATH,
   type SocketHub,
   type TopicOptions,
@@ -68,7 +70,7 @@ async function boot(
   });
   const hub = createSocketHub(heartbeatMs === undefined ? {} : { heartbeatMs });
   hub.registerTopic('ticker', publisher, topicOptions);
-  hub.attach(server, verify);
+  attachUpgradeRouter(server, [socketHubRoute(hub, verify)]);
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   servers.push(server);
   hubs.push(hub);
@@ -235,15 +237,6 @@ describe('createSocketHub', () => {
     hub.registerTopic('ticker', publisher);
     expect(() => hub.registerTopic('ticker', publisher)).toThrow(/already registered/);
     hub.close();
-  });
-
-  it('refuses a second attach (it would orphan the first heartbeat interval)', async () => {
-    const hub = createSocketHub();
-    const server = createServer();
-    servers.push(server);
-    hubs.push(hub);
-    hub.attach(server, () => ({ trusted: true }));
-    expect(() => hub.attach(server, () => ({ trusted: true }))).toThrow(/already attached/);
   });
 
   it('emits an app-level heartbeat ping the client can watch', async () => {

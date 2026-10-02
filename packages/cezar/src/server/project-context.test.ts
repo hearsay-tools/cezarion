@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AutomationStore } from '../automations/store.ts';
 import { emitUsageForTest } from '../core/process-usage.ts';
+import type { PreviewHost } from '../preview/host.ts';
 import { ProjectContextError, ProjectContexts, type ProjectContextSource } from './project-context.ts';
 
 /**
@@ -53,6 +54,27 @@ describe('ProjectContexts', () => {
 
     const second = await contexts.context('a');
     expect(second).toBe(first);
+  });
+
+  it('hands the workspace preview host to every lazily built manager and store (#781)', async () => {
+    vi.stubEnv('CEZ_PREVIEW', '1');
+    const release = vi.fn(async () => undefined);
+    const preview = { portOwner: () => undefined, probe: async () => false, release } as unknown as PreviewHost;
+    const contexts = new ProjectContexts({ listProjects: async () => [{ id: 'a', root: rootA, status: 'not-git' }], preview, cezarPort: () => 4321 });
+    try {
+      const ctx = await contexts.context('a');
+      const run = ctx.store.createRun({ title: 't', workflow: 'quick-task', task: 't', steps: [] });
+      ctx.store.updateRun(run.id, { worktreePath: rootA });
+      // Without the host every registration answers `headless`, and without the port getter the
+      // cockpit's own port registers.
+      expect((await ctx.manager.registerPreviewServer(run.id, { command: 'npm run dev', port: 4321 })).code).toBe('cezar_port');
+      expect((await ctx.manager.registerPreviewServer(run.id, { command: 'npm run dev', port: 5173 })).code).toBe('registered');
+      ctx.store.deleteRun(run.id);
+      expect(release).toHaveBeenCalledWith(run.id, { deleteProfile: true, dataDir: ctx.dataDir });
+    } finally {
+      contexts.disposeAll();
+      vi.unstubAllEnvs();
+    }
   });
 
   it('dedupes concurrent builds of the same project into one instance', async () => {
