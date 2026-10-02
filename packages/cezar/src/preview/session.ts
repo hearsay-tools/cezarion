@@ -19,6 +19,9 @@ export type Viewer = {
 
 const QUALITY = 60;
 const DEFAULT_VIEWPORT = { w: 1280, h: 800 };
+/** A started stream with no frame after this long is restarted: Chromium can stay silent after back-to-back restarts on a page that no longer changes. */
+const FIRST_FRAME_WAIT_MS = 500;
+const FIRST_FRAME_RETRIES = 5;
 
 /**
  * Runs in every page. Popups open in the same tab (there is one page to stream), and the cursor
@@ -59,6 +62,12 @@ export class PreviewSession {
   private held?: ScreencastFrame;
   private announced = false;
   private viewport = DEFAULT_VIEWPORT;
+  /** Viewport changes and screencast stops run one at a time: overlapping stop/start pairs can leave Chromium without a first frame. */
+  private queue: Promise<void> = Promise.resolve();
+  /** The size the running screencast was started at; unset while stopped. */
+  private streaming?: { w: number; h: number };
+  private watchdog?: ReturnType<typeof setTimeout>;
+  private silentStarts = 0;
 
   private constructor(
     private readonly cdp: Cdp,
@@ -102,6 +111,9 @@ export class PreviewSession {
   attach(viewer: Viewer): void {
     this.viewer = viewer;
     this.announced = false;
+    // A new viewer needs its own first frame, so its stream always restarts, whatever the size.
+    this.streaming = undefined;
+    this.silentStarts = 0;
     void this.setViewport(this.viewport.w, this.viewport.h).catch(() => {});
   }
 
@@ -109,7 +121,11 @@ export class PreviewSession {
     if (this.viewer !== viewer) return;
     this.viewer = undefined;
     this.releaseFrames();
-    void this.cdp.send('Page.stopScreencast').catch(() => {});
+    this.streaming = undefined;
+    this.disarmWatchdog();
+    this.enqueue(async () => {
+      await this.cdp.send('Page.stopScreencast').catch(() => {});
+    });
   }
 
   async navigate(url: string): Promise<void> {
@@ -119,6 +135,7 @@ export class PreviewSession {
 
   close(): void {
     this.viewer = undefined;
+    this.disarmWatchdog();
     this.cdp.close();
   }
 
@@ -184,19 +201,54 @@ export class PreviewSession {
     }
   }
 
-  private async setViewport(w: number, h: number): Promise<void> {
+  private enqueue(job: () => Promise<void>): Promise<void> {
+    const run = this.queue.then(job);
+    this.queue = run.catch(() => {});
+    return run;
+  }
+
+  private setViewport(w: number, h: number): Promise<void> {
+    // Recorded now, so an attach that follows queued resizes starts at the newest size.
     this.viewport = { w, h };
+    return this.enqueue(() => this.applyViewport(w, h));
+  }
+
+  private async applyViewport(w: number, h: number): Promise<void> {
+    // The pane repeats its size at every loading step; a stream already at this size has nothing to redo.
+    if (this.streaming?.w === w && this.streaming.h === h) return;
     await this.cdp.send('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 1, mobile: false });
     if (!this.viewer) return;
+    this.streaming = undefined;
     await this.cdp.send('Page.stopScreencast').catch(() => {});
     // A restarted screencast numbers its frames afresh; the old in-flight frame will never be acked.
     this.pending = undefined;
     this.held = undefined;
     await this.cdp.send('Page.startScreencast', { format: 'jpeg', quality: QUALITY, maxWidth: w, maxHeight: h, everyNthFrame: 1 });
+    this.streaming = { w, h };
+    this.armWatchdog();
+  }
+
+  /** No frame since the last start: start again, a few times, then leave it to the owner's reload. */
+  private armWatchdog(): void {
+    this.disarmWatchdog();
+    this.watchdog = setTimeout(() => {
+      if (!this.viewer || !this.streaming || this.silentStarts >= FIRST_FRAME_RETRIES) return;
+      this.silentStarts += 1;
+      this.streaming = undefined;
+      void this.setViewport(this.viewport.w, this.viewport.h).catch(() => {});
+    }, FIRST_FRAME_WAIT_MS);
+    this.watchdog.unref?.();
+  }
+
+  private disarmWatchdog(): void {
+    clearTimeout(this.watchdog);
+    this.watchdog = undefined;
   }
 
   /** One frame in flight per viewer. A newer frame replaces a held one, so the last visual state always arrives. */
   private onFrame(frame: ScreencastFrame): void {
+    this.silentStarts = 0;
+    this.disarmWatchdog();
     if (!this.viewer) return void this.ackFrame(frame.sessionId);
     if (this.pending !== undefined) {
       if (this.held) void this.ackFrame(this.held.sessionId);

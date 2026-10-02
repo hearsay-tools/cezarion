@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fakeCdp, fakeViewer } from './preview.testkit.ts';
 import { PreviewSession } from './session.ts';
 
@@ -31,6 +31,66 @@ describe('PreviewSession', () => {
     await session.handle({ t: 'ack' });
     expect(sent('Page.screencastFrameAck').map(call => call.params.sessionId)).toEqual([2, 1]);
     expect(viewer.frames).toEqual(['A', 'C']);
+  });
+
+  it('serializes viewport changes: stop and start never interleave, a repeated size does not restart', async () => {
+    // The pane sends a resize at every loading step. Overlapping restarts left Chromium with no
+    // first frame on a static page, so the pane sat on "First frame" for good (#781 e2e).
+    const { cdp, sent, calls } = fakeCdp();
+    const session = await PreviewSession.create(cdp);
+    const first = fakeViewer();
+    session.attach(first);
+    await Promise.all([1, 2, 3].map(() => session.handle({ t: 'resize', w: 646, h: 787 })));
+    await flush();
+    const screencast = calls.map(call => call.method).filter(method => method === 'Page.stopScreencast' || method === 'Page.startScreencast');
+    expect(screencast).toEqual(['Page.stopScreencast', 'Page.startScreencast', 'Page.stopScreencast', 'Page.startScreencast']);
+    expect(sent('Page.startScreencast').map(call => [call.params.maxWidth, call.params.maxHeight])).toEqual([[1280, 800], [646, 787]]);
+
+    // A new viewer always restarts the stream, even at the size it already has: it needs its own first frame.
+    session.detach(first);
+    session.attach(fakeViewer());
+    await flush();
+    expect(sent('Page.startScreencast').map(call => [call.params.maxWidth, call.params.maxHeight])).toEqual([[1280, 800], [646, 787], [646, 787]]);
+  });
+
+  describe('first-frame watchdog', () => {
+    afterEach(() => vi.useRealTimers());
+
+    it('restarts a stream that produced no frame, until one arrives', async () => {
+      // Back-to-back restarts can leave Chromium silent on a page that no longer changes, so a
+      // start with no frame after it is retried (#781 e2e: the pane stuck on "First frame").
+      vi.useFakeTimers();
+      const { cdp, sent, emit } = fakeCdp();
+      const session = await PreviewSession.create(cdp);
+      session.attach(fakeViewer());
+      await vi.advanceTimersByTimeAsync(0);
+      expect(sent('Page.startScreencast')).toHaveLength(1);
+
+      await vi.advanceTimersByTimeAsync(500);
+      expect(sent('Page.startScreencast')).toHaveLength(2);
+      expect(sent('Page.stopScreencast')).toHaveLength(2);
+
+      emit('Page.screencastFrame', frame('A', 2));
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(sent('Page.startScreencast')).toHaveLength(2);
+    });
+
+    it('gives up after a few tries and stops when the viewer leaves', async () => {
+      vi.useFakeTimers();
+      const { cdp, sent } = fakeCdp();
+      const session = await PreviewSession.create(cdp);
+      const viewer = fakeViewer();
+      session.attach(viewer);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(sent('Page.startScreencast')).toHaveLength(6);
+
+      const second = fakeViewer();
+      session.attach(second);
+      await vi.advanceTimersByTimeAsync(0);
+      session.detach(second);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(sent('Page.startScreencast')).toHaveLength(7);
+    });
   });
 
   it('acks frames nobody watches', async () => {
