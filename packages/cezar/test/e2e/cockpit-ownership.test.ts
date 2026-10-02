@@ -39,6 +39,7 @@ test('cockpit ownership rejects live duplicates, recovers after death, and isola
           const url = output.match(/cockpit → (http:\/\/\S+)/)?.[1];
           if (url) return { url, code: null, output };
           if (child.exitCode !== null || child.signalCode !== null) return { url: undefined, code: child.exitCode, output };
+          // e2e-wait: condition-poll — retry interval follows the fixture state probe; never signals readiness
           await new Promise((done) => setTimeout(done, 50));
         }
         throw new Error(`cockpit neither started nor exited: ${output}`);

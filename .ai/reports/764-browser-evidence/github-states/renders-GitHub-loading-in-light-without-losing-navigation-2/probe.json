@@ -1,0 +1,21 @@
+{
+  "kind": "test",
+  "spec": "github-states",
+  "test": "renders GitHub 'loading' in 'light' without losing navigation",
+  "session": "e2e-ghs-923873",
+  "capturedAt": "2026-10-02T11:59:03.099Z",
+  "error": "WaitForValueError: cezar e2e: value never stayed stable: (() => {\n    const root = document.documentElement, target = document.querySelector(\"[data-route=\\\"github\\\"]\");\n    if (!target || document.fonts?.status !== 'loaded') return null;\n    if (\"light\" && root.classList.contains('light') !== (\"light\" === 'light')) return null;\n    if (\"wide\" && root.dataset.width !== \"wide\") return null;\n    if (false && window.__cezIdle !== true) return null;\n    const elements = [target, ...target.querySelectorAll('*')];\n    for (let el = target.parentElement; el; el = el.parentElement) elements.push(el);\n    if (elements.some(el => el.getAnimations().some(a => a.playState === 'running' && a.effect?.getComputedTiming().iterations !== Infinity))) return null;\n    const rect = el => { const r = el.getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; };\n    const box = target.getBoundingClientRect();\n    if (!box.width || !box.height) return null;\n    return { boxes: elements.map(rect), text: target.textContent, scrollWidth: root.scrollWidth, viewport: innerWidth };\n  })() (last value: {\"boxes\":[[0,57,402,708],[0,57,402,708],[24,333,354,156],[165,333,72,72],[181.22213745117188,349.2221374511719,39.55572509765625,39.55572509765625],[186.1662139892578,354.1669616699219,29.666793823242188,29.666778564453125],[99.078125,421,203.84375,32],[63.609375,469,274.78125,20],[0,57,402,788],[0,0,402,900],[0,0,402,900],[0,0,402,900],[0,0,402,900],[0,0,402,900]],\"scrollWidth\":402,\"text\":\"Loadin…) (failure bundle: /home/agent/projects/cezar/.ai/cezar/worktrees/d6e7f159-f1c6-45f4-87c6-500ec47ab925/.ai/qa/failures/github-states/renders-GitHub-loading-in-light-without-losing-navigation-1)",
+  "page": {
+    "activeElement": null,
+    "openDialogs": [],
+    "readyState": "complete",
+    "title": "",
+    "url": "about:blank",
+    "viewport": {
+      "height": 900,
+      "scrollX": 0,
+      "scrollY": 0,
+      "width": 1440
+    }
+  }
+}

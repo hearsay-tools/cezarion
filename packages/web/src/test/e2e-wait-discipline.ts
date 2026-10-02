@@ -18,6 +18,7 @@ export type Rule =
   | 'hover-in-wait'
   | 'mutating-predicate'
   | 'sleep'
+  | 'clock-only-wait'
   | 'product-dom-write'
   | 'positional-row-index'
   | 'focus-after-bare-escape'
@@ -53,7 +54,7 @@ const action =
 const read = /\bexpect\(\(?\s*\w+\.(?:evaluate|count|isVisible|text|url)\(/
 /** Anything that blocks on a page condition between an action and a read. */
 const wait = /\b(?:waitFor\w*|settle\w*)\s*\(/
-const sleep = /\bsetTimeout\s*\(/
+const sleep = /(?<![.\w])(?:window\.|globalThis\.)?setTimeout\s*\(/
 
 /** An Escape pressed through the seam directly, not through `dismissWithEscape`. */
 const bareEscape = /\b\w+\.press\(\s*['"`]Escape['"`]\s*\)/
@@ -88,6 +89,9 @@ export function scanSource(file: string, source: string): Site[] {
   // Rules 2 and 3 — what a wait's argument contains.
   for (const call of callSpans(source, /\b(waitForFunction|waitForValue|waitForStable)\(/g)) {
     const line = lineOf(source, call.start)
+    const hasClock = /(?:performance|Date)\.now\s*\(/.test(call.text)
+    const hasState = /document\.|querySelector|activeElement|__cezIdle|__geometry|dataset\./.test(call.text)
+    if (hasClock && !hasState) sites.push(at('clock-only-wait', line))
     if (call.text.includes(':hover')) sites.push(at('hover-in-wait', line))
     if (call.name === 'waitForFunction' && call.text.includes('scrollIntoView')) sites.push(at('mutating-predicate', line))
   }
@@ -96,8 +100,17 @@ export function scanSource(file: string, source: string): Site[] {
   // which is excluded from this scan and is the only place a spec-side poll sleeps (#416).
   // The name-based exemption this replaces trusted any looping `waitFor…`/`poll…` function,
   // so a helper could sleep for any reason at all under a good name.
+  const deadlines = new Set<number>()
+  for (const call of callSpans(source, /\b(setTimeout)\(/g)) {
+    // Reject-only observers are failure deadlines, never success/readiness delays.
+    if (/\breject\s*\(/.test(call.text) && !/\bresolve\s*\(/.test(call.text)) deadlines.add(lineOf(source, call.start))
+  }
   lines.forEach((line, i) => {
-    if (sleep.test(line)) sites.push(at('sleep', i))
+    const policy = lines[i - 1]?.trim() ?? ''
+    // Packaged fixtures model shutdown and condition backoff on their own event loop.
+    // Named, reviewed mechanisms only; a new bare delay still fails the guard.
+    const fixturePolicy = file.startsWith('packages/cezar/test/e2e/') && /^\/\/ e2e-wait: (condition-poll|shutdown-grace|process-deadline) — .+/.test(policy)
+    if (sleep.test(line) && !line.trim().startsWith('//') && !deadlines.has(i) && !fixturePolicy) sites.push(at('sleep', i))
   })
 
   // Rule 7 — a keyboard step, or a read of where focus is, after an Escape nobody waited out.
@@ -307,11 +320,14 @@ function lineOf(source: string, offset: number): number {
 }
 
 /** Every browser-driving `.ts` under `packages/web/e2e`, scanned. */
-export function scanSuite(dir = e2eDir): Site[] {
-  return readdirSync(dir)
+export function scanSuite(dir = e2eDir, packaged = dir === e2eDir ? resolve(e2eDir, '../../cezar/test/e2e') : undefined): Site[] {
+  const browserSites = readdirSync(dir)
     .filter((name) => name.endsWith('.ts') && !excluded.has(name))
     .sort()
     .flatMap((name) => scanSource(name, readFileSync(join(dir, name), 'utf8')))
+  if (!packaged) return browserSites
+  return [...browserSites, ...readdirSync(packaged).filter(name => name.endsWith('.ts')).sort()
+    .flatMap(name => scanSource(`packages/cezar/test/e2e/${name}`, readFileSync(join(packaged, name), 'utf8')))]
 }
 
 /** Sites folded to `(file, rule, site) → count`, sorted for a stable file. */

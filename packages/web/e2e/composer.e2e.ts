@@ -214,12 +214,13 @@ describe('the thread composer against a live waiting session', () => {
   })
 
   it('a closed session keeps the composer authorable — sending it is Continue', async () => {
+    const deadline = Date.now() + 140_000
     // Finish the waiting session. When the mock's turns touched notes.md the run parks at
     // `review` first (the documented double-finish path) — accept that and finish again.
     await fetch(`${baseUrl}/api/v1/runs/${runId}/finish`, { method: 'POST' })
-    if ((await waitForStatus(baseUrl, runId, ['done', 'review'])) === 'review') {
+    if ((await waitForStatus(baseUrl, runId, ['done', 'review'], { deadline })) === 'review') {
       await fetch(`${baseUrl}/api/v1/runs/${runId}/finish`, { method: 'POST' })
-      await waitForStatus(baseUrl, runId, ['done'])
+      await waitForStatus(baseUrl, runId, ['done'], { deadline })
     }
 
     browser.goto(`${baseUrl}/tasks/${runId}`)
@@ -244,10 +245,10 @@ describe('the thread composer against a live waiting session', () => {
     // …and typing a prompt then sending reopens the session on it.
     browser.fill('[data-slot="composer"] textarea', 'one more thing: add a note')
     browser.click('[aria-label="Send"]')
-    await waitForStatus(baseUrl, runId, ['running', 'waiting'])
+    await waitForStatus(baseUrl, runId, ['running', 'waiting'], { deadline })
     browser.waitForFunction(
       `[...document.querySelectorAll('[data-slot="user-bubble"]')].some((b) =>
         b.textContent.includes('one more thing: add a note'))`,
     )
-  }, 60_000)
+  }, 180_000)
 })

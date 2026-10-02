@@ -28,7 +28,11 @@ function fakeBrowser(results: unknown[]) {
       const results = JSON.parse(process.env.FAKE_EVAL_RESULTS)
       const n = Number(readFileSync(process.env.FAKE_COUNTER, 'utf8'))
       writeFileSync(process.env.FAKE_COUNTER, String(n + 1))
-      const result = results[Math.min(n, results.length - 1)]
+      let result = results[Math.min(n, results.length - 1)]
+      if (result && typeof result === 'object' && 'delayMs' in result) {
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, result.delayMs)
+        result = result.value
+      }
       if (result && typeof result === 'object' && 'error' in result) {
         process.stdout.write(JSON.stringify({ success: false, error: result.error }))
       } else {
@@ -265,4 +269,13 @@ describe('dismissWithEscape (#410)', () => {
     expect(predicate).toContain(`document.querySelector(${JSON.stringify(content)}) === null`)
     expect(predicate).toContain(`document.activeElement === document.querySelector(${JSON.stringify(focus)})`)
   })
+})
+
+
+it('bounds the CLI probe and rejects a matching sample arriving after the wait deadline (#764)', () => {
+  process.env.AGENT_BROWSER_DEFAULT_TIMEOUT = '100'
+  const fake = open([{ delayMs: 1500, value: 'ready' }, 'ready'])
+  const started = Date.now()
+  expect(() => fake.browser.waitForValue('late()', value => value === 'ready', { intervalMs: 0 })).toThrow(WaitForValueError)
+  expect(Date.now() - started).toBeLessThan(1000)
 })

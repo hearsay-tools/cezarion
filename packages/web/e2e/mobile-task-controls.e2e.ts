@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import type { RunRecord } from '@open-mercato/cezar-api-client'
+import { waitForHealth } from './poll'
 import { stopFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv, getJson } from './agent-browser'
 import { dismissWithEscape, focusWithKeyboard } from './contrast'
@@ -41,13 +42,7 @@ beforeAll(async () => {
   server = spawn(process.execPath, [cezarCli, 'serve', '--repo', root, '--port', String(port), '--no-open'], {
     env: fixtureServeEnv(root), stdio: 'ignore',
   })
-  let healthy = false
-  for (let attempt = 0; attempt < 60; attempt++) {
-    try { healthy = (await fetch(`${baseUrl}/api/v1/health`)).ok } catch { /* booting */ }
-    if (healthy) break
-    await new Promise(resolve => setTimeout(resolve, 250))
-  }
-  if (!healthy) throw new Error('Controls fixture did not start')
+  await waitForHealth(baseUrl, 'mobile-task-controls fixture', { timeoutMs: 20_000 })
   project = await bootProjectId(baseUrl)
   browser = AgentBrowser.open(`controls-${process.pid}`)
 })

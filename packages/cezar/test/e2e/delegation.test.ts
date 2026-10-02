@@ -69,6 +69,7 @@ test('installed CLI completes owned-worker lifecycle with lost spawn reply and o
     const deadline = Date.now() + 15_000;
     while (!(await check())) {
       assert.ok(Date.now() < deadline, `${label}; runs=${JSON.stringify(store?.listRuns())}`);
+      // e2e-wait: condition-poll — retry interval follows the fixture state probe; never signals readiness
       await new Promise(done => setTimeout(done, 20));
     }
   }
@@ -104,6 +105,7 @@ import { join } from 'node:path';
 const wire = ${JSON.stringify(wire)};
 const id = process.env.CEZ_TASK_ID;
 const emit = value => process.stdout.write(JSON.stringify(value) + '\\n');
+// e2e-wait: condition-poll — retry interval follows the fixture state probe; never signals readiness
 const sleep = ms => new Promise(done => setTimeout(done, ms));
 let turn = 0, queue = Promise.resolve();
 emit({ type: 'system', subtype: 'init', session_id: id });

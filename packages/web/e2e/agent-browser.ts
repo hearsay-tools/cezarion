@@ -104,7 +104,7 @@ type FailureReason =
 /**
  * The CLI's own default wait budget, read from the variable agent-browser reads
  * (`AGENT_BROWSER_DEFAULT_TIMEOUT`, milliseconds), so a seam-side poll gives up when a
- * `wait <selector>` would. 25 s stays inside both `run()`'s 60 s kill and the suite's 60 s test
+ * `wait <selector>` would. 25 s bounds each polled command too, and stays inside the suite's 60 s test
  * timeout; a unit test shortens it through the same variable.
  */
 function defaultWaitTimeoutMs(): number {
@@ -442,9 +442,13 @@ export class AgentBrowser {
       }
     }
     let page: unknown = null
-    attempt('screenshot', () => this.screenshot(join(dir, 'screenshot.png'), { viewport: true }))
-    attempt('snapshot', () => writeFileSync(join(dir, 'snapshot.txt'), this.snapshot()))
-    attempt('probe', () => { page = this.evaluate(probeScript(reason)) })
+    attempt('screenshot', () => {
+      const path = join(dir, 'screenshot.png')
+      this.run(['screenshot', path], 5_000)
+      if (statSync(path).size === 0) throw new Error('empty failure screenshot')
+    })
+    attempt('snapshot', () => writeFileSync(join(dir, 'snapshot.txt'), String(this.run(['snapshot', '-i'], 5_000).snapshot ?? '')))
+    attempt('probe', () => { page = this.run(['eval', probeScript(reason)], 5_000).result })
     const probe = {
       ...reason,
       spec: failureCapture.spec,
@@ -472,14 +476,14 @@ export class AgentBrowser {
   }
 
   /** One agent-browser invocation. `--json` on every call so results are parsed, not scraped. */
-  private run(args: string[]): Record<string, unknown> {
+  private run(args: string[], timeoutMs = 60_000): Record<string, unknown> {
     const plan = browserSpawnPlan(this.browser, this.session, args)
     let stdout: string
     try {
       stdout = execFileSync(this.bin, plan.argv, {
         encoding: 'utf8',
         // A hung browser must fail the spec, not the whole suite's wall clock.
-        timeout: 60_000,
+        timeout: Math.max(1, Math.ceil(timeoutMs)),
         maxBuffer: 32 * 1024 * 1024,
         env: plan.env,
       })
@@ -537,7 +541,7 @@ export class AgentBrowser {
    *  that window answers every question wrong. */
   waitForFunction(js: string): void {
     try {
-      this.run(['wait', '--fn', js])
+      this.run(['wait', '--fn', js], defaultWaitTimeoutMs() + 2_000)
     } catch (cause) {
       const bundle = this.captureFailure({ kind: 'wait-fn', predicate: js }, cause)
       throw new Error(`cezar e2e: predicate never became truthy: ${js} (failure bundle: ${bundle})`, { cause })
@@ -568,7 +572,7 @@ export class AgentBrowser {
       failure,
     }: { holdMs: number; matcher?: (value: T) => boolean; intervalMs?: number; failure?: string },
   ): T {
-    const deadline = Date.now() + defaultWaitTimeoutMs()
+    const deadline = performance.now() + defaultWaitTimeoutMs()
     let lastValue: unknown = undefined
     let lastError: unknown = undefined
     let holdStartedAt: number | null = null
@@ -576,7 +580,8 @@ export class AgentBrowser {
     for (;;) {
       const now = Date.now()
       try {
-        const value = this.evaluate(js) as T
+        const value = this.run(['eval', js], deadline - performance.now()).result as T
+        if (performance.now() > deadline) break
         lastValue = value
         lastError = undefined
         if (matcher(value) && (holdStartedAt === null || sameSample(value, holdValue))) {
@@ -592,11 +597,11 @@ export class AgentBrowser {
           holdStartedAt = null
         }
       } catch (cause) {
-        lastError = cause
+        if (performance.now() < deadline || (lastError === undefined && lastValue === undefined)) lastError = cause
         holdStartedAt = null
       }
-      if (Date.now() >= deadline) break
-      pause(intervalMs)
+      if (performance.now() >= deadline) break
+      pause(Math.min(intervalMs, Math.max(0, deadline - performance.now())))
     }
     const reason: FailureReason = {
       kind: 'wait-value',
@@ -653,7 +658,7 @@ export class AgentBrowser {
    *  than the control it protects — the treadmill #369 and #393 ran on. `wait <selector>` is the
    *  CLI's own primitive: it blocks until the element is attached and has a non-zero box, and
    *  gives up after its default timeout (`AGENT_BROWSER_DEFAULT_TIMEOUT`, 25 s), which stays
-   *  inside both `run()`'s 60 s kill and the suite's 60 s test timeout. Waits on a state rather
+   *  inside the command kill budget and the suite's 60 s test timeout. Waits on a state rather
    *  than on existence (opacity, `aria-current`, a hover hit-test) are not covered and stay
    *  per-assertion.
    *
@@ -661,7 +666,7 @@ export class AgentBrowser {
    *  would turn "not there" into a 25 s timeout. */
   private awaitTarget(action: 'click' | 'hover' | 'fill', selector: string): void {
     try {
-      this.run(['wait', selector])
+      this.run(['wait', selector], defaultWaitTimeoutMs() + 2_000)
     } catch (cause) {
       const bundle = this.captureFailure({ kind: 'wait-selector', action, selector }, cause)
       throw new Error(`cezar e2e: ${action} target never appeared: ${selector} (failure bundle: ${bundle})`, { cause })
@@ -819,7 +824,7 @@ export class AgentBrowser {
     const index = attached.indexOf(this)
     if (index !== -1) attached.splice(index, 1)
     try {
-      this.run(['close'])
+      this.run(['close'], 5_000)
     } catch {
       /* already closed */
     }

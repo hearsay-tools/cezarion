@@ -171,3 +171,28 @@ describe('waitForHealth', () => {
     ).rejects.toThrow('cezar e2e: the worst-case fixture server never answered at http://127.0.0.1:1')
   })
 })
+
+
+describe('wall-clock and request bounds (#764)', () => {
+  it('aborts a stuck probe within the wall-clock budget', async () => {
+    const started = performance.now()
+    let aborted = false
+    await expect(pollFor((signal) => new Promise((_, reject) => {
+      signal.addEventListener('abort', () => { aborted = true; reject(signal.reason) }, { once: true })
+    }), () => 'stuck', { timeoutMs: 40, requestTimeoutMs: 15, intervalMs: 0 })).rejects.toThrow('stuck')
+    expect(aborted).toBe(true)
+    expect(performance.now() - started).toBeLessThan(500)
+  })
+
+  it('bounds even a probe that ignores its abort signal', async () => {
+    await expect(pollFor(() => new Promise(() => {}), () => 'ignored abort', {
+      timeoutMs: 30, requestTimeoutMs: 10, intervalMs: 0,
+    })).rejects.toThrow('ignored abort')
+  }, 1000)
+
+  it('reports the last observed status, wanted state and URL', async () => {
+    vi.stubGlobal('fetch', () => Promise.resolve(new Response(JSON.stringify({ status: 'waiting' }))))
+    await expect(waitForStatus('http://localhost:1', 'r', ['done'], { tries: 1, intervalMs: 0 }))
+      .rejects.toThrow('last state: waiting')
+  })
+})

@@ -1,0 +1,52 @@
+
+> test
+> vitest run packages/web/src/test/visual-ready.test.ts
+
+
+ RUN  v4.1.10 /home/agent/projects/cezar/.ai/cezar/worktrees/d6e7f159-f1c6-45f4-87c6-500ec47ab925
+
+ ❯ |web| src/test/visual-ready.test.ts (2 tests | 2 failed) 19ms
+   × waits for the target, intended appearance and fonts rather than just elapsed time 15ms
+   × waits out finite animations but permits a deliberately held request and infinite spinners 3ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |web| src/test/visual-ready.test.ts > waits for the target, intended appearance and fonts rather than just elapsed time
+AssertionError: expected null to match object { text: 'Loaded route' }
+
+- Expected:
+{
+  "text": "Loaded route",
+}
+
++ Received:
+null
+
+ ❯ src/test/visual-ready.test.ts:17:38
+     15|   expect(sample({ theme: 'light' })).toBeNull()
+     16|   document.documentElement.classList.add('light')
+     17|   expect(sample({ theme: 'light' })).toMatchObject({ text: 'Loaded rou…
+       |                                      ^
+     18| })
+     19| it('waits out finite animations but permits a deliberately held reques…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  |web| src/test/visual-ready.test.ts > waits out finite animations but permits a deliberately held request and infinite spinners
+AssertionError: expected null not to be null
+ ❯ src/test/visual-ready.test.ts:28:39
+     26|   ;(window as unknown as { __cezIdle: boolean }).__cezIdle = false
+     27|   expect(sample({ idle: true })).toBeNull()
+     28|   expect(sample({ idle: false })).not.toBeNull()
+       |                                       ^
+     29| })
+     30|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed (2)
+   Start at  13:45:38
+   Duration  846ms (transform 48ms, setup 55ms, import 10ms, tests 19ms, environment 613ms)
+

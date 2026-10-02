@@ -14,8 +14,14 @@
  */
 
 export interface PollOptions {
-  /** How many probes before giving up. */
+  /** Additional attempt cap; timeoutMs is the wall-clock limit. */
   tries?: number
+  /** Total wall-clock budget, including probes and backoff. */
+  timeoutMs?: number
+  /** Bound each probe; the signal also aborts fetch and body reads. */
+  requestTimeoutMs?: number
+  /** Absolute shared deadline for multiple waits in one test. */
+  deadline?: number
   /** How long to wait between them, in milliseconds. */
   intervalMs?: number
 }
@@ -39,24 +45,53 @@ export interface PollOptions {
  * says so instead of only saying it timed out.
  */
 export async function pollFor<T>(
-  probe: () => T | undefined | Promise<T | undefined>,
-  fail: () => string | Promise<string>,
-  { tries = 40, intervalMs = 250 }: PollOptions = {},
+  probe: (signal: AbortSignal) => T | undefined | Promise<T | undefined>,
+  fail: (signal: AbortSignal) => string | Promise<string>,
+  { tries = 40, intervalMs = 250, timeoutMs = tries * Math.max(intervalMs, 250), requestTimeoutMs = 2_000, deadline = Infinity }: PollOptions = {},
 ): Promise<T> {
+  const end = Math.min(Date.now() + timeoutMs, deadline)
+  const probeEnd = end - Math.min(250, timeoutMs / 10)
   let lastError: unknown
-  for (let attempt = 0; attempt < tries; attempt += 1) {
+  for (let attempt = 0; attempt < tries && Date.now() < probeEnd; attempt += 1) {
     try {
-      const answer = await probe()
-      if (answer !== undefined) return answer
+      const answer = await boundedProbe(probe, Math.min(requestTimeoutMs, probeEnd - Date.now()))
+      if (answer !== undefined && Date.now() <= probeEnd) return answer
     } catch (error) {
       lastError = error
     }
-    await new Promise((resolve) => setTimeout(resolve, intervalMs))
+    if (attempt + 1 < tries && Date.now() < probeEnd) {
+      await new Promise((resolve) => setTimeout(resolve, Math.min(intervalMs, probeEnd - Date.now())))
+    }
   }
-  const reason = await fail()
+  // Diagnostics must not hang after the poll exhausted its budget either.
+  const reason = await boundedProbe(signal => fail(signal), Math.max(1, Math.min(requestTimeoutMs, end - Date.now()))).catch(error => `poll diagnostics failed: ${String(error)}`)
   if (lastError === undefined) throw new Error(reason)
   const detail = lastError instanceof Error ? lastError.message : String(lastError)
   throw new Error(`${reason} (last probe error: ${detail})`, { cause: lastError })
+}
+
+async function boundedProbe<T>(probe: (signal: AbortSignal) => T | Promise<T>, timeoutMs: number): Promise<T> {
+  const controller = new AbortController()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      Promise.resolve().then(() => probe(controller.signal)),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          const error = new Error(`probe exceeded ${timeoutMs}ms`)
+          controller.abort(error)
+          reject(error)
+        }, Math.max(1, timeoutMs))
+      }),
+    ])
+  } finally { clearTimeout(timer) }
+}
+
+/** JSON and its body read share the poll's abort signal; non-2xx responses are retries. */
+export async function pollJson<T>(url: string, signal: AbortSignal): Promise<T> {
+  const response = await fetch(url, { signal })
+  if (!response.ok) throw new Error(`GET ${url} answered ${response.status}`)
+  return await response.json() as T
 }
 
 /** A fixture server is listening and answering its own health route. */
@@ -64,9 +99,9 @@ export async function waitForHealth(baseUrl: string, what = 'the fixture server'
   // Still starting is the ordinary case here, so a rejected fetch is not even worth reporting as
   // the last probe error — `pollFor` would otherwise end every boot timeout with ECONNREFUSED.
   await pollFor(
-    async () => {
+    async (signal) => {
       try {
-        return (await fetch(`${baseUrl}/api/v1/health`)).ok || undefined
+        return (await fetch(`${baseUrl}/api/v1/health`, { signal })).ok || undefined
       } catch {
         return undefined
       }
@@ -83,17 +118,19 @@ export async function waitForStatus(
   wanted: readonly string[],
   options: PollOptions = {},
 ): Promise<string> {
+  let lastState: string | undefined
   return pollFor(
-    async () => {
+    async (signal) => {
       // `pollFor` treats a throw as "not yet", so a reset connection or a 5xx keeps polling
       // rather than aborting the wait — what `queued-stack`'s five-attempt `getRun` gave this
       // one spec before the helpers were folded together.
-      const response = await fetch(`${baseUrl}/api/v1/runs/${id}`)
+      const response = await fetch(`${baseUrl}/api/v1/runs/${id}`, { signal })
       if (!response.ok) throw new Error(`GET run ${id} answered ${response.status}`)
       const record = (await response.json()) as { status?: string }
+      lastState = record.status
       return record.status !== undefined && wanted.includes(record.status) ? record.status : undefined
     },
-    () => `cezar e2e: run ${id} never reached status "${wanted.join('/')}"`,
+    () => `cezar e2e: run ${id} never reached status "${wanted.join('/')}"${lastState === undefined ? '' : ` at ${baseUrl}/api/v1/runs/${id} (last state: ${lastState})`}`,
     { tries: 120, intervalMs: 500, ...options },
   )
 }
@@ -105,12 +142,14 @@ export async function waitForConfig<T>(
   what: string,
   options: PollOptions = {},
 ): Promise<T> {
+  let lastState: T | undefined
   return pollFor(
-    async () => {
-      const config = (await (await fetch(`${baseUrl}/api/v1/config`)).json()) as T
+    async (signal) => {
+      const config = await pollJson<T>(`${baseUrl}/api/v1/config`, signal)
+      lastState = config
       return check(config) ? config : undefined
     },
-    () => `GET /api/v1/config never showed ${what}`,
+    () => `GET ${baseUrl}/api/v1/config never showed ${what}; last state: ${JSON.stringify(lastState)}`,
     options,
   )
 }
@@ -125,14 +164,16 @@ export async function waitForServerAppearance(
   check: (appearance: Record<string, unknown>) => boolean,
   options: PollOptions = {},
 ): Promise<Record<string, unknown>> {
+  let lastState: unknown
   return pollFor(
-    async () => {
-      const state = (await (await fetch(`${baseUrl}/api/v1/workspace/ui-state`)).json()) as {
+    async (signal) => {
+      const state = await pollJson<{
         appearance?: Record<string, unknown>
-      }
+      }>(`${baseUrl}/api/v1/workspace/ui-state`, signal)
+      lastState = state
       return state.appearance && check(state.appearance) ? state.appearance : undefined
     },
-    () => 'ui-state.json never showed the expected appearance',
+    () => `GET ${baseUrl}/api/v1/workspace/ui-state never showed the expected appearance; last state: ${JSON.stringify(lastState)}`,
     options,
   )
 }

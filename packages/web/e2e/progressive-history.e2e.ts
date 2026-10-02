@@ -174,6 +174,13 @@ function settleHistoryAnchor(rowExpr: string): HistoryAnchor {
 }
 
 function parkAndSettleHistoryStart(): HistoryAnchor {
+  // Start the unpin gesture away from the boundary, even when a previous prepend kept it near.
+  browser.evaluate(`(() => {
+    const main = ${MAIN}
+    window.__cezThreadScrollTo(main.scrollHeight - main.clientHeight)
+  })()`)
+  browser.waitForValue(`(() => { const main = ${MAIN}; return main.scrollHeight - main.clientHeight - main.scrollTop })()`,
+    (remaining): remaining is number => typeof remaining === 'number' && Math.abs(remaining) < 2)
   browser.evaluate(`(() => {
     const main = ${MAIN}
     // Unpin while still at the live tail so a later wheel at the boundary cannot load a page.
@@ -310,28 +317,56 @@ describe('progressive long-session history', () => {
     browser.waitForFunction(
       `document.querySelector('[data-slot="history-boundary"]')?.dataset.retainedPages === '2'`,
     )
-    expect(Number(browser.evaluate(cursorRequestCount))).toBe(1)
-
+    waitUntilCockpitIdle()
     const after = settleNamedHistoryAnchor(before.key)
     expect(
       Math.abs(after.top - before.top),
       `anchor jumped ${Math.abs(after.top - before.top)}px ${JSON.stringify({ before, after })}`,
     ).toBeLessThan(2)
 
+    expect(Number(browser.evaluate(cursorRequestCount))).toBe(1)
     browser.screenshot(join(artifactsDir, 'progressive-history-earlier-page.png'), { viewport: true })
-    // Let the prepend anchor's requestAnimationFrame settle before the next test supplies
-    // a genuinely fresh upward gesture.
-    await new Promise((resolveWait) => setTimeout(resolveWait, 50))
+    waitUntilCockpitIdle()
+    settleNamedHistoryAnchor(before.key)
   })
 
   it('consumes one upward intent without cascading while the boundary remains near', async () => {
+    // Establish this test's own first page; it must also work when selected alone.
+    browser.goto(`${baseUrl}/p/${bootProject}/tasks/${RUN_ID}`)
+    browser.waitForFunction(`document.querySelector('[data-slot="history-boundary"]')?.dataset.retainedPages === '1'`)
+    waitUntilCockpitIdle()
+    const initial = parkAndSettleHistoryStart()
+    activateHistoryBoundary()
+    browser.waitForFunction(`document.querySelector('[data-slot="history-boundary"]')?.dataset.retainedPages === '2'`)
+    waitUntilCockpitIdle()
+    settleNamedHistoryAnchor(initial.key)
+    const before = parkAndSettleHistoryStart()
+    // Observe throughout response consumption and anchoring, not just at request initiation.
     browser.evaluate(`(() => {
-      const main = document.querySelector('[data-slot="main"]')
-      main.scrollTop = 0
-      main.dispatchEvent(new WheelEvent('wheel', { deltaY: -120, bubbles: true }))
+      const nativeFetch = window.fetch;
+      window.__historyCycle = { started: 0, completed: 0, pending: 0 };
+      window.fetch = async (...args) => {
+        const url = new URL(typeof args[0] === 'string' ? args[0] : args[0].url, location.href);
+        const history = url.pathname.endsWith('/runs/${RUN_ID}/history') && url.searchParams.has('cursor');
+        if (!history) return nativeFetch(...args);
+        const cycle = window.__historyCycle;
+        cycle.started++; cycle.pending++;
+        try {
+          const response = await nativeFetch(...args);
+          await response.clone().text();
+          cycle.completed++;
+          return response;
+        } finally { cycle.pending--; }
+      };
+      const main = document.querySelector('[data-slot="main"]');
+      main.dispatchEvent(new WheelEvent('wheel', { deltaY: -120, bubbles: true }));
     })()`)
-    browser.waitForFunction(`${cursorRequestCount} === 2`)
-    await new Promise((resolveWait) => setTimeout(resolveWait, 500))
+    browser.waitForValue(`({ cycle: window.__historyCycle, pages: document.querySelector('[data-slot="history-boundary"]')?.dataset.retainedPages, top: document.querySelector('[data-slot="main"]')?.scrollTop, requests: ${cursorRequestCount} })`, (s: { cycle: { completed: number; pending: number }; pages: string }) => s.cycle.completed >= 1 && s.cycle.pending === 0 && s.pages === '3')
+    waitUntilCockpitIdle()
+    const after = settleNamedHistoryAnchor(before.key)
+    expect(Math.abs(after.top - before.top), JSON.stringify({ before, after })).toBeLessThan(2)
+    const cycle = browser.waitForStable(`window.__historyCycle`, { holdMs: 200 })
+    expect(cycle).toEqual({ started: 1, completed: 1, pending: 0 })
     expect(Number(browser.evaluate(cursorRequestCount))).toBe(2)
   })
 

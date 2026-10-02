@@ -1,0 +1,51 @@
+
+> test
+> vitest run packages/web/src/test/agent-browser-wait-value.test.ts
+
+
+ RUN  v4.1.10 /home/agent/projects/cezar/.ai/cezar/worktrees/d6e7f159-f1c6-45f4-87c6-500ec47ab925
+
+ ❯ |web| src/test/agent-browser-wait-value.test.ts (14 tests | 1 failed) 6512ms
+     ✓ returns only after the matcher holds across polls spanning holdMs 204ms
+     ✓ a predicate that flips inside the hold window fails the wait, not a later expect  615ms
+     ✓ polls evaluate until the matcher passes and returns that sample  405ms
+     ✓ without a matcher, waits for a value that is not null, undefined or false  408ms
+     ✓ a sample that throws in the page is a miss, not a failure 257ms
+     × a value that never matches fails through the failure bundle, naming the last sample 627ms
+     ✓ a sample that kept throwing reports the page error instead of a value  610ms
+     ✓ reads scroll, hit-test and point in one polled expression, then moves the pointer once  519ms
+     ✓ a target that never paints a hit-testable point fails naming the selector and the bundle  677ms
+     ✓ focuses the visible predecessor, presses Tab, and waits for focus to land on the target  359ms
+     ✓ names the element that took focus when the target never receives it  712ms
+     ✓ a target with no visible predecessor fails after polling, naming the selector  629ms
+     ✓ presses Escape, then waits for the content to be gone AND focus to have returned 158ms
+   ✓ bounds the CLI probe and rejects a matching sample arriving after the wait deadline (#764)  329ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |web| src/test/agent-browser-wait-value.test.ts > AgentBrowser.waitForValue (#409) > a value that never matches fails through the failure bundle, naming the last sample
+AssertionError: expected 'cezar e2e: value never matched: probe…' to contain 'button#other'
+
+- Expected
++ Received
+
+- button#other
++ cezar e2e: value never matched: probe() (last error: Error: cezar e2e: agent-browser eval probe() failed
++   caused by: Error: spawnSync /home/agent/projects/cezar/.ai/cezar/tmp/d6e7f159-f1c6-45f4-87c6-500ec47ab925/cez-fake-agent-browser-wait-value-hHBZWx/agent-browser ETIMEDOUT) (failure bundle: /home/agent/projects/cezar/.ai/cezar/tmp/d6e7f159-f1c6-45f4-87c6-500ec47ab925/cez-fake-agent-browser-wait-value-hHBZWx/failures/selection-states/model-pill-hover-1)
+
+ ❯ src/test/agent-browser-wait-value.test.ts:170:29
+    168|     const failure = error as WaitForValueError
+    169|     expect(failure.message).toMatch(/value never matched: probe\(\)/)
+    170|     expect(failure.message).toContain('button#other')
+       |                             ^
+    171|     expect(failure.lastValue).toEqual({ ready: false, seen: 'button#ot…
+    172|     expect(failure.bundle.startsWith(join(failures, 'selection-states'…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 13 passed (14)
+   Start at  13:52:44
+   Duration  6.73s (transform 70ms, setup 46ms, import 46ms, tests 6.51s, environment 0ms)
+

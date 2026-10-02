@@ -50,6 +50,7 @@ async function pollLocalJson(url: string, child: ReturnType<typeof spawn>, deadl
   do {
     if (child.exitCode !== null || child.signalCode !== null) throw new Error(`built CLI exited before health: ${child.exitCode ?? child.signalCode}`);
     try { return await localJson(url); } catch (error) { last = error; }
+    // e2e-wait: condition-poll — retry interval follows the fixture state probe; never signals readiness
     await new Promise(resolve => setTimeout(resolve, 150));
   } while (Date.now() < deadline);
   throw new Error(`local fixture never answered within ${deadlineMs}ms: ${last instanceof Error ? last.message : String(last)}`, { cause: last });
@@ -176,6 +177,7 @@ else {
       res.end(JSON.stringify({ version: process.env.FIXTURE_BAD_HEALTH_VERSION === version ? 'wrong-version' : version, repoRoot, pid: process.pid }));
     } else if (req.url === '/restart' && req.method === 'POST') {
       res.end('ack');
+      // e2e-wait: shutdown-grace — fixture restart models deferred listener shutdown
       res.once('finish', () => setTimeout(() => server.close(() => process.exit(0)), 50));
     } else { res.statusCode = 404; res.end(); }
   });
@@ -387,6 +389,7 @@ test(`real ${installKind} restart helper ${badHealth ? 'reaps new process and ro
         return response.ok ? await response.json() as { version: string; repoRoot: string; pid: number } : undefined;
       } catch { return undefined; }
     };
+    // e2e-wait: condition-poll — retry interval follows the fixture state probe; never signals readiness
     for (let i = 0; i < 100 && !(await health()); i++) await new Promise((resolve) => setTimeout(resolve, 50));
     assert.equal((await health())?.version, '1.0.0');
     const claimId = randomUUID();
@@ -428,6 +431,7 @@ test('a queued helper rejects a stale claim before promotion', async () => {
     let release!: () => void;
     const owner = withDirectoryLock(join(fixture.stateDir, 'operation.lock'), async () =>
       new Promise<void>((resolve) => { release = resolve; }));
+    // e2e-wait: condition-poll — retry interval follows the fixture state probe; never signals readiness
     while (!release) await new Promise((resolve) => setTimeout(resolve, 5));
     const queued = runHelper(fixture.plan);
     await writeFile(fixture.recordPath, JSON.stringify({ state: { status: 'idle', supported: true }, claimId: fixture.plan.claimId }));
@@ -467,11 +471,12 @@ fs.mkdirSync(${JSON.stringify(lock)});
 let n=0; setInterval(()=>fs.writeFileSync(${JSON.stringify(ticks)},String(++n)),25);`, { mode: 0o700 });
     await assert.rejects(runHelper(fixture.plan), /ownership changed/);
     pid = Number(await readFile(pidPath, 'utf8'));
-    const before = await readFile(ticks, 'utf8');
-    await new Promise((resolve) => setTimeout(resolve, 150));
-    const after = await readFile(ticks, 'utf8');
+    // Reaping is the completion acknowledgement: a dead writer cannot mutate again.
+    assert.throws(() => process.kill(pid, 0), 'owned npm must be reaped before reading final ticks');
+    const finalTicks = await readFile(ticks, 'utf8');
+    assert.match(finalTicks, /^\d+$/, 'the child wrote ticks before it was reaped');
     assert.equal(existsSync(join(fixture.root, 'term-received')), true);
-    assert.equal(after, before, 'npm must stop mutating before helper settles');
+
     assert.throws(() => process.kill(pid, 0), 'owned npm must be reaped');
     assert.equal((await readJson(fixture.recordPath)).state.status, 'restarting');
     assert.equal(existsSync(fixture.recovery), true);
@@ -504,11 +509,12 @@ let n=0; setInterval(()=>fs.writeFileSync(${JSON.stringify(ticks)},String(++n)),
       npmPrefix: prefix, npmCache: cache, npmBin, home, targetVersion: () => '2.0.0' });
     await assert.rejects(service.apply(), /owns this installation/);
     pid = Number(await readFile(pidPath, 'utf8'));
-    const before = await readFile(ticks, 'utf8');
-    await new Promise((resolve) => setTimeout(resolve, 150));
-    const after = await readFile(ticks, 'utf8');
+    // Reaping is the completion acknowledgement: a dead writer cannot mutate again.
+    assert.throws(() => process.kill(pid, 0), 'owned npm must be reaped before reading final ticks');
+    const finalTicks = await readFile(ticks, 'utf8');
+    assert.match(finalTicks, /^\d+$/, 'the child wrote ticks before it was reaped');
     assert.equal(existsSync(join(root, 'term-received')), true);
-    assert.equal(after, before, 'npm must stop mutating before Apply settles');
+
     assert.throws(() => process.kill(pid, 0), 'owned npm must be reaped');
     assert.equal((await readJson(join(original, 'package.json'))).version, '1.0.0');
   } finally {
@@ -617,12 +623,14 @@ writeFileSync(${JSON.stringify(join(fixture.root, 'ack'))}, String(pid));`);
       try { health = await (await fetch(`http://127.0.0.1:${fixture.plan.port}/api/v1/health`, { signal: AbortSignal.timeout(300) })).json() as typeof health; }
       catch { /* child is still starting */ }
       if (health?.version === '2.0.0') break;
+      // e2e-wait: condition-poll — retry interval follows the fixture state probe; never signals readiness
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
     assert.equal(health?.version, '2.0.0');
     assert.equal(health?.repoRoot, fixture.root);
     replacementPid = health?.pid;
     for (let attempt = 0; attempt < 50 && (await readJson(fixture.recordPath)).state.status !== 'idle'; attempt += 1) {
+      // e2e-wait: condition-poll — retry interval follows the fixture state probe; never signals readiness
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
     assert.equal((await readJson(fixture.recordPath)).state.status, 'idle');
@@ -723,6 +731,7 @@ const pkg=JSON.parse(fs.readFileSync(p)); pkg.version='2.0.0'; fs.writeFileSync(
         try { process.kill(pid, 'SIGTERM'); } catch { /* helper already reaped it */ }
         for (let attempt = 0; attempt < 100; attempt++) {
           try { process.kill(pid, 0); } catch { break; }
+          // e2e-wait: condition-poll — retry interval follows the fixture state probe; never signals readiness
           await new Promise(resolve => setTimeout(resolve, 20));
         }
         assert.throws(() => process.kill(pid, 0), 'owned fixture child must be reaped');
@@ -825,6 +834,7 @@ if(promotion) {
         try { process.kill(pid, 'SIGTERM'); } catch { /* already reaped */ }
         for (let attempt = 0; attempt < 100; attempt++) {
           try { process.kill(pid, 0); } catch { break; }
+          // e2e-wait: condition-poll — retry interval follows the fixture state probe; never signals readiness
           await new Promise(resolve => setTimeout(resolve, 20));
         }
         assert.throws(() => process.kill(pid, 0), 'owned fixture child must be reaped');

@@ -2,12 +2,6 @@
   "$comment": "Wait-discipline sites the cockpit e2e suite carried when the ratchet landed (issue 409). Keyed by file, rule and the line text so a moved line does not churn it. This list only shrinks: fix a site, then run E2E_WAIT_DISCIPLINE_UPDATE=1 npm test -- e2e-wait-discipline. Rules: packages/web/e2e/README.md.",
   "sites": [
     {
-      "file": "automations.e2e.ts",
-      "rule": "sleep",
-      "site": "await new Promise((resolve) => setTimeout(resolve, 500))",
-      "count": 1
-    },
-    {
       "file": "composer-defaults.e2e.ts",
       "rule": "one-shot-read",
       "site": "expect(browser.evaluate(",
@@ -29,24 +23,6 @@
       "file": "github-layout.e2e.ts",
       "rule": "one-shot-read",
       "site": "expect(browser.evaluate(`document.querySelector('[data-slot=\"gh-custom-prompt\"]').value`)).toBe('Review this issue and keep this draft')",
-      "count": 1
-    },
-    {
-      "file": "github-layout.e2e.ts",
-      "rule": "sleep",
-      "site": "browser.evaluate('new Promise(resolve => setTimeout(resolve, 250))')",
-      "count": 1
-    },
-    {
-      "file": "github-pr-review.e2e.ts",
-      "rule": "sleep",
-      "site": "stateBrowser.evaluate(`document.documentElement.classList.toggle('light', ${theme === 'light'}); document.documentElement.dataset.width = 'wide'; document.querySelector('[data-slot=\"gh-merge-box\"]').scrollIntoView({block:'center'}); new Promise(resolve => setTimeout(resolve, 250))`)",
-      "count": 1
-    },
-    {
-      "file": "github-states.e2e.ts",
-      "rule": "sleep",
-      "site": "stateBrowser.evaluate(`document.documentElement.classList.toggle('light', ${theme === 'light'}); document.documentElement.dataset.width = 'wide'; new Promise(resolve => setTimeout(resolve, 250))`)",
       "count": 1
     },
     {
@@ -107,12 +83,6 @@
       "file": "mobile-task-controls.e2e.ts",
       "rule": "one-shot-read",
       "site": "expect(browser.text('[data-slot=\"tasks-empty\"]')).toContain('No matching tasks')",
-      "count": 1
-    },
-    {
-      "file": "mobile-task-controls.e2e.ts",
-      "rule": "sleep",
-      "site": "await new Promise(resolve => setTimeout(resolve, 250))",
       "count": 1
     },
     {
@@ -200,42 +170,6 @@
       "count": 1
     },
     {
-      "file": "plan-mode.e2e.ts",
-      "rule": "one-shot-read",
-      "site": "expect(browser.evaluate(`(() => { const sheet = document.querySelector('[data-slot=\"plan-review\"]'); return sheet.scrollWidth <= sheet.clientWidth })()`)).toBe(true)",
-      "count": 1
-    },
-    {
-      "file": "plan-mode.e2e.ts",
-      "rule": "sleep",
-      "site": "await new Promise((r) => setTimeout(r, 100))",
-      "count": 1
-    },
-    {
-      "file": "plan-mode.e2e.ts",
-      "rule": "sleep",
-      "site": "browser.evaluate('new Promise((done) => setTimeout(done, 250))')",
-      "count": 1
-    },
-    {
-      "file": "progressive-history.e2e.ts",
-      "rule": "sleep",
-      "site": "await new Promise((resolveWait) => setTimeout(resolveWait, 50))",
-      "count": 1
-    },
-    {
-      "file": "progressive-history.e2e.ts",
-      "rule": "sleep",
-      "site": "await new Promise((resolveWait) => setTimeout(resolveWait, 500))",
-      "count": 1
-    },
-    {
-      "file": "queued-stack.e2e.ts",
-      "rule": "sleep",
-      "site": "await new Promise((r) => setTimeout(r, 100))",
-      "count": 1
-    },
-    {
       "file": "selection-states.e2e.ts",
       "rule": "one-shot-read",
       "site": "expect(browser.evaluate(`({",
@@ -245,12 +179,6 @@
       "file": "selection-states.e2e.ts",
       "rule": "one-shot-read",
       "site": "expect(browser.evaluate(`document.querySelector(${JSON.stringify(selector)}) === document.activeElement && document.activeElement.matches(':focus-visible')`)).toBe(true)",
-      "count": 1
-    },
-    {
-      "file": "selection-states.e2e.ts",
-      "rule": "sleep",
-      "site": "await new Promise((done) => setTimeout(done, 250))",
       "count": 1
     },
     {
@@ -264,12 +192,6 @@
       "rule": "one-shot-read",
       "site": "expect(browser.evaluate(`document.querySelector('${input}').value`)).toBe('qz163browse')",
       "count": 1
-    },
-    {
-      "file": "skills-update.e2e.ts",
-      "rule": "sleep",
-      "site": "await new Promise((resolvePromise) => setTimeout(resolvePromise, 100))",
-      "count": 2
     },
     {
       "file": "smoke.e2e.ts",
@@ -364,37 +286,7 @@
     {
       "file": "task-views-layout.e2e.ts",
       "rule": "one-shot-read",
-      "site": "expect(browser.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true)",
-      "count": 1
-    },
-    {
-      "file": "task-views-layout.e2e.ts",
-      "rule": "one-shot-read",
       "site": "expect(browser.text('[data-slot=\"task-card\"]:first-child')).toContain('Memory')",
-      "count": 1
-    },
-    {
-      "file": "task-views-layout.e2e.ts",
-      "rule": "one-shot-read",
-      "site": "if (name === 'editor') expect(browser.evaluate(`document.querySelector('.automation-editor input[type=\"checkbox\"]').getBoundingClientRect().right <= innerWidth`)).toBe(true)",
-      "count": 1
-    },
-    {
-      "file": "task-views-layout.e2e.ts",
-      "rule": "sleep",
-      "site": "browser.evaluate('new Promise((done) => setTimeout(done, 250))')",
-      "count": 1
-    },
-    {
-      "file": "thread-scroll.e2e.ts",
-      "rule": "sleep",
-      "site": "const timeout = setTimeout(() => { observer.disconnect(); reject(new Error('live append did not render')); }, 5000);",
-      "count": 1
-    },
-    {
-      "file": "thread-scroll.e2e.ts",
-      "rule": "sleep",
-      "site": "const timeout = setTimeout(() => { observer.disconnect(); reject(new Error('textarea did not grow')); }, 5000);",
       "count": 1
     },
     {
@@ -431,18 +323,6 @@
       "file": "touch-targets.e2e.ts",
       "rule": "one-shot-read",
       "site": "expect(browser.url()).toContain('/new')",
-      "count": 1
-    },
-    {
-      "file": "touch-targets.e2e.ts",
-      "rule": "sleep",
-      "site": "await new Promise(resolve => setTimeout(resolve, 250))",
-      "count": 1
-    },
-    {
-      "file": "worker-relationships.e2e.ts",
-      "rule": "sleep",
-      "site": "await new Promise(done => setTimeout(done, 250))",
       "count": 1
     },
     {

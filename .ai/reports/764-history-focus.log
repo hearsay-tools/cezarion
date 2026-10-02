@@ -1,0 +1,58 @@
+
+> test:e2e
+> sh .ai/scripts/e2e.sh progressive-history.e2e.ts github-layout.e2e.ts -t loads exactly one page|consumes one upward intent|hands focus on|while project boards refresh then settle as ready at 1440 / light|without cached boards, settling as long names at 1440 / light
+
+[test-env] not reusing: no descriptor at /home/agent/projects/cezar/.ai/cezar/worktrees/d6e7f159-f1c6-45f4-87c6-500ec47ab925/.ai/qa/test-env.json
+[test-env] building (npm ci && VITE_CEZ_E2E=1 npm run build)
+[test-env] starting cezar on http://127.0.0.1:39707 (CEZ_DRY_RUN=1)
+[test-env] healthy after 3s
+TEST_ENV_STATUS=running
+TEST_ENV_BASE_URL=http://127.0.0.1:39707
+TEST_ENV_DESCRIPTOR=.ai/qa/test-env.json
+TEST_ENV_REUSED=0
+BROWSER_PROVIDER=agent-browser
+BROWSER_INSTALLED=1
+
+> test
+> vitest run --config packages/web/e2e/vitest.config.ts progressive-history.e2e.ts github-layout.e2e.ts -t loads exactly one page|consumes one upward intent|hands focus on|while project boards refresh then settle as ready at 1440 / light|without cached boards, settling as long names at 1440 / light
+
+
+ RUN  v4.1.10 /home/agent/projects/cezar/.ai/cezar/worktrees/d6e7f159-f1c6-45f4-87c6-500ec47ab925/packages/web/e2e
+
+ ❯ |e2e| progressive-history.e2e.ts (7 tests | 1 failed | 5 skipped) 33247ms
+     × consumes one upward intent without cascading while the boundary remains near 27454ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |e2e| progressive-history.e2e.ts > progressive long-session history > consumes one upward intent without cascading while the boundary remains near
+Error: cezar e2e: predicate never became truthy: window.__historyCycle.completed >= 1 && window.__historyCycle.pending === 0 && document.querySelector('[data-slot="history-boundary"]')?.dataset.retainedPages === '3' (failure bundle: /home/agent/projects/cezar/.ai/cezar/worktrees/d6e7f159-f1c6-45f4-87c6-500ec47ab925/.ai/qa/failures/progressive-history/consumes-one-upward-intent-without-cascading-while-the-boundary-remains-near-1)
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:543:13
+    541|     } catch (cause) {
+    542|       const bundle = this.captureFailure({ kind: 'wait-fn', predicate:…
+    543|       throw new Error(`cezar e2e: predicate never became truthy: ${js}…
+       |             ^
+    544|     }
+    545|   }
+ ❯ progressive-history.e2e.ts:357:13
+
+Caused by: Error: cezar e2e: agent-browser wait --fn window.__historyCycle.completed >= 1 && window.__historyCycle.pending === 0 && document.querySelector('[data-slot="history-boundary"]')?.dataset.retainedPages === '3' failed
+ ❯ AgentBrowser.run agent-browser.ts:487:13
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:540:12
+ ❯ progressive-history.e2e.ts:357:13
+
+Caused by: Error: Command failed: /home/agent/.cache/agent-tools/agent-browser/agent-browser-linux-x64 --namespace cez-e2e --args --no-sandbox --session e2e-progressive-history-810969 wait --fn window.__historyCycle.completed >= 1 && window.__historyCycle.pending === 0 && document.querySelector('[data-slot="history-boundary"]')?.dataset.retainedPages === '3' --json
+ ❯ AgentBrowser.run agent-browser.ts:479:16
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:540:12
+ ❯ progressive-history.e2e.ts:357:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { status: 1, signal: null, output: [ null, '{"success":false,"data":null,"error":"Wait timed out after 25000ms"}\n', '' ], pid: 814493, stdout: '{"success":false,"data":null,"error":"Wait timed out after 25000ms"}\n', stderr: '' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  1 failed | 5 passed | 36 skipped (42)
+   Start at  13:49:10
+   Duration  44.38s (transform 199ms, setup 105ms, import 196ms, tests 43.56s, environment 0ms)
+
+TEST_E2E_STATUS=failed

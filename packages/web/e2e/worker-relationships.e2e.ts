@@ -6,6 +6,7 @@ import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, expect, it } from 'vitest'
+import { waitForHealth } from './poll'
 import { stopFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 
@@ -59,11 +60,8 @@ beforeAll(async () => {
   base = `http://localhost:${port}`
   server = spawn(process.execPath, [cezarCli, 'serve', '--repo', root, '--port', String(port), '--no-open'], { env: fixtureServeEnv(root, { CEZ_DELEGATION: '0', CEZ_AUTONAME: '0' }), stdio: ['ignore', 'pipe', 'pipe'] })
   server.stdout?.on('data', chunk => { diagnostic += String(chunk) }); server.stderr?.on('data', chunk => { diagnostic += String(chunk) })
-  for (let attempt = 0; ; attempt++) {
-    try { if ((await fetch(`${base}/api/v1/health`)).ok) break } catch { /* starting */ }
-    if (attempt === 80) throw Error(`Fixture boot failed: ${diagnostic}`)
-    await new Promise(done => setTimeout(done, 250))
-  }
+  try { await waitForHealth(base, 'worker-relationships fixture', { timeoutMs: 20_000 }) }
+  catch (error) { throw new Error(`${String(error)}\n${diagnostic}`, { cause: error }) }
   project = await bootProjectId(base)
   browser = AgentBrowser.open(`e2e-workers-${process.pid}`)
   browser.setViewport(1440, 900)
