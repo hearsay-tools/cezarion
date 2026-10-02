@@ -493,7 +493,7 @@ describe('delegation service durable authority', () => {
     expect(await f.service.cancelWait(f.caller, { waitId })).toEqual(settled);
     expect(f.store.getRun(f.parent.id)).toEqual(before);
   });
-  it('collect settles a worker whose crashed generation left no live process (#469)', async () => {
+  it('collect settles a worker whose crashed generation left no live process (#469)', { timeout: 15_000 }, async () => {
     const { workerId } = await f.service.spawn(f.caller, input());
     const generation = f.store.commitWorkerExecutionStart(workerId);
     f.store.updateRun(workerId, { status: 'failed', finishedAt: new Date().toISOString() });
@@ -505,7 +505,10 @@ describe('delegation service durable authority', () => {
     const reopened = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true }); const manager = new RunManager(reopened, f.root);
     f.service.registerProject({ id: 'project', root: f.root, store: reopened, manager });
     try {
-      expect(await f.service.collect(f.caller, { workerId })).toMatchObject({ settled: true });
+      // Under full-suite load the host-wide process scan can transiently return alive/unknown.
+      // collect caches that conservative result for 2 s; poll it (not the finalizer) so the
+      // assertion waits for proof of termination and still catches a missing collect hook (#703).
+      await expect.poll(() => f.service.collect(f.caller, { workerId }), { timeout: 10_000, interval: 250 }).toMatchObject({ settled: true });
       expect(reopened.readWorkerExecution(workerId)).toEqual({ generation, phase: 'complete' });
     } finally { manager.dispose(); reopened.flush(); }
   });
