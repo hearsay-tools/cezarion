@@ -378,35 +378,50 @@ describe('progressive long-session history', () => {
     settleNamedHistoryAnchor(initial.key)
     const before = parkAndSettleHistoryStart()
     // Observe throughout response consumption and anchoring, not just at request initiation.
-    browser.evaluate(`(() => {
-      const nativeFetch = window.fetch;
-      window.__historyCycle = { started: 0, completed: 0, pending: 0 };
-      window.fetch = async (...args) => {
-        const url = new URL(typeof args[0] === 'string' ? args[0] : args[0].url, location.href);
-        const history = url.pathname.endsWith('/runs/${RUN_ID}/history') && url.searchParams.has('cursor');
-        if (!history) return nativeFetch(...args);
-        const cycle = window.__historyCycle;
-        cycle.started++; cycle.pending++;
-        try {
-          const response = await nativeFetch(...args);
-          await response.clone().text();
-          cycle.completed++;
-          return response;
-        } finally { cycle.pending--; }
-      };
-      const main = document.querySelector('[data-slot="main"]');
-      main.dispatchEvent(new WheelEvent('wheel', { deltaY: -120, bubbles: true }));
-    })()`)
-    browser.waitForValue(`({ cycle: window.__historyCycle, pages: document.querySelector('[data-slot="history-boundary"]')?.dataset.retainedPages, top: document.querySelector('[data-slot="main"]')?.scrollTop, requests: ${cursorRequestCount} })`, (s: { cycle: { completed: number; pending: number }; pages: string }) => s.cycle.completed >= 1 && s.cycle.pending === 0 && s.pages === '3')
-    waitUntilCockpitIdle()
-    const after = settleNamedHistoryAnchor(before.key)
-    expect(Math.abs(after.top - before.top), JSON.stringify({ before, after })).toBeLessThan(2)
-    const cycle = browser.waitForStable(`window.__historyCycle`, { holdMs: 200 })
-    expect(cycle).toEqual({ started: 1, completed: 1, pending: 0 })
-    expect(Number(browser.evaluate(cursorRequestCount))).toBe(2)
+    let fetchRestored = false
+    try {
+      browser.evaluate(`(() => {
+        const nativeFetch = window.fetch;
+        window.__historyFetchBefore = nativeFetch;
+        window.__historyCycle = { started: 0, completed: 0, pending: 0 };
+        window.fetch = async (...args) => {
+          const url = new URL(typeof args[0] === 'string' ? args[0] : args[0].url, location.href);
+          const history = url.pathname.endsWith('/runs/${RUN_ID}/history') && url.searchParams.has('cursor');
+          if (!history) return nativeFetch(...args);
+          const cycle = window.__historyCycle;
+          cycle.started++; cycle.pending++;
+          try {
+            const response = await nativeFetch(...args);
+            await response.clone().text();
+            cycle.completed++;
+            return response;
+          } finally { cycle.pending--; }
+        };
+        const main = document.querySelector('[data-slot="main"]');
+        main.dispatchEvent(new WheelEvent('wheel', { deltaY: -120, bubbles: true }));
+      })()`)
+      browser.waitForValue(`({ cycle: window.__historyCycle, pages: document.querySelector('[data-slot="history-boundary"]')?.dataset.retainedPages, top: document.querySelector('[data-slot="main"]')?.scrollTop, requests: ${cursorRequestCount} })`, (s: { cycle: { completed: number; pending: number }; pages: string }) => s.cycle.completed >= 1 && s.cycle.pending === 0 && s.pages === '3')
+      waitUntilCockpitIdle()
+      const after = settleNamedHistoryAnchor(before.key)
+      expect(Math.abs(after.top - before.top), JSON.stringify({ before, after })).toBeLessThan(2)
+      const cycle = browser.waitForStable(`window.__historyCycle`, { holdMs: 200 })
+      expect(cycle).toEqual({ started: 1, completed: 1, pending: 0 })
+      expect(Number(browser.evaluate(cursorRequestCount))).toBe(2)
+    } finally {
+      fetchRestored = browser.evaluate(`(() => {
+        const previous = window.__historyFetchBefore;
+        if (previous) window.fetch = previous;
+        const restored = window.fetch === previous;
+        delete window.__historyFetchBefore;
+        delete window.__historyCycle;
+        return restored;
+      })()`) as boolean
+    }
+    expect(fetchRestored).toBe(true)
   })
 
   it('caps retained pages at five and jumps directly back to a fresh tail', () => {
+    expect(browser.evaluate(`window.__historyCycle === undefined && window.__historyFetchBefore === undefined`)).toBe(true)
     let page = Number(browser.evaluate(
       `document.querySelector('[data-slot="history-boundary"]')?.dataset.retainedPages`,
     ))
