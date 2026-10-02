@@ -1,9 +1,10 @@
+import { useMemo } from 'react'
 import { Outlet, useParams } from 'react-router'
 
 import { useHealth, useRun } from '@/api/queries'
 
 import { PreviewSplit } from './preview-split'
-import { PreviewPaneContext, usePreviewPaneState } from './preview-state'
+import { PreviewPaneContext, usePreviewPaneState, worktreeRemoved } from './preview-state'
 
 /**
  * The layout every task tab sits in (#781). It owns the preview pane's state and the split, so
@@ -15,16 +16,15 @@ import { PreviewPaneContext, usePreviewPaneState } from './preview-state'
  */
 export function TaskPreviewLayout() {
   const { id } = useParams<{ id: string }>()
-  // One pane per task: another task starts with it closed.
-  return <TaskPreviewScope key={id} id={id} />
-}
-
-function TaskPreviewScope({ id }: { id: string | undefined }) {
   const run = useRun(id)
   const enabled = useHealth().data?.capabilities?.preview === true
-  const pane = usePreviewPaneState()
+  // One pane per task: another task starts with it closed. Only the pane state resets, so moving
+  // between tasks never remounts the tab (the run header keeps its per-run state across it).
+  const pane = usePreviewPaneState(id)
+  const removed = run.data ? worktreeRemoved(run.data) : false
+  const value = useMemo(() => ({ ...pane, worktreeRemoved: removed }), [pane, removed])
   return (
-    <PreviewPaneContext.Provider value={enabled ? pane : null}>
+    <PreviewPaneContext.Provider value={enabled ? value : null}>
       <PreviewSplit run={enabled ? run.data : undefined} state={pane}>
         <Outlet />
       </PreviewSplit>

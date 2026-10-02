@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useMemo, useState } from 'react'
 
-import type { PreviewServer } from '@open-mercato/cezar-api-client'
+import type { ApiRun, PreviewServer } from '@open-mercato/cezar-api-client'
 import type { StatusDotTone } from '@/components/status-dot'
 import { shortAge } from '@/lib/format'
 
@@ -28,7 +28,20 @@ export interface PreviewPane {
   live: boolean
   /** The server the pane is showing, when it is showing one. */
   port?: number
+  /** The task's worktree is gone: every card reads 5.15 "worktree removed" and offers nothing. */
+  worktreeRemoved?: boolean
   openPane(request: PreviewOpenRequest): void
+}
+
+/**
+ * Whether the task's worktree is gone, from the run record alone: removed (no path), reclaimed by
+ * retention, or a destroyed owned worker's checkout. Continue can restore a reclaimed worktree,
+ * and the cards come back with it.
+ */
+export function worktreeRemoved(run: ApiRun): boolean {
+  if (!run.worktreePath || run.worktreeReclaimedAt) return true
+  const destroy = run.delegation?.role === 'worker' ? run.delegation.destroy : undefined
+  return destroy !== undefined && !destroy.remaining.includes('worktree')
 }
 
 /** How a registered server reads right now: the dot and the words, on the card and in the pane's lists. */
@@ -103,13 +116,25 @@ export interface PreviewPaneState extends PreviewPane {
   setPort(port: number | undefined): void
 }
 
-/** The task view's pane state. The pane (a separate component) reads and drives it. */
-export function usePreviewPaneState(): PreviewPaneState {
+/**
+ * The task view's pane state. The pane (a separate component) reads and drives it. A new `scope`
+ * (another task) starts with the pane closed. Only this state resets: the task's tabs stay mounted.
+ */
+export function usePreviewPaneState(scope?: string): PreviewPaneState {
   const [open, setOpen] = useState(false)
   const [live, setLive] = useState(false)
   const [port, setPort] = useState<number | undefined>(undefined)
   const [session, setSession] = useState(false)
   const [request, setRequest] = useState<PreviewOpenRequest | undefined>(undefined)
+  const [current, setCurrent] = useState(scope)
+  if (current !== scope) {
+    setCurrent(scope)
+    setOpen(false)
+    setLive(false)
+    setPort(undefined)
+    setSession(false)
+    setRequest(undefined)
+  }
   const openPane = useCallback((next: PreviewOpenRequest) => {
     setRequest({ ...next })
     if (next.port !== undefined) setPort(next.port)

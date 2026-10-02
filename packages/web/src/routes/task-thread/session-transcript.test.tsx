@@ -517,6 +517,27 @@ describe('SessionTranscript', () => {
       expect(openPane).toHaveBeenCalledWith({ port: 5173, run: true })
     })
 
+    it('reads worktree removed, with no action, once the task worktree is gone (5.15)', async () => {
+      const openPane = vi.fn()
+      const stopped: ThreadEntry = { ...preview, state: 'stopped' } as ThreadEntry
+      vi.stubGlobal('fetch', vi.fn(async () =>
+        new Response(JSON.stringify({ capabilities: { localHandoff: true, followups: false, singleProject: false, tokenMetrics: true, preview: true } }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })))
+      render(
+        <QueryClientProvider client={createQueryClient()}>
+          <PreviewPaneContext.Provider value={{ open: false, live: false, openPane, worktreeRemoved: true }}>
+            <SessionTranscript runId="r1" viewId="main" sections={[{ id: 's', entries: [preview, { ...stopped, id: 'preview-server:5174', server: { ...preview.server, port: 5174 } } as ThreadEntry]} ]} mode="panel" />
+          </PreviewPaneContext.Provider>
+        </QueryClientProvider>,
+      )
+      expect((await screen.findAllByText('worktree removed')).length).toBe(2)
+      expect(document.querySelectorAll('[data-slot="preview-server-card"][data-state="unavailable"]').length).toBe(2)
+      expect(screen.queryByRole('button')).toBeNull()
+      expect(screen.queryByText(/in this task's worktree/)).toBeNull()
+    })
+
     it('shows the card with no action when preview is off or the view hosts no pane', async () => {
       renderPreview(false, { open: false, live: false, openPane: vi.fn() })
       expect(await screen.findByText('registered · not started')).toBeTruthy()

@@ -498,9 +498,13 @@ function ThreadEntryRenderer({
 function PreviewServerEntry({ entry }: { entry: ThreadPreviewServer }) {
   const pane = usePreviewPane()
   const available = useHealth().data?.capabilities?.preview === true
+  // 5.15: with the worktree gone, no card may offer to run the command "in this task's worktree".
+  const shown: ThreadPreviewServer = pane?.worktreeRemoved
+    ? { kind: 'preview-server', id: entry.id, server: entry.server, state: 'unavailable' }
+    : entry
   return (
     <PreviewServerCard
-      entry={entry}
+      entry={shown}
       inPreview={pane !== null && pane.open && pane.port === entry.server.port}
       onOpen={pane !== null && available ? pane.openPane : undefined}
     />
