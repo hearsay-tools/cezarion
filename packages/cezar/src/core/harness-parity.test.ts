@@ -41,7 +41,7 @@ import { agentTmpDir, resolveAgentTmpDir } from '../runs/agent-tmpdir.ts';
 import { appendTurnText } from '../workflows/run.ts';
 import { cleanupCheckpoint, seedSettledFamily } from '../workflows/delegation-reconcile.testkit.ts';
 import { supportsProfiles } from './agent-profiles.ts';
-import type { WorkflowDef } from '../workflows/types.ts';
+import { plannedWorkflow, skillTaskSteps, type WorkflowDef } from '../workflows/types.ts';
 import { workerWorkflowHash, type WorkerAccountBinding, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
 import {
   withOwnedInputRun,
@@ -406,6 +406,7 @@ const CONTROL_CRITERIA = [
   { id: 'R26', scenario: 'ask-resume' },
   // workflows/ci-wait-refusal.test.ts: settled worker wake, private CI IPC, then delivery.
   { id: 'R27', scenario: 'hold' },
+  { id: 'R28', scenario: 'done' },
 ] as const;
 
 /**
@@ -949,6 +950,31 @@ describe('harness parity — owned input run tier', () => {
         if (run.delegation?.role !== 'worker') throw new Error('expected worker');
         expect(readFileSync(cwdFile, 'utf8')).toBe(run.delegation.workspace.path);
       }, { workflowDef });
+    }, 60_000);
+
+    it(`${backend} R28 runs a --skill worker with the skill in its system prompt and no parent skill (#778)`, async () => {
+      const workflowDef = plannedWorkflow(skillTaskSteps('worker-skill').map(step => ({ ...step, runner: backend })));
+      const identity: WorkerExecutionIdentity = { kind: 'internal', workflowHash: workerWorkflowHash(workflowDef) };
+      const name = 'worker-skill';
+      await withOwnedInputRun(backend, 'done', async ({ store, manager, repoRoot, runId, parentRunId }) => {
+        const skillsDir = join(repoRoot, '.ai/cezar/skills');
+        mkdirSync(skillsDir, { recursive: true });
+        writeFileSync(join(skillsDir, 'worker-skill.md'), 'WORKER SKILL BODY');
+        store.updateRun(parentRunId, { systemPrompt: 'Selected skill: /parent-skill\nPARENT SKILL BODY\nparent extra' });
+        store.updateRun(runId, { systemPrompt: 'parent extra' });
+        manager.enqueueOwnedRun(runId);
+        await waitFor(() => !manager.isActive(runId), 30_000);
+        const run = store.getRun(runId)!;
+        expect(run.error).toBeUndefined();
+        expect(run.steps.map(step => ({ id: step.id, status: step.status }))).toEqual([{ id: 'task', status: 'done' }]);
+        if (run.delegation?.role !== 'worker') throw new Error('expected worker');
+        // Read the backend mock's argv/requests and stdin in the worker's own cwd.
+        // Normalized events cannot prove that the skill reached the provider.
+        const recording = readRecording(run.delegation.workspace.path, name).join('\n');
+        expect(recording).toContain('WORKER SKILL BODY');
+        expect(recording).toContain('parent extra');
+        expect(recording).not.toContain('Selected skill: /parent-skill');
+      }, { workflowDef, identity, env: probeEnv(name) });
     }, 60_000);
 
     it(`${backend} R14 runs an accepted mixed-runner chain under per-step identity, each step on its own pinned account (#452)`, async () => {
