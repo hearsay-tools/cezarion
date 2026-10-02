@@ -775,12 +775,6 @@ const workerProcessRecordSchema = z.object({ generation: z.string().uuid(), cont
   processes: z.array(recordedProcessSchema).max(WORKER_PROCESS_CAP) }).strict();
 const startToken = (pid: number) => { const token = processStartToken(pid); return token === undefined ? {} : { startToken: token }; };
 
-/**
- * File-backed run store: `runs.json` index (atomic tmp+rename writes, the
- * pattern from @cezar/core's IssueStore) plus one append-only NDJSON event
- * file per run. Also the in-process event bus the SSE endpoints subscribe to:
- * emits `('run', RunRecord)` and `('event', { runId, event: RunEvent })`.
- */
 /** The bulk-archive sweep's one predicate (#780): finished, not archived, not scheduled (a
  *  `failed` run waiting out a usage limit), not an owned worker (those leave with their parent),
  *  then filtered by pin state. Mirrored clause for clause by `isSweepable` in the cockpit's
@@ -794,6 +788,12 @@ export function isSweepable(run: RunRecord, scope?: ArchiveFinishedScope): boole
   return true;
 }
 
+/**
+ * File-backed run store: `runs.json` index (atomic tmp+rename writes, the
+ * pattern from @cezar/core's IssueStore) plus one append-only NDJSON event
+ * file per run. Also the in-process event bus the SSE endpoints subscribe to:
+ * emits `('run', RunRecord)` and `('event', { runId, event: RunEvent })`.
+ */
 export class RunStore extends EventEmitter {
   private runs = new Map<string, RunRecord>();
   private saveTimer: NodeJS.Timeout | null = null;

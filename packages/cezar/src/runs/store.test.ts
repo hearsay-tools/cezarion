@@ -2101,8 +2101,8 @@ describe('RunStore — read receipts (#unread-done-items)', () => {
   it('archiving retires a pending usage-limit resume — one run; the sweep skips scheduled runs', () => {
     // Archiving is how a user resigns from a task, so an archived run can never carry a promise
     // to resume itself (spec 2026-08-03-auto-resume-after-usage-limit). The rule lives in the
-    // store because the "Archive finished" SWEEP never goes through the archive route, and a
-    // user who archives fifty finished tasks has resigned from all fifty.
+    // store because every archive path (the route, a parent's cascade) goes through
+    // `applyArchived`; the sweep itself now skips scheduled runs (#780).
     const store = RunStore.open(dataDir);
     const limited = () => {
       const id = finishedRun(store, 'failed');

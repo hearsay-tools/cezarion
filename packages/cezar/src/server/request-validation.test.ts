@@ -199,6 +199,16 @@ describe('request validation bounds (#429)', () => {
       expect(scoped.status).toBe(200);
       expect(await scoped.json()).toEqual({ archived: 1, ids: [pinned], pinnedIds: [pinned] });
 
+      const mal = await apiRequest(app, path, {
+        method: 'POST', body: '{"scope":', headers: { 'content-type': 'application/json' },
+      });
+      expect(mal.status).toBe(400);
+
+      const unpinnedRes = await postJson(path, { scope: 'unpinned' });
+      expect(unpinnedRes.status).toBe(200);
+      expect(await unpinnedRes.json()).toEqual({ archived: 1, ids: [loose], pinnedIds: [] });
+      store.setArchived(loose, false);
+
       const all = await apiRequest(app, path, { method: 'POST' });
       expect(all.status).toBe(200);
       expect(await all.json()).toEqual({ archived: 1, ids: [loose], pinnedIds: [] });

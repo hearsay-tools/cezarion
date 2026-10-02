@@ -146,7 +146,7 @@ export const OPERATIONS: Record<string, Operation> = {
   finish: { args: '<id>', description: 'Close a waiting session as done.', positionals: [1, 1], flags: {} },
   archive: { args: '<id>', description: 'Archive a task.', positionals: [1, 1], flags: {} },
   unarchive: { args: '<id>', description: 'Restore an archived task.', positionals: [1, 1], flags: {} },
-  'archive-finished': { args: '', description: 'Archive all finished tasks.', positionals: [0, 0], flags: {} },
+  'archive-finished': { args: '', description: 'Archive finished tasks (scheduled runs and owned workers excluded).', positionals: [0, 0], flags: {} },
   diff: {
     args: '<id>',
     description: "Show a task's changes.",
