@@ -1,0 +1,16 @@
+
+> test
+> vitest run --run packages/web/src/test/e2e-wait-discipline.test.ts packages/cezar/src/application-update/npm-process.test.ts
+
+
+ RUN  v4.1.10 /home/agent/projects/cezar/.ai/cezar/worktrees/d6e7f159-f1c6-45f4-87c6-500ec47ab925
+
+ ✓ |server| src/application-update/npm-process.test.ts (7 tests) 261ms
+ ✓ |web| src/test/e2e-wait-discipline.test.ts (30 tests) 892ms
+     ✓ has no wait-discipline site outside the baseline, and the baseline names no site that is gone  380ms
+
+ Test Files  2 passed (2)
+      Tests  37 passed (37)
+   Start at  17:07:01
+   Duration  1.11s (transform 101ms, setup 63ms, import 79ms, tests 1.15s, environment 0ms)
+
