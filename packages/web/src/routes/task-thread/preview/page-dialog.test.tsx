@@ -23,6 +23,41 @@ describe('PageDialog (5.13)', () => {
     expect(onResult).toHaveBeenCalledWith({ accept: false })
   })
 
+  it('leaves an Esc that another layer already handled to that layer', () => {
+    const onResult = vi.fn()
+    render(<PageDialog dialog={{ t: 'dialog', type: 'confirm', message: 'Sure?', origin: 'localhost:5173' }} onResult={onResult} />)
+    // A Radix layer (the command palette, a popover) claims Esc on the document, then the dialog sees it.
+    const claim = (event: KeyboardEvent) => event.preventDefault()
+    document.addEventListener('keydown', claim, true)
+    fireEvent.keyDown(document.body, { key: 'Escape' })
+    document.removeEventListener('keydown', claim, true)
+    expect(onResult).not.toHaveBeenCalled()
+  })
+
+  it('ignores an Esc pressed in another part of the cockpit', () => {
+    const onResult = vi.fn()
+    render(
+      <>
+        <input aria-label="Elsewhere" />
+        <PageDialog dialog={{ t: 'dialog', type: 'confirm', message: 'Sure?', origin: 'localhost:5173' }} onResult={onResult} />
+      </>,
+    )
+    fireEvent.keyDown(screen.getByLabelText('Elsewhere'), { key: 'Escape' })
+    expect(onResult).not.toHaveBeenCalled()
+  })
+
+  it('answers an Esc pressed anywhere inside the preview pane', () => {
+    const onResult = vi.fn()
+    render(
+      <section data-slot="preview-pane-body">
+        <input aria-label="Address" />
+        <PageDialog dialog={{ t: 'dialog', type: 'confirm', message: 'Sure?', origin: 'localhost:5173' }} onResult={onResult} />
+      </section>,
+    )
+    fireEvent.keyDown(screen.getByLabelText('Address'), { key: 'Escape' })
+    expect(onResult).toHaveBeenCalledWith({ accept: false })
+  })
+
   it('sends the typed answer of a prompt on OK', () => {
     const onResult = vi.fn()
     render(<PageDialog dialog={{ t: 'dialog', type: 'prompt', message: 'Name?', defaultPrompt: 'Ada', origin: 'localhost:5173' }} onResult={onResult} />)

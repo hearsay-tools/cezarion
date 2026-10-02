@@ -18,12 +18,16 @@ export function PageDialog({
   useEffect(() => {
     ;(dialog.type === 'prompt' ? field.current : ok.current)?.focus()
   }, [dialog.type])
-  // The page is frozen until it is answered, so Esc cancels wherever focus sits.
+  // The page is frozen until it is answered, so Esc cancels wherever focus sits in the pane. An
+  // Esc another layer already handled (the palette, a popover) or one aimed at the rest of the
+  // cockpit is not an answer.
   const answer = useRef(onResult)
   answer.current = onResult
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return
+      if (event.key !== 'Escape' || event.defaultPrevented) return
+      const target = event.target instanceof Element ? event.target : null
+      if (target && target !== document.body && !target.closest('[data-slot="preview-pane-body"], [data-slot="preview-page-dialog"]')) return
       event.stopPropagation()
       answer.current({ accept: false })
     }

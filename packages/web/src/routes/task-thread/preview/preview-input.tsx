@@ -112,6 +112,9 @@ export function PreviewInput({ scale, send }: { scale: number; send: (message: P
     const message = keyToMessage(event.nativeEvent)
     if (!message) return
     event.preventDefault()
+    // Whatever the page receives is not the cockpit's: its bare-key and Alt shortcuts listen on
+    // `window` and would fire on the same keystroke (`c` opens a new task, Alt+A approves).
+    event.stopPropagation()
     send(message)
   }
 

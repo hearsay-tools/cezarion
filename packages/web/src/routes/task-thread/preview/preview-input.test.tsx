@@ -1,7 +1,9 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 
 import type { PreviewClientMessage } from '@open-mercato/cezar-api-client'
+
+import { useKeyShortcut } from '@/lib/use-command-shortcut'
 
 import { PreviewInput } from './preview-input'
 
@@ -94,6 +96,48 @@ describe('PreviewInput', () => {
     expect(fireEvent.keyDown(layer, { key: 'v', ctrlKey: true })).toBe(true)
     expect(fireEvent.keyDown(layer, { key: 'k', metaKey: true })).toBe(true)
     expect(send).not.toHaveBeenCalled()
+  })
+
+  it('keeps the keys the page receives away from the cockpit window shortcuts', () => {
+    const newTask = vi.fn()
+    const quickReply = vi.fn()
+    // The two window-global listeners that fire on a bare key: `c` opens a new task, and the
+    // composer sends a canned approval on Alt+A / Alt+C (matched by `event.code`).
+    function CockpitShortcuts() {
+      useKeyShortcut('c', newTask)
+      return null
+    }
+    const onWindowKeyDown = (event: KeyboardEvent) => {
+      if (event.altKey && (event.code === 'KeyA' || event.code === 'KeyC')) quickReply(event.code)
+    }
+    window.addEventListener('keydown', onWindowKeyDown)
+    onTestFinished(() => window.removeEventListener('keydown', onWindowKeyDown))
+    const send = vi.fn<(message: PreviewClientMessage) => void>()
+    render(<><CockpitShortcuts /><PreviewInput scale={1} send={send} /></>)
+    const layer = screen.getByRole('application')
+
+    fireEvent.keyDown(layer, { key: 'c', code: 'KeyC', keyCode: 67 })
+    fireEvent.keyDown(layer, { key: 'å', code: 'KeyA', keyCode: 65, altKey: true })
+    expect(send).toHaveBeenCalledTimes(2)
+    expect(newTask).not.toHaveBeenCalled()
+    expect(quickReply).not.toHaveBeenCalled()
+
+    // The page gets keyup too, and it stays off the window as well.
+    const onWindowKeyUp = vi.fn()
+    window.addEventListener('keyup', onWindowKeyUp)
+    onTestFinished(() => window.removeEventListener('keyup', onWindowKeyUp))
+    fireEvent.keyUp(layer, { key: 'c', code: 'KeyC', keyCode: 67 })
+    expect(onWindowKeyUp).not.toHaveBeenCalled()
+
+    // Cmd/Ctrl+K and paste stay with cezar: they are not sent, so they keep going.
+    const seen = vi.fn()
+    window.addEventListener('keydown', seen)
+    onTestFinished(() => window.removeEventListener('keydown', seen))
+    send.mockClear()
+    fireEvent.keyDown(layer, { key: 'k', ctrlKey: true })
+    fireEvent.keyDown(layer, { key: 'v', metaKey: true })
+    expect(send).not.toHaveBeenCalled()
+    expect(seen).toHaveBeenCalledTimes(2)
   })
 
   it('sends pasted text as insertText only while the layer has focus', () => {
