@@ -72,6 +72,8 @@ interface Lifetime {
   deadline: number
   remaining: number
   holds: Set<'hover' | 'focus'>
+  /** Where focus was before it entered the toast, so the action can hand it back. */
+  returnFocus: Element | null
 }
 const lifetimes = new Map<number, Lifetime>()
 
@@ -107,6 +109,19 @@ function hold(id: number, reason: 'hover' | 'focus', on: boolean): void {
   }
 }
 
+/** Dismiss through the action button: once only, and keyboard focus goes back to where it
+ *  came from instead of dropping to <body> when the button unmounts. Focus is never moved
+ *  INTO a toast, only returned out of one. */
+function activate(id: number, toastEl: Element | null, action: ToastAction): void {
+  const life = lifetimes.get(id)
+  if (!life) return
+  const back = life.returnFocus
+  startExit(id)
+  if (back instanceof HTMLElement && back.isConnected && toastEl?.contains(document.activeElement))
+    back.focus()
+  action.onAction()
+}
+
 /** Show a transient message. `danger` tone for failures — the message should be the server's
  *  own words wherever one exists (see ApiError). An `action` adds a button that runs
  *  `onAction` and dismisses the toast; such a toast lives longer and pauses while hovered or
@@ -130,6 +145,7 @@ export function toast(
     deadline: 0,
     remaining: opts.action ? ACTION_TOAST_MS : TOAST_MS,
     holds: new Set(),
+    returnFocus: null,
   }
   lifetimes.set(item.id, life)
   runLifetime(item.id, life)
@@ -160,53 +176,62 @@ export function Toaster() {
       // the bug moved rather than fixed; `md:` is where that header stops rendering.
       className="pointer-events-none fixed top-[calc(66px+env(safe-area-inset-top))] right-[calc(16px+env(safe-area-inset-right))] z-[60] flex flex-col items-end gap-2 md:top-[calc(16px+env(safe-area-inset-top))]"
     >
-      {current.map((item) => (
-        <div
-          key={item.id}
-          role="status"
-          data-slot="toast"
-          data-tone={item.tone}
-          data-state={item.exiting ? 'closed' : 'open'}
-          {...(item.action
-            ? {
-                onPointerEnter: () => hold(item.id, 'hover', true),
-                onPointerLeave: () => hold(item.id, 'hover', false),
-                onFocus: () => hold(item.id, 'focus', true),
-                onBlur: (e: FocusEvent<HTMLDivElement>) => {
-                  if (!e.currentTarget.contains(e.relatedTarget as Node | null))
-                    hold(item.id, 'focus', false)
-                },
-              }
-            : {})}
-          className={cn(
-            'pointer-events-auto max-w-[min(360px,calc(100vw-32px))] rounded-md px-3.5 py-2.5 text-[13px] font-medium shadow-modal',
-            // tw-animate-css utilities (imported in styles/index.css), the same vocabulary the
-            // shadcn primitives use. motion-safe: so `prefers-reduced-motion` keeps the instant
-            // appear/disappear it had before.
-            'motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-right-4 motion-safe:duration-200',
-            'motion-safe:data-[state=closed]:animate-out motion-safe:data-[state=closed]:fade-out-0 motion-safe:data-[state=closed]:slide-out-to-right-4',
-            item.tone === 'danger'
-              ? 'bg-danger text-danger-foreground'
-              : 'bg-contrast text-contrast-foreground',
-            item.action && 'flex items-center',
-          )}
-        >
-          {item.message}
-          {item.action ? (
-            <button
-              type="button"
-              data-slot="toast-action"
-              className="ml-3 shrink-0 cursor-pointer font-semibold text-inherit underline underline-offset-2"
-              onClick={() => {
-                item.action!.onAction()
-                startExit(item.id)
-              }}
-            >
-              {item.action.label}
-            </button>
-          ) : null}
-        </div>
-      ))}
+      {current.map((item) => {
+        const action = item.action
+        return (
+          <div
+            key={item.id}
+            role="status"
+            data-slot="toast"
+            data-tone={item.tone}
+            data-state={item.exiting ? 'closed' : 'open'}
+            {...(item.action
+              ? {
+                  onPointerEnter: () => hold(item.id, 'hover', true),
+                  onPointerLeave: () => hold(item.id, 'hover', false),
+                  onFocus: (e: FocusEvent<HTMLDivElement>) => {
+                    const from = e.relatedTarget as Node | null
+                    const life = lifetimes.get(item.id)
+                    if (life && from instanceof Element && !e.currentTarget.contains(from))
+                      life.returnFocus = from
+                    hold(item.id, 'focus', true)
+                  },
+                  onBlur: (e: FocusEvent<HTMLDivElement>) => {
+                    if (!e.currentTarget.contains(e.relatedTarget as Node | null))
+                      hold(item.id, 'focus', false)
+                  },
+                }
+              : {})}
+            className={cn(
+              'pointer-events-auto max-w-[min(360px,calc(100vw-32px))] rounded-md px-3.5 py-2.5 text-[13px] font-medium shadow-modal',
+              // tw-animate-css utilities (imported in styles/index.css), the same vocabulary the
+              // shadcn primitives use. motion-safe: so `prefers-reduced-motion` keeps the instant
+              // appear/disappear it had before.
+              'motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-right-4 motion-safe:duration-200',
+              'motion-safe:data-[state=closed]:animate-out motion-safe:data-[state=closed]:fade-out-0 motion-safe:data-[state=closed]:slide-out-to-right-4',
+              item.tone === 'danger'
+                ? 'bg-danger text-danger-foreground'
+                : 'bg-contrast text-contrast-foreground',
+              item.action && 'flex items-center',
+            )}
+          >
+            {item.message}
+            {action ? (
+              <button
+                type="button"
+                data-slot="toast-action"
+                className="ml-3 shrink-0 cursor-pointer rounded-[3px] font-semibold text-inherit underline underline-offset-2 outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-current"
+                onClick={(e) => {
+                  if (item.exiting) return
+                  activate(item.id, e.currentTarget.closest('[data-slot="toast"]'), action)
+                }}
+              >
+                {action.label}
+              </button>
+            ) : null}
+          </div>
+        )
+      })}
     </div>
   )
 }
