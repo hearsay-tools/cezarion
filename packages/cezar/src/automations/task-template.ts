@@ -154,7 +154,9 @@ export async function launchScheduledRun(options: {
   return { runId: first.id };
 }
 
-/** Reserved receipts are reconciled against additive run provenance after restart. */
+/** Reserved receipts are reconciled against additive run provenance after restart. Reservations
+ *  this process has in flight are skipped: a lazily built project context reconciles while the
+ *  launch that asked for it is still running. */
 export function reconcileAutomationReceipts(automationStore: AutomationStore, runStore: RunStore): number {
   let reconciled = 0;
   const byReceipt = new Map(runStore.listRuns().flatMap((run) => {
@@ -163,6 +165,8 @@ export function reconcileAutomationReceipts(automationStore: AutomationStore, ru
   }));
   for (const receipt of automationStore.latestReceipts().values()) {
     if (receipt.status !== 'reserved') continue;
+    // A launch this process is still running is not a crash leftover; its launcher settles it.
+    if (automationStore.isReservationInFlight(receipt.receiptId)) continue;
     const runId = byReceipt.get(receipt.receiptId);
     const error = 'Cezar restarted before run creation completed; explicit retry is available.';
     automationStore.appendReceipt({
@@ -212,12 +216,12 @@ export function rebaselineIdleAutomations(
     if (!definition.enabled || definition.kind !== 'github') continue;
     const state = automationStore.state(definition.id) ?? {};
     const lookbackMs = (definition.filters?.lookbackDays ?? 7) * 86_400_000;
-    // Idle since the last success, or — for a poll enabled but not yet due — since its enable
-    // baseline. Measuring a never-polled poll from nothing would re-baseline it on every restart
-    // inside its first interval, dropping the events since the enable (a deviation from upstream,
-    // which reads `lastSuccessAt` alone).
-    const referenceIso = state.lastSuccessAt ?? state.baselineAt;
-    const reference = referenceIso ? Date.parse(referenceIso) : Number.NaN;
+    // Idle since the LATER of the last success and the enable baseline. `enable` writes a fresh
+    // `baselineAt` but no `lastSuccessAt` (and keeps a stale one on a re-enable), so measuring
+    // from `lastSuccessAt` alone would re-baseline a poll on every restart inside its first
+    // interval, dropping the events since the enable (a deviation from upstream).
+    const instants = [state.lastSuccessAt, state.baselineAt].map((iso) => iso ? Date.parse(iso) : Number.NaN).filter(Number.isFinite);
+    const reference = instants.length ? Math.max(...instants) : Number.NaN;
     if (Number.isFinite(reference) && now - reference <= lookbackMs) continue;
     const lastSuccess = state.lastSuccessAt ? Date.parse(state.lastSuccessAt) : Number.NaN;
     const idleDays = Number.isFinite(lastSuccess) ? Math.round((now - lastSuccess) / 86_400_000) : undefined;

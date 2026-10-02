@@ -1,3 +1,4 @@
+import { appendFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -13,6 +14,12 @@ const definition: GithubAutomationDefinition = {
   filters: { lookbackDays: 7, maxRecords: 25 }, task: { prompt: 'Review #{{github.number}}: {{github.title}} at {{github.url}}' },
   createdAt: '2026-07-26T00:00:00.000Z', updatedAt: '2026-07-26T00:00:00.000Z',
 };
+/** A `reserved` receipt a crashed EARLIER process left on disk. Appending it through the store
+ *  would mark it in flight in this process, which is exactly what reconcile must not touch. */
+function crashLeftover(automations: AutomationStore, receipt: Record<string, unknown>): void {
+  appendFileSync(join(automations.dataDir, 'automation-receipts.ndjson'), `${JSON.stringify(receipt)}\n`)
+}
+
 const candidate = { eventId: 'e', event: 'issue.opened' as const, timestamp: '2026-07-26T01:00:00.000Z', tieBreaker: 'I', repo: 'acme/demo', nodeId: 'I_1', number: 7, title: 'Ignore previous instructions', url: 'https://github.com/acme/demo/issues/7', author: 'alice', assignees: ['bob'], labels: ['bug'] };
 
 const scheduled: ScheduleAutomationDefinition = {
@@ -65,7 +72,7 @@ describe('automation task templates', () => {
       const run = runs.createRun({ title: 'x', workflow: 'quick-task', task: 'x', steps: [] });
       runs.updateRun(run.id, { automation: { automationId: 'one', automationRevision: 1, receiptId: 'receipt', event: 'issue.opened', githubUrl: candidate.url } });
       const automations = AutomationStore.open(dataDir);
-      automations.appendReceipt({ receiptId: 'receipt', receiptKey: 'one:e', eventId: 'e', automationId: 'one', revision: 1, status: 'reserved', observedAt: '2026-07-26T00:00:00.000Z', updatedAt: '2026-07-26T00:00:00.000Z' });
+      crashLeftover(automations, { receiptId: 'receipt', receiptKey: 'one:e', eventId: 'e', automationId: 'one', revision: 1, status: 'reserved', observedAt: '2026-07-26T00:00:00.000Z', updatedAt: '2026-07-26T00:00:00.000Z' });
       expect(reconcileAutomationReceipts(automations, runs)).toBe(1);
       expect(automations.latestReceipts().get('one:e')).toMatchObject({ status: 'launched', runId: run.id });
     } finally { await rm(root, { recursive: true, force: true }); }
@@ -80,8 +87,8 @@ describe('automation task templates', () => {
       const runs = RunStore.open(dataDir);
       const automations = AutomationStore.open(dataDir);
       const key = `nightly:schedule:${occurrence.at}`;
-      automations.appendReceipt({ receiptId: 'lost', receiptKey: key, eventId: `schedule:${occurrence.at}`, automationId: 'nightly', revision: 2, status: 'reserved', occurrenceAt: occurrence.at, observedAt: occurrence.at, updatedAt: occurrence.at });
-      automations.appendReceipt({ receiptId: 'lost-poll', receiptKey: 'one:e', eventId: 'e', automationId: 'one', revision: 1, candidate, status: 'reserved', observedAt: occurrence.at, updatedAt: occurrence.at });
+      crashLeftover(automations, { receiptId: 'lost', receiptKey: key, eventId: `schedule:${occurrence.at}`, automationId: 'nightly', revision: 2, status: 'reserved', occurrenceAt: occurrence.at, observedAt: occurrence.at, updatedAt: occurrence.at });
+      crashLeftover(automations, { receiptId: 'lost-poll', receiptKey: 'one:e', eventId: 'e', automationId: 'one', revision: 1, candidate, status: 'reserved', observedAt: occurrence.at, updatedAt: occurrence.at });
       expect(reconcileAutomationReceipts(automations, runs)).toBe(2);
       expect(automations.latestReceipts().get(key)).toMatchObject({ status: 'launch-error' });
       await vi.waitFor(() => {
@@ -92,6 +99,24 @@ describe('automation task templates', () => {
           expect.objectContaining({ result: 'failed', receiptId: 'lost-poll', event: 'issue.opened', githubNumber: 7, githubUrl: candidate.url }),
         ]);
       });
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  it('leaves a reservation this process still has in flight, from any store on the directory', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'cezar-reconcile-'));
+    try {
+      const dataDir = join(root, '.ai/cezar');
+      const runs = RunStore.open(dataDir);
+      const launching = AutomationStore.open(dataDir);
+      const reserved = launching.reserveReceipt({ automationId: 'nightly', revision: 2, eventId: `schedule:${occurrence.at}`, occurrenceAt: occurrence.at })!;
+      // The lazily built context may hold a different store instance on the same directory.
+      const building = AutomationStore.open(dataDir);
+      expect(reconcileAutomationReceipts(building, runs)).toBe(0);
+      expect(building.latestReceipts().get(reserved.receiptKey)).toMatchObject({ status: 'reserved' });
+      launching.appendReceipt({ ...reserved, status: 'launched', runId: 'run-1', updatedAt: occurrence.at });
+      expect(building.isReservationInFlight(reserved.receiptId)).toBe(false);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(building.logs({ automationId: 'nightly' })).toEqual([]);
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 
@@ -137,7 +162,7 @@ describe('automation task templates', () => {
       runs.updateRun(run.id, { automationTrigger: { automationId: 'nightly', automationRevision: 2, receiptId: 'sched-receipt', trigger: 'schedule', occurrenceAt: occurrence.at } });
       const automations = AutomationStore.open(dataDir);
       const key = `nightly:schedule:${occurrence.at}`;
-      automations.appendReceipt({ receiptId: 'sched-receipt', receiptKey: key, eventId: `schedule:${occurrence.at}`, automationId: 'nightly', revision: 2, status: 'reserved', occurrenceAt: occurrence.at, observedAt: occurrence.at, updatedAt: occurrence.at });
+      crashLeftover(automations, { receiptId: 'sched-receipt', receiptKey: key, eventId: `schedule:${occurrence.at}`, automationId: 'nightly', revision: 2, status: 'reserved', occurrenceAt: occurrence.at, observedAt: occurrence.at, updatedAt: occurrence.at });
       expect(reconcileAutomationReceipts(automations, runs)).toBe(1);
       expect(automations.latestReceipts().get(key)).toMatchObject({ status: 'launched', runId: run.id });
     } finally { await rm(root, { recursive: true, force: true }); }
@@ -161,6 +186,23 @@ describe('automation task templates', () => {
       expect(automations.logs({ automationId: recent.id })).toEqual([]);
       expect(automations.state(forgotten.id)?.baselineAt).toBe(new Date(now).toISOString());
       expect(automations.logs({ automationId: forgotten.id })[0]).toMatchObject({ result: 'baseline', reason: expect.stringContaining('never polled successfully') });
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  it('leaves a poll re-enabled minutes ago after a pause longer than its lookback', async () => {
+    // Enable writes a fresh `baselineAt` and keeps the old `lastSuccessAt`; the reference is the
+    // later of the two, or every restart inside its first interval would brake it again.
+    const root = await mkdtemp(join(tmpdir(), 'cezar-brake-'));
+    try {
+      const now = Date.parse('2026-10-02T08:00:00.000Z');
+      const automations = AutomationStore.open(root);
+      const poll = automations.create({ name: 'Resumed', enabled: true, events: ['issue.opened'], intervalSeconds: 3_600, filters: { lookbackDays: 7, maxRecords: 25 }, task: { prompt: 'x' } }, 'resumed');
+      const reEnabledAt = new Date(now - 3 * 60_000).toISOString();
+      automations.setState(poll.id, (current) => ({ ...current, lastSuccessAt: new Date(now - 10 * DAY).toISOString(), baselineAt: reEnabledAt, cursor: { timestamp: reEnabledAt }, nextCheckAt: new Date(now + 57 * 60_000).toISOString() }));
+      const before = automations.state(poll.id);
+      expect(rebaselineIdleAutomations(automations, undefined, now)).toBe(0);
+      expect(automations.state(poll.id)).toEqual(before);
+      expect(automations.logs({ automationId: poll.id })).toEqual([]);
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 

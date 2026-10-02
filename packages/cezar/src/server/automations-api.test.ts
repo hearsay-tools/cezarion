@@ -10,7 +10,7 @@ import { WorkspaceAutomationScheduler } from '../automations/scheduler.ts';
 import { AutomationStore } from '../automations/store.ts';
 import { RunStore } from '../runs/store.ts';
 import { registerProject } from '../workspace/projects.ts';
-import type { RunManager } from '../workflows/run.ts';
+import { RunManager } from '../workflows/run.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
 import { createApp, startServer, WorkspaceEventBus } from './server.ts';
 
@@ -452,6 +452,62 @@ describe('GitHub automation API', () => {
       expect(AutomationStore.open(join(root, '.ai/cezar')).logs({ automationId: 'nightly' })[0]).toMatchObject({ result: 'duplicate' });
     } finally {
       vi.restoreAllMocks();
+      if (savedDryRun === undefined) delete process.env.CEZ_DRY_RUN;
+      else process.env.CEZ_DRY_RUN = savedDryRun;
+    }
+  }, 30_000);
+
+  // The timer reserves the receipt, THEN its launcher builds a non-boot project's context
+  // lazily — and building it reconciles receipts. The reservation this process is launching right
+  // now is not a crash leftover: it must neither flip to launch-error nor log a false `failed`.
+  it('the first launch in a non-boot project whose context is not built yet logs no failure', async () => {
+    const savedDryRun = process.env.CEZ_DRY_RUN;
+    process.env.CEZ_DRY_RUN = '1';
+    const other = mkdtempSync(join(tmpdir(), 'cezar-automation-other-'));
+    const gitInit = (dir: string) => {
+      execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: dir, stdio: 'ignore' });
+      execFileSync('git', ['-c', 'user.email=t@example.com', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'init'], { cwd: dir, stdio: 'ignore' });
+    };
+    gitInit(root);
+    gitInit(other);
+    const created = new Date(Date.now() - 86_400_000).toISOString();
+    const occurrenceAt = new Date(Date.now() - 3 * 60_000).toISOString();
+    const dataDir = join(other, '.ai/cezar');
+    mkdirSync(dataDir, { recursive: true });
+    writeFileSync(join(dataDir, 'automations.json'), JSON.stringify({
+      version: 1,
+      automations: [{
+        id: 'nightly', revision: 1, kind: 'schedule', name: 'Nightly deps', enabled: true,
+        schedule: { type: 'daily', hour: 4, minute: 0 }, task: { prompt: 'Bump {{project}} deps' },
+        createdAt: created, updatedAt: created,
+      }],
+    }));
+    writeFileSync(join(dataDir, 'automation-state.json'), JSON.stringify({ version: 1, states: { nightly: { revision: 1, nextRunAt: occurrenceAt } } }));
+    // The real context builds a real RunManager; only its run creation is stubbed to a record.
+    const startRun = vi.spyOn(RunManager.prototype, 'startRun').mockImplementation(function (this: RunManager, workflow, input) {
+      return (this as unknown as { store: RunStore }).store.createRun({ title: 'automation', workflow: workflow.name, task: input.task, steps: [] });
+    });
+    const boot = await registerProject(root);
+    const second = await registerProject(other);
+    const server = startServer({ repoRoot: boot.root, bootProjectId: boot.id, store, manager: Object.assign(recordingManager(), { isActive: () => false }), version: '0.0.0-test' }, 0);
+    try {
+      await new Promise<void>((resolve) => server.once('listening', () => resolve()));
+      const automations = AutomationStore.open(dataDir);
+      await vi.waitFor(() => {
+        expect(automations.logs({ automationId: 'nightly' }).some((row) => row.result === 'launched')).toBe(true);
+      }, { timeout: 15_000, interval: 20 });
+      expect(startRun).toHaveBeenCalledTimes(1);
+      const receipt = automations.latestReceipts().get(`nightly:schedule:${occurrenceAt}`);
+      expect(receipt).toMatchObject({ status: 'launched', runId: expect.any(String) });
+      expect(automations.receipts().filter((row) => row.status === 'launch-error')).toEqual([]);
+      // Give a best-effort reconcile row time to land before asserting it never did.
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(automations.logs({ automationId: 'nightly' }).map((row) => row.result)).toEqual(['launched']);
+      expect(second.id).not.toBe(boot.id);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      vi.restoreAllMocks();
+      rmSync(other, { recursive: true, force: true });
       if (savedDryRun === undefined) delete process.env.CEZ_DRY_RUN;
       else process.env.CEZ_DRY_RUN = savedDryRun;
     }

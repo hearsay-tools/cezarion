@@ -30,7 +30,7 @@ day calendars, statistics) are filed as follow-up issues. Dollar figures follow
 | Lease | The #651 store lease (reclaim guard, identity checks) stays. The schedule runner takes it and checks `isCurrent()` before reserving. A held or lost lease logs `skipped` and retries through the existing workspace floor; it never advances the shared `nextRunAt`. | #985 advanced the loser's `nextRunAt`; #1099 replaced the lock with `proper-lockfile`. Neither adopted. |
 | `setState` | Read-modify-write against a fresh disk read, function form. | Same. |
 | Delegation | No `task.dispatch`, no review-child suffix. Launched runs get governed workers like every run. | `task.dispatch` → dispatch intent. |
-| Boot brake | Ported: an enabled poll idle longer than its lookback is re-baselined at boot with a `baseline` log row. Idleness is measured from `lastSuccessAt ?? baselineAt`, so a poll enabled but not yet due is left alone. | Measures from `lastSuccessAt` alone. |
+| Boot brake | Ported: an enabled poll idle longer than its lookback is re-baselined at boot with a `baseline` log row. Idleness is measured from the later of `lastSuccessAt` and `baselineAt`, so a poll enabled or re-enabled but not yet due is left alone. | Measures from `lastSuccessAt` alone. |
 | UI | Composed from the fork's existing primitives; one file per screen component. | Pixel-matched design kit; four promoted primitives. |
 | CLI, skill, prompt part, Copy as CLI | Stage 2. | Included. |
 | Templates, calendars, rail, stats, cross-project templates route | Stage 3. | Included. |
@@ -116,17 +116,21 @@ web routes/automations/*: route shell, list, editor (+ schedule / github fields)
    (no `candidate`, has `occurrenceAt`): re-reserves the same receipt and fires it as `manual`;
    the github path is unchanged.
 8. **Boot brake** (github kind): before the timer arms, every enabled poll whose idleness
-   reference, `lastSuccessAt ?? baselineAt`, is absent or older than `filters.lookbackDays` is
+   reference, the later of `lastSuccessAt` and `baselineAt`, is absent or older than `filters.lookbackDays` is
    re-baselined (`baselineAt = cursor = now`,
    `frozenHighWatermark`/`backlogAfter`/`backoffUntil` cleared, `nextCheckAt = now + interval`)
    with a `baseline` log row and an `automation-change` event. Polls that succeeded within their
    lookback continue exactly as today. Deviation from upstream, which reads `lastSuccessAt`
-   alone: `enable` writes `baselineAt` but no `lastSuccessAt`, so a restart inside a fresh
-   poll's first interval would re-baseline it, drop the events since the enable, and push its
+   alone: `enable` writes a fresh `baselineAt` but no `lastSuccessAt` (a re-enable keeps the
+   stale one), so a restart inside a fresh or resumed poll's first interval would re-baseline it, drop the events since the enable, and push its
    first check out again.
 9. **Crash recovery**: at boot, `reconcileAutomationReceipts` turns a `reserved` receipt that no
    run claims into `launch-error` and appends a `failed` log row carrying its `receiptId`, so the
-   lost occurrence shows in the log with "Retry task" (both kinds).
+   lost occurrence shows in the log with "Retry task" (both kinds). A reservation this process
+   wrote and has not settled is skipped: a non-boot project's context is built lazily by the
+   first launch, and building it reconciles while that launch is in flight. The store keeps the
+   in-flight set process-wide per data directory; a crash empties it, so the next boot
+   reconciles a real leftover.
 
 GitHub-kind polling, cursors, baselines, receipts and backoff are otherwise unchanged.
 

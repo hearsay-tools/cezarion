@@ -14,7 +14,7 @@ import {
 } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { collectSecretValues, redactDeep } from '../core/secret-redaction.ts';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import {
   automationDefinitionSchema,
   automationDefinitionsFileSchema,
@@ -37,6 +37,15 @@ const LOG_RECLAIM = 'automation-log.reclaim';
 const POLL_LOCK = 'automation-poll.lock';
 const POLL_RECLAIM = 'automation-poll.reclaim';
 const RETENTION_MS = 90 * 24 * 60 * 60 * 1_000;
+
+/**
+ * Reservations THIS process wrote and has not settled yet, per data directory. A `reserved`
+ * receipt on disk is ambiguous: a crash leftover, or a launch still running here. Only this
+ * process can tell, and reconciliation must leave the second kind alone — a lazily built
+ * project context reconciles while the timer's launch that triggered the build is in flight.
+ * Process-wide rather than per store, so a second store opened on the same directory agrees.
+ */
+const inFlightReservations = new Map<string, Set<string>>();
 const LEASE_RECLAIM_ATTEMPTS = 1;
 
 type DefinitionsFile = ReturnType<typeof automationDefinitionsFileSchema.parse>;
@@ -162,6 +171,17 @@ export class AutomationStore {
 
   appendReceipt(receipt: AutomationReceipt): void {
     this.appendNdjson(RECEIPTS, redactDeep(automationReceiptSchema.parse(receipt), this.secrets));
+    const key = resolve(this.dataDir);
+    const pending = inFlightReservations.get(key) ?? new Set<string>();
+    if (receipt.status === 'reserved') pending.add(receipt.receiptId);
+    else pending.delete(receipt.receiptId);
+    if (pending.size) inFlightReservations.set(key, pending);
+    else inFlightReservations.delete(key);
+  }
+
+  /** This process reserved the receipt and its launch has not settled (see `inFlightReservations`). */
+  isReservationInFlight(receiptId: string): boolean {
+    return inFlightReservations.get(resolve(this.dataDir))?.has(receiptId) ?? false;
   }
 
   reserveReceipt(input: {
