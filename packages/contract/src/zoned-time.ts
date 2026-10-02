@@ -1,8 +1,9 @@
 /**
  * Wall-clock ↔ instant conversion in a named IANA zone, on `Intl` alone (no library, Node-free,
- * so the cockpit and the server share one implementation — spec 2026-09-14-automations-redesign
- * § Architecture). Two consumers: the automation schedule math (`./automation-schedule.ts`) and
- * the usage-limit resume clock (`packages/cezar/src/core/usage-limit.ts`), which is where these
+ * so the cockpit and the server share one implementation — spec
+ * `.ai/specs/2026-10-02-scheduled-automations.md`, issue #766; origin: upstream open-mercato/cezar
+ * #985). Two consumers: the automation schedule math (`./automation-schedule.ts`) and the
+ * usage-limit resume clock (`packages/cezar/src/core/usage-limit.ts`), which is where these
  * functions were born.
  *
  * `zonedWallTimeToUtc` iterates the zone offset to a fixed point. For a wall time that does not

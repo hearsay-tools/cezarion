@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { automationScheduleSchema, type AutomationSchedule } from '@open-mercato/cezar-contract';
+import { automationKindSchema, automationScheduleSchema, type AutomationSchedule } from '@open-mercato/cezar-contract';
 import { RUNNER_IDS } from '../core/agent-runner.ts';
 import { workflowStepSchema } from '../workflows/types.ts';
 
@@ -70,11 +70,12 @@ export const automationDefinitionObjectSchema = z
     description: z.string().max(2_000).optional(),
     enabled: z.boolean().default(false),
     /** A definition written before schedules has no `kind`: it is a poll. */
-    kind: z.enum(['github', 'schedule']).default('github'),
+    kind: automationKindSchema.default('github'),
     events: z.array(automationEventSchema).min(1).max(4).optional(),
     intervalSeconds: z.number().int().min(60).max(86_400).optional(),
     filters: automationFiltersSchema.optional(),
-    schedule: automationScheduleSchema.optional(),
+    // Passthrough like every other persisted layer: a schedule key a later build adds survives a save here.
+    schedule: automationScheduleSchema.passthrough().optional(),
     task: automationTaskSchema,
     createdAt: z.string().datetime(),
     updatedAt: z.string().datetime(),

@@ -47,6 +47,15 @@ describe('automation schemas', () => {
     expect(parsed.future).toBe(true);
     expect(parsed.filters?.futureFilter).toBe('kept');
     expect(parsed.task.futureTask).toBe('kept');
+    const scheduled = automationDefinitionSchema.parse({
+      ...definition,
+      kind: 'schedule',
+      events: undefined,
+      intervalSeconds: undefined,
+      filters: undefined,
+      schedule: { type: 'daily', futureSchedule: 'kept' },
+    });
+    expect(scheduled.schedule?.futureSchedule).toBe('kept');
     expect(automationDefinitionsFileSchema.parse({ version: 1, automations: [], future: 1 }).future).toBe(1);
     expect(automationRuntimeStateSchema.parse({ future: 'kept' }).future).toBe('kept');
   });

@@ -378,6 +378,19 @@ describe('AutomationStore.setState (read-modify-write)', () => {
     expect(AutomationStore.open(dir).state('a')).toEqual({ lastRunAt: '2026-10-02T02:00:00.000Z', nextRunAt: '2026-10-03T02:00:00.000Z' });
   });
 
+  it('keeps this process\'s last good view of other ids when the state file is unreadable', async () => {
+    const dir = await directory();
+    const one = AutomationStore.open(dir);
+    const two = AutomationStore.open(dir);
+    two.setState('b', (current) => ({ ...current, baselineAt: '2026-10-02T00:00:00.000Z' }));
+    one.setState('a', (current) => ({ ...current, lastRunAt: '2026-10-02T01:00:00.000Z' }));
+    writeFileSync(join(dir, 'automation-state.json'), '{not json');
+    one.setState('a', (current) => ({ ...current, consecutiveFailures: 1 }));
+    const fresh = AutomationStore.open(dir);
+    expect(fresh.state('b')).toEqual({ baselineAt: '2026-10-02T00:00:00.000Z' });
+    expect(fresh.state('a')).toEqual({ lastRunAt: '2026-10-02T01:00:00.000Z', consecutiveFailures: 1 });
+  });
+
   it('returns the next record', async () => {
     const store = AutomationStore.open(await directory());
     expect(store.setState('a', (current) => ({ ...current, consecutiveFailures: 1 }))).toEqual({ consecutiveFailures: 1 });

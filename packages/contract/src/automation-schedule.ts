@@ -2,14 +2,14 @@ import { z } from 'zod';
 import { isoWeekday, zonedParts, zonedWallTimeToUtc } from './zoned-time.ts';
 
 /**
- * A scheduled automation's trigger (spec 2026-09-14-automations-redesign § Data Model) and the
- * pure occurrence math over it, shared by the server's schedule runner and the cockpit's
- * calendars, "next runs" rail and editor preview — one implementation, so what the editor
- * previews is what the timer fires.
+ * A scheduled automation's trigger (spec `.ai/specs/2026-10-02-scheduled-automations.md`, issue
+ * #766; origin: upstream open-mercato/cezar #985) and the pure occurrence math over it, shared
+ * by the server's schedule runner and the cockpit's editor preview — one implementation, so what
+ * the editor previews is what the timer fires.
  *
  * Four bounded shapes rather than cron: every day at HH:MM, weekdays at HH:MM, one weekday at
- * HH:MM, every N hours from midnight. A cron string is DERIVED for display and for the CLI
- * (`cronOf` / `parseCron`), never stored and never evaluated — the shapes are what the math runs.
+ * HH:MM, every N hours from midnight. A cron string is DERIVED for display (`cronOf` /
+ * `parseCron`), never stored and never evaluated — the shapes are what the math runs.
  */
 
 export const SCHEDULE_TYPES = ['daily', 'weekdays', 'weekly', 'hours'] as const;

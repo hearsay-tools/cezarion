@@ -141,7 +141,9 @@ export class AutomationStore {
    * the full next record. Never close over a state read from before this call.
    */
   setState(id: string, update: (current: AutomationRuntimeState) => AutomationRuntimeState): AutomationRuntimeState {
-    const onDisk = this.readJson(STATE, automationStateFileSchema, { version: 1, states: {} });
+    // An unreadable file falls back to this process's last good view, never to an empty one:
+    // writing `{ [id]: next }` alone would erase every other automation's cursor and baseline.
+    const onDisk = this.readJson(STATE, automationStateFileSchema, this.stateFile);
     const next = update(onDisk.states[id] ?? {});
     this.stateFile = { ...onDisk, states: { ...onDisk.states, [id]: next } };
     this.atomicJson(STATE, this.stateFile);

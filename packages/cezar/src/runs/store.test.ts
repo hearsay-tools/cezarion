@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { runRecordSchema as contractRunRecordSchema } from '@open-mercato/cezar-contract';
 import { RunStore, runRecordSchema } from './store.ts';
 
 import type { RunRecord } from './store.ts';
@@ -2670,7 +2671,7 @@ describe('RunRecord.automationTrigger', () => {
   });
 
   it('is stripped, not fatal, for a schema that predates the key', () => {
-    const previous = runRecordSchema.omit({ automationTrigger: true });
+    const previous = contractRunRecordSchema.omit({ automationTrigger: true });
     const parsed = previous.parse({ ...LEGACY_RUN, automationTrigger: trigger });
     expect(parsed.id).toBe('legacy-1');
     expect('automationTrigger' in parsed).toBe(false);
