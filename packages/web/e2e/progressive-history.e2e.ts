@@ -11,6 +11,7 @@ import { largeThreadEvents } from './fixtures/make-large-thread'
 import record from './fixtures/thread-run.record.json'
 import { waitForHealth, waitForStatus } from './poll'
 import { settleVisual } from './visual-ready'
+import { HISTORY_BOUNDARY_SLACK_PX, isNearHistoryStart } from '../src/routes/task-thread/thread-scroll'
 
 const repoRoot = resolve(import.meta.dirname, '../../..')
 const artifactsDir = resolve(repoRoot, '.ai/qa/artifacts_e2e')
@@ -187,15 +188,20 @@ function settleHistoryAnchor(rowExpr: string): HistoryAnchor {
 
 function parkAndSettleHistoryStart(): HistoryAnchor {
   // Start the unpin gesture away from the boundary, even when a previous prepend kept it near.
+  // Virtua may remeasure rows after this numeric end request, changing the final maximum.
+  // The safety condition for the wheel is outside the history arm, not an exact live tail.
   browser.evaluate(`(() => {
     const main = ${MAIN}
     window.__cezThreadScrollTo(main.scrollHeight - main.clientHeight)
   })()`)
-  browser.waitForValue(`(() => { const main = ${MAIN}; return main.scrollHeight - main.clientHeight - main.scrollTop })()`,
-    (remaining): remaining is number => typeof remaining === 'number' && Math.abs(remaining) < 2)
+  browser.waitForValue(`(() => { const main = ${MAIN}; return main && { scrollTop:main.scrollTop, clientHeight:main.clientHeight, maxTop:main.scrollHeight-main.clientHeight } })()`,
+    (sample: { scrollTop: number; clientHeight: number } | null) => sample !== null && !isNearHistoryStart(sample))
   browser.evaluate(`(() => {
     const main = ${MAIN}
-    // Unpin while still at the live tail so a later wheel at the boundary cannot load a page.
+    // Recheck in the same browser task as the wheel: this gesture must not consume history.
+    if (main.scrollTop < Math.max(${HISTORY_BOUNDARY_SLACK_PX}, main.clientHeight)) {
+      throw new Error('unpin gesture is still inside the history boundary arm')
+    }
     main.dispatchEvent(new WheelEvent('wheel', { deltaY: -120, bubbles: true }))
     // Virtua ignores a raw scrollTop write; the e2e seam goes through the scroll owner.
     if (typeof window.__cezThreadScrollTo !== 'function') {

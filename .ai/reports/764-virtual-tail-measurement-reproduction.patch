@@ -1,0 +1,19 @@
+--- a/packages/web/e2e/progressive-history.e2e.ts
++++ b/packages/web/e2e/progressive-history.e2e.ts
+@@ -189,10 +189,14 @@
+   // Start the unpin gesture away from the boundary, even when a previous prepend kept it near.
+   browser.evaluate(`(() => {
+     const main = ${MAIN}
++    const read = () => ({top:main.scrollTop, max:main.scrollHeight-main.clientHeight, rows:document.querySelector('[data-slot="thread-rows"]')?.getBoundingClientRect().height, viewport:main.clientHeight, virtual:document.querySelector('[data-slot="thread-rows"]')?.dataset.virtualized});
++    window.__tailMeasurement = { requested:read(), samples:[] };
++    const observer = new ResizeObserver(() => { window.__tailMeasurement.samples.push(read()); if(window.__tailMeasurement.samples.length>=20) observer.disconnect(); });
++    observer.observe(document.querySelector('[data-slot="thread-rows"]'));
+     window.__cezThreadScrollTo(main.scrollHeight - main.clientHeight)
+   })()`)
+-  browser.waitForValue(`(() => { const main = ${MAIN}; return main.scrollHeight - main.clientHeight - main.scrollTop })()`,
+-    (remaining): remaining is number => typeof remaining === 'number' && Math.abs(remaining) < 2)
++  try { browser.waitForValue(`(() => { const main = ${MAIN}; return main.scrollHeight - main.clientHeight - main.scrollTop })()`,
++    (remaining): remaining is number => typeof remaining === 'number' && Math.abs(remaining) < 2) } finally { console.log('TAIL-MEASUREMENT', JSON.stringify(browser.evaluate('window.__tailMeasurement'))) }
+   browser.evaluate(`(() => {
+     const main = ${MAIN}
+     // Unpin while still at the live tail so a later wheel at the boundary cannot load a page.

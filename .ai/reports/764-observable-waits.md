@@ -275,3 +275,28 @@ npm test -- packages/web/src/test/poll.test.ts -t 'failed health status|address-
 ```
 
 A third fresh history invocation passed **2/2** (`764-startup-focused-3-green.log`) with final metadata capture: `healthReadyAfterMs: 1307`, drained normal CLI startup output, no stderr, and exit 0 (`764-startup-focused-3.json`). It used the same two-case command above. No original startup failure reproduced. Own environment stopped successfully (`764-startup-diagnostics-down.log`), and `git diff --check` passed. Remaining validation is a parent-controlled load run with these diagnostics; actual intermittent root cause is unresolved. Changed code: `fixture-server.ts`, `poll.ts`, `progressive-history.e2e.ts`, `poll.test.ts`, and new `fixture-server-diagnostics.test.ts`; no production files changed.
+
+
+## Full-browser virtual history setup follow-up
+
+First merged parent `c5e810da11c1c6fe3186259b12c29259f968ecba` normally as `88823b1a`, then installed `npm ci` in this worktree (`764-virtual-tail-npm-ci.log`). Read the parent's full-browser lane-4 log and retained 1440px failure probe/snapshot/screenshot before diagnosing. The initial setup wait exhausted with remaining distance **95px**, although tail content was visible. Parent reports all other browser cases passed and controlled idle 10/10 and load 10×8 campaigns already passed; those campaigns were not rerun by this worker.
+
+Temporary read-only `ResizeObserver` samples around the single scroll-owner call reproduced failures at **both widths** in a full history invocation (`764-virtual-tail-diagnosis.log`: **5 passed, 2 failed**). At 1440px, the requested offset/max was **14366**, virtual row height changed **14494.8125 → 14640.875 → 14589.875**, final max became **14461**, and scrollTop stayed **14366**, leaving exactly the parent's **95px** gap. At 360px, requested max **15034** grew to **15284** while scrollTop stayed **15034**, leaving **250px**. Viewport heights stayed 836 and 583 respectively. Both failure bundles are preserved under `764-virtual-tail-evidence/`. The observation-only patch is `764-virtual-tail-measurement-reproduction.patch`, applicable to the pre-fix spec at merge commit `88823b1a`; temporary instrumentation is absent from the final source.
+
+Root cause: `__cezThreadScrollTo` routes virtual scrolling through `VirtualizerHandle.scrollTo(top)` and intentionally clears follow-tail intent. The caller supplied a numeric maximum sampled before Virtua measured newly mounted rows. The handle keeps requesting that numeric offset while measurements change the extent; passive waiting cannot turn that old offset into the new maximum. This is a setup condition error, not evidence that the paging anchor moved or that the product failed to honor a requested offset.
+
+The initial end request was added to make the unpin wheel safe after a prepend had left the viewport near the history boundary. Its load-bearing condition is **outside the older-history intent arm**. The setup now observes `!isNearHistoryStart(sample)` using the production pure predicate, and atomically rechecks the same threshold in the browser task that dispatches the wheel. Therefore the setup wheel cannot consume an older-page arm even if geometry changes between observations. It still issues one scroll request through the same owner, then parks at the start through that owner. Exact `<2px` anchor assertions, request-count/cumulative-completion cascade assertions, per-frame navigation checks, and all existing budgets remain unchanged. No scroll retries, sleeps, timeout inflation, or production changes were introduced.
+
+Exact verification commands:
+
+```sh
+env -u CEZ_AUTOMATIONS TMPDIR=/tmp TMP=/tmp TEMP=/tmp npm test -- --config packages/web/e2e/vitest.config.ts progressive-history.e2e.ts --reporter=verbose
+npm test -- packages/web/src/test/e2e-wait-discipline.test.ts packages/web/src/test/agent-browser-wait-value.test.ts packages/web/src/test/visual-ready.test.ts packages/web/src/routes/task-thread/thread-scroll.test.ts
+npm run typecheck:web
+env -u CEZ_AUTOMATIONS TMPDIR=/tmp TMP=/tmp TEMP=/tmp npm test -- --config packages/web/e2e/vitest.config.ts progressive-history.e2e.ts -t 'virtual history anchor' --reporter=verbose
+```
+
+The first command produced the red evidence above with only read-only diagnostics added before the fix; after the fix it passed **7/7** (`764-virtual-tail-all-green.log`), including both virtual widths and the negative cascade case. Helper/scanner/scroll-rule units passed **68/68** across four files (`764-virtual-tail-units-green.log`); web typecheck passed (`764-virtual-tail-typecheck.log`). Scanner baseline remains unchanged. Changed implementation is limited to `packages/web/e2e/progressive-history.e2e.ts`; no helper/scanner behavior was modified.
+
+
+Two fresh focused invocations of both virtual widths also passed **2/2 each**, with five other cases filtered (`764-virtual-tail-focused-1-green.log`, `764-virtual-tail-focused-2-green.log`), using the final command above. Own environment stopped successfully (`764-virtual-tail-down.log`), and `git diff --check` passed. No unresolved focused history failure remains. Parent owns the final full-browser rerun and remaining gate checks; its completed controlled campaigns are not superseded by these focused checks.

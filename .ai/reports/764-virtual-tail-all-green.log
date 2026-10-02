@@ -1,0 +1,20 @@
+
+> test
+> vitest run --config packages/web/e2e/vitest.config.ts progressive-history.e2e.ts --reporter=verbose
+
+
+ RUN  v4.1.10 /home/agent/projects/cezar/.ai/cezar/worktrees/d6e7f159-f1c6-45f4-87c6-500ec47ab925/packages/web/e2e
+
+ ✓ |e2e| progressive-history.e2e.ts > progressive long-session history > paints the current tail and docks without requesting an earlier page 152ms
+ ✓ |e2e| progressive-history.e2e.ts > progressive long-session history > loads exactly one page, preserves the visible anchor, and bounds retained pages 1264ms
+ ✓ |e2e| progressive-history.e2e.ts > progressive long-session history > consumes one upward intent without cascading while the boundary remains near 2422ms
+ ✓ |e2e| progressive-history.e2e.ts > progressive long-session history > caps retained pages at five and jumps directly back to a fresh tail 402ms
+ ✓ |e2e| progressive-history.e2e.ts > progressive long-session history > switches between cached and live-tail threads without a near-zero destination frame 924ms
+ ✓ |e2e| progressive-history.e2e.ts > progressive long-session history > preserves a virtual history anchor behind the task prefix at 360px 1965ms
+ ✓ |e2e| progressive-history.e2e.ts > progressive long-session history > preserves a virtual history anchor behind the task prefix at 1440px 2188ms
+
+ Test Files  1 passed (1)
+      Tests  7 passed (7)
+   Start at  16:34:49
+   Duration  13.31s (transform 61ms, setup 44ms, import 51ms, tests 13.02s, environment 0ms)
+

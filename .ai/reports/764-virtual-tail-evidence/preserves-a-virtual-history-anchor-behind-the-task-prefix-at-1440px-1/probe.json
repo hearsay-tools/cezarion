@@ -1,0 +1,23 @@
+{
+  "kind": "wait-value",
+  "expression": "(() => { const main = document.querySelector('[data-slot=\"main\"]'); return main.scrollHeight - main.clientHeight - main.scrollTop })()",
+  "lastValue": 95,
+  "spec": "progressive-history",
+  "test": "preserves a virtual history anchor behind the task prefix at 1440px",
+  "session": "e2e-progressive-history-2508418",
+  "capturedAt": "2026-10-02T14:33:17.703Z",
+  "error": "Error: last value: 95",
+  "page": {
+    "activeElement": null,
+    "openDialogs": [],
+    "readyState": "complete",
+    "title": "cezar-e2e-progressive-history-t0VKrr — Progressively page a long session · cezar",
+    "url": "http://localhost:40867/p/cezar-e2e-progressive-history-t0vkrr/tasks/cccccccc-1111-4222-8333-dddddddddddd?thread=virtual",
+    "viewport": {
+      "height": 900,
+      "scrollX": 0,
+      "scrollY": 0,
+      "width": 1440
+    }
+  }
+}

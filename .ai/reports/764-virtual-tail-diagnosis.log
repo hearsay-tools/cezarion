@@ -1,0 +1,74 @@
+
+> test
+> vitest run --config packages/web/e2e/vitest.config.ts progressive-history.e2e.ts --reporter=verbose
+
+
+ RUN  v4.1.10 /home/agent/projects/cezar/.ai/cezar/worktrees/d6e7f159-f1c6-45f4-87c6-500ec47ab925/packages/web/e2e
+
+ ✓ |e2e| progressive-history.e2e.ts > progressive long-session history > paints the current tail and docks without requesting an earlier page 7911ms
+stdout | progressive-history.e2e.ts > progressive long-session history > loads exactly one page, preserves the visible anchor, and bounds retained pages
+TAIL-MEASUREMENT {"requested":{"max":8079,"rows":8166.1875,"top":8079,"viewport":836,"virtual":"false"},"samples":[{"max":8079,"rows":8166.1875,"top":8079,"viewport":836,"virtual":"false"}]}
+
+ ✓ |e2e| progressive-history.e2e.ts > progressive long-session history > loads exactly one page, preserves the visible anchor, and bounds retained pages 1483ms
+stdout | progressive-history.e2e.ts > progressive long-session history > consumes one upward intent without cascading while the boundary remains near
+TAIL-MEASUREMENT {"requested":{"max":7918,"rows":8046.796875,"top":7918,"viewport":836,"virtual":"false"},"samples":[{"max":7918,"rows":8046.796875,"top":7918,"viewport":836,"virtual":"false"}]}
+TAIL-MEASUREMENT {"requested":{"max":15779,"rows":15907.34375,"top":0,"viewport":836,"virtual":"false"},"samples":[{"max":15779,"rows":15907.34375,"top":15779,"viewport":836,"virtual":"false"}]}
+
+ ✓ |e2e| progressive-history.e2e.ts > progressive long-session history > consumes one upward intent without cascading while the boundary remains near 3411ms
+ ✓ |e2e| progressive-history.e2e.ts > progressive long-session history > caps retained pages at five and jumps directly back to a fresh tail 663ms
+ ✓ |e2e| progressive-history.e2e.ts > progressive long-session history > switches between cached and live-tail threads without a near-zero destination frame 2476ms
+stdout | progressive-history.e2e.ts > progressive long-session history > preserves a virtual history anchor behind the task prefix at 360px
+TAIL-MEASUREMENT {"requested":{"max":7541,"rows":7755.25,"top":7541,"viewport":583,"virtual":"true"},"samples":[{"max":7541,"rows":7755.25,"top":7541,"viewport":583,"virtual":"true"}]}
+TAIL-MEASUREMENT {"requested":{"max":15034,"rows":15247.9375,"top":7801,"viewport":583,"virtual":"true"},"samples":[{"max":15284,"rows":15498.4375,"top":15034,"viewport":583,"virtual":"true"},{"max":15284,"rows":15498.4375,"top":15034,"viewport":583,"virtual":"true"}]}
+
+stdout | progressive-history.e2e.ts > progressive long-session history > preserves a virtual history anchor behind the task prefix at 1440px
+TAIL-MEASUREMENT {"requested":{"max":5217,"rows":5345.0625,"top":5217,"viewport":836,"virtual":"true"},"samples":[{"max":5217,"rows":5345.0625,"top":5217,"viewport":836,"virtual":"true"}]}
+TAIL-MEASUREMENT {"requested":{"max":14366,"rows":14494.8125,"top":7468,"viewport":836,"virtual":"true"},"samples":[{"max":14512,"rows":14640.875,"top":14366,"viewport":836,"virtual":"true"},{"max":14461,"rows":14589.875,"top":14366,"viewport":836,"virtual":"true"},{"max":14461,"rows":14589.875,"top":14366,"viewport":836,"virtual":"true"}]}
+
+ × |e2e| progressive-history.e2e.ts > progressive long-session history > preserves a virtual history anchor behind the task prefix at 360px 27508ms
+   → cezar e2e: value never matched: (() => { const main = document.querySelector('[data-slot="main"]'); return main.scrollHeight - main.clientHeight - main.scrollTop })() (last value: 250) (failure bundle: /home/agent/projects/cezar/.ai/cezar/worktrees/d6e7f159-f1c6-45f4-87c6-500ec47ab925/.ai/qa/failures/progressive-history/preserves-a-virtual-history-anchor-behind-the-task-prefix-at-360px-1)
+ × |e2e| progressive-history.e2e.ts > progressive long-session history > preserves a virtual history anchor behind the task prefix at 1440px 26838ms
+   → cezar e2e: value never matched: (() => { const main = document.querySelector('[data-slot="main"]'); return main.scrollHeight - main.clientHeight - main.scrollTop })() (last value: 95) (failure bundle: /home/agent/projects/cezar/.ai/cezar/worktrees/d6e7f159-f1c6-45f4-87c6-500ec47ab925/.ai/qa/failures/progressive-history/preserves-a-virtual-history-anchor-behind-the-task-prefix-at-1440px-1)
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |e2e| progressive-history.e2e.ts > progressive long-session history > preserves a virtual history anchor behind the task prefix at 360px
+WaitForValueError: cezar e2e: value never matched: (() => { const main = document.querySelector('[data-slot="main"]'); return main.scrollHeight - main.clientHeight - main.scrollTop })() (last value: 250) (failure bundle: /home/agent/projects/cezar/.ai/cezar/worktrees/d6e7f159-f1c6-45f4-87c6-500ec47ab925/.ai/qa/failures/progressive-history/preserves-a-virtual-history-anchor-behind-the-task-prefix-at-360px-1)
+ ❯ AgentBrowser.waitForStable agent-browser.ts:615:11
+    613|     const last = lastError !== undefined ? `last error: ${describeErro…
+    614|     const headline = failure ?? (holdMs > 0 ? 'value never stayed stab…
+    615|     throw new WaitForValueError(
+       |           ^
+    616|       `cezar e2e: ${headline}: ${js} (${last}) (failure bundle: ${bund…
+    617|       js,
+ ❯ AgentBrowser.waitForValue agent-browser.ts:643:17
+ ❯ parkAndSettleHistoryStart progressive-history.e2e.ts:198:17
+ ❯ progressive-history.e2e.ts:510:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { expression: '(() => { const main = document.querySelector(\'[data-slot="main"]\'); return main.scrollHeight - main.clientHeight - main.scrollTop })()', lastValue: 250, bundle: '/home/agent/projects/cezar/.ai/cezar/worktrees/d6e7f159-f1c6-45f4-87c6-500ec47ab925/.ai/qa/failures/progressive-history/preserves-a-virtual-history-anchor-behind-the-task-prefix-at-360px-1' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  |e2e| progressive-history.e2e.ts > progressive long-session history > preserves a virtual history anchor behind the task prefix at 1440px
+WaitForValueError: cezar e2e: value never matched: (() => { const main = document.querySelector('[data-slot="main"]'); return main.scrollHeight - main.clientHeight - main.scrollTop })() (last value: 95) (failure bundle: /home/agent/projects/cezar/.ai/cezar/worktrees/d6e7f159-f1c6-45f4-87c6-500ec47ab925/.ai/qa/failures/progressive-history/preserves-a-virtual-history-anchor-behind-the-task-prefix-at-1440px-1)
+ ❯ AgentBrowser.waitForStable agent-browser.ts:615:11
+    613|     const last = lastError !== undefined ? `last error: ${describeErro…
+    614|     const headline = failure ?? (holdMs > 0 ? 'value never stayed stab…
+    615|     throw new WaitForValueError(
+       |           ^
+    616|       `cezar e2e: ${headline}: ${js} (${last}) (failure bundle: ${bund…
+    617|       js,
+ ❯ AgentBrowser.waitForValue agent-browser.ts:643:17
+ ❯ parkAndSettleHistoryStart progressive-history.e2e.ts:198:17
+ ❯ progressive-history.e2e.ts:510:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { expression: '(() => { const main = document.querySelector(\'[data-slot="main"]\'); return main.scrollHeight - main.clientHeight - main.scrollTop })()', lastValue: 95, bundle: '/home/agent/projects/cezar/.ai/cezar/worktrees/d6e7f159-f1c6-45f4-87c6-500ec47ab925/.ai/qa/failures/progressive-history/preserves-a-virtual-history-anchor-behind-the-task-prefix-at-1440px-1' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 5 passed (7)
+   Start at  16:32:01
+   Duration  75.96s (transform 145ms, setup 102ms, import 106ms, tests 75.34s, environment 0ms)
+
