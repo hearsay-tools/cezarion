@@ -3603,9 +3603,15 @@ export function createApp(deps: ServerDeps) {
         const automation = automationStore.update(c.req.param('id'), expectedRevision, { ...input, kind: resolved.kind, enabled: input.enabled ?? false });
         // The armed instant belongs to the schedule it was computed from, and to an enabled
         // definition: a new schedule, or a resume through PUT, re-arms from now — never a catch-up
-        // of an occurrence that passed while it was paused.
-        if (resolved.kind === 'schedule' && (!sameSchedule(stored.schedule, automation.schedule) || (!stored.enabled && automation.enabled))) {
-          automationStore.setState(automation.id, (current) => ({ ...current, nextRunAt: undefined }));
+        // of an occurrence that passed while it was paused. Armed here, as `enable` does, rather
+        // than left to the timer: the list refetched on the change event must already see it.
+        if (isScheduleAutomation(automation) && (!sameSchedule(stored.schedule, automation.schedule) || (!stored.enabled && automation.enabled))) {
+          const next = automation.enabled ? nextOccurrence(automation.schedule, Date.now(), localTimeZone()) : null;
+          automationStore.setState(automation.id, (current) => ({
+            ...current,
+            revision: automation.revision,
+            nextRunAt: next === null ? undefined : new Date(next).toISOString(),
+          }));
         }
         emitAutomationChange(c.get('project'), automation.id, automation.revision);
         automationsChanged();

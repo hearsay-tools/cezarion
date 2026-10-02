@@ -134,8 +134,8 @@ function wallTimesOn(s: NormalizedSchedule, weekday: number): Array<[number, num
 /**
  * Every instant the schedule fires in `[fromMs, toMs)`, ascending, in the zone. Bounded by
  * `limit` so a caller asking for a year of hourly runs gets the first `limit`, not a stall.
- * Each (day, wall time) yields exactly one instant, which is what makes a DST fall-back hour
- * fire once and a spring-forward gap fire once.
+ * Each (day, wall time) yields at most one instant, and no instant is yielded twice, which is
+ * what makes a DST fall-back hour fire once and a spring-forward gap fire once.
  */
 export function occurrencesBetween(
   schedule: AutomationSchedule,
@@ -159,6 +159,9 @@ export function occurrencesBetween(
     for (const [hour, minute] of wallTimesOn(s, isoWeekday(year, month, day))) {
       const at = zonedWallTimeToUtc(year, month, day, hour, minute, timeZone);
       if (at === null) return out;
+      // A wall time inside a spring-forward gap settles onto a neighbouring slot's instant
+      // (`hours` 02:00 onto 01:00 or 03:00): the same instant is one occurrence, not two.
+      if (at === out.at(-1)) continue;
       if (at >= fromMs && at < toMs) {
         out.push(at);
         if (out.length >= limit) return out;

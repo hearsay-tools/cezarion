@@ -75,6 +75,18 @@ describe('occurrencesBetween', () => {
     expect(out).toHaveLength(4);
   });
 
+  it('yields each instant once for every-hour across a spring-forward gap', () => {
+    // The nonexistent 02:00 settles onto a neighbouring slot's instant; it must not repeat it,
+    // or the preview shows two equal rows and a catch-up counts one miss too many.
+    for (const [zone, from] of [['Europe/Warsaw', '2026-03-28T22:00:00Z'], ['America/New_York', '2026-03-08T04:00:00Z']] as const) {
+      const fromMs = Date.parse(from);
+      const runs = occurrencesBetween({ type: 'hours', every: 1 }, fromMs, fromMs + 6 * 3_600_000, zone);
+      expect(new Set(runs).size).toBe(runs.length);
+      expect(runs).toHaveLength(6);
+      expect(runs).toEqual([...runs].sort((a, b) => a - b));
+    }
+  });
+
   it('answers an empty list for an unknown zone', () => {
     expect(occurrencesBetween({ type: 'daily' }, 0, 86_400_000 * 3, 'Nowhere/Land')).toEqual([]);
   });

@@ -271,11 +271,24 @@ describe('GitHub automation API', () => {
     expect(entry(created.id).nextRunAt).toBe(state.nextRunAt);
     expect(entry(poll.id).nextRunAt).toBe(automationStore.state(poll.id)?.nextCheckAt);
 
-    // Editing the schedule forgets the armed instant, so the timer recomputes it from the new one.
+    // Editing the schedule re-arms from the new one in the same request, so the list the cockpit
+    // refetches on the change event never answers "Next run: —" for an enabled schedule.
     const current = automationStore.get(created.id)!;
+    const editedAt = Date.now();
     const edited = await apiRequest(server, `/api/v1/automations/${created.id}`, json({ ...scheduleInput, schedule: { type: 'weekdays', hour: 9 }, enabled: true, expectedRevision: current.revision }, 'PUT'));
     expect(edited.status).toBe(200);
+    const rearmed = nextOccurrence({ type: 'weekdays', hour: 9, minute: 0 }, editedAt, localTimeZone())!;
+    expect(Math.abs(Date.parse(automationStore.state(created.id)!.nextRunAt!) - rearmed)).toBeLessThan(60_000);
+    const afterEdit = (await (await apiRequest(server, '/api/v1/automations')).json()) as any;
+    expect(afterEdit.automations.find((item: { id: string }) => item.id === created.id).nextRunAt).toBe(automationStore.state(created.id)!.nextRunAt);
+    // An edit that leaves it paused arms nothing.
+    const stillPaused = automationStore.update(created.id, automationStore.get(created.id)!.revision, { ...scheduleInput, kind: 'schedule', schedule: { type: 'weekdays', hour: 9 }, enabled: false } as never);
+    const pausedEdit = await apiRequest(server, `/api/v1/automations/${created.id}`, json({ ...scheduleInput, schedule: { type: 'daily', hour: 7 }, enabled: false, expectedRevision: stillPaused.revision }, 'PUT'));
+    expect(pausedEdit.status).toBe(200);
     expect(automationStore.state(created.id)?.nextRunAt).toBeUndefined();
+    const resumed = await apiRequest(server, `/api/v1/automations/${created.id}`, json({ ...scheduleInput, schedule: { type: 'daily', hour: 7 }, enabled: true, expectedRevision: stillPaused.revision + 1 }, 'PUT'));
+    expect(resumed.status).toBe(200);
+    expect(automationStore.state(created.id)?.nextRunAt).toBe(new Date(nextOccurrence({ type: 'daily', hour: 7, minute: 0 }, Date.now(), localTimeZone())!).toISOString());
     const paused = await apiRequest(server, `/api/v1/automations/${created.id}/pause`, { method: 'POST' });
     expect(paused.status).toBe(200);
     const afterPause = (await (await apiRequest(server, '/api/v1/automations')).json()) as any;
@@ -376,6 +389,73 @@ describe('GitHub automation API', () => {
     expect(automations.logs({ automationId: 'idle-poll' })).toEqual([]);
     expect(automations.state('idle-poll')?.cursor?.timestamp).toBe(booted.stale);
   }, 20_000);
+
+  // The timer's own launcher (`startServer`'s handle → `launchScheduledRun`), not Run now's: a
+  // past-due schedule on a project with no remote at all launches one ordinary run at boot, and
+  // the occurrence's durable receipt stops a second boot that finds the same due instant.
+  it('boot fires a past-due schedule on a project without a remote, once across two boots', async () => {
+    const savedDryRun = process.env.CEZ_DRY_RUN;
+    process.env.CEZ_DRY_RUN = '1';
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: root, stdio: 'ignore' });
+    execFileSync('git', ['-c', 'user.email=t@example.com', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'init'], { cwd: root, stdio: 'ignore' });
+    const created = new Date(Date.now() - 86_400_000).toISOString();
+    // Inside the 10-minute grace window, so this is an on-time `schedule` fire, not a catch-up.
+    const occurrenceAt = new Date(Date.now() - 3 * 60_000).toISOString();
+    writeFileSync(join(root, '.ai/cezar/automations.json'), JSON.stringify({
+      version: 1,
+      automations: [{
+        id: 'nightly', revision: 1, kind: 'schedule', name: 'Nightly deps', enabled: true,
+        schedule: { type: 'daily', hour: 4, minute: 0 }, task: { prompt: 'Bump {{project}} deps' },
+        createdAt: created, updatedAt: created,
+      }],
+    }));
+    const pastDue = () => {
+      // Read-modify-write: keep whatever else the first boot persisted (a crash between the
+      // launch and the state write is what leaves `nextRunAt` behind).
+      const path = join(root, '.ai/cezar/automation-state.json');
+      const current = existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) as { states?: Record<string, object> } : {};
+      writeFileSync(path, JSON.stringify({ version: 1, states: { ...current.states, nightly: { ...current.states?.nightly, revision: 1, nextRunAt: occurrenceAt } } }));
+    };
+    pastDue();
+    const manager = Object.assign(recordingManager(), { isActive: () => false });
+    const project = await registerProject(root);
+    const boot = async (awaited: 'launched' | 'duplicate') => {
+      const started = vi.spyOn(WorkspaceAutomationScheduler.prototype, 'start');
+      const server = startServer({ repoRoot: project.root, bootProjectId: project.id, store, manager, version: '0.0.0-test' }, 0);
+      try {
+        await new Promise<void>((resolve) => server.once('listening', () => resolve()));
+        await vi.waitFor(() => expect(started).toHaveBeenCalledTimes(1), { timeout: 15_000, interval: 10 });
+        await vi.waitFor(() => {
+          const rows = AutomationStore.open(join(root, '.ai/cezar')).logs({ automationId: 'nightly' });
+          expect(rows.some((row) => row.result === awaited)).toBe(true);
+        }, { timeout: 5_000, interval: 20 });
+      } finally {
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+        started.mockRestore();
+      }
+    };
+    try {
+      await boot('launched');
+      const launched = store.listRuns().filter((run) => run.automationTrigger);
+      expect(launched).toHaveLength(1);
+      expect(launched[0]!.automationTrigger).toMatchObject({ automationId: 'nightly', automationRevision: 1, trigger: 'schedule', occurrenceAt });
+      expect(launched[0]!.task).toContain('Scheduled run context');
+      const automations = AutomationStore.open(join(root, '.ai/cezar'));
+      expect(automations.latestReceipts().get(`nightly:schedule:${occurrenceAt}`)).toMatchObject({ status: 'launched', runId: launched[0]!.id });
+      expect(Date.parse(automations.state('nightly')!.nextRunAt!)).toBeGreaterThan(Date.now());
+
+      // The second boot meets the same past-due instant; the receipt makes it a `duplicate`.
+      pastDue();
+      await boot('duplicate');
+      expect(store.listRuns().filter((run) => run.automationTrigger)).toHaveLength(1);
+      expect(manager.startRun).toHaveBeenCalledTimes(1);
+      expect(AutomationStore.open(join(root, '.ai/cezar')).logs({ automationId: 'nightly' })[0]).toMatchObject({ result: 'duplicate' });
+    } finally {
+      vi.restoreAllMocks();
+      if (savedDryRun === undefined) delete process.env.CEZ_DRY_RUN;
+      else process.env.CEZ_DRY_RUN = savedDryRun;
+    }
+  }, 30_000);
 
   it('accepts preview as an automation-log result filter', async () => {
     const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
