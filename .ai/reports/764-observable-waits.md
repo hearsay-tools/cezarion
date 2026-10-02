@@ -326,3 +326,24 @@ Individual invocation durations were 29.984–44.250 seconds idle (median 39.577
 Earlier failed attempts are retained in the report sections above: recovery-header growth, provider textarea clearing, and virtual extent remeasurement each have reproduced red/green evidence. One earlier loaded fixture startup failed before browser creation; its original cause cannot be determined because that run discarded child output. Diagnostic capture was added without changing budgets; the subsequent 80-invocation campaign had no recurrence. This is an unresolved historical observation, not a claimed startup fix.
 
 Durable parent evidence is in `764-parent-verification/`: full gate logs, four lane logs, campaign summary, reproducible orchestration source, and `campaign-evidence.tar.gz` containing setup/results, actual host/session samples, per-invocation logs and startup snapshots. The campaign script is a retained reproduction artifact; run it from its documented original `.ai/qa/764-final/` location.
+
+## PR #773 CI package tick observation follow-up
+
+Merged parent `fe27b00c098ed205f090d93d0b5954fb8ec665bb` normally as `ef36081d` (retained both report sections), and installed `npm ci` in this worktree before validation. Parent CI run `37022421007`, job `110888538147`, failed only the promotion reaping case at `application-update.test.ts:477`: `finalTicks` was `''`, while the staging case passed. The failing case ran 3021.8ms. The test had already established that the child was reaped before reading. Both child fixtures used `fs.writeFileSync(ticks, String(++n))` every 25ms, and the production owned-child code waits for `close` after SIGTERM / bounded SIGKILL escalation. A forced termination can interrupt the truncate/content seam of this fixture write; process reaping does not imply the last write completed.
+
+Added a shared **test-only** tick writer that writes a sibling `.pending` file and renames a completed number into place. Both fake npm children use it; their interval, SIGTERM behavior, authoritative PID reaping checks, numeric final-tick assertion, recovery assertions and enclosing budgets are unchanged. No production change is needed for this demonstrated observation race. No application environment was started.
+
+The new real-child regression commits tick 1, intercepts the next filesystem write at the truncation/content seam, emits an IPC observation, and blocks until its parent sends SIGKILL. The parent waits for `close`, proves the writer was reaped, and applies the same numeric assertion plus the stronger exact committed value `1`. Against the original direct-write implementation it fails with `actual: ''` (`764-ticks-red.log`); with atomic publication it passes (`764-ticks-green.log`). This deterministically proves the fixture can produce the CI symptom independently of readiness or production reaping. The exact interrupted syscall in the original CI run was not captured; the mechanism is reproduced rather than inferred solely from duration.
+
+Exact focused validation from repository root:
+
+```sh
+npm ci
+node --import ./scripts/test-git-env.mjs --import tsx --test packages/cezar/test/e2e/tick-writer.test.ts
+node --import ./scripts/test-git-env.mjs --import tsx --test --test-name-pattern='SIGTERM-resistant|compromised|queued helper' packages/cezar/test/e2e/application-update.test.ts
+npm test -- --run packages/web/src/test/e2e-wait-discipline.test.ts packages/cezar/src/application-update/npm-process.test.ts
+npm run typecheck -w @wjarka/cezarion
+git diff --check
+```
+
+Results: regression **1/1**; both reaping cases and three adjacent stale/compromised-lock cases **5/5**; scanner and npm-process units **37/37**; package typecheck and diff check passed. Evidence is `764-ticks-{red,green,package-green,units-green,typecheck,npm-ci}.log` alongside this report. The package cases ran against the parent build already present in this worktree; no production source changed. Parent owns CI rerun, full package gate and PR writes. No unresolved focused failure remains.

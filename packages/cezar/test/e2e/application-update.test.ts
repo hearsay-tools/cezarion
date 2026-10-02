@@ -14,6 +14,7 @@ import { promoteOriginal, restoreOriginal, runHelper } from '../../dist/applicat
 import { withDirectoryLock } from '../../dist/application-update/lock.js';
 import { armRestartHelper } from '../../dist/application-update/launcher.js';
 import { stopChild } from './stop-child.js';
+import { tickWriterSource } from './tick-writer.js';
 
 const execFile = promisify(execFileCallback);
 const npm = async (args: string[], env: NodeJS.ProcessEnv) => execFile('npm', args, { env, timeout: 90_000, maxBuffer: 2_000_000 });
@@ -468,7 +469,8 @@ const fs=require('node:fs'); fs.writeFileSync(${JSON.stringify(pidPath)},String(
 process.on('SIGTERM',()=>fs.writeFileSync(${JSON.stringify(join(fixture.root, 'term-received'))},'yes'));
 fs.renameSync(${JSON.stringify(lock)},${JSON.stringify(join(fixture.stateDir, 'stolen-lock'))});
 fs.mkdirSync(${JSON.stringify(lock)});
-let n=0; setInterval(()=>fs.writeFileSync(${JSON.stringify(ticks)},String(++n)),25);`, { mode: 0o700 });
+${tickWriterSource(ticks)}
+let n=0; setInterval(()=>writeTick(++n),25);`, { mode: 0o700 });
     await assert.rejects(runHelper(fixture.plan), /ownership changed/);
     pid = Number(await readFile(pidPath, 'utf8'));
     // Reaping is the completion acknowledgement: a dead writer cannot mutate again.
@@ -504,7 +506,8 @@ const fs=require('node:fs'); const path=require('node:path'); fs.writeFileSync($
 process.on('SIGTERM',()=>fs.writeFileSync(${JSON.stringify(join(root, 'term-received'))},'yes'));
 const update=path.join(${JSON.stringify(home)},'application-updates',fs.readdirSync(path.join(${JSON.stringify(home)},'application-updates'))[0]);
 const lock=path.join(update,'operation.lock'); fs.renameSync(lock,path.join(update,'stolen-lock')); fs.mkdirSync(lock);
-let n=0; setInterval(()=>fs.writeFileSync(${JSON.stringify(ticks)},String(++n)),25);`, { mode: 0o700 });
+${tickWriterSource(ticks)}
+let n=0; setInterval(()=>writeTick(++n),25);`, { mode: 0o700 });
     const service = new ApplicationUpdateService({ packageRoot: original, launchEntry: join(original, 'dist/index.js'),
       npmPrefix: prefix, npmCache: cache, npmBin, home, targetVersion: () => '2.0.0' });
     await assert.rejects(service.apply(), /owns this installation/);
