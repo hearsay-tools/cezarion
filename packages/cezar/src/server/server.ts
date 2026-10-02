@@ -77,6 +77,7 @@ import { WORKFLOWS_DIR, loadWorkflows } from '../workflows/load.ts';
 import {
   QUICK_TASK_WORKFLOW,
   normalizeWorkflowDoc,
+  plannedWorkflow,
   skillStackOf,
   skillsToSteps,
   stepsIssue,
@@ -3818,11 +3819,7 @@ export function createApp(deps: ServerDeps) {
         // Inline chain (spec 008): an approved plan runs as an ad-hoc workflow.
         const issue = stepsIssue(parsed.data.steps);
         if (issue) return c.json({ error: issue }, 400);
-        workflow = {
-          name: '(planned)',
-          source: 'built-in',
-          steps: parsed.data.steps,
-        };
+        workflow = plannedWorkflow(parsed.data.steps);
       } else {
         const { workflows } = await loadWorkflows(repoRoot);
         workflow = workflows.find((w) => w.name === parsed.data.workflow);

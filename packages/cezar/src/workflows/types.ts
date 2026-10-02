@@ -228,6 +228,25 @@ function extrasFor(backend: AgentBackend | undefined): readonly string[] {
   return HARNESS_EXTRA_TOOLS[backend];
 }
 
+/** One task step applying the selected skill to the user's task. */
+export function skillTaskSteps(name: string): WorkflowStepDef[] {
+  return [{ id: 'task', name, skill: name, prompt: '{{task}}' }];
+}
+
+/** Wrap an inline chain as an ad-hoc workflow. */
+export function plannedWorkflow(steps: WorkflowStepDef[]): WorkflowDef {
+  return { name: '(planned)', source: 'built-in', steps };
+}
+
+/** Validate the mutually exclusive skill/workflow flags before discovery. */
+export function skillFlagIssue(flags: { skill?: string; workflow?: string }): string | undefined {
+  if (flags.skill !== undefined && flags.workflow !== undefined) {
+    return '--skill and --workflow cannot be used together';
+  }
+  if (flags.skill !== undefined && !flags.skill.trim()) return '--skill must name a skill';
+  return undefined;
+}
+
 /** The zero-config workflow: one agent step that just does the task. */
 export const QUICK_TASK_WORKFLOW: WorkflowDef = {
   name: 'quick-task',
