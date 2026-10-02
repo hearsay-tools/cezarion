@@ -16,8 +16,8 @@ import { waitForHealth } from './poll'
  *
  * The spec boots its own server because the feature is off by default (`CEZ_PREVIEW=1`). The
  * cezar-side Chromium is whatever `resolveChromium` finds; `CEZ_PREVIEW_NO_SANDBOX=1` is added
- * only when the cockpit's own browser needed `--no-sandbox` (a container), the one case the
- * spec shares a cause with.
+ * only when the cockpit's own browser needed `--no-sandbox` (a container) or on CI, whose runners
+ * restrict the user namespaces Chromium's sandbox needs.
  */
 
 const sessionId = `e2e-live-preview-${process.pid}`
@@ -67,7 +67,11 @@ beforeAll(async () => {
   const port = await freePort()
   baseUrl = `http://localhost:${port}`
   // The cockpit's own browser is launched with --no-sandbox exactly where this machine needs it.
-  const noSandbox = readTestEnv().browser.launchArgs?.includes('--no-sandbox')
+  // GitHub's Ubuntu runners restrict unprivileged user namespaces (AppArmor), so the Chromium
+  // cezar resolves there dies with "No usable sandbox" and the pane shows 5.4 (failure bundle
+  // live-preview/registers-runs-streams-takes-a-click-and-stops-1, PR #792). That state has its own
+  // unit coverage; this spec is about streaming, so CI opts in the documented way.
+  const noSandbox = readTestEnv().browser.launchArgs?.includes('--no-sandbox') || process.env.CI === 'true'
   server = spawn(process.execPath, [cezarCli, 'serve', '--repo', dataRoot, '--port', String(port), '--no-open'], {
     env: fixtureServeEnv(dataRoot, { CEZ_PREVIEW: '1', ...(noSandbox ? { CEZ_PREVIEW_NO_SANDBOX: '1' } : {}) }),
     stdio: 'ignore',
@@ -103,25 +107,20 @@ describe('live preview', () => {
     ) as string
     expect(registered).toContain(`:${appPort}`)
 
-    // The card lands while the agent's reply is still rendering below it and the thread scrolls
-    // with it; a click on a card that is still moving misses. Click it once its box has held still.
-    // On CI the agent's reply is longer (deeper fixture paths), so following the thread's tail left
-    // the card under the sticky breadcrumb, and agent-browser refused the covered click (failure
-    // bundle live-preview/registers-runs-streams-takes-a-click-and-stops-1, PR #792). Centre the
-    // button first, then wait for it to hold still below the breadcrumb.
-    browser.waitForFunction(`!!document.querySelector('${card} button')`)
-    browser.evaluate(`document.querySelector('${card} button').scrollIntoView({ block: 'center', behavior: 'instant' })`)
-    browser.waitForStable(
-      `(() => {
-        const b = document.querySelector('${card} button'); if (!b) return null;
-        const r = b.getBoundingClientRect();
-        const crumb = document.querySelector('[data-slot="desktop-breadcrumb"]');
-        const below = crumb ? crumb.getBoundingClientRect().bottom : 0;
-        return r.width > 0 && r.top >= below && r.bottom <= innerHeight ? [r.left, r.top, r.width, r.height] : null;
-      })()`,
-      { holdMs: 800 },
-    )
-    browser.click(`${card} button`)
+    // Open the pane from the header toggle and approve the run there (spec 5.16). The thread card
+    // offers the same Run and open, but the thread follows its tail while the agent's reply
+    // renders, so on CI (longer reply, deeper fixture paths) the card sat under the sticky
+    // breadcrumb and agent-browser refused the covered click (failure bundle
+    // live-preview/registers-runs-streams-takes-a-click-and-stops-1, PR #792). The toggle sits in
+    // the fixed task header and never moves with the thread.
+    browser.click('[data-slot="preview-toggle"]')
+    const approval = '[data-slot="preview-pane"] [data-slot="preview-state"][data-state="needs-approval"]'
+    const pending = browser.waitForValue(
+      `(() => { const s = document.querySelector('${approval}'); return s ? s.textContent : null })()`,
+      text => typeof text === 'string' && text.includes('Run and open'),
+    ) as string
+    expect(pending).toContain('registered · not started')
+    browser.click(`${approval} button`)
 
     // The canvas holds the page: the fixture button's fill is green, not white or empty. The frame
     // must also be the size of the pane (Chromium's viewport follows the pane through a burst of
