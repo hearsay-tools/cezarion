@@ -45,6 +45,7 @@ import { plannedWorkflow, skillTaskSteps, type WorkflowDef } from '../workflows/
 import { workerWorkflowHash, type WorkerAccountBinding, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
 import {
   withOwnedInputRun,
+  withSkillParentRun,
   promptFor,
   driveRun,
   driveSeam,
@@ -407,6 +408,7 @@ const CONTROL_CRITERIA = [
   // workflows/ci-wait-refusal.test.ts: settled worker wake, private CI IPC, then delivery.
   { id: 'R27', scenario: 'hold' },
   { id: 'R28', scenario: 'done' },
+  { id: 'R29', scenario: 'baseline' },
 ] as const;
 
 /**
@@ -950,6 +952,26 @@ describe('harness parity — owned input run tier', () => {
         if (run.delegation?.role !== 'worker') throw new Error('expected worker');
         expect(readFileSync(cwdFile, 'utf8')).toBe(run.delegation.workspace.path);
       }, { workflowDef });
+    }, 60_000);
+
+    it(`${backend} R29 spawns from a skill-driven parent without inheriting its skill on the native wire (#778)`, async () => {
+      const name = 'skill-inheritance';
+      await withSkillParentRun(backend, probeEnv(name), async ({ store, manager, repoRoot, runId }) => {
+        const parentRecording = readRecording(repoRoot, name).join('\n');
+        expect(parentRecording).toContain('Selected skill: /parent-skill');
+        expect(parentRecording).toContain('PARENT SKILL BODY 778');
+        expect(parentRecording).toContain('parent extra');
+        await waitFor(() => !manager.isActive(runId), 30_000);
+        const worker = store.getRun(runId)!;
+        expect(worker.error).toBeUndefined();
+        expect(worker.steps.map(step => ({ id: step.id, status: step.status }))).toEqual([{ id: 'task', status: 'done' }]);
+        if (worker.delegation?.role !== 'worker') throw new Error('expected worker');
+        const childRecording = readRecording(worker.delegation.workspace.path, name).join('\n');
+        expect(childRecording).toContain('parent extra');
+        expect(childRecording).not.toContain('Selected skill: /parent-skill');
+        expect(childRecording).not.toContain('PARENT SKILL BODY 778');
+        expect(worker.systemPrompt).toBe('parent extra');
+      });
     }, 60_000);
 
     it(`${backend} R28 runs a --skill worker with the skill in its system prompt and no parent skill (#778)`, async () => {
