@@ -1,6 +1,6 @@
 import { nextOccurrence, occurrencesBetween } from '@open-mercato/cezar-contract';
 import type { AutomationLease, AutomationStore } from './store.ts';
-import type { AutomationReceipt, ScheduleAutomationDefinition } from './types.ts';
+import { isScheduleAutomation, type AutomationReceipt, type ScheduleAutomationDefinition } from './types.ts';
 
 /**
  * The schedule kind's evaluator (spec 2026-10-02-scheduled-automations § Lifecycle): what fires
@@ -97,6 +97,16 @@ export class ScheduleRunner {
   /** The timer fired (or boot found a past-due occurrence): apply the age rule and launch. */
   async fire(definition: ScheduleAutomationDefinition): Promise<ScheduleFireOutcome> {
     const outcome = await this.underLease(async () => {
+      // The timer captured `definition` from this process's view; another cockpit may have
+      // paused, edited or deleted it since. Re-read it under the lease and fire only the
+      // revision that is still on disk. Anything else launches nothing and moves nothing —
+      // the process that changed it owns `nextRunAt` — and `onChange` re-arms from the fresh view.
+      this.handle.store.reload();
+      const current = this.handle.store.get(definition.id);
+      if (!current?.enabled || !isScheduleAutomation(current) || current.revision !== definition.revision) {
+        this.handle.onChange?.(definition.id, current?.revision ?? definition.revision);
+        return { result: 'skipped' } as const;
+      }
       const now = this.now();
       const due = this.dueAt(definition);
       if (due === null) return { result: 'skipped' } as const;

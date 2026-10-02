@@ -136,6 +136,18 @@ export class AutomationStore {
     return true;
   }
 
+  /**
+   * Re-reads the definitions and state files from disk. Another cockpit on this project may have
+   * paused, edited or deleted a definition since this process loaded it; a schedule fire calls
+   * this under the lease so it never launches a definition that no longer exists on disk. An
+   * unreadable file keeps this process's last good view, as `setState` does.
+   */
+  reload(): void {
+    const definitions = this.readJson(DEFINITIONS, automationDefinitionsFileSchema, this.definitionsFile);
+    if (definitions !== this.definitionsFile) this.adoptDefinitions(definitions);
+    this.stateFile = this.readJson(STATE, automationStateFileSchema, this.stateFile);
+  }
+
   state(id: string): AutomationRuntimeState | undefined {
     return this.stateFile.states[id];
   }
@@ -395,15 +407,21 @@ export class AutomationStore {
   }
 
   private loadDefinitions(): void {
-    this.definitionsFile = this.readJson(DEFINITIONS, automationDefinitionsFileSchema, {
+    this.adoptDefinitions(this.readJson(DEFINITIONS, automationDefinitionsFileSchema, {
       version: 1,
       automations: [],
-    });
-    for (const raw of this.definitionsFile.automations) {
+    }));
+  }
+
+  private adoptDefinitions(file: DefinitionsFile): void {
+    const definitions = new Map<string, AutomationDefinition>();
+    for (const raw of file.automations) {
       const parsed = automationDefinitionSchema.safeParse(raw);
-      if (parsed.success) this.definitions.set(parsed.data.id, parsed.data);
+      if (parsed.success) definitions.set(parsed.data.id, parsed.data);
       else this.warnOnce('definitions', 'Ignored an invalid GitHub automation definition.');
     }
+    this.definitionsFile = file;
+    this.definitions = definitions;
   }
 
   private persistDefinitions(): void {

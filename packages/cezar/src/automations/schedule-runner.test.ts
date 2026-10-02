@@ -1,3 +1,4 @@
+import { writeFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -392,6 +393,76 @@ describe('ScheduleRunner', () => {
     expect(await runner.retry(definition, stale)).toEqual({ result: 'duplicate', occurrenceAt: stale.occurrenceAt });
     expect(launch).toHaveBeenCalledTimes(1);
     expect(store.latestReceipts().get(stale.receiptKey)).toMatchObject({ status: 'launched', runId: 'elsewhere' });
+  });
+
+  // A second cockpit on the same project edits the definitions file on disk; this process's
+  // timer still holds the definition it captured when it armed. The lease serializes fires,
+  // not views: the fire must re-read the definition under the lease and drop a stale one.
+  describe('a definition changed by another process', () => {
+    const editable = (definition: ScheduleAutomationDefinition) => {
+      const { id: _id, revision: _r, createdAt: _c, updatedAt: _u, ...rest } = definition;
+      return rest;
+    };
+
+    it('paused elsewhere: launches nothing, logs no failure, leaves the counter and nextRunAt, and refreshes this store', async () => {
+      const { dir, store, definition, runner, launch, clock, changes } = await setup();
+      runner.dueAt(definition);
+      store.setState('nightly', (current) => ({ ...current, consecutiveFailures: 1 }));
+      const other = AutomationStore.open(dir, { now: () => new Date(clock.now()) });
+      other.update('nightly', definition.revision, { ...editable(definition), enabled: false });
+      clock.set(FIRST_RUN + 1_000);
+      expect(await runner.fire(definition)).toEqual({ result: 'skipped' });
+      expect(launch).not.toHaveBeenCalled();
+      expect(store.latestReceipts().size).toBe(0);
+      expect(store.logs({ automationId: 'nightly' }).filter((row) => row.result === 'failed')).toEqual([]);
+      expect(store.state('nightly')).toMatchObject({ consecutiveFailures: 1, nextRunAt: iso(FIRST_RUN) });
+      expect(store.get('nightly')).toMatchObject({ enabled: false, revision: 2 });
+      expect(store.list().filter((item) => item.enabled)).toEqual([]);
+      expect(changes.at(-1)).toBe('nightly');
+    });
+
+    it('rescheduled elsewhere: launches nothing and adopts the on-disk definition and nextRunAt', async () => {
+      const { dir, store, definition, runner, launch, clock } = await setup();
+      runner.dueAt(definition);
+      const other = AutomationStore.open(dir, { now: () => new Date(clock.now()) });
+      const edited = other.update('nightly', definition.revision, { ...editable(definition), schedule: { type: 'daily', hour: 9 } });
+      other.setState('nightly', (current) => ({ ...current, revision: edited.revision, nextRunAt: iso(FIRST_RUN + 5 * HOUR) }));
+      clock.set(FIRST_RUN + 1_000);
+      expect(await runner.fire(definition)).toEqual({ result: 'skipped' });
+      expect(launch).not.toHaveBeenCalled();
+      expect(store.get('nightly')).toMatchObject({ revision: 2, schedule: { type: 'daily', hour: 9 } });
+      expect(store.state('nightly')?.nextRunAt).toBe(iso(FIRST_RUN + 5 * HOUR));
+    });
+
+    it('deleted elsewhere: launches nothing and drops the definition here too', async () => {
+      const { dir, store, definition, runner, launch, clock } = await setup();
+      runner.dueAt(definition);
+      AutomationStore.open(dir, { now: () => new Date(clock.now()) }).delete('nightly');
+      clock.set(FIRST_RUN + 1_000);
+      expect(await runner.fire(definition)).toEqual({ result: 'skipped' });
+      expect(launch).not.toHaveBeenCalled();
+      expect(store.get('nightly')).toBeUndefined();
+    });
+
+    it('unchanged on disk: a second store opening the directory does not stop the fire', async () => {
+      const { dir, store, definition, runner, launch, clock } = await setup();
+      runner.dueAt(definition);
+      AutomationStore.open(dir, { now: () => new Date(clock.now()) });
+      clock.set(FIRST_RUN + 1_000);
+      expect(await runner.fire(definition)).toMatchObject({ result: 'launched', occurrenceAt: iso(FIRST_RUN) });
+      expect(launch).toHaveBeenCalledTimes(1);
+      expect(store.state('nightly')?.nextRunAt).toBe(iso(FIRST_RUN + DAY));
+    });
+
+    it('an unreadable definitions file falls back to this process\'s view and still fires', async () => {
+      const { dir, store, definition, runner, launch, clock } = await setup();
+      runner.dueAt(definition);
+      writeFileSync(join(dir, 'automations.json'), '{ not json');
+      clock.set(FIRST_RUN + 1_000);
+      expect(await runner.fire(definition)).toMatchObject({ result: 'launched' });
+      expect(launch).toHaveBeenCalledTimes(1);
+      expect(store.get('nightly')).toMatchObject({ enabled: true, revision: 1 });
+    });
   });
 
   it('reports detection-only when the cockpit cannot launch', async () => {
