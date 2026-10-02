@@ -2,34 +2,22 @@ import { pathToFileURL } from 'node:url';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import { ciWaitRequestSchema } from '@open-mercato/cezar-contract';
-import { z } from 'zod';
-import { callCiWait, monitorCiOwner } from './client.ts';
+import { monitorCiOwner } from './client.ts';
+import { cezarServerInstructions, cezarTools } from './tools.ts';
 
-export const ciToolDefinition = {
-  name: 'cezar_wait_for_ci',
-  description: 'Register a bounded CI wait for a GitHub pull request. End your turn after registration; Cezar resumes you with an observation. No marker is needed. Passing reported checks does not prove all expected workflows appeared and is not merge approval.',
-  inputSchema: { ...z.toJSONSchema(ciWaitRequestSchema, { io: 'input' }), type: 'object' as const },
-};
-export async function invokeCiTool(input: unknown) {
-  try {
-    const receipt = await callCiWait(input);
-    return { content: [{ type: 'text' as const, text: `${JSON.stringify(receipt)}\nRegistered. Please end your turn to wait; no marker is needed. This observation is not merge approval.` }], details: receipt };
-  } catch (error) {
-    return { isError: true, content: [{ type: 'text' as const, text: error instanceof Error ? error.message : 'CI tool unavailable' }], details: {} };
-  }
-}
+// Existing importers read the CI tool from here.
+export { ciToolDefinition, invokeCiTool } from './tools.ts';
+
 // #497: deferred-tool harnesses show a bare tool name until the agent loads its
 // schema, so the initialize instructions carry one trigger line per listed tool.
-const tools = [{ definition: ciToolDefinition, trigger: 'load when opening or updating a PR you want to watch CI on.' }];
-export const ciServerInstructions = [
-  'The interface to Cezarion, the orchestrator running this session. Load a tool below when its situation comes up.',
-  ...tools.map(tool => `- ${tool.definition.name}: ${tool.trigger}`),
-].join('\n');
-export function createCiMcpServer(): Server {
-  const server = new Server({ name: 'cezar-ci', version: '1.0.0' }, { capabilities: { tools: {} }, instructions: ciServerInstructions });
+export function createCiMcpServer(env: NodeJS.ProcessEnv = process.env): Server {
+  const tools = cezarTools(env);
+  const server = new Server({ name: 'cezar-ci', version: '1.0.0' }, { capabilities: { tools: {} }, instructions: cezarServerInstructions(env) });
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: tools.map(tool => tool.definition) }));
-  server.setRequestHandler(CallToolRequestSchema, async request => request.params.name === ciToolDefinition.name ? invokeCiTool(request.params.arguments) : { isError: true, content: [{ type: 'text', text: 'Unknown tool' }] });
+  server.setRequestHandler(CallToolRequestSchema, async request => {
+    const tool = tools.find(candidate => candidate.definition.name === request.params.name);
+    return tool ? tool.invoke(request.params.arguments) : { isError: true, content: [{ type: 'text', text: 'Unknown tool' }] };
+  });
   return server;
 }
 export async function serveCiMcp(): Promise<void> {

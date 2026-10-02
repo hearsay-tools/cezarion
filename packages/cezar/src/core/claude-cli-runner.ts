@@ -29,6 +29,7 @@ import type {
 export type { AgentSession, SessionOptions } from './agent-runner.ts';
 import { isSignalTerminationExit, trackChildExit } from './agent-runner.ts';
 import { buildChildEnv } from './agent-env.ts';
+import { cezarToolEnvNames, cezarToolNames } from '../ci-wait/tools.ts';
 import { costWeightedTokens, type RawUsage } from './usage.ts';
 import { readNdjson } from './ndjson.ts';
 import { InputSubmissions } from './input-submissions.ts';
@@ -532,9 +533,9 @@ export function buildClaudeArgs(
     const { name, command, args: toolArgs } = spec.cezarTools;
     args.push('--mcp-config', JSON.stringify({ mcpServers: { [name]: {
       command, args: toolArgs,
-      env: { CEZ_TOOL_TOKEN: '${CEZ_TOOL_TOKEN}', CEZ_TOOL_SOCKET: '${CEZ_TOOL_SOCKET}' },
+      env: Object.fromEntries(cezarToolEnvNames(spec.env ?? {}).map(key => [key, `\${${key}}`])),
     } } }));
-    if (allowed.length > 0) allowed.push(`mcp__${name}__cezar_wait_for_ci`);
+    if (allowed.length > 0) allowed.push(...cezarToolNames(spec.env ?? {}).map(tool => `mcp__${name}__${tool}`));
   }
   if (allowed.length > 0) {
     args.push('--allowedTools', allowed.join(','));

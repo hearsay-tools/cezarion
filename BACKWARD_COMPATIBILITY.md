@@ -121,6 +121,16 @@ The MCP tool name `cezar_wait_for_ci` and its default 1,800-second timeout (rang
 1–7,200) are model-facing compatibility surfaces. Preserve user MCP configuration
 and explicit denials when provisioning a session.
 
+Additive for #781 (live preview v1): `POST /api/v1/tools/preview-serve` joins the same
+private family, behind the same bearer capability and a 16 KiB body limit. Every answer
+except a missing or revoked capability (`401`) is `200` with the shared
+`PreviewServeResult` `{ ok, code, message, hint }`, so an agent can repair a bad call from
+the hint: `invalid_input` names the first failing field and gives a valid example call,
+`preview_disabled` answers whenever `CEZ_PREVIEW` is not exactly `1`, and `headless` answers
+when the session carries no preview registration. The MCP tool `cezar_preview_serve` is
+listed, and admitted on every runner, only under `CEZ_PREVIEW=1`, which the provisioned
+session environment carries to the adapter. `cezar_wait_for_ci` and its route are unchanged.
+
 - Task file links and published output (#418, additive): `GET /api/v1/runs/:id/file-link`, `GET /api/v1/runs/:id/artifacts`, `GET /api/v1/runs/:id/artifacts/:artifactId`, `GET /api/v1/runs/:id/artifacts/:artifactId/download`, `GET /api/v1/runs/:id/artifacts/:artifactId/image`. All have the normal project aliases. The resolver accepts a bounded `path` and optional `raw=1` (raster images only); external paths match published metadata only and never authorize a source-file read. Artifact routes address validated IDs, not host paths. Download uses attachment disposition and `nosniff`; active documents are never served inline. Existing `/files` and pasted-attachment behavior is unchanged. Files-page query selectors `path` and `artifact` are mutually exclusive.
 
 ## 3. `.ai/cezar/` state files (`packages/cezar/src/runs/store.ts` and friends)
