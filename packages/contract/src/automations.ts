@@ -203,6 +203,9 @@ export const automationListEntrySchema = automationDefinitionSchema.extend({
   state: automationRuntimeStateSchema.optional(),
   latestLog: automationLogRecordSchema.optional(),
   counts: automationCountsSchema,
+  /** Enabled only: a schedule's armed `state.nextRunAt`, a poll's `state.nextCheckAt`. Absent
+   *  while paused, and for a schedule the timer has not armed yet. */
+  nextRunAt: z.string().optional(),
 });
 export type AutomationListEntry = z.infer<typeof automationListEntrySchema>;
 
@@ -212,11 +215,13 @@ export type AutomationListEntry = z.infer<typeof automationListEntrySchema>;
  * `available`/`reason` are the forge's own cached availability (the same degrade `/github` uses:
  * no GitHub remote, no `gh`, offline — never a 5xx), and `scheduler` summarizes the timer:
  * `scheduled` when any definition is enabled, `idle` otherwise, with `nextDue` the earliest
- * pending check across them.
+ * `nextRunAt` across them. `available`/`reason` describe GitHub only; a schedule needs neither.
+ * `timeZone` is the server's own zone, the one every schedule is evaluated in.
  */
 export const automationsResponseSchema = z.object({
   available: z.boolean(),
   reason: z.string().optional(),
+  timeZone: z.string(),
   scheduler: z.object({
     state: z.enum(['scheduled', 'idle']),
     nextDue: z.string().optional(),
@@ -274,6 +279,10 @@ export const automationRetryResponseSchema = z.object({
   runId: z.string(),
 });
 export type AutomationRetryResponse = z.infer<typeof automationRetryResponseSchema>;
+
+/** `POST /automations/:id/run` (202) — a schedule fired once by hand, and the run it created. */
+export const automationRunResponseSchema = z.object({ runId: z.string() });
+export type AutomationRunResponse = z.infer<typeof automationRunResponseSchema>;
 
 // ---- request bodies ------------------------------------------------------------------------
 //

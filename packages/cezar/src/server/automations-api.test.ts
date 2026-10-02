@@ -1,14 +1,26 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { localTimeZone, nextOccurrence } from '@open-mercato/cezar-contract';
 import { AutomationCoordinator } from '../automations/coordinator.ts';
+import { GithubPoller } from '../automations/github-poller.ts';
 import { WorkspaceAutomationScheduler } from '../automations/scheduler.ts';
 import { AutomationStore } from '../automations/store.ts';
 import { RunStore } from '../runs/store.ts';
+import { registerProject } from '../workspace/projects.ts';
 import type { RunManager } from '../workflows/run.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
-import { createApp, WorkspaceEventBus } from './server.ts';
+import { createApp, startServer, WorkspaceEventBus } from './server.ts';
+
+/** A git checkout whose `origin` is on github.com — what a GitHub automation needs at create. */
+function withGithubRemote(root: string): void {
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: root, stdio: 'ignore' });
+  git('init', '-q', '-b', 'main');
+  git('-c', 'user.email=t@example.com', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'init');
+  git('remote', 'add', 'origin', 'https://github.com/acme/demo.git');
+}
 
 describe('GitHub automation API', () => {
   let root: string;
@@ -42,6 +54,17 @@ describe('GitHub automation API', () => {
     filters: { lookbackDays: 7, maxRecords: 25 },
     task: { prompt: 'Review {{github.url}}' },
   };
+  const scheduleInput = {
+    name: 'Nightly deps',
+    kind: 'schedule',
+    schedule: { type: 'daily', hour: 4, minute: 0 },
+    task: { prompt: 'Bump {{project}} deps on {{date}}' },
+  };
+  /** A manager that creates the run record and nothing else — enough for a launch to land. */
+  const recordingManager = () => ({
+    startRun: vi.fn((workflow: { name: string }, start: { task: string }) =>
+      store.createRun({ title: 'automation', workflow: workflow.name, task: start.task, steps: [] })),
+  }) as unknown as RunManager & { startRun: ReturnType<typeof vi.fn> };
   const app = (over: Partial<Parameters<typeof createApp>[0]> = {}) =>
     createApp({ repoRoot: root, store, manager: {} as RunManager, version: 'test', ...over });
   const json = (body: unknown, method = 'POST'): RequestInit => ({
@@ -51,6 +74,7 @@ describe('GitHub automation API', () => {
   });
 
   it('creates paused definitions and rejects malformed bounds', async () => {
+    withGithubRemote(root);
     const bad = await apiRequest(app(), '/api/v1/automations', json({ ...input, intervalSeconds: 5 }));
     expect(bad.status).toBe(400);
     const response = await apiRequest(app(), '/api/v1/automations', json(input));
@@ -59,6 +83,7 @@ describe('GitHub automation API', () => {
   });
 
   it('enforces optimistic concurrency and establishes a baseline on enable', async () => {
+    withGithubRemote(root);
     const created = ((await (await apiRequest(app(), '/api/v1/automations', json(input))).json()) as any).automation;
     const stale = await apiRequest(
       app(),
@@ -73,8 +98,11 @@ describe('GitHub automation API', () => {
   });
 
   it('runs preview checks asynchronously without writing receipts', async () => {
-    const server = app();
-    const created = ((await (await apiRequest(server, '/api/v1/automations', json(input))).json()) as any).automation;
+    // Created in the store, not through the API: the checkout has no GitHub remote, which is the
+    // failure this check has to report.
+    const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
+    const server = app({ automationStore });
+    const created = automationStore.create({ ...input, events: ['issue.opened'] });
     const queued = await apiRequest(server, `/api/v1/automations/${created.id}/check`, json({ mode: 'preview' }));
     expect(queued.status).toBe(202);
     const { checkId } = (await queued.json()) as { checkId: string };
@@ -115,6 +143,7 @@ describe('GitHub automation API', () => {
     });
 
     await scheduler.start();
+    withGithubRemote(root);
     const created = ((await (await apiRequest(server, '/api/v1/automations', json(input))).json()) as any).automation;
     expect(scheduler.hasTimer()).toBe(false);
 
@@ -134,6 +163,194 @@ describe('GitHub automation API', () => {
     expect(((await detail.json()) as any).state.lastSuccessAt).toBe('2026-07-27T00:00:00.000Z');
     scheduler.stop();
   });
+
+  it('creates a schedule automation without poll keys and refuses one with filters (400)', async () => {
+    const server = app();
+    const created = await apiRequest(server, '/api/v1/automations', json(scheduleInput));
+    expect(created.status).toBe(201);
+    const automation = ((await created.json()) as any).automation;
+    expect(automation).toMatchObject({ kind: 'schedule', enabled: false, schedule: { type: 'daily', hour: 4, minute: 0 } });
+    expect(automation).not.toHaveProperty('events');
+    expect(automation).not.toHaveProperty('intervalSeconds');
+    expect(automation).not.toHaveProperty('filters');
+
+    const filtered = await apiRequest(server, '/api/v1/automations', json({ ...scheduleInput, filters: { lookbackDays: 7 } }));
+    expect(filtered.status).toBe(400);
+    expect(((await filtered.json()) as any).error).toBe('a scheduled automation has no GitHub filter');
+    const unscheduled = await apiRequest(server, '/api/v1/automations', json({ ...scheduleInput, schedule: undefined }));
+    expect(unscheduled.status).toBe(400);
+    const githubPlaceholder = await apiRequest(server, '/api/v1/automations', json({ ...scheduleInput, task: { prompt: 'Open {{github.url}}' } }));
+    expect(githubPlaceholder.status).toBe(400);
+    expect(((await githubPlaceholder.json()) as any).error).toContain('unknown automation placeholder');
+    // No `kind` is a GitHub automation, and this checkout has no GitHub remote to poll.
+    const noRemote = await apiRequest(server, '/api/v1/automations', json(input));
+    expect(noRemote.status).toBe(400);
+    expect(((await noRemote.json()) as any).error).toBe('No GitHub remote is configured');
+  });
+
+  it('a PUT without kind inherits schedule and a PUT switching kind answers 409', async () => {
+    const server = app();
+    const created = ((await (await apiRequest(server, '/api/v1/automations', json(scheduleInput))).json()) as any).automation;
+    // An old client sends no `kind` and no poll keys: that is an edit of the schedule it read.
+    const { kind: _kind, ...oldClientBody } = scheduleInput;
+    const renamed = await apiRequest(server, `/api/v1/automations/${created.id}`, json({ ...oldClientBody, name: 'Renamed', expectedRevision: 1 }, 'PUT'));
+    expect(renamed.status).toBe(200);
+    expect(((await renamed.json()) as any).automation).toMatchObject({ kind: 'schedule', name: 'Renamed', revision: 2 });
+    // Inheriting `schedule` also means a poll key is refused rather than read as a GitHub edit.
+    const polled = await apiRequest(server, `/api/v1/automations/${created.id}`, json({ ...oldClientBody, intervalSeconds: 300, expectedRevision: 2 }, 'PUT'));
+    expect(polled.status).toBe(400);
+    expect(((await polled.json()) as any).error).toBe('a scheduled automation has no GitHub filter');
+    const switched = await apiRequest(server, `/api/v1/automations/${created.id}`, json({ ...input, kind: 'github', expectedRevision: 2 }, 'PUT'));
+    expect(switched.status).toBe(409);
+    expect(((await switched.json()) as any).error).toBe('change the kind by creating a new automation');
+    expect(((await (await apiRequest(server, `/api/v1/automations/${created.id}`)).json()) as any).automation).toMatchObject({ kind: 'schedule', revision: 2 });
+  });
+
+  it('POST /automations/:id/run launches a schedule (202 runId) and 409s a github automation', async () => {
+    const bus = new WorkspaceEventBus();
+    const changes: unknown[] = [];
+    bus.on((event, data) => { if (event === 'automation-change') changes.push(data); });
+    const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
+    const manager = recordingManager();
+    const server = app({ automationStore, manager, workspaceEvents: bus });
+    const created = ((await (await apiRequest(server, '/api/v1/automations', json(scheduleInput))).json()) as any).automation;
+
+    const ran = await apiRequest(server, `/api/v1/automations/${created.id}/run`, { method: 'POST' });
+    expect(ran.status).toBe(202);
+    const { runId } = (await ran.json()) as { runId: string };
+    expect(store.getRun(runId)?.automationTrigger).toMatchObject({ automationId: created.id, trigger: 'manual' });
+    expect(store.getRun(runId)?.task).toContain('Scheduled run context');
+    expect(automationStore.logs({ automationId: created.id })[0]).toMatchObject({ result: 'manual', runId });
+    // Run now leaves the timer alone: still paused, nothing armed.
+    expect(automationStore.get(created.id)?.enabled).toBe(false);
+    expect(automationStore.state(created.id)?.nextRunAt).toBeUndefined();
+    expect(changes.at(-1)).toMatchObject({ project: 'default', automationId: created.id });
+
+    const held = automationStore.acquireLease();
+    try {
+      const busy = await apiRequest(server, `/api/v1/automations/${created.id}/run`, { method: 'POST' });
+      expect(busy.status).toBe(409);
+    } finally { held?.release(); }
+
+    const poll = automationStore.create({ ...input, events: ['issue.opened'] });
+    const refused = await apiRequest(server, `/api/v1/automations/${poll.id}/run`, { method: 'POST' });
+    expect(refused.status).toBe(409);
+    expect(((await refused.json()) as any).error).toContain('use check with mode execute');
+    expect((await apiRequest(server, '/api/v1/automations/nope/run', { method: 'POST' })).status).toBe(404);
+    expect(manager.startRun).toHaveBeenCalledTimes(1);
+  });
+
+  it('check 409s a schedule', async () => {
+    const server = app();
+    const created = ((await (await apiRequest(server, '/api/v1/automations', json(scheduleInput))).json()) as any).automation;
+    const check = await apiRequest(server, `/api/v1/automations/${created.id}/check`, json({ mode: 'preview' }));
+    expect(check.status).toBe(409);
+    expect(((await check.json()) as any).error).toBe('a schedule has nothing to preview; use run');
+  });
+
+  it('enable arms nextRunAt for a schedule and the list answers timeZone and nextRunAt', async () => {
+    const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
+    const server = app({ automationStore });
+    const created = ((await (await apiRequest(server, '/api/v1/automations', json(scheduleInput))).json()) as any).automation;
+    const before = Date.now();
+    const enabled = await apiRequest(server, `/api/v1/automations/${created.id}/enable`, { method: 'POST' });
+    expect(enabled.status).toBe(200);
+    const state = automationStore.state(created.id)!;
+    const expected = nextOccurrence(scheduleInput.schedule as never, before, localTimeZone())!;
+    expect(Math.abs(Date.parse(state.nextRunAt!) - expected)).toBeLessThan(60_000);
+    expect(state.nextRunAt! > new Date().toISOString()).toBe(true);
+    // A schedule has no backlog to baseline against.
+    expect(state.baselineAt).toBeUndefined();
+    expect(automationStore.logs({ automationId: created.id })).toEqual([]);
+
+    const poll = automationStore.create({ ...input, events: ['issue.opened'] });
+    expect((await apiRequest(server, `/api/v1/automations/${poll.id}/enable`, { method: 'POST' })).status).toBe(200);
+    const list = (await (await apiRequest(server, '/api/v1/automations')).json()) as any;
+    expect(list.timeZone).toBe(localTimeZone());
+    const entry = (id: string) => list.automations.find((item: { id: string }) => item.id === id);
+    expect(entry(created.id).nextRunAt).toBe(state.nextRunAt);
+    expect(entry(poll.id).nextRunAt).toBe(automationStore.state(poll.id)?.nextCheckAt);
+
+    // Editing the schedule forgets the armed instant, so the timer recomputes it from the new one.
+    const current = automationStore.get(created.id)!;
+    const edited = await apiRequest(server, `/api/v1/automations/${created.id}`, json({ ...scheduleInput, schedule: { type: 'weekdays', hour: 9 }, enabled: true, expectedRevision: current.revision }, 'PUT'));
+    expect(edited.status).toBe(200);
+    expect(automationStore.state(created.id)?.nextRunAt).toBeUndefined();
+    const paused = await apiRequest(server, `/api/v1/automations/${created.id}/pause`, { method: 'POST' });
+    expect(paused.status).toBe(200);
+    const afterPause = (await (await apiRequest(server, '/api/v1/automations')).json()) as any;
+    expect(afterPause.automations.find((item: { id: string }) => item.id === created.id)).not.toHaveProperty('nextRunAt');
+  });
+
+  it('retry fires a launch-error schedule receipt', async () => {
+    const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
+    const manager = recordingManager();
+    const server = app({ automationStore, manager });
+    const created = ((await (await apiRequest(server, '/api/v1/automations', json(scheduleInput))).json()) as any).automation;
+    const occurrenceAt = '2026-10-02T04:00:00.000Z';
+    automationStore.appendReceipt({
+      receiptId: 'sched-receipt', receiptKey: `${created.id}:schedule:${occurrenceAt}`, eventId: `schedule:${occurrenceAt}`,
+      automationId: created.id, revision: created.revision, status: 'launch-error', error: 'unknown workflow: gone',
+      occurrenceAt, observedAt: occurrenceAt, updatedAt: occurrenceAt,
+    });
+    const retried = await apiRequest(server, '/api/v1/automation-log/sched-receipt/retry', { method: 'POST' });
+    expect(retried.status).toBe(202);
+    const body = (await retried.json()) as { receiptId: string; runId: string };
+    expect(body.receiptId).toBe('sched-receipt');
+    expect(automationStore.latestReceipts().get(`${created.id}:schedule:${occurrenceAt}`)).toMatchObject({ status: 'launched', runId: body.runId });
+    expect(store.getRun(body.runId)?.automationTrigger).toMatchObject({ receiptId: 'sched-receipt', trigger: 'manual', occurrenceAt });
+    const again = await apiRequest(server, '/api/v1/automation-log/sched-receipt/retry', { method: 'POST' });
+    expect(again.status).toBe(409);
+    expect(manager.startRun).toHaveBeenCalledTimes(1);
+  });
+
+  it('boot re-baselines an idle enabled poll and launches nothing', async () => {
+    const savedDryRun = process.env.CEZ_DRY_RUN;
+    process.env.CEZ_DRY_RUN = '1';
+    withGithubRemote(root);
+    const DAY = 86_400_000;
+    const stale = new Date(Date.now() - 30 * DAY).toISOString();
+    // A pre-schedule file: no `kind`, enabled, last polled a month ago.
+    writeFileSync(join(root, '.ai/cezar/automations.json'), JSON.stringify({
+      version: 1,
+      automations: [{
+        id: 'idle-poll', revision: 1, name: 'Old poll', enabled: true, events: ['issue.opened'], intervalSeconds: 300,
+        filters: { lookbackDays: 7, maxRecords: 25 }, task: { prompt: 'Review {{github.url}}' },
+        createdAt: stale, updatedAt: stale,
+      }],
+    }));
+    writeFileSync(join(root, '.ai/cezar/automation-state.json'), JSON.stringify({
+      version: 1,
+      states: { 'idle-poll': { revision: 1, baselineAt: stale, cursor: { timestamp: stale }, lastSuccessAt: stale, nextCheckAt: stale } },
+    }));
+    // The backlog a stale cursor would launch: an issue opened 20 days ago, after the cursor.
+    const backlog = { eventId: 'old', event: 'issue.opened' as const, timestamp: new Date(Date.now() - 20 * DAY).toISOString(), tieBreaker: 'I', repo: 'acme/demo', nodeId: 'I', number: 7, title: 'Old', url: 'https://github.com/acme/demo/issues/7', author: 'alice', assignees: [], labels: [] };
+    const poll = vi.spyOn(GithubPoller.prototype, 'poll').mockResolvedValue({ candidates: [backlog], truncated: false, pages: 1 });
+    const started = vi.spyOn(WorkspaceAutomationScheduler.prototype, 'start');
+    const manager = Object.assign(recordingManager(), { isActive: () => false });
+    // Registered, as `cez` registers the repo it boots in: the coordinator only keeps a store for
+    // a project the registry lists, so an unregistered root would never reach the timer at all.
+    const project = await registerProject(root);
+    const server = startServer({ repoRoot: project.root, bootProjectId: project.id, store, manager, version: '0.0.0-test' }, 0);
+    try {
+      await new Promise<void>((resolve) => server.once('listening', () => resolve()));
+      await vi.waitFor(() => expect(started).toHaveBeenCalledTimes(1), { timeout: 15_000, interval: 10 });
+      // Long enough for a past-due poll armed at boot to fire and launch.
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(manager.startRun).not.toHaveBeenCalled();
+      expect(poll).not.toHaveBeenCalled();
+      const automations = AutomationStore.open(join(root, '.ai/cezar'));
+      expect(automations.logs({ automationId: 'idle-poll' })[0]).toMatchObject({ result: 'baseline', reason: expect.stringContaining('30 days idle') });
+      const state = automations.state('idle-poll')!;
+      expect(Date.parse(state.cursor!.timestamp)).toBeGreaterThan(Date.now() - 60_000);
+      expect(Date.parse(state.nextCheckAt!)).toBeGreaterThan(Date.now());
+    } finally {
+      server.close();
+      vi.restoreAllMocks();
+      if (savedDryRun === undefined) delete process.env.CEZ_DRY_RUN;
+      else process.env.CEZ_DRY_RUN = savedDryRun;
+    }
+  }, 20_000);
 
   it('accepts preview as an automation-log result filter', async () => {
     const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
@@ -160,7 +377,7 @@ describe('GitHub automation API', () => {
       if (event === 'automation-change') changes.push(data);
     });
     const server = app({ workspaceEvents: bus });
-    const created = ((await (await apiRequest(server, '/api/v1/automations', json(input))).json()) as any).automation;
+    const created = ((await (await apiRequest(server, '/api/v1/automations', json(scheduleInput))).json()) as any).automation;
     const response = await apiRequest(server, `/api/v1/automations/${created.id}`, { method: 'DELETE' });
     expect(response.status).toBe(204);
     expect(changes.at(-1)).toEqual({
