@@ -59,6 +59,8 @@ function naturalWidth({ pill, box, full }: GroupMember): number {
 /** The row layout containing the pills: the nearest grid or flex ancestor. */
 function rowContainer(pill: HTMLElement): HTMLElement {
   for (let node = pill.parentElement; node; node = node.parentElement) {
+    // Grid/flex items blockify inline-flex; the tooltip wrapper is not the shared row.
+    if (node.dataset.slot === 'picker-pill-disabled-wrapper') continue
     const display = getComputedStyle(node).display
     if (display === 'grid' || display === 'flex') return node
   }
@@ -256,7 +258,7 @@ export function PickerPill({
   // that still receives hover.
   if (disabled) {
     return (
-      <span title={title} className="inline-flex min-w-0 max-w-full">
+      <span data-slot="picker-pill-disabled-wrapper" title={title} className="inline-flex min-w-0 max-w-full">
         {trigger}
       </span>
     )

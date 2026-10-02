@@ -44,6 +44,7 @@ import {
 import { githubTaskPrompt } from '@/lib/github-task'
 import { cn } from '@/lib/utils'
 
+import { IssueLinkedTasks } from './issue-linked-tasks'
 import { IssueFilters } from './issue-filters'
 import { allLabels, filterGithubItems, labelChipStyle, shouldSearchForge } from './github-filter'
 import { GithubFilterScreen } from './github-filter-screen'
@@ -930,6 +931,7 @@ export function GithubRoute({
         {selected ? (
           <GithubItemDetail
             item={selected}
+            afterHeading={selected.kind === 'issue' ? <IssueLinkedTasks number={selected.number} repo={gh.repo} /> : undefined}
             backLink={{ to: listPath }}
             subNav={{ filter: linkFilter, changes }}
             onRunAgent={focusHandToAgentPrompt}
