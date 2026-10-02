@@ -24,6 +24,8 @@ import type { AutomationReceipt, ScheduleAutomationDefinition } from './types.ts
 export const SCHEDULE_GRACE_MS = 10 * 60_000;
 export const SCHEDULE_CATCH_UP_MS = 24 * 60 * 60_000;
 export const SCHEDULE_AUTO_PAUSE_AFTER = 3;
+/** The cap the missed-occurrence count runs under: a count that reaches it is a lower bound. */
+const OCCURRENCE_LIMIT = 1_000;
 
 export type ScheduleTrigger = 'schedule' | 'catch-up' | 'manual';
 
@@ -105,13 +107,13 @@ export class ScheduleRunner {
         return this.launch(definition, { at: new Date(due).toISOString(), trigger: 'schedule' }, now, advance);
       }
       // Late. Every occurrence from the due one up to now was missed; the newest may catch up.
-      const missed = occurrencesBetween(definition.schedule, due, now + 1, this.handle.timeZone);
-      const latest = missed.at(-1) ?? due;
+      const missed = this.missed(definition, due, now);
+      const latest = missed.latest;
       if (now - latest <= SCHEDULE_CATCH_UP_MS) {
-        if (missed.length > 1) await this.logSkipped(definition, missed.length - 1, true);
+        if (missed.count > 1) await this.logSkipped(definition, missed.count - 1, missed.atLeast, true);
         return this.launch(definition, { at: new Date(latest).toISOString(), trigger: 'catch-up' }, now, advance);
       }
-      await this.logSkipped(definition, missed.length, false);
+      await this.logSkipped(definition, missed.count, missed.atLeast, false);
       this.advance(definition, now, now, advance);
       return { result: 'skipped', occurrenceAt: new Date(latest).toISOString() } as const;
     });
@@ -284,8 +286,27 @@ export class ScheduleRunner {
     return { revision, nextRunAt: nextIso(definition, Math.max(fromMs, now), this.handle.timeZone) };
   }
 
-  private async logSkipped(definition: ScheduleAutomationDefinition, count: number, latestCaughtUp: boolean): Promise<void> {
-    const plural = count === 1 ? '' : 's';
+  /**
+   * The occurrences in `[due, now]`: the latest one and how many there are. `occurrencesBetween`
+   * stops at its cap EARLIEST-first, so the latest is searched for on its own — in the catch-up
+   * window, else in the week before it (every shape recurs within 7 days; 9 covers a DST week) —
+   * and a count that reached the cap is reported as a lower bound, never as an exact number.
+   */
+  private missed(definition: ScheduleAutomationDefinition, due: number, now: number): { latest: number; count: number; atLeast: boolean } {
+    const { schedule } = definition;
+    const { timeZone } = this.handle;
+    const windowStart = Math.max(due, now - SCHEDULE_CATCH_UP_MS);
+    const recent = occurrencesBetween(schedule, windowStart, now + 1, timeZone);
+    const older = occurrencesBetween(schedule, due, windowStart, timeZone, OCCURRENCE_LIMIT);
+    const latest = recent.at(-1)
+      ?? occurrencesBetween(schedule, Math.max(due, windowStart - 9 * 86_400_000), windowStart, timeZone).at(-1)
+      ?? due;
+    return { latest, count: recent.length + older.length, atLeast: older.length >= OCCURRENCE_LIMIT };
+  }
+
+  private async logSkipped(definition: ScheduleAutomationDefinition, total: number, atLeast: boolean, latestCaughtUp: boolean): Promise<void> {
+    const count = atLeast ? `at least ${total}` : String(total);
+    const plural = total === 1 ? '' : 's';
     await this.handle.store.appendLog({
       automationId: definition.id,
       revision: definition.revision,

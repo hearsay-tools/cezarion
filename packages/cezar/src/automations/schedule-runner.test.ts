@@ -110,6 +110,30 @@ describe('ScheduleRunner', () => {
     expect(next - clock.now()).toBeLessThanOrEqual(HOUR);
   });
 
+  it('an hourly schedule offline for 43 days catches up its latest occurrence, past the 1,000-occurrence cap', async () => {
+    const { store, definition, runner, launch, clock } = await setup({ schedule: { type: 'hours', every: 1 } });
+    const due = runner.dueAt(definition)!;
+    // 43 × 24 = 1,032 missed hours: more than `occurrencesBetween` returns in one call.
+    clock.set(due + 43 * DAY + 30 * 60_000);
+    const outcome = await runner.fire(definition);
+    expect(outcome).toMatchObject({ result: 'catch-up', occurrenceAt: iso(due + 43 * DAY) });
+    expect(launch).toHaveBeenCalledTimes(1);
+    expect(launch).toHaveBeenCalledWith(definition, { at: iso(due + 43 * DAY), trigger: 'catch-up' }, expect.any(String));
+    const logs = store.logs({ automationId: 'nightly' });
+    expect(logs.map((row) => row.result)).toEqual(['catch-up', 'skipped']);
+    // The count past the cap is a lower bound, and the log says so rather than a wrong exact number.
+    expect(logs[1]?.reason).toContain('Missed at least 1023 older occurrences');
+    expect(store.state('nightly')?.nextRunAt).toBe(iso(due + 43 * DAY + HOUR));
+  });
+
+  it('counts older misses exactly while they stay under the cap', async () => {
+    const { store, definition, runner, clock } = await setup({ schedule: { type: 'hours', every: 1 } });
+    const due = runner.dueAt(definition)!;
+    clock.set(due + 30 * DAY + 30 * 60_000);
+    expect((await runner.fire(definition)).result).toBe('catch-up');
+    expect(store.logs({ automationId: 'nightly' })[1]?.reason).toContain(`Missed ${30 * 24} older occurrences`);
+  });
+
   it('DST: daily 02:30 Europe/Warsaw across 2026-03-29 fires once', async () => {
     // Armed on Friday evening 2026-03-27 (CET, UTC+1); 2026-03-29 springs forward 02:00 → 03:00,
     // so its 02:30 does not exist. The laptop sleeps from before Saturday's run until Sunday noon.
