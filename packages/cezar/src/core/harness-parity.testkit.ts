@@ -715,6 +715,8 @@ export async function withOwnedInputRun(
     agentProfile?: string;
     /** Further runners a mixed chain launches; their mocks are wired for the fixture's lifetime. */
     extraBackends?: readonly RunnerId[];
+    /** Environment overrides restored after the native mock worker settles. */
+    env?: Record<string, string>;
   } = {},
 ): Promise<void> {
   const adapter = HARNESS_ADAPTERS[backend];
@@ -723,6 +725,8 @@ export async function withOwnedInputRun(
   for (const extra of options.extraBackends ?? []) process.env[HARNESS_ADAPTERS[extra].binEnv] = HARNESS_ADAPTERS[extra].mockBin;
   const savedDry = process.env.CEZ_DRY_RUN;
   const savedAutoName = process.env.CEZ_AUTONAME;
+  const savedEnv = Object.keys(options.env ?? {}).map(name => [name, process.env[name]] as const);
+  Object.assign(process.env, options.env);
   // Naming is a separate auxiliary invocation, not part of input delivery.
   process.env.CEZ_AUTONAME = '0';
   process.env[adapter.binEnv] = adapter.mockBin;
@@ -799,6 +803,9 @@ export async function withOwnedInputRun(
     if (savedDry !== undefined) process.env.CEZ_DRY_RUN = savedDry;
     if (savedAutoName === undefined) delete process.env.CEZ_AUTONAME;
     else process.env.CEZ_AUTONAME = savedAutoName;
+    for (const [name, saved] of savedEnv) {
+      if (saved === undefined) delete process.env[name]; else process.env[name] = saved;
+    }
     rmSync(repoRoot, { recursive: true, force: true });
   }
 }
