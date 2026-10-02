@@ -203,6 +203,26 @@ describe('DevServer', () => {
     }
   }, 15_000);
 
+  it('runs the command in the curated env: host secrets and session authority stay out (#427)', async () => {
+    vi.stubEnv('GITHUB_TOKEN', 'ghp_leak');
+    vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ant-leak');
+    vi.stubEnv('CEZ_TOOL_TOKEN', 'tool-leak');
+    vi.stubEnv('CEZ_ENV_PASSTHROUGH', 'MY_DEV_FLAG');
+    vi.stubEnv('MY_DEV_FLAG', 'kept');
+    try {
+      const port = await freePort();
+      const command = 'echo "gh=${GITHUB_TOKEN:-unset} ant=${ANTHROPIC_API_KEY:-unset} tool=${CEZ_TOOL_TOKEN:-unset} flag=${MY_DEV_FLAG:-unset} path=${PATH:+set}"';
+      const server: PreviewServer = { port, command, label: 'fake', registeredAt: '2026-10-02T10:00:00.000Z', answeredAtRegistration: false };
+      const supervisor = new DevServer({ server, worktreePath: root, dir: join(root, 'preview') });
+      supervisors.push(supervisor);
+      supervisor.start();
+      await until(() => supervisor.state === 'exited');
+      expect(supervisor.logTail()).toEqual(['gh=unset ant=unset tool=unset flag=kept path=set']);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it('stop is idempotent and safe after the process exited by itself', async () => {
     const port = await freePort();
     const supervisor = supervise(port, ['--exit-code', '2'], { probeMs: 50 });

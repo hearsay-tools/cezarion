@@ -4,6 +4,7 @@ import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, 
 import { Socket } from 'node:net';
 import { join, resolve } from 'node:path';
 import type { PreviewServer } from '@open-mercato/cezar-contract';
+import { buildCommandEnv } from '../core/agent-env.ts';
 import { processStartToken, recordedProcessLive } from '../delegation/process-liveness.ts';
 
 /**
@@ -126,9 +127,11 @@ export class DevServer extends EventEmitter {
     const logFd = openSync(this.logPath, 'a');
     const cwd = resolve(this.worktreePath, this.server.cwd ?? '.');
     // stdin is closed: nobody can answer a prompt from the cockpit, so one fails fast into `exited` with its log.
+    // The command is the agent's and runs outside its sandbox: it gets the curated env, never cezar's secrets (#427).
+    const env = buildCommandEnv();
     const child = process.platform === 'win32'
-      ? spawn(this.server.command, { cwd, shell: true, windowsHide: true, stdio: ['ignore', logFd, logFd] })
-      : spawn('/bin/sh', ['-c', this.server.command], { cwd, detached: true, stdio: ['ignore', logFd, logFd] });
+      ? spawn(this.server.command, { cwd, env, shell: true, windowsHide: true, stdio: ['ignore', logFd, logFd] })
+      : spawn('/bin/sh', ['-c', this.server.command], { cwd, env, detached: true, stdio: ['ignore', logFd, logFd] });
     closeSync(logFd);
     this.child = child;
     this.childExited = new Promise<void>(resolveExit => {

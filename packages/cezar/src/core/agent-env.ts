@@ -306,8 +306,28 @@ export interface BuildChildEnvOptions {
  * (the runner's `spec.env`) is applied last so per-run vars always win.
  */
 export function buildChildEnv(opts: BuildChildEnvOptions): NodeJS.ProcessEnv {
-  const source = opts.source ?? process.env;
-  const extra = opts.extraEnv ?? {};
+  return curateEnv(opts.source ?? process.env, opts.extraEnv ?? {}, {
+    backendPrefixes: BACKEND_ALLOW_PREFIXES[opts.backend] ?? BACKEND_ALLOW_PREFIXES.claude,
+    gh: true,
+  });
+}
+
+/**
+ * The curated env for a host command no backend runs: a dev server the owner approved in the
+ * live preview (#781). It is `buildChildEnv` with no backend: the base allowlist, `CEZ_*`,
+ * `CEZ_ENV_PASSTHROUGH` and the `CEZ_AGENT_ENV_FULL` escape hatch, but no backend auth, no Bedrock
+ * or Vertex credentials and no `gh` token. The command is model-written (`npm run dev` runs
+ * whatever the agent put in package.json) and runs outside any backend sandbox.
+ */
+export function buildCommandEnv(opts: { extraEnv?: Record<string, string>; source?: NodeJS.ProcessEnv } = {}): NodeJS.ProcessEnv {
+  return curateEnv(opts.source ?? process.env, opts.extraEnv ?? {}, { backendPrefixes: [], gh: false });
+}
+
+function curateEnv(
+  source: NodeJS.ProcessEnv,
+  extra: Record<string, string>,
+  grants: { backendPrefixes: readonly string[]; gh: boolean },
+): NodeJS.ProcessEnv {
 
   // Names `extra` is about to define, normalized. The host copy of a var the
   // per-run env overrides must be DROPPED, not merely shadowed: env names are
@@ -338,7 +358,7 @@ export function buildChildEnv(opts: BuildChildEnvOptions): NodeJS.ProcessEnv {
     return { ...full, ...extra };
   }
 
-  const backendPrefixes = BACKEND_ALLOW_PREFIXES[opts.backend] ?? BACKEND_ALLOW_PREFIXES.claude;
+  const { backendPrefixes } = grants;
   const passthrough = upperSet(
     (readVar(source, 'CEZ_ENV_PASSTHROUGH') ?? '')
       .split(',')
@@ -378,7 +398,7 @@ export function buildChildEnv(opts: BuildChildEnvOptions): NodeJS.ProcessEnv {
     // toggle needs: forwarded even though they are secrets — the backend cannot
     // authenticate without them. They are still redacted before anything
     // reaches the on-disk NDJSON (see secret-redaction.ts).
-    if (GH_ALLOW_NAMES.has(key)) return true;
+    if (grants.gh && GH_ALLOW_NAMES.has(key)) return true;
     if (matchesPrefix(key, backendPrefixes)) return true;
     if (cloudNames.has(key) || matchesPrefix(key, cloudPrefixes)) return true;
     // Explicit opt-in passthrough.

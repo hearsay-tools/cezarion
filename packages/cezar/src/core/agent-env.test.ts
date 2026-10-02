@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildChildEnv, looksSecret } from './agent-env.ts';
+import { buildChildEnv, buildCommandEnv, looksSecret } from './agent-env.ts';
 
 /**
  * #427: the spawned backend must NOT inherit the full host environment. It
@@ -357,6 +357,46 @@ describe('agent-profile config dirs reach the child', () => {
       source: { PATH: '/usr/bin', CEZ_AGENT_ENV_FULL: '1', CLAUDE_CONFIG_DIR: '/home/u/.claude' },
     });
     expect(env.CLAUDE_CONFIG_DIR).toBe('/home/u/.claude-klaudiusz');
+  });
+});
+
+describe('buildCommandEnv — a host command no backend runs (#781 dev servers)', () => {
+  const source = {
+    PATH: '/usr/bin',
+    HOME: '/home/u',
+    NODE_ENV: 'development',
+    GITHUB_TOKEN: 'ghp_x',
+    GH_TOKEN: 'gho_x',
+    ANTHROPIC_API_KEY: 'sk-ant',
+    OPENAI_API_KEY: 'sk-oa',
+    CLAUDE_CODE_USE_BEDROCK: '1',
+    AWS_SECRET_ACCESS_KEY: 'aws',
+    STRIPE_SECRET_KEY: 'sk_live',
+    CEZ_PREVIEW: '1',
+    CEZ_TOOL_TOKEN: 'tool',
+    CEZ_TOOL_SOCKET: '/tmp/s',
+    CEZ_DELEGATION_TOKEN: 'del',
+    CEZ_DELEGATION_URL: 'http://x',
+  };
+
+  it('keeps the base allowlist and drops every backend and gh credential', () => {
+    const env = buildCommandEnv({ source });
+    expect(env).toMatchObject({ PATH: '/usr/bin', HOME: '/home/u', NODE_ENV: 'development', CEZ_PREVIEW: '1' });
+    for (const name of ['GITHUB_TOKEN', 'GH_TOKEN', 'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'CLAUDE_CODE_USE_BEDROCK', 'AWS_SECRET_ACCESS_KEY', 'STRIPE_SECRET_KEY']) {
+      expect(env[name], name).toBeUndefined();
+    }
+  });
+
+  it('never forwards session authority, whatever the escape hatches say', () => {
+    for (const extra of [{ CEZ_ENV_PASSTHROUGH: 'CEZ_TOOL_TOKEN,CEZ_DELEGATION_TOKEN' }, { CEZ_AGENT_ENV_FULL: '1' }]) {
+      const env = buildCommandEnv({ source: { ...source, ...extra } });
+      for (const name of ['CEZ_TOOL_TOKEN', 'CEZ_TOOL_SOCKET', 'CEZ_DELEGATION_TOKEN', 'CEZ_DELEGATION_URL']) expect(env[name], name).toBeUndefined();
+    }
+  });
+
+  it('honors CEZ_ENV_PASSTHROUGH and the CEZ_AGENT_ENV_FULL escape hatch', () => {
+    expect(buildCommandEnv({ source: { ...source, CEZ_ENV_PASSTHROUGH: 'GITHUB_TOKEN' } }).GITHUB_TOKEN).toBe('ghp_x');
+    expect(buildCommandEnv({ source: { ...source, CEZ_AGENT_ENV_FULL: '1' } }).STRIPE_SECRET_KEY).toBe('sk_live');
   });
 });
 
