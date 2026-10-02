@@ -367,6 +367,22 @@ describe('sub-agent nesting (golden subagent-task fixture, end to end through th
  * broken attachment, on the one screen that is supposed to show them their own message back.
  */
 describe('conversation message surfaces', () => {
+  it('leaves agent markdown uncapped so text, lists and code fill the card (#757)', () => {
+    render(
+      <MemoryRouter>
+        <AssistantMessage text={'A full-width response.\n\n- List item\n\n```text\nlong_unbroken_line\n```'} />
+      </MemoryRouter>,
+    )
+
+    const body = screen.getByRole('article', { name: 'Agent response' }).querySelector(':scope > div')!
+    expect(body.querySelector('p')?.textContent).toBe('A full-width response.')
+    expect(body.querySelector('li')?.textContent).toBe('List item')
+    expect(body.querySelector('pre code')?.textContent).toContain('long_unbroken_line')
+    expect(body.className).not.toMatch(/(?:^|[\s:])max-w-/)
+    expect(body.classList.contains('text-[15px]')).toBe(true)
+    expect(body.classList.contains('md:text-[14px]')).toBe(true)
+  })
+
   it('labels user and agent messages with the shared role surface', () => {
     render(
       <MemoryRouter>

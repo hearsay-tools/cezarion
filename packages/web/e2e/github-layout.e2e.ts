@@ -31,6 +31,156 @@ afterAll(() => {
   browser?.close()
 })
 
+it('keeps the detail readable at 900px (#754)', async () => {
+  expect(forgeAvailable).toBe(true)
+  const gh = await api<GithubPayload>('/api/v1/github')
+  browser.setViewport(900, 800)
+  await openGitHub(`/github/issues/${gh.issues[0]!.number}`)
+  const facts = browser.waitForValue<{ list: number; detail: number; stacked: boolean; overflow: boolean }>(`(() => {
+    const list = document.querySelector('[data-slot="gh-list"]');
+    const detail = document.querySelector('[data-slot="gh-detail"]');
+    if (!list || !detail || !document.querySelector('[data-slot="gh-hand"]')) return null;
+    const l = list.getBoundingClientRect(), d = detail.getBoundingClientRect();
+    const main = document.querySelector('[data-slot="main"]');
+    return { list: l.width, detail: d.width, stacked: d.top >= l.bottom,
+      overflow: main.scrollWidth > main.clientWidth || document.documentElement.scrollWidth > innerWidth };
+  })()`)
+  console.log('900px pane geometry', facts)
+  browser.screenshot(`${artifactsDir}/github-900px.png`, { viewport: true })
+  expect(facts.stacked || facts.detail >= 360).toBe(true)
+  expect(facts.overflow).toBe(false)
+})
+
+// Catch fixed desktop columns, stale observations after resizing, and lost width preferences.
+const PANE_GEOMETRY = `(() => {
+  const workspace = document.querySelector('[data-slot="gh-workspace"]');
+  const panes = document.querySelector('[data-slot="gh-panes"]');
+  const list = document.querySelector('[data-slot="gh-list"]');
+  const detail = document.querySelector('[data-slot="gh-detail"]');
+  const main = document.querySelector('[data-slot="main"]');
+  const handle = document.querySelector('[data-slot="gh-list-resize-handle"]');
+  if (!workspace || !panes || !list || !detail || !handle || !document.querySelector('[data-slot="gh-hand"]')) return null;
+  const l = list.getBoundingClientRect(), d = detail.getBoundingClientRect();
+  return {
+    viewport: innerWidth, available: workspace.clientWidth, list: l.width, detail: d.width,
+    stacked: d.top >= l.bottom, handleVisible: handle.checkVisibility(),
+    documentFlow: getComputedStyle(list).overflowY === 'visible' && getComputedStyle(detail).overflowY === 'visible',
+    // Tabs deliberately bleed into the workspace padding; test the page and pane scrollports.
+    overflow: [main, panes, list, detail].some(el => getComputedStyle(el).overflowX !== 'hidden' && el.scrollWidth > el.clientWidth + 1)
+      || document.documentElement.scrollWidth > innerWidth,
+    saved: localStorage.getItem('cez-github-list-width'),
+  };
+})()`
+interface PaneGeometry {
+  viewport: number; available: number; list: number; detail: number
+  stacked: boolean; handleVisible: boolean; documentFlow: boolean; overflow: boolean; saved: string | null
+}
+
+it.each(['issues', 'prs'] as const)('keeps %s readable across pane boundaries and saved widths (#754)', async (view) => {
+  expect(forgeAvailable).toBe(true)
+  const gh = await api<GithubPayload>('/api/v1/github')
+  browser.goto(baseUrl)
+  try {
+    for (const saved of [360, 520]) {
+      browser.evaluate(`localStorage.setItem('cez-github-list-width', '${saved}')`)
+      browser.setViewport(1440, 800)
+      await openGitHub(`/github/${view}/${gh[view][0]!.number}`)
+      const wide = browser.waitForValue<PaneGeometry>(PANE_GEOMETRY, f => Boolean(f && !f.stacked && f.list === saved))
+      // Derive only the surrounding chrome's width from the browser, not the layout decision.
+      const boundary = 1440 - wide.available + saved + 22 + 360
+      for (const width of [768, 900, 1024, 1100, 1280, boundary - 1, boundary, boundary + 1, 1440]) {
+        browser.setViewport(width, 800)
+        const stacked = width < boundary
+        const facts = browser.waitForStable<PaneGeometry>(PANE_GEOMETRY, {
+          holdMs: 100,
+          matcher: f => Boolean(f && f.viewport === width && f.stacked === stacked
+            && f.handleVisible === !stacked && f.documentFlow === stacked
+            && (stacked ? f.detail === f.available && f.list === f.available : f.detail >= 360 && f.list === saved)
+            && !f.overflow),
+        })
+        expect(facts.saved).toBe(String(saved))
+        expect(facts.stacked).toBe(stacked)
+        expect(facts.overflow).toBe(false)
+      }
+    }
+  } finally {
+    browser.evaluate(`localStorage.removeItem('cez-github-list-width')`)
+  }
+}, 120_000)
+
+it('reflows when the list is resized and restores its saved width after stacking (#754)', async () => {
+  expect(forgeAvailable).toBe(true)
+  const gh = await api<GithubPayload>('/api/v1/github')
+  await openGitHub(`/github/issues/${gh.issues[0]!.number}`)
+  try {
+    const wide = browser.waitForValue<PaneGeometry>(PANE_GEOMETRY, f => Boolean(f && !f.stacked))
+    // Leave exactly 16px to spare beyond the default list + gap + minimum detail.
+    browser.setViewport(1440 - wide.available + 360 + 22 + 360 + 16, 800)
+    browser.waitForValue<PaneGeometry>(PANE_GEOMETRY, f => Boolean(f && !f.stacked && f.detail === 376))
+    browser.evaluate(`document.querySelector('[data-slot="gh-list-resize-handle"]').focus()`)
+    browser.press('End')
+    const stacked = browser.waitForValue<PaneGeometry>(PANE_GEOMETRY, f => Boolean(f && f.stacked && !f.handleVisible))
+    expect(stacked.saved).toBe('520')
+    browser.setViewport(1440, 800)
+    const restored = browser.waitForValue<PaneGeometry>(PANE_GEOMETRY, f => Boolean(f && !f.stacked && f.list === 520))
+    expect(restored.saved).toBe('520')
+    const point = browser.waitForValue<{ x: number; y: number }>(`(() => {
+      const handle = document.querySelector('[data-slot="gh-list-resize-handle"]');
+      handle.scrollIntoView({ block: 'center' });
+      const r = handle.getBoundingClientRect();
+      return { x: Math.round(r.left + r.width / 2), y: Math.round(Math.max(r.top, 0) + 40) };
+    })()`)
+    browser.dragTo(point, { x: point.x - 40, y: point.y })
+    const dragged = browser.waitForValue<PaneGeometry>(PANE_GEOMETRY, f => Boolean(f && f.list === 480))
+    expect(dragged.saved).toBe('480')
+  } finally {
+    browser.evaluate(`localStorage.removeItem('cez-github-list-width')`)
+  }
+})
+
+it.each(['light', 'dark'])('scrolls stacked panes in document flow at 900px, %s (#754)', async (theme) => {
+  expect(forgeAvailable).toBe(true)
+  const gh = await api<GithubPayload>('/api/v1/github')
+  const stub = { ...gh, issues: Array.from({ length: 12 }, (_, index) => ({
+    ...gh.issues[0], number: 9000 + index, url: `https://github.com/mock/repo/issues/${9000 + index}`,
+    title: `Stacked issue ${index}`, body: Array.from({ length: 40 }, () => 'Long issue body.').join('\n\n'),
+  })) }
+  browser.setViewport(900, 800)
+  browser.goto(`${baseUrl}${scoped('/')}`)
+  browser.waitForFunction(`document.querySelector('a[href="${scoped('/github')}"]') !== null`)
+  browser.evaluate(`(() => {
+    document.documentElement.classList.toggle('light', ${theme === 'light'});
+    const nativeFetch = window.fetch;
+    window.fetch = (input, init) => {
+      const url = new URL(typeof input === 'string' ? input : input instanceof Request ? input.url : String(input), location.href);
+      if (url.pathname.endsWith('/github')) return Promise.resolve(new Response(${JSON.stringify(JSON.stringify(stub))}, { status: 200, headers: { 'content-type': 'application/json' } }));
+      return nativeFetch(input, init);
+    };
+    history.pushState(null, '', '${scoped('/github/issues/9000')}'); dispatchEvent(new PopStateEvent('popstate'));
+  })()`)
+  browser.waitForValue<PaneGeometry>(PANE_GEOMETRY, f => Boolean(f && f.stacked && f.documentFlow))
+  const start = browser.waitForValue<{ x: number; y: number; scroll: number }>(`(() => {
+    const main = document.querySelector('[data-slot="main"]');
+    main.scrollTop = 0;
+    const r = document.querySelector('[data-slot="gh-list"]').getBoundingClientRect();
+    return { x: r.left + 50, y: r.top + 50, scroll: main.scrollTop };
+  })()`)
+  await browser.wheelAt(start.x, start.y, 200)
+  const scroll = browser.waitForValue<number>(`document.querySelector('[data-slot="main"]').scrollTop`, n => n > start.scroll)
+  expect(scroll).toBeGreaterThan(0)
+  const end = browser.waitForValue<{ reachable: boolean; listScroll: number; detailScroll: number }>(`(() => {
+    const main = document.querySelector('[data-slot="main"]');
+    const detail = document.querySelector('[data-slot="gh-detail"]');
+    const list = document.querySelector('[data-slot="gh-list"]');
+    main.scrollTop = main.scrollHeight;
+    list.scrollTop = 100; detail.scrollTop = 100;
+    const d = detail.getBoundingClientRect(), m = main.getBoundingClientRect();
+    return { reachable: d.bottom <= m.bottom && d.bottom > m.top, listScroll: list.scrollTop, detailScroll: detail.scrollTop };
+  })()`, f => Boolean(f?.reachable))
+  expect(end).toEqual({ reachable: true, listScroll: 0, detailScroll: 0 })
+  browser.screenshot(`${artifactsDir}/github-stacked-900-${theme}.png`, { viewport: true })
+})
+
 describe('the GitHub tab against the live dry-run server', () => {
   it.each([900, 540])('on desktop hides the GitHub title then scrolls list and detail independently (#523), height %i', async (height) => {
     if (!forgeAvailable) return

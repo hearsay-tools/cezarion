@@ -89,7 +89,7 @@ describe('the inbox against the live dry-run server', () => {
       `document.querySelector('[data-route="inbox"] [data-slot="centered-state"]') !== null`,
     )
 
-    expect(browser.text('[data-slot="centered-state"]')).toContain('Inbox empty')
+    expect(browser.text('[data-slot="centered-state"]')).toContain('You’re all caught up')
     expect(browser.count(CARD)).toBe(0)
   })
 
@@ -117,10 +117,14 @@ describe('the inbox against the live dry-run server', () => {
     expect(browser.text(`${CARD}[data-id="e2e-inbox-1"]`)).toContain(
       'Open a follow-up PR for the flaky retry test',
     )
-    // The attention dot: the "needs you" rung of the shared grammar, amber.
+    // Cards use text-only actionability labels instead of attention dots.
+    expect(browser.count(`${CARD} [data-slot="status-dot"]`)).toBe(0)
     expect(
-      browser.count(`${CARD} [data-slot="status-dot"][data-tone="pending"]`),
-    ).toBe(2)
+      browser.text(`${CARD}[data-id="e2e-inbox-1"] [data-slot="todo-meta"]`),
+    ).toContain('Runnable follow-up')
+    expect(
+      browser.text(`${CARD}[data-id="e2e-inbox-2"] [data-slot="todo-meta"]`),
+    ).toContain('Note only')
     // The meta row is honest about a source task the server no longer has.
     expect(browser.text(`${CARD}[data-id="e2e-inbox-1"]`)).toContain('source task deleted')
     expect(browser.text(`${CARD}[data-id="e2e-inbox-1"]`)).toContain('skill: om-fix')

@@ -112,6 +112,24 @@ const actionBar = () => {
   return within(document.querySelector('[data-slot="run-actions-menu"]') as HTMLElement)
 }
 
+describe('Session-only activity controls (#751)', () => {
+  const tabs: RunTab[] = ['changes', 'commits', 'files', { kind: 'issue', number: 751 }, { kind: 'pr', number: 752 }]
+
+  it.each(tabs)('omits workers and workflow controls on %j', async (tab) => {
+    stubFetch({ '/api/v1/runs/r1/relationships': () => jsonResponse({ workers: [] }) })
+    renderHeader(run('running', {
+      delegation: { role: 'root', permissions: [], receipts: [] },
+      steps: [step({ status: 'running' })],
+    }), undefined, tab)
+
+    await act(async () => {})
+    expect.soft(screen.queryByRole('region', { name: 'Task relationships' })).toBeNull()
+    expect.soft(screen.queryByText('No workers')).toBeNull()
+    expect.soft(screen.queryByRole('button', { name: /Workflow: Do the task/ })).toBeNull()
+    expect.soft(document.querySelector('[data-slot="workflow-steps"]')).toBeNull()
+  })
+})
+
 describe('monitoring schedule', () => {
   it('shows the exact persisted deadline in a time element', () => {
     stubFetch()

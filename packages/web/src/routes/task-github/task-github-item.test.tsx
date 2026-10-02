@@ -8,6 +8,7 @@ import type { GithubItem, ProjectsResponse } from '@open-mercato/cezar-api-clien
 import { AppearanceProvider } from '@/components/appearance-provider'
 import { ListViewProvider } from '@/components/list-view'
 import { ThemeProvider } from '@/components/theme-provider'
+import { githubRunBody } from '@/lib/github-task'
 import { AppRoutes } from '@/routes'
 
 /**
@@ -84,6 +85,8 @@ let item: ((path: string) => Response) | undefined
 let checks: ((path: string) => Response) | undefined
 
 beforeEach(() => {
+  Element.prototype.scrollIntoView = vi.fn()
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   paths = []
   item = undefined
   checks = undefined
@@ -116,6 +119,8 @@ function NavigationProbe() {
   return (
     <>
       <div data-testid="location" data-pathname={location.pathname} />
+      <button onClick={() => navigate('/p/other/github/issues/7')}>Open GitHub issue</button>
+      <button onClick={() => navigate('/p/other/tasks/r1/issue/7')}>Open task issue</button>
       <button onClick={() => navigate('/p/third/tasks/r1/pr/5')}>Open the third project’s PR tab</button>
       <button onClick={() => navigate('/p/other/tasks/r1/pr/5')}>Open the other project’s PR tab</button>
     </>
@@ -150,6 +155,77 @@ const tabRow = async () =>
   }))
 
 describe('TaskGithubItemRoute', () => {
+  it('shares the real hand-to-agent panel and prompt draft across the GitHub and task issue routes', async () => {
+    const issue = { ...PR_5, kind: 'issue', number: 7, url: `${REPO}/issues/7` }
+    item = () => json({ available: true, item: issue })
+    const originalFetch = globalThis.fetch
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input)
+      if (path.includes('/github?')) return json({ available: true, repo: 'hearsay-tools/cezarion', syncedAt: '', issues: [issue], prs: [] })
+      if (path.endsWith('/workflows')) return json({ workflows: [{ name: 'quick-task', steps: [], source: 'built-in' }], issues: [] })
+      if (path.endsWith('/skills')) return json([])
+      if (path.endsWith('/ui-state')) return json({})
+      return originalFetch(input, init)
+    }))
+    renderAt('/p/other/tasks/r1/issue/7')
+    const prompt = await screen.findByRole('textbox', { name: 'Custom prompt' }, { timeout: 10_000 })
+    expect(screen.queryByRole('link', { name: /View task/ })).toBeNull()
+    fireEvent.change(prompt, { target: { value: 'Keep this draft across surfaces' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Choose a workflow' }))
+    fireEvent.click(await screen.findByRole('option', { name: 'quick-task' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open GitHub issue' }))
+    await waitFor(() => expect((screen.getByRole('textbox', { name: 'Custom prompt' }) as HTMLTextAreaElement).value).toBe('Keep this draft across surfaces'))
+    expect(screen.getByRole('button', { name: 'Choose a workflow' }).textContent).toContain('quick-task')
+    fireEvent.change(screen.getByRole('textbox', { name: 'Custom prompt' }), { target: { value: 'Edited in GitHub' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Open task issue' }))
+    await waitFor(() => expect((screen.getByRole('textbox', { name: 'Custom prompt' }) as HTMLTextAreaElement).value).toBe('Edited in GitHub'))
+    expect(screen.getByRole('button', { name: 'Choose a workflow' }).textContent).toContain('quick-task')
+  }, 20_000)
+
+  it.each(['task', 'github'])('submits from the %s surface to the active project and keeps failed drafts for retry', async (surface) => {
+    const issue: GithubItem = { ...PR_5, kind: 'issue', number: 7, url: `${REPO}/issues/7` }
+    item = () => json({ available: true, item: issue })
+    const sent: { path: string; body: unknown }[] = []
+    let fail = true
+    const originalFetch = globalThis.fetch
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input)
+      if (init?.method === 'POST' && path.endsWith('/runs')) {
+        sent.push({ path, body: JSON.parse(String(init.body)) })
+        return fail ? json({ error: 'Try again' }, 500) : json({ ...RUN, id: 'new-run', status: 'queued' })
+      }
+      if (path.includes('/github?')) return json({ available: true, repo: 'hearsay-tools/cezarion', syncedAt: '', issues: [issue], prs: [] })
+      if (path.endsWith('/workflows')) return json({ workflows: [], issues: [] })
+      if (path.endsWith('/skills')) return json([])
+      if (path.endsWith('/ui-state')) return json({})
+      if (path.endsWith('/providers/status')) return json({ providers: [{ provider: 'claude', status: 'connected', enabled: true }] })
+      if (path.includes('/models?')) return json({ runner: 'claude', models: [], source: 'unavailable', stale: false })
+      if (path.endsWith('/config')) return json({})
+      if (path.includes('/agent-accounts')) return json({ accounts: [] })
+      return originalFetch(input, init)
+    }))
+    renderAt(surface === 'task' ? '/p/other/tasks/r1/issue/7' : '/p/other/github/issues/7')
+    const prompt = await screen.findByRole('textbox', { name: 'Custom prompt' }, { timeout: 10_000 })
+    fireEvent.change(prompt, { target: { value: 'Ship this fix' } })
+    const start = await screen.findByRole('button', { name: /Run agent/ })
+    await waitFor(() => expect((start as HTMLButtonElement).disabled).toBe(false))
+    fireEvent.click(start)
+    await waitFor(() => expect(sent).toHaveLength(1))
+    await waitFor(() => expect((start as HTMLButtonElement).disabled).toBe(false))
+    expect((prompt as HTMLTextAreaElement).value).toBe('Ship this fix')
+    expect(screen.queryByRole('link', { name: /View task/ })).toBeNull()
+    fail = false
+    fireEvent.click(start)
+    const link = await screen.findByRole('link', { name: /View task/ })
+    expect(link.getAttribute('href')).toBe('/p/other/tasks/new-run')
+    expect(sent).toEqual([
+      { path: '/api/v1/p/other/runs', body: githubRunBody(issue, null, [], 'Ship this fix', { runner: 'claude' }) },
+      { path: '/api/v1/p/other/runs', body: githubRunBody(issue, null, [], 'Ship this fix', { runner: 'claude' }) },
+    ])
+    fireEvent.click(screen.getByRole('button', { name: surface === 'task' ? 'Open GitHub issue' : 'Open task issue' }))
+    await waitFor(() => expect(screen.getByRole('link', { name: /View task/ }).getAttribute('href')).toBe('/p/other/tasks/new-run'))
+  })
+
   it('shows the detail skeleton under the header while the item loads', async () => {
     renderAt('/p/other/tasks/r1/pr/5')
     const tabs = await tabRow()

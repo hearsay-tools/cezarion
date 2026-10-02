@@ -33,7 +33,7 @@ beforeAll(async () => {
   execFileSync('git', ['init', '-q', '-b', 'main', root])
   mkdirSync(join(root, '.ai/cezar/runs'), { recursive: true })
   const runs = [
-    record(parentId, 'Relationship parent with 32 workers', { delegation: rootMetadata(ids) }),
+    record(parentId, 'Relationship parent with 32 workers', { delegation: rootMetadata(ids), issueNumber: 751, steps: [{ id: 'task', name: 'Do the task', kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0 }] }),
     ...ids.map((id, i) => record(id, `Owned worker ${i + 1}`, { archived: i === 31, delegation: worker(id, parentId, i === 0 ? { destroy: { requestedAt: now, phase: 'incomplete', remaining: ['branch'], error: 'Branch is checked out elsewhere' } } : {}) })),
     record(orphanId, 'Worker with unavailable parent', { delegation: worker(orphanId, absentId) }),
     record(waitingId, 'Waiting root fixture', { status: 'waiting', delegation: { ...rootMetadata([absentId]), wait: wait() } }),
@@ -76,10 +76,9 @@ afterAll(async () => {
   if (root) rmSync(root, { recursive: true, force: true })
 })
 
-// Since #402 the panel has two homes: the Session tab reaches it through the unified run
-// activity dock above the composer, while Changes / Commits / Files keep the header panel.
-// The dock is also collapsed by default on a phone, so reaching the region is a click there
-// and already open on a desktop — wait for whichever surface this tab rendered, then expand.
+// Relationships live in the Session activity dock above the composer (#751).
+// The dock is collapsed by default on a phone, so reaching the region requires a click
+// there and is already open on desktop.
 function reveal(expectedHeading?: string) {
   // After in-app navigation, wait for the destination heading before using its dock.
   // Keep checking the disclosure state until the relationship region appears.
@@ -104,14 +103,21 @@ function open(id = parentId, suffix = '') {
   reveal()
 }
 
-it('retains all 32 scoped links on Session, Changes, Commits and Files, including archived workers', () => {
-  for (const suffix of ['', '/changes', '/commits', '/files']) {
-    open(parentId, suffix)
-    browser.waitForFunction(`document.querySelectorAll('${region} a').length === 32`)
-    expect(browser.count(`${region} a`)).toBe(32)
-    expect(browser.evaluate(`[...document.querySelectorAll('${region} a')].every(a => a.getAttribute('href').startsWith('/p/${project}/tasks/'))`)).toBe(true)
-    expect(browser.text(region)).toContain('Cleanup incomplete')
-    observations.push({ tab: suffix || 'Session', links: 32, scope: project })
+it('retains all 32 scoped worker links only on Session, including archived workers', () => {
+  open()
+  browser.waitForFunction(`document.querySelectorAll('${region} a').length === 32`)
+  expect(browser.count(`${region} a`)).toBe(32)
+  expect(browser.evaluate(`[...document.querySelectorAll('${region} a')].every(a => a.getAttribute('href').startsWith('/p/${project}/tasks/'))`)).toBe(true)
+  expect(browser.text(region)).toContain('Cleanup incomplete')
+  expect(browser.count('[data-slot="run-activity-workflow"]')).toBe(1)
+  observations.push({ tab: 'Session', links: 32, scope: project })
+
+  for (const suffix of ['/changes', '/commits', '/files', '/issue/751']) {
+    browser.goto(`${base}${route(parentId)}${suffix}`)
+    browser.waitForFunction(`document.querySelector('[data-slot="run-header"]') !== null`)
+    expect(browser.count(region)).toBe(0)
+    expect(browser.count('[data-slot="workflow-steps"]')).toBe(0)
+    observations.push({ tab: suffix, links: 0, scope: project })
   }
 })
 
