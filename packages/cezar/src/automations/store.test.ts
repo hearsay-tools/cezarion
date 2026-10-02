@@ -71,6 +71,65 @@ describe('AutomationStore', () => {
     expect(() => store.create(input, 'one')).toThrow('unavailable');
   });
 
+  describe('definitions writes from a stale store (another cockpit on the same directory)', () => {
+    const onDisk = (dir: string) =>
+      JSON.parse(readFileSync(join(dir, 'automations.json'), 'utf8')) as { automations: { id: string; name: string; revision: number }[]; tombstones?: Record<string, string> };
+
+    it('an update of another id never resurrects a definition deleted elsewhere', async () => {
+      const dir = await directory();
+      const a = AutomationStore.open(dir);
+      a.create(input, 'x');
+      const y = a.create(input, 'y');
+      const b = AutomationStore.open(dir);
+      expect(b.delete('x')).toBe(true);
+      a.update('y', y.revision, { ...input, name: 'Y edited' });
+      const file = onDisk(dir);
+      expect(file.automations.map((row) => row.id)).toEqual(['y']);
+      expect(file.tombstones?.x).toBeDefined();
+      expect(a.get('x')).toBeUndefined();
+    });
+
+    it('a stale update of an id edited elsewhere is a revision conflict and leaves the edit intact', async () => {
+      const dir = await directory();
+      const a = AutomationStore.open(dir);
+      const x = a.create(input, 'x');
+      const b = AutomationStore.open(dir);
+      b.update('x', x.revision, { ...input, name: 'B edit' });
+      expect(() => a.update('x', x.revision, { ...input, name: 'A edit' })).toThrow('automation revision conflict');
+      expect(onDisk(dir).automations).toEqual([expect.objectContaining({ id: 'x', name: 'B edit', revision: 2 })]);
+    });
+
+    it('a stale update of an id deleted elsewhere is not found and writes nothing back', async () => {
+      const dir = await directory();
+      const a = AutomationStore.open(dir);
+      const x = a.create(input, 'x');
+      AutomationStore.open(dir).delete('x');
+      expect(() => a.update('x', x.revision, { ...input, name: 'A edit' })).toThrow('automation not found');
+      expect(onDisk(dir).automations).toEqual([]);
+    });
+
+    it('creates from two stores both land on disk, and a tombstone written elsewhere blocks the id', async () => {
+      const dir = await directory();
+      const a = AutomationStore.open(dir);
+      const b = AutomationStore.open(dir);
+      b.create(input, 'z');
+      a.create(input, 'w');
+      expect(onDisk(dir).automations.map((row) => row.id).sort()).toEqual(['w', 'z']);
+      expect(() => a.create(input, 'z')).toThrow('automation id unavailable');
+      b.delete('w');
+      expect(() => a.create(input, 'w')).toThrow('automation id unavailable');
+    });
+
+    it('a stale delete keeps definitions created elsewhere', async () => {
+      const dir = await directory();
+      const a = AutomationStore.open(dir);
+      a.create(input, 'x');
+      AutomationStore.open(dir).create(input, 'z');
+      expect(a.delete('x')).toBe(true);
+      expect(onDisk(dir).automations.map((row) => row.id)).toEqual(['z']);
+    });
+  });
+
   it('reserves one receipt per automation event and appends finalized rows', async () => {
     const store = AutomationStore.open(await directory());
     const receipt = store.reserveReceipt({ automationId: 'one', revision: 1, eventId: 'event' });

@@ -90,6 +90,7 @@ export class AutomationStore {
     input: Omit<AutomationDefinition, 'id' | 'revision' | 'createdAt' | 'updatedAt'>,
     id: string = randomUUID(),
   ): AutomationDefinition {
+    this.refreshDefinitions();
     if (this.definitions.has(id) || this.isTombstoned(id)) throw new Error('automation id unavailable');
     const now = this.now().toISOString();
     const definition = automationDefinitionSchema.parse({
@@ -109,6 +110,7 @@ export class AutomationStore {
     expectedRevision: number,
     input: Omit<AutomationDefinition, 'id' | 'revision' | 'createdAt' | 'updatedAt'>,
   ): AutomationDefinition {
+    this.refreshDefinitions();
     const current = this.definitions.get(id);
     if (!current) throw new Error('automation not found');
     if (current.revision !== expectedRevision) throw new Error('automation revision conflict');
@@ -127,6 +129,7 @@ export class AutomationStore {
   }
 
   delete(id: string): boolean {
+    this.refreshDefinitions();
     if (!this.definitions.delete(id)) return false;
     this.definitionsFile.tombstones = {
       ...this.definitionsFile.tombstones,
@@ -143,8 +146,7 @@ export class AutomationStore {
    * unreadable file keeps this process's last good view, as `setState` does.
    */
   reload(): void {
-    const definitions = this.readJson(DEFINITIONS, automationDefinitionsFileSchema, this.definitionsFile);
-    if (definitions !== this.definitionsFile) this.adoptDefinitions(definitions);
+    this.refreshDefinitions();
     this.stateFile = this.readJson(STATE, automationStateFileSchema, this.stateFile);
   }
 
@@ -422,6 +424,18 @@ export class AutomationStore {
     }
     this.definitionsFile = file;
     this.definitions = definitions;
+  }
+
+  /**
+   * The definitions half of `reload`. Every definitions write starts here: another cockpit on
+   * this project may have created, edited or deleted a definition since this process read the
+   * file, and writing the whole list from a stale view would revert that edit or resurrect that
+   * deletion. Re-reading first makes the revision check, the not-found check and the tombstone
+   * check run against disk, and the write carries every other process's definitions along.
+   */
+  private refreshDefinitions(): void {
+    const definitions = this.readJson(DEFINITIONS, automationDefinitionsFileSchema, this.definitionsFile);
+    if (definitions !== this.definitionsFile) this.adoptDefinitions(definitions);
   }
 
   private persistDefinitions(): void {
