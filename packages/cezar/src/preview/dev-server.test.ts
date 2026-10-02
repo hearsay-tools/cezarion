@@ -10,6 +10,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { processStartToken } from '../delegation/process-liveness.ts';
 import { DevServer, probePort, sweepPreviewLeftovers, trimLog } from './dev-server.ts';
 
+vi.mock('../delegation/process-liveness.ts', async importOriginal => {
+  const actual = await importOriginal<typeof import('../delegation/process-liveness.ts')>();
+  return { ...actual, processStartToken: vi.fn(actual.processStartToken) };
+});
+
 const FIXTURE = fileURLToPath(new URL('./__fixtures__/fake-dev-server.mjs', import.meta.url));
 
 let root: string;
@@ -258,6 +263,29 @@ describe('sweepPreviewLeftovers', () => {
     const pid = child.pid!;
     const record = writeRecord(root, 'run-b', 5174, { pid, pgid: pid, startToken: 'some-other-incarnation' });
     expect(await sweepPreviewLeftovers(root)).toBe(0);
+    expect(() => process.kill(pid, 0)).not.toThrow();
+    expect(existsSync(record)).toBe(false);
+  });
+
+  it('skips a live pid whose record has no startToken, but deletes the record', async () => {
+    const child = strayFixture();
+    const pid = child.pid!;
+    const record = writeRecord(root, 'run-d', 5177, { pid, pgid: pid });
+    expect(await sweepPreviewLeftovers(root)).toBe(0);
+    expect(() => process.kill(pid, 0)).not.toThrow();
+    expect(existsSync(record)).toBe(false);
+  });
+
+  it('skips a live pid whose current start token cannot be read, but deletes the record', async () => {
+    const child = strayFixture();
+    const pid = child.pid!;
+    const record = writeRecord(root, 'run-e', 5178, { pid, pgid: pid, startToken: processStartToken(pid) });
+    vi.mocked(processStartToken).mockReturnValue(undefined);
+    try {
+      expect(await sweepPreviewLeftovers(root)).toBe(0);
+    } finally {
+      vi.mocked(processStartToken).mockRestore();
+    }
     expect(() => process.kill(pid, 0)).not.toThrow();
     expect(existsSync(record)).toBe(false);
   });

@@ -225,7 +225,8 @@ export class DevServer extends EventEmitter {
 
 /**
  * Boot sweep: a crashed cezar leaves pid records behind. Kill a record's group only when its
- * leader is still the process we started (pid AND start token), so a reused pid is never hit.
+ * leader is still the process we started (pid AND an exactly matching start token), so a reused
+ * pid is never hit; a missing or unreadable token means skip.
  * The record goes either way. Returns how many groups were killed.
  */
 export async function sweepPreviewLeftovers(dataDir: string): Promise<number> {
@@ -241,8 +242,10 @@ export async function sweepPreviewLeftovers(dataDir: string): Promise<number> {
       try { record = JSON.parse(readFileSync(path, 'utf8')); } catch { /* unreadable: nothing to kill */ }
       rmSync(path, { force: true });
       const { pid, pgid, startToken } = (record ?? {}) as { pid?: unknown; pgid?: unknown; startToken?: unknown };
-      if (typeof pid !== 'number' || typeof pgid !== 'number' || (startToken !== undefined && typeof startToken !== 'string')) continue;
-      if (!recordedProcessLive({ pid, ...(startToken !== undefined ? { startToken } : {}) })) continue;
+      if (typeof pid !== 'number' || typeof pgid !== 'number' || typeof startToken !== 'string') continue;
+      // `recordedProcessLive` answers "alive" on any uncertainty; a kill needs an exact token match,
+      // so a record without a token, or a pid whose token cannot be read now, is skipped.
+      if (!recordedProcessLive({ pid, startToken }) || processStartToken(pid) !== startToken) continue;
       kills.push(terminateGroup(pgid));
     }
   }
