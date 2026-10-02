@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { stopFixtureServer } from './fixture-server'
 import { AgentBrowser, cezarCli, fixtureServeEnv } from './agent-browser'
-import { waitForHealth, waitForStatus } from './poll'
+import { waitForHealth, waitForStatus, pollFor, pollJson } from './poll'
 
 /**
  * Stacking, editing and removing a queued run's prompt (#472), end-to-end against a LIVE
@@ -44,22 +44,8 @@ function freePort(): Promise<number> {
 
 
 async function getRun(url: string, id: string): Promise<{ status: string; task: string; queuedMessages?: Array<{ id: string; text: string }> }> {
-  let lastError: unknown
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    try {
-      const response = await fetch(`${url}/api/v1/runs/${id}`)
-      if (!response.ok) throw new Error(`GET run answered ${response.status}`)
-      return (await response.json()) as {
-        status: string
-        task: string
-        queuedMessages?: Array<{ id: string; text: string }>
-      }
-    } catch (error) {
-      lastError = error
-      await new Promise((r) => setTimeout(r, 100))
-    }
-  }
-  throw lastError
+  return pollFor(signal => pollJson(`${url}/api/v1/runs/${id}`, signal),
+    () => `GET ${url}/api/v1/runs/${id} never answered`, { timeoutMs: 10_000, intervalMs: 100 })
 }
 
 
@@ -81,6 +67,7 @@ let baseUrl: string
 let queuedId: string
 
 beforeAll(async () => {
+  const deadline = Date.now() + 140_000
   dataRoot = mkdtempSync(join(tmpdir(), 'cezar-e2e-queued-'))
   const git = (...args: string[]) => execFileSync('git', ['-C', dataRoot, ...args])
   git('init', '-q', '-b', 'main')
@@ -107,19 +94,19 @@ beforeAll(async () => {
     [cezarCli, 'serve', '--repo', dataRoot, '--port', String(port), '--no-open'],
     { env: fixtureServeEnv(dataRoot), stdio: 'ignore' },
   )
-  await waitForHealth(baseUrl)
+  await waitForHealth(baseUrl, 'queued-stack fixture', { deadline })
 
   // Hold the only slot with a slow turn, then queue the run under test behind it.
   //
   // 160 attempts, not the shared 120: this spec chose a longer budget than the other
   // `waitForStatus` callers before the helpers were folded into `poll.ts`, because these two
   // waits sit behind a fresh serve boot AND an agent spawn rather than behind a settled server.
-  // Passing it here keeps the 80 s a slow CI runner may need without lengthening every other
-  // spec's failure by 20 s.
+  // Each wait keeps its 80 s cap; the shared setup deadline reserves browser time inside
+  // the hook instead of letting sequential probes overrun it.
   const blockerId = await startRun(baseUrl, 'mock:slow occupy the only agent slot')
-  await waitForStatus(baseUrl, blockerId, ['running'], { tries: 160 })
+  await waitForStatus(baseUrl, blockerId, ['running'], { tries: 160, deadline })
   queuedId = await startRun(baseUrl, 'mock:done the original prompt')
-  await waitForStatus(baseUrl, queuedId, ['queued'], { tries: 160 })
+  await waitForStatus(baseUrl, queuedId, ['queued'], { tries: 160, deadline })
 
   browser = AgentBrowser.open(sessionId)
   browser.setViewport(1440, 900)

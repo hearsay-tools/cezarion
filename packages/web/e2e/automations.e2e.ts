@@ -1,6 +1,7 @@
 import { resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
+import { pollFor, pollJson } from './poll'
 import { AgentBrowser, bootProjectId, readTestEnv } from './agent-browser'
 
 const artifactsDir = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_e2e')
@@ -76,11 +77,10 @@ describe('GitHub automations', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ mode: 'preview' }),
     }).then((response) => response.json()) as { checkId: string }
-    let check: { status: string; matches?: number; error?: string } = { status: 'queued' }
-    for (let attempt = 0; attempt < 60 && !['complete', 'error'].includes(check.status); attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 500))
-      check = await fetch(`${baseUrl}/api/v1/automation-checks/${preview.checkId}`).then((response) => response.json())
-    }
+    const check = await pollFor(async signal => {
+      const check = await pollJson<{ status: string; matches?: number; error?: string }>(`${baseUrl}/api/v1/automation-checks/${preview.checkId}`, signal)
+      return ['complete', 'error'].includes(check.status) ? check : undefined
+    }, () => `automation check ${preview.checkId} never completed`, { timeoutMs: 30_000, intervalMs: 500 })
     expect(check.status, check.error).toBe('complete')
 
     await fetch(`${baseUrl}/api/v1/automations/${automationId}/enable`, { method: 'POST' })

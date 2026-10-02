@@ -199,3 +199,32 @@ wait, watch it go green, then restore `dist` (`npm run build`, or `git checkout`
 because `dist` is not tracked). Boot the env before patching: the first
 `test-env-up.sh` in a fresh worktree runs `npm ci && npm run build` and would erase the patch.
 The shared env's own server is not restarted by a `dist` patch; `--force-rebuild` is.
+
+## Observable completion and budgets (#764)
+
+`settleVisual(browser, target, { theme, width, idle })` waits for the intended appearance,
+loaded fonts, non-zero target geometry, and completion of finite animations, then holds the
+same target/descendant geometry and text across samples. Use it **before** overflow reads and
+screenshots. Pair `idle: true` with the named route/target for ordinary completed navigation;
+held loading fixtures must omit idle. Infinite loading spinners remain valid loading state.
+For transition regressions, arm frame sampling before the trigger, observe the named loading
+state and actual rendered frames before releasing the response, and keep sampling until the
+ready/unavailable target settles. Final-state assertions alone cannot detect a transient jump.
+
+HTTP `pollFor` probes receive an `AbortSignal`. Pass it through `fetch` and body reads (or use
+`pollJson`); a cancelled probe must not leave a request running. `timeoutMs` bounds wall-clock
+work, `requestTimeoutMs` bounds each probe, and `deadline` shares a test's remaining budget
+between sequential polls. `tries` remains an additional cap for existing callers. The default
+budgets remain 10 seconds for general polls, 15 for health, and 60 for status. Reserve part of
+the enclosing test for browser actions, capture and cleanup; diagnostics consume a bounded
+reserve inside the poll budget. Browser value polls also kill a CLI invocation within their
+remaining monotonic deadline and reject late matching samples. Fixture teardown has a five
+second grace and a five second kill acknowledgement bound, so hooks need at least that plus
+browser close and filesystem cleanup (the suite's 60-second hook budget covers it).
+
+The ratchet also scans packaged CLI E2E specs and helpers. It rejects elapsed-clock-only
+`waitForFunction`/`waitForValue`/`waitForStable` calls, and permits reject-only observer deadlines.
+Packaged fixtures' audited polling, shutdown simulation and process escalation timers carry
+an adjacent `// e2e-wait: condition-poll|shutdown-grace|process-deadline — reason` annotation.
+These annotations describe fixture mechanisms, never readiness; do not exempt an observation
+sleep. HTTP request socket deadlines (`request.setTimeout`) are not unconditional sleeps.

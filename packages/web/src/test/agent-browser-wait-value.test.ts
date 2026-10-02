@@ -28,7 +28,11 @@ function fakeBrowser(results: unknown[]) {
       const results = JSON.parse(process.env.FAKE_EVAL_RESULTS)
       const n = Number(readFileSync(process.env.FAKE_COUNTER, 'utf8'))
       writeFileSync(process.env.FAKE_COUNTER, String(n + 1))
-      const result = results[Math.min(n, results.length - 1)]
+      let result = results[Math.min(n, results.length - 1)]
+      if (result && typeof result === 'object' && 'delayMs' in result) {
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, result.delayMs)
+        result = result.value
+      }
       if (result && typeof result === 'object' && 'error' in result) {
         process.stdout.write(JSON.stringify({ success: false, error: result.error }))
       } else {
@@ -92,6 +96,32 @@ function shortTimeout(ms = 400) {
 const actions = (commands: string[][]) => commands.map(([action]) => action)
 
 describe('AgentBrowser.waitForStable (#415)', () => {
+  it.each([
+    { name: 'starts after the first probe completes', values: ['ready'], durations: [300, 10, 100, 100], holdMs: 200, probes: 4, endedAt: 510, expected: 'ready' },
+    { name: 'restarts after the matching value changes', values: ['old', 'ready'], durations: [300, 10, 100, 100], holdMs: 200, probes: 4, endedAt: 510, expected: 'ready' },
+    { name: 'restarts after a miss', values: ['ready', false, 'ready'], durations: [300, 10, 10, 100, 100], holdMs: 200, probes: 5, endedAt: 520, expected: 'ready' },
+    { name: 'returns the first matching sample for hold zero', values: ['ready'], durations: [300], holdMs: 0, probes: 1, endedAt: 300, expected: 'ready' },
+  ])('completed-sample hold $name without counting earlier CLI latency', scenario => {
+    const { browser } = open([])
+    let now = 0
+    let probes = 0
+    const monotonic = vi.spyOn(performance, 'now').mockImplementation(() => now)
+    const wallClock = vi.spyOn(Date, 'now').mockImplementation(() => now)
+    const run = vi.spyOn(browser as unknown as { run: (args: string[], timeoutMs?: number) => { result: unknown } }, 'run')
+      .mockImplementation(() => {
+        const index = probes++
+        now += scenario.durations[index] ?? 100
+        return { result: scenario.values[Math.min(index, scenario.values.length - 1)] }
+      })
+    try {
+      expect(browser.waitForStable('ready()', { holdMs: scenario.holdMs, intervalMs: 0 })).toBe(scenario.expected)
+      expect(probes).toBe(scenario.probes)
+      expect(now).toBe(scenario.endedAt)
+    } finally {
+      run.mockRestore(); wallClock.mockRestore(); monotonic.mockRestore()
+    }
+  })
+
   it('returns only after the matcher holds across polls spanning holdMs', () => {
     const { browser, commands } = open(['Skills', 'Skills', 'Skills'])
     const start = Date.now()
@@ -265,4 +295,13 @@ describe('dismissWithEscape (#410)', () => {
     expect(predicate).toContain(`document.querySelector(${JSON.stringify(content)}) === null`)
     expect(predicate).toContain(`document.activeElement === document.querySelector(${JSON.stringify(focus)})`)
   })
+})
+
+
+it('bounds the CLI probe and rejects a matching sample arriving after the wait deadline (#764)', () => {
+  process.env.AGENT_BROWSER_DEFAULT_TIMEOUT = '100'
+  const fake = open([{ delayMs: 1500, value: 'ready' }, 'ready'])
+  const started = Date.now()
+  expect(() => fake.browser.waitForValue('late()', value => value === 'ready', { intervalMs: 0 })).toThrow(WaitForValueError)
+  expect(Date.now() - started).toBeLessThan(1000)
 })

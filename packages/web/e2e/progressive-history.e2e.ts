@@ -5,11 +5,13 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import { stopFixtureServer } from './fixture-server'
+import { captureFixtureServer, stopFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, fixtureServeEnv } from './agent-browser'
 import { largeThreadEvents } from './fixtures/make-large-thread'
 import record from './fixtures/thread-run.record.json'
-import { waitForHealth } from './poll'
+import { waitForHealth, waitForStatus } from './poll'
+import { settleVisual } from './visual-ready'
+import { HISTORY_BOUNDARY_SLACK_PX, isNearHistoryStart } from '../src/routes/task-thread/thread-scroll'
 
 const repoRoot = resolve(import.meta.dirname, '../../..')
 const artifactsDir = resolve(repoRoot, '.ai/qa/artifacts_e2e')
@@ -90,6 +92,17 @@ let server: ChildProcess
 let dataRoot: string
 let baseUrl: string
 let bootProject: string
+let serverDiagnostics: ReturnType<typeof captureFixtureServer> | undefined
+let startupError: string | undefined
+let healthReady = false
+let healthReadyAfterMs: number | undefined
+
+function retainServerDiagnostics(): string {
+  const path = join(artifactsDir, 'progressive-history-startup.json')
+  mkdirSync(artifactsDir, { recursive: true })
+  writeFileSync(path, JSON.stringify({ baseUrl, dataRoot, healthReady, healthReadyAfterMs, startupError, child: serverDiagnostics?.() }, null, 2))
+  return path
+}
 
 const cursorRequestCount = `performance.getEntriesByType('resource').filter((entry) => {
   const url = new URL(entry.name)
@@ -174,9 +187,21 @@ function settleHistoryAnchor(rowExpr: string): HistoryAnchor {
 }
 
 function parkAndSettleHistoryStart(): HistoryAnchor {
+  // Start the unpin gesture away from the boundary, even when a previous prepend kept it near.
+  // Virtua may remeasure rows after this numeric end request, changing the final maximum.
+  // The safety condition for the wheel is outside the history arm, not an exact live tail.
   browser.evaluate(`(() => {
     const main = ${MAIN}
-    // Unpin while still at the live tail so a later wheel at the boundary cannot load a page.
+    window.__cezThreadScrollTo(main.scrollHeight - main.clientHeight)
+  })()`)
+  browser.waitForValue(`(() => { const main = ${MAIN}; return main && { scrollTop:main.scrollTop, clientHeight:main.clientHeight, maxTop:main.scrollHeight-main.clientHeight } })()`,
+    (sample: { scrollTop: number; clientHeight: number } | null) => sample !== null && !isNearHistoryStart(sample))
+  browser.evaluate(`(() => {
+    const main = ${MAIN}
+    // Recheck in the same browser task as the wheel: this gesture must not consume history.
+    if (main.scrollTop < Math.max(${HISTORY_BOUNDARY_SLACK_PX}, main.clientHeight)) {
+      throw new Error('unpin gesture is still inside the history boundary arm')
+    }
     main.dispatchEvent(new WheelEvent('wheel', { deltaY: -120, bubbles: true }))
     // Virtua ignores a raw scrollTop write; the e2e seam goes through the scroll owner.
     if (typeof window.__cezThreadScrollTo !== 'function') {
@@ -261,9 +286,19 @@ beforeAll(async () => {
   server = spawn(
     process.execPath,
     [join(repoRoot, 'packages/cezar/dist/index.js'), 'serve', '--repo', dataRoot, '--port', String(port), '--no-open'],
-    { env: fixtureServeEnv(dataRoot), stdio: 'ignore' },
+    { env: fixtureServeEnv(dataRoot), stdio: ['ignore', 'pipe', 'pipe'] },
   )
-  await waitForHealth(baseUrl)
+  serverDiagnostics = captureFixtureServer(server)
+  try {
+    await waitForHealth(baseUrl)
+    healthReady = true
+    healthReadyAfterMs = serverDiagnostics().elapsedMs
+  } catch (error) {
+    startupError = error instanceof Error ? error.message : String(error)
+    const path = retainServerDiagnostics()
+    throw new Error(`${startupError}\nFixture startup: ${JSON.stringify(serverDiagnostics())}\nDiagnostics: ${path}`, { cause: error })
+  }
+  retainServerDiagnostics()
   bootProject = await bootProjectId(baseUrl)
   browser = AgentBrowser.open(sessionId)
   browser.setViewport(1440, 900)
@@ -276,12 +311,20 @@ beforeAll(async () => {
     `document.querySelector('[data-slot="history-boundary"]')?.dataset.retainedPages === '1' &&
      document.querySelector('[data-slot="history-boundary"] button:not([disabled])') !== null`,
   )
+  // This stored running fixture is recovered through a real dry-run continuation. Query
+  // idle can be true before that continuation publishes its waiting/PR header update. The
+  // no-hover PR chip grows the metadata row by 12px; establish that completed layout before
+  // measuring a paging anchor, including when the preceding tail-paint test is filtered out.
+  await waitForStatus(baseUrl, RUN_ID, ['waiting'])
+  browser.waitForFunction(`document.querySelector('[data-slot="run-header"] [data-slot="pr-chip"]') !== null`)
   waitUntilCockpitIdle()
+  settleVisual(browser, '[data-slot="run-header"]', { idle: true })
 }, 120_000)
 
 afterAll(async () => {
   browser?.close()
   await stopFixtureServer(server)
+  if (serverDiagnostics) retainServerDiagnostics()
   if (dataRoot) rmSync(dataRoot, { recursive: true, force: true })
 })
 
@@ -310,32 +353,75 @@ describe('progressive long-session history', () => {
     browser.waitForFunction(
       `document.querySelector('[data-slot="history-boundary"]')?.dataset.retainedPages === '2'`,
     )
-    expect(Number(browser.evaluate(cursorRequestCount))).toBe(1)
-
+    waitUntilCockpitIdle()
     const after = settleNamedHistoryAnchor(before.key)
     expect(
       Math.abs(after.top - before.top),
       `anchor jumped ${Math.abs(after.top - before.top)}px ${JSON.stringify({ before, after })}`,
     ).toBeLessThan(2)
 
+    expect(Number(browser.evaluate(cursorRequestCount))).toBe(1)
     browser.screenshot(join(artifactsDir, 'progressive-history-earlier-page.png'), { viewport: true })
-    // Let the prepend anchor's requestAnimationFrame settle before the next test supplies
-    // a genuinely fresh upward gesture.
-    await new Promise((resolveWait) => setTimeout(resolveWait, 50))
+    waitUntilCockpitIdle()
+    settleNamedHistoryAnchor(before.key)
   })
 
   it('consumes one upward intent without cascading while the boundary remains near', async () => {
-    browser.evaluate(`(() => {
-      const main = document.querySelector('[data-slot="main"]')
-      main.scrollTop = 0
-      main.dispatchEvent(new WheelEvent('wheel', { deltaY: -120, bubbles: true }))
-    })()`)
-    browser.waitForFunction(`${cursorRequestCount} === 2`)
-    await new Promise((resolveWait) => setTimeout(resolveWait, 500))
-    expect(Number(browser.evaluate(cursorRequestCount))).toBe(2)
+    // Establish this test's own first page; it must also work when selected alone.
+    browser.goto(`${baseUrl}/p/${bootProject}/tasks/${RUN_ID}`)
+    browser.waitForFunction(`document.querySelector('[data-slot="history-boundary"]')?.dataset.retainedPages === '1'`)
+    waitUntilCockpitIdle()
+    const initial = parkAndSettleHistoryStart()
+    activateHistoryBoundary()
+    browser.waitForFunction(`document.querySelector('[data-slot="history-boundary"]')?.dataset.retainedPages === '2'`)
+    waitUntilCockpitIdle()
+    settleNamedHistoryAnchor(initial.key)
+    const before = parkAndSettleHistoryStart()
+    // Observe throughout response consumption and anchoring, not just at request initiation.
+    let fetchRestored = false
+    try {
+      browser.evaluate(`(() => {
+        const nativeFetch = window.fetch;
+        window.__historyFetchBefore = nativeFetch;
+        window.__historyCycle = { started: 0, completed: 0, pending: 0 };
+        window.fetch = async (...args) => {
+          const url = new URL(typeof args[0] === 'string' ? args[0] : args[0].url, location.href);
+          const history = url.pathname.endsWith('/runs/${RUN_ID}/history') && url.searchParams.has('cursor');
+          if (!history) return nativeFetch(...args);
+          const cycle = window.__historyCycle;
+          cycle.started++; cycle.pending++;
+          try {
+            const response = await nativeFetch(...args);
+            await response.clone().text();
+            cycle.completed++;
+            return response;
+          } finally { cycle.pending--; }
+        };
+        const main = document.querySelector('[data-slot="main"]');
+        main.dispatchEvent(new WheelEvent('wheel', { deltaY: -120, bubbles: true }));
+      })()`)
+      browser.waitForValue(`({ cycle: window.__historyCycle, pages: document.querySelector('[data-slot="history-boundary"]')?.dataset.retainedPages, top: document.querySelector('[data-slot="main"]')?.scrollTop, requests: ${cursorRequestCount} })`, (s: { cycle: { completed: number; pending: number }; pages: string }) => s.cycle.completed >= 1 && s.cycle.pending === 0 && s.pages === '3')
+      waitUntilCockpitIdle()
+      const after = settleNamedHistoryAnchor(before.key)
+      expect(Math.abs(after.top - before.top), JSON.stringify({ before, after })).toBeLessThan(2)
+      const cycle = browser.waitForStable(`window.__historyCycle`, { holdMs: 200 })
+      expect(cycle).toEqual({ started: 1, completed: 1, pending: 0 })
+      expect(Number(browser.evaluate(cursorRequestCount))).toBe(2)
+    } finally {
+      fetchRestored = browser.evaluate(`(() => {
+        const previous = window.__historyFetchBefore;
+        if (previous) window.fetch = previous;
+        const restored = window.fetch === previous;
+        delete window.__historyFetchBefore;
+        delete window.__historyCycle;
+        return restored;
+      })()`) as boolean
+    }
+    expect(fetchRestored).toBe(true)
   })
 
   it('caps retained pages at five and jumps directly back to a fresh tail', () => {
+    expect(browser.evaluate(`window.__historyCycle === undefined && window.__historyFetchBefore === undefined`)).toBe(true)
     let page = Number(browser.evaluate(
       `document.querySelector('[data-slot="history-boundary"]')?.dataset.retainedPages`,
     ))

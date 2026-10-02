@@ -2,6 +2,7 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
+import { pollFor, pollJson } from './poll'
 import { AgentBrowser, bootProjectId, readTestEnv } from './agent-browser'
 import { readSharedProjects, writeSharedProjects } from './workspace-registry'
 
@@ -76,11 +77,11 @@ describe('automatic Open Mercato skills updates', () => {
     browser.screenshot(`${artifactsDir}/settings-skills-auto-update.png`)
 
     browser.click('[data-slot="skills-auto-update"]')
-    let config = await api<{ skillsAutoUpdate: boolean | null }>('/api/v1/workspace/config')
-    for (let attempt = 0; config.skillsAutoUpdate !== false && attempt < 40; attempt += 1) {
-      await new Promise((resolvePromise) => setTimeout(resolvePromise, 100))
-      config = await api('/api/v1/workspace/config')
-    }
+    const saved = (wanted: boolean | null) => pollFor(async signal => {
+      const config = await pollJson<{ skillsAutoUpdate: boolean | null }>(`${baseUrl}/api/v1/workspace/config`, signal)
+      return config.skillsAutoUpdate === wanted ? config : undefined
+    }, () => `workspace skillsAutoUpdate never persisted ${wanted}`, { timeoutMs: 10_000, intervalMs: 100 })
+    let config = await saved(false)
     expect(config.skillsAutoUpdate).toBe(false)
     // Local run 1790759265447-4156089, lane-3-failures/skills-update/
     // shows-the-inherited-global-preference-and-persists-an-explicit-override-1:
@@ -94,10 +95,7 @@ describe('automatic Open Mercato skills updates', () => {
     expect(explanation).toContain('explicit workspace override')
 
     browser.click('[data-action="skills-use-default"]')
-    for (let attempt = 0; config.skillsAutoUpdate !== null && attempt < 40; attempt += 1) {
-      await new Promise((resolvePromise) => setTimeout(resolvePromise, 100))
-      config = await api('/api/v1/workspace/config')
-    }
+    config = await saved(null)
     expect(config.skillsAutoUpdate).toBeNull()
   })
 

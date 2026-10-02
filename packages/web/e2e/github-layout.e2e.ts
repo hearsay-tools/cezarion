@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
+import { settleVisual } from './visual-ready'
 import { artifactsDir, createGitHubFixture, DESKTOP } from './github-fixture'
 import type { GitHubFixture, GithubPayload } from './github-fixture'
 
@@ -644,8 +645,16 @@ it.each([1440, 402, 360].flatMap(width => ['light', 'dark'].map(theme => ({ widt
     return Math.abs(page.getBoundingClientRect().width - narrow);
   })()`)).toBeLessThan(1)
 
+  // agent-browser 0.36 clears via a tracked value assignment before inserting text.
+  // A React rerender between those steps can restore the old prompt. Clear with trusted
+  // keyboard input first so component state observes the replacement, then type the draft.
+  browser.click('[data-slot="gh-custom-prompt"]')
+  browser.press('Control+a')
+  browser.press('Backspace')
+  browser.waitForFunction(`document.querySelector('[data-slot="gh-custom-prompt"]').value === ''`)
   browser.fill('[data-slot="gh-custom-prompt"]', 'Review this issue and keep this draft')
-  browser.evaluate('new Promise(resolve => setTimeout(resolve, 250))')
+  browser.waitForFunction(`document.querySelector('[data-slot="gh-custom-prompt"]').value === 'Review this issue and keep this draft'`)
+  settleVisual(browser, '[data-route="github"]', { theme, width: 'wide', idle: true })
   browser.screenshot(`${artifactsDir}/revised-github-handoff-${width}-${theme}.png`, { viewport: true })
   browser.click('[data-slot="gh-workflow-trigger"]')
   browser.press('Escape')
@@ -685,6 +694,7 @@ it.each([{ width: 1440, height: 900 }, { width: 360, height: 640 }].flatMap(view
   browser.evaluate(`(() => {
     const seen = new Set();
     window.__geometry = seen;
+    window.__geometrySamples = 0;
     const box = el => { const r = el.getBoundingClientRect(); return [r.top, r.left, r.width, r.height].map(n => Math.round(n * 10) / 10).join(','); };
     const tick = () => {
       const toolbar = document.querySelector('[data-slot="gh-filter-toolbar"]');
@@ -692,6 +702,7 @@ it.each([{ width: 1440, height: 900 }, { width: 360, height: 640 }].flatMap(view
       const list = document.querySelector('[data-slot="gh-list"]');
       const search = document.querySelector('[data-slot="gh-search"]');
       if (toolbar && picker && list && search) seen.add(JSON.stringify({ toolbar: box(toolbar), picker: box(picker), list: box(list), search: box(search) }));
+      window.__geometrySamples++;
       window.__geometryFrame = requestAnimationFrame(tick);
     };
     tick();
@@ -708,8 +719,8 @@ it.each([{ width: 1440, height: 900 }, { width: 360, height: 640 }].flatMap(view
     return { text: el.textContent, lines: Math.round(el.clientHeight / parseFloat(style.lineHeight)), clipped: el.scrollHeight > el.clientHeight + 1 || el.scrollWidth > el.clientWidth + 1, inside: r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight };
   })()`
   const refreshingPopover = browser.waitForValue<{ text: string; lines: number; clipped: boolean; inside: boolean }>(readPopover, value => Boolean(value?.text.includes('Refreshing project boards')))
-  browser.evaluate('window.__mark = performance.now()')
-  browser.waitForFunction('performance.now() - window.__mark > 400')
+  browser.waitForFunction('window.__geometrySamples >= 3')
+  settleVisual(browser, '[data-slot="gh-filter-toolbar"]', { theme, width: 'wide' })
   // The delayed /github/projects request must have reached the interceptor before it can be released.
   // Provenance: with registration of window.__finishProjects delayed 1500ms (setTimeout in the interceptor) and this guard removed,
   // `-t "while project boards refresh then settle as .ready. at 1440 / .light."` fails with `TypeError: window.__finishProjects is not a function`
@@ -719,8 +730,8 @@ it.each([{ width: 1440, height: 900 }, { width: 360, height: 640 }].flatMap(view
   browser.waitForFunction(outcome === 'ready'
     ? `!(${status}).includes('Refreshing project boards')`
     : `(${status}).includes('rate limited')`)
-  browser.evaluate('window.__mark = performance.now()')
-  browser.waitForFunction('performance.now() - window.__mark > 400')
+  if (outcome === 'ready') browser.waitForFunction(`document.activeElement?.matches('select[aria-label="Project board"]')`)
+  settleVisual(browser, '[data-route="github"]', { theme, width: 'wide' })
   const facts = browser.evaluate(`(() => {
     cancelAnimationFrame(window.__geometryFrame);
     const samples = [...window.__geometry].map(sample => JSON.parse(sample));
@@ -785,6 +796,7 @@ it.each([{ width: 1440, height: 900 }, { width: 360, height: 640 }].flatMap(view
   browser.evaluate(`(() => {
     const seen = new Set();
     window.__geometry = seen;
+    window.__geometrySamples = 0;
     const box = el => { const r = el.getBoundingClientRect(); return [r.top, r.left, r.width, r.height].map(n => Math.round(n * 10) / 10).join(','); };
     const tick = () => {
       const toolbar = document.querySelector('[data-slot="gh-filter-toolbar"]');
@@ -792,20 +804,20 @@ it.each([{ width: 1440, height: 900 }, { width: 360, height: 640 }].flatMap(view
       const list = document.querySelector('[data-slot="gh-list"]');
       const search = document.querySelector('[data-slot="gh-search"]');
       if (toolbar && picker && list && search) seen.add(JSON.stringify({ toolbar: box(toolbar), picker: box(picker), list: box(list), search: box(search) }));
+      window.__geometrySamples++;
       window.__geometryFrame = requestAnimationFrame(tick);
     };
     tick();
   })()`)
-  browser.evaluate('window.__mark = performance.now()')
-  browser.waitForFunction('performance.now() - window.__mark > 400')
+  browser.waitForFunction(`document.querySelector('select[aria-label="Project board"]')?.textContent.includes('Loading boards') && window.__geometrySamples >= 3`)
+  settleVisual(browser, '[data-slot="gh-filter-toolbar"]', { theme, width: 'wide' })
   // The delayed /github/projects request must have reached the interceptor before it can be released.
   browser.waitForFunction("typeof window.__finishProjects === 'function'")
   browser.evaluate('window.__finishProjects()')
   browser.waitForFunction(outcome === 'long names'
     ? `[...document.querySelector('select[aria-label="Project board"]').options].some(option => option.textContent.includes('Delivery roadmap'))`
     : `document.querySelector('select[aria-label="Project board"]').options[0].textContent === 'Boards unavailable'`)
-  browser.evaluate('window.__mark = performance.now()')
-  browser.waitForFunction('performance.now() - window.__mark > 400')
+  settleVisual(browser, '[data-route="github"]', { theme, width: 'wide' })
   const facts = browser.evaluate(`(() => {
     cancelAnimationFrame(window.__geometryFrame);
     const samples = [...window.__geometry].map(sample => JSON.parse(sample));
@@ -852,9 +864,7 @@ it.each([1440, 360].flatMap(width => ['status button', 'search'].map(focus => ({
   browser.waitForFunction("typeof window.__finishProjects === 'function'")
   browser.evaluate('window.__finishProjects()')
   browser.waitForFunction(`document.querySelector('select[aria-label="Project board"]') && !document.querySelector('[data-slot="gh-filter-toolbar"] [role="status"]').textContent.includes('Refreshing')`)
-  browser.evaluate('window.__mark = performance.now()')
-  browser.waitForFunction('performance.now() - window.__mark > 300')
-  const active = browser.evaluate(`(() => { const a = document.activeElement; return { body: a === document.body, picker: a?.matches('select[aria-label="Project board"]') === true, search: a?.matches('[data-slot="gh-search"]') === true }; })()`)
+  const active = browser.waitForValue(`(() => { const a = document.activeElement; return { body: a === document.body, picker: a?.matches('select[aria-label="Project board"]') === true, search: a?.matches('[data-slot="gh-search"]') === true }; })()`, (value: { body: boolean; picker: boolean; search: boolean }) => !value.body && (focus === 'search' ? value.search : value.picker))
   expect(active).toEqual(focus === 'search' ? { body: false, picker: false, search: true } : { body: false, picker: true, search: false })
   browser.setViewport(DESKTOP.width, DESKTOP.height)
 }, 90_000)

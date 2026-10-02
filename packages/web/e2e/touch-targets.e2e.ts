@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { RunRecord } from '@open-mercato/cezar-api-client'
+import { waitForHealth } from './poll'
 import { stopFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { contrastSampleExpression, focusWithKeyboard, type ContrastSample } from './contrast'
@@ -51,13 +52,7 @@ beforeAll(async () => {
   server = spawn(process.execPath, [cezarCli, 'serve', '--repo', root, '--port', String(port), '--no-open'], {
     env: fixtureServeEnv(root, { CEZ_SKILLS_AUTO_UPDATE: '0' }), stdio: 'ignore',
   })
-  let healthy = false
-  for (let attempt = 0; attempt < 60; attempt++) {
-    try { healthy = (await fetch(`${baseUrl}/api/v1/health`)).ok } catch { /* booting */ }
-    if (healthy) break
-    await new Promise(resolve => setTimeout(resolve, 250))
-  }
-  if (!healthy) throw new Error('Touch fixture server did not become healthy')
+  await waitForHealth(baseUrl, 'touch-targets fixture', { timeoutMs: 20_000 })
   project = await bootProjectId(baseUrl)
   browser = AgentBrowser.open(`touch-${process.pid}`)
 })

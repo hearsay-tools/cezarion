@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, expect, it } from 'vitest'
 
+import { settleVisual } from './visual-ready'
 import { AgentBrowser } from './agent-browser'
 import { artifactsDir, createGitHubFixture, DESKTOP } from './github-fixture'
 import type { GitHubFixture, GithubPayload } from './github-fixture'
@@ -56,7 +57,8 @@ it.each(['ready', 'unknown', 'conflicting'].flatMap(state => [1440, 402].flatMap
       history.pushState(null, '', ${JSON.stringify(scoped(`/github/prs/${item.number}`))}); dispatchEvent(new PopStateEvent('popstate'));
     })()`)
     stateBrowser.waitForFunction(`document.querySelector('[data-slot="gh-merge-box"]') !== null`)
-    stateBrowser.evaluate(`document.documentElement.classList.toggle('light', ${theme === 'light'}); document.documentElement.dataset.width = 'wide'; document.querySelector('[data-slot="gh-merge-box"]').scrollIntoView({block:'center'}); new Promise(resolve => setTimeout(resolve, 250))`)
+    stateBrowser.evaluate(`document.documentElement.classList.toggle('light', ${theme === 'light'}); document.documentElement.dataset.width = 'wide'; document.querySelector('[data-slot="gh-merge-box"]').scrollIntoView({block:'center'})`)
+    settleVisual(stateBrowser, '[data-slot="gh-merge-box"]', { theme, width: 'wide' })
     expect(stateBrowser.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true)
     expect(stateBrowser.text('[data-slot="gh-merge-box"]')).toContain(state === 'ready' ? 'Ready to merge' : state === 'unknown' ? 'Requirements unknown' : 'Conflicts must be resolved')
     if (state === 'unknown') {

@@ -63,7 +63,7 @@ beforeAll(async () => {
   await new Promise<void>(done => probe.close(() => done()))
   url = `http://127.0.0.1:${port}/${fixtureName}.html`
   server = spawn(process.execPath, [resolve(webRoot, '../../node_modules/vite/bin/vite.js'), '--host', '127.0.0.1', '--port', String(port), '--strictPort'], { cwd: webRoot, stdio: 'ignore' })
-  await pollFor(async () => (await fetch(url)).ok || undefined,
+  await pollFor(async signal => (await fetch(url, { signal })).ok || undefined,
     () => 'CI header browser fixture did not start', { tries: 60 })
   browser = AgentBrowser.open(`ci-header-${process.pid}`)
   browser.goto(url)

@@ -1,7 +1,10 @@
 // @vitest-environment node
+import { createServer } from 'node:http'
+import type { Socket } from 'node:net'
+import { once } from 'node:events'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { pollFor, waitForHealth, waitForStatus } from '../../e2e/poll'
+import { pollFor, pollJson, waitForHealth, waitForStatus } from '../../e2e/poll'
 
 /**
  * The shared spec-side poll (#416). It replaced 34 copies, one of which — `queued-stack`'s
@@ -170,4 +173,92 @@ describe('waitForHealth', () => {
       waitForHealth('http://127.0.0.1:1', 'the worst-case fixture server', { ...fast, tries: 2 }),
     ).rejects.toThrow('cezar e2e: the worst-case fixture server never answered at http://127.0.0.1:1')
   })
+})
+
+describe('wall-clock and request bounds (#764)', () => {
+  it('aborts a stuck probe within the wall-clock budget', async () => {
+    const started = performance.now()
+    let aborted = false
+    await expect(pollFor((signal) => new Promise((_, reject) => {
+      signal.addEventListener('abort', () => { aborted = true; reject(signal.reason) }, { once: true })
+    }), () => 'stuck', { timeoutMs: 40, requestTimeoutMs: 15, intervalMs: 0 })).rejects.toThrow('stuck')
+    expect(aborted).toBe(true)
+    expect(performance.now() - started).toBeLessThan(500)
+  })
+
+  it('bounds even a probe that ignores its abort signal', async () => {
+    await expect(pollFor(() => new Promise(() => {}), () => 'ignored abort', {
+      timeoutMs: 30, requestTimeoutMs: 10, intervalMs: 0,
+    })).rejects.toThrow('ignored abort')
+  }, 1000)
+
+  it('reports the last observed status, wanted state and URL', async () => {
+    vi.stubGlobal('fetch', () => Promise.resolve(new Response(JSON.stringify({ status: 'waiting' }))))
+    await expect(waitForStatus('http://localhost:1', 'r', ['done'], { tries: 1, intervalMs: 0 }))
+      .rejects.toThrow('last state: waiting')
+  })
+})
+
+/** Real open response streams pin transport cleanup, not just AbortSignal bookkeeping. */
+async function streamedFixture(status: number) {
+  const sockets = new Set<Socket>()
+  let requests = 0
+  const server = createServer((_request, response) => {
+    requests++
+    response.writeHead(status, { 'content-type': 'application/json', connection: 'close' })
+    response.write('{"unfinished":')
+    // Leave the body open: headers alone must not outlive a settled probe's deadline.
+  })
+  server.on('connection', socket => {
+    sockets.add(socket)
+    socket.once('close', () => sockets.delete(socket))
+  })
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  const address = server.address()
+  if (!address || typeof address === 'string') throw new Error('fixture has no port')
+  return {
+    url: `http://127.0.0.1:${address.port}`,
+    sockets, requests: () => requests,
+    close: async () => {
+      server.closeAllConnections()
+      await new Promise<void>(resolve => server.close(() => resolve()))
+    },
+  }
+}
+
+describe('settled probes close unread streamed bodies (#764 review)', () => {
+  it('closes the successful health response socket after accepting headers', async () => {
+    const fixture = await streamedFixture(200)
+    try {
+      await waitForHealth(fixture.url, 'streamed fixture', { tries: 1, requestTimeoutMs: 500, timeoutMs: 3000 })
+      expect(fixture.requests()).toBe(1)
+      await vi.waitFor(() => expect(fixture.sockets.size).toBe(0), { timeout: 1000, interval: 10 })
+    } finally { await fixture.close() }
+  })
+
+  it('closes every rejected non-2xx socket across repeated JSON probes', async () => {
+    const fixture = await streamedFixture(503)
+    try {
+      await expect(pollFor(signal => pollJson(fixture.url, signal), () => 'streamed JSON never answered', {
+        tries: 3, intervalMs: 0, requestTimeoutMs: 500, timeoutMs: 3000,
+      })).rejects.toThrow('answered 503')
+      expect(fixture.requests()).toBe(3)
+      await vi.waitFor(() => expect(fixture.sockets.size).toBe(0), { timeout: 1000, interval: 10 })
+    } finally { await fixture.close() }
+  })
+})
+
+it('reports failed health status', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 503 }))
+  await expect(waitForHealth('http://localhost:35801', 'history fixture', { tries: 1, intervalMs: 0 }))
+    .rejects.toThrow('answered 503')
+})
+
+it('reports nested address-family health transport errors', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('fetch failed', {
+    cause: new AggregateError([new Error('connect ECONNREFUSED ::1:35801'), new Error('connect ECONNREFUSED 127.0.0.1:35801')]),
+  })))
+  await expect(waitForHealth('http://localhost:35801', 'history fixture', { tries: 1, intervalMs: 0 }))
+    .rejects.toThrow('ECONNREFUSED ::1:35801')
 })

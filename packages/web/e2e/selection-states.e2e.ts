@@ -4,6 +4,7 @@ import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { waitForHealth } from './poll'
 import { stopFixtureServer } from './fixture-server'
 import { expectGroupRowHeightMatchesTaskRow } from './row-height'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
@@ -59,10 +60,7 @@ beforeAll(async () => {
   server = spawn(process.execPath, [cezarCli, 'serve', '--repo', root, '--port', String(port), '--no-open'], {
     env: fixtureServeEnv(root, { CEZ_FOLLOWUPS: '1' }), stdio: 'ignore',
   })
-  for (let attempt = 0; attempt < 60; attempt++) {
-    try { if ((await fetch(`${baseUrl}/api/v1/health`)).ok) break } catch { /* booting */ }
-    await new Promise((done) => setTimeout(done, 250))
-  }
+  await waitForHealth(baseUrl, 'selection-states fixture', { timeoutMs: 20_000 })
   expect((await (await fetch(`${baseUrl}/api/v1/runs`)).json()).map((run: { id: string }) => run.id).sort()).toEqual(['fin', 'ga', 'gb', 'one', 'two'])
   project = await bootProjectId(baseUrl)
   browser = AgentBrowser.open(`states-${process.pid}`)

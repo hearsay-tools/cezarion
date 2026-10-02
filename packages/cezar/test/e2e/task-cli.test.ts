@@ -42,6 +42,7 @@ test('built cez task drives a dry-run cockpit it discovers from the checkout', {
     for (let attempt = 0; attempt < 100; attempt += 1) {
       listed = await task(['list']);
       if (listed.code === 0) break;
+      // e2e-wait: condition-poll — retry interval follows the fixture state probe; never signals readiness
       await new Promise((done) => setTimeout(done, 200));
     }
     assert.equal(listed?.code, 0, `cockpit never became discoverable: ${listed?.stdout}`);

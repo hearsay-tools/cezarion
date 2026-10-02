@@ -1,6 +1,7 @@
 // @vitest-environment node
-import { readFileSync, readdirSync } from 'node:fs'
+import { readFileSync, readdirSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { describe, expect, it } from 'vitest'
 import {
   baselinePath,
@@ -357,4 +358,68 @@ describe('the cockpit suite', () => {
       `Baseline entries no longer found; shrink ${baselinePath} (E2E_WAIT_DISCIPLINE_UPDATE=1 npm test -- e2e-wait-discipline does it):\n${describeSites(stale)}`,
     ).toEqual([])
   })
+})
+
+describe('observable waits (#764)', () => {
+  it('rejects clock-only predicates, including multiline and Date clocks', () => {
+    for (const predicate of ['performance.now() - window.__mark > 400', 'Date.now() >= started + 300']) {
+      expect(rules(scanSource('x.ts', `browser.waitForFunction(\n  '${predicate}'\n)`))).toContain('clock-only-wait')
+    }
+    expect(rules(scanSource('x.ts', `browser.waitForValue('performance.now() - window.__mark')`))).toContain('clock-only-wait')
+  })
+  it('rejects constructed Date clocks with normal syntax spacing', () => {
+    for (const clock of ['new Date().getTime()', 'new Date ( ) . getTime ( )']) {
+      for (const method of ['waitForFunction', 'waitForValue', 'waitForStable']) {
+        expect(rules(scanSource('x.ts', `browser.${method}('${clock} - window.__mark > 400')`))).toContain('clock-only-wait')
+      }
+      expect(scanSource('x.ts', `browser.waitForFunction('document.querySelector("main").dataset.updatedAt > ${clock} - 1000')`)).toEqual([])
+    }
+  })
+  it('permits state predicates containing timestamps and reject-only event deadlines', () => {
+    expect(scanSource('x.ts', `browser.waitForFunction('document.querySelector("main").dataset.updatedAt > Date.now() - 1000')`)).toEqual([])
+    expect(scanSource('x.ts', `const timeout = setTimeout(() => { observer.disconnect(); reject(new Error('event missing')); }, 5000)`)).toEqual([])
+    expect(rules(scanSource('x.ts', `setTimeout(() => { resolve('ready') }, 150)`))).toContain('sleep')
+  })
+  it('includes packaged CLI specs and their helpers in the guard coverage', () => {
+    const source = readFileSync(join(e2eDir, '../../cezar/test/e2e/application-update.test.ts'), 'utf8')
+    expect(scanSource('packages/cezar/test/e2e/application-update.test.ts', source).filter(s => s.rule === 'sleep')).toEqual([])
+  })
+})
+
+it('scans a new packaged helper for clock waits and observation delays', () => {
+  const root = mkdtempSync(join(tmpdir(), 'wait-guard-'))
+  try {
+    const web = join(root, 'web'), packaged = join(root, 'packaged')
+    mkdirSync(web); mkdirSync(packaged)
+    writeFileSync(join(packaged, 'helper.ts'), `await new Promise(r => setTimeout(r, 150))\nbrowser.waitForFunction('Date.now() - start > 300')`)
+    expect(rules(scanSuite(web, packaged)).sort()).toEqual(['clock-only-wait', 'sleep'])
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})
+
+it('rejects qualified page timers but permits request socket deadlines', () => {
+  expect(rules(scanSource('x.ts', `browser.evaluate('new Promise(r => window.setTimeout(r, 250))')`))).toEqual(['sleep'])
+  expect(rules(scanSource('x.ts', `globalThis.setTimeout(done, 200)`))).toEqual(['sleep'])
+  expect(scanSource('x.ts', `request.setTimeout(1000, () => request.destroy(new Error('deadline')))`)).toEqual([])
+})
+
+it('rejects Node and browser global timer aliases without exempting other timer receivers', () => {
+  for (const receiver of ['global', 'globalThis', 'window']) {
+    for (const separator of ['.', ' . ']) {
+      expect(rules(scanSource('packages/cezar/test/e2e/timer.ts', `await new Promise(done => ${receiver}${separator}setTimeout(done, 250))`))).toEqual(['sleep'])
+    }
+  }
+  expect(rules(scanSource('x.ts', `timers.setTimeout(done, 250)`))).toEqual(['sleep'])
+  for (const receiver of ['request', 'socket']) {
+    expect(scanSource('x.ts', `${receiver} . setTimeout(1000, () => ${receiver}.destroy(new Error('deadline')))`)).toEqual([])
+  }
+})
+
+it('exempts event deadlines per call without hiding a success sleep on the same line (#764 review)', () => {
+  const deadline = "setTimeout(() => reject(new Error('event missing')), 5000)"
+  const success = "setTimeout(() => resolve('ready'), 150)"
+  for (const source of [`${deadline}; ${success}`, `${success}; ${deadline}`]) {
+    const sites = scanSource('x.ts', source)
+    expect(rules(sites)).toEqual(['sleep'])
+    expect(lines(sites)).toEqual([1])
+  }
 })

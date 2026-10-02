@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
+import { settleVisual } from './visual-ready'
 import { stopFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv, getJson } from './agent-browser'
 import { waitForHealth } from './poll'
@@ -88,27 +89,13 @@ afterAll(async () => {
 const stepIdsJs = `[...document.querySelectorAll('[data-slot="plan-step"]')].map((el) => el.dataset.stepId)`
 const stepOrder = () => browser.evaluate(`${stepIdsJs}.join()`) as string
 
-/**
- * Click a step-card control (↑/↓/✕) and require the order it must produce. Retries the CLICK
- * only while the order is provably UNCHANGED: agent-browser occasionally computes the click
- * point against a mid-reflow layout (observed after viewport flips — the pointerdown landed on
- * the list's gap, the click on body), and a click that landed nowhere is safe to repeat. A
- * click that changed the order to anything but `expected` still fails loudly.
- */
+/** Settle the target before one non-idempotent click, then observe its resulting order. */
 async function clickStepControl(selector: string, expected: string): Promise<void> {
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const before = stepOrder()
-    browser.click(selector)
-    for (let poll = 0; poll < 20; poll += 1) {
-      await new Promise((r) => setTimeout(r, 100))
-      const now = stepOrder()
-      if (now !== before) {
-        expect(now).toBe(expected)
-        return
-      }
-    }
-  }
-  throw new Error(`cezar e2e: ${selector} never changed the step order`)
+  const before = stepOrder()
+  settleVisual(browser, selector, { idle: true })
+  browser.click(selector)
+  const now = browser.waitForValue(`${stepIdsJs}.join()`, value => value !== before)
+  expect(now).toBe(expected)
 }
 
 describe('plan mode against a live dry-run server', () => {
@@ -183,10 +170,10 @@ describe('plan mode against a live dry-run server', () => {
     for (const width of [1440, 402, 360]) for (const theme of ['light', 'dark']) {
       browser.setViewport(width, 1100)
       browser.evaluate(`document.documentElement.classList.toggle('light', '${theme}' === 'light'); document.documentElement.classList.toggle('dark', '${theme}' === 'dark')`)
+      settleVisual(browser, '[data-slot="plan-review"]', { theme, idle: true })
       expect(browser.evaluate(`(() => { const sheet = document.querySelector('[data-slot="plan-review"]'); return sheet.scrollWidth <= sheet.clientWidth })()`)).toBe(true)
       expect(browser.count('[data-slot="plan-step-up"]')).toBe(3)
       expect(browser.count('[data-slot="plan-step-down"]')).toBe(3)
-      browser.evaluate('new Promise((done) => setTimeout(done, 250))')
       browser.screenshot(join(artifactsDir, `plan-review-${width}-${theme}.png`))
     }
     browser.setViewport(1440, 900)

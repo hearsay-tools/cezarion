@@ -8,7 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { dismissWithEscape } from './contrast'
 import { stopFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv, getJson } from './agent-browser'
-import { pollFor, waitForHealth } from './poll'
+import { pollJson, pollFor, waitForHealth } from './poll'
 
 /**
  * The full-screen /new composer (R4 Steps 1.1 + 1.3) end-to-end against a LIVE dry-run server:
@@ -210,9 +210,9 @@ describe('the full-screen /new against a live dry-run server', () => {
     // The rule under test is legacy's: pill iff the HOST offers >1 backend. The host's own
     // CLIs are what they are (codex/opencode may genuinely be installed here), so assert
     // consistency with the live health answer rather than assuming a bare machine.
-    const health = await pollFor(async () => {
-      const snapshot = await getJson<{ checks: Array<{ name: string; available: boolean }> }>(
-        `${baseUrl}/api/v1/health`,
+    const health = await pollFor(async signal => {
+      const snapshot = await pollJson<{ checks: Array<{ name: string; available: boolean }> }>(
+        `${baseUrl}/api/v1/health`, signal,
       )
       return snapshot.checks.length > 0 ? snapshot : undefined
     }, () => 'runner availability never finished its first background sweep', { tries: 120 })

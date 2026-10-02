@@ -61,8 +61,10 @@ function startServer(): ChildProcess {
   )
 }
 
-async function workspaceConfig(): Promise<WorkspaceConfig> {
-  return getJson<WorkspaceConfig>(`${baseUrl}/api/v1/workspace/config`)
+async function workspaceConfig(signal?: AbortSignal): Promise<WorkspaceConfig> {
+  const response = await fetch(`${baseUrl}/api/v1/workspace/config`, { signal })
+  if (!response.ok) throw new Error(`workspace config answered ${response.status}`)
+  return await response.json() as WorkspaceConfig
 }
 
 function diskResources(): string {
@@ -88,11 +90,11 @@ async function waitForResources(
   label: string,
 ): Promise<WorkspaceConfig> {
   const stored = await pollFor(
-    async () => {
-      const resources = (await workspaceConfig()).resources
+    async (signal) => {
+      const resources = (await workspaceConfig(signal)).resources
       return check(resources) ? resources : undefined
     },
-    async () => mutationFailure(label, (await workspaceConfig()).resources),
+    async signal => mutationFailure(label, (await workspaceConfig(signal)).resources),
   )
   return { resources: stored }
 }
@@ -132,7 +134,7 @@ async function waitForPut(
       }
       return undefined
     },
-    async () => mutationFailure(`${label} PUT never observed`, (await workspaceConfig()).resources),
+    async signal => mutationFailure(`${label} PUT never observed`, (await workspaceConfig(signal)).resources),
   )
   // A matching PUT that failed is a failure of this spec, not something to keep polling for.
   if (matched.status < 200 || matched.status >= 300) {

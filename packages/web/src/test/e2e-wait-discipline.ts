@@ -18,6 +18,7 @@ export type Rule =
   | 'hover-in-wait'
   | 'mutating-predicate'
   | 'sleep'
+  | 'clock-only-wait'
   | 'product-dom-write'
   | 'positional-row-index'
   | 'focus-after-bare-escape'
@@ -88,6 +89,9 @@ export function scanSource(file: string, source: string): Site[] {
   // Rules 2 and 3 — what a wait's argument contains.
   for (const call of callSpans(source, /\b(waitForFunction|waitForValue|waitForStable)\(/g)) {
     const line = lineOf(source, call.start)
+    const hasClock = /(?:performance|Date)\.now\s*\(|\bnew\s+Date\s*\(\s*\)\s*\.\s*getTime\s*\(/.test(call.text)
+    const hasState = /document\.|querySelector|activeElement|__cezIdle|__geometry|dataset\./.test(call.text)
+    if (hasClock && !hasState) sites.push(at('clock-only-wait', line))
     if (call.text.includes(':hover')) sites.push(at('hover-in-wait', line))
     if (call.name === 'waitForFunction' && call.text.includes('scrollIntoView')) sites.push(at('mutating-predicate', line))
   }
@@ -96,9 +100,20 @@ export function scanSource(file: string, source: string): Site[] {
   // which is excluded from this scan and is the only place a spec-side poll sleeps (#416).
   // The name-based exemption this replaces trusted any looping `waitFor…`/`poll…` function,
   // so a helper could sleep for any reason at all under a good name.
-  lines.forEach((line, i) => {
-    if (sleep.test(line)) sites.push(at('sleep', i))
-  })
+  for (const call of callSpans(source, new RegExp(sleep.source, 'g'))) {
+    const i = lineOf(source, call.start)
+    if (lines[i]?.trim().startsWith('//')) continue
+    // Node request/socket deadlines are methods, not global timer aliases.
+    if (/\b(?:request|socket)\s*\.\s*$/.test(source.slice(0, call.start))) continue
+    // Classify this callback, never its whole line: a separate timer on the same line
+    // may resolve success after a blind delay even when this one only rejects failure.
+    const deadline = /\breject\s*\(/.test(call.text) && !/\bresolve\s*\(/.test(call.text)
+    const policy = lines[i - 1]?.trim() ?? ''
+    // Packaged fixtures model shutdown and condition backoff on their own event loop.
+    // Named, reviewed mechanisms only; a new bare delay still fails the guard.
+    const fixturePolicy = file.startsWith('packages/cezar/test/e2e/') && /^\/\/ e2e-wait: (condition-poll|shutdown-grace|process-deadline) — .+/.test(policy)
+    if (!deadline && !fixturePolicy) sites.push(at('sleep', i))
+  }
 
   // Rule 7 — a keyboard step, or a read of where focus is, after an Escape nobody waited out.
   // A Radix overlay closed with Escape hands focus back to its trigger one task AFTER its
@@ -307,11 +322,14 @@ function lineOf(source: string, offset: number): number {
 }
 
 /** Every browser-driving `.ts` under `packages/web/e2e`, scanned. */
-export function scanSuite(dir = e2eDir): Site[] {
-  return readdirSync(dir)
+export function scanSuite(dir = e2eDir, packaged = dir === e2eDir ? resolve(e2eDir, '../../cezar/test/e2e') : undefined): Site[] {
+  const browserSites = readdirSync(dir)
     .filter((name) => name.endsWith('.ts') && !excluded.has(name))
     .sort()
     .flatMap((name) => scanSource(name, readFileSync(join(dir, name), 'utf8')))
+  if (!packaged) return browserSites
+  return [...browserSites, ...readdirSync(packaged).filter(name => name.endsWith('.ts')).sort()
+    .flatMap(name => scanSource(`packages/cezar/test/e2e/${name}`, readFileSync(join(packaged, name), 'utf8')))]
 }
 
 /** Sites folded to `(file, rule, site) → count`, sorted for a stable file. */

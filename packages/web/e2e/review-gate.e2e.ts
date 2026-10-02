@@ -149,14 +149,15 @@ describe('the review gate against a live parked run', () => {
   }, 90_000)
 
   it('the run gates again after the follow-up turn, with a fresh diff', async () => {
-    await waitForStatus(baseUrl, runId, ['waiting'])
+    const deadline = Date.now() + 110_000
+    await waitForStatus(baseUrl, runId, ['waiting'], { deadline })
     await fetch(`${baseUrl}/api/v1/runs/${runId}/finish`, { method: 'POST' })
-    await waitForStatus(baseUrl, runId, ['review'])
+    await waitForStatus(baseUrl, runId, ['review'], { deadline })
     // Re-entry re-renders the panel AND refetches the diff (legacy reload-on-entry parity).
     browser.waitForFunction(`document.querySelector('[data-slot="review-panel"]') !== null`)
     browser.waitForFunction(`document.querySelector('[data-slot="diff-file"]') !== null`)
     expect(browser.text('[data-slot="diff-file-path"]')).toContain('notes.md')
-  }, 90_000)
+  }, 180_000)
 
   it('✓ Accept finishes the run as done and fires the one-shot celebration', async () => {
     // The overlay lives ~1.5s — watch for it with an observer armed BEFORE the click, so the

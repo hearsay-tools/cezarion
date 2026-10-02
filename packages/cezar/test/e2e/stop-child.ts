@@ -9,6 +9,7 @@ export async function stopChild(child: ChildProcess, name: string, timeoutMs = 3
       resolve();
     };
     child.once('exit', onExit);
+    // e2e-wait: process-deadline — bounded child termination escalates to SIGKILL
     const timer = setTimeout(() => {
       child.off('exit', onExit);
       child.kill('SIGKILL');

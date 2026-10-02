@@ -4,9 +4,10 @@ import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { beforeAll, afterAll, expect, it } from 'vitest'
+import { settleVisual } from './visual-ready'
 import { stopFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
-import { waitForHealth } from './poll'
+import { waitForHealth, pollFor, pollJson } from './poll'
 import record from './fixtures/thread-run.record.json'
 
 const artifacts = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_e2e/task-views')
@@ -44,12 +45,14 @@ beforeAll(async () => {
 }, 60_000)
 afterAll(async () => { browser?.close(); await stopFixtureServer(server); if (root) rmSync(root, { recursive: true, force: true }) })
 const scoped = (path: string) => `/p/${project}${path}`
-const prepare = (width: number, theme: string) => {
+const prepare = (width: number, theme: string, idle = true) => {
+  // Appearance hydration can overwrite a cold-navigation override after the route mounts.
+  if (idle) browser.waitForStable(`window.__cezIdle === true`, { holdMs: 200 })
   browser.setViewport(width, 1000)
   browser.evaluate(`document.documentElement.classList.toggle('light', '${theme}' === 'light'); document.documentElement.classList.toggle('dark', '${theme}' === 'dark'); document.documentElement.dataset.width = 'wide'`)
 }
 it('renders assigned task flows at 1440 Wide, 402 and 360 in both themes without page overflow', () => {
-  const pages = [
+  const pages: Array<[string, string, string]> = [
     ['project', scoped('/'), '[data-slot="tasks-table"]'], ['global', '/tasks?group=project', '[data-slot="global-task-row"]'],
     ['inbox', scoped('/inbox'), '[data-slot="todo-card"]'], ['automations', scoped('/automations'), '[data-route="automations"] article'],
     ['editor', scoped(`/automations/${automationId}`), '#automation-name'], ['compare', scoped('/compare/fixture-group'), '[data-slot="variant-column"]'],
@@ -59,9 +62,10 @@ it('renders assigned task flows at 1440 Wide, 402 and 360 in both themes without
     browser.waitForFunction(`document.querySelector('${selector}') !== null`)
     prepare(width, theme)
     if (name === 'inbox') browser.click('[data-slot="todo-instructions-toggle"]')
+    const visualTarget = name === 'project' ? '[data-route="tasks"]' : selector
+    settleVisual(browser, visualTarget, { theme, width: 'wide', idle: true })
     expect(browser.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true)
     if (name === 'editor') expect(browser.evaluate(`document.querySelector('.automation-editor input[type="checkbox"]').getBoundingClientRect().right <= innerWidth`)).toBe(true)
-    browser.evaluate('new Promise((done) => setTimeout(done, 250))')
     browser.screenshot(join(artifacts, `${name}-${width}-${theme}.png`))
   }
 }, 180_000)
@@ -71,8 +75,11 @@ it('persists column choices, filters projects, and expands mobile resources thro
   browser.click('[data-slot="task-columns-trigger"]')
   browser.click('[data-column-toggle="branch"]')
   browser.press('Escape')
-  const state = await fetch(`${base}/api/v1/workspace/ui-state`).then((r) => r.json())
-  expect(state.taskTable.expandedColumns.branch).toBe(true)
+  const state = await pollFor(async signal => {
+    const state = await pollJson<{ taskTable?: { expandedColumns?: { branch?: boolean } } }>(`${base}/api/v1/workspace/ui-state`, signal)
+    return state.taskTable?.expandedColumns?.branch === true ? state : undefined
+  }, () => 'workspace UI state never persisted expanded branch column', { timeoutMs: 10_000 })
+  expect(state.taskTable?.expandedColumns?.branch).toBe(true)
   browser.goto(base + scoped('/')); prepare(360, 'dark')
   browser.waitForFunction(`document.querySelector('[data-slot="task-card"]') !== null`)
   browser.click('[data-slot="task-card"]:first-child [data-slot="mobile-resources-toggle"]')
@@ -122,7 +129,7 @@ it('renders loading, retryable error, and filtered-empty states in both themes a
       writeFileSync(faultFile, 'loading')
       browser.goto(origin + scoped('/'))
       browser.waitForFunction(`document.querySelector('[aria-label="Loading tasks"]') !== null`)
-      prepare(width, theme)
+      prepare(width, theme, false)
       browser.screenshot(join(artifacts, `loading-${width}-${theme}.png`))
       writeFileSync(faultFile, 'error')
       browser.waitForFunction(`document.body.textContent.includes('Could not load tasks')`)
