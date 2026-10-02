@@ -10,14 +10,6 @@
 .gh-field > button, .gh-field > select { width: 100%; min-height: 44px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); padding: 0 12px; color: var(--foreground); text-align: left; font-size: 12px; }
 .gh-field > button > svg:last-child { margin-left: auto; }
 [data-slot='gh-custom-prompt'] { margin-top: 0; min-height: 150px; padding: 16px; font-size: 14px; }
-.gh-engine-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 12px; }
-.gh-engine-fields > button { position: relative; height: 44px; width: 100%; margin-top: 0; border: 1px solid var(--border); border-radius: 8px; background: var(--card); padding: 0 12px; color: var(--foreground); font-size: 12px; }
-.gh-engine-fields [data-slot='model-pill'] { grid-column: 1 / -1; grid-row: 1; }
-.gh-engine-fields [data-slot='runner-pill'] { grid-column: 1; grid-row: 2; }
-.gh-engine-fields [data-slot='effort-pill'] { grid-column: 2; grid-row: 2; }
-.gh-engine-fields > button > svg:last-child { margin-left: auto; }
-.gh-fixed-runner { grid-column: 1; grid-row: 2; display: flex; flex-direction: column; justify-content: space-between; min-height: 65px; font-size: 12px; }
-.gh-fixed-runner > span { color: var(--muted-foreground); font-size: 11px; }
 [data-slot='gh-merge-box'] { margin-block: 22px; padding: 24px; border-radius: 12px; }
 [data-slot='gh-merge-box'] select { flex: none; min-height: 44px; }
 @media (max-width: 767px) {
@@ -38,10 +30,6 @@
   [data-slot='gh-list'][data-mobile-preview] [data-slot='gh-rows'] > li[data-compact-hidden] { display: none; }
 }
 
-@media (max-width: 767px) {
-  .gh-engine-fields { column-gap: 8px; }
-  .gh-engine-fields > button { padding-inline: 8px; gap: 4px; }
-}
 [data-slot='gh-merge-box'] > div > svg { display: none; }
 [data-slot='gh-merge-box'] h3 { font-size: 18px; font-weight: 400; }
 [data-slot='gh-merge-box'] ul { margin-top: 20px; font-size: 13px; }
@@ -73,7 +61,6 @@
 [data-slot='gh-hand'] { border-color: color-mix(in srgb, var(--accent-strong) 24%, var(--border)); }
 .gh-prompt-field { gap: 8px; }
 .gh-prompt-field [data-slot='gh-custom-prompt'] { min-height: 96px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); }
-.gh-engine-fields [data-slot='model-pill'] { justify-content: flex-start; }
 /* #262: the Account field shares the panel's pill grammar; the width rule reaches through the
    disabled PickerPill's span wrapper, where `.gh-field > button` no longer matches. */
 .gh-field [data-slot='account-pill'] { width: 100%; }

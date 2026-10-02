@@ -1,5 +1,5 @@
 import { QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react'
 import { createElement } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -435,5 +435,99 @@ describe('EnginePills presentation and choices', () => {
     expect(screen.getByRole('button', { name: /^Model · / }).querySelector('[data-slot="picker-label"]')?.textContent).toBe('Model · Default')
     expect(screen.queryByRole('button', { name: /^Runner · / })).toBeNull()
     expect(screen.getByRole('button', { name: /^Effort · / })).not.toBeNull()
+  })
+})
+
+describe('EnginePills layout="row" (#724)', () => {
+  let boxWidth = 800
+  let resize: () => void = () => {}
+  const bothProviders = { providers: [
+    { provider: 'claude', status: 'connected', enabled: true },
+    { provider: 'codex', status: 'connected', enabled: true },
+  ] }
+  const pick: EnginePick = { runner: 'claude', model: null, effort: null, account: null }
+
+  function setup(props: Record<string, unknown> = {}) {
+    stubResolverFetch({ providers: bothProviders })
+    // jsdom has no layout: only the row's own wrapper is measured, like new-task.tsx's group.
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      return { width: this.dataset.slot === 'engine-row-box' ? boxWidth : 400 } as DOMRect
+    })
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(callback: () => void) { resize = callback }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    })
+    return render(createElement(QueryClientProvider, { client: createQueryClient() },
+      createElement(EnginePills, { pick, onChange: vi.fn(), ...props })))
+  }
+  const order = (root: ParentNode) =>
+    [...root.querySelectorAll('[data-slot$="pill"]')].map((el) => el.getAttribute('data-slot'))
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+    boxWidth = 800
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1024 })
+  })
+
+  it('renders Runner, Model, Effort inside the shared row when the box is wide', async () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 })
+    const { container } = setup({ layout: 'row' })
+    await screen.findByRole('button', { name: /^Runner · / })
+    const row = container.querySelector('[data-slot="engine-row"]')!
+    expect(row).not.toBeNull()
+    expect(row.parentElement?.getAttribute('data-slot')).toBe('engine-row-box')
+    expect(order(row)).toEqual(['runner-pill', 'model-pill', 'effort-pill'])
+  })
+
+  it('moves Effort before Model when the box is under 550px, so focus order follows the visual order (#492)', async () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 })
+    boxWidth = 549
+    const { container } = setup({ layout: 'row' })
+    await screen.findByRole('button', { name: /^Runner · / })
+    expect(order(container.querySelector('[data-slot="engine-row"]')!)).toEqual(['runner-pill', 'effort-pill', 'model-pill'])
+  })
+
+  it('goes compact on a phone viewport even if the box measures wide, and re-measures on resize', async () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 767 })
+    boxWidth = 900
+    const { container } = setup({ layout: 'row' })
+    await screen.findByRole('button', { name: /^Runner · / })
+    const row = () => container.querySelector('[data-slot="engine-row"]')!
+    expect(order(row())).toEqual(['runner-pill', 'effort-pill', 'model-pill'])
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 })
+    act(() => resize())
+    expect(order(row())).toEqual(['runner-pill', 'model-pill', 'effort-pill'])
+    boxWidth = 300
+    act(() => resize())
+    expect(order(row())).toEqual(['runner-pill', 'effort-pill', 'model-pill'])
+  })
+
+  it('flips by moving the same pill nodes and hands focus back to the focused pill', async () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 })
+    const { container } = setup({ layout: 'row' })
+    await screen.findByRole('button', { name: /^Runner · / })
+    const row = container.querySelector('[data-slot="engine-row"]')!
+    expect(row.getAttribute('role')).toBe('group')
+    expect(row.getAttribute('aria-label')).toBe('Agent settings')
+    const model = container.querySelector<HTMLElement>('[data-slot="model-pill"]')!
+    model.focus()
+    expect(document.activeElement).toBe(model)
+    boxWidth = 300
+    act(() => resize())
+    expect(order(row)).toEqual(['runner-pill', 'effort-pill', 'model-pill'])
+    // Same element, not a remount, and still the focused one (a moved node is blurred by Chrome).
+    expect(container.querySelector('[data-slot="model-pill"]')).toBe(model)
+    expect(document.activeElement).toBe(model)
+  })
+
+  it('without the prop keeps the legacy flat markup: no row, no box', async () => {
+    const { container } = setup()
+    await screen.findByRole('button', { name: /^Runner · / })
+    expect(container.querySelector('[data-slot="engine-row"]')).toBeNull()
+    expect(container.querySelector('[data-slot="engine-row-box"]')).toBeNull()
+    expect(order(container)).toEqual(['runner-pill', 'model-pill', 'effort-pill'])
   })
 })

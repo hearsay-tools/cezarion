@@ -494,6 +494,17 @@ describe('Run — backend selection (#401)', () => {
     await waitFor(() => expect(startBody(sent, 't9')).toBeUndefined())
   })
 
+  it('mounts the shared Runner · Model · Effort row on a runnable card only (#724)', async () => {
+    stubFetch()
+    renderInbox()
+
+    await waitFor(() => expect(cards()).toHaveLength(2))
+    const [runnable, note] = cards()
+    await waitFor(() => expect(runnable!.querySelector('[data-slot="todo-engine"] [data-slot="engine-row"]')).not.toBeNull())
+    expect(runnable!.querySelector('[data-slot="engine-row"] [data-slot="effort-pill"]')).not.toBeNull()
+    expect(note!.querySelector('[data-slot="engine-row"]')).toBeNull()
+  })
+
   it('a non-runnable note gets no pills — there is no run to aim', async () => {
     stubFetch()
     renderInbox()

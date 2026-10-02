@@ -96,8 +96,8 @@
 [data-slot="automation-inline-log"] li time { margin-left: auto; }
 
 [data-slot="todo-engine"] { gap: 12px; }
-[data-slot="todo-engine"] > button { border-radius: 8px; border-color: var(--border); padding: 10px 12px; color: var(--foreground); font-size: 12px; font-weight: 500; min-height: 44px; }
-[data-slot="todo-engine"] > button > span { text-transform: capitalize; }
+/* The pills sit in the shared engine row (components/engine-row.css, #724) which owns their box. */
+[data-slot="todo-engine"] [data-slot$="pill"] > span { text-transform: capitalize; }
 [data-slot="todo-actions"] [data-slot="prompt-template-trigger"] { border-radius: 8px; }
 [data-slot="todo-meta"] > * + *::before { content: '·'; margin-right: 8px; }
 [data-slot="todo-meta"] { column-gap: 8px; }
@@ -107,7 +107,6 @@
   .task-flow-page { padding-top: 20px; gap: 18px; }
   .task-flow-page > header { gap: 18px; }
   [data-slot="todo-card"] { gap: 16px; }
-  [data-slot="todo-engine"] > button { padding: 16px; }
   [data-slot="todo-actions"] button { padding: 16px; font-weight: 500; }
 }
 
@@ -131,7 +130,6 @@
 [data-slot="variant-confirm-dialog"] [data-variant="primary"], [data-slot="plan-save-dialog"] [data-variant="primary"], [data-slot="plan-overwrite-dialog"] [data-variant="primary"] { background: var(--accent-strong); color: var(--accent-strong-foreground); }
 
 @media (max-width: 767px) {
-  [data-slot="todo-engine"] > button::before { content: none; }
   [data-slot="todo-card"][data-runnable="false"] [data-slot="todo-summary"] { font-size: 17px; }
   [data-slot="todo-instructions-input"] { min-height: 72px; padding: 16px; }
 }

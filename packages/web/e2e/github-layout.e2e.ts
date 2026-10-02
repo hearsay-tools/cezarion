@@ -367,6 +367,98 @@ describe('the GitHub tab against the live dry-run server', () => {
   }, 60_000)
 })
 
+// #724: GitHub hand-off pills follow the Runner · Model · Effort layout New Task and Continue share.
+const ENGINE_ROW_FACTS = `(() => {
+  const box = document.querySelector('[data-slot="engine-row-box"]');
+  const hand = document.querySelector('[data-slot="gh-hand"]');
+  const slots = ['runner-pill', 'model-pill', 'effort-pill'];
+  const rects = Object.fromEntries(slots.map(slot => [slot, document.querySelector('[data-slot="' + slot + '"]')?.getBoundingClientRect()]));
+  if (!box || !hand || slots.some(slot => !rects[slot])) return null;
+  const { 'runner-pill': runner, 'model-pill': model, 'effort-pill': effort } = rects;
+  const near = (a, b) => Math.abs(a - b) <= 2;
+  return {
+    innerWidth,
+    boxWidth: Math.round(box.getBoundingClientRect().width),
+    domOrder: [...box.querySelectorAll('[data-slot$="pill"]')].map(el => el.getAttribute('data-slot')),
+    oneRow: near(runner.top, model.top) && near(model.top, effort.top),
+    leftToRight: runner.right <= model.left + 2 && model.right <= effort.left + 2,
+    modelWidest: model.width > runner.width && model.width > effort.width,
+    topPairShareRow: near(runner.top, effort.top),
+    modelBelow: model.top >= Math.max(runner.bottom, effort.bottom) - 2,
+    modelSpansRow: near(model.left, runner.left) && near(model.right, effort.right),
+    minHeight: Math.min(runner.height, model.height, effort.height),
+    panelOverflow: hand.scrollWidth > hand.clientWidth,
+    pageOverflow: document.documentElement.scrollWidth > innerWidth,
+  };
+})()`
+
+interface EngineRowFacts {
+  innerWidth: number
+  boxWidth: number
+  domOrder: string[]
+  oneRow: boolean
+  leftToRight: boolean
+  modelWidest: boolean
+  topPairShareRow: boolean
+  modelBelow: boolean
+  modelSpansRow: boolean
+  minHeight: number
+  panelOverflow: boolean
+  pageOverflow: boolean
+}
+
+const WIDE_ORDER = ['runner-pill', 'model-pill', 'effort-pill']
+const COMPACT_ORDER = ['runner-pill', 'effort-pill', 'model-pill']
+
+const isWideRow = (f: EngineRowFacts | null): f is EngineRowFacts =>
+  f !== null && f.boxWidth >= 550 && f.domOrder.join() === WIDE_ORDER.join() && f.oneRow && f.leftToRight && f.modelWidest
+  && !f.panelOverflow && !f.pageOverflow && f.minHeight >= 44
+const isCompactRow = (f: EngineRowFacts | null): f is EngineRowFacts =>
+  f !== null && f.boxWidth < 550 && f.domOrder.join() === COMPACT_ORDER.join() && f.topPairShareRow && f.modelBelow && f.modelSpansRow
+  && !f.panelOverflow && !f.pageOverflow && f.minHeight >= 44
+
+async function openHandoffAt(viewport: { width: number; height: number }, theme: 'light' | 'dark') {
+  const gh = await api<GithubPayload>('/api/v1/github')
+  const first = gh.issues[0]!
+  browser.setViewport(viewport.width, viewport.height)
+  await openGitHub(`/github/issues/${first.number}`)
+  browser.waitForFunction(`document.querySelector('[data-slot="gh-hand"]') !== null`)
+  browser.evaluate(`document.documentElement.classList.toggle('light', ${theme === 'light'}); document.querySelector('[data-slot="gh-hand"]').scrollIntoView({block:'start'})`)
+}
+
+// The matcher encodes the expected geometry and must hold for 200ms, so a layout that is still
+// settling (or that flips back) cannot pass on its first sample.
+const settledEngineRow = (matcher: (f: EngineRowFacts | null) => f is EngineRowFacts) =>
+  browser.waitForStable<EngineRowFacts | null, EngineRowFacts>(ENGINE_ROW_FACTS, { holdMs: 200, matcher })
+
+it.each(['light', 'dark'] as const)('puts Runner, Model and Effort on one row on a wide handoff panel, %s (#724)', async (theme) => {
+  await openHandoffAt(DESKTOP, theme)
+  const facts = settledEngineRow(isWideRow)
+  expect(facts.domOrder).toEqual(WIDE_ORDER)
+  browser.screenshot(`${artifactsDir}/github-engine-row-wide-${theme}.png`, { viewport: true })
+}, 60_000)
+
+it.each(['light', 'dark'] as const)('puts Runner and Effort over a full-width Model on a phone handoff panel, %s (#724)', async (theme) => {
+  await openHandoffAt(REVIEW_PHONE, theme)
+  // DOM order follows the visual order, so Tab goes Runner, Effort, Model (#492).
+  const facts = settledEngineRow(isCompactRow)
+  expect(facts.domOrder).toEqual(COMPACT_ORDER)
+  browser.screenshot(`${artifactsDir}/github-engine-row-phone-${theme}.png`, { viewport: true })
+}, 60_000)
+
+// The phone case cannot tell the container query from the phone media query: both give the same
+// geometry. A desktop viewport whose detail column is under 550px can: only the container query
+// (and the JS measure behind the DOM order) applies there. With the sidebar and the issue list
+// beside it the column is about viewport - 855px, so 1340px lands near 485px (narrower viewports
+// squeeze the column to a sliver, which is a different layout concern).
+it.each(['light', 'dark'] as const)('compacts the row when the handoff box is under 550px on a desktop-sized viewport, %s (#724)', async (theme) => {
+  await openHandoffAt({ width: 1340, height: 900 }, theme)
+  const facts = settledEngineRow((f): f is EngineRowFacts => isCompactRow(f) && f.innerWidth > 767)
+  expect(facts.boxWidth).toBeLessThan(550)
+  expect(facts.innerWidth).toBeGreaterThan(767)
+  browser.screenshot(`${artifactsDir}/github-engine-row-narrow-box-${theme}.png`, { viewport: true })
+}, 60_000)
+
 it.each([1440, 402, 360].flatMap(width => ['light', 'dark'].map(theme => ({ width, theme }))))('keeps handoff fields usable at $width / $theme', async ({ width, theme }) => {
   const gh = await api<GithubPayload>('/api/v1/github')
   const first = gh.issues[0]!
@@ -374,12 +466,26 @@ it.each([1440, 402, 360].flatMap(width => ['light', 'dark'].map(theme => ({ widt
   await openGitHub(`/github/issues/${first.number}`)
   browser.waitForFunction(`document.querySelector('[data-slot="gh-hand"]') !== null`)
   browser.evaluate(`document.documentElement.classList.toggle('light', ${theme === 'light'}); document.documentElement.dataset.width = 'wide'; delete document.documentElement.dataset.density; document.querySelector('[data-slot="gh-hand"]').scrollIntoView({block:'start'})`)
-  const facts = browser.evaluate(`(() => {
-    const rect = selector => document.querySelector(selector).getBoundingClientRect();
+  // #724: the engine pills share New Task's row, so the geometry depends on the row's own width
+  // (>= 550px: one row; narrower, or a phone viewport: Runner + Effort over a full-width Model).
+  const facts = browser.waitForStable<Record<string, boolean> | null>(`(() => {
+    const rect = selector => document.querySelector(selector)?.getBoundingClientRect();
     const prompt = rect('[data-slot="gh-custom-prompt"]'), workflow = rect('[data-slot="gh-workflow-trigger"]'), model = rect('[data-slot="model-pill"]'), effort = rect('[data-slot="effort-pill"]'), account = rect('[aria-label="Account"]');
-    return { promptFirst: prompt.bottom < workflow.top, fullWidth: Math.abs(workflow.width - model.width) < 2, order: model.bottom < effort.top && effort.bottom < account.top, overflow: document.documentElement.scrollWidth > innerWidth };
-  })()`)
-  expect(facts).toEqual({ promptFirst: true, fullWidth: true, order: true, overflow: false })
+    if (!prompt || !workflow || !model || !effort || !account) return null;
+    const compact = innerWidth <= 767 || rect('[data-slot="engine-row-box"]').width < 550;
+    // Judged from geometry: Model sits below Effort exactly when the rule says the row is compact.
+    return {
+      promptFirst: prompt.bottom < workflow.top,
+      rowBeforeAccount: Math.max(model.bottom, effort.bottom) < account.top,
+      modelFillsRow: compact ? model.width > effort.width : model.width > effort.width * 1.5,
+      layoutMatchesWidth: compact === (model.top >= effort.bottom - 2),
+      overflow: document.documentElement.scrollWidth > innerWidth,
+    };
+  })()`, {
+    holdMs: 200,
+    matcher: (f) => f !== null && f.promptFirst === true && f.rowBeforeAccount === true && f.modelFillsRow === true && f.layoutMatchesWidth === true && f.overflow === false,
+  })
+  expect(facts).toEqual({ promptFirst: true, rowBeforeAccount: true, modelFillsRow: true, layoutMatchesWidth: true, overflow: false })
   expect(browser.evaluate(`(() => {
     const page = document.querySelector('[data-route="github"]');
     document.documentElement.dataset.width = 'narrow';
