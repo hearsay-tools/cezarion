@@ -7,7 +7,7 @@ import { shortAge } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 import type { ThreadPreviewServer } from '../thread-state'
-import type { PreviewOpenRequest } from './preview-state'
+import { serverScript, type PreviewOpenRequest } from './preview-state'
 
 /**
  * The thread card for one registered dev server (#781, v1 design screen 05).
@@ -78,9 +78,8 @@ export function PreviewServerCard({
   const showingHere = inPreview && action !== undefined && !action.run
   const label = showingHere ? 'In preview' : action?.label
   const Icon = showingHere ? AppWindowIcon : action ? ICONS[action.label] : null
-  // Screen 05 names the script, not its flags: `npm run dev` for `npm run dev -- --port 5173 ...`.
-  // The exact command sits in the block above the note.
-  const script = server.command.split(' -- ')[0]!.trim()
+  // The exact command sits in the block above the note; the note names only the script.
+  const script = serverScript(server.command)
   const registered = shortAge(server.registeredAt)
 
   return (

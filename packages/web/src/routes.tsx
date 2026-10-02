@@ -29,6 +29,9 @@ import { WorkflowsLoading } from './routes/workflows/workflows-loading'
 import { GitTabLoading } from './routes/task-git/git-tab-loading'
 import { TaskGithubItemLoading } from './routes/task-github/task-github-loading'
 import { ThreadLoading } from './routes/task-thread/thread-loading'
+// Static on purpose: the tabs' own Suspense fallbacks must render at once. The layout is thin; the
+// pane it can open is a lazy chunk (preview-split.tsx).
+import { TaskPreviewLayout } from './routes/task-thread/preview/task-preview-layout'
 import { visibleSettingsSections, type SettingsSectionId } from './routes/settings/registry'
 import {
   SettingsIndexRoute,
@@ -314,62 +317,65 @@ function projectScopeRoute(capabilities: HealthResponse['capabilities'] | undefi
       <Route index element={<TasksOverviewRoute />} />
       <Route path="new" element={<NewTaskProjectRoute />} />
   
-      <Route
-        path="tasks/:id"
-        element={
-          <Suspense fallback={<ThreadLoading />}>
-            <TaskThreadRoute />
-          </Suspense>
-        }
-      />
-      <Route
-        path="tasks/:id/changes"
-        element={
-          <Suspense fallback={<GitTabLoading tab="changes" />}>
-            <TaskChangesRoute />
-          </Suspense>
-        }
-      />
-      <Route
-        path="tasks/:id/files"
-        element={
-          <Suspense fallback={<GitTabLoading tab="files" />}>
-            <TaskFilesRoute />
-          </Suspense>
-        }
-      />
-      <Route
-        path="tasks/:id/commits"
-        element={
-          <Suspense fallback={<GitTabLoading tab="changes" />}>
-            <TaskCommitsRoute />
-          </Suspense>
-        }
-      />
-      <Route
-        path="tasks/:id/commits/:sha"
-        element={
-          <Suspense fallback={<GitTabLoading tab="changes" />}>
-            <TaskCommitsRoute />
-          </Suspense>
-        }
-      />
-      <Route
-        path="tasks/:id/issue/:n"
-        element={
-          <Suspense fallback={<TaskGithubItemLoading kind="issue" />}>
-            <TaskGithubItemRoute kind="issue" />
-          </Suspense>
-        }
-      />
-      <Route
-        path="tasks/:id/pr/:n"
-        element={
-          <Suspense fallback={<TaskGithubItemLoading kind="pr" />}>
-            <TaskGithubItemRoute kind="pr" />
-          </Suspense>
-        }
-      />
+      {/* Every task tab shares one layout, which hosts the live preview pane (#781). */}
+      <Route path="tasks/:id" element={<TaskPreviewLayout />}>
+        <Route
+          index
+          element={
+            <Suspense fallback={<ThreadLoading />}>
+              <TaskThreadRoute />
+            </Suspense>
+          }
+        />
+        <Route
+          path="changes"
+          element={
+            <Suspense fallback={<GitTabLoading tab="changes" />}>
+              <TaskChangesRoute />
+            </Suspense>
+          }
+        />
+        <Route
+          path="files"
+          element={
+            <Suspense fallback={<GitTabLoading tab="files" />}>
+              <TaskFilesRoute />
+            </Suspense>
+          }
+        />
+        <Route
+          path="commits"
+          element={
+            <Suspense fallback={<GitTabLoading tab="changes" />}>
+              <TaskCommitsRoute />
+            </Suspense>
+          }
+        />
+        <Route
+          path="commits/:sha"
+          element={
+            <Suspense fallback={<GitTabLoading tab="changes" />}>
+              <TaskCommitsRoute />
+            </Suspense>
+          }
+        />
+        <Route
+          path="issue/:n"
+          element={
+            <Suspense fallback={<TaskGithubItemLoading kind="issue" />}>
+              <TaskGithubItemRoute kind="issue" />
+            </Suspense>
+          }
+        />
+        <Route
+          path="pr/:n"
+          element={
+            <Suspense fallback={<TaskGithubItemLoading kind="pr" />}>
+              <TaskGithubItemRoute kind="pr" />
+            </Suspense>
+          }
+        />
+      </Route>
       <Route
         path="compare/:groupId"
         element={

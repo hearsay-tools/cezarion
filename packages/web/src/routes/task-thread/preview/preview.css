@@ -1,0 +1,61 @@
+/* Live preview (#781): the split between the transcript and the pane, and the pane's motion. */
+
+/* The pane docks beside the transcript and sticks to the shell's scrolling main, so it stays in
+ * view while a long transcript scrolls. --preview-h is the main's measured height (100dvh until
+ * measured); --preview-pane is the divider's width. */
+.preview-pane {
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  flex: 0 0 var(--preview-pane, 58%);
+  min-width: 0;
+  height: var(--preview-h, 100dvh);
+  border-left: 1px solid var(--border);
+  background: var(--background);
+}
+.preview-pane[hidden] { display: none; }
+
+/* Below 1180 px the pane takes the main area. */
+.preview-split[data-takeover] .preview-pane { flex: 1 1 100%; border-left: 0; }
+
+/* On a phone the pane is the whole screen, over the shell's top bar and tab bar. */
+@media (max-width: 767px) {
+  .preview-pane {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    height: 100dvh;
+    padding-bottom: env(safe-area-inset-bottom);
+    border-left: 0;
+  }
+}
+
+.preview-divider {
+  position: relative;
+  flex: 0 0 9px;
+  margin-inline: -4px;
+  z-index: 1;
+  cursor: col-resize;
+  touch-action: none;
+  outline: none;
+}
+.preview-divider::after {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  left: 4px;
+  width: 1px;
+  background: transparent;
+  transition: background-color 120ms;
+}
+.preview-divider:hover::after,
+.preview-divider:focus-visible::after,
+.preview-divider:active::after { background: var(--ring); width: 2px; left: 3.5px; }
+
+/* The thin bar under the toolbar while the first page opens. Reduced motion keeps the bar and
+ * drops the sweep, so the feedback stays. */
+@keyframes preview-progress { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+.preview-progress { animation: preview-progress 1.2s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .preview-progress { animation: none; width: 40%; }
+}
