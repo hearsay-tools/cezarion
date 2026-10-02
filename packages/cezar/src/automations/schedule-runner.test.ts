@@ -293,6 +293,52 @@ describe('ScheduleRunner', () => {
     expect(changes.at(-1)).toBe('nightly');
   });
 
+  // An edit during the launch is what the PUT route does: a new revision, then `nextRunAt`
+  // re-armed from now for the new schedule. Completion must not overwrite it with an instant
+  // computed from the definition this fire captured.
+  const editDuringLaunch = (store: AutomationStore, definition: ScheduleAutomationDefinition, armed: number) => {
+    const edited = store.update('nightly', definition.revision, { name: 'Nightly', enabled: true, kind: 'schedule', schedule: { type: 'daily', hour: 9 }, task: definition.task });
+    store.setState('nightly', (current) => ({ ...current, revision: edited.revision, nextRunAt: iso(armed) }));
+  };
+
+  it('a success keeps the nextRunAt an edit armed while the launch ran', async () => {
+    const { store, definition, runner, launch, clock } = await setup();
+    runner.dueAt(definition);
+    const armed = FIRST_RUN + 5 * HOUR;
+    launch.mockImplementationOnce(async () => {
+      editDuringLaunch(store, definition, armed);
+      return { runId: 'run-edited' };
+    });
+    clock.set(FIRST_RUN + 1_000);
+    expect(await runner.fire(definition)).toMatchObject({ result: 'launched', runId: 'run-edited' });
+    expect(store.state('nightly')).toMatchObject({ revision: 2, nextRunAt: iso(armed), lastRunAt: iso(FIRST_RUN), consecutiveFailures: 0 });
+  });
+
+  it('a failure keeps the nextRunAt an edit armed while the launch ran', async () => {
+    const { store, definition, runner, launch, clock } = await setup();
+    runner.dueAt(definition);
+    const armed = FIRST_RUN + 5 * HOUR;
+    launch.mockImplementationOnce(async () => {
+      editDuringLaunch(store, definition, armed);
+      throw new Error('boom');
+    });
+    clock.set(FIRST_RUN + 1_000);
+    expect(await runner.fire(definition)).toMatchObject({ result: 'failed' });
+    expect(store.state('nightly')).toMatchObject({ revision: 2, nextRunAt: iso(armed), consecutiveFailures: 1 });
+  });
+
+  it('an edit that leaves the schedule alone still lets completion advance nextRunAt', async () => {
+    const { store, definition, runner, launch, clock } = await setup();
+    runner.dueAt(definition);
+    launch.mockImplementationOnce(async () => {
+      store.update('nightly', 1, { name: 'Nightly (renamed)', enabled: true, kind: 'schedule', schedule: definition.schedule, task: definition.task });
+      return { runId: 'run-renamed' };
+    });
+    clock.set(FIRST_RUN + 1_000);
+    expect(await runner.fire(definition)).toMatchObject({ result: 'launched' });
+    expect(store.state('nightly')).toMatchObject({ revision: 2, nextRunAt: iso(FIRST_RUN + DAY), lastRunAt: iso(FIRST_RUN) });
+  });
+
   it('the third failure skips the pause when the definition was paused elsewhere during the launch', async () => {
     const { store, definition, runner, launch, clock, changes } = await setup();
     runner.dueAt(definition);

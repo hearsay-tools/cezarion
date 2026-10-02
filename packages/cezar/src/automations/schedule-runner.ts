@@ -61,6 +61,16 @@ export class ScheduleLeaseHeldError extends Error {
   constructor() { super(SCHEDULE_LEASE_HELD_REASON); }
 }
 
+/**
+ * A timer fire's licence to move `nextRunAt` on: the value it found armed when it started. A
+ * PUT or an enable that lands while the launch is awaited re-arms `nextRunAt` for the edited
+ * definition; completion sees the stored value no longer matches and leaves it alone, instead of
+ * overwriting it with an instant computed from the definition this fire captured.
+ */
+interface Advance {
+  armedAt: string | undefined;
+}
+
 export class ScheduleRunner {
   constructor(private readonly handle: ScheduleRunnerHandle) {}
 
@@ -88,20 +98,21 @@ export class ScheduleRunner {
       const now = this.now();
       const due = this.dueAt(definition);
       if (due === null) return { result: 'skipped' } as const;
+      const advance: Advance = { armedAt: this.handle.store.state(definition.id)?.nextRunAt };
       // Not due yet: another cockpit (or a PUT) moved `nextRunAt` after this fire was armed.
       if (due > now) return { result: 'skipped', occurrenceAt: new Date(due).toISOString() } as const;
       if (now - due <= SCHEDULE_GRACE_MS) {
-        return this.launch(definition, { at: new Date(due).toISOString(), trigger: 'schedule' }, now, true);
+        return this.launch(definition, { at: new Date(due).toISOString(), trigger: 'schedule' }, now, advance);
       }
       // Late. Every occurrence from the due one up to now was missed; the newest may catch up.
       const missed = occurrencesBetween(definition.schedule, due, now + 1, this.handle.timeZone);
       const latest = missed.at(-1) ?? due;
       if (now - latest <= SCHEDULE_CATCH_UP_MS) {
         if (missed.length > 1) await this.logSkipped(definition, missed.length - 1, true);
-        return this.launch(definition, { at: new Date(latest).toISOString(), trigger: 'catch-up' }, now, true);
+        return this.launch(definition, { at: new Date(latest).toISOString(), trigger: 'catch-up' }, now, advance);
       }
       await this.logSkipped(definition, missed.length, false);
-      this.advance(definition, now, now);
+      this.advance(definition, now, now, advance);
       return { result: 'skipped', occurrenceAt: new Date(latest).toISOString() } as const;
     });
     if (outcome) return outcome;
@@ -114,7 +125,7 @@ export class ScheduleRunner {
   async runNow(definition: ScheduleAutomationDefinition): Promise<ScheduleFireOutcome> {
     const outcome = await this.underLease(() => {
       const now = this.now();
-      return this.launch(definition, { at: new Date(now).toISOString(), trigger: 'manual' }, now, false);
+      return this.launch(definition, { at: new Date(now).toISOString(), trigger: 'manual' }, now, null);
     });
     return outcome ?? { result: 'lease-held' };
   }
@@ -130,7 +141,7 @@ export class ScheduleRunner {
       }
       const reserved: AutomationReceipt = { ...receipt, status: 'reserved', error: undefined, updatedAt: new Date(now).toISOString() };
       this.handle.store.appendReceipt(reserved);
-      return this.launchReserved(definition, { at: occurrenceAt, trigger: 'manual' }, reserved, now, false);
+      return this.launchReserved(definition, { at: occurrenceAt, trigger: 'manual' }, reserved, now, null);
     });
     return outcome ?? { result: 'lease-held', occurrenceAt };
   }
@@ -156,14 +167,14 @@ export class ScheduleRunner {
     definition: ScheduleAutomationDefinition,
     occurrence: ScheduleOccurrence,
     now: number,
-    advance: boolean,
+    advance: Advance | null,
   ): Promise<ScheduleFireOutcome> {
     const { store } = this.handle;
     const eventId = occurrence.trigger === 'manual' ? `manual:${occurrence.at}` : `schedule:${occurrence.at}`;
     const receipt = store.reserveReceipt({ automationId: definition.id, revision: definition.revision, eventId, occurrenceAt: occurrence.at });
     if (!receipt) {
       await store.appendLog({ automationId: definition.id, revision: definition.revision, result: 'duplicate', reason: `A durable receipt already exists for the ${occurrence.at} occurrence.` });
-      if (advance) this.advance(definition, Date.parse(occurrence.at), now);
+      if (advance) this.advance(definition, Date.parse(occurrence.at), now, advance);
       return { result: 'duplicate', occurrenceAt: occurrence.at };
     }
     return this.launchReserved(definition, occurrence, receipt, now, advance);
@@ -174,12 +185,12 @@ export class ScheduleRunner {
     occurrence: ScheduleOccurrence,
     receipt: AutomationReceipt,
     now: number,
-    advance: boolean,
+    advance: Advance | null,
   ): Promise<ScheduleFireOutcome> {
     const { store } = this.handle;
     if (!this.handle.launch) {
       store.appendReceipt({ ...receipt, status: 'launch-error', error: 'This cockpit cannot launch tasks.', updatedAt: new Date(now).toISOString() });
-      if (advance) this.advance(definition, Date.parse(occurrence.at), now);
+      if (advance) this.advance(definition, Date.parse(occurrence.at), now, advance);
       return { result: 'detection-only', occurrenceAt: occurrence.at };
     }
     const started = Date.now();
@@ -192,7 +203,7 @@ export class ScheduleRunner {
       store.appendReceipt({ ...receipt, status: 'launch-error', error: message, updatedAt: new Date(this.now()).toISOString() });
       await store.appendLog({ automationId: definition.id, revision: definition.revision, result: 'failed', reason: message, receiptId: receipt.receiptId, durationMs: Date.now() - started });
       // Only the timer counts towards the auto-pause: Run now and Retry leave `enabled` alone.
-      if (advance) await this.recordFailure(definition, occurrence, now);
+      if (advance) await this.recordFailure(definition, occurrence, now, advance);
       else this.handle.onChange?.(definition.id, definition.revision);
       return { result: 'failed', occurrenceAt: occurrence.at };
     }
@@ -204,8 +215,7 @@ export class ScheduleRunner {
     });
     store.setState(definition.id, (current) => ({
       ...current,
-      revision: definition.revision,
-      ...(advance ? { nextRunAt: nextIso(definition, Math.max(Date.parse(occurrence.at), now), this.handle.timeZone), lastRunAt: occurrence.at } : {}),
+      ...(advance ? { ...this.advanced(current, definition, Date.parse(occurrence.at), now, advance), lastRunAt: occurrence.at } : { revision: Math.max(current.revision ?? 0, definition.revision) }),
       lastSuccessAt: new Date(this.now()).toISOString(),
       consecutiveFailures: 0,
     }));
@@ -213,13 +223,12 @@ export class ScheduleRunner {
     return { result, runId, occurrenceAt: occurrence.at };
   }
 
-  private async recordFailure(definition: ScheduleAutomationDefinition, occurrence: ScheduleOccurrence, now: number): Promise<void> {
+  private async recordFailure(definition: ScheduleAutomationDefinition, occurrence: ScheduleOccurrence, now: number, advance: Advance): Promise<void> {
     const { store } = this.handle;
     const next = store.setState(definition.id, (current) => ({
       ...current,
-      revision: definition.revision,
+      ...this.advanced(current, definition, Date.parse(occurrence.at), now, advance),
       consecutiveFailures: (current.consecutiveFailures ?? 0) + 1,
-      nextRunAt: nextIso(definition, Math.max(Date.parse(occurrence.at), now), this.handle.timeZone),
     }));
     if ((next.consecutiveFailures ?? 0) >= SCHEDULE_AUTO_PAUSE_AFTER) {
       const paused = this.pause(definition.id);
@@ -249,13 +258,30 @@ export class ScheduleRunner {
     }
   }
 
-  private advance(definition: ScheduleAutomationDefinition, fromMs: number, now: number): void {
+  private advance(definition: ScheduleAutomationDefinition, fromMs: number, now: number, advance: Advance): void {
     this.handle.store.setState(definition.id, (current) => ({
       ...current,
-      revision: definition.revision,
-      nextRunAt: nextIso(definition, Math.max(fromMs, now), this.handle.timeZone),
+      ...this.advanced(current, definition, fromMs, now, advance),
     }));
     this.handle.onChange?.(definition.id, definition.revision);
+  }
+
+  /**
+   * The `revision`/`nextRunAt` pair a timer fire writes. An edit that landed meanwhile already
+   * bumped the state's revision (never moved back) and, when it changed the schedule or resumed
+   * the definition, re-armed `nextRunAt` — which then stands. An edit that left `nextRunAt`
+   * alone (a rename) left the schedule alone too, so advancing from the captured one is right.
+   */
+  private advanced(
+    current: { revision?: number; nextRunAt?: string },
+    definition: ScheduleAutomationDefinition,
+    fromMs: number,
+    now: number,
+    advance: Advance,
+  ): { revision: number; nextRunAt: string | undefined } {
+    const revision = Math.max(current.revision ?? 0, definition.revision);
+    if (current.nextRunAt !== advance.armedAt) return { revision, nextRunAt: current.nextRunAt };
+    return { revision, nextRunAt: nextIso(definition, Math.max(fromMs, now), this.handle.timeZone) };
   }
 
   private async logSkipped(definition: ScheduleAutomationDefinition, count: number, latestCaughtUp: boolean): Promise<void> {
