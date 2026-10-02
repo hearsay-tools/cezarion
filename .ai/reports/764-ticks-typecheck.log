@@ -1,4 +1,0 @@
-
-> @wjarka/cezarion@0.15.1 typecheck
-> tsc --noEmit -p tsconfig.test.json
-
