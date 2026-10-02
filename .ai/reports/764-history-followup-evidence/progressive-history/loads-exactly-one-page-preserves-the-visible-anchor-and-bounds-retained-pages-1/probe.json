@@ -1,0 +1,24 @@
+{
+  "kind": "test",
+  "spec": "progressive-history",
+  "test": "loads exactly one page, preserves the visible anchor, and bounds retained pages",
+  "session": "e2e-progressive-history-1154602",
+  "capturedAt": "2026-10-02T12:35:49.335Z",
+  "error": "AssertionError: anchor jumped 12px {\"before\":{\"key\":\"task\",\"maxTop\":8069,\"mountedRows\":128,\"scrollTop\":0,\"top\":298,\"virtualized\":\"false\"},\"after\":{\"key\":\"task\",\"maxTop\":16108,\"mountedRows\":255,\"scrollTop\":0,\"top\":310,\"virtualized\":\"false\"}}: expected 12 to be less than 2",
+  "page": {
+    "activeElement": null,
+    "openDialogs": [],
+    "readyState": "complete",
+    "title": "cezar-e2e-progressive-history-j8nrtW — Progressively page a long session · cezar",
+    "url": "http://localhost:44809/p/cezar-e2e-progressive-history-j8nrtw/tasks/cccccccc-1111-4222-8333-dddddddddddd",
+    "viewport": {
+      "height": 900,
+      "scrollX": 0,
+      "scrollY": 0,
+      "width": 1440
+    }
+  },
+  "captureErrors": [
+    "screenshot: Error: cezar e2e: agent-browser screenshot /home/agent/projects/cezar/.ai/cezar/worktrees/d6e7f159-f1c6-45f4-87c6-500ec47ab925/.ai/qa/failures/progressive-history/loads-exactly-one-page-preserves-the-visible-anchor-and-bounds-retained-pages-1/screenshot.png failed\n  caused by: Error: spawnSync /home/agent/.cache/agent-tools/agent-browser/agent-browser-linux-x64 ETIMEDOUT"
+  ]
+}

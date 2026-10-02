@@ -170,3 +170,40 @@ npm test -- packages/web/src/test/agent-browser-wait-value.test.ts packages/web/
 ```
 
 `git diff --check` passed before commit. Follow-up changes are limited to `packages/web/e2e/poll.ts`, the scanner and their two test files, this report, and four review validation logs.
+
+
+## Idle-campaign history follow-up
+
+The parent's fifth fresh idle repetition failed the positive history case while the negative cascade case passed. Read the retained `round-5-lane-1/tests.log` and the positive history `probe.json`, `snapshot.txt` and `screenshot.png` before diagnosing. The probe recorded task-anchor top **298 → 310**, scrollTop **0 → 0**, maxTop **8069 → 16108**, mounted rows **128 → 255**, virtualization false. The exact `<2px` anchor assertion remains unchanged.
+
+A focused run in this worktree reproduced the same failure before the fix. Temporary before/after diagnostics showed **header height 164 → 176**, **metadata height 32 → 44**, **PR chip absent → present**, and `__cezIdle: true` at both samples; the authoritative run API was still `running` before paging. Evidence is `764-history-diagnosis.log`; its failure probe/snapshot/screenshot were copied to `764-history-followup-evidence/progressive-history/loads-exactly-one-page-preserves-the-visible-anchor-and-bounds-retained-pages-1/` before cleanup. Temporary diagnostic instrumentation was removed from the final source.
+
+Root cause: this fixture writes a `running` record with no PR URL. CLI startup recovery (`packages/cezar/src/index.ts`, `RunManager.recover` in `packages/cezar/src/workflows/run.ts`) resumes it asynchronously through the dry-run continuation. That continuation eventually parks in `waiting` and exposes a referenced PR. The header's PR control has `no-hover:min-h-[44px]`, enlarging the initial 32px metadata row by exactly 12px. Query/SSE idle only describes current work; it cannot prove a future continuation update has finished. The filtered campaign skipped the earlier tail screenshot test that usually supplied incidental time for this update.
+
+The fix observes recovery's **waiting status**, the **rendered PR chip**, **cockpit idle**, and **stable visual header geometry** in `beforeAll`, before taking any history anchor baseline. It reuses the bounded `waitForStatus` and `settleVisual` helpers, changes no scheduling or fixture state, and preserves all paging, cascade, focus and frame-by-frame assertions. A first synchronization trial incorrectly expected `review`; its bounded failure reported last state `waiting` (`764-history-followup-status-trial.log`), after which the durable recovered state was inspected and the condition corrected.
+
+Exact focused browser red/green commands (red used only the positive filter and temporary header diagnostics):
+
+```sh
+env -u CEZ_AUTOMATIONS TMPDIR=/tmp TMP=/tmp TEMP=/tmp npm test -- --config packages/web/e2e/vitest.config.ts progressive-history.e2e.ts -t 'loads exactly one page' --reporter=verbose
+env -u CEZ_AUTOMATIONS TMPDIR=/tmp TMP=/tmp TEMP=/tmp npm test -- --config packages/web/e2e/vitest.config.ts progressive-history.e2e.ts -t 'loads exactly one page|consumes one upward intent' --reporter=verbose
+```
+
+Red: **1 failed, 6 filtered**, exact 12px failure (`764-history-diagnosis.log`). Green: **2 passed, 5 filtered**, including the negative observation (`764-history-followup-focused-green.log`). Both selections omit `paints the current tail`, matching the campaign's history selection.
+
+```sh
+npm test -- packages/web/src/test/e2e-wait-discipline.test.ts packages/web/src/test/visual-ready.test.ts
+```
+
+**33 unit tests passed**, including the scanner baseline and visual helper (`764-history-followup-units-green.log`). No helper/scanner behavior changed in this follow-up. The existing ten-case representative campaign selection and shared-state ordering guidance above remain valid.
+
+
+The complete history file passed **7/7** (`764-history-followup-all-green.log`):
+
+```sh
+env -u CEZ_AUTOMATIONS TMPDIR=/tmp TMP=/tmp TEMP=/tmp npm test -- --config packages/web/e2e/vitest.config.ts progressive-history.e2e.ts --reporter=verbose
+```
+
+A second filtered invocation with a fresh fixture also passed **2/2**, with the tail-paint test omitted (`764-history-followup-repeat-green.log`); it used the same two-case command above. Each invocation starts its own fresh history fixture and browser session. These are focused iterations, not the parent's controlled ten-repetition campaign. The parent reports its full non-browser gates already passed; renewed idle/load campaigns and final browser validation remain parent-owned. No unresolved focused history failure remains.
+
+Own test environment stopped successfully with `sh .ai/scripts/test-env-down.sh` (`764-history-followup-down.log`). `git diff --check` passed before commit. Changed code is limited to the history spec setup; report, diagnostic/validation logs and the three-file failure bundle are the remaining deliverables.

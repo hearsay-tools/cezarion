@@ -1,0 +1,120 @@
+
+> test
+> vitest run --config packages/web/e2e/vitest.config.ts progressive-history.e2e.ts -t loads exactly one page --reporter=verbose
+
+
+ RUN  v4.1.10 /home/agent/projects/cezar/.ai/cezar/worktrees/d6e7f159-f1c6-45f4-87c6-500ec47ab925/packages/web/e2e
+
+ ↓ |e2e| progressive-history.e2e.ts > progressive long-session history > paints the current tail and docks without requesting an earlier page
+stdout | progressive-history.e2e.ts > progressive long-session history > loads exactly one page, preserves the visible anchor, and bounds retained pages
+HEADER-BEFORE { header: 164, idle: true, meta: 32, pr: false } {
+  id: 'cccccccc-1111-4222-8333-dddddddddddd',
+  title: 'Progressively page a very long session',
+  titleSummary: 'Progressively page a long session',
+  diffStat: { adds: 1, dels: 0, files: 1 },
+  workflow: 'quick-task',
+  task: 'Inspect a long session without downloading the archive.',
+  runner: 'claude',
+  status: 'running',
+  createdAt: '2026-07-30T00:00:00.000Z',
+  startedAt: '2026-07-14T20:28:14.004Z',
+  tokensUsed: 3620,
+  costUsd: 0.0352,
+  worktreePath: '/tmp/cezar-fixture-hg7X/.ai/cezar/worktrees/fcd519dd-5641-45d6-a9a2-d8eef6eed2e3',
+  branch: 'cez/fcd519dd',
+  baseBranch: 'main',
+  peakRssBytes: 50987008,
+  peakProcCount: 1,
+  archived: false,
+  steps: [
+    {
+      id: 'task',
+      name: 'Do the task',
+      kind: 'agent',
+      status: 'done',
+      iterations: 1,
+      tokensUsed: 3620,
+      startedAt: '2026-07-14T20:28:14.062Z',
+      finishedAt: '2026-07-14T20:28:17.155Z',
+      sessionId: '40169e05-629f-4d7c-853c-8a2a197255e4',
+      costUsd: 0.0352
+    },
+    {
+      id: 'continue-1',
+      name: 'Continue',
+      kind: 'agent',
+      synthetic: 'continuation',
+      status: 'running',
+      iterations: 1,
+      tokensUsed: 0,
+      startedAt: '2026-10-02T12:35:38.740Z',
+      sessionId: '40169e05-629f-4d7c-853c-8a2a197255e4',
+      backend: 'claude',
+      profileId: 'default',
+      usageInvocationEpoch: 1,
+      usageInvocationsStarted: 1,
+      usageTurnsStarted: 1,
+      usageInvocationsObserved: 1
+    }
+  ],
+  workflowDef: {
+    name: 'quick-task',
+    description: 'One agent run on your task — no ceremony.',
+    steps: [ [Object], [Object] ],
+    source: 'built-in'
+  },
+  currentStepId: 'continue-1',
+  continuationMessage: {
+    id: 'continue-1',
+    text: 'The cezar process restarted while you were working on this task. Read the handoff file (CEZ_HANDOFF_FILE) to recover context, then continue the task from where you left off.',
+    createdAt: '2026-10-02T12:35:38.388Z',
+    origin: 'lifecycle'
+  },
+  delegation: {
+    role: 'root',
+    permissions: [
+      'spawn',   'inspect',
+      'steer',   'stop',
+      'destroy', 'diff',
+      'wait'
+    ],
+    receipts: []
+  },
+  referencedPrCandidates: [ 'https://github.com/open-mercato/demo/pull/123' ],
+  referencedPullRequestUrl: 'https://github.com/open-mercato/demo/pull/123',
+  usage: { cpuPct: 100, rssBytes: 40689664, procCount: 1 },
+  finishBlocked: null
+}
+HEADER-AFTER { header: 176, idle: true, meta: 44, pr: true }
+
+stderr | progressive-history.e2e.ts > progressive long-session history > loads exactly one page, preserves the visible anchor, and bounds retained pages
+cezar e2e: failure bundle for "loads exactly one page, preserves the visible anchor, and bounds retained pages" at /home/agent/projects/cezar/.ai/cezar/worktrees/d6e7f159-f1c6-45f4-87c6-500ec47ab925/.ai/qa/failures/progressive-history/loads-exactly-one-page-preserves-the-visible-anchor-and-bounds-retained-pages-1
+
+ × |e2e| progressive-history.e2e.ts > progressive long-session history > loads exactly one page, preserves the visible anchor, and bounds retained pages 9257ms
+   → anchor jumped 12px {"before":{"key":"task","maxTop":8069,"mountedRows":128,"scrollTop":0,"top":298,"virtualized":"false"},"after":{"key":"task","maxTop":16108,"mountedRows":255,"scrollTop":0,"top":310,"virtualized":"false"}}: expected 12 to be less than 2
+ ↓ |e2e| progressive-history.e2e.ts > progressive long-session history > consumes one upward intent without cascading while the boundary remains near
+ ↓ |e2e| progressive-history.e2e.ts > progressive long-session history > caps retained pages at five and jumps directly back to a fresh tail
+ ↓ |e2e| progressive-history.e2e.ts > progressive long-session history > switches between cached and live-tail threads without a near-zero destination frame
+ ↓ |e2e| progressive-history.e2e.ts > progressive long-session history > preserves a virtual history anchor behind the task prefix at 360px
+ ↓ |e2e| progressive-history.e2e.ts > progressive long-session history > preserves a virtual history anchor behind the task prefix at 1440px
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |e2e| progressive-history.e2e.ts > progressive long-session history > loads exactly one page, preserves the visible anchor, and bounds retained pages
+AssertionError: anchor jumped 12px {"before":{"key":"task","maxTop":8069,"mountedRows":128,"scrollTop":0,"top":298,"virtualized":"false"},"after":{"key":"task","maxTop":16108,"mountedRows":255,"scrollTop":0,"top":310,"virtualized":"false"}}: expected 12 to be less than 2
+ ❯ progressive-history.e2e.ts:327:7
+    325|       Math.abs(after.top - before.top),
+    326|       `anchor jumped ${Math.abs(after.top - before.top)}px ${JSON.stri…
+    327|     ).toBeLessThan(2)
+       |       ^
+    328|
+    329|     expect(Number(browser.evaluate(cursorRequestCount))).toBe(1)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 6 skipped (7)
+   Start at  14:35:37
+   Duration  12.23s (transform 50ms, setup 39ms, import 40ms, tests 11.97s, environment 0ms)
+

@@ -9,7 +9,8 @@ import { stopFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, fixtureServeEnv } from './agent-browser'
 import { largeThreadEvents } from './fixtures/make-large-thread'
 import record from './fixtures/thread-run.record.json'
-import { waitForHealth } from './poll'
+import { waitForHealth, waitForStatus } from './poll'
+import { settleVisual } from './visual-ready'
 
 const repoRoot = resolve(import.meta.dirname, '../../..')
 const artifactsDir = resolve(repoRoot, '.ai/qa/artifacts_e2e')
@@ -283,7 +284,14 @@ beforeAll(async () => {
     `document.querySelector('[data-slot="history-boundary"]')?.dataset.retainedPages === '1' &&
      document.querySelector('[data-slot="history-boundary"] button:not([disabled])') !== null`,
   )
+  // This stored running fixture is recovered through a real dry-run continuation. Query
+  // idle can be true before that continuation publishes its waiting/PR header update. The
+  // no-hover PR chip grows the metadata row by 12px; establish that completed layout before
+  // measuring a paging anchor, including when the preceding tail-paint test is filtered out.
+  await waitForStatus(baseUrl, RUN_ID, ['waiting'])
+  browser.waitForFunction(`document.querySelector('[data-slot="run-header"] [data-slot="pr-chip"]') !== null`)
   waitUntilCockpitIdle()
+  settleVisual(browser, '[data-slot="run-header"]', { idle: true })
 }, 120_000)
 
 afterAll(async () => {
