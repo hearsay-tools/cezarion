@@ -13,7 +13,15 @@ import { createPointerState, keyToMessage, pasteToMessage, pointerToMessages, wh
 
 const asPointer = (event: PointerEvent): PointerLike => event as PointerEvent & { type: PointerLike['type'] }
 
-export function PreviewInput({ scale, send }: { scale: number; send: (message: PreviewClientMessage) => void }) {
+/** The page's keyboard exit: every other key, Tab and Escape included, belongs to the page. */
+const isLeaveKey = (event: ReactKeyboardEvent) => event.key === 'Escape' && event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey
+
+export function PreviewInput({ scale, send, onLeave }: {
+  scale: number
+  send: (message: PreviewClientMessage) => void
+  /** Shift+Esc: hand the keyboard back to the cockpit. Without it the layer only blurs. */
+  onLeave?: () => void
+}) {
   const layer = useRef<HTMLDivElement>(null)
   const state = useRef(createPointerState({ left: 0, top: 0 }, scale))
   const scaleRef = useRef(scale)
@@ -109,6 +117,15 @@ export function PreviewInput({ scale, send }: { scale: number; send: (message: P
   }
 
   const onKey = (event: ReactKeyboardEvent) => {
+    if (isLeaveKey(event)) {
+      event.preventDefault()
+      event.stopPropagation()
+      if (event.type === 'keydown') {
+        if (onLeave) onLeave()
+        else layer.current?.blur()
+      }
+      return
+    }
     const message = keyToMessage(event.nativeEvent)
     if (!message) return
     event.preventDefault()
@@ -124,6 +141,7 @@ export function PreviewInput({ scale, send }: { scale: number; send: (message: P
       data-slot="preview-input"
       role="application"
       aria-label="Page preview, interactive"
+      aria-description="Keys go to the page, Tab included. Press Shift+Escape to return to the cockpit."
       tabIndex={0}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}

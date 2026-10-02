@@ -415,7 +415,7 @@ function PreviewPaneBody({ run, servers, serverStates, request, onSession, onPor
         dimmed={dim && showPage}
         cursor={cursor}
         onSize={setStageSize}
-        renderInput={geometry => (interactive ? <PreviewInput scale={geometry.scale} send={send} /> : null)}
+        renderInput={geometry => (interactive ? <PreviewInput scale={geometry.scale} send={send} onLeave={() => urlInput.current?.focus()} /> : null)}
       >
         {lost ? <ConnectionBanner attempt={transport.attempt} exhausted={transport.state === 'closed'} onReconnect={reconnect} /> : null}
         {overlay ? (

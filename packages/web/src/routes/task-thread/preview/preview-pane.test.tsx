@@ -169,6 +169,10 @@ describe('PreviewPane', () => {
     const layer = screen.getByRole('application')
     fireEvent.keyDown(layer, { key: 'a', code: 'KeyA', keyCode: 65 })
     expect(sent()).toContainEqual(expect.objectContaining({ t: 'key', type: 'keyDown', text: 'a' }))
+    // Shift+Esc hands the keyboard back: the address field, not the page, has it next.
+    layer.focus()
+    fireEvent.keyDown(layer, { key: 'Escape', code: 'Escape', keyCode: 27, shiftKey: true })
+    expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Page address' }))
 
     message({ t: 'dialog', type: 'alert', message: 'Saved', origin: 'localhost:5173' })
     expect(screen.queryByRole('application')).toBeNull()

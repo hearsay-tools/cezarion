@@ -294,6 +294,10 @@ The v1 design is final. Where it and this spec disagree, the spec wins:
   stall: dev servers get no stdin, so a prompt fails fast into 5.8 Exited. Build 5.7 with a process
   that is alive but waiting on something outside it (e.g. `wait-on tcp:5432`), and body copy "It may
   be waiting on another service, or listening somewhere else." instead of "waiting for input".
+- **Keyboard exit from the page.** While the page has focus every key goes to it, Tab and Escape
+  included, so a form inside it works. Shift+Escape is never sent: it moves focus to the address
+  field (WCAG 2.1.2), and the input layer's `aria-description` says so. Ctrl/Cmd+K still opens the
+  command palette.
 
 ## Env contract
 

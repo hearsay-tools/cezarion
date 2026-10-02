@@ -21,9 +21,9 @@ afterEach(() => {
 })
 
 /** The layer, with the box the stage would give it: its top-left corner at (left, top). */
-function mount(scale = 1, box = { left: 0, top: 0 }) {
+function mount(scale = 1, box = { left: 0, top: 0 }, onLeave?: () => void) {
   const send = vi.fn<(message: PreviewClientMessage) => void>()
-  render(<PreviewInput scale={scale} send={send} />)
+  render(<PreviewInput scale={scale} send={send} onLeave={onLeave} />)
   const layer = screen.getByRole('application')
   layer.getBoundingClientRect = () => ({ ...box, right: 0, bottom: 0, width: 0, height: 0, x: box.left, y: box.top, toJSON: () => ({}) })
   return { layer, send }
@@ -153,6 +153,23 @@ describe('PreviewInput', () => {
     layer.focus()
     paste('hello')
     expect(send).toHaveBeenCalledWith({ t: 'insertText', text: 'hello' })
+  })
+
+  it('Shift+Esc leaves the page for the cockpit, and the layer says so (WCAG 2.1.2)', () => {
+    const onLeave = vi.fn()
+    const { layer, send } = mount(1, { left: 0, top: 0 }, onLeave)
+    expect(layer.getAttribute('aria-description')).toContain('Shift+Escape')
+    layer.focus()
+    const down = fireEvent.keyDown(layer, { key: 'Escape', code: 'Escape', keyCode: 27, shiftKey: true })
+    fireEvent.keyUp(layer, { key: 'Escape', code: 'Escape', keyCode: 27, shiftKey: true })
+    expect(down).toBe(false)
+    expect(onLeave).toHaveBeenCalledTimes(1)
+    expect(send).not.toHaveBeenCalled()
+    // A bare Escape and Tab still belong to the page.
+    fireEvent.keyDown(layer, { key: 'Escape', code: 'Escape', keyCode: 27 })
+    fireEvent.keyDown(layer, { key: 'Tab', code: 'Tab', keyCode: 9 })
+    expect(send.mock.calls.map(call => (call[0] as { key?: string }).key)).toEqual(['Escape', 'Tab'])
+    expect(onLeave).toHaveBeenCalledTimes(1)
   })
 
   it('does not open the browser context menu over the page', () => {
