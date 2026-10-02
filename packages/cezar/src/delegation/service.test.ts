@@ -1,7 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { QUICK_TASK_WORKFLOW } from '../workflows/types.ts';
+import { workerSpawnRequestSchema } from '@open-mercato/cezar-contract';
+import { DelegationPolicyError } from './policy.ts';
+import { workerWorkflowHash } from './execution-identity.ts';
+import { QUICK_TASK_WORKFLOW, skillTaskSteps } from '../workflows/types.ts';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RunStore } from '../runs/store.ts';
@@ -83,6 +86,62 @@ describe('delegation service durable authority', () => {
     vi.stubEnv('CEZ_AGENT_MODELS_LOCKED', '1');
     await expect(f.service.spawn(f.caller, { ...input(), model: 'sonnet' })).rejects.toMatchObject({ code: 'invalid_input' });
     expect(f.store.listRuns()).toHaveLength(1);
+  });
+  describe('explicit skill on spawn (#778)', () => {
+    beforeEach(() => {
+      const dir = join(f.root, '.ai/cezar/skills'); mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, 'worker-skill.md'), '# Worker skill\nInspect the assigned task.');
+    });
+    it('spawns a worker on a named skill', async () => {
+      const { workerId } = await f.service.spawn(f.caller, { ...input(), skill: 'worker-skill' });
+      const worker = f.store.getRun(workerId)!;
+      expect(worker.workflowDef).toMatchObject({ name: '(planned)', steps: [{
+        ...skillTaskSteps('worker-skill')[0], runner: 'claude', agentProfile: 'default', model: 'opus', effort: 'high',
+      }] });
+      expect(worker.steps.map(step => step.id)).toEqual(['task']);
+      expect(f.store.readWorkerIdentity(workerId)).toMatchObject({ workflowHash: workerWorkflowHash(worker.workflowDef!) });
+    });
+    it('rejects an unknown skill at spawn before creating a worker', async () => {
+      const rejection = f.service.spawn(f.caller, { ...input(), skill: 'missing' });
+      await expect(rejection).rejects.toBeInstanceOf(DelegationPolicyError);
+      await expect(rejection).rejects.toMatchObject({ code: 'invalid_input', message: expect.stringMatching(/Unknown skill "missing"; available: .*worker-skill/) });
+      expect(f.store.listRuns()).toHaveLength(1);
+    });
+    it('rejects skill with workflow in the spawn contract', () => {
+      const result = workerSpawnRequestSchema.safeParse({ ...input(), skill: 'worker-skill', workflow: 'review' });
+      expect(result.success).toBe(false);
+      if (!result.success) expect(result.error.issues).toEqual(expect.arrayContaining([
+        expect.objectContaining({ message: '--skill and --workflow cannot be used together' }),
+      ]));
+    });
+    it('trims the skill name in the spawn contract', () => {
+      expect(workerSpawnRequestSchema.parse({ ...input(), skill: ' worker-skill ' })).toHaveProperty('skill', 'worker-skill');
+    });
+    it.each(['', '   ', 'x'.repeat(201)])('rejects invalid skill names in the spawn contract %j', skill => {
+      const result = workerSpawnRequestSchema.safeParse({ ...input(), skill });
+      expect(result.success).toBe(false);
+      if (!result.success) expect(result.error.issues[0]?.path).toEqual(['skill']);
+    });
+    it('binds skill into the request hash', async () => {
+      const request = { ...input(), skill: 'worker-skill' };
+      const accepted = await f.service.spawn(f.caller, request);
+      expect(await f.service.spawn(f.caller, { ...request, skill: ' worker-skill ' })).toEqual(accepted);
+      for (const skill of ['changed', undefined]) {
+        await expect(f.service.spawn(f.caller, { ...request, skill })).rejects.toMatchObject({ code: 'invalid_input', message: 'Request ID payload conflict' });
+      }
+    });
+    it('refuses a tampered skill chain', async () => {
+      const { workerId } = await f.service.spawn(f.caller, { ...input(), skill: 'worker-skill' });
+      const workflow = f.store.getRun(workerId)!.workflowDef!;
+      f.store.updateRun(workerId, { workflowDef: { ...workflow, steps: [{ ...workflow.steps[0]!, skill: 'injected' }] } });
+      expect(() => f.manager.enqueueOwnedRun(workerId)).toThrow('Accepted worker workflow definition is unavailable or changed');
+      // Preserve the root's human attention during recovery so it does not cancel the child.
+      f.store.updateRun(f.parent.id, { status: 'waiting' });
+      f.manager.dispose();
+      const recovered = new RunManager(f.store, f.root);
+      try { await recovered.recover(); } finally { recovered.dispose(); }
+      expect(f.store.getRun(workerId)).toMatchObject({ status: 'failed', error: expect.stringContaining('Accepted worker workflow definition is unavailable or changed') });
+    });
   });
   describe('catalog workflow on spawn (#451)', () => {
     const catalog = (name: string, yaml: string) => {

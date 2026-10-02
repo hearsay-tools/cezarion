@@ -17,7 +17,8 @@ import {
 import type { RunStore, RunRecord } from '../runs/store.ts';
 import { workerOutcome } from '../runs/delegation-state.ts';
 import type { DelegationExecutionSettings, RunManager } from '../workflows/run.ts';
-import { QUICK_TASK_WORKFLOW, allowedToolsForStep, stepKind, type WorkflowDef, type WorkflowStepDef } from '../workflows/types.ts';
+import { QUICK_TASK_WORKFLOW, skillTaskSteps, plannedWorkflow, allowedToolsForStep, stepKind, type WorkflowDef, type WorkflowStepDef } from '../workflows/types.ts';
+import { discoverSkills } from '../skills.ts';
 import { findWorkflow } from '../workflows/load.ts';
 import type { RunnerId } from '../core/agent-runner.ts';
 import type { Caller } from './credentials.ts';
@@ -30,11 +31,16 @@ export type DelegationProject = { id: string; root: string; store: RunStore; man
 
 /**
  * The catalog definition a spawn runs (#451): the built-in quick-task constant when the request
- * names none — never the catalog's `quick-task` entry, so a repo file cannot change the default
- * path — else the named entry. Every agent step resolves its own runner and account (#452), so a
+ * names neither workflow nor skill — never the catalog's `quick-task` entry, so a repo file cannot change the default
+ * path — else the named workflow or a one-step discovered skill task. Every agent step resolves its own runner and account (#452), so a
  * chain may mix providers; a chain with no agent step has nothing for a worker to run.
  */
 async function resolveSpawnWorkflow(root: string, request: WorkerSpawnRequest): Promise<WorkflowDef> {
+  if (request.skill !== undefined) {
+    const skills = await discoverSkills(root);
+    if (!skills.some(skill => skill.name === request.skill)) throw new DelegationPolicyError('invalid_input', `Unknown skill "${request.skill}"; available: ${skills.map(skill => skill.name).join(', ')}`);
+    return plannedWorkflow(skillTaskSteps(request.skill));
+  }
   if (request.workflow === undefined) return QUICK_TASK_WORKFLOW;
   const workflow = await findWorkflow(root, request.workflow);
   if (!workflow) throw new DelegationPolicyError('invalid_input', `Unknown workflow "${request.workflow}"; the catalog holds the built-in quick-task and .ai/cezar/workflows/*.yaml`);
@@ -418,6 +424,7 @@ export class DelegationService {
         ...(request.model === undefined ? {} : { model: request.model }),
         ...(effortPin === undefined ? {} : { effort: effortPin }),
         ...(request.workflow === undefined ? {} : { workflow: request.workflow }),
+        ...(request.skill === undefined ? {} : { skill: request.skill }),
       })).digest('hex');
       const receipt = parent.delegation.receipts.find(r => r.requestId === request.requestId);
       if (receipt) {
@@ -469,8 +476,8 @@ export class DelegationService {
           steps: workflowDef.steps.map(step => ({ id: step.id, name: step.name ?? step.id, kind: stepKind(step) })),
         }, parent.id, request.requestId, { role: 'worker', permissions: [], parentRunId: parent.id, workspace, ...(context ? { context } : {}) }, requestHash, {
           ...identity, ...(context ? { contextHash: workerContextHash(context) } : {}),
-          // A named catalog chain is bound like the context recipe; the default quick-task leaves the identity as before.
-          ...(request.workflow === undefined ? {} : { workflowHash: workerWorkflowHash(workflowDef) }),
+          // A named catalog chain or skill is bound like the context recipe; the default quick-task leaves the identity as before.
+          ...(request.workflow === undefined && request.skill === undefined ? {} : { workflowHash: workerWorkflowHash(workflowDef) }),
         });
         accepted = true;
         project.manager.enqueueOwnedRun(worker.id);
