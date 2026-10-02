@@ -645,6 +645,13 @@ it.each([1440, 402, 360].flatMap(width => ['light', 'dark'].map(theme => ({ widt
     return Math.abs(page.getBoundingClientRect().width - narrow);
   })()`)).toBeLessThan(1)
 
+  // agent-browser 0.36 clears via a tracked value assignment before inserting text.
+  // A React rerender between those steps can restore the old prompt. Clear with trusted
+  // keyboard input first so component state observes the replacement, then type the draft.
+  browser.click('[data-slot="gh-custom-prompt"]')
+  browser.press('Control+a')
+  browser.press('Backspace')
+  browser.waitForFunction(`document.querySelector('[data-slot="gh-custom-prompt"]').value === ''`)
   browser.fill('[data-slot="gh-custom-prompt"]', 'Review this issue and keep this draft')
   browser.waitForFunction(`document.querySelector('[data-slot="gh-custom-prompt"]').value === 'Review this issue and keep this draft'`)
   settleVisual(browser, '[data-route="github"]', { theme, width: 'wide', idle: true })

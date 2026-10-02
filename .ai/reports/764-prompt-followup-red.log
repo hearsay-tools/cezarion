@@ -1,0 +1,86 @@
+
+> test
+> vitest run --config packages/web/e2e/vitest.config.ts github-layout.e2e.ts -t handoff fields usable at 1440.*light --reporter=verbose
+
+
+ RUN  v4.1.10 /home/agent/projects/cezar/.ai/cezar/worktrees/d6e7f159-f1c6-45f4-87c6-500ec47ab925/packages/web/e2e
+
+stdout | github-layout.e2e.ts > keeps handoff fields usable at 1440 / 'light'
+FILL-TRACE [{"kind":"setter","value":""},{"kind":"input","trusted":false,"value":""},{"kind":"setter","value":"Fix GitHub issue #142: Login form drops session on refresh\n\nhttps://github.com/mock/repo/issues/142"},{"kind":"input","trusted":true,"value":"Fix GitHub issue #142: Login form drops session on refresh\n\nhttps://github.com/mock/repo/issues/142Review this issue and keep this draft"}]
+
+ ↓ |e2e| github-layout.e2e.ts > keeps the detail readable at 900px (#754)
+ ↓ |e2e| github-layout.e2e.ts > keeps issues readable across pane boundaries and saved widths (#754)
+ ↓ |e2e| github-layout.e2e.ts > keeps prs readable across pane boundaries and saved widths (#754)
+ ↓ |e2e| github-layout.e2e.ts > reflows when the list is resized and restores its saved width after stacking (#754)
+ ↓ |e2e| github-layout.e2e.ts > scrolls stacked panes in document flow at 900px, light (#754)
+ ↓ |e2e| github-layout.e2e.ts > scrolls stacked panes in document flow at 900px, dark (#754)
+ ↓ |e2e| github-layout.e2e.ts > the GitHub tab against the live dry-run server > on desktop hides the GitHub title then scrolls list and detail independently (#523), height 900
+ ↓ |e2e| github-layout.e2e.ts > the GitHub tab against the live dry-run server > on desktop hides the GitHub title then scrolls list and detail independently (#523), height 540
+ ↓ |e2e| github-layout.e2e.ts > the GitHub tab against the live dry-run server > lays out long issue and pull-request titles at the review viewports in both themes and densities
+ ↓ |e2e| github-layout.e2e.ts > puts Runner, Model and Effort on one row on a wide handoff panel, light (#724)
+ ↓ |e2e| github-layout.e2e.ts > puts Runner, Model and Effort on one row on a wide handoff panel, dark (#724)
+ ↓ |e2e| github-layout.e2e.ts > puts Runner and Effort over a full-width Model on a phone handoff panel, light (#724)
+ ↓ |e2e| github-layout.e2e.ts > puts Runner and Effort over a full-width Model on a phone handoff panel, dark (#724)
+ ↓ |e2e| github-layout.e2e.ts > compacts the row when the handoff box is under 550px on a desktop-sized viewport, light (#724)
+ ↓ |e2e| github-layout.e2e.ts > compacts the row when the handoff box is under 550px on a desktop-sized viewport, dark (#724)
+ × |e2e| github-layout.e2e.ts > keeps handoff fields usable at 1440 / 'light' 26189ms
+   → cezar e2e: predicate never became truthy: document.querySelector('[data-slot="gh-custom-prompt"]').value === 'Review this issue and keep this draft' (failure bundle: /home/agent/projects/cezar/.ai/cezar/worktrees/d6e7f159-f1c6-45f4-87c6-500ec47ab925/.ai/qa/failures/github-layout/keeps-handoff-fields-usable-at-1440-light-1)
+ ↓ |e2e| github-layout.e2e.ts > keeps handoff fields usable at 1440 / 'dark'
+ ↓ |e2e| github-layout.e2e.ts > keeps handoff fields usable at 402 / 'light'
+ ↓ |e2e| github-layout.e2e.ts > keeps handoff fields usable at 402 / 'dark'
+ ↓ |e2e| github-layout.e2e.ts > keeps handoff fields usable at 360 / 'light'
+ ↓ |e2e| github-layout.e2e.ts > keeps handoff fields usable at 360 / 'dark'
+ ↓ |e2e| github-layout.e2e.ts > keeps filter geometry still while project boards refresh then settle as 'ready' at 1440 / 'light' (#721)
+ ↓ |e2e| github-layout.e2e.ts > keeps filter geometry still while project boards refresh then settle as 'unavailable' at 1440 / 'light' (#721)
+ ↓ |e2e| github-layout.e2e.ts > keeps filter geometry still while project boards refresh then settle as 'ready' at 1440 / 'dark' (#721)
+ ↓ |e2e| github-layout.e2e.ts > keeps filter geometry still while project boards refresh then settle as 'unavailable' at 1440 / 'dark' (#721)
+ ↓ |e2e| github-layout.e2e.ts > keeps filter geometry still while project boards refresh then settle as 'ready' at 360 / 'light' (#721)
+ ↓ |e2e| github-layout.e2e.ts > keeps filter geometry still while project boards refresh then settle as 'unavailable' at 360 / 'light' (#721)
+ ↓ |e2e| github-layout.e2e.ts > keeps filter geometry still while project boards refresh then settle as 'ready' at 360 / 'dark' (#721)
+ ↓ |e2e| github-layout.e2e.ts > keeps filter geometry still while project boards refresh then settle as 'unavailable' at 360 / 'dark' (#721)
+ ↓ |e2e| github-layout.e2e.ts > keeps filter geometry still without cached boards, settling as 'unavailable' at 1440 / 'light' (#721)
+ ↓ |e2e| github-layout.e2e.ts > keeps filter geometry still without cached boards, settling as 'long names' at 1440 / 'light' (#721)
+ ↓ |e2e| github-layout.e2e.ts > keeps filter geometry still without cached boards, settling as 'unavailable' at 1440 / 'dark' (#721)
+ ↓ |e2e| github-layout.e2e.ts > keeps filter geometry still without cached boards, settling as 'long names' at 1440 / 'dark' (#721)
+ ↓ |e2e| github-layout.e2e.ts > keeps filter geometry still without cached boards, settling as 'unavailable' at 360 / 'light' (#721)
+ ↓ |e2e| github-layout.e2e.ts > keeps filter geometry still without cached boards, settling as 'long names' at 360 / 'light' (#721)
+ ↓ |e2e| github-layout.e2e.ts > keeps filter geometry still without cached boards, settling as 'unavailable' at 360 / 'dark' (#721)
+ ↓ |e2e| github-layout.e2e.ts > keeps filter geometry still without cached boards, settling as 'long names' at 360 / 'dark' (#721)
+ ↓ |e2e| github-layout.e2e.ts > hands focus on from the closed status button but leaves other focus alone at 1440 ('status button') (#721)
+ ↓ |e2e| github-layout.e2e.ts > hands focus on from the closed status button but leaves other focus alone at 1440 ('search') (#721)
+ ↓ |e2e| github-layout.e2e.ts > hands focus on from the closed status button but leaves other focus alone at 360 ('status button') (#721)
+ ↓ |e2e| github-layout.e2e.ts > hands focus on from the closed status button but leaves other focus alone at 360 ('search') (#721)
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |e2e| github-layout.e2e.ts > keeps handoff fields usable at 1440 / 'light'
+Error: cezar e2e: predicate never became truthy: document.querySelector('[data-slot="gh-custom-prompt"]').value === 'Review this issue and keep this draft' (failure bundle: /home/agent/projects/cezar/.ai/cezar/worktrees/d6e7f159-f1c6-45f4-87c6-500ec47ab925/.ai/qa/failures/github-layout/keeps-handoff-fields-usable-at-1440-light-1)
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:547:13
+    545|     } catch (cause) {
+    546|       const bundle = this.captureFailure({ kind: 'wait-fn', predicate:…
+    547|       throw new Error(`cezar e2e: predicate never became truthy: ${js}…
+       |             ^
+    548|     }
+    549|   }
+ ❯ github-layout.e2e.ts:669:11
+
+Caused by: Error: cezar e2e: agent-browser wait --fn document.querySelector('[data-slot="gh-custom-prompt"]').value === 'Review this issue and keep this draft' failed
+ ❯ AgentBrowser.run agent-browser.ts:491:13
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:544:12
+ ❯ github-layout.e2e.ts:669:11
+
+Caused by: Error: Command failed: /home/agent/.cache/agent-tools/agent-browser/agent-browser-linux-x64 --namespace cez-e2e --args --no-sandbox --session e2e-ghl-1781981 wait --fn document.querySelector('[data-slot="gh-custom-prompt"]').value === 'Review this issue and keep this draft' --json
+ ❯ AgentBrowser.run agent-browser.ts:483:16
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:544:12
+ ❯ github-layout.e2e.ts:669:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { status: 1, signal: null, output: [ null, '{"success":false,"data":null,"error":"Wait timed out after 25000ms"}\n', '' ], pid: 1782390, stdout: '{"success":false,"data":null,"error":"Wait timed out after 25000ms"}\n', stderr: '' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 40 skipped (41)
+   Start at  15:18:44
+   Duration  27.00s (transform 56ms, setup 41ms, import 41ms, tests 26.74s, environment 0ms)
+

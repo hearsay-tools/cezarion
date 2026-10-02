@@ -207,3 +207,37 @@ env -u CEZ_AUTOMATIONS TMPDIR=/tmp TMP=/tmp TEMP=/tmp npm test -- --config packa
 A second filtered invocation with a fresh fixture also passed **2/2**, with the tail-paint test omitted (`764-history-followup-repeat-green.log`); it used the same two-case command above. Each invocation starts its own fresh history fixture and browser session. These are focused iterations, not the parent's controlled ten-repetition campaign. The parent reports its full non-browser gates already passed; renewed idle/load campaigns and final browser validation remain parent-owned. No unresolved focused history failure remains.
 
 Own test environment stopped successfully with `sh .ai/scripts/test-env-down.sh` (`764-history-followup-down.log`). `git diff --check` passed before commit. Changed code is limited to the history spec setup; report, diagnostic/validation logs and the three-file failure bundle are the remaining deliverables.
+
+
+## Load-campaign custom-prompt follow-up
+
+First merged the parent's tested head `0fa2d91a89a06bc049f89d83aac72d2674dc1d61` normally, as merge commit `92e3307b`, then ran `npm ci` in this worktree (`764-prompt-followup-npm-ci.log`). The current shared `use-hand-to-agent-state` implementation was therefore used for diagnosis and tests. Parent reports idle **10/10** passed and two load rounds (**16 invocations**) passed before round-three lanes 3 and 8 failed. Read both lanes' tests logs, probes, snapshots and screenshots under the parent's `load-1790946042841` evidence before diagnosing.
+
+Both failures contained the default GitHub issue prompt concatenated with `Review this issue and keep this draft`. Current production prompt/base state initializes once per item mount; the extracted hook shares picker and engine state, not prompt initialization. Inspection of the installed `agent-browser 0.36.0` implementation explains the race: [native fill at the pinned v0.36.0 source](https://github.com/vercel-labs/agent-browser/blob/v0.36.0/cli/src/native/interaction.rs#L114) focuses, assigns `this.value = ''`, dispatches a synthetic input event, then sends `Input.insertText` in a separate CDP command. The direct assignment updates React's tracked value, so the synthetic input does not publish the clear to component state. A component rerender in the gap restores the old state; subsequent trusted text insertion appends to that restored default.
+
+A diagnostic-only DOM value-setter/input trace plus an ordinary shared workflow selection update forced the gap on the current application. The exact-value assertion failed with this sequence:
+
+```text
+setter: ""
+input: trusted=false, value=""
+setter: default GitHub issue prompt
+input: trusted=true, value=default GitHub issue prompt + intended replacement
+```
+
+Red proof: **1 failed, 40 filtered** (`764-prompt-followup-red.log`). The failure screenshot/probe/snapshot are retained in `764-prompt-followup-evidence/keeps-handoff-fields-usable-at-1440-light-1/`. The repeatable fault-injection patch is `764-prompt-rerender-reproduction.patch`: apply it to the pre-fix spec at merge commit `92e3307b`, then run the single-case command below. It injects a shared picker update only when the CLI's synthetic empty input occurs; it changes no production scheduling and does not depend on load or sleeps. Temporary diagnostic code and React-internal inspection are absent from the final spec.
+
+The E2E fix clicks the prompt, sends trusted `Control+a` and `Backspace`, observes the empty value, then fills the replacement. React receives the deletion through its normal keyboard input path before the CLI clear/insert split. With the same fault injection still present, green trace is trusted empty input → synthetic empty input → trusted exact replacement, and the case passes (**1 passed, 40 filtered**, `764-prompt-followup-injected-green.log`). Existing exact-value and post-workflow-dismissal draft persistence assertions remain unchanged. The fix is limited to test input mechanics; no production defect was found or production code changed. No generic retry, sleep, or timeout increase was introduced.
+
+Exact commands:
+
+```sh
+env -u CEZ_AUTOMATIONS TMPDIR=/tmp TMP=/tmp TEMP=/tmp npm test -- --config packages/web/e2e/vitest.config.ts github-layout.e2e.ts -t 'handoff fields usable at 1440.*light' --reporter=verbose
+env -u CEZ_AUTOMATIONS TMPDIR=/tmp TMP=/tmp TEMP=/tmp npm test -- --config packages/web/e2e/vitest.config.ts github-layout.e2e.ts -t 'handoff fields usable' --reporter=verbose
+npm test -- packages/web/src/test/agent-browser-interact.test.ts packages/web/src/test/e2e-wait-discipline.test.ts packages/web/src/routes/github/use-hand-to-agent-state.test.tsx packages/web/src/routes/github/hand-to-agent-draft.test.ts
+npm run typecheck:web
+```
+
+Normal six viewport/theme handoff cases passed **6/6**, 35 filtered (`764-prompt-followup-six-green.log`). Adjacent seam/scanner/shared-state/draft unit tests passed **44/44** across four files (`764-prompt-followup-units-green.log`). Web typecheck passed on the merged head (`764-prompt-followup-typecheck.log`); this follow-up only adds four existing browser operations to the spec. Scanner baseline remains unchanged. No helper behavior was modified.
+
+
+The exact 1440/light case also passed in **two fresh-session repetitions**, each 1 passed / 40 filtered, using the first command above (`764-prompt-followup-repeat-1-green.log`, `764-prompt-followup-repeat-2-green.log`). Together with the six-case selection, the originally failing case has three ordinary focused passes plus the controlled fault-injection green. These iterations are not a full load campaign. Own test environment stopped via `sh .ai/scripts/test-env-down.sh` (`764-prompt-followup-down.log`); no application or browser fixture remains from these checks. `git diff --check` passed. The parent retains full gate/load/browser campaign responsibility. No unresolved focused custom-prompt failure remains.

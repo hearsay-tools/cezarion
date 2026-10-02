@@ -1,0 +1,18 @@
+
+> test
+> vitest run packages/web/src/test/agent-browser-interact.test.ts packages/web/src/test/e2e-wait-discipline.test.ts packages/web/src/routes/github/use-hand-to-agent-state.test.tsx packages/web/src/routes/github/hand-to-agent-draft.test.ts
+
+
+ RUN  v4.1.10 /home/agent/projects/cezar/.ai/cezar/worktrees/d6e7f159-f1c6-45f4-87c6-500ec47ab925
+
+ ✓ |web| src/routes/github/hand-to-agent-draft.test.ts (8 tests) 7ms
+ ✓ |web| src/test/agent-browser-interact.test.ts (5 tests) 716ms
+ ✓ |web| src/test/e2e-wait-discipline.test.ts (30 tests) 852ms
+     ✓ has no wait-discipline site outside the baseline, and the baseline names no site that is gone  374ms
+ ✓ |web| src/routes/github/use-hand-to-agent-state.test.tsx (1 test) 28ms
+
+ Test Files  4 passed (4)
+      Tests  44 passed (44)
+   Start at  15:20:41
+   Duration  1.21s (transform 431ms, setup 142ms, import 599ms, tests 1.60s, environment 1.02s)
+
