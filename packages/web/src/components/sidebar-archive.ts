@@ -114,13 +114,13 @@ export function useSidebarArchive(projectId: string | undefined, cacheScope: str
     })
 
   // A second click before the first answers would send a second archive and a second toast.
-  const inFlight = React.useRef(new Set<string>())
+  const inFlight = React.useRef(new Map<string, Promise<boolean>>())
 
   /** Resolves whether the run was archived, so a swiped row can snap back on a failure. A repeat
-   *  while the first request is in flight resolves `true` at once: the first one decides. */
+   *  while the first request is in flight gets that request's promise: it follows the real outcome. */
   const archiveOne = (run: RunRecord): Promise<boolean> => {
-    if (inFlight.current.has(run.id)) return Promise.resolve(true)
-    inFlight.current.add(run.id)
+    const pending = inFlight.current.get(run.id)
+    if (pending) return pending
     // Captured before the request: navigation during the round trip must not retarget either half.
     const scope = cacheScope ?? queryScope()
     const wasPinned = Boolean(run.pinned)
@@ -134,7 +134,7 @@ export function useSidebarArchive(projectId: string | undefined, cacheScope: str
       },
       row?.closest('[data-slot="quick-list-bucket"]')?.parentElement ?? null,
     )
-    return (projectId === undefined ? archiveRun(run.id, true) : archiveProjectRun(projectId, run.id, true))
+    const request = (projectId === undefined ? archiveRun(run.id, true) : archiveProjectRun(projectId, run.id, true))
       .then(
         () => {
           void refresh(scope)
@@ -148,6 +148,8 @@ export function useSidebarArchive(projectId: string | undefined, cacheScope: str
         },
       )
       .finally(() => inFlight.current.delete(run.id))
+    inFlight.current.set(run.id, request)
+    return request
   }
 
   const sweep = (scopeOfSweep: ArchiveFinishedScope) => {

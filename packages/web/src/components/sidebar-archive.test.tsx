@@ -135,6 +135,19 @@ describe('useSidebarArchive', () => {
 describe('useSidebarArchive guards and focus (#780)', () => {
   const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={createQueryClient()}>{children}</QueryClientProvider>
 
+  it('a repeat while in flight follows the first request to its real outcome', async () => {
+    let reject!: (error: Error) => void
+    api.archiveProjectRun.mockImplementation(() => new Promise((_r, j) => { reject = j }))
+    const { result } = renderHook(() => useSidebarArchive('p1', 'p1'), { wrapper })
+    let first!: Promise<boolean>
+    let second!: Promise<boolean>
+    act(() => { first = result.current.archiveOne(record({ id: 'r1' })); second = result.current.archiveOne(record({ id: 'r1' })) })
+    await act(async () => reject(new Error('Nope')))
+    await expect(first).resolves.toBe(false)
+    await expect(second).resolves.toBe(false)
+    expect(api.archiveProjectRun).toHaveBeenCalledTimes(1)
+  })
+
   it('ignores a repeat click on a row whose archive is still in flight', async () => {
     let resolve!: (value: unknown) => void
     api.archiveProjectRun.mockImplementation(() => new Promise((r) => { resolve = r }))

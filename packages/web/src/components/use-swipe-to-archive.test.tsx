@@ -78,7 +78,7 @@ afterEach(() => {
 describe('useSwipeToArchive', () => {
   it('exports the gesture constants the design names', () => {
     expect({ AXIS_LOCK_PX, PARK_PX, ACTION_PX, COMMIT_RATIO, SNAP_MS, FLING_PX_PER_MS }).toEqual({
-      AXIS_LOCK_PX: 10, PARK_PX: 40, ACTION_PX: 88, COMMIT_RATIO: 0.6, SNAP_MS: 200, FLING_PX_PER_MS: 0.5,
+      AXIS_LOCK_PX: 10, PARK_PX: 40, ACTION_PX: 88, COMMIT_RATIO: 0.6, SNAP_MS: 200, FLING_PX_PER_MS: 1,
     })
   })
 
@@ -209,6 +209,33 @@ describe('useSwipeToArchive', () => {
     const second = new MouseEvent('click', { bubbles: true, cancelable: true })
     screen.getByTestId('link-a').dispatchEvent(second)
     expect(second.defaultPrevented).toBe(false)
+  })
+
+  it('a deliberate short swipe (0.6px/ms) parks rather than flings', () => {
+    const onArchive = vi.fn()
+    render(<Row id="a" onArchive={onArchive} />)
+    drag('a', [{ dx: -15, ms: 25 }, { dx: -30, ms: 25 }, { dx: -45, ms: 25 }, { dx: -60, ms: 25 }])
+    expect(onArchive).not.toHaveBeenCalled()
+    expect(state('a').phase).toBe('open')
+  })
+
+  it('a drag that produced no click does not swallow a later keyboard Enter', () => {
+    render(<Row id="a" onArchive={vi.fn()} />)
+    drag('a', [{ dx: -20 }, { dx: -30 }])
+    // Enter on the focused link: a keydown, then the click the browser synthesises.
+    fireEvent.keyDown(screen.getByTestId('link-a'), { key: 'Enter' })
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true })
+    screen.getByTestId('link-a').dispatchEvent(click)
+    expect(click.defaultPrevented).toBe(false)
+  })
+
+  it('the swallow lapses on its own shortly after the drag ends', () => {
+    render(<Row id="a" onArchive={vi.fn()} />)
+    drag('a', [{ dx: -20 }, { dx: -30 }])
+    act(() => { vi.advanceTimersByTime(1000) })
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true })
+    screen.getByTestId('link-a').dispatchEvent(click)
+    expect(click.defaultPrevented).toBe(false)
   })
 
   it('a plain tap is a click', () => {

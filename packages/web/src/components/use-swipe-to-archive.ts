@@ -20,7 +20,12 @@ export const PARK_PX = 40
 export const ACTION_PX = 88
 export const COMMIT_RATIO = 0.6
 export const SNAP_MS = 200
-export const FLING_PX_PER_MS = 0.5
+/** 1px/ms: a deliberate short swipe (~0.6px/ms) parks; only a real flick archives. */
+export const FLING_PX_PER_MS = 1
+/** How long a gesture's click swallow outlives it. A touch tap's click lands within a frame or
+ *  two of the pointerup; anything later (a screen reader's activation, a keyboard Enter after a
+ *  drag that produced no click at all) is not part of the gesture. */
+const SUPPRESS_CLICK_MS = 300
 /** The window a release velocity is measured over. */
 const FLING_WINDOW_MS = 100
 
@@ -82,6 +87,21 @@ export function useSwipeToArchive({
   const gesture = React.useRef<Gesture | null>(null)
   const pastRef = React.useRef(false)
   const suppressClick = React.useRef(false)
+  const suppressTimer = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  /** Swallow the click this gesture ends with, for SUPPRESS_CLICK_MS at most. */
+  const swallowNextClick = () => {
+    suppressClick.current = true
+    clearTimeout(suppressTimer.current)
+    suppressTimer.current = undefined
+  }
+  const lapseSwallow = () => {
+    if (!suppressClick.current) return
+    clearTimeout(suppressTimer.current)
+    suppressTimer.current = setTimeout(() => {
+      suppressClick.current = false
+    }, SUPPRESS_CLICK_MS)
+  }
+  React.useEffect(() => () => clearTimeout(suppressTimer.current), [])
   const stateRef = React.useRef(state)
   stateRef.current = state
   const onArchiveRef = React.useRef(onArchive)
@@ -167,7 +187,7 @@ export function useSwipeToArchive({
         // An already-released pointer: the moves still arrive while the finger is on the row.
       }
       claim(id, close)
-      suppressClick.current = true
+      swallowNextClick()
     }
     if (g.axis !== 'x') return
     const offset = Math.min(0, Math.max(-g.width, g.base + dx))
@@ -186,11 +206,13 @@ export function useSwipeToArchive({
     if (g.axis !== 'x') {
       // A tap on an open row closes it, and is not a tap on its link.
       if (g.axis === null && g.wasOpen) {
-        suppressClick.current = true
+        swallowNextClick()
+        lapseSwallow()
         close()
       }
       return
     }
+    lapseSwallow()
     const offset = stateRef.current.offset
     const now = Date.now()
     const last = { x: event.clientX, t: now }
@@ -213,7 +235,13 @@ export function useSwipeToArchive({
     const g = gesture.current
     if (!g || event.pointerId !== g.pointerId) return
     gesture.current = null
+    lapseSwallow()
     if (g.axis === 'x') close()
+  }
+
+  // A keyboard activation is never the end of a pointer gesture.
+  const onKeyDownCapture = () => {
+    suppressClick.current = false
   }
 
   const onClickCapture = (event: React.MouseEvent<HTMLElement>) => {
@@ -228,7 +256,7 @@ export function useSwipeToArchive({
     phase: state.phase,
     past: state.past,
     surfaceRef,
-    bind: { onPointerDown, onPointerMove, onPointerUp, onPointerCancel, onClickCapture },
+    bind: { onPointerDown, onPointerMove, onPointerUp, onPointerCancel, onClickCapture, onKeyDownCapture },
     close,
   }
 }

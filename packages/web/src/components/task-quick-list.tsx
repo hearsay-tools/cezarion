@@ -900,6 +900,8 @@ function RunRow({
       style={swipe.offset ? { transform: `translateX(${swipe.offset}px)` } : undefined}
       className={cn(
         'selection-row group/task-row flex cursor-pointer items-start gap-2.5 rounded-[6px] py-1.5 pr-2 pl-2.5 hover:bg-sidebar-row-hover',
+        // No native text selection mid-swipe (a mouse in the narrow shell would select instead).
+        swipeable && 'select-none',
         // The finger moves the row 1:1; only the snap back or out animates, and only for users who
         // have not asked for reduced motion (then it is an instant snap).
         swipeable && swipe.phase !== 'dragging' && 'motion-safe:transition-transform motion-safe:duration-200 motion-safe:ease-out',
@@ -925,6 +927,8 @@ function RunRow({
           // the visible text drop — so hover always gives back everything the column could not show.
           title={title}
           aria-current={isActive ? 'page' : undefined}
+          // A mouse drag on a swipeable row is the swipe, not a native link drag.
+          draggable={swipeable ? false : undefined}
           className="flex h-[19px] min-w-0 items-center gap-2 rounded-[2px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground"
         >
           {variant ? (
@@ -1066,13 +1070,18 @@ function RunRow({
     </div>
   )
 
-  if (!swipeable) return rowElement
+  // A pointer that can hover gets the row button and no wrapper. Where references are inert the
+  // wrapper is ALWAYS there, swipeable or not: a row that starts swiping (its run just finished)
+  // must keep its element tree, or React remounts it and the focused link goes with it.
+  if (!inertReferences) return rowElement
   return (
     <div
       ref={swipe.surfaceRef}
       data-slot="task-row-swipe"
-      // `pan-y`: the browser keeps vertical scrolling, the gesture only ever reads horizontal moves.
-      className="relative touch-pan-y overflow-hidden rounded-[6px]"
+      data-swipe={swipeable ? 'on' : undefined}
+      // `pan-y pinch-zoom`: the browser keeps vertical scrolling and pinch zoom; the gesture only
+      // ever reads horizontal moves.
+      className={cn('relative rounded-[6px]', swipeable && 'touch-pan-y touch-pinch-zoom overflow-hidden')}
     >
       {/* Tapping the parked action leaves the row parked until the list drops it. */}
       {swipe.offset < 0 ? <SwipeArchiveAction width={-swipe.offset} past={swipe.past} title={title} onArchive={() => void onArchiveRun?.(run)} /> : null}

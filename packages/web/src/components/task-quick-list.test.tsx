@@ -2076,7 +2076,7 @@ describe('swipe to archive on touch (#780 §7)', () => {
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
   })
-  const surface = (id: string) => document.querySelector<HTMLElement>(`[data-slot="task-row"][data-run-id="${id}"]`)?.closest<HTMLElement>('[data-slot="task-row-swipe"]') ?? null
+  const surface = (id: string) => document.querySelector<HTMLElement>(`[data-slot="task-row"][data-run-id="${id}"]`)?.closest<HTMLElement>('[data-slot="task-row-swipe"][data-swipe="on"]') ?? null
   const layer = (id: string) => document.querySelector<HTMLElement>(`[data-slot="task-row"][data-run-id="${id}"]`)!
   const action = (id: string) => surface(id)?.querySelector<HTMLElement>('[data-slot="task-row-swipe-action"]') ?? null
   function swipe(id: string, dx: number, { release = true } = {}) {
@@ -2103,6 +2103,7 @@ describe('swipe to archive on touch (#780 §7)', () => {
       onTogglePin: vi.fn(),
     })
     expect(surface('fin')!.className).toContain('touch-pan-y')
+    expect(surface('fin')!.className).toContain('touch-pinch-zoom')
     expect(surface('fin')!.className).toContain('overflow-hidden')
     expect(surface('pin')).not.toBeNull()
     for (const id of ['live', 'ask', 'sched']) expect(surface(id)).toBeNull()
@@ -2167,6 +2168,33 @@ describe('swipe to archive on touch (#780 §7)', () => {
     swipe('fin', -50, { release: false })
     expect(layer('fin').className).not.toContain('motion-safe:transition-transform')
     expect(layer('fin').style.transform).toBe('translateX(-50px)')
+  })
+
+  it('keeps the row mounted, and its link focused, when the run finishes', () => {
+    const client = createQueryClient()
+    const live = run({ id: 'flip', title: 'Flip', status: 'running', pinned: true })
+    const tree = (record: RunRecord) => (
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <TaskQuickList runs={[record]} view="active" now={NOW} onViewChange={vi.fn()} onArchiveRun={vi.fn()} onTogglePin={vi.fn()} />
+        </MemoryRouter>
+      </QueryClientProvider>
+    )
+    const { rerender } = render(tree(live))
+    const link = within(layer('flip')).getByRole('link')
+    link.focus()
+    expect(surface('flip')).toBeNull()
+    // Still Pinned, so the bucket does not change; only swipeability does.
+    rerender(tree({ ...live, status: 'done', finishedAt: ago(1_000) }))
+    expect(link.isConnected).toBe(true)
+    expect(document.activeElement).toBe(link)
+    expect(surface('flip')).not.toBeNull()
+  })
+
+  it('marks the link undraggable and the row unselectable while it swipes', () => {
+    renderList({ runs: [run({ id: 'fin' })], onArchiveRun: vi.fn() })
+    expect(within(layer('fin')).getByRole('link').getAttribute('draggable')).toBe('false')
+    expect(layer('fin').className).toContain('select-none')
   })
 
   it('keeps one row open at a time', () => {

@@ -1860,7 +1860,8 @@ describe('swipe to archive on touch (#780 §7)', () => {
     ...Array.from({ length: 10 }, (_, i) => swipeRun(`sw-${i}`, `Finished task ${i}`, 10 + i)),
   ]
   const rowSel = (id: string) => `${ROW}[data-run-id="${id}"]`
-  const actionSel = (id: string) => `[data-slot="task-row-swipe"]:has(> ${rowSel(id)}) [data-slot="task-row-swipe-action"]`
+  const SWIPE = '[data-slot="task-row-swipe"][data-swipe="on"]'
+  const actionSel = (id: string) => `${SWIPE}:has(> ${rowSel(id)}) [data-slot="task-row-swipe-action"]`
   const stored = async (id: string) => ((await (await fetch(`${swipeUrl}/api/v1/runs/${id}`)).json()) as { archived?: boolean })
   /** The row's box, scrolled into view and settled (no running finite animation: a running
    *  row's status dot pulses forever), read in one step. */
@@ -1906,13 +1907,13 @@ describe('swipe to archive on touch (#780 §7)', () => {
   beforeEach(() => {
     browser.setViewport(1440, 900)
     browser.goto(`${swipeUrl}/p/${swipeProject}/`)
-    browser.waitForFunction(`document.querySelector('[data-slot="task-row-swipe"] > ${rowSel('sw-0')}') !== null`)
+    browser.waitForFunction(`document.querySelector('${SWIPE} > ${rowSel('sw-0')}') !== null`)
   })
 
   it('renders the swipe, not the row button, on a device that cannot hover', () => {
     expect(browser.evaluate(`matchMedia('(hover: none)').matches`)).toBe(true)
     expect(browser.count('[data-action="archive-run"]')).toBe(0)
-    expect(browser.evaluate(`getComputedStyle(document.querySelector('[data-slot="task-row-swipe"]')).touchAction`)).toBe('pan-y')
+    expect(browser.evaluate(`getComputedStyle(document.querySelector('${SWIPE}')).touchAction`)).toBe('pan-y pinch-zoom')
   })
 
   it('parks a short swipe on Archive, and tapping it archives with an Undo toast', async () => {
@@ -1956,8 +1957,10 @@ describe('swipe to archive on touch (#780 §7)', () => {
       }
       return null
     })()`
-    const before = browser.waitForValue<number>(`(() => { const s = ${scroller}; return s ? s.scrollTop : null })()`)
+    // `box` scrolls the row into view, so it runs first; `before` is read after it, and from then
+    // on only the drag scrolls — the polls below are pure reads.
     const r = box('sw-3')
+    const before = browser.waitForValue<number>(`(() => { const s = ${scroller}; return s ? s.scrollTop : null })()`)
     // Mostly vertical, a little horizontal drift: the gesture locks vertical and the browser pans.
     const during = (await browser.touchDrag(
       [{ x: r.right - 40, y: r.cy }, ...[1, 2, 3, 4, 5, 6].map((i) => ({ x: r.right - 40 - i * 1.5, y: r.cy - i * 20 }))],
@@ -1975,7 +1978,7 @@ describe('swipe to archive on touch (#780 §7)', () => {
   })
 
   it('leaves a scheduled row where it is', async () => {
-    expect(browser.count(`[data-slot="task-row-swipe"] > ${rowSel('sw-live')}`)).toBe(0)
+    expect(browser.count(`${SWIPE} > ${rowSel('sw-live')}`)).toBe(0)
     const r = box('sw-live')
     const during = (await leftSwipe(r, r.width * 0.8, {
       whileDown: `getComputedStyle(document.querySelector('${rowSel('sw-live')}')).transform`,
@@ -2008,7 +2011,7 @@ describe('swipe to archive on touch (#780 §7)', () => {
         const icon = browser.evaluate(contrastSampleExpression(`${actionSel('sw-4')} svg`, 'color', 'parent')) as ContrastSample
         expect(icon.ratio, `${variant.id} parked icon`).toBeGreaterThanOrEqual(3)
         browser.goto(`${swipeUrl}/p/${swipeProject}/`)
-        browser.waitForFunction(`document.querySelector('[data-slot="task-row-swipe"] > ${rowSel('sw-4')}') !== null`)
+        browser.waitForFunction(`document.querySelector('${SWIPE} > ${rowSel('sw-4')}') !== null`)
       }
     } finally {
       restoreContrastQaDefaults(browser)
