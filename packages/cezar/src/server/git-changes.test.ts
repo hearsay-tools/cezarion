@@ -23,6 +23,7 @@ import {
 } from './git-changes.ts';
 import { createApp } from './server.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
+import { getStatus } from './git.ts';
 
 /**
  * Session git API (redesign R5 Step 1.2 — spec §"Git/session API additions"):
@@ -64,6 +65,39 @@ describe('collectChanges — structured diff vs base', () => {
   });
 
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it.each([false, true])('counts nested untracked files consistently with status (mixed tracked changes: %s) (#749)', async (mixed) => {
+    writeFileSync(join(dir, '.gitignore'), '*.ignored\n');
+    writeFileSync(join(dir, 'tracked.txt'), 'base\n');
+    g(dir, 'add', '-A');
+    g(dir, 'commit', '-m', 'base');
+    mkdirSync(join(dir, '.opencode', 'plugins'), { recursive: true });
+    writeFileSync(join(dir, '.opencode', 'apptension.json'), '{}\n');
+    writeFileSync(join(dir, '.opencode', 'plugins', 'apptension-dev.js'), '// plugin\n');
+    writeFileSync(join(dir, '.opencode', 'plugins', 'cache.ignored'), 'ignored\n');
+    if (mixed) {
+      writeFileSync(join(dir, 'tracked.txt'), 'staged\n');
+      g(dir, 'add', 'tracked.txt');
+      writeFileSync(join(dir, 'tracked.txt'), 'unstaged\n');
+    }
+
+    const status = await getStatus(dir);
+    const indexBefore = readFileSync(join(dir, '.git', 'index'));
+    const result = await collectChanges(dir, 'HEAD', { intentToAdd: false });
+    expect(readFileSync(join(dir, '.git', 'index'))).toEqual(indexBefore);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const expectedPaths = mixed
+      ? ['.opencode/apptension.json', '.opencode/plugins/apptension-dev.js', 'tracked.txt']
+      : ['.opencode/apptension.json', '.opencode/plugins/apptension-dev.js'];
+    expect(result.changes.files.map((file) => file.path).sort()).toEqual(expectedPaths);
+    expect(result.changes.stat.files).toBe(mixed ? 3 : 2);
+    expect(status).toHaveLength(result.changes.stat.files);
+    expect(status.map((file) => file.path).sort()).toEqual(expectedPaths);
+    expect(status.filter((file) => file.status === '??')).toHaveLength(2);
+    if (mixed) expect(status.find((file) => file.path === 'tracked.txt')?.status).toBe('MM');
+  });
 
   it('reports modified, added, deleted, renamed and binary files with counts and patches', async () => {
     writeFileSync(join(dir, 'mod.txt'), 'line one\nline two\n');
