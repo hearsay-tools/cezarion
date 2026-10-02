@@ -66,7 +66,9 @@ export function renderScheduleTask(
   const trigger = occurrence.trigger === 'manual'
     ? 'started by hand'
     : occurrence.trigger === 'catch-up' ? 'a missed occurrence, caught up after a gap' : 'a scheduled occurrence';
-  return `${prompt}\n\n---\nScheduled run context\nautomation: ${values.automation}\nproject: ${values.project}\nscheduled for: ${date} ${time} ${context.timeZone}\ntrigger: ${trigger}\nThis task was started by an automation, not by a person: nobody is waiting to answer questions, so decide and report.\n---`;
+  // An unknown zone falls back to the UTC wall time above, so label it UTC too.
+  const zone = parts ? context.timeZone : 'UTC';
+  return `${prompt}\n\n---\nScheduled run context\nautomation: ${values.automation}\nproject: ${values.project}\nscheduled for: ${date} ${time} ${zone}\ntrigger: ${trigger}\nThis task was started by an automation, not by a person: nobody is waiting to answer questions, so decide and report.\n---`;
 }
 
 async function resolveWorkflow(root: string, definition: AutomationDefinition): Promise<WorkflowDef> {

@@ -6285,6 +6285,16 @@ export function startServer(deps: ServerDeps, port: number): ServerType & { shut
   };
   const emitWorkspaceAutomationChange = (projectId: string) => (automationId: string, revision: number) =>
     workspaceEvents.emit('automation-change', { project: projectId, automationId, revision });
+  /**
+   * The boot brake for one project, at boot and for a project registered after it: an enabled
+   * poll idle past its lookback is re-baselined rather than resumed from a stale cursor. Only a
+   * project with a github.com remote: its polls are the only ones the timer arms, so a poll
+   * without one never succeeds and would be re-baselined on every boot, forever.
+   */
+  const brakeIdleAutomations = (id: string, automationStore: AutomationStore | undefined): void => {
+    if (!automationStore || !automationProjects.get(id)?.github) return;
+    rebaselineIdleAutomations(automationStore, emitWorkspaceAutomationChange(id));
+  };
   const automationScheduler = new WorkspaceAutomationScheduler({
     coordinator: automationCoordinator,
     handle: (projectId, store) => {
@@ -6341,12 +6351,8 @@ export function startServer(deps: ServerDeps, port: number): ServerType & { shut
         coordinator.add(project.id, project.root);
         const { id, root } = project as { id: string; root: string };
         void rememberAutomationProject(id, root).then(() => {
-          // The boot brake applies to a project registered after boot just as it does at boot.
           if (!automationsEnabled()) return;
-          const automationStore = automationCoordinator.store(id, root);
-          if (automationStore && existsSync(join(root, '.ai/cezar/automations.json'))) {
-            rebaselineIdleAutomations(automationStore, emitWorkspaceAutomationChange(id));
-          }
+          brakeIdleAutomations(id, automationCoordinator.store(id, root));
           return rescheduleAutomations();
         }).catch(() => undefined);
       }
@@ -6376,9 +6382,8 @@ export function startServer(deps: ServerDeps, port: number): ServerType & { shut
           ? deps.store
           : sharedContexts.peek(project.id)?.store;
         if (automationStore && runStore) reconcileAutomationReceipts(automationStore, runStore);
-        // The boot brake, after reconciliation and before the timer arms: an enabled poll idle
-        // past its lookback is re-baselined rather than resumed from a stale cursor.
-        if (automationStore) rebaselineIdleAutomations(automationStore, emitWorkspaceAutomationChange(project.id));
+        // After reconciliation and before the timer arms.
+        brakeIdleAutomations(project.id, automationStore);
       })).then(() => automationScheduler.start()).catch(() => undefined);
     }).catch(() => undefined);
   });

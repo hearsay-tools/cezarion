@@ -304,10 +304,19 @@ describe('GitHub automation API', () => {
     expect(manager.startRun).toHaveBeenCalledTimes(1);
   });
 
-  it('boot re-baselines an idle enabled poll and launches nothing', async () => {
+  /**
+   * Boots `startServer` on a pre-schedule `automations.json` whose one enabled poll last succeeded
+   * 30 days ago, waits for the timer to start plus long enough for a past-due poll to fire, and
+   * hands back what happened. `remote: false` is a git checkout with no remote at all.
+   */
+  const bootIdlePoll = async (remote: boolean) => {
     const savedDryRun = process.env.CEZ_DRY_RUN;
     process.env.CEZ_DRY_RUN = '1';
-    withGithubRemote(root);
+    if (remote) withGithubRemote(root);
+    else {
+      execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: root, stdio: 'ignore' });
+      execFileSync('git', ['-c', 'user.email=t@example.com', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'init'], { cwd: root, stdio: 'ignore' });
+    }
     const DAY = 86_400_000;
     const stale = new Date(Date.now() - 30 * DAY).toISOString();
     // A pre-schedule file: no `kind`, enabled, last polled a month ago.
@@ -337,19 +346,35 @@ describe('GitHub automation API', () => {
       await vi.waitFor(() => expect(started).toHaveBeenCalledTimes(1), { timeout: 15_000, interval: 10 });
       // Long enough for a past-due poll armed at boot to fire and launch.
       await new Promise((resolve) => setTimeout(resolve, 300));
-      expect(manager.startRun).not.toHaveBeenCalled();
-      expect(poll).not.toHaveBeenCalled();
-      const automations = AutomationStore.open(join(root, '.ai/cezar'));
-      expect(automations.logs({ automationId: 'idle-poll' })[0]).toMatchObject({ result: 'baseline', reason: expect.stringContaining('30 days idle') });
-      const state = automations.state('idle-poll')!;
-      expect(Date.parse(state.cursor!.timestamp)).toBeGreaterThan(Date.now() - 60_000);
-      expect(Date.parse(state.nextCheckAt!)).toBeGreaterThan(Date.now());
+      return { stale, poll: poll.mock.calls.length, launches: manager.startRun.mock.calls.length };
     } finally {
-      server.close();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
       vi.restoreAllMocks();
       if (savedDryRun === undefined) delete process.env.CEZ_DRY_RUN;
       else process.env.CEZ_DRY_RUN = savedDryRun;
     }
+  };
+
+  it('boot re-baselines an idle enabled poll and launches nothing', async () => {
+    const booted = await bootIdlePoll(true);
+    expect(booted.launches).toBe(0);
+    expect(booted.poll).toBe(0);
+    const automations = AutomationStore.open(join(root, '.ai/cezar'));
+    expect(automations.logs({ automationId: 'idle-poll' })[0]).toMatchObject({ result: 'baseline', reason: expect.stringContaining('30 days idle') });
+    const state = automations.state('idle-poll')!;
+    expect(Date.parse(state.cursor!.timestamp)).toBeGreaterThan(Date.now() - 60_000);
+    expect(Date.parse(state.nextCheckAt!)).toBeGreaterThan(Date.now());
+  }, 20_000);
+
+  // A poll on a project without a github.com remote is never armed, so it never succeeds: braking
+  // it would append a fresh `baseline` row on every boot, forever, for a poll that cannot run.
+  it('boot leaves an idle poll alone on a project without a GitHub remote', async () => {
+    const booted = await bootIdlePoll(false);
+    expect(booted.launches).toBe(0);
+    expect(booted.poll).toBe(0);
+    const automations = AutomationStore.open(join(root, '.ai/cezar'));
+    expect(automations.logs({ automationId: 'idle-poll' })).toEqual([]);
+    expect(automations.state('idle-poll')?.cursor?.timestamp).toBe(booted.stale);
   }, 20_000);
 
   it('accepts preview as an automation-log result filter', async () => {

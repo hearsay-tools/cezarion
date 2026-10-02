@@ -87,6 +87,9 @@ describe('automation task templates', () => {
     expect(task).toContain('nobody is waiting to answer questions');
     expect(renderScheduleTask(scheduled, { ...occurrence, trigger: 'manual' }, { projectName: 'demo', timeZone: 'Europe/Warsaw' }))
       .toContain('scheduled for: 2026-10-02 06:00 Europe/Warsaw');
+    // An unknown zone falls back to UTC wall time, and says so.
+    expect(renderScheduleTask(scheduled, occurrence, { projectName: 'demo', timeZone: 'Not/AZone' }))
+      .toContain('scheduled for: 2026-10-02 04:00 UTC');
   });
 
   it('launches a scheduled run with automationTrigger provenance', async () => {
