@@ -144,7 +144,9 @@ export function installCommand(platform: string, osRelease: string): string {
   if (platform !== 'linux') return '';
   const field = (key: string) => osRelease.match(new RegExp(`^${key}=(.*)$`, 'm'))?.[1]?.replace(/^["']|["']$/g, '') ?? '';
   const ids = [field('ID'), ...field('ID_LIKE').split(/\s+/)].filter(Boolean);
-  if (ids.some(id => id === 'debian' || id === 'ubuntu')) return 'sudo apt-get install -y chromium';
+  // Ubuntu (and its derivatives) has no `chromium` deb, only a snap; Debian proper has the package.
+  if (ids.includes('ubuntu')) return 'sudo snap install chromium';
+  if (ids.includes('debian')) return 'sudo apt-get install -y chromium';
   if (ids.includes('fedora')) return 'sudo dnf install -y chromium';
   return '';
 }
@@ -169,16 +171,16 @@ export type DownloadChromiumOptions = {
   platform?: string;
   arch?: string;
   /** Unpacks `zip` into `dest`. Defaults to `unzip -q` (POSIX) or `tar -xf` (Windows). */
-  extract?: (zip: string, dest: string, platform: string) => Promise<void>;
+  extract?: (zip: string, dest: string, platform: string, signal?: AbortSignal) => Promise<void>;
   /** Waits out a retry backoff; rejects when the signal aborts. Tests replace it. */
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
 };
 
 const execFileAsync = promisify(execFile);
 
-async function extractZip(zip: string, dest: string, platform: string): Promise<void> {
-  if (platform === 'win32') await execFileAsync('tar', ['-xf', zip, '-C', dest]);
-  else await execFileAsync('unzip', ['-q', zip, '-d', dest]);
+async function extractZip(zip: string, dest: string, platform: string, signal?: AbortSignal): Promise<void> {
+  if (platform === 'win32') await execFileAsync('tar', ['-xf', zip, '-C', dest], { signal });
+  else await execFileAsync('unzip', ['-q', zip, '-d', dest], { signal });
 }
 
 function sleep(ms: number, signal: AbortSignal): Promise<void> {
@@ -196,10 +198,14 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
+/** A failure a retry cannot fix: a bad manifest, a missing extractor, a wrong archive layout. */
+class PermanentDownloadError extends Error {}
+
 /**
  * Downloads the Stable `chrome-headless-shell` build into `<cache>/chromium` and returns its binary.
  * The archive lands in `.partial` and is renamed into place only once unpacked, so an abort or a
- * crash never leaves a half-installed Chromium for `resolveChromium` to find. Three attempts.
+ * crash never leaves a half-installed Chromium for `resolveChromium` to find. Only the network
+ * phase gets three attempts; a failed extraction fails at once, since re-downloading would not help.
  */
 export async function downloadChromium(opts: DownloadChromiumOptions): Promise<string> {
   const platform = opts.platform ?? process.platform;
@@ -208,33 +214,41 @@ export async function downloadChromium(opts: DownloadChromiumOptions): Promise<s
   if (!target) throw new Error(`Chrome for Testing publishes no download for ${platform}-${arch}`);
   const root = join(opts.cacheDir ?? cezCacheDir(), 'chromium');
   const partial = join(root, '.partial');
+  const zip = join(partial, 'chromium.zip');
 
-  for (let attempt = 0; ; attempt++) {
-    try {
-      return await downloadOnce(opts, target.platformKey, platform, root, partial);
-    } catch (err) {
-      await rm(partial, { recursive: true, force: true });
-      if (opts.signal.aborted) throw err;
-      const delay = RETRY_DELAYS_MS[attempt];
-      if (delay === undefined) throw err;
-      await (opts.sleep ?? sleep)(delay, opts.signal);
+  try {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await fetchArchive(opts, target.platformKey, partial, zip);
+        break;
+      } catch (err) {
+        await rm(partial, { recursive: true, force: true });
+        if (opts.signal.aborted || err instanceof PermanentDownloadError) throw err;
+        const delay = RETRY_DELAYS_MS[attempt];
+        if (delay === undefined) throw err;
+        await (opts.sleep ?? sleep)(delay, opts.signal);
+      }
     }
+    return await install(opts, target.platformKey, platform, root, partial, zip);
+  } catch (err) {
+    await rm(partial, { recursive: true, force: true });
+    throw err;
   }
 }
 
-async function downloadOnce(opts: DownloadChromiumOptions, platformKey: PlatformKey, platform: string, root: string, partial: string): Promise<string> {
+async function fetchArchive(opts: DownloadChromiumOptions, platformKey: PlatformKey, partial: string, zip: string): Promise<void> {
   const doFetch = opts.fetchImpl ?? fetch;
   const { signal } = opts;
 
   const versionsRes = await doFetch(VERSIONS_URL, { signal });
   if (!versionsRes.ok) throw new Error(`Chrome for Testing version list answered ${versionsRes.status}`);
-  const versions = versionsSchema.parse(await versionsRes.json());
-  const url = versions.channels.Stable.downloads[HEADLESS_SHELL]?.find(d => d.platform === platformKey)?.url;
-  if (!url) throw new Error(`Chrome for Testing lists no ${HEADLESS_SHELL} download for ${platformKey}`);
+  const versions = versionsSchema.safeParse(await versionsRes.json());
+  if (!versions.success) throw new PermanentDownloadError('Chrome for Testing version list has an unexpected shape');
+  const url = versions.data.channels.Stable.downloads[HEADLESS_SHELL]?.find(d => d.platform === platformKey)?.url;
+  if (!url) throw new PermanentDownloadError(`Chrome for Testing lists no ${HEADLESS_SHELL} download for ${platformKey}`);
 
   await rm(partial, { recursive: true, force: true });
   await mkdir(partial, { recursive: true });
-  const zip = join(partial, 'chromium.zip');
 
   const res = await doFetch(url, { signal });
   if (!res.ok || !res.body) throw new Error(`Chromium download answered ${res.status}`);
@@ -254,25 +268,35 @@ async function downloadOnce(opts: DownloadChromiumOptions, platformKey: Platform
     await file.close();
   }
   signal.throwIfAborted();
+}
 
+async function install(opts: DownloadChromiumOptions, platformKey: PlatformKey, platform: string, root: string, partial: string, zip: string): Promise<string> {
+  const tool = platform === 'win32' ? 'tar' : 'unzip';
   const unpacked = join(partial, 'unpacked');
   await mkdir(unpacked);
-  await (opts.extract ?? extractZip)(zip, unpacked, platform);
-  signal.throwIfAborted();
+  try {
+    await (opts.extract ?? extractZip)(zip, unpacked, platform, opts.signal);
+  } catch (err) {
+    if (opts.signal.aborted) throw err;
+    const reason = (err as NodeJS.ErrnoException).code === 'ENOENT' ? `${tool} is not installed` : `${tool} could not unpack the download: ${(err as Error).message}`;
+    throw new PermanentDownloadError(`Could not extract Chromium: ${reason}`);
+  }
+  opts.signal.throwIfAborted();
 
   const dirName = `${HEADLESS_SHELL}-${platformKey}`;
   const finalDir = join(root, dirName);
+  const bin = join(finalDir, HEADLESS_SHELL + (platform === 'win32' ? '.exe' : ''));
+  if (!existsSync(join(unpacked, dirName))) throw new PermanentDownloadError(`The Chromium download did not contain ${dirName}`);
   await rm(finalDir, { recursive: true, force: true });
   await rename(join(unpacked, dirName), finalDir);
   await rm(partial, { recursive: true, force: true });
-  const bin = join(finalDir, HEADLESS_SHELL + (platform === 'win32' ? '.exe' : ''));
-  if (!existsSync(bin)) throw new Error(`The Chromium download did not contain ${HEADLESS_SHELL}`);
+  if (!existsSync(bin)) throw new PermanentDownloadError(`The Chromium download did not contain ${HEADLESS_SHELL}`);
   return bin;
 }
 
 export class ChromiumError extends Error {
   constructor(
-    readonly kind: 'sandbox' | 'timeout' | 'exited',
+    readonly kind: 'not-installed' | 'sandbox' | 'timeout' | 'exited',
     readonly stderrTail: string,
     message: string,
   ) {
@@ -312,17 +336,20 @@ export async function launchChromium(
     tail = Buffer.concat([tail, chunk]).subarray(-STDERR_TAIL_BYTES);
   });
   let exit: string | undefined;
+  let missing = false;
   proc.once('close', (code, signal) => {
     exit ??= `Chromium exited (${signal ?? code})`;
   });
-  proc.once('error', err => {
+  proc.on('error', err => {
     exit ??= `Chromium could not start: ${err.message}`;
+    missing ||= (err as NodeJS.ErrnoException).code === 'ENOENT';
     tail = Buffer.from(err.message);
   });
 
   const fail = (kind: 'timeout' | 'exited', message: string): ChromiumError => {
     proc.kill('SIGKILL');
     const stderrTail = tail.toString('utf8');
+    if (missing) return new ChromiumError('not-installed', stderrTail, message);
     return new ChromiumError(SANDBOX_FAILURE.test(stderrTail) ? 'sandbox' : kind, stderrTail, message);
   };
 

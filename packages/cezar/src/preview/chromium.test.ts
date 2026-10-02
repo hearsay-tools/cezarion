@@ -111,9 +111,11 @@ describe('downloadTarget (#781)', () => {
 
 describe('installCommand (#781)', () => {
   it.each([
-    ['linux', 'ID=ubuntu\nID_LIKE=debian\n', 'sudo apt-get install -y chromium'],
+    // Ubuntu ships no `chromium` deb, only a snap; Debian proper has the package.
+    ['linux', 'ID=ubuntu\nID_LIKE=debian\n', 'sudo snap install chromium'],
+    ['linux', 'ID=pop\nID_LIKE="ubuntu debian"\n', 'sudo snap install chromium'],
     ['linux', 'NAME="Debian GNU/Linux"\nID=debian\n', 'sudo apt-get install -y chromium'],
-    ['linux', 'ID=pop\nID_LIKE="ubuntu debian"\n', 'sudo apt-get install -y chromium'],
+    ['linux', 'ID=raspbian\nID_LIKE=debian\n', 'sudo apt-get install -y chromium'],
     ['linux', 'ID=fedora\n', 'sudo dnf install -y chromium'],
     ['darwin', '', 'brew install --cask chromium'],
     ['linux', 'ID=arch\n', ''],
@@ -279,6 +281,61 @@ describe('downloadChromium (#781)', () => {
     expect(attempts).toBe(2);
   });
 
+
+  it('does not re-download when extraction fails: one download, a clear error, .partial removed', async () => {
+    let downloads = 0;
+    const fetchImpl = (async (input: string | URL | Request) => {
+      if (String(input).endsWith('.json')) return jsonResponse(manifest);
+      downloads++;
+      return chunked([new Uint8Array(5)]);
+    }) as typeof fetch;
+    const delays: number[] = [];
+    const enoent = Object.assign(new Error('spawn unzip ENOENT'), { code: 'ENOENT' });
+    await expect(
+      downloadChromium({
+        signal: new AbortController().signal,
+        onProgress: noop,
+        fetchImpl,
+        cacheDir: dir,
+        platform: 'linux',
+        arch: 'x64',
+        sleep: async ms => void delays.push(ms),
+        extract: async () => {
+          throw enoent;
+        },
+      }),
+    ).rejects.toThrow(/unzip is not installed/i);
+    expect(downloads).toBe(1);
+    expect(delays).toEqual([]);
+    expect(existsSync(join(dir, 'chromium', '.partial'))).toBe(false);
+  });
+
+  it('does not re-download when the archive is corrupt or has the wrong layout', async () => {
+    let downloads = 0;
+    const fetchImpl = (async (input: string | URL | Request) => {
+      if (String(input).endsWith('.json')) return jsonResponse(manifest);
+      downloads++;
+      return chunked([new Uint8Array(5)]);
+    }) as typeof fetch;
+    await expect(
+      downloadChromium({ signal: new AbortController().signal, onProgress: noop, fetchImpl, cacheDir: dir, platform: 'linux', arch: 'x64', sleep: async () => {}, extract: async () => {} }),
+    ).rejects.toThrow();
+    expect(downloads).toBe(1);
+    expect(existsSync(join(dir, 'chromium', '.partial'))).toBe(false);
+  });
+
+  it('does not retry a manifest with no download for the platform', async () => {
+    let manifests = 0;
+    const fetchImpl = (async () => {
+      manifests++;
+      return jsonResponse({ channels: { Stable: { downloads: { 'chrome-headless-shell': [] } } } });
+    }) as typeof fetch;
+    await expect(
+      downloadChromium({ signal: new AbortController().signal, onProgress: noop, fetchImpl, cacheDir: dir, platform: 'linux', arch: 'x64', sleep: async () => {} }),
+    ).rejects.toThrow(/no .*download/i);
+    expect(manifests).toBe(1);
+  });
+
   it('refuses a target Chrome for Testing does not publish (linux-arm64)', async () => {
     await expect(
       downloadChromium({ signal: new AbortController().signal, onProgress: noop, fetchImpl: (async () => jsonResponse(manifest)) as typeof fetch, cacheDir: dir, platform: 'linux', arch: 'arm64' }),
@@ -366,6 +423,12 @@ setInterval(()=>{},1000);`,
     expect(err).toBeInstanceOf(ChromiumError);
     expect(err.kind).toBe('sandbox');
     expect(err.stderrTail).toContain('No usable sandbox!');
+  });
+
+  it('reports kind not-installed when the binary does not exist', async () => {
+    const err = await launchChromium(join(dir, 'no-such-chrome'), join(dir, 'profile'), {}).catch(e => e);
+    expect(err).toBeInstanceOf(ChromiumError);
+    expect(err.kind).toBe('not-installed');
   });
 
   it.skipIf(!posix)('reports kind exited with the stderr tail capped at 4 KiB', async () => {
