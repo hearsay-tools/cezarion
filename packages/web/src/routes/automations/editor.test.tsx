@@ -64,6 +64,30 @@ it('saves a weekly schedule paused and shows five previewed runs', async () => {
   expect(post?.body).not.toHaveProperty('events')
 })
 
+it('an out-of-range hour is marked invalid and blocks Save until it is fixed', async () => {
+  // Typing "24" over "02" must not leave the field reading 24 while the draft keeps 2: pressing
+  // Save (or Enter) before blur would then save 02:00, a time nobody typed.
+  const calls = stubFetch(() => json(saved, 201))
+  const onSaved = mount()
+  fill()
+  const hour = screen.getByLabelText('Hour') as HTMLInputElement
+  fireEvent.change(hour, { target: { value: '2' } })
+  expect(hour.getAttribute('aria-invalid')).not.toBe('true')
+  fireEvent.change(hour, { target: { value: '24' } })
+  expect(hour.getAttribute('aria-invalid')).toBe('true')
+  expect(screen.getByText('Hour must be 00–23.')).not.toBeNull()
+  fireEvent.submit(hour.form!)
+  fireEvent.click(screen.getByRole('button', { name: 'Save paused' }))
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  expect(calls).toEqual([])
+  expect(onSaved).not.toHaveBeenCalled()
+  fireEvent.change(hour, { target: { value: '23' } })
+  expect(hour.getAttribute('aria-invalid')).not.toBe('true')
+  fireEvent.click(screen.getByRole('button', { name: 'Save paused' }))
+  await waitFor(() => expect(onSaved).toHaveBeenCalled())
+  expect(calls.find((call) => call.method === 'POST')?.body).toMatchObject({ schedule: { hour: 23 } })
+})
+
 it('offers Save and enable once the enable switch is on', async () => {
   const calls = stubFetch(() => json(saved, 201))
   const onSaved = mount()

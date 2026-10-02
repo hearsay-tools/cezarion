@@ -63,6 +63,13 @@ export function AutomationEditor({ automation, forge, timeZone, onSaved, onReloa
   const submit = async (event: FormEvent) => {
     event.preventDefault()
     if (saving) return
+    // A field holding text it has not committed (an hour of "24") sets a custom validity; a
+    // submit that skipped the browser's own check must not save the stale committed value.
+    const form = event.currentTarget
+    if (form instanceof HTMLFormElement && !form.checkValidity()) {
+      form.reportValidity()
+      return
+    }
     setSaving(true)
     setFailure(undefined)
     let step: 'save' | 'enable' = 'save'
