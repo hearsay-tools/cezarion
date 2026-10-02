@@ -99,6 +99,14 @@ describe('PreviewPane', () => {
     expect(sent().filter(m => m.t === 'run')).toEqual([{ t: 'run', port: 5173 }])
   })
 
+  it('Run and open shows the server URL in an unfocused address field (#781 final review)', () => {
+    render(<PreviewPane run={run} servers={[web]} request={{ port: 5173, run: true }} onClose={() => undefined} />)
+    transport('open')
+    const field = screen.getByRole('textbox', { name: 'Page address' }) as HTMLInputElement
+    expect(document.activeElement).not.toBe(field)
+    expect(field.value).toBe('localhost:5173')
+  })
+
   it('a card that already asked to run sends run when the server asks for approval', () => {
     render(<PreviewPane run={run} servers={[web]} request={{ port: 5173, run: true }} onClose={() => undefined} />)
     transport('open')

@@ -141,7 +141,10 @@ export function PreviewToolbar(props: PreviewToolbarProps) {
   const ownInput = useRef<HTMLInputElement | null>(null)
   const input = props.urlInputRef ?? ownInput
   const focusUrlAfterMenu = useRef(false)
+  // `draft` is only what the owner typed. Focus alone shows the full URL, so a URL that arrives
+  // while the field is focused still shows.
   const [draft, setDraft] = useState<string | null>(null)
+  const [focused, setFocused] = useState(false)
 
   const back = (
     <Button variant="ghost" size="icon-sm" className={iconButton} aria-label="Back" disabled={!navEnabled} onClick={props.onBack}>
@@ -221,17 +224,24 @@ export function PreviewToolbar(props: PreviewToolbarProps) {
         spellCheck={false}
         autoCapitalize="off"
         autoCorrect="off"
-        value={draft ?? displayUrl(url)}
+        value={draft ?? (focused ? url : displayUrl(url))}
         title={url || undefined}
         className={cn(
           'h-8 w-full min-w-0 truncate rounded-md border border-transparent bg-muted pl-8 font-mono text-[13px] text-foreground outline-none placeholder:text-soft-foreground focus-visible:border-ring focus-visible:bg-background focus-visible:ring-[3px] focus-visible:ring-ring/30 max-md:h-11',
           adopted ? 'pr-40' : 'pr-2.5',
         )}
         onFocus={event => {
-          setDraft(url)
-          event.currentTarget.select()
+          const field = event.currentTarget
+          setFocused(true)
+          // After the full URL replaces the short one, so the whole address is selected.
+          requestAnimationFrame(() => {
+            if (document.activeElement === field) field.select()
+          })
         }}
-        onBlur={() => setDraft(null)}
+        onBlur={() => {
+          setFocused(false)
+          setDraft(null)
+        }}
         onChange={event => setDraft(event.target.value)}
         onKeyDown={event => {
           if (event.key === 'Enter') {
@@ -242,7 +252,7 @@ export function PreviewToolbar(props: PreviewToolbarProps) {
           }
         }}
       />
-      {adopted && draft === null ? (
+      {adopted && !focused ? (
         <span className="pointer-events-none absolute right-2 inline-flex h-6 items-center gap-1 rounded-full border border-border bg-card px-2 text-xs font-semibold text-muted-foreground">
           <Link2Icon className="size-3" aria-hidden="true" />
           Not started by cezar

@@ -312,9 +312,12 @@ function PreviewPaneBody({ run, servers, serverStates, request, onSession, onPor
   }, [request])
 
   const empty = !hasTarget && !takenOver && transport.state !== 'blocked'
+  // The empty state invites typing. A pane opened for a server is not empty, even in the commit
+  // before its target lands: focusing then would hide the page URL and pop a phone's keyboard.
+  const awaitingRequest = request?.port !== undefined
   useEffect(() => {
-    if (empty) urlInput.current?.focus()
-  }, [empty])
+    if (empty && !awaitingRequest) urlInput.current?.focus()
+  }, [empty, awaitingRequest])
 
   const navigate = (input: string) => {
     const address = resolveAddress(input, servers)

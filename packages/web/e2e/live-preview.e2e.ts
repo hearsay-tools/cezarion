@@ -134,6 +134,15 @@ describe('live preview', () => {
     expect(ready.g).toBeGreaterThan(150)
     browser.screenshot(resolve(artifactsDir, 'streaming.png'), { viewport: true })
 
+    // Run and open shows the page's address, in a field nobody focused (#781 final review,
+    // Important 5: the pane used to focus the field before the URL landed, freezing an empty
+    // draft). Read before the tap, because tapAt blurs the field and would hide the bug.
+    const before = browser.waitForValue(
+      `(() => { const input = document.querySelector('${address}'); return input ? { value: input.value, focused: document.activeElement === input } : null })()`,
+      value => !!value && (value as { value: string }).value.includes(`localhost:${appPort}`),
+    ) as { value: string; focused: boolean }
+    expect(before.focused).toBe(false)
+
     // A real pointer stream at the button's screen position changes the page.
     browser.tapAt(ready.x, ready.y)
     const shown = browser.waitForValue(

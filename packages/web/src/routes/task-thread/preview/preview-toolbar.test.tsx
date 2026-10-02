@@ -190,6 +190,20 @@ describe('PreviewToolbar', () => {
     expect(onNavigate).toHaveBeenCalledWith('3000')
   })
 
+  it('a URL that arrives while the field is focused shows, until the owner types (#781 final review)', () => {
+    const { rerender } = render(<PreviewToolbar {...props({ url: '' })} />)
+    const field = screen.getByRole('textbox', { name: 'Page address' }) as HTMLInputElement
+    fireEvent.focus(field)
+    expect(field.value).toBe('')
+    rerender(<PreviewToolbar {...props({ url: 'http://localhost:5173/' })} />)
+    expect(field.value).toBe('http://localhost:5173/')
+    fireEvent.change(field, { target: { value: '30' } })
+    rerender(<PreviewToolbar {...props({ url: 'http://localhost:5173/members' })} />)
+    expect(field.value).toBe('30')
+    fireEvent.blur(field)
+    expect(field.value).toBe('localhost:5173/members')
+  })
+
   it('shows the status label in place of the stats outside a stream', () => {
     render(<PreviewToolbar {...props({ stats: undefined, status: { tone: 'danger', label: 'server exited' } })} />)
     expect(screen.getByText('server exited')).toBeTruthy()
