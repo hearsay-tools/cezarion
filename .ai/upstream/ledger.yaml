@@ -331,10 +331,13 @@ entries:
     pr: 985
     title: "feat(automations): scheduled triggers, default-on, redesigned surface, creation from a prompt (#985)"
     date: 2026-09-15
-    status: pending
+    status: planned
     hint:
       conflicts: 20
-    note: "different by design today: fork automations are GitHub-poll only and opt-in; upstream adds schedule triggers, calendars and default-on. A project, not a port"
+    note: "Adapt scheduling, prompt-based creation and the redesigned surface in stages; preserve the fork's opt-in default and governed workers instead of upstream dispatch"
+    fork:
+      issue: 766
+    decided: 2026-10-02
   - sha: 67fc941f0cc79c2aca3c77ed7d0f953afadf8f5e
     pr: 990
     title: "chore(release): bump main to 0.11.0 and cut the changelog entry (#990)"
