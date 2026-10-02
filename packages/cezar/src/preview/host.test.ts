@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import type { PreviewServer } from '@open-mercato/cezar-contract';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DevServerState, DevServerStopReason } from './dev-server.ts';
-import { ChromiumError } from './chromium.ts';
+import { ChromiumError, installCommand } from './chromium.ts';
 import { ChromiumMissingError, PREVIEW_BROWSER_IDLE_MS, PREVIEW_SERVER_IDLE_MS, PreviewHost, type BrowserHandle, type RunContext } from './host.ts';
 import { fakeCdp, fakeViewer } from './preview.testkit.ts';
 
@@ -325,7 +325,7 @@ describe('PreviewHost', () => {
     const viewer = fakeViewer();
     await host.open(ctx, viewer, { port: 5173 });
     // linux-arm64 has no Chrome for Testing build: only the OS command.
-    expect(viewer.messages.at(-1)).toEqual({ t: 'state', stage: 'chromium-missing', installCommand: 'sudo apt-get install -y chromium', canDownload: false });
+    expect(viewer.messages.at(-1)).toEqual({ t: 'state', stage: 'chromium-missing', installCommand: installCommand('linux', 'ID=ubuntu\n'), canDownload: false });
 
     installed = true;
     await host.handle(ctx, viewer, { t: 'download' });
@@ -345,5 +345,68 @@ describe('PreviewHost', () => {
     expect(browsers).toHaveLength(0);
     await host.handle(ctx, viewer, { t: 'retryBrowser' });
     expect(navigations(browsers[0]!)).toEqual(['http://localhost:5173/']);
+  });
+
+  it('a binary that vanished after resolution (not-installed) offers the download, and the next open tries again', async () => {
+    let missing = true;
+    const { host, ctx, answering, browsers } = make(undefined, () => (missing ? new ChromiumError('not-installed', '', 'spawn ENOENT') : undefined));
+    answering.add(5173);
+    const viewer = fakeViewer();
+    await host.open(ctx, viewer, { port: 5173 });
+    expect(viewer.messages.at(-1)).toEqual({ t: 'state', stage: 'chromium-missing', installCommand: installCommand('linux', 'ID=ubuntu\n'), canDownload: false });
+    missing = false;
+    await host.open(ctx, viewer, { port: 5173 });
+    expect(browsers).toHaveLength(1);
+  });
+
+  it('Start again after an idle stop reopens the page the owner was on (5.9)', async () => {
+    const { host, ctx, devServers, browsers } = make();
+    const viewer = fakeViewer();
+    await host.open(ctx, viewer, { port: 5173 });
+    await host.run('run-1', 5173);
+    devServers[0]!.set('up');
+    await flush();
+    browsers[0]!.cdpFake.emit('Page.frameNavigated', { frame: { id: 'main', url: 'http://localhost:5173/settings' } });
+    host.detach('run-1', viewer);
+    await vi.advanceTimersByTimeAsync(PREVIEW_SERVER_IDLE_MS);
+
+    const back = fakeViewer();
+    await host.open(ctx, back, { port: 5173 });
+    expect(back.messages.at(-1)).toEqual({ t: 'state', stage: 'server-stopped', server: server(5173), reason: 'idle', lastUrl: 'http://localhost:5173/settings' });
+
+    await host.handle(ctx, back, { t: 'run', port: 5173 });
+    devServers[1]!.set('up');
+    await flush();
+    expect(navigations(browsers[1]!)).toEqual(['http://localhost:5173/settings']);
+  });
+
+  it('a reconnecting pane resumes the live page instead of navigating back to the root', async () => {
+    const { host, ctx, devServers, browsers } = make();
+    const viewer = fakeViewer();
+    await host.open(ctx, viewer, { port: 5173 });
+    await host.run('run-1', 5173);
+    devServers[0]!.set('up');
+    await flush();
+    browsers[0]!.cdpFake.emit('Page.frameNavigated', { frame: { id: 'main', url: 'http://localhost:5173/settings' } });
+
+    const again = fakeViewer();
+    await host.open(ctx, again, { port: 5173 });
+    await flush();
+    expect(navigations(browsers[0]!)).toEqual(['http://localhost:5173/']);
+    browsers[0]!.cdpFake.emit('Page.screencastFrame', { data: 'AA==', sessionId: 9 });
+    expect(again.messages.at(-1)).toEqual({ t: 'state', stage: 'streaming', adopted: false });
+    expect(again.frames).toHaveLength(1);
+  });
+
+  it('a reconnect to an adopted server resumes the live page too', async () => {
+    const { host, ctx, answering, browsers } = make();
+    answering.add(5173);
+    await host.open(ctx, fakeViewer(), { port: 5173 });
+    browsers[0]!.cdpFake.emit('Page.frameNavigated', { frame: { id: 'main', url: 'http://localhost:5173/cart' } });
+    const again = fakeViewer();
+    await host.open(ctx, again, { port: 5173 });
+    expect(navigations(browsers[0]!)).toEqual(['http://localhost:5173/']);
+    browsers[0]!.cdpFake.emit('Page.screencastFrame', { data: 'AA==', sessionId: 3 });
+    expect(again.messages.at(-1)).toEqual({ t: 'state', stage: 'streaming', adopted: true });
   });
 });

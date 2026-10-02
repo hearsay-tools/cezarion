@@ -85,6 +85,14 @@ const live = (server: ServerEntry | undefined): server is DevServerLike =>
 const owned = (server: ServerEntry | undefined): server is DevServerLike => server !== undefined && server !== 'adopted';
 const serverUrl = (server: PreviewServer) => `http://localhost:${server.port}${server.path ?? '/'}`;
 
+function sameOrigin(a: string, b: string): boolean {
+  try {
+    return new URL(a).origin === new URL(b).origin;
+  } catch {
+    return false;
+  }
+}
+
 const targetsSchema = z.array(z.object({ type: z.string(), webSocketDebuggerUrl: z.string().optional() }).passthrough());
 
 /** resolve → launch → the page target's CDP socket. */
@@ -168,7 +176,7 @@ export class PreviewHost implements PreviewHostLike {
     if (this.entries.get(ctx.runId) !== entry || entry.viewer !== viewer || entry.port !== server.port) return;
     if (answering) {
       entry.servers.set(server.port, 'adopted');
-      return this.show(entry, serverUrl(server), true);
+      return this.showServer(entry, server, true, true);
     }
     if (current === 'adopted') entry.servers.delete(server.port);
     // A server cezar ran and lost says so, with its log; Start again is the same approval.
@@ -316,7 +324,8 @@ export class PreviewHost implements PreviewHostLike {
     const server = this.registration(entry, port);
     // Chromium starts for a pane that is open, never for nobody.
     if (state === 'up') {
-      if (server && entry.viewer) void this.show(entry, serverUrl(server), false);
+      // A (re)started server: load the page again, at the one the owner was last on (5.9).
+      if (server && entry.viewer) void this.showServer(entry, server, false, false);
     } else {
       this.report(entry, port, dev);
     }
@@ -357,9 +366,34 @@ export class PreviewHost implements PreviewHostLike {
           lastUrl: entry.session?.url ?? entry.lastUrl ?? serverUrl(server),
         });
       case 'up':
-        if (entry.viewer) void this.show(entry, serverUrl(server), false);
+        if (entry.viewer) void this.showServer(entry, server, false, true);
         return;
     }
+  }
+
+  /** Where a server's page reopens: the page the owner was last on when it is this server's, else the registered root. */
+  private serverPage(entry: RunEntry, server: PreviewServer): string {
+    const root = serverUrl(server);
+    const last = entry.session?.url ?? entry.lastUrl;
+    return last && sameOrigin(last, root) ? last : root;
+  }
+
+  /**
+   * Streams a registered server. With `resume`, a live page already on that server is kept as it
+   * is: a reconnect, a takeover or a reopen inside the browser idle window must not throw the owner
+   * back to the root and lose their form state. Re-attaching restarts the screencast, so the first
+   * frame still announces `streaming`.
+   */
+  private async showServer(entry: RunEntry, server: PreviewServer, adopted: boolean, resume: boolean): Promise<void> {
+    const url = this.serverPage(entry, server);
+    const { session, viewer } = entry;
+    if (resume && session?.url && viewer && !entry.browserFailure && sameOrigin(session.url, url)) {
+      entry.adopted = adopted;
+      entry.lastUrl = session.url;
+      session.attach(viewer);
+      return;
+    }
+    return this.show(entry, url, adopted);
   }
 
   /** Browser, then page, then the first frame (which the session announces as `streaming`). */
@@ -420,7 +454,10 @@ export class PreviewHost implements PreviewHostLike {
   }
 
   private launchFailed(entry: RunEntry, error: unknown): void {
-    if (error instanceof ChromiumMissingError) return this.tell(entry, this.missingState());
+    // `not-installed`: the binary vanished between resolution and spawn. Same pane as none at all.
+    if (error instanceof ChromiumMissingError || (error instanceof ChromiumError && error.kind === 'not-installed')) {
+      return this.tell(entry, this.missingState());
+    }
     const stderrTail = error instanceof ChromiumError ? error.stderrTail : error instanceof Error ? error.message : String(error);
     entry.browserFailure = error instanceof ChromiumError && error.kind === 'sandbox'
       ? { t: 'state', stage: 'sandbox-failed', stderrTail }
@@ -506,6 +543,8 @@ export class PreviewHost implements PreviewHostLike {
   private closeBrowser(entry: RunEntry): BrowserHandle | undefined {
     const { browser, session } = entry;
     entry.browserGen += 1;
+    // The page the owner was on outlives the browser: 5.9 shows it, and Start again reopens it.
+    entry.lastUrl = session?.url ?? entry.lastUrl;
     entry.browser = entry.session = undefined;
     session?.close();
     browser?.close();
