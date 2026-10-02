@@ -192,12 +192,12 @@ export function AutomationEditor({ automation, forge, timeZone, onSaved, onReloa
                 <>
                   <p className="text-sm break-words">{`Delete “${automation.name}”? It will stop running and cannot be restored.`}</p>
                   <div className="flex flex-wrap gap-2">
-                    <Button type="button" variant="danger-ghost" data-slot="automation-delete-confirm" disabled={deleting} onClick={() => void remove()}>Delete automation</Button>
+                    <Button type="button" variant="danger-ghost" data-action="automation-delete-confirm" disabled={deleting} onClick={() => void remove()}>Delete automation</Button>
                     <Button type="button" variant="outline" disabled={deleting} onClick={() => { setConfirmingDelete(false); setDeleteError('') }}>Keep</Button>
                   </div>
                 </>
               ) : (
-                <Button type="button" variant="outline" data-slot="automation-delete" onClick={() => setConfirmingDelete(true)}>Delete</Button>
+                <Button type="button" variant="outline" data-action="automation-delete" onClick={() => setConfirmingDelete(true)}>Delete</Button>
               )}
               {deleteError ? <p role="alert" className="text-sm break-words text-destructive">{deleteError}</p> : null}
             </div>

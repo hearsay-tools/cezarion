@@ -187,9 +187,10 @@ describe('scheduled automations on an opted-in fixture server', () => {
     applyContrastQaVariant(browser, dark)
     // Phone width: the same form in one column, GitHub segment still disabled, nothing sideways.
     browser.setViewport(390, 844)
+    // The sample waits for the 390 px viewport to take effect, so it never reads the desktop layout.
     const phone = browser.waitForValue(`(() => {
       const form = document.querySelector('form.automation-editor')
-      return form ? { overflow: document.documentElement.scrollWidth - window.innerWidth } : null
+      return form && window.innerWidth === 390 ? { overflow: document.documentElement.scrollWidth - window.innerWidth } : null
     })()`) as { overflow: number }
     expect(phone.overflow).toBeLessThanOrEqual(0)
     browser.screenshot(`${shotsDir}/automations-editor-390.png`, { viewport: true })
@@ -212,7 +213,7 @@ describe('scheduled automations on an opted-in fixture server', () => {
     expect(card).toContain('Next run: —')
 
     // Run now works while paused and launches an ordinary task.
-    browser.click('[data-slot="automation-run"]')
+    browser.click('[data-action="automation-run"]')
     browser.waitForFunction(`document.body.textContent.includes('Started task')`)
     const runs = await pollFor(async (signal) => {
       const all = await pollJson<Array<{ id: string; task: string; automationTrigger?: { trigger: string } }>>(`${base}/api/v1/runs`, signal)
@@ -229,14 +230,14 @@ describe('scheduled automations on an opted-in fixture server', () => {
     browser.goto(`${base}${scoped(`/automations/${created.id}/log`)}`)
     const logRows = browser.waitForValue(`(() => {
       const rows = [...document.querySelectorAll('ol[aria-label="Automation execution log"] li')].map((li) => li.textContent)
-      return rows.length > 0 ? rows : null
+      return rows.some((row) => row.includes('Manual') && row.includes('Open task')) ? rows : null
     })()`) as string[]
-    expect(logRows.some((row) => row.includes('Manual') && row.includes('Open task'))).toBe(true)
+    expect(logRows.length).toBeGreaterThan(0)
     browser.screenshot(`${shotsDir}/automations-log.png`)
 
     // Enable arms the next run; the list shows it.
     browser.goto(`${base}${scoped('/automations')}`)
-    browser.click('[data-slot="automation-toggle"]')
+    browser.click('[data-action="automation-toggle"]')
     const enabledCard = browser.waitForValue(`(() => {
       const card = [...document.querySelectorAll('[data-slot="automation-card"]')].find((node) => node.textContent.includes(${JSON.stringify(name)}))
       return card && /Next run: Tue 02:00/.test(card.textContent) ? card.textContent : null
@@ -246,10 +247,20 @@ describe('scheduled automations on an opted-in fixture server', () => {
     applyContrastQaVariant(browser, light)
     browser.screenshot(`${shotsDir}/automations-list-light.png`)
     restoreContrastQaDefaults(browser)
+    // The enabled list on a phone: one column, nothing sideways. The shared-env iOS sweep only
+    // sees the "off" page, so this is where the list's 390 px layout is asserted.
+    browser.setViewport(390, 844)
+    const phoneList = browser.waitForValue(`(() => {
+      const card = document.querySelector('[data-slot="automation-card"]')
+      return card && window.innerWidth === 390 ? { overflow: document.documentElement.scrollWidth - window.innerWidth } : null
+    })()`) as { overflow: number }
+    expect(phoneList.overflow).toBeLessThanOrEqual(0)
+    browser.screenshot(`${shotsDir}/automations-list-390.png`, { viewport: true })
+    browser.setViewport(1440, 900)
     expect((await listed()).find((item) => item.id === created.id)?.nextRunAt).toBeTruthy()
 
     // Pause clears the next run.
-    browser.click('[data-slot="automation-toggle"]')
+    browser.click('[data-action="automation-toggle"]')
     const pausedCard = browser.waitForValue(`(() => {
       const card = [...document.querySelectorAll('[data-slot="automation-card"]')].find((node) => node.textContent.includes(${JSON.stringify(name)}))
       return card && card.textContent.includes('Paused') && card.textContent.includes('Next run: —') ? card.textContent : null
@@ -258,8 +269,8 @@ describe('scheduled automations on an opted-in fixture server', () => {
 
     // Delete goes through the editor's inline confirm.
     browser.goto(`${base}${scoped(`/automations/${created.id}`)}`)
-    browser.click('[data-slot="automation-delete"]')
-    browser.click('[data-slot="automation-delete-confirm"]')
+    browser.click('[data-action="automation-delete"]')
+    browser.click('[data-action="automation-delete-confirm"]')
     browser.waitForFunction(`location.pathname === '${scoped('/automations')}'`)
     await pollFor(async () => ((await listed()).some((item) => item.id === created.id) ? undefined : true),
       () => 'the deleted automation is still listed', { timeoutMs: 15_000, intervalMs: 250 })
