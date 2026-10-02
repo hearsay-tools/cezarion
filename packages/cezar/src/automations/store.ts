@@ -112,8 +112,7 @@ export class AutomationStore {
       updatedAt: this.now().toISOString(),
     });
     this.definitions.set(id, definition);
-    const state = this.state(id);
-    if (state) this.setState(id, { ...state, revision: definition.revision });
+    if (this.state(id)) this.setState(id, (current) => ({ ...current, revision: definition.revision }));
     this.persistDefinitions();
     return definition;
   }
@@ -132,9 +131,21 @@ export class AutomationStore {
     return this.stateFile.states[id];
   }
 
-  setState(id: string, state: AutomationRuntimeState): void {
-    this.stateFile.states = { ...this.stateFile.states, [id]: state };
+  /**
+   * Read-modify-write: two cockpits on one project each hold their own in-memory copy of the
+   * state file, and a write from memory alone would clobber the other's cursor or `nextRunAt`.
+   * Re-reading first merges this ONE id over whatever is on disk, so the two converge.
+   *
+   * The write for THIS id is also computed from the fresh read, not from the caller's possibly
+   * stale snapshot: `update` receives the on-disk record (or `{}` when none exists) and returns
+   * the full next record. Never close over a state read from before this call.
+   */
+  setState(id: string, update: (current: AutomationRuntimeState) => AutomationRuntimeState): AutomationRuntimeState {
+    const onDisk = this.readJson(STATE, automationStateFileSchema, { version: 1, states: {} });
+    const next = update(onDisk.states[id] ?? {});
+    this.stateFile = { ...onDisk, states: { ...onDisk.states, [id]: next } };
     this.atomicJson(STATE, this.stateFile);
+    return next;
   }
 
   receipts(): AutomationReceipt[] {
@@ -156,6 +167,8 @@ export class AutomationStore {
     revision: number;
     eventId: string;
     candidate?: GithubCandidate;
+    /** schedule kind: the occurrence being reserved. */
+    occurrenceAt?: string;
   }): AutomationReceipt | undefined {
     const receiptKey = `${input.automationId}:${input.eventId}`;
     if (this.latestReceipts().has(receiptKey)) return undefined;

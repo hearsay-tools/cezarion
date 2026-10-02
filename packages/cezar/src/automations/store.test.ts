@@ -351,3 +351,47 @@ describe('AutomationStore.acquireLease', () => {
     lease?.release();
   });
 });
+
+describe('AutomationStore.setState (read-modify-write)', () => {
+  it('lets two stores on one directory interleave writes without clobbering each other', async () => {
+    const dir = await directory();
+    const one = AutomationStore.open(dir);
+    const two = AutomationStore.open(dir);
+    one.setState('a', (current) => ({ ...current, nextRunAt: '2026-10-03T02:00:00.000Z' }));
+    two.setState('b', (current) => ({ ...current, cursor: { timestamp: '2026-10-02T00:00:00.000Z' } }));
+    one.setState('a', (current) => ({ ...current, nextRunAt: '2026-10-04T02:00:00.000Z' }));
+    const fresh = AutomationStore.open(dir);
+    expect(fresh.state('a')).toEqual({ nextRunAt: '2026-10-04T02:00:00.000Z' });
+    expect(fresh.state('b')).toEqual({ cursor: { timestamp: '2026-10-02T00:00:00.000Z' } });
+    // Each in-memory copy also sees the other's id after its own next write.
+    expect(one.state('b')).toEqual({ cursor: { timestamp: '2026-10-02T00:00:00.000Z' } });
+  });
+
+  it('two stores racing on the SAME id: the loser updates from a fresh disk read, not its stale snapshot', async () => {
+    const dir = await directory();
+    const one = AutomationStore.open(dir);
+    const two = AutomationStore.open(dir);
+    // `two` only knows 'a' as absent.
+    expect(two.state('a')).toBeUndefined();
+    one.setState('a', (current) => ({ ...current, lastRunAt: '2026-10-02T02:00:00.000Z' }));
+    two.setState('a', (current) => ({ ...current, nextRunAt: '2026-10-03T02:00:00.000Z' }));
+    expect(AutomationStore.open(dir).state('a')).toEqual({ lastRunAt: '2026-10-02T02:00:00.000Z', nextRunAt: '2026-10-03T02:00:00.000Z' });
+  });
+
+  it('returns the next record', async () => {
+    const store = AutomationStore.open(await directory());
+    expect(store.setState('a', (current) => ({ ...current, consecutiveFailures: 1 }))).toEqual({ consecutiveFailures: 1 });
+  });
+
+  it('persists the occurrence a receipt reserved', async () => {
+    const store = AutomationStore.open(await directory());
+    const receipt = store.reserveReceipt({
+      automationId: 'a',
+      revision: 1,
+      eventId: 'schedule:2026-10-03T02:00:00.000Z',
+      occurrenceAt: '2026-10-03T02:00:00.000Z',
+    });
+    expect(receipt?.receiptKey).toBe('a:schedule:2026-10-03T02:00:00.000Z');
+    expect(store.receipts()[0]?.occurrenceAt).toBe('2026-10-03T02:00:00.000Z');
+  });
+});

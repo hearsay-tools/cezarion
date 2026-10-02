@@ -44,7 +44,7 @@ describe('ProjectAutomationScheduler', () => {
 
   it('does not advance the cursor on failure and applies bounded backoff', async () => {
     const { store, definition } = await setup();
-    store.setState(definition.id, { cursor: { timestamp: '2026-07-26T01:00:00.000Z' } });
+    store.setState(definition.id, (current) => ({ ...current, cursor: { timestamp: '2026-07-26T01:00:00.000Z' } }));
     const scheduler = new ProjectAutomationScheduler({ projectId: 'p', owner: 'acme', repo: 'demo', store, poller: { poll: async () => { throw new Error('rate limited'); } } as never, launch: async () => ({ runId: 'unused' }) });
     await expect(scheduler.check(definition)).rejects.toThrow('rate limited');
     expect(store.state(definition.id)?.cursor?.timestamp).toBe('2026-07-26T01:00:00.000Z');
@@ -73,8 +73,8 @@ describe('ProjectAutomationScheduler', () => {
     const contender = AutomationStore.open(owner.dataDir);
     const held = owner.acquireLease();
     await owner.appendLog({ automationId: definition.id, revision: definition.revision, result: 'no-match' });
-    owner.setState(definition.id, { baselineAt: '2026-09-14T06:00:00.000Z', cursor: { timestamp: '2026-09-14T06:01:00.000Z' }, consecutiveFailures: 3, backoffUntil: '2026-09-14T07:00:00.000Z' });
-    owner.setState(other.id, { baselineAt: '2026-09-14T06:02:00.000Z' });
+    owner.setState(definition.id, (current) => ({ ...current, baselineAt: '2026-09-14T06:00:00.000Z', cursor: { timestamp: '2026-09-14T06:01:00.000Z' }, consecutiveFailures: 3, backoffUntil: '2026-09-14T07:00:00.000Z' }));
+    owner.setState(other.id, (current) => ({ ...current, baselineAt: '2026-09-14T06:02:00.000Z' }));
     const path = join(owner.dataDir, 'automation-state.json');
     const before = await readFile(path, 'utf8');
     const scheduler = new ProjectAutomationScheduler({ projectId: 'p', owner: 'acme', repo: 'demo', store: contender, poller: { poll: async () => ({ candidates: [], truncated: false, pages: 1 }) } as never, launch: async () => ({ runId: 'unused' }) });
@@ -118,9 +118,10 @@ describe('ProjectAutomationScheduler', () => {
 
   it('starts provider discovery from the durable cursor overlap', async () => {
     const { store, definition } = await setup();
-    store.setState(definition.id, {
+    store.setState(definition.id, (current) => ({
+      ...current,
       cursor: { timestamp: '2026-07-26T01:00:00.000Z' },
-    });
+    }));
     const poll = vi.fn(async () => ({ candidates: [], truncated: false, pages: 1 }));
     const scheduler = new ProjectAutomationScheduler({
       projectId: 'p',
@@ -138,9 +139,10 @@ describe('ProjectAutomationScheduler', () => {
 
   it('advances through scanned non-matches without moving a cursor backwards', async () => {
     const { store, definition } = await setup();
-    store.setState(definition.id, {
+    store.setState(definition.id, (current) => ({
+      ...current,
       cursor: { timestamp: '2026-07-26T01:00:00.000Z', tieBreaker: 'current' },
-    });
+    }));
     const scheduler = new ProjectAutomationScheduler({
       projectId: 'p',
       owner: 'acme',
@@ -223,8 +225,8 @@ describe('WorkspaceAutomationScheduler', () => {
       vi.setSystemTime(now);
       const a = await setup();
       const b = await setup();
-      a.store.setState(a.definition.id, { nextCheckAt: new Date(now - 60_000).toISOString() });
-      b.store.setState(b.definition.id, { nextCheckAt: new Date(now + 30_000).toISOString() });
+      a.store.setState(a.definition.id, (current) => ({ ...current, nextCheckAt: new Date(now - 60_000).toISOString() }));
+      b.store.setState(b.definition.id, (current) => ({ ...current, nextCheckAt: new Date(now + 30_000).toISOString() }));
       a.store.setState = () => { throw new Error('read-only automation state'); };
       const failing = vi.fn(async () => { throw new Error('rate limited'); });
       const healthy = vi.fn(async () => ({ candidates: [], truncated: false, pages: 1 }));

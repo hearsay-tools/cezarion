@@ -3472,12 +3472,13 @@ export function createApp(deps: ServerDeps) {
         const automation = automationStore.create({ ...input, enabled: enable === true });
         if (enable && isGithubAutomation(automation)) {
           const baselineAt = new Date().toISOString();
-          automationStore.setState(automation.id, {
+          automationStore.setState(automation.id, (current) => ({
+            ...current,
             revision: automation.revision,
             baselineAt,
             cursor: { timestamp: baselineAt },
             nextCheckAt: new Date(Date.now() + automation.intervalSeconds * 1_000).toISOString(),
-          });
+          }));
         }
         emitAutomationChange(c.get('project'), automation.id, automation.revision);
         automationsChanged();
@@ -3536,13 +3537,13 @@ export function createApp(deps: ServerDeps) {
       if (!isGithubAutomation(current)) return c.json({ error: 'only GitHub automations can be enabled here' }, 409);
       const automation = store.update(current.id, current.revision, { ...editableAutomation(current), enabled: true });
       const baselineAt = new Date().toISOString();
-      store.setState(automation.id, {
-        ...store.state(automation.id),
+      store.setState(automation.id, (state) => ({
+        ...state,
         revision: automation.revision,
         baselineAt,
         cursor: { timestamp: baselineAt },
         nextCheckAt: new Date(Date.now() + current.intervalSeconds * 1_000).toISOString(),
-      });
+      }));
       await store.appendLog({ automationId: automation.id, revision: automation.revision, result: 'baseline', reason: 'Enabled from a current-time baseline; existing records were not launched.' });
       emitAutomationChange(c.get('project'), automation.id, automation.revision);
       automationsChanged();
