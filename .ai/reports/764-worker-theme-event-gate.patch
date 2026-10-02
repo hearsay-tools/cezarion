@@ -1,0 +1,29 @@
+diff --git a/packages/web/e2e/worker-relationships.e2e.ts b/packages/web/e2e/worker-relationships.e2e.ts
+index 713a04dd..b6abede7 100644
+--- a/packages/web/e2e/worker-relationships.e2e.ts
++++ b/packages/web/e2e/worker-relationships.e2e.ts
+@@ -124,8 +124,24 @@ it('retains all 32 scoped worker links only on Session, including archived worke
+ for (const [width, height] of [[1440, 900], [360, 640]]) for (const theme of ['light', 'dark']) {
+   it(`${width}x${height} ${theme}: keyboard reaches last worker under sticky header with 44px targets`, () => {
+     browser.setViewport(width!, height!)
++    if (width === 1440 && theme === 'dark') { browser.goto(base); browser.evaluate(`localStorage.setItem('cez-theme', 'light')`) }
+     browser.goto(`${base}/settings/global/appearance`)
+     browser.waitForFunction(`document.querySelector('[data-slot="appearance-theme"]') !== null`)
++    if (width === 1440 && theme === 'dark') browser.evaluate(`(() => {
++      const target = document.querySelector('[data-slot="appearance-theme"] [data-value="dark"]');
++      target.addEventListener('click', event => {
++        event.stopImmediatePropagation(); event.preventDefault();
++        const read = Storage.prototype.getItem;
++        Storage.prototype.getItem = function(key) {
++          const value = read.call(this, key);
++          if (key === 'cez-theme') {
++            Storage.prototype.getItem = read;
++            queueMicrotask(() => target.click());
++          }
++          return value;
++        };
++      }, { capture: true, once: true });
++    })()`)
+     browser.click(`[data-slot="appearance-theme"] [data-value="${theme}"]`)
+     open()
+     browser.waitForFunction(`document.querySelectorAll('${region} a').length === 32`)

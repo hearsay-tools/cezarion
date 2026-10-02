@@ -1,0 +1,17 @@
+
+> test
+> vitest run --run packages/web/src/test/e2e-wait-discipline.test.ts packages/web/src/test/poll.test.ts packages/web/src/components/theme-provider.test.tsx
+
+
+ RUN  v4.1.10 /home/agent/projects/cezar/.ai/cezar/worktrees/d6e7f159-f1c6-45f4-87c6-500ec47ab925
+
+ ✓ |web| src/test/poll.test.ts (20 tests) 426ms
+ ✓ |web| src/components/theme-provider.test.tsx (18 tests) 92ms
+ ✓ |web| src/test/e2e-wait-discipline.test.ts (30 tests) 941ms
+     ✓ has no wait-discipline site outside the baseline, and the baseline names no site that is gone  402ms
+
+ Test Files  3 passed (3)
+      Tests  68 passed (68)
+   Start at  17:22:16
+   Duration  1.18s (transform 204ms, setup 133ms, import 216ms, tests 1.46s, environment 574ms)
+

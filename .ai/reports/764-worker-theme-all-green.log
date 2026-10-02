@@ -1,0 +1,22 @@
+
+> test
+> vitest run --config packages/web/e2e/vitest.config.ts worker-relationships.e2e.ts --reporter=verbose
+
+
+ RUN  v4.1.10 /home/agent/projects/cezar/.ai/cezar/worktrees/d6e7f159-f1c6-45f4-87c6-500ec47ab925/packages/web/e2e
+
+ ✓ |e2e| worker-relationships.e2e.ts > retains all 32 scoped worker links only on Session, including archived workers 2777ms
+ ✓ |e2e| worker-relationships.e2e.ts > 1440x900 light: keyboard reaches last worker under sticky header with 44px targets 7391ms
+ ✓ |e2e| worker-relationships.e2e.ts > 1440x900 dark: keyboard reaches last worker under sticky header with 44px targets 1175ms
+ ✓ |e2e| worker-relationships.e2e.ts > 360x640 light: keyboard reaches last worker under sticky header with 44px targets 1193ms
+ ✓ |e2e| worker-relationships.e2e.ts > 360x640 dark: keyboard reaches last worker under sticky header with 44px targets 1196ms
+ ✓ |e2e| worker-relationships.e2e.ts > shows unavailable parent with retry, successful empty state, worker wait and preserved human ask attribution 2867ms
+ ✓ |e2e| worker-relationships.e2e.ts > retains known IDs during loading, request error and offline pause, then retries real relationships 1938ms
+ ✓ |e2e| worker-relationships.e2e.ts > global Tasks and cross-project palette keep parked-root status without listing workers 328ms
+ ✓ |e2e| worker-relationships.e2e.ts > keeps request waits consistent in threads, global tasks and the palette at phone and desktop widths 6473ms
+
+ Test Files  1 passed (1)
+      Tests  9 passed (9)
+   Start at  17:22:55
+   Duration  27.47s (transform 41ms, setup 36ms, import 25ms, tests 27.23s, environment 0ms)
+

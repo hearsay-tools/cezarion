@@ -1,0 +1,48 @@
+
+> test
+> vitest run --config packages/web/e2e/vitest.config.ts worker-relationships.e2e.ts -t 1440x900 dark --reporter=verbose
+
+
+ RUN  v4.1.10 /home/agent/projects/cezar/.ai/cezar/worktrees/d6e7f159-f1c6-45f4-87c6-500ec47ab925/packages/web/e2e
+
+stderr | worker-relationships.e2e.ts > 1440x900 dark: keyboard reaches last worker under sticky header with 44px targets
+cezar e2e: failure bundle for "1440x900 dark: keyboard reaches last worker under sticky header with 44px targets" at /home/agent/projects/cezar/.ai/cezar/worktrees/d6e7f159-f1c6-45f4-87c6-500ec47ab925/.ai/qa/failures/worker-relationships/1440x900-dark-keyboard-reaches-last-worker-under-sticky-header-with-44px-targets-2
+
+ ↓ |e2e| worker-relationships.e2e.ts > retains all 32 scoped worker links only on Session, including archived workers
+ ↓ |e2e| worker-relationships.e2e.ts > 1440x900 light: keyboard reaches last worker under sticky header with 44px targets
+ × |e2e| worker-relationships.e2e.ts > 1440x900 dark: keyboard reaches last worker under sticky header with 44px targets 1474ms
+   → expected false to be true // Object.is equality
+ ↓ |e2e| worker-relationships.e2e.ts > 360x640 light: keyboard reaches last worker under sticky header with 44px targets
+ ↓ |e2e| worker-relationships.e2e.ts > 360x640 dark: keyboard reaches last worker under sticky header with 44px targets
+ ↓ |e2e| worker-relationships.e2e.ts > shows unavailable parent with retry, successful empty state, worker wait and preserved human ask attribution
+ ↓ |e2e| worker-relationships.e2e.ts > retains known IDs during loading, request error and offline pause, then retries real relationships
+ ↓ |e2e| worker-relationships.e2e.ts > global Tasks and cross-project palette keep parked-root status without listing workers
+ ↓ |e2e| worker-relationships.e2e.ts > keeps request waits consistent in threads, global tasks and the palette at phone and desktop widths
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |e2e| worker-relationships.e2e.ts > 1440x900 dark: keyboard reaches last worker under sticky header with 44px targets
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ worker-relationships.e2e.ts:163:25
+    161|     expect(facts.focused).toBe(true); expect(facts.visible).toBe(true)…
+    162|     expect(facts.minimumTarget).toBeGreaterThanOrEqual(44); expect(fac…
+    163|     expect(facts.theme).toBe(true); expect(facts.reducedMotion).toBe(t…
+       |                         ^
+    164|     browser.screenshot(join(artifacts, `workers-${width}-${theme}.png`…
+    165|     browser.press('Enter')
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 8 skipped (9)
+   Start at  17:21:12
+   Duration  3.70s (transform 51ms, setup 39ms, import 33ms, tests 3.44s, environment 0ms)
+

@@ -127,6 +127,10 @@ for (const [width, height] of [[1440, 900], [360, 640]]) for (const theme of ['l
     browser.goto(`${base}/settings/global/appearance`)
     browser.waitForFunction(`document.querySelector('[data-slot="appearance-theme"]') !== null`)
     browser.click(`[data-slot="appearance-theme"] [data-value="${theme}"]`)
+    // A hard navigation must follow the committed browser-local preference, not just the click.
+    browser.waitForFunction(`localStorage.getItem('cez-theme') === '${theme}' &&
+      document.querySelector('[data-slot="appearance-theme"] [data-value="${theme}"]')?.getAttribute('aria-checked') === 'true' &&
+      document.documentElement.classList.contains('light') === ${theme === 'light'}`)
     open()
     browser.waitForFunction(`document.querySelectorAll('${region} a').length === 32`)
     browser.setReducedMotion()

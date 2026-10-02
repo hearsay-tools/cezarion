@@ -357,3 +357,30 @@ A deterministic missing-observation case aborts upon the child's `spawn` event. 
 The original interrupted-write proof was rerun with only atomic publication temporarily replaced by the original direct write: the truncation case fails with the original empty-number assertion while cancellation passes (`764-ticks-cancellation-truncate-red.log`). Restoring atomic publication gives **2/2** (`764-ticks-cancellation-green.log`). Both real SIGTERM-resistant cases and adjacent lock cases pass **5/5** (`764-ticks-cancellation-package-green.log`); scanner/npm-process units pass **37/37** (`764-ticks-cancellation-units-green.log`); package typecheck and diff check pass (`764-ticks-cancellation-typecheck.log`). Exact commands are the same focused selection in the preceding section. No production code, interval, dependency or browser environment changed; no environment was started. Parent owns review and CI rerun.
 
 Parent follow-up verification on `130643fa`: `npm run test:package` → 62/62 passed (including both new fixture regressions). Independent reviewer approved the atomic publication and cancellation follow-up; evidence `764-parent-verification/package-ticks-cancellation.log`.
+
+## PR #773 CI worker-relationship theme setup follow-up
+
+Merged parent `9955b401` normally as `f249c766` and ran `npm ci` in this worktree. Read the retained CI log and all three failure-bundle files before diagnosis: the 1440/dark case fails only `facts.theme` at line 147; screenshot and snapshot show light theme (`Theme: light. Switch to dark.`), with worker 32 focused, visible and a 44px target. The original artifact is retained in `764-worker-theme-ci-bundle/`.
+
+The setting is **browser-local**, not an asynchronous workspace save: `ThemeProvider.setTheme` synchronously writes `cez-theme` through `writeStoredTheme`; density/width are the appearance values saved over HTTP. The affected test clicked the theme and immediately issued a hard `goto` through `open()`, without observing that the click reached the selected control, stored preference or applied root. A completed browser command alone was its ordering assumption. The original full spec passed 9/9 locally (`764-worker-theme-before.log`), so the uncontrolled CI event ordering is not claimed as locally reproduced.
+
+For controlled red/green evidence, seed the previous light preference, gate the real dark button's click delivery, and release that event when the next stored-theme observation runs. This deliberately exposes the click/navigation ordering boundary without a sleep, request retry or production change. The original setup navigates away and discards the pending change, reproducing the exact theme assertion failure while the focus/geometry assertions pass (`764-worker-theme-red.log`, `764-worker-theme-red-bundle/`). With the correction, the localStorage read releases the pending event and the wait observes its actual commit before navigation; the same gated case passes (`764-worker-theme-gated-green.log`). The repeatable injection is retained as `764-worker-theme-event-gate.patch` against the pre-fix spec. It demonstrates the missing ordering guarantee; the original CI artifact has no event trace to establish the exact browser delivery sequence.
+
+Final code changes only the setup for the four existing worker keyboard/viewport/theme rows: before hard navigation, wait for `localStorage.getItem('cez-theme')`, the chosen radio's `aria-checked` value, and the root's light class to agree with the requested theme. All injection code is removed. Exact downstream theme, focus, reduced-motion and geometry assertions and existing budgets remain unchanged. No helper, production code or baseline change.
+
+Exact focused commands from repository root:
+
+```sh
+npm ci
+env -u CEZ_AUTOMATIONS TMPDIR=/tmp TMP=/tmp TEMP=/tmp sh .ai/scripts/test-env-up.sh
+env -u CEZ_AUTOMATIONS TMPDIR=/tmp TMP=/tmp TEMP=/tmp npm test -- --config packages/web/e2e/vitest.config.ts worker-relationships.e2e.ts -t '1440x900 dark' --reporter=verbose
+env -u CEZ_AUTOMATIONS TMPDIR=/tmp TMP=/tmp TEMP=/tmp npm test -- --config packages/web/e2e/vitest.config.ts worker-relationships.e2e.ts --reporter=verbose
+npm test -- --run packages/web/src/test/e2e-wait-discipline.test.ts packages/web/src/test/poll.test.ts packages/web/src/components/theme-provider.test.tsx
+npm run typecheck:web
+sh .ai/scripts/test-env-down.sh
+git diff --check
+```
+
+The filtered command is the controlled red/green pair above (1 failed, then 1 passed / 8 filtered). Final ordinary full worker-relationships spec passed **9/9** (`764-worker-theme-all-green.log`); adjacent scanner, bounded polls and theme-provider units passed **68/68** (`764-worker-theme-units-green.log`); web typecheck passed (`764-worker-theme-typecheck.log`). Environment bootstrap/install logs are `764-worker-theme-{up,npm-ci}.log`. Parent owns CI rerun and broad gates/campaigns. No unresolved focused failure remains.
+
+Own environment stopped successfully (`764-worker-theme-down.log`); final diff check passed. The fixture's own browser/server cleanup completed in the focused spec.
