@@ -32,7 +32,8 @@ inline-contract ok — contract bundled with declarations, 85 file(s) repointed
 > vite build
 
 vite v8.1.4 building client environment for production...
-[2Ktransforming...✓ 2690 modules transformed.
+[2K
+transforming...✓ 2690 modules transformed.
 rendering chunks...
 computing gzip size...
 ../cezar/web/dist/.cez-e2e-build                                                0.00 kB

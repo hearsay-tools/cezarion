@@ -50,4 +50,3 @@ inline-contract ok — contract bundled with declarations, 85 file(s) repointed
 
 > @wjarka/cezarion@0.15.1 typecheck
 > tsc --noEmit -p tsconfig.test.json
-

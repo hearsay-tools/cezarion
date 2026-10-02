@@ -648,12 +648,12 @@ Switched to a new branch 'task'
 hint: Using 'master' as the name for the initial branch. This default branch name
 hint: is subject to change. To configure the initial branch name to use in all
 hint: of your new repositories, which will suppress this warning, call:
-hint: 
+hint:
 hint: 	git config --global init.defaultBranch <name>
-hint: 
+hint:
 hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
 hint: 'development'. The just-created branch can be renamed via this command:
-hint: 
+hint:
 hint: 	git branch -m <name>
  ✓ |server| src/core/conversation-resume.test.ts (10 tests) 14857ms
    ✓ claude: live parent resume executes its message once without human input  3116ms
@@ -1642,13 +1642,13 @@ Not implemented: navigation to another Document
      ✓ keeps drafts isolated per project — one composer never leaks into the other  734ms
      ✓ submits to the SELECTED project and clears only that project’s draft text  538ms
 stderr | src/routes/task-thread/run-header-mobile.test.tsx > pushed task screen top bar > titles a compare route itself
-No routes matched location "/compare/grp-1" 
+No routes matched location "/compare/grp-1"
 
  ✓ |web| src/routes/repo-git/repo-git.test.tsx (33 tests) 2559ms
      ✓ renders a title-and-meta header with no section tabs, and the working-tree diff from /api/v1/repo/changes  699ms
  ✓ |web| src/components/task-quick-list.test.tsx (114 tests) 2636ms
 stderr | src/routes/task-thread/run-header-mobile.test.tsx > RunHeader below md on a pushed task screen > swaps facet tabs in place below md, so Back still returns to the list
-No routes matched location "/git" 
+No routes matched location "/git"
 
  ✓ |web| src/routes/compare-variants.test.tsx (13 tests) 2734ms
      ✓ renders a column per variant: letter, status text, spend, --stat text, Progress excerpt  405ms
@@ -2316,4 +2316,3 @@ stderr | src/core/harness-parity.test.ts > harness parity — owned input run ti
       Tests  11345 passed (11345)
    Start at  16:30:32
    Duration  262.94s (transform 63.54s, setup 17.27s, import 393.55s, tests 2492.61s, environment 131.56s)
-

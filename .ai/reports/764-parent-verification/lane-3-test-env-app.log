@@ -16,4 +16,3 @@
   creation, code review, CI stabilisation, spec writing & more.
   cezar already loads them for you — Skills → Refresh in the cockpit gets the latest.
   To use them outside cezar:  npx skills add open-mercato/skills --skill '*'
-
