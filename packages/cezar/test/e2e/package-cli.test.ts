@@ -64,6 +64,8 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { CiToolController } from ${JSON.stringify(pathToFileURL(join(packageRoot, 'dist/ci-wait/controller.js')).href)};
 import { createRunner } from ${JSON.stringify(pathToFileURL(join(packageRoot, 'dist/core/runner-factory.js')).href)};
 import piExtension from ${JSON.stringify(pathToFileURL(join(packageRoot, 'scripts/pi-ci-wait.mjs')).href)};
+// Live preview is opt-in: the flag-off assertions below must not depend on the caller's environment.
+delete process.env.CEZ_PREVIEW;
 const controller = await CiToolController.start();
 let count = 0;
 const wait = { id:'11111111-1111-4111-8111-111111111111', generation:'generation', turnId:'turn', timeoutSeconds:1800, prUrl:'https://github.com/owner/repo/pull/1', repository:'owner/repo', prNumber:1, headSha:'a'.repeat(40), registeredAt:'2026-09-22T00:00:00.000Z', deadline:'2026-09-22T00:30:00.000Z', phase:'registered' };
@@ -76,7 +78,16 @@ try {
  assert.match(client.getInstructions() ?? '', /^The interface to Cezarion[^\\n]*\\n- cezar_wait_for_ci: /);
  const tools = await client.listTools();
  assert.deepEqual(tools.tools.map(tool => tool.name), ['cezar_wait_for_ci']);
+ // Flag unset: no cezar_preview_serve in the listing or in the instructions.
+ assert.ok(!tools.tools.some(tool => tool.name === 'cezar_preview_serve'));
+ assert.ok(!(client.getInstructions() ?? '').includes('cezar_preview_serve'));
  assert.equal(count, 0);
+ // Flag set: the installed adapter lists the preview tool next to the CI one.
+ const previewClient = new Client({ name:'installed-preview-smoke', version:'1' });
+ try {
+   await previewClient.connect(new StdioClientTransport({ ...session.descriptor, env:{ ...session.env, CEZ_PREVIEW:'1' }, stderr:'pipe' }));
+   assert.deepEqual((await previewClient.listTools()).tools.map(tool => tool.name), ['cezar_wait_for_ci', 'cezar_preview_serve']);
+ } finally { await previewClient.close(); }
  const result = await client.callTool({ name:'cezar_wait_for_ci', arguments:{pr:wait.prUrl} });
  assert.notEqual(result.isError, true);
  assert.match(JSON.stringify(result), new RegExp(wait.id));
