@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { PreviewServer } from '@open-mercato/cezar-api-client'
 
+import type { ThreadPreviewServer } from '../thread-state'
+
 import { ConnectionBanner, PageDialog, PreviewEmptyState, PreviewStates, type PreviewStageState, type PreviewStateActions } from './preview-states'
 
 afterEach(() => cleanup())
@@ -93,11 +95,20 @@ describe('PreviewStates (design 5.1 to 5.18)', () => {
   })
 
   it('5.6 shows the attempt and stops the server', () => {
-    const a = show({ t: 'state', stage: 'server-starting', server, attempt: 3, startedAt: new Date().toISOString() })
+    const a = show({ t: 'state', stage: 'server-starting', server, attempt: 3, startedAt: new Date().toISOString(), logTail: [] })
     expect(screen.getByRole('heading', { name: 'Starting web' })).toBeTruthy()
     expect(screen.getByText(/Attempt 3/)).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Stop server' }))
     expect(a.stop).toHaveBeenCalledWith(5173)
+  })
+
+  it('5.6 shows the command output so far, and nothing before it prints', () => {
+    show({ t: 'state', stage: 'server-starting', server, attempt: 2, startedAt: new Date().toISOString(), logTail: ['> members-web@0.4.0 dev', '> vite --port 5173', 'VITE v6.2.1  building deps'] })
+    expect(screen.getByText(/VITE v6\.2\.1/)).toBeTruthy()
+    expect(document.querySelector('[data-slot="preview-log-tail"]')?.textContent).toContain('last 3 lines')
+    cleanup()
+    show({ t: 'state', stage: 'server-starting', server, attempt: 0, startedAt: new Date().toISOString(), logTail: [] })
+    expect(document.querySelector('[data-slot="preview-log-tail"]')).toBeNull()
   })
 
   it('5.7 uses the spec copy: waiting on another service, not waiting for input', () => {
@@ -247,6 +258,20 @@ describe('PreviewEmptyState (design 04)', () => {
     expect(document.body.textContent).toContain("Nothing runs from this list")
   })
 
+  it('shows each server as it is now, not as it was registered', () => {
+    const storybook = { ...server, port: 6006, label: 'storybook' }
+    const api = { ...server, port: 8787, label: 'api' }
+    const states = new Map<number, ThreadPreviewServer>([
+      [5173, { kind: 'preview-server', id: 'a', server, state: 'up', stateAt: '2026-10-02T09:54:00.000Z' }],
+      [8787, { kind: 'preview-server', id: 'c', server: api, state: 'exited', exitCode: 1 }],
+    ])
+    render(<PreviewEmptyState servers={[server, storybook, api]} states={states} onOpen={() => undefined} />)
+    expect(screen.getByText(/^up · \d+[smhd]$/)).toBeTruthy()
+    expect(screen.getByText('exited · code 1')).toBeTruthy()
+    expect(screen.getByText('registered · not started')).toBeTruthy()
+    expect(screen.getAllByRole('button').map(b => b.textContent)).toEqual(['Open', 'Review', 'Review'])
+  })
+
   it('shows no list when nothing is registered', () => {
     render(<PreviewEmptyState servers={[]} onOpen={() => undefined} />)
     expect(screen.queryByText('Registered in this task')).toBeNull()
@@ -258,9 +283,12 @@ describe('time-dependent copy', () => {
     vi.useFakeTimers()
     vi.setSystemTime(Date.parse('2026-10-02T10:00:06.000Z'))
     try {
-      show({ t: 'state', stage: 'server-starting', server, attempt: 1, startedAt: '2026-10-02T10:00:00.000Z' })
+      show({ t: 'state', stage: 'server-starting', server, attempt: 1, startedAt: '2026-10-02T10:00:00.000Z', logTail: [] })
       expect(screen.getByText('started 6 s ago')).toBeTruthy()
-      act(() => { vi.advanceTimersByTime(2000) })
+      expect(document.body.textContent).toContain('Attempt 1 · next try in 2 s')
+      act(() => { vi.advanceTimersByTime(1000) })
+      expect(document.body.textContent).toContain('Attempt 1 · next try in 1 s')
+      act(() => { vi.advanceTimersByTime(1000) })
       expect(screen.getByText('started 8 s ago')).toBeTruthy()
     } finally {
       vi.useRealTimers()

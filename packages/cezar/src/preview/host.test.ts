@@ -119,10 +119,10 @@ describe('PreviewHost', () => {
     expect(devServers).toHaveLength(1);
     expect(devServers[0]!.started).toBe(true);
     expect(devServers[0]!.opts).toMatchObject({ worktreePath: '/repo/wt', dir: join(ctx.dataDir, 'preview', 'run-1') });
-    expect(viewer.messages.at(-1)).toMatchObject({ t: 'state', stage: 'server-starting', attempt: 0 });
+    expect(viewer.messages.at(-1)).toMatchObject({ t: 'state', stage: 'server-starting', attempt: 0, logTail: ['ready in 300 ms'] });
 
     devServers[0]!.attempt();
-    expect(viewer.messages.at(-1)).toMatchObject({ t: 'state', stage: 'server-starting', attempt: 1 });
+    expect(viewer.messages.at(-1)).toMatchObject({ t: 'state', stage: 'server-starting', attempt: 1, logTail: ['ready in 300 ms'] });
 
     devServers[0]!.set('up');
     await flush();

@@ -35,7 +35,9 @@ import {
 import { cn } from '@/lib/utils'
 
 import { ExperimentalBadge } from './experimental-badge'
+import { entryFor, serverStatus } from './preview-state'
 import { displayUrl } from './preview-url'
+import type { ThreadPreviewServer } from '../thread-state'
 
 /**
  * The pane's toolbar (design 04, 4.1 to 4.3 and the mobile frame). Order: Session (only where the
@@ -80,6 +82,10 @@ export interface PreviewToolbarProps {
   navEnabled: boolean
   /** First open in progress (5.10): the thin bar under the toolbar. */
   loading?: boolean
+  /** Where each registered server stands now; a server missing here reads as just registered. */
+  serverStates?: ReadonlyMap<number, ThreadPreviewServer>
+  /** The Experimental badge. False where the stage carries it instead (5.14). */
+  badge?: boolean
   /** Present while frames flow. */
   stats?: PreviewStatsValue
   /** Shown in the stats' place when nothing streams: `server exited`, `offline`, `not started`. */
@@ -129,7 +135,7 @@ function Stats({ stats, shrunk }: { stats: PreviewStatsValue; shrunk: boolean })
 }
 
 export function PreviewToolbar(props: PreviewToolbarProps) {
-  const { url, servers, current, adopted, viewport, compact = false, navEnabled, loading = false, stats, status } = props
+  const { url, servers, current, adopted, viewport, compact = false, navEnabled, loading = false, stats, status, badge = true } = props
   const switcher = servers.length >= 2
   const crowded = switcher || adopted
   const ownInput = useRef<HTMLInputElement | null>(null)
@@ -178,15 +184,18 @@ export function PreviewToolbar(props: PreviewToolbarProps) {
           input.current?.focus()
         }}
       >
-        {servers.map(server => (
-          <DropdownMenuItem key={server.port} className="min-h-11 gap-2.5 md:min-h-0" onSelect={() => props.onPickServer(server.port)}>
-            <StatusDot tone="neutral" shape="ring" aria-hidden="true" />
-            <span className="font-semibold">{server.label}</span>
-            <span className="font-mono text-muted-foreground">:{server.port}</span>
-            <span className="ml-auto text-xs text-muted-foreground">{server.answeredAtRegistration ? 'was running' : 'registered'}</span>
-            {current?.port === server.port ? <CheckIcon className="size-4" aria-hidden="true" /> : null}
-          </DropdownMenuItem>
-        ))}
+        {servers.map(server => {
+          const look = serverStatus(entryFor(server, props.serverStates))
+          return (
+            <DropdownMenuItem key={server.port} className="min-h-11 gap-2.5 md:min-h-0" onSelect={() => props.onPickServer(server.port)}>
+              <StatusDot tone={look.tone} shape={look.ring ? 'ring' : 'filled'} pulse={look.pulse} aria-hidden="true" />
+              <span className="font-semibold">{server.label}</span>
+              <span className="font-mono text-muted-foreground">:{server.port}</span>
+              <span className="ml-auto text-xs text-muted-foreground">{look.text}</span>
+              {current?.port === server.port ? <CheckIcon className="size-4" aria-hidden="true" /> : null}
+            </DropdownMenuItem>
+          )
+        })}
         <DropdownMenuSeparator />
         <DropdownMenuItem
           className="min-h-11 gap-2.5 md:min-h-0"
@@ -356,7 +365,7 @@ export function PreviewToolbar(props: PreviewToolbarProps) {
               {stats ? <StatusDot tone="success" aria-hidden="true" /> : null}
               <span className="truncate">{current ? `${current.label} :${current.port}` : 'Preview'}</span>
             </span>
-            <span className="text-xs text-muted-foreground">Experimental</span>
+            {badge ? <span className="text-xs text-muted-foreground">Experimental</span> : null}
           </div>
           {more}
         </div>
@@ -381,7 +390,7 @@ export function PreviewToolbar(props: PreviewToolbarProps) {
       {address}
       {viewportMenu}
       {readout}
-      <ExperimentalBadge iconOnly={crowded} />
+      {badge ? <ExperimentalBadge iconOnly={crowded} /> : null}
       <span aria-hidden="true" className="mx-0.5 h-5 w-px shrink-0 bg-border" />
       {more}
       <Button variant="ghost" size="icon-sm" className={iconButton} aria-label="Close preview" onClick={props.onClose}>

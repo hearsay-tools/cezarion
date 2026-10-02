@@ -9,6 +9,8 @@ vi.mock('@/api/queries', () => ({
   useHealth: () => ({ data: { capabilities: { preview: state.preview } } }),
 }))
 
+vi.mock('./use-preview-server-states', () => ({ usePreviewServerStates: () => new Map() }))
+
 vi.mock('./preview-pane', () => ({
   PreviewPane: ({ onClose }: { onClose: () => void }) => <button type="button" onClick={onClose}>pane</button>,
 }))

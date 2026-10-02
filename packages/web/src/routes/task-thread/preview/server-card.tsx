@@ -7,7 +7,7 @@ import { shortAge } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 import type { ThreadPreviewServer } from '../thread-state'
-import { serverScript, type PreviewOpenRequest } from './preview-state'
+import { serverScript, serverStatus, type PreviewOpenRequest } from './preview-state'
 
 /**
  * The thread card for one registered dev server (#781, v1 design screen 05).
@@ -26,36 +26,24 @@ interface CardView {
 }
 
 function view(entry: ThreadPreviewServer): CardView {
-  const { state, server } = entry
-  const age = shortAge(entry.stateAt)
-  switch (state) {
+  const { text, ...look } = serverStatus(entry)
+  const status = { ...look, status: text }
+  switch (entry.state) {
     case 'registered':
-      return server.answeredAtRegistration
-        ? { tone: 'neutral', status: 'was running when registered', action: { label: 'Open', run: false } }
-        : { tone: 'neutral', ring: true, status: 'registered · not started', action: { label: 'Run and open', run: true } }
+      return entry.server.answeredAtRegistration
+        ? { ...status, action: { label: 'Open', run: false } }
+        : { ...status, action: { label: 'Run and open', run: true } }
     case 'adopted':
-      return { tone: 'neutral', status: 'was running when registered', action: { label: 'Open', run: false } }
     case 'starting':
-      return { tone: 'pending', pulse: true, status: 'starting', action: { label: 'Open', run: false } }
     case 'up':
-      return { tone: 'success', status: age ? `up · ${age}` : 'up', action: { label: 'Open', run: false } }
+      return { ...status, action: { label: 'Open', run: false } }
     case 'stalled':
-      return { tone: 'pending', status: 'stalled · port silent 2 min', action: { label: 'View', run: false } }
+      return { ...status, action: { label: 'View', run: false } }
     case 'exited':
-      return {
-        tone: 'danger',
-        status: entry.exitCode === undefined ? 'exited' : `exited · code ${entry.exitCode}`,
-        action: { label: 'Start again', run: true },
-      }
     case 'stopped':
-      return {
-        tone: 'neutral',
-        ring: true,
-        status: entry.reason === 'idle' ? 'stopped after 15 min idle' : 'stopped',
-        action: { label: 'Start again', run: true },
-      }
+      return { ...status, action: { label: 'Start again', run: true } }
     case 'unavailable':
-      return { tone: 'neutral', ring: true, status: 'unavailable' }
+      return status
   }
 }
 

@@ -1,5 +1,11 @@
 import { createContext, useCallback, useContext, useMemo, useState } from 'react'
 
+import type { PreviewServer } from '@open-mercato/cezar-api-client'
+import type { StatusDotTone } from '@/components/status-dot'
+import { shortAge } from '@/lib/format'
+
+import type { ThreadPreviewServer } from '../thread-state'
+
 /**
  * Where the task view and the preview pane meet (#781). The header toggle, the server cards and
  * the pane itself all speak through this one context, so none of them imports another.
@@ -23,6 +29,55 @@ export interface PreviewPane {
   /** The server the pane is showing, when it is showing one. */
   port?: number
   openPane(request: PreviewOpenRequest): void
+}
+
+/** How a registered server reads right now: the dot and the words, on the card and in the pane's lists. */
+export interface ServerStatus {
+  tone: StatusDotTone
+  ring: boolean
+  pulse: boolean
+  text: string
+}
+
+export function serverStatus(entry: ThreadPreviewServer): ServerStatus {
+  const { state, server } = entry
+  const age = shortAge(entry.stateAt)
+  switch (state) {
+    case 'registered':
+      return server.answeredAtRegistration
+        ? { tone: 'neutral', ring: false, pulse: false, text: 'was running when registered' }
+        : { tone: 'neutral', ring: true, pulse: false, text: 'registered · not started' }
+    case 'adopted':
+      return { tone: 'neutral', ring: false, pulse: false, text: 'was running when registered' }
+    case 'starting':
+      return { tone: 'pending', ring: false, pulse: true, text: 'starting' }
+    case 'up':
+      return { tone: 'success', ring: false, pulse: false, text: age ? `up · ${age}` : 'up' }
+    case 'stalled':
+      return { tone: 'pending', ring: false, pulse: false, text: 'stalled · port silent 2 min' }
+    case 'exited':
+      return { tone: 'danger', ring: false, pulse: false, text: entry.exitCode === undefined ? 'exited' : `exited · code ${entry.exitCode}` }
+    case 'stopped':
+      return { tone: 'neutral', ring: true, pulse: false, text: entry.reason === 'idle' ? 'stopped after 15 min idle' : 'stopped' }
+    case 'unavailable':
+      return { tone: 'neutral', ring: true, pulse: false, text: 'unavailable' }
+  }
+}
+
+/** What the pane knows of a server nothing has reported on yet: only its registration. */
+export function registrationEntry(server: PreviewServer): ThreadPreviewServer {
+  return { kind: 'preview-server', id: `preview-server:${server.port}`, server, state: 'registered', stateAt: server.registeredAt }
+}
+
+/** The server's entry from the task's reduced events, else its registration. */
+export function entryFor(server: PreviewServer, states: ReadonlyMap<number, ThreadPreviewServer> | undefined): ThreadPreviewServer {
+  return states?.get(server.port) ?? registrationEntry(server)
+}
+
+/** `Open` where the page can load now, `Review` where the owner has to look at an approval first. */
+export function opensDirectly(entry: ThreadPreviewServer): boolean {
+  if (entry.state === 'registered') return entry.server.answeredAtRegistration
+  return entry.state === 'up' || entry.state === 'starting' || entry.state === 'adopted'
 }
 
 /** Screen 05 names the script, not its flags: `npm run dev` for `npm run dev -- --port 5173 ...`. */

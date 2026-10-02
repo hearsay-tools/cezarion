@@ -138,7 +138,8 @@ describe('previewServerMessageSchema', () => {
     [{ t: 'state', stage: 'browser-exited', stderrTail: '', serverUp: true }],
     [{ t: 'state', stage: 'browser-exited', signal: 'SIGKILL', stderrTail: '', serverUp: false }],
     [{ t: 'state', stage: 'needs-approval', server, wasRunning: false }],
-    [{ t: 'state', stage: 'server-starting', server, attempt: 3, startedAt: '2026-10-02T10:00:00.000Z' }],
+    [{ t: 'state', stage: 'server-starting', server, attempt: 3, startedAt: '2026-10-02T10:00:00.000Z', logTail: ['> vite', 'building deps'] }],
+    [{ t: 'state', stage: 'server-starting', server, attempt: 0, startedAt: '2026-10-02T10:00:00.000Z', logTail: [] }],
     [{ t: 'state', stage: 'server-stalled', server, logTail: 'waiting' }],
     [{ t: 'state', stage: 'server-exited', server, exitCode: 1, logTail: 'boom' }],
     [{ t: 'state', stage: 'server-exited', server, exitCode: null, logTail: '' }],
@@ -161,6 +162,7 @@ describe('previewServerMessageSchema', () => {
     ['an unknown state stage', { t: 'state', stage: 'connection-lost' }],
     ['an unknown loading step', { t: 'state', stage: 'loading', step: 'dns' }],
     ['an unknown stop reason', { t: 'state', stage: 'server-stopped', server, reason: 'crash', lastUrl: '' }],
+    ['a starting state without its log tail', { t: 'state', stage: 'server-starting', server, attempt: 1, startedAt: '2026-10-02T10:00:00.000Z' }],
     ['an unknown message type', { t: 'cdp', method: 'Runtime.evaluate' }],
   ])('rejects %s', (_name, message) => {
     expect(previewServerMessageSchema.safeParse(message).success).toBe(false);

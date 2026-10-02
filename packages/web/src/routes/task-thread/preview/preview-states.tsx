@@ -34,7 +34,8 @@ import { cn } from '@/lib/utils'
 import { ExperimentalBadge } from './experimental-badge'
 import { LogTail } from './log-tail'
 import { PreviewServerCard } from './server-card'
-import { serverScript } from './preview-state'
+import type { ThreadPreviewServer } from '../thread-state'
+import { entryFor, opensDirectly, serverScript, serverStatus } from './preview-state'
 import { displayUrl } from './preview-url'
 
 /**
@@ -307,6 +308,9 @@ function BrowserExited({ state, actions }: StageProps<'browser-exited'>) {
 
 // ---- dev server -------------------------------------------------------------------------------
 
+/** The dev server is probed this often (PREVIEW_PROBE_MS) while it starts. */
+const PROBE_SECONDS = 2
+
 /** Re-renders every `ms` so "6 s ago" stays true. */
 function useNow(ms: number): number {
   const [now, setNow] = useState(() => Date.now())
@@ -345,16 +349,21 @@ function ServerStarting({ state, actions }: StageProps<'server-starting'>) {
   const { server } = state
   const now = useNow(1000)
   const seconds = Math.max(0, Math.floor((now - Date.parse(state.startedAt)) / 1000))
+  // The host probes every PREVIEW_PROBE_MS; each report restarts the countdown to the next try.
+  const [reportedAt, setReportedAt] = useState(() => Date.now())
+  useEffect(() => setReportedAt(Date.now()), [state.attempt])
+  const nextIn = Math.max(0, Math.ceil(PROBE_SECONDS - (now - reportedAt) / 1000))
   return (
     <Shell state={state.stage} icon={<PlayIcon />} title={`Starting ${server.label}`}>
       <Body>{`cezar ran ${serverScript(server.command)} in the worktree. The page opens as soon as :${server.port} answers.`}</Body>
       <div className="flex items-center justify-between gap-3 rounded-lg border border-border px-3.5 py-3 text-sm">
         <span className="flex items-center gap-2.5 font-semibold text-foreground">
           <LoaderCircleIcon className="size-4 animate-spin text-success motion-reduce:animate-none" aria-hidden="true" />
-          {`Attempt ${state.attempt}`}
+          {nextIn > 0 ? `Attempt ${state.attempt} · next try in ${nextIn} s` : `Attempt ${state.attempt}`}
         </span>
         <span className="text-xs text-muted-foreground">{`started ${seconds} s ago`}</span>
       </div>
+      {state.logTail.length > 0 ? <LogTail text={state.logTail.join('\n')} source={serverScript(server.command)} onCopy={actions.copy} /> : null}
       <Actions>
         <Button variant="outline" onClick={() => actions.stop(server.port)}>Stop server</Button>
       </Actions>
@@ -604,7 +613,16 @@ export function PageDialog({
 // ---- empty ------------------------------------------------------------------------------------
 
 /** Design 04: nothing open yet. Lists the task's registered servers; nothing here runs anything. */
-export function PreviewEmptyState({ servers, onOpen }: { servers: readonly PreviewServer[]; onOpen: (port: number) => void }) {
+export function PreviewEmptyState({
+  servers,
+  states,
+  onOpen,
+}: {
+  servers: readonly PreviewServer[]
+  /** Where each server stands now; a server missing here reads as just registered. */
+  states?: ReadonlyMap<number, ThreadPreviewServer>
+  onOpen: (port: number) => void
+}) {
   return (
     <div data-slot="preview-state" data-state="empty" className="mx-auto flex h-full w-full max-w-[560px] flex-col justify-center gap-4 px-6 py-8">
       <h2 className="text-xl leading-tight font-semibold text-foreground">Open a page in this task's browser</h2>
@@ -615,19 +633,23 @@ export function PreviewEmptyState({ servers, onOpen }: { servers: readonly Previ
             Registered in this task
           </h3>
           <ul>
-            {servers.map(server => (
-              <li key={server.port} className="flex items-center justify-between gap-3 border-b border-border px-3.5 py-2 text-sm last:border-b-0">
-                <span className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-0.5">
-                  <StatusDot tone="neutral" shape="ring" aria-hidden="true" />
-                  <span className="font-semibold text-foreground">{server.label}</span>
-                  <span className="font-mono text-muted-foreground">:{server.port}</span>
-                  <span className="text-muted-foreground">{server.answeredAtRegistration ? 'was running when registered' : 'registered · not started'}</span>
-                </span>
-                <Button variant="outline" size="sm" className="max-md:h-11" onClick={() => onOpen(server.port)}>
-                  {server.answeredAtRegistration ? 'Open' : 'Review'}
-                </Button>
-              </li>
-            ))}
+            {servers.map(server => {
+              const entry = entryFor(server, states)
+              const look = serverStatus(entry)
+              return (
+                <li key={server.port} className="flex items-center justify-between gap-3 border-b border-border px-3.5 py-2 text-sm last:border-b-0">
+                  <span className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-0.5">
+                    <StatusDot tone={look.tone} shape={look.ring ? 'ring' : 'filled'} pulse={look.pulse} aria-hidden="true" />
+                    <span className="font-semibold text-foreground">{server.label}</span>
+                    <span className="font-mono text-muted-foreground">:{server.port}</span>
+                    <span className="text-muted-foreground">{look.text}</span>
+                  </span>
+                  <Button variant="outline" size="sm" className="max-md:h-11" onClick={() => onOpen(server.port)}>
+                    {opensDirectly(entry) ? 'Open' : 'Review'}
+                  </Button>
+                </li>
+              )
+            })}
           </ul>
         </section>
       ) : null}

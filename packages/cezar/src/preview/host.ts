@@ -352,7 +352,7 @@ export class PreviewHost implements PreviewHostLike {
     const logTail = () => dev.logTail().join('\n');
     switch (dev.state) {
       case 'starting':
-        return this.tell(entry, { t: 'state', stage: 'server-starting', server, attempt: dev.attempts, startedAt: entry.startedAt.get(port) ?? new Date().toISOString() });
+        return this.tell(entry, { t: 'state', stage: 'server-starting', server, attempt: dev.attempts, startedAt: entry.startedAt.get(port) ?? new Date().toISOString(), logTail: dev.logTail() });
       case 'stalled':
         return this.tell(entry, { t: 'state', stage: 'server-stalled', server, logTail: logTail() });
       case 'exited':

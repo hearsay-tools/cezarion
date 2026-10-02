@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { PreviewServer } from '@open-mercato/cezar-api-client'
 
+import type { ThreadPreviewServer } from '../thread-state'
+
 import { PreviewToolbar, type PreviewToolbarProps } from './preview-toolbar'
 
 beforeEach(() => {
@@ -77,6 +79,22 @@ describe('PreviewToolbar', () => {
     // The stats shrink to their dot; the numbers live in More.
     expect(screen.queryByText(/fps/)).toBeNull()
     expect(screen.getByLabelText('Preview is live')).toBeTruthy()
+  })
+
+  it('the switcher rows show each server as it is now', () => {
+    const states = new Map<number, ThreadPreviewServer>([
+      [5173, { kind: 'preview-server', id: 'a', server: web, state: 'up', stateAt: '2026-10-02T09:54:00.000Z' }],
+      [6006, { kind: 'preview-server', id: 'b', server: storybook, state: 'exited', exitCode: 1 }],
+    ])
+    render(<PreviewToolbar {...props({ servers: [web, storybook], serverStates: states })} />)
+    openMenu(screen.getByRole('button', { name: /^Server: web/ }))
+    expect(screen.getByRole('menuitem', { name: /web.*:5173.*up · 6m/ })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: /storybook.*:6006.*exited · code 1/ })).toBeTruthy()
+  })
+
+  it('shows no badge when the stage carries it instead (5.14)', () => {
+    render(<PreviewToolbar {...props({ badge: false, stats: undefined, status: { tone: 'neutral', label: 'not supported' } })} />)
+    expect(document.querySelector('[data-slot="preview-experimental"]')).toBeNull()
   })
 
   it('an adopted server also shrinks the badge, and says so inside the URL field', () => {

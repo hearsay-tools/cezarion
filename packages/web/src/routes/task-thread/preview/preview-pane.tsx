@@ -17,6 +17,7 @@ import { PREVIEW_PHONE_QUERY, useMediaQuery } from './use-media-query'
 import { ConnectionBanner, PageDialog, PreviewEmptyState, PreviewStates, type PreviewStageState, type PreviewStateActions } from './preview-states'
 import { PreviewStage, type PreviewStageHandle, type StageGeometry, type StageSize } from './preview-stage'
 import type { PreviewOpenRequest } from './preview-state'
+import type { ThreadPreviewServer } from '../thread-state'
 import { PreviewToolbar, type PreviewStatsValue, type PreviewViewport } from './preview-toolbar'
 import { resolveAddress } from './preview-url'
 
@@ -39,6 +40,8 @@ export interface PreviewPaneProps {
   run: ApiRun
   /** The task's registered servers, newest registration last. */
   servers: readonly PreviewServer[]
+  /** Where each registered server stands now (from the task's events). Absent reads as registered. */
+  serverStates?: ReadonlyMap<number, ThreadPreviewServer>
   /** What the owner asked for: a server to show, and whether they already approved running it. */
   request?: PreviewOpenRequest
   /** Set where the pane replaces the transcript (below 1180 px): the way back to the conversation. */
@@ -58,6 +61,23 @@ export function PreviewPane(props: PreviewPaneProps) {
       <PreviewPaneBody {...props} />
     </PreviewErrorBoundary>
   )
+}
+
+/** The stages that describe the server being opened (not the browser around it). */
+function answersServer(message: PreviewStateMessage, port: number): boolean {
+  switch (message.stage) {
+    case 'needs-approval':
+    case 'server-starting':
+    case 'server-stalled':
+    case 'server-exited':
+    case 'server-stopped':
+      return message.server.port === port
+    case 'loading':
+    case 'streaming':
+      return true
+    default:
+      return false
+  }
 }
 
 function copyText(text: string): void {
@@ -94,7 +114,7 @@ function statusFor(
   }
 }
 
-function PreviewPaneBody({ run, servers, request, onSession, onPort, onLive, onClose }: PreviewPaneProps) {
+function PreviewPaneBody({ run, servers, serverStates, request, onSession, onPort, onLive, onClose }: PreviewPaneProps) {
   const projectId = useActiveProjectId()
   const compact = useMediaQuery(PREVIEW_PHONE_QUERY, false)
 
@@ -157,14 +177,15 @@ function PreviewPaneBody({ run, servers, request, onSession, onPort, onLive, onC
             case 'state':
               setStage(message)
               if (message.stage === 'streaming' || message.stage === 'loading') setStageNonce(n => n + 1)
-              if (
-                autoRun.current !== undefined &&
-                (message.stage === 'needs-approval' || message.stage === 'server-exited' || message.stage === 'server-stopped') &&
-                message.server.port === autoRun.current
-              ) {
+              // A card's approval answers the first thing the server says about its port, and is
+              // spent there: a stale card (the server was already up) must not leave a run waiting
+              // for some later crash.
+              if (autoRun.current !== undefined && answersServer(message, autoRun.current)) {
                 const approved = autoRun.current
                 autoRun.current = undefined
-                conn?.send({ t: 'run', port: approved })
+                if (message.stage === 'needs-approval' || message.stage === 'server-exited' || message.stage === 'server-stopped') {
+                  conn?.send({ t: 'run', port: approved })
+                }
               }
               return
             case 'url': return setUrl(message.url)
@@ -180,6 +201,7 @@ function PreviewPaneBody({ run, servers, request, onSession, onPort, onLive, onC
               // The server has closed this socket. Left to reconnect it would take the preview
               // straight back from the other tab, and the two would trade it forever.
               setTakenOver(message.by)
+              socketOpen.current = false
               conn?.close()
               return
           }
@@ -202,22 +224,24 @@ function PreviewPaneBody({ run, servers, request, onSession, onPort, onLive, onC
   }, [projectId, run.id, generation])
 
   // A resize is only meaningful to a browser that exists, so it follows the stage messages too.
+  // A takeover closes the socket without a transport event, so it ends the connection here.
+  const connected = transport.state === 'open' && takenOver === undefined
   const desired = compact || viewport === 'fit' ? stageSize : viewport
   useEffect(() => {
-    if (desired && transport.state === 'open' && (stage?.stage === 'streaming' || stage?.stage === 'loading')) {
+    if (desired && connected && (stage?.stage === 'streaming' || stage?.stage === 'loading')) {
       send({ t: 'resize', w: desired.w, h: desired.h })
     }
-  }, [desired?.w, desired?.h, transport.state, stage?.stage, stageNonce, send]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [desired?.w, desired?.h, connected, stage?.stage, stageNonce, send]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Keep the socket alive and measure the round trip.
   useEffect(() => {
-    if (transport.state !== 'open') return
+    if (!connected) return
     const timer = setInterval(() => send({ t: 'ping', ts: Date.now() }), PING_MS)
     return () => clearInterval(timer)
-  }, [transport.state, send])
+  }, [connected, send])
 
   // Stats are read off the frame log twice a second, not once per frame.
-  const streaming = transport.state === 'open' && stage?.stage === 'streaming'
+  const streaming = connected && stage?.stage === 'streaming'
   useEffect(() => {
     if (!streaming) {
       setStats(undefined)
@@ -336,7 +360,7 @@ function PreviewPaneBody({ run, servers, request, onSession, onPort, onLive, onC
     dim = true
     overlay = <PreviewStates state={{ stage: 'taken-over', by: takenOver }} actions={actions} />
   } else if (empty) {
-    overlay = <PreviewEmptyState servers={servers} onOpen={serverPort => openServer(serverPort)} />
+    overlay = <PreviewEmptyState servers={servers} states={serverStates} onOpen={serverPort => openServer(serverPort)} />
   } else if (stage?.stage === 'streaming' || (stage?.stage === 'loading' && hasFrame)) {
     overlay = null
   } else if (stage) {
@@ -353,6 +377,8 @@ function PreviewPaneBody({ run, servers, request, onSession, onPort, onLive, onC
       <PreviewToolbar
         url={url}
         servers={servers}
+        serverStates={serverStates}
+        badge={transport.state !== 'blocked'}
         current={current}
         adopted={adopted}
         viewport={compact ? 'fit' : viewport}

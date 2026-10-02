@@ -18,7 +18,7 @@ import { PREVIEW_DOCK_QUERY, PREVIEW_PHONE_QUERY, useMediaQuery } from './use-me
 
 /** Lazy ON PURPOSE: live preview is experimental and off by default, so the pane (toolbar, states,
  *  menus) is a chunk only an owner who opens it pays for. */
-const PreviewPane = lazy(() => import('./preview-pane').then(module => ({ default: module.PreviewPane })))
+const PreviewPane = lazy(() => import('./preview-pane-connected').then(module => ({ default: module.ConnectedPreviewPane })))
 
 const STORAGE_KEY = 'cez.preview.pane-width'
 const DEFAULT_PERCENT = 58
@@ -70,7 +70,9 @@ export function PreviewSplit({ run, state, children }: { run: ApiRun | undefined
 
   const showPane = state.open && run !== undefined
   const takeover = showPane && !docked
-  const transcriptHidden = takeover && !state.session
+  // Pane in front: below 1180 px it takes the main area, under the task header (design 02); on a
+  // phone it is the whole screen and the task view steps aside entirely.
+  const paneInFront = takeover && !state.session
   const paneHidden = takeover && state.session
 
   const dragTo = (clientX: number) => {
@@ -101,11 +103,16 @@ export function PreviewSplit({ run, state, children }: { run: ApiRun | undefined
       ref={wrapper}
       data-slot="task-split"
       data-pane={showPane ? 'open' : 'closed'}
-      data-takeover={takeover ? '' : undefined}
+      data-takeover={paneInFront ? '' : undefined}
       className="preview-split flex min-h-full"
       style={style}
     >
-      <div data-slot="task-main" hidden={transcriptHidden} className="min-w-0 flex-1">
+      <div
+        data-slot="task-main"
+        hidden={paneInFront && phone}
+        data-collapsed={paneInFront && !phone ? '' : undefined}
+        className="min-w-0 flex-1"
+      >
         {children}
       </div>
       {showPane ? (
@@ -133,7 +140,7 @@ export function PreviewSplit({ run, state, children }: { run: ApiRun | undefined
                   run={run}
                   servers={run.previewServers ?? []}
                   request={state.request}
-                  onSession={takeover && !paneHidden ? state.showSession : undefined}
+                  onSession={paneInFront ? state.showSession : undefined}
                   onPort={state.setPort}
                   onLive={state.setLive}
                   onClose={state.closePane}

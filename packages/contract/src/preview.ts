@@ -151,6 +151,8 @@ export const previewStateMessageSchema = z.discriminatedUnion('stage', [
     server: previewServerSchema,
     attempt: z.number().int(),
     startedAt: z.iso.datetime(),
+    /** The newest lines the command printed, oldest first; empty before it prints anything. */
+    logTail: z.array(z.string()),
   }),
   z.object({ t: z.literal('state'), stage: z.literal('server-stalled'), server: previewServerSchema, logTail: z.string() }),
   z.object({

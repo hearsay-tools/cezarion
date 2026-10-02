@@ -1,4 +1,6 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { useEffect } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -16,6 +18,9 @@ vi.mock('@/api/preview-socket', async () => ({
     return socket
   }),
 }))
+
+const history = vi.hoisted(() => ({ events: [] as unknown[] }))
+vi.mock('@/api/run-history', () => ({ useRunHistory: () => ({ visibleEvents: history.events }) }))
 
 vi.mock('@/lib/project-router', async () => {
   const actual = await vi.importActual<typeof import('@/lib/project-router')>('@/lib/project-router')
@@ -36,7 +41,8 @@ const web: PreviewServer = {
   answeredAtRegistration: false,
 }
 
-const run = { id: 'r1', worktreePath: '/repo/.ai/cezar/worktrees/r1', previewServers: [web] } as never
+const runRecord = { id: 'r1', worktreePath: '/repo/.ai/cezar/worktrees/r1', previewServers: [web] }
+const run = runRecord as never
 
 const last = () => sockets.at(-1)!
 const sent = (socket = last()): PreviewClientMessage[] => socket.send.mock.calls.map(call => call[0] as PreviewClientMessage)
@@ -55,6 +61,7 @@ function setWidth(width: number) {
 
 beforeEach(() => {
   sockets.length = 0
+  history.events = []
   setWidth(1440)
 })
 
@@ -181,6 +188,72 @@ describe('PreviewPane', () => {
     expect(onLive).toHaveBeenLastCalledWith(false)
   })
 
+  it('a takeover ends the stream: no live dot, no navigation, status paused', () => {
+    const onLive = vi.fn()
+    render(<PreviewPane run={run} servers={[web]} request={{ port: 5173 }} onLive={onLive} onClose={() => undefined} />)
+    transport('open')
+    message({ t: 'state', stage: 'streaming', adopted: false })
+    expect(onLive).toHaveBeenLastCalledWith(true)
+    expect((screen.getByRole('button', { name: 'Back' }) as HTMLButtonElement).disabled).toBe(false)
+    message({ t: 'replaced', by: 'Mozilla/5.0 (X11; Linux x86_64) Chrome/130.0 Safari/537.36' })
+    expect(onLive).toHaveBeenLastCalledWith(false)
+    expect((screen.getByRole('button', { name: 'Back' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByText('paused')).toBeTruthy()
+    expect(screen.queryByText('idle')).toBeNull()
+    expect(screen.queryByText('Lost the connection to the host')).toBeNull()
+  })
+
+  it('a takeover stops the heartbeat and sends nothing more', () => {
+    vi.useFakeTimers()
+    try {
+      render(<PreviewPane run={run} servers={[web]} request={{ port: 5173 }} onClose={() => undefined} />)
+      transport('open')
+      act(() => { vi.advanceTimersByTime(2100) })
+      expect(sent().filter(m => m.t === 'ping')).toHaveLength(1)
+      message({ t: 'replaced', by: '' })
+      const before = sent(sockets[0]).length
+      act(() => { vi.advanceTimersByTime(10_000) })
+      expect(sent(sockets[0])).toHaveLength(before)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a card approval is spent on the first answer: a later crash never restarts the server by itself', () => {
+    render(<PreviewPane run={run} servers={[web]} request={{ port: 5173, run: true }} onClose={() => undefined} />)
+    transport('open')
+    // The card was stale: the server was already up, so the approval had nothing to approve.
+    message({ t: 'state', stage: 'streaming', adopted: false })
+    message({ t: 'state', stage: 'server-exited', server: web, exitCode: 1, logTail: 'boom' })
+    expect(sent().some(m => m.t === 'run')).toBe(false)
+    // The owner's own click still runs it.
+    fireEvent.click(screen.getByRole('button', { name: 'Start again' }))
+    expect(sent().filter(m => m.t === 'run')).toEqual([{ t: 'run', port: 5173 }])
+  })
+
+  it('a card approval survives an unrelated browser state before the server answers', () => {
+    render(<PreviewPane run={run} servers={[web]} request={{ port: 5173, run: true }} onClose={() => undefined} />)
+    transport('open')
+    message({ t: 'state', stage: 'downloading', received: 1, total: 2 })
+    message({ t: 'state', stage: 'needs-approval', server: web, wasRunning: false })
+    expect(sent().filter(m => m.t === 'run')).toEqual([{ t: 'run', port: 5173 }])
+  })
+
+  it('5.14 draws the Experimental badge once, in the stage, and not in the toolbar', () => {
+    render(<PreviewPane run={run} servers={[web]} onClose={() => undefined} />)
+    expect(document.querySelectorAll('[data-slot="preview-experimental"]')).toHaveLength(1)
+    transport('blocked')
+    expect(document.querySelectorAll('[data-slot="preview-experimental"]')).toHaveLength(1)
+    expect(document.querySelector('[data-slot="preview-state"] [data-slot="preview-experimental"]')).not.toBeNull()
+  })
+
+  it('shows the live servers in the empty state and the switcher', () => {
+    const storybook = { ...web, port: 6006, label: 'storybook' }
+    const states = new Map([[5173, { kind: 'preview-server' as const, id: 'a', server: web, state: 'exited' as const, exitCode: 1 }]])
+    render(<PreviewPane run={run} servers={[web, storybook]} serverStates={states} onClose={() => undefined} />)
+    expect(screen.getByText('exited · code 1')).toBeTruthy()
+  })
+
   it('an error inside the pane stays inside the pane', () => {
     const boom = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     const onClose = vi.fn()
@@ -193,16 +266,19 @@ describe('PreviewPane', () => {
   })
 })
 
-function Harness({ open, session = false }: { open: boolean; session?: boolean }) {
+function Harness({ open, session = false, port = 5173, servers }: { open: boolean; session?: boolean; port?: number | null; servers?: PreviewServer[] }) {
   const state = usePreviewPaneState()
   useEffect(() => {
-    if (open) state.openPane({ port: 5173 })
+    if (open) state.openPane(port === null ? {} : { port })
     if (session) state.showSession()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   return (
-    <PreviewSplit run={run} state={state}>
-      <div data-testid="transcript">transcript</div>
+    <PreviewSplit run={servers ? ({ ...runRecord, previewServers: servers } as never) : run} state={state}>
+      <div data-route="task-thread">
+        <header data-slot="run-header">header</header>
+        <div data-testid="transcript">transcript</div>
+      </div>
     </PreviewSplit>
   )
 }
@@ -224,18 +300,47 @@ describe('PreviewSplit', () => {
     expect(screen.getByTestId('transcript').closest('[data-slot="task-main"]')?.hasAttribute('hidden')).toBe(false)
   })
 
-  it('at 1179 px the pane takes the main area and Session returns to the transcript', async () => {
+  it('at 1179 px the pane takes the main area under the task header, and Session returns to the transcript', async () => {
     setWidth(1179)
     render(<Harness open />)
     await screen.findByRole('button', { name: 'Session' })
     const main = screen.getByTestId('transcript').closest('[data-slot="task-main"]')!
-    expect(main.hasAttribute('hidden')).toBe(true)
-    fireEvent.click(screen.getByRole('button', { name: 'Session' }))
+    // Design 02: the title, tabs and Preview toggle stay above the pane; only the body steps aside.
     expect(main.hasAttribute('hidden')).toBe(false)
+    expect(main.hasAttribute('data-collapsed')).toBe(true)
+    expect(main.contains(screen.getByText('header'))).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: 'Session' }))
+    expect(main.hasAttribute('data-collapsed')).toBe(false)
     // The pane stays mounted, so the stream and the browser survive the glance at the conversation.
     expect(document.querySelector('[data-slot="preview-pane"]')).not.toBeNull()
     expect(document.querySelector('[data-slot="preview-pane"]')?.hasAttribute('hidden')).toBe(true)
     expect(sockets[0]!.close).not.toHaveBeenCalled()
+  })
+
+  it('on a phone the pane is the whole screen and the task view steps aside', async () => {
+    setWidth(390)
+    render(<Harness open />)
+    await screen.findByRole('button', { name: 'Session' })
+    expect(screen.getByTestId('transcript').closest('[data-slot="task-main"]')?.hasAttribute('hidden')).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: 'Session' }))
+    expect(screen.getByTestId('transcript').closest('[data-slot="task-main"]')?.hasAttribute('hidden')).toBe(false)
+  })
+
+  it('the collapsed task view keeps only its header (stylesheet rule)', () => {
+    const previewCss = readFileSync(join(import.meta.dirname, 'preview.css'), 'utf8')
+    expect(previewCss).toContain("[data-slot='task-main'][data-collapsed] [data-route] > :not([data-slot='run-header'])")
+  })
+
+  it('feeds the live server states from the task history to the pane', async () => {
+    const storybook = { ...web, port: 6006, label: 'storybook' }
+    history.events = [
+      { seq: 1, ts: '2026-10-02T09:00:00.000Z', type: 'preview.server-registered', server: web },
+      { seq: 2, ts: '2026-10-02T09:00:01.000Z', type: 'preview.server-registered', server: storybook },
+      { seq: 3, ts: '2026-10-02T09:01:00.000Z', type: 'preview.server-state', port: 5173, state: 'exited', exitCode: 1 },
+    ]
+    render(<Harness open port={null} servers={[web, storybook]} />)
+    expect(await screen.findByText('exited · code 1')).toBeTruthy()
+    expect(screen.getByText('registered · not started')).toBeTruthy()
   })
 
   it('at 1180 px the transcript and the pane share the row', async () => {
