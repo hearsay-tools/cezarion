@@ -59,7 +59,7 @@ export function PreviewStage({
   viewport: 'fit' | StageSize
   /** 5.11: the last frame stays, dimmed. */
   dimmed?: boolean
-  /** The CSS cursor the page asked for. */
+  /** The CSS cursor the page asked for. It sits on the surface, so the input layer over the canvas shows it too. */
   cursor?: string
   /** The stage's box changed (CSS pixels). Fit sends this to the browser as its viewport. */
   onSize?: (size: StageSize) => void
@@ -128,10 +128,10 @@ export function PreviewStage({
         <div
           data-slot="preview-surface"
           data-scale={scale}
-          style={surface}
+          style={{ ...surface, cursor }}
           className={cn('relative shrink-0 bg-card', viewport !== 'fit' && 'shadow-md', dimmed && 'opacity-60 saturate-50')}
         >
-          <canvas ref={canvas} aria-label="Page preview" role="img" style={{ ...surface, cursor }} className="block touch-none select-none" />
+          <canvas ref={canvas} aria-label="Page preview" role="img" style={surface} className="block touch-none select-none" />
           {renderInput?.({ canvas: canvas.current, scale, viewport: page })}
         </div>
       ) : null}

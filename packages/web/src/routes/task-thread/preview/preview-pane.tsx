@@ -14,8 +14,10 @@ import { useActiveProjectId } from '@/lib/project-router'
 
 import { PreviewErrorBoundary } from './preview-error-boundary'
 import { PREVIEW_PHONE_QUERY, useMediaQuery } from './use-media-query'
-import { ConnectionBanner, PageDialog, PreviewEmptyState, PreviewStates, type PreviewStageState, type PreviewStateActions } from './preview-states'
-import { PreviewStage, type PreviewStageHandle, type StageGeometry, type StageSize } from './preview-stage'
+import { ConnectionBanner, PreviewEmptyState, PreviewStates, type PreviewStageState, type PreviewStateActions } from './preview-states'
+import { PageDialog } from './page-dialog'
+import { PreviewInput } from './preview-input'
+import { PreviewStage, type PreviewStageHandle, type StageSize } from './preview-stage'
 import type { PreviewOpenRequest } from './preview-state'
 import type { ThreadPreviewServer } from '../thread-state'
 import { PreviewToolbar, type PreviewStatsValue, type PreviewViewport } from './preview-toolbar'
@@ -370,6 +372,8 @@ function PreviewPaneBody({ run, servers, serverStates, request, onSession, onPor
   }
   if (lost) dim = true
 
+  // The page takes input while it is on screen and live: not behind a state, not while a dialog freezes it.
+  const interactive = connected && overlay === null && !dialog
   const showPage = hasFrame && (stage?.stage === 'streaming' || stage?.stage === 'loading' || dim)
 
   return (
@@ -408,7 +412,7 @@ function PreviewPaneBody({ run, servers, serverStates, request, onSession, onPor
         dimmed={dim && showPage}
         cursor={cursor}
         onSize={setStageSize}
-        renderInput={renderInputLayer}
+        renderInput={geometry => (interactive ? <PreviewInput scale={geometry.scale} send={send} /> : null)}
       >
         {lost ? <ConnectionBanner attempt={transport.attempt} exhausted={transport.state === 'closed'} onReconnect={reconnect} /> : null}
         {overlay ? (
@@ -428,13 +432,4 @@ function PreviewPaneBody({ run, servers, serverStates, request, onSession, onPor
       </PreviewStage>
     </section>
   )
-}
-
-/**
- * SEAM (input, Task 10): the layer that turns pointer and key events on the canvas into
- * `mouse`, `key` and `insertText` messages. It receives the canvas and the display scale, so a
- * position inside it divides by `geometry.scale` to land on the same page pixel.
- */
-function renderInputLayer(_geometry: StageGeometry): ReactNode {
-  return null
 }

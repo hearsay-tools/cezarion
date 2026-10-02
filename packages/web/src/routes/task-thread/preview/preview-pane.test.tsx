@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { useEffect } from 'react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 
 import type { PreviewClientMessage, PreviewServer, PreviewServerMessage } from '@open-mercato/cezar-api-client'
 import type { PreviewHandlers, PreviewTransport } from '@/api/preview-socket'
@@ -144,6 +144,39 @@ describe('PreviewPane', () => {
     message({ t: 'dialog', type: 'confirm', message: 'Suspend?', origin: 'localhost:5173' })
     fireEvent.click(screen.getByRole('button', { name: 'OK' }))
     expect(sent()).toContainEqual({ t: 'dialogResult', accept: true })
+  })
+
+  it('takes input only while the page is live: not behind a state, not while a dialog freezes it', () => {
+    // jsdom lays nothing out: give the stage a box so the surface, and the layer in it, exist.
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => 1000 })
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get: () => 700 })
+    onTestFinished(() => {
+      delete (HTMLElement.prototype as { clientWidth?: number }).clientWidth
+      delete (HTMLElement.prototype as { clientHeight?: number }).clientHeight
+    })
+    render(<PreviewPane run={run} servers={[web]} request={{ port: 5173 }} onClose={() => undefined} />)
+    transport('open')
+    expect(screen.queryByRole('application')).toBeNull()
+    message({ t: 'state', stage: 'streaming', adopted: false })
+    const layer = screen.getByRole('application')
+    fireEvent.keyDown(layer, { key: 'a', code: 'KeyA', keyCode: 65 })
+    expect(sent()).toContainEqual(expect.objectContaining({ t: 'key', type: 'keyDown', text: 'a' }))
+
+    message({ t: 'dialog', type: 'alert', message: 'Saved', origin: 'localhost:5173' })
+    expect(screen.queryByRole('application')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'OK' }))
+    expect(screen.getByRole('application')).toBeTruthy()
+
+    transport('reconnecting', 1)
+    expect(screen.queryByRole('application')).toBeNull()
+  })
+
+  it('acks a frame once it is drawn so the server sends the next one', async () => {
+    render(<PreviewPane run={run} servers={[web]} request={{ port: 5173 }} onClose={() => undefined} />)
+    transport('open')
+    message({ t: 'state', stage: 'streaming', adopted: false })
+    await act(async () => last().handlers.onFrame(new Blob(['x'], { type: 'image/jpeg' })))
+    expect(sent().filter(m => m.t === 'ack')).toHaveLength(1)
   })
 
   it('opens on the empty state when nothing was requested and navigates a typed port', () => {

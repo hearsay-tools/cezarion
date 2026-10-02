@@ -5,7 +5,7 @@ import type { PreviewServer } from '@open-mercato/cezar-api-client'
 
 import type { ThreadPreviewServer } from '../thread-state'
 
-import { ConnectionBanner, PageDialog, PreviewEmptyState, PreviewStates, type PreviewStageState, type PreviewStateActions } from './preview-states'
+import { ConnectionBanner, PreviewEmptyState, PreviewStates, type PreviewStageState, type PreviewStateActions } from './preview-states'
 
 afterEach(() => cleanup())
 
@@ -221,27 +221,6 @@ describe('ConnectionBanner (5.11)', () => {
     render(<ConnectionBanner attempt={5} exhausted onReconnect={() => undefined} />)
     expect(document.body.textContent).not.toContain('attempt')
     expect(screen.getByRole('button', { name: 'Reconnect' })).toBeTruthy()
-  })
-})
-
-describe('PageDialog (5.13)', () => {
-  it('labels the dialog with the page origin and maps Esc to Cancel', () => {
-    const onResult = vi.fn()
-    render(<PageDialog dialog={{ t: 'dialog', type: 'confirm', message: 'Suspend Mara Okafor?', origin: 'localhost:5173' }} onResult={onResult} />)
-    expect(screen.getByText('localhost:5173 says')).toBeTruthy()
-    expect(screen.getByText('Suspend Mara Okafor?')).toBeTruthy()
-    fireEvent.keyDown(screen.getByRole('alertdialog'), { key: 'Escape' })
-    expect(onResult).toHaveBeenCalledWith({ accept: false })
-  })
-
-  it('sends the typed answer of a prompt on OK', () => {
-    const onResult = vi.fn()
-    render(<PageDialog dialog={{ t: 'dialog', type: 'prompt', message: 'Name?', defaultPrompt: 'Ada', origin: 'localhost:5173' }} onResult={onResult} />)
-    const field = screen.getByRole('textbox') as HTMLInputElement
-    expect(field.value).toBe('Ada')
-    fireEvent.change(field, { target: { value: 'Mara' } })
-    fireEvent.click(screen.getByRole('button', { name: 'OK' }))
-    expect(onResult).toHaveBeenCalledWith({ accept: true, text: 'Mara' })
   })
 })
 
