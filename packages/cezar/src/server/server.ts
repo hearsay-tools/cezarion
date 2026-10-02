@@ -1,4 +1,5 @@
 import type { ApiRun } from '@open-mercato/cezar-contract';
+import { localTimeZone } from '@open-mercato/cezar-contract';
 import { DelegationService } from '../delegation/service.ts';
 import type { DelegationController } from '../delegation/provision.ts';
 import { delegationFailure } from '../delegation/routes.ts';
@@ -3584,10 +3585,9 @@ export function createApp(deps: ServerDeps) {
           if (!remote || remote.host !== 'github.com') throw new Error('No GitHub remote is configured');
           const scheduler = new ProjectAutomationScheduler({
             projectId: project.id,
-            owner: remote.owner,
-            repo: remote.repo,
             store,
-            poller: new GithubPoller(),
+            timeZone: localTimeZone(),
+            github: { owner: remote.owner, repo: remote.repo, poller: new GithubPoller() },
             launch: parsed.data.mode === 'execute'
               ? (definition, candidate, receiptId) => launchAutomationRun({ root: project.root, manager: project.manager, store: project.store, definition, candidate, receiptId })
               : undefined,
@@ -3615,6 +3615,7 @@ export function createApp(deps: ServerDeps) {
       if (!receipt.candidate) return c.json({ error: 'receipt predates retry context and cannot be retried safely' }, 409);
       const definition = store.get(receipt.automationId);
       if (!definition) return c.json({ error: 'automation not found' }, 404);
+      if (!isGithubAutomation(definition)) return c.json({ error: 'receipt is not retryable' }, 409);
       const lease = store.acquireLease();
       if (!lease) return c.json({ error: 'automation polling lease is held by another process' }, 409);
       const reserved = { ...receipt, status: 'reserved' as const, error: undefined, updatedAt: new Date().toISOString() };
@@ -6140,10 +6141,9 @@ export function startServer(deps: ServerDeps, port: number): ServerType & { shut
       if (!project) return undefined;
       return {
         projectId,
-        owner: project.owner,
-        repo: project.repo,
         store,
-        poller: new GithubPoller(),
+        timeZone: localTimeZone(),
+        github: { owner: project.owner, repo: project.repo, poller: new GithubPoller() },
         onChange: (automationId, revision) =>
           workspaceEvents.emit('automation-change', { project: projectId, automationId, revision }),
         launch: async (definition, candidate, receiptId) => {

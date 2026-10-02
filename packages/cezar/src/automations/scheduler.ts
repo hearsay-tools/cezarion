@@ -1,7 +1,8 @@
 import type { AutomationCoordinator } from './coordinator.ts';
 import type { GithubCandidate, GithubPoller, GithubPollResult } from './github-poller.ts';
+import { ScheduleRunner, type ScheduleLauncher } from './schedule-runner.ts';
 import type { AutomationLease, AutomationStore } from './store.ts';
-import { isGithubAutomation, type GithubAutomationDefinition } from './types.ts';
+import { isGithubAutomation, isScheduleAutomation, type GithubAutomationDefinition } from './types.ts';
 
 export interface AutomationLaunchResult { runId: string }
 export type AutomationLauncher = (
@@ -10,14 +11,21 @@ export type AutomationLauncher = (
   receiptId: string,
 ) => Promise<AutomationLaunchResult>;
 
+/**
+ * Everything one project needs on the workspace timer. Every registered project gets one; only a
+ * project with a github.com remote carries `github`, so its polls can fire — a schedule needs no
+ * remote (spec 2026-10-02-scheduled-automations § Architecture).
+ */
 export interface ProjectAutomationHandle {
   projectId: string;
-  owner: string;
-  repo: string;
   store: AutomationStore;
-  poller: GithubPoller;
+  /** The zone schedules are evaluated in — the server's own (`localTimeZone()`). */
+  timeZone: string;
+  github?: { owner: string; repo: string; poller: GithubPoller };
   launch?: AutomationLauncher;
+  launchSchedule?: ScheduleLauncher;
   onChange?: (automationId: string, revision: number) => void;
+  now?: () => number;
 }
 
 /** One request chain process-wide. The promise tail also prevents a failed request from
@@ -41,6 +49,8 @@ export class ProjectAutomationScheduler {
   constructor(private readonly handle: ProjectAutomationHandle) {}
 
   async check(definition: GithubAutomationDefinition, mode: 'preview' | 'execute' = 'execute'): Promise<GithubPollResult> {
+    const { github } = this.handle;
+    if (!github) throw new Error('No GitHub remote is configured');
     const detectionOnly = mode === 'execute' && !this.handle.launch;
     if (detectionOnly) mode = 'preview';
     const { store } = this.handle;
@@ -58,9 +68,9 @@ export class ProjectAutomationScheduler {
       const overlapSince = since
         ? new Date(Date.parse(since) - 120_000).toISOString()
         : undefined;
-      const result = await githubRequests.run(() => this.handle.poller.poll(
-        this.handle.owner,
-        this.handle.repo,
+      const result = await githubRequests.run(() => github.poller.poll(
+        github.owner,
+        github.repo,
         definition,
         { since: overlapSince },
       ));
@@ -209,18 +219,43 @@ export class WorkspaceAutomationScheduler {
 
   private schedule(): void {
     if (this.stopped) return;
-    const due: Array<{ key: string; at: number; retryAfterMs: number; definition: GithubAutomationDefinition; scheduler: ProjectAutomationScheduler }> = [];
+    const due: Array<{ key: string; at: number; retryAfterMs: number; fire: () => Promise<unknown> }> = [];
     const live = new Set<string>();
     for (const projectId of this.options.coordinator.enabledProjectIds()) {
       const store = this.options.coordinator.store(projectId);
       if (!store) continue;
       const handle = this.options.handle(projectId, store);
       if (!handle) continue;
-      for (const definition of store.list().filter((item) => item.enabled).filter(isGithubAutomation)) {
+      const enabled = store.list().filter((item) => item.enabled);
+      // A poll needs the project's GitHub remote; without one it is never armed, not armed to fail.
+      if (handle.github) {
+        const scheduler = new ProjectAutomationScheduler(handle);
+        for (const definition of enabled.filter(isGithubAutomation)) {
+          const key = `${projectId}:${definition.id}`;
+          live.add(key);
+          const at = Date.parse(store.state(definition.id)?.nextCheckAt ?? new Date().toISOString());
+          due.push({ key, at: Math.max(at, this.retryAfter.get(key) ?? 0), retryAfterMs: Math.max(definition.intervalSeconds * 1_000, MIN_RETRY_MS), fire: () => scheduler.check(definition) });
+        }
+      }
+      const runner = new ScheduleRunner({
+        projectId,
+        store,
+        timeZone: handle.timeZone,
+        ...(handle.launchSchedule ? { launch: handle.launchSchedule } : {}),
+        ...(handle.onChange ? { onChange: handle.onChange } : {}),
+        ...(handle.now ? { now: handle.now } : {}),
+      });
+      for (const definition of enabled.filter(isScheduleAutomation)) {
         const key = `${projectId}:${definition.id}`;
+        let at: number | null;
+        // A throwing `dueAt` (an unknown zone, an unwritable state file) skips this item rather
+        // than stalling the one timer every other automation shares.
+        try { at = runner.dueAt(definition); } catch { continue; }
+        if (at === null) continue;
         live.add(key);
-        const at = Date.parse(store.state(definition.id)?.nextCheckAt ?? new Date().toISOString());
-        due.push({ key, at: Math.max(at, this.retryAfter.get(key) ?? 0), retryAfterMs: Math.max(definition.intervalSeconds * 1_000, MIN_RETRY_MS), definition, scheduler: new ProjectAutomationScheduler(handle) });
+        // A rejected fire (a held lease included) re-arms at the floor; the schedule's own next
+        // occurrence is the runner's business, not the timer's.
+        due.push({ key, at: Math.max(at, this.retryAfter.get(key) ?? 0), retryAfterMs: MIN_RETRY_MS, fire: () => runner.fire(definition) });
       }
     }
     for (const key of this.retryAfter.keys()) if (!live.has(key)) this.retryAfter.delete(key);
@@ -229,7 +264,7 @@ export class WorkspaceAutomationScheduler {
     const next = due[0]!;
     this.timer = setTimeout(() => {
       this.timer = undefined;
-      void next.scheduler.check(next.definition).then(
+      void next.fire().then(
         () => { this.retryAfter.delete(next.key); },
         () => { this.retryAfter.set(next.key, (this.options.now?.() ?? Date.now()) + next.retryAfterMs); },
       ).finally(() => this.schedule());

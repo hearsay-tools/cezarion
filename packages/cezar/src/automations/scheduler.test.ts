@@ -4,7 +4,8 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { automationLogRecordSchema as contractLogRecordSchema } from '@open-mercato/cezar-contract';
 import { AutomationStore } from './store.ts';
-import type { GithubAutomationDefinition } from './types.ts';
+import type { GithubAutomationDefinition, ScheduleAutomationDefinition } from './types.ts';
+import * as scheduleRunner from './schedule-runner.ts';
 import { LeaseHeldError, ProjectAutomationScheduler, WorkspaceAutomationScheduler } from './scheduler.ts';
 
 const dirs: string[] = [];
@@ -21,7 +22,7 @@ describe('ProjectAutomationScheduler', () => {
   it('previews without cursor, receipt, or launch mutation', async () => {
     const { store, definition } = await setup();
     const launch = vi.fn(async () => ({ runId: 'run' }));
-    const scheduler = new ProjectAutomationScheduler({ projectId: 'p', owner: 'acme', repo: 'demo', store, poller: { poll: async () => ({ candidates: [candidate], truncated: false, pages: 1 }) } as never, launch });
+    const scheduler = new ProjectAutomationScheduler({ projectId: 'p', store, timeZone: 'UTC', github: { owner: 'acme', repo: 'demo', poller: { poll: async () => ({ candidates: [candidate], truncated: false, pages: 1 }) } as never }, launch });
     await scheduler.check(definition, 'preview');
     expect(store.state(definition.id)).toBeUndefined();
     expect(store.receipts()).toEqual([]);
@@ -35,7 +36,7 @@ describe('ProjectAutomationScheduler', () => {
   it('reserves before launch and deduplicates the overlap window', async () => {
     const { store, definition } = await setup();
     const launch = vi.fn(async () => ({ runId: 'run' }));
-    const scheduler = new ProjectAutomationScheduler({ projectId: 'p', owner: 'acme', repo: 'demo', store, poller: { poll: async () => ({ candidates: [candidate], truncated: false, pages: 1 }) } as never, launch });
+    const scheduler = new ProjectAutomationScheduler({ projectId: 'p', store, timeZone: 'UTC', github: { owner: 'acme', repo: 'demo', poller: { poll: async () => ({ candidates: [candidate], truncated: false, pages: 1 }) } as never }, launch });
     await scheduler.check(definition);
     await scheduler.check(definition);
     expect(launch).toHaveBeenCalledTimes(1);
@@ -45,7 +46,7 @@ describe('ProjectAutomationScheduler', () => {
   it('does not advance the cursor on failure and applies bounded backoff', async () => {
     const { store, definition } = await setup();
     store.setState(definition.id, (current) => ({ ...current, cursor: { timestamp: '2026-07-26T01:00:00.000Z' } }));
-    const scheduler = new ProjectAutomationScheduler({ projectId: 'p', owner: 'acme', repo: 'demo', store, poller: { poll: async () => { throw new Error('rate limited'); } } as never, launch: async () => ({ runId: 'unused' }) });
+    const scheduler = new ProjectAutomationScheduler({ projectId: 'p', store, timeZone: 'UTC', github: { owner: 'acme', repo: 'demo', poller: { poll: async () => { throw new Error('rate limited'); } } as never }, launch: async () => ({ runId: 'unused' }) });
     await expect(scheduler.check(definition)).rejects.toThrow('rate limited');
     expect(store.state(definition.id)?.cursor?.timestamp).toBe('2026-07-26T01:00:00.000Z');
     expect(store.state(definition.id)).toMatchObject({ consecutiveFailures: 1, backoffUntil: expect.any(String) });
@@ -55,7 +56,7 @@ describe('ProjectAutomationScheduler', () => {
     const { store, definition } = await setup();
     const held = store.acquireLease();
     const poll = vi.fn(async () => ({ candidates: [], truncated: false, pages: 1 }));
-    const scheduler = new ProjectAutomationScheduler({ projectId: 'p', owner: 'acme', repo: 'demo', store, poller: { poll } as never, launch: async () => ({ runId: 'unused' }) });
+    const scheduler = new ProjectAutomationScheduler({ projectId: 'p', store, timeZone: 'UTC', github: { owner: 'acme', repo: 'demo', poller: { poll } as never }, launch: async () => ({ runId: 'unused' }) });
     try {
       const error = await scheduler.check(definition).catch((cause: unknown) => cause);
       expect(error).toBeInstanceOf(LeaseHeldError);
@@ -77,7 +78,7 @@ describe('ProjectAutomationScheduler', () => {
     owner.setState(other.id, (current) => ({ ...current, baselineAt: '2026-09-14T06:02:00.000Z' }));
     const path = join(owner.dataDir, 'automation-state.json');
     const before = await readFile(path, 'utf8');
-    const scheduler = new ProjectAutomationScheduler({ projectId: 'p', owner: 'acme', repo: 'demo', store: contender, poller: { poll: async () => ({ candidates: [], truncated: false, pages: 1 }) } as never, launch: async () => ({ runId: 'unused' }) });
+    const scheduler = new ProjectAutomationScheduler({ projectId: 'p', store: contender, timeZone: 'UTC', github: { owner: 'acme', repo: 'demo', poller: { poll: async () => ({ candidates: [], truncated: false, pages: 1 }) } as never }, launch: async () => ({ runId: 'unused' }) });
     try {
       await expect(scheduler.check(definition)).rejects.toBeInstanceOf(LeaseHeldError);
       expect(await readFile(path, 'utf8')).toBe(before);
@@ -91,7 +92,7 @@ describe('ProjectAutomationScheduler', () => {
   it('records a preview blocked by a held lease without changing state', async () => {
     const { store, definition } = await setup();
     const held = store.acquireLease();
-    const scheduler = new ProjectAutomationScheduler({ projectId: 'p', owner: 'acme', repo: 'demo', store, poller: { poll: async () => ({ candidates: [], truncated: false, pages: 1 }) } as never, launch: async () => ({ runId: 'unused' }) });
+    const scheduler = new ProjectAutomationScheduler({ projectId: 'p', store, timeZone: 'UTC', github: { owner: 'acme', repo: 'demo', poller: { poll: async () => ({ candidates: [], truncated: false, pages: 1 }) } as never }, launch: async () => ({ runId: 'unused' }) });
     try {
       await expect(scheduler.check(definition, 'preview')).rejects.toThrow('lease is held by another process');
       expect(store.logs({ automationId: definition.id })[0]).toMatchObject({ result: 'skipped' });
@@ -105,7 +106,7 @@ describe('ProjectAutomationScheduler', () => {
     const realNow = Date.now;
     let advanced = realNow();
     const clock = vi.spyOn(Date, 'now').mockImplementation(() => (advanced += 2_000));
-    const scheduler = new ProjectAutomationScheduler({ projectId: 'p', owner: 'acme', repo: 'demo', store, poller: { poll: async () => ({ candidates: [], truncated: false, pages: 1 }) } as never, launch: async () => ({ runId: 'unused' }) });
+    const scheduler = new ProjectAutomationScheduler({ projectId: 'p', store, timeZone: 'UTC', github: { owner: 'acme', repo: 'demo', poller: { poll: async () => ({ candidates: [], truncated: false, pages: 1 }) } as never }, launch: async () => ({ runId: 'unused' }) });
     try {
       await expect(scheduler.check(definition)).rejects.toThrow('automation log lock is busy');
       const next = store.acquireLease();
@@ -125,10 +126,9 @@ describe('ProjectAutomationScheduler', () => {
     const poll = vi.fn(async () => ({ candidates: [], truncated: false, pages: 1 }));
     const scheduler = new ProjectAutomationScheduler({
       projectId: 'p',
-      owner: 'acme',
-      repo: 'demo',
       store,
-      poller: { poll } as never,
+      timeZone: 'UTC',
+      github: { owner: 'acme', repo: 'demo', poller: { poll } as never },
       launch: async () => ({ runId: 'unused' }),
     });
     await scheduler.check(definition);
@@ -145,17 +145,20 @@ describe('ProjectAutomationScheduler', () => {
     }));
     const scheduler = new ProjectAutomationScheduler({
       projectId: 'p',
-      owner: 'acme',
-      repo: 'demo',
       store,
-      poller: {
-        poll: async () => ({
-          candidates: [],
-          truncated: false,
-          pages: 1,
-          cursor: { timestamp: '2026-07-26T02:00:00.000Z', tieBreaker: 'scanned' },
-        }),
-      } as never,
+      timeZone: 'UTC',
+      github: {
+        owner: 'acme',
+        repo: 'demo',
+        poller: {
+          poll: async () => ({
+            candidates: [],
+            truncated: false,
+            pages: 1,
+            cursor: { timestamp: '2026-07-26T02:00:00.000Z', tieBreaker: 'scanned' },
+          }),
+        } as never,
+      },
       launch: async () => ({ runId: 'unused' }),
     });
     await scheduler.check(definition);
@@ -177,7 +180,7 @@ describe('WorkspaceAutomationScheduler', () => {
     };
     const scheduler = new WorkspaceAutomationScheduler({
       coordinator: coordinator as never,
-      handle: () => ({ projectId: 'p', owner: 'acme', repo: 'demo', store, poller: { poll: async () => ({ candidates: [], truncated: false, pages: 1 }) } as never }),
+      handle: () => ({ projectId: 'p', store, timeZone: 'UTC', github: { owner: 'acme', repo: 'demo', poller: { poll: async () => ({ candidates: [], truncated: false, pages: 1 }) } as never } }),
     });
     await scheduler.start();
     expect(scheduler.hasTimer()).toBe(false);
@@ -200,7 +203,7 @@ describe('WorkspaceAutomationScheduler', () => {
       };
       const scheduler = new WorkspaceAutomationScheduler({
         coordinator: coordinator as never,
-        handle: () => ({ projectId: 'p', owner: 'acme', repo: 'demo', store, poller: { poll: async () => ({ candidates: [], truncated: false, pages: 1 }) } as never }),
+        handle: () => ({ projectId: 'p', store, timeZone: 'UTC', github: { owner: 'acme', repo: 'demo', poller: { poll: async () => ({ candidates: [], truncated: false, pages: 1 }) } as never } }),
       });
       const started = scheduler.start();
       releases.shift()!();
@@ -233,7 +236,7 @@ describe('WorkspaceAutomationScheduler', () => {
       const stores = { a: a.store, b: b.store };
       const scheduler = new WorkspaceAutomationScheduler({
         coordinator: { refresh: async () => undefined, enabledProjectIds: () => ['a', 'b'], store: (id: 'a' | 'b') => stores[id] } as never,
-        handle: (id, store) => ({ projectId: id, owner: 'acme', repo: 'demo', store, poller: { poll: id === 'a' ? failing : healthy } as never, launch: async () => ({ runId: 'unused' }) }),
+        handle: (id, store) => ({ projectId: id, store, timeZone: 'UTC', github: { owner: 'acme', repo: 'demo', poller: { poll: id === 'a' ? failing : healthy } as never }, launch: async () => ({ runId: 'unused' }) }),
         now: () => Date.now(),
       });
       await scheduler.start();
@@ -246,5 +249,94 @@ describe('WorkspaceAutomationScheduler', () => {
       expect(failing).toHaveBeenCalledTimes(2);
       scheduler.stop();
     } finally { vi.useRealTimers(); }
+  });
+
+  it('a project without github arms only schedule items', async () => {
+    vi.useFakeTimers();
+    try {
+      const now = Date.parse('2026-09-14T03:59:00Z');
+      vi.setSystemTime(now);
+      const { store, definition: poll } = await setup();
+      store.setState(poll.id, (current) => ({ ...current, nextCheckAt: new Date(now - 60_000).toISOString() }));
+      const nightly = store.create({ name: 'Nightly', enabled: true, kind: 'schedule', schedule: { type: 'daily', hour: 4, minute: 0 }, task: { prompt: 'Bump deps' } }, 'nightly') as ScheduleAutomationDefinition;
+      const launchSchedule = vi.fn(async () => ({ runId: 'scheduled' }));
+      const scheduler = new WorkspaceAutomationScheduler({
+        coordinator: { refresh: async () => undefined, enabledProjectIds: () => ['p'], store: () => store } as never,
+        // No `github`: this project has no GitHub remote. The past-due poll must not fire.
+        handle: () => ({ projectId: 'p', store, timeZone: 'UTC', launchSchedule }),
+        now: () => Date.now(),
+      });
+      await scheduler.start();
+      expect(store.state(nightly.id)?.nextRunAt).toBe('2026-09-14T04:00:00.000Z');
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(launchSchedule).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(31_000);
+      expect(launchSchedule).toHaveBeenCalledTimes(1);
+      expect(launchSchedule).toHaveBeenCalledWith(expect.objectContaining({ id: 'nightly' }), { at: '2026-09-14T04:00:00.000Z', trigger: 'schedule' }, expect.any(String));
+      expect(store.logs({ automationId: poll.id })).toEqual([]);
+      scheduler.stop();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('mixed kinds arm the earlier due item', async () => {
+    vi.useFakeTimers();
+    try {
+      const now = Date.parse('2026-09-14T03:59:00Z');
+      vi.setSystemTime(now);
+      const { store, definition: poll } = await setup();
+      store.setState(poll.id, (current) => ({ ...current, nextCheckAt: new Date(now + 10 * 60_000).toISOString() }));
+      store.create({ name: 'Nightly', enabled: true, kind: 'schedule', schedule: { type: 'daily', hour: 4, minute: 0 }, task: { prompt: 'Bump deps' } }, 'nightly');
+      const pollFn = vi.fn(async () => ({ candidates: [], truncated: false, pages: 1 }));
+      const launchSchedule = vi.fn(async () => ({ runId: 'scheduled' }));
+      const scheduler = new WorkspaceAutomationScheduler({
+        coordinator: { refresh: async () => undefined, enabledProjectIds: () => ['p'], store: () => store } as never,
+        handle: () => ({ projectId: 'p', store, timeZone: 'UTC', github: { owner: 'acme', repo: 'demo', poller: { poll: pollFn } as never }, launch: async () => ({ runId: 'unused' }), launchSchedule }),
+        now: () => Date.now(),
+      });
+      await scheduler.start();
+      await vi.advanceTimersByTimeAsync(61_000);
+      expect(launchSchedule).toHaveBeenCalledTimes(1);
+      expect(pollFn).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      expect(pollFn).toHaveBeenCalledTimes(1);
+      scheduler.stop();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('a fire that rejects with ScheduleLeaseHeldError re-arms at the retry floor', async () => {
+    vi.useFakeTimers();
+    try {
+      const now = Date.parse('2026-09-14T04:00:00Z');
+      vi.setSystemTime(now);
+      const { store } = await setup();
+      const poll = store.list()[0]!;
+      store.update(poll.id, poll.revision, { ...poll, enabled: false });
+      store.create({ name: 'Nightly', enabled: true, kind: 'schedule', schedule: { type: 'daily', hour: 4, minute: 0 }, task: { prompt: 'Bump deps' } }, 'nightly');
+      store.setState('nightly', (current) => ({ ...current, nextRunAt: new Date(now).toISOString() }));
+      const fire = vi.spyOn(scheduleRunner.ScheduleRunner.prototype, 'fire').mockRejectedValue(new scheduleRunner.ScheduleLeaseHeldError());
+      const scheduler = new WorkspaceAutomationScheduler({
+        coordinator: { refresh: async () => undefined, enabledProjectIds: () => ['p'], store: () => store } as never,
+        handle: () => ({ projectId: 'p', store, timeZone: 'UTC', launchSchedule: async () => ({ runId: 'unused' }) }),
+        now: () => Date.now(),
+      });
+      try {
+        await scheduler.start();
+        await vi.advanceTimersByTimeAsync(1);
+        expect(fire).toHaveBeenCalledTimes(1);
+        await vi.advanceTimersByTimeAsync(59_000);
+        expect(fire).toHaveBeenCalledTimes(1);
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(fire).toHaveBeenCalledTimes(2);
+      } finally {
+        scheduler.stop();
+        fire.mockRestore();
+      }
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('check refuses a project without a GitHub remote', async () => {
+    const { store, definition } = await setup();
+    const scheduler = new ProjectAutomationScheduler({ projectId: 'p', store, timeZone: 'UTC' });
+    await expect(scheduler.check(definition)).rejects.toThrow('No GitHub remote is configured');
   });
 });

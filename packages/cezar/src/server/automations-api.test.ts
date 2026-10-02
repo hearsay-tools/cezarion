@@ -102,10 +102,9 @@ describe('GitHub automation API', () => {
       coordinator,
       handle: (_projectId, sharedStore) => ({
         projectId: 'default',
-        owner: 'open-mercato',
-        repo: 'cezar',
         store: sharedStore,
-        poller: { poll: async () => ({ candidates: [], truncated: false, pages: 1 }) } as never,
+        timeZone: 'UTC',
+        github: { owner: 'open-mercato', repo: 'cezar', poller: { poll: async () => ({ candidates: [], truncated: false, pages: 1 }) } as never },
       }),
     });
     const server = app({
