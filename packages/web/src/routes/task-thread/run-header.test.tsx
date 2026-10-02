@@ -1981,11 +1981,19 @@ describe('Preview header toggle (#781)', () => {
   const withWorktree = (servers: number[] = []) =>
     run('done', { worktreePath: '/tmp/wt', previewServers: servers.map(server) })
 
+  let client: ReturnType<typeof createQueryClient>
+  /** The flag-off cases assert absence: only meaningful once the health answer is in the cache. */
+  const healthSettled = () =>
+    waitFor(() =>
+      expect(client.getQueryCache().getAll().some(query => JSON.stringify(query.queryKey).includes('health') && query.state.status === 'success')).toBe(true),
+    )
+
   function renderToggle(record: ApiRun, pane: Partial<PreviewPane> = {}) {
     const openPane = vi.fn()
     const value: PreviewPane = { open: false, live: false, openPane, ...pane }
+    client = createQueryClient()
     render(
-      <QueryClientProvider client={createQueryClient()}>
+      <QueryClientProvider client={client}>
         <PreviewPaneContext.Provider value={value}>
           <MemoryRouter initialEntries={[`/tasks/${record.id}`]}>
             <Routes>
@@ -2002,14 +2010,14 @@ describe('Preview header toggle (#781)', () => {
   it('is hidden when the server reports capabilities.preview: false', async () => {
     stubFetch({ '/api/v1/health': health(false) })
     renderToggle(withWorktree([5173]))
-    await act(async () => {})
+    await healthSettled()
     expect(toggle()).toBeNull()
   })
 
   it('is hidden when the run has no worktree', async () => {
     stubFetch({ '/api/v1/health': health(true) })
     renderToggle(run('done', { previewServers: [server(5173)] }))
-    await act(async () => {})
+    await healthSettled()
     expect(toggle()).toBeNull()
   })
 

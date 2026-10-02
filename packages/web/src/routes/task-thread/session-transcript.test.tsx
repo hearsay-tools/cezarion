@@ -1,5 +1,5 @@
 import { QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -495,14 +495,21 @@ describe('SessionTranscript', () => {
         answeredAtRegistration: false,
       },
     }
+    let client: ReturnType<typeof createQueryClient>
+    /** The flag-off cases assert absence: only meaningful once the health answer is in the cache. */
+    const healthSettled = () =>
+      waitFor(() =>
+        expect(client.getQueryCache().getAll().some(query => JSON.stringify(query.queryKey).includes('health') && query.state.status === 'success')).toBe(true),
+      )
     function renderPreview(capable: boolean, pane: PreviewPane | null) {
       vi.stubGlobal('fetch', vi.fn(async () =>
         new Response(JSON.stringify({ capabilities: { localHandoff: true, followups: false, singleProject: false, tokenMetrics: true, preview: capable } }), {
           status: 200,
           headers: { 'content-type': 'application/json' },
         })))
+      client = createQueryClient()
       render(
-        <QueryClientProvider client={createQueryClient()}>
+        <QueryClientProvider client={client}>
           <PreviewPaneContext.Provider value={pane}>
             <SessionTranscript runId="r1" viewId="main" sections={[{ id: 's', entries: [preview] }]} mode="panel" />
           </PreviewPaneContext.Provider>
@@ -541,10 +548,12 @@ describe('SessionTranscript', () => {
     it('shows the card with no action when preview is off or the view hosts no pane', async () => {
       renderPreview(false, { open: false, live: false, openPane: vi.fn() })
       expect(await screen.findByText('registered · not started')).toBeTruthy()
+      await healthSettled()
       expect(screen.queryByRole('button')).toBeNull()
       cleanup()
       renderPreview(true, null)
       expect(await screen.findByText('registered · not started')).toBeTruthy()
+      await healthSettled()
       expect(screen.queryByRole('button')).toBeNull()
     })
   })
