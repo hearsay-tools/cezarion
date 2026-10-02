@@ -20,7 +20,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
@@ -32,6 +32,8 @@ import type { UiEvent } from './ui-events.ts';
 import { RunStore, type RunRecord } from '../runs/store.ts';
 import { RunManager } from '../workflows/run.ts';
 import { createFixtureManager, drainFixtureManagers } from '../workflows/fixture-cleanup.testkit.ts';
+import { DelegationController } from '../delegation/provision.ts';
+import { plannedWorkflow, skillTaskSteps } from '../workflows/types.ts';
 import { planOwnedWorkspace } from '../delegation/workspace.ts';
 import { workerWorkflowHash, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
 import { stepKind, type WorkflowDef } from '../workflows/types.ts';
@@ -805,6 +807,63 @@ export async function withOwnedInputRun(
     else process.env.CEZ_AUTONAME = savedAutoName;
     for (const [name, saved] of savedEnv) {
       if (saved === undefined) delete process.env[name]; else process.env[name] = saved;
+    }
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+}
+
+/** Launch a skill-driven parent and accept its child through the real session settings/service.
+ * Native mock recordings stay in each run's cwd; no worker prompt is supplied by the fixture. */
+export async function withSkillParentRun(
+  backend: RunnerId,
+  env: Record<string, string>,
+  body: (fixture: { repoRoot: string; parentRunId: string; runId: string; store: RunStore; manager: RunManager }) => Promise<void>,
+): Promise<void> {
+  const adapter = HARNESS_ADAPTERS[backend];
+  const overrides = { ...env, [adapter.binEnv]: adapter.mockBin, CEZ_DELEGATION: '1', CEZ_AUTONAME: '0' };
+  const saved = Object.keys({ ...overrides, CEZ_DRY_RUN: '' }).map(name => [name, process.env[name]] as const);
+  Object.assign(process.env, overrides);
+  delete process.env.CEZ_DRY_RUN;
+  const repoRoot = mkdtempSync(join(tmpdir(), `cez-skill-parent-${backend}-`));
+  let store: RunStore | undefined;
+  let manager: RunManager | undefined;
+  let controller: DelegationController | undefined;
+  let drainBookkeeping = async () => {};
+  try {
+    await execFileAsync('git', ['init', '-q', '-b', 'main'], { cwd: repoRoot });
+    await execFileAsync('git', ['config', 'gc.auto', '0'], { cwd: repoRoot });
+    await execFileAsync('git', ['config', 'maintenance.auto', 'false'], { cwd: repoRoot });
+    writeFileSync(join(repoRoot, 'a.txt'), 'one\n');
+    await execFileAsync('git', ['add', '-A'], { cwd: repoRoot });
+    await execFileAsync('git', [...GIT_IDENTITY, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
+    const skillsDir = join(repoRoot, '.ai/cezar/skills');
+    mkdirSync(skillsDir, { recursive: true });
+    writeFileSync(join(skillsDir, 'parent-skill.md'), 'PARENT SKILL BODY 778');
+    store = RunStore.open(join(repoRoot, '.ai/cezar'));
+    manager = new RunManager(store, repoRoot);
+    drainBookkeeping = trackTurnBookkeeping(manager);
+    controller = await DelegationController.start();
+    controller.attachProject({ id: 'project', root: repoRoot, store, manager });
+    const parent = manager.startRun(plannedWorkflow(skillTaskSteps('parent-skill')), {
+      task: promptFor(backend, 'baseline'), runner: backend, worktree: false, systemPrompt: 'parent extra',
+    });
+    await waitFor(() => store!.getRun(parent.id)?.status === 'waiting', 30_000);
+    // Authenticate a test-owned caller through the real registry. Execution settings still
+    // come exclusively from the parent's actual live native session.
+    const caller = controller.credentials.authenticate(controller.credentials.issue('project', parent.id, randomUUID()))!;
+    const child = await controller.service.spawn(caller, {
+      task: promptFor(backend, 'done'), baseline: 'HEAD', requestId: randomUUID(),
+    });
+    await body({ repoRoot, parentRunId: parent.id, runId: child.workerId, store, manager });
+  } finally {
+    for (const run of store?.listRuns() ?? []) manager?.cancel(run.id);
+    if (manager && store) await waitFor(() => store!.listRuns().every(run => !manager!.isActive(run.id)), 30_000);
+    await drainBookkeeping();
+    await controller?.close();
+    manager?.dispose();
+    store?.flush();
+    for (const [name, value] of saved) {
+      if (value === undefined) delete process.env[name]; else process.env[name] = value;
     }
     rmSync(repoRoot, { recursive: true, force: true });
   }
