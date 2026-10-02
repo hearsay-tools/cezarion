@@ -153,6 +153,42 @@ describe('PickerPillGroup (#541)', () => {
     expect(screen.getByRole('button', { name: `Model · ${LONG}` }).title).toBe(`Model · ${LONG}`)
   })
 
+  it.each([true, false])('fits disabled pills against their shared row (all disabled: %s)', (allDisabled) => {
+    const computedStyle = window.getComputedStyle.bind(window)
+    vi.spyOn(window, 'getComputedStyle').mockImplementation((element) => {
+      const style = computedStyle(element)
+      // A grid item blockifies the disabled tooltip wrapper's inline-flex display.
+      if (element.matches('span') && element.firstElementChild?.matches('button:disabled')) {
+        style.display = 'flex'
+      }
+      return style
+    })
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.matches('span') ? available / 3 : available
+    })
+    full['model-pill'] = 350
+    render(
+      <PickerPillGroup>
+        <div style={{ display: 'grid' }}>
+          {(['Runner', 'Model', 'Effort'] as const).map((field) => {
+            const label = field === 'Model' ? LONG : field === 'Runner' ? 'opencode' : 'medium'
+            return <PickerPill key={field} fieldLabel slot={`${field.toLowerCase()}-pill`}
+              ariaLabel={field} label={label} value={label} options={[{ value: label, label }]}
+              disabled={allDisabled || field === 'Model'} onPick={() => {}} />
+          })}
+        </div>
+      </PickerPillGroup>,
+    )
+    expect(labels()).toEqual(['opencode', LONG, 'medium'])
+    available = 650
+    resize()
+    expect(labels()).toEqual(['Runner · opencode', `Model · ${LONG}`, 'Effort · medium'])
+    available = 649
+    resize()
+    expect(labels()).toEqual(['opencode', LONG, 'medium'])
+    expect(screen.getByRole('button', { name: `Model · ${LONG}` }).title).toBe(`Model · ${LONG}`)
+  })
+
   it('rechecks the row when the selected value changes', () => {
     const view = render(row())
     expect(labels()).toEqual(['Runner · opencode', 'Model · Fable', 'Effort · medium'])
