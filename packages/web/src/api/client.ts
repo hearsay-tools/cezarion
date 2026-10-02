@@ -1403,8 +1403,9 @@ export async function cancelAutoResume(id: string): Promise<CancelAutoResumeResp
   )
 }
 
-/** Sweep every finished (done/failed/cancelled) active run into the archive in one call —
- *  the Tasks header's "Archive finished" button. */
+/** Sweep finished runs into the archive in one call — the Tasks header's "Archive finished"
+ *  button (no scope) or one sidebar group (`unpinned` / `pinned`). What it takes is
+ *  `isSweepable` (`lib/tasks-table.ts`): scheduled resumes and owned workers are skipped. */
 export async function archiveFinished(scope?: ArchiveFinishedScope): Promise<ArchiveFinishedResponse> {
   return archiveProjectFinished(queryScope(), scope)
 }

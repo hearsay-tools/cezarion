@@ -371,7 +371,7 @@ Every view is project-scoped:
 `<projectId>` is a slug derived from the folder name (`my-app`, then `my-app-2`
 on a collision), and `/p/default/…` always means the project cezar was started
 in. The desktop rail selects the project. Its sidebar shows the project header,
-view tabs and task list, with Needs you before Pinned, Working and Recent.
+view tabs and task list, with Needs you before Pinned, Working and Finished.
 Inbox and Automations appear in More views when enabled. The project menu
 offers Mark all read and project settings; local mode also offers Open in and
 Copy path. Active/Archived remains below the Tasks heading. The new-task

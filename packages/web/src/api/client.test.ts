@@ -5,6 +5,7 @@ import {
   markRunSeen,
   openProjectIn,
   archiveFinished,
+  archiveProjectFinished,
   archiveRun,
   cancelRun,
   connectProvider,
@@ -242,6 +243,13 @@ describe('request shapes', () => {
       path: '/api/v1/runs/archive-finished',
       method: 'POST',
       body: { scope: 'pinned' },
+    },
+    {
+      name: 'archiveProjectFinished (explicit project, scope)',
+      call: () => archiveProjectFinished('other', 'unpinned'),
+      path: '/api/v1/p/other/runs/archive-finished',
+      method: 'POST',
+      body: { scope: 'unpinned' },
     },
     { name: 'finishRun', call: () => finishRun('run-1'), path: '/api/v1/runs/run-1/finish', method: 'POST' },
     {
