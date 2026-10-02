@@ -100,10 +100,23 @@ afterAll(async () => {
 interface Line { text: string; top: number; height: number; left: number }
 interface Measure { lines: Line[]; lineHeight: number; codeLeft: number }
 
-/** Every fence under `scope`, as the rendered rows: top of each source line's box and the left of
- *  its first non-space glyph (a Range, so a blank line reports no left). */
-const measure = (scope: string): Measure[] => browser.evaluate(`(() => [...document.querySelectorAll(${JSON.stringify(scope + ' [data-streamdown="code-block"]')})].map((block) => {
+/** Scroll each fence into the thread viewport before measuring it. Flat thread rows use
+ * content-visibility:auto, so attached offscreen spans are not a settled layout sample.
+ * Hold the actual row/glyph measurements, not their expected spacing: a stable layout bug
+ * must still reach expectSourceLines and fail its unchanged assertions. */
+function measure(scope: string): Measure[] {
+  const selector = JSON.stringify(scope + ' [data-streamdown="code-block"]')
+  const count = browser.waitForValue<number>(`document.querySelectorAll(${selector}).length`, (value) => value > 0)
+  return Array.from({ length: count }, (_, index) => browser.waitForStable<Measure>(`(() => {
+  const block = document.querySelectorAll(${selector})[${index}]
+  if (!block || document.fonts.status !== 'loaded') return null
+  block.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' })
   const code = block.querySelector('code')
+  if (!code || !code.checkVisibility({ contentVisibilityAuto: true })) return null
+  const box = code.getBoundingClientRect()
+  const viewport = block.closest('[data-slot="main"]').getBoundingClientRect()
+  if (!box.width || !box.height || box.top < Math.max(0, viewport.top)
+    || box.bottom > Math.min(innerHeight, viewport.bottom)) return null
   const lineHeight = parseFloat(getComputedStyle(code).lineHeight)
   const lines = [...code.children].map((span) => {
     const box = span.getBoundingClientRect()
@@ -119,7 +132,8 @@ const measure = (scope: string): Measure[] => browser.evaluate(`(() => [...docum
     return { text, top: box.top, height: box.height, left }
   })
   return { lines, lineHeight, codeLeft: code.getBoundingClientRect().left }
-}))()`) as Measure[]
+})()`, { holdMs: 200 }))
+}
 
 function expectSourceLines(blocks: Measure[], label: string): void {
   expect(blocks, label).toHaveLength(ALL.length)
