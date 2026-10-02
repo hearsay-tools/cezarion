@@ -8,7 +8,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { stopFixtureServer } from './fixture-server'
 import { expectGroupRowHeightMatchesTaskRow } from './row-height'
-import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
+import { AgentBrowser, HOVER_POINTER_ARGS, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import {
   applyContrastQaVariant,
   contrastQaVariants,
@@ -1668,5 +1668,164 @@ describe('persistent task pins (#93)', () => {
     const unpinned = await (await fetch(`${baseUrl}/api/v1/runs/fix-var-b`)).json()
     expect(unpinned).not.toHaveProperty('pinned')
     expect(unpinned).not.toHaveProperty('pinnedAt')
+  })
+})
+
+describe('archive from the sidebar (#780)', () => {
+  // Its own browser: the row button only exists where the primary pointer can hover, and headless
+  // Chrome reports `(hover: none)` unless it is launched with the flag (see selection-states).
+  const originalArgs = process.env.AGENT_BROWSER_ARGS
+  let browser: AgentBrowser
+  let archiveServer: ChildProcess
+  let archiveRoot: string
+  let archiveUrl: string
+  let archiveProject: string
+  const archiveScoped = (path: string) => `/p/${archiveProject}${path}`
+  const finishedRun = (id: string, title: string, minutesAgo: number, extra: Record<string, unknown> = {}) => ({
+    id,
+    title,
+    workflow: 'default',
+    task: title,
+    status: 'done',
+    createdAt: ago((minutesAgo + 5) * 60_000),
+    finishedAt: ago(minutesAgo * 60_000),
+    tokensUsed: 1_000,
+    archived: false,
+    steps: [],
+    ...extra,
+  })
+  const ARCHIVE_FIXTURE = [
+    finishedRun('arc-a', 'Tidy the release notes', 10),
+    finishedRun('arc-b', 'Rename the config loader', 20),
+    finishedRun('arc-pinned', 'Pinned and finished', 30, { pinned: true, pinnedAt: ago(5 * 60_000) }),
+    finishedRun('arc-scheduled', 'Waiting out a usage limit', 40, { status: 'failed', autoResumeAt: new Date(Date.now() + 86_400_000).toISOString() }),
+  ]
+  const rowSel = (id: string) => `${ROW}[data-run-id="${id}"]`
+  const archiveBtn = (id: string) => `${rowSel(id)} [data-action="archive-run"]`
+  const toastText = () => browser.evaluate(`document.querySelector('[data-slot="toast"]')?.textContent ?? null`)
+  const ids = (bucket: string) =>
+    browser.evaluate(`[...document.querySelectorAll('[data-bucket="${bucket}"] ${ROW}')].map((row) => row.dataset.runId)`) as string[]
+  const stored = async (id: string) =>
+    ((await (await fetch(`${archiveUrl}/api/v1/runs/${id}`)).json()) as { archived?: boolean; pinned?: boolean; autoResumeAt?: string })
+
+  beforeAll(async () => {
+    process.env.AGENT_BROWSER_ARGS = [originalArgs, ...HOVER_POINTER_ARGS].filter(Boolean).join(',')
+    browser = AgentBrowser.open(`${runId}-archive`)
+    archiveRoot = mkdtempSync(join(tmpdir(), 'cezar-e2e-archive-'))
+    mkdirSync(join(archiveRoot, '.ai/cezar'), { recursive: true })
+    writeFileSync(join(archiveRoot, '.ai/cezar/runs.json'), JSON.stringify(ARCHIVE_FIXTURE, null, 2), 'utf8')
+    const port = await freePort()
+    archiveUrl = `http://localhost:${port}`
+    archiveServer = spawn(process.execPath, [cezarCli, 'serve', '--repo', archiveRoot, '--port', String(port), '--no-open'], {
+      env: fixtureServeEnv(archiveRoot),
+      stdio: 'ignore',
+    })
+    await waitForHealth(archiveUrl)
+    archiveProject = await bootProjectId(archiveUrl)
+  }, 60_000)
+
+  afterAll(async () => {
+    browser?.close()
+    if (originalArgs === undefined) delete process.env.AGENT_BROWSER_ARGS
+    else process.env.AGENT_BROWSER_ARGS = originalArgs
+    await stopFixtureServer(archiveServer)
+    if (archiveRoot) rmSync(archiveRoot, { recursive: true, force: true })
+  })
+
+  beforeEach(() => {
+    browser.setViewport(1440, 900)
+    browser.goto(`${archiveUrl}${archiveScoped('/')}`)
+    browser.waitForFunction(`document.querySelector('${rowSel('arc-a')}') !== null`)
+  })
+
+  it('reveals the row button without moving the title or the row, and leaves Working rows without one', () => {
+    const measure = `(() => {
+      const row = document.querySelector('${rowSel('arc-a')}')
+      const button = row.querySelector('[data-action="archive-run"]')
+      return {
+        opacity: button ? getComputedStyle(button).opacity : null,
+        title: row.querySelector('[data-slot="task-row-title"]').getBoundingClientRect().width,
+        height: row.getBoundingClientRect().height,
+      }
+    })()`
+    const rest = browser.waitForValue<{ opacity: string; title: number; height: number }>(measure, (s) => s.opacity === '0')
+    browser.hover(rowSel('arc-a'))
+    const hovered = browser.waitForValue<{ opacity: string; title: number; height: number }>(measure, (s) => s.opacity === '1')
+    expect(hovered.title).toBe(rest.title)
+    expect(hovered.height).toBe(rest.height)
+    // A scheduled run is archivable from its thread only.
+    expect(browser.count(archiveBtn('arc-scheduled'))).toBe(0)
+    expect(browser.count(archiveBtn('arc-a'))).toBe(1)
+  })
+
+  it('archives on click with no dialog, offers Undo, and Undo puts the row back', async () => {
+    browser.hover(rowSel('arc-b'))
+    browser.click(archiveBtn('arc-b'))
+    browser.waitForFunction(`document.querySelector('${rowSel('arc-b')}') === null`)
+    expect(browser.count('[role="alertdialog"]')).toBe(0)
+    expect(browser.waitForValue(`document.querySelector('[data-slot="toast"]')?.textContent ?? null`)).toContain('Archived "Rename the config loader"')
+    expect((await stored('arc-b')).archived).toBe(true)
+    browser.click('[data-slot="toast-action"]')
+    browser.waitForFunction(`document.querySelector('[data-bucket="Finished"] ${rowSel('arc-b')}') !== null`)
+    expect((await stored('arc-b')).archived).toBeFalsy()
+  })
+
+  it('brings a pinned row back pinned, under Pinned', async () => {
+    expect(ids('Pinned')).toEqual(['arc-pinned'])
+    browser.hover(rowSel('arc-pinned'))
+    browser.click(archiveBtn('arc-pinned'))
+    browser.waitForFunction(`document.querySelector('${rowSel('arc-pinned')}') === null`)
+    browser.click('[data-slot="toast-action"]')
+    browser.waitForFunction(`document.querySelector('[data-bucket="Pinned"] ${rowSel('arc-pinned')}') !== null`)
+    const back = await stored('arc-pinned')
+    expect(back.archived).toBeFalsy()
+    expect(back.pinned).toBe(true)
+  })
+
+  it('"Archive all" takes the Finished rows only, and Undo restores them', async () => {
+    browser.click('[data-action="archive-group"][data-scope="unpinned"]')
+    browser.waitForFunction(`document.querySelector('[data-bucket="Finished"]') === null`)
+    expect(browser.waitForValue(`document.querySelector('[data-slot="toast"]')?.textContent ?? null`)).toContain('Archived 2 tasks')
+    // Pinned is untouched, and so is the scheduled run (it sits in Working and keeps its resume).
+    expect(ids('Pinned')).toEqual(['arc-pinned'])
+    expect((await stored('arc-scheduled')).archived).toBeFalsy()
+    expect((await stored('arc-scheduled')).autoResumeAt).toBeTruthy()
+    browser.click('[data-slot="toast-action"]')
+    browser.waitForFunction(`document.querySelectorAll('[data-bucket="Finished"] ${ROW}').length === 2`)
+  })
+
+  it('"Archive finished" on Pinned takes the pinned finished row and comes back pinned on Undo', async () => {
+    browser.click('[data-action="archive-group"][data-scope="pinned"]')
+    browser.waitForFunction(`document.querySelector('[data-bucket="Pinned"]') === null`)
+    expect(browser.waitForValue(`document.querySelector('[data-slot="toast"]')?.textContent ?? null`)).toContain('Archived 1 task')
+    browser.click('[data-slot="toast-action"]')
+    browser.waitForFunction(`document.querySelector('[data-bucket="Pinned"] ${rowSel('arc-pinned')}') !== null`)
+    expect((await stored('arc-pinned')).pinned).toBe(true)
+  })
+
+  it('keeps the row button and both group buttons readable, at rest and hovered, in both themes', () => {
+    try {
+      for (const variant of contrastQaVariants.filter(({ viewport }) => viewport.width === 1440)) {
+        applyContrastQaVariant(browser, variant)
+        browser.hover(rowSel('arc-a'))
+        browser.waitForValue(`getComputedStyle(document.querySelector('${archiveBtn('arc-a')}')).opacity`, (v) => v === '1')
+        const icon = browser.evaluate(contrastSampleExpression(`${archiveBtn('arc-a')} svg`, 'color', 'parent')) as ContrastSample
+        expect(icon.ratio, `${variant.id} row button: ${icon.foreground} on ${icon.background}`).toBeGreaterThanOrEqual(3)
+        for (const scope of ['unpinned', 'pinned']) {
+          const group = `[data-action="archive-group"][data-scope="${scope}"]`
+          browser.moveTo(0, 0)
+          const rest = browser.evaluate(contrastSampleExpression(group, 'color', 'parent')) as ContrastSample
+          expect(rest.ratio, `${variant.id} ${scope} rest: ${rest.foreground} on ${rest.background}`).toBeGreaterThanOrEqual(4.5)
+          browser.hover(group)
+          const hovered = browser.waitForValue<ContrastSample>(
+            contrastSampleExpression(group),
+            (sample) => sample.background !== rest.background,
+          )
+          expect(hovered.ratio, `${variant.id} ${scope} hover: ${hovered.foreground} on ${hovered.background}`).toBeGreaterThanOrEqual(4.5)
+        }
+      }
+    } finally {
+      restoreContrastQaDefaults(browser)
+    }
   })
 })

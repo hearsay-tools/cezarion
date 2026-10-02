@@ -1908,3 +1908,132 @@ describe('notifying glyph and age-first overflow on the meta line (#729)', () =>
     })
   })
 })
+
+describe('sidebar archive (#780)', () => {
+  afterEach(() => vi.unstubAllGlobals())
+  const archiveButtons = () => Array.from(document.querySelectorAll<HTMLElement>('[data-action="archive-run"]'))
+  const groupButton = (scope: string) => document.querySelector<HTMLElement>(`[data-action="archive-group"][data-scope="${scope}"]`)
+
+  it('puts the archive button on finished rows only, Finished and Pinned alike', () => {
+    renderList({
+      runs: [
+        run({ id: 'fin', title: 'Done one', status: 'done' }),
+        run({ id: 'pinned-fin', title: 'Pinned done', status: 'failed', pinned: true }),
+        run({ id: 'live', status: 'running' }),
+        run({ id: 'ask', status: 'waiting' }),
+        run({ id: 'sched', status: 'failed', autoResumeAt: new Date(NOW + 600_000).toISOString() }),
+        run({ id: 'pinned-live', status: 'running', pinned: true }),
+      ],
+      onTogglePin: vi.fn(),
+      onArchiveRun: vi.fn(),
+    })
+    expect(archiveButtons().map((b) => b.closest('[data-slot="task-row"]')?.getAttribute('data-run-id'))).toEqual(['pinned-fin', 'fin'])
+    const button = archiveButtons()[1]!
+    expect(button.tagName).toBe('BUTTON')
+    expect(button.getAttribute('aria-label')).toBe('Archive Done one')
+    expect(button.getAttribute('title')).toBe('Archive task')
+  })
+
+  it('keeps the trailing slot 16px and reveals the button like the pin', () => {
+    renderList({ runs: [run({ id: 'fin' })], onTogglePin: vi.fn(), onArchiveRun: vi.fn() })
+    const button = archiveButtons()[0]!
+    const slot = button.closest('[data-slot="task-row-trailing"]') as HTMLElement
+    expect(slot.className).toContain('w-[16px]')
+    expect(button.className).toContain('opacity-0')
+    expect(button.className).toContain('group-hover/task-row:opacity-100')
+    expect(button.className).toContain('group-has-[:focus-visible]/task-row:opacity-100')
+    // Beside the pin, never in place of it, and never over a line-1 target.
+    expect(slot.querySelector('[data-slot="pin-toggle"]')).not.toBeNull()
+  })
+
+  it('archives on click with no dialog and without opening the row', () => {
+    const onArchiveRun = vi.fn()
+    renderList({ runs: [run({ id: 'fin' })], onArchiveRun })
+    fireEvent.click(archiveButtons()[0]!)
+    expect(onArchiveRun).toHaveBeenCalledOnce()
+    expect(onArchiveRun.mock.calls[0]![0]).toMatchObject({ id: 'fin' })
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    expect(location()).toBe('/')
+  })
+
+  it('renders nothing where the swipe replaces the button', () => {
+    stubMedia({ noHover: true, desktop: false })
+    renderList({ runs: [run({ id: 'fin' })], onArchiveRun: vi.fn(), onSweep: vi.fn() })
+    expect(archiveButtons()).toHaveLength(0)
+  })
+
+  it('withholds the button in the Archived view and on variant group rows', () => {
+    const onArchiveRun = vi.fn()
+    renderList({ runs: [run({ id: 'old', archived: true })], view: 'archived', onArchiveRun, onSweep: vi.fn() })
+    expect(archiveButtons()).toHaveLength(0)
+    expect(document.querySelector('[data-action="archive-group"]')).toBeNull()
+    cleanup()
+    renderList({
+      runs: [
+        run({ id: 'v1', status: 'done', groupId: 'g', variant: 'A' }),
+        run({ id: 'v2', status: 'done', groupId: 'g', variant: 'B' }),
+      ],
+      onArchiveRun,
+    })
+    expect(document.querySelector('[data-slot="group-row"]')).not.toBeNull()
+    expect(document.querySelector('[data-slot="group-row"] [data-action="archive-run"]')).toBeNull()
+  })
+
+  it('shows "Archive all" on Finished only while it has rows, and sweeps unpinned', () => {
+    const onSweep = vi.fn()
+    renderList({ runs: [run({ id: 'a' }), run({ id: 'b', pinned: true })], onSweep, onTogglePin: vi.fn() })
+    const finished = document.querySelector('[data-bucket="Finished"]') as HTMLElement
+    const button = within(finished).getByRole('button', { name: 'Archive all' })
+    expect(button).toBe(groupButton('unpinned'))
+    // The heading's accessible name stays `Finished 1`; the button sits beside it.
+    expect(within(finished).getByRole('heading', { name: 'Finished 1' })).toBeTruthy()
+    fireEvent.click(button)
+    expect(onSweep).toHaveBeenCalledWith('unpinned')
+    cleanup()
+    renderList({ runs: [run({ id: 'live', status: 'running' })], onSweep })
+    expect(groupButton('unpinned')).toBeNull()
+  })
+
+  it('counts the whole unpinned set for "Archive all", rows the cap hides included', () => {
+    const runs = Array.from({ length: 6 }, (_, i) => run({ id: `f${i}`, createdAt: ago(60_000 + i) }))
+    renderList({ runs, rowLimit: 2, onSweep: vi.fn() })
+    expect(document.querySelectorAll('[data-bucket="Finished"] [data-slot="task-row"]')).toHaveLength(2)
+    expect(groupButton('unpinned')).not.toBeNull()
+  })
+
+  it('shows "Archive finished" on Pinned only while it holds a finished, non-scheduled row', () => {
+    const onSweep = vi.fn()
+    renderList({ runs: [run({ id: 'p1', pinned: true, status: 'done' }), run({ id: 'p2', pinned: true, status: 'running' })], onSweep, onTogglePin: vi.fn() })
+    const button = within(document.querySelector('[data-bucket="Pinned"]') as HTMLElement).getByRole('button', { name: 'Archive finished' })
+    expect(button).toBe(groupButton('pinned'))
+    fireEvent.click(button)
+    expect(onSweep).toHaveBeenCalledWith('pinned')
+    cleanup()
+    // Review Focus 3: a pinned run that is only waiting out a usage limit has nothing to sweep.
+    renderList({
+      runs: [
+        run({ id: 'p3', pinned: true, status: 'running' }),
+        run({ id: 'p4', pinned: true, status: 'failed', autoResumeAt: new Date(NOW + 600_000).toISOString() }),
+      ],
+      onSweep,
+    })
+    expect(document.querySelector('[data-bucket="Pinned"]')).not.toBeNull()
+    expect(groupButton('pinned')).toBeNull()
+  })
+
+  it('disables the running sweep with aria-busy', () => {
+    renderList({ runs: [run({ id: 'a' }), run({ id: 'b', pinned: true })], onSweep: vi.fn(), sweeping: 'unpinned' })
+    const busy = groupButton('unpinned') as HTMLButtonElement
+    expect(busy.disabled).toBe(true)
+    expect(busy.getAttribute('aria-busy')).toBe('true')
+    const other = groupButton('pinned') as HTMLButtonElement
+    expect(other.getAttribute('aria-busy')).toBeNull()
+  })
+
+  it('gives the group buttons a 44px target on touch', () => {
+    renderList({ runs: [run({ id: 'a' })], onSweep: vi.fn() })
+    const className = groupButton('unpinned')!.className
+    expect(className).toContain('max-md:h-11')
+    expect(className).toContain('no-hover:h-11')
+  })
+})

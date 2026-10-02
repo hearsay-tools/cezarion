@@ -10,7 +10,8 @@ import { useListView } from '@/components/list-view'
 import { activeNavPath, visibleNavItems } from '@/components/nav-items'
 import { NAV_INBOX_COUNT_CLASS, NAV_UPDATE_DOT_CLASS, navIconClass, navRowClass } from '@/components/nav-row-styles'
 import { ReferenceStatusProvider } from '@/components/reference-status'
-import { QuickListBuckets } from '@/components/task-quick-list'
+import { useSidebarArchive } from '@/components/sidebar-archive'
+import { QuickListBuckets, sweepCountsOf } from '@/components/task-quick-list'
 import { Link, pathnameProjectId, scopeTo, stripProjectPrefix, useProjectMatch } from '@/lib/project-router'
 import { isProjectCollapsed, readStoredCollapsed, writeStoredCollapsed } from '@/lib/sidebar-collapse'
 import { capBuckets, groupRuns, listCounts, sidebarActiveRunId, type ListView } from '@/lib/task-groups'
@@ -235,6 +236,7 @@ function ProjectGroup({
   // THIS project, and the cache invalidated is the one `useProjectRuns` above writes — which is
   // `'default'` for the boot project, whose list mounts unscoped.
   const pin = usePinRun(project.id, boot ? 'default' : project.id)
+  const archive = useSidebarArchive(project.id, boot ? 'default' : project.id)
 
   const waiting = runs.data ? listCounts(runs.data).waiting : 0
   const buckets = runs.data ? capBuckets(groupRuns(runs.data, view), RECENT_LIMIT) : []
@@ -385,6 +387,10 @@ function ProjectGroup({
                   : (run, pinned) =>
                       pin.mutate({ id: run.id, pinned })
               }
+              onArchiveRun={view === 'archived' ? undefined : archive.archiveOne}
+              onSweep={view === 'archived' ? undefined : archive.sweep}
+              sweeping={archive.sweeping}
+              sweepCounts={view === 'archived' || !runs.data ? undefined : sweepCountsOf(runs.data)}
             />
           </ReferenceStatusProvider>
 

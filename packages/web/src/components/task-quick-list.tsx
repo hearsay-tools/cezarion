@@ -1,11 +1,12 @@
-import { ChevronDownIcon, ChevronRightIcon } from '@/components/design-icons'
+import { ArchiveIcon, ChevronDownIcon, ChevronRightIcon } from '@/components/design-icons'
 import { ScaleIcon, SendIcon } from 'lucide-react'
 import { useQueries } from '@tanstack/react-query'
 import * as React from 'react'
 import { queryScope } from '@open-mercato/cezar-api-client'
+import { useSidebarArchive } from '@/components/sidebar-archive'
 import { useHealth, usePinRun, useProjectRuns, useProjectRepoBase, useProjects, useReferenceProjectId, useRuns } from '@/api/queries'
 import { Link, scopeTo, useNavigate, useProjectMatch } from '@/lib/project-router'
-import type { RunRecord } from '@open-mercato/cezar-api-client'
+import type { ArchiveFinishedScope, RunRecord } from '@open-mercato/cezar-api-client'
 import { DiffStatLabel } from '@/components/diff-stat'
 import { useListView } from '@/components/list-view'
 import { PinToggle } from '@/components/pin-toggle'
@@ -17,7 +18,7 @@ import { groupMetaParts, referenceKey, resumeLabel, sharedReferenceKeys } from '
 import { useNoHover } from '@/lib/use-no-hover'
 import { useIsDesktop } from '@/lib/use-desktop'
 import { shortAge } from '@/lib/format'
-import { isUnread, unreadMarkerTone } from '@/lib/read-state'
+import { isScheduledResume, isUnread, unreadMarkerTone } from '@/lib/read-state'
 import { directionalUsageText } from '@/components/directional-usage'
 import {
   capBuckets,
@@ -31,7 +32,7 @@ import {
   type QuickListBucket,
   type QuickListRow,
 } from '@/lib/task-groups'
-import { formatCost, taskReference, taskReferences } from '@/lib/tasks-table'
+import { formatCost, sweepableRunCount, taskReference, taskReferences } from '@/lib/tasks-table'
 import { usageMetricVisibility } from '@/lib/token-metrics'
 import { useNow } from '@/lib/use-now'
 import { cn } from '@/lib/utils'
@@ -54,6 +55,9 @@ export function TaskQuickList({
   showTokens = true,
   showCost = true,
   onTogglePin,
+  onArchiveRun,
+  onSweep,
+  sweeping = null,
   showViewControls = true,
   rowLimit,
 }: {
@@ -72,6 +76,12 @@ export function TaskQuickList({
   /** Pin/unpin one row (#935). The container owns the mutation, because WHICH project a row
    *  belongs to is a container's question — this list is painted for other projects too. */
   onTogglePin?: (run: RunRecord, pinned: boolean) => void
+  /** Archive one finished row (#780). Like the pin, the container owns the mutation. */
+  onArchiveRun?: (run: RunRecord) => void
+  /** Sweep a group's finished rows: `unpinned` is the Finished group, `pinned` the Pinned one. */
+  onSweep?: (scope: ArchiveFinishedScope) => void
+  /** The sweep in flight, so its button reads busy. */
+  sweeping?: ArchiveFinishedScope | null
   showViewControls?: boolean
   rowLimit?: number
 }) {
@@ -80,6 +90,13 @@ export function TaskQuickList({
   // Withheld in the archived view, where `groupRuns` answers one `Archived` bucket and never
   // reads `run.pinned` — the same call the thread header makes on an archived run.
   const pinToggle = view === 'archived' ? undefined : onTogglePin
+  // Archiving is withheld there too: the Archived view has nothing left to file away, and
+  // restoring stays in the thread and the Tasks table.
+  const archiveRow = view === 'archived' ? undefined : onArchiveRun
+  const sweep = view === 'archived' ? undefined : onSweep
+  // From the FULL list, not the capped buckets: "Archive all" sweeps rows the cap hides, so its
+  // visibility must not depend on which of them are painted.
+  const sweepCounts = sweep ? sweepCountsOf(runs) : undefined
 
   return (
     <div data-slot="quick-list">
@@ -120,10 +137,26 @@ export function TaskQuickList({
           showTokens={showTokens}
           showCost={showCost}
           onTogglePin={pinToggle}
+          onArchiveRun={archiveRow}
+          onSweep={sweep}
+          sweeping={sweeping}
+          sweepCounts={sweepCounts}
         />
       )}
     </div>
   )
+}
+
+/** How many runs each group sweep would take: the same predicate the server sweeps with. */
+export function sweepCountsOf(runs: readonly RunRecord[]): { unpinned: number; pinned: number } {
+  return { unpinned: sweepableRunCount(runs, 'unpinned'), pinned: sweepableRunCount(runs, 'pinned') }
+}
+
+/** Whether a row gets the archive button: finished and not waiting out a usage limit. Owned
+ *  workers qualify — the row is one task the user can see; only the SWEEP leaves them to their
+ *  parent. */
+function isArchivableRow(run: RunRecord): boolean {
+  return !run.archived && (run.status === 'done' || run.status === 'failed' || run.status === 'cancelled') && !isScheduledResume(run)
 }
 
 /**
@@ -142,6 +175,10 @@ export function QuickListBuckets({
   showTokens = true,
   showCost = true,
   onTogglePin,
+  onArchiveRun,
+  onSweep,
+  sweeping = null,
+  sweepCounts,
 }: {
   buckets: QuickListBucket[]
   currentRunId?: string | null
@@ -151,6 +188,11 @@ export function QuickListBuckets({
   showTokens?: boolean
   showCost?: boolean
   onTogglePin?: (run: RunRecord, pinned: boolean) => void
+  onArchiveRun?: (run: RunRecord) => void
+  onSweep?: (scope: ArchiveFinishedScope) => void
+  sweeping?: ArchiveFinishedScope | null
+  /** What each group sweep would take, from the whole list. Absent = no group buttons. */
+  sweepCounts?: { unpinned: number; pinned: number }
 }) {
   // Which variant groups are open. Local: it is view state about this list, nothing else reads it.
   const [expanded, setExpanded] = React.useState<ReadonlySet<string>>(() => new Set())
@@ -161,15 +203,19 @@ export function QuickListBuckets({
       return next
     })
 
-  const renderRow = (row: QuickListRow) => <Row row={row} currentRunId={currentRunId} currentGroupId={currentGroupId} now={now} scope={scope} showTokens={showTokens} showCost={showCost} expanded={row.kind === 'group' && expanded.has(row.groupId)} onToggle={toggleGroup} onTogglePin={onTogglePin} />
+  const renderRow = (row: QuickListRow) => <Row row={row} currentRunId={currentRunId} currentGroupId={currentGroupId} now={now} scope={scope} showTokens={showTokens} showCost={showCost} expanded={row.kind === 'group' && expanded.has(row.groupId)} onToggle={toggleGroup} onTogglePin={onTogglePin} onArchiveRun={onArchiveRun} />
 
   return (
     <div className="flex flex-col gap-3">
       {buckets.map((bucket) => (
         <div key={bucket.label} data-slot="quick-list-bucket" data-bucket={bucket.label}>
-          <h2 className="px-[10px] pt-[2px] pb-[4px] text-[11px] font-medium text-soft-foreground">
-            {bucket.label}{' '}<span className="text-[11px] font-normal tabular-nums">{bucket.rows.length}</span>
-          </h2>
+          <div className="flex items-center justify-between gap-2 pr-[6px] max-md:min-h-11 no-hover:min-h-11">
+            <h2 className="px-[10px] pt-[2px] pb-[4px] text-[11px] font-medium text-soft-foreground">
+              {bucket.label}{' '}<span className="text-[11px] font-normal tabular-nums">{bucket.rows.length}</span>
+            </h2>
+            {/* A sibling of the heading, so its accessible name stays `Finished 3`. */}
+            {onSweep && sweepCounts ? <GroupSweepButton label={bucket.label} counts={sweepCounts} onSweep={onSweep} sweeping={sweeping} /> : null}
+          </div>
           {bucket.rows.map((row) => (
             <div key={row.kind === 'group' ? row.groupId : row.run.id}>
               {renderRow(row)}
@@ -227,6 +273,7 @@ function Row({
   showTokens,
   showCost,
   onTogglePin,
+  onArchiveRun,
 }: {
   row: QuickListRow
   currentRunId: string | null
@@ -238,6 +285,7 @@ function Row({
   showTokens: boolean
   showCost: boolean
   onTogglePin?: (run: RunRecord, pinned: boolean) => void
+  onArchiveRun?: (run: RunRecord) => void
 }) {
   if (row.kind === 'run') {
     return (
@@ -250,6 +298,7 @@ function Row({
         showTokens={showTokens}
         showCost={showCost}
         onTogglePin={onTogglePin}
+        onArchiveRun={onArchiveRun}
       />
     )
   }
@@ -278,6 +327,7 @@ function Row({
           showTokens={showTokens}
           showCost={showCost}
           onTogglePin={onTogglePin}
+          onArchiveRun={onArchiveRun}
         />
       ) : null}
     </>
@@ -469,6 +519,7 @@ function ExpandedVariantMembers({
   showTokens,
   showCost,
   onTogglePin,
+  onArchiveRun,
 }: {
   members: RunRecord[]
   currentRunId: string | null
@@ -477,6 +528,7 @@ function ExpandedVariantMembers({
   showTokens: boolean
   showCost: boolean
   onTogglePin?: (run: RunRecord, pinned: boolean) => void
+  onArchiveRun?: (run: RunRecord) => void
 }) {
   const shared = sharedReferenceKeys(members, scope ?? undefined)
   // 15.5px in, a 1px guide line, then 6px: with the row's own 10px padding that puts each
@@ -496,6 +548,7 @@ function ExpandedVariantMembers({
           showTokens={showTokens}
           showCost={showCost}
           onTogglePin={onTogglePin}
+          onArchiveRun={onArchiveRun}
         />
       ))}
     </div>
@@ -556,6 +609,11 @@ const ROW_PIN_CLASS =
   ' group-has-[:focus-visible]/task-row:opacity-100' +
   // A device that CANNOT hover, where none of the above ever fires: always visible, 44px.
   ' no-hover:opacity-100'
+
+/** The archive button's reveal (#780): the pin's, minus the always-visible touch rule — a device
+ *  that cannot hover swipes instead and never renders the button. */
+const ROW_ARCHIVE_CLASS =
+  'opacity-0 group-hover/task-row:opacity-100 focus-visible:opacity-100 group-has-[:focus-visible]/task-row:opacity-100'
 
 /** The unread marker hides wherever the pin shows — the two share the slot. On a no-hover device
  *  (or a narrow viewport) the pin never hides, so the marker steps to the slot's leading edge and
@@ -735,6 +793,7 @@ function RunRow({
   showTokens,
   showCost,
   onTogglePin,
+  onArchiveRun,
 }: {
   run: RunRecord
   queuePosition: number | null
@@ -751,6 +810,9 @@ function RunRow({
   showTokens: boolean
   showCost: boolean
   onTogglePin?: (run: RunRecord, pinned: boolean) => void
+  /** Archive this row (#780). Where references are inert (touch, the mobile shell) the swipe
+   *  replaces the button, so it only renders on a device that can hover. */
+  onArchiveRun?: (run: RunRecord) => void
 }) {
   const navigate = useNavigate()
   // On a device that cannot hover, or in the mobile shell, the references are plain text and the
@@ -970,8 +1032,62 @@ function RunRow({
             className={cn('absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2', ROW_PIN_CLASS)}
           />
         ) : null}
+        {/* The archive button (#780): line 2 of the same 16px column, under the pin. 20px target
+            hung from the slot's line-1 bottom edge, so it never overlaps the pin's own, and the
+            glyph is nudged up to sit on line 2's centre. Absolute, so the slot, the title and the
+            row height are the same at rest and under the pointer. */}
+        {onArchiveRun && !inertReferences && isArchivableRow(run) ? (
+          <button
+            type="button"
+            data-action="archive-run"
+            aria-label={`Archive ${title}`}
+            title="Archive task"
+            onClick={(event) => {
+              event.stopPropagation()
+              onArchiveRun(run)
+            }}
+            className={cn(
+              'absolute top-[19.5px] left-1/2 inline-flex size-5 -translate-x-1/2 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none motion-reduce:transition-none',
+              ROW_ARCHIVE_CLASS,
+            )}
+          >
+            <ArchiveIcon className="size-[12px] -translate-y-[2.5px]" aria-hidden="true" />
+          </button>
+        ) : null}
       </span>
     </div>
+  )
+}
+
+/** The group-label sweep (#780): `Archive all` on Finished, `Archive finished` on Pinned. Only
+ *  those two, and only while there is something to take. */
+function GroupSweepButton({
+  label,
+  counts,
+  onSweep,
+  sweeping,
+}: {
+  label: QuickListBucket['label']
+  counts: { unpinned: number; pinned: number }
+  onSweep: (scope: ArchiveFinishedScope) => void
+  sweeping: ArchiveFinishedScope | null
+}) {
+  const scope: ArchiveFinishedScope | null = label === 'Finished' ? 'unpinned' : label === 'Pinned' ? 'pinned' : null
+  if (!scope || counts[scope] === 0) return null
+  const busy = sweeping === scope
+  return (
+    <button
+      type="button"
+      data-action="archive-group"
+      data-scope={scope}
+      disabled={busy}
+      aria-busy={busy ? 'true' : undefined}
+      onClick={() => onSweep(scope)}
+      className="inline-flex shrink-0 items-center gap-1 rounded-[4px] px-1.5 py-0.5 font-sans text-[11px] leading-[1.4] text-muted-foreground hover:bg-sidebar-row-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-link-foreground disabled:opacity-60 max-md:h-11 no-hover:h-11"
+    >
+      <ArchiveIcon className="size-[11px]" aria-hidden="true" />
+      {scope === 'unpinned' ? 'Archive all' : 'Archive finished'}
+    </button>
   )
 }
 
@@ -984,6 +1100,7 @@ export function TaskQuickListContainer({ showViewControls = true, projectId: exp
   const scope = explicitProjectId ?? queryScope()
   const runs = useProjectRuns(scope, true, boot)
   const pin = usePinRun(scope, boot ? 'default' : scope)
+  const archive = useSidebarArchive(scope, boot ? 'default' : scope)
   const health = useHealth()
   const visibility = usageMetricVisibility(health.data)
   const [view, setView] = useListView()
@@ -1027,6 +1144,9 @@ export function TaskQuickListContainer({ showViewControls = true, projectId: exp
         onTogglePin={(run, pinned) =>
           pin.mutate({ id: run.id, pinned })
         }
+        onArchiveRun={archive.archiveOne}
+        onSweep={archive.sweep}
+        sweeping={archive.sweeping}
       />
     </ReferenceStatusProvider>
   )
