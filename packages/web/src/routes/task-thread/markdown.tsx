@@ -53,9 +53,10 @@ interface MdastNode {
  * Turn every newline inside a text node into a hard `break` — CommonMark's "a single newline is
  * just a space" rule, disabled.
  *
- * Needed only for text a HUMAN typed (#524). An LLM writes real markdown and means the CommonMark
- * reading; a person hitting Enter in a textarea means a line break, and collapsing those would
- * reflow their message into one paragraph. `remark-breaks` does exactly this, but it is not a
+ * Used for chat text: what a HUMAN typed (#524) and the assistant's replies (#730). A person
+ * hitting Enter in a textarea means a line break, and an agent's reply that puts steps on
+ * separate lines means it too; collapsing those reflows the message into one paragraph. Documents
+ * and compact previews keep the CommonMark reading. `remark-breaks` does exactly this, but it is not a
  * dependency here and `unist-util-visit` is only a transitive one — an mdast tree is plain
  * objects, so the walk is cheaper to inline than either import is to take on.
  *
@@ -118,8 +119,8 @@ const LINK_SAFETY: LinkSafetyConfig = {
  * message whose `children` string actually grew re-renders — the research doc's one hard rule
  * for markdown in chat threads.
  *
- * `breaks` opts into hard line breaks — set it for user-authored text, leave it off for the
- * assistant's (see `remarkHardBreaks`).
+ * `breaks` opts into hard line breaks — set it for chat messages (user and assistant), leave it
+ * off for documents and compact previews (see `remarkHardBreaks`).
  */
 export const Markdown = memo(function Markdown({
   children,

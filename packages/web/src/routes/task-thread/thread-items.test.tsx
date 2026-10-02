@@ -15,6 +15,7 @@ import failedAndDenied from '../../../../cezar/src/core/__fixtures__/claude/fail
 import subagentTask from '../../../../cezar/src/core/__fixtures__/claude/subagent-task.expected.json'
 import thinkingEditWriteTodo from '../../../../cezar/src/core/__fixtures__/claude/thinking-edit-write-todo.expected.json'
 import opencodeToolLifecycle from '../../../../cezar/src/core/__fixtures__/opencode/tool-lifecycle.expected.json'
+import { TaskFileContext } from './file-links'
 import { groupThreadItems } from './thread-groups'
 import {
   ContextGroup,
@@ -383,6 +384,77 @@ describe('conversation message surfaces', () => {
     expect(document.querySelector('[data-slot="note-line"]')).toBeNull()
     expect(document.querySelector('[data-slot="tool-card"]')).toBeNull()
     expect(document.querySelector('[data-slot="reasoning"]')).toBeNull()
+  })
+
+  // #730 — an agent's single newlines are visible line breaks, however the text arrives.
+  describe('assistant line breaks (#730)', () => {
+    const agent = () => document.querySelector('[data-slot="assistant-message"]') as HTMLElement
+
+    it('keeps single newlines as breaks while text streams in, and after a remount (replay)', () => {
+      const { rerender } = render(<MemoryRouter><AssistantMessage text="line one" /></MemoryRouter>)
+      expect(agent().querySelectorAll('br')).toHaveLength(0)
+      rerender(<MemoryRouter><AssistantMessage text={'line one\nline two'} /></MemoryRouter>)
+      expect(agent().querySelectorAll('br')).toHaveLength(1)
+      rerender(<MemoryRouter><AssistantMessage text={'line one\nline two\nline three'} /></MemoryRouter>)
+      expect(agent().querySelectorAll('br')).toHaveLength(2)
+      cleanup()
+      render(<MemoryRouter><AssistantMessage text={'line one\nline two\nline three'} /></MemoryRouter>)
+      expect(agent().querySelectorAll('br')).toHaveLength(2)
+      expect(agent().querySelectorAll('.thread-markdown p')).toHaveLength(1)
+    })
+
+    it('keeps blank-line paragraphs, lists, tables, links, emphasis and code intact', () => {
+      render(
+        <MemoryRouter>
+          <AssistantMessage
+            text={[
+              'First **bold** and `inline`',
+              'second line with https://example.com/x',
+              '',
+              '- item a',
+              '- item b',
+              '',
+              '| h1 | h2 |',
+              '| -- | -- |',
+              '| a | b |',
+              '',
+              '```ts',
+              'const a = 1',
+              'const b = 2',
+              '```',
+            ].join('\n')}
+          />
+        </MemoryRouter>,
+      )
+      const root = agent()
+      expect(root.querySelectorAll('.thread-markdown p')).toHaveLength(1)
+      expect(root.querySelectorAll('.thread-markdown p br')).toHaveLength(1)
+      expect(root.querySelector('[data-streamdown="strong"]')?.textContent).toBe('bold')
+      expect(root.querySelector('[data-streamdown="inline-code"]')?.textContent).toBe('inline')
+      expect(root.querySelectorAll('li')).toHaveLength(2)
+      expect(root.querySelector('table')).not.toBeNull()
+      expect(root.querySelector('[data-streamdown="link"]')?.textContent).toBe('https://example.com/x')
+      const code = root.querySelector('[data-streamdown="code-block"]')
+      expect(code).not.toBeNull()
+      expect(code?.querySelectorAll('br')).toHaveLength(0)
+    })
+
+    it('keeps breaks and task-file links together inside task file context', () => {
+      render(
+        <MemoryRouter>
+          <TaskFileContext.Provider value={{ runId: 'task-one' }}>
+            <AssistantMessage text={'See [ADR](/tmp/decision.md)\nthen continue'} />
+          </TaskFileContext.Provider>
+        </MemoryRouter>,
+      )
+      expect(agent().querySelectorAll('br')).toHaveLength(1)
+      expect(screen.getByRole('link', { name: 'ADR' }).getAttribute('href')).toContain('/files?path=%2Ftmp%2Fdecision.md')
+    })
+
+    it('user bubbles keep breaking lines', () => {
+      render(<MemoryRouter><UserBubble text={'a\nb'} /></MemoryRouter>)
+      expect(document.querySelector('[data-slot="user-bubble"]')?.querySelectorAll('br')).toHaveLength(1)
+    })
   })
 
   it('does not infer badges, CTAs, or success styling from message contents', async () => {
