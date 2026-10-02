@@ -15,6 +15,7 @@ import type {
   HealthResponse,
   ProviderStatusResponse,
   Runner,
+  RunRecord,
   Skill,
   WorkflowsResponse,
 } from '@open-mercato/cezar-api-client'
@@ -225,6 +226,7 @@ function stubFetch(
       if (method === 'GET' && (path === '/api/v1/github' || path.startsWith('/api/v1/github?'))) {
         return jsonResponse(GITHUB)
       }
+      if (method === 'GET' && path === '/api/v1/runs') return jsonResponse([])
       if (method === 'GET' && path === '/api/v1/workflows') return jsonResponse(WORKFLOWS)
       if (method === 'GET' && path === '/api/v1/skills') return jsonResponse(SKILLS)
       if (method === 'GET' && path === '/api/v1/providers/status') {
@@ -261,10 +263,12 @@ function stubFetch(
  *  reconciles as one element type instead of remounting (#730). Getting either wrong here would
  *  hide the very bug the "opens a cross-state hit" tests below exist to catch. */
 function renderAt(entry: string) {
+  const client = createQueryClient()
   render(
-    <QueryClientProvider client={createQueryClient()}>
+    <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[entry]}>
         <Routes>
+          <Route path="/p/:projectId/tasks/:id" element={<p>Task destination</p>} />
           <Route path="/github" element={<GithubRoute view="issues" index />} />
           <Route path="/github/prs" element={<GithubRoute view="prs" />} />
           <Route path="/github/issues/:n" element={<GithubRoute view="issues" />} />
@@ -280,6 +284,7 @@ function renderAt(entry: string) {
       </MemoryRouter>
     </QueryClientProvider>,
   )
+  return client
 }
 
 const rows = () => [...document.querySelectorAll<HTMLElement>('[data-slot="gh-row"]')]
@@ -3709,5 +3714,78 @@ describe('deep links to items outside the open list (#692)', () => {
     await waitFor(() => expect(detail()?.textContent).toContain('Stream tokens over SSE'))
     await waitFor(() => expect(document.querySelector('[data-slot="gh-pr-changes"]')).not.toBeNull())
     expect(itemRequests(sent)).toEqual([])
+  })
+})
+
+
+describe('issue linked tasks (#750)', () => {
+  const task = (id: string, over: Partial<RunRecord> = {}): RunRecord => ({
+    id, title: id, task: id, workflow: 'quick-task', status: 'done',
+    createdAt: '2026-09-01T12:00:00Z', tokensUsed: 0, archived: false, steps: [],
+    issueNumber: 142, ...over,
+  })
+  const linked = () => screen.getByRole('region', { name: /Linked tasks/ })
+
+  it('opens a single linked task from a direct project-scoped issue URL', async () => {
+    stubFetch({ 'GET /api/v1/runs': () => jsonResponse([task('diagnosis')]) })
+    renderAt('/p/boot/github/issues/142')
+    const link = await screen.findByRole('link', { name: /diagnosis/ })
+    expect(link.getAttribute('href')).toBe('/p/boot/tasks/diagnosis')
+    expect(within(linked()).getByRole('heading').textContent).toBe('Linked tasks (1)')
+    fireEvent.click(link)
+    expect(await screen.findByText('Task destination')).toBeTruthy()
+  })
+
+  it('lists diagnosis and fix separately, newest first, with archived history and no duplicate or foreign tasks', async () => {
+    stubFetch({ 'GET /api/v1/runs': () => jsonResponse([
+      task('diagnosis', { archived: true, referencedIssueUrl: ISSUE_142.url }),
+      task('fix', { status: 'running', createdAt: '2026-10-01T12:00:00Z' }),
+      task('fix', { status: 'running', createdAt: '2026-10-01T12:00:00Z' }),
+      task('foreign', { referencedIssueUrl: 'https://github.com/other/repo/issues/142' }),
+      task('pr-only', { issueNumber: undefined, prNumber: 142 }),
+    ]) })
+    renderAt('/github/issues/142')
+    await screen.findByRole('heading', { name: 'Linked tasks (2)' })
+    const links = within(linked()).getAllByRole('link')
+    expect(links.map((link) => link.getAttribute('href'))).toEqual(['/tasks/fix', '/tasks/diagnosis'])
+    expect(within(links[0]!).getByRole('img', { name: 'running' }).getAttribute('data-tone')).toBe('running')
+    expect(within(links[1]!).getByRole('img', { name: 'done' }).getAttribute('data-tone')).toBe('success')
+    expect(links[0]?.textContent).not.toContain('running')
+    expect(links[1]?.textContent).not.toContain('done')
+    expect(links[1]?.textContent).toContain('Archived')
+    expect(links[1]?.querySelector('time')?.dateTime).toBe('2026-09-01T12:00:00Z')
+  })
+
+  it('shows loading before an empty answer and reacts to the existing live runs cache', async () => {
+    let resolve!: (response: Response) => void
+    stubFetch({ 'GET /api/v1/runs': () => new Promise<Response>((r) => { resolve = r }) })
+    const client = renderAt('/github/issues/142')
+    expect(await screen.findByText('Loading linked tasks…')).toBeTruthy()
+    await act(async () => resolve(jsonResponse([])))
+    expect(await screen.findByText('No linked tasks yet.')).toBeTruthy()
+    act(() => client.setQueryData(['default', 'runs', 'list'], [task('new-task')]))
+    expect(await screen.findByRole('link', { name: /new-task/ })).toBeTruthy()
+  })
+
+  it('retries a failed runs request without hiding the issue', async () => {
+    let fail = true
+    stubFetch({ 'GET /api/v1/runs': () => fail
+      ? jsonResponse({ error: 'Unavailable' }, 403)
+      : jsonResponse([task('recovered')]) })
+    renderAt('/github/issues/142')
+    const retry = await screen.findByRole('button', { name: 'Retry linked tasks' })
+    expect(detail()?.textContent).toContain(ISSUE_142.title)
+    fail = false
+    fireEvent.click(retry)
+    expect(await screen.findByRole('link', { name: /recovered/ })).toBeTruthy()
+  })
+
+  it('includes archived tasks for an exact issue absent from the open list', async () => {
+    stubFetch({
+      'GET /api/v1/runs': () => jsonResponse([task('old-task', { issueNumber: 4507, archived: true })]),
+      'GET /api/v1/github/items/issue/4507': () => jsonResponse({ available: true, item: { ...ISSUE_142, number: 4507 } }),
+    })
+    renderAt('/github/issues/4507')
+    expect(await screen.findByRole('link', { name: /old-task/ })).toBeTruthy()
   })
 })
