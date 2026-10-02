@@ -62,7 +62,7 @@ the agent what to do next in one step, and says explicitly when not to retry.
 
 | `code` | `message` (example) | `hint` (example) |
 |---|---|---|
-| `registered` | Registered `:5173` (vite) for this task. | Continue your work. Cezar runs `npm run dev` in the worktree when the user opens the preview; a copy you already run on `:5173` is reused. Call again only if the command or port changes. Do not wait for the user to open it. |
+| `registered` | Registered `:5173` (vite) for this task. | Continue your work. Cezar runs `npm run dev` in the worktree when the user approves it from the preview; a copy you already run on `:5173` is reused while it answers, and it stops when your session ends. Call again only if the command or port changes. Do not wait for the user to open it. |
 | `replaced` | Replaced the registration for `:5173`. | Same as `registered`. |
 | `invalid_input` | `port` must be an integer between 1 and 65535 (got "5173abc"). | Names the failing field and the rule, then a valid example call: `{ "command": "npm run dev -- --port 5173 --strictPort", "port": 5173 }`. Fix the field and call again. |
 | `cwd_outside_worktree` | `cwd` resolves outside the worktree. | Pass a path relative to the worktree root, e.g. `"apps/web"`, or omit `cwd`. |
@@ -85,8 +85,8 @@ its title only.
 |---|---|
 | `chromium.ts` | Resolve the binary (PATH, Playwright cache, agent-browser's Chrome for Testing cache, then `~/.cache/cez/chromium`), download Chrome for Testing into that cache on request, launch headless with the task profile and `--remote-debugging-port=0`, read `DevToolsActivePort`, stop. Typed failures: `not-installed`, `sandbox` (stderr tail kept), `timeout`, `exited`. |
 | `cdp.ts` | Minimal CDP client over the `ws` package already in `packages/cezar` (Node's global `WebSocket` is not stable on the `>=20` engine floor). |
-| `session.ts` | One preview session per task: the page, screencast with one frame in flight and newest-frame-wins, the input whitelist (resize, mouse, key, insertText, nav, back, forward, reload, dialog reply), dialog forwarding, the injected cursor-shape binding and same-tab popups (from the prototype's `INJECT`), one viewer. |
-| `dev-server.ts` | Supervisor for one registration: probe the port; if it answers, adopt; else spawn `command` in its own process group with `cwd`, log to the task's preview directory, TCP-probe until up. States `starting → up → exited`, plus `stalled`. Writes a pid record `{ pid, startToken }` and kills only what it started. |
+| `session.ts` | One preview session per task: the page, screencast with one frame in flight and newest-frame-wins, the input whitelist (resize, mouse, key, insertText, nav, back, forward, `reload { ignoreCache? }`, dialog reply), dialog forwarding, the injected cursor-shape binding and same-tab popups (from the prototype's `INJECT`), one viewer. |
+| `dev-server.ts` | Supervisor for one registration: probe the port; if it answers, adopt; if it is silent, report `needs_approval` and spawn only on an explicit `run`. Spawn `command` in its own process group with `cwd`, log to the task's preview directory, TCP-probe until up. States `starting → up → exited`, plus `stalled`. Writes a pid record `{ pid, startToken }` and kills only what it started. |
 | `manager.ts` | Map run → `{ servers, session }`. Owns every exit in the lifecycle table below, the boot sweep and shutdown. |
 
 On disk, per task: `.ai/cezar/preview/<runId>/` with `profile/`, `<port>.log`, `<port>.pid.json`.
@@ -113,17 +113,20 @@ so adding a tool is one edit.
 - The preview handler runs `verifyWsUpgrade` and requires `trusted`; an untrusted (loopback
   fallback) connection is refused before the handshake.
 - Messages in both directions are zod schemas in `packages/contract/src/preview.ts`. Client to
-  server: `open { target: { port } | { url } }`, `stop { port }`, the input whitelist, `ack`,
-  `ping`. Server to client: binary JPEG frames; JSON `state`, `url`, `cursor`, `dialog`,
+  server: `open { target: { port } | { url } }` (never spawns anything), `stop { port }`, the input whitelist, `ack`,
+  `ping`, `run { port }`. Server to client: binary JPEG frames; JSON `state`, `url`, `cursor`, `dialog`,
   `replaced`, `pong`.
 - Route inventory: listed in BACKWARD_COMPATIBILITY.md §2 like `/api/v1/ws`.
 
 ### Run record and events
 
-- `RunRecord.previewServers?: Array<{ port, command, cwd?, label, path?, registeredAt }>`, optional
-  so old files parse.
-- Run events: `preview_server_registered` and `preview_server_state { port, state, exitCode? }`.
-  They keep the card current while the pane is closed and the history after the task ends. Frames
+- `RunRecord.previewServers?: Array<{ port, command, cwd?, label, path?, registeredAt,
+  answeredAtRegistration }>`, optional so old files parse. `answeredAtRegistration` is one TCP probe
+  at registration. It is a historical observation, never a promise that Open runs nothing.
+- Run events: `preview_server_registered` and `preview_server_state { port, state, exitCode?,
+  reason? }`, appended on transitions only (`starting`, `up`, `stalled`, `exited`, `stopped` with
+  `reason: 'user' | 'idle'`). Probe attempts are never events; the attempt count reaches the pane over
+  the WebSocket only. They keep the card current while the pane is closed and the history after the task ends. Frames
   never reach the event log.
 
 ### Capabilities
@@ -135,19 +138,24 @@ so adding a tool is one edit.
 Under the task route, each its own component:
 
 - **Server card**: the row renderer for the `cezar_preview_serve` tool call, so the card sits at
-  the call that registered it. Shows label, port, command, state dot, "already running, not
-  started by cezar" when adopted, and Open preview.
+  the call that registered it. Shows label, port, the exact command, `cwd` when set, the state, and
+  one next action. "Was running when registered" when `answeredAtRegistration`. Whenever the next
+  click may run the command (Run and open, Start again), the card says so above the button. Stop
+  is never on the card.
 - **Header toggle**: shown whenever `capabilities.preview` is on and the task has a worktree, so the
   owner can always open the pane and type a URL. Plain `Preview` with no registration,
-  `Preview :5173` with one, `:5173 +1` with two (opens on the empty state to pick).
+  `Preview :5173` with one, `:5173 +1` with two (opens on the empty state to pick). The toggle
+  only opens the pane on that server's current state; it never runs a command.
 - **Split layout**: resizable divider; below 1180 px the pane takes the main area.
-- **Pane**: toolbar (back, forward, reload, URL, viewport, live stats with an "idle" reading when
-  no frames change, close) and the canvas stage with the states below. The empty state focuses the
+- **Pane**: toolbar (back, forward, reload, URL, server switcher when two or more servers are
+  registered, viewport, live stats with an "idle" reading when no frames change, Experimental badge,
+  More: Reload without cache, Copy page URL, Stop server, close) and the canvas stage with the states below. The empty state focuses the
   URL bar, expands a bare port to `localhost:<port>`, lists the task's registered servers and states
   the unsupported list once (copying out, file pickers, downloads).
-- **Input**: the canvas listens to Pointer Events, so a tap on a touch device (a phone cockpit) arrives
-  as a mouse click and a drag as a mouse drag. This is about the cockpit device; the page still sees
-  no touch emulation.
+- **Input**: the canvas listens to Pointer Events. Mouse and pen pointers map to mouse events as in
+  the prototype. Touch pointers (a phone cockpit): a tap is a mouse click, a one-finger swipe is
+  `mouseWheel` scrolling, long-press and pinch do nothing. This is about the cockpit device; the page
+  still sees no touch emulation. On a phone the viewport is always Fit.
 - **Page dialogs**: alert, confirm and prompt drawn over the viewport, labelled with the page's
   origin.
 - Own error boundary: a pane crash never takes down the task view.
@@ -163,8 +171,12 @@ back, the pop-out route, a read-only second viewer, port detection.
 2. The owner clicks Open preview. The pane mounts and opens the WebSocket, then sends
    `open { target: { port } }`. The socket being open is the demand; no other open/stop route
    exists.
-3. The manager ensures the dev server (adopt or spawn, then wait for the port) and Chromium,
-   streaming each step as a `state` message (4.3 and 4.4 render from these), navigates to
+3. The manager probes the port again. If it answers, cezar adopts it. If it is silent, the pane
+   gets `needs_approval { command, cwd }` and shows Run and open; only the owner's `run { port }`
+   spawns the command. Adoption is decided here, at every Open, never from the registration
+   probe: an agent's own copy dies with its session, and a stale "adopted" label must not turn
+   into a silent spawn. The manager then waits for the port and ensures Chromium, streaming each
+   step as a `state` message (4.3 and 4.4 render from these), navigates to
    `http://localhost:<port><path>` and starts the screencast.
 4. Dev-server transitions append `preview_server_state` events.
 
@@ -175,9 +187,9 @@ Every state has an exit that is on by default.
 | Thing | States | Ends when |
 |---|---|---|
 | Registration | stored on the run | The run is deleted. Re-registering a port replaces it. |
-| Dev server (cezar-owned) | `starting`, `up`, `stalled`, `exited` | `starting`: the port answers (→ `up`), the process exits (→ `exited`), 2 min without an answer (→ `stalled`, process left running, log shown). `up` and `stalled`: the process exits, the owner presses Stop, 15 min with no viewer, the worktree is removed, the run is deleted, cezar shuts down. |
-| Dev server (adopted) | probed only | Never killed by cezar. A port that stops answering shows 4.3. |
-| Chromium | `launching`, `ready`, `streaming` | 2 min with no viewer, Chromium exits (→ "browser exited", Retry), the run is deleted, cezar shuts down. |
+| Dev server (cezar-owned) | `starting`, `up`, `stalled`, `exited` | `starting`: the port answers (→ `up`), the process exits (→ `exited`), 2 min without an answer (→ `stalled`, process left running, log shown). `up` and `stalled`: the process exits, the owner presses Stop, 15 min after the last viewer left, the worktree is removed, the run is deleted, cezar shuts down. |
+| Dev server (adopted) | probed only | Never killed by cezar. A port that stops answering shows the `needs_approval` state with Run and open. |
+| Chromium | `launching`, `ready`, `streaming` | 2 min after the last viewer left, Chromium exits (→ "browser exited", manual Retry only; no automatic relaunch, so a page that crashes Chromium cannot loop), the run is deleted, cezar shuts down. |
 | Viewer | connected | Socket close, replaced by another tab (old tab gets `replaced`, renders 4.6), missed pings, cezar shuts down. |
 | Leftovers after a crash | pid records on disk | Boot sweep: kill the process group only when the pid is alive **and** its `startToken` matches (`delegation/process-liveness.ts`), so a reused pid is never killed. |
 
@@ -193,7 +205,7 @@ Exit triggers:
   `PREVIEW_PORT_WAIT_MS = 2 min` (probe every 2 s), `PREVIEW_MAX_SERVERS = 8` per task.
 
 Port collisions between parallel tasks: a port held by another task's cezar-owned server is
-refused at registration (`port_held`). A port answered by an unknown process is adopted and
+refused at registration (`port_held`). A port answered by an unknown process at Open is adopted and
 labelled as not started by cezar, so a wrong app is visible as such.
 
 ## Errors and edge states
@@ -204,11 +216,13 @@ Each is a typed `state` message; the toolbar never moves.
 |---|---|---|
 | No Chromium | 4.1 | Download (progress in the pane). On failure, the install command for the detected OS. |
 | Sandbox failure | 4.2 with the last 4 KiB of stderr | Retry, Copy diagnostics, link to docs on `CEZ_PREVIEW_NO_SANDBOX=1`. |
-| Port not answering yet | 4.3 with attempt count and the command | Retry now, Stop waiting. After 2 min: `stalled` with the log tail. |
+| Port not answering yet | 4.3 with attempt count, the command and the log tail | Stop server. After 2 min: `stalled`, with Keep waiting (resets the 2 min) and Stop server. |
 | Dev server exited | 4.3 variant with exit code and log tail | Start again (reruns the recorded command). |
+| Stopped (idle or Stop) | Reason, last URL kept | Start again; reopens the last URL. |
+| Adopted port silent at Open | `needs_approval` with the command and `cwd` | Run and open. |
 | First open | 4.4 steps: server, browser, first frame | none |
 | Socket dropped after a frame | 4.5, last frame dimmed | 5 reconnects with backoff, then Reconnect. |
-| Upgrade never succeeded | "This proxy did not allow the preview's WebSocket" | Stops after 2 attempts, no loop (the #688 failure mode). Links to the Basic Auth note. |
+| Upgrade never succeeded | "The proxy in front of cezar didn't let the preview's WebSocket through" (cezar cannot tell Basic Auth from a proxy that drops `Upgrade`; the copy names Basic Auth only as the known case) | Stops after 2 attempts, no loop (the #688 failure mode). Links to the Basic Auth note. |
 | Another tab took it | 4.6 | Use it here, Close preview. |
 | Page dialog | 4.7 | The page's own buttons; Esc means Cancel. |
 | Typed URL fails | Chromium's error page inside the frame | none |
@@ -219,7 +233,9 @@ Each is a typed `state` message; the toolbar never moves.
 - **Unit (vitest, no browser, no server)**: binary resolution against a fake filesystem;
   `DevToolsActivePort` parsing; frame backpressure against a fake CDP; the input whitelist through
   the contract schemas; the supervisor with a small Node script as the dev server; one test per row
-  of the lifecycle table with fake timers; boot sweep pid reuse; port collision and adoption; every
+  of the lifecycle table with fake timers; boot sweep pid reuse; port collision and adoption; Open on a registration that answered at
+  registration but is silent now yields `needs_approval` and spawns nothing until `run`; touch
+  tap and swipe mapping; every
   tool result code including its hint; the upgrade dispatcher (bus path unchanged, preview path
   routed, unknown destroyed, untrusted refused); flag off removes tool, tool route, WebSocket and
   capability.
