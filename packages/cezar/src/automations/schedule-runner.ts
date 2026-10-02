@@ -135,9 +135,11 @@ export class ScheduleRunner {
 
   /** `POST /automations/:id/run`: fire now, by hand, paused or not; `nextRunAt` is untouched. */
   async runNow(definition: ScheduleAutomationDefinition): Promise<ScheduleFireOutcome> {
-    const outcome = await this.underLease(() => {
+    const outcome = await this.underLease(async () => {
+      const current = this.currentUnderLease(definition);
+      if (!current) return { result: 'skipped' } as const;
       const now = this.now();
-      return this.launch(definition, { at: new Date(now).toISOString(), trigger: 'manual' }, now, null);
+      return this.launch(current, { at: new Date(now).toISOString(), trigger: 'manual' }, now, null);
     });
     return outcome ?? { result: 'lease-held' };
   }
@@ -146,6 +148,8 @@ export class ScheduleRunner {
   async retry(definition: ScheduleAutomationDefinition, receipt: AutomationReceipt): Promise<ScheduleFireOutcome> {
     const occurrenceAt = receipt.occurrenceAt ?? new Date(this.now()).toISOString();
     const outcome = await this.underLease(async () => {
+      const current = this.currentUnderLease(definition);
+      if (!current) return { result: 'skipped', occurrenceAt } as const;
       const now = this.now();
       // Re-checked under the lease: another retry may have relaunched it since the caller read it.
       if (this.handle.store.latestReceipts().get(receipt.receiptKey)?.status !== 'launch-error') {
@@ -153,9 +157,23 @@ export class ScheduleRunner {
       }
       const reserved: AutomationReceipt = { ...receipt, status: 'reserved', error: undefined, updatedAt: new Date(now).toISOString() };
       this.handle.store.appendReceipt(reserved);
-      return this.launchReserved(definition, { at: occurrenceAt, trigger: 'manual' }, reserved, now, null);
+      return this.launchReserved(current, { at: occurrenceAt, trigger: 'manual' }, reserved, now, null);
     });
     return outcome ?? { result: 'lease-held', occurrenceAt };
+  }
+
+  /**
+   * Run now and Retry act on this process's cached definition, which another cockpit may have
+   * edited or deleted since. Re-read it under the lease: the fresh schedule definition (paused is
+   * fine, those are manual actions), or `undefined` after notifying when it is gone or no longer
+   * a schedule, so the caller launches and writes nothing.
+   */
+  private currentUnderLease(definition: ScheduleAutomationDefinition): ScheduleAutomationDefinition | undefined {
+    this.handle.store.reload();
+    const current = this.handle.store.get(definition.id);
+    if (current && isScheduleAutomation(current)) return current;
+    this.handle.onChange?.(definition.id, current?.revision ?? definition.revision);
+    return undefined;
   }
 
   /** Runs `operation` under the project lease; `undefined` when the lease is held or not current. */

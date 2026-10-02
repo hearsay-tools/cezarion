@@ -240,6 +240,18 @@ describe('GitHub automation API', () => {
     expect(manager.startRun).toHaveBeenCalledTimes(1);
   });
 
+  it('POST /automations/:id/run answers 404 and launches nothing when another process deleted the schedule', async () => {
+    const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
+    const manager = recordingManager();
+    const server = app({ automationStore, manager });
+    const created = ((await (await apiRequest(server, '/api/v1/automations', json(scheduleInput))).json()) as any).automation;
+    AutomationStore.open(join(root, '.ai/cezar')).delete(created.id);
+    const ran = await apiRequest(server, `/api/v1/automations/${created.id}/run`, { method: 'POST' });
+    expect(ran.status).toBe(404);
+    expect(((await ran.json()) as any).error).toBe('not found');
+    expect(manager.startRun).not.toHaveBeenCalled();
+  });
+
   it('check 409s a schedule', async () => {
     const server = app();
     const created = ((await (await apiRequest(server, '/api/v1/automations', json(scheduleInput))).json()) as any).automation;

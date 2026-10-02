@@ -444,6 +444,59 @@ describe('ScheduleRunner', () => {
       expect(store.get('nightly')).toBeUndefined();
     });
 
+    describe('Run now and Retry reload under the lease', () => {
+      const failedReceipt = async () => {
+        const ctx = await setup();
+        ctx.launch.mockRejectedValueOnce(new Error('boom'));
+        ctx.runner.dueAt(ctx.definition);
+        ctx.clock.set(FIRST_RUN + 1_000);
+        await ctx.runner.fire(ctx.definition);
+        const failed = [...ctx.store.latestReceipts().values()][0]!;
+        expect(failed.status).toBe('launch-error');
+        ctx.launch.mockClear();
+        return { ...ctx, failed };
+      };
+
+      it('runNow after a delete elsewhere launches nothing, writes no receipt or log row, and notifies', async () => {
+        const { dir, store, definition, runner, launch, clock, changes } = await setup();
+        const logsBefore = store.logs({ automationId: 'nightly' }).length;
+        AutomationStore.open(dir, { now: () => new Date(clock.now()) }).delete('nightly');
+        const before = changes.length;
+        expect(await runner.runNow(definition)).toEqual({ result: 'skipped' });
+        expect(launch).not.toHaveBeenCalled();
+        expect(store.latestReceipts().size).toBe(0);
+        expect(store.logs({ automationId: 'nightly' })).toHaveLength(logsBefore);
+        expect(changes.length).toBeGreaterThan(before);
+      });
+
+      it('runNow after an edit elsewhere launches the edited definition', async () => {
+        const { dir, store, definition, runner, launch, clock } = await setup();
+        const edited = AutomationStore.open(dir, { now: () => new Date(clock.now()) })
+          .update('nightly', definition.revision, { ...editable(definition), task: { prompt: 'Bump deps, then lint' } });
+        expect(await runner.runNow(definition)).toMatchObject({ result: 'manual' });
+        expect(launch).toHaveBeenCalledTimes(1);
+        expect((launch.mock.calls as unknown[][])[0]![0]).toMatchObject({ revision: edited.revision, task: { prompt: 'Bump deps, then lint' } });
+        expect(store.logs({ automationId: 'nightly' })[0]).toMatchObject({ result: 'manual', revision: edited.revision });
+      });
+
+      it('retry after a delete elsewhere launches nothing and leaves the receipt in launch-error', async () => {
+        const { dir, store, definition, runner, launch, clock, failed } = await failedReceipt();
+        AutomationStore.open(dir, { now: () => new Date(clock.now()) }).delete('nightly');
+        expect(await runner.retry(definition, failed)).toEqual({ result: 'skipped', occurrenceAt: failed.occurrenceAt });
+        expect(launch).not.toHaveBeenCalled();
+        expect(store.latestReceipts().get(failed.receiptKey)?.status).toBe('launch-error');
+      });
+
+      it('retry after an edit elsewhere launches the edited definition', async () => {
+        const { dir, definition, runner, launch, clock, failed } = await failedReceipt();
+        const edited = AutomationStore.open(dir, { now: () => new Date(clock.now()) })
+          .update('nightly', definition.revision, { ...editable(definition), task: { prompt: 'Bump deps, then lint' } });
+        expect(await runner.retry(definition, failed)).toMatchObject({ result: 'manual', occurrenceAt: failed.occurrenceAt });
+        expect(launch).toHaveBeenCalledTimes(1);
+        expect((launch.mock.calls as unknown[][])[0]![0]).toMatchObject({ revision: edited.revision, task: { prompt: 'Bump deps, then lint' } });
+      });
+    });
+
     it('unchanged on disk: a second store opening the directory does not stop the fire', async () => {
       const { dir, store, definition, runner, launch, clock } = await setup();
       runner.dueAt(definition);

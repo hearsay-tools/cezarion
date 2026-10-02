@@ -3684,8 +3684,10 @@ export function createApp(deps: ServerDeps) {
       if (!automation) return c.json({ error: 'not found' }, 404);
       if (!isScheduleAutomation(automation)) return c.json({ error: 'a GitHub automation runs on its events; use check with mode execute' }, 409);
       const outcome = await new ScheduleRunner(scheduleHandle(project)).runNow(automation);
+      // Gone, or no longer a schedule, once re-read under the lease: nothing was launched.
+      if (outcome.result === 'skipped') return c.json({ error: 'not found' }, 404);
       if (outcome.result === 'manual') {
-        emitAutomationChange(project, automation.id, automation.revision);
+        emitAutomationChange(project, automation.id, store.get(automation.id)?.revision ?? automation.revision);
         return c.json({ runId: outcome.runId }, 202);
       }
       if (outcome.result === 'lease-held') return c.json({ error: SCHEDULE_LEASE_HELD_REASON }, 409);
@@ -3749,8 +3751,10 @@ export function createApp(deps: ServerDeps) {
       // again by hand through the runner, under the lease, as the same receipt.
       if (scheduled && isScheduleAutomation(scheduled) && receipt.occurrenceAt) {
         const outcome = await new ScheduleRunner(scheduleHandle(project)).retry(scheduled, receipt);
+        // Gone, or no longer a schedule, once re-read under the lease: nothing was launched.
+        if (outcome.result === 'skipped') return c.json({ error: 'not found' }, 404);
         if (outcome.result === 'manual') {
-          emitAutomationChange(project, scheduled.id, scheduled.revision);
+          emitAutomationChange(project, scheduled.id, store.get(scheduled.id)?.revision ?? scheduled.revision);
           return c.json({ receiptId: receipt.receiptId, runId: outcome.runId }, 202);
         }
         if (outcome.result === 'lease-held') return c.json({ error: SCHEDULE_LEASE_HELD_REASON }, 409);
