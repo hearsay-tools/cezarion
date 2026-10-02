@@ -38,7 +38,7 @@ import { cn } from '@/lib/utils'
 
 /**
  * The sidebar's task quick-list (spec, "App shell & navigation"): Active/Archived tabs, then the
- * runs grouped Needs you / Working / Recent, with variant groups collapsed into one tile.
+ * runs grouped Needs you / Working / Finished, with variant groups collapsed into one tile.
  *
  * Presentational — every decision it paints (which bucket, which order, which dot, whether a
  * group collapses) is made by `lib/task-groups.ts` and `lib/attention.ts`, which are pure and
@@ -90,7 +90,7 @@ export function TaskQuickList({
           All<ChevronRightIcon className="size-[13px]" aria-hidden="true" />
         </Link>
       </div>
-      {/* Sticky, not scrolled away: the tabs say what you are looking at, and a long Recent list
+      {/* Sticky, not scrolled away: the tabs say what you are looking at, and a long Finished list
           must not be able to hide that the view is filtered. */}
       {showViewControls ? <div className="sticky top-0 z-10 bg-sidebar pt-2 pb-1">
         <div className="inline-flex w-full gap-0.5 rounded-md bg-muted p-[2px]">

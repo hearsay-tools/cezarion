@@ -236,6 +236,13 @@ describe('request shapes', () => {
       method: 'POST',
       body: {},
     },
+    {
+      name: 'archiveFinished (scope)',
+      call: () => archiveFinished('pinned'),
+      path: '/api/v1/runs/archive-finished',
+      method: 'POST',
+      body: { scope: 'pinned' },
+    },
     { name: 'finishRun', call: () => finishRun('run-1'), path: '/api/v1/runs/run-1/finish', method: 'POST' },
     {
       name: 'continueRun (no text)',

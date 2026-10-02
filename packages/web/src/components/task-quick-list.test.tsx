@@ -108,10 +108,10 @@ describe('TaskQuickList', () => {
     })
 
     const headers = [...document.querySelectorAll('[data-slot="quick-list-bucket"] h2')].map((h) => h.textContent)
-    expect(headers).toEqual(['Needs you 1', 'Pinned 1', 'Working 1', 'Recent 1'])
+    expect(headers).toEqual(['Needs you 1', 'Pinned 1', 'Working 1', 'Finished 1'])
     expect(rowsIn('Needs you')).toEqual(['Structured changes endpointneeds review · 1m'])
     expect(rowsIn('Working')).toEqual(['Normalize agent-event protocolrunning · 1m'])
-    expect(rowsIn('Recent')).toEqual(['README parallel-agents tagline1m'])
+    expect(rowsIn('Finished')).toEqual(['README parallel-agents tagline1m'])
   })
 
   it('links every row to its task', () => {
@@ -445,7 +445,7 @@ describe('TaskQuickList', () => {
 
       // Everything the row paints, in reading order: name and diff on line one; reference and
       // age on the meta line (a done row has no state word — its green dot says it).
-      expect(rowsIn('Recent')).toEqual(['implementing comment threads across the whole thread view+59,514 −12,160PR #775 · 1m'])
+      expect(rowsIn('Finished')).toEqual(['implementing comment threads across the whole thread view+59,514 −12,160PR #775 · 1m'])
     })
 
     it('lets the collapsed group title truncate before its ×N chip does', () => {

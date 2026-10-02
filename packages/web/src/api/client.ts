@@ -25,6 +25,7 @@ import type {
   ApiRun,
   RunRelationships,
   ArchiveFinishedResponse,
+  ArchiveFinishedScope,
   MarkAllReadResponse,
   CancelAutoResumeResponse,
   CancelResponse,
@@ -1404,11 +1405,23 @@ export async function cancelAutoResume(id: string): Promise<CancelAutoResumeResp
 
 /** Sweep every finished (done/failed/cancelled) active run into the archive in one call —
  *  the Tasks header's "Archive finished" button. */
-export async function archiveFinished(): Promise<ArchiveFinishedResponse> {
+export async function archiveFinished(scope?: ArchiveFinishedScope): Promise<ArchiveFinishedResponse> {
+  return archiveProjectFinished(queryScope(), scope)
+}
+
+/**
+ * The same sweep by EXPLICIT project — the twin of `pinProjectRun`, for the sidebar rail that
+ * archives in a row's own project rather than the one `queryScope()` names. Without a scope the
+ * body stays `{}`, which is the Tasks page's sweep.
+ */
+export async function archiveProjectFinished(
+  projectId: string,
+  scope?: ArchiveFinishedScope,
+): Promise<ArchiveFinishedResponse> {
   return unwrap(
     await cez.api.v1.p[':projectId'].runs['archive-finished'].$post({
-      param: { projectId: queryScope() },
-      json: {},
+      param: { projectId },
+      json: scope ? { scope } : {},
     }),
     '/runs/archive-finished',
   )

@@ -228,8 +228,8 @@ describe('task quick-list', () => {
     )
   })
 
-  it('groups attention before recent outcomes while retaining independent status rows', () => {
-    expect(browser.evaluate(`[...document.querySelectorAll('[data-slot="quick-list-bucket"]')].map(h => h.dataset.bucket)`)).toEqual(['Needs you', 'Recent'])
+  it('groups attention before finished outcomes while retaining independent status rows', () => {
+    expect(browser.evaluate(`[...document.querySelectorAll('[data-slot="quick-list-bucket"]')].map(h => h.dataset.bucket)`)).toEqual(['Needs you', 'Finished'])
     expect(browser.evaluate(`[...document.querySelectorAll('[data-slot="quick-list-bucket"] [data-slot="task-row"]')].map(row => row.dataset.runId)`)).toEqual(['fix-review-pr', 'fix-done', 'fix-failed'])
     expect(browser.count('[data-slot="quick-list-bucket"] [data-slot="group-tile"]')).toBe(1)
     expect(browser.text('[data-slot="quick-list-bucket"]')).toContain('Structured changes endpoint for the git view')

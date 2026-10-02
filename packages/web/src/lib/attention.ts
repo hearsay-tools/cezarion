@@ -31,7 +31,7 @@ export {
  * `waiting`/`review`/failed via the attention function", which is exactly the top three rungs.
  *
  * It is deliberately *not* the sidebar's "Needs you" bucket, which is narrower (waiting/review
- * only): a failed run is worth a notification, but in the list it belongs under Recent with its
+ * only): a failed run is worth a notification, but in the list it belongs under Finished with its
  * outcome rather than in the pile of things you can act on. See `lib/task-groups.ts`.
  */
 export function wantsAttention(run: RunRecord): boolean {

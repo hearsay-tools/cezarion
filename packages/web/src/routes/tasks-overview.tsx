@@ -1106,7 +1106,7 @@ export function TasksOverviewRoute() {
   const [view, setView] = React.useState<ListView>('active')
   const queryClient = useQueryClient()
   const archive = useMutation({
-    mutationFn: archiveFinished,
+    mutationFn: () => archiveFinished(),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.runs.all }),
     onError: (error: Error) => toast(error.message, { tone: 'danger' }),
   })
