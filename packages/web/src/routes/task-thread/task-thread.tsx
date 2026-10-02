@@ -46,6 +46,7 @@ import { useRunRecordReconcile } from './run-reconcile'
 import { useActiveProviderAvailability } from './active-provider'
 import { ThreadLoading } from './thread-loading'
 import { threadRenderMode } from './thread-scroll'
+import { PreviewPaneContext, usePreviewPaneState } from './preview/preview-state'
 import { JumpToLatestPill, useThreadScroll } from './thread-scroller'
 import {
   SessionTranscript,
@@ -307,8 +308,10 @@ export function ThreadView({
   })
   // Re-pin a tail reader after the viewport or document-flow composer changes size.
   useKeyboardInsetVar(scroll.restickIfStuck)
+  const previewPane = usePreviewPaneState()
 
   return (
+    <PreviewPaneContext.Provider value={previewPane}>
     <div data-route="task-thread" data-run-id={run.id} className="flex min-h-full flex-col">
       <RunHeader run={run} hasPendingHumanAsk={hasPendingHumanAsk} onMarkedUnread={() => onMarkedUnread?.(run.id)} />
 
@@ -524,6 +527,7 @@ export function ThreadView({
           layout pass: the textarea grows upward while the dock's bottom stays put. */}
       <div data-slot="thread-tail-anchor" aria-hidden="true" className="h-px shrink-0 md:hidden" />
     </div>
+    </PreviewPaneContext.Provider>
   )
 }
 

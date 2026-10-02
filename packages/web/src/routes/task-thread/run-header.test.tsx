@@ -9,6 +9,7 @@ import type { ApiRun, RunStatus, StepState } from '@open-mercato/cezar-api-clien
 import { Toaster, resetToasts } from '@/components/ui/toaster'
 
 import { RunHeader, visibleItemTabs, type RunTab } from './run-header'
+import { PreviewPaneContext, type PreviewPane } from './preview/preview-state'
 import { resolveConflictsPrompt } from './run-actions'
 
 afterEach(() => {
@@ -1962,5 +1963,96 @@ describe('linked issue and PR tabs (#692)', () => {
     renderHeader(run('done', { prNumber: 801 }))
     const tab = within(tabRow()).getByRole('link', { name: 'Pull request #801' })
     await waitFor(() => expect(tab.querySelector('[data-slot="reference-status-glyph"]')?.getAttribute('data-status')).toBe('merged'))
+  })
+})
+
+describe('Preview header toggle (#781)', () => {
+  const server = (port: number) => ({
+    port,
+    command: 'npm run dev',
+    label: `s${port}`,
+    registeredAt: '2026-10-02T10:00:00.000Z',
+    answeredAtRegistration: false,
+  })
+  const health = (preview: boolean) => () =>
+    jsonResponse({
+      capabilities: { localHandoff: true, followups: false, singleProject: false, tokenMetrics: true, preview },
+    })
+  const withWorktree = (servers: number[] = []) =>
+    run('done', { worktreePath: '/tmp/wt', previewServers: servers.map(server) })
+
+  function renderToggle(record: ApiRun, pane: Partial<PreviewPane> = {}) {
+    const openPane = vi.fn()
+    const value: PreviewPane = { open: false, live: false, openPane, ...pane }
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <PreviewPaneContext.Provider value={value}>
+          <MemoryRouter initialEntries={[`/tasks/${record.id}`]}>
+            <Routes>
+              <Route path="/tasks/:id" element={<RunHeader run={record} />} />
+            </Routes>
+          </MemoryRouter>
+        </PreviewPaneContext.Provider>
+      </QueryClientProvider>,
+    )
+    return openPane
+  }
+  const toggle = () => screen.queryByRole('button', { name: /^Preview/ })
+
+  it('is hidden when the server reports capabilities.preview: false', async () => {
+    stubFetch({ '/api/v1/health': health(false) })
+    renderToggle(withWorktree([5173]))
+    await act(async () => {})
+    expect(toggle()).toBeNull()
+  })
+
+  it('is hidden when the run has no worktree', async () => {
+    stubFetch({ '/api/v1/health': health(true) })
+    renderToggle(run('done', { previewServers: [server(5173)] }))
+    await act(async () => {})
+    expect(toggle()).toBeNull()
+  })
+
+  it('reads Preview with no servers, Preview :5173 with one, Preview :5173 +1 with two', async () => {
+    stubFetch({ '/api/v1/health': health(true) })
+    renderToggle(withWorktree())
+    expect((await screen.findByRole('button', { name: /^Preview/ })).textContent).toBe('Preview')
+    cleanup()
+    renderToggle(withWorktree([5173]))
+    expect((await screen.findByRole('button', { name: /^Preview/ })).textContent).toBe('Preview :5173')
+    cleanup()
+    renderToggle(withWorktree([5173, 3000]))
+    expect((await screen.findByRole('button', { name: /^Preview/ })).textContent).toBe('Preview :5173 +1')
+  })
+
+  it('opens the pane on the one server, on the empty state otherwise, and never asks to run', async () => {
+    stubFetch({ '/api/v1/health': health(true) })
+    let openPane = renderToggle(withWorktree([5173]))
+    fireEvent.click(await screen.findByRole('button', { name: /^Preview/ }))
+    expect(openPane).toHaveBeenCalledTimes(1)
+    expect(openPane).toHaveBeenCalledWith({ port: 5173 })
+    cleanup()
+    openPane = renderToggle(withWorktree([5173, 3000]))
+    fireEvent.click(await screen.findByRole('button', { name: /^Preview/ }))
+    expect(openPane).toHaveBeenCalledWith({})
+    for (const [request] of openPane.mock.calls) expect(request).not.toHaveProperty('run')
+  })
+
+  it('shows the green dot only while the pane is live', async () => {
+    stubFetch({ '/api/v1/health': health(true) })
+    renderToggle(withWorktree([5173]), { open: true, live: false })
+    const button = await screen.findByRole('button', { name: /^Preview/ })
+    expect(button.querySelector('[data-slot="status-dot"]')).toBeNull()
+    cleanup()
+    renderToggle(withWorktree([5173]), { open: true, live: true })
+    const live = await screen.findByRole('button', { name: /^Preview/ })
+    expect(live.querySelector('[data-slot="status-dot"]')?.getAttribute('data-tone')).toBe('success')
+  })
+
+  it('has no toggle outside a pane provider (the git tabs)', async () => {
+    stubFetch({ '/api/v1/health': health(true) })
+    renderHeader(withWorktree([5173]))
+    await act(async () => {})
+    expect(toggle()).toBeNull()
   })
 })

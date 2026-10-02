@@ -26,7 +26,10 @@ import {
   type ThreadRow,
   type ThreadScrollControls,
 } from './thread-scroller'
-import type { ThreadAsk, ThreadEntry, ThreadState } from './thread-state'
+import type { ThreadAsk, ThreadEntry, ThreadPreviewServer, ThreadState } from './thread-state'
+import { usePreviewPane } from './preview/preview-state'
+import { PreviewServerCard } from './preview/server-card'
+import { useHealth } from '@/api/queries'
 import type { RecipientBackendMap, TaskTitleMap } from './conversation-presentation'
 import { ConversationNavigation, type ConversationTarget } from './conversation-navigation'
 
@@ -484,9 +487,24 @@ function ThreadEntryRenderer({
       )
     case 'provider-auth-required':
       return <ProviderAuthRequiredCard incident={entry} />
+    case 'preview-server':
+      return <PreviewServerEntry entry={entry} />
     default:
       return assertNever(entry)
   }
+}
+
+/** The card with its pane wiring: no action when the task view hosts no pane or the server has preview off. */
+function PreviewServerEntry({ entry }: { entry: ThreadPreviewServer }) {
+  const pane = usePreviewPane()
+  const available = useHealth().data?.capabilities?.preview === true
+  return (
+    <PreviewServerCard
+      entry={entry}
+      inPreview={pane !== null && pane.open && pane.port === entry.server.port}
+      onOpen={pane !== null && available ? pane.openPane : undefined}
+    />
+  )
 }
 
 function assertNever(value: never): never {
