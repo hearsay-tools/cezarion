@@ -234,6 +234,7 @@ describe('request shapes', () => {
       call: () => archiveFinished(),
       path: '/api/v1/runs/archive-finished',
       method: 'POST',
+      body: {},
     },
     { name: 'finishRun', call: () => finishRun('run-1'), path: '/api/v1/runs/run-1/finish', method: 'POST' },
     {

@@ -505,8 +505,23 @@ export type CancelResponse = z.infer<typeof cancelResponseSchema>;
 export const cancelAutoResumeResponseSchema = z.object({ cancelled: z.literal(true) });
 export type CancelAutoResumeResponse = z.infer<typeof cancelAutoResumeResponseSchema>;
 
-/** `POST /runs/archive-finished` — how many runs the sweep archived. */
-export const archiveFinishedResponseSchema = z.object({ archived: z.number() });
+/** Which finished runs a sweep takes: unpinned (the sidebar's Finished group), pinned (the pinned
+ *  rows that have ended), or both when absent. Scheduled runs and owned workers are never swept. */
+export const archiveFinishedScopeSchema = z.enum(['unpinned', 'pinned']);
+export type ArchiveFinishedScope = z.infer<typeof archiveFinishedScopeSchema>;
+
+/** `POST /runs/archive-finished` body — optional, an absent body sweeps both scopes. */
+export const archiveFinishedRequestSchema = z.object({ scope: archiveFinishedScopeSchema.optional() });
+export type ArchiveFinishedRequest = z.infer<typeof archiveFinishedRequestSchema>;
+
+/** `POST /runs/archive-finished` — `archived` counts every record flipped (owned workers
+ *  included), `ids` the top-level runs the sweep picked, `pinnedIds` the subset that carried a
+ *  pin before archiving dropped it (so an Undo can restore it). */
+export const archiveFinishedResponseSchema = z.object({
+  archived: z.number(),
+  ids: z.array(z.string()),
+  pinnedIds: z.array(z.string()),
+});
 export type ArchiveFinishedResponse = z.infer<typeof archiveFinishedResponseSchema>;
 
 /** `POST /runs/read-all` — how many unread finished runs the sweep marked read. */

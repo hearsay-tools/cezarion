@@ -1408,6 +1408,7 @@ export async function archiveFinished(): Promise<ArchiveFinishedResponse> {
   return unwrap(
     await cez.api.v1.p[':projectId'].runs['archive-finished'].$post({
       param: { projectId: queryScope() },
+      json: {},
     }),
     '/runs/archive-finished',
   )
