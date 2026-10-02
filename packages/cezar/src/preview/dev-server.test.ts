@@ -305,7 +305,7 @@ describe('sweepPreviewLeftovers', () => {
     const child = strayFixture();
     const pid = child.pid!;
     const record = writeRecord(root, 'run-live', 5179, { pid, pgid: pid, startToken: processStartToken(pid) });
-    const keep = vi.fn((runId: string, port: number) => runId === 'run-live' && port === 5179);
+    const keep = vi.fn((runId: string, port: number | 'browser') => runId === 'run-live' && port === 5179);
     expect(await sweepPreviewLeftovers(root, { keep })).toBe(0);
     expect(keep).toHaveBeenCalledWith('run-live', 5179);
     expect(() => process.kill(pid, 0)).not.toThrow();
