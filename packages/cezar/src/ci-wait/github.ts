@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { ciPrIdentitySchema, ciWaitRequestSchema, type CiPrIdentity, type CiWaitErrorCode } from '@open-mercato/cezar-contract';
 
 export const CI_QUERY_TIMEOUT_MS = 10_000;
+/** `gh pr checks --watch --interval`, in seconds. Not the query timeout. */
+export const CI_WATCH_INTERVAL_SECONDS = 30;
 export const CI_QUERY_LIMIT = 4;
 export const CI_OUTPUT_LIMIT = 64 * 1024;
 export const CI_TERMINATE_MS = 2_000;
@@ -156,7 +158,7 @@ export class GithubCiClient {
     return parseJson(result.stdout, githubChecksSchema);
   }
   async watch(pr: CiPrIdentity, signal: AbortSignal): Promise<void> {
-    const result = await runCiCommand({file:this.command.file,args:[...this.command.args, 'pr', 'checks', String(pr.prNumber), '--repo', `github.com/${pr.repository}`, '--watch', '--interval', '10']}, signal, true, this.env, this.cwd);
+    const result = await runCiCommand({file:this.command.file,args:[...this.command.args, 'pr', 'checks', String(pr.prNumber), '--repo', `github.com/${pr.repository}`, '--watch', '--interval', String(CI_WATCH_INTERVAL_SECONDS)]}, signal, true, this.env, this.cwd);
     if (![0,1,8].includes(result.code) || result.stderr.trim()) throw commandError(result);
   }
 }
