@@ -9,7 +9,7 @@ agent does not drive that browser in v1.
 Design settled with the owner on 2026-10-01/02 (cezar task 3e478497). Inputs: the
 `live-preview-v1` design (the source for every state number below: 27 screens and an annotated
 PDF, exported by the designer; the `.pen` frame `Live Preview · v1 · light` is the editable source;
-`live-preview-v0.1` is the archive of the pre-review ideas) and the zero-dependency CDP screencast
+`live-preview-v0.1-archive` is the archive of the pre-review ideas) and the zero-dependency CDP screencast
 prototype at `~/projects/cdp-screencast-proto` (server.mjs, client.html, smoke.mjs).
 
 ## Slices
@@ -87,7 +87,7 @@ its title only.
 | `chromium.ts` | Resolve the binary (PATH, Playwright cache, agent-browser's Chrome for Testing cache, then `~/.cache/cez/chromium`), download Chrome for Testing into that cache on request, launch headless with the task profile and `--remote-debugging-port=0`, read `DevToolsActivePort`, stop. Typed failures: `not-installed`, `sandbox` (stderr tail kept), `timeout`, `exited`. |
 | `cdp.ts` | Minimal CDP client over the `ws` package already in `packages/cezar` (Node's global `WebSocket` is not stable on the `>=20` engine floor). |
 | `session.ts` | One preview session per task: the page, screencast with one frame in flight and newest-frame-wins, the input whitelist (resize, mouse, key, insertText, nav, back, forward, `reload { ignoreCache? }`, dialog reply), dialog forwarding, the injected cursor-shape binding and same-tab popups (from the prototype's `INJECT`), one viewer. |
-| `dev-server.ts` | Supervisor for one registration: probe the port; if it answers, adopt; if it is silent, report `needs_approval` and spawn only on an explicit `run`. Spawn `command` in its own process group with `cwd`, log to the task's preview directory, TCP-probe until up. States `starting → up → exited`, plus `stalled`. Writes a pid record `{ pid, startToken }` and kills only what it started. |
+| `dev-server.ts` | Supervisor for one registration: probe the port; if it answers, adopt; if it is silent, report `needs_approval` and spawn only on an explicit `run`. Spawn `command` in its own process group with `cwd` and stdin closed (`'ignore'`: nobody can answer a prompt from the cockpit, so an interactive prompt fails fast into `exited` with its log instead of hanging), log to the task's preview directory, TCP-probe until up. States `starting → up → exited`, plus `stalled`. Writes a pid record `{ pid, startToken }` and kills only what it started. |
 | `manager.ts` | Map run → `{ servers, session }`. Owns every exit in the lifecycle table below, the boot sweep and shutdown. |
 
 On disk, per task: `.ai/cezar/preview/<runId>/` with `profile/`, `<port>.log`, `<port>.pid.json`.
