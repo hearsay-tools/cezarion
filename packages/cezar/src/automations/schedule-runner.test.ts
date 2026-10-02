@@ -63,6 +63,8 @@ describe('ScheduleRunner', () => {
     expect(launch).toHaveBeenCalledTimes(1);
     expect(launch).toHaveBeenCalledWith(definition, { at: iso(FIRST_RUN), trigger: 'catch-up' }, expect.any(String));
     expect(store.logs({ automationId: 'nightly' }).map((row) => row.result)).toEqual(['catch-up']);
+    // Late because cezar was down OR the machine slept: the reason must not claim only the first.
+    expect(store.logs({ automationId: 'nightly' })[0]?.reason).toContain('missed while cezar was not running or the machine was asleep');
     expect(store.state('nightly')?.nextRunAt).toBe(iso(FIRST_RUN + DAY));
   });
 
@@ -76,7 +78,7 @@ describe('ScheduleRunner', () => {
     expect(outcome.result).toBe('skipped');
     expect(launch).not.toHaveBeenCalled();
     expect(store.logs({ automationId: 'nightly' })).toEqual([
-      expect.objectContaining({ result: 'skipped', reason: expect.stringContaining('3 occurrences') }),
+      expect.objectContaining({ result: 'skipped', reason: expect.stringContaining('3 occurrences while cezar was not running or the machine was asleep') }),
     ]);
     expect(Date.parse(store.state('nightly')!.nextRunAt!)).toBeGreaterThan(clock.now());
     expect(store.state('nightly')?.nextRunAt).toBe(iso(FIRST_RUN + 21 * DAY));
@@ -91,7 +93,7 @@ describe('ScheduleRunner', () => {
     expect(launch).toHaveBeenCalledTimes(1);
     const logs = store.logs({ automationId: 'nightly' });
     expect(logs.map((row) => row.result)).toEqual(['catch-up', 'skipped']);
-    expect(logs[1]?.reason).toContain('Missed 3 older occurrences');
+    expect(logs[1]?.reason).toContain('Missed 3 older occurrences while cezar was not running or the machine was asleep');
     expect(store.state('nightly')?.nextRunAt).toBe(iso(FIRST_RUN + 4 * DAY));
   });
 

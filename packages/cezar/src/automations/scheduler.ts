@@ -179,6 +179,15 @@ function laterCursor(
 
 const MIN_RETRY_MS = 60_000;
 
+/**
+ * The longest the workspace timer sleeps before it looks at the wall clock again. Node timers
+ * count on a monotonic clock that stops while the machine is suspended, so one timer armed for
+ * the whole distance to a weekly occurrence would wake days late after a laptop slept. A capped
+ * wake that is not yet due re-arms without firing; the cap also keeps every delay far below
+ * `setTimeout`'s 2^31 ms overflow.
+ */
+export const WORKSPACE_TIMER_CAP_MS = 60_000;
+
 export interface WorkspaceAutomationSchedulerOptions {
   coordinator: AutomationCoordinator;
   handle: (projectId: string, store: AutomationStore) => ProjectAutomationHandle | undefined;
@@ -262,12 +271,15 @@ export class WorkspaceAutomationScheduler {
     if (!due.length) return;
     due.sort((a, b) => a.at - b.at);
     const next = due[0]!;
+    const clock = () => this.options.now?.() ?? Date.now();
     this.timer = setTimeout(() => {
       this.timer = undefined;
+      // A capped wake short of the due instant fires nothing: look again from fresh state.
+      if (clock() < next.at) { this.schedule(); return; }
       void next.fire().then(
         () => { this.retryAfter.delete(next.key); },
-        () => { this.retryAfter.set(next.key, (this.options.now?.() ?? Date.now()) + next.retryAfterMs); },
+        () => { this.retryAfter.set(next.key, clock() + next.retryAfterMs); },
       ).finally(() => this.schedule());
-    }, Math.max(0, next.at - (this.options.now?.() ?? Date.now())));
+    }, Math.min(WORKSPACE_TIMER_CAP_MS, Math.max(0, next.at - clock())));
   }
 }

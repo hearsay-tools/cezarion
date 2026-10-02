@@ -265,8 +265,8 @@ export class ScheduleRunner {
       revision: definition.revision,
       result: 'skipped',
       reason: latestCaughtUp
-        ? `Missed ${count} older occurrence${plural} while cezar was not running; only the latest one caught up.`
-        : `Missed ${count} occurrence${plural} while cezar was not running; nothing was launched for them.`,
+        ? `Missed ${count} older occurrence${plural} while cezar was not running or the machine was asleep; only the latest one caught up.`
+        : `Missed ${count} occurrence${plural} while cezar was not running or the machine was asleep; nothing was launched for them.`,
     });
   }
 }
@@ -280,7 +280,7 @@ function reasonFor(occurrence: ScheduleOccurrence, timeZone: string): string {
   const when = new Intl.DateTimeFormat('en-GB', { timeZone, weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(occurrence.at));
   switch (occurrence.trigger) {
     case 'schedule': return `Scheduled run at ${when}.`;
-    case 'catch-up': return `Caught up the ${when} occurrence missed while cezar was not running.`;
+    case 'catch-up': return `Caught up the ${when} occurrence missed while cezar was not running or the machine was asleep.`;
     case 'manual': return `Started by hand at ${when}.`;
   }
 }

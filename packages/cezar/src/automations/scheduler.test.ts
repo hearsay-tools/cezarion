@@ -6,7 +6,7 @@ import { automationLogRecordSchema as contractLogRecordSchema } from '@open-merc
 import { AutomationStore } from './store.ts';
 import type { GithubAutomationDefinition, ScheduleAutomationDefinition } from './types.ts';
 import * as scheduleRunner from './schedule-runner.ts';
-import { LeaseHeldError, ProjectAutomationScheduler, WorkspaceAutomationScheduler } from './scheduler.ts';
+import { LeaseHeldError, ProjectAutomationScheduler, WORKSPACE_TIMER_CAP_MS, WorkspaceAutomationScheduler } from './scheduler.ts';
 
 const dirs: string[] = [];
 afterEach(async () => Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))));
@@ -331,6 +331,66 @@ describe('WorkspaceAutomationScheduler', () => {
         scheduler.stop();
         fire.mockRestore();
       }
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('a weekly schedule fires on time after the machine slept past its occurrence', async () => {
+    // A suspend stops the monotonic clock Node timers count on: wall time jumps, timers do not
+    // advance. One timer armed for the whole week would wake days late; the capped wake notices.
+    vi.useFakeTimers();
+    try {
+      const now = Date.parse('2026-09-14T04:00:00Z'); // a Monday
+      vi.setSystemTime(now);
+      const { store } = await setup();
+      const poll = store.list()[0]!;
+      store.update(poll.id, poll.revision, { ...poll, enabled: false });
+      store.create({ name: 'Weekly', enabled: true, kind: 'schedule', schedule: { type: 'weekly', day: 4, hour: 9, minute: 0 }, task: { prompt: 'Report' } }, 'weekly');
+      const launchSchedule = vi.fn(async () => ({ runId: 'scheduled' }));
+      const scheduler = new WorkspaceAutomationScheduler({
+        coordinator: { refresh: async () => undefined, enabledProjectIds: () => ['p'], store: () => store } as never,
+        handle: () => ({ projectId: 'p', store, timeZone: 'UTC', launchSchedule }),
+        now: () => Date.now(),
+      });
+      try {
+        await scheduler.start();
+        expect(store.state('weekly')?.nextRunAt).toBe('2026-09-17T09:00:00.000Z');
+        // Asleep until a minute before Thursday 09:00; the timers saw none of it.
+        vi.setSystemTime(Date.parse('2026-09-17T08:59:30Z'));
+        await vi.advanceTimersByTimeAsync(WORKSPACE_TIMER_CAP_MS);
+        expect(launchSchedule).toHaveBeenCalledTimes(1);
+        expect(launchSchedule).toHaveBeenCalledWith(expect.objectContaining({ id: 'weekly' }), { at: '2026-09-17T09:00:00.000Z', trigger: 'schedule' }, expect.any(String));
+      } finally { scheduler.stop(); }
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('a capped wake before a poll is due re-arms without firing it', async () => {
+    vi.useFakeTimers();
+    try {
+      const now = Date.parse('2026-09-14T06:00:00Z');
+      vi.setSystemTime(now);
+      const { store, definition } = await setup();
+      // Backed off for two hours: far beyond one capped wake.
+      store.setState(definition.id, (current) => ({ ...current, nextCheckAt: new Date(now + 2 * 60 * 60_000).toISOString() }));
+      const pollFn = vi.fn(async () => ({ candidates: [], truncated: false, pages: 1 }));
+      const scheduler = new WorkspaceAutomationScheduler({
+        coordinator: { refresh: async () => undefined, enabledProjectIds: () => ['p'], store: () => store } as never,
+        handle: () => ({ projectId: 'p', store, timeZone: 'UTC', github: { owner: 'acme', repo: 'demo', poller: { poll: pollFn } as never }, launch: async () => ({ runId: 'unused' }) }),
+        now: () => Date.now(),
+      });
+      try {
+        await scheduler.start();
+        await vi.advanceTimersByTimeAsync(2 * 60 * 60_000 - 1_000);
+        expect(pollFn).not.toHaveBeenCalled();
+        expect(vi.getTimerCount()).toBe(1);
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(pollFn).toHaveBeenCalledTimes(1);
+        // And a wall-clock jump past the due instant is noticed within one cap.
+        store.setState(definition.id, (current) => ({ ...current, nextCheckAt: new Date(Date.now() + 2 * 60 * 60_000).toISOString() }));
+        await scheduler.reschedule();
+        vi.setSystemTime(Date.now() + 3 * 60 * 60_000);
+        await vi.advanceTimersByTimeAsync(WORKSPACE_TIMER_CAP_MS);
+        expect(pollFn).toHaveBeenCalledTimes(2);
+      } finally { scheduler.stop(); }
     } finally { vi.useRealTimers(); }
   });
 
