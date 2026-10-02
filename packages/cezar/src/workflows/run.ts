@@ -1040,6 +1040,10 @@ export class RunManager {
   private readonly ciResources: ReturnType<typeof acquireCiResources>;
   /** #781: the workspace-wide preview host. Absent (`cez run`, tests) means every registration is `headless`. */
   private readonly preview?: PreviewHostLike;
+  /** The same host, for a removal outside this manager that must release a run's preview first. */
+  get previewHost(): PreviewHostLike | undefined {
+    return this.preview;
+  }
   /** #781: cezar's own listening port, which no dev server may register. */
   private readonly cezarPort?: () => number | undefined;
   private ciSupervisor: Pick<CiWatcherSupervisor, 'resolve' | 'watch' | 'close'>;

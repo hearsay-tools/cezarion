@@ -205,9 +205,11 @@ Exit triggers:
 
 - **Run deleted**: the manager subscribes to the run store's `deleted` emission.
 - **Worktree removed**: removal happens at several sites (`runs/retention.ts:177`,
-  `server/server.ts:4628`, `4641`, `4725`). All of them go through one helper that releases the
-  task's preview before calling `removeWorktree`, so no site can be missed; a test enumerates the
-  call sites.
+  `server/server.ts:4628`, `4641`, `4725`, and a destroyed owned worker's fenced removal in
+  `delegation/workspace.ts`). All of them go through `git-worktree-release.ts`, which releases the
+  task's preview once the removal is going ahead and before git removes the checkout
+  (`releaseThenRemoveWorktree`, `releaseThenRemoveOwnedWorkspace`), so no site can be missed; a
+  test scans the sources for direct calls and for any other `['worktree', 'remove'` git call.
 - **Shutdown**: `close` and `shutdownForRestart` both call `manager.close()`.
 - Constants: `PREVIEW_SERVER_IDLE_MS = 15 min`, `PREVIEW_BROWSER_IDLE_MS = 2 min`,
   `PREVIEW_PORT_WAIT_MS = 2 min` (probe every 2 s), `PREVIEW_MAX_SERVERS = 8` per task.
