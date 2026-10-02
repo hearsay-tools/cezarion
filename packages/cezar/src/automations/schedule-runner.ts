@@ -88,6 +88,8 @@ export class ScheduleRunner {
       const now = this.now();
       const due = this.dueAt(definition);
       if (due === null) return { result: 'skipped' } as const;
+      // Not due yet: another cockpit (or a PUT) moved `nextRunAt` after this fire was armed.
+      if (due > now) return { result: 'skipped', occurrenceAt: new Date(due).toISOString() } as const;
       if (now - due <= SCHEDULE_GRACE_MS) {
         return this.launch(definition, { at: new Date(due).toISOString(), trigger: 'schedule' }, now, true);
       }
@@ -120,8 +122,12 @@ export class ScheduleRunner {
   /** Retry a `launch-error` receipt of this kind: the same receipt, fired again by hand. */
   async retry(definition: ScheduleAutomationDefinition, receipt: AutomationReceipt): Promise<ScheduleFireOutcome> {
     const occurrenceAt = receipt.occurrenceAt ?? new Date(this.now()).toISOString();
-    const outcome = await this.underLease(() => {
+    const outcome = await this.underLease(async () => {
       const now = this.now();
+      // Re-checked under the lease: another retry may have relaunched it since the caller read it.
+      if (this.handle.store.latestReceipts().get(receipt.receiptKey)?.status !== 'launch-error') {
+        return { result: 'duplicate', occurrenceAt } as const;
+      }
       const reserved: AutomationReceipt = { ...receipt, status: 'reserved', error: undefined, updatedAt: new Date(now).toISOString() };
       this.handle.store.appendReceipt(reserved);
       return this.launchReserved(definition, { at: occurrenceAt, trigger: 'manual' }, reserved, now, false);
@@ -185,7 +191,9 @@ export class ScheduleRunner {
       const message = error instanceof Error ? error.message : String(error);
       store.appendReceipt({ ...receipt, status: 'launch-error', error: message, updatedAt: new Date(this.now()).toISOString() });
       await store.appendLog({ automationId: definition.id, revision: definition.revision, result: 'failed', reason: message, receiptId: receipt.receiptId, durationMs: Date.now() - started });
-      await this.recordFailure(definition, occurrence, now, advance);
+      // Only the timer counts towards the auto-pause: Run now and Retry leave `enabled` alone.
+      if (advance) await this.recordFailure(definition, occurrence, now);
+      else this.handle.onChange?.(definition.id, definition.revision);
       return { result: 'failed', occurrenceAt: occurrence.at };
     }
     store.appendReceipt({ ...receipt, status: 'launched', runId, updatedAt: new Date(this.now()).toISOString() });
@@ -205,22 +213,40 @@ export class ScheduleRunner {
     return { result, runId, occurrenceAt: occurrence.at };
   }
 
-  private async recordFailure(definition: ScheduleAutomationDefinition, occurrence: ScheduleOccurrence, now: number, advance: boolean): Promise<void> {
+  private async recordFailure(definition: ScheduleAutomationDefinition, occurrence: ScheduleOccurrence, now: number): Promise<void> {
     const { store } = this.handle;
     const next = store.setState(definition.id, (current) => ({
       ...current,
       revision: definition.revision,
       consecutiveFailures: (current.consecutiveFailures ?? 0) + 1,
-      ...(advance ? { nextRunAt: nextIso(definition, Math.max(Date.parse(occurrence.at), now), this.handle.timeZone) } : {}),
+      nextRunAt: nextIso(definition, Math.max(Date.parse(occurrence.at), now), this.handle.timeZone),
     }));
-    if ((next.consecutiveFailures ?? 0) >= SCHEDULE_AUTO_PAUSE_AFTER && definition.enabled) {
-      const { id, revision, createdAt: _c, updatedAt: _u, ...editable } = definition;
-      const paused = store.update(id, revision, { ...editable, enabled: false });
-      await store.appendLog({ automationId: id, revision: paused.revision, result: 'failed', reason: `Paused after ${SCHEDULE_AUTO_PAUSE_AFTER} consecutive launch failures; fix the task and enable it again.` });
-      this.handle.onChange?.(id, paused.revision);
-      return;
+    if ((next.consecutiveFailures ?? 0) >= SCHEDULE_AUTO_PAUSE_AFTER) {
+      const paused = this.pause(definition.id);
+      if (paused) {
+        await store.appendLog({ automationId: paused.id, revision: paused.revision, result: 'failed', reason: `Paused after ${SCHEDULE_AUTO_PAUSE_AFTER} consecutive launch failures; fix the task and enable it again.` });
+        this.handle.onChange?.(paused.id, paused.revision);
+        return;
+      }
     }
     this.handle.onChange?.(definition.id, definition.revision);
+  }
+
+  /**
+   * Pauses the CURRENT revision, not the one this fire started with: the definition may have been
+   * edited while the launch ran, and pausing the stale copy would either conflict or revert the
+   * edit. Already paused (or deleted) by then: nothing to do.
+   */
+  private pause(id: string): ScheduleAutomationDefinition | undefined {
+    const current = this.handle.store.get(id);
+    if (!current?.enabled) return undefined;
+    const { revision, createdAt: _c, updatedAt: _u, id: _id, ...editable } = current;
+    try {
+      return this.handle.store.update(id, revision, { ...editable, enabled: false }) as ScheduleAutomationDefinition;
+    } catch {
+      // Edited or deleted in between; the next failure pauses whatever is current then.
+      return undefined;
+    }
   }
 
   private advance(definition: ScheduleAutomationDefinition, fromMs: number, now: number): void {

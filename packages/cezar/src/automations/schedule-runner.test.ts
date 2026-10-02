@@ -250,6 +250,78 @@ describe('ScheduleRunner', () => {
     expect(store.state('nightly')?.nextRunAt).toBe(nextRunAt);
   });
 
+  it('a failed runNow or retry neither counts towards nor triggers the auto-pause', async () => {
+    const { store, definition, runner, launch, clock } = await setup();
+    runner.dueAt(definition);
+    store.setState('nightly', (current) => ({ ...current, consecutiveFailures: 2 }));
+    launch.mockRejectedValue(new Error('still broken'));
+    clock.set(T0 + 5_000);
+    expect(await runner.runNow(definition)).toMatchObject({ result: 'failed' });
+    const failed = [...store.latestReceipts().values()][0]!;
+    clock.set(T0 + 10_000);
+    expect(await runner.retry(definition, failed)).toMatchObject({ result: 'failed' });
+    expect(store.get('nightly')?.enabled).toBe(true);
+    expect(store.get('nightly')?.revision).toBe(1);
+    expect(store.state('nightly')?.consecutiveFailures).toBe(2);
+    expect(store.logs({ automationId: 'nightly' }).some((row) => row.reason?.startsWith('Paused after'))).toBe(false);
+  });
+
+  it('fire before the due instant launches nothing and leaves nextRunAt', async () => {
+    const { store, definition, runner, launch } = await setup();
+    runner.dueAt(definition);
+    // The clock is still T0, 30 s before FIRST_RUN.
+    expect(await runner.fire(definition)).toEqual({ result: 'skipped', occurrenceAt: iso(FIRST_RUN) });
+    expect(launch).not.toHaveBeenCalled();
+    expect(store.latestReceipts().size).toBe(0);
+    expect(store.state('nightly')?.nextRunAt).toBe(iso(FIRST_RUN));
+  });
+
+  it('the third failure pauses the current revision when the definition was edited during the launch', async () => {
+    const { store, definition, runner, launch, clock, changes } = await setup();
+    runner.dueAt(definition);
+    store.setState('nightly', (current) => ({ ...current, consecutiveFailures: 2 }));
+    launch.mockImplementationOnce(async () => {
+      store.update('nightly', 1, { name: 'Nightly (edited)', enabled: true, kind: 'schedule', schedule: definition.schedule, task: definition.task });
+      throw new Error('boom');
+    });
+    clock.set(FIRST_RUN + 1_000);
+    expect(await runner.fire(definition)).toMatchObject({ result: 'failed' });
+    expect(store.get('nightly')).toMatchObject({ name: 'Nightly (edited)', enabled: false, revision: 3 });
+    expect(store.logs({ automationId: 'nightly' })[0]).toMatchObject({ result: 'failed', revision: 3, reason: expect.stringContaining('Paused after 3') });
+    expect(changes.at(-1)).toBe('nightly');
+  });
+
+  it('the third failure skips the pause when the definition was paused elsewhere during the launch', async () => {
+    const { store, definition, runner, launch, clock, changes } = await setup();
+    runner.dueAt(definition);
+    store.setState('nightly', (current) => ({ ...current, consecutiveFailures: 2 }));
+    launch.mockImplementationOnce(async () => {
+      store.update('nightly', 1, { name: 'Nightly', enabled: false, kind: 'schedule', schedule: definition.schedule, task: definition.task });
+      throw new Error('boom');
+    });
+    clock.set(FIRST_RUN + 1_000);
+    const before = changes.length;
+    expect(await runner.fire(definition)).toMatchObject({ result: 'failed' });
+    expect(store.get('nightly')).toMatchObject({ enabled: false, revision: 2 });
+    expect(store.logs({ automationId: 'nightly' }).some((row) => row.reason?.startsWith('Paused after'))).toBe(false);
+    expect(changes.length).toBeGreaterThan(before);
+  });
+
+  it('retry launches nothing when the receipt is no longer in launch-error', async () => {
+    const { store, definition, runner, launch, clock } = await setup();
+    launch.mockRejectedValueOnce(new Error('boom'));
+    runner.dueAt(definition);
+    clock.set(FIRST_RUN + 1_000);
+    await runner.fire(definition);
+    const stale = [...store.latestReceipts().values()][0]!;
+    expect(stale.status).toBe('launch-error');
+    // Another process retried it first.
+    AutomationStore.open(store.dataDir).appendReceipt({ ...stale, status: 'launched', runId: 'elsewhere', updatedAt: iso(clock.now()) });
+    expect(await runner.retry(definition, stale)).toEqual({ result: 'duplicate', occurrenceAt: stale.occurrenceAt });
+    expect(launch).toHaveBeenCalledTimes(1);
+    expect(store.latestReceipts().get(stale.receiptKey)).toMatchObject({ status: 'launched', runId: 'elsewhere' });
+  });
+
   it('reports detection-only when the cockpit cannot launch', async () => {
     const { store, definition, clock } = await setup();
     const runner = new ScheduleRunner({ projectId: 'p', store, timeZone: 'UTC', now: clock.now });
