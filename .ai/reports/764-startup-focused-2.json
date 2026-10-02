@@ -1,0 +1,42 @@
+{
+  "baseUrl": "http://localhost:38541",
+  "dataRoot": "/tmp/cezar-e2e-progressive-history-L8rTPz",
+  "healthReady": true,
+  "child": {
+    "pid": 1955405,
+    "spawnfile": "/home/agent/.nvm/versions/node/v24.21.0/bin/node",
+    "spawnargs": [
+      "/home/agent/.nvm/versions/node/v24.21.0/bin/node",
+      "/home/agent/projects/cezar/.ai/cezar/worktrees/d6e7f159-f1c6-45f4-87c6-500ec47ab925/packages/cezar/dist/index.js",
+      "serve",
+      "--repo",
+      "/tmp/cezar-e2e-progressive-history-L8rTPz",
+      "--port",
+      "38541",
+      "--no-open"
+    ],
+    "elapsedMs": 7629,
+    "exitCode": 0,
+    "signalCode": null,
+    "lifecycle": [
+      {
+        "kind": "spawn",
+        "elapsedMs": 6
+      },
+      {
+        "kind": "exit",
+        "elapsedMs": 7629,
+        "detail": "code=0 signal=null"
+      },
+      {
+        "kind": "close",
+        "elapsedMs": 7629,
+        "detail": "code=0 signal=null"
+      }
+    ],
+    "stdout": "  recovered 2 run(s) from the previous session\n\n  cezar v0.15.1 — /tmp/cezar-e2e-progressive-history-L8rTPz\n  not a git repository (tasks run in place, one at a time; repo view is empty)\n  ✓ claude mock (CEZ_DRY_RUN=1)\n  ✓ codex  codex-cli 0.159.2\n  ✓ opencode 1.18.33\n  ✓ pi     mock (CEZ_DRY_RUN=1)\n  ✓ cursor mock (CEZ_DRY_RUN=1)\n  ✓ gh     authenticated\n  ✓ git    git version 2.43.0\n\n  cockpit → http://127.0.0.1:38541\n\n  🤖 Make the most of parallel coding with our AI skills\n  open-mercato/skills: reusable, technology-agnostic agent skills for PR\n  creation, code review, CI stabilisation, spec writing & more.\n  cezar already loads them for you — Skills → Refresh in the cockpit gets the latest.\n  To use them outside cezar:  npx skills add open-mercato/skills --skill '*'\n\n",
+    "stderr": "",
+    "stdoutDropped": 0,
+    "stderrDropped": 0
+  }
+}

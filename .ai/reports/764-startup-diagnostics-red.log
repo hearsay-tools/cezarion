@@ -1,0 +1,91 @@
+
+> test
+> vitest run packages/web/src/test/fixture-server-diagnostics.test.ts packages/web/src/test/poll.test.ts -t retains real child|actual spawn error|failed health status
+
+
+ RUN  v4.1.10 /home/agent/projects/cezar/.ai/cezar/worktrees/d6e7f159-f1c6-45f4-87c6-500ec47ab925
+
+ ❯ |web| src/test/fixture-server-diagnostics.test.ts (2 tests | 2 failed) 10ms
+   × retains real child lifecycle and bounded stdout/stderr after startup exits 6ms
+   × captures an actual spawn error without an unhandled child error 2ms
+ ❯ |web| src/test/poll.test.ts (19 tests | 1 failed | 18 skipped) 10ms
+     ↓ returns the first answer that is not undefined, and stops probing
+     ↓ treats a throwing probe as "not yet" and keeps polling
+     ↓ reports the last probe error alongside the failure, and carries it as the cause
+     ↓ says only what failed when the probe never threw — an empty poll is not an error
+     ↓ gives up after `tries` probes
+     ↓ waits 60 × 250 ms for a fixture server to answer health — 15 s
+     ↓ waits 120 × 500 ms for a run to reach a status — 60 s, the budget 6 of the 7 copies used
+     ↓ waits 40 × 250 ms by default — 10 s, what pollFor gives a caller that names no budget
+     ↓ polls through a rejected fetch until the run reaches a wanted status
+     ↓ polls through a 5xx rather than aborting on it
+     ↓ names the run, the wanted statuses and the last server answer when it runs out
+     ↓ polls until the server answers, and does not report the connection refusals on the way
+     ↓ names what never answered, without an ECONNREFUSED tail nobody needs
+     ↓ aborts a stuck probe within the wall-clock budget
+     ↓ bounds even a probe that ignores its abort signal
+     ↓ reports the last observed status, wanted state and URL
+     ↓ closes the successful health response socket after accepting headers
+     ↓ closes every rejected non-2xx socket across repeated JSON probes
+   × reports failed health status and nested address-family transport errors 9ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |web| src/test/fixture-server-diagnostics.test.ts > retains real child lifecycle and bounded stdout/stderr after startup exits
+TypeError: captureFixtureServer is not a function
+ ❯ src/test/fixture-server-diagnostics.test.ts:9:18
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  |web| src/test/fixture-server-diagnostics.test.ts > captures an actual spawn error without an unhandled child error
+TypeError: captureFixtureServer is not a function
+ ❯ src/test/fixture-server-diagnostics.test.ts:20:18
+     18| it('captures an actual spawn error without an unhandled child error', …
+     19|   const child = spawn('/cezar-e2e-missing-fixture-executable', [], { s…
+     20|   const sample = captureFixtureServer(child)
+       |                  ^
+     21|   // once(close) would reject on error; the diagnostic observer must r…
+     22|   await new Promise<void>(resolve => child.once('close', () => resolve…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  |web| src/test/poll.test.ts > reports failed health status and nested address-family transport errors
+AssertionError: expected [Function] to throw error including 'answered 503' but got 'cezar e2e: history fixture never answ…'
+
+Expected: "answered 503"
+Received: "cezar e2e: history fixture never answered at http://localhost:35801"
+
+ ❯ src/test/poll.test.ts:254:104
+    252| it('reports failed health status and nested address-family transport e…
+    253|   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status…
+    254|   await expect(waitForHealth('http://localhost:35801', 'history fixtur…
+       |                                                                                                        ^
+    255|     .rejects.toThrow('answered 503')
+    256|   vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('fetc…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+⎯⎯⎯⎯⎯⎯ Unhandled Errors ⎯⎯⎯⎯⎯⎯
+
+Vitest caught 1 unhandled error during the test run.
+This might cause false positive tests. Resolve unhandled errors to make sure your tests are not affected.
+
+⎯⎯⎯⎯⎯ Uncaught Exception ⎯⎯⎯⎯⎯
+Error: spawn /cezar-e2e-missing-fixture-executable ENOENT
+ ❯ Process.ChildProcess._handle.onexit node:internal/child_process:287:19
+ ❯ onErrorNT node:internal/child_process:525:16
+ ❯ processTicksAndRejections node:internal/process/task_queues:90:21
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { errno: -2, code: 'ENOENT', syscall: 'spawn /cezar-e2e-missing-fixture-executable', path: '/cezar-e2e-missing-fixture-executable', spawnargs: [] }
+This error originated in "packages/web/src/test/fixture-server-diagnostics.test.ts" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+
+
+ Test Files  2 failed (2)
+      Tests  3 failed | 18 skipped (21)
+     Errors  1 error
+   Start at  15:44:45
+   Duration  196ms (transform 78ms, setup 73ms, import 34ms, tests 20ms, environment 0ms)
+

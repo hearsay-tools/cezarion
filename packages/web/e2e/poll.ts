@@ -66,8 +66,18 @@ export async function pollFor<T>(
   // Diagnostics must not hang after the poll exhausted its budget either.
   const reason = await boundedProbe(signal => fail(signal), Math.max(1, Math.min(requestTimeoutMs, end - Date.now()))).catch(error => `poll diagnostics failed: ${String(error)}`)
   if (lastError === undefined) throw new Error(reason)
-  const detail = lastError instanceof Error ? lastError.message : String(lastError)
+  const detail = probeErrorDetail(lastError)
   throw new Error(`${reason} (last probe error: ${detail})`, { cause: lastError })
+}
+
+/** Node fetch wraps useful socket/address errors in cause or AggregateError.errors. */
+function probeErrorDetail(error: unknown, depth = 0): string {
+  if (!(error instanceof Error)) return String(error).slice(0, 2_000)
+  const nested = depth < 3
+    ? [error.cause, ...(error instanceof AggregateError ? error.errors.slice(0, 4) : [])]
+      .filter(value => value !== undefined).map(value => probeErrorDetail(value, depth + 1))
+    : []
+  return [error.message || error.name, ...nested].join(': ').slice(0, 2_000)
 }
 
 async function boundedProbe<T>(probe: (signal: AbortSignal) => T | Promise<T>, timeoutMs: number): Promise<T> {
@@ -101,15 +111,11 @@ export async function pollJson<T>(url: string, signal: AbortSignal): Promise<T> 
 
 /** A fixture server is listening and answering its own health route. */
 export async function waitForHealth(baseUrl: string, what = 'the fixture server', options: PollOptions = {}): Promise<void> {
-  // Still starting is the ordinary case here, so a rejected fetch is not even worth reporting as
-  // the last probe error — `pollFor` would otherwise end every boot timeout with ECONNREFUSED.
   await pollFor(
     async (signal) => {
-      try {
-        return (await fetch(`${baseUrl}/api/v1/health`, { signal })).ok || undefined
-      } catch {
-        return undefined
-      }
+      const response = await fetch(`${baseUrl}/api/v1/health`, { signal })
+      if (!response.ok) throw new Error(`GET ${baseUrl}/api/v1/health answered ${response.status}`)
+      return true
     },
     () => `cezar e2e: ${what} never answered at ${baseUrl}`,
     { tries: 60, ...options },

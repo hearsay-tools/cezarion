@@ -1,0 +1,19 @@
+
+> test
+> vitest run packages/web/src/test/fixture-server-diagnostics.test.ts packages/web/src/test/fixture-server-stop.test.ts packages/web/src/test/poll.test.ts packages/web/src/test/e2e-wait-discipline.test.ts
+
+
+ RUN  v4.1.10 /home/agent/projects/cezar/.ai/cezar/worktrees/d6e7f159-f1c6-45f4-87c6-500ec47ab925
+
+ ✓ |web| src/test/fixture-server-diagnostics.test.ts (3 tests) 122ms
+ ✓ |web| src/test/fixture-server-stop.test.ts (3 tests) 287ms
+ ✓ |web| src/test/poll.test.ts (20 tests) 452ms
+ ✓ |web| src/test/e2e-wait-discipline.test.ts (30 tests) 903ms
+     ✓ scans every spec and the browser-driving helpers  308ms
+     ✓ has no wait-discipline site outside the baseline, and the baseline names no site that is gone  362ms
+
+ Test Files  4 passed (4)
+      Tests  56 passed (56)
+   Start at  15:51:11
+   Duration  1.12s (transform 239ms, setup 174ms, import 153ms, tests 1.76s, environment 0ms)
+

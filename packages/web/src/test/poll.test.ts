@@ -248,3 +248,17 @@ describe('settled probes close unread streamed bodies (#764 review)', () => {
     } finally { await fixture.close() }
   })
 })
+
+it('reports failed health status', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 503 }))
+  await expect(waitForHealth('http://localhost:35801', 'history fixture', { tries: 1, intervalMs: 0 }))
+    .rejects.toThrow('answered 503')
+})
+
+it('reports nested address-family health transport errors', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('fetch failed', {
+    cause: new AggregateError([new Error('connect ECONNREFUSED ::1:35801'), new Error('connect ECONNREFUSED 127.0.0.1:35801')]),
+  })))
+  await expect(waitForHealth('http://localhost:35801', 'history fixture', { tries: 1, intervalMs: 0 }))
+    .rejects.toThrow('ECONNREFUSED ::1:35801')
+})

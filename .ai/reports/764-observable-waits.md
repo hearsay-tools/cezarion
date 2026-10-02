@@ -241,3 +241,37 @@ Normal six viewport/theme handoff cases passed **6/6**, 35 filtered (`764-prompt
 
 
 The exact 1440/light case also passed in **two fresh-session repetitions**, each 1 passed / 40 filtered, using the first command above (`764-prompt-followup-repeat-1-green.log`, `764-prompt-followup-repeat-2-green.log`). Together with the six-case selection, the originally failing case has three ordinary focused passes plus the controlled fault-injection green. These iterations are not a full load campaign. Own test environment stopped via `sh .ai/scripts/test-env-down.sh` (`764-prompt-followup-down.log`); no application or browser fixture remains from these checks. `git diff --check` passed. The parent retains full gate/load/browser campaign responsibility. No unresolved focused custom-prompt failure remains.
+
+
+## Load-campaign fixture startup diagnostics
+
+Read the parent's `load-1790947988710/round-3-lane-2/tests.log`. The failure occurred in history `beforeAll`, at `waitForHealth(http://localhost:35801)`, before a browser session existed. Its only recorded cause was “the fixture server never answered”; the spawned CLI used ignored stdio and health polling swallowed request failures. All lanes were already cleaned, so the actual child exit/output and transport error cannot be recovered. Parent reports the prompt-fixed idle campaign passed 10/10, preceding load rounds passed 16/16 invocations, and the other seven lanes passed this round. Those facts do not establish capacity exhaustion or a specific startup cause.
+
+Source inspection found the port allocator binds/releases `127.0.0.1` before CLI spawn; health uses `localhost`; the server defaults to binding `127.0.0.1`. Bind collisions or address-family errors are possible, as are child exits or startup delays, but no one of these is proven by the retained failure. Port allocation, address spelling, HTTP budgets, retry counts and production scheduling remain unchanged. This follow-up is a diagnostic change, **not a claim that the intermittent startup failure is fixed**.
+
+The history fixture now pipes and drains stdout/stderr from spawn onward. `captureFixtureServer` retains a 16,384-character tail for each stream, dropped-character counts, command/arguments, PID, elapsed time, exit code, signal and bounded spawn/error/exit/close lifecycle observations. Health polling preserves failed HTTP statuses and nested Node fetch causes, including bounded `AggregateError.errors` address details, rather than suppressing them. A failed health wait embeds the child snapshot in the thrown error and writes `.ai/qa/artifacts_e2e/progressive-history-startup.json`, which the parent's existing campaign artifact copy retains even without a browser failure bundle. Successful waits also record time to health; shutdown refreshes the lifecycle snapshot while keeping readiness/failure information.
+
+TDD red command before the fixes:
+
+```sh
+npm test -- packages/web/src/test/fixture-server-diagnostics.test.ts packages/web/src/test/poll.test.ts -t 'retains real child|actual spawn error|failed health status'
+```
+
+**3 failed, 18 filtered**, plus the deliberately missing executable's unhandled error because the observer did not yet exist (`764-startup-diagnostics-red.log`). After implementation all of those checks pass with no unhandled errors. An additional real local bind-conflict test proves actual `EADDRINUSE` stderr retains the loopback address and selected port. The exit/output tests use real Node child processes, not fabricated lifecycle events.
+
+```sh
+npm test -- packages/web/src/test/fixture-server-diagnostics.test.ts packages/web/src/test/fixture-server-stop.test.ts packages/web/src/test/poll.test.ts packages/web/src/test/e2e-wait-discipline.test.ts
+npm run typecheck:web
+env -u CEZ_AUTOMATIONS TMPDIR=/tmp TMP=/tmp TEMP=/tmp npm test -- --config packages/web/e2e/vitest.config.ts progressive-history.e2e.ts -t 'loads exactly one page|consumes one upward intent' --reporter=verbose
+```
+
+**56 unit tests passed** across four files (`764-startup-diagnostics-green.log`); web typecheck passed (`764-startup-diagnostics-typecheck.log`). Two fresh focused history invocations each passed **2/2**, with no startup failure (`764-startup-focused-1-green.log`, `764-startup-focused-2-green.log`). Their retained child snapshots are `764-startup-focused-1.json` and `764-startup-focused-2.json`: health ready, normal exit 0, spawn/exit/close lifecycle and drained output. No intermittent cause reproduced in these focused iterations. The parent's next controlled load run is required to capture an actual failure with these diagnostics if one recurs.
+
+
+Health HTTP-status and transport-cause regressions were subsequently separated and both were proven red with only `poll.ts` stashed (`764-startup-health-without-fix-red.log`: **2 failed, 18 filtered**). The stash restored without conflicts; final four-file green is **56/56**. Exact command for that red proof:
+
+```sh
+npm test -- packages/web/src/test/poll.test.ts -t 'failed health status|address-family health'
+```
+
+A third fresh history invocation passed **2/2** (`764-startup-focused-3-green.log`) with final metadata capture: `healthReadyAfterMs: 1307`, drained normal CLI startup output, no stderr, and exit 0 (`764-startup-focused-3.json`). It used the same two-case command above. No original startup failure reproduced. Own environment stopped successfully (`764-startup-diagnostics-down.log`), and `git diff --check` passed. Remaining validation is a parent-controlled load run with these diagnostics; actual intermittent root cause is unresolved. Changed code: `fixture-server.ts`, `poll.ts`, `progressive-history.e2e.ts`, `poll.test.ts`, and new `fixture-server-diagnostics.test.ts`; no production files changed.

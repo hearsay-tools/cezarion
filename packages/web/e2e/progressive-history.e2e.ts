@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import { stopFixtureServer } from './fixture-server'
+import { captureFixtureServer, stopFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, fixtureServeEnv } from './agent-browser'
 import { largeThreadEvents } from './fixtures/make-large-thread'
 import record from './fixtures/thread-run.record.json'
@@ -91,6 +91,17 @@ let server: ChildProcess
 let dataRoot: string
 let baseUrl: string
 let bootProject: string
+let serverDiagnostics: ReturnType<typeof captureFixtureServer> | undefined
+let startupError: string | undefined
+let healthReady = false
+let healthReadyAfterMs: number | undefined
+
+function retainServerDiagnostics(): string {
+  const path = join(artifactsDir, 'progressive-history-startup.json')
+  mkdirSync(artifactsDir, { recursive: true })
+  writeFileSync(path, JSON.stringify({ baseUrl, dataRoot, healthReady, healthReadyAfterMs, startupError, child: serverDiagnostics?.() }, null, 2))
+  return path
+}
 
 const cursorRequestCount = `performance.getEntriesByType('resource').filter((entry) => {
   const url = new URL(entry.name)
@@ -269,9 +280,19 @@ beforeAll(async () => {
   server = spawn(
     process.execPath,
     [join(repoRoot, 'packages/cezar/dist/index.js'), 'serve', '--repo', dataRoot, '--port', String(port), '--no-open'],
-    { env: fixtureServeEnv(dataRoot), stdio: 'ignore' },
+    { env: fixtureServeEnv(dataRoot), stdio: ['ignore', 'pipe', 'pipe'] },
   )
-  await waitForHealth(baseUrl)
+  serverDiagnostics = captureFixtureServer(server)
+  try {
+    await waitForHealth(baseUrl)
+    healthReady = true
+    healthReadyAfterMs = serverDiagnostics().elapsedMs
+  } catch (error) {
+    startupError = error instanceof Error ? error.message : String(error)
+    const path = retainServerDiagnostics()
+    throw new Error(`${startupError}\nFixture startup: ${JSON.stringify(serverDiagnostics())}\nDiagnostics: ${path}`, { cause: error })
+  }
+  retainServerDiagnostics()
   bootProject = await bootProjectId(baseUrl)
   browser = AgentBrowser.open(sessionId)
   browser.setViewport(1440, 900)
@@ -297,6 +318,7 @@ beforeAll(async () => {
 afterAll(async () => {
   browser?.close()
   await stopFixtureServer(server)
+  if (serverDiagnostics) retainServerDiagnostics()
   if (dataRoot) rmSync(dataRoot, { recursive: true, force: true })
 })
 
