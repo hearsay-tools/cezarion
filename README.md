@@ -432,6 +432,11 @@ tasks, excluding references to other repositories. Counts show a `+` when the
 underlying list or search reaches its result limit; an unavailable count is not
 shown as zero. Views without their own navigation still show tasks in the sidebar.
 
+Open an issue to see **Linked tasks (N)** beneath its heading. Each row opens a task
+in the current project and shows its title, status and date, newest first. Archived
+tasks remain listed with an **Archived** label, so diagnosis and implementation
+sessions are both reachable.
+
 The Git sidebar lists **Task worktrees** that still exist on disk, including retained
 worktrees from finished tasks. Each row shows its branch, task title, status and
 available diff counts, and opens that task's Changes tab. Reclaimed worktrees disappear

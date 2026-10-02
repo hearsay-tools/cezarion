@@ -138,19 +138,32 @@ export function issueNumbersWithTask(
   repo: string | undefined,
   projectId: string | undefined,
 ): Set<number> {
+  return new Set(runs.filter((run) => !run.archived)
+    .flatMap((run) => ownIssueNumbers(run, repo, projectId)))
+}
+
+function ownIssueNumbers(run: RunRecord, repo: string | undefined, projectId: string | undefined): number[] {
   const own = repo?.toLowerCase()
-  const numbers = new Set<number>()
+  return taskReferences(run, undefined, projectId)
+    .filter((reference) => reference.kind === 'Issue'
+      && (!reference.url || (own !== undefined && repoOfUrl(reference.url) === own)))
+    .map((reference) => reference.number)
+}
+
+/** All recorded history for an issue, including archived runs. Input is the project's runs
+ * query, never the workspace index. The sidebar keeps its non-archived membership rule. */
+export function linkedIssueTasks(
+  runs: readonly RunRecord[],
+  number: number,
+  repo: string | undefined,
+  projectId: string | undefined,
+): RunRecord[] {
+  const tasks = new Map<string, RunRecord>()
   for (const run of runs) {
-    if (run.archived) continue
-    for (const reference of taskReferences(run, undefined, projectId)) {
-      if (reference.kind !== 'Issue') continue
-      if (reference.url) {
-        if (own === undefined || repoOfUrl(reference.url) !== own) continue
-      }
-      numbers.add(reference.number)
-    }
+    if (ownIssueNumbers(run, repo, projectId).includes(number)) tasks.set(run.id, run)
   }
-  return numbers
+  return [...tasks.values()].sort((a, b) =>
+    Date.parse(b.createdAt) - Date.parse(a.createdAt) || a.id.localeCompare(b.id))
 }
 
 /** Main-list rows for a search-backed filter: the HITS, in GitHub's order — never an intersection

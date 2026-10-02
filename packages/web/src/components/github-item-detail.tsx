@@ -61,6 +61,7 @@ export function GithubItemDetail({
   backLink,
   subNav,
   onRunAgent,
+  afterHeading,
   children,
 }: {
   item: GithubItem
@@ -75,6 +76,8 @@ export function GithubItemDetail({
   /** The merge box's "Run agent on this PR" on a conflicting PR; absent renders no button, so a
    *  surface with no agent panel never offers an inert control. */
   onRunAgent?: () => void
+  /** Optional context beneath the heading, supplied by the owning surface. */
+  afterHeading?: ReactNode
   children?: ReactNode
 }) {
   const changes = subNav?.changes ?? false
@@ -133,6 +136,8 @@ export function GithubItemDetail({
       </p>
 
       {item.kind !== 'pr' ? <h2 className="mt-2 text-[22px] leading-snug font-normal">{item.title}</h2> : null}
+
+      {afterHeading}
 
       {item.kind === 'pr' && subNav ? (
         <nav aria-label="Pull request detail" className="mt-4 flex border-b border-border">
