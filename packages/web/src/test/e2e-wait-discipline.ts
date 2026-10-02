@@ -54,7 +54,7 @@ const action =
 const read = /\bexpect\(\(?\s*\w+\.(?:evaluate|count|isVisible|text|url)\(/
 /** Anything that blocks on a page condition between an action and a read. */
 const wait = /\b(?:waitFor\w*|settle\w*)\s*\(/
-const sleep = /(?<![.\w])(?:window\.|globalThis\.)?setTimeout\s*\(/
+const sleep = /\bsetTimeout\s*\(/
 
 /** An Escape pressed through the seam directly, not through `dismissWithEscape`. */
 const bareEscape = /\b\w+\.press\(\s*['"`]Escape['"`]\s*\)/
@@ -103,6 +103,8 @@ export function scanSource(file: string, source: string): Site[] {
   for (const call of callSpans(source, new RegExp(sleep.source, 'g'))) {
     const i = lineOf(source, call.start)
     if (lines[i]?.trim().startsWith('//')) continue
+    // Node request/socket deadlines are methods, not global timer aliases.
+    if (/\b(?:request|socket)\s*\.\s*$/.test(source.slice(0, call.start))) continue
     // Classify this callback, never its whole line: a separate timer on the same line
     // may resolve success after a blind delay even when this one only rejects failure.
     const deadline = /\breject\s*\(/.test(call.text) && !/\bresolve\s*\(/.test(call.text)

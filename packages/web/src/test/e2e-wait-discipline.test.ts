@@ -402,6 +402,18 @@ it('rejects qualified page timers but permits request socket deadlines', () => {
   expect(scanSource('x.ts', `request.setTimeout(1000, () => request.destroy(new Error('deadline')))`)).toEqual([])
 })
 
+it('rejects Node and browser global timer aliases without exempting other timer receivers', () => {
+  for (const receiver of ['global', 'globalThis', 'window']) {
+    for (const separator of ['.', ' . ']) {
+      expect(rules(scanSource('packages/cezar/test/e2e/timer.ts', `await new Promise(done => ${receiver}${separator}setTimeout(done, 250))`))).toEqual(['sleep'])
+    }
+  }
+  expect(rules(scanSource('x.ts', `timers.setTimeout(done, 250)`))).toEqual(['sleep'])
+  for (const receiver of ['request', 'socket']) {
+    expect(scanSource('x.ts', `${receiver} . setTimeout(1000, () => ${receiver}.destroy(new Error('deadline')))`)).toEqual([])
+  }
+})
+
 it('exempts event deadlines per call without hiding a success sleep on the same line (#764 review)', () => {
   const deadline = "setTimeout(() => reject(new Error('event missing')), 5000)"
   const success = "setTimeout(() => resolve('ready'), 150)"
