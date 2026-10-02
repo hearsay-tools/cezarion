@@ -1,7 +1,7 @@
 import { useState, type FormEvent, type ReactNode } from 'react'
 import type { AutomationDefinition, AutomationKind, Runner } from '@open-mercato/cezar-api-client'
 
-import { ApiError, createAutomation, setAutomationEnabled, updateAutomation } from '@/api/client'
+import { ApiError, createAutomation, deleteAutomation, setAutomationEnabled, updateAutomation } from '@/api/client'
 import { useConfig, useProviderStatus, useRunnerModels, useWorkflows } from '@/api/queries'
 import { CpuIcon, TerminalIcon, WorkflowIcon } from '@/components/design-icons'
 import { SegmentedControl } from '@/components/facet-filter'
@@ -55,6 +55,9 @@ export function AutomationEditor({ automation, forge, timeZone, onSaved, onReloa
   const [revision, setRevision] = useState(automation?.revision)
   const [failure, setFailure] = useState<Failure>()
   const [saving, setSaving] = useState(false)
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
   const patch = (next: Partial<AutomationDraft>) => setDraft((current) => ({ ...current, ...next }))
 
   const submit = async (event: FormEvent) => {
@@ -79,13 +82,29 @@ export function AutomationEditor({ automation, forge, timeZone, onSaved, onReloa
       onSaved()
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause)
-      if (step === 'save' && automation && cause instanceof ApiError && cause.status === 409) {
+      // Only the store's revision conflict means "edited elsewhere"; the other 409s (a kind switch,
+      // automations switched off) say their own thing, and Reload could not fix them.
+      if (step === 'save' && automation && cause instanceof ApiError && cause.status === 409 && /revision conflict/i.test(message)) {
         setFailure({ section: 'form', message: 'Edited elsewhere — reload to see the latest version', conflict: true })
       } else {
         setFailure({ section: step === 'enable' ? 'enable' : sectionOf(message), message })
       }
     } finally {
       setSaving(false)
+    }
+  }
+
+  const remove = async () => {
+    if (!automation || deleting) return
+    setDeleting(true)
+    setDeleteError('')
+    try {
+      await deleteAutomation(automation.id)
+      onSaved()
+    } catch (cause) {
+      setDeleteError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -167,6 +186,22 @@ export function AutomationEditor({ automation, forge, timeZone, onSaved, onReloa
             <Button type="submit" disabled={saving}>{saving ? 'Saving…' : saveLabel}</Button>
             <Button type="button" variant="outline" asChild><Link to="/automations">Cancel</Link></Button>
           </div>
+          {automation ? (
+            <div className="grid justify-items-start gap-2 border-t pt-4">
+              {confirmingDelete ? (
+                <>
+                  <p className="text-sm break-words">{`Delete “${automation.name}”? It will stop running and cannot be restored.`}</p>
+                  <div className="flex flex-wrap gap-2">
+                    <Button type="button" variant="danger-ghost" disabled={deleting} onClick={() => void remove()}>Delete automation</Button>
+                    <Button type="button" variant="outline" disabled={deleting} onClick={() => { setConfirmingDelete(false); setDeleteError('') }}>Keep</Button>
+                  </div>
+                </>
+              ) : (
+                <Button type="button" variant="outline" onClick={() => setConfirmingDelete(true)}>Delete</Button>
+              )}
+              {deleteError ? <p role="alert" className="text-sm break-words text-destructive">{deleteError}</p> : null}
+            </div>
+          ) : null}
         </div>
 
         <aside className="min-w-0 md:sticky md:top-4">

@@ -6,6 +6,14 @@ import { createQueryClient } from '@/api/query-client'
 import { queryKeys } from '@/api/queries'
 import { AutomationsRoute } from './automations-route'
 
+// The workspace event bus keeps its listener set private; capture it so a test can fire the SSE
+// `automation-change` news the server emits after every edit.
+const bus = vi.hoisted(() => ({ listeners: new Set<(name: string, payload: unknown) => void>() }))
+vi.mock('@/api/global-events', async (original) => ({
+  ...(await original<typeof import('@/api/global-events')>()),
+  onWorkspaceEvent: (listener: (name: string, payload: unknown) => void) => { bus.listeners.add(listener); return () => bus.listeners.delete(listener) },
+}))
+
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 function mount(mode: 'list' | 'new' | 'edit' | 'log', health: unknown) {
@@ -73,4 +81,26 @@ it('opens the execution log with the automation name and the zone from the list'
   mountAt('/automations/a1/log', 'log')
   expect(await screen.findByText('Saved trigger')).not.toBeNull()
   expect((await screen.findByRole('link', { name: 'Open task' })).getAttribute('href')).toBe('/tasks/run-42')
+})
+
+it('keeps the typed name when another cockpit bumps the revision, and drops it only on an explicit Reload', async () => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
+  let body = listBody
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = String(input)
+    if ((init?.method ?? 'GET') === 'PUT') return json({ error: 'automation revision conflict' }, 409)
+    return path.endsWith('/automations') ? json(body) : json({ error: 'not found' }, 404)
+  }))
+  mountAt('/automations/a1', 'edit')
+  const name = await screen.findByDisplayValue('Saved trigger')
+  fireEvent.change(name, { target: { value: 'Typed locally' } })
+  // Someone else edits it: revision 3, a new name, and the SSE signal that follows.
+  body = { ...listBody, automations: [{ ...stored, revision: 3, name: 'Edited elsewhere name' }] }
+  bus.listeners.forEach((listener) => listener('automation-change', { project: 'p', automationId: 'a1', revision: 3 }))
+  await waitFor(() => expect((fetch as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(2))
+  expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Typed locally')
+  // Saving surfaces the conflict, and Reload is the one act that replaces the draft.
+  fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Reload' }))
+  await waitFor(() => expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Edited elsewhere name'))
 })

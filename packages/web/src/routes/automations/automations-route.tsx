@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useParams } from 'react-router'
 import { ZapIcon } from '@/components/design-icons'
 
@@ -15,6 +16,9 @@ export function AutomationsRoute({ mode = 'list' }: { mode?: 'list' | 'new' | 'e
   const { automationId } = useParams()
   const navigate = useNavigate()
   const { data, error, refresh } = useAutomations()
+  // Bumped by the editor's Reload and nothing else: a background revision change must reach the
+  // user as the save-time 409, not as a form that silently resets under their typing.
+  const [reloadToken, setReloadToken] = useState(0)
   // Automations are opt-in (#801). A bookmarked `/automations…` URL still routes here with the
   // capability off, so the view says so rather than rendering an editor whose every request
   // would 409. `!== true` deliberately: only a health payload that HAS answered switches this on.
@@ -51,7 +55,7 @@ export function AutomationsRoute({ mode = 'list' }: { mode?: 'list' | 'new' | 'e
   const saved = () => { navigate('/automations'); void refresh() }
   const found = data?.automations.find((item) => item.id === automationId)
 
-    // The editor and the log read the forge and the zone from the list, so they wait for it too. A
+  // The editor and the log read the forge and the zone from the list, so they wait for it too. A
   // failed REFRESH with data already in hand must not tear the screen down under an open draft.
   if (!data) {
     return error
@@ -63,7 +67,7 @@ export function AutomationsRoute({ mode = 'list' }: { mode?: 'list' | 'new' | 'e
   if (mode === 'new') return <AutomationEditor forge={forge} timeZone={data.timeZone} onSaved={saved} />
   if (mode === 'edit') {
     if (!found) return <PageFrame title="Automation not found" subtitle="This automation may have been removed."><Button asChild variant="outline"><Link to="/automations">Back to automations</Link></Button></PageFrame>
-    return <AutomationEditor key={found.revision} automation={found} forge={forge} timeZone={data.timeZone} onSaved={saved} onReload={() => void refresh()} />
+    return <AutomationEditor key={`${found.id}:${reloadToken}`} automation={found} forge={forge} timeZone={data.timeZone} onSaved={saved} onReload={() => void refresh().then(() => setReloadToken((token) => token + 1))} />
   }
   return automationId
     ? <AutomationLogScreen automationId={automationId} automationName={found?.name} timeZone={data.timeZone} />

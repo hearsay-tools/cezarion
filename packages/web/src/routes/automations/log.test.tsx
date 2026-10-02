@@ -123,3 +123,15 @@ it('InlineLog shows the five latest rows under Recent activity and enables nothi
   // The five newest rows: two of them started a task.
   expect(screen.getAllByRole('link', { name: 'Open task' })).toHaveLength(2)
 })
+
+it('offers Retry task only on the newest failed row of a receipt', async () => {
+  stub([
+    row(3, { result: 'failed', reason: 'second failure', receiptId: 'r1' }),
+    row(2, { result: 'failed', reason: 'first failure', receiptId: 'r1' }),
+  ])
+  mountScreen()
+  await screen.findByRole('list', { name: 'Automation execution log' })
+  expect(screen.getAllByRole('button', { name: 'Retry task' })).toHaveLength(1)
+  expect(within(rowOf('second failure')).getByRole('button', { name: 'Retry task' })).not.toBeNull()
+  expect(within(rowOf('first failure')).queryByRole('button', { name: 'Retry task' })).toBeNull()
+})

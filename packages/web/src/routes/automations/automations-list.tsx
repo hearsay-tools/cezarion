@@ -152,7 +152,7 @@ function AutomationCard({ automation, timeZone, note, busy, onRun, onToggle, onP
       {note ? (
         <p role={note.tone === 'error' ? 'alert' : 'status'} className={cn('mt-3 text-sm break-words', note.tone === 'error' ? 'text-destructive' : 'text-muted-foreground')}>
           {note.text}
-          {note.runId ? <> · <Link className="underline underline-offset-4" to={`/tasks/${note.runId}`}>Open task</Link></> : null}
+          {note.runId ? <> · <Link className="inline-flex min-h-11 items-center underline underline-offset-4" to={`/tasks/${note.runId}`}>Open task</Link></> : null}
         </p>
       ) : null}
       <InlineLog automationId={automation.id} automationName={automation.name} timeZone={timeZone} />

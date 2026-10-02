@@ -55,10 +55,11 @@ function useAutomationLog(automationId: string) {
 }
 
 /** A task that failed to START leaves a `failed`/`error` row carrying its receipt and no run. A
- *  later row for the same receipt that has a run means a retry already went through. */
+ *  later row for the same receipt that has a run means a retry already went through, and only the
+ *  newest row of a receipt offers the button: a retry that failed again adds a second row. */
 function retryable(record: AutomationLogRecord, all: readonly AutomationLogRecord[]): boolean {
   if ((record.result !== 'failed' && record.result !== 'error') || !record.receiptId || record.runId) return false
-  return !all.some((other) => other.receiptId === record.receiptId && other.runId)
+  return !all.some((other) => other.receiptId === record.receiptId && (other.runId || other.seq > record.seq))
 }
 
 function LogRows({ records, all, timeZone, onRetried }: { records: readonly AutomationLogRecord[]; all: readonly AutomationLogRecord[]; timeZone: string; onRetried: () => void }) {

@@ -110,7 +110,7 @@ const stored = {
 } as AutomationDefinition
 
 it('a 409 shows the reload action and keeps the typed name', async () => {
-  stubFetch(() => json({ error: 'conflict' }, 409))
+  stubFetch(() => json({ error: 'automation revision conflict' }, 409))
   const onReload = vi.fn()
   const onSaved = mount({ automation: stored, onReload })
   fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Renamed locally' } })
@@ -147,4 +147,50 @@ it('shows the GitHub fields and how it polls, instead of a preview, for a GitHub
   expect(screen.getByRole('button', { name: 'issue.opened' }).getAttribute('aria-pressed')).toBe('true')
   expect(screen.queryByRole('list', { name: 'Next 5 runs' })).toBeNull()
   expect(screen.getByText(/every 10 minutes/)).not.toBeNull()
+})
+
+it.each([
+  ['AUTOMATIONS_OFF', 'Automations are off on this server.'],
+  ['a kind switch', 'change the kind by creating a new automation'],
+])('a 409 that is not a revision conflict (%s) shows its own message and no Reload', async (_name, error) => {
+  stubFetch(() => json({ error }, 409))
+  mount({ automation: stored, onReload: vi.fn() })
+  fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Kept' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+  const alert = await screen.findByRole('alert')
+  expect(alert.textContent).toContain(error)
+  expect(alert.textContent).not.toContain('Edited elsewhere')
+  expect(screen.queryByRole('button', { name: 'Reload' })).toBeNull()
+  expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Kept')
+})
+
+it('deletes an existing automation only after an inline confirm, then leaves the editor', async () => {
+  const calls = stubFetch(() => new Response(null, { status: 204 }))
+  const onSaved = mount({ automation: stored })
+  expect(screen.queryByRole('button', { name: 'Delete automation' })).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
+  expect(screen.getByText('Delete “Digest”? It will stop running and cannot be restored.')).not.toBeNull()
+  expect(calls.some((call) => call.method === 'DELETE')).toBe(false)
+  fireEvent.click(screen.getByRole('button', { name: 'Keep' }))
+  expect(screen.getByRole('button', { name: 'Delete' })).not.toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Delete automation' }))
+  await waitFor(() => expect(onSaved).toHaveBeenCalled())
+  expect(calls.find((call) => call.method === 'DELETE')?.path).toMatch(/\/automations\/a1$/)
+})
+
+it('keeps the editor and says why when the delete fails', async () => {
+  stubFetch(() => json({ error: 'not found' }, 404))
+  const onSaved = mount({ automation: stored })
+  fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Delete automation' }))
+  expect((await screen.findByRole('alert')).textContent).toContain('not found')
+  expect(onSaved).not.toHaveBeenCalled()
+  expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Digest')
+})
+
+it('offers no Delete on a new automation', () => {
+  stubFetch(() => json({}))
+  mount()
+  expect(screen.queryByRole('button', { name: 'Delete' })).toBeNull()
 })
