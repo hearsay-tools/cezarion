@@ -30,7 +30,7 @@ day calendars, statistics) are filed as follow-up issues. Dollar figures follow
 | Lease | The #651 store lease (reclaim guard, identity checks) stays. The schedule runner takes it and checks `isCurrent()` before reserving. A held or lost lease logs `skipped` and retries through the existing workspace floor; it never advances the shared `nextRunAt`. | #985 advanced the loser's `nextRunAt`; #1099 replaced the lock with `proper-lockfile`. Neither adopted. |
 | `setState` | Read-modify-write against a fresh disk read, function form. | Same. |
 | Delegation | No `task.dispatch`, no review-child suffix. Launched runs get governed workers like every run. | `task.dispatch` → dispatch intent. |
-| Boot brake | Ported: an enabled poll idle longer than its lookback is re-baselined at boot with a `baseline` log row. | Same. |
+| Boot brake | Ported: an enabled poll idle longer than its lookback is re-baselined at boot with a `baseline` log row. Idleness is measured from `lastSuccessAt ?? baselineAt`, so a poll enabled but not yet due is left alone. | Measures from `lastSuccessAt` alone. |
 | UI | Composed from the fork's existing primitives; one file per screen component. | Pixel-matched design kit; four promoted primitives. |
 | CLI, skill, prompt part, Copy as CLI | Stage 2. | Included. |
 | Templates, calendars, rail, stats, cross-project templates route | Stage 3. | Included. |
@@ -73,13 +73,18 @@ web routes/automations/*: route shell, list, editor (+ schedule / github fields)
    a project by its optional `automations.json` only.
 2. `schedule()` collects due items: github → `state.nextCheckAt`; schedule → `ScheduleRunner.dueAt`,
    which returns `state.nextRunAt` or computes `nextOccurrence(schedule, now, tz)` and persists it,
-   so every process agrees on the instant. A `PUT` that changes `schedule` clears `nextRunAt`;
-   `enable` sets `nextRunAt = nextOccurrence(now)` and writes no baseline.
+   so every process agrees on the instant. A `PUT` that changes `schedule` (or resumes through
+   `PUT`) sets `nextRunAt = nextOccurrence(now)` when the result is enabled and clears it when
+   paused; `enable` sets `nextRunAt = nextOccurrence(now)` and writes no baseline. Both arm in the
+   request, so the list refetched on the change event already shows the next run.
+   The timer sleeps `min(earliest due − now, 60 s)`. A wake short of the due instant fires
+   nothing and calls `schedule()` again from fresh state.
 3. At due time, `fire(definition)` applies the **age rule** from the due instant:
    - `now − due ≤ 10 min` → launch as `launched` (trigger `schedule`);
    - `≤ 24 h` → the latest missed occurrence launches once as `catch-up`; older missed ones are
      logged `skipped` with their count;
-   - `> 24 h` → nothing launches; log `skipped` "missed N occurrences while cezar was not running";
+   - `> 24 h` → nothing launches; log `skipped` "missed N occurrences while cezar was not running
+     or the machine was asleep";
      `nextRunAt` advances from `now`.
    Then: acquire the project lease. **Lease held or not current** → log `skipped` (reason names
    the lease), leave `nextRunAt`, reject the fire so the workspace floor retries in ≥ 60 s; the
@@ -95,7 +100,14 @@ web routes/automations/*: route shell, list, editor (+ schedule / github fields)
    (`store.update` with `enabled: false`), a `failed` row says "Paused after 3 consecutive launch
    failures; fix the task and enable it again", and `automation-change` fires. Held leases and
    duplicates never increment the counter.
-5. **Restart or sleep**: step 3 covers it; the first `schedule()` after boot finds past-due items.
+5. **Restart or sleep**: step 3 covers both. After a restart, the first `schedule()` after boot
+   finds past-due items. After a sleep, the 60 s timer cap does: Node timers count on a monotonic
+   clock that stops while the machine is suspended, so one timer armed for a week-long distance
+   would wake late by the whole time asleep (a weekly on a laptop that sleeps nightly would land
+   more than 24 h late and be skipped every week). A capped wake reads the wall clock at least
+   once a minute, so a fire comes at most one cap after the machine wakes. The cap applies to
+   github polls too; a poll still fires only once its `nextCheckAt` is due. Upstream has the
+   single long timer.
 6. **Run now** (`POST /automations/:id/run`, schedule kind, allowed while paused): fires
    immediately outside the timer under the same lease with `receiptKey = …:manual:<nowIso>`, logs
    `manual`, leaves `nextRunAt` and `enabled` untouched; answers `202 { runId }`. Lease held →
@@ -103,11 +115,18 @@ web routes/automations/*: route shell, list, editor (+ schedule / github fields)
 7. **Retry** (`POST /automation-log/:receiptId/retry`) for a schedule receipt in `launch-error`
    (no `candidate`, has `occurrenceAt`): re-reserves the same receipt and fires it as `manual`;
    the github path is unchanged.
-8. **Boot brake** (github kind): before the timer arms, every enabled poll whose `lastSuccessAt`
-   is absent or older than `filters.lookbackDays` is re-baselined (`baselineAt = cursor = now`,
+8. **Boot brake** (github kind): before the timer arms, every enabled poll whose idleness
+   reference, `lastSuccessAt ?? baselineAt`, is absent or older than `filters.lookbackDays` is
+   re-baselined (`baselineAt = cursor = now`,
    `frozenHighWatermark`/`backlogAfter`/`backoffUntil` cleared, `nextCheckAt = now + interval`)
    with a `baseline` log row and an `automation-change` event. Polls that succeeded within their
-   lookback continue exactly as today.
+   lookback continue exactly as today. Deviation from upstream, which reads `lastSuccessAt`
+   alone: `enable` writes `baselineAt` but no `lastSuccessAt`, so a restart inside a fresh
+   poll's first interval would re-baseline it, drop the events since the enable, and push its
+   first check out again.
+9. **Crash recovery**: at boot, `reconcileAutomationReceipts` turns a `reserved` receipt that no
+   run claims into `launch-error` and appends a `failed` log row carrying its `receiptId`, so the
+   lost occurrence shows in the log with "Retry task" (both kinds).
 
 GitHub-kind polling, cursors, baselines, receipts and backoff are otherwise unchanged.
 
@@ -192,7 +211,7 @@ renders the "Automations are off" state when the capability is absent, as today.
 | DST gap (`daily 02:30` on spring-forward) | `zonedWallTimeToUtc` settles on one instant near the gap; fires once. Fall-back repeated hour fires once. Fixtures: `Europe/Warsaw`, `America/New_York`. |
 | `hours` shape across DST | Anchored at 00:00 wall time per day: one slot fewer or more that day. |
 | Server zone changes between boots | `nextRunAt` is an instant; the next arm recomputes from the schedule. Header shows the current zone. |
-| Down or asleep for hours/days | Age rule: one catch-up at most, else skipped with count; `nextRunAt` advances from now. |
+| Down or asleep for hours/days | Age rule: one catch-up at most, else skipped with count; `nextRunAt` advances from now. The 60 s timer cap notices a wake within a minute, so a sleep that ends before the occurrence still fires it on time. |
 | Two cezar processes, one project | Lease loser logs `skipped` and retries via the floor; receipt dedupes. `setState` RMW keeps both processes' keys. |
 | Run queue at capacity | The run is created queued; the row is `launched`. |
 | Workflow/model/runner missing at fire time | `failed` with the reason; third consecutive failure pauses. |
