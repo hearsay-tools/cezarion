@@ -61,7 +61,7 @@ describe('bounded GitHub supervisor',()=>{
   await vi.waitFor(async()=>{ expect(await readFile(log,'utf8')).toContain('--watch'); }, { timeout: 10_000 });
   controller.abort(); expect((await pending).outcome).toBe('cancelled');
   const calls=(await readFile(log,'utf8')).trim().split('\n').map(line=>JSON.parse(line) as {args:string[];pid:number});
-  expect(calls.find(c=>c.args.includes('--watch'))?.args).toEqual(['pr','checks','12','--repo','github.com/org/repo','--watch','--interval','10']);
+  expect(calls.find(c=>c.args.includes('--watch'))?.args).toEqual(['pr','checks','12','--repo','github.com/org/repo','--watch','--interval','30']);
   for(const call of calls) expect(()=>process.kill(call.pid,0)).toThrow();
  },20000);
 });
