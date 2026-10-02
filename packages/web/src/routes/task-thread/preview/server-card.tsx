@@ -78,7 +78,9 @@ export function PreviewServerCard({
   const showingHere = inPreview && action !== undefined && !action.run
   const label = showingHere ? 'In preview' : action?.label
   const Icon = showingHere ? AppWindowIcon : action ? ICONS[action.label] : null
-  const firstWord = server.command.trim().split(/\s+/)[0] ?? server.command
+  // Screen 05 names the script, not its flags: `npm run dev` for `npm run dev -- --port 5173 ...`.
+  // The exact command sits in the block above the note.
+  const script = server.command.split(' -- ')[0]!.trim()
   const registered = shortAge(server.registeredAt)
 
   return (
@@ -127,7 +129,7 @@ export function PreviewServerCard({
 
       {action?.run ? (
         <Note icon={<SquareTerminalIcon className="size-3.5 shrink-0" aria-hidden="true" />}>
-          {`Runs ${firstWord} ... in this task's worktree, on the host.`}
+          {`${action.label === 'Start again' ? 'Starting again' : 'Opening'} runs ${script} in this task's worktree, on the host.`}
         </Note>
       ) : null}
       {unavailable ? (

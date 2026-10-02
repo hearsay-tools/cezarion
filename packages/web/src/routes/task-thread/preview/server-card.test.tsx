@@ -39,7 +39,8 @@ function renderCard(e: ThreadPreviewServer, inPreview = false) {
   return onOpen
 }
 
-const hint = "Runs npm ... in this task's worktree, on the host."
+const openingHint = "Opening runs npm run dev in this task's worktree, on the host."
+const startingHint = "Starting again runs npm run dev in this task's worktree, on the host."
 
 describe('PreviewServerCard (design 05)', () => {
   it('always shows the label, port, exact command and cwd', () => {
@@ -60,7 +61,7 @@ describe('PreviewServerCard (design 05)', () => {
   it('registered: "registered · not started", Run and open, with the hint', () => {
     const onOpen = renderCard(entry())
     expect(screen.getByText('registered · not started')).toBeTruthy()
-    expect(screen.getByText(hint)).toBeTruthy()
+    expect(screen.getByText(openingHint)).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Run and open' }))
     expect(onOpen).toHaveBeenCalledWith({ port: 5173, run: true })
   })
@@ -68,7 +69,7 @@ describe('PreviewServerCard (design 05)', () => {
   it('starting: Open, no run hint', () => {
     const onOpen = renderCard(entry({ state: 'starting' }))
     expect(screen.getByText('starting')).toBeTruthy()
-    expect(screen.queryByText(hint)).toBeNull()
+    expect(screen.queryByText(openingHint)).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Open' }))
     expect(onOpen).toHaveBeenCalledWith({ port: 5173, run: false })
   })
@@ -80,7 +81,7 @@ describe('PreviewServerCard (design 05)', () => {
     expect(onOpen).toHaveBeenCalledWith({ port: 5173, run: false })
   })
 
-  it('up while the pane shows it: a disabled "In preview"', () => {
+  it('up while the pane shows it: Open becomes "In preview" and still focuses the pane', () => {
     const onOpen = renderCard(entry({ state: 'up' }), true)
     const button = screen.getByRole('button', { name: 'In preview' }) as HTMLButtonElement
     expect(button.disabled).toBe(false)
@@ -94,7 +95,7 @@ describe('PreviewServerCard (design 05)', () => {
     expect(screen.getByText('was running when registered')).toBeTruthy()
     expect(document.body.textContent).not.toMatch(/\bup\b/i)
     expect(document.querySelector('[data-slot="status-dot"]')?.getAttribute('data-tone')).toBe('neutral')
-    expect(screen.queryByText(hint)).toBeNull()
+    expect(screen.queryByText(openingHint)).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Open' }))
     expect(onOpen).toHaveBeenCalledWith({ port: 5173, run: false })
   })
@@ -115,7 +116,7 @@ describe('PreviewServerCard (design 05)', () => {
   it('exited: the exit code, Start again and the hint', () => {
     const onOpen = renderCard(entry({ state: 'exited', exitCode: 1 }))
     expect(screen.getByText('exited · code 1')).toBeTruthy()
-    expect(screen.getByText(hint)).toBeTruthy()
+    expect(screen.getByText(startingHint)).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Start again' }))
     expect(onOpen).toHaveBeenCalledWith({ port: 5173, run: true })
   })
@@ -128,7 +129,7 @@ describe('PreviewServerCard (design 05)', () => {
   it('stopped after idle: "stopped after 15 min idle", Start again and the hint', () => {
     renderCard(entry({ state: 'stopped', reason: 'idle' }))
     expect(screen.getByText('stopped after 15 min idle')).toBeTruthy()
-    expect(screen.getByText(hint)).toBeTruthy()
+    expect(screen.getByText(startingHint)).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Start again' })).toBeTruthy()
   })
 
@@ -146,9 +147,12 @@ describe('PreviewServerCard (design 05)', () => {
     expect(screen.queryByRole('button')).toBeNull()
   })
 
-  it('names the first word of the command in the hint', () => {
+  it('names the script without its flags, or the whole command when it has no "--"', () => {
     renderCard(entry({}, { command: 'pnpm dev' }))
-    expect(screen.getByText("Runs pnpm ... in this task's worktree, on the host.")).toBeTruthy()
+    expect(screen.getByText("Opening runs pnpm dev in this task's worktree, on the host.")).toBeTruthy()
+    cleanup()
+    renderCard(entry({ state: 'exited', exitCode: 1 }, { command: 'npm run dev --workspace web -- --port 5173' }))
+    expect(screen.getByText("Starting again runs npm run dev --workspace web in this task's worktree, on the host.")).toBeTruthy()
   })
 
   it('never uses an em-dash', () => {
