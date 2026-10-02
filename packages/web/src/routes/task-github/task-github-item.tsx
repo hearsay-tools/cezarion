@@ -7,7 +7,7 @@ import { Link } from '@/lib/project-router'
 
 import { getGithubItem } from '@/api/client'
 import { queryKeys, useGithubChecks, useGithubItem, useHealth, useProjectRepoBase, useProjects, useRun } from '@/api/queries'
-import type { ApiRun } from '@open-mercato/cezar-api-client'
+import type { ApiRun, GithubItem } from '@open-mercato/cezar-api-client'
 import { CenteredState } from '@/components/centered-state'
 import { GithubItemDetail } from '@/components/github-item-detail'
 import { Button } from '@/components/ui/button'
@@ -16,6 +16,8 @@ import { isHttpUrl } from '@/lib/utils'
 
 import { GitTabLoadError } from '../task-git/git-tab-loading'
 import { RunHeader } from '../task-thread/run-header'
+import { HandToAgent } from '../github/hand-to-agent'
+import { useHandToAgentState } from '../github/use-hand-to-agent-state'
 import { TaskGithubItemLoading } from './task-github-loading'
 
 const KIND_LABEL = { issue: 'Issue', pr: 'Pull request' } as const
@@ -179,7 +181,9 @@ function ItemBody({
         checks={kind === 'pr' ? checksMap?.[number] ?? data.item.checks : data.item.checks}
         backLink={null}
         subNav={null}
-      />
+      >
+        {kind === 'issue' ? <IssueHandToAgent key={data.item.url} item={data.item} /> : null}
+      </GithubItemDetail>
     </div>
   )
 }
@@ -192,4 +196,23 @@ function repoName(repoBase: string | undefined): string {
   } catch {
     return 'this repository'
   }
+}
+
+/** Mount catalogs only for a successfully loaded issue, never a PR or an unavailable item. */
+function IssueHandToAgent({ item }: { item: GithubItem }) {
+  const state = useHandToAgentState()
+  return <HandToAgent
+    key={item.url}
+    item={item}
+    workflows={state.workflows.data?.workflows ?? []}
+    skills={state.skillList}
+    workflow={state.workflow}
+    onWorkflowChange={state.setWorkflow}
+    selectedSkills={state.selectedSkills}
+    onSkillsChange={state.setSelectedSkills}
+    engine={state.engine}
+    onEngineChange={state.setEngine}
+    queuedRunId={state.queued.get(item.url) ?? null}
+    onQueued={state.onQueued}
+  />
 }

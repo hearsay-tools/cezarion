@@ -18,13 +18,12 @@ import { queryScope } from '@open-mercato/cezar-api-client'
 import { Link, Navigate } from '@/lib/project-router'
 
 import { getGithub, getGithubComments, getGithubItem, putUiState } from '@/api/client'
-import { queryKeys, useGithub, useGithubChecks, useGithubItem, useProjectRuns, useGithubSearch, useHealth, useSkills, useUiState, useWorkflows } from '@/api/queries'
+import { queryKeys, useGithub, useGithubChecks, useGithubItem, useProjectRuns, useGithubSearch, useHealth, useUiState } from '@/api/queries'
 import type {
   GithubItem,
   UiState,
 } from '@open-mercato/cezar-api-client'
 import { CenteredState } from '@/components/centered-state'
-import type { EnginePick } from '@/components/engine-pills'
 import { GithubIcon } from '@/components/icons'
 import { ChecksGlyph, CommentCount, GithubItemDetail, LabelChip } from '@/components/github-item-detail'
 import { TabLink } from '@/components/tab-link'
@@ -43,7 +42,6 @@ import {
   writeStoredGithubListWidth,
 } from '@/lib/github-list-width'
 import { githubTaskPrompt } from '@/lib/github-task'
-import { orderSkillsByUsage } from '@/lib/skills'
 import { cn } from '@/lib/utils'
 
 import { IssueFilters } from './issue-filters'
@@ -56,7 +54,7 @@ import {
 } from './github-sidebar-model'
 import { useIsDesktop } from '@/lib/use-desktop'
 import { HandToAgent } from './hand-to-agent'
-import { readFollowupSelection, writeFollowupSelection } from './hand-to-agent-draft'
+import { useHandToAgentState } from './use-hand-to-agent-state'
 
 // Moved to the shared detail (#692); re-exported so existing imports keep resolving.
 export { groupCommitRuns, type GroupedRow, type ThreadRow } from '@/components/github-item-detail'
@@ -323,22 +321,9 @@ export function GithubRoute({
     onError: (error) => toast(error.message, { tone: 'danger' }),
   })
 
-  // Pickers + queued-run bookkeeping live at the route so they survive switching items
-  // (legacy parity) — see HandToAgent's doc block. Initial value comes from the localStorage
-  // "remembered last selection" (#408): a repeat hand-off is one action, and it now survives a
-  // page reload too — previously this was plain route state, gone on refresh.
-  const workflows = useWorkflows()
-  const skills = useSkills()
+  const { workflows, skillList, workflow, setWorkflow, selectedSkills, setSelectedSkills,
+    engine, setEngine, queued, onQueued } = useHandToAgentState()
   const uiState = useUiState()
-  const [workflow, setWorkflow] = useState<string | null>(() => readFollowupSelection().workflow)
-  const [selectedSkills, setSelectedSkills] = useState<readonly string[]>(
-    () => readFollowupSelection().skills,
-  )
-  // The backend choice (#401) is a way of working too, so it lives here beside the pickers —
-  // and it must, because HandToAgent is keyed by item and would otherwise reset on every hop.
-  // The agent account rides along on the same footing: a per-hand-off choice, route state rather
-  // than a persisted one, exactly like the runner and the model beside it.
-  const [engine, setEngine] = useState<EnginePick>({ runner: null, model: null, effort: null, account: null })
   const [githubListWidth, setGithubListWidth] = useState(readStoredGithubListWidth)
   const [mobileListExpanded, setMobileListExpanded] = useState(false)
   const routeRef = useRef<HTMLDivElement>(null)
@@ -389,31 +374,6 @@ export function GithubRoute({
       desktop.removeEventListener('change', sync)
     }
   }, [workspaceAvailable])
-  useEffect(() => {
-    writeFollowupSelection({ workflow, skills: [...selectedSkills] })
-  }, [workflow, selectedSkills])
-  // A workflow that no longer exists must not reach the server — the same legacy rule
-  // `validSkills` applies to skills (hand-to-agent.tsx). Remembering the pick (#408) gave this
-  // state a lifetime beyond the `.ai/workflows/` file that justified it: rename the workflow and
-  // every reload restores a name the server 404s on, with no obvious way to clear it. Cockpits
-  // for different repos also share one `localhost:<port>` origin (`pickPort`, src/index.ts) and
-  // therefore this localStorage key, so the name can arrive from a repo where it does exist.
-  // Drop it only once the list has LOADED — an in-flight fetch is not evidence of absence.
-  const workflowDefs = workflows.data?.workflows
-  useEffect(() => {
-    if (!workflowDefs) return
-    if (workflow !== null && !workflowDefs.some((def) => def.name === workflow)) setWorkflow(null)
-  }, [workflowDefs, workflow])
-  // Frequency sort (#408, shared with /new's SourcePill): project-first, then most-selected.
-  // Memoized so the picker gets a STABLE array identity across renders that don't actually
-  // change the catalog or the usage stats (e.g. toggling a skill re-renders this route).
-  const skillsData = skills.data
-  const skillUsage = uiState.data?.skillUsage
-  const skillList = useMemo(
-    () => orderSkillsByUsage(skillsData ?? [], skillUsage),
-    [skillsData, skillUsage],
-  )
-  const [queued, setQueued] = useState<ReadonlyMap<string, string>>(new Map())
   // List filtering (#gh-filter): free-text search (by #id or any text) + a label narrow.
   const [query, setQuery] = useState('')
   const [labelFilter, setLabelFilter] = useState<readonly string[]>([])
@@ -981,7 +941,7 @@ export function GithubRoute({
               engine={engine}
               onEngineChange={setEngine}
               queuedRunId={queued.get(selected.url) ?? null}
-              onQueued={(url, runId) => setQueued((current) => new Map(current).set(url, runId))}
+              onQueued={onQueued}
             />
           </GithubItemDetail>
         ) : exactWanted && exactItem.isPending ? (
