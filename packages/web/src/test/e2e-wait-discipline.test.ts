@@ -360,7 +360,6 @@ describe('the cockpit suite', () => {
   })
 })
 
-
 describe('observable waits (#764)', () => {
   it('rejects clock-only predicates, including multiline and Date clocks', () => {
     for (const predicate of ['performance.now() - window.__mark > 400', 'Date.now() >= started + 300']) {
@@ -393,4 +392,14 @@ it('rejects qualified page timers but permits request socket deadlines', () => {
   expect(rules(scanSource('x.ts', `browser.evaluate('new Promise(r => window.setTimeout(r, 250))')`))).toEqual(['sleep'])
   expect(rules(scanSource('x.ts', `globalThis.setTimeout(done, 200)`))).toEqual(['sleep'])
   expect(scanSource('x.ts', `request.setTimeout(1000, () => request.destroy(new Error('deadline')))`)).toEqual([])
+})
+
+it('exempts event deadlines per call without hiding a success sleep on the same line (#764 review)', () => {
+  const deadline = "setTimeout(() => reject(new Error('event missing')), 5000)"
+  const success = "setTimeout(() => resolve('ready'), 150)"
+  for (const source of [`${deadline}; ${success}`, `${success}; ${deadline}`]) {
+    const sites = scanSource('x.ts', source)
+    expect(rules(sites)).toEqual(['sleep'])
+    expect(lines(sites)).toEqual([1])
+  }
 })

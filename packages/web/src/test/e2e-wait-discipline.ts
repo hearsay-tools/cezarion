@@ -100,18 +100,18 @@ export function scanSource(file: string, source: string): Site[] {
   // which is excluded from this scan and is the only place a spec-side poll sleeps (#416).
   // The name-based exemption this replaces trusted any looping `waitFor…`/`poll…` function,
   // so a helper could sleep for any reason at all under a good name.
-  const deadlines = new Set<number>()
-  for (const call of callSpans(source, /\b(setTimeout)\(/g)) {
-    // Reject-only observers are failure deadlines, never success/readiness delays.
-    if (/\breject\s*\(/.test(call.text) && !/\bresolve\s*\(/.test(call.text)) deadlines.add(lineOf(source, call.start))
-  }
-  lines.forEach((line, i) => {
+  for (const call of callSpans(source, new RegExp(sleep.source, 'g'))) {
+    const i = lineOf(source, call.start)
+    if (lines[i]?.trim().startsWith('//')) continue
+    // Classify this callback, never its whole line: a separate timer on the same line
+    // may resolve success after a blind delay even when this one only rejects failure.
+    const deadline = /\breject\s*\(/.test(call.text) && !/\bresolve\s*\(/.test(call.text)
     const policy = lines[i - 1]?.trim() ?? ''
     // Packaged fixtures model shutdown and condition backoff on their own event loop.
     // Named, reviewed mechanisms only; a new bare delay still fails the guard.
     const fixturePolicy = file.startsWith('packages/cezar/test/e2e/') && /^\/\/ e2e-wait: (condition-poll|shutdown-grace|process-deadline) — .+/.test(policy)
-    if (sleep.test(line) && !line.trim().startsWith('//') && !deadlines.has(i) && !fixturePolicy) sites.push(at('sleep', i))
-  })
+    if (!deadline && !fixturePolicy) sites.push(at('sleep', i))
+  }
 
   // Rule 7 — a keyboard step, or a read of where focus is, after an Escape nobody waited out.
   // A Radix overlay closed with Escape hands focus back to its trigger one task AFTER its

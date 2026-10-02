@@ -135,3 +135,38 @@ packages/web/src/test/visual-ready.test.ts
 ```
 
 The report, checked-in logs and preserved fixture failure bundles live under `.ai/reports/764-*`. Fresh passing screenshots remain under `.ai/qa/artifacts_e2e/` until copied by the parent or cleaned with task history.
+
+
+## Independent review follow-up
+
+The review identified two gaps, both reproduced before changing the implementation. A settled health probe accepted headers while leaving its streamed response body open; three rejected JSON probes likewise left three sockets open. Clearing the timeout removed their remaining cleanup deadline. `boundedProbe` now aborts its controller in `finally` on every settlement, cancelling unread bodies as well as stopping its timer. The regression uses a real local Node HTTP server with deliberately unfinished bodies, checks one successful health request and three non-2xx JSON requests, observes all sockets close, and force-closes the fixture in cleanup even on failure.
+
+The scanner previously classified reject-only timers by line number, allowing a neighboring success timer on the same line. It now classifies each matched timer call span. The regression places both timers on the same line in both orders and requires the success sleep to be reported while preserving the failure-deadline exemption. The repository baseline remains unchanged.
+
+Red proof before either fix:
+
+```sh
+npm test -- packages/web/src/test/poll.test.ts packages/web/src/test/e2e-wait-discipline.test.ts -t 'settled probes close unread streamed bodies|exempts event deadlines per call'
+```
+
+**3 failed, 45 filtered**: health retained one socket, JSON retained three sockets, and the scanner omitted the success sleep. Evidence: `764-review-red.log`.
+
+Focused green verification:
+
+```sh
+npm test -- packages/web/src/test/poll.test.ts packages/web/src/test/e2e-wait-discipline.test.ts
+npm run typecheck:web
+```
+
+**48 passed across two files**, including the repository baseline guard; web typecheck passed. Evidence: `764-review-green.log`, `764-review-typecheck.log`.
+
+No browser or application test environment was started for this follow-up. The HTTP fixture binds an ephemeral loopback port and closes its server and connections after each test. No full gate or browser/load campaign was run; those remain parent-owned validation. No unresolved issue remains in either review finding.
+
+
+Adjacent helper validation also passed **80 tests across six files** (`764-review-helpers-green.log`):
+
+```sh
+npm test -- packages/web/src/test/agent-browser-wait-value.test.ts packages/web/src/test/agent-browser-interact.test.ts packages/web/src/test/agent-browser-failure.test.ts packages/web/src/test/poll.test.ts packages/web/src/test/visual-ready.test.ts packages/web/src/test/e2e-wait-discipline.test.ts
+```
+
+`git diff --check` passed before commit. Follow-up changes are limited to `packages/web/e2e/poll.ts`, the scanner and their two test files, this report, and four review validation logs.

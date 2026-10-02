@@ -1,0 +1,125 @@
+
+> test
+> vitest run packages/web/src/test/poll.test.ts packages/web/src/test/e2e-wait-discipline.test.ts -t settled probes close unread streamed bodies|exempts event deadlines per call
+
+
+ RUN  v4.1.10 /home/agent/projects/cezar/.ai/cezar/worktrees/d6e7f159-f1c6-45f4-87c6-500ec47ab925
+
+ ❯ |web| src/test/e2e-wait-discipline.test.ts (30 tests | 1 failed | 29 skipped) 9ms
+     ↓ flags an expect on a seam read within two lines of an action with no wait between
+     ↓ accepts a wait between the action and the read, and a read further than two lines away
+     ↓ treats the contrast helpers and every seam interaction as actions
+     ↓ counts a read once even when two actions precede it
+     ↓ flags :hover in a waitForFunction predicate and in a waitForValue expression
+     ↓ leaves a one-shot :hover assertion to the other rules
+     ↓ flags scrollIntoView inside waitForFunction, not inside waitForValue or a plain evaluate
+     ↓ flags a node-side sleep and an in-page sleep
+     ↓ flags a sleep inside a looping waitFor helper too — the name-based exemption is gone (#416)
+     ↓ does not scan the shared poll module, which is where those sleeps now live
+     ↓ flags a write reached through querySelector, directly or through a bound name
+     ↓ leaves theme, density and the spec's own probes and clones alone
+     ↓ only looks at in-page code, not at what the node side does with the result
+     ↓ flags a positional read of a live node list
+     ↓ leaves a spec that never addresses a row by id, and a node-side index, alone
+     ↓ flags Tab, focusWithKeyboard and a read of activeElement after press('Escape') with nothing settling focus between
+     ↓ accepts dismissWithEscape, a wait that names activeElement, and a click that moves focus itself
+     ↓ reads a wait as a span: a predicate naming activeElement on the line after waitForFunction( settles focus
+     ↓ stops looking past the window, so an unrelated later test is not attributed to the Escape
+     ↓ tallies sites by file, rule and site text, sorted
+     ↓ reports a new site as added and a fixed site as stale
+     ↓ never calls kill directly in a fixture spec
+     ↓ scans every spec and the browser-driving helpers
+     ↓ has no wait-discipline site outside the baseline, and the baseline names no site that is gone
+     ↓ rejects clock-only predicates, including multiline and Date clocks
+     ↓ permits state predicates containing timestamps and reject-only event deadlines
+     ↓ includes packaged CLI specs and their helpers in the guard coverage
+   ↓ scans a new packaged helper for clock waits and observation delays
+   ↓ rejects qualified page timers but permits request socket deadlines
+   × exempts event deadlines per call without hiding a success sleep on the same line (#764 review) 7ms
+ ❯ |web| src/test/poll.test.ts (18 tests | 2 failed | 16 skipped) 2042ms
+     ↓ returns the first answer that is not undefined, and stops probing
+     ↓ treats a throwing probe as "not yet" and keeps polling
+     ↓ reports the last probe error alongside the failure, and carries it as the cause
+     ↓ says only what failed when the probe never threw — an empty poll is not an error
+     ↓ gives up after `tries` probes
+     ↓ waits 60 × 250 ms for a fixture server to answer health — 15 s
+     ↓ waits 120 × 500 ms for a run to reach a status — 60 s, the budget 6 of the 7 copies used
+     ↓ waits 40 × 250 ms by default — 10 s, what pollFor gives a caller that names no budget
+     ↓ polls through a rejected fetch until the run reaches a wanted status
+     ↓ polls through a 5xx rather than aborting on it
+     ↓ names the run, the wanted statuses and the last server answer when it runs out
+     ↓ polls until the server answers, and does not report the connection refusals on the way
+     ↓ names what never answered, without an ECONNREFUSED tail nobody needs
+     ↓ aborts a stuck probe within the wall-clock budget
+     ↓ bounds even a probe that ignores its abort signal
+     ↓ reports the last observed status, wanted state and URL
+     × closes the successful health response socket after accepting headers 1026ms
+     × closes every rejected non-2xx socket across repeated JSON probes 1014ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |web| src/test/e2e-wait-discipline.test.ts > exempts event deadlines per call without hiding a success sleep on the same line (#764 review)
+AssertionError: expected [] to deeply equal [ 'sleep' ]
+
+- Expected
++ Received
+
+- [
+-   "sleep",
+- ]
++ []
+
+ ❯ src/test/e2e-wait-discipline.test.ts:404:26
+    402|   for (const source of [`${deadline}; ${success}`, `${success}; ${dead…
+    403|     const sites = scanSource('x.ts', source)
+    404|     expect(rules(sites)).toEqual(['sleep'])
+       |                          ^
+    405|     expect(lines(sites)).toEqual([1])
+    406|   }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  |web| src/test/poll.test.ts > settled probes close unread streamed bodies (#764 review) > closes the successful health response socket after accepting headers
+AssertionError: expected 1 to be +0 // Object.is equality
+
+- Expected
++ Received
+
+- 0
++ 1
+
+ ❯ vi.waitFor.timeout src/test/poll.test.ts:238:59
+    236|       await waitForHealth(fixture.url, 'streamed fixture', { tries: 1,…
+    237|       expect(fixture.requests()).toBe(1)
+    238|       await vi.waitFor(() => expect(fixture.sockets.size).toBe(0), { t…
+       |                                                           ^
+    239|     } finally { await fixture.close() }
+    240|   })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  |web| src/test/poll.test.ts > settled probes close unread streamed bodies (#764 review) > closes every rejected non-2xx socket across repeated JSON probes
+AssertionError: expected 3 to be +0 // Object.is equality
+
+- Expected
++ Received
+
+- 0
++ 3
+
+ ❯ vi.waitFor.timeout src/test/poll.test.ts:249:59
+    247|       })).rejects.toThrow('answered 503')
+    248|       expect(fixture.requests()).toBe(3)
+    249|       await vi.waitFor(() => expect(fixture.sockets.size).toBe(0), { t…
+       |                                                           ^
+    250|     } finally { await fixture.close() }
+    251|   })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  3 failed | 45 skipped (48)
+   Start at  14:18:14
+   Duration  2.23s (transform 106ms, setup 71ms, import 68ms, tests 2.05s, environment 0ms)
+

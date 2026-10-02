@@ -84,7 +84,12 @@ async function boundedProbe<T>(probe: (signal: AbortSignal) => T | Promise<T>, t
         }, Math.max(1, timeoutMs))
       }),
     ])
-  } finally { clearTimeout(timer) }
+  } finally {
+    clearTimeout(timer)
+    // A probe can settle on headers alone (health or a rejected status). Its unread body
+    // still owns the socket, so settlement must cancel it as well as stop the deadline.
+    controller.abort()
+  }
 }
 
 /** JSON and its body read share the poll's abort signal; non-2xx responses are retries. */
