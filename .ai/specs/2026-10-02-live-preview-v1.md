@@ -7,8 +7,8 @@ open it in a browser that runs on the host, docked next to the task, and click t
 agent does not drive that browser in v1.
 
 Design settled with the owner on 2026-10-01/02 (cezar task 3e478497). Inputs: the
-`live-preview-v1` design (the source for every state number below: 27 screens and an annotated
-PDF, exported by the designer; the `.pen` frame `Live Preview · v1 · light` is the editable source;
+`live-preview-v1` design (the source for every state number below: 27 screens in
+`assets/2026-10-02-live-preview-v1/`, plus an annotated PDF kept outside the repo; the `.pen` frame `Live Preview · v1 · light` is the editable source;
 `live-preview-v0.1-archive` is the archive of the pre-review ideas) and the zero-dependency CDP screencast
 prototype at `~/projects/cdp-screencast-proto` (server.mjs, client.html, smoke.mjs).
 
@@ -264,6 +264,15 @@ Each is a typed `state` message; the toolbar never moves.
 - **Package**: the tarball contains `dist/preview/`; with the flag unset no tool is listed.
 - **Manual, recorded in the PR**: one session through Traefik + Authelia including session expiry;
   the ubuntu-vps Basic Auth setup in Chrome, Safari and Firefox.
+
+## Design deltas
+
+The v1 design is final. Where it and this spec disagree, the spec wins:
+
+- **5.7 Server stalled.** The drawn example (a `predev` script prompting for a migration name) cannot
+  stall: dev servers get no stdin, so a prompt fails fast into 5.8 Exited. Build 5.7 with a process
+  that is alive but waiting on something outside it (e.g. `wait-on tcp:5432`), and body copy "It may
+  be waiting on another service, or listening somewhere else." instead of "waiting for input".
 
 ## Env contract
 
