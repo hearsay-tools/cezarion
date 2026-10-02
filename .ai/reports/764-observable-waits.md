@@ -384,3 +384,17 @@ git diff --check
 The filtered command is the controlled red/green pair above (1 failed, then 1 passed / 8 filtered). Final ordinary full worker-relationships spec passed **9/9** (`764-worker-theme-all-green.log`); adjacent scanner, bounded polls and theme-provider units passed **68/68** (`764-worker-theme-units-green.log`); web typecheck passed (`764-worker-theme-typecheck.log`). Environment bootstrap/install logs are `764-worker-theme-{up,npm-ci}.log`. Parent owns CI rerun and broad gates/campaigns. No unresolved focused failure remains.
 
 Own environment stopped successfully (`764-worker-theme-down.log`); final diff check passed. The fixture's own browser/server cleanup completed in the focused spec.
+
+## Automated review: constructed Date clock guard
+
+PR #773 review comment `4167275105` identified the equivalent clock-only expression `new Date().getTime() - window.__mark > 400`. Added a regression before changing the scanner: the original guard reports no violation and the new case fails (`764-date-clock-red.log`, 1 failed / 30 passed). Narrowly extended the existing clock expression regex to recognize a zero-argument constructed `Date` followed by `getTime`, with whitespace allowed around the call and member separator. No parser or state-exemption change.
+
+The regression covers ordinary and spaced forms in `waitForFunction`, `waitForValue` and `waitForStable`; predicates that also observe document state remain permitted. Existing reject-only event deadlines and suite/baseline checks remain green. Focused validation after `npm ci` in this worktree:
+
+```sh
+npm test -- --run packages/web/src/test/e2e-wait-discipline.test.ts
+npm run typecheck:web
+git diff --check
+```
+
+Scanner **31/31**, web typecheck and diff check passed (`764-date-clock-{green,typecheck}.log`; install `764-date-clock-npm-ci.log`). Baseline unchanged; executable paths are `packages/web/src/test/e2e-wait-discipline.ts` and its test only. No browser environment started or broad suite run. Parent owns review reply, push and CI.

@@ -1,0 +1,60 @@
+
+> test
+> vitest run --run packages/web/src/test/e2e-wait-discipline.test.ts
+
+
+ RUN  v4.1.10 /home/agent/projects/cezar/.ai/cezar/worktrees/d6e7f159-f1c6-45f4-87c6-500ec47ab925
+
+ ❯ |web| src/test/e2e-wait-discipline.test.ts (31 tests | 1 failed) 796ms
+     ✓ flags an expect on a seam read within two lines of an action with no wait between 3ms
+     ✓ accepts a wait between the action and the read, and a read further than two lines away 2ms
+     ✓ treats the contrast helpers and every seam interaction as actions 0ms
+     ✓ counts a read once even when two actions precede it 1ms
+     ✓ flags :hover in a waitForFunction predicate and in a waitForValue expression 1ms
+     ✓ leaves a one-shot :hover assertion to the other rules 0ms
+     ✓ flags scrollIntoView inside waitForFunction, not inside waitForValue or a plain evaluate 1ms
+     ✓ flags a node-side sleep and an in-page sleep 0ms
+     ✓ flags a sleep inside a looping waitFor helper too — the name-based exemption is gone (#416) 0ms
+     ✓ does not scan the shared poll module, which is where those sleeps now live 194ms
+     ✓ flags a write reached through querySelector, directly or through a bound name 0ms
+     ✓ leaves theme, density and the spec's own probes and clones alone 0ms
+     ✓ only looks at in-page code, not at what the node side does with the result 0ms
+     ✓ flags a positional read of a live node list 0ms
+     ✓ leaves a spec that never addresses a row by id, and a node-side index, alone 0ms
+     ✓ flags Tab, focusWithKeyboard and a read of activeElement after press('Escape') with nothing settling focus between 0ms
+     ✓ accepts dismissWithEscape, a wait that names activeElement, and a click that moves focus itself 0ms
+     ✓ reads a wait as a span: a predicate naming activeElement on the line after waitForFunction( settles focus 0ms
+     ✓ stops looking past the window, so an unrelated later test is not attributed to the Escape 0ms
+     ✓ tallies sites by file, rule and site text, sorted 5ms
+     ✓ reports a new site as added and a fixed site as stale 0ms
+     ✓ never calls kill directly in a fixture spec 5ms
+     ✓ scans every spec and the browser-driving helpers 224ms
+     ✓ has no wait-discipline site outside the baseline, and the baseline names no site that is gone  348ms
+     ✓ rejects clock-only predicates, including multiline and Date clocks 1ms
+     × rejects constructed Date clocks with normal syntax spacing 3ms
+     ✓ permits state predicates containing timestamps and reject-only event deadlines 0ms
+     ✓ includes packaged CLI specs and their helpers in the guard coverage 1ms
+   ✓ scans a new packaged helper for clock waits and observation delays 1ms
+   ✓ rejects qualified page timers but permits request socket deadlines 0ms
+   ✓ exempts event deadlines per call without hiding a success sleep on the same line (#764 review) 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |web| src/test/e2e-wait-discipline.test.ts > observable waits (#764) > rejects constructed Date clocks with normal syntax spacing
+AssertionError: expected [] to include 'clock-only-wait'
+ ❯ src/test/e2e-wait-discipline.test.ts:373:98
+    371|     for (const clock of ['new Date().getTime()', 'new Date ( ) . getTi…
+    372|       for (const method of ['waitForFunction', 'waitForValue', 'waitFo…
+    373|         expect(rules(scanSource('x.ts', `browser.${method}('${clock} -…
+       |                                                                                                  ^
+    374|       }
+    375|       expect(scanSource('x.ts', `browser.waitForFunction('document.que…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 30 passed (31)
+   Start at  17:39:15
+   Duration  1.00s (transform 54ms, setup 45ms, import 27ms, tests 796ms, environment 0ms)
+

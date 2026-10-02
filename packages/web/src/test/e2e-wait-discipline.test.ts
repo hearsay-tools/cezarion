@@ -367,6 +367,14 @@ describe('observable waits (#764)', () => {
     }
     expect(rules(scanSource('x.ts', `browser.waitForValue('performance.now() - window.__mark')`))).toContain('clock-only-wait')
   })
+  it('rejects constructed Date clocks with normal syntax spacing', () => {
+    for (const clock of ['new Date().getTime()', 'new Date ( ) . getTime ( )']) {
+      for (const method of ['waitForFunction', 'waitForValue', 'waitForStable']) {
+        expect(rules(scanSource('x.ts', `browser.${method}('${clock} - window.__mark > 400')`))).toContain('clock-only-wait')
+      }
+      expect(scanSource('x.ts', `browser.waitForFunction('document.querySelector("main").dataset.updatedAt > ${clock} - 1000')`)).toEqual([])
+    }
+  })
   it('permits state predicates containing timestamps and reject-only event deadlines', () => {
     expect(scanSource('x.ts', `browser.waitForFunction('document.querySelector("main").dataset.updatedAt > Date.now() - 1000')`)).toEqual([])
     expect(scanSource('x.ts', `const timeout = setTimeout(() => { observer.disconnect(); reject(new Error('event missing')); }, 5000)`)).toEqual([])

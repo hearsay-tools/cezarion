@@ -89,7 +89,7 @@ export function scanSource(file: string, source: string): Site[] {
   // Rules 2 and 3 — what a wait's argument contains.
   for (const call of callSpans(source, /\b(waitForFunction|waitForValue|waitForStable)\(/g)) {
     const line = lineOf(source, call.start)
-    const hasClock = /(?:performance|Date)\.now\s*\(/.test(call.text)
+    const hasClock = /(?:performance|Date)\.now\s*\(|\bnew\s+Date\s*\(\s*\)\s*\.\s*getTime\s*\(/.test(call.text)
     const hasState = /document\.|querySelector|activeElement|__cezIdle|__geometry|dataset\./.test(call.text)
     if (hasClock && !hasState) sites.push(at('clock-only-wait', line))
     if (call.text.includes(':hover')) sites.push(at('hover-in-wait', line))
