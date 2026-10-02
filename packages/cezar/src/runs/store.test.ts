@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { RunStore } from './store.ts';
+import { RunStore, runRecordSchema } from './store.ts';
 
 import type { RunRecord } from './store.ts';
 
@@ -2652,5 +2652,31 @@ describe('RunStore — replaying accepted but unread input after a crash (#505)'
     expect(store.requeueAwaitingReadInputs(LEGACY_RUN.id)).toEqual([unread.id]);
     const { deliveredAt: _d, awaitingRead: _a, ...queued } = unread;
     expect(store.getRun(LEGACY_RUN.id)?.agentInputs).toEqual([queued, read, historical]);
+  });
+});
+
+describe('RunRecord.automationTrigger', () => {
+  const trigger = {
+    automationId: 'nightly',
+    automationRevision: 2,
+    receiptId: 'r-1',
+    trigger: 'catch-up' as const,
+    occurrenceAt: '2026-10-02T04:00:00.000Z',
+  };
+
+  it('round-trips through the run schema', () => {
+    const parsed = runRecordSchema.parse({ ...LEGACY_RUN, automationTrigger: trigger });
+    expect(parsed.automationTrigger).toEqual(trigger);
+  });
+
+  it('is stripped, not fatal, for a schema that predates the key', () => {
+    const previous = runRecordSchema.omit({ automationTrigger: true });
+    const parsed = previous.parse({ ...LEGACY_RUN, automationTrigger: trigger });
+    expect(parsed.id).toBe('legacy-1');
+    expect('automationTrigger' in parsed).toBe(false);
+  });
+
+  it('is absent on an ordinary record', () => {
+    expect(runRecordSchema.parse(LEGACY_RUN).automationTrigger).toBeUndefined();
   });
 });

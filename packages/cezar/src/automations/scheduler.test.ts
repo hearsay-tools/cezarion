@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { automationLogRecordSchema as contractLogRecordSchema } from '@open-mercato/cezar-contract';
 import { AutomationStore } from './store.ts';
+import type { GithubAutomationDefinition } from './types.ts';
 import { LeaseHeldError, ProjectAutomationScheduler, WorkspaceAutomationScheduler } from './scheduler.ts';
 
 const dirs: string[] = [];
@@ -11,7 +12,7 @@ afterEach(async () => Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursiv
 async function setup() {
   const dir = await mkdtemp(join(tmpdir(), 'cezar-scheduler-')); dirs.push(dir);
   const store = AutomationStore.open(dir);
-  const definition = store.create({ name: 'Issues', enabled: true, events: ['issue.opened'], intervalSeconds: 300, filters: { lookbackDays: 7, maxRecords: 25 }, task: { prompt: 'Review' } }, 'one');
+  const definition = store.create({ name: 'Issues', enabled: true, events: ['issue.opened'], intervalSeconds: 300, filters: { lookbackDays: 7, maxRecords: 25 }, task: { prompt: 'Review' } }, 'one') as GithubAutomationDefinition;
   return { store, definition };
 }
 const candidate = { eventId: 'event', event: 'issue.opened' as const, timestamp: '2026-07-26T02:00:00.000Z', tieBreaker: 'I', repo: 'acme/demo', nodeId: 'I', number: 7, title: 'Issue', url: 'https://github.com/acme/demo/issues/7', author: 'alice', assignees: [], labels: [] };

@@ -113,7 +113,7 @@ export function AutomationsRoute({ mode = 'list' }: { mode?: 'list' | 'new' | 'e
               {data.automations.map((automation) => (
                 <article key={automation.id} className="rounded-xl border bg-card p-4">
                   <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div><h2 className="font-semibold">{automation.name}</h2><p className="mt-6 text-[13px] text-muted-foreground">{automation.events.join(', ')} · every {Math.round(automation.intervalSeconds / 60)} min</p></div>
+                    <div><h2 className="font-semibold">{automation.name}</h2><p className="mt-6 text-[13px] text-muted-foreground">{(automation.events ?? []).join(', ')} · every {Math.round((automation.intervalSeconds ?? 300) / 60)} min</p></div>
                     <span className="rounded-lg border px-4 py-3 text-xs">{automation.enabled ? 'Enabled' : 'Paused'}</span>
                   </div>
                   <SchedulerStatus data={data} />
@@ -182,12 +182,14 @@ function AutomationEditor({ automation, onSaved }: { automation?: AutomationDefi
     setError('')
     try {
       if (automation) {
+        const { events, intervalSeconds, filters } = automation
+        if (!events || intervalSeconds === undefined || !filters) throw new Error('This page edits GitHub automations only')
         await updateAutomation(automation.id, {
           name,
           description: automation.description,
-          events: automation.events,
-          intervalSeconds: automation.intervalSeconds,
-          filters: automation.filters,
+          events,
+          intervalSeconds,
+          filters,
           task: { ...automation.task, prompt },
           enabled: automation.enabled,
           expectedRevision: automation.revision,
@@ -201,7 +203,7 @@ function AutomationEditor({ automation, onSaved }: { automation?: AutomationDefi
   }
   return <PageFrame title={automation ? 'Edit automation' : 'New automation'} subtitle="Define a bounded GitHub trigger and the ordinary task it launches.">
     <form className="automation-editor grid gap-5" onSubmit={submit}>
-      <fieldset className="grid gap-4 rounded-xl border p-5"><legend className="px-2 font-semibold">When GitHub changes</legend><div className="grid gap-2"><Label htmlFor="automation-name">Name</Label><Input id="automation-name" value={name} onChange={(event) => setName(event.target.value)} required /></div><div className="flex items-center gap-2 text-sm">{automation ? `Saved trigger · ${automation.events.join(', ')} · Every ${Math.round(automation.intervalSeconds / 60)} minutes` : 'New issue · every 5 minutes · last 7 days · maximum 25 records'}</div></fieldset>
+      <fieldset className="grid gap-4 rounded-xl border p-5"><legend className="px-2 font-semibold">When GitHub changes</legend><div className="grid gap-2"><Label htmlFor="automation-name">Name</Label><Input id="automation-name" value={name} onChange={(event) => setName(event.target.value)} required /></div><div className="flex items-center gap-2 text-sm">{automation ? `Saved trigger · ${(automation.events ?? []).join(', ')} · Every ${Math.round((automation.intervalSeconds ?? 300) / 60)} minutes` : 'New issue · every 5 minutes · last 7 days · maximum 25 records'}</div></fieldset>
       <fieldset className="grid gap-4 rounded-xl border p-5"><legend className="px-2 font-semibold">What task to run</legend><div className="grid gap-2"><Label htmlFor="automation-prompt">Prompt</Label><Textarea id="automation-prompt" value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={2} required /></div><p className="text-xs text-muted-foreground">Available: {'{{github.number}}'} {'{{github.title}}'} {'{{github.url}}'} {'{{github.labels}}'}</p><p className="text-xs text-pending-strong">GitHub content is appended as untrusted context.</p></fieldset>
       {!automation?.enabled ? <fieldset className="relative rounded-xl border p-5"><legend className="sr-only">Review and enable</legend><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={enable} onChange={(event) => setEnable(event.target.checked)} />Save and enable from a current-time baseline</label><p className="text-[13px] text-muted-foreground">Existing matches will not launch tasks.</p></fieldset> : null}
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}

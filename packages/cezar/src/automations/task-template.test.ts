@@ -6,10 +6,10 @@ import { RunStore } from '../runs/store.ts';
 import type { RunManager } from '../workflows/run.ts';
 import { launchAutomationRun, reconcileAutomationReceipts, renderAutomationTask, validateAutomationPrompt } from './task-template.ts';
 import { AutomationStore } from './store.ts';
-import type { AutomationDefinition } from './types.ts';
+import type { GithubAutomationDefinition } from './types.ts';
 
-const definition: AutomationDefinition = {
-  id: 'one', revision: 1, name: 'Review', enabled: true, events: ['issue.opened'], intervalSeconds: 300,
+const definition: GithubAutomationDefinition = {
+  id: 'one', revision: 1, name: 'Review', enabled: true, kind: 'github', events: ['issue.opened'], intervalSeconds: 300,
   filters: { lookbackDays: 7, maxRecords: 25 }, task: { prompt: 'Review #{{github.number}}: {{github.title}} at {{github.url}}' },
   createdAt: '2026-07-26T00:00:00.000Z', updatedAt: '2026-07-26T00:00:00.000Z',
 };

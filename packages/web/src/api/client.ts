@@ -19,6 +19,7 @@ import type {
   AutomationCheckQueuedResponse,
   AutomationLogResponse,
   AutomationResponse,
+  AutomationDefinition,
   CreateAutomationInput,
   UpdateAutomationInput,
   AgentConfigListing,
@@ -1819,8 +1820,15 @@ export async function getAutomations(opts?: ReadOptions): Promise<AutomationsRes
   )
 }
 
+/** The poll keys, required: until the kind-aware routes land the server's bodies are GitHub-only. */
+type GithubBody<T> = Omit<T, 'events' | 'intervalSeconds' | 'filters'> & {
+  events: NonNullable<AutomationDefinition['events']>
+  intervalSeconds: number
+  filters: NonNullable<AutomationDefinition['filters']>
+}
+
 /** Create a definition. Always created PAUSED unless `enable` asks for a current-time baseline. */
-export async function createAutomation(input: CreateAutomationInput): Promise<AutomationResponse> {
+export async function createAutomation(input: GithubBody<CreateAutomationInput>): Promise<AutomationResponse> {
   return unwrap(
     await cez.api.v1.p[':projectId'].automations.$post({
       param: { projectId: queryScope() },
@@ -1834,7 +1842,7 @@ export async function createAutomation(input: CreateAutomationInput): Promise<Au
  *  rather than overwriting an edit made elsewhere. */
 export async function updateAutomation(
   id: string,
-  input: UpdateAutomationInput,
+  input: GithubBody<UpdateAutomationInput>,
 ): Promise<AutomationResponse> {
   return unwrap(
     await cez.api.v1.p[':projectId'].automations[':id'].$put({

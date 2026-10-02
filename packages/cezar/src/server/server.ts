@@ -15,6 +15,7 @@ import {
   automationFiltersSchema,
   automationLogResultSchema,
   automationTaskSchema,
+  isGithubAutomation,
   type AutomationDefinition,
 } from '../automations/types.ts';
 import type { IncomingMessage } from 'node:http';
@@ -3469,7 +3470,7 @@ export function createApp(deps: ServerDeps) {
       const { enable, ...input } = parsed.data;
       try {
         const automation = automationStore.create({ ...input, enabled: enable === true });
-        if (enable) {
+        if (enable && isGithubAutomation(automation)) {
           const baselineAt = new Date().toISOString();
           automationStore.setState(automation.id, {
             revision: automation.revision,
@@ -3531,6 +3532,8 @@ export function createApp(deps: ServerDeps) {
       const store = c.get('project').automationStore;
       const current = store.get(c.req.param('id'));
       if (!current) return c.json({ error: 'not found' }, 404);
+      // Until the kind-aware routes land only polls reach this route; a schedule has no baseline.
+      if (!isGithubAutomation(current)) return c.json({ error: 'only GitHub automations can be enabled here' }, 409);
       const automation = store.update(current.id, current.revision, { ...editableAutomation(current), enabled: true });
       const baselineAt = new Date().toISOString();
       store.setState(automation.id, {
@@ -3538,7 +3541,7 @@ export function createApp(deps: ServerDeps) {
         revision: automation.revision,
         baselineAt,
         cursor: { timestamp: baselineAt },
-        nextCheckAt: new Date(Date.now() + automation.intervalSeconds * 1_000).toISOString(),
+        nextCheckAt: new Date(Date.now() + current.intervalSeconds * 1_000).toISOString(),
       });
       await store.appendLog({ automationId: automation.id, revision: automation.revision, result: 'baseline', reason: 'Enabled from a current-time baseline; existing records were not launched.' });
       emitAutomationChange(c.get('project'), automation.id, automation.revision);
@@ -3564,6 +3567,7 @@ export function createApp(deps: ServerDeps) {
       const store = project.automationStore;
       const automation = store.get(c.req.param('id'));
       if (!automation) return c.json({ error: 'not found' }, 404);
+      if (!isGithubAutomation(automation)) return c.json({ error: 'only GitHub automations can be checked' }, 409);
       const parsed = { data: c.req.valid('json') };
       // `string`, not `randomUUID`'s template-literal type: the wire carries an opaque id, and
       // leaking `${string}-${string}-…` into the route type would make the contract describe the

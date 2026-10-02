@@ -3,6 +3,7 @@ import { z } from 'zod';
 // run-creation input minus the keys an automation supplies itself. Consumed rather than
 // redeclared — the same one-way direction `./runs.ts` takes towards `./workflows.ts`.
 import { createRunInputBaseSchema } from './runs.ts';
+import { automationScheduleSchema } from './automation-schedule.ts';
 
 /**
  * The AUTOMATIONS family of `/api/v1` (#694) — the per-project GitHub triggers, their runtime
@@ -55,6 +56,13 @@ export const automationFiltersSchema = z.object({
 export type AutomationFilters = z.infer<typeof automationFiltersSchema>;
 
 /**
+ * What triggers an automation: a bounded GitHub poll, or a schedule in the cockpit's zone. The
+ * storage schema defaults a definition without `kind` to `github`, so the wire always carries it.
+ */
+export const automationKindSchema = z.enum(['github', 'schedule']);
+export type AutomationKind = z.infer<typeof automationKindSchema>;
+
+/**
  * The task a match launches: `POST /runs`' own body minus the three keys an automation owns
  * itself — `task` (the rendered prompt), `images` and `todoId` — plus the prompt TEMPLATE.
  *
@@ -90,9 +98,13 @@ export const automationDefinitionSchema = z.object({
   /** Always present: the storage schema defaults it to `false`, so a definition is created
    *  PAUSED and enabling it is a separate, baseline-establishing act. */
   enabled: z.boolean(),
-  events: z.array(automationEventSchema),
-  intervalSeconds: z.number(),
-  filters: automationFiltersSchema,
+  kind: automationKindSchema,
+  /** `github` kind: always present. `schedule` kind: absent. */
+  events: z.array(automationEventSchema).optional(),
+  intervalSeconds: z.number().optional(),
+  filters: automationFiltersSchema.optional(),
+  /** `schedule` kind: always present. `github` kind: absent. */
+  schedule: automationScheduleSchema.optional(),
   task: automationTaskSchema,
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -122,6 +134,9 @@ export const automationRuntimeStateSchema = z.object({
   backlogAfter: automationCursorSchema.extend({ tieBreaker: z.string() }).optional(),
   nextCheckAt: z.string().optional(),
   lastSuccessAt: z.string().optional(),
+  /** `schedule` kind: the next occurrence's instant and the last fired one's. */
+  nextRunAt: z.string().optional(),
+  lastRunAt: z.string().optional(),
   /** Per-query GitHub ETags, so an unchanged page costs no rate-limit budget. */
   etags: z.record(z.string(), z.string()).optional(),
   backoffUntil: z.string().optional(),
@@ -140,6 +155,10 @@ export const automationLogResultSchema = z.enum([
   'baseline',
   'preview',
   'skipped',
+  // schedule kind: a Run now launch, a missed occurrence fired once after a gap, a launch that threw.
+  'manual',
+  'catch-up',
+  'failed',
 ]);
 export type AutomationLogResult = z.infer<typeof automationLogResultSchema>;
 
@@ -268,8 +287,13 @@ export type AutomationRetryResponse = z.infer<typeof automationRetryResponseSche
  * `enable: true` asks the route to enable it AND establish a current-time baseline in one step.
  */
 export const createAutomationInputSchema = automationDefinitionSchema
-  .omit({ id: true, revision: true, createdAt: true, updatedAt: true, enabled: true })
-  .extend({ enable: z.boolean().optional() });
+  .omit({ id: true, revision: true, createdAt: true, updatedAt: true, enabled: true, kind: true })
+  .extend({
+    /** Omitted = `github` on create, the shape every pre-schedule client sends; omitted on
+     *  update = the stored kind. */
+    kind: automationKindSchema.optional(),
+    enable: z.boolean().optional(),
+  });
 export type CreateAutomationInput = z.input<typeof createAutomationInputSchema>;
 
 /**

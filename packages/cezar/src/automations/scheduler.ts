@@ -1,11 +1,11 @@
 import type { AutomationCoordinator } from './coordinator.ts';
 import type { GithubCandidate, GithubPoller, GithubPollResult } from './github-poller.ts';
 import type { AutomationLease, AutomationStore } from './store.ts';
-import type { AutomationDefinition } from './types.ts';
+import { isGithubAutomation, type GithubAutomationDefinition } from './types.ts';
 
 export interface AutomationLaunchResult { runId: string }
 export type AutomationLauncher = (
-  definition: AutomationDefinition,
+  definition: GithubAutomationDefinition,
   candidate: GithubCandidate,
   receiptId: string,
 ) => Promise<AutomationLaunchResult>;
@@ -40,7 +40,7 @@ export class LeaseHeldError extends Error {
 export class ProjectAutomationScheduler {
   constructor(private readonly handle: ProjectAutomationHandle) {}
 
-  async check(definition: AutomationDefinition, mode: 'preview' | 'execute' = 'execute'): Promise<GithubPollResult> {
+  async check(definition: GithubAutomationDefinition, mode: 'preview' | 'execute' = 'execute'): Promise<GithubPollResult> {
     const detectionOnly = mode === 'execute' && !this.handle.launch;
     if (detectionOnly) mode = 'preview';
     const { store } = this.handle;
@@ -117,7 +117,7 @@ export class ProjectAutomationScheduler {
     }
   }
 
-  private async launch(definition: AutomationDefinition, candidate: GithubCandidate): Promise<void> {
+  private async launch(definition: GithubAutomationDefinition, candidate: GithubCandidate): Promise<void> {
     const receipt = this.handle.store.reserveReceipt({ automationId: definition.id, revision: definition.revision, eventId: candidate.eventId, candidate });
     if (!receipt) {
       await this.handle.store.appendLog({ automationId: definition.id, revision: definition.revision, event: candidate.event, result: 'duplicate', reason: 'A durable receipt already exists for this automation and event.', githubNumber: candidate.number, githubTitle: candidate.title, githubUrl: candidate.url });
@@ -133,14 +133,14 @@ export class ProjectAutomationScheduler {
     }
   }
 
-  private async recordSkip(definition: AutomationDefinition, error: LeaseHeldError): Promise<void> {
+  private async recordSkip(definition: GithubAutomationDefinition, error: LeaseHeldError): Promise<void> {
     const { store } = this.handle;
     await store.appendLog({ automationId: definition.id, revision: definition.revision, result: 'skipped', reason: error.message });
     // The lease owner may be writing state. The workspace retry floor handles our next attempt.
     this.handle.onChange?.(definition.id, definition.revision);
   }
 
-  private async recordFailure(definition: AutomationDefinition, error: unknown): Promise<void> {
+  private async recordFailure(definition: GithubAutomationDefinition, error: unknown): Promise<void> {
     const state = this.handle.store.state(definition.id) ?? {};
     const failures = (state.consecutiveFailures ?? 0) + 1;
     const delay = Math.min(6 * 60 * 60_000, 60_000 * 2 ** (failures - 1));
@@ -208,14 +208,14 @@ export class WorkspaceAutomationScheduler {
 
   private schedule(): void {
     if (this.stopped) return;
-    const due: Array<{ key: string; at: number; retryAfterMs: number; definition: AutomationDefinition; scheduler: ProjectAutomationScheduler }> = [];
+    const due: Array<{ key: string; at: number; retryAfterMs: number; definition: GithubAutomationDefinition; scheduler: ProjectAutomationScheduler }> = [];
     const live = new Set<string>();
     for (const projectId of this.options.coordinator.enabledProjectIds()) {
       const store = this.options.coordinator.store(projectId);
       if (!store) continue;
       const handle = this.options.handle(projectId, store);
       if (!handle) continue;
-      for (const definition of store.list().filter((item) => item.enabled)) {
+      for (const definition of store.list().filter((item) => item.enabled).filter(isGithubAutomation)) {
         const key = `${projectId}:${definition.id}`;
         live.add(key);
         const at = Date.parse(store.state(definition.id)?.nextCheckAt ?? new Date().toISOString());
