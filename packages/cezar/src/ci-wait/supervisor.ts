@@ -3,7 +3,8 @@ import { ciWaitSchema, ciWaitResultSchema, type CiPrIdentity, type CiWait, type 
 import { CiGithubError, CiSemaphore, GithubCiClient, type GithubCheck } from './github.ts';
 
 export const CI_WATCHER_LIMIT = 4;
-export const CI_PROBE_MS = 10_000;
+/** PR-head probes, absent-check rechecks, and stale-watch rechecks. Not the discovery deadline. */
+export const CI_PROBE_MS = 30_000;
 export const CI_DISCOVERY_MS = 60_000;
 export const CI_RETRY_MS = [1_000, 5_000, 15_000] as const;
 export const CI_RESULT_LIMIT = 32 * 1024;

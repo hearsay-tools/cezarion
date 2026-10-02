@@ -534,8 +534,10 @@ its existing automatic-check schedule when no CI wait is registered.
 
 Cezar reports passed, failed, cancelled or skipped checks, no checks, changed head,
 timeout or an operational error. It watches the registered commit: a new PR head
-is reported separately, and the agent decides whether to wait again. Four watchers
-run concurrently; queued waits retain their original deadline. Results are bounded
+is reported separately, and the agent decides whether to wait again. The first
+observation runs immediately. Later check-status and PR-head polls run every 30
+seconds, and no setting changes that interval. Four watchers run concurrently;
+queued waits retain their original deadline. Results are bounded
 observations, not merge approval or evidence that every expected workflow appeared.
 The agent still decides its next action; CI success never completes the task or
 accepts review. A human message cancels the current wait, and CI never answers a
