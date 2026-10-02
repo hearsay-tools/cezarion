@@ -147,6 +147,63 @@ describe('project rail', () => {
     assertProject()
   })
 
+  it('returns to each project\'s last page when switching, and keeps it across a reload (#728)', () => {
+    browser.goto(baseUrl + `/p/${bootProject}/`)
+    browser.evaluate(`localStorage.removeItem('cez-project-locations')`)
+    const pathIs = (path: string) => browser.waitForValue(`location.pathname + location.search`, value => value === path)
+    // The controller files a page once the registry has validated its project, so a test that
+    // navigates away at once would be racing the write it is about to depend on.
+    const remembered = (id: string, path: string) =>
+      browser.waitForValue(`JSON.parse(localStorage.getItem('cez-project-locations') ?? '{}')[${JSON.stringify(id)}]?.pathname`, value => value === path)
+    const switchTo = (id: string) => {
+      browser.evaluate(`document.querySelector('${mark(id)} a').scrollIntoView({ block: 'nearest' })`)
+      browser.click(`${mark(id)} a`)
+    }
+    gotoRail()
+    browser.goto(baseUrl + `/p/${bootProject}/skills`)
+    pathIs(`/p/${bootProject}/skills`)
+    remembered(bootProject, `/p/${bootProject}/skills`)
+    // No memory for the other project yet: its home.
+    switchTo(OTHER.id)
+    pathIs(`/p/${OTHER.id}/`)
+    browser.goto(baseUrl + `/p/${OTHER.id}/workflows`)
+    pathIs(`/p/${OTHER.id}/workflows`)
+    remembered(OTHER.id, `/p/${OTHER.id}/workflows`)
+    // Global pages must not overwrite either memory.
+    browser.goto(baseUrl + '/settings/global/appearance')
+    browser.waitForValue(`location.pathname`, value => value === '/settings/global/appearance')
+    browser.waitForFunction(`document.querySelector('${mark(bootProject)} a') !== null`)
+    switchTo(bootProject)
+    pathIs(`/p/${bootProject}/skills`)
+    switchTo(OTHER.id)
+    pathIs(`/p/${OTHER.id}/workflows`)
+    // Persisted: a reload lands the keyboard on the same remembered page.
+    browser.goto(baseUrl + `/p/${bootProject}/skills`)
+    pathIs(`/p/${bootProject}/skills`)
+    browser.waitForFunction(`document.querySelector('${mark(OTHER.id)} a') !== null`)
+    browser.evaluate(`document.querySelector('${mark(OTHER.id)} a').focus()`)
+    browser.press('Enter')
+    pathIs(`/p/${OTHER.id}/workflows`)
+    // A task page that still exists comes back whole, query and hash included.
+    browser.goto(baseUrl + `/p/${OTHER.id}/tasks/rail-review?x=1#frag`)
+    remembered(OTHER.id, `/p/${OTHER.id}/tasks/rail-review`)
+    switchTo(bootProject)
+    pathIs(`/p/${bootProject}/skills`)
+    switchTo(OTHER.id)
+    pathIs(`/p/${OTHER.id}/tasks/rail-review?x=1`)
+    // A page the server confirms is gone degrades to the project home.
+    browser.goto(baseUrl + `/p/${bootProject}/`)
+    browser.waitForFunction(`document.querySelector('${mark(OTHER.id)} [data-slot="rail-pill-top"]') !== null`)
+    remembered(bootProject, `/p/${bootProject}/`)
+    browser.evaluate(`localStorage.setItem('cez-project-locations', JSON.stringify({ ${JSON.stringify(OTHER.id)}: { projectId: ${JSON.stringify(OTHER.id)}, pathname: '/p/${OTHER.id}/tasks/deleted-run' } }))`)
+    // The rail's links are resolved on render, so the seeded memory is picked up by a fresh load.
+    browser.goto(baseUrl + `/p/${bootProject}/`)
+    browser.waitForFunction(`document.querySelector('${mark(OTHER.id)} [data-slot="rail-pill-top"]') !== null`)
+    switchTo(OTHER.id)
+    pathIs(`/p/${OTHER.id}/`)
+    browser.evaluate(`localStorage.removeItem('cez-project-locations')`)
+  })
+
   it('is a 60px column beside the sidebar, and resizing the sidebar leaves it alone', () => {
     gotoRail()
     const width = () => Number(browser.evaluate(`document.querySelector('[data-slot="project-rail"]').getBoundingClientRect().width`))

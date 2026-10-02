@@ -13,6 +13,36 @@
 > UI-state read, none of which a synchronous local write needs. The server keeps
 > accepting the `lastLocation` key for older cockpits.
 
+> **Extended (#728): each project remembers its own last page.** Switching projects from the
+> rail (collapsed or expanded) or the ⌘K Projects group lands on that project's last page
+> instead of its home. Browser-local, no server change; `cez-last-location` and the bare-root
+> restore above are untouched.
+>
+> - **Storage:** `cez-project-locations` in `localStorage`, `{ [projectId]: location }`, written by
+>   the same `LastLocationController` from the same `locationToSave` result, so global pages,
+>   unscoped routes and missing projects never write. Corrupt or unavailable storage reads as
+>   "no memory".
+> - **Resolution** (`lib/project-switch.ts`, hook `components/use-project-switch.ts`): a saved page
+>   must belong to the target project, the project must be usable, and the path must be one the
+>   router really serves. Matching uses `matchProjectRoute` over the same `projectScopeRoute()`
+>   element tree `AppRoutes` renders, so route casing, trailing slashes and the settings sections
+>   visible under the server's capabilities agree with routing, and there is no second route
+>   list. Anything else, including a malformed percent escape, goes to the project home.
+> - **Stale entities:** a plain click on a page naming an entity (task, compare group, commit,
+>   issue/PR, workflow, automation) first asks the target project's own endpoint. Only a
+>   confirmed answer sends the user home: a 404, a workflow/automation list that loaded without
+>   the name, a forge item that is `null`. Offline, a 5xx, an unavailable forge, a 2.5s timeout
+>   or the capped runs index never count as "gone": the page is restored and shows its own state.
+>   New-tab gestures use the unverified `href`. The commit route answers a missing sha with 409 +
+>   git's reason, so there (only) a 409 whose reason says the object is absent counts as gone.
+>   Switching intent is one app-lifetime controller (module state in `lib/project-switch.ts`, fed
+>   by `useSwitchHost`): the newest click across rail and palette wins, and a navigation of any
+>   kind (path, query, hash) or a later click drops a pending switch, even after the palette that
+>   started it has unmounted.
+> - **Freshness:** the current project's link reads the live location, not storage, because the
+>   controller files a page one effect after the render that shows it.
+> - **Not covered:** the phone drawer's project list still opens the project home.
+
 ## 📝 TLDR
 
 Cezar remembers the last valid project-scoped cockpit location in the existing

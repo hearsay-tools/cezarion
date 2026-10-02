@@ -3,6 +3,7 @@ import { SunMoonIcon } from '@/components/design-icons'
 import * as React from 'react'
 import { useNavigate as useRouterNavigate } from 'react-router'
 import { useHealth, useProjects, useRuns, useRunsIndex, useSkills, useUiState } from '@/api/queries'
+import { useProjectSwitch } from '@/components/use-project-switch'
 import { scopeTo, useActiveProjectId, useNavigate } from '@/lib/project-router'
 import { runDelegationSummarySchema } from '@open-mercato/cezar-api-client'
 import type { ProjectListEntry, RunIndexEntry, RunRecord } from '@open-mercato/cezar-api-client'
@@ -373,9 +374,10 @@ function PaletteContent({ close }: { close: () => void }) {
   // An explicit `/p/<id>/…` target, which the scoping wrapper passes through untouched — the
   // whole point of this group is landing in a project that is NOT the active one. `/` is that
   // project's tasks pane, the same door the sidebar group's "More…" opens.
+  const projectSwitch = useProjectSwitch()
   const goProject = (projectId: string) => {
     close()
-    navigate(scopeTo(projectId, '/'))
+    void projectSwitch.go(projectId)
   }
   /** A task thread in its OWN project — the one navigation that must ignore the active scope.
    *  A row with no project id belongs to wherever we already are, which is exactly what an

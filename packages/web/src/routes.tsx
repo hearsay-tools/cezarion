@@ -1,6 +1,8 @@
 import { Suspense, lazy } from 'react'
 import {
+  createRoutesFromElements,
   matchPath,
+  matchRoutes,
   Navigate,
   Outlet,
   Route,
@@ -8,6 +10,8 @@ import {
   useLocation,
   useParams,
 } from 'react-router'
+
+import type { HealthResponse } from '@open-mercato/cezar-api-client'
 
 import { useHealth, useProjects } from './api/queries'
 import { ProjectScopeProvider } from './api/project-scope-context'
@@ -301,6 +305,278 @@ export function pageTitleContext(pathname: string): PageTitleContext {
   return { pageLabel: route?.pageLabel ?? null, taskId: null }
 }
 
+/** The project-scoped route subtree, one definition for the router AND for `matchProjectRoute`,
+ *  so the last-page restore agrees with what is actually routed (and with the settings sections
+ *  the server's capabilities make visible). Only element TREES are built here; nothing renders. */
+function projectScopeRoute(capabilities: HealthResponse['capabilities'] | undefined) {
+  return (
+    <Route path="/p/:projectId" element={<ProjectScopeRoute />}>
+      <Route index element={<TasksOverviewRoute />} />
+      <Route path="new" element={<NewTaskProjectRoute />} />
+  
+      <Route
+        path="tasks/:id"
+        element={
+          <Suspense fallback={<ThreadLoading />}>
+            <TaskThreadRoute />
+          </Suspense>
+        }
+      />
+      <Route
+        path="tasks/:id/changes"
+        element={
+          <Suspense fallback={<GitTabLoading tab="changes" />}>
+            <TaskChangesRoute />
+          </Suspense>
+        }
+      />
+      <Route
+        path="tasks/:id/files"
+        element={
+          <Suspense fallback={<GitTabLoading tab="files" />}>
+            <TaskFilesRoute />
+          </Suspense>
+        }
+      />
+      <Route
+        path="tasks/:id/commits"
+        element={
+          <Suspense fallback={<GitTabLoading tab="changes" />}>
+            <TaskCommitsRoute />
+          </Suspense>
+        }
+      />
+      <Route
+        path="tasks/:id/commits/:sha"
+        element={
+          <Suspense fallback={<GitTabLoading tab="changes" />}>
+            <TaskCommitsRoute />
+          </Suspense>
+        }
+      />
+      <Route
+        path="tasks/:id/issue/:n"
+        element={
+          <Suspense fallback={<TaskGithubItemLoading kind="issue" />}>
+            <TaskGithubItemRoute kind="issue" />
+          </Suspense>
+        }
+      />
+      <Route
+        path="tasks/:id/pr/:n"
+        element={
+          <Suspense fallback={<TaskGithubItemLoading kind="pr" />}>
+            <TaskGithubItemRoute kind="pr" />
+          </Suspense>
+        }
+      />
+      <Route
+        path="compare/:groupId"
+        element={
+          <Suspense fallback={<CompareLoading />}>
+            <CompareVariantsRoute />
+          </Suspense>
+        }
+      />
+  
+      {/* The Git view (issue 06 §3): each section is a URL — /git (Recently on main; a phone's
+          Git screen unless ?view=repo), /git/commits (+ /:sha, one commit inside Recently on
+          main), /git/not-landed (issue 08), /git/cleanup, /git/branches, and /git/changes (the main tree's uncommitted
+          files, from the checkout block). */}
+      <Route
+        path="git"
+        element={
+          <Suspense fallback={<RepoGitLoading />}>
+            <RepoGitRoute section="main" index />
+          </Suspense>
+        }
+      />
+      <Route
+        path="git/commits"
+        element={
+          <Suspense fallback={<RepoGitLoading />}>
+            <RepoGitRoute section="main" />
+          </Suspense>
+        }
+      />
+      <Route
+        path="git/commits/:sha"
+        element={
+          <Suspense fallback={<RepoGitLoading />}>
+            <RepoGitRoute section="main" />
+          </Suspense>
+        }
+      />
+      <Route
+        path="git/not-landed"
+        element={
+          <Suspense fallback={<RepoGitLoading />}>
+            <RepoGitRoute section="not-landed" />
+          </Suspense>
+        }
+      />
+      <Route
+        path="git/cleanup"
+        element={
+          <Suspense fallback={<RepoGitLoading />}>
+            <RepoGitRoute section="cleanup" />
+          </Suspense>
+        }
+      />
+      <Route
+        path="git/branches"
+        element={
+          <Suspense fallback={<RepoGitLoading />}>
+            <RepoGitRoute section="branches" />
+          </Suspense>
+        }
+      />
+      <Route
+        path="git/changes"
+        element={
+          <Suspense fallback={<RepoGitLoading />}>
+            <RepoGitRoute section="changes" />
+          </Suspense>
+        }
+      />
+      {/* The GitHub tab (R6 Step 1.1): issues and PRs are separate list URLs, each item a
+          deep link. The nav item is forge-gated in the shell; the routes stay reachable so a
+          pasted link renders the honest unavailable explainer instead of a 404. The bare
+          `/github` is the one URL that restores the last-selected tab (#417) — `/github/prs`
+          and the `:n` deep links are always exactly what they say. */}
+      <Route
+        path="github"
+        element={
+          <Suspense fallback={<GithubLoading />}>
+            {/* `GithubRoute` itself, with `index`, rather than a wrapper component: React
+                reconciles by element type, so any other type here would unmount the route on
+                the hop to `github/issues/:n` and reset its search text — losing the very
+                cross-state hit the user clicked (#730). The `prs` pair below already renders
+                one type across its two paths, which is why it never had that bug. */}
+            <GithubRoute view="issues" index />
+          </Suspense>
+        }
+      />
+      <Route
+        path="github/prs"
+        element={
+          <Suspense fallback={<GithubLoading />}>
+            <GithubRoute view="prs" />
+          </Suspense>
+        }
+      />
+      <Route
+        path="github/issues/:n"
+        element={
+          <Suspense fallback={<GithubLoading />}>
+            <GithubRoute view="issues" />
+          </Suspense>
+        }
+      />
+      <Route
+        path="github/prs/:n"
+        element={
+          <Suspense fallback={<GithubLoading />}>
+            <GithubRoute view="prs" />
+          </Suspense>
+        }
+      />
+      <Route
+        path="github/prs/:n/changes"
+        element={
+          <Suspense fallback={<GithubLoading />}>
+            <GithubRoute view="prs" changes />
+          </Suspense>
+        }
+      />
+      <Route path="automations" element={<AutomationsRoute />} />
+      <Route path="automations/new" element={<AutomationsRoute mode="new" />} />
+      <Route path="automations/:automationId" element={<AutomationsRoute mode="edit" />} />
+      <Route path="automations/:automationId/log" element={<AutomationsRoute mode="log" />} />
+  
+      {/* The skills catalog (R6 Step 1.4) — its own top-level surface, no settings sub-nav.
+          `/settings/skills` redirects here (below) so pasted links keep working. */}
+      <Route
+        path="skills"
+        element={
+          <Suspense fallback={<SkillsLoading />}>
+            <SkillsRoute />
+          </Suspense>
+        }
+      />
+  
+      {/* The follow-up inbox (R6 Step 1.2): light — no markdown stack — so it rides the main
+          bundle like the overview does. */}
+      <Route path="inbox" element={<InboxRoute />} />
+  
+      {/* The workflow builder (R6 Step 1.6): /workflows opens the canvas on the repo's first
+          saved chain, /workflows/:name deep-links a specific one. */}
+      <Route
+        path="workflows"
+        element={
+          <Suspense fallback={<WorkflowsLoading />}>
+            <WorkflowsRoute />
+          </Suspense>
+        }
+      />
+      <Route
+        path="workflows/:name"
+        element={
+          <Suspense fallback={<WorkflowsLoading />}>
+            <WorkflowsRoute />
+          </Suspense>
+        }
+      />
+  
+      {/* Settings (R6 Step 1.3): registry-driven — the section list, nav and routes all come
+          from routes/settings/registry.tsx. Hidden sections are NOT routed, so their URLs are
+          honest 404s until the section ships (notifications unhides in Step 1.7).
+  
+          Only the PROJECT-scoped sections live here (multi-project spec, step 3.5); the
+          global ones are the top-level `/settings/global/*` block below. */}
+      <Route path="settings" element={<SettingsIndexRoute capabilities={capabilities} />} />
+      <Route path="settings/skills" element={<SettingsSkillsRedirect />} />
+      {visibleSettingsSections('project', capabilities).map((section) => (
+        <Route
+          key={section.id}
+          path={`settings/${section.id}`}
+          element={<SettingsSectionRoute section={section} scope="project" capabilities={capabilities} />}
+        />
+      ))}
+      {/* A section that MOVED out of the project area keeps its old URL working: every
+          pre-3.5 bookmark and every legacy flat `/settings/appearance` (which the redirect
+          below turns into `/p/<boot>/settings/appearance`) lands on the global twin instead
+          of a 404 — query and hash intact across both hops. */}
+      {visibleSettingsSections('global', capabilities).map((section) => (
+        <Route
+          key={section.id}
+          path={`settings/${section.id}`}
+          element={<MovedSettingsSectionRedirect sectionId={section.id} />}
+        />
+      ))}
+  
+      <Route path="*" element={<NotFoundRoute />} />
+    </Route>
+  )
+}
+
+/** A project page the router really serves: its project-relative pattern (`/tasks/:id/changes`)
+ *  and the decoded params. Null for the catch-all (not found) and for anything unrouted. */
+export function matchProjectRoute(
+  pathname: string,
+  capabilities: HealthResponse['capabilities'] | undefined,
+): { pattern: string; params: Record<string, string | undefined> } | null {
+  const matches = matchRoutes(createRoutesFromElements(projectScopeRoute(capabilities)), pathname)
+  const leaf = matches?.at(-1)
+  if (!matches || !leaf || leaf.route.path === '*') return null
+  const pattern = matches
+    .slice(1)
+    .map((match) => match.route.path)
+    .filter((path): path is string => path !== undefined)
+    .join('/')
+  return { pattern: `/${pattern}`.replace(/\/$/, '') || '/', params: leaf.params }
+}
+
 /** The route map from the spec's "Routing — every surface is a URL" section.
  *
  *  Real URLs, not hash routes: the Hono server serves the built index.html for
@@ -315,253 +591,7 @@ export function AppRoutes() {
   const capabilities = useHealth().data?.capabilities
   return (
     <Routes>
-      <Route path="/p/:projectId" element={<ProjectScopeRoute />}>
-        <Route index element={<TasksOverviewRoute />} />
-        <Route path="new" element={<NewTaskProjectRoute />} />
-
-        <Route
-          path="tasks/:id"
-          element={
-            <Suspense fallback={<ThreadLoading />}>
-              <TaskThreadRoute />
-            </Suspense>
-          }
-        />
-        <Route
-          path="tasks/:id/changes"
-          element={
-            <Suspense fallback={<GitTabLoading tab="changes" />}>
-              <TaskChangesRoute />
-            </Suspense>
-          }
-        />
-        <Route
-          path="tasks/:id/files"
-          element={
-            <Suspense fallback={<GitTabLoading tab="files" />}>
-              <TaskFilesRoute />
-            </Suspense>
-          }
-        />
-        <Route
-          path="tasks/:id/commits"
-          element={
-            <Suspense fallback={<GitTabLoading tab="changes" />}>
-              <TaskCommitsRoute />
-            </Suspense>
-          }
-        />
-        <Route
-          path="tasks/:id/commits/:sha"
-          element={
-            <Suspense fallback={<GitTabLoading tab="changes" />}>
-              <TaskCommitsRoute />
-            </Suspense>
-          }
-        />
-        <Route
-          path="tasks/:id/issue/:n"
-          element={
-            <Suspense fallback={<TaskGithubItemLoading kind="issue" />}>
-              <TaskGithubItemRoute kind="issue" />
-            </Suspense>
-          }
-        />
-        <Route
-          path="tasks/:id/pr/:n"
-          element={
-            <Suspense fallback={<TaskGithubItemLoading kind="pr" />}>
-              <TaskGithubItemRoute kind="pr" />
-            </Suspense>
-          }
-        />
-        <Route
-          path="compare/:groupId"
-          element={
-            <Suspense fallback={<CompareLoading />}>
-              <CompareVariantsRoute />
-            </Suspense>
-          }
-        />
-
-        {/* The Git view (issue 06 §3): each section is a URL — /git (Recently on main; a phone's
-            Git screen unless ?view=repo), /git/commits (+ /:sha, one commit inside Recently on
-            main), /git/not-landed (issue 08), /git/cleanup, /git/branches, and /git/changes (the main tree's uncommitted
-            files, from the checkout block). */}
-        <Route
-          path="git"
-          element={
-            <Suspense fallback={<RepoGitLoading />}>
-              <RepoGitRoute section="main" index />
-            </Suspense>
-          }
-        />
-        <Route
-          path="git/commits"
-          element={
-            <Suspense fallback={<RepoGitLoading />}>
-              <RepoGitRoute section="main" />
-            </Suspense>
-          }
-        />
-        <Route
-          path="git/commits/:sha"
-          element={
-            <Suspense fallback={<RepoGitLoading />}>
-              <RepoGitRoute section="main" />
-            </Suspense>
-          }
-        />
-        <Route
-          path="git/not-landed"
-          element={
-            <Suspense fallback={<RepoGitLoading />}>
-              <RepoGitRoute section="not-landed" />
-            </Suspense>
-          }
-        />
-        <Route
-          path="git/cleanup"
-          element={
-            <Suspense fallback={<RepoGitLoading />}>
-              <RepoGitRoute section="cleanup" />
-            </Suspense>
-          }
-        />
-        <Route
-          path="git/branches"
-          element={
-            <Suspense fallback={<RepoGitLoading />}>
-              <RepoGitRoute section="branches" />
-            </Suspense>
-          }
-        />
-        <Route
-          path="git/changes"
-          element={
-            <Suspense fallback={<RepoGitLoading />}>
-              <RepoGitRoute section="changes" />
-            </Suspense>
-          }
-        />
-        {/* The GitHub tab (R6 Step 1.1): issues and PRs are separate list URLs, each item a
-            deep link. The nav item is forge-gated in the shell; the routes stay reachable so a
-            pasted link renders the honest unavailable explainer instead of a 404. The bare
-            `/github` is the one URL that restores the last-selected tab (#417) — `/github/prs`
-            and the `:n` deep links are always exactly what they say. */}
-        <Route
-          path="github"
-          element={
-            <Suspense fallback={<GithubLoading />}>
-              {/* `GithubRoute` itself, with `index`, rather than a wrapper component: React
-                  reconciles by element type, so any other type here would unmount the route on
-                  the hop to `github/issues/:n` and reset its search text — losing the very
-                  cross-state hit the user clicked (#730). The `prs` pair below already renders
-                  one type across its two paths, which is why it never had that bug. */}
-              <GithubRoute view="issues" index />
-            </Suspense>
-          }
-        />
-        <Route
-          path="github/prs"
-          element={
-            <Suspense fallback={<GithubLoading />}>
-              <GithubRoute view="prs" />
-            </Suspense>
-          }
-        />
-        <Route
-          path="github/issues/:n"
-          element={
-            <Suspense fallback={<GithubLoading />}>
-              <GithubRoute view="issues" />
-            </Suspense>
-          }
-        />
-        <Route
-          path="github/prs/:n"
-          element={
-            <Suspense fallback={<GithubLoading />}>
-              <GithubRoute view="prs" />
-            </Suspense>
-          }
-        />
-        <Route
-          path="github/prs/:n/changes"
-          element={
-            <Suspense fallback={<GithubLoading />}>
-              <GithubRoute view="prs" changes />
-            </Suspense>
-          }
-        />
-        <Route path="automations" element={<AutomationsRoute />} />
-        <Route path="automations/new" element={<AutomationsRoute mode="new" />} />
-        <Route path="automations/:automationId" element={<AutomationsRoute mode="edit" />} />
-        <Route path="automations/:automationId/log" element={<AutomationsRoute mode="log" />} />
-
-        {/* The skills catalog (R6 Step 1.4) — its own top-level surface, no settings sub-nav.
-            `/settings/skills` redirects here (below) so pasted links keep working. */}
-        <Route
-          path="skills"
-          element={
-            <Suspense fallback={<SkillsLoading />}>
-              <SkillsRoute />
-            </Suspense>
-          }
-        />
-
-        {/* The follow-up inbox (R6 Step 1.2): light — no markdown stack — so it rides the main
-            bundle like the overview does. */}
-        <Route path="inbox" element={<InboxRoute />} />
-
-        {/* The workflow builder (R6 Step 1.6): /workflows opens the canvas on the repo's first
-            saved chain, /workflows/:name deep-links a specific one. */}
-        <Route
-          path="workflows"
-          element={
-            <Suspense fallback={<WorkflowsLoading />}>
-              <WorkflowsRoute />
-            </Suspense>
-          }
-        />
-        <Route
-          path="workflows/:name"
-          element={
-            <Suspense fallback={<WorkflowsLoading />}>
-              <WorkflowsRoute />
-            </Suspense>
-          }
-        />
-
-        {/* Settings (R6 Step 1.3): registry-driven — the section list, nav and routes all come
-            from routes/settings/registry.tsx. Hidden sections are NOT routed, so their URLs are
-            honest 404s until the section ships (notifications unhides in Step 1.7).
-
-            Only the PROJECT-scoped sections live here (multi-project spec, step 3.5); the
-            global ones are the top-level `/settings/global/*` block below. */}
-        <Route path="settings" element={<SettingsIndexRoute capabilities={capabilities} />} />
-        <Route path="settings/skills" element={<SettingsSkillsRedirect />} />
-        {visibleSettingsSections('project', capabilities).map((section) => (
-          <Route
-            key={section.id}
-            path={`settings/${section.id}`}
-            element={<SettingsSectionRoute section={section} scope="project" capabilities={capabilities} />}
-          />
-        ))}
-        {/* A section that MOVED out of the project area keeps its old URL working: every
-            pre-3.5 bookmark and every legacy flat `/settings/appearance` (which the redirect
-            below turns into `/p/<boot>/settings/appearance`) lands on the global twin instead
-            of a 404 — query and hash intact across both hops. */}
-        {visibleSettingsSections('global', capabilities).map((section) => (
-          <Route
-            key={section.id}
-            path={`settings/${section.id}`}
-            element={<MovedSettingsSectionRedirect sectionId={section.id} />}
-          />
-        ))}
-
-        <Route path="*" element={<NotFoundRoute />} />
-      </Route>
+      {projectScopeRoute(capabilities)}
 
       {/* The global Tasks page — the second cockpit area outside `/p/:projectId`, and outside it
           for the same reason global settings are: "every project's tasks" scoped to one project

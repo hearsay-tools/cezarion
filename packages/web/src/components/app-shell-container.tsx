@@ -10,6 +10,7 @@ import { ListViewProvider } from '@/components/list-view'
 import { ProviderBannerContainer } from '@/components/provider-banner-container'
 import { SidebarProjectHeader } from '@/components/sidebar-project-header'
 import { ProjectRail } from '@/components/project-rail'
+import { useProjectSwitch } from '@/components/use-project-switch'
 import { useWorkspaceSignals } from '@/components/use-workspace-signals'
 import { TaskQuickListContainer } from '@/components/task-quick-list'
 import { ToolsMenu, forgeNote, toolsBlocker } from '@/components/tools-menu'
@@ -80,6 +81,7 @@ export function AppShellContainer({ children }: { children: ReactNode }) {
   // The registry and every project's counts, read once: the rail (md+) and the phone's menu button
   // and drawer paint from this one result.
   const workspace = useWorkspaceSignals()
+  const projectSwitch = useProjectSwitch()
   const titleContext = pageTitleContext(pathname)
   const bootProjectId = registry?.bootProject ?? health.data?.bootProject ?? null
   const sidebarProjectId = projectId ?? bootProjectId ?? 'default'
@@ -164,7 +166,7 @@ export function AppShellContainer({ children }: { children: ReactNode }) {
         needsYou={listCounts(runs.data ?? []).waiting > 0}
         toolsMenu={<ToolsMenu health={health.data} />}
         toolsStatus={health.data ? { blocked: toolsBlocker(health.data) !== null, note: forgeNote(health.data) } : null}
-        projectRail={workspace ? <ProjectRail {...workspace} version={shellHealth?.version ?? null} /> : null}
+        projectRail={workspace ? <ProjectRail {...workspace} projectTarget={projectSwitch.target} onSwitchProject={(id) => void projectSwitch.go(id)} version={shellHealth?.version ?? null} /> : null}
       >
         {children}
       </AppShell>

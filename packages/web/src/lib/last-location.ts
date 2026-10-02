@@ -139,3 +139,60 @@ export function sameLastLocation(left: unknown, right: WorkspaceLastLocation): b
     (parsed.hash ?? '') === (right.hash ?? '')
   )
 }
+
+/**
+ * Where each project's own last page lives: `{ [projectId]: location }`, in THIS browser.
+ *
+ * `cez-last-location` answers one question — where does a bare-root launch land — and holds only
+ * the single latest page. Switching projects asks a different one (where was I in THAT project),
+ * so it gets its own key and the bare-root key is untouched. Global pages never reach it:
+ * `locationToSave` only yields project-scoped, registered locations.
+ */
+export const PROJECT_LOCATIONS_STORAGE_KEY = 'cez-project-locations'
+
+function readProjectLocations(): Record<string, unknown> {
+  try {
+    const raw = localStorage.getItem(PROJECT_LOCATIONS_STORAGE_KEY)
+    const value: unknown = raw === null ? null : JSON.parse(raw)
+    return typeof value === 'object' && value !== null && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {}
+  } catch {
+    // Absent, private mode or hand-edited: no memories, and the next write replaces it.
+    return {}
+  }
+}
+
+/** One project's stored memory, unvalidated — `projectSwitchTarget` decides whether it is usable. */
+export function readStoredProjectLocation(projectId: string): unknown {
+  const entry = readProjectLocations()[projectId]
+  return entry === undefined ? null : entry
+}
+
+export function writeStoredProjectLocation(location: WorkspaceLastLocation): void {
+  try {
+    localStorage.setItem(
+      PROJECT_LOCATIONS_STORAGE_KEY,
+      JSON.stringify({ ...readProjectLocations(), [location.projectId]: location }),
+    )
+  } catch {
+    // Private mode / storage full — switching just lands on the project home.
+  }
+}
+
+/**
+ * The remembered page of `projectId` as a path, or null when there is nothing usable: no memory,
+ * corrupt storage, a page of another project, or a project that is gone or missing. This is the
+ * storage half of a project switch; whether the router actually serves the page, and whether its
+ * entity still exists, is `lib/project-switch.ts`.
+ */
+export function rememberedProjectPage(
+  projectId: string,
+  stored: unknown,
+  registry: ProjectsResponse | undefined,
+): string | null {
+  const saved = parsedLastLocation(stored)
+  if (saved === null || saved.projectId !== projectId) return null
+  if (registry === undefined || !projectIsUsable(projectId, registry)) return null
+  return `${saved.pathname}${saved.search ?? ''}${saved.hash ?? ''}`
+}

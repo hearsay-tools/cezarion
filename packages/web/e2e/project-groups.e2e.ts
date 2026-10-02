@@ -178,7 +178,8 @@ describe('the project sidebar in a multi-project workspace', () => {
     browser.goto(baseUrl + scoped(ALPHA.id, '/git'))
     assertProject(ALPHA.id, '/git')
     browser.click(mark(bootProject))
-    assertProject(bootProject, '/')
+    // #728: switching returns to the project's own last page, and boot was last on /git.
+    assertProject(bootProject, '/git')
   })
 
   it('ignores legacy collapse pins so the current project stays available after reload', ({ skip }) => {
