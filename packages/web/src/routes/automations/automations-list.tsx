@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { dayTime, relativeIn } from '@/lib/automation-format'
 import { Link } from '@/lib/project-router'
 import { cn } from '@/lib/utils'
+import { InlineLog } from './log'
 import { PageFrame, PageState } from './page-frame'
 
 /** What a card says under its actions: a progress word, a result, or a refusal. */
@@ -140,12 +141,6 @@ function AutomationCard({ automation, timeZone, note, busy, onRun, onToggle, onP
           </>
         ) : <span>Next run: —</span>}
       </p>
-      {automation.latestLog ? (
-        <p className="mt-1.5 text-[13px] break-words text-muted-foreground">
-          <span className="capitalize">{automation.latestLog.result.replace('-', ' ')}</span>
-          {automation.latestLog.reason ? <> · <span>{automation.latestLog.reason}</span></> : null}
-        </p>
-      ) : null}
       <div className="mt-4 flex flex-wrap gap-2">
         <Button variant="outline" asChild><Link to={`/automations/${automation.id}`}>Edit</Link></Button>
         <Button variant="outline" asChild><Link to={`/automations/${automation.id}/log`}>Execution log</Link></Button>
@@ -160,6 +155,7 @@ function AutomationCard({ automation, timeZone, note, busy, onRun, onToggle, onP
           {note.runId ? <> · <Link className="underline underline-offset-4" to={`/tasks/${note.runId}`}>Open task</Link></> : null}
         </p>
       ) : null}
+      <InlineLog automationId={automation.id} automationName={automation.name} timeZone={timeZone} />
     </li>
   )
 }
