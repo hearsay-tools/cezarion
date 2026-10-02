@@ -124,8 +124,8 @@ so adding a tool is one edit.
 - `RunRecord.previewServers?: Array<{ port, command, cwd?, label, path?, registeredAt,
   answeredAtRegistration }>`, optional so old files parse. `answeredAtRegistration` is one TCP probe
   at registration. It is a historical observation, never a promise that Open runs nothing.
-- Run events: `preview_server_registered` and `preview_server_state { port, state, exitCode?,
-  reason? }`, appended on transitions only (`starting`, `up`, `stalled`, `exited`, `stopped` with
+- Run events, dotted like the other cezar events: `preview.server-registered { server }` and
+  `preview.server-state { port, state, exitCode?, reason? }`, appended on transitions only (`starting`, `up`, `stalled`, `exited`, `stopped` with
   `reason: 'user' | 'idle'`). Probe attempts are never events; the attempt count reaches the pane over
   the WebSocket only. They keep the card current while the pane is closed and the history after the task ends. Frames
   never reach the event log.
@@ -138,8 +138,9 @@ so adding a tool is one edit.
 
 Under the task route, each its own component:
 
-- **Server card**: the row renderer for the `cezar_preview_serve` tool call, so the card sits at
-  the call that registered it. Shows label, port, the exact command, `cwd` when set, the state, and
+- **Server card**: a cezar thread entry reduced from the `preview.server-registered` and
+  `preview.server-state` run events (see "Decisions made while planning"). It renders where the
+  registration event lands, which is right after the `cezar_preview_serve` tool call. Shows label, port, the exact command, `cwd` when set, the state, and
   one next action. "Was running when registered" when `answeredAtRegistration`; such a card shows a neutral
   state, never "up", because cezar does not watch a port it does not own. Whenever the next
   click may run the command (Run and open, Start again), the card says so above the button. Stop
@@ -172,7 +173,7 @@ back, the pop-out route, a read-only second viewer, port detection.
 ## Data flow
 
 1. The agent calls `cezar_preview_serve`. The MCP process posts to the private tool route; cezar
-   validates, writes `previewServers`, appends `preview_server_registered`. The cockpit receives it
+   validates, writes `previewServers`, appends `preview.server-registered`. The cockpit receives it
    over SSE; the card and the header button appear.
 2. The owner clicks Open preview. The pane mounts and opens the WebSocket, then sends
    `open { target: { port } }`. The socket being open is the demand; no other open/stop route
@@ -184,7 +185,7 @@ back, the pop-out route, a read-only second viewer, port detection.
    into a silent spawn. The manager then waits for the port and ensures Chromium, streaming each
    step as a `state` message (5.6 to 5.10 and 5.16 to 5.17 render from these), navigates to
    `http://localhost:<port><path>` and starts the screencast.
-4. Dev-server transitions append `preview_server_state` events.
+4. Dev-server transitions append `preview.server-state` events.
 
 ## Lifecycle: states and what ends them
 
@@ -264,6 +265,23 @@ Each is a typed `state` message; the toolbar never moves.
 - **Package**: the tarball contains `dist/preview/`; with the flag unset no tool is listed.
 - **Manual, recorded in the PR**: one session through Traefik + Authelia including session expiry;
   the ubuntu-vps Basic Auth setup in Chrome, Safari and Firefox.
+
+## Decisions made while planning
+
+Settled while writing the implementation plan. They refine the sections above; where a section
+above still reads differently, this one wins.
+
+- **The server card is a cezar thread entry, not the tool-call row.** Five runners name MCP tool
+  calls five ways, so there is no one row to hang a renderer on. `thread-state.ts` already reduces
+  cezar run events (`webhook.failed`) into entries. Registration appends
+  `preview.server-registered`; state changes append `preview.server-state`. The card renders where
+  the registration event lands, right after the tool call.
+- **Event names follow the dotted convention**: `preview.server-registered { server }` and
+  `preview.server-state { port, state, exitCode?, reason? }`.
+- **Chrome for Testing publishes no linux-arm64 build.** On that platform 5.1 shows only the OS
+  install command and no Download button (`canDownload: false`).
+- **One `PreviewHost` per server process**, not per project. Ports are host-global, so `port_held`
+  must see every project's servers.
 
 ## Design deltas
 

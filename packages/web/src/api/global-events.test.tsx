@@ -1126,7 +1126,7 @@ describe('useGlobalEvents — provider status', () => {
     const health = {
       version: 'test', repoRoot: 'repo', repo: null, defaultRunner: 'claude', forge: null,
       projects: [], bootProject: BOOT,
-      capabilities: { localHandoff: false, followups: false, singleProject: false, automations: false, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true },
+      capabilities: { localHandoff: false, followups: false, singleProject: false, automations: false, preview: false, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true },
       checks: [{ name: 'cursor', available: true }],
     }
     client.removeQueries({ queryKey: queryKeys.health })
