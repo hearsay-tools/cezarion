@@ -140,7 +140,8 @@ Under the task route, each its own component:
 
 - **Server card**: the row renderer for the `cezar_preview_serve` tool call, so the card sits at
   the call that registered it. Shows label, port, the exact command, `cwd` when set, the state, and
-  one next action. "Was running when registered" when `answeredAtRegistration`. Whenever the next
+  one next action. "Was running when registered" when `answeredAtRegistration`; such a card shows a neutral
+  state, never "up", because cezar does not watch a port it does not own. Whenever the next
   click may run the command (Run and open, Start again), the card says so above the button. Stop
   is never on the card.
 - **Header toggle**: shown whenever `capabilities.preview` is on and the task has a worktree, so the
