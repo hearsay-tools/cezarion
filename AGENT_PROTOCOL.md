@@ -676,6 +676,10 @@ Bounds are implementation constants: four concurrent watchers and four short
 queries per shared supervisor; ten seconds per metadata/head/snapshot command,
 always bounded by the remaining deadline; at most 60 seconds discovering absent
 checks; three transient retries at 1/5/15 seconds within the original deadline.
+Check-status polling (`gh pr checks --watch --interval`) and periodic PR-head
+probes both use 30 seconds. The first observation still runs immediately. Those
+intervals do not stretch the ten-second command timeout, the 60-second discovery
+deadline, or the absolute wait deadline.
 Registered watcher queues retain their original deadlines. Capture is bounded to
 64 KiB per subprocess, with watch redraws discarded. Results contain at most 100
 rows (256-character names, 2,048-character links), 4 KiB sanitized diagnostics and

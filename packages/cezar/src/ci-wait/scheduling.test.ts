@@ -25,9 +25,29 @@ class ScriptedGithub extends GithubCiClient {
  override async watch(_pr:CiPrIdentity,signal:AbortSignal):Promise<void> {this.watchers++;this.active++;this.peak=Math.max(this.peak,this.active);try{await new Promise<void>(resolve=>{if(signal.aborted)resolve();else signal.addEventListener('abort',()=>resolve(),{once:true});});}finally{this.active--;}}
 }
 afterEach(()=>{for(const s of services.splice(0))s.close();for(const c of controllers.splice(0))c.abort();vi.useRealTimers();});
-it('discovers absent checks for sixty seconds and never reports them as passing',async()=>{
+it('discovers absent checks for sixty seconds at a thirty-second interval and never reports them as passing',async()=>{
  vi.useFakeTimers(); const github=new ScriptedGithub(); const {result}=start(github);
- await vi.advanceTimersByTimeAsync(60000); expect(await result).toMatchObject({outcome:'no_checks',totalChecks:0});expect(github.snapshots).toBe(7);
+ await vi.advanceTimersByTimeAsync(1); expect(github.snapshots).toBe(1);
+ await vi.advanceTimersByTimeAsync(10_000); expect(github.snapshots).toBe(1);
+ await vi.advanceTimersByTimeAsync(20_000); expect(github.snapshots).toBe(2);
+ await vi.advanceTimersByTimeAsync(30_000); expect(await result).toMatchObject({outcome:'no_checks',totalChecks:0}); expect(github.snapshots).toBe(3);
+});
+it('probes the PR head every thirty seconds while checks stay pending, not every ten',async()=>{
+ vi.useFakeTimers(); const github=new ScriptedGithub(); github.rows=[{name:'build',state:'PENDING',bucket:'pending',link:''}];
+ const started=start(github);
+ await vi.advanceTimersByTimeAsync(1); expect(github.headReads).toBe(2); expect(github.watchers).toBe(1);
+ await vi.advanceTimersByTimeAsync(10_000); expect(github.headReads).toBe(2);
+ await vi.advanceTimersByTimeAsync(20_000); expect(github.headReads).toBe(3);
+ started.controller.abort(); expect((await started.result).outcome).toBe('cancelled');
+});
+it('rechecks a stale watch completion after thirty seconds, not ten',async()=>{
+ vi.useFakeTimers(); const github=new ScriptedGithub(); github.rows=[{name:'build',state:'PENDING',bucket:'pending',link:''}];
+ github.watch=async()=>{github.watchers++;};
+ const started=start(github);
+ await vi.advanceTimersByTimeAsync(1); expect(github.snapshots).toBe(2); expect(github.watchers).toBe(1);
+ await vi.advanceTimersByTimeAsync(10_000); expect(github.snapshots).toBe(2);
+ await vi.advanceTimersByTimeAsync(20_000); expect(github.snapshots).toBe(4);
+ started.controller.abort(); expect((await started.result).outcome).toBe('cancelled');
 });
 it('retries three transient failures with 1/5/15 second backoff without model wakes',async()=>{
  vi.useFakeTimers();const github=new ScriptedGithub();github.failures=3;github.rows=[{name:'build',state:'SUCCESS',bucket:'pass',link:''}];const {result}=start(github);
@@ -41,7 +61,7 @@ it('settles persistent transient errors after the third retry',async()=>{
 });
 it('rejects head changes during snapshot attribution and during a running watch',async()=>{
  vi.useFakeTimers();const github=new ScriptedGithub();github.rows=[{name:'build',state:'PENDING',bucket:'pending',link:''}];github.changedAt=3;
- const {result}=start(github);await vi.advanceTimersByTimeAsync(10000);expect(await result).toMatchObject({outcome:'head_changed',observedHeadSha:'b'.repeat(40)});expect(github.active).toBe(0);
+ const {result}=start(github);await vi.advanceTimersByTimeAsync(30_000);expect(await result).toMatchObject({outcome:'head_changed',observedHeadSha:'b'.repeat(40)});expect(github.active).toBe(0);
  const racing=new ScriptedGithub();racing.rows=[{name:'build',state:'SUCCESS',bucket:'pass',link:''}];racing.changedAt=2;expect((await start(racing).result).outcome).toBe('head_changed');
 });
 it('keeps at most four watchers and starts the fifth only after an owned watcher exits',async()=>{
