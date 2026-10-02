@@ -227,9 +227,10 @@ export class DevServer extends EventEmitter {
  * Boot sweep: a crashed cezar leaves pid records behind. Kill a record's group only when its
  * leader is still the process we started (pid AND an exactly matching start token), so a reused
  * pid is never hit; a missing or unreadable token means skip.
- * The record goes either way. Returns how many groups were killed.
+ * The record goes either way, except one `keep` claims: a server the live host still runs.
+ * Returns how many groups were killed.
  */
-export async function sweepPreviewLeftovers(dataDir: string): Promise<number> {
+export async function sweepPreviewLeftovers(dataDir: string, opts: { keep?: (runId: string, port: number) => boolean } = {}): Promise<number> {
   const root = join(dataDir, 'preview');
   if (!existsSync(root)) return 0;
   const kills: Promise<void>[] = [];
@@ -237,6 +238,7 @@ export async function sweepPreviewLeftovers(dataDir: string): Promise<number> {
     if (!run.isDirectory()) continue;
     for (const file of readdirSync(join(root, run.name))) {
       if (!file.endsWith('.pid.json')) continue;
+      if (opts.keep?.(run.name, Number(file.slice(0, -'.pid.json'.length)))) continue;
       const path = join(root, run.name, file);
       let record: unknown;
       try { record = JSON.parse(readFileSync(path, 'utf8')); } catch { /* unreadable: nothing to kill */ }

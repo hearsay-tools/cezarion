@@ -80,13 +80,22 @@ export interface ProjectContextDeps {
   cezarPort?: () => number | undefined;
 }
 
+/** Data dirs this process has swept: the sweep cleans up after a crashed cezar, never this one. */
+const sweptPreviewDirs = new Set<string>();
+
 /**
  * A project's preview exits that the store drives (#781, spec 2026-10-02-live-preview-v1):
- * dev servers a crashed cezar left behind are swept (always, so turning the flag off after a
- * crash still cleans up), and a deleted run's preview is released with its profile.
+ * dev servers a crashed cezar left behind are swept once per data dir per process (always, so
+ * turning the flag off after a crash still cleans up; a project removed and re-added is not swept
+ * again, and a server the live host runs is spared either way), and a deleted run's preview is
+ * released with its profile.
  */
 export function armPreview(store: RunStore, dataDir: string, host: PreviewHost | undefined): void {
-  void sweepPreviewLeftovers(dataDir).catch(() => 0);
+  if (!sweptPreviewDirs.has(dataDir)) {
+    sweptPreviewDirs.add(dataDir);
+    const keep = host ? (runId: string, port: number) => host.ownsServer(runId, port) : undefined;
+    void sweepPreviewLeftovers(dataDir, { keep }).catch(() => 0);
+  }
   if (host) store.on('deleted', (runId: string) => void host.release(runId, { deleteProfile: true, dataDir }));
 }
 
@@ -213,10 +222,15 @@ export class ProjectContexts {
    * flushed to disk, every event-bus subscriber detached. Returns false when
    * nothing was built for `projectId`.
    */
-  dispose(projectId: string): boolean {
+  dispose(projectId: string, opts: { releasePreviews?: boolean } = {}): boolean {
     const ctx = this.contexts.get(projectId);
     if (!ctx) return false;
     this.contexts.delete(projectId);
+    // The preview host is process-wide and outlives this context: a removed project's dev servers
+    // and browsers go with it (#781). Shutdown leaves that to `PreviewHost.close()`.
+    if (opts.releasePreviews !== false && this.deps.preview) {
+      for (const run of ctx.store.listRuns()) void this.deps.preview.release(run.id).catch(() => undefined);
+    }
     this.repoHandleControllers.get(ctx.store)?.abort();
     this.repoHandleControllers.delete(ctx.store);
     this.managerCleanups.get(ctx.manager)?.();
@@ -227,7 +241,7 @@ export class ProjectContexts {
 
   /** Tear down every built context (process shutdown). */
   disposeAll(): void {
-    for (const id of this.ids()) this.dispose(id);
+    for (const id of this.ids()) this.dispose(id, { releasePreviews: false });
   }
 
   private async build(projectId: string): Promise<ProjectContext> {

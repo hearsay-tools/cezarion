@@ -258,6 +258,17 @@ describe('sweepPreviewLeftovers', () => {
     expect(existsSync(record)).toBe(false);
   });
 
+  it('never kills a group the live host still owns, and keeps its record (#781 review)', async () => {
+    const child = strayFixture();
+    const pid = child.pid!;
+    const record = writeRecord(root, 'run-live', 5179, { pid, pgid: pid, startToken: processStartToken(pid) });
+    const keep = vi.fn((runId: string, port: number) => runId === 'run-live' && port === 5179);
+    expect(await sweepPreviewLeftovers(root, { keep })).toBe(0);
+    expect(keep).toHaveBeenCalledWith('run-live', 5179);
+    expect(() => process.kill(pid, 0)).not.toThrow();
+    expect(existsSync(record)).toBe(true);
+  });
+
   it('skips a record whose startToken differs (a reused pid) but still deletes it', async () => {
     const child = strayFixture();
     const pid = child.pid!;

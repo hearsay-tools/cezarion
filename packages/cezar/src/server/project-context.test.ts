@@ -1,9 +1,12 @@
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { spawn, type ChildProcess } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AutomationStore } from '../automations/store.ts';
 import { emitUsageForTest } from '../core/process-usage.ts';
+import { processStartToken } from '../delegation/process-liveness.ts';
 import type { PreviewHost } from '../preview/host.ts';
 import { ProjectContextError, ProjectContexts, type ProjectContextSource } from './project-context.ts';
 
@@ -59,7 +62,7 @@ describe('ProjectContexts', () => {
   it('hands the workspace preview host to every lazily built manager and store (#781)', async () => {
     vi.stubEnv('CEZ_PREVIEW', '1');
     const release = vi.fn(async () => undefined);
-    const preview = { portOwner: () => undefined, probe: async () => false, release } as unknown as PreviewHost;
+    const preview = { portOwner: () => undefined, probe: async () => false, release, ownsServer: () => false } as unknown as PreviewHost;
     const contexts = new ProjectContexts({ listProjects: async () => [{ id: 'a', root: rootA, status: 'not-git' }], preview, cezarPort: () => 4321 });
     try {
       const ctx = await contexts.context('a');
@@ -74,6 +77,34 @@ describe('ProjectContexts', () => {
     } finally {
       contexts.disposeAll();
       vi.unstubAllEnvs();
+    }
+  });
+
+  it('releases a removed project\'s previews, and a rebuild never sweeps a server this process runs (#781)', async () => {
+    const fixture = fileURLToPath(new URL('../preview/__fixtures__/fake-dev-server.mjs', import.meta.url));
+    const child: ChildProcess = spawn(process.execPath, [fixture, '--port', '0', '--delay', '600000'], { detached: true, stdio: 'ignore' });
+    const release = vi.fn(async () => undefined);
+    const preview = { portOwner: () => undefined, probe: async () => false, release, ownsServer: () => false } as unknown as PreviewHost;
+    const contexts = new ProjectContexts({ listProjects: async () => [{ id: 'a', root: rootA, status: 'not-git' }], preview });
+    try {
+      const ctx = await contexts.context('a');
+      const run = ctx.store.createRun({ title: 't', workflow: 'quick-task', task: 't', steps: [] });
+      // A dev server this process started after the boot sweep: its pid record is on disk.
+      const dir = join(ctx.dataDir, 'preview', run.id);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, '5173.pid.json'), JSON.stringify({ pid: child.pid, pgid: child.pid, startToken: processStartToken(child.pid!) }));
+
+      expect(contexts.dispose('a')).toBe(true);
+      expect(release).toHaveBeenCalledWith(run.id);
+
+      await contexts.context('a');
+      await new Promise(resolve => setTimeout(resolve, 300));
+      expect(child.exitCode).toBeNull();
+      expect(child.signalCode).toBeNull();
+      expect(existsSync(join(dir, '5173.pid.json'))).toBe(true);
+    } finally {
+      contexts.disposeAll();
+      try { process.kill(-child.pid!, 'SIGKILL'); } catch { /* gone */ }
     }
   });
 

@@ -274,6 +274,11 @@ export class PreviewHost implements PreviewHostLike {
     return undefined;
   }
 
+  /** Whether this host runs the dev server `<runId>/<port>.pid.json` records: the sweep spares it. */
+  ownsServer(runId: string, port: number): boolean {
+    return live(this.entries.get(runId)?.servers.get(port));
+  }
+
   probe(port: number): Promise<boolean> {
     return this.deps.probe(port);
   }

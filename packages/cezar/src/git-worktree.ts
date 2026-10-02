@@ -323,19 +323,28 @@ export async function ownedCleanupProtection(repoRoot: string): Promise<{ paths:
   } catch { return { paths, branches, uncertain: true }; }
 }
 
+export type RemoveWorktreeOptions = {
+  reclaimOwnedDirectory?: boolean;
+  onlyClean?: boolean;
+  /** Runs once every check that can decline the removal has passed, right before git removes
+   *  the checkout (#781: the run's preview is released here). A declined removal never calls it. */
+  beforeRemove?: () => Promise<void>;
+};
+
 export async function removeWorktree(
   repoRoot: string,
   worktreePath: string,
   branch?: string,
-  opts?: { reclaimOwnedDirectory?: boolean; onlyClean?: boolean },
+  opts?: RemoveWorktreeOptions,
 ): Promise<void> {
   await withWorktreeMutation(repoRoot, git => removeWorktreeLocked(repoRoot, worktreePath, branch, opts, git)).catch(() => undefined);
 }
 
 async function removeWorktreeLocked(
   repoRoot: string, worktreePath: string, branch: string | undefined,
-  opts: { reclaimOwnedDirectory?: boolean; onlyClean?: boolean } | undefined, git: WorktreeGit,
+  opts: RemoveWorktreeOptions | undefined, git: WorktreeGit,
 ): Promise<void> {
+  const beforeRemove = () => opts?.beforeRemove?.().catch(() => undefined);
   const protection = await ownedCleanupProtection(repoRoot);
   // Directory-only retention (#575) may reclaim a finished owned-worker checkout
   // while keeping its branch and receipts. Unowned deletion still refuses owned
@@ -364,11 +373,17 @@ async function removeWorktreeLocked(
     if (!head.ok || !sha) return;
     const kept = await git(repoRoot, ['for-each-ref', '--contains', sha, '--count=1', '--format=%(refname)', 'refs/heads', 'refs/remotes']);
     if (!kept.ok || kept.stdout.trim() === '') return;
+    // The refusal git would give a dirty tree, read first so a declined removal costs nothing
+    // (`beforeRemove` stops the run's preview). git still has the last word at removal time.
+    const status = await git(worktreePath, ['status', '--porcelain']);
+    if (!status.ok || status.stdout.trim() !== '') return;
+    await beforeRemove();
     const removed = await git(repoRoot, ['worktree', 'remove', worktreePath]);
     if (!removed.ok) return;
     if (protection.paths.size === 0) await git(repoRoot, ['worktree', 'prune']);
     return;
   }
+  await beforeRemove();
   const removed = await git(repoRoot, ['worktree', 'remove', '--force', worktreePath]);
   // Owned-path reclaim must not `rm` a receipt path that is no longer a git
   // worktree — the directory may have been replaced with unrelated files.

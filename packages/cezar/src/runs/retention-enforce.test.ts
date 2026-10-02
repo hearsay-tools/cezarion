@@ -147,6 +147,35 @@ describe('reclaimWorktrees (real git, #483)', () => {
     expect(held.size).toBe(0); // released afterwards
   });
 
+  it('releases a preview only for a worktree it really removes, and before removing it (#781)', async () => {
+    const repo = await fixtureRepo();
+    const dirtyId = '33333333-3333-4333-8333-333333333333';
+    const cleanId = '44444444-4444-4444-8444-444444444444';
+    const keptId = '55555555-5555-4555-8555-555555555555';
+    const dirtyWt = await createWorktree(repo, dirtyId, 'main');
+    const cleanWt = await createWorktree(repo, cleanId, 'main');
+    const keptWt = await createWorktree(repo, keptId, 'main');
+    writeFileSync(join(dirtyWt.path, 'notes.txt'), 'uncommitted\n');
+    const store = fakeStore([
+      finishedRun(dirtyId, dirtyWt.path, '2026-07-01T00:00:00.000Z'),
+      finishedRun(cleanId, cleanWt.path, '2026-07-02T00:00:00.000Z'),
+      finishedRun(keptId, keptWt.path, '2026-07-09T00:00:00.000Z'),
+    ]);
+    const released: Array<{ runId: string; existed: boolean }> = [];
+    const previewHost = {
+      release: async (runId: string) => {
+        released.push({ runId, existed: existsSync(runId === cleanId ? cleanWt.path : dirtyWt.path) });
+      },
+    };
+
+    const reclaimed = await reclaimWorktrees(repo, store, 1, { previewHost });
+
+    expect(reclaimed).toEqual([cleanId]);
+    // The dirty checkout is declined: its directory stays, so its dev servers and pane stay too.
+    expect(existsSync(dirtyWt.path)).toBe(true);
+    expect(released).toEqual([{ runId: cleanId, existed: true }]);
+  });
+
   it('keep=0 reclaims nothing (unlimited)', async () => {
     const repo = await fixtureRepo();
     const id = '66666666-6666-4666-8666-666666666666';
