@@ -145,6 +145,9 @@ Under the task route, each its own component:
   no frames change, close) and the canvas stage with the states below. The empty state focuses the
   URL bar, expands a bare port to `localhost:<port>`, lists the task's registered servers and states
   the unsupported list once (copying out, file pickers, downloads).
+- **Input**: the canvas listens to Pointer Events, so a tap on a touch device (a phone cockpit) arrives
+  as a mouse click and a drag as a mouse drag. This is about the cockpit device; the page still sees
+  no touch emulation.
 - **Page dialogs**: alert, confirm and prompt drawn over the viewport, labelled with the page's
   origin.
 - Own error boundary: a pane crash never takes down the task view.
