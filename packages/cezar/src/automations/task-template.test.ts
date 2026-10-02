@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { RunStore } from '../runs/store.ts';
 import type { RunManager } from '../workflows/run.ts';
 import { launchAutomationRun, launchScheduledRun, rebaselineIdleAutomations, reconcileAutomationReceipts, renderAutomationTask, renderScheduleTask, validateAutomationPrompt } from './task-template.ts';
@@ -71,6 +71,30 @@ describe('automation task templates', () => {
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 
+  it('logs a retryable failed row for a reserved receipt no run ever claimed', async () => {
+    // A crash between the reservation and the run leaves `reserved`; reconcile turns it into
+    // `launch-error`, and the log must say so, or the occurrence vanishes without a Retry task.
+    const root = await mkdtemp(join(tmpdir(), 'cezar-reconcile-'));
+    try {
+      const dataDir = join(root, '.ai/cezar');
+      const runs = RunStore.open(dataDir);
+      const automations = AutomationStore.open(dataDir);
+      const key = `nightly:schedule:${occurrence.at}`;
+      automations.appendReceipt({ receiptId: 'lost', receiptKey: key, eventId: `schedule:${occurrence.at}`, automationId: 'nightly', revision: 2, status: 'reserved', occurrenceAt: occurrence.at, observedAt: occurrence.at, updatedAt: occurrence.at });
+      automations.appendReceipt({ receiptId: 'lost-poll', receiptKey: 'one:e', eventId: 'e', automationId: 'one', revision: 1, candidate, status: 'reserved', observedAt: occurrence.at, updatedAt: occurrence.at });
+      expect(reconcileAutomationReceipts(automations, runs)).toBe(2);
+      expect(automations.latestReceipts().get(key)).toMatchObject({ status: 'launch-error' });
+      await vi.waitFor(() => {
+        expect(automations.logs({ automationId: 'nightly' })).toEqual([
+          expect.objectContaining({ result: 'failed', receiptId: 'lost', revision: 2, reason: expect.stringContaining('Cezar restarted before run creation completed') }),
+        ]);
+        expect(automations.logs({ automationId: 'one' })).toEqual([
+          expect.objectContaining({ result: 'failed', receiptId: 'lost-poll', event: 'issue.opened', githubNumber: 7, githubUrl: candidate.url }),
+        ]);
+      });
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
   it('validates schedule placeholders by kind', () => {
     expect(validateAutomationPrompt('{{date}}', 'schedule')).toBeNull();
     expect(validateAutomationPrompt('{{time}} {{project}} {{automation}}', 'schedule')).toBeNull();
@@ -116,6 +140,27 @@ describe('automation task templates', () => {
       automations.appendReceipt({ receiptId: 'sched-receipt', receiptKey: key, eventId: `schedule:${occurrence.at}`, automationId: 'nightly', revision: 2, status: 'reserved', occurrenceAt: occurrence.at, observedAt: occurrence.at, updatedAt: occurrence.at });
       expect(reconcileAutomationReceipts(automations, runs)).toBe(1);
       expect(automations.latestReceipts().get(key)).toMatchObject({ status: 'launched', runId: run.id });
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  it('leaves a poll enabled minutes ago that has not polled yet, and brakes one never polled for weeks', async () => {
+    // Enabling writes `baselineAt` but no `lastSuccessAt`: a restart inside the first interval
+    // must not re-baseline it (dropping events since the enable) or push its first check out.
+    const root = await mkdtemp(join(tmpdir(), 'cezar-brake-'));
+    try {
+      const now = Date.parse('2026-10-02T08:00:00.000Z');
+      const automations = AutomationStore.open(root);
+      const recent = automations.create({ name: 'Recent', enabled: true, events: ['issue.opened'], intervalSeconds: 3_600, filters: { lookbackDays: 7, maxRecords: 25 }, task: { prompt: 'x' } }, 'recent');
+      const forgotten = automations.create({ name: 'Forgotten', enabled: true, events: ['issue.opened'], intervalSeconds: 300, filters: { lookbackDays: 7, maxRecords: 25 }, task: { prompt: 'x' } }, 'forgotten');
+      const enabledAt = new Date(now - 2 * 60_000).toISOString();
+      automations.setState(recent.id, (current) => ({ ...current, baselineAt: enabledAt, nextCheckAt: new Date(now + 58 * 60_000).toISOString() }));
+      automations.setState(forgotten.id, (current) => ({ ...current, baselineAt: new Date(now - 30 * DAY).toISOString() }));
+      const recentBefore = automations.state(recent.id);
+      expect(rebaselineIdleAutomations(automations, undefined, now)).toBe(1);
+      expect(automations.state(recent.id)).toEqual(recentBefore);
+      expect(automations.logs({ automationId: recent.id })).toEqual([]);
+      expect(automations.state(forgotten.id)?.baselineAt).toBe(new Date(now).toISOString());
+      expect(automations.logs({ automationId: forgotten.id })[0]).toMatchObject({ result: 'baseline', reason: expect.stringContaining('never polled successfully') });
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 

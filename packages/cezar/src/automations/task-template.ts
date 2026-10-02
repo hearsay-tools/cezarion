@@ -164,13 +164,28 @@ export function reconcileAutomationReceipts(automationStore: AutomationStore, ru
   for (const receipt of automationStore.latestReceipts().values()) {
     if (receipt.status !== 'reserved') continue;
     const runId = byReceipt.get(receipt.receiptId);
+    const error = 'Cezar restarted before run creation completed; explicit retry is available.';
     automationStore.appendReceipt({
       ...receipt,
       status: runId ? 'launched' : 'launch-error',
       runId,
-      error: runId ? undefined : 'Cezar restarted before run creation completed; explicit retry is available.',
+      error: runId ? undefined : error,
       updatedAt: new Date().toISOString(),
     });
+    // Without a row the lost occurrence is invisible: the next fire only logs `duplicate`, and
+    // "Retry task" keys on a `failed` row carrying the receipt. Best effort, as the brake's row:
+    // a busy log lock must not undo a reconciliation that already held.
+    if (!runId) {
+      const { candidate } = receipt;
+      void automationStore.appendLog({
+        automationId: receipt.automationId,
+        revision: receipt.revision,
+        result: 'failed',
+        reason: error,
+        receiptId: receipt.receiptId,
+        ...(candidate ? { event: candidate.event, githubNumber: candidate.number, githubTitle: candidate.title, githubUrl: candidate.url } : {}),
+      }).catch(() => undefined);
+    }
     reconciled++;
   }
   return reconciled;
@@ -197,8 +212,14 @@ export function rebaselineIdleAutomations(
     if (!definition.enabled || definition.kind !== 'github') continue;
     const state = automationStore.state(definition.id) ?? {};
     const lookbackMs = (definition.filters?.lookbackDays ?? 7) * 86_400_000;
+    // Idle since the last success, or — for a poll enabled but not yet due — since its enable
+    // baseline. Measuring a never-polled poll from nothing would re-baseline it on every restart
+    // inside its first interval, dropping the events since the enable (a deviation from upstream,
+    // which reads `lastSuccessAt` alone).
+    const referenceIso = state.lastSuccessAt ?? state.baselineAt;
+    const reference = referenceIso ? Date.parse(referenceIso) : Number.NaN;
+    if (Number.isFinite(reference) && now - reference <= lookbackMs) continue;
     const lastSuccess = state.lastSuccessAt ? Date.parse(state.lastSuccessAt) : Number.NaN;
-    if (Number.isFinite(lastSuccess) && now - lastSuccess <= lookbackMs) continue;
     const idleDays = Number.isFinite(lastSuccess) ? Math.round((now - lastSuccess) / 86_400_000) : undefined;
     const baselineAt = new Date(now).toISOString();
     automationStore.setState(definition.id, (current) => ({
