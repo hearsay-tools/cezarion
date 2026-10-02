@@ -35,6 +35,7 @@ import {
   repoPullInputSchema,
   deleteBranchesInputSchema,
   pinRunInputSchema,
+  archiveFinishedRequestSchema,
   notifyRunInputSchema,
   type TestProjectWebhookResponse,
   githubSearchQuerySchema,
@@ -3710,7 +3711,8 @@ export function createApp(deps: ServerDeps) {
 
     // Registered before the `/:id/...` routes so "archive-finished" and "read-all"
     // never match as a run id.
-    .post('/runs/archive-finished', (c) => c.json({ archived: c.get('project').store.archiveFinished() }))
+    .post('/runs/archive-finished', jsonZodValidator(archiveFinishedRequestSchema, { absent: {}, malformed: null }), (c) =>
+      c.json(c.get('project').store.archiveFinished(c.req.valid('json').scope)))
 
     // The read-receipt sweep (#unread-done-items) — the mark-read twin of the archive
     // sweep above, and under the same registration-order guard.

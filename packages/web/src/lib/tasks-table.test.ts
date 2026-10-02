@@ -13,6 +13,7 @@ import {
   isOwnRepoReference,
   prNumber,
   scheduledResume,
+  sweepableRunCount,
   taskReference,
   taskPrUrl,
   taskIssueUrl,
@@ -246,6 +247,48 @@ describe('finishedRunCount', () => {
         }),
       ]),
     ).toBe(1)
+  })
+})
+
+describe('sweepableRunCount / isSweepable', () => {
+  const worker = {
+    role: 'worker' as const,
+    permissions: [],
+    parentRunId: 'parent',
+    workspace: {
+      ownerRunId: 'w',
+      resourceId: 'w',
+      kind: 'owned-isolated' as const,
+      path: '/w',
+      branch: 'cez/w',
+      baselineSha: 'a'.repeat(40),
+    },
+  }
+  const fixture = () => [
+    run({ status: 'done' }),
+    run({ status: 'failed' }),
+    run({ status: 'cancelled' }),
+    run({ status: 'done', pinned: true }),
+    run({ status: 'running', pinned: true }),
+    run({ status: 'failed', autoResumeAt: '2026-10-03T10:00:00.000Z' }),
+    run({ status: 'failed', pinned: true, autoResumeAt: '2026-10-03T10:00:00.000Z' }),
+    run({ status: 'running' }),
+    run({ status: 'review' }),
+    run({ status: 'done', archived: true }),
+    run({ status: 'done', delegation: worker }),
+  ]
+
+  it.each([
+    ['unpinned' as const, 3],
+    ['pinned' as const, 1],
+    [undefined, 4],
+  ])('scope %s counts %i', (scope, expected) => {
+    expect(sweepableRunCount(fixture(), scope)).toBe(expected)
+  })
+
+  it('finishedRunCount is the unscoped sweep and skips scheduled runs', () => {
+    expect(finishedRunCount(fixture())).toBe(sweepableRunCount(fixture()))
+    expect(finishedRunCount([run({ status: 'failed', autoResumeAt: '2026-10-03T10:00:00.000Z' })])).toBe(0)
   })
 })
 

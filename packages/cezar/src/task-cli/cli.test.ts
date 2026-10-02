@@ -429,7 +429,7 @@ describe('cez task', () => {
       const active = await start('active');
       store.updateRun(finished, { status: 'done' });
       expect(await run(['archive-finished'])).toBe(0);
-      expect(last()).toEqual({ archived: 1 });
+      expect(last()).toEqual({ archived: 1, ids: [finished], pinnedIds: [] });
       expect(store.getRun(finished)?.archived).toBe(true);
       expect(store.getRun(active)?.archived).toBe(false);
     });

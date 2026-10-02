@@ -12,7 +12,7 @@ import { isOwnedWorker } from './task-groups'
  * Tasks table, the mobile card and the nav badge all read one answer and can never disagree.
  */
 
-/** The terminal statuses a *done item* can be — the sidebar's "Recent" set. */
+/** The terminal statuses a *done item* can be — the sidebar's "Finished" set. */
 const DONE_STATUSES: readonly RunRecord['status'][] = ['done', 'failed', 'cancelled']
 
 /** The subset that can carry an *unread* marker. Cancelled is excluded on purpose: you stopped
@@ -35,12 +35,12 @@ export type ReadStateInput = Pick<
  * (no unread marker, no nav-badge count) and no history to dim (not a read done item). The
  * status dot says `scheduled` for the same reason (`lib/attention.ts`).
  */
-function isScheduledResume(run: ReadStateInput): boolean {
+export function isScheduledResume(run: ReadStateInput): boolean {
   return run.status === 'failed' && run.autoResumeAt !== undefined
 }
 
 /** A finished run — done, failed, or cancelled. These are the rows the read/unread treatment
- *  applies to (the "Recent" bucket); everything else carries its live attention signal instead. */
+ *  applies to (the "Finished" bucket); everything else carries its live attention signal instead. */
 export function isDoneItem(status: RunRecord['status']): boolean {
   return DONE_STATUSES.includes(status)
 }

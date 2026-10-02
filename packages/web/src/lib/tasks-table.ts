@@ -1,4 +1,5 @@
-import type { ProcessUsage, RunRecord, RunStatus } from '@open-mercato/cezar-api-client'
+import type { ArchiveFinishedScope, ProcessUsage, RunRecord, RunStatus } from '@open-mercato/cezar-api-client'
+import { isScheduledResume } from '@/lib/read-state'
 import { groupTitle, isOwnedWorker, runTitle, type ListView } from '@/lib/task-groups'
 
 /**
@@ -101,12 +102,30 @@ export function filterRuns(runs: readonly RunRecord[], query: string): RunRecord
   )
 }
 
+/**
+ * Whether the sweep (`POST /runs/archive-finished`, `isSweepable` in `runs/store.ts`) would take
+ * this run, clause for clause: finished, not archived, not a scheduled resume, not an owned
+ * worker (those leave with their parent), and `scope` picks pinned or unpinned (absent = both).
+ */
+export function isSweepable(run: RunRecord, scope?: ArchiveFinishedScope): boolean {
+  if (run.archived || !FINISHED_STATUSES.has(run.status)) return false
+  if (isScheduledResume(run)) return false
+  if (isOwnedWorker(run)) return false
+  if (scope === 'unpinned') return !run.pinned
+  if (scope === 'pinned') return run.pinned === true
+  return true
+}
+
+/** How many runs the sweep would archive in `scope`. The sidebar's group buttons only exist when
+ *  this is nonzero — a broom over an empty floor is noise. */
+export function sweepableRunCount(runs: readonly RunRecord[], scope?: ArchiveFinishedScope): number {
+  return runs.filter((run) => isSweepable(run, scope)).length
+}
+
 /** How many active runs "Archive finished" would sweep. The button only exists when this is
  *  nonzero — a broom over an empty floor is noise (legacy showed the same count-gated button). */
 export function finishedRunCount(runs: readonly RunRecord[]): number {
-  return runs.filter(
-    (run) => !run.archived && FINISHED_STATUSES.has(run.status) && !isOwnedWorker(run),
-  ).length
+  return sweepableRunCount(runs)
 }
 
 /** A git remote as a GitHub web root (`https://github.com/owner/repo`) — the caller passes the

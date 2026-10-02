@@ -10,7 +10,9 @@ import { setApiScope } from '@open-mercato/cezar-api-client'
 import type { RunRecord } from '@open-mercato/cezar-api-client'
 import { ListViewProvider } from '@/components/list-view'
 import { ReferenceStatusProvider, ReferenceStatusRegistry } from '@/components/reference-status'
-import { SidebarSessionScope, TaskQuickList, TaskQuickListContainer } from '@/components/task-quick-list'
+import { QuickListBuckets, SidebarSessionScope, TaskQuickList, TaskQuickListContainer } from '@/components/task-quick-list'
+import { resetSwipeStore } from '@/components/use-swipe-to-archive'
+import { groupRuns } from '@/lib/task-groups'
 
 const NOW = Date.parse('2026-07-14T12:00:00.000Z')
 const ago = (ms: number) => new Date(NOW - ms).toISOString()
@@ -108,10 +110,10 @@ describe('TaskQuickList', () => {
     })
 
     const headers = [...document.querySelectorAll('[data-slot="quick-list-bucket"] h2')].map((h) => h.textContent)
-    expect(headers).toEqual(['Needs you 1', 'Pinned 1', 'Working 1', 'Recent 1'])
+    expect(headers).toEqual(['Needs you 1', 'Pinned 1', 'Working 1', 'Finished 1'])
     expect(rowsIn('Needs you')).toEqual(['Structured changes endpointneeds review · 1m'])
     expect(rowsIn('Working')).toEqual(['Normalize agent-event protocolrunning · 1m'])
-    expect(rowsIn('Recent')).toEqual(['README parallel-agents tagline1m'])
+    expect(rowsIn('Finished')).toEqual(['README parallel-agents tagline1m'])
   })
 
   it('links every row to its task', () => {
@@ -445,7 +447,7 @@ describe('TaskQuickList', () => {
 
       // Everything the row paints, in reading order: name and diff on line one; reference and
       // age on the meta line (a done row has no state word — its green dot says it).
-      expect(rowsIn('Recent')).toEqual(['implementing comment threads across the whole thread view+59,514 −12,160PR #775 · 1m'])
+      expect(rowsIn('Finished')).toEqual(['implementing comment threads across the whole thread view+59,514 −12,160PR #775 · 1m'])
     })
 
     it('lets the collapsed group title truncate before its ×N chip does', () => {
@@ -1906,5 +1908,302 @@ describe('notifying glyph and age-first overflow on the meta line (#729)', () =>
       expect(age('va')).toBeNull()
       expect(metaEl('va').textContent).toBe('needs you')
     })
+  })
+})
+
+describe('sidebar archive (#780)', () => {
+  afterEach(() => vi.unstubAllGlobals())
+  const archiveButtons = () => Array.from(document.querySelectorAll<HTMLElement>('[data-action="archive-run"]'))
+  const groupButton = (scope: string) => document.querySelector<HTMLElement>(`[data-action="archive-group"][data-scope="${scope}"]`)
+
+  it('puts the archive button on finished rows only, Finished and Pinned alike', () => {
+    renderList({
+      runs: [
+        run({ id: 'fin', title: 'Done one', status: 'done' }),
+        run({ id: 'pinned-fin', title: 'Pinned done', status: 'failed', pinned: true }),
+        run({ id: 'live', status: 'running' }),
+        run({ id: 'ask', status: 'waiting' }),
+        run({ id: 'sched', status: 'failed', autoResumeAt: new Date(NOW + 600_000).toISOString() }),
+        run({ id: 'pinned-live', status: 'running', pinned: true }),
+      ],
+      onTogglePin: vi.fn(),
+      onArchiveRun: vi.fn(),
+    })
+    expect(archiveButtons().map((b) => b.closest('[data-slot="task-row"]')?.getAttribute('data-run-id'))).toEqual(['pinned-fin', 'fin'])
+    const button = archiveButtons()[1]!
+    expect(button.tagName).toBe('BUTTON')
+    expect(button.getAttribute('aria-label')).toBe('Archive Done one')
+    expect(button.getAttribute('title')).toBe('Archive task')
+  })
+
+  it('keeps the trailing slot 16px and reveals the button like the pin', () => {
+    renderList({ runs: [run({ id: 'fin' })], onTogglePin: vi.fn(), onArchiveRun: vi.fn() })
+    const button = archiveButtons()[0]!
+    const slot = button.closest('[data-slot="task-row-trailing"]') as HTMLElement
+    expect(slot.className).toContain('w-[16px]')
+    expect(button.className).toContain('opacity-0')
+    expect(button.className).toContain('group-hover/task-row:opacity-100')
+    expect(button.className).toContain('group-has-[:focus-visible]/task-row:opacity-100')
+    // Beside the pin, never in place of it, and never over a line-1 target.
+    expect(slot.querySelector('[data-slot="pin-toggle"]')).not.toBeNull()
+  })
+
+  it('archives on click with no dialog and without opening the row', () => {
+    const onArchiveRun = vi.fn()
+    renderList({ runs: [run({ id: 'fin' })], onArchiveRun })
+    fireEvent.click(archiveButtons()[0]!)
+    expect(onArchiveRun).toHaveBeenCalledOnce()
+    expect(onArchiveRun.mock.calls[0]![0]).toMatchObject({ id: 'fin' })
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    expect(location()).toBe('/')
+  })
+
+  it('renders nothing where the swipe replaces the button', () => {
+    stubMedia({ noHover: true, desktop: false })
+    renderList({ runs: [run({ id: 'fin' })], onArchiveRun: vi.fn(), onSweep: vi.fn() })
+    expect(archiveButtons()).toHaveLength(0)
+  })
+
+  it('withholds the button in the Archived view and on variant group rows', () => {
+    const onArchiveRun = vi.fn()
+    renderList({ runs: [run({ id: 'old', archived: true })], view: 'archived', onArchiveRun, onSweep: vi.fn() })
+    expect(archiveButtons()).toHaveLength(0)
+    expect(document.querySelector('[data-action="archive-group"]')).toBeNull()
+    cleanup()
+    renderList({
+      runs: [
+        run({ id: 'v1', status: 'done', groupId: 'g', variant: 'A' }),
+        run({ id: 'v2', status: 'done', groupId: 'g', variant: 'B' }),
+      ],
+      onArchiveRun,
+    })
+    expect(document.querySelector('[data-slot="group-row"]')).not.toBeNull()
+    expect(document.querySelector('[data-slot="group-row"] [data-action="archive-run"]')).toBeNull()
+  })
+
+  it('shows "Archive all" on Finished only while it has rows, and sweeps unpinned', () => {
+    const onSweep = vi.fn()
+    renderList({ runs: [run({ id: 'a' }), run({ id: 'b', pinned: true })], onSweep, onTogglePin: vi.fn() })
+    const finished = document.querySelector('[data-bucket="Finished"]') as HTMLElement
+    const button = within(finished).getByRole('button', { name: 'Archive all' })
+    expect(button).toBe(groupButton('unpinned'))
+    // The heading's accessible name stays `Finished 1`; the button sits beside it.
+    expect(within(finished).getByRole('heading', { name: 'Finished 1' })).toBeTruthy()
+    fireEvent.click(button)
+    expect(onSweep).toHaveBeenCalledWith('unpinned')
+    cleanup()
+    renderList({ runs: [run({ id: 'live', status: 'running' })], onSweep })
+    expect(groupButton('unpinned')).toBeNull()
+  })
+
+  it('counts the whole unpinned set for "Archive all", rows the cap hides included', () => {
+    const runs = Array.from({ length: 6 }, (_, i) => run({ id: `f${i}`, createdAt: ago(60_000 + i) }))
+    renderList({ runs, rowLimit: 2, onSweep: vi.fn() })
+    expect(document.querySelectorAll('[data-bucket="Finished"] [data-slot="task-row"]')).toHaveLength(2)
+    expect(groupButton('unpinned')).not.toBeNull()
+  })
+
+  it('shows "Archive finished" on Pinned only while it holds a finished, non-scheduled row', () => {
+    const onSweep = vi.fn()
+    renderList({ runs: [run({ id: 'p1', pinned: true, status: 'done' }), run({ id: 'p2', pinned: true, status: 'running' })], onSweep, onTogglePin: vi.fn() })
+    const button = within(document.querySelector('[data-bucket="Pinned"]') as HTMLElement).getByRole('button', { name: 'Archive finished' })
+    expect(button).toBe(groupButton('pinned'))
+    fireEvent.click(button)
+    expect(onSweep).toHaveBeenCalledWith('pinned')
+    cleanup()
+    // Review Focus 3: a pinned run that is only waiting out a usage limit has nothing to sweep.
+    renderList({
+      runs: [
+        run({ id: 'p3', pinned: true, status: 'running' }),
+        run({ id: 'p4', pinned: true, status: 'failed', autoResumeAt: new Date(NOW + 600_000).toISOString() }),
+      ],
+      onSweep,
+    })
+    expect(document.querySelector('[data-bucket="Pinned"]')).not.toBeNull()
+    expect(groupButton('pinned')).toBeNull()
+  })
+
+  it('disables the running sweep with aria-busy', () => {
+    renderList({ runs: [run({ id: 'a' }), run({ id: 'b', pinned: true })], onSweep: vi.fn(), sweeping: 'unpinned' })
+    const busy = groupButton('unpinned') as HTMLButtonElement
+    expect(busy.disabled).toBe(true)
+    expect(busy.getAttribute('aria-busy')).toBe('true')
+    const other = groupButton('pinned') as HTMLButtonElement
+    expect(other.getAttribute('aria-busy')).toBeNull()
+  })
+
+  it('gives the group buttons a 44px target on touch', () => {
+    renderList({ runs: [run({ id: 'a' })], onSweep: vi.fn() })
+    const className = groupButton('unpinned')!.className
+    // A 44px hit area from a pseudo-element: the header keeps its natural height.
+    expect(className).toContain('max-md:before:h-11')
+    expect(className).toContain('no-hover:before:h-11')
+    expect(className).not.toContain('max-md:h-11')
+    const row = groupButton('unpinned')!.parentElement as HTMLElement
+    expect(row.className).not.toContain('min-h-11')
+  })
+
+  it('names the group button with its visible text first, then the project', () => {
+    renderList({ runs: [run({ id: 'a' })], onSweep: vi.fn() })
+    expect(groupButton('unpinned')!.getAttribute('aria-describedby')).toBe(
+      document.querySelector('[data-bucket="Finished"] h2')!.id,
+    )
+    cleanup()
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <MemoryRouter>
+          <QuickListBuckets buckets={groupRuns([run({ id: 'a' })], 'active')} sweepCounts={{ unpinned: 1, pinned: 0 }} onSweep={vi.fn()} projectName="shop" />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+    expect(groupButton('unpinned')!.getAttribute('aria-label')).toBe('Archive all, shop')
+  })
+})
+
+describe('swipe to archive on touch (#780 §7)', () => {
+  // Every gesture step is 300ms after the last: the swipes here are deliberate drags, never flings.
+  let clock = 0
+  beforeEach(() => {
+    clock = NOW
+    vi.spyOn(Date, 'now').mockImplementation(() => clock)
+    stubMedia({ noHover: true, desktop: false })
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      width: 320, height: 47, top: 0, left: 0, right: 320, bottom: 47, x: 0, y: 0, toJSON: () => ({}),
+    } as DOMRect)
+  })
+  afterEach(() => {
+    resetSwipeStore()
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+  })
+  const surface = (id: string) => document.querySelector<HTMLElement>(`[data-slot="task-row"][data-run-id="${id}"]`)?.closest<HTMLElement>('[data-slot="task-row-swipe"][data-swipe="on"]') ?? null
+  const layer = (id: string) => document.querySelector<HTMLElement>(`[data-slot="task-row"][data-run-id="${id}"]`)!
+  const action = (id: string) => surface(id)?.querySelector<HTMLElement>('[data-slot="task-row-swipe-action"]') ?? null
+  function swipe(id: string, dx: number, { release = true } = {}) {
+    const el = layer(id)
+    fireEvent.pointerDown(el, { pointerId: 1, clientX: 300, clientY: 20, button: 0 })
+    clock += 300
+    fireEvent.pointerMove(el, { pointerId: 1, clientX: 300 + Math.sign(dx) * 12, clientY: 20 })
+    clock += 300
+    fireEvent.pointerMove(el, { pointerId: 1, clientX: 300 + dx, clientY: 20 })
+    clock += 300
+    if (release) fireEvent.pointerUp(el, { pointerId: 1, clientX: 300 + dx, clientY: 20 })
+  }
+
+  it('wraps only finished, non-scheduled rows in a pan-y swipe surface', () => {
+    renderList({
+      runs: [
+        run({ id: 'fin', status: 'done' }),
+        run({ id: 'pin', status: 'cancelled', pinned: true }),
+        run({ id: 'live', status: 'running' }),
+        run({ id: 'ask', status: 'waiting' }),
+        run({ id: 'sched', status: 'failed', autoResumeAt: new Date(NOW + 600_000).toISOString() }),
+      ],
+      onArchiveRun: vi.fn(),
+      onTogglePin: vi.fn(),
+    })
+    expect(surface('fin')!.className).toContain('touch-pan-y')
+    expect(surface('fin')!.className).toContain('touch-pinch-zoom')
+    expect(surface('fin')!.className).toContain('overflow-hidden')
+    expect(surface('pin')).not.toBeNull()
+    for (const id of ['live', 'ask', 'sched']) expect(surface(id)).toBeNull()
+    // At rest nothing sits behind the row.
+    expect(action('fin')).toBeNull()
+  })
+
+  it('renders no swipe where the row button is used, nor without an archive handler', () => {
+    vi.unstubAllGlobals()
+    stubMedia({ noHover: false, desktop: true })
+    renderList({ runs: [run({ id: 'fin' })], onArchiveRun: vi.fn() })
+    expect(surface('fin')).toBeNull()
+    cleanup()
+    stubMedia({ noHover: true, desktop: false })
+    renderList({ runs: [run({ id: 'fin2' })] })
+    expect(surface('fin2')).toBeNull()
+  })
+
+  it('parks a short swipe on the Archive action, and tapping it archives', () => {
+    const onArchiveRun = vi.fn()
+    renderList({ runs: [run({ id: 'fin', title: 'Cursor fix' })], onArchiveRun })
+    swipe('fin', -50)
+    expect(layer('fin').style.transform).toBe('translateX(-88px)')
+    const button = action('fin')!.querySelector('button')!
+    expect(button.textContent).toBe('Archive')
+    expect(button.getAttribute('aria-label')).toBe('Archive Cursor fix')
+    expect(button.tabIndex).toBe(-1)
+    expect(action('fin')!.className).toContain('bg-muted')
+    fireEvent.click(button)
+    expect(onArchiveRun).toHaveBeenCalledOnce()
+    expect(onArchiveRun.mock.calls[0]![0]).toMatchObject({ id: 'fin' })
+    expect(location()).toBe('/')
+  })
+
+  it('a long swipe shows "Release to archive" in --info and archives on release', () => {
+    const onArchiveRun = vi.fn()
+    renderList({ runs: [run({ id: 'fin' })], onArchiveRun })
+    swipe('fin', -220, { release: false })
+    expect(action('fin')!.className).toContain('bg-info')
+    expect(action('fin')!.className).toContain('text-signal-ink')
+    expect(action('fin')!.textContent).toBe('Release to archive')
+    expect(onArchiveRun).not.toHaveBeenCalled()
+    fireEvent.pointerUp(layer('fin'), { pointerId: 1, clientX: 80, clientY: 20 })
+    expect(onArchiveRun).toHaveBeenCalledOnce()
+  })
+
+  it('a drag never opens the row, and the row stays one link for screen readers', () => {
+    renderList({ runs: [run({ id: 'fin', title: 'Only link' })], onArchiveRun: vi.fn() })
+    swipe('fin', -30)
+    fireEvent.click(within(layer('fin')).getByRole('link'))
+    expect(location()).toBe('/')
+    swipe('fin', -50)
+    expect(action('fin')!.getAttribute('aria-hidden')).toBe('true')
+    expect(within(surface('fin')!).getAllByRole('link')).toHaveLength(1)
+    expect(within(surface('fin')!).queryAllByRole('button')).toHaveLength(0)
+  })
+
+  it('snaps with a motion-safe 200ms transition, never while the finger drags', () => {
+    renderList({ runs: [run({ id: 'fin' })], onArchiveRun: vi.fn() })
+    expect(layer('fin').className).toContain('motion-safe:transition-transform')
+    expect(layer('fin').className).toContain('motion-safe:duration-200')
+    swipe('fin', -50, { release: false })
+    expect(layer('fin').className).not.toContain('motion-safe:transition-transform')
+    expect(layer('fin').style.transform).toBe('translateX(-50px)')
+  })
+
+  it('keeps the row mounted, and its link focused, when the run finishes', () => {
+    const client = createQueryClient()
+    const live = run({ id: 'flip', title: 'Flip', status: 'running', pinned: true })
+    const tree = (record: RunRecord) => (
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <TaskQuickList runs={[record]} view="active" now={NOW} onViewChange={vi.fn()} onArchiveRun={vi.fn()} onTogglePin={vi.fn()} />
+        </MemoryRouter>
+      </QueryClientProvider>
+    )
+    const { rerender } = render(tree(live))
+    const link = within(layer('flip')).getByRole('link')
+    link.focus()
+    expect(surface('flip')).toBeNull()
+    // Still Pinned, so the bucket does not change; only swipeability does.
+    rerender(tree({ ...live, status: 'done', finishedAt: ago(1_000) }))
+    expect(link.isConnected).toBe(true)
+    expect(document.activeElement).toBe(link)
+    expect(surface('flip')).not.toBeNull()
+  })
+
+  it('marks the link undraggable and the row unselectable while it swipes', () => {
+    renderList({ runs: [run({ id: 'fin' })], onArchiveRun: vi.fn() })
+    expect(within(layer('fin')).getByRole('link').getAttribute('draggable')).toBe('false')
+    expect(layer('fin').className).toContain('select-none')
+  })
+
+  it('keeps one row open at a time', () => {
+    renderList({ runs: [run({ id: 'a' }), run({ id: 'b' })], onArchiveRun: vi.fn() })
+    swipe('a', -50)
+    expect(action('a')).not.toBeNull()
+    swipe('b', -50)
+    expect(action('a')).toBeNull()
+    expect(layer('a').style.transform).toBe('')
+    expect(action('b')).not.toBeNull()
   })
 })

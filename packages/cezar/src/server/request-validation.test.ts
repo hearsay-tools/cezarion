@@ -178,6 +178,43 @@ describe('request validation bounds (#429)', () => {
     expect(res.status).toBe(400);
   });
 
+  // ---- archive-finished scope (#780) --------------------------------------------------------
+  it.each(['/api/v1/runs/archive-finished', '/api/v1/p/default/runs/archive-finished'])(
+    'archive-finished on %s: absent body sweeps, a scope narrows, an unknown scope is a 400',
+    async (path) => {
+      const mk = (pinned: boolean) => {
+        const run = store.createRun({ title: 't', workflow: 'w', task: 't', steps: [] });
+        store.updateRun(run.id, { status: 'done' });
+        if (pinned) store.setPinned(run.id, true);
+        return run.id;
+      };
+      const loose = mk(false);
+      const pinned = mk(true);
+
+      const bad = await postJson(path, { scope: 'nope' });
+      expect(bad.status).toBe(400);
+      expect(store.getRun(loose)?.archived).toBe(false);
+
+      const scoped = await postJson(path, { scope: 'pinned' });
+      expect(scoped.status).toBe(200);
+      expect(await scoped.json()).toEqual({ archived: 1, ids: [pinned], pinnedIds: [pinned] });
+
+      const mal = await apiRequest(app, path, {
+        method: 'POST', body: '{"scope":', headers: { 'content-type': 'application/json' },
+      });
+      expect(mal.status).toBe(400);
+
+      const unpinnedRes = await postJson(path, { scope: 'unpinned' });
+      expect(unpinnedRes.status).toBe(200);
+      expect(await unpinnedRes.json()).toEqual({ archived: 1, ids: [loose], pinnedIds: [] });
+      store.setArchived(loose, false);
+
+      const all = await apiRequest(app, path, { method: 'POST' });
+      expect(all.status).toBe(200);
+      expect(await all.json()).toEqual({ archived: 1, ids: [loose], pinnedIds: [] });
+    },
+  );
+
   // ---- pin schema (#935) — the archive route's twin, so the same three cases ---------------
   it('pins with no body, and answers the updated record', async () => {
     const run = store.createRun({ title: 't', workflow: 'w', task: 't', steps: [] });

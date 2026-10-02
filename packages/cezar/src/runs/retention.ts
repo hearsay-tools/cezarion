@@ -9,7 +9,7 @@ import { collectWorkerEvidence } from '../delegation/results.ts';
 import { createWorktree, removeWorktree } from '../git-worktree.ts';
 import type { RunRecord, RunStatus, RunStore } from './store.ts';
 
-/** The "finished" status set — mirrors `RunStore.archiveFinished`. A run at the
+/** The "finished" status set — mirrors the statuses `RunStore.archiveFinished` sweeps. A run at the
  *  `review` gate is deliberately excluded: it still needs its worktree to render
  *  the diff and open a draft PR, so reclaiming it would break the gate. */
 const FINISHED: ReadonlySet<RunStatus> = new Set<RunStatus>(['done', 'failed', 'cancelled']);

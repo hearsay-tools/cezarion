@@ -371,7 +371,7 @@ Every view is project-scoped:
 `<projectId>` is a slug derived from the folder name (`my-app`, then `my-app-2`
 on a collision), and `/p/default/…` always means the project cezar was started
 in. The desktop rail selects the project. Its sidebar shows the project header,
-view tabs and task list, with Needs you before Pinned, Working and Recent.
+view tabs and task list, with Needs you before Pinned, Working and Finished.
 Inbox and Automations appear in More views when enabled. The project menu
 offers Mark all read and project settings; local mode also offers Open in and
 Copy path. Active/Archived remains below the Tasks heading. The new-task
@@ -668,8 +668,8 @@ instead of starting a second. Also: `list`, `stop`, `finish`, `diff [--stat]`, `
 Use `archive <id>` to hide a task from `list`, `unarchive <id>` to restore it, and
 `list --all` to include archived tasks. `list` never shows owned workers, with or without
 `--all`: they are steer targets of their parent task. Id-addressed commands (`status`, `wait`,
-`send`, `log`, `stop`, …) still accept a worker's id. `archive-finished` sweeps finished tasks and prints
-`{"archived": count}`. The single-task commands print `{"id": "…", "archived": true|false}`.
+`send`, `log`, `stop`, …) still accept a worker's id. `archive-finished` sweeps finished tasks (not scheduled runs waiting on a usage limit, and not owned workers, which leave with their parent) and prints
+`{"archived": count, "ids": [...], "pinnedIds": [...]}`. The single-task commands print `{"id": "…", "archived": true|false}`.
 Exit codes:
 `0` ok (`wait`/`start --wait`: the task ended `done`/`review` or stopped for attention), `1` task
 failed/cancelled or a message was not delivered, `2` no cockpit or the cockpit refused (its `error`

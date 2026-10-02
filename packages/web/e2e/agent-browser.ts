@@ -701,6 +701,78 @@ export class AgentBrowser {
 
   /** Trusted wheel with explicit coordinates (the CLI wheel command uses 0,0). */
   async wheelAt(x: number, y: number, deltaY: number): Promise<void> {
+    await this.withPageSession(async (request) => {
+      await request('Input.dispatchMouseEvent', { type: 'mouseWheel', x, y, deltaX: 0, deltaY })
+    })
+  }
+
+  /** operation: interact (CDP `Input.dispatchTouchEvent`) — one finger down at `points[0]`, moved
+   *  through the rest `stepMs` apart, then lifted. Real touch input, not a mouse stand-in: the
+   *  browser applies `touch-action` to it, so a vertical drag over a `pan-y` surface scrolls its
+   *  container and fires `pointercancel` at the page, exactly as a phone does (#780 §7).
+   *
+   *  `whileDown` is an expression polled in the page after the last move and BEFORE the finger
+   *  lifts, until it yields something other than null/undefined/false — the only way to read a
+   *  state that exists only under a held finger. Its sample is returned. The finger lifts
+   *  whatever happens; if the expression never matches within 5s (a held finger cannot wait the
+   *  full default timeout), it fails the way `waitForValue` does: a failure bundle, then a
+   *  `WaitForValueError` naming the expression and its last sample. */
+  async touchDrag(
+    points: ReadonlyArray<{ x: number; y: number }>,
+    { stepMs = 40, whileDown }: { stepMs?: number; whileDown?: string } = {},
+  ): Promise<unknown> {
+    if (points.length < 2) throw new Error('touchDrag needs a start and at least one move')
+    const matched = (value: unknown) => value !== null && value !== undefined && value !== false
+    const outcome = await this.withPageSession(async (request) => {
+      const touch = (type: string, point?: { x: number; y: number }) =>
+        request('Input.dispatchTouchEvent', { type, touchPoints: point ? [{ x: Math.round(point.x), y: Math.round(point.y), id: 1 }] : [] })
+      const pause = () => new Promise((done) => setTimeout(done, stepMs))
+      let sample: unknown = null
+      let lastError: string | undefined
+      await touch('touchStart', points[0])
+      try {
+        for (const point of points.slice(1)) {
+          await pause()
+          await touch('touchMove', point)
+        }
+        if (whileDown) {
+          const deadline = Date.now() + 5000
+          for (;;) {
+            const { result, exceptionDetails } = await request('Runtime.evaluate', { expression: whileDown, returnByValue: true })
+            lastError = exceptionDetails ? String(exceptionDetails.exception?.description ?? exceptionDetails.text) : undefined
+            sample = exceptionDetails ? null : result?.value
+            if (matched(sample)) break
+            if (Date.now() > deadline) return { timedOut: true as const, sample, lastError }
+            await new Promise((done) => setTimeout(done, 50))
+          }
+        }
+      } finally {
+        await touch('touchEnd')
+      }
+      return { timedOut: false as const, sample, lastError }
+    })
+    if (whileDown && outcome.timedOut) {
+      const reason: FailureReason = {
+        kind: 'wait-value',
+        expression: whileDown,
+        lastValue: outcome.sample,
+        ...(outcome.lastError !== undefined ? { lastError: outcome.lastError } : {}),
+      }
+      const bundle = this.captureFailure(reason, new Error(`last value: ${summarize(outcome.sample)}`))
+      const last = outcome.lastError !== undefined ? `last error: ${outcome.lastError}` : `last value: ${summarize(outcome.sample)}`
+      throw new WaitForValueError(
+        `cezar e2e: value never matched under the held finger: ${whileDown} (${last}) (failure bundle: ${bundle})`,
+        whileDown,
+        outcome.sample,
+        bundle,
+      )
+    }
+    return outcome.sample
+  }
+
+  /** One flattened CDP session on this page for the duration of `fn` — for input the CLI has no
+   *  command for (wheel at a point, touch). */
+  private async withPageSession<T>(fn: (request: (method: string, params: object) => Promise<any>) => Promise<T>): Promise<T> {
     const { cdpUrl } = this.run(['get', 'cdp-url'])
     if (typeof cdpUrl !== 'string') throw new Error('agent-browser did not expose its CDP URL')
     const url = this.url()
@@ -730,8 +802,11 @@ export class AgentBrowser {
       const target = targetInfos.find((entry: { type: string; url: string }) => entry.type === 'page' && entry.url === url)
       if (!target) throw new Error(`No agent-browser page at ${url}`)
       const { sessionId } = await request('Target.attachToTarget', { targetId: target.targetId, flatten: true })
-      await request('Input.dispatchMouseEvent', { type: 'mouseWheel', x, y, deltaX: 0, deltaY }, sessionId)
-      await request('Target.detachFromTarget', { sessionId })
+      try {
+        return await fn((method, params) => request(method, params, sessionId))
+      } finally {
+        await request('Target.detachFromTarget', { sessionId })
+      }
     } finally {
       socket.close()
     }

@@ -1,7 +1,7 @@
-import { act, cleanup, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { Toaster, resetToasts, toast } from './toaster'
+import { ACTION_TOAST_MS, Toaster, resetToasts, toast } from './toaster'
 
 beforeEach(() => {
   vi.useFakeTimers()
@@ -105,5 +105,168 @@ describe('Toaster', () => {
     expect(screen.getByRole('status').getAttribute('data-state')).toBe('closed')
     act(() => vi.advanceTimersByTime(200))
     expect(document.querySelector('[data-slot="toast"]')).toBeNull()
+  })
+
+  it('renders no button and keeps the 5s lifetime without an action', () => {
+    render(<Toaster />)
+    act(() => toast('plain'))
+    expect(document.querySelector('[data-slot="toast-action"]')).toBeNull()
+    act(() => vi.advanceTimersByTime(5000))
+    expect(screen.getByRole('status').getAttribute('data-state')).toBe('closed')
+    act(() => vi.advanceTimersByTime(200))
+    expect(document.querySelector('[data-slot="toast"]')).toBeNull()
+  })
+
+  it('does not pause a plain toast on hover', () => {
+    render(<Toaster />)
+    act(() => toast('plain'))
+    act(() => vi.advanceTimersByTime(3000))
+    fireEvent.pointerEnter(screen.getByRole('status'))
+    act(() => vi.advanceTimersByTime(2000))
+    expect(screen.getByRole('status').getAttribute('data-state')).toBe('closed')
+  })
+
+  describe('with an action', () => {
+    const show = (onAction = vi.fn()) => {
+      render(<Toaster />)
+      act(() => toast('Archived "X"', { action: { label: 'Undo', onAction } }))
+      return onAction
+    }
+
+    it('lives 8s', () => {
+      show()
+      expect(ACTION_TOAST_MS).toBe(8000)
+      act(() => vi.advanceTimersByTime(7999))
+      expect(screen.getByRole('status').getAttribute('data-state')).toBe('open')
+      act(() => vi.advanceTimersByTime(1))
+      expect(screen.getByRole('status').getAttribute('data-state')).toBe('closed')
+    })
+
+    it('renders a real, tabbable button in the toast colour', () => {
+      show()
+      const button = document.querySelector<HTMLButtonElement>('[data-slot="toast-action"]')!
+      expect(button.tagName).toBe('BUTTON')
+      expect(button.getAttribute('type')).toBe('button')
+      expect(button.tabIndex).toBe(0)
+      expect(button.textContent).toBe('Undo')
+      expect(button.className).toContain('font-semibold')
+      expect(button.className).toContain('underline')
+      expect(button.className).toContain('text-inherit')
+    })
+
+    it('pauses while hovered and resumes with the remaining time', () => {
+      show()
+      const toastEl = screen.getByRole('status')
+      act(() => vi.advanceTimersByTime(3000))
+      fireEvent.pointerEnter(toastEl)
+      act(() => vi.advanceTimersByTime(17000))
+      expect(screen.getByRole('status').getAttribute('data-state')).toBe('open')
+      fireEvent.pointerLeave(toastEl)
+      act(() => vi.advanceTimersByTime(4999))
+      expect(screen.getByRole('status').getAttribute('data-state')).toBe('open')
+      act(() => vi.advanceTimersByTime(1))
+      expect(screen.getByRole('status').getAttribute('data-state')).toBe('closed')
+    })
+
+    it('pauses while the button holds focus', () => {
+      show()
+      const button = document.querySelector<HTMLButtonElement>('[data-slot="toast-action"]')!
+      act(() => vi.advanceTimersByTime(3000))
+      fireEvent.focusIn(button)
+      act(() => vi.advanceTimersByTime(17000))
+      expect(screen.getByRole('status').getAttribute('data-state')).toBe('open')
+      fireEvent.focusOut(button)
+      act(() => vi.advanceTimersByTime(4999))
+      expect(screen.getByRole('status').getAttribute('data-state')).toBe('open')
+      act(() => vi.advanceTimersByTime(1))
+      expect(screen.getByRole('status').getAttribute('data-state')).toBe('closed')
+    })
+
+    it('stays paused while focus remains after the pointer leaves', () => {
+      show()
+      const toastEl = screen.getByRole('status')
+      const button = document.querySelector<HTMLButtonElement>('[data-slot="toast-action"]')!
+      fireEvent.pointerEnter(toastEl)
+      fireEvent.focusIn(button)
+      fireEvent.pointerLeave(toastEl)
+      act(() => vi.advanceTimersByTime(20000))
+      expect(screen.getByRole('status').getAttribute('data-state')).toBe('open')
+    })
+
+    it('runs onAction once and starts the exit at once on click', () => {
+      const onAction = show()
+      fireEvent.click(document.querySelector('[data-slot="toast-action"]')!)
+      expect(onAction).toHaveBeenCalledTimes(1)
+      expect(screen.getByRole('status').getAttribute('data-state')).toBe('closed')
+      act(() => vi.advanceTimersByTime(200))
+      expect(document.querySelector('[data-slot="toast"]')).toBeNull()
+    })
+
+    it('ignores a second click and still dismisses when onAction throws', () => {
+      const onAction = vi.fn(() => {
+        throw new Error('boom')
+      })
+      show(onAction)
+      const swallow = (e: ErrorEvent) => e.preventDefault()
+      window.addEventListener('error', swallow)
+      const button = document.querySelector('[data-slot="toast-action"]')!
+      try {
+        fireEvent.click(button)
+      } catch {
+        // React rethrows handler errors; the toast must be dismissed regardless.
+      }
+      expect(screen.getByRole('status').getAttribute('data-state')).toBe('closed')
+      try {
+        fireEvent.click(button)
+      } catch {
+        // ignored
+      }
+      window.removeEventListener('error', swallow)
+      expect(onAction).toHaveBeenCalledTimes(1)
+    })
+
+    it('returns focus to where it came from when the clicked button held it', () => {
+      const trigger = document.createElement('button')
+      document.body.appendChild(trigger)
+      trigger.focus()
+      show()
+      const button = document.querySelector<HTMLButtonElement>('[data-slot="toast-action"]')!
+      fireEvent.focusIn(button, { relatedTarget: trigger })
+      button.focus()
+      expect(document.activeElement).toBe(button)
+      fireEvent.click(button)
+      expect(document.activeElement).toBe(trigger)
+      trigger.remove()
+    })
+
+    it('never moves focus into the toast, and skips a disconnected origin', () => {
+      const trigger = document.createElement('button')
+      document.body.appendChild(trigger)
+      show()
+      expect(document.activeElement).not.toBe(document.querySelector('[data-slot="toast-action"]'))
+      const button = document.querySelector<HTMLButtonElement>('[data-slot="toast-action"]')!
+      fireEvent.focusIn(button, { relatedTarget: trigger })
+      trigger.remove()
+      button.focus()
+      fireEvent.click(button)
+      act(() => vi.advanceTimersByTime(200))
+      expect(document.activeElement).toBe(document.body)
+    })
+
+    it('has a focus-visible ring on the action button', () => {
+      show()
+      const cls = document.querySelector('[data-slot="toast-action"]')!.className
+      expect(cls).toContain('focus-visible:outline-2')
+      expect(cls).toContain('focus-visible:outline-offset-2')
+      expect(cls).toContain('focus-visible:outline-current')
+      expect(cls).toContain('outline-none')
+    })
+
+    it('resetToasts clears paused timers', () => {
+      show()
+      fireEvent.pointerEnter(screen.getByRole('status'))
+      act(() => resetToasts())
+      expect(vi.getTimerCount()).toBe(0)
+    })
   })
 })

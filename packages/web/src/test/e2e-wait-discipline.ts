@@ -49,7 +49,7 @@ const excluded = new Set(['agent-browser.ts', 'fixture-server.ts', 'poll.ts', 'v
 
 /** An action: a seam interaction, or a contrast helper that performs one. */
 const action =
-  /(?:\b\w+\.(?:click|hover|fill|press|goto|setViewport|moveTo|dragTo|tapAt|wheel)\(|\b(?:applyContrastQaVariant|dismissWithEscape|focusWithKeyboard|hoverVisiblePoint)\()/
+  /(?:\b\w+\.(?:click|hover|fill|press|goto|setViewport|moveTo|dragTo|tapAt|touchDrag|wheel)\(|\b(?:applyContrastQaVariant|dismissWithEscape|focusWithKeyboard|hoverVisiblePoint)\()/
 /** A one-shot read asserted on directly. */
 const read = /\bexpect\(\(?\s*\w+\.(?:evaluate|count|isVisible|text|url)\(/
 /** Anything that blocks on a page condition between an action and a read. */

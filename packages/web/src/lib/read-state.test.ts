@@ -26,7 +26,7 @@ function done(over: Partial<ReadStateInput> = {}): ReadStateInput {
 }
 
 describe('isDoneItem', () => {
-  it('is true for the terminal statuses (the Recent bucket) and false for live ones', () => {
+  it('is true for the terminal statuses (the Finished bucket) and false for live ones', () => {
     const terminal: RunRecord['status'][] = ['done', 'failed', 'cancelled']
     const live: RunRecord['status'][] = ['queued', 'running', 'waiting', 'review']
     for (const status of terminal) expect(isDoneItem(status)).toBe(true)

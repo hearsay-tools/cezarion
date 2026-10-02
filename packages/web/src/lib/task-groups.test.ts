@@ -69,9 +69,9 @@ describe('bucketOf', () => {
     ['review', 'Needs you'],
     ['running', 'Working'],
     ['queued', 'Working'],
-    ['done', 'Recent'],
-    ['failed', 'Recent'],
-    ['cancelled', 'Recent'],
+    ['done', 'Finished'],
+    ['failed', 'Finished'],
+    ['cancelled', 'Finished'],
   ]
 
   it.each(cases)('%s → %s in the active view', (status, label) => {
@@ -86,13 +86,13 @@ describe('bucketOf', () => {
     expect(bucketOf(run({ status: 'running', activity: 'monitoring' }), 'active')).toBe('Working')
   })
 
-  it('a run waiting out a usage limit is Working, not Recent', () => {
+  it('a run waiting out a usage limit is Working, not Finished', () => {
     // Failed on the record, but it has an appointment to resume itself (spec
     // 2026-08-03-auto-resume-after-usage-limit) — it is work in flight, not an outcome. And it
     // asks for nothing, so never "Needs you".
     const scheduled = run({ status: 'failed', autoResumeAt: '2026-08-03T19:33:53.000Z' })
     expect(bucketOf(scheduled, 'active')).toBe('Working')
-    expect(bucketOf(run({ status: 'failed' }), 'active')).toBe('Recent')
+    expect(bucketOf(run({ status: 'failed' }), 'active')).toBe('Finished')
     // Archived still collapses everything, schedule or not.
     expect(bucketOf({ ...scheduled, archived: true }, 'archived')).toBe('Archived')
   })
@@ -281,14 +281,14 @@ describe('groupRuns', () => {
       run({ id: 'waiting', status: 'waiting' }),
       run({ id: 'running', status: 'running' }),
     ]
-    expect(shape(groupRuns(runs, 'active'))).toEqual(['Needs you: waiting', 'Working: running', 'Recent: done'])
+    expect(shape(groupRuns(runs, 'active'))).toEqual(['Needs you: waiting', 'Working: running', 'Finished: done'])
 
     // Nothing waiting → no "Needs you" header at all.
-    expect(shape(groupRuns([run({ id: 'done', status: 'done' })], 'active'))).toEqual(['Recent: done'])
+    expect(shape(groupRuns([run({ id: 'done', status: 'done' })], 'active'))).toEqual(['Finished: done'])
   })
 
   it('declares the bucket order it renders in', () => {
-    expect(BUCKET_ORDER).toEqual(['Needs you', 'Pinned', 'Working', 'Recent', 'Archived'])
+    expect(BUCKET_ORDER).toEqual(['Needs you', 'Pinned', 'Working', 'Finished', 'Archived'])
   })
 
   it('puts every archived run under one Archived bucket regardless of status', () => {
@@ -354,7 +354,7 @@ describe('groupRuns', () => {
     it('renders a lone survivor as a plain row, not a one-member group', () => {
       // What the "pick a winner" flow leaves behind: the winner keeps its groupId forever.
       const runs = group([{ id: 'winner', variant: 'A', status: 'done', title: 'Add autocomplete (A)' }])
-      expect(shape(groupRuns(runs, 'active'))).toEqual(['Recent: winner'])
+      expect(shape(groupRuns(runs, 'active'))).toEqual(['Finished: winner'])
     })
 
     it('does not pull members across the view filter', () => {
@@ -363,7 +363,7 @@ describe('groupRuns', () => {
         { id: 'b', variant: 'B', status: 'done', title: 'Add autocomplete (B)', archived: true },
       ])
       // One active member left → a plain row, and the archived one is not smuggled into its tile.
-      expect(shape(groupRuns(runs, 'active'))).toEqual(['Recent: a'])
+      expect(shape(groupRuns(runs, 'active'))).toEqual(['Finished: a'])
       expect(shape(groupRuns(runs, 'archived'))).toEqual(['Archived: b'])
     })
 
@@ -535,18 +535,18 @@ describe('pinned tasks (#935)', () => {
     })
 
     it('omits the bucket entirely when nothing is pinned', () => {
-      expect(shape(groupRuns([run({ id: 'done', status: 'done' })], 'active'))).toEqual(['Recent: done'])
+      expect(shape(groupRuns([run({ id: 'done', status: 'done' })], 'active'))).toEqual(['Finished: done'])
     })
 
     it('lifts a whole variant tile when any member is pinned', () => {
       // The existing best-ranked-member rule, applied to the new bucket: the tile moves as a
-      // unit rather than tearing in half across Pinned and Recent.
+      // unit rather than tearing in half across Pinned and Finished.
       const runs = [
         run({ id: 'a', groupId: 'g1', variant: 'A', status: 'done' }),
         pinned({ id: 'b', groupId: 'g1', variant: 'B', status: 'done' }),
         run({ id: 'other', status: 'done' }),
       ]
-      expect(shape(groupRuns(runs, 'active'))).toEqual(['Pinned: [AB]', 'Recent: other'])
+      expect(shape(groupRuns(runs, 'active'))).toEqual(['Pinned: [AB]', 'Finished: other'])
     })
   })
 
@@ -563,7 +563,7 @@ describe('pinned tasks (#935)', () => {
         [
           { label: 'Needs you', rows: bucketRows(2, 'n') },
           { label: 'Working', rows: bucketRows(3, 'w') },
-          { label: 'Recent', rows: bucketRows(4, 'r') },
+          { label: 'Finished', rows: bucketRows(4, 'r') },
         ],
         4,
       )
@@ -606,7 +606,7 @@ describe('pin promotion preserves visible variant membership (#93)', () => {
     const before = structuredClone(rows)
     expect(shape(capBuckets(groupRuns(rows, 'active'), 0))).toEqual(['Needs you: [ABC]', 'Pinned: single-pin'])
     const buckets = capBuckets(groupRuns(rows, 'active'), 10)
-    expect(buckets.map(({ label, rows }) => [label, rows.length])).toEqual([['Needs you', 1], ['Pinned', 1], ['Recent', 10]])
+    expect(buckets.map(({ label, rows }) => [label, rows.length])).toEqual([['Needs you', 1], ['Pinned', 1], ['Finished', 10]])
     const group = buckets[0]?.rows.find((row) => row.kind === 'group')
     expect(group?.kind).toBe('group')
     if (group?.kind !== 'group') throw new Error('missing group')
@@ -620,7 +620,7 @@ describe('pin promotion preserves visible variant membership (#93)', () => {
     const a = run({ id: 'a', groupId: 'g', variant: 'A', status: 'done' })
     const b = run({ id: 'b', groupId: 'g', variant: 'B', status: 'done', pinned: true, archived: true })
     const c = run({ id: 'c', groupId: 'g', variant: 'C', status: 'done' })
-    expect(shape(groupRuns([b, c, a], 'active'))).toEqual(['Recent: [AC]'])
+    expect(shape(groupRuns([b, c, a], 'active'))).toEqual(['Finished: [AC]'])
     expect(shape(groupRuns([b, c, a], 'archived'))).toEqual(['Archived: b'])
     expect(shape(groupRuns([b, { ...a, pinned: true }], 'active'))).toEqual(['Pinned: a'])
     expect(shape(capBuckets(groupRuns([b, { ...a, pinned: true }], 'active'), 0))).toEqual(['Pinned: a'])
@@ -665,7 +665,7 @@ describe('owned workers are not list rows (#312)', () => {
     const parent = run({ id: 'parent', archived: true })
     const child = ownedWorker({ id: 'child', pinned: true, pinnedAt: '2026-08-29T10:00:00.000Z' })
     const other = run({ id: 'other' })
-    expect(shape(groupRuns([parent, child, other], 'active'))).toEqual(['Recent: other'])
+    expect(shape(groupRuns([parent, child, other], 'active'))).toEqual(['Finished: other'])
     expect(shape(groupRuns([parent, child, other], 'archived'))).toEqual(['Archived: parent'])
   })
 
@@ -674,7 +674,7 @@ describe('owned workers are not list rows (#312)', () => {
       run({ id: 'a', groupId: 'g1', variant: 'A', title: 'Add autocomplete (A)' }),
       ownedWorker({ id: 'b', groupId: 'g1', variant: 'B', title: 'Add autocomplete (B)' }),
     ]
-    expect(shape(groupRuns(runs, 'active'))).toEqual(['Recent: a'])
+    expect(shape(groupRuns(runs, 'active'))).toEqual(['Finished: a'])
   })
 
   it('does not count workers in Active, Archived, or waiting', () => {

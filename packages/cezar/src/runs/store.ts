@@ -11,7 +11,7 @@ import {
   continuationMessageSchema,
   runRecordSchema as contractRunRecordSchema,
 } from '@open-mercato/cezar-contract';
-import type { CiWait, ConversationState, AgentInput, InboxClaim, DelegationState, WorkerCollectedResult } from '@open-mercato/cezar-contract';
+import type { ArchiveFinishedScope, CiWait, ConversationState, AgentInput, InboxClaim, DelegationState, WorkerCollectedResult } from '@open-mercato/cezar-contract';
 import { storedDelegationStateSchema } from './delegation-state.ts';
 import { refreshHumanAskSummary } from './human-ask-summary.ts';
 import { workerExecutionIdentitySchema, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
@@ -774,6 +774,19 @@ const recordedProcessSchema = z.object({ pid: z.number().int().positive(), start
 const workerProcessRecordSchema = z.object({ generation: z.string().uuid(), controller: recordedProcessSchema,
   processes: z.array(recordedProcessSchema).max(WORKER_PROCESS_CAP) }).strict();
 const startToken = (pid: number) => { const token = processStartToken(pid); return token === undefined ? {} : { startToken: token }; };
+
+/** The bulk-archive sweep's one predicate (#780): finished, not archived, not scheduled (a
+ *  `failed` run waiting out a usage limit), not an owned worker (those leave with their parent),
+ *  then filtered by pin state. Mirrored clause for clause by `isSweepable` in the cockpit's
+ *  `lib/tasks-table.ts`. */
+export function isSweepable(run: RunRecord, scope?: ArchiveFinishedScope): boolean {
+  if (run.archived || !['done', 'failed', 'cancelled'].includes(run.status)) return false;
+  if (run.status === 'failed' && run.autoResumeAt !== undefined) return false;
+  if (run.delegation?.role === 'worker') return false;
+  if (scope === 'unpinned') return !run.pinned;
+  if (scope === 'pinned') return run.pinned === true;
+  return true;
+}
 
 /**
  * File-backed run store: `runs.json` index (atomic tmp+rename writes, the
@@ -1631,20 +1644,23 @@ export class RunStore extends EventEmitter {
     return run;
   }
 
-  /** Bulk-archive every finished run; returns how many records flipped to archived. */
-  archiveFinished(): number {
-    let count = 0;
-    // Snapshot ids first: cascade may archive still-live workers, mutating the map view.
-    const finished = [...this.runs.values()]
-      .filter((run) => !run.archived && ['done', 'failed', 'cancelled'].includes(run.status))
-      .map((run) => run.id);
-    for (const id of finished) {
-      // Re-check: a prior cascade may already have archived this id as an owned worker.
+  /** Bulk-archive finished runs (#780). `isSweepable` decides which; `archived` counts every
+   *  record that flipped (cascaded workers included), `ids` lists the top-level runs picked and
+   *  `pinnedIds` the subset that carried a pin before `clearPin` dropped it. */
+  archiveFinished(scope?: ArchiveFinishedScope): { archived: number; ids: string[]; pinnedIds: string[] } {
+    let archived = 0;
+    // Snapshot first: cascade may archive still-live workers, mutating the map view, and the pin
+    // has to be read before `applyArchived` clears it.
+    const picked = [...this.runs.values()].filter((run) => isSweepable(run, scope));
+    const ids = picked.map((run) => run.id);
+    const pinnedIds = picked.filter((run) => run.pinned).map((run) => run.id);
+    for (const id of ids) {
+      // Re-check: a prior cascade may already have archived this id.
       const run = this.runs.get(id);
       if (!run || run.archived) continue;
-      count += this.applyArchivedCascade(run, true);
+      archived += this.applyArchivedCascade(run, true);
     }
-    return count;
+    return { archived, ids, pinnedIds };
   }
 
   /** Mark one run as read (#unread-done-items): stamp the read receipt now. Mirrors

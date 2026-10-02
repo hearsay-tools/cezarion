@@ -16,10 +16,10 @@ import type { RunRecord } from '@open-mercato/cezar-api-client'
 /** Active/Archived. The same type on both surfaces; each surface holds its own value. */
 export type ListView = 'active' | 'archived'
 
-export type BucketLabel = 'Pinned' | 'Needs you' | 'Working' | 'Recent' | 'Archived'
+export type BucketLabel = 'Pinned' | 'Needs you' | 'Working' | 'Finished' | 'Archived'
 
 /** Rendering order. Also the exhaustive set — `groupRuns` emits a subset of these, in this order. */
-export const BUCKET_ORDER: readonly BucketLabel[] = ['Needs you', 'Pinned', 'Working', 'Recent', 'Archived']
+export const BUCKET_ORDER: readonly BucketLabel[] = ['Needs you', 'Pinned', 'Working', 'Finished', 'Archived']
 
 /**
  * Sort weight per status: needs-you first, then the pipeline in the order it will actually
@@ -110,9 +110,9 @@ export function bucketOf(run: RunRecord, view: ListView): BucketLabel {
   if (run.status === 'running' || run.status === 'queued') return 'Working'
   // A run waiting out a provider usage limit is `failed` on the record but has an appointment to
   // resume itself (spec 2026-08-03-auto-resume-after-usage-limit) — it belongs with the work in
-  // flight, not filed under Recent as an outcome. It asks for nothing, so never "Needs you".
+  // flight, not filed under Finished as an outcome. It asks for nothing, so never "Needs you".
   if (run.status === 'failed' && run.autoResumeAt) return 'Working'
-  return 'Recent'
+  return 'Finished'
 }
 
 /**

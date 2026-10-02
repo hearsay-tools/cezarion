@@ -8,7 +8,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { stopFixtureServer } from './fixture-server'
 import { expectGroupRowHeightMatchesTaskRow } from './row-height'
-import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
+import { AgentBrowser, HOVER_POINTER_ARGS, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import {
   applyContrastQaVariant,
   contrastQaVariants,
@@ -228,8 +228,8 @@ describe('task quick-list', () => {
     )
   })
 
-  it('groups attention before recent outcomes while retaining independent status rows', () => {
-    expect(browser.evaluate(`[...document.querySelectorAll('[data-slot="quick-list-bucket"]')].map(h => h.dataset.bucket)`)).toEqual(['Needs you', 'Recent'])
+  it('groups attention before finished outcomes while retaining independent status rows', () => {
+    expect(browser.evaluate(`[...document.querySelectorAll('[data-slot="quick-list-bucket"]')].map(h => h.dataset.bucket)`)).toEqual(['Needs you', 'Finished'])
     expect(browser.evaluate(`[...document.querySelectorAll('[data-slot="quick-list-bucket"] [data-slot="task-row"]')].map(row => row.dataset.runId)`)).toEqual(['fix-review-pr', 'fix-done', 'fix-failed'])
     expect(browser.count('[data-slot="quick-list-bucket"] [data-slot="group-tile"]')).toBe(1)
     expect(browser.text('[data-slot="quick-list-bucket"]')).toContain('Structured changes endpoint for the git view')
@@ -1668,5 +1668,361 @@ describe('persistent task pins (#93)', () => {
     const unpinned = await (await fetch(`${baseUrl}/api/v1/runs/fix-var-b`)).json()
     expect(unpinned).not.toHaveProperty('pinned')
     expect(unpinned).not.toHaveProperty('pinnedAt')
+  })
+})
+
+describe('archive from the sidebar (#780)', () => {
+  // Its own browser: the row button only exists where the primary pointer can hover, and headless
+  // Chrome reports `(hover: none)` unless it is launched with the flag (see selection-states).
+  const originalArgs = process.env.AGENT_BROWSER_ARGS
+  let browser: AgentBrowser
+  let archiveServer: ChildProcess
+  let archiveRoot: string
+  let archiveUrl: string
+  let archiveProject: string
+  const archiveScoped = (path: string) => `/p/${archiveProject}${path}`
+  const finishedRun = (id: string, title: string, minutesAgo: number, extra: Record<string, unknown> = {}) => ({
+    id,
+    title,
+    workflow: 'default',
+    task: title,
+    status: 'done',
+    createdAt: ago((minutesAgo + 5) * 60_000),
+    finishedAt: ago(minutesAgo * 60_000),
+    tokensUsed: 1_000,
+    archived: false,
+    steps: [],
+    ...extra,
+  })
+  const ARCHIVE_FIXTURE = [
+    finishedRun('arc-a', 'Tidy the release notes', 10),
+    finishedRun('arc-b', 'Rename the config loader', 20),
+    finishedRun('arc-pinned', 'Pinned and finished', 30, { pinned: true, pinnedAt: ago(5 * 60_000) }),
+    finishedRun('arc-scheduled', 'Waiting out a usage limit', 40, { status: 'failed', autoResumeAt: new Date(Date.now() + 86_400_000).toISOString() }),
+  ]
+  const rowSel = (id: string) => `${ROW}[data-run-id="${id}"]`
+  const archiveBtn = (id: string) => `${rowSel(id)} [data-action="archive-run"]`
+  const toastText = () => browser.evaluate(`document.querySelector('[data-slot="toast"]')?.textContent ?? null`)
+  const ids = (bucket: string) =>
+    browser.evaluate(`[...document.querySelectorAll('[data-bucket="${bucket}"] ${ROW}')].map((row) => row.dataset.runId)`) as string[]
+  const stored = async (id: string) =>
+    ((await (await fetch(`${archiveUrl}/api/v1/runs/${id}`)).json()) as { archived?: boolean; pinned?: boolean; autoResumeAt?: string })
+
+  beforeAll(async () => {
+    process.env.AGENT_BROWSER_ARGS = [originalArgs, ...HOVER_POINTER_ARGS].filter(Boolean).join(',')
+    browser = AgentBrowser.open(`${runId}-archive`)
+    archiveRoot = mkdtempSync(join(tmpdir(), 'cezar-e2e-archive-'))
+    mkdirSync(join(archiveRoot, '.ai/cezar'), { recursive: true })
+    writeFileSync(join(archiveRoot, '.ai/cezar/runs.json'), JSON.stringify(ARCHIVE_FIXTURE, null, 2), 'utf8')
+    const port = await freePort()
+    archiveUrl = `http://localhost:${port}`
+    archiveServer = spawn(process.execPath, [cezarCli, 'serve', '--repo', archiveRoot, '--port', String(port), '--no-open'], {
+      env: fixtureServeEnv(archiveRoot),
+      stdio: 'ignore',
+    })
+    await waitForHealth(archiveUrl)
+    archiveProject = await bootProjectId(archiveUrl)
+  }, 60_000)
+
+  afterAll(async () => {
+    browser?.close()
+    if (originalArgs === undefined) delete process.env.AGENT_BROWSER_ARGS
+    else process.env.AGENT_BROWSER_ARGS = originalArgs
+    await stopFixtureServer(archiveServer)
+    if (archiveRoot) rmSync(archiveRoot, { recursive: true, force: true })
+  })
+
+  beforeEach(() => {
+    browser.setViewport(1440, 900)
+    browser.goto(`${archiveUrl}${archiveScoped('/')}`)
+    browser.waitForFunction(`document.querySelector('${rowSel('arc-a')}') !== null`)
+  })
+
+  it('reveals the row button without moving the title or the row, and leaves Working rows without one', () => {
+    const measure = `(() => {
+      const row = document.querySelector('${rowSel('arc-a')}')
+      const button = row.querySelector('[data-action="archive-run"]')
+      return {
+        opacity: button ? getComputedStyle(button).opacity : null,
+        title: row.querySelector('[data-slot="task-row-title"]').getBoundingClientRect().width,
+        height: row.getBoundingClientRect().height,
+      }
+    })()`
+    const rest = browser.waitForValue<{ opacity: string; title: number; height: number }>(measure, (s) => s.opacity === '0')
+    browser.hover(rowSel('arc-a'))
+    const hovered = browser.waitForValue<{ opacity: string; title: number; height: number }>(measure, (s) => s.opacity === '1')
+    expect(hovered.title).toBe(rest.title)
+    expect(hovered.height).toBe(rest.height)
+    // A scheduled run is archivable from its thread only.
+    expect(browser.count(archiveBtn('arc-scheduled'))).toBe(0)
+    expect(browser.count(archiveBtn('arc-a'))).toBe(1)
+  })
+
+  it('archives on click with no dialog, offers Undo, and Undo puts the row back', async () => {
+    browser.hover(rowSel('arc-b'))
+    browser.click(archiveBtn('arc-b'))
+    browser.waitForFunction(`document.querySelector('${rowSel('arc-b')}') === null`)
+    expect(browser.count('[role="alertdialog"]')).toBe(0)
+    expect(browser.waitForValue(`document.querySelector('[data-slot="toast"]')?.textContent ?? null`)).toContain('Archived "Rename the config loader"')
+    expect((await stored('arc-b')).archived).toBe(true)
+    browser.click('[data-slot="toast-action"]')
+    browser.waitForFunction(`document.querySelector('[data-bucket="Finished"] ${rowSel('arc-b')}') !== null`)
+    expect((await stored('arc-b')).archived).toBeFalsy()
+  })
+
+  it('brings a pinned row back pinned, under Pinned', async () => {
+    expect(ids('Pinned')).toEqual(['arc-pinned'])
+    browser.hover(rowSel('arc-pinned'))
+    browser.click(archiveBtn('arc-pinned'))
+    browser.waitForFunction(`document.querySelector('${rowSel('arc-pinned')}') === null`)
+    browser.click('[data-slot="toast-action"]')
+    browser.waitForFunction(`document.querySelector('[data-bucket="Pinned"] ${rowSel('arc-pinned')}') !== null`)
+    const back = await stored('arc-pinned')
+    expect(back.archived).toBeFalsy()
+    expect(back.pinned).toBe(true)
+  })
+
+  it('"Archive all" takes the Finished rows only, and Undo restores them', async () => {
+    browser.click('[data-action="archive-group"][data-scope="unpinned"]')
+    browser.waitForFunction(`document.querySelector('[data-bucket="Finished"]') === null`)
+    expect(browser.waitForValue(`document.querySelector('[data-slot="toast"]')?.textContent ?? null`)).toContain('Archived 2 tasks')
+    // Pinned is untouched, and so is the scheduled run (it sits in Working and keeps its resume).
+    expect(ids('Pinned')).toEqual(['arc-pinned'])
+    expect((await stored('arc-scheduled')).archived).toBeFalsy()
+    expect((await stored('arc-scheduled')).autoResumeAt).toBeTruthy()
+    browser.click('[data-slot="toast-action"]')
+    browser.waitForFunction(`document.querySelectorAll('[data-bucket="Finished"] ${ROW}').length === 2`)
+  })
+
+  it('"Archive finished" on Pinned takes the pinned finished row and comes back pinned on Undo', async () => {
+    browser.click('[data-action="archive-group"][data-scope="pinned"]')
+    browser.waitForFunction(`document.querySelector('[data-bucket="Pinned"]') === null`)
+    expect(browser.waitForValue(`document.querySelector('[data-slot="toast"]')?.textContent ?? null`)).toContain('Archived 1 task')
+    browser.click('[data-slot="toast-action"]')
+    browser.waitForFunction(`document.querySelector('[data-bucket="Pinned"] ${rowSel('arc-pinned')}') !== null`)
+    expect((await stored('arc-pinned')).pinned).toBe(true)
+  })
+
+  it('keeps the row button and both group buttons readable, at rest and hovered, in both themes', () => {
+    try {
+      for (const variant of contrastQaVariants.filter(({ viewport }) => viewport.width === 1440)) {
+        applyContrastQaVariant(browser, variant)
+        browser.hover(rowSel('arc-a'))
+        browser.waitForValue(`getComputedStyle(document.querySelector('${archiveBtn('arc-a')}')).opacity`, (v) => v === '1')
+        const icon = browser.evaluate(contrastSampleExpression(`${archiveBtn('arc-a')} svg`, 'color', 'parent')) as ContrastSample
+        expect(icon.ratio, `${variant.id} row button: ${icon.foreground} on ${icon.background}`).toBeGreaterThanOrEqual(3)
+        for (const scope of ['unpinned', 'pinned']) {
+          const group = `[data-action="archive-group"][data-scope="${scope}"]`
+          browser.moveTo(0, 0)
+          const rest = browser.evaluate(contrastSampleExpression(group, 'color', 'parent')) as ContrastSample
+          expect(rest.ratio, `${variant.id} ${scope} rest: ${rest.foreground} on ${rest.background}`).toBeGreaterThanOrEqual(4.5)
+          browser.hover(group)
+          const hovered = browser.waitForValue<ContrastSample>(
+            contrastSampleExpression(group),
+            (sample) => sample.background !== rest.background,
+          )
+          expect(hovered.ratio, `${variant.id} ${scope} hover: ${hovered.foreground} on ${hovered.background}`).toBeGreaterThanOrEqual(4.5)
+        }
+      }
+    } finally {
+      restoreContrastQaDefaults(browser)
+    }
+  })
+})
+
+describe('swipe to archive on touch (#780 §7)', () => {
+  // The default browser: headless Chrome reports `(hover: none)`, which at desktop width is the
+  // touch path (`useRowReferencesInert`) where the swipe replaces the row button. Input is real
+  // CDP touch (`touchDrag`), so `touch-action: pan-y` and the browser's own panning apply.
+  let browser: AgentBrowser
+  let swipeServer: ChildProcess
+  let swipeRoot: string
+  let swipeUrl: string
+  let swipeProject: string
+  const swipeRun = (id: string, title: string, minutesAgo: number, extra: Record<string, unknown> = {}) => ({
+    id,
+    title,
+    workflow: 'default',
+    task: title,
+    status: 'done',
+    createdAt: ago((minutesAgo + 5) * 60_000),
+    finishedAt: ago(minutesAgo * 60_000),
+    tokensUsed: 1_000,
+    archived: false,
+    steps: [],
+    ...extra,
+  })
+  // Enough finished rows that the sidebar scrolls at 500px tall.
+  const SWIPE_FIXTURE = [
+    // Not finished as far as the sidebar is concerned: it sits in Working, waiting out a usage
+    // limit. (A `running` record would not survive the store's boot-time reconcile.)
+    swipeRun('sw-live', 'Waiting out a usage limit', 1, { status: 'failed', autoResumeAt: new Date(Date.now() + 86_400_000).toISOString() }),
+    ...Array.from({ length: 10 }, (_, i) => swipeRun(`sw-${i}`, `Finished task ${i}`, 10 + i)),
+  ]
+  const rowSel = (id: string) => `${ROW}[data-run-id="${id}"]`
+  const SWIPE = '[data-slot="task-row-swipe"][data-swipe="on"]'
+  const actionSel = (id: string) => `${SWIPE}:has(> ${rowSel(id)}) [data-slot="task-row-swipe-action"]`
+  const stored = async (id: string) => ((await (await fetch(`${swipeUrl}/api/v1/runs/${id}`)).json()) as { archived?: boolean })
+  /** The row's box, scrolled into view and settled (no running finite animation: a running
+   *  row's status dot pulses forever), read in one step. */
+  const box = (id: string) =>
+    browser.waitForValue<{ left: number; right: number; top: number; bottom: number; cy: number; width: number }>(`(() => {
+      const row = document.querySelector('${rowSel(id)}')
+      if (!row || row.getAnimations({ subtree: true }).some((a) => a.playState === 'running' && a.effect?.getComputedTiming().iterations !== Infinity)) return null
+      row.scrollIntoView({ block: 'nearest' })
+      const r = row.getBoundingClientRect()
+      return r.bottom <= innerHeight && r.top >= 0 ? { left: r.left, right: r.right, top: r.top, bottom: r.bottom, cy: r.top + r.height / 2, width: r.width } : null
+    })()`)
+  /** A left swipe from near the row's right edge by `dx` px, in `steps` moves `stepMs` apart. */
+  const leftSwipe = (r: { right: number; cy: number }, dx: number, opts: { steps?: number; stepMs?: number; whileDown?: string } = {}) => {
+    const steps = opts.steps ?? 6
+    const start = { x: r.right - 12, y: r.cy }
+    return browser.touchDrag(
+      [start, ...Array.from({ length: steps }, (_, i) => ({ x: start.x - (dx * (i + 1)) / steps, y: r.cy }))],
+      { stepMs: opts.stepMs ?? 150, whileDown: opts.whileDown },
+    )
+  }
+
+  beforeAll(async () => {
+    browser = AgentBrowser.open(`${runId}-swipe`)
+    swipeRoot = mkdtempSync(join(tmpdir(), 'cezar-e2e-swipe-'))
+    mkdirSync(join(swipeRoot, '.ai/cezar'), { recursive: true })
+    writeFileSync(join(swipeRoot, '.ai/cezar/runs.json'), JSON.stringify(SWIPE_FIXTURE, null, 2), 'utf8')
+    const port = await freePort()
+    swipeUrl = `http://localhost:${port}`
+    swipeServer = spawn(process.execPath, [cezarCli, 'serve', '--repo', swipeRoot, '--port', String(port), '--no-open'], {
+      env: fixtureServeEnv(swipeRoot),
+      stdio: 'ignore',
+    })
+    await waitForHealth(swipeUrl)
+    swipeProject = await bootProjectId(swipeUrl)
+  }, 60_000)
+
+  afterAll(async () => {
+    browser?.close()
+    await stopFixtureServer(swipeServer)
+    if (swipeRoot) rmSync(swipeRoot, { recursive: true, force: true })
+  })
+
+  beforeEach(() => {
+    browser.setViewport(1440, 900)
+    browser.goto(`${swipeUrl}/p/${swipeProject}/`)
+    browser.waitForFunction(`document.querySelector('${SWIPE} > ${rowSel('sw-0')}') !== null`)
+  })
+
+  it('renders the swipe, not the row button, on a device that cannot hover', () => {
+    expect(browser.evaluate(`matchMedia('(hover: none)').matches`)).toBe(true)
+    expect(browser.count('[data-action="archive-run"]')).toBe(0)
+    expect(browser.evaluate(`getComputedStyle(document.querySelector('${SWIPE}')).touchAction`)).toBe('pan-y pinch-zoom')
+  })
+
+  it('parks a short swipe on Archive, and tapping it archives with an Undo toast', async () => {
+    const r = box('sw-1')
+    await leftSwipe(r, 60)
+    // Released past 40px and slowly: the row parks on the 88px action, it does not archive.
+    const parked = browser.waitForValue<{ transform: string; label: string }>(`(() => {
+      const row = document.querySelector('${rowSel('sw-1')}')
+      const action = document.querySelector('${actionSel('sw-1')}')
+      return row && action && row.style.transform === 'translateX(-88px)' ? { transform: row.style.transform, label: action.textContent } : null
+    })()`)
+    expect(parked.label).toBe('Archive')
+    expect((await stored('sw-1')).archived).toBeFalsy()
+    browser.click(`${actionSel('sw-1')} button`)
+    browser.waitForFunction(`document.querySelector('${rowSel('sw-1')}') === null`)
+    expect(browser.waitForValue(`document.querySelector('[data-slot="toast"]')?.textContent ?? null`)).toContain('Archived "Finished task 1"')
+    expect((await stored('sw-1')).archived).toBe(true)
+    browser.click('[data-slot="toast-action"]')
+    browser.waitForFunction(`document.querySelector('[data-bucket="Finished"] ${rowSel('sw-1')}') !== null`)
+  })
+
+  it('a long swipe shows "Release to archive" and archives on release', async () => {
+    const r = box('sw-2')
+    const held = (await leftSwipe(r, r.width * 0.8, {
+      whileDown: `(() => { const a = document.querySelector('${actionSel('sw-2')}'); return a?.dataset.past === 'true' ? a.textContent : null })()`,
+    })) as string | null
+    expect(held).toBe('Release to archive')
+    browser.waitForFunction(`document.querySelector('${rowSel('sw-2')}') === null`)
+    expect(browser.waitForValue(`document.querySelector('[data-slot="toast"]')?.textContent ?? null`)).toContain('Archived "Finished task 2"')
+    expect((await stored('sw-2')).archived).toBe(true)
+    browser.click('[data-slot="toast-action"]')
+    browser.waitForFunction(`document.querySelector('[data-bucket="Finished"] ${rowSel('sw-2')}') !== null`)
+  })
+
+  it('a vertical drag over a finished row scrolls the list and never moves the row', async () => {
+    browser.setViewport(1440, 500)
+    const scroller = `(() => {
+      for (let el = document.querySelector('${rowSel('sw-3')}'); el; el = el.parentElement) {
+        const style = getComputedStyle(el)
+        if (/(auto|scroll)/.test(style.overflowY) && el.scrollHeight > el.clientHeight) return el
+      }
+      return null
+    })()`
+    // `box` scrolls the row into view, so it runs first; `before` is read after it, and from then
+    // on only the drag scrolls — the polls below are pure reads.
+    const r = box('sw-3')
+    const before = browser.waitForValue<number>(`(() => { const s = ${scroller}; return s ? s.scrollTop : null })()`)
+    // Mostly vertical, a little horizontal drift: the gesture locks vertical and the browser pans.
+    const during = (await browser.touchDrag(
+      [{ x: r.right - 40, y: r.cy }, ...[1, 2, 3, 4, 5, 6].map((i) => ({ x: r.right - 40 - i * 1.5, y: r.cy - i * 20 }))],
+      { stepMs: 30, whileDown: `getComputedStyle(document.querySelector('${rowSel('sw-3')}')).transform` },
+    )) as string
+    expect(during).toBe('none')
+    const after = browser.waitForValue<{ top: number; transform: string }>(`(() => {
+      const s = ${scroller}
+      const row = document.querySelector('${rowSel('sw-3')}')
+      return s && row && s.scrollTop !== ${before} ? { top: s.scrollTop, transform: getComputedStyle(row).transform } : null
+    })()`)
+    expect(after.top).toBeGreaterThan(before)
+    expect(after.transform).toBe('none')
+    expect(browser.count('[data-slot="task-row-swipe-action"]')).toBe(0)
+  })
+
+  it('leaves a scheduled row where it is', async () => {
+    expect(browser.count(`${SWIPE} > ${rowSel('sw-live')}`)).toBe(0)
+    const r = box('sw-live')
+    const during = (await leftSwipe(r, r.width * 0.8, {
+      whileDown: `getComputedStyle(document.querySelector('${rowSel('sw-live')}')).transform`,
+    })) as string
+    expect(during).toBe('none')
+    expect((await stored('sw-live')).archived).toBeFalsy()
+  })
+
+  it('keeps "Archive" on --muted and "Release to archive" on --info readable, dark and light', async () => {
+    try {
+      for (const variant of contrastQaVariants.filter(({ viewport, density }) => viewport.width === 1440 && density === 'comfortable')) {
+        applyContrastQaVariant(browser, variant)
+        const r = box('sw-4')
+        const release = (await leftSwipe(r, r.width * 0.8, {
+          stepMs: 60,
+          // Sampled under the held finger: the state exists only until it lifts.
+          whileDown: `(() => { const a = document.querySelector('${actionSel('sw-4')}'); return a?.dataset.past === 'true' ? ${contrastSampleExpression(`${actionSel('sw-4')} span`)} : null })()`,
+        })) as ContrastSample
+        expect(release.ratio, `${variant.id} release: ${release.foreground} on ${release.background}`).toBeGreaterThanOrEqual(4.5)
+        browser.waitForFunction(`document.querySelector('${rowSel('sw-4')}') === null`)
+        browser.click('[data-slot="toast-action"]')
+        browser.waitForFunction(`document.querySelector('${rowSel('sw-4')}') !== null`)
+        const r2 = box('sw-4')
+        await leftSwipe(r2, 60)
+        const parked = browser.waitForValue<ContrastSample>(`(() => {
+          if (document.querySelector('${rowSel('sw-4')}')?.style.transform !== 'translateX(-88px)') return null
+          return ${contrastSampleExpression(`${actionSel('sw-4')} button`)}
+        })()`)
+        expect(parked.ratio, `${variant.id} parked: ${parked.foreground} on ${parked.background}`).toBeGreaterThanOrEqual(4.5)
+        const icon = browser.evaluate(contrastSampleExpression(`${actionSel('sw-4')} svg`, 'color', 'parent')) as ContrastSample
+        expect(icon.ratio, `${variant.id} parked icon`).toBeGreaterThanOrEqual(3)
+        browser.goto(`${swipeUrl}/p/${swipeProject}/`)
+        browser.waitForFunction(`document.querySelector('${SWIPE} > ${rowSel('sw-4')}') !== null`)
+      }
+    } finally {
+      restoreContrastQaDefaults(browser)
+    }
+  })
+
+  // Last: the emulated preference stays on this browser for the rest of the describe.
+  it('snaps over 200ms, and not at all under prefers-reduced-motion', () => {
+    const duration = `getComputedStyle(document.querySelector('${rowSel('sw-5')}')).transitionDuration`
+    expect(browser.waitForValue(duration)).toBe('0.2s')
+    browser.setReducedMotion()
+    expect(browser.waitForValue(duration, (value) => value !== '0.2s')).toBe('0s')
   })
 })
