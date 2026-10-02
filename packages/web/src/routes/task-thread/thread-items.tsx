@@ -48,7 +48,7 @@ const MESSAGE_SURFACE = {
     speaker: 'Agent response',
     classes: 'border-message-agent-border bg-message-agent-bg',
     accent: 'text-message-agent-accent',
-    body: 'max-w-[65ch] text-[15px] md:text-[14px]',
+    body: 'text-[15px] md:text-[14px]',
   },
 } as const
 
