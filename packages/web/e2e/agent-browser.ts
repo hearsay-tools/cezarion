@@ -578,10 +578,11 @@ export class AgentBrowser {
     let holdStartedAt: number | null = null
     let holdValue: unknown = undefined
     for (;;) {
-      const now = Date.now()
       try {
         const value = this.run(['eval', js], deadline - performance.now()).result as T
-        if (performance.now() > deadline) break
+        // A hold starts at an observed sample, after transport/evaluation completes.
+        const now = performance.now()
+        if (now > deadline) break
         lastValue = value
         lastError = undefined
         if (matcher(value) && (holdStartedAt === null || sameSample(value, holdValue))) {

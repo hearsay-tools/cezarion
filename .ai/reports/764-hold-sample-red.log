@@ -1,0 +1,51 @@
+
+> test
+> vitest run --run packages/web/src/test/agent-browser-wait-value.test.ts -t starts the hold after
+
+
+ RUN  v4.1.10 /home/agent/projects/cezar/.ai/cezar/worktrees/d6e7f159-f1c6-45f4-87c6-500ec47ab925
+
+ ❯ |web| src/test/agent-browser-wait-value.test.ts (15 tests | 1 failed | 14 skipped) 59ms
+     × starts the hold after the first probe completes, excluding earlier CLI latency 57ms
+     ↓ returns only after the matcher holds across polls spanning holdMs
+     ↓ a predicate that flips inside the hold window fails the wait, not a later expect
+     ↓ polls evaluate until the matcher passes and returns that sample
+     ↓ without a matcher, waits for a value that is not null, undefined or false
+     ↓ a sample that throws in the page is a miss, not a failure
+     ↓ a value that never matches fails through the failure bundle, naming the last sample
+     ↓ a sample that kept throwing reports the page error instead of a value
+     ↓ reads scroll, hit-test and point in one polled expression, then moves the pointer once
+     ↓ a target that never paints a hit-testable point fails naming the selector and the bundle
+     ↓ focuses the visible predecessor, presses Tab, and waits for focus to land on the target
+     ↓ names the element that took focus when the target never receives it
+     ↓ a target with no visible predecessor fails after polling, naming the selector
+     ↓ presses Escape, then waits for the content to be gone AND focus to have returned
+   ↓ bounds the CLI probe and rejects a matching sample arriving after the wait deadline (#764)
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |web| src/test/agent-browser-wait-value.test.ts > AgentBrowser.waitForStable (#415) > starts the hold after the first probe completes, excluding earlier CLI latency
+AssertionError: expected 2 to be 4 // Object.is equality
+
+- Expected
++ Received
+
+- 4
++ 2
+
+ ❯ src/test/agent-browser-wait-value.test.ts:114:22
+    112|       expect(browser.waitForStable('ready()', { holdMs: 200, intervalM…
+    113|       // Completions at 300, 310 and 410 cannot establish a 200ms hold…
+    114|       expect(probes).toBe(4)
+       |                      ^
+    115|       expect(now).toBe(510)
+    116|     } finally {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 14 skipped (15)
+   Start at  18:00:30
+   Duration  275ms (transform 70ms, setup 43ms, import 46ms, tests 59ms, environment 0ms)
+

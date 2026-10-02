@@ -398,3 +398,22 @@ git diff --check
 ```
 
 Scanner **31/31**, web typecheck and diff check passed (`764-date-clock-{green,typecheck}.log`; install `764-date-clock-npm-ci.log`). Baseline unchanged; executable paths are `packages/web/src/test/e2e-wait-discipline.ts` and its test only. No browser environment started or broad suite run. Parent owns review reply, push and CI.
+
+## Automated review: completed-sample stability hold
+
+PR #773 review comment `4167409850` found that `waitForStable` captured its hold timestamp with `Date.now()` **before** the synchronous CLI evaluation, while its deadline already used `performance.now()`. A slow first probe and faster next probe therefore counted time before the first observed sample toward the hold. The deterministic regression scripts probe durations by advancing mocked clocks within the probe, with `intervalMs: 0`: first completion at 300ms, second at 310ms. The original helper returns after two probes despite only 10ms between observations (`764-hold-sample-red.log`, expected 4 probes, received 2).
+
+Narrowly moved the hold timestamp after the completed evaluation and used the same monotonic `performance.now()` clock as the existing deadline. Late-sample rejection, reset branches, interval and timeout budgets remain unchanged. The first matching observation now begins the hold at 300ms; matching observations at 310/410ms do not suffice; the observation at 510ms establishes the full 200ms hold.
+
+Added controlled-duration cases for a changed matching value, a miss and `holdMs: 0`. Temporarily removing only the source fix proves the final cases: **3 failed**, while the first-truth guard remains **1 passed** (`764-hold-sample-final-red.log`). Restoring the fix passes **52/52** across helper, visual-readiness and scanner tests, including the existing real CLI deadline/late-sample regression (`764-hold-sample-green.log`). The injected-duration regressions use no sleeping test or elapsed-time assumption.
+
+Exact focused commands after `npm ci` in this worktree:
+
+```sh
+npm test -- --run packages/web/src/test/agent-browser-wait-value.test.ts -t 'completed-sample hold'
+npm test -- --run packages/web/src/test/agent-browser-wait-value.test.ts packages/web/src/test/visual-ready.test.ts packages/web/src/test/e2e-wait-discipline.test.ts
+npm run typecheck:web
+git diff --check
+```
+
+Web typecheck and diff check passed (`764-hold-sample-typecheck.log`; install `764-hold-sample-npm-ci.log`). Executable paths are the E2E seam `packages/web/e2e/agent-browser.ts` and `packages/web/src/test/agent-browser-wait-value.test.ts`; visual helper/scanner source and baseline unchanged. No production scheduling change, browser environment or broad suite. Parent owns review reply and CI.

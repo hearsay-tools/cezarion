@@ -1,0 +1,92 @@
+
+> test
+> vitest run --run packages/web/src/test/agent-browser-wait-value.test.ts -t completed-sample hold
+
+
+ RUN  v4.1.10 /home/agent/projects/cezar/.ai/cezar/worktrees/d6e7f159-f1c6-45f4-87c6-500ec47ab925
+
+ ❯ |web| src/test/agent-browser-wait-value.test.ts (18 tests | 3 failed | 14 skipped) 205ms
+     × completed-sample hold 'starts after the first probe completes' without counting earlier CLI latency 58ms
+     × completed-sample hold 'restarts after the matching value cha…' without counting earlier CLI latency 49ms
+     × completed-sample hold 'restarts after a miss' without counting earlier CLI latency 47ms
+     ✓ completed-sample hold 'returns the first matching sample for…' without counting earlier CLI latency 48ms
+     ↓ returns only after the matcher holds across polls spanning holdMs
+     ↓ a predicate that flips inside the hold window fails the wait, not a later expect
+     ↓ polls evaluate until the matcher passes and returns that sample
+     ↓ without a matcher, waits for a value that is not null, undefined or false
+     ↓ a sample that throws in the page is a miss, not a failure
+     ↓ a value that never matches fails through the failure bundle, naming the last sample
+     ↓ a sample that kept throwing reports the page error instead of a value
+     ↓ reads scroll, hit-test and point in one polled expression, then moves the pointer once
+     ↓ a target that never paints a hit-testable point fails naming the selector and the bundle
+     ↓ focuses the visible predecessor, presses Tab, and waits for focus to land on the target
+     ↓ names the element that took focus when the target never receives it
+     ↓ a target with no visible predecessor fails after polling, naming the selector
+     ↓ presses Escape, then waits for the content to be gone AND focus to have returned
+   ↓ bounds the CLI probe and rejects a matching sample arriving after the wait deadline (#764)
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |web| src/test/agent-browser-wait-value.test.ts > AgentBrowser.waitForStable (#415) > completed-sample hold 'starts after the first probe completes' without counting earlier CLI latency
+AssertionError: expected 2 to be 4 // Object.is equality
+
+- Expected
++ Received
+
+- 4
++ 2
+
+ ❯ src/test/agent-browser-wait-value.test.ts:118:22
+    116|     try {
+    117|       expect(browser.waitForStable('ready()', { holdMs: scenario.holdM…
+    118|       expect(probes).toBe(scenario.probes)
+       |                      ^
+    119|       expect(now).toBe(scenario.endedAt)
+    120|     } finally {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  |web| src/test/agent-browser-wait-value.test.ts > AgentBrowser.waitForStable (#415) > completed-sample hold 'restarts after the matching value cha…' without counting earlier CLI latency
+AssertionError: expected 5 to be 4 // Object.is equality
+
+- Expected
++ Received
+
+- 4
++ 5
+
+ ❯ src/test/agent-browser-wait-value.test.ts:118:22
+    116|     try {
+    117|       expect(browser.waitForStable('ready()', { holdMs: scenario.holdM…
+    118|       expect(probes).toBe(scenario.probes)
+       |                      ^
+    119|       expect(now).toBe(scenario.endedAt)
+    120|     } finally {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  |web| src/test/agent-browser-wait-value.test.ts > AgentBrowser.waitForStable (#415) > completed-sample hold 'restarts after a miss' without counting earlier CLI latency
+AssertionError: expected 6 to be 5 // Object.is equality
+
+- Expected
++ Received
+
+- 5
++ 6
+
+ ❯ src/test/agent-browser-wait-value.test.ts:118:22
+    116|     try {
+    117|       expect(browser.waitForStable('ready()', { holdMs: scenario.holdM…
+    118|       expect(probes).toBe(scenario.probes)
+       |                      ^
+    119|       expect(now).toBe(scenario.endedAt)
+    120|     } finally {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed | 1 passed | 14 skipped (18)
+   Start at  18:02:02
+   Duration  427ms (transform 74ms, setup 48ms, import 47ms, tests 205ms, environment 0ms)
+

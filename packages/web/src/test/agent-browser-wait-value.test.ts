@@ -96,6 +96,32 @@ function shortTimeout(ms = 400) {
 const actions = (commands: string[][]) => commands.map(([action]) => action)
 
 describe('AgentBrowser.waitForStable (#415)', () => {
+  it.each([
+    { name: 'starts after the first probe completes', values: ['ready'], durations: [300, 10, 100, 100], holdMs: 200, probes: 4, endedAt: 510, expected: 'ready' },
+    { name: 'restarts after the matching value changes', values: ['old', 'ready'], durations: [300, 10, 100, 100], holdMs: 200, probes: 4, endedAt: 510, expected: 'ready' },
+    { name: 'restarts after a miss', values: ['ready', false, 'ready'], durations: [300, 10, 10, 100, 100], holdMs: 200, probes: 5, endedAt: 520, expected: 'ready' },
+    { name: 'returns the first matching sample for hold zero', values: ['ready'], durations: [300], holdMs: 0, probes: 1, endedAt: 300, expected: 'ready' },
+  ])('completed-sample hold $name without counting earlier CLI latency', scenario => {
+    const { browser } = open([])
+    let now = 0
+    let probes = 0
+    const monotonic = vi.spyOn(performance, 'now').mockImplementation(() => now)
+    const wallClock = vi.spyOn(Date, 'now').mockImplementation(() => now)
+    const run = vi.spyOn(browser as unknown as { run: (args: string[], timeoutMs?: number) => { result: unknown } }, 'run')
+      .mockImplementation(() => {
+        const index = probes++
+        now += scenario.durations[index] ?? 100
+        return { result: scenario.values[Math.min(index, scenario.values.length - 1)] }
+      })
+    try {
+      expect(browser.waitForStable('ready()', { holdMs: scenario.holdMs, intervalMs: 0 })).toBe(scenario.expected)
+      expect(probes).toBe(scenario.probes)
+      expect(now).toBe(scenario.endedAt)
+    } finally {
+      run.mockRestore(); wallClock.mockRestore(); monotonic.mockRestore()
+    }
+  })
+
   it('returns only after the matcher holds across polls spanning holdMs', () => {
     const { browser, commands } = open(['Skills', 'Skills', 'Skills'])
     const start = Date.now()
