@@ -215,7 +215,7 @@ export function Toaster() {
               item.action && 'flex items-center',
             )}
           >
-            {item.message}
+            <span className="min-w-0 break-words">{item.message}</span>
             {action ? (
               <button
                 type="button"

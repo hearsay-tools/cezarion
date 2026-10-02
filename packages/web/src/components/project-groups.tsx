@@ -390,6 +390,7 @@ function ProjectGroup({
               onArchiveRun={view === 'archived' ? undefined : archive.archiveOne}
               onSweep={view === 'archived' ? undefined : archive.sweep}
               sweeping={archive.sweeping}
+              projectName={project.name}
               sweepCounts={view === 'archived' || !runs.data ? undefined : sweepCountsOf(runs.data)}
             />
           </ReferenceStatusProvider>

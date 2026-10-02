@@ -12,9 +12,15 @@ import { runTitle } from '@/lib/task-groups'
  * land here, so the toast copy and the Undo rule exist once.
  */
 
-/** `Archived "<title>"` for one row, `Archived N tasks` for a sweep. */
+const TOAST_TITLE_MAX = 60
+
+/** `Archived "<title>"` for one row, `Archived N tasks` for a sweep. A long title is cut so the
+ *  toast stays a line or two; the row's own title tooltip carries the rest. */
 export function archivedToastMessage(input: { title: string } | { count: number }): string {
-  if ('title' in input) return `Archived "${input.title}"`
+  if ('title' in input) {
+    const title = input.title.length > TOAST_TITLE_MAX ? `${input.title.slice(0, TOAST_TITLE_MAX - 1)}…` : input.title
+    return `Archived "${title}"`
+  }
   return `Archived ${input.count} ${input.count === 1 ? 'task' : 'tasks'}`
 }
 
@@ -41,6 +47,54 @@ export async function undoArchive(
   if (failed) toast(failed.reason instanceof Error ? failed.reason.message : 'Could not undo the archive.', { tone: 'danger' })
 }
 
+/** True when focus has nowhere useful to be: nothing, <body>, or a node that left the page. */
+function focusIsLost(): boolean {
+  const active = document.activeElement
+  return !active || active === document.body || !active.isConnected
+}
+
+/** Runs `then` once `el` has left the page (the list drops a row over SSE a moment after the
+ *  request answers), or at once if it already has. Gives up after a few seconds. */
+function afterRemoval(el: Element, then: () => void): void {
+  if (!el.isConnected) return then()
+  const observer = new MutationObserver(() => {
+    if (el.isConnected) return
+    observer.disconnect()
+    clearTimeout(giveUp)
+    then()
+  })
+  const giveUp = setTimeout(() => observer.disconnect(), 5000)
+  observer.observe(document.body, { childList: true, subtree: true })
+}
+
+function focusTarget(el: Element | null | undefined, fallback?: Element | null): void {
+  if (!focusIsLost()) return
+  const target = el?.isConnected ? el : fallback?.isConnected ? fallback : null
+  if (!(target instanceof HTMLElement)) return
+  if (target.tabIndex < 0 && !target.hasAttribute('tabindex')) target.tabIndex = -1
+  target.focus({ preventScroll: true })
+}
+
+/**
+ * Keyboard focus survives an archive: the row (or sweep button) the user was on is about to
+ * disappear, and focus would drop to <body>. Remember the next row's link in the same bucket,
+ * else the previous one, else the list container, and put focus there once the element is gone
+ * — but only if nothing else has taken it by then.
+ */
+function keepFocusAfterRemoval(from: Element | null, pickTarget: (from: Element) => Element | null, container: Element | null): () => void {
+  if (!from) return () => {}
+  const target = pickTarget(from)
+  return () => afterRemoval(from, () => focusTarget(target, container))
+}
+
+function rowElement(runId: string): Element | null {
+  const active = document.activeElement?.closest('[data-slot="task-row"]')
+  if (active?.getAttribute('data-run-id') === runId) return active
+  return Array.from(document.querySelectorAll('[data-slot="task-row"]')).find((row) => row.getAttribute('data-run-id') === runId) ?? null
+}
+
+const linkOf = (row: Element | undefined) => row?.querySelector('a') ?? null
+
 /**
  * The sidebar's archive actions for one project's list. `projectId`/`cacheScope` are the pair
  * `usePinRun` takes: the request goes to the row's own project, and the invalidated cache is the
@@ -59,22 +113,47 @@ export function useSidebarArchive(projectId: string | undefined, cacheScope: str
       },
     })
 
+  // A second click before the first answers would send a second archive and a second toast.
+  const inFlight = React.useRef(new Set<string>())
+
   const archiveOne = (run: RunRecord) => {
+    if (inFlight.current.has(run.id)) return
+    inFlight.current.add(run.id)
     // Captured before the request: navigation during the round trip must not retarget either half.
     const scope = cacheScope ?? queryScope()
     const wasPinned = Boolean(run.pinned)
-    void (projectId === undefined ? archiveRun(run.id, true) : archiveProjectRun(projectId, run.id, true)).then(
-      () => {
-        void refresh(scope)
-        offerUndo(archivedToastMessage({ title: runTitle(run) }), scope, [run.id], wasPinned ? [run.id] : [])
+    const row = rowElement(run.id)
+    const restoreFocus = keepFocusAfterRemoval(
+      row,
+      (el) => {
+        const rows = Array.from(el.closest('[data-slot="quick-list-bucket"]')?.querySelectorAll('[data-slot="task-row"]') ?? [])
+        const at = rows.indexOf(el)
+        return linkOf(rows[at + 1] ?? rows[at - 1])
       },
-      (error: Error) => toast(error.message, { tone: 'danger' }),
+      row?.closest('[data-slot="quick-list-bucket"]')?.parentElement ?? null,
     )
+    void (projectId === undefined ? archiveRun(run.id, true) : archiveProjectRun(projectId, run.id, true))
+      .then(
+        () => {
+          void refresh(scope)
+          offerUndo(archivedToastMessage({ title: runTitle(run) }), scope, [run.id], wasPinned ? [run.id] : [])
+          restoreFocus()
+        },
+        (error: Error) => toast(error.message, { tone: 'danger' }),
+      )
+      .finally(() => inFlight.current.delete(run.id))
   }
 
   const sweep = (scopeOfSweep: ArchiveFinishedScope) => {
     const scope = cacheScope ?? queryScope()
     setSweeping(scopeOfSweep)
+    const active = document.activeElement
+    const button = active?.matches('[data-action="archive-group"]') ? active : null
+    const restoreFocus = keepFocusAfterRemoval(
+      button,
+      (el) => linkOf(el.closest('[data-slot="quick-list-bucket"]')?.nextElementSibling?.querySelector('[data-slot="task-row"]') ?? undefined),
+      button?.closest('[data-slot="quick-list-bucket"]')?.parentElement ?? null,
+    )
     void (projectId === undefined ? archiveFinished(scopeOfSweep) : archiveProjectFinished(projectId, scopeOfSweep))
       .then(
         ({ ids, pinnedIds }) => {
@@ -82,6 +161,7 @@ export function useSidebarArchive(projectId: string | undefined, cacheScope: str
           // The count is what the server took, not what was on screen: a run that finished a
           // moment ago may be in it, and Undo restores it too.
           if (ids.length > 0) offerUndo(archivedToastMessage({ count: ids.length }), scope, ids, pinnedIds)
+          restoreFocus()
         },
         (error: Error) => toast(error.message, { tone: 'danger' }),
       )

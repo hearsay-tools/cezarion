@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Toaster, resetToasts } from '@/components/ui/toaster'
 import { createQueryClient } from '@/api/query-client'
 import type { ProjectListEntry, RunRecord } from '@open-mercato/cezar-api-client'
-import { ListViewProvider } from '@/components/list-view'
+import { ListViewProvider, useListView } from '@/components/list-view'
 import { ProjectGroups } from '@/components/project-groups'
 import { SIDEBAR_COLLAPSED_STORAGE_KEY } from '@/lib/sidebar-collapse'
 
@@ -470,6 +470,55 @@ describe('ProjectGroups', () => {
     await waitFor(() => expect(taskLinks('cezar')).toHaveLength(1))
     fireEvent.click(within(group('cezar')).getByRole('button', { name: 'Pin task' }))
     await waitFor(() => expect(posts).toEqual(['/api/v1/p/cezar/runs/other-project-task/pin']))
+  })
+
+  it("archives through a non-boot project's own routes, and sweeps from the full list (#780)", async () => {
+    const posts: Array<{ path: string; body: unknown }> = []
+    const runs = Array.from({ length: 12 }, (_, i) => run({ id: `shop-${i}`, createdAt: `2026-07-14T10:${String(i).padStart(2, '0')}:00.000Z` }))
+    fetchMock.mockImplementation(async (input, init: RequestInit = {}) => {
+      const path = String(input)
+      if (init.method === 'POST') {
+        posts.push({ path, body: JSON.parse(String(init.body ?? '{}')) })
+        return json(path.endsWith('archive-finished') ? { archived: 12, ids: runs.map((r) => r.id), pinnedIds: [] } : {})
+      }
+      if (path === '/api/v1/p/shop/runs') return json(runs)
+      if (path === '/api/v1/p/cezar/runs') return json([])
+      return json({ error: 'not found' }, 404)
+    })
+    storeCollapsed({ shop: false })
+    renderGroups([project(), project({ id: 'shop', name: 'shop', lastOpenedAt: '2026-07-19T00:00:00.000Z' })], '/p/cezar/')
+    await waitFor(() => expect(taskLinks('shop')).toHaveLength(10))
+    const first = group('shop').querySelector('[data-slot="task-row"]') as HTMLElement
+    fireEvent.click(first.querySelector('[data-action="archive-run"]') as HTMLElement)
+    await waitFor(() => expect(posts).toEqual([{ path: `/api/v1/p/shop/runs/${first.dataset.runId}/archive`, body: { archived: true } }]))
+    posts.length = 0
+    // Ten of twelve are painted, yet the button exists and sweeps the project's own route.
+    fireEvent.click(group('shop').querySelector('[data-action="archive-group"][data-scope="unpinned"]') as HTMLElement)
+    await waitFor(() => expect(posts).toEqual([{ path: '/api/v1/p/shop/runs/archive-finished', body: { scope: 'unpinned' } }]))
+  })
+
+  it('renders neither archive control in the archived view (#780)', async () => {
+    serve({ '/api/v1/p/cezar/runs': [run({ id: 'old', archived: true }), run({ id: 'fin' })] })
+    function ShowArchived() {
+      const [, setView] = useListView()
+      return <button type="button" onClick={() => setView('archived')}>show archived</button>
+    }
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <MemoryRouter initialEntries={['/p/cezar/']}>
+          <ListViewProvider>
+            <ShowArchived />
+            <ProjectGroups projects={[project()]} bootProjectId="cezar" automationsAvailable={false} inboxAvailable={false} inboxCount={null} skillsUpdateAvailable={false} />
+          </ListViewProvider>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+    await waitFor(() => expect(group('cezar').querySelector('[data-action="archive-run"]')).not.toBeNull())
+    expect(group('cezar').querySelector('[data-action="archive-group"]')).not.toBeNull()
+    fireEvent.click(screen.getByText('show archived'))
+    await waitFor(() => expect(group('cezar').querySelector('[data-bucket="Archived"]')).not.toBeNull())
+    expect(group('cezar').querySelector('[data-action="archive-run"]')).toBeNull()
+    expect(group('cezar').querySelector('[data-action="archive-group"]')).toBeNull()
   })
 
   it('retains the pin on failed unpin, explains retry, then moves the row on success', async () => {

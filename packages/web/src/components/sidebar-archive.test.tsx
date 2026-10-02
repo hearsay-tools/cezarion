@@ -35,6 +35,12 @@ describe('archivedToastMessage', () => {
     expect(archivedToastMessage({ count: 1 })).toBe('Archived 1 task')
     expect(archivedToastMessage({ count: 4 })).toBe('Archived 4 tasks')
   })
+
+  it('truncates a long title to 60 characters with an ellipsis', () => {
+    const long = 'x'.repeat(100)
+    expect(archivedToastMessage({ title: long })).toBe(`Archived "${'x'.repeat(59)}…"`)
+    expect(archivedToastMessage({ title: 'y'.repeat(60) })).toBe(`Archived "${'y'.repeat(60)}"`)
+  })
 })
 
 describe('undoArchive', () => {
@@ -123,5 +129,88 @@ describe('useSidebarArchive', () => {
     const { result } = renderHook(() => useSidebarArchive('p1', 'p1'), { wrapper })
     act(() => result.current.archiveOne(record()))
     await vi.waitFor(() => expect(toastMock).toHaveBeenCalledWith('Nope', { tone: 'danger' }))
+  })
+})
+
+describe('useSidebarArchive guards and focus (#780)', () => {
+  const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={createQueryClient()}>{children}</QueryClientProvider>
+
+  it('ignores a repeat click on a row whose archive is still in flight', async () => {
+    let resolve!: (value: unknown) => void
+    api.archiveProjectRun.mockImplementation(() => new Promise((r) => { resolve = r }))
+    const { result } = renderHook(() => useSidebarArchive('p1', 'p1'), { wrapper })
+    act(() => { result.current.archiveOne(record({ id: 'r1' })); result.current.archiveOne(record({ id: 'r1' })) })
+    await act(async () => resolve({}))
+    await vi.waitFor(() => expect(toastMock).toHaveBeenCalledTimes(1))
+    expect(api.archiveProjectRun).toHaveBeenCalledTimes(1)
+    // Settled: the same row may be archived again (after an Undo, say).
+    api.archiveProjectRun.mockResolvedValue({})
+    act(() => result.current.archiveOne(record({ id: 'r1' })))
+    await vi.waitFor(() => expect(api.archiveProjectRun).toHaveBeenCalledTimes(2))
+  })
+
+  function mountBucket(ids: string[]) {
+    const list = document.createElement('div')
+    list.innerHTML = `<div data-slot="quick-list-bucket">${ids
+      .map((id) => `<div data-slot="task-row" data-run-id="${id}"><a href="#${id}">${id}</a><button data-action="archive-run">x</button></div>`)
+      .join('')}</div>`
+    document.body.append(list)
+    const row = (id: string) => list.querySelector<HTMLElement>(`[data-run-id="${id}"]`)!
+    return { list, row, link: (id: string) => row(id).querySelector('a')!, button: (id: string) => row(id).querySelector('button')! }
+  }
+
+  async function archiveAndRemove(ui: ReturnType<typeof mountBucket>, id: string) {
+    const { result } = renderHook(() => useSidebarArchive('p1', 'p1'), { wrapper })
+    ui.button(id).focus()
+    act(() => result.current.archiveOne(record({ id })))
+    await vi.waitFor(() => expect(toastMock).toHaveBeenCalled())
+    // The SSE removes the row a moment after the request answers.
+    act(() => ui.row(id).remove())
+  }
+
+  afterEach(() => { document.body.innerHTML = '' })
+
+  it('moves focus to the next row, else the previous one, after the focused row leaves', async () => {
+    const ui = mountBucket(['a', 'b', 'c'])
+    await archiveAndRemove(ui, 'b')
+    await vi.waitFor(() => expect(document.activeElement).toBe(ui.link('c')))
+    toastMock.mockClear()
+    ui.button('c').focus()
+    await archiveAndRemove(ui, 'c')
+    await vi.waitFor(() => expect(document.activeElement).toBe(ui.link('a')))
+  })
+
+  it('falls back to the list container when the group emptied', async () => {
+    const ui = mountBucket(['only'])
+    await archiveAndRemove(ui, 'only')
+    await vi.waitFor(() => expect(document.activeElement).toBe(ui.list))
+  })
+
+  it('leaves focus alone when the user already moved it', async () => {
+    const ui = mountBucket(['a', 'b'])
+    const elsewhere = document.createElement('input')
+    document.body.append(elsewhere)
+    const { result } = renderHook(() => useSidebarArchive('p1', 'p1'), { wrapper })
+    ui.button('a').focus()
+    act(() => result.current.archiveOne(record({ id: 'a' })))
+    elsewhere.focus()
+    await vi.waitFor(() => expect(toastMock).toHaveBeenCalled())
+    act(() => ui.row('a').remove())
+    await new Promise((r) => setTimeout(r, 20))
+    expect(document.activeElement).toBe(elsewhere)
+  })
+
+  it('moves focus out of a swept group once its button is gone', async () => {
+    api.archiveProjectFinished.mockResolvedValue({ archived: 1, ids: ['a'], pinnedIds: [] })
+    const host = document.createElement('div')
+    host.innerHTML = `<div data-slot="quick-list-bucket" data-bucket="Finished"><button data-action="archive-group" data-scope="unpinned">Archive all</button><div data-slot="task-row" data-run-id="a"><a href="#a">a</a></div></div><div data-slot="quick-list-bucket" data-bucket="Archived"><div data-slot="task-row" data-run-id="z"><a href="#z">z</a></div></div>`
+    document.body.append(host)
+    const button = host.querySelector<HTMLElement>('[data-action="archive-group"]')!
+    const { result } = renderHook(() => useSidebarArchive('p1', 'p1'), { wrapper })
+    button.focus()
+    act(() => result.current.sweep('unpinned'))
+    await vi.waitFor(() => expect(toastMock).toHaveBeenCalled())
+    act(() => host.querySelector('[data-bucket="Finished"]')!.remove())
+    await vi.waitFor(() => expect(document.activeElement).toBe(host.querySelector('a[href="#z"]')))
   })
 })

@@ -18,7 +18,7 @@ import { groupMetaParts, referenceKey, resumeLabel, sharedReferenceKeys } from '
 import { useNoHover } from '@/lib/use-no-hover'
 import { useIsDesktop } from '@/lib/use-desktop'
 import { shortAge } from '@/lib/format'
-import { isScheduledResume, isUnread, unreadMarkerTone } from '@/lib/read-state'
+import { isUnread, unreadMarkerTone } from '@/lib/read-state'
 import { directionalUsageText } from '@/components/directional-usage'
 import {
   capBuckets,
@@ -32,7 +32,7 @@ import {
   type QuickListBucket,
   type QuickListRow,
 } from '@/lib/task-groups'
-import { formatCost, sweepableRunCount, taskReference, taskReferences } from '@/lib/tasks-table'
+import { formatCost, isSweepable, sweepableRunCount, taskReference, taskReferences } from '@/lib/tasks-table'
 import { usageMetricVisibility } from '@/lib/token-metrics'
 import { useNow } from '@/lib/use-now'
 import { cn } from '@/lib/utils'
@@ -152,12 +152,6 @@ export function sweepCountsOf(runs: readonly RunRecord[]): { unpinned: number; p
   return { unpinned: sweepableRunCount(runs, 'unpinned'), pinned: sweepableRunCount(runs, 'pinned') }
 }
 
-/** Whether a row gets the archive button: finished and not waiting out a usage limit. Owned
- *  workers qualify — the row is one task the user can see; only the SWEEP leaves them to their
- *  parent. */
-function isArchivableRow(run: RunRecord): boolean {
-  return !run.archived && (run.status === 'done' || run.status === 'failed' || run.status === 'cancelled') && !isScheduledResume(run)
-}
 
 /**
  * The bucketed rows alone — the piece the multi-project sidebar reuses per project group
@@ -179,6 +173,7 @@ export function QuickListBuckets({
   onSweep,
   sweeping = null,
   sweepCounts,
+  projectName,
 }: {
   buckets: QuickListBucket[]
   currentRunId?: string | null
@@ -193,7 +188,10 @@ export function QuickListBuckets({
   sweeping?: ArchiveFinishedScope | null
   /** What each group sweep would take, from the whole list. Absent = no group buttons. */
   sweepCounts?: { unpinned: number; pinned: number }
+  /** Names the project in a group button's accessible name, where several lists share a page. */
+  projectName?: string
 }) {
+  const headingId = React.useId()
   // Which variant groups are open. Local: it is view state about this list, nothing else reads it.
   const [expanded, setExpanded] = React.useState<ReadonlySet<string>>(() => new Set())
   const toggleGroup = (groupId: string) =>
@@ -209,12 +207,12 @@ export function QuickListBuckets({
     <div className="flex flex-col gap-3">
       {buckets.map((bucket) => (
         <div key={bucket.label} data-slot="quick-list-bucket" data-bucket={bucket.label}>
-          <div className="flex items-center justify-between gap-2 pr-[6px] max-md:min-h-11 no-hover:min-h-11">
-            <h2 className="px-[10px] pt-[2px] pb-[4px] text-[11px] font-medium text-soft-foreground">
+          <div className="flex items-center justify-between gap-2 pr-[6px]">
+            <h2 id={`${headingId}-${bucket.label}`} className="px-[10px] pt-[2px] pb-[4px] text-[11px] font-medium text-soft-foreground">
               {bucket.label}{' '}<span className="text-[11px] font-normal tabular-nums">{bucket.rows.length}</span>
             </h2>
             {/* A sibling of the heading, so its accessible name stays `Finished 3`. */}
-            {onSweep && sweepCounts ? <GroupSweepButton label={bucket.label} counts={sweepCounts} onSweep={onSweep} sweeping={sweeping} /> : null}
+            {onSweep && sweepCounts ? <GroupSweepButton label={bucket.label} headingId={`${headingId}-${bucket.label}`} projectName={projectName} counts={sweepCounts} onSweep={onSweep} sweeping={sweeping} /> : null}
           </div>
           {bucket.rows.map((row) => (
             <div key={row.kind === 'group' ? row.groupId : row.run.id}>
@@ -1036,7 +1034,7 @@ function RunRow({
             hung from the slot's line-1 bottom edge, so it never overlaps the pin's own, and the
             glyph is nudged up to sit on line 2's centre. Absolute, so the slot, the title and the
             row height are the same at rest and under the pointer. */}
-        {onArchiveRun && !inertReferences && isArchivableRow(run) ? (
+        {onArchiveRun && !inertReferences && isSweepable(run) ? (
           <button
             type="button"
             data-action="archive-run"
@@ -1063,11 +1061,15 @@ function RunRow({
  *  those two, and only while there is something to take. */
 function GroupSweepButton({
   label,
+  headingId,
+  projectName,
   counts,
   onSweep,
   sweeping,
 }: {
   label: QuickListBucket['label']
+  headingId: string
+  projectName?: string
   counts: { unpinned: number; pinned: number }
   onSweep: (scope: ArchiveFinishedScope) => void
   sweeping: ArchiveFinishedScope | null
@@ -1075,6 +1077,7 @@ function GroupSweepButton({
   const scope: ArchiveFinishedScope | null = label === 'Finished' ? 'unpinned' : label === 'Pinned' ? 'pinned' : null
   if (!scope || counts[scope] === 0) return null
   const busy = sweeping === scope
+  const text = scope === 'unpinned' ? 'Archive all' : 'Archive finished'
   return (
     <button
       type="button"
@@ -1082,11 +1085,15 @@ function GroupSweepButton({
       data-scope={scope}
       disabled={busy}
       aria-busy={busy ? 'true' : undefined}
+      // The name starts with the visible words; the project (or, failing that, the group's
+      // heading) says WHICH list, since a sidebar can show several of these buttons at once.
+      aria-label={projectName ? `${text}, ${projectName}` : undefined}
+      aria-describedby={headingId}
       onClick={() => onSweep(scope)}
-      className="inline-flex shrink-0 items-center gap-1 rounded-[4px] px-1.5 py-0.5 font-sans text-[11px] leading-[1.4] text-muted-foreground hover:bg-sidebar-row-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-link-foreground disabled:opacity-60 max-md:h-11 no-hover:h-11"
+      className="relative inline-flex shrink-0 items-center gap-1 rounded-[4px] px-1.5 py-0.5 font-sans text-[11px] leading-[1.4] text-muted-foreground hover:bg-sidebar-row-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-link-foreground disabled:opacity-60 max-md:before:absolute max-md:before:top-1/2 max-md:before:left-0 max-md:before:h-11 max-md:before:w-full max-md:before:-translate-y-1/2 max-md:before:content-[''] no-hover:before:absolute no-hover:before:top-1/2 no-hover:before:left-0 no-hover:before:h-11 no-hover:before:w-full no-hover:before:-translate-y-1/2 no-hover:before:content-['']"
     >
       <ArchiveIcon className="size-[11px]" aria-hidden="true" />
-      {scope === 'unpinned' ? 'Archive all' : 'Archive finished'}
+      {text}
     </button>
   )
 }

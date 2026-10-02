@@ -10,7 +10,8 @@ import { setApiScope } from '@open-mercato/cezar-api-client'
 import type { RunRecord } from '@open-mercato/cezar-api-client'
 import { ListViewProvider } from '@/components/list-view'
 import { ReferenceStatusProvider, ReferenceStatusRegistry } from '@/components/reference-status'
-import { SidebarSessionScope, TaskQuickList, TaskQuickListContainer } from '@/components/task-quick-list'
+import { QuickListBuckets, SidebarSessionScope, TaskQuickList, TaskQuickListContainer } from '@/components/task-quick-list'
+import { groupRuns } from '@/lib/task-groups'
 
 const NOW = Date.parse('2026-07-14T12:00:00.000Z')
 const ago = (ms: number) => new Date(NOW - ms).toISOString()
@@ -2033,7 +2034,27 @@ describe('sidebar archive (#780)', () => {
   it('gives the group buttons a 44px target on touch', () => {
     renderList({ runs: [run({ id: 'a' })], onSweep: vi.fn() })
     const className = groupButton('unpinned')!.className
-    expect(className).toContain('max-md:h-11')
-    expect(className).toContain('no-hover:h-11')
+    // A 44px hit area from a pseudo-element: the header keeps its natural height.
+    expect(className).toContain('max-md:before:h-11')
+    expect(className).toContain('no-hover:before:h-11')
+    expect(className).not.toContain('max-md:h-11')
+    const row = groupButton('unpinned')!.parentElement as HTMLElement
+    expect(row.className).not.toContain('min-h-11')
+  })
+
+  it('names the group button with its visible text first, then the project', () => {
+    renderList({ runs: [run({ id: 'a' })], onSweep: vi.fn() })
+    expect(groupButton('unpinned')!.getAttribute('aria-describedby')).toBe(
+      document.querySelector('[data-bucket="Finished"] h2')!.id,
+    )
+    cleanup()
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <MemoryRouter>
+          <QuickListBuckets buckets={groupRuns([run({ id: 'a' })], 'active')} sweepCounts={{ unpinned: 1, pinned: 0 }} onSweep={vi.fn()} projectName="shop" />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+    expect(groupButton('unpinned')!.getAttribute('aria-label')).toBe('Archive all, shop')
   })
 })
