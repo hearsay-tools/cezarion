@@ -350,7 +350,7 @@ function GithubMergeBox({ number, onRunAgent }: { number: number; onRunAgent?: (
             </p>
           ) : null}
           {state.state === 'open' && state.methods.length > 0 ? (
-            <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+            <div className="mt-4 flex flex-col flex-wrap gap-2 sm:flex-row">
               <select
                 aria-label="Merge method"
                 value={selectedMethod ?? ''}

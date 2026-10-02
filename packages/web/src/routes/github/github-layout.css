@@ -1,6 +1,12 @@
 /* GitHub reference 9 and supplemental 27: document flow, readable forms and real filters. */
 /* Reading width is a task-session preference; GitHub uses all available page space. */
 [data-route='github'] { width: 100%; }
+/* #754: use document flow when the saved list width leaves too little detail space.
+   Keep the preference intact so columns return at that width when space permits. */
+[data-slot='gh-workspace'][data-stacked='true'] { height: auto; }
+[data-slot='gh-workspace'][data-stacked='true'] [data-slot='gh-panes'] { flex-direction: column; flex: none; overflow: visible; }
+[data-slot='gh-workspace'][data-stacked='true'] :is([data-slot='gh-list'], [data-slot='gh-detail']) { width: 100%; flex: none; overflow: visible; }
+[data-slot='gh-workspace'][data-stacked='true'] [data-slot='gh-list-resize-handle'] { display: none; }
 [data-slot='gh-hand'] { display: flex; flex-direction: column; gap: 16px; padding: 20px; border-radius: 12px; }
 [data-slot='gh-hand'] { border-color: color-mix(in srgb, var(--accent-strong) 24%, var(--border)); background: var(--background); }
 [data-slot='gh-hand'] > h3 { margin: 0; }

@@ -340,6 +340,7 @@ export function GithubRoute({
   // than a persisted one, exactly like the runner and the model beside it.
   const [engine, setEngine] = useState<EnginePick>({ runner: null, model: null, effort: null, account: null })
   const [githubListWidth, setGithubListWidth] = useState(readStoredGithubListWidth)
+  const [panesStacked, setPanesStacked] = useState(true)
   const [mobileListExpanded, setMobileListExpanded] = useState(false)
   const routeRef = useRef<HTMLDivElement>(null)
   const workspaceRef = useRef<HTMLDivElement>(null)
@@ -360,8 +361,13 @@ export function GithubRoute({
     const main = route?.closest<HTMLElement>('[data-slot="main"]')
     if (!route || !workspace || !main) return
     const desktop = window.matchMedia('(min-width: 768px)')
+    let columns = false
     const sync = () => {
-      if (!desktop.matches || main.clientHeight < 1) {
+      // The sidebar and the saved list width both consume reading space. A desktop
+      // viewport alone does not guarantee room for a usable detail pane (#754).
+      columns = desktop.matches && workspace.clientWidth >= githubListWidth + 22 + 360
+      setPanesStacked(!columns)
+      if (!columns || main.clientHeight < 1) {
         route.style.removeProperty('--gh-workspace-height')
         return
       }
@@ -370,10 +376,11 @@ export function GithubRoute({
     sync()
     const observer = new ResizeObserver(sync)
     observer.observe(main)
+    observer.observe(workspace)
     // Keep geometry stable while docking: route wheel input, not layout/overflow.
     // Once the workspace reaches main's top, native pane scrolling takes over.
     const wheel = (event: WheelEvent) => {
-      if (!desktop.matches || event.ctrlKey || !event.deltaY ||
+      if (!columns || event.ctrlKey || !event.deltaY ||
         Math.abs(event.deltaX) > Math.abs(event.deltaY) ||
         workspace.getBoundingClientRect().top <= main.getBoundingClientRect().top + 1 ||
         !(event.target instanceof Element) || !event.target.closest('[data-slot="gh-panes"]')) return
@@ -388,7 +395,7 @@ export function GithubRoute({
       observer.disconnect()
       desktop.removeEventListener('change', sync)
     }
-  }, [workspaceAvailable])
+  }, [workspaceAvailable, githubListWidth])
   useEffect(() => {
     writeFollowupSelection({ workflow, skills: [...selectedSkills] })
   }, [workflow, selectedSkills])
@@ -798,7 +805,7 @@ export function GithubRoute({
             </span>
           ) : null}
         </div>
-        <div ref={workspaceRef} data-slot="gh-workspace" className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 md:h-[calc(var(--gh-workspace-height,calc(100dvh-4rem))-1rem)] md:flex-none md:gap-[22px]">
+        <div ref={workspaceRef} data-slot="gh-workspace" data-stacked={panesStacked} className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 md:h-[calc(var(--gh-workspace-height,calc(100dvh-4rem))-1rem)] md:flex-none md:gap-[22px]">
         <header
           data-slot="gh-header"
           className="flex shrink-0 flex-col gap-3 bg-background md:gap-[22px]"
@@ -865,7 +872,7 @@ export function GithubRoute({
         data-slot="gh-panes"
         className="flex min-h-0 min-w-0 flex-1 flex-col items-start gap-[22px] md:flex-row md:items-stretch md:overflow-hidden"
       >
-      {/* Issue list and detail stack on mobile. A selected PR has a full-width review surface. */}
+      {/* Stack whenever columns would leave less than 360px for the detail. */}
       <section
         data-slot="gh-list"
         data-mobile-preview={compactPreview || undefined}
