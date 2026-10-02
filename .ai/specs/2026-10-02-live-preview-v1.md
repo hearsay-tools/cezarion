@@ -7,8 +7,9 @@ open it in a browser that runs on the host, docked next to the task, and click t
 agent does not drive that browser in v1.
 
 Design settled with the owner on 2026-10-01/02 (cezar task 3e478497). Inputs: the
-`live-preview-v0.1` mockups (inspiration, not the spec; v1-relevant screens copied to
-`assets/2026-10-02-live-preview/`, layout reference only) and the zero-dependency CDP screencast
+`live-preview-v1` design (the source for every state number below: 27 screens and an annotated
+PDF, exported by the designer; the `.pen` frame `Live Preview · v1 · light` is the editable source;
+`live-preview-v0.1` is the archive of the pre-review ideas) and the zero-dependency CDP screencast
 prototype at `~/projects/cdp-screencast-proto` (server.mjs, client.html, smoke.mjs).
 
 ## Slices
@@ -152,6 +153,10 @@ Under the task route, each its own component:
   More: Reload without cache, Copy page URL, Stop server, close) and the canvas stage with the states below. The empty state focuses the
   URL bar, expands a bare port to `localhost:<port>`, lists the task's registered servers and states
   the unsupported list once (copying out, file pickers, downloads).
+- **URL field**: long URLs cut off at the edge and show in full while the field has focus. While
+  the page comes from an adopted server, "Not started by cezar" sits inside the field and the
+  Experimental badge shrinks to its icon; the icon keeps `aria-label` and a tooltip reading
+  "Experimental", so it still counts as the marker.
 - **Input**: the canvas listens to Pointer Events. Mouse and pen pointers map to mouse events as in
   the prototype. Touch pointers (a phone cockpit): a tap is a mouse click, a one-finger swipe is
   `mouseWheel` scrolling, long-press and pinch do nothing. This is about the cockpit device; the page
@@ -160,7 +165,7 @@ Under the task route, each its own component:
   origin.
 - Own error boundary: a pane crash never takes down the task view.
 
-Out of the v0.1 mockups for v1: the driver strip, ring colours, agent cursor, take over and hand
+Out of the v0.1 archive for v1: the driver strip, ring colours, agent cursor, take over and hand
 back, the pop-out route, a read-only second viewer, port detection.
 
 ## Data flow
@@ -176,7 +181,7 @@ back, the pop-out route, a read-only second viewer, port detection.
    spawns the command. Adoption is decided here, at every Open, never from the registration
    probe: an agent's own copy dies with its session, and a stale "adopted" label must not turn
    into a silent spawn. The manager then waits for the port and ensures Chromium, streaming each
-   step as a `state` message (4.3 and 4.4 render from these), navigates to
+   step as a `state` message (5.6 to 5.10 and 5.16 to 5.17 render from these), navigates to
    `http://localhost:<port><path>` and starts the screencast.
 4. Dev-server transitions append `preview_server_state` events.
 
@@ -190,7 +195,7 @@ Every state has an exit that is on by default.
 | Dev server (cezar-owned) | `starting`, `up`, `stalled`, `exited` | `starting`: the port answers (→ `up`), the process exits (→ `exited`), 2 min without an answer (→ `stalled`, process left running, log shown). `up` and `stalled`: the process exits, the owner presses Stop, 15 min after the last viewer left, the worktree is removed, the run is deleted, cezar shuts down. |
 | Dev server (adopted) | probed only | Never killed by cezar. A port that stops answering shows the `needs_approval` state with Run and open. |
 | Chromium | `launching`, `ready`, `streaming` | 2 min after the last viewer left, Chromium exits (→ "browser exited", manual Retry only; no automatic relaunch, so a page that crashes Chromium cannot loop), the run is deleted, cezar shuts down. |
-| Viewer | connected | Socket close, replaced by another tab (old tab gets `replaced`, renders 4.6), missed pings, cezar shuts down. |
+| Viewer | connected | Socket close, replaced by another tab (old tab gets `replaced`, renders 5.12), missed pings, cezar shuts down. |
 | Leftovers after a crash | pid records on disk | Boot sweep: kill the process group only when the pid is alive **and** its `startToken` matches (`delegation/process-liveness.ts`), so a reused pid is never killed. |
 
 Exit triggers:
@@ -212,19 +217,26 @@ labelled as not started by cezar, so a wrong app is visible as such.
 
 Each is a typed `state` message; the toolbar never moves.
 
-| Failure | State | Primary action |
+| Failure | State (v1 design) | Primary action |
 |---|---|---|
-| No Chromium | 4.1 | Download (progress in the pane). On failure, the install command for the detected OS. |
-| Sandbox failure | 4.2 with the last 4 KiB of stderr | Retry, Copy diagnostics, link to docs on `CEZ_PREVIEW_NO_SANDBOX=1`. |
-| Port not answering yet | 4.3 with attempt count, the command and the log tail | Stop server. After 2 min: `stalled`, with Keep waiting (resets the 2 min) and Stop server. |
-| Dev server exited | 4.3 variant with exit code and log tail | Start again (reruns the recorded command). |
-| Stopped (idle or Stop) | Reason, last URL kept | Start again; reopens the last URL. |
-| Adopted port silent at Open | `needs_approval` with the command and `cwd` | Run and open. |
-| First open | 4.4 steps: server, browser, first frame | none |
-| Socket dropped after a frame | 4.5, last frame dimmed | 5 reconnects with backoff, then Reconnect. |
-| Upgrade never succeeded | "The proxy in front of cezar didn't let the preview's WebSocket through" (cezar cannot tell Basic Auth from a proxy that drops `Upgrade`; the copy names Basic Auth only as the known case) | Stops after 2 attempts, no loop (the #688 failure mode). Links to the Basic Auth note. |
-| Another tab took it | 4.6 | Use it here, Close preview. |
-| Page dialog | 4.7 | The page's own buttons; Esc means Cancel. |
+| No Chromium | 5.1 | Download Chromium. |
+| Downloading | 5.2, progress and time left | Cancel (removes the partial file). |
+| Download failed | 5.3, the install command for the detected OS | Retry download, Copy diagnostics. |
+| Sandbox failure | 5.4 with the last 4 KiB of stderr | Retry, Copy diagnostics, link to docs on `CEZ_PREVIEW_NO_SANDBOX=1`. |
+| Chromium exited | 5.5, the server's state stated separately | Retry (manual only; restarts the browser at the same URL). |
+| Server starting | 5.6, attempt count, the command and the log tail | Stop server. |
+| Server stalled | 5.7 after 2 min, log tail | Keep waiting (resets the 2 min), Stop server. |
+| Server exited | 5.8, exit code and log tail | Start again (reruns the recorded command, says so). |
+| Stopped after idle | 5.9, last URL kept | Start again; reopens the last URL. A user Stop lands on 5.8's Start again. |
+| First open | 5.10 steps: browser, page, first frame | none |
+| Socket dropped after a frame | 5.11, last frame dimmed | 5 reconnects with backoff, then Reconnect. |
+| Another tab took it | 5.12 | Use it here, Close preview. |
+| Page dialog | 5.13 | The page's own buttons; Esc means Cancel. |
+| Upgrade never succeeded | 5.14, "The proxy in front of cezar didn't let the preview's WebSocket through." (cezar cannot tell Basic Auth from a proxy that drops `Upgrade`; the copy names Basic Auth only as the known case) | Close preview. Stops after 2 attempts, no loop (the #688 failure mode). |
+| Worktree removed | 5.15 | Close preview. The card stays in history, disabled. |
+| Registered, not running | 5.16 `needs_approval`: command, `cwd`, what runs where | Run and open. Reached from the card, the header toggle, the server switcher and the empty state's Review. |
+| Adopted port silent at Open | 5.17 `needs_approval`, same block | Run and open. |
+| Using an adopted server | 5.18, "Not started by cezar" in the URL field | Stop server disabled with the reason. |
 | Typed URL fails | Chromium's error page inside the frame | none |
 | Invalid client message | Dropped, logged once per connection | none |
 
