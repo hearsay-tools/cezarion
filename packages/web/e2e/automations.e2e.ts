@@ -140,7 +140,7 @@ describe('scheduled automations on an opted-in fixture server', () => {
     }))
     base = `http://127.0.0.1:${port}`
     server = spawn(process.execPath, [cezarCli, 'serve', '--repo', root, '--port', String(port), '--no-open'], {
-      env: fixtureServeEnv(root, { CEZ_AUTOMATIONS: '1', CEZ_DRY_RUN: '1' }), stdio: 'ignore',
+      env: fixtureServeEnv(root, { CEZ_AUTOMATIONS: '1' }), stdio: 'ignore',
     })
     await waitForHealth(base)
     project = await bootProjectId(base)
