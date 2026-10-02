@@ -612,6 +612,73 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     expect(f.manager.continueRun(worker.id, { text: 'again' })).toMatchObject({ ok: false, error: expect.stringContaining('identity') });
     expect(sessions).toHaveLength(1);
   });
+  async function startSkillParent() {
+    const dir = join(f.root, '.ai/cezar/skills'); mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'parent-skill.md'), 'PARENT SKILL BODY 778');
+    const workflow = { ...QUICK_TASK_WORKFLOW, steps: [{ id: 'task', skill: 'parent-skill', prompt: '{{task}}' }] };
+    const parent = f.manager.startRun(workflow, { task: 'parent', runner: 'claude', worktree: false, systemPrompt: 'parent extra' });
+    await until(() => sessions.length === 1);
+    // Provision guidance is appended; pin the selected skill without depending on that copy.
+    expect(sessions[0]!.spec.systemPrompt).toContain('PARENT SKILL BODY 778');
+    expect(sessions[0]!.spec.systemPrompt).toContain('parent extra');
+    const caller = controller.credentials.authenticate(sessions[0]!.spec.env?.CEZ_DELEGATION_TOKEN!)!;
+    const pump = vi.spyOn(f.manager as unknown as { pump(): Promise<void> }, 'pump').mockResolvedValue();
+    return { parent, caller, pump };
+  }
+  it("does not copy the parent's selected skill into worker records", async () => {
+    const { caller } = await startSkillParent();
+    const children = [];
+    for (let index = 0; index < 10; index++) {
+      children.push(await controller.service.spawn(caller, { task: `child ${index}`, baseline: 'HEAD', requestId: randomUUID() }));
+    }
+    f.store.flush();
+    expect(readFileSync(join(f.root, '.ai/cezar/runs.json'), 'utf8')).not.toContain('PARENT SKILL BODY 778');
+    for (const child of children) expect(f.store.getRun(child.workerId)?.systemPrompt).toBe('parent extra');
+  });
+  it('gives first-session and post-Continue spawns the same inherited prompt', async () => {
+    const { parent, caller, pump } = await startSkillParent();
+    const first = await controller.service.spawn(caller, { task: 'first', baseline: 'HEAD', requestId: randomUUID() });
+    sessions[0]!.finish(); await until(() => !f.manager.isActive(parent.id));
+    expect(f.manager.continueRun(parent.id, { text: 'continue' }).ok).toBe(true);
+    pump.mockRestore(); await (f.manager as unknown as { pump(): Promise<void> }).pump();
+    await until(() => sessions.some(s => s !== sessions[0] && s.spec.env?.CEZ_TASK_ID === parent.id));
+    vi.spyOn(f.manager as unknown as { pump(): Promise<void> }, 'pump').mockResolvedValue();
+    const continued = sessions.find(s => s !== sessions[0] && s.spec.env?.CEZ_TASK_ID === parent.id)!;
+    const nextCaller = controller.credentials.authenticate(continued.spec.env?.CEZ_DELEGATION_TOKEN!)!;
+    const second = await controller.service.spawn(nextCaller, { task: 'second', baseline: 'HEAD', requestId: randomUUID() });
+    expect(f.store.getRun(first.workerId)?.systemPrompt).toBe(f.store.getRun(second.workerId)?.systemPrompt);
+    expect(f.store.getRun(second.workerId)?.systemPrompt).toBe('parent extra');
+  });
+  it('continues and recovers a legacy worker with its inline skill prompt', async () => {
+    const legacyPrompt = 'Selected skill: /legacy\n\nSkill instructions:\nLEGACY BODY';
+    const workspace = await planOwnedWorkspace(f.root, randomUUID(), f.sha);
+    const worker = f.store.createOwnedRun({ title: 'legacy', task: 'legacy', runner: 'claude', workflow: 'quick-task', systemPrompt: legacyPrompt,
+      steps: [{ id: 'task', name: 'Task', kind: 'agent' }] }, f.parent.id, randomUUID(),
+    { role: 'worker', permissions: [], parentRunId: f.parent.id, workspace }, '0'.repeat(64));
+    const assertInlinePrompt = (spec: AgentRunSpec) => {
+      expect(spec.systemPrompt?.slice(0, legacyPrompt.length)).toBe(legacyPrompt);
+    };
+    f.manager.enqueueOwnedRun(worker.id); await until(() => sessions.length === 1);
+    assertInlinePrompt(sessions[0]!.spec);
+    sessions[0]!.finish(); expect(await f.manager.awaitRunTermination(worker.id, 15000)).toBe(true);
+    expect(f.manager.continueRun(worker.id, { text: 'continue legacy' }).ok).toBe(true);
+    await until(() => sessions.length === 2); assertInlinePrompt(sessions[1]!.spec);
+    sessions[1]!.finish(); expect(await f.manager.awaitRunTermination(worker.id, 15000)).toBe(true);
+    // Persist a queued Continue, then restart through recover(), rather than checking reload alone.
+    f.store.addStep(worker.id, { id: 'continue-2', name: 'Continue', kind: 'agent', synthetic: 'continuation' });
+    f.store.updateRun(worker.id, { status: 'queued', finishedAt: undefined, currentStepId: undefined,
+      continuationMessage: { id: 'continue-2', text: 'recover legacy', origin: 'human', createdAt: new Date().toISOString() } });
+    f.store.updateRun(f.parent.id, { status: 'waiting' }); f.store.flush(); f.manager.dispose();
+    const store = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true }); recoveredStores.push(store);
+    expect(store.getRun(worker.id)?.systemPrompt).toBe(legacyPrompt);
+    const manager = new RunManager(store, f.root); recoveredManagers.push(manager);
+    controller.attachProject({ id: 'restarted-legacy', root: f.root, store, manager });
+    await manager.recover(); await until(() => sessions.length === 3);
+    expect(sessions[2]!.spec.env?.CEZ_TASK_ID).toBe(worker.id);
+    assertInlinePrompt(sessions[2]!.spec);
+    expect(store.getRun(worker.id)?.systemPrompt).toBe(legacyPrompt);
+    sessions[2]!.finish(); expect(await manager.awaitRunTermination(worker.id, 15000)).toBe(true);
+  });
   it('fresh and Continue rotate/revoke inside execution, retain restrictions through accepted worker and restart', async () => {
     const workflow = { ...QUICK_TASK_WORKFLOW, steps: [{ ...QUICK_TASK_WORKFLOW.steps[0]!, model: 'haiku', allowedTools: ['Read', 'Bash'], bashAllowlist: ['git status'] }] };
     const run = f.manager.startRun(workflow, { task: 'parent', runner: 'claude', model: 'opus', systemPrompt: 'parent restriction', worktree: false });
