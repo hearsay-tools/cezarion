@@ -105,8 +105,20 @@ describe('live preview', () => {
 
     // The card lands while the agent's reply is still rendering below it and the thread scrolls
     // with it; a click on a card that is still moving misses. Click it once its box has held still.
+    // On CI the agent's reply is longer (deeper fixture paths), so following the thread's tail left
+    // the card under the sticky breadcrumb, and agent-browser refused the covered click (failure
+    // bundle live-preview/registers-runs-streams-takes-a-click-and-stops-1, PR #792). Centre the
+    // button first, then wait for it to hold still below the breadcrumb.
+    browser.waitForFunction(`!!document.querySelector('${card} button')`)
+    browser.evaluate(`document.querySelector('${card} button').scrollIntoView({ block: 'center', behavior: 'instant' })`)
     browser.waitForStable(
-      `(() => { const b = document.querySelector('${card} button'); if (!b) return null; const r = b.getBoundingClientRect(); return r.width > 0 ? [r.left, r.top, r.width, r.height] : null })()`,
+      `(() => {
+        const b = document.querySelector('${card} button'); if (!b) return null;
+        const r = b.getBoundingClientRect();
+        const crumb = document.querySelector('[data-slot="desktop-breadcrumb"]');
+        const below = crumb ? crumb.getBoundingClientRect().bottom : 0;
+        return r.width > 0 && r.top >= below && r.bottom <= innerHeight ? [r.left, r.top, r.width, r.height] : null;
+      })()`,
       { holdMs: 800 },
     )
     browser.click(`${card} button`)
