@@ -220,7 +220,10 @@ export async function runWorkerCommand(argv: string[], env: NodeJS.ProcessEnv): 
       body = operation === 'conversation' ? conversationInspectRequestSchema.parse({ recipientRunId: positionals[0] }) : conversationCancelRequestSchema.parse({ requestId: positionals[0] });
     } else if (operation === 'spawn') {
       expectCount(operation, positionals, 1);
-      const skillIssue = skillFlagIssue({ skill: values.skill, workflow: values.workflow });
+      const skillIssue = skillFlagIssue({
+        skill: values.skill as string | undefined,
+        workflow: values.workflow as string | undefined,
+      });
       if (skillIssue) throw new WorkerCliError(skillIssue);
       if (values.context !== undefined && values['context-file'] !== undefined) throw new WorkerCliError('spawn has extra argument --context-file');
       const contextText = values['context-file'] === undefined ? values.context
