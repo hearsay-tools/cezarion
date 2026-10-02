@@ -116,8 +116,10 @@ export function useSidebarArchive(projectId: string | undefined, cacheScope: str
   // A second click before the first answers would send a second archive and a second toast.
   const inFlight = React.useRef(new Set<string>())
 
-  const archiveOne = (run: RunRecord) => {
-    if (inFlight.current.has(run.id)) return
+  /** Resolves whether the run was archived, so a swiped row can snap back on a failure. A repeat
+   *  while the first request is in flight resolves `true` at once: the first one decides. */
+  const archiveOne = (run: RunRecord): Promise<boolean> => {
+    if (inFlight.current.has(run.id)) return Promise.resolve(true)
     inFlight.current.add(run.id)
     // Captured before the request: navigation during the round trip must not retarget either half.
     const scope = cacheScope ?? queryScope()
@@ -132,14 +134,18 @@ export function useSidebarArchive(projectId: string | undefined, cacheScope: str
       },
       row?.closest('[data-slot="quick-list-bucket"]')?.parentElement ?? null,
     )
-    void (projectId === undefined ? archiveRun(run.id, true) : archiveProjectRun(projectId, run.id, true))
+    return (projectId === undefined ? archiveRun(run.id, true) : archiveProjectRun(projectId, run.id, true))
       .then(
         () => {
           void refresh(scope)
           offerUndo(archivedToastMessage({ title: runTitle(run) }), scope, [run.id], wasPinned ? [run.id] : [])
           restoreFocus()
+          return true
         },
-        (error: Error) => toast(error.message, { tone: 'danger' }),
+        (error: Error) => {
+          toast(error.message, { tone: 'danger' })
+          return false
+        },
       )
       .finally(() => inFlight.current.delete(run.id))
   }

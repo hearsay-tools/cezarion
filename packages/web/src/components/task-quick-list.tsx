@@ -4,6 +4,7 @@ import { useQueries } from '@tanstack/react-query'
 import * as React from 'react'
 import { queryScope } from '@open-mercato/cezar-api-client'
 import { useSidebarArchive } from '@/components/sidebar-archive'
+import { useSwipeToArchive } from '@/components/use-swipe-to-archive'
 import { useHealth, usePinRun, useProjectRuns, useProjectRepoBase, useProjects, useReferenceProjectId, useRuns } from '@/api/queries'
 import { Link, scopeTo, useNavigate, useProjectMatch } from '@/lib/project-router'
 import type { ArchiveFinishedScope, RunRecord } from '@open-mercato/cezar-api-client'
@@ -77,7 +78,7 @@ export function TaskQuickList({
    *  belongs to is a container's question — this list is painted for other projects too. */
   onTogglePin?: (run: RunRecord, pinned: boolean) => void
   /** Archive one finished row (#780). Like the pin, the container owns the mutation. */
-  onArchiveRun?: (run: RunRecord) => void
+  onArchiveRun?: (run: RunRecord) => void | Promise<unknown>
   /** Sweep a group's finished rows: `unpinned` is the Finished group, `pinned` the Pinned one. */
   onSweep?: (scope: ArchiveFinishedScope) => void
   /** The sweep in flight, so its button reads busy. */
@@ -183,7 +184,7 @@ export function QuickListBuckets({
   showTokens?: boolean
   showCost?: boolean
   onTogglePin?: (run: RunRecord, pinned: boolean) => void
-  onArchiveRun?: (run: RunRecord) => void
+  onArchiveRun?: (run: RunRecord) => void | Promise<unknown>
   onSweep?: (scope: ArchiveFinishedScope) => void
   sweeping?: ArchiveFinishedScope | null
   /** What each group sweep would take, from the whole list. Absent = no group buttons. */
@@ -283,7 +284,7 @@ function Row({
   showTokens: boolean
   showCost: boolean
   onTogglePin?: (run: RunRecord, pinned: boolean) => void
-  onArchiveRun?: (run: RunRecord) => void
+  onArchiveRun?: (run: RunRecord) => void | Promise<unknown>
 }) {
   if (row.kind === 'run') {
     return (
@@ -526,7 +527,7 @@ function ExpandedVariantMembers({
   showTokens: boolean
   showCost: boolean
   onTogglePin?: (run: RunRecord, pinned: boolean) => void
-  onArchiveRun?: (run: RunRecord) => void
+  onArchiveRun?: (run: RunRecord) => void | Promise<unknown>
 }) {
   const shared = sharedReferenceKeys(members, scope ?? undefined)
   // 15.5px in, a 1px guide line, then 6px: with the row's own 10px padding that puts each
@@ -809,13 +810,17 @@ function RunRow({
   showCost: boolean
   onTogglePin?: (run: RunRecord, pinned: boolean) => void
   /** Archive this row (#780). Where references are inert (touch, the mobile shell) the swipe
-   *  replaces the button, so it only renders on a device that can hover. */
-  onArchiveRun?: (run: RunRecord) => void
+   *  replaces the button, so it only renders on a device that can hover. A promise that
+   *  resolves `false` says the archive failed, and a swiped row snaps back. */
+  onArchiveRun?: (run: RunRecord) => void | Promise<unknown>
 }) {
   const navigate = useNavigate()
   // On a device that cannot hover, or in the mobile shell, the references are plain text and the
   // whole row is the tap target (#617 01b); the task header keeps them as 44px links.
   const inertReferences = useRowReferencesInert()
+  // Touch and the mobile shell swipe instead (#780 §7): the same rows the button serves elsewhere.
+  const swipeable = Boolean(onArchiveRun) && inertReferences && isSweepable(run)
+  const swipe = useSwipeToArchive({ id: run.id, enabled: swipeable, onArchive: () => onArchiveRun?.(run) })
   const to = scopeTo(scope, `/tasks/${run.id}`)
   const attention = deriveAttention(run)
   const isActive = run.id === currentRunId
@@ -876,7 +881,7 @@ function RunRow({
     meta.push(<span key="state" data-slot="task-row-state">{attention.label}</span>)
   }
 
-  return (
+  const rowElement = (
     <div
       data-slot="task-row"
       data-run-id={run.id}
@@ -891,8 +896,13 @@ function RunRow({
         if ((event.target as Element).closest('a, button, input')) return
         navigate(to)
       }}
+      {...(swipeable ? swipe.bind : {})}
+      style={swipe.offset ? { transform: `translateX(${swipe.offset}px)` } : undefined}
       className={cn(
         'selection-row group/task-row flex cursor-pointer items-start gap-2.5 rounded-[6px] py-1.5 pr-2 pl-2.5 hover:bg-sidebar-row-hover',
+        // The finger moves the row 1:1; only the snap back or out animates, and only for users who
+        // have not asked for reduced motion (then it is an instant snap).
+        swipeable && swipe.phase !== 'dragging' && 'motion-safe:transition-transform motion-safe:duration-200 motion-safe:ease-out',
         // Neutral, not teal (#617): the selected fill is a surface step, and it holds under the
         // pointer so hovering the open task does not make it look unselected.
         isActive && 'bg-sidebar-row-selected hover:bg-sidebar-row-selected',
@@ -1053,6 +1063,63 @@ function RunRow({
           </button>
         ) : null}
       </span>
+    </div>
+  )
+
+  if (!swipeable) return rowElement
+  return (
+    <div
+      ref={swipe.surfaceRef}
+      data-slot="task-row-swipe"
+      // `pan-y`: the browser keeps vertical scrolling, the gesture only ever reads horizontal moves.
+      className="relative touch-pan-y overflow-hidden rounded-[6px]"
+    >
+      {/* Tapping the parked action leaves the row parked until the list drops it. */}
+      {swipe.offset < 0 ? <SwipeArchiveAction width={-swipe.offset} past={swipe.past} title={title} onArchive={() => void onArchiveRun?.(run)} /> : null}
+      {rowElement}
+    </div>
+  )
+}
+
+/**
+ * What a swipe uncovers behind a finished row (#780 §7): an 88px `Archive` action while short,
+ * the whole uncovered width in `--info` with `Release to archive` once past the commit point.
+ * Hidden from assistive tech: the row stays ONE link, and the thread's own Archive is the path
+ * that does not need a gesture.
+ */
+function SwipeArchiveAction({ width, past, title, onArchive }: { width: number; past: boolean; title: string; onArchive: () => void }) {
+  return (
+    <div
+      data-slot="task-row-swipe-action"
+      data-past={past ? 'true' : undefined}
+      aria-hidden="true"
+      style={{ width }}
+      className={cn(
+        'absolute inset-y-0 right-0 flex items-stretch justify-end overflow-hidden rounded-[6px]',
+        // Ink on --info is the violet pill's pair (`--signal-ink`): #121722 dark, #FFFFFF light.
+        past ? 'bg-info text-signal-ink' : 'bg-muted text-foreground',
+      )}
+    >
+      {past ? (
+        <span className="flex w-full items-center justify-center gap-2 text-[12px] font-semibold whitespace-nowrap">
+          <ArchiveIcon className="size-[16px] shrink-0" aria-hidden="true" />
+          Release to archive
+        </span>
+      ) : (
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-label={`Archive ${title}`}
+          onClick={(event) => {
+            event.stopPropagation()
+            onArchive()
+          }}
+          className="flex w-[88px] shrink-0 flex-col items-center justify-center gap-1 text-[12px] font-semibold"
+        >
+          <ArchiveIcon className="size-[16px]" aria-hidden="true" />
+          Archive
+        </button>
+      )}
     </div>
   )
 }

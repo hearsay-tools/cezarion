@@ -89,7 +89,7 @@ describe('useSidebarArchive', () => {
 
   it('archives one row in its own project and offers Undo bound to that project', async () => {
     const { result, rerender } = renderHook(({ project }: { project: string }) => useSidebarArchive(project, project), { wrapper, initialProps: { project: 'p1' } })
-    act(() => result.current.archiveOne(record({ id: 'r1', pinned: true })))
+    act(() => { void result.current.archiveOne(record({ id: 'r1', pinned: true })) })
     await vi.waitFor(() => expect(toastMock).toHaveBeenCalledTimes(1))
     expect(api.archiveProjectRun).toHaveBeenCalledWith('p1', 'r1', true)
     expect(toastMock.mock.calls[0]![0]).toBe('Archived "Fix the thing"')
@@ -127,7 +127,7 @@ describe('useSidebarArchive', () => {
   it('surfaces a failed archive as a danger toast', async () => {
     api.archiveProjectRun.mockRejectedValue(new Error('Nope'))
     const { result } = renderHook(() => useSidebarArchive('p1', 'p1'), { wrapper })
-    act(() => result.current.archiveOne(record()))
+    act(() => { void result.current.archiveOne(record()) })
     await vi.waitFor(() => expect(toastMock).toHaveBeenCalledWith('Nope', { tone: 'danger' }))
   })
 })
@@ -139,13 +139,13 @@ describe('useSidebarArchive guards and focus (#780)', () => {
     let resolve!: (value: unknown) => void
     api.archiveProjectRun.mockImplementation(() => new Promise((r) => { resolve = r }))
     const { result } = renderHook(() => useSidebarArchive('p1', 'p1'), { wrapper })
-    act(() => { result.current.archiveOne(record({ id: 'r1' })); result.current.archiveOne(record({ id: 'r1' })) })
+    act(() => { void result.current.archiveOne(record({ id: 'r1' })); void result.current.archiveOne(record({ id: 'r1' })) })
     await act(async () => resolve({}))
     await vi.waitFor(() => expect(toastMock).toHaveBeenCalledTimes(1))
     expect(api.archiveProjectRun).toHaveBeenCalledTimes(1)
     // Settled: the same row may be archived again (after an Undo, say).
     api.archiveProjectRun.mockResolvedValue({})
-    act(() => result.current.archiveOne(record({ id: 'r1' })))
+    act(() => { void result.current.archiveOne(record({ id: 'r1' })) })
     await vi.waitFor(() => expect(api.archiveProjectRun).toHaveBeenCalledTimes(2))
   })
 
@@ -162,7 +162,7 @@ describe('useSidebarArchive guards and focus (#780)', () => {
   async function archiveAndRemove(ui: ReturnType<typeof mountBucket>, id: string) {
     const { result } = renderHook(() => useSidebarArchive('p1', 'p1'), { wrapper })
     ui.button(id).focus()
-    act(() => result.current.archiveOne(record({ id })))
+    act(() => { void result.current.archiveOne(record({ id })) })
     await vi.waitFor(() => expect(toastMock).toHaveBeenCalled())
     // The SSE removes the row a moment after the request answers.
     act(() => ui.row(id).remove())
@@ -192,7 +192,7 @@ describe('useSidebarArchive guards and focus (#780)', () => {
     document.body.append(elsewhere)
     const { result } = renderHook(() => useSidebarArchive('p1', 'p1'), { wrapper })
     ui.button('a').focus()
-    act(() => result.current.archiveOne(record({ id: 'a' })))
+    act(() => { void result.current.archiveOne(record({ id: 'a' })) })
     elsewhere.focus()
     await vi.waitFor(() => expect(toastMock).toHaveBeenCalled())
     act(() => ui.row('a').remove())

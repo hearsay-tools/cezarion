@@ -11,6 +11,7 @@ import type { RunRecord } from '@open-mercato/cezar-api-client'
 import { ListViewProvider } from '@/components/list-view'
 import { ReferenceStatusProvider, ReferenceStatusRegistry } from '@/components/reference-status'
 import { QuickListBuckets, SidebarSessionScope, TaskQuickList, TaskQuickListContainer } from '@/components/task-quick-list'
+import { resetSwipeStore } from '@/components/use-swipe-to-archive'
 import { groupRuns } from '@/lib/task-groups'
 
 const NOW = Date.parse('2026-07-14T12:00:00.000Z')
@@ -2056,5 +2057,125 @@ describe('sidebar archive (#780)', () => {
       </QueryClientProvider>,
     )
     expect(groupButton('unpinned')!.getAttribute('aria-label')).toBe('Archive all, shop')
+  })
+})
+
+describe('swipe to archive on touch (#780 §7)', () => {
+  // Every gesture step is 300ms after the last: the swipes here are deliberate drags, never flings.
+  let clock = 0
+  beforeEach(() => {
+    clock = NOW
+    vi.spyOn(Date, 'now').mockImplementation(() => clock)
+    stubMedia({ noHover: true, desktop: false })
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      width: 320, height: 47, top: 0, left: 0, right: 320, bottom: 47, x: 0, y: 0, toJSON: () => ({}),
+    } as DOMRect)
+  })
+  afterEach(() => {
+    resetSwipeStore()
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+  })
+  const surface = (id: string) => document.querySelector<HTMLElement>(`[data-slot="task-row"][data-run-id="${id}"]`)?.closest<HTMLElement>('[data-slot="task-row-swipe"]') ?? null
+  const layer = (id: string) => document.querySelector<HTMLElement>(`[data-slot="task-row"][data-run-id="${id}"]`)!
+  const action = (id: string) => surface(id)?.querySelector<HTMLElement>('[data-slot="task-row-swipe-action"]') ?? null
+  function swipe(id: string, dx: number, { release = true } = {}) {
+    const el = layer(id)
+    fireEvent.pointerDown(el, { pointerId: 1, clientX: 300, clientY: 20, button: 0 })
+    clock += 300
+    fireEvent.pointerMove(el, { pointerId: 1, clientX: 300 + Math.sign(dx) * 12, clientY: 20 })
+    clock += 300
+    fireEvent.pointerMove(el, { pointerId: 1, clientX: 300 + dx, clientY: 20 })
+    clock += 300
+    if (release) fireEvent.pointerUp(el, { pointerId: 1, clientX: 300 + dx, clientY: 20 })
+  }
+
+  it('wraps only finished, non-scheduled rows in a pan-y swipe surface', () => {
+    renderList({
+      runs: [
+        run({ id: 'fin', status: 'done' }),
+        run({ id: 'pin', status: 'cancelled', pinned: true }),
+        run({ id: 'live', status: 'running' }),
+        run({ id: 'ask', status: 'waiting' }),
+        run({ id: 'sched', status: 'failed', autoResumeAt: new Date(NOW + 600_000).toISOString() }),
+      ],
+      onArchiveRun: vi.fn(),
+      onTogglePin: vi.fn(),
+    })
+    expect(surface('fin')!.className).toContain('touch-pan-y')
+    expect(surface('fin')!.className).toContain('overflow-hidden')
+    expect(surface('pin')).not.toBeNull()
+    for (const id of ['live', 'ask', 'sched']) expect(surface(id)).toBeNull()
+    // At rest nothing sits behind the row.
+    expect(action('fin')).toBeNull()
+  })
+
+  it('renders no swipe where the row button is used, nor without an archive handler', () => {
+    vi.unstubAllGlobals()
+    stubMedia({ noHover: false, desktop: true })
+    renderList({ runs: [run({ id: 'fin' })], onArchiveRun: vi.fn() })
+    expect(surface('fin')).toBeNull()
+    cleanup()
+    stubMedia({ noHover: true, desktop: false })
+    renderList({ runs: [run({ id: 'fin2' })] })
+    expect(surface('fin2')).toBeNull()
+  })
+
+  it('parks a short swipe on the Archive action, and tapping it archives', () => {
+    const onArchiveRun = vi.fn()
+    renderList({ runs: [run({ id: 'fin', title: 'Cursor fix' })], onArchiveRun })
+    swipe('fin', -50)
+    expect(layer('fin').style.transform).toBe('translateX(-88px)')
+    const button = action('fin')!.querySelector('button')!
+    expect(button.textContent).toBe('Archive')
+    expect(button.getAttribute('aria-label')).toBe('Archive Cursor fix')
+    expect(button.tabIndex).toBe(-1)
+    expect(action('fin')!.className).toContain('bg-muted')
+    fireEvent.click(button)
+    expect(onArchiveRun).toHaveBeenCalledOnce()
+    expect(onArchiveRun.mock.calls[0]![0]).toMatchObject({ id: 'fin' })
+    expect(location()).toBe('/')
+  })
+
+  it('a long swipe shows "Release to archive" in --info and archives on release', () => {
+    const onArchiveRun = vi.fn()
+    renderList({ runs: [run({ id: 'fin' })], onArchiveRun })
+    swipe('fin', -220, { release: false })
+    expect(action('fin')!.className).toContain('bg-info')
+    expect(action('fin')!.className).toContain('text-signal-ink')
+    expect(action('fin')!.textContent).toBe('Release to archive')
+    expect(onArchiveRun).not.toHaveBeenCalled()
+    fireEvent.pointerUp(layer('fin'), { pointerId: 1, clientX: 80, clientY: 20 })
+    expect(onArchiveRun).toHaveBeenCalledOnce()
+  })
+
+  it('a drag never opens the row, and the row stays one link for screen readers', () => {
+    renderList({ runs: [run({ id: 'fin', title: 'Only link' })], onArchiveRun: vi.fn() })
+    swipe('fin', -30)
+    fireEvent.click(within(layer('fin')).getByRole('link'))
+    expect(location()).toBe('/')
+    swipe('fin', -50)
+    expect(action('fin')!.getAttribute('aria-hidden')).toBe('true')
+    expect(within(surface('fin')!).getAllByRole('link')).toHaveLength(1)
+    expect(within(surface('fin')!).queryAllByRole('button')).toHaveLength(0)
+  })
+
+  it('snaps with a motion-safe 200ms transition, never while the finger drags', () => {
+    renderList({ runs: [run({ id: 'fin' })], onArchiveRun: vi.fn() })
+    expect(layer('fin').className).toContain('motion-safe:transition-transform')
+    expect(layer('fin').className).toContain('motion-safe:duration-200')
+    swipe('fin', -50, { release: false })
+    expect(layer('fin').className).not.toContain('motion-safe:transition-transform')
+    expect(layer('fin').style.transform).toBe('translateX(-50px)')
+  })
+
+  it('keeps one row open at a time', () => {
+    renderList({ runs: [run({ id: 'a' }), run({ id: 'b' })], onArchiveRun: vi.fn() })
+    swipe('a', -50)
+    expect(action('a')).not.toBeNull()
+    swipe('b', -50)
+    expect(action('a')).toBeNull()
+    expect(layer('a').style.transform).toBe('')
+    expect(action('b')).not.toBeNull()
   })
 })
