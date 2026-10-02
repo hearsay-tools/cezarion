@@ -127,9 +127,16 @@ function Stats({ stats, shrunk }: { stats: PreviewStatsValue; shrunk: boolean })
     return <StatusDot data-slot="preview-stats" tone={idle ? 'neutral' : 'success'} aria-label="Preview is live" role="img" />
   }
   return (
-    <span data-slot="preview-stats" className="flex shrink-0 items-center gap-1.5 font-mono text-xs whitespace-nowrap text-muted-foreground">
+    // The words go first when the toolbar is narrow (a container query): the dot stays, and the
+    // numbers stay readable through the accessible name and More.
+    <span
+      data-slot="preview-stats"
+      role="img"
+      aria-label={idle ? 'idle' : statsText(stats)}
+      className="flex shrink-0 items-center gap-1.5 font-mono text-xs whitespace-nowrap text-muted-foreground"
+    >
       <StatusDot tone={idle ? 'neutral' : 'success'} aria-hidden="true" />
-      {idle ? 'idle' : statsText(stats)}
+      <span className="hidden @min-[640px]:inline">{idle ? 'idle' : statsText(stats)}</span>
     </span>
   )
 }
@@ -214,7 +221,7 @@ export function PreviewToolbar(props: PreviewToolbarProps) {
   ) : null
 
   const address = (
-    <div className="relative flex min-w-0 flex-1 items-center">
+    <div className="relative flex min-w-[9rem] flex-1 items-center">
       <GlobeIcon className="pointer-events-none absolute left-2.5 size-4 text-muted-foreground" aria-hidden="true" />
       <input
         ref={input}
@@ -266,7 +273,7 @@ export function PreviewToolbar(props: PreviewToolbarProps) {
       <DropdownMenuTrigger asChild>
         <Button variant="outline" size="sm" className="shrink-0 gap-1.5" aria-label={`Viewport size: ${viewportLabel(viewport)}`}>
           {viewport === 'fit' ? <MaximizeIcon aria-hidden="true" /> : <MonitorIcon aria-hidden="true" />}
-          <span className={viewport === 'fit' ? undefined : 'font-mono font-normal'}>{viewportLabel(viewport)}</span>
+          <span className={cn('hidden @min-[500px]:inline', viewport !== 'fit' && 'font-mono font-normal')}>{viewportLabel(viewport)}</span>
           <ChevronDownIcon className="size-3.5 text-muted-foreground" aria-hidden="true" />
         </Button>
       </DropdownMenuTrigger>
@@ -391,7 +398,7 @@ export function PreviewToolbar(props: PreviewToolbarProps) {
   }
 
   return (
-    <div data-slot="preview-toolbar" className="relative flex shrink-0 items-center gap-1.5 border-b border-border bg-background px-2.5 py-2">
+    <div data-slot="preview-toolbar" className="@container relative flex shrink-0 items-center gap-1.5 border-b border-border bg-background px-2.5 py-2">
       {session}
       {back}
       {forward}
@@ -400,7 +407,7 @@ export function PreviewToolbar(props: PreviewToolbarProps) {
       {address}
       {viewportMenu}
       {readout}
-      {badge ? <ExperimentalBadge iconOnly={crowded} /> : null}
+      {badge ? <ExperimentalBadge iconOnly={crowded} responsive={!crowded} /> : null}
       <span aria-hidden="true" className="mx-0.5 h-5 w-px shrink-0 bg-border" />
       {more}
       <Button variant="ghost" size="icon-sm" className={iconButton} aria-label="Close preview" onClick={props.onClose}>

@@ -62,6 +62,19 @@ describe('PreviewToolbar', () => {
     expect(screen.getByText('Experimental')).toBeTruthy()
   })
 
+  it('the address field keeps its room: a minimum width, truncated text, and neighbours that give way first', () => {
+    render(<PreviewToolbar {...props()} />)
+    const field = screen.getByRole('textbox', { name: 'Page address' })
+    expect(field.className).toContain('truncate')
+    const minRem = Number(/min-w-\[(\d+(?:\.\d+)?)rem\]/.exec(field.parentElement!.className)?.[1])
+    expect(minRem).toBeGreaterThanOrEqual(7)
+    // Stats, the badge and the viewport label drop their words when the toolbar is narrow (container queries).
+    expect(document.querySelector('[data-slot="preview-toolbar"]')!.className).toContain('@container')
+    expect(screen.getByText('24 fps · 180 KB/s · 38 ms').className).toMatch(/hidden @min-\[\d+px\]:inline/)
+    expect(screen.getByText('Experimental').className).toMatch(/hidden @min-\[\d+px\]:inline/)
+    expect(screen.getByText('Fit').className).toMatch(/hidden @min-\[\d+px\]:inline/)
+  })
+
   it('reads idle once a second passes without a frame', () => {
     render(<PreviewToolbar {...props()} />)
     expect(screen.queryByText('idle')).toBeNull()

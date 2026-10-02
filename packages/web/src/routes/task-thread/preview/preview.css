@@ -8,7 +8,9 @@
   top: 0;
   align-self: flex-start;
   flex: 0 0 var(--preview-pane, 58%);
-  min-width: 0;
+  /* The toolbar needs room for the address next to its controls; the transcript keeps the rest. */
+  min-width: min(440px, 100%);
+  max-width: calc(100% - 360px);
   height: var(--preview-h, 100dvh);
   border-left: 1px solid var(--border);
   background: var(--background);
@@ -27,6 +29,8 @@
     align-self: stretch;
     height: auto;
     min-height: 0;
+    min-width: 0;
+    max-width: none;
     border-left: 0;
   }
 }
@@ -40,8 +44,23 @@
     inset: 0;
     z-index: 40;
     height: 100dvh;
+    min-width: 0;
+    max-width: none;
     padding-bottom: env(safe-area-inset-bottom);
     border-left: 0;
+  }
+}
+
+/* Docked, the transcript column is half the screen and the task header cannot spend it all on chips:
+ * the title keeps one truncated line on its own row and the status pill and actions sit under it. */
+@container (max-width: 640px) {
+  [data-slot='task-split'][data-pane='open'] [data-slot='run-title-row'] { flex-wrap: wrap; row-gap: 6px; }
+  [data-slot='task-split'][data-pane='open'] [data-slot='run-title-row'] > .group { flex: 1 1 100%; }
+  [data-slot='task-split'][data-pane='open'] [data-slot='run-title-row'] h1 {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 }
 

@@ -134,6 +134,21 @@ describe('live preview', () => {
     expect(ready.g).toBeGreaterThan(150)
     browser.screenshot(resolve(artifactsDir, 'streaming.png'), { viewport: true })
 
+    // Docked, both halves keep their room (#781 visual QA): the task title holds one line instead of
+    // wrapping letter by letter beside the chips, and the address field is wide enough to read the
+    // page's URL whatever else the toolbar carries.
+    const room = browser.waitForValue(
+      `(() => {
+        const field = document.querySelector('${address}');
+        const title = document.querySelector('[data-slot="run-title-row"] h1');
+        if (!field || !title) return null;
+        return { address: field.getBoundingClientRect().width, titleHeight: title.getBoundingClientRect().height, titleSize: parseFloat(getComputedStyle(title).fontSize) };
+      })()`,
+      value => !!value,
+    ) as { address: number; titleHeight: number; titleSize: number }
+    expect(room.address).toBeGreaterThan(150)
+    expect(room.titleHeight).toBeLessThan(room.titleSize * 1.6)
+
     // Run and open shows the page's address, in a field nobody focused (#781 final review,
     // Important 5: the pane used to focus the field before the URL landed, freezing an empty
     // draft). Read before the tap, because tapAt blurs the field and would hide the bug.
