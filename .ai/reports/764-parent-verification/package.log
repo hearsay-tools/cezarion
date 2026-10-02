@@ -1,0 +1,76 @@
+
+> test:package
+> npm run test:package -w @wjarka/cezarion
+
+
+> @wjarka/cezarion@0.15.1 test:package
+> node --import ../../scripts/test-git-env.mjs --import tsx --test test/e2e/*.test.ts
+
+✔ the cezarion alias imports a specifier the exports map exposes (79.702209ms)
+✔ alias publication lag leaves the original npx command untouched (2479.063049ms)
+✔ engine-incompatible advertised package is refused before touching the original (1741.392946ms)
+✔ default alias npx 0.14.8 → 0.15.0 updates the original future command (3306.341744ms)
+✔ default alias npx 1.0.0 → 2.0.0 updates the original future command (3190.94517ms)
+✔ @wjarka/cezarion global promotion changes the original command used by future launches (2247.049476ms)
+✔ cezarion global promotion changes the original command used by future launches (2216.528939ms)
+✔ real global restart helper promotes after acknowledgement and boots on the same port (2245.106156ms)
+✔ real global restart helper reaps new process and rolls back on wrong health (2372.476084ms)
+✔ real npx restart helper promotes after acknowledgement and boots on the same port (2491.832466ms)
+✔ real npx restart helper reaps new process and rolls back on wrong health (2521.303805ms)
+✔ a queued helper rejects a stale claim before promotion (114.5086ms)
+✔ a compromised installation lock cancels promotion before launch and retains recovery (58.564939ms)
+✔ a SIGTERM-resistant promotion child is reaped before compromised-lock failure settles (3011.037669ms)
+✔ a SIGTERM-resistant staging child is reaped before Apply settles (3010.711205ms)
+✔ a compromised npx concurrency lock cancels promotion before launch (64.592233ms)
+✔ an unrelated matching health occupant cannot satisfy owned listener proof (198.457878ms)
+✔ built production CLI acknowledges its actual listener (ephemeral=false) (1396.738272ms)
+✔ built production CLI acknowledges its actual listener (ephemeral=true) (1334.256144ms)
+✔ copied detached helper acknowledges, then promotes and boots its owned child (432.197072ms)
+✔ detached launcher rejects a helper that exits before acknowledgement (93.878706ms)
+✔ detached helper does not acknowledge a stale durable claim (128.429335ms)
+✔ helper preserves actual loopback endpoint 127.0.0.2 (rollback=false, rejecting proxy enabled) (199.444352ms)
+✔ helper preserves actual loopback endpoint 127.0.0.2 (rollback=true, rejecting proxy enabled) (361.165523ms)
+✔ helper preserves actual loopback endpoint ::1 (rollback=false, rejecting proxy enabled) (210.06734ms)
+✔ helper preserves actual loopback endpoint ::1 (rollback=true, rejecting proxy enabled) (381.732145ms)
+✔ hoisted global alias restores both packages and fresh launchers after promotion failure (437.121021ms)
+✔ hoisted global alias restores both packages and fresh launchers after health failure (575.062211ms)
+✔ cockpit ownership rejects live duplicates, recovers after death, and isolates repositories (6324.888029ms)
+✔ built worker CLI runs without cez on PATH; headless provision stays local and exits cleanly (4235.716514ms)
+✔ installed CLI completes owned-worker lifecycle with lost spawn reply and one slot (8454.94229ms)
+✔ the build repointed something — otherwise every assertion below is vacuous (133.022446ms)
+✔ the bundled contract ships declarations, not just JavaScript (119.274187ms)
+✔ a repointed declaration type-checks with skipLibCheck OFF (1185.168202ms)
+✔ the published contract and workflow share the document vocabulary at runtime (275.426728ms)
+✔ the release tarball installs and runs the dry-run CLI workflow (17472.536043ms)
+✔ dry-run publish stamps every manifest, pins each sibling exact, and emits the result JSON (2667.706049ms)
+✔ OIDC without a token still forces a snapshot dry run (2851.238027ms)
+✔ a missing NPM token forces a dry run instead of failing the job (1158.762937ms)
+✔ the nightly channel stamps a dated version and publishes under the nightly tag (1169.389435ms)
+✔ a nightly re-run stamps the attempt onto the version so it cannot collide (1245.367489ms)
+✔ the same schedule event without the channel request publishes nothing (67.725065ms)
+✔ a non-publishable event exits 0 without touching the manifests (62.255301ms)
+✔ pack-only produces snapshot archives without publishing or running lifecycle scripts (908.526655ms)
+✔ a patch bump stamps every manifest, keeps the caret ranges, and emits the version (2662.921414ms)
+✔ a private package is stamped but never published (2842.653776ms)
+✔ the existing bump publishes the committed version verbatim (1382.679005ms)
+✔ a missing NPM token forces a dry run instead of publishing (1220.24481ms)
+✔ OIDC without a token does not force a dry run and does not pass --provenance (260.335598ms)
+✔ a token publish from Actions still passes --provenance (255.699374ms)
+✔ a mid-set collision skips the already-published name and publishes the rest (345.389469ms)
+✔ a publish failure that is not already on the registry still aborts (309.249515ms)
+✔ an unknown bump exits non-zero without touching the manifests (80.37694ms)
+✔ an existing publication with different source is verified before finalization (210.008047ms)
+✔ an existing publication with missing source is verified before finalization (202.213784ms)
+✔ an existing publication with matching source is verified before finalization (439.750612ms)
+✔ stops a child that handles SIGTERM (64.76595ms)
+✔ kills and names a child that ignores SIGTERM (108.89809ms)
+✔ returns when a child already exited from a signal (2.954926ms)
+✔ built cez task drives a dry-run cockpit it discovers from the checkout (18259.852875ms)
+ℹ tests 60
+ℹ suites 0
+ℹ pass 60
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 37138.853237

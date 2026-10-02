@@ -1,0 +1,36 @@
+{
+  "idle": {
+    "directory": "idle-1790947459963",
+    "testedHead": "068369331d9b0da13b6116568beb8036a5a6884e",
+    "invocations": 10,
+    "passed": 10,
+    "selectedTestExecutions": 100,
+    "maxOwnedBrowserSessions": 2,
+    "maxGlobalBrowserRoots": 2,
+    "maxLoad1m": 2.52,
+    "minFreeGiB": 38.87,
+    "invocationSeconds": {
+      "min": 29.984,
+      "median": 39.577,
+      "max": 44.25
+    },
+    "startupSnapshots": 0
+  },
+  "load": {
+    "directory": "load-1790949205935",
+    "testedHead": "8fb8920b208fcd861a40f6ffd07a16657394b2da",
+    "invocations": 80,
+    "passed": 80,
+    "selectedTestExecutions": 800,
+    "maxOwnedBrowserSessions": 14,
+    "maxGlobalBrowserRoots": 14,
+    "maxLoad1m": 15.78,
+    "minFreeGiB": 32.47,
+    "invocationSeconds": {
+      "min": 28.878,
+      "median": 42.263,
+      "max": 61.275
+    },
+    "startupSnapshots": 80
+  }
+}

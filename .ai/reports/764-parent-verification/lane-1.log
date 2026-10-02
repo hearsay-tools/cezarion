@@ -1,0 +1,21 @@
+[test-env] reusing the healthy instance at http://127.0.0.1:45079
+TEST_ENV_STATUS=running
+TEST_ENV_BASE_URL=http://127.0.0.1:45079
+TEST_ENV_DESCRIPTOR=.ai/qa/test-env.json
+TEST_ENV_REUSED=1
+BROWSER_PROVIDER=agent-browser
+BROWSER_INSTALLED=1
+
+> test
+> vitest run --config packages/web/e2e/vitest.config.ts --shard=1/4
+
+
+ RUN  v4.1.10 /home/agent/projects/cezar/.ai/cezar/tmp/a001c986-83f8-441e-9cb8-874e3a36cac5/cez-e2e-lanes-x0P9De/lane-1/packages/web/e2e
+
+
+ Test Files  15 passed (15)
+      Tests  137 passed (137)
+   Start at  16:40:36
+   Duration  264.31s (transform 238ms, setup 244ms, import 296ms, tests 261.69s, environment 1ms)
+
+TEST_E2E_STATUS=passed

@@ -300,3 +300,29 @@ The first command produced the red evidence above with only read-only diagnostic
 
 
 Two fresh focused invocations of both virtual widths also passed **2/2 each**, with five other cases filtered (`764-virtual-tail-focused-1-green.log`, `764-virtual-tail-focused-2-green.log`), using the final command above. Own environment stopped successfully (`764-virtual-tail-down.log`), and `git diff --check` passed. No unresolved focused history failure remains. Parent owns the final full-browser rerun and remaining gate checks; its completed controlled campaigns are not superseded by these focused checks.
+
+
+## Parent verification and controlled campaigns
+
+The parent merged current `origin/main` (`b47b4ed9`) without conflicts as `c5e810da`. The final executable change is `6c2ff709`, independently approved by the Sol medium reviewer. Both governed workers’ latest settled revision 5 results were collected.
+
+- `npm run typecheck` → passed on merged `c5e810da`.
+- `npm test` → 526 files / 11,345 tests passed on that merged tree.
+- `npm run test:unit` → 568 tests passed (64 package scripts + 504 repository scripts).
+- `VITE_CEZ_E2E=1 npm run build` → passed, including package-content check.
+- `npm run test:package` → 60 tests passed.
+- `npm run test:e2e:local` → all four lanes passed on `6c2ff709`: 63 files, 599 tests passed, 7 existing skips. This command rebuilt the merged application.
+- Final setup correction focused validation → history 7/7, both virtual widths 2/2 twice in fresh sessions, 68 helper/scanner/scroll tests and web typecheck passed (worker evidence above).
+
+Controlled campaign commands: `node .ai/qa/764-final/campaign.mjs idle` and `node .ai/qa/764-final/campaign.mjs load`. Each invocation runs the documented ten-case selection serially in a fresh isolated checkout with private server/home/browser namespace. Load runs eight invocations concurrently in each of ten rounds. Browser sessions were sampled from the actual provider namespace, alongside host load/memory and global browser roots.
+
+| Campaign | Tested head | Invocations | Case executions | Observed peak owned browser sessions | Peak host load (1m) | Minimum available RAM |
+| --- | --- | --- | --- | --- | --- | --- |
+| Idle | `06836933` | 10/10 passed | 100 | 2 | 2.52 | 38.87 GiB |
+| Eight-task load | `8fb8920b` | 80/80 passed | 800 | 14 | 15.78 | 32.47 GiB |
+
+Individual invocation durations were 29.984–44.250 seconds idle (median 39.577) and 28.878–61.275 seconds loaded (median 42.263). Eight lanes do not mean exactly eight browsers: the GitHub loading test temporarily owns two sessions. All 80 load startup diagnostic snapshots were retained. Campaign heads are explicit: the later virtual-history setup correction was validated with fresh focused repetitions and the complete four-lane suite, not claimed as part of the earlier campaign.
+
+Earlier failed attempts are retained in the report sections above: recovery-header growth, provider textarea clearing, and virtual extent remeasurement each have reproduced red/green evidence. One earlier loaded fixture startup failed before browser creation; its original cause cannot be determined because that run discarded child output. Diagnostic capture was added without changing budgets; the subsequent 80-invocation campaign had no recurrence. This is an unresolved historical observation, not a claimed startup fix.
+
+Durable parent evidence is in `764-parent-verification/`: full gate logs, four lane logs, campaign summary, reproducible orchestration source, and `campaign-evidence.tar.gz` containing setup/results, actual host/session samples, per-invocation logs and startup snapshots. The campaign script is a retained reproduction artifact; run it from its documented original `.ai/qa/764-final/` location.

@@ -1,0 +1,10 @@
+[test-env] not reusing: no descriptor at /home/agent/projects/cezar/.ai/cezar/tmp/a001c986-83f8-441e-9cb8-874e3a36cac5/cez-e2e-lanes-x0P9De/lane-4/.ai/qa/test-env.json
+[test-env] using prebuilt e2e assets
+[test-env] starting cezar on http://127.0.0.1:33629 (CEZ_DRY_RUN=1)
+[test-env] healthy after 2s
+TEST_ENV_STATUS=running
+TEST_ENV_BASE_URL=http://127.0.0.1:33629
+TEST_ENV_DESCRIPTOR=.ai/qa/test-env.json
+TEST_ENV_REUSED=0
+BROWSER_PROVIDER=agent-browser
+BROWSER_INSTALLED=1
