@@ -79,14 +79,12 @@ import { HandoffAction } from './handoff-action'
 import { Markdown } from './markdown'
 import { TaskFileScope } from './task-file-scope'
 import { cliTargetResumes, cliTargetRunner, lastSessionBackend, resumeHint, runActionFlags } from './run-actions'
-import { RunRelationshipsPanel } from './run-relationships'
-import { WorkflowSteps } from './step-rail'
 
 /**
  * The run header (spec §"Task thread" → Header): editable title + status pill, the meta line,
- * the Session | Changes | Files tabs with the action bar, the workflow step rail and the plan
- * mirror — the whole header region above the thread. It scrolls away on phones so the transcript
- * owns the small viewport. On desktop Session it docks (`md:sticky md:top-0`) so Archive and sibling
+ * the Session | Changes | Files tabs with the action bar — the header region above the thread.
+ * Session activity controls live in the activity dock above the composer. The header scrolls away
+ * on phones so the transcript owns the small viewport. On desktop Session it docks (`md:sticky md:top-0`) so Archive and sibling
  * actions stay on screen while the transcript scrolls. Git tabs stay in document flow — their own
  * sticky chrome (`top-4` / `--diff-sticky-top`) already parks under the viewport top. Opaque
  * `bg-background` so thread text does not show through; `z-20` parks it below any shell top bar
@@ -409,14 +407,6 @@ export function RunHeader({
             </DropdownMenu>
           ) : null}
         </div>
-
-        {tab !== 'session' ? <RunRelationshipsPanel run={run} /> : null}
-
-        {tab !== 'session' && run.steps.length > 0 ? (
-          <div className="border-t border-border pt-1 pb-0 md:pt-2 md:pb-1">
-            <WorkflowSteps runId={run.id} steps={run.steps} />
-          </div>
-        ) : null}
 
         {notesOpen ? <NotesPanel runId={run.id} onClose={() => setNotesOpen(false)} /> : null}
         {openChooser ? <OpenInMenuForRun run={run} canResume={runActionFlags(run).terminal} onResume={() => actions.terminal.mutate()} onClose={() => setOpenChooser(false)} /> : null}
