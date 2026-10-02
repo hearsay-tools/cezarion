@@ -52,12 +52,12 @@ import { readFollowupPrompt, writeFollowupPrompt } from './hand-to-agent-draft'
  * source picker. The run body is `githubRunBody`'s three-way rule (lib/github-task.ts), so
  * the POST is exactly the legacy tab's.
  *
- * Picker state lives in the ROUTE, not here (legacy parity: your workflow/skill selection
+ * Picker state lives in the shared project session, not here (legacy parity: your workflow/skill selection
  * survives switching between issues — it is a way of working, not a property of one item) —
- * `github.tsx` also persists it to localStorage (#408) so it survives a reload and pre-fills a
+ * `useHandToAgentState` also persists it to localStorage (#408) so it survives a reload and pre-fills a
  * hand-off you have never touched (`hand-to-agent-draft.ts`). `skills` arrives already ordered
  * most-used → project → global (`orderSkillsByUsage`, #519) — this component just renders it.
- * The runner/model pills (#401) are route state for the same reason.
+ * The runner/model pills (#401) share that session for the same reason.
  *
  * The selected skills render as an always-visible chip row OUTSIDE the dropdown — the legacy
  * invariant "the filter can't hide your selection", carried over: cmdk may filter the list,

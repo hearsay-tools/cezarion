@@ -1136,16 +1136,18 @@ it.each([375, 1280])('uses the readable agent type scale and preserves full tool
     const command = document.querySelector('[data-slot="tool-card"][data-kind="execute"] > button code');
     if (!body || !eyebrow || !command) return null;
     const style = getComputedStyle(body);
+    const cardStyle = getComputedStyle(message);
     return { fontSize: style.fontSize, lineHeight: style.lineHeight,
-      width: body.getBoundingClientRect().width, maxWidth: parseFloat(style.maxWidth),
+      width: body.getBoundingClientRect().width, maxWidth: style.maxWidth,
+      availableWidth: message.clientWidth - parseFloat(cardStyle.paddingLeft) - parseFloat(cardStyle.paddingRight),
       eyebrowLineHeight: getComputedStyle(eyebrow).lineHeight,
       command: command.textContent, title: command.title,
       overflow: getComputedStyle(command).textOverflow, whiteSpace: getComputedStyle(command).whiteSpace };
-  })()`) as { fontSize: string; lineHeight: string; width: number; maxWidth: number; eyebrowLineHeight: string; command: string; title: string; overflow: string; whiteSpace: string }
+  })()`) as { fontSize: string; lineHeight: string; width: number; maxWidth: string; availableWidth: number; eyebrowLineHeight: string; command: string; title: string; overflow: string; whiteSpace: string }
   expect(facts.fontSize).toBe(width < 768 ? '15px' : '14px')
   expect(facts.lineHeight).toBe(width < 768 ? '24px' : '22.4px')
-  expect(facts.width).toBeLessThanOrEqual(facts.maxWidth + 1)
-  expect(Number.isFinite(facts.maxWidth)).toBe(true)
+  expect(facts.maxWidth).toBe('none')
+  expect(Math.abs(facts.width - facts.availableWidth)).toBeLessThanOrEqual(1)
   expect(facts.eyebrowLineHeight).toBe('13.2px')
   expect(facts.title).toBe(facts.command)
   expect(facts.overflow).toBe('ellipsis')

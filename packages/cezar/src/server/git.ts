@@ -82,7 +82,7 @@ export async function getHeadCommit(root: string): Promise<string | null> {
 }
 
 export async function getStatus(root: string): Promise<StatusEntry[]> {
-  const out = await git(root, ['status', '--porcelain']);
+  const out = await git(root, ['status', '--porcelain', '--untracked-files=all']);
   return out
     .split('\n')
     .filter(Boolean)
