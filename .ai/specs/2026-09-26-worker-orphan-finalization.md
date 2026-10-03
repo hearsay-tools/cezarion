@@ -216,7 +216,7 @@ belongs to another cezar. The second is the ordinary `cancel` path.
     holders and matching live process records still block. Same-boot controllers for
     old-created workers, legacy/missing tokens, unknown boot IDs and scan errors retain
     conservative behavior.
-- `worker-reboot-parity.test.ts` (registered harness row R35): every `RUNNER_IDS` backend
+- `worker-reboot-parity.test.ts` (registered harness row R36): every `RUNNER_IDS` backend
   launches and exits through its `HARNESS_ADAPTERS` native mock wire. Restore interrupted
   execution evidence from a prior boot, inject an unrelated post-boot non-dumpable process,
   and prove both collect-first and destroy-first complete the proof and remove the owned

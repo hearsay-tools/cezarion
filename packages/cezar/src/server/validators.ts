@@ -54,6 +54,11 @@ type JsonOptions = ErrorOptions & {
    * behaviour moved with it rather than being lost in the move.
    */
   malformed?: unknown;
+  /**
+   * Builds the rejection itself, from the issues and the parsed input. The private preview tool
+   * route (#781) answers its agent a typed 200 result naming the field, not this API's 400.
+   */
+  invalid?: (c: Context, error: z.ZodError, input: unknown) => Response;
 };
 
 /**
@@ -105,13 +110,12 @@ export function jsonZodValidator<
   // `= null` default would silently overwrite exactly that case.
   const absent = 'absent' in options ? options.absent : null;
   const malformed = 'malformed' in options ? options.malformed : absent;
-  const { message, code } = options;
+  const { message, code, invalid } = options;
   const check = (input: unknown, c: Context) => {
     const resolved = typeof schema === 'function' ? schema() : schema;
     const parsed = resolved.safeParse(input);
-    return parsed.success
-      ? ({ ok: true, data: parsed.data as z.infer<S> } as const)
-      : ({ ok: false, response: reject(c, parsed.error, message, code) } as const);
+    if (parsed.success) return { ok: true, data: parsed.data as z.infer<S> } as const;
+    return { ok: false, response: invalid ? invalid(c, parsed.error, input) : reject(c, parsed.error, message, code) } as const;
   };
 
   const validate = validator('json', (value, c) => {

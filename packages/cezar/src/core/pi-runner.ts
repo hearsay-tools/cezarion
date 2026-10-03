@@ -18,6 +18,7 @@ import type {
 } from './agent-runner.js';
 import { isSignalTerminationExit } from './agent-runner.js';
 import { buildChildEnv } from './agent-env.js';
+import { cezarToolNames } from '../ci-wait/tools.js';
 import { readNdjson } from './ndjson.js';
 import { createPiUiState, mapPiRpcMessage, piFlushProviderError, piProviderErrorMessage, piTurnStarted } from './pi-ui-mapper.js';
 import { V1TextCoalescer } from './v1-text-coalescer.js';
@@ -511,7 +512,7 @@ export function buildPiArgs(spec: AgentRunSpec): string[] {
   if (spec.restrictNativeDelegation) args.push('--exclude-tools', 'subagent');
   const tools = piTools(spec.allowedTools ?? [], spec.bashAllowlist);
   if (tools.length > 0) {
-    if (spec.cezarTools) tools.push('cezar_wait_for_ci');
+    if (spec.cezarTools) tools.push(...cezarToolNames(spec.env ?? {}));
     args.push('--tools', tools.join(','));
   }
   return args;

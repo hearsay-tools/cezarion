@@ -37,7 +37,8 @@ beforeAll(async () => {
   server = spawn(process.execPath, [cezarCli, 'serve', '--repo', root, '--port', String(port), '--no-open'], { env: fixtureServeEnv(root, { CEZ_FOLLOWUPS: '1', CEZ_AUTOMATIONS: '1' }), stdio: 'ignore' })
   await waitForHealth(base)
   project = await bootProjectId(base)
-  const response = await fetch(`${base}/api/v1/automations`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Review new pull requests', events: ['pull_request.opened'], intervalSeconds: 86400, filters: { lookbackDays: 7, maxRecords: 25 }, task: { prompt: 'Review {{github.url}}', workflow: 'quick-task' }, enable: false }) })
+  // The fixture has no GitHub remote, so create refuses a GitHub automation (#766); a schedule needs none.
+  const response = await fetch(`${base}/api/v1/automations`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Nightly review', kind: 'schedule', schedule: { type: 'daily', hour: 4, minute: 0 }, task: { prompt: 'Review the open work on {{date}}', workflow: 'quick-task' }, enable: false }) })
   expect(response.ok).toBe(true)
   automationId = (await response.json()).automation.id
   browser = AgentBrowser.open(`task-views-${process.pid}`)
@@ -54,7 +55,7 @@ const prepare = (width: number, theme: string, idle = true) => {
 it('renders assigned task flows at 1440 Wide, 402 and 360 in both themes without page overflow', () => {
   const pages: Array<[string, string, string]> = [
     ['project', scoped('/'), '[data-slot="tasks-table"]'], ['global', '/tasks?group=project', '[data-slot="global-task-row"]'],
-    ['inbox', scoped('/inbox'), '[data-slot="todo-card"]'], ['automations', scoped('/automations'), '[data-route="automations"] article'],
+    ['inbox', scoped('/inbox'), '[data-slot="todo-card"]'], ['automations', scoped('/automations'), '[data-route="automations"] [data-slot="automation-card"]'],
     ['editor', scoped(`/automations/${automationId}`), '#automation-name'], ['compare', scoped('/compare/fixture-group'), '[data-slot="variant-column"]'],
   ]
   for (const width of [1440, 402, 360]) for (const theme of ['light', 'dark']) for (const [name, path, selector] of pages) {
@@ -65,7 +66,7 @@ it('renders assigned task flows at 1440 Wide, 402 and 360 in both themes without
     const visualTarget = name === 'project' ? '[data-route="tasks"]' : selector
     settleVisual(browser, visualTarget, { theme, width: 'wide', idle: true })
     expect(browser.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true)
-    if (name === 'editor') expect(browser.evaluate(`document.querySelector('.automation-editor input[type="checkbox"]').getBoundingClientRect().right <= innerWidth`)).toBe(true)
+    if (name === 'editor') expect(browser.evaluate(`document.querySelector('.automation-editor [data-slot="switch"]').getBoundingClientRect().right <= innerWidth`)).toBe(true)
     browser.screenshot(join(artifacts, `${name}-${width}-${theme}.png`))
   }
 }, 180_000)

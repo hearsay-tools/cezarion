@@ -3,6 +3,8 @@ import { AutomationStore } from '../automations/store.ts';
 import { reconcileAutomationReceipts } from '../automations/task-template.ts';
 import { DEFAULT_WORKTREE_RETENTION, resolveWorktreeRetention } from '../config.ts';
 import { pruneOrphans } from '../git-worktree.ts';
+import { sweepPreviewLeftovers } from '../preview/dev-server.ts';
+import type { PreviewHost } from '../preview/host.ts';
 import { armRepoHandle } from '../runs/arm-repo-handle.ts';
 import { reclaimWorktrees } from '../runs/retention.ts';
 import { RunStore } from '../runs/store.ts';
@@ -10,7 +12,7 @@ import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { RunManager } from '../workflows/run.ts';
 import { ensureLaunchKey } from './launch-key.ts';
 import { getRepoInfo } from './git.ts';
-import type { CockpitOwnership } from './cockpit-ownership.ts';
+import { ownedByAnotherCockpit, type CockpitOwnership } from './cockpit-ownership.ts';
 
 /**
  * Per-project server context (spec 2026-07-20-multi-project-workspace,
@@ -71,6 +73,57 @@ export interface ProjectContextDeps {
    *  When omitted, the map still shares one private instance across the
    *  managers it builds (workspace defaults, never refreshed). */
   semaphore?: WorkspaceSemaphore;
+  /** The ONE workspace preview host (#781, present under `CEZ_PREVIEW=1`): every project's
+   *  manager registers against it, because ports are host-global. */
+  preview?: PreviewHost;
+  /** The cockpit's listening port, for the preview tool's `cezar_port` refusal. */
+  cezarPort?: () => number | undefined;
+}
+
+/** Data dirs this process has swept: the sweep cleans up after a crashed cezar, never this one. */
+const sweptPreviewDirs = new Set<string>();
+
+/** One data dir's crash leftovers, once per process; whatever the live host runs is spared. */
+function sweepPreviewOnce(dataDir: string, host: PreviewHost | undefined): Promise<number> {
+  if (sweptPreviewDirs.has(dataDir)) return Promise.resolve(0);
+  sweptPreviewDirs.add(dataDir);
+  const keep = host
+    ? (runId: string, what: number | 'browser') => (what === 'browser' ? host.ownsBrowser(runId) : host.ownsServer(runId, what))
+    : undefined;
+  return sweepPreviewLeftovers(dataDir, { keep }).catch(() => 0);
+}
+
+/**
+ * A project's preview exits that the store drives (#781, spec 2026-10-02-live-preview-v1):
+ * dev servers and browsers a crashed cezar left behind are swept once per data dir per process
+ * (always, so turning the flag off after a crash still cleans up; a project removed and re-added
+ * is not swept again, and what the live host runs is spared either way), and a deleted run's
+ * preview is released with its profile.
+ */
+export function armPreview(store: RunStore, dataDir: string, host: PreviewHost | undefined): void {
+  void sweepPreviewOnce(dataDir, host);
+  if (host) store.on('deleted', (runId: string) => void host.release(runId, { deleteProfile: true, dataDir }).catch(() => undefined));
+}
+
+/**
+ * Boot: the crash leftovers of every registered project, not only the boot project's, so a dev
+ * server left in a project nobody opens this session does not hold its port all session. A data
+ * dir another live cockpit owns holds that cockpit's servers, not a crash's: it is skipped and
+ * left unswept, so this process's own context build (which takes ownership first) sweeps it if
+ * that cockpit goes. Resolves with how many processes were killed.
+ */
+export async function sweepRegisteredPreviewLeftovers(
+  projects: ReadonlyArray<{ root: string; status?: string }>,
+  host: PreviewHost | undefined,
+): Promise<number> {
+  let killed = 0;
+  for (const project of projects) {
+    if (project.status === 'missing') continue;
+    const dataDir = join(project.root, '.ai/cezar');
+    if (sweptPreviewDirs.has(dataDir) || ownedByAnotherCockpit(dataDir)) continue;
+    killed += await sweepPreviewOnce(dataDir, host);
+  }
+  return killed;
 }
 
 export type ProjectContextFailure = 'unknown-project' | 'missing-root';
@@ -196,10 +249,15 @@ export class ProjectContexts {
    * flushed to disk, every event-bus subscriber detached. Returns false when
    * nothing was built for `projectId`.
    */
-  dispose(projectId: string): boolean {
+  dispose(projectId: string, opts: { releasePreviews?: boolean } = {}): boolean {
     const ctx = this.contexts.get(projectId);
     if (!ctx) return false;
     this.contexts.delete(projectId);
+    // The preview host is process-wide and outlives this context: a removed project's dev servers
+    // and browsers go with it (#781). Shutdown leaves that to `PreviewHost.close()`.
+    if (opts.releasePreviews !== false && this.deps.preview) {
+      for (const run of ctx.store.listRuns()) void this.deps.preview.release(run.id).catch(() => undefined);
+    }
     this.repoHandleControllers.get(ctx.store)?.abort();
     this.repoHandleControllers.delete(ctx.store);
     this.managerCleanups.get(ctx.manager)?.();
@@ -210,7 +268,7 @@ export class ProjectContexts {
 
   /** Tear down every built context (process shutdown). */
   disposeAll(): void {
-    for (const id of this.ids()) this.dispose(id);
+    for (const id of this.ids()) this.dispose(id, { releasePreviews: false });
   }
 
   private async build(projectId: string): Promise<ProjectContext> {
@@ -228,7 +286,8 @@ export class ProjectContexts {
       ?? AutomationStore.open(dataDir);
     reconcileAutomationReceipts(automationStore, store);
     this.notifyStoreCreated(store);
-    const manager = new RunManager(store, project.root, { semaphore: this.semaphore });
+    armPreview(store, dataDir, this.deps.preview);
+    const manager = new RunManager(store, project.root, { semaphore: this.semaphore, preview: this.deps.preview, cezarPort: this.deps.cezarPort });
     try {
       const cleanup = this.deps.prepareManager?.({ id: project.id, root: project.root, store, manager });
       if (cleanup) this.managerCleanups.set(manager, cleanup);
@@ -243,7 +302,7 @@ export class ProjectContexts {
         const keep = await resolveWorktreeRetention(project.root).catch(
           () => DEFAULT_WORKTREE_RETENTION,
         );
-        await reclaimWorktrees(project.root, store, keep).catch(() => [] as string[]);
+        await reclaimWorktrees(project.root, store, keep, { previewHost: this.deps.preview }).catch(() => [] as string[]);
       }
       await manager.recover();
       this.deps.afterRecover?.({ id: project.id, root: project.root, store, manager });

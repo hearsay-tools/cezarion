@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { agentInputSchema, delegationStateSchema, runDelegationSummarySchema } from './delegation.ts';
 import { runnerSchema } from './health.ts';
 import { referenceStatusSchema } from './github.ts';
+import { previewServerSchema } from './preview.ts';
 // The chain shapes belong to the workflows family; the run record embeds one, so this file
 // consumes them rather than redeclaring. One-way on purpose — see the header of `./workflows.ts`.
 import { workflowDefSchema, workflowStepDefSchema } from './workflows.ts';
@@ -180,6 +181,8 @@ export const runRecordSchema = z.object({
   lastCiWait: ciWaitSchema.optional(),
   /** Retained recovery observation when previous CI metadata cannot be trusted. */
   lastCiWaitError: z.string().max(256).optional(),
+  /** Dev servers the agent registered with `cezar_preview_serve` (#781). Salvaged per entry on load. */
+  previewServers: z.array(previewServerSchema).optional(),
   /** URLs of images and document attachments on the initial task prompt; branch on isImageAttachmentName. */
   taskImages: z.array(z.string()).optional(),
   model: z.string().optional(),
@@ -215,6 +218,21 @@ export const runRecordSchema = z.object({
       receiptId: z.string(),
       event: z.string(),
       githubUrl: z.string(),
+    })
+    .optional(),
+  /**
+   * Provenance for a task a SCHEDULED automation launched. A separate optional key rather than a
+   * loosened `automation`: `runs.json` is parsed as one array, so a downgraded cezar meeting a
+   * record without `githubUrl` would drop every run, whereas an unknown key it simply strips.
+   */
+  automationTrigger: z
+    .object({
+      automationId: z.string(),
+      automationRevision: z.number(),
+      receiptId: z.string(),
+      trigger: z.enum(['schedule', 'catch-up', 'manual']),
+      /** The scheduled instant (UTC ISO); for `manual`, the launch time. */
+      occurrenceAt: z.string(),
     })
     .optional(),
   /** Task webhook opt-in (#589): the project's webhook receives this run's status changes.

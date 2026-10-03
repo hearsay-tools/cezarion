@@ -104,10 +104,17 @@ describe('AppShell', () => {
   })
 
   it('omits overflow when no optional view is available and keeps version in footer', () => {
-    renderShell('/', { inboxAvailable: false, automationsAvailable: true, forgeAvailable: false, version: '1.2.3' })
+    renderShell('/', { inboxAvailable: false, automationsAvailable: false, forgeAvailable: false, version: '1.2.3' })
     expect(within(nav()).queryByRole('button', { name: 'More views' })).toBeNull()
     expect(within(nav()).queryByRole('link', { name: 'GitHub' })).toBeNull()
     expect(footer().querySelector('[data-slot="version-chip"]')?.textContent).toBe('v1.2.3')
+  })
+
+  // A schedule needs no GitHub remote (#766): the opt-in alone makes Automations an optional view.
+  it('offers overflow for Automations alone, with no forge', () => {
+    renderShell('/', { inboxAvailable: false, automationsAvailable: true, forgeAvailable: false })
+    expect(within(nav()).getByRole('button', { name: 'More views' })).not.toBeNull()
+    expect(within(nav()).queryByRole('link', { name: 'GitHub' })).toBeNull()
   })
 
   it('shows the running version in the footer and only offers a newer local release', () => {

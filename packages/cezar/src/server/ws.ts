@@ -2,6 +2,7 @@ import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { z } from 'zod';
+import type { UpgradeRoute } from './upgrade-router.ts';
 
 /**
  * The cockpit's WebSocket subscription bus (`GET /api/v1/ws`, upgrade-only).
@@ -19,10 +20,14 @@ import { z } from 'zod';
  * to mean N polls every 5 s forever; now they mean one publisher while at
  * least one tab subscribes, and none afterwards.
  *
- * Security: the hub itself never decides who may connect — `attach` takes the
- * upgrade guard as a function, and server.ts supplies the WebSocket twin of
- * the `/api/*` request-origin guard (#426). See `verifyWsUpgrade` there for
+ * Security: the hub itself never decides who may connect — `handleUpgrade`
+ * takes the upgrade guard's verdict, and server.ts supplies the WebSocket twin
+ * of the `/api/*` request-origin guard (#426). See `verifyWsUpgrade` there for
  * what it admits, and the caveat about which topics may live on this hub.
+ *
+ * The hub does not listen on the HTTP server itself: the one `upgrade` listener
+ * is `attachUpgradeRouter` (upgrade-router.ts, #781), and `socketHubRoute` is
+ * this hub's route in it.
  */
 
 /** The one upgrade path. Workspace-level like `/api/workspace/events` — never
@@ -80,26 +85,18 @@ export interface TopicOptions {
  */
 export type WsUpgradeVerdict = false | { trusted: boolean };
 
-/** The minimal server surface `attach` needs — satisfied by the `http.Server`
- *  that `@hono/node-server`'s `serve()` returns. */
-export interface UpgradeCapableServer {
-  on(event: 'upgrade', listener: (req: IncomingMessage, socket: Duplex, head: Buffer) => void): unknown;
-  on(event: 'close', listener: () => void): unknown;
-}
-
 export interface SocketHub {
   /** Register a topic clients may subscribe to. Registration is boot-time
    *  wiring (createApp), so a duplicate name is a programming error: throw.
    *  `options.loopbackReadable` defaults to `false` (topic legible to trusted
    *  connections only) — see `TopicOptions`. */
   registerTopic(name: string, publisher: TopicPublisher, options?: TopicOptions): void;
-  /** Start accepting `WS_PATH` upgrades on `server`. `verifyUpgrade` is the
-   *  request-origin guard — `false` answers 403 before the handshake, otherwise
-   *  its `trusted` flag decides which topics the connection may read. Boot-time
-   *  wiring like `registerTopic`: attaching twice throws. */
-  attach(server: UpgradeCapableServer, verifyUpgrade: (req: IncomingMessage) => WsUpgradeVerdict): void;
-  /** Stop publishers, terminate clients, clear timers. Idempotent; also runs
-   *  on the attached server's own `close`. */
+  /** Accept one `WS_PATH` upgrade under the request-origin guard's verdict:
+   *  `false` answers 403 before the handshake, otherwise its `trusted` flag
+   *  decides which topics the connection may read. */
+  handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer, verdict: WsUpgradeVerdict): void;
+  /** Stop publishers, terminate clients, clear timers. Idempotent; the server
+   *  that routes upgrades here calls it on its own `close`. */
   close(): void;
 }
 
@@ -185,6 +182,33 @@ export function createSocketHub(options: SocketHubOptions = {}): SocketHub {
     }
   };
 
+  /** Started by the first upgrade, so a hub nobody connects to holds no timer. */
+  const startHeartbeat = (): void => {
+    if (heartbeat !== undefined) return;
+    heartbeat = setInterval(() => {
+      for (const [ws, client] of clients) {
+        if (!client.alive) {
+          // Missed the previous beat's pong — the peer is gone. Terminate (not
+          // a polite close, there is nobody to handshake with); 'close' fires
+          // synchronously and dropClient releases its topics.
+          ws.terminate();
+          continue;
+        }
+        client.alive = false;
+        ws.ping(); // protocol ping — a live browser auto-pongs, flipping `alive` back
+        // App-level beat too. The browser NEVER surfaces the protocol ping to
+        // page JS, so a client cannot tell a silent-dead socket (sleep, network
+        // partition — no FIN ever arrives) from an idle-but-healthy one on the
+        // protocol ping alone. This visible frame is what the client's own
+        // watchdog watches to decide to reconnect. Sent to every client,
+        // subscribed or not; the client ignores it beyond noting liveness.
+        send(ws, { type: 'ping' });
+      }
+    }, heartbeatMs);
+    // Never the reason the process stays up — the HTTP server owns lifetime.
+    heartbeat.unref?.();
+  };
+
   const dropClient = (ws: WebSocket): void => {
     const client = clients.get(ws);
     if (!client) return;
@@ -193,7 +217,7 @@ export function createSocketHub(options: SocketHubOptions = {}): SocketHub {
   };
 
   wss.on('connection', (ws: WebSocket, _req: IncomingMessage, trusted?: boolean) => {
-    // `trusted` is emitted by `attach` from the upgrade verdict; default false is
+    // `trusted` is emitted by `handleUpgrade` from the upgrade verdict; default false is
     // the safe read for any path that reaches here without one.
     const client: ClientState = { alive: true, topics: new Set(), trusted: trusted === true };
     clients.set(ws, client);
@@ -233,55 +257,20 @@ export function createSocketHub(options: SocketHubOptions = {}): SocketHub {
       });
     },
 
-    attach(server, verifyUpgrade) {
-      // Boot-time wiring like `registerTopic`, so a second call is a programming
-      // error rather than something to absorb: it would install a second
-      // `upgrade` listener and orphan the first heartbeat interval (`close`
-      // clears only the last one). Throw the same way registration does.
-      if (heartbeat !== undefined) throw new Error('ws hub already attached');
-      server.on('upgrade', (req, socket, head) => {
-        // `req.url` on an upgrade is the request path (+query); the base is
-        // only there to satisfy URL parsing of a relative reference.
-        const pathname = new URL(req.url ?? '', 'http://localhost').pathname;
-        if (pathname !== WS_PATH) {
-          // With an `upgrade` listener installed, Node no longer auto-destroys
-          // unhandled upgrades — do it explicitly or the socket leaks.
-          socket.destroy();
-          return;
-        }
-        const verdict = verifyUpgrade(req);
-        if (!verdict) {
-          socket.write('HTTP/1.1 403 Forbidden\r\nconnection: close\r\n\r\n');
-          socket.destroy();
-          return;
-        }
-        // Carry the verdict's trust flag onto the connection — `subscribe` reads
-        // it to gate non-`loopbackReadable` topics.
-        wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req, verdict.trusted));
-      });
-      server.on('close', () => hub.close());
-      heartbeat = setInterval(() => {
-        for (const [ws, client] of clients) {
-          if (!client.alive) {
-            // Missed the previous beat's pong — the peer is gone. Terminate (not
-            // a polite close, there is nobody to handshake with); 'close' fires
-            // synchronously and dropClient releases its topics.
-            ws.terminate();
-            continue;
-          }
-          client.alive = false;
-          ws.ping(); // protocol ping — a live browser auto-pongs, flipping `alive` back
-          // App-level beat too. The browser NEVER surfaces the protocol ping to
-          // page JS, so a client cannot tell a silent-dead socket (sleep, network
-          // partition — no FIN ever arrives) from an idle-but-healthy one on the
-          // protocol ping alone. This visible frame is what the client's own
-          // watchdog watches to decide to reconnect. Sent to every client,
-          // subscribed or not; the client ignores it beyond noting liveness.
-          send(ws, { type: 'ping' });
-        }
-      }, heartbeatMs);
-      // Never the reason the process stays up — the HTTP server owns lifetime.
-      heartbeat.unref?.();
+    handleUpgrade(req, socket, head, verdict) {
+      if (closed) {
+        socket.destroy();
+        return;
+      }
+      if (!verdict) {
+        socket.write('HTTP/1.1 403 Forbidden\r\nconnection: close\r\n\r\n');
+        socket.destroy();
+        return;
+      }
+      startHeartbeat();
+      // Carry the verdict's trust flag onto the connection — `subscribe` reads
+      // it to gate non-`loopbackReadable` topics.
+      wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req, verdict.trusted));
     },
 
     close() {
@@ -297,4 +286,12 @@ export function createSocketHub(options: SocketHubOptions = {}): SocketHub {
   };
 
   return hub;
+}
+
+/** The hub's route in the upgrade router: `WS_PATH`, under `verifyUpgrade`. */
+export function socketHubRoute(hub: SocketHub, verifyUpgrade: (req: IncomingMessage) => WsUpgradeVerdict): UpgradeRoute {
+  return {
+    match: (pathname) => (pathname === WS_PATH ? {} : undefined),
+    handle: (req, socket, head) => hub.handleUpgrade(req, socket, head, verifyUpgrade(req)),
+  };
 }

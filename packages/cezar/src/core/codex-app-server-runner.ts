@@ -27,6 +27,7 @@ import { InputSubmissions } from './input-submissions.ts';
 import { codexStreamError } from './codex-stream-error.ts';
 import { codexTurnOutcome } from './codex-turn-outcome.ts';
 import { codexNetworkIsRestricted, codexPermissionOverrides } from './codex-permissions.ts';
+import { cezarToolEnvNames } from '../ci-wait/tools.ts';
 import {
   CodexAppServerRpc,
   CodexRpcResponseError,
@@ -580,7 +581,7 @@ class CodexSession implements AgentSession {
       ...((restrictNetwork || this.spec.restrictNativeDelegation || this.spec.cezarTools) ? { config: {
         ...(restrictNetwork ? { 'sandbox_workspace_write.network_access': false } : {}),
         ...(this.spec.restrictNativeDelegation ? { 'features.multi_agent': false, 'features.multi_agent_v2': false } : {}),
-        ...(this.spec.cezarTools ? { [`mcp_servers.${this.spec.cezarTools.name}`]: { command: this.spec.cezarTools.command, args: this.spec.cezarTools.args, env_vars: ['CEZ_TOOL_TOKEN', 'CEZ_TOOL_SOCKET'] } } : {}),
+        ...(this.spec.cezarTools ? { [`mcp_servers.${this.spec.cezarTools.name}`]: { command: this.spec.cezarTools.command, args: this.spec.cezarTools.args, env_vars: cezarToolEnvNames(this.spec.env ?? {}) } } : {}),
       } } : {}),
     };
     let threadResponse: Record<string, unknown>;

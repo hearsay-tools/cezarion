@@ -1,6 +1,6 @@
 import './run-header.css'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { FileTextIcon, MailIcon, PencilIcon, PinOffIcon, SquareTerminalIcon } from 'lucide-react'
+import { AppWindowIcon, FileTextIcon, MailIcon, PencilIcon, PinOffIcon, SquareTerminalIcon } from 'lucide-react'
 import { BotIcon, ChevronDownIcon, CircleDotIcon, CopyIcon, EllipsisIcon, GitPullRequestIcon, PinIcon, Trash2Icon, XIcon } from '@/components/design-icons'
 import { Fragment, useEffect, useId, useMemo, useReducer, useRef, useState, type ReactNode } from 'react'
 import { Link, useActiveProjectId, useNavigate } from '@/lib/project-router'
@@ -33,6 +33,7 @@ import { ReferenceStatusProvider } from '@/components/reference-status'
 import { TabLink } from '@/components/tab-link'
 import { MobileRunBarPortal, useIsDesktopViewport, useMobileRunBarSlot } from '@/components/mobile-run-bar'
 import { StatusDot } from '@/components/status-dot'
+import { usePreviewPane } from './preview/preview-state'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -153,6 +154,32 @@ function ItemTabLabel({ tab }: { tab: TaskItemTab }) {
  *  into run B. Session-lifetime only; no server persistence invented for it. */
 const detailsOpenByRun = new Map<string, boolean>()
 
+/**
+ * The preview pane's header toggle (#781): `Preview`, `Preview :5173`, `Preview :5173 +1`. It only
+ * opens the pane, on the one server's current state or on the empty state when there are none or
+ * several to pick from. It never asks to run a command; that approval lives on the card and in
+ * the pane. The green dot means frames are flowing, not that a server is registered.
+ */
+function PreviewToggle({ servers }: { servers: ApiRun['previewServers'] & object }) {
+  const pane = usePreviewPane()
+  if (pane === null) return null // no pane to open here (the git tabs)
+  const first = servers[0]
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      data-slot="preview-toggle"
+      className="max-md:h-11"
+      aria-pressed={pane.open}
+      onClick={() => pane.openPane(servers.length === 1 && first ? { port: first.port } : {})}
+    >
+      <AppWindowIcon aria-hidden="true" />
+      Preview{first ? ` :${first.port}` : ''}{servers.length > 1 ? ` +${servers.length - 1}` : ''}
+      {pane.live ? <StatusDot tone="success" aria-label="Preview is live" /> : null}
+    </Button>
+  )
+}
+
 export function RunHeader({
   run,
   tab = 'session',
@@ -236,6 +263,9 @@ export function RunHeader({
     if (!activeItemKey || isDesktop) return
     tabRowRef.current?.querySelector('[aria-current="page"]')?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
   }, [activeItemKey, inlineItemSignature, isDesktop])
+  const previewToggle = run.worktreePath && health.data?.capabilities?.preview === true
+    ? <PreviewToggle servers={run.previewServers ?? []} />
+    : null
   const actionsKebab = (
     <ActionsKebab
       run={run}
@@ -314,6 +344,7 @@ export function RunHeader({
             <span className="ml-auto flex shrink-0 items-center gap-1 md:gap-2.5">
               {detailsToggle}
               {archiveButton}
+              {previewToggle}
               <HandoffAction run={run} />
               {actionsKebab}
             </span>
@@ -330,6 +361,7 @@ export function RunHeader({
           {barSlot ? (
             <div data-slot="run-details-actions" className="flex flex-wrap items-center gap-2 pt-2">
               {archiveButton}
+              {previewToggle}
               <HandoffAction run={run} />
             </div>
           ) : null}

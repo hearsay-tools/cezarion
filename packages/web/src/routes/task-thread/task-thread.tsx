@@ -307,7 +307,6 @@ export function ThreadView({
   })
   // Re-pin a tail reader after the viewport or document-flow composer changes size.
   useKeyboardInsetVar(scroll.restickIfStuck)
-
   return (
     <div data-route="task-thread" data-run-id={run.id} className="flex min-h-full flex-col">
       <RunHeader run={run} hasPendingHumanAsk={hasPendingHumanAsk} onMarkedUnread={() => onMarkedUnread?.(run.id)} />

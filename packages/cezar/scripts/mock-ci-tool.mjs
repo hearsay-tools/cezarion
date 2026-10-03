@@ -1,12 +1,17 @@
 // Offline harness fixtures share the real bundled MCP protocol, never a fake receipt.
 import { writeFileSync, existsSync } from 'node:fs';
 import { basename } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 
 export async function probeCiTool(backend, wire, pr = process.env.CEZ_MOCK_CI_PR) {
   if (!pr) return;
+  return probeCezarTool(backend, wire, 'cezar_wait_for_ci', { pr });
+}
+
+// Calls one cezar tool the way the real harness would: through the wired MCP server (or Pi extension).
+export async function probeCezarTool(backend, wire, name, args) {
   let result;
   if (backend === 'pi') {
     const extensions = wire.flatMap((arg, index) => arg === '--extension' ? [wire[index + 1]] : []);
@@ -17,7 +22,9 @@ export async function probeCiTool(backend, wire, pr = process.env.CEZ_MOCK_CI_PR
     const { default: extension } = await import(pathToFileURL(path));
     const tools = [];
     extension({ registerTool(tool) { tools.push(tool); } });
-    result = { names: tools.map(tool => tool.name), response: await tools[0].execute('ci-1', { pr }) };
+    const tool = tools.find(tool => tool.name === name);
+    if (!tool) throw new Error(`${name} not registered`);
+    result = { names: tools.map(tool => tool.name), response: await tool.execute('ci-1', args) };
   } else {
     let server; let env;
     if (backend === 'claude') {
@@ -39,7 +46,7 @@ export async function probeCiTool(backend, wire, pr = process.env.CEZ_MOCK_CI_PR
     try {
       await client.connect(new StdioClientTransport({ command: server.command, args: server.args, env, stderr: 'pipe' }));
       const list = await client.listTools();
-      result = { names: list.tools.map(tool => tool.name), response: await client.callTool({ name: 'cezar_wait_for_ci', arguments: { pr } }) };
+      result = { names: list.tools.map(tool => tool.name), response: await client.callTool({ name, arguments: args }) };
     } finally { await client.close(); }
   }
   if (process.env.CEZ_MOCK_CI_RESULT) writeFileSync(process.env.CEZ_MOCK_CI_RESULT, JSON.stringify(result));
@@ -49,5 +56,13 @@ export async function probeCiTool(backend, wire, pr = process.env.CEZ_MOCK_CI_PR
 export async function ciPrompt(backend, wire, text) {
   const pr = /mock:ci-wait(?:\s+(https:\/\/[^\s\"\\]+))?/.exec(text)?.[1] ?? 'https://github.com/owner/repo/pull/1';
   const result = await probeCiTool(backend, wire, pr);
+  return JSON.stringify(result.response);
+}
+
+// `mock:preview-serve <port>` registers the e2e fixture app (`node preview-app.mjs <port>`) as a live preview.
+export async function previewPrompt(backend, wire, text) {
+  const port = Number(/mock:preview-serve\s+(\d+)/.exec(text)?.[1]);
+  const fixture = fileURLToPath(new URL('../../web/e2e/fixtures/preview-app.mjs', import.meta.url));
+  const result = await probeCezarTool(backend, wire, 'cezar_preview_serve', { command: `node "${fixture}" ${port}`, port, label: 'web' });
   return JSON.stringify(result.response);
 }

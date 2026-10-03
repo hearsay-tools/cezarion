@@ -85,3 +85,7 @@
 [data-route='task-thread'] [data-slot='tool-output'] pre,
 [data-route='task-thread'] [data-slot='tool-error'] { padding: calc(var(--spacing) * 2) calc(var(--spacing) * 3) calc(var(--spacing) * 2.5); }
 [data-route='task-thread'] [data-slot='tool-output-fade'] { --tw-gradient-to: var(--task-brand-bg); }
+
+/* A docked live preview (#781) halves the transcript column; the 64px reading gutters would eat it. */
+[data-slot='task-split'][data-pane='open'] [data-route='task-thread'] [data-slot='session-conversation'],
+[data-slot='task-split'][data-pane='open'] [data-route='task-thread'] [data-slot='thread-dock'] > div { padding-inline: 18px; }
