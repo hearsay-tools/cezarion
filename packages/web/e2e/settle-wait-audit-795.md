@@ -382,3 +382,61 @@ Historical parent results are retained against their tested revision:
 These historical passes do not claim success for the later rail correction. The final
 normal gate, loaded-after full-suite retry and independent review of the latest integrated
 revision remain parent-owned and pending. No previous result was overwritten.
+
+## Final normal attempt: thread restoration diagnosis
+
+The parent normal gate at `42a76bec` (integrating worker `053b5791`) passed its first
+five commands, including **531 unit files / 11,470 tests**, but the full four-lane
+browser command **failed**: **611 passed, one thread-scroll restoration failure,
+seven existing skips**, exit 1, completed **2026-10-03 09:05:42 UTC**. The loaded-after
+watcher exited without starting CPU burners. This result is retained separately from
+both the earlier normal pass and the failing loaded rail run. Parent evidence:
+`.ai/qa/issue-795/final-normal-attempt-1-failures/` and
+`.ai/qa/local-runs/1791017821817-2777308/`.
+
+The actual parked capture has ten consecutive frames at `scrollTop=67430`,
+`scrollHeight=135696`, `clientHeight=836`, with the jump pill visible. At the timeout,
+the returned thread was at its tail: `scrollTop=50010`, `scrollHeight=50846`,
+`clientHeight=836`, pill absent, fallback replay active and loading false. The saved
+67430px offset was **17420px beyond the returned maximum of 50010px**. This is an
+observed failure of the unchanged restoration expectation, not evidence that a
+readiness wait should accept a different offset. Its **200px** tolerance and timeout
+remain unchanged.
+
+A bounded, read-only native trace compared the complete current thread-scroll file
+with a variant reverting **only** the restoration block's maxTop measurement from
+`waitForSettledSample` to baseline `browser.evaluate`. Both parked at the same
+67430px offset and 135696px total height before and after that measurement. Both
+returned with a freshly estimated virtualizer cache: 1253 rows, default size 40,
+zero measured rows, total DOM height 50672px. Subsequent native measurements changed
+the default estimate to 57.5 and increased the total height enough to restore the
+saved pixel offset. Final heights differed (72633px current, 72849px baseline-block
+variant), but both restored 67430px. Thus the estimate reset also occurred with the
+baseline maxTop read; this comparison does **not** establish that #795 caused the
+cache reset or provide a causal test-only fix for the full-suite timeout.
+
+Source provenance: `routes/task-thread/thread-scroll.ts` accepts a stored measurement
+cache only for an exact row-count match; `thread-scroller.tsx` reads it once when the
+virtualized session mounts. `api/run-events.ts` and `api/run-history.ts` replay a fresh
+SSE stream on return. These product files are unchanged from `35a519de`. Their mount
+and replay interaction is a possible explanation for the missing stored cache,
+not a proven root cause: frame snapshots can miss intermediate React commits. The
+comparison isolates the maxTop conversion, **not** the entire original baseline
+file. No product/cache patch or speculative readiness wait was added.
+
+Worker evidence is preserved at `.ai/qa/issue-795/thread-restore-diagnosis/`, including
+the copied parent failure bundles, both exact instrumented spec variants, the
+baseline-block diff, both native traces and `comparison-summary.json`.
+
+| Command / bounded comparison | Outcome | Evidence |
+| --- | --- | --- |
+| `npm ci` | exit 0 | `npm-ci.log` |
+| Complete `npm run test:e2e -- thread-scroll.e2e.ts`, current `053b5791` behavior plus read-only native trace | exit 0; all 14 passed, 45.65s | `diagnostic-current.log`, `diagnostic-current.ts`, `native-restore-trace.json` (146 samples) |
+| Same complete command, only restoration maxTop read reverted to baseline behavior plus the same trace | exit 0; all 14 passed, 45.38s | `diagnostic-baseline-block.log`, `diagnostic-baseline-block.ts`, `baseline-restoration-block.diff`, `native-restore-baseline-block.json` (135 samples) |
+
+Neither focused run reproduced the timeout; they are diagnostic comparisons, not
+red/green regression proof and not a claim that the restoration failure was eliminated.
+All temporary instrumentation was removed and the committed thread-scroll spec
+restored verbatim. Audit counts and readiness fixes are unchanged. The parent owns
+one unchanged full normal retry and the subsequent full CPU-loaded acceptance run;
+the failed attempt and this limitation must remain visible alongside those results.
