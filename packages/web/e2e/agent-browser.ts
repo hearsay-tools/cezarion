@@ -98,8 +98,68 @@ export function lastAttachedBrowser(): AgentBrowser | null {
 type FailureReason =
   | { kind: 'wait-selector'; action: 'click' | 'hover' | 'fill'; selector: string }
   | { kind: 'wait-fn'; predicate: string }
-  | { kind: 'wait-value'; expression: string; lastValue: unknown; lastError?: string }
+  | { kind: 'wait-value'; expression: string; lastValue: unknown; lastError?: string; poll?: PollDiagnostics }
   | { kind: 'test' }
+
+type PollAttempt = {
+  attempt: number
+  startMs: number
+  endMs: number
+  budgetMs: number
+} & (
+  | { outcome: 'returned' | 'returned-after-deadline'; value: unknown; matcherError?: unknown }
+  | { outcome: 'threw'; error: unknown }
+)
+
+type PollDiagnostics = {
+  timeoutMs: number
+  holdMs: number
+  elapsedMs: number
+  attempts: number
+  completedSamples: number // Returned within the deadline, eligible for the matcher.
+  nullSamples: number
+  commandErrors: number
+  lateReturns: number
+  matcherErrors: number
+  // All timestamps are monotonic offsets from the start of this wait.
+  lastSample: { attempt: number; completedAtMs: number } | null
+  terminalProbe: {
+    attempt: number
+    startMs: number
+    endMs: number
+    durationMs: number
+    budgetMs: number
+    outcome: PollAttempt['outcome']
+    browserCompletion: 'returned' | 'unknown'
+    result?: { type: string; present: boolean; summary: string }
+    error?: string
+    matcherError?: string
+  } | null
+}
+
+/** Bound each cause separately so a long expression cannot hide the transport error.
+ * Never serialize child-process stdout, stderr or environment into the poll record. */
+function describePollError(error: unknown): string {
+  const lines: string[] = []
+  try {
+    for (let current: unknown = error, depth = 0; depth < 5; depth += 1) {
+      if (current !== null && typeof current === 'object' && 'message' in current) {
+        const item = current as { name?: unknown; message: unknown; code?: unknown; signal?: unknown; cause?: unknown }
+        const tags = [item.name, item.code, item.signal].filter(value => typeof value === 'string').map(value => value.slice(0, 40))
+        lines.push(`${tags.join(' ')}: ${String(item.message).slice(0, 250)}`)
+        current = item.cause
+        if (current == null) break
+      } else {
+        lines.push((typeof current === 'object' ? Object.prototype.toString.call(current) : String(current)).slice(0, 250))
+        break
+      }
+    }
+  } catch {
+    // Diagnostics must not replace the original failure if an error has getters.
+    lines.push('<unreadable error>')
+  }
+  return lines.join('\n  caused by: ').slice(0, 2_000)
+}
 
 /**
  * The CLI's own default wait budget, read from the variable agent-browser reads
@@ -572,17 +632,31 @@ export class AgentBrowser {
       failure,
     }: { holdMs: number; matcher?: (value: T) => boolean; intervalMs?: number; failure?: string },
   ): T {
-    const deadline = performance.now() + defaultWaitTimeoutMs()
+    const startedAt = performance.now()
+    const timeoutMs = defaultWaitTimeoutMs()
+    const deadline = startedAt + timeoutMs
     let lastValue: unknown = undefined
     let lastError: unknown = undefined
     let holdStartedAt: number | null = null
     let holdValue: unknown = undefined
+    let attempts = 0, completedSamples = 0, nullSamples = 0, commandErrors = 0, lateReturns = 0, matcherErrors = 0
+    let lastSample: PollDiagnostics['lastSample'] = null
+    let terminalProbe: PollAttempt | null = null
     for (;;) {
+      const probeStartedAt = performance.now()
+      const budgetMs = deadline - probeStartedAt
+      const attempt = ++attempts
+      let returned = false
       try {
-        const value = this.run(['eval', js], deadline - performance.now()).result as T
+        const value = this.run(['eval', js], budgetMs).result as T
         // A hold starts at an observed sample, after transport/evaluation completes.
         const now = performance.now()
-        if (now > deadline) break
+        returned = true
+        terminalProbe = { attempt, startMs: probeStartedAt - startedAt, endMs: now - startedAt, budgetMs, outcome: now > deadline ? 'returned-after-deadline' : 'returned', value }
+        if (now > deadline) { lateReturns += 1; break }
+        completedSamples += 1
+        if (value === null) nullSamples += 1
+        lastSample = { attempt, completedAtMs: now - startedAt }
         lastValue = value
         lastError = undefined
         if (matcher(value) && (holdStartedAt === null || sameSample(value, holdValue))) {
@@ -598,7 +672,15 @@ export class AgentBrowser {
           holdStartedAt = null
         }
       } catch (cause) {
-        if (performance.now() < deadline || (lastError === undefined && lastValue === undefined)) lastError = cause
+        const now = performance.now()
+        if (!returned) {
+          commandErrors += 1
+          terminalProbe = { attempt, startMs: probeStartedAt - startedAt, endMs: now - startedAt, budgetMs, outcome: 'threw', error: cause }
+        } else if (terminalProbe?.outcome === 'returned') {
+          matcherErrors += 1
+          terminalProbe.matcherError = cause
+        }
+        if (now < deadline || (lastError === undefined && lastValue === undefined)) lastError = cause
         holdStartedAt = null
       }
       if (performance.now() >= deadline) break
@@ -609,6 +691,24 @@ export class AgentBrowser {
       expression: js,
       lastValue,
       ...(lastError !== undefined ? { lastError: describeError(lastError) } : {}),
+      // #795: keep the last eligible value AND the terminal command outcome. A
+      // null followed by a deadline kill must not look like 25s of returned nulls.
+      // This metadata is failure-only and never enters the matcher/held payload.
+      poll: {
+        timeoutMs, holdMs, elapsedMs: performance.now() - startedAt,
+        attempts, completedSamples, nullSamples, commandErrors, lateReturns, matcherErrors, lastSample,
+        terminalProbe: terminalProbe && {
+          attempt: terminalProbe.attempt, startMs: terminalProbe.startMs, endMs: terminalProbe.endMs,
+          durationMs: terminalProbe.endMs - terminalProbe.startMs, budgetMs: terminalProbe.budgetMs,
+          outcome: terminalProbe.outcome,
+          ...(terminalProbe.outcome === 'threw'
+            ? { browserCompletion: 'unknown' as const, error: describePollError(terminalProbe.error) }
+            : { browserCompletion: 'returned' as const,
+              result: { type: terminalProbe.value === null ? 'null' : typeof terminalProbe.value, present: terminalProbe.value !== undefined, summary: summarize(terminalProbe.value) },
+              ...(terminalProbe.matcherError !== undefined ? { matcherError: describePollError(terminalProbe.matcherError) } : {}),
+            }),
+        },
+      },
     }
     const bundle = this.captureFailure(reason, lastError ?? new Error(`last value: ${summarize(lastValue)}`))
     const last = lastError !== undefined ? `last error: ${describeError(lastError)}` : `last value: ${summarize(lastValue)}`
