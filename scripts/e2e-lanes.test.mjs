@@ -391,3 +391,102 @@ test('the suite refuses a preexisting scratch directory before build or cleanup 
   assert.equal(readFileSync(marker, 'utf8'), 'keep');
   assert.equal(built, false);
 });
+
+const remoteUrls = (repo, name, push = false) => gitText(repo, 'remote', 'get-url', ...(push ? ['--push'] : []), '--all', name);
+
+test('effective remote projection preserves insteadOf longest matches and multiple fetch URLs', (t) => {
+  const { root, repo } = fixture(t);
+  gitText(repo, 'config', 'url.https://github.com/.insteadOf', 'fixture:');
+  gitText(repo, 'config', 'url.https://example.test/special/.insteadOf', 'fixture:special/');
+  gitText(repo, 'remote', 'add', 'origin', 'fixture:team/project.git');
+  gitText(repo, 'config', '--add', 'remote.origin.url', 'fixture:special/project.git');
+  const lane = privateLane(t, repo, root);
+  assert.equal(remoteUrls(lane, 'origin'), remoteUrls(repo, 'origin'));
+  assert.equal(remoteUrls(lane, 'origin', true), remoteUrls(repo, 'origin', true));
+  assert.equal(readFileSync(join(lane, '.git/config'), 'utf8').includes('insteadOf'), false);
+});
+
+test('effective remote projection preserves distinct pushInsteadOf URLs for multiple fetch URLs', (t) => {
+  const { root, repo } = fixture(t);
+  gitText(repo, 'config', 'url.https://github.com/.insteadOf', 'fixture:');
+  gitText(repo, 'config', 'url.ssh://git@push.example.test/.pushInsteadOf', 'fixture:');
+  gitText(repo, 'remote', 'add', 'origin', 'fixture:team/project.git');
+  gitText(repo, 'config', '--add', 'remote.origin.url', 'fixture:team/second.git');
+  const lane = privateLane(t, repo, root);
+  assert.equal(remoteUrls(lane, 'origin'), remoteUrls(repo, 'origin'));
+  assert.equal(remoteUrls(lane, 'origin', true), remoteUrls(repo, 'origin', true));
+});
+
+test('effective remote projection honors multiple explicit push URLs over pushInsteadOf', (t) => {
+  const { root, repo } = fixture(t);
+  gitText(repo, 'remote', 'add', 'origin', 'https://github.com/team/project.git');
+  gitText(repo, 'config', 'url.ssh://git@unused.example.test/.pushInsteadOf', 'https://github.com/');
+  gitText(repo, 'config', 'url.ssh://git@push.example.test/.insteadOf', 'push-fixture:');
+  gitText(repo, 'config', '--add', 'remote.origin.pushurl', 'push-fixture:team/project.git');
+  gitText(repo, 'config', '--add', 'remote.origin.pushurl', 'push-fixture:team/second.git');
+  const lane = privateLane(t, repo, root);
+  assert.equal(remoteUrls(lane, 'origin'), remoteUrls(repo, 'origin'));
+  assert.equal(remoteUrls(lane, 'origin', true), remoteUrls(repo, 'origin', true));
+});
+
+test('effective credential-bearing fetch and push rewrites refuse generically before lane creation', (t) => {
+  const { root, repo } = fixture(t);
+  const secret = 'synthetic-rewrite-secret';
+  gitText(repo, 'remote', 'add', 'origin', 'fixture:team/project.git');
+  for (const rewrite of ['insteadOf', 'pushInsteadOf']) {
+    const key = `url.https://test:${secret}@example.test/.${rewrite}`;
+    gitText(repo, 'config', key, 'fixture:');
+    let failure;
+    try { createLane({ repoRoot: repo, scratchRoot: join(root, 'scratch'), index: 1 }); } catch (error) { failure = error; }
+    assert.ok(failure, 'an unsafe effective URL must refuse construction');
+    assert.match(failure.message, /remote.*credentials|credential.*remote/i);
+    assert.equal(String(failure.stack).includes(secret), false);
+    assert.equal(existsSync(join(root, 'scratch/lane-1')), false);
+    gitText(repo, 'config', '--unset', key);
+  }
+});
+
+for (const linkedSource of [false, true]) {
+  test(`common-dir info attributes refuse unsupported checkout for ${linkedSource ? 'linked' : 'root'} source`, (t) => {
+    const { root, repo: main } = fixture(t);
+    writeFileSync(join(commonDir(main), 'info/attributes'), '*.txt text eol=crlf\n');
+    const linked = join(root, 'old-linked');
+    gitText(main, 'worktree', 'add', '--detach', linked, 'HEAD');
+    assert.equal(readFileSync(join(linked, 'kept.txt'), 'utf8'), 'base\r\n');
+    assert.equal(gitText(main, 'status', '--porcelain'), '');
+    const repo = linkedSource ? linked : main;
+    if (linkedSource) {
+      for (const asset of ['node_modules', 'packages/cezar/dist', 'packages/cezar/web/dist']) cpSync(join(main, asset), join(repo, asset), { recursive: true });
+    }
+    assert.throws(() => createLane({ repoRoot: repo, scratchRoot: join(root, 'scratch'), index: 1 }), /unsupported.*attributes/i);
+    assert.equal(existsSync(join(root, 'scratch/lane-1')), false);
+  });
+}
+
+test('absent, empty and comment-only common-dir attributes preserve the default checkout', (t) => {
+  const { root, repo } = fixture(t);
+  const attributes = join(commonDir(repo), 'info/attributes');
+  for (const [index, contents] of [undefined, '', '\n  \n# fixture comment\n'].entries()) {
+    if (contents !== undefined) writeFileSync(attributes, contents);
+    const lane = privateLane(t, repo, root, index + 1);
+    assert.equal(readFileSync(join(lane, 'kept.txt'), 'utf8'), 'base\n');
+  }
+});
+
+test('inherited rewrites that would transform a resolved URL twice refuse and clean the partial lane', (t) => {
+  const { root, repo } = fixture(t);
+  const globalConfig = join(root, 'fixture-global.gitconfig');
+  writeFileSync(globalConfig, '[url "https://second.example.test/"]\n\tinsteadOf = https://github.com/\n');
+  gitText(repo, 'config', 'url.https://github.com/.insteadOf', 'fixture:');
+  gitText(repo, 'remote', 'add', 'origin', 'fixture:team/project.git');
+  const script = join(root, 'probe.mjs');
+  const scratch = join(root, 'scratch');
+  writeFileSync(script, `import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
+import { createLane } from ${JSON.stringify(new URL('../.ai/scripts/e2e-lanes.mjs', import.meta.url).href)};
+assert.throws(() => createLane({repoRoot:${JSON.stringify(repo)},scratchRoot:${JSON.stringify(scratch)},index:1}), /unsupported effective E2E remote rewrite/);
+assert.equal(existsSync(${JSON.stringify(join(scratch, 'lane-1'))}), false);
+`);
+  const result = spawnSync(process.execPath, [script], { encoding: 'utf8', env: { ...process.env, GIT_CONFIG_GLOBAL: globalConfig } });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+});

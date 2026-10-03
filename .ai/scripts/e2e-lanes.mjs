@@ -71,7 +71,25 @@ function publicRemote(value) {
   } catch { return false; }
 }
 
+function effectiveRemoteUrls(repoRoot, name, push = false) {
+  let output;
+  try {
+    output = execFileSync('git', ['-C', repoRoot, 'remote', 'get-url', ...(push ? ['--push'] : []), '--all', name],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  } catch { throw new Error('cannot resolve effective E2E remote metadata'); }
+  const urls = output.replace(/\n$/, '').split('\n');
+  if (urls.some(url => !url || !publicRemote(url))) {
+    throw new Error('E2E remote metadata must use public URLs without credentials');
+  }
+  return urls;
+}
+
 function laneMetadata(repoRoot) {
+  const common = git(repoRoot, 'rev-parse', '--path-format=absolute', '--git-common-dir').toString('utf8').trim();
+  const attributes = join(common, 'info/attributes');
+  if (existsSync(attributes) && readFileSync(attributes, 'utf8').split(/\r?\n/).some(line => !/^\s*(?:#.*)?$/.test(line))) {
+    throw new Error('unsupported E2E checkout info attributes; cannot faithfully isolate the lane');
+  }
   // These can transform checkout contents or execute commands outside a fixture.
   const unsupported = configEntries(repoRoot, '^(filter\\..*\\.(clean|smudge|process|required)|core\\.(hookspath|attributesfile|excludesfile|sparsecheckout))$');
   if (unsupported.some(([key, value]) => key !== 'core.sparsecheckout' || !/^(false|no|off|0)$/i.test(value))) {
@@ -81,10 +99,15 @@ function laneMetadata(repoRoot) {
   if (remotes.some(([key, value]) => /\.(url|pushurl)$/.test(key) && !publicRemote(value))) {
     throw new Error('E2E remote metadata must use public URLs without credentials');
   }
+  // Resolve Git's insteadOf/pushInsteadOf rules without copying rewrite configuration.
+  const effective = new Map();
+  for (const name of new Set(remotes.map(([key]) => key.slice(7, key.lastIndexOf('.'))))) {
+    effective.set(name, { fetch: effectiveRemoteUrls(repoRoot, name), push: effectiveRemoteUrls(repoRoot, name, true) });
+  }
   const core = configEntries(repoRoot, '^core\\.(autocrlf|eol|symlinks|filemode|ignorecase|precomposeunicode)$');
   const symbolic = git(repoRoot, 'for-each-ref', '--format=%(refname) %(symref)').toString('utf8')
     .trim().split('\n').map(line => line.trim().split(' ')).filter(parts => parts.length === 2);
-  return { remotes, core, symbolic };
+  return { remotes, core, symbolic, effective };
 }
 
 export function createLane({ repoRoot, scratchRoot, index, baseRef = 'HEAD' }) {
@@ -104,6 +127,21 @@ export function createLane({ repoRoot, scratchRoot, index, baseRef = 'HEAD' }) {
     for (const [key, value] of metadata.core) git(laneRoot, 'config', '--replace-all', key, value);
     for (const [key, value] of metadata.remotes) {
       git(laneRoot, 'config', '--add', key, value);
+    }
+    for (const [name, expected] of metadata.effective) {
+      // Keep literal public spelling when inherited rules already preserve its meaning.
+      // Otherwise materialize safe effective URLs; never copy rewrite configuration.
+      for (const [field, push] of [['fetch', false], ['push', true]]) {
+        if (JSON.stringify(effectiveRemoteUrls(laneRoot, name, push)) === JSON.stringify(expected[field])) continue;
+        const key = `remote.${name}.${push ? 'pushurl' : 'url'}`;
+        try { git(laneRoot, 'config', '--unset-all', key); } catch (error) { if (error.status !== 5) throw error; }
+        for (const url of expected[field]) git(laneRoot, 'config', '--add', key, url);
+      }
+      // A global rewrite may apply again to an already-resolved URL. Refuse that drift.
+      if (JSON.stringify(effectiveRemoteUrls(laneRoot, name)) !== JSON.stringify(expected.fetch) ||
+          JSON.stringify(effectiveRemoteUrls(laneRoot, name, true)) !== JSON.stringify(expected.push)) {
+        throw new Error('unsupported effective E2E remote rewrite; cannot faithfully isolate the lane');
+      }
     }
     for (const [name, target] of metadata.symbolic) git(laneRoot, 'symbolic-ref', name, target);
     if (existsSync(join(laneRoot, '.git/objects/info/alternates'))) {
