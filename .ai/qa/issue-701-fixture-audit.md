@@ -113,3 +113,9 @@ Review-round verification (normal Vitest worker count):
 - Temporarily removed only the three new ownership entries, reran `npm test -- packages/cezar/src/workflows/fixture-cleanup.test.ts -t 'detached Finish|queue rescue'`: **3 failed / 4 filtered out**, each with missing repository at the held boundary. Restored the saved helper in `finally`.
 - After restoration, `npm test -- packages/cezar/src/workflows/fixture-cleanup.test.ts packages/cezar/src/workflows/auto-resume.test.ts packages/cezar/src/workflows/agent-tmpdir.test.ts packages/cezar/src/workflows/run.test.ts -t 'detached Finish|queue rescue|watchdog|[Ff]inish|keeps the repo|ownership timeout|removal errors'`: **4 files / 13 passed / 196 filtered out**.
 - `npm run typecheck -w @wjarka/cezarion`: **passed**.
+
+## Parent integration verification
+
+The complete six-command gate passed on `c878e4a1`: typecheck; Vitest (529 files, 11,452 tests at normal workers); node unit (504 tests); build/check:pack; packaged CLI (62 tests); and `test:e2e:local` (all four lanes, `TEST_E2E_STATUS=passed`). The subsequent review fix changes only fixture tests/testkit and this audit, leaving runtime, package and browser inputs unchanged.
+
+On final code revision `d7b1fdf7`, `npm run typecheck` and the complete `npm test` passed again (529 files, 11,455 tests, normal worker count). The independent Astra reviewer approved the corrected implementation, passed 45 focused tests, and replayed both originally failing Finish/watchdog reproductions without late errors. All review findings are resolved. `git diff --check` passed and merging freshly fetched `origin/main` reported already up to date.
