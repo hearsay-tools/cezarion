@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { inspectGeneration } from '../delegation/process-liveness.ts';
 import { CredentialRegistry } from '../delegation/credentials.ts';
 import { DelegationPolicyError } from '../delegation/policy.ts';
 import { DelegationService } from '../delegation/service.ts';
@@ -139,6 +140,18 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
       // Recovery resumes the parent; the worker's session stays closed on its pending question.
       await until(() => ['running', 'waiting'].includes(store.getRun(f.p.id)?.status ?? '') && store.getRun(f.w.id)?.status === 'waiting');
       expect(manager.isActive(f.w.id)).toBe(false);
+      if (crashed) {
+        // This case answers after the crashed execution has no possible process
+        // holders. Inactive only proves our manager released it: the real #469
+        // scan can still see transient Git children or unreadable same-user host
+        // processes. Wait for that physical precondition without finalizing the
+        // proof, suppressing any PIDs, or retrying the answer under test.
+        await until(() => {
+          const orphan = manager['orphanedWorkerGeneration'](f.w.id);
+          return orphan ? inspectGeneration(orphan).liveness === 'gone'
+            : store.readWorkerExecution(f.w.id)?.phase === 'complete';
+        });
+      }
       await service.send(parentCaller, { id: randomUUID(), recipientRunId: f.w.id, kind: 'reply', requestId: f.questionId, text: 'mock:agent-echo Use the parser', timeoutSeconds: 600 });
       await until(() => answered(f.w.id).length === 1);
       await until(() => said(f.w.id, 'Use the parser'));
