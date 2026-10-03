@@ -246,6 +246,25 @@ describe('PreviewHost', () => {
     expect(devServers[1]!.opts.server.command).toBe('npm run dev -- --host');
   });
 
+  it('a newer open wins over a show still waiting for Chromium: the old target never navigates', async () => {
+    let letLaunch!: () => void;
+    const gate = new Promise<void>(resolve => (letLaunch = resolve));
+    const { host, ctx, answering, browsers } = make([server(5173), server(3000)], undefined, () => gate);
+    answering.add(5173);
+    const viewer = fakeViewer();
+    const first = host.open(ctx, viewer, { port: 5173 });
+    await flush();
+    // The owner switches to the silent :3000 while :5173 is still waiting for the browser.
+    await host.open(ctx, viewer, { port: 3000 });
+    expect(viewer.messages.at(-1)).toMatchObject({ t: 'state', stage: 'needs-approval', server: { port: 3000 } });
+
+    letLaunch();
+    await first;
+    await flush();
+    expect(navigations(browsers[0]!)).toEqual([]);
+    expect(viewer.messages.at(-1)).toMatchObject({ t: 'state', stage: 'needs-approval', server: { port: 3000 } });
+  });
+
   it('a run deleted while its Chromium is still launching waits for that browser before deleting the profile', async () => {
     let letLaunch!: () => void;
     const gate = new Promise<void>(resolve => (letLaunch = resolve));

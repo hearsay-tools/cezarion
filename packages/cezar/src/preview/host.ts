@@ -69,6 +69,9 @@ type RunEntry = {
   launching?: Promise<PreviewSession | undefined>;
   /** Bumped whenever the browser is closed on purpose, so a launch in flight knows it lost. */
   browserGen: number;
+  /** Bumped by every open and every show: a show still waiting for Chromium navigates only if
+   *  nothing newer asked for the pane since. */
+  targetGen: number;
   /** Chromium died or would not start: shown until `retryBrowser`, never relaunched on its own. */
   browserFailure?: PreviewStateMessage;
   viewer?: Viewer;
@@ -161,6 +164,8 @@ export class PreviewHost implements PreviewHostLike {
   async open(ctx: RunContext, viewer: Viewer, target: PreviewTarget): Promise<void> {
     const entry = this.entryFor(ctx);
     this.claim(entry, viewer);
+    // Whatever this open shows, a show still waiting on Chromium for an older target is stale.
+    entry.targetGen += 1;
     if ('url' in target) {
       let url: string;
       try {
@@ -328,7 +333,7 @@ export class PreviewHost implements PreviewHostLike {
       existing.ctx = ctx;
       return existing;
     }
-    const entry: RunEntry = { ctx, servers: new Map(), startedAt: new Map(), browserGen: 0, adopted: false, idleTimers: {}, released: false };
+    const entry: RunEntry = { ctx, servers: new Map(), startedAt: new Map(), browserGen: 0, targetGen: 0, adopted: false, idleTimers: {}, released: false };
     this.entries.set(ctx.runId, entry);
     return entry;
   }
@@ -449,8 +454,9 @@ export class PreviewHost implements PreviewHostLike {
     if (entry.browserFailure) return this.tell(entry, entry.browserFailure);
     entry.lastUrl = url;
     entry.adopted = adopted;
+    const generation = ++entry.targetGen;
     const session = await this.ensureSession(entry);
-    if (!session || entry.lastUrl !== url) return;
+    if (!session || entry.targetGen !== generation) return;
     this.tell(entry, { t: 'state', stage: 'loading', step: 'page' });
     await session.navigate(url).catch(() => {});
     this.tell(entry, { t: 'state', stage: 'loading', step: 'frame' });
