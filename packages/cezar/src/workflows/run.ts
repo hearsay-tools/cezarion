@@ -1469,11 +1469,15 @@ export class RunManager {
     if (!checked.server) return checked.answer();
     const server = { ...checked.server, answeredAtRegistration: answered };
     const existing = this.store.getRun(runId)?.previewServers ?? [];
+    const previous = existing.find(entry => entry.port === server.port);
+    const changed = !!previous && (previous.command !== server.command || previous.cwd !== server.cwd || previous.path !== server.path);
     const previewServers = checked.code === 'replaced'
       ? existing.map(entry => entry.port === server.port ? server : entry)
       : [...existing, server];
     this.store.updateRun(runId, { previewServers });
     this.store.appendEvent(runId, { type: 'preview.server-registered', server });
+    // A copy cezar runs from the old command must not keep answering for the new registration.
+    if (changed) await this.preview.replaced(runId, server.port).catch(() => {});
     return checked.answer();
   }
 

@@ -45,7 +45,7 @@ describe('RunManager.registerPreviewServer (#781)', { timeout: 30_000 }, () => {
   beforeEach(async () => {
     vi.stubEnv('CEZ_PREVIEW', '1');
     sessions.release.length = 0;
-    preview = { portOwner: () => undefined, probe: async () => false, release: async () => undefined };
+    preview = { portOwner: () => undefined, probe: async () => false, release: async () => undefined, replaced: vi.fn(async () => undefined) };
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-preview-reg-'));
     await run('git', ['init', '-q', '-b', 'main'], { cwd: repoRoot });
     writeFileSync(join(repoRoot, 'a.txt'), 'one\n');
@@ -97,6 +97,12 @@ describe('RunManager.registerPreviewServer (#781)', { timeout: 30_000 }, () => {
       [6006, 'npm run storybook'],
     ]);
     expect(store.readEvents(record.id).at(-1)).toMatchObject({ type: 'preview.server-registered', server: { port: 5173, label: 'npm' } });
+    // A changed command must not leave the old one running behind the new registration.
+    expect(preview.replaced).toHaveBeenCalledTimes(1);
+    expect(preview.replaced).toHaveBeenCalledWith(record.id, 5173);
+    // The same registration again changes nothing the running server depends on.
+    await second({ command: 'npm run dev -- --port 5173 --strictPort --host', port: 5173 });
+    expect(preview.replaced).toHaveBeenCalledTimes(1);
   });
 
   it('records a port that answers at registration and refuses one held by another task', async () => {

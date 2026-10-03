@@ -18,6 +18,9 @@ export interface PreviewHostLike {
   probe(port: number): Promise<boolean>;
   /** The run's worktree is going: stop its servers and close its browser. */
   release(runId: string): Promise<void>;
+  /** The agent re-registered `port` with a different command, cwd or path: the running copy
+   *  belongs to the old registration, so it stops and the next run needs the owner's approval. */
+  replaced(runId: string, port: number): Promise<void>;
 }
 
 export type PreviewRegistrationInput = {

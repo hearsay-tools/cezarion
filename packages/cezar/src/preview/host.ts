@@ -207,6 +207,23 @@ export class PreviewHost implements PreviewHostLike {
     dev.start();
   }
 
+  /**
+   * The agent re-registered `port` with a different command, cwd or path. A server cezar runs
+   * from the old registration stops, an adoption is forgotten, and a pane on that port is asked
+   * to approve the new command: nothing runs it until the owner does.
+   */
+  async replaced(runId: string, port: number): Promise<void> {
+    const entry = this.entries.get(runId);
+    if (!entry) return;
+    const current = entry.servers.get(port);
+    entry.servers.delete(port);
+    if (live(current)) await current.stop('release');
+    const server = this.registration(entry, port);
+    if (server && entry.viewer && entry.port === port) {
+      this.tell(entry, { t: 'state', stage: 'needs-approval', server, wasRunning: false });
+    }
+  }
+
   /** Stops a cezar-owned server. An adopted one is not cezar's to stop: refused with `false`. */
   async stop(runId: string, port: number, reason: 'user' | 'idle'): Promise<boolean> {
     const dev = this.entries.get(runId)?.servers.get(port);

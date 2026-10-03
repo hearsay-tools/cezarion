@@ -224,6 +224,27 @@ describe('PreviewHost', () => {
     expect(devServers[0]!.stop).not.toHaveBeenCalled();
   });
 
+  it('a re-registration with a new command stops the old server and asks for approval of the new one', async () => {
+    const servers = [server(5173)];
+    const { host, ctx, devServers } = make(servers);
+    const viewer = fakeViewer();
+    await host.open(ctx, viewer, { port: 5173 });
+    await host.run('run-1', 5173);
+    devServers[0]!.set('up');
+    await flush();
+
+    // The agent re-registered :5173 with another command; the store now holds the new one.
+    servers[0] = server(5173, { command: 'npm run dev -- --host' });
+    await host.replaced('run-1', 5173);
+    expect(devServers[0]!.stop).toHaveBeenCalledWith('release');
+    expect(viewer.messages.at(-1)).toEqual({ t: 'state', stage: 'needs-approval', server: server(5173, { command: 'npm run dev -- --host' }), wasRunning: false });
+    // Nothing runs the new command until the owner approves it.
+    expect(devServers).toHaveLength(1);
+    await host.run('run-1', 5173);
+    expect(devServers).toHaveLength(2);
+    expect(devServers[1]!.opts.server.command).toBe('npm run dev -- --host');
+  });
+
   it('release stops the servers and closes the session', async () => {
     const { host, ctx, devServers, browsers } = make();
     const viewer = fakeViewer();
