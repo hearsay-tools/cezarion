@@ -429,6 +429,14 @@ const automationLogQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).optional(),
 });
 
+/** enable/pause carry no client revision, so a conflict is a race inside the write: 409, never 500. */
+function toggleFailure(error: unknown): { error: string; status: 404 | 409 } {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message === 'automation not found') return { error: 'not found', status: 404 };
+  if (message === 'automation revision conflict') return { error: 'the automation changed elsewhere; reload and try again', status: 409 };
+  throw error;
+}
+
 function editableAutomation(definition: AutomationDefinition) {
   return {
     name: definition.name,
@@ -3635,8 +3643,11 @@ export function createApp(deps: ServerDeps) {
 
     .post('/automations/:id/enable', async (c) => {
       const store = c.get('project').automationStore;
+      // No client revision: the toggle applies to what is on disk now, not to this store's last read.
+      store.reload();
       const current = store.get(c.req.param('id'));
       if (!current) return c.json({ error: 'not found' }, 404);
+      try {
       if (isScheduleAutomation(current)) {
         // A schedule has no backlog to baseline against: it arms its next occurrence from now.
         const automation = store.update(current.id, current.revision, { ...editableAutomation(current), enabled: true }, armScheduleFromNow);
@@ -3658,16 +3669,26 @@ export function createApp(deps: ServerDeps) {
       emitAutomationChange(c.get('project'), automation.id, automation.revision);
       automationsChanged();
       return c.json({ automation });
+      } catch (error) {
+        const { status, ...body } = toggleFailure(error);
+        return c.json(body, status);
+      }
     })
 
     .post('/automations/:id/pause', (c) => {
       const store = c.get('project').automationStore;
+      store.reload();
       const current = store.get(c.req.param('id'));
       if (!current) return c.json({ error: 'not found' }, 404);
-      const automation = store.update(current.id, current.revision, { ...editableAutomation(current), enabled: false }, armScheduleFromNow);
-      emitAutomationChange(c.get('project'), automation.id, automation.revision);
-      automationsChanged();
-      return c.json({ automation });
+      try {
+        const automation = store.update(current.id, current.revision, { ...editableAutomation(current), enabled: false }, armScheduleFromNow);
+        emitAutomationChange(c.get('project'), automation.id, automation.revision);
+        automationsChanged();
+        return c.json({ automation });
+      } catch (error) {
+        const { status, ...body } = toggleFailure(error);
+        return c.json(body, status);
+      }
     })
 
     // Run now: a schedule fired once by hand, paused or not, outside the timer and under the same

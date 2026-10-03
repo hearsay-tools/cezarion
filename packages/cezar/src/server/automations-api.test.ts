@@ -464,6 +464,40 @@ describe('GitHub automation API', () => {
     expect(AutomationStore.open(join(root, '.ai/cezar')).state(created.id)?.nextRunAt).toBe(stale);
   });
 
+  it('enable and pause toggle the current revision when another store edited the definition', async () => {
+    const dir = join(root, '.ai/cezar');
+    const stale = AutomationStore.open(dir);
+    const other = AutomationStore.open(dir);
+    const server = app({ automationStore: stale });
+    const created = stale.create({ ...scheduleInput, enabled: false } as never);
+    other.reload();
+    const edited = other.update(created.id, created.revision, { ...scheduleInput, name: 'Edited elsewhere', enabled: false } as never);
+    const enabled = await apiRequest(server, `/api/v1/automations/${created.id}/enable`, { method: 'POST' });
+    expect(enabled.status).toBe(200);
+    expect(((await enabled.json()) as any).automation).toMatchObject({ name: 'Edited elsewhere', enabled: true, revision: edited.revision + 1 });
+    other.reload();
+    const edited2 = other.update(created.id, other.get(created.id)!.revision, { ...scheduleInput, name: 'Edited again', enabled: true } as never);
+    const paused = await apiRequest(server, `/api/v1/automations/${created.id}/pause`, { method: 'POST' });
+    expect(paused.status).toBe(200);
+    expect(((await paused.json()) as any).automation).toMatchObject({ name: 'Edited again', enabled: false, revision: edited2.revision + 1 });
+  });
+
+  it('enable and pause answer 409, never 500, when the write races another edit', async () => {
+    const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
+    const server = app({ automationStore });
+    const created = automationStore.create({ ...scheduleInput, enabled: false } as never);
+    for (const action of ['enable', 'pause']) {
+      const spy = vi.spyOn(automationStore, 'update').mockImplementationOnce(() => { throw new Error('automation revision conflict'); });
+      const response = await apiRequest(server, `/api/v1/automations/${created.id}/${action}`, { method: 'POST' });
+      expect(response.status).toBe(409);
+      expect(((await response.json()) as any).error).toBe('the automation changed elsewhere; reload and try again');
+      spy.mockRestore();
+    }
+    const gone = vi.spyOn(automationStore, 'update').mockImplementationOnce(() => { throw new Error('automation not found'); });
+    expect((await apiRequest(server, `/api/v1/automations/${created.id}/pause`, { method: 'POST' })).status).toBe(404);
+    gone.mockRestore();
+  });
+
   it('retry fires a launch-error schedule receipt', async () => {
     const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
     const manager = recordingManager();
