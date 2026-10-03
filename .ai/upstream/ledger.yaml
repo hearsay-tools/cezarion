@@ -331,13 +331,14 @@ entries:
     pr: 985
     title: "feat(automations): scheduled triggers, default-on, redesigned surface, creation from a prompt (#985)"
     date: 2026-09-15
-    status: planned
+    status: partial
     hint:
       conflicts: 20
     note: "Adapt scheduling, prompt-based creation and the redesigned surface in stages; preserve the fork's opt-in default and governed workers instead of upstream dispatch"
     fork:
       issue: 766
     decided: 2026-10-02
+    reason: "stage 1 (#766) ported the schedule trigger, run-now, the kind-aware editor, list and log; the fork keeps CEZ_AUTOMATIONS=1 opt-in, the #651 lease and governed workers instead of default-on, lock replacement and task.dispatch. The CLI, built-in skill, prompt part, templates, calendars and stats are stages 2 and 3"
   - sha: 67fc941f0cc79c2aca3c77ed7d0f953afadf8f5e
     pr: 990
     title: "chore(release): bump main to 0.11.0 and cut the changelog entry (#990)"

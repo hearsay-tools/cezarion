@@ -9,6 +9,7 @@ import type {
   automationLogResponseSchema,
   automationResponseSchema,
   automationRetryResponseSchema,
+  automationRunResponseSchema,
   automationsResponseSchema,
 } from '@open-mercato/cezar-contract';
 import type { AppType } from './app-type.ts';
@@ -68,6 +69,10 @@ describe('src/contract automation schemas match the routes exactly', () => {
     (typeof client.api.v1.automations)[':id']['check']['$post'],
     202
   >;
+  type RunAutomation202 = InferResponseType<
+    (typeof client.api.v1.automations)[':id']['run']['$post'],
+    202
+  >;
   type AutomationLog200 = InferResponseType<(typeof client.api.v1)['automation-log']['$get'], 200>;
   type RetryReceipt202 = InferResponseType<
     (typeof client.api.v1)['automation-log'][':receiptId']['retry']['$post'],
@@ -88,6 +93,7 @@ describe('src/contract automation schemas match the routes exactly', () => {
     Assert<Exact<z.infer<typeof automationResponseSchema>, EnableAutomation200>>,
     Assert<Exact<z.infer<typeof automationResponseSchema>, PauseAutomation200>>,
     Assert<Exact<z.infer<typeof automationCheckQueuedResponseSchema>, CheckAutomation202>>,
+    Assert<Exact<z.infer<typeof automationRunResponseSchema>, RunAutomation202>>,
     Assert<Exact<z.infer<typeof automationLogResponseSchema>, AutomationLog200>>,
     Assert<Exact<z.infer<typeof automationRetryResponseSchema>, RetryReceipt202>>,
     Assert<Exact<z.infer<typeof automationCheckSchema>, AutomationCheck200>>,

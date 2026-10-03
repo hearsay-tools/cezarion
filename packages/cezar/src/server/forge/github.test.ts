@@ -588,6 +588,30 @@ describe('detectGithubCached', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(execFileMock).toHaveBeenCalledTimes(2);
   });
+
+  it('keeps one availability slot per repository, so projects do not evict each other', async () => {
+    ghOk();
+    const a = '/repo/detect-multi-a';
+    const b = '/repo/detect-multi-b';
+    detectGithubCached(a);
+    await vi.advanceTimersByTimeAsync(0);
+    detectGithubCached(b);
+    await vi.advanceTimersByTimeAsync(0);
+    // The single-slot cache held only B here, so A read back null (→ "still being checked").
+    expect(detectGithubCached(a)).toEqual({ available: true });
+    expect(detectGithubCached(b)).toEqual({ available: true });
+    expect(execFileMock).toHaveBeenCalledTimes(2); // both fresh: no extra probes
+  });
+
+  it('dedupes concurrent cold reads of one repository into a single probe', async () => {
+    ghOk();
+    const x = '/repo/detect-burst';
+    detectGithubCached(x);
+    detectGithubCached(x);
+    detectGithubCached(x);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(execFileMock).toHaveBeenCalledTimes(1);
+  });
 });
 
 // ---- timeline events (#525) -------------------------------------------------

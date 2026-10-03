@@ -18,7 +18,10 @@ import type {
   AutomationCheck,
   AutomationCheckQueuedResponse,
   AutomationLogResponse,
+  AutomationRunResponse,
+  AutomationRetryResponse,
   AutomationResponse,
+  AutomationDefinition,
   CreateAutomationInput,
   UpdateAutomationInput,
   AgentConfigListing,
@@ -1871,6 +1874,35 @@ export async function checkAutomation(
       json: { mode },
     }),
     `/automations/${encodeURIComponent(id)}/check`,
+  )
+}
+
+/** Remove a definition (204). A missing id is a 404 `ApiError`. */
+export async function deleteAutomation(id: string): Promise<void> {
+  const res = await cez.api.v1.p[':projectId'].automations[':id'].$delete({
+    param: { projectId: queryScope(), id: encodeURIComponent(id) },
+  })
+  if (!res.ok) throw errorFor(res.status, res.statusText, await res.text())
+}
+
+/** Fire a schedule once by hand (202): the run it created. Allowed while paused; leaves the
+ *  schedule's next occurrence alone. A held lease or an unlaunchable project answers 409. */
+export async function runAutomationNow(id: string): Promise<AutomationRunResponse> {
+  return unwrap(
+    await cez.api.v1.p[':projectId'].automations[':id'].run.$post({
+      param: { projectId: queryScope(), id: encodeURIComponent(id) },
+    }),
+    `/automations/${encodeURIComponent(id)}/run`,
+  )
+}
+
+/** Relaunch a receipt whose task failed to start (`launch-error` log rows). */
+export async function retryAutomationReceipt(receiptId: string): Promise<AutomationRetryResponse> {
+  return unwrap(
+    await cez.api.v1.p[':projectId']['automation-log'][':receiptId'].retry.$post({
+      param: { projectId: queryScope(), receiptId: encodeURIComponent(receiptId) },
+    }),
+    `/automation-log/${encodeURIComponent(receiptId)}/retry`,
   )
 }
 
