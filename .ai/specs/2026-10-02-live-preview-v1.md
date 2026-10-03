@@ -7,8 +7,8 @@ open it in a browser that runs on the host, docked next to the task, and click t
 agent does not drive that browser in v1.
 
 Design settled with the owner on 2026-10-01/02 (cezar task 3e478497). Inputs: the
-`live-preview-v1` design (the source for every state number below: 27 screens in
-`assets/2026-10-02-live-preview-v1/`, plus an annotated PDF kept outside the repo; the `.pen` frame `Live Preview · v1 · light` is the editable source;
+`live-preview-v1` design (the source for every state number below: 27 screens and an annotated
+PDF, kept outside the repo because they show client work; the `.pen` frame `Live Preview · v1 · light` is the editable source;
 `live-preview-v0.1-archive` is the archive of the pre-review ideas) and the zero-dependency CDP screencast
 prototype at `~/projects/cdp-screencast-proto` (server.mjs, client.html, smoke.mjs).
 

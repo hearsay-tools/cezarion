@@ -8,7 +8,7 @@
 
 **Tech Stack:** TypeScript (ESM, Node >=20), Hono, zod, `ws`, `@modelcontextprotocol/sdk`; React 19 + Tailwind v4 + shadcn/ui; vitest; agent-browser e2e.
 
-**Spec:** `.ai/specs/2026-10-02-live-preview-v1.md` (screens: `.ai/specs/assets/2026-10-02-live-preview-v1/`, state numbers 5.1 to 5.18). Prototype to port: `/home/agent/projects/cdp-screencast-proto/` (`server.mjs`, `client.html`).
+**Spec:** `.ai/specs/2026-10-02-live-preview-v1.md` (state numbers 5.1 to 5.18 refer to the v1 design screens, kept outside the repo). Prototype to port: `/home/agent/projects/cdp-screencast-proto/` (`server.mjs`, `client.html`).
 
 ## Global Constraints
 
