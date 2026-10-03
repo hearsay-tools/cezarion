@@ -1431,7 +1431,7 @@ export class RunManager {
     if (!controller || this.disposed || state.cancelled || this.active.get(runId) !== state) return;
     const provisioned = controller.provision(
       (request, signal) => this.registerCiWait(runId, request, generation, signal),
-      request => this.registerPreviewServer(runId, request),
+      (request, signal) => this.registerPreviewServer(runId, request, signal),
     );
     state.revokeCiTools = provisioned.revoke;
     return provisioned;
@@ -1441,7 +1441,7 @@ export class RunManager {
    * #781: record a dev server the agent registered. One probe at registration becomes
    * `answeredAtRegistration`; the run is re-validated after it, since the probe awaits.
    */
-  async registerPreviewServer(runId: string, request: PreviewServeRequest): Promise<PreviewServeResult> {
+  async registerPreviewServer(runId: string, request: PreviewServeRequest, signal?: AbortSignal): Promise<PreviewServeResult> {
     const parsed = previewServeRequestSchema.parse(request);
     const validate = () => {
       const run = this.store.getRun(runId);
@@ -1465,6 +1465,8 @@ export class RunManager {
     // until it knows its port, `cezar_port` cannot be checked, so the tool asks for a retry instead.
     if (this.cezarPort && this.cezarPort() === undefined) return previewResult('unavailable', parsed);
     const answered = await this.preview.probe(parsed.port).catch(() => false);
+    // A session revoked during the probe (cancel, stop) must leave no card behind.
+    signal?.throwIfAborted();
     const checked = validate();
     if (!checked.server) return checked.answer();
     const server = { ...checked.server, answeredAtRegistration: answered };

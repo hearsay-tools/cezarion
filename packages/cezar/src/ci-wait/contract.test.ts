@@ -131,7 +131,7 @@ describe('private preview-serve route', () => {
     const response = await post(env, JSON.stringify({ ...valid, label: 'vite', extra: 'dropped' }));
     expect(response.status).toBe(200);
     expect(JSON.parse(response.body)).toEqual(registered);
-    expect(registerPreview).toHaveBeenCalledWith({ ...valid, label: 'vite' });
+    expect(registerPreview).toHaveBeenCalledWith({ ...valid, label: 'vite' }, expect.any(AbortSignal));
     const failing = await session(async () => { throw new Error('secret-sensitive'); });
     const failed = await post(failing.env, JSON.stringify(valid));
     expect(failed.body).not.toContain('secret-sensitive');

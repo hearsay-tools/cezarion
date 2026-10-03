@@ -16,7 +16,8 @@ import type { AgentRunSpec } from '../core/agent-runner.ts';
 
 type Registration = (request: CiWaitRequest, signal: AbortSignal) => Promise<CiWait>;
 /** #781: absent where no cockpit owns the run, which the route answers as `headless`. */
-type PreviewRegistration = (request: PreviewServeRequest) => Promise<PreviewServeResult>;
+/** `signal` aborts when the session's capability is revoked (cancel, stop, session end). */
+type PreviewRegistration = (request: PreviewServeRequest, signal: AbortSignal) => Promise<PreviewServeResult>;
 type Capability = { register: Registration; registerPreview?: PreviewRegistration; lifetime: AbortController };
 export type CiToolSession = { descriptor: NonNullable<AgentRunSpec['cezarTools']>; env: Record<string, string>; revoke(): void };
 const unavailable = { code: 'unavailable' as const, message: ciErrorMessage('unavailable') };
@@ -147,7 +148,7 @@ export function ciToolRoutes(capabilities: Map<string, Capability>) {
       const capability = c.get('capability');
       if (!capability.registerPreview) return c.json(previewRefusal('headless'));
       try {
-        const result = previewServeResultSchema.parse(await capability.registerPreview(c.req.valid('json')));
+        const result = previewServeResultSchema.parse(await capability.registerPreview(c.req.valid('json'), capability.lifetime.signal));
         capability.lifetime.signal.throwIfAborted();
         return c.json(result);
       } catch {

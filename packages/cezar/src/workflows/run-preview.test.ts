@@ -30,7 +30,7 @@ vi.mock('../core/runner-factory.ts', () => ({
   }),
 }));
 
-type PreviewCallback = (request: PreviewServeRequest) => Promise<PreviewServeResult>;
+type PreviewCallback = (request: PreviewServeRequest, signal?: AbortSignal) => Promise<PreviewServeResult>;
 
 /**
  * The preview capability rides the CI tool session, so every start, Continue and recovered launch
@@ -103,6 +103,18 @@ describe('RunManager.registerPreviewServer (#781)', { timeout: 30_000 }, () => {
     // The same registration again changes nothing the running server depends on.
     await second({ command: 'npm run dev -- --port 5173 --strictPort --host', port: 5173 });
     expect(preview.replaced).toHaveBeenCalledTimes(1);
+  });
+
+  it('a capability revoked while the port probe is pending records nothing', async () => {
+    const provision = vi.spyOn(CiToolController.prototype, 'provision');
+    const record = manager!.startRun(QUICK_TASK_WORKFLOW, { task: 'build the members page' });
+    const register = await callbackAt(provision, 0);
+    const lifetime = new AbortController();
+    // The run is cancelled while the probe is in flight.
+    preview.probe = async () => { lifetime.abort(); return false; };
+    await expect(register({ command: 'npm run dev', port: 5173 }, lifetime.signal)).rejects.toThrow();
+    expect(store.getRun(record.id)?.previewServers ?? []).toEqual([]);
+    expect(store.readEvents(record.id).some(event => event.type === 'preview.server-registered')).toBe(false);
   });
 
   it('records a port that answers at registration and refuses one held by another task', async () => {
