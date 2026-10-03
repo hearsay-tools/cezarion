@@ -130,6 +130,52 @@ describe('Hand off to webhook', () => {
     settledShot('desktop-sidebar-glyph.png')
   })
 
+  it('keeps the live glyph when an older stop-notifying list response arrives after re-enable (#795)', async () => {
+    const path = `${baseUrl}/api/v1/p/${project}/runs/desktop/notify`
+    const post = (notify: boolean) => fetch(path, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ notify }),
+    })
+    expect((await post(true)).ok).toBe(true)
+    browser.setViewport(1280, 800)
+    browser.goto(`${baseUrl}/p/${project}/tasks/desktop`)
+    browser.waitForFunction(`document.querySelector(${JSON.stringify(chip)}) !== null`)
+    const glyph = `document.querySelector('[data-run-id="desktop"] [data-slot="task-row-notify"]')`
+    browser.waitForFunction(`${glyph} !== null`)
+    // Hold only the real server's off-state list response, leaving POST, SSE and detail native.
+    // This is a route-response fixture, not a rewrite of any React-owned node.
+    browser.evaluate(`(() => {
+      window.__handoffFetch = window.fetch;
+      window.__offListHeld = false; window.__offListReleased = false;
+      window.fetch = async (...args) => {
+        const response = await window.__handoffFetch(...args);
+        const url = String(args[0]?.url ?? args[0]);
+        if (url.endsWith('/runs')) {
+          const rows = await response.clone().json();
+          if (rows.some(row => row.id === 'desktop' && row.notify !== true)) {
+            window.__offListHeld = true;
+            await new Promise(resolve => { window.__releaseOffList = resolve; });
+            window.__offListReleased = true;
+          }
+        }
+        return response;
+      };
+    })()`)
+    try {
+      browser.click(chip)
+      browser.click('[data-slot="notifying-menu"] [data-variant="destructive"]')
+      browser.waitForFunction(`${glyph} === null && window.__offListHeld === true`)
+      expect((await post(true)).ok).toBe(true)
+      browser.waitForFunction(`${glyph} !== null && document.querySelector(${JSON.stringify(chip)}) !== null`)
+      browser.evaluate(`window.__releaseOffList(); true`)
+      browser.waitForFunction(`window.__offListReleased === true && window.__cezIdle === true`)
+      expect(waitForSettledSample(browser, `${glyph} !== null`)).toBe(true)
+      const stored = await getJson<RunRecord>(`${baseUrl}/api/v1/p/${project}/runs/desktop`)
+      expect(stored.notify).toBe(true)
+    } finally {
+      browser.evaluate(`(() => { window.__releaseOffList?.(); window.fetch = window.__handoffFetch; })()`)
+    }
+  })
+
   it('is a bottom sheet with a full-width 44px action at 360×640', () => {
     browser.setViewport(360, 640)
     openThread('mobile')

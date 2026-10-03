@@ -1,3 +1,4 @@
+import { clickAppearanceControl } from './appearance-control'
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
@@ -127,7 +128,7 @@ for (const [width, height] of [[1440, 900], [360, 640]]) for (const theme of ['l
     browser.setViewport(width!, height!)
     browser.goto(`${base}/settings/global/appearance`)
     browser.waitForFunction(`document.querySelector('[data-slot="appearance-theme"]') !== null`)
-    browser.click(`[data-slot="appearance-theme"] [data-value="${theme}"]`)
+    clickAppearanceControl(browser, 'theme', theme)
     // A hard navigation must follow the committed browser-local preference, not just the click.
     browser.waitForFunction(`localStorage.getItem('cez-theme') === '${theme}' &&
       document.querySelector('[data-slot="appearance-theme"] [data-value="${theme}"]')?.getAttribute('aria-checked') === 'true' &&
@@ -264,7 +265,7 @@ it('keeps request waits consistent in threads, global tasks and the palette at p
     browser.setViewport(width, height)
     browser.goto(`${base}/settings/appearance`)
     browser.waitForFunction(`document.querySelector('[data-slot="appearance-theme"]') !== null`)
-    browser.click(`[data-slot="appearance-theme"] [data-value="${theme}"]`)
+    clickAppearanceControl(browser, 'theme', theme)
     for (const [id, label] of [[requestParentId, 'Waiting on worker replies'], [requestWorkerId, 'Waiting on parent reply']] as const) {
       open(id)
       browser.waitForFunction(`document.querySelector('[data-slot="paused-hint"]') !== null`)

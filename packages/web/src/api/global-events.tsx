@@ -163,33 +163,50 @@ function reconcileBackgroundQuery(queryClient: QueryClient, key: readonly unknow
   )
 }
 
+/** Requested list keys only: never create a cache or fetch a collapsed/disabled project.
+ * A cold request must be cancelled before invalidation, which otherwise reuses its promise. */
+function reconcileRunLists(queryClient: QueryClient): Promise<void>[] {
+  // Keep every retained alias stale for its next enabled mount, without fetching disabled keys.
+  void queryClient.invalidateQueries({ predicate: query => isRunListQueryKey(query.queryKey), refetchType: 'none' })
+  return queryClient.getQueryCache().findAll({ predicate: query =>
+    isRunListQueryKey(query.queryKey) && (query.state.data !== undefined || query.state.fetchStatus !== 'idle'),
+  }).map(query => reconcileBackgroundQuery(queryClient, query.queryKey))
+}
+
 function reconcile(queryClient: QueryClient): void {
-  trackSseReconcile(() => [
-    queryClient.invalidateQueries({ queryKey: queryKeys.runs.all }),
-    // Sidebar groups keep per-project list caches. `queryKeys.runs.all` is scope-led, so a
-    // reconnect would otherwise leave an expanded non-active group's patched list stale (#129).
-    queryClient.invalidateQueries({
-      predicate: (query) => isRunListQueryKey(query.queryKey),
-    }),
-    // Events happened while we were disconnected, and the index is cross-project — nothing else
-    // here covers it.
-    queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.runsIndex }),
-    queryClient.invalidateQueries({ queryKey: queryKeys.todos }),
-    reconcileBackgroundQuery(queryClient, queryKeys.health),
-    // The worktree panel's list/total (#483) — a run finishing or a reclaim changes it.
-    queryClient.invalidateQueries({ queryKey: queryKeys.worktrees }),
-    // Branch classes follow run state (issue 08): a finish, a delete or a reclaim moves them.
-    queryClient.invalidateQueries({ queryKey: queryKeys.repoBranches }),
-    queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.providerStatus }),
-    reconcileBackgroundQuery(queryClient, workspaceQueryKeys.models('cursor')),
-    // GitHub edits never enter this stream. Reconnect (including server restart) must
-    // invalidate every project's list, leaving inactive caches stale until revisited.
-    // Restrict this to list keys: comments/checks/search have separate cache policies.
-    queryClient.invalidateQueries({
-      predicate: ({ queryKey }) => queryKey.length === 3 && queryKey[1] === 'github'
-        && (queryKey[2] === null || typeof queryKey[2] === 'number'),
-    }),
-  ])
+  trackSseReconcile(() => {
+    // Warm invalidation already replaces a running GET. Cold invalidation reuses it, so cancel
+    // only that uncovered case before preserving the existing family/list reconciliation.
+    for (const query of queryClient.getQueryCache().findAll({ predicate: query => isRunListQueryKey(query.queryKey) })) {
+      if (query.state.data === undefined && query.state.fetchStatus !== 'idle') {
+        void queryClient.cancelQueries({ queryKey: query.queryKey, exact: true })
+      }
+    }
+    return [
+      queryClient.invalidateQueries({ queryKey: queryKeys.runs.all }),
+      // Sidebar groups keep per-project list caches. `queryKeys.runs.all` is scope-led, so a
+      // reconnect would otherwise leave an expanded non-active group's patched list stale (#129).
+      queryClient.invalidateQueries({ predicate: query => isRunListQueryKey(query.queryKey) }),
+      // Events happened while we were disconnected, and the index is cross-project — nothing else
+      // here covers it.
+      queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.runsIndex }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.todos }),
+      reconcileBackgroundQuery(queryClient, queryKeys.health),
+      // The worktree panel's list/total (#483) — a run finishing or a reclaim changes it.
+      queryClient.invalidateQueries({ queryKey: queryKeys.worktrees }),
+      // Branch classes follow run state (issue 08): a finish, a delete or a reclaim moves them.
+      queryClient.invalidateQueries({ queryKey: queryKeys.repoBranches }),
+      queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.providerStatus }),
+      reconcileBackgroundQuery(queryClient, workspaceQueryKeys.models('cursor')),
+      // GitHub edits never enter this stream. Reconnect (including server restart) must
+      // invalidate every project's list, leaving inactive caches stale until revisited.
+      // Restrict this to list keys: comments/checks/search have separate cache policies.
+      queryClient.invalidateQueries({
+        predicate: ({ queryKey }) => queryKey.length === 3 && queryKey[1] === 'github'
+          && (queryKey[2] === null || typeof queryKey[2] === 'number'),
+      }),
+    ]
+  })
 }
 
 /**
@@ -317,8 +334,13 @@ function createRunListBatcher(queryClient: QueryClient) {
 
   const keysFor = (project: string): Array<readonly [string, 'runs', 'list']> => {
     const stamped = runListCacheKey(project, bootProjectOf(queryClient))
-    const scoped = project === activeProject(queryClient) ? queryKeys.runs.list() : undefined
-    return scoped && JSON.stringify(scoped) !== JSON.stringify(stamped) ? [stamped, scoped] : [stamped]
+    const keys = [stamped]
+    // A boot project can retain both aliases after navigation. Inactive caches must receive
+    // the same news; otherwise revisiting the scoped alias restores its obsolete snapshot.
+    const scoped = [project, 'runs', 'list'] as const
+    if (project === activeProject(queryClient) || queryClient.getQueryState(scoped)) keys.push(scoped)
+    if (project === activeProject(queryClient)) keys.push(queryKeys.runs.list())
+    return [...new Map(keys.map(key => [JSON.stringify(key), key])).values()]
   }
 
   return {
@@ -351,6 +373,21 @@ function createRunListBatcher(queryClient: QueryClient) {
       // A newer live update or deletion must win over an archived record still in the queue.
       const reconcileAfterWrite = flush(true)
       for (const key of keys) {
+        const cacheKey = JSON.stringify(key)
+        const query = queryClient.getQueryCache().find({ queryKey: key, exact: true })
+        const recovery = needsReconcile.get(cacheKey)
+        if (!recovery && query && query.state.fetchStatus !== 'idle') {
+          // #795: a GET captured before this event can overwrite the live patch. Cancel BEFORE
+          // writing: cancellation reverts query state. Cold lists still need a complete answer,
+          // while warm lists expose the event now and recover authoritatively afterwards.
+          needsReconcile.set(cacheKey, { key, phase: 'needs-start', dirty: false })
+          void queryClient.cancelQueries({ queryKey: key, exact: true })
+          reconcileAfterWrite.push(key)
+        } else if (recovery?.phase === 'fetching') {
+          // Cold caches cannot take a manual patch, so their dirty obligation must not depend
+          // on setQueryData emitting a success action. Keep one fetch plus a trailing recovery.
+          recovery.dirty = true
+        }
         if (event.type === 'run') queryClient.setQueryData<ApiRun[]>(key, list => applyRunEvent(list, event.run))
         else queryClient.setQueryData<ApiRun[]>(key, list => applyRunDeleted(list, event.id))
       }
@@ -565,6 +602,7 @@ export function useGlobalEvents(usage: UsageStore, url: string = SSE_URL): void 
     const runDetailRefresher = createRunDetailRefresher(queryClient)
     const runListBatcher = createRunListBatcher(queryClient)
     const relationshipsRefresher = createRelationshipsRefresher(queryClient)
+    let attachmentNeedsReconcile = false
     let reopenTimer: ReturnType<typeof setTimeout> | undefined
     let everOpened = false
     let disposed = false
@@ -603,6 +641,7 @@ export function useGlobalEvents(usage: UsageStore, url: string = SSE_URL): void 
       source = new Source(url, { withCredentials: true })
 
       source.addEventListener('open', () => {
+        attachmentNeedsReconcile = true
         // Not the first one: at boot the queries are fetching anyway, and invalidating them here
         // would only ask the same questions twice. Every later open is a *re*connect — we were
         // disconnected, events happened without us, and the cache is now a guess.
@@ -611,6 +650,7 @@ export function useGlobalEvents(usage: UsageStore, url: string = SSE_URL): void 
           reconcile(queryClient)
         }
         if (!everOpened) {
+          trackSseReconcile(() => reconcileRunLists(queryClient))
           // Discovery can finish between the cold HTTP read and SSE connection.
           // Cancel that read and reconcile once after the completion listener is attached.
           for (const key of [queryKeys.health, workspaceQueryKeys.models('cursor')]) {
@@ -626,6 +666,13 @@ export function useGlobalEvents(usage: UsageStore, url: string = SSE_URL): void 
         source.addEventListener(name, (event) => {
           const parsed = parseWorkspaceEvent(name, (event as MessageEvent<string>).data)
           if (!parsed) return
+          if (parsed.event.type === 'ping' && attachmentNeedsReconcile) {
+            // #795: the server writes its first ping only AFTER store listeners attach.
+            // Open alone may expose headers earlier. This once-per-attachment barrier catches
+            // snapshots taken in that gap, without touching never-requested list keys.
+            attachmentNeedsReconcile = false
+            trackSseReconcile(() => reconcileRunLists(queryClient))
+          }
           // The cross-project index first, and BEFORE the scope filter below — it is the one
           // cache that spans every project, so another project's news is exactly what it is news
           // for. Dropping those events left the global Tasks page entirely poll-driven: a title

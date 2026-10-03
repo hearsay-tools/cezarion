@@ -2,7 +2,8 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import { settleVisual, waitForSettledSample } from './visual-ready'
+import { clickAppearanceControl } from './appearance-control'
+import { waitForSettledSample } from './visual-ready'
 import { AgentBrowser, readTestEnv } from './agent-browser'
 import { waitForServerAppearance } from './poll'
 
@@ -69,7 +70,7 @@ describe('settings → appearance against the live dry-run server', () => {
   })
 
   it('flipping the theme flips the root class and persists across a reload', () => {
-    browser.click('[data-slot="appearance-theme"] [data-value="light"]')
+    clickAppearanceControl(browser, 'theme', 'light')
     browser.waitForFunction(`document.documentElement.classList.contains('light')`)
 
     // A fresh navigation: the pre-paint script must re-apply the choice before the bundle.
@@ -78,10 +79,7 @@ describe('settings → appearance against the live dry-run server', () => {
     expect(browser.count('[data-slot="appearance-theme"] [data-value="light"][aria-checked="true"]')).toBe(1)
 
     // Back to dark so every other suite screenshots the default palette.
-    // #795 loaded trace: Light/root readiness precedes a 60px control shift.
-    // Hold native target geometry independently of the expected theme result.
-    settleVisual(browser, '[data-slot="appearance-theme"] [data-value="dark"]')
-    browser.click('[data-slot="appearance-theme"] [data-value="dark"]')
+    clickAppearanceControl(browser, 'theme', 'dark')
     browser.waitForFunction(`!document.documentElement.classList.contains('light')`)
   })
 
@@ -102,12 +100,12 @@ describe('settings → appearance against the live dry-run server', () => {
 
     // Saving another appearance field writes the complete normalized object, proving accent is
     // still connected rather than deleted along with the redundant control.
-    browser.click('[data-slot="appearance-density"] [data-value="compact"]')
+    clickAppearanceControl(browser, 'density', 'compact')
     const appearance = await waitForServerAppearance(baseUrl, (a) => a.accent === 'cezarion' && a.density === 'compact')
     expect(appearance.accent).toBe('cezarion')
-    browser.click('[data-slot="appearance-density"] [data-value="comfortable"]')
+    clickAppearanceControl(browser, 'density', 'comfortable')
     await waitForServerAppearance(baseUrl, (a) => a.density === 'comfortable')
-    browser.click('[data-slot="appearance-width"] [data-value="narrow"]')
+    clickAppearanceControl(browser, 'width', 'narrow')
     await waitForServerAppearance(baseUrl, (a) => a.density === 'comfortable' && a.width === 'narrow')
     browser.waitForFunction(`document.documentElement.dataset.density === undefined`)
   })
@@ -120,7 +118,7 @@ describe('settings → appearance against the live dry-run server', () => {
     expect(Number(waitForSettledSample(browser, `${header}.offsetHeight`))).toBe(56)
     expect(Number(browser.evaluate(`parseFloat(getComputedStyle(${section}).rowGap)`))).toBe(28)
 
-    browser.click('[data-slot="appearance-density"] [data-value="compact"]')
+    clickAppearanceControl(browser, 'density', 'compact')
     browser.waitForFunction(`document.documentElement.dataset.density === 'compact'`)
     expect(Number(waitForSettledSample(browser, `${header}.offsetHeight`))).toBe(56)
     expect(Number(browser.evaluate(`parseFloat(getComputedStyle(${section}).rowGap)`))).toBe(24.5)
@@ -129,7 +127,7 @@ describe('settings → appearance against the live dry-run server', () => {
     browser.screenshot(`${artifactsDir}/settings-appearance.png`)
 
     // Neutralize for the rest of the suite run (afterAll restores the file itself too).
-    browser.click('[data-slot="appearance-density"] [data-value="comfortable"]')
+    clickAppearanceControl(browser, 'density', 'comfortable')
     browser.waitForFunction(
       `document.documentElement.dataset.density === undefined && document.documentElement.dataset.accent === undefined`,
     )
