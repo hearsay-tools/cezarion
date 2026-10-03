@@ -1,5 +1,13 @@
 /* Live preview (#781): the split between the transcript and the pane, and the pane's motion. */
 
+/* A closed pane adds no boxes: the split and its main column step out of layout, so the task view
+ * lays out as it does without live preview. Opening the pane brings them back without remounting
+ * the tab. */
+[data-slot='task-split'][data-pane='closed'],
+[data-slot='task-split'][data-pane='closed'] > [data-slot='task-main'] {
+  display: contents;
+}
+
 /* The pane docks beside the transcript and sticks to the shell's scrolling main, so it stays in
  * view while a long transcript scrolls. --preview-h is the main's measured height (100dvh until
  * measured); --preview-pane is the divider's width. */

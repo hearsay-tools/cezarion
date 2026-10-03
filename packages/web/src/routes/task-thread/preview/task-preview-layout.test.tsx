@@ -105,4 +105,12 @@ describe('TaskPreviewLayout', () => {
     renderAt('/tasks/r1')
     expect(screen.getByText('no pane')).toBeTruthy()
   })
+
+  it('leaves the task view exactly as it was with the feature off: no split around the tab', () => {
+    state.preview = false
+    renderAt('/tasks/r1')
+    expect(screen.getByTestId('tab').textContent).toBe('session')
+    expect(document.querySelector('[data-slot="task-split"]')).toBeNull()
+    expect(document.querySelector('[data-slot="task-main"]')).toBeNull()
+  })
 })

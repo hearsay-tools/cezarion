@@ -33,4 +33,9 @@ describe('docked preview layout', () => {
     expect(rule("[data-slot='task-split'][data-pane='open'] [data-slot='run-title-row'] > .group")).toMatch(/flex: 1 1 100%/)
     expect(rule("[data-slot='task-split'][data-pane='open'] [data-slot='run-title-row'] {")).toContain('flex-wrap: wrap')
   })
+
+  it('a closed pane adds no boxes: the split and its main column lay out as if absent', () => {
+    expect(rule("[data-slot='task-split'][data-pane='closed'],")).toContain('display: contents')
+    expect(css.replace(/\s+/g, ' ')).toContain("[data-slot='task-split'][data-pane='closed'] > [data-slot='task-main'] {")
+  })
 })
