@@ -21,6 +21,7 @@ export * from './agent-profiles.ts';
 export * from './zoned-time.ts';
 export * from './automation-schedule.ts';
 export * from './automations.ts';
+export * from './preview.ts';
 
 export * from './conversations.ts';
 export * from './ci-wait.ts';

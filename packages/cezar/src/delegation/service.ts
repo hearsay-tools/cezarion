@@ -24,7 +24,8 @@ import type { Caller } from './credentials.ts';
 import { isAuthenticatedCaller } from './credentials.ts';
 import { parseDelegationEffort } from './effort.ts';
 import { authorizeSpawn, authorizeSpawnReplay, authorizeWorker, authorizeCancelWait, authorizeRetainedResult, DelegationPolicyError } from './policy.ts';
-import { planOwnedWorkspace, readOwnedDiff, removeOwnedWorkspace, resolveWorkerBaseline } from './workspace.ts';
+import { releaseThenRemoveOwnedWorkspace } from '../git-worktree-release.ts';
+import { planOwnedWorkspace, readOwnedDiff, resolveWorkerBaseline } from './workspace.ts';
 
 export type DelegationProject = { id: string; root: string; store: RunStore; manager: RunManager };
 
@@ -622,7 +623,9 @@ export class DelegationService {
         project.store.commitWorkerResult(evidence.result.parentRunId, evidence.result, evidence.diffSnapshot);
         assertAttached();
         check();
-        result = await removeOwnedWorkspace(project.root, workspace, project.manager.getWorkerNoMaterializationProof(workerId), assertAttached);
+        // #781: the worker's dev servers and browser go before its checkout does.
+        result = await releaseThenRemoveOwnedWorkspace({ previewHost: project.manager.previewHost }, project.root, workspace,
+          project.manager.getWorkerNoMaterializationProof(workerId), assertAttached);
         // An already-started checked Git operation may finish after detach. Its
         // checkpoint makes a new controller's retry safe; the old store must not
         // publish a result after ownership of the project has moved.

@@ -50,6 +50,14 @@ export const capabilitiesSchema = z.object({
    */
   automations: z.boolean(),
   /**
+   * `true` means `CEZ_PREVIEW=1` opted this server into live preview (#781): the `cezar_preview_serve`
+   * tool is listed, its route answers, the preview WebSocket upgrades and the cockpit offers the
+   * pane. Off — the default — every one of those is absent.
+   *
+   * REQUIRED for the same reason as `tokenMetrics` below: this server always sends it.
+   */
+  preview: z.boolean(),
+  /**
    * `false` means `CEZ_HIDE_TOKEN_METRICS=1` asks the browser to omit token counts and monetary
    * cost (#481). The telemetry itself still rides in run/event payloads — this is presentation
    * only.

@@ -6,7 +6,9 @@
 // is pure and unit-testable; the enforcer never throws (helper discipline).
 import { existsSync } from 'node:fs';
 import { collectWorkerEvidence } from '../delegation/results.ts';
-import { createWorktree, removeWorktree } from '../git-worktree.ts';
+import { createWorktree } from '../git-worktree.ts';
+import { releaseThenRemoveWorktree } from '../git-worktree-release.ts';
+import type { PreviewHostLike } from '../preview/registration.ts';
 import type { RunRecord, RunStatus, RunStore } from './store.ts';
 
 /** The "finished" status set — mirrors the statuses `RunStore.archiveFinished` sweeps. A run at the
@@ -125,6 +127,8 @@ export interface ReclaimOptions {
    *  worker's evidence snapshot; a person pressing Reclaim on one row (issue 08 §B4) is not shown
    *  that a diff snapshot drops binary content and caps its size, so that path asks for clean. */
   requireClean?: boolean;
+  /** The workspace preview host (#781): the default reclaimer releases the run's preview first. */
+  previewHost?: Pick<PreviewHostLike, 'release'>;
 }
 
 /** Snapshot parent-owned worker evidence before the checkout goes.
@@ -174,7 +178,8 @@ export async function reclaimWorktree(
   // Branch kept. An owned worker's evidence (uncommitted diff included) is snapshotted first; any
   // other run's uncommitted work lives only in the directory, so a dirty one is left for later.
   const onlyClean = opts.requireClean === true || run.delegation?.role !== 'worker';
-  const remove = opts.remove ?? ((root, path) => removeWorktree(root, path, undefined, { reclaimOwnedDirectory: true, onlyClean }));
+  const remove = opts.remove ?? ((root, path) =>
+    releaseThenRemoveWorktree({ previewHost: opts.previewHost }, run.id, root, path, undefined, { reclaimOwnedDirectory: true, onlyClean }));
   if (!run.worktreePath) return null;
   const release = opts.claim ? opts.claim(run) : () => undefined;
   if (!release) return null; // in use since it was selected

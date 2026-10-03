@@ -122,7 +122,8 @@ import { artifactParamsSchema, fileLinkQuerySchema } from '@open-mercato/cezar-c
 import { artifactDirectory, listArtifacts, readArtifact } from '../artifacts/store.ts';
 import { artifactPreview, loadFileLink, rasterMime } from '../artifacts/resolve.ts';
 import { isUntouchedCancelledRun, toPastedContent, type PastedContent, type RunManager } from '../workflows/run.ts';
-import { removeWorktree, worktreeDiff, worktreeDiffStat, worktreeSizeBytes } from '../git-worktree.ts';
+import { worktreeDiff, worktreeDiffStat, worktreeSizeBytes } from '../git-worktree.ts';
+import { releaseThenRemoveWorktree } from '../git-worktree-release.ts';
 import { isReclaimable, reclaimWorktree, reclaimWorktrees, rematerializeReclaimedWorktree, selectReclaimableWorktrees } from '../runs/retention.ts';
 import { getBranches, getCommit, getDiff, getLogWithParents, getRepoInfo, getStatus, getTracking } from './git.ts';
 import { attributeLog, deleteBranches, forgetRepoBranches, githubBranchForge, readRepoBranches, type BranchForge, type ClassifyInput } from './repo-branches.ts';
@@ -191,14 +192,17 @@ import {
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { mergeWriteWorkspaceUiState, readWorkspaceUiState } from '../workspace/ui-state.ts';
 import { checkoutRepo, type CloneRunner } from './checkout.ts';
-import { ProjectContextError, ProjectContexts, type ProjectContext } from './project-context.ts';
+import { armPreview, ProjectContextError, ProjectContexts, sweepRegisteredPreviewLeftovers, type ProjectContext } from './project-context.ts';
 import { reviewGateEnabled } from '../runs/review-gate.ts';
 import { readUiState, uiStatePath } from '../ui-state.ts';
 import { agentHomePaths, expandTilde } from '../paths.ts';
 import { isLoopbackHostHeader, normalizeHostname, resolveCapabilities } from './capabilities.ts';
 import { applicationUpdateInputSchema, type ApplicationUpdateState } from '@open-mercato/cezar-contract';
 import { ApplicationUpdateConflictError, ApplicationUpdateFailureError, type ApplicationUpdateServiceLike } from '../application-update/service.ts';
-import { createSocketHub, type SocketHub, type WsUpgradeVerdict } from './ws.ts';
+import { createSocketHub, socketHubRoute, type SocketHub, type WsUpgradeVerdict } from './ws.ts';
+import { attachUpgradeRouter } from './upgrade-router.ts';
+import { createPreviewSocket } from './preview-socket.ts';
+import type { PreviewHost } from '../preview/host.ts';
 import { browseDirectory, isInsideBrowseRoot, isLexicallyInsideBrowseRoot, resolveBrowseRoot } from './fs-browse.ts';
 import { parseRemote, resolveForge, type ForgeAvailability } from './forge/index.ts';
 import { fetchGithub, fetchGithubProjects, fetchGithubChecks, fetchGithubComments, fetchGithubItem, forgetGithubItem, fetchGithubPrDiff, fetchGithubRefStatus, forgetRefStatus, readCachedRefStatuses, refNumberFromUrl, searchGithubItems, GithubPrNotFoundError, GH_CHECKS_MAX, GH_REF_STATUS_MAX } from './github.ts';
@@ -313,6 +317,15 @@ export interface ServerDeps {
    *  to the HTTP server it binds. Optional so legacy callers/tests change
    *  nothing: no hub, no topics, and the HTTP surface is byte-identical. */
   socketHub?: SocketHub;
+  /** The workspace-wide live preview host (#781), one per server process because ports are
+   *  host-global. Present only under `CEZ_PREVIEW=1`; absent, the preview WebSocket answers 404
+   *  and every run manager answers `headless`. */
+  previewHost?: PreviewHost;
+  /** The port the cockpit listens on, once it does: `cezar_preview_serve` refuses it. */
+  cezarPort?: () => number | undefined;
+  /** Filled in by `createApp` with the scope middleware's own project lookup, so an upgrade-only
+   *  route (`startServer`'s preview socket) resolves `:projectId` exactly as the HTTP routes do. */
+  projectLookup?: { resolve?: (projectId: string | undefined) => Promise<ProjectContext | undefined> };
   /** Re-arm the workspace automation timer after definition mutations. */
   automationsChanged?: () => void;
 }
@@ -1312,6 +1325,8 @@ export function createApp(deps: ServerDeps) {
       return listProjects(selector);
     },
     semaphore: deps.semaphore,
+    preview: deps.previewHost,
+    cezarPort: deps.cezarPort,
     prepareManager: (project) => {
       taskWebhooks.attach(project);
       return deps.delegation?.attachProject(project);
@@ -1478,6 +1493,13 @@ export function createApp(deps: ServerDeps) {
   // `ProjectContextError` mapped to 404 (unknown) / 409 (missing root).
   // Named rather than inlined because both mounts share it — one function, so
   // the two spellings can never disagree about what `default` means.
+  if (deps.projectLookup) {
+    deps.projectLookup.resolve = async (raw) => {
+      if (raw === undefined || raw === 'default' || raw === (await resolveBootProject())) return bootContext;
+      if (!projectIdSchema.safeParse(raw).success) return undefined;
+      return contexts.context(raw).catch(() => undefined);
+    };
+  }
   const resolveProjectScope = async (c: Context<ProjectApiEnv>, next: Next): Promise<Response | void> => {
     const raw = c.req.param('projectId');
     if (raw === undefined) {
@@ -4799,7 +4821,7 @@ export function createApp(deps: ServerDeps) {
       if (!run) return c.json({ error: 'not found' }, 404);
       if (manager.isActive(id)) return c.json({ error: 'run is active — cancel it first' }, 409);
       if (run.delegation?.role === 'worker' || !store.canDeleteRun(id)) return c.json({ error: 'owned resources require verified worker cleanup' }, 409);
-      if (run.worktreePath) await removeWorktree(repoRoot, run.worktreePath, run.branch);
+      if (run.worktreePath) await releaseThenRemoveWorktree({ previewHost: deps.previewHost }, id, repoRoot, run.worktreePath, run.branch);
       store.updateRun(id, { worktreePath: undefined, branch: undefined });
       return c.json({ removed: true });
     })
@@ -4812,7 +4834,7 @@ export function createApp(deps: ServerDeps) {
       if (!run) return c.json({ error: 'not found' }, 404);
       // Delete cleans up after itself: worktree + branch go with the run (spec 006).
       if (!store.canDeleteRun(id)) return c.json({ error: 'owned resources require verified worker cleanup and explicit child history deletion first' }, 409);
-      if (run.delegation?.role !== 'worker' && run.worktreePath) await removeWorktree(repoRoot, run.worktreePath, run.branch);
+      if (run.delegation?.role !== 'worker' && run.worktreePath) await releaseThenRemoveWorktree({ previewHost: deps.previewHost }, id, repoRoot, run.worktreePath, run.branch);
       return store.deleteRun(id) ? c.json({ deleted: true }) : c.json({ error: 'history cleanup incomplete — retry deletion' }, 409);
     });
 
@@ -4896,7 +4918,7 @@ export function createApp(deps: ServerDeps) {
         if (manager.isActive(loser.id)) manager.cancel(loser.id);
         // Owned workers use verified cleanup exclusively, even after history becomes deletable.
         if (loser.delegation?.role === 'worker' || !store.canDeleteRun(loser.id)) continue;
-        if (loser.worktreePath) await removeWorktree(repoRoot, loser.worktreePath, loser.branch);
+        if (loser.worktreePath) await releaseThenRemoveWorktree({ previewHost: deps.previewHost }, loser.id, repoRoot, loser.worktreePath, loser.branch);
         store.updateRun(loser.id, { worktreePath: undefined, branch: undefined });
         store.setArchived(loser.id, true);
         store.appendEvent(loser.id, {
@@ -5031,6 +5053,7 @@ export function createApp(deps: ServerDeps) {
       const { manager } = c.get('project');
       const reclaimed = await reclaimWorktrees(repoRoot, store, await resolveWorktreeRetention(repoRoot), {
         claim: (run) => manager.claimWorktreeReclaim(run.id),
+        previewHost: deps.previewHost,
       });
       if (reclaimed.length > 0) forgetRepoBranches(repoRoot);
       return c.json({ reclaimed });
@@ -5048,7 +5071,7 @@ export function createApp(deps: ServerDeps) {
       if (!release) {
         return c.json({ error: 'this worktree is in use or already reclaimed — only a finished task\'s worktree can be reclaimed' }, 409);
       }
-      const worktreeReclaimedAt = await reclaimWorktree(repoRoot, store, run, { requireClean: true }).finally(release);
+      const worktreeReclaimedAt = await reclaimWorktree(repoRoot, store, run, { requireClean: true, previewHost: deps.previewHost }).finally(release);
       if (!worktreeReclaimedAt) {
         // Reclaim keeps only what is committed, so it leaves a dirty checkout alone; say which case this was.
         const dirty = run.worktreePath && existsSync(run.worktreePath) ? (await getStatus(run.worktreePath).catch(() => [])).length : 0;
@@ -6236,6 +6259,10 @@ export function startServer(deps: ServerDeps, port: number): ServerType & { shut
   // The subscription hub rides the same HTTP server (one port, zero config):
   // createApp registers the topics, the `upgrade` hook below owns the socket.
   const socketHub = deps.socketHub ?? createSocketHub();
+  // `cezar_preview_serve` refuses the cockpit's own port: the one the listener BOUND (`--port 0`).
+  let listeningPort: number | undefined;
+  const cezarPort = deps.cezarPort ?? (() => listeningPort);
+  const projectLookup: NonNullable<ServerDeps['projectLookup']> = {};
   const automationCoordinator = new AutomationCoordinator({ listProjects });
   const bootProjectId = deps.bootProjectId ?? 'default';
   const bootAutomationStore = automationCoordinator.store(bootProjectId, deps.repoRoot)!;
@@ -6244,6 +6271,8 @@ export function startServer(deps: ServerDeps, port: number): ServerType & { shut
     ownership: deps.ownership,
     listProjects,
     semaphore: deps.semaphore,
+    preview: deps.previewHost,
+    cezarPort,
     automationStore: (projectId, root) => automationCoordinator.store(projectId, root)!,
     prepareManager: (project) => {
       taskWebhooks.attach(project);
@@ -6265,6 +6294,8 @@ export function startServer(deps: ServerDeps, port: number): ServerType & { shut
     workspaceEvents,
     skillsUpdate,
     socketHub,
+    cezarPort,
+    projectLookup,
     automationsChanged: () => rescheduleAutomations(),
   });
   // SECURITY: default to loopback. This server executes agents locally and its endpoints are
@@ -6400,6 +6431,8 @@ export function startServer(deps: ServerDeps, port: number): ServerType & { shut
       const all = projects.some((project) => project.root === deps.repoRoot)
         ? projects : [{ id: deps.bootProjectId ?? 'default', root: deps.repoRoot, status: 'ok' as const }, ...projects];
       coordinator.start(all);
+      // #781: every registered project's preview leftovers, not only the boot project's.
+      void sweepRegisteredPreviewLeftovers(all, deps.previewHost).catch(() => 0);
       // #801: with automations off there is nothing to warm — no remote to resolve, no receipts
       // to reconcile, and above all no scheduler to start. The skills-update coordinator above is
       // a separate feature and starts either way.
@@ -6416,12 +6449,29 @@ export function startServer(deps: ServerDeps, port: number): ServerType & { shut
       })).then(() => automationScheduler.start()).catch(() => undefined);
     }).catch(() => undefined);
   });
-  server.once('close', () => { unsubscribe(); coordinator.stop(); automationScheduler.stop(); sharedContexts.disposeAll(); void deps.delegation?.close(); });
-  socketHub.attach(server, (req) => verifyWsUpgrade(req, deps.bindHost));
+  // The boot store's preview leftovers and run deletions; lazy projects arm theirs at build.
+  armPreview(deps.store, join(deps.repoRoot, '.ai/cezar'), deps.previewHost);
+  const previewSocket = createPreviewSocket({
+    host: deps.previewHost,
+    verify: (req) => verifyWsUpgrade(req, deps.bindHost),
+    resolveProject: async (projectId) => projectLookup.resolve?.(projectId),
+  });
+  server.once('close', () => {
+    unsubscribe(); coordinator.stop(); automationScheduler.stop(); sharedContexts.disposeAll(); void deps.delegation?.close();
+    socketHub.close();
+    previewSocket.close();
+    void deps.previewHost?.close().catch(() => undefined);
+  });
+  // The one `upgrade` listener: the subscription bus and the preview pane's socket (#781).
+  attachUpgradeRouter(server, [socketHubRoute(socketHub, (req) => verifyWsUpgrade(req, deps.bindHost)), previewSocket.route]);
   const shutdownForRestart = async (): Promise<void> => {
     sharedContexts.disposeAll(); // flush every built secondary project before old process exits
     deps.store.flush();
     socketHub.close();
+    // Dev servers run in their own process groups: they outlive cezar unless stopped here.
+    // A failed release must not abort the restart halfway, with the store flushed and the port still bound.
+    await deps.previewHost?.close().catch(() => undefined);
+    previewSocket.close();
     await deps.delegation?.close();
     await new Promise<void>((resolve) => {
       server.close(() => resolve());
@@ -6434,6 +6484,7 @@ export function startServer(deps: ServerDeps, port: number): ServerType & { shut
   const setTaskWebhookOrigin = () => {
     const address = server.address();
     const bound = address && typeof address === 'object' ? address.port : port;
+    listeningPort = bound;
     taskWebhooks.setOrigin(`http://${taskWebhookHost(deps.bindHost)}:${bound}`);
   };
   if (server.listening) setTaskWebhookOrigin();

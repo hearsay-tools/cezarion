@@ -2656,6 +2656,35 @@ describe('RunStore — replaying accepted but unread input after a crash (#505)'
   });
 });
 
+describe('RunStore — previewServers survive a partly unreadable entry (#781)', () => {
+  let dataDir: string;
+  beforeEach(() => { dataDir = mkdtempSync(join(tmpdir(), 'cez-store-preview-')); });
+  afterEach(() => { rmSync(dataDir, { recursive: true, force: true }); });
+
+  const valid = { port: 5173, command: 'npm run dev', label: 'vite', registeredAt: '2026-10-02T10:00:00.000Z', answeredAtRegistration: false };
+
+  it('keeps the valid entry and drops the malformed one', () => {
+    writeFileSync(join(dataDir, 'runs.json'), JSON.stringify([
+      { ...LEGACY_RUN, previewServers: [valid, { port: 'nope', command: 3 }] },
+    ]));
+    const store = RunStore.open(dataDir, { keepLive: true });
+    expect(store.getRun('legacy-1')?.previewServers).toEqual([valid]);
+  });
+
+  it('loads a record whose previewServers is not an array, without the field', () => {
+    writeFileSync(join(dataDir, 'runs.json'), JSON.stringify([{ ...LEGACY_RUN, previewServers: 'garbage' }]));
+    const store = RunStore.open(dataDir, { keepLive: true });
+    expect(store.getRun('legacy-1')).toBeDefined();
+    expect(store.getRun('legacy-1')?.previewServers).toBeUndefined();
+  });
+
+  it('loads a pre-#781 record with no previewServers field', () => {
+    writeFileSync(join(dataDir, 'runs.json'), JSON.stringify([LEGACY_RUN]));
+    const store = RunStore.open(dataDir, { keepLive: true });
+    expect(store.getRun('legacy-1')?.previewServers).toBeUndefined();
+  });
+});
+
 describe('RunRecord.automationTrigger', () => {
   const trigger = {
     automationId: 'nightly',

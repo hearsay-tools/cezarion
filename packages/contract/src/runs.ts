@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { agentInputSchema, delegationStateSchema, runDelegationSummarySchema } from './delegation.ts';
 import { runnerSchema } from './health.ts';
 import { referenceStatusSchema } from './github.ts';
+import { previewServerSchema } from './preview.ts';
 // The chain shapes belong to the workflows family; the run record embeds one, so this file
 // consumes them rather than redeclaring. One-way on purpose — see the header of `./workflows.ts`.
 import { workflowDefSchema, workflowStepDefSchema } from './workflows.ts';
@@ -180,6 +181,8 @@ export const runRecordSchema = z.object({
   lastCiWait: ciWaitSchema.optional(),
   /** Retained recovery observation when previous CI metadata cannot be trusted. */
   lastCiWaitError: z.string().max(256).optional(),
+  /** Dev servers the agent registered with `cezar_preview_serve` (#781). Salvaged per entry on load. */
+  previewServers: z.array(previewServerSchema).optional(),
   /** URLs of images and document attachments on the initial task prompt; branch on isImageAttachmentName. */
   taskImages: z.array(z.string()).optional(),
   model: z.string().optional(),

@@ -27,7 +27,7 @@ Both contain the relevant source-dependent resolver and off-as-omission serializ
 
 Read-only inspection of the affected project's `.ai/cezar/` state confirmed:
 
-- Project: `/home/agent/projects/mvp-unveiled-july26`.
+- Project: `/home/agent/projects/<client-mvp>`.
 - Run: `70fbd826-a97e-476e-aca3-19c657df4ded`, created `2026-09-21T10:27:19.130Z`.
 - `runs.json`: `autonomous: true`, `(planned)` workflow, one initial step named
   `setup`, `skill: setup`, prompt `{{task}}`, task `Let's set up SDLC for this project`.

@@ -160,6 +160,7 @@ describe('resolveCapabilities — followups (#471)', () => {
       followups: true,
       singleProject: false,
       automations: false,
+      preview: false,
       tokenMetrics: true,
       tokenUsageMetrics: true,
       costMetrics: true,
@@ -205,6 +206,7 @@ describe('resolveCapabilities — automations (#801)', () => {
   it('does not turn on any other opt-in capability', () => {
     expect(resolveCapabilities({ CEZ_AUTOMATIONS: '1' })).toMatchObject({
       automations: true,
+      preview: false,
       followups: false,
       singleProject: false,
     });
@@ -250,5 +252,15 @@ describe('resolveCapabilities — usage presentation', () => {
       tokenUsageMetrics: true,
       costMetrics: true,
     });
+  });
+});
+
+describe('resolveCapabilities — preview (#781)', () => {
+  it('is on only for the exact value 1', () => {
+    expect(resolveCapabilities({ CEZ_PREVIEW: '1' }).preview).toBe(true);
+  });
+
+  it.each([undefined, '', '0', 'true', 'yes', ' 1'])('is off for CEZ_PREVIEW=%j', (value) => {
+    expect(resolveCapabilities(value === undefined ? {} : { CEZ_PREVIEW: value }).preview).toBe(false);
   });
 });

@@ -18,6 +18,8 @@ import { pruneOrphans } from './git-worktree.ts';
 import { getRepoInfo } from './server/git.ts';
 import { DEFAULT_WORKTREE_RETENTION, loadConfig, resolveWorktreeRetention } from './config.ts';
 import { reclaimWorktrees } from './runs/retention.ts';
+import { previewToolEnabled } from './ci-wait/tools.ts';
+import { PreviewHost } from './preview/host.ts';
 import { armRepoHandle } from './runs/arm-repo-handle.ts';
 import { RunStore } from './runs/store.ts';
 import { TaskWebhooks } from './runs/webhook.ts';
@@ -259,7 +261,13 @@ async function serveCommand(
   // transitions an opted-in bot is waiting for. Deliveries wait until startServer knows its port.
   const taskWebhooks = new TaskWebhooks();
   taskWebhooks.attach({ id: bootProjectId ?? 'default', root: repoRoot, store });
-  const manager = new RunManager(store, repoRoot, { semaphore });
+  // ONE preview host for the whole process (#781), like the semaphore: ports are host-global, so
+  // `port_held` must see every project's servers. Off unless `CEZ_PREVIEW=1`.
+  const previewHost = previewToolEnabled() ? new PreviewHost() : undefined;
+  // The port the cockpit bound, once `startServer` listens; the preview tool refuses it.
+  let boundPort: number | undefined;
+  const cezarPort = () => boundPort;
+  const manager = new RunManager(store, repoRoot, { semaphore, preview: previewHost, cezarPort });
   const delegation = await DelegationController.start();
   delegation.attachProject({ id: bootProjectId ?? 'default', root: repoRoot, store, manager });
   const providerAuth = new ProviderAuthService();
@@ -286,7 +294,7 @@ async function serveCommand(
     // the keep-limit (directory only — `cez/<id8>` branch kept, so recoverable).
     // Best-effort; never blocks boot.
     const keep = await resolveWorktreeRetention(repoRoot).catch(() => DEFAULT_WORKTREE_RETENTION);
-    const reclaimed = await reclaimWorktrees(repoRoot, store, keep).catch(() => [] as string[]);
+    const reclaimed = await reclaimWorktrees(repoRoot, store, keep, { previewHost }).catch(() => [] as string[]);
     if (reclaimed.length > 0) {
       console.log(`  reclaimed ${reclaimed.length} old worktree(s), branch kept: ${reclaimed.map((id) => id.slice(0, 8)).join(', ')}`);
     }
@@ -357,11 +365,13 @@ async function serveCommand(
     providerRuntimeAuth,
     workspaceEvents,
     taskWebhooks,
+    previewHost,
+    cezarPort,
   }, port);
   if (!server.listening) await once(server, 'listening');
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('cockpit TCP listener is unavailable');
-  const boundPort = address.port;
+  boundPort = address.port;
   const boundHost = address.address;
   if (restartExact && process.send) {
     process.send({ type: 'application-update-listening', host: boundHost, port: boundPort, repoRoot, version },
@@ -384,7 +394,8 @@ async function serveCommand(
   await printSkillsBanner(repoRoot);
 
   const shutdown = () => {
-    void delegation.close().finally(() => {
+    // Dev servers run in their own process groups: stop them before this process exits.
+    void Promise.all([delegation.close(), previewHost?.close()]).finally(() => {
       server.close();
       store.flush();
       process.exit(0);
@@ -800,6 +811,7 @@ function ensureDataGitignore(repoRoot: string): void {
     'automation-log.reclaim*/',
     'automation-poll.lock',
     'automation-poll.reclaim*/',
+    'preview/', // live preview: per-task Chromium profile, dev-server logs and pid records (#781)
     'automations.lock',
     'automations.reclaim*/',
     'automation-state.lock',

@@ -12,7 +12,7 @@ import { TaskCliError } from './http.ts';
 function health(repoRoot: string) {
   return {
     version: '0.0.0-test', repoRoot, repo: null, checks: [], defaultRunner: 'claude', forge: null,
-    capabilities: { localHandoff: true, followups: false, singleProject: false, automations: false, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true },
+    capabilities: { localHandoff: true, followups: false, singleProject: false, automations: false, preview: false, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true },
     projects: [], bootProject: 'boot',
   };
 }
