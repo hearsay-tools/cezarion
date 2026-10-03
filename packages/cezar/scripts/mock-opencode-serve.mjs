@@ -119,6 +119,7 @@ const info = (extra) => ({
 
 let autonomousTurn = 0;
 let autonomousCap = false;
+let autonomousReadinessIdle = false;
 const server = createServer((req, res) => {
   const url = req.url ?? '';
   if (req.method === 'GET' && url === '/question') {
@@ -189,11 +190,14 @@ const server = createServer((req, res) => {
       res.writeHead(200, { 'content-type': 'application/json' });
       // #426: a nudged turn can finish on SSE before its HTTP acceptance arrives.
       // Force that ordering in the cap scenario; the first opening stays ordinary.
-      if (autonomousCap && body.includes('Continue working autonomously until the task is fully complete.')) {
+      if (autonomousReadinessIdle && body.includes('Continue working autonomously until the task is fully complete.')) {
+        // Keep the portable answer HTTP request unacknowledged while its SSE turn finishes.
+      } else if (autonomousCap && body.includes('Continue working autonomously until the task is fully complete.')) {
         setTimeout(() => res.end(JSON.stringify({ info: info({}), parts: [] })), 100);
       } else {
       res.end(JSON.stringify({ info: info({}), parts: [] }));
       }
+      if (body.includes('mock:autonomous-readiness-idle')) autonomousReadinessIdle = true;
       if (body.includes('mock:autonomous-cap') || body.includes('mock:autonomous-ask-cap')) autonomousCap = true;
       if (url.endsWith('/prompt_async')) {
         currentUserId = `msg_user_${++steerSerial}`;
@@ -548,4 +552,8 @@ server.listen(0, hostname, () => {
   // The runner reads the bound URL back from stdout, like the real server.
   console.log(`opencode server listening on http://${hostname}:${server.address().port}`);
 });
-process.on('SIGTERM', () => process.exit(0));
+process.on('SIGTERM', () => {
+  // Expose the end-request/process-exit interval to the root idle regression.
+  if (autonomousReadinessIdle) setTimeout(() => process.exit(0), 250);
+  else process.exit(0);
+});

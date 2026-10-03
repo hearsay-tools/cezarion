@@ -3,7 +3,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { RUNNER_IDS } from './agent-runner.ts';
-import { AUTONOMOUS_CRITERIA, driveSeam, exemptionFor, promptFor, waitFor, withOwnedInputRun } from './harness-parity.testkit.ts';
+import { AUTONOMOUS_CRITERIA, driveRun, driveSeam, exemptionFor, promptFor, waitFor, withOwnedInputRun } from './harness-parity.testkit.ts';
 import { handoffPath } from '../handoff.ts';
 import { MAX_AUTO_CONTINUES } from '../workflows/run.ts';
 
@@ -13,6 +13,74 @@ describe('autonomous turn-end parity — #426', () => {
   for (const backend of RUNNER_IDS) {
     for (const row of AUTONOMOUS_CRITERIA) {
       const exemption = exemptionFor(row.id, backend);
+      if (row.id === 'A13' || row.id === 'A14') {
+        it(`${backend} ${row.id} ${row.name}${exemption ? ' — exemption: ordinary native idle control' : ''}`, async () => {
+          const continuation = row.id === 'A14';
+          const retainedAck = !exemption;
+          await driveRun(backend, continuation || exemption ? 'autonomous' : row.scenario,
+            run => run?.status === (retainedAck && !continuation ? 'running' : 'waiting'), 30_000,
+            async ({ store, manager, runId }) => {
+              expect(store.getRun(runId)?.delegation?.role).not.toBe('worker');
+              if (continuation) {
+                manager.finish(runId);
+                await waitFor(() => !manager.isActive(runId));
+                store.updateRun(runId, { autonomous: retainedAck });
+                expect(manager.continueRun(runId, { text: promptFor(backend, exemption ? 'autonomous' : row.scenario) }).ok).toBe(true);
+              }
+              await waitFor(() => {
+                const current = manager['active'].get(runId);
+                return !!current?.idleTimer && (retainedAck ? !!current.autonomousNudgePending : store.getRun(runId)?.status === 'waiting');
+              });
+              const state = manager['active'].get(runId)!;
+              const session = state.session!;
+              const stepId = state.currentStepId!;
+              const sent = vi.spyOn(session, 'sendAgentMessage');
+              expect(!!state.autonomousNudgePending).toBe(retainedAck);
+              if (retainedAck) {
+                expect(store.getRun(runId)?.status).toBe('running');
+                expect(manager['busySlots']()).toBe(1);
+              }
+              // Execute the real idle-expiry callback, with only its 15-minute
+              // delay accelerated. No normalized event or session result injection.
+              const timer = state.idleTimer! as NodeJS.Timeout & { _onTimeout: () => void };
+              const expire = timer._onTimeout;
+              clearTimeout(timer);
+              expire();
+              expect(state.idleClosed).toBe(true);
+              if (retainedAck) {
+                expect(manager.isActive(runId)).toBe(true);
+                expect(manager['busySlots']()).toBe(1);
+                expect(store.getRun(runId)?.status).toBe('running');
+                // The mock delays SIGTERM exit: neither end() nor late readiness
+                // may release the slot or resurrect the timed-out boundary.
+                manager['handleAgentInputReady'](runId, state, session);
+                await new Promise(resolve => setTimeout(resolve, 50));
+                expect(manager.isActive(runId)).toBe(true);
+                expect(manager['busySlots']()).toBe(1);
+              }
+              await waitFor(() => !manager.isActive(runId));
+              expect(sent).not.toHaveBeenCalled();
+              expect(manager['busySlots']()).toBe(0);
+              expect(store.getRun(runId)?.status).toBe('waiting');
+              expect(store.getRun(runId)?.steps.at(-1)?.status).toBe('waiting');
+              if (retainedAck) {
+                expect(JSON.parse(readFileSync(join(manager['dataDir'], 'runs.json'), 'utf8'))).toEqual(expect.arrayContaining([
+                  expect.objectContaining({ id: runId, status: 'waiting', steps: expect.arrayContaining([
+                    expect.objectContaining({ id: stepId, status: 'waiting' }),
+                  ]) }),
+                ]));
+                expect(readFileSync(handoffPath(manager['dataDir'], runId), 'utf8')).toContain('session idle-closed — status=waiting');
+              }
+              expect(store.readEvents(runId).some(e => e.type === 'lifecycle' && String(e.message).includes('of inactivity'))).toBe(true);
+              expect(manager.continueRun(runId, { text: promptFor(backend, 'done') }).ok).toBe(true);
+              await waitFor(() => !manager.isActive(runId) && store.getRun(runId)?.status === 'done');
+              manager['handleAgentInputReady'](runId, state, session);
+              expect(sent).not.toHaveBeenCalled();
+              sent.mockRestore();
+            }, { autonomous: retainedAck && !continuation });
+        }, 30_000);
+        continue;
+      }
       if (exemption) {
         it(`${backend} ${row.id} exemption — ${exemption.reason}`, async () => {
           const observed = await driveSeam(backend, 'ask');

@@ -801,7 +801,7 @@ End, cancellation, provider failure and process settlement dispose it. The guard
 emits a failure and interrupts the runner; it never synthesizes process exit or
 releases capacity early. Standalone wall-clock limits remain unchanged.
 
-Autonomous turn-end rows **A1–A12** live in
+Autonomous turn-end rows **A1–A14** live in
 `core/workflow-autonomous-parity.test.ts` and the same parity guard (#426).
 Every adapter covers fresh and Continue nudges, portable ASK attribution, the
 40-nudge cap, non-autonomous parking, monitoring, DONE and persisted-question
@@ -820,7 +820,14 @@ that exact completed boundary, after durable input. New parent activity, accepte
 input or a real question invalidates the retry; cancellation, Finish, disposal and
 session replacement revoke it. Missing readiness reaches the existing idle close
 bound. Successful retries use normal acknowledged input, so the cap and all
-worker/CI/native-question guards still apply.
+worker/CI/native-question guards still apply. A13/A14 use ordinary root runs on
+fresh and Continue paths: OpenCode retains the answer ACK indefinitely, the actual
+idle callback requests shutdown, and the slot stays occupied until process exit.
+Only then do the run and step become durable `waiting`, with a successful Continue
+proving resumability. The other adapters have named executable exemptions for
+this HTTP-only ordering and test root idle expiry/Continue on their native wires.
+Owned-worker terminal settlement and explicit question/worker/CI waits retain
+their existing policies.
 
 > Every criterion in the harness parity matrix MUST hold for **every** backend,
 > or carry a declared exemption naming the wire limitation that prevents it.

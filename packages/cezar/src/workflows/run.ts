@@ -5480,7 +5480,7 @@ export class RunManager {
           appendHandoffHeartbeat(this.dataDir, runId, `step "${stepId}" complete — status=done`);
         }
       } else {
-        await this.settleIdleClosedWorker(runId);
+        await this.settleIdleClosedRun(runId, state);
       }
     } catch (err) {
       if (!setupComplete) {
@@ -5898,7 +5898,7 @@ export class RunManager {
       this.store.updateRun(runId, { status: 'failed', error: runError, finishedAt, currentStepId: undefined });
       emit({ type: 'lifecycle', message: `run failed — ${runError}` });
     } else if (state.idleClosed) {
-      await this.settleIdleClosedWorker(runId);
+      await this.settleIdleClosedRun(runId, state);
       this.dropActive(runId);
       return;
     } else {
@@ -6770,6 +6770,24 @@ export class RunManager {
         ? 'changes ready for review — send feedback, open a draft PR, or finish'
         : 'run finished',
     });
+  }
+
+  /** Called only after session/process settlement. A refused nudge retained its
+   * slot and running status until idle close; ordinary roots must now become
+   * resumable. Previously parked roots and delegated lifecycle policy stay intact. */
+  private async settleIdleClosedRun(runId: string, state: ActiveRun): Promise<void> {
+    const run = this.store.getRun(runId);
+    if (run?.delegation?.role === 'worker') {
+      await this.settleIdleClosedWorker(runId);
+      return;
+    }
+    if (!run || !state.autonomousNudgePending || run.ciWait || this.workerWait(runId) || this.hasPendingHumanAsk(runId)) return;
+    for (const step of run.steps) {
+      if (step.status === 'running') this.store.updateStep(runId, step.id, { status: 'waiting' });
+    }
+    this.store.updateRun(runId, { status: 'waiting', activity: undefined });
+    appendHandoffHeartbeat(this.dataDir, runId, 'session idle-closed — status=waiting; Continue to resume');
+    this.store.flush();
   }
 
   /** An ordinary owned worker cannot accept an inactive Continue. Once its
