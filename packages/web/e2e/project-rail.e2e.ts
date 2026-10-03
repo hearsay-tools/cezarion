@@ -5,6 +5,7 @@ import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { waitForSettledSample } from './visual-ready'
+import { expandedRailSampleExpression } from './project-rail-ready'
 import { AgentBrowser, HOVER_POINTER_ARGS, bootProjectId, readTestEnv } from './agent-browser'
 import { contrastSampleExpression, hoverVisiblePoint, type ContrastSample } from './contrast'
 import { readSharedProjects, snapshotSharedHome, writeSharedProjects } from './workspace-registry'
@@ -277,13 +278,15 @@ describe('expandable project rail (#711)', () => {
   const TOGGLE = '[data-slot="rail-expand-toggle"]'
   const box = (selector: string) =>
     waitForSettledSample(browser, `(() => { const r = document.querySelector(${JSON.stringify(selector)})?.getBoundingClientRect(); return r ? { left: r.left, width: r.width } : null })()`) as { left: number; width: number } | null
-  // The rail settles when its width stops moving AND the names have faded in (160ms width, then
-  // 120ms opacity after a 160ms delay). Waiting on both is by design, not a flake fix: the fade is
-  // this feature's own animation, and reading geometry or ink mid-fade is reading a frame.
-  const settledExpanded = () =>
-    expect(waitForSettledSample(browser,
-      `(() => { const rail = document.querySelector('${RAIL}'); const name = rail?.querySelector('[data-slot="rail-project-name"]'); return rail?.getBoundingClientRect().width === 232 && !!name && getComputedStyle(name.parentElement).opacity === '1' })()`,
-    )).toBe(true)
+  // #795 loaded trace: body stability can hold before a reloaded rail mounts.
+  // Observe the expanded commit/native rendering, then hold actual width/opacity.
+  // Existing finite-animation readiness waits out #711's 160ms width transition
+  // and 120ms text fade after a 160ms delay; geometry/ink limits remain assertions.
+  const settledExpanded = () => {
+    const facts = waitForSettledSample<{ width: number; opacity: string }>(browser, expandedRailSampleExpression())
+    expect(facts.width).toBe(232)
+    expect(facts.opacity).toBe('1')
+  }
   const collapse = () => browser.evaluate(`localStorage.removeItem('cez-project-rail-expanded')`)
 
   it('expands to 232px from the bottom group, pushes main, keeps the sidebar, and survives a reload', () => {

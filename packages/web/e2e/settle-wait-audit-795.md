@@ -4,7 +4,8 @@ Audited baseline: `35a519de` (includes #758, `35a519de`, and #794, `af1383f9`).
 Scope: every one of the **63** current `*.e2e.ts` specs. The original audit covers
 **13** helper/setup files (11 direct TypeScript files plus `fetch-setup.mjs` and
 `fixtures/make-large-thread.ts`); review round 1 adds `transcript-measurements.ts` and
-`session-layout.ts`, bringing the current helper/setup inventory to **15**.
+`session-layout.ts`; the loaded-rail correction adds `project-rail-ready.ts`, bringing
+the current helper/setup inventory to **16**.
 No product, dependency, assertion tolerance, skip or fixture baseline changes.
 
 ## Diagnosis and provenance
@@ -46,7 +47,8 @@ issue-specific reproduction history (notably #548, #736, #369 and #758).
 **Counts:** 462 baseline sampling calls; 45 affected spec rows; 18 `NONE` affected
 rows (10 have no sampling calls). At `31597045`, there were **208 actual** accepted-sample
 calls; the initial 209-entry list incorrectly included the helper declaration. After review
-round 1 there are **209 actual calls**, excluding declarations; current locations follow.
+round 1 and the loaded-rail correction there are **209 actual calls**, excluding
+declarations; current locations follow.
 
 ## Exhaustive spec inventory
 
@@ -89,7 +91,7 @@ waits still need S when followed by a changed geometry sample.
 | [plan-mode.e2e.ts](plan-mode.e2e.ts) | 5: 117, 174, 217, 223, 256 | 217, 223. #383 mobile reflow: replace y=57 / width>380 readiness predicate with stable geometry; preserve exact x=0, y=57, w=390 assertions. Existing settleVisual overflow path retained. | 95, 97, 104, 106, 111, 134, 156, 160, 173, 184, 187, 198, 201, 203, 217, 234, 256, 271, 285, 290 |
 | [progressive-history.e2e.ts](progressive-history.e2e.ts) | 14: 147, 175, 193, 197, 199, 230, 264, 443, 453, 459, 499, 509, 528, 532 | 197, 528, 532. S: raw / first-value geometry after route, viewport, theme, density or disclosure now returns the held measurement. Existing assertions remain unchanged. | 166, 175, 197, 212, 255, 306, 310, 319, 321, 340, 352, 353, 372, 376, 403, 407, 431, 440, 443, 446, 459, 493, 522 |
 | [project-groups.e2e.ts](project-groups.e2e.ts) | 3: 192, 193, 216 | 192. S: raw / first-value geometry after route, viewport, theme, density or disclosure now returns the held measurement. Existing assertions remain unchanged. | 133, 135, 137, 144, 147, 160, 163, 174, 177, 192, 205, 210, 220, 221, 227, 231 |
-| [project-rail.e2e.ts](project-rail.e2e.ts) | 11: 209, 210, 212, 216, 226, 278, 283, 317, 329, 350, 386 | 209, 210, 212, 226, 278, 283, 386. S: raw / first-value geometry after route, viewport, theme, density or disclosure now returns the held measurement. Existing assertions remain unchanged. | 107, 132, 133, 134, 153, 157, 174, 175, 183, 196, 201, 216, 267, 283, 292, 317, 329, 361, 362, 367, 382, 386 |
+| [project-rail.e2e.ts](project-rail.e2e.ts) | 11: 209, 210, 212, 216, 226, 278, 283, 317, 329, 350, 386 | 209, 210, 212, 226, 278, 283, 386. S: hold geometry after route/width changes. Loaded trace also proves stable body before expanded rail mounting; observe expanded commit, measured-target native rendering and existing finite animations, then hold actual width/opacity. Exact 232px, opacity 1 and AA 4.5 expectations remain assertions. | 107, 132, 133, 134, 153, 157, 174, 175, 183, 196, 201, 216, 267, 283, 292, 317, 329, 361, 362, 367, 382, 386 |
 | [queued-stack.e2e.ts](queued-stack.e2e.ts) | 0: NONE | NONE. K: existing waits / direct data, focus or visibility checks retained. | 114, 143, 164, 172, 177, 201, 213 |
 | [quick-list.e2e.ts](quick-list.e2e.ts) | 50: 248, 255, 366, 370, 372, 378, 394, 398, 406, 409, 478, 486, 598, 654, 657, 660, 670, 722, 732, 734, 836, 843, 889, 940, 1087, 1093, 1117, 1132, 1168, 1181, 1200, 1303, 1373, 1434, 1444, 1451, 1507, 1526, 1539, 1557, 1574, 1585, 1648, 1657, 1812, 1817, 1820, 1869, 2006, 2011 | 366, 370, 372, 378, 732, 734, 889, 940, 1093, 1117, 1132, 1168, 1181, 1200, 1303, 1373, 1451, 1526, 1539, 1557, 1574, 1585, 1648, 1869. #617/#621/#166 group expansion, density, width contention and ResizeObserver token/cost decisions: observe stable boxes; preserve 47px, 44px, pixel and token/cost expectations. Swipe fixture retains real finite-animation completion. | 219, 244, 265, 275, 339, 352, 366, 370, 372, 378, 406, 409, 428, 436, 437, 447, 448, 453, 461, 481, 485, 486, 496, 517, 537, 606, 609, 627, 629, 634, 637, 642, 659, 688, 698, 718, 838, 842, 843, 863, 877, 889, 935, 1083, 1087, 1123, 1126, 1130, 1181, 1188, 1195, 1276, 1365, 1398, 1408, 1434, 1440, 1446, 1499, 1507, 1526, 1539, 1557, 1574, 1577, 1585, 1601, 1631, 1646, 1653, 1657, 1660, 1666, 1738, 1751, 1753, 1764, 1766, 1769, 1777, 1779, 1787, 1788, 1794, 1799, 1800, 1802, 1811, 1820, 1869, 1910, 1923, 1931, 1932, 1935, 1944, 1945, 1948, 1963, 1970, 2001, 2003, 2006, 2014, 2024, 2026 |
 | [repo-git-diff.e2e.ts](repo-git-diff.e2e.ts) | 0: NONE | NONE. K: existing waits / direct data, focus or visibility checks retained. | 150, 194 |
@@ -150,7 +152,7 @@ remains anchored at `35a519de`; review corrections and their current sites follo
 - `plan-mode.e2e.ts`: 219.
 - `progressive-history.e2e.ts`: 197, 528, 532.
 - `project-groups.e2e.ts`: 193.
-- `project-rail.e2e.ts`: 210, 211, 213, 227, 279, 284, 387.
+- `project-rail.e2e.ts`: 211, 212, 214, 228, 280, 286, 390.
 - `quick-list.e2e.ts`: 367, 371, 373, 379, 733, 735, 890, 941, 1094, 1118, 1133, 1169, 1182, 1201, 1304, 1374, 1452, 1561, 1578, 1589, 1652, 1873.
 - `repo-git.e2e.ts`: 180, 198.
 - `row-height.ts`: 62.
@@ -184,6 +186,7 @@ remains anchored at `35a519de`; review corrections and their current sites follo
 | `row-height.ts` | `heights` at baseline 40–56, sample at 59 | R/S: native visibility before all four measured elements; hold geometry across density/expand rendering. Preserve task-height equality, exact 47px and overlap/toggle expectations. |
 | `transcript-measurements.ts` | `assistantWidthExpression`; `messageClockExpression` | R: select an already-rendered tail assistant without scrolling; scroll each worker card separately and reject until card/clock/optional heading were natively rendered before all their box reads. Body readiness alone is insufficient. |
 | `session-layout.ts` | `expectEditorFitsViewport`; all four session samples in `task-thread.e2e.ts` | A: retain the old editor viewport-bottom bound as `editor.bottom <= viewportHeight + 1`; viewport height belongs to the accepted sample, never a second browser read or an expected-answer waiter. |
+| `project-rail-ready.ts` | `expandedRailSampleExpression`; `project-rail.e2e.ts` expansion samples | R/S: wait on mounted names plus expanded `data-expanded` / toggle `aria-expanded` commit; check native rail/name/ink rendering before box/style reads. Return actual width/opacity; inherited finite-animation wait and unchanged 232px/opacity 1 assertions finish the contract. |
 | `agent-browser.ts` | failure probe rects at 190, active focus at 216; `waitForStable`/`waitForValue`; `setViewport` (#794) | K: failure probe intentionally records the failing frame. Monotonic deadlines, diagnostics reserve and returned accepted sample retained. Viewport rendered-frame fix unchanged. |
 | `github-fixture.ts` | route/data readiness, keyboard and surface helpers | K: no direct geometry sampling; existing named route/data/focus waits retained. |
 | `repo-diff-coverage.ts` | virtualizer mounting/data checks and last-tree selection | K: no geometry sampling. Do not replace file-count/data completion with visual settlement. |
@@ -295,12 +298,64 @@ composer regressions reject 1000px/844px even with valid padding, accept 845px e
 and reject 845.001px. The disclosure regression holds the body ready while the commit is
 delayed, then accepts false after the control commits: it never polls visibility until true.
 
+## Loaded-rail follow-up — reload commit before measurement
+
+The parent's first integrated AFTER-loaded run at `923becf3` failed exactly two
+`project-rail` tests: expansion after reload (`settledExpanded` caller at then-line 316)
+and dark AA setup after reload (then-line 357), both at then-line 286 with
+`expected false to be true`. The failures precede the downstream AA assertions.
+Both accessibility snapshots contain expanded names / `Collapse projects` with
+`aria-expanded=true`; both screenshots show a widened rail with name ink still absent.
+Capture happens after the accepted boolean, so these later images alone do not identify
+the earlier sample's width, opacity or animation state.
+
+Native diagnostic runs preserved the old returned boolean / held signature and recorded
+measurements from that same browser task. Both complete targeted runs passed (they did
+not reproduce the assertion failure), but the second trace records **seven false samples
+with no rail, toggle, name or animations mounted yet**, while body readiness was already
+passing. Its mounted samples have width 232, opacity 1 and finished animations. The
+deterministic fixture then pins a stable body through that missing-commit interval: the
+old helper accepts false instead of returning null. No separate animation-start defect
+was established, so the generic finite-animation mechanism remains unchanged.
+
+`project-rail-ready.ts:2` now gates on the mounted name and the independent expanded
+`data-expanded` / toggle `aria-expanded` commit, then native rendering of the rail, name
+and ink **before** their geometry/style measurement. `project-rail.e2e.ts:286` holds the
+actual `{width, opacity}` sample. Exact **232px**, **opacity 1** and **AA 4.5** checks remain
+assertions; settled wrong width / zero opacity are accepted measurements that those
+assertions reject. The existing finite-animation gate still waits out #711's width and
+delayed text fade, including the reduced-motion path. Hold and timeout values are unchanged.
+
+Worker evidence: `.ai/qa/issue-795/loaded-rail-fix/`. Original parent bundles are preserved
+at `.ai/qa/issue-795/loaded-fixed-failures/project-rail/` and copied into the worker evidence
+under `loaded-fixed-failures/project-rail/`; `loaded-fixed-lane-1.log` retains the failures.
+Temporary diagnostics were removed before the fix; `native-trace.ndjson` and
+`native-trace-summary.json` retain the measured states.
+
+| Command / reproduction | Outcome | Worker evidence |
+| --- | --- | --- |
+| `npm ci` | exit 0 | `npm-ci.log` |
+| `npm test -- project-rail-ready` with the original boolean expression | exit 1; all 3 commit/native regressions failed | `commit-native-red.log` |
+| Same command with semantic/native guards | exit 0; initial 3 passed | `commit-native-green.log` |
+| Same command, behavior-only guard rollback with sample API retained | exit 1; 4 failed / 2 guards passed, then source restored | `behavior-only-rollback-red.log` |
+| `npm test -- project-rail-ready visual-ready transcript-measurements session-layout agent-browser-wait-value e2e-wait-discipline` | exit 0; 78 passed / 6 files, including all 6 rail regressions | `helpers-green.log`, `helpers-restored-green.log` |
+| `npm run typecheck:web` | exit 0 | `typecheck-web.log` |
+| Complete `npm run test:e2e -- project-rail.e2e.ts`, diagnostics before fix, under full CPU saturation | exit 0; 12 passed, 36.62s; CPU mean 99.996%, min 99.875%, 32 samples; all 24 burners cleaned | `diagnostic-before/{suite.log,status.json,cpu-load.ndjson}` |
+| Same unchanged-behavior diagnostic command, with native trace retained | exit 0; 12 passed, 35.34s; CPU mean 99.998%, min 99.896%, 51 samples; all 24 burners cleaned | `diagnostic-before-2/{suite.log,status.json,cpu-load.ndjson}` |
+| Complete `npm run test:e2e -- project-rail.e2e.ts` after fix, under full CPU saturation | exit 0; all 12 passed, 34.79s; CPU mean 99.997%, min 99.834%, 50 samples; all 24 burners cleaned | `fixed-after/{suite.log,status.json,cpu-load.ndjson}` |
+| `git diff --check` | exit 0 | focused diff validation |
+
+The supervised load uses one default-priority busy Python process pinned to each available
+CPU (0–23), samples `/proc/stat` every two seconds, and terminates/reaps every burner in
+`finally`. No browser test names were filtered or skipped. These are complete focused-file
+results, not a replacement for the parent's four-lane acceptance run.
+
 ## Loaded suites and parent acceptance
 
 The **BEFORE-fix full four-lane loaded suite PASSED** at baseline `35a519de`, before
 integration, as reported by the parent: all four lanes green; CPU mean **100%**, minimum
 **99.97%**, **156** utilization samples, **24** pinned default-priority CPU burners
-cleaned up. Both result sets are to be retained. Parent evidence:
+cleaned up; **612 passed / 7 existing skips**. Both result sets are retained. Parent evidence:
 `.ai/qa/issue-795/loaded-baseline` and `.ai/qa/local-runs/1791011166587-1662221`.
 
 Acceptance also requires the **entire four-lane suite under sustained full CPU load
@@ -309,7 +364,21 @@ run must come first using baseline `35a519de` in an isolated worktree (equivalen
 stashing and restoring the fixes), followed by the integrated after-fix loaded run,
 with the current timeouts/assertions and supervised stress-process cleanup. The parent
 owns that additional loaded run, the normal six-command gate and complete four-lane
-cockpit suite after integration, plus independent governed review. The before-fix
-result is preserved above; the full normal gate, loaded-after result and
-independent review remain parent-owned and pending. These focused results are not a
-full-gate claim.
+cockpit suite after integration, plus independent governed review.
+
+Historical parent results are retained against their tested revision:
+
+- At `923becf3`, **all six normal commands passed**, including the complete four-lane
+  suite: `npm run typecheck`, `npm test`, `npm run test:unit`, `npm run build`,
+  `npm run test:package`, `npm run test:e2e:local`, each exit 0. Evidence:
+  `.ai/qa/issue-795/normal-gate/{status.json,*.log}`.
+- The first AFTER-loaded run at that same revision **failed**: **610 passed, two rail
+  failures, seven existing skips**, exit 1; CPU mean **100%**, minimum **99.89%**, **156**
+  samples; all **24** burners cleaned (`loadWorkersRemaining=0`). Evidence:
+  `.ai/qa/issue-795/loaded-fixed/{status.json,suite.log,cpu-load.ndjson}` and
+  `.ai/qa/local-runs/1791015302559-2473880/`. The archived
+  `.ai/qa/issue-795/loaded-fixed-attempt-1-evidence.zip` preserves this failing result.
+
+These historical passes do not claim success for the later rail correction. The final
+normal gate, loaded-after full-suite retry and independent review of the latest integrated
+revision remain parent-owned and pending. No previous result was overwritten.
