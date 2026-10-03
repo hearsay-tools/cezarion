@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -480,6 +480,34 @@ describe('WorkspaceAutomationScheduler', () => {
         } finally { scheduler.stop(); }
       } finally { vi.useRealTimers(); }
     });
+  });
+
+  it('hands the project\'s receipt reconciliation to the schedule runner (finding 4172021394)', async () => {
+    vi.useFakeTimers();
+    try {
+      const now = Date.parse('2026-09-14T04:00:01Z');
+      vi.setSystemTime(now);
+      const { store } = await setup();
+      const poll = store.list()[0]!;
+      store.update(poll.id, poll.revision, { ...poll, enabled: false });
+      store.create({ name: 'Nightly', enabled: true, kind: 'schedule', schedule: { type: 'daily', hour: 4, minute: 0 }, task: { prompt: 'Bump deps' } }, 'nightly');
+      const at = '2026-09-14T04:00:00.000Z';
+      store.setState('nightly', (current) => ({ ...current, nextRunAt: at }));
+      await appendFile(join(store.dataDir, 'automation-receipts.ndjson'), `${JSON.stringify({ receiptId: 'lost', receiptKey: `nightly:schedule:${at}`, eventId: `schedule:${at}`, automationId: 'nightly', revision: 1, status: 'reserved', occurrenceAt: at, observedAt: at, updatedAt: at })}\n`);
+      const reconcileReceipts = vi.fn(async () => undefined);
+      const launchSchedule = vi.fn(async () => ({ runId: 'unused' }));
+      const scheduler = new WorkspaceAutomationScheduler({
+        coordinator: { refresh: async () => undefined, enabledProjectIds: () => ['p'], store: () => store, hasDefinitions: () => true } as never,
+        handle: () => ({ projectId: 'p', store, timeZone: 'UTC', launchSchedule, reconcileReceipts }),
+        now: () => Date.now(),
+      });
+      try {
+        await scheduler.start();
+        await vi.advanceTimersByTimeAsync(1);
+        expect(reconcileReceipts).toHaveBeenCalledTimes(1);
+        expect(launchSchedule).not.toHaveBeenCalled();
+      } finally { scheduler.stop(); }
+    } finally { vi.useRealTimers(); }
   });
 
   it('check refuses a project without a GitHub remote', async () => {

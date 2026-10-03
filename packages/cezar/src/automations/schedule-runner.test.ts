@@ -1,9 +1,11 @@
-import { readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { RunStore } from '../runs/store.ts';
 import { AutomationStore } from './store.ts';
+import { reconcileAutomationReceipts } from './task-template.ts';
 import { SCHEDULE_AUTO_PAUSE_AFTER, ScheduleLeaseHeldError, ScheduleRunner } from './schedule-runner.ts';
 import type { ScheduleAutomationDefinition } from './types.ts';
 
@@ -169,6 +171,71 @@ describe('ScheduleRunner', () => {
     expect(store.logs({ automationId: 'nightly' })[0]).toMatchObject({ result: 'duplicate' });
     expect(store.state('nightly')?.nextRunAt).toBe(iso(FIRST_RUN + DAY));
     expect(store.state('nightly')?.consecutiveFailures).toBeUndefined();
+  });
+
+  describe('a leftover reservation on a lazily built project (finding 4172021394)', () => {
+    /** A `reserved` receipt a crashed process left: written raw, so it is not in flight here. */
+    function crashLeftover(store: AutomationStore, receiptId: string): void {
+      const at = iso(FIRST_RUN);
+      appendFileSync(join(store.dataDir, 'automation-receipts.ndjson'), `${JSON.stringify({ receiptId, receiptKey: `nightly:schedule:${at}`, eventId: `schedule:${at}`, automationId: 'nightly', revision: 1, status: 'reserved', occurrenceAt: at, observedAt: at, updatedAt: at })}\n`);
+    }
+    /** The server's hook: build the project's context lazily (its RunStore), then reconcile. */
+    function lazyContext(dir: string) {
+      let runs: RunStore | undefined;
+      const built = vi.fn(() => { runs ??= RunStore.open(join(dir, 'runs')); return runs; });
+      return { built, reconcile: async (store: AutomationStore) => { reconcileAutomationReceipts(store, built()); } };
+    }
+    async function lazySetup() {
+      const base = await setup();
+      const context = lazyContext(base.dir);
+      const runner = new ScheduleRunner({ projectId: 'secondary', store: base.store, timeZone: 'UTC', launch: base.launch, now: base.clock.now, reconcile: () => context.reconcile(base.store) });
+      base.runner.dueAt(base.definition);
+      base.clock.set(FIRST_RUN + 1_000);
+      return { ...base, runner, context };
+    }
+
+    it('no run claims it: the next fire leaves launch-error and a retryable failed row, then advances', async () => {
+      const { store, definition, runner, launch, context } = await lazySetup();
+      crashLeftover(store, 'lost');
+      expect(context.built).not.toHaveBeenCalled();
+      expect((await runner.fire(definition)).result).toBe('duplicate');
+      expect(launch).not.toHaveBeenCalled();
+      expect(store.latestReceipts().get(`nightly:schedule:${iso(FIRST_RUN)}`)).toMatchObject({ receiptId: 'lost', status: 'launch-error' });
+      await vi.waitFor(() => {
+        expect(store.logs({ automationId: 'nightly', result: 'failed' })).toEqual([expect.objectContaining({ receiptId: 'lost' })]);
+      });
+      expect(store.state('nightly')?.nextRunAt).toBe(iso(FIRST_RUN + DAY));
+    });
+
+    it('a run claims it: the receipt becomes launched and nothing launches again', async () => {
+      const { store, definition, runner, launch, context } = await lazySetup();
+      crashLeftover(store, 'claimed');
+      const runs = context.built();
+      const run = runs.createRun({ title: 't', workflow: 'quick-task', task: 'x', steps: [{ id: 's', name: 's', kind: 'agent' }] });
+      runs.updateRun(run.id, { automationTrigger: { automationId: 'nightly', automationRevision: 1, receiptId: 'claimed', trigger: 'schedule', occurrenceAt: iso(FIRST_RUN) } });
+      expect((await runner.fire(definition)).result).toBe('duplicate');
+      expect(launch).not.toHaveBeenCalled();
+      expect(store.latestReceipts().get(`nightly:schedule:${iso(FIRST_RUN)}`)).toMatchObject({ status: 'launched', runId: run.id });
+      expect(store.logs({ automationId: 'nightly', result: 'failed' })).toEqual([]);
+    });
+
+    it('a reservation in flight in this process is left alone and builds no context', async () => {
+      const { store, definition, runner, launch, context } = await lazySetup();
+      const live = AutomationStore.open(store.dataDir).reserveReceipt({ automationId: 'nightly', revision: 1, eventId: `schedule:${iso(FIRST_RUN)}`, occurrenceAt: iso(FIRST_RUN) })!;
+      expect((await runner.fire(definition)).result).toBe('duplicate');
+      expect(launch).not.toHaveBeenCalled();
+      expect(context.built).not.toHaveBeenCalled();
+      expect(store.latestReceipts().get(live.receiptKey)).toMatchObject({ receiptId: live.receiptId, status: 'reserved' });
+    });
+
+    it('a settled receipt takes the duplicate path without reconciling', async () => {
+      const { store, definition, runner, context } = await lazySetup();
+      const other = AutomationStore.open(store.dataDir);
+      const receipt = other.reserveReceipt({ automationId: 'nightly', revision: 1, eventId: `schedule:${iso(FIRST_RUN)}`, occurrenceAt: iso(FIRST_RUN) })!;
+      other.appendReceipt({ ...receipt, status: 'launched', runId: 'elsewhere' });
+      expect((await runner.fire(definition)).result).toBe('duplicate');
+      expect(context.built).not.toHaveBeenCalled();
+    });
   });
 
   it('a held lease logs skipped, leaves nextRunAt, does not count a failure and throws ScheduleLeaseHeldError', async () => {

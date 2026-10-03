@@ -6320,6 +6320,9 @@ export function startServer(deps: ServerDeps, port: number): ServerType & { shut
         timeZone,
         ...(project.github ? { github: { ...project.github, poller: new GithubPoller() } } : {}),
         onChange: emitWorkspaceAutomationChange(projectId),
+        // Building a lazy project's context reconciles on its own; the explicit call covers the
+        // boot project and a context built before another process left the reservation.
+        reconcileReceipts: async () => { reconcileAutomationReceipts(store, (await launchContext()).store); },
         launchSchedule: async (definition, occurrence, receiptId) => {
           const context = await launchContext();
           return launchScheduledRun({

@@ -26,6 +26,8 @@ export interface ProjectAutomationHandle {
   launchSchedule?: ScheduleLauncher;
   onChange?: (automationId: string, revision: number) => void;
   now?: () => number;
+  /** See `ScheduleRunnerHandle.reconcile`. */
+  reconcileReceipts?: () => Promise<void>;
 }
 
 /** One request chain process-wide. The promise tail also prevents a failed request from
@@ -258,6 +260,7 @@ export class WorkspaceAutomationScheduler {
         ...(handle.launchSchedule ? { launch: handle.launchSchedule } : {}),
         ...(handle.onChange ? { onChange: handle.onChange } : {}),
         ...(handle.now ? { now: handle.now } : {}),
+        ...(handle.reconcileReceipts ? { reconcile: handle.reconcileReceipts } : {}),
       });
       for (const definition of enabled.filter(isScheduleAutomation)) {
         const key = `${projectId}:${definition.id}`;

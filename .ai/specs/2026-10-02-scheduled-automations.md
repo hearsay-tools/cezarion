@@ -135,7 +135,11 @@ web routes/automations/*: route shell, list, editor (+ schedule / github fields)
    wrote and has not settled is skipped: a non-boot project's context is built lazily by the
    first launch, and building it reconciles while that launch is in flight. The store keeps the
    in-flight set process-wide per data directory; a crash empties it, so the next boot
-   reconciles a real leftover.
+   reconciles a real leftover. Boot reconciles only projects whose context exists, so a schedule
+   fire that meets a `reserved` receipt not in flight here (a lazy secondary project's leftover,
+   or one another process left after this boot) first calls the handle's `reconcileReceipts`
+   (build the context, then `reconcileAutomationReceipts`) before the duplicate path: the receipt
+   ends `launched` or `launch-error` + `failed` row, then `nextRunAt` advances as before.
 
 GitHub-kind polling, cursors, baselines, receipts and backoff are otherwise unchanged.
 

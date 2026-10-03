@@ -50,6 +50,15 @@ export interface ScheduleRunnerHandle {
   launch?: ScheduleLauncher;
   onChange?: (automationId: string, revision: number) => void;
   now?: () => number;
+  /**
+   * Settles crash-leftover `reserved` receipts against the project's run store, as boot does
+   * (`reconcileAutomationReceipts`). Boot reconciles only a project whose context already exists;
+   * a secondary project's is built lazily, and a reservation another process left after this one
+   * booted is never seen by boot at all. The fire calls this before treating a leftover as a
+   * duplicate, so the occurrence ends `launched` (a run claims it) or `launch-error` with a
+   * retryable `failed` row — never silently consumed. Absent: the duplicate path as before.
+   */
+  reconcile?: () => Promise<void>;
 }
 
 export type ScheduleFireOutcome =
@@ -203,6 +212,11 @@ export class ScheduleRunner {
     const eventId = occurrence.trigger === 'manual' ? `manual:${occurrence.at}` : `schedule:${occurrence.at}`;
     const receipt = store.reserveReceipt({ automationId: definition.id, revision: definition.revision, eventId, occurrenceAt: occurrence.at });
     if (!receipt) {
+      // Under the lease nobody else is launching, so a `reserved` receipt this process is not
+      // running is a crash leftover: settle it first (see `reconcile`). One in flight here is a
+      // live launch its launcher settles, and is left alone.
+      const existing = store.latestReceipts().get(`${definition.id}:${eventId}`);
+      if (existing?.status === 'reserved' && !store.isReservationInFlight(existing.receiptId)) await this.handle.reconcile?.();
       await store.appendLog({ automationId: definition.id, revision: definition.revision, result: 'duplicate', reason: `A durable receipt already exists for the ${occurrence.at} occurrence.` });
       if (advance) this.advance(definition, Date.parse(occurrence.at), now, advance);
       return { result: 'duplicate', occurrenceAt: occurrence.at };
