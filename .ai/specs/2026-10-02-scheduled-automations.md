@@ -80,8 +80,14 @@ web routes/automations/*: route shell, list, editor (+ schedule / github fields)
    which returns `state.nextRunAt` or computes `nextOccurrence(schedule, now, tz)` and persists it,
    so every process agrees on the instant. A `PUT` that changes `schedule` (or resumes through
    `PUT`) sets `nextRunAt = nextOccurrence(now)` when the result is enabled and clears it when
-   paused; `enable` sets `nextRunAt = nextOccurrence(now)` and writes no baseline. Both arm in the
-   request, so the list refetched on the change event already shows the next run.
+   paused; `enable` sets `nextRunAt = nextOccurrence(now)` and writes no baseline; `create` with
+   `enable` arms the same way. Each arms in the request, so the list refetched on the change event
+   already shows the next run, and arms through the store's `create`/`update` `arm` callback:
+   under the definitions write lock, after the revision and not-found checks, the state write
+   lands BEFORE the definition write. A reader loads definitions, then state, so another
+   cockpit's fire sees the old definition beside the new (future) instant — not due, skipped — or
+   the new pair, never the new definition beside the old, possibly past, `nextRunAt`. A failed
+   definition write puts the armed keys back; a conflict or a missing id writes nothing.
    The timer sleeps `min(earliest due − now, 60 s)`. A wake short of the due instant fires
    nothing and calls `reschedule()` again from fresh state.
 3. At due time, `fire(definition)` applies the **age rule** from the due instant:

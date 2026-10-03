@@ -1,13 +1,15 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { localTimeZone, nextOccurrence } from '@open-mercato/cezar-contract';
 import { AutomationCoordinator } from '../automations/coordinator.ts';
 import { GithubPoller } from '../automations/github-poller.ts';
+import { ScheduleRunner } from '../automations/schedule-runner.ts';
 import { WorkspaceAutomationScheduler } from '../automations/scheduler.ts';
 import { AutomationStore } from '../automations/store.ts';
+import { isScheduleAutomation } from '../automations/types.ts';
 import { RunStore } from '../runs/store.ts';
 import { registerProject } from '../workspace/projects.ts';
 import { RunManager } from '../workflows/run.ts';
@@ -309,6 +311,89 @@ describe('GitHub automation API', () => {
     expect(paused.status).toBe(200);
     const afterPause = (await (await apiRequest(server, '/api/v1/automations')).json()) as any;
     expect(afterPause.automations.find((item: { id: string }) => item.id === created.id)).not.toHaveProperty('nextRunAt');
+  });
+
+  /**
+   * What a schedule fire in ANOTHER process would do at every point in a route's writes: after
+   * each rename of `automations.json` or `automation-state.json`, both files are copied to a fresh
+   * directory, and once the route answered a `ScheduleRunner` on a store opened there fires the
+   * definition that copy holds — as another cockpit's timer would, had it reloaded right then.
+   */
+  async function launchesMidRoute(automationStore: AutomationStore, id: string, route: () => Promise<Response>): Promise<{ response: Response; launches: number; copies: number }> {
+    const copies: string[] = [];
+    const write = (automationStore as any).atomicJson.bind(automationStore) as (filename: string, value: unknown) => void;
+    const spy = vi.spyOn(automationStore as any, 'atomicJson').mockImplementation(((filename: string, value: unknown) => {
+      write(filename, value);
+      const copy = mkdtempSync(join(tmpdir(), 'cezar-automation-mid-route-'));
+      for (const name of ['automations.json', 'automation-state.json']) {
+        const path = join(automationStore.dataDir, name);
+        if (existsSync(path)) copyFileSync(path, join(copy, name));
+      }
+      copies.push(copy);
+    }) as never);
+    let response: Response;
+    try { response = await route(); } finally { spy.mockRestore(); }
+    let launches = 0;
+    for (const copy of copies) {
+      try {
+        const reader = AutomationStore.open(copy);
+        const definition = reader.get(id);
+        if (!definition || !isScheduleAutomation(definition)) continue;
+        const launch = vi.fn(async () => ({ runId: 'mid-route' }));
+        await new ScheduleRunner({ projectId: 'other', store: reader, timeZone: localTimeZone(), launch }).fire(definition);
+        launches += launch.mock.calls.length;
+      } finally {
+        rmSync(copy, { recursive: true, force: true });
+      }
+    }
+    return { response, launches, copies: copies.length };
+  }
+  /** A paused schedule whose state still holds an instant that is due now (five minutes ago). */
+  function pausedWithStaleInstant(automationStore: AutomationStore) {
+    const created = automationStore.create({ ...scheduleInput, kind: 'schedule', enabled: false } as never);
+    const stale = new Date(Date.now() - 5 * 60_000).toISOString();
+    automationStore.setState(created.id, (current) => ({ ...current, revision: created.revision, nextRunAt: stale }));
+    return { created, stale };
+  }
+
+  it('enable never shows another process the enabled schedule beside its stale nextRunAt', async () => {
+    const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
+    const server = app({ automationStore });
+    const { created } = pausedWithStaleInstant(automationStore);
+    const before = Date.now();
+    const { response, launches, copies } = await launchesMidRoute(automationStore, created.id, () =>
+      apiRequest(server, `/api/v1/automations/${created.id}/enable`, { method: 'POST' }));
+    expect(response.status).toBe(200);
+    expect(copies).toBeGreaterThanOrEqual(2);
+    expect(launches).toBe(0);
+    const armed = automationStore.state(created.id)!.nextRunAt!;
+    expect(Math.abs(Date.parse(armed) - nextOccurrence(scheduleInput.schedule as never, before, localTimeZone())!)).toBeLessThan(60_000);
+    expect(Date.parse(armed)).toBeGreaterThan(Date.now());
+  });
+
+  it('a PUT that resumes a schedule never shows another process the new definition beside its stale nextRunAt', async () => {
+    const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
+    const server = app({ automationStore });
+    const { created } = pausedWithStaleInstant(automationStore);
+    const schedule = { type: 'weekdays', hour: 9, minute: 0 } as const;
+    const before = Date.now();
+    const { response, launches, copies } = await launchesMidRoute(automationStore, created.id, () =>
+      apiRequest(server, `/api/v1/automations/${created.id}`, json({ ...scheduleInput, schedule, enabled: true, expectedRevision: created.revision }, 'PUT')));
+    expect(response.status).toBe(200);
+    expect(copies).toBeGreaterThanOrEqual(2);
+    expect(launches).toBe(0);
+    const armed = automationStore.state(created.id)!.nextRunAt!;
+    expect(Math.abs(Date.parse(armed) - nextOccurrence(schedule, before, localTimeZone())!)).toBeLessThan(60_000);
+    expect(Date.parse(armed)).toBeGreaterThan(Date.now());
+  });
+
+  it('a PUT that loses the revision race leaves the armed nextRunAt alone', async () => {
+    const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
+    const server = app({ automationStore });
+    const { created, stale } = pausedWithStaleInstant(automationStore);
+    const conflict = await apiRequest(server, `/api/v1/automations/${created.id}`, json({ ...scheduleInput, enabled: true, expectedRevision: created.revision + 5 }, 'PUT'));
+    expect(conflict.status).toBe(409);
+    expect(AutomationStore.open(join(root, '.ai/cezar')).state(created.id)?.nextRunAt).toBe(stale);
   });
 
   it('retry fires a launch-error schedule receipt', async () => {

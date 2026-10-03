@@ -491,6 +491,58 @@ describe('AutomationStore.setState (read-modify-write)', () => {
   });
 });
 
+describe('AutomationStore arm (state before definition)', () => {
+  const schedule = { ...input, kind: 'schedule' as const, schedule: { type: 'daily' as const, hour: 4, minute: 0 }, events: undefined, intervalSeconds: undefined, filters: undefined, task: { prompt: 'Nightly' } };
+
+  it('writes the armed state before the definition, from the on-disk previous definition', async () => {
+    const dir = await directory();
+    const store = AutomationStore.open(dir);
+    const created = store.create(schedule as never, 'nightly');
+    store.setState('nightly', (current) => ({ ...current, revision: 1, nextRunAt: '2026-01-01T04:00:00.000Z' }));
+    const order: string[] = [];
+    const write = (store as any).atomicJson.bind(store) as (filename: string, value: unknown) => void;
+    (store as any).atomicJson = (filename: string, value: unknown) => { order.push(filename); write(filename, value); };
+    const seen: unknown[] = [];
+    const updated = store.update('nightly', created.revision, { ...schedule, enabled: true } as never, (definition, previous) => {
+      seen.push(previous?.enabled, definition.enabled);
+      return { nextRunAt: '2026-10-04T04:00:00.000Z' };
+    });
+    expect(order).toEqual(['automation-state.json', 'automations.json']);
+    expect(seen).toEqual([false, true]);
+    expect(AutomationStore.open(dir).state('nightly')).toMatchObject({ revision: updated.revision, nextRunAt: '2026-10-04T04:00:00.000Z' });
+  });
+
+  it('a revision conflict or a missing id arms nothing', async () => {
+    const dir = await directory();
+    const store = AutomationStore.open(dir);
+    store.create(schedule as never, 'nightly');
+    store.setState('nightly', (current) => ({ ...current, revision: 1, nextRunAt: '2026-01-01T04:00:00.000Z' }));
+    const arm = () => ({ nextRunAt: '2026-10-04T04:00:00.000Z' });
+    expect(() => store.update('nightly', 7, schedule as never, arm)).toThrow('revision conflict');
+    expect(() => store.update('gone', 1, schedule as never, arm)).toThrow('not found');
+    const fresh = AutomationStore.open(dir);
+    expect(fresh.state('nightly')).toEqual({ revision: 1, nextRunAt: '2026-01-01T04:00:00.000Z' });
+    expect(fresh.state('gone')).toBeUndefined();
+  });
+
+  it('restores the armed keys when the definition write fails', async () => {
+    const dir = await directory();
+    const store = AutomationStore.open(dir);
+    const created = store.create(schedule as never, 'nightly');
+    store.setState('nightly', (current) => ({ ...current, revision: 1, nextRunAt: '2026-01-01T04:00:00.000Z', consecutiveFailures: 2 }));
+    const write = (store as any).atomicJson.bind(store) as (filename: string, value: unknown) => void;
+    (store as any).atomicJson = (filename: string, value: unknown) => {
+      if (filename === 'automations.json') throw new Error('disk full');
+      write(filename, value);
+    };
+    expect(() => store.update('nightly', created.revision, { ...schedule, enabled: true } as never, () => ({ nextRunAt: '2026-10-04T04:00:00.000Z' }))).toThrow('disk full');
+    const fresh = AutomationStore.open(dir);
+    expect(fresh.state('nightly')).toEqual({ revision: 1, nextRunAt: '2026-01-01T04:00:00.000Z', consecutiveFailures: 2 });
+    expect(fresh.get('nightly')).toMatchObject({ revision: 1, enabled: false });
+    expect(store.get('nightly')).toMatchObject({ revision: 1, enabled: false });
+  });
+});
+
 /**
  * Runs `body` in two real OS processes released by one barrier file. `body` sees `store` (an
  * AutomationStore on `dir`) and `who` ('one' | 'two'), and runs synchronously, as the callers do.

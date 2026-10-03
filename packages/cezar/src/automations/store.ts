@@ -63,6 +63,16 @@ const LEASE_RECLAIM_ATTEMPTS = 1;
 type DefinitionsFile = ReturnType<typeof automationDefinitionsFileSchema.parse>;
 type StateFile = ReturnType<typeof automationStateFileSchema.parse>;
 
+/**
+ * The runtime state a definition write arms with it — a schedule's `nextRunAt` — computed from the
+ * definition about to be persisted and the on-disk one it replaces (`undefined` on create).
+ * Answer `undefined` to arm nothing. See `create`/`update` for why it is a parameter.
+ */
+export type AutomationArm = (
+  definition: AutomationDefinition,
+  previous: AutomationDefinition | undefined,
+) => Partial<AutomationRuntimeState> | undefined;
+
 export interface AutomationStoreOptions {
   warn?: (message: string) => void;
   now?: () => Date;
@@ -102,16 +112,25 @@ export class AutomationStore {
     return this.definitions.get(id);
   }
 
+  /**
+   * `arm`, when given, writes the state that belongs to the new definition BEFORE the definition
+   * itself, under the definitions lock and after every check passed. Another process reads the
+   * definitions file and then the state file (`reload`), so it sees the old definition beside the
+   * new state, or the new pair — never the new definition beside a stale `nextRunAt` it would
+   * fire or catch up. A failed definition write puts the armed keys back.
+   */
   create(
     input: Omit<AutomationDefinition, 'id' | 'revision' | 'createdAt' | 'updatedAt'>,
     id: string = randomUUID(),
+    arm?: AutomationArm,
   ): AutomationDefinition {
-    return this.withWriteLock(DEFINITIONS_LOCK, DEFINITIONS_RECLAIM, () => this.createLocked(input, id));
+    return this.withWriteLock(DEFINITIONS_LOCK, DEFINITIONS_RECLAIM, () => this.createLocked(input, id, arm));
   }
 
   private createLocked(
     input: Omit<AutomationDefinition, 'id' | 'revision' | 'createdAt' | 'updatedAt'>,
     id: string,
+    arm: AutomationArm | undefined,
   ): AutomationDefinition {
     this.refreshDefinitions();
     if (this.definitions.has(id) || this.isTombstoned(id)) throw new Error('automation id unavailable');
@@ -123,24 +142,26 @@ export class AutomationStore {
       createdAt: now,
       updatedAt: now,
     });
-    this.definitions.set(id, definition);
-    this.persistDefinitions();
+    this.persistArmed(definition, undefined, arm, false);
     return definition;
   }
 
+  /** `arm`: as in `create`; `previous` is the definition on disk, never the caller's copy. */
   update(
     id: string,
     expectedRevision: number,
     input: Omit<AutomationDefinition, 'id' | 'revision' | 'createdAt' | 'updatedAt'>,
+    arm?: AutomationArm,
   ): AutomationDefinition {
     // Lock order is always definitions -> state (the `setState` below); nothing takes them reversed.
-    return this.withWriteLock(DEFINITIONS_LOCK, DEFINITIONS_RECLAIM, () => this.updateLocked(id, expectedRevision, input));
+    return this.withWriteLock(DEFINITIONS_LOCK, DEFINITIONS_RECLAIM, () => this.updateLocked(id, expectedRevision, input, arm));
   }
 
   private updateLocked(
     id: string,
     expectedRevision: number,
     input: Omit<AutomationDefinition, 'id' | 'revision' | 'createdAt' | 'updatedAt'>,
+    arm: AutomationArm | undefined,
   ): AutomationDefinition {
     this.refreshDefinitions();
     const current = this.definitions.get(id);
@@ -154,10 +175,46 @@ export class AutomationStore {
       createdAt: current.createdAt,
       updatedAt: this.now().toISOString(),
     });
-    this.definitions.set(id, definition);
-    if (this.state(id)) this.setState(id, (current) => ({ ...current, revision: definition.revision }));
-    this.persistDefinitions();
+    this.persistArmed(definition, current, arm, Boolean(this.state(id)));
     return definition;
+  }
+
+  /**
+   * State first, then the definition (see `create`). `bumpRevision`: a state record exists, so
+   * its `revision` follows the definition even when `arm` arms nothing.
+   */
+  private persistArmed(
+    definition: AutomationDefinition,
+    previous: AutomationDefinition | undefined,
+    arm: AutomationArm | undefined,
+    bumpRevision: boolean,
+  ): void {
+    const { id } = definition;
+    const patch = arm?.(definition, previous);
+    let before: AutomationRuntimeState | undefined;
+    if (patch || bumpRevision) {
+      this.setState(id, (current) => {
+        before = current;
+        return { ...current, ...patch, revision: definition.revision };
+      });
+    }
+    this.definitions.set(id, definition);
+    try {
+      this.persistDefinitions();
+    } catch (error) {
+      if (previous) this.definitions.set(id, previous);
+      else this.definitions.delete(id);
+      if (patch && before) {
+        const armed = before;
+        // Only the keys this write armed: a fire may have written others since.
+        this.setState(id, (current) => ({
+          ...current,
+          ...Object.fromEntries(Object.keys(patch).map((key) => [key, armed[key as keyof AutomationRuntimeState]])),
+          revision: armed.revision,
+        }));
+      }
+      throw error;
+    }
   }
 
   delete(id: string): boolean {

@@ -473,6 +473,17 @@ function sameSchedule(a: AutomationDefinition['schedule'], b: AutomationDefiniti
   return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 }
 
+/**
+ * The `nextRunAt` a schedule definition arms with: its next occurrence from now when enabled,
+ * cleared when paused. Passed to the store's `create`/`update` as `arm`, which writes it BEFORE
+ * the definition, so another cockpit's timer never pairs the new definition with the old instant.
+ */
+function armScheduleFromNow(definition: AutomationDefinition): { nextRunAt: string | undefined } | undefined {
+  if (!isScheduleAutomation(definition)) return undefined;
+  const next = definition.enabled ? nextOccurrence(definition.schedule, Date.now(), localTimeZone()) : null;
+  return { nextRunAt: next === null ? undefined : new Date(next).toISOString() };
+}
+
 /** One row of the mirrored project-route table. */
 export interface ProjectRouteInfo {
   method: string;
@@ -3551,13 +3562,7 @@ export function createApp(deps: ServerDeps) {
       }
       const { enable, ...input } = parsed.data;
       try {
-        const automation = automationStore.create({ ...input, kind: resolved.kind, enabled: enable === true });
-        if (enable && isScheduleAutomation(automation)) {
-          const next = nextOccurrence(automation.schedule, Date.now(), localTimeZone());
-          if (next !== null) {
-            automationStore.setState(automation.id, (current) => ({ ...current, revision: automation.revision, nextRunAt: new Date(next).toISOString() }));
-          }
-        }
+        const automation = automationStore.create({ ...input, kind: resolved.kind, enabled: enable === true }, undefined, enable ? armScheduleFromNow : undefined);
         if (enable && isGithubAutomation(automation)) {
           const baselineAt = new Date().toISOString();
           automationStore.setState(automation.id, (current) => ({
@@ -3600,19 +3605,13 @@ export function createApp(deps: ServerDeps) {
       const promptIssue = validateAutomationPrompt(input.task.prompt, resolved.kind);
       if (promptIssue) return c.json({ error: promptIssue }, 400);
       try {
-        const automation = automationStore.update(c.req.param('id'), expectedRevision, { ...input, kind: resolved.kind, enabled: input.enabled ?? false });
         // The armed instant belongs to the schedule it was computed from, and to an enabled
         // definition: a new schedule, or a resume through PUT, re-arms from now — never a catch-up
-        // of an occurrence that passed while it was paused. Armed here, as `enable` does, rather
-        // than left to the timer: the list refetched on the change event must already see it.
-        if (isScheduleAutomation(automation) && (!sameSchedule(stored.schedule, automation.schedule) || (!stored.enabled && automation.enabled))) {
-          const next = automation.enabled ? nextOccurrence(automation.schedule, Date.now(), localTimeZone()) : null;
-          automationStore.setState(automation.id, (current) => ({
-            ...current,
-            revision: automation.revision,
-            nextRunAt: next === null ? undefined : new Date(next).toISOString(),
-          }));
-        }
+        // of an occurrence that passed while it was paused. Armed in the request, as `enable`
+        // does, rather than left to the timer: the list refetched on the change event must
+        // already see it. Compared with the definition on disk, not the one read above.
+        const automation = automationStore.update(c.req.param('id'), expectedRevision, { ...input, kind: resolved.kind, enabled: input.enabled ?? false }, (next, previous) =>
+          previous && (!sameSchedule(previous.schedule, next.schedule) || (!previous.enabled && next.enabled)) ? armScheduleFromNow(next) : undefined);
         emitAutomationChange(c.get('project'), automation.id, automation.revision);
         automationsChanged();
         return c.json({ automation });
@@ -3638,13 +3637,7 @@ export function createApp(deps: ServerDeps) {
       if (!current) return c.json({ error: 'not found' }, 404);
       if (isScheduleAutomation(current)) {
         // A schedule has no backlog to baseline against: it arms its next occurrence from now.
-        const automation = store.update(current.id, current.revision, { ...editableAutomation(current), enabled: true });
-        const next = nextOccurrence(current.schedule, Date.now(), localTimeZone());
-        store.setState(automation.id, (state) => ({
-          ...state,
-          revision: automation.revision,
-          nextRunAt: next === null ? undefined : new Date(next).toISOString(),
-        }));
+        const automation = store.update(current.id, current.revision, { ...editableAutomation(current), enabled: true }, armScheduleFromNow);
         emitAutomationChange(c.get('project'), automation.id, automation.revision);
         automationsChanged();
         return c.json({ automation });
