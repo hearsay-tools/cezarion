@@ -1771,7 +1771,12 @@ describe('archive from the sidebar (#780)', () => {
   })
 
   it('brings a pinned row back pinned, under Pinned', async () => {
-    expect(ids('Pinned')).toEqual(['arc-pinned'])
+    // The Finished row awaited by beforeEach does not establish Pinned readiness.
+    const pinned = browser.waitForValue<string[]>(
+      `[...document.querySelectorAll('[data-bucket="Pinned"] ${ROW}')].map((row) => row.dataset.runId)`,
+      (rows) => rows.includes('arc-pinned'),
+    )
+    expect(pinned).toEqual(['arc-pinned'])
     browser.hover(rowSel('arc-pinned'))
     browser.click(archiveBtn('arc-pinned'))
     browser.waitForFunction(`document.querySelector('${rowSel('arc-pinned')}') === null`)
