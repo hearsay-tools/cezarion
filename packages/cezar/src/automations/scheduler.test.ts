@@ -1,8 +1,9 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { automationLogRecordSchema as contractLogRecordSchema } from '@open-mercato/cezar-contract';
+import { AutomationCoordinator } from './coordinator.ts';
 import { AutomationStore } from './store.ts';
 import type { GithubAutomationDefinition, ScheduleAutomationDefinition } from './types.ts';
 import * as scheduleRunner from './schedule-runner.ts';
@@ -177,6 +178,8 @@ describe('WorkspaceAutomationScheduler', () => {
       refresh: vi.fn(async () => undefined),
       enabledProjectIds: () => store.list().some((item) => item.enabled) ? ['p'] : [],
       store: () => store,
+      // No idle wake here: this case pins the reschedule path a local enable takes.
+      hasDefinitions: () => false,
     };
     const scheduler = new WorkspaceAutomationScheduler({
       coordinator: coordinator as never,
@@ -392,6 +395,91 @@ describe('WorkspaceAutomationScheduler', () => {
         expect(pollFn).toHaveBeenCalledTimes(2);
       } finally { scheduler.stop(); }
     } finally { vi.useRealTimers(); }
+  });
+
+  describe('a definition changed by another process (finding 4172021393)', () => {
+    async function workspace() {
+      const root = await mkdtemp(join(tmpdir(), 'cezar-scheduler-ws-')); dirs.push(root);
+      const coordinator = new AutomationCoordinator({ listProjects: async () => [{ id: 'p', root, status: 'ok' }] });
+      return { root, dataDir: join(root, '.ai/cezar'), coordinator };
+    }
+
+    it('arms and fires a schedule another process enabled while this one had nothing armed', async () => {
+      vi.useFakeTimers();
+      try {
+        const now = Date.parse('2026-09-14T03:58:00Z');
+        vi.setSystemTime(now);
+        const { dataDir, coordinator } = await workspace();
+        // The other process (B) owns the definition; it starts paused.
+        const other = AutomationStore.open(dataDir);
+        const paused = other.create({ name: 'Nightly', enabled: false, kind: 'schedule', schedule: { type: 'daily', hour: 4, minute: 0 }, task: { prompt: 'Bump deps' } }, 'nightly');
+        const launchSchedule = vi.fn(async () => ({ runId: 'scheduled' }));
+        const scheduler = new WorkspaceAutomationScheduler({
+          coordinator,
+          handle: (projectId, store) => ({ projectId, store, timeZone: 'UTC', launchSchedule }),
+          now: () => Date.now(),
+        });
+        try {
+          await scheduler.start();
+          const mine = coordinator.store('p')!;
+          expect(mine.get('nightly')?.enabled).toBe(false);
+          // B enables it and exits: no event reaches this process, only the file changes.
+          other.update(paused.id, paused.revision, { ...paused, enabled: true });
+          await vi.advanceTimersByTimeAsync(WORKSPACE_TIMER_CAP_MS);
+          expect(mine.get('nightly')?.enabled).toBe(true);
+          expect(mine.state('nightly')?.nextRunAt).toBe('2026-09-14T04:00:00.000Z');
+          expect(scheduler.hasTimer()).toBe(true);
+          expect(launchSchedule).not.toHaveBeenCalled();
+          await vi.advanceTimersByTimeAsync(Date.parse('2026-09-14T04:00:00Z') - Date.now());
+          expect(launchSchedule).toHaveBeenCalledTimes(1);
+          expect(launchSchedule).toHaveBeenCalledWith(expect.objectContaining({ id: 'nightly' }), { at: '2026-09-14T04:00:00.000Z', trigger: 'schedule' }, expect.any(String));
+        } finally { scheduler.stop(); }
+      } finally { vi.useRealTimers(); }
+    });
+
+    it('discovers a project whose definitions file another process created after boot', async () => {
+      vi.useFakeTimers();
+      try {
+        vi.setSystemTime(Date.parse('2026-09-14T03:58:00Z'));
+        const { root, dataDir } = await workspace();
+        const second = await mkdtemp(join(tmpdir(), 'cezar-scheduler-ws-')); dirs.push(second);
+        // Project `a` already has a (paused) automation, so this workspace keeps its idle wake.
+        AutomationStore.open(dataDir).create({ name: 'Paused', enabled: false, kind: 'schedule', schedule: { type: 'daily', hour: 4, minute: 0 }, task: { prompt: 'x' } }, 'paused');
+        const coordinator = new AutomationCoordinator({ listProjects: async () => [{ id: 'a', root, status: 'ok' }, { id: 'b', root: second, status: 'ok' }] });
+        const launchSchedule = vi.fn(async () => ({ runId: 'scheduled' }));
+        const scheduler = new WorkspaceAutomationScheduler({
+          coordinator,
+          handle: (projectId, store) => ({ projectId, store, timeZone: 'UTC', launchSchedule }),
+          now: () => Date.now(),
+        });
+        try {
+          await scheduler.start();
+          expect(coordinator.ids()).toEqual(['a']);
+          AutomationStore.open(join(second, '.ai/cezar')).create({ name: 'Nightly', enabled: true, kind: 'schedule', schedule: { type: 'daily', hour: 4, minute: 0 }, task: { prompt: 'x' } }, 'nightly');
+          await vi.advanceTimersByTimeAsync(WORKSPACE_TIMER_CAP_MS);
+          expect(coordinator.ids()).toEqual(['a', 'b']);
+          await vi.advanceTimersByTimeAsync(Date.parse('2026-09-14T04:00:00Z') - Date.now());
+          expect(launchSchedule).toHaveBeenCalledTimes(1);
+        } finally { scheduler.stop(); }
+      } finally { vi.useRealTimers(); }
+    });
+
+    it('a workspace with no automations arms no timer', async () => {
+      vi.useFakeTimers();
+      try {
+        const { root, coordinator } = await workspace();
+        await mkdir(join(root, '.ai/cezar'), { recursive: true });
+        const scheduler = new WorkspaceAutomationScheduler({
+          coordinator,
+          handle: (projectId, store) => ({ projectId, store, timeZone: 'UTC' }),
+        });
+        try {
+          await scheduler.start();
+          expect(scheduler.hasTimer()).toBe(false);
+          expect(vi.getTimerCount()).toBe(0);
+        } finally { scheduler.stop(); }
+      } finally { vi.useRealTimers(); }
+    });
   });
 
   it('check refuses a project without a GitHub remote', async () => {

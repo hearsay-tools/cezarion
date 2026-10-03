@@ -70,7 +70,12 @@ web routes/automations/*: route shell, list, editor (+ schedule / github fields)
 ## Lifecycle (schedule kind)
 
 1. `reschedule()` refreshes the coordinator and calls `schedule()`; the coordinator still discovers
-   a project by its optional `automations.json` only.
+   a project by its optional `automations.json` only. The refresh also re-reads a store it already
+   holds when another cockpit changed `automations.json` or `automation-state.json`
+   (`reloadIfChanged`: two `stat`s, inode + mtime + size), and every timer wake goes through
+   `reschedule()`. With nothing due, a project carrying the file keeps an idle wake at the 60 s
+   cap, so a schedule enabled, edited or created by another process (which may have exited since)
+   arms here within one cap; a workspace with no definitions file arms no timer at all.
 2. `schedule()` collects due items: github → `state.nextCheckAt`; schedule → `ScheduleRunner.dueAt`,
    which returns `state.nextRunAt` or computes `nextOccurrence(schedule, now, tz)` and persists it,
    so every process agrees on the instant. A `PUT` that changes `schedule` (or resumes through
@@ -78,7 +83,7 @@ web routes/automations/*: route shell, list, editor (+ schedule / github fields)
    paused; `enable` sets `nextRunAt = nextOccurrence(now)` and writes no baseline. Both arm in the
    request, so the list refetched on the change event already shows the next run.
    The timer sleeps `min(earliest due − now, 60 s)`. A wake short of the due instant fires
-   nothing and calls `schedule()` again from fresh state.
+   nothing and calls `reschedule()` again from fresh state.
 3. At due time, `fire(definition)` applies the **age rule** from the due instant:
    - `now − due ≤ 10 min` → launch as `launched` (trigger `schedule`);
    - `≤ 24 h` → the latest missed occurrence launches once as `catch-up`; older missed ones are

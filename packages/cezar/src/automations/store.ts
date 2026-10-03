@@ -62,6 +62,8 @@ export class AutomationStore {
   private stateFile: StateFile = { version: 1, states: {} };
   private definitions = new Map<string, AutomationDefinition>();
   private warned = new Set<string>();
+  /** What `definitions`/`stateFile` were read from: see `reloadIfChanged`. */
+  private seen = '';
   private readonly now: () => Date;
   private readonly secrets = collectSecretValues();
 
@@ -146,8 +148,40 @@ export class AutomationStore {
    * unreadable file keeps this process's last good view, as `setState` does.
    */
   reload(): void {
+    // Stat before reading: a write landing in between leaves a signature older than the content,
+    // which costs one extra reload later, never a missed change.
+    this.seen = this.signature();
     this.refreshDefinitions();
     this.stateFile = this.readJson(STATE, automationStateFileSchema, this.stateFile);
+  }
+
+  /**
+   * `reload`, but only when either file changed on disk since this store last read both. The
+   * workspace timer calls it on every wake for every known store, so another cockpit's create,
+   * edit, enable or pause reaches this process within one timer cap — even after that cockpit
+   * exited — at the price of two `stat`s. Every write here is a tmp+rename, so the inode changes
+   * on each one; mtime and size back that up. Returns whether it reloaded.
+   */
+  reloadIfChanged(): boolean {
+    if (this.signature() === this.seen) return false;
+    this.reload();
+    return true;
+  }
+
+  /** Whether this project carries the optional definitions file at all. */
+  hasDefinitionsFile(): boolean {
+    return existsSync(join(this.dataDir, DEFINITIONS));
+  }
+
+  private signature(): string {
+    return [DEFINITIONS, STATE].map((filename) => {
+      try {
+        const stat = statSync(join(this.dataDir, filename));
+        return `${stat.ino}:${stat.mtimeMs}:${stat.size}`;
+      } catch {
+        return '-';
+      }
+    }).join('|');
   }
 
   state(id: string): AutomationRuntimeState | undefined {
@@ -401,6 +435,7 @@ export class AutomationStore {
 
   private load(): void {
     mkdirSync(this.dataDir, { recursive: true });
+    this.seen = this.signature();
     this.loadDefinitions();
     this.stateFile = this.readJson(STATE, automationStateFileSchema, {
       version: 1,

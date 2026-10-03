@@ -130,6 +130,29 @@ describe('AutomationStore', () => {
     });
   });
 
+  it('reloadIfChanged re-reads only after another store wrote either file', async () => {
+    const dir = await directory();
+    const mine = AutomationStore.open(dir);
+    const other = AutomationStore.open(dir);
+    const created = other.create(input, 'one');
+    expect(mine.hasDefinitionsFile()).toBe(true);
+    expect(mine.get('one')).toBeUndefined();
+    expect(mine.reloadIfChanged()).toBe(true);
+    expect(mine.get('one')?.enabled).toBe(false);
+    expect(mine.reloadIfChanged()).toBe(false);
+    other.update(created.id, created.revision, { ...input, enabled: true });
+    expect(mine.reloadIfChanged()).toBe(true);
+    expect(mine.get('one')?.enabled).toBe(true);
+    other.setState('one', (current) => ({ ...current, nextCheckAt: '2026-09-14T04:00:00.000Z' }));
+    expect(mine.reloadIfChanged()).toBe(true);
+    expect(mine.state('one')?.nextCheckAt).toBe('2026-09-14T04:00:00.000Z');
+    expect(mine.reloadIfChanged()).toBe(false);
+  });
+
+  it('hasDefinitionsFile is false for a project without automations', async () => {
+    expect(AutomationStore.open(await directory()).hasDefinitionsFile()).toBe(false);
+  });
+
   it('reserves one receipt per automation event and appends finalized rows', async () => {
     const store = AutomationStore.open(await directory());
     const receipt = store.reserveReceipt({ automationId: 'one', revision: 1, eventId: 'event' });

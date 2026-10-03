@@ -144,8 +144,12 @@ describe('GitHub automation API', () => {
 
     await scheduler.start();
     withGithubRemote(root);
-    const created = ((await (await apiRequest(server, '/api/v1/automations', json(input))).json()) as any).automation;
     expect(scheduler.hasTimer()).toBe(false);
+    const created = ((await (await apiRequest(server, '/api/v1/automations', json(input))).json()) as any).automation;
+    // Created paused, but the definitions file now exists: the idle wake watches it for edits
+    // made by another cockpit (finding 4172021393).
+    await rescheduled;
+    expect(scheduler.hasTimer()).toBe(true);
 
     const enabled = await apiRequest(server, `/api/v1/automations/${created.id}/enable`, { method: 'POST' });
     expect(enabled.status).toBe(200);

@@ -194,7 +194,12 @@ export interface WorkspaceAutomationSchedulerOptions {
   now?: () => number;
 }
 
-/** One workspace timer, created only while at least one enabled definition exists. */
+/**
+ * One workspace timer, created only while at least one project carries a definitions file. With
+ * nothing enabled it is an idle wake at the cap: every wake goes through `reschedule`, whose
+ * coordinator refresh re-reads a store another cockpit changed and opens a project whose
+ * definitions file appeared, so their edits arm here within one cap. No file anywhere: no timer.
+ */
 export class WorkspaceAutomationScheduler {
   private timer?: ReturnType<typeof setTimeout>;
   private stopped = true;
@@ -268,18 +273,23 @@ export class WorkspaceAutomationScheduler {
       }
     }
     for (const key of this.retryAfter.keys()) if (!live.has(key)) this.retryAfter.delete(key);
-    if (!due.length) return;
+    if (!due.length) {
+      if (this.options.coordinator.hasDefinitions()) {
+        this.timer = setTimeout(() => { this.timer = undefined; void this.reschedule(); }, WORKSPACE_TIMER_CAP_MS);
+      }
+      return;
+    }
     due.sort((a, b) => a.at - b.at);
     const next = due[0]!;
     const clock = () => this.options.now?.() ?? Date.now();
     this.timer = setTimeout(() => {
       this.timer = undefined;
       // A capped wake short of the due instant fires nothing: look again from fresh state.
-      if (clock() < next.at) { this.schedule(); return; }
+      if (clock() < next.at) { void this.reschedule(); return; }
       void next.fire().then(
         () => { this.retryAfter.delete(next.key); },
         () => { this.retryAfter.set(next.key, clock() + next.retryAfterMs); },
-      ).finally(() => this.schedule());
+      ).finally(() => this.reschedule());
     }, Math.min(WORKSPACE_TIMER_CAP_MS, Math.max(0, next.at - clock())));
   }
 }
