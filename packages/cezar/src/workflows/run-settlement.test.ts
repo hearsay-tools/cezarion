@@ -120,10 +120,12 @@ describe('successful run settlement (#473)', () => {
     expect(store.getRun(id)?.steps.find(step => step.id === 'late-step')).toMatchObject({ status: 'done', finishedAt: store.getRun(id)?.finishedAt });
   });
 
-  it('does not reconcile a replacement execution admitted during diff I/O', async () => {
+  it.each([false, true])('does not reconcile a replacement execution during diff I/O (disposed=%s)', async disposed => {
     const id = seed();
     const active = (manager as unknown as { active: Map<string, unknown> }).active;
+    active.set(id, { finishRequested: true });
     vi.mocked(worktreeDiff).mockImplementationOnce(async () => {
+      if (disposed) manager.dispose();
       // A new ActiveRun is the generation boundary used by Continue admission.
       active.set(id, {});
       store.updateRun(id, { status: 'running' });
@@ -136,5 +138,23 @@ describe('successful run settlement (#473)', () => {
       expect(store.getRun(id)?.finishedAt).toBeUndefined();
       expect(store.getRun(id)?.steps).toEqual(steps);
     } finally { active.delete(id); }
+  });
+
+  it.each(['none', 'finish', 'cancel'] as const)('disposal during diff I/O preserves explicit terminal intent: %s', async intent => {
+    const id = seed();
+    const active = (manager as unknown as { active: Map<string, unknown> }).active;
+    active.set(id, { finishRequested: intent === 'finish', cancelled: intent === 'cancel' });
+    vi.mocked(worktreeDiff).mockImplementationOnce(async () => {
+      manager.dispose();
+      return 'changed';
+    });
+    await settle(id);
+    const completed = store.getRun(id)!;
+    expect(completed.status).toBe(intent === 'none' ? 'waiting' : intent === 'cancel' ? 'cancelled' : 'done');
+    if (intent === 'none') expect(completed.finishedAt).toBeUndefined();
+    else {
+      expect(completed.finishedAt).toBeDefined();
+      expect(completed.steps.some(step => step.status === 'running' || step.status === 'waiting')).toBe(false);
+    }
   });
 });

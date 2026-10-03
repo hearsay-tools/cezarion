@@ -6691,7 +6691,12 @@ export class RunManager {
     // Diff/config I/O can race cancellation or a replacement execution. Re-read
     // the record before touching steps, and never settle another session's work.
     const current = this.store.getRun(runId);
-    if (!current || !['queued', 'running', 'waiting'].includes(current.status) || this.active.get(runId) !== state) return;
+    const active = this.active.get(runId);
+    // Disposal clears active, but cannot revoke an already accepted Finish/Stop.
+    // A different active state is still a replacement, even after disposal.
+    const disposedWithTerminalIntent = this.disposed && active === undefined && (state?.finishRequested || state?.cancelled);
+    if (!current || !['queued', 'running', 'waiting'].includes(current.status) ||
+      (active !== state && !disposedWithTerminalIntent)) return;
     if (state?.cancelled) {
       const finishedAt = new Date().toISOString();
       for (const step of current.steps) {

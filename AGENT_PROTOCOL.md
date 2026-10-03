@@ -866,6 +866,10 @@ parked and become done with a completion timestamp only when the run succeeds.
 R30 delays the final diff check and cancels during it: cancellation wins over
 success, including the intermediate steps. Successful settlement preserves other
 step statuses and existing timestamps, and still respects parent completion deferrals.
+R31/R32 accept Finish on fresh and Continue sessions, dispose the manager during
+the final diff check, and still require terminal success on every native wire.
+Disposal cannot revoke accepted Finish/Stop intent; a replacement active execution
+still prevents the old settlement from completing its steps.
 
 R20/R21 (#661) complete an owned worker over each native mock wire, then commit a
 cleanup checkpoint. Enabled delegation reads only that worker's family; disabled

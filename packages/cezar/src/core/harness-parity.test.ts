@@ -410,6 +410,8 @@ const CONTROL_CRITERIA = [
   { id: 'R28', scenario: 'baseline' },
   { id: 'R29', scenario: 'baseline' },
   { id: 'R30', scenario: 'baseline' },
+  { id: 'R31', scenario: 'baseline' },
+  { id: 'R32', scenario: 'baseline' },
 ] as const;
 
 /**
@@ -1563,6 +1565,63 @@ describe('harness parity — multi-Continue settlement', () => {
               expect(completed.steps.map(step => step.status)).toEqual(['done', status === 'cancelled' ? 'cancelled' : 'done', 'done']);
               for (const step of completed.steps) expect(step.finishedAt).toBeDefined();
               expect(completed.currentStepId).toBeUndefined();
+            });
+        } finally { vi.unstubAllEnvs(); }
+      }, 60_000);
+    }
+  }
+});
+
+describe('harness parity — accepted Finish across disposal', () => {
+  for (const backend of RUNNER_IDS) {
+    for (const continuation of [false, true]) {
+      const criterion = continuation ? 'R32' : 'R31';
+      it(`${backend} ${criterion} honors ${continuation ? 'Continue' : 'fresh'} Finish when disposed during diff I/O`, async () => {
+        vi.stubEnv('CEZ_REVIEW_GATE', '0');
+        try {
+          await driveRun(backend, 'baseline', record => record?.status === 'waiting', 30_000,
+            async ({ store, manager, runId }) => {
+              const internal = manager as unknown as {
+                repoRoot: string;
+                active: Map<string, { idleTimer?: NodeJS.Timeout }>;
+                dropActive(id: string): void;
+              };
+              if (continuation) {
+                const timer = internal.active.get(runId)?.idleTimer as NodeJS.Timeout & { _onTimeout(): void };
+                expect(timer).toBeDefined();
+                timer._onTimeout();
+                await waitFor(() => !manager.isActive(runId));
+                expect(manager.continueRun(runId, { text: promptFor(backend, 'baseline') }).ok).toBe(true);
+                await waitFor(() => manager.isActive(runId) && store.getRun(runId)?.status === 'waiting');
+              }
+              store.updateRun(runId, { worktreePath: internal.repoRoot, baseBranch: 'main' });
+              let release: ((diff: string) => void) | undefined;
+              const diff = vi.spyOn(gitWorktree, 'worktreeDiff').mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+              // dispose clears active immediately. Observe actual engine cleanup,
+              // so assertions and fixture deletion wait for the settlement callback.
+              let cleanedUp = false;
+              const dropActive = internal.dropActive.bind(manager);
+              const cleanup = vi.spyOn(internal, 'dropActive').mockImplementation(id => {
+                dropActive(id);
+                if (id === runId) cleanedUp = true;
+              });
+              try {
+                expect(manager.finish(runId)).toBe(true);
+                await waitFor(() => release !== undefined);
+                manager.dispose();
+                release!('changed');
+                await waitFor(() => cleanedUp);
+                const completed = store.getRun(runId)!;
+                expect(completed.status).toBe('done');
+                expect(completed.finishedAt).toBeDefined();
+                expect(completed.currentStepId).toBeUndefined();
+                expect(completed.steps).toHaveLength(continuation ? 2 : 1);
+                for (const step of completed.steps) expect(step).toMatchObject({ status: 'done', finishedAt: expect.any(String) });
+              } finally {
+                release?.('changed');
+                diff.mockRestore();
+                cleanup.mockRestore();
+              }
             });
         } finally { vi.unstubAllEnvs(); }
       }, 60_000);
