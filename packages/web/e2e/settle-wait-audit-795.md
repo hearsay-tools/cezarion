@@ -440,3 +440,85 @@ All temporary instrumentation was removed and the committed thread-scroll spec
 restored verbatim. Audit counts and readiness fixes are unchanged. The parent owns
 one unchanged full normal retry and the subsequent full CPU-loaded acceptance run;
 the failed attempt and this limitation must remain visible alongside those results.
+
+## Repeated restoration failure: concurrent diagnosis and scope boundary
+
+The parent unchanged full normal retry at `74495525` also failed the same restoration
+wait for 67430px. Its first five commands passed; the browser result was **611 passed,
+one restoration failure, seven existing skips**, completed **2026-10-03 09:35:46 UTC**.
+No loaded-after burners were started. The second actual probe independently confirms
+the target and timeout, but the retained second bundle does not contain a detailed
+scroll-height capture: do not infer its final height from attempt 1. Parent evidence:
+`.ai/qa/issue-795/final-normal-attempt-2-evidence.zip` and
+`.ai/qa/local-runs/1791019627753-3022091/lane-4-failures/thread-scroll/`.
+
+A stronger bounded comparison ran the actual four-lane allocator/sequencer. Its tracer
+starts inside the **existing** wheel call, performs passive in-page frame observations,
+and is retrieved **only after** the original restoration wait succeeds or times out.
+There are no added browser CLI calls before park, departure or return. Observing frames
+still adds work and may affect timing; these runs are not deterministic red/green proof.
+
+In current `c91c6172` behavior, the departed virtualizer had 1253 rows, default estimate
+110 and 53 measured entries; park was 67430px at height 135696px. On return, a native
+frame shows a **456-row virtual mount**, default estimate **40**, zero measured entries
+and no saved mount cache, height 18792px. Growing that same session to 1253 rows retained
+a fresh cache. It later estimated 57.5, height 72621px, and reached 67430px. The first
+rendered overscan key changed from `turn-seq-1234:item_msg_124` before departure to
+`turn-seq-2324:toolu_233` after return. These are overscan-window observations, not exact
+first-visible anchors, but they demonstrate that passing pixel arithmetic alone does
+not establish the same reader content after re-estimation.
+
+The comparison variant restored the **complete baseline `35a519de` thread-scroll spec
+behavior**, with the same passive tracer; all other specs/product files remained at
+current #795 input. It parked 35889px at height 72614px/default estimate 57.5. Return
+showed 154 flat rows, then a 1253-row virtual session whose native mount state contained
+the saved 1253-row cache/default 57.5/58 measured entries. It restored 35889px. This
+pair observes different initial estimates and replay batch boundaries; it does not
+isolate which #795 change, scheduling difference or other input caused those differences.
+It is **not** a full baseline checkout acceptance run.
+
+The native partial mount now demonstrates the source gap described above:
+`thread-scroll.ts:124` rejects the incompatible count, `thread-scroller.tsx:570` reads
+once at mount, and `:630` supplies that immutable cache value to the virtualizer.
+Reaching the compatible full count later does not retry the saved snapshot. A rendering
+wait cannot restore missing measurements or make an unreachable pixel offset valid.
+The uninstrumented failed attempts do not capture their initial virtual mount, so this
+is not a proven explanation for every recorded timeout.
+
+Worker evidence: `.ai/qa/issue-795/thread-restore-context/`. Both exact instrumented
+spec variants, baseline original, diff, native traces/summaries, all lane logs and every
+failure bundle are retained. `before.ts` is the verbatim committed spec restored after
+these two runs. No instrumentation or product changes remain.
+
+| Command / bounded contextual comparison | Outcome | Evidence |
+| --- | --- | --- |
+| `npm ci` | exit 0 | `npm-ci.log` |
+| `npm run test:e2e:local`, current behavior plus passive trace | exit 1; **609 passed, 3 selection-states failures, 7 existing skips**; all 14 thread-scroll tests passed | `passive-current-four-lane.log`, `passive-current-local-run/`, `passive-current-summary.json`; original local run `1791020432896-3110311` |
+| Same complete four-lane command, complete baseline thread-scroll spec behavior plus the same trace | exit 1; **611 passed, 1 worker-conversation navigation failure, 7 existing skips**; lane 4 passed all 192 tests / 1 existing skip, including thread-scroll 14 and selection-states 27 | `passive-complete-baseline-four-lane.log`, `passive-complete-baseline-local-run/`, `passive-complete-baseline-summary.json`; original local run `1791021033493-3200243` |
+
+The three current-run selection failures were settled-sample `wait-value` timeouts with
+`lastValue: null`: sidebar row/title/pin geometry, the Skills nav-update marker sample,
+and model-pill geometry, all desktop dark comfortable. Captures show complete pages,
+1440×900 and no dialogs; they do not identify fonts, native rendering, finite animation
+or another rejected guard. Their captures (09:44:11/09:44:37/09:45:03 UTC) precede the
+2.59-second thread trace retrieved at 09:45:54 UTC, so that tracer was not running
+during their waits. Overall concurrency/environment differences remain possible.
+The baseline-context run did not reproduce them; an external native-wait observer
+captured zero matching probes, so no null-guard cause was established or fixed.
+
+The baseline-context failure was the worker-conversation clock test's **navigation**
+at `worker-conversation.e2e.ts:109`, before clock readiness or geometry: agent-browser
+`open` failed with `spawnSync ETIMEDOUT` after its existing 90-second command budget.
+The failure capture has the intended flat-thread URL and a complete document. That
+bundle does not prove why the CLI open failed; no budget or test change was made.
+
+Independent read-only review recommends retaining the original run/view cache candidate
+through the incompatible prefix, adopting it once at an exact compatible count while
+the original arrival still owns restoration, and protecting it from detach overwrites.
+This leaves #795's approved test-only surface. A bounded product design and regressions
+are prepared in worker evidence `product-remedy-design.md`; **no implementation is
+approved or made here**. Preserve exact-count compatibility, reader cancellation, tail
+pinning, append/prepend behavior and the original 200px assertion. Do not substitute a
+larger height wait, lower parked offset or atomic replay fixture. Parent owns the design
+gate, subsequent red/green proof, independent review and final normal/full-load gates.
+Audit inventories/counts remain unchanged; these failed runs are not acceptance passes.
