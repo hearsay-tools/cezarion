@@ -37,6 +37,16 @@ const TURNS = 250
 const ROWS = expectedRowCount(TURNS) // 1253 — comfortably past the ~300 threshold
 
 const RUN_ID = 'aaaaaaaa-1111-4222-8333-bbbbbbbbcccc'
+const REPLAY_ID = 'aaaaaaaa-1111-4222-8333-bbbbbbbbdddd'
+// #795: genuine wire data, short prefix / longer tail makes lost size estimates observable.
+const replayEvents = largeThreadEvents(TURNS).map(line => {
+  if (line.seq > 650) return line
+  if (line.type === 'item.completed' && (line.item as { kind?: string })?.kind === 'tool') {
+    return { ...line, item: { ...(line.item as object), output: 'ok' } }
+  }
+  return line.type === 'tool-result' ? { ...line, result: 'ok' } : line
+})
+const replayBoundary = replayEvents.find(line => line.type === 'turn.completed' && line.turnId === 'turn_64')!.seq
 /** The real record fixture, re-ided for the synthetic transcript; the untouched fields keep
  *  the store's zod shape. No PR url (this run never shipped one) and only the agent step. */
 const RUN = {
@@ -61,7 +71,6 @@ function freePort(): Promise<number> {
     })
   })
 }
-
 
 let browser: AgentBrowser
 let server: ChildProcess
@@ -105,7 +114,7 @@ function parkAt(target: string) {
 
 /** Load the thread and wait until the SSE replay has finished growing it (the last turn's
  *  note is rendered) — every measurement below is over the complete transcript. */
-function openThread(query = '') {
+function openThread(query = '', runId = RUN_ID) {
   browser.goto(`${baseUrl}${scoped('/')}`)
   browser.waitForFunction(`document.querySelector('[data-route="tasks"]') !== null`)
   // This suite measures complete-session virtualization. Exercise the supported
@@ -121,7 +130,7 @@ function openThread(query = '') {
     window.fetch = (input, options) => new URL(String(input), location.href).pathname.endsWith('/history')
       ? Promise.resolve(new Response('{"error":"fixture optimized history unavailable"}', { status: 404 }))
       : original(input, options);
-    history.pushState({}, '', '${scoped(`/tasks/${RUN_ID}`)}${query}');
+    history.pushState({}, '', '${scoped(`/tasks/${runId}`)}${query}');
     window.dispatchEvent(new PopStateEvent('popstate'));
   })()`)
   browser.waitForFunction(`document.querySelector('[data-slot="history-fallback"]') !== null`)
@@ -157,7 +166,7 @@ function captureScrollState(name: string) {
 beforeAll(async () => {
   dataRoot = mkdtempSync(join(tmpdir(), 'cezar-e2e-thread-scroll-'))
   mkdirSync(join(dataRoot, '.ai/cezar/runs'), { recursive: true })
-  writeFileSync(join(dataRoot, '.ai/cezar/runs.json'), JSON.stringify([RUN], null, 2), 'utf8')
+  writeFileSync(join(dataRoot, '.ai/cezar/runs.json'), JSON.stringify([RUN, { ...RUN, id: REPLAY_ID, title: 'Held progressive cache replay' }], null, 2), 'utf8')
   writeFileSync(
     join(dataRoot, '.ai/cezar/runs', `${RUN_ID}.ndjson`),
     largeThreadEvents(TURNS)
@@ -165,6 +174,8 @@ beforeAll(async () => {
       .join('\n') + '\n',
     'utf8',
   )
+
+  writeFileSync(join(dataRoot, '.ai/cezar/runs', `${REPLAY_ID}.ndjson`), replayEvents.map(line => JSON.stringify(line)).join('\n') + '\n')
 
   const port = await freePort()
   baseUrl = `http://localhost:${port}`
@@ -288,6 +299,75 @@ describe('thread virtualization on a 1,000-row transcript', () => {
       throw error
     }
     expect(browser.evaluate(nearBottom)).toBe(false) // back where the reader parked, not the tail
+  }, 90_000)
+
+  it('restores the same reader row after a measured virtual prefix grows to the cached full replay (#795)', () => {
+    openThread('', REPLAY_ID)
+    parkAt(`Math.round((m.scrollHeight - m.clientHeight) * .75)`)
+    const reader = waitForSettledSample<{ top: number; height: number; viewport: number; key: string; offset: number }>(browser, `(() => {
+      const main = ${MAIN}, viewport = main.getBoundingClientRect();
+      const row = [...document.querySelectorAll('[data-slot="thread-row"]')].find(el => {
+        if (!el.checkVisibility({ contentVisibilityAuto: true })) return false;
+        const box = el.getBoundingClientRect(); return box.bottom > viewport.top && box.top < viewport.bottom;
+      });
+      if (!row) return null;
+      return { top: main.scrollTop, height: main.scrollHeight, viewport: main.clientHeight, key: row.dataset.rowKey, offset: row.getBoundingClientRect().top - viewport.top };
+    })()`)
+    expect(reader.top).toBeGreaterThan(1000)
+    expect(reader.height - reader.viewport - reader.top).toBeGreaterThan(1000)
+    // Hold actual ordered SSE frames after a real prefix. No atomic preload or DOM rewrite.
+    browser.evaluate(`(() => {
+      const NativeSource = window.EventSource; window.__replayNativeSource = NativeSource;
+      window.EventSource = class extends NativeSource {
+        constructor(...args) { super(...args); this.gated = String(args[0]).includes('/runs/${REPLAY_ID}/events');
+          if (this.gated) window.__heldReplay = { queue: [], lastSeq: 0, released: false };
+        }
+        addEventListener(type, listener, options) {
+          if (!this.gated || !['run-event', 'ui-event'].includes(type)) return super.addEventListener(type, listener, options);
+          return super.addEventListener(type, event => {
+            const state = window.__heldReplay, seq = JSON.parse(event.data).seq;
+            const deliver = () => typeof listener === 'function' ? listener.call(this, event) : listener.handleEvent(event);
+            state.lastSeq = seq;
+            if (!state.released && seq > ${replayBoundary}) state.queue.push(deliver); else deliver();
+          }, options);
+        }
+      };
+    })()`)
+    try {
+      browser.click(`[data-slot="sidebar"] a[href="${scoped('/')}"]`)
+      browser.waitForFunction(`document.querySelector('[data-route="task-thread"]') === null`)
+      browser.click(`a[href="${scoped(`/tasks/${REPLAY_ID}`)}"]`)
+      browser.waitForFunction(`window.__heldReplay?.queue.length > 0 && document.querySelector('[data-slot="thread-rows"]')?.dataset.virtualized === 'true'`)
+      // Hold native prefix-container extent, not a restored-offset expectation. A
+      // clamped pending restore may have zero rendered row children; record that fact.
+      const prefix = waitForSettledSample(browser, `(() => {
+        const rows = document.querySelector('[data-slot="thread-rows"]');
+        if (!rows || !rows.checkVisibility({ contentVisibilityAuto: true })) return null;
+        const extent = rows.getBoundingClientRect().height;
+        if (!extent) return null;
+        return { extent, height: ${MAIN}.scrollHeight, mounted: rows.querySelectorAll('[data-slot="thread-row"]').length };
+      })()`)
+      writeFileSync(join(artifactsDir, 'thread-held-replay-prefix.json'), JSON.stringify({ reader, prefix }, null, 2))
+      browser.evaluate(`(() => { const state = window.__heldReplay; state.released = true; for (const deliver of state.queue.splice(0)) deliver(); })()`)
+      // ORIGINAL pixel coverage assertion/budget, with an additional content-identity assertion.
+      browser.waitForFunction(`Math.abs(${MAIN}.scrollTop - ${reader.top}) < 200`)
+      const restored = waitForSettledSample<{ key: string; offset: number }>(browser, `(() => {
+        const viewport = ${MAIN}.getBoundingClientRect();
+        const row = [...document.querySelectorAll('[data-slot="thread-row"]')].find(el => {
+          if (!el.checkVisibility({ contentVisibilityAuto: true })) return false;
+          const box = el.getBoundingClientRect(); return box.bottom > viewport.top && box.top < viewport.bottom;
+        });
+        return row ? { key: row.dataset.rowKey, offset: row.getBoundingClientRect().top - viewport.top } : null;
+      })()`)
+      writeFileSync(join(artifactsDir, 'thread-held-replay-restored.json'), JSON.stringify({ reader, restored }, null, 2))
+      expect(restored.key).toBe(reader.key)
+      expect(Math.abs(restored.offset - reader.offset)).toBeLessThan(2)
+    } catch (error) {
+      captureScrollState('thread-held-replay-timeout')
+      throw error
+    } finally {
+      browser.evaluate(`(() => { const state = window.__heldReplay; if (state) { state.released = true; for (const deliver of state.queue.splice(0)) deliver(); } window.EventSource = window.__replayNativeSource; })()`)
+    }
   }, 90_000)
 })
 

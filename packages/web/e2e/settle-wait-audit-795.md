@@ -6,7 +6,12 @@ Scope: every one of the **63** current `*.e2e.ts` specs. The original audit cove
 `fixtures/make-large-thread.ts`); review round 1 adds `transcript-measurements.ts` and
 `session-layout.ts`; the loaded-rail correction adds `project-rail-ready.ts`, bringing
 the current helper/setup inventory to **16**.
-No product, dependency, assertion tolerance, skip or fixture baseline changes.
+The initial readiness audit and review corrections stay in test infrastructure. After
+repeated full-suite restoration failures, the human approved the bounded product cache
+remedy described below on 2026-10-03. Only `thread-scroll.ts` and `thread-scroller.tsx`
+change product behavior. No dependencies, assertion tolerances, timeouts, holds or skips
+change; the original transcript fixture remains intact and a separate held-replay fixture
+adds regression coverage.
 
 ## Diagnosis and provenance
 
@@ -17,7 +22,8 @@ No product, dependency, assertion tolerance, skip or fixture baseline changes.
   before every descendant/ancestor box. Skipped descendants remain outside the readiness
   signature; measured transcript targets independently scroll and wait for native rendering.
   Product provenance: `thread-scroller.tsx:519`, `commit-list.tsx:117`,
-  `diff-view.tsx:189,471`. These are read-only source references, not changed files.
+  `diff-view.tsx:189,471`. These were read-only source references during the initial readiness phase; the later
+  approved cache correction changes only the thread-scroll lifecycle described below.
 - **S — settled sample rather than first mounted / first truth.** #794 documents a
   viewport action returning before its rendered frame; that fix is retained verbatim.
   Its one frame does not finish font loading, finite transitions or ResizeObserver work.
@@ -47,8 +53,10 @@ issue-specific reproduction history (notably #548, #736, #369 and #758).
 **Counts:** 462 baseline sampling calls; 45 affected spec rows; 18 `NONE` affected
 rows (10 have no sampling calls). At `31597045`, there were **208 actual** accepted-sample
 calls; the initial 209-entry list incorrectly included the helper declaration. After review
-round 1 and the loaded-rail correction there are **209 actual calls**, excluding
-declarations; current locations follow.
+round 1 and the loaded-rail correction there were **209 actual calls**. The new held-replay
+regression adds three, bringing the current total to **212 actual calls**, excluding
+declarations; current locations follow. Baseline sampling counts and `NONE` rows remain
+unchanged.
 
 ## Exhaustive spec inventory
 
@@ -118,7 +126,7 @@ waits still need S when followed by a changed geometry sample.
 | [task-handoff.e2e.ts](task-handoff.e2e.ts) | 6: 76, 143, 154, 181, 204, 228 | 76, 154, 204. S: raw / first-value geometry after route, viewport, theme, density or disclosure now returns the held measurement. Existing assertions remain unchanged. | 67, 72, 76, 88, 89, 91, 98, 99, 116, 117, 124, 127, 143, 154, 176, 181, 192, 194, 204, 224, 228 |
 | [task-thread.e2e.ts](task-thread.e2e.ts) | 57: 141, 179, 181, 185, 190, 200, 441, 443, 451, 454, 495, 579, 621, 624, 653, 704, 707, 709, 715, 724, 725, 747, 748, 749, 756, 757, 758, 760, 764, 775, 776, 780, 792, 793, 801, 802, 803, 815, 816, 818, 819, 822, 823, 947, 957, 977, 1025, 1040, 1072, 1073, 1080, 1083, 1097, 1113, 1132, 1163, 1216 | 141, 443, 621, 624, 653, 709, 715, 725, 747, 749, 758, 760, 764, 792, 793, 803, 818, 819, 822, 823, 947, 957, 977, 1072, 1073, 1083, 1132, 1163, 1216. #758 lazy transcript and #794 mobile Copy branch: guard native rendering before boxes; scroll transcript targets. Session control coverage and menu 44px thresholds are assertions. Keep #415 title-edit focus/geometry stability. Review round 1 additionally restores editor viewport bottom on every caller and replaces immediate disclosure/visibility reads; see precise review sites below. | 115, 128, 171, 180, 184, 212, 218, 311, 323, 333, 358, 375, 380, 388, 393, 434, 440, 441, 443, 453, 459, 461, 468, 479, 485, 492, 494, 504, 531, 556, 562, 564, 565, 571, 574, 576, 579, 586, 595, 609, 618, 619, 643, 653, 686, 691, 694, 703, 713, 715, 719, 721, 723, 737, 746, 787, 799, 809, 814, 828, 945, 947, 955, 957, 975, 977, 1053, 1055, 1060, 1062, 1071, 1073, 1080, 1083, 1097, 1104, 1113, 1125, 1132, 1162, 1215, 1230 |
 | [task-views-layout.e2e.ts](task-views-layout.e2e.ts) | 2: 67, 68 | NONE. K: existing waits / direct data, focus or visibility checks retained. | 50, 62, 66, 74, 84, 88, 90, 94, 96, 101, 131, 135, 139, 142 |
-| [thread-scroll.e2e.ts](thread-scroll.e2e.ts) | 16: 79, 132, 144, 252, 260, 271, 299, 301, 322, 324, 347, 384, 425, 439, 456, 472 | 79, 271, 299, 301, 384, 425, 472. R/S: review round 1 fixes assistant width to choose an already-rendered assistant at the live tail, without scrolling the reader. Other held measurements retain assertions. | 92, 108, 125, 126, 227, 235, 243, 248, 249, 252, 268, 276, 280, 283, 299, 322, 420, 452, 457, 458 |
+| [thread-scroll.e2e.ts](thread-scroll.e2e.ts) | 16: 79, 132, 144, 252, 260, 271, 299, 301, 322, 324, 347, 384, 425, 439, 456, 472 | 79, 271, 299, 301, 384, 425, 472. R/S: review round 1 fixes assistant width to choose an already-rendered assistant at the live tail, without scrolling the reader. Other held measurements retain assertions. The approved separate held-replay regression adds actual partial/native-container readiness and pixel plus visible-row identity assertions; see the product correction below. | 92, 108, 125, 126, 227, 235, 243, 248, 249, 252, 268, 276, 280, 283, 299, 322, 420, 452, 457, 458 |
 | [tools-menu.e2e.ts](tools-menu.e2e.ts) | 0: NONE | NONE. K: existing waits / direct data, focus or visibility checks retained. | 67, 91, 135, 136 |
 | [touch-targets.e2e.ts](touch-targets.e2e.ts) | 16: 88, 99, 127, 157, 178, 182, 193, 221, 241, 279, 302, 307, 359, 380, 381, 414 | 88, 99, 127, 221, 241, 307, 359, 380, 381, 414. S: raw / first-value geometry after route, viewport, theme, density or disclosure now returns the held measurement. Existing assertions remain unchanged. | 122, 170, 178, 180, 201, 203, 211, 231, 233, 239, 254, 266, 270, 279, 283, 287, 292, 297, 311, 316, 321, 344, 358, 363, 366, 370, 394, 414, 438, 450 |
 | [variants-compare.e2e.ts](variants-compare.e2e.ts) | 1: 153 | 153. S: raw / first-value geometry after route, viewport, theme, density or disclosure now returns the held measurement. Existing assertions remain unchanged. | 119, 129, 151, 164, 166, 179, 183, 184 |
@@ -170,7 +178,9 @@ remains anchored at `35a519de`; review corrections and their current sites follo
 - `task-github-items.e2e.ts`: 117, 148, 168.
 - `task-handoff.e2e.ts`: 77, 155, 206.
 - `task-thread.e2e.ts`: 135, 136, 150, 456, 634, 637, 666, 722, 728, 738, 760, 762, 771, 773, 777, 805, 806, 816, 831, 832, 835, 836, 961, 972, 993, 1089, 1090, 1100, 1150, 1184, 1237.
-- `thread-scroll.e2e.ts`: 81, 273, 302, 385, 426, 473.
+- `thread-scroll.e2e.ts`: 90, 284, 307, 343, 354, 382, 465, 506, 553. The three new
+  regression samples at 307/343/354 hold the original visible anchor, native prefix-container
+  extent, and restored visible anchor. Native rendering precedes target box reads.
 - `touch-targets.e2e.ts`: 89, 100, 128, 222, 242, 308, 360, 381, 382, 415.
 - `variants-compare.e2e.ts`: 154.
 - `worker-conversation.e2e.ts`: 115, 201, 229, 256.
@@ -522,3 +532,95 @@ pinning, append/prepend behavior and the original 200px assertion. Do not substi
 larger height wait, lower parked offset or atomic replay fixture. Parent owns the design
 gate, subsequent red/green proof, independent review and final normal/full-load gates.
 Audit inventories/counts remain unchanged; these failed runs are not acceptance passes.
+
+
+## Approved compatible-cache correction — partial replay restoration
+
+The human answered **Continue** to the parent’s bounded product design; parent request
+`571cf980-8c01-4081-a8b0-2ee8663d71b0` explicitly records that approval. This supersedes
+the preceding historical “no implementation approved” status. The design is retained at
+worker `.ai/qa/issue-795/thread-restore-context/product-remedy-design.md`. The previous
+failed full runs remain failed results; this correction does not retroactively turn them
+into acceptance passes or establish that #795 caused the original cache lifecycle gap.
+
+The old mechanism was load-bearing for exact item-count compatibility of virtua’s opaque
+snapshot, independent run/view caches, away-from-tail restoration, live-tail following,
+intent cancellation and preserving cached heights on append/prepend/eviction. A snapshot
+accepted at the initial mount restored measured heights, but a snapshot rejected during
+partial SSE replay was never reconsidered. Waiting until fresh estimates reach the old
+pixel can show a different message, so a taller-layout wait would not preserve content.
+
+The correction retains the original per-run/view candidate in the virtual-row session.
+Saved snapshots now also carry copied ordered row identities; no opaque cache internals
+are changed. A partial compatible prefix uses native estimates until the **exact original
+count and ordered identities** return. Only the original away-from-tail arrival can then
+consume its restoration ownership and remount the virtua child once with the saved native
+cache. The route’s controls stay mounted and keep the original offset. Reader wheel,
+touch, scroll keys, scrollbar pointer, Jump, correlated-row jump or history intent cancels
+that ownership. Merely reaching the pixel through a fresh estimate does not cancel it.
+An owned partial detach retains the original complete snapshot and scroll memory,
+even if fresh estimates temporarily reach the saved pixel at their tail. Immediate
+compatible arrivals release that postponed ownership, so normal native scroll corrections
+continue to update memory; incompatible history,
+append beyond the saved count or replacement abandons deferred adoption. Immediate
+compatible caches, missing/other-view caches, live-tail following and ordinary repeated
+commits/append/prepend/eviction retain their existing behavior. No timer, configuration,
+dependency, persistent state or HTTP/wire shape is added.
+
+Source provenance and affected sites:
+
+- `src/routes/task-thread/thread-scroll.ts`: `ThreadMeasurements`,
+  `saveThreadMeasurements`, `readThreadMeasurementCandidate`, `readThreadMeasurements`;
+  retain the exact-count guard and add immutable identity compatibility.
+- `src/routes/task-thread/thread-scroller.tsx`: `useThreadScroll` original arrival,
+  intent cancellation and one-use measurement restoration ownership; `VirtualRowsSession`
+  candidate capture, exact compatible-prefix adoption and protected detach. The supported
+  `Virtualizer cache` mount prop performs one controlled child hydration.
+- `src/routes/task-thread/thread-scroller.test.tsx`: real virtua public handles seed and
+  verify cached item geometry, plus cancellation/identity/ownership and old-behavior guards.
+  All 33 pre-existing tests remain alongside 23 new real-native-cache guard cases. `thread-scroll.test.ts` adds copied-key compatibility;
+  the two pre-existing mocked-virtualizer route/shift tests remain.
+- `thread-scroll.e2e.ts`: a **separate** replay run holds real ordered EventSource frames
+  after sequence 642 (`turn_64`), while the original run/file stays unchanged. Release
+  readiness requires a committed virtual prefix and stable native container extent,
+  independent of the desired restore result. Before sampling a row, the browser checks
+  `checkVisibility({contentVisibilityAuto:true})`. The new regression keeps the original
+  `<200px` restoration coverage/budget and also asserts the same first visible row with
+  `<2px` offset difference. The original restoration test/assertions are unchanged.
+- `README.md`: explain compatible replay restoration and reader/history ownership.
+
+Worker evidence: `.ai/qa/issue-795/cache-hydration/` (all logs and immutable failure/sample
+copies retained; no CPU burners were launched during this worker phase).
+
+| Command / proof | Outcome | Evidence |
+| --- | --- | --- |
+| `npm ci` in this worktree | exit 0 before component/browser tests | `npm-ci.log` |
+| `npm test -- thread-scroller.test.tsx`, new real-virtua regression before product edits | exit 1; one regression failed / 33 existing tests passed, cached item 123 expected 180px but native fresh estimate was 40px | `component-native-red.log` |
+| `npm run test:e2e -- thread-scroll.e2e.ts -t 'same reader row'`, before product edits | exit 1; original pixel restoration timed out: saved 53818px was above returned max 50010px; 14 tests filtered, not skips added | `browser-red.log`, `browser-red-artifacts/`, `browser-red-failures/` |
+| First expanded guard matrix | exit 1; partial owned detach overwrote the complete candidate (native item 40px versus saved 180px), 51 other tests passed; then fixed | `guard-matrix-first.log` |
+| Behavior-only rollback: omit only `setHydration`, retaining APIs, metadata and ownership guards; `npm test -- thread-scroll thread-scroller` | exit 1; 3 regressions failed / 75 guards passed | `thread-scroller-behavior-rollback.tsx`, `behavior-rollback-units.log` |
+| Same behavior-only rollback; selected held-replay browser regression with `--force-rebuild` | exit 1; pixel coverage passed but visible row changed from `turn-seq-1864:user` to `turn-seq-2384:item_msg_239`; 14 tests filtered | `behavior-rollback-browser.log`, `behavior-rollback-artifacts/` |
+| Initial restored fix; `npm test -- thread-scroll thread-scroller session-transcript visual-ready transcript-measurements session-layout agent-browser-wait-value e2e-wait-discipline project-rail-ready` | exit 0; all 180 tests / 10 files passed, 8.34s | `units-final-green.log` |
+| Final guard expansion, same relevant unit command | exit 0; all 182 tests / 10 files passed, 8.20s | `units-final-ownership-green.log` |
+| Fresh prefix reaches saved pixel then leaves; new memory guard before its fix | exit 1; one regression failed / 54 tests passed: saved memory incorrectly changed to atBottom true without intent | `owned-scroll-memory-red.log` |
+| Immediate compatible arrival, normal native pixel correction; first memory guard before narrowing | exit 1; one regression failed / 55 tests passed: normal 9600px correction was incorrectly suppressed to 9000px | `immediate-memory-guard-red.log` |
+| `npm run typecheck:web`, final ownership guards | exit 0, including required service prebuild | `typecheck-final-ownership.log` |
+| First complete cache fix, `npm run test:e2e -- thread-scroll.e2e.ts --force-rebuild` | exit 0; all 15 tests passed, 53.46s; no test filter/skips. Saved/restored `turn-seq-1854:turn-time`, offset exactly -0.3125px both times | `browser-file-final-green.log`, `browser-final-artifacts/` |
+| `npm run test:e2e -- --shard=4/4`, same cache-fix build before the final two memory guards | exit 0; all 16 files / 193 tests passed, 1 existing skip, 410.82s. This is one shard context, not concurrent four-lane acceptance | `browser-shard4-context.log` |
+| Final ownership guards, `npm run test:e2e -- thread-scroll.e2e.ts --force-rebuild` | exit 0; all 15 tests passed, 54.08s, no filters/skips. Saved/restored `turn-seq-1864:user` at exactly -73.109375px both times | `browser-final-ownership-green.log`, `browser-final-ownership-artifacts/` |
+
+The initial pre-fix held prefix had **zero rendered row children**: its native container
+extent was observed, not native row measurement readiness. The rollback prefix had nine
+mounted rows. Neither proof claims skipped/unmounted rows were measured. Both actual
+result sets and geometry/anchor samples are retained without substituting another fixture
+or relaxing coverage. The original full-loaded baseline (612 passed), failed loaded-after
+rail attempt (610 passed / 2 failed), both normal restoration failures (611 passed / 1 failed)
+and diagnostic contextual results above remain historical input-revision evidence.
+
+Parent follow-up found the selection-state null guard held while the FontFaceSet reported
+`loading`; its root cause is still unproven. Later focused font follow-up passed 10 tests
+with 17 filtered. This does not erase the earlier three failures; no font readiness guard,
+assertion or timeout was changed here. Parent retains its native font evidence, owns
+independent review, and will run the complete six-command gate and another complete
+24-core loaded suite after integration. The worker focused passes are not full-suite
+acceptance claims.
