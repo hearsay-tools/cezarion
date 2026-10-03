@@ -8,13 +8,17 @@ import { fileURLToPath } from 'node:url';
 import { getRequestListener } from '@hono/node-server';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
-import { ciErrorMessage } from './errors.ts';
-import { ciWaitRequestSchema, ciWaitReceiptSchema, ciWaitErrorCodeSchema, type CiWait, type CiWaitRequest } from '@open-mercato/cezar-contract';
+import { ciErrorMessage, previewInvalidInput, previewOversized, previewRefusal } from './errors.ts';
+import { previewToolEnabled } from './tools.ts';
+import { ciWaitRequestSchema, ciWaitReceiptSchema, ciWaitErrorCodeSchema, previewServeRequestSchema, previewServeResultSchema, type CiWait, type CiWaitRequest, type PreviewServeRequest, type PreviewServeResult } from '@open-mercato/cezar-contract';
 import { jsonZodValidator } from '../server/validators.ts';
 import type { AgentRunSpec } from '../core/agent-runner.ts';
 
 type Registration = (request: CiWaitRequest, signal: AbortSignal) => Promise<CiWait>;
-type Capability = { register: Registration; lifetime: AbortController };
+/** #781: absent where no cockpit owns the run, which the route answers as `headless`. */
+/** `signal` aborts when the session's capability is revoked (cancel, stop, session end). */
+type PreviewRegistration = (request: PreviewServeRequest, signal: AbortSignal) => Promise<PreviewServeResult>;
+type Capability = { register: Registration; registerPreview?: PreviewRegistration; lifetime: AbortController };
 export type CiToolSession = { descriptor: NonNullable<AgentRunSpec['cezarTools']>; env: Record<string, string>; revoke(): void };
 const unavailable = { code: 'unavailable' as const, message: ciErrorMessage('unavailable') };
 
@@ -55,17 +59,19 @@ export class CiToolController {
     }
   }
 
-  provision(register: Registration): CiToolSession {
+  provision(register: Registration, registerPreview?: PreviewRegistration): CiToolSession {
     if (this.closed) throw new Error(unavailable.message);
     const token = randomBytes(32).toString('hex');
-    const capability = { register, lifetime: new AbortController() };
+    const capability: Capability = { register, registerPreview, lifetime: new AbortController() };
     this.capabilities.set(token, capability);
     const entry = fileURLToPath(new URL('./mcp.js', import.meta.url));
     // Source execution uses tsx already installed by the developer; installed artifacts use plain Node.
     const source = import.meta.url.endsWith('.ts');
     return {
       descriptor: { name: `cezar_ci_${randomUUID().replaceAll('-', '')}`, command: process.execPath, args: source ? ['--import', fileURLToPath(import.meta.resolve('tsx')), entry.replace(/\.js$/, '.ts')] : [entry] },
-      env: { CEZ_TOOL_TOKEN: token, CEZ_TOOL_SOCKET: this.address },
+      // #781: the session carries the preview opt-in, so its runner admits and forwards exactly
+      // the tools this session's adapter lists.
+      env: { CEZ_TOOL_TOKEN: token, CEZ_TOOL_SOCKET: this.address, ...(previewToolEnabled() ? { CEZ_PREVIEW: '1' } : {}) },
       revoke: () => { this.capabilities.delete(token); capability.lifetime.abort(); },
     };
   }
@@ -82,14 +88,21 @@ export class CiToolController {
   }
 }
 
-/** Typed private route inventory: GET holds adapter lifetime; POST registers CI only. */
+/**
+ * Typed private route inventory: GET holds adapter lifetime; POST ci-wait registers CI; POST
+ * preview-serve registers a dev server (#781).
+ */
 export function ciToolRoutes(capabilities: Map<string, Capability>) {
+  const authorized = (authorization: string | undefined) => {
+    const token = authorization?.startsWith('Bearer ') ? authorization.slice(7) : undefined;
+    const capability = token ? capabilities.get(token) : undefined;
+    return capability && !capability.lifetime.signal.aborted ? capability : undefined;
+  };
+  const unauthorized = { code: 'unauthorized' as const, message: ciErrorMessage('unauthorized') };
   return new Hono<{ Variables: { capability: Capability } }>()
     .use('/api/v1/tools/ci-wait', async (c, next) => {
-      const authorization = c.req.header('authorization');
-      const token = authorization?.startsWith('Bearer ') ? authorization.slice(7) : undefined;
-      const capability = token ? capabilities.get(token) : undefined;
-      if (!capability || capability.lifetime.signal.aborted) return c.json({ code: 'unauthorized' as const, message: ciErrorMessage('unauthorized') }, 401);
+      const capability = authorized(c.req.header('authorization'));
+      if (!capability) return c.json(unauthorized, 401);
       c.set('capability', capability);
       await next();
       // The shared middleware uses the public API error envelope. Normalize this
@@ -118,6 +131,29 @@ export function ciToolRoutes(capabilities: Map<string, Capability>) {
         const code = ciWaitErrorCodeSchema.safeParse(error && typeof error === 'object' && 'code' in error ? error.code : undefined);
         if (code.success) return c.json({ code: code.data, message: ciErrorMessage(code.data) }, 503);
         return c.json(unavailable, 503);
+      }
+    })
+    .use('/api/v1/tools/preview-serve', async (c, next) => {
+      const capability = authorized(c.req.header('authorization'));
+      if (!capability) return c.json(unauthorized, 401);
+      c.set('capability', capability);
+      await next();
+    })
+    // The agent fixes a bad call from the hint, so refusals answer 200 with a typed result. The
+    // flag gate runs before validation: off means off, whatever the body.
+    .post('/api/v1/tools/preview-serve', bodyLimit({ maxSize: 16_384, onError: c => c.json(previewOversized()) }), async (c, next) => {
+      if (!previewToolEnabled()) return c.json(previewRefusal('preview_disabled'));
+      await next();
+    }, jsonZodValidator(previewServeRequestSchema, { invalid: (c, error, input) => c.json(previewInvalidInput(error, input)) }), async c => {
+      const capability = c.get('capability');
+      if (!capability.registerPreview) return c.json(previewRefusal('headless'));
+      try {
+        const result = previewServeResultSchema.parse(await capability.registerPreview(c.req.valid('json'), capability.lifetime.signal));
+        capability.lifetime.signal.throwIfAborted();
+        return c.json(result);
+      } catch {
+        if (capability.lifetime.signal.aborted) return c.json({ code: 'capability_revoked' as const, message: ciErrorMessage('capability_revoked') }, 401);
+        return c.json(previewRefusal('unavailable'));
       }
     });
 }

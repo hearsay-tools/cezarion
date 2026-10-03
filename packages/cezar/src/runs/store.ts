@@ -8,7 +8,7 @@ import { join, resolve } from 'node:path';
 import { z } from 'zod';
 import {
   ciWaitSchema, agentInputSchema, inboxClaimSchema, delegationStateSchema, workerCreationReceiptSchema, workerCollectedResultSchema, workerResultFileSchema,
-  continuationMessageSchema,
+  continuationMessageSchema, previewServerSchema,
   runRecordSchema as contractRunRecordSchema,
 } from '@open-mercato/cezar-contract';
 import type { ArchiveFinishedScope, CiWait, ConversationState, AgentInput, InboxClaim, DelegationState, WorkerCollectedResult } from '@open-mercato/cezar-contract';
@@ -163,6 +163,8 @@ export const runRecordSchema = z.object({
   lastCiWait: ciWaitSchema.optional(),
   /** Retained recovery observation when previous CI metadata cannot be trusted. */
   lastCiWaitError: z.string().max(256).optional(),
+  /** Dev servers the agent registered with `cezar_preview_serve` (#781). Optional so old files parse. */
+  previewServers: z.array(previewServerSchema).optional(),
   /** URLs of images attached to the initial task prompt, for the thread's first bubble
    *  (#image-display) — persisted like agent screenshots, served from `/images/`. */
   taskImages: z.array(z.string()).optional(),
@@ -215,6 +217,17 @@ export const runRecordSchema = z.object({
       receiptId: z.string(),
       event: z.string(),
       githubUrl: z.string().url(),
+    })
+    .optional(),
+  /** Provenance for a task a scheduled automation launched. Its own key so a pre-schedule cezar
+   *  strips it instead of failing the whole index on a missing `githubUrl`. */
+  automationTrigger: z
+    .object({
+      automationId: z.string(),
+      automationRevision: z.number().int().positive(),
+      receiptId: z.string(),
+      trigger: z.enum(['schedule', 'catch-up', 'manual']),
+      occurrenceAt: z.string(),
     })
     .optional(),
   status: z.enum(['queued', 'running', 'waiting', 'review', 'done', 'failed', 'cancelled']),
@@ -366,6 +379,11 @@ export function parseRunRecords(raw: unknown) {
     if (row.lastCiWait !== undefined && !ciWaitSchema.safeParse(row.lastCiWait).success) {
       delete row.lastCiWait;
       row.lastCiWaitError = 'CI wait unavailable — saved observation is unreadable; register a new wait.';
+    }
+    // One unreadable registration must not evict the run, nor its readable siblings (#781).
+    if (row.previewServers !== undefined) {
+      if (Array.isArray(row.previewServers)) row.previewServers = row.previewServers.filter((entry: unknown) => previewServerSchema.safeParse(entry).success);
+      else delete row.previewServers;
     }
   }
   return z.array(runRecordSchema).safeParse(raw);

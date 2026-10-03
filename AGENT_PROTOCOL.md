@@ -717,6 +717,15 @@ settlement alone must not discard the result or start competing waits. Harness r
 R27 reproduces this sequence through every runner's native mock wire and the real
 private CI controller, then verifies CI registration succeeds after delivery.
 
+Every cezar tool comes from one list (`packages/cezar/src/ci-wait/tools.ts`, #781):
+the adapter's `tools/list` and server instructions, Pi's extension, Claude's
+generated allow-list entries, Pi's tool admission and the environment names each
+harness forwards to the adapter all read it. `cezar_preview_serve` is on that list
+only under `CEZ_PREVIEW=1`; the provisioned session environment carries the opt-in,
+and Claude, Codex and Cursor forward it explicitly because they start MCP servers
+from an environment allowlist. Harness row R35 lists the tools through every
+runner's native mock wire and the real bundled adapter, with the flag on and off.
+
 Startup and tool listing do no GitHub work. IPC failure preserves ordinary boot
 and execution, surfaces a bounded unavailable diagnostic, and never substitutes
 model polling. Explicit tool denial remains denial. Preserve existing MCP servers,

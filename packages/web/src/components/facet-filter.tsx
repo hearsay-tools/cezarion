@@ -216,13 +216,17 @@ export function SegmentedControl<T extends string>({
   value,
   options,
   onChange,
+  size = 'compact',
 }: {
   slot: string
   label: string
   /** The pressed option's value — or anything else, meaning none of them is pressed. */
   value: string
-  options: readonly { value: T; label: string }[]
+  /** `disabled` greys an option out; `title` says why. */
+  options: readonly { value: T; label: string; disabled?: boolean; title?: string }[]
   onChange: (value: T) => void
+  /** `touch` makes every option a 44 px target, for forms; `compact` is the toolbar default. */
+  size?: 'compact' | 'touch'
 }) {
   return (
     <div
@@ -241,9 +245,12 @@ export function SegmentedControl<T extends string>({
             // Like the list tabs: these re-slice one list in place, they do not switch panels.
             // `aria-pressed` is also the honest reading of a toggle that can be released.
             aria-pressed={isActive}
+            disabled={option.disabled}
+            title={option.title}
             onClick={() => onChange(option.value)}
             className={cn(
-              'flex h-6 items-center justify-center rounded-[6px] px-2.5 text-[12px] font-medium text-muted-foreground transition-colors hover:text-foreground',
+              'flex h-6 items-center justify-center rounded-[6px] px-2.5 text-[12px] font-medium text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-50',
+              size === 'touch' && 'h-11 px-4 text-[13px]',
               isActive && 'bg-card font-semibold text-foreground shadow-xs',
             )}
           >

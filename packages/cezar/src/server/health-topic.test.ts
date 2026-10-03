@@ -27,7 +27,7 @@ function stubHub() {
     registerTopic: (name, publisher) => {
       topics.set(name, publisher);
     },
-    attach: () => undefined,
+    handleUpgrade: () => undefined,
     close: () => undefined,
   };
   return { hub, topics };

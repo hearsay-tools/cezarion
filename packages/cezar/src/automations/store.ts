@@ -14,7 +14,7 @@ import {
 } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { collectSecretValues, redactDeep } from '../core/secret-redaction.ts';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import {
   automationDefinitionSchema,
   automationDefinitionsFileSchema,
@@ -36,16 +36,49 @@ const LOG_LOCK = 'automation-log.lock';
 const LOG_RECLAIM = 'automation-log.reclaim';
 const POLL_LOCK = 'automation-poll.lock';
 const POLL_RECLAIM = 'automation-poll.reclaim';
+/**
+ * Write locks for the two read-modify-write JSON files, one per file. Held only across one
+ * read+write (milliseconds), so a holder older than `WRITE_LOCK_STALE_MS` is abandoned whatever
+ * its pid says; the bounded wait outlasts that age, so a stale holder always clears in time.
+ * Never confused with the #651 polling lease: nothing acquires that lease while holding these.
+ */
+const DEFINITIONS_LOCK = 'automations.lock';
+const DEFINITIONS_RECLAIM = 'automations.reclaim';
+const STATE_LOCK = 'automation-state.lock';
+const STATE_RECLAIM = 'automation-state.reclaim';
+const WRITE_LOCK_STALE_MS = 5_000;
+const WRITE_LOCK_TIMEOUT_MS = 10_000;
 const RETENTION_MS = 90 * 24 * 60 * 60 * 1_000;
+
+/**
+ * Reservations THIS process wrote and has not settled yet, per data directory. A `reserved`
+ * receipt on disk is ambiguous: a crash leftover, or a launch still running here. Only this
+ * process can tell, and reconciliation must leave the second kind alone — a lazily built
+ * project context reconciles while the timer's launch that triggered the build is in flight.
+ * Process-wide rather than per store, so a second store opened on the same directory agrees.
+ */
+const inFlightReservations = new Map<string, Set<string>>();
 const LEASE_RECLAIM_ATTEMPTS = 1;
 
 type DefinitionsFile = ReturnType<typeof automationDefinitionsFileSchema.parse>;
 type StateFile = ReturnType<typeof automationStateFileSchema.parse>;
 
+/**
+ * The runtime state a definition write arms with it — a schedule's `nextRunAt` — computed from the
+ * definition about to be persisted and the on-disk one it replaces (`undefined` on create).
+ * Answer `undefined` to arm nothing. See `create`/`update` for why it is a parameter.
+ */
+export type AutomationArm = (
+  definition: AutomationDefinition,
+  previous: AutomationDefinition | undefined,
+) => Partial<AutomationRuntimeState> | undefined;
+
 export interface AutomationStoreOptions {
   warn?: (message: string) => void;
   now?: () => Date;
   processAlive?: (pid: number) => boolean;
+  /** How long a definitions/state write waits for the other process's write lock. Tests only. */
+  writeLockTimeoutMs?: number;
 }
 
 export class AutomationStore {
@@ -53,6 +86,8 @@ export class AutomationStore {
   private stateFile: StateFile = { version: 1, states: {} };
   private definitions = new Map<string, AutomationDefinition>();
   private warned = new Set<string>();
+  /** What `definitions`/`stateFile` were read from: see `reloadIfChanged`. */
+  private seen = '';
   private readonly now: () => Date;
   private readonly secrets = collectSecretValues();
 
@@ -77,10 +112,27 @@ export class AutomationStore {
     return this.definitions.get(id);
   }
 
+  /**
+   * `arm`, when given, writes the state that belongs to the new definition BEFORE the definition
+   * itself, under the definitions lock and after every check passed. Another process reads the
+   * definitions file and then the state file (`reload`), so it sees the old definition beside the
+   * new state, or the new pair — never the new definition beside a stale `nextRunAt` it would
+   * fire or catch up. A failed definition write puts the armed keys back.
+   */
   create(
     input: Omit<AutomationDefinition, 'id' | 'revision' | 'createdAt' | 'updatedAt'>,
     id: string = randomUUID(),
+    arm?: AutomationArm,
   ): AutomationDefinition {
+    return this.withWriteLock(DEFINITIONS_LOCK, DEFINITIONS_RECLAIM, () => this.createLocked(input, id, arm));
+  }
+
+  private createLocked(
+    input: Omit<AutomationDefinition, 'id' | 'revision' | 'createdAt' | 'updatedAt'>,
+    id: string,
+    arm: AutomationArm | undefined,
+  ): AutomationDefinition {
+    this.refreshDefinitions();
     if (this.definitions.has(id) || this.isTombstoned(id)) throw new Error('automation id unavailable');
     const now = this.now().toISOString();
     const definition = automationDefinitionSchema.parse({
@@ -90,16 +142,28 @@ export class AutomationStore {
       createdAt: now,
       updatedAt: now,
     });
-    this.definitions.set(id, definition);
-    this.persistDefinitions();
+    this.persistArmed(definition, undefined, arm, false);
     return definition;
   }
 
+  /** `arm`: as in `create`; `previous` is the definition on disk, never the caller's copy. */
   update(
     id: string,
     expectedRevision: number,
     input: Omit<AutomationDefinition, 'id' | 'revision' | 'createdAt' | 'updatedAt'>,
+    arm?: AutomationArm,
   ): AutomationDefinition {
+    // Lock order is always definitions -> state (the `setState` below); nothing takes them reversed.
+    return this.withWriteLock(DEFINITIONS_LOCK, DEFINITIONS_RECLAIM, () => this.updateLocked(id, expectedRevision, input, arm));
+  }
+
+  private updateLocked(
+    id: string,
+    expectedRevision: number,
+    input: Omit<AutomationDefinition, 'id' | 'revision' | 'createdAt' | 'updatedAt'>,
+    arm: AutomationArm | undefined,
+  ): AutomationDefinition {
+    this.refreshDefinitions();
     const current = this.definitions.get(id);
     if (!current) throw new Error('automation not found');
     if (current.revision !== expectedRevision) throw new Error('automation revision conflict');
@@ -111,14 +175,54 @@ export class AutomationStore {
       createdAt: current.createdAt,
       updatedAt: this.now().toISOString(),
     });
-    this.definitions.set(id, definition);
-    const state = this.state(id);
-    if (state) this.setState(id, { ...state, revision: definition.revision });
-    this.persistDefinitions();
+    this.persistArmed(definition, current, arm, Boolean(this.state(id)));
     return definition;
   }
 
+  /**
+   * State first, then the definition (see `create`). `bumpRevision`: a state record exists, so
+   * its `revision` follows the definition even when `arm` arms nothing.
+   */
+  private persistArmed(
+    definition: AutomationDefinition,
+    previous: AutomationDefinition | undefined,
+    arm: AutomationArm | undefined,
+    bumpRevision: boolean,
+  ): void {
+    const { id } = definition;
+    const patch = arm?.(definition, previous);
+    let before: AutomationRuntimeState | undefined;
+    if (patch || bumpRevision) {
+      this.setState(id, (current) => {
+        before = current;
+        return { ...current, ...patch, revision: definition.revision };
+      });
+    }
+    this.definitions.set(id, definition);
+    try {
+      this.persistDefinitions();
+    } catch (error) {
+      if (previous) this.definitions.set(id, previous);
+      else this.definitions.delete(id);
+      if (patch && before) {
+        const armed = before;
+        // Only the keys this write armed: a fire may have written others since.
+        this.setState(id, (current) => ({
+          ...current,
+          ...Object.fromEntries(Object.keys(patch).map((key) => [key, armed[key as keyof AutomationRuntimeState]])),
+          revision: armed.revision,
+        }));
+      }
+      throw error;
+    }
+  }
+
   delete(id: string): boolean {
+    return this.withWriteLock(DEFINITIONS_LOCK, DEFINITIONS_RECLAIM, () => this.deleteLocked(id));
+  }
+
+  private deleteLocked(id: string): boolean {
+    this.refreshDefinitions();
     if (!this.definitions.delete(id)) return false;
     this.definitionsFile.tombstones = {
       ...this.definitionsFile.tombstones,
@@ -128,13 +232,77 @@ export class AutomationStore {
     return true;
   }
 
+  /**
+   * Re-reads the definitions and state files from disk. Another cockpit on this project may have
+   * paused, edited or deleted a definition since this process loaded it; a schedule fire calls
+   * this under the lease so it never launches a definition that no longer exists on disk. An
+   * unreadable file keeps this process's last good view, as `setState` does.
+   */
+  reload(): void {
+    // Stat before reading: a write landing in between leaves a signature older than the content,
+    // which costs one extra reload later, never a missed change.
+    this.seen = this.signature();
+    this.refreshDefinitions();
+    this.stateFile = this.readJson(STATE, automationStateFileSchema, this.stateFile);
+  }
+
+  /**
+   * `reload`, but only when either file changed on disk since this store last read both. The
+   * workspace timer calls it on every wake for every known store, so another cockpit's create,
+   * edit, enable or pause reaches this process within one timer cap — even after that cockpit
+   * exited — at the price of two `stat`s. Every write here is a tmp+rename, so the inode changes
+   * on each one; mtime and size back that up. Returns whether it reloaded.
+   */
+  reloadIfChanged(): boolean {
+    if (this.signature() === this.seen) return false;
+    this.reload();
+    return true;
+  }
+
+  /** Whether this project carries the optional definitions file at all. */
+  hasDefinitionsFile(): boolean {
+    return existsSync(join(this.dataDir, DEFINITIONS));
+  }
+
+  private signature(): string {
+    return [DEFINITIONS, STATE].map((filename) => {
+      try {
+        const stat = statSync(join(this.dataDir, filename));
+        return `${stat.ino}:${stat.mtimeMs}:${stat.size}`;
+      } catch {
+        return '-';
+      }
+    }).join('|');
+  }
+
   state(id: string): AutomationRuntimeState | undefined {
     return this.stateFile.states[id];
   }
 
-  setState(id: string, state: AutomationRuntimeState): void {
-    this.stateFile.states = { ...this.stateFile.states, [id]: state };
+  /**
+   * Read-modify-write: two cockpits on one project each hold their own in-memory copy of the
+   * state file, and a write from memory alone would clobber the other's cursor or `nextRunAt`.
+   * Re-reading first merges this ONE id over whatever is on disk, so the two converge.
+   *
+   * The write for THIS id is also computed from the fresh read, not from the caller's possibly
+   * stale snapshot: `update` receives the on-disk record (or `{}` when none exists) and returns
+   * the full next record. Never close over a state read from before this call.
+   *
+   * Re-reading alone still loses a write when two PROCESSES read the same file before either
+   * renames, so the read and the write happen under the state write lock (`withWriteLock`).
+   */
+  setState(id: string, update: (current: AutomationRuntimeState) => AutomationRuntimeState): AutomationRuntimeState {
+    return this.withWriteLock(STATE_LOCK, STATE_RECLAIM, () => this.setStateLocked(id, update));
+  }
+
+  private setStateLocked(id: string, update: (current: AutomationRuntimeState) => AutomationRuntimeState): AutomationRuntimeState {
+    // An unreadable file falls back to this process's last good view, never to an empty one:
+    // writing `{ [id]: next }` alone would erase every other automation's cursor and baseline.
+    const onDisk = this.readJson(STATE, automationStateFileSchema, this.stateFile);
+    const next = update(onDisk.states[id] ?? {});
+    this.stateFile = { ...onDisk, states: { ...onDisk.states, [id]: next } };
     this.atomicJson(STATE, this.stateFile);
+    return next;
   }
 
   receipts(): AutomationReceipt[] {
@@ -149,6 +317,17 @@ export class AutomationStore {
 
   appendReceipt(receipt: AutomationReceipt): void {
     this.appendNdjson(RECEIPTS, redactDeep(automationReceiptSchema.parse(receipt), this.secrets));
+    const key = resolve(this.dataDir);
+    const pending = inFlightReservations.get(key) ?? new Set<string>();
+    if (receipt.status === 'reserved') pending.add(receipt.receiptId);
+    else pending.delete(receipt.receiptId);
+    if (pending.size) inFlightReservations.set(key, pending);
+    else inFlightReservations.delete(key);
+  }
+
+  /** This process reserved the receipt and its launch has not settled (see `inFlightReservations`). */
+  isReservationInFlight(receiptId: string): boolean {
+    return inFlightReservations.get(resolve(this.dataDir))?.has(receiptId) ?? false;
   }
 
   reserveReceipt(input: {
@@ -156,6 +335,8 @@ export class AutomationStore {
     revision: number;
     eventId: string;
     candidate?: GithubCandidate;
+    /** schedule kind: the occurrence being reserved. */
+    occurrenceAt?: string;
   }): AutomationReceipt | undefined {
     const receiptKey = `${input.automationId}:${input.eventId}`;
     if (this.latestReceipts().has(receiptKey)) return undefined;
@@ -234,6 +415,27 @@ export class AutomationStore {
       if (!lease) await new Promise<void>((resolve) => setTimeout(resolve, 10));
     }
     if (!lease) throw new Error('automation log lock is busy; retry shortly');
+    try { return operation(); }
+    finally { lease.release(); }
+  }
+
+  /**
+   * Synchronous sibling of `withLogLease` for the read-modify-write JSON files: the callers are
+   * synchronous, so the wait sleeps the thread (`Atomics.wait`) instead of yielding. Contention is
+   * one other process's millisecond write, so the wait is short in practice; past the bound it
+   * throws rather than write unserialized and lose the other process's keys.
+   */
+  private withWriteLock<T>(lockName: string, reclaimName: string, operation: () => T): T {
+    mkdirSync(this.dataDir, { recursive: true });
+    const path = join(this.dataDir, lockName);
+    const guardPath = join(this.dataDir, reclaimName);
+    const deadline = Date.now() + (this.options.writeLockTimeoutMs ?? WRITE_LOCK_TIMEOUT_MS);
+    let lease = this.tryAcquireLease(path, guardPath, WRITE_LOCK_STALE_MS, 0, false);
+    while (!lease && Date.now() < deadline) {
+      Atomics.wait(SLEEP, 0, 0, 2);
+      lease = this.tryAcquireLease(path, guardPath, WRITE_LOCK_STALE_MS, 0, false);
+    }
+    if (!lease) throw new Error(`automation ${lockName} is busy; retry shortly`);
     try { return operation(); }
     finally { lease.release(); }
   }
@@ -352,6 +554,7 @@ export class AutomationStore {
 
   private load(): void {
     mkdirSync(this.dataDir, { recursive: true });
+    this.seen = this.signature();
     this.loadDefinitions();
     this.stateFile = this.readJson(STATE, automationStateFileSchema, {
       version: 1,
@@ -360,15 +563,33 @@ export class AutomationStore {
   }
 
   private loadDefinitions(): void {
-    this.definitionsFile = this.readJson(DEFINITIONS, automationDefinitionsFileSchema, {
+    this.adoptDefinitions(this.readJson(DEFINITIONS, automationDefinitionsFileSchema, {
       version: 1,
       automations: [],
-    });
-    for (const raw of this.definitionsFile.automations) {
+    }));
+  }
+
+  private adoptDefinitions(file: DefinitionsFile): void {
+    const definitions = new Map<string, AutomationDefinition>();
+    for (const raw of file.automations) {
       const parsed = automationDefinitionSchema.safeParse(raw);
-      if (parsed.success) this.definitions.set(parsed.data.id, parsed.data);
+      if (parsed.success) definitions.set(parsed.data.id, parsed.data);
       else this.warnOnce('definitions', 'Ignored an invalid GitHub automation definition.');
     }
+    this.definitionsFile = file;
+    this.definitions = definitions;
+  }
+
+  /**
+   * The definitions half of `reload`. Every definitions write starts here: another cockpit on
+   * this project may have created, edited or deleted a definition since this process read the
+   * file, and writing the whole list from a stale view would revert that edit or resurrect that
+   * deletion. Re-reading first makes the revision check, the not-found check and the tombstone
+   * check run against disk, and the write carries every other process's definitions along.
+   */
+  private refreshDefinitions(): void {
+    const definitions = this.readJson(DEFINITIONS, automationDefinitionsFileSchema, this.definitionsFile);
+    if (definitions !== this.definitionsFile) this.adoptDefinitions(definitions);
   }
 
   private persistDefinitions(): void {
@@ -462,6 +683,8 @@ export class AutomationStore {
     this.options.warn?.(message);
   }
 }
+
+const SLEEP = new Int32Array(new SharedArrayBuffer(4));
 
 function readLeasePid(path: string): number | undefined {
   try {

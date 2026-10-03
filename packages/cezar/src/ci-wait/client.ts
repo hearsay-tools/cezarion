@@ -1,5 +1,6 @@
 import { request } from 'node:http';
-import { ciWaitRequestSchema, ciWaitReceiptSchema, ciWaitErrorSchema, type CiWaitReceipt } from '@open-mercato/cezar-contract';
+import { previewRefusal } from './errors.ts';
+import { ciWaitRequestSchema, ciWaitReceiptSchema, ciWaitErrorSchema, previewServeResultSchema, type CiWaitReceipt, type PreviewServeResult } from '@open-mercato/cezar-contract';
 
 const UNAVAILABLE = 'CI tool unavailable: the owning session is closed or the private IPC connection failed.';
 export async function callCiWait(input: unknown, env: NodeJS.ProcessEnv = process.env): Promise<CiWaitReceipt> {
@@ -27,6 +28,33 @@ export async function callCiWait(input: unknown, env: NodeJS.ProcessEnv = proces
     req.setTimeout(15000, () => req.destroy(new Error(UNAVAILABLE)));
     req.on('error', () => reject(new Error(UNAVAILABLE)));
     req.end(JSON.stringify(parsed.data));
+  });
+}
+
+/**
+ * #781: posts the arguments unparsed, so the server names the failing field in its hint. Every
+ * transport failure, refusal or unreadable answer becomes the typed `unavailable` result; this
+ * never throws.
+ */
+export function callPreviewServe(input: unknown, env: NodeJS.ProcessEnv = process.env): Promise<PreviewServeResult> {
+  const unavailable = previewRefusal('unavailable');
+  const socketPath = env.CEZ_TOOL_SOCKET; const token = env.CEZ_TOOL_TOKEN;
+  if (!socketPath || !token) return Promise.resolve(unavailable);
+  return new Promise(resolve => {
+    const req = request({ socketPath, path: '/api/v1/tools/preview-serve', method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' } }, response => {
+      const chunks: Buffer[] = []; let bytes = 0;
+      response.on('data', (chunk: Buffer) => { bytes += chunk.length; if (bytes > 32768) req.destroy(); else chunks.push(chunk); });
+      response.on('error', () => resolve(unavailable));
+      response.on('end', () => {
+        try {
+          const result = previewServeResultSchema.safeParse(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+          resolve(response.statusCode === 200 && result.success ? result.data : unavailable);
+        } catch { resolve(unavailable); }
+      });
+    });
+    req.setTimeout(15000, () => req.destroy());
+    req.on('error', () => resolve(unavailable));
+    req.end(JSON.stringify(input ?? null));
   });
 }
 

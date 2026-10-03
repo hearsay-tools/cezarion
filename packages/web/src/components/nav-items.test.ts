@@ -89,8 +89,8 @@ describe('NAV_ITEMS', () => {
 
 /** The gates: the GitHub item exists exactly while health reports the forge driver (R6 Step 1.1),
  *  the Inbox item exactly while it reports the opt-in `capabilities.followups` (#471), and the
- *  Automations item exactly while it reports a forge AND the opt-in `capabilities.automations`
- *  (#801). Each gate owns ONLY its own item, and all default to absent while health is unknown. */
+ *  Automations item exactly while it reports the opt-in `capabilities.automations` (#801; no forge
+ *  needed since schedules, #766). Each gate owns ONLY its own item, and all default to absent while health is unknown. */
 describe('visibleNavItems', () => {
   const labelsOf = (opts?: Parameters<typeof visibleNavItems>[0]) =>
     visibleNavItems(opts).map((item) => item.label)
@@ -99,11 +99,13 @@ describe('visibleNavItems', () => {
     expect(visibleNavItems({ forge: true, inbox: true, automations: true })).toEqual(NAV_ITEMS)
   })
 
-  it('without a forge, the GitHub AND Automations items drop out', () => {
+  // A schedule needs no GitHub remote (#766), so a forge-less repo keeps the Automations item.
+  it('without a forge, only the GitHub item drops out; Automations stays', () => {
     expect(labelsOf({ forge: false, inbox: true, automations: true })).toEqual([
       'Tasks',
       'Inbox',
       'Git',
+      'Automations',
       'Skills',
       'Workflows',
       'Settings',
@@ -134,8 +136,8 @@ describe('visibleNavItems', () => {
     ])
   })
 
-  // The two gates on that one item are ANDed: a forge alone does not resurrect it, which is the
-  // whole point of #801 — every project with a GitHub remote used to see the tab.
+  // The opt-in is the item's only gate: a forge alone does not resurrect it, which is the whole
+  // point of #801 — every project with a GitHub remote used to see the tab.
   it('a forge alone does not bring Automations back', () => {
     expect(labelsOf({ forge: true, inbox: false })).not.toContain('Automations')
   })

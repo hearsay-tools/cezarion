@@ -172,6 +172,13 @@ async function respond(userText, imageCount, uuid) {
     emit({ type: 'result', subtype: 'success', result: text, usage: { input_tokens: 20, output_tokens: 10 } });
     return;
   }
+  if (!userText.includes('[cez-namer]') && userText.includes('mock:preview-serve')) {
+    const { previewPrompt } = await import('./mock-ci-tool.mjs');
+    const text = await previewPrompt('claude', process.argv.slice(2), userText);
+    emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } });
+    emit({ type: 'result', subtype: 'success', result: text, usage: { input_tokens: 20, output_tokens: 10 } });
+    return;
+  }
   turn += 1;
   await sleep(250);
   // `mock:done` anywhere in the message → the reply ends with the CEZ:DONE

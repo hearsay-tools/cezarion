@@ -78,7 +78,7 @@ it('prewarms Cursor on the live path and publishes completion to both transports
     repoRoot: root, store: RunStore.open(join(root, '.ai/cezar')), manager: {} as RunManager,
     version: 'test', modelCatalog: catalog, workspaceEvents: events,
     providerAuth: new ProviderAuthService({ runCommand: async () => ({ stdout: '', stderr: '', exitCode: 1 }) }),
-    socketHub: { registerTopic: (name, topic) => { topics.set(name, topic); }, attach: () => {}, close: () => {} },
+    socketHub: { registerTopic: (name, topic) => { topics.set(name, topic); }, handleUpgrade: () => {}, close: () => {} },
   });
   expect(discover).toHaveBeenCalledOnce();
   const publish = vi.fn();
@@ -107,7 +107,7 @@ it('a Cursor topic snapshot does not wait on an obsolete discovery generation', 
   const topics = new Map<string, TopicPublisher>();
   build(catalog, {
     providerAuth: new ProviderAuthService({ runCommand: async () => ({ stdout: '', stderr: '', exitCode: 1 }) }),
-    socketHub: { registerTopic: (name, topic) => { topics.set(name, topic); }, attach: () => {}, close: () => {} },
+    socketHub: { registerTopic: (name, topic) => { topics.set(name, topic); }, handleUpgrade: () => {}, close: () => {} },
   });
   expect(await topics.get('models:cursor')!.snapshot()).toMatchObject({ source: 'unavailable' });
   catalog.invalidate('cursor');
@@ -127,7 +127,7 @@ it.each([false, true])('publishes completed availability without a health subscr
   const app = build(undefined, {
     workspaceEvents: events,
     providerAuth: new ProviderAuthService({ runCommand: async () => ({ stdout: '', stderr: '', exitCode: 1 }) }),
-    socketHub: { registerTopic: () => {}, attach: () => {}, close: () => {} },
+    socketHub: { registerTopic: () => {}, handleUpgrade: () => {}, close: () => {} },
   });
   if (!early) {
     expect(await (await apiRequest(app, '/api/v1/health')).json()).toMatchObject({ checks: [] });

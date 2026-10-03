@@ -248,9 +248,11 @@ export type WorkerNoMaterializationProof = (workspace: WorkerWorkspace) => boole
 
 /** Checked cleanup only. Caller must first persist destruction intent and prove termination.
  * The private checkpoint survives removal of the linked Git directory and records
- * the exact ref/log identity whose compare-and-swap deletion may be retried. */
+ * the exact ref/log identity whose compare-and-swap deletion may be retried.
+ * `beforeRemove` runs once every check has passed, right before git removes the checkout: call
+ * this through `releaseThenRemoveOwnedWorkspace` so the worker's preview goes first (#781). */
 export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorkspace, neverMaterialized?: WorkerNoMaterializationProof,
-  assertCurrent?: () => void): Promise<WorkerDestroyResult> {
+  assertCurrent?: () => void, beforeRemove?: () => Promise<void>): Promise<WorkerDestroyResult> {
   let remaining: Array<'worktree' | 'branch'> = ['worktree', 'branch'];
   let provisioned = false;
   const result = (): WorkerDestroyResult => ({ workerId: value.ownerRunId, state: remaining.length ? 'incomplete' : 'complete', remaining,
@@ -307,6 +309,8 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
         if (checkpoint && (checkpoint.sha !== current.sha || !same(checkpoint.logFile, current.log.file) || checkpoint.logHash !== hash(current.log.content))) return result();
         checkpoint ??= { workspace, gitDir: receipt.gitDir, sha: current.sha, logFile: current.log.file, logHash: hash(current.log.content), phase: 'prepared' };
         await writeCleanup(checkpointPath, checkpoint, assertCurrent);
+        assertCurrent?.();
+        await beforeRemove?.();
         assertCurrent?.();
         const removed = await mutationGit(repoRoot, ['worktree', 'remove', '--force', workspace.path]);
         if (!removed.ok) return result();

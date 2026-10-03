@@ -391,7 +391,7 @@ describe('the global settings area (/settings/global)', () => {
       renderAt(`/p/${BOOT}/${path}`)
       expect(currentPathname()).toBe(`/p/${BOOT}/${path}`)
       expect(routeName()).toBe('automations')
-      expect(await screen.findByText('GitHub automations are off')).not.toBeNull()
+      expect(await screen.findByText('Automations are off')).not.toBeNull()
       expect(screen.getByText(/CEZ_AUTOMATIONS=1/)).not.toBeNull()
     })
   }
@@ -404,7 +404,7 @@ describe('the global settings area (/settings/global)', () => {
     expect(routeName()).toBe('automations')
     expect(screen.getByText('Loading automations…')).not.toBeNull()
     expect(document.querySelector('#automation-name')).toBeNull()
-    expect(screen.queryByText('GitHub automations are off')).toBeNull()
+    expect(screen.queryByText('Automations are off')).toBeNull()
   })
 
   it('omits the Projects route when single-project mode is active', () => {

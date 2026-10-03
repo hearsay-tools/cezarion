@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import type { AgentEvent, AgentRunResult, AgentRunner, AgentRunSpec, AgentRunSpecSupport, AgentSession, AgentToolCallRecord, ContentBlock, InputDelivery, SessionOptions } from './agent-runner.ts';
 import { prependSystemPrompt, trackChildExit } from './agent-runner.ts';
 import { buildChildEnv } from './agent-env.ts';
+import { cezarToolEnvNames } from '../ci-wait/tools.ts';
 import { parseAskMarker, parseAskRequest, type AskQuestion } from './ask.ts';
 import { readNdjson } from './ndjson.ts';
 import { boundOutputDrainAfterExit, AUTO_END_DELAY_MS, DEFAULT_RUN_TIMEOUT_MS, EOF_TERM_GRACE_MS, EOF_KILL_GRACE_MS } from './runner-runtime.ts';
@@ -321,7 +322,7 @@ class CursorSession implements AgentSession {
       // Forward only this capability; the descriptor itself remains secret-free.
       mcpServers: this.spec.cezarTools ? [{
         ...this.spec.cezarTools,
-        env: ['CEZ_TOOL_TOKEN', 'CEZ_TOOL_SOCKET'].flatMap(name =>
+        env: cezarToolEnvNames(this.spec.env ?? {}).flatMap(name =>
           this.spec.env?.[name] ? [{ name, value: this.spec.env[name] }] : []),
       }] : [],
       ...(resume ? { sessionId: this.spec.sessionId } : {}),

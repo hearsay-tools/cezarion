@@ -1191,3 +1191,82 @@ describe('reduceThread — task webhook lines (#589)', () => {
     ])
   })
 })
+
+describe('reduceThread — preview servers (#781)', () => {
+  const server = (extra: Record<string, unknown> = {}) => ({
+    port: 5173,
+    command: 'npm run dev',
+    label: 'web',
+    registeredAt: '2026-10-02T10:00:00.000Z',
+    answeredAtRegistration: false,
+    ...extra,
+  })
+  const previewEntries = (events: RunEvent[]) =>
+    reduceThread(events).turns.flatMap((turn) => turn.items).filter((item) => item.kind === 'preview-server')
+
+  it('folds registration, starting and up into one entry at the registration position', () => {
+    const { turns } = reduceThread([
+      line(1, 'user-message', { text: 'start the app' }),
+      line(2, 'note', { message: 'before' }),
+      line(3, 'preview.server-registered', { server: server() }),
+      line(4, 'note', { message: 'after' }),
+      line(5, 'preview.server-state', { port: 5173, state: 'starting' }),
+      line(6, 'preview.server-state', { port: 5173, state: 'up' }),
+    ])
+    const items = turns.flatMap((turn) => turn.items)
+    expect(items.map((item) => item.kind)).toEqual(['note', 'preview-server', 'note'])
+    const entry = items[1] as Extract<ThreadEntry, { kind: 'preview-server' }>
+    expect(entry.state).toBe('up')
+    expect(entry.server.port).toBe(5173)
+    expect(entry.id).toBe('preview-server:5173')
+  })
+
+  it('starts in registered and carries exit code and stop reason', () => {
+    const [registered] = previewEntries([line(1, 'preview.server-registered', { server: server() })])
+    expect(registered).toMatchObject({ kind: 'preview-server', state: 'registered' })
+    const [exited] = previewEntries([
+      line(1, 'preview.server-registered', { server: server() }),
+      line(2, 'preview.server-state', { port: 5173, state: 'exited', exitCode: 1 }),
+    ])
+    expect(exited).toMatchObject({ state: 'exited', exitCode: 1 })
+    const [stopped] = previewEntries([
+      line(1, 'preview.server-registered', { server: server() }),
+      line(2, 'preview.server-state', { port: 5173, state: 'stopped', reason: 'idle' }),
+    ])
+    expect(stopped).toMatchObject({ state: 'stopped', reason: 'idle' })
+  })
+
+  it('keeps one entry per port and drops stale fields when a state moves on', () => {
+    const entries = previewEntries([
+      line(1, 'preview.server-registered', { server: server() }),
+      line(2, 'preview.server-registered', { server: server({ port: 3000, label: 'api' }) }),
+      line(3, 'preview.server-state', { port: 5173, state: 'exited', exitCode: 1 }),
+      line(4, 'preview.server-state', { port: 5173, state: 'starting' }),
+    ])
+    expect(entries).toHaveLength(2)
+    expect(entries[0]).toMatchObject({ state: 'starting' })
+    expect(entries[0]).not.toHaveProperty('exitCode')
+    expect(entries[1]).toMatchObject({ state: 'registered', server: { port: 3000 } })
+  })
+
+  it('a re-registration of the same port replaces the card at the new position', () => {
+    const { turns } = reduceThread([
+      line(1, 'preview.server-registered', { server: server() }),
+      line(2, 'preview.server-state', { port: 5173, state: 'up' }),
+      line(3, 'note', { message: 'between' }),
+      line(4, 'preview.server-registered', { server: server({ command: 'vite' }) }),
+    ])
+    const items = turns.flatMap((turn) => turn.items)
+    expect(items.map((item) => item.kind)).toEqual(['note', 'preview-server'])
+    expect(items[1]).toMatchObject({ state: 'registered', server: { command: 'vite' } })
+  })
+
+  it('ignores malformed registrations and state events for unknown ports', () => {
+    expect(previewEntries([
+      line(1, 'preview.server-registered', { server: { port: 'x' } }),
+      line(2, 'preview.server-state', { port: 5173, state: 'up' }),
+      line(3, 'preview.server-registered', { server: server() }),
+      line(4, 'preview.server-state', { port: 5173, state: 'bogus' }),
+    ])).toMatchObject([{ state: 'registered' }])
+  })
+})

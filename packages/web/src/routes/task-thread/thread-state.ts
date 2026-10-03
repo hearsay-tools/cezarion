@@ -3,10 +3,14 @@ import {
   toolDisplay,
   agentInputEventSchema,
   conversationMessageEventSchema,
+  previewServerSchema,
+  previewServerStateSchema,
   requestOutcomeEventSchema,
   type ConversationMessage,
   type PlanEntry,
   type PlanStatus,
+  type PreviewServer,
+  type PreviewServerState,
   type RequestOutcome,
   type StopReason,
   type UiAskQuestion,
@@ -115,9 +119,25 @@ export interface ThreadProviderAuthRequired {
   authFailureId: string
 }
 
+/**
+ * A dev server the agent registered with `cezar_preview_serve` (#781). One entry per port, placed at
+ * the registration event (right after the tool call) and kept current by the later
+ * `preview.server-state` events, so the card is right while the pane is closed and in history.
+ */
+export interface ThreadPreviewServer {
+  kind: 'preview-server'
+  id: string
+  server: PreviewServer
+  state: PreviewServerState
+  /** When `state` was last set: the registration, or the latest state event. */
+  stateAt?: string
+  exitCode?: number
+  reason?: 'user' | 'idle'
+}
+
 /** Event time belongs to the web transcript, not the backend UiItem protocol. */
 export type ThreadMessage = Extract<UiItem, { kind: 'message' }> & { ts?: string }
-export type ThreadEntry = Exclude<UiItem, { kind: 'message' }> | ThreadMessage | ThreadNote | ThreadImage | ThreadAsk | ThreadProviderAuthRequired | ThreadConversationMessage
+export type ThreadEntry = Exclude<UiItem, { kind: 'message' }> | ThreadMessage | ThreadNote | ThreadImage | ThreadAsk | ThreadProviderAuthRequired | ThreadConversationMessage | ThreadPreviewServer
 
 export interface ThreadTurn {
   /** Stable source-derived render key. The opening event sequence survives prepended pages;
@@ -520,6 +540,8 @@ export function reduceThread(events: RunEvent[], options: ThreadReduceOptions = 
     currentTurn().entries.push({ origin: 'meta', entry })
     return entry
   }
+  /** The live card per registered port (#781): state events mutate it, a re-registration replaces it. */
+  const previewByPort = new Map<number, { turn: DraftTurn; draft: DraftEntry }>()
   /** Whether a `handoff` event already turned notify on, so a later one reads as a note (#589). */
   let handedOff = false
   for (const event of events) {
@@ -550,6 +572,44 @@ export function reduceThread(events: RunEvent[], options: ThreadReduceOptions = 
         const payload = (event.payload ?? {}) as { status?: unknown }
         const text = `Webhook (dry run, nothing sent): ${str(event.event) ?? 'delivery'}${str(payload.status) ? ` · ${str(payload.status)}` : ''}`
         currentTurn().entries.push({ origin: 'meta', entry: { kind: 'note', id: `v1:${event.seq}`, text, tone: 'dim' } })
+        break
+      }
+      // ---- live preview (#781) ----------------------------------------------------------
+      case 'preview.server-registered': {
+        const server = previewServerSchema.safeParse(event.server)
+        if (!server.success) break
+        const previous = previewByPort.get(server.data.port)
+        if (previous) previous.turn.entries = previous.turn.entries.filter((e) => e !== previous.draft)
+        const turn = currentTurn()
+        const draft: DraftEntry = {
+          origin: 'meta',
+          entry: {
+            kind: 'preview-server',
+            id: `preview-server:${server.data.port}`,
+            server: server.data,
+            state: 'registered',
+            stateAt: event.ts,
+          },
+        }
+        turn.entries.push(draft)
+        previewByPort.set(server.data.port, { turn, draft })
+        break
+      }
+      case 'preview.server-state': {
+        const state = previewServerStateSchema.safeParse(event.state)
+        const live = typeof event.port === 'number' ? previewByPort.get(event.port) : undefined
+        if (!state.success || !live || live.draft.entry.kind !== 'preview-server') break
+        const { server, id } = live.draft.entry
+        // Rebuilt, not patched: a field of the old state (an exit code) must not outlive it.
+        live.draft.entry = {
+          kind: 'preview-server',
+          id,
+          server,
+          state: state.data,
+          stateAt: event.ts,
+          ...(typeof event.exitCode === 'number' ? { exitCode: event.exitCode } : {}),
+          ...(event.reason === 'user' || event.reason === 'idle' ? { reason: event.reason } : {}),
+        }
         break
       }
       // ---- turn boundaries ------------------------------------------------------------

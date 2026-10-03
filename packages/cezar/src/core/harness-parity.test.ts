@@ -517,6 +517,8 @@ const CONTROL_CRITERIA = [
   { id: 'R32', scenario: 'baseline' },
   { id: 'R33', scenario: 'baseline' },
   { id: 'R34', scenario: 'baseline' },
+  // The shared cezar tool list, `describe('harness parity — cezarTools list behind CEZ_PREVIEW')` (#781).
+  { id: 'R35', scenario: 'baseline' },
 ] as const;
 
 /**
@@ -1590,6 +1592,40 @@ describe('harness parity — AgentRunSpec support declarations', () => {
         });
       }
     });
+  }
+});
+
+// #781: the `cezarTools` cell, live. One shared cezar tool list feeds every
+// runner's own wire (Claude's MCP config and generated allow-list entry, Codex
+// and Cursor forwarded env, OpenCode's runtime config, Pi's extension and tool
+// admission), and each mock lists the tools through the real bundled adapter.
+// `cezar_preview_serve` is there under `CEZ_PREVIEW=1` exactly, and nowhere else.
+describe('harness parity — cezarTools list behind CEZ_PREVIEW', () => {
+  const wait = { id: '11111111-1111-4111-8111-111111111111', generation: 'gen', turnId: 'turn', timeoutSeconds: 1800, prUrl: 'https://github.com/owner/repo/pull/1', repository: 'owner/repo', prNumber: 1, headSha: 'a'.repeat(40), registeredAt: '2026-09-22T00:00:00.000Z', deadline: '2026-09-22T00:30:00.000Z', phase: 'registered' as const };
+  for (const backend of RUNNER_IDS) for (const enabled of [true, false]) {
+    it(`${backend} R35 ${enabled ? 'exposes' : 'hides'} cezar_preview_serve with CEZ_PREVIEW ${enabled ? 'on' : 'off'}`, async () => {
+      vi.stubEnv('CEZ_PREVIEW', enabled ? '1' : '');
+      const { CiToolController } = await import('../ci-wait/controller.ts');
+      const controller = await CiToolController.start();
+      const dir = mkdtempSync(join(tmpdir(), 'cez-tools-list-'));
+      try {
+        const session = controller.provision(async () => wait);
+        const obs = await driveSeam(backend, 'baseline', { spec: { cezarTools: session.descriptor, allowedTools: ['Read'], env: { ...session.env, CEZ_MOCK_ARGS_FILE: join(dir, 'wire'), CEZ_MOCK_CI_PR: wait.prUrl, CEZ_MOCK_CI_RESULT: join(dir, 'result'), CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' } } });
+        expect(obs.v1.filter((event) => event.type === 'error')).toEqual([]);
+        const expected = enabled ? ['cezar_wait_for_ci', 'cezar_preview_serve'] : ['cezar_wait_for_ci'];
+        expect(JSON.parse(readFileSync(join(dir, 'result'), 'utf8')).names).toEqual(expected);
+        const argv: string[] = JSON.parse(readFileSync(join(dir, 'wire'), 'utf8').trim().split('\n')[0]!);
+        if (backend === 'claude') {
+          const allowed = argv[argv.indexOf('--allowedTools') + 1]!.split(',');
+          expect(allowed.filter((name) => name.startsWith(`mcp__${session.descriptor.name}__`))).toEqual(expected.map((name) => `mcp__${session.descriptor.name}__${name}`));
+        }
+        if (backend === 'pi') expect(argv[argv.indexOf('--tools') + 1]!.split(',').filter((name) => name.startsWith('cezar_'))).toEqual(expected);
+      } finally {
+        vi.unstubAllEnvs();
+        await controller.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }, 30_000);
   }
 });
 
