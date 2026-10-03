@@ -15,7 +15,7 @@ command lands. The seam closes that gap in two places:
 | Primitive | What it waits for | What it returns |
 | --- | --- | --- |
 | `click` / `hover` / `fill` | The selector is attached with a non-zero box (`wait <selector>`, #405) | nothing |
-| `setViewport` | An animation frame at the new size, so every `matchMedia` listener has run and a view that switches tree at a breakpoint has switched (#794) | nothing |
+| `setViewport` | An animation frame at the new size, so every native `matchMedia`/`resize` listener has run and its tree switch has committed (#794). `ResizeObserver`-driven state may still lag: wait on the DOM you read | nothing |
 | `waitForFunction(js)` | A predicate becomes truthy | nothing — **the read that follows is a second call** |
 | `waitForValue(js, matcher?)` | An expression yields a value the matcher accepts (#409) | **that sample** |
 | `waitForStable(js, { holdMs })` | The matcher holds across consecutive polls spanning `holdMs` (#415). `waitForValue` is this with `holdMs: 0`. | **the held sample** |

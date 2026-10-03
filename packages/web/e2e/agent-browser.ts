@@ -872,8 +872,12 @@ export class AgentBrowser {
    *
    *  So this waits for one animation frame at the new size, read in the same sample. Media query
    *  listeners run before animation-frame callbacks in a rendering update, and React commits a
-   *  `change` event's state update in a microtask after the listener, so once the frame callback
-   *  runs, every view that switches tree on the breakpoint has switched. */
+   *  `change` event's state update in a microtask after the listener (React 19 gives `change` and
+   *  `resize` discrete priority), so once the frame callback runs, every view that switches tree
+   *  from a native `matchMedia` or `resize` listener has switched. It does NOT settle state fed by
+   *  a `ResizeObserver` (picker-pill prefixes, the quick list's overflow, GitHub's stacked panes):
+   *  observers run after frame callbacks and update at default priority, so a spec reading those
+   *  still waits on the DOM it reads. */
   setViewport(width: number, height: number): void {
     this.run(['set', 'viewport', String(width), String(height)])
     this.waitForValue<{ width: number; height: number } | null>(
