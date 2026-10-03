@@ -529,6 +529,18 @@ describe('GitHub automation API', () => {
     }
   }, 30_000);
 
+  it('the list tallies count schedule launches as launched and failed launches as errors', async () => {
+    const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
+    const created = ((await (await apiRequest(app({ automationStore }), '/api/v1/automations', json(scheduleInput))).json()) as any).automation;
+    for (const result of ['launched', 'manual', 'catch-up', 'failed', 'error', 'rate-limited', 'duplicate', 'no-match'] as const) {
+      await automationStore.appendLog({ automationId: created.id, revision: 1, result });
+    }
+    const response = await apiRequest(app({ automationStore }), '/api/v1/automations');
+    expect(response.status).toBe(200);
+    const listed = ((await response.json()) as any).automations.find((row: { id: string }) => row.id === created.id);
+    expect(listed.counts).toEqual({ matches: 2, launched: 3, duplicates: 1, errors: 3 });
+  });
+
   it('accepts preview as an automation-log result filter', async () => {
     const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
     await automationStore.appendLog({

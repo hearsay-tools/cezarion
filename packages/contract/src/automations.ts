@@ -191,9 +191,13 @@ export type AutomationLogRecord = z.infer<typeof automationLogRecordSchema>;
 
 /** The list view's per-automation tallies, counted over that automation's last 100 log rows. */
 export const automationCountsSchema = z.object({
+  /** GitHub candidates that matched a filter: `launched` + `duplicate` rows. */
   matches: z.number(),
+  /** Tasks launched: `launched`, plus a schedule's `manual` (Run now) and `catch-up` rows. */
   launched: z.number(),
+  /** `duplicate` rows: a match whose receipt already existed, so nothing launched. */
   duplicates: z.number(),
+  /** `error` and `rate-limited` rows, plus a schedule's `failed` launches. */
   errors: z.number(),
 });
 export type AutomationCounts = z.infer<typeof automationCountsSchema>;

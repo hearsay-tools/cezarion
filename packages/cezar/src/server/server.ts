@@ -3518,9 +3518,9 @@ export function createApp(deps: ServerDeps) {
           ...(nextRunAt ? { nextRunAt } : {}),
           counts: {
             matches: logs.filter((row) => row.result === 'launched' || row.result === 'duplicate').length,
-            launched: logs.filter((row) => row.result === 'launched').length,
+            launched: logs.filter((row) => row.result === 'launched' || row.result === 'manual' || row.result === 'catch-up').length,
             duplicates: logs.filter((row) => row.result === 'duplicate').length,
-            errors: logs.filter((row) => row.result === 'error' || row.result === 'rate-limited').length,
+            errors: logs.filter((row) => row.result === 'error' || row.result === 'rate-limited' || row.result === 'failed').length,
           },
         };
       });
