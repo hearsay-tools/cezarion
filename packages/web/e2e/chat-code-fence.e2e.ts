@@ -101,9 +101,26 @@ interface Line { text: string; top: number; height: number; left: number }
 interface Measure { lines: Line[]; lineHeight: number; codeLeft: number }
 
 /** Every fence under `scope`, as the rendered rows: top of each source line's box and the left of
- *  its first non-space glyph (a Range, so a blank line reports no left). */
-const measure = (scope: string): Measure[] => browser.evaluate(`(() => [...document.querySelectorAll(${JSON.stringify(scope + ' [data-streamdown="code-block"]')})].map((block) => {
+ *  its first non-space glyph (a Range, so a blank line reports no left).
+ *
+ *  Each fence is sampled only once the browser is rendering it (#758). Thread rows carry
+ *  `content-visibility: auto`, and at 360px the thread sticks to its bottom with every fence
+ *  above the fold: all eight `code` elements answered `checkVisibility({ contentVisibilityAuto:
+ *  true })` false at measure time in every probe run. Read right after `applyContrastQaVariant`
+ *  under CPU load (6 of 15 focused runs red), the first line's box inside that skipped subtree
+ *  came back `0/0/0` while its own child span sat at -865px and line 2 at -847.6px, which is the
+ *  `-847.59375` row step the issue reports. So the expression scrolls the fence into view and
+ *  answers `null` until a poll finds it already rendered by the page's own lifecycle, and the
+ *  sample `waitForValue` returns is the rendered one. */
+const measure = (scope: string): Measure[] => {
+  const selector = JSON.stringify(scope + ' [data-streamdown="code-block"]')
+  const count = browser.waitForValue<number>(`document.querySelectorAll(${selector}).length || null`)
+  return Array.from({ length: count }, (_, index) => browser.waitForValue<Measure>(`(() => {
+  const block = document.querySelectorAll(${selector})[${index}]
   const code = block.querySelector('code')
+  const rendered = code.checkVisibility({ contentVisibilityAuto: true })
+  block.scrollIntoView({ block: 'center' })
+  if (!rendered) return null
   const lineHeight = parseFloat(getComputedStyle(code).lineHeight)
   const lines = [...code.children].map((span) => {
     const box = span.getBoundingClientRect()
@@ -119,7 +136,8 @@ const measure = (scope: string): Measure[] => browser.evaluate(`(() => [...docum
     return { text, top: box.top, height: box.height, left }
   })
   return { lines, lineHeight, codeLeft: code.getBoundingClientRect().left }
-}))()`) as Measure[]
+})()`))
+}
 
 function expectSourceLines(blocks: Measure[], label: string): void {
   expect(blocks, label).toHaveLength(ALL.length)
