@@ -5,7 +5,7 @@ Generated from `ledger.yaml` by `node .github/scripts/upstream-scan.cjs render`.
 - Upstream: [open-mercato/cezar](https://github.com/open-mercato/cezar) `main`
 - Fork point: `feb85666` (2026-08-31)
 - Last scan: 2026-09-28 to `ff27c45e` ([report](scans/2026-09-28.md))
-- Entries: 91 · pending: 54 · planned: 3 · ported: 20 · partial: 1 · diverged: 6 · n/a: 7
+- Entries: 91 · pending: 54 · planned: 2 · ported: 21 · partial: 1 · diverged: 6 · n/a: 7
 
 ## Pending (54)
 
@@ -66,15 +66,14 @@ Generated from `ledger.yaml` by `node .github/scripts/upstream-scan.cjs render`.
 | [#1130](https://github.com/open-mercato/cezar/pull/1130) | 2026-09-28 | fix(docs): drop the permalink icons from the README hero on mobile (#1130) | 1 |  |
 | [#1131](https://github.com/open-mercato/cezar/pull/1131) | 2026-09-28 | fix(docs): put the README hero back on headings, with the black brand icon (#1131) | 1 |  |
 
-## Planned (3)
+## Planned (2)
 
 | Upstream | Date | Title | Fork | Decided | Reason / note |
 | --- | --- | --- | --- | --- | --- |
-| [#967](https://github.com/open-mercato/cezar/pull/967) | 2026-09-12 | fix(runs): make the autonomous auto-continue nudge reachable on both turn-end paths (#967) | [issue #426](https://github.com/hearsay-tools/cezarion/issues/426) | 2026-09-18 | bug present here: runContinuation never sets state.autonomous and runAgentStep has no nudge, so #autonomous parks after the first turn; 1 conflicting file, 4 hunks in run.ts |
 | [#953](https://github.com/open-mercato/cezar/pull/953) | 2026-09-14 | feat(sidebar): drag project groups to set their order, shared across devices (#952) (#953) | [issue #438](https://github.com/hearsay-tools/cezarion/issues/438) | 2026-09-18 | absent here; needs the contract field plus 4 hunks in project-groups |
 | [#984](https://github.com/open-mercato/cezar/pull/984) | 2026-09-14 | fix(workflows): park intermediate asks for input (#984) | [issue #427](https://github.com/hearsay-tools/cezarion/issues/427) | 2026-09-18 | bug present here: resolveAskTurn is gated on interactive, so a CEZ:ASK from a non-final workflow step is dropped and the next step runs; upstream patch references dispatch code that must be stripped |
 
-## Ported (20)
+## Ported (21)
 
 | Upstream | Date | Title | Fork | Decided | Reason / note |
 | --- | --- | --- | --- | --- | --- |
@@ -88,6 +87,7 @@ Generated from `ledger.yaml` by `node .github/scripts/upstream-scan.cjs render`.
 | [#937](https://github.com/open-mercato/cezar/pull/937) | 2026-09-04 | fix(ask): recover a CEZ:ASK payload that is only missing its closing brackets (#937) | [PR #98](https://github.com/hearsay-tools/cezarion/pull/98) | 2026-09-05 |  |
 | [#841](https://github.com/open-mercato/cezar/pull/841) | 2026-09-04 | fix(models): discover Claude models from the host CLI instead of fixed presets (#841) | [PR #99](https://github.com/hearsay-tools/cezarion/pull/99) | 2026-09-05 |  |
 | [#873](https://github.com/open-mercato/cezar/pull/873) | 2026-09-04 | fix(ui): collapse dense run metadata at phone width (#765) (#873) | [PR #103](https://github.com/hearsay-tools/cezarion/pull/103) | 2026-09-06 |  |
+| [#967](https://github.com/open-mercato/cezar/pull/967) | 2026-09-12 | fix(runs): make the autonomous auto-continue nudge reachable on both turn-end paths (#967) | [PR #805](https://github.com/hearsay-tools/cezarion/pull/805), [issue #426](https://github.com/hearsay-tools/cezarion/issues/426) | 2026-10-04 | Ported shared bounded nudging and Continue hydration; adapted portable ASK and delayed acknowledgement recovery to this fork, with native runner parity coverage. |
 | [#809](https://github.com/open-mercato/cezar/pull/809) | 2026-09-14 | fix(composer): scroll skill menu on arrow key navigation (#809) | [PR #653](https://github.com/hearsay-tools/cezarion/pull/653), [issue #433](https://github.com/hearsay-tools/cezarion/issues/433), [3c27a8c8](https://github.com/hearsay-tools/cezarion/commit/3c27a8c80d1838de919fd80ad17ca8274e712534) | 2026-09-27 | keyboard selection scroll ported with ArrowUp and ArrowDown regression coverage |
 | [#861](https://github.com/open-mercato/cezar/pull/861) | 2026-09-14 | fix(ui): keep CPU/Mem folded on queued task rows (#821) (#861) | [PR #652](https://github.com/hearsay-tools/cezarion/pull/652), [issue #432](https://github.com/hearsay-tools/cezarion/issues/432), [2b66db1d](https://github.com/hearsay-tools/cezarion/commit/2b66db1d) | 2026-09-27 | queued rows honor folded CPU/Mem columns; regression tests cover both folds and either expanded column |
 | [#956](https://github.com/open-mercato/cezar/pull/956) | 2026-09-14 | feat(tasks): copy branch name from task header (#956) | [PR #645](https://github.com/hearsay-tools/cezarion/pull/645), [issue #434](https://github.com/hearsay-tools/cezarion/issues/434), [2dbe2799](https://github.com/hearsay-tools/cezarion/commit/2dbe279966c804cf3be2942dc28b8b6dc8871b95) | 2026-09-27 | Branch-adjacent copy control adapted to the fork header, with keyboard and theme coverage |
