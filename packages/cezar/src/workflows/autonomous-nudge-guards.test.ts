@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentSession } from '../core/agent-runner.ts';
 import { RunStore } from '../runs/store.ts';
-import { RunManager } from './run.ts';
+import { AUTONOMOUS_NUDGE, RunManager } from './run.ts';
 
 // Focused policy guards complement workflow-autonomous-parity's actual native
 // wires. A refused nudge must never touch either transport or consume its budget.
@@ -34,9 +34,9 @@ describe('autonomous nudge priority and lifecycle guards', () => {
     };
     state = { cwd: root, cancelled: false, interrupt: () => {}, pendingHumanAsk: false, autonomous: true, autoContinues: 0, session };
   });
-  afterEach(() => { manager.dispose(); store.flush(); rmSync(root, { recursive: true, force: true }); });
+  afterEach(() => { manager['clearIdleTimer'](state); manager.dispose(); vi.useRealTimers(); store.flush(); rmSync(root, { recursive: true, force: true }); });
 
-  for (const portable of [false, true]) it.each(guards)('%s blocks the nudge (portable ASK=' + portable + ')', guard => {
+  function applyGuard(guard: typeof guards[number]): void {
     switch (guard) {
       case 'disabled': state.autonomous = false; break; // includes the memory-limit pause
       case 'cancelled': state.cancelled = true; break;
@@ -60,6 +60,10 @@ describe('autonomous nudge priority and lifecycle guards', () => {
       case 'worker-wake': manager['workerWakeAdmitted'].add(id); break;
       case 'root-finish': store.commitDelegation([{ id, delegation: { role: 'root', permissions: [], receipts: [], finishRequestedAt: new Date().toISOString() } }]); break;
     }
+  }
+
+  for (const portable of [false, true]) it.each(guards)('%s blocks the nudge (portable ASK=' + portable + ')', guard => {
+    applyGuard(guard);
     expect(manager['tryAutonomousNudge'](id, state, 'task', portable ? ask : null)).toBe(false);
     expect(session.sendMessage).not.toHaveBeenCalled();
     expect(session.sendAgentMessage).not.toHaveBeenCalled();
@@ -73,4 +77,97 @@ describe('autonomous nudge priority and lifecycle guards', () => {
     expect(state.autoContinues).toBe(0);
     expect(store.readEvents(id).filter(e => e.type === 'note' || e.type === 'human-input-delivered')).toEqual([]);
   });
+
+  function pendingBoundary(): void {
+    state.currentStepId = 'task';
+    state.atTurnBoundary = session;
+    state.autonomousNudgePending = session;
+    manager['active'].set(id, state);
+  }
+
+  it.each(guards)('%s blocks a readiness retry', guard => {
+    pendingBoundary();
+    applyGuard(guard);
+    manager['handleAgentInputReady'](id, state, session);
+    expect(session.sendMessage).not.toHaveBeenCalled();
+    expect(state.autoContinues).toBe(0);
+    if (guard === 'queued-input') {
+      expect(session.sendAgentMessage).toHaveBeenCalledOnce();
+      expect(session.sendAgentMessage).not.toHaveBeenCalledWith([{ type: 'text', text: AUTONOMOUS_NUDGE }], []);
+      expect(state.autonomousNudgePending).toBeUndefined();
+    } else expect(session.sendAgentMessage).not.toHaveBeenCalled();
+  });
+
+  it.each(['replaced-state', 'replaced-session', 'new-boundary', 'done', 'no-pending', 'closed-by-idle', 'session-error'] as const)(
+    '%s revokes readiness authority', guard => {
+      pendingBoundary();
+      switch (guard) {
+        case 'replaced-state': manager['active'].set(id, { ...state }); break;
+        case 'replaced-session': state.session = { ...session }; break;
+        case 'new-boundary': state.atTurnBoundary = undefined; break;
+        case 'done': state.doneAtBoundary = session; break;
+        case 'no-pending': state.autonomousNudgePending = undefined; break;
+        case 'closed-by-idle': state.idleClosed = true; break;
+        case 'session-error': state.agentSessionError = 'provider failed'; break;
+      }
+      manager['handleAgentInputReady'](id, state, session);
+      expect(session.sendMessage).not.toHaveBeenCalled();
+      expect(session.sendAgentMessage).not.toHaveBeenCalled();
+      expect(state.autoContinues).toBe(0);
+    },
+  );
+
+  it('refused ordinary input waits for readiness without charging the cap or releasing capacity', () => {
+    pendingBoundary();
+    vi.mocked(session.sendAgentMessage).mockReturnValueOnce(false);
+    expect(manager['tryAutonomousNudge'](id, state, 'task', null)).toBe(false);
+    expect(state.autonomousNudgePending).toBe(session);
+    expect(state.idleTimer).toBeDefined();
+    expect(state.autoContinues).toBe(0);
+    expect(store.getRun(id)?.status).toBe('running');
+    expect(manager['waiting'].has(id)).toBe(false);
+    manager['handleAgentInputReady'](id, state, session);
+    expect(session.sendAgentMessage).toHaveBeenLastCalledWith([{ type: 'text', text: AUTONOMOUS_NUDGE }], []);
+    expect(state.autonomousNudgePending).toBeUndefined();
+    expect(state.idleTimer).toBeUndefined();
+    expect(state.autoContinues).toBe(1);
+    expect(session.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('missing readiness reaches the existing idle close bound', () => {
+    vi.useFakeTimers();
+    pendingBoundary();
+    vi.mocked(session.sendAgentMessage).mockReturnValue(false);
+    expect(manager['tryAutonomousNudge'](id, state, 'task', null)).toBe(false);
+    vi.runOnlyPendingTimers();
+    expect(session.end).toHaveBeenCalledOnce();
+    expect(state.idleClosed).toBe(true);
+    manager['handleAgentInputReady'](id, state, session);
+    expect(session.sendAgentMessage).toHaveBeenCalledOnce();
+    expect(state.autoContinues).toBe(0);
+  });
+
+  it('parent activity invalidates the refused boundary and its timer', () => {
+    pendingBoundary();
+    vi.mocked(session.sendAgentMessage).mockReturnValue(false);
+    manager['tryAutonomousNudge'](id, state, 'task', null);
+    manager['handleRunnerUiEvent'](id, state, manager['makeUiSink'](id, 'task'), { type: 'turn.started', turnId: randomUUID() });
+    expect(state.autonomousNudgePending).toBeUndefined();
+    expect(state.atTurnBoundary).toBeUndefined();
+    expect(state.idleTimer).toBeUndefined();
+    manager['handleAgentInputReady'](id, state, session);
+    expect(session.sendAgentMessage).toHaveBeenCalledOnce();
+  });
+
+  it('a transport exception fails without retaining a readiness retry', () => {
+    pendingBoundary();
+    vi.mocked(session.sendAgentMessage).mockImplementation(() => { throw new Error('failed transport'); });
+    expect(manager['tryAutonomousNudge'](id, state, 'task', null)).toBe(false);
+    expect(state.agentInputError).toContain('failed transport');
+    expect(state.autonomousNudgePending).toBeUndefined();
+    expect(state.idleTimer).toBeUndefined();
+    manager['handleAgentInputReady'](id, state, session);
+    expect(session.sendAgentMessage).toHaveBeenCalledOnce();
+  });
+
 });

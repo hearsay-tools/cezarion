@@ -194,7 +194,7 @@ const server = createServer((req, res) => {
       } else {
       res.end(JSON.stringify({ info: info({}), parts: [] }));
       }
-      if (body.includes('mock:autonomous-cap')) autonomousCap = true;
+      if (body.includes('mock:autonomous-cap') || body.includes('mock:autonomous-ask-cap')) autonomousCap = true;
       if (url.endsWith('/prompt_async')) {
         currentUserId = `msg_user_${++steerSerial}`;
         const text = JSON.parse(body).parts.map(part => part.text ?? '').join('\n');

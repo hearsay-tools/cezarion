@@ -22,7 +22,7 @@ describe('autonomous turn-end parity — #426', () => {
         continue;
       }
       // Cap and non-autonomous controls exercise both constructors as well.
-      const modes = row.id === 'A2' || row.id === 'A4' ? ['continuation'] : row.id === 'A5' || row.id === 'A6' ? ['fresh', 'continuation'] : ['fresh'];
+      const modes = row.id === 'A2' || row.id === 'A4' || row.id === 'A12' ? ['continuation'] : row.id === 'A5' || row.id === 'A6' ? ['fresh', 'continuation'] : ['fresh'];
       for (const mode of modes) it(`${backend} ${row.id} ${row.name} (${mode})`, async () => {
         await withOwnedInputRun(backend, mode === 'continuation' ? 'autonomous' : row.scenario, async ({ store, manager, runId, repoRoot }) => {
           const handoff = handoffPath(join(repoRoot, '.ai/cezar'), runId);
@@ -50,7 +50,7 @@ describe('autonomous turn-end parity — #426', () => {
           if (row.id === 'A9') await new Promise(resolve => setTimeout(resolve, 150));
           const events = store.readEvents(runId).slice(startSeq);
           const notes = nudges(events);
-          if (row.id === 'A5') {
+          if (row.id === 'A5' || row.id === 'A11' || row.id === 'A12') {
             expect(store.getRun(runId)?.status).toBe('waiting');
             expect(notes).toHaveLength(MAX_AUTO_CONTINUES);
             expect(events.some(e => e.type === 'note' && String(e.message).includes(`autonomous — safety cap reached (${MAX_AUTO_CONTINUES})`))).toBe(true);
@@ -77,6 +77,15 @@ describe('autonomous turn-end parity — #426', () => {
               expect(events.filter(e => e.type === 'ask.requested' || e.type === 'human-input-delivered')).toEqual([]);
               expect(events.filter(e => e.type === 'user-message' && String(e.text).startsWith('Continue working autonomously'))).toEqual([]);
             }
+          }
+          if (row.id === 'A11' || row.id === 'A12') {
+            expect(events.filter(e => e.type === 'note' && String(e.message).includes('question overridden'))).toHaveLength(1);
+            expect(events.filter(e => e.type === 'ask.requested' || e.type === 'human-input-delivered')).toEqual([]);
+            expect(events.filter(e => e.type === 'user-message' && String(e.text).startsWith('Continue working autonomously'))).toEqual([]);
+            // Prove the native SSE boundary actually beat the portable answer's
+            // HTTP ACK, rather than passing through the already-ready path.
+            if (backend === 'opencode') expect(readFileSync(handoff, 'utf8')).toContain('status=running (awaiting input readiness)');
+            expect(updates.mock.calls.filter(([id, patch]) => id === runId && patch.status === 'waiting')).toHaveLength(1);
           }
           updates.mockRestore();
         });

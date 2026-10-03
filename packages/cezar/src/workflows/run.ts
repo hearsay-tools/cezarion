@@ -355,6 +355,9 @@ interface ActiveRun {
    *  Pending input, native asks and lifecycle waits retain priority. */
   autonomous?: boolean;
   autoContinues?: number;
+  /** An eligible boundary nudge refused until the current transport becomes ready.
+   * Retains its slot, bounded by the existing idle timer; never represents a sent input. */
+  autonomousNudgePending?: AgentSession;
   /** Registry snapshot used to expand `/skill` follow-ups before a backend can
    *  mistake them for its own slash commands (#676). */
   skills?: Skill[];
@@ -4182,6 +4185,10 @@ export class RunManager {
         appendHandoffHeartbeat(this.dataDir, runId, 'turn complete — status=running (autonomous nudge)');
         return;
       }
+      if (state.autonomousNudgePending === session) {
+        appendHandoffHeartbeat(this.dataDir, runId, 'turn complete — status=running (awaiting input readiness)');
+        return;
+      }
       // A wake turn can finish before its HTTP/RPC acknowledgement. Retiring
       // that wait must release its completed turn, not invent another turn.
       if ((state.parkAfterAck.monitoring || this.hasLiveWorkers(runId)) && !this.parentCompletionAttention(runId)) {
@@ -4250,7 +4257,16 @@ export class RunManager {
 
   /** A callback from an old/replaced/disposed session carries no authority. */
   private handleAgentInputReady(runId: string, state: ActiveRun, session: AgentSession | undefined): void {
-    if (session && this.active.get(runId) === state && state.session === session) this.flushAgentInputs(runId);
+    if (!session || this.disposed || this.active.get(runId) !== state || state.session !== session ||
+      !session.open || state.idleClosed || state.cancelled || state.finishRequested || state.agentInputError || state.agentSessionError) return;
+    // Durable input always gets the first opportunity. Only the same refused,
+    // completed boundary may retry; ordinary/native question parks are not wakes.
+    if (this.flushAgentInputs(runId)) return;
+    if (state.autonomousNudgePending !== session || state.atTurnBoundary !== session ||
+      state.doneAtBoundary === session || !state.currentStepId) return;
+    if (this.tryAutonomousNudge(runId, state, state.currentStepId, null)) {
+      appendHandoffHeartbeat(this.dataDir, runId, 'turn complete — status=running (autonomous nudge)');
+    }
   }
 
   /** Reservation is synchronous; only an acknowledged transport may checkpoint delivery. */
@@ -4430,6 +4446,7 @@ export class RunManager {
   /** Restore active lifecycle/accounting when either Cezar or the backend
    * resumes work in a parked session. */
   private resumeParkedRun(runId: string, state: ActiveRun): void {
+    state.autonomousNudgePending = undefined;
     state.atTurnBoundary = undefined;
     state.doneAtBoundary = undefined;
     state.parkAfterAck = undefined;
@@ -5167,7 +5184,7 @@ export class RunManager {
         }
         if (sessionOpen && !agentInputDelivered && !workerWaitParked && !this.workerWakeAdmitted.has(runId)) {
           if (!ask) autoContinued = this.tryAutonomousNudge(runId, state, stepId, null);
-          if (!autoContinued) {
+          if (!autoContinued && state.autonomousNudgePending !== state.session) {
             // `CEZ:ASK` → park `waiting` (attention) AND surface the structured
             // question as an ask card (#473). `CEZ:MONITORING` or Claude's native
             // `ScheduleWakeup` → non-attention `running`/`activity:'monitoring'`
@@ -5203,7 +5220,7 @@ export class RunManager {
         appendHandoffHeartbeat(
           this.dataDir,
           runId,
-          `turn complete — status=${autoContinued ? 'running (autonomous nudge)' : agentInputDelivered ? 'running' : monitoring ? 'monitoring' : sessionOpen ? 'waiting' : 'running'}`,
+          `turn complete — status=${autoContinued ? 'running (autonomous nudge)' : state.autonomousNudgePending && state.autonomousNudgePending === state.session ? 'running (awaiting input readiness)' : agentInputDelivered ? 'running' : monitoring ? 'monitoring' : sessionOpen ? 'waiting' : 'running'}`,
         );
       }
     };
@@ -6075,7 +6092,7 @@ export class RunManager {
         }
         const waiting = (interactive || !!ask) && sessionOpen && !agentInputDelivered && !workerWaitParked && !this.workerWakeAdmitted.has(runId);
         if (waiting && interactive && !ask) autoContinued = this.tryAutonomousNudge(runId, state, step.id, null);
-        if (waiting && !autoContinued) {
+        if (waiting && !autoContinued && state.autonomousNudgePending !== state.session) {
           // Turn over, session open. Either the ball is in the user's court
           // (`waiting`) — optionally with a structured `CEZ:ASK` question the
           // cockpit renders as an ask card (#473) — or the agent declared it is
@@ -6109,7 +6126,7 @@ export class RunManager {
         appendHandoffHeartbeat(
           this.dataDir,
           runId,
-          `turn complete — status=${autoContinued ? 'running (autonomous nudge)' : monitoring ? 'monitoring' : waiting ? 'waiting' : 'running'}`,
+          `turn complete — status=${autoContinued ? 'running (autonomous nudge)' : state.autonomousNudgePending && state.autonomousNudgePending === state.session ? 'running (awaiting input readiness)' : monitoring ? 'monitoring' : waiting ? 'waiting' : 'running'}`,
         );
       }
     };
@@ -6350,6 +6367,7 @@ export class RunManager {
   /** Ask precedence also releases an admitted but not yet delivered worker wake.
    * Its durable input/wait remain queued until an actual human answer. */
   private prepareHumanAsk(runId: string, state: ActiveRun): void {
+    state.autonomousNudgePending = undefined;
     this.withdrawCiWait(runId);
     state.pendingHumanAsk = true;
     this.workerWaiting.delete(runId);
@@ -6366,7 +6384,10 @@ export class RunManager {
     this.recordUsageUiEvent(runId, state, event);
     sink.handle(event);
     if (state.cancelled) return;
-    if (isRunnerActivity(event)) { state.atTurnBoundary = undefined; state.doneAtBoundary = undefined; state.parkAfterAck = undefined; }
+    if (isRunnerActivity(event)) {
+      if (state.autonomousNudgePending) { state.autonomousNudgePending = undefined; this.clearIdleTimer(state); }
+      state.atTurnBoundary = undefined; state.doneAtBoundary = undefined; state.parkAfterAck = undefined;
+    }
     if (event.type === 'ask.requested') {
       this.prepareHumanAsk(runId, state);
       this.clearIdleTimer(state);
@@ -6868,7 +6889,9 @@ export class RunManager {
    * input, worker/CI waits and parent completion keep priority. Cancel, Finish,
    * disposal and memory pause stop nudging; provider errors/exits use normal
    * teardown. Native mid-turn asks still park for an answer (outside this policy).
-   * A refused send falls back to normal parking; no successful send is invented.
+   * A refused ordinary nudge waits for readiness at this exact boundary; the idle
+   * timeout bounds a missing readiness signal. New activity/input invalidates it.
+   * A refused portable override falls back to normal question parking.
    */
   private tryAutonomousNudge(runId: string, state: ActiveRun, stepId: string, ask: AskRequest | null): boolean {
     const run = this.store.getRun(runId);
@@ -6877,6 +6900,8 @@ export class RunManager {
       this.workerExecutionStopped(runId) || this.executionBlockedByRootFinish(run) || this.parentCompletionPending(runId) ||
       this.workerWait(runId) || run.ciWait || this.workerWakeAdmitted.has(runId) ||
       state.agentInputFlight || this.harnessOwesInput(state) || this.hasQueuedAgentInputs(runId)) return false;
+    state.autonomousNudgePending = undefined;
+    this.clearIdleTimer(state);
     if ((state.autoContinues ?? 0) >= MAX_AUTO_CONTINUES) {
       this.store.appendEvent(runId, { type: 'note', stepId, message: `autonomous — safety cap reached (${MAX_AUTO_CONTINUES}); automatic continuation paused` });
       return false;
@@ -6888,7 +6913,17 @@ export class RunManager {
     // question. Do not route via deliverMessage, which attributes a human answer.
     // Ordinary nudges keep #505's acknowledged agent-input failure semantics.
     const sent = ask ? state.session.sendMessage(content) : this.submitAgentInput(runId, state, content);
-    if (!sent) return false;
+    if (!sent) {
+      // A portable override uses sendMessage: its POST may still be awaiting ACK
+      // after the next SSE turn ends. It is not an agentInputFlight. Keep this
+      // exact boundary running until onAgentInputReady retries, without charging
+      // the cap or claiming delivery. Missing readiness closes via the idle bound.
+      if (!ask && state.session.open && !state.agentInputError && !state.agentSessionError) {
+        state.autonomousNudgePending = state.session;
+        this.armIdleTimer(runId, state);
+      }
+      return false;
+    }
     if (ask) this.resumeParkedRun(runId, state);
     state.autoContinues = (state.autoContinues ?? 0) + 1;
     this.store.appendEvent(runId, {
