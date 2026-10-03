@@ -326,6 +326,11 @@ function PreviewPaneBody({ run, servers, serverStates, request, onSession, onPor
     if (address.kind === 'error') return setAddressError(address.message)
     if (address.kind === 'server') return openServer(address.port)
     if (latest.current.stage?.stage === 'streaming') {
+      // The live page navigates in place, and from now on it is this URL, not a server: a
+      // reconnect reopens it, and the switcher and header no longer mark a server as shown.
+      target.current = { url: address.url }
+      autoRun.current = undefined
+      setPort(undefined)
       setAddressError(undefined)
       setUrl(address.url)
       return send({ t: 'nav', url: address.url })

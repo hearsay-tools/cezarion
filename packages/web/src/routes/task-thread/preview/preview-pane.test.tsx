@@ -202,6 +202,21 @@ describe('PreviewPane', () => {
     expect(sent()).toContainEqual({ t: 'open', target: { url: 'http://localhost:3000' } })
   })
 
+  it('a URL typed while streaming becomes the target a reconnect reopens, and no server stays current', () => {
+    const onPort = vi.fn()
+    render(<PreviewPane run={run} servers={[web]} request={{ port: 5173 }} onPort={onPort} onClose={() => undefined} />)
+    transport('open')
+    message({ t: 'state', stage: 'streaming', adopted: false })
+    const field = screen.getByRole('textbox', { name: 'Page address' })
+    fireEvent.change(field, { target: { value: 'example.com/docs' } })
+    fireEvent.keyDown(field, { key: 'Enter' })
+    expect(sent()).toContainEqual({ t: 'nav', url: 'http://example.com/docs' })
+    expect(onPort).toHaveBeenLastCalledWith(undefined)
+    transport('reconnecting', 1)
+    transport('open')
+    expect(sent().filter(m => m.t === 'open').at(-1)).toEqual({ t: 'open', target: { url: 'http://example.com/docs' } })
+  })
+
   it('a typed registered port opens that server instead of a bare URL', () => {
     render(<PreviewPane run={run} servers={[web]} onClose={() => undefined} />)
     transport('open')
