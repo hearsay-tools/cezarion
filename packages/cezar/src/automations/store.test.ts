@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, readFileSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readdirSync, readFileSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { execFileSync, spawn } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -488,5 +488,116 @@ describe('AutomationStore.setState (read-modify-write)', () => {
     });
     expect(receipt?.receiptKey).toBe('a:schedule:2026-10-03T02:00:00.000Z');
     expect(store.receipts()[0]?.occurrenceAt).toBe('2026-10-03T02:00:00.000Z');
+  });
+});
+
+/**
+ * Runs `body` in two real OS processes released by one barrier file. `body` sees `store` (an
+ * AutomationStore on `dir`) and `who` ('one' | 'two'), and runs synchronously, as the callers do.
+ */
+async function hammerFromTwoProcesses(dir: string, body: string): Promise<void> {
+  const barrier = join(dir, 'start');
+  const modulePath = fileURLToPath(new URL('./store.ts', import.meta.url));
+  const script = `
+    import { access } from 'node:fs/promises';
+    import { AutomationStore } from ${JSON.stringify(modulePath)};
+    const store = AutomationStore.open(${JSON.stringify(dir)});
+    const who = process.argv[1];
+    process.stdout.write('ready\\n');
+    while (true) { try { await access(${JSON.stringify(barrier)}); break; } catch { await new Promise(resolve => setTimeout(resolve, 2)); } }
+    ${body}
+  `;
+  const children = ['one', 'two'].map((who) => spawn(process.execPath,
+    ['--import', 'tsx', '--input-type=module', '-e', script, who], { stdio: ['ignore', 'pipe', 'pipe'] }));
+  const stderr = children.map((child) => {
+    let text = '';
+    child.stderr.on('data', (chunk) => { text += String(chunk); });
+    return () => text;
+  });
+  try {
+    await Promise.all(children.map((child) => new Promise<void>((resolve, reject) => {
+      child.stdout.once('data', () => resolve());
+      child.once('error', reject);
+      child.once('exit', (code) => reject(new Error(`child exited before barrier: ${code}`)));
+    })));
+    writeFileSync(barrier, 'go');
+    const codes = await Promise.all(children.map((child) => new Promise<number | null>((resolve) => {
+      if (child.exitCode !== null) resolve(child.exitCode);
+      else child.once('exit', resolve);
+    })));
+    expect(codes, stderr.map((read) => read()).join('\n')).toEqual([0, 0]);
+  } finally {
+    for (const child of children) child.kill();
+  }
+}
+
+describe('AutomationStore cross-process write lock', () => {
+  const N = 40;
+
+  it('keeps every id when two processes setState different ids concurrently', async () => {
+    const dir = await directory();
+    await hammerFromTwoProcesses(dir, `
+      for (let i = 0; i < ${N}; i++) store.setState(who + '-' + i, (current) => ({ ...current, consecutiveFailures: i }));
+    `);
+    const states = JSON.parse(readFileSync(join(dir, 'automation-state.json'), 'utf8')).states;
+    const expected = ['one', 'two'].flatMap((who) => Array.from({ length: N }, (_, i) => `${who}-${i}`));
+    expect(Object.keys(states).sort()).toEqual(expected.sort());
+    expect(readdirSync(dir).filter((name) => name.endsWith('.lock'))).toEqual([]);
+  }, 60_000);
+
+  it('keeps every definition when two processes create concurrently', async () => {
+    const dir = await directory();
+    await hammerFromTwoProcesses(dir, `
+      for (let i = 0; i < ${N}; i++) store.create(${JSON.stringify(input)}, who + '-' + i);
+    `);
+    const ids = JSON.parse(readFileSync(join(dir, 'automations.json'), 'utf8')).automations.map((row: { id: string }) => row.id);
+    const expected = ['one', 'two'].flatMap((who) => Array.from({ length: N }, (_, i) => `${who}-${i}`));
+    expect(ids.sort()).toEqual(expected.sort());
+  }, 60_000);
+
+  it('keeps every edit when two processes update and delete their own definitions concurrently', async () => {
+    const dir = await directory();
+    const seed = AutomationStore.open(dir);
+    for (const who of ['one', 'two']) for (let i = 0; i < 10; i++) seed.create(input, `${who}-${i}`);
+    await hammerFromTwoProcesses(dir, `
+      for (let i = 0; i < 10; i++) {
+        const id = who + '-' + i;
+        if (i % 2) store.delete(id);
+        else store.update(id, 1, { ...${JSON.stringify(input)}, name: 'edited ' + id });
+      }
+    `);
+    const file = JSON.parse(readFileSync(join(dir, 'automations.json'), 'utf8'));
+    const expected = ['one', 'two'].flatMap((who) => [0, 2, 4, 6, 8].map((i) => `${who}-${i}`));
+    expect(file.automations.map((row: { id: string; name: string }) => [row.id, row.name]).sort())
+      .toEqual(expected.sort().map((id) => [id, `edited ${id}`]));
+    expect(Object.keys(file.tombstones).length).toBe(10);
+  }, 60_000);
+
+  it('recovers a write lock left by a dead process', async () => {
+    const dir = await directory();
+    writeFileSync(join(dir, 'automation-state.lock'), JSON.stringify({ pid: 424242 }));
+    writeFileSync(join(dir, 'automations.lock'), JSON.stringify({ pid: 424242 }));
+    const store = AutomationStore.open(dir, { processAlive: () => false });
+    expect(store.setState('a', () => ({ consecutiveFailures: 1 }))).toEqual({ consecutiveFailures: 1 });
+    expect(store.create(input, 'one').id).toBe('one');
+  });
+
+  it('recovers an aged-out write lock even when its pid looks alive', async () => {
+    const dir = await directory();
+    const lock = join(dir, 'automation-state.lock');
+    writeFileSync(lock, JSON.stringify({ pid: 424242 }));
+    const old = new Date(Date.now() - 60_000);
+    utimesSync(lock, old, old);
+    const store = AutomationStore.open(dir, { processAlive: () => true });
+    expect(store.setState('a', () => ({ consecutiveFailures: 1 }))).toEqual({ consecutiveFailures: 1 });
+  });
+
+  it('throws rather than writing unserialized when a live holder keeps the lock past the bounded wait', async () => {
+    const dir = await directory();
+    const store = AutomationStore.open(dir, { processAlive: () => true, writeLockTimeoutMs: 50 });
+    store.setState('a', () => ({ consecutiveFailures: 1 }));
+    writeFileSync(join(dir, 'automation-state.lock'), JSON.stringify({ pid: 424242 }));
+    expect(() => store.setState('b', () => ({ consecutiveFailures: 2 }))).toThrow(/busy/);
+    expect(Object.keys(JSON.parse(readFileSync(join(dir, 'automation-state.json'), 'utf8')).states)).toEqual(['a']);
   });
 });

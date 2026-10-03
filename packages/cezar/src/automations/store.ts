@@ -36,6 +36,18 @@ const LOG_LOCK = 'automation-log.lock';
 const LOG_RECLAIM = 'automation-log.reclaim';
 const POLL_LOCK = 'automation-poll.lock';
 const POLL_RECLAIM = 'automation-poll.reclaim';
+/**
+ * Write locks for the two read-modify-write JSON files, one per file. Held only across one
+ * read+write (milliseconds), so a holder older than `WRITE_LOCK_STALE_MS` is abandoned whatever
+ * its pid says; the bounded wait outlasts that age, so a stale holder always clears in time.
+ * Never confused with the #651 polling lease: nothing acquires that lease while holding these.
+ */
+const DEFINITIONS_LOCK = 'automations.lock';
+const DEFINITIONS_RECLAIM = 'automations.reclaim';
+const STATE_LOCK = 'automation-state.lock';
+const STATE_RECLAIM = 'automation-state.reclaim';
+const WRITE_LOCK_STALE_MS = 5_000;
+const WRITE_LOCK_TIMEOUT_MS = 10_000;
 const RETENTION_MS = 90 * 24 * 60 * 60 * 1_000;
 
 /**
@@ -55,6 +67,8 @@ export interface AutomationStoreOptions {
   warn?: (message: string) => void;
   now?: () => Date;
   processAlive?: (pid: number) => boolean;
+  /** How long a definitions/state write waits for the other process's write lock. Tests only. */
+  writeLockTimeoutMs?: number;
 }
 
 export class AutomationStore {
@@ -92,6 +106,13 @@ export class AutomationStore {
     input: Omit<AutomationDefinition, 'id' | 'revision' | 'createdAt' | 'updatedAt'>,
     id: string = randomUUID(),
   ): AutomationDefinition {
+    return this.withWriteLock(DEFINITIONS_LOCK, DEFINITIONS_RECLAIM, () => this.createLocked(input, id));
+  }
+
+  private createLocked(
+    input: Omit<AutomationDefinition, 'id' | 'revision' | 'createdAt' | 'updatedAt'>,
+    id: string,
+  ): AutomationDefinition {
     this.refreshDefinitions();
     if (this.definitions.has(id) || this.isTombstoned(id)) throw new Error('automation id unavailable');
     const now = this.now().toISOString();
@@ -108,6 +129,15 @@ export class AutomationStore {
   }
 
   update(
+    id: string,
+    expectedRevision: number,
+    input: Omit<AutomationDefinition, 'id' | 'revision' | 'createdAt' | 'updatedAt'>,
+  ): AutomationDefinition {
+    // Lock order is always definitions -> state (the `setState` below); nothing takes them reversed.
+    return this.withWriteLock(DEFINITIONS_LOCK, DEFINITIONS_RECLAIM, () => this.updateLocked(id, expectedRevision, input));
+  }
+
+  private updateLocked(
     id: string,
     expectedRevision: number,
     input: Omit<AutomationDefinition, 'id' | 'revision' | 'createdAt' | 'updatedAt'>,
@@ -131,6 +161,10 @@ export class AutomationStore {
   }
 
   delete(id: string): boolean {
+    return this.withWriteLock(DEFINITIONS_LOCK, DEFINITIONS_RECLAIM, () => this.deleteLocked(id));
+  }
+
+  private deleteLocked(id: string): boolean {
     this.refreshDefinitions();
     if (!this.definitions.delete(id)) return false;
     this.definitionsFile.tombstones = {
@@ -196,8 +230,15 @@ export class AutomationStore {
    * The write for THIS id is also computed from the fresh read, not from the caller's possibly
    * stale snapshot: `update` receives the on-disk record (or `{}` when none exists) and returns
    * the full next record. Never close over a state read from before this call.
+   *
+   * Re-reading alone still loses a write when two PROCESSES read the same file before either
+   * renames, so the read and the write happen under the state write lock (`withWriteLock`).
    */
   setState(id: string, update: (current: AutomationRuntimeState) => AutomationRuntimeState): AutomationRuntimeState {
+    return this.withWriteLock(STATE_LOCK, STATE_RECLAIM, () => this.setStateLocked(id, update));
+  }
+
+  private setStateLocked(id: string, update: (current: AutomationRuntimeState) => AutomationRuntimeState): AutomationRuntimeState {
     // An unreadable file falls back to this process's last good view, never to an empty one:
     // writing `{ [id]: next }` alone would erase every other automation's cursor and baseline.
     const onDisk = this.readJson(STATE, automationStateFileSchema, this.stateFile);
@@ -317,6 +358,27 @@ export class AutomationStore {
       if (!lease) await new Promise<void>((resolve) => setTimeout(resolve, 10));
     }
     if (!lease) throw new Error('automation log lock is busy; retry shortly');
+    try { return operation(); }
+    finally { lease.release(); }
+  }
+
+  /**
+   * Synchronous sibling of `withLogLease` for the read-modify-write JSON files: the callers are
+   * synchronous, so the wait sleeps the thread (`Atomics.wait`) instead of yielding. Contention is
+   * one other process's millisecond write, so the wait is short in practice; past the bound it
+   * throws rather than write unserialized and lose the other process's keys.
+   */
+  private withWriteLock<T>(lockName: string, reclaimName: string, operation: () => T): T {
+    mkdirSync(this.dataDir, { recursive: true });
+    const path = join(this.dataDir, lockName);
+    const guardPath = join(this.dataDir, reclaimName);
+    const deadline = Date.now() + (this.options.writeLockTimeoutMs ?? WRITE_LOCK_TIMEOUT_MS);
+    let lease = this.tryAcquireLease(path, guardPath, WRITE_LOCK_STALE_MS, 0, false);
+    while (!lease && Date.now() < deadline) {
+      Atomics.wait(SLEEP, 0, 0, 2);
+      lease = this.tryAcquireLease(path, guardPath, WRITE_LOCK_STALE_MS, 0, false);
+    }
+    if (!lease) throw new Error(`automation ${lockName} is busy; retry shortly`);
     try { return operation(); }
     finally { lease.release(); }
   }
@@ -564,6 +626,8 @@ export class AutomationStore {
     this.options.warn?.(message);
   }
 }
+
+const SLEEP = new Int32Array(new SharedArrayBuffer(4));
 
 function readLeasePid(path: string): number | undefined {
   try {

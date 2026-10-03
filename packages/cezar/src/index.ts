@@ -800,6 +800,10 @@ function ensureDataGitignore(repoRoot: string): void {
     'automation-log.reclaim*/',
     'automation-poll.lock',
     'automation-poll.reclaim*/',
+    'automations.lock',
+    'automations.reclaim*/',
+    'automation-state.lock',
+    'automation-state.reclaim*/',
   ];
   try {
     mkdirSync(join(repoRoot, '.ai/cezar'), { recursive: true });
