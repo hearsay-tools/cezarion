@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
+import { waitForSettledSample } from './visual-ready'
 import { stopFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { waitForHealth, waitForStatus } from './poll'
@@ -258,14 +259,14 @@ describe('the Changes tab against a live dry run', () => {
     ).toBe('none')
     // The integrated mobile design stacks the selectable file tree above the diff.
     expect(
-      browser.evaluate(
+      waitForSettledSample(browser,
         `(() => { const el = document.querySelector('[data-slot="changes-tree"]'); return el !== null && el.checkVisibility() && el.getBoundingClientRect().width <= innerWidth })()`,
       ),
     ).toBe(true)
     // The tabs remain a tappable segment row and the page does not overflow sideways.
     // Session / Changes / Commits / Files — the whole row survives the phone framing.
     expect(browser.count('[data-slot="run-tabs"] a')).toBe(4)
-    expect(browser.evaluate(`document.documentElement.scrollWidth <= window.innerWidth`)).toBe(true)
+    expect(waitForSettledSample(browser, `document.documentElement.scrollWidth <= window.innerWidth`)).toBe(true)
 
     browser.screenshot(`${artifactsDir}/changes-mobile.png`)
     browser.setViewport(1440, 900)

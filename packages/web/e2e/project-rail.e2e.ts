@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
+import { waitForSettledSample } from './visual-ready'
 import { AgentBrowser, HOVER_POINTER_ARGS, bootProjectId, readTestEnv } from './agent-browser'
 import { contrastSampleExpression, hoverVisiblePoint, type ContrastSample } from './contrast'
 import { readSharedProjects, snapshotSharedHome, writeSharedProjects } from './workspace-registry'
@@ -206,10 +207,10 @@ describe('project rail', () => {
 
   it('is a 60px column beside the sidebar, and resizing the sidebar leaves it alone', () => {
     gotoRail()
-    const width = () => Number(browser.evaluate(`document.querySelector('[data-slot="project-rail"]').getBoundingClientRect().width`))
-    const sidebar = () => Number(browser.evaluate(`document.querySelector('[data-slot="sidebar"]').getBoundingClientRect().width`))
+    const width = () => Number(waitForSettledSample(browser, `document.querySelector('[data-slot="project-rail"]').getBoundingClientRect().width`))
+    const sidebar = () => Number(waitForSettledSample(browser, `document.querySelector('[data-slot="sidebar"]').getBoundingClientRect().width`))
     expect(width()).toBe(60)
-    expect(Number(browser.evaluate(`document.querySelector('[data-slot="project-rail"]').getBoundingClientRect().left`))).toBe(0)
+    expect(Number(waitForSettledSample(browser, `document.querySelector('[data-slot="project-rail"]').getBoundingClientRect().left`))).toBe(0)
     const before = sidebar()
     browser.evaluate(`document.querySelector('[data-slot="sidebar-resize-handle"]').focus()`)
     browser.press('ArrowRight')
@@ -223,7 +224,7 @@ describe('project rail', () => {
     const rect = (selector: string) =>
       JSON.parse(
         String(
-          browser.evaluate(`JSON.stringify((({left, right, top, bottom, width, height}) => ({left, right, top, bottom, width, height}))(document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect()))`),
+          waitForSettledSample(browser, `JSON.stringify((({left, right, top, bottom, width, height}) => ({left, right, top, bottom, width, height}))(document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect()))`),
         ),
       ) as { left: number; right: number; top: number; bottom: number; width: number; height: number }
     const link = rect(`${mark(OTHER.id)} a`)
@@ -275,14 +276,14 @@ describe('expandable project rail (#711)', () => {
   const RAIL = '[data-slot="project-rail"]'
   const TOGGLE = '[data-slot="rail-expand-toggle"]'
   const box = (selector: string) =>
-    browser.evaluate(`(() => { const r = document.querySelector(${JSON.stringify(selector)})?.getBoundingClientRect(); return r ? { left: r.left, width: r.width } : null })()`) as { left: number; width: number } | null
+    waitForSettledSample(browser, `(() => { const r = document.querySelector(${JSON.stringify(selector)})?.getBoundingClientRect(); return r ? { left: r.left, width: r.width } : null })()`) as { left: number; width: number } | null
   // The rail settles when its width stops moving AND the names have faded in (160ms width, then
   // 120ms opacity after a 160ms delay). Waiting on both is by design, not a flake fix: the fade is
   // this feature's own animation, and reading geometry or ink mid-fade is reading a frame.
   const settledExpanded = () =>
-    browser.waitForValue(
+    expect(waitForSettledSample(browser,
       `(() => { const rail = document.querySelector('${RAIL}'); const name = rail?.querySelector('[data-slot="rail-project-name"]'); return rail?.getBoundingClientRect().width === 232 && !!name && getComputedStyle(name.parentElement).opacity === '1' })()`,
-    )
+    )).toBe(true)
   const collapse = () => browser.evaluate(`localStorage.removeItem('cez-project-rail-expanded')`)
 
   it('expands to 232px from the bottom group, pushes main, keeps the sidebar, and survives a reload', () => {
@@ -383,7 +384,7 @@ describe('expandable project rail (#711)', () => {
     expect(style(RAIL, 'transitionProperty')).toBe('none')
     browser.click(TOGGLE)
     // No transition: the width is final on the next frame, with no wait for a settle.
-    expect(browser.waitForValue(`document.querySelector('${RAIL}').getBoundingClientRect().width`, (width) => width === 232)).toBe(232)
+    expect(waitForSettledSample(browser, `document.querySelector('${RAIL}').getBoundingClientRect().width`)).toBe(232)
     collapse()
   })
 })

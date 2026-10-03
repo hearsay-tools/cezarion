@@ -1,6 +1,7 @@
 import { resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
+import { waitForSettledSample } from './visual-ready'
 import { AgentBrowser, readTestEnv } from './agent-browser'
 import { waitForStatus } from './poll'
 
@@ -123,7 +124,7 @@ function sweep(slug: string, path: string, ready: string, chrome: 'list' | 'push
   }
 
   // `<=`, not `===`: the document may be narrower than the viewport, never wider.
-  const [scrollWidth, innerWidth] = browser.evaluate(
+  const [scrollWidth, innerWidth] = waitForSettledSample(browser,
     `[document.documentElement.scrollWidth, window.innerWidth]`,
   ) as [number, number]
   expect(scrollWidth, `${path} overflows the iPhone viewport horizontally`).toBeLessThanOrEqual(

@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
+import { waitForSettledSample } from './visual-ready'
 import { stopFixtureServer } from './fixture-server'
 import { expectGroupRowHeightMatchesTaskRow } from './row-height'
 import { AgentBrowser, HOVER_POINTER_ARGS, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
@@ -363,19 +364,19 @@ describe('task quick-list', () => {
         titleLeft: row.querySelector('[data-slot="group-title"]').getBoundingClientRect().left,
         meta: row.querySelector('[data-slot="group-meta"]').textContent }
     })()`
-    const collapsed = browser.waitForValue(geometry, (g: Geometry | null) => g?.expanded === 'false') as Geometry
+    const collapsed = waitForSettledSample(browser, geometry, (g: Geometry | null) => g?.expanded === 'false') as Geometry
     // Two review members, no shared reference: the aggregate in words, then the latest age.
     expect(collapsed.meta).toBe('2 needs review · 11m')
     browser.click(TILE)
-    const open = browser.waitForValue(geometry, (g: Geometry | null) => g?.expanded === 'true') as Geometry
+    const open = waitForSettledSample(browser, geometry, (g: Geometry | null) => g?.expanded === 'true') as Geometry
     expect(open.height).toBe(collapsed.height)
-    const dots = browser.waitForValue(`(() => {
+    const dots = waitForSettledSample(browser, `(() => {
       const slots = ['fix-var-a', 'fix-var-b'].map((id) => document.querySelector('${ROW}[data-run-id="' + id + '"] [data-slot="task-row-dot"]'))
       return slots.every(Boolean) ? slots.map((slot) => slot.getBoundingClientRect().left) : null
     })()`) as number[]
     for (const left of dots) expect(Math.abs(left - collapsed.titleLeft), `dot at ${left}, title at ${collapsed.titleLeft}`).toBeLessThanOrEqual(1)
     browser.click(TILE)
-    const closed = browser.waitForValue(geometry, (g: Geometry | null) => g?.expanded === 'false') as Geometry
+    const closed = waitForSettledSample(browser, geometry, (g: Geometry | null) => g?.expanded === 'false') as Geometry
     expect(closed.height).toBe(collapsed.height)
   })
 
@@ -729,9 +730,9 @@ describe('tasks table overview', () => {
       browser.evaluate(`getComputedStyle(document.querySelector('[data-slot="tasks-table"]')).display`)
     ).toBe('none')
     // Nothing forces the page wider than the phone.
-    expect(browser.evaluate(`document.documentElement.scrollWidth <= window.innerWidth`)).toBe(true)
+    expect(waitForSettledSample(browser, `document.documentElement.scrollWidth <= window.innerWidth`)).toBe(true)
     expect(
-      browser.evaluate(`(() => {
+      waitForSettledSample(browser, `(() => {
         const main = document.querySelector('[data-slot="main"]')
         return main.scrollWidth <= main.clientWidth
       })()`)
@@ -886,7 +887,7 @@ describe('the tasks table under worst-case row content', () => {
           if (${JSON.stringify(density)} === 'comfortable') delete document.documentElement.dataset.density
           else document.documentElement.dataset.density = ${JSON.stringify(density)}
         })()`)
-        const glyphs = browser.waitForValue(`(() => {
+        const glyphs = waitForSettledSample(browser, `(() => {
           const dataset = document.documentElement.dataset.density ?? 'comfortable'
           if (dataset !== ${JSON.stringify(density)}) return null
           const dot = document.querySelector('${sidebarRow} [data-slot="status-dot"][data-shape="workers"]')
@@ -937,7 +938,7 @@ describe('the tasks table under worst-case row content', () => {
              && document.querySelector('${wrappingRow} td[data-column-id="cpu"]') !== null`,
         )
 
-        const facts = browser.evaluate(`(() => {
+        const facts = waitForSettledSample(browser, `(() => {
           const metricsRow = document.querySelector('${wrappingRow}')
           const firstCell = metricsRow.querySelector('td[data-column-id="task"]')
           const firstLink = firstCell.querySelector('a[href*="/tasks/"]')
@@ -1090,7 +1091,7 @@ describe('the tasks table under worst-case row content', () => {
             return !!button && button === document.activeElement && button.matches(':focus-visible') && getComputedStyle(button).opacity === '1'
           })()`,
         )
-        const actions = browser.evaluate(`(() => {
+        const actions = waitForSettledSample(browser, `(() => {
           const cell = document.querySelector('${wrappingRow} td[data-column-id="task"]')
           const bounds = cell.getBoundingClientRect()
           return [...cell.querySelectorAll('button')].map((button) => {
@@ -1114,7 +1115,7 @@ describe('the tasks table under worst-case row content', () => {
 
   it('gives the task column the width the Workflow fold releases, and remembers a resized sidebar', () => {
     const taskWidth = () =>
-      Number(browser.evaluate(
+      Number(waitForSettledSample(browser,
         `document.querySelector('${wrappingRow} td[data-column-id="task"]').getBoundingClientRect().width`,
       ))
 
@@ -1129,7 +1130,7 @@ describe('the tasks table under worst-case row content', () => {
     browser.goto(`${worstUrl}/p/${worstProject}/`)
     browser.waitForFunction(`document.querySelector('${wrappingRow}') !== null`)
     showResourceTable()
-    const resized = browser.evaluate(`({
+    const resized = waitForSettledSample(browser, `({
       preference: localStorage.getItem('cez-sidebar-width'),
       sidebarWidth: document.querySelector('[data-slot="sidebar"]').getBoundingClientRect().width,
       taskWidth: document.querySelector('${wrappingRow} td[data-column-id="task"]').getBoundingClientRect().width,
@@ -1165,7 +1166,7 @@ describe('a row under width contention, in a column the user can widen', () => {
   /** The `<aside>`'s resolved width in px — the number the drag is actually moving. */
   const sidebarWidth = () =>
     Number(
-      browser.evaluate(
+      waitForSettledSample(browser,
         `document.querySelector('[data-slot="sidebar"]').getBoundingClientRect().width`
       )
     )
@@ -1178,7 +1179,7 @@ describe('a row under width contention, in a column the user can widen', () => {
    *  Read only while the measured node exists; keep the width assertions unchanged. */
   const titleWidth = () =>
     Number(
-      browser.waitForValue(
+      waitForSettledSample(browser,
         `document.querySelector('${ROW_ID} [data-slot="task-row-title"]')?.getBoundingClientRect().width ?? null`
       )
     )
@@ -1197,7 +1198,7 @@ describe('a row under width contention, in a column the user can widen', () => {
 
   /** Grab the handle at its middle and pull it `dx` px horizontally. */
   const dragHandle = (dx: number) => {
-    const box = browser.evaluate(`(() => {
+    const box = waitForSettledSample(browser, `(() => {
       const r = document.querySelector('${HANDLE}').getBoundingClientRect()
       return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }
     })()`) as { x: number; y: number }
@@ -1300,7 +1301,7 @@ describe('a row under width contention, in a column the user can widen', () => {
   it('gives the name real width at the default 264px, and drops the diff pair to do it', () => {
     expect(sidebarWidth()).toBe(264)
 
-    const measured = browser.evaluate(`(() => {
+    const measured = waitForSettledSample(browser, `(() => {
       const row = document.querySelector('${ROW_ID}')
       const title = row.querySelector('[data-slot="task-row-title"]')
       const diff = row.querySelector('[data-slot="diff-stat"]')
@@ -1370,7 +1371,7 @@ describe('a row under width contention, in a column the user can widen', () => {
     const META_ROW = '[data-slot="task-row"][data-run-id="meta-load"]'
     type Meta = { age: string | null; text: string; glyphInside: boolean; ageInside: boolean; glyphFirst: boolean }
     const read = () =>
-      browser.evaluate(`(() => {
+      waitForSettledSample(browser, `(() => {
         const meta = document.querySelector('${META_ROW} [data-slot="task-row-meta"]')
         const box = meta.getBoundingClientRect()
         const glyph = meta.querySelector('[data-slot="task-row-notify"]').getBoundingClientRect()
@@ -1448,7 +1449,7 @@ describe('a row under width contention, in a column the user can widen', () => {
       browser.evaluate(`document.querySelectorAll('[data-slot="mobile-nav-drawer"] ${HANDLE}').length`)
     ).toBe(0)
     expect(
-      browser.evaluate(
+      waitForSettledSample(browser,
         `Math.round(document.querySelector('[data-slot="mobile-nav-drawer"]').getBoundingClientRect().width)`
       )
     ).toBe(322)
@@ -1523,7 +1524,8 @@ describe('variant rows and the group row under width pressure', () => {
     open(264)
     for (const id of ['wa', 'wb']) {
       // The layout settles after the ResizeObserver's first pass: wait for a stable answer.
-      const line = browser.waitForStable(lineOf(id), { holdMs: 300, matcher: (l: Line | null) => l !== null && !(l.overflows && l.tokens) }) as Line
+      const line = browser.waitForStable(lineOf(id), { holdMs: 300, matcher: (l: Line | null) => l !== null }) as Line
+      expect(!(line.overflows && line.tokens), JSON.stringify(line)).toBe(true)
       expect(line.text, id).toBe('opencode · $0.40')
       // Rendered text keeps the separator's spaces (a flex item dropped the leading one).
       expect(line.rendered, id).toBe('opencode · $0.40')
@@ -1536,7 +1538,9 @@ describe('variant rows and the group row under width pressure', () => {
   it('at 420px, has room for both: the full cost and the tokens', () => {
     open(420)
     for (const id of ['wa', 'wb']) {
-      const line = browser.waitForStable(lineOf(id), { holdMs: 300, matcher: (l: Line | null) => l !== null && l.tokens && !l.overflows }) as Line
+      const line = browser.waitForStable(lineOf(id), { holdMs: 300, matcher: (l: Line | null) => l !== null }) as Line
+      expect(line.tokens, JSON.stringify(line)).toBe(true)
+      expect(line.overflows, JSON.stringify(line)).toBe(false)
       expect(line.costShown, JSON.stringify(line)).toBe(true)
     }
   })
@@ -1554,7 +1558,7 @@ describe('variant rows and the group row under width pressure', () => {
         height: Math.round(row.getBoundingClientRect().height), meta: meta.textContent,
         inert: chip?.dataset.inert ?? null, links: meta.querySelectorAll('a').length, inToggle: chip?.closest('button') != null }
     })()`
-    const collapsed = browser.waitForValue(group, (g: Group | null) => g?.expanded === 'false') as Group
+    const collapsed = waitForSettledSample(browser, group, (g: Group | null) => g?.expanded === 'false') as Group
     // The fixture's newest member finished 9m before `now`, a module-load constant, while the row
     // ages against the live clock: a slow shard start legitimately shows 10m, 11m... So pin the
     // age to 9m plus the minutes elapsed since the fixture was built (one minute of rounding slack)
@@ -1571,7 +1575,7 @@ describe('variant rows and the group row under width pressure', () => {
     // not interactive, so nothing is nested in the button.
     expect(collapsed).toMatchObject({ inert: 'true', links: 0, inToggle: true })
     browser.click(`${GROUP} [data-slot="group-tile"]`)
-    const expanded = browser.waitForValue(group, (g: Group | null) => g?.expanded === 'true') as Group
+    const expanded = waitForSettledSample(browser, group, (g: Group | null) => g?.expanded === 'true') as Group
     expect(expanded.height).toBe(collapsed.height)
     // The members no longer repeat the reference their group row carries.
     const memberMeta = browser.waitForValue(`document.querySelector('${member('wa')} [data-slot="task-row-meta"]')?.textContent ?? null`) as string
@@ -1582,7 +1586,7 @@ describe('variant rows and the group row under width pressure', () => {
   it('gives the compare link a real 44px touch target beside the disclosure, and a tap opens compare', () => {
     open(264)
     type Target = { noHover: boolean; w: number; h: number; clearOfDisclosure: boolean; hits: boolean[]; x: number; y: number }
-    const target = browser.waitForValue(`(() => {
+    const target = waitForSettledSample(browser, `(() => {
       const link = document.querySelector('${GROUP} [data-slot="group-compare"]')
       const chevron = document.querySelector('${GROUP} [data-slot="group-disclosure"]')
       if (!link || !chevron) return null
@@ -1645,7 +1649,7 @@ describe('persistent task pins (#93)', () => {
     browser.goto(`${baseUrl}${scoped('/')}`)
     browser.waitForFunction(`document.querySelector('[data-slot="task-card"][data-run-id="fix-var-b"]') !== null`)
     const pin = '[data-slot="task-card"][data-run-id="fix-var-b"] [data-slot="pin-toggle"]'
-    const target = browser.evaluate(`(() => { const x = document.querySelector('${pin}'); const r = x.getBoundingClientRect(); return { width: r.width, height: r.height, pressed: x.getAttribute('aria-pressed') } })()`) as { width: number; height: number; pressed: string }
+    const target = waitForSettledSample(browser, `(() => { const x = document.querySelector('${pin}'); const r = x.getBoundingClientRect(); return { width: r.width, height: r.height, pressed: x.getAttribute('aria-pressed') } })()`) as { width: number; height: number; pressed: string }
     expect(target.width).toBeGreaterThanOrEqual(44)
     expect(target.height).toBeGreaterThanOrEqual(44)
     expect(target.pressed).toBe('false')
@@ -1866,7 +1870,7 @@ describe('swipe to archive on touch (#780 §7)', () => {
   /** The row's box, scrolled into view and settled (no running finite animation: a running
    *  row's status dot pulses forever), read in one step. */
   const box = (id: string) =>
-    browser.waitForValue<{ left: number; right: number; top: number; bottom: number; cy: number; width: number }>(`(() => {
+    waitForSettledSample<{ left: number; right: number; top: number; bottom: number; cy: number; width: number }>(browser, `(() => {
       const row = document.querySelector('${rowSel(id)}')
       if (!row || row.getAnimations({ subtree: true }).some((a) => a.playState === 'running' && a.effect?.getComputedTiming().iterations !== Infinity)) return null
       row.scrollIntoView({ block: 'nearest' })

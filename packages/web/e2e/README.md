@@ -18,6 +18,7 @@ command lands. The seam closes that gap in two places:
 | `setViewport` | An animation frame at the new size, so every native `matchMedia`/`resize` listener has run and its tree switch has committed (#794). `ResizeObserver`-driven state may still lag: wait on the DOM you read | nothing |
 | `waitForFunction(js)` | A predicate becomes truthy | nothing — **the read that follows is a second call** |
 | `waitForValue(js, matcher?)` | An expression yields a value the matcher accepts (#409) | **that sample** |
+| `waitForSettledSample(browser, js)` | Fonts, native rendering, finite animations and stable geometry/focus, independently of the assertion (#795) | **the held measurement**, including `false` / `0` |
 | `waitForStable(js, { holdMs })` | The matcher holds across consecutive polls spanning `holdMs` (#415). `waitForValue` is this with `holdMs: 0`. | **the held sample** |
 
 `waitForValue` is the one to reach for whenever a test needs a value the page has to reach
@@ -211,6 +212,13 @@ held loading fixtures must omit idle. Infinite loading spinners remain valid loa
 For transition regressions, arm frame sampling before the trigger, observe the named loading
 state and actual rendered frames before releasing the response, and keep sampling until the
 ready/unavailable target settles. Final-state assertions alone cannot detect a transient jump.
+
+`waitForSettledSample` composes the same visual readiness with the measured expression in
+one browser task. Keep expected line heights, contrast, viewport coverage and focus-visible
+results in assertions, not readiness matchers. For lazy transcript geometry, observe
+`checkVisibility({ contentVisibilityAuto: true })` before any box read, scroll the target
+into view, and reject the sample until native rendering is observable on a later frame.
+See [the exhaustive #795 audit](settle-wait-audit-795.md) for sites and red/green evidence.
 
 HTTP `pollFor` probes receive an `AbortSignal`. Pass it through `fetch` and body reads (or use
 `pollJson`); a cancelled probe must not leave a request running. `timeoutMs` bounds wall-clock

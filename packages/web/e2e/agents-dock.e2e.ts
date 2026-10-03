@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
+import { waitForSettledSample } from './visual-ready'
 import { stopFixtureServer } from './fixture-server'
 import { AgentBrowser, cezarCli, fixtureServeEnv } from './agent-browser'
 import record from './fixtures/subagents-run.record.json'
@@ -150,7 +151,7 @@ function revealSubagentSection(): void {
 function clickThreadControl(selector: string): void {
   // Send actual upward pointer intent to detach follow-tail before bringing a
   // document-flow control into view. Assert the real target, not scrollTop=0.
-  const point = browser.evaluate(`(() => {
+  const point = waitForSettledSample(browser, `(() => {
     const rect = document.querySelector('[data-slot="main"]').getBoundingClientRect()
     return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }
   })()`) as { x: number; y: number }
@@ -244,7 +245,7 @@ describe('the Agents dock against a replayed fan-out', () => {
     settledClick('[data-slot="subagent-sheet"] [data-slot="tool-streak"] button')
     browser.waitForFunction(`document.querySelector('[data-slot="subagent-sheet"] [data-slot="tool-streak"] [aria-expanded="true"]') !== null`)
     const metrics = JSON.parse(
-      browser.evaluate(`JSON.stringify((() => {
+      waitForSettledSample(browser, `JSON.stringify((() => {
         const el = document.querySelector('[data-slot="subagent-sheet"] [data-slot="transcript-viewport"]')
         const style = getComputedStyle(el)
         return {

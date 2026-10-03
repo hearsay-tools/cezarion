@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
+import { waitForSettledSample } from './visual-ready'
 import { stopFixtureServer } from './fixture-server'
 import { AgentBrowser, cezarCli, fixtureServeEnv } from './agent-browser'
 import { waitForHealth } from './poll'
@@ -183,7 +184,7 @@ describe(`diff virtualization on a generated ${FIXTURE_FILES}-file changeset`, (
     // A header whose card still covers the viewport top must be pinned AT that top edge, not
     // scrolled away with its card. virtua absolutely-positions every item, which is exactly
     // the layout that could silently kill `position: sticky`.
-    const pinned = browser.evaluate(`(() => {
+    const pinned = waitForSettledSample(browser, `(() => {
       const scroller = ${MAIN}
       const top = scroller.getBoundingClientRect().top
       for (const card of document.querySelectorAll('[data-slot="diff-file"]')) {
@@ -213,7 +214,7 @@ describe(`diff virtualization on a generated ${FIXTURE_FILES}-file changeset`, (
     // (`startMargin`). Get that wrong — measuring it before the scroller ref is attached pins
     // it at 0 — and the window is computed for a point further down the list than the reader
     // is at, leaving an uncovered band at the top of the viewport once the buffer runs out.
-    const gap = browser.evaluate(`(() => {
+    const gap = waitForSettledSample(browser, `(() => {
       const scroller = ${MAIN}
       const fold = scroller.getBoundingClientRect().top
       const tops = [...document.querySelectorAll('[data-slot="diff-file"]')]
@@ -236,7 +237,7 @@ describe(`diff virtualization on a generated ${FIXTURE_FILES}-file changeset`, (
   it('scrolls the file tree independently of the diff', () => {
     openChanges('virtual')
 
-    const pane = browser.evaluate(`(() => {
+    const pane = waitForSettledSample(browser, `(() => {
       const pane = document.querySelector('[data-slot="changes-tree-pane"]')
       if (!pane) return null
       const scroller = ${MAIN}
@@ -273,7 +274,7 @@ describe(`diff virtualization on a generated ${FIXTURE_FILES}-file changeset`, (
     // last file no longer moves `main`. It says nothing about `overscroll-contain`: a scripted
     // scroll never chains to an ancestor whatever the overscroll-behavior is, and the driver's
     // input ops are pointer-based, with no wheel to send. Wheel chaining stays manual-QA territory.
-    const moved = browser.evaluate(`(() => {
+    const moved = waitForSettledSample(browser, `(() => {
       const pane = document.querySelector('[data-slot="changes-tree-pane"]')
       pane.scrollTop = pane.scrollHeight
       return { paneTop: Math.round(pane.scrollTop), mainTop: Math.round(${MAIN}.scrollTop) }

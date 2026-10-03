@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
+import { waitForSettledSample } from './visual-ready'
 import { stopFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { applyContrastQaVariant, contrastQaVariants, contrastSampleExpression, focusWithKeyboard, hoverVisiblePoint, type ContrastSample } from './contrast'
@@ -105,7 +106,7 @@ describe('chronological worker conversation', () => {
       for (const width of [360, 1440]) {
         browser.setViewport(width, 900)
         browser.goto(`${base}/p/${project}/tasks/${parent}?thread=flat`)
-        const insets = browser.waitForValue<Array<{ top: number; right: number; overflow: boolean }>>(`(() => {
+        const insets = waitForSettledSample<Array<{ top: number; right: number; overflow: boolean }>>(browser, `(() => {
           const selectors = ['[data-slot="user-bubble"]', '[data-slot="assistant-message"]', '${request}', '${replyCard}'];
           const cards = selectors.map(selector => document.querySelector(selector));
           if (cards.some(card => !card?.querySelector('[data-slot="message-time"]'))) return null;
@@ -119,7 +120,7 @@ describe('chronological worker conversation', () => {
         expect(batchTimes).toEqual([reqA.createdAt, reqB.createdAt])
         expect(browser.waitForValue<string>(`document.querySelector('${request} > div.grid')?.textContent`, value => value.includes('First sent'))).toContain('First sent')
         if (width === 360) {
-          const wrappedHeading = browser.waitForValue<number>(`document.querySelector('${request} > div > div > p')?.getBoundingClientRect().height`)
+          const wrappedHeading = waitForSettledSample<number>(browser, `document.querySelector('${request} > div > div > p')?.getBoundingClientRect().height`)
           expect(wrappedHeading).toBeGreaterThan(50)
         }
         for (const { top, right, overflow } of insets) {
@@ -160,9 +161,9 @@ describe('chronological worker conversation', () => {
           top: main.scrollTop, height: main.clientHeight, scrollHeight: main.scrollHeight };
       })()`, {
         holdMs: 100,
-        matcher: (state: { top: number; height: number; scrollHeight: number }) =>
-          state.scrollHeight > state.height && state.top >= state.scrollHeight - state.height - 24,
+        matcher: (state) => state !== null,
       })
+      expect(scroller.scrollHeight > scroller.height && scroller.top >= scroller.scrollHeight - scroller.height - 24).toBe(true)
       browser.evaluate(`window.__cezWheelProbe = null; window.addEventListener('wheel', event => {
         window.__cezWheelProbe = {
           trusted: event.isTrusted,
@@ -178,12 +179,10 @@ describe('chronological worker conversation', () => {
       expect(wheel.trusted).toBe(true)
       expect(wheel.inMain).toBe(true)
       expect(wheel.deltaY).toBeLessThan(0)
-      browser.waitForStable(`document.querySelector('[data-slot="main"]').scrollTop`, {
-        holdMs: 100,
-        matcher: (top: number) => top < scroller.top,
-      })
+      const wheelTop = browser.waitForStable<number>(`document.querySelector('[data-slot="main"]').scrollTop`, { holdMs: 100 })
+      expect(wheelTop).toBeLessThan(scroller.top)
       hoverVisiblePoint(browser, `${request} [data-slot="collapsible-trigger"]`)
-      browser.waitForStable(`(() => {
+      const visiblePoint = browser.waitForStable<{ y: number; headerBottom: number; visible: boolean }>(`(() => {
         const target = document.querySelector('${request} [data-slot="collapsible-trigger"]');
         const rect = target.getBoundingClientRect();
         const x = rect.left + rect.width / 2;
@@ -193,14 +192,15 @@ describe('chronological worker conversation', () => {
           visible: hit === target || target.contains(hit) };
       })()`, {
         holdMs: 100,
-        matcher: (point: { y: number; headerBottom: number; visible: boolean }) => point.visible && point.y > point.headerBottom,
+        matcher: (point) => point !== null,
       })
+      expect(visiblePoint.visible && visiblePoint.y > visiblePoint.headerBottom).toBe(true)
       browser.click(`${request} [data-slot="collapsible-trigger"]`)
       const detail = browser.waitForValue<string>(`document.querySelector('${request}').textContent`, value => value.includes('Delivery acknowledged'))
       expect(detail).toContain('2026-09-20T12:00:00Z')
       expect(detail).toContain('2026-09-20T12:04:00Z')
       expect(detail).toContain('2026-09-20T12:05:00Z')
-      const bounds = browser.waitForValue<{ overflow: boolean; targets: number[] }>(`(() => ({
+      const bounds = waitForSettledSample<{ overflow: boolean; targets: number[] }>(browser, `(() => ({
         overflow: document.documentElement.scrollWidth > innerWidth || [...document.querySelectorAll('${card}')].some(el => el.scrollWidth > el.clientWidth),
         targets: [...document.querySelectorAll('${card} button, ${card} a')].map(el => el.getBoundingClientRect().height)
       }))()`)
@@ -228,7 +228,7 @@ describe('chronological worker conversation', () => {
         const contrast = browser.waitForValue<ContrastSample>(contrastSampleExpression(selector))
         expect(contrast.ratio).toBeGreaterThanOrEqual(4.5)
       }
-      const bounds = browser.waitForValue<{ overflow: boolean; targets: number[] }>(`(() => ({
+      const bounds = waitForSettledSample<{ overflow: boolean; targets: number[] }>(browser, `(() => ({
         overflow: document.documentElement.scrollWidth > innerWidth || [...document.querySelectorAll('${card}')].some(el => el.scrollWidth > el.clientWidth),
         targets: [...document.querySelectorAll('${card} button, ${card} a')].map(el => el.getBoundingClientRect().height)
       }))()`)
@@ -255,7 +255,8 @@ describe('chronological worker conversation', () => {
     focusWithKeyboard(browser, `${replyCard} ${connector}`)
     browser.press('Enter')
     waitForFocusedCard(request)
-    const top = browser.waitForValue<number>(`document.querySelector('${request}').getBoundingClientRect().top`, value => value >= 0 && value < 500)
+    const top = waitForSettledSample<number>(browser, `document.querySelector('${request}').getBoundingClientRect().top`)
+    expect(top).toBeGreaterThanOrEqual(0)
     expect(top).toBeLessThan(500)
     focusWithKeyboard(browser, `${request} ${connector}`)
     browser.press('Enter')

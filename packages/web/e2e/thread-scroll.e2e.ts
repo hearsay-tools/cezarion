@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
+import { waitForSettledSample } from './visual-ready'
 import { stopFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { expectedRowCount, largeThreadEvents } from './fixtures/make-large-thread'
@@ -76,7 +77,7 @@ const nearBottom = `(() => { const m = ${MAIN}; return m.scrollHeight - m.scroll
 const rowCount = () => browser.count('[data-slot="thread-row"]')
 const domSize = () => Number(browser.evaluate(`document.querySelectorAll('*').length`))
 const assistantWidth = () =>
-  Number(browser.evaluate(`document.querySelector('[data-slot="assistant-message"]')?.getBoundingClientRect().width ?? 0`))
+  Number(waitForSettledSample(browser, `document.querySelector('[data-slot="assistant-message"]')?.getBoundingClientRect().width ?? 0`))
 
 /**
  * Scroll away from the tail like a reader would — and INSIST, like a reader would.
@@ -268,7 +269,7 @@ describe('thread virtualization on a 1,000-row transcript', () => {
     browser.waitForFunction(`document.querySelector('[data-slot="jump-to-latest"]') !== null`)
     const parked = Number(browser.evaluate(`${MAIN}.scrollTop`))
     expect(parked).toBeGreaterThan(1000)
-    const maxTop = Number(browser.evaluate(`${MAIN}.scrollHeight - ${MAIN}.clientHeight`))
+    const maxTop = Number(waitForSettledSample(browser, `${MAIN}.scrollHeight - ${MAIN}.clientHeight`))
     expect(maxTop - parked).toBeGreaterThan(1000) // genuinely mid-thread, not a near-tail park
 
     // …leave through the sidebar (a client-side <Link> — a reload would drop the caches)…
@@ -296,9 +297,8 @@ describe('phone viewports', () => {
 
     // Let measured virtual rows settle. scrollHeight is integer-valued while the dock's
     // DOMRect retains fractions, so allow the final subpixel rather than calling it clipping.
-    browser.waitForFunction(`document.querySelector('[data-slot="thread-dock"]').getBoundingClientRect().bottom <= innerHeight + 1`)
     // The composer dock fits the visual viewport in document flow.
-    const dock = browser.evaluate(`(() => {
+    const dock = waitForSettledSample(browser, `(() => {
       const dock = document.querySelector('[data-slot="thread-dock"]')
       const rect = dock.getBoundingClientRect()
       return { bottomGap: window.innerHeight - rect.bottom, cssBottom: getComputedStyle(dock).bottom }
@@ -381,7 +381,7 @@ describe('phone viewports', () => {
     openThread()
     browser.evaluate(`document.documentElement.style.setProperty('--kb', '280px')`)
     browser.evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`)
-    const reserved = browser.evaluate(`(() => {
+    const reserved = waitForSettledSample(browser, `(() => {
       const main = ${MAIN}.getBoundingClientRect();
       const shellComposer = document.querySelector('[data-slot="main"] + [data-slot="composer"]');
       const reserve = shellComposer.getBoundingClientRect();
@@ -422,7 +422,7 @@ describe('tool cards remain below assistant messages after live appends', () => 
       // React can commit an expanded card before ResizeObserver delivers its new size.
       // Measure after layout delivery, not between those two phases of the same frame.
       browser.evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`)
-      const overlaps = browser.evaluate(`(() => {
+      const overlaps = waitForSettledSample(browser, `(() => {
         const rows = [...document.querySelectorAll('[data-slot="thread-row"]')];
         return rows.flatMap((row, index) => {
           const next = rows[index + 1];
@@ -469,7 +469,7 @@ describe('tool cards remain below assistant messages after live appends', () => 
       })()`)
       assertSeparated()
     }
-    expect(browser.evaluate(`(() => {
+    expect(waitForSettledSample(browser, `(() => {
       const r = document.querySelector('[data-slot="thread-dock"]').getBoundingClientRect();
       const rows = document.querySelector('[data-slot="thread-rows"]').getBoundingClientRect();
       return r.top >= rows.bottom - 1;

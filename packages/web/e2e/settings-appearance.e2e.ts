@@ -2,6 +2,7 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
+import { waitForSettledSample } from './visual-ready'
 import { AgentBrowser, readTestEnv } from './agent-browser'
 import { waitForServerAppearance } from './poll'
 
@@ -113,12 +114,12 @@ describe('settings → appearance against the live dry-run server', () => {
     const section = `document.querySelector('[data-slot="appearance-section"]')`
     // The #622 board's one-line header is a fixed 16/28 bar, so density leaves it alone; the
     // section gap below is what compact tightens.
-    expect(Number(browser.evaluate(`${header}.offsetHeight`))).toBe(56)
+    expect(Number(waitForSettledSample(browser, `${header}.offsetHeight`))).toBe(56)
     expect(Number(browser.evaluate(`parseFloat(getComputedStyle(${section}).rowGap)`))).toBe(28)
 
     browser.click('[data-slot="appearance-density"] [data-value="compact"]')
     browser.waitForFunction(`document.documentElement.dataset.density === 'compact'`)
-    expect(Number(browser.evaluate(`${header}.offsetHeight`))).toBe(56)
+    expect(Number(waitForSettledSample(browser, `${header}.offsetHeight`))).toBe(56)
     expect(Number(browser.evaluate(`parseFloat(getComputedStyle(${section}).rowGap)`))).toBe(24.5)
     await waitForServerAppearance(baseUrl, (a) => a.density === 'compact')
 

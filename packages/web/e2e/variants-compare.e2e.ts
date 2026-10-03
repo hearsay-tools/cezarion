@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
+import { waitForSettledSample } from './visual-ready'
 import { stopFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { waitForHealth, waitForStatus } from './poll'
@@ -150,7 +151,7 @@ describe('the variants compare view against two settled dry runs', () => {
     browser.setViewport(390, 844)
     browser.waitForFunction(`document.querySelectorAll('[data-slot="variant-column"]').length === 2`)
     // Structural stacking proof: at 390px the two columns occupy the same x-range (one per row).
-    const stacked = browser.evaluate(`(() => {
+    const stacked = waitForSettledSample(browser, `(() => {
       const [a, b] = document.querySelectorAll('[data-slot="variant-column"]')
       const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect()
       return Math.abs(ra.left - rb.left) < 1 && rb.top >= ra.bottom

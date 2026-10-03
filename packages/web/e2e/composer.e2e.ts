@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
+import { waitForSettledSample } from './visual-ready'
 import { stopFixtureServer } from './fixture-server'
 import { AgentBrowser, cezarCli, fixtureServeEnv } from './agent-browser'
 import { waitForHealth, waitForStatus } from './poll'
@@ -190,11 +191,11 @@ describe('the thread composer against a live waiting session', () => {
     )
     browser.setViewport(360, 640)
     for (const label of ['Cancel dictation', 'Insert transcription', 'Insert transcription and send']) {
-      expect(browser.evaluate(`(() => { const r = document.querySelector('[aria-label="${label}"]').getBoundingClientRect(); return [r.width, r.height] })()`)).toEqual([44, 44])
+      expect(waitForSettledSample(browser, `(() => { const r = document.querySelector('[aria-label="${label}"]').getBoundingClientRect(); return [r.width, r.height] })()`)).toEqual([44, 44])
     }
-    expect(browser.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true)
+    expect(waitForSettledSample(browser, `document.documentElement.scrollWidth <= innerWidth`)).toBe(true)
     browser.setViewport(1440, 900)
-    expect(browser.evaluate(`document.querySelector('[aria-label="Cancel dictation"]').getBoundingClientRect().width`)).toBe(32)
+    expect(waitForSettledSample(browser, `document.querySelector('[aria-label="Cancel dictation"]').getBoundingClientRect().width`)).toBe(32)
     browser.screenshot(`${artifactsDir}/composer-dictation.png`)
   })
 

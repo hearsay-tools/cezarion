@@ -6,6 +6,7 @@ import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, expect, it } from 'vitest'
+import { waitForSettledSample } from './visual-ready'
 import { waitForHealth } from './poll'
 import { stopFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
@@ -136,7 +137,7 @@ for (const [width, height] of [[1440, 900], [360, 640]]) for (const theme of ['l
     browser.setReducedMotion()
     browser.evaluate(`document.querySelector('${region} a').focus()`)
     for (let i = 1; i < 32; i++) browser.press('Tab')
-    const facts = browser.evaluate(`(() => {
+    const facts = waitForSettledSample(browser, `(() => {
       const section = document.querySelector('${region}'); const list = section.querySelector('ul'); const links = [...section.querySelectorAll('a')];
       const last = links.at(-1), r = last.getBoundingClientRect(), container = list.getBoundingClientRect();
       return { focused: document.activeElement === last, visible: r.top >= Math.max(0, container.top) && r.bottom <= Math.min(innerHeight, container.bottom),
@@ -270,7 +271,7 @@ it('keeps request waits consistent in threads, global tasks and the palette at p
       expect(browser.text('[data-slot="paused-hint"]')).toContain(label)
       expect(browser.text(region)).toContain(label)
       expect(browser.count('[data-slot="ask-card"]')).toBe(0)
-      expect(browser.evaluate('document.documentElement.scrollWidth > innerWidth')).toBe(false)
+      expect(waitForSettledSample(browser, 'document.documentElement.scrollWidth > innerWidth')).toBe(false)
       browser.screenshot(join(artifacts, `request-wait-${id === requestWorkerId ? 'worker' : 'parent'}-${width}-${theme}.png`), { viewport: true })
       observations.push({ requestWait: id === requestWorkerId ? 'worker' : 'parent', width, height, theme, label, overflow: false })
     }

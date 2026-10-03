@@ -5,6 +5,7 @@ import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { waitForSettledSample } from './visual-ready'
 import type { RunRecord } from '@open-mercato/cezar-api-client'
 import { waitForHealth } from './poll'
 import { stopFixtureServer } from './fixture-server'
@@ -121,7 +122,7 @@ describe('mobile Tasks controls', () => {
       browser.evaluate(`document.documentElement.dataset.density = '${density}'; document.documentElement.classList.toggle('light', ${theme === 'light'})`)
       for (const width of [360, 1440]) {
         browser.setViewport(width, width === 360 ? 640 : 900)
-        const bounds = browser.evaluate(`(() => {
+        const bounds = waitForSettledSample(browser, `(() => {
           const header = document.querySelector('[data-route="tasks"] header');
           const nodes = [...header.querySelectorAll('input, button')].filter(el => el.checkVisibility());
           return {
@@ -150,7 +151,7 @@ describe('mobile Tasks controls', () => {
           browser.waitForFunction(`document.querySelector('${item}') !== null`)
           settle(item)
           expect(browser.evaluate(`document.activeElement.textContent`)).toContain('Archive finished')
-          expect(browser.evaluate(`document.querySelector('${item}').getBoundingClientRect().height`)).toBeGreaterThanOrEqual(44)
+          expect(waitForSettledSample(browser, `document.querySelector('${item}').getBoundingClientRect().height`)).toBeGreaterThanOrEqual(44)
           // The menu returns focus to its trigger one task after it unmounts (#410): wait for it.
           dismissWithEscape(browser, { content: item, focus: actions })
         }

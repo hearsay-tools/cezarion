@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import { settleVisual } from './visual-ready'
+import { settleVisual, waitForSettledSample } from './visual-ready'
 import { stopFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv, getJson } from './agent-browser'
 import { waitForHealth } from './poll'
@@ -214,13 +214,9 @@ describe('plan mode against a live dry-run server', () => {
     browser.setViewport(390, 844)
     // The reflow must LAND before anything measures or clicks: a click computed against the
     // pre-resize layout dispatches into the gap between cards and silently does nothing.
-    browser.waitForFunction(
-      `window.innerWidth === 390 &&
-       document.querySelector('[data-slot="plan-review"]')?.getBoundingClientRect().width > 380 &&
-       Math.round(document.querySelector('[data-slot="plan-review"]').getBoundingClientRect().y) === 57`,
-    )
+    // #795: rendered geometry must settle independently of the 57px shell expectation.
     // Rounded: Radix's zoom-in entrance leaves sub-pixel transform residue on the rect.
-    const rect = browser.evaluate(
+    const rect = waitForSettledSample(browser,
       `(() => { const r = document.querySelector('[data-slot="plan-review"]').getBoundingClientRect();
         return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width) } })()`,
     ) as { x: number; y: number; w: number }

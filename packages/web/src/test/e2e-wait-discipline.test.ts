@@ -423,3 +423,12 @@ it('exempts event deadlines per call without hiding a success sleep on the same 
     expect(lines(sites)).toEqual([1])
   }
 })
+
+// #795: factoring a sample into shared readiness must not hide its page code
+// from the existing ratchet (no new exemptions or baseline allowances).
+it('scans settled samples for forbidden hover waits and React DOM writes', () => {
+  expect(rules(scanSource('x.e2e.ts', `waitForSettledSample(browser, \`document.querySelector('.m').matches(':hover')\`)`)))
+    .toContain('hover-in-wait')
+  expect(rules(scanSource('x.e2e.ts', `waitForSettledSample(browser, \`document.querySelector('.title').textContent = 'fake'\`)`)))
+    .toContain('product-dom-write')
+})

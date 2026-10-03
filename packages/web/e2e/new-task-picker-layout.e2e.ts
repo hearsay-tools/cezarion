@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, expect, it } from 'vitest'
 
+import { waitForSettledSample } from './visual-ready'
 import { stopFixtureServer } from './fixture-server'
 import { AgentBrowser, cezarCli, fixtureServeEnv } from './agent-browser'
 import { waitForHealth } from './poll'
@@ -70,7 +71,7 @@ type Box = { left: number; right: number; top: number; bottom: number; width: nu
 type Layout = { runner: Box; model: Box; effort: Box; group: Box; sidebarWidth: number; viewportOverflow: boolean; clipped: string[]; truncated: string[]; incorrectPrefixes: string[] }
 
 function layout(): Layout {
-  return browser.evaluate(`(() => {
+  return waitForSettledSample(browser, `(() => {
     const group = document.querySelector('[data-slot="agent-options"]');
     const get = (slot) => { const r = group.querySelector('[data-slot="' + slot + '"]').getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height }; };
     const r = group.getBoundingClientRect();
@@ -244,7 +245,7 @@ it('shows the fractional-width Model prefix when pi / grok-4.6 fits at three-col
   browser.click(`[data-testid="runner-pill-menu"] [role="menuitemradio"]:nth-child(${index})`)
   browser.waitForFunction(`document.querySelector('[data-slot="model-pill"]')?.getAttribute('aria-label') === 'Model · grok-4.6'`)
   browser.waitForFunction(`document.querySelector('[data-testid="runner-pill-menu"]') === null`)
-  const facts = browser.evaluate(`(() => {
+  const facts = waitForSettledSample(browser, `(() => {
     const group = document.querySelector('[data-slot="agent-options"]');
     const pill = group.querySelector('[data-slot="model-pill"]');
     const label = pill.querySelector('[data-slot="picker-label"]');

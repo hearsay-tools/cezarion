@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
+import { waitForSettledSample } from './visual-ready'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { focusWithKeyboard } from './contrast'
 import { artifactsDir } from './github-fixture'
@@ -308,7 +309,7 @@ describe('GitHub desktop sidebar (#622)', () => {
       browser.evaluate(`document.documentElement.classList.remove('light', 'dark'); document.documentElement.classList.add('${theme}')`)
       // The shot must show the loaded list, not the route's "Loading GitHub…" placeholder.
       browser.waitForFunction(`document.querySelectorAll(${JSON.stringify(ROWS)}).length === ${ISSUES.length} && !document.querySelector('[data-route="github"]').textContent.includes('Loading GitHub')`)
-      const facts = browser.waitForValue<Record<string, unknown>>(`(() => {
+      const facts = waitForSettledSample<Record<string, unknown>>(browser, `(() => {
         const sidebar = document.querySelector(${JSON.stringify(SIDEBAR)});
         const row = sidebar?.querySelector('[data-gh-filter="assigned"]');
         const active = sidebar?.querySelector('[data-gh-filter="all"]');
@@ -353,7 +354,7 @@ describe('GitHub desktop sidebar (#622)', () => {
       browser.setViewport(DESKTOP.width, DESKTOP.height)
       browser.goto(`${base}${scoped('/github?filter=no-task')}`)
       browser.evaluate(`document.documentElement.classList.remove('light', 'dark'); document.documentElement.classList.add('${theme}')`)
-      const facts = browser.waitForValue<Record<string, unknown>>(`(() => {
+      const facts = waitForSettledSample<Record<string, unknown>>(browser, `(() => {
         const title = document.querySelector('[data-slot="gh-masthead"] h1');
         const tabs = [...document.querySelectorAll('[data-slot="gh-tabs"] > a')];
         const controls = [...document.querySelectorAll('[data-slot="gh-filter-toolbar"] input[data-slot="gh-search"], [data-slot="gh-label-filter"], [data-slot="gh-filter-toolbar"] [data-slot="gh-issue-filters"] > button:first-of-type')];
@@ -384,7 +385,7 @@ describe('GitHub desktop sidebar (#622)', () => {
     browser.setViewport(DESKTOP.width, DESKTOP.height)
     browser.goto(`${base}/settings`)
     browser.waitForFunction(`document.querySelector('[data-slot="view-tabs"] a[aria-current="page"][aria-label="Settings"]') !== null && document.querySelector('[data-slot="view-tabs"] button[aria-label="More views"]') !== null`)
-    const fit = browser.evaluate(`(() => {
+    const fit = waitForSettledSample(browser, `(() => {
       const nav = document.querySelector('[data-slot="view-tabs"]');
       const inner = nav.getBoundingClientRect().right - parseFloat(getComputedStyle(nav).paddingRight);
       const tabs = [...nav.querySelectorAll('[data-view-tab]')];
@@ -396,7 +397,7 @@ describe('GitHub desktop sidebar (#622)', () => {
     })()`) as { tabs: number; sidebar: number; overflow: number[] }
     // Tasks, Git, GitHub, Skills, Settings and More: Workflows joins Inbox in the menu.
     expect(fit.tabs).toBe(6)
-    const label = browser.evaluate(`(() => { const span = document.querySelector('[data-slot="view-tabs"] a[aria-current="page"] span.truncate'); return span.scrollWidth - span.clientWidth })()`)
+    const label = waitForSettledSample(browser, `(() => { const span = document.querySelector('[data-slot="view-tabs"] a[aria-current="page"] span.truncate'); return span.scrollWidth - span.clientWidth })()`)
     expect(label).toBe(0)
     expect(fit.sidebar).toBeLessThanOrEqual(264) // the default, narrowest column (its 1px border sits outside the nav)
     expect(fit.overflow).toEqual([])
@@ -528,7 +529,7 @@ describe('GitHub phone filter index at 360x640 (#622)', () => {
       expect(browser.waitForValue(`[...document.querySelectorAll('${SCREEN} [data-gh-filter]')].map((row) => row.getAttribute('data-gh-filter'))`, sameJson(ALL_FILTERS)))
         .toEqual(ALL_FILTERS)
       expect(browser.waitForValue(countsJs(SCREEN), sameJson(EXPECTED_COUNTS))).toEqual(EXPECTED_COUNTS)
-      const facts = browser.waitForValue<Record<string, unknown>>(`(() => {
+      const facts = waitForSettledSample<Record<string, unknown>>(browser, `(() => {
         const rows = [...document.querySelectorAll('${SCREEN} [data-gh-filter]')];
         if (rows.length === 0) return null;
         // The mobile board's 18px leading icon and 15px chevron.
@@ -591,7 +592,7 @@ describe('GitHub phone filter index at 360x640 (#622)', () => {
     const detailUrl = `${scoped('/github/prs/210')}?filter=review`
     expect(browser.waitForValue(locationJs, (value) => value === detailUrl)).toBe(detailUrl)
     browser.waitForFunction(`document.querySelector('[data-slot="gh-detail-inner"]') !== null`)
-    expect(browser.waitForValue(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true)
+    expect(waitForSettledSample(browser, `document.documentElement.scrollWidth <= innerWidth`)).toBe(true)
     expect(browser.waitForValue(`document.querySelector('[data-slot="gh-back"]')?.getAttribute('href')`)).toBe(listUrl)
     browser.click('[data-slot="gh-back"]')
     expect(browser.waitForValue(locationJs, (value) => value === listUrl)).toBe(listUrl)
@@ -601,7 +602,7 @@ describe('GitHub phone filter index at 360x640 (#622)', () => {
   it('scrolls the last filter row clear of the New task button and the tab bar, and it stays clickable', () => {
     openIndex()
     expect(browser.waitForValue(countsJs(SCREEN), sameJson(EXPECTED_COUNTS))).toEqual(EXPECTED_COUNTS)
-    const facts = browser.waitForValue<Record<string, boolean>>(`(() => {
+    const facts = waitForSettledSample<Record<string, boolean>>(browser, `(() => {
       const main = document.querySelector('[data-slot="main"]');
       const row = document.querySelector('${SCREEN} [data-gh-filter="all-prs"]');
       if (!main || !row) return null;
@@ -616,7 +617,7 @@ describe('GitHub phone filter index at 360x640 (#622)', () => {
         clearOfFab: !fab || rect.bottom <= fab.top + 1 || rect.top >= fab.bottom || rect.right <= fab.left || rect.left >= fab.right,
         hitsRow: hits.every((hit) => hit !== null && row.contains(hit)),
       };
-    })()`, (value) => Boolean(value?.inViewport))
+    })()`)
     browser.screenshot(`${artifactsDir}/github-filter-screen-scrolled.png`, { viewport: true })
     expect(facts).toEqual({ inViewport: true, aboveTabBar: true, clearOfFab: true, hitsRow: true })
     browser.click(`${SCREEN} [data-gh-filter="all-prs"]`)
@@ -645,7 +646,7 @@ describe('GitHub phone filter index at 360x640 (#622)', () => {
     browser.goto(`${base}${scoped('/github?filter=all')}`)
     browser.waitForFunction(`document.querySelectorAll(${JSON.stringify(ROWS)}).length === ${ISSUES.length}`)
     focusWithKeyboard(browser, `${SIDEBAR} [data-gh-filter="has-task"]`)
-    expect(browser.waitForValue(`document.activeElement?.matches(':focus-visible') && document.activeElement.getAttribute('data-gh-filter') === 'has-task' ? true : null`)).toBe(true)
+    expect(waitForSettledSample(browser, `Boolean(document.activeElement?.matches(':focus-visible') && document.activeElement.getAttribute('data-gh-filter') === 'has-task')`)).toBe(true)
     browser.press('Enter')
     const url = `${scoped('/github')}?filter=has-task`
     expect(browser.waitForValue(locationJs, (value) => value === url)).toBe(url)
@@ -677,7 +678,7 @@ describe('GitHub phone filter index at 360x640 (#622)', () => {
     browser.setViewport(DESKTOP.width, DESKTOP.height)
     browser.waitForFunction(`document.querySelector(${JSON.stringify(SIDEBAR)}) !== null && document.querySelector(${JSON.stringify(SCREEN)}) === null`)
     // The list/detail workspace is laid out inside the viewport, not left at its phone flow.
-    const facts = browser.waitForValue<Record<string, boolean>>(`(() => {
+    const facts = waitForSettledSample<Record<string, boolean>>(browser, `(() => {
       const list = document.querySelector('[data-slot="gh-list"]');
       const main = document.querySelector('[data-slot="main"]');
       if (!list || !main) return null;

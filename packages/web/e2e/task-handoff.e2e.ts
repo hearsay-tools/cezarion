@@ -5,6 +5,7 @@ import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { waitForSettledSample } from './visual-ready'
 import type { RunRecord } from '@open-mercato/cezar-api-client'
 import { stopFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv, getJson } from './agent-browser'
@@ -73,7 +74,7 @@ const settledShot = (name: string) => {
   browser.screenshot(join(artifacts, name))
 }
 
-const box = (selector: string) => browser.waitForValue(`(() => {
+const box = (selector: string) => waitForSettledSample(browser, `(() => {
   const el = document.querySelector(${JSON.stringify(selector)});
   if (!el) return null;
   const r = el.getBoundingClientRect();
@@ -151,12 +152,13 @@ describe('Hand off to webhook', () => {
     expect(trigger.height).toBeGreaterThanOrEqual(44)
     browser.click(handoff)
     // Settled: the sheet has slid in when its bottom edge sits on the viewport's.
-    const sheet = browser.waitForValue(`(() => {
+    const sheet = waitForSettledSample(browser, `(() => {
       const el = document.querySelector(${JSON.stringify(dialog)});
       if (!el || el.getAnimations().some(a => a.playState === 'running')) return null;
       const r = el.getBoundingClientRect();
-      return Math.abs(r.bottom - window.innerHeight) < 1 ? { left: r.left, width: r.width } : null;
-    })()`) as { left: number; width: number }
+      return { left: r.left, width: r.width, bottomGap: Math.abs(r.bottom - window.innerHeight) };
+    })()`) as { left: number; width: number; bottomGap: number }
+    expect(sheet.bottomGap).toBeLessThan(1)
     expect(sheet.left).toBe(0)
     expect(sheet.width).toBe(360)
     const action = box(submit)
@@ -201,7 +203,7 @@ describe('Hand off to webhook', () => {
   it('keeps the new-task notify row inside 360×640 with AA contrast', () => {
     browser.setViewport(360, 640)
     browser.goto(`${baseUrl}/p/${project}/new`)
-    const sample = browser.waitForValue(`(() => {
+    const sample = waitForSettledSample(browser, `(() => {
       const row = document.querySelector('[data-slot="notify-webhook-toggle"]')
       const card = document.querySelector('[data-slot="execution-options"]')
       if (!row || !card || row.getBoundingClientRect().height === 0) return null

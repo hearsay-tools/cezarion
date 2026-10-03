@@ -1,6 +1,7 @@
 import { mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { waitForSettledSample } from './visual-ready'
 import { AgentBrowser, readTestEnv } from './agent-browser'
 
 const artifacts = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_e2e')
@@ -22,7 +23,7 @@ describe('Settings view sidebar (#622)', () => {
       browser.goto(`${base}/settings/agents`)
       browser.waitForFunction(`document.querySelector('${sidebar} [data-section="agents"][aria-current="page"]') !== null`)
       browser.evaluate(`document.documentElement.classList.remove('light', 'dark'); document.documentElement.classList.add('${theme}')`)
-      const facts = browser.waitForValue(`(() => {
+      const facts = waitForSettledSample(browser, `(() => {
         const row = document.querySelector('${sidebar} [data-section="agents"]');
         const nav = document.querySelector('${sidebar}');
         if (!row || !nav) return null;
@@ -76,7 +77,7 @@ describe('Settings view sidebar (#622)', () => {
     browser.click('.settings-section-picker summary')
     browser.click('[data-slot="settings-nav-mobile"] [data-section="resources"]')
     browser.waitForFunction(`document.querySelector('[data-route="settings-global-resources"]') !== null`)
-    const facts = browser.waitForValue(`(() => {
+    const facts = waitForSettledSample(browser, `(() => {
       const picker = document.querySelector('.settings-section-picker');
       if (!picker || picker.querySelector('summary')?.textContent !== 'Resources') return null;
       return { open: picker.open, sidebarHidden: getComputedStyle(document.querySelector('[data-slot="sidebar"]')).display === 'none',

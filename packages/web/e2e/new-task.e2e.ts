@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
+import { waitForSettledSample } from './visual-ready'
 import { dismissWithEscape } from './contrast'
 import { stopFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv, getJson } from './agent-browser'
@@ -126,7 +127,7 @@ describe('the full-screen /new against a live dry-run server', () => {
       browser.fill(search, ' SEARCHABLE ')
       expect(browser.waitForValue(`Array.from(document.querySelectorAll('[role="menuitemradio"]')).map(el => el.textContent)`,
         value => Array.isArray(value) && value.length === 1)).toEqual(['feature/searchable-base'])
-      const geometry = browser.waitForValue(`(() => {
+      const geometry = waitForSettledSample(browser, `(() => {
         const menu = document.querySelector('[data-testid="base-pill-menu"]')
         const input = document.querySelector('${search}')
         const option = document.querySelector('[role="menuitemradio"]')

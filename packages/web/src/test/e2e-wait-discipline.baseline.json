@@ -8,18 +8,6 @@
       "count": 1
     },
     {
-      "file": "composer.e2e.ts",
-      "rule": "one-shot-read",
-      "site": "expect(browser.evaluate(`(() => { const r = document.querySelector('[aria-label=\"${label}\"]').getBoundingClientRect(); return [r.width, r.height] })()`)).toEqual([44, 44])",
-      "count": 1
-    },
-    {
-      "file": "composer.e2e.ts",
-      "rule": "one-shot-read",
-      "site": "expect(browser.evaluate(`document.querySelector('[aria-label=\"Cancel dictation\"]').getBoundingClientRect().width`)).toBe(32)",
-      "count": 1
-    },
-    {
       "file": "github-layout.e2e.ts",
       "rule": "one-shot-read",
       "site": "expect(browser.evaluate(`document.querySelector('[data-slot=\"gh-custom-prompt\"]').value`)).toBe('Review this issue and keep this draft')",
@@ -136,12 +124,6 @@
     {
       "file": "new-task-hierarchy.e2e.ts",
       "rule": "one-shot-read",
-      "site": "expect(browser.evaluate(`document.querySelector('${composer}').getBoundingClientRect().height`)).toBe(height)",
-      "count": 1
-    },
-    {
-      "file": "new-task-hierarchy.e2e.ts",
-      "rule": "one-shot-read",
       "site": "expect(browser.evaluate(`document.querySelector('${disclosure}').open`)).toBe(false)",
       "count": 1
     },
@@ -240,18 +222,6 @@
       "rule": "one-shot-read",
       "site": "expect(browser.evaluate(`(() => { const el = document.querySelector('${input}'); return [el === window.__phoneTextarea, el.value, el.selectionStart, el.selectionEnd] })()`))",
       "count": 1
-    },
-    {
-      "file": "task-thread.e2e.ts",
-      "rule": "one-shot-read",
-      "site": "expect(browser.evaluate(`(() => { const r = document.querySelector('[data-slot=\"dropdown-menu-content\"]').getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth })()`)).toBe(true)",
-      "count": 1
-    },
-    {
-      "file": "task-thread.e2e.ts",
-      "rule": "one-shot-read",
-      "site": "expect(browser.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true)",
-      "count": 2
     },
     {
       "file": "task-thread.e2e.ts",

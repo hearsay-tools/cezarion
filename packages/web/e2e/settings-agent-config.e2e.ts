@@ -1,6 +1,7 @@
 import { resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
+import { waitForSettledSample } from './visual-ready'
 import { AgentBrowser, readTestEnv } from './agent-browser'
 import {
   applyContrastQaVariant,
@@ -49,7 +50,7 @@ const gotoAgentConfig = () => {
 }
 
 const rectOf = (selector: string) =>
-  browser.evaluate(
+  waitForSettledSample(browser,
     `(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { width: r.width, height: r.height } })()`,
   ) as { width: number; height: number }
 

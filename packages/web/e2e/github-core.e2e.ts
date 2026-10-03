@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
+import { waitForSettledSample } from './visual-ready'
 import { artifactsDir, createGitHubFixture, DESKTOP } from './github-fixture'
 import type { GitHubFixture, GithubPayload } from './github-fixture'
 
@@ -238,7 +239,7 @@ describe('the GitHub tab against the live dry-run server', () => {
       browser.waitForFunction(
         `(() => { const el = document.querySelector('[data-slot="gh-detail"]'); return el !== null && el.offsetParent === null })()`,
       )
-      expect(browser.evaluate(`document.documentElement.scrollWidth <= window.innerWidth`)).toBe(true)
+      expect(waitForSettledSample(browser, `document.documentElement.scrollWidth <= window.innerWidth`)).toBe(true)
 
       await openGitHub(`/github/issues/${first.number}`)
       browser.waitForFunction(`document.querySelector('[data-slot="gh-detail-inner"]') !== null`)
@@ -254,7 +255,7 @@ describe('the GitHub tab against the live dry-run server', () => {
       if (gh.issues.length > 2) {
         const visibleRowsCountJs = (count: number) =>
           `[...document.querySelectorAll('[data-slot="gh-rows"] [data-slot="gh-row"]')].filter(row => row.offsetParent !== null).length === ${count}`
-        const visibleRows = () => browser.evaluate(`[...document.querySelectorAll('[data-slot="gh-rows"] [data-slot="gh-row"]')].filter(row => row.offsetParent !== null).length`)
+        const visibleRows = () => waitForSettledSample(browser, `[...document.querySelectorAll('[data-slot="gh-rows"] [data-slot="gh-row"]')].filter(row => row.offsetParent !== null).length`)
         const selectedIndex = Number(browser.evaluate(
           `[...document.querySelectorAll('[data-slot="gh-rows"] > li')].findIndex(li => li.querySelector("[aria-current='page']"))`,
         ))

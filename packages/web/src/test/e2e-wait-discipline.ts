@@ -87,7 +87,7 @@ export function scanSource(file: string, source: string): Site[] {
   for (const j of [...flaggedReads].sort((a, b) => a - b)) sites.push(at('one-shot-read', j))
 
   // Rules 2 and 3 — what a wait's argument contains.
-  for (const call of callSpans(source, /\b(waitForFunction|waitForValue|waitForStable)\(/g)) {
+  for (const call of callSpans(source, /\b(waitForFunction|waitForValue|waitForStable|waitForSettledSample)\(/g)) {
     const line = lineOf(source, call.start)
     const hasClock = /(?:performance|Date)\.now\s*\(|\bnew\s+Date\s*\(\s*\)\s*\.\s*getTime\s*\(/.test(call.text)
     const hasState = /document\.|querySelector|activeElement|__cezIdle|__geometry|dataset\./.test(call.text)
@@ -128,7 +128,7 @@ export function scanSource(file: string, source: string): Site[] {
   // `waitForFunction(`, and a wait's own mention of `activeElement` is the settled wait, never
   // a one-shot read of it.
   const waitLines = new Map<number, 'settles' | 'other'>()
-  for (const call of callSpans(source, /\b(waitForFunction|waitForValue|waitForStable)\(/g)) {
+  for (const call of callSpans(source, /\b(waitForFunction|waitForValue|waitForStable|waitForSettledSample)\(/g)) {
     const kind = focusState.test(call.text) ? 'settles' : 'other'
     for (let l = lineOf(source, call.start); l <= lineOf(source, call.textStart + call.text.length); l += 1) waitLines.set(l, kind)
   }
@@ -158,7 +158,7 @@ export function scanSource(file: string, source: string): Site[] {
 }
 
 /** The calls whose argument is code that runs IN the page. */
-const inPage = /\b(evaluate|waitForFunction|waitForValue|waitForStable)\(/g
+const inPage = /\b(evaluate|waitForFunction|waitForValue|waitForStable|waitForSettledSample)\(/g
 
 /** A mutation of a DOM node. `classList`/`dataset` are here because theme and density are set
  *  that way, and the receiver is what tells those apart from a write into a rendered row. */
