@@ -289,6 +289,8 @@ describe('ScheduleRunner', () => {
       expect((await fireOnce()).result).toBe('failed');
     }
     expect(store.get('nightly')?.enabled).toBe(false);
+    // The pause clears the armed instant in the same write, so a paused definition never carries one.
+    expect(store.state('nightly')?.nextRunAt).toBeUndefined();
     const logs = store.logs({ automationId: 'nightly' });
     expect(logs[0]).toMatchObject({ result: 'failed', reason: 'Paused after 3 consecutive launch failures; fix the task and enable it again.' });
     expect(logs.filter((row) => row.reason === 'unknown workflow: nope')).toHaveLength(5);

@@ -3607,11 +3607,12 @@ export function createApp(deps: ServerDeps) {
       try {
         // The armed instant belongs to the schedule it was computed from, and to an enabled
         // definition: a new schedule, or a resume through PUT, re-arms from now — never a catch-up
-        // of an occurrence that passed while it was paused. Armed in the request, as `enable`
-        // does, rather than left to the timer: the list refetched on the change event must
-        // already see it. Compared with the definition on disk, not the one read above.
+        // of an occurrence that passed while it was paused. Pausing clears it in the same write, so
+        // another cockpit never reads the still-enabled definition beside a due instant. Armed in
+        // the request, as `enable` does, rather than left to the timer: the list refetched on the
+        // change event must already see it. Compared with the definition on disk, not the one read above.
         const automation = automationStore.update(c.req.param('id'), expectedRevision, { ...input, kind: resolved.kind, enabled: input.enabled ?? false }, (next, previous) =>
-          previous && (!sameSchedule(previous.schedule, next.schedule) || (!previous.enabled && next.enabled)) ? armScheduleFromNow(next) : undefined);
+          previous && (!sameSchedule(previous.schedule, next.schedule) || previous.enabled !== next.enabled) ? armScheduleFromNow(next) : undefined);
         emitAutomationChange(c.get('project'), automation.id, automation.revision);
         automationsChanged();
         return c.json({ automation });
@@ -3662,7 +3663,7 @@ export function createApp(deps: ServerDeps) {
       const store = c.get('project').automationStore;
       const current = store.get(c.req.param('id'));
       if (!current) return c.json({ error: 'not found' }, 404);
-      const automation = store.update(current.id, current.revision, { ...editableAutomation(current), enabled: false });
+      const automation = store.update(current.id, current.revision, { ...editableAutomation(current), enabled: false }, armScheduleFromNow);
       emitAutomationChange(c.get('project'), automation.id, automation.revision);
       automationsChanged();
       return c.json({ automation });

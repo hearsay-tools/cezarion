@@ -387,6 +387,40 @@ describe('GitHub automation API', () => {
     expect(Date.parse(armed)).toBeGreaterThan(Date.now());
   });
 
+  /** An enabled schedule whose state holds an instant that is due now (five minutes ago). */
+  function enabledWithDueInstant(automationStore: AutomationStore) {
+    const created = automationStore.create({ ...scheduleInput, kind: 'schedule', enabled: true } as never);
+    const due = new Date(Date.now() - 5 * 60_000).toISOString();
+    automationStore.setState(created.id, (current) => ({ ...current, revision: created.revision, nextRunAt: due }));
+    return created;
+  }
+
+  it('a PUT that pauses a schedule never shows another process the enabled definition beside a due nextRunAt', async () => {
+    const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
+    const server = app({ automationStore });
+    const created = enabledWithDueInstant(automationStore);
+    const { response, launches, copies } = await launchesMidRoute(automationStore, created.id, () =>
+      apiRequest(server, `/api/v1/automations/${created.id}`, json({ ...scheduleInput, enabled: false, expectedRevision: created.revision }, 'PUT')));
+    expect(response.status).toBe(200);
+    expect(copies).toBeGreaterThanOrEqual(2);
+    expect(launches).toBe(0);
+    expect(automationStore.state(created.id)?.nextRunAt).toBeUndefined();
+    expect(automationStore.get(created.id)?.enabled).toBe(false);
+  });
+
+  it('the pause route never shows another process the enabled definition beside a due nextRunAt', async () => {
+    const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
+    const server = app({ automationStore });
+    const created = enabledWithDueInstant(automationStore);
+    const { response, launches, copies } = await launchesMidRoute(automationStore, created.id, () =>
+      apiRequest(server, `/api/v1/automations/${created.id}/pause`, { method: 'POST' }));
+    expect(response.status).toBe(200);
+    expect(copies).toBeGreaterThanOrEqual(2);
+    expect(launches).toBe(0);
+    expect(AutomationStore.open(join(root, '.ai/cezar')).state(created.id)).not.toHaveProperty('nextRunAt');
+    expect(automationStore.get(created.id)?.enabled).toBe(false);
+  });
+
   it('a PUT that loses the revision race leaves the armed nextRunAt alone', async () => {
     const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
     const server = app({ automationStore });

@@ -87,7 +87,10 @@ web routes/automations/*: route shell, list, editor (+ schedule / github fields)
    lands BEFORE the definition write. A reader loads definitions, then state, so another
    cockpit's fire sees the old definition beside the new (future) instant — not due, skipped — or
    the new pair, never the new definition beside the old, possibly past, `nextRunAt`. A failed
-   definition write puts the armed keys back; a conflict or a missing id writes nothing.
+   definition write puts the armed keys back; a conflict or a missing id writes nothing. Every
+   enabled → paused transition of a schedule (PUT with `enabled: false`, `pause`, the runner's
+   three-strike auto-pause) clears `nextRunAt` through the same callback, so no reader sees the
+   still-enabled definition beside a due instant after the pause was requested.
    The timer sleeps `min(earliest due − now, 60 s)`. A wake short of the due instant fires
    nothing and calls `reschedule()` again from fresh state.
 3. At due time, `fire(definition)` applies the **age rule** from the due instant:

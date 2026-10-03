@@ -297,7 +297,7 @@ export class ScheduleRunner {
     if (!current?.enabled || current.kind !== 'schedule') return undefined;
     const { revision, createdAt: _c, updatedAt: _u, id: _id, ...editable } = current;
     try {
-      return this.handle.store.update(id, revision, { ...editable, enabled: false }) as ScheduleAutomationDefinition;
+      return this.handle.store.update(id, revision, { ...editable, enabled: false }, () => ({ nextRunAt: undefined })) as ScheduleAutomationDefinition;
     } catch {
       // Edited or deleted in between; the next failure pauses whatever is current then.
       return undefined;
