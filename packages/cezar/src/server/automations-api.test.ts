@@ -146,10 +146,11 @@ describe('GitHub automation API', () => {
 
     await scheduler.start();
     withGithubRemote(root);
-    expect(scheduler.hasTimer()).toBe(false);
+    // A registered project keeps the idle wake before it has any definitions file, so another
+    // cockpit's first automation is discovered (finding 4172236277).
+    expect(scheduler.hasTimer()).toBe(true);
     const created = ((await (await apiRequest(server, '/api/v1/automations', json(input))).json()) as any).automation;
-    // Created paused, but the definitions file now exists: the idle wake watches it for edits
-    // made by another cockpit (finding 4172021393).
+    // Created paused: the idle wake still watches for edits made by another cockpit (finding 4172021393).
     await rescheduled;
     expect(scheduler.hasTimer()).toBe(true);
 
