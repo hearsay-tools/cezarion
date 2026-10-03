@@ -78,6 +78,36 @@ describe('process liveness (#469)', () => {
     expect(processesWithCwdUnder(dir, 'darwin', linuxUnused, since, darwin('', [], false))).toBe('unknown');
   });
 
+  const oldBoot = '11111111-1111-4111-8111-111111111111';
+  const currentBoot = '22222222-2222-4222-8222-222222222222';
+  const deniedProc = (code = 'EACCES', boot: string | undefined = currentBoot) => ({
+    readdir: () => ['7'], readlink: () => { throw Object.assign(new Error(code), { code }); },
+    ownerUid: () => process.getuid?.(), startedAtMs: () => 30_000, bootId: () => boot,
+  });
+
+  it.each(['EACCES', 'EPERM'])('ignores %s cwd candidates from a later boot but preserves readable holders (#738)', code => {
+    const proc = { ...deniedProc(code), readdir: () => ['7', '8', '9'], readlink: (pid: string) => {
+      if (pid === '7') return deniedProc(code).readlink();
+      return pid === '8' ? '/worker/nested' : '/scratch';
+    } };
+    expect(processesWithCwdUnder(['/worker', '/scratch'], 'linux', proc, 10_000, undefined, `${oldBoot}:100`)).toEqual([8, 9]);
+  });
+
+  it.each([undefined, '100', 'malformed:100', `${oldBoot}:invalid`, `${currentBoot}:100`])('retains same-boot possible descendants with controller token %s, even for a pre-reboot worker', token => {
+    expect(processesWithCwdUnder('/worker', 'linux', deniedProc(), 10_000, undefined, token)).toEqual([7]);
+  });
+
+  it.each([undefined, '', 'malformed'])('retains possible descendants when current boot ID is %s', boot => {
+    const proc = { ...deniedProc(), bootId: () => boot };
+    expect(processesWithCwdUnder('/worker', 'linux', proc, 10_000, undefined, `${oldBoot}:100`)).toEqual([7]);
+  });
+
+  it('retains conservative fallback on unexpected cwd errors or unreadable proc, even across boots', () => {
+    expect(processesWithCwdUnder('/worker', 'linux', deniedProc('EIO'), 10_000, undefined, `${oldBoot}:100`)).toEqual([7]);
+    const proc = { ...deniedProc(), readdir: () => { throw Error('unreadable /proc'); } };
+    expect(processesWithCwdUnder('/worker', 'linux', proc, 10_000, undefined, `${oldBoot}:100`)).toBe('unknown');
+  });
+
   it.runIf(linux)('finds a real child by its working directory and loses it after exit', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'cez-liveness-')); dirs.push(dir);
     const nested = join(dir, 'nested'); mkdirSync(nested);
@@ -88,6 +118,9 @@ describe('process liveness (#469)', () => {
       expect(processesWithCwdUnder(`${dir}-sibling`)).not.toContain(proc.pid);
       expect(processesWithCwdUnder(dir)).not.toContain(process.pid);
       expect(probeGeneration({ paths: [dir], since })).toBe('alive');
+      // Reboot proof only excludes unreadable possible descendants, never an actual cwd holder.
+      expect(probeGeneration({ paths: [dir], since: 0,
+        record: { generation: 'g', controller: { pid: 2147483001, startToken: `${oldBoot}:100` }, processes: [] } })).toBe('alive');
       // One scan pass over several roots (#469: worktree plus scratch).
       expect(processesWithCwdUnder([`${dir}-sibling`, nested])).toContain(proc.pid);
     } finally { proc.kill('SIGKILL'); await exited; }
@@ -115,6 +148,9 @@ describe('process liveness (#469)', () => {
       const record = (processes: { pid: number; startToken?: string }[]) => ({ generation: 'g', controller: { pid: process.pid }, processes });
       expect(probeGeneration({ record: record([{ pid: proc.pid!, startToken: `${token}0` }]), paths: [dir], since })).toBe('gone');
       expect(probeGeneration({ record: record([{ pid: proc.pid!, startToken: token }]), paths: [dir], since })).toBe('alive');
+      // Even with a previous-boot controller, a verified live record blocks independently of cwd.
+      expect(probeGeneration({ paths: [dir], since: 0, record: { generation: 'g',
+        controller: { pid: 2147483001, startToken: `${oldBoot}:100` }, processes: [{ pid: proc.pid!, startToken: token }] } })).toBe('alive');
       // This process as controller is never "alive": the in-memory execution map owns it.
       expect(probeGeneration({ record: record([]), paths: [dir], since })).toBe('gone');
       expect(probeGeneration({ record: { generation: 'g', controller: { pid: proc.pid!, startToken: token }, processes: [] }, paths: [dir], since })).toBe('alive');

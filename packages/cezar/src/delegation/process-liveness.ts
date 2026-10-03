@@ -50,6 +50,12 @@ function pidExists(pid: number): boolean {
 }
 
 const LINUX_TOKEN = /^(?:[0-9a-f-]{36}:)?(\d+)$/;
+const LINUX_BOOT_ID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
+/** A known different boot proves that no descendant of this controller can still exist. */
+function controllerPredatesBoot(token: string | undefined, boot: string | undefined): boolean {
+  const recordedBoot = token?.match(/^(.+):\d+$/)?.[1];
+  return recordedBoot !== undefined && boot !== undefined && LINUX_BOOT_ID.test(recordedBoot) && LINUX_BOOT_ID.test(boot) && recordedBoot !== boot;
+}
 /** Liveness-only comparison: when exactly one Linux token lacks the boot id (it was unreadable on one
  * side), the `starttime` suffix decides. Reaping still requires an exact match. */
 function sameIncarnation(recorded: string, current: string): boolean {
@@ -76,6 +82,7 @@ export function isCurrentProcess(entry: RecordedProcess): boolean {
 export type ProcReader = {
   readdir: () => string[]; readlink: (pid: string) => string;
   ownerUid: (pid: string) => number | undefined; startedAtMs: (pid: string) => number | undefined;
+  bootId?: () => string | undefined;
 };
 let clockTicks: number | undefined;
 let bootTimeMs: number | undefined;
@@ -115,13 +122,15 @@ const realProc: ProcReader = {
   readlink: pid => readlinkSync(`/proc/${pid}/cwd`),
   ownerUid: pid => { try { return statSync(`/proc/${pid}`).uid; } catch { return undefined; } },
   startedAtMs: procStartedAtMs,
+  bootId: linuxBootId,
 };
 
 /** PIDs (never this process) whose working directory is one of `dirs` or beneath it, in one scan
  * pass; `unknown` when no scan can run. cezar's own short-lived git children in a worktree make
  * this read "alive" briefly: conservative, and a retry self-heals. `since` (epoch ms) is the
- * earliest moment the generation's processes can have started; see the EACCES rule below. */
-export function processesWithCwdUnder(dirs: string | readonly string[], platform: NodeJS.Platform = process.platform, proc: ProcReader = realProc, since?: number, darwin: DarwinReader = realDarwin): number[] | 'unknown' {
+ * earliest moment the worker's processes can have started; see the EACCES rule below.
+ * `controllerStartToken` is the interrupted generation's durable controller identity. */
+export function processesWithCwdUnder(dirs: string | readonly string[], platform: NodeJS.Platform = process.platform, proc: ProcReader = realProc, since?: number, darwin: DarwinReader = realDarwin, controllerStartToken?: string): number[] | 'unknown' {
   const targets = (typeof dirs === 'string' ? [dirs] : dirs).map(dir => { try { return realpathSync(dir); } catch { return resolve(dir); } });
   const under = (cwd: string) => { const path = cwd.replace(/ \(deleted\)$/, ''); return targets.some(target => path === target || path.startsWith(target + sep)); };
   const found: number[] = [];
@@ -138,6 +147,12 @@ export function processesWithCwdUnder(dirs: string | readonly string[], platform
         // every host has), so they cannot all block the proof: one that started before the worker
         // existed cannot be its descendant. A later one is a possible holder, never signalled.
         if ((error as NodeJS.ErrnoException).code === 'ENOENT' || uid === undefined || proc.ownerUid(entry) !== uid) continue;
+        // #738: a controller from a known different boot cannot have surviving descendants.
+        // Worker creation time alone is insufficient: an old worker may have resumed this boot.
+        // Only denied cwd reads get this exception; readable holders and recorded live processes
+        // still block independently. Legacy/unknown tokens and unexpected errors stay conservative.
+        const code = (error as NodeJS.ErrnoException).code;
+        if ((code === 'EACCES' || code === 'EPERM') && controllerPredatesBoot(controllerStartToken, proc.bootId?.())) continue;
         const started = since === undefined ? undefined : proc.startedAtMs(entry);
         if (started === undefined || started >= since!) found.push(Number(entry));
       }
@@ -172,7 +187,7 @@ export type GenerationProbe = { liveness: GenerationLiveness; controller?: numbe
 export function inspectGeneration({ record, paths, since }: { record?: WorkerProcessRecord; paths: readonly string[]; since?: number }): GenerationProbe {
   if (record && !isCurrentProcess(record.controller) && recordedProcessLive(record.controller)) return { liveness: 'alive', controller: record.controller.pid, pids: [] };
   const recorded = record?.processes.filter(recordedProcessLive).map(entry => entry.pid) ?? [];
-  const scan = processesWithCwdUnder(paths, process.platform, realProc, since);
+  const scan = processesWithCwdUnder(paths, process.platform, realProc, since, realDarwin, record?.controller.startToken);
   const pids = [...new Set([...recorded, ...(scan === 'unknown' ? [] : scan)])];
   return { liveness: pids.length ? 'alive' : scan === 'unknown' ? 'unknown' : 'gone', pids };
 }

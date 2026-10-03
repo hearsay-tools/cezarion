@@ -516,6 +516,8 @@ const CONTROL_CRITERIA = [
   { id: 'R32', scenario: 'baseline' },
   { id: 'R33', scenario: 'baseline' },
   { id: 'R34', scenario: 'baseline' },
+  // workflows/worker-reboot-parity.test.ts: native worker exit, reboot proof, collect/destroy and parent Finish.
+  { id: 'R35', scenario: 'baseline' },
 ] as const;
 
 /**
