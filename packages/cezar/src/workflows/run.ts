@@ -1066,6 +1066,10 @@ export class RunManager {
    *  explicit user Continue, these are bulk scheduler work and must re-enter
    *  through `pump()` so both workspace and per-project caps are honored. */
   private readonly pendingContinuations = new Map<string, PendingContinuation>();
+  /** Accepted Continues supersede in-flight settlement even before launch or after
+   * idle close. Retain these across dropActive/dispose so absence cannot look like
+   * the earlier execution again; disposal alone never revokes terminal intent. */
+  private readonly continuationGenerations = new Map<string, symbol>();
   /** Per-run image counter behind `pasted-<n>` / `screenshot-<n>` (#472). Lives on
    *  the manager rather than the `ActiveRun` so a *queued* run — which has no
    *  `ActiveRun` at all — can persist attachments. Seeded lazily from disk. */
@@ -4839,6 +4843,7 @@ export class RunManager {
       }
     }
     else { this.store.updateRun(runId, acceptedPatch); this.store.flush(); }
+    this.continuationGenerations.set(runId, Symbol());
     // Keep fresh viewable images even if persistence failed; recovery uses saved URLs.
     const images = contentBlocksOf(opts.images ?? []).filter((block) => block.type === 'image');
     if (deferForCapacity) {
@@ -6678,6 +6683,7 @@ export class RunManager {
    */
   private async settleSuccess(runId: string, durableRootFinish = false): Promise<void> {
     const state = this.active.get(runId);
+    const continuationGeneration = this.continuationGenerations.get(runId);
     if (this.deferParentCompletion(runId)) return;
     const run = this.store.getRun(runId);
     let review = false;
@@ -6696,6 +6702,7 @@ export class RunManager {
     // A different active state is still a replacement, even after disposal.
     const disposedWithTerminalIntent = this.disposed && active === undefined && (state?.finishRequested || state?.cancelled);
     if (!current || !['queued', 'running', 'waiting'].includes(current.status) ||
+      this.continuationGenerations.get(runId) !== continuationGeneration ||
       (active !== state && !disposedWithTerminalIntent)) return;
     if (state?.cancelled) {
       const finishedAt = new Date().toISOString();

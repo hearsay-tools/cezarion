@@ -902,6 +902,10 @@ R31/R32 accept Finish on fresh and Continue sessions, dispose the manager during
 the final diff check, and still require terminal success on every native wire.
 Disposal cannot revoke accepted Finish/Stop intent; a replacement active execution
 still prevents the old settlement from completing its steps.
+R33/R34 hold an inactive run's Finish diff check while a newer Continue either
+starts and idle-closes or remains queued behind capacity. Continue acceptance
+supersedes that settlement before scheduling; returning to no active session must
+not let the earlier Finish close the newer execution or its steps.
 
 R20/R21 (#661) complete an owned worker over each native mock wire, then commit a
 cleanup checkpoint. Enabled delegation reads only that worker's family; disabled

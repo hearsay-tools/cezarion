@@ -514,6 +514,8 @@ const CONTROL_CRITERIA = [
   { id: 'R30', scenario: 'baseline' },
   { id: 'R31', scenario: 'baseline' },
   { id: 'R32', scenario: 'baseline' },
+  { id: 'R33', scenario: 'baseline' },
+  { id: 'R34', scenario: 'baseline' },
 ] as const;
 
 /**
@@ -1669,6 +1671,70 @@ describe('harness parity — multi-Continue settlement', () => {
               expect(completed.currentStepId).toBeUndefined();
             });
         } finally { vi.unstubAllEnvs(); }
+      }, 60_000);
+    }
+  }
+});
+
+describe('harness parity — inactive Finish superseded by Continue', () => {
+  for (const backend of RUNNER_IDS) {
+    for (const queued of [false, true]) {
+      const criterion = queued ? 'R34' : 'R33';
+      it(`${backend} ${criterion} rejects stale Finish after Continue ${queued ? 'queues' : 'starts and idle-closes'}`, async () => {
+        await driveRun(backend, 'baseline', record => record?.status === 'waiting', 30_000,
+          async ({ store, manager, runId }) => {
+            const internal = manager as unknown as {
+              repoRoot: string;
+              active: Map<string, { idleTimer?: NodeJS.Timeout }>;
+              semaphore: { busy(): number };
+              settleSuccess(id: string, durable?: boolean): Promise<void>;
+            };
+            const idleClose = async () => {
+              const timer = internal.active.get(runId)?.idleTimer as NodeJS.Timeout & { _onTimeout(): void };
+              expect(timer).toBeDefined();
+              timer._onTimeout();
+              await waitFor(() => !manager.isActive(runId));
+              expect(store.getRun(runId)?.status).toBe('waiting');
+            };
+            await idleClose();
+            store.updateRun(runId, { worktreePath: internal.repoRoot, baseBranch: 'main' });
+            let release: ((diff: string) => void) | undefined;
+            const diff = vi.spyOn(gitWorktree, 'worktreeDiff').mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+            // Observe the real fire-and-forget settlement, including its config I/O.
+            const settlement = vi.spyOn(internal, 'settleSuccess');
+            // Hold only scheduler capacity; the run and its idle close use native wires.
+            const capacity = queued ? vi.spyOn(internal.semaphore, 'busy').mockReturnValue(Number.MAX_SAFE_INTEGER) : undefined;
+            try {
+              expect(manager.finish(runId)).toBe(true);
+              await waitFor(() => release !== undefined);
+              const pending = settlement.mock.results[0]!.value as Promise<void>;
+              expect(manager.continueRun(runId, { text: promptFor(backend, 'baseline') }, queued).ok).toBe(true);
+              if (!queued) {
+                await waitFor(() => manager.isActive(runId) && store.getRun(runId)?.status === 'waiting');
+                await idleClose();
+              }
+              expect(internal.active.get(runId)).toBeUndefined();
+              const before = structuredClone(store.getRun(runId)!);
+              expect(before.status).toBe(queued ? 'queued' : 'waiting');
+              expect(before.steps.at(-1)).toMatchObject({ id: 'continue-1', status: queued ? 'pending' : 'waiting' });
+              release!('changed');
+              await pending;
+              const after = store.getRun(runId)!;
+              expect(after.status).toBe(before.status);
+              expect(after.steps).toEqual(before.steps);
+              expect(after.finishedAt).toBeUndefined();
+              expect(store.readEvents(runId).some(event => event.type === 'lifecycle' &&
+                (event.message === 'run finished' || (typeof event.message === 'string' && event.message.startsWith('changes ready for review'))))).toBe(false);
+            } finally {
+              release?.('changed');
+              await Promise.allSettled(settlement.mock.results.map(result => result.value));
+              diff.mockRestore();
+              settlement.mockRestore();
+              // Cancel queued work before restoring capacity so teardown cannot launch it.
+              manager.cancel(runId);
+              capacity?.mockRestore();
+            }
+          });
       }, 60_000);
     }
   }
