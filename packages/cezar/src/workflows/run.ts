@@ -6169,9 +6169,10 @@ export class RunManager {
     const grants = stepIdentity?.grants ?? {
       allowedTools: allowedToolsForStep(step, stepBackend), bashAllowlist: step.bashAllowlist,
     };
+    // Workers inherit only the extra prompt, never the parent's selected skill (#778).
     state.delegationSettings = { cwd: state.cwd, runner: stepBackend, model: backendModel,
       effort: effectiveEffort,
-      agentProfile: stepProfile.profileId, accountBinding: stepProfile.accountBinding, systemPrompt: composeSystemPrompt(systemPrompt, extraSystemPrompt),
+      agentProfile: stepProfile.profileId, accountBinding: stepProfile.accountBinding, systemPrompt: extraSystemPrompt,
       allowedTools: grants.allowedTools, bashAllowlist: grants.bashAllowlist };
     const runner = createRunner(stepBackend);
     state.agentSessionError = undefined;
