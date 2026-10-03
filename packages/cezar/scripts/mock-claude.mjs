@@ -118,6 +118,10 @@ function writeHandoffAndTodo() {
 }
 
 async function respond(userText, imageCount, uuid) {
+  if (userText.includes('mock:crash-stderr')) {
+    const { crashWithStderr } = await import('./mock-runner-crash.mjs');
+    if (crashWithStderr(userText, '{"type":"assistant","message":')) return;
+  }
   emitReplay(uuid, userText);
   // `mock:steer-tool` → one tool call; lines written while it runs are consumed after
   // it (replayed with their uuid) and settled by the SAME result, like Claude 2.1.280 (#505).

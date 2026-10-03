@@ -57,6 +57,9 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  * | `steer-late` | the final text first; agent input sent after it arrives after the last model call (#505) |
  */
 export const SCENARIOS = [
+  'shutdown-stderr',
+  'crash-stderr',
+  'crash-stderr-single',
   'baseline',
   'done',
   'hold',
@@ -139,6 +142,9 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     mockBin: CLAUDE_MOCK,
     scenarios: {
       baseline: BASELINE_PROMPT,
+      'shutdown-stderr': 'mock:crash-stderr-clean',
+      'crash-stderr': 'mock:crash-stderr',
+      'crash-stderr-single': 'mock:crash-stderr-single',
       done: 'mock:done',
       hold: 'mock:hold', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'busy-progress': 'mock:busy-progress',
       'split-text': 'mock:split-text',
@@ -165,6 +171,9 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     mockBin: CODEX_MOCK,
     scenarios: {
       baseline: BASELINE_PROMPT,
+      'shutdown-stderr': 'mock:crash-stderr-clean',
+      'crash-stderr': 'mock:crash-stderr',
+      'crash-stderr-single': 'mock:crash-stderr-single',
       done: 'mock:done',
       hold: 'mock:hold', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'busy-progress': 'mock:busy-progress',
       'split-text': 'mock:split-text',
@@ -191,6 +200,9 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     mockBin: OPENCODE_MOCK,
     scenarios: {
       baseline: BASELINE_PROMPT,
+      'shutdown-stderr': 'mock:crash-stderr-clean',
+      'crash-stderr': 'mock:crash-stderr',
+      'crash-stderr-single': 'mock:crash-stderr-single',
       done: 'mock:done',
       hold: 'mock:hold', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'busy-progress': 'mock:busy-progress',
       'split-text': 'mock:split-text',
@@ -216,7 +228,10 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     ],
     binEnv: 'CEZ_CURSOR_BIN',
     mockBin: join(HERE, '..', '..', 'scripts', 'mock-cursor-acp.mjs'),
-    scenarios: { baseline: BASELINE_PROMPT, done: 'mock:done', hold: 'mock:hold', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'busy-progress': 'mock:busy-progress',
+    scenarios: { baseline: BASELINE_PROMPT,
+      'shutdown-stderr': 'mock:crash-stderr-clean',
+      'crash-stderr': 'mock:crash-stderr',
+      'crash-stderr-single': 'mock:crash-stderr-single', done: 'mock:done', hold: 'mock:hold', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'busy-progress': 'mock:busy-progress',
       'split-text': 'mock:split-text', 'provider-error': 'mock:provider-error',
       'provider-unavailable': 'mock:provider-error',
       ask: 'mock:ask',
@@ -232,6 +247,9 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     mockBin: PI_MOCK,
     scenarios: {
       baseline: BASELINE_PROMPT,
+      'shutdown-stderr': 'mock:crash-stderr-clean',
+      'crash-stderr': 'mock:crash-stderr',
+      'crash-stderr-single': 'mock:crash-stderr-single',
       done: 'mock:done',
       hold: 'mock:hold', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'busy-progress': 'mock:busy-progress',
       'split-text': 'mock:split-text',
@@ -447,13 +465,14 @@ export async function driveSeam(
       (event) => v1.push(event),
       { ...opts.sessionOptions, onUiEvent: (event) => v2.push(event) },
     );
+    const settled = session.result.catch(
+      (): AgentRunResult => ({ text: '', toolCalls: [], tokensUsed: 0 }),
+    );
     const pid = session.pid;
     if (opts.whileOpen) await opts.whileOpen(session, { v1, v2 });
     else await waitFor(() => v1.some((e) => e.type === 'turn-end' || e.type === 'error'));
     session.end();
-    const result = await session.result.catch(
-      (): AgentRunResult => ({ text: '', toolCalls: [], tokensUsed: 0 }),
-    );
+    const result = await settled;
     return { v1, v2, result, pid };
   } finally {
     session?.interrupt();

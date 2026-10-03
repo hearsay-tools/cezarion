@@ -77,6 +77,54 @@ const sessionEvents = (v1: readonly AgentEvent[]) =>
 
 const SEAM_CRITERIA: readonly SeamCriterion[] = [
   {
+    id: 'S17',
+    name: 'S17 keeps clean exits and requested signal teardown successful despite stderr',
+    scenario: 'shutdown-stderr',
+    assert: ({ v1 }) => {
+      expect(v1.filter(e => e.type === 'error')).toEqual([]);
+      expect(v1.filter(e => e.type === 'done')).toHaveLength(1);
+      expect(v1.filter(e => e.type === 'turn-end')).toHaveLength(1);
+      expect(v1.at(-1)?.type).toBe('done');
+      expect(v1.filter(e => e.type === 'note').map(e => e.message).join('\n')).not.toContain('harmless shutdown diagnostic');
+    },
+  },
+  {
+    id: 'S15',
+    name: 'S15 preserves actionable crash stderr and full available diagnostics after malformed native output',
+    scenario: 'crash-stderr',
+    assert: ({ v1 }) => {
+      const errors = v1.filter(e => e.type === 'error');
+      expect(errors).toHaveLength(1);
+      const message = errors.at(-1)!.message;
+      expect(message).toContain('Error: write EPIPE');
+      expect(message).toMatch(/(?:code 1|\(1\))/);
+      expect(message).not.toContain('Node.js');
+      expect(message).not.toContain(' |  | ');
+      expect(message.length).toBeLessThan(650);
+      expect(v1.filter(e => e.type === 'done').length).toBeLessThanOrEqual(1);
+      expect(v1.filter(e => e.type === 'turn-end').length).toBeLessThanOrEqual(1);
+      if (message.startsWith('pi CLI')) {
+        expect(v1.some(e => e.type === 'note' && e.message.includes('skipped unparseable RPC line'))).toBe(true);
+      }
+      const notes = v1.filter(e => e.type === 'note').map(e => e.message).join('\n');
+      expect(notes).toContain('at afterWriteDispatched (node:internal/stream_base_commons:159:15)');
+      expect(notes).toContain("errno: -32,\n  code: 'EPIPE',\n  syscall: 'write',");
+      expect(notes).toContain("diagnostic: '" + 'x'.repeat(700) + "'");
+      expect(notes).toContain('Node.js v24.20.0');
+    },
+  },
+  {
+    id: 'S16',
+    name: 'S16 preserves single-line stderr and nonzero exit codes',
+    scenario: 'crash-stderr-single',
+    assert: ({ v1 }) => {
+      const errors = v1.filter(e => e.type === 'error');
+      expect(errors).toHaveLength(1);
+      expect(errors.at(-1)!.message).toContain('authentication unavailable');
+      expect(errors.at(-1)!.message).toMatch(/(?:code 7|\(7\))/);
+    },
+  },
+  {
     // Group 7 — the baseline AgentSession contract, never asserted uniformly.
     id: 'S1',
     name: 'S1 terminates with exactly one v1 done, and it is the last event',

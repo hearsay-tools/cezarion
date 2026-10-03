@@ -207,6 +207,11 @@ rl.on('line', async (line) => {
       emit({ method: 'item/started', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: opening } });
       emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: opening } });
     }
+    if (turnText.includes('mock:crash-stderr')) {
+      const { crashWithStderr } = await import('./mock-runner-crash.mjs');
+      await new Promise(resolve => setTimeout(resolve, 30));
+      if (crashWithStderr(turnText, '{"method":"item/commandExecution/outputDelta","params":')) return;
+    }
     // Native thread attribution from collab-agent-tool-call.ndjson (#121/#401).
     if (turnText.includes('mock:subagent-after-park')) {
       emit({ method: 'item/started', params: { threadId: 'th_mock_1', item: { type: 'collabAgentToolCall', id: 'park-spawn', tool: 'spawnAgent', status: 'inProgress', receiverThreadIds: ['th_park_child'] } } });

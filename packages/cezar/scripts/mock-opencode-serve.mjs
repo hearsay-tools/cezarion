@@ -187,6 +187,11 @@ const server = createServer((req, res) => {
         send({ type: 'message.updated', properties: { info: { id: currentUserId, sessionID: SESSION_ID, role: 'user', time: { created: Date.now() } } } });
         send({ type: 'message.part.updated', properties: { part: { id: `prt_${currentUserId}`, messageID: currentUserId, sessionID: SESSION_ID, type: 'text', text } } });
       }
+      if (body.includes('mock:crash-stderr')) {
+        const { crashWithStderr } = await import('./mock-runner-crash.mjs');
+        if (body.includes('mock:crash-stderr-clean')) crashWithStderr(body);
+        else { setTimeout(() => crashWithStderr(body), 30); return; }
+      }
       if (body.includes('mock:steer-tool')) {
         send({ type: 'message.updated', properties: { info: info({}) } });
         send({ type: 'message.part.updated', properties: { part: { id: 'prt_steer_tool', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'tool', callID: 'call_steer', tool: 'bash', state: { status: 'running', input: { command: 'wait' } } } } });

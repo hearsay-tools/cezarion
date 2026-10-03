@@ -743,6 +743,20 @@ this normative contract.
 
 ## 7. Harness parity — session and lifecycle (`packages/cezar/src/core/harness-parity.test.ts`)
 
+Crash-diagnostic rows **S15–S17** (#499) drive every `RUNNER_IDS` adapter's
+native transport through an uncaught-exception-shaped stderr fixture, a plain
+single-line failure, and a clean/requested shutdown with stderr. RPC mocks send
+a malformed native frame before the crash. Crash summaries preserve the
+exception and exit code, omit empty lines and the Node runtime footer, and cap
+the stderr detail at 500 characters. A separate v1 `note` retains the available
+stderr (including stack and error properties); it never replaces the fatal
+summary. Cursor retains a bounded 65,536-character diagnostic tail, explicitly
+marks truncation, and keeps its existing sanitized 500-character display bound.
+Its existing startup retries are unchanged. OpenCode chooses the crash diagnostic
+after process settlement, before its synthetic turn-end, so an SSE disconnect
+cannot obscure the exception or add a second error. Timeouts and requested
+signal teardown retain their existing outcomes.
+
 Workflow deadline rows **T1–T6** (#470) live in
 `core/workflow-timeout-parity.test.ts` and are registered in the shared parity
 guard. Each `RUNNER_IDS` backend uses its own `HARNESS_ADAPTERS` native wire:

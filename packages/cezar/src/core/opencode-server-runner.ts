@@ -1,3 +1,4 @@
+import { summarizeRunnerStderr } from './runner-stderr.ts';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
@@ -15,7 +16,7 @@ import type {
 } from './agent-runner.ts';
 import { InputSubmissions } from './input-submissions.ts';
 import type { AgentSession, SessionOptions } from './agent-runner.ts';
-import { prependSystemPrompt, trackChildExit } from './agent-runner.ts';
+import { isSignalTerminationExit, prependSystemPrompt, trackChildExit } from './agent-runner.ts';
 import { buildChildEnv } from './agent-env.ts';
 import { ciOpenCodeEnv } from '../ci-wait/injection.ts';
 import { parseAskRequest, type AskQuestion } from './ask.ts';
@@ -136,6 +137,7 @@ class OpencodeSession implements AgentSession {
    *  reports delivery and would disarm the escalation (#844/#858). */
   private readonly hasExited: () => boolean;
   private serverOpen = true;
+  private exitFailure: string | undefined;
   private baseUrl: string | undefined;
   private sessionId: string | undefined;
   private ready!: Promise<void>;
@@ -269,7 +271,7 @@ class OpencodeSession implements AgentSession {
       } catch (err) {
         if (!this.timedOut && !this.openingPromptFailed) {
           const message = err instanceof Error ? err.message : String(err);
-          this.emit({ type: 'error', message: `opencode: ${message}` });
+          this.exitFailure = `opencode: ${message}`;
         }
       } finally {
         if (deadline) clearTimeout(deadline);
@@ -282,6 +284,20 @@ class OpencodeSession implements AgentSession {
 
       await this.exited;
       if (this.spawnFailed) throw this.spawnFailed;
+
+      // SSE closure can precede the process exit event. Choose one authoritative
+      // error after settlement, before the synthetic turn-end, retaining the code.
+      const code = this.child.exitCode;
+      const crashed = code !== null && code !== 0 && !(this.signalled && isSignalTerminationExit(code));
+      if (!this.timedOut && (crashed || this.exitFailure)) {
+        const stderr = stderrChunks.join('');
+        if (stderr.trim()) this.emit({ type: 'note', message: `opencode serve stderr:\n${stderr}` });
+        const detail = summarizeRunnerStderr(stderr);
+        const message = crashed
+          ? `opencode serve exited with code ${code}${detail ? ` — ${detail}` : ''}`
+          : this.exitFailure!;
+        this.emit({ type: 'error', message });
+      }
 
       // Timeout/interrupt can cut the SSE feed before its `session.idle` —
       // close the turn (idempotent) so consumers still see the v1 boundary,
@@ -737,8 +753,7 @@ class OpencodeSession implements AgentSession {
       // empty success. Then close the turn (flushing what did arrive) and end
       // the session; "Continue" resumes it on a fresh server.
       if (this.serverOpen && !this.sse.signal.aborted) {
-        this.emit({ type: 'error', message: 'opencode: event stream closed unexpectedly' });
-        this.finishTurn();
+        this.exitFailure = 'opencode: event stream closed unexpectedly';
         this.end();
       }
     }
