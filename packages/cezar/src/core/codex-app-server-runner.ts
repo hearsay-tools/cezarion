@@ -1,3 +1,4 @@
+import { summarizeRunnerStderr } from './runner-stderr.ts';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { parseEffort } from '@open-mercato/cezar-contract';
@@ -325,7 +326,25 @@ class CodexSession implements AgentSession {
       }
 
       if (this.spawnFailed) throw this.spawnFailed;
-      if (this.failure) throw this.failure;
+      // Preserve diagnostics even when an RPC/startup failure already owns the error.
+      const stderr = stderrChunks.join('');
+      if (stderr.trim() && (this.failure || (!this.timedOut && exitCode !== 0 && exitCode !== null &&
+        !(this.terminatedByCezar && isSignalTerminationExit(exitCode))))) {
+        this.emit({ type: 'note', message: `codex app-server stderr:\n${stderr}` });
+      }
+      if (this.failure) {
+        // Before the first prompt ACK, process/pipe closure can own the failure
+        // before the ordinary crash branch. Keep its phase context and expose
+        // the drained terminal exception on the same v1 error seam as later exits.
+        if (!this.startupComplete && !this.timedOut && stderr.trim() && exitCode !== null && exitCode !== 0 &&
+          !(this.terminatedByCezar && isSignalTerminationExit(exitCode))) {
+          const detail = summarizeRunnerStderr(stderr);
+          const message = `codex app-server exited with code ${exitCode}${detail ? ` — ${detail}` : ''} (${this.failure.message})`;
+          this.emit({ type: 'error', message });
+          throw new Error(message);
+        }
+        throw this.failure;
+      }
 
       // Timeout/interrupt can end the read loop mid-item — recover buffered prose.
       this.textCoalescer.flush();
@@ -356,8 +375,8 @@ class CodexSession implements AgentSession {
       }
 
       if (exitCode !== 0 && exitCode !== null) {
-        const stderr = stderrChunks.join('').trim();
-        const detail = stderr ? ` — ${stderr.split('\n').slice(-3).join(' | ')}` : '';
+        const summary = summarizeRunnerStderr(stderr);
+        const detail = summary ? ` — ${summary}` : '';
         const message = `codex app-server exited with code ${exitCode}${detail}`;
         this.emit({ type: 'error', message });
         throw new Error(message);

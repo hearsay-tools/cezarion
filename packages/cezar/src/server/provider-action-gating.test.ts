@@ -1,3 +1,4 @@
+import { createFixtureManager, drainFixtureManagers } from '../workflows/fixture-cleanup.testkit.ts';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -97,7 +98,8 @@ describe('provider action gating', () => {
     });
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await drainFixtureManagers(repoRoot);
     store.flush();
     rmSync(repoRoot, { recursive: true, force: true });
     if (savedModelsLocked === undefined) delete process.env.CEZ_AGENT_MODELS_LOCKED;
@@ -236,7 +238,7 @@ describe('provider action gating', () => {
 
   it.each([false, true])('preserves inherited account affinity through a real replay (switch provider: %s)', async (switchProvider) => {
     writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ defaultRunner: 'codex' }));
-    const manager = new RunManager(store, repoRoot, { semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 0 } }) });
+    const manager = createFixtureManager(store, repoRoot, { semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 0 } }) });
     try {
       app = createApp({ repoRoot, store, manager, version: 'test', providerAuth: providerAuth(),
         workspaceConfig: memoryWorkspaceConfig([]),
@@ -336,7 +338,8 @@ describe('the gate verifies before it refuses', () => {
     }));
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await drainFixtureManagers(repoRoot);
     store.flush();
     rmSync(repoRoot, { recursive: true, force: true });
     if (savedDryRun === undefined) delete process.env.CEZ_DRY_RUN;
@@ -452,10 +455,11 @@ describe('provider availability preserves existing execution', () => {
     );
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-provider-continuity-'));
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    manager = new RunManager(store, repoRoot);
+    manager = createFixtureManager(store, repoRoot);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await drainFixtureManagers(repoRoot);
     if (runId) manager.cancel(runId);
     store.flush();
     rmSync(repoRoot, { recursive: true, force: true });

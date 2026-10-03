@@ -31,6 +31,7 @@ import { createRunner } from './runner-factory.ts';
 import type { UiEvent } from './ui-events.ts';
 import { RunStore, type RunRecord } from '../runs/store.ts';
 import { RunManager } from '../workflows/run.ts';
+import { createFixtureManager, drainFixtureManagers } from '../workflows/fixture-cleanup.testkit.ts';
 import { planOwnedWorkspace } from '../delegation/workspace.ts';
 import { workerWorkflowHash, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
 import { stepKind, type WorkflowDef } from '../workflows/types.ts';
@@ -57,6 +58,12 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  * | `steer-late` | the final text first; agent input sent after it arrives after the last model call (#505) |
  */
 export const SCENARIOS = [
+  'missing-binary',
+  'crash-stderr-pre-ack',
+  'crash-stderr-held-pipe',
+  'shutdown-stderr',
+  'crash-stderr',
+  'crash-stderr-single',
   'baseline',
   'done',
   'hold',
@@ -138,7 +145,13 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     binEnv: 'CEZ_CLAUDE_BIN',
     mockBin: CLAUDE_MOCK,
     scenarios: {
+      'missing-binary': BASELINE_PROMPT,
       baseline: BASELINE_PROMPT,
+      'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
+      'crash-stderr-held-pipe': 'mock:crash-stderr-held-pipe',
+      'shutdown-stderr': 'mock:crash-stderr-clean',
+      'crash-stderr': 'mock:crash-stderr',
+      'crash-stderr-single': 'mock:crash-stderr-single',
       done: 'mock:done',
       hold: 'mock:hold', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'busy-progress': 'mock:busy-progress',
       'split-text': 'mock:split-text',
@@ -164,7 +177,13 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     binEnv: 'CEZ_CODEX_BIN',
     mockBin: CODEX_MOCK,
     scenarios: {
+      'missing-binary': BASELINE_PROMPT,
       baseline: BASELINE_PROMPT,
+      'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
+      'crash-stderr-held-pipe': 'mock:crash-stderr-held-pipe',
+      'shutdown-stderr': 'mock:crash-stderr-clean',
+      'crash-stderr': 'mock:crash-stderr',
+      'crash-stderr-single': 'mock:crash-stderr-single',
       done: 'mock:done',
       hold: 'mock:hold', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'busy-progress': 'mock:busy-progress',
       'split-text': 'mock:split-text',
@@ -190,7 +209,13 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     binEnv: 'CEZ_OPENCODE_BIN',
     mockBin: OPENCODE_MOCK,
     scenarios: {
+      'missing-binary': BASELINE_PROMPT,
       baseline: BASELINE_PROMPT,
+      'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
+      'crash-stderr-held-pipe': 'mock:crash-stderr-held-pipe',
+      'shutdown-stderr': 'mock:crash-stderr-clean',
+      'crash-stderr': 'mock:crash-stderr',
+      'crash-stderr-single': 'mock:crash-stderr-single',
       done: 'mock:done',
       hold: 'mock:hold', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'busy-progress': 'mock:busy-progress',
       'split-text': 'mock:split-text',
@@ -216,7 +241,12 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     ],
     binEnv: 'CEZ_CURSOR_BIN',
     mockBin: join(HERE, '..', '..', 'scripts', 'mock-cursor-acp.mjs'),
-    scenarios: { baseline: BASELINE_PROMPT, done: 'mock:done', hold: 'mock:hold', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'busy-progress': 'mock:busy-progress',
+    scenarios: { 'missing-binary': BASELINE_PROMPT, baseline: BASELINE_PROMPT,
+      'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
+      'crash-stderr-held-pipe': 'mock:crash-stderr-held-pipe',
+      'shutdown-stderr': 'mock:crash-stderr-clean',
+      'crash-stderr': 'mock:crash-stderr',
+      'crash-stderr-single': 'mock:crash-stderr-single', done: 'mock:done', hold: 'mock:hold', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'busy-progress': 'mock:busy-progress',
       'split-text': 'mock:split-text', 'provider-error': 'mock:provider-error',
       'provider-unavailable': 'mock:provider-error',
       ask: 'mock:ask',
@@ -231,7 +261,13 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     binEnv: 'CEZ_PI_BIN',
     mockBin: PI_MOCK,
     scenarios: {
+      'missing-binary': BASELINE_PROMPT,
       baseline: BASELINE_PROMPT,
+      'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
+      'crash-stderr-held-pipe': 'mock:crash-stderr-held-pipe',
+      'shutdown-stderr': 'mock:crash-stderr-clean',
+      'crash-stderr': 'mock:crash-stderr',
+      'crash-stderr-single': 'mock:crash-stderr-single',
       done: 'mock:done',
       hold: 'mock:hold', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'busy-progress': 'mock:busy-progress',
       'split-text': 'mock:split-text',
@@ -387,6 +423,9 @@ export function textEvents(v1: readonly AgentEvent[]): string[] {
 }
 
 export interface SeamObservation {
+  readonly backend: RunnerId;
+  readonly elapsedMs: number;
+  readonly failure?: Error;
   readonly v1: readonly AgentEvent[];
   readonly v2: readonly UiEvent[];
   readonly result: AgentRunResult;
@@ -420,12 +459,16 @@ export async function driveSeam(
   scenario: ScenarioName,
   opts: DriveSeamOptions = {},
 ): Promise<SeamObservation> {
+  const started = Date.now();
   const adapter = HARNESS_ADAPTERS[backend];
   const savedBin = process.env[adapter.binEnv];
   const savedDry = process.env.CEZ_DRY_RUN;
   process.env[adapter.binEnv] = adapter.mockBin;
   delete process.env.CEZ_DRY_RUN;
   const cwd = mkdtempSync(join(tmpdir(), `cez-parity-${backend}-`));
+  // A failed spawn has no native wire. Exercise the real OS boundary through
+  // the adapter's binary setting, leaving runtime scenarios on their own mocks.
+  if (scenario === 'missing-binary') process.env[adapter.binEnv] = join(cwd, 'missing-executable');
   const v1: AgentEvent[] = [];
   const v2: UiEvent[] = [];
   let session: AgentSession | undefined;
@@ -447,14 +490,18 @@ export async function driveSeam(
       (event) => v1.push(event),
       { ...opts.sessionOptions, onUiEvent: (event) => v2.push(event) },
     );
+    let failure: Error | undefined;
+    const settled = session.result.catch((error: unknown): AgentRunResult => {
+      failure = error instanceof Error ? error : new Error(String(error));
+      return { text: '', toolCalls: [], tokensUsed: 0 };
+    });
     const pid = session.pid;
-    if (opts.whileOpen) await opts.whileOpen(session, { v1, v2 });
+    if (scenario === 'missing-binary') await settled;
+    else if (opts.whileOpen) await opts.whileOpen(session, { v1, v2 });
     else await waitFor(() => v1.some((e) => e.type === 'turn-end' || e.type === 'error'));
     session.end();
-    const result = await session.result.catch(
-      (): AgentRunResult => ({ text: '', toolCalls: [], tokensUsed: 0 }),
-    );
-    return { v1, v2, result, pid };
+    const result = await settled;
+    return { backend, v1, v2, result, pid, elapsedMs: Date.now() - started, ...(failure ? { failure } : {}) };
   } finally {
     session?.interrupt();
     if (savedBin === undefined) delete process.env[adapter.binEnv];
@@ -508,25 +555,27 @@ export async function driveRun(
   const adapter = HARNESS_ADAPTERS[backend];
   const savedBin = process.env[adapter.binEnv];
   const savedDry = process.env.CEZ_DRY_RUN;
+  const savedAutoName = process.env.CEZ_AUTONAME;
+  process.env.CEZ_AUTONAME = '0';
   process.env[adapter.binEnv] = adapter.mockBin;
   delete process.env.CEZ_DRY_RUN;
   const repoRoot = mkdtempSync(join(tmpdir(), `cez-parity-run-${backend}-`));
   let store: RunStore | undefined;
   let manager: RunManager | undefined;
-  let runId: string | undefined;
   try {
     await execFileAsync('git', ['init', '-q', '-b', 'main'], { cwd: repoRoot });
+    await execFileAsync('git', ['config', 'gc.auto', '0'], { cwd: repoRoot });
+    await execFileAsync('git', ['config', 'maintenance.auto', 'false'], { cwd: repoRoot });
     writeFileSync(join(repoRoot, 'a.txt'), 'one\n');
     await execFileAsync('git', ['add', '-A'], { cwd: repoRoot });
     await execFileAsync('git', [...GIT_IDENTITY, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    manager = new RunManager(store, repoRoot);
+    manager = createFixtureManager(store, repoRoot);
     const started = manager.startRun(SINGLE_STEP, {
       task: typeof scenario === 'string' ? promptFor(backend, scenario) : scenario.prompt,
       runner: backend,
       worktree: false,
     });
-    runId = started.id;
     const statuses: string[] = [];
     const record = () => store?.getRun(started.id);
     const deadline = Date.now() + timeoutMs;
@@ -542,19 +591,18 @@ export async function driveRun(
       }
       await new Promise((r) => setTimeout(r, 50));
     }
-    if (afterSettled) await afterSettled({ store, manager, runId });
+    if (afterSettled) await afterSettled({ store, manager, runId: started.id });
     store.flush();
     // Cleanup mutates the live record; return the observed state before cancellation.
     return { statuses, record: structuredClone(record()), events: readRunEvents(repoRoot, started.id) };
   } finally {
-    if (runId && manager) {
-      manager.cancel(runId);
-      await waitFor(() => !manager!.isActive(runId!));
-    }
+    await drainFixtureManagers(repoRoot);
     store?.flush();
     if (savedBin === undefined) delete process.env[adapter.binEnv];
     else process.env[adapter.binEnv] = savedBin;
     if (savedDry !== undefined) process.env.CEZ_DRY_RUN = savedDry;
+    if (savedAutoName === undefined) delete process.env.CEZ_AUTONAME;
+    else process.env.CEZ_AUTONAME = savedAutoName;
     rmSync(repoRoot, { force: true, recursive: true });
   }
 }
@@ -633,6 +681,8 @@ export async function withOwnedInputRun(
   let drainBookkeeping = async () => {};
   try {
     await execFileAsync('git', ['init', '-q', '-b', 'main'], { cwd: repoRoot });
+    await execFileAsync('git', ['config', 'gc.auto', '0'], { cwd: repoRoot });
+    await execFileAsync('git', ['config', 'maintenance.auto', 'false'], { cwd: repoRoot });
     await execFileAsync('git', ['config', 'user.name', 'test'], { cwd: repoRoot });
     await execFileAsync('git', ['config', 'user.email', 'test@local'], { cwd: repoRoot });
     writeFileSync(join(repoRoot, 'a.txt'), 'one\n');

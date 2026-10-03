@@ -723,7 +723,7 @@ generated allow-list entries, Pi's tool admission and the environment names each
 harness forwards to the adapter all read it. `cezar_preview_serve` is on that list
 only under `CEZ_PREVIEW=1`; the provisioned session environment carries the opt-in,
 and Claude, Codex and Cursor forward it explicitly because they start MCP servers
-from an environment allowlist. Harness row R28 lists the tools through every
+from an environment allowlist. Harness row R35 lists the tools through every
 runner's native mock wire and the real bundled adapter, with the flag on and off.
 
 Startup and tool listing do no GitHub work. IPC failure preserves ordinary boot
@@ -751,6 +751,38 @@ The integration verification ledger must record actual outcomes separately from
 this normative contract.
 
 ## 7. Harness parity — session and lifecycle (`packages/cezar/src/core/harness-parity.test.ts`)
+
+Crash-diagnostic rows **S15–S17** (#499) drive every `RUNNER_IDS` adapter's
+native transport through an uncaught-exception-shaped stderr fixture, a plain
+single-line failure, and a clean/requested shutdown with stderr. RPC mocks send
+a malformed native frame before the crash. Crash summaries preserve the
+exception and exit code, omit empty lines and the Node runtime footer, and cap
+the stderr detail at 500 characters. A separate v1 `note` retains the available
+stderr (including stack and error properties); it never replaces the fatal
+summary. Cursor retains a bounded 65,536-character diagnostic tail, explicitly
+marks truncation, and keeps its existing sanitized 500-character display bound.
+Its existing startup retries are unchanged. OpenCode chooses the crash diagnostic
+after process settlement, before its synthetic turn-end, so an SSE disconnect
+cannot obscure the exception or add a second error. Timeouts and requested
+signal teardown retain their existing outcomes.
+
+S15 additionally pins selection of the terminal outer exception after a recovered
+error, without confusing indented nested causes/properties with the fatal header.
+**S18** crashes while the opening prompt is awaiting acknowledgement (before the
+first response on Claude's stream wire), requiring one actionable error before
+any terminal boundary. **S19** inherits the CLI's pipes in a descendant, writes a
+late diagnostic after CLI exit, and proves settlement remains bounded. OpenCode
+awaits drained stdout/stderr after confirmed process exit under the shared 250ms
+pipe deadline; an opening HTTP rejection keeps its note and failure reason, while
+a concurrent process crash supplies the authoritative error. Codex startup crash
+errors retain their phase context alongside the terminal stderr exception.
+
+**S20** exercises missing executables through every adapter's binary setting.
+There is no child process or backend wire on ENOENT, so it uses the OS spawn
+boundary and preserves each runner's existing event/rejected-result failure
+channel. No turn starts. OpenCode's focused spawn test additionally requires
+exactly one wrapped error event with PATH/installation guidance before rejecting
+the result, without a turn-end or done event.
 
 Workflow deadline rows **T1–T6** (#470) live in
 `core/workflow-timeout-parity.test.ts` and are registered in the shared parity
@@ -868,6 +900,21 @@ R22/R23 (#515) preserve task scratch across native session close and host temp-e
 runs keep files through fresh and continuation idle-close paths, and workers
 with a pending question keep files after private process completion. Terminal
 Finish still reaps both repo-local and fallback scratch. Every runner is covered.
+
+R28/R29 (#473) idle-close and Continue twice on every native runner wire, then
+Finish into `done` or `review`. Intermediate Continue steps remain waiting while
+parked and become done with a completion timestamp only when the run succeeds.
+R30 delays the final diff check and cancels during it: cancellation wins over
+success, including the intermediate steps. Successful settlement preserves other
+step statuses and existing timestamps, and still respects parent completion deferrals.
+R31/R32 accept Finish on fresh and Continue sessions, dispose the manager during
+the final diff check, and still require terminal success on every native wire.
+Disposal cannot revoke accepted Finish/Stop intent; a replacement active execution
+still prevents the old settlement from completing its steps.
+R33/R34 hold an inactive run's Finish diff check while a newer Continue either
+starts and idle-closes or remains queued behind capacity. Continue acceptance
+supersedes that settlement before scheduling; returning to no active session must
+not let the earlier Finish close the newer execution or its steps.
 
 R20/R21 (#661) complete an owned worker over each native mock wire, then commit a
 cleanup checkpoint. Enabled delegation reads only that worker's family; disabled

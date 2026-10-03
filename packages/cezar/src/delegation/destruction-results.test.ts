@@ -1,3 +1,4 @@
+import { createFixtureManager } from '../workflows/fixture-cleanup.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -6,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fixture } from './service.testkit.ts';
 import { ensureOwnedWorkspace, planOwnedWorkspace } from './workspace.ts';
 import { RunStore } from '../runs/store.ts';
-import { RunManager } from '../workflows/run.ts';
+
 import { QUICK_TASK_WORKFLOW } from '../workflows/types.ts';
 
 vi.mock('node:fs', async original => { const fs = await original<typeof import('node:fs')>(); return { ...fs, rmSync: vi.fn(fs.rmSync) }; });
@@ -276,7 +277,7 @@ describe('verified destruction retains results through explicit history deletion
   it.each(['queued', 'running'] as const)('does not revive a %s parent with interrupted deletion on restart', async status => {
     interruptedParentDeletion(); f.store.updateRun(f.parent.id, { status }); f.store.flush();
     const reopened = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true });
-    const manager = new RunManager(reopened, f.root);
+    const manager = createFixtureManager(reopened, f.root);
     vi.spyOn(manager as unknown as { pump(): Promise<void> }, 'pump').mockResolvedValue();
     try {
       await manager.recover();

@@ -1,3 +1,4 @@
+import { summarizeRunnerStderr } from './runner-stderr.ts';
 import { spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { parseEffort } from '@open-mercato/cezar-contract';
 import { fileURLToPath } from 'node:url';
@@ -456,7 +457,9 @@ export class PiRunner implements AgentRunner {
           message: `pi CLI did not exit on its own after close; terminated by cezar (code ${exitCode})`,
         });
       } else if (exitCode !== 0 && exitCode !== null) {
-        const detail = stderr.join('').trim().split('\n').slice(-3).join(' | ');
+        const diagnostic = stderr.join('');
+        if (diagnostic.trim()) onEvent?.({ type: 'note', message: `pi CLI stderr:\n${diagnostic}` });
+        const detail = summarizeRunnerStderr(diagnostic);
         const message = `pi CLI exited with code ${exitCode}${detail ? ` — ${detail}` : ''}`;
         onEvent?.({ type: 'error', message });
         throw new Error(message);

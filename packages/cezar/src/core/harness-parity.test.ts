@@ -39,6 +39,7 @@ import { createRunner } from './runner-factory.ts';
 import { inputDeliveryOf } from './agent-runner.ts';
 import { agentTmpDir, resolveAgentTmpDir } from '../runs/agent-tmpdir.ts';
 import { appendTurnText } from '../workflows/run.ts';
+import * as gitWorktree from '../git-worktree.ts';
 import { cleanupCheckpoint, seedSettledFamily } from '../workflows/delegation-reconcile.testkit.ts';
 import { supportsProfiles } from './agent-profiles.ts';
 import type { WorkflowDef } from '../workflows/types.ts';
@@ -76,6 +77,108 @@ const sessionEvents = (v1: readonly AgentEvent[]) =>
   v1.filter((e): e is Extract<AgentEvent, { type: 'session' }> => e.type === 'session');
 
 const SEAM_CRITERIA: readonly SeamCriterion[] = [
+  {
+    id: 'S20',
+    name: 'S20 reports missing executables through its existing failure channel without starting a turn',
+    scenario: 'missing-binary',
+    assert: ({ backend, v1, failure, pid }) => {
+      // ENOENT precedes the backend wire. Runners retain their existing event
+      // and/or rejected-result channels; none may look like a successful turn.
+      expect(pid).toBeUndefined();
+      const errors = v1.filter(event => event.type === 'error');
+      expect(errors.length).toBeLessThanOrEqual(1);
+      if (backend === 'opencode') {
+        expect(errors).toHaveLength(1);
+        expect(failure).toBeDefined();
+        expect(errors[0]!.message).toBe(failure!.message);
+        expect(v1.some(event => event.type === 'done' || event.type === 'turn-end')).toBe(false);
+      }
+      const diagnostics = [...errors.map(event => event.message), ...(failure ? [failure.message] : [])];
+      expect(diagnostics.length).toBeGreaterThan(0);
+      for (const message of diagnostics) expect(message).toMatch(/PATH|install/i);
+      expect(v1.some(event => event.type === 'turn-end' || event.type === 'text')).toBe(false);
+      const done = v1.findIndex(event => event.type === 'done');
+      if (done >= 0) expect(v1.findIndex(event => event.type === 'error')).toBeGreaterThanOrEqual(0);
+      if (done >= 0) expect(v1.findIndex(event => event.type === 'error')).toBeLessThan(done);
+    },
+  },
+  {
+    id: 'S18',
+    name: 'S18 reports one actionable crash before terminal boundaries when the opening prompt is unacknowledged',
+    scenario: 'crash-stderr-pre-ack',
+    assert: ({ v1 }) => {
+      const errors = v1.filter(e => e.type === 'error');
+      expect(errors).toHaveLength(1);
+      expect(errors[0]!.message).toContain('Error: write EPIPE');
+      expect(errors[0]!.message).toMatch(/(?:code 1|\(1\))/);
+      const errorIndex = v1.findIndex(e => e.type === 'error');
+      for (const [index, event] of v1.entries()) {
+        if (event.type === 'turn-end' || event.type === 'done') expect(index).toBeGreaterThan(errorIndex);
+      }
+      expect(v1.filter(e => e.type === 'turn-end').length).toBeLessThanOrEqual(1);
+      expect(v1.filter(e => e.type === 'done').length).toBeLessThanOrEqual(1);
+    },
+  },
+  {
+    id: 'S19',
+    name: 'S19 drains late crash stderr without waiting indefinitely for inherited pipes',
+    scenario: 'crash-stderr-held-pipe',
+    assert: ({ v1, elapsedMs }) => {
+      expect(elapsedMs).toBeLessThan(4_000); // Descendant keeps both pipes open for 5s.
+      const errors = v1.filter(e => e.type === 'error');
+      expect(errors).toHaveLength(1);
+      expect(errors[0]!.message).toContain('Error: write EPIPE');
+      expect(v1.filter(e => e.type === 'note').map(e => e.message).join('\n')).toContain('late buffered crash diagnostic');
+    },
+  },
+  {
+    id: 'S17',
+    name: 'S17 keeps clean exits and requested signal teardown successful despite stderr',
+    scenario: 'shutdown-stderr',
+    assert: ({ v1 }) => {
+      expect(v1.filter(e => e.type === 'error')).toEqual([]);
+      expect(v1.filter(e => e.type === 'done')).toHaveLength(1);
+      expect(v1.filter(e => e.type === 'turn-end')).toHaveLength(1);
+      expect(v1.at(-1)?.type).toBe('done');
+      expect(v1.filter(e => e.type === 'note').map(e => e.message).join('\n')).not.toContain('harmless shutdown diagnostic');
+    },
+  },
+  {
+    id: 'S15',
+    name: 'S15 preserves actionable crash stderr and full available diagnostics after malformed native output',
+    scenario: 'crash-stderr',
+    assert: ({ v1 }) => {
+      const errors = v1.filter(e => e.type === 'error');
+      expect(errors).toHaveLength(1);
+      const message = errors.at(-1)!.message;
+      expect(message).toContain('Error: write EPIPE');
+      expect(message).toMatch(/(?:code 1|\(1\))/);
+      expect(message).not.toContain('Node.js');
+      expect(message).not.toContain(' |  | ');
+      expect(message.length).toBeLessThan(650);
+      expect(v1.filter(e => e.type === 'done').length).toBeLessThanOrEqual(1);
+      expect(v1.filter(e => e.type === 'turn-end').length).toBeLessThanOrEqual(1);
+      if (message.startsWith('pi CLI')) {
+        expect(v1.some(e => e.type === 'note' && e.message.includes('skipped unparseable RPC line'))).toBe(true);
+      }
+      const notes = v1.filter(e => e.type === 'note').map(e => e.message).join('\n');
+      expect(notes).toContain('at afterWriteDispatched (node:internal/stream_base_commons:159:15)');
+      expect(notes).toContain("errno: -32,\n  code: 'EPIPE',\n  syscall: 'write',");
+      expect(notes).toContain("diagnostic: '" + 'x'.repeat(700) + "'");
+      expect(notes).toContain('Node.js v24.20.0');
+    },
+  },
+  {
+    id: 'S16',
+    name: 'S16 preserves single-line stderr and nonzero exit codes',
+    scenario: 'crash-stderr-single',
+    assert: ({ v1 }) => {
+      const errors = v1.filter(e => e.type === 'error');
+      expect(errors).toHaveLength(1);
+      expect(errors.at(-1)!.message).toContain('authentication unavailable');
+      expect(errors.at(-1)!.message).toMatch(/(?:code 7|\(7\))/);
+    },
+  },
   {
     // Group 7 — the baseline AgentSession contract, never asserted uniformly.
     id: 'S1',
@@ -406,8 +509,15 @@ const CONTROL_CRITERIA = [
   { id: 'R26', scenario: 'ask-resume' },
   // workflows/ci-wait-refusal.test.ts: settled worker wake, private CI IPC, then delivery.
   { id: 'R27', scenario: 'hold' },
-  // The shared cezar tool list, `describe('harness parity — cezarTools list behind CEZ_PREVIEW')` (#781).
   { id: 'R28', scenario: 'baseline' },
+  { id: 'R29', scenario: 'baseline' },
+  { id: 'R30', scenario: 'baseline' },
+  { id: 'R31', scenario: 'baseline' },
+  { id: 'R32', scenario: 'baseline' },
+  { id: 'R33', scenario: 'baseline' },
+  { id: 'R34', scenario: 'baseline' },
+  // The shared cezar tool list, `describe('harness parity — cezarTools list behind CEZ_PREVIEW')` (#781).
+  { id: 'R35', scenario: 'baseline' },
 ] as const;
 
 /**
@@ -1489,7 +1599,7 @@ describe('harness parity — AgentRunSpec support declarations', () => {
 describe('harness parity — cezarTools list behind CEZ_PREVIEW', () => {
   const wait = { id: '11111111-1111-4111-8111-111111111111', generation: 'gen', turnId: 'turn', timeoutSeconds: 1800, prUrl: 'https://github.com/owner/repo/pull/1', repository: 'owner/repo', prNumber: 1, headSha: 'a'.repeat(40), registeredAt: '2026-09-22T00:00:00.000Z', deadline: '2026-09-22T00:30:00.000Z', phase: 'registered' as const };
   for (const backend of RUNNER_IDS) for (const enabled of [true, false]) {
-    it(`${backend} R28 ${enabled ? 'exposes' : 'hides'} cezar_preview_serve with CEZ_PREVIEW ${enabled ? 'on' : 'off'}`, async () => {
+    it(`${backend} R35 ${enabled ? 'exposes' : 'hides'} cezar_preview_serve with CEZ_PREVIEW ${enabled ? 'on' : 'off'}`, async () => {
       vi.stubEnv('CEZ_PREVIEW', enabled ? '1' : '');
       const { CiToolController } = await import('../ci-wait/controller.ts');
       const controller = await CiToolController.start();
@@ -1541,6 +1651,182 @@ describe('harness parity — terminal cleanup reconciliation', () => {
               if (!enabled) { expect(reconcile).not.toHaveBeenCalled(); expect(reads).not.toHaveBeenCalled(); }
             } finally { reads.mockRestore(); reconcile.mockRestore(); }
           });
+        } finally { vi.unstubAllEnvs(); }
+      }, 60_000);
+    }
+  }
+});
+
+// #473: successful settlement closes intermediate Continues left by idle close.
+describe('harness parity — multi-Continue settlement', () => {
+  for (const backend of RUNNER_IDS) {
+    for (const status of ['done', 'review', 'cancelled'] as const) {
+      const criterion = status === 'done' ? 'R28' : status === 'review' ? 'R29' : 'R30';
+      it(`${backend} ${criterion} closes every live step when multi-Continue finishes as ${status}`, async () => {
+        vi.stubEnv('CEZ_REVIEW_GATE', status === 'review' ? '1' : '0');
+        try {
+          await driveRun(backend, 'baseline', record => record?.status === 'waiting', 30_000,
+            async ({ store, manager, runId }) => {
+              const internal = manager as unknown as {
+                repoRoot: string;
+                active: Map<string, { idleTimer?: NodeJS.Timeout }>;
+              };
+              for (let turn = 0; turn < 2; turn++) {
+                const timer = internal.active.get(runId)?.idleTimer as NodeJS.Timeout & { _onTimeout(): void };
+                expect(timer).toBeDefined();
+                timer._onTimeout();
+                await waitFor(() => !manager.isActive(runId));
+                // Idle close remains a park, not successful task completion.
+                expect(store.getRun(runId)?.status).toBe('waiting');
+                expect(store.getRun(runId)?.steps.every(step => step.status === 'waiting' && !step.finishedAt)).toBe(true);
+                expect(manager.continueRun(runId, { text: promptFor(backend, 'baseline') }).ok).toBe(true);
+                await waitFor(() => manager.isActive(runId) && store.getRun(runId)?.status === 'waiting');
+              }
+              const before = store.getRun(runId)!;
+              expect(before.steps.map(step => step.id)).toEqual(['task', 'continue-1', 'continue-2']);
+              // driveRun uses an in-place repository; expose that real diff to the gate.
+              store.updateRun(runId, { worktreePath: internal.repoRoot, baseBranch: 'main' });
+              writeFileSync(join(internal.repoRoot, 'a.txt'), 'changed for review\n');
+              if (status === 'cancelled') {
+                let release!: (diff: string) => void;
+                const diff = vi.spyOn(gitWorktree, 'worktreeDiff').mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+                try {
+                  expect(manager.finish(runId)).toBe(true);
+                  await waitFor(() => release !== undefined);
+                  expect(manager.cancel(runId)).toBe(true);
+                } finally {
+                  release?.('changed');
+                  diff.mockRestore();
+                }
+              } else expect(manager.finish(runId)).toBe(true);
+              await waitFor(() => !manager.isActive(runId));
+              const completed = store.getRun(runId)!;
+              expect(completed.status).toBe(status);
+              expect(completed.steps.map(step => step.status)).toEqual(['done', status === 'cancelled' ? 'cancelled' : 'done', 'done']);
+              for (const step of completed.steps) expect(step.finishedAt).toBeDefined();
+              expect(completed.currentStepId).toBeUndefined();
+            });
+        } finally { vi.unstubAllEnvs(); }
+      }, 60_000);
+    }
+  }
+});
+
+describe('harness parity — inactive Finish superseded by Continue', () => {
+  for (const backend of RUNNER_IDS) {
+    for (const queued of [false, true]) {
+      const criterion = queued ? 'R34' : 'R33';
+      it(`${backend} ${criterion} rejects stale Finish after Continue ${queued ? 'queues' : 'starts and idle-closes'}`, async () => {
+        await driveRun(backend, 'baseline', record => record?.status === 'waiting', 30_000,
+          async ({ store, manager, runId }) => {
+            const internal = manager as unknown as {
+              repoRoot: string;
+              active: Map<string, { idleTimer?: NodeJS.Timeout }>;
+              semaphore: { busy(): number };
+              settleSuccess(id: string, durable?: boolean): Promise<void>;
+            };
+            const idleClose = async () => {
+              const timer = internal.active.get(runId)?.idleTimer as NodeJS.Timeout & { _onTimeout(): void };
+              expect(timer).toBeDefined();
+              timer._onTimeout();
+              await waitFor(() => !manager.isActive(runId));
+              expect(store.getRun(runId)?.status).toBe('waiting');
+            };
+            await idleClose();
+            store.updateRun(runId, { worktreePath: internal.repoRoot, baseBranch: 'main' });
+            let release: ((diff: string) => void) | undefined;
+            const diff = vi.spyOn(gitWorktree, 'worktreeDiff').mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+            // Observe the real fire-and-forget settlement, including its config I/O.
+            const settlement = vi.spyOn(internal, 'settleSuccess');
+            // Hold only scheduler capacity; the run and its idle close use native wires.
+            const capacity = queued ? vi.spyOn(internal.semaphore, 'busy').mockReturnValue(Number.MAX_SAFE_INTEGER) : undefined;
+            try {
+              expect(manager.finish(runId)).toBe(true);
+              await waitFor(() => release !== undefined);
+              const pending = settlement.mock.results[0]!.value as Promise<void>;
+              expect(manager.continueRun(runId, { text: promptFor(backend, 'baseline') }, queued).ok).toBe(true);
+              if (!queued) {
+                await waitFor(() => manager.isActive(runId) && store.getRun(runId)?.status === 'waiting');
+                await idleClose();
+              }
+              expect(internal.active.get(runId)).toBeUndefined();
+              const before = structuredClone(store.getRun(runId)!);
+              expect(before.status).toBe(queued ? 'queued' : 'waiting');
+              expect(before.steps.at(-1)).toMatchObject({ id: 'continue-1', status: queued ? 'pending' : 'waiting' });
+              release!('changed');
+              await pending;
+              const after = store.getRun(runId)!;
+              expect(after.status).toBe(before.status);
+              expect(after.steps).toEqual(before.steps);
+              expect(after.finishedAt).toBeUndefined();
+              expect(store.readEvents(runId).some(event => event.type === 'lifecycle' &&
+                (event.message === 'run finished' || (typeof event.message === 'string' && event.message.startsWith('changes ready for review'))))).toBe(false);
+            } finally {
+              release?.('changed');
+              await Promise.allSettled(settlement.mock.results.map(result => result.value));
+              diff.mockRestore();
+              settlement.mockRestore();
+              // Cancel queued work before restoring capacity so teardown cannot launch it.
+              manager.cancel(runId);
+              capacity?.mockRestore();
+            }
+          });
+      }, 60_000);
+    }
+  }
+});
+
+describe('harness parity — accepted Finish across disposal', () => {
+  for (const backend of RUNNER_IDS) {
+    for (const continuation of [false, true]) {
+      const criterion = continuation ? 'R32' : 'R31';
+      it(`${backend} ${criterion} honors ${continuation ? 'Continue' : 'fresh'} Finish when disposed during diff I/O`, async () => {
+        vi.stubEnv('CEZ_REVIEW_GATE', '0');
+        try {
+          await driveRun(backend, 'baseline', record => record?.status === 'waiting', 30_000,
+            async ({ store, manager, runId }) => {
+              const internal = manager as unknown as {
+                repoRoot: string;
+                active: Map<string, { idleTimer?: NodeJS.Timeout }>;
+                dropActive(id: string): void;
+              };
+              if (continuation) {
+                const timer = internal.active.get(runId)?.idleTimer as NodeJS.Timeout & { _onTimeout(): void };
+                expect(timer).toBeDefined();
+                timer._onTimeout();
+                await waitFor(() => !manager.isActive(runId));
+                expect(manager.continueRun(runId, { text: promptFor(backend, 'baseline') }).ok).toBe(true);
+                await waitFor(() => manager.isActive(runId) && store.getRun(runId)?.status === 'waiting');
+              }
+              store.updateRun(runId, { worktreePath: internal.repoRoot, baseBranch: 'main' });
+              let release: ((diff: string) => void) | undefined;
+              const diff = vi.spyOn(gitWorktree, 'worktreeDiff').mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+              // dispose clears active immediately. Observe actual engine cleanup,
+              // so assertions and fixture deletion wait for the settlement callback.
+              let cleanedUp = false;
+              const dropActive = internal.dropActive.bind(manager);
+              const cleanup = vi.spyOn(internal, 'dropActive').mockImplementation(id => {
+                dropActive(id);
+                if (id === runId) cleanedUp = true;
+              });
+              try {
+                expect(manager.finish(runId)).toBe(true);
+                await waitFor(() => release !== undefined);
+                manager.dispose();
+                release!('changed');
+                await waitFor(() => cleanedUp);
+                const completed = store.getRun(runId)!;
+                expect(completed.status).toBe('done');
+                expect(completed.finishedAt).toBeDefined();
+                expect(completed.currentStepId).toBeUndefined();
+                expect(completed.steps).toHaveLength(continuation ? 2 : 1);
+                for (const step of completed.steps) expect(step).toMatchObject({ status: 'done', finishedAt: expect.any(String) });
+              } finally {
+                release?.('changed');
+                diff.mockRestore();
+                cleanup.mockRestore();
+              }
+            });
         } finally { vi.unstubAllEnvs(); }
       }, 60_000);
     }

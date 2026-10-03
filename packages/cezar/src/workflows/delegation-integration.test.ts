@@ -44,7 +44,9 @@ describe('public delegation completion integration', () => {
   beforeEach(async () => {
     root = mkdtempSync(join(tmpdir(), 'cez-delegation-integration-'));
     repo = join(root, 'repo'); control = join(root, 'wire'); mkdirSync(repo); mkdirSync(control);
-    git(repo, 'init', '-q', '-b', 'main'); git(repo, 'config', 'user.name', 'test'); git(repo, 'config', 'user.email', 'test@local');
+    git(repo, 'init', '-q', '-b', 'main');
+    git(repo, 'config', 'gc.auto', '0'); git(repo, 'config', 'maintenance.auto', 'false');
+    git(repo, 'config', 'user.name', 'test'); git(repo, 'config', 'user.email', 'test@local');
     writeFileSync(join(repo, 'shared.txt'), 'baseline\n'); git(repo, 'add', '.'); git(repo, 'commit', '-qm', 'base');
     const wire = join(root, 'agent.mjs');
     writeFileSync(wire, `#!${process.execPath}\nimport { runWire } from ${JSON.stringify(new URL('./__fixtures__/delegation-wire.mjs', import.meta.url).href)};\nrunWire(${JSON.stringify(control)});\n`, { mode: 0o755 });

@@ -1,3 +1,4 @@
+import { summarizeRunnerStderr } from './runner-stderr.ts';
 import { execFileSync, spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { parseEffort } from '@open-mercato/cezar-contract';
@@ -406,8 +407,10 @@ export class ClaudeCliRunner implements AgentRunner {
       }
 
       if (exitCode !== 0 && exitCode !== null) {
-        const stderr = stderrChunks.join('').trim();
-        const detail = stderr ? ` — ${stderr.split('\n').slice(-3).join(' | ')}` : '';
+        const stderr = stderrChunks.join('');
+        if (stderr.trim()) onEvent?.({ type: 'note', message: `claude CLI stderr:\n${stderr}` });
+        const summary = summarizeRunnerStderr(stderr);
+        const detail = summary ? ` — ${summary}` : '';
         const msg = `claude CLI exited with code ${exitCode}${detail}`;
         onEvent?.({ type: 'error', message: msg });
         throw new Error(msg);

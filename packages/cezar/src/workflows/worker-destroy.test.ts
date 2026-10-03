@@ -32,6 +32,8 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     vi.stubEnv('CEZ_DRY_RUN', '1'); vi.stubEnv('CEZ_AUTONAME', '0');
     root = mkdtempSync(join(tmpdir(), 'cez-worker-destroy-'));
     execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: root });
+    execFileSync('git', ['config', 'gc.auto', '0'], { cwd: root });
+    execFileSync('git', ['config', 'maintenance.auto', 'false'], { cwd: root });
     execFileSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@local', 'commit', '--allow-empty', '-qm', 'base'], { cwd: root });
     store = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
     manager = new RunManager(store, root, { semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 1 } }) });

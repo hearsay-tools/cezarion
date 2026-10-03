@@ -1,3 +1,4 @@
+import { summarizeRunnerStderr } from './runner-stderr.ts';
 import { parseCursorConfigOptions, cursorEffortSelection, type CursorConfigOption } from './cursor-config-options.ts';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -94,6 +95,7 @@ class CursorSession implements AgentSession {
   private child!: ChildProcessWithoutNullStreams;
   private hasExited!: () => boolean;
   private stderrBuf = '';
+  private stderrTruncated = false;
   private spawnAttempts = 0;
   private bootstrapGeneration = 0;
   private isOpen = true;
@@ -142,6 +144,7 @@ class CursorSession implements AgentSession {
   private spawnAcp(): void {
     this.spawnAttempts += 1;
     this.stderrBuf = '';
+    this.stderrTruncated = false;
     const spec = this.spec;
     this.attachChild(spawn(this.bin, ['--force', ...(spec.model ? ['--model', spec.model] : []), ...(spec.additionalDirectories ?? []).flatMap(path => ['--add-dir', path]), 'acp'], {
       cwd: spec.cwd, env: buildChildEnv({ backend: 'cursor', extraEnv: spec.env }),
@@ -152,7 +155,12 @@ class CursorSession implements AgentSession {
     boundOutputDrainAfterExit(child);
     this.hasExited = trackChildExit(child);
     child.stderr.setEncoding('utf8');
-    child.stderr.on('data', (chunk: string) => { this.stderrBuf = appendCursorStderr(this.stderrBuf, chunk); });
+    child.stderr.on('data', (chunk: string) => {
+      // Keep bounded diagnostics separately from the existing 500-character display cap.
+      const limit = 64 * 1024;
+      this.stderrTruncated ||= this.stderrBuf.length + chunk.length > limit;
+      this.stderrBuf = appendCursorStderr(this.stderrBuf, chunk, limit);
+    });
     child.stdin.on('error', () => {
       if (this.closing || this.child !== child) return;
       if (!this.ready) { this.abandonHungBootstrap(); return; }
@@ -166,6 +174,8 @@ class CursorSession implements AgentSession {
     child.once('close', (code, signal) => {
       if (this.child !== child) return;
       if (this.closing) { this.finish(); return; }
+      if (this.stderrBuf.trim()) this.emit({ type: 'note', message:
+        `Cursor ACP stderr${this.stderrTruncated ? ' (truncated to last 65536 characters)' : ''}:\n${this.stderrBuf}` });
       if (!this.ready && this.spawnAttempts <= CURSOR_ACP_SPAWN_MAX_RETRIES) {
         this.respawn();
         return;
@@ -253,7 +263,7 @@ class CursorSession implements AgentSession {
   }
   private unexpectedExitMessage(code: number | null, signal: NodeJS.Signals | null): string {
     const reason = signal ?? code ?? 'unknown';
-    const detail = sanitizeCursorProviderError(this.stderrBuf);
+    const detail = sanitizeCursorProviderError(summarizeRunnerStderr(this.stderrBuf));
     const attempts = this.spawnAttempts;
     return `Cursor ACP exited unexpectedly (${reason}) after ${attempts} attempt${attempts === 1 ? '' : 's'}${detail ? `: ${detail}` : ''}`;
   }
