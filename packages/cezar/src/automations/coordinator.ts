@@ -50,9 +50,13 @@ export class AutomationCoordinator {
     }
   }
 
-  /** At least one known project carries a definitions file: the workspace timer keeps watching. */
-  hasDefinitions(): boolean {
-    return [...this.stores.values()].some((store) => store.hasDefinitionsFile());
+  /**
+   * At least one registered project is known (its root is not missing), with or without a
+   * definitions file: the workspace timer keeps an idle wake so a file another cockpit creates
+   * later is discovered by `refresh`.
+   */
+  hasProjects(): boolean {
+    return this.roots.size > 0;
   }
 
   private reloadQuietly(store: AutomationStore): void {

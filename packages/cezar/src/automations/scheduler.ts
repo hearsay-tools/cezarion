@@ -197,10 +197,12 @@ export interface WorkspaceAutomationSchedulerOptions {
 }
 
 /**
- * One workspace timer, created only while at least one project carries a definitions file. With
- * nothing enabled it is an idle wake at the cap: every wake goes through `reschedule`, whose
- * coordinator refresh re-reads a store another cockpit changed and opens a project whose
- * definitions file appeared, so their edits arm here within one cap. No file anywhere: no timer.
+ * One workspace timer, running only while the scheduler is started (automations are opt-in) and at
+ * least one project is registered with the coordinator. With nothing enabled it is an idle wake
+ * at the cap, even before any project has a definitions file: every wake goes through
+ * `reschedule`, whose coordinator refresh re-reads a store another cockpit changed and opens a
+ * project whose definitions file appeared, so their edits arm here within one cap. No registered
+ * project: no timer.
  */
 export class WorkspaceAutomationScheduler {
   private timer?: ReturnType<typeof setTimeout>;
@@ -277,7 +279,7 @@ export class WorkspaceAutomationScheduler {
     }
     for (const key of this.retryAfter.keys()) if (!live.has(key)) this.retryAfter.delete(key);
     if (!due.length) {
-      if (this.options.coordinator.hasDefinitions()) {
+      if (this.options.coordinator.hasProjects()) {
         this.timer = setTimeout(() => { this.timer = undefined; void this.reschedule(); }, WORKSPACE_TIMER_CAP_MS);
       }
       return;

@@ -73,9 +73,10 @@ web routes/automations/*: route shell, list, editor (+ schedule / github fields)
    a project by its optional `automations.json` only. The refresh also re-reads a store it already
    holds when another cockpit changed `automations.json` or `automation-state.json`
    (`reloadIfChanged`: two `stat`s, inode + mtime + size), and every timer wake goes through
-   `reschedule()`. With nothing due, a project carrying the file keeps an idle wake at the 60 s
-   cap, so a schedule enabled, edited or created by another process (which may have exited since)
-   arms here within one cap; a workspace with no definitions file arms no timer at all.
+   `reschedule()`. With nothing due, a scheduler with at least one registered project keeps an idle
+   wake at the 60 s cap — even before any project has a definitions file — so a schedule enabled,
+   edited or created by another process (which may have exited since) arms here within one cap;
+   a workspace with no registered project arms no timer at all.
 2. `schedule()` collects due items: github → `state.nextCheckAt`; schedule → `ScheduleRunner.dueAt`,
    which returns `state.nextRunAt` or computes `nextOccurrence(schedule, now, tz)` and persists it,
    so every process agrees on the instant. A `PUT` that changes `schedule` (or resumes through

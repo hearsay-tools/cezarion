@@ -179,7 +179,7 @@ describe('WorkspaceAutomationScheduler', () => {
       enabledProjectIds: () => store.list().some((item) => item.enabled) ? ['p'] : [],
       store: () => store,
       // No idle wake here: this case pins the reschedule path a local enable takes.
-      hasDefinitions: () => false,
+      hasProjects: () => false,
     };
     const scheduler = new WorkspaceAutomationScheduler({
       coordinator: coordinator as never,
@@ -464,11 +464,10 @@ describe('WorkspaceAutomationScheduler', () => {
       } finally { vi.useRealTimers(); }
     });
 
-    it('a workspace with no automations arms no timer', async () => {
+    it('a workspace with no registered project arms no timer', async () => {
       vi.useFakeTimers();
       try {
-        const { root, coordinator } = await workspace();
-        await mkdir(join(root, '.ai/cezar'), { recursive: true });
+        const coordinator = new AutomationCoordinator({ listProjects: async () => [] });
         const scheduler = new WorkspaceAutomationScheduler({
           coordinator,
           handle: (projectId, store) => ({ projectId, store, timeZone: 'UTC' }),
@@ -477,6 +476,32 @@ describe('WorkspaceAutomationScheduler', () => {
           await scheduler.start();
           expect(scheduler.hasTimer()).toBe(false);
           expect(vi.getTimerCount()).toBe(0);
+        } finally { scheduler.stop(); }
+      } finally { vi.useRealTimers(); }
+    });
+
+    it('a registered project without definitions keeps an idle wake that discovers a schedule another process creates and exits (finding 4172236277)', async () => {
+      vi.useFakeTimers();
+      try {
+        vi.setSystemTime(Date.parse('2026-09-14T03:58:00Z'));
+        const { root, dataDir, coordinator } = await workspace();
+        await mkdir(dataDir, { recursive: true });
+        const launchSchedule = vi.fn(async () => ({ runId: 'scheduled' }));
+        const scheduler = new WorkspaceAutomationScheduler({
+          coordinator,
+          handle: (projectId, store) => ({ projectId, store, timeZone: 'UTC', launchSchedule }),
+          now: () => Date.now(),
+        });
+        try {
+          await scheduler.start();
+          expect(coordinator.ids()).toEqual([]);
+          expect(scheduler.hasTimer()).toBe(true);
+          // Another cockpit creates and enables the first automation, then is gone.
+          AutomationStore.open(join(root, '.ai/cezar')).create({ name: 'Nightly', enabled: true, kind: 'schedule', schedule: { type: 'daily', hour: 4, minute: 0 }, task: { prompt: 'x' } }, 'nightly');
+          await vi.advanceTimersByTimeAsync(WORKSPACE_TIMER_CAP_MS);
+          expect(coordinator.ids()).toEqual(['p']);
+          await vi.advanceTimersByTimeAsync(Date.parse('2026-09-14T04:00:00Z') - Date.now());
+          expect(launchSchedule).toHaveBeenCalledTimes(1);
         } finally { scheduler.stop(); }
       } finally { vi.useRealTimers(); }
     });
@@ -497,7 +522,7 @@ describe('WorkspaceAutomationScheduler', () => {
       const reconcileReceipts = vi.fn(async () => undefined);
       const launchSchedule = vi.fn(async () => ({ runId: 'unused' }));
       const scheduler = new WorkspaceAutomationScheduler({
-        coordinator: { refresh: async () => undefined, enabledProjectIds: () => ['p'], store: () => store, hasDefinitions: () => true } as never,
+        coordinator: { refresh: async () => undefined, enabledProjectIds: () => ['p'], store: () => store, hasProjects: () => true } as never,
         handle: () => ({ projectId: 'p', store, timeZone: 'UTC', launchSchedule, reconcileReceipts }),
         now: () => Date.now(),
       });
