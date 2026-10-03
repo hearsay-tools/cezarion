@@ -6677,6 +6677,7 @@ export class RunManager {
    * off — settle straight to `done`, leaving the diff in the worktree untouched.
    */
   private async settleSuccess(runId: string, durableRootFinish = false): Promise<void> {
+    const state = this.active.get(runId);
     if (this.deferParentCompletion(runId)) return;
     const run = this.store.getRun(runId);
     let review = false;
@@ -6687,16 +6688,39 @@ export class RunManager {
       const config = await loadConfig(this.repoRoot);
       review = hasDiff && reviewGateEnabled(config) && run.autonomous !== true;
     }
-    // Diff/config I/O can race a worker's accepted continuation or a new child.
+    // Diff/config I/O can race cancellation or a replacement execution. Re-read
+    // the record before touching steps, and never settle another session's work.
+    const current = this.store.getRun(runId);
+    if (!current || !['queued', 'running', 'waiting'].includes(current.status) || this.active.get(runId) !== state) return;
+    if (state?.cancelled) {
+      const finishedAt = new Date().toISOString();
+      for (const step of current.steps) {
+        if (step.status === 'running' || step.status === 'waiting') {
+          this.store.updateStep(runId, step.id, { status: 'cancelled', finishedAt: step.finishedAt ?? finishedAt });
+        }
+      }
+      this.store.updateRun(runId, { status: 'cancelled', finishedAt, currentStepId: undefined });
+      this.store.appendEvent(runId, { type: 'lifecycle', message: 'run cancelled' });
+      return;
+    }
+    // A worker's accepted continuation or a new child can defer parent completion.
     if (this.deferParentCompletion(runId)) return;
     if (durableRootFinish) {
       // A later explicit cancellation wins over a slow diff. Publication/cascade
       // follows the atomic terminal/step checkpoint, never the other way around.
       if (!this.store.commitRootFinishSuccess(runId, review ? 'review' : 'done')) return;
     } else {
+      const finishedAt = new Date().toISOString();
+      // An idle-closed Continue remains waiting until the whole task succeeds.
+      // Complete those intermediate steps before publishing terminal run status.
+      for (const step of this.store.getRun(runId)?.steps ?? []) {
+        if (step.status === 'running' || step.status === 'waiting') {
+          this.store.updateStep(runId, step.id, { status: 'done', finishedAt: step.finishedAt ?? finishedAt });
+        }
+      }
       this.store.updateRun(runId, {
         status: review ? 'review' : 'done',
-        finishedAt: new Date().toISOString(),
+        finishedAt,
         currentStepId: undefined,
         // A run that got all the way to a settled turn is not in a limit loop, so the resume
         // counter starts over — otherwise a task that legitimately met the limit once a week would

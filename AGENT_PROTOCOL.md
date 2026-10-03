@@ -860,6 +860,13 @@ runs keep files through fresh and continuation idle-close paths, and workers
 with a pending question keep files after private process completion. Terminal
 Finish still reaps both repo-local and fallback scratch. Every runner is covered.
 
+R28/R29 (#473) idle-close and Continue twice on every native runner wire, then
+Finish into `done` or `review`. Intermediate Continue steps remain waiting while
+parked and become done with a completion timestamp only when the run succeeds.
+R30 delays the final diff check and cancels during it: cancellation wins over
+success, including the intermediate steps. Successful settlement preserves other
+step statuses and existing timestamps, and still respects parent completion deferrals.
+
 R20/R21 (#661) complete an owned worker over each native mock wire, then commit a
 cleanup checkpoint. Enabled delegation reads only that worker's family; disabled
 delegation enters no terminal-checkpoint reconciliation and reads no histories.
