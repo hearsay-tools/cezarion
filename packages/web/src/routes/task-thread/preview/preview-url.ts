@@ -26,9 +26,21 @@ export function resolveAddress(input: string, servers: readonly PreviewServer[])
   const scheme = SCHEME.exec(text)?.[1]?.toLowerCase()
   if (scheme && !/^[a-z0-9.-]+:\d/i.test(text)) {
     if (scheme !== 'http' && scheme !== 'https') return { kind: 'error', message: 'Only http and https addresses open here.' }
-    return { kind: 'url', url: text }
+    return parsed(text)
   }
-  return { kind: 'url', url: `http://${text}` }
+  return parsed(`http://${text}`)
+}
+
+/** The server would refuse an address that does not parse; refuse it here, where it can be said. */
+function parsed(url: string): PreviewAddress {
+  const invalid: PreviewAddress = { kind: 'error', message: 'That is not a valid address.' }
+  if (/\s/.test(url)) return invalid
+  try {
+    new URL(url)
+  } catch {
+    return invalid
+  }
+  return { kind: 'url', url }
 }
 
 /** `http://localhost:5173/members` as the field shows it when it is not being edited. */

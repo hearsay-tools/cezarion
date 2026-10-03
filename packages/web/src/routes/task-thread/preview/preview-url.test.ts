@@ -30,6 +30,11 @@ describe('resolveAddress', () => {
     expect(resolveAddress('70000', [])).toMatchObject({ kind: 'error' })
     expect(resolveAddress('0', [])).toMatchObject({ kind: 'error' })
   })
+
+  it('refuses an address that does not parse as a URL before it reaches the pane', () => {
+    expect(resolveAddress('http://[', [])).toMatchObject({ kind: 'error' })
+    expect(resolveAddress('exa mple.com', [])).toMatchObject({ kind: 'error' })
+  })
 })
 
 describe('displayUrl', () => {
