@@ -1243,7 +1243,7 @@ export class RunStore extends EventEmitter {
     proposed.set(id, { ...run, delegation, status, finishedAt, currentStepId: undefined, autoResumeAttempts: undefined,
       activity: undefined, monitoringWakeAt: undefined, monitoringWakeCapReached: undefined,
       steps: run.steps.map(step => step.status === 'waiting' || step.status === 'running'
-        ? { ...step, status: 'done' as const, finishedAt } : step),
+        ? { ...step, status: 'done' as const, finishedAt: step.finishedAt ?? finishedAt } : step),
     });
     this.commitIndex(proposed, new Set([id]));
     return true;

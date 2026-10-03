@@ -28,7 +28,7 @@ function unreadablePostBootProcess() {
   syncBuiltinESMExports();
 }
 
-describe.runIf(process.platform === 'linux')('R28 reboot orphan settlement (#738)', { timeout: 30_000 }, () => {
+describe.runIf(process.platform === 'linux')('R35 reboot orphan settlement (#738)', { timeout: 30_000 }, () => {
   useWorkerWaitFixture();
   afterEach(() => { vi.restoreAllMocks(); syncBuiltinESMExports(); });
 

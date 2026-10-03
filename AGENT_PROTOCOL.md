@@ -743,7 +743,7 @@ this normative contract.
 
 ## 7. Harness parity — session and lifecycle (`packages/cezar/src/core/harness-parity.test.ts`)
 
-**R28** (#738), in `workflows/worker-reboot-parity.test.ts`, drives every `RUNNER_IDS`
+**R35** (#738), in `workflows/worker-reboot-parity.test.ts`, drives every `RUNNER_IDS`
 backend's `HARNESS_ADAPTERS` native wire through worker cancellation and a successful twin.
 Linux prior-boot controller evidence excludes unrelated unreadable cwd candidates, allowing
 collect-first and destroy-first orphan settlement, resource cleanup and parent Finish after
@@ -899,6 +899,21 @@ R22/R23 (#515) preserve task scratch across native session close and host temp-e
 runs keep files through fresh and continuation idle-close paths, and workers
 with a pending question keep files after private process completion. Terminal
 Finish still reaps both repo-local and fallback scratch. Every runner is covered.
+
+R28/R29 (#473) idle-close and Continue twice on every native runner wire, then
+Finish into `done` or `review`. Intermediate Continue steps remain waiting while
+parked and become done with a completion timestamp only when the run succeeds.
+R30 delays the final diff check and cancels during it: cancellation wins over
+success, including the intermediate steps. Successful settlement preserves other
+step statuses and existing timestamps, and still respects parent completion deferrals.
+R31/R32 accept Finish on fresh and Continue sessions, dispose the manager during
+the final diff check, and still require terminal success on every native wire.
+Disposal cannot revoke accepted Finish/Stop intent; a replacement active execution
+still prevents the old settlement from completing its steps.
+R33/R34 hold an inactive run's Finish diff check while a newer Continue either
+starts and idle-closes or remains queued behind capacity. Continue acceptance
+supersedes that settlement before scheduling; returning to no active session must
+not let the earlier Finish close the newer execution or its steps.
 
 R20/R21 (#661) complete an owned worker over each native mock wire, then commit a
 cleanup checkpoint. Enabled delegation reads only that worker's family; disabled
