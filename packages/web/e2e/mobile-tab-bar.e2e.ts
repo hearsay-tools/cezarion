@@ -1,6 +1,5 @@
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
+import { execFileSync, type ChildProcess } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -8,8 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { waitForSettledSample } from './visual-ready'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { applyContrastQaVariant, contrastQaVariants, contrastSampleExpression, restoreContrastQaDefaults, type ContrastSample } from './contrast'
-import { stopFixtureServer } from './fixture-server'
-import { waitForHealth } from './poll'
+import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 
 /**
  * #621: the phone's tab bar, More sheet, New task button and pushed task screen, against its own
@@ -67,16 +65,10 @@ beforeAll(async () => {
   writeFileSync(join(root, '.ai/cezar/todos.json'), JSON.stringify([
     { id: 'follow-up', summary: 'Check the tab bar on a phone.', runnable: false, taskId: RUN_ID },
   ]))
-  const probe = createServer()
-  const port = await new Promise<number>((done) => probe.listen(0, '127.0.0.1', () => {
-    const address = (probe.address() as { port: number }).port
-    probe.close(() => done(address))
-  }))
-  base = `http://127.0.0.1:${port}`
-  server = spawn(process.execPath, [cezarCli, 'serve', '--repo', root, '--port', String(port), '--no-open'], {
+  server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
     env: fixtureServeEnv(root, { CEZ_FOLLOWUPS: '1', CEZ_AUTOMATIONS: '1' }), stdio: 'ignore',
   })
-  await waitForHealth(base)
+  base = await waitForFixtureServer(server)
   project = await bootProjectId(base)
   // Which views this server actually offers decides which rows the bar and the sheet must show:
   // Inbox needs the follow-ups flag, Automations the flag AND a forge, GitHub the forge.

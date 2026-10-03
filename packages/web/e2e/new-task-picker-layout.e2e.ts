@@ -1,15 +1,12 @@
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
-import { once } from 'node:events'
+import { execFileSync, type ChildProcess } from 'node:child_process'
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, expect, it } from 'vitest'
 
 import { waitForSettledSample } from './visual-ready'
-import { stopFixtureServer } from './fixture-server'
+import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, cezarCli, fixtureServeEnv } from './agent-browser'
-import { waitForHealth } from './poll'
 
 let browser: AgentBrowser
 let server: ChildProcess
@@ -36,20 +33,10 @@ beforeAll(async () => {
   git('add', '.')
   git('commit', '-qm', 'init')
 
-  const probe = createServer()
-  const port = await new Promise<number>((resolve, reject) => {
-    probe.once('error', reject)
-    probe.listen(0, '127.0.0.1', () => {
-      const address = probe.address()
-      const port = typeof address === 'object' && address ? address.port : 0
-      probe.close(() => resolve(port))
-    })
-  })
-  baseUrl = `http://127.0.0.1:${port}`
-  server = spawn(process.execPath, [cezarCli, 'serve', '--repo', root, '--port', String(port), '--no-open'], {
+  server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
     env: fixtureServeEnv(root, { CEZ_OPENCODE_BIN: opencode, CEZ_PI_BIN: pi }), stdio: 'ignore',
   })
-  await waitForHealth(baseUrl)
+  baseUrl = await waitForFixtureServer(server)
   browser = AgentBrowser.open(`picker-layout-${process.pid}`)
   browser.setViewport(1440, 900)
   browser.goto(`${baseUrl}/new`)
@@ -230,10 +217,10 @@ it('shows the fractional-width Model prefix when pi / grok-4.6 fits at three-col
   writeFileSync(join(root, '.ai/cezar/config.json'), JSON.stringify({
     defaultModels: { pi: 'grok-4.6' },
   }))
-  server = spawn(process.execPath, [cezarCli, 'serve', '--repo', root, '--port', baseUrl.split(':').at(-1)!, '--no-open'], {
+  server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', baseUrl.split(':').at(-1)!, '--no-open'], {
     env: fixtureServeEnv(root, { CEZ_OPENCODE_BIN: join(root, 'opencode-fixture'), CEZ_PI_BIN: join(root, 'pi-fixture') }), stdio: 'ignore',
   })
-  await waitForHealth(baseUrl)
+  baseUrl = await waitForFixtureServer(server, { expectedOrigin: baseUrl })
   browser.setViewport(viewportWidth(1440), 900)
   browser.evaluate(`localStorage.setItem('cez-sidebar-width', '420')`)
   browser.goto(`${baseUrl}/new`)

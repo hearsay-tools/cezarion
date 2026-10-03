@@ -1,15 +1,12 @@
-import { spawn, type ChildProcess } from 'node:child_process'
-import { once } from 'node:events'
+import type { ChildProcess } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { waitForSettledSample } from './visual-ready'
 import type { RunRecord } from '@open-mercato/cezar-api-client'
-import { stopFixtureServer } from './fixture-server'
+import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv, getJson } from './agent-browser'
-import { waitForHealth } from './poll'
 import { applyContrastQaVariant, contrastSampleExpression, restoreContrastQaDefaults, type ContrastSample } from './contrast'
 
 // "Hand off" (#589) against the real server: the project webhook is set through the same PATCH
@@ -37,16 +34,10 @@ beforeAll(async () => {
   root = mkdtempSync(join(tmpdir(), 'cez-handoff-'))
   mkdirSync(join(root, '.ai/cezar'), { recursive: true })
   writeFileSync(join(root, '.ai/cezar/runs.json'), JSON.stringify([fixture('desktop'), fixture('mobile')]))
-  const probe = createServer()
-  probe.listen(0, '127.0.0.1')
-  await once(probe, 'listening')
-  const port = (probe.address() as { port: number }).port
-  await new Promise<void>(done => probe.close(() => done()))
-  baseUrl = `http://127.0.0.1:${port}`
-  server = spawn(process.execPath, [cezarCli, 'serve', '--repo', root, '--port', String(port), '--no-open'], {
+  server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
     env: fixtureServeEnv(root), stdio: 'ignore',
   })
-  await waitForHealth(baseUrl, 'the hand-off fixture')
+  baseUrl = await waitForFixtureServer(server)
   project = await bootProjectId(baseUrl)
   const saved = await fetch(`${baseUrl}/api/v1/projects/${project}`, {
     method: 'PATCH',

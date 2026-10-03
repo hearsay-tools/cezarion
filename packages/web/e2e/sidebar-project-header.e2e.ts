@@ -1,14 +1,12 @@
-import { spawn, type ChildProcess } from 'node:child_process'
+import type { ChildProcess } from 'node:child_process'
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { waitForSettledSample } from './visual-ready'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
-import { stopFixtureServer } from './fixture-server'
-import { waitForHealth } from './poll'
+import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { focusWithKeyboard } from './contrast'
 
 const artifacts = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_e2e')
@@ -25,17 +23,12 @@ beforeAll(async () => {
       id: status, title: `${status} task`, task: 'Header test', workflow: 'default', status,
       createdAt: '2026-09-01T00:00:00Z', finishedAt: '2026-09-01T01:00:00Z', tokensUsed: 0, archived: false, steps: [],
     }))))
-    const probe = createServer()
-    const port = await new Promise<number>(done => probe.listen(0, '127.0.0.1', () => {
-      const port = (probe.address() as { port: number }).port
-      probe.close(() => done(port))
-    }))
-    const url = `http://127.0.0.1:${port}`
-    const server = spawn(process.execPath, [cezarCli, 'serve', '--repo', root, '--port', String(port), '--no-open'], {
+    const server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
       env: fixtureServeEnv(root, { CEZ_REMOTE: remote ? '1' : '0', CEZ_FOLLOWUPS: '1', CEZ_AUTOMATIONS: '1' }), stdio: 'ignore',
     })
-    fixtures.push({ root, server, url, project: '', remote })
-    await waitForHealth(url)
+    fixtures.push({ root, server, url: '', project: '', remote })
+    const url = await waitForFixtureServer(server)
+    fixtures[fixtures.length - 1]!.url = url
     fixtures[fixtures.length - 1]!.project = await bootProjectId(url)
   }
   mkdirSync(artifacts, { recursive: true })

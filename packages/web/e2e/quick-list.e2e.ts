@@ -1,5 +1,4 @@
-import { spawn, type ChildProcess } from 'node:child_process'
-import { createServer } from 'node:net'
+import type { ChildProcess } from 'node:child_process'
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -7,7 +6,7 @@ import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { waitForSettledSample } from './visual-ready'
-import { stopFixtureServer } from './fixture-server'
+import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { expectGroupRowHeightMatchesTaskRow } from './row-height'
 import { AgentBrowser, HOVER_POINTER_ARGS, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import {
@@ -19,7 +18,6 @@ import {
   restoreContrastQaDefaults,
   type ContrastSample,
 } from './contrast'
-import { waitForHealth } from './poll'
 
 /**
  * The task quick-list, in a real browser, against a real cezar serving real runs.
@@ -148,19 +146,6 @@ const FIXTURE = [
   },
 ]
 
-function freePort(): Promise<number> {
-  return new Promise((done, fail) => {
-    const probe = createServer()
-    probe.once('error', fail)
-    probe.listen(0, '127.0.0.1', () => {
-      const address = probe.address()
-      const port = typeof address === 'object' && address ? address.port : 0
-      probe.close(() => done(port))
-    })
-  })
-}
-
-
 let browser: AgentBrowser
 let server: ChildProcess
 let dataRoot: string
@@ -192,15 +177,13 @@ beforeAll(async () => {
   mkdirSync(join(dataRoot, '.ai/cezar'), { recursive: true })
   writeFileSync(join(dataRoot, '.ai/cezar/runs.json'), JSON.stringify(FIXTURE, null, 2), 'utf8')
 
-  const port = await freePort()
-  baseUrl = `http://localhost:${port}`
-  server = spawn(process.execPath, [cezarCli, 'serve', '--repo', dataRoot, '--port', String(port), '--no-open'], {
+  server = spawnFixtureServer([cezarCli, 'serve', '--repo', dataRoot, '--port', '0', '--no-open'], {
     // Dry-run + a pinned CEZ_HOME, exactly as the shared test env does — see `fixtureServeEnv`.
     // Nothing in this spec starts a run, but the boot probes the backends.
     env: fixtureServeEnv(dataRoot),
     stdio: 'ignore',
   })
-  await waitForHealth(baseUrl)
+  baseUrl = await waitForFixtureServer(server)
   bootProject = await bootProjectId(baseUrl)
 
   browser = AgentBrowser.open(runId)
@@ -849,14 +832,10 @@ describe('the tasks table under worst-case row content', () => {
     mkdirSync(join(worstRoot, '.ai/cezar'), { recursive: true })
     writeFileSync(join(worstRoot, '.ai/cezar/runs.json'), JSON.stringify(WORST, null, 2), 'utf8')
 
-    const port = await freePort()
-    worstUrl = `http://localhost:${port}`
-    worstServer = spawn(
-      process.execPath,
-      [cezarCli, 'serve', '--repo', worstRoot, '--port', String(port), '--no-open'],
+    worstServer = spawnFixtureServer([cezarCli, 'serve', '--repo', worstRoot, '--port', '0', '--no-open'],
       { env: fixtureServeEnv(worstRoot), stdio: 'ignore' }
     )
-    await waitForHealth(worstUrl, 'the worst-case fixture server')
+    worstUrl = await waitForFixtureServer(worstServer)
     worstProject = await bootProjectId(worstUrl)
 
     browser.setViewport(1440, 900)
@@ -1252,14 +1231,10 @@ describe('a row under width contention, in a column the user can widen', () => {
       'utf8'
     )
 
-    const port = await freePort()
-    wideUrl = `http://localhost:${port}`
-    wideServer = spawn(
-      process.execPath,
-      [cezarCli, 'serve', '--repo', wideRoot, '--port', String(port), '--no-open'],
+    wideServer = spawnFixtureServer([cezarCli, 'serve', '--repo', wideRoot, '--port', '0', '--no-open'],
       { env: fixtureServeEnv(wideRoot), stdio: 'ignore' }
     )
-    await waitForHealth(wideUrl)
+    wideUrl = await waitForFixtureServer(wideServer)
     wideProject = await bootProjectId(wideUrl)
   }, 90_000)
 
@@ -1482,12 +1457,11 @@ describe('variant rows and the group row under width pressure', () => {
     varRoot = mkdtempSync(join(tmpdir(), 'cezar-e2e-variants-'))
     mkdirSync(join(varRoot, '.ai/cezar'), { recursive: true })
     writeFileSync(join(varRoot, '.ai/cezar/runs.json'), JSON.stringify(VARIANTS, null, 2), 'utf8')
-    const port = await freePort()
-    varUrl = `http://localhost:${port}`
-    varServer = spawn(process.execPath, [cezarCli, 'serve', '--repo', varRoot, '--port', String(port), '--no-open'], {
+
+    varServer = spawnFixtureServer([cezarCli, 'serve', '--repo', varRoot, '--port', '0', '--no-open'], {
       env: fixtureServeEnv(varRoot), stdio: 'ignore',
     })
-    await waitForHealth(varUrl, 'the variant-width fixture server')
+    varUrl = await waitForFixtureServer(varServer)
     varProject = await bootProjectId(varUrl)
   }, 90_000)
 
@@ -1614,14 +1588,11 @@ describe('empty quick-list', () => {
 
   beforeAll(async () => {
     emptyRoot = mkdtempSync(join(tmpdir(), 'cezar-e2e-empty-'))
-    const port = await freePort()
-    emptyUrl = `http://localhost:${port}`
-    emptyServer = spawn(
-      process.execPath,
-      [cezarCli, 'serve', '--repo', emptyRoot, '--port', String(port), '--no-open'],
+
+    emptyServer = spawnFixtureServer([cezarCli, 'serve', '--repo', emptyRoot, '--port', '0', '--no-open'],
       { env: fixtureServeEnv(emptyRoot), stdio: 'ignore' }
     )
-    await waitForHealth(emptyUrl)
+    emptyUrl = await waitForFixtureServer(emptyServer)
     emptyProject = await bootProjectId(emptyUrl)
   }, 60_000)
 
@@ -1718,13 +1689,12 @@ describe('archive from the sidebar (#780)', () => {
     archiveRoot = mkdtempSync(join(tmpdir(), 'cezar-e2e-archive-'))
     mkdirSync(join(archiveRoot, '.ai/cezar'), { recursive: true })
     writeFileSync(join(archiveRoot, '.ai/cezar/runs.json'), JSON.stringify(ARCHIVE_FIXTURE, null, 2), 'utf8')
-    const port = await freePort()
-    archiveUrl = `http://localhost:${port}`
-    archiveServer = spawn(process.execPath, [cezarCli, 'serve', '--repo', archiveRoot, '--port', String(port), '--no-open'], {
+
+    archiveServer = spawnFixtureServer([cezarCli, 'serve', '--repo', archiveRoot, '--port', '0', '--no-open'], {
       env: fixtureServeEnv(archiveRoot),
       stdio: 'ignore',
     })
-    await waitForHealth(archiveUrl)
+    archiveUrl = await waitForFixtureServer(archiveServer)
     archiveProject = await bootProjectId(archiveUrl)
   }, 60_000)
 
@@ -1892,13 +1862,12 @@ describe('swipe to archive on touch (#780 §7)', () => {
     swipeRoot = mkdtempSync(join(tmpdir(), 'cezar-e2e-swipe-'))
     mkdirSync(join(swipeRoot, '.ai/cezar'), { recursive: true })
     writeFileSync(join(swipeRoot, '.ai/cezar/runs.json'), JSON.stringify(SWIPE_FIXTURE, null, 2), 'utf8')
-    const port = await freePort()
-    swipeUrl = `http://localhost:${port}`
-    swipeServer = spawn(process.execPath, [cezarCli, 'serve', '--repo', swipeRoot, '--port', String(port), '--no-open'], {
+
+    swipeServer = spawnFixtureServer([cezarCli, 'serve', '--repo', swipeRoot, '--port', '0', '--no-open'], {
       env: fixtureServeEnv(swipeRoot),
       stdio: 'ignore',
     })
-    await waitForHealth(swipeUrl)
+    swipeUrl = await waitForFixtureServer(swipeServer)
     swipeProject = await bootProjectId(swipeUrl)
   }, 60_000)
 

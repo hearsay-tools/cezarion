@@ -1,15 +1,13 @@
-import { spawn, type ChildProcess } from 'node:child_process'
+import type { ChildProcess } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { waitForSettledSample } from './visual-ready'
-import { stopFixtureServer } from './fixture-server'
+import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, fixtureServeEnv } from './agent-browser'
 import record from './fixtures/thread-run.record.json'
-import { waitForHealth } from './poll'
 
 /**
  * #730 — an assistant reply's single newlines render as visible line breaks in the loaded
@@ -58,18 +56,6 @@ const events = [
   { type: 'item.completed', item: { kind: 'message', id: 'm1', role: 'assistant', text: REPLY }, stepId: 'task' },
 ].map((event, index) => ({ ...event, seq: index + 1, ts: new Date(Date.parse(RUN.createdAt) + index * 10).toISOString() }))
 
-function freePort(): Promise<number> {
-  return new Promise((resolvePort, reject) => {
-    const probe = createServer()
-    probe.once('error', reject)
-    probe.listen(0, '127.0.0.1', () => {
-      const address = probe.address()
-      const port = typeof address === 'object' && address ? address.port : 0
-      probe.close(() => resolvePort(port))
-    })
-  })
-}
-
 let browser: AgentBrowser
 let server: ChildProcess
 let dataRoot: string
@@ -87,14 +73,11 @@ beforeAll(async () => {
     events.map((event) => JSON.stringify(event)).join('\n') + '\n',
     'utf8',
   )
-  const port = await freePort()
-  baseUrl = `http://localhost:${port}`
-  server = spawn(
-    process.execPath,
-    [join(repoRoot, 'packages/cezar/dist/index.js'), 'serve', '--repo', dataRoot, '--port', String(port), '--no-open'],
+
+  server = spawnFixtureServer([join(repoRoot, 'packages/cezar/dist/index.js'), 'serve', '--repo', dataRoot, '--port', '0', '--no-open'],
     { env: fixtureServeEnv(dataRoot), stdio: 'ignore' },
   )
-  await waitForHealth(baseUrl)
+  baseUrl = await waitForFixtureServer(server)
   bootProject = await bootProjectId(baseUrl)
   browser = AgentBrowser.open(sessionId)
   browser.setViewport(1440, 900)

@@ -1,6 +1,5 @@
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
+import { execFileSync, type ChildProcess } from 'node:child_process'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
-import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -8,8 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { waitForSettledSample } from './visual-ready'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { artifactsDir } from './github-fixture'
-import { stopFixtureServer } from './fixture-server'
-import { waitForHealth } from './poll'
+import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 
 /**
  * Issue 06 §3 (#622, Git slice) and issue 08 §C: the Git view's sidebar (desktop) and Git screen
@@ -101,16 +99,10 @@ beforeAll(async () => {
   ]))
   writeFileSync(join(rootB, '.ai/cezar/runs.json'), JSON.stringify([run(rootB, 'b-only', { title: 'B only worktree' })]))
 
-  const probe = createServer()
-  const port = await new Promise<number>((done) => probe.listen(0, '127.0.0.1', () => {
-    const address = (probe.address() as { port: number }).port
-    probe.close(() => done(address))
-  }))
-  base = `http://127.0.0.1:${port}`
-  server = spawn(process.execPath, [cezarCli, 'serve', '--repo', root, '--port', String(port), '--no-open'], {
+  server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
     env: fixtureServeEnv(root), stdio: 'ignore',
   })
-  await waitForHealth(base)
+  base = await waitForFixtureServer(server)
   project = await bootProjectId(base)
   const registered = await fetch(`${base}/api/v1/projects`, {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ root: rootB }),

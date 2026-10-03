@@ -1,14 +1,12 @@
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
+import { execFileSync, type ChildProcess } from 'node:child_process'
 import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { settleVisual, waitForSettledSample } from './visual-ready'
-import { stopFixtureServer } from './fixture-server'
+import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv, getJson } from './agent-browser'
-import { waitForHealth } from './poll'
 
 /**
  * Plan mode end-to-end (R4 Step 1.2, #383 + spec 008) against a LIVE dry-run server. Under
@@ -21,19 +19,6 @@ import { waitForHealth } from './poll'
 
 const artifactsDir = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_e2e')
 const sessionId = `e2e-plan-mode-${process.pid}`
-
-function freePort(): Promise<number> {
-  return new Promise((done, fail) => {
-    const probe = createServer()
-    probe.once('error', fail)
-    probe.listen(0, '127.0.0.1', () => {
-      const address = probe.address()
-      const port = typeof address === 'object' && address ? address.port : 0
-      probe.close(() => done(port))
-    })
-  })
-}
-
 
 let browser: AgentBrowser
 let server: ChildProcess
@@ -62,18 +47,15 @@ beforeAll(async () => {
     'utf8',
   )
 
-  const port = await freePort()
-  baseUrl = `http://localhost:${port}`
-  server = spawn(
-    process.execPath,
-    [cezarCli, 'serve', '--repo', dataRoot, '--port', String(port), '--no-open'],
+  server = spawnFixtureServer([cezarCli, 'serve', '--repo', dataRoot, '--port', '0', '--no-open'],
     { env: fixtureServeEnv(dataRoot), stdio: ['ignore', 'pipe', 'pipe'] },
   )
   mkdirSync(artifactsDir, { recursive: true })
-  writeFileSync(join(artifactsDir, 'plan-mode-server.log'), `root=${dataRoot} url=${baseUrl} pid=${server.pid}\n`)
+  writeFileSync(join(artifactsDir, 'plan-mode-server.log'), `root=${dataRoot} awaiting-owned-listener pid=${server.pid}\n`)
   server.stdout?.on('data', chunk => appendFileSync(join(artifactsDir, 'plan-mode-server.log'), chunk))
   server.stderr?.on('data', chunk => appendFileSync(join(artifactsDir, 'plan-mode-server.log'), chunk))
-  await waitForHealth(baseUrl)
+  baseUrl = await waitForFixtureServer(server)
+  appendFileSync(join(artifactsDir, 'plan-mode-server.log'), `owned-url=${baseUrl}\n`)
   bootProject = await bootProjectId(baseUrl)
 
   browser = AgentBrowser.open(sessionId)

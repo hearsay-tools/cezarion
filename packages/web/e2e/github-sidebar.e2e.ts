@@ -1,6 +1,5 @@
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
+import { execFileSync, type ChildProcess } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -9,8 +8,7 @@ import { waitForSettledSample } from './visual-ready'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { focusWithKeyboard } from './contrast'
 import { artifactsDir } from './github-fixture'
-import { stopFixtureServer } from './fixture-server'
-import { waitForHealth } from './poll'
+import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 
 /**
  * #622 (GitHub slice): the GitHub view's own sidebar (desktop) and filter index (phone), in a real
@@ -158,17 +156,11 @@ beforeAll(async () => {
     run('task-archived', { issueNumber: 106, archived: true, archivedAt: ago(1_000) }),
     run('task-pr-only', { pullRequestUrl: `https://github.com/${REPO}/pull/201` }),
   ]))
-  const probe = createServer()
-  const port = await new Promise<number>((done) => probe.listen(0, '127.0.0.1', () => {
-    const address = (probe.address() as { port: number }).port
-    probe.close(() => done(address))
-  }))
-  base = `http://127.0.0.1:${port}`
-  server = spawn(process.execPath, [cezarCli, 'serve', '--repo', root, '--port', String(port), '--no-open'], {
+  server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
     // CEZ_FOLLOWUPS=1 adds Inbox, so the view tabs carry their most crowded set: a More menu beside six views.
     env: { ...fixtureServeEnv(root), CEZ_FOLLOWUPS: '1' }, stdio: 'ignore',
   })
-  await waitForHealth(base)
+  base = await waitForFixtureServer(server)
   project = await bootProjectId(base)
   const health = (await fetch(`${base}/api/v1/health`).then((response) => response.json())) as { forge: { available: boolean } | null }
   if (health.forge?.available !== true) throw new Error('cezar e2e: the dry-run fixture server must report an available forge')

@@ -1,14 +1,11 @@
-import { spawn, type ChildProcess } from 'node:child_process'
-import { once } from 'node:events'
+import type { ChildProcess } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { waitForSettledSample } from './visual-ready'
 import type { RunRecord } from '@open-mercato/cezar-api-client'
-import { waitForHealth } from './poll'
-import { stopFixtureServer } from './fixture-server'
+import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv, getJson } from './agent-browser'
 import { dismissWithEscape, focusWithKeyboard } from './contrast'
 
@@ -34,16 +31,10 @@ beforeAll(async () => {
     fixture('done', 'done'), fixture('failed', 'failed'), fixture('cancelled', 'cancelled'),
     fixture('review', 'review'), fixture('old', 'done', true),
   ]))
-  const probe = createServer()
-  probe.listen(0, '127.0.0.1')
-  await once(probe, 'listening')
-  const port = (probe.address() as { port: number }).port
-  await new Promise<void>(done => probe.close(() => done()))
-  baseUrl = `http://127.0.0.1:${port}`
-  server = spawn(process.execPath, [cezarCli, 'serve', '--repo', root, '--port', String(port), '--no-open'], {
+  server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
     env: fixtureServeEnv(root), stdio: 'ignore',
-  })
-  await waitForHealth(baseUrl, 'mobile-task-controls fixture', { timeoutMs: 20_000 })
+  }, { timeoutMs: 20_000 })
+  baseUrl = await waitForFixtureServer(server)
   project = await bootProjectId(baseUrl)
   browser = AgentBrowser.open(`controls-${process.pid}`)
 })

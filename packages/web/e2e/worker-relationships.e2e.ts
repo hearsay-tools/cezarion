@@ -1,15 +1,12 @@
 import { clickAppearanceControl } from './appearance-control'
-import { spawn, execFileSync, type ChildProcess } from 'node:child_process'
+import { execFileSync, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { once } from 'node:events'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, expect, it } from 'vitest'
 import { waitForSettledSample } from './visual-ready'
-import { waitForHealth } from './poll'
-import { stopFixtureServer } from './fixture-server'
+import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 
 const artifacts = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_e2e')
@@ -56,13 +53,9 @@ beforeAll(async () => {
   execFileSync('git', ['init', '-q', '-b', 'main', other])
   mkdirSync(join(root, '.cez-home'), { recursive: true })
   writeFileSync(join(root, '.cez-home/config.json'), JSON.stringify({ projects: [{ id: 'other-project', name: 'Other project', root: other, source: 'local', addedAt: now, lastOpenedAt: now }] }))
-  const probe = createServer(); probe.listen(0, '127.0.0.1'); await once(probe, 'listening')
-  const address = probe.address(); if (!address || typeof address === 'string') throw Error('No fixture port')
-  const port = address.port; await new Promise<void>(done => probe.close(() => done()))
-  base = `http://localhost:${port}`
-  server = spawn(process.execPath, [cezarCli, 'serve', '--repo', root, '--port', String(port), '--no-open'], { env: fixtureServeEnv(root, { CEZ_DELEGATION: '0', CEZ_AUTONAME: '0' }), stdio: ['ignore', 'pipe', 'pipe'] })
+  server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], { env: fixtureServeEnv(root, { CEZ_DELEGATION: '0', CEZ_AUTONAME: '0' }), stdio: ['ignore', 'pipe', 'pipe'] }, { timeoutMs: 20_000 })
   server.stdout?.on('data', chunk => { diagnostic += String(chunk) }); server.stderr?.on('data', chunk => { diagnostic += String(chunk) })
-  try { await waitForHealth(base, 'worker-relationships fixture', { timeoutMs: 20_000 }) }
+  try { base = await waitForFixtureServer(server) }
   catch (error) { throw new Error(`${String(error)}\n${diagnostic}`, { cause: error }) }
   project = await bootProjectId(base)
   browser = AgentBrowser.open(`e2e-workers-${process.pid}`)
