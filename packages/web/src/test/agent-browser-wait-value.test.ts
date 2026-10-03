@@ -297,6 +297,27 @@ describe('dismissWithEscape (#410)', () => {
   })
 })
 
+describe('setViewport (#794)', () => {
+  it('resizes, then waits for an animation frame that reports the new size', () => {
+    const { browser, commands } = open([
+      { width: 360, height: 640 },
+      { width: 1440, height: 900 },
+    ])
+    browser.setViewport(1440, 900)
+    expect(commands()[0]).toEqual(['set', 'viewport', '1440', '900'])
+    expect(actions(commands())).toEqual(['set', 'eval', 'eval'])
+    // The breakpoint's `matchMedia` listeners run in the same rendering update, before the
+    // frame callbacks: the frame is the signal, not the size alone.
+    expect(commands()[1]?.[1]).toContain('requestAnimationFrame')
+  })
+
+  it('a page that never renders a frame at the new size fails naming the size', () => {
+    shortTimeout()
+    const { browser } = open([{ width: 360, height: 640 }])
+    expect(() => browser.setViewport(1440, 900)).toThrow(/the page never rendered a frame at 1440x900/)
+  })
+})
+
 
 it('bounds the CLI probe and rejects a matching sample arriving after the wait deadline (#764)', () => {
   process.env.AGENT_BROWSER_DEFAULT_TIMEOUT = '100'
