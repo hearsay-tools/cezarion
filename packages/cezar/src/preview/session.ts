@@ -24,6 +24,30 @@ const FIRST_FRAME_WAIT_MS = 500;
 const FIRST_FRAME_RETRIES = 5;
 
 /**
+ * The pixel size of a JPEG frame, from its first baseline/progressive SOF segment; undefined when
+ * the bytes are not a JPEG this can read. Screencast metadata is no help: it can report the
+ * requested size for a frame captured before the page resized.
+ */
+function jpegSize(base64: string): { w: number; h: number } | undefined {
+  const bytes = Buffer.from(base64, 'base64');
+  if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) return undefined;
+  let at = 2;
+  while (at + 4 <= bytes.length) {
+    if (bytes[at] !== 0xff) return undefined;
+    const marker = bytes[at + 1]!;
+    if (marker === 0xff) {
+      at += 1;
+      continue;
+    }
+    if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+      return at + 9 <= bytes.length ? { h: bytes.readUInt16BE(at + 5), w: bytes.readUInt16BE(at + 7) } : undefined;
+    }
+    at += 2 + bytes.readUInt16BE(at + 2);
+  }
+  return undefined;
+}
+
+/**
  * Runs in every page. Popups open in the same tab (there is one page to stream), and the cursor
  * shape is reported through the `__cursor` binding because screencast frames carry no cursor.
  */
@@ -223,12 +247,18 @@ export class PreviewSession {
     // A restarted screencast numbers its frames afresh; the old in-flight frame will never be acked.
     this.pending = undefined;
     this.held = undefined;
-    await this.cdp.send('Page.startScreencast', { format: 'jpeg', quality: QUALITY, maxWidth: w, maxHeight: h, everyNthFrame: 1 });
+    // Set before the start: its first frame can beat the command's reply, and is judged against this size.
     this.streaming = { w, h };
+    try {
+      await this.cdp.send('Page.startScreencast', { format: 'jpeg', quality: QUALITY, maxWidth: w, maxHeight: h, everyNthFrame: 1 });
+    } catch (error) {
+      this.streaming = undefined;
+      throw error;
+    }
     this.armWatchdog();
   }
 
-  /** No frame since the last start: start again, a few times, then leave it to the owner's reload. */
+  /** No frame, or none at the viewport size, since the last start: start again, a few times, then leave it to the owner's reload. */
   private armWatchdog(): void {
     this.disarmWatchdog();
     this.watchdog = setTimeout(() => {
@@ -247,8 +277,17 @@ export class PreviewSession {
 
   /** One frame in flight per viewer. A newer frame replaces a held one, so the last visual state always arrives. */
   private onFrame(frame: ScreencastFrame): void {
-    this.silentStarts = 0;
-    this.disarmWatchdog();
+    // A frame the size of the viewport settles the stream. Chromium can capture one before the page
+    // has resized (646x362 for a 646x787 viewport) and send nothing after it on a static page; the
+    // viewer still gets that frame, and the watchdog starts the stream again to replace it.
+    const size = jpegSize(frame.data);
+    const stale = size !== undefined && this.streaming !== undefined && (size.w !== this.streaming.w || size.h !== this.streaming.h);
+    if (stale) {
+      this.armWatchdog();
+    } else {
+      this.silentStarts = 0;
+      this.disarmWatchdog();
+    }
     if (!this.viewer) return void this.ackFrame(frame.sessionId);
     if (this.pending !== undefined) {
       if (this.held) void this.ackFrame(this.held.sessionId);

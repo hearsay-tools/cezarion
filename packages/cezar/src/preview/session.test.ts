@@ -3,6 +3,9 @@ import { fakeCdp, fakeViewer } from './preview.testkit.ts';
 import { PreviewSession } from './session.ts';
 
 const frame = (text: string, sessionId: number) => ({ data: Buffer.from(text).toString('base64'), sessionId });
+/** A JPEG header the size of `w` x `h`: SOI, then a baseline SOF0 segment. Enough for the session to read dimensions. */
+const jpeg = (w: number, h: number) =>
+  Buffer.from([0xff, 0xd8, 0xff, 0xc0, 0, 17, 8, h >> 8, h & 255, w >> 8, w & 255, 3, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1, 0xff, 0xd9]).toString('base64');
 const flush = () => new Promise(resolve => setImmediate(resolve));
 
 describe('PreviewSession', () => {
@@ -90,6 +93,58 @@ describe('PreviewSession', () => {
       session.detach(second);
       await vi.advanceTimersByTimeAsync(10_000);
       expect(sent('Page.startScreencast')).toHaveLength(7);
+    });
+  });
+
+  describe('frame size check', () => {
+    afterEach(() => vi.useRealTimers());
+
+    it('restarts a stream whose frame is not the viewport size, until one is', async () => {
+      // Chromium can capture the first frame while the page is still at its old size (a 646x362
+      // frame for a 646x787 viewport) and send no other on a page that no longer changes. A click
+      // maps to page pixels only at the viewport size, so that frame must be replaced (#781 e2e).
+      vi.useFakeTimers();
+      const { cdp, sent, emit } = fakeCdp();
+      const session = await PreviewSession.create(cdp);
+      const viewer = fakeViewer();
+      session.attach(viewer);
+      await session.handle({ t: 'resize', w: 646, h: 787 });
+      await vi.advanceTimersByTimeAsync(0);
+      const starts = sent('Page.startScreencast').length;
+
+      emit('Page.screencastFrame', { data: jpeg(646, 362), sessionId: 2 });
+      expect(viewer.frames).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(500);
+      expect(sent('Page.startScreencast')).toHaveLength(starts + 1);
+      expect(sent('Page.startScreencast').at(-1)?.params).toMatchObject({ maxWidth: 646, maxHeight: 787 });
+
+      emit('Page.screencastFrame', { data: jpeg(646, 787), sessionId: 3 });
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(sent('Page.startScreencast')).toHaveLength(starts + 1);
+    });
+
+    it('stops retrying a size Chromium never delivers', async () => {
+      vi.useFakeTimers();
+      const { cdp, sent, emit } = fakeCdp();
+      const session = await PreviewSession.create(cdp);
+      session.attach(fakeViewer());
+      await vi.advanceTimersByTimeAsync(0);
+      for (let i = 0; i < 12; i += 1) {
+        emit('Page.screencastFrame', { data: jpeg(300, 200), sessionId: i + 1 });
+        await vi.advanceTimersByTimeAsync(600);
+      }
+      expect(sent('Page.startScreencast')).toHaveLength(6);
+    });
+
+    it('takes a frame whose size it cannot read as the right one', async () => {
+      vi.useFakeTimers();
+      const { cdp, sent, emit } = fakeCdp();
+      const session = await PreviewSession.create(cdp);
+      session.attach(fakeViewer());
+      await vi.advanceTimersByTimeAsync(0);
+      emit('Page.screencastFrame', frame('not a jpeg', 1));
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(sent('Page.startScreencast')).toHaveLength(1);
     });
   });
 
