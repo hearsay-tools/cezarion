@@ -96,8 +96,10 @@ function serve({
   providerStatusAfterFirstError,
   agentProfiles,
   hostModels = {},
+  repoRead,
 }: {
   config?: Partial<ConfigResponse>
+  repoRead?: () => Promise<Response>
   putStatus?: number
   putError?: string
   providerStatus?: unknown
@@ -172,7 +174,7 @@ function serve({
         }
         return json(state)
       }
-      if (url === '/api/v1/repo' && method === 'GET') return json(REPO)
+      if (url === '/api/v1/repo' && method === 'GET') return repoRead ? repoRead() : json(REPO)
       if (url === '/api/v1/workspace/agent-profiles' && method === 'GET' && agentProfiles) {
         // Served from the mutable copy, so a PUT is visible to the refetch the mutation triggers —
         // which is how the real store behaves, and the only way to assert what the pane shows AFTER
@@ -725,5 +727,61 @@ describe('the agents form', () => {
       // The consequence a reader cannot guess: sessions live in the account's own folder.
       expect(pane?.textContent).toContain('can’t be resumed here')
     })
+  })
+})
+
+// #795: config and repo are independent. A saved prompt is not a branch-control mount gate.
+describe('Agents conditional controls while repo discovery is pending (#795)', () => {
+  it('keeps the unavailable state when discovery finishes without a git repository', async () => {
+    serve({ repoRead: () => Promise.resolve(new Response(JSON.stringify({ ...REPO, info: null, branches: [] }))) })
+    renderAt('/settings/agents')
+    await waitFor(() => expect(document.querySelector('[data-slot="agents-base-branch-unavailable"]')?.textContent).toContain('Not a git repository'))
+    expect(document.querySelector('[data-slot="agents-base-branch"]')).toBeNull()
+  })
+
+  it('leaves an empty branch answer for the original nonempty assertion to reject', async () => {
+    serve({ repoRead: () => Promise.resolve(new Response(JSON.stringify({ ...REPO, branches: [] }))) })
+    renderAt('/settings/agents')
+    const selector = '[data-slot="agents-base-branch"]'
+    await waitFor(() => expect(document.querySelector<HTMLSelectElement>(selector)?.options.length).toBe(1))
+    expect(window.eval(`document.querySelector('[data-slot="agents-base-branch"]').options[1]?.value ?? ''`)).toBe('')
+  })
+
+  it('can finish the original prompt save while a cold branch control is still absent', async () => {
+    let release!: (response: Response) => void
+    const held = new Promise<Response>(resolve => { release = resolve })
+    serve({ repoRead: () => held })
+    const client = renderAt('/settings/agents')
+    await waitFor(() => expect(form()).not.toBeNull())
+    const selector = '[data-slot="agents-base-branch"]'
+    expect(document.querySelector(selector)).toBeNull()
+    expect(document.querySelector('[data-slot="agents-base-branch-unavailable"]')?.textContent).toContain('Loading branches')
+    fireEvent.change(screen.getByLabelText('System prompt'), { target: { value: 'Always add tests. (e2e)' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save prompt' }))
+    await waitFor(() => expect(client.getQueryData<ConfigResponse>(queryKeys.config)?.systemPrompt).toBe('Always add tests. (e2e)'))
+    await waitFor(() => expect(screen.getByText('System prompt saved')).toBeTruthy())
+    expect(client.getQueryState(queryKeys.repo)?.status).toBe('pending')
+    expect(document.querySelector(selector)).toBeNull()
+    // Exact original property access fails despite mounted form, persisted config and save toast.
+    expect(() => window.eval(`document.querySelector('[data-slot="agents-base-branch"]').options[1]?.value ?? ''`)).toThrow(/null/)
+    await act(async () => release(new Response(JSON.stringify(REPO), { headers: { 'content-type': 'application/json' } })))
+    await waitFor(() => expect(document.querySelector<HTMLSelectElement>(selector)?.options[1]?.value).toBe('main'))
+    expect(document.querySelector<HTMLSelectElement>(selector)?.disabled).toBe(false)
+  })
+
+  it('keeps a previously mounted branch control during the prompt-save repo refetch', async () => {
+    let release!: (response: Response) => void
+    const held = new Promise<Response>(resolve => { release = resolve })
+    let reads = 0
+    serve({ repoRead: () => ++reads === 1 ? Promise.resolve(new Response(JSON.stringify(REPO))) : held })
+    const client = renderAt('/settings/agents')
+    const selector = '[data-slot="agents-base-branch"]'
+    await waitFor(() => expect(document.querySelector<HTMLSelectElement>(selector)?.options[1]?.value).toBe('main'))
+    fireEvent.change(screen.getByLabelText('System prompt'), { target: { value: 'Warm save' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save prompt' }))
+    await waitFor(() => expect(reads).toBe(2))
+    expect(client.getQueryState(queryKeys.repo)?.fetchStatus).toBe('fetching')
+    expect(document.querySelector<HTMLSelectElement>(selector)?.options[1]?.value).toBe('main')
+    await act(async () => release(new Response(JSON.stringify(REPO))))
   })
 })
