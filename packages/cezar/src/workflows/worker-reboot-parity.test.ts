@@ -33,6 +33,8 @@ describe.runIf(process.platform === 'linux')('R35 reboot orphan settlement (#738
   afterEach(() => { vi.restoreAllMocks(); syncBuiltinESMExports(); });
 
   for (const settleVia of ['collect', 'destroy'] as const) it.each(RUNNER_IDS)(`%s ${settleVia} settles and collects a dead worker beside a successful twin, then clears parent Finish`, async runner => {
+    // Service collection is opt-in; useWorkerWaitFixture restores the caller's environment.
+    process.env.CEZ_DELEGATION = '1';
     const adapter = HARNESS_ADAPTERS[runner];
     process.env.CEZ_DRY_RUN = '0'; process.env[adapter.binEnv] = adapter.mockBin;
     const p = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [{ id: 'task', kind: 'agent', name: 'Task' }] });
