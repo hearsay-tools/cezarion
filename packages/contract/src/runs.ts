@@ -217,6 +217,21 @@ export const runRecordSchema = z.object({
       githubUrl: z.string(),
     })
     .optional(),
+  /**
+   * Provenance for a task a SCHEDULED automation launched. A separate optional key rather than a
+   * loosened `automation`: `runs.json` is parsed as one array, so a downgraded cezar meeting a
+   * record without `githubUrl` would drop every run, whereas an unknown key it simply strips.
+   */
+  automationTrigger: z
+    .object({
+      automationId: z.string(),
+      automationRevision: z.number(),
+      receiptId: z.string(),
+      trigger: z.enum(['schedule', 'catch-up', 'manual']),
+      /** The scheduled instant (UTC ISO); for `manual`, the launch time. */
+      occurrenceAt: z.string(),
+    })
+    .optional(),
   /** Task webhook opt-in (#589): the project's webhook receives this run's status changes.
    *  Absent = off. Changes after start through `POST /runs/:id/notify`, which is why it is not
    *  part of the idempotent-start hash. */

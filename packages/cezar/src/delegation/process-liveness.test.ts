@@ -2,16 +2,34 @@ import { spawn } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { parseProcStat, probeGeneration, processesWithCwdUnder, processStartToken, recordedProcessLive } from './process-liveness.ts';
+
+// Scope only enumeration to the processes this fixture owns. A full-host scan may
+// conservatively include an unrelated same-user process whose cwd is unreadable.
+// Keep cwd/stat/token reads real, including ENOENT after our child has exited;
+// the injected-reader cases below cover unreadable holders separately.
+const procScope = vi.hoisted(() => ({ entries: undefined as string[] | undefined }));
+vi.mock('node:fs', async importOriginal => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  return {
+    ...actual,
+    readdirSync: (...args: Parameters<typeof actual.readdirSync>) =>
+      args[0] === '/proc' && procScope.entries ? procScope.entries : actual.readdirSync(...args),
+  };
+});
 
 const linux = process.platform === 'linux';
 const dirs: string[] = [];
-afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
+afterEach(() => {
+  procScope.entries = undefined;
+  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
 
 async function child(cwd: string) {
   const proc = spawn(process.execPath, ['-e', "console.log('ready'); setInterval(()=>{},1000)"], { cwd, stdio: ['ignore', 'pipe', 'ignore'] });
   await new Promise<void>(resolve => proc.stdout!.once('data', () => resolve()));
+  procScope.entries = [String(process.pid), String(proc.pid!)];
   return { proc, exited: new Promise<void>(resolve => proc.once('exit', () => resolve())) };
 }
 
