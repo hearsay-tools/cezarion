@@ -387,6 +387,15 @@ describe('buildCommandEnv — a host command no backend runs (#781 dev servers)'
     }
   });
 
+  it('drops secret-shaped CEZ_ variables by default and keeps the plain ones', () => {
+    const env = buildCommandEnv({ source: { ...source, CEZ_PRIVATE_TOKEN: 'tok', CEZ_DEPLOY_SECRET: 's', CEZ_DRY_RUN: '1' } });
+    expect(env.CEZ_PRIVATE_TOKEN).toBeUndefined();
+    expect(env.CEZ_DEPLOY_SECRET).toBeUndefined();
+    expect(env).toMatchObject({ CEZ_DRY_RUN: '1', CEZ_PREVIEW: '1' });
+    // An explicit passthrough still forwards one the owner names.
+    expect(buildCommandEnv({ source: { ...source, CEZ_PRIVATE_TOKEN: 'tok', CEZ_ENV_PASSTHROUGH: 'CEZ_PRIVATE_TOKEN' } }).CEZ_PRIVATE_TOKEN).toBe('tok');
+  });
+
   it('never forwards session authority, whatever the escape hatches say', () => {
     for (const extra of [{ CEZ_ENV_PASSTHROUGH: 'CEZ_TOOL_TOKEN,CEZ_DELEGATION_TOKEN' }, { CEZ_AGENT_ENV_FULL: '1' }]) {
       const env = buildCommandEnv({ source: { ...source, ...extra } });
