@@ -1,7 +1,8 @@
+import { createFixtureManager } from '../workflows/fixture-cleanup.testkit.ts';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { RunStore } from '../runs/store.ts';
-import { RunManager } from '../workflows/run.ts';
+
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Hono } from 'hono';
@@ -181,7 +182,7 @@ describe('authenticated delegation HTTP family', () => {
     const records = f.store.listRuns().map(run => run.id === f.parent.id ? { ...run, status,
       delegation: { ...run.delegation, permissions: ['wait'], wait: legacy ? { id: wait.id, workerIds: wait.workerIds, phase: wait.phase, deadline: wait.deadline, outcomes: wait.outcomes } : wait } } : run);
     writeFileSync(join(f.root, '.ai/cezar/runs.json'), JSON.stringify(records));
-    const reopened = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true }); const manager = new RunManager(reopened, f.root);
+    const reopened = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true }); const manager = createFixtureManager(reopened, f.root);
     f.service.registerProject({ id: 'project', root: f.root, store: reopened, manager });
     try {
       for (let i = 0; i < 2; i++) {

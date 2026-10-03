@@ -1,3 +1,4 @@
+import { createFixtureManager, drainFixtureManagers } from '../workflows/fixture-cleanup.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -5,12 +6,16 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { vi } from 'vitest';
 import { RunStore, type RunRecord } from '../runs/store.ts';
-import { RunManager } from '../workflows/run.ts';
+import type { RunManager } from '../workflows/run.ts';
 import { CredentialRegistry, type Caller } from './credentials.ts';
 import { DelegationService } from './service.ts';
 
 export async function waitForOwnedWork(manager: RunManager, store: RunStore): Promise<void> {
-  await Promise.all(store.listRuns().filter(run => manager.isActive(run.id)).map(run => manager.awaitRunTermination(run.id, 8_000).then(() => undefined)));
+  // Root runs have no worker execution proof; fixture tracking drains those.
+  for (const run of store.listRuns().filter(run => run.delegation?.role === 'worker' && manager.isActive(run.id))) {
+    manager.cancel(run.id);
+    if (!await manager.awaitRunTermination(run.id, 8_000)) throw new Error(`Worker did not terminate: ${run.id}`);
+  }
 }
 
 export async function removeAfterOwnedWork(root: string, ownedWork: Promise<void>): Promise<void> {
@@ -27,7 +32,7 @@ export function fixture(): { root: string; sha: string; store: RunStore; manager
   execFileSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@local', 'commit', '--allow-empty', '-qm', 'base'], { cwd: root });
   const sha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
   const store = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
-  const manager = new RunManager(store, root);
+  const manager = createFixtureManager(store, root);
   // Scheduler admission is deliberately held: service acceptance must be durable before it.
   vi.spyOn(manager as unknown as { pump(): Promise<void> }, 'pump').mockResolvedValue();
   const parent = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', runner: 'claude', model: 'opus', effort: 'high', steps: [] });
@@ -42,6 +47,6 @@ export function fixture(): { root: string; sha: string; store: RunStore; manager
     async close() {
       unregister();
       credentials.close();
-      await removeAfterOwnedWork(root, waitForOwnedWork(manager, store).then(() => { manager.dispose(); store.flush(); }));
+      await removeAfterOwnedWork(root, waitForOwnedWork(manager, store).then(() => drainFixtureManagers(root)));
     } };
 }

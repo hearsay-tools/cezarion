@@ -851,9 +851,40 @@ export class AgentBrowser {
 
   /** operation: interact (`set viewport`) — the descriptor's "other actions use the matching
    *  CLI command" clause. Responsive layout is a real behavior of this app, so the specs must be
-   *  able to ask for an iPhone-sized window rather than assume the default one. */
+   *  able to ask for an iPhone-sized window rather than assume the default one.
+   *
+   *  The resize is not settled when the CLI returns. CSS media queries apply at the next style
+   *  read, but `matchMedia` change listeners only run in the browser's next rendering update,
+   *  and headless Chrome can take longer than several CLI calls to produce one. The cockpit picks
+   *  WHICH tree to render from those listeners (`useIsDesktopViewport`: the run header's phone
+   *  bar or its desktop title row), so in that gap a page is laid out for the new width but still
+   *  renders the old width's controls. #794: widening 360 → 1440, `focusWithKeyboard` picked
+   *  "Resize the sidebar" as the predecessor of Copy branch name because the desktop title row
+   *  was not mounted yet, the rendering update mounted it before the Tab, and Tab landed on its
+   *  Rename task button. Evidence: `cockpit-failures-shard-2` artifacts 11255134650, 11255508374
+   *  and 11259950580 (draft PR #791), whose `probe.json` all name `Rename task` as
+   *  `activeElement` at 1440x900. Local reproduction, logging the change event, the predecessor
+   *  and the `focusin` after Tab: unforced, the change had not fired by the predecessor pick in
+   *  3 of 6 runs (Tab beat the frame each time, so they passed). With a page script that holds the
+   *  widening's rendering update (its change listeners, then its frame callbacks) until the next
+   *  keydown or 1.5 s, the spec failed with the CI bundle's `activeElement` in 8 of 10 runs
+   *  without this wait, and passed 10 of 10 with it.
+   *
+   *  So this waits for one animation frame at the new size, read in the same sample. Media query
+   *  listeners run before animation-frame callbacks in a rendering update, and React commits a
+   *  `change` event's state update in a microtask after the listener (React 19 gives `change` and
+   *  `resize` discrete priority), so once the frame callback runs, every view that switches tree
+   *  from a native `matchMedia` or `resize` listener has switched. It does NOT settle state fed by
+   *  a `ResizeObserver` (picker-pill prefixes, the quick list's overflow, GitHub's stacked panes):
+   *  observers run after frame callbacks and update at default priority, so a spec reading those
+   *  still waits on the DOM it reads. */
   setViewport(width: number, height: number): void {
     this.run(['set', 'viewport', String(width), String(height)])
+    this.waitForValue<{ width: number; height: number } | null>(
+      `new Promise((resolve) => requestAnimationFrame(() => resolve({ width: innerWidth, height: innerHeight })))`,
+      (size) => size?.width === width && size?.height === height,
+      { failure: `the page never rendered a frame at ${width}x${height}` },
+    )
   }
 
   /** Actual browser network emulation, including online/offline events. */

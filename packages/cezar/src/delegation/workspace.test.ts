@@ -1,3 +1,4 @@
+import { createFixtureManager, drainFixtureManagers } from '../workflows/fixture-cleanup.testkit.ts';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
@@ -8,7 +9,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { workerDiffSchema } from '@open-mercato/cezar-contract';
 import type { WorkerWorkspace } from '@open-mercato/cezar-contract';
 import { RunStore } from '../runs/store.ts';
-import { RunManager } from '../workflows/run.ts';
+import type { RunManager } from '../workflows/run.ts';
 import { autosaveCommit, createWorktree, pruneOrphans, removeWorktree } from '../git-worktree.ts';
 import { createOwnedWorkspace, ensureOwnedWorkspace, planOwnedWorkspace, readOwnedDiff, removeOwnedWorkspace, resolveWorkerBaseline, verifyOwnedWorkspace } from './workspace.ts';
 
@@ -22,6 +23,8 @@ async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'cez-owned-workspace-'));
   roots.push(root);
   git(root, 'init', '-q', '-b', 'main');
+  git(root, 'config', 'gc.auto', '0');
+  git(root, 'config', 'maintenance.auto', 'false');
   git(root, 'config', 'user.name', 'test');
   git(root, 'config', 'user.email', 'test@local');
   await writeFile(join(root, 'tracked.txt'), 'base');
@@ -51,6 +54,7 @@ function receiptPath(root: string, workspace: WorkerWorkspace) {
   return join(root, '.git', 'cezar-owned-workspaces', `${workspace.resourceId}.json`);
 }
 afterEach(async () => {
+  for (const root of roots) await drainFixtureManagers(root);
   for (const manager of managers.splice(0)) manager.dispose();
   for (const store of stores.splice(0)) store.flush();
   vi.unstubAllEnvs();
@@ -297,7 +301,7 @@ async function finished(store: RunStore, id: string) {
   }, { timeout: 10_000, interval: 20 });
 }
 function managerFor(store: RunStore, root: string) {
-  const manager = new RunManager(store, root); managers.push(manager); return manager;
+  const manager = createFixtureManager(store, root); managers.push(manager); return manager;
 }
 
 describe('RunManager.enqueueOwnedRun', () => {

@@ -1,10 +1,15 @@
+import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RunStore } from '../runs/store.ts';
-import { RunManager } from './run.ts';
+
+
+// These fixtures exercise checks and Git, never the auxiliary LLM namer.
+beforeEach(() => vi.stubEnv('CEZ_AUTONAME', '0'));
+afterEach(() => vi.unstubAllEnvs());
 
 const roots: string[] = [];
 const TEST_TIMEOUT_MS = 30_000;
@@ -13,9 +18,11 @@ function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'cez-chk-'));
   roots.push(root);
   execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: root });
+  execFileSync('git', ['config', 'gc.auto', '0'], { cwd: root });
+  execFileSync('git', ['config', 'maintenance.auto', 'false'], { cwd: root });
   execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@l', 'commit', '--allow-empty', '-q', '-m', 'b'], { cwd: root });
   const store = RunStore.open(join(root, '.ai/cezar'));
-  return { root, store, manager: new RunManager(store, root) };
+  return { root, store, manager: createFixtureManager(store, root) };
 }
 
 async function waitFor(pred: () => boolean, what: string, ms = 15_000): Promise<void> {
@@ -35,7 +42,8 @@ function startCheck(f: ReturnType<typeof fixture>, command: string) {
   return run.id;
 }
 
-afterEach(() => { for (const r of roots.splice(0)) rmSync(r, { recursive: true, force: true }); });
+afterEach(async () => {
+  for (const root of roots) await drainFixtureManagers(root); for (const r of roots.splice(0)) rmSync(r, { recursive: true, force: true }); });
 
 describe('Stop on a workflow check (#496)', () => {
   it('kills a check that ignores SIGTERM and confirms the group is gone', async () => {

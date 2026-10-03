@@ -190,6 +190,12 @@ rl.on('line', async (line) => {
       emit({ id: msg.id, result: { thread: { id: msg.params?.threadId }, sandbox } });
     }
   } else if (msg.method === 'turn/start') {
+    const openingCrashText = msg.params?.input?.map?.((part) => part.text ?? '').join('\n') ?? '';
+    if (openingCrashText.includes('mock:crash-stderr-pre-ack')) {
+      const { crashWithStderr } = await import('./mock-runner-crash.mjs');
+      crashWithStderr(openingCrashText, '{"method":"turn/started","params":');
+      return;
+    }
     if (rejectedPermissionOverride) permissionWarning();
     activeTurnId = 'turn_mock_1';
     // owned-input-delivery.testkit.ts patches the exact `emit(...)` line below; keep it verbatim.
@@ -206,6 +212,11 @@ rl.on('line', async (line) => {
     if (process.env.CEZ_MOCK_CODEX_NO_USER_ITEM !== '1') {
       emit({ method: 'item/started', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: opening } });
       emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: opening } });
+    }
+    if (turnText.includes('mock:crash-stderr')) {
+      const { crashWithStderr } = await import('./mock-runner-crash.mjs');
+      await new Promise(resolve => setTimeout(resolve, 30));
+      if (crashWithStderr(turnText, '{"method":"item/commandExecution/outputDelta","params":')) return;
     }
     // Native thread attribution from collab-agent-tool-call.ndjson (#121/#401).
     if (turnText.includes('mock:subagent-after-park')) {

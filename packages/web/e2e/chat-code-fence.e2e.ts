@@ -100,25 +100,35 @@ afterAll(async () => {
 interface Line { text: string; top: number; height: number; left: number }
 interface Measure { lines: Line[]; lineHeight: number; codeLeft: number }
 
-/** Scroll each fence into the thread viewport before measuring it. Flat thread rows use
- * content-visibility:auto, so attached offscreen spans are not a settled layout sample.
- * Hold the actual row/glyph measurements, not their expected spacing: a stable layout bug
- * must still reach expectSourceLines and fail its unchanged assertions.
- * Failure bundle, reproducible old/new probe, and limits:
- * https://github.com/hearsay-tools/cezarion/pull/793#discussion_r4170935158 */
-function measure(scope: string): Measure[] {
+/** Every fence under `scope`, as the rendered rows: top of each source line's box and the left of
+ *  its first non-space glyph (a Range, so a blank line reports no left).
+ *
+ *  Each fence is sampled only once the browser is rendering it (#758). Thread rows carry
+ *  `content-visibility: auto`, and at 360px the thread sticks to its bottom with every fence
+ *  above the fold: all eight `code` elements answered `checkVisibility({ contentVisibilityAuto:
+ *  true })` false at measure time in every probe run. Read right after `applyContrastQaVariant`
+ *  under CPU load (6 of 15 focused runs red), the first line's box inside that skipped subtree
+ *  came back `0/0/0` while its own child span sat at -865px and line 2 at -847.6px, which is the
+ *  `-847.59375` row step the issue reports. So the expression scrolls the fence into view and
+ *  answers `null` until a poll finds it already rendered by the page's own lifecycle, and the
+ *  sample `waitForValue` returns is the rendered one.
+ *
+ *  Reproduction: the failure needs CPU contention and does not show on an idle host (5/5 green).
+ *  Start one busy loop per core (`sh -c 'while :; do :; done' &`, `nproc` times), then run
+ *  `env -u CEZ_AUTOMATIONS npm test -- --config packages/web/e2e/vitest.config.ts
+ *  packages/web/e2e/chat-code-fence.e2e.ts` 15 times. Without this wait: 6/15 red, each
+ *  `mobile-dark-comfortable assistant fence 1 row 1: expected -847.59375 to be greater than
+ *  17.6`; with it: 0/15. The original failure, seen while verifying #751, is recorded on #758
+ *  (`mobile-light-comfortable`, same value). */
+const measure = (scope: string): Measure[] => {
   const selector = JSON.stringify(scope + ' [data-streamdown="code-block"]')
-  const count = browser.waitForValue<number>(`document.querySelectorAll(${selector}).length`, (value) => value > 0)
-  return Array.from({ length: count }, (_, index) => browser.waitForStable<Measure>(`(() => {
+  const count = browser.waitForValue<number>(`document.querySelectorAll(${selector}).length || null`)
+  return Array.from({ length: count }, (_, index) => browser.waitForValue<Measure>(`(() => {
   const block = document.querySelectorAll(${selector})[${index}]
-  if (!block || document.fonts.status !== 'loaded') return null
-  block.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' })
   const code = block.querySelector('code')
-  if (!code || !code.checkVisibility({ contentVisibilityAuto: true })) return null
-  const box = code.getBoundingClientRect()
-  const viewport = block.closest('[data-slot="main"]').getBoundingClientRect()
-  if (!box.width || !box.height || box.top < Math.max(0, viewport.top)
-    || box.bottom > Math.min(innerHeight, viewport.bottom)) return null
+  const rendered = code.checkVisibility({ contentVisibilityAuto: true })
+  block.scrollIntoView({ block: 'center' })
+  if (!rendered) return null
   const lineHeight = parseFloat(getComputedStyle(code).lineHeight)
   const lines = [...code.children].map((span) => {
     const box = span.getBoundingClientRect()
@@ -134,7 +144,7 @@ function measure(scope: string): Measure[] {
     return { text, top: box.top, height: box.height, left }
   })
   return { lines, lineHeight, codeLeft: code.getBoundingClientRect().left }
-})()`, { holdMs: 200 }))
+})()`))
 }
 
 function expectSourceLines(blocks: Measure[], label: string): void {

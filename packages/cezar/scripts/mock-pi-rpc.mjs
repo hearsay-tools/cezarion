@@ -104,6 +104,10 @@ rl.on('line', (line) => {
 rl.on('close', () => { queue.then(() => process.exit(0)); });
 
 async function handle(command) {
+  if (command.type === 'prompt' && command.message.includes('mock:crash-stderr')) {
+    const { crashWithStderr } = await import('./mock-runner-crash.mjs');
+    if (crashWithStderr(command.message, '{"type":"tool_execution_update","toolCallId":"truncated')) return;
+  }
   // Testability hook, mirroring mock-claude: CEZ_MOCK_STDIN_FILE=<path> appends
   // each inbound prompt's text and image count, so tests can assert what the
   // runner actually wrote onto the RPC (harness parity's AgentRunSpec probes).

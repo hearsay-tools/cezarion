@@ -1,3 +1,4 @@
+import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { execFile } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -214,13 +215,15 @@ describe('pasted screenshots materialize to disk and reach the agent as file pat
     process.env.CEZ_MOCK_ARGS_FILE = argsFile;
     process.env.CEZ_MOCK_STDIN_FILE = stdinFile;
     await run('git', ['init', '-q', '-b', 'main'], { cwd: repoRoot });
+    await run('git', ['config', 'gc.auto', '0'], { cwd: repoRoot });
+    await run('git', ['config', 'maintenance.auto', 'false'], { cwd: repoRoot });
     writeFileSync(join(repoRoot, 'a.txt'), 'one\n');
     await run('git', ['add', '-A'], { cwd: repoRoot });
     await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
     mkdirSync(dataDir, { recursive: true });
     writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ maxParallel: 1 }));
     store = RunStore.open(dataDir);
-    manager = new RunManager(store, repoRoot);
+    manager = createFixtureManager(store, repoRoot);
   });
 
   afterEach(async () => {
@@ -236,25 +239,13 @@ describe('pasted screenshots materialize to disk and reach the agent as file pat
   });
 
   afterAll(async () => {
-    try {
-      for (const release of [...pendingHolderReleases]) release();
-      for (const run of store.listRuns()) {
-        if (!['done', 'review', 'failed', 'cancelled'].includes(run.status)) manager.cancel(run.id);
-      }
-      await Promise.all(
-        store
-          .listRuns()
-          .map((run) => waitForStatus(run.id, ['done', 'review', 'failed', 'cancelled'], 5_000)),
-      );
-    } finally {
-      manager.dispose();
-      for (const [key, value] of Object.entries(savedEnv)) {
-        if (value === undefined) delete process.env[key];
-        else process.env[key] = value;
-      }
-      store.flush();
-      rmSync(repoRoot, { recursive: true, force: true });
+    for (const release of [...pendingHolderReleases]) release();
+    await drainFixtureManagers(repoRoot);
+    for (const [key, value] of Object.entries(savedEnv)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
     }
+    rmSync(repoRoot, { recursive: true, force: true });
   });
 
   function readStdinLines(): Array<{ userText: string; imageCount: number }> {
@@ -601,7 +592,7 @@ describe('pasted screenshots materialize to disk and reach the agent as file pat
       store.addStep(record.id, { id: 'work', name: 'work', kind: 'agent' });
       store.updateStep(record.id, 'work', { status: 'done', sessionId: 'previous-session', backend: 'claude' });
       store.updateRun(record.id, { status: 'done', worktree: false });
-      const launcher = new RunManager(store, repoRoot);
+      const launcher = createFixtureManager(store, repoRoot);
       // Stop at the boundary before any asynchronous startup or runner invocation.
       (launcher as unknown as { runContinuation(): Promise<void> }).runContinuation = async () => {};
       expect(launcher.continueRun(record.id, {
@@ -622,7 +613,7 @@ describe('pasted screenshots materialize to disk and reach the agent as file pat
         store.flush();
         store = RunStore.open(dataDir, { keepLive: true });
       }
-      manager = new RunManager(store, repoRoot);
+      manager = createFixtureManager(store, repoRoot);
       await manager.recover();
       await waitForStatus(record.id, ['waiting']);
       const opening = readStdinLines().find((line) => line.userText.includes('read my durable continuation brief'));

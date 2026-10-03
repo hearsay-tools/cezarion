@@ -48,6 +48,8 @@ describe('the repo branches API', () => {
     process.env.CEZ_HOME = cezHome;
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-branchapi-'));
     await git(repoRoot, 'init', '-q', '-b', 'main');
+    await git(repoRoot, 'config', 'gc.auto', '0');
+    await git(repoRoot, 'config', 'maintenance.auto', 'false');
     writeFileSync(join(repoRoot, 'base.txt'), 'base\n');
     writeFileSync(join(repoRoot, '.gitignore'), '.ai/\n');
     await git(repoRoot, 'add', '-A');
