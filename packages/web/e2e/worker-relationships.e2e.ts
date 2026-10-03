@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, expect, it } from 'vitest'
 import { waitForHealth } from './poll'
+import { settleVisual } from './visual-ready'
 import { stopFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 
@@ -125,7 +126,8 @@ for (const [width, height] of [[1440, 900], [360, 640]]) for (const theme of ['l
   it(`${width}x${height} ${theme}: keyboard reaches last worker under sticky header with 44px targets`, () => {
     browser.setViewport(width!, height!)
     browser.goto(`${base}/settings/global/appearance`)
-    browser.waitForFunction(`document.querySelector('[data-slot="appearance-theme"]') !== null`)
+    // Registry arrival mounts the project rail and can move already-visible theme radios.
+    settleVisual(browser, '[data-slot="appearance-theme"]', { idle: true })
     browser.click(`[data-slot="appearance-theme"] [data-value="${theme}"]`)
     // A hard navigation must follow the committed browser-local preference, not just the click.
     browser.waitForFunction(`localStorage.getItem('cez-theme') === '${theme}' &&
@@ -262,7 +264,8 @@ it('keeps request waits consistent in threads, global tasks and the palette at p
   for (const [width, height] of [[1440, 900], [360, 640]] as const) for (const theme of ['light', 'dark']) {
     browser.setViewport(width, height)
     browser.goto(`${base}/settings/appearance`)
-    browser.waitForFunction(`document.querySelector('[data-slot="appearance-theme"]') !== null`)
+    // Registry arrival mounts the project rail and can move already-visible theme radios.
+    settleVisual(browser, '[data-slot="appearance-theme"]', { idle: true })
     browser.click(`[data-slot="appearance-theme"] [data-value="${theme}"]`)
     for (const [id, label] of [[requestParentId, 'Waiting on worker replies'], [requestWorkerId, 'Waiting on parent reply']] as const) {
       open(id)
