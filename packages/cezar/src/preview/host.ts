@@ -95,6 +95,13 @@ function sameOrigin(a: string, b: string): boolean {
 
 const targetsSchema = z.array(z.object({ type: z.string(), webSocketDebuggerUrl: z.string().optional() }).passthrough());
 
+/** A closed browser's exit, bounded: a profile is deleted only once Chromium let go of it. */
+async function waitForExit(browser: BrowserHandle): Promise<void> {
+  let timer: NodeJS.Timeout | undefined;
+  await Promise.race([browser.exited, new Promise<void>(resolve => (timer = setTimeout(resolve, PROFILE_RELEASE_WAIT_MS)))]);
+  clearTimeout(timer);
+}
+
 /** resolve → launch → the page target's CDP socket. */
 async function launchBrowser(profileDir: string, env: NodeJS.ProcessEnv): Promise<BrowserHandle> {
   const bin = resolveChromium(undefined, env);
@@ -484,6 +491,8 @@ export class PreviewHost implements PreviewHostLike {
     if (entry.released || entry.browserGen !== generation) {
       session.close();
       browser.close();
+      // A release waiting on this launch deletes the profile next: the browser must be gone first.
+      if (entry.released) await waitForExit(browser);
       return undefined;
     }
     entry.browser = browser;
@@ -608,13 +617,14 @@ export class PreviewHost implements PreviewHostLike {
     if (this.entries.get(entry.ctx.runId) === entry) this.entries.delete(entry.ctx.runId);
     this.clearIdle(entry);
     this.download?.watchers.delete(entry);
+    // A launch in flight has no browser on the entry yet; it sees `released` and closes its own.
+    const launching = entry.launching;
     const browser = this.closeBrowser(entry);
     const stops = [...entry.servers.values()].filter(live).map(server => server.stop('release'));
     await Promise.all(stops);
-    if (browser && awaitBrowserExit) {
-      let timer: NodeJS.Timeout | undefined;
-      await Promise.race([browser.exited, new Promise<void>(resolve => (timer = setTimeout(resolve, PROFILE_RELEASE_WAIT_MS)))]);
-      clearTimeout(timer);
+    if (awaitBrowserExit) {
+      if (browser) await waitForExit(browser);
+      if (launching) await launching.catch(() => undefined);
     }
     const viewer = entry.viewer;
     entry.viewer = undefined;

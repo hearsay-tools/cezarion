@@ -44,7 +44,7 @@ function fakeStore(servers: PreviewServer[]) {
   };
 }
 
-function setup(servers: PreviewServer[] = [server(5173)], launchError?: () => Error | undefined) {
+function setup(servers: PreviewServer[] = [server(5173)], launchError?: () => Error | undefined, launchGate?: () => Promise<void>) {
   const dataDir = mkdtempSync(join(tmpdir(), 'cez-preview-host-'));
   const store = fakeStore(servers);
   const answering = new Set<number>();
@@ -58,6 +58,7 @@ function setup(servers: PreviewServer[] = [server(5173)], launchError?: () => Er
       return dev;
     },
     launchBrowser: async profileDir => {
+      await launchGate?.();
       const error = launchError?.();
       if (error) throw error;
       const cdpFake = fakeCdp();
@@ -95,8 +96,8 @@ describe('PreviewHost', () => {
     for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
     dirs = [];
   });
-  const make = (servers?: PreviewServer[], launchError?: () => Error | undefined) => {
-    const env = setup(servers, launchError);
+  const make = (servers?: PreviewServer[], launchError?: () => Error | undefined, launchGate?: () => Promise<void>) => {
+    const env = setup(servers, launchError, launchGate);
     dirs.push(env.dataDir);
     return env;
   };
@@ -243,6 +244,30 @@ describe('PreviewHost', () => {
     await host.run('run-1', 5173);
     expect(devServers).toHaveLength(2);
     expect(devServers[1]!.opts.server.command).toBe('npm run dev -- --host');
+  });
+
+  it('a run deleted while its Chromium is still launching waits for that browser before deleting the profile', async () => {
+    let letLaunch!: () => void;
+    const gate = new Promise<void>(resolve => (letLaunch = resolve));
+    const { host, ctx, answering, browsers } = make(undefined, undefined, () => gate);
+    answering.add(5173);
+    const viewer = fakeViewer();
+    const opening = host.open(ctx, viewer, { port: 5173 });
+    await flush();
+    let released = false;
+    const releasing = host.release('run-1', { deleteProfile: true }).then(() => { released = true; });
+    await flush();
+    expect(released).toBe(false);
+
+    letLaunch();
+    await flush();
+    // The launch that lost the race closes its browser, and release waits for it to exit.
+    expect(browsers[0]!.close).toHaveBeenCalled();
+    expect(released).toBe(false);
+    browsers[0]!.exit({ stderrTail: '' });
+    await releasing;
+    await opening;
+    expect(existsSync(join(ctx.dataDir, 'preview', 'run-1'))).toBe(false);
   });
 
   it('release stops the servers and closes the session', async () => {
