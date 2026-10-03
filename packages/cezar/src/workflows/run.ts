@@ -1461,6 +1461,9 @@ export class RunManager {
     };
     const first = validate();
     if (!first.server || !this.preview) return first.answer();
+    // A server process supplies `cezarPort`, but recovered runs can call before the cockpit binds:
+    // until it knows its port, `cezar_port` cannot be checked, so the tool asks for a retry instead.
+    if (this.cezarPort && this.cezarPort() === undefined) return previewResult('unavailable', parsed);
     const answered = await this.preview.probe(parsed.port).catch(() => false);
     const checked = validate();
     if (!checked.server) return checked.answer();

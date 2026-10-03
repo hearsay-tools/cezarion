@@ -116,6 +116,24 @@ describe('RunManager.registerPreviewServer (#781)', { timeout: 30_000 }, () => {
     expect(store.getRun(record.id)?.previewServers).toHaveLength(1);
   });
 
+  it('answers unavailable until the cockpit knows its own port, so cezar_port cannot be skipped', async () => {
+    // Recovered runs launch before `startServer` binds: `cezarPort()` is undefined in that window.
+    let boundPort: number | undefined;
+    manager!.dispose();
+    manager = new RunManager(store, repoRoot, { preview, cezarPort: () => boundPort });
+    const provision = vi.spyOn(CiToolController.prototype, 'provision');
+    const record = manager.startRun(QUICK_TASK_WORKFLOW, { task: 'build the members page' });
+    const register = await callbackAt(provision, 0);
+
+    const early = await register({ command: 'npm run dev', port: 4321 });
+    expect(early).toMatchObject({ ok: false, code: 'unavailable' });
+    expect(store.getRun(record.id)?.previewServers ?? []).toHaveLength(0);
+
+    boundPort = 4321;
+    expect(await register({ command: 'npm run dev', port: 4321 })).toMatchObject({ ok: false, code: 'cezar_port' });
+    expect(await register({ command: 'npm run dev', port: 5173 })).toMatchObject({ ok: true, code: 'registered' });
+  });
+
   it('answers headless without a preview host', async () => {
     manager!.dispose();
     manager = new RunManager(store, repoRoot);
