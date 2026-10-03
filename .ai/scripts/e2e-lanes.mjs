@@ -2,7 +2,7 @@
 // One-command local browser gate: one build, four independent app/browser lanes.
 import { spawn, execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { closeSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readlinkSync, rmSync, symlinkSync } from 'node:fs';
+import { closeSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -46,24 +46,98 @@ function linkBuiltAssets(repoRoot, laneRoot) {
   }
 }
 
+// Project only public fixture metadata. Never copy host config, credentials or hooks.
+function configEntries(repoRoot, pattern) {
+  let output;
+  try { output = git(repoRoot, 'config', '--null', '--get-regexp', pattern).toString('utf8'); }
+  catch (error) {
+    if (error.status === 1) return [];
+    throw new Error('cannot inspect E2E Git metadata');
+  }
+  return output.split('\0').filter(Boolean).map((entry) => {
+    const split = entry.indexOf('\n');
+    return [entry.slice(0, split), entry.slice(split + 1)];
+  });
+}
+
+function publicRemote(value) {
+  if (/[\r\n\0]/.test(value) || value.includes('::')) return false;
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) return true; // local path or SCP spelling
+  try {
+    const url = new URL(value);
+    return ['https:', 'http:', 'ssh:', 'git:', 'file:'].includes(url.protocol) &&
+      !url.password && !url.search && !url.hash &&
+      (!url.username || url.protocol === 'ssh:');
+  } catch { return false; }
+}
+
+function laneMetadata(repoRoot) {
+  // These can transform checkout contents or execute commands outside a fixture.
+  const unsupported = configEntries(repoRoot, '^(filter\\..*\\.(clean|smudge|process|required)|core\\.(hookspath|attributesfile|excludesfile|sparsecheckout))$');
+  if (unsupported.some(([key, value]) => key !== 'core.sparsecheckout' || !/^(false|no|off|0)$/i.test(value))) {
+    throw new Error('unsupported E2E checkout configuration; cannot faithfully isolate the lane');
+  }
+  const remotes = configEntries(repoRoot, '^remote\\..*\\.(url|pushurl|fetch)$');
+  if (remotes.some(([key, value]) => /\.(url|pushurl)$/.test(key) && !publicRemote(value))) {
+    throw new Error('E2E remote metadata must use public URLs without credentials');
+  }
+  const core = configEntries(repoRoot, '^core\\.(autocrlf|eol|symlinks|filemode|ignorecase|precomposeunicode)$');
+  const symbolic = git(repoRoot, 'for-each-ref', '--format=%(refname) %(symref)').toString('utf8')
+    .trim().split('\n').map(line => line.trim().split(' ')).filter(parts => parts.length === 2);
+  return { remotes, core, symbolic };
+}
+
 export function createLane({ repoRoot, scratchRoot, index, baseRef = 'HEAD' }) {
   const laneRoot = join(scratchRoot, `lane-${index}`);
-  git(repoRoot, 'worktree', 'add', '--detach', laneRoot, baseRef);
+  const source = realpathSync(repoRoot);
+  const base = git(repoRoot, 'rev-parse', '--verify', `${baseRef}^{commit}`).toString('utf8').trim();
+  const metadata = laneMetadata(repoRoot);
+  mkdirSync(scratchRoot, { recursive: true });
+  mkdirSync(laneRoot); // Exclusive reservation: failure cleanup never owns a preexisting path.
   try {
-    copyCurrentEdits(repoRoot, laneRoot, baseRef);
+    // #795: linked worktrees share the host's 120s mutation queue. Each lane needs its
+    // own administration AND objects, including when the source borrows alternates.
+    execFileSync('git', ['clone', '--template=', '--mirror', '--no-hardlinks', '--dissociate', '--quiet', source, join(laneRoot, '.git')]);
+    git(laneRoot, 'config', 'core.bare', 'false');
+    // remote remove would delete the mirrored tracking refs as well as the config.
+    git(laneRoot, 'config', '--remove-section', 'remote.origin');
+    for (const [key, value] of metadata.core) git(laneRoot, 'config', '--replace-all', key, value);
+    for (const [key, value] of metadata.remotes) {
+      git(laneRoot, 'config', '--add', key, value);
+    }
+    for (const [name, target] of metadata.symbolic) git(laneRoot, 'symbolic-ref', name, target);
+    if (existsSync(join(laneRoot, '.git/objects/info/alternates'))) {
+      throw new Error('E2E lane still depends on borrowed Git objects');
+    }
+    git(laneRoot, 'checkout', '--quiet', '--detach', base);
+    writeFileSync(join(laneRoot, '.git/cezar-e2e-lane.json'), JSON.stringify({
+      version: 1, source, root: realpathSync(laneRoot),
+    }), { flag: 'wx' });
+    copyCurrentEdits(repoRoot, laneRoot, base);
     linkBuiltAssets(repoRoot, laneRoot);
     return laneRoot;
   } catch (error) {
-    removeLane({ repoRoot, laneRoot });
+    rmSync(laneRoot, { recursive: true, force: true });
     throw error;
   }
 }
 
 export function removeLane({ repoRoot, laneRoot }) {
   if (!existsSync(laneRoot)) return;
-  // Browser specs can create Cezar task worktrees below the lane. Removing the parent first
-  // leaves their Git registrations behind, pointing at paths that no longer exist.
-  const descendants = git(repoRoot, 'worktree', 'list', '--porcelain', '-z').toString('utf8')
+  if (!lstatSync(laneRoot).isDirectory() || lstatSync(laneRoot).isSymbolicLink()) {
+    throw new Error('refusing cleanup of an unowned E2E Git directory');
+  }
+  const root = realpathSync(laneRoot);
+  const administration = join(root, '.git');
+  if (!lstatSync(administration).isDirectory() || lstatSync(administration).isSymbolicLink()) {
+    throw new Error('refusing cleanup of an unowned E2E Git directory');
+  }
+  const owner = JSON.parse(readFileSync(join(administration, 'cezar-e2e-lane.json'), 'utf8'));
+  if (owner.version !== 1 || owner.root !== root || owner.source !== realpathSync(repoRoot) ||
+      realpathSync(git(root, 'rev-parse', '--path-format=absolute', '--git-common-dir').toString('utf8').trim()) !== administration) {
+    throw new Error('refusing cleanup of an unowned E2E Git directory');
+  }
+  const registered = git(root, 'worktree', 'list', '--porcelain', '-z').toString('utf8')
     .split('\0\0').filter(Boolean)
     .map((record) => {
       const fields = record.split('\0');
@@ -71,14 +145,16 @@ export function removeLane({ repoRoot, laneRoot }) {
         path: fields.find((field) => field.startsWith('worktree '))?.slice('worktree '.length),
         branch: fields.find((field) => field.startsWith('branch refs/heads/'))?.slice('branch refs/heads/'.length),
       };
-    })
-    .filter((entry) => entry.path?.startsWith(`${laneRoot}${sep}`))
-    .sort((a, b) => b.path.length - a.path.length);
-  for (const entry of descendants) {
-    git(repoRoot, 'worktree', 'remove', '--force', entry.path);
-    if (entry.branch) git(repoRoot, 'branch', '-D', '--', entry.branch);
+    });
+  if (registered.some(entry => !entry.path || (entry.path !== root &&
+      (!entry.path.startsWith(`${root}${sep}`) || (existsSync(entry.path) && !realpathSync(entry.path).startsWith(`${root}${sep}`)))))) {
+    throw new Error('refusing cleanup of an E2E lane with an outside worktree');
   }
-  git(repoRoot, 'worktree', 'remove', '--force', laneRoot);
+  for (const entry of registered.filter(entry => entry.path !== root).sort((a, b) => b.path.length - a.path.length)) {
+    git(root, 'worktree', 'remove', '--force', entry.path);
+    if (entry.branch) git(root, 'branch', '-D', '--', entry.branch);
+  }
+  rmSync(root, { recursive: true, force: true });
 }
 
 async function runProcess(command, args, { cwd, env, logPath, running }) {
@@ -133,7 +209,7 @@ export function buildSource(repoRoot) {
 
 export async function runLocalSuite({ repoRoot = ownRoot, scratchRoot, buildSource: prepareBuild = buildSource } = {}) {
   const scratch = scratchRoot ?? mkdtempSync(join(tmpdir(), 'cez-e2e-lanes-'));
-  mkdirSync(scratch, { recursive: true });
+  if (scratchRoot) mkdirSync(scratch); // Refuse foreign state before build or teardown can claim it.
   const runId = `${Date.now()}-${process.pid}`;
   // Keep the namespace no longer than the serial runner's `cez-e2e`: Chrome's Unix socket
   // path includes both namespace and the test's session name, and GitHub specs nearly fill it.
