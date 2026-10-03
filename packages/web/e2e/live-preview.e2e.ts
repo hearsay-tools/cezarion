@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv, readTestEnv } from './agent-browser'
+import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { stopFixtureServer } from './fixture-server'
 import { waitForHealth } from './poll'
 
@@ -15,9 +15,8 @@ import { waitForHealth } from './poll'
  * Chromium streams it onto the canvas, a click on the canvas changes the page, and Stop ends it.
  *
  * The spec boots its own server because the feature is off by default (`CEZ_PREVIEW=1`). The
- * cezar-side Chromium is whatever `resolveChromium` finds; `CEZ_PREVIEW_NO_SANDBOX=1` is added
- * only when the cockpit's own browser needed `--no-sandbox` (a container) or on CI, whose runners
- * restrict the user namespaces Chromium's sandbox needs.
+ * cezar-side Chromium is whatever `resolveChromium` finds, launched with `CEZ_PREVIEW_NO_SANDBOX=1`
+ * because whether its sandbox works depends on the host (see beforeAll).
  */
 
 const sessionId = `e2e-live-preview-${process.pid}`
@@ -67,13 +66,13 @@ beforeAll(async () => {
   const port = await freePort()
   baseUrl = `http://localhost:${port}`
   // The cockpit's own browser is launched with --no-sandbox exactly where this machine needs it.
-  // GitHub's Ubuntu runners restrict unprivileged user namespaces (AppArmor), so the Chromium
-  // cezar resolves there dies with "No usable sandbox" and the pane shows 5.4 (failure bundle
-  // live-preview/registers-runs-streams-takes-a-click-and-stops-1, PR #792). That state has its own
-  // unit coverage; this spec is about streaming, so CI opts in the documented way.
-  const noSandbox = readTestEnv().browser.launchArgs?.includes('--no-sandbox') || process.env.CI === 'true'
+  // Whether the Chromium cezar resolves can use its sandbox depends on the host: GitHub's Ubuntu
+  // runners and this repo's dev boxes restrict unprivileged user namespaces (AppArmor), and the
+  // pane then shows 5.4 (failure bundle live-preview/registers-runs-streams-takes-a-click-and-stops-1,
+  // PR #792). That state has its own unit coverage; this spec is about streaming, so it always opts
+  // out the documented way.
   server = spawn(process.execPath, [cezarCli, 'serve', '--repo', dataRoot, '--port', String(port), '--no-open'], {
-    env: fixtureServeEnv(dataRoot, { CEZ_PREVIEW: '1', ...(noSandbox ? { CEZ_PREVIEW_NO_SANDBOX: '1' } : {}) }),
+    env: fixtureServeEnv(dataRoot, { CEZ_PREVIEW: '1', CEZ_PREVIEW_NO_SANDBOX: '1' }),
     stdio: 'ignore',
   })
   await waitForHealth(baseUrl)
@@ -121,6 +120,11 @@ describe('live preview', () => {
     ) as string
     expect(pending).toContain('registered · not started')
     browser.click(`${approval} button`)
+
+    // First the pane leaves its state screens (server start, then the browser's cold launch, which
+    // took over 10 s on a loaded CI runner: failure bundle live-preview/registers-runs-streams-
+    // takes-a-click-and-stops-1, PR #792), so the frame check below gets its own wait budget.
+    browser.waitForFunction(`!document.querySelector('[data-slot="preview-pane"] [data-slot="preview-state"]')`)
 
     // The canvas holds the page: the fixture button's fill is green, not white or empty. The frame
     // must also be the size of the pane (Chromium's viewport follows the pane through a burst of
