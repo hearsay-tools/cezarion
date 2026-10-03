@@ -64,6 +64,8 @@ export const SCENARIOS = [
   'shutdown-stderr',
   'crash-stderr',
   'crash-stderr-single',
+  'autonomous',
+  'autonomous-cap',
   'baseline',
   'done',
   'hold',
@@ -110,6 +112,20 @@ export const NO_PROGRESS_CRITERIA = [
   { id: 'N4', scenario: 'baseline', name: 'Continue sessions enforce inactivity' },
 ] as const;
 
+/** #426: workflow-autonomous-parity.test.ts, real native wires on both turn-end paths. */
+export const AUTONOMOUS_CRITERIA = [
+  { id: 'A1', scenario: 'autonomous', name: 'nudges fresh markerless turns to completion' },
+  { id: 'A2', scenario: 'autonomous', name: 'hydrates autonomous Continue sessions' },
+  { id: 'A3', scenario: 'ask-snapshot', name: 'records overridden portable questions on fresh turns' },
+  { id: 'A4', scenario: 'ask-snapshot', name: 'records overridden portable questions on Continue' },
+  { id: 'A5', scenario: 'autonomous-cap', name: 'parks at the cap with an explicit note' },
+  { id: 'A6', scenario: 'autonomous', name: 'keeps non-autonomous parking reachable' },
+  { id: 'A7', scenario: 'split-text', name: 'nudges monitoring without a false waiting heartbeat' },
+  { id: 'A8', scenario: 'done', name: 'honors DONE without a nudge' },
+  { id: 'A9', scenario: 'ask', name: 'preserves native mid-turn questions' },
+  { id: 'A10', scenario: 'ask-snapshot', name: 'never overrides a persisted unanswered question' },
+] as const;
+
 export interface HarnessAdapter {
   readonly backend: RunnerId;
   /** Every human ask wire this runner exposes; marker fallback when none exists. */
@@ -146,6 +162,8 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     mockBin: CLAUDE_MOCK,
     scenarios: {
       'missing-binary': BASELINE_PROMPT,
+      autonomous: 'mock:autonomous',
+      'autonomous-cap': 'mock:autonomous-cap',
       baseline: BASELINE_PROMPT,
       'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
       'crash-stderr-held-pipe': 'mock:crash-stderr-held-pipe',
@@ -178,6 +196,8 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     mockBin: CODEX_MOCK,
     scenarios: {
       'missing-binary': BASELINE_PROMPT,
+      autonomous: 'mock:autonomous',
+      'autonomous-cap': 'mock:autonomous-cap',
       baseline: BASELINE_PROMPT,
       'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
       'crash-stderr-held-pipe': 'mock:crash-stderr-held-pipe',
@@ -210,6 +230,8 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     mockBin: OPENCODE_MOCK,
     scenarios: {
       'missing-binary': BASELINE_PROMPT,
+      autonomous: 'mock:autonomous',
+      'autonomous-cap': 'mock:autonomous-cap',
       baseline: BASELINE_PROMPT,
       'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
       'crash-stderr-held-pipe': 'mock:crash-stderr-held-pipe',
@@ -241,7 +263,10 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     ],
     binEnv: 'CEZ_CURSOR_BIN',
     mockBin: join(HERE, '..', '..', 'scripts', 'mock-cursor-acp.mjs'),
-    scenarios: { 'missing-binary': BASELINE_PROMPT, baseline: BASELINE_PROMPT,
+    scenarios: { 'missing-binary': BASELINE_PROMPT,
+      autonomous: 'mock:autonomous',
+      'autonomous-cap': 'mock:autonomous-cap',
+      baseline: BASELINE_PROMPT,
       'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
       'crash-stderr-held-pipe': 'mock:crash-stderr-held-pipe',
       'shutdown-stderr': 'mock:crash-stderr-clean',
@@ -262,6 +287,8 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     mockBin: PI_MOCK,
     scenarios: {
       'missing-binary': BASELINE_PROMPT,
+      autonomous: 'mock:autonomous',
+      'autonomous-cap': 'mock:autonomous-cap',
       baseline: BASELINE_PROMPT,
       'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
       'crash-stderr-held-pipe': 'mock:crash-stderr-held-pipe',
@@ -328,6 +355,14 @@ export interface ParityExemption {
  * is the runner, not this table.
  */
 export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
+  {
+    criterion: 'A9', backend: 'claude', kind: 'capability-absent',
+    reason: 'Claude stream-json uses the turn-end CEZ:ASK fallback; its ask wire emits no native mid-turn ask.requested (A3/A4 cover the portable policy).',
+  },
+  {
+    criterion: 'A9', backend: 'pi', kind: 'capability-absent',
+    reason: 'Pi RPC uses the turn-end CEZ:ASK fallback; its ask wire emits no native mid-turn ask.requested (A3/A4 cover the portable policy).',
+  },
   {
     criterion: 'R16', backend: 'claude', kind: 'capability-absent',
     reason: 'Claude stream-json has whole assistant text blocks and a result-only fallback, not a separate completed-text channel. claude-cli-runner handleClaudeMessage and claude-ui-mapper mapResult consume the same text (text-turn.ndjson and claude-ui-mapper result-fallback tests).',

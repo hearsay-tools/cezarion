@@ -117,6 +117,8 @@ const info = (extra) => ({
   ...extra,
 });
 
+let autonomousTurn = 0;
+let autonomousCap = false;
 const server = createServer((req, res) => {
   const url = req.url ?? '';
   if (req.method === 'GET' && url === '/question') {
@@ -185,7 +187,14 @@ const server = createServer((req, res) => {
       turnActive = true;
       // `prompt_async` semantics: acknowledge now, stream the turn over SSE.
       res.writeHead(200, { 'content-type': 'application/json' });
+      // #426: a nudged turn can finish on SSE before its HTTP acceptance arrives.
+      // Force that ordering in the cap scenario; the first opening stays ordinary.
+      if (autonomousCap && body.includes('Continue working autonomously until the task is fully complete.')) {
+        setTimeout(() => res.end(JSON.stringify({ info: info({}), parts: [] })), 100);
+      } else {
       res.end(JSON.stringify({ info: info({}), parts: [] }));
+      }
+      if (body.includes('mock:autonomous-cap')) autonomousCap = true;
       if (url.endsWith('/prompt_async')) {
         currentUserId = `msg_user_${++steerSerial}`;
         const text = JSON.parse(body).parts.map(part => part.text ?? '').join('\n');
@@ -339,6 +348,13 @@ const server = createServer((req, res) => {
           cost: 0.0001, tokens: { input: 20, output: 10, reasoning: 0, cache: { read: 0, write: 0 } },
         }) } });
         setTimeout(() => send({ type: 'session.idle', properties: { sessionID: SESSION_ID } }), 30);
+        return;
+      }
+      if (body.includes('mock:autonomous') || body.includes('Continue working autonomously until the task is fully complete.')) {
+        const { autonomousReply } = await import('./mock-autonomous.mjs');
+        send({ type: 'message.updated', properties: { info: info({}) } });
+        send({ type: 'message.part.updated', properties: { part: { id: `autonomous-${++autonomousTurn}`, messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text', text: autonomousReply(JSON.parse(body).parts.map(part => part.text ?? '').join('\n')), time: { start: 1, end: 2 } } } });
+        send({ type: 'session.idle', properties: { sessionID: SESSION_ID } });
         return;
       }
       // #401: one completed text snapshot, without an earlier streaming part.

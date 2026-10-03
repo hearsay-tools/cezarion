@@ -801,6 +801,19 @@ End, cancellation, provider failure and process settlement dispose it. The guard
 emits a failure and interrupts the runner; it never synthesizes process exit or
 releases capacity early. Standalone wall-clock limits remain unchanged.
 
+Autonomous turn-end rows **A1–A10** live in
+`core/workflow-autonomous-parity.test.ts` and the same parity guard (#426).
+Every adapter covers fresh and Continue nudges, portable ASK attribution, the
+40-nudge cap, non-autonomous parking, monitoring, DONE and persisted-question
+priority. A9 preserves native mid-turn questions; Claude/Pi have executable
+exemptions proving their native wire uses the portable marker fallback instead.
+Only a new portable turn-end ASK may use the existing answer transport for a
+synthetic nudge, without a human message or answer checkpoint. Queued/accepted
+input, worker/CI waits, existing questions and lifecycle stops block that override.
+OpenCode's cap cell holds each nudge's HTTP ACK until after its SSE turn ends;
+deferred idle-boundary settlement applies the same policy after the ACK, including
+the cap note and the heartbeat for the state actually entered.
+
 > Every criterion in the harness parity matrix MUST hold for **every** backend,
 > or carry a declared exemption naming the wire limitation that prevents it.
 
