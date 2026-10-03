@@ -52,6 +52,13 @@ async function installBeforeNavigation(source: string): Promise<() => Promise<vo
 }
 
 let detach = async () => {}
+let proofFailed = false
+let proofError: unknown
+const cleanupFailures: Error[] = []
+const attemptCleanup = async (label: string, action: () => unknown | Promise<unknown>) => {
+  try { await action() }
+  catch (error) { cleanupFailures.push(new Error(`Settings fixture cleanup: ${label} failed`, { cause: error })) }
+}
 try {
   const reset = await fetch(`${env.baseUrl}/api/v1/config`, { method: 'PUT', headers: { 'content-type': 'application/json', connection: 'close' }, body: JSON.stringify({ systemPrompt: null }) })
   assert.ok(reset.ok, 'fixture prompt setup succeeds')
@@ -126,18 +133,28 @@ try {
     setSelect('')
     await waitForConfig<{ baseBranch: string | null }>(env.baseUrl, config => config.baseBranch === null, 'original branch cleared')
   } finally {
-    const restored = await fetch(`${env.baseUrl}/api/v1/config`, { method: 'PUT', headers: { 'content-type': 'application/json', connection: 'close' }, body: JSON.stringify({ baseBranch: previousBranch }) })
-    assert.ok(restored.ok, 'fixture branch restoration succeeds')
+    await attemptCleanup('branch restoration', async () => {
+      const restored = await fetch(`${env.baseUrl}/api/v1/config`, { method: 'PUT', headers: { 'content-type': 'application/json', connection: 'close' }, body: JSON.stringify({ baseBranch: previousBranch }) })
+      assert.ok(restored.ok, 'fixture branch restoration succeeds')
+    })
   }
 } catch (error) {
-  console.error(error)
-  throw error
+  proofFailed = true
+  proofError = error
 } finally {
-  browser.evaluate(`window.__repoWaiters?.forEach(resolve => resolve())`)
-  try {
+  await attemptCleanup('held response release', () => browser.evaluate(`window.__repoWaiters?.forEach(resolve => resolve())`))
+  await attemptCleanup('prompt restoration', async () => {
     const restored = await fetch(`${env.baseUrl}/api/v1/config`, { method: 'PUT', headers: { 'content-type': 'application/json', connection: 'close' }, body: JSON.stringify({ systemPrompt: before.systemPrompt }) })
     assert.ok(restored.ok, 'fixture prompt restoration succeeds')
-  } finally {
-    try { await detach() } finally { browser.close() }
+  })
+  await attemptCleanup('CDP detach', detach)
+  await attemptCleanup('browser close', () => browser.close())
+  if (cleanupFailures.length) {
+    throw new AggregateError(
+      proofFailed ? [proofError, ...cleanupFailures] : cleanupFailures,
+      proofFailed ? 'Settings fixture proof and cleanup failed' : 'Settings fixture cleanup failed',
+      proofFailed ? { cause: proofError } : undefined,
+    )
   }
+  if (proofFailed) throw proofError
 }
