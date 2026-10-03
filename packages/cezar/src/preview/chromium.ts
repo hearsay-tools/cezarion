@@ -308,7 +308,8 @@ export class ChromiumError extends Error {
 
 const STDERR_TAIL_BYTES = 4096;
 const SANDBOX_FAILURE = /No usable sandbox|zygote_host_impl|setuid sandbox/;
-const LAUNCH_TIMEOUT_MS = 10_000;
+/** A cold start (fresh profile, loaded machine) can take well over 10 s; CI runners did (#781). */
+const LAUNCH_TIMEOUT_MS = 30_000;
 
 /** Chromium's argv: the prototype's, without its automatic `--no-sandbox` for root. */
 export function chromiumArgs(profileDir: string, env: NodeJS.ProcessEnv): string[] {
