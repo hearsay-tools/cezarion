@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { waitForSettledSample } from './visual-ready'
+import { messageClockExpression } from './transcript-measurements'
 import { stopFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { applyContrastQaVariant, contrastQaVariants, contrastSampleExpression, focusWithKeyboard, hoverVisiblePoint, type ContrastSample } from './contrast'
@@ -106,23 +107,20 @@ describe('chronological worker conversation', () => {
       for (const width of [360, 1440]) {
         browser.setViewport(width, 900)
         browser.goto(`${base}/p/${project}/tasks/${parent}?thread=flat`)
-        const insets = waitForSettledSample<Array<{ top: number; right: number; overflow: boolean }>>(browser, `(() => {
-          const selectors = ['[data-slot="user-bubble"]', '[data-slot="assistant-message"]', '${request}', '${replyCard}'];
-          const cards = selectors.map(selector => document.querySelector(selector));
-          if (cards.some(card => !card?.querySelector('[data-slot="message-time"]'))) return null;
-          return cards.map(card => {
-            const box = card.getBoundingClientRect();
-            const clock = card.querySelector('[data-slot="message-time"]').getBoundingClientRect();
-            return { top: clock.top - box.top, right: box.right - clock.right, overflow: card.scrollWidth > card.clientWidth };
-          });
-        })()`, value => Array.isArray(value) && value.length === 4)
+        // #795 review: body readiness excludes skipped rows. Scroll and hold each
+        // card separately, including the wrapped heading while its own row renders.
+        const selectors = ['[data-slot="user-bubble"]', '[data-slot="assistant-message"]', request, replyCard]
+        const insets = selectors.map(selector => {
+          const wrappedHeading = width === 360 && selector === request
+          const facts = waitForSettledSample<{ top: number; right: number; overflow: boolean; headingHeight: number | null }>(
+            browser, messageClockExpression(selector, wrappedHeading ? ':scope > div > div > p' : undefined),
+          )
+          if (wrappedHeading) expect(facts.headingHeight).toBeGreaterThan(50)
+          return facts
+        })
         const batchTimes = browser.waitForValue<string[]>(`[...document.querySelectorAll('${request} ul li time')].map(el => el.dateTime)`, value => value.length === 2)
         expect(batchTimes).toEqual([reqA.createdAt, reqB.createdAt])
         expect(browser.waitForValue<string>(`document.querySelector('${request} > div.grid')?.textContent`, value => value.includes('First sent'))).toContain('First sent')
-        if (width === 360) {
-          const wrappedHeading = waitForSettledSample<number>(browser, `document.querySelector('${request} > div > div > p')?.getBoundingClientRect().height`)
-          expect(wrappedHeading).toBeGreaterThan(50)
-        }
         for (const { top, right, overflow } of insets) {
           expect(top).toBeGreaterThanOrEqual(0)
           expect(top).toBeLessThan(28)

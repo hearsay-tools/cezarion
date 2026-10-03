@@ -1,8 +1,10 @@
 # Cockpit rendered / settled sampling audit — #795
 
 Audited baseline: `35a519de` (includes #758, `35a519de`, and #794, `af1383f9`).
-Scope: every one of the **63** current `*.e2e.ts` specs, all **11** direct TypeScript
-helpers/configuration files, plus `fetch-setup.mjs` and `fixtures/make-large-thread.ts`.
+Scope: every one of the **63** current `*.e2e.ts` specs. The original audit covers
+**13** helper/setup files (11 direct TypeScript files plus `fetch-setup.mjs` and
+`fixtures/make-large-thread.ts`); review round 1 adds `transcript-measurements.ts` and
+`session-layout.ts`, bringing the current helper/setup inventory to **15**.
 No product, dependency, assertion tolerance, skip or fixture baseline changes.
 
 ## Diagnosis and provenance
@@ -42,7 +44,9 @@ mechanisms; targeted browser runs establish integration. Existing source comment
 issue-specific reproduction history (notably #548, #736, #369 and #758).
 
 **Counts:** 462 baseline sampling calls; 45 affected spec rows; 18 `NONE` affected
-rows (10 have no sampling calls); 209 accepted-sample call sites in specs/helpers.
+rows (10 have no sampling calls). At `31597045`, there were **208 actual** accepted-sample
+calls; the initial 209-entry list incorrectly included the helper declaration. After review
+round 1 there are **209 actual calls**, excluding declarations; current locations follow.
 
 ## Exhaustive spec inventory
 
@@ -110,22 +114,21 @@ waits still need S when followed by a changed geometry sample.
 | [task-files.e2e.ts](task-files.e2e.ts) | 5: 120, 143, 248, 270, 276 | 120, 248, 270, 276. S: raw / first-value geometry after route, viewport, theme, density or disclosure now returns the held measurement. Existing assertions remain unchanged. | 120, 134, 143, 158, 179, 182, 190, 203, 208, 213, 216, 223, 228, 231, 246, 248, 252, 254, 256, 266 |
 | [task-github-items.e2e.ts](task-github-items.e2e.ts) | 3: 115, 146, 166 | 115, 146, 166. PR panel mount/phone chip tab: stable geometry; viewport left/right coverage is asserted, not polled. | 101, 115, 128, 142, 146, 166 |
 | [task-handoff.e2e.ts](task-handoff.e2e.ts) | 6: 76, 143, 154, 181, 204, 228 | 76, 154, 204. S: raw / first-value geometry after route, viewport, theme, density or disclosure now returns the held measurement. Existing assertions remain unchanged. | 67, 72, 76, 88, 89, 91, 98, 99, 116, 117, 124, 127, 143, 154, 176, 181, 192, 194, 204, 224, 228 |
-| [task-thread.e2e.ts](task-thread.e2e.ts) | 57: 141, 179, 181, 185, 190, 200, 441, 443, 451, 454, 495, 579, 621, 624, 653, 704, 707, 709, 715, 724, 725, 747, 748, 749, 756, 757, 758, 760, 764, 775, 776, 780, 792, 793, 801, 802, 803, 815, 816, 818, 819, 822, 823, 947, 957, 977, 1025, 1040, 1072, 1073, 1080, 1083, 1097, 1113, 1132, 1163, 1216 | 141, 443, 621, 624, 653, 709, 715, 725, 747, 749, 758, 760, 764, 792, 793, 803, 818, 819, 822, 823, 947, 957, 977, 1072, 1073, 1083, 1132, 1163, 1216. #758 lazy transcript and #794 mobile Copy branch: guard native rendering before boxes; scroll transcript targets. Session control coverage and menu 44px thresholds are assertions. Keep #415 title-edit focus/geometry stability. | 115, 128, 171, 180, 184, 212, 218, 311, 323, 333, 358, 375, 380, 388, 393, 434, 440, 441, 443, 453, 459, 461, 468, 479, 485, 492, 494, 504, 531, 556, 562, 564, 565, 571, 574, 576, 579, 586, 595, 609, 618, 619, 643, 653, 686, 691, 694, 703, 713, 715, 719, 721, 723, 737, 746, 787, 799, 809, 814, 828, 945, 947, 955, 957, 975, 977, 1053, 1055, 1060, 1062, 1071, 1073, 1080, 1083, 1097, 1104, 1113, 1125, 1132, 1162, 1215, 1230 |
+| [task-thread.e2e.ts](task-thread.e2e.ts) | 57: 141, 179, 181, 185, 190, 200, 441, 443, 451, 454, 495, 579, 621, 624, 653, 704, 707, 709, 715, 724, 725, 747, 748, 749, 756, 757, 758, 760, 764, 775, 776, 780, 792, 793, 801, 802, 803, 815, 816, 818, 819, 822, 823, 947, 957, 977, 1025, 1040, 1072, 1073, 1080, 1083, 1097, 1113, 1132, 1163, 1216 | 141, 443, 621, 624, 653, 709, 715, 725, 747, 749, 758, 760, 764, 792, 793, 803, 818, 819, 822, 823, 947, 957, 977, 1072, 1073, 1083, 1132, 1163, 1216. #758 lazy transcript and #794 mobile Copy branch: guard native rendering before boxes; scroll transcript targets. Session control coverage and menu 44px thresholds are assertions. Keep #415 title-edit focus/geometry stability. Review round 1 additionally restores editor viewport bottom on every caller and replaces immediate disclosure/visibility reads; see precise review sites below. | 115, 128, 171, 180, 184, 212, 218, 311, 323, 333, 358, 375, 380, 388, 393, 434, 440, 441, 443, 453, 459, 461, 468, 479, 485, 492, 494, 504, 531, 556, 562, 564, 565, 571, 574, 576, 579, 586, 595, 609, 618, 619, 643, 653, 686, 691, 694, 703, 713, 715, 719, 721, 723, 737, 746, 787, 799, 809, 814, 828, 945, 947, 955, 957, 975, 977, 1053, 1055, 1060, 1062, 1071, 1073, 1080, 1083, 1097, 1104, 1113, 1125, 1132, 1162, 1215, 1230 |
 | [task-views-layout.e2e.ts](task-views-layout.e2e.ts) | 2: 67, 68 | NONE. K: existing waits / direct data, focus or visibility checks retained. | 50, 62, 66, 74, 84, 88, 90, 94, 96, 101, 131, 135, 139, 142 |
-| [thread-scroll.e2e.ts](thread-scroll.e2e.ts) | 16: 79, 132, 144, 252, 260, 271, 299, 301, 322, 324, 347, 384, 425, 439, 456, 472 | 79, 271, 299, 301, 384, 425, 472. S: raw / first-value geometry after route, viewport, theme, density or disclosure now returns the held measurement. Existing assertions remain unchanged. | 92, 108, 125, 126, 227, 235, 243, 248, 249, 252, 268, 276, 280, 283, 299, 322, 420, 452, 457, 458 |
+| [thread-scroll.e2e.ts](thread-scroll.e2e.ts) | 16: 79, 132, 144, 252, 260, 271, 299, 301, 322, 324, 347, 384, 425, 439, 456, 472 | 79, 271, 299, 301, 384, 425, 472. R/S: review round 1 fixes assistant width to choose an already-rendered assistant at the live tail, without scrolling the reader. Other held measurements retain assertions. | 92, 108, 125, 126, 227, 235, 243, 248, 249, 252, 268, 276, 280, 283, 299, 322, 420, 452, 457, 458 |
 | [tools-menu.e2e.ts](tools-menu.e2e.ts) | 0: NONE | NONE. K: existing waits / direct data, focus or visibility checks retained. | 67, 91, 135, 136 |
 | [touch-targets.e2e.ts](touch-targets.e2e.ts) | 16: 88, 99, 127, 157, 178, 182, 193, 221, 241, 279, 302, 307, 359, 380, 381, 414 | 88, 99, 127, 221, 241, 307, 359, 380, 381, 414. S: raw / first-value geometry after route, viewport, theme, density or disclosure now returns the held measurement. Existing assertions remain unchanged. | 122, 170, 178, 180, 201, 203, 211, 231, 233, 239, 254, 266, 270, 279, 283, 287, 292, 297, 311, 316, 321, 344, 358, 363, 366, 370, 394, 414, 438, 450 |
 | [variants-compare.e2e.ts](variants-compare.e2e.ts) | 1: 153 | 153. S: raw / first-value geometry after route, viewport, theme, density or disclosure now returns the held measurement. Existing assertions remain unchanged. | 119, 129, 151, 164, 166, 179, 183, 184 |
-| [worker-conversation.e2e.ts](worker-conversation.e2e.ts) | 10: 91, 108, 122, 156, 186, 203, 209, 228, 231, 258 | 108, 122, 156, 186, 203, 231, 258. #548 sticky-header evidence retained; settle card/clock dimensions and focus independently. Preserve viewport, click coverage and scroll expectations as assertions. | 91, 108, 118, 120, 122, 141, 143, 146, 156, 177, 181, 185, 186, 199, 203, 209, 212, 218, 220, 225, 228, 231, 237, 241, 246, 253, 255, 258, 260 |
+| [worker-conversation.e2e.ts](worker-conversation.e2e.ts) | 10: 91, 108, 122, 156, 186, 203, 209, 228, 231, 258 | 108, 122, 156, 186, 203, 231, 258. #548 sticky-header evidence retained. Review round 1 scrolls/measures cards individually with native guards on card/clock/heading. Preserve all inset, heading, viewport, click coverage and scroll assertions. | 91, 108, 118, 120, 122, 141, 143, 146, 156, 177, 181, 185, 186, 199, 203, 209, 212, 218, 220, 225, 228, 231, 237, 241, 246, 253, 255, 258, 260 |
 | [worker-relationships.e2e.ts](worker-relationships.e2e.ts) | 2: 139, 273 | 139, 273. S: raw / first-value geometry after route, viewport, theme, density or disclosure now returns the held measurement. Existing assertions remain unchanged. | 88, 108, 117, 128, 131, 135, 156, 158, 166, 171, 179, 184, 188, 212, 217, 225, 230, 236, 241, 244, 265, 269, 281, 287 |
 | [workflows.e2e.ts](workflows.e2e.ts) | 6: 102, 159, 211, 240, 273, 342 | 159, 273, 342. S: raw / first-value geometry after route, viewport, theme, density or disclosure now returns the held measurement. Existing assertions remain unchanged. | 74, 78, 82, 102, 104, 120, 133, 142, 143, 158, 239, 334, 357, 360 |
 
-## Precise accepted-sample sites
+## Precise accepted-sample sites (current)
 
-The helper's provenance comment applies to the following call sites. These are the measurements
-that previously used raw evaluation or first-value readiness. Each expression remains in its
-own spec with its selectors and original assertions; no generic expected-result matcher is
-introduced. Additional matcher-only moves are listed in the inventory above.
+The helper's provenance comment applies to these direct calls. Declarations are excluded.
+Measurements keep their spec's selectors and assertions. The baseline inventory above
+remains anchored at `35a519de`; review corrections and their current sites follow below.
 
 - `agents-dock.e2e.ts`: 154, 248.
 - `application-update.e2e.ts`: 56, 75, 103, 116, 148, 159, 212.
@@ -164,12 +167,11 @@ introduced. Additional matcher-only moves are listed in the inventory above.
 - `task-files.e2e.ts`: 121, 249, 271, 277.
 - `task-github-items.e2e.ts`: 117, 148, 168.
 - `task-handoff.e2e.ts`: 77, 155, 206.
-- `task-thread.e2e.ts`: 142, 448, 626, 629, 658, 714, 720, 730, 752, 754, 763, 765, 769, 797, 798, 808, 823, 824, 827, 828, 952, 962, 982, 1077, 1078, 1088, 1137, 1171, 1224.
-- `thread-scroll.e2e.ts`: 80, 272, 301, 384, 425, 472.
+- `task-thread.e2e.ts`: 135, 136, 150, 456, 634, 637, 666, 722, 728, 738, 760, 762, 771, 773, 777, 805, 806, 816, 831, 832, 835, 836, 961, 972, 993, 1089, 1090, 1100, 1150, 1184, 1237.
+- `thread-scroll.e2e.ts`: 81, 273, 302, 385, 426, 473.
 - `touch-targets.e2e.ts`: 89, 100, 128, 222, 242, 308, 360, 381, 382, 415.
 - `variants-compare.e2e.ts`: 154.
-- `visual-ready.ts`: 57.
-- `worker-conversation.e2e.ts`: 109, 123, 203, 231, 258.
+- `worker-conversation.e2e.ts`: 115, 201, 229, 256.
 - `worker-relationships.e2e.ts`: 140, 274.
 - `workflows.e2e.ts`: 160, 274, 343.
 
@@ -177,9 +179,11 @@ introduced. Additional matcher-only moves are listed in the inventory above.
 
 | File | Audit / exact sites | Result |
 | --- | --- | --- |
-| `visual-ready.ts` | `visualSampleExpression` target / descendant geometry; `settleVisual`; new `settledSampleExpression` / `waitForSettledSample` | R/S: guard native rendering before boxes; retain fonts, finite/infinite animation distinctions, appearance and optional idle; add held focus identity; return the accepted value. |
+| `visual-ready.ts` | `visualSampleExpression` target / descendant geometry; `settleVisual`; `settledSampleExpression` / `waitForSettledSample`; `visibilitySampleExpression` / `disclosureVisibilityExpression` | R/S: guard native rendering before boxes; retain fonts, finite/infinite animation distinctions, appearance and optional idle; hold focus identity and return accepted value. Disclosure `aria-expanded` observes the commit; visibility remains an independent boolean, preserving non-empty box semantics. |
 | `contrast.ts` | `focusWithKeyboard` predecessor/focus at baseline 113–149; `dismissWithEscape` at 164–171; `hoverVisiblePoint` at 187–211 | Focus and Escape readiness retained (#409). Hover now checks native rendering **before** scrolling/rect reads (#758/#795); it moves the pointer once using the accepted hit-tested point. Do not filter skipped controls out of keyboard tab order. Contrast expression reads computed paint, not geometry; AA thresholds stay assertions. |
 | `row-height.ts` | `heights` at baseline 40–56, sample at 59 | R/S: native visibility before all four measured elements; hold geometry across density/expand rendering. Preserve task-height equality, exact 47px and overlap/toggle expectations. |
+| `transcript-measurements.ts` | `assistantWidthExpression`; `messageClockExpression` | R: select an already-rendered tail assistant without scrolling; scroll each worker card separately and reject until card/clock/optional heading were natively rendered before all their box reads. Body readiness alone is insufficient. |
+| `session-layout.ts` | `expectEditorFitsViewport`; all four session samples in `task-thread.e2e.ts` | A: retain the old editor viewport-bottom bound as `editor.bottom <= viewportHeight + 1`; viewport height belongs to the accepted sample, never a second browser read or an expected-answer waiter. |
 | `agent-browser.ts` | failure probe rects at 190, active focus at 216; `waitForStable`/`waitForValue`; `setViewport` (#794) | K: failure probe intentionally records the failing frame. Monotonic deadlines, diagnostics reserve and returned accepted sample retained. Viewport rendered-frame fix unchanged. |
 | `github-fixture.ts` | route/data readiness, keyboard and surface helpers | K: no direct geometry sampling; existing named route/data/focus waits retained. |
 | `repo-diff-coverage.ts` | virtualizer mounting/data checks and last-tree selection | K: no geometry sampling. Do not replace file-count/data completion with visual settlement. |
@@ -235,10 +239,77 @@ report are durable repository artifacts.
 - `npm run test:e2e -- task-github-items.e2e.ts`: **3 passed / 1 file**, exit 0,
   `task-github-final.log`, including the latest accepted tab geometry sample.
 
+## Review round 1 — corrections and proof
+
+Independent review of `31597045` requested three corrections. Its unchanged-body fixture
+accepted a stable zero assistant width and four all-zero insets whose original assertions
+passed; its accepted editor sample ended at 1000px in an 844px viewport yet passed normal
+padding checks. The original Enter disclosure visibility read also had no commit wait.
+The verified pre-fix output is `review-round-1/reviewer-proof.log`.
+
+- R1: `thread-scroll.e2e.ts:80` now calls `assistantWidthExpression`, selecting the latest
+  natively rendered assistant before its box read. No scroll changes the live-tail state.
+  `worker-conversation.e2e.ts:111` samples each of the four cards independently through
+  `messageClockExpression`; card, clock and the optional request heading must be rendered
+  at sample entry. Scrolling cannot authorize geometry in that same skipped task. All
+  four inset assertions and the phone heading-height assertion remain unchanged.
+- R2: `task-thread.e2e.ts` records viewport height in each accepted session sample and
+  calls `expectEditorFitsViewport` at all four callers (current lines 962, 973, 994, 1101).
+  The old exact one-pixel viewport allowance is preserved as an assertion; readiness does
+  not wait until this expected geometry becomes correct.
+- R3: disclosure visibility now observes `aria-expanded` before its held visibility
+  measurement (`task-thread.e2e.ts:720`). Both a settled false and an already-rendered
+  zero measurement remain accepted results for assertions to reject. Visibility retains
+  the old non-empty box semantics, with native visibility checked before those boxes.
+  The other legacy `run-details` / `follow-up-engine` visibility exemptions in this file
+  are also replaced. The Space disclosure attribute assertion now waits for its commit.
+  Remaining baseline visibility sites in `mobile-task-controls` concern search after
+  route/query changes; `smoke` concerns route/viewport shell visibility, not the same
+  keyboard disclosure trigger. No baseline exemption is taken as proof of readiness.
+  This round removes four stale legacy entries; no allowances or exceptions are added.
+- Optional review cleanup: inbox facts explicitly narrow null; accepted-sample counts
+  exclude the function declaration.
+
+Review evidence is under `.ai/qa/issue-795/review-round-1/` in the implementation worktree:
+
+| Command / reproduction | Outcome | Evidence |
+| --- | --- | --- |
+| `npm ci` | exit 0 | `npm-ci.log` |
+| `npm test -- transcript-measurements` with pre-review measurement expressions | exit 1; 3 failed | `lazy-target-red.log` |
+| Same command after native target fixes | exit 0; 3 passed | `lazy-target-green.log` |
+| `npm test -- session-layout` with no viewport assertion | exit 1; 2 failed | `editor-bound-red.log` |
+| Same command after restoring the one-pixel assertion | exit 0; 2 passed | `editor-bound-green.log` |
+| `npm test -- visual-ready` before disclosure commit guard | exit 1; 1 failed / 7 passed | `disclosure-red.log` |
+| Same command after commit guard | exit 0; 8 passed | `disclosure-green.log` |
+| Same command before preserving non-empty visibility boxes | exit 1; 2 failed / 9 passed | `visibility-box-red.log` |
+| Behavior-only rollback: `npm test -- transcript-measurements session-layout visual-ready` | exit 1; 6 failed / 10 passed. Helper APIs retained; only the reviewed behaviors removed, then restored immediately | `behavior-only-rollback-red.log` |
+| `npm test -- transcript-measurements session-layout visual-ready agent-browser-wait-value e2e-wait-discipline` | exit 0; 72 passed / 5 files | `helpers-green.log` |
+| `E2E_WAIT_DISCIPLINE_UPDATE=1 npm test -- e2e-wait-discipline` | exit 0; 33 passed; baseline only shrinks | `ratchet-green.log` |
+| `npm run typecheck:web` | exit 0 | `typecheck-web.log` |
+| `npm run test:e2e -- thread-scroll.e2e.ts worker-conversation.e2e.ts task-thread.e2e.ts` | exit 0; all 74 tests / 3 complete files passed, 158.95s; no test-name filter or skips | `browser-green.log` |
+
+The lazy fixture holds body readiness true while the measured target remains skipped;
+first-task geometry is forbidden, not merely filtered by a width/inset expectation. The
+rendered-zero test returns zero and lets the unchanged `>200` assertion reject it. The
+composer regressions reject 1000px/844px even with valid padding, accept 845px exactly,
+and reject 845.001px. The disclosure regression holds the body ready while the commit is
+delayed, then accepts false after the control commits: it never polls visibility until true.
+
+## Loaded suites and parent acceptance
+
+The **BEFORE-fix full four-lane loaded suite PASSED** at baseline `35a519de`, before
+integration, as reported by the parent: all four lanes green; CPU mean **100%**, minimum
+**99.97%**, **156** utilization samples, **24** pinned default-priority CPU burners
+cleaned up. Both result sets are to be retained. Parent evidence:
+`.ai/qa/issue-795/loaded-baseline` and `.ai/qa/local-runs/1791011166587-1662221`.
+
 Acceptance also requires the **entire four-lane suite under sustained full CPU load
 both before and after these fixes**, retaining both result sets. The before-fix loaded
 run must come first using baseline `35a519de` in an isolated worktree (equivalent to
 stashing and restoring the fixes), followed by the integrated after-fix loaded run,
 with the current timeouts/assertions and supervised stress-process cleanup. The parent
 owns that additional loaded run, the normal six-command gate and complete four-lane
-cockpit suite after integration, plus independent governed review. Normal full-suite and both loaded result sets are pending here. These focused results are not a full-gate claim.
+cockpit suite after integration, plus independent governed review. The before-fix
+result is preserved above; the full normal gate, loaded-after result and
+independent review remain parent-owned and pending. These focused results are not a
+full-gate claim.

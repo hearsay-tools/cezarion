@@ -68,3 +68,23 @@ export function waitForSettledSample<T = unknown>(
   if (sample === null) throw new Error('settled sample unexpectedly absent')
   return sample.value
 }
+
+/** Native visibility is a measurement: a settled false remains an assertion failure. */
+export function visibilitySampleExpression(selector: string): string {
+  return `(() => {
+    const target = document.querySelector(${JSON.stringify(selector)});
+    if (!target) return null;
+    if (!target.checkVisibility({ contentVisibilityAuto: true, visibilityProperty: true })) return false;
+    const rect = target.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  })()`
+}
+
+/** #795 review: observe the disclosure commit independently of its visibility result. */
+export function disclosureVisibilityExpression(toggleSelector: string, targetSelector: string, expanded: boolean): string {
+  return `(() => {
+    const toggle = document.querySelector(${JSON.stringify(toggleSelector)});
+    if (!toggle || toggle.getAttribute('aria-expanded') !== ${JSON.stringify(String(expanded))}) return null;
+    return ${visibilitySampleExpression(targetSelector)};
+  })()`
+}

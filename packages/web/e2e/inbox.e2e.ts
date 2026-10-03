@@ -179,13 +179,15 @@ describe('the inbox against the live dry-run server', () => {
         // Effort precedes Model in the DOM whenever the row is compact, so Tab follows what is drawn.
         matcher: (f) => f !== null,
       })
-      expect(facts?.rowCount).toBe(1)
-      expect(facts!.domOrder.indexOf('effort-pill')).toBeLessThan(facts!.domOrder.indexOf('model-pill'))
-      expect(facts!.modelBelow).toBe(true)
-      expect(facts!.modelSpansRow).toBe(true)
-      expect(facts!.cardOverflow).toBe(false)
-      expect(facts!.pageOverflow).toBe(false)
-      expect(facts!.minHeight).toBeGreaterThanOrEqual(44)
+      expect(facts).not.toBeNull()
+      if (facts === null) throw new Error('engine row sample unexpectedly absent')
+      expect(facts.rowCount).toBe(1)
+      expect(facts.domOrder.indexOf('effort-pill')).toBeLessThan(facts.domOrder.indexOf('model-pill'))
+      expect(facts.modelBelow).toBe(true)
+      expect(facts.modelSpansRow).toBe(true)
+      expect(facts.cardOverflow).toBe(false)
+      expect(facts.pageOverflow).toBe(false)
+      expect(facts.minHeight).toBeGreaterThanOrEqual(44)
       browser.screenshot(`${artifactsDir}/inbox-engine-row-phone.png`, { viewport: true })
     } finally {
       browser.setViewport(DESKTOP.width, DESKTOP.height)

@@ -129,3 +129,30 @@ it('scrolls a skipped hover target and waits for native rendering before rects',
   expect(visibility).toHaveBeenCalledWith({ contentVisibilityAuto: true })
   expect(points).toEqual([[0, 0], [25, 25]])
 })
+
+// #795 review: a ready body does not mean Enter's delayed React disclosure commit
+// has happened. A hidden measured result must stay false after the commit too.
+it('waits for the disclosure commit, then measures visibility independently', () => {
+  document.body.innerHTML = '<button aria-expanded="false"></button><section id="details"></section>'
+  Object.defineProperty(document, 'fonts', { configurable: true, value: { status: 'loaded' } })
+  vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({ x: 0, y: 0, width: 200, height: 20 } as DOMRect)
+  let visible = false
+  vi.spyOn(Element.prototype, 'checkVisibility').mockImplementation(function (this: Element) {
+    return this.id !== 'details' || visible
+  })
+  const expression = readiness.settledSampleExpression(readiness.disclosureVisibilityExpression('button', '#details', true))
+  expect(window.eval(expression)).toBeNull() // body ready, disclosure still uncommitted
+  document.querySelector('button')!.setAttribute('aria-expanded', 'true')
+  expect(window.eval(expression).value).toBe(false) // never wait until expected visibility is true
+  visible = true
+  expect(window.eval(expression).value).toBe(true)
+})
+
+// Native checkVisibility alone permits a zero-size associated box. Preserve the
+// non-empty-box requirement of AgentBrowser.isVisible / Playwright visibility.
+it.each([[0, 20, false], [20, 0, false], [20, 20, true]])('keeps visibility box semantics at %s × %s', (width, height, visible) => {
+  document.body.innerHTML = '<section id="details"></section>'
+  vi.spyOn(Element.prototype, 'checkVisibility').mockReturnValue(true)
+  vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({ width, height } as DOMRect)
+  expect(window.eval(readiness.visibilitySampleExpression('#details'))).toBe(visible)
+})

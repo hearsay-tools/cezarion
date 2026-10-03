@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { waitForSettledSample } from './visual-ready'
+import { assistantWidthExpression } from './transcript-measurements'
 import { stopFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { expectedRowCount, largeThreadEvents } from './fixtures/make-large-thread'
@@ -77,7 +78,7 @@ const nearBottom = `(() => { const m = ${MAIN}; return m.scrollHeight - m.scroll
 const rowCount = () => browser.count('[data-slot="thread-row"]')
 const domSize = () => Number(browser.evaluate(`document.querySelectorAll('*').length`))
 const assistantWidth = () =>
-  Number(waitForSettledSample(browser, `document.querySelector('[data-slot="assistant-message"]')?.getBoundingClientRect().width ?? 0`))
+  waitForSettledSample<number>(browser, assistantWidthExpression())
 
 /**
  * Scroll away from the tail like a reader would — and INSIST, like a reader would.
