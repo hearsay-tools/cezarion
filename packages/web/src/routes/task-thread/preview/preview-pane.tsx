@@ -69,6 +69,7 @@ export function PreviewPane(props: PreviewPaneProps) {
 function answersServer(message: PreviewStateMessage, port: number): boolean {
   switch (message.stage) {
     case 'needs-approval':
+    case 'port-held':
     case 'server-starting':
     case 'server-stalled':
     case 'server-exited':
@@ -107,6 +108,7 @@ function statusFor(
     case 'sandbox-failed': return { tone: 'danger', label: 'browser failed' }
     case 'browser-exited': return { tone: 'danger', label: 'browser exited' }
     case 'needs-approval': return { tone: 'neutral', label: 'not started' }
+    case 'port-held': return { tone: 'danger', label: 'port in use' }
     case 'server-starting': return { tone: 'pending', label: `waiting for :${stage.server.port}` }
     case 'server-stalled': return { tone: 'pending', label: 'waiting · 2 min' }
     case 'server-exited': return { tone: 'danger', label: 'server exited' }

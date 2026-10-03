@@ -190,6 +190,16 @@ describe('PreviewStates (design 5.1 to 5.18)', () => {
     expect(screen.getByRole('button', { name: 'Close preview' })).toBeTruthy()
   })
 
+  it('port held by another task names that task by title and offers only Close preview', () => {
+    const a = show({ t: 'state', stage: 'port-held', server, ownerTitle: 'Fix the footer' })
+    expect(screen.getByRole('heading', { name: 'web :5173 is in use by another task' })).toBeTruthy()
+    expect(document.body.textContent).toContain('Task "Fix the footer" is running its own server on :5173. Register a different port for this task, or stop that task\'s server.')
+    expect(primary().map(b => b.textContent)).toEqual(['Close preview'])
+    expect(screen.queryByRole('button', { name: /run/i })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Close preview' }))
+    expect(a.close).toHaveBeenCalledTimes(1)
+  })
+
   it.each([
     ['5.16', false, "web isn't running yet", 'The agent registered this server. Nothing runs until you approve it here.', 'registered · not started'],
     ['5.17', true, 'Nothing answers on :5173 anymore', "web was running when the agent registered it, likely inside the agent's own session, which has ended.", 'was running when registered · silent now'],

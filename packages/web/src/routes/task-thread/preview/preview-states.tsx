@@ -89,6 +89,7 @@ export function PreviewStates({
     case 'sandbox-failed': return <SandboxFailed state={state} actions={actions} />
     case 'browser-exited': return <BrowserExited state={state} actions={actions} />
     case 'needs-approval': return <NeedsApproval state={state} actions={actions} />
+    case 'port-held': return <PortHeld state={state} actions={actions} />
     case 'server-starting': return <ServerStarting state={state} actions={actions} />
     case 'server-stalled': return <ServerStalled state={state} actions={actions} />
     case 'server-exited': return <ServerExited state={state} actions={actions} />
@@ -339,6 +340,18 @@ function NeedsApproval({ state, actions }: StageProps<'needs-approval'>) {
           <PlayIcon aria-hidden="true" />
           Run and open
         </Button>
+      </Actions>
+    </Shell>
+  )
+}
+
+function PortHeld({ state, actions }: StageProps<'port-held'>) {
+  const { server, ownerTitle } = state
+  return (
+    <Shell state={state.stage} icon={<TriangleAlertIcon className="text-pending-strong" />} title={`${server.label} :${server.port} is in use by another task`}>
+      <Body>{`Task "${ownerTitle}" is running its own server on :${server.port}. Register a different port for this task, or stop that task's server.`}</Body>
+      <Actions>
+        <Button variant="contrast" onClick={actions.close}>Close preview</Button>
       </Actions>
     </Shell>
   )

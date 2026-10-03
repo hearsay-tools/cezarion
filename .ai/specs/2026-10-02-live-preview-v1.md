@@ -215,8 +215,10 @@ Exit triggers:
   `PREVIEW_PORT_WAIT_MS = 2 min` (probe every 2 s), `PREVIEW_MAX_SERVERS = 8` per task.
 
 Port collisions between parallel tasks: a port held by another task's cezar-owned server is
-refused at registration (`port_held`). A port answered by an unknown process at Open is adopted and
-labelled as not started by cezar, so a wrong app is visible as such.
+refused at registration (`port_held`). Two tasks can still both register a port while it is silent;
+once one of them runs its server, the other's Open and Run answer `port-held` and neither adopt nor
+spawn. A port answered by an unknown process at Open is adopted and labelled as not started by cezar,
+so a wrong app is visible as such.
 
 ## Errors and edge states
 
@@ -242,6 +244,7 @@ Each is a typed `state` message; the toolbar never moves.
 | Registered, not running | 5.16 `needs-approval`: command, `cwd`, what runs where | Run and open. Reached from the card, the header toggle, the server switcher and the empty state's Review. |
 | Adopted port silent at Open | 5.17 `needs-approval`, same block | Run and open. |
 | Using an adopted server | 5.18, "Not started by cezar" in the URL field | Stop server disabled with the reason. |
+| Port held by another task at Open or Run | `port-held { server, ownerTitle }` (no design screen): "<label> :<port> is in use by another task", naming that task by title only, never its path. Both tasks registered while the port was silent, so registration's `port_held` did not apply. The port is neither adopted nor spawned onto. | Close preview. |
 | Typed URL fails | Chromium's error page inside the frame | none |
 | Invalid client message | Dropped, logged once per connection | none |
 

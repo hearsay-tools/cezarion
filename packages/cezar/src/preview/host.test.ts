@@ -34,7 +34,8 @@ const server = (port: number, extra: Partial<PreviewServer> = {}): PreviewServer
 
 function fakeStore(servers: PreviewServer[]) {
   const events: Array<{ runId: string; event: Record<string, unknown> }> = [];
-  const runs = new Map([['run-1', { id: 'run-1', previewServers: servers }]]);
+  // run-2 is a second task that registered the same servers (both registered while the ports were silent).
+  const runs = new Map([['run-1', { id: 'run-1', previewServers: servers }], ['run-2', { id: 'run-2', previewServers: servers }]]);
   return {
     events,
     stateEvents: () => events.filter(entry => entry.event.type === 'preview.server-state').map(entry => entry.event),
@@ -427,5 +428,60 @@ describe('PreviewHost', () => {
     expect(navigations(browsers[0]!)).toEqual(['http://localhost:5173/']);
     browsers[0]!.cdpFake.emit('Page.screencastFrame', { data: 'AA==', sessionId: 3 });
     expect(again.messages.at(-1)).toEqual({ t: 'state', stage: 'streaming', adopted: true });
+  });
+
+  describe('a port another task\'s cezar-owned server holds', () => {
+    const other = (ctx: RunContext): RunContext => ({ ...ctx, runId: 'run-2', title: 'Fix the footer' });
+
+    it('is never adopted or streamed at open: the pane says which task holds it', async () => {
+      const { host, ctx, answering, devServers, browsers } = make();
+      await host.open(ctx, fakeViewer(), { port: 5173 });
+      await host.run('run-1', 5173);
+      devServers[0]!.set('up');
+      answering.add(5173);
+      await flush();
+      const launched = browsers.length;
+
+      const viewer = fakeViewer();
+      await host.open(other(ctx), viewer, { port: 5173 });
+      await flush();
+      expect(viewer.messages).toEqual([{ t: 'state', stage: 'port-held', server: server(5173), ownerTitle: 'Build the app' }]);
+      expect(browsers).toHaveLength(launched);
+      expect(viewer.frames).toHaveLength(0);
+      expect(host.portOwner(5173)).toEqual({ runId: 'run-1', title: 'Build the app' });
+    });
+
+    it('is held while that server is still starting and silent', async () => {
+      const { host, ctx } = make();
+      await host.open(ctx, fakeViewer(), { port: 5173 });
+      await host.run('run-1', 5173);
+      const viewer = fakeViewer();
+      await host.open(other(ctx), viewer, { port: 5173 });
+      expect(viewer.messages.at(-1)).toEqual({ t: 'state', stage: 'port-held', server: server(5173), ownerTitle: 'Build the app' });
+    });
+
+    it('run refuses to spawn onto it and repeats port-held', async () => {
+      const { host, ctx, devServers } = make();
+      await host.open(ctx, fakeViewer(), { port: 5173 });
+      await host.run('run-1', 5173);
+      const viewer = fakeViewer();
+      await host.open(other(ctx), viewer, { port: 5173 });
+      viewer.messages.length = 0;
+      await host.handle(other(ctx), viewer, { t: 'run', port: 5173 });
+      expect(devServers).toHaveLength(1);
+      expect(viewer.messages).toEqual([{ t: 'state', stage: 'port-held', server: server(5173), ownerTitle: 'Build the app' }]);
+    });
+
+    it('is free again once the owner stops it', async () => {
+      const { host, ctx, devServers } = make();
+      await host.open(ctx, fakeViewer(), { port: 5173 });
+      await host.run('run-1', 5173);
+      await host.stop('run-1', 5173, 'user');
+      const viewer = fakeViewer();
+      await host.open(other(ctx), viewer, { port: 5173 });
+      expect(viewer.messages.at(-1)).toMatchObject({ t: 'state', stage: 'needs-approval' });
+      await host.handle(other(ctx), viewer, { t: 'run', port: 5173 });
+      expect(devServers).toHaveLength(2);
+    });
   });
 });

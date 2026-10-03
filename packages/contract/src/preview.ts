@@ -145,6 +145,8 @@ export const previewStateMessageSchema = z.discriminatedUnion('stage', [
     serverUp: z.boolean(),
   }),
   z.object({ t: z.literal('state'), stage: z.literal('needs-approval'), server: previewServerSchema, wasRunning: z.boolean() }),
+  /** Another task's cezar-owned server holds the port: never adopted, never spawned onto. Its title only, never its path. */
+  z.object({ t: z.literal('state'), stage: z.literal('port-held'), server: previewServerSchema, ownerTitle: z.string() }),
   z.object({
     t: z.literal('state'),
     stage: z.literal('server-starting'),

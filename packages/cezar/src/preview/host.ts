@@ -172,6 +172,8 @@ export class PreviewHost implements PreviewHostLike {
     entry.port = server.port;
     const current = entry.servers.get(server.port);
     if (live(current)) return this.report(entry, server.port, current);
+    // Another task's server would answer the probe: streaming it here would show that task's app.
+    if (this.heldByOther(entry, server)) return;
     const answering = await this.deps.probe(server.port).catch(() => false);
     if (this.entries.get(ctx.runId) !== entry || entry.viewer !== viewer || entry.port !== server.port) return;
     if (answering) {
@@ -189,6 +191,7 @@ export class PreviewHost implements PreviewHostLike {
     const entry = this.entries.get(runId);
     const server = entry && this.registration(entry, port);
     if (!entry || !server || live(entry.servers.get(port))) return;
+    if (this.heldByOther(entry, server)) return;
     const dev = this.deps.createServer({ server, worktreePath: entry.ctx.worktreePath, dir: this.runDir(entry.ctx) });
     entry.servers.set(port, dev);
     entry.startedAt.set(port, new Date().toISOString());
@@ -318,6 +321,15 @@ export class PreviewHost implements PreviewHostLike {
     }
     entry.viewer = viewer;
     entry.session?.attach(viewer);
+  }
+
+  /** Tells the pane `port-held` when another task's cezar-owned server holds `server.port`. */
+  private heldByOther(entry: RunEntry, server: PreviewServer): boolean {
+    const owner = this.portOwner(server.port);
+    if (!owner || owner.runId === entry.ctx.runId) return false;
+    if (entry.servers.get(server.port) === 'adopted') entry.servers.delete(server.port);
+    this.tell(entry, { t: 'state', stage: 'port-held', server, ownerTitle: owner.title });
+    return true;
   }
 
   private registration(entry: RunEntry, port: number): PreviewServer | undefined {
