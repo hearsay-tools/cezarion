@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -181,6 +181,14 @@ describe('downloadChromium (#781)', () => {
       { headers: { 'content-length': String(chunks.reduce((n, c) => n + c.length, 0)) } },
     );
   const noop = () => {};
+  /** Staging directories a download left behind in `<cacheDir>/chromium`. */
+  const staging = (cacheDir: string) => {
+    try {
+      return readdirSync(join(cacheDir, 'chromium')).filter(name => name.startsWith('.partial'));
+    } catch {
+      return [];
+    }
+  };
 
   it('reads the Stable chrome-headless-shell url for the target, reports progress, extracts and renames into place', async () => {
     const requested: string[] = [];
@@ -215,9 +223,65 @@ describe('downloadChromium (#781)', () => {
     expect(extractCalls).toHaveLength(1);
     expect(bin).toBe(join(dir, 'home', '.cache', 'cez', 'chromium', 'chrome-headless-shell-linux64', 'chrome-headless-shell'));
     expect(existsSync(bin)).toBe(true);
-    expect(existsSync(join(dir, 'home', '.cache', 'cez', 'chromium', '.partial'))).toBe(false);
+    expect(staging(join(dir, 'home', '.cache', 'cez'))).toEqual([]);
     // The cache it filled is the one resolveChromium reads last.
     expect(resolveChromium(realFs, { HOME: join(dir, 'home'), PATH: '' }, 'linux', 'x64')).toBe(bin);
+  });
+
+  it('two overlapping downloads stage apart, and the second keeps the copy the first published', async () => {
+    // Two cezar processes (different repos) share ~/.cache/cez/chromium.
+    let downloads = 0;
+    const fetchImpl = (async (input: string | URL | Request) => {
+      if (String(input).endsWith('.json')) return jsonResponse(manifest);
+      downloads++;
+      return chunked([new Uint8Array([downloads])]);
+    }) as typeof fetch;
+    const entered: Array<() => void> = [];
+    const gates: Array<() => void> = [];
+    const extract = async (zip: string, dest: string) => {
+      // Like unzip: the archive must still be there when extraction runs.
+      const tag = String(readFileSync(zip)[0]);
+      await new Promise<void>(resolve => {
+        gates.push(resolve);
+        entered.shift()?.();
+      });
+      mkdirSync(join(dest, 'chrome-headless-shell-linux64'), { recursive: true });
+      writeFileSync(join(dest, 'chrome-headless-shell-linux64', 'chrome-headless-shell'), tag);
+    };
+    const inExtract = () => new Promise<void>(resolve => entered.push(resolve));
+    const start = () => downloadChromium({ signal: new AbortController().signal, onProgress: noop, fetchImpl, cacheDir: dir, platform: 'linux', arch: 'x64', sleep: async () => {}, extract });
+
+    const firstIn = inExtract();
+    const first = start();
+    await firstIn;
+    const secondIn = inExtract();
+    const second = start();
+    await secondIn;
+    gates[0]!();
+    const firstBin = await first;
+    gates[1]!();
+    const secondBin = await second;
+
+    expect(secondBin).toBe(firstBin);
+    expect(readFileSync(firstBin, 'utf8')).toBe('1');
+    expect(readdirSync(join(dir, 'chromium'))).toEqual(['chrome-headless-shell-linux64']);
+  });
+
+  it('replaces a leftover install directory that holds no binary', async () => {
+    mkdirSync(join(dir, 'chromium', 'chrome-headless-shell-linux64'), { recursive: true });
+    writeFileSync(join(dir, 'chromium', 'chrome-headless-shell-linux64', 'stray'), 'x');
+    const fetchImpl = (async (input: string | URL | Request) =>
+      String(input).endsWith('.json') ? jsonResponse(manifest) : chunked([new Uint8Array(3)])) as typeof fetch;
+    const bin = await downloadChromium({
+      signal: new AbortController().signal, onProgress: noop, fetchImpl, cacheDir: dir, platform: 'linux', arch: 'x64',
+      extract: async (_zip, dest) => {
+        mkdirSync(join(dest, 'chrome-headless-shell-linux64'), { recursive: true });
+        writeFileSync(join(dest, 'chrome-headless-shell-linux64', 'chrome-headless-shell'), 'fresh');
+      },
+    });
+    expect(readFileSync(bin, 'utf8')).toBe('fresh');
+    expect(existsSync(join(dir, 'chromium', 'chrome-headless-shell-linux64', 'stray'))).toBe(false);
+    expect(staging(dir)).toEqual([]);
   });
 
   it('removes .partial and rejects when the signal aborts mid-download, without retrying', async () => {
@@ -243,7 +307,7 @@ describe('downloadChromium (#781)', () => {
     });
     await expect(done).rejects.toThrow();
     expect(downloads).toBe(1);
-    expect(existsSync(join(dir, 'chromium', '.partial'))).toBe(false);
+    expect(staging(dir)).toEqual([]);
   });
 
   it('retries a failed attempt after 1 s, then 4 s, and gives up after three', async () => {
@@ -268,7 +332,7 @@ describe('downloadChromium (#781)', () => {
     ).rejects.toThrow(/network down/);
     expect(attempts).toBe(3);
     expect(delays).toEqual([1_000, 4_000]);
-    expect(existsSync(join(dir, 'chromium', '.partial'))).toBe(false);
+    expect(staging(dir)).toEqual([]);
   });
 
   it('succeeds when a later attempt works', async () => {
@@ -321,7 +385,7 @@ describe('downloadChromium (#781)', () => {
     ).rejects.toThrow(/unzip is not installed/i);
     expect(downloads).toBe(1);
     expect(delays).toEqual([]);
-    expect(existsSync(join(dir, 'chromium', '.partial'))).toBe(false);
+    expect(staging(dir)).toEqual([]);
   });
 
   it('does not re-download when the archive is corrupt or has the wrong layout', async () => {
@@ -335,7 +399,7 @@ describe('downloadChromium (#781)', () => {
       downloadChromium({ signal: new AbortController().signal, onProgress: noop, fetchImpl, cacheDir: dir, platform: 'linux', arch: 'x64', sleep: async () => {}, extract: async () => {} }),
     ).rejects.toThrow();
     expect(downloads).toBe(1);
-    expect(existsSync(join(dir, 'chromium', '.partial'))).toBe(false);
+    expect(staging(dir)).toEqual([]);
   });
 
   it('does not retry a manifest with no download for the platform', async () => {

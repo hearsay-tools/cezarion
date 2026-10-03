@@ -1,8 +1,8 @@
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { mkdir, open, rename, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, open, rename, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { delimiter, dirname, join } from 'node:path';
+import { basename, delimiter, dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { z } from 'zod';
 import { processStartToken } from '../delegation/process-liveness.ts';
@@ -221,8 +221,10 @@ class PermanentDownloadError extends Error {}
 
 /**
  * Downloads the Stable `chrome-headless-shell` build into `<cache>/chromium` and returns its binary.
- * The archive lands in `.partial` and is renamed into place only once unpacked, so an abort or a
- * crash never leaves a half-installed Chromium for `resolveChromium` to find. Only the network
+ * Each download stages in its own `.partial-*` directory (two cezar processes in different repos
+ * share the cache) and is renamed into place only once unpacked, so an abort or a crash never
+ * leaves a half-installed Chromium for `resolveChromium` to find. A copy another process already
+ * published wins; ours is discarded. Only the network
  * phase gets three attempts; a failed extraction fails at once, since re-downloading would not help.
  */
 export async function downloadChromium(opts: DownloadChromiumOptions): Promise<string> {
@@ -231,7 +233,8 @@ export async function downloadChromium(opts: DownloadChromiumOptions): Promise<s
   const target = downloadTarget(platform, arch);
   if (!target) throw new Error(`Chrome for Testing publishes no download for ${platform}-${arch}`);
   const root = join(opts.cacheDir ?? cezCacheDir(), 'chromium');
-  const partial = join(root, '.partial');
+  await mkdir(root, { recursive: true });
+  const partial = await mkdtemp(join(root, '.partial-'));
   const zip = join(partial, 'chromium.zip');
 
   try {
@@ -288,6 +291,26 @@ async function fetchArchive(opts: DownloadChromiumOptions, platformKey: Platform
   signal.throwIfAborted();
 }
 
+/**
+ * Renames `staged` to `finalDir` in one step. A directory rename never replaces a non-empty one, so
+ * when another process published first, its complete copy stays and ours is discarded with the
+ * staging directory. Only a leftover without a binary is cleared and the rename tried again.
+ */
+async function publish(staged: string, finalDir: string, bin: string): Promise<void> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await rename(staged, finalDir);
+      return;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code !== 'ENOTEMPTY' && code !== 'EEXIST' && code !== 'EPERM') throw err;
+      if (existsSync(bin)) return;
+      if (attempt >= 2) throw err;
+      await rm(finalDir, { recursive: true, force: true });
+    }
+  }
+}
+
 async function install(opts: DownloadChromiumOptions, platformKey: PlatformKey, platform: string, root: string, partial: string, zip: string): Promise<string> {
   const tool = platform === 'win32' ? 'tar' : 'unzip';
   const unpacked = join(partial, 'unpacked');
@@ -305,10 +328,9 @@ async function install(opts: DownloadChromiumOptions, platformKey: PlatformKey, 
   const finalDir = join(root, dirName);
   const bin = join(finalDir, HEADLESS_SHELL + (platform === 'win32' ? '.exe' : ''));
   if (!existsSync(join(unpacked, dirName))) throw new PermanentDownloadError(`The Chromium download did not contain ${dirName}`);
-  await rm(finalDir, { recursive: true, force: true });
-  await rename(join(unpacked, dirName), finalDir);
+  if (!existsSync(join(unpacked, dirName, basename(bin)))) throw new PermanentDownloadError(`The Chromium download did not contain ${HEADLESS_SHELL}`);
+  await publish(join(unpacked, dirName), finalDir, bin);
   await rm(partial, { recursive: true, force: true });
-  if (!existsSync(bin)) throw new PermanentDownloadError(`The Chromium download did not contain ${HEADLESS_SHELL}`);
   return bin;
 }
 
