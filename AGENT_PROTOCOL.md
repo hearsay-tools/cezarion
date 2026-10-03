@@ -768,6 +768,13 @@ pipe deadline; an opening HTTP rejection keeps its note and failure reason, whil
 a concurrent process crash supplies the authoritative error. Codex startup crash
 errors retain their phase context alongside the terminal stderr exception.
 
+**S20** exercises missing executables through every adapter's binary setting.
+There is no child process or backend wire on ENOENT, so it uses the OS spawn
+boundary and preserves each runner's existing event/rejected-result failure
+channel. No turn starts. OpenCode's focused spawn test additionally requires
+exactly one wrapped error event with PATH/installation guidance before rejecting
+the result, without a turn-end or done event.
+
 Workflow deadline rows **T1–T6** (#470) live in
 `core/workflow-timeout-parity.test.ts` and are registered in the shared parity
 guard. Each `RUNNER_IDS` backend uses its own `HARNESS_ADAPTERS` native wire:

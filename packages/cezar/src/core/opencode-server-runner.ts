@@ -291,7 +291,10 @@ class OpencodeSession implements AgentSession {
 
       await this.exited;
       await outputDrained;
-      if (this.spawnFailed) throw this.spawnFailed;
+      if (this.spawnFailed) {
+        this.emit({ type: 'error', message: this.spawnFailed.message });
+        throw this.spawnFailed;
+      }
 
       // SSE closure can precede the process exit event. Choose one authoritative
       // error after settlement, before the synthetic turn-end, retaining the code.

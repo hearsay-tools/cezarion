@@ -678,14 +678,22 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
   it('keeps PATH and installation guidance for a missing binary', async () => {
     const child = enoentChild();
     spawnHook.override = () => child;
+    const events: AgentEvent[] = [];
     try {
       const session = new OpencodeServerRunner({ bin: 'opencode', timeoutMs: 30_000 }).startSession({
         userPrompt: 'go',
         cwd: process.cwd(),
         model: 'openai/gpt-5.6-sol',
-      });
+      }, event => events.push(event));
       await expect(session.result).rejects.toThrow(/`opencode` not found on PATH/);
       await expect(session.result).rejects.toThrow(/https:\/\/opencode\.ai/);
+      const errors = events.filter(event => event.type === 'error');
+      expect(errors).toHaveLength(1);
+      expect(errors[0]!.message).toContain('`opencode` not found on PATH');
+      expect(errors[0]!.message).toContain('https://opencode.ai');
+      await expect(session.result).rejects.toThrow(errors[0]!.message);
+      expect(events.at(-1)?.type).toBe('error');
+      expect(events.some(event => event.type === 'turn-end' || event.type === 'done')).toBe(false);
     } finally {
       spawnHook.override = null;
     }

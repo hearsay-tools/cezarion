@@ -77,6 +77,25 @@ const sessionEvents = (v1: readonly AgentEvent[]) =>
 
 const SEAM_CRITERIA: readonly SeamCriterion[] = [
   {
+    id: 'S20',
+    name: 'S20 reports missing executables through its existing failure channel without starting a turn',
+    scenario: 'missing-binary',
+    assert: ({ v1, failure, pid }) => {
+      // ENOENT precedes the backend wire. Runners retain their existing event
+      // and/or rejected-result channels; none may look like a successful turn.
+      expect(pid).toBeUndefined();
+      const errors = v1.filter(event => event.type === 'error');
+      expect(errors.length).toBeLessThanOrEqual(1);
+      const diagnostics = [...errors.map(event => event.message), ...(failure ? [failure.message] : [])];
+      expect(diagnostics.length).toBeGreaterThan(0);
+      for (const message of diagnostics) expect(message).toMatch(/PATH|install/i);
+      expect(v1.some(event => event.type === 'turn-end' || event.type === 'text')).toBe(false);
+      const done = v1.findIndex(event => event.type === 'done');
+      if (done >= 0) expect(v1.findIndex(event => event.type === 'error')).toBeGreaterThanOrEqual(0);
+      if (done >= 0) expect(v1.findIndex(event => event.type === 'error')).toBeLessThan(done);
+    },
+  },
+  {
     id: 'S18',
     name: 'S18 reports one actionable crash before terminal boundaries when the opening prompt is unacknowledged',
     scenario: 'crash-stderr-pre-ack',
