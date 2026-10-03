@@ -467,6 +467,8 @@ setInterval(()=>{},1000);`,
     const err = await launchChromium(bin, join(dir, 'profile'), {}, { timeoutMs: 400 }).catch(e => e);
     expect(err).toBeInstanceOf(ChromiumError);
     expect(err.kind).toBe('timeout');
+    // The owner's diagnostics name the binary and the deadline it missed.
+    expect(err.message).toBe(`Chromium did not open its DevTools port within 0.4 s (${bin})`);
     const pid = Number(readFileSync(pidFile, 'utf8'));
     await vi.waitFor(() => {
       expect(() => process.kill(pid, 0)).toThrow();

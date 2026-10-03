@@ -373,14 +373,15 @@ export async function launchChromium(
     return new ChromiumError(SANDBOX_FAILURE.test(stderrTail) ? 'sandbox' : kind, stderrTail, message);
   };
 
-  const deadline = Date.now() + (opts.timeoutMs ?? LAUNCH_TIMEOUT_MS);
+  const timeoutMs = opts.timeoutMs ?? LAUNCH_TIMEOUT_MS;
+  const deadline = Date.now() + timeoutMs;
   for (;;) {
     if (exit) throw fail('exited', exit);
     if (existsSync(portFile)) {
       const port = Number(readFileSync(portFile, 'utf8').split('\n')[0]);
       if (port > 0) return { proc, port };
     }
-    if (Date.now() >= deadline) throw fail('timeout', 'Chromium did not open its DevTools port in time');
+    if (Date.now() >= deadline) throw fail('timeout', `Chromium did not open its DevTools port within ${timeoutMs / 1000} s (${bin})`);
     await new Promise(resolve => setTimeout(resolve, 50));
   }
 }
