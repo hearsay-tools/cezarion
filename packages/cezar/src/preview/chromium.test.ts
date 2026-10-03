@@ -29,9 +29,22 @@ describe('resolveChromium (#781)', () => {
     expect(resolveChromium(fs, env(), 'linux', 'x64')).toBe('/opt/bin/google-chrome');
   });
 
-  it('searches the PATH names in order within one directory', () => {
-    const fs = fakeFs(['/usr/bin/google-chrome-stable', '/usr/bin/chromium-browser']);
-    expect(resolveChromium(fs, env(), 'linux', 'x64')).toBe('/usr/bin/chromium-browser');
+  it('prefers Google Chrome over a distro Chromium within one directory', () => {
+    // A GitHub runner's /usr/bin/chromium never opened its DevTools port where google-chrome did
+    // (PR #792), and Ubuntu's chromium and chromium-browser are snap shims.
+    const fs = fakeFs(['/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser']);
+    expect(resolveChromium(fs, env(), 'linux', 'x64')).toBe('/usr/bin/google-chrome-stable');
+    expect(resolveChromium(fakeFs(['/usr/bin/chromium-browser', '/usr/bin/chromium']), env(), 'linux', 'x64')).toBe('/usr/bin/chromium');
+  });
+
+  it('skips a snap-confined binary, which cannot write the profile under the hidden .ai directory', () => {
+    const fs: ChromiumFs = {
+      ...fakeFs(['/usr/bin/chromium', `${HOME}/.cache/cez/chromium/chrome-headless-shell-linux64/chrome-headless-shell`], {
+        [`${HOME}/.cache/cez/chromium`]: ['chrome-headless-shell-linux64'],
+      }),
+      realpathSync: p => (p === '/usr/bin/chromium' ? '/snap/chromium/3000/usr/lib/chromium-browser/chrome' : p),
+    };
+    expect(resolveChromium(fs, env(), 'linux', 'x64')).toBe(`${HOME}/.cache/cez/chromium/chrome-headless-shell-linux64/chrome-headless-shell`);
   });
 
   it('prefers the Playwright cache over the cez cache', () => {

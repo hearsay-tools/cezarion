@@ -1,5 +1,5 @@
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { mkdir, open, rename, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
@@ -17,6 +17,8 @@ export type ChromiumFs = {
   existsSync(path: string): boolean;
   /** Entry names of a directory; empty when it does not exist. */
   readdirSync(path: string): string[];
+  /** Where a path really points; the input when it cannot be resolved. Optional for test fakes. */
+  realpathSync?(path: string): string;
 };
 
 export const realFs: ChromiumFs = {
@@ -28,6 +30,13 @@ export const realFs: ChromiumFs = {
       return [];
     }
   },
+  realpathSync: path => {
+    try {
+      return realpathSync(path);
+    } catch {
+      return path;
+    }
+  },
 };
 
 /** `~/.cache/cez`: the root the skills cache already uses. */
@@ -35,7 +44,9 @@ export function cezCacheDir(home = homedir()): string {
   return join(home, '.cache', 'cez');
 }
 
-const PATH_NAMES = ['chromium', 'chromium-browser', 'google-chrome', 'google-chrome-stable'];
+/** Google Chrome first: a distro `chromium` is often a snap shim (Ubuntu) or a build that never
+ *  opened its DevTools port headless (a GitHub runner's /usr/bin/chromium, PR #792). */
+const PATH_NAMES = ['google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser'];
 const MAC_APPS = ['Google Chrome', 'Chromium', 'Google Chrome Canary', 'Brave Browser', 'Microsoft Edge'];
 const HEADLESS_SHELL = 'chrome-headless-shell';
 
@@ -75,6 +86,12 @@ function firstInRevisions(fs: ChromiumFs, root: string, pattern: RegExp, platfor
   return undefined;
 }
 
+/** A snap's confinement keeps it out of hidden directories and /tmp, so it can never write the
+ *  task profile under `.ai/cezar/preview/` and its DevTools port file never appears. */
+function snapConfined(fs: ChromiumFs, path: string): boolean {
+  return (fs.realpathSync?.(path) ?? path).startsWith('/snap/');
+}
+
 /**
  * The first usable Chromium, most deliberate source first: PATH, macOS app bundles, Playwright's
  * cache, agent-browser's Chrome for Testing cache, then the copy `downloadChromium` keeps.
@@ -91,7 +108,7 @@ export function resolveChromium(
   for (const dir of (env.PATH ?? '').split(delimiter).filter(Boolean)) {
     for (const name of PATH_NAMES) {
       const p = join(dir, name + exe);
-      if (fs.existsSync(p)) return p;
+      if (fs.existsSync(p) && !snapConfined(fs, p)) return p;
     }
   }
 
