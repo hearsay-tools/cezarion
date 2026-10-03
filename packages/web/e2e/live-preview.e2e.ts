@@ -51,7 +51,13 @@ let appPort: number
 let runId: string
 let taskUrl: string
 
+/** The browser's cold launch can take most of a 25 s wait on a loaded CI runner (PR #792); give
+ *  this spec's waits room past cezar's 30 s launch deadline, so a launch that fails shows its
+ *  5.5 reason in the failure bundle instead of a spinner. Restored in afterAll. */
+const priorWaitBudget = process.env.AGENT_BROWSER_DEFAULT_TIMEOUT
+
 beforeAll(async () => {
+  process.env.AGENT_BROWSER_DEFAULT_TIMEOUT = '45000'
   dataRoot = mkdtempSync(join(tmpdir(), 'cezar-e2e-preview-'))
   mkdirSync(artifactsDir, { recursive: true })
   const git = (...args: string[]) => execFileSync('git', ['-C', dataRoot, ...args])
@@ -92,6 +98,8 @@ beforeAll(async () => {
 }, 120_000)
 
 afterAll(async () => {
+  if (priorWaitBudget === undefined) delete process.env.AGENT_BROWSER_DEFAULT_TIMEOUT
+  else process.env.AGENT_BROWSER_DEFAULT_TIMEOUT = priorWaitBudget
   browser?.close()
   await stopFixtureServer(server)
   if (dataRoot) rmSync(dataRoot, { recursive: true, force: true })
@@ -123,7 +131,8 @@ describe('live preview', () => {
 
     // First the pane leaves its state screens (server start, then the browser's cold launch, which
     // took over 10 s on a loaded CI runner: failure bundle live-preview/registers-runs-streams-
-    // takes-a-click-and-stops-1, PR #792), so the frame check below gets its own wait budget.
+    // takes-a-click-and-stops-1, PR #792), so the frame check below gets its own wait budget. A
+    // launch that fails leaves a state screen up, and the bundle shows its reason.
     browser.waitForFunction(`!document.querySelector('[data-slot="preview-pane"] [data-slot="preview-state"]')`)
 
     // The canvas holds the page: the fixture button's fill is green, not white or empty. The frame
