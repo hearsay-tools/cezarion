@@ -3504,13 +3504,14 @@ export function createApp(deps: ServerDeps) {
     .get('/automations', async (c) => {
       const { root, automationStore } = c.get('project');
       const forge = resolveForge(await getRepoInfo(root));
-      // Annotated, so the two branches are ONE shape rather than a union of two: the fallback
-      // literal always carries `reason`, the cached answer only sometimes does, and the route
-      // type is what `contract/src/automations.ts` has to describe.
-      const availability: ForgeAvailability = forge?.detectCached() ?? {
-        available: false,
-        reason: forge ? 'GitHub availability is still being checked' : 'No GitHub remote is configured',
-      };
+      // Awaits the driver's settled probe (per-repo cache + in-flight dedupe, 5 s timeout, never
+      // throws): a "still being checked" answer would leave the cockpit's GitHub option disabled
+      // because it does not refetch when the probe completes. `/health` keeps `detectCached`.
+      // Annotated, so both branches are ONE shape: the route type is what
+      // `contract/src/automations.ts` has to describe.
+      const availability: ForgeAvailability = forge
+        ? await forge.detect()
+        : { available: false, reason: 'No GitHub remote is configured' };
       const automations = automationStore.list().map((automation) => {
         const logs = automationStore.logs({ automationId: automation.id, limit: 100 });
         const state = automationStore.state(automation.id);

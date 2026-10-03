@@ -75,6 +75,39 @@ describe('GitHub automation API', () => {
     body: JSON.stringify(body),
   });
 
+  it('answers GitHub availability from a settled probe on a cold cache', async () => {
+    withGithubRemote(root);
+    // A stub `gh` that succeeds: the first read must wait for the probe instead of answering
+    // "still being checked", which the cockpit never refetches.
+    const bin = mkdtempSync(join(tmpdir(), 'cezar-fake-gh-'));
+    writeFileSync(join(bin, 'gh'), '#!/bin/sh\necho \'{"nameWithOwner":"acme/demo"}\'\n', { mode: 0o755 });
+    const savedPath = process.env.PATH;
+    const savedDry = process.env.CEZ_DRY_RUN;
+    delete process.env.CEZ_DRY_RUN;
+    process.env.PATH = `${bin}:${savedPath}`;
+    try {
+      const first = await apiRequest(app(), '/api/v1/automations');
+      expect(((await first.json()) as any)).toMatchObject({ available: true });
+    } finally {
+      process.env.PATH = savedPath;
+      if (savedDry !== undefined) process.env.CEZ_DRY_RUN = savedDry;
+      rmSync(bin, { recursive: true, force: true });
+    }
+  });
+
+  it('answers available under CEZ_DRY_RUN without probing', async () => {
+    withGithubRemote(root);
+    const savedDry = process.env.CEZ_DRY_RUN;
+    process.env.CEZ_DRY_RUN = '1';
+    try {
+      const res = await apiRequest(app(), '/api/v1/automations');
+      expect(((await res.json()) as any)).toMatchObject({ available: true });
+    } finally {
+      if (savedDry === undefined) delete process.env.CEZ_DRY_RUN;
+      else process.env.CEZ_DRY_RUN = savedDry;
+    }
+  });
+
   it('creates paused definitions and rejects malformed bounds', async () => {
     withGithubRemote(root);
     const bad = await apiRequest(app(), '/api/v1/automations', json({ ...input, intervalSeconds: 5 }));
