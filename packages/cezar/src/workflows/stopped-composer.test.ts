@@ -1,3 +1,4 @@
+import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -6,7 +7,7 @@ import type { AgentRunSpec } from '../core/agent-runner.ts';
 import { RunStore } from '../runs/store.ts';
 import { mergeWriteAgentAccounts } from '../workspace/agent-accounts.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
-import { RunManager } from './run.ts';
+import type { RunManager } from './run.ts';
 
 const captured = vi.hoisted(() => ({ specs: [] as AgentRunSpec[], release: undefined as (() => void) | undefined }));
 vi.mock('../core/runner-factory.ts', () => ({ createRunner: () => ({
@@ -25,13 +26,13 @@ function fixture() {
   const data = join(root, '.ai/cezar');
   const store = RunStore.open(data);
   const semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 0 } });
-  const manager = new RunManager(store, root, { semaphore }); managers.push(manager);
+  const manager = createFixtureManager(store, root, { semaphore }); managers.push(manager);
   return { root, data, store, manager };
 }
 afterEach(async () => {
   captured.release?.(); captured.release = undefined;
-  for (const manager of managers.splice(0)) manager.dispose();
-  await new Promise(resolve => setTimeout(resolve, 30));
+  for (const root of roots) await drainFixtureManagers(root);
+  managers.length = 0;
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
   captured.specs.length = 0;
 });
@@ -54,7 +55,7 @@ describe('stopped composer engine', () => {
     expect(captured.specs).toHaveLength(0);
     manager.dispose();
     const reopened = RunStore.open(data, { keepLive: true });
-    const next = new RunManager(reopened, root); managers.push(next);
+    const next = createFixtureManager(reopened, root); managers.push(next);
     await next.recover();
     await vi.waitFor(() => expect(captured.specs).toHaveLength(1));
     expect(captured.specs[0]).toMatchObject({ model: 'sonnet', effort: 'high', allowedTools: ['Read'], env: { CLAUDE_CONFIG_DIR: accountDir } });
@@ -72,7 +73,7 @@ describe('stopped composer engine', () => {
   });
   it('exposes stopping until the process result settles and rejects Continue in that interval', async () => {
     const { root, store, manager } = fixture(); manager.dispose();
-    const live = new RunManager(store, root); managers.push(live);
+    const live = createFixtureManager(store, root); managers.push(live);
     const run = live.startRun(workflow, { task: 'task' });
     await vi.waitFor(() => expect(captured.specs).toHaveLength(1));
     expect(live.cancel(run.id)).toBe(true);

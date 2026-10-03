@@ -1,3 +1,4 @@
+import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -6,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { shellQuote } from '../core/shell-env.ts';
 import { RunStore } from '../runs/store.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
-import { RunManager } from './run.ts';
+import type { RunManager } from './run.ts';
 import type { WorkflowDef } from './types.ts';
 
 const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
@@ -33,6 +34,8 @@ function fixtureRepo(prefix: string, roots: string[]): string {
   const root = mkdtempSync(join(tmpdir(), prefix));
   roots.push(root);
   execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: root });
+  execFileSync('git', ['config', 'gc.auto', '0'], { cwd: root });
+  execFileSync('git', ['config', 'maintenance.auto', 'false'], { cwd: root });
   execFileSync('git', [...GIT_ID, 'commit', '--allow-empty', '-q', '-m', 'base'], { cwd: root });
   return root;
 }
@@ -48,11 +51,15 @@ async function waitFor(predicate: () => boolean, what: string, ms = 15_000): Pro
 
 const settled = ['done', 'failed', 'cancelled', 'review'];
 
+const releaseSlotHolders: Array<() => void> = [];
+
 /** A real check-step subprocess that holds a slot until the test releases it. */
 function slotHolder(roots: string[]): { workflow: WorkflowDef; release: () => void } {
   const root = mkdtempSync(join(tmpdir(), 'cez-slot-gate-'));
   roots.push(root);
   const gate = join(root, 'release');
+  const release = () => writeFileSync(gate, '');
+  releaseSlotHolders.push(release);
   const script =
     "const fs=require('node:fs');const gate=process.argv[1];" +
     'const poll=()=>fs.existsSync(gate)?undefined:setTimeout(poll,5);poll()';
@@ -67,7 +74,7 @@ function slotHolder(roots: string[]): { workflow: WorkflowDef; release: () => vo
         },
       ],
     },
-    release: () => writeFileSync(gate, ''),
+    release,
   };
 }
 const INSTANT: WorkflowDef = {
@@ -95,7 +102,7 @@ describe('workspace semaphore across RunManagers (step 2.5)', () => {
   ): { store: RunStore; manager: RunManager; root: string } {
     const root = fixtureRepo(prefix, roots);
     const store = RunStore.open(join(root, '.ai/cezar'));
-    const manager = new RunManager(store, root, { semaphore });
+    const manager = createFixtureManager(store, root, { semaphore });
     stores.push(store);
     managers.push(manager);
     return { store, manager, root };
@@ -124,22 +131,13 @@ describe('workspace semaphore across RunManagers (step 2.5)', () => {
   });
 
   afterEach(async () => {
-    // Settle everything before tearing the fixtures down: cancel whatever is
-    // still live and wait for terminal statuses, so no check-step child or
-    // mock session outlives its repo directory.
-    for (const store of stores) {
-      for (const run of store.listRuns()) {
-        const m = managers[stores.indexOf(store)];
-        if (!settled.includes(store.getRun(run.id)?.status ?? '')) m?.cancel(run.id);
-      }
-    }
-    for (const store of stores) {
-      await waitFor(
-        () => store.listRuns().every((r) => settled.includes(r.status)),
-        'all runs to settle before teardown',
-      ).catch(() => undefined);
-      store.flush();
-    }
+    for (const release of releaseSlotHolders.splice(0)) release();
+    // Let released checks close naturally before cancelling parked agents, so
+    // their gate is not removed between the shell exit and the child's read.
+    await waitFor(() => stores.every(store => store.listRuns().every(run =>
+      !run.steps.some(step => step.kind === 'check' && step.status === 'running'))),
+    'released check processes to finish');
+    for (const root of roots) await drainFixtureManagers(root);
     for (const manager of managers.splice(0)) manager.dispose();
     stores.length = 0;
     for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
@@ -340,6 +338,8 @@ describe('workspace semaphore across RunManagers (step 2.5)', () => {
     const taskRoot = join(ownerRoot, '.ai/cezar/worktrees/task-run');
     mkdirSync(taskRoot, { recursive: true });
     execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: taskRoot });
+    execFileSync('git', ['config', 'gc.auto', '0'], { cwd: taskRoot });
+    execFileSync('git', ['config', 'maintenance.auto', 'false'], { cwd: taskRoot });
     execFileSync('git', [...GIT_ID, 'commit', '--allow-empty', '-q', '-m', 'base'], { cwd: taskRoot });
 
     const semaphore = new WorkspaceSemaphore({
@@ -349,7 +349,7 @@ describe('workspace semaphore across RunManagers (step 2.5)', () => {
       },
     });
     const store = RunStore.open(join(taskRoot, '.ai/cezar'));
-    const manager = new RunManager(store, taskRoot, { semaphore });
+    const manager = createFixtureManager(store, taskRoot, { semaphore });
     stores.push(store);
     managers.push(manager);
 
@@ -380,7 +380,7 @@ describe('workspace semaphore across RunManagers (step 2.5)', () => {
     });
     await semaphore.refresh();
     const store = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
-    const firstManager = new RunManager(store, root, { semaphore });
+    const firstManager = createFixtureManager(store, root, { semaphore });
     stores.push(store);
 
     for (const suffix of ['one', 'two', 'three']) {
@@ -436,7 +436,7 @@ describe('workspace semaphore across RunManagers (step 2.5)', () => {
     // Simulate another process start before the queued continuations receive a
     // slot. They must reconstruct those same Continue jobs, not revive the
     // original quick-task workflow or append duplicate continuation steps.
-    const secondManager = new RunManager(store, root, { semaphore });
+    const secondManager = createFixtureManager(store, root, { semaphore });
     managers.push(secondManager);
     holdContinuation(secondManager);
     await secondManager.recover();
@@ -472,7 +472,7 @@ describe('workspace semaphore across RunManagers (step 2.5)', () => {
     const root = fixtureRepo('cez-wsem-recover-starting-', roots);
     const semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 1 } });
     const store = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
-    const manager = new RunManager(store, root, { semaphore });
+    const manager = createFixtureManager(store, root, { semaphore });
     stores.push(store);
     managers.push(manager);
 

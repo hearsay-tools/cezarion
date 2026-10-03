@@ -20,6 +20,8 @@ describe('Pi provider failure survives teardown (#73)', () => {
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), 'cez-pi-teardown-'));
     execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: root });
+    execFileSync('git', ['config', 'gc.auto', '0'], { cwd: root });
+    execFileSync('git', ['config', 'maintenance.auto', 'false'], { cwd: root });
     execFileSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@local', 'commit', '--allow-empty', '-qm', 'base'], { cwd: root });
     vi.stubEnv('CEZ_DRY_RUN', '1');
     vi.stubEnv('CEZ_PI_BIN', new URL('../core/__fixtures__/pi/stub-sigterm.mjs', import.meta.url).pathname);

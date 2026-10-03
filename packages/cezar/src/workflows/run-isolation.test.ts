@@ -1,8 +1,9 @@
+import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RunStore } from '../runs/store.ts';
 import type { WorkflowDef } from './types.ts';
 
@@ -14,7 +15,11 @@ vi.mock('../git-worktree.js', async (importOriginal) => {
   };
 });
 
-import { RunManager } from './run.ts';
+
+
+// These fixtures exercise checks and Git, never the auxiliary LLM namer.
+beforeEach(() => vi.stubEnv('CEZ_AUTONAME', '0'));
+afterEach(() => vi.unstubAllEnvs());
 
 const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
 const roots: string[] = [];
@@ -23,6 +28,8 @@ function fixtureRepo(): string {
   const root = mkdtempSync(join(tmpdir(), 'cez-root-isolation-'));
   roots.push(root);
   execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: root });
+  execFileSync('git', ['config', 'gc.auto', '0'], { cwd: root });
+  execFileSync('git', ['config', 'maintenance.auto', 'false'], { cwd: root });
   execFileSync('git', [...GIT_ID, 'commit', '--allow-empty', '-q', '-m', 'base'], { cwd: root });
   return root;
 }
@@ -47,7 +54,8 @@ async function waitFor(predicate: () => boolean, what: string): Promise<void> {
   throw new Error(`timed out waiting for ${what}`);
 }
 
-afterEach(() => {
+afterEach(async () => {
+  for (const root of roots) await drainFixtureManagers(root);
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
@@ -55,7 +63,7 @@ describe('RunManager repository-root isolation', () => {
   it('fails closed without executing a workflow step when worktree creation fails', async () => {
     const root = fixtureRepo();
     const store = RunStore.open(join(root, '.ai/cezar'));
-    const manager = new RunManager(store, root);
+    const manager = createFixtureManager(store, root);
     const workflow: WorkflowDef = {
       name: 'must-not-run-in-root',
       source: 'built-in',
@@ -78,7 +86,7 @@ describe('RunManager repository-root isolation', () => {
   it('serializes parallel runs that explicitly opt out of worktrees', async () => {
     const root = fixtureRepo();
     const store = RunStore.open(join(root, '.ai/cezar'));
-    const manager = new RunManager(store, root);
+    const manager = createFixtureManager(store, root);
     const workflow: WorkflowDef = {
       name: 'root-lock-check',
       source: 'built-in',
@@ -110,7 +118,7 @@ describe('RunManager repository-root isolation', () => {
     try {
       const root = fixtureRepo();
       const store = RunStore.open(join(root, '.ai/cezar'));
-      const manager = new RunManager(store, root);
+      const manager = createFixtureManager(store, root);
       const workflow: WorkflowDef = {
         name: 'root-lock-bypass-check',
         source: 'built-in',

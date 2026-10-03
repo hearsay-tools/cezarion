@@ -31,6 +31,7 @@ import { createRunner } from './runner-factory.ts';
 import type { UiEvent } from './ui-events.ts';
 import { RunStore, type RunRecord } from '../runs/store.ts';
 import { RunManager } from '../workflows/run.ts';
+import { createFixtureManager, drainFixtureManagers } from '../workflows/fixture-cleanup.testkit.ts';
 import { planOwnedWorkspace } from '../delegation/workspace.ts';
 import { workerWorkflowHash, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
 import { stepKind, type WorkflowDef } from '../workflows/types.ts';
@@ -554,25 +555,27 @@ export async function driveRun(
   const adapter = HARNESS_ADAPTERS[backend];
   const savedBin = process.env[adapter.binEnv];
   const savedDry = process.env.CEZ_DRY_RUN;
+  const savedAutoName = process.env.CEZ_AUTONAME;
+  process.env.CEZ_AUTONAME = '0';
   process.env[adapter.binEnv] = adapter.mockBin;
   delete process.env.CEZ_DRY_RUN;
   const repoRoot = mkdtempSync(join(tmpdir(), `cez-parity-run-${backend}-`));
   let store: RunStore | undefined;
   let manager: RunManager | undefined;
-  let runId: string | undefined;
   try {
     await execFileAsync('git', ['init', '-q', '-b', 'main'], { cwd: repoRoot });
+    await execFileAsync('git', ['config', 'gc.auto', '0'], { cwd: repoRoot });
+    await execFileAsync('git', ['config', 'maintenance.auto', 'false'], { cwd: repoRoot });
     writeFileSync(join(repoRoot, 'a.txt'), 'one\n');
     await execFileAsync('git', ['add', '-A'], { cwd: repoRoot });
     await execFileAsync('git', [...GIT_IDENTITY, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    manager = new RunManager(store, repoRoot);
+    manager = createFixtureManager(store, repoRoot);
     const started = manager.startRun(SINGLE_STEP, {
       task: typeof scenario === 'string' ? promptFor(backend, scenario) : scenario.prompt,
       runner: backend,
       worktree: false,
     });
-    runId = started.id;
     const statuses: string[] = [];
     const record = () => store?.getRun(started.id);
     const deadline = Date.now() + timeoutMs;
@@ -588,19 +591,18 @@ export async function driveRun(
       }
       await new Promise((r) => setTimeout(r, 50));
     }
-    if (afterSettled) await afterSettled({ store, manager, runId });
+    if (afterSettled) await afterSettled({ store, manager, runId: started.id });
     store.flush();
     // Cleanup mutates the live record; return the observed state before cancellation.
     return { statuses, record: structuredClone(record()), events: readRunEvents(repoRoot, started.id) };
   } finally {
-    if (runId && manager) {
-      manager.cancel(runId);
-      await waitFor(() => !manager!.isActive(runId!));
-    }
+    await drainFixtureManagers(repoRoot);
     store?.flush();
     if (savedBin === undefined) delete process.env[adapter.binEnv];
     else process.env[adapter.binEnv] = savedBin;
     if (savedDry !== undefined) process.env.CEZ_DRY_RUN = savedDry;
+    if (savedAutoName === undefined) delete process.env.CEZ_AUTONAME;
+    else process.env.CEZ_AUTONAME = savedAutoName;
     rmSync(repoRoot, { force: true, recursive: true });
   }
 }
@@ -679,6 +681,8 @@ export async function withOwnedInputRun(
   let drainBookkeeping = async () => {};
   try {
     await execFileAsync('git', ['init', '-q', '-b', 'main'], { cwd: repoRoot });
+    await execFileAsync('git', ['config', 'gc.auto', '0'], { cwd: repoRoot });
+    await execFileAsync('git', ['config', 'maintenance.auto', 'false'], { cwd: repoRoot });
     await execFileAsync('git', ['config', 'user.name', 'test'], { cwd: repoRoot });
     await execFileAsync('git', ['config', 'user.email', 'test@local'], { cwd: repoRoot });
     writeFileSync(join(repoRoot, 'a.txt'), 'one\n');

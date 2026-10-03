@@ -1,3 +1,4 @@
+import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { execFile } from 'node:child_process';
 import {
   existsSync,
@@ -47,6 +48,14 @@ type UsageAccountingHarness = {
   ): void;
 };
 
+// Naming has its own suite; no background LLM call may outlive these fixtures.
+const fixtureAutoname = process.env.CEZ_AUTONAME;
+beforeEach(() => { process.env.CEZ_AUTONAME = '0'; });
+afterAll(() => {
+  if (fixtureAutoname === undefined) delete process.env.CEZ_AUTONAME;
+  else process.env.CEZ_AUTONAME = fixtureAutoname;
+});
+
 const run = promisify(execFile);
 const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
 
@@ -84,13 +93,14 @@ describe('RunManager directional usage accounting', () => {
   beforeEach(() => {
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-usage-accounting-'));
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    manager = new RunManager(store, repoRoot, {
+    manager = createFixtureManager(store, repoRoot, {
       semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 0 } }),
     });
     internal = manager as unknown as UsageAccountingHarness;
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await drainFixtureManagers(repoRoot);
     manager.dispose();
     store.flush();
     rmSync(repoRoot, { recursive: true, force: true });
@@ -238,14 +248,17 @@ describe('RunManager reported cost accounting', () => {
   beforeEach(async () => {
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-cost-accounting-'));
     await run('git', ['init', '-q', '-b', 'main'], { cwd: repoRoot });
+    await run('git', ['config', 'gc.auto', '0'], { cwd: repoRoot });
+    await run('git', ['config', 'maintenance.auto', 'false'], { cwd: repoRoot });
     writeFileSync(join(repoRoot, 'a.txt'), 'one\n');
     await run('git', ['add', '-A'], { cwd: repoRoot });
     await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    manager = new RunManager(store, repoRoot);
+    manager = createFixtureManager(store, repoRoot);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await drainFixtureManagers(repoRoot);
     runnerHook.runner = undefined;
     manager.dispose();
     store.flush();
@@ -327,11 +340,11 @@ describe('RunManager reported cost accounting', () => {
   }, 30_000);
 });
 
-it('parallel variants ignore a worktree opt-out and retain isolated mode', () => {
+it('parallel variants ignore a worktree opt-out and retain isolated mode', async () => {
   const repoRoot = mkdtempSync(join(tmpdir(), 'cez-variant-isolation-'));
   const store = RunStore.open(join(repoRoot, '.ai/cezar'));
   try {
-    const manager = new RunManager(store, repoRoot, {
+    const manager = createFixtureManager(store, repoRoot, {
       semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 0 } }),
     });
     const records = manager.startVariants(
@@ -347,6 +360,7 @@ it('parallel variants ignore a worktree opt-out and retain isolated mode', () =>
 
     expect(records.map((record) => record.worktree)).toEqual([undefined, undefined]);
   } finally {
+    await drainFixtureManagers(repoRoot);
     store.flush();
     rmSync(repoRoot, { recursive: true, force: true });
   }
@@ -376,14 +390,17 @@ describe('RunManager.recordTurnEnd', () => {
   beforeAll(async () => {
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-turnend-'));
     await run('git', ['init', '-q', '-b', 'main'], { cwd: repoRoot });
+    await run('git', ['config', 'gc.auto', '0'], { cwd: repoRoot });
+    await run('git', ['config', 'maintenance.auto', 'false'], { cwd: repoRoot });
     writeFileSync(join(repoRoot, 'a.txt'), 'one\ntwo\nthree\n');
     await run('git', ['add', '-A'], { cwd: repoRoot });
     await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    manager = new RunManager(store, repoRoot);
+    manager = createFixtureManager(store, repoRoot);
   });
 
-  afterAll(() => {
+  afterAll(async () => {
+    await drainFixtureManagers(repoRoot);
     manager.dispose();
     store.flush();
     rmSync(repoRoot, { recursive: true, force: true });
@@ -542,13 +559,14 @@ describe('RunManager.continueRun override', () => {
   beforeEach(() => {
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-continue-'));
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    manager = new RunManager(store, repoRoot);
+    manager = createFixtureManager(store, repoRoot);
     // No live agent — we only assert the synchronous persistence continueRun does before it
     // hands off to the (stubbed) continuation.
     (manager as unknown as { runContinuation: () => Promise<void> }).runContinuation = async () => {};
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await drainFixtureManagers(repoRoot);
     store.flush();
     rmSync(repoRoot, { recursive: true, force: true });
   });
@@ -582,7 +600,7 @@ describe('RunManager.continueRun override', () => {
       images: [{ type: 'file', mediaType: 'application/pdf', data: 'YQ==' }],
     }, mode === 'capacity')).toEqual({ ok: true });
     store = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true });
-    manager = new RunManager(store, repoRoot);
+    manager = createFixtureManager(store, repoRoot);
     const internals = manager as unknown as {
       pump(): Promise<void>;
       pendingContinuations: Map<string, { sessionId?: string; prompt: string }>;
@@ -855,14 +873,17 @@ describe('RunManager.settleSuccess — optional review gate', () => {
     process.env.CEZ_AUTONAME = '0';
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-reviewgate-'));
     await run('git', ['init', '-q', '-b', 'main'], { cwd: repoRoot });
+    await run('git', ['config', 'gc.auto', '0'], { cwd: repoRoot });
+    await run('git', ['config', 'maintenance.auto', 'false'], { cwd: repoRoot });
     writeFileSync(join(repoRoot, 'a.txt'), 'one\ntwo\nthree\n');
     await run('git', ['add', '-A'], { cwd: repoRoot });
     await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    manager = new RunManager(store, repoRoot);
+    manager = createFixtureManager(store, repoRoot);
   });
 
-  afterAll(() => {
+  afterAll(async () => {
+    await drainFixtureManagers(repoRoot);
     store.flush();
     rmSync(repoRoot, { recursive: true, force: true });
     if (savedGate === undefined) delete process.env.CEZ_REVIEW_GATE;
@@ -955,14 +976,17 @@ describe('a chain of 2 selected skills runs BOTH steps, in order (#410)', () => 
     savedEnv.CEZ_DRY_RUN = process.env.CEZ_DRY_RUN;
     process.env.CEZ_DRY_RUN = '1';
     await run('git', ['init', '-q', '-b', 'main'], { cwd: repoRoot });
+    await run('git', ['config', 'gc.auto', '0'], { cwd: repoRoot });
+    await run('git', ['config', 'maintenance.auto', 'false'], { cwd: repoRoot });
     writeFileSync(join(repoRoot, 'a.txt'), 'one\n');
     await run('git', ['add', '-A'], { cwd: repoRoot });
     await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    manager = new RunManager(store, repoRoot);
+    manager = createFixtureManager(store, repoRoot);
   });
 
-  afterAll(() => {
+  afterAll(async () => {
+    await drainFixtureManagers(repoRoot);
     for (const [key, value] of Object.entries(savedEnv)) {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
@@ -1044,14 +1068,17 @@ describe('a single agent step plus a check step gets NO chain note (#410)', () =
     savedEnv.CEZ_DRY_RUN = process.env.CEZ_DRY_RUN;
     process.env.CEZ_DRY_RUN = '1';
     await run('git', ['init', '-q', '-b', 'main'], { cwd: repoRoot });
+    await run('git', ['config', 'gc.auto', '0'], { cwd: repoRoot });
+    await run('git', ['config', 'maintenance.auto', 'false'], { cwd: repoRoot });
     writeFileSync(join(repoRoot, 'a.txt'), 'one\n');
     await run('git', ['add', '-A'], { cwd: repoRoot });
     await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    manager = new RunManager(store, repoRoot);
+    manager = createFixtureManager(store, repoRoot);
   });
 
-  afterAll(() => {
+  afterAll(async () => {
+    await drainFixtureManagers(repoRoot);
     for (const [key, value] of Object.entries(savedEnv)) {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
@@ -1123,15 +1150,18 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
     savedEnv.CEZ_CODEX_BIN = process.env.CEZ_CODEX_BIN;
     process.env.CEZ_DRY_RUN = '1';
     await run('git', ['init', '-q', '-b', 'main'], { cwd: repoRoot });
+    await run('git', ['config', 'gc.auto', '0'], { cwd: repoRoot });
+    await run('git', ['config', 'maintenance.auto', 'false'], { cwd: repoRoot });
     writeFileSync(join(repoRoot, 'a.txt'), 'one\n');
     await run('git', ['add', '-A'], { cwd: repoRoot });
     await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    manager = new RunManager(store, repoRoot);
+    manager = createFixtureManager(store, repoRoot);
     currentId = undefined;
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await drainFixtureManagers(repoRoot);
     runnerHook.runner = undefined;
     if (currentId) manager.cancel(currentId); // release the session + repo lock
     for (const [key, value] of Object.entries(savedEnv)) {
@@ -1313,7 +1343,7 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
 
   it('park mode remains reachable as an explicit operator choice (#810)', async () => {
     manager.dispose();
-    manager = new RunManager(store, repoRoot, {
+    manager = createFixtureManager(store, repoRoot, {
       semaphore: new WorkspaceSemaphore({ initial: { monitoringWakeIntervalMinutes: null } }),
     });
     const record = manager.startRun(SINGLE_STEP, { task: 'mock:monitoring keep going', worktree: false });
@@ -1329,7 +1359,7 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
   it('optionally wakes a parked monitor without fabricating a user message', async () => {
     manager.dispose();
     const semaphore = new WorkspaceSemaphore({ initial: { monitoringWakeIntervalMinutes: 0.001 } });
-    manager = new RunManager(store, repoRoot, { semaphore });
+    manager = createFixtureManager(store, repoRoot, { semaphore });
     const record = manager.startRun(SINGLE_STEP, { task: 'mock:monitoring keep going', worktree: false });
     currentId = record.id;
     await waitFor(record.id, () => {
@@ -1350,7 +1380,7 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
   ])('backend $activity activity resumes a parked monitor before its wake deadline (#59)', async ({ trigger, eventNeedle }) => {
     manager.dispose();
     const semaphore = new WorkspaceSemaphore({ initial: { monitoringWakeIntervalMinutes: 0.02 } });
-    manager = new RunManager(store, repoRoot, { semaphore });
+    manager = createFixtureManager(store, repoRoot, { semaphore });
     const record = manager.startRun(SINGLE_STEP, {
       task: `mock:monitoring ${trigger} keep going`,
       runner: 'pi',
@@ -1398,7 +1428,7 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
   it('a passive backend diagnostic keeps a parked monitor wakeable', async () => {
     manager.dispose();
     const semaphore = new WorkspaceSemaphore({ initial: { monitoringWakeIntervalMinutes: 0.01 } });
-    manager = new RunManager(store, repoRoot, { semaphore });
+    manager = createFixtureManager(store, repoRoot, { semaphore });
     const record = manager.startRun(SINGLE_STEP, { task: 'mock:monitoring keep going', worktree: false });
     currentId = record.id;
     await waitFor(record.id, (r) => r?.activity === 'monitoring' && Boolean(r.monitoringWakeAt));
@@ -1448,7 +1478,7 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
   it('nested Codex subagent items after park do not unpark monitoring (#121)', async () => {
     manager.dispose();
     const semaphore = new WorkspaceSemaphore({ initial: { monitoringWakeIntervalMinutes: 0.01 } });
-    manager = new RunManager(store, repoRoot, { semaphore });
+    manager = createFixtureManager(store, repoRoot, { semaphore });
     const record = manager.startRun(SINGLE_STEP, { task: 'mock:monitoring keep going', worktree: false });
     currentId = record.id;
     await waitFor(record.id, (r) => r?.activity === 'monitoring' && Boolean(r.monitoringWakeAt));
@@ -1534,7 +1564,7 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
   it('parent turn.started after park still unparks monitoring (#61, #121)', async () => {
     manager.dispose();
     const semaphore = new WorkspaceSemaphore({ initial: { monitoringWakeIntervalMinutes: 0.02 } });
-    manager = new RunManager(store, repoRoot, { semaphore });
+    manager = createFixtureManager(store, repoRoot, { semaphore });
     const record = manager.startRun(SINGLE_STEP, { task: 'mock:monitoring keep going', worktree: false });
     currentId = record.id;
     await waitFor(record.id, (r) => r?.activity === 'monitoring' && Boolean(r.monitoringWakeAt));
@@ -1590,7 +1620,7 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
     await waitFor(record.id, candidate => candidate?.status === 'waiting');
     const surviving = (manager as unknown as { active: Map<string, { session?: AgentSession }> }).active.get(record.id)?.session;
     manager.dispose();
-    manager = new RunManager(store, repoRoot);
+    manager = createFixtureManager(store, repoRoot);
     await manager.recover();
     expect(manager.finish(record.id)).toBe(false);
     expect(manager.continueRun(record.id, { text: 'resume' })).toEqual({ ok: false, error: 'cannot continue a waiting run' });
@@ -1614,7 +1644,7 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
     });
     const surviving = (manager as unknown as { active: Map<string, { session?: AgentSession }> }).active.get(record.id)?.session;
     manager.dispose();
-    manager = new RunManager(store, repoRoot);
+    manager = createFixtureManager(store, repoRoot);
     await manager.recover();
     registerRunProcess(record.id, process.pid);
 
@@ -1809,7 +1839,7 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
     await waitFor(successor.id, (candidate) => candidate?.status === 'done' || candidate?.status === 'review');
 
     manager.dispose();
-    manager = new RunManager(store, repoRoot);
+    manager = createFixtureManager(store, repoRoot);
     await manager.recover();
     expect(store.getRun(record.id)).toEqual(idleClosed);
     if (mode === 'fresh' && delegation === 'zero-config' && task === 'just do the thing') {
@@ -1853,7 +1883,7 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
     await waitFor(record.id, () => !(manager as unknown as { active: Map<string, unknown> }).active.has(record.id));
 
     manager.dispose();
-    manager = new RunManager(store, repoRoot);
+    manager = createFixtureManager(store, repoRoot);
     await manager.recover();
     expect(manager.finish(record.id)).toBe(false);
     if (shape === 'workflow definition') {
@@ -1906,7 +1936,7 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
     await waitFor(record.id, () => !(manager as unknown as { active: Map<string, unknown> }).active.has(record.id));
 
     manager.dispose();
-    manager = new RunManager(store, repoRoot);
+    manager = createFixtureManager(store, repoRoot);
     await manager.recover();
     const originalStartedAt = '2026-09-01T00:00:00.000Z';
     const originalBaseBranch = 'original-diff-baseline';
@@ -1998,7 +2028,7 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
     store.updateRun(record.id, { status: 'queued', currentStepId: undefined, workflowDef: workflow });
     store.flush();
 
-    manager = new RunManager(store, repoRoot);
+    manager = createFixtureManager(store, repoRoot);
     await manager.recover();
     await waitFor(record.id, (candidate) => candidate?.status === 'done' || candidate?.status === 'review');
     expect(store.getRun(record.id)?.steps).toEqual(expect.arrayContaining([
@@ -2040,7 +2070,7 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
     });
     store.flush();
 
-    manager = new RunManager(store, repoRoot);
+    manager = createFixtureManager(store, repoRoot);
     await manager.recover();
     await waitFor(record.id, (candidate) => candidate?.status === 'done' || candidate?.status === 'review');
     expect(store.getRun(record.id)?.steps).toEqual(expect.arrayContaining([
@@ -2196,7 +2226,7 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
     store.updateRun(record.id, { status: 'running', currentStepId: 'verify', workflowDef: workflow });
     store.flush();
 
-    manager = new RunManager(store, repoRoot);
+    manager = createFixtureManager(store, repoRoot);
     await manager.recover();
     await waitFor(record.id, candidate => candidate?.status === 'done' || candidate?.status === 'review');
     expect(store.getRun(record.id)?.steps).toEqual(expect.arrayContaining([
@@ -2253,7 +2283,7 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
     store.updateRun(record.id, { continuationMessage: undefined, workflowDef: SINGLE_STEP });
     store.flush();
     manager.dispose();
-    manager = new RunManager(store, repoRoot);
+    manager = createFixtureManager(store, repoRoot);
     await manager.recover();
     expect(manager.finish(record.id)).toBe(true);
   }, 30_000);
@@ -2310,15 +2340,18 @@ describe('CEZ:ASK parks as waiting and emits ask.requested (#473)', () => {
     savedEnv.CEZ_DRY_RUN = process.env.CEZ_DRY_RUN;
     process.env.CEZ_DRY_RUN = '1';
     await run('git', ['init', '-q', '-b', 'main'], { cwd: repoRoot });
+    await run('git', ['config', 'gc.auto', '0'], { cwd: repoRoot });
+    await run('git', ['config', 'maintenance.auto', 'false'], { cwd: repoRoot });
     writeFileSync(join(repoRoot, 'a.txt'), 'one\n');
     await run('git', ['add', '-A'], { cwd: repoRoot });
     await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    manager = new RunManager(store, repoRoot);
+    manager = createFixtureManager(store, repoRoot);
     currentId = undefined;
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await drainFixtureManagers(repoRoot);
     runnerHook.runner = undefined;
     if (currentId) manager.cancel(currentId);
     for (const [key, value] of Object.entries(savedEnv)) {
@@ -2627,10 +2660,11 @@ describe('RunManager.persistAttachment without a session (#472)', () => {
   beforeEach(() => {
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-persist-'));
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    manager = new RunManager(store, repoRoot);
+    manager = createFixtureManager(store, repoRoot);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await drainFixtureManagers(repoRoot);
     rmSync(repoRoot, { recursive: true, force: true });
   });
 
@@ -2712,10 +2746,11 @@ describe('RunManager queued-stack mutators (#472)', () => {
   beforeEach(() => {
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-stack-'));
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    manager = new RunManager(store, repoRoot);
+    manager = createFixtureManager(store, repoRoot);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await drainFixtureManagers(repoRoot);
     rmSync(repoRoot, { recursive: true, force: true });
   });
 
@@ -3043,10 +3078,11 @@ describe('RunManager.hydrateQueuedInput (#472)', () => {
   beforeEach(() => {
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-hydrate-'));
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    manager = new RunManager(store, repoRoot);
+    manager = createFixtureManager(store, repoRoot);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await drainFixtureManagers(repoRoot);
     rmSync(repoRoot, { recursive: true, force: true });
   });
 
@@ -3219,6 +3255,8 @@ describe('queued stacking reaches the backend (#472)', () => {
     savedEnv.CEZ_DRY_RUN = process.env.CEZ_DRY_RUN;
     process.env.CEZ_DRY_RUN = '1';
     await run('git', ['init', '-q', '-b', 'main'], { cwd: repoRoot });
+    await run('git', ['config', 'gc.auto', '0'], { cwd: repoRoot });
+    await run('git', ['config', 'maintenance.auto', 'false'], { cwd: repoRoot });
     writeFileSync(join(repoRoot, 'a.txt'), 'one\n');
     await run('git', ['add', '-A'], { cwd: repoRoot });
     await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
@@ -3226,10 +3264,11 @@ describe('queued stacking reaches the backend (#472)', () => {
     // One slot, so the second run demonstrably waits in the queue.
     writeFileSync(join(repoRoot, '.ai/cezar', 'config.json'), JSON.stringify({ maxParallel: 1 }));
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    manager = new RunManager(store, repoRoot);
+    manager = createFixtureManager(store, repoRoot);
   });
 
-  afterAll(() => {
+  afterAll(async () => {
+    await drainFixtureManagers(repoRoot);
     for (const [key, value] of Object.entries(savedEnv)) {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
@@ -3297,7 +3336,8 @@ describe('recover() carries the queued stack exactly once (#472)', () => {
     store = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true });
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await drainFixtureManagers(repoRoot);
     rmSync(repoRoot, { recursive: true, force: true });
   });
 
@@ -3317,7 +3357,7 @@ describe('recover() carries the queued stack exactly once (#472)', () => {
 
     // Two successive restarts, each re-adopting the same record.
     for (let restart = 0; restart < 2; restart += 1) {
-      const manager = new RunManager(store, repoRoot);
+      const manager = createFixtureManager(store, repoRoot);
       // Keep the run parked in the queue: recover() pushes and pumps, but with the
       // job still pending we can read exactly what it rebuilt.
       await manager.recover();
@@ -3346,14 +3386,17 @@ describe('native Codex requestUserInput parks and resumes the run (#565)', () =>
     // so the path holds wherever vitest is invoked from and survives the tree moving.
     process.env.CEZ_CODEX_BIN = join(import.meta.dirname, '../core/__fixtures__/codex/mock-codex-app-server.mjs');
     await run('git', ['init', '-q', '-b', 'main'], { cwd: repoRoot });
+    await run('git', ['config', 'gc.auto', '0'], { cwd: repoRoot });
+    await run('git', ['config', 'maintenance.auto', 'false'], { cwd: repoRoot });
     writeFileSync(join(repoRoot, 'a.txt'), 'one\n');
     await run('git', ['add', '-A'], { cwd: repoRoot });
     await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    manager = new RunManager(store, repoRoot);
+    manager = createFixtureManager(store, repoRoot);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await drainFixtureManagers(repoRoot);
     if (runId) manager.cancel(runId);
     if (savedDryRun === undefined) delete process.env.CEZ_DRY_RUN; else process.env.CEZ_DRY_RUN = savedDryRun;
     if (savedCodexBin === undefined) delete process.env.CEZ_CODEX_BIN; else process.env.CEZ_CODEX_BIN = savedCodexBin;
@@ -3414,6 +3457,8 @@ describe('registry /skill expansion survives a continuation (#811)', () => {
     savedDryRun = process.env.CEZ_DRY_RUN;
     process.env.CEZ_DRY_RUN = '1';
     await run('git', ['init', '-q', '-b', 'main'], { cwd: repoRoot });
+    await run('git', ['config', 'gc.auto', '0'], { cwd: repoRoot });
+    await run('git', ['config', 'maintenance.auto', 'false'], { cwd: repoRoot });
     writeFileSync(join(repoRoot, 'a.txt'), 'one\n');
     await run('git', ['add', '-A'], { cwd: repoRoot });
     await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
@@ -3423,11 +3468,12 @@ describe('registry /skill expansion survives a continuation (#811)', () => {
       '---\nname: demo-review\ndescription: Review a diff.\n---\n\nRun the demo review playbook.\n',
     );
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    manager = new RunManager(store, repoRoot);
+    manager = createFixtureManager(store, repoRoot);
     runId = undefined;
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await drainFixtureManagers(repoRoot);
     if (runId) manager.cancel(runId);
     if (savedDryRun === undefined) delete process.env.CEZ_DRY_RUN;
     else process.env.CEZ_DRY_RUN = savedDryRun;
@@ -3537,6 +3583,8 @@ describe("registry /skill expansion on a fresh run's opening prompt (#87)", () =
     savedDryRun = process.env.CEZ_DRY_RUN;
     process.env.CEZ_DRY_RUN = '1';
     await run('git', ['init', '-q', '-b', 'main'], { cwd: repoRoot });
+    await run('git', ['config', 'gc.auto', '0'], { cwd: repoRoot });
+    await run('git', ['config', 'maintenance.auto', 'false'], { cwd: repoRoot });
     writeFileSync(join(repoRoot, 'a.txt'), 'one\n');
     await run('git', ['add', '-A'], { cwd: repoRoot });
     await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
@@ -3546,11 +3594,12 @@ describe("registry /skill expansion on a fresh run's opening prompt (#87)", () =
       '---\nname: demo-review\ndescription: Review a diff.\n---\n\nRun the demo review playbook.\n',
     );
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    manager = new RunManager(store, repoRoot);
+    manager = createFixtureManager(store, repoRoot);
     runId = undefined;
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await drainFixtureManagers(repoRoot);
     if (runId) manager.cancel(runId);
     if (savedDryRun === undefined) delete process.env.CEZ_DRY_RUN;
     else process.env.CEZ_DRY_RUN = savedDryRun;

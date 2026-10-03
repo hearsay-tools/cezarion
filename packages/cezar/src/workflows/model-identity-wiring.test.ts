@@ -1,12 +1,13 @@
+import { createFixtureManager, removeFixtureRepo } from './fixture-cleanup.testkit.ts';
 import { execFile } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { RunStore } from '../runs/store.ts';
 import type { WorkflowDef } from './types.ts';
-import { RunManager } from './run.ts';
+import type { RunManager } from './run.ts';
 
 const run = promisify(execFile);
 const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
@@ -43,25 +44,23 @@ describe('model identity wiring (dry run)', () => {
     process.env.CEZ_MOCK_ARGS_FILE = argsFile;
     delete process.env.CEZ_FOLLOWUPS;
     await run('git', ['init', '-q', '-b', 'main'], { cwd: repoRoot });
+    await run('git', ['config', 'gc.auto', '0'], { cwd: repoRoot });
+    await run('git', ['config', 'maintenance.auto', 'false'], { cwd: repoRoot });
     writeFileSync(join(repoRoot, 'a.txt'), 'one\n');
     await run('git', ['add', '-A'], { cwd: repoRoot });
     await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
     mkdirSync(join(repoRoot, '.ai/cezar'), { recursive: true });
     writeFileSync(join(repoRoot, '.ai/cezar', 'config.json'), JSON.stringify({ maxParallel: 1 }), 'utf8');
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    manager = new RunManager(store, repoRoot);
+    manager = createFixtureManager(store, repoRoot);
   });
 
-  afterAll(() => {
+  afterAll(async () => {
+    await removeFixtureRepo(repoRoot);
     for (const [key, value] of Object.entries(savedEnv)) {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
     }
-    store.flush();
-    // Retries, as in git-worktree.test.ts: the runs create worktrees, and git's detached
-    // background work can still be writing into the tree as rm walks it (ENOTEMPTY on CI,
-    // PR #716 runs 36772703613 and 36784783175).
-    rmSync(repoRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   });
 
   // Agent step + trailing check, so the agent session auto-ends and the run

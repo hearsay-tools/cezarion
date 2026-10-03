@@ -40,6 +40,8 @@ test('built worker CLI runs without cez on PATH; headless provision stays local 
 
     const repo = join(root, 'repo'); await mkdir(repo);
     await execFile('git', ['init', '-q', '-b', 'main'], { cwd: repo });
+    await execFile('git', ['config', 'gc.auto', '0'], { cwd: repo });
+    await execFile('git', ['config', 'maintenance.auto', 'false'], { cwd: repo });
     await execFile('git', ['-c', 'user.name=test', '-c', 'user.email=test@local', 'commit', '--allow-empty', '-qm', 'base'], { cwd: repo });
     const run = await execFile(process.execPath, [cli, 'run', 'mock:done', '--repo', repo], {
       cwd, env: { ...cleanEnv, CEZ_DRY_RUN: '1', CEZ_DELEGATION: '1', CEZ_AUTONAME: '0' }, timeout: 60_000,
@@ -91,6 +93,8 @@ test('installed CLI completes owned-worker lifecycle with lost spawn reply and o
     await mkdir(repo); await mkdir(wire); await mkdir(home);
     const git = (...args: string[]) => execFile('git', args, { cwd: repo });
     await git('init', '-q', '-b', 'main');
+    await git('config', 'gc.auto', '0');
+    await git('config', 'maintenance.auto', 'false');
     await git('config', 'user.name', 'test'); await git('config', 'user.email', 'test@local');
     await writeFile(join(repo, 'tracked.txt'), 'committed baseline\n');
     await git('add', 'tracked.txt'); await git('commit', '-qm', 'base');
