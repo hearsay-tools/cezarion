@@ -7,6 +7,9 @@ export function visualSampleExpression(selector: string, { theme, width, idle = 
   return `(() => {
     const root = document.documentElement, target = document.querySelector(${JSON.stringify(selector)});
     if (!target || document.fonts?.status !== 'loaded') return null;
+    // #795/#758: box reads can force layout in skipped content-visibility subtrees.
+    // Observe native rendering BEFORE reading any geometry, including descendants.
+    if (!target.checkVisibility({ contentVisibilityAuto: true })) return null;
     if (${JSON.stringify(theme)} && root.classList.contains('light') !== (${JSON.stringify(theme)} === 'light')) return null;
     if (${JSON.stringify(width)} && root.dataset.width !== ${JSON.stringify(width)}) return null;
     if (${idle} && window.__cezIdle !== true) return null;
@@ -23,10 +26,65 @@ export function visualSampleExpression(selector: string, { theme, width, idle = 
     const rect = el => { const r = el.getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; };
     const box = target.getBoundingClientRect();
     if (!box.width || !box.height) return null;
-    return { boxes: elements.filter(el => !movingInk(el)).map(rect), text: target.textContent, scrollWidth: root.scrollWidth, viewport: innerWidth };
+    return { boxes: elements.filter(el => el.checkVisibility({ contentVisibilityAuto: true }) && !movingInk(el)).map(rect), text: target.textContent, scrollWidth: root.scrollWidth, viewport: innerWidth };
   })()`
 }
 
 export function settleVisual(browser: AgentBrowser, selector: string, appearance: Appearance = {}): void {
   browser.waitForStable(visualSampleExpression(selector, appearance), { holdMs: 200 })
+}
+
+/**
+ * #795: a mounted control or the first truth is not a settled layout. Reuse the
+ * #764 visual signature and #415 hold, keeping readiness and the measurement in
+ * ONE browser task. False/zero are valid measurements: assertions stay outside
+ * the matcher. Never pass contrast, line-height or coverage limits as readiness.
+ * Lazy transcript targets must scroll and checkVisibility BEFORE box reads in
+ * their measurement expression, as chat-code-fence (#758) does.
+ */
+export function settledSampleExpression(expression: string, selector = 'body'): string {
+  return `(() => {
+    const layout = ${visualSampleExpression(selector)};
+    if (!layout) return null;
+    const active = document.activeElement;
+    const focus = active ? [...document.querySelectorAll('*')].indexOf(active) : -1;
+    const value = (${expression});
+    if (value === null || value === undefined) return null;
+    return { layout, focus, value };
+  })()`
+}
+
+export function waitForSettledSample<T = unknown>(
+  browser: AgentBrowser,
+  expression: string,
+  matcher: (value: T) => boolean = () => true,
+  selector = 'body',
+): T {
+  const sample = browser.waitForStable<{ value: T } | null>(settledSampleExpression(expression, selector), {
+    holdMs: 200,
+    matcher: sample => sample !== null && matcher(sample.value),
+  })
+  // waitForStable's matcher rejects null; keep the narrowing explicit for callers.
+  if (sample === null) throw new Error('settled sample unexpectedly absent')
+  return sample.value
+}
+
+/** Native visibility is a measurement: a settled false remains an assertion failure. */
+export function visibilitySampleExpression(selector: string): string {
+  return `(() => {
+    const target = document.querySelector(${JSON.stringify(selector)});
+    if (!target) return null;
+    if (!target.checkVisibility({ contentVisibilityAuto: true, visibilityProperty: true })) return false;
+    const rect = target.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  })()`
+}
+
+/** #795 review: observe the disclosure commit independently of its visibility result. */
+export function disclosureVisibilityExpression(toggleSelector: string, targetSelector: string, expanded: boolean): string {
+  return `(() => {
+    const toggle = document.querySelector(${JSON.stringify(toggleSelector)});
+    if (!toggle || toggle.getAttribute('aria-expanded') !== ${JSON.stringify(String(expanded))}) return null;
+    return ${visibilitySampleExpression(targetSelector)};
+  })()`
 }

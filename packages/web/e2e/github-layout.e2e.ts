@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
-import { settleVisual } from './visual-ready'
+import { settleVisual, waitForSettledSample } from './visual-ready'
 import { artifactsDir, createGitHubFixture, DESKTOP } from './github-fixture'
 import type { GitHubFixture, GithubPayload } from './github-fixture'
 
@@ -36,7 +36,7 @@ it('keeps the detail readable at 900px (#754)', async () => {
   const gh = await api<GithubPayload>('/api/v1/github')
   browser.setViewport(900, 800)
   await openGitHub(`/github/issues/${gh.issues[0]!.number}`)
-  const facts = browser.waitForValue<{ list: number; detail: number; stacked: boolean; overflow: boolean }>(`(() => {
+  const facts = waitForSettledSample<{ list: number; detail: number; stacked: boolean; overflow: boolean }>(browser, `(() => {
     const list = document.querySelector('[data-slot="gh-list"]');
     const detail = document.querySelector('[data-slot="gh-detail"]');
     if (!list || !detail || !document.querySelector('[data-slot="gh-hand"]')) return null;
@@ -85,19 +85,18 @@ it.each(['issues', 'prs'] as const)('keeps %s readable across pane boundaries an
       browser.evaluate(`localStorage.setItem('cez-github-list-width', '${saved}')`)
       browser.setViewport(1440, 800)
       await openGitHub(`/github/${view}/${gh[view][0]!.number}`)
-      const wide = browser.waitForValue<PaneGeometry>(PANE_GEOMETRY, f => Boolean(f && !f.stacked && f.list === saved))
+      const wide = waitForSettledSample<PaneGeometry>(browser, PANE_GEOMETRY)
+      expect(Boolean(!wide.stacked && wide.list === saved)).toBe(true)
       // Derive only the surrounding chrome's width from the browser, not the layout decision.
       const boundary = 1440 - wide.available + saved + 22 + 360
       for (const width of [768, 900, 1024, 1100, 1280, boundary - 1, boundary, boundary + 1, 1440]) {
         browser.setViewport(width, 800)
         const stacked = width < boundary
-        const facts = browser.waitForStable<PaneGeometry>(PANE_GEOMETRY, {
-          holdMs: 100,
-          matcher: f => Boolean(f && f.viewport === width && f.stacked === stacked
-            && f.handleVisible === !stacked && f.documentFlow === stacked
-            && (stacked ? f.detail === f.available && f.list === f.available : f.detail >= 360 && f.list === saved)
-            && !f.overflow),
-        })
+        const facts = waitForSettledSample<PaneGeometry>(browser, PANE_GEOMETRY)
+        expect(Boolean(facts.viewport === width && facts.stacked === stacked
+          && facts.handleVisible === !stacked && facts.documentFlow === stacked
+          && (stacked ? facts.detail === facts.available && facts.list === facts.available : facts.detail >= 360 && facts.list === saved)
+          && !facts.overflow)).toBe(true)
         expect(facts.saved).toBe(String(saved))
         expect(facts.stacked).toBe(stacked)
         expect(facts.overflow).toBe(false)
@@ -113,25 +112,30 @@ it('reflows when the list is resized and restores its saved width after stacking
   const gh = await api<GithubPayload>('/api/v1/github')
   await openGitHub(`/github/issues/${gh.issues[0]!.number}`)
   try {
-    const wide = browser.waitForValue<PaneGeometry>(PANE_GEOMETRY, f => Boolean(f && !f.stacked))
+    const wide = waitForSettledSample<PaneGeometry>(browser, PANE_GEOMETRY)
+    expect(Boolean(!wide.stacked)).toBe(true)
     // Leave exactly 16px to spare beyond the default list + gap + minimum detail.
     browser.setViewport(1440 - wide.available + 360 + 22 + 360 + 16, 800)
-    browser.waitForValue<PaneGeometry>(PANE_GEOMETRY, f => Boolean(f && !f.stacked && f.detail === 376))
+    const beforeResize = waitForSettledSample<PaneGeometry>(browser, PANE_GEOMETRY)
+    expect(!beforeResize.stacked && beforeResize.detail === 376).toBe(true)
     browser.evaluate(`document.querySelector('[data-slot="gh-list-resize-handle"]').focus()`)
     browser.press('End')
-    const stacked = browser.waitForValue<PaneGeometry>(PANE_GEOMETRY, f => Boolean(f && f.stacked && !f.handleVisible))
+    const stacked = waitForSettledSample<PaneGeometry>(browser, PANE_GEOMETRY)
+    expect(Boolean(stacked.stacked && !stacked.handleVisible)).toBe(true)
     expect(stacked.saved).toBe('520')
     browser.setViewport(1440, 800)
-    const restored = browser.waitForValue<PaneGeometry>(PANE_GEOMETRY, f => Boolean(f && !f.stacked && f.list === 520))
+    const restored = waitForSettledSample<PaneGeometry>(browser, PANE_GEOMETRY)
+    expect(Boolean(!restored.stacked && restored.list === 520)).toBe(true)
     expect(restored.saved).toBe('520')
-    const point = browser.waitForValue<{ x: number; y: number }>(`(() => {
+    const point = waitForSettledSample<{ x: number; y: number }>(browser, `(() => {
       const handle = document.querySelector('[data-slot="gh-list-resize-handle"]');
       handle.scrollIntoView({ block: 'center' });
       const r = handle.getBoundingClientRect();
       return { x: Math.round(r.left + r.width / 2), y: Math.round(Math.max(r.top, 0) + 40) };
     })()`)
     browser.dragTo(point, { x: point.x - 40, y: point.y })
-    const dragged = browser.waitForValue<PaneGeometry>(PANE_GEOMETRY, f => Boolean(f && f.list === 480))
+    const dragged = waitForSettledSample<PaneGeometry>(browser, PANE_GEOMETRY)
+    expect(Boolean(dragged.list === 480)).toBe(true)
     expect(dragged.saved).toBe('480')
   } finally {
     browser.evaluate(`localStorage.removeItem('cez-github-list-width')`)
@@ -158,7 +162,8 @@ it.each(['light', 'dark'])('scrolls stacked panes in document flow at 900px, %s 
     };
     history.pushState(null, '', '${scoped('/github/issues/9000')}'); dispatchEvent(new PopStateEvent('popstate'));
   })()`)
-  browser.waitForValue<PaneGeometry>(PANE_GEOMETRY, f => Boolean(f && f.stacked && f.documentFlow))
+  const stackedPanes = waitForSettledSample<PaneGeometry>(browser, PANE_GEOMETRY)
+  expect(stackedPanes.stacked && stackedPanes.documentFlow).toBe(true)
   const start = browser.waitForValue<{ x: number; y: number; scroll: number }>(`(() => {
     const main = document.querySelector('[data-slot="main"]');
     main.scrollTop = 0;
@@ -217,19 +222,19 @@ describe('the GitHub tab against the live dry-run server', () => {
     browser.waitForFunction(`document.querySelectorAll('[data-slot="gh-row"]').length === 40`)
     browser.waitForFunction(`document.querySelector('[data-slot="gh-detail"]') !== null`)
 
-    const atTop = browser.waitForValue<{ titleVisible: boolean }>(`(() => {
+    const atTop = waitForSettledSample<{ titleVisible: boolean }>(browser, `(() => {
       const main = document.querySelector('[data-slot="main"]');
       const masthead = document.querySelector('[data-slot="gh-masthead"]');
       if (!main || !masthead) return null;
       main.scrollTop = 0;
       return { titleVisible: masthead.getBoundingClientRect().bottom > main.getBoundingClientRect().top + 8 };
-    })()`, (value) => Boolean(value?.titleVisible))
+    })()`)
     expect(atTop).toMatchObject({ titleVisible: true })
 
     // Trusted wheel input must move the page first, even over either scrollable pane.
     for (const slot of ['gh-list', 'gh-detail']) {
       browser.evaluate(`document.querySelector('[data-slot="main"]').scrollTop = 0`)
-      const point = browser.waitForValue<{ x: number; y: number }>(`(() => {
+      const point = waitForSettledSample<{ x: number; y: number }>(browser, `(() => {
         const main = document.querySelector('[data-slot="main"]');
         const pane = document.querySelector('[data-slot="${slot}"]');
         if (!main || !pane || main.scrollTop !== 0) return null;
@@ -248,7 +253,7 @@ describe('the GitHub tab against the live dry-run server', () => {
       expect(scrolled.detail).toBe(0)
     }
 
-    const evidence = browser.waitForValue<{
+    const evidence = waitForSettledSample<{
       bottomGap: number
       panesUncovered: boolean
       titleGone: boolean
@@ -259,7 +264,7 @@ describe('the GitHub tab against the live dry-run server', () => {
       detailMoved: boolean
       listStill: boolean
       listHasNoXScroll: boolean
-    }>(`(() => {
+    }>(browser, `(() => {
       const main = document.querySelector('[data-slot="main"]');
       const masthead = document.querySelector('[data-slot="gh-masthead"]');
       const tabs = document.querySelector('[data-slot="gh-tabs"]');
@@ -308,19 +313,7 @@ describe('the GitHub tab against the live dry-run server', () => {
         listOverflow: getComputedStyle(list).overflowY,
         listSizes: [list.scrollHeight, list.clientHeight, list.scrollWidth, list.clientWidth],
       };
-    })()`, (value) => Boolean(
-      value &&
-        value.bottomGap >= 15 && value.bottomGap <= 17 &&
-        value.panesUncovered &&
-        value.titleGone &&
-        value.tabsVisible &&
-        value.filtersVisible &&
-        value.listMoved &&
-        value.detailStill &&
-        value.detailMoved &&
-        value.listStill &&
-        value.listHasNoXScroll,
-    ))
+    })()`)
     expect(evidence).toMatchObject({
       bottomGap: 16,
       panesUncovered: true,
@@ -334,7 +327,7 @@ describe('the GitHub tab against the live dry-run server', () => {
       listHasNoXScroll: true,
     })
     for (const slot of ['gh-list', 'gh-detail']) {
-      const before = browser.waitForValue<{ x: number; y: number; scroll: number; page: number; other: number }>(`(() => {
+      const before = waitForSettledSample<{ x: number; y: number; scroll: number; page: number; other: number }>(browser, `(() => {
         const pane = document.querySelector('[data-slot="${slot}"]');
         const other = document.querySelector('[data-slot="${slot === 'gh-list' ? 'gh-detail' : 'gh-list'}"]');
         const box = pane.getBoundingClientRect();
@@ -359,7 +352,7 @@ describe('the GitHub tab against the live dry-run server', () => {
     browser.evaluate(`document.querySelector('[data-slot="gh-row"][data-number="9003"]').click()`)
     browser.waitForFunction(`location.pathname === ${JSON.stringify(scoped('/github/issues/9003'))}`)
     browser.waitForFunction(`document.querySelector('[data-slot="gh-row"][data-number="9003"]')?.getAttribute('aria-current') === 'page'`)
-    const afterPick = browser.waitForValue<{ page: number; list: number; detail: number; titleGone: boolean; rowHeight: number }>(`(() => {
+    const afterPick = waitForSettledSample<{ page: number; list: number; detail: number; titleGone: boolean; rowHeight: number }>(browser, `(() => {
       const main = document.querySelector('[data-slot="main"]');
       const masthead = document.querySelector('[data-slot="gh-masthead"]');
       return {
@@ -369,7 +362,8 @@ describe('the GitHub tab against the live dry-run server', () => {
         titleGone: masthead.getBoundingClientRect().bottom <= main.getBoundingClientRect().top + 2,
         rowHeight: document.querySelector('[data-slot="gh-row"][data-number="9003"]').getBoundingClientRect().height,
       };
-    })()`, value => Boolean(value && value.rowHeight >= 44))
+    })()`)
+    expect(afterPick.rowHeight).toBeGreaterThanOrEqual(44)
     expect(afterPick).toMatchObject({ ...beforePick, titleGone: true })
     browser.screenshot(`${artifactsDir}/github-independent-scroll.png`)
   })
@@ -432,7 +426,7 @@ describe('the GitHub tab against the live dry-run server', () => {
               `document.querySelector('[data-slot="gh-row"]')?.getAttribute('href')?.includes(${JSON.stringify(view === 'issues' ? '/issues/' : '/prs/')}) === true
                  && document.querySelector('[data-slot="gh-row"]').textContent.includes(${JSON.stringify(longAuthor)})`,
             )
-            const facts = browser.evaluate(`(() => {
+            const facts = waitForSettledSample(browser, `(() => {
               const row = document.querySelector('[data-slot="gh-row"]')
               const titleLine = row.children[0]
               const icon = titleLine.children[0]
@@ -577,10 +571,13 @@ async function openHandoffAt(viewport: { width: number; height: number }, theme:
   browser.evaluate(`document.documentElement.classList.toggle('light', ${theme === 'light'}); document.querySelector('[data-slot="gh-hand"]').scrollIntoView({block:'start'})`)
 }
 
-// The matcher encodes the expected geometry and must hold for 200ms, so a layout that is still
-// settling (or that flips back) cannot pass on its first sample.
-const settledEngineRow = (matcher: (f: EngineRowFacts | null) => f is EngineRowFacts) =>
-  browser.waitForStable<EngineRowFacts | null, EngineRowFacts>(ENGINE_ROW_FACTS, { holdMs: 200, matcher })
+// #795: observe settled layout independently of the expected row arrangement.
+// Keep every #724 expectation, asserting it on the accepted sample.
+const settledEngineRow = (expected: (f: EngineRowFacts | null) => f is EngineRowFacts): EngineRowFacts => {
+  const facts = waitForSettledSample<EngineRowFacts>(browser, ENGINE_ROW_FACTS)
+  expect(expected(facts)).toBe(true)
+  return facts
+}
 
 it.each(['light', 'dark'] as const)('puts Runner, Model and Effort on one row on a wide handoff panel, %s (#724)', async (theme) => {
   await openHandoffAt(DESKTOP, theme)
@@ -634,7 +631,7 @@ it.each([1440, 402, 360].flatMap(width => ['light', 'dark'].map(theme => ({ widt
     };
   })()`, {
     holdMs: 200,
-    matcher: (f) => f !== null && f.promptFirst === true && f.rowBeforeAccount === true && f.modelFillsRow === true && f.layoutMatchesWidth === true && f.overflow === false,
+    matcher: (f) => f !== null,
   })
   expect(facts).toEqual({ promptFirst: true, rowBeforeAccount: true, modelFillsRow: true, layoutMatchesWidth: true, overflow: false })
   expect(browser.evaluate(`(() => {

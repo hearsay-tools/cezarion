@@ -5,6 +5,8 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
+import { disclosureVisibilityExpression, visibilitySampleExpression, waitForSettledSample } from './visual-ready'
+import { expectEditorFitsViewport } from './session-layout'
 import { stopFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import {
@@ -128,6 +130,13 @@ function backToList(): void {
   browser.waitForFunction(`document.querySelector('[data-slot="task-card"]') !== null`)
 }
 
+// #795 review: React disclosure commit precedes the held visibility measurement.
+// False is accepted and asserted, including hidden details on a phone.
+const settledVisibility = (selector: string) => waitForSettledSample<boolean>(browser, visibilitySampleExpression(selector))
+const settledDetailsVisibility = (expanded: boolean) => waitForSettledSample<boolean>(browser,
+  disclosureVisibilityExpression('[aria-label="Show run details"], [aria-label="Hide run details"]', '[data-slot="run-details"]', expanded),
+)
+
 describe('task thread', () => {
   it('renders the task and follow-up as labeled full-width user messages', () => {
     const bubbles = browser.evaluate(
@@ -138,9 +147,13 @@ describe('task thread', () => {
     expect(bubbles[1]).toBe('Thanks — now show the markdown summary. mock:md')
 
     // The revised document layout fills the reading column; the role label identifies authorship.
-    const geometry = browser.evaluate(`(() => {
+    const geometry = waitForSettledSample(browser, `(() => {
       const bubble = document.querySelector('[data-slot="user-bubble"]')
       const message = document.querySelector('[data-slot="assistant-message"]')
+      // #795/#758: presence is not rendering for content-visibility thread rows.
+      const rendered = [bubble, message].every(el => el.checkVisibility({ contentVisibilityAuto: true }))
+      bubble.scrollIntoView({ block: 'center' })
+      if (!rendered) return null
       const column = bubble.parentElement
       const b = bubble.getBoundingClientRect(), c = column.getBoundingClientRect(), m = message.getBoundingClientRect()
       return { rightGap: c.right - b.right, bubbleLeft: b.left, mid: c.left + c.width / 2, messageLeft: m.left - c.left }
@@ -440,7 +453,7 @@ describe('task thread', () => {
           browser.waitForFunction(`document.querySelector('[aria-label="Hide run details"]') !== null`)
           browser.waitForFunction(`document.querySelector(${JSON.stringify(copy)})?.getClientRects().length > 0`)
         }
-        const layout = browser.waitForValue<{ height: number; overflow: number }>(`(() => {
+        const layout = waitForSettledSample<{ height: number; overflow: number }>(browser, `(() => {
           const button = document.querySelector(${JSON.stringify(copy)})
           if (!button?.getClientRects().length) return null
           return { height: button.getBoundingClientRect().height,
@@ -618,10 +631,10 @@ describe('task thread', () => {
     browser.waitForFunction(`document.querySelectorAll('[data-slot="user-bubble"]').length >= 2`)
     browser.waitForFunction(`document.querySelector('[data-streamdown="code-block"]') !== null`)
 
-    expect(browser.evaluate(`document.documentElement.scrollWidth <= window.innerWidth`)).toBe(true)
+    expect(waitForSettledSample(browser, `document.documentElement.scrollWidth <= window.innerWidth`)).toBe(true)
     // The wide fixture table/code scroll inside their own boxes, not the page.
     expect(
-      browser.evaluate(`(() => {
+      waitForSettledSample(browser, `(() => {
         const main = document.querySelector('[data-slot="main"]')
         return main.scrollWidth <= main.clientWidth
       })()`),
@@ -650,7 +663,7 @@ describe('task thread', () => {
     ).toBe(null)
     // The pushed screen's top bar carries the kebab, the title and the state line (#621); the
     // run header drops its own title row below md, so there is no h1 or pill left in it.
-    const bar = browser.waitForValue(`(() => {
+    const bar = waitForSettledSample(browser, `(() => {
       const top = document.querySelector('[data-slot="mobile-top-bar"]')
       const kebab = top?.querySelector('[aria-label="Run actions"]')
       const title = top?.querySelector('[data-slot="mobile-run-title"]')
@@ -701,18 +714,18 @@ describe('task thread', () => {
     browser.setViewport(360, 640)
     browser.goto(`${baseUrl}${scoped(`/tasks/${RUN_ID}`)}`)
     browser.waitForFunction(`document.querySelector('[aria-label="Show run details"]') !== null`)
-    expect(browser.isVisible('[data-slot="run-details"]')).toBe(false)
+    expect(settledDetailsVisibility(false)).toBe(false)
     browser.evaluate(`document.querySelector('[aria-label="Show run details"]').focus()`)
     browser.press('Enter')
-    expect(browser.isVisible('[data-slot="run-details"]')).toBe(true)
+    expect(settledDetailsVisibility(true)).toBe(true)
     for (const label of ['Hide run details', 'Run actions']) {
-      expect(browser.evaluate(`(() => { const r = document.querySelector('[aria-label="${label}"]').getBoundingClientRect(); return r.width >= 44 && r.height >= 44 })()`)).toBe(true)
+      expect(waitForSettledSample(browser, `(() => { const r = document.querySelector('[aria-label="${label}"]').getBoundingClientRect(); return r.width >= 44 && r.height >= 44 })()`)).toBe(true)
     }
     for (const wasPinned of [false, true]) {
       browser.click('[aria-label="Run actions"]')
       browser.waitForFunction(`document.querySelector('[data-slot="run-actions-menu"] [data-slot="pin-run"]') !== null`)
       const pin = '[data-slot="run-actions-menu"] [data-slot="pin-run"]'
-      browser.waitForFunction(`document.querySelector('${pin}').getBoundingClientRect().height >= 44`)
+      expect(waitForSettledSample(browser, `document.querySelector('${pin}').getBoundingClientRect().height`)).toBeGreaterThanOrEqual(44)
       expect(browser.evaluate(`document.querySelector('${pin}').getAttribute('aria-checked')`)).toBe(String(wasPinned))
       browser.evaluate(`document.querySelector('${pin}').focus()`)
       browser.press('Space')
@@ -721,8 +734,8 @@ describe('task thread', () => {
       browser.waitForFunction(`document.querySelector('${pin}').getAttribute('aria-checked') === '${!wasPinned}'`)
       browser.press('Escape')
       browser.waitForFunction(`document.querySelector('[data-slot="run-actions-menu"]') === null`)
-      expect(browser.isVisible('[data-slot="run-details"]')).toBe(true)
-      expect(browser.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true)
+      expect(settledDetailsVisibility(true)).toBe(true)
+      expect(waitForSettledSample(browser, `document.documentElement.scrollWidth <= innerWidth`)).toBe(true)
     }
     const record = await (await fetch(`${baseUrl}/api/v1/runs/${RUN_ID}`)).json()
     expect(record).not.toHaveProperty('pinned')
@@ -744,24 +757,24 @@ describe('task thread', () => {
       el.dispatchEvent(new ClipboardEvent('paste', {bubbles:true, clipboardData: files}));
     })()`)
     browser.waitForFunction(`document.querySelectorAll('[data-slot="composer-thumbs"] button').length === 3`)
-    expect(browser.evaluate(`document.querySelector('${input}').getBoundingClientRect().height`)).toBeGreaterThan(44)
-    expect(browser.isVisible('[data-slot="follow-up-engine"]')).toBe(true)
-    expect(browser.evaluate(`[...document.querySelectorAll('[data-slot="follow-up-engine"] button')].every(el => {const r=el.getBoundingClientRect(); return r.width >=44 && r.height >=44})`)).toBe(true)
+    expect(waitForSettledSample(browser, `document.querySelector('${input}').getBoundingClientRect().height`)).toBeGreaterThan(44)
+    expect(settledVisibility('[data-slot="follow-up-engine"]')).toBe(true)
+    expect(waitForSettledSample(browser, `[...document.querySelectorAll('[data-slot="follow-up-engine"] button')].every(el => {const r=el.getBoundingClientRect(); return r.width >=44 && r.height >=44})`)).toBe(true)
     browser.evaluate(`document.querySelector('[aria-label="Run actions"]').scrollIntoView({block:'center'})`)
     browser.click('[aria-label="Run actions"]')
     browser.press('Escape')
     expect(browser.evaluate(`(() => { const el = document.querySelector('${input}'); return [el === window.__phoneTextarea, el.value, el.selectionStart, el.selectionEnd] })()`))
       .toEqual([true, 'first line\nsecond line\nthird line', 2, 8])
     expect(browser.count('[data-slot="composer-thumbs"] button')).toBe(3)
-    expect(browser.isVisible('[aria-label="Attach files"]')).toBe(true)
-    expect(browser.isVisible('[aria-label="Send"]')).toBe(true)
-    expect(browser.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true)
+    expect(settledVisibility('[aria-label="Attach files"]')).toBe(true)
+    expect(settledVisibility('[aria-label="Send"]')).toBe(true)
+    expect(waitForSettledSample(browser, `document.documentElement.scrollWidth <= innerWidth`)).toBe(true)
     for (const label of ['Show run details', 'Run actions']) {
-      expect(browser.evaluate(`(() => { const r = document.querySelector('[aria-label="${label}"]').getBoundingClientRect(); return r.width >= 44 && r.height >= 44 })()`)).toBe(true)
+      expect(waitForSettledSample(browser, `(() => { const r = document.querySelector('[aria-label="${label}"]').getBoundingClientRect(); return r.width >= 44 && r.height >= 44 })()`)).toBe(true)
     }
     // At the start of the transcript, the header and bottom dock still leave reading space.
     browser.evaluate(`document.querySelector('[data-slot="main"]').scrollTop = 0`)
-    const room = browser.evaluate(`(() => {
+    const room = waitForSettledSample(browser, `(() => {
       const main = document.querySelector('[data-slot="main"]');
       const header = document.querySelector('[data-slot="run-header"]').getBoundingClientRect();
       const dock = document.querySelector('[data-slot="thread-dock"]').getBoundingClientRect();
@@ -772,12 +785,12 @@ describe('task thread', () => {
     browser.evaluate(`document.documentElement.classList.add('light')`)
     browser.screenshot(`${artifactsDir}/phone-reading-light.png`, { viewport: true })
     browser.setViewport(1440, 900)
-    expect(browser.isVisible('[data-slot="run-details"]')).toBe(true)
-    expect(browser.isVisible('[data-slot="follow-up-engine"]')).toBe(true)
+    expect(settledVisibility('[data-slot="run-details"]')).toBe(true)
+    expect(settledVisibility('[data-slot="follow-up-engine"]')).toBe(true)
     expect(browser.count('[aria-label="Expand composer"]')).toBe(0)
     expect(browser.evaluate(`getComputedStyle(document.querySelector('[data-slot="run-header"]')).position`)).toBe('sticky')
     browser.setViewport(360, 640)
-    expect(browser.isVisible('[data-slot="follow-up-engine"]')).toBe(true)
+    expect(settledVisibility('[data-slot="follow-up-engine"]')).toBe(true)
     expect(browser.evaluate(`document.querySelector('${input}').value`)).toBe('first line\nsecond line\nthird line')
   })
 
@@ -788,9 +801,9 @@ describe('task thread', () => {
     expect(browser.count('[data-slot="run-activity-plan"]')).toBe(0)
     browser.evaluate(`document.querySelector('[aria-label="Show run details"]').focus()`)
     browser.press('Space')
-    expect(browser.evaluate(`document.querySelector('[aria-label="Hide run details"]').getAttribute('aria-expanded')`)).toBe('true')
-    expect(browser.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true)
-    expect(browser.evaluate(`[...document.querySelectorAll('[data-slot="run-header"] *')].filter(el => el.getBoundingClientRect().right > innerWidth).map(el => ({slot:el.dataset.slot, text:el.textContent?.slice(0,60), width:el.getBoundingClientRect().width}))`)).toEqual([])
+    expect(browser.waitForValue(`document.querySelector('[aria-label="Hide run details"]')?.getAttribute('aria-expanded') ?? null`)).toBe('true')
+    expect(waitForSettledSample(browser, `document.documentElement.scrollWidth <= innerWidth`)).toBe(true)
+    expect(waitForSettledSample(browser, `[...document.querySelectorAll('[data-slot="run-header"] *')].filter(el => el.getBoundingClientRect().right > innerWidth).map(el => ({slot:el.dataset.slot, text:el.textContent?.slice(0,60), width:el.getBoundingClientRect().width}))`)).toEqual([])
     for (const tab of ['changes', 'commits', 'files', '']) {
       const tabSelector = `[data-slot="run-tabs"] a[href="${scoped(`/tasks/${LONG_RUN.id}${tab ? '/' + tab : ''}`)}"]`
       browser.evaluate(`document.querySelector('${tabSelector}').scrollIntoView({block: 'start'})`)
@@ -798,9 +811,9 @@ describe('task thread', () => {
       browser.press('Enter')
       browser.waitForFunction(`document.querySelector('[data-slot="run-tabs"] a[aria-current="page"]')?.getAttribute('href') === '${scoped(`/tasks/${LONG_RUN.id}${tab ? '/' + tab : ''}`)}'`)
       browser.evaluate(`document.querySelector('[data-slot="main"]').scrollTop = 0`)
-      expect(browser.isVisible('[data-slot="run-details"]')).toBe(true)
-      expect(browser.isVisible('[aria-label="Run actions"]')).toBe(true)
-      expect(browser.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true)
+      expect(settledDetailsVisibility(true)).toBe(true)
+      expect(settledVisibility('[aria-label="Run actions"]')).toBe(true)
+      expect(waitForSettledSample(browser, `document.documentElement.scrollWidth <= innerWidth`)).toBe(true)
     }
     // Navigate through the real phone UI (Back to the list, then the task card); a full browser.goto would reset module memory.
     for (const [id, label] of [[RUN_ID, 'Show run details'], [LONG_RUN.id, 'Hide run details']]) {
@@ -812,15 +825,15 @@ describe('task thread', () => {
       browser.press('Enter')
       // The toggle lives in the shell's top bar below md (#621), outside the route's [data-run-id] wrapper.
       browser.waitForFunction(`document.querySelector('[data-route="task-thread"][data-run-id="${id}"]') !== null && document.querySelector('[aria-label="${label}"]') !== null`)
-      expect(browser.isVisible('[data-slot="run-details"]')).toBe(id === LONG_RUN.id)
-      expect(browser.isVisible('[data-slot="session-controls"]')).toBe(true)
+      expect(settledDetailsVisibility(id === LONG_RUN.id)).toBe(id === LONG_RUN.id)
+      expect(settledVisibility('[data-slot="session-controls"]')).toBe(true)
     }
-    expect(browser.evaluate(`(() => { const el = document.querySelector('[data-slot="follow-up-model-pill"]'); return el.scrollHeight <= el.clientHeight })()`)).toBe(true)
-    expect(browser.evaluate(`(() => { const el = document.querySelector('[data-slot="main"]'); return el.scrollWidth <= el.clientWidth })()`)).toBe(true)
+    expect(waitForSettledSample(browser, `(() => { const el = document.querySelector('[data-slot="follow-up-model-pill"]'); return el.scrollHeight <= el.clientHeight })()`)).toBe(true)
+    expect(waitForSettledSample(browser, `(() => { const el = document.querySelector('[data-slot="main"]'); return el.scrollWidth <= el.clientWidth })()`)).toBe(true)
     browser.evaluate(`document.querySelector('[data-slot="main"]').scrollTop = 0`)
     browser.click('[data-slot="agent-badge"]')
-    expect(browser.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true)
-    expect(browser.evaluate(`(() => { const r = document.querySelector('[data-slot="dropdown-menu-content"]').getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth })()`)).toBe(true)
+    expect(waitForSettledSample(browser, `document.documentElement.scrollWidth <= innerWidth`)).toBe(true)
+    expect(waitForSettledSample(browser, `(() => { const r = document.querySelector('[data-slot="dropdown-menu-content"]').getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth })()`)).toBe(true)
     expect(browser.text('[data-slot="dropdown-menu-content"]')).toContain('effort: high')
     // #251: one defined account is not a choice — the lone login never joins the badge menu.
     expect(browser.text('[data-slot="dropdown-menu-content"]')).not.toContain('account:')
@@ -844,6 +857,7 @@ type SessionLayout = {
   modelChrome: Record<'icon' | 'label' | 'chevron', LayoutRect>
   group: LayoutRect
   editor: LayoutRect
+  viewportHeight: number
   textarea: LayoutRect
   documentOverflow: boolean
   mainOverflow: boolean
@@ -857,7 +871,7 @@ type SessionLayout = {
 
 const sessionLayoutExpression = `(() => {
   const editor = document.querySelector('[data-slot="composer-editor"]')
-  if (!editor || editor.getBoundingClientRect().bottom > innerHeight + 1) return null
+  if (!editor || !editor.checkVisibility({ contentVisibilityAuto: true })) return null
   const select = (selector) => {
     const el = document.querySelector(selector)
     if (!el) return null
@@ -888,7 +902,7 @@ const sessionLayoutExpression = `(() => {
   const editorRect = select('[data-slot="composer-editor"]')
   const textarea = select('[data-slot="composer"] textarea')
   return {
-    controls, modelChrome, group, editor: editorRect, textarea,
+    controls, modelChrome, group, editor: editorRect, viewportHeight: innerHeight, textarea,
     documentOverflow: document.documentElement.scrollWidth > innerWidth + 1,
     mainOverflow: main.scrollWidth > main.clientWidth + 1,
     modelText: label?.textContent ?? '',
@@ -944,7 +958,8 @@ describe('responsive session composer', () => {
     browser.goto(`${baseUrl}${scoped(`/tasks/${LONG_RUN.id}`)}`)
     browser.waitForFunction(`document.querySelector('[data-slot="follow-up-model-pill"]')?.textContent?.includes('${LONG_RUN.model}') === true && !!document.querySelector('[data-slot="composer-actions"] [aria-label="Continue"]')`)
     browser.evaluate(`document.querySelector('[data-slot="composer-editor"]').scrollIntoView({block:'end'})`)
-    const facts = browser.waitForValue(sessionLayoutExpression) as SessionLayout
+    const facts = waitForSettledSample(browser, sessionLayoutExpression) as SessionLayout
+    expectEditorFitsViewport(facts)
     expect(facts.bottomGap).toBeGreaterThanOrEqual(0)
     expect(facts.bottomGap).toBeLessThanOrEqual(20)
   }, 90_000)
@@ -954,7 +969,8 @@ describe('responsive session composer', () => {
     browser.goto(`${baseUrl}${scoped(`/tasks/${LONG_RUN.id}`)}`)
     browser.waitForFunction(`document.querySelector('[data-slot="follow-up-model-pill"]')?.textContent?.includes('${LONG_RUN.model}') === true && !!document.querySelector('[data-slot="composer-actions"] [aria-label="Continue"]')`)
     browser.evaluate(`document.documentElement.classList.toggle('light', ${theme === 'light'}); document.querySelector('[data-slot="composer-editor"]').scrollIntoView({block:'end'})`)
-    const facts = browser.waitForValue(sessionLayoutExpression) as SessionLayout
+    const facts = waitForSettledSample(browser, sessionLayoutExpression) as SessionLayout
+    expectEditorFitsViewport(facts)
     const actions = [facts.controls.attach, facts.controls.dictation, facts.controls.archive, facts.controls.continue]
     for (const [i, action] of actions.entries()) {
       expect(action.hit, `action ${i} center hit`).toBe(true)
@@ -974,7 +990,8 @@ describe('responsive session composer', () => {
     browser.goto(`${baseUrl}${scoped(`/tasks/${LONG_RUN.id}`)}`)
     browser.waitForFunction(`document.querySelector('[data-slot="follow-up-model-pill"]')?.textContent?.includes('${LONG_RUN.model}') === true && !!document.querySelector('[data-slot="composer-actions"] [aria-label="Continue"]')`)
     browser.evaluate(`document.documentElement.style.setProperty('--default-transition-duration', '0s'); document.documentElement.classList.toggle('light', ${theme === 'light'}); document.querySelector('[data-slot="composer-editor"]').scrollIntoView({block:'end'})`)
-    const facts = browser.waitForValue(sessionLayoutExpression) as SessionLayout
+    const facts = waitForSettledSample(browser, sessionLayoutExpression) as SessionLayout
+    expectEditorFitsViewport(facts)
     const { runner, model, effort } = facts.controls
 
     // The fixture must reach the pill, not silently resolve to the automatic model.
@@ -1069,8 +1086,8 @@ describe('responsive session composer', () => {
     browser.setViewport(viewport, 900)
     browser.goto(`${baseUrl}${scoped(`/tasks/${LONG_RUN.id}`)}`)
     browser.waitForFunction(`document.querySelector('[data-slot="follow-up-model-pill"]')?.textContent?.includes('${LONG_RUN.model}') === true && !!document.querySelector('[data-slot="sidebar-resize-handle"]')`)
-    const sidebarWidth = () => browser.evaluate(`document.querySelector('[data-slot="sidebar"]').getBoundingClientRect().width`) as number
-    const handlePoint = () => browser.waitForValue(`(() => {
+    const sidebarWidth = () => waitForSettledSample(browser, `document.querySelector('[data-slot="sidebar"]').getBoundingClientRect().width`) as number
+    const handlePoint = () => waitForSettledSample(browser, `(() => {
       const r = document.querySelector('[data-slot="sidebar-resize-handle"]')?.getBoundingClientRect()
       return r ? { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) } : null
     })()`) as { x: number; y: number }
@@ -1080,7 +1097,8 @@ describe('responsive session composer', () => {
     browser.waitForFunction(`document.querySelector('[data-slot="sidebar"]').getBoundingClientRect().width === 420`)
     try {
       browser.evaluate(`document.querySelector('[data-slot="composer-editor"]').scrollIntoView({block:'end'})`)
-      const facts = browser.waitForValue(sessionLayoutExpression) as SessionLayout
+      const facts = waitForSettledSample(browser, sessionLayoutExpression) as SessionLayout
+      expectEditorFitsViewport(facts)
       const { runner, model, effort } = facts.controls
       expect(facts.modelText).toContain(LONG_RUN.model)
       expect(Math.max(runner.top, model.top, effort.top) - Math.min(runner.top, model.top, effort.top)).toBeLessThanOrEqual(2)
@@ -1129,12 +1147,15 @@ describe('responsive session composer', () => {
 it.each([375, 1280])('uses the readable agent type scale and preserves full tool commands at %ipx (#522)', (width) => {
   browser.setViewport(width, 800)
   browser.goto(`${baseUrl}${scoped(`/tasks/${RUN_ID}`)}`)
-  const facts = browser.waitForValue(`(() => {
+  const facts = waitForSettledSample(browser, `(() => {
     const message = document.querySelector('[data-slot="assistant-message"]');
     const body = message?.querySelector(':scope > div');
     const eyebrow = message?.querySelector(':scope > p');
     const command = document.querySelector('[data-slot="tool-card"][data-kind="execute"] > button code');
     if (!body || !eyebrow || !command) return null;
+    const rendered = body.checkVisibility({ contentVisibilityAuto: true });
+    message.scrollIntoView({ block: 'center' });
+    if (!rendered) return null;
     const style = getComputedStyle(body);
     const cardStyle = getComputedStyle(message);
     return { fontSize: style.fontSize, lineHeight: style.lineHeight,
@@ -1160,7 +1181,7 @@ it.each(TYPO_RUNS.flatMap(run => [360, 906, 1280].map(width => ({ run, width }))
     browser.evaluate(`localStorage.setItem('cez-sidebar-width', '264')`)
     browser.goto(`${baseUrl}${scoped(`/tasks/${run.id}`)}`)
     browser.waitForFunction(`document.querySelector('[data-slot="follow-up-model-pill"]')?.getAttribute('aria-label') === 'Model · ${run.model}'`)
-    const facts = browser.evaluate(`(() => {
+    const facts = waitForSettledSample(browser, `(() => {
       const group = document.querySelector('.session-engine-controls');
       const read = (slot) => {
         const pill = group.querySelector('[data-slot="' + slot + '"]');
@@ -1213,8 +1234,11 @@ it('ellipsizes a bare OpenCode command and reveals it on expansion (#522)', () =
   browser.setViewport(906, 800)
   browser.goto(`${baseUrl}${scoped('/tasks/typography-short-model')}`)
   browser.waitForFunction(`document.querySelector('[data-slot="tool-card"][data-kind="execute"]') !== null`)
-  const facts = browser.evaluate(`(() => {
+  const facts = waitForSettledSample(browser, `(() => {
     const card = document.querySelector('[data-slot="tool-card"][data-kind="execute"]');
+    const rendered = card.checkVisibility({ contentVisibilityAuto: true });
+    card.scrollIntoView({ block: 'center' });
+    if (!rendered) return null;
     const button = card.querySelector('button');
     const code = button.querySelector('code');
     return { code: code?.textContent, title: code?.title, overflow: code && getComputedStyle(code).textOverflow,

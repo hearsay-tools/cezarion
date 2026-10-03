@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
+import { waitForSettledSample } from './visual-ready'
 import { stopFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { waitForHealth, waitForStatus } from './poll'
@@ -117,7 +118,7 @@ const transcriptLink = '[data-slot="user-bubble"] a[data-streamdown="link"]'
 // Failure trace and controlled resize reproduction:
 // https://github.com/hearsay-tools/cezarion/issues/664#issuecomment-5873034765
 async function scrollToTranscriptLink() {
-  const scroller = browser.waitForValue<{ x: number; y: number; height: number }>(`(() => {
+  const scroller = waitForSettledSample<{ x: number; y: number; height: number }>(browser, `(() => {
     const main = document.querySelector('[data-slot="main"]');
     if (!main || !document.querySelector(${JSON.stringify(transcriptLink)})) return null;
     const rect = main.getBoundingClientRect();
@@ -245,7 +246,7 @@ describe('the Files tab against a live dry-run worktree', () => {
         browser.goto(`${baseUrl}${scoped(artifact.link)}`)
         browser.waitForFunction(`document.querySelector('[data-slot="file-preview"]')?.textContent.includes('Snapshot survives source removal.')`)
         browser.evaluate(`document.documentElement.classList.toggle('light', ${theme === 'light'}); document.documentElement.classList.toggle('dark', ${theme === 'dark'})`)
-        const evidence = browser.waitForValue(`(() => { const pane = document.querySelector('[data-slot="file-preview"]'); if (!pane) return null; pane.scrollIntoView({ block: 'start' }); return { text: pane.textContent, images: pane.querySelectorAll('img').length, overflow: document.documentElement.scrollWidth > innerWidth, download: pane.querySelector('a[href$="/download"]')?.getAttribute('href') } })()`)
+        const evidence = waitForSettledSample(browser, `(() => { const pane = document.querySelector('[data-slot="file-preview"]'); if (!pane) return null; pane.scrollIntoView({ block: 'start' }); return { text: pane.textContent, images: pane.querySelectorAll('img').length, overflow: document.documentElement.scrollWidth > innerWidth, download: pane.querySelector('a[href$="/download"]')?.getAttribute('href') } })()`)
         expect(evidence).toMatchObject({ images: 0, overflow: false, download: `/api/v1/runs/${runId}/artifacts/${artifact.id}/download` })
         browser.screenshot(`${artifactsDir}/published-${theme}-360.png`)
       }
@@ -267,13 +268,13 @@ describe('the Files tab against a live dry-run worktree', () => {
 
     // Unlike Changes, the tree must stay visible on phones — it is the only navigation.
     expect(
-      browser.evaluate(
+      waitForSettledSample(browser,
         `document.querySelector('[data-slot="files-tree"]').offsetParent !== null`,
       ),
     ).toBe(true)
     // Session / Changes / Commits / Files.
     expect(browser.count('[data-slot="run-tabs"] a')).toBe(4)
-    expect(browser.evaluate(`document.documentElement.scrollWidth <= window.innerWidth`)).toBe(true)
+    expect(waitForSettledSample(browser, `document.documentElement.scrollWidth <= window.innerWidth`)).toBe(true)
 
     browser.screenshot(`${artifactsDir}/files-mobile.png`)
     browser.setViewport(1440, 900)

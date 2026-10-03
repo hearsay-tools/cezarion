@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
+import { waitForSettledSample } from './visual-ready'
 import { stopFixtureServer } from './fixture-server'
 import { AgentBrowser, cezarCli, fixtureServeEnv } from './agent-browser'
 import { waitForHealth } from './poll'
@@ -199,7 +200,7 @@ describe('#163 mobile skill picker', () => {
     })()`)
     expect(browser.evaluate(`document.activeElement?.dataset.slot === 'command-input'`)).toBe(false)
     expect(browser.count('[data-slot="source-menu"]')).toBe(1)
-    const geometry = browser.evaluate(`(() => {
+    const geometry = waitForSettledSample(browser, `(() => {
       const popover = document.querySelector('[data-slot="popover-content"]').getBoundingClientRect();
       const input = document.querySelector('[data-slot="command-input"]');
       return { left: popover.left, right: popover.right, top: popover.top, bottom: popover.bottom,

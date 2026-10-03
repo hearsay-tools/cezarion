@@ -5,6 +5,8 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
+import { waitForSettledSample } from './visual-ready'
+import { assistantWidthExpression } from './transcript-measurements'
 import { stopFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { expectedRowCount, largeThreadEvents } from './fixtures/make-large-thread'
@@ -35,6 +37,16 @@ const TURNS = 250
 const ROWS = expectedRowCount(TURNS) // 1253 — comfortably past the ~300 threshold
 
 const RUN_ID = 'aaaaaaaa-1111-4222-8333-bbbbbbbbcccc'
+const REPLAY_ID = 'aaaaaaaa-1111-4222-8333-bbbbbbbbdddd'
+// #795: genuine wire data, short prefix / longer tail makes lost size estimates observable.
+const replayEvents = largeThreadEvents(TURNS).map(line => {
+  if (line.seq > 650) return line
+  if (line.type === 'item.completed' && (line.item as { kind?: string })?.kind === 'tool') {
+    return { ...line, item: { ...(line.item as object), output: 'ok' } }
+  }
+  return line.type === 'tool-result' ? { ...line, result: 'ok' } : line
+})
+const replayBoundary = replayEvents.find(line => line.type === 'turn.completed' && line.turnId === 'turn_64')!.seq
 /** The real record fixture, re-ided for the synthetic transcript; the untouched fields keep
  *  the store's zod shape. No PR url (this run never shipped one) and only the agent step. */
 const RUN = {
@@ -60,7 +72,6 @@ function freePort(): Promise<number> {
   })
 }
 
-
 let browser: AgentBrowser
 let server: ChildProcess
 let dataRoot: string
@@ -76,7 +87,7 @@ const nearBottom = `(() => { const m = ${MAIN}; return m.scrollHeight - m.scroll
 const rowCount = () => browser.count('[data-slot="thread-row"]')
 const domSize = () => Number(browser.evaluate(`document.querySelectorAll('*').length`))
 const assistantWidth = () =>
-  Number(browser.evaluate(`document.querySelector('[data-slot="assistant-message"]')?.getBoundingClientRect().width ?? 0`))
+  waitForSettledSample<number>(browser, assistantWidthExpression())
 
 /**
  * Scroll away from the tail like a reader would — and INSIST, like a reader would.
@@ -103,7 +114,7 @@ function parkAt(target: string) {
 
 /** Load the thread and wait until the SSE replay has finished growing it (the last turn's
  *  note is rendered) — every measurement below is over the complete transcript. */
-function openThread(query = '') {
+function openThread(query = '', runId = RUN_ID) {
   browser.goto(`${baseUrl}${scoped('/')}`)
   browser.waitForFunction(`document.querySelector('[data-route="tasks"]') !== null`)
   // This suite measures complete-session virtualization. Exercise the supported
@@ -119,7 +130,7 @@ function openThread(query = '') {
     window.fetch = (input, options) => new URL(String(input), location.href).pathname.endsWith('/history')
       ? Promise.resolve(new Response('{"error":"fixture optimized history unavailable"}', { status: 404 }))
       : original(input, options);
-    history.pushState({}, '', '${scoped(`/tasks/${RUN_ID}`)}${query}');
+    history.pushState({}, '', '${scoped(`/tasks/${runId}`)}${query}');
     window.dispatchEvent(new PopStateEvent('popstate'));
   })()`)
   browser.waitForFunction(`document.querySelector('[data-slot="history-fallback"]') !== null`)
@@ -155,7 +166,7 @@ function captureScrollState(name: string) {
 beforeAll(async () => {
   dataRoot = mkdtempSync(join(tmpdir(), 'cezar-e2e-thread-scroll-'))
   mkdirSync(join(dataRoot, '.ai/cezar/runs'), { recursive: true })
-  writeFileSync(join(dataRoot, '.ai/cezar/runs.json'), JSON.stringify([RUN], null, 2), 'utf8')
+  writeFileSync(join(dataRoot, '.ai/cezar/runs.json'), JSON.stringify([RUN, { ...RUN, id: REPLAY_ID, title: 'Held progressive cache replay' }], null, 2), 'utf8')
   writeFileSync(
     join(dataRoot, '.ai/cezar/runs', `${RUN_ID}.ndjson`),
     largeThreadEvents(TURNS)
@@ -163,6 +174,8 @@ beforeAll(async () => {
       .join('\n') + '\n',
     'utf8',
   )
+
+  writeFileSync(join(dataRoot, '.ai/cezar/runs', `${REPLAY_ID}.ndjson`), replayEvents.map(line => JSON.stringify(line)).join('\n') + '\n')
 
   const port = await freePort()
   baseUrl = `http://localhost:${port}`
@@ -268,7 +281,7 @@ describe('thread virtualization on a 1,000-row transcript', () => {
     browser.waitForFunction(`document.querySelector('[data-slot="jump-to-latest"]') !== null`)
     const parked = Number(browser.evaluate(`${MAIN}.scrollTop`))
     expect(parked).toBeGreaterThan(1000)
-    const maxTop = Number(browser.evaluate(`${MAIN}.scrollHeight - ${MAIN}.clientHeight`))
+    const maxTop = Number(waitForSettledSample(browser, `${MAIN}.scrollHeight - ${MAIN}.clientHeight`))
     expect(maxTop - parked).toBeGreaterThan(1000) // genuinely mid-thread, not a near-tail park
 
     // …leave through the sidebar (a client-side <Link> — a reload would drop the caches)…
@@ -287,6 +300,75 @@ describe('thread virtualization on a 1,000-row transcript', () => {
     }
     expect(browser.evaluate(nearBottom)).toBe(false) // back where the reader parked, not the tail
   }, 90_000)
+
+  it('restores the same reader row after a measured virtual prefix grows to the cached full replay (#795)', () => {
+    openThread('', REPLAY_ID)
+    parkAt(`Math.round((m.scrollHeight - m.clientHeight) * .75)`)
+    const reader = waitForSettledSample<{ top: number; height: number; viewport: number; key: string; offset: number }>(browser, `(() => {
+      const main = ${MAIN}, viewport = main.getBoundingClientRect();
+      const row = [...document.querySelectorAll('[data-slot="thread-row"]')].find(el => {
+        if (!el.checkVisibility({ contentVisibilityAuto: true })) return false;
+        const box = el.getBoundingClientRect(); return box.bottom > viewport.top && box.top < viewport.bottom;
+      });
+      if (!row) return null;
+      return { top: main.scrollTop, height: main.scrollHeight, viewport: main.clientHeight, key: row.dataset.rowKey, offset: row.getBoundingClientRect().top - viewport.top };
+    })()`)
+    expect(reader.top).toBeGreaterThan(1000)
+    expect(reader.height - reader.viewport - reader.top).toBeGreaterThan(1000)
+    // Hold actual ordered SSE frames after a real prefix. No atomic preload or DOM rewrite.
+    browser.evaluate(`(() => {
+      const NativeSource = window.EventSource; window.__replayNativeSource = NativeSource;
+      window.EventSource = class extends NativeSource {
+        constructor(...args) { super(...args); this.gated = String(args[0]).includes('/runs/${REPLAY_ID}/events');
+          if (this.gated) window.__heldReplay = { queue: [], lastSeq: 0, released: false };
+        }
+        addEventListener(type, listener, options) {
+          if (!this.gated || !['run-event', 'ui-event'].includes(type)) return super.addEventListener(type, listener, options);
+          return super.addEventListener(type, event => {
+            const state = window.__heldReplay, seq = JSON.parse(event.data).seq;
+            const deliver = () => typeof listener === 'function' ? listener.call(this, event) : listener.handleEvent(event);
+            state.lastSeq = seq;
+            if (!state.released && seq > ${replayBoundary}) state.queue.push(deliver); else deliver();
+          }, options);
+        }
+      };
+    })()`)
+    try {
+      browser.click(`[data-slot="sidebar"] a[href="${scoped('/')}"]`)
+      browser.waitForFunction(`document.querySelector('[data-route="task-thread"]') === null`)
+      browser.click(`a[href="${scoped(`/tasks/${REPLAY_ID}`)}"]`)
+      browser.waitForFunction(`window.__heldReplay?.queue.length > 0 && document.querySelector('[data-slot="thread-rows"]')?.dataset.virtualized === 'true'`)
+      // Hold native prefix-container extent, not a restored-offset expectation. A
+      // clamped pending restore may have zero rendered row children; record that fact.
+      const prefix = waitForSettledSample(browser, `(() => {
+        const rows = document.querySelector('[data-slot="thread-rows"]');
+        if (!rows || !rows.checkVisibility({ contentVisibilityAuto: true })) return null;
+        const extent = rows.getBoundingClientRect().height;
+        if (!extent) return null;
+        return { extent, height: ${MAIN}.scrollHeight, mounted: rows.querySelectorAll('[data-slot="thread-row"]').length };
+      })()`)
+      writeFileSync(join(artifactsDir, 'thread-held-replay-prefix.json'), JSON.stringify({ reader, prefix }, null, 2))
+      browser.evaluate(`(() => { const state = window.__heldReplay; state.released = true; for (const deliver of state.queue.splice(0)) deliver(); })()`)
+      // ORIGINAL pixel coverage assertion/budget, with an additional content-identity assertion.
+      browser.waitForFunction(`Math.abs(${MAIN}.scrollTop - ${reader.top}) < 200`)
+      const restored = waitForSettledSample<{ key: string; offset: number }>(browser, `(() => {
+        const viewport = ${MAIN}.getBoundingClientRect();
+        const row = [...document.querySelectorAll('[data-slot="thread-row"]')].find(el => {
+          if (!el.checkVisibility({ contentVisibilityAuto: true })) return false;
+          const box = el.getBoundingClientRect(); return box.bottom > viewport.top && box.top < viewport.bottom;
+        });
+        return row ? { key: row.dataset.rowKey, offset: row.getBoundingClientRect().top - viewport.top } : null;
+      })()`)
+      writeFileSync(join(artifactsDir, 'thread-held-replay-restored.json'), JSON.stringify({ reader, restored }, null, 2))
+      expect(restored.key).toBe(reader.key)
+      expect(Math.abs(restored.offset - reader.offset)).toBeLessThan(2)
+    } catch (error) {
+      captureScrollState('thread-held-replay-timeout')
+      throw error
+    } finally {
+      browser.evaluate(`(() => { const state = window.__heldReplay; if (state) { state.released = true; for (const deliver of state.queue.splice(0)) deliver(); } window.EventSource = window.__replayNativeSource; })()`)
+    }
+  }, 90_000)
 })
 
 describe('phone viewports', () => {
@@ -296,9 +378,8 @@ describe('phone viewports', () => {
 
     // Let measured virtual rows settle. scrollHeight is integer-valued while the dock's
     // DOMRect retains fractions, so allow the final subpixel rather than calling it clipping.
-    browser.waitForFunction(`document.querySelector('[data-slot="thread-dock"]').getBoundingClientRect().bottom <= innerHeight + 1`)
     // The composer dock fits the visual viewport in document flow.
-    const dock = browser.evaluate(`(() => {
+    const dock = waitForSettledSample(browser, `(() => {
       const dock = document.querySelector('[data-slot="thread-dock"]')
       const rect = dock.getBoundingClientRect()
       return { bottomGap: window.innerHeight - rect.bottom, cssBottom: getComputedStyle(dock).bottom }
@@ -381,7 +462,7 @@ describe('phone viewports', () => {
     openThread()
     browser.evaluate(`document.documentElement.style.setProperty('--kb', '280px')`)
     browser.evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`)
-    const reserved = browser.evaluate(`(() => {
+    const reserved = waitForSettledSample(browser, `(() => {
       const main = ${MAIN}.getBoundingClientRect();
       const shellComposer = document.querySelector('[data-slot="main"] + [data-slot="composer"]');
       const reserve = shellComposer.getBoundingClientRect();
@@ -422,7 +503,7 @@ describe('tool cards remain below assistant messages after live appends', () => 
       // React can commit an expanded card before ResizeObserver delivers its new size.
       // Measure after layout delivery, not between those two phases of the same frame.
       browser.evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`)
-      const overlaps = browser.evaluate(`(() => {
+      const overlaps = waitForSettledSample(browser, `(() => {
         const rows = [...document.querySelectorAll('[data-slot="thread-row"]')];
         return rows.flatMap((row, index) => {
           const next = rows[index + 1];
@@ -469,7 +550,7 @@ describe('tool cards remain below assistant messages after live appends', () => 
       })()`)
       assertSeparated()
     }
-    expect(browser.evaluate(`(() => {
+    expect(waitForSettledSample(browser, `(() => {
       const r = document.querySelector('[data-slot="thread-dock"]').getBoundingClientRect();
       const rows = document.querySelector('[data-slot="thread-rows"]').getBoundingClientRect();
       return r.top >= rows.bottom - 1;

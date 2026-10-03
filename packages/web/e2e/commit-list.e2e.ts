@@ -195,7 +195,7 @@ describe(`the task Commits tab on a ${COMMITS}-commit branch`, () => {
     // virtua windows around the wrong offset, leaving an uncovered band at the top.
     // Existing rows alone do not prove the scroll has re-windowed: removing the header's
     // activity controls (#751) exposed a transient 32px gap before the next layout. Require
-    // stable coverage, retaining the same two-pixel limit for a persistent gap.
+    // stable geometry before asserting coverage, retaining the same two-pixel limit for a persistent gap.
     const gap = browser.waitForStable<number>(
       `(() => {
         const scroller = ${MAIN}
@@ -204,7 +204,7 @@ describe(`the task Commits tab on a ${COMMITS}-commit branch`, () => {
           .map((row) => row.getBoundingClientRect().top - fold)
         return tops.length === 0 ? null : Math.round(Math.min(...tops))
       })()`,
-      { holdMs: 200, matcher: (value) => Number.isFinite(value) && value <= SUB_PIXEL },
+      { holdMs: 200, matcher: (value) => Number.isFinite(value) },
     )
 
     expect(Number.isNaN(gap), 'no commit rows mounted at all').toBe(false)

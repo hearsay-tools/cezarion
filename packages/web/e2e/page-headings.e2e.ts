@@ -1,6 +1,7 @@
 import { resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
+import { waitForSettledSample } from './visual-ready'
 import { AgentBrowser, bootProjectId, readTestEnv } from './agent-browser'
 
 const artifactsDir = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_e2e')
@@ -59,7 +60,7 @@ describe('Git page headings at the review viewports', () => {
           browser.waitForFunction(`document.querySelector('[data-slot="mobile-project-picker"]') !== null`)
           browser.evaluate(`document.documentElement.classList.toggle('light', ${theme === 'light'})`)
 
-          const facts = browser.evaluate(`(() => {
+          const facts = waitForSettledSample(browser, `(() => {
             const header = document.querySelector(${JSON.stringify(page.header)})
             const routeTitle = header.querySelector('h1')
             const shell = document.querySelector('[data-slot="mobile-top-bar"]')
@@ -67,7 +68,7 @@ describe('Git page headings at the review viewports', () => {
             const context = document.querySelector(${JSON.stringify(page.context)})
             const content = document.querySelector(${JSON.stringify(page.content)})
             const painted = (element) => {
-              if (!element) return false
+              if (!element || !element.checkVisibility({ contentVisibilityAuto: true })) return false
               const rect = element.getBoundingClientRect()
               const style = getComputedStyle(element)
               return element.checkVisibility({ opacityProperty: true, visibilityProperty: true }) && rect.width > 2 && rect.height > 2 && style.display !== 'none' &&

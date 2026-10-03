@@ -1,6 +1,7 @@
 import { resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
+import { waitForSettledSample } from './visual-ready'
 import { AgentBrowser, bootProjectId, readTestEnv } from './agent-browser'
 import { assertDiffCoverage } from './repo-diff-coverage'
 
@@ -176,7 +177,7 @@ describe('the repo view against the live dry-run server', () => {
         expect(browser.evaluate(`document.querySelector('[data-slot="diff"]').dataset.mode`)).toBe('unified')
         // The integrated mobile design stacks the selectable file tree above the diff.
         expect(
-          browser.evaluate(
+          waitForSettledSample(browser,
             `(() => { const el = document.querySelector('[data-slot="changes-tree"]'); return el !== null && el.checkVisibility() && el.getBoundingClientRect().width <= innerWidth })()`,
           ),
         ).toBe(true)
@@ -194,7 +195,7 @@ describe('the repo view against the live dry-run server', () => {
       // No tab strip, a way back to the Git screen, and the page never scrolls sideways.
       expect(browser.count('[data-slot="repo-tabs"]')).toBe(0)
       expect(browser.count('[data-slot="git-back"]')).toBe(1)
-      expect(browser.evaluate(`document.documentElement.scrollWidth <= window.innerWidth`)).toBe(true)
+      expect(waitForSettledSample(browser, `document.documentElement.scrollWidth <= window.innerWidth`)).toBe(true)
 
       browser.screenshot(`${artifactsDir}/repo-git-iphone.png`)
     } finally {

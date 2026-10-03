@@ -5,6 +5,7 @@ import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { waitForSettledSample } from './visual-ready'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { contrastSampleExpression, hoverVisiblePoint, type ContrastSample } from './contrast'
 import { stopFixtureServer } from './fixture-server'
@@ -82,7 +83,7 @@ function mockForge() {
 
 function sample(theme: string, state: string, status: string) {
   const selector = chip(status)
-  const result = browser.waitForValue(`(() => {
+  const result = waitForSettledSample(browser, `(() => {
     const el = document.querySelector(${JSON.stringify(selector)})
     const glyph = el?.querySelector('svg'), label = el?.querySelector('span')
     if (!glyph || !label) return null
@@ -181,7 +182,7 @@ describe('sidebar reference status (#677)', () => {
       expect(browser.waitForValue(`matchMedia('(hover: none)').matches`)).toBe(true)
       for (const status of cases) {
         const selector = `[data-slot="sidebar"] ${chip(status)}`
-        const inert = browser.waitForValue(`(() => {
+        const inert = waitForSettledSample(browser, `(() => {
           const el = document.querySelector(${JSON.stringify(selector)})
           if (!el?.querySelector('svg')) return null
           return { tag: el.tagName, inert: el.dataset.inert, links: el.querySelectorAll('a, button, [tabindex]').length,
@@ -202,7 +203,7 @@ describe('sidebar reference status (#677)', () => {
     browser.waitForFunction(`document.querySelector('[aria-label="Show run details"]') !== null`)
     browser.evaluate(`document.querySelector('[aria-label="Show run details"]').focus()`)
     browser.press('Enter')
-    const header = browser.waitForValue(`(() => {
+    const header = waitForSettledSample(browser, `(() => {
       const el = document.querySelector('[data-slot="run-meta"] [data-slot="pr-chip"]')
       if (!el || el.getBoundingClientRect().height === 0) return null
       return { tag: el.tagName, tone: el.className, height: el.getBoundingClientRect().height }

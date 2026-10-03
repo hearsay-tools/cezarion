@@ -17,6 +17,7 @@ import {
   isNearBottom,
   firstVisibleThreadAnchor,
   readThreadMeasurements,
+  readThreadMeasurementCandidate,
   readThreadScroll,
   saveThreadMeasurements,
   saveThreadScroll,
@@ -48,6 +49,9 @@ export interface ThreadScrollControls {
   /** virtua's imperative handle while the thread is virtualized (VirtualRows fills it) —
    *  programmatic scrolls must go through it, or they race virtua's own offset writes. */
   virtualizerRef: RefObject<VirtualizerHandle | null>
+  /** Consume the original arrival once, unless reader/history intent has cancelled it. */
+  restoreMeasurements: (viewKey: string) => boolean
+  ownsMeasurementRestore: (viewKey: string) => boolean
   /** True while the reader is away from the live tail — the pill's visibility. */
   pillVisible: boolean
   /** The pill's action: pin to the live tail and stick again. */
@@ -93,6 +97,9 @@ export function useThreadScroll(
   const downIntentAtRef = useRef(0)
   /** A cached offset not yet reachable (content still replaying). Cleared by user intent. */
   const pendingRestoreRef = useRef<number | null>(null)
+  // #795: reaching a pixel through fresh estimates is not reader intent. Keep the
+  // original arrival owner until compatible measurements arrive or intent cancels it.
+  const measurementRestoreRef = useRef<{ viewKey: string; top: number } | null>(null)
   /** Arrival (cache restore / land at tail) happens once per view, not once per container. */
   const arrivedForRef = useRef<string | null>(null)
   /** virtua's handle while virtualized (VirtualRows fills it), null in flat mode. */
@@ -124,14 +131,33 @@ export function useThreadScroll(
       if (memory && !memory.atBottom) {
         stuckRef.current = false
         pendingRestoreRef.current = memory.top
+        measurementRestoreRef.current = readThreadMeasurementCandidate(viewKey)?.rowKeys
+          ? { viewKey, top: memory.top } : null
       } else {
         stuckRef.current = true
         pendingRestoreRef.current = null
+        measurementRestoreRef.current = null
       }
     }
     if (pendingRestoreRef.current !== null) setOffset(pendingRestoreRef.current)
     else if (stuckRef.current) toBottom()
   }, [viewKey, setOffset, toBottom])
+
+  const ownsMeasurementRestore = useCallback((key: string): boolean => {
+    // A destination render updates viewKeyRef before the old native ref detaches.
+    // That departing committed owner may still retain its candidate (#795 review proof).
+    return measurementRestoreRef.current?.viewKey === key
+  }, [])
+  const restoreMeasurements = useCallback((key: string): boolean => {
+    const owner = measurementRestoreRef.current
+    // Adoption additionally requires the active destination; departure ownership alone
+    // must never let an old run/view consume the new view’s scroll restoration.
+    if (!owner || !ownsMeasurementRestore(key) || key !== viewKeyRef.current) return false
+    pendingRestoreRef.current = owner.top
+    stuckRef.current = false
+    measurementRestoreRef.current = null
+    return true
+  }, [ownsMeasurementRestore])
 
   // The callback ref runs in the destination commit itself. Applying arrival here closes the
   // gap between the route render and the follow-up state update that installs subscriptions;
@@ -177,6 +203,7 @@ export function useThreadScroll(
     if (!isCockpitE2e()) return
     const scrollTo = (top: number) => {
       pendingRestoreRef.current = null
+      measurementRestoreRef.current = null
       historyRestoreGenerationRef.current += 1
       pendingHistoryRestoreRef.current = null
       stuckRef.current = false
@@ -216,6 +243,7 @@ export function useThreadScroll(
     // The explicit history button reaches this path without a gesture handler. Mark the reader
     // as browsing history before the page grows, so ResizeObserver cannot re-pin it to the tail.
     pendingRestoreRef.current = null
+    measurementRestoreRef.current = null
     stuckRef.current = false
     loadingOlderRef.current = true
     const requestId = loadingOlderOwnerRef.current + 1
@@ -248,6 +276,7 @@ export function useThreadScroll(
     const scroller = scrollElRef.current
     if (!scroller || !contentEl) return
     pendingRestoreRef.current = null
+    measurementRestoreRef.current = null
     historyRestoreGenerationRef.current += 1
     pendingHistoryRestoreRef.current = null
     stuckRef.current = false
@@ -287,6 +316,7 @@ export function useThreadScroll(
     const scroller = scrollElRef.current
     if (!scroller) return
     pendingRestoreRef.current = null
+    measurementRestoreRef.current = null
     historyRestoreGenerationRef.current += 1
     pendingHistoryRestoreRef.current = null
     stuckRef.current = true
@@ -358,12 +388,15 @@ export function useThreadScroll(
     const unstick = () => {
       pendingFocusRef.current?.disconnect()
       pendingRestoreRef.current = null
+      measurementRestoreRef.current = null
       historyRestoreGenerationRef.current += 1
       pendingHistoryRestoreRef.current = null
       stuckRef.current = false
       downIntentAtRef.current = 0 // the LATEST intent wins — an up gesture voids a recent down one
     }
     const markDown = () => {
+      pendingRestoreRef.current = null
+      measurementRestoreRef.current = null
       historyRestoreGenerationRef.current += 1
       pendingHistoryRestoreRef.current = null
       downIntentAtRef.current = Date.now()
@@ -389,6 +422,8 @@ export function useThreadScroll(
       else if (['ArrowDown', 'PageDown', 'End'].includes(event.key)) markDown()
     }
     const onPointerDown = () => {
+      pendingRestoreRef.current = null
+      measurementRestoreRef.current = null
       pointerScrolling = true
       pointerHistoryConsumedRef.current = false
       previousScrollTop = scroller.scrollTop
@@ -439,7 +474,9 @@ export function useThreadScroll(
       setPillVisible(!near)
       // …and no overwriting the memory being restored, either — leaving again mid-restore
       // must find the parked position, not a replay artifact.
-      if (pendingRestoreRef.current === null) {
+      // A fresh estimate reaching the pixel still belongs to the original arrival,
+      // until compatible measurements arrive or reader intent cancels it (#795).
+      if (pendingRestoreRef.current === null && !ownsMeasurementRestore(viewKey)) {
         saveThreadScroll(viewKey, { top: scroller.scrollTop, atBottom: near })
       }
     }
@@ -484,9 +521,9 @@ export function useThreadScroll(
       scroller.removeEventListener('keydown', onKey)
       observer?.disconnect()
     }
-  }, [viewKey, contentEl, loadOlder, setOffset, toBottom])
+  }, [viewKey, contentEl, loadOlder, setOffset, toBottom, ownsMeasurementRestore])
 
-  return { attachContent, scrollElRef, virtualizerRef, pillVisible, jumpToLatest, jumpToRow, loadOlder, restickIfStuck }
+  return { attachContent, scrollElRef, virtualizerRef, restoreMeasurements, ownsMeasurementRestore, pillVisible, jumpToLatest, jumpToRow, loadOlder, restickIfStuck }
 }
 
 /**
@@ -565,11 +602,41 @@ function VirtualRowsSession({
   useLayoutEffect(() => {
     previousRows.current = rows
   }, [rows])
-  // The per-run measurement cache: read once per mount (only honored at the row count the
-  // snapshot was taken at — virtua's caveat), written back with the final count on detach.
-  const [measurements] = useState(() => readThreadMeasurements(runId, rows.length))
+  // #795 native proof: a 1253-row saved cache was rejected at a 456-row SSE mount
+  // and never retried. Capture it locally; detach during hydration may save prefix
+  // estimates into the map, but cannot replace this original arrival candidate.
+  const [candidate] = useState(() => readThreadMeasurementCandidate(runId))
+  const [hydration, setHydration] = useState(() => ({
+    cache: readThreadMeasurements(runId, rows.length, rows.map(row => row.key)), generation: 0,
+  }))
+  const awaitingCompatibleCache = useRef(hydration.cache === undefined && candidate?.rowKeys?.length === candidate?.rows && candidate !== undefined)
+  useLayoutEffect(() => {
+    const keys = candidate?.rowKeys
+    if (!awaitingCompatibleCache.current) {
+      // Immediate/fresh arrivals have no delayed candidate to protect. Their ongoing
+      // native scroll corrections continue to update memory as before.
+      controls.restoreMeasurements(runId)
+      return
+    }
+    if (!candidate || !keys) return
+    // Only a compatible prefix can become the original list. Append beyond it,
+    // history prepend/eviction or replacement permanently abandon this candidate.
+    if (rows.length > candidate.rows || rows.some((row, index) => row.key !== keys[index])) {
+      awaitingCompatibleCache.current = false
+      controls.restoreMeasurements(runId)
+      return
+    }
+    if (rows.length !== candidate.rows) return
+    awaitingCompatibleCache.current = false
+    if (!controls.restoreMeasurements(runId)) return
+    // virtua accepts cache on mount only. One child remount leaves route scroll
+    // controls/arrival ownership alive; never remount on ordinary append/prepend.
+    setHydration({ cache: candidate.cache, generation: 1 })
+  }, [candidate, rows, controls.restoreMeasurements, runId])
   const rowCountRef = useRef(rows.length)
   rowCountRef.current = rows.length
+  const rowKeysRef = useRef(rows.map(row => row.key))
+  rowKeysRef.current = rows.map(row => row.key)
   const lastHandleRef = useRef<VirtualizerHandle | null>(null)
   const attachHandle = useCallback(
     (handle: VirtualizerHandle | null) => {
@@ -579,11 +646,17 @@ function VirtualRowsSession({
       } else if (lastHandleRef.current) {
         // Detach = unmount: snapshot in the ref callback, where the handle is still known
         // (effect cleanup order vs ref detach is not a contract worth leaning on).
-        saveThreadMeasurements(runId, { rows: rowCountRef.current, cache: lastHandleRef.current.cache })
+        // Leaving while replay is partial must retain the complete original candidate
+        // as well as its pending scroll memory. Cancelled reader intent saves normally.
+        const retainOriginal = awaitingCompatibleCache.current && candidate?.rowKeys &&
+          rowCountRef.current < candidate.rows && controls.ownsMeasurementRestore(runId)
+        if (!retainOriginal) {
+          saveThreadMeasurements(runId, { rows: rowCountRef.current, cache: lastHandleRef.current.cache, rowKeys: rowKeysRef.current })
+        }
         lastHandleRef.current = null
       }
     },
-    [runId, controls.virtualizerRef],
+    [runId, controls.virtualizerRef, controls.ownsMeasurementRestore, candidate],
   )
 
   // virtua needs the distance between the scroller's content start and the virtualizer (the
@@ -623,11 +696,12 @@ function VirtualRowsSession({
       {/* Older history prepends rows. `shift` keeps the existing viewport anchored while virtua
           measures the new start, and the thread scroll owner applies the stable-row correction. */}
       <Virtualizer
+        key={hydration.generation}
         ref={attachHandle}
         scrollRef={controls.scrollElRef}
         startMargin={startMargin}
         shift={shift}
-        {...(measurements !== undefined ? { cache: measurements } : {})}
+        {...(hydration.cache !== undefined ? { cache: hydration.cache } : {})}
       >
         {rows.map((row) => (
           <div key={row.key} data-slot="thread-row" data-row-key={row.key} className="flex w-full flex-col pb-2.5">

@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { waitForSettledSample } from './visual-ready'
 import { parse } from 'yaml'
 
 import { AgentBrowser, readTestEnv } from './agent-browser'
@@ -156,7 +157,7 @@ describe('workflow builder against the live dry-run server', () => {
 
           // Measure the settled theme, rather than an intermediate button color transition.
           browser.waitForFunction(`document.querySelector('[data-slot="wb-actions"]').getAnimations({ subtree: true }).every(animation => animation.playState !== 'running')`)
-          const presentation = browser.evaluate(`(() => {
+          const presentation = waitForSettledSample(browser, `(() => {
             const save = document.querySelector('[data-slot="wb-save"]');
             const removeFile = document.querySelector('[data-slot="wb-delete"]');
             const step = document.querySelector('[data-slot="wb-step"][data-id="${ALPHA}"]');
@@ -270,7 +271,7 @@ describe('workflow builder against the live dry-run server', () => {
       browser.press('Tab')
       browser.evaluate(`document.querySelector('[data-slot="wb-save"]').focus()`)
 
-      const facts = browser.evaluate(`(() => {
+      const facts = waitForSettledSample(browser, `(() => {
         const save = document.querySelector('[data-slot="wb-save"]');
         const saveStyle = getComputedStyle(save);
         const actions = [...document.querySelectorAll('[data-slot="wb-actions"] button')]
@@ -339,7 +340,7 @@ describe('workflow builder against the live dry-run server', () => {
     expect(browser.text('[data-slot="wb-step"][data-id="tests"] [data-slot="wb-step-kind"]')).toBe('Command step · Retry ×2')
     expect(browser.text('[data-slot="wb-yaml"]')).toContain('steps:')
     expect(browser.text('[data-slot="wb-yaml"]')).toContain('command: npm test')
-    const separation = browser.evaluate(`(() => {
+    const separation = waitForSettledSample(browser, `(() => {
       const step = document.querySelector('[data-slot="wb-step"][data-id="tests"]');
       const heading = step.querySelector('[data-slot="wb-step-heading"]').getBoundingClientRect();
       const summary = step.querySelector('[data-slot="wb-step-summary"]').getBoundingClientRect();

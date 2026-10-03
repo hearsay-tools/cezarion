@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
+import { waitForSettledSample } from './visual-ready'
 import { stopFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, fixtureServeEnv } from './agent-browser'
 import record from './fixtures/thread-run.record.json'
@@ -119,10 +120,14 @@ describe('assistant reply line breaks (#730)', () => {
           document.documentElement.classList.remove('light', 'dark')
           document.documentElement.classList.add('${theme}')
         })()`)
-        const shape = browser.waitForValue(
+        const shape = waitForSettledSample(browser,
           `(() => {
             const md = ${MESSAGE}
             if (!md) return null
+            // #795/#758: scroll lazy markdown, but read only a later rendered sample.
+            const rendered = md.checkVisibility({ contentVisibilityAuto: true })
+            md.scrollIntoView({ block: 'start' })
+            if (!rendered) return null
             const scroller = document.scrollingElement
             return {
               paragraphBreaks: md.querySelectorAll('p br').length,

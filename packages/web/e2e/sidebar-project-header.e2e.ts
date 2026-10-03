@@ -5,6 +5,7 @@ import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { waitForSettledSample } from './visual-ready'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { stopFixtureServer } from './fixture-server'
 import { waitForHealth } from './poll'
@@ -100,7 +101,7 @@ describe('project header actions', () => {
     browser.evaluate(`document.documentElement.classList.toggle('light', ${theme === 'light'})`)
     // The view tabs moved out of the drawer (#621): the tab bar holds Tasks/Git/GitHub and its
     // More sheet the rest, so "every view is reachable at 360px" is asserted there, at 44px.
-    const tabs = browser.waitForValue(`Array.from(document.querySelectorAll('[data-slot="mobile-tab-bar"] a, [data-slot="mobile-tab-bar"] button')).map(el => ({ width: el.getBoundingClientRect().width, height: el.getBoundingClientRect().height }))`, value => Array.isArray(value) && value.length > 0) as Array<{ width: number; height: number }>
+    const tabs = waitForSettledSample(browser, `Array.from(document.querySelectorAll('[data-slot="mobile-tab-bar"] a, [data-slot="mobile-tab-bar"] button')).map(el => ({ width: el.getBoundingClientRect().width, height: el.getBoundingClientRect().height }))`, value => Array.isArray(value) && value.length > 0) as Array<{ width: number; height: number }>
     expect(tabs.length).toBeGreaterThanOrEqual(3)
     expect(tabs.every(size => size.width >= 44 && size.height >= 44)).toBe(true)
     browser.click('[data-slot="mobile-tab-bar"] [data-tab="more"]')
@@ -115,7 +116,7 @@ describe('project header actions', () => {
     const drawer = '[data-slot="mobile-nav-drawer"]'
     browser.waitForStable(`(() => { const el = document.querySelector('${drawer}'); return el ? el.getBoundingClientRect().left : null })()`, { holdMs: 150, matcher: value => value === 0 })
     const trigger = `${drawer} [data-slot="drawer-project-current"] [data-slot="project-menu-trigger"]`
-    const size = browser.waitForValue(`(() => { const el = document.querySelector('${trigger}'); if (!el) return null; const box = el.getBoundingClientRect(); return { width: box.width, height: box.height, inLink: !!el.closest('a') } })()`) as { width: number; height: number; inLink: boolean }
+    const size = waitForSettledSample(browser, `(() => { const el = document.querySelector('${trigger}'); if (!el) return null; const box = el.getBoundingClientRect(); return { width: box.width, height: box.height, inLink: !!el.closest('a') } })()`) as { width: number; height: number; inLink: boolean }
     expect(size.width).toBeGreaterThanOrEqual(44)
     expect(size.height).toBeGreaterThanOrEqual(44)
     expect(size.inLink).toBe(false)

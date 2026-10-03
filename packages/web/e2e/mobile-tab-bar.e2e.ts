@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
+import { waitForSettledSample } from './visual-ready'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { applyContrastQaVariant, contrastQaVariants, contrastSampleExpression, restoreContrastQaDefaults, type ContrastSample } from './contrast'
 import { stopFixtureServer } from './fixture-server'
@@ -116,7 +117,7 @@ function openMore(): void {
 
 /** Every listed control's rect must clear the 44px touch floor. */
 function undersized(selector: string): unknown {
-  return browser.waitForValue(`(() => {
+  return waitForSettledSample(browser, `(() => {
     const nodes = [...document.querySelectorAll(${JSON.stringify(selector)})]
     if (nodes.length === 0) return null
     return nodes.map((node) => { const r = node.getBoundingClientRect(); return { label: node.textContent.trim().slice(0, 24) || node.getAttribute('aria-label'), w: Math.round(r.width), h: Math.round(r.height) } })
@@ -192,13 +193,13 @@ describe('mobile tab bar, More sheet and pushed task screen', () => {
     browser.setViewport(PHONE.width, PHONE.height)
     openList()
     expect(undersized(`${TAB_BAR} a, ${TAB_BAR} button`)).toEqual([])
-    const fab = browser.waitForValue(`(() => { const r = document.querySelector('${FAB}')?.getBoundingClientRect(); return r ? { w: Math.round(r.width), h: Math.round(r.height), right: Math.round(innerWidth - r.right) } : null })()`) as { w: number; h: number; right: number }
+    const fab = waitForSettledSample(browser, `(() => { const r = document.querySelector('${FAB}')?.getBoundingClientRect(); return r ? { w: Math.round(r.width), h: Math.round(r.height), right: Math.round(innerWidth - r.right) } : null })()`) as { w: number; h: number; right: number }
     expect(fab.h).toBe(48)
     expect(fab.w).toBeGreaterThanOrEqual(44)
     expect(fab.right).toBe(16)
     openMore()
     expect(undersized(`${SHEET} [data-slot="more-row"]`)).toEqual([])
-    const bar = browser.waitForValue(`Math.round(document.querySelector('${TAB_BAR}').getBoundingClientRect().height)`)
+    const bar = waitForSettledSample(browser, `Math.round(document.querySelector('${TAB_BAR}').getBoundingClientRect().height)`)
     expect(bar).toBe(54)
     browser.press('Escape')
     browser.waitForFunction(`document.querySelector('${SHEET}') === null`)
@@ -221,7 +222,7 @@ describe('mobile tab bar, More sheet and pushed task screen', () => {
     browser.click(`[data-slot="task-card"][data-run-id="${RUN_ID}"] a[href]`)
     browser.waitForFunction(`location.pathname === ${JSON.stringify(scoped(`/tasks/${RUN_ID}`))} && document.querySelector('${TOP_BAR} [data-slot="mobile-run-title"]') !== null`)
 
-    const screen = browser.waitForValue(`(() => {
+    const screen = waitForSettledSample(browser, `(() => {
       const top = document.querySelector('${TOP_BAR}')
       const state = top.querySelector('[data-slot="mobile-run-state"]')
       return {
