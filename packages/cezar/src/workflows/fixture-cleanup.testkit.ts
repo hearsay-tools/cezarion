@@ -14,7 +14,8 @@ export function createFixtureManager(...args: ConstructorParameters<typeof RunMa
   const pending = new Map<Promise<unknown>, string>();
   const sessions = new Set<AgentSession>();
   const engine = manager as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>;
-  for (const name of ['pump', 'execute', 'runContinuation', 'recordTurnEnd', 'saveWorktree', 'autoNameRun', 'enforceRetention', 'finishWorkerExecution']) {
+  // Inactive Finish and watchdog adoption can write without any active session.
+  for (const name of ['pump', 'execute', 'runContinuation', 'recordTurnEnd', 'saveWorktree', 'autoNameRun', 'enforceRetention', 'finishWorkerExecution', 'settleSuccess', 'settleRequestedRootFinish', 'rescueStalledQueue']) {
     const original = engine[name]!.bind(manager);
     engine[name] = (...input) => {
       const result = original(...input);

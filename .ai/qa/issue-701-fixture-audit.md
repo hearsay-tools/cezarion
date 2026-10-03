@@ -8,7 +8,7 @@ Scope: all 42 files containing `new RunManager` at the implementation base (`git
 
 PR #400 (`29c53964d950655adcf115eb5211b25d6e0c6472`) established drain → dispose/flush → rm and disabled Git background maintenance. Its `awaitRunTermination` helper ignored the returned boolean. Today that API only proves delegated worker execution; ordinary root runs return false immediately. `dispose()` intentionally does not terminate sessions. Continuations can remain parked indefinitely. Status alone is therefore insufficient.
 
-The shared test-only factory observes real `pump`, `execute`, `runContinuation`, `recordTurnEnd`, autosave, naming, retention and worker-finalization promises plus returned session closure. It preserves the original return values and production failure handling. Teardown cancels admitted work once, interrupts remaining sessions (including sessions of disposed/replaced managers), waits for owned promises, then disposes and flushes every store. A bounded ownership timeout fails without removing the directory. Synthetic private active entries in unit tests are not process-ownership evidence. No production API or runner behavior changes.
+The shared test-only factory observes real `pump`, `execute`, `runContinuation`, `recordTurnEnd`, autosave, naming, retention, worker-finalization, detached Finish settlement and queue-rescue promises plus returned session closure. It preserves the original return values and production failure handling. Teardown cancels admitted work once, interrupts remaining sessions (including sessions of disposed/replaced managers), waits for owned promises, then disposes and flushes every store. A bounded ownership timeout fails without removing the directory. Synthetic private active entries in unit tests are not process-ownership evidence. No production API or runner behavior changes.
 
 ## Site-by-site audit
 
@@ -18,7 +18,7 @@ Paths below are relative to `packages/cezar/`.
 | --- | --- |
 | `src/core/harness-parity.testkit.ts` | driveRun root fixture only awaited isActive=false, lacked manager disposal and could leave naming/bookkeeping outstanding: now tracks/drains and disables unrelated naming. withOwnedInputRun already waits worker ownership and tracked turn bookkeeping, then disposes/flushes. Disabled maintenance in both initializers. |
 | `src/delegation/destruction-results.test.ts` | Replacement managers registered with shared root teardown; fixture close owns final disposal/removal. |
-| `src/delegation/input.test.ts` | Replacement managers registered with shared root teardown; fixture close owns final disposal/removal. |
+| `src/delegation/input.test.ts` | Eight standalone constructor sites use deliberately synthetic sessions/state, including two recovery managers with scheduler admission held. ACK promises are explicitly settled; cleanup disposes managers, flushes stores and restores real timers before removal. No service-fixture teardown exists here. Retained raw constructors: registering these managers with the shared factory without calling its drain leaked registrations. |
 | `src/delegation/provision-workflows.test.ts` | Recovery managers share the service fixture root. Registered all replacement managers; checked worker termination remains before dispose and service close drains root execution too. |
 | `src/delegation/routes.test.ts` | Replacement manager registered with shared root teardown; fixture close owns final disposal/removal. |
 | `src/delegation/service.test.ts` | Replacement/recovered managers registered with shared root teardown; fixture close owns final disposal/removal. |
@@ -97,3 +97,19 @@ The worker deliberately did not run the full six-command gate, per the parent's 
 Final parity check: `npm test -- packages/cezar/src/core/harness-parity.test.ts -t 'harness parity — run tier|harness parity — late child attention|harness parity — stored assistant ASK|harness parity — live task scratch'`: **65 passed**, 253 intentionally filtered out. This covers every driveRun consumer group through each backend's native mock wire; no new parity cells or production runner changes were needed.
 
 `git diff --check`: passed. All remaining verification belongs to the parent integration gate; no known unresolved targeted-test failures remain.
+
+
+### Independent-review corrections (2026-10-03)
+
+The first helper missed inactive Finish and watchdog rescue: neither requires an active session or execution promise. Added ownership observation for `settleSuccess`, `settleRequestedRootFinish` and `rescueStalledQueue`. Regressions seed real RunStore records in a real Git repository and hold the real Git diff / workflow catalog result before the manager's durable settlement/adoption writes. Both ordinary and delegated-root Finish are covered. Removing the repository cannot proceed until those operations, and any work they admit, settle.
+
+Also corrected the input-fixture audit above and restored raw constructors at its eight synthetic sites. These fixtures never used the shared service teardown, so factory registration retained their disposed managers and stores. Their explicit ACK/recovery waits and existing disposal/flush remain sufficient.
+
+Before the correction, `npm test -- packages/cezar/src/workflows/fixture-cleanup.test.ts -t 'detached Finish|queue rescue'`: **3 failed**, each on the repository having been removed while the held boundary remained pending; **4 filtered out**. Detached operation promises are observed in the regression so expected broken-helper rejections cannot escape as unrelated unhandled errors.
+
+Review-round verification (normal Vitest worker count):
+
+- `npm test -- packages/cezar/src/workflows/fixture-cleanup.test.ts packages/cezar/src/delegation/input.test.ts packages/cezar/src/delegation/service.testkit.test.ts packages/cezar/src/workflows/model-identity-wiring.test.ts`: **4 files / 60 passed**.
+- Temporarily removed only the three new ownership entries, reran `npm test -- packages/cezar/src/workflows/fixture-cleanup.test.ts -t 'detached Finish|queue rescue'`: **3 failed / 4 filtered out**, each with missing repository at the held boundary. Restored the saved helper in `finally`.
+- After restoration, `npm test -- packages/cezar/src/workflows/fixture-cleanup.test.ts packages/cezar/src/workflows/auto-resume.test.ts packages/cezar/src/workflows/agent-tmpdir.test.ts packages/cezar/src/workflows/run.test.ts -t 'detached Finish|queue rescue|watchdog|[Ff]inish|keeps the repo|ownership timeout|removal errors'`: **4 files / 13 passed / 196 filtered out**.
+- `npm run typecheck -w @wjarka/cezarion`: **passed**.

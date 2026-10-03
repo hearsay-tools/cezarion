@@ -1,11 +1,10 @@
-import { createFixtureManager } from '../workflows/fixture-cleanup.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { AgentInput } from '@open-mercato/cezar-contract';
-import type { RunManager } from '../workflows/run.ts';
+import { RunManager } from '../workflows/run.ts';
 import type { AgentSession } from '../core/agent-runner.ts';
 import { RunStore, type RunRecord } from '../runs/store.ts';
 import { enqueueAgentInput, nextAgentInput, agentInputBatch } from './input.ts';
@@ -74,7 +73,7 @@ describe('attributed input queue', () => {
 it('readiness hints ignore stale/disposed sessions and guard duplicate/reentrant drains', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'cez-input-ready-'));
   const store = RunStore.open(dir);
-  const manager = createFixtureManager(store, dir);
+  const manager = new RunManager(store, dir);
   const internal = manager as unknown as {
     active: Map<string, object>;
     handleAgentInputReady(id: string, state: object, session: AgentSession | undefined): void;
@@ -125,7 +124,7 @@ it('readiness hints ignore stale/disposed sessions and guard duplicate/reentrant
 it('ask replay requires a validated successful-delivery checkpoint for the current ask', () => {
   const dir = mkdtempSync(join(tmpdir(), 'cez-ask-checkpoint-'));
   const store = RunStore.open(dir);
-  const manager = createFixtureManager(store, dir);
+  const manager = new RunManager(store, dir);
   const replay = manager as unknown as { hasPendingHumanAsk(id: string): boolean };
   try {
     const record = store.createRun({ title: 'task', task: 'task', workflow: 'quick-task', steps: [] });
@@ -148,7 +147,7 @@ it('ask replay requires a validated successful-delivery checkpoint for the curre
 it.each(['cancelled', 'finish requested', 'disposed', 'replacement session', 'replacement state'] as const)(
   'a late transport ACK has no authority after %s', async transition => {
     const dir = mkdtempSync(join(tmpdir(), 'cez-input-stale-ack-'));
-    const store = RunStore.open(dir), manager = createFixtureManager(store, dir);
+    const store = RunStore.open(dir), manager = new RunManager(store, dir);
     const internal = manager as unknown as {
       active: Map<string, object>;
       handleAgentInputReady(id: string, state: object, session: AgentSession | undefined): void;
@@ -182,7 +181,7 @@ it.each(['cancelled', 'finish requested', 'disposed', 'replacement session', 're
 
 it('ACK cannot answer a newly visible human ask or drain its queued successor', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'cez-input-ack-ask-'));
-  const store = RunStore.open(dir), manager = createFixtureManager(store, dir);
+  const store = RunStore.open(dir), manager = new RunManager(store, dir);
   const internal = manager as unknown as {
     active: Map<string, object>;
     handleAgentInputReady(id: string, state: object, session: AgentSession): void;
@@ -215,7 +214,7 @@ it('ACK cannot answer a newly visible human ask or drain its queued successor', 
 
 it.each(['accepted', 'rejected'] as const)('%s ACK settles before a later provider-close frame in the same read batch', async outcome => {
   const dir = mkdtempSync(join(tmpdir(), 'cez-input-ack-provider-'));
-  const store = RunStore.open(dir), manager = createFixtureManager(store, dir);
+  const store = RunStore.open(dir), manager = new RunManager(store, dir);
   const internal = manager as unknown as { active: Map<string, object>;
     handleAgentInputReady(id: string, state: object, session: AgentSession): void };
   let open = true;
@@ -256,7 +255,7 @@ async function withInboxRun(check: (f: { store: RunStore; manager: RunManager; d
   enqueue: (text: string) => AgentInput; state: { session: AgentSession; pendingHumanAsk: boolean; cancelled: boolean; openingAgentInputId?: string };
   sent: string[] }) => Promise<void> | void) {
   const dir = mkdtempSync(join(tmpdir(), 'cez-inbox-arbitration-'));
-  const store = RunStore.open(dir, { keepLive: true }), manager = createFixtureManager(store, dir);
+  const store = RunStore.open(dir, { keepLive: true }), manager = new RunManager(store, dir);
   const sent: string[] = [];
   const session: AgentSession = { open: true, result: Promise.resolve({ text: '', toolCalls: [], tokensUsed: 0 }),
     sendMessage: () => { throw Error('used human input seam'); },
@@ -345,7 +344,7 @@ it.each(['live', 'expired'] as const)('restart recovers a %s receipt and expiry 
     const receipt = manager.reserveInboxInputs(runId, generation, [first.id])!;
     store.updateRun(runId, { status: 'waiting' }); store.flush(); manager.dispose();
     vi.setSystemTime(Date.now() + (mode === 'live' ? 60_000 : 120_001));
-    const reopened = RunStore.open(dir, { keepLive: true }), recovered = createFixtureManager(reopened, dir);
+    const reopened = RunStore.open(dir, { keepLive: true }), recovered = new RunManager(reopened, dir);
     // Hold scheduler admission while observing the real durable wake produced by expiry.
     const pump = vi.spyOn(recovered as unknown as { pump(): Promise<void> }, 'pump').mockResolvedValue();
     try {
@@ -424,7 +423,7 @@ it('restart after durable inbox ACK retires the wake without creating a continua
     // Simulate the crash boundary after the atomic ACK and before manager reconciliation.
     store.ackInboxInputs(runId, receiptId, generation, new Date().toISOString());
     manager.dispose(); store.flush();
-    const reopened = RunStore.open(dir, { keepLive: true }), recovered = createFixtureManager(reopened, dir);
+    const reopened = RunStore.open(dir, { keepLive: true }), recovered = new RunManager(reopened, dir);
     const pump = vi.spyOn(recovered as unknown as { pump(): Promise<void> }, 'pump').mockResolvedValue();
     try {
       await recovered.recover();
