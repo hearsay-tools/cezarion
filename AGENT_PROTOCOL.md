@@ -871,6 +871,14 @@ session transcript. Codex filters both child message deltas and completions;
 Claude excludes child assistant text from v1 and its result fallback buffer;
 the v2 fallback uses the same parent-only guard.
 
+R36–R39 (#399) record the shared monitoring wrap-up contract on every native
+prompt channel for fresh, Continue and restart-recovered sessions, and the
+automatic monitoring wake. Finished work with the task goal complete requires
+`CEZ:DONE`; pending work requires `CEZ:MONITORING`. Genuine user questions retain
+their own paths. R40 keeps completion prose without a marker parked as waiting;
+the harness does not infer completion from prose. Offline prompt recordings prove
+delivery, not live model compliance.
+
 R26 (#398) runs every `HARNESS_ADAPTERS.askResumeCases` entry for every
 `RUNNER_IDS` backend: Claude/Pi `CEZ:ASK`, Codex `item/tool/requestUserInput`,
 OpenCode `question.asked`, and Cursor `cursor/ask_question` plus `cursor/create_plan`.
