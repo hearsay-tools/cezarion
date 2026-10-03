@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto'
+import { decodeVisualSample, type VisualProgram, type VisualPollEvidence } from './visual-sample-protocol'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -107,7 +109,7 @@ type PollAttempt = {
   endMs: number
   budgetMs: number
 } & (
-  | { outcome: 'returned' | 'returned-after-deadline'; value: unknown; matcherError?: unknown }
+  | { outcome: 'returned' | 'returned-after-deadline'; value: unknown; matcherError?: unknown; decoderError?: unknown; decoderExceededDeadline?: true }
   | { outcome: 'threw'; error: unknown }
 )
 
@@ -121,6 +123,8 @@ type PollDiagnostics = {
   commandErrors: number
   lateReturns: number
   matcherErrors: number
+  decoderErrors?: number
+  visual?: VisualPollEvidence
   // All timestamps are monotonic offsets from the start of this wait.
   lastSample: { attempt: number; completedAtMs: number } | null
   terminalProbe: {
@@ -134,6 +138,8 @@ type PollDiagnostics = {
     result?: { type: string; present: boolean; summary: string }
     error?: string
     matcherError?: string
+    decoderError?: string
+    decoderExceededDeadline?: true
   } | null
 }
 
@@ -617,11 +623,11 @@ export class AgentBrowser {
    *  first truth, which is how `waitForValue` is built on this rather than beside it. */
   waitForStable<T, U extends T>(
     js: string,
-    options: { holdMs: number; matcher: (value: T) => value is U; intervalMs?: number; failure?: string },
+    options: { holdMs: number; matcher: (value: T) => value is U; intervalMs?: number; failure?: string; visualDiagnostic?: VisualProgram },
   ): U
   waitForStable<T = unknown>(
     js: string,
-    options: { holdMs: number; matcher?: (value: T) => boolean; intervalMs?: number; failure?: string },
+    options: { holdMs: number; matcher?: (value: T) => boolean; intervalMs?: number; failure?: string; visualDiagnostic?: VisualProgram },
   ): T
   waitForStable<T = unknown>(
     js: string,
@@ -630,7 +636,8 @@ export class AgentBrowser {
       matcher = (value: T) => value !== null && value !== undefined && value !== false,
       intervalMs = 100,
       failure,
-    }: { holdMs: number; matcher?: (value: T) => boolean; intervalMs?: number; failure?: string },
+      visualDiagnostic,
+    }: { holdMs: number; matcher?: (value: T) => boolean; intervalMs?: number; failure?: string; visualDiagnostic?: VisualProgram },
   ): T {
     const startedAt = performance.now()
     const timeoutMs = defaultWaitTimeoutMs()
@@ -642,18 +649,47 @@ export class AgentBrowser {
     let attempts = 0, completedSamples = 0, nullSamples = 0, commandErrors = 0, lateReturns = 0, matcherErrors = 0
     let lastSample: PollDiagnostics['lastSample'] = null
     let terminalProbe: PollAttempt | null = null
+    const token = visualDiagnostic?.mode === 'envelope' ? randomUUID() : undefined
+    const visual: VisualPollEvidence | undefined = visualDiagnostic && { kind: visualDiagnostic.kind, ...(token ? { token } : {}),
+      ...(visualDiagnostic.mode === 'legacy' ? { fallback: visualDiagnostic.fallback } : {}),
+      latest: null, firstQualified: null, latestQualified: null, reasons: {},
+    }
+    let decoderErrors = 0
     for (;;) {
+      const attempt = ++attempts
+      // Construction uses this same deadline; its cost never buys more CLI time.
+      const expression = visualDiagnostic?.mode === 'envelope' ? visualDiagnostic.build(token!, attempt) : js
       const probeStartedAt = performance.now()
       const budgetMs = deadline - probeStartedAt
-      const attempt = ++attempts
-      let returned = false
+      let returned = false, decoded = false
       try {
-        const value = this.run(['eval', js], budgetMs).result as T
+        const response = this.run(['eval', expression], budgetMs)
+        const raw = response.result
         // A hold starts at an observed sample, after transport/evaluation completes.
         const now = performance.now()
         returned = true
-        terminalProbe = { attempt, startMs: probeStartedAt - startedAt, endMs: now - startedAt, budgetMs, outcome: now > deadline ? 'returned-after-deadline' : 'returned', value }
-        if (now > deadline) { lateReturns += 1; break }
+        terminalProbe = { attempt, startMs: probeStartedAt - startedAt, endMs: now - startedAt, budgetMs, outcome: now > deadline ? 'returned-after-deadline' : 'returned', value: visualDiagnostic?.mode === 'envelope' ? undefined : raw }
+        if (now > deadline) lateReturns += 1
+        let value = raw as T
+        if (visualDiagnostic?.mode === 'envelope') {
+          const sample = decodeVisualSample(raw, Object.prototype.hasOwnProperty.call(response, 'result'), { token: token!, attempt, kind: visualDiagnostic.kind, session: this.session })
+          value = sample.value as T
+          visual!.latest = sample.observation
+          if (sample.observation.qualification === 'qualified') {
+            visual!.firstQualified ??= sample.observation
+            visual!.latestQualified = sample.observation
+            visual!.reasons[sample.observation.reason] = (visual!.reasons[sample.observation.reason] ?? 0) + 1
+          }
+        } else if (visual) visual.latest = { qualification: 'legacy-fallback', attempt }
+        decoded = true
+        terminalProbe.value = value
+        if (now > deadline) break
+        // Transport completion anchors the original hold. Codec work also spends
+        // this deadline and cannot make an otherwise late match eligible.
+        if (visualDiagnostic?.mode === 'envelope' && performance.now() > deadline) {
+          terminalProbe.decoderExceededDeadline = true
+          break
+        }
         completedSamples += 1
         if (value === null) nullSamples += 1
         lastSample = { attempt, completedAtMs: now - startedAt }
@@ -676,6 +712,11 @@ export class AgentBrowser {
         if (!returned) {
           commandErrors += 1
           terminalProbe = { attempt, startMs: probeStartedAt - startedAt, endMs: now - startedAt, budgetMs, outcome: 'threw', error: cause }
+          if (visual) visual.latest = { qualification: 'command-error', attempt }
+        } else if (!decoded && terminalProbe && terminalProbe.outcome !== 'threw') {
+          decoderErrors += 1
+          terminalProbe.decoderError = cause
+          visual!.latest = { qualification: 'protocol-error', attempt }
         } else if (terminalProbe?.outcome === 'returned') {
           matcherErrors += 1
           terminalProbe.matcherError = cause
@@ -697,6 +738,7 @@ export class AgentBrowser {
       poll: {
         timeoutMs, holdMs, elapsedMs: performance.now() - startedAt,
         attempts, completedSamples, nullSamples, commandErrors, lateReturns, matcherErrors, lastSample,
+        ...(visual ? { decoderErrors, visual } : {}),
         terminalProbe: terminalProbe && {
           attempt: terminalProbe.attempt, startMs: terminalProbe.startMs, endMs: terminalProbe.endMs,
           durationMs: terminalProbe.endMs - terminalProbe.startMs, budgetMs: terminalProbe.budgetMs,
@@ -704,8 +746,11 @@ export class AgentBrowser {
           ...(terminalProbe.outcome === 'threw'
             ? { browserCompletion: 'unknown' as const, error: describePollError(terminalProbe.error) }
             : { browserCompletion: 'returned' as const,
-              result: { type: terminalProbe.value === null ? 'null' : typeof terminalProbe.value, present: terminalProbe.value !== undefined, summary: summarize(terminalProbe.value) },
+              ...(terminalProbe.decoderError !== undefined ? { decoderError: describePollError(terminalProbe.decoderError) } : {
+                result: { type: terminalProbe.value === null ? 'null' : typeof terminalProbe.value, present: terminalProbe.value !== undefined, summary: summarize(terminalProbe.value) },
+              }),
               ...(terminalProbe.matcherError !== undefined ? { matcherError: describePollError(terminalProbe.matcherError) } : {}),
+              ...(terminalProbe.decoderExceededDeadline ? { decoderExceededDeadline: true as const } : {}),
             }),
         },
       },

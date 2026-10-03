@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AgentBrowser, WaitForValueError, configureFailureCapture } from '../../e2e/agent-browser'
 import { waitForSettledSample } from '../../e2e/visual-ready'
+import { scriptedVisualResult } from './helpers/visual-wire-fixture'
 import { dismissWithEscape, focusWithKeyboard, hoverVisiblePoint } from '../../e2e/contrast'
 
 /**
@@ -339,7 +340,7 @@ it.each([false, 0])('returns the held measurement %s after geometry and focus se
   const monotonic = vi.spyOn(performance, 'now').mockImplementation(() => now)
   const pause = vi.spyOn(Atomics, 'wait').mockReturnValue('timed-out')
   const run = vi.spyOn(browser as unknown as { run: (args: string[], timeoutMs?: number) => { result: unknown } }, 'run')
-    .mockImplementation(() => { now += 100; return { result: states[probes++] } })
+    .mockImplementation((args) => { now += 100; return { result: scriptedVisualResult(args[1]!, states[probes++]) } })
   try {
     expect(waitForSettledSample(browser, String(value))).toBe(value)
     expect(probes).toBe(6) // no second read after the accepted sample

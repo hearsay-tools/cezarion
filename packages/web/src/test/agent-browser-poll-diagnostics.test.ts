@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AgentBrowser, WaitForValueError, configureFailureCapture } from '../../e2e/agent-browser'
 import { waitForSettledSample } from '../../e2e/visual-ready'
+import { scriptedVisualResult } from './helpers/visual-wire-fixture'
 
 // Exercise the real wait/hold/capture code with only its external command seam
 // and monotonic scheduling controlled. No browser or wall-clock jitter.
@@ -31,7 +32,7 @@ function controlled(probes: Probe[], label: string) {
         if (next.at < now) throw new Error('fixture monotonic time went backwards')
         now = next.at
         if (next.error) throw next.error
-        return { result: next.value }
+        return { result: scriptedVisualResult(args[1]!, next.value) }
       }
       captureCalls.push({ action: args[0]!, budget: timeoutMs })
       if (args[0] === 'screenshot') { capturing = true; writeFileSync(args[1]!, 'controlled screenshot'); return {} }
