@@ -15,6 +15,8 @@ change product behavior. No dependencies, assertion tolerances, timeouts, holds 
 change; the original transcript fixture remains intact and a separate held-replay fixture
 adds regression coverage.
 
+**Final local acceptance (2026-10-03): normal and full CPU-loaded suites PASS at `dc001023`.** The final section records exact inputs, retained history, lane totals, load and cleanup.
+
 ## Diagnosis and provenance
 
 - **R — rendered before geometry.** #758's observed −847px code-line gap came from
@@ -384,7 +386,7 @@ Historical parent results are retained against their tested revision:
 - At `923becf3`, **all six normal commands passed**, including the complete four-lane
   suite: `npm run typecheck`, `npm test`, `npm run test:unit`, `npm run build`,
   `npm run test:package`, `npm run test:e2e:local`, each exit 0. Evidence:
-  `.ai/qa/issue-795/normal-gate/{status.json,*.log}`.
+  `.ai/qa/issue-795/normal-gate-before-rail-fix/{status.json,*.log}`.
 - The first AFTER-loaded run at that same revision **failed**: **610 passed, two rail
   failures, seven existing skips**, exit 1; CPU mean **100%**, minimum **99.89%**, **156**
   samples; all **24** burners cleaned (`loadWorkersRemaining=0`). Evidence:
@@ -743,3 +745,52 @@ passing diagnostics. Parent owns final acceptance.
 spec correction, unchanged shared readiness and native proof driver. Only documentation
 changes follow the runtime verification. This targeted loaded pass is not a full loaded
 acceptance result and does not erase the original parent failure.
+
+
+## Final local acceptance — 2026-10-03
+
+All final reviewed runtime inputs are integrated in parent `dc0010236cc7c9ec1040e7efc1bfdb51ea8952a5`.
+The cache correction was independently approved at worker `b9e993c2`; the local theme readiness
+correction was independently approved at worker `9baceb5e`. Both workers' latest settled results
+were collected. Their reports are retained under `.ai/qa/issue-795/review-round-1/`, including
+`cache-navigation-re-review.md` and `settings-theme-review.md`.
+
+| Command / acceptance | Tested input | Result | Parent evidence |
+| --- | --- | --- | --- |
+| `npm run typecheck` | `190ceb02` | exit 0, all four workspaces | `normal-gate/typecheck.log` |
+| `npm test` | `190ceb02` | exit 0, 531 files / 11,497 tests | `normal-gate/test.log` |
+| `npm run test:unit` | `190ceb02` | exit 0, 504 tests | `normal-gate/test-unit.log` |
+| `npm run build` | `190ceb02` | exit 0, including tarball gate | `normal-gate/build.log` |
+| `npm run test:package` | `190ceb02` | exit 0, 62 tests | `normal-gate/test-package.log` |
+| `npm run test:e2e:local` | `190ceb02` | exit 0, all 63 specs; 613 passed / seven existing skips | `normal-gate/status.json`, `normal-gate/test-e2e-local.log`; lanes `1791028401620-3658425` |
+| `npm run test:e2e:local`, final normal browser rerun | `dc001023` | exit 0, all 63 specs; 613 passed / seven existing skips; ended 12:56:03 UTC | `final-browser-after-theme/{status.json,suite.log}`; lanes `1791031681694-3878081` |
+| `npm run test:e2e:local`, full CPU-loaded AFTER attempt 3 | `dc001023` | exit 0, all 63 specs; 613 passed / seven existing skips; 12:56:32–13:08:59 UTC | `loaded-fixed-attempt-3/{status.json,suite.log,cpu-load.ndjson}`; lanes `1791032193110-3966403` |
+
+Paths in the last column are beneath `.ai/qa/issue-795/`, except lane folders under
+`.ai/qa/local-runs/`. Final normal and loaded lane counts match: 137 / 168 / 115 / 193
+passed; 0 / 5 / 1 / 1 existing skips. No new skip, filter or assertion relaxation was added.
+The load supervisor kept one default-priority busy process pinned to each available CPU
+(0–23) throughout build and all four browser lanes. Its 149 five-second samples record
+mean **100%**, minimum **99.93%**, maximum **100%** utilization. Final cleanup reports
+**zero remaining load workers**. Supervisor source is retained at `/tmp/cez-795-load.py`
+and included in the published acceptance snapshot.
+
+First-five-gate evidence remains valid for the final tree: the only changes after `190ceb02`
+are the appearance e2e wait, its standalone native proof driver and Markdown. Product and
+shared test-helper inputs are unchanged. The affected unit scan (49 tests) and web typecheck
+were rerun after those changes; the complete normal browser suite and complete loaded suite
+were rerun at the final runtime revision. Subsequent acceptance documentation changes do not
+invalidate these checks under the repository's unchanged-input rule.
+
+History remains intact: BEFORE loaded baseline `35a519de` passed 612 tests / seven existing
+skips; loaded AFTER attempt 1 failed two rail tests; loaded AFTER attempt 2 failed the original
+theme interaction. Both earlier normal restoration failures, contextual diagnostics, font-loading
+observations and the unchanged unit timing timeouts remain associated with their actual inputs.
+The new passes do not erase them or prove every intermittent failure is eliminated. In particular,
+the theme geometry gap has native red/green proof, but the original failing pointer hit and the
+source of its layout shift remain unproven; the global font guard remains unchanged.
+
+The final exhaustive inventory is **63 specs**, **16 shared/setup files plus one native proof
+driver**, and **212 actual accepted-sample calls**. The original 462 baseline sampling calls,
+45 affected spec rows and 18 NONE rows remain the baseline audit counts. All #758 and #794
+coverage is retained. Local acceptance is complete; draft-PR CI remains a separate verification.
