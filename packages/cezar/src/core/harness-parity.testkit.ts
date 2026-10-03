@@ -57,6 +57,8 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  * | `steer-late` | the final text first; agent input sent after it arrives after the last model call (#505) |
  */
 export const SCENARIOS = [
+  'crash-stderr-pre-ack',
+  'crash-stderr-held-pipe',
   'shutdown-stderr',
   'crash-stderr',
   'crash-stderr-single',
@@ -142,6 +144,8 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     mockBin: CLAUDE_MOCK,
     scenarios: {
       baseline: BASELINE_PROMPT,
+      'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
+      'crash-stderr-held-pipe': 'mock:crash-stderr-held-pipe',
       'shutdown-stderr': 'mock:crash-stderr-clean',
       'crash-stderr': 'mock:crash-stderr',
       'crash-stderr-single': 'mock:crash-stderr-single',
@@ -171,6 +175,8 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     mockBin: CODEX_MOCK,
     scenarios: {
       baseline: BASELINE_PROMPT,
+      'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
+      'crash-stderr-held-pipe': 'mock:crash-stderr-held-pipe',
       'shutdown-stderr': 'mock:crash-stderr-clean',
       'crash-stderr': 'mock:crash-stderr',
       'crash-stderr-single': 'mock:crash-stderr-single',
@@ -200,6 +206,8 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     mockBin: OPENCODE_MOCK,
     scenarios: {
       baseline: BASELINE_PROMPT,
+      'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
+      'crash-stderr-held-pipe': 'mock:crash-stderr-held-pipe',
       'shutdown-stderr': 'mock:crash-stderr-clean',
       'crash-stderr': 'mock:crash-stderr',
       'crash-stderr-single': 'mock:crash-stderr-single',
@@ -229,6 +237,8 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     binEnv: 'CEZ_CURSOR_BIN',
     mockBin: join(HERE, '..', '..', 'scripts', 'mock-cursor-acp.mjs'),
     scenarios: { baseline: BASELINE_PROMPT,
+      'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
+      'crash-stderr-held-pipe': 'mock:crash-stderr-held-pipe',
       'shutdown-stderr': 'mock:crash-stderr-clean',
       'crash-stderr': 'mock:crash-stderr',
       'crash-stderr-single': 'mock:crash-stderr-single', done: 'mock:done', hold: 'mock:hold', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'busy-progress': 'mock:busy-progress',
@@ -247,6 +257,8 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     mockBin: PI_MOCK,
     scenarios: {
       baseline: BASELINE_PROMPT,
+      'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
+      'crash-stderr-held-pipe': 'mock:crash-stderr-held-pipe',
       'shutdown-stderr': 'mock:crash-stderr-clean',
       'crash-stderr': 'mock:crash-stderr',
       'crash-stderr-single': 'mock:crash-stderr-single',
@@ -405,6 +417,7 @@ export function textEvents(v1: readonly AgentEvent[]): string[] {
 }
 
 export interface SeamObservation {
+  readonly elapsedMs: number;
   readonly v1: readonly AgentEvent[];
   readonly v2: readonly UiEvent[];
   readonly result: AgentRunResult;
@@ -438,6 +451,7 @@ export async function driveSeam(
   scenario: ScenarioName,
   opts: DriveSeamOptions = {},
 ): Promise<SeamObservation> {
+  const started = Date.now();
   const adapter = HARNESS_ADAPTERS[backend];
   const savedBin = process.env[adapter.binEnv];
   const savedDry = process.env.CEZ_DRY_RUN;
@@ -473,7 +487,7 @@ export async function driveSeam(
     else await waitFor(() => v1.some((e) => e.type === 'turn-end' || e.type === 'error'));
     session.end();
     const result = await settled;
-    return { v1, v2, result, pid };
+    return { v1, v2, result, pid, elapsedMs: Date.now() - started };
   } finally {
     session?.interrupt();
     if (savedBin === undefined) delete process.env[adapter.binEnv];

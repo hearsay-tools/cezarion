@@ -77,6 +77,35 @@ const sessionEvents = (v1: readonly AgentEvent[]) =>
 
 const SEAM_CRITERIA: readonly SeamCriterion[] = [
   {
+    id: 'S18',
+    name: 'S18 reports one actionable crash before terminal boundaries when the opening prompt is unacknowledged',
+    scenario: 'crash-stderr-pre-ack',
+    assert: ({ v1 }) => {
+      const errors = v1.filter(e => e.type === 'error');
+      expect(errors).toHaveLength(1);
+      expect(errors[0]!.message).toContain('Error: write EPIPE');
+      expect(errors[0]!.message).toMatch(/(?:code 1|\(1\))/);
+      const errorIndex = v1.findIndex(e => e.type === 'error');
+      for (const [index, event] of v1.entries()) {
+        if (event.type === 'turn-end' || event.type === 'done') expect(index).toBeGreaterThan(errorIndex);
+      }
+      expect(v1.filter(e => e.type === 'turn-end').length).toBeLessThanOrEqual(1);
+      expect(v1.filter(e => e.type === 'done').length).toBeLessThanOrEqual(1);
+    },
+  },
+  {
+    id: 'S19',
+    name: 'S19 drains late crash stderr without waiting indefinitely for inherited pipes',
+    scenario: 'crash-stderr-held-pipe',
+    assert: ({ v1, elapsedMs }) => {
+      expect(elapsedMs).toBeLessThan(4_000); // Descendant keeps both pipes open for 5s.
+      const errors = v1.filter(e => e.type === 'error');
+      expect(errors).toHaveLength(1);
+      expect(errors[0]!.message).toContain('Error: write EPIPE');
+      expect(v1.filter(e => e.type === 'note').map(e => e.message).join('\n')).toContain('late buffered crash diagnostic');
+    },
+  },
+  {
     id: 'S17',
     name: 'S17 keeps clean exits and requested signal teardown successful despite stderr',
     scenario: 'shutdown-stderr',

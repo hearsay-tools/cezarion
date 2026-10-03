@@ -331,7 +331,19 @@ class CodexSession implements AgentSession {
         !(this.terminatedByCezar && isSignalTerminationExit(exitCode))))) {
         this.emit({ type: 'note', message: `codex app-server stderr:\n${stderr}` });
       }
-      if (this.failure) throw this.failure;
+      if (this.failure) {
+        // Before the first prompt ACK, process/pipe closure can own the failure
+        // before the ordinary crash branch. Keep its phase context and expose
+        // the drained terminal exception on the same v1 error seam as later exits.
+        if (!this.startupComplete && !this.timedOut && stderr.trim() && exitCode !== null && exitCode !== 0 &&
+          !(this.terminatedByCezar && isSignalTerminationExit(exitCode))) {
+          const detail = summarizeRunnerStderr(stderr);
+          const message = `codex app-server exited with code ${exitCode}${detail ? ` — ${detail}` : ''} (${this.failure.message})`;
+          this.emit({ type: 'error', message });
+          throw new Error(message);
+        }
+        throw this.failure;
+      }
 
       // Timeout/interrupt can end the read loop mid-item — recover buffered prose.
       this.textCoalescer.flush();

@@ -1,4 +1,5 @@
 import { summarizeRunnerStderr } from './runner-stderr.ts';
+import { finished } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
@@ -20,7 +21,7 @@ import { isSignalTerminationExit, prependSystemPrompt, trackChildExit } from './
 import { buildChildEnv } from './agent-env.ts';
 import { ciOpenCodeEnv } from '../ci-wait/injection.ts';
 import { parseAskRequest, type AskQuestion } from './ask.ts';
-import { AUTO_END_DELAY_MS, DEFAULT_RUN_TIMEOUT_MS } from './runner-runtime.ts';
+import { boundOutputDrainAfterExit, AUTO_END_DELAY_MS, DEFAULT_RUN_TIMEOUT_MS } from './runner-runtime.ts';
 import { formatModelIdentity, parseModelIdentity } from './model-identity.ts';
 import { V1TextCoalescer } from './v1-text-coalescer.ts';
 import {
@@ -230,6 +231,12 @@ class OpencodeSession implements AgentSession {
       throw wrapSpawnError(err, bin);
     }
     this.hasExited = trackChildExit(this.child);
+    boundOutputDrainAfterExit(this.child);
+    // `exit` settles process liveness, not its pipes. The shared 250ms drain
+    // bound prevents an inherited descendant pipe from retaining this session.
+    const outputDrained = Promise.all([this.child.stdout, this.child.stderr].map(stream =>
+      finished(stream, { cleanup: true }).catch(() => undefined),
+    ));
 
     this.child.on('error', (err: NodeJS.ErrnoException) => {
       this.spawnFailed = wrapSpawnError(err, bin);
@@ -283,6 +290,7 @@ class OpencodeSession implements AgentSession {
       }
 
       await this.exited;
+      await outputDrained;
       if (this.spawnFailed) throw this.spawnFailed;
 
       // SSE closure can precede the process exit event. Choose one authoritative
@@ -579,19 +587,19 @@ class OpencodeSession implements AgentSession {
           this.emit({ type: 'error', message: `opencode: agent input failed: ${message}` });
           this.interrupt();
         }
+      } else if (origin === 'opening') {
+        this.emit({ type: 'note', message: `opencode: prompt failed: ${message}` });
+        // A dropped ACK can be the first sign of a process crash. Retain HTTP
+        // rejection details, but let settlement choose one error before turn-end.
+        this.openingPromptFailed = true;
+        this.exitFailure = `opencode: ${message}`;
+        this.interrupt();
       } else {
         this.emit({ type: 'note', message: `opencode: prompt failed: ${message}` });
-        if (origin === 'opening') {
-          // Opening failure was always fatal. Report it before the synthetic
-          // boundary, and do not emit it again from the bootstrap result catch.
-          this.openingPromptFailed = true;
-          if (!this.timedOut) this.emit({ type: 'error', message: `opencode: ${message}` });
-          this.interrupt();
-        }
       }
-      if (!this.providerErrorPending) this.finishTurn();
-      // Bootstrap still rejects; its result catch suppresses the already
-      // reported opening error. Human follow-ups keep their nonfatal note.
+      if (!this.providerErrorPending && origin !== 'opening') this.finishTurn();
+      // Bootstrap still rejects; its result path reports the latched opening
+      // failure. Human follow-ups keep their nonfatal note and turn boundary.
       throw err;
     }
   }

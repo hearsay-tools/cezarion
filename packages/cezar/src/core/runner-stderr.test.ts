@@ -4,6 +4,9 @@ import { summarizeRunnerStderr } from './runner-stderr.ts';
 describe('summarizeRunnerStderr', () => {
   it.each([
     ['', ''],
+    ['Error: transient connection reset; retrying\nRecovered\nError: write EPIPE\n    at write (file.js:1:2)\nNode.js v24.20.0', 'Error: write EPIPE'],
+    ["Error: recovered\nRecovered\nfile:///runner.js:1\nthrow new Error('outer', {cause: inner});\n^\nError: outer {\n  [cause]: Error: inner {\n    code: 'EPIPE'\n  }\n}\nNode.js v24.20.0", 'Error: outer {'],
+    ['Error: recovered\nRecovered\nError: outer {\n  diagnostics: `\n    Error: nested property text\n  `\n}\nNode.js v24.20.0', 'Error: outer {'],
     ['  \nNode.js v24.20.0\n', ''],
     ['authentication unavailable\n', 'authentication unavailable'],
     ['\nfirst\n\nsecond\nthird\nfourth\nNode.js v24.20.0\n', 'second | third | fourth'],

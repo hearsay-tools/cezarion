@@ -1,5 +1,6 @@
 // Synthetic Node uncaught-exception diagnostic matching #499's property/footer layout.
-// Native transports call this only after their own startup/prompt handshake.
+// Native transports call this when a prompt arrives, optionally before its ACK.
+import { spawn } from 'node:child_process';
 import { writeSync } from 'node:fs';
 export function crashWithStderr(prompt, malformedFrame) {
   if (!prompt.includes('mock:crash-stderr')) return false;
@@ -13,6 +14,12 @@ export function crashWithStderr(prompt, malformedFrame) {
     writeSync(2, 'authentication unavailable\n');
     process.exit(7);
   }
+  if (prompt.includes('mock:crash-stderr-held-pipe')) {
+    spawn(process.execPath, ['-e', `setTimeout(() => process.stderr.write('late buffered crash diagnostic\\n'), 40); setTimeout(() => {}, 5000);`], {
+      stdio: ['ignore', process.stdout, process.stderr],
+    });
+  }
+  writeSync(2, 'Error: transient connection reset; retrying\nRecovered\n');
   if (malformedFrame) writeSync(1, malformedFrame + '\n');
   writeSync(2, `node:events:496
       throw er; // Unhandled 'error' event

@@ -757,6 +757,17 @@ after process settlement, before its synthetic turn-end, so an SSE disconnect
 cannot obscure the exception or add a second error. Timeouts and requested
 signal teardown retain their existing outcomes.
 
+S15 additionally pins selection of the terminal outer exception after a recovered
+error, without confusing indented nested causes/properties with the fatal header.
+**S18** crashes while the opening prompt is awaiting acknowledgement (before the
+first response on Claude's stream wire), requiring one actionable error before
+any terminal boundary. **S19** inherits the CLI's pipes in a descendant, writes a
+late diagnostic after CLI exit, and proves settlement remains bounded. OpenCode
+awaits drained stdout/stderr after confirmed process exit under the shared 250ms
+pipe deadline; an opening HTTP rejection keeps its note and failure reason, while
+a concurrent process crash supplies the authoritative error. Codex startup crash
+errors retain their phase context alongside the terminal stderr exception.
+
 Workflow deadline rows **T1–T6** (#470) live in
 `core/workflow-timeout-parity.test.ts` and are registered in the shared parity
 guard. Each `RUNNER_IDS` backend uses its own `HARNESS_ADAPTERS` native wire:

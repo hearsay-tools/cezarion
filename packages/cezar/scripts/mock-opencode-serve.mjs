@@ -160,6 +160,11 @@ const server = createServer((req, res) => {
       req.method === 'POST' &&
       (url === `/session/${SESSION_ID}/prompt_async` || url === `/session/${SESSION_ID}/message`)
     ) {
+      if (body.includes('mock:crash-stderr-pre-ack')) {
+        const { crashWithStderr } = await import('./mock-runner-crash.mjs');
+        crashWithStderr(body);
+        return;
+      }
       if (body.includes('mock:reject-agent-post')) {
         res.writeHead(503, { 'content-type': 'application/json' });
         res.end(JSON.stringify({ error: 'agent prompt rejected' }));

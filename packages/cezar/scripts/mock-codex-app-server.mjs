@@ -190,6 +190,12 @@ rl.on('line', async (line) => {
       emit({ id: msg.id, result: { thread: { id: msg.params?.threadId }, sandbox } });
     }
   } else if (msg.method === 'turn/start') {
+    const openingCrashText = msg.params?.input?.map?.((part) => part.text ?? '').join('\n') ?? '';
+    if (openingCrashText.includes('mock:crash-stderr-pre-ack')) {
+      const { crashWithStderr } = await import('./mock-runner-crash.mjs');
+      crashWithStderr(openingCrashText, '{"method":"turn/started","params":');
+      return;
+    }
     if (rejectedPermissionOverride) permissionWarning();
     activeTurnId = 'turn_mock_1';
     // owned-input-delivery.testkit.ts patches the exact `emit(...)` line below; keep it verbatim.
