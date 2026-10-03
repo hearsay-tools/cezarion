@@ -2,7 +2,7 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import { waitForSettledSample } from './visual-ready'
+import { settleVisual, waitForSettledSample } from './visual-ready'
 import { AgentBrowser, readTestEnv } from './agent-browser'
 import { waitForServerAppearance } from './poll'
 
@@ -78,6 +78,9 @@ describe('settings → appearance against the live dry-run server', () => {
     expect(browser.count('[data-slot="appearance-theme"] [data-value="light"][aria-checked="true"]')).toBe(1)
 
     // Back to dark so every other suite screenshots the default palette.
+    // #795 loaded trace: Light/root readiness precedes a 60px control shift.
+    // Hold native target geometry independently of the expected theme result.
+    settleVisual(browser, '[data-slot="appearance-theme"] [data-value="dark"]')
     browser.click('[data-slot="appearance-theme"] [data-value="dark"]')
     browser.waitForFunction(`!document.documentElement.classList.contains('light')`)
   })

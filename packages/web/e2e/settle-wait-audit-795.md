@@ -5,7 +5,9 @@ Scope: every one of the **63** current `*.e2e.ts` specs. The original audit cove
 **13** helper/setup files (11 direct TypeScript files plus `fetch-setup.mjs` and
 `fixtures/make-large-thread.ts`); review round 1 adds `transcript-measurements.ts` and
 `session-layout.ts`; the loaded-rail correction adds `project-rail-ready.ts`, bringing
-the current helper/setup inventory to **16**.
+the helper/setup inventory to **16**. The settings follow-up adds one standalone
+native proof driver, bringing the current infrastructure inventory to **17** (16
+shared/setup files plus the proof driver).
 The initial readiness audit and review corrections stay in test infrastructure. After
 repeated full-suite restoration failures, the human approved the bounded product cache
 remedy described below on 2026-10-03. Only `thread-scroll.ts` and `thread-scroller.tsx`
@@ -109,7 +111,7 @@ waits still need S when followed by a changed geometry sample.
 | [selection-states.e2e.ts](selection-states.e2e.ts) | 36: 100, 107, 109, 144, 146, 149, 214, 230, 239, 245, 258, 263, 276, 289, 316, 338, 370, 375, 401, 405, 410, 415, 419, 438, 445, 460, 470, 476, 488, 492, 498, 505, 509, 538, 540, 546 | 214, 230, 239, 245, 263, 276, 289, 370, 375, 401, 460, 509. #369/#617 hover and selected state: expected fill and pin opacity moved to assertions; geometry, focus and finite animation completion determine readiness. Contrast thresholds and focus-visible assertions retained. | 106, 136, 144, 146, 194, 214, 221, 230, 239, 245, 251, 258, 263, 274, 276, 289, 298, 307, 313, 316, 319, 329, 334, 341, 343, 352, 370, 372, 375, 436, 438, 442, 443, 447, 455, 479, 495, 503, 534, 538, 540, 546 |
 | [settings-agent-config.e2e.ts](settings-agent-config.e2e.ts) | 3: 52, 56, 99 | 52. S: raw / first-value geometry after route, viewport, theme, density or disclosure now returns the held measurement. Existing assertions remain unchanged. | 48, 69, 98 |
 | [settings-agents.e2e.ts](settings-agents.e2e.ts) | 0: NONE | NONE. K: existing waits / direct data, focus or visibility checks retained. | 81, 87, 100, 106, 117, 118 |
-| [settings-appearance.e2e.ts](settings-appearance.e2e.ts) | 2: 116, 121 | 116, 121. S: raw / first-value geometry after route, viewport, theme, density or disclosure now returns the held measurement. Existing assertions remain unchanged. | 52, 72, 76, 81, 93, 108, 120, 129 |
+| [settings-appearance.e2e.ts](settings-appearance.e2e.ts) | 2: 116, 121 | 116, 121. S: density geometry returns the held measurement. Loaded follow-up: baseline Dark action at80 (current84) follows semantic readiness while its target later shifts60px; current83 adds existing target settle before the same click. Original expectations/timeouts remain unchanged. | 52, 72, 76, 81, 93, 108, 120, 129 |
 | [settings-bookmarklets.e2e.ts](settings-bookmarklets.e2e.ts) | 0: NONE | NONE. K: existing waits / direct data, focus or visibility checks retained. | 48, 95, 123, 129, 137, 141, 152, 165, 196, 201, 206, 210, 216, 217 |
 | [settings-monitoring.e2e.ts](settings-monitoring.e2e.ts) | 0: NONE | NONE. K: existing waits / direct data, focus or visibility checks retained. | 147, 161, 218, 220, 221 |
 | [settings-resources.e2e.ts](settings-resources.e2e.ts) | 0: NONE | NONE. K: existing waits / direct data, focus or visibility checks retained. | 50, 60, 66, 68, 74, 76, 84, 86, 88, 99, 101 |
@@ -167,7 +169,7 @@ remains anchored at `35a519de`; review corrections and their current sites follo
 - `run-header-ci-wait.e2e.ts`: 88, 102, 137.
 - `selection-states.e2e.ts`: 215, 231, 241, 248, 267, 281, 295, 376, 382, 409, 468, 517.
 - `settings-agent-config.e2e.ts`: 53.
-- `settings-appearance.e2e.ts`: 117, 122.
+- `settings-appearance.e2e.ts`: 120, 125; target action readiness at83 uses existing `settleVisual`.
 - `settings-sidebar.e2e.ts`: 26, 80.
 - `sidebar-project-header.e2e.ts`: 104, 119.
 - `sidebar-reference-status.e2e.ts`: 86, 185, 206.
@@ -207,6 +209,7 @@ remains anchored at `35a519de`; review corrections and their current sites follo
 | `vitest.config.ts` | spec selection, browser lane configuration | NONE: no browser geometry/focus/visibility. |
 | `fetch-setup.mjs` | fetch environment setup | NONE: no browser geometry/focus/visibility. |
 | `fixtures/make-large-thread.ts` | deterministic server fixture generation | NONE: no browser geometry/focus/visibility. |
+| `fixtures/theme-layout-proof.ts` | standalone native blank-document render-phase regression; initial and held geometry signatures, original selector action | R/S: native checks from existing visual expression before boxes. One fixture-owned RAF commits the observed60px shift; first-truth comparison is red, existing200ms target settle returns the actual committed sample. No product DOM writes or expected-theme readiness. This is a manual provider proof, not an additional full-suite spec. |
 
 ## Red / green evidence and verification
 
@@ -675,3 +678,68 @@ byte-identical to `final-fixed-thread-scroller.tsx`. All earlier full normal/loa
 and passes remain attached to their actual input revisions; parent owns independent
 re-review and the final full normal / full CPU-load gates after collecting this correction.
 The 63-spec / 16-helper audit and 212 actual accepted-sample call inventory are unchanged.
+
+
+## Loaded settings theme follow-up — qualified evidence, cause still bounded
+
+Parent runtime `190ceb02` (identical to worker `b9e993c2`) passed the complete normal
+six-command gate, including **613 browser passes / seven existing skips**. Its subsequent
+full 24-core loaded suite recorded **612 passes / one settings-appearance theme failure /
+seven existing skips**, mean CPU 100%, minimum 99.95%, all burners cleaned. The original
+Light/Dark theme block at `settings-appearance.e2e.ts:70-82` was unchanged from
+`35a519de` at that failing input; initial #795 conversions affected only later density measurements.
+
+Actual parent capture shows root Light, Light checked and active, document complete,
+no dialogs after the original Dark click. It has no trusted pointer history. Worker
+evidence is retained under `.ai/qa/issue-795/settings-theme-loaded/`, including copied
+actual parent failure/logs, three fresh diagnostic variant directories, setup comparison,
+raw qualified native trace and `diagnosis.md`. Complete four-test loaded diagnostics all
+passed: first 12.93s (CPU mean 99.984/min 99.854%,9 samples), second 12.62s
+(mean 99.977/min 99.813%,8 samples), qualified third 5.45s
+(mean 99.988/min 99.792%,17 samples). Each cleaned all 24 default-priority pinned burners.
+The first two reload traces were absent: detached preload session, then missing Page.enable.
+They are setup failures, not evidence that no pointer events or movement occurred.
+
+A nonloaded setup comparison proves Page.enable is required for preload survival. The
+third capture holds that session through navigation and compares native/CDP URL, time
+origin and first trace entry to qualify the actual active page. Its original action sequence
+is preserved; diagnostic geometry observations themselves may affect timing. The trace
+shows document-complete/root-Light/checked-Light/native-rendered controls at 236.5ms,
+fonts loaded at 267.9ms, then a **60px rightward geometry change at 301.7ms**. Dark's old
+center 515.34375 lies inside Light's later 468.921875..533.578125 box. Semantic state and
+visibility therefore precede stable action geometry. The trusted Dark click at 369.7-375.2ms
+uses the new center and succeeds. This is evidence of a readiness gap, **not proof that
+the original failure was a wrong hit**, nor proof of the source of the shift.
+
+Parent reply `f12ebd26-4ac1-4420-8e56-b7b239d32362` authorizes a controlled native
+render-phase regression for this observed readiness class while retaining the causal limit.
+`fixtures/theme-layout-proof.ts` owns a blank document with semantic-Light/checked-Light/
+complete/native-visible controls at the observed initial sizes. Its next native animation
+frame commits the measured 60px shift; it adds no timer or pointer-triggered mutation.
+The first-truth variant accepts x 483.578125 while committed x 543.578125 differs and fails
+its geometry assertion. Existing `settleVisual` returns a held actual signature matching
+the committed sample and passes. **The same native selector Dark click succeeds in both
+variants**; this is a geometry-readiness proof, not reproduction of the original wrong hit.
+
+The smallest spec correction adds existing `settleVisual(browser, darkSelector)` at current 83
+before the same original Dark click at 84. It uses the unchanged 200ms target geometry
+hold, native checks, fonts and finite-animation readiness; no appearance expectation
+matcher is supplied. All original theme/density assertions, actions, timeout budgets, shared
+helpers, product and font behavior remain unchanged. Diagnostic instrumentation is restored.
+Inventory is 63  specs / 16 shared-setup files plus 1 native proof driver / 212 accepted-sample
+calls; the original 462 baseline calls, 45 affected spec rows and 18 NONE rows are unchanged.
+The failed parent loaded result is retained and is not converted into acceptance by focused
+passing diagnostics. Parent owns final acceptance.
+
+| Command / proof | Outcome | Evidence under settings-theme-loaded/ |
+| --- | --- | --- |
+| `node --import tsx packages/web/e2e/fixtures/theme-layout-proof.ts --first-truth`, before adding the local wait | exit 1, accepted geometry x 483.578125 differs from committed 543.578125; native selector action succeeds | `native-geometry-first-truth-red.log` |
+| Same native proof without `--first-truth`, existing target settle | exit 0, actual held geometry equals committed signature; selector action succeeds | `native-geometry-settled-green.log` |
+| `npm test -- visual-ready e2e-wait-discipline agent-browser-interact` | exit 0, 49 tests/3 files, 1.25s; unchanged ratchet baseline | `units-green.log` |
+| `npm run typecheck:web` | exit 0 including service prebuild; fixture driver included | `typecheck-green.log` |
+| `python3 .ai/qa/issue-795/settings-theme-loaded/run-loaded.py fixed-final-loaded npm run test:e2e -- settings-appearance.e2e.ts` | exit 0, all 4 original tests passed 13.10s; CPU mean 99.993%/min 99.854%,21 samples, all 24 burners cleaned 0 | `fixed-final-loaded/{suite.log,status.json,cpu-load.ndjson}` |
+
+`tested-inputs.json` identifies the tested base plus SHA256/snapshots of the final local
+spec correction, unchanged shared readiness and native proof driver. Only documentation
+changes follow the runtime verification. This targeted loaded pass is not a full loaded
+acceptance result and does not erase the original parent failure.

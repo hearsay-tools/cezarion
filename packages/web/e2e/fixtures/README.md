@@ -71,3 +71,16 @@ untouched.
 To regenerate: build, boot `CEZ_DRY_RUN=1 node dist/index.js serve --repo <tmp-git-repo>`,
 start a task whose text is `mock:subagents`, wait for it to settle, then copy
 `<tmp>/.ai/cezar/runs/<id>.ndjson` here and normalize the timestamps.
+
+
+## Native theme-layout readiness proof (#795)
+
+`theme-layout-proof.ts` drives a blank fixture document through the configured browser
+provider. It reproduces the observed semantic-ready controls followed by a 60px shift on
+a separate native render frame. Run `node --import tsx packages/web/e2e/fixtures/theme-layout-proof.ts`
+from the repository root. Add `--first-truth` for the intentionally failing comparison: the
+first accepted box differs from the committed box. The default uses existing 200ms
+`settleVisual` and verifies its actual held sample. This manual provider proof is separate
+from the four application appearance tests and requires no running product server.
+Both variants keep the same selector click; a successful first-truth click does not prove
+the original loaded failure's pointer target. The original failure lacks that pointer history.
