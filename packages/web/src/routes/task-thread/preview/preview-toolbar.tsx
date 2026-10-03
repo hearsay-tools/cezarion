@@ -136,7 +136,9 @@ function Stats({ stats, shrunk }: { stats: PreviewStatsValue; shrunk: boolean })
       className="flex shrink-0 items-center gap-1.5 font-mono text-xs whitespace-nowrap text-muted-foreground"
     >
       <StatusDot tone={idle ? 'neutral' : 'success'} aria-hidden="true" />
-      <span className="hidden @min-[640px]:inline">{idle ? 'idle' : statsText(stats)}</span>
+      {/* One reserved width (the longest reading, "60 fps · 9999 KB/s · 999 ms"), live or idle:
+          a reading that changes length must not shift the URL field and the controls beside it. */}
+      <span className="hidden @min-[640px]:inline-block w-[28ch] overflow-hidden text-ellipsis">{idle ? 'idle' : statsText(stats)}</span>
     </span>
   )
 }

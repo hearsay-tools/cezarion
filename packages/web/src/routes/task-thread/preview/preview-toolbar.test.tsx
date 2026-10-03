@@ -83,6 +83,16 @@ describe('PreviewToolbar', () => {
     expect(screen.queryByText(/fps/)).toBeNull()
   })
 
+  it('keeps the stats slot one width, live or idle, so nothing beside it moves', () => {
+    render(<PreviewToolbar {...props()} />)
+    const live = screen.getByText('24 fps · 180 KB/s · 38 ms').className
+    act(() => { vi.advanceTimersByTime(1100) })
+    const idle = screen.getByText('idle').className
+    // jsdom lays nothing out: pin the reserved width, the same class in both states.
+    expect(live).toMatch(/w-\[\d+ch\]/)
+    expect(idle).toBe(live)
+  })
+
   it('with two servers the switcher appears and the badge shrinks to its icon', () => {
     render(<PreviewToolbar {...props({ servers: [web, storybook] })} />)
     expect(screen.getByRole('button', { name: /^Server: web :5173/ })).toBeTruthy()
