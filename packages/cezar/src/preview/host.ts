@@ -469,10 +469,15 @@ export class PreviewHost implements PreviewHostLike {
     if (error instanceof ChromiumMissingError || (error instanceof ChromiumError && error.kind === 'not-installed')) {
       return this.tell(entry, this.missingState());
     }
-    const stderrTail = error instanceof ChromiumError ? error.stderrTail : error instanceof Error ? error.message : String(error);
-    entry.browserFailure = error instanceof ChromiumError && error.kind === 'sandbox'
-      ? { t: 'state', stage: 'sandbox-failed', stderrTail }
-      : { t: 'state', stage: 'browser-exited', stderrTail, serverUp: this.serverUp(entry) };
+    if (error instanceof ChromiumError && error.kind === 'sandbox') {
+      entry.browserFailure = { t: 'state', stage: 'sandbox-failed', stderrTail: error.stderrTail };
+      return this.tell(entry, entry.browserFailure);
+    }
+    // A timeout or an early exit says why first: Chromium's own stderr is often unrelated noise.
+    const stderrTail = error instanceof ChromiumError
+      ? [error.message, error.stderrTail].filter(Boolean).join('\n')
+      : error instanceof Error ? error.message : String(error);
+    entry.browserFailure = { t: 'state', stage: 'browser-exited', stderrTail, serverUp: this.serverUp(entry) };
     this.tell(entry, entry.browserFailure);
   }
 

@@ -344,6 +344,14 @@ describe('PreviewHost', () => {
     expect(navigations(browsers[0]!)).toEqual(['http://localhost:5173/']);
   });
 
+  it('a launch that times out or exits names why above the stderr tail', async () => {
+    const { host, ctx, answering } = make(undefined, () => new ChromiumError('timeout', 'dbus noise', 'Chromium did not open its DevTools port in time'));
+    answering.add(5173);
+    const viewer = fakeViewer();
+    await host.open(ctx, viewer, { port: 5173 });
+    expect(viewer.messages.at(-1)).toEqual({ t: 'state', stage: 'browser-exited', stderrTail: 'Chromium did not open its DevTools port in time\ndbus noise', serverUp: true });
+  });
+
   it('a sandbox failure stays on screen until retryBrowser', async () => {
     let failing = true;
     const { host, ctx, answering, browsers } = make(undefined, () => (failing ? new ChromiumError('sandbox', 'No usable sandbox!', 'exited') : undefined));
