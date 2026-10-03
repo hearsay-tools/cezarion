@@ -508,6 +508,8 @@ const CONTROL_CRITERIA = [
   { id: 'R26', scenario: 'ask-resume' },
   // workflows/ci-wait-refusal.test.ts: settled worker wake, private CI IPC, then delivery.
   { id: 'R27', scenario: 'hold' },
+  // workflows/worker-reboot-parity.test.ts: native worker exit, reboot proof, collect/destroy and parent Finish.
+  { id: 'R28', scenario: 'baseline' },
 ] as const;
 
 /**

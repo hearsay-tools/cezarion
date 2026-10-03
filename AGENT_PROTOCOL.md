@@ -743,6 +743,14 @@ this normative contract.
 
 ## 7. Harness parity — session and lifecycle (`packages/cezar/src/core/harness-parity.test.ts`)
 
+**R28** (#738), in `workflows/worker-reboot-parity.test.ts`, drives every `RUNNER_IDS`
+backend's `HARNESS_ADAPTERS` native wire through worker cancellation and a successful twin.
+Linux prior-boot controller evidence excludes unrelated unreadable cwd candidates, allowing
+collect-first and destroy-first orphan settlement, resource cleanup and parent Finish after
+collection. Only the reboot and unreadable `/proc` boundary are simulated. Linux-only OS
+coverage does not exempt any runner; conservative same-boot, unknown-boot and real-holder
+guards live in `delegation/process-liveness.test.ts`.
+
 Crash-diagnostic rows **S15–S17** (#499) drive every `RUNNER_IDS` adapter's
 native transport through an uncaught-exception-shaped stderr fixture, a plain
 single-line failure, and a clean/requested shutdown with stderr. RPC mocks send

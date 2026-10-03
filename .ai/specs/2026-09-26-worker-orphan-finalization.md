@@ -83,7 +83,20 @@ A synchronous, dependency-free module (a sync probe lets `continueRun` stay sync
   started before the worker's record was created (`since`, from `/proc/stat` btime plus
   starttime ticks). A process that old cannot be the worker's descendant, and every host has
   some. The cutoff is the worker's creation, not the current generation's start, because an
-  earlier generation can leave a daemon holding the worktree. macOS uses
+  earlier generation can leave a daemon holding the worktree.
+
+  **Linux reboot proof (#738):** for `EACCES` or `EPERM` only, an unreadable own-user
+  cwd is no longer a possible descendant when the interrupted generation's recorded
+  controller token contains a valid boot UUID different from the current readable boot UUID.
+  No process descended from that controller can survive the reboot. This does **not**
+  skip readable worktree/scratch holders, live token-verified recorded processes, or live
+  controllers; those still block independently. Creation time before `/proc/stat`'s boot
+  time is insufficient: an old worker may have resumed under a controller in the current
+  boot. Same-boot controllers, absent records, legacy tokens without boot IDs, malformed
+  tokens, unknown current boot IDs and unexpected cwd-read errors retain the existing
+  conservative rules. No configuration or durable/API shape changes are needed.
+
+  macOS uses
   `lsof -a -d cwd -Fpn` with a bounded timeout. `lsof` silently omits processes it cannot
   read, so any process of our user (`ps -U <uid> -o pid=,lstart=`, minus `ps` itself) missing
   from its output is judged by the same rule. Without that `ps` list the scan is `unknown`.
@@ -182,6 +195,9 @@ belongs to another cezar. The second is the ordinary `cancel` path.
 
 ## Known limitations
 
+- Legacy process records without a controller boot ID, or an unreadable current Linux
+  boot ID, cannot use the #738 reboot proof. Unreadable same-user cwd candidates may
+  still block those generations; uncertainty never authorizes cleanup.
 - Reaping signals only the recorded session leader. Runners do not spawn detached, so there
   is no process group to kill. A descendant that survives the leader keeps its cwd in the
   worktree, and the scan keeps destroy `incomplete` (naming the PIDs) until it exits.
@@ -196,6 +212,17 @@ belongs to another cezar. The second is the ordinary `cancel` path.
     after it exits;
   - an unsupported platform returns `unknown`;
   - PID reuse (token mismatch) counts as gone.
+  - #738: denied cwd candidates from a different controller boot are excluded; readable
+    holders and matching live process records still block. Same-boot controllers for
+    old-created workers, legacy/missing tokens, unknown boot IDs and scan errors retain
+    conservative behavior.
+- `worker-reboot-parity.test.ts` (registered harness row R28): every `RUNNER_IDS` backend
+  launches and exits through its `HARNESS_ADAPTERS` native mock wire. Restore interrupted
+  execution evidence from a prior boot, inject an unrelated post-boot non-dumpable process,
+  and prove both collect-first and destroy-first complete the proof and remove the owned
+  worktree/branch. A successful twin is already collected; collecting the orphan clears
+  parent `finishBlocked` and allows Finish. The OS reboot/permission boundary is simulated;
+  runners, process exit, stores, Git and delegation lifecycle remain real.
 - `worker-destroy.test.ts`, with a crash simulated by a dead controller written into the
   record and the `starting` proof restored:
   - dead child → `recover()` completes the proof, the worker re-launches or settles, and
