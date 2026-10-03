@@ -219,6 +219,17 @@ export const runRecordSchema = z.object({
       githubUrl: z.string().url(),
     })
     .optional(),
+  /** Provenance for a task a scheduled automation launched. Its own key so a pre-schedule cezar
+   *  strips it instead of failing the whole index on a missing `githubUrl`. */
+  automationTrigger: z
+    .object({
+      automationId: z.string(),
+      automationRevision: z.number().int().positive(),
+      receiptId: z.string(),
+      trigger: z.enum(['schedule', 'catch-up', 'manual']),
+      occurrenceAt: z.string(),
+    })
+    .optional(),
   status: z.enum(['queued', 'running', 'waiting', 'review', 'done', 'failed', 'cancelled']),
   stopping: contractRunRecordSchema.shape.stopping.catch(undefined),
   /** Sub-state of `running` (spec 2026-07-18-subagent-monitoring-status, #490):

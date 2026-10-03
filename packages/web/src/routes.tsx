@@ -41,7 +41,7 @@ import {
 } from './routes/settings/settings-shell'
 import { TasksOverviewRoute } from './routes/tasks-overview'
 import { GlobalTasksRoute } from './routes/global-tasks'
-import { AutomationsRoute } from './routes/automations/automations'
+import { AutomationsRoute } from './routes/automations/automations-route'
 import { WorkspaceToolsRoute } from './routes/workspace-tools'
 
 /** Lazy ON PURPOSE: the thread view carries the markdown stack (Streamdown + remark/rehype,

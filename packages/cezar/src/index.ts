@@ -812,6 +812,10 @@ function ensureDataGitignore(repoRoot: string): void {
     'automation-poll.lock',
     'automation-poll.reclaim*/',
     'preview/', // live preview: per-task Chromium profile, dev-server logs and pid records (#781)
+    'automations.lock',
+    'automations.reclaim*/',
+    'automation-state.lock',
+    'automation-state.reclaim*/',
   ];
   try {
     mkdirSync(join(repoRoot, '.ai/cezar'), { recursive: true });

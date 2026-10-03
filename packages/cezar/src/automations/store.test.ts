@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, readFileSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readdirSync, readFileSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { execFileSync, spawn } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -69,6 +69,88 @@ describe('AutomationStore', () => {
     expect(() => store.update('one', 9, input)).toThrow('revision conflict');
     expect(store.delete('one')).toBe(true);
     expect(() => store.create(input, 'one')).toThrow('unavailable');
+  });
+
+  describe('definitions writes from a stale store (another cockpit on the same directory)', () => {
+    const onDisk = (dir: string) =>
+      JSON.parse(readFileSync(join(dir, 'automations.json'), 'utf8')) as { automations: { id: string; name: string; revision: number }[]; tombstones?: Record<string, string> };
+
+    it('an update of another id never resurrects a definition deleted elsewhere', async () => {
+      const dir = await directory();
+      const a = AutomationStore.open(dir);
+      a.create(input, 'x');
+      const y = a.create(input, 'y');
+      const b = AutomationStore.open(dir);
+      expect(b.delete('x')).toBe(true);
+      a.update('y', y.revision, { ...input, name: 'Y edited' });
+      const file = onDisk(dir);
+      expect(file.automations.map((row) => row.id)).toEqual(['y']);
+      expect(file.tombstones?.x).toBeDefined();
+      expect(a.get('x')).toBeUndefined();
+    });
+
+    it('a stale update of an id edited elsewhere is a revision conflict and leaves the edit intact', async () => {
+      const dir = await directory();
+      const a = AutomationStore.open(dir);
+      const x = a.create(input, 'x');
+      const b = AutomationStore.open(dir);
+      b.update('x', x.revision, { ...input, name: 'B edit' });
+      expect(() => a.update('x', x.revision, { ...input, name: 'A edit' })).toThrow('automation revision conflict');
+      expect(onDisk(dir).automations).toEqual([expect.objectContaining({ id: 'x', name: 'B edit', revision: 2 })]);
+    });
+
+    it('a stale update of an id deleted elsewhere is not found and writes nothing back', async () => {
+      const dir = await directory();
+      const a = AutomationStore.open(dir);
+      const x = a.create(input, 'x');
+      AutomationStore.open(dir).delete('x');
+      expect(() => a.update('x', x.revision, { ...input, name: 'A edit' })).toThrow('automation not found');
+      expect(onDisk(dir).automations).toEqual([]);
+    });
+
+    it('creates from two stores both land on disk, and a tombstone written elsewhere blocks the id', async () => {
+      const dir = await directory();
+      const a = AutomationStore.open(dir);
+      const b = AutomationStore.open(dir);
+      b.create(input, 'z');
+      a.create(input, 'w');
+      expect(onDisk(dir).automations.map((row) => row.id).sort()).toEqual(['w', 'z']);
+      expect(() => a.create(input, 'z')).toThrow('automation id unavailable');
+      b.delete('w');
+      expect(() => a.create(input, 'w')).toThrow('automation id unavailable');
+    });
+
+    it('a stale delete keeps definitions created elsewhere', async () => {
+      const dir = await directory();
+      const a = AutomationStore.open(dir);
+      a.create(input, 'x');
+      AutomationStore.open(dir).create(input, 'z');
+      expect(a.delete('x')).toBe(true);
+      expect(onDisk(dir).automations.map((row) => row.id)).toEqual(['z']);
+    });
+  });
+
+  it('reloadIfChanged re-reads only after another store wrote either file', async () => {
+    const dir = await directory();
+    const mine = AutomationStore.open(dir);
+    const other = AutomationStore.open(dir);
+    const created = other.create(input, 'one');
+    expect(mine.hasDefinitionsFile()).toBe(true);
+    expect(mine.get('one')).toBeUndefined();
+    expect(mine.reloadIfChanged()).toBe(true);
+    expect(mine.get('one')?.enabled).toBe(false);
+    expect(mine.reloadIfChanged()).toBe(false);
+    other.update(created.id, created.revision, { ...input, enabled: true });
+    expect(mine.reloadIfChanged()).toBe(true);
+    expect(mine.get('one')?.enabled).toBe(true);
+    other.setState('one', (current) => ({ ...current, nextCheckAt: '2026-09-14T04:00:00.000Z' }));
+    expect(mine.reloadIfChanged()).toBe(true);
+    expect(mine.state('one')?.nextCheckAt).toBe('2026-09-14T04:00:00.000Z');
+    expect(mine.reloadIfChanged()).toBe(false);
+  });
+
+  it('hasDefinitionsFile is false for a project without automations', async () => {
+    expect(AutomationStore.open(await directory()).hasDefinitionsFile()).toBe(false);
   });
 
   it('reserves one receipt per automation event and appends finalized rows', async () => {
@@ -349,5 +431,225 @@ describe('AutomationStore.acquireLease', () => {
     const lease = AutomationStore.open(dir).acquireLease(1_000);
     expect(lease).toBeDefined();
     lease?.release();
+  });
+});
+
+describe('AutomationStore.setState (read-modify-write)', () => {
+  it('lets two stores on one directory interleave writes without clobbering each other', async () => {
+    const dir = await directory();
+    const one = AutomationStore.open(dir);
+    const two = AutomationStore.open(dir);
+    one.setState('a', (current) => ({ ...current, nextRunAt: '2026-10-03T02:00:00.000Z' }));
+    two.setState('b', (current) => ({ ...current, cursor: { timestamp: '2026-10-02T00:00:00.000Z' } }));
+    one.setState('a', (current) => ({ ...current, nextRunAt: '2026-10-04T02:00:00.000Z' }));
+    const fresh = AutomationStore.open(dir);
+    expect(fresh.state('a')).toEqual({ nextRunAt: '2026-10-04T02:00:00.000Z' });
+    expect(fresh.state('b')).toEqual({ cursor: { timestamp: '2026-10-02T00:00:00.000Z' } });
+    // Each in-memory copy also sees the other's id after its own next write.
+    expect(one.state('b')).toEqual({ cursor: { timestamp: '2026-10-02T00:00:00.000Z' } });
+  });
+
+  it('two stores racing on the SAME id: the loser updates from a fresh disk read, not its stale snapshot', async () => {
+    const dir = await directory();
+    const one = AutomationStore.open(dir);
+    const two = AutomationStore.open(dir);
+    // `two` only knows 'a' as absent.
+    expect(two.state('a')).toBeUndefined();
+    one.setState('a', (current) => ({ ...current, lastRunAt: '2026-10-02T02:00:00.000Z' }));
+    two.setState('a', (current) => ({ ...current, nextRunAt: '2026-10-03T02:00:00.000Z' }));
+    expect(AutomationStore.open(dir).state('a')).toEqual({ lastRunAt: '2026-10-02T02:00:00.000Z', nextRunAt: '2026-10-03T02:00:00.000Z' });
+  });
+
+  it('keeps this process\'s last good view of other ids when the state file is unreadable', async () => {
+    const dir = await directory();
+    const one = AutomationStore.open(dir);
+    const two = AutomationStore.open(dir);
+    two.setState('b', (current) => ({ ...current, baselineAt: '2026-10-02T00:00:00.000Z' }));
+    one.setState('a', (current) => ({ ...current, lastRunAt: '2026-10-02T01:00:00.000Z' }));
+    writeFileSync(join(dir, 'automation-state.json'), '{not json');
+    one.setState('a', (current) => ({ ...current, consecutiveFailures: 1 }));
+    const fresh = AutomationStore.open(dir);
+    expect(fresh.state('b')).toEqual({ baselineAt: '2026-10-02T00:00:00.000Z' });
+    expect(fresh.state('a')).toEqual({ lastRunAt: '2026-10-02T01:00:00.000Z', consecutiveFailures: 1 });
+  });
+
+  it('returns the next record', async () => {
+    const store = AutomationStore.open(await directory());
+    expect(store.setState('a', (current) => ({ ...current, consecutiveFailures: 1 }))).toEqual({ consecutiveFailures: 1 });
+  });
+
+  it('persists the occurrence a receipt reserved', async () => {
+    const store = AutomationStore.open(await directory());
+    const receipt = store.reserveReceipt({
+      automationId: 'a',
+      revision: 1,
+      eventId: 'schedule:2026-10-03T02:00:00.000Z',
+      occurrenceAt: '2026-10-03T02:00:00.000Z',
+    });
+    expect(receipt?.receiptKey).toBe('a:schedule:2026-10-03T02:00:00.000Z');
+    expect(store.receipts()[0]?.occurrenceAt).toBe('2026-10-03T02:00:00.000Z');
+  });
+});
+
+describe('AutomationStore arm (state before definition)', () => {
+  const schedule = { ...input, kind: 'schedule' as const, schedule: { type: 'daily' as const, hour: 4, minute: 0 }, events: undefined, intervalSeconds: undefined, filters: undefined, task: { prompt: 'Nightly' } };
+
+  it('writes the armed state before the definition, from the on-disk previous definition', async () => {
+    const dir = await directory();
+    const store = AutomationStore.open(dir);
+    const created = store.create(schedule as never, 'nightly');
+    store.setState('nightly', (current) => ({ ...current, revision: 1, nextRunAt: '2026-01-01T04:00:00.000Z' }));
+    const order: string[] = [];
+    const write = (store as any).atomicJson.bind(store) as (filename: string, value: unknown) => void;
+    (store as any).atomicJson = (filename: string, value: unknown) => { order.push(filename); write(filename, value); };
+    const seen: unknown[] = [];
+    const updated = store.update('nightly', created.revision, { ...schedule, enabled: true } as never, (definition, previous) => {
+      seen.push(previous?.enabled, definition.enabled);
+      return { nextRunAt: '2026-10-04T04:00:00.000Z' };
+    });
+    expect(order).toEqual(['automation-state.json', 'automations.json']);
+    expect(seen).toEqual([false, true]);
+    expect(AutomationStore.open(dir).state('nightly')).toMatchObject({ revision: updated.revision, nextRunAt: '2026-10-04T04:00:00.000Z' });
+  });
+
+  it('a revision conflict or a missing id arms nothing', async () => {
+    const dir = await directory();
+    const store = AutomationStore.open(dir);
+    store.create(schedule as never, 'nightly');
+    store.setState('nightly', (current) => ({ ...current, revision: 1, nextRunAt: '2026-01-01T04:00:00.000Z' }));
+    const arm = () => ({ nextRunAt: '2026-10-04T04:00:00.000Z' });
+    expect(() => store.update('nightly', 7, schedule as never, arm)).toThrow('revision conflict');
+    expect(() => store.update('gone', 1, schedule as never, arm)).toThrow('not found');
+    const fresh = AutomationStore.open(dir);
+    expect(fresh.state('nightly')).toEqual({ revision: 1, nextRunAt: '2026-01-01T04:00:00.000Z' });
+    expect(fresh.state('gone')).toBeUndefined();
+  });
+
+  it('restores the armed keys when the definition write fails', async () => {
+    const dir = await directory();
+    const store = AutomationStore.open(dir);
+    const created = store.create(schedule as never, 'nightly');
+    store.setState('nightly', (current) => ({ ...current, revision: 1, nextRunAt: '2026-01-01T04:00:00.000Z', consecutiveFailures: 2 }));
+    const write = (store as any).atomicJson.bind(store) as (filename: string, value: unknown) => void;
+    (store as any).atomicJson = (filename: string, value: unknown) => {
+      if (filename === 'automations.json') throw new Error('disk full');
+      write(filename, value);
+    };
+    expect(() => store.update('nightly', created.revision, { ...schedule, enabled: true } as never, () => ({ nextRunAt: '2026-10-04T04:00:00.000Z' }))).toThrow('disk full');
+    const fresh = AutomationStore.open(dir);
+    expect(fresh.state('nightly')).toEqual({ revision: 1, nextRunAt: '2026-01-01T04:00:00.000Z', consecutiveFailures: 2 });
+    expect(fresh.get('nightly')).toMatchObject({ revision: 1, enabled: false });
+    expect(store.get('nightly')).toMatchObject({ revision: 1, enabled: false });
+  });
+});
+
+/**
+ * Runs `body` in two real OS processes released by one barrier file. `body` sees `store` (an
+ * AutomationStore on `dir`) and `who` ('one' | 'two'), and runs synchronously, as the callers do.
+ */
+async function hammerFromTwoProcesses(dir: string, body: string): Promise<void> {
+  const barrier = join(dir, 'start');
+  const modulePath = fileURLToPath(new URL('./store.ts', import.meta.url));
+  const script = `
+    import { access } from 'node:fs/promises';
+    import { AutomationStore } from ${JSON.stringify(modulePath)};
+    const store = AutomationStore.open(${JSON.stringify(dir)});
+    const who = process.argv[1];
+    process.stdout.write('ready\\n');
+    while (true) { try { await access(${JSON.stringify(barrier)}); break; } catch { await new Promise(resolve => setTimeout(resolve, 2)); } }
+    ${body}
+  `;
+  const children = ['one', 'two'].map((who) => spawn(process.execPath,
+    ['--import', 'tsx', '--input-type=module', '-e', script, who], { stdio: ['ignore', 'pipe', 'pipe'] }));
+  const stderr = children.map((child) => {
+    let text = '';
+    child.stderr.on('data', (chunk) => { text += String(chunk); });
+    return () => text;
+  });
+  try {
+    await Promise.all(children.map((child) => new Promise<void>((resolve, reject) => {
+      child.stdout.once('data', () => resolve());
+      child.once('error', reject);
+      child.once('exit', (code) => reject(new Error(`child exited before barrier: ${code}`)));
+    })));
+    writeFileSync(barrier, 'go');
+    const codes = await Promise.all(children.map((child) => new Promise<number | null>((resolve) => {
+      if (child.exitCode !== null) resolve(child.exitCode);
+      else child.once('exit', resolve);
+    })));
+    expect(codes, stderr.map((read) => read()).join('\n')).toEqual([0, 0]);
+  } finally {
+    for (const child of children) child.kill();
+  }
+}
+
+describe('AutomationStore cross-process write lock', () => {
+  const N = 40;
+
+  it('keeps every id when two processes setState different ids concurrently', async () => {
+    const dir = await directory();
+    await hammerFromTwoProcesses(dir, `
+      for (let i = 0; i < ${N}; i++) store.setState(who + '-' + i, (current) => ({ ...current, consecutiveFailures: i }));
+    `);
+    const states = JSON.parse(readFileSync(join(dir, 'automation-state.json'), 'utf8')).states;
+    const expected = ['one', 'two'].flatMap((who) => Array.from({ length: N }, (_, i) => `${who}-${i}`));
+    expect(Object.keys(states).sort()).toEqual(expected.sort());
+    expect(readdirSync(dir).filter((name) => name.endsWith('.lock'))).toEqual([]);
+  }, 60_000);
+
+  it('keeps every definition when two processes create concurrently', async () => {
+    const dir = await directory();
+    await hammerFromTwoProcesses(dir, `
+      for (let i = 0; i < ${N}; i++) store.create(${JSON.stringify(input)}, who + '-' + i);
+    `);
+    const ids = JSON.parse(readFileSync(join(dir, 'automations.json'), 'utf8')).automations.map((row: { id: string }) => row.id);
+    const expected = ['one', 'two'].flatMap((who) => Array.from({ length: N }, (_, i) => `${who}-${i}`));
+    expect(ids.sort()).toEqual(expected.sort());
+  }, 60_000);
+
+  it('keeps every edit when two processes update and delete their own definitions concurrently', async () => {
+    const dir = await directory();
+    const seed = AutomationStore.open(dir);
+    for (const who of ['one', 'two']) for (let i = 0; i < 10; i++) seed.create(input, `${who}-${i}`);
+    await hammerFromTwoProcesses(dir, `
+      for (let i = 0; i < 10; i++) {
+        const id = who + '-' + i;
+        if (i % 2) store.delete(id);
+        else store.update(id, 1, { ...${JSON.stringify(input)}, name: 'edited ' + id });
+      }
+    `);
+    const file = JSON.parse(readFileSync(join(dir, 'automations.json'), 'utf8'));
+    const expected = ['one', 'two'].flatMap((who) => [0, 2, 4, 6, 8].map((i) => `${who}-${i}`));
+    expect(file.automations.map((row: { id: string; name: string }) => [row.id, row.name]).sort())
+      .toEqual(expected.sort().map((id) => [id, `edited ${id}`]));
+    expect(Object.keys(file.tombstones).length).toBe(10);
+  }, 60_000);
+
+  it('recovers a write lock left by a dead process', async () => {
+    const dir = await directory();
+    writeFileSync(join(dir, 'automation-state.lock'), JSON.stringify({ pid: 424242 }));
+    writeFileSync(join(dir, 'automations.lock'), JSON.stringify({ pid: 424242 }));
+    const store = AutomationStore.open(dir, { processAlive: () => false });
+    expect(store.setState('a', () => ({ consecutiveFailures: 1 }))).toEqual({ consecutiveFailures: 1 });
+    expect(store.create(input, 'one').id).toBe('one');
+  });
+
+  it('recovers an aged-out write lock even when its pid looks alive', async () => {
+    const dir = await directory();
+    const lock = join(dir, 'automation-state.lock');
+    writeFileSync(lock, JSON.stringify({ pid: 424242 }));
+    const old = new Date(Date.now() - 60_000);
+    utimesSync(lock, old, old);
+    const store = AutomationStore.open(dir, { processAlive: () => true });
+    expect(store.setState('a', () => ({ consecutiveFailures: 1 }))).toEqual({ consecutiveFailures: 1 });
+  });
+
+  it('throws rather than writing unserialized when a live holder keeps the lock past the bounded wait', async () => {
+    const dir = await directory();
+    const store = AutomationStore.open(dir, { processAlive: () => true, writeLockTimeoutMs: 50 });
+    store.setState('a', () => ({ consecutiveFailures: 1 }));
+    writeFileSync(join(dir, 'automation-state.lock'), JSON.stringify({ pid: 424242 }));
+    expect(() => store.setState('b', () => ({ consecutiveFailures: 2 }))).toThrow(/busy/);
+    expect(Object.keys(JSON.parse(readFileSync(join(dir, 'automation-state.json'), 'utf8')).states)).toEqual(['a']);
   });
 });

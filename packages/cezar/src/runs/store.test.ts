@@ -3,7 +3,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { RunStore } from './store.ts';
+import { runRecordSchema as contractRunRecordSchema } from '@open-mercato/cezar-contract';
+import { RunStore, runRecordSchema } from './store.ts';
 
 import type { RunRecord } from './store.ts';
 
@@ -2681,5 +2682,31 @@ describe('RunStore — previewServers survive a partly unreadable entry (#781)',
     writeFileSync(join(dataDir, 'runs.json'), JSON.stringify([LEGACY_RUN]));
     const store = RunStore.open(dataDir, { keepLive: true });
     expect(store.getRun('legacy-1')?.previewServers).toBeUndefined();
+  });
+});
+
+describe('RunRecord.automationTrigger', () => {
+  const trigger = {
+    automationId: 'nightly',
+    automationRevision: 2,
+    receiptId: 'r-1',
+    trigger: 'catch-up' as const,
+    occurrenceAt: '2026-10-02T04:00:00.000Z',
+  };
+
+  it('round-trips through the run schema', () => {
+    const parsed = runRecordSchema.parse({ ...LEGACY_RUN, automationTrigger: trigger });
+    expect(parsed.automationTrigger).toEqual(trigger);
+  });
+
+  it('is stripped, not fatal, for a schema that predates the key', () => {
+    const previous = contractRunRecordSchema.omit({ automationTrigger: true });
+    const parsed = previous.parse({ ...LEGACY_RUN, automationTrigger: trigger });
+    expect(parsed.id).toBe('legacy-1');
+    expect('automationTrigger' in parsed).toBe(false);
+  });
+
+  it('is absent on an ordinary record', () => {
+    expect(runRecordSchema.parse(LEGACY_RUN).automationTrigger).toBeUndefined();
   });
 });
