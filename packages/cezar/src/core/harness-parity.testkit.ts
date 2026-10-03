@@ -422,6 +422,7 @@ export function textEvents(v1: readonly AgentEvent[]): string[] {
 }
 
 export interface SeamObservation {
+  readonly backend: RunnerId;
   readonly elapsedMs: number;
   readonly failure?: Error;
   readonly v1: readonly AgentEvent[];
@@ -499,7 +500,7 @@ export async function driveSeam(
     else await waitFor(() => v1.some((e) => e.type === 'turn-end' || e.type === 'error'));
     session.end();
     const result = await settled;
-    return { v1, v2, result, pid, elapsedMs: Date.now() - started, ...(failure ? { failure } : {}) };
+    return { backend, v1, v2, result, pid, elapsedMs: Date.now() - started, ...(failure ? { failure } : {}) };
   } finally {
     session?.interrupt();
     if (savedBin === undefined) delete process.env[adapter.binEnv];

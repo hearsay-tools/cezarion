@@ -80,12 +80,18 @@ const SEAM_CRITERIA: readonly SeamCriterion[] = [
     id: 'S20',
     name: 'S20 reports missing executables through its existing failure channel without starting a turn',
     scenario: 'missing-binary',
-    assert: ({ v1, failure, pid }) => {
+    assert: ({ backend, v1, failure, pid }) => {
       // ENOENT precedes the backend wire. Runners retain their existing event
       // and/or rejected-result channels; none may look like a successful turn.
       expect(pid).toBeUndefined();
       const errors = v1.filter(event => event.type === 'error');
       expect(errors.length).toBeLessThanOrEqual(1);
+      if (backend === 'opencode') {
+        expect(errors).toHaveLength(1);
+        expect(failure).toBeDefined();
+        expect(errors[0]!.message).toBe(failure!.message);
+        expect(v1.some(event => event.type === 'done' || event.type === 'turn-end')).toBe(false);
+      }
       const diagnostics = [...errors.map(event => event.message), ...(failure ? [failure.message] : [])];
       expect(diagnostics.length).toBeGreaterThan(0);
       for (const message of diagnostics) expect(message).toMatch(/PATH|install/i);
