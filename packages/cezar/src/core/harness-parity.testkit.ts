@@ -27,6 +27,7 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 
 import type { AgentRunSpec, AgentEvent, AgentRunResult, AgentSession, RunnerId, SessionOptions } from './agent-runner.ts';
+import { profileEnv } from './agent-profiles.ts';
 import { createRunner } from './runner-factory.ts';
 import type { UiEvent } from './ui-events.ts';
 import { RunStore, type RunRecord } from '../runs/store.ts';
@@ -820,11 +821,16 @@ export async function withSkillParentRun(
   body: (fixture: { repoRoot: string; parentRunId: string; runId: string; store: RunStore; manager: RunManager }) => Promise<void>,
 ): Promise<void> {
   const adapter = HARNESS_ADAPTERS[backend];
-  const overrides = { ...env, [adapter.binEnv]: adapter.mockBin, CEZ_DELEGATION: '1', CEZ_AUTONAME: '0' };
+  const repoRoot = mkdtempSync(join(tmpdir(), `cez-skill-parent-${backend}-`));
+  // Acceptance binds the live parent's account, and spawn requires that directory to exist.
+  // Supply an empty test-owned home rather than relying on an installed host login.
+  const accountHome = join(repoRoot, 'account');
+  mkdirSync(accountHome);
+  const overrides = { ...env, ...profileEnv(backend, accountHome), CEZ_HOME: join(repoRoot, 'workspace-home'),
+    [adapter.binEnv]: adapter.mockBin, CEZ_DELEGATION: '1', CEZ_AUTONAME: '0' };
   const saved = Object.keys({ ...overrides, CEZ_DRY_RUN: '' }).map(name => [name, process.env[name]] as const);
   Object.assign(process.env, overrides);
   delete process.env.CEZ_DRY_RUN;
-  const repoRoot = mkdtempSync(join(tmpdir(), `cez-skill-parent-${backend}-`));
   let store: RunStore | undefined;
   let manager: RunManager | undefined;
   let controller: DelegationController | undefined;
