@@ -103,7 +103,9 @@ interface Measure { lines: Line[]; lineHeight: number; codeLeft: number }
 /** Scroll each fence into the thread viewport before measuring it. Flat thread rows use
  * content-visibility:auto, so attached offscreen spans are not a settled layout sample.
  * Hold the actual row/glyph measurements, not their expected spacing: a stable layout bug
- * must still reach expectSourceLines and fail its unchanged assertions. */
+ * must still reach expectSourceLines and fail its unchanged assertions.
+ * Failure bundle, reproducible old/new probe, and limits:
+ * https://github.com/hearsay-tools/cezarion/pull/793#discussion_r4170935158 */
 function measure(scope: string): Measure[] {
   const selector = JSON.stringify(scope + ' [data-streamdown="code-block"]')
   const count = browser.waitForValue<number>(`document.querySelectorAll(${selector}).length`, (value) => value > 0)
