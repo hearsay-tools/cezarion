@@ -27,6 +27,7 @@ afterEach(() => {
   act(() => resetToasts())
   cleanup()
   vi.unstubAllGlobals()
+  vi.restoreAllMocks()
 })
 
 function setDesktop(desktop: boolean) {
@@ -452,25 +453,30 @@ describe('the checkout block', () => {
 describe('the phone Git screen', () => {
   beforeEach(() => setDesktop(false))
 
-  it('bare /git is the checkout block and the sections as 48px rows with chevrons', async () => {
-    stub()
-    renderRoute('/git')
-    await waitFor(() => expect(q('[data-slot="git-screen"] [data-slot="git-checkout"]')).not.toBeNull())
-    expect(q('[data-slot="git-screen"] h1')?.textContent).toBe('Git')
-    expect(q('[data-slot="git-checkout"]')?.getAttribute('data-variant')).toBe('screen')
-    await waitFor(() => expect(sectionRows()[2]?.count).toBe('4.2 GB'))
-    await waitFor(() => expect(sectionRows()[1]?.count).toBe('3'))
-    expect(sectionRows()).toEqual([
-      { section: 'main', text: 'Recently on main', count: '1 today', href: '/git?view=repo', current: null },
-      { section: 'not-landed', text: 'Not landed', count: '3', href: '/git/not-landed', current: null },
-      { section: 'cleanup', text: 'Cleanup', count: '4.2 GB', href: '/git/cleanup', current: null },
-      { section: 'branches', text: 'All branches', count: '2', href: '/git/branches', current: null },
-    ])
-    const row = q('a[data-git-section="cleanup"]')!
-    expect(row.className).toContain('h-[48px]')
-    expect(row.querySelectorAll('svg')).toHaveLength(2)
-    expect(q('[data-slot="git-worktree-list"]')).toBeNull()
-  })
+  it.each(['2026-10-03T00:01:00', '2026-10-03T12:00:00'])(
+    'bare /git is the checkout block and the sections as 48px rows with chevrons at %s', async (now) => {
+      // Pin the local day, including just after midnight: five minutes ago can be yesterday.
+      vi.spyOn(Date, 'now').mockReturnValue(new Date(now).getTime())
+      stub({ 'GET /api/v1/repo': () => json({ ...REPO,
+        log: [{ ...REPO.log[0]!, at: new Date(Date.now()).toISOString() }],
+      }) })
+      renderRoute('/git')
+      await waitFor(() => expect(q('[data-slot="git-screen"] [data-slot="git-checkout"]')).not.toBeNull())
+      expect(q('[data-slot="git-screen"] h1')?.textContent).toBe('Git')
+      expect(q('[data-slot="git-checkout"]')?.getAttribute('data-variant')).toBe('screen')
+      // Repo, branches and worktrees settle independently; wait for all exact row states.
+      await waitFor(() => expect(sectionRows()).toEqual([
+        { section: 'main', text: 'Recently on main', count: '1 today', href: '/git?view=repo', current: null },
+        { section: 'not-landed', text: 'Not landed', count: '3', href: '/git/not-landed', current: null },
+        { section: 'cleanup', text: 'Cleanup', count: '4.2 GB', href: '/git/cleanup', current: null },
+        { section: 'branches', text: 'All branches', count: '2', href: '/git/branches', current: null },
+      ]))
+      const row = q('a[data-git-section="cleanup"]')!
+      expect(row.className).toContain('h-[48px]')
+      expect(row.querySelectorAll('svg')).toHaveLength(2)
+      expect(q('[data-slot="git-worktree-list"]')).toBeNull()
+    },
+  )
 
   it('a section pushes its screen, which leads back to Git', async () => {
     stub()
