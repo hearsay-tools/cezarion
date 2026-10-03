@@ -57,6 +57,8 @@ export function useWorkerWaitFixture(): void {
     process.env.CEZ_DRY_RUN = '1'; process.env.CEZ_AUTONAME = '0';
     root = mkdtempSync(join(tmpdir(), 'cez-worker-wait-'));
     execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: root });
+    execFileSync('git', ['config', 'gc.auto', '0'], { cwd: root });
+    execFileSync('git', ['config', 'maintenance.auto', 'false'], { cwd: root });
     execFileSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@local', 'commit', '--allow-empty', '-qm', 'base'], { cwd: root });
     semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 1 } });
     store = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
