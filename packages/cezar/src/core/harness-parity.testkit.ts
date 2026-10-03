@@ -57,6 +57,12 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  * | `steer-late` | the final text first; agent input sent after it arrives after the last model call (#505) |
  */
 export const SCENARIOS = [
+  'missing-binary',
+  'crash-stderr-pre-ack',
+  'crash-stderr-held-pipe',
+  'shutdown-stderr',
+  'crash-stderr',
+  'crash-stderr-single',
   'baseline',
   'done',
   'hold',
@@ -138,7 +144,13 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     binEnv: 'CEZ_CLAUDE_BIN',
     mockBin: CLAUDE_MOCK,
     scenarios: {
+      'missing-binary': BASELINE_PROMPT,
       baseline: BASELINE_PROMPT,
+      'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
+      'crash-stderr-held-pipe': 'mock:crash-stderr-held-pipe',
+      'shutdown-stderr': 'mock:crash-stderr-clean',
+      'crash-stderr': 'mock:crash-stderr',
+      'crash-stderr-single': 'mock:crash-stderr-single',
       done: 'mock:done',
       hold: 'mock:hold', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'busy-progress': 'mock:busy-progress',
       'split-text': 'mock:split-text',
@@ -164,7 +176,13 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     binEnv: 'CEZ_CODEX_BIN',
     mockBin: CODEX_MOCK,
     scenarios: {
+      'missing-binary': BASELINE_PROMPT,
       baseline: BASELINE_PROMPT,
+      'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
+      'crash-stderr-held-pipe': 'mock:crash-stderr-held-pipe',
+      'shutdown-stderr': 'mock:crash-stderr-clean',
+      'crash-stderr': 'mock:crash-stderr',
+      'crash-stderr-single': 'mock:crash-stderr-single',
       done: 'mock:done',
       hold: 'mock:hold', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'busy-progress': 'mock:busy-progress',
       'split-text': 'mock:split-text',
@@ -190,7 +208,13 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     binEnv: 'CEZ_OPENCODE_BIN',
     mockBin: OPENCODE_MOCK,
     scenarios: {
+      'missing-binary': BASELINE_PROMPT,
       baseline: BASELINE_PROMPT,
+      'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
+      'crash-stderr-held-pipe': 'mock:crash-stderr-held-pipe',
+      'shutdown-stderr': 'mock:crash-stderr-clean',
+      'crash-stderr': 'mock:crash-stderr',
+      'crash-stderr-single': 'mock:crash-stderr-single',
       done: 'mock:done',
       hold: 'mock:hold', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'busy-progress': 'mock:busy-progress',
       'split-text': 'mock:split-text',
@@ -216,7 +240,12 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     ],
     binEnv: 'CEZ_CURSOR_BIN',
     mockBin: join(HERE, '..', '..', 'scripts', 'mock-cursor-acp.mjs'),
-    scenarios: { baseline: BASELINE_PROMPT, done: 'mock:done', hold: 'mock:hold', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'busy-progress': 'mock:busy-progress',
+    scenarios: { 'missing-binary': BASELINE_PROMPT, baseline: BASELINE_PROMPT,
+      'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
+      'crash-stderr-held-pipe': 'mock:crash-stderr-held-pipe',
+      'shutdown-stderr': 'mock:crash-stderr-clean',
+      'crash-stderr': 'mock:crash-stderr',
+      'crash-stderr-single': 'mock:crash-stderr-single', done: 'mock:done', hold: 'mock:hold', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'busy-progress': 'mock:busy-progress',
       'split-text': 'mock:split-text', 'provider-error': 'mock:provider-error',
       'provider-unavailable': 'mock:provider-error',
       ask: 'mock:ask',
@@ -231,7 +260,13 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     binEnv: 'CEZ_PI_BIN',
     mockBin: PI_MOCK,
     scenarios: {
+      'missing-binary': BASELINE_PROMPT,
       baseline: BASELINE_PROMPT,
+      'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
+      'crash-stderr-held-pipe': 'mock:crash-stderr-held-pipe',
+      'shutdown-stderr': 'mock:crash-stderr-clean',
+      'crash-stderr': 'mock:crash-stderr',
+      'crash-stderr-single': 'mock:crash-stderr-single',
       done: 'mock:done',
       hold: 'mock:hold', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'busy-progress': 'mock:busy-progress',
       'split-text': 'mock:split-text',
@@ -387,6 +422,9 @@ export function textEvents(v1: readonly AgentEvent[]): string[] {
 }
 
 export interface SeamObservation {
+  readonly backend: RunnerId;
+  readonly elapsedMs: number;
+  readonly failure?: Error;
   readonly v1: readonly AgentEvent[];
   readonly v2: readonly UiEvent[];
   readonly result: AgentRunResult;
@@ -420,12 +458,16 @@ export async function driveSeam(
   scenario: ScenarioName,
   opts: DriveSeamOptions = {},
 ): Promise<SeamObservation> {
+  const started = Date.now();
   const adapter = HARNESS_ADAPTERS[backend];
   const savedBin = process.env[adapter.binEnv];
   const savedDry = process.env.CEZ_DRY_RUN;
   process.env[adapter.binEnv] = adapter.mockBin;
   delete process.env.CEZ_DRY_RUN;
   const cwd = mkdtempSync(join(tmpdir(), `cez-parity-${backend}-`));
+  // A failed spawn has no native wire. Exercise the real OS boundary through
+  // the adapter's binary setting, leaving runtime scenarios on their own mocks.
+  if (scenario === 'missing-binary') process.env[adapter.binEnv] = join(cwd, 'missing-executable');
   const v1: AgentEvent[] = [];
   const v2: UiEvent[] = [];
   let session: AgentSession | undefined;
@@ -447,14 +489,18 @@ export async function driveSeam(
       (event) => v1.push(event),
       { ...opts.sessionOptions, onUiEvent: (event) => v2.push(event) },
     );
+    let failure: Error | undefined;
+    const settled = session.result.catch((error: unknown): AgentRunResult => {
+      failure = error instanceof Error ? error : new Error(String(error));
+      return { text: '', toolCalls: [], tokensUsed: 0 };
+    });
     const pid = session.pid;
-    if (opts.whileOpen) await opts.whileOpen(session, { v1, v2 });
+    if (scenario === 'missing-binary') await settled;
+    else if (opts.whileOpen) await opts.whileOpen(session, { v1, v2 });
     else await waitFor(() => v1.some((e) => e.type === 'turn-end' || e.type === 'error'));
     session.end();
-    const result = await session.result.catch(
-      (): AgentRunResult => ({ text: '', toolCalls: [], tokensUsed: 0 }),
-    );
-    return { v1, v2, result, pid };
+    const result = await settled;
+    return { backend, v1, v2, result, pid, elapsedMs: Date.now() - started, ...(failure ? { failure } : {}) };
   } finally {
     session?.interrupt();
     if (savedBin === undefined) delete process.env[adapter.binEnv];

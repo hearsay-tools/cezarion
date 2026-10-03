@@ -144,6 +144,20 @@ describe('Codex startup and Stop (#493)', () => {
     expect(String(failure)).toMatch(/initialize.*(?:exit|7)|(?:exit|7).*initialize/i);
   });
 
+  it('retains stderr diagnostics when malformed RPC precedes an early process failure', async () => {
+    start();
+    (fake.child.stdout as PassThrough).write('{"method":"item/commandExecution/outputDelta","params":\n');
+    const stderr = "Error: write EPIPE\n    at write (file.js:1:2) {\n  code: 'EPIPE'\n}\n\nNode.js v24.20.0\n";
+    (fake.child.stderr as PassThrough).write(stderr);
+    fake.exit(1);
+    await flush();
+    expect(outcome).toBe('rejected');
+    expect(String(failure)).toContain('initialize');
+    expect(events.filter(e => e.type === 'note')).toContainEqual({
+      type: 'note', message: `codex app-server stderr:\n${stderr}`,
+    });
+  });
+
   it('settles a failed spawn without waiting for a nonexistent process', async () => {
     Object.assign(fake.child, { pid: undefined });
     start(); fake.child.emit('error', Object.assign(new Error('not found'), { code: 'ENOENT' }));

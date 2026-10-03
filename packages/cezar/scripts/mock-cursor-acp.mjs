@@ -66,6 +66,10 @@ const question = { id: 'tests', prompt: 'Which test runner?', options: [{ id: 'v
 async function prompt(id, content) {
   const input = content.filter(b => b.type === 'text').map(b => b.text).join('\n');
   prompts += 1;
+  if (input.includes('mock:crash-stderr')) {
+    const { crashWithStderr } = await import('./mock-runner-crash.mjs');
+    if (crashWithStderr(input, '{"method":"session/update","params":')) return;
+  }
   if (input.includes('mock:ci-wait')) { const { ciPrompt } = await import('./mock-ci-tool.mjs'); text(await ciPrompt('cursor', ciWire, input)); complete(id); return; }
   if (resumeDone) { resumeDone = false; text('Resumed work finished.\nCEZ:DONE'); complete(id); return; }
   if (watchdogStall(input)) return;

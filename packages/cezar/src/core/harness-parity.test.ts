@@ -77,6 +77,108 @@ const sessionEvents = (v1: readonly AgentEvent[]) =>
 
 const SEAM_CRITERIA: readonly SeamCriterion[] = [
   {
+    id: 'S20',
+    name: 'S20 reports missing executables through its existing failure channel without starting a turn',
+    scenario: 'missing-binary',
+    assert: ({ backend, v1, failure, pid }) => {
+      // ENOENT precedes the backend wire. Runners retain their existing event
+      // and/or rejected-result channels; none may look like a successful turn.
+      expect(pid).toBeUndefined();
+      const errors = v1.filter(event => event.type === 'error');
+      expect(errors.length).toBeLessThanOrEqual(1);
+      if (backend === 'opencode') {
+        expect(errors).toHaveLength(1);
+        expect(failure).toBeDefined();
+        expect(errors[0]!.message).toBe(failure!.message);
+        expect(v1.some(event => event.type === 'done' || event.type === 'turn-end')).toBe(false);
+      }
+      const diagnostics = [...errors.map(event => event.message), ...(failure ? [failure.message] : [])];
+      expect(diagnostics.length).toBeGreaterThan(0);
+      for (const message of diagnostics) expect(message).toMatch(/PATH|install/i);
+      expect(v1.some(event => event.type === 'turn-end' || event.type === 'text')).toBe(false);
+      const done = v1.findIndex(event => event.type === 'done');
+      if (done >= 0) expect(v1.findIndex(event => event.type === 'error')).toBeGreaterThanOrEqual(0);
+      if (done >= 0) expect(v1.findIndex(event => event.type === 'error')).toBeLessThan(done);
+    },
+  },
+  {
+    id: 'S18',
+    name: 'S18 reports one actionable crash before terminal boundaries when the opening prompt is unacknowledged',
+    scenario: 'crash-stderr-pre-ack',
+    assert: ({ v1 }) => {
+      const errors = v1.filter(e => e.type === 'error');
+      expect(errors).toHaveLength(1);
+      expect(errors[0]!.message).toContain('Error: write EPIPE');
+      expect(errors[0]!.message).toMatch(/(?:code 1|\(1\))/);
+      const errorIndex = v1.findIndex(e => e.type === 'error');
+      for (const [index, event] of v1.entries()) {
+        if (event.type === 'turn-end' || event.type === 'done') expect(index).toBeGreaterThan(errorIndex);
+      }
+      expect(v1.filter(e => e.type === 'turn-end').length).toBeLessThanOrEqual(1);
+      expect(v1.filter(e => e.type === 'done').length).toBeLessThanOrEqual(1);
+    },
+  },
+  {
+    id: 'S19',
+    name: 'S19 drains late crash stderr without waiting indefinitely for inherited pipes',
+    scenario: 'crash-stderr-held-pipe',
+    assert: ({ v1, elapsedMs }) => {
+      expect(elapsedMs).toBeLessThan(4_000); // Descendant keeps both pipes open for 5s.
+      const errors = v1.filter(e => e.type === 'error');
+      expect(errors).toHaveLength(1);
+      expect(errors[0]!.message).toContain('Error: write EPIPE');
+      expect(v1.filter(e => e.type === 'note').map(e => e.message).join('\n')).toContain('late buffered crash diagnostic');
+    },
+  },
+  {
+    id: 'S17',
+    name: 'S17 keeps clean exits and requested signal teardown successful despite stderr',
+    scenario: 'shutdown-stderr',
+    assert: ({ v1 }) => {
+      expect(v1.filter(e => e.type === 'error')).toEqual([]);
+      expect(v1.filter(e => e.type === 'done')).toHaveLength(1);
+      expect(v1.filter(e => e.type === 'turn-end')).toHaveLength(1);
+      expect(v1.at(-1)?.type).toBe('done');
+      expect(v1.filter(e => e.type === 'note').map(e => e.message).join('\n')).not.toContain('harmless shutdown diagnostic');
+    },
+  },
+  {
+    id: 'S15',
+    name: 'S15 preserves actionable crash stderr and full available diagnostics after malformed native output',
+    scenario: 'crash-stderr',
+    assert: ({ v1 }) => {
+      const errors = v1.filter(e => e.type === 'error');
+      expect(errors).toHaveLength(1);
+      const message = errors.at(-1)!.message;
+      expect(message).toContain('Error: write EPIPE');
+      expect(message).toMatch(/(?:code 1|\(1\))/);
+      expect(message).not.toContain('Node.js');
+      expect(message).not.toContain(' |  | ');
+      expect(message.length).toBeLessThan(650);
+      expect(v1.filter(e => e.type === 'done').length).toBeLessThanOrEqual(1);
+      expect(v1.filter(e => e.type === 'turn-end').length).toBeLessThanOrEqual(1);
+      if (message.startsWith('pi CLI')) {
+        expect(v1.some(e => e.type === 'note' && e.message.includes('skipped unparseable RPC line'))).toBe(true);
+      }
+      const notes = v1.filter(e => e.type === 'note').map(e => e.message).join('\n');
+      expect(notes).toContain('at afterWriteDispatched (node:internal/stream_base_commons:159:15)');
+      expect(notes).toContain("errno: -32,\n  code: 'EPIPE',\n  syscall: 'write',");
+      expect(notes).toContain("diagnostic: '" + 'x'.repeat(700) + "'");
+      expect(notes).toContain('Node.js v24.20.0');
+    },
+  },
+  {
+    id: 'S16',
+    name: 'S16 preserves single-line stderr and nonzero exit codes',
+    scenario: 'crash-stderr-single',
+    assert: ({ v1 }) => {
+      const errors = v1.filter(e => e.type === 'error');
+      expect(errors).toHaveLength(1);
+      expect(errors.at(-1)!.message).toContain('authentication unavailable');
+      expect(errors.at(-1)!.message).toMatch(/(?:code 7|\(7\))/);
+    },
+  },
+  {
     // Group 7 — the baseline AgentSession contract, never asserted uniformly.
     id: 'S1',
     name: 'S1 terminates with exactly one v1 done, and it is the last event',
