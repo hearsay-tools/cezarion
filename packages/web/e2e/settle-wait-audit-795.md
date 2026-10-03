@@ -578,7 +578,8 @@ Source provenance and affected sites:
   `Virtualizer cache` mount prop performs one controlled child hydration.
 - `src/routes/task-thread/thread-scroller.test.tsx`: real virtua public handles seed and
   verify cached item geometry, plus cancellation/identity/ownership and old-behavior guards.
-  All 33 pre-existing tests remain alongside 23 new real-native-cache guard cases. `thread-scroll.test.ts` adds copied-key compatibility;
+  All 33 pre-existing tests remain alongside 26 new real-native-cache guard cases,
+  including the reviewed reused-route departure correction below. `thread-scroll.test.ts` adds copied-key compatibility;
   the two pre-existing mocked-virtualizer route/shift tests remain.
 - `thread-scroll.e2e.ts`: a **separate** replay run holds real ordered EventSource frames
   after sequence 642 (`turn_64`), while the original run/file stays unchanged. Release
@@ -598,8 +599,8 @@ copies retained; no CPU burners were launched during this worker phase).
 | `npm test -- thread-scroller.test.tsx`, new real-virtua regression before product edits | exit 1; one regression failed / 33 existing tests passed, cached item 123 expected 180px but native fresh estimate was 40px | `component-native-red.log` |
 | `npm run test:e2e -- thread-scroll.e2e.ts -t 'same reader row'`, before product edits | exit 1; original pixel restoration timed out: saved 53818px was above returned max 50010px; 14 tests filtered, not skips added | `browser-red.log`, `browser-red-artifacts/`, `browser-red-failures/` |
 | First expanded guard matrix | exit 1; partial owned detach overwrote the complete candidate (native item 40px versus saved 180px), 51 other tests passed; then fixed | `guard-matrix-first.log` |
-| Behavior-only rollback: omit only `setHydration`, retaining APIs, metadata and ownership guards; `npm test -- thread-scroll thread-scroller` | exit 1; 3 regressions failed / 75 guards passed | `thread-scroller-behavior-rollback.tsx`, `behavior-rollback-units.log` |
-| Same behavior-only rollback; selected held-replay browser regression with `--force-rebuild` | exit 1; pixel coverage passed but visible row changed from `turn-seq-1864:user` to `turn-seq-2384:item_msg_239`; 14 tests filtered | `behavior-rollback-browser.log`, `behavior-rollback-artifacts/` |
+| Earlier-revision behavior-only rollback, **before the final two memory guards and navigation correction**: omit only `setHydration`, retaining then-current APIs, metadata and ownership guards; `npm test -- thread-scroll thread-scroller` | exit 1; 3 regressions failed / 75 guards passed | `thread-scroller-behavior-rollback.tsx`, `behavior-rollback-units.log` |
+| Same **earlier-revision** behavior-only rollback; selected held-replay browser regression with `--force-rebuild` | exit 1; pixel coverage passed but visible row changed from `turn-seq-1864:user` to `turn-seq-2384:item_msg_239`; 14 tests filtered | `behavior-rollback-browser.log`, `behavior-rollback-artifacts/` |
 | Initial restored fix; `npm test -- thread-scroll thread-scroller session-transcript visual-ready transcript-measurements session-layout agent-browser-wait-value e2e-wait-discipline project-rail-ready` | exit 0; all 180 tests / 10 files passed, 8.34s | `units-final-green.log` |
 | Final guard expansion, same relevant unit command | exit 0; all 182 tests / 10 files passed, 8.20s | `units-final-ownership-green.log` |
 | Fresh prefix reaches saved pixel then leaves; new memory guard before its fix | exit 1; one regression failed / 54 tests passed: saved memory incorrectly changed to atBottom true without intent | `owned-scroll-memory-red.log` |
@@ -624,3 +625,53 @@ assertion or timeout was changed here. Parent retains its native font evidence, 
 independent review, and will run the complete six-command gate and another complete
 24-core loaded suite after integration. The worker focused passes are not full-suite
 acceptance claims.
+
+
+## Independent review correction — reused-route partial departure
+
+Independent review of immutable `fa5b32d71698f47f6883780575cb61ff46e010c2` requested
+changes for one cache ownership blocker. Production reuses `useThreadScroll` on task
+navigation (`task-thread.tsx:303`, `session-transcript.tsx:267`). In partial A → B → full A,
+`viewKeyRef.current` already held destination B during the old A native ref detach.
+`ownsMeasurementRestore(A)` therefore returned false, overwriting A’s complete 400-row
+cache with a 350-row estimate. The real virtua reviewer proof observed saved count 350
+and returned item 123 at 40px instead of 180px. Reviewer evidence is retained under
+sibling `.ai/qa/issue-795-review/{cache-hydration-review.md,cache-navigation-proof.test.tsx,
+cache-navigation-proof.log}` and copied into worker evidence below.
+
+The bounded correction distinguishes the departing **committed arrival owner** from
+eligibility to **adopt into the active view**. `ownsMeasurementRestore` checks the saved
+owner key for detach retention; `restoreMeasurements` additionally checks the current
+view key before consuming that owner. Destination render cannot destroy A’s candidate,
+and a stale A cannot adopt into B. No broader restoration/geometry, font, threshold,
+timeout or hold change is made. The new same-hook native regression seeds independent
+A=180px and B=260px caches, visits both partial views, then returns to each complete view.
+Wheel and Jump cancellation before departure still save the new estimate normally.
+
+Worker evidence root: `.ai/qa/issue-795/cache-navigation-review/`. The previous rollback
+artifacts above are explicitly historical: they preceded the final two memory guards.
+The regenerated rollback below starts from the **final navigation-corrected source and
+final component tests**, retaining candidate-gated owner creation, original scroll-memory
+protection, immediate/incompatible ownership release, and the navigation correction.
+`diff -u final-fixed-thread-scroller.tsx final-adoption-only-rollback.tsx` shows exactly one
+behavior change: removing `setHydration({cache:candidate.cache,generation:1})`. Fixed
+source and final test snapshots are retained, together with `final-fixed.patch` against
+`fa5b32d7`. No earlier proof is relabelled as final proof.
+
+| Command / proof | Outcome | Evidence |
+| --- | --- | --- |
+| `npm ci` in this worktree | exit 0 before review regression tests | `npm-ci.log` |
+| New same-hook A/B roundtrip regression, `npm test -- thread-scroller.test.tsx`, before ownership correction | exit 1; one regression failed / 58 tests passed, returned native item 40px versus saved 180px; strengthened independent A/B cache version also red | `navigation-before-fix-red.log`, `navigation-two-candidates-before-fix-red.log` |
+| Paired ownership correction, `npm test -- thread-scroll thread-scroller` | exit 0; all 83 tests / 3 files passed, 1.67s | `navigation-green.log` |
+| Exact-final adoption-only rollback, same unit command | exit 1; three regressions failed / 80 guards passed, 1.44s; final memory/navigation APIs and guards remain | `final-adoption-only-rollback-units.log`, `final-adoption-only-rollback.tsx` |
+| Exact-final adoption-only rollback, `npm run test:e2e -- thread-scroll.e2e.ts -t 'same reader row' --force-rebuild` | exit 1; original 25s / <200px waiter timed out, saved 53818px versus actual top/max 50010px (height 50846, viewport 836); one failed / 14 filtered, 35.53s | `final-adoption-only-rollback-browser.log`, `exact-final-rollback-artifacts/` |
+| Restored final fixed source, `npm test -- thread-scroll thread-scroller session-transcript visual-ready transcript-measurements session-layout agent-browser-wait-value e2e-wait-discipline project-rail-ready` | exit 0; all 185 tests / 10 files passed, 8.29s | `final-green-units.log` |
+| `npm run typecheck:web` | exit 0, including service prebuild | `final-green-typecheck.log` |
+| Restored final fixed source, `npm run test:e2e -- thread-scroll.e2e.ts --force-rebuild` | exit 0; all 15 tests passed, 50.42s, no filters/skips; same visible row and viewport offset preserved | `final-green-browser.log`, `final-green-artifacts/` |
+
+The exact-final rollback prefix again had **zero mounted row children** and observed
+native container extent 12880px, not rendered row geometry. Source restoration is
+byte-identical to `final-fixed-thread-scroller.tsx`. All earlier full normal/loaded failures
+and passes remain attached to their actual input revisions; parent owns independent
+re-review and the final full normal / full CPU-load gates after collecting this correction.
+The 63-spec / 16-helper audit and 212 actual accepted-sample call inventory are unchanged.

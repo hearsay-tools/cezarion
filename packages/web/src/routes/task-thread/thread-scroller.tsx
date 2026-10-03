@@ -144,11 +144,15 @@ export function useThreadScroll(
   }, [viewKey, setOffset, toBottom])
 
   const ownsMeasurementRestore = useCallback((key: string): boolean => {
-    return measurementRestoreRef.current?.viewKey === key && key === viewKeyRef.current
+    // A destination render updates viewKeyRef before the old native ref detaches.
+    // That departing committed owner may still retain its candidate (#795 review proof).
+    return measurementRestoreRef.current?.viewKey === key
   }, [])
   const restoreMeasurements = useCallback((key: string): boolean => {
     const owner = measurementRestoreRef.current
-    if (!owner || !ownsMeasurementRestore(key)) return false
+    // Adoption additionally requires the active destination; departure ownership alone
+    // must never let an old run/view consume the new view’s scroll restoration.
+    if (!owner || !ownsMeasurementRestore(key) || key !== viewKeyRef.current) return false
     pendingRestoreRef.current = owner.top
     stuckRef.current = false
     measurementRestoreRef.current = null

@@ -823,11 +823,11 @@ describe('useThreadScroll — route arrival (#761)', () => {
 })
 
 describe('#795 compatible measurement replay with the real virtua handle', () => {
-  function seed(runId = 'revisit:main', atBottom = false) {
+  function seed(runId = 'revisit:main', atBottom = false, itemSize = 180) {
     vi.stubGlobal('requestAnimationFrame', () => 1)
     const full = rows(400)
     let seedHandle: VirtualizerHandle | null = null
-    const tree = render(<Virtualizer itemSize={180} ref={handle => { seedHandle = handle }}>{full.map(row => <div key={row.key}>{row.node}</div>)}</Virtualizer>)
+    const tree = render(<Virtualizer itemSize={itemSize} ref={handle => { seedHandle = handle }}>{full.map(row => <div key={row.key}>{row.node}</div>)}</Virtualizer>)
     const snapshot = seedHandle!.cache
     tree.unmount()
     saveThreadMeasurements(runId, { rows: 400, cache: snapshot, rowKeys: full.map(row => row.key) })
@@ -1014,6 +1014,30 @@ describe('#795 compatible measurement replay with the real virtua handle', () =>
     view.commit(full, 'other:panel')
     expect(view.controls().virtualizerRef.current!.getItemSize(123)).not.toBe(180)
   })
+
+  it('retains the departing candidate through partial A → B → full A on a reused route hook', () => {
+    const full = seed()
+    seed('other:main', false, 260)
+    const view = replay(full.slice(0, 350))
+    view.commit(full.slice(0, 350), 'other:main')
+    expect(view.controls().virtualizerRef.current!.getItemSize(123)).not.toBe(260)
+    view.commit(full)
+    expect(view.controls().virtualizerRef.current!.getItemSize(123)).toBe(180)
+    expect(view.controls().virtualizerRef.current!.getItemOffset(123)).toBe(22140)
+    view.commit(full, 'other:main')
+    expect(view.controls().virtualizerRef.current!.getItemSize(123)).toBe(260)
+  })
+
+  it.each(['wheel', 'Jump'])(
+    'saves the cancelled departure normally after %s before partial A → B → full A', async intent => {
+      const full = seed(), view = replay(full.slice(0, 350))
+      if (intent === 'wheel') fireEvent.wheel(view.main(), { deltaY: -120 })
+      else await act(async () => { view.controls().jumpToLatest() })
+      view.commit(full.slice(0, 350), 'other:main')
+      view.commit(full)
+      expect(view.controls().virtualizerRef.current!.getItemSize(123)).not.toBe(180)
+    },
+  )
 
   it('keeps fresh geometry without a saved candidate or before the exact full count', () => {
     vi.stubGlobal('requestAnimationFrame', () => 1)
