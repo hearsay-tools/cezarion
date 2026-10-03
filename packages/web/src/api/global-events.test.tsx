@@ -2111,3 +2111,226 @@ describe('requested list attachment and recovery lifecycle (#795)', () => {
     expect(client.getQueryState(queryKeys.runs.list())?.isInvalidated).toBe(false)
   })
 })
+
+// Review regressions: the first-archive fast path must protect the same HTTP/SSE boundary.
+describe('archive flush and failed recovery freshness (#795)', () => {
+  const captureFrame = () => {
+    let frame: FrameRequestCallback | undefined
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { frame = callback; return 1 })
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+    return () => {
+      expect(frame).toBeTypeOf('function')
+      const current = frame
+      frame = undefined
+      act(() => current?.(performance.now()))
+    }
+  }
+
+  it.each((['boot-alias', 'boot-scoped', 'other-project'] as const).flatMap(scope =>
+    [false, true].map(cold => ({ scope, cold }))))('$scope cold=$cold first archive flush beats a late GET', async ({ scope, cold }) => {
+    const project = scope === 'other-project' ? 'other' : BOOT
+    setApiScope(scope === 'boot-alias' ? null : project)
+    const key = [scope === 'boot-alias' ? 'default' : project, 'runs', 'list'] as const
+    const record = runRecord('r1'), unrelated = runRecord('unrelated')
+    const final = [{ ...record, archived: true }, unrelated]
+    const stale = deferredResponse(), fresh = deferredResponse()
+    vi.mocked(fetch).mockReset().mockReturnValueOnce(stale.promise).mockReturnValue(fresh.promise)
+    if (!cold) client.setQueryData(key, [record, unrelated])
+    const flushFrame = captureFrame()
+    const list = renderHook(() => useProjectRuns(project, true, scope === 'boot-alias'), { wrapper })
+    if (!cold) await act(async () => { void client.invalidateQueries({ queryKey: key, exact: true }) })
+    expect(fetch).toHaveBeenCalledTimes(1)
+    const stream = mount()
+    stream.source.emit('run', stampedRun(final[0]!, project))
+    flushFrame() // Never release the stale GET until the archive batch has written.
+    if (cold) expect(client.getQueryData(key)).toBeUndefined()
+    else expect(client.getQueryData<ApiRun[]>(key)?.[0]?.archived).toBe(true)
+    await act(async () => stale.resolve(json([record, unrelated])))
+    expect(client.getQueryData<ApiRun[]>(key)?.[0]?.archived).not.toBe(false)
+    expect(fetch).toHaveBeenCalledTimes(2)
+    await act(async () => fresh.resolve(json(final)))
+    await waitFor(() => expect(list.result.current.data).toEqual(final))
+    expect(client.getQueryState(key)?.isInvalidated).toBe(false)
+    expect(fetch).toHaveBeenCalledTimes(2)
+    list.unmount(); stream.unmount()
+  })
+
+  it.each(['warm', 'cold'] as const)('%s archive burst keeps one replacement plus one trailing fetch', async temperature => {
+    const records = Array.from({ length: 30 }, (_, i) => runRecord(`r${i}`))
+    const final = records.map(record => ({ ...record, archived: true }))
+    const stale = deferredResponse(), replacement = deferredResponse(), trailing = deferredResponse()
+    vi.mocked(fetch).mockReturnValueOnce(stale.promise).mockReturnValueOnce(replacement.promise).mockReturnValue(trailing.promise)
+    if (temperature === 'warm') client.setQueryData(queryKeys.runs.list(), records)
+    const flushFrame = captureFrame()
+    const list = renderHook(() => useRuns(), { wrapper })
+    if (temperature === 'warm') await act(async () => { void client.invalidateQueries({ queryKey: queryKeys.runs.list() }) })
+    const { source } = mount()
+    for (const record of final.slice(0, 15)) source.emit('run', stampedRun(record))
+    flushFrame()
+    expect(fetch).toHaveBeenCalledTimes(2)
+    for (const record of final.slice(15)) source.emit('run', stampedRun(record))
+    flushFrame()
+    expect(fetch).toHaveBeenCalledTimes(2)
+    if (temperature === 'cold') expect(client.getQueryData(queryKeys.runs.list())).toBeUndefined()
+    await act(async () => stale.resolve(json(records)))
+    await act(async () => replacement.resolve(json(records.map((record, i) => i < 15 ? final[i] : record))))
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(3))
+    await act(async () => trailing.resolve(json(final)))
+    await waitFor(() => expect(list.result.current.data).toEqual(final))
+    expect(fetch).toHaveBeenCalledTimes(3)
+  })
+
+  it('records a cold archive as dirty before its deferred frame can patch anything', async () => {
+    const record = runRecord('r1')
+    const stale = deferredResponse(), replacement = deferredResponse(), afterEvent = deferredResponse(), afterFlush = deferredResponse()
+    vi.mocked(fetch).mockReturnValueOnce(stale.promise).mockReturnValueOnce(replacement.promise).mockReturnValueOnce(afterEvent.promise).mockReturnValue(afterFlush.promise)
+    const flushFrame = captureFrame()
+    const list = renderHook(() => useRuns(), { wrapper })
+    const { source } = mount()
+    source.emit('run', stampedRun({ ...record, notify: true }))
+    source.emit('run', stampedRun({ ...record, archived: true }))
+    expect(client.getQueryData(queryKeys.runs.list())).toBeUndefined()
+    // Recovery completes before the archive frame. Receipt itself must retain its obligation.
+    await act(async () => replacement.resolve(json([{ ...record, notify: true }])))
+    expect(fetch).toHaveBeenCalledTimes(3)
+    expect(client.getQueryState(queryKeys.runs.list())?.isInvalidated).toBe(true)
+    flushFrame() // The intervening success keeps the existing generation-conflict recovery rule.
+    expect(fetch).toHaveBeenCalledTimes(4)
+    await act(async () => { stale.resolve(json([record])); afterEvent.resolve(json([{ ...record, archived: true }])); afterFlush.resolve(json([{ ...record, archived: true }])) })
+    await waitFor(() => expect(list.result.current.data?.[0]?.archived).toBe(true))
+    expect(fetch).toHaveBeenCalledTimes(4)
+  })
+
+  it.each(['warm-update', 'cold-update', 'warm-delete', 'cold-delete', 'warm-archive', 'cold-archive'] as const)('%s new event resumes failed recovery once without automatic retry', async kind => {
+    client.setDefaultOptions({ queries: { ...client.getDefaultOptions().queries, retry: false } })
+    const record = runRecord('r1'), unrelated = runRecord('unrelated')
+    const stale = deferredResponse(), fresh = deferredResponse()
+    vi.mocked(fetch).mockReturnValueOnce(stale.promise).mockRejectedValueOnce(new Error('offline')).mockReturnValue(fresh.promise)
+    if (kind.startsWith('warm')) client.setQueryData(queryKeys.runs.list(), [record, unrelated])
+    const flushFrame = captureFrame()
+    const list = renderHook(() => useRuns(), { wrapper })
+    expect(list.result.current.data).toEqual(kind.startsWith('warm') ? [record, unrelated] : undefined)
+    if (kind.startsWith('warm')) await act(async () => { void client.invalidateQueries({ queryKey: queryKeys.runs.list() }) })
+    const { source } = mount()
+    source.emit('run', stampedRun({ ...record, notify: true }))
+    await waitFor(() => expect(list.result.current.isError).toBe(true))
+    await act(async () => stale.resolve(json([record, unrelated])))
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(client.getQueryState(queryKeys.runs.list())?.isInvalidated).toBe(true)
+    const newer = { ...record, notify: true, title: 'New name', archived: kind.endsWith('archive') }
+    const final = kind.endsWith('delete') ? [unrelated] : [newer, unrelated]
+    if (kind.endsWith('delete')) source.emit('run-deleted', JSON.stringify({ id: record.id, project: BOOT }))
+    else source.emit('run', stampedRun(newer))
+    if (kind.endsWith('archive')) flushFrame()
+    await act(async () => {})
+    expect(fetch).toHaveBeenCalledTimes(3)
+    if (kind.startsWith('cold')) expect(client.getQueryData(queryKeys.runs.list())).toBeUndefined()
+    await act(async () => fresh.resolve(json(final)))
+    await waitFor(() => expect(list.result.current.data).toEqual(final))
+    expect(client.getQueryState(queryKeys.runs.list())?.isInvalidated).toBe(false)
+    expect(fetch).toHaveBeenCalledTimes(3)
+  })
+})
+
+describe('failed cold recovery with no enabled reader (#795)', () => {
+  it('keeps the obligation stale without a background fetch until the disabled reader returns', async () => {
+    client.setDefaultOptions({ queries: { ...client.getDefaultOptions().queries, retry: false } })
+    const record = runRecord('r1')
+    const stale = deferredResponse(), fresh = deferredResponse()
+    vi.mocked(fetch).mockReturnValueOnce(stale.promise).mockRejectedValueOnce(new Error('offline')).mockReturnValue(fresh.promise)
+    const list = renderHook(({ enabled }) => useProjectRuns(BOOT, enabled, true), { wrapper, initialProps: { enabled: true } })
+    expect(list.result.current.data).toBeUndefined() // subscribe to data as well as the error state
+    const { source } = mount()
+    source.emit('run', stampedRun({ ...record, notify: true }))
+    await waitFor(() => expect(list.result.current.isError).toBe(true))
+    list.rerender({ enabled: false })
+    source.emit('run', stampedRun({ ...record, notify: true, title: 'Latest' }))
+    await act(async () => stale.resolve(json([record])))
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(client.getQueryData(queryKeys.runs.list())).toBeUndefined()
+    expect(client.getQueryState(queryKeys.runs.list())?.isInvalidated).toBe(true)
+    list.rerender({ enabled: true })
+    expect(fetch).toHaveBeenCalledTimes(3)
+    await act(async () => fresh.resolve(json([{ ...record, notify: true, title: 'Latest' }])))
+    await waitFor(() => expect(list.result.current.data?.[0]?.title).toBe('Latest'))
+    expect(client.getQueryState(queryKeys.runs.list())?.isInvalidated).toBe(false)
+  })
+})
+
+describe('incomplete inactive snapshots remain stale across live patches (#795)', () => {
+  it.each((['default', 'boot'] as const).flatMap(alias =>
+    (['invalidate', 'first-open', 'reconnect'] as const).flatMap(boundary =>
+      (['update', 'delete', 'archive'] as const).map(kind => ({ alias, boundary, kind }))))
+  )('$alias $boundary $kind preserves missed-history reconciliation until enabled', async ({ alias, boundary, kind }) => {
+    setApiScope('other')
+    client.setQueryData(workspaceQueryKeys.projects, { bootProject: BOOT, projects: [] })
+    const record = runRecord('r1'), missedDeletion = runRecord('removed-while-offline')
+    const newer = { ...record, title: 'Latest', archived: kind === 'archive' }
+    const key = [alias === 'default' ? 'default' : BOOT, 'runs', 'list'] as const
+    client.setQueryData(['default', 'runs', 'list'], [record, missedDeletion])
+    client.setQueryData([BOOT, 'runs', 'list'], [record, missedDeletion])
+    const fresh = deferredResponse()
+    vi.mocked(fetch).mockReturnValue(fresh.promise)
+    let frame: FrameRequestCallback | undefined
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { frame = callback; return 1 })
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+    const list = renderHook(({ enabled }) => useProjectRuns(BOOT, enabled, alias === 'default'), { wrapper, initialProps: { enabled: false } })
+    const { source } = mount()
+    if (boundary === 'invalidate') await act(async () => { await client.invalidateQueries({ queryKey: key, exact: true, refetchType: 'none' }) })
+    else {
+      source.open()
+      source.emit('ping', '')
+      if (boundary === 'reconnect') source.open()
+    }
+    // Attachment's queued cancel/invalidate callbacks finish while the reader is still disabled.
+    await act(async () => {})
+    expect(client.getQueryState(key)?.isInvalidated).toBe(true)
+    expect(fetch).not.toHaveBeenCalled()
+    if (kind === 'delete') source.emit('run-deleted', JSON.stringify({ id: record.id, project: BOOT }))
+    else source.emit('run', stampedRun(newer))
+    if (kind === 'archive') {
+      expect(frame).toBeTypeOf('function')
+      act(() => frame?.(performance.now()))
+    }
+    // Immediate complete-record news is visible, but cannot certify all rows we missed offline.
+    expect(client.getQueryData<ApiRun[]>(key)?.find(row => row.id === record.id)).toEqual(kind === 'delete' ? undefined : newer)
+    expect(client.getQueryState(key)?.isInvalidated).toBe(true)
+    expect(fetch).not.toHaveBeenCalled()
+    list.rerender({ enabled: true })
+    expect(fetch).toHaveBeenCalledTimes(1)
+    const final = kind === 'delete' ? [] : [newer]
+    await act(async () => fresh.resolve(json(final)))
+    await waitFor(() => expect(list.result.current.data).toEqual(final))
+    expect(client.getQueryState(key)?.isInvalidated).toBe(false)
+    expect(fetch).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('exhausted cold recovery remains event driven (#795)', () => {
+  it('bounds a new event burst to one failed attempt and waits for another event to recover', async () => {
+    client.setDefaultOptions({ queries: { ...client.getDefaultOptions().queries, retry: false } })
+    const record = runRecord('r1'), unrelated = runRecord('unrelated')
+    const stale = deferredResponse(), fresh = deferredResponse()
+    vi.mocked(fetch).mockReturnValueOnce(stale.promise)
+      .mockRejectedValueOnce(new Error('offline once')).mockRejectedValueOnce(new Error('offline again')).mockReturnValue(fresh.promise)
+    const list = renderHook(() => useRuns(), { wrapper })
+    expect(list.result.current.data).toBeUndefined()
+    const { source } = mount()
+    source.emit('run', stampedRun({ ...record, tokensUsed: 1 }))
+    await waitFor(() => expect(list.result.current.isError).toBe(true))
+    expect(fetch).toHaveBeenCalledTimes(2)
+    for (let tokensUsed = 2; tokensUsed <= 30; tokensUsed++) source.emit('run', stampedRun({ ...record, tokensUsed }))
+    await waitFor(() => expect(client.getQueryState(queryKeys.runs.list())?.errorUpdateCount).toBe(2))
+    expect(fetch).toHaveBeenCalledTimes(3)
+    expect(list.result.current.data).toBeUndefined()
+    expect(client.getQueryState(queryKeys.runs.list())?.isInvalidated).toBe(true)
+    await act(async () => stale.resolve(json([record, unrelated])))
+    expect(fetch).toHaveBeenCalledTimes(3) // Exhaustion itself has no retry timer or self-loop.
+    source.emit('run', stampedRun({ ...record, tokensUsed: 31 }))
+    expect(fetch).toHaveBeenCalledTimes(4)
+    await act(async () => fresh.resolve(json([{ ...record, tokensUsed: 31 }, unrelated])))
+    await waitFor(() => expect(list.result.current.data).toEqual([{ ...record, tokensUsed: 31 }, unrelated]))
+    expect(fetch).toHaveBeenCalledTimes(4)
+    expect(client.getQueryState(queryKeys.runs.list())?.isInvalidated).toBe(false)
+  })
+})

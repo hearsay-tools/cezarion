@@ -300,6 +300,27 @@ function createRunListBatcher(queryClient: QueryClient) {
     // overlaps it, success starts one trailing fetch: that snapshot may predate this write.
     void queryClient.invalidateQueries({ queryKey: entry.key, exact: true }, { cancelRefetch: false })
   })
+  const protectBeforeWrite = (
+    key: readonly [string, 'runs', 'list'],
+    recoverAfterWrite: Array<readonly [string, 'runs', 'list']>,
+  ): void => {
+    const cacheKey = JSON.stringify(key)
+    const query = queryClient.getQueryCache().find({ queryKey: key, exact: true })
+    if (!query) return // never create complete-list data or fetch an unrequested key
+    const recovery = needsReconcile.get(cacheKey)
+    if ((!recovery && (query.state.fetchStatus !== 'idle' || query.state.isInvalidated))
+      || (recovery && query.state.fetchStatus === 'idle')) {
+      // Every manual patch, including a batched archive, shares this boundary. Cancel BEFORE
+      // writing because cancellation reverts data. An idle stale/error list also retains its
+      // full-snapshot obligation: a single row cannot certify missed history as complete.
+      needsReconcile.set(cacheKey, { key, phase: 'needs-start', dirty: false })
+      if (query.state.fetchStatus !== 'idle') void queryClient.cancelQueries({ queryKey: key, exact: true })
+      if (!recoverAfterWrite.some(queued => JSON.stringify(queued) === cacheKey)) recoverAfterWrite.push(key)
+    } else if (recovery?.phase === 'fetching') {
+      // Keep a running recovery, with at most one trailing read for overlapping events.
+      recovery.dirty = true
+    }
+  }
   let frame: number | undefined
   let timer: ReturnType<typeof setTimeout> | undefined
 
@@ -317,8 +338,11 @@ function createRunListBatcher(queryClient: QueryClient) {
       if (query !== baseQuery || query?.state.dataUpdateCount !== baseUpdateCount || query?.state.data !== baseList) {
         reconcileKeys.push(key)
         needsReconcile.set(JSON.stringify(key), { key, phase: 'needs-start', dirty: false })
+        // The discarded batch still invalidates any older cold or warm request.
+        void queryClient.cancelQueries({ queryKey: key, exact: true })
         continue
       }
+      protectBeforeWrite(key, reconcileKeys)
       queryClient.setQueryData<ApiRun[]>(key, list => {
         let next = list
         for (const run of runs.values()) next = applyRunEvent(next, run)
@@ -353,6 +377,10 @@ function createRunListBatcher(queryClient: QueryClient) {
       if (firstArchive && event.type === 'run') {
         for (const key of keys) {
           const cacheKey = JSON.stringify(key)
+          // Cold archives cannot take a manual patch before the frame. Record overlap at
+          // receipt, even if the recovery response completes before that frame can flush.
+          const recovery = needsReconcile.get(cacheKey)
+          if (recovery?.phase === 'fetching') recovery.dirty = true
           let entry = pending.get(cacheKey)
           if (!entry) {
             const query = queryClient.getQueryCache().find({ queryKey: key, exact: true })
@@ -373,21 +401,7 @@ function createRunListBatcher(queryClient: QueryClient) {
       // A newer live update or deletion must win over an archived record still in the queue.
       const reconcileAfterWrite = flush(true)
       for (const key of keys) {
-        const cacheKey = JSON.stringify(key)
-        const query = queryClient.getQueryCache().find({ queryKey: key, exact: true })
-        const recovery = needsReconcile.get(cacheKey)
-        if (!recovery && query && query.state.fetchStatus !== 'idle') {
-          // #795: a GET captured before this event can overwrite the live patch. Cancel BEFORE
-          // writing: cancellation reverts query state. Cold lists still need a complete answer,
-          // while warm lists expose the event now and recover authoritatively afterwards.
-          needsReconcile.set(cacheKey, { key, phase: 'needs-start', dirty: false })
-          void queryClient.cancelQueries({ queryKey: key, exact: true })
-          reconcileAfterWrite.push(key)
-        } else if (recovery?.phase === 'fetching') {
-          // Cold caches cannot take a manual patch, so their dirty obligation must not depend
-          // on setQueryData emitting a success action. Keep one fetch plus a trailing recovery.
-          recovery.dirty = true
-        }
+        protectBeforeWrite(key, reconcileAfterWrite)
         if (event.type === 'run') queryClient.setQueryData<ApiRun[]>(key, list => applyRunEvent(list, event.run))
         else queryClient.setQueryData<ApiRun[]>(key, list => applyRunDeleted(list, event.id))
       }
