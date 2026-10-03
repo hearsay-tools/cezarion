@@ -18,6 +18,8 @@ export const PREVIEW_PORT_WAIT_MS = 2 * 60_000;
 export const PREVIEW_PROBE_MS = 2_000;
 const PROBE_CONNECT_MS = 500;
 const KILL_GRACE_MS = 5_000;
+/** How long a SIGKILLed group gets to disappear before the stop resolves anyway. */
+const KILL_SETTLE_MS = 2_000;
 const LOG_TRIM_ABOVE = 5 * 1024 * 1024;
 const LOG_KEEP = 1024 * 1024;
 const LOG_CHECK_MS = 60_000;
@@ -71,7 +73,12 @@ async function terminateGroup(pgid: number): Promise<void> {
   if (!signalGroup(pgid, 'SIGTERM')) return;
   const deadline = Date.now() + KILL_GRACE_MS;
   while (groupAlive(pgid) && Date.now() < deadline) await sleep(50);
-  if (groupAlive(pgid)) signalGroup(pgid, 'SIGKILL');
+  if (!groupAlive(pgid)) return;
+  signalGroup(pgid, 'SIGKILL');
+  // SIGKILL is delivered, not done: until the kernel tears the processes down they still hold
+  // their sockets. Return once the group is gone, so "stopped" means the port is free.
+  const killDeadline = Date.now() + KILL_SETTLE_MS;
+  while (groupAlive(pgid) && Date.now() < killDeadline) await sleep(20);
 }
 
 /** Keep the last 1 MiB once the log passes 5 MiB. The child holds the file open in append mode, so it keeps writing at the end. */
