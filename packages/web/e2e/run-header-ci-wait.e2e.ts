@@ -47,7 +47,7 @@ beforeAll(async () => {
     import './src/styles/index.css';
     window.fetch = async input => {
       const path = new URL(input instanceof Request ? input.url : String(input), location.href).pathname;
-      return new Response(JSON.stringify(path.endsWith('/runs') ? [] : {}), {headers: {'content-type': 'application/json'}});
+      return new Response(JSON.stringify(path.endsWith('/run-summaries') ? [] : {}), {headers: {'content-type': 'application/json'}});
     };
     const client = createQueryClient();
     function Fixture() {

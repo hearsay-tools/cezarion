@@ -140,7 +140,7 @@ describe('Hand off to webhook', () => {
       window.fetch = async (...args) => {
         const response = await window.__handoffFetch(...args);
         const url = String(args[0]?.url ?? args[0]);
-        if (url.endsWith('/runs')) {
+        if (url.endsWith('/run-summaries')) {
           const rows = await response.clone().json();
           if (rows.some(row => row.id === 'desktop' && row.notify !== true)) {
             window.__offListHeld = true;
