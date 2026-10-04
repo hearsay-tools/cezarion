@@ -513,14 +513,35 @@ describe('delegation service durable authority', () => {
     f.store.commitDelegation([{ id: parent.id, delegation: { ...parent.delegation, permissions: ['spawn'] } }]);
     expect(await f.service.spawn(f.caller, request)).toEqual(result);
   });
-  // Exercise all 32 real durable creations; this is not a 5s filesystem throughput assertion.
-  it('caps accepted creations at 32 including destroyed workers; replay does not consume a creation', { timeout: 30_000 }, async () => {
+  // Exercise 33+ real durable creations; this is not a 5s filesystem throughput assertion.
+  it('frees capacity only after verified destroy; worker 33 spawns and replay survives (#816)', { timeout: 60_000 }, async () => {
     const first = input(); const result = await f.service.spawn(f.caller, first);
-    await f.service.destroy(f.caller, { workerId: result.workerId });
     for (let n = 1; n < 32; n++) await f.service.spawn(f.caller, input());
-    expect(await f.service.spawn(f.caller, first)).toEqual(result);
+    await expect(f.service.spawn(f.caller, input())).rejects.toMatchObject({ code: 'capacity_limit', message: expect.stringContaining('32 outstanding workers') });
+    expect(await f.service.destroy(f.caller, { workerId: result.workerId })).toMatchObject({ state: 'complete' });
+    const thirtyThird = await f.service.spawn(f.caller, input());
+    expect(thirtyThird.workerId).not.toBe(result.workerId);
     await expect(f.service.spawn(f.caller, input())).rejects.toMatchObject({ code: 'capacity_limit' });
-    expect(f.store.listRuns()).toHaveLength(33);
+    expect(await f.service.spawn(f.caller, first)).toEqual(result);
+    expect(f.store.listRuns()).toHaveLength(34);
+  });
+  it('keeps capacity during incomplete cleanup and releases it once when a retry completes (#816)', { timeout: 60_000 }, async () => {
+    const { workerId } = await f.service.spawn(f.caller, input());
+    for (let n = 1; n < 32; n++) await f.service.spawn(f.caller, input());
+    const termination = vi.spyOn(f.manager, 'awaitRunTermination').mockResolvedValue(false);
+    expect(await f.service.destroy(f.caller, { workerId })).toMatchObject({ state: 'incomplete' });
+    await expect(f.service.spawn(f.caller, input())).rejects.toMatchObject({ code: 'capacity_limit' });
+    termination.mockRestore();
+    expect(await f.service.destroy(f.caller, { workerId })).toMatchObject({ state: 'complete' });
+    expect(await f.service.destroy(f.caller, { workerId })).toMatchObject({ state: 'complete' });
+    await f.service.spawn(f.caller, input());
+    await expect(f.service.spawn(f.caller, input())).rejects.toMatchObject({ code: 'capacity_limit' });
+  });
+  it('admits exactly one of two concurrent spawns at 31 outstanding (#816)', { timeout: 60_000 }, async () => {
+    for (let n = 0; n < 31; n++) await f.service.spawn(f.caller, input());
+    const settled = await Promise.allSettled([f.service.spawn(f.caller, input()), f.service.spawn(f.caller, input())]);
+    expect(settled.filter(entry => entry.status === 'fulfilled')).toHaveLength(1);
+    expect(settled.find(entry => entry.status === 'rejected')).toMatchObject({ reason: { code: 'capacity_limit' } });
   });
   it('queues attributed steering and denies the 33rd undelivered message', async () => {
     const { workerId } = await f.service.spawn(f.caller, input());

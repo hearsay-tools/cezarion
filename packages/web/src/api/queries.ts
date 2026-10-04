@@ -44,6 +44,7 @@ import {
   getRepoCommit,
   getRun,
   getRunRelationships,
+  destroyWorker,
   getRunChanges,
   getRunDiff,
   getRunFile,
@@ -935,6 +936,16 @@ export function useProjectRuns(projectId: string, enabled = true, boot = false) 
     queryKey: [boot ? 'default' : projectId, 'runs', 'list'] as const,
     queryFn: ({ signal }) => getProjectRuns(projectId, { signal }),
     enabled,
+  })
+}
+
+/** Clean up one settled worker (#816). Settles either way by refetching its parent's
+ *  relationships, so a freed slot or an incomplete cleanup shows without waiting for SSE. */
+export function useDestroyWorker(parentRunId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (workerId: string) => destroyWorker(workerId),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.runs.relationships(parentRunId) }),
   })
 }
 

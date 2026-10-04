@@ -12,6 +12,7 @@ import {
 } from '@open-mercato/cezar-contract';
 import type { DelegationState } from '@open-mercato/cezar-contract';
 import { RunStore, runRecordSchema } from './store.ts';
+import { parentReadiness } from '../delegation/readiness.ts';
 
 const workerId = randomUUID();
 const requestId = randomUUID();
@@ -121,8 +122,11 @@ describe('delegation schemas', () => {
     for (const receipts of [
       [{ ...receipt, requestHash: 'bad' }], [{ ...receipt, requestId: 'bad' }],
       [receipt, receipt], [receipt, { ...receipt, requestId: randomUUID() }],
-      Array.from({ length: 33 }, () => ({ ...receipt, requestId: randomUUID(), workerId: randomUUID() })),
+      Array.from({ length: 1025 }, () => ({ ...receipt, requestId: randomUUID(), workerId: randomUUID() })),
     ]) expect(delegationStateSchema.safeParse({ ...root, receipts }).success).toBe(false);
+    // #816: history beyond 32 creations parses up to the 1,024 creation ceiling.
+    const history = Array.from({ length: 1024 }, () => ({ ...receipt, requestId: randomUUID(), workerId: randomUUID() }));
+    expect(delegationStateSchema.safeParse({ ...root, receipts: history }).success).toBe(true);
   });
 
   it('retains attributed input in records and typed transcript events', () => {
@@ -140,7 +144,11 @@ describe('delegation schemas', () => {
     const inspection = { workerId, parentRunId, status: 'done', workspace, outcome };
     expect(workerInspectionSchema.parse(inspection)).toEqual(inspection);
     expect(runRelationshipsSchema.parse({ workers: [inspection] })).toEqual({ workers: [inspection] });
-    expect(runRelationshipsSchema.safeParse({ workers: Array(33).fill(inspection) }).success).toBe(false);
+    expect(runRelationshipsSchema.safeParse({ workers: Array(1024).fill(inspection) }).success).toBe(true);
+    expect(runRelationshipsSchema.safeParse({ workers: Array(1025).fill(inspection) }).success).toBe(false);
+    const capacity = { outstanding: 3, limit: 32, created: 40, creationLimit: 1024 };
+    expect(runRelationshipsSchema.parse({ workers: [], capacity })).toEqual({ workers: [], capacity });
+    expect(runRelationshipsSchema.safeParse({ workers: [], capacity: { ...capacity, outstanding: -1 } }).success).toBe(false);
     expect(workerDiffSchema.parse({ workerId, baselineSha, diff: '', truncated: false }).diff).toBe('');
     expect(workerDiffSchema.safeParse({ workerId, baselineSha, diff: 'x'.repeat(400001), truncated: true }).success).toBe(false);
     expect(workerStopResultSchema.safeParse({ workerId, state: 'stopping' }).success).toBe(true);
@@ -504,8 +512,8 @@ describe('RunStore durable delegation', () => {
     expect(store.listRuns()).toHaveLength(3);
   });
 
-  // Exercise all 32 real durable creations; this is not a 5s filesystem throughput assertion.
-  it('keeps the lifetime creation cap across restart, including destroyed workers and retries', { timeout: 30_000 }, () => {
+  // Exercise 33 real durable creations; this is not a 5s filesystem throughput assertion.
+  it('reclaims verified-destroyed capacity across restart and keeps every receipt (#816)', { timeout: 30_000 }, () => {
     const run = parent();
     for (let i = 0; i < 32; i++) {
       const id = randomUUID();
@@ -518,9 +526,40 @@ describe('RunStore durable delegation', () => {
     }
     store.flush();
     store = RunStore.open(dataDir, { keepLive: true });
-    expect(() => store.createOwnedRun(input, run.id, randomUUID(), worker(run.id, randomUUID()), requestHash)).toThrow();
+    const thirtyThird = randomUUID();
+    expect(store.createOwnedRun(input, run.id, randomUUID(), worker(run.id, thirtyThird), requestHash).id).toBe(thirtyThird);
     expect(store.createOwnedRun(input, run.id, requestId, worker(run.id, randomUUID()), requestHash).delegation).toMatchObject({ destroy: { phase: 'complete' } });
-    expect(store.listRuns()).toHaveLength(33);
+    store.flush();
+    store = RunStore.open(dataDir, { keepLive: true });
+    const reopened = store.getRun(run.id)!.delegation;
+    expect(reopened?.role === 'root' ? reopened.receipts.length : 0).toBe(33);
+    expect(store.listOwnedWorkers(run.id)).toHaveLength(33);
+    expect(store.listRuns()).toHaveLength(34);
+  });
+
+  it('refuses a 33rd outstanding receipt inside the store transaction (#816)', { timeout: 30_000 }, () => {
+    const run = parent();
+    for (let i = 0; i < 32; i++) store.createOwnedRun(input, run.id, randomUUID(), worker(run.id, randomUUID()), requestHash);
+    expect(() => store.createOwnedRun(input, run.id, randomUUID(), worker(run.id, randomUUID()), requestHash)).toThrow(/32 outstanding workers/);
+    const delegation = store.getRun(run.id)!.delegation;
+    expect(delegation?.role === 'root' ? delegation.receipts.length : 0).toBe(32);
+  });
+
+  it('readiness covers every historical worker beyond 32 (#816)', { timeout: 30_000 }, () => {
+    const run = parent();
+    const ids: string[] = [];
+    for (let i = 0; i < 33; i++) {
+      const id = randomUUID(); ids.push(id);
+      const metadata = worker(run.id, id);
+      if (metadata.role !== 'worker') throw new Error('fixture');
+      store.createOwnedRun(input, run.id, randomUUID(), metadata, requestHash);
+      if (i < 32) store.commitDelegation([{ id, delegation: { ...metadata, destroy: { requestedAt: now, phase: 'complete', remaining: [] } } }]);
+    }
+    store.flush();
+    store = RunStore.open(dataDir, { keepLive: true });
+    const blockers = parentReadiness(store.getRun(run.id)!, ids.map(id => ({ workerId: id, run: store.getRun(id), terminated: false })));
+    expect(blockers).toHaveLength(33);
+    expect(blockers.at(-1)).toEqual({ workerId: ids[32], reason: 'outstanding' });
   });
 
   it('fails closed when a retry receipt points at a missing worker', () => {
