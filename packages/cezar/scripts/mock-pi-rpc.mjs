@@ -104,6 +104,15 @@ rl.on('line', (line) => {
 rl.on('close', () => { queue.then(() => process.exit(0)); });
 
 async function handle(command) {
+  if (command.type === 'prompt' && (command.message.includes('mock:autonomous') || command.message.startsWith('Continue working autonomously until the task is fully complete.'))) {
+    const { autonomousReply } = await import('./mock-autonomous.mjs');
+    send({ id: command.id, type: 'response', command: 'prompt', success: true });
+    send({ type: 'agent_start' });
+    send({ type: 'turn_start' });
+    sendText([autonomousReply(command.message)]);
+    sendTurnEnd();
+    return;
+  }
   if (command.type === 'prompt' && command.message.includes('mock:crash-stderr')) {
     const { crashWithStderr } = await import('./mock-runner-crash.mjs');
     if (crashWithStderr(command.message, '{"type":"tool_execution_update","toolCallId":"truncated')) return;

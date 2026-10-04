@@ -142,13 +142,14 @@ entries:
     pr: 967
     title: "fix(runs): make the autonomous auto-continue nudge reachable on both turn-end paths (#967)"
     date: 2026-09-12
-    status: planned
+    status: ported
     hint:
       conflicts: 1
-    note: "bug present here: runContinuation never sets state.autonomous and runAgentStep has no nudge, so #autonomous parks after the first turn; 1 conflicting file, 4 hunks in run.ts"
+    note: "Ported shared bounded nudging and Continue hydration; adapted portable ASK and delayed acknowledgement recovery to this fork, with native runner parity coverage."
     fork:
       issue: 426
-    decided: 2026-09-18
+      pr: 805
+    decided: 2026-10-04
   - sha: 9ee4283782e5de31d0379fc2fe8cf30275e1a704
     pr: 954
     title: "feat(tasks): switch runners with persisted context (#954)"
