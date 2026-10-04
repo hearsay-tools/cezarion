@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import { workerEvidenceRunIds, workerExecutionSchema, type WorkerExecution } from './worker-execution.ts';
 import { agentTmpDirLocations, agentTmpDirMayExist, removeAgentTmpDir } from './agent-tmpdir.ts';
 import { removeArtifacts } from '../artifacts/lifecycle.ts';
 import { randomUUID } from 'node:crypto';
@@ -2036,22 +2037,20 @@ export class RunStore extends EventEmitter {
     return join(dir, `${id}.execution.json`);
   }
 
-  readWorkerExecution(id: string): { generation: string; phase: 'queued' | 'starting' | 'complete'; neverMaterialized?: true } | undefined {
+  readWorkerExecution(id: string): WorkerExecution | undefined {
     try {
       const path = this.executionPath(id);
       const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
       try {
         const info = fstatSync(fd);
-        if (!info.isFile() || info.size > 1024 || (info.mode & 0o077)) return undefined;
-        const buffer = Buffer.alloc(1025); const count = readSync(fd, buffer, 0, buffer.length, 0);
-        return z.object({ generation: z.string().uuid(), phase: z.enum(['queued', 'starting', 'complete']), neverMaterialized: z.literal(true).optional() }).strict()
-          .refine(proof => !proof.neverMaterialized || proof.phase === 'complete')
-          .parse(JSON.parse(buffer.subarray(0, count).toString('utf8')));
+        if (!info.isFile() || info.size > 16384 || (info.mode & 0o077)) return undefined;
+        const buffer = Buffer.alloc(16385); const count = readSync(fd, buffer, 0, buffer.length, 0);
+        return workerExecutionSchema.parse(JSON.parse(buffer.subarray(0, count).toString('utf8')));
       } finally { closeSync(fd); }
     } catch { return undefined; }
   }
 
-  private writeWorkerExecution(id: string, proof: { generation: string; phase: 'queued' | 'starting' | 'complete'; neverMaterialized?: true }, fresh = false): void {
+  private writeWorkerExecution(id: string, proof: WorkerExecution, fresh = false): void {
     const path = this.executionPath(id);
     try {
       const existing = lstatSync(path);
@@ -2083,6 +2082,32 @@ export class RunStore extends EventEmitter {
     if (absent) return record === 'absent' ||
       ((!recordedProcessLive(record.controller) || isCurrentProcess(record.controller)) && !record.processes.some(recordedProcessLive));
     return inspectGeneration({ ...(record === 'absent' ? {} : { record }), paths }).liveness === 'gone';
+  }
+
+  /** Upgrade a legacy completed checkpoint while terminal task ownership is still known.
+   * No holder scan here: settlement and scheduling must never wait on cleanup proof. */
+  retainWorkerScratchCleanup(id: string): void {
+    const run = this.runs.get(id), proof = this.readWorkerExecution(id);
+    if (run?.delegation?.role !== 'worker' || ['queued', 'running', 'waiting'].includes(run.status) || proof?.phase !== 'complete') return;
+    const { resourceId, path } = run.delegation.workspace;
+    if (proof.scratchCleanup?.resourceId === resourceId && proof.scratchCleanup.path === path) return;
+    this.writeWorkerExecution(id, { ...proof, scratchCleanup: { resourceId, path } });
+  }
+
+  /** Cleanup can outlive its index row, but never its generation or terminal task intent. */
+  workerScratchResourcesSafe(id: string, generation: string, resourceId: string): boolean {
+    const run = this.runs.get(id), proof = this.readWorkerExecution(id);
+    if (proof?.phase !== 'complete' || proof.generation !== generation || proof.scratchCleanup?.resourceId !== resourceId ||
+      (run && ['queued', 'running', 'waiting'].includes(run.status))) return false;
+    if (run?.delegation?.role === 'worker') return run.delegation.workspace.path === proof.scratchCleanup.path &&
+      this.workerResourcesSafe(id, generation, resourceId);
+    // A valid different role contradicts the retained intent. Quarantined/missing metadata
+    // supplies no new authority; only the private terminal checkpoint authorizes scratch.
+    if (run && run.delegation?.role !== 'invalid') return false;
+    const record = this.readWorkerProcesses(id, generation);
+    if (record === 'unknown') return false;
+    return inspectGeneration({ ...(record === 'absent' ? {} : { record }),
+      paths: [proof.scratchCleanup.path, ...agentTmpDirLocations(this.dataDir, id)] }).liveness === 'gone';
   }
 
   commitWorkerExecutionStart(id: string): string {
@@ -2156,7 +2181,9 @@ export class RunStore extends EventEmitter {
       this.commitIndex(new Map(this.runs), new Set([id]));
       if (this.readWorkerExecution(id)?.generation !== generation) return false;
       this.writeWorkerExecution(id, { generation, phase: 'complete',
-        ...(proof.phase === 'queued' || proof.neverMaterialized ? { neverMaterialized: true as const } : {}) });
+        ...(proof.phase === 'queued' || proof.neverMaterialized ? { neverMaterialized: true as const } : {}),
+        ...(!['queued', 'running', 'waiting'].includes(run.status) ? { scratchCleanup: {
+          resourceId: run.delegation.workspace.resourceId, path: run.delegation.workspace.path } } : {}) });
       // The earlier index event cannot attest exit: subscribers must observe the
       // durable private proof before a terminal worker can satisfy a lifecycle wait.
       this.emit('run', this.runs.get(id)!);
@@ -2215,6 +2242,8 @@ export class RunStore extends EventEmitter {
     const run = this.runs.get(id);
     if (run?.delegation?.role === 'invalid') return false;
     if (run?.delegation?.role === 'worker') return this.workerDeletionEvidence(id);
+    const privateWorkers = workerEvidenceRunIds(this.dataDir);
+    if (!privateWorkers || privateWorkers.includes(id)) return false;
     if (run?.delegation?.role === 'root') {
       if (run.delegation.finishRequestedAt && ['queued', 'running', 'waiting'].includes(run.status)) return false;
       // Keep the parent's receipt and result ownership until each child history is explicitly removed.

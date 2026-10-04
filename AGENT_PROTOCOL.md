@@ -760,7 +760,10 @@ Both collect-first and destroy-first unblock parent Finish after collection whil
 blocks deletion, retention, history removal and reuse, including after a complete checkpoint and
 restart. Production 60-second retries release resources only after real holder exit; a stale retry
 cannot touch a newly admitted native execution. Disposal/detach stops retries; recovery/reattach
-reconstructs their durable intents. If uncertainty never clears, files remain indefinitely.
+reconstructs their durable intents from private generation checkpoints even if the run index is
+missing, corrupt, or quarantines the worker. Surviving unknown private evidence protects local
+and fallback scratch from generic sweeping; unreadable discovery retries too. If uncertainty
+never clears, files remain indefinitely.
 Only prior-boot evidence and process enumeration scope are synthetic; cwd permission denial,
 process exit, native wires, stores and Git remain real. Linux-only OS coverage exempts no runner;
 legacy/unknown-boot and recorded-process guards live in `delegation/process-liveness.test.ts`.

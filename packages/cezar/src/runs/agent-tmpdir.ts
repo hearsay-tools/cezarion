@@ -45,6 +45,7 @@
  * run.
  */
 import { createHash } from 'node:crypto';
+import { workerEvidenceRunIds } from './worker-execution.ts';
 import type { Dirent } from 'node:fs';
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -425,7 +426,11 @@ export function removeAgentTmpDir(dataDir: string, runId: string): void {
  *     never touched.
  */
 export function sweepAgentTmpDirs(dataDir: string, keepRunIds: Iterable<string>): string[] {
-  const keep = new Set(keepRunIds);
+  // Private worker evidence outlives corrupt/missing/quarantined index rows. Both local
+  // and digest-named fallback scratch belong to deferred cleanup, not this orphan sweep.
+  const workers = workerEvidenceRunIds(dataDir);
+  if (!workers) return []; // unreadable evidence directory is not proof of absence
+  const keep = new Set([...keepRunIds, ...workers]);
   const reaped: string[] = [];
   let entries: string[];
   const root = agentTmpRoot(dataDir);

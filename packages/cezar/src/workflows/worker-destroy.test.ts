@@ -432,7 +432,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     await until(() => store.getRun(w.id)?.status === 'waiting');
     expect(store.readWorkerExecution(w.id)).toEqual(deferred);
     manager.requestWorkerStop(w.id); expect(await manager.awaitRunTermination(w.id, 15000)).toBe(true);
-    expect(store.readWorkerExecution(w.id)).toEqual({ generation: deferred.generation, phase: 'complete' });
+    expect(store.readWorkerExecution(w.id)).toMatchObject({ generation: deferred.generation, phase: 'complete' });
   });
 
   it('capacity-deferred Continue invalidates prior completion before queueing and cancels without launching', async () => {
@@ -633,7 +633,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
         expect(await service.destroyForHuman('reopened', w.id)).toMatchObject({ state: 'complete', remaining: [] });
         await child.exited;
         expect(child.proc.signalCode).toBe('SIGKILL');
-        expect(reopened.readWorkerExecution(w.id)).toEqual({ ...prior, phase: 'complete' });
+        expect(reopened.readWorkerExecution(w.id)).toMatchObject({ ...prior, phase: 'complete' });
         expect(existsSync(workspace(w).path)).toBe(false); expect(branchExists(workspace(w).branch)).toBe(false);
       } finally { other.dispose(); reopened.flush(); }
     });

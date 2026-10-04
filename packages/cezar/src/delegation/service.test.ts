@@ -526,7 +526,7 @@ describe('delegation service durable authority', () => {
       // collect caches that conservative result for 2 s; poll it (not the finalizer) so the
       // assertion waits for proof of termination and still catches a missing collect hook (#703).
       await expect.poll(() => f.service.collect(f.caller, { workerId }), { timeout: 10_000, interval: 250 }).toMatchObject({ settled: true });
-      expect(reopened.readWorkerExecution(workerId)).toEqual({ generation, phase: 'complete' });
+      expect(reopened.readWorkerExecution(workerId)).toMatchObject({ generation, phase: 'complete' });
     } finally { manager.dispose(); reopened.flush(); }
   });
   it('returns only the retained old cancellation while a queued parent has a newer wait', async () => {

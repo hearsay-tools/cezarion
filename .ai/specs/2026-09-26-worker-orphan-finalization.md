@@ -191,16 +191,24 @@ belongs to another cezar. The second is the ordinary `cancel` path.
 
 ### 5. Durable independent cleanup and admission fencing
 
-The existing terminal run record, complete execution generation, resource ownership and retained
-scratch together are the durable scratch-cleanup intent. No second journal creates a crash window:
-completion is already durable before cleanup is scheduled. `WorkerScratchCleanup` reconstructs
-these intents on recovery and project reattach; startup sweeping retains all owned-worker scratch
-for this checked path. Its first attempt is deferred; each incomplete attempt retries after the
-same 60-second cadence as pending destroy, without an agent slot, age limit or force deletion.
-Disposal/detach cancels timers. Reattach/recovery rearms them. A timer stops when resources are
-removed or the task ceases to be terminal. A changed generation/resource invalidates the captured
-operation; any newly completed generation supplies its own intent. Missing/unreadable evidence
-and path permission errors retain files and keep periodic rechecks alive.
+The private execution checkpoint records terminal scratch-cleanup intent (resource identity and
+workspace path) atomically alongside the completed generation. An intact terminal worker record
+can reconstruct this optional field for older checkpoints; no new configuration or separate journal
+is needed. Starting a new generation drops the prior intent. `WorkerScratchCleanup` discovers
+private sidecars independently of the run index, so corrupt/missing `runs.json` and quarantined
+worker rows cannot make local or fallback scratch eligible for the generic orphan sweep. Even
+unreadable/malformed sidecars reserve those locations. Missing terminal intent is uncertainty,
+not permission to remove a legacy worker's scratch; restoring usable evidence permits retry.
+
+Recovery and project reattach reconstruct timers. The first attempt is deferred; each incomplete
+attempt retries after the same 60-second cadence as pending destroy, without an agent slot, age
+limit or force deletion. Disposal/detach cancels timers, including failed evidence-discovery retries.
+A timer stops when resources are removed or a known task ceases to be terminal. A changed
+generation/resource invalidates the captured operation; the new completed generation supplies
+its own intent. Unknown execution/process evidence and path permission errors retain files and
+keep periodic rechecks alive. If the private evidence directory itself cannot be enumerated, the
+sweep retains all scratch and retries discovery; once readable, ordinary orphan sweeping resumes
+and terminal worker scratch again requires fresh holder proof.
 
 Destroy remains an explicit persisted request for worktree/branch removal. Collection alone never
 requests it. Existing authorized retention after parent Finish keeps its behavior, with the same
@@ -316,3 +324,26 @@ candidate remains. If that proof never becomes available, files remain indefinit
   claim macOS permission coverage; injected-reader tests retain its conservative policy checks.
 - Full repository/browser gate, independent review, PR changes and integration remain with the
   parent task by assignment.
+
+### Index-loss review follow-up (2026-10-04)
+
+- Baseline `e8b73436`, four changed production sources restored temporarily: filter
+  `index recovery` in `scratch-cleanup.test.ts` produced **six behavioral failures**.
+  Corrupt, missing and quarantined index cases each deleted held local and owned fallback
+  scratch. Every failure was the retained-file assertion, not a missing helper or mock.
+  All implementation source bytes were restored exactly in `finally`.
+- Focused seven-file run: **186 passed** across scratch cleanup, run/workflow temp directories,
+  native R36, worker destroy, delegation service and retention. The finalized scratch fixture
+  additionally reran **18 passed**, using production fallback creation/ownership markers.
+- The reviewer's standalone real-Linux reproduction passed all three index-loss shapes:
+  actual `EACCES`, strict probe `alive`, retained files and successful relative writes after
+  recovery, with both private sidecars intact. No filesystem/process enumeration mocking in
+  that reproduction. Regression fixtures narrow enumeration to the test's real process tree;
+  actual cwd denial, writes and exit remain unmocked.
+- New scratch guards also cover unknown execution/process evidence and legacy missing cleanup
+  intent at both local/fallback locations, unreadable evidence discovery followed by automatic
+  retry, ordinary orphan reclamation after discovery recovers, and stripped role metadata.
+  Real holder exit releases resources through the unchanged 60-second retry. The existing
+  native stale-generation guard passes for all five runners.
+- Server build, server test typecheck and `git diff --check` passed. Full gate and independent
+  incremental review remain with the parent task.

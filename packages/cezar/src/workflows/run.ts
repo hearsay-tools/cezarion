@@ -1,3 +1,4 @@
+import { workerEvidenceRunIds } from '../runs/worker-execution.ts';
 import { ciErrorMessage } from '../ci-wait/errors.ts';
 import { ciWaitRequestSchema, ciWaitResultSchema, previewServeRequestSchema, type CiWait, type CiWaitRequest, type CiWaitResult, type CiWaitErrorCode, type PreviewServeRequest, type PreviewServeResult } from '@open-mercato/cezar-contract';
 import { previewToolEnabled } from '../ci-wait/tools.ts';
@@ -90,7 +91,6 @@ import {
   agentTmpEnv,
   agentTmpDirLocations,
   removeAgentTmpDir,
-  sweepAgentTmpDirs,
 } from '../runs/agent-tmpdir.ts';
 import { extractTaskRefs, refineTaskRefs, titleRefNumber } from '../runs/task-refs.ts';
 import { parseTaskMarkers, stripTaskMarkers } from '../runs/task-markers.ts';
@@ -2243,18 +2243,9 @@ export class RunManager {
       .listRuns()
       .filter((r) => ['queued', 'waiting', 'running'].includes(r.status))
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-    // A crash never reaches `dropActive`, so its temp directory (#785) outlived the run.
-    // Startup is the one moment we know which runs are still live, so sweep every other
-    // per-run directory here — bounded to `<dataDir>/tmp`, never a sibling.
-    // Execution completion alone never authorizes scratch removal. Preserve every worker for
-    // independently retried, fresh holder/generation checks, including already-complete proofs.
-    const retained = this.store.listRuns().filter(run => run.delegation?.role === 'worker');
+    // Scratch cleanup discovers private evidence independently of the salvageable run index.
+    // Terminal worker cleanup/retries and the generic orphan sweep share this boundary.
     this.workerScratchCleanup.recover();
-    // `dispose()` deliberately does not terminate live sessions, so a waiting
-    // record may still own a process even while this manager is recovering.
-    // Idle-close ends a process, not its task. Preserve all live task scratch,
-    // including workers whose previous process generation has completed.
-    sweepAgentTmpDirs(this.dataDir, [...live, ...retained].map(run => run.id));
     for (const run of live) {
       if (this.isActive(run.id)) continue;
       if (this.workerExecutionStopped(run.id)) continue;
@@ -2483,7 +2474,8 @@ export class RunManager {
     const run = this.store.getRun(runId);
     if (!run || ['queued', 'running', 'waiting'].includes(run.status)) return;
     if (this.active.has(runId) || this.starting.has(runId) || this.queue.includes(runId)) return;
-    if (run.delegation?.role === 'worker') { this.workerScratchCleanup.schedule(runId); return; }
+    const privateWorkers = workerEvidenceRunIds(this.dataDir);
+    if (run.delegation?.role === 'worker' || run.delegation?.role === 'invalid' || !privateWorkers || privateWorkers.includes(runId)) { this.workerScratchCleanup.schedule(runId); return; }
     removeAgentTmpDir(this.dataDir, runId);
   }
 
