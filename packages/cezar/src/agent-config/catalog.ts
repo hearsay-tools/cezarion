@@ -38,6 +38,8 @@ export interface AgentHomePaths {
   pi: string;
   /** Cursor CLI configuration directory; not an account home. */
   cursor: string;
+  /** `$PI_CODING_AGENT_DIR` or `~/${PI_CONFIG_DIR || '.omp'}/agent` — OMP's default profile. */
+  omp: string;
 }
 
 export interface ConfigFileDef {

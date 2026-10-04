@@ -7,6 +7,7 @@ const HOME: AgentHomePaths = {
   opencodeConfig: '/home/u/.config/opencode',
   pi: '/home/u/.pi/agent',
   cursor: '/home/u/.cursor',
+  omp: '/home/u/.omp/agent',
 };
 
 describe('agent-config catalog', () => {

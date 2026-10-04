@@ -45,6 +45,15 @@ describe('modelConflictsWithRunner', () => {
   it('keeps no hard-coded OpenCode catalog to drift', () => {
     expect(KNOWN_PRESETS_BY_RUNNER.opencode).toEqual([]);
   });
+
+  it('treats omp like pi: no hard-coded presets, every provider-qualified id accepted', () => {
+    expect(KNOWN_PRESETS_BY_RUNNER.omp).toEqual([]);
+    for (const runner of ['pi', 'omp'] as const) {
+      expect(modelConflictsWithRunner('anthropic/claude-sonnet-5', runner)).toBe(false);
+      expect(modelConflictsWithRunner('openai/gpt-5.4', runner)).toBe(false);
+      expect(modelConflictsWithRunner('opus', runner)).toBe(true);
+    }
+  });
 });
 
 it('accepts Cursor live models that share names with another backend preset', () => {

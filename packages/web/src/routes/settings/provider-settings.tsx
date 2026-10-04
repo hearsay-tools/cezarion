@@ -22,6 +22,7 @@ const PROVIDERS = [
   { id: 'opencode', label: 'OpenCode', login: 'opencode auth login' },
   { id: 'pi', label: 'pi', login: 'pi /login' },
   { id: 'cursor', label: 'Cursor', login: 'agent login' },
+  { id: 'omp', label: 'OMP', login: 'omp login' },
 ] as const
 
 const providerWriteState = <T,>(value: T): Record<ProviderId, T> => ({
@@ -30,6 +31,7 @@ const providerWriteState = <T,>(value: T): Record<ProviderId, T> => ({
   opencode: value,
   pi: value,
   cursor: value,
+  omp: value,
 })
 
 const STATUS_PRESENTATION = {

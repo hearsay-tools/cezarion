@@ -1368,6 +1368,7 @@ describe('harness parity — the matrix itself', () => {
       opencode: ['question.asked'],
       pi: ['CEZ:ASK'],
       cursor: ['cursor/ask_question', 'cursor/create_plan'],
+      omp: ['CEZ:ASK'],
     };
     for (const backend of RUNNER_IDS) {
       const cases = HARNESS_ADAPTERS[backend]?.askResumeCases;

@@ -82,6 +82,9 @@ export const MODELS_BY_RUNNER: Record<Runner, readonly ModelPreset[]> = {
   pi: [
     { id: '', label: 'auto', desc: 'Use your pi default model' },
   ],
+  omp: [
+    { id: '', label: 'auto', desc: 'Use your OMP default model' },
+  ],
 }
 
 /** Shared effort catalog (#45). `value: ''` is auto — omitted on the wire, harness default.
@@ -193,6 +196,7 @@ const DISCOVERY_RUNNER_LABEL: Record<ModelDiscoveryRunner, string> = {
   opencode: 'OpenCode',
   pi: 'Pi',
   cursor: 'Cursor',
+  omp: 'OMP',
 }
 
 export function modelCatalogStatus(

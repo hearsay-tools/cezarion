@@ -44,6 +44,10 @@ export const PROFILE_ENV_VAR: Record<ProviderId, string | null> = {
   pi: null,
   // CURSOR_CONFIG_DIR relocates configuration, not a verified whole account home.
   cursor: null,
+  // OMP profiles are selected by the named `OMP_PROFILE`, under which `PI_CODING_AGENT_DIR` is
+  // ignored, and whether the credential store (`agent.db`) moves with a profile is unverified.
+  // `null` until a single home variable that moves credentials as well as config is documented.
+  omp: null,
 };
 
 /** Providers that can carry more than one account — what the UI offers "Add account" for. */
@@ -98,4 +102,6 @@ const PROFILE_DIR_MARKERS: Record<ProviderId, readonly string[]> = {
   // profile dir; the entry exists to keep this table exhaustive over `ProviderId`.
   pi: [],
   cursor: [],
+  // OMP cannot carry profiles (`PROFILE_ENV_VAR.omp === null`), so nothing probes its dir.
+  omp: [],
 };

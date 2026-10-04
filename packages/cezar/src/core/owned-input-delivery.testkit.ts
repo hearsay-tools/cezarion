@@ -6,7 +6,7 @@ import { HARNESS_ADAPTERS } from './harness-parity.testkit.ts';
 
 /** Reject exactly one identified command through the real protocol; a reopened
  * process accepts it. No session/manager mock and no transport-error inference. */
-export async function withRejectedCommand(backend: 'codex' | 'opencode' | 'pi', body: () => Promise<void>): Promise<void> {
+export async function withRejectedCommand(backend: 'codex' | 'opencode' | 'pi' | 'omp', body: () => Promise<void>): Promise<void> {
   const root = mkdtempSync(join(tmpdir(), 'cez-delivery-reject-'));
   const once = join(root, 'rejected-once');
   const adapter = HARNESS_ADAPTERS[backend] as { mockBin: string };
@@ -37,7 +37,7 @@ export async function withRejectedCommand(backend: 'codex' | 'opencode' | 'pi', 
 }
 
 /** Hold only the transport ACK; normal real turn frames still reach the runner. */
-export async function withDelayedCommand(backend: 'codex' | 'opencode' | 'pi', body: (release: () => void) => Promise<void>, marker = 'delay-owned-ack'): Promise<void> {
+export async function withDelayedCommand(backend: 'codex' | 'opencode' | 'pi' | 'omp', body: (release: () => void) => Promise<void>, marker = 'delay-owned-ack'): Promise<void> {
   const root = mkdtempSync(join(tmpdir(), 'cez-delivery-delay-'));
   const released = join(root, 'released');
   const adapter = HARNESS_ADAPTERS[backend] as { mockBin: string };

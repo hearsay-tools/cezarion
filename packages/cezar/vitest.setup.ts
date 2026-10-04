@@ -47,6 +47,7 @@ const HOST_BIN_AND_MODE_KEYS = [
   'CEZ_CODEX_BIN',
   'CEZ_OPENCODE_BIN',
   'CEZ_PI_BIN',
+  'CEZ_OMP_BIN',
   'CEZ_REMOTE',
 ] as const
 

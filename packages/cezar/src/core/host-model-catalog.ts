@@ -24,5 +24,9 @@ export function hostModelCatalogAdapters(cwd: string): Record<ModelDiscoveryRunn
     opencode: { discover: () => discoverOpencodeModels({ cwd }) },
     cursor: { discover: () => discoverCursorModels({ cwd }) },
     pi: { discover: () => discoverPiModels({ cwd }) },
+    // Placeholder until OMP's discovery (`omp models --json`) lands: a rejection is reported by
+    // `RunnerModelCatalog` as `unavailable`, so the picker falls back exactly as for any
+    // runner whose discovery failed.
+    omp: { discover: () => Promise.reject(new Error('OMP model discovery is not implemented yet')) },
   };
 }

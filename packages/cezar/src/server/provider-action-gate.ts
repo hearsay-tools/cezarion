@@ -11,6 +11,7 @@ const LABEL: Record<ProviderId, string> = {
   opencode: 'OpenCode',
   pi: 'pi',
   cursor: 'Cursor',
+  omp: 'omp',
 };
 
 export function providerForExistingRun(

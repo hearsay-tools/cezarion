@@ -4,7 +4,7 @@ import { promisify } from 'node:util';
 const exec = promisify(execFile);
 
 export interface BackendCheck {
-  name: 'claude' | 'codex' | 'opencode' | 'pi' | 'cursor' | 'gh' | 'git';
+  name: 'claude' | 'codex' | 'opencode' | 'pi' | 'cursor' | 'omp' | 'gh' | 'git';
   available: boolean;
   version?: string;
   hint?: string;
@@ -12,7 +12,7 @@ export interface BackendCheck {
 
 /**
  * Probe the host for everything cez leans on: the agent CLIs (`claude`, and
- * the optional `codex` / `opencode` / `pi` alternatives), `gh` (GitHub auth for
+ * the optional `codex` / `opencode` / `pi` / `omp` alternatives), `gh` (GitHub auth for
  * PR creation) and `git`. Nothing is required except at least one agent CLI —
  * the GUI degrades gracefully, only offers the runners that are present, and
  * shows the hints for the rest.
@@ -24,6 +24,7 @@ export async function detectEnvironment(): Promise<BackendCheck[]> {
     probeOpencode(),
     probePi(),
     probeCursor(),
+    probeOmp(),
     probeGh(),
     probeGit(),
   ]);
@@ -138,6 +139,31 @@ async function probeCursor(): Promise<BackendCheck> {
     return { name: 'cursor', available: true, version: stdout.trim(), hint: 'Run `agent login` to connect Cursor.' };
   } catch {
     return { name: 'cursor', available: false, hint: 'Optional: install Cursor CLI (https://cursor.com/docs/cli/installation), then run `agent login`.' };
+  }
+}
+
+// Copy of probePi with OMP's binary, env override and hints; it never spawns `pi`.
+export async function probeOmp(): Promise<BackendCheck> {
+  // Dry-run stands the runner up on the shared mock, so report it present.
+  if (process.env.CEZ_DRY_RUN === '1') {
+    return { name: 'omp', available: true, version: 'mock (CEZ_DRY_RUN=1)' };
+  }
+  const bin = process.env.CEZ_OMP_BIN ?? 'omp';
+  try {
+    const { stdout } = await exec(bin, ['--version'], { timeout: 10_000 });
+    return {
+      name: 'omp',
+      available: true,
+      version: stdout.trim(),
+      hint: 'if not authenticated, run `omp login`',
+    };
+  } catch {
+    // A missing `omp` CLI is never a boot failure — the runner just isn't offered.
+    return {
+      name: 'omp',
+      available: false,
+      hint: 'optional: install OMP (omp.sh) and run `omp login` to use the OMP runner',
+    };
   }
 }
 

@@ -95,6 +95,7 @@ const PROVIDER_LABEL: Record<ProviderId, string> = {
   opencode: 'OpenCode',
   pi: 'pi',
   cursor: 'Cursor',
+  omp: 'OMP',
 }
 
 /** The vendor's own install/login instruction, shown when the CLI is not on this machine. */
@@ -104,6 +105,7 @@ const PROVIDER_INSTALL: Record<ProviderId, string> = {
   opencode: 'https://opencode.ai',
   pi: 'https://github.com/badlogic/pi-mono',
   cursor: 'https://cursor.com/docs/cli/installation',
+  omp: 'https://omp.sh',
 }
 
 /** Same vocabulary the Providers card uses — one wording for "is this logged in?". */

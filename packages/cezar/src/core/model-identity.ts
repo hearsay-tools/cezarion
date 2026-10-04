@@ -101,6 +101,8 @@ export const BACKEND_MODEL_MAP: Readonly<Record<AgentBackend, BackendModelMap>> 
   // opencode (#387) — no default provider, so a bare model is rejected loudly
   // and `toBackendModel` hands pi the full `provider/model` on its `--model`.
   pi: {},
+  // OMP is pi's fork: `provider/model`, no default provider, so a bare model is rejected loudly.
+  omp: {},
 };
 
 const SLASH = '/';

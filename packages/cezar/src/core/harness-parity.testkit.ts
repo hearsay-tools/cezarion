@@ -170,6 +170,8 @@ export interface HarnessAdapter {
 /** Resolved from this file, not the cwd, so the paths hold wherever vitest runs. */
 const CLAUDE_MOCK = join(HERE, '..', '..', 'scripts', 'mock-claude.mjs');
 const PI_MOCK = join(HERE, '..', '..', 'scripts', 'mock-pi-rpc.mjs');
+/** Created by the OMP runner's mock task; HARNESS_ADAPTERS.omp stays red until it exists. */
+const OMP_MOCK = join(HERE, '..', '..', 'scripts', 'mock-omp-rpc.mjs');
 const CODEX_MOCK = join(HERE, '..', '..', 'scripts', 'mock-codex-app-server.mjs');
 const OPENCODE_MOCK = join(HERE, '..', '..', 'scripts', 'mock-opencode-serve.mjs');
 
@@ -345,6 +347,42 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'steer-tool': 'mock:steer-tool',
       'steer-late': 'mock:steer-late',
       // No `subagent`: see the S9 and R12 entries in PARITY_EXEMPTIONS.
+    },
+  },
+  // OMP is pi's fork on the same RPC wire, so it answers pi's scenario map, plus the two
+  // subagent scenarios pi is exempt from: OMP's `task` tool surfaces subagent events natively.
+  omp: {
+    backend: 'omp',
+    askResumeCases: [{ kind: 'CEZ:ASK', scenario: 'ask-resume', answer: 'Library: Vitest' }],
+    binEnv: 'CEZ_OMP_BIN',
+    mockBin: OMP_MOCK,
+    scenarios: {
+      'missing-binary': BASELINE_PROMPT,
+      autonomous: 'mock:autonomous',
+      'autonomous-cap': 'mock:autonomous-cap',
+      'autonomous-ask-cap': 'mock:autonomous-ask-cap',
+      baseline: BASELINE_PROMPT,
+      'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
+      'crash-stderr-held-pipe': 'mock:crash-stderr-held-pipe',
+      'shutdown-stderr': 'mock:crash-stderr-clean',
+      'crash-stderr': 'mock:crash-stderr',
+      'crash-stderr-single': 'mock:crash-stderr-single',
+      done: 'mock:done',
+      hold: 'mock:hold', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'busy-progress': 'mock:busy-progress',
+      'split-text': 'mock:split-text',
+      'provider-error': 'mock:provider-error',
+      'provider-unavailable': 'mock:provider-error',
+      ask: 'mock:ask',
+      'ask-resume': 'mock:ask mock:resume-done',
+      'ask-reply-late': 'mock:ask',
+      'ask-snapshot': 'mock:ask-snapshot',
+      'ask-snapshot-bad': 'mock:ask-snapshot-bad',
+      'ask-prose': 'mock:ask-prose',
+      'ask-bad': 'mock:ask-bad',
+      'steer-tool': 'mock:steer-tool',
+      'steer-late': 'mock:steer-late',
+      subagent: 'mock:subagent',
+      'subagent-after-park': 'mock:subagent-after-park',
     },
   },
 };

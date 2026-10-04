@@ -4,7 +4,7 @@ import { AGENT_MODELS_LOCKED_ENV } from './agent-model-policy.ts';
 import { profileEnv } from './agent-profiles.ts';
 import { withEnvPrefix } from './shell-env.ts';
 
-export const PROVIDER_IDS = ['claude', 'codex', 'opencode', 'pi', 'cursor'] as const;
+export const PROVIDER_IDS = ['claude', 'codex', 'opencode', 'pi', 'cursor', 'omp'] as const;
 export type ProviderId = (typeof PROVIDER_IDS)[number];
 export type ProviderConnectionState =
   | 'connected'
@@ -240,6 +240,25 @@ function parsePiStatus(result: ProviderCommandResult): ProviderConnectionState |
   return null;
 }
 
+/**
+ * OMP (Oh My Pi) v18.4.11: `omp models --json` exits 0 and prints `{"models":[...]}` — an object
+ * wrapping the array, not a bare array. With no credentials the array is empty; with any provider
+ * key (stored login or an environment variable) it lists that provider's models. Like OpenCode's
+ * environment count, a configured credential permits a run, so a non-empty list is `connected`;
+ * a vendor rejection is still latched at runtime. Recorded against the real binary
+ * (/tmp/omp-evidence/models.json, models-with-key.json).
+ */
+function parseOmpStatus(result: ProviderCommandResult): ProviderConnectionState | null {
+  if (result.exitCode !== 0) return null;
+  try {
+    const value = JSON.parse(result.stdout) as { models?: unknown };
+    if (!Array.isArray(value?.models)) return null;
+    return value.models.length > 0 ? 'connected' : 'disconnected';
+  } catch {
+    return null;
+  }
+}
+
 // Verified against Cursor CLI 2026.09.15 status --format json implementation.
 function parseCursorStatus(result: ProviderCommandResult): ProviderConnectionState | null {
   try {
@@ -299,6 +318,14 @@ const DESCRIPTORS: readonly ProviderDescriptor[] = [
     loginArgs: ['login'],
     installHint: 'Install Cursor CLI, then run `agent login`.',
     parse: parseCursorStatus,
+  },
+  {
+    id: 'omp',
+    executable: () => process.env.CEZ_OMP_BIN ?? 'omp',
+    statusArgs: ['models', '--json'],
+    loginArgs: ['login'],
+    installHint: 'Install OMP (curl -fsSL https://omp.sh/install | sh), then run `omp login`.',
+    parse: parseOmpStatus,
   },
 ];
 

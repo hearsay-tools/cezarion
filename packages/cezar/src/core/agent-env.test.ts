@@ -7,7 +7,7 @@ import { buildChildEnv, buildCommandEnv, looksSecret } from './agent-env.ts';
  * auth + gh + cezar's `CEZ_*` — and nothing else.
  */
 describe('buildChildEnv — delegation session isolation', () => {
-  for (const backend of ['claude', 'claude-cli', 'codex', 'opencode', 'pi'] as const) {
+  for (const backend of ['claude', 'claude-cli', 'codex', 'opencode', 'pi', 'omp'] as const) {
     for (const full of ['0', '1']) {
       it(`${backend} strips inherited delegation authority with CEZ_AGENT_ENV_FULL=${full}, even when passed through`, () => {
         const source = {
@@ -36,6 +36,27 @@ describe('buildChildEnv — delegation session isolation', () => {
       });
     }
   }
+});
+
+describe('buildChildEnv — omp credentials', () => {
+  const source: NodeJS.ProcessEnv = {
+    PATH: '/usr/bin', OMP_LOG_LEVEL: 'info', PI_CODING_AGENT_DIR: '/x', OPENAI_API_KEY: 'k',
+    CLAUDE_CONFIG_DIR: '/c', AWS_SECRET_ACCESS_KEY: 's', SOME_UNRELATED_SECRET: 'nope',
+  };
+
+  it('omp receives OMP_, PI_ and multi-provider credentials but no CLAUDE_ or AWS_', () => {
+    const env = buildChildEnv({ backend: 'omp', source });
+    expect(env).toMatchObject({ OMP_LOG_LEVEL: 'info', PI_CODING_AGENT_DIR: '/x', OPENAI_API_KEY: 'k' });
+    expect(env.CLAUDE_CONFIG_DIR).toBeUndefined();
+    expect(env.AWS_SECRET_ACCESS_KEY).toBeUndefined();
+    expect(env.SOME_UNRELATED_SECRET).toBeUndefined();
+  });
+
+  it('pi still receives no OMP_ variables', () => {
+    const env = buildChildEnv({ backend: 'pi', source });
+    expect(env.OMP_LOG_LEVEL).toBeUndefined();
+    expect(env.PI_CODING_AGENT_DIR).toBe('/x');
+  });
 });
 
 describe('buildChildEnv — least-privilege child env (#427)', () => {

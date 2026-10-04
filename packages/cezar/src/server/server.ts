@@ -1995,7 +1995,7 @@ export function createApp(deps: ServerDeps) {
       },
     )
 
-    .post('/providers/connect', jsonZodValidator(providerConnectSchema, { message: 'provider must be claude, codex, opencode, pi, or cursor' }), async (c) => {
+    .post('/providers/connect', jsonZodValidator(providerConnectSchema, { message: 'provider must be claude, codex, opencode, pi, cursor, or omp' }), async (c) => {
       const body = { data: c.req.valid('json') };
 
       const provider = body.data.provider as ProviderId;
@@ -3265,6 +3265,7 @@ export function createApp(deps: ServerDeps) {
             codex: z.string().trim().min(1).max(200).nullable().optional(),
             opencode: z.string().trim().min(1).max(200).nullable().optional(),
             pi: z.string().trim().min(1).max(200).nullable().optional(),
+            omp: z.string().trim().min(1).max(200).nullable().optional(),
             cursor: z.string().trim().min(1).max(200).nullable().optional(),
           })
           .optional(),
@@ -5940,6 +5941,7 @@ export function createApp(deps: ServerDeps) {
         codex: modelPresetSchema,
         opencode: modelPresetSchema,
         pi: modelPresetSchema,
+        omp: modelPresetSchema,
         cursor: modelPresetSchema,
       })
       .optional(),
@@ -6650,6 +6652,8 @@ export function resumeCommand(runner: string | undefined, sessionId: string): st
     }
     case 'pi':
       return `pi --session ${sessionId}`;
+    case 'omp':
+      return `omp --resume ${sessionId}`;
     default:
       return `claude --resume ${sessionId}`;
   }
