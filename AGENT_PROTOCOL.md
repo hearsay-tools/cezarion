@@ -752,7 +752,8 @@ this normative contract.
 
 ## 7. Harness parity — session and lifecycle (`packages/cezar/src/core/harness-parity.test.ts`)
 
-**R36** (#738), in `workflows/worker-reboot-parity.test.ts`, drives every `RUNNER_IDS`
+**R36** (#738), in `workflows/worker-reboot-parity.test.ts` and
+`workflows/worker-location-evidence.test.ts`, drives every `RUNNER_IDS`
 backend's `HARNESS_ADAPTERS` native wire through worker cancellation and a successful twin.
 Linux prior-boot controller evidence settles the old execution independently of resource cleanup.
 Both collect-first and destroy-first unblock parent Finish after collection while a real same-user
@@ -766,6 +767,12 @@ and fallback scratch from generic sweeping; unreadable discovery retries too. Un
 ownership retains its saved location. Partial removal retains a directory-identity receipt and
 the pointer until the fallback is gone, so permissions recovering cannot strand cleanup. If uncertainty
 never clears, files remain indefinitely.
+Malformed or unreadable fallback pointers/removal receipts retain every independently readable
+candidate and mark location discovery incomplete. Legacy execution, collect and parent Finish
+remain unsettled until holders exit and location evidence recovers; a clear partial scan is not
+termination proof. The native matrix covers all four damage shapes with real readable holders,
+post-probe writes and restored-evidence recovery. Known-reboot execution still settles without
+holder scans when cleanup metadata is damaged, while independent cleanup remains blocked.
 Only prior-boot evidence and process enumeration scope are synthetic; cwd permission denial,
 process exit, native wires, stores and Git remain real. Linux-only OS coverage exempts no runner;
 legacy/unknown-boot and recorded-process guards live in `delegation/process-liveness.test.ts`.

@@ -118,6 +118,7 @@ describe('process liveness (#469)', () => {
     try {
       expect(probeGeneration({ ...input, since: Date.now() + 60_000 })).toBe('alive');
       expect(inspectExecutionGeneration(input).liveness).toBe('gone');
+      expect(inspectExecutionGeneration({ ...input, pathsComplete: false }).liveness).toBe('gone');
       await holder.write();
       expect(readFileSync(join(dir, 'holder-writes'), 'utf8')).toContain('still writable');
     } finally { await holder.close(); }
@@ -134,11 +135,15 @@ describe('process liveness (#469)', () => {
       : shape === 'same boot' ? `${currentBoot}:100` : shape === 'missing token' ? undefined : `${oldBoot}:100`;
     vi.resetModules();
     const { inspectExecutionGeneration: executionProbe } = await import('./process-liveness.ts');
+    const input = { paths: [dir], since: 0, ...(shape === 'absent record' ? {} : { record: {
+      generation: 'g', controller: { pid: 2147483001, startToken: token }, processes: [],
+    } }) };
     try {
-      expect(executionProbe({ paths: [dir], since: 0, ...(shape === 'absent record' ? {} : { record: {
-        generation: 'g', controller: { pid: 2147483001, startToken: token }, processes: [],
-      } }) }).liveness).toBe('alive');
+      expect(executionProbe(input).liveness).toBe('alive');
+      expect(executionProbe({ ...input, pathsComplete: false }).liveness).toBe('alive');
     } finally { await holder.close(); }
+    expect(executionProbe({ ...input, pathsComplete: false }).liveness).toBe('unknown');
+    expect(executionProbe(input).liveness).toBe('gone');
   });
 
   it.runIf(linux)('finds a real child by its working directory and loses it after exit', async () => {

@@ -518,7 +518,8 @@ const CONTROL_CRITERIA = [
   { id: 'R34', scenario: 'baseline' },
   // The shared cezar tool list, `describe('harness parity — cezarTools list behind CEZ_PREVIEW')` (#781).
   { id: 'R35', scenario: 'baseline' },
-  // workflows/worker-reboot-parity.test.ts: native exit/Continue, independent execution settlement, real denied holders, durable cleanup retries and parent Finish.
+  // workflows/worker-reboot-parity.test.ts and worker-location-evidence.test.ts: native exit/Continue,
+  // independent reboot proof, legacy location uncertainty, real holders, cleanup retries and parent Finish.
   { id: 'R36', scenario: 'baseline' },
 ] as const;
 

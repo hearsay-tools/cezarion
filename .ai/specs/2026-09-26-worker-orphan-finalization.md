@@ -75,8 +75,8 @@ A synchronous, dependency-free module (a sync probe lets `continueRun` stay sync
 
 - `processStartToken(pid)` as above.
 - `processesWithCwdUnder(dirs)`: the worker's worktree and every agent tmp dir location
-  (`agentTmpDirLocations`). Independent cleanup can delete terminal-task scratch; execution
-  settlement cannot. Live tasks retain
+  (`agentTmpDirLocationEvidence` supplies both candidates and discovery completeness). Independent
+  cleanup can delete terminal-task scratch; execution settlement cannot. Live tasks retain
   scratch across finalized process generations and restart (#515). Linux reads `/proc/*/cwd`,
   skipping `ENOENT` (the process vanished) and `EACCES` on another user's process. An
   unreadable process of our own user is non-dumpable (`systemd --user`, `sshd`,
@@ -90,7 +90,10 @@ A synchronous, dependency-free module (a sync probe lets `continueRun` stay sync
   controller boot UUID different from the current readable boot UUID proves old descendants
   cannot survive, but only after checking that neither the controller nor any recorded process
   is live. `inspectExecutionGeneration` uses this fast proof without scanning paths. Unknown,
-  malformed and legacy boot identities retain conservative descendant handling. This proves
+  malformed and legacy boot identities retain conservative descendant handling. Unknown scratch
+  locations prevent a clear partial scan from returning `gone`; readable candidates still report
+  their live PIDs. This completeness check follows the known-reboot fast proof, so uncertainty in
+  cleanup metadata cannot reintroduce a holder scan into reboot settlement. This proves
   execution settlement only; a same-user non-dumpable process can hold persistent paths after
   reboot and is indistinguishable from an ambient daemon whose cwd cannot be read.
 
@@ -219,6 +222,14 @@ marker. A missing marker may use only the matching receipt; unreadable/foreign o
 blocks, and the receipt cannot authorize a replacement directory. Failed fallback removal retains both pointer and receipt, so
 restart and the ordinary 60-second retry can finish after permissions and holders clear. The local
 pointer/receipts are removed only after every fallback is proven absent.
+
+Pointer and removal-receipt reads are independent: neither failure discards a candidate discovered
+by the other. Malformed/unreadable evidence marks the list incomplete, which also blocks legacy
+execution settlement after known holders exit. The orphan reprobe keeps its existing 15-second,
+then 60-second uncapped cadence; evidence restoration permits settlement on a later probe. A
+known-reboot execution proof remains independent, but incomplete discovery always refuses cleanup
+or reuse. Removal receipts continue to require exact directory identity; their location value alone
+never authorizes deletion.
 
 Destroy remains an explicit persisted request for worktree/branch removal. Collection alone never
 requests it. Existing authorized retention after parent Finish keeps its behavior, with the same
@@ -377,3 +388,27 @@ candidate remains. If that proof never becomes available, files remain indefinit
   is scoped to the actual child. Tests remain Linux/unprivileged-user specific for EACCES.
 - Server build, server test typecheck and `git diff --check` passed. Full gate and independent
   incremental review remain with the parent task.
+
+### Receipt-liveness review follow-up (2026-10-04)
+
+- Baseline `74bf1dcf`: the preserved four-case regression and both standalone reviewer scripts
+  reproduced live readable fallback holders being falsely settled after receipt/pointer damage.
+  With the finalized native tests and three production sources temporarily restored to baseline,
+  `npx vitest run packages/cezar/src/workflows/worker-location-evidence.test.ts packages/cezar/src/delegation/process-liveness.test.ts`
+  produced **27 behavioral failures / 11 guard passes**: twenty native cases falsely settled live
+  holders; seven legacy/unknown-boot shapes returned `gone` for incomplete location evidence.
+  All source bytes were restored in `finally` and verified exactly.
+- The new native R36 matrix covers all five runners and four real malformed/permission-denied
+  receipt/pointer shapes, post-probe holder writes, blocked collect/Finish, and settlement plus
+  cleanup once holders exit and evidence recovers. Both reviewer scripts now retain the saved
+  path and report `alive`, settlement `false`, phase `starting`, resource safety `false`.
+- Focused lifecycle/tempdir/retention run: **212 passed** across eight files; separate scratch
+  cleanup run: **22 passed**, including the prior index-loss, fallback-retry and replacement
+  safety guards. The harness registration guard passed. The existing fifteen R36 cases remain;
+  collect/destroy also test damaged cleanup metadata during known-reboot settlement, then restore
+  metadata before the original holder-only deletion/reuse assertions. The final R36-only rerun
+  passed all **15** cases after this fixture adjustment.
+- Server build, server test typecheck and diff check passed. Linux/unprivileged permission tests
+  use actual EACCES, readable holder cwd, writes and exits; enumeration is scoped to fixture
+  processes. No production timer changes, liveness stubs or unrelated-process signals. The full
+  gate and independent review remain with the parent task; no push or PR edits were performed.

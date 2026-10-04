@@ -89,7 +89,7 @@ import { isReclaimable, reclaimWorktrees, rematerializeReclaimedWorktree } from 
 import {
   AgentTempDirError,
   agentTmpEnv,
-  agentTmpDirLocations,
+  agentTmpDirLocationEvidence,
   removeAgentTmpDir,
 } from '../runs/agent-tmpdir.ts';
 import { extractTaskRefs, refineTaskRefs, titleRefNumber } from '../runs/task-refs.ts';
@@ -807,7 +807,7 @@ export class RunManager {
    * manager holds the run); `unknown` is a present record that proves nothing. */
   private orphanState(runId: string, admitting = false):
     | { state: 'none' | 'busy' | 'unknown' }
-    | { state: 'orphan'; generation: string; record?: WorkerProcessRecord; paths: string[]; since?: number } {
+    | { state: 'orphan'; generation: string; record?: WorkerProcessRecord; paths: string[]; pathsComplete: boolean; since?: number } {
     const run = this.store.getRun(runId);
     if (run?.delegation?.role !== 'worker' || this.disposed) return { state: 'none' };
     if (this.executions.has(runId) || this.active.has(runId) || this.starting.has(runId) || (!admitting && this.queue.includes(runId))) return { state: 'busy' };
@@ -819,8 +819,9 @@ export class RunManager {
     if (record === 'unknown') return { state: 'unknown' };
     if (record !== 'absent' && isCurrentProcess(record.controller)) return { state: 'none' };
     // Legacy execution proof also considers scratch holders; cleanup uses a separate strict proof.
+    const locations = agentTmpDirLocationEvidence(this.dataDir, runId);
     return { state: 'orphan', generation: proof.generation, ...(record === 'absent' ? {} : { record }),
-      paths: [run.delegation.workspace.path, ...agentTmpDirLocations(this.dataDir, runId)],
+      paths: [run.delegation.workspace.path, ...locations.paths], pathsComplete: locations.complete,
       // No process of this worker can predate its record (1 s slack for tick rounding).
       ...(Number.isFinite(Date.parse(run.createdAt)) ? { since: Date.parse(run.createdAt) - 1_000 } : {}) };
   }

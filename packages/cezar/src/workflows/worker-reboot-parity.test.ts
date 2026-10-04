@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import fs, { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import fs, { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -60,6 +60,10 @@ describe.runIf(process.platform === 'linux')('R36 reboot orphan settlement (#738
     if (!workspace) throw Error('missing workspace');
     const scratch = agentTmpDir(join(root, '.ai/cezar'), orphan.id);
     mkdirSync(scratch, { recursive: true }); writeFileSync(join(scratch, 'retained'), 'scratch');
+    // Unknown location evidence blocks legacy settlement, but cannot negate known-reboot
+    // execution proof. The independent cleanup still requires this evidence to recover.
+    const receipt = join(scratch, '.cez-fallback-removal.json');
+    writeFileSync(receipt, '{corrupt', { mode: 0o600 });
     const holder = await nonDumpableHolder(settleVia === 'collect' ? scratch : workspace.path);
     const scopedPids = [holder.pid]; scopeProcesses(scopedPids);
     reopenRuntime();
@@ -86,6 +90,8 @@ describe.runIf(process.platform === 'linux')('R36 reboot orphan settlement (#738
       expect(manager.finish(p.id)).toBe(true);
       expect(existsSync(scratch)).toBe(true);
       expect(resourceProbe.mock.calls.filter(([path]) => String(path).startsWith('/proc/'))).toHaveLength(0);
+      // Restore metadata before testing holder-only deletion/reuse guards below.
+      rmSync(receipt);
       await until(() => store.getRun(p.id)?.status === 'done');
       expect(semaphore.busy()).toBe(0);
       await holder.write();

@@ -200,11 +200,14 @@ export function inspectGeneration(input: { record?: WorkerProcessRecord; paths: 
 /** Execution-only proof: a known reboot ended all old descendants, provided neither the
  * controller nor any recorded process is still live. Never use this to authorize reuse/deletion.
  * Legacy or unknown boot evidence retains the conservative descendant scan. */
-export function inspectExecutionGeneration(input: { record?: WorkerProcessRecord; paths: readonly string[]; since?: number }): GenerationProbe {
+export function inspectExecutionGeneration(input: { record?: WorkerProcessRecord; paths: readonly string[]; pathsComplete?: boolean; since?: number }): GenerationProbe {
   const record = input.record;
   if (record && recordedProcessLive(record.controller)) return { liveness: 'alive', controller: record.controller.pid, pids: [] };
   const pids = record?.processes.filter(recordedProcessLive).map(entry => entry.pid) ?? [];
   if (pids.length) return { liveness: 'alive', pids };
   if (process.platform === 'linux' && controllerPredatesBoot(record?.controller.startToken, linuxBootId())) return { liveness: 'gone', pids: [] };
-  return inspect(input);
+  const probe = inspect(input);
+  // Unknown scratch locations can hide a legacy descendant even when every known path is
+  // clear. Keep live PID diagnostics, but never turn a partial scan into proof of termination.
+  return probe.liveness === 'gone' && input.pathsComplete === false ? { liveness: 'unknown', pids: [] } : probe;
 }

@@ -364,14 +364,22 @@ export function agentTmpEnv(
 
 /** Reading a persisted location is not deletion authority. Keep it in holder scans even
  * when its ownership marker is unreadable, so evidence cannot disappear from the proof. */
-function fallbackLocations(dataDir: string, runId: string): { paths: string[]; removals: FallbackRemoval[] } {
-  const local = agentTmpDir(dataDir, runId), recorded = recordedFallback(dataDir, runId);
-  const removals = readFallbackRemovals(local);
-  for (const { path } of removals) {
-    if (!isAbsolute(path) || path !== fallbackTmpDir(dirname(path), dataDir, runId)) throw Error('Invalid fallback removal location');
-  }
-  return { paths: [...new Set([...osTempRoots().map(root => fallbackTmpDir(root, dataDir, runId)),
-    ...(recorded ? [recorded] : []), ...removals.map(record => record.path)])], removals };
+function fallbackLocations(dataDir: string, runId: string): { paths: string[]; removals: FallbackRemoval[]; complete: boolean } {
+  const paths = new Set(osTempRoots().map(root => fallbackTmpDir(root, dataDir, runId)));
+  let complete = true, removals: FallbackRemoval[] = [];
+  try {
+    const recorded = recordedFallback(dataDir, runId);
+    if (recorded) paths.add(recorded);
+  } catch { complete = false; }
+  // Independent evidence: a damaged receipt must never discard a readable pointer (#738).
+  try {
+    removals = readFallbackRemovals(agentTmpDir(dataDir, runId));
+    for (const { path } of removals) {
+      if (!isAbsolute(path) || path !== fallbackTmpDir(dirname(path), dataDir, runId)) { complete = false; continue; }
+      paths.add(path);
+    }
+  } catch { complete = false; }
+  return { paths: [...paths], removals, complete };
 }
 
 function fallbackOwnedOrAbsent(dataDir: string, path: string, removals: FallbackRemoval[]): boolean {
@@ -393,21 +401,22 @@ function fallbackOwnedOrAbsent(dataDir: string, path: string, removals: Fallback
 export function agentTmpDirOwnershipProven(dataDir: string, runId: string): boolean {
   if (!safeRunId(runId)) return false;
   try {
-    const { paths, removals } = fallbackLocations(dataDir, runId);
-    return paths.every(path => fallbackOwnedOrAbsent(dataDir, path, removals));
+    const { paths, removals, complete } = fallbackLocations(dataDir, runId);
+    return complete && paths.every(path => fallbackOwnedOrAbsent(dataDir, path, removals));
   } catch { return false; }
 }
 
 /** Every candidate path, including readable pointers whose ownership is still uncertain. */
 export function agentTmpDirLocations(dataDir: string, runId: string): string[] {
-  if (!safeRunId(runId)) return [];
-  const local = agentTmpDir(dataDir, runId);
-  try { return [local, ...fallbackLocations(dataDir, runId).paths]; }
-  catch {
-    // Callers needing removal/reuse authority must also require ownership proof. This
-    // partial list is useful for read-only legacy execution scans, never permission to rm.
-    return [local, ...osTempRoots().map(root => fallbackTmpDir(root, dataDir, runId))];
-  }
+  return agentTmpDirLocationEvidence(dataDir, runId).paths;
+}
+
+/** A clear scan of a partial list cannot settle legacy execution. Completeness is distinct
+ * from ownership: neither this list nor a known reboot authorizes resource deletion/reuse. */
+export function agentTmpDirLocationEvidence(dataDir: string, runId: string): { paths: string[]; complete: boolean } {
+  if (!safeRunId(runId)) return { paths: [], complete: false };
+  const { paths, complete } = fallbackLocations(dataDir, runId);
+  return { paths: [agentTmpDir(dataDir, runId), ...paths], complete };
 }
 
 /** Only ENOENT proves cleanup finished. Permission/read errors retain the durable intent. */
@@ -433,8 +442,8 @@ export function removeAgentTmpDir(dataDir: string, runId: string): void {
   if (!safeRunId(runId)) return;
   const local = agentTmpDir(dataDir, runId);
   try {
-    const { paths, removals } = fallbackLocations(dataDir, runId);
-    if (!paths.every(path => fallbackOwnedOrAbsent(dataDir, path, removals))) return;
+    const { paths, removals, complete } = fallbackLocations(dataDir, runId);
+    if (!complete || !paths.every(path => fallbackOwnedOrAbsent(dataDir, path, removals))) return;
     for (const path of paths) {
       try { lstatSync(path); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue; throw error; }
       // Commit verified directory ownership before recursive rm can remove its marker.
