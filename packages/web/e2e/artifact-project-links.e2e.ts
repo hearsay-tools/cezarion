@@ -1,7 +1,7 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -25,7 +25,7 @@ let publication: { id: string; link: string; markdown: string }
 let bootPublication: { id: string; link: string }
 
 beforeAll(async () => {
-  root = mkdtempSync(join(tmpdir(), 'cez-artifact-projects-'))
+  root = realpathSync(mkdtempSync(join(tmpdir(), 'cez-artifact-projects-')))
   const boot = join(root, 'boot')
   const owner = join(root, 'owner')
   for (const project of [boot, owner]) {
