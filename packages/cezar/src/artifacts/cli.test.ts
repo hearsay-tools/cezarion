@@ -3,7 +3,7 @@ import { runArtifactCommand } from './cli.ts';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -22,7 +22,7 @@ it('returns immutable metadata, a task-relative link and escaped Markdown', asyn
   try {
     await writeFile(source, 'original');
     const output = vi.spyOn(console, 'log').mockImplementation(() => {});
-    expect(await runArtifactCommand(['publish', source], { CEZ_ARTIFACTS_DIR: dir, CEZ_TASK_ID: runId })).toBe(0);
+    expect(await runArtifactCommand(['publish', source], { CEZ_HOME: join(root, 'home'), CEZ_ARTIFACTS_DIR: dir, CEZ_TASK_ID: runId })).toBe(0);
     const result = JSON.parse(String(output.mock.calls[0]?.[0]));
     expect(result).toMatchObject({ runId, sourcePath: source, name: 'report [final] <v2>\\.md', size: 8 });
     expect(result.sha256).toBe('0682c5f2076f099c34cfdd15a9e063849ed437a49677e6fcc5b4198c76575be5');
@@ -43,4 +43,60 @@ it('shows help successfully without context', async () => {
   const output = vi.spyOn(console, 'log').mockImplementation(() => {});
   expect(await runArtifactCommand(['--help'], {})).toBe(0);
   expect(output.mock.calls[0]?.[0]).toContain('cez artifact publish');
+});
+
+it.each(['boot', 'owner', 'aliased-owner'])('preserves the registered %s project in publication links, independent of cwd', async (owner) => {
+  const root = await mkdtemp(join(tmpdir(), 'cez-artifact-owner-'));
+  try {
+    const home = join(root, 'home');
+    const project = join(root, owner);
+    await mkdir(home);
+    await mkdir(join(project, '.ai/cezar'), { recursive: true });
+    const alias = join(root, 'alias');
+    if (owner === 'aliased-owner') await symlink(project, alias, 'dir');
+    const registry = JSON.stringify({ projects: [
+      { id: 'unrelated', root: process.cwd() },
+      { id: owner, root: owner === 'aliased-owner' ? alias : project },
+    ] });
+    await writeFile(join(home, 'config.json'), registry);
+    const runId = randomUUID();
+    const source = join(root, 'report.md');
+    await writeFile(source, 'owned snapshot');
+    const output = vi.spyOn(console, 'log').mockImplementation(() => {});
+    expect(await runArtifactCommand(['publish', source], {
+      CEZ_HOME: home, CEZ_TASK_ID: runId,
+      CEZ_ARTIFACTS_DIR: artifactDirectory(join(project, '.ai/cezar'), runId),
+    })).toBe(0);
+    const result = JSON.parse(String(output.mock.calls[0]?.[0]));
+    expect(result.link).toBe(`/p/${owner}/tasks/${runId}/files?artifact=${result.id}`);
+    expect(result.markdown).toBe(`[report\\.md](${result.link})`);
+    expect(await readFile(join(home, 'config.json'), 'utf8')).toBe(registry);
+    expect(await readdir(home)).toEqual(['config.json']);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+it.each(['missing', 'corrupt', 'unreadable', 'empty', 'unmatched'])('keeps publication working with a %s registry', async (state) => {
+  const root = await mkdtemp(join(tmpdir(), 'cez-artifact-fallback-'));
+  try {
+    const home = join(root, 'home');
+    await mkdir(home);
+    const config = join(home, 'config.json');
+    if (state === 'corrupt') await writeFile(config, '{');
+    // A directory gives a deterministic read failure even when tests run as root.
+    if (state === 'unreadable') await mkdir(config);
+    if (state === 'empty') await writeFile(config, '{"projects":[]}');
+    if (state === 'unmatched') await writeFile(config, JSON.stringify({ projects: [{ id: 'other', root: join(root, 'other') }] }));
+    const before = await readdir(home);
+    const runId = randomUUID();
+    const source = join(root, 'report.md');
+    await writeFile(source, 'fallback snapshot');
+    const output = vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(await runArtifactCommand(['publish', source], {
+      CEZ_HOME: home, CEZ_TASK_ID: runId, CEZ_ARTIFACTS_DIR: artifactDirectory(root, runId),
+    })).toBe(0);
+    const result = JSON.parse(String(output.mock.calls[0]?.[0]));
+    expect(result.link).toBe(`/tasks/${runId}/files?artifact=${result.id}`);
+    expect(result.markdown).toContain(`](${result.link})`);
+    expect(await readdir(home)).toEqual(before);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
