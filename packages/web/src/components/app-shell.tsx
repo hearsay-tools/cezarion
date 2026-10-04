@@ -515,8 +515,8 @@ function SidebarResizeHandle({ width, onWidthChange }: SidebarResize) {
 }
 
 /**
- * The `<md` drawer: the projects drawer and nothing else (#621). Views live in the tab bar and
- * its More sheet, the task list on the Tasks screen, New task on the floating button and search
+ * The `<md` drawer: projects and their current task sections (#811). Views live in the tab bar and
+ * its More sheet, New task on the floating button and search
  * in the top bar, so the desktop `SidebarContent` is no longer rendered here. The three things
  * only it carried got new homes: Tools is a row in `DrawerGlobal`, the update action is
  * `DrawerUpdate` under the identity row, and the project menu is the `…` on the current project.
@@ -530,7 +530,8 @@ function MobileNavDrawer({
   onNavigate, onCloseAutoFocus, mobileProjects, currentProjectId, toolsStatus,
   version, latestVersion, applicationUpdate, onApplyUpdate, onRestart,
   applicationUpdateError, applicationUpdateBusy, applicationUpdateOffline,
-}: Pick<NavProps, 'version' | 'latestVersion' | 'applicationUpdate' | 'onApplyUpdate' | 'onRestart' | 'applicationUpdateError' | 'applicationUpdateBusy' | 'applicationUpdateOffline'> & {
+  taskQuickList, sidebarProjectId,
+}: Pick<NavProps, 'sidebarProjectId' | 'taskQuickList' | 'version' | 'latestVersion' | 'applicationUpdate' | 'onApplyUpdate' | 'onRestart' | 'applicationUpdateError' | 'applicationUpdateBusy' | 'applicationUpdateOffline'> & {
   onNavigate: () => void
   onCloseAutoFocus?: React.ComponentProps<typeof SheetContent>['onCloseAutoFocus']
   mobileProjects?: MobileProjectNav | null
@@ -567,15 +568,36 @@ function MobileNavDrawer({
           row's and the global rows', so the content between them takes none of its own. */}
       <div data-slot="drawer-scroll" className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain">
         {mobileProjects ? <DrawerProjects nav={mobileProjects} currentProjectId={currentProjectId} onNavigate={onNavigate} /> : null}
+        {taskQuickList ? <SidebarNavigationScope projectId={sidebarProjectId} onNavigate={onNavigate}>
+          <div data-slot="drawer-tasks" className="border-t border-border px-[8px] py-[8px]">{taskQuickList}</div>
+        </SidebarNavigationScope> : null}
       </div>
       <DrawerGlobal onNavigate={onNavigate} tools={toolsStatus} />
     </SheetContent>
   )
 }
 
+/** Displayed-project navigation is shared by the desktop sidebar and the mobile task list. */
+function SidebarNavigationScope({ projectId, onNavigate, children }: {
+  projectId?: string
+  onNavigate?: () => void
+  children: React.ReactNode
+}) {
+  const inheritedScope = useProjectScope()
+  // Context only: the routed view owns the mutable API scope. Sidebar queries bind their
+  // endpoints explicitly; links and row navigation share this displayed project's identity.
+  const scope = projectId === undefined ? inheritedScope : {
+    projectId,
+    apiBase: `${API_PREFIX}/p/${encodeURIComponent(projectId)}`,
+  }
+  return <ProjectScopeContext.Provider value={scope}>
+    <SidebarNavigateContext.Provider value={onNavigate}>{children}</SidebarNavigateContext.Provider>
+  </ProjectScopeContext.Provider>
+}
+
 /**
  * Everything inside the sidebar: brand lockup, New task CTA, nav, quick-list, footer. Framed by
- * `Sidebar`, desktop only since #621 (the phone drawer is projects only).
+ * `Sidebar`, desktop only since #621. The phone drawer reuses the task list (#811).
  */
 function SidebarContent({
   activeTo,
@@ -605,16 +627,8 @@ function SidebarContent({
    *  navigates home even when already active), which changes no pathname at all. */
   onNavigate?: () => void
 }) {
-  const inheritedScope = useProjectScope()
-  // Context only: the routed view owns the mutable API scope. Sidebar queries bind their
-  // endpoints explicitly; links and row navigation share this displayed project's identity.
-  const navigationScope = sidebarProjectId === undefined ? inheritedScope : {
-    projectId: sidebarProjectId,
-    apiBase: `${API_PREFIX}/p/${encodeURIComponent(sidebarProjectId)}`,
-  }
   return (
-    <ProjectScopeContext.Provider value={navigationScope}>
-    <SidebarNavigateContext.Provider value={onNavigate}><div
+    <SidebarNavigationScope projectId={sidebarProjectId} onNavigate={onNavigate}><div
       data-slot="sidebar-content"
       // `@container/sidebar` (#788): the sidebar is no longer one fixed width, so what its rows
       // can afford to paint is a question about THIS column, not about the viewport. Everything
@@ -672,8 +686,7 @@ function SidebarContent({
         </div>
         <ApplicationUpdateFeedback version={version} latestVersion={latestVersion} state={applicationUpdate} error={applicationUpdateError} offline={applicationUpdateOffline} busy={applicationUpdateBusy} />
       </div>
-    </div></SidebarNavigateContext.Provider>
-    </ProjectScopeContext.Provider>
+    </div></SidebarNavigationScope>
   )
 }
 

@@ -80,11 +80,10 @@ describe('mobile Tasks controls', () => {
     browser.click(tab('archived'))
     browser.click('[aria-label^="Open projects"]')
     settle(drawer)
-    // The drawer's own quick list and view tabs are gone (#621: the quick list is desktop-only and
-    // the page's Active/Archived tabs are the phone's one selector), so opening the drawer must
-    // leave the page's selection exactly as it was instead of mirroring it.
-    expect(browser.count(`${drawer} [data-slot="quick-list"]`)).toBe(0)
-    expect(browser.count(`${drawer} [data-slot="view-tab"]`)).toBe(0)
+    // The drawer shares the sidebar's quick-list view (#811), independently of the page's
+    // Active/Archived selection. Opening it must not overwrite the page's query or selection.
+    expect(browser.waitForValue(`document.querySelectorAll('${drawer} [data-slot="quick-list"]').length`, (count: number) => count === 1)).toBe(1)
+    expect(browser.count(`${drawer} [data-slot="view-tab"]`)).toBe(2)
     browser.click('[aria-label="Close menu"]')
     browser.waitForFunction(`document.querySelector('${drawer}') === null`)
     expect(browser.evaluate(`document.querySelector('${tab('archived')}').getAttribute('aria-pressed')`)).toBe('true')

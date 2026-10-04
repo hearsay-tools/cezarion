@@ -274,12 +274,12 @@ describe('mobile drawer', () => {
     expect(theme.textContent).toBe('Theme · System')
   })
 
-  it('no longer renders the sidebar content: nav, quick list and New task moved out (#621)', () => {
+  it('shares the current project task list without desktop nav and New task chrome (#811)', () => {
     renderShell('/p/cezarion/', nav(), { taskQuickList: <a href="/p/cezarion/tasks/x">A task</a> })
     fireEvent.click(menuButton())
     expect(drawer().querySelector('[data-slot="sidebar-content"]')).toBeNull()
     expect(within(drawer()).queryByRole('navigation', { name: 'Main' })).toBeNull()
-    expect(within(drawer()).queryByRole('link', { name: 'A task' })).toBeNull()
+    expect(within(drawer()).getByRole('link', { name: 'A task' }).getAttribute('href')).toBe('/p/cezarion/tasks/x')
     expect(within(drawer()).queryByRole('link', { name: /New task/ })).toBeNull()
   })
 

@@ -281,14 +281,14 @@ describe('groupRuns', () => {
       run({ id: 'waiting', status: 'waiting' }),
       run({ id: 'running', status: 'running' }),
     ]
-    expect(shape(groupRuns(runs, 'active'))).toEqual(['Needs you: waiting', 'Working: running', 'Finished: done'])
+    expect(shape(groupRuns(runs, 'active'))).toEqual(['Needs you: waiting', 'Finished: done', 'Working: running'])
 
     // Nothing waiting → no "Needs you" header at all.
     expect(shape(groupRuns([run({ id: 'done', status: 'done' })], 'active'))).toEqual(['Finished: done'])
   })
 
   it('declares the bucket order it renders in', () => {
-    expect(BUCKET_ORDER).toEqual(['Needs you', 'Pinned', 'Working', 'Finished', 'Archived'])
+    expect(BUCKET_ORDER).toEqual(['Needs you', 'Finished', 'Working', 'Archived'])
   })
 
   it('puts every archived run under one Archived bucket regardless of status', () => {
@@ -469,6 +469,34 @@ describe('listCounts', () => {
   })
 })
 
+describe('status sections (#811)', () => {
+  it('keeps a mixed working/finished variant group in flight even though Finished renders first', () => {
+    const members = [run({ id: 'a', groupId: 'mixed', variant: 'A', status: 'done', pinned: true }), run({ id: 'b', groupId: 'mixed', variant: 'B', status: 'running' })]
+    expect(shape(groupRuns([...members, run({ id: 'done' })], 'active'))).toEqual(['Finished: done', 'Working: [AB]'])
+    expect(shape(capBuckets(groupRuns(members, 'active'), 0))).toEqual(['Working: [AB]'])
+  })
+
+  it('keeps pins first inside their status and allocates the shared budget to Finished before Working', () => {
+    const runs = [
+      run({ id: 'work', status: 'running' }),
+      run({ id: 'pin-work', status: 'queued', pinned: true }),
+      run({ id: 'done', status: 'done' }),
+      run({ id: 'pin-done', status: 'failed', pinned: true }),
+      run({ id: 'ask', status: 'waiting' }),
+      run({ id: 'pin-ask', status: 'review', pinned: true }),
+    ]
+    expect(shape(groupRuns(runs, 'active'))).toEqual([
+      'Needs you: pin-ask, ask', 'Finished: pin-done, done', 'Working: pin-work, work',
+    ])
+    expect(shape(capBuckets(groupRuns(runs, 'active'), 2))).toEqual([
+      'Needs you: pin-ask, ask', 'Finished: pin-done, done', 'Working: pin-work',
+    ])
+    expect(shape(groupRuns(runs.map(r => r.id === 'pin-work' ? { ...r, status: 'done' as const } : r), 'active'))).toEqual([
+      'Needs you: pin-ask, ask', 'Finished: pin-work, pin-done, done', 'Working: work',
+    ])
+  })
+})
+
 describe('pinned tasks (#935)', () => {
   const pinned = (over: Partial<RunRecord> = {}) => run({ pinned: true, pinnedAt: '2026-08-29T10:00:00.000Z', ...over })
 
@@ -476,7 +504,7 @@ describe('pinned tasks (#935)', () => {
     it.each(['waiting', 'review', 'running', 'queued', 'done', 'failed', 'cancelled'] as RunStatus[])(
       'a pinned %s run yields to attention',
       (status) => {
-        expect(bucketOf(pinned({ status }), 'active')).toBe(['waiting', 'review'].includes(status) ? 'Needs you' : 'Pinned')
+        expect(bucketOf(pinned({ status }), 'active')).toBe(['waiting', 'review'].includes(status) ? 'Needs you' : ['running', 'queued'].includes(status) ? 'Working' : 'Finished')
       },
     )
 
@@ -520,7 +548,7 @@ describe('pinned tasks (#935)', () => {
   })
 
   describe('groupRuns', () => {
-    it('emits Needs you before Pinned, and each pinned run exactly once', () => {
+    it('emits Needs you before Finished, and each pinned run exactly once', () => {
       const runs = [
         run({ id: 'waiting', status: 'waiting' }),
         pinned({ id: 'p-waiting', status: 'waiting' }),
@@ -529,7 +557,7 @@ describe('pinned tasks (#935)', () => {
       ]
       expect(shape(groupRuns(runs, 'active'))).toEqual([
         'Needs you: p-waiting, waiting',
-        'Pinned: p-done',
+        'Finished: p-done',
         'Working: running',
       ])
     })
@@ -539,14 +567,13 @@ describe('pinned tasks (#935)', () => {
     })
 
     it('lifts a whole variant tile when any member is pinned', () => {
-      // The existing best-ranked-member rule, applied to the new bucket: the tile moves as a
-      // unit rather than tearing in half across Pinned and Finished.
+      // A pinned variant lifts the whole tile within its status section.
       const runs = [
         run({ id: 'a', groupId: 'g1', variant: 'A', status: 'done' }),
         pinned({ id: 'b', groupId: 'g1', variant: 'B', status: 'done' }),
         run({ id: 'other', status: 'done' }),
       ]
-      expect(shape(groupRuns(runs, 'active'))).toEqual(['Pinned: [AB]', 'Finished: other'])
+      expect(shape(groupRuns(runs, 'active'))).toEqual(['Finished: [AB], other'])
     })
   })
 
@@ -573,19 +600,19 @@ describe('pinned tasks (#935)', () => {
       ])
     })
 
-    it('never trims Pinned, and spends none of the budget on it', () => {
+    it('never trims pins, and spends none of the budget on them', () => {
       // A pin is an explicit request for that row to be on screen — and the ten rows still go
       // to the other buckets, so pinning three tasks cannot hide what needs you.
       const capped = capBuckets(
         [
-          { label: 'Pinned', rows: bucketRows(12, 'p') },
           { label: 'Needs you', rows: bucketRows(3, 'n') },
+          { label: 'Finished', rows: bucketRows(12, 'p').map(row => ({ ...row, run: { ...row.run, pinned: true } })) },
         ],
         10,
       )
       expect(capped.map((bucket) => `${bucket.label}:${bucket.rows.length}`)).toEqual([
-        'Pinned:12',
         'Needs you:3',
+        'Finished:12',
       ])
     })
   })
@@ -604,9 +631,9 @@ describe('pin promotion preserves visible variant membership (#93)', () => {
     const c = run({ id: 'c', groupId: 'g', variant: 'C', status: 'running', activity: 'monitoring', pinned: true })
     const rows = [c, b, a, run({ id: 'single-pin', pinned: true }), ...Array.from({ length: 12 }, (_, i) => run({ id: `recent-${i}` }))]
     const before = structuredClone(rows)
-    expect(shape(capBuckets(groupRuns(rows, 'active'), 0))).toEqual(['Needs you: [ABC]', 'Pinned: single-pin'])
+    expect(shape(capBuckets(groupRuns(rows, 'active'), 0))).toEqual(['Needs you: [ABC]', 'Finished: single-pin'])
     const buckets = capBuckets(groupRuns(rows, 'active'), 10)
-    expect(buckets.map(({ label, rows }) => [label, rows.length])).toEqual([['Needs you', 1], ['Pinned', 1], ['Finished', 10]])
+    expect(buckets.map(({ label, rows }) => [label, rows.length])).toEqual([['Needs you', 1], ['Finished', 11]])
     const group = buckets[0]?.rows.find((row) => row.kind === 'group')
     expect(group?.kind).toBe('group')
     if (group?.kind !== 'group') throw new Error('missing group')
@@ -622,8 +649,8 @@ describe('pin promotion preserves visible variant membership (#93)', () => {
     const c = run({ id: 'c', groupId: 'g', variant: 'C', status: 'done' })
     expect(shape(groupRuns([b, c, a], 'active'))).toEqual(['Finished: [AC]'])
     expect(shape(groupRuns([b, c, a], 'archived'))).toEqual(['Archived: b'])
-    expect(shape(groupRuns([b, { ...a, pinned: true }], 'active'))).toEqual(['Pinned: a'])
-    expect(shape(capBuckets(groupRuns([b, { ...a, pinned: true }], 'active'), 0))).toEqual(['Pinned: a'])
+    expect(shape(groupRuns([b, { ...a, pinned: true }], 'active'))).toEqual(['Finished: a'])
+    expect(shape(capBuckets(groupRuns([b, { ...a, pinned: true }], 'active'), 0))).toEqual(['Finished: a'])
   })
 })
 

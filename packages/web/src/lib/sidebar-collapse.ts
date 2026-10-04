@@ -10,6 +10,7 @@
  */
 
 export const SIDEBAR_COLLAPSED_STORAGE_KEY = 'cez-sidebar-collapsed'
+export const SIDEBAR_SECTIONS_STORAGE_KEY = 'cez-sidebar-sections-collapsed'
 
 /** Project id → collapsed. Absent entry means "no answer yet" (see `isProjectCollapsed`). */
 export type SidebarCollapsed = Record<string, boolean>
@@ -25,9 +26,9 @@ export function normalizeCollapsed(raw: unknown): SidebarCollapsed {
   return map
 }
 
-export function readStoredCollapsed(): SidebarCollapsed {
+export function readStoredCollapsed(key = SIDEBAR_COLLAPSED_STORAGE_KEY): SidebarCollapsed {
   try {
-    const raw = localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY)
+    const raw = localStorage.getItem(key)
     return raw === null ? {} : normalizeCollapsed(JSON.parse(raw))
   } catch {
     // Absent, private mode, or non-JSON — the defaults below still give every group an answer.
@@ -35,9 +36,9 @@ export function readStoredCollapsed(): SidebarCollapsed {
   }
 }
 
-export function writeStoredCollapsed(collapsed: SidebarCollapsed): void {
+export function writeStoredCollapsed(collapsed: SidebarCollapsed, key = SIDEBAR_COLLAPSED_STORAGE_KEY): void {
   try {
-    localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, JSON.stringify(collapsed))
+    localStorage.setItem(key, JSON.stringify(collapsed))
   } catch {
     // Private mode / storage full — the collapse still applies for this page.
   }

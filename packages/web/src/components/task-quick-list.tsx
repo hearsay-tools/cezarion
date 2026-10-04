@@ -4,6 +4,7 @@ import { useQueries } from '@tanstack/react-query'
 import * as React from 'react'
 import { queryScope } from '@open-mercato/cezar-api-client'
 import { useSidebarArchive } from '@/components/sidebar-archive'
+import { useSidebarNavigate } from '@/components/app-shell'
 import { useSwipeToArchive } from '@/components/use-swipe-to-archive'
 import { useHealth, usePinRun, useProjectRuns, useProjectRepoBase, useProjects, useReferenceProjectId, useRuns } from '@/api/queries'
 import { Link, scopeTo, useNavigate, useProjectMatch } from '@/lib/project-router'
@@ -25,6 +26,7 @@ import {
   capBuckets,
   groupRuns,
   listCounts,
+  loudestMember,
   refPrefixMatches,
   runTitle,
   sidebarActiveRunId,
@@ -36,11 +38,12 @@ import {
 import { formatCost, isSweepable, sweepableRunCount, taskReference, taskReferences } from '@/lib/tasks-table'
 import { usageMetricVisibility } from '@/lib/token-metrics'
 import { useNow } from '@/lib/use-now'
+import { useSidebarSections } from '@/lib/use-sidebar-sections'
 import { cn } from '@/lib/utils'
 
 /**
  * The sidebar's task quick-list (spec, "App shell & navigation"): Active/Archived tabs, then the
- * runs grouped Needs you / Working / Finished, with variant groups collapsed into one tile.
+ * runs grouped Needs you / Finished / Working, with variant groups collapsed into one tile.
  *
  * Presentational — every decision it paints (which bucket, which order, which dot, whether a
  * group collapses) is made by `lib/task-groups.ts` and `lib/attention.ts`, which are pure and
@@ -61,6 +64,7 @@ export function TaskQuickList({
   sweeping = null,
   showViewControls = true,
   rowLimit,
+  projectId = null,
 }: {
   runs: RunRecord[]
   view: ListView
@@ -79,15 +83,19 @@ export function TaskQuickList({
   onTogglePin?: (run: RunRecord, pinned: boolean) => void
   /** Archive one finished row (#780). Like the pin, the container owns the mutation. */
   onArchiveRun?: (run: RunRecord) => void | Promise<unknown>
-  /** Sweep a group's finished rows: `unpinned` is the Finished group, `pinned` the Pinned one. */
+  /** Sweep unpinned finished rows across the full project list. */
   onSweep?: (scope: ArchiveFinishedScope) => void
   /** The sweep in flight, so its button reads busy. */
   sweeping?: ArchiveFinishedScope | null
   showViewControls?: boolean
   rowLimit?: number
+  /** Canonical project id for browser-local section folding; null while discovery is pending. */
+  projectId?: string | null
 }) {
+  const onNavigate = useSidebarNavigate()
   const counts = listCounts(runs)
-  const buckets = rowLimit === undefined ? groupRuns(runs, view) : capBuckets(groupRuns(runs, view), rowLimit)
+  const allBuckets = groupRuns(runs, view)
+  const buckets = rowLimit === undefined ? allBuckets : capBuckets(allBuckets, rowLimit)
   // Withheld in the archived view, where `groupRuns` answers one `Archived` bucket and never
   // reads `run.pinned` — the same call the thread header makes on an archived run.
   const pinToggle = view === 'archived' ? undefined : onTogglePin
@@ -104,7 +112,7 @@ export function TaskQuickList({
       <div data-slot="quick-list-header" className="flex min-h-11 items-center gap-1.5 pr-[6px] pl-[10px] md:min-h-[26px]">
         <h2 className="text-[13px] font-semibold text-foreground">Tasks</h2>
         <span className="text-[11.5px] text-soft-foreground">{counts[view]}</span>
-        <Link to="/" className="ml-auto flex min-h-11 items-center gap-0.5 text-[12px] text-soft-foreground hover:text-foreground md:min-h-[26px]">
+        <Link to="/" onClick={onNavigate} className="ml-auto flex min-h-11 items-center gap-0.5 text-[12px] text-soft-foreground hover:text-foreground md:min-h-[26px]">
           All<ChevronRightIcon className="size-[13px]" aria-hidden="true" />
         </Link>
       </div>
@@ -125,13 +133,15 @@ export function TaskQuickList({
         </div>
       </div> : null}
 
-      {buckets.length === 0 ? (
+      {allBuckets.length === 0 ? (
         <p className="px-3 py-3.5 text-xs text-soft-foreground">
           {view === 'archived' ? 'Nothing archived yet.' : 'No tasks yet — describe one.'}
         </p>
       ) : (
         <QuickListBuckets
           buckets={buckets}
+          allBuckets={view === 'active' ? allBuckets : buckets}
+          sectionProjectId={projectId}
           currentRunId={sidebarActiveRunId(currentRunId, runs)}
           currentGroupId={currentGroupId}
           now={now}
@@ -175,8 +185,13 @@ export function QuickListBuckets({
   sweeping = null,
   sweepCounts,
   projectName,
+  allBuckets = buckets,
+  sectionProjectId = scope,
 }: {
   buckets: QuickListBucket[]
+  /** Full sections retain honest task counts/attention even when the row budget is exhausted. */
+  allBuckets?: QuickListBucket[]
+  sectionProjectId?: string | null
   currentRunId?: string | null
   currentGroupId?: string | null
   now?: number
@@ -193,6 +208,37 @@ export function QuickListBuckets({
   projectName?: string
 }) {
   const headingId = React.useId()
+  const sections = useSidebarSections(sectionProjectId)
+  const listRef = React.useRef<HTMLDivElement>(null)
+  const focusedRow = React.useRef<{ kind: 'run' | 'group'; id: string; element: HTMLElement } | null>(null)
+  React.useLayoutEffect(() => {
+    const previous = focusedRow.current
+    if (!previous || previous.element.isConnected) return
+    // A disconnected control gets one recovery attempt, never a claim on future focus after
+    // removal or navigation. A successful focus below captures the newly mounted control.
+    focusedRow.current = null
+    if (document.activeElement !== document.body) return
+    const destination = allBuckets.find(bucket => bucket.rows.some(row =>
+      previous.kind === 'group'
+        ? row.kind === 'group' && row.groupId === previous.id
+        : row.kind === 'run' ? row.run.id === previous.id : row.members.some(member => member.id === previous.id),
+    ))
+    // Removal belongs to the archive controller. A status move belongs to this list; if its
+    // destination is folded, focus the disclosure rather than silently unfolding the section.
+    if (!destination) return
+    const bucket = Array.from(listRef.current?.children ?? []).find(el => (el as HTMLElement).dataset.bucket === destination.label)
+    const row = Array.from(bucket?.querySelectorAll<HTMLElement>('[data-slot="task-row"], [data-slot="group-row"]') ?? [])
+      .find(el => (previous.kind === 'group' ? el.dataset.groupId : el.dataset.runId) === previous.id)
+    // Group links include compare AND shared references. Keep the same link when it survives;
+    // otherwise return to the group's disclosure. Member rows keep their own run-link target.
+    const rowTarget = previous.kind === 'group'
+      ? Array.from(row?.querySelectorAll<HTMLElement>('a') ?? []).find(el =>
+          previous.element.tagName === 'A' && el.getAttribute('href') === previous.element.getAttribute('href'))
+        ?? row?.querySelector<HTMLElement>('[data-slot="group-tile"]')
+      : row?.querySelector<HTMLElement>('a')
+    const target = rowTarget ?? bucket?.querySelector<HTMLElement>('[data-slot="section-toggle"]')
+    target?.focus({ preventScroll: true })
+  })
   // Which variant groups are open. Local: it is view state about this list, nothing else reads it.
   const [expanded, setExpanded] = React.useState<ReadonlySet<string>>(() => new Set())
   const toggleGroup = (groupId: string) =>
@@ -205,23 +251,53 @@ export function QuickListBuckets({
   const renderRow = (row: QuickListRow) => <Row row={row} currentRunId={currentRunId} currentGroupId={currentGroupId} now={now} scope={scope} showTokens={showTokens} showCost={showCost} expanded={row.kind === 'group' && expanded.has(row.groupId)} onToggle={toggleGroup} onTogglePin={onTogglePin} onArchiveRun={onArchiveRun} />
 
   return (
-    <div className="flex flex-col gap-3">
-      {buckets.map((bucket) => (
+    <div ref={listRef} className="flex flex-col gap-3" onFocusCapture={event => {
+      const row = event.target.closest<HTMLElement>('[data-slot="task-row"], [data-slot="group-row"]')
+      focusedRow.current = row?.dataset.runId
+        ? { kind: 'run', id: row.dataset.runId, element: event.target }
+        : row?.dataset.groupId ? { kind: 'group', id: row.dataset.groupId, element: event.target } : null
+    }} onBlurCapture={event => {
+      // An intentional exit (including blur to body) must not be restored by a later update.
+      // Removing a focused row does not emit blur; that is the status-move path above.
+      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) focusedRow.current = null
+    }}>
+      {allBuckets.map((bucket) => {
+        const archived = bucket.label === 'Archived'
+        const collapsed = sections.isCollapsed(bucket.label)
+        const rows = buckets.find(({ label }) => label === bucket.label)?.rows ?? []
+        const members = bucket.rows.flatMap(row => row.kind === 'run' ? [row.run] : row.members)
+        const count = archived ? bucket.rows.length : members.length
+        const attention = members.length ? deriveAttention(loudestMember(members)) : null
+        const unread = members.some(isUnread)
+        const id = `${headingId}-${bucket.label.replaceAll(' ', '-')}`
+        const Disclosure = collapsed ? ChevronRightIcon : ChevronDownIcon
+        return (
         <div key={bucket.label} data-slot="quick-list-bucket" data-bucket={bucket.label}>
           <div className="flex items-center justify-between gap-2 pr-[6px]">
-            <h2 id={`${headingId}-${bucket.label}`} className="px-[10px] pt-[2px] pb-[4px] text-[11px] font-medium text-soft-foreground">
-              {bucket.label}{' '}<span className="text-[11px] font-normal tabular-nums">{bucket.rows.length}</span>
+            <h2 id={id} className="min-w-0 flex-1 text-[11px] font-medium text-soft-foreground">
+              {archived ? <span className="px-[10px] pt-[2px] pb-[4px]">{bucket.label} {count}</span> : (
+                <button type="button" data-slot="section-toggle" aria-expanded={!collapsed} aria-controls={`${id}-rows`}
+                  aria-label={`${bucket.label} ${count}`} onClick={() => sections.toggle(bucket.label as Exclude<QuickListBucket['label'], 'Archived'>)}
+                  className="flex min-h-[44px] w-full items-center gap-1.5 rounded-[4px] px-[10px] text-left hover:bg-sidebar-row-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-link-foreground md:min-h-[26px] no-hover:min-h-[44px]">
+                  <Disclosure className="size-[12px] shrink-0" aria-hidden="true" />
+                  <span>{bucket.label}</span>{' '}<span className="font-normal tabular-nums">{count}</span>
+                  {attention && (bucket.label === 'Needs you' || collapsed) ? <StatusDot tone={attention.tone} shape={attention.shape} pulse={attention.pulse} role="img" aria-label={attention.label} title={attention.label} /> : null}
+                  {collapsed && unread ? <span role="img" aria-label="unread" title="Unread tasks" className="size-[5px] shrink-0 rounded-full bg-foreground" /> : null}
+                </button>
+              )}
             </h2>
             {/* A sibling of the heading, so its accessible name stays `Finished 3`. */}
-            {onSweep && sweepCounts ? <GroupSweepButton label={bucket.label} headingId={`${headingId}-${bucket.label}`} projectName={projectName} counts={sweepCounts} onSweep={onSweep} sweeping={sweeping} /> : null}
+            {onSweep && sweepCounts ? <GroupSweepButton label={bucket.label} headingId={id} projectName={projectName} counts={sweepCounts} onSweep={onSweep} sweeping={sweeping} /> : null}
           </div>
-          {bucket.rows.map((row) => (
+          <div id={`${id}-rows`} hidden={collapsed}>
+          {!collapsed && rows.map((row) => (
             <div key={row.kind === 'group' ? row.groupId : row.run.id}>
               {renderRow(row)}
             </div>
           ))}
+          </div>
         </div>
-      ))}
+      )})}
     </div>
   )
 }
@@ -315,8 +391,8 @@ function Row({
         active={currentGroupId === row.groupId || (!expanded && row.members.some((member) => member.id === currentRunId))}
       />
       {/* No pin on the group (#935): a pin is per task, and the group row stands in for two or
-          three of them. Expanding it pins the variant you mean, and the group rises to `Pinned`
-          with it — the same best-ranked-member rule that already moves it between buckets. */}
+           three of them. Expanding it pins the variant you mean, and the group rises within its
+           status section with it. */}
       {expanded ? (
         <ExpandedVariantMembers
           members={row.members}
@@ -375,6 +451,7 @@ function GroupRow({
   onToggle: (groupId: string) => void
   active: boolean
 }) {
+  const onNavigate = useSidebarNavigate()
   const lead = deriveAttention(row.lead)
   const projectId = scope ?? undefined
   const { families, shared, age } = groupMetaParts(row.members, now, projectId)
@@ -489,6 +566,7 @@ function GroupRow({
       >
         <Link
           to={scopeTo(scope, `/compare/${row.groupId}`)}
+          onClick={onNavigate}
           data-slot="group-compare"
           title="Compare the variants"
           aria-label={`Compare the variants of ${row.title}`}
@@ -815,6 +893,7 @@ function RunRow({
   onArchiveRun?: (run: RunRecord) => void | Promise<unknown>
 }) {
   const navigate = useNavigate()
+  const onNavigate = useSidebarNavigate()
   // On a device that cannot hover, or in the mobile shell, the references are plain text and the
   // whole row is the tap target (#617 01b); the task header keeps them as 44px links.
   const inertReferences = useRowReferencesInert()
@@ -895,6 +974,7 @@ function RunRow({
         if (!event.currentTarget.contains(event.target as Node)) return
         if ((event.target as Element).closest('a, button, input')) return
         navigate(to)
+        onNavigate?.()
       }}
       {...(swipeable ? swipe.bind : {})}
       style={swipe.offset ? { transform: `translateX(${swipe.offset}px)` } : undefined}
@@ -923,6 +1003,7 @@ function RunRow({
       <div className="flex min-w-0 flex-1 flex-col">
         <Link
           to={to}
+          onClick={onNavigate}
           // `title` carries the FULL stored title — including a `NNN: ` prefix the reference let
           // the visible text drop — so hover always gives back everything the column could not show.
           title={title}
@@ -1133,8 +1214,7 @@ function SwipeArchiveAction({ width, past, title, onArchive }: { width: number; 
   )
 }
 
-/** The group-label sweep (#780): `Archive all` on Finished, `Archive finished` on Pinned. Only
- *  those two, and only while there is something to take. */
+/** The section sweep: Finished only, always protecting pins (#811). */
 function GroupSweepButton({
   label,
   headingId,
@@ -1150,10 +1230,10 @@ function GroupSweepButton({
   onSweep: (scope: ArchiveFinishedScope) => void
   sweeping: ArchiveFinishedScope | null
 }) {
-  const scope: ArchiveFinishedScope | null = label === 'Finished' ? 'unpinned' : label === 'Pinned' ? 'pinned' : null
+  const scope = label === 'Finished' ? 'unpinned' : null
   if (!scope || counts[scope] === 0) return null
   const busy = sweeping === scope
-  const text = scope === 'unpinned' ? 'Archive all' : 'Archive finished'
+  const text = 'Archive all'
   return (
     <button
       type="button"
@@ -1180,10 +1260,11 @@ function GroupSweepButton({
  * independent of the Tasks table's own tabs.
  */
 export function TaskQuickListContainer({ showViewControls = true, projectId: explicitProjectId, boot = false }: { showViewControls?: boolean; projectId?: string; boot?: boolean }) {
+  const onNavigate = useSidebarNavigate()
   const scope = explicitProjectId ?? queryScope()
   const runs = useProjectRuns(scope, true, boot)
   const pin = usePinRun(scope, boot ? 'default' : scope)
-  const archive = useSidebarArchive(scope, boot ? 'default' : scope)
+  const archive = useSidebarArchive(scope, boot ? 'default' : scope, onNavigate)
   const health = useHealth()
   const visibility = usageMetricVisibility(health.data)
   const [view, setView] = useListView()
@@ -1214,6 +1295,7 @@ export function TaskQuickListContainer({ showViewControls = true, projectId: exp
       <TaskQuickList
         showViewControls={showViewControls}
         rowLimit={10}
+        projectId={projectId === 'default' ? health.data?.bootProject ?? null : projectId ?? null}
         runs={runs.data}
         view={view}
         onViewChange={setView}
