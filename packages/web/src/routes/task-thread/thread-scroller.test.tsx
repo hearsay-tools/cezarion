@@ -930,6 +930,77 @@ describe('#795 compatible measurement replay with the real virtua handle', () =>
     },
   )
 
+  function overlayScrollbar(main: Element) {
+    scrollbar(main)
+    Object.defineProperties(main, {
+      clientWidth: { value: 316, configurable: true },
+      clientLeft: { value: 2, configurable: true },
+    })
+  }
+
+  it.each(['up', 'down'])(
+    'cancels delayed adoption after a held overlay scrollbar moves %s', direction => {
+      const full = seed(), view = replay(full.slice(0, 350)), main = view.main() as HTMLElement
+      overlayScrollbar(main)
+      pointerDown(main, 414)
+      expect(view.controls().ownsMeasurementRestore('revisit:main')).toBe(true)
+      act(() => {
+        main.scrollTop = direction === 'up' ? 8000 : 10000
+        fireEvent.scroll(main)
+      })
+      expect(view.controls().ownsMeasurementRestore('revisit:main')).toBe(false)
+      view.commit(full)
+      expect(view.controls().virtualizerRef.current!.getItemSize(123)).not.toBe(180)
+      expect(main.scrollTop).toBe(direction === 'up' ? 8000 : 10000)
+    },
+  )
+
+  it('keeps cancelled overlay geometry on detach instead of reviving the original candidate', () => {
+    const full = seed(), view = replay(full.slice(0, 350)), main = view.main() as HTMLElement
+    overlayScrollbar(main)
+    pointerDown(main, 414)
+    act(() => { main.scrollTop = 8000; fireEvent.scroll(main) })
+    view.unmount()
+    const returned = replay(full)
+    expect(returned.controls().virtualizerRef.current!.getItemSize(123)).not.toBe(180)
+  })
+
+  it.each(['no movement', 'pointerup', 'pointercancel', 'content selection', 'touch press', 'secondary button'])(
+    'keeps delayed overlay restoration after %s', scenario => {
+      const full = seed(), view = replay(full.slice(0, 350)), main = view.main() as HTMLElement
+      overlayScrollbar(main)
+      const node = scenario === 'content selection' ? main.querySelector('[data-slot="thread-rows"]')! : main
+      pointerDown(node, 414, scenario === 'touch press' ? 'touch' : 'mouse', scenario === 'secondary button' ? 2 : 0)
+      act(() => {
+        if (scenario === 'pointerup' || scenario === 'pointercancel') fireEvent(window, new Event(scenario))
+        if (scenario !== 'no movement') main.scrollTop = 8000
+        fireEvent.scroll(main)
+      })
+      expect(view.controls().ownsMeasurementRestore('revisit:main')).toBe(true)
+      view.commit(full)
+      expect(view.controls().virtualizerRef.current!.getItemSize(123)).toBe(180)
+    },
+  )
+
+  it('unpins an overlay drag up from the tail before subsequent growth', () => {
+    const main = document.createElement('main'), content = document.createElement('div')
+    main.dataset.slot = 'main'
+    main.append(content)
+    document.body.append(main)
+    Object.defineProperties(main, {
+      clientHeight: { value: 500, configurable: true }, scrollHeight: { value: 100000, configurable: true },
+    })
+    const hook = renderHook(() => useThreadScroll('overlay-tail'))
+    act(() => hook.result.current.attachContent(content))
+    expect(main.scrollTop).toBe(99500)
+    overlayScrollbar(main)
+    pointerDown(main, 414)
+    act(() => { main.scrollTop = 99000; fireEvent.scroll(main); hook.result.current.restickIfStuck() })
+    expect(main.scrollTop).toBe(99000)
+    hook.unmount()
+    main.remove()
+  })
+
   it('keeps the complete candidate on detach after pressing transcript content', () => {
     const full = seed(), view = replay(full.slice(0, 350))
     fireEvent.pointerDown(view.main().querySelector('[data-slot="thread-rows"]')!)

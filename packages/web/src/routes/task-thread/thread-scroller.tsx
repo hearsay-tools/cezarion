@@ -423,10 +423,13 @@ export function useThreadScroll(
     }
     const onPointerDown = (event: PointerEvent) => {
       // Transcript clicks/selection (including blank viewport space) are not scrolling
-      // intent. Only a primary mouse press in the native vertical scrollbar cancels
-      // arrival; touch pans are handled by their movement above.
+      // intent. A primary mouse press in the native gutter cancels arrival immediately;
+      // overlay scrollbar presses wait for a held scroll to move. Touch pans use touchmove.
       if (event.target !== scroller || event.button !== 0 || event.pointerType === 'touch' || event.pointerType === 'pen') return
       if (scroller.scrollHeight <= scroller.clientHeight) return
+      pointerScrolling = true
+      pointerHistoryConsumedRef.current = false
+      previousScrollTop = scroller.scrollTop
       const rect = scroller.getBoundingClientRect()
       const style = getComputedStyle(scroller)
       const borderLeft = parseFloat(style.borderLeftWidth) || 0
@@ -439,9 +442,6 @@ export function useThreadScroll(
       if (!inScrollbar || event.clientY < rect.top + scroller.clientTop || event.clientY >= rect.top + scroller.clientTop + scroller.clientHeight) return
       pendingRestoreRef.current = null
       measurementRestoreRef.current = null
-      pointerScrolling = true
-      pointerHistoryConsumedRef.current = false
-      previousScrollTop = scroller.scrollTop
       if (!isNearBottom(scroller, NEAR_BOTTOM_SLACK_PX)) {
         unstick()
         markDown() // a scrollbar grab can go either way — let a drag to the tail re-pin
@@ -469,6 +469,12 @@ export function useThreadScroll(
       lastTouchY = y
     }
     const onScroll = () => {
+      // Overlay scrollbars occupy the client box, so a gutter hit cannot identify
+      // their grab. Actual movement during a primary scroller press is reader intent.
+      if (pointerScrolling && scroller.scrollTop !== previousScrollTop) {
+        if (scroller.scrollTop < previousScrollTop) unstick()
+        else markDown()
+      }
       if (
         pointerScrolling &&
         !pointerHistoryConsumedRef.current &&
@@ -501,6 +507,7 @@ export function useThreadScroll(
     scroller.addEventListener('touchmove', onTouchMove, { passive: true })
     scroller.addEventListener('pointerdown', onPointerDown, { passive: true })
     window.addEventListener('pointerup', onPointerUp, { passive: true })
+    window.addEventListener('pointercancel', onPointerUp, { passive: true })
     scroller.addEventListener('keydown', onKey)
 
     // Content growth (streamed items, replay, virtua's total-size updates) re-applies the
@@ -533,6 +540,7 @@ export function useThreadScroll(
       scroller.removeEventListener('touchmove', onTouchMove)
       scroller.removeEventListener('pointerdown', onPointerDown)
       window.removeEventListener('pointerup', onPointerUp)
+      window.removeEventListener('pointercancel', onPointerUp)
       scroller.removeEventListener('keydown', onKey)
       observer?.disconnect()
     }
