@@ -173,11 +173,13 @@ Missing/malformed private grants refuse execution rather than fall back to
 ordinary defaults. No credentials or configuration contents are
 snapshotted, and inspection/history/stop/verified cleanup remain available.
 
-Use fixed service limits rather than new configuration: at most 32 accepted
-worker creations per parent, including destroyed workers; bound task/steering
+Use fixed service limits rather than new configuration; bound task/steering
 payloads by the existing run-input limits. Spawn receipts do not consume another
-creation. Persisted counts survive restart. These are cost/abuse bounds, not a
-recursive-delegation feature.
+creation. Persisted counts survive restart. These are not a recursive-delegation
+feature. **Superseded by #816** (`2026-10-04-reclaimable-worker-capacity.md`):
+the former 32 lifetime creations per parent, counting destroyed workers, is now
+32 outstanding allocations reclaimed by verified destroy plus a 1,024 lifetime
+creation ceiling; neither is a spending budget.
 
 Errors distinguish unavailable transport, unauthenticated caller, denied scope,
 invalid input/baseline, incompatible run state, capacity limit, unavailable diff,
@@ -374,7 +376,7 @@ changing normal grouping or requiring a separate dashboard.
 
 Use project-scoped links and current run cache/SSE. Relationship lookup must not
 assume the first page or currently filtered run list contains every worker.
-Use a bounded complete relationship response (maximum 32 workers) when needed;
+Use a bounded complete relationship response (maximum 1,024 workers since #816) when needed;
 human read routes expose no session credentials and follow normal API contracts.
 Updates and reconnect reconciliation reuse current event infrastructure, with
 no new browser socket or polling timer.
