@@ -664,10 +664,22 @@ Fix the `cez task` docs. Keep $(example) and "quotes" literal.
 EOF
 )
 cez task wait "$id" --timeout-seconds 900                     # 0 done/review/needs you · 1 failed · 3 timeout
-cez task status "$id"                                         # slim JSON: status, attention, question, branch…
-cez task send "$id" 'Use the retry helper instead'            # queued, delivered, or --resume to reopen
+cez task list                                                # currentStepId (running), pullRequestUrl (done/review), capped error (failed)
+cez task status "$id"                                       # slim JSON: status, attention, question, branch, handoffUrl…
+cez task send "$id" 'Use the retry helper instead'            # delivered live, queued before start
+cez task send "$id" --resume 'Continue with the next step'    # resumed: reopen a settled session
 cez task log "$id" --follow --timeout-seconds 300             # JSON lines until it ends
 ```
+
+`list --status` accepts comma-separated values: `queued`, `running`, `waiting`, `review`,
+`done`, `failed`, `cancelled`. Default rows include only the next-action field for their status
+when defined; errors use the first line, at most 200 characters including `…` when cut.
+Default `status` includes `handoffUrl`, a URL to the existing handoff endpoint even before
+contents are seeded, and keeps the full error. `--full` still prints the contract unchanged.
+To answer a pending `question`, use the same `send` with the answer text. Without `--resume`,
+a closed session returns `delivery: not-delivered` and the `next` command. For multi-line or
+shell-sensitive messages use `send <id> --text-file <path|->` (`-` reads stdin); the quoting
+rules below apply to messages too.
 
 Use `--task-file PATH` to read a saved task (for example, `cez task start --task-file task.md`),
 or `--task-file -` to read stdin as above. The quoted heredoc delimiter (`<<'EOF'`) keeps

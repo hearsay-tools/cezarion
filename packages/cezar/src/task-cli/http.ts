@@ -31,6 +31,11 @@ export function threadUrl(cockpit: Cockpit, runId: string): string {
   return `${cockpit.origin}/p/${encodeURIComponent(cockpit.projectId)}/tasks/${encodeURIComponent(runId)}`;
 }
 
+/** Reachable for every known run, including one without seeded handoff contents. */
+export function handoffUrl(cockpit: Cockpit, runId: string): string {
+  return `${cockpit.origin}/api/v1/p/${encodeURIComponent(cockpit.projectId)}/runs/${encodeURIComponent(runId)}/handoff`;
+}
+
 /** Enforce a byte limit where the route has a bounded response, including error bodies. */
 async function boundedText(response: Response, limit: number): Promise<string> {
   if (Number(response.headers.get('content-length')) > limit) {

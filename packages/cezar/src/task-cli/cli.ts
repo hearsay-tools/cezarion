@@ -19,7 +19,7 @@ import {
 import { openUrl } from '../open-url.ts';
 import { skillFlagIssue, skillTaskSteps } from '../workflows/types.ts';
 import { discoverCockpit, type DiscoverOptions } from './discovery.ts';
-import { invalidResponse, refuse, request, TaskCliError, threadUrl, type Cockpit } from './http.ts';
+import { handoffUrl, invalidResponse, refuse, request, TaskCliError, threadUrl, type Cockpit } from './http.ts';
 import { projectListRow, projectStatus } from './projections.ts';
 import { DEFAULT_WAIT_UNTIL, readLog, waitForRuns, type WaitMode, type WaitUntil } from './watch.ts';
 
@@ -56,6 +56,7 @@ interface Operation {
   flags: Record<string, FlagSpec>;
 }
 
+const STATUS_VALUES = runStatusSchema.options.join(', ');
 const TASK_TEXT_MAX_CHARS = 100_000;
 const DEFAULT_TIMEOUT_SECONDS = 600;
 const MAX_TIMEOUT_SECONDS = 1_800;
@@ -87,10 +88,10 @@ export const OPERATIONS: Record<string, Operation> = {
   },
   list: {
     args: '',
-    description: 'List tasks, newest first. Workers are left out; address one by id.',
+    description: 'List tasks, newest first: currentStepId when running, pullRequestUrl when done/review, error when failed (first line, 200 characters including … when cut). Workers are left out; address one by id.',
     positionals: [0, 0],
     flags: {
-      status: { type: 'string', help: '<s>[,<s>…]     Only these statuses.' },
+      status: { type: 'string', help: `<s>[,<s>…]     Only these statuses: ${STATUS_VALUES}.` },
       limit: { type: 'string', help: '<n>             At most n rows (default 20).' },
       all: { type: 'boolean', help: '                Include archived tasks.' },
       full: { type: 'boolean', help: '               Print contract ApiRun rows.' },
@@ -98,7 +99,7 @@ export const OPERATIONS: Record<string, Operation> = {
   },
   status: {
     args: '<id>',
-    description: 'Show one task.',
+    description: 'Show one task, including handoffUrl (the handoff endpoint) and the full error when set.',
     positionals: [1, 1],
     flags: { full: { type: 'boolean', help: '               Print the contract ApiRun.' } },
   },
@@ -125,7 +126,7 @@ export const OPERATIONS: Record<string, Operation> = {
   },
   send: {
     args: "<id> '<text>' | <id> --text-file <path|->",
-    description: 'Steer a task: deliver, queue or (with --resume) reopen.',
+    description: 'Steer or answer a task: delivered to a live session, queued before it starts, resumed from a closed session with --resume (examples below).',
     positionals: [1, 2],
     flags: {
       'text-file': { type: 'string', help: '<path|->     Read the text from a file, or stdin with -.' },
@@ -219,6 +220,21 @@ export function taskHelp(operation?: string): string {
       'before the CLI receives the text. Do not put raw backticks in double-quoted task arguments.',
       'Use --task-file PATH or --task-file - with a quoted heredoc delimiter as above.',
       "For short tasks, a single-quoted positional argument still works: cez task start 'Fix the typo'.", '',
+    ] : []),
+    ...(names.includes('send') ? [
+      'Send — steer, answer or reopen:',
+      '  delivery: delivered means the live session accepted the text; queued means it is saved',
+      '  for a task that has not started; resumed means --resume reopened a closed session.',
+      '  Steer while running:',
+      "    cez task send <id> 'Use the retry helper instead'",
+      '  Answer a pending question after wait ends with attention: waiting, or status shows question:',
+      "    cez task send <id> 'Use option A'",
+      '  Reopen a settled session:',
+      "    cez task send <id> --resume '…'",
+      '  Without --resume a closed session returns delivery: not-delivered and a next command.',
+      '  Use --text-file <path|-> for multi-line or shell-sensitive text; --text-file - reads stdin.',
+      '  See the safe task input / quoting note in cez task start --help; the same shell rules apply.',
+      '',
     ] : []),
     'Commands find the running cockpit that serves this checkout (ports 4321-4370) and print JSON.',
     'notify: with a task webhook set in Settings → General, start notifies it unless --no-notify;',
@@ -315,7 +331,7 @@ function statuses(value: string | boolean | undefined) {
   if (typeof value !== 'string') return undefined;
   const list = value.split(',').map((entry) => entry.trim()).filter(Boolean);
   const invalid = list.find((entry) => !runStatusSchema.safeParse(entry).success);
-  if (invalid) usageError(`unknown status '${invalid}'`);
+  if (invalid) usageError(`unknown status '${invalid}'; one of ${STATUS_VALUES}`);
   return new Set(list);
 }
 
@@ -519,7 +535,7 @@ async function execute(
       const run = await getRun(cockpit, id);
       if (values.full) { print(run); return EXIT.ok; }
       const question = run.hasPendingHumanAsk ? await pendingQuestion(cockpit, id) : undefined;
-      print(projectStatus(run, threadUrl(cockpit, id), question));
+      print({ ...projectStatus(run, threadUrl(cockpit, id), question), handoffUrl: handoffUrl(cockpit, id) });
       return EXIT.ok;
     }
     case 'list': {
