@@ -16,11 +16,13 @@ const ordinary: ApiRun = { id: parentId, title: 'Parent', task: 'Do task', workf
 const root: ApiRun = { ...ordinary, delegation: { role: 'root', permissions: [], receipts: [{ requestId: workerId, workerId, requestHash: 'b'.repeat(64) }] } }
 const child: ApiRun = { ...ordinary, id: workerId, delegation: { role: 'worker', permissions: [], parentRunId: parentId, workspace } }
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } })
-function setup(run: ApiRun, response: () => Promise<Response> = async () => json({ workers: [] })) {
+function setup(run: ApiRun, response: () => Promise<Response> = async () => json({ workers: [] }),
+  destroyResponse: () => Promise<Response> = async () => json({ workerId, state: 'complete', remaining: [] })) {
   const requests: string[] = []
   vi.stubGlobal('fetch', vi.fn(async (url: RequestInfo | URL) => {
     const path = String(url); requests.push(path)
     if (path.endsWith('/relationships')) return response()
+    if (path.endsWith('/worker-destroy')) return destroyResponse()
     if (path.endsWith('/runs')) return json([])
     if (path.endsWith('/providers/status')) return json({ providers: [] })
     if (path.endsWith(`/runs/${parentId}`)) return json({ error: 'not found' }, 404)
@@ -162,4 +164,50 @@ it('collapses worker navigation on phones and preserves its scoped links when re
   expect(screen.getByRole('link', { name: `Worker task ${workerId}` }).getAttribute('href')).toBe(`/p/sample/tasks/${workerId}`)
   fireEvent.click(switcher)
   expect(screen.queryByRole('link', { name: `Worker task ${workerId}` })).toBeNull()
+})
+
+// #816: capacity is reclaimable, so history beyond the old 32 is listed in full.
+const workerAt = (n: number): WorkerInspection => {
+  const id = `20000000-0000-4000-8000-${String(n).padStart(12, '0')}`
+  return { workerId: id, parentRunId: parentId, status: 'done', workspace: { ...workspace, ownerRunId: id, resourceId: id }, destroy: { requestedAt: at, phase: 'complete', remaining: [] } }
+}
+it('lists every historical worker beyond 32 without slicing (#816)', async () => {
+  const many = Array.from({ length: 33 }, (_, n) => workerAt(n))
+  const run: ApiRun = { ...ordinary, delegation: { role: 'root', permissions: [], receipts: many.map(w => ({ requestId: w.workerId, workerId: w.workerId, requestHash: 'b'.repeat(64) })) } }
+  setup(run, async () => json({ workers: many, capacity: { outstanding: 0, limit: 32, created: 33, creationLimit: 1024 } }))
+  const panel = await screen.findByRole('region', { name: 'Task relationships' })
+  await waitFor(() => expect(within(panel).getAllByRole('link', { name: /^Worker task / })).toHaveLength(33))
+})
+it('shows how much worker capacity the parent uses (#816)', async () => {
+  setup(root, async () => json({ workers: [worker], capacity: { outstanding: 12, limit: 32, created: 40, creationLimit: 1024 } }))
+  const panel = await screen.findByRole('region', { name: 'Task relationships' })
+  expect(await within(panel).findByText('Capacity 12 of 32 in use')).toBeTruthy()
+  expect(within(panel).queryByText(/All 32 worker slots are in use/)).toBeNull()
+})
+it('explains exhausted capacity and its recovery (#816)', async () => {
+  setup(root, async () => json({ workers: [worker], capacity: { outstanding: 32, limit: 32, created: 32, creationLimit: 1024 } }))
+  const panel = await screen.findByRole('region', { name: 'Task relationships' })
+  expect(await within(panel).findByText('All 32 worker slots are in use. Clean up finished workers to free a slot.')).toBeTruthy()
+})
+it('offers Clean up only for settled workers that are not verifiably destroyed, and posts the human destroy (#816)', async () => {
+  const settled: WorkerInspection = { ...worker, status: 'done', destroy: undefined }
+  const live = { ...workerAt(1), status: 'running' as const, destroy: undefined }
+  const gone = workerAt(2)
+  const run: ApiRun = { ...ordinary, delegation: { role: 'root', permissions: [], receipts: [settled, live, gone].map(w => ({ requestId: w.workerId, workerId: w.workerId, requestHash: 'b'.repeat(64) })) } }
+  const { requests } = setup(run, async () => json({ workers: [settled, live, gone], capacity: { outstanding: 2, limit: 32, created: 3, creationLimit: 1024 } }))
+  const panel = await screen.findByRole('region', { name: 'Task relationships' })
+  const button = await within(panel).findByRole('button', { name: `Clean up worker ${workerId.slice(0, 8)}` })
+  expect(within(panel).getAllByRole('button', { name: /^Clean up worker/ })).toHaveLength(1)
+  expect(button.className).toContain('min-h-11')
+  fireEvent.click(button)
+  await waitFor(() => expect(requests).toContain(`/api/v1/p/sample/runs/${workerId}/worker-destroy`))
+})
+it('reports an incomplete cleanup and leaves Clean up available for a retry (#816)', async () => {
+  const settled: WorkerInspection = { ...worker, status: 'done', destroy: undefined }
+  setup(root, async () => json({ workers: [settled], capacity: { outstanding: 1, limit: 32, created: 1, creationLimit: 1024 } }),
+    async () => json({ workerId, state: 'incomplete', remaining: ['branch'], error: 'Branch is checked out' }, 409))
+  const panel = await screen.findByRole('region', { name: 'Task relationships' })
+  fireEvent.click(await within(panel).findByRole('button', { name: `Clean up worker ${workerId.slice(0, 8)}` }))
+  expect(await within(panel).findByText(/Cleanup did not finish/)).toBeTruthy()
+  expect((within(panel).getByRole('button', { name: `Clean up worker ${workerId.slice(0, 8)}` }) as HTMLButtonElement).disabled).toBe(false)
 })

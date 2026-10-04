@@ -122,6 +122,7 @@ import type {
   WorkspaceConfigResponse,
   WorkspaceUiState,
   SkillsUpdateState,
+  WorkerDestroyResult,
 } from '@open-mercato/cezar-api-client'
 import { parseProviderStatusResponse } from '@/lib/provider-status'
 import {
@@ -1309,6 +1310,20 @@ export async function cancelRun(id: string): Promise<CancelResponse> {
       param: { projectId: queryScope(), id: encodeURIComponent(id) },
     }),
     runPath(id, '/cancel'),
+  )
+}
+
+/** A human's verified cleanup of one owned worker (#816), freeing its capacity slot only when
+ *  every resource is proven removed. An incomplete cleanup answers 409 and throws; the
+ *  relationships refetch then shows what remains. */
+export async function destroyWorker(id: string): Promise<WorkerDestroyResult> {
+  return unwrap(
+    await cez.api.v1.p[':projectId'].runs[':id']['worker-destroy'].$post({
+      param: { projectId: queryScope(), id: encodeURIComponent(id) },
+      query: {},
+      json: {},
+    }),
+    runPath(id, '/worker-destroy'),
   )
 }
 

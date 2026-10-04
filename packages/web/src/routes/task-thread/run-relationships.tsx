@@ -6,7 +6,7 @@ import { delegationWaitLabel } from '@/lib/attention'
 import { runTitle } from '@/lib/task-groups'
 import type { ApiRun, RunRelationships, WorkerDestroy, WorkerInspection } from '@open-mercato/cezar-api-client'
 
-import { useRun, useRunRelationships, useRuns } from '@/api/queries'
+import { useDestroyWorker, useRun, useRunRelationships, useRuns } from '@/api/queries'
 import { Button } from '@/components/ui/button'
 import { Link } from '@/lib/project-router'
 import { cn } from '@/lib/utils'
@@ -30,7 +30,8 @@ export function RunRelationshipsPanel({ run }: { run: ApiRun }) {
  *  failed or offline relationships lookup (a fetched-only list would blink the links away). */
 function workerIdsOf(metadata: Delegation | undefined, data: RunRelationships | undefined): string[] {
   const known = metadata?.role === 'root' ? metadata.receipts.map(receipt => receipt.workerId) : []
-  return [...new Set([...known, ...(data?.workers ?? []).map(worker => worker.workerId)])].slice(0, 32)
+  // #816: receipts are bounded by the 1,024 creation ceiling, so nothing is sliced away here.
+  return [...new Set([...known, ...(data?.workers ?? []).map(worker => worker.workerId)])]
 }
 
 /**
@@ -104,6 +105,7 @@ function Relationships({ run }: { run: ApiRun }) {
         {metadata?.role === 'worker' && metadata.destroy ? <Cleanup state={metadata.destroy} /> : null}
         {wait ? <WaitNote wait={wait} dependencyLabel={dependencyLabel} /> : null}
       <div id={navigationId} hidden={!expanded}>
+        {query.data?.capacity ? <CapacityNote capacity={query.data.capacity} /> : null}
         {parentId ? <ParentLink id={parentId} /> : null}
         {ids.length > 0 ? (
           <ul className="grid max-h-64 min-w-0 gap-1 overflow-y-auto">
@@ -114,6 +116,7 @@ function Relationships({ run }: { run: ApiRun }) {
                 <div className="flex min-w-0 flex-wrap items-center gap-x-2">
                   <Link to={`/tasks/${id}`} aria-label={`Worker task ${id}`} className={linkClass}>{record ? runTitle(record) : `Worker ${id.slice(0, 8)}`}</Link>
                   <span className="px-2 text-xs">{worker?.status ?? (query.isSuccess ? 'Record unavailable or deleted' : 'Status unavailable')}</span>
+                  {worker ? <CleanUpWorker parentRunId={run.id} worker={worker} /> : null}
                 </div>
                 {worker?.destroy ? <Cleanup state={worker.destroy} /> : null}
               </li>
@@ -163,6 +166,7 @@ export function WorkerActivitySection({ run, open, onToggle }: { run: ApiRun; op
       <div aria-label="Task relationships" className="min-w-0 text-[13px] text-muted-foreground" role="group">
         {metadata?.role === 'worker' && metadata.destroy ? <Cleanup state={metadata.destroy} /> : null}
         {wait ? <WaitNote wait={wait} dependencyLabel={dependencyLabel} /> : null}
+        {query.data?.capacity ? <CapacityNote capacity={query.data.capacity} /> : null}
         {parentId ? <ParentLink id={parentId} /> : null}
         {ids.length > 0 ? (
           <ul className="grid max-h-64 min-w-0 gap-0.5 overflow-y-auto">
@@ -182,6 +186,7 @@ export function WorkerActivitySection({ run, open, onToggle }: { run: ApiRun; op
                     <span className={cn('max-w-[45%] shrink-0 truncate text-xs', statusTone(worker?.status))}>{status}</span>
                     <ArrowUpRightIcon aria-hidden className="size-3.5 shrink-0 text-soft-foreground" />
                   </Link>
+                  {worker ? <CleanUpWorker parentRunId={run.id} worker={worker} /> : null}
                   {worker?.destroy ? <Cleanup state={worker.destroy} /> : null}
                 </li>
               )
@@ -281,6 +286,44 @@ function ParentLink({ id }: { id: string }) {
       <Button variant="outline" className="min-h-11" onClick={() => void parent.refetch()}>Retry parent task</Button>
     </> : null}
   </div>
+}
+
+/**
+ * The parent's worker capacity (#816): outstanding allocations against the fixed limit. A
+ * slot comes back only when a worker's cleanup is verified complete, so at the limit the note
+ * names the one recovery a human has here — cleaning up finished workers.
+ */
+function CapacityNote({ capacity }: { capacity: NonNullable<RunRelationships['capacity']> }) {
+  const full = capacity.outstanding >= capacity.limit
+  return <p role="status" className={cn('px-2 break-words', full && 'text-foreground')}>
+    {full ? `All ${capacity.limit} worker slots are in use. Clean up finished workers to free a slot.`
+      : `Capacity ${capacity.outstanding} of ${capacity.limit} in use`}
+  </p>
+}
+
+const SETTLED = new Set<WorkerInspection['status']>(['review', 'done', 'failed', 'cancelled'])
+
+/**
+ * Verified cleanup of one settled worker through the human destroy route (#816). Offered only
+ * once the worker has stopped and until its cleanup is proven complete. Cleanup checkpoints
+ * the worker's result before removing anything; it never accepts a review gate.
+ */
+function CleanUpWorker({ parentRunId, worker }: { parentRunId: string; worker: WorkerInspection }) {
+  const destroy = useDestroyWorker(parentRunId)
+  if (!SETTLED.has(worker.status) || (worker.destroy?.phase === 'complete' && worker.destroy.remaining.length === 0)) return null
+  return <>
+    <Button
+      variant="outline"
+      size="sm"
+      className="min-h-11"
+      aria-label={`Clean up worker ${worker.workerId.slice(0, 8)}`}
+      disabled={destroy.isPending}
+      onClick={() => destroy.mutate(worker.workerId)}
+    >
+      {destroy.isPending ? 'Cleaning up…' : 'Clean up'}
+    </Button>
+    {destroy.isError ? <span role="status" className="px-2 text-xs break-words">Cleanup did not finish and keeps its slot. Retry Clean up.</span> : null}
+  </>
 }
 
 /**
