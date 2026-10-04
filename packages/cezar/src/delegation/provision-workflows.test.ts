@@ -671,7 +671,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     f.store.updateRun(f.parent.id, { status: 'waiting' }); f.store.flush(); f.manager.dispose();
     const store = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true }); recoveredStores.push(store);
     expect(store.getRun(worker.id)?.systemPrompt).toBe(legacyPrompt);
-    const manager = new RunManager(store, f.root); recoveredManagers.push(manager);
+    const manager = createFixtureManager(store, f.root); recoveredManagers.push(manager);
     controller.attachProject({ id: 'restarted-legacy', root: f.root, store, manager });
     await manager.recover(); await until(() => sessions.length === 3);
     expect(sessions[2]!.spec.env?.CEZ_TASK_ID).toBe(worker.id);

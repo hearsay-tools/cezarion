@@ -139,7 +139,7 @@ describe('delegation service durable authority', () => {
       // Preserve the root's human attention during recovery so it does not cancel the child.
       f.store.updateRun(f.parent.id, { status: 'waiting' });
       f.manager.dispose();
-      const recovered = new RunManager(f.store, f.root);
+      const recovered = createFixtureManager(f.store, f.root);
       try { await recovered.recover(); } finally { recovered.dispose(); }
       expect(f.store.getRun(workerId)).toMatchObject({ status: 'failed', error: expect.stringContaining('Accepted worker workflow definition is unavailable or changed') });
     });
