@@ -1,3 +1,4 @@
+import { summaryOf } from '@/test/run-summary-fixture'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
@@ -7,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createQueryClient } from '@/api/query-client'
 import { workspaceQueryKeys } from '@/api/queries'
 import { setApiScope } from '@open-mercato/cezar-api-client'
-import type { RunRecord } from '@open-mercato/cezar-api-client'
+import type { RunRecord, RunSummary } from '@open-mercato/cezar-api-client'
 import { ListViewProvider } from '@/components/list-view'
 import { ReferenceStatusProvider, ReferenceStatusRegistry } from '@/components/reference-status'
 import { QuickListBuckets, SidebarSessionScope, TaskQuickList, TaskQuickListContainer } from '@/components/task-quick-list'
@@ -19,9 +20,9 @@ const ago = (ms: number) => new Date(NOW - ms).toISOString()
 
 let seq = 0
 
-function run(over: Partial<RunRecord> = {}): RunRecord {
+function run(over: Partial<RunRecord> = {}): RunSummary {
   seq += 1
-  return {
+  return summaryOf({
     id: `r${seq}`,
     title: `Task ${seq}`,
     workflow: 'default',
@@ -32,7 +33,7 @@ function run(over: Partial<RunRecord> = {}): RunRecord {
     archived: false,
     steps: [],
     ...over,
-  }
+  })
 }
 
 /** Where the router currently is — the whole-row click vs nested-control assertions read this. */
@@ -108,7 +109,7 @@ describe('status section folding (#811)', () => {
       run({ id: 'va', groupId: 'g', variant: 'A', status: 'running' }),
       run({ id: 'vb', groupId: 'g', variant: 'B', status: 'running' }),
     ]
-    const tree = (runs: RunRecord[]) => <QueryClientProvider client={createQueryClient()}><MemoryRouter>
+    const tree = (runs: RunSummary[]) => <QueryClientProvider client={createQueryClient()}><MemoryRouter>
       <button type="button">Outside navigation</button>
       <TaskQuickList projectId="focus" runs={runs} view="active" onViewChange={() => {}} />
     </MemoryRouter></QueryClientProvider>
@@ -261,7 +262,7 @@ describe('status section folding (#811)', () => {
   it('moves live updates into saved folded sections without duplication, retaining attention and focus', () => {
     const done = run({ id: 'done', status: 'done', finishedAt: ago(1000) })
     const working = run({ id: 'move', status: 'running' })
-    const tree = (runs: RunRecord[]) => <QueryClientProvider client={createQueryClient()}><MemoryRouter><TaskQuickList projectId="live" runs={runs} view="active" onViewChange={() => {}} /></MemoryRouter></QueryClientProvider>
+    const tree = (runs: RunSummary[]) => <QueryClientProvider client={createQueryClient()}><MemoryRouter><TaskQuickList projectId="live" runs={runs} view="active" onViewChange={() => {}} /></MemoryRouter></QueryClientProvider>
     const { rerender } = render(tree([done, working]))
     fireEvent.click(screen.getByRole('button', { name: 'Finished 1' }))
     act(() => (row('move')?.querySelector('a') as HTMLElement).focus())
@@ -1009,7 +1010,7 @@ describe('TaskQuickListContainer', () => {
     vi.unstubAllGlobals()
   })
 
-  function renderContainer(runs: RunRecord[], route = '/') {
+  function renderContainer(runs: RunSummary[], route = '/') {
     fetchMock.mockImplementation(async () => new Response(JSON.stringify(runs), { status: 200 }))
     const wrapper = ({ children }: { children: ReactNode }) => (
       <QueryClientProvider client={createQueryClient()}>
@@ -1031,7 +1032,7 @@ describe('TaskQuickListContainer', () => {
   it('renders the live run list', async () => {
     renderContainer([run({ id: 'live', title: 'A real run', status: 'running' })])
     expect(await screen.findByText('A real run')).not.toBeNull()
-    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/runs')
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/run-summaries')
   })
 
   it('lights the row for the task open at /tasks/:id, including its child routes', async () => {
@@ -1109,7 +1110,7 @@ describe('SidebarSessionScope', () => {
     const sharedId = 'shared-across-projects'
     fetchMock.mockImplementation(async (input) => {
       const path = String(input)
-      if (path === '/api/v1/runs') {
+      if (path === '/api/v1/run-summaries') {
         return new Response(JSON.stringify([run({ id: sharedId, status: 'running' })]), { status: 200 })
       }
       if (path === '/api/v1/projects') {
@@ -2363,7 +2364,7 @@ describe('swipe to archive on touch (#780 §7)', () => {
   it('keeps the task link focused when finishing moves a pin into Finished', () => {
     const client = createQueryClient()
     const live = run({ id: 'flip', title: 'Flip', status: 'running', pinned: true })
-    const tree = (record: RunRecord) => (
+    const tree = (record: RunSummary) => (
       <QueryClientProvider client={client}>
         <MemoryRouter>
           <TaskQuickList runs={[record]} view="active" now={NOW} onViewChange={vi.fn()} onArchiveRun={vi.fn()} onTogglePin={vi.fn()} />

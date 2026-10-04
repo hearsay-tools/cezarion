@@ -1,3 +1,4 @@
+import { summaryOf } from '@/test/run-summary-fixture'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, useLocation } from 'react-router'
@@ -8,7 +9,7 @@ import type {
   HealthResponse,
   ProjectListEntry,
   RunIndexEntry,
-  RunRecord,
+  RunRecord, RunSummary,
   Skill,
 } from '@open-mercato/cezar-api-client'
 import {
@@ -56,8 +57,8 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-function run(overrides: Partial<RunRecord> & { id: string; title: string }): RunRecord {
-  return {
+function run(overrides: Partial<RunRecord> & { id: string; title: string }): RunSummary {
+  return summaryOf({
     workflow: 'build',
     task: 'do the thing',
     status: 'running',
@@ -66,7 +67,7 @@ function run(overrides: Partial<RunRecord> & { id: string; title: string }): Run
     archived: false,
     steps: [],
     ...overrides,
-  }
+  })
 }
 
 function skill(overrides: Partial<Skill> & { name: string; source: Skill['source'] }): Skill {
@@ -81,6 +82,8 @@ function indexed(
     createdAt: '2026-07-14T10:00:00Z',
     archived: false,
     workflow: 'build',
+    workflowLabel: 'build',
+    tokensUsed: 0,
     ...overrides,
   }
 }
@@ -130,7 +133,7 @@ function LocationProbe() {
 }
 
 function renderPalette({
-  runs = [] as RunRecord[],
+  runs = [] as RunSummary[],
   skills = [] as Skill[],
   projects = [] as ProjectListEntry[],
   indexed = [] as RunIndexEntry[],
@@ -142,7 +145,7 @@ function renderPalette({
   entry = '/',
   extraRoutes = {} as Record<string, unknown>,
 }: {
-  runs?: RunRecord[]
+  runs?: RunSummary[]
   skills?: Skill[]
   projects?: ProjectListEntry[]
   /** What `GET /workspace/runs-index` answers — every project's tasks, including the active one's. */
@@ -160,7 +163,7 @@ function renderPalette({
 } = {}) {
   if (theme) localStorage.setItem(THEME_STORAGE_KEY, theme)
   serve({
-    '/api/v1/runs': runs,
+    '/api/v1/run-summaries': runs,
     '/api/v1/skills': skills,
     '/api/v1/health': health(forge, automations),
     '/api/v1/ui-state': uiState,
@@ -1042,7 +1045,7 @@ describe('the pure ordering helpers', () => {
       ],
       'cezar',
       [
-        indexed({ id: 'indexed-worker', projectId: 'other', title: 'Indexed worker', delegation: { role: 'worker' } }),
+        indexed({ id: 'indexed-worker', projectId: 'other', title: 'Indexed worker', delegation: { role: 'worker', parentRunId: 'parent' } }),
         indexed({ id: 'other-parent', projectId: 'other', title: 'Other parent' }),
       ],
     )
@@ -1086,13 +1089,14 @@ it('preserves parked-parent wait phases without listing owned workers', async ()
   })
   renderPalette({ projects: [project({ id: 'cezar' }), project({ id: 'other' })], runs: [live, liveWorker], indexed: [
     { ...live, id: 'indexed-parent', title: 'Indexed parent', projectId: 'other', delegation: { role: 'root', wait: { phase: 'parked' } } },
-    { ...live, id: 'indexed-worker', title: 'Indexed worker unique', status: 'running', projectId: 'other', delegation: { role: 'worker' } },
+    { ...live, id: 'indexed-worker', title: 'Indexed worker unique', status: 'running', projectId: 'other', delegation: { role: 'worker', parentRunId: 'parent' } },
   ] })
   openWith({ metaKey: true })
   await screen.findByText('Indexed parent')
-  for (const id of ['live-parent', 'indexed-parent']) {
-    expect(document.querySelector(`[data-slot="palette-task"][data-run-id="${id}"] [data-slot="status-dot"]`)?.getAttribute('aria-label')).toBe('waiting on workers')
-  }
+  // A live summary row carries the awaited worker ids (#817) and counts them; an index row without
+  // them claims no number.
+  expect(document.querySelector('[data-slot="palette-task"][data-run-id="live-parent"] [data-slot="status-dot"]')?.getAttribute('aria-label')).toBe('waiting on 1 worker')
+  expect(document.querySelector('[data-slot="palette-task"][data-run-id="indexed-parent"] [data-slot="status-dot"]')?.getAttribute('aria-label')).toBe('waiting on workers')
   expect(document.querySelector('[data-slot="palette-task"][data-run-id="indexed-worker"]')).toBeNull()
   expect(document.querySelector('[data-slot="palette-task"][data-run-id="live-worker"]')).toBeNull()
 

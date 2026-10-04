@@ -1,16 +1,17 @@
 // @vitest-environment node
 
+import { summaryOf } from '@/test/run-summary-fixture'
 import { describe, expect, it } from 'vitest'
 
-import type { RunRecord } from '@open-mercato/cezar-api-client'
+import type { RunRecord, RunSummary } from '@open-mercato/cezar-api-client'
 import { GROUP_FAMILIES, attentionFamily, familiesOfLabels, groupAge, groupFamilies, groupMetaParts, resumeLabel, referenceKey, sharedReferenceKeys } from '@/lib/group-summary'
 
 const NOW = Date.parse('2026-07-14T12:00:00.000Z')
 const ago = (ms: number) => new Date(NOW - ms).toISOString()
 let seq = 0
-function run(over: Partial<RunRecord> = {}): RunRecord {
+function run(over: Partial<RunRecord> = {}): RunSummary {
   seq += 1
-  return { id: `r${seq}`, title: 'Upstream ledger', workflow: 'default', task: 't', status: 'running', createdAt: ago(12 * 60_000), tokensUsed: 0, archived: false, steps: [], ...over }
+  return summaryOf({ id: `r${seq}`, title: 'Upstream ledger', workflow: 'default', task: 't', status: 'running', createdAt: ago(12 * 60_000), tokensUsed: 0, archived: false, steps: [], ...over })
 }
 const parked = (): Partial<RunRecord> => ({
   status: 'waiting',

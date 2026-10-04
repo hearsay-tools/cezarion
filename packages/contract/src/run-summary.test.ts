@@ -55,6 +55,19 @@ describe('toRunSummary', () => {
     });
   });
 
+  it('keeps a root wait\'s worker ids and reported ids for the counted label', () => {
+    const worker = '33333333-3333-4333-8333-333333333333';
+    const delegation = {
+      role: 'root', permissions: [], receipts: [],
+      wait: { id: REQUEST, workerIds: [PARENT, worker], deadline: '2026-10-04T10:10:00.000Z', phase: 'parked',
+        outcomes: [{ workerId: worker, status: 'done', observedAt: '2026-10-04T10:05:00.000Z', summary: 'secret' }] },
+    } as unknown as RunRecord['delegation'];
+    expect(toRunSummary(record({ delegation })).delegation).toEqual({
+      role: 'root',
+      wait: { phase: 'parked', workerIds: [PARENT, worker], outcomes: [{ workerId: worker }] },
+    });
+  });
+
   it('keeps an invalid delegation role-only', () => {
     expect(toRunSummary(record({ delegation: { role: 'invalid' } })).delegation).toEqual({ role: 'invalid' });
   });
@@ -67,6 +80,17 @@ describe('toRunSummary', () => {
     ])).toBe('Fix bug');
     expect(planned([{ id: 'c', name: 'Lint', kind: 'check', status: 'pending', iterations: 0, tokensUsed: 0 }])).toBe('(planned)');
     expect(toRunSummary(record()).workflowLabel).toBe('quick-task');
+  });
+
+  it('names the current step backend and keeps the worktree path', () => {
+    const summary = toRunSummary(record({
+      currentStepId: 's1',
+      worktreePath: '/repo/.ai/cezar/worktrees/run-1',
+      steps: [{ id: 's1', name: 'Implement', kind: 'agent', status: 'running', iterations: 1, tokensUsed: 0, backend: 'codex' }],
+    }));
+    expect(summary.currentStepBackend).toBe('codex');
+    expect(summary.worktreePath).toBe('/repo/.ai/cezar/worktrees/run-1');
+    expect('currentStepBackend' in toRunSummary(record())).toBe(false);
   });
 
   it('carries live usage when present and omits the key when absent', () => {

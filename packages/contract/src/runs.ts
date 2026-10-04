@@ -466,7 +466,12 @@ export const runSummarySchema = z.object({
   inputTokens: runRecordSchema.shape.inputTokens,
   outputTokens: runRecordSchema.shape.outputTokens,
   currentStepId: z.string().optional(),
+  /** The backend of the step `currentStepId` names, when it recorded one — the conversation view
+   *  labels a delegated peer by the agent actually running it, which can differ from `runner`. */
+  currentStepBackend: runnerSchema.optional(),
   error: z.string().optional(),
+  /** Present while the run's isolated worktree exists — the breadcrumb says "Isolated worktree". */
+  worktreePath: z.string().optional(),
 });
 export type RunSummary = z.infer<typeof runSummarySchema>;
 
@@ -487,11 +492,11 @@ const SUMMARY_OPTIONAL_KEYS = [
   'autoResumeAt', 'branch', 'startedAt', 'pullRequestUrl', 'referencedPullRequestUrl', 'prNumber',
   'issueNumber', 'referencedIssueUrl', 'markerRefs', 'costUsd', 'peakRssBytes', 'peakProcCount',
   'groupId', 'variant', 'pinned', 'runner', 'model', 'notify', 'diffStat', 'inputTokens',
-  'outputTokens', 'currentStepId', 'error',
+  'outputTokens', 'currentStepId', 'error', 'worktreePath',
 ] as const satisfies readonly (keyof RunSummary & keyof RunRecord)[];
 
 /** `(planned)` and `(inbox)` chains carry their meaning in their first agent step's name. */
-function summaryWorkflowLabel(run: Pick<RunRecord, 'workflow' | 'steps'>): string {
+export function runWorkflowLabel(run: Pick<RunRecord, 'workflow' | 'steps'>): string {
   if (run.workflow === '(planned)' || run.workflow === '(inbox)') {
     const agent = run.steps.find((step) => step.kind === 'agent');
     if (agent?.name) return agent.name;
@@ -513,12 +518,14 @@ export function toRunSummary(run: RunRecord & { usage?: ProcessUsage }): RunSumm
     createdAt: run.createdAt,
     archived: run.archived,
     workflow: run.workflow,
-    workflowLabel: summaryWorkflowLabel(run),
+    workflowLabel: runWorkflowLabel(run),
     tokensUsed: run.tokensUsed,
   };
   for (const key of SUMMARY_OPTIONAL_KEYS) {
     if (run[key] !== undefined) summary[key] = run[key];
   }
+  const currentStepBackend = run.steps.find((step) => step.id === run.currentStepId)?.backend;
+  if (currentStepBackend !== undefined) summary.currentStepBackend = currentStepBackend;
   if (run.delegation) summary.delegation = runDelegationSummarySchema.parse(run.delegation);
   if (run.usage) summary.usage = run.usage;
   return summary as RunSummary;

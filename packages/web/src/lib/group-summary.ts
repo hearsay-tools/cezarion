@@ -1,4 +1,4 @@
-import type { RunRecord } from '@open-mercato/cezar-api-client'
+import type { RunSummary } from '@open-mercato/cezar-api-client'
 
 import { deriveAttention } from './attention'
 import { shortAge } from './format'
@@ -35,7 +35,7 @@ export function attentionFamily(label: string): GroupFamily {
 }
 
 /** `['1 needs you', '1 working']` — at most two families, in family order. */
-export function groupFamilies(members: readonly RunRecord[], limit = 2): string[] {
+export function groupFamilies(members: readonly RunSummary[], limit = 2): string[] {
   return familiesOfLabels(members.map((member) => deriveAttention(member).label), limit)
 }
 
@@ -57,7 +57,7 @@ export { referenceKey } from './tasks-table'
 
 /** The references EVERY member carries. The group row shows these; a variant shows only the ones
  *  not in this set (each variant that opened its own PR shows it). */
-export function sharedReferenceKeys(members: readonly (RunRecord & { projectId?: string })[], projectId?: string): Set<string> {
+export function sharedReferenceKeys(members: readonly (RunSummary & { projectId?: string })[], projectId?: string): Set<string> {
   const [first, ...rest] = members
   if (!first) return new Set()
   const shared = new Set(taskReferences(first, undefined, projectId).map(referenceKey))
@@ -70,7 +70,7 @@ export function sharedReferenceKeys(members: readonly (RunRecord & { projectId?:
 
 /** The age of the member with the latest `finishedAt ?? createdAt` — the task row's own age rule,
  *  so a running group shows its shared start and a finished one when it last changed. */
-export function groupAge(members: readonly RunRecord[], now: number): string {
+export function groupAge(members: readonly RunSummary[], now: number): string {
   let latest: string | undefined
   let latestMs = -Infinity
   for (const member of members) {
@@ -84,7 +84,7 @@ export function groupAge(members: readonly RunRecord[], now: number): string {
   return shortAge(latest, now)
 }
 
-export function groupMetaParts(members: readonly RunRecord[], now: number, projectId?: string): { families: string[]; shared: Set<string>; age: string } {
+export function groupMetaParts(members: readonly RunSummary[], now: number, projectId?: string): { families: string[]; shared: Set<string>; age: string } {
   return { families: groupFamilies(members), shared: sharedReferenceKeys(members, projectId), age: groupAge(members, now) }
 }
 

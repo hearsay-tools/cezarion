@@ -126,7 +126,7 @@ function refStatusUrls(): string[] {
 describe('ProjectGroups', () => {
   it('remembers section folds per project independently of project folding (#811)', async () => {
     const projects = [project(), project({ id: 'shop', name: 'shop' })]
-    serve({ '/api/v1/p/cezar/runs': [run({ title: 'Cez done' })], '/api/v1/p/shop/runs': [run({ title: 'Shop done' })] })
+    serve({ '/api/v1/p/cezar/run-summaries': [run({ title: 'Cez done' })], '/api/v1/p/shop/run-summaries': [run({ title: 'Shop done' })] })
     storeCollapsed({ cezar: false, shop: false })
     renderGroups(projects)
     const toggle = await within(group('cezar')).findByRole('button', { name: 'Finished 1' })
@@ -145,7 +145,7 @@ describe('ProjectGroups', () => {
 
   it('caps an expanded group at 10 rows and links More… at that project’s tasks pane', async () => {
     const runs = Array.from({ length: 15 }, () => run())
-    serve({ '/api/v1/p/cezar/runs': runs })
+    serve({ '/api/v1/p/cezar/run-summaries': runs })
     renderGroups([project(), project({ id: 'shop', name: 'shop', lastOpenedAt: '2026-07-19T00:00:00.000Z' })])
 
     await waitFor(() => expect(taskLinks('cezar').length).toBeGreaterThan(0))
@@ -177,7 +177,7 @@ describe('ProjectGroups', () => {
         },
       }),
     )
-    serve({ '/api/v1/p/cezar/runs': [...parents, ...workers] })
+    serve({ '/api/v1/p/cezar/run-summaries': [...parents, ...workers] })
     renderGroups([project(), project({ id: 'shop', name: 'shop', lastOpenedAt: '2026-07-19T00:00:00.000Z' })])
 
     await waitFor(() => expect(taskLinks('cezar').length).toBeGreaterThan(0))
@@ -209,7 +209,7 @@ describe('ProjectGroups', () => {
         },
       },
     })
-    serve({ '/api/v1/p/cezar/runs': [parent, child] })
+    serve({ '/api/v1/p/cezar/run-summaries': [parent, child] })
     renderGroups([project()], '/p/cezar/tasks/child')
 
     await waitFor(() => expect(group('cezar').querySelector('[data-run-id="parent"]')).not.toBeNull())
@@ -218,7 +218,7 @@ describe('ProjectGroups', () => {
   })
 
   it('orders groups by lastOpenedAt and only fetches the expanded one', async () => {
-    serve({ '/api/v1/p/cezar/runs': [] })
+    serve({ '/api/v1/p/cezar/run-summaries': [] })
     renderGroups([
       project({ id: 'shop', name: 'shop', lastOpenedAt: '2026-07-18T00:00:00.000Z' }),
       project(),
@@ -233,11 +233,11 @@ describe('ProjectGroups', () => {
     // The collapsed group costs one registry row, never a runs request.
     expect(header('shop').getAttribute('aria-expanded')).toBe('false')
     const asked = fetchMock.mock.calls.map((call) => String(call[0]))
-    expect(asked).not.toContain('/api/v1/p/shop/runs')
+    expect(asked).not.toContain('/api/v1/p/shop/run-summaries')
   })
 
   it('puts the branch on the same row as the project name, to the right', async () => {
-    serve({ '/api/v1/p/cezar/runs': [] })
+    serve({ '/api/v1/p/cezar/run-summaries': [] })
     renderGroups([project(), project({ id: 'shop', name: 'shop', lastOpenedAt: '2026-07-19T00:00:00.000Z' })])
     await waitFor(() => expect(header('cezar').getAttribute('aria-expanded')).toBe('true'))
     const name = within(group('cezar')).getByRole('link', { name: 'Open cezar' })
@@ -250,7 +250,7 @@ describe('ProjectGroups', () => {
 
   it('shows each expanded group’s own nav, and lights only the active one', async () => {
     storeCollapsed({ shop: false })
-    serve({ '/api/v1/p/cezar/runs': [], '/api/v1/p/shop/runs': [] })
+    serve({ '/api/v1/p/cezar/run-summaries': [], '/api/v1/p/shop/run-summaries': [] })
     renderGroups([project(), project({ id: 'shop', name: 'shop' })])
     expect(within(group('shop')).getByRole('link', { name: 'Open shop' }).getAttribute('href')).toBe('/p/shop/')
     const shopNav = within(group('shop')).getByRole('navigation', { name: 'shop navigation' })
@@ -269,7 +269,7 @@ describe('ProjectGroups', () => {
 
   // #617 01c: a grouped project's nav speaks the same selection language as the task rows.
   it('selects a nav row with the task row fill, hovers neutral, and badges by meaning (#617)', async () => {
-    serve({ '/api/v1/p/cezar/runs': [] })
+    serve({ '/api/v1/p/cezar/run-summaries': [] })
     renderGroups([project()], '/p/cezar/inbox', { inboxCount: 3, skillsUpdateAvailable: true })
     const nav = within(group('cezar')).getByRole('navigation')
     const selected = within(nav).getByRole('link', { current: 'page' })
@@ -294,7 +294,7 @@ describe('ProjectGroups', () => {
   })
 
   it('collapses an unpinned previous project when another project is selected', async () => {
-    serve({ '/api/v1/p/cezar/runs': [], '/api/v1/p/shop/runs': [] })
+    serve({ '/api/v1/p/cezar/run-summaries': [], '/api/v1/p/shop/run-summaries': [] })
     renderGroups(
       [project(), project({ id: 'shop', name: 'shop', lastOpenedAt: '2026-07-19T00:00:00.000Z' })],
       '/p/cezar/git',
@@ -312,7 +312,7 @@ describe('ProjectGroups', () => {
 
   it('keeps an explicitly pinned project open across navigation', async () => {
     storeCollapsed({ cezar: false })
-    serve({ '/api/v1/p/cezar/runs': [], '/api/v1/p/shop/runs': [] })
+    serve({ '/api/v1/p/cezar/run-summaries': [], '/api/v1/p/shop/run-summaries': [] })
     renderGroups(
       [project(), project({ id: 'shop', name: 'shop', lastOpenedAt: '2026-07-19T00:00:00.000Z' })],
       '/p/cezar/git',
@@ -330,7 +330,7 @@ describe('ProjectGroups', () => {
   })
 
   it('folds an expanded group when its project name is clicked again', async () => {
-    serve({ '/api/v1/p/cezar/runs': [] })
+    serve({ '/api/v1/p/cezar/run-summaries': [] })
     renderGroups([project(), project({ id: 'shop', name: 'shop', lastOpenedAt: '2026-07-19T00:00:00.000Z' })])
     await waitFor(() => expect(header('cezar').getAttribute('aria-expanded')).toBe('true'))
     fireEvent.click(screen.getByRole('link', { name: 'Open cezar' }))
@@ -339,7 +339,7 @@ describe('ProjectGroups', () => {
 
   it('unfolds a collapsed group when its project name is clicked', async () => {
     storeCollapsed({ shop: true })
-    serve({ '/api/v1/p/cezar/runs': [], '/api/v1/p/shop/runs': [] })
+    serve({ '/api/v1/p/cezar/run-summaries': [], '/api/v1/p/shop/run-summaries': [] })
     renderGroups([project(), project({ id: 'shop', name: 'shop' })])
     expect(header('shop').getAttribute('aria-expanded')).toBe('false')
     fireEvent.click(screen.getByRole('link', { name: 'Open shop' }))
@@ -349,7 +349,7 @@ describe('ProjectGroups', () => {
 
   it("gates the selected project's GitHub destination on its own forge", async () => {
     storeCollapsed({ plain: false })
-    serve({ '/api/v1/p/cezar/runs': [], '/api/v1/p/plain/runs': [] })
+    serve({ '/api/v1/p/cezar/run-summaries': [], '/api/v1/p/plain/run-summaries': [] })
     renderGroups([project(), project({ id: 'plain', name: 'plain', forge: undefined })])
     expect(screen.getByRole('link', { name: 'GitHub' }).getAttribute('href')).toBe('/p/cezar/github')
     fireEvent.click(within(group('plain')).getByRole('link', { name: 'Tasks' }))
@@ -359,7 +359,7 @@ describe('ProjectGroups', () => {
 
   it.each([true, false])('preserves the automations capability gate (%s) when switching projects', async (automations) => {
     storeCollapsed({ shop: false })
-    serve({ '/api/v1/p/cezar/runs': [], '/api/v1/p/shop/runs': [] })
+    serve({ '/api/v1/p/cezar/run-summaries': [], '/api/v1/p/shop/run-summaries': [] })
     renderGroups([project(), project({ id: 'shop', name: 'shop' })], '/p/cezar/', { automations })
     for (const id of ['cezar', 'shop']) {
       fireEvent.click(within(group(id)).getByRole('link', { name: 'Tasks' }))
@@ -371,7 +371,7 @@ describe('ProjectGroups', () => {
   })
 
   it('round-trips a collapse through this browser’s storage, never the server', async () => {
-    serve({ '/api/v1/p/cezar/runs': [] })
+    serve({ '/api/v1/p/cezar/run-summaries': [] })
     renderGroups([project(), project({ id: 'shop', name: 'shop', lastOpenedAt: '2026-07-19T00:00:00.000Z' })])
 
     await waitFor(() => expect(header('cezar').getAttribute('aria-expanded')).toBe('true'))
@@ -395,7 +395,7 @@ describe('ProjectGroups', () => {
   it('starts from the stored collapse rather than the active-project default', async () => {
     storeCollapsed({ cezar: true })
     serve({
-      '/api/v1/p/cezar/runs': [],
+      '/api/v1/p/cezar/run-summaries': [],
     })
     renderGroups([project(), project({ id: 'shop', name: 'shop', lastOpenedAt: '2026-07-19T00:00:00.000Z' })])
 
@@ -405,7 +405,7 @@ describe('ProjectGroups', () => {
 
   it('badges a group with its needs-you count', async () => {
     serve({
-      '/api/v1/p/cezar/runs': [run({ status: 'waiting' }), run({ status: 'review' }), run()],
+      '/api/v1/p/cezar/run-summaries': [run({ status: 'waiting' }), run({ status: 'review' }), run()],
     })
     renderGroups([project(), project({ id: 'shop', name: 'shop', lastOpenedAt: '2026-07-19T00:00:00.000Z' })])
 
@@ -425,7 +425,7 @@ describe('ProjectGroups', () => {
     // live under the 'default' scope key. The boot group must share that entry, or its list and
     // needs-you badge freeze at whatever the expand-time fetch answered.
     const client = createQueryClient()
-    serve({ '/api/v1/p/cezar/runs': [] })
+    serve({ '/api/v1/p/cezar/run-summaries': [] })
     render(
       <QueryClientProvider client={client}>
         <MemoryRouter initialEntries={['/p/cezar/']}>
@@ -454,7 +454,7 @@ describe('ProjectGroups', () => {
       run({ id: 'kept-a', pinned: true }),
       run({ id: 'kept-b', pinned: true }),
     ]
-    serve({ '/api/v1/p/cezar/runs': runs })
+    serve({ '/api/v1/p/cezar/run-summaries': runs })
     renderGroups([project()])
 
     await waitFor(() => expect(taskLinks('cezar').length).toBeGreaterThan(0))
@@ -475,8 +475,8 @@ describe('ProjectGroups', () => {
         posts.push(path)
         return json({})
       }
-      if (path === '/api/v1/p/cezar/runs') return json([run({ id: 'other-project-task' })])
-      if (path === '/api/v1/p/shop/runs') return json([])
+      if (path === '/api/v1/p/cezar/run-summaries') return json([run({ id: 'other-project-task' })])
+      if (path === '/api/v1/p/shop/run-summaries') return json([])
       return json({ error: 'not found' }, 404)
     })
     // Standing in `shop`, with the boot project's group open beside it.
@@ -500,8 +500,8 @@ describe('ProjectGroups', () => {
         posts.push({ path, body: JSON.parse(String(init.body ?? '{}')) })
         return json(path.endsWith('archive-finished') ? { archived: 12, ids: runs.map((r) => r.id), pinnedIds: [] } : {})
       }
-      if (path === '/api/v1/p/shop/runs') return json(runs)
-      if (path === '/api/v1/p/cezar/runs') return json([])
+      if (path === '/api/v1/p/shop/run-summaries') return json(runs)
+      if (path === '/api/v1/p/cezar/run-summaries') return json([])
       return json({ error: 'not found' }, 404)
     })
     storeCollapsed({ shop: false })
@@ -517,7 +517,7 @@ describe('ProjectGroups', () => {
   })
 
   it('renders neither archive control in the archived view (#780)', async () => {
-    serve({ '/api/v1/p/cezar/runs': [run({ id: 'old', archived: true }), run({ id: 'fin' })] })
+    serve({ '/api/v1/p/cezar/run-summaries': [run({ id: 'old', archived: true }), run({ id: 'fin' })] })
     function ShowArchived() {
       const [, setView] = useListView()
       return <button type="button" onClick={() => setView('archived')}>show archived</button>
@@ -553,7 +553,7 @@ describe('ProjectGroups', () => {
         task = { ...task, pinned: undefined }
         return json(task)
       }
-      if (path === '/api/v1/p/cezar/runs') return json([task])
+      if (path === '/api/v1/p/cezar/run-summaries') return json([task])
       return json({ error: 'not found' }, 404)
     })
     render(<Toaster />)
@@ -570,7 +570,7 @@ describe('ProjectGroups', () => {
   })
 
   it('renders a missing project greyed and inert, with no nav behind it', async () => {
-    serve({ '/api/v1/p/cezar/runs': [] })
+    serve({ '/api/v1/p/cezar/run-summaries': [] })
     renderGroups([project(), project({ id: 'gone', name: 'old-spike', status: 'missing', lastOpenedAt: '2026-07-01T00:00:00.000Z' })])
 
     await waitFor(() => expect(group('gone')).not.toBeNull())
@@ -581,7 +581,7 @@ describe('ProjectGroups', () => {
     // link at — the row states the fact and stops.
     expect(within(group('gone')).queryByRole('button')).toBeNull()
     expect(within(group('gone')).queryAllByRole('link')).toHaveLength(0)
-    expect(fetchMock.mock.calls.map((call) => String(call[0]))).not.toContain('/api/v1/p/gone/runs')
+    expect(fetchMock.mock.calls.map((call) => String(call[0]))).not.toContain('/api/v1/p/gone/run-summaries')
   })
 
   /**
@@ -591,7 +591,7 @@ describe('ProjectGroups', () => {
    * user reads an all-projects table says the page is about that project when it is not.
    */
   it('marks no project as selected on a page that belongs to none', async () => {
-    serve({ '/api/v1/p/cezar/runs': [] })
+    serve({ '/api/v1/p/cezar/run-summaries': [] })
     renderGroups(
       [project(), project({ id: 'shop', name: 'shop', lastOpenedAt: '2026-07-19T00:00:00.000Z' })],
       '/tasks',
@@ -608,7 +608,7 @@ describe('ProjectGroups', () => {
   })
 
   it('still marks the scoped project on a project page', async () => {
-    serve({ '/api/v1/p/shop/runs': [] })
+    serve({ '/api/v1/p/shop/run-summaries': [] })
     renderGroups(
       [project(), project({ id: 'shop', name: 'shop', lastOpenedAt: '2026-07-19T00:00:00.000Z' })],
       '/p/shop/git',
@@ -649,7 +649,7 @@ describe('ProjectGroups', () => {
     ]
     fetchMock.mockImplementation(async (input) => {
       const path = String(input)
-      if (path === '/api/v1/p/cezar/runs') return json(variants)
+      if (path === '/api/v1/p/cezar/run-summaries') return json(variants)
       if (path.includes('/github/ref-status')) {
         return json({
           available: true,

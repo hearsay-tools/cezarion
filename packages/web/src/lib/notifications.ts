@@ -1,4 +1,4 @@
-import type { RunRecord, RunStatus } from '@open-mercato/cezar-api-client'
+import type { RunSummary, RunStatus } from '@open-mercato/cezar-api-client'
 import { deriveAttention, wantsAttention } from './attention'
 
 /* Browser notifications (R6 Step 1.7, spec §"Cross-cutting"): the pure half.
@@ -60,7 +60,7 @@ export interface RunNotificationState {
 
 export interface RunTransitions {
   /** Runs that ENTERED an attention state in this observation — the ones worth a notification. */
-  entering: RunRecord[]
+  entering: RunSummary[]
   /** The status and attention to remember for the next observation. Rebuilt each time, so deleted runs
    *  fall out instead of accumulating forever. */
   statuses: Map<string, RunNotificationState>
@@ -84,10 +84,10 @@ export interface RunTransitions {
  */
 export function diffRunTransitions(
   previous: ReadonlyMap<string, RunNotificationState>,
-  runs: readonly RunRecord[] | undefined,
+  runs: readonly RunSummary[] | undefined,
 ): RunTransitions {
   const statuses = new Map<string, RunNotificationState>()
-  const entering: RunRecord[] = []
+  const entering: RunSummary[] = []
   for (const run of runs ?? []) {
     const current = { status: run.status, wantsAttention: wantsAttention(run) }
     statuses.set(run.id, current)
@@ -127,7 +127,7 @@ export interface RunNotificationContent {
 
 /** What the notification says: the run's display title (#389: `titleSummary ?? title`) and the
  *  attention label — the same phrase the dot's tooltip uses, from the same one function. */
-export function describeRunNotification(run: RunRecord): RunNotificationContent {
+export function describeRunNotification(run: RunSummary): RunNotificationContent {
   const label = deriveAttention(run).label
   return {
     title: run.titleSummary ?? run.title,

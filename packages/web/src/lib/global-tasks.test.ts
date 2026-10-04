@@ -58,6 +58,8 @@ function run(overrides: Partial<RunIndexEntry> & { id: string; projectId: string
     createdAt: '2026-07-14T10:00:00Z',
     archived: false,
     workflow: 'quick-task',
+    workflowLabel: 'quick-task',
+    tokensUsed: 0,
     ...overrides,
   }
 }
@@ -111,7 +113,7 @@ describe('toGlobalTasks', () => {
           id: 'worker',
           projectId: 'api',
           title: 'Worker task',
-          delegation: { role: 'worker' },
+          delegation: { role: 'worker', parentRunId: 'parent' },
         }),
       ],
       PROJECTS,

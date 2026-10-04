@@ -290,7 +290,7 @@ describe('sidebar wiring', () => {
       },
       '/api/v1/todos': [],
       '/api/v1/projects': { projects: [PROJECT], bootProject: 'cezar', projectsDir: '/home/me/cezar/projects' },
-      '/api/v1/runs': [],
+      '/api/v1/run-summaries': [],
     })
     renderShell()
 
@@ -307,7 +307,7 @@ describe('sidebar wiring', () => {
       },
       '/api/v1/todos': [],
       '/api/v1/projects': { projects: [PROJECT], bootProject: 'cezar', projectsDir: '/home/me/cezar/projects' },
-      '/api/v1/runs': [],
+      '/api/v1/run-summaries': [],
     })
     renderShell()
 
@@ -327,7 +327,7 @@ describe('sidebar wiring', () => {
         projectsDir: '/home/me/cezar/projects',
       },
       '/api/v1/workspace/ui-state': {},
-      '/api/v1/p/cezar/runs': [],
+      '/api/v1/p/cezar/run-summaries': [],
     })
     renderShell()
 
@@ -345,7 +345,7 @@ describe('sidebar wiring', () => {
       },
       '/api/v1/todos': TODOS,
       '/api/v1/projects': { projects: [{ ...PROJECT, forge: 'github' }], bootProject: 'cezar', projectsDir: '/home/me/cezar/projects' },
-      '/api/v1/runs': [],
+      '/api/v1/run-summaries': [],
     })
     renderShell('/p/cezar/')
     await waitFor(() => expect(repoChip()?.textContent).toBe('cezar'))
@@ -371,7 +371,7 @@ describe('sidebar wiring', () => {
         projectsDir: '/home/me/cezar/projects',
       },
       '/api/v1/workspace/ui-state': {},
-      '/api/v1/p/cezar/runs': [],
+      '/api/v1/p/cezar/run-summaries': [],
     })
     renderShell('/p/cezar/')
     await waitFor(() => expect(repoChip()?.textContent).toBe('cezar'))
@@ -391,8 +391,8 @@ describe('sidebar wiring', () => {
         projects: [PROJECT, { ...PROJECT, id: 'shop', name: 'shop' }],
         bootProject: 'cezar', projectsDir: '/projects',
       },
-      '/api/v1/runs': [active, archived],
-      '/api/v1/p/cezar/runs': [active, archived],
+      '/api/v1/run-summaries': [active, archived],
+      '/api/v1/p/cezar/run-summaries': [active, archived],
       '/api/v1/workspace/ui-state': {},
     })
     renderShell('/p/cezar/new')
@@ -419,9 +419,9 @@ describe('sidebar wiring', () => {
         bootProject: 'cezar',
         projectsDir: '/projects',
       },
-      '/api/v1/runs': [bootActive],
-      '/api/v1/p/cezar/runs': [bootActive],
-      '/api/v1/p/shop/runs': [shopWaiting],
+      '/api/v1/run-summaries': [bootActive],
+      '/api/v1/p/cezar/run-summaries': [bootActive],
+      '/api/v1/p/shop/run-summaries': [shopWaiting],
       '/api/v1/workspace/ui-state': {},
     })
     renderShell('/p/cezar/new')
@@ -543,7 +543,7 @@ describe('document title wiring', () => {
         ...REGISTRY,
         projects: [{ ...PROJECT, id: 'shop', name: 'Storefront' }],
       },
-      '/api/v1/runs': [],
+      '/api/v1/run-summaries': [],
     })
     renderShell('/p/shop/git')
 
@@ -551,7 +551,7 @@ describe('document title wiring', () => {
   })
 
   it('falls back to the boot repository name when the registry is unavailable', async () => {
-    serve({ '/api/v1/health': HEALTH_WITH_BOOT, '/api/v1/todos': [], '/api/v1/runs': [] })
+    serve({ '/api/v1/health': HEALTH_WITH_BOOT, '/api/v1/todos': [], '/api/v1/run-summaries': [] })
     renderShell('/p/cezar/')
 
     await waitFor(() => expect(document.title).toBe('cezar — Tasks · cezar'))
@@ -562,7 +562,7 @@ describe('document title wiring', () => {
       '/api/v1/health': { ...HEALTH_WITH_BOOT, repo: null },
       '/api/v1/todos': [],
       '/api/v1/projects': REGISTRY,
-      '/api/v1/runs': [],
+      '/api/v1/run-summaries': [],
     })
     const global = renderShell('/settings/global/projects')
 
@@ -578,7 +578,7 @@ describe('document title wiring', () => {
       '/api/v1/health': HEALTH_WITH_BOOT,
       '/api/v1/todos': [],
       '/api/v1/projects': REGISTRY,
-      '/api/v1/runs': [],
+      '/api/v1/run-summaries': [],
     })
     renderShell('/p/cezar/')
 
@@ -596,8 +596,8 @@ describe('document title wiring', () => {
         ...REGISTRY,
         projects: [{ ...PROJECT, id: 'shop', name: 'Storefront' }],
       },
-      '/api/v1/runs': [],
-      '/api/v1/p/shop/runs': [initialRun],
+      '/api/v1/run-summaries': [],
+      '/api/v1/p/shop/run-summaries': [initialRun],
     })
     const { client } = renderShell('/p/shop/tasks/run-1')
 
@@ -655,10 +655,10 @@ describe('project rail wiring', () => {
       '/api/v1/todos': [],
       '/api/v1/projects': { ...TWO_PROJECTS, projects: [...TWO_PROJECTS.projects, { ...PROJECT, id: 'third', name: 'third' }] },
       '/api/v1/workspace/runs-index': railIndex([]),
-      '/api/v1/runs': [],
-      '/api/v1/p/cezar/runs': [],
-      '/api/v1/p/shop/runs': [],
-      '/api/v1/p/third/runs': [],
+      '/api/v1/run-summaries': [],
+      '/api/v1/p/cezar/run-summaries': [],
+      '/api/v1/p/shop/run-summaries': [],
+      '/api/v1/p/third/run-summaries': [],
     })
     renderShell('/p/cezar/')
     await rail()
@@ -680,8 +680,8 @@ describe('project rail wiring', () => {
         '/api/v1/todos': [],
         '/api/v1/projects': TWO_PROJECTS,
         '/api/v1/workspace/runs-index': railIndex([]),
-        '/api/v1/runs': [],
-        '/api/v1/p/cezar/runs': [],
+        '/api/v1/run-summaries': [],
+        '/api/v1/p/cezar/run-summaries': [],
       })
       renderShell('/p/cezar/')
       await rail()
@@ -702,9 +702,9 @@ describe('project rail wiring', () => {
       '/api/v1/projects': TWO_PROJECTS,
       '/api/v1/workspace/ui-state': {},
       '/api/v1/workspace/runs-index': railIndex([indexRow({ projectId: 'shop', id: 's1', status: 'waiting' })]),
-      '/api/v1/runs': [],
-      '/api/v1/p/cezar/runs': [],
-      '/api/v1/p/shop/runs': [],
+      '/api/v1/run-summaries': [],
+      '/api/v1/p/cezar/run-summaries': [],
+      '/api/v1/p/shop/run-summaries': [],
     })
     renderShell('/p/cezar/')
 
@@ -725,9 +725,9 @@ describe('project rail wiring', () => {
       '/api/v1/projects': TWO_PROJECTS,
       '/api/v1/workspace/ui-state': {},
       '/api/v1/workspace/runs-index': railIndex([done]),
-      '/api/v1/runs': [],
-      '/api/v1/p/cezar/runs': [],
-      '/api/v1/p/shop/runs': [],
+      '/api/v1/run-summaries': [],
+      '/api/v1/p/cezar/run-summaries': [],
+      '/api/v1/p/shop/run-summaries': [],
     })
     const { client } = renderShell('/p/shop/')
 
@@ -747,9 +747,9 @@ describe('project rail wiring', () => {
       '/api/v1/projects': TWO_PROJECTS,
       '/api/v1/workspace/ui-state': {},
       '/api/v1/workspace/runs-index': railIndex([], ['shop']),
-      '/api/v1/runs': [],
-      '/api/v1/p/cezar/runs': [],
-      '/api/v1/p/shop/runs': [],
+      '/api/v1/run-summaries': [],
+      '/api/v1/p/cezar/run-summaries': [],
+      '/api/v1/p/shop/run-summaries': [],
     })
     renderShell('/p/cezar/')
 
@@ -766,9 +766,9 @@ describe('project rail wiring', () => {
       '/api/v1/todos': [],
       '/api/v1/projects': TWO_PROJECTS,
       '/api/v1/workspace/ui-state': {},
-      '/api/v1/runs': [],
-      '/api/v1/p/cezar/runs': [],
-      '/api/v1/p/shop/runs': [],
+      '/api/v1/run-summaries': [],
+      '/api/v1/p/cezar/run-summaries': [],
+      '/api/v1/p/shop/run-summaries': [],
     })
     renderShell('/p/cezar/')
 
@@ -786,9 +786,9 @@ describe('project rail wiring', () => {
       '/api/v1/projects': { projects: [PROJECT], bootProject: 'cezar', projectsDir: '/home/me/cezar/projects' },
       '/api/v1/workspace/ui-state': {},
       '/api/v1/workspace/runs-index': railIndex([]),
-      '/api/v1/runs': [],
-      '/api/v1/p/cezar/runs': [],
-      '/api/v1/p/shop/runs': [],
+      '/api/v1/run-summaries': [],
+      '/api/v1/p/cezar/run-summaries': [],
+      '/api/v1/p/shop/run-summaries': [],
     })
     const { client } = renderShell('/p/cezar/')
 
@@ -808,9 +808,9 @@ describe('project rail wiring', () => {
       '/api/v1/projects': TWO_PROJECTS,
       '/api/v1/workspace/ui-state': {},
       '/api/v1/workspace/runs-index': railIndex([indexRow({ projectId: 'shop', id: 's1', status: 'waiting' })]),
-      '/api/v1/runs': [],
-      '/api/v1/p/cezar/runs': [],
-      '/api/v1/p/shop/runs': [],
+      '/api/v1/run-summaries': [],
+      '/api/v1/p/cezar/run-summaries': [],
+      '/api/v1/p/shop/run-summaries': [],
     })
     act(() => {
       client.setQueryData(workspaceQueryKeys.projects, TWO_PROJECTS)
@@ -838,9 +838,9 @@ describe('project rail wiring', () => {
         // The current project's own signal is not "elsewhere".
         indexRow({ projectId: 'cezar', id: 'c1', status: 'running' }),
       ]),
-      '/api/v1/runs': [],
-      '/api/v1/p/cezar/runs': [],
-      '/api/v1/p/shop/runs': [],
+      '/api/v1/run-summaries': [],
+      '/api/v1/p/cezar/run-summaries': [],
+      '/api/v1/p/shop/run-summaries': [],
     })
     renderShell('/p/cezar/')
 
@@ -868,9 +868,9 @@ describe('project rail wiring', () => {
       '/api/v1/projects': TWO_PROJECTS,
       '/api/v1/workspace/ui-state': {},
       '/api/v1/workspace/runs-index': railIndex([]),
-      '/api/v1/runs': [],
-      '/api/v1/p/cezar/runs': [],
-      '/api/v1/p/shop/runs': [],
+      '/api/v1/run-summaries': [],
+      '/api/v1/p/cezar/run-summaries': [],
+      '/api/v1/p/shop/run-summaries': [],
     })
     renderShell('/p/cezar/')
     fireEvent.click(await screen.findByRole('button', { name: /^Open projects/ }))
@@ -893,8 +893,8 @@ describe('project rail wiring', () => {
       '/api/v1/projects': { projects: [PROJECT], bootProject: 'cezar', projectsDir: '/home/me/cezar/projects' },
       '/api/v1/workspace/ui-state': {},
       '/api/v1/workspace/runs-index': railIndex([]),
-      '/api/v1/runs': [],
-      '/api/v1/p/cezar/runs': [],
+      '/api/v1/run-summaries': [],
+      '/api/v1/p/cezar/run-summaries': [],
     })
     renderShell('/p/cezar/')
 
@@ -911,8 +911,8 @@ describe('project rail wiring', () => {
       '/api/v1/projects': { projects: [PROJECT], bootProject: 'cezar', projectsDir: '/home/me/cezar/projects' },
       '/api/v1/workspace/ui-state': {},
       '/api/v1/workspace/runs-index': railIndex([]),
-      '/api/v1/runs': [],
-      '/api/v1/p/cezar/runs': [],
+      '/api/v1/run-summaries': [],
+      '/api/v1/p/cezar/run-summaries': [],
     })
     renderShell('/p/cezar/')
 
@@ -934,7 +934,7 @@ it('keeps sidebar data on the URL project when rendered above the route scope pr
     '/api/v1/health': HEALTH,
     '/api/v1/todos': [],
     '/api/v1/projects': { bootProject: 'cezar', projects: [PROJECT, { ...PROJECT, id: 'shop', name: 'Shop' }] },
-    '/api/v1/p/shop/runs': [run({ id: 'right', title: 'Selected project task', titleSummary: undefined, status: 'waiting' })],
+    '/api/v1/p/shop/run-summaries': [run({ id: 'right', title: 'Selected project task', titleSummary: undefined, status: 'waiting' })],
   })
   renderShell('/p/shop/new', client)
   expect(await screen.findByText('Selected project task')).toBeTruthy()
@@ -971,8 +971,8 @@ it.each(['/tasks', '/tools'])('keeps sidebar navigation on its displayed boot pr
     '/api/v1/health': { ...HEALTH, bootProject: 'cezar' },
     '/api/v1/todos': [],
     '/api/v1/projects': { bootProject: 'cezar', projects: [PROJECT, { ...PROJECT, id: 'shop', name: 'Shop' }] },
-    '/api/v1/p/cezar/runs': [run({ id: 'boot-task', title: 'Boot task', titleSummary: undefined })],
-    '/api/v1/p/default/runs': [run({ id: 'boot-task', title: 'Boot task', titleSummary: undefined })],
+    '/api/v1/p/cezar/run-summaries': [run({ id: 'boot-task', title: 'Boot task', titleSummary: undefined })],
+    '/api/v1/p/default/run-summaries': [run({ id: 'boot-task', title: 'Boot task', titleSummary: undefined })],
   })
   renderShell(entry)
   expect(await screen.findByText('Boot task')).toBeTruthy()
@@ -1035,7 +1035,7 @@ describe('GitHub view sidebar list (#622)', () => {
       '/api/v1/todos': [],
       '/api/v1/projects': { bootProject: 'cezar', projects: [{ ...PROJECT, forge: 'github' }, shop] },
       '/api/v1/p/shop/github?limit=1000': GH,
-      '/api/v1/p/shop/runs': [],
+      '/api/v1/p/shop/run-summaries': [],
     })
     renderShell('/p/shop/github/prs?filter=review')
     const sidebar = await screen.findByRole('navigation', { name: 'Pull requests' })
@@ -1053,7 +1053,7 @@ describe('GitHub view sidebar list (#622)', () => {
       '/api/v1/health': HEALTH,
       '/api/v1/todos': [],
       '/api/v1/projects': { bootProject: 'cezar', projects: [PROJECT, { ...shop, forge: 'none' as const }] },
-      '/api/v1/p/shop/runs': [],
+      '/api/v1/p/shop/run-summaries': [],
     })
     renderShell('/p/shop/github')
     await waitFor(() => expect(document.querySelector('[data-slot="task-quick-list"]')).not.toBeNull())

@@ -1,8 +1,9 @@
 // @vitest-environment node
 
+import { summaryOf } from '@/test/run-summary-fixture'
 import { describe, expect, it } from 'vitest'
 
-import type { RunRecord, RunStatus } from '@open-mercato/cezar-api-client'
+import type { RunRecord, RunSummary, RunStatus } from '@open-mercato/cezar-api-client'
 import type { StatusDotTone } from '@/components/status-dot'
 import {
   ATTENTION_RANK,
@@ -13,8 +14,8 @@ import {
   type AttentionTone,
 } from '@/lib/attention'
 
-function run(over: Partial<RunRecord> = {}): RunRecord {
-  return {
+function run(over: Partial<RunRecord> = {}): RunSummary {
+  return summaryOf({
     id: 'r1',
     title: 'Normalize the agent-event protocol',
     workflow: 'default',
@@ -25,7 +26,7 @@ function run(over: Partial<RunRecord> = {}): RunRecord {
     archived: false,
     steps: [],
     ...over,
-  }
+  })
 }
 
 /** The whole `RunStatus` union, spelled out. If the server ever adds a status, this array stops
@@ -237,7 +238,7 @@ describe('status key (#617)', () => {
     status: 'waiting',
     delegation: { role: 'root', permissions: [], receipts: [], wait: { id: 'wait', workerIds: ['00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000002'], deadline: '2026-09-06T00:00:00.000Z', phase: 'parked', outcomes: [], ...wait } },
   } as Partial<RunRecord>)
-  const rows: ReadonlyArray<[string, RunRecord, Pick<Attention, 'tone' | 'shape' | 'pulse' | 'label'>]> = [
+  const rows: ReadonlyArray<[string, RunSummary, Pick<Attention, 'tone' | 'shape' | 'pulse' | 'label'>]> = [
     ['needs you', run({ status: 'waiting' }), { tone: 'pending', shape: 'filled', pulse: true, label: 'needs you' }],
     ['needs review', run({ status: 'review' }), { tone: 'info', shape: 'filled', pulse: true, label: 'needs review' }],
     ['running', run({ status: 'running' }), { tone: 'running', shape: 'filled', pulse: true, label: 'running' }],
@@ -254,7 +255,7 @@ describe('status key (#617)', () => {
     expect(deriveAttention(record)).toMatchObject(expected)
   })
 
-  const look = (record: RunRecord) => { const { tone, shape } = deriveAttention(record); return `${tone}/${shape}` }
+  const look = (record: RunSummary) => { const { tone, shape } = deriveAttention(record); return `${tone}/${shape}` }
   it('separates the pairs that used to collide', () => {
     expect(look(run({ status: 'running' }))).not.toBe(look(run({ status: 'running', activity: 'monitoring' })))
     expect(look(parkedRoot())).not.toBe(look(run({ status: 'done' })))

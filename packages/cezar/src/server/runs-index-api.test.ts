@@ -338,13 +338,14 @@ describe('workspace runs index API', () => {
     store.updateRun(live.id, { status: 'waiting', delegation: { role: 'root', permissions: [], receipts: [], wait } });
     seedColdProject(otherRoot, [storedRun({ id: workerId, title: 'Worker', delegation: { role: 'worker', permissions: [], parentRunId: live.id, wait: { ...wait, workerIds: [], requestIds: [workerId] }, workspace: { kind: 'owned-isolated', ownerRunId: workerId, resourceId: workerId, path: '/managed/worker', branch: 'cez/worker', baselineSha: 'a'.repeat(40) } } }), storedRun({ id: 'ordinary', title: 'Ordinary' })]);
     const body = await getIndex();
-    expect(body.runs.find(run => run.id === live.id)).toHaveProperty('delegation', { role: 'root', wait: { phase: 'parked' } });
+    expect(body.runs.find(run => run.id === live.id)).toHaveProperty('delegation', { role: 'root', wait: { phase: 'parked', workerIds: [workerId], outcomes: [] } });
     expect(body.runs.find(run => run.id === workerId)).toHaveProperty('delegation', { role: 'worker', parentRunId: live.id, wait: { phase: 'parked', requestIds: [workerId] } });
     expect(body.runs.find(run => run.id === 'ordinary')).not.toHaveProperty('delegation');
     expect(runsIndexResponseSchema.parse(body)).toEqual(body);
-    // `parentRunId` is a run id, not an ownership resource: the summary carries it since #817 so a
-    // list can light a worker's parent row. Paths, permissions and receipts still never leave.
-    expect(JSON.stringify(body)).not.toMatch(/receipts|outcomes|workspace|permissions|managed/);
+    // Run ids are not ownership resources: since #817 the summary carries a worker's `parentRunId`
+    // (a list lights the parent row) and a root wait's worker ids and reported ids (the counted
+    // label). Paths, permissions, receipts and outcome details still never leave.
+    expect(JSON.stringify(body)).not.toMatch(/receipts|workspace|permissions|managed|observedAt|deadline/);
   });
 
   it('carries pending human attention for hot and cold parked roots without opening the cold project', async () => {

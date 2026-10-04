@@ -1,4 +1,4 @@
-import type { ArchiveFinishedScope, ProcessUsage, RunRecord, RunStatus } from '@open-mercato/cezar-api-client'
+import { runWorkflowLabel, type ArchiveFinishedScope, type ProcessUsage, type RunRecord, type RunSummary, type RunStatus } from '@open-mercato/cezar-api-client'
 import { isScheduledResume } from '@/lib/read-state'
 import { groupTitle, isOwnedWorker, runTitle, type ListView } from '@/lib/task-groups'
 
@@ -55,7 +55,7 @@ export function formatCost(usd: number | undefined): string {
  * never print `Invalid Date` next to "scheduled".
  */
 export function scheduledResume(
-  run: Pick<RunRecord, 'status' | 'autoResumeAt'>,
+  run: Pick<RunSummary, 'status' | 'autoResumeAt'>,
   now: Date = new Date(),
 ): { label: string; title: string } | undefined {
   if (run.status !== 'failed' || !run.autoResumeAt) return undefined
@@ -75,13 +75,12 @@ export function scheduledResume(
 }
 
 /** The Workflow column's text. `(planned)` chains and inbox runs carry their meaning in their
- *  first agent step, so that name reads better than the placeholder. Legacy `workflowLabel`. */
-export function workflowLabel(run: RunRecord): string {
-  if (run.workflow === '(planned)' || run.workflow === '(inbox)') {
-    const agent = run.steps.find((step) => step.kind === 'agent')
-    if (agent?.name) return agent.name
-  }
-  return run.workflow
+ *  first agent step, so that name reads better than the placeholder. The server derives it into
+ *  the run summary (#817, `toRunSummary`); a full record without it shows the raw workflow. */
+export function workflowLabel(run: Pick<RunSummary, 'workflow'> & { workflowLabel?: string; steps?: RunRecord['steps'] }): string {
+  // A full record (the task header) applies the same contract rule the summary was derived by.
+  if (run.steps) return runWorkflowLabel({ workflow: run.workflow, steps: run.steps })
+  return run.workflowLabel ?? run.workflow
 }
 
 /**
@@ -91,7 +90,7 @@ export function workflowLabel(run: RunRecord): string {
  * raw `title` hidden behind a summary: matching on text the table never displays makes rows
  * appear for no visible reason.
  */
-export function filterRuns(runs: readonly RunRecord[], query: string): RunRecord[] {
+export function filterRuns(runs: readonly RunSummary[], query: string): RunSummary[] {
   const listed = runs.filter((run) => !isOwnedWorker(run))
   const needle = query.trim().toLowerCase()
   if (!needle) return [...listed]
@@ -107,7 +106,7 @@ export function filterRuns(runs: readonly RunRecord[], query: string): RunRecord
  * this run, clause for clause: finished, not archived, not a scheduled resume, not an owned
  * worker (those leave with their parent), and `scope` picks pinned or unpinned (absent = both).
  */
-export function isSweepable(run: RunRecord, scope?: ArchiveFinishedScope): boolean {
+export function isSweepable(run: RunSummary, scope?: ArchiveFinishedScope): boolean {
   if (run.archived || !FINISHED_STATUSES.has(run.status)) return false
   if (isScheduledResume(run)) return false
   if (isOwnedWorker(run)) return false
@@ -118,13 +117,13 @@ export function isSweepable(run: RunRecord, scope?: ArchiveFinishedScope): boole
 
 /** How many runs the sweep would archive in `scope`. The sidebar's group buttons only exist when
  *  this is nonzero — a broom over an empty floor is noise. */
-export function sweepableRunCount(runs: readonly RunRecord[], scope?: ArchiveFinishedScope): number {
+export function sweepableRunCount(runs: readonly RunSummary[], scope?: ArchiveFinishedScope): number {
   return runs.filter((run) => isSweepable(run, scope)).length
 }
 
 /** How many active runs "Archive finished" would sweep. The button only exists when this is
  *  nonzero — a broom over an empty floor is noise (legacy showed the same count-gated button). */
-export function finishedRunCount(runs: readonly RunRecord[]): number {
+export function finishedRunCount(runs: readonly RunSummary[]): number {
   return sweepableRunCount(runs)
 }
 
@@ -198,14 +197,14 @@ export function taskIssueUrl(run: TaskReferenceInput, repoBase?: string): string
 /**
  * What deciding a task's tracker chip actually reads.
  *
- * `Pick`ed rather than the whole `RunRecord`, for the same reason `RunTitleInput` and
+ * `Pick`ed rather than the whole `RunSummary`, for the same reason `RunTitleInput` and
  * `AttentionInput` are: the cross-project index (`RunIndexEntry`) is a slim row, not a record,
  * and the global Tasks page must resolve a PR/issue chip exactly as every other surface does.
  * Widening this means widening `runIndexEntrySchema` too, or that page silently answers
  * differently — which is the whole failure a shared rule exists to prevent.
  */
 export type TaskReferenceInput = Pick<
-  RunRecord,
+  RunSummary,
   | 'pullRequestUrl'
   | 'referencedPullRequestUrl'
   | 'prNumber'
@@ -427,14 +426,14 @@ export interface UsageCell {
  * usage stream is a snapshot broadcast, and a tick that raced the run's exit must not paint a
  * finished row as live.
  *
- * `Pick`ed rather than a whole `RunRecord`, for the same reason `RunTitleInput` and
+ * `Pick`ed rather than a whole `RunSummary`, for the same reason `RunTitleInput` and
  * `AttentionInput` are: the cross-project index (`RunIndexEntry`) is a slim row, and the global
  * Tasks table must read usage exactly as the per-project one does rather than inventing a
  * second set of fallbacks. With no live sample, Mem falls back to the persisted `peakRssBytes`
  * (dimmed, labeled `peak`); CPU has no persisted peak, so its cell goes empty rather than
  * inventing one. Exactly the legacy table's fallbacks.
  */
-export type UsageCellInput = Pick<RunRecord, 'status' | 'peakRssBytes' | 'peakProcCount'>
+export type UsageCellInput = Pick<RunSummary, 'status' | 'peakRssBytes' | 'peakProcCount'>
 
 export function usageCells(
   run: UsageCellInput,
@@ -477,9 +476,9 @@ export interface CompareGroup {
  * Scoped to the view like everything else on this screen: an archived group belongs to the
  * Archived tab. A `groupId` with one member left in view is a picked winner, not a comparison.
  */
-export function compareGroups(runs: readonly RunRecord[], view: ListView): CompareGroup[] {
+export function compareGroups(runs: readonly RunSummary[], view: ListView): CompareGroup[] {
   const inView = runs.filter((run) => (view === 'archived' ? run.archived : !run.archived))
-  const byGroup = new Map<string, RunRecord[]>()
+  const byGroup = new Map<string, RunSummary[]>()
   for (const run of inView) {
     if (!run.groupId) continue
     const members = byGroup.get(run.groupId)

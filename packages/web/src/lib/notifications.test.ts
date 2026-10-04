@@ -1,6 +1,7 @@
+import { summaryOf } from '@/test/run-summary-fixture'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import type { RunRecord, RunStatus } from '@open-mercato/cezar-api-client'
+import type { RunRecord, RunSummary, RunStatus } from '@open-mercato/cezar-api-client'
 import { wantsAttention } from '@/lib/attention'
 import {
   DEFAULT_NOTIFICATIONS,
@@ -18,8 +19,8 @@ import {
  * `Notification`, the cache subscription) is pinned in components/run-notifications.test.tsx.
  */
 
-function run(over: Partial<RunRecord> = {}): RunRecord {
-  return {
+function run(over: Partial<RunRecord> = {}): RunSummary {
+  return summaryOf({
     id: 'r1',
     title: 'Normalize the agent-event protocol',
     workflow: 'default',
@@ -30,7 +31,7 @@ function run(over: Partial<RunRecord> = {}): RunRecord {
     archived: false,
     steps: [],
     ...over,
-  }
+  })
 }
 
 afterEach(() => vi.unstubAllGlobals())

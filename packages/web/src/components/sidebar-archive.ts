@@ -2,7 +2,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import * as React from 'react'
 
 import { queryScope } from '@open-mercato/cezar-api-client'
-import type { ArchiveFinishedScope, RunRecord } from '@open-mercato/cezar-api-client'
+import type { ArchiveFinishedScope, RunSummary } from '@open-mercato/cezar-api-client'
 import { archiveProjectFinished, archiveProjectRun, archiveRun, archiveFinished, pinProjectRun, pinRun } from '@/api/client'
 import { toast } from '@/components/ui/toaster'
 import { runTitle } from '@/lib/task-groups'
@@ -118,7 +118,7 @@ export function useSidebarArchive(projectId: string | undefined, cacheScope: str
 
   /** Resolves whether the run was archived, so a swiped row can snap back on a failure. A repeat
    *  while the first request is in flight gets that request's promise: it follows the real outcome. */
-  const archiveOne = (run: RunRecord): Promise<boolean> => {
+  const archiveOne = (run: RunSummary): Promise<boolean> => {
     const pending = inFlight.current.get(run.id)
     if (pending) return pending
     // Captured before the request: navigation during the round trip must not retarget either half.

@@ -127,7 +127,7 @@ function stubServer(kind: 'issue' | 'pr') {
       if (path.startsWith('/api/v1/github/checks')) return json({ available: true, checks: {} })
       if (path.startsWith('/api/v1/github/comments/')) return json({ available: true, comments: [] })
       if (path.startsWith('/api/v1/models?')) return json({ runner: 'claude', models: [], source: 'unavailable', stale: false })
-      if (path === '/api/v1/runs') return json([])
+      if (path === '/api/v1/run-summaries') return json([])
       if (path === '/api/v1/skills') return json([])
       if (path === '/api/v1/workflows') return json({ workflows: [] })
       return json({})

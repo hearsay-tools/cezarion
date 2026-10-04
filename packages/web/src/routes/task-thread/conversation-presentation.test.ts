@@ -1,3 +1,4 @@
+import { summaryOf } from '@/test/run-summary-fixture'
 import { describe, expect, it } from 'vitest'
 
 import type { ApiRun } from '@open-mercato/cezar-api-client'
@@ -29,7 +30,7 @@ describe('conversation presentation titles', () => {
   it('resolves sibling run titles the same way the relationships panel does', () => {
     const parent = run({ id: 'parent', title: 'Parent task', titleSummary: 'Parent' })
     const worker = run({ id: 'alpha', title: 'raw worker prompt', titleSummary: 'Alpha' })
-    const titles = titlesFromRuns(parent, [worker])
+    const titles = titlesFromRuns(parent, [summaryOf(worker)])
     expect(taskTitleFor('parent', titles)).toBe('Parent')
     expect(taskTitleFor('alpha', titles)).toBe('Alpha')
     expect(taskTitleFor('missing', titles)).toBe('Task')
@@ -60,7 +61,7 @@ describe('recipient backend for queued guidance', () => {
       { id: 'task', name: 'Task', kind: 'agent', status: 'running', iterations: 1, tokensUsed: 0, backend: 'cursor' },
     ] })
     const unknown = run({ id: 'unknown', title: 'Old worker' })
-    const backends = recipientBackendsFromRuns(parent, [cursor, unknown])
+    const backends = recipientBackendsFromRuns(parent, [summaryOf(cursor), summaryOf(unknown)])
     expect(backends.parent).toBe('codex')
     expect(backends.cursor).toBe('cursor')
     expect(backends.unknown).toBeUndefined()

@@ -4,7 +4,7 @@ import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { createQueryClient } from '@/api/query-client'
-import type { RunRecord } from '@open-mercato/cezar-api-client'
+import type { RunRecord, RunSummary } from '@open-mercato/cezar-api-client'
 
 const api = vi.hoisted(() => ({
   archiveRun: vi.fn(),
@@ -21,7 +21,7 @@ vi.mock('@/components/ui/toaster', () => ({ toast: toastMock }))
 import { archivedToastMessage, undoArchive, useSidebarArchive } from '@/components/sidebar-archive'
 
 const record = (over: Partial<RunRecord> = {}) =>
-  ({ id: 'a', title: 'Fix the thing', workflow: 'w', task: 't', status: 'done', createdAt: '2026-01-01T00:00:00Z', tokensUsed: 0, archived: false, steps: [], ...over }) as RunRecord
+  ({ id: 'a', title: 'Fix the thing', workflow: 'w', task: 't', status: 'done', createdAt: '2026-01-01T00:00:00Z', tokensUsed: 0, archived: false, steps: [], ...over }) as unknown as RunSummary
 
 beforeEach(() => {
   for (const fn of Object.values(api)) fn.mockReset().mockResolvedValue({})

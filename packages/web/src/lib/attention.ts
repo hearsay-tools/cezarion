@@ -1,7 +1,7 @@
 import {
   ATTENTION_RANK,
   deriveAttention,
-  type RunRecord,
+  type RunSummary,
 } from '@open-mercato/cezar-api-client'
 
 /**
@@ -34,6 +34,6 @@ export {
  * only): a failed run is worth a notification, but in the list it belongs under Finished with its
  * outcome rather than in the pile of things you can act on. See `lib/task-groups.ts`.
  */
-export function wantsAttention(run: RunRecord): boolean {
+export function wantsAttention(run: RunSummary): boolean {
   return ATTENTION_RANK[deriveAttention(run).bucket] <= ATTENTION_RANK.waiting
 }

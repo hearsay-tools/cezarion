@@ -1,8 +1,9 @@
 // @vitest-environment node
 
+import { summaryOf } from '@/test/run-summary-fixture'
 import { describe, expect, it } from 'vitest'
 
-import type { RunRecord, RunStatus } from '@open-mercato/cezar-api-client'
+import type { RunRecord, RunSummary, RunStatus } from '@open-mercato/cezar-api-client'
 import {
   BUCKET_ORDER,
   bucketOf,
@@ -21,9 +22,9 @@ import {
 
 let seq = 0
 
-function run(over: Partial<RunRecord> = {}): RunRecord {
+function run(over: Partial<RunRecord> = {}): RunSummary {
   seq += 1
-  return {
+  return summaryOf({
     id: `r${seq}`,
     title: `Task ${seq}`,
     workflow: 'default',
@@ -34,7 +35,7 @@ function run(over: Partial<RunRecord> = {}): RunRecord {
     archived: false,
     steps: [],
     ...over,
-  }
+  })
 }
 
 /** Flatten to `Bucket: id, id` lines — the assertions are about placement and order, and a
@@ -319,7 +320,7 @@ describe('groupRuns', () => {
   })
 
   describe('variant groups (spec 010)', () => {
-    const group = (over: Partial<RunRecord>[]): RunRecord[] =>
+    const group = (over: Partial<RunRecord>[]): RunSummary[] =>
       over.map((o) => run({ groupId: 'g1', title: 'Add autocomplete (X)', ...o }))
 
     it('collapses a groupId into one tile, members ordered by letter', () => {
@@ -667,23 +668,11 @@ it('counts a parked parent question as Needs you from the run summary', () => {
   expect(bucketOf({ ...record, hasPendingHumanAsk: false }, 'active')).toBe('Working')
 })
 
-function ownedWorker(over: Partial<RunRecord> = {}, parentRunId = 'parent'): RunRecord {
+function ownedWorker(over: Partial<RunRecord> = {}, parentRunId = 'parent'): RunSummary {
   const base = run(over)
   return {
     ...base,
-    delegation: over.delegation ?? {
-      role: 'worker',
-      permissions: [],
-      parentRunId,
-      workspace: {
-        ownerRunId: base.id,
-        resourceId: base.id,
-        kind: 'owned-isolated',
-        path: `/${base.id}`,
-        branch: `cez/${base.id}`,
-        baselineSha: 'a'.repeat(40),
-      },
-    },
+    delegation: (over.delegation as RunSummary['delegation']) ?? { role: 'worker', parentRunId },
   }
 }
 
@@ -753,7 +742,7 @@ describe('owned workers are not list rows (#312)', () => {
 })
 
 describe("a variant group's lead dot (#617): the loudest member by attention, not the list's first", () => {
-  const groupOf = (members: RunRecord[]) => {
+  const groupOf = (members: RunSummary[]) => {
     const row = groupRuns(members, 'active').flatMap((bucket) => bucket.rows).find((r) => r.kind === 'group')
     if (!row || row.kind !== 'group') throw new Error('no group row')
     return row

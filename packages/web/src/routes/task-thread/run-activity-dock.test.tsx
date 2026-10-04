@@ -94,7 +94,7 @@ function renderDock(
       if (path.endsWith('/relationships')) {
         return relationships === 'error' ? json({ error: 'offline' }, 503) : json({ workers: linked })
       }
-      if (path.endsWith('/runs')) {
+      if (path.endsWith('/run-summaries')) {
         return json([
           { ...run({ id: doneWorkerId, title: 'auditing stale roles', status: 'done' }) },
           { ...run({ id: cancelledWorkerId, title: 'lightweight VM preset', status: 'cancelled' }) },
