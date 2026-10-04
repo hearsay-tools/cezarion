@@ -86,6 +86,7 @@ export const SCENARIOS = [
   'ask-resume',
   'plan-resume',
   'ask-snapshot',
+  'ask-snapshot-bad',
   'ask-prose',
   'ask-bad',
   'ask-reply-late',
@@ -95,6 +96,20 @@ export const SCENARIOS = [
   'steer-late',
 ] as const;
 export type ScenarioName = (typeof SCENARIOS)[number];
+
+/** #427: portable intermediate asks, through every native message wire. */
+export const WORKFLOW_ASK_CRITERIA = [
+  { id: 'Q1', scenario: 'ask-snapshot', name: 'holds the same intermediate session until answered, then runs the tail' },
+  { id: 'Q2', scenario: 'ask-snapshot-bad', name: 'notes a malformed intermediate marker and runs the tail' },
+  { id: 'Q3', scenario: 'ask-snapshot', name: 'preserves final interactive asks' },
+  { id: 'Q4', scenario: 'ask-snapshot', name: 'idle close and a second question on Continue retain the workflow tail' },
+  { id: 'Q5', scenario: 'ask-snapshot', name: 'restart preserves the unanswered question and resumes the tail after an answer' },
+  { id: 'Q6', scenario: 'ask-snapshot', name: 'cancel leaves later steps pending' },
+  { id: 'Q7', scenario: 'ask-snapshot', name: 'Finish stops at the parked step on fresh and Continue sessions' },
+  { id: 'Q8', scenario: 'ask-snapshot', name: 'an authored timeout fails without running later steps' },
+  { id: 'Q9', scenario: 'ask-snapshot', name: 'autonomous intermediate asks use the bounded override before the tail' },
+  { id: 'Q10', scenario: 'ask-snapshot', name: 'an unanswered clean session close stays resumable without success' },
+] as const;
 
 /** #470: exercised in workflow-timeout-parity.test.ts against every native wire. */
 export const WORKFLOW_TIMEOUT_CRITERIA = [
@@ -191,6 +206,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'ask-resume': 'mock:ask mock:resume-done',
       'ask-reply-late': 'mock:ask',
       'ask-snapshot': 'mock:ask-snapshot',
+      'ask-snapshot-bad': 'mock:ask-snapshot-bad',
       'ask-prose': 'mock:ask-prose',
       'ask-bad': 'mock:ask-bad',
       subagent: 'mock:subagents',
@@ -226,6 +242,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'ask-resume': 'mock:native-codex-ask mock:resume-done',
       'ask-reply-late': 'mock:native-codex-ask',
       'ask-snapshot': 'mock:ask-snapshot',
+      'ask-snapshot-bad': 'mock:ask-snapshot-bad',
       'ask-prose': 'mock:ask-prose',
       'ask-bad': 'mock:ask-bad',
       // #600's repro: a child thread's own turn/completed must not end the parent.
@@ -261,6 +278,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'ask-resume': 'mock:ask mock:resume-done',
       'ask-reply-late': 'mock:ask-reply-late',
       'ask-snapshot': 'mock:ask-snapshot',
+      'ask-snapshot-bad': 'mock:ask-snapshot-bad',
       'ask-prose': 'mock:ask-prose',
       'ask-bad': 'mock:ask-bad',
       subagent: 'mock:subagent',
@@ -292,7 +310,8 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       ask: 'mock:ask',
       'ask-resume': 'mock:ask mock:resume-done',
       'plan-resume': 'mock:plan mock:resume-done',
-      'ask-snapshot': 'mock:ask-snapshot', 'ask-prose': 'mock:ask-prose', 'ask-bad': 'mock:ask-bad', 'ask-reply-late': 'mock:ask', subagent: 'mock:subagent',
+      'ask-snapshot': 'mock:ask-snapshot',
+      'ask-snapshot-bad': 'mock:ask-snapshot-bad', 'ask-prose': 'mock:ask-prose', 'ask-bad': 'mock:ask-bad', 'ask-reply-late': 'mock:ask', subagent: 'mock:subagent',
       'subagent-after-park': 'mock:subagent-after-park' },
   },
   pi: {
@@ -320,6 +339,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'ask-resume': 'mock:ask mock:resume-done',
       'ask-reply-late': 'mock:ask',
       'ask-snapshot': 'mock:ask-snapshot',
+      'ask-snapshot-bad': 'mock:ask-snapshot-bad',
       'ask-prose': 'mock:ask-prose',
       'ask-bad': 'mock:ask-bad',
       'steer-tool': 'mock:steer-tool',
@@ -606,7 +626,7 @@ export async function driveRun(
   settled: (record: RunRecord | undefined) => boolean,
   timeoutMs = 30_000,
   afterSettled?: (context: { store: RunStore; manager: RunManager; runId: string }) => Promise<void>,
-  options: { autonomous?: boolean } = {},
+  options: { autonomous?: boolean; workflowDef?: WorkflowDef } = {},
 ): Promise<RunObservation> {
   const adapter = HARNESS_ADAPTERS[backend];
   const savedBin = process.env[adapter.binEnv];
@@ -627,7 +647,7 @@ export async function driveRun(
     await execFileAsync('git', [...GIT_IDENTITY, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
     manager = createFixtureManager(store, repoRoot);
-    const started = manager.startRun(SINGLE_STEP, {
+    const started = manager.startRun(options.workflowDef ?? SINGLE_STEP, {
       ...options,
       task: typeof scenario === 'string' ? promptFor(backend, scenario) : scenario.prompt,
       runner: backend,

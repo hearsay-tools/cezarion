@@ -219,7 +219,7 @@ async function handle(command) {
     send({ id: command.id, type: 'response', command: 'prompt', success: true });
     send({ type: 'agent_start' });
     send({ type: 'turn_start' });
-    send({ type: 'message_update', message: {}, assistantMessageEvent: { type: 'text_end', contentIndex: 0, content: 'Using the CEZ:ASK structured question format instead:\n\nCEZ:ASK {"questions":[{"header":"Library","question":"Which test library?","options":[{"label":"Vitest"},{"label":"Node test"}]}]}', partial: {} } });
+    send({ type: 'message_update', message: {}, assistantMessageEvent: { type: 'text_end', contentIndex: 0, content: command.message.includes('mock:ask-snapshot-bad') ? 'CEZ:ASK {not valid json' : 'Using the CEZ:ASK structured question format instead:\n\nCEZ:ASK {"questions":[{"header":"Library","question":"Which test library?","options":[{"label":"Vitest"},{"label":"Node test"}]}]}', partial: {} } });
     sendTurnEnd();
   } else if (command.type === 'prompt' && command.message.includes('mock:ask-prose')) {
     send({ id: command.id, type: 'response', command: 'prompt', success: true });

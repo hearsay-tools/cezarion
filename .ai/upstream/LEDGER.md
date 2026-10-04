@@ -5,7 +5,7 @@ Generated from `ledger.yaml` by `node .github/scripts/upstream-scan.cjs render`.
 - Upstream: [open-mercato/cezar](https://github.com/open-mercato/cezar) `main`
 - Fork point: `feb85666` (2026-08-31)
 - Last scan: 2026-09-28 to `ff27c45e` ([report](scans/2026-09-28.md))
-- Entries: 91 · pending: 54 · planned: 2 · ported: 21 · partial: 1 · diverged: 6 · n/a: 7
+- Entries: 91 · pending: 54 · planned: 1 · ported: 22 · partial: 1 · diverged: 6 · n/a: 7
 
 ## Pending (54)
 
@@ -66,14 +66,13 @@ Generated from `ledger.yaml` by `node .github/scripts/upstream-scan.cjs render`.
 | [#1130](https://github.com/open-mercato/cezar/pull/1130) | 2026-09-28 | fix(docs): drop the permalink icons from the README hero on mobile (#1130) | 1 |  |
 | [#1131](https://github.com/open-mercato/cezar/pull/1131) | 2026-09-28 | fix(docs): put the README hero back on headings, with the black brand icon (#1131) | 1 |  |
 
-## Planned (2)
+## Planned (1)
 
 | Upstream | Date | Title | Fork | Decided | Reason / note |
 | --- | --- | --- | --- | --- | --- |
 | [#953](https://github.com/open-mercato/cezar/pull/953) | 2026-09-14 | feat(sidebar): drag project groups to set their order, shared across devices (#952) (#953) | [issue #438](https://github.com/hearsay-tools/cezarion/issues/438) | 2026-09-18 | absent here; needs the contract field plus 4 hunks in project-groups |
-| [#984](https://github.com/open-mercato/cezar/pull/984) | 2026-09-14 | fix(workflows): park intermediate asks for input (#984) | [issue #427](https://github.com/hearsay-tools/cezarion/issues/427) | 2026-09-18 | bug present here: resolveAskTurn is gated on interactive, so a CEZ:ASK from a non-final workflow step is dropped and the next step runs; upstream patch references dispatch code that must be stripped |
 
-## Ported (21)
+## Ported (22)
 
 | Upstream | Date | Title | Fork | Decided | Reason / note |
 | --- | --- | --- | --- | --- | --- |
@@ -93,6 +92,7 @@ Generated from `ledger.yaml` by `node .github/scripts/upstream-scan.cjs render`.
 | [#956](https://github.com/open-mercato/cezar/pull/956) | 2026-09-14 | feat(tasks): copy branch name from task header (#956) | [PR #645](https://github.com/hearsay-tools/cezarion/pull/645), [issue #434](https://github.com/hearsay-tools/cezarion/issues/434), [2dbe2799](https://github.com/hearsay-tools/cezarion/commit/2dbe279966c804cf3be2942dc28b8b6dc8871b95) | 2026-09-27 | Branch-adjacent copy control adapted to the fork header, with keyboard and theme coverage |
 | [#942](https://github.com/open-mercato/cezar/pull/942) | 2026-09-14 | feat(thread): per-message timestamps in the task conversation (#942) | [PR #588](https://github.com/hearsay-tools/cezarion/pull/588) | 2026-09-25 | absent here; new files apply clean, 1 hunk in thread-items |
 | [#973](https://github.com/open-mercato/cezar/pull/973) | 2026-09-14 | feat(ui): filter the new-task base branch picker (#973) | [PR #720](https://github.com/hearsay-tools/cezarion/pull/720), [issue #436](https://github.com/hearsay-tools/cezarion/issues/436) | 2026-10-01 | Ported optional branch-name filtering, preserving fork picker presentation and keyboard query refinement. |
+| [#984](https://github.com/open-mercato/cezar/pull/984) | 2026-09-14 | fix(workflows): park intermediate asks for input (#984) | [PR #813](https://github.com/hearsay-tools/cezarion/pull/813), [issue #427](https://github.com/hearsay-tools/cezarion/issues/427), [33aa7462](https://github.com/hearsay-tools/cezarion/commit/33aa7462), [cd0cc36a](https://github.com/hearsay-tools/cezarion/commit/cd0cc36a) | 2026-10-04 | Ported intermediate ASK parking and lifecycle coverage using the fork durable waiting and Continue-tail recovery; upstream dispatch and budget-brake logic excluded. |
 | [#968](https://github.com/open-mercato/cezar/pull/968) | 2026-09-14 | fix(clone): recover from GitHub organization SAML auth (#968) | [PR #719](https://github.com/hearsay-tools/cezarion/pull/719), [issue #437](https://github.com/hearsay-tools/cezarion/issues/437), [01e6d382](https://github.com/hearsay-tools/cezarion/commit/01e6d382061c18095793ff256cb247229382a2aa) | 2026-09-30 | Ported SAML recovery, HTTPS credentials, fork-parent HTTPS transport, and unterminated error output. |
 | [#993](https://github.com/open-mercato/cezar/pull/993) | 2026-09-16 | fix(automations): a stale poll lock no longer silences every project for ten minutes (#993) | [PR #651](https://github.com/hearsay-tools/cezarion/pull/651), [issue #428](https://github.com/hearsay-tools/cezarion/issues/428), [0f47bdfa](https://github.com/hearsay-tools/cezarion/commit/0f47bdfa), [3ff408df](https://github.com/hearsay-tools/cezarion/commit/3ff408df) | 2026-09-27 |  |
 | [#1014](https://github.com/open-mercato/cezar/pull/1014) | 2026-09-17 | fix(providers): a runtime auth rejection verifies itself before it sticks (#1014) | [PR #598](https://github.com/hearsay-tools/cezarion/pull/598), [issue #431](https://github.com/hearsay-tools/cezarion/issues/431) | 2026-09-25 |  |

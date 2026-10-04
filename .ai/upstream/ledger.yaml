@@ -280,13 +280,17 @@ entries:
     pr: 984
     title: "fix(workflows): park intermediate asks for input (#984)"
     date: 2026-09-14
-    status: planned
+    status: ported
     hint:
       conflicts: 3
-    note: "bug present here: resolveAskTurn is gated on interactive, so a CEZ:ASK from a non-final workflow step is dropped and the next step runs; upstream patch references dispatch code that must be stripped"
+    note: "Ported intermediate ASK parking and lifecycle coverage using the fork durable waiting and Continue-tail recovery; upstream dispatch and budget-brake logic excluded."
     fork:
       issue: 427
-    decided: 2026-09-18
+      pr: 813
+      commits:
+        - 33aa7462
+        - cd0cc36a
+    decided: 2026-10-04
   - sha: 77d3f2f5ae0e91d8f555bde922598fef712eec7e
     pr: 965
     title: "fix(ui): keep the task thread readable on a phone while an agent works (#965)"
