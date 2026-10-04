@@ -1,4 +1,4 @@
-# Phone task reading — issue #92
+# Phone task reading — issue hearsay-tools/cezarion#92
 
 Base: `29db8cb8` (fresh fork main, including PDF/TXT/MD attachments). Port order: upstream `2c5522a8`, then `1a2b8882`. Parent approved the concrete design on 2026-09-06. No new artwork is needed for these existing surfaces.
 
@@ -37,7 +37,7 @@ Base: `29db8cb8` (fresh fork main, including PDF/TXT/MD attachments). Port order
 
 ## Existing broader-suite failures
 
-An additional exploratory run of `thread-scroll.e2e.ts` has the same three failures against both baseline and this patch: flat mode expects 1,003 rows but paginated history initially loads 101; auto virtualization is expected before enough history is loaded; and an exact-bottom wait times out. The other three tests pass. Source was stashed, the baseline cockpit rebuilt, and the suite rerun to confirm this. Production history behavior and the suite's thresholds are unchanged; these results are not counted as passing verification. No issue #92 acceptance criterion is deferred.
+An additional exploratory run of `thread-scroll.e2e.ts` has the same three failures against both baseline and this patch: flat mode expects 1,003 rows but paginated history initially loads 101; auto virtualization is expected before enough history is loaded; and an exact-bottom wait times out. The other three tests pass. Source was stashed, the baseline cockpit rebuilt, and the suite rerun to confirm this. Production history behavior and the suite's thresholds are unchanged; these results are not counted as passing verification. No issue hearsay-tools/cezarion#92 acceptance criterion is deferred.
 
 ## Automated review fixes
 

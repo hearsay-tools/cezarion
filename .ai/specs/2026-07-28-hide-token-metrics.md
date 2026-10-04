@@ -1,5 +1,10 @@
 # Hide Token Metrics in Embedded Cockpits
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 ## 📝 TLDR
 
 Add an opt-in environment switch for deployments that embed cezar into services where model pricing and token consumption are irrelevant or misleading. When enabled, the cockpit hides both monetary cost and token-usage values from every user-facing surface while preserving telemetry collection and API compatibility.

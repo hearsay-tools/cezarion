@@ -1,5 +1,10 @@
 # Execution plan: server installer & uninstaller spec
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 ## Goal
 
 Ship the finalized feature spec `.ai/specs/2026-07-16-server-installer.md` as a docs-only PR against `main`, mirroring how PR #406 shipped the multi-project-switcher spec, and open an `Implement:` tracking issue so the phased build can be scheduled.

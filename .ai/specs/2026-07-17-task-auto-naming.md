@@ -1,5 +1,10 @@
 # Task auto-naming — short, LLM-generated titles with PR/issue extraction
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 Status: proposed · Date: 2026-07-17 · Issues: #432 (naming quality), owner direction 2026-07-17 · Relates: PR #442 (kept — becomes this spec's heuristic fallback), spec 008 (the planner, the one-shot template this reuses)
 
 ## Problem

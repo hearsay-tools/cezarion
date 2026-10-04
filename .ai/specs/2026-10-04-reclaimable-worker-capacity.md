@@ -1,9 +1,9 @@
-# Reclaimable worker capacity (#816)
+# Reclaimable worker capacity (hearsay-tools/cezarion#816)
 
-> Design record for #816. Approved 2026-10-04. Supersedes the limits paragraph of `2026-09-06-owned-workers-isolated-worktrees.md`.
+> Design record for hearsay-tools/cezarion#816. Approved 2026-10-04. Supersedes the limits paragraph of `2026-09-06-owned-workers-isolated-worktrees.md`.
 
 Replaces the 32 lifetime worker creations per parent (spec
-`2026-09-06-owned-workers-isolated-worktrees`, PR #138) with reclaimable
+`2026-09-06-owned-workers-isolated-worktrees`, PR hearsay-tools/cezarion#138) with reclaimable
 resource capacity plus a finite runaway ceiling.
 
 ## Problem
@@ -64,7 +64,7 @@ Consequences:
 - Provisioning failure: the worker record exists from acceptance; `destroy`
   treats already-absent resources as cleaned, so the slot is freed explicitly by
   destroy. Nothing frees a slot implicitly.
-- Incomplete cleanup keeps its slot until a retry (explicit or the #642
+- Incomplete cleanup keeps its slot until a retry (explicit or the hearsay-tools/cezarion#642
   automatic retry) completes.
 
 ## Enforcement

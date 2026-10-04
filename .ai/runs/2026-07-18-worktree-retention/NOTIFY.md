@@ -1,5 +1,10 @@
 # NOTIFY — worktree retention (#483, PR #486)
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 ## 2026-07-18T05:00:16Z — om-auto-continue-pr-loop resume
 - Resumed by: @pkarw
 - Resume point: spec-implementation bootstrap (PR #486 was docs-only spec; no prior run folder — created one here)

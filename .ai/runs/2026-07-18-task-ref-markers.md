@@ -1,5 +1,10 @@
 # Execution plan — in-band task-reference markers (CEZ:PR / CEZ:ISSUE / CEZ:TITLE)
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 Date: 2026-07-18 · Owner: pkarw · Branch: `feat/task-ref-markers`
 Source doc: `.ai/specs/2026-07-18-task-ref-markers.md` (written in Phase 1)
 

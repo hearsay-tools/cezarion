@@ -17,13 +17,13 @@ Rebuild cezar's cockpit (`web/`) as a React + Vite + Tailwind + shadcn/ui app wi
 
 ## Problem Statement
 
-The current cockpit is a single 3.8k-line vanilla-JS file with hand-rolled markdown, dropdowns, diff rendering and 1.9k lines of bespoke CSS. It works, but it has hit its ceiling — a dozen open issues (#354, #377–#390) are all UI/UX symptoms of the same root causes:
+The current cockpit is a single 3.8k-line vanilla-JS file with hand-rolled markdown, dropdowns, diff rendering and 1.9k lines of bespoke CSS. It works, but it has hit its ceiling — a dozen open issues (open-mercato/cezar#354, open-mercato/cezar#377–open-mercato/cezar#390) are all UI/UX symptoms of the same root causes:
 
-- **Composer welded into a 318px sidebar** (#386) — the richest surface in the app (task, attachments, workflow/skill picker, runner, model, plan) is the most cramped.
-- **Tool calls and results render as flat text chips** (#381); TODO/plan lists from agents are invisible (#382); plan mode has no selected state (#383). The internal event model (`tool-call`/`tool-result`, 2 states, no plan/reasoning/diff events) can't express what the agent vendors' own GUIs show.
-- **Git integration looks like a log dump** (#390): `<pre>` diffs, no file tree, no commit/push/branch actions, no PR affordance beyond a link.
-- **Full-innerHTML re-renders** lose scroll and selection (#384), lists can't express ordering/emphasis (#377), chip-walls don't scale (#385), no autocomplete anywhere (#380), footer clips the theme toggle (#378), task titles aren't editable and carry no git stats (#389).
-- **No real mobile layout** (#354) — one narrow-screen breakpoint.
+- **Composer welded into a 318px sidebar** (open-mercato/cezar#386) — the richest surface in the app (task, attachments, workflow/skill picker, runner, model, plan) is the most cramped.
+- **Tool calls and results render as flat text chips** (open-mercato/cezar#381); TODO/plan lists from agents are invisible (open-mercato/cezar#382); plan mode has no selected state (open-mercato/cezar#383). The internal event model (`tool-call`/`tool-result`, 2 states, no plan/reasoning/diff events) can't express what the agent vendors' own GUIs show.
+- **Git integration looks like a log dump** (open-mercato/cezar#390): `<pre>` diffs, no file tree, no commit/push/branch actions, no PR affordance beyond a link.
+- **Full-innerHTML re-renders** lose scroll and selection (open-mercato/cezar#384), lists can't express ordering/emphasis (open-mercato/cezar#377), chip-walls don't scale (open-mercato/cezar#385), no autocomplete anywhere (open-mercato/cezar#380), footer clips the theme toggle (open-mercato/cezar#378), task titles aren't editable and carry no git stats (open-mercato/cezar#389).
+- **No real mobile layout** (open-mercato/cezar#354) — one narrow-screen breakpoint.
 
 Fixing these piecemeal inside string-template rendering means re-implementing React badly. The framework move and the visual redesign are one project.
 
@@ -115,8 +115,8 @@ Every UI capability in this spec MUST work with **all coding agents cezar suppor
 
 | UI capability | claude | codex | opencode |
 |---|---|---|---|
-| Plan/todo dock (#382) | `TodoWrite` input, or `TaskCreate`/`TaskUpdate`/`TaskList` results folded into a snapshot | `turn/plan/updated` notification | `todowrite` tool |
-| Tool cards + statuses (#381) | `tool_use`/`tool_result` | typed items + status | tool parts + state |
+| Plan/todo dock (open-mercato/cezar#382) | `TodoWrite` input, or `TaskCreate`/`TaskUpdate`/`TaskList` results folded into a snapshot | `turn/plan/updated` notification | `todowrite` tool |
+| Tool cards + statuses (open-mercato/cezar#381) | `tool_use`/`tool_result` | typed items + status | tool parts + state |
 | Reasoning line | `thinking` blocks | `reasoning` items/deltas | `reasoning` parts |
 | Live command output | — (result only; card fills on completion) | `outputDelta` | running-state `metadata` |
 | Structured diffs in edit cards | `Edit`/`Write` input | `fileChange.changes` | `patch` parts |
@@ -147,7 +147,7 @@ src/server/forge/
   index.ts     # resolveForge(repoInfo): remote host → driver | null
 ```
 
-- `GET /api/health` gains `forge: {kind:'github', available:boolean, reason?} | null` and `capabilities: {localHandoff: boolean}`. The UI shows forge features (GitHub tab, Create/View PR, PR links, checks badges) only when `forge.available`; plain-git features (diffs, commit, push, branches) need only git. This formalizes today's behavior (#372) and is the extension point for GitLab — one new driver file, no UI changes.
+- `GET /api/health` gains `forge: {kind:'github', available:boolean, reason?} | null` and `capabilities: {localHandoff: boolean}`. The UI shows forge features (GitHub tab, Create/View PR, PR links, checks badges) only when `forge.available`; plain-git features (diffs, commit, push, branches) need only git. This formalizes today's behavior (open-mercato/cezar#372) and is the extension point for GitLab — one new driver file, no UI changes.
 - Existing `/api/github` response shape is kept (BACKWARD_COMPATIBILITY) and marked as the GitHub driver's serialization.
 
 ### Git/session API additions
@@ -162,10 +162,10 @@ New endpoints (all zod-validated, all degrade with 409 + human reason, never HTM
 | `POST /api/runs/:id/git/push` | push branch (sets upstream) |
 | `GET  /api/repo/changes` | same structured shape for the main repo working tree |
 | `POST /api/repo/branch` | `{name, from?}` create/switch (repo view's branch actions) |
-| `PATCH /api/runs/:id` | `{title?}` — editable titles (#389) |
+| `PATCH /api/runs/:id` | `{title?}` — editable titles (open-mercato/cezar#389) |
 
-- **Auto-summary titles** (#389): after the first agent turn, the RunManager derives a title (first assistant sentence, capped; planner model summarization only when configured) and sets `RunRecord.titleSummary`; `title` stays the raw task. UI shows `titleSummary ?? title`, editable inline (PATCH).
-- **Diff stats in lists** (#389): RunManager computes `diffStat {adds,dels,files}` on turn-end (cheap `git diff --shortstat`) and stores it additively on RunRecord.
+- **Auto-summary titles** (open-mercato/cezar#389): after the first agent turn, the RunManager derives a title (first assistant sentence, capped; planner model summarization only when configured) and sets `RunRecord.titleSummary`; `title` stays the raw task. UI shows `titleSummary ?? title`, editable inline (PATCH).
+- **Diff stats in lists** (open-mercato/cezar#389): RunManager computes `diffStat {adds,dels,files}` on turn-end (cheap `git diff --shortstat`) and stores it additively on RunRecord.
 
 ### Deployment modes — local vs hosted
 
@@ -180,7 +180,7 @@ cezar's default stays exactly `npx cezar-cli` in a repo: zero config, zero flags
 
 New nav tab, registry-driven so sections grow without layout changes:
 
-- **Skills** (now): the current skills catalog + refresh move here, with project-first ordering (#377).
+- **Skills** (now): the current skills catalog + refresh move here, with project-first ordering (open-mercato/cezar#377).
 - **Bookmarklets** (now): the generic launcher and the available per-skill bookmarklets get a dedicated, discoverable Settings subpage; the former Skills deep link remains compatible.
 - **Appearance** (now): theme light/dark/system, accent choice (lime default), UI density. Persisted in `ui-state.json` (additive keys).
 - **Agents** (now): default runner, per-runner model presets, **the system prompt** (the single place it is edited), base branch — today's scattered `PUT /api/config` knobs in one place. Coding-agent-agnostic: sections describe capabilities (`runner`, `model`, `system prompt`), never vendor-specific config formats.
@@ -203,7 +203,7 @@ New nav tab, registry-driven so sections grow without layout changes:
 Deep-linkable, pasteable, refresh-safe navigation (react-router; the Hono server serves `index.html` for every non-`/api` GET so any URL cold-loads):
 
 ```
-/                      → tasks overview — the full-width table (PR #392 behavior)
+/                      → tasks overview — the full-width table (PR open-mercato/cezar#392 behavior)
 /new                   → new task (existing ?skill=&ref=&auto=&key= bookmarklet params unchanged)
 /tasks/:id             → thread   /tasks/:id/changes  /tasks/:id/files   (tab in the path)
 /compare/:groupId      → variants compare
@@ -216,33 +216,33 @@ Selected run, active tab, review-gate state — all restorable from the URL; sha
 
 ### App shell & navigation
 
-- **Desktop**: shadcn sidebar (icon-collapsible) — brand lockup + repo/branch chip (live-updating via SSE health refresh, fixes #369), **"New task" primary button** (replaces the embedded composer, #386), nav (Tasks, Inbox·badge, Git, GitHub·hidden-when-no-forge, Skills, Workflows, Settings), then the task quick-list (grouped: Needs you / Working / Recent / Archived; variant groups collapse with per-variant dots; `⌘K` palette for everything). Footer: **Tools dropdown** replacing the env-chip row — one compact trigger (aggregate status dot + "Tools"; hover tooltip shows the cezar version and any tool needing attention) opening a menu that lists every installed/configured tool (claude, codex, opencode, gh, git, …) with its status dot and **version number**, a per-tool setup link when unavailable (the hint from `/api/health` checks, e.g. "install gh and run `gh auth login`"), and a footer row with a **cog icon → Settings → Agents**. Plus the cezar version chip (update pulse, #368) and the theme toggle as a proper icon button (fixes #378).
+- **Desktop**: shadcn sidebar (icon-collapsible) — brand lockup + repo/branch chip (live-updating via SSE health refresh, fixes open-mercato/cezar#369), **"New task" primary button** (replaces the embedded composer, open-mercato/cezar#386), nav (Tasks, Inbox·badge, Git, GitHub·hidden-when-no-forge, Skills, Workflows, Settings), then the task quick-list (grouped: Needs you / Working / Recent / Archived; variant groups collapse with per-variant dots; `⌘K` palette for everything). Footer: **Tools dropdown** replacing the env-chip row — one compact trigger (aggregate status dot + "Tools"; hover tooltip shows the cezar version and any tool needing attention) opening a menu that lists every installed/configured tool (claude, codex, opencode, gh, git, …) with its status dot and **version number**, a per-tool setup link when unavailable (the hint from `/api/health` checks, e.g. "install gh and run `gh auth login`"), and a footer row with a **cog icon → Settings → Agents**. Plus the cezar version chip (update pulse, open-mercato/cezar#368) and the theme toggle as a proper icon button (fixes open-mercato/cezar#378).
 - **Mobile (<md)**: bottom-sheet-first. Sidebar becomes an overlay drawer (one-position state machine, backdrop, swipe); a slim top bar (menu, title, status dot, kebab); the composer is a docked bottom bar with safe-area padding. Layout is a `100dvh` grid (`auto 1fr auto`), only the thread scrolls, visualViewport keyboard variable lifts the composer, all inputs ≥16px, touch targets ≥44pt.
-- Every list keeps scroll/selection across updates (React keyed rendering fixes #384 by construction).
+- Every list keeps scroll/selection across updates (React keyed rendering fixes open-mercato/cezar#384 by construction).
 
-### New task (full-screen, #386)
+### New task (full-screen, open-mercato/cezar#386)
 
-- Route `/new` (also the `/new?skill=…` bookmarklet target, unchanged contract). **Centered composer** on a grain+twinkle hero surface, agent-desktop home style: big textarea ("Describe a task for the agent…"), then a pill row: **Workflow/Skill picker** (cmdk searchable dropdown — project skills first and bold, global after, #377/#385 pattern), **Runner** (hidden unless >1 installed), **Model**, **Variants ×1/×2/×3** (control returns — server path never left), **Base branch**. (The system prompt is a Settings → Agents concern, not a per-task composer control.)
-- **Plan mode is a toggle, not a button** (#383): segmented `Start | Plan first` control with a clearly selected state; in plan mode, submit produces the plan review (below) instead of running.
+- Route `/new` (also the `/new?skill=…` bookmarklet target, unchanged contract). **Centered composer** on a grain+twinkle hero surface, agent-desktop home style: big textarea ("Describe a task for the agent…"), then a pill row: **Workflow/Skill picker** (cmdk searchable dropdown — project skills first and bold, global after, open-mercato/cezar#377/#385 pattern), **Runner** (hidden unless >1 installed), **Model**, **Variants ×1/×2/×3** (control returns — server path never left), **Base branch**. (The system prompt is a Settings → Agents concern, not a per-task composer control.)
+- **Plan mode is a toggle, not a button** (open-mercato/cezar#383): segmented `Start | Plan first` control with a clearly selected state; in plan mode, submit produces the plan review (below) instead of running.
 - Attachments: paperclip + paste, thumbnail row with remove; drag-drop anywhere on the surface.
-- Composer intelligence (shared component with thread composer): `/` opens skill autocomplete (#380) inserting `/skill-name` refs; `@` mentions files (worktree-aware, fuzzy); **mic button labeled "Dictation"** (tooltip + aria) using the Web Speech API when available — recording state swaps the footer for an overlay with timer + partial transcript + cancel / insert / insert-and-send (paseo's exact pattern); hidden with a "not supported in this browser" hint otherwise.
+- Composer intelligence (shared component with thread composer): `/` opens skill autocomplete (open-mercato/cezar#380) inserting `/skill-name` refs; `@` mentions files (worktree-aware, fuzzy); **mic button labeled "Dictation"** (tooltip + aria) using the Web Speech API when available — recording state swaps the footer for an overlay with timer + partial transcript + cancel / insert / insert-and-send (paseo's exact pattern); hidden with a "not supported in this browser" hint otherwise.
 - ⌘N from anywhere; **⌘↵ and Ctrl+↵ both submit — in every prompting surface** (new-task composer, thread reply, review notes, plan-mode refinement): one shared `useSubmitShortcut` hook, macOS and Windows/Linux modifiers always registered together, kbd hints render the platform's symbol. Queued form state survives navigation (draft store).
 
 ### Task thread (the chat view)
 
 - **Turn grouping**: user message (right-aligned bubble) starts a turn; the agent's work renders as a stream of items. Consecutive read/search/list tool items collapse into **context groups** ("Explored 4 files · 2 searches", expandable); edits and commands stay visible as individual cards (the desktop-apps research consensus: edits and commands visible, output collapsed).
-- **Tool cards** (#381): shadcn Collapsible with the `{icon, title, subtitle, args}` trigger — `Bash` → "Ran `npm test`" with live-streaming output (v2 `item.delta{output}`) and exit-code badge; `Edit/Write` → file path + inline `<Diff>` (word-level, expandable context); `WebFetch/Search` → labeled query/url; MCP/unknown tools → generic card with heuristic label. Title shimmers while `running`; card locked until it has detail; failed = danger tint with unwrapped error message. Older streaks fold ("▸ N earlier tool calls").
+- **Tool cards** (open-mercato/cezar#381): shadcn Collapsible with the `{icon, title, subtitle, args}` trigger — `Bash` → "Ran `npm test`" with live-streaming output (v2 `item.delta{output}`) and exit-code badge; `Edit/Write` → file path + inline `<Diff>` (word-level, expandable context); `WebFetch/Search` → labeled query/url; MCP/unknown tools → generic card with heuristic label. Title shimmers while `running`; card locked until it has detail; failed = danger tint with unwrapped error message. Older streaks fold ("▸ N earlier tool calls").
 - **Reasoning**: collapsed "Thinking…" line streaming the summary, expandable, dimmed — visible while active, folded when done.
-- **Plan/todo dock (#382)**: `plan.updated` renders a **dock pinned above the composer** (not in-thread; TodoWrite tool cards are hidden): collapsed = "3/7" odometer + current item with animated label; expanded = checkbox list (pending ○ / in_progress pulsing ◐ / completed ✓ with strikethrough animation). Also mirrored as a compact progress line in the run header.
+- **Plan/todo dock (open-mercato/cezar#382)**: `plan.updated` renders a **dock pinned above the composer** (not in-thread; TodoWrite tool cards are hidden): collapsed = "3/7" odometer + current item with animated label; expanded = checkbox list (pending ○ / in_progress pulsing ◐ / completed ✓ with strikethrough animation). Also mirrored as a compact progress line in the run header.
 - **Step rail** (workflow steps ≠ plan): the existing ✓/●/✗ steps rail stays in the header, restyled as mercato's startup-checklist (emerald check / amber-tinted spinner / faint circle / danger X above a thin progress bar); check-steps render as command cards with pass/fail pills.
-- **Markdown**: Streamdown (stable-block memoization, unterminated-block repair) + Shiki CSS-variable dual theme; every code block gets copy + language chip; fixes #379's renderer glitches by replacing the renderer.
+- **Markdown**: Streamdown (stable-block memoization, unterminated-block repair) + Shiki CSS-variable dual theme; every code block gets copy + language chip; fixes open-mercato/cezar#379's renderer glitches by replacing the renderer.
 - **Thread performance**: virtua virtualization when a thread exceeds ~300 nodes, bottom-anchored streaming, "Jump to latest ↓" pill, per-session measurement + open-card cache; plaintext-first code paint at final line-height (no height jumps).
-- **Header**: editable title (auto-summary, pencil-on-hover, #389), meta line (workflow · runner · model · branch chip · ± diff stat · tokens with context-window gauge · cost), status pill, action bar (Finish / Continue / Terminal / **VS Code** / Notes / Archive / Cancel / Delete) — Terminal keeps the copy-command 409 fallback; **VS Code** = `POST /api/runs/:id/open-in-editor` (`code <worktree>`, driver-detected, hidden when absent).
+- **Header**: editable title (auto-summary, pencil-on-hover, open-mercato/cezar#389), meta line (workflow · runner · model · branch chip · ± diff stat · tokens with context-window gauge · cost), status pill, action bar (Finish / Continue / Terminal / **VS Code** / Notes / Archive / Cancel / Delete) — Terminal keeps the copy-command 409 fallback; **VS Code** = `POST /api/runs/:id/open-in-editor` (`code <worktree>`, driver-detected, hidden when absent).
 - **Review gate**: unchanged flow, redesigned surface — parked runs show a review banner + the session **Changes tab** (below) with notes box, `Send back`, `Draft PR`/`PR ↗`, and the manual-merge fallback line. Accepting celebrates with a brief twinkle moment (reduced-motion-safe).
 - **Composer**: same intelligent composer as /new (skills `/`, files `@`, dictation, attachments); Alt+A / Alt+C quick replies kept; waiting state pulses "The agent is paused, waiting for your reply"; closed state offers Continue.
 - **Variants compare**: kept as a dedicated surface, restyled: column per variant (status, tokens/cost, ± stat, Progress excerpt), full diffs below, "Pick this one" as the single accent CTA per column.
 
-### Session git view — Changes & Files tabs (#390)
+### Session git view — Changes & Files tabs (open-mercato/cezar#390)
 
 Tabs sit in the run detail next to the thread: **Session | Changes | Files** (mobile: swipeable segments).
 
@@ -250,18 +250,18 @@ Tabs sit in the run detail next to the thread: **Session | Changes | Files** (mo
 - **Files**: worktree file browser (tree + file preview with Shiki, images inline) — read-only v1, the "what does the workspace look like now" affordance.
 - **Repo view** (nav "Git") becomes the same components pointed at the main working tree: working-tree Changes, recent commits (click → structured commit diff), branch list with switch/create, base-branch picker. Forge-specific rows (PR links, checks) render only when the driver is available.
 
-### Task list & table (#389)
+### Task list & table (open-mercato/cezar#389)
 
-- The **full-width table is the Tasks overview and home** (`/`): the Tasks nav item always lands here — also when already active ("back to overview") — per PR #392, which removed the list/table toggle. **Active/Archived filter tabs live in the table header**, independent of the sidebar quick-list tabs (reversed #209: the original "share state" rule hid live sidebar runs while browsing archived table rows). Per-project table state is local; global `/tasks` uses `archived=1` in the URL; the sidebar filter stays in-memory. Both default to Active on a fresh load. Columns keep live CPU/Mem/Procs and gain editable Title (auto-summary), ±, and branch; clicking a row (or a sidebar quick-list item) opens `/tasks/:id` with Tasks still active.
+- The **full-width table is the Tasks overview and home** (`/`): the Tasks nav item always lands here — also when already active ("back to overview") — per PR open-mercato/cezar#392, which removed the list/table toggle. **Active/Archived filter tabs live in the table header**, independent of the sidebar quick-list tabs (reversed hearsay-tools/cezarion#209: the original "share state" rule hid live sidebar runs while browsing archived table rows). Per-project table state is local; global `/tasks` uses `archived=1` in the URL; the sidebar filter stays in-memory. Both default to Active on a fresh load. Columns keep live CPU/Mem/Procs and gain editable Title (auto-summary), ±, and branch; clicking a row (or a sidebar quick-list item) opens `/tasks/:id` with Tasks still active.
 - Sidebar quick-list rows: status dot, editable auto-summary title, `± stat` chip, PR chip, age/queue position.
 
 ### GitHub tab (forge tab)
 
-- Kept as-is functionally (issues/PRs lists, detail with markdown body + label chips + checks badge, drag-to-composer, hand-to-agent) with: **searchable cmdk dropdowns for workflow and skills** replacing chip walls (#385), project-first skill ordering (#377), and the whole tab hidden (nav item too) when `forge` is null — with the env chip explaining why.
+- Kept as-is functionally (issues/PRs lists, detail with markdown body + label chips + checks badge, drag-to-composer, hand-to-agent) with: **searchable cmdk dropdowns for workflow and skills** replacing chip walls (open-mercato/cezar#385), project-first skill ordering (open-mercato/cezar#377), and the whole tab hidden (nav item too) when `forge` is null — with the env chip explaining why.
 
 ### Skills, Workflows, Inbox
 
-- **Skills** moves under Settings (catalog + detail + refresh) — project skills first and bold (#377), stable scroll/selection (#384). Bookmarklets have their own Settings subpage while the former Skills deep link stays compatible. A read-only skills browser remains reachable from pickers ("View skill" preview in the dropdown).
+- **Skills** moves under Settings (catalog + detail + refresh) — project skills first and bold (open-mercato/cezar#377), stable scroll/selection (open-mercato/cezar#384). Bookmarklets have their own Settings subpage while the former Skills deep link stays compatible. A read-only skills browser remains reachable from pickers ("View skill" preview in the dropdown).
 - **Workflows builder**: same capabilities (canvas, drag from palette, YAML import/export/preview, 8-step limit), rebuilt on dnd-kit + shadcn — visual language only, no behavior change.
 - **Inbox**: card list restyled (CenteredState empty state, status dots, Run/Dismiss buttons); badge logic unchanged.
 
@@ -310,12 +310,12 @@ The degradation table is the product (README promise: everything degrades):
 
 Each phase is independently shippable; issues in parentheses close in that phase.
 
-- **R1 — Platform + shell**: Vite/React/Tailwind/shadcn scaffold, tokens, fonts, Hono static serving + dev proxy, app shell (sidebar, nav, theme system, env chips, ⌘K), task quick-list on live SSE. (#378, #369, #354 groundwork)
-- **R2 — Protocol v2**: runner emitters + RunManager persistence + `web/src/protocol` display model; auto-summary titles + diffStat on RunRecord; system-prompt end-to-end. (#389-data, system prompt)
-- **R3 — Thread**: full task detail — turns, tool cards, context groups, reasoning, plan dock, step rail, Streamdown+Shiki, virtua, composer (skills `/`, `@` files, dictation, attachments), review gate, variants compare. (#381, #382, #379, #380, dictation)
-- **R4 — New task + list**: full-screen composer with plan-mode toggle + variants; task list/table upgrades with editable titles + ± stats. (#386, #383, #389)
-- **R5 — Git view + forge seam**: structured changes/files endpoints, git actions (commit/push/branch), forge driver extraction, Changes/Files tabs, repo view rebuild, Create/View PR, open-in-editor/VS Code handoff. (#390, #385-adjacent forge gating)
-- **R6 — Remaining views + Settings**: GitHub tab (searchable dropdowns), Skills→Settings, Workflows builder, Inbox, Settings (skills/bookmarklets/appearance/agents), notifications. (#385, #377, #384)
+- **R1 — Platform + shell**: Vite/React/Tailwind/shadcn scaffold, tokens, fonts, Hono static serving + dev proxy, app shell (sidebar, nav, theme system, env chips, ⌘K), task quick-list on live SSE. (open-mercato/cezar#378, open-mercato/cezar#369, open-mercato/cezar#354 groundwork)
+- **R2 — Protocol v2**: runner emitters + RunManager persistence + `web/src/protocol` display model; auto-summary titles + diffStat on RunRecord; system-prompt end-to-end. (open-mercato/cezar#389-data, system prompt)
+- **R3 — Thread**: full task detail — turns, tool cards, context groups, reasoning, plan dock, step rail, Streamdown+Shiki, virtua, composer (skills `/`, `@` files, dictation, attachments), review gate, variants compare. (open-mercato/cezar#381, open-mercato/cezar#382, open-mercato/cezar#379, open-mercato/cezar#380, dictation)
+- **R4 — New task + list**: full-screen composer with plan-mode toggle + variants; task list/table upgrades with editable titles + ± stats. (open-mercato/cezar#386, open-mercato/cezar#383, open-mercato/cezar#389)
+- **R5 — Git view + forge seam**: structured changes/files endpoints, git actions (commit/push/branch), forge driver extraction, Changes/Files tabs, repo view rebuild, Create/View PR, open-in-editor/VS Code handoff. (open-mercato/cezar#390, open-mercato/cezar#385-adjacent forge gating)
+- **R6 — Remaining views + Settings**: GitHub tab (searchable dropdowns), Skills→Settings, Workflows builder, Inbox, Settings (skills/bookmarklets/appearance/agents), notifications. (open-mercato/cezar#385, open-mercato/cezar#377, open-mercato/cezar#384)
 - **R7 — Retirement + polish**: delete legacy `web/app.js`/`style.css`, packaging flip to `web/dist`, design-guardian in gate, iOS pass on every view, docs/screenshots refresh.
 
 ## Implementation Plan

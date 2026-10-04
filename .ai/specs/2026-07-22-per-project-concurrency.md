@@ -1,5 +1,10 @@
 # Per-project resource / concurrency settings
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 ## TLDR
 The parallel-task ceiling is a single workspace-global number (`resources.maxParallel`, default 2) enforced by one shared `WorkspaceSemaphore` across every project. This spec makes the ceiling configurable **per project**: a project can be pinned to run strictly one task at a time (heavy memory profile) while another runs up to N at once, all under an overall workspace cap that still protects the host. The per-project limit is an optional field on the existing project registry entry; when unset a project inherits the workspace cap, so no config migration is required and behaviour is unchanged for anyone who never touches the new setting.
 

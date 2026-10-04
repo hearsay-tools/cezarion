@@ -2,7 +2,7 @@
 
 > For agentic workers: use superpowers:subagent-driven-development for independent UI work; keep server integration in the controlling session.
 
-**Goal:** Implement issue #67 with the Switch & pull design approved in chat on 2026-09-04.
+**Goal:** Implement issue hearsay-tools/cezarion#67 with the Switch & pull design approved in chat on 2026-09-04.
 **Architecture:** A project-scoped GET /repo/pull lists local branches; POST /repo/pull resolves the requested/base/current branch, checks risks before mutation, switches safely when necessary, then invokes git pull using that branch's configured upstream. The Git header owns one picker/action and a risk confirmation dialog.
 **Tech stack:** TypeScript, Hono, Zod, React, TanStack Query, Vitest.
 **Spec:** Issue https://github.com/wjarka/cezar/issues/67 plus approved in-chat design.
@@ -46,7 +46,7 @@ expect(await screen.findByRole('alertdialog')).toHaveTextContent(/active session
 ## Task 3: Verify and deliver
 - [x] Review whole diff against issue and contract; fix material findings.
 - [x] Run in order: `npm run typecheck`, `npm test`, `npm run test:unit`, `npm run build`, `npm run test:package`.
-- [ ] Commit Conventional Commit, push feat/git-tab-pull, open draft PR against main using repository template and Closes #67.
+- [ ] Commit Conventional Commit, push feat/git-tab-pull, open draft PR against main using repository template and Closes hearsay-tools/cezarion#67.
 - [ ] Move card In review; use pr-checks until CI verdict. Update handoff at milestones.
 
 ## Review and QA evidence

@@ -1,5 +1,10 @@
 # Run: Cockpit UI redesign — Phase R4 (New task + list)
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 - Date: 2026-07-15
 - Branch: `feat/cockpit-ui-r1-platform-shell` (single consolidated PR #396)
 - Source spec: `.ai/specs/2026-07-14-cockpit-ui-redesign.md` — §"New task (full-screen, #386)", Implementation Plan steps 13–15

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** Use superpowers:subagent-driven-development for independent experiment patches, with review before applying them.
 
-**Goal:** Measure all six opportunities in issue #156 and ship only verified improvements.
+**Goal:** Measure all six opportunities in issue hearsay-tools/cezarion#156 and ship only verified improvements.
 
 **Architecture:** A push-triggered benchmark workflow checks out the harness and the fixed application separately. Each GitHub-hosted job applies one checked-in patch, measures the full verification sequence, and uploads raw reports even on failure. Three repetitions per variant use identical Node, runner label and cold npm cache conditions. Later campaigns measure combined winners.
 
@@ -56,5 +56,5 @@ Files: benchmark workflow and duration assignment manifest.
 Files: selected application/CI changes, `docs/benchmarks/ci-performance-156.md` and raw JSON.
 - [x] Compare median/range, CPU seconds and peak memory, total runner time, wall time and failures for all variants. Reject complexity unsupported by benefit.
 - [x] Apply only winners; run npm run typecheck, npm test, npm run test:unit, npm run build, npm run test:package.
-- [ ] Commit, push, merge fresh origin/main and reverify if changed, open draft PR using repository template with Closes #156.
+- [ ] Commit, push, merge fresh origin/main and reverify if changed, open draft PR using repository template with Closes hearsay-tools/cezarion#156.
 - [ ] Move board to In review, run pr-checks and SDLC docs check, resolve automated review on final SHA and retain green CI/review links.

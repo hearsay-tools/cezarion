@@ -1,5 +1,10 @@
 # Server installer & uninstaller
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 ## TLDR
 
 A dependency-free interactive wizard — `npx @open-mercato/cezar server-install --platform <id>` — that turns a bare Ubuntu/Debian VPS (or a local macOS box fronted by ngrok) into a running, reachable, authenticated cezar server in one sitting, and a matching `server-uninstall` that reverses every change it made. The wizard is **modularized by platform strategy** (`ubuntu-vps`, `macosx-ngrok`, …): a shared engine drives the flow and each strategy declares its own ordered steps, so a third platform is "declare steps", not "re-solve UX". It is **idempotent and resumable** (progress persisted to `~/.cezar/server.json`), **sudo-aware** (it never runs a privileged command silently — it prints the exact command, asks whether to run it under `sudo` or hand it to the operator, then verifies the result before advancing and offers a redo), and **install-once per host** (the OS-level proxy, TLS and autostart service are shared by every repo instance, matching multi-instance mode where the first cezar proxies the rest).

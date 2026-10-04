@@ -1,5 +1,10 @@
 # Final gate — spec completion (all 32 Tasks rows `done`)
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 **Ran:** 2026-07-21T12:00:00Z (om-auto-continue-pr-loop resume)
 **Head at gate:** `66a4fe9` (re-run after the review-fix Steps 5.5–5.7)
 **Branch:** feat/multi-project-workspace → main

@@ -13,7 +13,7 @@
 > UI-state read, none of which a synchronous local write needs. The server keeps
 > accepting the `lastLocation` key for older cockpits.
 
-> **Extended (#728): each project remembers its own last page.** Switching projects from the
+> **Extended (hearsay-tools/cezarion#728): each project remembers its own last page.** Switching projects from the
 > rail (collapsed or expanded) or the ⌘K Projects group lands on that project's last page
 > instead of its home. Browser-local, no server change; `cez-last-location` and the bare-root
 > restore above are untouched.

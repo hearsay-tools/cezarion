@@ -1,4 +1,4 @@
-# Mobile touch targets — #166
+# Mobile touch targets — hearsay-tools/cezarion#166
 
 ## Scope and design
 
@@ -8,7 +8,7 @@ The floor applies to the actual control box, including native picker buttons and
 items. Switches reserve space with a transparent border around the existing compact
 track. No hit-area pseudo-elements, new artwork, dependencies, or state/handler changes.
 The mobile header, appearance choices, and workflow toolbar accommodate the larger
-targets. Settings tabs retain #183's horizontal scrolling and reveal controller.
+targets. Settings tabs retain hearsay-tools/cezarion#183's horizontal scrolling and reveal controller.
 
 ## Browser verification
 
@@ -67,7 +67,7 @@ npm test -- --config packages/web/e2e/vitest.config.ts touch-targets
 
 ## Supervisor focus-contrast follow-up
 
-Integrated main's #184 wordmark without changing its dimensions/assets. The default light
+Integrated main's hearsay-tools/cezarion#184 wordmark without changing its dimensions/assets. The default light
 ring is dark and passes; the confirmed regression was the violet accent's ring on the
 light sidebar: `rgb(143, 134, 232)` on `rgb(250, 250, 250)` measured **2.9837:1**.
 The new regression failed in all three densities before the fix

@@ -11,7 +11,7 @@ How it is used at runtime: `om-setup-agent-pipeline` copies this file into the r
 
 ## Conventions
 
-- Issue and PR identifiers are numbers; in text they are written `#123`.
+- Issue and PR identifiers passed to tracker operations are numbers. In documentation, qualify citations as `hearsay-tools/cezarion#123` (fork) or `open-mercato/cezar#123` (upstream), or use a repository-qualified GitHub link. See `AGENTS.md` § Issue and PR citations. Literal CLI arguments and example markers remain unchanged.
 - A PR is linked to the issue it resolves with `Fixes #{issueId}` (or `Closes #{issueId}`) in the PR body; GitHub then closes the issue on merge. To reference without auto-closing, use a plain issue link.
 - PRs open as **drafts** when a skill says so; a human (or **mark-pr-ready**) promotes them.
 - Claim/lock signals on an issue or PR are: assignee set to the automation user, the `in-progress` label, and a `🤖`-prefixed claim comment. All three are set on claim; the label is guarded (below).

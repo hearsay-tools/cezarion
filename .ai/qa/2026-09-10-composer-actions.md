@@ -1,4 +1,4 @@
-# Issue #201 composer actions — browser QA
+# Issue hearsay-tools/cezarion#201 composer actions — browser QA
 
 Date: 2026-09-10
 
@@ -6,7 +6,7 @@ Result: PASS with the bounded limitations below.
 
 ## Environment
 
-- Production build from the completed issue #201 build gate.
+- Production build from the completed issue hearsay-tools/cezarion#201 build gate.
 - Isolated disposable Git repository under `/tmp/cezar-201-qa-XFfeC0`.
 - `CEZ_DRY_RUN=1`, fixture-owned `CEZ_HOME`, `CEZ_SKILLS_AUTO_UPDATE=0`, and `CEZ_HANDOFF_FILE` explicitly unset.
 - agent-browser 0.36.0 / Chrome for Testing 151, with `TMPDIR=/tmp` and `AGENT_BROWSER_ARGS=--no-sandbox`.

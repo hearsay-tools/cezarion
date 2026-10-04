@@ -13,7 +13,7 @@ scheduler and event streams, and own isolated Git worktrees.
 Stage 1 supports one generation and parent-to-worker steering. Worker terminal
 outcomes are lifecycle notifications, not conversational replies. No recursive
 delegation, peer messaging, shared workspaces, dirty snapshots, automatic merge,
-or automatic review acceptance. Issues #112–#115 own subsequent stages.
+or automatic review acceptance. Issues hearsay-tools/cezarion#112–hearsay-tools/cezarion#115 own subsequent stages.
 
 ## Decisions approved in conversation
 
@@ -176,7 +176,7 @@ snapshotted, and inspection/history/stop/verified cleanup remain available.
 Use fixed service limits rather than new configuration; bound task/steering
 payloads by the existing run-input limits. Spawn receipts do not consume another
 creation. Persisted counts survive restart. These are not a recursive-delegation
-feature. **Superseded by #816** (`2026-10-04-reclaimable-worker-capacity.md`):
+feature. **Superseded by hearsay-tools/cezarion#816** (`2026-10-04-reclaimable-worker-capacity.md`):
 the former 32 lifetime creations per parent, counting destroyed workers, is now
 32 outstanding allocations reclaimed by verified destroy plus a 1,024 lifetime
 creation ceiling; neither is a spending budget.
@@ -342,7 +342,7 @@ History, stop and explicit verified-cleanup attempts remain reachable.
 
 Each Git/process operation has a bounded timeout. A failed cleanup never gets a
 success response just because cancellation was sent. Partial cleanup survives
-restart. Issue #642 changes the retry rule: an already persisted destroy request
+restart. Issue hearsay-tools/cezarion#642 changes the retry rule: an already persisted destroy request
 authorizes automatic retries in the current controller and after restart, after
 manager recovery has reconstructed execution proof. The delegation service owns
 one unref'd timer per pending worker and serializes each retry with explicit
@@ -359,7 +359,7 @@ permission to delete owned resources.
 
 Existing retention/orphan sweeps must respect worker ownership and destruction
 state. Finished owned-worker *directories* are reclaimable under the same keep-N
-budget as other finished runs (#575: directory only, branch kept) once the parent
+budget as other finished runs (hearsay-tools/cezarion#575: directory only, branch kept) once the parent
 is gone or `done` (collection-gated). Failed/cancelled parents can still collect.
 Live workers, `review`, `invalid`, and workers mid-destroy stay excluded. Unowned deletion
 paths still skip owned resources; verified destroy owns branch/process/history
@@ -376,7 +376,7 @@ changing normal grouping or requiring a separate dashboard.
 
 Use project-scoped links and current run cache/SSE. Relationship lookup must not
 assume the first page or currently filtered run list contains every worker.
-Use a bounded complete relationship response (maximum 1,024 workers since #816) when needed;
+Use a bounded complete relationship response (maximum 1,024 workers since hearsay-tools/cezarion#816) when needed;
 human read routes expose no session credentials and follow normal API contracts.
 Updates and reconnect reconciliation reuse current event infrastructure, with
 no new browser socket or polling timer.
@@ -494,6 +494,6 @@ eight issue-specific real-browser cases. The full browser aggregate remains
 222passed/two failed/six conditional skips; unrelated baseline failures are
 tracked separately in [#136](https://github.com/wjarka/cezar/issues/136) and
 [#137](https://github.com/wjarka/cezar/issues/137), following the user's instruction
-to keep further work scoped to #111. Exact commands, observations, incident
+to keep further work scoped to hearsay-tools/cezarion#111. Exact commands, observations, incident
 limitations and artifact references are in the adjacent QA report. Publication
 and CI are controller-owned and pending.

@@ -1,4 +1,4 @@
-# #662 fix #1 measurements
+# hearsay-tools/cezarion#662 fix #1 measurements
 
 Measured 2026-09-28 on this host/account against `e97c6314`. Before ran before production edits; the final after run used the verified working diff with verification idle. The JSON commit field is baseline HEAD; the after implementation was uncommitted.
 

@@ -1,4 +1,4 @@
-# Project task pins — #93 acceptance and QA
+# Project task pins — hearsay-tools/cezarion#93 acceptance and QA
 
 Selective port of upstream `44a8dbba` on fork baseline `064a2f00`. Parent approved Design Track on 2026-09-06. No lifecycle/scheduling changes, dependency changes, package identity/version changes, or configuration requirements.
 
@@ -37,9 +37,9 @@ The first additional browser smoke run found six stale expectations, all reprodu
 
 ## Reconciliation with merged GitHub search
 
-Merged `origin/main` at `a35377431e6360b398c7f8aa417c317208f01414` (PR #100) after parent approval of the original pinning head. The only conflict was the server's contract import block: keep both `pinRunInputSchema` and `githubSearchQuerySchema`. Routes, contracts, client hooks and tests retain both features; no further production changes.
+Merged `origin/main` at `a35377431e6360b398c7f8aa417c317208f01414` (PR hearsay-tools/cezarion#100) after parent approval of the original pinning head. The only conflict was the server's contract import block: keep both `pinRunInputSchema` and `githubSearchQuerySchema`. Routes, contracts, client hooks and tests retain both features; no further production changes.
 
-Combined-tree verification on 2026-09-06: `npm run typecheck` passed; `npm test` passed 344 files / 6,878 tests; `npm run test:unit` passed; `npm run build` passed including check:pack; `npm run test:package` passed 22 tests; the same quick-list/thread browser command passed 44 tests. Parent has marked PR #104 ready and retains final merge authority.
+Combined-tree verification on 2026-09-06: `npm run typecheck` passed; `npm test` passed 344 files / 6,878 tests; `npm run test:unit` passed; `npm run build` passed including check:pack; `npm run test:package` passed 22 tests; the same quick-list/thread browser command passed 44 tests. Parent has marked PR hearsay-tools/cezarion#104 ready and retains final merge authority.
 
 ## Reconciliation with mobile task reading
 

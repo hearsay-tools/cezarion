@@ -1,4 +1,4 @@
-# New Task composer hierarchy — issue #168
+# New Task composer hierarchy — issue hearsay-tools/cezarion#168
 
 The supervisor approved this bounded design: prompt/context first, a separate Start/Plan first and submission row, and an accessible execution-options disclosure showing the resolved agent/model. It uses the existing tokens and controls, adds no artwork or animation, and keeps one mounted composer and mounted execution controls across disclosure and viewport changes.
 

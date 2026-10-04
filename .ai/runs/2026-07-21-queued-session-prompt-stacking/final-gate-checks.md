@@ -1,5 +1,10 @@
 # Final gate — all 11 Steps done
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 **When:** 2026-07-21T12:14:00Z
 **Branch:** `feat/queued-session-prompt-stacking`
 **Merged base:** `origin/main` @ `8c22ab9` (main moved during the run — see "Merge" below)

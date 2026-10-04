@@ -1,5 +1,10 @@
 # Execution plan — clone checkout-root settings link
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 Status: complete
 
 Source doc: .ai/specs/2026-07-21-clone-checkout-root-settings-link.md

@@ -1,4 +1,4 @@
-# `cez task` — operator/bot CLI over the cockpit's run routes — #504
+# `cez task` — operator/bot CLI over the cockpit's run routes — hearsay-tools/cezarion#504
 
 An operator, or an LLM bot driving a shell, cannot start a task that appears in
 the running cockpit, watch it and steer it from a terminal. `cez run` keeps its
@@ -73,7 +73,7 @@ With `--url` and no root match (a remote cockpit's paths are not local paths)
 the boot project is used. The API scope is `/api/v1/p/<projectId>`; the thread
 URL is `<origin>/p/<projectId>/tasks/<runId>`.
 
-The plain client passes the #426 origin guard as-is (loopback `Host`, no
+The plain client passes the open-mercato/cezar#426 origin guard as-is (loopback `Host`, no
 `Origin`). Nothing reads, prints or forwards `CEZ_DELEGATION_*`.
 
 ### Commands (`cli.ts`)
@@ -95,18 +95,18 @@ operation prints text without a server. `--full` returns the contract shape.
 - `wait` **polls** `GET /runs` every 1.5 s (owner decision, 2026-09-24): one
   call covers any number of runs and holds no socket. What ends it is decided
   by the cockpit's own attention function, shared through the contract since
-  #553/#609 (`packages/contract/src/attention.ts`, `deriveAttention`) — see
+  hearsay-tools/cezarion#553/#609 (`packages/contract/src/attention.ts`, `deriveAttention`) — see
   "The wait decision" below.
 - `list` leaves out runs whose `delegation.role` is `worker`, with or without
   `--all` (`--all` means "include archived"), and `total` counts parents only
-  (#635). No flag brings workers back; add one only when someone asks.
+  (hearsay-tools/cezarion#635). No flag brings workers back; add one only when someone asks.
 - `notify <id>` and `send <id> --notify` on a worker exit 64 with
   `{ code: "invalid_input", error, parentId }`, naming the parent to notify
   instead, before anything is subscribed or delivered. `notify --off` still
   reaches a worker so an earlier subscription can be undone. Every other
-  id-addressed command still accepts a worker id (#635).
+  id-addressed command still accepts a worker id (hearsay-tools/cezarion#635).
 
-### The wait decision (#553, #609)
+### The wait decision (hearsay-tools/cezarion#553, hearsay-tools/cezarion#609)
 
 `wait` and `start --wait` take `--until attention` (the default) or
 `--until settled`:
@@ -124,9 +124,9 @@ cockpit does not show them as Needs You: a root parked on its own workers
 (`status === 'waiting' || hasPendingHumanAsk`), which stopped on a parked
 parent the cockpit showed as still working, and it defaulted to `settled`,
 which made every interactive `start --wait` run out its timeout (exit 3)
-although the agent had parked within seconds (#553). An operator reading
+although the agent had parked within seconds (hearsay-tools/cezarion#553). An operator reading
 `waiting` + `hasPendingHumanAsk: false` from the CLI while the cockpit showed
-Needs You cleared runs too early (#609).
+Needs You cleared runs too early (hearsay-tools/cezarion#609).
 
 The fix is one function, not a second default: `deriveAttention` moved from
 `packages/web/src/lib/attention.ts` into the contract, the cockpit re-exports

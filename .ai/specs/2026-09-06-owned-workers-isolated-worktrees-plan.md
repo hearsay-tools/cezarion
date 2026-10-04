@@ -530,7 +530,7 @@ npm run test:package
   plan and QA) with `feat(delegation): add owned workers in isolated worktrees`.
   Push `git push -u origin HEAD`.
 - [ ] Read this repo's first matching PR template; map all required dev-flow
-  fields into it. Include `Closes #111`, concise summary/design/spec reference,
+  fields into it. Include `Closes hearsay-tools/cezarion#111`, concise summary/design/spec reference,
   Experience/QA, exact command-result lines, and explicitly deferred roadmap
   stages. Open **draft**, explicitly `--base main`; never auto-merge or ready it.
 - [ ] Emit the new PR reference, move board card to In review, load pr-checks
@@ -553,7 +553,7 @@ npm run test:package
   and independently approved; their retained task reports record red/green and
   source-removal evidence. Task 9 implementation and scoped local verification are complete. All five
   ordered gates and eight issue-specific browser cases passed. The full browser
-  aggregate retains two baseline failures tracked as #136/#137; no pass is
+  aggregate retains two baseline failures tracked as hearsay-tools/cezarion#136/#137; no pass is
   inferred from those failures. Final review disposition, commit, draft PR,
   project-board update and CI remain controller-owned.
 
@@ -569,4 +569,4 @@ The controller approved explicit 30s outer budgets only for the two real-manager
 integration suites/their cleanup and three named 32-creation cases; existing
 15s state/termination assertions and product timers remain unchanged.
 Per the user’s final scope direction, unrelated baseline browser failures are
-filed separately as #136/#137, with no further unrelated fix or broad retry.
+filed separately as hearsay-tools/cezarion#136/#137, with no further unrelated fix or broad retry.

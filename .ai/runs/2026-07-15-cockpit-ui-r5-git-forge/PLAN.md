@@ -1,5 +1,10 @@
 # Run: Cockpit UI redesign — Phase R5 (Git view + forge)
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 - Date: 2026-07-15
 - Branch: `feat/cockpit-ui-r1-platform-shell` (single consolidated PR #396)
 - Source spec: `.ai/specs/2026-07-14-cockpit-ui-redesign.md` — §"Session git view — Changes & Files tabs (#390)", §"Forge-driver seam", §"Git/session API additions", §"Deployment modes", Implementation Plan steps 16–18

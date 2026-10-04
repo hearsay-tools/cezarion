@@ -1,5 +1,10 @@
 # Generate follow-ups per task
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 ## Overview
 
 Add a per-task **Generate follow-ups** choice to the New Task composer, defaulting on and remembered like the existing worktree/autonomous choices. When disabled, the run keeps its handoff journal and completion marker but agents receive neither `CEZ_TODOS_FILE` nor instructions for appending inbox entries.

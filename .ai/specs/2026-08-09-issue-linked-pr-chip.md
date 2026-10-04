@@ -1,5 +1,10 @@
 # Linked-PR chips on the GitHub Issues list
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 ## 📝 TLDR
 
 Each row of the cockpit's GitHub **Issues** list gains a clickable `↗ PR #123` chip when a pull request is linked to that issue, tinted by the PR's state (open / merged / closed). The links come from GitHub's real issue↔PR relationships, fetched lazily for the on-screen row window via a new `GET /api/v1/github/issue-prs` endpoint — an additive sibling of the existing lazy checks-glyph endpoint (#664), so the one-shot list fetch stays untouched. The signal lets a triager see, without leaving the cockpit, that an issue already has a PR in flight before handing it to an agent.

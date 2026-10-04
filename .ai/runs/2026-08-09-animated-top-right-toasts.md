@@ -1,5 +1,10 @@
 # Execution plan — animated top-right toast stack in the cockpit
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 **Issue:** #818 — Implement: animated top-right toast stack in the cockpit
 **Branch:** `feat/animated-top-right-toasts`
 **Engine:** `Engine: om-auto-create-pr (steps: 7, --loop: no)`

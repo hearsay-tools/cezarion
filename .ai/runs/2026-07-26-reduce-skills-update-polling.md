@@ -1,5 +1,10 @@
 # Reduce skills update polling
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 ## Goal
 
 Prevent the skills update status query from flooding the local API while a bounded background check is still running, without changing update ownership, security boundaries, or the six-hour backend cache.
