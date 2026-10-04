@@ -810,6 +810,34 @@ End, cancellation, provider failure and process settlement dispose it. The guard
 emits a failure and interrupts the runner; it never synthesizes process exit or
 releases capacity early. Standalone wall-clock limits remain unchanged.
 
+Autonomous turn-end rows **A1–A14** live in
+`core/workflow-autonomous-parity.test.ts` and the same parity guard (#426).
+Every adapter covers fresh and Continue nudges, portable ASK attribution, the
+40-nudge cap, non-autonomous parking, monitoring, DONE and persisted-question
+priority. A9 preserves native mid-turn questions; Claude/Pi have executable
+exemptions proving their native wire uses the portable marker fallback instead.
+Only a new portable turn-end ASK may use the existing answer transport for a
+synthetic nudge, without a human message or answer checkpoint. Queued/accepted
+input, worker/CI waits, existing questions and lifecycle stops block that override.
+OpenCode's cap cell holds each nudge's HTTP ACK until after its SSE turn ends;
+deferred idle-boundary settlement applies the same policy after the ACK, including
+the cap note and the heartbeat for the state actually entered. A11/A12 start with
+an overridden portable ASK before markerless turns, covering the separate answer
+transport's delayed ACK on fresh and Continue sessions. A refused ordinary nudge
+retains its capacity slot and a running heartbeat until input readiness retries
+that exact completed boundary, after durable input. New parent activity, accepted
+input or a real question invalidates the retry; cancellation, Finish, disposal and
+session replacement revoke it. Missing readiness reaches the existing idle close
+bound. Successful retries use normal acknowledged input, so the cap and all
+worker/CI/native-question guards still apply. A13/A14 use ordinary root runs on
+fresh and Continue paths: OpenCode retains the answer ACK indefinitely, the actual
+idle callback requests shutdown, and the slot stays occupied until process exit.
+Only then do the run and step become durable `waiting`, with a successful Continue
+proving resumability. The other adapters have named executable exemptions for
+this HTTP-only ordering and test root idle expiry/Continue on their native wires.
+Owned-worker terminal settlement and explicit question/worker/CI waits retain
+their existing policies.
+
 > Every criterion in the harness parity matrix MUST hold for **every** backend,
 > or carry a declared exemption naming the wire limitation that prevents it.
 
@@ -870,6 +898,14 @@ R12 asserts the `subagent` turn parks as `running`/`monitoring`, never `waiting`
 session transcript. Codex filters both child message deltas and completions;
 Claude excludes child assistant text from v1 and its result fallback buffer;
 the v2 fallback uses the same parent-only guard.
+
+R36–R39 (#399) record the shared monitoring wrap-up contract on every native
+prompt channel for fresh, Continue and restart-recovered sessions, and the
+automatic monitoring wake. Finished work with the task goal complete requires
+`CEZ:DONE`; pending work requires `CEZ:MONITORING`. Genuine user questions retain
+their own paths. R40 keeps completion prose without a marker parked as waiting;
+the harness does not infer completion from prose. Offline prompt recordings prove
+delivery, not live model compliance.
 
 R26 (#398) runs every `HARNESS_ADAPTERS.askResumeCases` entry for every
 `RUNNER_IDS` backend: Claude/Pi `CEZ:ASK`, Codex `item/tool/requestUserInput`,

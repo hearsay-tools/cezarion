@@ -42,7 +42,8 @@ const hasForge = (projectId: string) => projectId === bootProject && forgeAvaila
 function expectedOverflowHrefs(projectId: string): string[] {
   const optional = [
     ...(followupsAvailable ? ['/inbox'] : []),
-    ...(hasForge(projectId) && automationsAvailable ? ['/automations'] : []),
+    // Schedules need no GitHub remote; the capability alone gates Automations (#766).
+    ...(automationsAvailable ? ['/automations'] : []),
   ]
   const crowded = optional.length > 0 && hasForge(projectId)
   return [...optional, ...(crowded ? ['/workflows'] : [])].map((path) => scoped(projectId, path))
@@ -138,7 +139,9 @@ function assertProject(projectId: string, path: string): void {
     value => JSON.stringify(value) === JSON.stringify([scoped(projectId, path)]))).toEqual([scoped(projectId, path)])
   // The More views scope to the same project: every path the main row does not carry is in the menu.
   const overflow = expectedOverflowHrefs(projectId)
-  expect(browser.count(`${nav} [aria-label="More views"]`)).toBe(overflow.length ? 1 : 0)
+  // Health can settle after the primary links, which are unchanged by optional views on a bare repo.
+  expect(browser.waitForValue(`document.querySelectorAll('${nav} [aria-label="More views"]').length`,
+    value => value === (overflow.length ? 1 : 0))).toBe(overflow.length ? 1 : 0)
   if (overflow.length) {
     browser.click(`${nav} [aria-label="More views"]`)
     expect(browser.waitForValue(`Array.from(document.querySelectorAll('[role="menu"] a[role="menuitem"]')).map(a => new URL(a.href).pathname)`,

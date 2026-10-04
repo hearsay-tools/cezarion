@@ -42,6 +42,7 @@ const write = (obj) => process.stdout.write(`${JSON.stringify(obj)}\n`);
 // #505: like the real app-server, any active main-thread turn accepts `turn/steer`.
 // Steers accepted by an ordinary scripted turn are read just before it completes:
 // a userMessage item (echoing clientUserMessageId as clientId) and an echo reply.
+let autonomousTurn = 0;
 let activeTurnId = null;
 let pendingSteers = [];
 let steerEchoSerial = 0;
@@ -217,6 +218,12 @@ rl.on('line', async (line) => {
       const { crashWithStderr } = await import('./mock-runner-crash.mjs');
       await new Promise(resolve => setTimeout(resolve, 30));
       if (crashWithStderr(turnText, '{"method":"item/commandExecution/outputDelta","params":')) return;
+    }
+    if (turnText.includes('mock:autonomous') || turnText.startsWith('Continue working autonomously until the task is fully complete.')) {
+      const { autonomousReply } = await import('./mock-autonomous.mjs');
+      emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: `autonomous-${++autonomousTurn}`, text: autonomousReply(turnText) } } });
+      emit({ method: 'turn/completed', params: { threadId: 'th_mock_1', turn: { id: 'turn_mock_1', status: 'completed' } } });
+      return;
     }
     // Native thread attribution from collab-agent-tool-call.ndjson (#121/#401).
     if (turnText.includes('mock:subagent-after-park')) {
