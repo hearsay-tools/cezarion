@@ -405,9 +405,8 @@ export const runSummarySchema = z.object({
    *  Recently finished for work that is simply waiting for its appointment. */
   autoResumeAt: z.string().optional(),
   /** The workflow the run executes — the global Tasks page shows it in a column and groups by
-   *  it. Always present on the record (`RunRecord.workflow`), so required here; the display
-   *  refinement `workflowLabel` applies needs `steps[]`, which this row deliberately omits, so
-   *  a `(planned)` chain reads as itself here rather than as its first agent's name. */
+   *  it. Always present on the record (`RunRecord.workflow`), so required here. The display
+   *  name, which reads a `(planned)` chain as its first agent's name, is `workflowLabel` below. */
   workflow: z.string(),
   /** The task's branch, when it has one — a column on the global page, and the one field that
    *  makes a cross-project row identifiable at a glance without opening it. */

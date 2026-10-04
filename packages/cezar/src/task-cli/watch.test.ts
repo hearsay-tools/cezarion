@@ -278,6 +278,33 @@ describe('cez task watching against a scripted cockpit', () => {
     expect(JSON.parse(out.at(-1)!)).toMatchObject({ code: 'unavailable' });
   });
 
+  it('falls back to GET /runs when an older cockpit has no summary route (#817)', async () => {
+    const seen: string[] = [];
+    handler = (req, res) => {
+      seen.push(req.url ?? '');
+      if (req.url === '/api/v1/p/default/runs') return json(res, [{ ...apiRun('done'), id: 'r1' }]);
+      res.statusCode = 404;
+      json(res, { error: 'not found' });
+    };
+    expect(await run(['wait', 'r1', '--timeout-seconds', '5'])).toBe(0);
+    expect(JSON.parse(out.at(-1)!)).toMatchObject({ timedOut: false, runs: [{ id: 'r1', status: 'done' }] });
+    expect(await run(['list'])).toBe(0);
+    expect(JSON.parse(out.at(-1)!)).toMatchObject({ total: 1, runs: [{ id: 'r1', status: 'done' }] });
+    expect(seen.slice(0, 2)).toEqual(['/api/v1/p/default/run-summaries', '/api/v1/p/default/runs']);
+  });
+
+  it('passes a non-404 summary refusal through without the fallback', async () => {
+    const seen: string[] = [];
+    handler = (req, res) => {
+      seen.push(req.url ?? '');
+      res.statusCode = 409;
+      json(res, { error: 'project root is gone' });
+    };
+    expect(await run(['list'])).toBe(2);
+    expect(JSON.parse(out.at(-1)!)).toMatchObject({ code: 'refused', status: 409, error: 'project root is gone' });
+    expect(seen).toEqual(['/api/v1/p/default/run-summaries']);
+  });
+
   /** Replay of seq 1..3 with a live `run` frame (already terminal) arriving after seq 1. */
   const replayWithEarlyRunFrame = () => {
     handler = (req, res) => {

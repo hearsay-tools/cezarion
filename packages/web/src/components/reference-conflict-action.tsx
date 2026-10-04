@@ -122,11 +122,18 @@ export function ResolveConflictsForRun({
 }
 
 /**
- * The same button for a list row in the mounted scope (#817): list rows are slim summaries, so the
- * full record the delivery needs is fetched here, inside the open panel, exactly as the
- * cross-project case above does.
+ * The same button for a list row (#817): list rows are slim summaries, so the full record the
+ * delivery needs is fetched here, inside the open panel. A row inside a project's own reference
+ * scope (another project's sidebar group) reads and delivers through THAT project; elsewhere the
+ * mounted scope is the row's own.
  */
 function ResolveConflictsForListRun({ runId, prNumber }: { runId: string; prNumber?: number }) {
+  const { projectId } = useReferenceScope()
+  if (projectId !== undefined) return <ResolveConflictsForRun projectId={projectId} runId={runId} prNumber={prNumber} />
+  return <ResolveConflictsForMountedRun runId={runId} prNumber={prNumber} />
+}
+
+function ResolveConflictsForMountedRun({ runId, prNumber }: { runId: string; prNumber?: number }) {
   const run = useRun(runId)
   if (!run.data) {
     return (
