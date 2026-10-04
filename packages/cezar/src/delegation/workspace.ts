@@ -1,3 +1,4 @@
+import { inspectGeneration } from './process-liveness.ts';
 import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
@@ -252,7 +253,7 @@ export type WorkerNoMaterializationProof = (workspace: WorkerWorkspace) => boole
  * `beforeRemove` runs once every check has passed, right before git removes the checkout: call
  * this through `releaseThenRemoveOwnedWorkspace` so the worker's preview goes first (#781). */
 export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorkspace, neverMaterialized?: WorkerNoMaterializationProof,
-  assertCurrent?: () => void, beforeRemove?: () => Promise<void>): Promise<WorkerDestroyResult> {
+  assertCurrent?: () => void, beforeRemove?: () => Promise<void>, assertUnheld?: () => void): Promise<WorkerDestroyResult> {
   let remaining: Array<'worktree' | 'branch'> = ['worktree', 'branch'];
   let provisioned = false;
   const result = (): WorkerDestroyResult => ({ workerId: value.ownerRunId, state: remaining.length ? 'incomplete' : 'complete', remaining,
@@ -312,6 +313,10 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
         assertCurrent?.();
         await beforeRemove?.();
         assertCurrent?.();
+        // Preview release may itself terminate a known owned holder. Check unrelated holders
+        // only afterwards, immediately before destructive Git; they are never signalled.
+        assertUnheld?.();
+        if (inspectGeneration({ paths: [workspace.path] }).liveness !== 'gone') return result();
         const removed = await mutationGit(repoRoot, ['worktree', 'remove', '--force', workspace.path]);
         if (!removed.ok) return result();
         remaining = ['branch'];
@@ -326,6 +331,7 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
         if (current.sha !== checkpoint.sha || !same(current.log.file, checkpoint.logFile) || hash(current.log.content) !== checkpoint.logHash) return result();
         // Ref CAS: never delete a branch advanced after our verified snapshot.
         assertCurrent?.();
+        assertUnheld?.();
         const removed = await mutationGit(repoRoot, ['update-ref', '-d', `refs/heads/${workspace.branch}`, checkpoint.sha]);
         if (!removed.ok || await branchExists()) return result();
       }

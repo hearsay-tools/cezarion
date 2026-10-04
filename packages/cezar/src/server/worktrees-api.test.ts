@@ -1,3 +1,4 @@
+import { scopeFixtureProcesses } from '../delegation/process-scope.testkit.ts';
 import { createFixtureManager, drainFixtureManagers } from '../workflows/fixture-cleanup.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
@@ -6,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import type { Hono } from 'hono';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { onTestFinished, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createOwnedWorkspace } from '../delegation/workspace.ts';
 import { createWorktree } from '../git-worktree.ts';
 import { RunStore } from '../runs/store.ts';
@@ -32,6 +33,7 @@ describe('the worktrees API', () => {
   const savedHome = process.env.CEZ_HOME;
 
   beforeEach(async () => {
+    onTestFinished(scopeFixtureProcesses());
     // `keep` now falls back to the workspace default, so pin CEZ_HOME at an
     // empty temp dir — the suite must never read the developer's real ~/.cezar.
     cezHome = mkdtempSync(join(tmpdir(), 'cez-wtapi-home-'));

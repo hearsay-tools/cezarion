@@ -1,9 +1,10 @@
+import { scopeFixtureProcesses } from '../delegation/process-scope.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, onTestFailed, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFailed, onTestFinished, vi } from 'vitest';
 import { workerWaitRequestSchema, type WorkerWait } from '@open-mercato/cezar-contract';
 import { RunStore, type RunRecord } from '../runs/store.ts';
 import * as runnerFactory from '../core/runner-factory.ts';
@@ -50,8 +51,10 @@ export function track() {
   const real = internals.recordTurnEnd.bind(manager);
   internals.recordTurnEnd = (...args) => { const result = real(...args); bookkeeping.push(result); return result; };
 }
-export function useWorkerWaitFixture(): void {
+export function useWorkerWaitFixture(options: { processScope?: false } = {}): void {
   beforeEach(() => {
+    // Native mock children belong to this fixture; specialized holder tests supply their own scope.
+    if (options.processScope !== false) onTestFinished(scopeFixtureProcesses());
     saved = { ...process.env }; began = performance.now(); checkpoints = []; failureState = undefined; checkpoint('setup');
     onTestFailed(() => console.error('WORKER_WAIT_FAILURE_STATE', JSON.stringify(failureState ?? captureState())));
     process.env.CEZ_DRY_RUN = '1'; process.env.CEZ_AUTONAME = '0';

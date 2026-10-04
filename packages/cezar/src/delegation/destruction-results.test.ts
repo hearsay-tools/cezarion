@@ -1,22 +1,30 @@
+import { scopeFixtureProcesses } from './process-scope.testkit.ts';
 import { createFixtureManager } from '../workflows/fixture-cleanup.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { onTestFinished, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fixture } from './service.testkit.ts';
 import { ensureOwnedWorkspace, planOwnedWorkspace } from './workspace.ts';
 import { RunStore } from '../runs/store.ts';
 
 import { QUICK_TASK_WORKFLOW } from '../workflows/types.ts';
 
-vi.mock('node:fs', async original => { const fs = await original<typeof import('node:fs')>(); return { ...fs, rmSync: vi.fn(fs.rmSync) }; });
+vi.mock('node:fs', async original => {
+  const fs = await original<typeof import('node:fs') & { default: typeof import('node:fs') }>();
+  return { ...fs,
+    // Keep enumeration live while this suite injects only removal failures.
+    readdirSync: (...args: Parameters<typeof fs.readdirSync>) => fs.default.readdirSync(...args),
+    rmSync: vi.fn(fs.rmSync),
+  };
+});
 
 // Git worktree teardown + a live RunManager contend under full-suite workers; cancel/dispose
 // without polling. Timeout matches the suite's 15s git/manager waits rather than the 5s default.
 describe('verified destruction retains results through explicit history deletion', { timeout: 15_000 }, () => {
   let f: ReturnType<typeof fixture>;
-  beforeEach(() => { vi.stubEnv('CEZ_DELEGATION', '1'); f = fixture(); });
+  beforeEach(() => { onTestFinished(scopeFixtureProcesses()); vi.stubEnv('CEZ_DELEGATION', '1'); f = fixture(); });
   afterEach(async () => {
     for (const run of f.store.listRuns()) f.manager.cancel(run.id);
     vi.restoreAllMocks(); await f.close(); vi.unstubAllEnvs();

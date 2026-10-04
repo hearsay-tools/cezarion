@@ -1,3 +1,4 @@
+import { workerEvidenceRunIds } from '../runs/worker-execution.ts';
 import { ciErrorMessage } from '../ci-wait/errors.ts';
 import { ciWaitRequestSchema, ciWaitResultSchema, previewServeRequestSchema, type CiWait, type CiWaitRequest, type CiWaitResult, type CiWaitErrorCode, type PreviewServeRequest, type PreviewServeResult } from '@open-mercato/cezar-contract';
 import { previewToolEnabled } from '../ci-wait/tools.ts';
@@ -20,7 +21,8 @@ import {
 } from '../core/ask.ts';
 import { type AgentSession } from '../core/claude-cli-runner.ts';
 import { hasRegisteredRunProcess, onUsage, registerRunProcess, unregisterRunProcess, type ProcessUsage } from '../core/process-usage.ts';
-import { inspectGeneration, isCurrentProcess, processStartToken, recordedProcessLive, type GenerationProbe, type WorkerProcessRecord } from '../delegation/process-liveness.ts';
+import { WorkerScratchCleanup } from '../delegation/scratch-cleanup.ts';
+import { inspectExecutionGeneration, isCurrentProcess, processStartToken, recordedProcessLive, type GenerationProbe, type WorkerProcessRecord } from '../delegation/process-liveness.ts';
 import { parseUsageLimit } from '../core/usage-limit.ts';
 import { startManagedSession } from '../core/managed-session.ts';
 import { createRunner } from '../core/runner-factory.ts';
@@ -87,9 +89,8 @@ import { isReclaimable, reclaimWorktrees, rematerializeReclaimedWorktree } from 
 import {
   AgentTempDirError,
   agentTmpEnv,
-  agentTmpDirLocations,
+  agentTmpDirLocationEvidence,
   removeAgentTmpDir,
-  sweepAgentTmpDirs,
 } from '../runs/agent-tmpdir.ts';
 import { extractTaskRefs, refineTaskRefs, titleRefNumber } from '../runs/task-refs.ts';
 import { parseTaskMarkers, stripTaskMarkers } from '../runs/task-markers.ts';
@@ -739,6 +740,7 @@ export class RunManager {
 
   private beginWorkerExecution(runId: string, admitted = true): void {
     if (this.store.getRun(runId)?.delegation?.role !== 'worker') return;
+    if (this.reclaiming.has(runId)) throw new Error('Worker resources are being cleaned up');
     // #469: one site for Continue, --resume, parent replies and queued revival after a crash.
     // Fresh: admission is one-shot, so a cached "alive" must not refuse an orphan that has since died.
     if (!this.executions.has(runId)) this.settleOrphanedWorkerExecution(runId, { admitting: true, fresh: true });
@@ -807,7 +809,7 @@ export class RunManager {
    * manager holds the run); `unknown` is a present record that proves nothing. */
   private orphanState(runId: string, admitting = false):
     | { state: 'none' | 'busy' | 'unknown' }
-    | { state: 'orphan'; generation: string; record?: WorkerProcessRecord; paths: string[]; since?: number } {
+    | { state: 'orphan'; generation: string; record?: WorkerProcessRecord; paths: string[]; pathsComplete: boolean; since?: number } {
     const run = this.store.getRun(runId);
     if (run?.delegation?.role !== 'worker' || this.disposed) return { state: 'none' };
     if (this.executions.has(runId) || this.active.has(runId) || this.starting.has(runId) || (!admitting && this.queue.includes(runId))) return { state: 'busy' };
@@ -818,9 +820,10 @@ export class RunManager {
     // finalization and reaping; only an absent one is legacy, scan-only evidence.
     if (record === 'unknown') return { state: 'unknown' };
     if (record !== 'absent' && isCurrentProcess(record.controller)) return { state: 'none' };
-    // Finalization may reap terminal task scratch, so a process working there keeps the generation alive.
+    // Legacy execution proof also considers scratch holders; cleanup uses a separate strict proof.
+    const locations = agentTmpDirLocationEvidence(this.dataDir, runId);
     return { state: 'orphan', generation: proof.generation, ...(record === 'absent' ? {} : { record }),
-      paths: [run.delegation.workspace.path, ...agentTmpDirLocations(this.dataDir, runId)],
+      paths: [run.delegation.workspace.path, ...locations.paths], pathsComplete: locations.complete,
       // No process of this worker can predate its record (1 s slack for tick rounding).
       ...(Number.isFinite(Date.parse(run.createdAt)) ? { since: Date.parse(run.createdAt) - 1_000 } : {}) };
   }
@@ -838,7 +841,7 @@ export class RunManager {
     if (!orphan) return false;
     const cached = this.orphanProbes.get(runId);
     if (!opts.fresh && cached?.generation === orphan.generation && Date.now() - cached.at < ORPHAN_PROBE_CACHE_MS) return false;
-    const probe = inspectGeneration(orphan);
+    const probe = inspectExecutionGeneration(orphan);
     if (probe.liveness !== 'gone') { this.orphanProbes.set(runId, { generation: orphan.generation, at: Date.now(), probe }); return false; }
     // A stale `alive` must not outlive a `gone` probe, even when the commit below fails.
     this.orphanProbes.delete(runId);
@@ -1147,6 +1150,7 @@ export class RunManager {
     options: { semaphore?: WorkspaceSemaphore; unreadInputGraceMs?: number; preview?: PreviewHostLike; cezarPort?: () => number | undefined } = {},
   ) {
     this.dataDir = join(repoRoot, '.ai/cezar');
+    this.workerScratchCleanup = new WorkerScratchCleanup(store, this.dataDir, id => this.isActive(id) || this.executions.has(id) || this.reclaiming.has(id));
     this.preview = options.preview;
     this.cezarPort = options.cezarPort;
     this.unreadInputGraceMs = options.unreadInputGraceMs ?? UNREAD_INPUT_GRACE_MS;
@@ -1179,6 +1183,7 @@ export class RunManager {
    */
   dispose(): void {
     this.disposed = true;
+    this.workerScratchCleanup.pause();
     for (const task of this.ciWatches.values()) task.abort.abort();
     this.ciWatches.clear();
     for (const task of this.ciRegistrations.values()) task.abort.abort();
@@ -2241,18 +2246,9 @@ export class RunManager {
       .listRuns()
       .filter((r) => ['queued', 'waiting', 'running'].includes(r.status))
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-    // A crash never reaches `dropActive`, so its temp directory (#785) outlived the run.
-    // Startup is the one moment we know which runs are still live, so sweep every other
-    // per-run directory here — bounded to `<dataDir>/tmp`, never a sibling.
-    // An owned process can survive its controller, including behind terminal
-    // public status. Unknown private termination retains that process's scratch.
-    const retained = this.store.listRuns().filter(run => run.delegation?.role === 'worker' &&
-      this.store.readWorkerExecution(run.id)?.phase !== 'complete');
-    // `dispose()` deliberately does not terminate live sessions, so a waiting
-    // record may still own a process even while this manager is recovering.
-    // Idle-close ends a process, not its task. Preserve all live task scratch,
-    // including workers whose previous process generation has completed.
-    sweepAgentTmpDirs(this.dataDir, [...live, ...retained].map(run => run.id));
+    // Scratch cleanup discovers private evidence independently of the salvageable run index.
+    // Terminal worker cleanup/retries and the generic orphan sweep share this boundary.
+    this.workerScratchCleanup.recover();
     for (const run of live) {
       if (this.isActive(run.id)) continue;
       if (this.workerExecutionStopped(run.id)) continue;
@@ -2462,6 +2458,18 @@ export class RunManager {
     this.reapTerminalScratch(runId);
   }
 
+  private readonly workerScratchCleanup: WorkerScratchCleanup;
+  /** Project detach cancels autonomous cleanup; reattach reconstructs the durable intents. */
+  pauseWorkerCleanup(): void { this.workerScratchCleanup.pause(); }
+  recoverWorkerCleanup(): void { if (!this.disposed) this.workerScratchCleanup.recover(); }
+
+  /** Hold off every admission path until destructive work (including async Git) completes. */
+  claimWorkerCleanup(runId: string): (() => void) | undefined {
+    if (this.disposed || this.reclaiming.has(runId) || this.isActive(runId) || this.executions.has(runId)) return undefined;
+    this.reclaiming.add(runId);
+    return () => { this.reclaiming.delete(runId); this.workerScratchCleanup.schedule(runId); };
+  }
+
   /** Scratch belongs to the task, not its current agent process (#515).
    * Terminal status alone is not process-exit proof: an active session or an
    * unfinished private worker generation must retain its files until exit. */
@@ -2469,7 +2477,8 @@ export class RunManager {
     const run = this.store.getRun(runId);
     if (!run || ['queued', 'running', 'waiting'].includes(run.status)) return;
     if (this.active.has(runId) || this.starting.has(runId) || this.queue.includes(runId)) return;
-    if (run.delegation?.role === 'worker' && this.store.readWorkerExecution(runId)?.phase !== 'complete') return;
+    const privateWorkers = workerEvidenceRunIds(this.dataDir);
+    if (run.delegation?.role === 'worker' || run.delegation?.role === 'invalid' || !privateWorkers || privateWorkers.includes(runId)) { this.workerScratchCleanup.schedule(runId); return; }
     removeAgentTmpDir(this.dataDir, runId);
   }
 

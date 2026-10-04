@@ -1,3 +1,4 @@
+import { scopeFixtureProcesses } from '../delegation/process-scope.testkit.ts';
 import { execFile as execFileCallback, execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
@@ -5,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { onTestFinished, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WorkerCollectedResult, WorkerDestroyResult, WorkerInspection, WorkerSpawnResult, WorkerWaitResult } from '@open-mercato/cezar-contract';
 import { DelegationController } from '../delegation/provision.ts';
 import { RunStore } from '../runs/store.ts';
@@ -42,6 +43,7 @@ describe('public delegation completion integration', () => {
     }
   }
   beforeEach(async () => {
+    onTestFinished(scopeFixtureProcesses());
     root = mkdtempSync(join(tmpdir(), 'cez-delegation-integration-'));
     repo = join(root, 'repo'); control = join(root, 'wire'); mkdirSync(repo); mkdirSync(control);
     git(repo, 'init', '-q', '-b', 'main');

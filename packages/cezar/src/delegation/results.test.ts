@@ -1,8 +1,9 @@
+import { scopeFixtureProcesses } from './process-scope.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, fsyncSync, fstatSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { beforeEach, afterEach, describe, it, expect, vi } from 'vitest';
+import { onTestFinished, beforeEach, afterEach, describe, it, expect, vi } from 'vitest';
 import { fixture } from './service.testkit.ts';
 import { ensureOwnedWorkspace } from './workspace.ts';
 import { removeWorktree } from '../git-worktree.ts';
@@ -10,13 +11,17 @@ import { RunStore } from '../runs/store.ts';
 import { artifactDirectory, publishArtifact } from '../artifacts/store.ts';
 
 vi.mock('node:fs', async importOriginal => {
-  const actual = await importOriginal<typeof import('node:fs')>();
-  return { ...actual, writeFileSync: vi.fn(actual.writeFileSync), fsyncSync: vi.fn(actual.fsyncSync) };
+  const actual = await importOriginal<typeof import('node:fs') & { default: typeof import('node:fs') }>();
+  return { ...actual,
+    // Keep enumeration live while this suite injects only write/fsync failures.
+    readdirSync: (...args: Parameters<typeof actual.readdirSync>) => actual.default.readdirSync(...args),
+    writeFileSync: vi.fn(actual.writeFileSync), fsyncSync: vi.fn(actual.fsyncSync),
+  };
 });
 
 describe('parent-owned collected worker results', () => {
   let f: ReturnType<typeof fixture>;
-  beforeEach(() => { vi.stubEnv('CEZ_DELEGATION', '1'); f = fixture(); });
+  beforeEach(() => { onTestFinished(scopeFixtureProcesses()); vi.stubEnv('CEZ_DELEGATION', '1'); f = fixture(); });
   afterEach(async () => { await f?.close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
   async function worker() {
     const { workerId } = await f.service.spawn(f.caller, { task: 'work', baseline: 'HEAD', requestId: randomUUID() });

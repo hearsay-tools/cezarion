@@ -96,6 +96,26 @@ function shortTimeout(ms = 400) {
 }
 const actions = (commands: string[][]) => commands.map(([action]) => action)
 
+/** Script only the probe transport and its completed-sample time. Failure capture still
+ * invokes the real fake CLI and writes its artifacts, outside the polling deadline. */
+function scriptProbes(browser: AgentBrowser, expression: string, samples: Array<{ value: unknown; durationMs: number }>) {
+  let now = 0
+  const budgets: Array<number | undefined> = []
+  const clock = vi.spyOn(performance, 'now').mockImplementation(() => now)
+  const transport = browser as unknown as { run: (args: string[], timeoutMs?: number) => Record<string, unknown> }
+  const invoke = transport.run.bind(browser)
+  const run = vi.spyOn(transport, 'run').mockImplementation((args, timeoutMs) => {
+    if (args[0] === 'eval' && args[1] === expression) {
+      const sample = samples[Math.min(budgets.length, samples.length - 1)]!
+      budgets.push(timeoutMs)
+      now += sample.durationMs
+      return { result: sample.value }
+    }
+    return invoke(args, timeoutMs)
+  })
+  return { budgets, elapsed: () => now, restore: () => { run.mockRestore(); clock.mockRestore() } }
+}
+
 describe('AgentBrowser.waitForStable (#415)', () => {
   it.each([
     { name: 'starts after the first probe completes', values: ['ready'], durations: [300, 10, 100, 100], holdMs: 200, probes: 4, endedAt: 510, expected: 'ready' },
@@ -139,21 +159,23 @@ describe('AgentBrowser.waitForStable (#415)', () => {
   it('a predicate that flips inside the hold window fails the wait, not a later expect', () => {
     shortTimeout()
     const { browser } = open(['Skills', 'Settings'])
-    const start = Date.now()
-    let clockReads = 0
-    const clock = vi.spyOn(Date, 'now').mockImplementation(() => start + 100 * clockReads++)
+    const probes = scriptProbes(browser, 'activeLabel()', [
+      { value: 'Skills', durationMs: 100 },
+      { value: 'Settings', durationMs: 100 },
+    ])
     let error: unknown
     try {
-      browser.waitForStable('activeLabel()', { holdMs: 200, intervalMs: 1, matcher: (v) => v === 'Skills' })
+      browser.waitForStable('activeLabel()', { holdMs: 200, intervalMs: 0, matcher: (v) => v === 'Skills' })
     } catch (caught) {
       error = caught
     } finally {
-      clock.mockRestore()
+      probes.restore()
     }
     expect(error).toBeInstanceOf(WaitForValueError)
     const failure = error as WaitForValueError
     expect(failure.message).toMatch(/value never stayed stable: activeLabel\(\)/)
     expect(failure.lastValue).toBe('Settings')
+    expect(probes.budgets).toEqual([400, 300, 200, 100])
   })
 })
 
@@ -179,17 +201,16 @@ describe('AgentBrowser.waitForValue (#409)', () => {
   it('a value that never matches fails through the failure bundle, naming the last sample', () => {
     shortTimeout()
     const { browser, commands, failures } = open([{ ready: false, seen: 'button#other' }])
-    const start = Date.now()
-    let clockReads = 0
-    // The initial deadline read starts at zero; each sample's clock read advances one interval.
-    const clock = vi.spyOn(Date, 'now').mockImplementation(() => start + 100 * clockReads++)
+    const probes = scriptProbes(browser, 'probe()', [
+      { value: { ready: false, seen: 'button#other' }, durationMs: 100 },
+    ])
     let error: unknown
     try {
-      browser.waitForValue<{ ready: boolean }>('probe()', (v) => v.ready)
+      browser.waitForValue<{ ready: boolean }>('probe()', (v) => v.ready, { intervalMs: 0 })
     } catch (caught) {
       error = caught
     } finally {
-      clock.mockRestore()
+      probes.restore()
     }
     expect(error).toBeInstanceOf(WaitForValueError)
     const failure = error as WaitForValueError
@@ -204,10 +225,12 @@ describe('AgentBrowser.waitForValue (#409)', () => {
       lastValue: { ready: false, seen: 'button#other' },
       spec: 'selection-states',
     })
-    // Sampled more than once before giving up, then captured: screenshot, snapshot, probe eval.
-    const seen = actions(commands())
-    expect(seen.filter((a) => a === 'eval').length).toBeGreaterThan(2)
-    expect(seen.slice(-3)).toEqual(['screenshot', 'snapshot', 'eval'])
+    expect(probes.budgets).toEqual([400, 300, 200, 100])
+    expect(probes.elapsed()).toBe(400)
+    expect(actions(commands())).toEqual(['screenshot', 'snapshot', 'eval'])
+    expect(readFileSync(join(failure.bundle, 'screenshot.png'), 'utf8')).toBe('PNG')
+    expect(readFileSync(join(failure.bundle, 'snapshot.txt'), 'utf8')).toBe('- button "Tools"')
+    expect(probe.captureErrors).toBeUndefined()
   })
 
   it('a sample that kept throwing reports the page error instead of a value', () => {
@@ -320,12 +343,51 @@ describe('setViewport (#794)', () => {
 })
 
 
-it('bounds the CLI probe and rejects a matching sample arriving after the wait deadline (#764)', () => {
-  process.env.AGENT_BROWSER_DEFAULT_TIMEOUT = '100'
-  const fake = open([{ delayMs: 1500, value: 'ready' }, 'ready'])
-  const started = Date.now()
-  expect(() => fake.browser.waitForValue('late()', value => value === 'ready', { intervalMs: 0 })).toThrow(WaitForValueError)
-  expect(Date.now() - started).toBeLessThan(1000)
+it('bounds a hung CLI probe without charging failure capture to the wait deadline (#764)', () => {
+  shortTimeout(100)
+  const { browser, commands } = open([{ delayMs: 1500, value: 'ready' }, 'ready'])
+  let error: unknown
+  try {
+    browser.waitForValue('late()', value => value === 'ready', { intervalMs: 0 })
+  } catch (caught) {
+    error = caught
+  }
+  // Prove the real subprocess was timed out, rather than relying on the whole call's
+  // elapsed time: screenshot, snapshot and diagnostic eval each have a separate budget.
+  expect(error).toBeInstanceOf(WaitForValueError)
+  expect(error).toMatchObject({ expression: 'late()', cause: { cause: { code: 'ETIMEDOUT' } } })
+  const failure = error as WaitForValueError
+  expect(failure.lastValue).toBeUndefined()
+  expect(actions(commands()).slice(-3)).toEqual(['screenshot', 'snapshot', 'eval'])
+  expect(readFileSync(join(failure.bundle, 'screenshot.png'), 'utf8')).toBe('PNG')
+  expect(readFileSync(join(failure.bundle, 'snapshot.txt'), 'utf8')).toBe('- button "Tools"')
+  const probe = JSON.parse(readFileSync(join(failure.bundle, 'probe.json'), 'utf8')) as Record<string, unknown>
+  expect(probe).toMatchObject({ kind: 'wait-value', expression: 'late()', page: 'ready' })
+  expect(probe.captureErrors).toBeUndefined()
+})
+
+it('rejects a matching sample completed after the deadline even when the CLI returns it (#764)', () => {
+  shortTimeout(100)
+  const { browser, commands } = open(['diagnostic page'])
+  const probes = scriptProbes(browser, 'late()', [
+    { value: false, durationMs: 60 },
+    { value: 'ready', durationMs: 60 },
+  ])
+  let error: unknown
+  try {
+    browser.waitForValue('late()', value => value === 'ready', { intervalMs: 0 })
+  } catch (caught) {
+    error = caught
+  } finally {
+    probes.restore()
+  }
+  expect(error).toBeInstanceOf(WaitForValueError)
+  expect(probes.budgets).toEqual([100, 40])
+  expect((error as WaitForValueError).lastValue).toBe(false)
+  expect(actions(commands())).toEqual(['screenshot', 'snapshot', 'eval'])
+  const probe = JSON.parse(readFileSync(join((error as WaitForValueError).bundle, 'probe.json'), 'utf8')) as Record<string, unknown>
+  expect(probe).toMatchObject({ kind: 'wait-value', expression: 'late()', lastValue: false, page: 'diagnostic page' })
+  expect(probe.captureErrors).toBeUndefined()
 })
 
 // #795: first truth, changing geometry, and returned focus may all precede

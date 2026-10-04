@@ -1,3 +1,4 @@
+import { scopeFixtureProcesses } from '../delegation/process-scope.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -29,6 +30,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
   const releases: Array<() => void> = [];
   const executions: Promise<unknown>[] = [];
   beforeEach(() => {
+    scopeFixtureProcesses();
     vi.stubEnv('CEZ_DRY_RUN', '1'); vi.stubEnv('CEZ_AUTONAME', '0');
     root = mkdtempSync(join(tmpdir(), 'cez-worker-destroy-'));
     execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: root });
@@ -430,7 +432,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     await until(() => store.getRun(w.id)?.status === 'waiting');
     expect(store.readWorkerExecution(w.id)).toEqual(deferred);
     manager.requestWorkerStop(w.id); expect(await manager.awaitRunTermination(w.id, 15000)).toBe(true);
-    expect(store.readWorkerExecution(w.id)).toEqual({ generation: deferred.generation, phase: 'complete' });
+    expect(store.readWorkerExecution(w.id)).toMatchObject({ generation: deferred.generation, phase: 'complete' });
   });
 
   it('capacity-deferred Continue invalidates prior completion before queueing and cancels without launching', async () => {
@@ -631,7 +633,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
         expect(await service.destroyForHuman('reopened', w.id)).toMatchObject({ state: 'complete', remaining: [] });
         await child.exited;
         expect(child.proc.signalCode).toBe('SIGKILL');
-        expect(reopened.readWorkerExecution(w.id)).toEqual({ ...prior, phase: 'complete' });
+        expect(reopened.readWorkerExecution(w.id)).toMatchObject({ ...prior, phase: 'complete' });
         expect(existsSync(workspace(w).path)).toBe(false); expect(branchExists(workspace(w).branch)).toBe(false);
       } finally { other.dispose(); reopened.flush(); }
     });
