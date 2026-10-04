@@ -193,9 +193,11 @@ export const workerSpawnRequestSchema = z.object({
   backend: workerBackendSchema.optional(),
   model: z.string().trim().min(1).max(512).optional(),
   effort: effortFieldSchema,
-  /** Catalog workflow name (built-in quick-task or `.ai/cezar/workflows/*.yaml`, #451). Absent means quick-task. */
+  /** Catalog workflow name (built-in quick-task or `.ai/cezar/workflows/*.yaml`, #451). Absent with no skill means quick-task. */
   workflow: z.string().trim().min(1).max(200).optional(),
-}).strict().refine(request => request.task.length + (request.context?.text?.length ?? 0) <= 100_000, { message: 'Combined task and context exceed 100000 characters' });
+  /** Discovered skill to run as a one-step task, mutually exclusive with workflow (#778). */
+  skill: z.string().trim().min(1).max(200).optional(),
+}).strict().refine(request => request.skill === undefined || request.workflow === undefined, { message: '--skill and --workflow cannot be used together' }).refine(request => request.task.length + (request.context?.text?.length ?? 0) <= 100_000, { message: 'Combined task and context exceed 100000 characters' });
 export type WorkerSpawnRequest = z.infer<typeof workerSpawnRequestSchema>;
 
 export const workerSteerRequestSchema = z.object({
