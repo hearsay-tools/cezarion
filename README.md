@@ -1042,9 +1042,11 @@ cez artifact publish /tmp/decision.md
 
 Cezar supplies the bundled command and task context to agent sessions automatically
 (`CEZ_TASK_ID` and `CEZ_ARTIFACTS_DIR`; do not configure these yourself). The command
-returns JSON with a Markdown link for the agent to share. The Files tab also lists
-published artifacts. It previews text, Markdown and raster images; other formats
-can be downloaded. HTML/scripts never execute inside the cockpit, and embedded
+returns JSON with a Markdown link for the agent to share. When the owning project
+is registered, the link keeps that project when copied or opened from another
+project. If ownership cannot be discovered, publication keeps the legacy task link.
+The Files tab also lists published artifacts. It previews text, Markdown and raster
+images; other formats can be downloaded. HTML/scripts never execute inside the cockpit, and embedded
 images in Markdown documents do not load automatically.
 
 Snapshots do not change when the original file changes. They survive worktree
