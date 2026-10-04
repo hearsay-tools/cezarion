@@ -21,7 +21,7 @@ function setTmpRoot(value: string | undefined) {
 }
 
 const cases = ['malformed receipt', 'denied receipt', 'malformed pointer', 'denied pointer'];
-describe.runIf(process.platform === 'linux' && process.getuid?.() !== 0)('R36 orphan execution location evidence', () => {
+describe.runIf(process.platform === 'linux' && process.getuid?.() !== 0)('R43 orphan execution location evidence', () => {
   useWorkerWaitFixture();
   let savedTmpdir: string | undefined;
   const temporaryRoots: string[] = [];

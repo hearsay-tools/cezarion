@@ -20,18 +20,21 @@
  */
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 
 import type { AgentRunSpec, AgentEvent, AgentRunResult, AgentSession, RunnerId, SessionOptions } from './agent-runner.ts';
+import { profileEnv } from './agent-profiles.ts';
 import { createRunner } from './runner-factory.ts';
 import type { UiEvent } from './ui-events.ts';
 import { RunStore, type RunRecord } from '../runs/store.ts';
 import { RunManager } from '../workflows/run.ts';
 import { createFixtureManager, drainFixtureManagers } from '../workflows/fixture-cleanup.testkit.ts';
+import { DelegationController } from '../delegation/provision.ts';
+import { plannedWorkflow, skillTaskSteps } from '../workflows/types.ts';
 import { planOwnedWorkspace } from '../delegation/workspace.ts';
 import { workerWorkflowHash, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
 import { stepKind, type WorkflowDef } from '../workflows/types.ts';
@@ -64,6 +67,10 @@ export const SCENARIOS = [
   'shutdown-stderr',
   'crash-stderr',
   'crash-stderr-single',
+  'autonomous',
+  'autonomous-cap',
+  'autonomous-ask-cap',
+  'autonomous-readiness-idle',
   'baseline',
   'done',
   'hold',
@@ -110,6 +117,24 @@ export const NO_PROGRESS_CRITERIA = [
   { id: 'N4', scenario: 'baseline', name: 'Continue sessions enforce inactivity' },
 ] as const;
 
+/** #426: workflow-autonomous-parity.test.ts, real native wires on both turn-end paths. */
+export const AUTONOMOUS_CRITERIA = [
+  { id: 'A1', scenario: 'autonomous', name: 'nudges fresh markerless turns to completion' },
+  { id: 'A2', scenario: 'autonomous', name: 'hydrates autonomous Continue sessions' },
+  { id: 'A3', scenario: 'ask-snapshot', name: 'records overridden portable questions on fresh turns' },
+  { id: 'A4', scenario: 'ask-snapshot', name: 'records overridden portable questions on Continue' },
+  { id: 'A5', scenario: 'autonomous-cap', name: 'parks at the cap with an explicit note' },
+  { id: 'A6', scenario: 'autonomous', name: 'keeps non-autonomous parking reachable' },
+  { id: 'A7', scenario: 'split-text', name: 'nudges monitoring without a false waiting heartbeat' },
+  { id: 'A8', scenario: 'done', name: 'honors DONE without a nudge' },
+  { id: 'A9', scenario: 'ask', name: 'preserves native mid-turn questions' },
+  { id: 'A10', scenario: 'ask-snapshot', name: 'never overrides a persisted unanswered question' },
+  { id: 'A11', scenario: 'autonomous-ask-cap', name: 'continues after a portable override and delayed readiness' },
+  { id: 'A12', scenario: 'autonomous-ask-cap', name: 'continues a resumed portable override after delayed readiness' },
+  { id: 'A13', scenario: 'autonomous-readiness-idle', name: 'settles a root readiness timeout after process exit' },
+  { id: 'A14', scenario: 'autonomous-readiness-idle', name: 'settles a continued root readiness timeout after process exit' },
+] as const;
+
 export interface HarnessAdapter {
   readonly backend: RunnerId;
   /** Every human ask wire this runner exposes; marker fallback when none exists. */
@@ -146,6 +171,9 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     mockBin: CLAUDE_MOCK,
     scenarios: {
       'missing-binary': BASELINE_PROMPT,
+      autonomous: 'mock:autonomous',
+      'autonomous-cap': 'mock:autonomous-cap',
+      'autonomous-ask-cap': 'mock:autonomous-ask-cap',
       baseline: BASELINE_PROMPT,
       'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
       'crash-stderr-held-pipe': 'mock:crash-stderr-held-pipe',
@@ -178,6 +206,9 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     mockBin: CODEX_MOCK,
     scenarios: {
       'missing-binary': BASELINE_PROMPT,
+      autonomous: 'mock:autonomous',
+      'autonomous-cap': 'mock:autonomous-cap',
+      'autonomous-ask-cap': 'mock:autonomous-ask-cap',
       baseline: BASELINE_PROMPT,
       'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
       'crash-stderr-held-pipe': 'mock:crash-stderr-held-pipe',
@@ -210,6 +241,10 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     mockBin: OPENCODE_MOCK,
     scenarios: {
       'missing-binary': BASELINE_PROMPT,
+      autonomous: 'mock:autonomous',
+      'autonomous-cap': 'mock:autonomous-cap',
+      'autonomous-ask-cap': 'mock:autonomous-ask-cap',
+      'autonomous-readiness-idle': 'mock:autonomous-readiness-idle',
       baseline: BASELINE_PROMPT,
       'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
       'crash-stderr-held-pipe': 'mock:crash-stderr-held-pipe',
@@ -241,7 +276,11 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     ],
     binEnv: 'CEZ_CURSOR_BIN',
     mockBin: join(HERE, '..', '..', 'scripts', 'mock-cursor-acp.mjs'),
-    scenarios: { 'missing-binary': BASELINE_PROMPT, baseline: BASELINE_PROMPT,
+    scenarios: { 'missing-binary': BASELINE_PROMPT,
+      autonomous: 'mock:autonomous',
+      'autonomous-cap': 'mock:autonomous-cap',
+      'autonomous-ask-cap': 'mock:autonomous-ask-cap',
+      baseline: BASELINE_PROMPT,
       'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
       'crash-stderr-held-pipe': 'mock:crash-stderr-held-pipe',
       'shutdown-stderr': 'mock:crash-stderr-clean',
@@ -262,6 +301,9 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     mockBin: PI_MOCK,
     scenarios: {
       'missing-binary': BASELINE_PROMPT,
+      autonomous: 'mock:autonomous',
+      'autonomous-cap': 'mock:autonomous-cap',
+      'autonomous-ask-cap': 'mock:autonomous-ask-cap',
       baseline: BASELINE_PROMPT,
       'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
       'crash-stderr-held-pipe': 'mock:crash-stderr-held-pipe',
@@ -328,6 +370,18 @@ export interface ParityExemption {
  * is the runner, not this table.
  */
 export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
+  ...(['A13', 'A14'] as const).flatMap(criterion => (['claude', 'codex', 'pi', 'cursor'] as const).map(backend => ({
+    criterion, backend, kind: 'scenario-unconstructible' as const,
+    reason: 'This wire has no separate portable-answer HTTP ACK retained after turn completion. The executable cell checks ordinary root idle expiry and successful Continue through its native wire instead.',
+  }))),
+  {
+    criterion: 'A9', backend: 'claude', kind: 'capability-absent',
+    reason: 'Claude stream-json uses the turn-end CEZ:ASK fallback; its ask wire emits no native mid-turn ask.requested (A3/A4 cover the portable policy).',
+  },
+  {
+    criterion: 'A9', backend: 'pi', kind: 'capability-absent',
+    reason: 'Pi RPC uses the turn-end CEZ:ASK fallback; its ask wire emits no native mid-turn ask.requested (A3/A4 cover the portable policy).',
+  },
   {
     criterion: 'R16', backend: 'claude', kind: 'capability-absent',
     reason: 'Claude stream-json has whole assistant text blocks and a result-only fallback, not a separate completed-text channel. claude-cli-runner handleClaudeMessage and claude-ui-mapper mapResult consume the same text (text-turn.ndjson and claude-ui-mapper result-fallback tests).',
@@ -551,6 +605,7 @@ export async function driveRun(
   settled: (record: RunRecord | undefined) => boolean,
   timeoutMs = 30_000,
   afterSettled?: (context: { store: RunStore; manager: RunManager; runId: string }) => Promise<void>,
+  options: { autonomous?: boolean } = {},
 ): Promise<RunObservation> {
   const adapter = HARNESS_ADAPTERS[backend];
   const savedBin = process.env[adapter.binEnv];
@@ -572,6 +627,7 @@ export async function driveRun(
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
     manager = createFixtureManager(store, repoRoot);
     const started = manager.startRun(SINGLE_STEP, {
+      ...options,
       task: typeof scenario === 'string' ? promptFor(backend, scenario) : scenario.prompt,
       runner: backend,
       worktree: false,
@@ -662,6 +718,8 @@ export async function withOwnedInputRun(
     agentProfile?: string;
     /** Further runners a mixed chain launches; their mocks are wired for the fixture's lifetime. */
     extraBackends?: readonly RunnerId[];
+    /** Environment overrides restored after the native mock worker settles. */
+    env?: Record<string, string>;
   } = {},
 ): Promise<void> {
   const adapter = HARNESS_ADAPTERS[backend];
@@ -670,6 +728,8 @@ export async function withOwnedInputRun(
   for (const extra of options.extraBackends ?? []) process.env[HARNESS_ADAPTERS[extra].binEnv] = HARNESS_ADAPTERS[extra].mockBin;
   const savedDry = process.env.CEZ_DRY_RUN;
   const savedAutoName = process.env.CEZ_AUTONAME;
+  const savedEnv = Object.keys(options.env ?? {}).map(name => [name, process.env[name]] as const);
+  Object.assign(process.env, options.env);
   // Naming is a separate auxiliary invocation, not part of input delivery.
   process.env.CEZ_AUTONAME = '0';
   process.env[adapter.binEnv] = adapter.mockBin;
@@ -746,6 +806,71 @@ export async function withOwnedInputRun(
     if (savedDry !== undefined) process.env.CEZ_DRY_RUN = savedDry;
     if (savedAutoName === undefined) delete process.env.CEZ_AUTONAME;
     else process.env.CEZ_AUTONAME = savedAutoName;
+    for (const [name, saved] of savedEnv) {
+      if (saved === undefined) delete process.env[name]; else process.env[name] = saved;
+    }
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+}
+
+/** Launch a skill-driven parent and accept its child through the real session settings/service.
+ * Native mock recordings stay in each run's cwd; no worker prompt is supplied by the fixture. */
+export async function withSkillParentRun(
+  backend: RunnerId,
+  env: Record<string, string>,
+  body: (fixture: { repoRoot: string; parentRunId: string; runId: string; store: RunStore; manager: RunManager }) => Promise<void>,
+): Promise<void> {
+  const adapter = HARNESS_ADAPTERS[backend];
+  const repoRoot = mkdtempSync(join(tmpdir(), `cez-skill-parent-${backend}-`));
+  // Acceptance binds the live parent's account, and spawn requires that directory to exist.
+  // Supply an empty test-owned home rather than relying on an installed host login.
+  const accountHome = join(repoRoot, 'account');
+  mkdirSync(accountHome);
+  const overrides = { ...env, ...profileEnv(backend, accountHome), CEZ_HOME: join(repoRoot, 'workspace-home'),
+    [adapter.binEnv]: adapter.mockBin, CEZ_DELEGATION: '1', CEZ_AUTONAME: '0' };
+  const saved = Object.keys({ ...overrides, CEZ_DRY_RUN: '' }).map(name => [name, process.env[name]] as const);
+  Object.assign(process.env, overrides);
+  delete process.env.CEZ_DRY_RUN;
+  let store: RunStore | undefined;
+  let manager: RunManager | undefined;
+  let controller: DelegationController | undefined;
+  let drainBookkeeping = async () => {};
+  try {
+    await execFileAsync('git', ['init', '-q', '-b', 'main'], { cwd: repoRoot });
+    await execFileAsync('git', ['config', 'gc.auto', '0'], { cwd: repoRoot });
+    await execFileAsync('git', ['config', 'maintenance.auto', 'false'], { cwd: repoRoot });
+    writeFileSync(join(repoRoot, 'a.txt'), 'one\n');
+    await execFileAsync('git', ['add', '-A'], { cwd: repoRoot });
+    await execFileAsync('git', [...GIT_IDENTITY, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
+    const skillsDir = join(repoRoot, '.ai/cezar/skills');
+    mkdirSync(skillsDir, { recursive: true });
+    writeFileSync(join(skillsDir, 'parent-skill.md'), 'PARENT SKILL BODY 778');
+    store = RunStore.open(join(repoRoot, '.ai/cezar'));
+    manager = new RunManager(store, repoRoot);
+    drainBookkeeping = trackTurnBookkeeping(manager);
+    controller = await DelegationController.start();
+    controller.attachProject({ id: 'project', root: repoRoot, store, manager });
+    const parent = manager.startRun(plannedWorkflow(skillTaskSteps('parent-skill')), {
+      task: promptFor(backend, 'baseline'), runner: backend, worktree: false, systemPrompt: 'parent extra',
+    });
+    await waitFor(() => store!.getRun(parent.id)?.status === 'waiting', 30_000);
+    // Authenticate a test-owned caller through the real registry. Execution settings still
+    // come exclusively from the parent's actual live native session.
+    const caller = controller.credentials.authenticate(controller.credentials.issue('project', parent.id, randomUUID()))!;
+    const child = await controller.service.spawn(caller, {
+      task: promptFor(backend, 'done'), baseline: 'HEAD', requestId: randomUUID(),
+    });
+    await body({ repoRoot, parentRunId: parent.id, runId: child.workerId, store, manager });
+  } finally {
+    for (const run of store?.listRuns() ?? []) manager?.cancel(run.id);
+    if (manager && store) await waitFor(() => store!.listRuns().every(run => !manager!.isActive(run.id)), 30_000);
+    await drainBookkeeping();
+    await controller?.close();
+    manager?.dispose();
+    store?.flush();
+    for (const [name, value] of saved) {
+      if (value === undefined) delete process.env[name]; else process.env[name] = value;
+    }
     rmSync(repoRoot, { recursive: true, force: true });
   }
 }

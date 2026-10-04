@@ -283,7 +283,7 @@ candidate remains. If that proof never becomes available, files remain indefinit
     holders and matching live process records also block. Same-boot controllers for
     old-created workers, legacy/missing tokens, unknown boot IDs and scan errors retain
     conservative behavior.
-- `worker-reboot-parity.test.ts` (registered harness row R36): every `RUNNER_IDS` backend
+- `worker-reboot-parity.test.ts` (registered harness row R43): every `RUNNER_IDS` backend
   launches and exits through its `HARNESS_ADAPTERS` native mock wire. Both collect-first and
   destroy-first restore prior-boot interrupted evidence beside a successful collected twin.
   A real Linux Python process uses `PR_SET_DUMPABLE=0` while holding worktree or scratch;
@@ -326,7 +326,7 @@ candidate remains. If that proof never becomes available, files remain indefinit
 
 ## Verification of the approved #738 revision (2026-10-04)
 
-- Baseline `d2c66da2`, production sources temporarily restored, native R36 filter
+- Baseline `d2c66da2`, production sources temporarily restored, native R43 filter
   `clears parent Finish`: **10 behavioral failures** (five collect cases deleted held scratch;
   five destroy cases incorrectly returned complete). Implementation source bytes restored exactly.
 - Focused nine-file run: **265 passed** across `process-liveness`, `worker-reboot-parity`,
@@ -337,7 +337,7 @@ candidate remains. If that proof never becomes available, files remain indefinit
   and fresh absent-resource admission despite ambient denial while retained-path reuse is refused.
 - Harness registration guard (`every criterion is a live row`): **1 passed**.
 - `npm run build:server`, `npm run typecheck:server`, `git diff --check`: passed.
-- R36 scopes only `/proc` enumeration to its explicit real holder PIDs and, for continuation,
+- R43 scopes only `/proc` enumeration to its explicit real holder PIDs and, for continuation,
   recorded native child PIDs. Other focused lifecycle fixtures enumerate their own process tree
   and previously observed descendants, excluding ambient daemons and parallel test workers.
   Real kernel cwd denial is asserted; the holder writes after settlement/probes and is never
@@ -354,7 +354,7 @@ candidate remains. If that proof never becomes available, files remain indefinit
   scratch. Every failure was the retained-file assertion, not a missing helper or mock.
   All implementation source bytes were restored exactly in `finally`.
 - Focused seven-file run: **186 passed** across scratch cleanup, run/workflow temp directories,
-  native R36, worker destroy, delegation service and retention. The finalized scratch fixture
+  native R43, worker destroy, delegation service and retention. The finalized scratch fixture
   additionally reran **18 passed**, using production fallback creation/ownership markers.
 - The reviewer's standalone real-Linux reproduction passed all three index-loss shapes:
   actual `EACCES`, strict probe `alive`, retained files and successful relative writes after
@@ -377,7 +377,7 @@ candidate remains. If that proof never becomes available, files remain indefinit
   unreadable owner marker incorrectly changed holder safety to true; a real unwritable
   fallback parent caused cleanup to erase the saved fallback pointer. Source restoration was
   verified byte-for-byte. No helper-import or spy-target failure counted as red.
-- Focused seven-file run: **190 passed**, including all 15 native R36 cases and **22** scratch
+- Focused seven-file run: **190 passed**, including all 15 native R43 cases and **22** scratch
   cleanup cases. New guards prove restart and ordinary 60-second retries after marker denial
   or partial removal, and that a saved removal receipt cannot delete an ownerless or foreign
   replacement directory. Temporary environment changes are restored explicitly.
@@ -398,15 +398,15 @@ candidate remains. If that proof never becomes available, files remain indefinit
   produced **27 behavioral failures / 11 guard passes**: twenty native cases falsely settled live
   holders; seven legacy/unknown-boot shapes returned `gone` for incomplete location evidence.
   All source bytes were restored in `finally` and verified exactly.
-- The new native R36 matrix covers all five runners and four real malformed/permission-denied
+- The new native R43 matrix covers all five runners and four real malformed/permission-denied
   receipt/pointer shapes, post-probe holder writes, blocked collect/Finish, and settlement plus
   cleanup once holders exit and evidence recovers. Both reviewer scripts now retain the saved
   path and report `alive`, settlement `false`, phase `starting`, resource safety `false`.
 - Focused lifecycle/tempdir/retention run: **212 passed** across eight files; separate scratch
   cleanup run: **22 passed**, including the prior index-loss, fallback-retry and replacement
-  safety guards. The harness registration guard passed. The existing fifteen R36 cases remain;
+  safety guards. The harness registration guard passed. The existing fifteen R43 cases remain;
   collect/destroy also test damaged cleanup metadata during known-reboot settlement, then restore
-  metadata before the original holder-only deletion/reuse assertions. The final R36-only rerun
+  metadata before the original holder-only deletion/reuse assertions. The final R43-only rerun
   passed all **15** cases after this fixture adjustment.
 - Server build, server test typecheck and diff check passed. Linux/unprivileged permission tests
   use actual EACCES, readable holder cwd, writes and exits; enumeration is scoped to fixture

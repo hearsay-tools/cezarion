@@ -268,6 +268,25 @@ describe('bundled worker CLI', () => {
     await runWorkerCommand(['spawn', '--help'], {});
     expect(String(output.mock.calls.at(-1)?.[0])).toContain('--workflow');
   });
+  it('sends an explicit skill through the spawn transport', async () => {
+    const dir = join(f.root, '.ai/cezar/skills'); mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'worker-skill.md'), '# Worker skill\nInspect the task.');
+    const spawn = vi.spyOn(f.service, 'spawn');
+    expect(await runWorkerCommand(['spawn', '--baseline', 'parent-head', '--request-id', randomUUID(), '--skill', 'worker-skill', 'work'], env)).toBe(0);
+    expect(spawn.mock.calls[0]?.[1]).toMatchObject({ skill: 'worker-skill' });
+    expect(f.store.getRun(json().workerId)?.workflowDef?.steps[0]?.skill).toBe('worker-skill');
+    await runWorkerCommand(['spawn', '--help'], {});
+    expect(String(output.mock.calls.at(-1)?.[0])).toContain('--skill');
+  });
+  it.each([
+    { flags: ['--skill', ''], error: '--skill must name a skill' },
+    { flags: ['--skill', '   '], error: '--skill must name a skill' },
+    { flags: ['--skill', 'x', '--workflow', 'review'], error: '--skill and --workflow cannot be used together' },
+  ])('rejects invalid skill flags $flags', async ({ flags, error }) => {
+    expect(await runWorkerCommand(['spawn', '--baseline', 'parent-head', '--request-id', randomUUID(), ...flags, 'work'], env)).toBe(1);
+    expect(json()).toMatchObject({ code: 'invalid_input', error });
+    expect(f.store.listRuns()).toHaveLength(1);
+  });
   it('sends explicit wait modes and cancels a wait by ID using the provisioned transport', async () => {
     expect(await runWorkerCommand(['spawn', '--baseline', 'parent-head', '--request-id', randomUUID(), 'work'], env)).toBe(0);
     const { workerId } = json();

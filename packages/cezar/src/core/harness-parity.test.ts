@@ -42,10 +42,11 @@ import { appendTurnText } from '../workflows/run.ts';
 import * as gitWorktree from '../git-worktree.ts';
 import { cleanupCheckpoint, seedSettledFamily } from '../workflows/delegation-reconcile.testkit.ts';
 import { supportsProfiles } from './agent-profiles.ts';
-import type { WorkflowDef } from '../workflows/types.ts';
+import { plannedWorkflow, skillTaskSteps, type WorkflowDef } from '../workflows/types.ts';
 import { workerWorkflowHash, type WorkerAccountBinding, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
 import {
   withOwnedInputRun,
+  withSkillParentRun,
   promptFor,
   driveRun,
   driveSeam,
@@ -55,6 +56,7 @@ import {
   HARNESS_ADAPTERS,
   WORKFLOW_TIMEOUT_CRITERIA,
   NO_PROGRESS_CRITERIA,
+  AUTONOMOUS_CRITERIA,
   PARITY_EXEMPTIONS,
   PINNED_SESSION_ID,
   type RunObservation,
@@ -518,9 +520,17 @@ const CONTROL_CRITERIA = [
   { id: 'R34', scenario: 'baseline' },
   // The shared cezar tool list, `describe('harness parity — cezarTools list behind CEZ_PREVIEW')` (#781).
   { id: 'R35', scenario: 'baseline' },
+  // #399: shared monitoring instructions on each native prompt channel.
+  { id: 'R36', scenario: 'baseline' },
+  { id: 'R37', scenario: 'baseline' },
+  { id: 'R38', scenario: 'split-text' },
+  { id: 'R39', scenario: 'split-text' },
+  { id: 'R40', scenario: 'baseline' },
+  { id: 'R41', scenario: 'done' },
+  { id: 'R42', scenario: 'baseline' },
   // workflows/worker-reboot-parity.test.ts and worker-location-evidence.test.ts: native exit/Continue,
   // independent reboot proof, legacy location uncertainty, real holders, cleanup retries and parent Finish.
-  { id: 'R36', scenario: 'baseline' },
+  { id: 'R43', scenario: 'baseline' },
 ] as const;
 
 /**
@@ -1066,6 +1076,51 @@ describe('harness parity — owned input run tier', () => {
       }, { workflowDef });
     }, 60_000);
 
+    it(`${backend} R42 spawns from a skill-driven parent without inheriting its skill on the native wire (#778)`, async () => {
+      const name = 'skill-inheritance';
+      await withSkillParentRun(backend, probeEnv(name), async ({ store, manager, repoRoot, runId }) => {
+        const parentRecording = readRecording(repoRoot, name).join('\n');
+        expect(parentRecording).toContain('Selected skill: /parent-skill');
+        expect(parentRecording).toContain('PARENT SKILL BODY 778');
+        expect(parentRecording).toContain('parent extra');
+        await waitFor(() => !manager.isActive(runId), 30_000);
+        const worker = store.getRun(runId)!;
+        expect(worker.error).toBeUndefined();
+        expect(worker.steps.map(step => ({ id: step.id, status: step.status }))).toEqual([{ id: 'task', status: 'done' }]);
+        if (worker.delegation?.role !== 'worker') throw new Error('expected worker');
+        const childRecording = readRecording(worker.delegation.workspace.path, name).join('\n');
+        expect(childRecording).toContain('parent extra');
+        expect(childRecording).not.toContain('Selected skill: /parent-skill');
+        expect(childRecording).not.toContain('PARENT SKILL BODY 778');
+        expect(worker.systemPrompt).toBe('parent extra');
+      });
+    }, 60_000);
+
+    it(`${backend} R41 runs a --skill worker with the skill in its system prompt and no parent skill (#778)`, async () => {
+      const workflowDef = plannedWorkflow(skillTaskSteps('worker-skill').map(step => ({ ...step, runner: backend })));
+      const identity: WorkerExecutionIdentity = { kind: 'internal', workflowHash: workerWorkflowHash(workflowDef) };
+      const name = 'worker-skill';
+      await withOwnedInputRun(backend, 'done', async ({ store, manager, repoRoot, runId, parentRunId }) => {
+        const skillsDir = join(repoRoot, '.ai/cezar/skills');
+        mkdirSync(skillsDir, { recursive: true });
+        writeFileSync(join(skillsDir, 'worker-skill.md'), 'WORKER SKILL BODY');
+        store.updateRun(parentRunId, { systemPrompt: 'Selected skill: /parent-skill\nPARENT SKILL BODY\nparent extra' });
+        store.updateRun(runId, { systemPrompt: 'parent extra' });
+        manager.enqueueOwnedRun(runId);
+        await waitFor(() => !manager.isActive(runId), 30_000);
+        const run = store.getRun(runId)!;
+        expect(run.error).toBeUndefined();
+        expect(run.steps.map(step => ({ id: step.id, status: step.status }))).toEqual([{ id: 'task', status: 'done' }]);
+        if (run.delegation?.role !== 'worker') throw new Error('expected worker');
+        // Read the backend mock's argv/requests and stdin in the worker's own cwd.
+        // Normalized events cannot prove that the skill reached the provider.
+        const recording = readRecording(run.delegation.workspace.path, name).join('\n');
+        expect(recording).toContain('WORKER SKILL BODY');
+        expect(recording).toContain('parent extra');
+        expect(recording).not.toContain('Selected skill: /parent-skill');
+      }, { workflowDef, identity, env: probeEnv(name) });
+    }, 60_000);
+
     it(`${backend} R14 runs an accepted mixed-runner chain under per-step identity, each step on its own pinned account (#452)`, async () => {
       const other = RUNNER_IDS[(RUNNER_IDS.indexOf(backend) + 1) % RUNNER_IDS.length]!;
       const homes = realpathSync(mkdtempSync(join(tmpdir(), 'cez-parity-accounts-')));
@@ -1264,6 +1319,7 @@ describe('OpenCode durable input acknowledgements', () => {
 
 describe('harness parity — the matrix itself', () => {
   const allIds = [
+    ...AUTONOMOUS_CRITERIA.map(c => c.id),
     ...NO_PROGRESS_CRITERIA.map(c => c.id),
     ...WORKFLOW_TIMEOUT_CRITERIA.map((c) => c.id),
     ...SEAM_CRITERIA.map((c) => c.id),
@@ -1272,6 +1328,8 @@ describe('harness parity — the matrix itself', () => {
     ...RUN_CRITERIA.map((c) => c.id),
   ];
   const scenarioOf = (id: string): ScenarioName => {
+    const autonomous = AUTONOMOUS_CRITERIA.find(c => c.id === id);
+    if (autonomous) return autonomous.scenario;
     const inactivity = NO_PROGRESS_CRITERIA.find(c => c.id === id);
     if (inactivity) return inactivity.scenario;
     const timeout = WORKFLOW_TIMEOUT_CRITERIA.find(c => c.id === id);
@@ -1902,6 +1960,119 @@ describe('harness parity — live task scratch', () => {
         expect(store.readWorkerExecution(runId)?.phase).toBe('complete');
         expect(readFileSync(join(scratch, 'notes'), 'utf8')).toBe('pending answer');
       });
+    }, 60_000);
+  }
+});
+
+// #399 incident: issue Agent context, run 3a3c1ffa (original history unavailable).
+// Prompt delivery is the contract under test; these offline wires cannot prove
+// that a live model follows the instruction. Markerless output must still wait.
+describe('harness parity — monitoring wrap-up contract (#399)', () => {
+  const finishedRule = 'When the watched work is finished and the task goal is complete, end your final message with CEZ:DONE.';
+  const pendingRule = 'If the watched work is still pending, end with CEZ:MONITORING.';
+  const markerlessRule = 'Never yield markerless for a monitoring wrap-up.';
+  type Wire = {
+    userText?: string; method?: string; url?: string;
+    params?: { input?: { text?: string }[]; prompt?: { text?: string }[] };
+    body?: { parts?: { text?: string }[] };
+  };
+  const records = (path: string): (Wire | string[])[] => existsSync(path)
+    ? readFileSync(path, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line)) : [];
+  const messages = (backend: RunnerId, dir: string): string[] => {
+    const channel = backend === 'claude' || backend === 'pi' ? 'stdin' : 'args';
+    return records(join(dir, channel)).flatMap(row => {
+      if (Array.isArray(row)) return [];
+      if (backend === 'claude' || backend === 'pi') return row.userText === undefined ? [] : [row.userText];
+      const parts = backend === 'codex' && row.method === 'turn/start' ? row.params?.input
+        : backend === 'cursor' && row.method === 'session/prompt' ? row.params?.prompt
+        : backend === 'opencode' && /\/(message|prompt_async)$/.test(row.url ?? '') ? row.body?.parts : undefined;
+      return parts ? [parts.map(part => part.text ?? '').join('\n')] : [];
+    });
+  };
+  const systemPrompt = (backend: RunnerId, dir: string): string => {
+    if (backend !== 'claude' && backend !== 'pi') return messages(backend, dir)[0] ?? '';
+    const argv = records(join(dir, 'args')).find(Array.isArray) ?? [];
+    const index = argv.indexOf('--append-system-prompt');
+    expect(index).toBeGreaterThanOrEqual(0);
+    return argv[index + 1] ?? '';
+  };
+  const assertRules = (text: string) => {
+    expect(text).toContain(finishedRule);
+    expect(text).toContain(pendingRule);
+    expect(text).toContain(markerlessRule);
+  };
+  const recording = async (body: (dir: string) => Promise<void>) => {
+    const dir = mkdtempSync(join(tmpdir(), 'cez-monitoring-prompt-'));
+    vi.stubEnv('CEZ_MOCK_ARGS_FILE', join(dir, 'args'));
+    vi.stubEnv('CEZ_MOCK_STDIN_FILE', join(dir, 'stdin'));
+    try { await body(dir); }
+    finally { vi.unstubAllEnvs(); rmSync(dir, { recursive: true, force: true }); }
+  };
+  const clearRecording = (dir: string) => {
+    for (const channel of ['args', 'stdin']) writeFileSync(join(dir, channel), '');
+  };
+
+  for (const backend of RUNNER_IDS) {
+    for (const continued of [false, true]) {
+      it(`${backend} ${continued ? 'R37 Continue' : 'R36 fresh'} receives the shared monitoring wrap-up contract`, async () => {
+        await recording(async dir => {
+          await driveRun(backend, 'baseline', record => record?.status === 'waiting', 30_000,
+            async ({ store, manager, runId }) => {
+              if (continued) {
+                const internal = manager as unknown as { active: Map<string, { idleTimer?: NodeJS.Timeout }> };
+                const timer = internal.active.get(runId)?.idleTimer as NodeJS.Timeout & { _onTimeout(): void };
+                expect(timer).toBeDefined();
+                timer._onTimeout();
+                await waitFor(() => !manager.isActive(runId));
+                clearRecording(dir);
+                expect(manager.continueRun(runId, { text: promptFor(backend, 'baseline') }).ok).toBe(true);
+                await waitFor(() => manager.isActive(runId) && store.getRun(runId)?.status === 'waiting');
+              }
+              assertRules(systemPrompt(backend, dir));
+              expect(systemPrompt(backend, dir)).toContain('end plainly (no marker) only when you are genuinely waiting on the user');
+            });
+        });
+      }, 60_000);
+    }
+
+    it(`${backend} R38 restart recovery receives the shared monitoring wrap-up contract`, async () => {
+      await recording(async dir => {
+        await withOwnedInputRun(backend, 'split-text', async fixture => {
+          fixture.manager.enqueueOwnedRun(fixture.runId);
+          await waitFor(() => fixture.store.getRun(fixture.runId)?.activity === 'monitoring');
+          clearRecording(dir);
+          const { manager } = await fixture.restart();
+          await waitFor(() => manager.isActive(fixture.runId) && messages(backend, dir).length > 0);
+          assertRules(systemPrompt(backend, dir));
+        });
+      });
+    }, 60_000);
+
+    it(`${backend} R39 monitoring wake delivers DONE and MONITORING instructions on the native message channel`, async () => {
+      await recording(async dir => {
+        await driveRun(backend, 'split-text', record => record?.activity === 'monitoring', 30_000,
+          async ({ store, manager, runId }) => {
+            const internal = manager as unknown as { active: Map<string, { monitoringWakeTimer?: NodeJS.Timeout }> };
+            const timer = internal.active.get(runId)?.monitoringWakeTimer as NodeJS.Timeout & { _onTimeout(): void };
+            expect(timer).toBeDefined();
+            timer._onTimeout();
+            await waitFor(() => messages(backend, dir).length > 1);
+            assertRules(messages(backend, dir)[1]!);
+            expect(store.readEvents(runId).some(event => event.type === 'user-message')).toBe(false);
+          });
+      });
+    }, 60_000);
+
+    it(`${backend} R40 completion prose without a marker still parks waiting`, async () => {
+      await driveRun(backend, 'baseline', record => record?.status === 'waiting', 30_000,
+        async ({ store, manager, runId }) => {
+          const prose = 'The PR merged. No further monitoring is needed. Everything is complete.';
+          expect(manager.sendMessage(runId, [{ type: 'text', text: `mock:agent-echo ${prose}` }])).toBe(true);
+          await waitFor(() => store.readEvents(runId).some(event => event.type === 'text' && String(event.text).includes(prose)));
+          await waitFor(() => store.getRun(runId)?.status === 'waiting');
+          expect(store.getRun(runId)?.activity).toBeUndefined();
+          expect(manager.isActive(runId)).toBe(true);
+        });
     }, 60_000);
   }
 });

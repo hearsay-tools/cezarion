@@ -17,6 +17,7 @@ import {
   type ApiRun,
 } from '@open-mercato/cezar-contract';
 import { openUrl } from '../open-url.ts';
+import { skillFlagIssue, skillTaskSteps } from '../workflows/types.ts';
 import { discoverCockpit, type DiscoverOptions } from './discovery.ts';
 import { invalidResponse, refuse, request, TaskCliError, threadUrl, type Cockpit } from './http.ts';
 import { projectListRow, projectStatus } from './projections.ts';
@@ -321,8 +322,11 @@ function statuses(value: string | boolean | undefined) {
 /** Every flag check `execute` makes, run up front so a bad flag never waits on discovery. */
 function validateFlags(name: string, values: Values): void {
   if (name === 'start') {
-    if (values.skill !== undefined && values.workflow !== undefined) usageError('--skill and --workflow cannot be used together');
-    if (typeof values.skill === 'string' && !values.skill.trim()) usageError('--skill must name a skill');
+    const issue = skillFlagIssue({
+      skill: values.skill as string | undefined,
+      workflow: values.workflow as string | undefined,
+    });
+    if (issue) usageError(issue);
     if (values.notify && values['no-notify']) usageError('--notify and --no-notify cannot be used together');
     if (values.until !== undefined && !values.wait) usageError('--until needs --wait');
   }
@@ -413,7 +417,7 @@ async function start(cockpit: Cockpit, io: TaskIo, values: Values, task: string,
       task,
       ...(skill === undefined
         ? { workflow: (values.workflow as string | undefined) ?? 'quick-task' }
-        : { steps: [{ id: 'task', name: skill, skill, prompt: '{{task}}' }] }),
+        : { steps: skillTaskSteps(skill) }),
       ...(values.backend === undefined ? {} : { runner: values.backend }),
       ...(values.model === undefined ? {} : { model: values.model }),
       ...(values.effort === undefined ? {} : { effort: values.effort }),

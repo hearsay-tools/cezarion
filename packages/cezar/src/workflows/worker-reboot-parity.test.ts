@@ -21,7 +21,7 @@ function scopeProcesses(pids: number[]) {
   syncBuiltinESMExports();
 }
 
-describe.runIf(process.platform === 'linux')('R36 reboot orphan settlement (#738)', { timeout: 30_000 }, () => {
+describe.runIf(process.platform === 'linux')('R43 reboot orphan settlement (#738)', { timeout: 30_000 }, () => {
   useWorkerWaitFixture();
   afterEach(() => { vi.restoreAllMocks(); syncBuiltinESMExports(); });
 

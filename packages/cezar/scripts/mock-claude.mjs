@@ -123,6 +123,13 @@ async function respond(userText, imageCount, uuid) {
     if (crashWithStderr(userText, '{"type":"assistant","message":')) return;
   }
   emitReplay(uuid, userText);
+  if (userText.includes('mock:autonomous') || userText.startsWith('Continue working autonomously until the task is fully complete.')) {
+    const { autonomousReply } = await import('./mock-autonomous.mjs');
+    const text = autonomousReply(userText);
+    emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } });
+    emit({ type: 'result', subtype: 'success', result: text, user_message_uuids: [uuid].filter(Boolean), usage: { input_tokens: 10, output_tokens: 5 } });
+    return;
+  }
   // `mock:steer-tool` → one tool call; lines written while it runs are consumed after
   // it (replayed with their uuid) and settled by the SAME result, like Claude 2.1.280 (#505).
   if (userText.includes('mock:steer-tool')) {
