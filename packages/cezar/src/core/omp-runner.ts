@@ -1,7 +1,36 @@
+import { spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { parseEffort } from '@open-mercato/cezar-contract';
 import { fileURLToPath } from 'node:url';
-import type { AgentRunSpec, AgentRunSpecSupport } from './agent-runner.js';
+import { dirname, resolve as resolvePath } from 'node:path';
+import { parseAskMarker } from './ask.ts';
+import type {
+  AgentEvent,
+  AgentRunResult,
+  AgentRunSpec,
+  AgentRunSpecSupport,
+  InputDelivery,
+  AgentRunner,
+  AgentSession,
+  AgentToolCallRecord,
+  ContentBlock,
+  SessionOptions,
+} from './agent-runner.js';
+import { isSignalTerminationExit } from './agent-runner.js';
+import { buildChildEnv } from './agent-env.js';
 import { ciToolDefinition } from '../ci-wait/tools.js';
+import { readNdjson } from './ndjson.js';
+import {
+  createOmpUiState,
+  mapOmpRpcMessage,
+  ompFlushProviderError,
+  ompProviderErrorMessage,
+  ompTurnBoundary,
+  ompTurnStarted,
+} from './omp-ui-mapper.js';
+import { summarizeRunnerStderr } from './runner-stderr.ts';
+import { V1TextCoalescer } from './v1-text-coalescer.js';
+import { InputSubmissions } from './input-submissions.ts';
+import { boundOutputDrainAfterExit, AUTO_END_DELAY_MS, DEFAULT_RUN_TIMEOUT_MS, KILL_GRACE_MS } from './runner-runtime.js';
 
 /**
  * OMP's built-in tool names at the pinned version (`src/tools/builtin-names.ts`, oh-my-pi
@@ -132,4 +161,564 @@ export function buildOmpArgs(spec: AgentRunSpec): string[] {
 
 function ompScriptPath(name: string): string {
   return fileURLToPath(new URL(`../../scripts/${name}`, import.meta.url));
+}
+
+export interface OmpRunnerOptions {
+  /** Override the binary name/path; defaults to `omp` on PATH (`CEZ_OMP_BIN`). */
+  bin?: string;
+  /** Wall-clock timeout for a run (ms); per-spec `timeoutMs` still wins. */
+  timeoutMs?: number;
+}
+
+/**
+ * Persistent subprocess adapter for OMP's RPC mode (#595), one `omp --mode rpc` child per
+ * session. Structure follows `pi-runner.ts` step for step (Pi stays untouched); what OMP changes
+ * is the turn boundary — `session_settled`, or a prompt OMP completed without the agent
+ * (`ompTurnBoundary`), never `agent_end` — plus the startup commands and the error paths.
+ *
+ * Contract: oh-my-pi v18.4.11 `docs/rpc.md`, `packages/coding-agent/src/modes/rpc/rpc-mode.ts`.
+ */
+export class OmpRunner implements AgentRunner {
+  readonly backend = 'omp' as const;
+  readonly specSupport = OMP_SPEC_SUPPORT;
+  readonly inputDelivery: InputDelivery = {
+    mode: 'steer', consumption: 'observable',
+    via: 'prompt with streamingBehavior steer; set_steering_mode all at session start; user message_start with the submitted text',
+  };
+  private readonly bin: string;
+  private readonly timeoutMs: number;
+  private lastSession: AgentSession | null = null;
+
+  constructor(opts: OmpRunnerOptions = {}) {
+    this.bin = opts.bin ?? process.env.CEZ_OMP_BIN ?? (process.env.CEZ_DRY_RUN === '1' ? mockOmpPath() : 'omp');
+    this.timeoutMs = opts.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS;
+  }
+
+  run(spec: AgentRunSpec, onEvent?: (event: AgentEvent) => void): Promise<AgentRunResult> {
+    return this.startSession(spec, onEvent, { autoEndAfterFirstTurn: true }).result;
+  }
+
+  async interrupt(): Promise<void> {
+    this.lastSession?.interrupt();
+  }
+
+  startSession(
+    spec: AgentRunSpec,
+    onEvent?: (event: AgentEvent) => void,
+    opts: SessionOptions = {},
+  ): AgentSession {
+    const child = nodeSpawn(this.bin, buildOmpArgs(spec), {
+      cwd: spec.cwd,
+      env: buildChildEnv({ backend: this.backend, extraEnv: spec.env }),
+    });
+    boundOutputDrainAfterExit(child);
+    let open = true;
+    let timedOut = false;
+    let terminatedByCezar = false;
+    let autoEndTimer: NodeJS.Timeout | undefined;
+    let killTimer: NodeJS.Timeout | undefined;
+    let interruptKillTimer: NodeJS.Timeout | undefined;
+    let ompUi = createOmpUiState();
+    const textChunks: string[] = [];
+    /** One v1 `text` per complete block, never per token (pi-runner.ts, #902 / #2). */
+    const textCoalescer = new V1TextCoalescer((text) => {
+      textChunks.push(text);
+      onEvent?.({ type: 'text', text });
+    });
+    /** `contentIndex` restarts at 0 on every assistant message (as Pi's); see pi-runner.ts. */
+    let textBlockSeq = 0;
+    const openTextBlockKeys = new Map<number, string>();
+    const textBlockKey = (contentIndex: unknown): string | undefined => {
+      if (typeof contentIndex !== 'number') return undefined;
+      let key = openTextBlockKeys.get(contentIndex);
+      if (!key) {
+        key = `omp-text-${++textBlockSeq}`;
+        openTextBlockKeys.set(contentIndex, key);
+      }
+      return key;
+    };
+    const flushText = (): void => {
+      textCoalescer.flush();
+      openTextBlockKeys.clear();
+    };
+    const toolCalls: AgentToolCallRecord[] = [];
+    let sessionId = spec.sessionId;
+    let tokensUsed = 0;
+    let latchedProviderError: string | undefined;
+    const emitLatchedProviderError = (): void => {
+      if (!latchedProviderError) return;
+      onEvent?.({ type: 'error', message: latchedProviderError });
+      latchedProviderError = undefined;
+    };
+    let spawnError: Error | null = null;
+    const stderr: string[] = [];
+
+    child.on('error', (error: NodeJS.ErrnoException) => {
+      spawnError = wrapSpawnError(error, this.bin);
+    });
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (chunk: string) => stderr.push(chunk));
+
+    const emitUi = (value: unknown): void => {
+      const mapped = mapOmpRpcMessage(value, ompUi);
+      ompUi = mapped.state;
+      for (const event of mapped.events) opts.onUiEvent?.(event);
+    };
+    /** Releases the mapper's provider-error latch when the stream ends without a settle. */
+    const emitLatchedUiProviderError = (): void => {
+      const mapped = ompFlushProviderError(ompUi);
+      ompUi = mapped.state;
+      for (const event of mapped.events) opts.onUiEvent?.(event);
+    };
+    const write = (command: Record<string, unknown>): boolean => {
+      if (!open || !child.stdin.writable) return false;
+      try {
+        child.stdin.write(`${JSON.stringify(command)}\n`);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    let agentInputReady = false;
+    let promptSerial = 0;
+    let humanPromptAcks = 0;
+    let agentAck: { id: string; resolve: () => void; reject: (error: Error) => void } | undefined;
+    const rejectAgentAck = () => {
+      const pending = agentAck; agentAck = undefined;
+      pending?.reject(new Error('omp closed before prompt acknowledgement'));
+    };
+    const scheduleAutoEnd = () => {
+      if (!opts.autoEndAfterFirstTurn || !open || autoEndTimer || agentAck || humanPromptAcks) return;
+      autoEndTimer = setTimeout(() => {
+        autoEndTimer = undefined;
+        if (opts.shouldAutoEnd?.() !== false) end();
+      }, AUTO_END_DELAY_MS);
+      autoEndTimer.unref?.();
+    };
+    // Same readiness rules as pi-runner.ts (#505): a refusal caused only by an outstanding
+    // acknowledgement gets one readiness hint when it lands, even mid-turn.
+    let refusedForAck = false;
+    const readyAfterAck = () => {
+      if (open && agentInputReady && !ompUi.turnId && !agentAck && !humanPromptAcks) {
+        refusedForAck = false;
+        opts.onAgentInputReady?.(); scheduleAutoEnd();
+      } else if (refusedForAck && open && !agentAck && !humanPromptAcks && !pendingMarkerAsk) {
+        refusedForAck = false;
+        opts.onAgentInputReady?.();
+      }
+    };
+    let pendingMarkerAsk = false;
+    let turnTextStart = 0;
+    // Accepted agent prompts not yet seen as a user message_start (#505).
+    const submissions = new InputSubmissions();
+    // Submissions already queued when a turn began: that turn reads them. OMP reports an
+    // admitted steer at the next terminal agent_end (rpc-prompt-results.ts), never drops it.
+    let carried = new Set<string>();
+    const acked = new Set<string>();
+    let turnFailed = false;
+    const sendMessage = (content: ContentBlock[], requestId?: string, inputIds: readonly string[] = []): boolean => {
+      if (!open) return false;
+      // A steer joins the running turn; only an idle prompt opens one (#505).
+      const opensTurn = !ompUi.turnId;
+      agentInputReady = false;
+      if (opensTurn) {
+        pendingMarkerAsk = false;
+        turnTextStart = textChunks.length;
+      }
+      const { message, images } = toOmpPrompt(content);
+      if (autoEndTimer) {
+        clearTimeout(autoEndTimer);
+        autoEndTimer = undefined;
+      }
+      if (
+        !write({
+          type: 'prompt',
+          ...(requestId ? { id: requestId } : {}),
+          message,
+          ...(images.length > 0 ? { images } : {}),
+          ...(ompUi.turnId ? { streamingBehavior: 'steer' } : {}),
+        })
+      ) {
+        return false;
+      }
+      if (!requestId) humanPromptAcks += 1;
+      else submissions.accept(requestId, inputIds, message);
+      if (!ompUi.turnId) {
+        const mapped = ompTurnStarted(ompUi);
+        ompUi = mapped.state;
+        for (const event of mapped.events) opts.onUiEvent?.(event);
+      }
+      return true;
+    };
+    const end = (): void => {
+      if (!open) return;
+      open = false;
+      rejectAgentAck();
+      child.stdin.end();
+      killTimer = setTimeout(() => {
+        if (child.exitCode !== null || child.signalCode !== null) return;
+        terminatedByCezar = true;
+        child.kill('SIGTERM');
+      }, KILL_GRACE_MS);
+      killTimer.unref?.();
+    };
+    const interrupt = (): void => {
+      if (!open) return;
+      write({ type: 'abort' });
+      open = false;
+      rejectAgentAck();
+      terminatedByCezar = true;
+      child.kill('SIGTERM');
+      interruptKillTimer = setTimeout(() => {
+        if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+      }, KILL_GRACE_MS);
+      interruptKillTimer.unref?.();
+    };
+
+    const dropped = ompTools(spec.allowedTools, {
+      bashAllowlist: spec.bashAllowlist,
+      restrictNativeDelegation: spec.restrictNativeDelegation,
+    }).dropped;
+    if (dropped.length > 0) {
+      onEvent?.({ type: 'note', message: `omp: dropped tools with no OMP equivalent: ${dropped.join(', ')}` });
+    }
+    // Spec § Session lifecycle: OMP queues these until it is ready.
+    write({ id: 'cezar-state', type: 'get_state' });
+    // #551 parity: OMP defaults steeringMode to one-at-a-time, and sendAgentMessage requires
+    // every accepted steer at the next model call.
+    write({ id: 'cezar-steering', type: 'set_steering_mode', mode: 'all' });
+    write({ id: 'cezar-subagents', type: 'set_subagent_subscription', level: 'events' });
+    // Drops the per-delta `partial` snapshot; the coalescer and the mapper read deltas only.
+    write({ id: 'cezar-event-filter', type: 'set_event_filter', events: null, messageUpdates: 'delta' });
+    sendMessage([...(spec.images ?? []), { type: 'text', text: spec.userPrompt }]);
+
+    const limitMs = spec.timeoutMs ?? this.timeoutMs;
+    const deadline =
+      limitMs > 0
+        ? setTimeout(() => {
+            timedOut = true;
+            interrupt();
+          }, limitMs)
+        : undefined;
+    deadline?.unref?.();
+
+    const result = (async (): Promise<AgentRunResult> => {
+      try {
+        for await (const line of readNdjson(child.stdout)) {
+          let value: unknown;
+          try {
+            value = JSON.parse(line);
+          } catch {
+            onEvent?.({ type: 'note', message: `omp: skipped unparseable RPC line: ${truncate(line)}` });
+            continue;
+          }
+          opts.onActivity?.();
+          // Flush before message/tool/turn boundaries so v2 events never overtake a pending
+          // block; never on prompt acks, which can land between text_deltas (pi-runner.ts).
+          if (
+            isRecord(value) &&
+            (value.type === 'tool_execution_start' ||
+              value.type === 'message_end' ||
+              value.type === 'session_settled' ||
+              value.type === 'prompt_result' ||
+              value.type === 'turn_end' ||
+              value.type === 'agent_end')
+          ) {
+            flushText();
+          }
+          // A boundary only ends a turn that is open: OMP never settles an idle session, and a
+          // second boundary for the same prompt must not end the next one.
+          const turnOpen = ompUi.turnId !== null;
+          emitUi(value);
+          if (!isRecord(value)) continue;
+
+          if (value.type === 'response' && value.command === 'get_state' && value.success === true && isRecord(value.data)) {
+            const discovered = string(value.data.sessionId);
+            if (discovered && discovered !== sessionId) {
+              sessionId = discovered;
+              onEvent?.({ type: 'session', sessionId: discovered });
+            }
+          } else if (value.type === 'response' && string(value.command)?.startsWith('set_')) {
+            if (value.success !== true) {
+              onEvent?.({ type: 'note', message: `omp: ${string(value.command)} failed: ${rpcError(value)}` });
+            }
+          } else if (value.type === 'response' && value.command === 'prompt') {
+            // A failed prompt is reported by the `prompt_result` that follows it
+            // (rpc-prompt-results.ts `fail`), so this response is only a note, never a 2nd error.
+            if (value.success === false) onEvent?.({ type: 'note', message: `omp: prompt failed: ${rpcError(value)}` });
+            const pending = agentAck;
+            if (pending && value.id === pending.id) {
+              agentAck = undefined;
+              if (value.success === true) { acked.add(pending.id); pending.resolve(); }
+              else pending.reject(new Error(rpcError(value)));
+            } else if (value.id === undefined) {
+              humanPromptAcks = Math.max(0, humanPromptAcks - 1);
+            }
+            readyAfterAck();
+          } else if (value.type === 'response' && value.success === false) {
+            onEvent?.({ type: 'error', message: rpcError(value) });
+          } else if (value.type === 'prompt_result' && value.agentInvoked === false && value.status === 'error') {
+            // The prompt failed before the agent ran: no settle follows, so the turn ends here.
+            const error = isRecord(value.error) ? value.error : {};
+            if (turnOpen) {
+              onEvent?.({
+                type: 'error',
+                message: ompProviderErrorMessage({ provider: error.provider, model: error.model, errorMessage: error.message }),
+              });
+              turnFailed = true;
+            }
+          } else if (value.type === 'message_update' && isRecord(value.assistantMessageEvent)) {
+            const update = value.assistantMessageEvent;
+            const contentKey = textBlockKey(update.contentIndex);
+            if (update.type === 'text_delta' && typeof update.delta === 'string') {
+              textCoalescer.append(contentKey, update.delta);
+            } else if (update.type === 'text_end') {
+              const snapshot = typeof update.content === 'string' ? update.content : undefined;
+              textCoalescer.complete(contentKey, snapshot);
+              if (typeof update.contentIndex === 'number') openTextBlockKeys.delete(update.contentIndex);
+            }
+          } else if (value.type === 'message_end' && isRecord(value.message) && value.message.role === 'assistant') {
+            flushText();
+            const usage = usageValues(value.message.usage);
+            if (usage) {
+              tokensUsed += usage.weighted;
+              onEvent?.({ type: 'token-usage', tokensUsed });
+              if (usage.cost !== undefined) onEvent?.({ type: 'cost', usd: usage.cost });
+            }
+            // Latched until the turn ends, cleared by a later success: OMP retries past
+            // provider flakes and a recovered retry must stay silent (#256, #316).
+            if (string(value.message.stopReason) === 'error') {
+              turnFailed = true;
+              latchedProviderError = ompProviderErrorMessage(value.message);
+            } else {
+              latchedProviderError = undefined;
+            }
+          } else if (value.type === 'agent_start') {
+            // Only a prompt OMP acknowledged before this agent_start can be in its turn (#505).
+            carried = new Set(submissions.pendingIds().filter(id => acked.has(id)));
+            turnFailed = false;
+          } else if (value.type === 'message_start' && isRecord(value.message) && value.message.role === 'user') {
+            // The model received this prompt now (#505).
+            const ids = submissions.consumeOldestByText(ompMessageText(value.message));
+            if (ids.length) opts.onAgentInputConsumed?.(ids);
+          } else if (value.type === 'tool_execution_start') {
+            flushText();
+            const id = string(value.toolCallId);
+            const name = string(value.toolName);
+            if (id && name) {
+              toolCalls.push({ id, name, input: value.args });
+              onEvent?.({ type: 'tool-call', id, tool: name, input: value.args });
+            }
+          } else if (value.type === 'tool_execution_end') {
+            const id = string(value.toolCallId);
+            if (id) {
+              onEvent?.({
+                type: 'tool-result',
+                toolCallId: id,
+                result: contentText(isRecord(value.result) ? value.result.content : undefined) ?? '',
+                isError: value.isError === true,
+              });
+              emitImages(isRecord(value.result) ? value.result.content : undefined, onEvent);
+            }
+          } else if (value.type === 'extension_error') {
+            onEvent?.({ type: 'note', message: string(value.error) ?? string(value.message) ?? 'omp extension error' });
+          } else if (value.type === 'notice') {
+            const message = string(value.message);
+            if (message) onEvent?.({ type: 'note', message: `omp: ${message}` });
+          }
+
+          if (turnOpen && ompTurnBoundary(value) !== null) {
+            flushText();
+            emitLatchedProviderError();
+            pendingMarkerAsk = parseAskMarker(textChunks.slice(turnTextStart).join('\n')) !== null;
+            agentInputReady = true;
+            // Input queued before this turn began was processed by it, even without a user
+            // message_start (#505) — unless the turn failed and may never have reached the model.
+            const read = turnFailed ? [] : [...carried].flatMap(id => submissions.consume(id));
+            turnFailed = false;
+            carried = new Set();
+            if (read.length) opts.onAgentInputConsumed?.(read);
+            onEvent?.({ type: 'turn-end' });
+            scheduleAutoEnd();
+          }
+        }
+      } catch (error) {
+        if (child.exitCode === null && child.signalCode === null) throw error;
+      } finally {
+        if (deadline) clearTimeout(deadline);
+        if (autoEndTimer) clearTimeout(autoEndTimer);
+        if (killTimer) clearTimeout(killTimer);
+        open = false;
+        rejectAgentAck();
+      }
+
+      flushText();
+      emitLatchedProviderError();
+      emitLatchedUiProviderError();
+      const exitCode = await waitForExit(child);
+      if (interruptKillTimer) clearTimeout(interruptKillTimer);
+      if (spawnError) throw spawnError;
+      if (timedOut) {
+        const message = `omp CLI timed out after ${Math.round((limitMs / 60_000) * 10) / 10}m and was killed`;
+        onEvent?.({ type: 'error', message });
+        onEvent?.({ type: 'done' });
+        return { text: textChunks.join('\n').trim(), toolCalls, tokensUsed, sessionId };
+      }
+      // A signal we sent is teardown, not a second agent failure (#73).
+      if (terminatedByCezar && isSignalTerminationExit(exitCode)) {
+        onEvent?.({
+          type: 'note',
+          message: `omp CLI did not exit on its own after close; terminated by cezar (code ${exitCode})`,
+        });
+      } else if (exitCode !== 0 && exitCode !== null) {
+        const diagnostic = stderr.join('');
+        if (diagnostic.trim()) onEvent?.({ type: 'note', message: `omp CLI stderr:\n${diagnostic}` });
+        const detail = ompStderrDetail(diagnostic);
+        const message = `omp CLI exited with code ${exitCode}${detail ? ` — ${detail}` : ''}`;
+        onEvent?.({ type: 'error', message });
+        throw new Error(message);
+      }
+      if (ompUi.turnId) onEvent?.({ type: 'note', message: 'omp RPC session ended before session_settled' });
+      if (tokensUsed === 0) onEvent?.({ type: 'note', message: 'token usage not reported by omp CLI' });
+      opts.onUiEvent?.({ type: 'session.ended', reason: ompUi.stopReason });
+      onEvent?.({ type: 'done' });
+      return { text: textChunks.join('\n').trim(), toolCalls, tokensUsed, sessionId };
+    })();
+
+    const session: AgentSession = {
+      result,
+      sendMessage,
+      sendAgentMessage: (content, inputIds = []) => {
+        // #505: a running turn is steered; only a pending CEZ:ASK or an unacknowledged
+        // prompt refuses.
+        if (open && !pendingMarkerAsk && (agentAck || humanPromptAcks)) { refusedForAck = true; return false; }
+        if (!open || pendingMarkerAsk) return false;
+        const id = `cezar-agent-${++promptSerial}`;
+        let resolve!: () => void, reject!: (error: Error) => void;
+        const acknowledged = new Promise<void>((yes, no) => { resolve = yes; reject = no; });
+        agentAck = { id, resolve, reject };
+        if (!sendMessage(content, id, inputIds)) { agentAck = undefined; return false; }
+        return acknowledged;
+      },
+      discardQueuedMessages: () => undefined,
+      end,
+      interrupt,
+      pid: child.pid,
+      get open() {
+        return open;
+      },
+    };
+    this.lastSession = session;
+    return session;
+  }
+}
+
+/**
+ * The stderr line an exit error carries. OMP's "no usable model" exit prints its reason first
+ * and setup hints after it, which the generic last-lines summary would keep instead.
+ */
+function ompStderrDetail(stderr: string): string {
+  const first = stderr.split(/\r?\n/).find(line => line.trim())?.trim();
+  if (first?.startsWith('No models available')) return first;
+  return summarizeRunnerStderr(stderr);
+}
+
+/** Same as pi-runner.ts `toPiPrompt`. */
+function toOmpPrompt(content: ContentBlock[]): {
+  message: string;
+  images: Array<{ type: 'image'; data: string; mimeType: string }>;
+} {
+  const text: string[] = [];
+  const images: Array<{ type: 'image'; data: string; mimeType: string }> = [];
+  for (const block of content) {
+    if (block.type === 'text') text.push(block.text);
+    else images.push({ type: 'image', data: block.source.data, mimeType: block.source.media_type });
+  }
+  return { message: text.join('\n'), images };
+}
+
+/** Same as pi-runner.ts `usageValues`. */
+function usageValues(value: unknown): { weighted: number; cost?: number } | undefined {
+  if (!isRecord(value)) return undefined;
+  const input = number(value.input) ?? 0;
+  const output = number(value.output) ?? 0;
+  const cacheRead = number(value.cacheRead) ?? 0;
+  const cacheWrite = number(value.cacheWrite) ?? 0;
+  const cost = isRecord(value.cost) ? number(value.cost.total) : undefined;
+  return {
+    weighted: Math.round(input + output + cacheRead * 0.1 + cacheWrite * 1.25),
+    ...(cost !== undefined && cost >= 0 ? { cost } : {}),
+  };
+}
+
+/** Same as pi-runner.ts `emitImages`. */
+function emitImages(value: unknown, onEvent?: (event: AgentEvent) => void): void {
+  if (!Array.isArray(value)) return;
+  for (const part of value) {
+    if (isRecord(part) && part.type === 'image') {
+      const data = string(part.data);
+      const mediaType = string(part.mimeType);
+      if (data && mediaType) onEvent?.({ type: 'image', data, mediaType });
+    }
+  }
+}
+
+/** Same as pi-runner.ts `piMessageText`. */
+function ompMessageText(message: Record<string, unknown>): string {
+  if (typeof message.content === 'string') return message.content;
+  return Array.isArray(message.content)
+    ? message.content.flatMap(part => isRecord(part) && part.type === 'text' && typeof part.text === 'string' ? [part.text] : []).join('\n')
+    : '';
+}
+
+/** Same as pi-runner.ts `contentText`. */
+function contentText(value: unknown): string | undefined {
+  if (typeof value === 'string') return value;
+  if (!Array.isArray(value)) return undefined;
+  const text = value
+    .map((part) => (isRecord(part) && part.type === 'text' ? string(part.text) : undefined))
+    .filter((part): part is string => part !== undefined);
+  return text.length > 0 ? text.join('\n') : undefined;
+}
+
+/** OMP's failure response carries `error` as a string (rpc-mode.ts, v18.4.11). */
+function rpcError(value: Record<string, unknown>): string {
+  if (typeof value.error === 'string') return value.error;
+  const error = isRecord(value.error) ? value.error : undefined;
+  return string(error?.message) ?? string(value.message) ?? `omp RPC command ${string(value.command) ?? 'unknown'} failed`;
+}
+
+function waitForExit(child: ChildProcessWithoutNullStreams): Promise<number | null> {
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(child.exitCode);
+  return new Promise((resolve) => child.once('close', resolve));
+}
+
+function wrapSpawnError(error: NodeJS.ErrnoException, bin: string): Error {
+  if (error.code === 'ENOENT') {
+    return new Error(`\`${bin}\` not found on PATH: install OMP (Bun ≥ 1.3.14) and run \`omp login\``);
+  }
+  return error;
+}
+
+/** Path to the bundled mock (`scripts/mock-omp-rpc.mjs`), for CEZ_DRY_RUN=1; as pi-runner.ts `mockPiPath`. */
+function mockOmpPath(): string {
+  const here = dirname(fileURLToPath(import.meta.url));
+  // here = <pkg>/dist/core (built) or <pkg>/src/core (tsx dev).
+  return resolvePath(here, '..', '..', 'scripts', 'mock-omp-rpc.mjs');
+}
+
+function truncate(value: string, max = 200): string {
+  return value.length > max ? `${value.slice(0, max)}…` : value;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function string(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined;
+}
+
+function number(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
