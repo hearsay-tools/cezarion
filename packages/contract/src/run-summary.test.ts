@@ -72,6 +72,11 @@ describe('toRunSummary', () => {
     expect(toRunSummary(record({ delegation: { role: 'invalid' } })).delegation).toEqual({ role: 'invalid' });
   });
 
+  it('quarantines a delegation that does not parse instead of throwing', () => {
+    const delegation = { role: 'worker' } as unknown as RunRecord['delegation'];
+    expect(toRunSummary(record({ delegation })).delegation).toEqual({ role: 'invalid' });
+  });
+
   it('derives workflowLabel from the first agent step of a planned chain', () => {
     const planned = (steps: RunRecord['steps']) => toRunSummary(record({ workflow: '(planned)', steps })).workflowLabel;
     expect(planned([

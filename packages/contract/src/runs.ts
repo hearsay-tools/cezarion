@@ -498,7 +498,8 @@ const SUMMARY_OPTIONAL_KEYS = [
 /** `(planned)` and `(inbox)` chains carry their meaning in their first agent step's name. */
 export function runWorkflowLabel(run: Pick<RunRecord, 'workflow' | 'steps'>): string {
   if (run.workflow === '(planned)' || run.workflow === '(inbox)') {
-    const agent = run.steps.find((step) => step.kind === 'agent');
+    // `?? []`: the cockpit also projects streamed records, whose shape only `id` was checked on.
+    const agent = (run.steps ?? []).find((step) => step.kind === 'agent');
     if (agent?.name) return agent.name;
   }
   return run.workflow;
@@ -524,9 +525,15 @@ export function toRunSummary(run: RunRecord & { usage?: ProcessUsage }): RunSumm
   for (const key of SUMMARY_OPTIONAL_KEYS) {
     if (run[key] !== undefined) summary[key] = run[key];
   }
-  const currentStepBackend = run.steps.find((step) => step.id === run.currentStepId)?.backend;
+  const currentStepBackend = (run.steps ?? []).find((step) => step.id === run.currentStepId)?.backend;
   if (currentStepBackend !== undefined) summary.currentStepBackend = currentStepBackend;
-  if (run.delegation) summary.delegation = runDelegationSummarySchema.parse(run.delegation);
+  if (run.delegation) {
+    // Never throw: one malformed record must cost its own row's delegation, not the whole list or
+    // the cockpit's stream loop. A delegation that does not parse grants nothing, which is exactly
+    // what the persisted quarantine role says.
+    const delegation = runDelegationSummarySchema.safeParse(run.delegation);
+    summary.delegation = delegation.success ? delegation.data : { role: 'invalid' };
+  }
   if (run.usage) summary.usage = run.usage;
   return summary as RunSummary;
 }

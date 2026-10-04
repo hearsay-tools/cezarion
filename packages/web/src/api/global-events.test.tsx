@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { createUsageStore, type UsageStore } from './events'
 import { GlobalEventsProvider, useGlobalEvents, useRunUsage, useUsage } from './global-events'
-import { setApiScope } from '@open-mercato/cezar-api-client'
+import { setApiScope, toRunSummary } from '@open-mercato/cezar-api-client'
 import { createQueryClient } from './query-client'
 import { queryKeys, useHealth, useRunnerModels, useRun, useRuns, useProjectRuns, useProviderStatus, workspaceQueryKeys } from './queries'
 import { TaskQuickList } from '../components/task-quick-list'
@@ -806,8 +806,9 @@ describe('useGlobalEvents — run events', () => {
 
     source.emit('run', stampedRun(runRecord('r1', { status: 'queued' })))
 
+    // A list row is the summary of the streamed record (#817), never the record itself.
     expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())).toEqual([
-      runRecord('r1', { status: 'queued' }),
+      toRunSummary(runRecord('r1', { status: 'queued' })),
     ])
     // The whole point: a live run emits constantly, and none of it may become HTTP traffic.
     expect(fetch).not.toHaveBeenCalled()
@@ -1925,6 +1926,7 @@ describe('ordinary run events while authoritative lists are fetching (#795)', ()
   it.each(['warm-update', 'cold-update', 'warm-delete', 'cold-delete'] as const)('%s cannot be reversed by a pre-event GET', async kind => {
     const record = runRecord('r1')
     const newer = { ...record, title: 'New title', status: 'done' as const, pinned: true, tokensUsed: 37 }
+    const newerRow = toRunSummary(newer)
     const deleted = kind.endsWith('delete')
     const stale = deferredResponse(), fresh = deferredResponse()
     vi.mocked(fetch).mockReturnValueOnce(stale.promise).mockReturnValue(fresh.promise)
@@ -1935,11 +1937,11 @@ describe('ordinary run events while authoritative lists are fetching (#795)', ()
     if (deleted) source.emit('run-deleted', JSON.stringify({ id: record.id, project: BOOT }))
     else source.emit('run', stampedRun(newer))
     if (kind.startsWith('cold')) expect(list.result.current.data).toBeUndefined() // do not invent a partial list
-    else await waitFor(() => expect(list.result.current.data).toEqual(deleted ? [] : [newer]))
+    else await waitFor(() => expect(list.result.current.data).toEqual(deleted ? [] : [newerRow]))
     await act(async () => stale.resolve(json([record])))
     expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())?.find(row => row.id === record.id)?.title).not.toBe(record.title)
-    await act(async () => fresh.resolve(json(deleted ? [] : [newer])))
-    await waitFor(() => expect(list.result.current.data).toEqual(deleted ? [] : [newer]))
+    await act(async () => fresh.resolve(json(deleted ? [] : [newerRow])))
+    await waitFor(() => expect(list.result.current.data).toEqual(deleted ? [] : [newerRow]))
   })
 
   it('keeps both inactive boot aliases fresh without fetching for absent observers', async () => {
@@ -2293,12 +2295,12 @@ describe('incomplete inactive snapshots remain stale across live patches (#795)'
       act(() => frame?.(performance.now()))
     }
     // Immediate complete-record news is visible, but cannot certify all rows we missed offline.
-    expect(client.getQueryData<ApiRun[]>(key)?.find(row => row.id === record.id)).toEqual(kind === 'delete' ? undefined : newer)
+    expect(client.getQueryData<ApiRun[]>(key)?.find(row => row.id === record.id)).toEqual(kind === 'delete' ? undefined : toRunSummary(newer))
     expect(client.getQueryState(key)?.isInvalidated).toBe(true)
     expect(fetch).not.toHaveBeenCalled()
     list.rerender({ enabled: true })
     expect(fetch).toHaveBeenCalledTimes(1)
-    const final = kind === 'delete' ? [] : [newer]
+    const final = kind === 'delete' ? [] : [toRunSummary(newer)]
     await act(async () => fresh.resolve(json(final)))
     await waitFor(() => expect(list.result.current.data).toEqual(final))
     expect(client.getQueryState(key)?.isInvalidated).toBe(false)
