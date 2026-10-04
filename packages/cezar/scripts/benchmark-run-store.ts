@@ -8,7 +8,7 @@
  *
  * Flags: --sizes (100,500,1000,2000,5000) --profiles (legacy,post-778) --processes (5)
  * --samples (100) --budget-seconds (60) --duration (30, seconds of active simulation) --seed (779)
- * --out-dir (a new /tmp directory) --quick (sizes 100,1000, 2 processes, 10 samples, 10 s budget,
+ * --out-dir (a new /tmp directory) --resume (reuse child results already in --out-dir, run the rest) --quick (sizes 100,1000, 2 processes, 10 samples, 10 s budget,
  * 3 s simulation). Results land in <out-dir>/results.{md,json}; the Markdown also goes to stdout.
  *
  * Method:
@@ -18,7 +18,9 @@
  * - The parent spawns one fresh process per size x profile x process index, in shuffled order,
  *   one at a time. Each process measures every operation after 3 untimed warm-up calls, taking up
  *   to --samples samples and stopping early once it has 20 and --budget-seconds have passed.
- *   The table pools every process's samples per cell (median, p95, n).
+ *   The table pools every process's samples per cell (median, p95, n). A failed child is
+ *   reported and the rest still aggregate; the parent stops launching children when less than
+ *   1 GB is free, and exits 1 after writing what it has. `--resume` reruns only missing children.
  * - Everything goes through public APIs: `RunStore.open`, `updateRun` + `flush`, `updateStep`,
  *   `commitDelegation`, `readRunIndexFromDisk`, and the Hono app from `createApp`.
  * - Synchronous calls are timed with `performance.now()` around the call.
@@ -41,7 +43,7 @@
  */
 import { spawn, execFileSync } from 'node:child_process';
 import { randomInt } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, statfsSync, writeFileSync } from 'node:fs';
 import { cpus, totalmem, tmpdir, type as osType, release, arch } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -57,6 +59,7 @@ const MIN_SAMPLES = 20;
 const DEBOUNCE_MS = 300;
 const TOUCH_EVERY_MS = 5;
 const MULTI_ROWS = 10;
+const MIN_FREE_BYTES = 1e9;
 
 const SYNC_OPS = ['open', 'cold read', 'save (flush)', 'save (debounced)', 'commit (1 row)', 'commit (10 rows)'] as const;
 const ROUTES = ['GET /runs', 'GET /workspace/runs-index'] as const;
@@ -66,6 +69,8 @@ type Route = typeof ROUTES[number];
 interface ChildOptions { size: number; profile: FixtureProfile; process: number; samples: number; budgetSeconds: number; duration: number; seed: number }
 interface ChildResult {
   size: number; profile: FixtureProfile; process: number; fixtureBytes: number; records: number;
+  /** Added by the parent; absent on results written before `--resume` existed. */
+  revision?: string;
   sync: Record<SyncOp, number[]>;
   routes: Record<Route, { wall: number[]; block: number[]; responseBytes: number }>;
   loop: { p50: number; p99: number; max: number; mean: number; touches: number; expectedTouches: number };
@@ -254,7 +259,7 @@ async function runChild(options: ChildOptions, resultPath: string): Promise<void
 
 // ---- parent: orchestrate, aggregate, report -------------------------------------------------
 
-interface ParentOptions { sizes: number[]; profiles: FixtureProfile[]; processes: number; samples: number; budgetSeconds: number; duration: number; seed: number; outDir: string }
+interface ParentOptions { sizes: number[]; profiles: FixtureProfile[]; processes: number; samples: number; budgetSeconds: number; duration: number; seed: number; outDir: string; resume: boolean }
 
 function runChildProcess(options: ChildOptions, resultPath: string): Promise<void> {
   const env = { ...process.env };
@@ -320,15 +325,22 @@ const mb = (bytes: number) => `${(bytes / 1e6).toFixed(1)} MB`;
 const SAVE_METRICS = ['save (flush)', 'save (debounced)', 'commit (1 row)', 'commit (10 rows)'];
 const BLOCKING_METRICS = [...SYNC_OPS, ...ROUTES.map((route) => `${route} block`)];
 
-function report(aggregated: ReturnType<typeof aggregate>, options: ParentOptions, env: ReturnType<typeof environment>, order: string[]): { markdown: string; gate: unknown } {
+interface RunOutcome { failures: { job: string; error: string }[]; missing: string[]; stopped?: string }
+
+function report(aggregated: ReturnType<typeof aggregate>, options: ParentOptions, env: ReturnType<typeof environment>, order: string[],
+  results: readonly ChildResult[], outcome: RunOutcome): { markdown: string; gate: unknown } {
   const lines: string[] = ['# Run-store benchmark (#779)', ''];
-  lines.push(`- Revision: \`${env.revision}\`${env.dirty ? ' (uncommitted changes)' : ''}`, `- Node ${env.node}, ${env.os}, ${env.cpu}, ${env.memoryGb} GB RAM`,
+  const revisions = new Map<string, number>();
+  for (const result of results) revisions.set(result.revision ?? 'unrecorded', (revisions.get(result.revision ?? 'unrecorded') ?? 0) + 1);
+  lines.push(`- Revision: \`${env.revision}\`${env.dirty ? ' (uncommitted changes)' : ''}`,
+    `- Child results by revision: ${[...revisions].map(([revision, count]) => `\`${revision}\` x${count}`).join(', ')}`, `- Node ${env.node}, ${env.os}, ${env.cpu}, ${env.memoryGb} GB RAM`,
     `- Date: ${env.date}`,
     `- ${options.processes} fresh processes per size x profile, shuffled; up to ${options.samples} samples per operation after ${WARM_UP} warm-ups, stopping after ${options.budgetSeconds} s once ${MIN_SAMPLES} are taken; ${options.duration} s active simulation; fixture seed ${options.seed}`,
     '- Cells: median / p95 in ms over all processes\' samples; `n` when the time budget cut sampling short', '');
   const expectedN = options.processes * options.samples;
   for (const [profile, bySize] of Object.entries(aggregated)) {
     const sizes = Object.keys(bySize).map(Number);
+    if (sizes.length === 0) continue;
     lines.push(`## ${profile}`, '', `| Metric | ${sizes.map((size) => `${size} runs`).join(' | ')} |`, `| --- | ${sizes.map(() => '---:').join(' | ')} |`);
     lines.push(`| Fixture bytes | ${sizes.map((size) => mb(bySize[size]!.fixtureBytes)).join(' | ')} |`);
     const row = (label: string, key: string) => lines.push(`| ${label} | ${sizes.map((size) => {
@@ -380,8 +392,20 @@ function report(aggregated: ReturnType<typeof aggregate>, options: ParentOptions
       (ranking[0]!.metric === 'open' ? ` Excluding open (once per boot), the largest is ${recurring[0]!.metric}${saveLargestRecurring ? ', a save' : ''}.` : ''),
       `- Verdict: ${grows && saveLargest ? 'the evidence gate passes' : grows && saveLargestRecurring ? 'save grows beyond noise and is the largest recurring block, but open is larger' : 'the evidence gate does not pass'} for ${profile}.`, '');
   }
+  if (outcome.failures.length > 0 || outcome.missing.length > 0 || outcome.stopped) {
+    lines.push('## Incomplete run', '', 'Cells aggregate the children that finished.', '');
+    if (outcome.stopped) lines.push(`- ${outcome.stopped}`);
+    for (const failure of outcome.failures) lines.push(`- ${failure.job} failed: ${failure.error}`);
+    if (outcome.missing.length > 0) lines.push(`- Not run: ${outcome.missing.join(', ')}`);
+    lines.push('');
+  }
   lines.push('## Run order', '', order.join(', '), '');
   return { markdown: lines.join('\n'), gate };
+}
+
+/** Bytes free to this user on the file systems the children write to. */
+function freeBytes(paths: readonly string[]): number {
+  return Math.min(...paths.map((path) => { const fs = statfsSync(path); return fs.bavail * fs.bsize; }));
 }
 
 async function runParent(options: ParentOptions): Promise<void> {
@@ -393,27 +417,59 @@ async function runParent(options: ParentOptions): Promise<void> {
   for (let i = jobs.length - 1; i > 0; i--) { const j = randomInt(i + 1); [jobs[i], jobs[j]] = [jobs[j]!, jobs[i]!]; }
   const env = environment();
   const results: ChildResult[] = [];
+  const outcome: RunOutcome = { failures: [], missing: [] };
+  const status = new Map<ChildOptions, string>();
   const started = performance.now();
   for (const [index, job] of jobs.entries()) {
+    const name = `${job.size}/${job.profile}/${job.process}`;
     const resultPath = join(options.outDir, `child-${job.size}-${job.profile}-${job.process}.json`);
-    process.stderr.write(`[bench] ${index + 1}/${jobs.length} size=${job.size} profile=${job.profile} process=${job.process} (${((performance.now() - started) / 60_000).toFixed(1)} min elapsed)\n`);
-    await runChildProcess(job, resultPath);
-    results.push(JSON.parse(readFileSync(resultPath, 'utf8')) as ChildResult);
+    if (options.resume && existsSync(resultPath)) {
+      try {
+        results.push(JSON.parse(readFileSync(resultPath, 'utf8')) as ChildResult);
+        status.set(job, 'reused');
+        process.stderr.write(`[bench] ${index + 1}/${jobs.length} ${name} reused\n`);
+        continue;
+      } catch {
+        process.stderr.write(`[bench] ${name}: saved result unreadable, running it again\n`);
+      }
+    }
+    const free = freeBytes([options.outDir, tmpdir()]);
+    if (free < MIN_FREE_BYTES) {
+      outcome.stopped = `stopped before ${name}: ${(free / 1e9).toFixed(2)} GB free, ${MIN_FREE_BYTES / 1e9} GB required`;
+      process.stderr.write(`[bench] ${outcome.stopped}\n`);
+      break;
+    }
+    process.stderr.write(`[bench] ${index + 1}/${jobs.length} ${name} (${((performance.now() - started) / 60_000).toFixed(1)} min elapsed)\n`);
+    try {
+      await runChildProcess(job, resultPath);
+      // Tag the result with the revision that produced it, so a resumed run can name every revision.
+      const result = { ...(JSON.parse(readFileSync(resultPath, 'utf8')) as ChildResult), revision: env.revision };
+      writeFileSync(resultPath, JSON.stringify(result));
+      results.push(result);
+      status.set(job, 'ran');
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      outcome.failures.push({ job: name, error });
+      status.set(job, 'failed');
+      process.stderr.write(`[bench] ${name} failed: ${error}\n`);
+    }
   }
+  outcome.missing = jobs.filter((job) => !status.has(job)).map((job) => `${job.size}/${job.profile}/${job.process}`);
   const aggregated = aggregate(results, options);
-  const order = jobs.map((job) => `${job.size}/${job.profile}/${job.process}`);
-  const { markdown, gate } = report(aggregated, options, env, order);
+  const order = jobs.map((job) => `${job.size}/${job.profile}/${job.process}${status.get(job) === 'ran' ? '' : ` (${status.get(job) ?? 'not run'})`}`);
+  const { markdown, gate } = report(aggregated, options, env, order, results, outcome);
   writeFileSync(join(options.outDir, 'results.md'), markdown);
-  writeFileSync(join(options.outDir, 'results.json'), JSON.stringify({ environment: env, options, order, aggregated, gate, results }, null, 2));
+  writeFileSync(join(options.outDir, 'results.json'), JSON.stringify({ environment: env, options, order, outcome, aggregated, gate, results }, null, 2));
   process.stdout.write(`${markdown}\n`);
   process.stderr.write(`[bench] wrote ${join(options.outDir, 'results.md')} and results.json\n`);
+  if (outcome.failures.length > 0 || outcome.stopped) process.exitCode = 1;
 }
 
 // ---- entry ------------------------------------------------------------------------------------
 
 const { values } = parseArgs({
   options: {
-    child: { type: 'boolean', default: false }, quick: { type: 'boolean', default: false },
+    child: { type: 'boolean', default: false }, quick: { type: 'boolean', default: false }, resume: { type: 'boolean', default: false },
     sizes: { type: 'string' }, profiles: { type: 'string' }, processes: { type: 'string' }, samples: { type: 'string' },
     'budget-seconds': { type: 'string' }, duration: { type: 'string' }, seed: { type: 'string' }, 'out-dir': { type: 'string' },
     size: { type: 'string' }, profile: { type: 'string' }, process: { type: 'string' }, result: { type: 'string' },
@@ -446,5 +502,6 @@ if (values.child) {
     profiles: (values.profiles ?? FIXTURE_PROFILES.join(',')).split(',').map(profileOf),
     processes: positive(values.processes, quick ? 2 : 5, 'processes'),
     outDir: values['out-dir'] ?? mkdtempSync(join(tmpdir(), 'cezar-run-store-bench-')),
+    resume: values.resume,
   });
 }
