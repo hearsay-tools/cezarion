@@ -207,6 +207,9 @@ describe('workspace runs index API', () => {
       // The global Tasks page's own columns: always-present workflow, plus branch/startedAt
       // when the run has them (this one does not — see the absent-key assertions below).
       workflow: 'build',
+      // The run summary (#817) the index row now extends: the list label and the token count.
+      workflowLabel: 'build',
+      tokensUsed: 0,
     });
     // The fat keys neither consumer has a use for never reach the wire — `workflow` rides along
     // as a plain string, `steps[]` and `workflowDef` (the expensive half) do not.
@@ -336,10 +339,12 @@ describe('workspace runs index API', () => {
     seedColdProject(otherRoot, [storedRun({ id: workerId, title: 'Worker', delegation: { role: 'worker', permissions: [], parentRunId: live.id, wait: { ...wait, workerIds: [], requestIds: [workerId] }, workspace: { kind: 'owned-isolated', ownerRunId: workerId, resourceId: workerId, path: '/managed/worker', branch: 'cez/worker', baselineSha: 'a'.repeat(40) } } }), storedRun({ id: 'ordinary', title: 'Ordinary' })]);
     const body = await getIndex();
     expect(body.runs.find(run => run.id === live.id)).toHaveProperty('delegation', { role: 'root', wait: { phase: 'parked' } });
-    expect(body.runs.find(run => run.id === workerId)).toHaveProperty('delegation', { role: 'worker', wait: { phase: 'parked', requestIds: [workerId] } });
+    expect(body.runs.find(run => run.id === workerId)).toHaveProperty('delegation', { role: 'worker', parentRunId: live.id, wait: { phase: 'parked', requestIds: [workerId] } });
     expect(body.runs.find(run => run.id === 'ordinary')).not.toHaveProperty('delegation');
     expect(runsIndexResponseSchema.parse(body)).toEqual(body);
-    expect(JSON.stringify(body)).not.toMatch(/receipts|outcomes|workspace|permissions|parentRunId|managed/);
+    // `parentRunId` is a run id, not an ownership resource: the summary carries it since #817 so a
+    // list can light a worker's parent row. Paths, permissions and receipts still never leave.
+    expect(JSON.stringify(body)).not.toMatch(/receipts|outcomes|workspace|permissions|managed/);
   });
 
   it('carries pending human attention for hot and cold parked roots without opening the cold project', async () => {

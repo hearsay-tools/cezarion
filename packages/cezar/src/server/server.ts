@@ -1,10 +1,10 @@
 import { sidebarLimitsSchema } from '@open-mercato/cezar-contract';
-import type { ApiRun } from '@open-mercato/cezar-contract';
+import type { ApiRun, RunSummary } from '@open-mercato/cezar-contract';
 import { automationKindSchema, automationScheduleSchema, localTimeZone, nextOccurrence, type AutomationKind } from '@open-mercato/cezar-contract';
 import { DelegationService } from '../delegation/service.ts';
 import type { DelegationController } from '../delegation/provision.ts';
 import { delegationFailure } from '../delegation/routes.ts';
-import { githubItemParamsSchema, CLIENT_REQUEST_VARIANTS_ERROR, workerEmptyRequestSchema, runRelationshipsSchema, runDelegationSummarySchema } from '@open-mercato/cezar-contract';
+import { githubItemParamsSchema, CLIENT_REQUEST_VARIANTS_ERROR, workerEmptyRequestSchema, runRelationshipsSchema, toRunSummary } from '@open-mercato/cezar-contract';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { AutomationStore } from '../automations/store.ts';
@@ -3850,6 +3850,12 @@ export function createApp(deps: ServerDeps) {
       ...(finishBlocked !== undefined ? { finishBlocked } : {}) };
   };
 
+  // A list row (#817), with the same live `usage` sample `withUsage` attaches.
+  const runSummary = (run: RunRecord): RunSummary => {
+    const usage = currentUsage(run.id);
+    return toRunSummary(usage ? { ...run, usage } : run);
+  };
+
   // The inbox half of a composer launch (#374). Since the cockpit's "▶ Run"
   // prefills `/new` instead of calling POST /api/todos/:id/start (never launch
   // blind — #355), the todo id rides along on the composer's POST /api/runs and
@@ -3875,6 +3881,9 @@ export function createApp(deps: ServerDeps) {
   delegationService.setDiscovery({ models: modelCatalog, providers: providerStatus });
   const runsRoutes = new Hono<ProjectApiEnv>()
     .get('/runs', (c) => c.json(c.get('project').store.listRuns().map(run => withUsage(run))))
+    // The slim list (#817): the same runs in the same order as `GET /runs`, projected by the one
+    // shared `toRunSummary` so lists never parse `task`, `steps[]` or the full delegation state.
+    .get('/run-summaries', (c) => c.json(c.get('project').store.listRuns().map(run => runSummary(run))))
     .get('/runs/:id/relationships', paramZodValidator(runIdParamSchema), queryZodValidator(workerEmptyRequestSchema), (c) => {
       const { store } = c.get('project');
       const run = store.getRun(c.req.valid('param').id);
@@ -6082,44 +6091,9 @@ export function createApp(deps: ServerDeps) {
     return numbers;
   };
 
-  const runIndexEntry = (projectId: string, run: RunRecord): RunIndexEntry => {
-    const usage = currentUsage(run.id);
-    return {
-    projectId,
-    id: run.id,
-    title: run.title,
-    ...(run.titleSummary !== undefined ? { titleSummary: run.titleSummary } : {}),
-    ...(run.titleOrigin !== undefined ? { titleOrigin: run.titleOrigin } : {}),
-    status: run.status,
-    ...(run.delegation ? { delegation: runDelegationSummarySchema.parse(run.delegation) } : {}),
-    ...(run.activity !== undefined ? { activity: run.activity } : {}),
-    ...(run.hasPendingHumanAsk !== undefined ? { hasPendingHumanAsk: run.hasPendingHumanAsk } : {}),
-    createdAt: run.createdAt,
-    ...(run.finishedAt !== undefined ? { finishedAt: run.finishedAt } : {}),
-    ...(run.seenAt !== undefined ? { seenAt: run.seenAt } : {}),
-    archived: run.archived,
-    ...(run.autoResumeAt !== undefined ? { autoResumeAt: run.autoResumeAt } : {}),
-    workflow: run.workflow,
-    ...(run.branch !== undefined ? { branch: run.branch } : {}),
-    ...(run.startedAt !== undefined ? { startedAt: run.startedAt } : {}),
-    // The tracker-reference inputs, verbatim — the cockpit's `taskReference()` owns the rule
-    // that picks between them (see the schema's note).
-    ...(run.pullRequestUrl !== undefined ? { pullRequestUrl: run.pullRequestUrl } : {}),
-    ...(run.referencedPullRequestUrl !== undefined
-      ? { referencedPullRequestUrl: run.referencedPullRequestUrl }
-      : {}),
-    ...(run.prNumber !== undefined ? { prNumber: run.prNumber } : {}),
-    ...(run.issueNumber !== undefined ? { issueNumber: run.issueNumber } : {}),
-    ...(run.referencedIssueUrl !== undefined ? { referencedIssueUrl: run.referencedIssueUrl } : {}),
-    ...(run.markerRefs !== undefined ? { markerRefs: run.markerRefs } : {}),
-    ...(run.costUsd !== undefined ? { costUsd: run.costUsd } : {}),
-    ...(run.peakRssBytes !== undefined ? { peakRssBytes: run.peakRssBytes } : {}),
-    ...(run.peakProcCount !== undefined ? { peakProcCount: run.peakProcCount } : {}),
-    // The live sample, on the same terms as `GET /runs`: process-wide sampler, so a
-    // workspace-level answer can carry it for every project's runs at once.
-    ...(usage ? { usage } : {}),
-    };
-  };
+  // The live sample rides along on the same terms as `GET /runs`: the sampler is process-wide, so
+  // a workspace-level answer can carry it for every project's runs at once.
+  const runIndexEntry = (projectId: string, run: RunRecord): RunIndexEntry => ({ projectId, ...runSummary(run) });
 
   /**
    * `GET /workspace/runs-index` — every registered project's recent tasks in one slim answer, so
