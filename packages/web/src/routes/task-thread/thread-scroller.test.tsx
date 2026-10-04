@@ -859,6 +859,85 @@ describe('#795 compatible measurement replay with the real virtua handle', () =>
     expect(view.controls().virtualizerRef.current!.getItemOffset(123)).toBe(22140)
   })
 
+  function scrollbar(main: Element, side: 'left' | 'right' = 'right') {
+    const element = main as HTMLElement
+    element.style.border = '2px solid'
+    element.getBoundingClientRect = () => ({ left: 100, right: 420, top: 50, bottom: 554, width: 320, height: 504 } as DOMRect)
+    Object.defineProperties(element, {
+      offsetWidth: { value: 320, configurable: true },
+      clientWidth: { value: 300, configurable: true },
+      clientLeft: { value: side === 'left' ? 18 : 2, configurable: true },
+      clientTop: { value: 2, configurable: true },
+    })
+    return side === 'left' ? 110 : 410
+  }
+  function pointerDown(node: Element, clientX: number, pointerType = 'mouse', button = 0) {
+    const event = new MouseEvent('pointerdown', { bubbles: true, clientX, clientY: 100, button })
+    Object.defineProperty(event, 'pointerType', { value: pointerType })
+    fireEvent(node, event)
+  }
+
+  it.each(['row', 'button', 'selection', 'viewport', 'touch'])(
+    'keeps delayed measurement adoption after a %s press', target => {
+      const full = seed(), view = replay(full.slice(0, 350)), main = view.main()
+      scrollbar(main)
+      const node = target === 'viewport' || target === 'touch' ? main : document.createElement(target === 'button' ? 'button' : 'span')
+      if (node !== main) main.querySelector('[data-slot="thread-rows"]')!.append(node)
+      act(() => {
+        pointerDown(node, target === 'touch' ? 410 : 150, target === 'touch' ? 'touch' : 'mouse')
+        if (target === 'selection') {
+          // Selection can autoscroll; it is not a native scrollbar grab.
+          main.scrollTop = 8000
+          fireEvent.scroll(main)
+        }
+        fireEvent.pointerUp(window)
+      })
+      expect(view.controls().ownsMeasurementRestore('revisit:main')).toBe(true)
+      view.commit(full)
+      expect(view.controls().virtualizerRef.current!.getItemSize(123)).toBe(180)
+      expect(view.controls().virtualizerRef.current!.getItemOffset(123)).toBe(22140)
+    },
+  )
+
+  it.each(['left', 'right'] as const)('cancels delayed adoption on the %s scrollbar, including at the tail', side => {
+    for (const top of [9000, 99500]) {
+      const full = seed(), view = replay(full.slice(0, 350)), main = view.main() as HTMLElement
+      const x = scrollbar(main, side)
+      main.scrollTop = top
+      pointerDown(main, x)
+      expect(view.controls().ownsMeasurementRestore('revisit:main')).toBe(false)
+      view.commit(full)
+      expect(view.controls().virtualizerRef.current!.getItemSize(123)).not.toBe(180)
+      view.unmount()
+      clearThreadScrollCaches()
+    }
+  })
+
+  it.each(['border', 'secondary button', 'horizontal gutter', 'no overflow'])(
+    'keeps delayed adoption for a %s pointer action', target => {
+      const full = seed(), view = replay(full.slice(0, 350)), main = view.main() as HTMLElement
+      const x = scrollbar(main)
+      if (target === 'no overflow') Object.defineProperty(main, 'scrollHeight', { value: 500, configurable: true })
+      const event = new MouseEvent('pointerdown', {
+        bubbles: true, clientX: target === 'border' ? 419 : x,
+        clientY: target === 'horizontal gutter' ? 553 : 100,
+        button: target === 'secondary button' ? 2 : 0,
+      })
+      fireEvent(main, event)
+      expect(view.controls().ownsMeasurementRestore('revisit:main')).toBe(true)
+      view.commit(full)
+      expect(view.controls().virtualizerRef.current!.getItemSize(123)).toBe(180)
+    },
+  )
+
+  it('keeps the complete candidate on detach after pressing transcript content', () => {
+    const full = seed(), view = replay(full.slice(0, 350))
+    fireEvent.pointerDown(view.main().querySelector('[data-slot="thread-rows"]')!)
+    view.unmount()
+    const returned = replay(full)
+    expect(returned.controls().virtualizerRef.current!.getItemSize(123)).toBe(180)
+  })
+
   it('keeps the original complete candidate when leaving during a partial restore', () => {
     const full = seed(), view = replay(full.slice(0, 350))
     view.unmount()
@@ -875,7 +954,7 @@ describe('#795 compatible measurement replay with the real virtua handle', () =>
         fireEvent.touchStart(main, { touches: [{ clientY: 100 }] })
         fireEvent.touchMove(main, { touches: [{ clientY: intent.endsWith('up') ? 120 : 80 }] })
       } else if (intent.startsWith('key')) fireEvent.keyDown(main, { key: intent.endsWith('up') ? 'ArrowUp' : 'ArrowDown' })
-      else if (intent === 'scrollbar') fireEvent.pointerDown(main)
+      else if (intent === 'scrollbar') pointerDown(main, scrollbar(main))
       else await act(async () => {
         if (intent === 'Jump') view.controls().jumpToLatest()
         else if (intent === 'row jump') view.controls().jumpToRow('row-120', 120)

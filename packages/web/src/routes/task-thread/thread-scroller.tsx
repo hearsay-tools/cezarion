@@ -421,7 +421,22 @@ export function useThreadScroll(
       }
       else if (['ArrowDown', 'PageDown', 'End'].includes(event.key)) markDown()
     }
-    const onPointerDown = () => {
+    const onPointerDown = (event: PointerEvent) => {
+      // Transcript clicks/selection (including blank viewport space) are not scrolling
+      // intent. Only a primary mouse press in the native vertical scrollbar cancels
+      // arrival; touch pans are handled by their movement above.
+      if (event.target !== scroller || event.button !== 0 || event.pointerType === 'touch' || event.pointerType === 'pen') return
+      if (scroller.scrollHeight <= scroller.clientHeight) return
+      const rect = scroller.getBoundingClientRect()
+      const style = getComputedStyle(scroller)
+      const borderLeft = parseFloat(style.borderLeftWidth) || 0
+      const borderRight = parseFloat(style.borderRightWidth) || 0
+      const clientLeft = rect.left + scroller.clientLeft
+      const clientRight = clientLeft + scroller.clientWidth
+      const inScrollbar =
+        (event.clientX >= rect.left + borderLeft && event.clientX < clientLeft) ||
+        (event.clientX >= clientRight && event.clientX < rect.right - borderRight)
+      if (!inScrollbar || event.clientY < rect.top + scroller.clientTop || event.clientY >= rect.top + scroller.clientTop + scroller.clientHeight) return
       pendingRestoreRef.current = null
       measurementRestoreRef.current = null
       pointerScrolling = true
