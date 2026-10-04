@@ -4,7 +4,7 @@ import { once } from 'node:events'
 import { readFileSync, readdirSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { resolve } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { captureFixtureServer, spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from '../../e2e/fixture-server'
 
@@ -198,8 +198,45 @@ describe('owned fixture server readiness (#795)', () => {
 
   it('reports an unhealthy owned listener, retries within its existing budget, and stops only its child', async () => {
     const child = owned(serverScript({ status: 503 }))
+    await once(child.stdout!, 'data')
     await expect(waitForFixtureServer(child, { deadline: Date.now() + 900 })).rejects.toThrow('answered 503')
     expect(child.exitCode !== null || child.signalCode !== null).toBe(true)
+  })
+
+  it.each([500, 503])('retains the received HTTP %s when a later health probe times out', async status => {
+    const child = owned(serverScript({ status }))
+    // Arrange the owned listener, not an unrelated endpoint or a guessed port.
+    await once(child.stdout!, 'data')
+    let now = Date.now()
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now)
+    const nativeFetch = globalThis.fetch
+    const received: number[] = []
+    let probes = 0
+    const fetchProbe = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, options) => {
+      probes++
+      if (probes === 1) {
+        const response = await nativeFetch(input, options)
+        received.push(response.status)
+        now += 500
+        return response
+      }
+      // Deterministically reproduce the final, budget-exhausting transport error.
+      now += 900
+      throw new Error('late health probe timeout')
+    })
+    try {
+      const failure = await waitForFixtureServer(child, { deadline: Date.now() + 900 }).catch(error => error)
+      expect(received).toEqual([status])
+      expect(probes).toBe(2)
+      expect(failure).toBeInstanceOf(Error)
+      expect(failure.message).toContain(`answered ${status}`)
+      expect(failure.message).toContain('late health probe timeout')
+      expect(failure.cause.cause.message).toBe('late health probe timeout')
+      expect(child.exitCode !== null || child.signalCode !== null).toBe(true)
+    } finally {
+      fetchProbe.mockRestore()
+      clock.mockRestore()
+    }
   })
 
   it('refuses an unrelated child that was not constructed by the owned fixture helper', async () => {

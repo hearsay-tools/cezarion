@@ -106,6 +106,7 @@ export async function waitForFixtureServer(
   const fixture = ownedFixtures.get(child)
   if (!fixture) throw new Error('Fixture child was not constructed by spawnFixtureServer')
   let phase = 'awaiting listener announcement'
+  let lastHealthResponse: string | undefined
   try {
     const answer = await pollFor<{ origin: string } | { failure: Error }>(
       async signal => {
@@ -120,6 +121,8 @@ export async function waitForFixtureServer(
         }
         phase = 'awaiting owned listener health'
         const response = await fetch(`${origin}/api/v1/health`, { signal })
+        // Keep received headers even if cancellation or a later probe times out.
+        lastHealthResponse = `GET ${origin}/api/v1/health answered ${response.status}`
         await response.body?.cancel()
         if (child.exitCode !== null || child.signalCode !== null) {
           return { failure: new Error(`Fixture child exited: code=${child.exitCode} signal=${child.signalCode}`) }
@@ -133,7 +136,8 @@ export async function waitForFixtureServer(
     if ('failure' in answer) throw answer.failure
     return answer.origin
   } catch (error) {
-    const failure = new Error(`cezar e2e: ${phase}; ${error instanceof Error ? error.message : String(error)}; child=${JSON.stringify(fixture.sample())}`, { cause: error })
+    const healthDetail = lastHealthResponse === undefined ? '' : `; last received health response: ${lastHealthResponse}`
+    const failure = new Error(`cezar e2e: ${phase}; ${error instanceof Error ? error.message : String(error)}${healthDetail}; child=${JSON.stringify(fixture.sample())}`, { cause: error })
     try { await stopFixtureServer(child) }
     catch (cleanupError) { throw new AggregateError([failure, cleanupError], 'Fixture startup and cleanup failed', { cause: failure }) }
     throw failure
