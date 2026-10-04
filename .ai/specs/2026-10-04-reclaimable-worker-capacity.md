@@ -103,7 +103,8 @@ Records with ≤32 receipts parse unchanged; no migration.
   use. Clean up finished workers to free a slot.` Add a **Clean up** button per
   settled worker (`review`/`done`/`failed`/`cancelled`) without a complete
   destroy, calling the existing human `POST /runs/:id/worker-destroy` (its guard
-  is unchanged). Destroy checkpoints the result before removing anything; review
+  is unchanged) after an inline confirmation, because it removes the worktree
+  and branch. A refusal is shown in the server's own words. Destroy checkpoints the result before removing anything; review
   gates are not accepted and nothing runs automatically. Incomplete results show
   the existing `Cleanup` state.
 - **CLI / generated instructions** (`provision.ts`): replace "At most 32

@@ -305,25 +305,42 @@ const SETTLED = new Set<WorkerInspection['status']>(['review', 'done', 'failed',
 
 /**
  * Verified cleanup of one settled worker through the human destroy route (#816). Offered only
- * once the worker has stopped and until its cleanup is proven complete. Cleanup checkpoints
- * the worker's result before removing anything; it never accepts a review gate.
+ * once the worker has stopped and until its cleanup is proven complete. Cleanup removes the
+ * worker's worktree AND branch — work a reviewer may not have read yet — so it takes an inline
+ * confirmation. Its result is checkpointed first, and it never accepts a review gate. A refusal
+ * is reported in the server's own words, because some (history deletion under way) cannot be
+ * fixed by clicking again.
  */
 function CleanUpWorker({ parentRunId, worker }: { parentRunId: string; worker: WorkerInspection }) {
   const destroy = useDestroyWorker(parentRunId)
+  const [confirming, setConfirming] = useState(false)
   if (!SETTLED.has(worker.status) || (worker.destroy?.phase === 'complete' && worker.destroy.remaining.length === 0)) return null
-  return <>
-    <Button
+  const short = worker.workerId.slice(0, 8)
+  return <div className="flex min-w-0 flex-wrap items-center gap-2 px-1">
+    {confirming ? <>
+      <span className="break-words text-xs">Removes this worker's worktree and branch. Its result is saved first.</span>
+      <Button
+        variant="danger-ghost"
+        size="sm"
+        className="min-h-11"
+        aria-label={`Confirm clean up of worker ${short}`}
+        onClick={() => { setConfirming(false); destroy.mutate(worker.workerId) }}
+      >
+        Clean up
+      </Button>
+      <Button variant="outline" size="sm" className="min-h-11" onClick={() => setConfirming(false)}>Cancel</Button>
+    </> : <Button
       variant="outline"
       size="sm"
       className="min-h-11"
-      aria-label={`Clean up worker ${worker.workerId.slice(0, 8)}`}
+      aria-label={`Clean up worker ${short}`}
       disabled={destroy.isPending}
-      onClick={() => destroy.mutate(worker.workerId)}
+      onClick={() => setConfirming(true)}
     >
       {destroy.isPending ? 'Cleaning up…' : 'Clean up'}
-    </Button>
-    {destroy.isError ? <span role="status" className="px-2 text-xs break-words">Cleanup did not finish and keeps its slot. Retry Clean up.</span> : null}
-  </>
+    </Button>}
+    {destroy.isError && !confirming ? <span role="status" className="break-words text-xs">Cleanup did not finish: {destroy.error.message}</span> : null}
+  </div>
 }
 
 /**
