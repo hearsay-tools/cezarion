@@ -41,12 +41,12 @@ const signal = (overrides: Partial<ProjectSignal> = {}): ProjectSignal => ({
   ...overrides,
 })
 
-const PROJECTS = ['cezarion', 'toolkit-dev', 'api-platform', 'mvp-unveiled', 'ops-monitor'].map((id) => project(id))
+const PROJECTS = ['cezarion', 'toolkit-dev', 'api-platform', 'mvp-harbor', 'ops-monitor'].map((id) => project(id))
 const SIGNALS = new Map<string, ProjectSignal>([
   ['cezarion', signal({ needsYou: 1, inMotion: 3, finishedUnread: 1 })],
   ['toolkit-dev', signal({ needsYou: 1, inMotion: 2 })],
   ['api-platform', signal({ failedUnread: 1 })],
-  ['mvp-unveiled', signal({ finishedUnread: 1 })],
+  ['mvp-harbor', signal({ finishedUnread: 1 })],
 ])
 
 const nav = (overrides: Partial<MobileProjectNav> = {}): MobileProjectNav => ({

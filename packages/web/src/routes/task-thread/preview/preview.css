@@ -1,0 +1,103 @@
+/* Live preview (#781): the split between the transcript and the pane, and the pane's motion. */
+
+/* A closed pane adds no boxes: the split and its main column step out of layout, so the task view
+ * lays out as it does without live preview. Opening the pane brings them back without remounting
+ * the tab. */
+[data-slot='task-split'][data-pane='closed'],
+[data-slot='task-split'][data-pane='closed'] > [data-slot='task-main'] {
+  display: contents;
+}
+
+/* The pane docks beside the transcript and sticks to the shell's scrolling main, so it stays in
+ * view while a long transcript scrolls. --preview-h is the main's measured height (100dvh until
+ * measured); --preview-pane is the divider's width. */
+.preview-pane {
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  flex: 0 0 var(--preview-pane, 58%);
+  /* The toolbar needs room for the address next to its controls; the transcript keeps the rest. */
+  min-width: min(440px, 100%);
+  max-width: calc(100% - 360px);
+  height: var(--preview-h, 100dvh);
+  border-left: 1px solid var(--border);
+  background: var(--background);
+}
+.preview-pane[hidden] { display: none; }
+
+/* Below 1180 px (and above a phone) the pane takes the main area UNDER the task header, as design 02
+ * draws it: the title, the tabs and the Preview toggle stay, the rest of the task view steps aside
+ * (it stays mounted, so its scroll position and composer draft survive). */
+@media (min-width: 768px) {
+  .preview-split[data-takeover] { flex-direction: column; height: 100%; min-height: 0; }
+  .preview-split[data-takeover] [data-slot='task-main'] { flex: 0 0 auto; }
+  .preview-split[data-takeover] .preview-pane {
+    position: static;
+    flex: 1 1 0;
+    align-self: stretch;
+    height: auto;
+    min-height: 0;
+    min-width: 0;
+    max-width: none;
+    border-left: 0;
+  }
+}
+[data-slot='task-main'][data-collapsed] [data-route] { min-height: 0; }
+[data-slot='task-main'][data-collapsed] [data-route] > :not([data-slot='run-header']) { display: none; }
+
+/* On a phone the pane is the whole screen, over the shell's top bar and tab bar. */
+@media (max-width: 767px) {
+  .preview-pane {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    height: 100dvh;
+    min-width: 0;
+    max-width: none;
+    padding-bottom: env(safe-area-inset-bottom);
+    border-left: 0;
+  }
+}
+
+/* Docked, the transcript column is half the screen and the task header cannot spend it all on chips:
+ * the title keeps one truncated line on its own row and the status pill and actions sit under it. */
+@container (max-width: 640px) {
+  [data-slot='task-split'][data-pane='open'] [data-slot='run-title-row'] { flex-wrap: wrap; row-gap: 6px; }
+  [data-slot='task-split'][data-pane='open'] [data-slot='run-title-row'] > .group { flex: 1 1 100%; }
+  [data-slot='task-split'][data-pane='open'] [data-slot='run-title-row'] h1 {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.preview-divider {
+  position: relative;
+  flex: 0 0 9px;
+  margin-inline: -4px;
+  z-index: 1;
+  cursor: col-resize;
+  touch-action: none;
+  outline: none;
+}
+.preview-divider::after {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  left: 4px;
+  width: 1px;
+  background: transparent;
+  transition: background-color 120ms;
+}
+.preview-divider:hover::after,
+.preview-divider:focus-visible::after,
+.preview-divider:active::after { background: var(--ring); width: 2px; left: 3.5px; }
+
+/* The thin bar under the toolbar while the first page opens. Reduced motion keeps the bar and
+ * drops the sweep, so the feedback stays. */
+@keyframes preview-progress { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+.preview-progress { animation: preview-progress 1.2s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .preview-progress { animation: none; width: 40%; }
+}

@@ -1,4 +1,5 @@
 import type { ApiRun } from '@open-mercato/cezar-contract';
+import { automationKindSchema, automationScheduleSchema, localTimeZone, nextOccurrence, type AutomationKind } from '@open-mercato/cezar-contract';
 import { DelegationService } from '../delegation/service.ts';
 import type { DelegationController } from '../delegation/provision.ts';
 import { delegationFailure } from '../delegation/routes.ts';
@@ -9,12 +10,21 @@ import { AutomationStore } from '../automations/store.ts';
 import { AutomationCoordinator } from '../automations/coordinator.ts';
 import { GithubPoller } from '../automations/github-poller.ts';
 import { ProjectAutomationScheduler, WorkspaceAutomationScheduler } from '../automations/scheduler.ts';
-import { launchAutomationRun, reconcileAutomationReceipts, validateAutomationPrompt } from '../automations/task-template.ts';
+import { SCHEDULE_LEASE_HELD_REASON, ScheduleRunner, type ScheduleRunnerHandle } from '../automations/schedule-runner.ts';
+import {
+  launchAutomationRun,
+  launchScheduledRun,
+  rebaselineIdleAutomations,
+  reconcileAutomationReceipts,
+  validateAutomationPrompt,
+} from '../automations/task-template.ts';
 import {
   automationEventSchema,
   automationFiltersSchema,
   automationLogResultSchema,
   automationTaskSchema,
+  isGithubAutomation,
+  isScheduleAutomation,
   type AutomationDefinition,
 } from '../automations/types.ts';
 import type { IncomingMessage } from 'node:http';
@@ -112,7 +122,8 @@ import { artifactParamsSchema, fileLinkQuerySchema } from '@open-mercato/cezar-c
 import { artifactDirectory, listArtifacts, readArtifact } from '../artifacts/store.ts';
 import { artifactPreview, loadFileLink, rasterMime } from '../artifacts/resolve.ts';
 import { isUntouchedCancelledRun, toPastedContent, type PastedContent, type RunManager } from '../workflows/run.ts';
-import { removeWorktree, worktreeDiff, worktreeDiffStat, worktreeSizeBytes } from '../git-worktree.ts';
+import { worktreeDiff, worktreeDiffStat, worktreeSizeBytes } from '../git-worktree.ts';
+import { releaseThenRemoveWorktree } from '../git-worktree-release.ts';
 import { isReclaimable, reclaimWorktree, reclaimWorktrees, rematerializeReclaimedWorktree, selectReclaimableWorktrees } from '../runs/retention.ts';
 import { getBranches, getCommit, getDiff, getLogWithParents, getRepoInfo, getStatus, getTracking } from './git.ts';
 import { attributeLog, deleteBranches, forgetRepoBranches, githubBranchForge, readRepoBranches, type BranchForge, type ClassifyInput } from './repo-branches.ts';
@@ -181,14 +192,17 @@ import {
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { mergeWriteWorkspaceUiState, readWorkspaceUiState } from '../workspace/ui-state.ts';
 import { checkoutRepo, type CloneRunner } from './checkout.ts';
-import { ProjectContextError, ProjectContexts, type ProjectContext } from './project-context.ts';
+import { armPreview, ProjectContextError, ProjectContexts, sweepRegisteredPreviewLeftovers, type ProjectContext } from './project-context.ts';
 import { reviewGateEnabled } from '../runs/review-gate.ts';
 import { readUiState, uiStatePath } from '../ui-state.ts';
 import { agentHomePaths, expandTilde } from '../paths.ts';
 import { isLoopbackHostHeader, normalizeHostname, resolveCapabilities } from './capabilities.ts';
 import { applicationUpdateInputSchema, type ApplicationUpdateState } from '@open-mercato/cezar-contract';
 import { ApplicationUpdateConflictError, ApplicationUpdateFailureError, type ApplicationUpdateServiceLike } from '../application-update/service.ts';
-import { createSocketHub, type SocketHub, type WsUpgradeVerdict } from './ws.ts';
+import { createSocketHub, socketHubRoute, type SocketHub, type WsUpgradeVerdict } from './ws.ts';
+import { attachUpgradeRouter } from './upgrade-router.ts';
+import { createPreviewSocket } from './preview-socket.ts';
+import type { PreviewHost } from '../preview/host.ts';
 import { browseDirectory, isInsideBrowseRoot, isLexicallyInsideBrowseRoot, resolveBrowseRoot } from './fs-browse.ts';
 import { parseRemote, resolveForge, type ForgeAvailability } from './forge/index.ts';
 import { fetchGithub, fetchGithubProjects, fetchGithubChecks, fetchGithubComments, fetchGithubItem, forgetGithubItem, fetchGithubPrDiff, fetchGithubRefStatus, forgetRefStatus, readCachedRefStatuses, refNumberFromUrl, searchGithubItems, GithubPrNotFoundError, GH_CHECKS_MAX, GH_REF_STATUS_MAX } from './github.ts';
@@ -303,6 +317,15 @@ export interface ServerDeps {
    *  to the HTTP server it binds. Optional so legacy callers/tests change
    *  nothing: no hub, no topics, and the HTTP surface is byte-identical. */
   socketHub?: SocketHub;
+  /** The workspace-wide live preview host (#781), one per server process because ports are
+   *  host-global. Present only under `CEZ_PREVIEW=1`; absent, the preview WebSocket answers 404
+   *  and every run manager answers `headless`. */
+  previewHost?: PreviewHost;
+  /** The port the cockpit listens on, once it does: `cezar_preview_serve` refuses it. */
+  cezarPort?: () => number | undefined;
+  /** Filled in by `createApp` with the scope middleware's own project lookup, so an upgrade-only
+   *  route (`startServer`'s preview socket) resolves `:projectId` exactly as the HTTP routes do. */
+  projectLookup?: { resolve?: (projectId: string | undefined) => Promise<ProjectContext | undefined> };
   /** Re-arm the workspace automation timer after definition mutations. */
   automationsChanged?: () => void;
 }
@@ -383,17 +406,25 @@ const providerRetrySchema = z.object({
   authFailureId: z.string().min(1).max(128),
 }).strict();
 
+/**
+ * The editable body of both kinds. Every kind-specific key is optional here because which ones a
+ * body must (or must not) carry depends on the kind, and on `PUT` the kind is the STORED one when
+ * the body omits it — `resolveAutomationKind` below owns those rules.
+ */
 const automationEditableSchema = z
   .object({
     name: z.string().trim().min(1).max(200),
     description: z.string().max(2_000).optional(),
     enabled: z.boolean().optional(),
-    events: z.array(automationEventSchema).min(1).max(4),
-    intervalSeconds: z.number().int().min(60).max(86_400),
-    filters: automationFiltersSchema,
+    kind: automationKindSchema.optional(),
+    events: z.array(automationEventSchema).min(1).max(4).optional(),
+    intervalSeconds: z.number().int().min(60).max(86_400).optional(),
+    filters: automationFiltersSchema.optional(),
+    schedule: automationScheduleSchema.optional(),
     task: automationTaskSchema,
   })
   .strict();
+type AutomationEditable = z.infer<typeof automationEditableSchema>;
 const automationCreateSchema = automationEditableSchema.extend({ enable: z.boolean().optional() });
 const automationUpdateSchema = automationEditableSchema.extend({ expectedRevision: z.number().int().positive() });
 const automationCheckRequestSchema = z.object({ mode: z.enum(['preview', 'execute']) }).strict();
@@ -411,16 +442,67 @@ const automationLogQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).optional(),
 });
 
+/** enable/pause carry no client revision, so a conflict is a race inside the write: 409, never 500. */
+function toggleFailure(error: unknown): { error: string; status: 404 | 409 } {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message === 'automation not found') return { error: 'not found', status: 404 };
+  if (message === 'automation revision conflict') return { error: 'the automation changed elsewhere; reload and try again', status: 409 };
+  throw error;
+}
+
 function editableAutomation(definition: AutomationDefinition) {
   return {
     name: definition.name,
     description: definition.description,
     enabled: definition.enabled,
-    events: definition.events,
-    intervalSeconds: definition.intervalSeconds,
-    filters: definition.filters,
+    kind: definition.kind,
+    ...(definition.events ? { events: definition.events } : {}),
+    ...(definition.intervalSeconds !== undefined ? { intervalSeconds: definition.intervalSeconds } : {}),
+    ...(definition.filters ? { filters: definition.filters } : {}),
+    ...(definition.schedule ? { schedule: definition.schedule } : {}),
     task: definition.task,
   };
+}
+
+/**
+ * Which kind a create/update body is, and whether its keys fit it (spec
+ * 2026-10-02-scheduled-automations § Data model). A body without `kind` is `github` on create —
+ * every pre-schedule client — and the STORED kind on update, so an old client editing a schedule
+ * edits a schedule. Changing the kind is refused: receipts and cursors are kind-specific.
+ */
+function resolveAutomationKind(
+  body: AutomationEditable,
+  stored?: AutomationDefinition,
+): { kind: AutomationKind } | { error: string; status: 400 | 409 } {
+  const kind = body.kind ?? stored?.kind ?? 'github';
+  if (stored && kind !== stored.kind) return { error: 'change the kind by creating a new automation', status: 409 };
+  if (kind === 'schedule') {
+    if (body.events !== undefined || body.intervalSeconds !== undefined || body.filters !== undefined) {
+      return { error: 'a scheduled automation has no GitHub filter', status: 400 };
+    }
+    if (!body.schedule) return { error: 'a scheduled automation needs a schedule', status: 400 };
+  } else {
+    if (body.schedule !== undefined) return { error: 'a GitHub automation has no schedule', status: 400 };
+    if (!body.events || body.intervalSeconds === undefined || !body.filters) {
+      return { error: 'a GitHub automation needs events, intervalSeconds and filters', status: 400 };
+    }
+  }
+  return { kind };
+}
+
+function sameSchedule(a: AutomationDefinition['schedule'], b: AutomationDefinition['schedule']): boolean {
+  return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+}
+
+/**
+ * The `nextRunAt` a schedule definition arms with: its next occurrence from now when enabled,
+ * cleared when paused. Passed to the store's `create`/`update` as `arm`, which writes it BEFORE
+ * the definition, so another cockpit's timer never pairs the new definition with the old instant.
+ */
+function armScheduleFromNow(definition: AutomationDefinition): { nextRunAt: string | undefined } | undefined {
+  if (!isScheduleAutomation(definition)) return undefined;
+  const next = definition.enabled ? nextOccurrence(definition.schedule, Date.now(), localTimeZone()) : null;
+  return { nextRunAt: next === null ? undefined : new Date(next).toISOString() };
 }
 
 /** One row of the mirrored project-route table. */
@@ -469,7 +551,7 @@ export function projectRouteManifest(app: Hono): ProjectRouteInfo[] {
 const FOLLOWUPS_OFF = 'the follow-up inbox is disabled — set CEZ_FOLLOWUPS=1 to enable it';
 
 /** 409 body for every automations route while GitHub automations are off (#801). */
-const AUTOMATIONS_OFF = 'GitHub automations are disabled — set CEZ_AUTOMATIONS=1 to enable them';
+const AUTOMATIONS_OFF = 'Automations are disabled — set CEZ_AUTOMATIONS=1 to enable them';
 
 // ---- variant-compare response shapes (spec 010) ----------------------------
 // Named and exported so `api-types.test.ts` can drift-guard the cockpit's
@@ -1243,6 +1325,8 @@ export function createApp(deps: ServerDeps) {
       return listProjects(selector);
     },
     semaphore: deps.semaphore,
+    preview: deps.previewHost,
+    cezarPort: deps.cezarPort,
     prepareManager: (project) => {
       taskWebhooks.attach(project);
       return deps.delegation?.attachProject(project);
@@ -1409,6 +1493,13 @@ export function createApp(deps: ServerDeps) {
   // `ProjectContextError` mapped to 404 (unknown) / 409 (missing root).
   // Named rather than inlined because both mounts share it — one function, so
   // the two spellings can never disagree about what `default` means.
+  if (deps.projectLookup) {
+    deps.projectLookup.resolve = async (raw) => {
+      if (raw === undefined || raw === 'default' || raw === (await resolveBootProject())) return bootContext;
+      if (!projectIdSchema.safeParse(raw).success) return undefined;
+      return contexts.context(raw).catch(() => undefined);
+    };
+  }
   const resolveProjectScope = async (c: Context<ProjectApiEnv>, next: Next): Promise<Response | void> => {
     const raw = c.req.param('projectId');
     if (raw === undefined) {
@@ -3409,6 +3500,27 @@ export function createApp(deps: ServerDeps) {
     await next();
   };
 
+  /** The schedule runner for a route's project: launches into that project's own run manager. */
+  const scheduleHandle = (project: ProjectContext): ScheduleRunnerHandle => {
+    const timeZone = localTimeZone();
+    return {
+      projectId: project.id,
+      store: project.automationStore,
+      timeZone,
+      launch: (definition, occurrence, receiptId) => launchScheduledRun({
+        root: project.root,
+        manager: project.manager,
+        store: project.store,
+        definition,
+        occurrence,
+        receiptId,
+        projectName: basename(project.root),
+        timeZone,
+      }),
+      onChange: (automationId, revision) => emitAutomationChange(project, automationId, revision),
+    };
+  };
+
   // ---- chained family: GitHub automations (project-scoped) ----
   // Every handler below reads `c.get('project')` — the definitions, their runtime state and the
   // execution log are per-project files — so the family is project-scoped and mounted with the
@@ -3422,17 +3534,22 @@ export function createApp(deps: ServerDeps) {
     .get('/automations', async (c) => {
       const { root, automationStore } = c.get('project');
       const forge = resolveForge(await getRepoInfo(root));
-      // Annotated, so the two branches are ONE shape rather than a union of two: the fallback
-      // literal always carries `reason`, the cached answer only sometimes does, and the route
-      // type is what `contract/src/automations.ts` has to describe.
-      const availability: ForgeAvailability = forge?.detectCached() ?? {
-        available: false,
-        reason: forge ? 'GitHub availability is still being checked' : 'No GitHub remote is configured',
-      };
+      // Awaits the driver's settled probe (per-repo cache + in-flight dedupe, 5 s timeout, never
+      // throws): a "still being checked" answer would leave the cockpit's GitHub option disabled
+      // because it does not refetch when the probe completes. `/health` keeps `detectCached`.
+      // Annotated, so both branches are ONE shape: the route type is what
+      // `contract/src/automations.ts` has to describe.
+      const availability: ForgeAvailability = forge
+        ? await forge.detect()
+        : { available: false, reason: 'No GitHub remote is configured' };
       const automations = automationStore.list().map((automation) => {
         const logs = automationStore.logs({ automationId: automation.id, limit: 100 });
         const state = automationStore.state(automation.id);
         const latestLog = logs[0];
+        // Enabled only: a paused definition's stored instant is stale, not a next run.
+        const nextRunAt = automation.enabled
+          ? (automation.kind === 'schedule' ? state?.nextRunAt : state?.nextCheckAt)
+          : undefined;
         return {
           ...automation,
           // Spread conditionally, never `state: maybeUndefined`: the latter types the key as
@@ -3440,17 +3557,19 @@ export function createApp(deps: ServerDeps) {
           // have to describe a key consumers never receive.
           ...(state ? { state } : {}),
           ...(latestLog ? { latestLog } : {}),
+          ...(nextRunAt ? { nextRunAt } : {}),
           counts: {
             matches: logs.filter((row) => row.result === 'launched' || row.result === 'duplicate').length,
-            launched: logs.filter((row) => row.result === 'launched').length,
+            launched: logs.filter((row) => row.result === 'launched' || row.result === 'manual' || row.result === 'catch-up').length,
             duplicates: logs.filter((row) => row.result === 'duplicate').length,
-            errors: logs.filter((row) => row.result === 'error' || row.result === 'rate-limited').length,
+            errors: logs.filter((row) => row.result === 'error' || row.result === 'rate-limited' || row.result === 'failed').length,
           },
         };
       });
-      const nextDue = automations.map((item) => item.state?.nextCheckAt).filter(Boolean).sort()[0];
+      const nextDue = automations.map((item) => item.nextRunAt).filter(Boolean).sort()[0];
       return c.json({
         ...availability,
+        timeZone: localTimeZone(),
         scheduler: {
           // `as const` on both arms: in an object literal a conditional of two string literals
           // widens to `string`, which would erase the two states this key can hold.
@@ -3462,21 +3581,28 @@ export function createApp(deps: ServerDeps) {
     })
 
     .post('/automations', jsonZodValidator(() => automationCreateSchema), async (c) => {
-      const { automationStore } = c.get('project');
+      const { root, automationStore } = c.get('project');
       const parsed = { data: c.req.valid('json') };
-      const promptIssue = validateAutomationPrompt(parsed.data.task.prompt);
+      const resolved = resolveAutomationKind(parsed.data);
+      if ('error' in resolved) return c.json({ error: resolved.error }, resolved.status);
+      const promptIssue = validateAutomationPrompt(parsed.data.task.prompt, resolved.kind);
       if (promptIssue) return c.json({ error: promptIssue }, 400);
+      // A poll needs a GitHub remote to poll; a schedule needs nothing but this project.
+      if (resolved.kind === 'github' && !resolveForge(await getRepoInfo(root))) {
+        return c.json({ error: 'No GitHub remote is configured' }, 400);
+      }
       const { enable, ...input } = parsed.data;
       try {
-        const automation = automationStore.create({ ...input, enabled: enable === true });
-        if (enable) {
+        const automation = automationStore.create({ ...input, kind: resolved.kind, enabled: enable === true }, undefined, enable ? armScheduleFromNow : undefined);
+        if (enable && isGithubAutomation(automation)) {
           const baselineAt = new Date().toISOString();
-          automationStore.setState(automation.id, {
+          automationStore.setState(automation.id, (current) => ({
+            ...current,
             revision: automation.revision,
             baselineAt,
             cursor: { timestamp: baselineAt },
             nextCheckAt: new Date(Date.now() + automation.intervalSeconds * 1_000).toISOString(),
-          });
+          }));
         }
         emitAutomationChange(c.get('project'), automation.id, automation.revision);
         automationsChanged();
@@ -3502,12 +3628,22 @@ export function createApp(deps: ServerDeps) {
     .put('/automations/:id', jsonZodValidator(() => automationUpdateSchema), async (c) => {
       const { automationStore } = c.get('project');
       const parsed = { data: c.req.valid('json') };
-      const promptIssue = validateAutomationPrompt(parsed.data.task.prompt);
-      if (promptIssue) return c.json({ error: promptIssue }, 400);
       const { expectedRevision, ...input } = parsed.data;
-      if (!automationStore.get(c.req.param('id'))) return c.json({ error: 'not found' }, 404);
+      const stored = automationStore.get(c.req.param('id'));
+      if (!stored) return c.json({ error: 'not found' }, 404);
+      const resolved = resolveAutomationKind(input, stored);
+      if ('error' in resolved) return c.json({ error: resolved.error }, resolved.status);
+      const promptIssue = validateAutomationPrompt(input.task.prompt, resolved.kind);
+      if (promptIssue) return c.json({ error: promptIssue }, 400);
       try {
-        const automation = automationStore.update(c.req.param('id'), expectedRevision, { ...input, enabled: input.enabled ?? false });
+        // The armed instant belongs to the schedule it was computed from, and to an enabled
+        // definition: a new schedule, or a resume through PUT, re-arms from now — never a catch-up
+        // of an occurrence that passed while it was paused. Pausing clears it in the same write, so
+        // another cockpit never reads the still-enabled definition beside a due instant. Armed in
+        // the request, as `enable` does, rather than left to the timer: the list refetched on the
+        // change event must already see it. Compared with the definition on disk, not the one read above.
+        const automation = automationStore.update(c.req.param('id'), expectedRevision, { ...input, kind: resolved.kind, enabled: input.enabled ?? false }, (next, previous) =>
+          previous && (!sameSchedule(previous.schedule, next.schedule) || previous.enabled !== next.enabled) ? armScheduleFromNow(next) : undefined);
         emitAutomationChange(c.get('project'), automation.id, automation.revision);
         automationsChanged();
         return c.json({ automation });
@@ -3529,31 +3665,72 @@ export function createApp(deps: ServerDeps) {
 
     .post('/automations/:id/enable', async (c) => {
       const store = c.get('project').automationStore;
+      // No client revision: the toggle applies to what is on disk now, not to this store's last read.
+      store.reload();
       const current = store.get(c.req.param('id'));
       if (!current) return c.json({ error: 'not found' }, 404);
+      try {
+      if (isScheduleAutomation(current)) {
+        // A schedule has no backlog to baseline against: it arms its next occurrence from now.
+        const automation = store.update(current.id, current.revision, { ...editableAutomation(current), enabled: true }, armScheduleFromNow);
+        emitAutomationChange(c.get('project'), automation.id, automation.revision);
+        automationsChanged();
+        return c.json({ automation });
+      }
+      if (!isGithubAutomation(current)) return c.json({ error: 'automation definition is incomplete' }, 409);
       const automation = store.update(current.id, current.revision, { ...editableAutomation(current), enabled: true });
       const baselineAt = new Date().toISOString();
-      store.setState(automation.id, {
-        ...store.state(automation.id),
+      store.setState(automation.id, (state) => ({
+        ...state,
         revision: automation.revision,
         baselineAt,
         cursor: { timestamp: baselineAt },
-        nextCheckAt: new Date(Date.now() + automation.intervalSeconds * 1_000).toISOString(),
-      });
+        nextCheckAt: new Date(Date.now() + current.intervalSeconds * 1_000).toISOString(),
+      }));
       await store.appendLog({ automationId: automation.id, revision: automation.revision, result: 'baseline', reason: 'Enabled from a current-time baseline; existing records were not launched.' });
       emitAutomationChange(c.get('project'), automation.id, automation.revision);
       automationsChanged();
       return c.json({ automation });
+      } catch (error) {
+        const { status, ...body } = toggleFailure(error);
+        return c.json(body, status);
+      }
     })
 
     .post('/automations/:id/pause', (c) => {
       const store = c.get('project').automationStore;
+      store.reload();
       const current = store.get(c.req.param('id'));
       if (!current) return c.json({ error: 'not found' }, 404);
-      const automation = store.update(current.id, current.revision, { ...editableAutomation(current), enabled: false });
-      emitAutomationChange(c.get('project'), automation.id, automation.revision);
-      automationsChanged();
-      return c.json({ automation });
+      try {
+        const automation = store.update(current.id, current.revision, { ...editableAutomation(current), enabled: false }, armScheduleFromNow);
+        emitAutomationChange(c.get('project'), automation.id, automation.revision);
+        automationsChanged();
+        return c.json({ automation });
+      } catch (error) {
+        const { status, ...body } = toggleFailure(error);
+        return c.json(body, status);
+      }
+    })
+
+    // Run now: a schedule fired once by hand, paused or not, outside the timer and under the same
+    // lease. `nextRunAt` and `enabled` are untouched; a GitHub automation's equivalent is `check`.
+    .post('/automations/:id/run', async (c) => {
+      const project = c.get('project');
+      const store = project.automationStore;
+      const automation = store.get(c.req.param('id'));
+      if (!automation) return c.json({ error: 'not found' }, 404);
+      if (!isScheduleAutomation(automation)) return c.json({ error: 'a GitHub automation runs on its events; use check with mode execute' }, 409);
+      const outcome = await new ScheduleRunner(scheduleHandle(project)).runNow(automation);
+      // Gone, or no longer a schedule, once re-read under the lease: nothing was launched.
+      if (outcome.result === 'skipped') return c.json({ error: 'not found' }, 404);
+      if (outcome.result === 'manual') {
+        emitAutomationChange(project, automation.id, store.get(automation.id)?.revision ?? automation.revision);
+        return c.json({ runId: outcome.runId }, 202);
+      }
+      if (outcome.result === 'lease-held') return c.json({ error: SCHEDULE_LEASE_HELD_REASON }, 409);
+      const reason = store.logs({ automationId: automation.id, limit: 1 })[0]?.reason;
+      return c.json({ error: reason ?? 'the run could not be launched' }, 409);
     })
 
     // The body is validated as MIDDLEWARE, which is what puts it in the route type — and moves
@@ -3564,6 +3741,7 @@ export function createApp(deps: ServerDeps) {
       const store = project.automationStore;
       const automation = store.get(c.req.param('id'));
       if (!automation) return c.json({ error: 'not found' }, 404);
+      if (!isGithubAutomation(automation)) return c.json({ error: 'a schedule has nothing to preview; use run' }, 409);
       const parsed = { data: c.req.valid('json') };
       // `string`, not `randomUUID`'s template-literal type: the wire carries an opaque id, and
       // leaking `${string}-${string}-…` into the route type would make the contract describe the
@@ -3579,10 +3757,9 @@ export function createApp(deps: ServerDeps) {
           if (!remote || remote.host !== 'github.com') throw new Error('No GitHub remote is configured');
           const scheduler = new ProjectAutomationScheduler({
             projectId: project.id,
-            owner: remote.owner,
-            repo: remote.repo,
             store,
-            poller: new GithubPoller(),
+            timeZone: localTimeZone(),
+            github: { owner: remote.owner, repo: remote.repo, poller: new GithubPoller() },
             launch: parsed.data.mode === 'execute'
               ? (definition, candidate, receiptId) => launchAutomationRun({ root: project.root, manager: project.manager, store: project.store, definition, candidate, receiptId })
               : undefined,
@@ -3607,9 +3784,26 @@ export function createApp(deps: ServerDeps) {
       const receipt = [...store.latestReceipts().values()].find((row) => row.receiptId === c.req.param('receiptId'));
       if (!receipt) return c.json({ error: 'not found' }, 404);
       if (receipt.status !== 'launch-error' || receipt.runId) return c.json({ error: 'receipt is not retryable' }, 409);
+      const scheduled = store.get(receipt.automationId);
+      // A schedule receipt carries its occurrence instead of a GitHub candidate; it is fired
+      // again by hand through the runner, under the lease, as the same receipt.
+      if (scheduled && isScheduleAutomation(scheduled) && receipt.occurrenceAt) {
+        const outcome = await new ScheduleRunner(scheduleHandle(project)).retry(scheduled, receipt);
+        // Gone, or no longer a schedule, once re-read under the lease: nothing was launched.
+        if (outcome.result === 'skipped') return c.json({ error: 'not found' }, 404);
+        if (outcome.result === 'manual') {
+          emitAutomationChange(project, scheduled.id, store.get(scheduled.id)?.revision ?? scheduled.revision);
+          return c.json({ receiptId: receipt.receiptId, runId: outcome.runId }, 202);
+        }
+        if (outcome.result === 'lease-held') return c.json({ error: SCHEDULE_LEASE_HELD_REASON }, 409);
+        if (outcome.result === 'duplicate') return c.json({ error: 'receipt is not retryable' }, 409);
+        const latest = store.latestReceipts().get(receipt.receiptKey);
+        return c.json({ error: latest?.error ?? 'the run could not be launched' }, 409);
+      }
       if (!receipt.candidate) return c.json({ error: 'receipt predates retry context and cannot be retried safely' }, 409);
-      const definition = store.get(receipt.automationId);
+      const definition = scheduled;
       if (!definition) return c.json({ error: 'automation not found' }, 404);
+      if (!isGithubAutomation(definition)) return c.json({ error: 'receipt is not retryable' }, 409);
       const lease = store.acquireLease();
       if (!lease) return c.json({ error: 'automation polling lease is held by another process' }, 409);
       const reserved = { ...receipt, status: 'reserved' as const, error: undefined, updatedAt: new Date().toISOString() };
@@ -4627,7 +4821,7 @@ export function createApp(deps: ServerDeps) {
       if (!run) return c.json({ error: 'not found' }, 404);
       if (manager.isActive(id)) return c.json({ error: 'run is active — cancel it first' }, 409);
       if (run.delegation?.role === 'worker' || !store.canDeleteRun(id)) return c.json({ error: 'owned resources require verified worker cleanup' }, 409);
-      if (run.worktreePath) await removeWorktree(repoRoot, run.worktreePath, run.branch);
+      if (run.worktreePath) await releaseThenRemoveWorktree({ previewHost: deps.previewHost }, id, repoRoot, run.worktreePath, run.branch);
       store.updateRun(id, { worktreePath: undefined, branch: undefined });
       return c.json({ removed: true });
     })
@@ -4640,7 +4834,7 @@ export function createApp(deps: ServerDeps) {
       if (!run) return c.json({ error: 'not found' }, 404);
       // Delete cleans up after itself: worktree + branch go with the run (spec 006).
       if (!store.canDeleteRun(id)) return c.json({ error: 'owned resources require verified worker cleanup and explicit child history deletion first' }, 409);
-      if (run.delegation?.role !== 'worker' && run.worktreePath) await removeWorktree(repoRoot, run.worktreePath, run.branch);
+      if (run.delegation?.role !== 'worker' && run.worktreePath) await releaseThenRemoveWorktree({ previewHost: deps.previewHost }, id, repoRoot, run.worktreePath, run.branch);
       return store.deleteRun(id) ? c.json({ deleted: true }) : c.json({ error: 'history cleanup incomplete — retry deletion' }, 409);
     });
 
@@ -4724,7 +4918,7 @@ export function createApp(deps: ServerDeps) {
         if (manager.isActive(loser.id)) manager.cancel(loser.id);
         // Owned workers use verified cleanup exclusively, even after history becomes deletable.
         if (loser.delegation?.role === 'worker' || !store.canDeleteRun(loser.id)) continue;
-        if (loser.worktreePath) await removeWorktree(repoRoot, loser.worktreePath, loser.branch);
+        if (loser.worktreePath) await releaseThenRemoveWorktree({ previewHost: deps.previewHost }, loser.id, repoRoot, loser.worktreePath, loser.branch);
         store.updateRun(loser.id, { worktreePath: undefined, branch: undefined });
         store.setArchived(loser.id, true);
         store.appendEvent(loser.id, {
@@ -4859,6 +5053,7 @@ export function createApp(deps: ServerDeps) {
       const { manager } = c.get('project');
       const reclaimed = await reclaimWorktrees(repoRoot, store, await resolveWorktreeRetention(repoRoot), {
         claim: (run) => manager.claimWorktreeReclaim(run.id),
+        previewHost: deps.previewHost,
       });
       if (reclaimed.length > 0) forgetRepoBranches(repoRoot);
       return c.json({ reclaimed });
@@ -4876,7 +5071,7 @@ export function createApp(deps: ServerDeps) {
       if (!release) {
         return c.json({ error: 'this worktree is in use or already reclaimed — only a finished task\'s worktree can be reclaimed' }, 409);
       }
-      const worktreeReclaimedAt = await reclaimWorktree(repoRoot, store, run, { requireClean: true }).finally(release);
+      const worktreeReclaimedAt = await reclaimWorktree(repoRoot, store, run, { requireClean: true, previewHost: deps.previewHost }).finally(release);
       if (!worktreeReclaimedAt) {
         // Reclaim keeps only what is committed, so it leaves a dirty checkout alone; say which case this was.
         const dirty = run.worktreePath && existsSync(run.worktreePath) ? (await getStatus(run.worktreePath).catch(() => [])).length : 0;
@@ -6064,6 +6259,10 @@ export function startServer(deps: ServerDeps, port: number): ServerType & { shut
   // The subscription hub rides the same HTTP server (one port, zero config):
   // createApp registers the topics, the `upgrade` hook below owns the socket.
   const socketHub = deps.socketHub ?? createSocketHub();
+  // `cezar_preview_serve` refuses the cockpit's own port: the one the listener BOUND (`--port 0`).
+  let listeningPort: number | undefined;
+  const cezarPort = deps.cezarPort ?? (() => listeningPort);
+  const projectLookup: NonNullable<ServerDeps['projectLookup']> = {};
   const automationCoordinator = new AutomationCoordinator({ listProjects });
   const bootProjectId = deps.bootProjectId ?? 'default';
   const bootAutomationStore = automationCoordinator.store(bootProjectId, deps.repoRoot)!;
@@ -6072,6 +6271,8 @@ export function startServer(deps: ServerDeps, port: number): ServerType & { shut
     ownership: deps.ownership,
     listProjects,
     semaphore: deps.semaphore,
+    preview: deps.previewHost,
+    cezarPort,
     automationStore: (projectId, root) => automationCoordinator.store(projectId, root)!,
     prepareManager: (project) => {
       taskWebhooks.attach(project);
@@ -6093,6 +6294,8 @@ export function startServer(deps: ServerDeps, port: number): ServerType & { shut
     workspaceEvents,
     skillsUpdate,
     socketHub,
+    cezarPort,
+    projectLookup,
     automationsChanged: () => rescheduleAutomations(),
   });
   // SECURITY: default to loopback. This server executes agents locally and its endpoints are
@@ -6127,25 +6330,61 @@ export function startServer(deps: ServerDeps, port: number): ServerType & { shut
   });
   const coordinator = new SkillsUpdateCoordinator(skillsUpdate, async () =>
     effectiveSkillsAutoUpdate(await loadWorkspaceConfig()));
-  const automationProjects = new Map<string, { root: string; owner: string; repo: string }>();
+  // EVERY registered project, remote or not: a schedule needs none. `github` is present only for
+  // a github.com remote, and only then does the project's handle poll.
+  const automationProjects = new Map<string, { root: string; github?: { owner: string; repo: string } }>();
+  const rememberAutomationProject = async (id: string, root: string): Promise<void> => {
+    const parsed = parseRemote((await getRepoInfo(root))?.remote ?? '');
+    automationProjects.set(id, {
+      root,
+      ...(parsed?.host === 'github.com' ? { github: { owner: parsed.owner, repo: parsed.repo } } : {}),
+    });
+  };
+  const emitWorkspaceAutomationChange = (projectId: string) => (automationId: string, revision: number) =>
+    workspaceEvents.emit('automation-change', { project: projectId, automationId, revision });
+  /**
+   * The boot brake for one project, at boot and for a project registered after it: an enabled
+   * poll idle past its lookback is re-baselined rather than resumed from a stale cursor. Only a
+   * project with a github.com remote: its polls are the only ones the timer arms, so a poll
+   * without one never succeeds and would be re-baselined on every boot, forever.
+   */
+  const brakeIdleAutomations = (id: string, automationStore: AutomationStore | undefined): void => {
+    if (!automationStore || !automationProjects.get(id)?.github) return;
+    rebaselineIdleAutomations(automationStore, emitWorkspaceAutomationChange(id));
+  };
   const automationScheduler = new WorkspaceAutomationScheduler({
     coordinator: automationCoordinator,
     handle: (projectId, store) => {
       const project = automationProjects.get(projectId);
       if (!project) return undefined;
+      const timeZone = localTimeZone();
+      const launchContext = async () => projectId === (deps.bootProjectId ?? 'default')
+        ? { root: deps.repoRoot, manager: deps.manager, store: deps.store }
+        : await sharedContexts.context(projectId);
       return {
         projectId,
-        owner: project.owner,
-        repo: project.repo,
         store,
-        poller: new GithubPoller(),
-        onChange: (automationId, revision) =>
-          workspaceEvents.emit('automation-change', { project: projectId, automationId, revision }),
+        timeZone,
+        ...(project.github ? { github: { ...project.github, poller: new GithubPoller() } } : {}),
+        onChange: emitWorkspaceAutomationChange(projectId),
+        // Building a lazy project's context reconciles on its own; the explicit call covers the
+        // boot project and a context built before another process left the reservation.
+        reconcileReceipts: async () => { reconcileAutomationReceipts(store, (await launchContext()).store); },
+        launchSchedule: async (definition, occurrence, receiptId) => {
+          const context = await launchContext();
+          return launchScheduledRun({
+            root: context.root,
+            manager: context.manager,
+            store: context.store,
+            definition,
+            occurrence,
+            receiptId,
+            projectName: basename(context.root),
+            timeZone,
+          });
+        },
         launch: async (definition, candidate, receiptId) => {
-          const bootId = deps.bootProjectId ?? 'default';
-          const context = projectId === bootId
-            ? { root: deps.repoRoot, manager: deps.manager, store: deps.store }
-            : await sharedContexts.context(projectId);
+          const context = await launchContext();
           return launchAutomationRun({
             root: context.root,
             manager: context.manager,
@@ -6170,11 +6409,12 @@ export function startServer(deps: ServerDeps, port: number): ServerType & { shut
       const project = (data as { project?: { id?: unknown; root?: unknown; status?: unknown } }).project;
       if (project && typeof project.id === 'string' && typeof project.root === 'string' && project.status !== 'missing') {
         coordinator.add(project.id, project.root);
-        void getRepoInfo(project.root).then((info) => {
-          const parsed = parseRemote(info?.remote ?? '');
-          if (parsed?.host === 'github.com') automationProjects.set(project.id as string, { root: project.root as string, owner: parsed.owner, repo: parsed.repo });
+        const { id, root } = project as { id: string; root: string };
+        void rememberAutomationProject(id, root).then(() => {
+          if (!automationsEnabled()) return;
+          brakeIdleAutomations(id, automationCoordinator.store(id, root));
           return rescheduleAutomations();
-        });
+        }).catch(() => undefined);
       }
     } else if (event === 'project-removed') {
       const id = (data as { id?: unknown }).id;
@@ -6191,27 +6431,47 @@ export function startServer(deps: ServerDeps, port: number): ServerType & { shut
       const all = projects.some((project) => project.root === deps.repoRoot)
         ? projects : [{ id: deps.bootProjectId ?? 'default', root: deps.repoRoot, status: 'ok' as const }, ...projects];
       coordinator.start(all);
+      // #781: every registered project's preview leftovers, not only the boot project's.
+      void sweepRegisteredPreviewLeftovers(all, deps.previewHost).catch(() => 0);
       // #801: with automations off there is nothing to warm — no remote to resolve, no receipts
       // to reconcile, and above all no scheduler to start. The skills-update coordinator above is
       // a separate feature and starts either way.
       if (!automationsEnabled()) return;
       void Promise.all(all.map(async (project) => {
-        const parsed = parseRemote((await getRepoInfo(project.root))?.remote ?? '');
-        if (parsed?.host === 'github.com') automationProjects.set(project.id, { root: project.root, owner: parsed.owner, repo: parsed.repo });
+        await rememberAutomationProject(project.id, project.root);
         const automationStore = automationCoordinator.store(project.id, project.root);
         const runStore = project.id === (deps.bootProjectId ?? 'default')
           ? deps.store
           : sharedContexts.peek(project.id)?.store;
         if (automationStore && runStore) reconcileAutomationReceipts(automationStore, runStore);
+        // After reconciliation and before the timer arms.
+        brakeIdleAutomations(project.id, automationStore);
       })).then(() => automationScheduler.start()).catch(() => undefined);
     }).catch(() => undefined);
   });
-  server.once('close', () => { unsubscribe(); coordinator.stop(); automationScheduler.stop(); sharedContexts.disposeAll(); void deps.delegation?.close(); });
-  socketHub.attach(server, (req) => verifyWsUpgrade(req, deps.bindHost));
+  // The boot store's preview leftovers and run deletions; lazy projects arm theirs at build.
+  armPreview(deps.store, join(deps.repoRoot, '.ai/cezar'), deps.previewHost);
+  const previewSocket = createPreviewSocket({
+    host: deps.previewHost,
+    verify: (req) => verifyWsUpgrade(req, deps.bindHost),
+    resolveProject: async (projectId) => projectLookup.resolve?.(projectId),
+  });
+  server.once('close', () => {
+    unsubscribe(); coordinator.stop(); automationScheduler.stop(); sharedContexts.disposeAll(); void deps.delegation?.close();
+    socketHub.close();
+    previewSocket.close();
+    void deps.previewHost?.close().catch(() => undefined);
+  });
+  // The one `upgrade` listener: the subscription bus and the preview pane's socket (#781).
+  attachUpgradeRouter(server, [socketHubRoute(socketHub, (req) => verifyWsUpgrade(req, deps.bindHost)), previewSocket.route]);
   const shutdownForRestart = async (): Promise<void> => {
     sharedContexts.disposeAll(); // flush every built secondary project before old process exits
     deps.store.flush();
     socketHub.close();
+    // Dev servers run in their own process groups: they outlive cezar unless stopped here.
+    // A failed release must not abort the restart halfway, with the store flushed and the port still bound.
+    await deps.previewHost?.close().catch(() => undefined);
+    previewSocket.close();
     await deps.delegation?.close();
     await new Promise<void>((resolve) => {
       server.close(() => resolve());
@@ -6224,6 +6484,7 @@ export function startServer(deps: ServerDeps, port: number): ServerType & { shut
   const setTaskWebhookOrigin = () => {
     const address = server.address();
     const bound = address && typeof address === 'object' ? address.port : port;
+    listeningPort = bound;
     taskWebhooks.setOrigin(`http://${taskWebhookHost(deps.bindHost)}:${bound}`);
   };
   if (server.listening) setTaskWebhookOrigin();

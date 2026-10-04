@@ -1,3 +1,4 @@
+import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { execFile } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -6,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { RunStore } from '../runs/store.ts';
-import { RunManager } from './run.ts';
+
 
 const run = promisify(execFile);
 const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
@@ -26,13 +27,16 @@ describe('recover() contains backend session failures (#562)', () => {
     process.env.MOCK_CODEX_REJECT_RESUME = '1';
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-recover-session-'));
     await run('git', ['init', '-q', '-b', 'main'], { cwd: repoRoot });
+    await run('git', ['config', 'gc.auto', '0'], { cwd: repoRoot });
+    await run('git', ['config', 'maintenance.auto', 'false'], { cwd: repoRoot });
     writeFileSync(join(repoRoot, 'a.txt'), 'one\n');
     await run('git', ['add', '-A'], { cwd: repoRoot });
     await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await drainFixtureManagers(repoRoot);
     if (savedBin === undefined) delete process.env.CEZ_CODEX_BIN;
     else process.env.CEZ_CODEX_BIN = savedBin;
     if (savedPassthrough === undefined) delete process.env.CEZ_ENV_PASSTHROUGH;
@@ -59,7 +63,7 @@ describe('recover() contains backend session failures (#562)', () => {
     });
     store.updateRun(record.id, { status: 'running', currentStepId: 'work' });
 
-    const firstManager = new RunManager(store, repoRoot);
+    const firstManager = createFixtureManager(store, repoRoot);
     await firstManager.recover();
     await expect
       .poll(() => store.getRun(record.id)?.error, { timeout: 5_000 })
@@ -69,7 +73,7 @@ describe('recover() contains backend session failures (#562)', () => {
     expect(store.getRun(record.id)?.steps.filter((step) => step.id.startsWith('continue-'))).toHaveLength(1);
     firstManager.dispose();
 
-    const secondManager = new RunManager(store, repoRoot);
+    const secondManager = createFixtureManager(store, repoRoot);
     await secondManager.recover();
     expect(store.getRun(record.id)?.steps.filter((step) => step.id.startsWith('continue-'))).toHaveLength(1);
     secondManager.dispose();

@@ -67,6 +67,13 @@ with a separately resolved built CLI path.
 | worker-conversation.e2e.ts | 80 | OS-bound initial port; original 15 s |
 | worker-relationships.e2e.ts | 63 | Original 20 s retained |
 
+The merge of main adds two fixtures to this class: `automations.e2e.ts` (the
+opted-in schedule server) and `live-preview.e2e.ts` (the opted-in cockpit server).
+Both now request port 0 and adopt their owned listener within the original 15 s
+health budget. The preview application itself keeps its separate explicit port
+and native lifecycle; its browser wait override is unchanged. The complete
+construction guard now pins 46 starts across 39 spec files.
+
 ## Other server classes audited
 
 - `task-views-layout` fault proxy uses a direct Node HTTP listener; it does not run
@@ -79,7 +86,7 @@ with a separately resolved built CLI path.
   zero-config repo-identity discovery rather than a requested health endpoint.
   Application-update tests use their own IPC actual-listener acknowledgement with
   exact-restart identity checks, or packaged mock servers with fixed explicit binds.
-  They are distinct from the 44 cockpit-spec CLI preference/health constructions.
+  They are distinct from the 46 cockpit-spec CLI preference/health constructions.
 - In-process Hono/server tests use their returned listener or app and do not spawn
   an adaptive CLI port. Browser mock API fixtures do not spawn this CLI.
 

@@ -1,3 +1,4 @@
+import { summarizeRunnerStderr } from './runner-stderr.ts';
 import { spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { parseEffort } from '@open-mercato/cezar-contract';
 import { fileURLToPath } from 'node:url';
@@ -17,6 +18,7 @@ import type {
 } from './agent-runner.js';
 import { isSignalTerminationExit } from './agent-runner.js';
 import { buildChildEnv } from './agent-env.js';
+import { cezarToolNames } from '../ci-wait/tools.js';
 import { readNdjson } from './ndjson.js';
 import { createPiUiState, mapPiRpcMessage, piFlushProviderError, piProviderErrorMessage, piTurnStarted } from './pi-ui-mapper.js';
 import { V1TextCoalescer } from './v1-text-coalescer.js';
@@ -455,7 +457,9 @@ export class PiRunner implements AgentRunner {
           message: `pi CLI did not exit on its own after close; terminated by cezar (code ${exitCode})`,
         });
       } else if (exitCode !== 0 && exitCode !== null) {
-        const detail = stderr.join('').trim().split('\n').slice(-3).join(' | ');
+        const diagnostic = stderr.join('');
+        if (diagnostic.trim()) onEvent?.({ type: 'note', message: `pi CLI stderr:\n${diagnostic}` });
+        const detail = summarizeRunnerStderr(diagnostic);
         const message = `pi CLI exited with code ${exitCode}${detail ? ` — ${detail}` : ''}`;
         onEvent?.({ type: 'error', message });
         throw new Error(message);
@@ -508,7 +512,7 @@ export function buildPiArgs(spec: AgentRunSpec): string[] {
   if (spec.restrictNativeDelegation) args.push('--exclude-tools', 'subagent');
   const tools = piTools(spec.allowedTools ?? [], spec.bashAllowlist);
   if (tools.length > 0) {
-    if (spec.cezarTools) tools.push('cezar_wait_for_ci');
+    if (spec.cezarTools) tools.push(...cezarToolNames(spec.env ?? {}));
     args.push('--tools', tools.join(','));
   }
   return args;

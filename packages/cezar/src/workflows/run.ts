@@ -1,5 +1,7 @@
 import { ciErrorMessage } from '../ci-wait/errors.ts';
-import { ciWaitRequestSchema, ciWaitResultSchema, type CiWait, type CiWaitRequest, type CiWaitResult, type CiWaitErrorCode } from '@open-mercato/cezar-contract';
+import { ciWaitRequestSchema, ciWaitResultSchema, previewServeRequestSchema, type CiWait, type CiWaitRequest, type CiWaitResult, type CiWaitErrorCode, type PreviewServeRequest, type PreviewServeResult } from '@open-mercato/cezar-contract';
+import { previewToolEnabled } from '../ci-wait/tools.ts';
+import { previewResult, validateRegistration, type PreviewHostLike } from '../preview/registration.ts';
 import { acquireCiResources } from '../ci-wait/resources.ts';
 import { artifactInstructions, provisionArtifactDirectory } from '../artifacts/lifecycle.ts';
 import type { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
@@ -1036,6 +1038,14 @@ export class RunManager {
   private readonly ciRegistrations = new Map<string, { abort: AbortController; pr: string; seconds: number; promise: Promise<CiWait> }>();
   private readonly ciRetries = new Map<string, NodeJS.Timeout>();
   private readonly ciResources: ReturnType<typeof acquireCiResources>;
+  /** #781: the workspace-wide preview host. Absent (`cez run`, tests) means every registration is `headless`. */
+  private readonly preview?: PreviewHostLike;
+  /** The same host, for a removal outside this manager that must release a run's preview first. */
+  get previewHost(): PreviewHostLike | undefined {
+    return this.preview;
+  }
+  /** #781: cezar's own listening port, which no dev server may register. */
+  private readonly cezarPort?: () => number | undefined;
   private ciSupervisor: Pick<CiWatcherSupervisor, 'resolve' | 'watch' | 'close'>;
   private readonly workerWaiting = new Set<string>();
   private readonly workerWakeAdmitted = new Set<string>();
@@ -1066,6 +1076,10 @@ export class RunManager {
    *  explicit user Continue, these are bulk scheduler work and must re-enter
    *  through `pump()` so both workspace and per-project caps are honored. */
   private readonly pendingContinuations = new Map<string, PendingContinuation>();
+  /** Accepted Continues supersede in-flight settlement even before launch or after
+   * idle close. Retain these across dropActive/dispose so absence cannot look like
+   * the earlier execution again; disposal alone never revokes terminal intent. */
+  private readonly continuationGenerations = new Map<string, symbol>();
   /** Per-run image counter behind `pasted-<n>` / `screenshot-<n>` (#472). Lives on
    *  the manager rather than the `ActiveRun` so a *queued* run — which has no
    *  `ActiveRun` at all — can persist attachments. Seeded lazily from disk. */
@@ -1128,9 +1142,11 @@ export class RunManager {
   constructor(
     private readonly store: RunStore,
     private readonly repoRoot: string,
-    options: { semaphore?: WorkspaceSemaphore; unreadInputGraceMs?: number } = {},
+    options: { semaphore?: WorkspaceSemaphore; unreadInputGraceMs?: number; preview?: PreviewHostLike; cezarPort?: () => number | undefined } = {},
   ) {
     this.dataDir = join(repoRoot, '.ai/cezar');
+    this.preview = options.preview;
+    this.cezarPort = options.cezarPort;
     this.unreadInputGraceMs = options.unreadInputGraceMs ?? UNREAD_INPUT_GRACE_MS;
     this.semaphore = options.semaphore ?? new WorkspaceSemaphore();
     this.ciResources = acquireCiResources(this.semaphore);
@@ -1417,9 +1433,58 @@ export class RunManager {
     const generation = state.ciGeneration;
     const controller = await this.ciResources.controller();
     if (!controller || this.disposed || state.cancelled || this.active.get(runId) !== state) return;
-    const provisioned = controller.provision((request, signal) => this.registerCiWait(runId, request, generation, signal));
+    const provisioned = controller.provision(
+      (request, signal) => this.registerCiWait(runId, request, generation, signal),
+      (request, signal) => this.registerPreviewServer(runId, request, signal),
+    );
     state.revokeCiTools = provisioned.revoke;
     return provisioned;
+  }
+
+  /**
+   * #781: record a dev server the agent registered. One probe at registration becomes
+   * `answeredAtRegistration`; the run is re-validated after it, since the probe awaits.
+   */
+  async registerPreviewServer(runId: string, request: PreviewServeRequest, signal?: AbortSignal): Promise<PreviewServeResult> {
+    const parsed = previewServeRequestSchema.parse(request);
+    const validate = () => {
+      const run = this.store.getRun(runId);
+      const owner = this.preview?.portOwner(parsed.port);
+      const result = validateRegistration({
+        request: parsed,
+        worktreePath: run?.worktreePath && existsSync(run.worktreePath) ? run.worktreePath : undefined,
+        cezarPort: this.cezarPort?.(),
+        existing: run?.previewServers ?? [],
+        owner,
+        runId,
+        enabled: previewToolEnabled(),
+        headless: !this.preview,
+      });
+      const withoutWorktree = !!run && !run.worktreePath;
+      return { ...result, answer: () => previewResult(result.code, { ...parsed, ownerTitle: owner?.title, withoutWorktree }) };
+    };
+    const first = validate();
+    if (!first.server || !this.preview) return first.answer();
+    // A server process supplies `cezarPort`, but recovered runs can call before the cockpit binds:
+    // until it knows its port, `cezar_port` cannot be checked, so the tool asks for a retry instead.
+    if (this.cezarPort && this.cezarPort() === undefined) return previewResult('unavailable', parsed);
+    const answered = await this.preview.probe(parsed.port).catch(() => false);
+    // A session revoked during the probe (cancel, stop) must leave no card behind.
+    signal?.throwIfAborted();
+    const checked = validate();
+    if (!checked.server) return checked.answer();
+    const server = { ...checked.server, answeredAtRegistration: answered };
+    const existing = this.store.getRun(runId)?.previewServers ?? [];
+    const previous = existing.find(entry => entry.port === server.port);
+    const changed = !!previous && (previous.command !== server.command || previous.cwd !== server.cwd || previous.path !== server.path);
+    const previewServers = checked.code === 'replaced'
+      ? existing.map(entry => entry.port === server.port ? server : entry)
+      : [...existing, server];
+    this.store.updateRun(runId, { previewServers });
+    this.store.appendEvent(runId, { type: 'preview.server-registered', server });
+    // A copy cezar runs from the old command must not keep answering for the new registration.
+    if (changed) await this.preview.replaced(runId, server.port).catch(() => {});
+    return checked.answer();
   }
 
   /** Trusted capability callbacks supply run identity; the model supplies only a PR and deadline. */
@@ -2739,7 +2804,7 @@ export class RunManager {
   private async enforceRetention(): Promise<void> {
     try {
       const keep = await resolveWorktreeRetention(this.repoRoot);
-      await reclaimWorktrees(this.repoRoot, this.store, keep, { claim: (run) => this.claimWorktreeReclaim(run.id) });
+      await reclaimWorktrees(this.repoRoot, this.store, keep, { claim: (run) => this.claimWorktreeReclaim(run.id), previewHost: this.preview });
     } catch {
       // retention is best-effort; swallow so terminal transitions never break.
     }
@@ -4839,6 +4904,7 @@ export class RunManager {
       }
     }
     else { this.store.updateRun(runId, acceptedPatch); this.store.flush(); }
+    this.continuationGenerations.set(runId, Symbol());
     // Keep fresh viewable images even if persistence failed; recovery uses saved URLs.
     const images = contentBlocksOf(opts.images ?? []).filter((block) => block.type === 'image');
     if (deferForCapacity) {
@@ -6677,6 +6743,8 @@ export class RunManager {
    * off — settle straight to `done`, leaving the diff in the worktree untouched.
    */
   private async settleSuccess(runId: string, durableRootFinish = false): Promise<void> {
+    const state = this.active.get(runId);
+    const continuationGeneration = this.continuationGenerations.get(runId);
     if (this.deferParentCompletion(runId)) return;
     const run = this.store.getRun(runId);
     let review = false;
@@ -6687,16 +6755,45 @@ export class RunManager {
       const config = await loadConfig(this.repoRoot);
       review = hasDiff && reviewGateEnabled(config) && run.autonomous !== true;
     }
-    // Diff/config I/O can race a worker's accepted continuation or a new child.
+    // Diff/config I/O can race cancellation or a replacement execution. Re-read
+    // the record before touching steps, and never settle another session's work.
+    const current = this.store.getRun(runId);
+    const active = this.active.get(runId);
+    // Disposal clears active, but cannot revoke an already accepted Finish/Stop.
+    // A different active state is still a replacement, even after disposal.
+    const disposedWithTerminalIntent = this.disposed && active === undefined && (state?.finishRequested || state?.cancelled);
+    if (!current || !['queued', 'running', 'waiting'].includes(current.status) ||
+      this.continuationGenerations.get(runId) !== continuationGeneration ||
+      (active !== state && !disposedWithTerminalIntent)) return;
+    if (state?.cancelled) {
+      const finishedAt = new Date().toISOString();
+      for (const step of current.steps) {
+        if (step.status === 'running' || step.status === 'waiting') {
+          this.store.updateStep(runId, step.id, { status: 'cancelled', finishedAt: step.finishedAt ?? finishedAt });
+        }
+      }
+      this.store.updateRun(runId, { status: 'cancelled', finishedAt, currentStepId: undefined });
+      this.store.appendEvent(runId, { type: 'lifecycle', message: 'run cancelled' });
+      return;
+    }
+    // A worker's accepted continuation or a new child can defer parent completion.
     if (this.deferParentCompletion(runId)) return;
     if (durableRootFinish) {
       // A later explicit cancellation wins over a slow diff. Publication/cascade
       // follows the atomic terminal/step checkpoint, never the other way around.
       if (!this.store.commitRootFinishSuccess(runId, review ? 'review' : 'done')) return;
     } else {
+      const finishedAt = new Date().toISOString();
+      // An idle-closed Continue remains waiting until the whole task succeeds.
+      // Complete those intermediate steps before publishing terminal run status.
+      for (const step of this.store.getRun(runId)?.steps ?? []) {
+        if (step.status === 'running' || step.status === 'waiting') {
+          this.store.updateStep(runId, step.id, { status: 'done', finishedAt: step.finishedAt ?? finishedAt });
+        }
+      }
       this.store.updateRun(runId, {
         status: review ? 'review' : 'done',
-        finishedAt: new Date().toISOString(),
+        finishedAt,
         currentStepId: undefined,
         // A run that got all the way to a settled turn is not in a limit loop, so the resume
         // counter starts over — otherwise a task that legitimately met the limit once a week would

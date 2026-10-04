@@ -164,6 +164,10 @@ describe('iOS sweep — every primary view at 390×844', () => {
     sweep('github', '/github?filter=all', '[data-slot="gh-header"]')
   })
 
+  // Automations are opt-in (#801) and this shared environment runs without the flag, so a sweep
+  // here would only measure the "Automations are off" page. The enabled list and editor at 390 px
+  // are asserted in automations.e2e.ts, on its own opted-in fixture server.
+
   it('/workflows (builder)', () => {
     sweep('workflows', '/workflows', '[data-slot="wb-main"]')
   })

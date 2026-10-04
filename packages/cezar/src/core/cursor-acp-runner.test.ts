@@ -539,6 +539,24 @@ describe('Cursor ACP spawn retry (#529)', () => {
     });
   });
 
+  it('bounds retained crash diagnostics and labels the truncated tail', async () => {
+    const stderr = 'discarded-prefix' + 'x'.repeat(65_536) + '\nError: fatal write\nNode.js v24.20.0\n';
+    await driveCrash({ remaining: 10, resume: true, stderr }, async (session, v1) => {
+      await session.result.catch(() => {});
+      const notes = v1.filter(e => e.type === 'note' && e.message.startsWith('Cursor ACP stderr'));
+      expect(notes).toHaveLength(3); // Every existing bootstrap attempt retains its diagnosis.
+      for (const note of notes) {
+        if (note.type !== 'note') continue;
+        expect(note.message).toContain('truncated to last 65536 characters');
+        expect(note.message).not.toContain('discarded-prefix');
+        expect(note.message.length).toBeLessThan(65_650);
+        expect(note.message).toContain('Error: fatal write\nNode.js v24.20.0');
+      }
+      const error = v1.find(e => e.type === 'error');
+      expect(error?.type === 'error' && error.message).toContain('Error: fatal write');
+    });
+  });
+
   it('includes capped stderr when an unexpected bootstrap exit exhausts retries', async () => {
     const stderr = `${'x'.repeat(2000)} boom`;
     await driveCrash({ remaining: 10, resume: true, stderr }, async (session, v1) => {

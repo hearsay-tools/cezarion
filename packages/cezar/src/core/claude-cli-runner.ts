@@ -1,3 +1,4 @@
+import { summarizeRunnerStderr } from './runner-stderr.ts';
 import { execFileSync, spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { parseEffort } from '@open-mercato/cezar-contract';
@@ -29,6 +30,7 @@ import type {
 export type { AgentSession, SessionOptions } from './agent-runner.ts';
 import { isSignalTerminationExit, trackChildExit } from './agent-runner.ts';
 import { buildChildEnv } from './agent-env.ts';
+import { cezarToolEnvNames, cezarToolNames } from '../ci-wait/tools.ts';
 import { costWeightedTokens, type RawUsage } from './usage.ts';
 import { readNdjson } from './ndjson.ts';
 import { InputSubmissions } from './input-submissions.ts';
@@ -405,8 +407,10 @@ export class ClaudeCliRunner implements AgentRunner {
       }
 
       if (exitCode !== 0 && exitCode !== null) {
-        const stderr = stderrChunks.join('').trim();
-        const detail = stderr ? ` — ${stderr.split('\n').slice(-3).join(' | ')}` : '';
+        const stderr = stderrChunks.join('');
+        if (stderr.trim()) onEvent?.({ type: 'note', message: `claude CLI stderr:\n${stderr}` });
+        const summary = summarizeRunnerStderr(stderr);
+        const detail = summary ? ` — ${summary}` : '';
         const msg = `claude CLI exited with code ${exitCode}${detail}`;
         onEvent?.({ type: 'error', message: msg });
         throw new Error(msg);
@@ -532,9 +536,9 @@ export function buildClaudeArgs(
     const { name, command, args: toolArgs } = spec.cezarTools;
     args.push('--mcp-config', JSON.stringify({ mcpServers: { [name]: {
       command, args: toolArgs,
-      env: { CEZ_TOOL_TOKEN: '${CEZ_TOOL_TOKEN}', CEZ_TOOL_SOCKET: '${CEZ_TOOL_SOCKET}' },
+      env: Object.fromEntries(cezarToolEnvNames(spec.env ?? {}).map(key => [key, `\${${key}}`])),
     } } }));
-    if (allowed.length > 0) allowed.push(`mcp__${name}__cezar_wait_for_ci`);
+    if (allowed.length > 0) allowed.push(...cezarToolNames(spec.env ?? {}).map(tool => `mcp__${name}__${tool}`));
   }
   if (allowed.length > 0) {
     args.push('--allowedTools', allowed.join(','));

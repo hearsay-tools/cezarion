@@ -290,6 +290,9 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
       kill: () => {
         Object.assign(child, { exitCode: 0, killed: true });
         emitter.emit('exit', 0, null);
+        (child.stdout as PassThrough).end();
+        (child.stderr as PassThrough).end();
+        emitter.emit('close', 0, null);
         return true;
       },
     }) as unknown as ChildProcessWithoutNullStreams;
@@ -321,6 +324,8 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
       emitter.emit('error', err);
       Object.assign(child, { exitCode: 1 });
       emitter.emit('exit', 1, null);
+      (child.stdout as PassThrough).end();
+      (child.stderr as PassThrough).end();
       emitter.emit('close', 1, null);
     });
     return child;
@@ -340,6 +345,7 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
   const count = (events: AgentEvent[], type: string) => events.filter((e) => e.type === type).length;
 
   interface Harness {
+    child: ChildProcessWithoutNullStreams;
     events: AgentEvent[];
     uiEvents: UiEvent[];
     mock: Awaited<ReturnType<typeof startMockServer>>;
@@ -357,7 +363,8 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
     run: (h: Harness) => Promise<void>,
   ): Promise<void> {
     const mock = await startMockServer(opts);
-    spawnHook.override = () => servedChild(mock.url);
+    const child = servedChild(mock.url);
+    spawnHook.override = () => child;
     const events: AgentEvent[] = [];
     const uiEvents: UiEvent[] = [];
     const session = new OpencodeServerRunner({ bin: 'opencode', timeoutMs: 30_000 }).startSession(
@@ -373,7 +380,7 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
       },
     );
     try {
-      await run({ events, uiEvents, mock, session });
+      await run({ child, events, uiEvents, mock, session });
     } finally {
       spawnHook.override = null;
       session.end();
@@ -381,6 +388,27 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
       await mock.close();
     }
   }
+
+  it('retains buffered stderr delivered between child exit and pipe close', async () => {
+    await withSession({}, async ({ child, events, mock, session }) => {
+      await waitFor(() => mock.promptPosts.length === 1);
+      let settled = false;
+      void session.result.then(() => { settled = true; });
+      Object.assign(child, { exitCode: 1 });
+      child.emit('exit', 1, null);
+      await new Promise<void>(resolve => setImmediate(resolve));
+      expect(settled).toBe(false);
+      const stderr = 'Error: write EPIPE\n    at finalWrite (runner.js:1:1)\nNode.js v24.20.0\n';
+      (child.stderr as PassThrough).end(stderr);
+      (child.stdout as PassThrough).end();
+      child.emit('close', 1, null);
+      await session.result;
+      expect(events.filter(e => e.type === 'error')).toEqual([
+        { type: 'error', message: 'opencode serve exited with code 1 — Error: write EPIPE' },
+      ]);
+      expect(events.filter(e => e.type === 'note')).toContainEqual({ type: 'note', message: `opencode serve stderr:\n${stderr}` });
+    });
+  });
 
   function sendQuestion(
     mock: Harness['mock'],
@@ -492,6 +520,7 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
       await waitFor(() => count(events, 'error') >= 1);
       await session.result;
       expect(count(events, 'error')).toBe(1);
+      expect(events.find(e => e.type === 'error')?.message).toContain('POST /session/ses_test/prompt_async → 500');
       expect(events.findIndex(e => e.type === 'error')).toBeLessThan(events.findIndex(e => e.type === 'turn-end'));
       expect(session.open).toBe(false);
     });
@@ -649,14 +678,22 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
   it('keeps PATH and installation guidance for a missing binary', async () => {
     const child = enoentChild();
     spawnHook.override = () => child;
+    const events: AgentEvent[] = [];
     try {
       const session = new OpencodeServerRunner({ bin: 'opencode', timeoutMs: 30_000 }).startSession({
         userPrompt: 'go',
         cwd: process.cwd(),
         model: 'openai/gpt-5.6-sol',
-      });
+      }, event => events.push(event));
       await expect(session.result).rejects.toThrow(/`opencode` not found on PATH/);
       await expect(session.result).rejects.toThrow(/https:\/\/opencode\.ai/);
+      const errors = events.filter(event => event.type === 'error');
+      expect(errors).toHaveLength(1);
+      expect(errors[0]!.message).toContain('`opencode` not found on PATH');
+      expect(errors[0]!.message).toContain('https://opencode.ai');
+      await expect(session.result).rejects.toThrow(errors[0]!.message);
+      expect(events.at(-1)?.type).toBe('error');
+      expect(events.some(event => event.type === 'turn-end' || event.type === 'done')).toBe(false);
     } finally {
       spawnHook.override = null;
     }

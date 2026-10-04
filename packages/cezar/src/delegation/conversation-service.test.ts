@@ -292,11 +292,12 @@ describe('durable conversations', () => {
     const parent = f.store.getRun(f.parent.id)!;
     if (parent.delegation?.role !== 'root') throw Error('fixture');
     // Hold lifecycle cancellation at its boundary to exercise a still-active worker reply.
-    vi.spyOn(f.manager, 'cancel').mockReturnValue(true);
+    const cancel = vi.spyOn(f.manager, 'cancel').mockReturnValue(true);
     f.store.updateRun(parent.id, { status: 'done', delegation: { ...parent.delegation, finishRequestedAt: new Date().toISOString() } });
     const reply = await f.service.reply(w.caller, { id: randomUUID(), recipientRunId: parent.id, kind: 'reply', requestId: sent.message.id, text: 'answer', timeoutSeconds: 600 });
     expect(reply).toMatchObject({ message: { state: 'late' }, delivery: 'not-delivered', outcome: { status: 'sender-closed' } });
     expect(f.store.getRun(parent.id)?.agentInputs ?? []).toEqual([]);
+    cancel.mockRestore();
   });
 
   it('redacts recognizable secrets before the ledger, queue, receipts, inspection, disk and event projections', async () => {

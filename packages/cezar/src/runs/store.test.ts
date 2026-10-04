@@ -3,7 +3,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { RunStore } from './store.ts';
+import { runRecordSchema as contractRunRecordSchema } from '@open-mercato/cezar-contract';
+import { RunStore, runRecordSchema } from './store.ts';
 
 import type { RunRecord } from './store.ts';
 
@@ -2652,5 +2653,60 @@ describe('RunStore — replaying accepted but unread input after a crash (#505)'
     expect(store.requeueAwaitingReadInputs(LEGACY_RUN.id)).toEqual([unread.id]);
     const { deliveredAt: _d, awaitingRead: _a, ...queued } = unread;
     expect(store.getRun(LEGACY_RUN.id)?.agentInputs).toEqual([queued, read, historical]);
+  });
+});
+
+describe('RunStore — previewServers survive a partly unreadable entry (#781)', () => {
+  let dataDir: string;
+  beforeEach(() => { dataDir = mkdtempSync(join(tmpdir(), 'cez-store-preview-')); });
+  afterEach(() => { rmSync(dataDir, { recursive: true, force: true }); });
+
+  const valid = { port: 5173, command: 'npm run dev', label: 'vite', registeredAt: '2026-10-02T10:00:00.000Z', answeredAtRegistration: false };
+
+  it('keeps the valid entry and drops the malformed one', () => {
+    writeFileSync(join(dataDir, 'runs.json'), JSON.stringify([
+      { ...LEGACY_RUN, previewServers: [valid, { port: 'nope', command: 3 }] },
+    ]));
+    const store = RunStore.open(dataDir, { keepLive: true });
+    expect(store.getRun('legacy-1')?.previewServers).toEqual([valid]);
+  });
+
+  it('loads a record whose previewServers is not an array, without the field', () => {
+    writeFileSync(join(dataDir, 'runs.json'), JSON.stringify([{ ...LEGACY_RUN, previewServers: 'garbage' }]));
+    const store = RunStore.open(dataDir, { keepLive: true });
+    expect(store.getRun('legacy-1')).toBeDefined();
+    expect(store.getRun('legacy-1')?.previewServers).toBeUndefined();
+  });
+
+  it('loads a pre-#781 record with no previewServers field', () => {
+    writeFileSync(join(dataDir, 'runs.json'), JSON.stringify([LEGACY_RUN]));
+    const store = RunStore.open(dataDir, { keepLive: true });
+    expect(store.getRun('legacy-1')?.previewServers).toBeUndefined();
+  });
+});
+
+describe('RunRecord.automationTrigger', () => {
+  const trigger = {
+    automationId: 'nightly',
+    automationRevision: 2,
+    receiptId: 'r-1',
+    trigger: 'catch-up' as const,
+    occurrenceAt: '2026-10-02T04:00:00.000Z',
+  };
+
+  it('round-trips through the run schema', () => {
+    const parsed = runRecordSchema.parse({ ...LEGACY_RUN, automationTrigger: trigger });
+    expect(parsed.automationTrigger).toEqual(trigger);
+  });
+
+  it('is stripped, not fatal, for a schema that predates the key', () => {
+    const previous = contractRunRecordSchema.omit({ automationTrigger: true });
+    const parsed = previous.parse({ ...LEGACY_RUN, automationTrigger: trigger });
+    expect(parsed.id).toBe('legacy-1');
+    expect('automationTrigger' in parsed).toBe(false);
+  });
+
+  it('is absent on an ordinary record', () => {
+    expect(runRecordSchema.parse(LEGACY_RUN).automationTrigger).toBeUndefined();
   });
 });

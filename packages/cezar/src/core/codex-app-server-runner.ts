@@ -1,3 +1,4 @@
+import { summarizeRunnerStderr } from './runner-stderr.ts';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { parseEffort } from '@open-mercato/cezar-contract';
@@ -26,6 +27,7 @@ import { InputSubmissions } from './input-submissions.ts';
 import { codexStreamError } from './codex-stream-error.ts';
 import { codexTurnOutcome } from './codex-turn-outcome.ts';
 import { codexNetworkIsRestricted, codexPermissionOverrides } from './codex-permissions.ts';
+import { cezarToolEnvNames } from '../ci-wait/tools.ts';
 import {
   CodexAppServerRpc,
   CodexRpcResponseError,
@@ -324,7 +326,25 @@ class CodexSession implements AgentSession {
       }
 
       if (this.spawnFailed) throw this.spawnFailed;
-      if (this.failure) throw this.failure;
+      // Preserve diagnostics even when an RPC/startup failure already owns the error.
+      const stderr = stderrChunks.join('');
+      if (stderr.trim() && (this.failure || (!this.timedOut && exitCode !== 0 && exitCode !== null &&
+        !(this.terminatedByCezar && isSignalTerminationExit(exitCode))))) {
+        this.emit({ type: 'note', message: `codex app-server stderr:\n${stderr}` });
+      }
+      if (this.failure) {
+        // Before the first prompt ACK, process/pipe closure can own the failure
+        // before the ordinary crash branch. Keep its phase context and expose
+        // the drained terminal exception on the same v1 error seam as later exits.
+        if (!this.startupComplete && !this.timedOut && stderr.trim() && exitCode !== null && exitCode !== 0 &&
+          !(this.terminatedByCezar && isSignalTerminationExit(exitCode))) {
+          const detail = summarizeRunnerStderr(stderr);
+          const message = `codex app-server exited with code ${exitCode}${detail ? ` — ${detail}` : ''} (${this.failure.message})`;
+          this.emit({ type: 'error', message });
+          throw new Error(message);
+        }
+        throw this.failure;
+      }
 
       // Timeout/interrupt can end the read loop mid-item — recover buffered prose.
       this.textCoalescer.flush();
@@ -355,8 +375,8 @@ class CodexSession implements AgentSession {
       }
 
       if (exitCode !== 0 && exitCode !== null) {
-        const stderr = stderrChunks.join('').trim();
-        const detail = stderr ? ` — ${stderr.split('\n').slice(-3).join(' | ')}` : '';
+        const summary = summarizeRunnerStderr(stderr);
+        const detail = summary ? ` — ${summary}` : '';
         const message = `codex app-server exited with code ${exitCode}${detail}`;
         this.emit({ type: 'error', message });
         throw new Error(message);
@@ -561,7 +581,7 @@ class CodexSession implements AgentSession {
       ...((restrictNetwork || this.spec.restrictNativeDelegation || this.spec.cezarTools) ? { config: {
         ...(restrictNetwork ? { 'sandbox_workspace_write.network_access': false } : {}),
         ...(this.spec.restrictNativeDelegation ? { 'features.multi_agent': false, 'features.multi_agent_v2': false } : {}),
-        ...(this.spec.cezarTools ? { [`mcp_servers.${this.spec.cezarTools.name}`]: { command: this.spec.cezarTools.command, args: this.spec.cezarTools.args, env_vars: ['CEZ_TOOL_TOKEN', 'CEZ_TOOL_SOCKET'] } } : {}),
+        ...(this.spec.cezarTools ? { [`mcp_servers.${this.spec.cezarTools.name}`]: { command: this.spec.cezarTools.command, args: this.spec.cezarTools.args, env_vars: cezarToolEnvNames(this.spec.env ?? {}) } } : {}),
       } } : {}),
     };
     let threadResponse: Record<string, unknown>;

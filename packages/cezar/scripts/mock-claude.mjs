@@ -118,6 +118,10 @@ function writeHandoffAndTodo() {
 }
 
 async function respond(userText, imageCount, uuid) {
+  if (userText.includes('mock:crash-stderr')) {
+    const { crashWithStderr } = await import('./mock-runner-crash.mjs');
+    if (crashWithStderr(userText, '{"type":"assistant","message":')) return;
+  }
   emitReplay(uuid, userText);
   // `mock:steer-tool` → one tool call; lines written while it runs are consumed after
   // it (replayed with their uuid) and settled by the SAME result, like Claude 2.1.280 (#505).
@@ -157,6 +161,13 @@ async function respond(userText, imageCount, uuid) {
   if (userText.includes('mock:ci-wait')) {
     const { ciPrompt } = await import('./mock-ci-tool.mjs');
     const text = await ciPrompt('claude', process.argv.slice(2), userText);
+    emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } });
+    emit({ type: 'result', subtype: 'success', result: text, usage: { input_tokens: 20, output_tokens: 10 } });
+    return;
+  }
+  if (!userText.includes('[cez-namer]') && userText.includes('mock:preview-serve')) {
+    const { previewPrompt } = await import('./mock-ci-tool.mjs');
+    const text = await previewPrompt('claude', process.argv.slice(2), userText);
     emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } });
     emit({ type: 'result', subtype: 'success', result: text, usage: { input_tokens: 20, output_tokens: 10 } });
     return;

@@ -1,3 +1,4 @@
+import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { execFile } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -6,7 +7,7 @@ import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RunStore } from '../runs/store.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
-import { RunManager } from './run.ts';
+
 
 const run = promisify(execFile);
 const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
@@ -31,6 +32,8 @@ describe('recover() and the autonomous flag (#489)', () => {
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-recover-auto-'));
     mkdirSync(join(repoRoot, '.ai/cezar'), { recursive: true });
     await run('git', ['init', '-q', '-b', 'main'], { cwd: repoRoot });
+    await run('git', ['config', 'gc.auto', '0'], { cwd: repoRoot });
+    await run('git', ['config', 'maintenance.auto', 'false'], { cwd: repoRoot });
     writeFileSync(join(repoRoot, 'a.txt'), 'one\n');
     await run('git', ['add', '-A'], { cwd: repoRoot });
     await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
@@ -39,7 +42,8 @@ describe('recover() and the autonomous flag (#489)', () => {
 
   const frozen = () => new WorkspaceSemaphore({ initial: { maxParallel: 0 } });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await drainFixtureManagers(repoRoot);
     vi.unstubAllEnvs();
     store.flush();
     rmSync(repoRoot, { recursive: true, force: true });
@@ -68,7 +72,7 @@ describe('recover() and the autonomous flag (#489)', () => {
     const id = queuedRun(true);
     expect(store.getRun(id)?.autonomous).toBe(true);
 
-    await new RunManager(store, repoRoot, { semaphore: frozen() }).recover();
+    await createFixtureManager(store, repoRoot, { semaphore: frozen() }).recover();
 
     // Still recovered (queued), still autonomous — so a later settleSuccess lands it at `done`.
     expect(store.getRun(id)?.status).toBe('queued');
@@ -77,7 +81,7 @@ describe('recover() and the autonomous flag (#489)', () => {
 
   it('leaves a non-autonomous recovered run non-autonomous', async () => {
     const id = queuedRun(false);
-    await new RunManager(store, repoRoot, { semaphore: frozen() }).recover();
+    await createFixtureManager(store, repoRoot, { semaphore: frozen() }).recover();
     expect(store.getRun(id)?.autonomous).toBe(false);
   });
 
@@ -87,7 +91,7 @@ describe('recover() and the autonomous flag (#489)', () => {
     const id = queuedRun(autonomous);
     store.updateStep(id, 'work', { status: 'done', sessionId: 'previous-session', backend: 'claude' });
     store.updateRun(id, { status: 'done', runner: 'claude' });
-    const manager = new RunManager(store, repoRoot, { semaphore: frozen() });
+    const manager = createFixtureManager(store, repoRoot, { semaphore: frozen() });
     try {
       expect(manager.continueRun(id, { text: 'Continue setup' }, true)).toEqual({ ok: true });
       expect(store.getRun(id)?.autonomous).toBe(autonomous);
@@ -97,7 +101,7 @@ describe('recover() and the autonomous flag (#489)', () => {
       store.flush();
     }
     store = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true });
-    const recovered = new RunManager(store, repoRoot, { semaphore: frozen() });
+    const recovered = createFixtureManager(store, repoRoot, { semaphore: frozen() });
     try {
       await recovered.recover();
       expect(store.getRun(id)?.autonomous).toBe(autonomous);

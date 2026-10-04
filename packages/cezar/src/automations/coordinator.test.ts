@@ -29,6 +29,19 @@ describe('AutomationCoordinator', () => {
     await expect(import('node:fs/promises').then(({ stat }) => stat(join(second, '.ai')))).rejects.toThrow();
   });
 
+  it('hasProjects counts a registered project without a definitions file and not a missing one', async () => {
+    const root = await project();
+    let status: 'ok' | 'missing' = 'ok';
+    const coordinator = new AutomationCoordinator({ listProjects: async () => [{ id: 'one', root, status }] });
+    expect(coordinator.hasProjects()).toBe(false);
+    await coordinator.refresh();
+    expect(coordinator.ids()).toEqual([]);
+    expect(coordinator.hasProjects()).toBe(true);
+    status = 'missing';
+    await coordinator.refresh();
+    expect(coordinator.hasProjects()).toBe(false);
+  });
+
   it('drops removed and gone projects without failing other handles', async () => {
     const root = await project();
     await mkdir(join(root, '.ai/cezar'), { recursive: true });

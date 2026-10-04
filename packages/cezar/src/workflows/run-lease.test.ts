@@ -1,15 +1,20 @@
+import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RunStore } from '../runs/store.ts';
-import { RunManager } from './run.ts';
+import type { RunManager } from './run.ts';
 import type { WorkflowDef } from './types.ts';
 
-const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
-
 const SETTLED = ['done', 'failed', 'cancelled', 'review'];
+
+// These fixtures exercise checks and Git, never the auxiliary LLM namer.
+beforeEach(() => vi.stubEnv('CEZ_AUTONAME', '0'));
+afterEach(() => vi.unstubAllEnvs());
+
+const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
 
 /** Ceiling on how long a lease holder keeps the tree when nothing releases it.
  *  A passing test never reaches it — the test's own `release()` ends the step —
@@ -84,9 +89,11 @@ const fixtures: Fixture[] = [];
 function fixtureRepo(): Fixture {
   const root = mkdtempSync(join(tmpdir(), 'cez-root-lease-'));
   execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: root });
+  execFileSync('git', ['config', 'gc.auto', '0'], { cwd: root });
+  execFileSync('git', ['config', 'maintenance.auto', 'false'], { cwd: root });
   execFileSync('git', [...GIT_ID, 'commit', '--allow-empty', '-q', '-m', 'base'], { cwd: root });
   const store = RunStore.open(join(root, '.ai/cezar'));
-  const manager = new RunManager(store, root);
+  const manager = createFixtureManager(store, root);
   // Under `.ai/cezar` on purpose: nothing treats that directory as repository
   // content, so the gate can never turn up in a worktree diff or the review gate.
   const gate = join(root, '.ai/cezar', 'lease-gate');
@@ -137,41 +144,12 @@ async function waitFor(predicate: () => boolean, what: string): Promise<void> {
   throw new Error(`timed out waiting for ${what}`);
 }
 
-/**
- * Every run a fixture started has to be finished before its repository is
- * deleted. A run that is still settling writes its closing NDJSON event, and
- * against an already-removed fixture that surfaced as the teardown `ENOENT`
- * reported in #797 — the second test in particular returns the moment `after`
- * completes, while the holder it queued behind is still finalizing.
- */
-async function drain(fixture: Fixture): Promise<void> {
-  const unsettled = () =>
-    fixture.started.filter((id) => !SETTLED.includes(fixture.store.getRun(id)?.status ?? ''));
-  try {
-    await waitFor(() => unsettled().length === 0, 'every started run to settle');
-  } catch {
-    // A run that will not finish on its own is a real problem, so cancel it and
-    // let the second wait throw rather than deleting the fixture underneath it.
-    for (const id of unsettled()) fixture.manager.cancel(id);
-    await waitFor(() => unsettled().length === 0, 'the cancelled leftover runs to settle');
-  }
-}
-
 afterEach(async () => {
   for (const fixture of fixtures.splice(0)) {
     // Open the gate first. A failed assertion skips the test's own release, and
     // teardown must not sit out HOLD_SAFETY_MS waiting for the holder to give up.
     fixture.release();
-    try {
-      await drain(fixture);
-    } finally {
-      // Dispose either way: a manager left registered keeps its usage-sampler
-      // subscription and its semaphore membership alive for the rest of the suite.
-      fixture.manager.dispose();
-    }
-    // Reached only once nothing is still writing into the fixture. A failed
-    // drain therefore leaks a temp directory, which is strictly better than
-    // deleting one out from under a live run — the failure this file is fixing.
+    await drainFixtureManagers(fixture.root);
     rmSync(fixture.root, { recursive: true, force: true });
   }
 }, TEST_TIMEOUT_MS);

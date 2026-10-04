@@ -1,3 +1,4 @@
+import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -6,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentRunSpec } from '../core/agent-runner.ts';
 import { RunStore } from '../runs/store.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
-import { RunManager } from './run.ts';
+import type { RunManager } from './run.ts';
 
 const captured = vi.hoisted(() => ({ specs: [] as AgentRunSpec[], release: undefined as (() => void) | undefined }));
 vi.mock('../core/runner-factory.ts', () => ({ createRunner: () => ({
@@ -23,7 +24,7 @@ const managers: RunManager[] = [];
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'cez-unarchive-')); roots.push(root);
   const store = RunStore.open(join(root, '.ai/cezar'));
-  const manager = new RunManager(store, root, { semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 0 } }) });
+  const manager = createFixtureManager(store, root, { semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 0 } }) });
   managers.push(manager);
   return { store, manager };
 }
@@ -41,8 +42,8 @@ function archivedFinished(store: RunStore) {
 
 afterEach(async () => {
   captured.release?.(); captured.release = undefined;
-  for (const manager of managers.splice(0)) manager.dispose();
-  await new Promise(resolve => setTimeout(resolve, 30));
+  for (const root of roots) await drainFixtureManagers(root);
+  managers.length = 0;
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
   captured.specs.length = 0;
 });

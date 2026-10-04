@@ -96,6 +96,14 @@ function claim(path: string, owner: Owner, depth = 0): boolean {
   } finally { release(guard, gate); }
 }
 
+/** Whether a live cockpit other than this process owns `dataDir`. Read-only: nothing is claimed. */
+export function ownedByAnotherCockpit(dataDir: string): boolean {
+  let canonical: string;
+  try { canonical = realpathSync(dataDir); } catch { return false; }
+  const owner = readOwner(join(canonical, 'cockpit.lock'));
+  return owner !== undefined && owner.pid !== process.pid && alive(owner);
+}
+
 /** One owner per cockpit process, shared by boot and lazy project contexts. */
 export class CockpitOwnership {
   private readonly owned = new Map<string, Owner>();

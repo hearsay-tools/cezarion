@@ -1,3 +1,4 @@
+import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -47,11 +48,12 @@ describe('RunManager — task-scoped agent TMPDIR (#785)', () => {
     dataDir = join(repoRoot, '.ai/cezar');
     process.env.CEZ_HOME = home;
     store = RunStore.open(dataDir);
-    manager = new RunManager(store, repoRoot);
+    manager = createFixtureManager(store, repoRoot);
     await registerProject(repoRoot);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await drainFixtureManagers(repoRoot);
     manager.dispose();
     for (const run of store.listRuns()) removeAgentTmpDir(dataDir, run.id);
     store.flush();
@@ -121,7 +123,7 @@ describe('RunManager — task-scoped agent TMPDIR (#785)', () => {
     manager.dispose();
     store.flush();
     store = RunStore.open(dataDir, { keepLive: true });
-    manager = new RunManager(store, repoRoot);
+    manager = createFixtureManager(store, repoRoot);
     await manager.recover();
     expect(store.getRun(run.id)?.status).toBe('waiting');
     for (const dir of dirs) expect(readFileSync(join(dir, 'scratch'), 'utf8')).toBe('survive restart');
@@ -274,11 +276,12 @@ describe('RunManager — deep checkout falls back to a socket-safe TMPDIR (#387)
     dataDir = join(repoRoot, '.ai/cezar');
     process.env.CEZ_HOME = home;
     store = RunStore.open(dataDir);
-    manager = new RunManager(store, repoRoot);
+    manager = createFixtureManager(store, repoRoot);
     await registerProject(repoRoot);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await drainFixtureManagers(repoRoot);
     manager.dispose();
     for (const run of store.listRuns()) removeAgentTmpDir(dataDir, run.id);
     store.flush();

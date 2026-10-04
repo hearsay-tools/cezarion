@@ -1,4 +1,5 @@
-import { cleanup, fireEvent, render } from '@testing-library/react'
+import { QueryClientProvider } from '@tanstack/react-query'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -15,6 +16,8 @@ import {
   mainTranscriptSections,
   type TranscriptSection,
 } from './session-transcript'
+import { createQueryClient } from '@/api/query-client'
+import { PreviewPaneContext, type PreviewPane } from './preview/preview-state'
 import { clearThreadScrollCaches } from './thread-scroll'
 import { collectSubagents, subagentChildren } from './subagent-dock'
 import { reduceThread, type ThreadEntry, type ThreadState } from './thread-state'
@@ -477,6 +480,82 @@ describe('SessionTranscript', () => {
     expect(document.querySelector('[data-slot="ask-card"]')?.textContent).toContain(
       'Open the main session',
     )
+  })
+
+  describe('preview server card (#781)', () => {
+    const preview: ThreadEntry = {
+      kind: 'preview-server',
+      id: 'preview-server:5173',
+      state: 'registered',
+      server: {
+        port: 5173,
+        command: 'npm run dev',
+        label: 'web',
+        registeredAt: '2026-10-02T10:00:00.000Z',
+        answeredAtRegistration: false,
+      },
+    }
+    let client: ReturnType<typeof createQueryClient>
+    /** The flag-off cases assert absence: only meaningful once the health answer is in the cache. */
+    const healthSettled = () =>
+      waitFor(() =>
+        expect(client.getQueryCache().getAll().some(query => JSON.stringify(query.queryKey).includes('health') && query.state.status === 'success')).toBe(true),
+      )
+    function renderPreview(capable: boolean, pane: PreviewPane | null) {
+      vi.stubGlobal('fetch', vi.fn(async () =>
+        new Response(JSON.stringify({ capabilities: { localHandoff: true, followups: false, singleProject: false, tokenMetrics: true, preview: capable } }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })))
+      client = createQueryClient()
+      render(
+        <QueryClientProvider client={client}>
+          <PreviewPaneContext.Provider value={pane}>
+            <SessionTranscript runId="r1" viewId="main" sections={[{ id: 's', entries: [preview] }]} mode="panel" />
+          </PreviewPaneContext.Provider>
+        </QueryClientProvider>,
+      )
+    }
+
+    it('renders in the thread and opens the pane asking to run, only when preview is on', async () => {
+      const openPane = vi.fn()
+      renderPreview(true, { open: false, live: false, openPane })
+      fireEvent.click(await screen.findByRole('button', { name: 'Run and open' }))
+      expect(openPane).toHaveBeenCalledWith({ port: 5173, run: true })
+    })
+
+    it('reads worktree removed, with no action, once the task worktree is gone (5.15)', async () => {
+      const openPane = vi.fn()
+      const stopped: ThreadEntry = { ...preview, state: 'stopped' } as ThreadEntry
+      vi.stubGlobal('fetch', vi.fn(async () =>
+        new Response(JSON.stringify({ capabilities: { localHandoff: true, followups: false, singleProject: false, tokenMetrics: true, preview: true } }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })))
+      render(
+        <QueryClientProvider client={createQueryClient()}>
+          <PreviewPaneContext.Provider value={{ open: false, live: false, openPane, worktreeRemoved: true }}>
+            <SessionTranscript runId="r1" viewId="main" sections={[{ id: 's', entries: [preview, { ...stopped, id: 'preview-server:5174', server: { ...preview.server, port: 5174 } } as ThreadEntry]} ]} mode="panel" />
+          </PreviewPaneContext.Provider>
+        </QueryClientProvider>,
+      )
+      expect((await screen.findAllByText('worktree removed')).length).toBe(2)
+      expect(document.querySelectorAll('[data-slot="preview-server-card"][data-state="unavailable"]').length).toBe(2)
+      expect(screen.queryByRole('button')).toBeNull()
+      expect(screen.queryByText(/in this task's worktree/)).toBeNull()
+    })
+
+    it('shows the card with no action when preview is off or the view hosts no pane', async () => {
+      renderPreview(false, { open: false, live: false, openPane: vi.fn() })
+      expect(await screen.findByText('registered · not started')).toBeTruthy()
+      await healthSettled()
+      expect(screen.queryByRole('button')).toBeNull()
+      cleanup()
+      renderPreview(true, null)
+      expect(await screen.findByText('registered · not started')).toBeTruthy()
+      await healthSettled()
+      expect(screen.queryByRole('button')).toBeNull()
+    })
   })
 
   it('provides a bounded, keyboard-scrollable panel with a stable scrollbar gutter', () => {

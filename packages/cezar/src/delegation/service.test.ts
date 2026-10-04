@@ -1,3 +1,4 @@
+import { createFixtureManager } from '../workflows/fixture-cleanup.testkit.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -5,7 +6,7 @@ import { QUICK_TASK_WORKFLOW } from '../workflows/types.ts';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RunStore } from '../runs/store.ts';
-import { RunManager } from '../workflows/run.ts';
+import type { RunManager } from '../workflows/run.ts';
 import { mergeWriteAgentAccounts } from '../workspace/agent-accounts.ts';
 import type { Caller } from './credentials.ts';
 
@@ -275,6 +276,20 @@ describe('delegation service durable authority', () => {
     expect(await f.service.destroy(f.caller, { workerId })).toMatchObject({ state: 'incomplete', remaining: ['process', 'worktree', 'branch'] });
     expect(f.store.getRun(workerId)?.delegation).toMatchObject({ destroy: { phase: 'incomplete', remaining: ['process', 'worktree', 'branch'] } });
   });
+  it("releases a destroyed worker's preview before its checkout is removed (#781 final review)", async () => {
+    const { workerId } = await f.service.spawn(f.caller, input());
+    f.store.commitWorkerExecutionStart(workerId);
+    const workspace = await ensureOwnedWorkspace(f.root, f.store.getRun(workerId)!);
+    f.store.updateRun(workerId, { status: 'review', worktreePath: workspace.path, branch: workspace.branch });
+    expect(f.store.commitWorkerExecutionComplete(workerId, f.store.readWorkerExecution(workerId)!.generation)).toBe(true);
+    const released: Array<{ runId: string; checkoutExisted: boolean }> = [];
+    const host = { portOwner: () => undefined, probe: async () => false, release: async (runId: string) => { released.push({ runId, checkoutExisted: existsSync(workspace.path) }); }, replaced: async () => undefined };
+    vi.spyOn(f.manager, 'previewHost', 'get').mockReturnValue(host);
+    expect(await f.service.destroy(f.caller, { workerId })).toMatchObject({ state: 'complete', remaining: [] });
+    expect(released).toEqual([{ runId: workerId, checkoutExisted: true }]);
+    expect(existsSync(workspace.path)).toBe(false);
+  });
+
   it('retries a persisted incomplete destroy after termination becomes proven', async () => {
     Object.assign(f.service, { destroyRetryDelayMs: 50 });
     const { workerId } = await f.service.spawn(f.caller, input());
@@ -316,7 +331,7 @@ describe('delegation service durable authority', () => {
 
     const stale = restarted.registerProject({ id: 'project', root: f.root, store: f.store, manager: f.manager });
     restarted.armDestroyRetries('project');
-    const replacementManager = new RunManager(f.store, f.root);
+    const replacementManager = createFixtureManager(f.store, f.root);
     const replaced = restarted.registerProject({ id: 'project', root: f.root, store: f.store, manager: replacementManager });
     stale(); // a stale detach must not detach the replacement
     await new Promise(resolve => setTimeout(resolve, 120));
@@ -348,7 +363,7 @@ describe('delegation service durable authority', () => {
     const termination = vi.spyOn(f.manager, 'awaitRunTermination').mockReturnValue(held);
     f.service.armDestroyRetries('project');
     await vi.waitFor(() => expect(termination).toHaveBeenCalledOnce(), { timeout: 3_000 });
-    const replacementManager = new RunManager(f.store, f.root);
+    const replacementManager = createFixtureManager(f.store, f.root);
     const detachReplacement = f.service.registerProject({ id: 'project', root: f.root, store: f.store, manager: replacementManager });
     const writes = vi.spyOn(f.store, 'commitDelegation');
     const results = vi.spyOn(f.store, 'commitWorkerResult');
@@ -404,7 +419,7 @@ describe('delegation service durable authority', () => {
     let replacementManager: RunManager | undefined;
     try {
       await vi.waitFor(() => expect(existsSync(blocked)).toBe(true), { timeout: 5_000 });
-      replacementManager = new RunManager(f.store, f.root);
+      replacementManager = createFixtureManager(f.store, f.root);
       detachReplacement = f.service.registerProject({ id: 'project', root: f.root, store: f.store, manager: replacementManager });
       const oldResults = results.mock.calls.length;
       const writes = vi.spyOn(f.store, 'commitDelegation');
@@ -502,7 +517,7 @@ describe('delegation service durable authority', () => {
     writeFileSync(record, JSON.stringify({ ...JSON.parse(readFileSync(record, 'utf8')), controller: { pid: dead.pid, startToken: '1' } }));
     f.store.flush();
     // The restarted cezar: a fresh manager owns no execution or queue entry for the worker.
-    const reopened = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true }); const manager = new RunManager(reopened, f.root);
+    const reopened = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true }); const manager = createFixtureManager(reopened, f.root);
     f.service.registerProject({ id: 'project', root: f.root, store: reopened, manager });
     try {
       // Under full-suite load the host-wide process scan can transiently return alive/unknown.

@@ -1,3 +1,4 @@
+import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { execFile } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -6,7 +7,7 @@ import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentRunSpec } from '../core/agent-runner.ts';
 import { RunStore } from '../runs/store.ts';
-import { RunManager } from './run.ts';
+import type { RunManager } from './run.ts';
 
 const run = promisify(execFile);
 const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
@@ -50,26 +51,21 @@ describe('Continue after a Cursor bootstrap crash', () => {
     captured.specs.length = 0;
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-cursor-bootstrap-'));
     await run('git', ['init', '-q', '-b', 'main'], { cwd: repoRoot });
+    await run('git', ['config', 'gc.auto', '0'], { cwd: repoRoot });
+    await run('git', ['config', 'maintenance.auto', 'false'], { cwd: repoRoot });
     writeFileSync(join(repoRoot, 'a.txt'), 'one\n');
     await run('git', ['add', '-A'], { cwd: repoRoot });
     await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    manager = new RunManager(store, repoRoot);
+    manager = createFixtureManager(store, repoRoot);
   });
 
   afterEach(async () => {
+    await drainFixtureManagers(repoRoot);
     manager?.dispose();
     manager = undefined;
     store.flush();
-    for (let attempt = 0; ; attempt++) {
-      try {
-        rmSync(repoRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-        break;
-      } catch (err) {
-        if (attempt >= 5) throw err;
-        await new Promise((resolve) => setTimeout(resolve, 1_000));
-      }
-    }
+    rmSync(repoRoot, { recursive: true, force: true });
   });
 
   const LAUNCH_SESSION_ID = 'e339a973-0b14-4963-ab72-6c1dd4e3aa5b';

@@ -71,14 +71,14 @@ beforeAll(async () => {
   base = await waitForFixtureServer(server)
   project = await bootProjectId(base)
   // Which views this server actually offers decides which rows the bar and the sheet must show:
-  // Inbox needs the follow-ups flag, Automations the flag AND a forge, GitHub the forge.
+  // Inbox needs the follow-ups flag, Automations the flag alone (a schedule needs no forge), GitHub the forge.
   const health = (await fetch(`${base}/api/v1/health`).then((response) => response.json())) as {
     forge: { available: boolean } | null
     capabilities: { followups: boolean; automations: boolean }
   }
   forge = health.forge?.available === true
   followups = health.capabilities.followups
-  automations = health.capabilities.automations && forge
+  automations = health.capabilities.automations
   mkdirSync(SHOTS, { recursive: true })
   browser = AgentBrowser.open(`mobile-tab-bar-${process.pid}`)
 }, 60_000)
