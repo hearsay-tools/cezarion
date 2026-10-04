@@ -242,7 +242,7 @@ describe('the Files tab against a live dry-run worktree', () => {
       rmSync(outside, { recursive: true, force: true })
       browser.setViewport(360, 640)
       for (const theme of ['light', 'dark']) {
-        browser.goto(`${baseUrl}${scoped(artifact.link)}`)
+        browser.goto(`${baseUrl}${artifact.link}`)
         browser.waitForFunction(`document.querySelector('[data-slot="file-preview"]')?.textContent.includes('Snapshot survives source removal.')`)
         browser.evaluate(`document.documentElement.classList.toggle('light', ${theme === 'light'}); document.documentElement.classList.toggle('dark', ${theme === 'dark'})`)
         const evidence = browser.waitForValue(`(() => { const pane = document.querySelector('[data-slot="file-preview"]'); if (!pane) return null; pane.scrollIntoView({ block: 'start' }); return { text: pane.textContent, images: pane.querySelectorAll('img').length, overflow: document.documentElement.scrollWidth > innerWidth, download: pane.querySelector('a[href$="/download"]')?.getAttribute('href') } })()`)
