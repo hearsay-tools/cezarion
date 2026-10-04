@@ -3,10 +3,9 @@ import { once } from 'node:events';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import { dirname, join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { agentTmpDir, agentTmpDirMayExist, agentTmpEnv, removeAgentTmpDir } from '../runs/agent-tmpdir.ts';
 import { manager, store, root, worker, reopenRuntime, useWorkerWaitFixture } from '../workflows/worker-wait.testkit.ts';
-import { scopeFixtureProcesses } from './process-scope.testkit.ts';
 import { nonDumpableHolder } from './non-dumpable.testkit.ts';
 import { WorkerScratchCleanup } from './scratch-cleanup.ts';
 
@@ -20,7 +19,6 @@ function setTmpRoot(value: string | undefined) {
 
 describe('durable scratch cleanup evidence', () => {
   useWorkerWaitFixture();
-  beforeEach(() => scopeFixtureProcesses());
   afterEach(() => { vi.restoreAllMocks(); syncBuiltinESMExports(); });
 
   async function completed(location = 'local') {

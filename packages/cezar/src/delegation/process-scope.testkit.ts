@@ -5,11 +5,11 @@ import { vi } from 'vitest';
 /** Enumerate the fixture's process tree, including observed children subsequently orphaned.
  * Host daemons and parallel test workers are outside this fixture. Tokens/cwd/permissions are
  * real. Tests of arbitrary enumeration/denial use the injectable reader or their own scope. */
-export function scopeFixtureProcesses(): void {
-  if (process.platform !== 'linux') return;
+export function scopeFixtureProcesses(): () => void {
+  if (process.platform !== 'linux') return () => {};
   const read = fs.readdirSync;
   const seen = new Map<string, string>();
-  vi.spyOn(fs, 'readdirSync').mockImplementation(((...args: unknown[]) => {
+  const scope = vi.spyOn(fs, 'readdirSync').mockImplementation(((...args: unknown[]) => {
     if (String(args[0]) !== '/proc') return Reflect.apply(read, fs, args);
     const entries = read('/proc');
     const identities = new Map<string, { parent: string; token: string }>();
@@ -33,4 +33,5 @@ export function scopeFixtureProcesses(): void {
     return entries.filter(pid => owned.has(pid));
   }) as typeof fs.readdirSync);
   syncBuiltinESMExports();
+  return () => { scope.mockRestore(); syncBuiltinESMExports(); };
 }

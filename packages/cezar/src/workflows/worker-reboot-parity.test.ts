@@ -22,7 +22,7 @@ function scopeProcesses(pids: number[]) {
 }
 
 describe.runIf(process.platform === 'linux')('R43 reboot orphan settlement (#738)', { timeout: 30_000 }, () => {
-  useWorkerWaitFixture();
+  useWorkerWaitFixture({ processScope: false }); // Explicit PID scope below includes unreadable holders.
   afterEach(() => { vi.restoreAllMocks(); syncBuiltinESMExports(); });
 
   for (const settleVia of ['collect', 'destroy'] as const) it.each(RUNNER_IDS)(`%s ${settleVia} settles and clears parent Finish while an unreadable holder retains resources until retry after restart`, async runner => {

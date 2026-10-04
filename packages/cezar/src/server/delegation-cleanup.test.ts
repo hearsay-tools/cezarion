@@ -1,15 +1,16 @@
+import { scopeFixtureProcesses } from '../delegation/process-scope.testkit.ts';
 import { execFileSync } from 'node:child_process';
 import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { onTestFinished, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createApp } from './server.ts';
 import { fixture } from '../delegation/service.testkit.ts';
 import { workerDestroyResultSchema } from '@open-mercato/cezar-contract';
 
 describe('human owned-worker cleanup', () => {
   let f: ReturnType<typeof fixture>;
-  beforeEach(() => { vi.stubEnv('CEZ_DELEGATION', '1'); f = fixture(); });
+  beforeEach(() => { onTestFinished(scopeFixtureProcesses()); vi.stubEnv('CEZ_DELEGATION', '1'); f = fixture(); });
   afterEach(async () => { await f.close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
   it('rejects malformed human cleanup without state or intent changes and accepts absent or empty bodies', async () => {
     const { workerId } = await f.service.spawn(f.caller, { task: 'child', baseline: 'HEAD', requestId: randomUUID() });

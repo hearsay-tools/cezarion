@@ -9,7 +9,6 @@ import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { CredentialRegistry } from '../delegation/credentials.ts';
 import { DelegationService } from '../delegation/service.ts';
 import { agentTmpDir, agentTmpEnv, agentTmpDirLocations } from '../runs/agent-tmpdir.ts';
-import { scopeFixtureProcesses } from '../delegation/process-scope.testkit.ts';
 import { manager, root, store, worker, until, executions, bookkeeping, reopenRuntime, useWorkerWaitFixture } from './worker-wait.testkit.ts';
 
 // Node's os.tmpdir reads the original environment, including after this fixture replaces process.env.
@@ -25,7 +24,7 @@ describe.runIf(process.platform === 'linux' && process.getuid?.() !== 0)('R43 or
   useWorkerWaitFixture();
   let savedTmpdir: string | undefined;
   const temporaryRoots: string[] = [];
-  beforeEach(() => { savedTmpdir = process.env.TMPDIR; scopeFixtureProcesses(); });
+  beforeEach(() => { savedTmpdir = process.env.TMPDIR; });
   afterEach(() => {
     setTmpRoot(savedTmpdir);
     for (const path of temporaryRoots.splice(0)) rmSync(path, { recursive: true, force: true });
