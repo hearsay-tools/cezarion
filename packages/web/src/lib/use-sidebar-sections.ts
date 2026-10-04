@@ -8,6 +8,9 @@ const CHANGED = 'cez-sidebar-sections-changed'
  * lets the flat desktop list and mobile project tree share the same answer. */
 export function useSidebarSections(projectId: string | null) {
   const [collapsed, setCollapsed] = useState(() => readStoredCollapsed(SIDEBAR_SECTIONS_STORAGE_KEY))
+  // Only user-touched sections wait for discovery. Keep them out of the shared/persisted map
+  // so another copy or tab cannot erase them, and no null-project key can leak into storage.
+  const [pending, setPending] = useState<Partial<Record<BucketLabel, boolean>>>({})
   const latest = useRef(collapsed)
   useEffect(() => {
     const receive = (event: Event) => {
@@ -25,20 +28,35 @@ export function useSidebarSections(projectId: string | null) {
       window.removeEventListener(CHANGED, receive)
     }
   }, [])
-  // A tuple avoids ambiguous delimiters in project ids. Null is a transient, unpersisted list
-  // while health resolves the boot project's canonical id; never write the `default` alias.
+  useEffect(() => {
+    if (projectId === null || Object.keys(pending).length === 0) return
+    const next = { ...latest.current }
+    for (const [section, value] of Object.entries(pending)) {
+      next[JSON.stringify([projectId, section])] = value
+    }
+    // Consume once: later switches between known projects must not carry these choices along.
+    setPending({})
+    latest.current = next
+    setCollapsed(next)
+    writeStoredCollapsed(next, SIDEBAR_SECTIONS_STORAGE_KEY)
+    window.dispatchEvent(new CustomEvent(CHANGED, { detail: next }))
+  }, [projectId, pending])
+  // A tuple avoids ambiguous delimiters in canonical project ids. Callers resolve the `default`
+  // alias to null until health identifies the boot project.
   const keyOf = (section: BucketLabel) => JSON.stringify([projectId, section])
-  const isCollapsed = (section: BucketLabel) => section !== 'Archived' && collapsed[keyOf(section)] === true
+  const isCollapsed = (section: BucketLabel) => section !== 'Archived' && (pending[section] ?? collapsed[keyOf(section)]) === true
   const toggle = (section: Exclude<BucketLabel, 'Archived'>) => {
+    if (projectId === null) {
+      setPending(current => ({ ...current, [section]: current[section] !== true }))
+      return
+    }
     const key = keyOf(section)
     const next = { ...latest.current, [key]: latest.current[key] !== true }
     latest.current = next
     setCollapsed(next)
-    if (projectId !== null) {
-      writeStoredCollapsed(next, SIDEBAR_SECTIONS_STORAGE_KEY)
-      // Synchronize mounted desktop/mobile copies, including when storage is unavailable.
-      window.dispatchEvent(new CustomEvent(CHANGED, { detail: next }))
-    }
+    writeStoredCollapsed(next, SIDEBAR_SECTIONS_STORAGE_KEY)
+    // Synchronize mounted desktop/mobile copies, including when storage is unavailable.
+    window.dispatchEvent(new CustomEvent(CHANGED, { detail: next }))
   }
   return { isCollapsed, toggle }
 }
