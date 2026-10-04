@@ -502,7 +502,7 @@ transport into `UiEvent`s. The authoritative table is
 |---|---|---|---|
 | `session.started` | `system/init` (model, tools, cwd) | `thread/started` / `thread/start` result | `POST /session` response |
 | `turn.started` | each stdin user message | `turn/started` | each prompt POST |
-| `turn.completed` + `stopReason` | `result` subtype (`success→end_turn`, `error_max_turns→max_tokens`, `error_during_execution→error`) | `turn/completed→end_turn` (failed status or provider error → `error`), `turn/failed→error`, interrupt→`cancelled` | `session.idle→end_turn` (or `error` if a `session.error` preceded) |
+| `turn.completed` + `stopReason` | `result` subtype (`success→end_turn`, `error_max_turns→max_tokens`, `error_during_execution→error`) | `turn/completed→end_turn` (failed status or provider error → `error`), `turn/failed→error`, interrupt→`cancelled` | `session.idle→end_turn` (or `error` if a failure `session.error` preceded) |
 | message item | `assistant` `text` blocks (deltas via `--include-partial-messages`) | `agentMessage` items | text parts |
 | reasoning item | `thinking` blocks | `reasoning` items (+ `textDelta`) | `reasoning` parts |
 | tool item | `tool_use`→running, `tool_result`→completed/failed, `permission_denials`→`declined` | `commandExecution`→execute (+`exitCode`, `outputDelta`), `fileChange`→edit (`diffs`), `mcpToolCall`→other, `webSearch`→fetch, collaboration spawn→task | tool parts (state `pending/running/completed/error→failed`, `patch` parts→`diffs`) |
@@ -1421,3 +1421,24 @@ this reproduces the reported diagnostic pattern, not an independently captured
 enterprise-account trace. `codex-permissions.test.ts` additionally covers sandbox
 and profile requirements, read-only policy, unknown discovery, network restriction
 and mid-turn steering. Removing the startup selection must fail the managed cells.
+
+### Recoverable OpenCode skill discovery (#723)
+
+OpenCode 1.18.33's [skill loader](https://github.com/anomalyco/opencode/blob/v1.18.33/packages/opencode/src/skill/index.ts#L96-L111)
+skips an unreadable optional skill after publishing an unscoped `session.error`
+with `error.name: UnknownError` and `error.data.message: Failed to parse skill <path>`.
+For that exact prefix and a path ending in `/SKILL.md` (or a Windows separator),
+Cezar emits a v1 `note` and a v2 `session.error` with `fatal: false`, preserving the
+path and suggesting checking readability and repairing or reinstalling the skill.
+This warning neither sets the turn's error flag nor enters the agent-input ACK
+barrier. A successful later idle remains `end_turn`. All scoped errors and all
+other unscoped errors keep existing failure handling; free-form frontmatter errors
+cannot safely be classified from this wire and are not guessed recoverable.
+No protocol shape changes or automatic filesystem repairs are involved.
+
+Harness cells R44/R45 exercise fresh and Continue success through the native
+OpenCode wire. Other `RUNNER_IDS` members have named executable wire exemptions
+for this server-wide discovery diagnostic. R46 exercises genuine provider failure
+on Continue through every native `HARNESS_ADAPTERS` wire, complementing fresh R2.
+The OpenCode cells also retain scoped skill-text and unscoped provider failures;
+mapper and withheld-ACK tests cover completion state and barrier bypass.

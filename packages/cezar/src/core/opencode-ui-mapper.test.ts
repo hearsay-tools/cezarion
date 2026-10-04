@@ -465,6 +465,37 @@ describe('mapOpencodeEvent edge cases', () => {
     ]);
   });
 
+  it('keeps optional skill discovery warnings visible without poisoning completion (#723)', () => {
+    let state = opencodeSessionStarted(SESSION_ID, createOpencodeUiState()).state;
+    state = opencodeTurnStarted(state).state;
+    for (const path of ['/home/agent/.claude/skills/pen-design/SKILL.md', '/home/agent/.agents/skills/pen-design/SKILL.md']) {
+      const mapped = mapOpencodeEvent({ type: 'session.error', properties: {
+        error: { name: 'UnknownError', data: { message: `Failed to parse skill ${path}` } },
+      } }, state);
+      expect(mapped.events).toEqual([{ type: 'session.error', fatal: false,
+        message: `opencode: optional skill skipped: Failed to parse skill ${path}. Check that the skill file and any symlink target are readable; repair or reinstall the skill.`,
+      }]);
+      expect(mapped.state.turnErrored).toBe(false);
+      state = mapped.state;
+    }
+    expect(mapOpencodeEvent({ type: 'session.idle', properties: { sessionID: SESSION_ID } }, state).events)
+      .toContainEqual({ type: 'turn.completed', turnId: 'turn_1', stopReason: 'end_turn' });
+  });
+
+  it.each([
+    { sessionID: SESSION_ID, error: { name: 'UnknownError', data: { message: 'Failed to parse skill /skills/test/SKILL.md' } } },
+    { error: { name: 'UnknownError', data: { message: 'provider unavailable' } } },
+    { error: { name: 'ProviderAuthError', data: { message: 'Failed to parse skill /skills/test/SKILL.md' } } },
+    { error: { name: 'UnknownError', message: 'Failed to parse skill /skills/test/SKILL.md' } },
+    { error: { name: 'UnknownError', data: { message: 'Failed to parse skill ' } } },
+    { sessionID: null, error: { name: 'UnknownError', data: { message: 'Failed to parse skill /skills/test/SKILL.md' } } },
+  ])('retains failure semantics outside the proven skill diagnostic: %j', properties => {
+    const state = opencodeTurnStarted(opencodeSessionStarted(SESSION_ID, createOpencodeUiState()).state).state;
+    const mapped = mapOpencodeEvent({ type: 'session.error', properties }, state);
+    expect(mapped.state.turnErrored).toBe(true);
+    expect(mapped.events).toContainEqual(expect.objectContaining({ type: 'session.error', fatal: false }));
+  });
+
   it('a session.error inside the turn surfaces as non-fatal and flips the idle stopReason to error', () => {
     let state = opencodeSessionStarted(SESSION_ID, createOpencodeUiState()).state;
     state = opencodeTurnStarted(state).state;
