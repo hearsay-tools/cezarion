@@ -793,6 +793,17 @@ retain their default cap. Longer authored limits override that cap, while defaul
 tasks retain no wall-clock cap. The tests shorten only `DEFAULT_RUN_TIMEOUT_MS`; the
 manager, runners, transports and terminal signals remain real.
 
+Intermediate question rows **Q1–Q10** (#427) live in
+`core/workflow-ask-parity.test.ts` and the shared parity guard. Every
+`RUNNER_IDS` adapter sends portable ASK text through its native assistant-message
+and turn-completion wire; the malformed variant changes only the text inside
+the existing snapshot fixture. No wire exemption is needed. The rows cover
+same-session answers and trailing checks, malformed markers, final interactive
+asks, idle close/Continue, disk-round-trip restart recovery, cancellation,
+Finish on fresh and continued sessions, authored timeouts, autonomous overrides,
+and clean unanswered session exit. Unrun checks remain pending on stop/failure;
+an unanswered clean close retains durable waiting and releases capacity.
+
 
 Open-turn inactivity rows **N1–N8** live in `core/workflow-no-progress-parity.test.ts`
 and the same parity guard. Every native adapter proves that stalled nonfinal turns

@@ -231,8 +231,8 @@ type AskTurnOutcome = {
  * they are hand-duplicated, and `AGENTS.md` warns that a lifecycle change
  * applied to only one of them ships half a fix — the notes and their tones are
  * exactly that kind of change. `enabled` is the caller's own precondition (the
- * session is open, the turn is not a `CEZ:DONE`, and for an agent step, the run
- * is interactive); when false there is no marker to look for. */
+ * session is open and the turn is not a terminating `CEZ:DONE`); when false
+ * there is no marker to look for. Intermediate steps can ask too (#427). */
 function resolveAskTurn(turnText: string, completedAssistantText: string, enabled: boolean): AskTurnOutcome {
   if (!enabled) return { ask: null, notes: [] };
   const v1Result = parseAskMarkerResult(turnText);
@@ -4653,6 +4653,14 @@ export class RunManager {
     return current < 0 || current < steps.length - 1;
   }
 
+  /** A clean process exit cannot complete a workflow still blocked on a question.
+   * Keep its existing durable waiting step so Continue can resume the tail. */
+  private unansweredWorkflowAsk(runId: string, state: ActiveRun): boolean {
+    const run = this.store.getRun(runId);
+    return !state.finishRequested && !!run && this.hasPendingHumanAsk(runId) &&
+      this.waitingBeforeFinalWorkflowStep(run);
+  }
+
   /** Locate the original workflow step whose closed session a synthetic Continue is resuming. */
   private waitingWorkflowStepIndex(run: RunRecord): number {
     const steps = run.workflowDef?.steps ?? run.steps.filter(step => !isSyntheticContinuation(run, step));
@@ -5207,6 +5215,8 @@ export class RunManager {
         const done = sessionOpen && DONE_MARKER_RE.test(turnText.trimEnd());
         // `CEZ:ASK` → the user is genuinely blocked; wins over `CEZ:MONITORING`
         // (a pending question is always attention), loses to `CEZ:DONE` (#473).
+        // Continue can be answering an intermediate workflow ask too (#427):
+        // keep subsequent questions on this session before resuming its tail.
         const askTurn = resolveAskTurn(turnText, completedAssistantText, Boolean(sessionOpen) && !done);
         const { ask, notes: askNotes } = askTurn;
         discardQueuedMessagesOnAsk(state.session, askTurn);
@@ -5502,12 +5512,12 @@ export class RunManager {
         this.store.updateRun(runId, { status: 'cancelled', finishedAt: finishedAt(), currentStepId: undefined });
         this.store.appendEvent(runId, { type: 'lifecycle', message: 'run cancelled' });
         appendHandoffHeartbeat(this.dataDir, runId, `step "${stepId}" complete — status=cancelled`);
-      } else if (!state.idleClosed) {
+      } else if (!state.idleClosed && !this.unansweredWorkflowAsk(runId, state)) {
         this.store.updateStep(runId, stepId, { status: 'done', finishedAt: finishedAt() });
         this.store.appendEvent(runId, { type: 'step-end', stepId, status: 'done' });
         const completed = this.store.getRun(runId);
         const waitingIndex = completed ? this.waitingWorkflowStepIndex(completed) : -1;
-        if (completed?.workflowDef && waitingIndex >= 0) {
+        if (!state.finishRequested && completed?.workflowDef && waitingIndex >= 0) {
           const waitingStep = completed.workflowDef.steps[waitingIndex]!;
           this.store.updateStep(runId, waitingStep.id, { status: 'done', finishedAt: finishedAt() });
           this.store.appendEvent(runId, { type: 'step-end', stepId: waitingStep.id, status: 'done' });
@@ -5890,8 +5900,10 @@ export class RunManager {
           runError = `step "${step.id}" failed: ${failure}`;
           break;
         }
-        if (state.idleClosed) break;
+        if (state.idleClosed || this.unansweredWorkflowAsk(runId, state)) break;
         this.finishStep(runId, step.id, 'done', undefined, emit);
+        // Finish is an explicit stop, not an answer or permission to run checks.
+        if (state.finishRequested) break;
         i++;
         continue;
       }
@@ -5958,7 +5970,7 @@ export class RunManager {
     } else if (runError) {
       this.store.updateRun(runId, { status: 'failed', error: runError, finishedAt, currentStepId: undefined });
       emit({ type: 'lifecycle', message: `run failed — ${runError}` });
-    } else if (state.idleClosed) {
+    } else if (state.idleClosed || this.unansweredWorkflowAsk(runId, state)) {
       await this.settleIdleClosedRun(runId, state);
       this.dropActive(runId);
       return;
@@ -6113,7 +6125,9 @@ export class RunManager {
         const done = interactive && sessionOpen && DONE_MARKER_RE.test(turnText.trimEnd());
         // `CEZ:ASK` → the user is blocked; wins over `CEZ:MONITORING`, loses to
         // `CEZ:DONE` (#473).
-        const askTurn = resolveAskTurn(turnText, completedAssistantText, Boolean((interactive || this.workerWait(runId) || this.store.getRun(runId)?.ciWait) && sessionOpen) && !done);
+        // Every agent step may ask. Malformed markers only produce a note;
+        // without a parsed question an intermediate step advances normally.
+        const askTurn = resolveAskTurn(turnText, completedAssistantText, Boolean(sessionOpen) && !done);
         const { ask, notes: askNotes } = askTurn;
         discardQueuedMessagesOnAsk(state.session, askTurn);
         const monitoring =
@@ -6131,7 +6145,7 @@ export class RunManager {
         this.store.updateRun(runId, { invalidAsk: !ask && askNotes.length > 0 ? true : undefined });
         // Only a newly parsed portable ASK can be overridden. Do this before
         // prepareHumanAsk latches it; an existing/native ask still blocks the helper.
-        let autoContinued = !!ask && !!(interactive && sessionOpen) && this.tryAutonomousNudge(runId, state, step.id, ask);
+        let autoContinued = !!ask && !!sessionOpen && this.tryAutonomousNudge(runId, state, step.id, ask);
         if (ask && !autoContinued) this.prepareHumanAsk(runId, state);
         const ciWaitParked = !!sessionOpen && this.parkCiWait(runId, state);
         const completionBlocked = !ciWaitParked && !!done && this.deferParentCompletion(runId);
@@ -6259,7 +6273,8 @@ export class RunManager {
     state.agentSessionError = undefined;
     let session: AgentSession | undefined;
     const shouldAutoEnd = () => this.active.get(runId) !== state || state.session !== session ||
-      (!this.workerWait(runId) && !this.store.getRun(runId)?.ciWait && !this.parentCompletionPending(runId) &&
+      (state.atTurnBoundary === session && !state.pendingHumanAsk && !this.hasPendingHumanAsk(runId) &&
+        !this.workerWait(runId) && !this.store.getRun(runId)?.ciWait && !this.parentCompletionPending(runId) &&
         state.workerWakeTurn !== session && state.ciWakeTurn !== session && !state.agentInputFlight &&
         !this.hasQueuedAgentInputs(runId));
     state.currentStepId = step.id;
@@ -6314,7 +6329,9 @@ export class RunManager {
         onEvent,
         {
           autoEndAfterFirstTurn: !interactive,
-          // Unread inbox claims must survive this window so release/expiry can replay them.
+          // Questions and unread inbox claims must survive this close window.
+          // Keep the native timer: the answer's completed turn rearms it, and
+          // admission/worker/CI guards retain authority over when it may close.
           shouldAutoEnd,
           onUiEvent: (event) => {
             completedAssistantText = appendCompletedAssistantText(completedAssistantText, event);
