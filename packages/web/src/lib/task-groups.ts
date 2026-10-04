@@ -1,5 +1,5 @@
 import { ATTENTION_RANK, deriveAttention } from './attention'
-import type { RunRecord, SidebarLimits } from '@open-mercato/cezar-api-client'
+import { normalizeSidebarLimits, type RunRecord, type SidebarLimits } from '@open-mercato/cezar-api-client'
 
 /**
  * How the task list is bucketed, sorted and collapsed — the pure half of the sidebar quick-list
@@ -334,7 +334,7 @@ export function groupRuns(runs: readonly RunRecord[], view: ListView): QuickList
  * themselves, one click at a time, and can undo the same way.
  */
 export function capBuckets(buckets: readonly QuickListBucket[], limits: SidebarLimits | number = {}): QuickListBucket[] {
-  const preferences = typeof limits === 'number' ? { overall: limits } : limits
+  const preferences: SidebarLimits = typeof limits === 'number' ? { overall: limits } : normalizeSidebarLimits(limits)
   const sectionKeys = { 'Needs you': 'needsYou', Finished: 'finished', Working: 'working' } as const
   const capped: QuickListBucket[] = []
   let remaining = preferences.overall === undefined ? 10 : preferences.overall ?? Infinity

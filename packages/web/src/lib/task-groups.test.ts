@@ -844,3 +844,8 @@ describe('project sidebar combined limits (#810)', () => {
     expect(capBuckets(groupRuns(rows, 'archived'), { overall: null, needsYou: 1, finished: 1, working: 1 })[0]?.rows).toHaveLength(15)
   })
 })
+
+it.each([null, [], 'broken', { overall: -1 }, { overall: 'unlimited' }].map(value => [value]))('applies shipped defaults to malformed stored limits %j', limits => {
+  const buckets = groupRuns(Array.from({ length: 12 }, (_, i) => run({ id: `malformed-${i}` })), 'active')
+  expect(capBuckets(buckets, limits as never).flatMap(bucket => bucket.rows)).toHaveLength(10)
+})

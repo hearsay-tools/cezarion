@@ -433,6 +433,9 @@ and each section must also fit its own limit. Unlimited removes only its selecte
 constraint. Pinned rows and groups containing pins bypass both budgets; a grouped
 task counts as one row. Archived uses only the overall limit, with no pin exemption.
 Save applies the preferences to this project and keeps them after a reload.
+Refreshed preferences update an untouched form; unsaved edits stay in place.
+Malformed stored sidebar limits fall back field by field to these defaults,
+while valid limits and unrelated preferences are preserved.
 
 On desktop, Settings replaces the sidebar task list with two groups: **This project**
 and **Global · every project**. Each group includes General and its available sections;

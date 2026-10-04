@@ -41,3 +41,22 @@ it.each([['desktop', true], ['mobile', true], ['desktop', false], ['mobile', fal
   await waitFor(() => expect(visible()).toEqual(['r1', 'r11', 'r21', 'r22']))
   await waitFor(() => expect(numbers()).toEqual(['1', '11', '21', '22']))
 })
+
+it.each((['desktop', 'mobile'] as const).flatMap(surface => [null, [], 3, 'bad', { overall: -1, needsYou: 1, finished: 0, working: 1.5 }].map(sidebarLimits => ({ surface, sidebarLimits }))))('$surface normalizes $sidebarLimits for both rendering and reference requests', async ({ surface, sidebarLimits }) => {
+  const client = createQueryClient()
+  client.setQueryData(['default', 'ui-state'], { sidebarLimits })
+  const requested: string[] = []
+  vi.stubGlobal('fetch', vi.fn(async input => {
+    const url = String(input); requested.push(url)
+    return new Response(JSON.stringify(url.endsWith('/runs') ? runs : url.includes('/ref-status') ? { available: true, prs: {}, issues: {}, conflicts: [], recheckAfterMs: null } : {}))
+  }))
+  render(<QueryClientProvider client={client}><MemoryRouter><ListViewProvider>
+    {surface === 'desktop' ? <ProjectGroups projects={[project]} bootProjectId="boot" /> : <TaskQuickListContainer projectId="boot" boot />}
+  </ListViewProvider></MemoryRouter></QueryClientProvider>)
+  const expected = sidebarLimits && typeof sidebarLimits === 'object' && !Array.isArray(sidebarLimits)
+    ? ['r1', 'r11', 'r12', 'r13', 'r14', 'r21', 'r22', 'r23', 'r24']
+    : ['r1', 'r2', 'r3', 'r4', 'r11', 'r12', 'r13', 'r14', 'r21', 'r22']
+  await waitFor(() => expect(Array.from(document.querySelectorAll('[data-slot="task-row"]')).map(el => el.getAttribute('data-run-id'))).toEqual(expected))
+  await waitFor(() => expect(requested.some(url => url.includes('/ref-status'))).toBe(true))
+  expect([...new Set(requested.filter(url => url.includes('/ref-status')).flatMap(url => new URL(url, 'http://localhost').searchParams.get('issues')?.split(',') ?? []))].sort()).toEqual(expected.map(id => id.slice(1)).sort())
+})

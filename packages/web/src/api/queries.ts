@@ -1,4 +1,4 @@
-import { runnerModelCatalogResponseSchema } from '@open-mercato/cezar-api-client'
+import { normalizeSidebarLimits, runnerModelCatalogResponseSchema } from '@open-mercato/cezar-api-client'
 import { toast } from '@/components/ui/toaster'
 import { useMutation, useQueries, useQuery, useQueryClient, type QueryClient, type MutateOptions } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo } from 'react'
@@ -1260,6 +1260,8 @@ export function useProjectUiState(projectId: string, enabled = true, boot = fals
   return useQuery({
     queryKey: [boot ? 'default' : projectId, 'ui-state'] as const,
     queryFn: ({ signal }) => getUiState({ signal }, projectId),
+    // Cached state may come from an older server or predate validation. Keep the bag open.
+    select: state => state.sidebarLimits === undefined ? state : { ...state, sidebarLimits: normalizeSidebarLimits(state.sidebarLimits) },
     enabled,
   })
 }

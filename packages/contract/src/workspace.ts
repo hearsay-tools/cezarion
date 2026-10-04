@@ -141,6 +141,19 @@ export const sidebarLimitsSchema = z.object({
 });
 export type SidebarLimits = z.infer<typeof sidebarLimitsSchema>;
 
+/** Stored preferences may predate validation or be edited by hand. Salvage each valid
+ * field independently, without relaxing the request schema or parsing the open UI-state bag. */
+export function normalizeSidebarLimits(value: unknown): Required<SidebarLimits> {
+  const defaults: Required<SidebarLimits> = { overall: 10, needsYou: null, finished: null, working: null };
+  const input = value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown> : {};
+  for (const key of Object.keys(defaults) as (keyof SidebarLimits)[]) {
+    const parsed = sidebarLimitsSchema.shape[key].safeParse(input[key]);
+    if (parsed.success && parsed.data !== undefined) defaults[key] = parsed.data;
+  }
+  return defaults;
+}
+
 /**
  * `GET/PUT /api/v1/ui-state` — the per-repo GUI prefs in `.ai/cezar/ui-state.json`.
  *

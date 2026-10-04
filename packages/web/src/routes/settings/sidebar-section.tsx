@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { queryScope, sidebarLimitsSchema, type SidebarLimits } from '@open-mercato/cezar-api-client'
+import { queryScope, sidebarLimitsSchema, normalizeSidebarLimits, type SidebarLimits } from '@open-mercato/cezar-api-client'
 import { putUiState } from '@/api/client'
 import { useProjectUiState } from '@/api/queries'
 import { Button } from '@/components/ui/button'
@@ -22,22 +22,30 @@ export function SidebarSection() {
 
 function SidebarForm({ scope, initial }: { scope: string; initial: SidebarLimits }) {
   const queryClient = useQueryClient()
-  const defaults = { overall: 10, needsYou: null, finished: null, working: null }
-  const [values, setValues] = useState(() => Object.fromEntries(fields.map(([key]) => {
-    const value = initial[key] === undefined ? defaults[key] : initial[key]
-    return [key, value === null ? null : String(value)]
-  })) as Record<keyof SidebarLimits, string | null>)
-  const [saved, setSaved] = useState(values)
+  const defaults = normalizeSidebarLimits(undefined)
+  const incoming = formValues(initial)
+  const [form, setForm] = useState(() => ({ values: incoming, saved: incoming, received: incoming }))
+  const { values, saved } = form
+  const setValues = (next: typeof values) => setForm(current => ({ ...current, values: next }))
   const parsed = sidebarLimitsSchema.safeParse(Object.fromEntries(fields.map(([key]) => [key, values[key] === null ? null : Number(values[key])])))
   const invalid = (key: keyof SidebarLimits) => values[key] !== null && (values[key]!.trim() === '' || !Number.isSafeInteger(Number(values[key])) || Number(values[key]) <= 0)
   const dirty = fields.some(([key]) => values[key] !== saved[key])
   const save = useMutation({
+    onMutate: () => queryClient.cancelQueries({ queryKey: [scope, 'ui-state'], exact: true }),
     mutationFn: (limits: SidebarLimits) => putUiState({ sidebarLimits: limits }, scope),
-    onSuccess: result => {
+    onSuccess: async result => {
+      // A reconnect/refetch may have started another read while PUT was in flight.
+      await queryClient.cancelQueries({ queryKey: [scope, 'ui-state'], exact: true })
       queryClient.setQueryData([scope, 'ui-state'], result)
-      setSaved(values)
+      const next = formValues(result.sidebarLimits)
+      setForm({ values: next, saved: next, received: next })
     },
   })
+  // Adopt refreshed preferences before painting a pristine form. Dirty drafts survive;
+  // their baseline still follows the latest saved state. A pending save owns its result.
+  if (!save.isPending && !sameValues(form.received, incoming)) {
+    setForm({ values: dirty ? values : incoming, saved: incoming, received: incoming })
+  }
   return <form data-slot="sidebar-settings" className="flex w-full max-w-2xl flex-col gap-5 p-4 pb-[calc(90px+env(safe-area-inset-bottom))] md:p-6" onSubmit={event => {
     event.preventDefault()
     if (parsed.success && !fields.some(([key]) => invalid(key)) && !save.isPending) save.mutate(parsed.data)
@@ -69,4 +77,13 @@ function SidebarForm({ scope, initial }: { scope: string; initial: SidebarLimits
     {save.isError && <p role="alert" className="text-sm text-danger">Could not save sidebar limits: {save.error.message}</p>}
     {save.isSuccess && !dirty && <p role="status" className="text-sm text-muted-foreground">Sidebar limits saved.</p>}
   </form>
+}
+
+function formValues(limits: unknown): Record<keyof SidebarLimits, string | null> {
+  const normalized = normalizeSidebarLimits(limits)
+  return Object.fromEntries(fields.map(([key]) => [key, normalized[key] === null ? null : String(normalized[key])])) as Record<keyof SidebarLimits, string | null>
+}
+
+function sameValues(left: ReturnType<typeof formValues>, right: ReturnType<typeof formValues>): boolean {
+  return fields.every(([key]) => left[key] === right[key])
 }
