@@ -1,14 +1,13 @@
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
+import { execFileSync, type ChildProcess } from 'node:child_process'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
-import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
+import { waitForSettledSample } from './visual-ready'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { artifactsDir } from './github-fixture'
-import { stopFixtureServer } from './fixture-server'
-import { waitForHealth } from './poll'
+import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 
 /**
  * Issue 06 §3 (#622, Git slice) and issue 08 §C: the Git view's sidebar (desktop) and Git screen
@@ -100,16 +99,10 @@ beforeAll(async () => {
   ]))
   writeFileSync(join(rootB, '.ai/cezar/runs.json'), JSON.stringify([run(rootB, 'b-only', { title: 'B only worktree' })]))
 
-  const probe = createServer()
-  const port = await new Promise<number>((done) => probe.listen(0, '127.0.0.1', () => {
-    const address = (probe.address() as { port: number }).port
-    probe.close(() => done(address))
-  }))
-  base = `http://127.0.0.1:${port}`
-  server = spawn(process.execPath, [cezarCli, 'serve', '--repo', root, '--port', String(port), '--no-open'], {
+  server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
     env: fixtureServeEnv(root), stdio: 'ignore',
   })
-  await waitForHealth(base)
+  base = await waitForFixtureServer(server)
   project = await bootProjectId(base)
   const registered = await fetch(`${base}/api/v1/projects`, {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ root: rootB }),
@@ -233,7 +226,7 @@ describe('Git desktop sidebar (issue 06 §3)', () => {
       openDesktop()
       setTheme(theme)
       browser.waitForFunction(has('[data-slot="repo-commit-day"]'))
-      const facts = browser.evaluate(`({
+      const facts = waitForSettledSample(browser, `({
         light: document.documentElement.classList.contains('light'),
         overflow: document.documentElement.scrollWidth > innerWidth,
         card: getComputedStyle(document.querySelector(${JSON.stringify(CHECKOUT)})).borderTopLeftRadius,
@@ -345,7 +338,7 @@ describe('Git → Not landed and the branch cleanup (issue 08 §C)', () => {
     expect(browser.count('[data-branch="cez/orphan1"] [data-action="not-landed-copy"]')).toBe(1)
     for (const theme of ['light', 'dark'] as const) {
       setTheme(theme)
-      expect(browser.evaluate(`document.documentElement.scrollWidth > innerWidth`)).toBe(false)
+      expect(waitForSettledSample(browser, `document.documentElement.scrollWidth > innerWidth`)).toBe(false)
       browser.screenshot(`${artifactsDir}/git-view-not-landed-${theme}.png`, { viewport: true })
     }
   }, 90_000)
@@ -410,7 +403,7 @@ describe('the phone Git screen (issue 06 §3)', () => {
     expect(browser.count(`${SCREEN} [data-slot="git-uncommitted"]`)).toBe(1)
     expect(browser.count('[data-slot="git-worktree-row"]')).toBe(0)
     expect(browser.count('[data-slot="mobile-tab-bar"]')).toBe(1)
-    expect(browser.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true)
+    expect(waitForSettledSample(browser, `document.documentElement.scrollWidth <= innerWidth`)).toBe(true)
     for (const theme of ['light', 'dark'] as const) {
       setTheme(theme)
       browser.screenshot(`${artifactsDir}/git-view-phone-${theme}.png`, { viewport: true })

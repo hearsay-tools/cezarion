@@ -1,15 +1,12 @@
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
+import { execFileSync, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { once } from 'node:events'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
-import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, expect, it } from 'vitest'
 import type { RunRecord } from '@open-mercato/cezar-api-client'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
-import { stopFixtureServer } from './fixture-server'
-import { waitForHealth } from './poll'
+import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { settleVisual } from './visual-ready'
 
 // Real publication output, two registered projects and real disk-backed task records.
@@ -57,13 +54,8 @@ beforeAll(async () => {
   }
   mkdirSync(evidenceDir, { recursive: true })
   writeFileSync(join(evidenceDir, 'publication.json'), JSON.stringify(publication, null, 2))
-  const probe = createServer().listen(0, '127.0.0.1')
-  await once(probe, 'listening')
-  const port = (probe.address() as { port: number }).port
-  await new Promise<void>(done => probe.close(() => done()))
-  baseUrl = `http://127.0.0.1:${port}`
-  server = spawn(process.execPath, [cezarCli, 'serve', '--repo', boot, '--port', String(port), '--no-open'], { env, stdio: 'ignore' })
-  await waitForHealth(baseUrl, 'artifact project ownership fixture')
+  server = spawnFixtureServer([cezarCli, 'serve', '--repo', boot, '--port', '0', '--no-open'], { env, stdio: 'ignore' })
+  baseUrl = await waitForFixtureServer(server)
   expect(await bootProjectId(baseUrl)).toBe('boot')
   browser = AgentBrowser.open(`artifact-projects-${process.pid}`)
   browser.setViewport(1440, 900)

@@ -45,7 +45,12 @@ export type GithubItem = z.infer<typeof githubItemSchema>;
  * `item: null` is "GitHub answered and has no such item"; `available: false` is "could not ask".
  */
 export const githubItemResponseSchema = z.discriminatedUnion('available', [
-  z.object({ available: z.literal(true), item: githubItemSchema.nullable() }),
+  z.object({
+    available: z.literal(true),
+    item: githubItemSchema.nullable(),
+    /** Label name → GitHub hex colour (without #), as in the list and search responses. */
+    labelColors: z.record(z.string(), z.string()).optional(),
+  }),
   z.object({ available: z.literal(false), reason: z.string() }),
 ]);
 /** Path params of that route: a positive safe integer, so the number is safe to put on an argv. */

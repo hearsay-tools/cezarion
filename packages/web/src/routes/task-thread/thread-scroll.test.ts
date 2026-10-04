@@ -111,4 +111,13 @@ describe('the per-run measurement cache', () => {
     expect(readThreadMeasurements('r1', 120)).toBeUndefined()
     expect(readThreadMeasurements('r2', 400)).toBeUndefined()
   })
+
+  it('rejects same-count different row identities and keeps copied saved keys immutable', () => {
+    const keys = ['a', 'b', 'c']
+    saveThreadMeasurements('r1', { rows: 3, cache: snapshot, rowKeys: keys })
+    keys[1] = 'caller-mutated'
+    expect(readThreadMeasurements('r1', 3, ['a', 'b', 'c'])).toBe(snapshot)
+    expect(readThreadMeasurements('r1', 3, ['a', 'different', 'c'])).toBeUndefined()
+    expect(readThreadMeasurements('r1', 3, ['a', 'b'])).toBeUndefined()
+  })
 })

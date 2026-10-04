@@ -108,22 +108,33 @@ export function readThreadScroll(runId: string): ScrollMemory | undefined {
  *  keyed by run/view: revisiting a virtualized thread restores measured row heights instead of
  *  re-estimating, so the restored scroll offset lands on the same content. The snapshot is
  *  opaque, so the row count it was taken at rides along — virtua's documented caveat is that
- *  a snapshot only fits the same item count, and a mid-replay remount must degrade to
- *  estimates, never mis-apply. */
+ *  a snapshot only fits the same item count. A partial replay initially uses estimates;
+ *  its original arrival may adopt that snapshot once the complete ordered list returns.
+ *  User intent or a different history list cancels this adoption (#795). */
 export interface ThreadMeasurements {
   rows: number
   cache: CacheSnapshot
+  /** Ordered identities protect same-count replay from a different retained/history list. */
+  rowKeys?: readonly string[]
 }
 
 const measurementsByRun = new Map<string, ThreadMeasurements>()
 
 export function saveThreadMeasurements(runId: string, measurements: ThreadMeasurements): void {
-  measurementsByRun.set(runId, measurements)
+  measurementsByRun.set(runId, { ...measurements, ...(measurements.rowKeys ? { rowKeys: [...measurements.rowKeys] } : {}) })
 }
 
-export function readThreadMeasurements(runId: string, rows: number): CacheSnapshot | undefined {
+/** Capture the original candidate before a partial child's detach can replace the map entry. */
+export function readThreadMeasurementCandidate(runId: string): ThreadMeasurements | undefined {
+  return measurementsByRun.get(runId)
+}
+
+export function readThreadMeasurements(runId: string, rows: number, rowKeys?: readonly string[]): CacheSnapshot | undefined {
   const found = measurementsByRun.get(runId)
-  return found !== undefined && found.rows === rows ? found.cache : undefined
+  if (!found || found.rows !== rows) return undefined
+  const savedKeys = found.rowKeys
+  if (rowKeys && savedKeys && (rowKeys.length !== rows || savedKeys.length !== rows || !rowKeys.every((key, index) => key === savedKeys[index]))) return undefined
+  return found.cache
 }
 
 /** Test seam: caches are module state, and tests must not leak runs into each other. */

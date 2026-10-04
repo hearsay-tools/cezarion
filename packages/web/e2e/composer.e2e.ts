@@ -1,13 +1,13 @@
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
+import { execFileSync, type ChildProcess } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import { stopFixtureServer } from './fixture-server'
+import { waitForSettledSample } from './visual-ready'
+import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, cezarCli, fixtureServeEnv } from './agent-browser'
-import { waitForHealth, waitForStatus } from './poll'
+import { waitForStatus } from './poll'
 
 /**
  * The composer (R3 Step 2.1) end-to-end, against a LIVE dry-run session — not a replayed
@@ -26,20 +26,6 @@ import { waitForHealth, waitForStatus } from './poll'
 
 const artifactsDir = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_e2e')
 const sessionId = `e2e-composer-${process.pid}`
-
-function freePort(): Promise<number> {
-  return new Promise((done, fail) => {
-    const probe = createServer()
-    probe.once('error', fail)
-    probe.listen(0, '127.0.0.1', () => {
-      const address = probe.address()
-      const port = typeof address === 'object' && address ? address.port : 0
-      probe.close(() => done(port))
-    })
-  })
-}
-
-
 
 let browser: AgentBrowser
 let server: ChildProcess
@@ -67,14 +53,10 @@ beforeAll(async () => {
     'utf8',
   )
 
-  const port = await freePort()
-  baseUrl = `http://localhost:${port}`
-  server = spawn(
-    process.execPath,
-    [cezarCli, 'serve', '--repo', dataRoot, '--port', String(port), '--no-open'],
+  server = spawnFixtureServer([cezarCli, 'serve', '--repo', dataRoot, '--port', '0', '--no-open'],
     { env: fixtureServeEnv(dataRoot), stdio: 'ignore' },
   )
-  await waitForHealth(baseUrl)
+  baseUrl = await waitForFixtureServer(server)
 
   // Boot the run the composer will talk to. The mock's reply has no CEZ:DONE marker, so after
   // its first turn the session stays open and the run parks at `waiting`.
@@ -190,11 +172,11 @@ describe('the thread composer against a live waiting session', () => {
     )
     browser.setViewport(360, 640)
     for (const label of ['Cancel dictation', 'Insert transcription', 'Insert transcription and send']) {
-      expect(browser.evaluate(`(() => { const r = document.querySelector('[aria-label="${label}"]').getBoundingClientRect(); return [r.width, r.height] })()`)).toEqual([44, 44])
+      expect(waitForSettledSample(browser, `(() => { const r = document.querySelector('[aria-label="${label}"]').getBoundingClientRect(); return [r.width, r.height] })()`)).toEqual([44, 44])
     }
-    expect(browser.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true)
+    expect(waitForSettledSample(browser, `document.documentElement.scrollWidth <= innerWidth`)).toBe(true)
     browser.setViewport(1440, 900)
-    expect(browser.evaluate(`document.querySelector('[aria-label="Cancel dictation"]').getBoundingClientRect().width`)).toBe(32)
+    expect(waitForSettledSample(browser, `document.querySelector('[aria-label="Cancel dictation"]').getBoundingClientRect().width`)).toBe(32)
     browser.screenshot(`${artifactsDir}/composer-dictation.png`)
   })
 

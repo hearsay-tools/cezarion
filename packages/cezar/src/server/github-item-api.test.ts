@@ -68,7 +68,7 @@ describe('the github item API', () => {
     const res = await apiRequest(app, '/api/v1/github/items/pr/128');
     expect(res.status).toBe(200);
     const body = githubItemResponseSchema.parse(await res.json());
-    expect(body).toMatchObject({ available: true, item: { kind: 'pr', number: 128 } });
+    expect(body).toMatchObject({ available: true, item: { kind: 'pr', number: 128 }, labelColors: { tests: 'c5def5' } });
     expect(spies.fetch).toHaveBeenCalledWith(expect.any(String), 'pr', 128, false);
   });
 
@@ -78,6 +78,7 @@ describe('the github item API', () => {
     expect(githubItemResponseSchema.parse(await res.json())).toMatchObject({
       available: true,
       item: { kind: 'issue', number: 142 },
+      labelColors: { bug: 'd73a4a', auth: '5319e7' },
     });
   });
 

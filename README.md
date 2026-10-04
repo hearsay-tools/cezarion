@@ -496,7 +496,10 @@ Each row shows **every** PR and issue it references — a task opened on an issu
 that landed a PR shows both — plus its cost and live CPU/memory, and can be
 marked **read/unread** (the eye) or **archived** (or restored) right there. Every task title, project name and project group heading links into that
 project, so the thread, its diff and its worktree are one click away and stay
-exactly where they were.
+exactly where they were. Returning to a long thread restores its saved row measurements
+once the replay has rebuilt the same ordered messages, keeping the same content in view.
+Scrolling, jumping to the latest message, or loading different history takes ownership
+from that restoration; a thread left at its live tail follows the current tail.
 
 There is deliberately **no project filter**: narrowing this page to one project
 is that project's own Tasks page, which is a better version of the same answer

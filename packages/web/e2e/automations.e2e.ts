@@ -1,14 +1,13 @@
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
+import { execFileSync, type ChildProcess } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
-import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv, readTestEnv } from './agent-browser'
 import { applyContrastQaVariant, contrastQaVariants, restoreContrastQaDefaults } from './contrast'
-import { stopFixtureServer } from './fixture-server'
-import { pollFor, pollJson, waitForHealth } from './poll'
+import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
+import { pollFor, pollJson } from './poll'
 
 const artifactsDir = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_e2e')
 const shotsDir = resolve(import.meta.dirname, '../../../.ai/qa/screenshots/automations')
@@ -133,16 +132,10 @@ describe('scheduled automations on an opted-in fixture server', () => {
     const git = (...args: string[]) => execFileSync('git', ['-C', root, ...args], { stdio: 'ignore' })
     git('init', '-q', '-b', 'main')
     git('-c', 'user.name=E2E', '-c', 'user.email=e2e@example.test', 'commit', '--allow-empty', '-m', 'fixture')
-    const probe = createServer()
-    const port = await new Promise<number>((done) => probe.listen(0, '127.0.0.1', () => {
-      const address = (probe.address() as { port: number }).port
-      probe.close(() => done(address))
-    }))
-    base = `http://127.0.0.1:${port}`
-    server = spawn(process.execPath, [cezarCli, 'serve', '--repo', root, '--port', String(port), '--no-open'], {
+    server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
       env: fixtureServeEnv(root, { CEZ_AUTOMATIONS: '1' }), stdio: 'ignore',
     })
-    await waitForHealth(base)
+    base = await waitForFixtureServer(server)
     project = await bootProjectId(base)
     mkdirSync(shotsDir, { recursive: true })
     fixtureBrowser = AgentBrowser.open(`e2e-automations-fixture-${process.pid}`)

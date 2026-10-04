@@ -177,7 +177,7 @@ function ItemBody({
     <div className="min-w-0 px-0.5 md:px-2">
       <GithubItemDetail
         item={data.item}
-        colors={{}}
+        colors={data.labelColors ?? {}}
         checks={kind === 'pr' ? checksMap?.[number] ?? data.item.checks : data.item.checks}
         backLink={null}
         subNav={null}

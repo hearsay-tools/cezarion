@@ -1,14 +1,13 @@
 import { execFileSync } from 'node:child_process'
-import { spawn, type ChildProcess } from 'node:child_process'
+import type { ChildProcess } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import { stopFixtureServer } from './fixture-server'
+import { waitForSettledSample } from './visual-ready'
+import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, cezarCli, fixtureServeEnv } from './agent-browser'
-import { waitForHealth } from './poll'
 
 /**
  * Diff virtualization in a real browser (`components/diff/diff-scroll.ts` §"THE PERFORMANCE
@@ -58,18 +57,6 @@ let baseUrl: string
  *  `.ai/cezar/.gitignore` into it, which is itself an honest untracked change the view shows. */
 let changedFiles = 0
 
-function freePort(): Promise<number> {
-  return new Promise((done, fail) => {
-    const probe = createServer()
-    probe.once('error', fail)
-    probe.listen(0, '127.0.0.1', () => {
-      const address = probe.address()
-      const port = typeof address === 'object' && address ? address.port : 0
-      probe.close(() => done(port))
-    })
-  })
-}
-
 
 /** Commit a baseline, then rewrite every line — a big, honest modified-file diff. */
 function buildFixtureRepo(dir: string): void {
@@ -113,14 +100,10 @@ beforeAll(async () => {
   repo = mkdtempSync(join(tmpdir(), 'cezar-e2e-diff-scroll-'))
   buildFixtureRepo(repo)
 
-  const port = await freePort()
-  baseUrl = `http://localhost:${port}`
-  server = spawn(
-    process.execPath,
-    [cezarCli, 'serve', '--repo', repo, '--port', String(port), '--no-open'],
+  server = spawnFixtureServer([cezarCli, 'serve', '--repo', repo, '--port', '0', '--no-open'],
     { env: fixtureServeEnv(repo), stdio: 'ignore' },
   )
-  await waitForHealth(baseUrl)
+  baseUrl = await waitForFixtureServer(server)
   changedFiles = ((await (await fetch(`${baseUrl}/api/v1/repo/changes`)).json()) as { files: unknown[] }).files.length
   expect(changedFiles).toBeGreaterThanOrEqual(FIXTURE_FILES)
 
@@ -183,7 +166,7 @@ describe(`diff virtualization on a generated ${FIXTURE_FILES}-file changeset`, (
     // A header whose card still covers the viewport top must be pinned AT that top edge, not
     // scrolled away with its card. virtua absolutely-positions every item, which is exactly
     // the layout that could silently kill `position: sticky`.
-    const pinned = browser.evaluate(`(() => {
+    const pinned = waitForSettledSample(browser, `(() => {
       const scroller = ${MAIN}
       const top = scroller.getBoundingClientRect().top
       for (const card of document.querySelectorAll('[data-slot="diff-file"]')) {
@@ -213,7 +196,7 @@ describe(`diff virtualization on a generated ${FIXTURE_FILES}-file changeset`, (
     // (`startMargin`). Get that wrong — measuring it before the scroller ref is attached pins
     // it at 0 — and the window is computed for a point further down the list than the reader
     // is at, leaving an uncovered band at the top of the viewport once the buffer runs out.
-    const gap = browser.evaluate(`(() => {
+    const gap = waitForSettledSample(browser, `(() => {
       const scroller = ${MAIN}
       const fold = scroller.getBoundingClientRect().top
       const tops = [...document.querySelectorAll('[data-slot="diff-file"]')]
@@ -236,7 +219,7 @@ describe(`diff virtualization on a generated ${FIXTURE_FILES}-file changeset`, (
   it('scrolls the file tree independently of the diff', () => {
     openChanges('virtual')
 
-    const pane = browser.evaluate(`(() => {
+    const pane = waitForSettledSample(browser, `(() => {
       const pane = document.querySelector('[data-slot="changes-tree-pane"]')
       if (!pane) return null
       const scroller = ${MAIN}
@@ -273,7 +256,7 @@ describe(`diff virtualization on a generated ${FIXTURE_FILES}-file changeset`, (
     // last file no longer moves `main`. It says nothing about `overscroll-contain`: a scripted
     // scroll never chains to an ancestor whatever the overscroll-behavior is, and the driver's
     // input ops are pointer-based, with no wheel to send. Wheel chaining stays manual-QA territory.
-    const moved = browser.evaluate(`(() => {
+    const moved = waitForSettledSample(browser, `(() => {
       const pane = document.querySelector('[data-slot="changes-tree-pane"]')
       pane.scrollTop = pane.scrollHeight
       return { paneTop: Math.round(pane.scrollTop), mainTop: Math.round(${MAIN}.scrollTop) }

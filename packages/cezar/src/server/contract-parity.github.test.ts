@@ -7,7 +7,6 @@ import type {
   githubSearchDataSchema,
   githubCommentsDataSchema,
   githubDataSchema,
-  githubItemResponseSchema,
   githubMergeResponseSchema,
   githubPrChangesDataSchema,
   githubPrMergeStateResponseSchema,
@@ -29,7 +28,7 @@ import type {
   worktreeEntrySchema,
   worktreesResponseSchema,
 } from '@open-mercato/cezar-contract';
-import { githubProjectsDataSchema } from '@open-mercato/cezar-contract';
+import { githubItemResponseSchema, githubProjectsDataSchema } from '@open-mercato/cezar-contract';
 import type { AppType } from './app-type.ts';
 
 /**
@@ -175,5 +174,17 @@ describe('project hydration response contract', () => {
     { generation, state: 'unavailable', reason: 'Expired' },
   ])('accepts complete hydration payload %j', payload => {
     expect(githubProjectsDataSchema.parse(payload)).toEqual(payload);
+  });
+});
+
+
+describe('single-item label colour contract', () => {
+  it.each([undefined, {}, { bug: 'd73a4a' }])('preserves an optional map %j', (labelColors) => {
+    const payload = { available: true, item: null, ...(labelColors === undefined ? {} : { labelColors }) };
+    expect(githubItemResponseSchema.parse(payload)).toEqual(payload);
+  });
+
+  it('rejects non-string colour values', () => {
+    expect(githubItemResponseSchema.safeParse({ available: true, item: null, labelColors: { bug: 42 } }).success).toBe(false);
   });
 });

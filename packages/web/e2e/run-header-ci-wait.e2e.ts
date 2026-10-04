@@ -4,6 +4,7 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { waitForSettledSample } from './visual-ready'
 import type { ApiRun } from '@open-mercato/cezar-api-client'
 import { stopFixtureServer } from './fixture-server'
 import { AgentBrowser } from './agent-browser'
@@ -84,7 +85,7 @@ describe('CI header browser accessibility', () => {
           browser.setViewport(width, width === 360 ? 640 : 900)
           browser.evaluate(`document.documentElement.classList.toggle('light', ${theme === 'light'}); document.documentElement.style.zoom = '${zoom}'`)
           browser.waitForFunction(`document.querySelector('${link}').getBoundingClientRect().height >= 44`)
-          const geometry = browser.evaluate(`(() => {
+          const geometry = waitForSettledSample(browser, `(() => {
             const el = document.querySelector('${link}');
             const rect = el.getBoundingClientRect();
             return {height: rect.height, width: rect.width, left: rect.left, right: rect.right,
@@ -98,7 +99,7 @@ describe('CI header browser accessibility', () => {
           focusWithKeyboard(browser, link)
           browser.waitForFunction(`document.activeElement === document.querySelector('${link}')`)
           expect(browser.evaluate(`window.scrollX`)).toBe(0)
-          expect(browser.evaluate(`document.querySelector('${link}').getBoundingClientRect().left >= 0`)).toBe(true)
+          expect(waitForSettledSample(browser, `document.querySelector('${link}').getBoundingClientRect().left >= 0`)).toBe(true)
           const contrast = browser.evaluate(contrastSampleExpression(link)) as ContrastSample
           expect(contrast.ratio).toBeGreaterThanOrEqual(4.5)
           expect(browser.evaluate(`getComputedStyle(document.querySelector('${link}')).boxShadow !== 'none'`)).toBe(true)
@@ -133,7 +134,7 @@ describe('CI header browser accessibility', () => {
     browser.evaluate(`document.documentElement.style.zoom = '1'; window.setCiRun(${JSON.stringify(recovered)})`)
     browser.waitForFunction(`document.querySelector('${status}').textContent.includes('saved observation is unreadable')`)
     expect(browser.count(link)).toBe(0)
-    expect(browser.evaluate(`document.documentElement.scrollWidth <= document.documentElement.clientWidth`)).toBe(true)
+    expect(waitForSettledSample(browser, `document.documentElement.scrollWidth <= document.documentElement.clientWidth`)).toBe(true)
     browser.screenshot(resolve(artifacts, 'recovery-error-360.png'), { viewport: true })
   })
 
