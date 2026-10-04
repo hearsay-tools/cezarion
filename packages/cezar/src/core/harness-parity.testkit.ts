@@ -18,6 +18,7 @@
  *    and a backend with no dry-run short-circuit is driven the same way as one
  *    that has it.
  */
+import { scopeFixtureProcesses } from '../delegation/process-scope.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -735,6 +736,8 @@ export async function withOwnedInputRun(
   process.env[adapter.binEnv] = adapter.mockBin;
   delete process.env.CEZ_DRY_RUN;
   const repoRoot = mkdtempSync(join(tmpdir(), `cez-owned-input-${backend}-`));
+  // This fixture owns every native mock process; ambient host daemons cannot hold its new repo.
+  const restoreProcesses = scopeFixtureProcesses();
   let store: RunStore | undefined;
   let manager: RunManager | undefined;
   let runId: string | undefined;
@@ -791,25 +794,27 @@ export async function withOwnedInputRun(
     };
     await body({ repoRoot, runId, parentRunId: parent.id, store, manager, restart });
   } finally {
-    if (runId && manager) {
-      manager.cancel(runId);
-      await waitFor(() => !manager!.isActive(runId!));
-    }
-    await drainBookkeeping();
-    manager?.dispose();
-    store?.flush();
-    if (savedBin === undefined) delete process.env[adapter.binEnv];
-    else process.env[adapter.binEnv] = savedBin;
-    for (const [name, saved] of savedExtraBins) {
-      if (saved === undefined) delete process.env[name]; else process.env[name] = saved;
-    }
-    if (savedDry !== undefined) process.env.CEZ_DRY_RUN = savedDry;
-    if (savedAutoName === undefined) delete process.env.CEZ_AUTONAME;
-    else process.env.CEZ_AUTONAME = savedAutoName;
-    for (const [name, saved] of savedEnv) {
-      if (saved === undefined) delete process.env[name]; else process.env[name] = saved;
-    }
-    rmSync(repoRoot, { recursive: true, force: true });
+    try {
+      if (runId && manager) {
+        manager.cancel(runId);
+        await waitFor(() => !manager!.isActive(runId!));
+      }
+      await drainBookkeeping();
+      manager?.dispose();
+      store?.flush();
+      if (savedBin === undefined) delete process.env[adapter.binEnv];
+      else process.env[adapter.binEnv] = savedBin;
+      for (const [name, saved] of savedExtraBins) {
+        if (saved === undefined) delete process.env[name]; else process.env[name] = saved;
+      }
+      if (savedDry !== undefined) process.env.CEZ_DRY_RUN = savedDry;
+      if (savedAutoName === undefined) delete process.env.CEZ_AUTONAME;
+      else process.env.CEZ_AUTONAME = savedAutoName;
+      for (const [name, saved] of savedEnv) {
+        if (saved === undefined) delete process.env[name]; else process.env[name] = saved;
+      }
+      rmSync(repoRoot, { recursive: true, force: true });
+    } finally { restoreProcesses(); }
   }
 }
 

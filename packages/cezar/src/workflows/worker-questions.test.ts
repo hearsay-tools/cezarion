@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { inspectGeneration } from '../delegation/process-liveness.ts';
 import { CredentialRegistry } from '../delegation/credentials.ts';
 import { DelegationPolicyError } from '../delegation/policy.ts';
@@ -13,6 +14,7 @@ import { eventCheckpoint, fixtureUpdateRun, manager, parent, register, restart, 
 /** #505 PR B: a worker's question goes to its owning parent, not to the human. */
 describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () => {
   useWorkerWaitFixture();
+  afterEach(() => { vi.restoreAllMocks(); syncBuiltinESMExports(); });
   const conversationOf = (rootId: string) => { const d = store.getRun(rootId)?.delegation; return d?.role === 'root' ? d.conversation : undefined; };
   const eventsOf = (runId: string, type: string) => store.readEvents(runId).filter(event => event.type === type);
   /** A root that may message its workers, as provisioned roots are. */

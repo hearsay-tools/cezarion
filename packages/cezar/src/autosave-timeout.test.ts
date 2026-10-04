@@ -1,5 +1,6 @@
 import { execFileSync, spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import fs, { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -21,9 +22,25 @@ describe('autosave shutdown (#495)', () => {
     execFileSync(realGit, ['config', 'user.email', 'test@local'], { cwd: repo });
     writeFileSync(join(repo, 'work.txt'), 'keep this work\n');
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    if (process.platform === 'linux') {
+      // These fixtures prove shutdown of their real Git children, not unrelated host tools
+      // born during the save. Keep recorded descendants and every readable cwd; omit only
+      // ambient permission-denied cwd entries. Other errors and group probes stay real.
+      const readdir = fs.readdirSync;
+      vi.spyOn(fs, 'readdirSync').mockImplementation(((...args: unknown[]) => {
+        if (String(args[0]) !== '/proc') return Reflect.apply(readdir, fs, args);
+        const recorded = existsSync(join(bin, 'pid')) ? readFileSync(join(bin, 'pid'), 'utf8').trim().split('\n') : [];
+        return readdir('/proc').filter(pid => {
+          if (!/^\d+$/.test(pid) || recorded.includes(pid)) return true;
+          try { fs.readlinkSync(`/proc/${pid}/cwd`); return true; }
+          catch (error) { return !['EACCES', 'EPERM'].includes((error as NodeJS.ErrnoException).code ?? ''); }
+        });
+      }) as typeof fs.readdirSync);
+      syncBuiltinESMExports();
+    }
   });
   afterEach(async () => {
-    vi.restoreAllMocks();
+    vi.restoreAllMocks(); syncBuiltinESMExports();
     // Also reaps the intentionally unbounded implementation during the red run.
     if (existsSync(join(bin, 'pid'))) {
       for (const pid of readFileSync(join(bin, 'pid'), 'utf8').trim().split('\n')) {

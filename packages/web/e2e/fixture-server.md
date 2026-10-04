@@ -72,9 +72,12 @@ opted-in schedule server) and `live-preview.e2e.ts` (the opted-in cockpit server
 Both now request port 0 and adopt their owned listener within the original 15 s
 health budget. The preview application itself keeps its separate explicit port
 and native lifecycle; its browser wait override is unchanged. The complete
-construction guard now also includes `artifact-project-links.e2e.ts`, added by
-the artifact ownership fix: it uses port 0 and child-owned readiness within the
-original 15 s health budget. The guard pins 47 starts across 40 spec files.
+construction guard pins those 46 starts across 39 spec files.
+
+Main commit `12875135` adds `artifact-project-links.e2e.ts`, whose single CLI
+construction also requests port 0 and adopts its owned listener within the original
+15 s health budget. Its publication, cross-project browser assertions and 120 s setup
+timeout are unchanged. The complete guard now pins 47 starts across 40 spec files.
 
 ## Other server classes audited
 

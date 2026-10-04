@@ -54,7 +54,7 @@ beforeAll(async () => {
   }
   mkdirSync(evidenceDir, { recursive: true })
   writeFileSync(join(evidenceDir, 'publication.json'), JSON.stringify(publication, null, 2))
-  server = spawnFixtureServer([cezarCli, 'serve', '--repo', boot, '--port', '0', '--no-open'], { env, stdio: 'ignore' })
+  server = spawnFixtureServer([cezarCli, 'serve', '--repo', boot, '--port', '0', '--no-open'], { env })
   baseUrl = await waitForFixtureServer(server)
   expect(await bootProjectId(baseUrl)).toBe('boot')
   browser = AgentBrowser.open(`artifact-projects-${process.pid}`)

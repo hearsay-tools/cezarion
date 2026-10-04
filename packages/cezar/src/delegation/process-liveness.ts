@@ -50,6 +50,12 @@ function pidExists(pid: number): boolean {
 }
 
 const LINUX_TOKEN = /^(?:[0-9a-f-]{36}:)?(\d+)$/;
+const LINUX_BOOT_ID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
+/** A known different boot proves that no descendant of this controller can still exist. */
+function controllerPredatesBoot(token: string | undefined, boot: string | undefined): boolean {
+  const recordedBoot = token?.match(/^(.+):\d+$/)?.[1];
+  return recordedBoot !== undefined && boot !== undefined && LINUX_BOOT_ID.test(recordedBoot) && LINUX_BOOT_ID.test(boot) && recordedBoot !== boot;
+}
 /** Liveness-only comparison: when exactly one Linux token lacks the boot id (it was unreadable on one
  * side), the `starttime` suffix decides. Reaping still requires an exact match. */
 function sameIncarnation(recorded: string, current: string): boolean {
@@ -72,7 +78,7 @@ export function isCurrentProcess(entry: RecordedProcess): boolean {
   return entry.startToken === undefined || own === undefined || sameIncarnation(entry.startToken, own);
 }
 
-/** The `/proc` reads the Linux scan makes; injectable because EACCES cannot be staged for real. */
+/** The `/proc` reads the Linux scan makes; injectable for platform/error boundary coverage. */
 export type ProcReader = {
   readdir: () => string[]; readlink: (pid: string) => string;
   ownerUid: (pid: string) => number | undefined; startedAtMs: (pid: string) => number | undefined;
@@ -120,7 +126,9 @@ const realProc: ProcReader = {
 /** PIDs (never this process) whose working directory is one of `dirs` or beneath it, in one scan
  * pass; `unknown` when no scan can run. cezar's own short-lived git children in a worktree make
  * this read "alive" briefly: conservative, and a retry self-heals. `since` (epoch ms) is the
- * earliest moment the generation's processes can have started; see the EACCES rule below. */
+ * earliest moment the worker's processes can have started; see the EACCES rule below.
+ * `since` is only for conservative legacy execution/descendant checks. Resource proof never
+ * supplies it: reboot cannot exclude holders. */
 export function processesWithCwdUnder(dirs: string | readonly string[], platform: NodeJS.Platform = process.platform, proc: ProcReader = realProc, since?: number, darwin: DarwinReader = realDarwin): number[] | 'unknown' {
   const targets = (typeof dirs === 'string' ? [dirs] : dirs).map(dir => { try { return realpathSync(dir); } catch { return resolve(dir); } });
   const under = (cwd: string) => { const path = cwd.replace(/ \(deleted\)$/, ''); return targets.some(target => path === target || path.startsWith(target + sep)); };
@@ -137,7 +145,9 @@ export function processesWithCwdUnder(dirs: string | readonly string[], platform
         // user's non-dumpable processes are unreadable too (systemd --user, sshd, gpg-agent, which
         // every host has), so they cannot all block the proof: one that started before the worker
         // existed cannot be its descendant. A later one is a possible holder, never signalled.
-        if ((error as NodeJS.ErrnoException).code === 'ENOENT' || uid === undefined || proc.ownerUid(entry) !== uid) continue;
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+        const owner = proc.ownerUid(entry);
+        if (uid !== undefined && owner !== undefined && owner !== uid) continue;
         const started = since === undefined ? undefined : proc.startedAtMs(entry);
         if (started === undefined || started >= since!) found.push(Number(entry));
       }
@@ -167,16 +177,37 @@ export function processesWithCwdUnder(dirs: string | readonly string[], platform
 export type GenerationProbe = { liveness: GenerationLiveness; controller?: number; pids: number[] };
 
 /** A missing record (legacy) relies on the working-directory scan alone. `paths` are the
- * worktree and every scratch location, which finalization deletes. A live foreign controller
+ * worktree and every scratch location. Execution settlement itself deletes nothing. A live foreign controller
  * short-circuits the scan; otherwise `pids` names every live recorded or scanned process. */
-export function inspectGeneration({ record, paths, since }: { record?: WorkerProcessRecord; paths: readonly string[]; since?: number }): GenerationProbe {
+function inspect({ record, paths, since }: { record?: WorkerProcessRecord; paths: readonly string[]; since?: number }): GenerationProbe {
   if (record && !isCurrentProcess(record.controller) && recordedProcessLive(record.controller)) return { liveness: 'alive', controller: record.controller.pid, pids: [] };
   const recorded = record?.processes.filter(recordedProcessLive).map(entry => entry.pid) ?? [];
-  const scan = processesWithCwdUnder(paths, process.platform, realProc, since);
+  const scan = processesWithCwdUnder(paths, process.platform, realProc, since, realDarwin);
   const pids = [...new Set([...recorded, ...(scan === 'unknown' ? [] : scan)])];
   return { liveness: pids.length ? 'alive' : scan === 'unknown' ? 'unknown' : 'gone', pids };
 }
 
 export function probeGeneration(input: { record?: WorkerProcessRecord; paths: readonly string[]; since?: number }): GenerationLiveness {
   return inspectGeneration(input).liveness;
+}
+
+/** Fresh resource proof. Age and controller boot say nothing about who holds persistent paths.
+ * Every unreadable own-user cwd remains a candidate, even when it predates this task. */
+export function inspectGeneration(input: { record?: WorkerProcessRecord; paths: readonly string[]; since?: number }): GenerationProbe {
+  return inspect({ ...input, since: undefined });
+}
+
+/** Execution-only proof: a known reboot ended all old descendants, provided neither the
+ * controller nor any recorded process is still live. Never use this to authorize reuse/deletion.
+ * Legacy or unknown boot evidence retains the conservative descendant scan. */
+export function inspectExecutionGeneration(input: { record?: WorkerProcessRecord; paths: readonly string[]; pathsComplete?: boolean; since?: number }): GenerationProbe {
+  const record = input.record;
+  if (record && recordedProcessLive(record.controller)) return { liveness: 'alive', controller: record.controller.pid, pids: [] };
+  const pids = record?.processes.filter(recordedProcessLive).map(entry => entry.pid) ?? [];
+  if (pids.length) return { liveness: 'alive', pids };
+  if (process.platform === 'linux' && controllerPredatesBoot(record?.controller.startToken, linuxBootId())) return { liveness: 'gone', pids: [] };
+  const probe = inspect(input);
+  // Unknown scratch locations can hide a legacy descendant even when every known path is
+  // clear. Keep live PID diagnostics, but never turn a partial scan into proof of termination.
+  return probe.liveness === 'gone' && input.pathsComplete === false ? { liveness: 'unknown', pids: [] } : probe;
 }

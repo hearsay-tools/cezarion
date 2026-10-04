@@ -178,13 +178,24 @@ export async function reclaimWorktree(
   // Branch kept. An owned worker's evidence (uncommitted diff included) is snapshotted first; any
   // other run's uncommitted work lives only in the directory, so a dirty one is left for later.
   const onlyClean = opts.requireClean === true || run.delegation?.role !== 'worker';
+  const execution = run.delegation?.role === 'worker' ? (store as Partial<RunStore>).readWorkerExecution?.(run.id) : undefined;
+  const assertSafe = () => {
+    if (run.delegation?.role !== 'worker') return;
+    const real = store as Partial<RunStore>;
+    // Structural test stores have no private execution machinery. Real stores must attest both
+    // generation ownership and fresh resource holders, including after async evidence/preview.
+    if (typeof real.workerResourcesSafe === 'function' && (!execution ||
+      !real.workerResourcesSafe(run.id, execution.generation, run.delegation.workspace.resourceId))) throw Error('Worker resources are not safe to reclaim');
+  };
   const remove = opts.remove ?? ((root, path) =>
-    releaseThenRemoveWorktree({ previewHost: opts.previewHost }, run.id, root, path, undefined, { reclaimOwnedDirectory: true, onlyClean }));
+    releaseThenRemoveWorktree({ previewHost: opts.previewHost }, run.id, root, path, undefined,
+      { reclaimOwnedDirectory: true, onlyClean, assertCurrent: assertSafe }));
   if (!run.worktreePath) return null;
   const release = opts.claim ? opts.claim(run) : () => undefined;
   if (!release) return null; // in use since it was selected
   try {
     if (!(await preserveWorkerResult(repoRoot, store, run).catch(() => false))) return null;
+    if (opts.remove) assertSafe(); // injected reclaimer has no final callback
     await remove(repoRoot, run.worktreePath);
     if (existsSync(run.worktreePath)) return null; // reclaim failed; retry next pass
     const stamp = now();

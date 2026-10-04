@@ -1,6 +1,6 @@
 # Finalizing a crashed worker's execution proof (#469)
 
-Status: approved design (2026-09-26). Extends
+Status: approved design (2026-09-26), revised with human approval for #738 (2026-10-04). Extends
 `2026-09-06-owned-workers-isolated-worktrees.md` ("destroy awaits proven termination").
 
 ## Problem
@@ -75,7 +75,8 @@ A synchronous, dependency-free module (a sync probe lets `continueRun` stay sync
 
 - `processStartToken(pid)` as above.
 - `processesWithCwdUnder(dirs)`: the worker's worktree and every agent tmp dir location
-  (`agentTmpDirLocations`), because finalization can delete terminal-task scratch. Live tasks retain
+  (`agentTmpDirLocationEvidence` supplies both candidates and discovery completeness). Independent
+  cleanup can delete terminal-task scratch; execution settlement cannot. Live tasks retain
   scratch across finalized process generations and restart (#515). Linux reads `/proc/*/cwd`,
   skipping `ENOENT` (the process vanished) and `EACCES` on another user's process. An
   unreadable process of our own user is non-dumpable (`systemd --user`, `sshd`,
@@ -83,7 +84,27 @@ A synchronous, dependency-free module (a sync probe lets `continueRun` stay sync
   started before the worker's record was created (`since`, from `/proc/stat` btime plus
   starttime ticks). A process that old cannot be the worker's descendant, and every host has
   some. The cutoff is the worker's creation, not the current generation's start, because an
-  earlier generation can leave a daemon holding the worktree. macOS uses
+  earlier generation can leave a daemon holding the worktree.
+
+  **Execution and resource proofs are separate (#738, approved revision).** A valid Linux
+  controller boot UUID different from the current readable boot UUID proves old descendants
+  cannot survive, but only after checking that neither the controller nor any recorded process
+  is live. `inspectExecutionGeneration` uses this fast proof without scanning paths. Unknown,
+  malformed and legacy boot identities retain conservative descendant handling. Unknown scratch
+  locations prevent a clear partial scan from returning `gone`; readable candidates still report
+  their live PIDs. This completeness check follows the known-reboot fast proof, so uncertainty in
+  cleanup metadata cannot reintroduce a holder scan into reboot settlement. This proves
+  execution settlement only; a same-user non-dumpable process can hold persistent paths after
+  reboot and is indistinguishable from an ambient daemon whose cwd cannot be read.
+
+  `inspectGeneration` is the independent **resource** proof. It always scans every protected
+  worktree/scratch path with no age or boot exclusion. EACCES/EPERM (and unknown ownership)
+  remain unresolved candidates; readable holders and live recorded processes remain blockers.
+  Only a fresh clear scan plus generation/resource ownership permits deletion or reuse.
+  A process becoming readable and outside the protected paths, or exiting, may clear the
+  uncertainty; elapsed time or reboot cannot. Unknown evidence is retained, never silently dropped.
+
+  macOS uses
   `lsof -a -d cwd -Fpn` with a bounded timeout. `lsof` silently omits processes it cannot
   read, so any process of our user (`ps -U <uid> -o pid=,lstart=`, minus `ps` itself) missing
   from its output is judged by the same rule. Without that `ps` list the scan is `unknown`.
@@ -121,7 +142,8 @@ missing or malformed proof stays unproven, as the existing tests pin. On `gone` 
    generation;
 2. appends a lifecycle event:
    `the interrupted worker's processes are gone; its execution was finalized`;
-3. removes the run's agent tmp dir, as `persistWorkerCompletion` does.
+3. schedules independent terminal scratch cleanup, as `persistWorkerCompletion` does. No
+   synchronous resource probe or deletion runs on the collection/Finish settlement path.
 
 A result other than `gone` is cached per run and generation for 2 s, so polling callers
 (`collect`, inspect, the re-probe timer) do not rescan: a scan on macOS runs `lsof`
@@ -170,6 +192,64 @@ signal, so it skips step 1 and still waits in step 3:
 A live controller, or a controller that is this process, is never reaped from. The first
 belongs to another cezar. The second is the ordinary `cancel` path.
 
+### 5. Durable independent cleanup and admission fencing
+
+The private execution checkpoint records terminal scratch-cleanup intent (resource identity and
+workspace path) atomically alongside the completed generation. An intact terminal worker record
+can reconstruct this optional field for older checkpoints; no new configuration is needed. Starting
+a new generation drops the prior intent. `WorkerScratchCleanup` discovers
+private sidecars independently of the run index, so corrupt/missing `runs.json` and quarantined
+worker rows cannot make local or fallback scratch eligible for the generic orphan sweep. Even
+unreadable/malformed sidecars reserve those locations. Missing terminal intent is uncertainty,
+not permission to remove a legacy worker's scratch; restoring usable evidence permits retry.
+
+Recovery and project reattach reconstruct timers. The first attempt is deferred; each incomplete
+attempt retries after the same 60-second cadence as pending destroy, without an agent slot, age
+limit or force deletion. Disposal/detach cancels timers, including failed evidence-discovery retries.
+A timer stops when resources are removed or a known task ceases to be terminal. A changed
+generation/resource invalidates the captured operation; the new completed generation supplies
+its own intent. Unknown execution/process evidence and path permission errors retain files and
+keep periodic rechecks alive. If the private evidence directory itself cannot be enumerated, the
+sweep retains all scratch and retries discovery; once readable, ordinary orphan sweeping resumes
+and terminal worker scratch again requires fresh holder proof.
+
+A saved fallback location remains a holder candidate even when its `.cez-owner` cannot be read.
+Unknown/malformed pointers or ownership block deletion and reuse; they never become an empty
+location list. Fallback directories are removed before the local pointer. Before recursive removal,
+an atomic private receipt under local scratch binds previously verified ownership to that fallback's
+device, inode and birth time. This survives an interrupted removal that already deleted the owner
+marker. A missing marker may use only the matching receipt; unreadable/foreign ownership still
+blocks, and the receipt cannot authorize a replacement directory. Failed fallback removal retains both pointer and receipt, so
+restart and the ordinary 60-second retry can finish after permissions and holders clear. The local
+pointer/receipts are removed only after every fallback is proven absent.
+
+Pointer and removal-receipt reads are independent: neither failure discards a candidate discovered
+by the other. Malformed/unreadable evidence marks the list incomplete, which also blocks legacy
+execution settlement after known holders exit. The orphan reprobe keeps its existing 15-second,
+then 60-second uncapped cadence; evidence restoration permits settlement on a later probe. A
+known-reboot execution proof remains independent, but incomplete discovery always refuses cleanup
+or reuse. Removal receipts continue to require exact directory identity; their location value alone
+never authorizes deletion.
+
+Destroy remains an explicit persisted request for worktree/branch removal. Collection alone never
+requests it. Existing authorized retention after parent Finish keeps its behavior, with the same
+fresh holder proof and preserved parent result required. Destroy retains the immutable parent
+result before destructive work and returns settled-but-cleanup-incomplete when holders remain.
+The ordinary 60-second destroy timer rearms after recovery and retries until independently safe.
+
+Cleanup and execution admission exclude one another. Scratch's fresh ownership/generation/probe
+and deletion are synchronous with no yield; asynchronous workspace cleanup holds the manager's
+admission claim and rechecks generation, resource, attachment and holders immediately before Git
+removal. Every new worker generation passes the store's fresh resource guard, including Continue,
+resume, replies and pump admission. A stale retry cannot delete a newer execution's resources.
+History deletion checks holders before removing evidence, removes scratch while process/generation
+evidence still exists, and refuses to forget an intent whose scratch removal failed.
+
+The original #738 acceptance criterion that cleanup always succeeds after reboot is explicitly
+narrowed: **execution settlement, collection and parent Finish unblock once execution is proven
+terminated; eventual cleanup requires independent fresh proof that no holder or unresolved
+candidate remains. If that proof never becomes available, files remain indefinitely.**
+
 ## Not changing
 
 - Shutdown still leaves sessions running (`dispose()` contract); reaping at SIGTERM is out
@@ -182,6 +262,9 @@ belongs to another cezar. The second is the ordinary `cancel` path.
 
 ## Known limitations
 
+- Legacy process records without a controller boot ID, or an unreadable current Linux
+  boot ID, cannot use the #738 reboot proof. Unreadable same-user cwd candidates may
+  still block those generations; uncertainty never authorizes cleanup.
 - Reaping signals only the recorded session leader. Runners do not spawn detached, so there
   is no process group to kill. A descendant that survives the leader keeps its cwd in the
   worktree, and the scan keeps destroy `incomplete` (naming the PIDs) until it exits.
@@ -196,6 +279,21 @@ belongs to another cezar. The second is the ordinary `cancel` path.
     after it exits;
   - an unsupported platform returns `unknown`;
   - PID reuse (token mismatch) counts as gone.
+  - #738: denied cwd candidates remain possible resource holders even across boots; readable
+    holders and matching live process records also block. Same-boot controllers for
+    old-created workers, legacy/missing tokens, unknown boot IDs and scan errors retain
+    conservative behavior.
+- `worker-reboot-parity.test.ts` (registered harness row R43): every `RUNNER_IDS` backend
+  launches and exits through its `HARNESS_ADAPTERS` native mock wire. Both collect-first and
+  destroy-first restore prior-boot interrupted evidence beside a successful collected twin.
+  A real Linux Python process uses `PR_SET_DUMPABLE=0` while holding worktree or scratch;
+  kernel cwd reads are genuinely denied and the process still writes after collection/Finish.
+  Those settlement paths never call the strict resource probe. Restart keeps both resources;
+  automatic production-cadence retries release them after the actual holder exits. Completed
+  cleanup cannot bypass the fresh history-deletion probe. Native continuation tests refuse
+  reuse while uncertain, then admit a new generation on real exit and prove stale retry cannot
+  remove that generation's scratch. Only reboot evidence and enumeration scope are synthetic;
+  permissions, tokens, runners, stores, Git and deletion are real.
 - `worker-destroy.test.ts`, with a crash simulated by a dead controller written into the
   record and the `starting` proof restored:
   - dead child → `recover()` completes the proof, the worker re-launches or settles, and
@@ -225,3 +323,92 @@ belongs to another cezar. The second is the ordinary `cancel` path.
 3. Manager: record at both session sites, `settleOrphanedWorkerExecution`, and the callers.
 4. Destroy reaping + service `collect` hook.
 5. Regression tests, each shown red without the fix (`git stash push -- <sources>`).
+
+## Verification of the approved #738 revision (2026-10-04)
+
+- Baseline `d2c66da2`, production sources temporarily restored, native R43 filter
+  `clears parent Finish`: **10 behavioral failures** (five collect cases deleted held scratch;
+  five destroy cases incorrectly returned complete). Implementation source bytes restored exactly.
+- Focused nine-file run: **265 passed** across `process-liveness`, `worker-reboot-parity`,
+  `worker-destroy`, delegation `service`/`workspace`, workflow and run `agent-tmpdir`,
+  `retention-enforce`, and `git-worktree-release`.
+- `scratch-cleanup.test.ts`: **4 passed**, including unreadable execution/process sidecars
+  becoming readable, a real denied path becoming accessible on the default retry cadence,
+  and fresh absent-resource admission despite ambient denial while retained-path reuse is refused.
+- Harness registration guard (`every criterion is a live row`): **1 passed**.
+- `npm run build:server`, `npm run typecheck:server`, `git diff --check`: passed.
+- R43 scopes only `/proc` enumeration to its explicit real holder PIDs and, for continuation,
+  recorded native child PIDs. Other focused lifecycle fixtures enumerate their own process tree
+  and previously observed descendants, excluding ambient daemons and parallel test workers.
+  Real kernel cwd denial is asserted; the holder writes after settlement/probes and is never
+  signalled by cleanup. Prior boot evidence is synthetic. Linux-only permission cases do not
+  claim macOS permission coverage; injected-reader tests retain its conservative policy checks.
+- Full repository/browser gate, independent review, PR changes and integration remain with the
+  parent task by assignment.
+
+### Index-loss review follow-up (2026-10-04)
+
+- Baseline `e8b73436`, four changed production sources restored temporarily: filter
+  `index recovery` in `scratch-cleanup.test.ts` produced **six behavioral failures**.
+  Corrupt, missing and quarantined index cases each deleted held local and owned fallback
+  scratch. Every failure was the retained-file assertion, not a missing helper or mock.
+  All implementation source bytes were restored exactly in `finally`.
+- Focused seven-file run: **186 passed** across scratch cleanup, run/workflow temp directories,
+  native R43, worker destroy, delegation service and retention. The finalized scratch fixture
+  additionally reran **18 passed**, using production fallback creation/ownership markers.
+- The reviewer's standalone real-Linux reproduction passed all three index-loss shapes:
+  actual `EACCES`, strict probe `alive`, retained files and successful relative writes after
+  recovery, with both private sidecars intact. No filesystem/process enumeration mocking in
+  that reproduction. Regression fixtures narrow enumeration to the test's real process tree;
+  actual cwd denial, writes and exit remain unmocked.
+- New scratch guards also cover unknown execution/process evidence and legacy missing cleanup
+  intent at both local/fallback locations, unreadable evidence discovery followed by automatic
+  retry, ordinary orphan reclamation after discovery recovers, and stripped role metadata.
+  Real holder exit releases resources through the unchanged 60-second retry. The existing
+  native stale-generation guard passes for all five runners.
+- Server build, server test typecheck and `git diff --check` passed. Full gate and independent
+  incremental review remain with the parent task.
+
+
+### Fallback retry review follow-up (2026-10-04)
+
+- Baseline `2a59ae42`, the two changed production sources temporarily restored: filter
+  `old fallback` in `scratch-cleanup.test.ts` produced **two behavioral failures**. A real
+  unreadable owner marker incorrectly changed holder safety to true; a real unwritable
+  fallback parent caused cleanup to erase the saved fallback pointer. Source restoration was
+  verified byte-for-byte. No helper-import or spy-target failure counted as red.
+- Focused seven-file run: **190 passed**, including all 15 native R43 cases and **22** scratch
+  cleanup cases. New guards prove restart and ordinary 60-second retries after marker denial
+  or partial removal, and that a saved removal receipt cannot delete an ownerless or foreign
+  replacement directory. Temporary environment changes are restored explicitly.
+- Both standalone reviewer reproductions now retain the old location and a pending retry.
+  Extending only their final observation to 61 seconds (production timers unchanged, no fake
+  timers) observed fallback removal and zero pending timers after permissions/holders cleared.
+  Permission changes, holder cwd and filesystem removals are real; only process enumeration
+  is scoped to the actual child. Tests remain Linux/unprivileged-user specific for EACCES.
+- Server build, server test typecheck and `git diff --check` passed. Full gate and independent
+  incremental review remain with the parent task.
+
+### Receipt-liveness review follow-up (2026-10-04)
+
+- Baseline `74bf1dcf`: the preserved four-case regression and both standalone reviewer scripts
+  reproduced live readable fallback holders being falsely settled after receipt/pointer damage.
+  With the finalized native tests and three production sources temporarily restored to baseline,
+  `npx vitest run packages/cezar/src/workflows/worker-location-evidence.test.ts packages/cezar/src/delegation/process-liveness.test.ts`
+  produced **27 behavioral failures / 11 guard passes**: twenty native cases falsely settled live
+  holders; seven legacy/unknown-boot shapes returned `gone` for incomplete location evidence.
+  All source bytes were restored in `finally` and verified exactly.
+- The new native R43 matrix covers all five runners and four real malformed/permission-denied
+  receipt/pointer shapes, post-probe holder writes, blocked collect/Finish, and settlement plus
+  cleanup once holders exit and evidence recovers. Both reviewer scripts now retain the saved
+  path and report `alive`, settlement `false`, phase `starting`, resource safety `false`.
+- Focused lifecycle/tempdir/retention run: **212 passed** across eight files; separate scratch
+  cleanup run: **22 passed**, including the prior index-loss, fallback-retry and replacement
+  safety guards. The harness registration guard passed. The existing fifteen R43 cases remain;
+  collect/destroy also test damaged cleanup metadata during known-reboot settlement, then restore
+  metadata before the original holder-only deletion/reuse assertions. The final R43-only rerun
+  passed all **15** cases after this fixture adjustment.
+- Server build, server test typecheck and diff check passed. Linux/unprivileged permission tests
+  use actual EACCES, readable holder cwd, writes and exits; enumeration is scoped to fixture
+  processes. No production timer changes, liveness stubs or unrelated-process signals. The full
+  gate and independent review remain with the parent task; no push or PR edits were performed.

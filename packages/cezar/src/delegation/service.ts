@@ -142,8 +142,9 @@ export class DelegationService {
     const existing = this.projects.get(project.id);
     if (existing?.store === project.store && existing.manager === project.manager) return () => {};
     this.clearDestroyRetries(project.id);
+    existing?.manager.pauseWorkerCleanup();
     this.projects.set(project.id, project);
-    return () => { if (this.projects.get(project.id) === project) { this.clearDestroyRetries(project.id); this.projects.delete(project.id); } };
+    return () => { if (this.projects.get(project.id) === project) { this.clearDestroyRetries(project.id); project.manager.pauseWorkerCleanup(); this.projects.delete(project.id); } };
   }
   private clearDestroyRetries(projectId: string): void {
     for (const timer of this.destroyRetryTimers.get(projectId)?.values() ?? []) clearTimeout(timer);
@@ -154,6 +155,7 @@ export class DelegationService {
   armDestroyRetries(projectId: string): void {
     const project = this.projects.get(projectId);
     if (!project) return;
+    project.manager.recoverWorkerCleanup();
     for (const run of project.store.listRuns()) this.scheduleDestroyRetry(project, run.id);
   }
   private scheduleDestroyRetry(project: DelegationProject, workerId: string): void {
@@ -630,9 +632,29 @@ export class DelegationService {
         project.store.commitWorkerResult(evidence.result.parentRunId, evidence.result, evidence.diffSnapshot);
         assertAttached();
         check();
-        // #781: the worker's dev servers and browser go before its checkout does.
-        result = await releaseThenRemoveOwnedWorkspace({ previewHost: project.manager.previewHost }, project.root, workspace,
-          project.manager.getWorkerNoMaterializationProof(workerId), assertAttached);
+        const release = project.manager.claimWorkerCleanup(workerId);
+        const assertCurrent = () => {
+          assertAttached();
+          const current = check();
+          if (!release || current.delegation?.role !== 'worker' ||
+            JSON.stringify(current.delegation.workspace) !== JSON.stringify(workspace) ||
+            project.store.readWorkerExecution(workerId)?.generation !== proof.generation ||
+            project.store.readWorkerExecution(workerId)?.phase !== 'complete') {
+            throw new Error('Worker resource ownership changed');
+          }
+        };
+        const assertSafe = () => {
+          assertCurrent();
+          if (!project.store.workerResourcesSafe(workerId, proof.generation, workspace.resourceId)) throw new Error('Worker resources may still be held; cleanup will retry');
+        };
+        try {
+          assertCurrent();
+          // #781: release preview before the final fresh proof immediately preceding removal.
+          result = await releaseThenRemoveOwnedWorkspace({ previewHost: project.manager.previewHost }, project.root, workspace,
+            project.manager.getWorkerNoMaterializationProof(workerId), assertCurrent, assertSafe);
+        } catch {
+          result = { workerId, state: 'incomplete', remaining: resources, error: 'Worker resources may still be held; cleanup will retry' };
+        } finally { release?.(); }
         // An already-started checked Git operation may finish after detach. Its
         // checkpoint makes a new controller's retry safe; the old store must not
         // publish a result after ownership of the project has moved.

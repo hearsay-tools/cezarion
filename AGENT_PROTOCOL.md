@@ -752,6 +752,31 @@ this normative contract.
 
 ## 7. Harness parity — session and lifecycle (`packages/cezar/src/core/harness-parity.test.ts`)
 
+**R43** (#738), in `workflows/worker-reboot-parity.test.ts` and
+`workflows/worker-location-evidence.test.ts`, drives every `RUNNER_IDS`
+backend's `HARNESS_ADAPTERS` native wire through worker cancellation and a successful twin.
+Linux prior-boot controller evidence settles the old execution independently of resource cleanup.
+Both collect-first and destroy-first unblock parent Finish after collection while a real same-user
+`PR_SET_DUMPABLE=0` holder retains scratch/worktree and keeps writing. Fresh holder proof still
+blocks deletion, retention, history removal and reuse, including after a complete checkpoint and
+restart. Production 60-second retries release resources only after real holder exit; a stale retry
+cannot touch a newly admitted native execution. Disposal/detach stops retries; recovery/reattach
+reconstructs their durable intents from private generation checkpoints even if the run index is
+missing, corrupt, or quarantines the worker. Surviving unknown private evidence protects local
+and fallback scratch from generic sweeping; unreadable discovery retries too. Unknown fallback
+ownership retains its saved location. Partial removal retains a directory-identity receipt and
+the pointer until the fallback is gone, so permissions recovering cannot strand cleanup. If uncertainty
+never clears, files remain indefinitely.
+Malformed or unreadable fallback pointers/removal receipts retain every independently readable
+candidate and mark location discovery incomplete. Legacy execution, collect and parent Finish
+remain unsettled until holders exit and location evidence recovers; a clear partial scan is not
+termination proof. The native matrix covers all four damage shapes with real readable holders,
+post-probe writes and restored-evidence recovery. Known-reboot execution still settles without
+holder scans when cleanup metadata is damaged, while independent cleanup remains blocked.
+Only prior-boot evidence and process enumeration scope are synthetic; cwd permission denial,
+process exit, native wires, stores and Git remain real. Linux-only OS coverage exempts no runner;
+legacy/unknown-boot and recorded-process guards live in `delegation/process-liveness.test.ts`.
+
 Crash-diagnostic rows **S15–S17** (#499) drive every `RUNNER_IDS` adapter's
 native transport through an uncaught-exception-shaped stderr fixture, a plain
 single-line failure, and a clean/requested shutdown with stderr. RPC mocks send

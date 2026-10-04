@@ -67,17 +67,23 @@ int mkdir(const char *p, mode_t mode) {
   await exec('cc', ['-shared', '-fPIC', '-Wall', '-o', preload, c, '-ldl']);
   const driver = join(root, 'driver.mjs');
   writeFileSync(driver, `
-import { writeFileSync } from 'node:fs';
+import { renameSync, writeFileSync } from 'node:fs';
 import { createWorktree, removeWorktree, pruneOrphans } from ${JSON.stringify(new URL('./git-worktree.ts', import.meta.url).href)};
 const [root, operation, result, target, fresh] = process.argv.slice(2);
+// The parent treats result existence as completion; publish only the complete JSON.
+const publish = value => {
+  const pending = result + '.tmp';
+  writeFileSync(pending, JSON.stringify(value));
+  renameSync(pending, result);
+};
 writeFileSync(result + '.started', '');
 try {
   let value;
   if (operation === 'create') value = await createWorktree(root, target, 'main', { freshOnly: fresh === 'true' });
   else if (operation === 'remove') value = await removeWorktree(root, target);
   else value = await pruneOrphans(root, new Set(['victim000000']));
-  writeFileSync(result, JSON.stringify({ ok: true, value }));
-} catch (error) { writeFileSync(result, JSON.stringify({ ok: false, error: String(error) })); }
+  publish({ ok: true, value });
+} catch (error) { publish({ ok: false, error: String(error) }); }
 `);
   function start(cwd: string, operation: string, name: string, target: string, fresh = false) {
     const result = join(root, name + '.json');

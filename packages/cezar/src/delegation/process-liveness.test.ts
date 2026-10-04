@@ -3,17 +3,25 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { parseProcStat, probeGeneration, processesWithCwdUnder, processStartToken, recordedProcessLive } from './process-liveness.ts';
+import { nonDumpableHolder } from './non-dumpable.testkit.ts';
+import { inspectExecutionGeneration, parseProcStat, probeGeneration, processesWithCwdUnder, processStartToken, recordedProcessLive } from './process-liveness.ts';
 
 // Scope only enumeration to the processes this fixture owns. A full-host scan may
 // conservatively include an unrelated same-user process whose cwd is unreadable.
 // Keep cwd/stat/token reads real, including ENOENT after our child has exited;
 // the injected-reader cases below cover unreadable holders separately.
-const procScope = vi.hoisted(() => ({ entries: undefined as string[] | undefined }));
+const procScope = vi.hoisted(() => ({ entries: undefined as string[] | undefined, boot: undefined as string | null | undefined }));
 vi.mock('node:fs', async importOriginal => {
   const actual = await importOriginal<typeof import('node:fs')>();
   return {
     ...actual,
+    readFileSync: (...args: Parameters<typeof actual.readFileSync>) => {
+      if (args[0] === '/proc/sys/kernel/random/boot_id' && procScope.boot !== undefined) {
+        if (procScope.boot === null) throw Object.assign(Error('unreadable boot ID'), { code: 'EACCES' });
+        return procScope.boot;
+      }
+      return actual.readFileSync(...args);
+    },
     readdirSync: (...args: Parameters<typeof actual.readdirSync>) =>
       args[0] === '/proc' && procScope.entries ? procScope.entries : actual.readdirSync(...args),
   };
@@ -22,7 +30,7 @@ vi.mock('node:fs', async importOriginal => {
 const linux = process.platform === 'linux';
 const dirs: string[] = [];
 afterEach(() => {
-  procScope.entries = undefined;
+  procScope.entries = undefined; procScope.boot = undefined;
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -78,6 +86,66 @@ describe('process liveness (#469)', () => {
     expect(processesWithCwdUnder(dir, 'darwin', linuxUnused, since, darwin('', [], false))).toBe('unknown');
   });
 
+  const oldBoot = '11111111-1111-4111-8111-111111111111';
+  const deniedProc = (code = 'EACCES') => ({
+    readdir: () => ['7'], readlink: () => { throw Object.assign(new Error(code), { code }); },
+    ownerUid: () => process.getuid?.(), startedAtMs: () => 30_000,
+  });
+
+  it.each(['EACCES', 'EPERM'])('retains %s resource candidates alongside readable holders (#738)', code => {
+    const proc = { ...deniedProc(code), readdir: () => ['7', '8', '9'], readlink: (pid: string) => {
+      if (pid === '7') return deniedProc(code).readlink();
+      return pid === '8' ? '/worker/nested' : '/scratch';
+    } };
+    expect(processesWithCwdUnder(['/worker', '/scratch'], 'linux', proc, 10_000)).toEqual([7, 8, 9]);
+  });
+
+  it('unknown cwd ownership never removes an unresolved resource candidate', () => {
+    expect(processesWithCwdUnder(['/worker', '/scratch'], 'linux', { ...deniedProc(), ownerUid: () => undefined }, undefined)).toEqual([7]);
+  });
+
+  it('retains conservative fallback on unexpected cwd errors or unreadable proc', () => {
+    expect(processesWithCwdUnder('/worker', 'linux', deniedProc('EIO'), 10_000)).toEqual([7]);
+    const proc = { ...deniedProc(), readdir: () => { throw Error('unreadable /proc'); } };
+    expect(processesWithCwdUnder('/worker', 'linux', proc, 10_000)).toBe('unknown');
+  });
+
+  it.runIf(linux)('retains a real non-dumpable holder despite prior-boot execution evidence', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cez-hidden-holder-')); dirs.push(dir);
+    const holder = await nonDumpableHolder(dir);
+    procScope.entries = [String(holder.pid)];
+    const input = { paths: [dir], record: { generation: 'g', controller: { pid: 2147483001, startToken: `${oldBoot}:100` }, processes: [] } };
+    try {
+      expect(probeGeneration({ ...input, since: Date.now() + 60_000 })).toBe('alive');
+      expect(inspectExecutionGeneration(input).liveness).toBe('gone');
+      expect(inspectExecutionGeneration({ ...input, pathsComplete: false }).liveness).toBe('gone');
+      await holder.write();
+      expect(readFileSync(join(dir, 'holder-writes'), 'utf8')).toContain('still writable');
+    } finally { await holder.close(); }
+    expect(probeGeneration(input)).toBe('gone');
+  });
+
+  it.runIf(linux).each(['absent record', 'missing token', 'legacy token', 'malformed token', 'same boot', 'unknown boot', 'malformed boot'])('keeps conservative execution proof with %s', async shape => {
+    const dir = mkdtempSync(join(tmpdir(), 'cez-legacy-holder-')); dirs.push(dir);
+    const holder = await nonDumpableHolder(dir); procScope.entries = [String(holder.pid)];
+    const currentBoot = readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim();
+    if (shape === 'unknown boot') procScope.boot = null;
+    if (shape === 'malformed boot') procScope.boot = 'invalid';
+    const token = shape === 'legacy token' ? '100' : shape === 'malformed token' ? 'malformed:100'
+      : shape === 'same boot' ? `${currentBoot}:100` : shape === 'missing token' ? undefined : `${oldBoot}:100`;
+    vi.resetModules();
+    const { inspectExecutionGeneration: executionProbe } = await import('./process-liveness.ts');
+    const input = { paths: [dir], since: 0, ...(shape === 'absent record' ? {} : { record: {
+      generation: 'g', controller: { pid: 2147483001, startToken: token }, processes: [],
+    } }) };
+    try {
+      expect(executionProbe(input).liveness).toBe('alive');
+      expect(executionProbe({ ...input, pathsComplete: false }).liveness).toBe('alive');
+    } finally { await holder.close(); }
+    expect(executionProbe({ ...input, pathsComplete: false }).liveness).toBe('unknown');
+    expect(executionProbe(input).liveness).toBe('gone');
+  });
+
   it.runIf(linux)('finds a real child by its working directory and loses it after exit', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'cez-liveness-')); dirs.push(dir);
     const nested = join(dir, 'nested'); mkdirSync(nested);
@@ -88,6 +156,9 @@ describe('process liveness (#469)', () => {
       expect(processesWithCwdUnder(`${dir}-sibling`)).not.toContain(proc.pid);
       expect(processesWithCwdUnder(dir)).not.toContain(process.pid);
       expect(probeGeneration({ paths: [dir], since })).toBe('alive');
+      // Reboot proof only excludes unreadable possible descendants, never an actual cwd holder.
+      expect(probeGeneration({ paths: [dir], since: 0,
+        record: { generation: 'g', controller: { pid: 2147483001, startToken: `${oldBoot}:100` }, processes: [] } })).toBe('alive');
       // One scan pass over several roots (#469: worktree plus scratch).
       expect(processesWithCwdUnder([`${dir}-sibling`, nested])).toContain(proc.pid);
     } finally { proc.kill('SIGKILL'); await exited; }
@@ -115,6 +186,12 @@ describe('process liveness (#469)', () => {
       const record = (processes: { pid: number; startToken?: string }[]) => ({ generation: 'g', controller: { pid: process.pid }, processes });
       expect(probeGeneration({ record: record([{ pid: proc.pid!, startToken: `${token}0` }]), paths: [dir], since })).toBe('gone');
       expect(probeGeneration({ record: record([{ pid: proc.pid!, startToken: token }]), paths: [dir], since })).toBe('alive');
+      // Even with a previous-boot controller, a verified live record blocks independently of cwd.
+      for (const inspect of [probeGeneration, (input: Parameters<typeof inspectExecutionGeneration>[0]) => inspectExecutionGeneration(input).liveness]) {
+        expect(inspect({ paths: [dir], since: 0, record: { generation: 'g',
+          controller: { pid: 2147483001, startToken: `${oldBoot}:100` }, processes: [{ pid: proc.pid!, startToken: token }] } })).toBe('alive');
+        expect(inspect({ paths: [dir], record: { generation: 'g', controller: { pid: proc.pid!, startToken: token }, processes: [] } })).toBe('alive');
+      }
       // This process as controller is never "alive": the in-memory execution map owns it.
       expect(probeGeneration({ record: record([]), paths: [dir], since })).toBe('gone');
       expect(probeGeneration({ record: { generation: 'g', controller: { pid: proc.pid!, startToken: token }, processes: [] }, paths: [dir], since })).toBe('alive');
