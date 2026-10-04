@@ -286,6 +286,7 @@ entries:
     note: "Ported intermediate ASK parking and lifecycle coverage using the fork durable waiting and Continue-tail recovery; upstream dispatch and budget-brake logic excluded."
     fork:
       issue: 427
+      pr: 813
       commits:
         - 33aa7462
         - cd0cc36a
