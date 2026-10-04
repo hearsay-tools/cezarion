@@ -490,3 +490,79 @@ assert.equal(existsSync(${JSON.stringify(join(scratch, 'lane-1'))}), false);
   const result = spawnSync(process.execPath, [script], { encoding: 'utf8', env: { ...process.env, GIT_CONFIG_GLOBAL: globalConfig } });
   assert.equal(result.status, 0, result.stdout + result.stderr);
 });
+
+for (const scope of ['global', 'system']) {
+  test(`${scope}-only remote metadata is not projected into a lane`, (t) => {
+    const { root, repo } = fixture(t);
+    gitText(repo, 'remote', 'add', 'origin', 'https://github.com/team/project.git');
+    const config = join(root, `${scope}.gitconfig`);
+    writeFileSync(config, '[remote "host-only"]\n\turl = https://private.example.test/host/project.git\n\tpushurl = ssh://git@private.example.test/host/push.git\n\tfetch = +refs/heads/*:refs/remotes/host-only/*\n');
+    const script = join(root, 'scoped-remote.mjs');
+    const scratch = join(root, 'scratch');
+    writeFileSync(script, `import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { createLane, removeLane } from ${JSON.stringify(new URL('../.ai/scripts/e2e-lanes.mjs', import.meta.url).href)};
+const repoRoot=${JSON.stringify(repo)};
+const lane=createLane({repoRoot,scratchRoot:${JSON.stringify(scratch)},index:1});
+try { const config=readFileSync(lane+'/.git/config','utf8');
+assert.equal(config.includes('host-only'),false);
+assert.equal(config.includes('private.example.test'),false);
+assert.equal(config.includes('https://github.com/team/project.git'),true);
+} finally { removeLane({repoRoot,laneRoot:lane}); }
+`);
+    const result = spawnSync(process.execPath, [script], { encoding: 'utf8', env: {
+      ...process.env, GIT_CONFIG_NOSYSTEM: '0', GIT_CONFIG_SYSTEM: scope === 'system' ? config : '/dev/null',
+      GIT_CONFIG_GLOBAL: scope === 'global' ? config : '/dev/null',
+    } });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+  });
+
+  test(`${scope} remote URLs cannot contaminate same-name local URL resolution`, (t) => {
+    const { root, repo } = fixture(t);
+    gitText(repo, 'remote', 'add', 'origin', 'https://github.com/team/project.git');
+    const config = join(root, `${scope}.gitconfig`);
+    writeFileSync(config, '[remote "origin"]\n\turl = https://private.example.test/host/project.git\n\tpushurl = ssh://git@private.example.test/host/push.git\n');
+    const script = join(root, 'overlapping-remote.mjs');
+    const scratch = join(root, 'scratch');
+    writeFileSync(script, `import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
+import { createLane } from ${JSON.stringify(new URL('../.ai/scripts/e2e-lanes.mjs', import.meta.url).href)};
+assert.throws(()=>createLane({repoRoot:${JSON.stringify(repo)},scratchRoot:${JSON.stringify(scratch)},index:1}),/unsupported inherited E2E remote/);
+assert.equal(existsSync(${JSON.stringify(join(scratch, 'lane-1'))}),false);
+`);
+    const result = spawnSync(process.execPath, [script], { encoding: 'utf8', env: {
+      ...process.env, GIT_CONFIG_NOSYSTEM: '0', GIT_CONFIG_SYSTEM: scope === 'system' ? config : '/dev/null',
+      GIT_CONFIG_GLOBAL: scope === 'global' ? config : '/dev/null',
+    } });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+  });
+}
+
+test('repository worktree-scoped remotes remain project metadata', (t) => {
+  const { root, repo } = fixture(t);
+  gitText(repo, 'config', 'extensions.worktreeConfig', 'true');
+  gitText(repo, 'config', '--worktree', 'remote.project-only.url', 'https://github.com/team/worktree.git');
+  const lane = privateLane(t, repo, root);
+  assert.equal(remoteUrls(lane, 'project-only'), remoteUrls(repo, 'project-only'));
+  assert.equal(readFileSync(join(lane, '.git/config'), 'utf8').includes('https://github.com/team/worktree.git'), true);
+});
+
+test('global URL rewrites still resolve a repository-local remote without copying host config', (t) => {
+  const { root, repo } = fixture(t);
+  gitText(repo, 'remote', 'add', 'origin', 'fixture:team/project.git');
+  const config = join(root, 'global-rewrite.gitconfig');
+  writeFileSync(config, '[url "https://github.com/"]\n\tinsteadOf = fixture:\n');
+  const script = join(root, 'inherited-rewrite.mjs');
+  writeFileSync(script, `import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { createLane, removeLane } from ${JSON.stringify(new URL('../.ai/scripts/e2e-lanes.mjs', import.meta.url).href)};
+const repoRoot=${JSON.stringify(repo)};
+const lane=createLane({repoRoot,scratchRoot:${JSON.stringify(join(root, 'scratch'))},index:1});
+try { assert.equal(execFileSync('git',['-C',lane,'remote','get-url','origin'],{encoding:'utf8'}).trim(),'https://github.com/team/project.git');
+assert.equal(readFileSync(lane+'/.git/config','utf8').includes('insteadOf'),false);
+} finally {removeLane({repoRoot,laneRoot:lane});}
+`);
+  const result = spawnSync(process.execPath, [script], { encoding: 'utf8', env: { ...process.env, GIT_CONFIG_GLOBAL: config } });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+});

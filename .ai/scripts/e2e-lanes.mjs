@@ -47,9 +47,9 @@ function linkBuiltAssets(repoRoot, laneRoot) {
 }
 
 // Project only public fixture metadata. Never copy host config, credentials or hooks.
-function configEntries(repoRoot, pattern) {
+function configEntries(repoRoot, pattern, scope) {
   let output;
-  try { output = git(repoRoot, 'config', '--null', '--get-regexp', pattern).toString('utf8'); }
+  try { output = git(repoRoot, 'config', ...(scope ? [`--${scope}`] : []), '--null', '--get-regexp', pattern).toString('utf8'); }
   catch (error) {
     if (error.status === 1) return [];
     throw new Error('cannot inspect E2E Git metadata');
@@ -95,13 +95,32 @@ function laneMetadata(repoRoot) {
   if (unsupported.some(([key, value]) => key !== 'core.sparsecheckout' || !/^(false|no|off|0)$/i.test(value))) {
     throw new Error('unsupported E2E checkout configuration; cannot faithfully isolate the lane');
   }
-  const remotes = configEntries(repoRoot, '^remote\\..*\\.(url|pushurl|fetch)$');
+  const pattern = '^remote\\..*\\.(url|pushurl|fetch)$';
+  const remotes = configEntries(repoRoot, pattern, 'local');
+  // Worktree config belongs to this checkout too; read it only when enabled, since
+  // Git otherwise aliases --worktree to --local and would duplicate each entry.
+  let worktreeConfig = false;
+  try { worktreeConfig = git(repoRoot, 'config', '--local', '--bool', '--get', 'extensions.worktreeConfig').toString('utf8').trim() === 'true'; }
+  catch (error) { if (error.status !== 1) throw new Error('cannot inspect E2E Git metadata'); }
+  if (worktreeConfig) remotes.push(...configEntries(repoRoot, pattern, 'worktree'));
+  const names = new Set(remotes.map(([key]) => key.slice(7, key.lastIndexOf('.'))));
+  // get-url includes inherited same-name declarations. Inspect only their names
+  // and scopes, never their values, and refuse ambiguous resolution before copying.
+  let scopedNames = [];
+  try { scopedNames = git(repoRoot, 'config', '--null', '--show-scope', '--name-only', '--get-regexp', '^remote\\..*\\.(url|pushurl)$').toString('utf8').split('\0').filter(Boolean); }
+  catch (error) { if (error.status !== 1) throw new Error('cannot inspect E2E Git metadata'); }
+  for (let index = 0; index < scopedNames.length; index += 2) {
+    const [scope, key] = scopedNames.slice(index, index + 2);
+    if (scope !== 'local' && scope !== 'worktree' && names.has(key.slice(7, key.lastIndexOf('.')))) {
+      throw new Error('unsupported inherited E2E remote declaration; cannot isolate repository metadata');
+    }
+  }
   if (remotes.some(([key, value]) => /\.(url|pushurl)$/.test(key) && !publicRemote(value))) {
     throw new Error('E2E remote metadata must use public URLs without credentials');
   }
   // Resolve Git's insteadOf/pushInsteadOf rules without copying rewrite configuration.
   const effective = new Map();
-  for (const name of new Set(remotes.map(([key]) => key.slice(7, key.lastIndexOf('.'))))) {
+  for (const name of names) {
     effective.set(name, { fetch: effectiveRemoteUrls(repoRoot, name), push: effectiveRemoteUrls(repoRoot, name, true) });
   }
   const core = configEntries(repoRoot, '^core\\.(autocrlf|eol|symlinks|filemode|ignorecase|precomposeunicode)$');
