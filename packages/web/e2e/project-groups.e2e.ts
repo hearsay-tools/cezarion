@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
+import { waitForSettledSample } from './visual-ready'
 import { AgentBrowser, bootProjectId, readTestEnv } from './agent-browser'
 import { readSharedProjects, snapshotSharedHome, writeSharedProjects } from './workspace-registry'
 
@@ -192,7 +193,7 @@ describe('the project sidebar in a multi-project workspace', () => {
     try {
       browser.goto(baseUrl + scoped(ALPHA.id, '/'))
       assertProject(ALPHA.id, '/')
-      expect(browser.waitForValue(`document.querySelector('${header}')?.getBoundingClientRect().width > 0`)).toBe(true)
+      expect(waitForSettledSample(browser, `document.querySelector('${header}')?.getBoundingClientRect().width > 0`)).toBe(true)
       expect(browser.isVisible('[data-slot="project-task-navigation"]')).toBe(true)
     } finally {
       browser.evaluate(`localStorage.removeItem('cez-sidebar-collapsed')`)

@@ -487,7 +487,10 @@ Each row shows **every** PR and issue it references — a task opened on an issu
 that landed a PR shows both — plus its cost and live CPU/memory, and can be
 marked **read/unread** (the eye) or **archived** (or restored) right there. Every task title, project name and project group heading links into that
 project, so the thread, its diff and its worktree are one click away and stay
-exactly where they were.
+exactly where they were. Returning to a long thread restores its saved row measurements
+once the replay has rebuilt the same ordered messages, keeping the same content in view.
+Scrolling, jumping to the latest message, or loading different history takes ownership
+from that restoration; a thread left at its live tail follows the current tail.
 
 There is deliberately **no project filter**: narrowing this page to one project
 is that project's own Tasks page, which is a better version of the same answer
@@ -1042,9 +1045,11 @@ cez artifact publish /tmp/decision.md
 
 Cezar supplies the bundled command and task context to agent sessions automatically
 (`CEZ_TASK_ID` and `CEZ_ARTIFACTS_DIR`; do not configure these yourself). The command
-returns JSON with a Markdown link for the agent to share. The Files tab also lists
-published artifacts. It previews text, Markdown and raster images; other formats
-can be downloaded. HTML/scripts never execute inside the cockpit, and embedded
+returns JSON with a Markdown link for the agent to share. When the owning project
+is registered, the link keeps that project when copied or opened from another
+project. If ownership cannot be discovered, publication keeps the legacy task link.
+The Files tab also lists published artifacts. It previews text, Markdown and raster
+images; other formats can be downloaded. HTML/scripts never execute inside the cockpit, and embedded
 images in Markdown documents do not load automatically.
 
 Snapshots do not change when the original file changes. They survive worktree

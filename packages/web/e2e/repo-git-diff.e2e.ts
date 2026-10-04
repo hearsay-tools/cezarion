@@ -1,14 +1,12 @@
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
+import { execFileSync, type ChildProcess } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import { stopFixtureServer } from './fixture-server'
+import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv, getJson } from './agent-browser'
 import { assertDiffCoverage } from './repo-diff-coverage'
-import { waitForHealth } from './poll'
 
 /**
  * Repo Git diff completeness over generated fixtures — the live `repo-git.e2e.ts` suite
@@ -31,18 +29,6 @@ const LARGE_LINES = 8
 type ChangedFiles = { files: Array<{ path: string }> }
 
 let browser: AgentBrowser
-
-function freePort(): Promise<number> {
-  return new Promise((done, fail) => {
-    const probe = createServer()
-    probe.once('error', fail)
-    probe.listen(0, '127.0.0.1', () => {
-      const address = probe.address()
-      const port = typeof address === 'object' && address ? address.port : 0
-      probe.close(() => done(port))
-    })
-  })
-}
 
 
 function writeModules(dir: string, count: number, lines: number, tag: string): void {
@@ -83,14 +69,11 @@ async function bootFixture(
 }> {
   const repo = mkdtempSync(join(tmpdir(), `cezar-e2e-repo-git-diff-${label}-`))
   buildFixtureRepo(repo, count, lines)
-  const port = await freePort()
-  const baseUrl = `http://localhost:${port}`
-  const server = spawn(
-    process.execPath,
-    [cezarCli, 'serve', '--repo', repo, '--port', String(port), '--no-open'],
+
+  const server = spawnFixtureServer([cezarCli, 'serve', '--repo', repo, '--port', '0', '--no-open'],
     { env: fixtureServeEnv(repo), stdio: 'ignore' },
   )
-  await waitForHealth(baseUrl)
+  const baseUrl = await waitForFixtureServer(server)
   const project = await bootProjectId(baseUrl)
   return { repo, server, baseUrl, scoped: (path: string) => `/p/${project}${path}` }
 }

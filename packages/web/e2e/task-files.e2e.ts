@@ -1,13 +1,13 @@
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
+import { execFileSync, type ChildProcess } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import { stopFixtureServer } from './fixture-server'
+import { waitForSettledSample } from './visual-ready'
+import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
-import { waitForHealth, waitForStatus } from './poll'
+import { waitForStatus } from './poll'
 import { focusWithKeyboard } from './contrast'
 
 /**
@@ -32,20 +32,6 @@ const PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
   'base64',
 )
-
-function freePort(): Promise<number> {
-  return new Promise((done, fail) => {
-    const probe = createServer()
-    probe.once('error', fail)
-    probe.listen(0, '127.0.0.1', () => {
-      const address = probe.address()
-      const port = typeof address === 'object' && address ? address.port : 0
-      probe.close(() => done(port))
-    })
-  })
-}
-
-
 
 let browser: AgentBrowser
 let server: ChildProcess
@@ -72,17 +58,13 @@ beforeAll(async () => {
   git('add', '.')
   git('commit', '-qm', 'init')
 
-  const port = await freePort()
-  baseUrl = `http://localhost:${port}`
-  server = spawn(
-    process.execPath,
-    [cezarCli, 'serve', '--repo', dataRoot, '--port', String(port), '--no-open'],
+  server = spawnFixtureServer([cezarCli, 'serve', '--repo', dataRoot, '--port', '0', '--no-open'],
     // CEZ_REVIEW_GATE=1 because this spec is ABOUT the gate: it is opt-in (#489, default OFF),
     // so pinning it here is what makes the parked-at-review fixture reproducible instead of
     // depending on whatever the operator happens to export.
     { env: fixtureServeEnv(dataRoot, { CEZ_REVIEW_GATE: '1' }), stdio: 'ignore' },
   )
-  await waitForHealth(baseUrl)
+  baseUrl = await waitForFixtureServer(server)
   bootProject = await bootProjectId(baseUrl)
 
   const created = (await (
@@ -117,7 +99,7 @@ const transcriptLink = '[data-slot="user-bubble"] a[data-streamdown="link"]'
 // Failure trace and controlled resize reproduction:
 // https://github.com/hearsay-tools/cezarion/issues/664#issuecomment-5873034765
 async function scrollToTranscriptLink() {
-  const scroller = browser.waitForValue<{ x: number; y: number; height: number }>(`(() => {
+  const scroller = waitForSettledSample<{ x: number; y: number; height: number }>(browser, `(() => {
     const main = document.querySelector('[data-slot="main"]');
     if (!main || !document.querySelector(${JSON.stringify(transcriptLink)})) return null;
     const rect = main.getBoundingClientRect();
@@ -242,10 +224,10 @@ describe('the Files tab against a live dry-run worktree', () => {
       rmSync(outside, { recursive: true, force: true })
       browser.setViewport(360, 640)
       for (const theme of ['light', 'dark']) {
-        browser.goto(`${baseUrl}${scoped(artifact.link)}`)
+        browser.goto(`${baseUrl}${artifact.link}`)
         browser.waitForFunction(`document.querySelector('[data-slot="file-preview"]')?.textContent.includes('Snapshot survives source removal.')`)
         browser.evaluate(`document.documentElement.classList.toggle('light', ${theme === 'light'}); document.documentElement.classList.toggle('dark', ${theme === 'dark'})`)
-        const evidence = browser.waitForValue(`(() => { const pane = document.querySelector('[data-slot="file-preview"]'); if (!pane) return null; pane.scrollIntoView({ block: 'start' }); return { text: pane.textContent, images: pane.querySelectorAll('img').length, overflow: document.documentElement.scrollWidth > innerWidth, download: pane.querySelector('a[href$="/download"]')?.getAttribute('href') } })()`)
+        const evidence = waitForSettledSample(browser, `(() => { const pane = document.querySelector('[data-slot="file-preview"]'); if (!pane) return null; pane.scrollIntoView({ block: 'start' }); return { text: pane.textContent, images: pane.querySelectorAll('img').length, overflow: document.documentElement.scrollWidth > innerWidth, download: pane.querySelector('a[href$="/download"]')?.getAttribute('href') } })()`)
         expect(evidence).toMatchObject({ images: 0, overflow: false, download: `/api/v1/runs/${runId}/artifacts/${artifact.id}/download` })
         browser.screenshot(`${artifactsDir}/published-${theme}-360.png`)
       }
@@ -267,13 +249,13 @@ describe('the Files tab against a live dry-run worktree', () => {
 
     // Unlike Changes, the tree must stay visible on phones — it is the only navigation.
     expect(
-      browser.evaluate(
+      waitForSettledSample(browser,
         `document.querySelector('[data-slot="files-tree"]').offsetParent !== null`,
       ),
     ).toBe(true)
     // Session / Changes / Commits / Files.
     expect(browser.count('[data-slot="run-tabs"] a')).toBe(4)
-    expect(browser.evaluate(`document.documentElement.scrollWidth <= window.innerWidth`)).toBe(true)
+    expect(waitForSettledSample(browser, `document.documentElement.scrollWidth <= window.innerWidth`)).toBe(true)
 
     browser.screenshot(`${artifactsDir}/files-mobile.png`)
     browser.setViewport(1440, 900)

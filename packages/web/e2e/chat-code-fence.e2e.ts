@@ -1,15 +1,13 @@
-import { spawn, type ChildProcess } from 'node:child_process'
+import type { ChildProcess } from 'node:child_process'
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import { stopFixtureServer } from './fixture-server'
+import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { applyContrastQaVariant, contrastQaVariants, restoreContrastQaDefaults } from './contrast'
 import record from './fixtures/thread-run.record.json'
-import { waitForHealth } from './poll'
 
 /**
  * #742: a fenced code block in chat must keep one source line per visual line, in the user's
@@ -36,18 +34,6 @@ const document_ = (): string =>
   FENCES.map((f, i) => `Fence ${i + 1}:\n\n\`\`\`${f.lang}\n${f.body}\n\`\`\`\n`).join('\n')
   + `\nOpen fence:\n\n\`\`\`\n${OPEN_FENCE.body}`
 const ALL = [...FENCES, OPEN_FENCE]
-
-function freePort(): Promise<number> {
-  return new Promise((done, fail) => {
-    const probe = createServer()
-    probe.once('error', fail)
-    probe.listen(0, '127.0.0.1', () => {
-      const address = probe.address()
-      const port = typeof address === 'object' && address ? address.port : 0
-      probe.close(() => done(port))
-    })
-  })
-}
 
 let browser: AgentBrowser
 let server: ChildProcess
@@ -77,12 +63,10 @@ beforeAll(async () => {
   writeFileSync(join(dataRoot, '.ai/cezar/runs', `${RUN_ID}.ndjson`), transcript())
   cpSync(resolve(import.meta.dirname, 'fixtures/thread-run-images'), join(dataRoot, '.ai/cezar/runs', `${RUN_ID}-images`), { recursive: true })
 
-  const port = await freePort()
-  baseUrl = `http://localhost:${port}`
-  server = spawn(process.execPath, [cezarCli, 'serve', '--repo', dataRoot, '--port', String(port), '--no-open'], {
+  server = spawnFixtureServer([cezarCli, 'serve', '--repo', dataRoot, '--port', '0', '--no-open'], {
     env: fixtureServeEnv(dataRoot), stdio: 'ignore',
   })
-  await waitForHealth(baseUrl)
+  baseUrl = await waitForFixtureServer(server)
   bootProject = await bootProjectId(baseUrl)
   browser = AgentBrowser.open(sessionId)
   browser.setViewport(1440, 900)

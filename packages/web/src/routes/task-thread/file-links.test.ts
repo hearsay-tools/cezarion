@@ -30,6 +30,11 @@ describe('task file links', () => {
     const id = '4c15e25b-a08c-438d-a32b-fd1a8c6c90e2'
     expect(taskFileHref(`/tasks/task/files?artifact=${id}`, context)).toBe(`/p/project/tasks/task/files?artifact=${id}`)
   })
+  it('keeps unscoped legacy artifact links usable and does not reassign another task', () => {
+    const href = '/tasks/task/files?artifact=4c15e25b-a08c-438d-a32b-fd1a8c6c90e2'
+    expect(taskFileHref(href, { runId: 'task' })).toBe(href)
+    expect(taskFileHref(href, { runId: 'another', projectId: 'other' })).toBeNull()
+  })
   it('resolves document relative links against its directory', () => {
     expect(taskFileHref('next.md', { ...context, basePath: '/repo/docs/ADR.md' })).toBe('/p/project/tasks/task/files?path=%2Frepo%2Fdocs%2Fnext.md')
   })

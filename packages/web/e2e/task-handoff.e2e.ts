@@ -1,14 +1,12 @@
-import { spawn, type ChildProcess } from 'node:child_process'
-import { once } from 'node:events'
+import type { ChildProcess } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { waitForSettledSample } from './visual-ready'
 import type { RunRecord } from '@open-mercato/cezar-api-client'
-import { stopFixtureServer } from './fixture-server'
+import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv, getJson } from './agent-browser'
-import { waitForHealth } from './poll'
 import { applyContrastQaVariant, contrastSampleExpression, restoreContrastQaDefaults, type ContrastSample } from './contrast'
 
 // "Hand off" (#589) against the real server: the project webhook is set through the same PATCH
@@ -36,16 +34,10 @@ beforeAll(async () => {
   root = mkdtempSync(join(tmpdir(), 'cez-handoff-'))
   mkdirSync(join(root, '.ai/cezar'), { recursive: true })
   writeFileSync(join(root, '.ai/cezar/runs.json'), JSON.stringify([fixture('desktop'), fixture('mobile')]))
-  const probe = createServer()
-  probe.listen(0, '127.0.0.1')
-  await once(probe, 'listening')
-  const port = (probe.address() as { port: number }).port
-  await new Promise<void>(done => probe.close(() => done()))
-  baseUrl = `http://127.0.0.1:${port}`
-  server = spawn(process.execPath, [cezarCli, 'serve', '--repo', root, '--port', String(port), '--no-open'], {
+  server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
     env: fixtureServeEnv(root), stdio: 'ignore',
   })
-  await waitForHealth(baseUrl, 'the hand-off fixture')
+  baseUrl = await waitForFixtureServer(server)
   project = await bootProjectId(baseUrl)
   const saved = await fetch(`${baseUrl}/api/v1/projects/${project}`, {
     method: 'PATCH',
@@ -73,7 +65,7 @@ const settledShot = (name: string) => {
   browser.screenshot(join(artifacts, name))
 }
 
-const box = (selector: string) => browser.waitForValue(`(() => {
+const box = (selector: string) => waitForSettledSample(browser, `(() => {
   const el = document.querySelector(${JSON.stringify(selector)});
   if (!el) return null;
   const r = el.getBoundingClientRect();
@@ -129,6 +121,52 @@ describe('Hand off to webhook', () => {
     settledShot('desktop-sidebar-glyph.png')
   })
 
+  it('keeps the live glyph when an older stop-notifying list response arrives after re-enable (#795)', async () => {
+    const path = `${baseUrl}/api/v1/p/${project}/runs/desktop/notify`
+    const post = (notify: boolean) => fetch(path, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ notify }),
+    })
+    expect((await post(true)).ok).toBe(true)
+    browser.setViewport(1280, 800)
+    browser.goto(`${baseUrl}/p/${project}/tasks/desktop`)
+    browser.waitForFunction(`document.querySelector(${JSON.stringify(chip)}) !== null`)
+    const glyph = `document.querySelector('[data-run-id="desktop"] [data-slot="task-row-notify"]')`
+    browser.waitForFunction(`${glyph} !== null`)
+    // Hold only the real server's off-state list response, leaving POST, SSE and detail native.
+    // This is a route-response fixture, not a rewrite of any React-owned node.
+    browser.evaluate(`(() => {
+      window.__handoffFetch = window.fetch;
+      window.__offListHeld = false; window.__offListReleased = false;
+      window.fetch = async (...args) => {
+        const response = await window.__handoffFetch(...args);
+        const url = String(args[0]?.url ?? args[0]);
+        if (url.endsWith('/runs')) {
+          const rows = await response.clone().json();
+          if (rows.some(row => row.id === 'desktop' && row.notify !== true)) {
+            window.__offListHeld = true;
+            await new Promise(resolve => { window.__releaseOffList = resolve; });
+            window.__offListReleased = true;
+          }
+        }
+        return response;
+      };
+    })()`)
+    try {
+      browser.click(chip)
+      browser.click('[data-slot="notifying-menu"] [data-variant="destructive"]')
+      browser.waitForFunction(`${glyph} === null && window.__offListHeld === true`)
+      expect((await post(true)).ok).toBe(true)
+      browser.waitForFunction(`${glyph} !== null && document.querySelector(${JSON.stringify(chip)}) !== null`)
+      browser.evaluate(`window.__releaseOffList(); true`)
+      browser.waitForFunction(`window.__offListReleased === true && window.__cezIdle === true`)
+      expect(waitForSettledSample(browser, `${glyph} !== null`)).toBe(true)
+      const stored = await getJson<RunRecord>(`${baseUrl}/api/v1/p/${project}/runs/desktop`)
+      expect(stored.notify).toBe(true)
+    } finally {
+      browser.evaluate(`(() => { window.__releaseOffList?.(); window.fetch = window.__handoffFetch; })()`)
+    }
+  })
+
   it('is a bottom sheet with a full-width 44px action at 360×640', () => {
     browser.setViewport(360, 640)
     openThread('mobile')
@@ -151,12 +189,13 @@ describe('Hand off to webhook', () => {
     expect(trigger.height).toBeGreaterThanOrEqual(44)
     browser.click(handoff)
     // Settled: the sheet has slid in when its bottom edge sits on the viewport's.
-    const sheet = browser.waitForValue(`(() => {
+    const sheet = waitForSettledSample(browser, `(() => {
       const el = document.querySelector(${JSON.stringify(dialog)});
       if (!el || el.getAnimations().some(a => a.playState === 'running')) return null;
       const r = el.getBoundingClientRect();
-      return Math.abs(r.bottom - window.innerHeight) < 1 ? { left: r.left, width: r.width } : null;
-    })()`) as { left: number; width: number }
+      return { left: r.left, width: r.width, bottomGap: Math.abs(r.bottom - window.innerHeight) };
+    })()`) as { left: number; width: number; bottomGap: number }
+    expect(sheet.bottomGap).toBeLessThan(1)
     expect(sheet.left).toBe(0)
     expect(sheet.width).toBe(360)
     const action = box(submit)
@@ -201,7 +240,7 @@ describe('Hand off to webhook', () => {
   it('keeps the new-task notify row inside 360×640 with AA contrast', () => {
     browser.setViewport(360, 640)
     browser.goto(`${baseUrl}/p/${project}/new`)
-    const sample = browser.waitForValue(`(() => {
+    const sample = waitForSettledSample(browser, `(() => {
       const row = document.querySelector('[data-slot="notify-webhook-toggle"]')
       const card = document.querySelector('[data-slot="execution-options"]')
       if (!row || !card || row.getBoundingClientRect().height === 0) return null

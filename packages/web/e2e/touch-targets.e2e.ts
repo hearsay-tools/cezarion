@@ -1,14 +1,12 @@
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
+import { execFileSync, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { once } from 'node:events'
 import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { waitForSettledSample } from './visual-ready'
 import type { RunRecord } from '@open-mercato/cezar-api-client'
-import { waitForHealth } from './poll'
-import { stopFixtureServer } from './fixture-server'
+import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { contrastSampleExpression, focusWithKeyboard, type ContrastSample } from './contrast'
 
@@ -43,16 +41,10 @@ beforeAll(async () => {
     pullRequestUrl: 'https://github.com/o/r/pull/594', referencedIssueUrl: 'https://github.com/o/r/issues/451',
     steps: [{ id: 'task', name: 'Task', kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0, sessionId: 'touch-fixture-session' }],
   } satisfies RunRecord]))
-  const probe = createServer()
-  probe.listen(0, '127.0.0.1')
-  await once(probe, 'listening')
-  const port = (probe.address() as { port: number }).port
-  await new Promise<void>((done) => probe.close(() => done()))
-  baseUrl = `http://127.0.0.1:${port}`
-  server = spawn(process.execPath, [cezarCli, 'serve', '--repo', root, '--port', String(port), '--no-open'], {
+  server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
     env: fixtureServeEnv(root, { CEZ_SKILLS_AUTO_UPDATE: '0' }), stdio: 'ignore',
-  })
-  await waitForHealth(baseUrl, 'touch-targets fixture', { timeoutMs: 20_000 })
+  }, { timeoutMs: 20_000 })
+  baseUrl = await waitForFixtureServer(server)
   project = await bootProjectId(baseUrl)
   browser = AgentBrowser.open(`touch-${process.pid}`)
 })
@@ -85,7 +77,7 @@ const hitRectExpression = `(el) => {
 }`
 
 function smallTargets() {
-  return browser.evaluate(`(() => {
+  return waitForSettledSample(browser, `(() => {
     return [...document.querySelectorAll(${JSON.stringify(controls)})]
       .filter(el => el.checkVisibility())
       .map(el => {
@@ -96,7 +88,7 @@ function smallTargets() {
 }
 
 function overlappingTargets() {
-  return browser.evaluate(`(() => {
+  return waitForSettledSample(browser, `(() => {
     const nodes = [...document.querySelectorAll(${JSON.stringify(controls + ', [data-slot="wb-count"]')})]
       .filter(el => el.checkVisibility() && getComputedStyle(el).opacity !== '0');
     const overlaps = [];
@@ -124,7 +116,7 @@ function region(selector: string, mobile: boolean) {
       if (el.getAnimations().some(a => a.effect?.getComputedTiming().iterations !== Infinity && a.playState === 'running')) return false;
     return true;
   })()`)
-  const result = browser.evaluate(`(() => {
+  const result = waitForSettledSample(browser, `(() => {
     const el = document.querySelector(${JSON.stringify(selector)});
     el.scrollIntoView({block: 'center', inline: 'center'});
     const r = (${hitRectExpression})(el);
@@ -218,7 +210,7 @@ describe('density-independent mobile action targets (#166)', () => {
           browser.evaluate(`document.querySelector('[data-slot="main"]').scrollTop = 0`)
           expect(smallTargets(), path).toEqual([])
           expect(overlappingTargets(), path).toEqual([])
-          expect(browser.evaluate('document.documentElement.scrollWidth <= innerWidth'), path).toBe(true)
+          expect(waitForSettledSample(browser, 'document.documentElement.scrollWidth <= innerWidth'), path).toBe(true)
         }
       })
 
@@ -238,7 +230,7 @@ describe('density-independent mobile action targets (#166)', () => {
           const send = '[data-slot="composer"] button[aria-label="Start task"]'
           browser.waitForFunction(`document.querySelector('${send}')?.disabled === true`)
           // Empty/disabled action still reserves its space; a real tap cannot submit it.
-          const disabled = browser.evaluate(`(() => {
+          const disabled = waitForSettledSample(browser, `(() => {
             const el = document.querySelector('${send}'); el.scrollIntoView({block:'center'});
             const r=el.getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2,width:r.width,height:r.height};
           })()`) as { x: number; y: number; width: number; height: number }
@@ -304,7 +296,7 @@ describe('density-independent mobile action targets (#166)', () => {
           appearance('compact', theme)
           appearance(density, theme)
           expect(browser.evaluate(`document.querySelector('${textarea}').value`)).toBe('Follow-up draft')
-          expect(browser.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true)
+          expect(waitForSettledSample(browser, 'document.documentElement.scrollWidth <= innerWidth')).toBe(true)
           browser.screenshot(`${artifacts}/${width}-${density}-${theme}-follow-up.png`, { viewport: true })
 
           browser.goto(`${baseUrl}/p/${project}/workflows`)
@@ -356,7 +348,7 @@ describe('density-independent mobile action targets (#166)', () => {
           })()`)
           tapEdge(toggle, mobile)
           browser.waitForFunction(`document.querySelector('${toggle}').disabled === true`)
-          const pending = browser.evaluate(`(() => { const r=document.querySelector('${toggle}').getBoundingClientRect(); return {x:r.x+2,y:r.y+r.height/2,w:r.width,h:r.height}; })()`) as { x: number; y: number; w: number; h: number }
+          const pending = waitForSettledSample(browser, `(() => { const r=document.querySelector('${toggle}').getBoundingClientRect(); return {x:r.x+2,y:r.y+r.height/2,w:r.width,h:r.height}; })()`) as { x: number; y: number; w: number; h: number }
           if (mobile) expect([pending.w, pending.h]).toEqual([44, 44])
           browser.tapAt(Math.round(pending.x), Math.round(pending.y))
           browser.evaluate('window.releaseTouchSave(); window.fetch = window.touchFetch')
@@ -377,8 +369,8 @@ describe('density-independent mobile action targets (#166)', () => {
             browser.click('.settings-section-picker summary')
             region('[data-slot="settings-nav-mobile"] a:last-child', true)
           }
-          if (mobile) expect(browser.evaluate(`[...document.querySelectorAll('[data-slot="settings-nav-mobile"] a')].every(el => el.scrollWidth <= el.clientWidth)`)).toBe(true)
-          expect(browser.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true)
+          if (mobile) expect(waitForSettledSample(browser, `[...document.querySelectorAll('[data-slot="settings-nav-mobile"] a')].every(el => el.scrollWidth <= el.clientWidth)`)).toBe(true)
+          expect(waitForSettledSample(browser, 'document.documentElement.scrollWidth <= innerWidth')).toBe(true)
           browser.screenshot(`${artifacts}/${width}-${density}-${theme}-appearance.png`, { viewport: true })
         }, 60_000)
       }
@@ -411,7 +403,7 @@ describe('references on a device that cannot hover (#617 01b)', () => {
       browser.evaluate(`document.querySelector('[aria-label="Show run details"]').focus()`)
       browser.press('Enter')
       type Header = { noHover: boolean; chips: Array<{ w: number; h: number; top: number; right: number }>; inner: number; scroll: number }
-      const header = browser.waitForValue(`(() => {
+      const header = waitForSettledSample(browser, `(() => {
         const chips = [...document.querySelectorAll('[data-slot="run-meta"] :is([data-slot="pr-chip"], [data-slot="issue-chip"])')]
         if (chips.length !== 2 || chips.some((chip) => chip.getBoundingClientRect().width === 0)) return null
         return { noHover: matchMedia('(hover: none)').matches, inner: innerWidth, scroll: document.documentElement.scrollWidth,

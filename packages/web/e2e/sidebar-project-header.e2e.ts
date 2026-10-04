@@ -1,13 +1,12 @@
-import { spawn, type ChildProcess } from 'node:child_process'
+import type { ChildProcess } from 'node:child_process'
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { waitForSettledSample } from './visual-ready'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
-import { stopFixtureServer } from './fixture-server'
-import { waitForHealth } from './poll'
+import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { focusWithKeyboard } from './contrast'
 
 const artifacts = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_e2e')
@@ -24,17 +23,12 @@ beforeAll(async () => {
       id: status, title: `${status} task`, task: 'Header test', workflow: 'default', status,
       createdAt: '2026-09-01T00:00:00Z', finishedAt: '2026-09-01T01:00:00Z', tokensUsed: 0, archived: false, steps: [],
     }))))
-    const probe = createServer()
-    const port = await new Promise<number>(done => probe.listen(0, '127.0.0.1', () => {
-      const port = (probe.address() as { port: number }).port
-      probe.close(() => done(port))
-    }))
-    const url = `http://127.0.0.1:${port}`
-    const server = spawn(process.execPath, [cezarCli, 'serve', '--repo', root, '--port', String(port), '--no-open'], {
+    const server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
       env: fixtureServeEnv(root, { CEZ_REMOTE: remote ? '1' : '0', CEZ_FOLLOWUPS: '1', CEZ_AUTOMATIONS: '1' }), stdio: 'ignore',
     })
-    fixtures.push({ root, server, url, project: '', remote })
-    await waitForHealth(url)
+    fixtures.push({ root, server, url: '', project: '', remote })
+    const url = await waitForFixtureServer(server)
+    fixtures[fixtures.length - 1]!.url = url
     fixtures[fixtures.length - 1]!.project = await bootProjectId(url)
   }
   mkdirSync(artifacts, { recursive: true })
@@ -100,7 +94,7 @@ describe('project header actions', () => {
     browser.evaluate(`document.documentElement.classList.toggle('light', ${theme === 'light'})`)
     // The view tabs moved out of the drawer (#621): the tab bar holds Tasks/Git/GitHub and its
     // More sheet the rest, so "every view is reachable at 360px" is asserted there, at 44px.
-    const tabs = browser.waitForValue(`Array.from(document.querySelectorAll('[data-slot="mobile-tab-bar"] a, [data-slot="mobile-tab-bar"] button')).map(el => ({ width: el.getBoundingClientRect().width, height: el.getBoundingClientRect().height }))`, value => Array.isArray(value) && value.length > 0) as Array<{ width: number; height: number }>
+    const tabs = waitForSettledSample(browser, `Array.from(document.querySelectorAll('[data-slot="mobile-tab-bar"] a, [data-slot="mobile-tab-bar"] button')).map(el => ({ width: el.getBoundingClientRect().width, height: el.getBoundingClientRect().height }))`, value => Array.isArray(value) && value.length > 0) as Array<{ width: number; height: number }>
     expect(tabs.length).toBeGreaterThanOrEqual(3)
     expect(tabs.every(size => size.width >= 44 && size.height >= 44)).toBe(true)
     browser.click('[data-slot="mobile-tab-bar"] [data-tab="more"]')
@@ -115,7 +109,7 @@ describe('project header actions', () => {
     const drawer = '[data-slot="mobile-nav-drawer"]'
     browser.waitForStable(`(() => { const el = document.querySelector('${drawer}'); return el ? el.getBoundingClientRect().left : null })()`, { holdMs: 150, matcher: value => value === 0 })
     const trigger = `${drawer} [data-slot="drawer-project-current"] [data-slot="project-menu-trigger"]`
-    const size = browser.waitForValue(`(() => { const el = document.querySelector('${trigger}'); if (!el) return null; const box = el.getBoundingClientRect(); return { width: box.width, height: box.height, inLink: !!el.closest('a') } })()`) as { width: number; height: number; inLink: boolean }
+    const size = waitForSettledSample(browser, `(() => { const el = document.querySelector('${trigger}'); if (!el) return null; const box = el.getBoundingClientRect(); return { width: box.width, height: box.height, inLink: !!el.closest('a') } })()`) as { width: number; height: number; inLink: boolean }
     expect(size.width).toBeGreaterThanOrEqual(44)
     expect(size.height).toBeGreaterThanOrEqual(44)
     expect(size.inLink).toBe(false)

@@ -1,11 +1,10 @@
-import { spawn, type ChildProcess } from 'node:child_process'
+import type { ChildProcess } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { waitForHealth } from './poll'
-import { stopFixtureServer } from './fixture-server'
+import { waitForSettledSample } from './visual-ready'
+import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { expectGroupRowHeightMatchesTaskRow } from './row-height'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { applyContrastQaVariant, contrastQaVariants, type ContrastQaVariant, contrastSampleExpression, focusWithKeyboard, hoverVisiblePoint, type ContrastSample } from './contrast'
@@ -51,16 +50,10 @@ beforeAll(async () => {
   ]))
   // Two follow-ups for the Inbox nav count (#617 01c); the inbox itself is opt-in (CEZ_FOLLOWUPS).
   writeFileSync(join(root, '.ai/cezar/todos.json'), JSON.stringify([{ id: 'sel-1', summary: 'Review the PR' }, { id: 'sel-2', summary: 'Rerun the checks' }]))
-  const probe = createServer()
-  const port = await new Promise<number>((done) => probe.listen(0, '127.0.0.1', () => {
-    const address = probe.address() as { port: number }
-    probe.close(() => done(address.port))
-  }))
-  baseUrl = `http://127.0.0.1:${port}`
-  server = spawn(process.execPath, [cezarCli, 'serve', '--repo', root, '--port', String(port), '--no-open'], {
+  server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
     env: fixtureServeEnv(root, { CEZ_FOLLOWUPS: '1' }), stdio: 'ignore',
-  })
-  await waitForHealth(baseUrl, 'selection-states fixture', { timeoutMs: 20_000 })
+  }, { timeoutMs: 20_000 })
+  baseUrl = await waitForFixtureServer(server)
   expect((await (await fetch(`${baseUrl}/api/v1/runs`)).json()).map((run: { id: string }) => run.id).sort()).toEqual(['fin', 'ga', 'gb', 'one', 'two'])
   project = await bootProjectId(baseUrl)
   browser = AgentBrowser.open(`states-${process.pid}`)
@@ -211,7 +204,7 @@ function checkNavBody(variant: ContrastQaVariant, { base, projectId, container, 
     return { width: r.width, height: r.height, bg: getComputedStyle(el).backgroundColor, info: resolve('var(--info)'),
       row: getComputedStyle(document.querySelector(${JSON.stringify(skills)})).backgroundColor }
   })()`
-  const atRest = browser.waitForValue(marker) as Marker
+  const atRest = waitForSettledSample(browser, marker) as Marker
   expect({ width: atRest.width, height: atRest.height, bg: atRest.bg, row: atRest.row })
     .toEqual({ width: 7, height: 7, bg: atRest.info, row: 'rgba(0, 0, 0, 0)' })
   record(dot, 'update marker at rest', 3, 'background-color', 'parent')
@@ -227,7 +220,8 @@ function checkNavBody(variant: ContrastQaVariant, { base, projectId, container, 
     return { bg: s.backgroundColor, label: s.color, icon: getComputedStyle(el.querySelector('svg')).color, ink: resolve('var(--foreground)'),
       weight: s.fontWeight, width: r.width, height: r.height }
   })()`
-  const hovered = browser.waitForValue(ink(skills), (v: Ink | null) => v !== null && v.bg === fill.hover) as Ink
+  const hovered = waitForSettledSample(browser, ink(skills)) as Ink
+  expect(hovered.bg).toBe(fill.hover)
   expect({ label: hovered.label, icon: hovered.icon }).toEqual({ label: hovered.ink, icon: hovered.ink })
   record(skills, 'hover nav label', 4.5)
   record(`${skills} svg`, 'hover nav icon', 3)
@@ -236,13 +230,15 @@ function checkNavBody(variant: ContrastQaVariant, { base, projectId, container, 
 
   // Selected: the Skills page lights its own row, marker and all.
   open('/skills', '[data-slot="nav-update-marker"]')
-  const onSelected = browser.waitForValue(marker, (v: Marker | null) => v !== null && v.row === fill.selected) as Marker
+  const onSelected = waitForSettledSample(browser, marker) as Marker
+  expect(onSelected.row).toBe(fill.selected)
   expect({ width: onSelected.width, height: onSelected.height, bg: onSelected.bg }).toEqual({ width: 7, height: 7, bg: onSelected.info })
   record(dot, 'update marker on the selected row', 3, 'background-color', 'parent')
 
   open('/inbox', '[aria-label="More views"]')
   const more = `${nav} [aria-label="More views"]`
-  const selectedMore = browser.waitForValue(ink(more), (v: Ink | null) => v !== null && v.bg === fill.selected) as Ink
+  const selectedMore = waitForSettledSample(browser, ink(more)) as Ink
+  expect(selectedMore.bg).toBe(fill.selected)
   expect(selectedMore.icon).toBe(selectedMore.ink)
   expect(browser.count(`${nav} a[aria-current="page"]`)).toBe(0)
   expect(browser.count(`${more} [data-slot="overflow-inbox-dot"]`)).toBe(1)
@@ -260,7 +256,8 @@ function checkNavBody(variant: ContrastQaVariant, { base, projectId, container, 
   // New task on /new: the same fill as the selected nav item and the selected task row.
   const newTask = `${container}[data-sidebar-item="new-task"]`
   open('/new', '[data-sidebar-item="new-task"][aria-current="page"]')
-  const composer = browser.waitForValue(ink(newTask), (v: Ink | null) => v !== null && v.bg === fill.selected) as Ink
+  const composer = waitForSettledSample(browser, ink(newTask)) as Ink
+  expect(composer.bg).toBe(fill.selected)
   expect({ label: composer.label, icon: composer.icon, weight: composer.weight }).toEqual({ label: composer.ink, icon: composer.ink, weight: '500' })
   record(newTask, 'new task on /new', 4.5)
 
@@ -273,7 +270,8 @@ function checkNavBody(variant: ContrastQaVariant, { base, projectId, container, 
     // restoring a 36px control while this variant expects ultra density's 27px.
     browser.waitForStable(`document.querySelector(${JSON.stringify(gear)}) !== null && window.__cezIdle === true`, { holdMs: 150 })
     applyContrastQaVariant(browser, variant)
-    const footer = browser.waitForValue(ink(gear), (v: Ink | null) => v !== null && v.bg === fill.selected) as Ink
+    const footer = waitForSettledSample(browser, ink(gear)) as Ink
+    expect(footer.bg).toBe(fill.selected)
     const railControlSize = variant.density === 'ultra' ? 27 : 36
     expect({ width: footer.width, height: footer.height, icon: footer.icon }).toEqual({ width: railControlSize, height: railControlSize, icon: footer.ink })
     record(`${gear} svg`, 'active footer icon', 3)
@@ -286,7 +284,7 @@ function checkNeedsYouDot(_variant: ContrastQaVariant, { container, open, record
 }): void {
   const dot = `${container}[data-slot="view-tabs"] [data-slot="nav-needs-you-dot"]`
   open('/git', '[data-slot="nav-needs-you-dot"]')
-  const facts = browser.waitForValue(`(() => {
+  const facts = waitForSettledSample(browser, `(() => {
     const el = document.querySelector(${JSON.stringify(dot)}); if (!el) return null
     ${resolveFn}
     const r = el.getBoundingClientRect(), s = getComputedStyle(el)
@@ -367,12 +365,14 @@ describe('selection and control states (#171)', () => {
           bg: getComputedStyle(row).backgroundColor, pin: pin && getComputedStyle(pin).opacity }
       })()`
       // At rest: no fill, pin invisible (its slot is still reserved).
-      const rest = browser.waitForValue(geometry(other), (g: Geometry) => g.bg === 'rgba(0, 0, 0, 0)' && g.pin === '0') as Geometry
+      const rest = waitForSettledSample(browser, geometry(other)) as Geometry
+      expect({ bg: rest.bg, pin: rest.pin }).toEqual({ bg: 'rgba(0, 0, 0, 0)', pin: '0' })
       expect(browser.evaluate(`getComputedStyle(document.querySelector('${selected}')).backgroundColor`)).toBe(fill.selected)
       hoverVisiblePoint(browser, other)
       // Hovered: the neutral hover fill and the pin revealed — and the title box and the row
       // height identical to rest, to the pixel. This is the jump the old w-0→w-5 pin caused.
-      const hovered = browser.waitForValue(geometry(other), (g: Geometry) => g.bg === fill.hover && g.pin === '1') as Geometry
+      const hovered = waitForSettledSample(browser, geometry(other)) as Geometry
+      expect({ bg: hovered.bg, pin: hovered.pin }).toEqual({ bg: fill.hover, pin: '1' })
       expect({ title: hovered.title, row: hovered.row }).toEqual({ title: rest.title, row: rest.row })
       // The row as the issue specifies it, from the resolved stylesheet rather than the classes:
       // nothing in a later sheet may restyle it (an override layer once clamped the title to two
@@ -398,7 +398,7 @@ describe('selection and control states (#171)', () => {
       expect(browser.evaluate(`(() => { const a = document.querySelector('${other} [data-slot="task-row-meta"] [data-slot="pr-chip"]'); return a && { tag: a.tagName, href: a.getAttribute('href') } })()`))
         .toEqual({ tag: 'A', href: 'https://github.com/o/r/pull/594' })
       // Every row is the same two-line height.
-      expect(browser.evaluate(`Math.round(document.querySelector('${selected}').getBoundingClientRect().height)`)).toBe(rest.row)
+      expect(waitForSettledSample(browser, `Math.round(document.querySelector('${selected}').getBoundingClientRect().height)`)).toBe(rest.row)
       // Ink on both fills: text at 4.5:1, the status dot as a non-text mark at 3:1.
       for (const [row, state] of [[selected, 'selected'], [other, 'hover']] as const) {
         for (const part of ['[data-slot="task-row-title"]', '[data-slot="task-row-meta"]']) {
@@ -457,7 +457,7 @@ describe('selection and control states (#171)', () => {
       browser.evaluate(`document.querySelector('[data-slot="execution-options"] summary').scrollIntoView({ block: 'center' })`)
       browser.click('[data-slot="execution-options"] summary')
       browser.moveTo(0, 0)
-      const bounds = () => browser.evaluate(`(() => {
+      const bounds = () => waitForSettledSample(browser, `(() => {
         const r = document.querySelector('${model}').getBoundingClientRect(); return { width: r.width, height: r.height }
       })()`) as { width: number; height: number }
       const originalBounds = bounds()
@@ -506,7 +506,7 @@ describe('selection and control states (#171)', () => {
         const el = document.querySelector('${disabled}'); el.click(); el.focus()
         return { disabled: el.disabled, focused: document.activeElement === el, menu: !!document.querySelector('[role="menu"]') }
       })()`)).toEqual({ disabled: true, focused: false, menu: false })
-      expect(browser.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true)
+      expect(waitForSettledSample(browser, 'document.documentElement.scrollWidth <= innerWidth')).toBe(true)
       browser.screenshot(`${artifacts}/states-composer-${variant.id}.png`, { viewport: true })
     })
   }

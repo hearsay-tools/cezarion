@@ -22,6 +22,15 @@ describe('Markdown', () => {
     expect(screen.getByRole('link', { name: 'spaced' }).getAttribute('href')).toBe('/p/other/tasks/task-one/files?path=file%3A%2F%2F%2Ftmp%2Fa%2520b.md')
   })
 
+  it.each([
+    { runId: 'owner-task', projectId: 'owner' },
+    { runId: 'another-task', projectId: 'other' },
+  ])('preserves a scoped artifact destination in $projectId task context', context => {
+    const href = '/p/owner/tasks/owner-task/files?artifact=4c15e25b-a08c-438d-a32b-fd1a8c6c90e2'
+    render(<TaskFileContext.Provider value={context}><Markdown>{`[Report](${href})`}</Markdown></TaskFileContext.Provider>)
+    expect(screen.getByRole('link', { name: 'Report' }).getAttribute('href')).toBe(href)
+  })
+
   it('retains external link semantics and confirmation inside task context', () => {
     render(<TaskFileContext.Provider value={{ runId: 'task-one' }}><Markdown>{'[Website](https://example.com)'}</Markdown></TaskFileContext.Provider>)
     fireEvent.click(screen.getByRole('link', { name: 'Website' }))

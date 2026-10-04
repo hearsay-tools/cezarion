@@ -1,14 +1,13 @@
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
+import { execFileSync, type ChildProcess } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { ApiRun, CreateRunInput, RunRecord, WorkspaceConfigResponse } from '@open-mercato/cezar-api-client'
 
-import { stopFixtureServer } from './fixture-server'
+import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv, getJson } from './agent-browser'
-import { pollFor, waitForHealth } from './poll'
+import { pollFor } from './poll'
 
 const sessionId = `e2e-composer-defaults-${process.pid}`
 
@@ -17,19 +16,6 @@ let server: ChildProcess
 let dataRoot: string
 let baseUrl: string
 let bootProject: string
-
-function freePort(): Promise<number> {
-  return new Promise((done, fail) => {
-    const probe = createServer()
-    probe.once('error', fail)
-    probe.listen(0, '127.0.0.1', () => {
-      const address = probe.address()
-      const port = typeof address === 'object' && address ? address.port : 0
-      probe.close(() => done(port))
-    })
-  })
-}
-
 
 async function putDefaults(autonomous: boolean | null, worktree: boolean | null): Promise<void> {
   const response = await fetch(`${baseUrl}/api/v1/workspace/config`, {
@@ -68,14 +54,10 @@ beforeAll(async () => {
   git('add', '.')
   git('commit', '-qm', 'init')
 
-  const port = await freePort()
-  baseUrl = `http://localhost:${port}`
-  server = spawn(
-    process.execPath,
-    [cezarCli, 'serve', '--repo', dataRoot, '--port', String(port), '--no-open'],
+  server = spawnFixtureServer([cezarCli, 'serve', '--repo', dataRoot, '--port', '0', '--no-open'],
     { env: { ...fixtureServeEnv(dataRoot), CEZ_AUTONOMOUS_DEFAULT: '' }, stdio: 'ignore' },
   )
-  await waitForHealth(baseUrl)
+  baseUrl = await waitForFixtureServer(server)
   bootProject = await bootProjectId(baseUrl)
   browser = AgentBrowser.open(sessionId)
   browser.setViewport(1440, 900)

@@ -1,14 +1,12 @@
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
+import { execFileSync, type ChildProcess } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { createServer } from 'node:net'
-import { once } from 'node:events'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import { stopFixtureServer } from './fixture-server'
+import { waitForSettledSample } from './visual-ready'
+import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, cezarCli, fixtureServeEnv } from './agent-browser'
-import { waitForHealth } from './poll'
 
 /**
  * #484 end-to-end: skill search must rank the (almost-)exact match to the TOP wherever it is
@@ -22,19 +20,6 @@ import { waitForHealth } from './poll'
 
 const artifactsDir = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_e2e')
 const sessionId = `e2e-skill-search-${process.pid}`
-
-function freePort(): Promise<number> {
-  return new Promise((done, fail) => {
-    const probe = createServer()
-    probe.once('error', fail)
-    probe.listen(0, '127.0.0.1', () => {
-      const address = probe.address()
-      const port = typeof address === 'object' && address ? address.port : 0
-      probe.close(() => done(port))
-    })
-  })
-}
-
 
 let browser: AgentBrowser
 let server: ChildProcess
@@ -78,14 +63,10 @@ beforeAll(async () => {
     writeFileSync(join(dataRoot, `.ai/skills/${name}.md`), `---\ndescription: Browse fixture ${i}\n---\n\nTest skill.\n`)
   }
 
-  const port = await freePort()
-  baseUrl = `http://localhost:${port}`
-  server = spawn(
-    process.execPath,
-    [cezarCli, 'serve', '--repo', dataRoot, '--port', String(port), '--no-open'],
+  server = spawnFixtureServer([cezarCli, 'serve', '--repo', dataRoot, '--port', '0', '--no-open'],
     { env: fixtureServeEnv(dataRoot), stdio: 'ignore' },
   )
-  await waitForHealth(baseUrl)
+  baseUrl = await waitForFixtureServer(server)
 
   browser = AgentBrowser.open(sessionId)
   browser.setViewport(1440, 900)
@@ -199,7 +180,7 @@ describe('#163 mobile skill picker', () => {
     })()`)
     expect(browser.evaluate(`document.activeElement?.dataset.slot === 'command-input'`)).toBe(false)
     expect(browser.count('[data-slot="source-menu"]')).toBe(1)
-    const geometry = browser.evaluate(`(() => {
+    const geometry = waitForSettledSample(browser, `(() => {
       const popover = document.querySelector('[data-slot="popover-content"]').getBoundingClientRect();
       const input = document.querySelector('[data-slot="command-input"]');
       return { left: popover.left, right: popover.right, top: popover.top, bottom: popover.bottom,

@@ -188,7 +188,10 @@ export function hoverVisiblePoint(browser: AgentBrowser, selector: string): void
     `(() => {
     const target = document.querySelector(${JSON.stringify(selector)})
     if (!target) return null
+    // #795/#758: scroll requests rendering; box reads must not force skipped layout.
+    const rendered = target.checkVisibility({ contentVisibilityAuto: true })
     target.scrollIntoView({ block: 'center', inline: 'nearest' })
+    if (!rendered) return null
     for (const rect of target.getClientRects()) {
       for (const yPart of [0.25, 0.5, 0.75]) {
         for (const xPart of [0.25, 0.5, 0.75]) {

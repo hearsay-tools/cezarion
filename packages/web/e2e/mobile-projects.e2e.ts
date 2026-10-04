@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
+import { waitForSettledSample } from './visual-ready'
 import { AgentBrowser, bootProjectId, readTestEnv } from './agent-browser'
 import { readSharedProjects, snapshotSharedHome, writeSharedProjects } from './workspace-registry'
 import { applyContrastQaVariant, contrastQaVariants, contrastSampleExpression, restoreContrastQaDefaults, type ContrastSample } from './contrast'
@@ -92,7 +93,7 @@ describe('mobile top bar and project drawer', () => {
       // The other project's three runs arrive with the workspace runs index.
       browser.waitForFunction(`document.querySelector(${JSON.stringify(MENU)})?.getAttribute('aria-label') === 'Open projects. Elsewhere: 1 needs you, 1 failed, 1 finished'`)
 
-      const bar = browser.evaluate(`(() => {
+      const bar = waitForSettledSample(browser, `(() => {
         const top = document.querySelector(${JSON.stringify(BAR)})
         const row = top.firstElementChild.getBoundingClientRect()
         const menu = document.querySelector(${JSON.stringify(MENU)}).getBoundingClientRect()
@@ -114,7 +115,7 @@ describe('mobile top bar and project drawer', () => {
       expect(bar.overflow).toBeLessThanOrEqual(0)
 
       // The pills are the rail's, right-aligned in the 64px button and clear of the 20px icon.
-      const pills = browser.evaluate(`(() => {
+      const pills = waitForSettledSample(browser, `(() => {
         const menu = document.querySelector(${JSON.stringify(MENU)})
         const box = menu.getBoundingClientRect()
         const rect = (slot) => menu.querySelector('[data-slot="rail-pill-' + slot + '"]')?.getBoundingClientRect()
@@ -136,7 +137,7 @@ describe('mobile top bar and project drawer', () => {
 
       browser.click(MENU)
       browser.waitForFunction(`document.querySelector(${JSON.stringify(DRAWER)})?.getBoundingClientRect().x === 0`)
-      const drawer = browser.evaluate(`(() => {
+      const drawer = waitForSettledSample(browser, `(() => {
         const root = document.querySelector(${JSON.stringify(DRAWER)})
         const rect = (selector) => root.querySelector(selector)?.getBoundingClientRect()
         const order = [...root.querySelectorAll('[data-slot="drawer-identity"], [data-slot="drawer-projects"], [data-slot="sidebar-content"], [data-slot="drawer-global"]')]
@@ -227,7 +228,7 @@ describe('phone Tools page (#621 follow-up)', () => {
         browser.evaluate(`document.querySelector('#tools-heading').scrollIntoView({ block: 'start' })`)
         browser.waitForFunction(`document.querySelector('[data-slot="tools-settings"]').getBoundingClientRect().top < 200`)
 
-        const page = browser.evaluate(`(() => {
+        const page = waitForSettledSample(browser, `(() => {
           const rows = [...document.querySelectorAll('[data-route="workspace-tools"] [data-slot="tool-row"]')]
           return {
             rows: rows.map((row) => ({ available: row.getAttribute('data-available'), tone: row.querySelector('[data-slot="status-dot"]')?.getAttribute('data-tone'), size: row.querySelector('[data-slot="status-dot"]')?.getBoundingClientRect().width, state: row.querySelector('dd > span')?.textContent, hint: row.querySelector('[data-slot="tool-hint"]')?.textContent ?? null, setup: row.querySelector('[data-slot="tool-setup"]')?.getBoundingClientRect().height ?? null })),

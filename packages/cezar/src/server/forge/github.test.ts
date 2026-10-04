@@ -3377,13 +3377,30 @@ describe('fetchGithubItem (#692)', () => {
     });
   });
 
-  it('serves a cache hit within the TTL and bypasses it on refresh', async () => {
-    const argvs = ghSpy(happy);
-    await fetchGithubItem('/repo/item-cache', 'pr', 42);
-    await fetchGithubItem('/repo/item-cache', 'pr', 42);
-    expect(views(argvs)).toBe(1);
-    await fetchGithubItem('/repo/item-cache', 'pr', 42, true);
+  it.each(['issue', 'pr'] as const)('preserves %s label colours through cache hits and refresh without extra requests', async (kind) => {
+    let labels = [{ name: 'bug', color: 'd73a4a' }, { name: 'unknown', color: '' }];
+    const argvs = ghSpy((argv) => itemView(argv) ? JSON.stringify(view({ labels })) : happy(argv));
+    const root = `/repo/item-colours-${kind}`;
+    const first = await fetchGithubItem(root, kind, 42);
+    expect(first).toMatchObject({ item: { labels: ['bug', 'unknown'] }, labelColors: { bug: 'd73a4a' } });
+    const calls = argvs.length;
+    expect(await fetchGithubItem(root, kind, 42)).toEqual(first);
+    expect(argvs).toHaveLength(calls);
+    labels = [{ name: 'enhancement', color: 'a2eeef' }];
+    const refreshed = await fetchGithubItem(root, kind, 42, true);
+    expect(refreshed).toMatchObject({ item: { labels: ['enhancement'] }, labelColors: { enhancement: 'a2eeef' } });
+    expect(refreshed.available && refreshed.labelColors).toEqual({ enhancement: 'a2eeef' });
+    expect(await fetchGithubItem(root, kind, 42)).toEqual(refreshed);
+    // One cached availability probe, plus a view and comment count call per lookup.
+    expect(argvs).toHaveLength(5);
     expect(views(argvs)).toBe(2);
+  });
+
+  it('returns an empty colour map when GitHub supplies no label colours', async () => {
+    ghSpy((argv) => itemView(argv) ? JSON.stringify(view({ labels: [{ name: 'unknown' }] })) : happy(argv));
+    expect(await fetchGithubItem('/repo/item-no-colours', 'issue', 42)).toMatchObject({
+      item: { labels: ['unknown'] }, labelColors: {},
+    });
   });
 
   it('does not cache an unavailable answer', async () => {
@@ -3427,10 +3444,12 @@ describe('fetchGithubItem (#692)', () => {
     expect(await fetchGithubItem('/repo/item-dry', 'pr', 128)).toMatchObject({
       available: true,
       item: { kind: 'pr', number: 128 },
+      labelColors: { tests: 'c5def5' },
     });
     expect(await fetchGithubItem('/repo/item-dry', 'issue', 142)).toMatchObject({
       available: true,
       item: { kind: 'issue', number: 142 },
+      labelColors: { bug: 'd73a4a' },
     });
     expect(await fetchGithubItem('/repo/item-dry', 'pr', 99999)).toEqual({ available: true, item: null });
     expect(execFileMock).not.toHaveBeenCalled();

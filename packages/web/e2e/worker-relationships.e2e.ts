@@ -1,14 +1,12 @@
-import { spawn, execFileSync, type ChildProcess } from 'node:child_process'
+import { clickAppearanceControl } from './appearance-control'
+import { execFileSync, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { once } from 'node:events'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, expect, it } from 'vitest'
-import { waitForHealth } from './poll'
-import { settleVisual } from './visual-ready'
-import { stopFixtureServer } from './fixture-server'
+import { waitForSettledSample } from './visual-ready'
+import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 
 const artifacts = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_e2e')
@@ -55,13 +53,9 @@ beforeAll(async () => {
   execFileSync('git', ['init', '-q', '-b', 'main', other])
   mkdirSync(join(root, '.cez-home'), { recursive: true })
   writeFileSync(join(root, '.cez-home/config.json'), JSON.stringify({ projects: [{ id: 'other-project', name: 'Other project', root: other, source: 'local', addedAt: now, lastOpenedAt: now }] }))
-  const probe = createServer(); probe.listen(0, '127.0.0.1'); await once(probe, 'listening')
-  const address = probe.address(); if (!address || typeof address === 'string') throw Error('No fixture port')
-  const port = address.port; await new Promise<void>(done => probe.close(() => done()))
-  base = `http://localhost:${port}`
-  server = spawn(process.execPath, [cezarCli, 'serve', '--repo', root, '--port', String(port), '--no-open'], { env: fixtureServeEnv(root, { CEZ_DELEGATION: '0', CEZ_AUTONAME: '0' }), stdio: ['ignore', 'pipe', 'pipe'] })
+  server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], { env: fixtureServeEnv(root, { CEZ_DELEGATION: '0', CEZ_AUTONAME: '0' }), stdio: ['ignore', 'pipe', 'pipe'] }, { timeoutMs: 20_000 })
   server.stdout?.on('data', chunk => { diagnostic += String(chunk) }); server.stderr?.on('data', chunk => { diagnostic += String(chunk) })
-  try { await waitForHealth(base, 'worker-relationships fixture', { timeoutMs: 20_000 }) }
+  try { base = await waitForFixtureServer(server) }
   catch (error) { throw new Error(`${String(error)}\n${diagnostic}`, { cause: error }) }
   project = await bootProjectId(base)
   browser = AgentBrowser.open(`e2e-workers-${process.pid}`)
@@ -126,9 +120,9 @@ for (const [width, height] of [[1440, 900], [360, 640]]) for (const theme of ['l
   it(`${width}x${height} ${theme}: keyboard reaches last worker under sticky header with 44px targets`, () => {
     browser.setViewport(width!, height!)
     browser.goto(`${base}/settings/global/appearance`)
-    // Registry arrival mounts the project rail and can move already-visible theme radios.
-    settleVisual(browser, '[data-slot="appearance-theme"]', { idle: true })
-    browser.click(`[data-slot="appearance-theme"] [data-value="${theme}"]`)
+    browser.waitForFunction(`document.querySelector('[data-slot="appearance-theme"]') !== null`)
+    // Completed registry chrome can move theme radios; the helper settles before clicking.
+    clickAppearanceControl(browser, 'theme', theme)
     // A hard navigation must follow the committed browser-local preference, not just the click.
     browser.waitForFunction(`localStorage.getItem('cez-theme') === '${theme}' &&
       document.querySelector('[data-slot="appearance-theme"] [data-value="${theme}"]')?.getAttribute('aria-checked') === 'true' &&
@@ -138,7 +132,7 @@ for (const [width, height] of [[1440, 900], [360, 640]]) for (const theme of ['l
     browser.setReducedMotion()
     browser.evaluate(`document.querySelector('${region} a').focus()`)
     for (let i = 1; i < 32; i++) browser.press('Tab')
-    const facts = browser.evaluate(`(() => {
+    const facts = waitForSettledSample(browser, `(() => {
       const section = document.querySelector('${region}'); const list = section.querySelector('ul'); const links = [...section.querySelectorAll('a')];
       const last = links.at(-1), r = last.getBoundingClientRect(), container = list.getBoundingClientRect();
       return { focused: document.activeElement === last, visible: r.top >= Math.max(0, container.top) && r.bottom <= Math.min(innerHeight, container.bottom),
@@ -264,16 +258,16 @@ it('keeps request waits consistent in threads, global tasks and the palette at p
   for (const [width, height] of [[1440, 900], [360, 640]] as const) for (const theme of ['light', 'dark']) {
     browser.setViewport(width, height)
     browser.goto(`${base}/settings/appearance`)
-    // Registry arrival mounts the project rail and can move already-visible theme radios.
-    settleVisual(browser, '[data-slot="appearance-theme"]', { idle: true })
-    browser.click(`[data-slot="appearance-theme"] [data-value="${theme}"]`)
+    browser.waitForFunction(`document.querySelector('[data-slot="appearance-theme"]') !== null`)
+    // Completed registry chrome can move theme radios; the helper settles before clicking.
+    clickAppearanceControl(browser, 'theme', theme)
     for (const [id, label] of [[requestParentId, 'Waiting on worker replies'], [requestWorkerId, 'Waiting on parent reply']] as const) {
       open(id)
       browser.waitForFunction(`document.querySelector('[data-slot="paused-hint"]') !== null`)
       expect(browser.text('[data-slot="paused-hint"]')).toContain(label)
       expect(browser.text(region)).toContain(label)
       expect(browser.count('[data-slot="ask-card"]')).toBe(0)
-      expect(browser.evaluate('document.documentElement.scrollWidth > innerWidth')).toBe(false)
+      expect(waitForSettledSample(browser, 'document.documentElement.scrollWidth > innerWidth')).toBe(false)
       browser.screenshot(join(artifacts, `request-wait-${id === requestWorkerId ? 'worker' : 'parent'}-${width}-${theme}.png`), { viewport: true })
       observations.push({ requestWait: id === requestWorkerId ? 'worker' : 'parent', width, height, theme, label, overflow: false })
     }
