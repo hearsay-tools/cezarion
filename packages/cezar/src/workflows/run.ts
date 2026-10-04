@@ -5517,11 +5517,14 @@ export class RunManager {
         this.store.appendEvent(runId, { type: 'step-end', stepId, status: 'done' });
         const completed = this.store.getRun(runId);
         const waitingIndex = completed ? this.waitingWorkflowStepIndex(completed) : -1;
-        if (!state.finishRequested && completed?.workflowDef && waitingIndex >= 0) {
+        if (completed?.workflowDef && waitingIndex >= 0) {
           const waitingStep = completed.workflowDef.steps[waitingIndex]!;
           this.store.updateStep(runId, waitingStep.id, { status: 'done', finishedAt: finishedAt() });
           this.store.appendEvent(runId, { type: 'step-end', stepId: waitingStep.id, status: 'done' });
-          if (waitingIndex < completed.workflowDef.steps.length - 1) {
+          // Finish accepts this resumed step before the async settlement gate,
+          // but must not launch the remaining workflow. A later cancellation
+          // may cancel still-live steps, never this completed one (R30).
+          if (!state.finishRequested && waitingIndex < completed.workflowDef.steps.length - 1) {
             resumeWorkflow = {
               workflow: completed.workflowDef,
               startAt: waitingIndex + 1,
