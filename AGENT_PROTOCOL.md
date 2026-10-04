@@ -762,7 +762,9 @@ restart. Production 60-second retries release resources only after real holder e
 cannot touch a newly admitted native execution. Disposal/detach stops retries; recovery/reattach
 reconstructs their durable intents from private generation checkpoints even if the run index is
 missing, corrupt, or quarantines the worker. Surviving unknown private evidence protects local
-and fallback scratch from generic sweeping; unreadable discovery retries too. If uncertainty
+and fallback scratch from generic sweeping; unreadable discovery retries too. Unknown fallback
+ownership retains its saved location. Partial removal retains a directory-identity receipt and
+the pointer until the fallback is gone, so permissions recovering cannot strand cleanup. If uncertainty
 never clears, files remain indefinitely.
 Only prior-boot evidence and process enumeration scope are synthetic; cwd permission denial,
 process exit, native wires, stores and Git remain real. Linux-only OS coverage exempts no runner;

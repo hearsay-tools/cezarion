@@ -193,8 +193,8 @@ belongs to another cezar. The second is the ordinary `cancel` path.
 
 The private execution checkpoint records terminal scratch-cleanup intent (resource identity and
 workspace path) atomically alongside the completed generation. An intact terminal worker record
-can reconstruct this optional field for older checkpoints; no new configuration or separate journal
-is needed. Starting a new generation drops the prior intent. `WorkerScratchCleanup` discovers
+can reconstruct this optional field for older checkpoints; no new configuration is needed. Starting
+a new generation drops the prior intent. `WorkerScratchCleanup` discovers
 private sidecars independently of the run index, so corrupt/missing `runs.json` and quarantined
 worker rows cannot make local or fallback scratch eligible for the generic orphan sweep. Even
 unreadable/malformed sidecars reserve those locations. Missing terminal intent is uncertainty,
@@ -209,6 +209,16 @@ its own intent. Unknown execution/process evidence and path permission errors re
 keep periodic rechecks alive. If the private evidence directory itself cannot be enumerated, the
 sweep retains all scratch and retries discovery; once readable, ordinary orphan sweeping resumes
 and terminal worker scratch again requires fresh holder proof.
+
+A saved fallback location remains a holder candidate even when its `.cez-owner` cannot be read.
+Unknown/malformed pointers or ownership block deletion and reuse; they never become an empty
+location list. Fallback directories are removed before the local pointer. Before recursive removal,
+an atomic private receipt under local scratch binds previously verified ownership to that fallback's
+device, inode and birth time. This survives an interrupted removal that already deleted the owner
+marker. A missing marker may use only the matching receipt; unreadable/foreign ownership still
+blocks, and the receipt cannot authorize a replacement directory. Failed fallback removal retains both pointer and receipt, so
+restart and the ordinary 60-second retry can finish after permissions and holders clear. The local
+pointer/receipts are removed only after every fallback is proven absent.
 
 Destroy remains an explicit persisted request for worktree/branch removal. Collection alone never
 requests it. Existing authorized retention after parent Finish keeps its behavior, with the same
@@ -345,5 +355,25 @@ candidate remains. If that proof never becomes available, files remain indefinit
   retry, ordinary orphan reclamation after discovery recovers, and stripped role metadata.
   Real holder exit releases resources through the unchanged 60-second retry. The existing
   native stale-generation guard passes for all five runners.
+- Server build, server test typecheck and `git diff --check` passed. Full gate and independent
+  incremental review remain with the parent task.
+
+
+### Fallback retry review follow-up (2026-10-04)
+
+- Baseline `2a59ae42`, the two changed production sources temporarily restored: filter
+  `old fallback` in `scratch-cleanup.test.ts` produced **two behavioral failures**. A real
+  unreadable owner marker incorrectly changed holder safety to true; a real unwritable
+  fallback parent caused cleanup to erase the saved fallback pointer. Source restoration was
+  verified byte-for-byte. No helper-import or spy-target failure counted as red.
+- Focused seven-file run: **190 passed**, including all 15 native R36 cases and **22** scratch
+  cleanup cases. New guards prove restart and ordinary 60-second retries after marker denial
+  or partial removal, and that a saved removal receipt cannot delete an ownerless or foreign
+  replacement directory. Temporary environment changes are restored explicitly.
+- Both standalone reviewer reproductions now retain the old location and a pending retry.
+  Extending only their final observation to 61 seconds (production timers unchanged, no fake
+  timers) observed fallback removal and zero pending timers after permissions/holders cleared.
+  Permission changes, holder cwd and filesystem removals are real; only process enumeration
+  is scoped to the actual child. Tests remain Linux/unprivileged-user specific for EACCES.
 - Server build, server test typecheck and `git diff --check` passed. Full gate and independent
   incremental review remain with the parent task.

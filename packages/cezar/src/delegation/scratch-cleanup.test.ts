@@ -1,4 +1,6 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -7,6 +9,14 @@ import { manager, store, root, worker, reopenRuntime, useWorkerWaitFixture } fro
 import { scopeFixtureProcesses } from './process-scope.testkit.ts';
 import { nonDumpableHolder } from './non-dumpable.testkit.ts';
 import { WorkerScratchCleanup } from './scratch-cleanup.ts';
+
+// os.tmpdir reads Node's original environment even after the workflow fixture replaces process.env.
+const nativeEnvironment = process.env;
+function setTmpRoot(value: string | undefined) {
+  for (const env of [nativeEnvironment, process.env]) {
+    if (value === undefined) delete env.TMPDIR; else env.TMPDIR = value;
+  }
+}
 
 describe('durable scratch cleanup evidence', () => {
   useWorkerWaitFixture();
@@ -28,6 +38,107 @@ describe('durable scratch cleanup evidence', () => {
     mkdirSync(scratch, { recursive: true }); writeFileSync(join(scratch, 'keep'), 'durable');
     return { run, generation, dataDir, scratch };
   }
+
+  it.runIf(process.platform === 'linux' && process.getuid?.() !== 0)('retains an unreadable old fallback owner and its pointer until ownership and the real holder clear', async () => {
+    const priorTmpdir = process.env.TMPDIR;
+    const oldRoot = mkdtempSync('/tmp/cez-old-');
+    setTmpRoot(oldRoot);
+    const { run, generation, dataDir, scratch } = await completed('fallback');
+    expect(dirname(scratch)).toBe(oldRoot);
+    const local = agentTmpDir(dataDir, run.id), pointer = join(local, '.cez-fallback'), owner = join(scratch, '.cez-owner');
+    const child = spawn(process.execPath, ['-e', `
+      const fs = require('node:fs'); process.stdout.write('ready');
+      process.stdin.on('data', data => { fs.appendFileSync('holder-writes', data); process.stdout.write('written'); });
+      process.stdin.on('end', () => process.exit(0));
+    `], { cwd: scratch, stdio: ['pipe', 'pipe', 'inherit'] });
+    const exited = once(child, 'exit'); await once(child.stdout, 'data');
+    const write = async () => { const done = once(child.stdout, 'data'); child.stdin.write('still writable\n'); await done; };
+    const cleanup = new WorkerScratchCleanup(store, dataDir, () => false);
+    try {
+      expect(readlinkSync(`/proc/${child.pid}/cwd`)).toBe(scratch);
+      setTmpRoot('/tmp');
+      if (run.delegation?.role !== 'worker') throw Error('missing worker');
+      expect(store.workerScratchResourcesSafe(run.id, generation, run.delegation.workspace.resourceId)).toBe(false);
+      chmodSync(owner, 0);
+      expect(() => readFileSync(owner)).toThrow(/EACCES/);
+      expect(store.workerScratchResourcesSafe(run.id, generation, run.delegation.workspace.resourceId)).toBe(false);
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      cleanup.recover(); await vi.advanceTimersByTimeAsync(120_000);
+      expect(readFileSync(pointer, 'utf8')).toBe(scratch);
+      expect(existsSync(join(scratch, 'keep'))).toBe(true);
+      await write();
+      // Restart reconstruction must also retain the only route to this old temp root.
+      cleanup.pause(); cleanup.recover(); await vi.advanceTimersByTimeAsync(60_000);
+      chmodSync(owner, 0o600);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(readFileSync(pointer, 'utf8')).toBe(scratch);
+      await write();
+      expect(readFileSync(join(scratch, 'holder-writes'), 'utf8')).toBe('still writable\nstill writable\n');
+      child.stdin.end(); await exited;
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(existsSync(scratch)).toBe(false);
+      expect(existsSync(local)).toBe(false);
+    } finally {
+      cleanup.pause(); vi.useRealTimers(); child.stdin.end(); await exited;
+      if (existsSync(owner)) chmodSync(owner, 0o600);
+      rmSync(oldRoot, { recursive: true, force: true });
+      setTmpRoot(priorTmpdir);
+    }
+  });
+
+  it.runIf(process.platform === 'linux' && process.getuid?.() !== 0)('retains the old fallback pointer after partial removal and retries after its parent becomes writable', async () => {
+    const priorTmpdir = process.env.TMPDIR;
+    const oldRoot = mkdtempSync('/tmp/cez-old-'); setTmpRoot(oldRoot);
+    const { run, dataDir, scratch } = await completed('fallback');
+    expect(dirname(scratch)).toBe(oldRoot);
+    const pointer = join(agentTmpDir(dataDir, run.id), '.cez-fallback');
+    setTmpRoot('/tmp');
+    let cleanup = new WorkerScratchCleanup(store, dataDir, () => false);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      chmodSync(oldRoot, 0o500);
+      cleanup.recover(); await vi.advanceTimersByTimeAsync(120_000);
+      expect(existsSync(scratch)).toBe(true);
+      expect(existsSync(pointer)).toBe(true);
+      expect(readFileSync(pointer, 'utf8')).toBe(scratch);
+      // A new cleanup instance must recover even if recursive rm already removed .cez-owner.
+      cleanup.pause(); cleanup = new WorkerScratchCleanup(store, dataDir, () => false); cleanup.recover();
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(existsSync(scratch)).toBe(true);
+      chmodSync(oldRoot, 0o700);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(existsSync(scratch)).toBe(false);
+      expect(existsSync(agentTmpDir(dataDir, run.id))).toBe(false);
+    } finally { cleanup.pause(); chmodSync(oldRoot, 0o700); rmSync(oldRoot, { recursive: true, force: true }); vi.useRealTimers();
+      setTmpRoot(priorTmpdir);
+    }
+  });
+
+  it.runIf(process.platform === 'linux' && process.getuid?.() !== 0).each(['missing owner', 'foreign owner'])('a partial-removal receipt cannot delete a replacement fallback with %s', async ownership => {
+    const priorTmpdir = process.env.TMPDIR, oldRoot = mkdtempSync('/tmp/cez-old-'); setTmpRoot(oldRoot);
+    const { run, dataDir, scratch } = await completed('fallback');
+    expect(dirname(scratch)).toBe(oldRoot); setTmpRoot('/tmp');
+    const cleanup = new WorkerScratchCleanup(store, dataDir, () => false);
+    const displaced = `${scratch}.original`, pointer = join(agentTmpDir(dataDir, run.id), '.cez-fallback');
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      chmodSync(oldRoot, 0o500); cleanup.recover(); await vi.advanceTimersByTimeAsync(0);
+      expect(existsSync(scratch)).toBe(true);
+      chmodSync(oldRoot, 0o700); renameSync(scratch, displaced); mkdirSync(scratch);
+      writeFileSync(join(scratch, 'foreign'), 'replacement files');
+      if (ownership === 'foreign owner') writeFileSync(join(scratch, '.cez-owner'), 'another project');
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(readFileSync(join(scratch, 'foreign'), 'utf8')).toBe('replacement files');
+      expect(readFileSync(pointer, 'utf8')).toBe(scratch);
+      rmSync(scratch, { recursive: true }); renameSync(displaced, scratch);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(existsSync(scratch)).toBe(false);
+      expect(existsSync(pointer)).toBe(false);
+    } finally {
+      cleanup.pause(); chmodSync(oldRoot, 0o700); rmSync(oldRoot, { recursive: true, force: true });
+      vi.useRealTimers(); setTmpRoot(priorTmpdir);
+    }
+  });
 
   it.runIf(process.platform === 'linux').each(['corrupt', 'missing', 'quarantined'].flatMap(mode => ['local', 'fallback'].map(location => ({ mode, location }))))('retains held $location scratch across $mode index recovery and retries after the holder exits', async ({ mode, location }) => {
     const { run, dataDir, scratch } = await completed(location);

@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { workerEvidenceRunIds, workerExecutionSchema, type WorkerExecution } from './worker-execution.ts';
-import { agentTmpDirLocations, agentTmpDirMayExist, removeAgentTmpDir } from './agent-tmpdir.ts';
+import { agentTmpDirLocations, agentTmpDirMayExist, agentTmpDirOwnershipProven, removeAgentTmpDir } from './agent-tmpdir.ts';
 import { removeArtifacts } from '../artifacts/lifecycle.ts';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
@@ -2071,7 +2071,7 @@ export class RunStore extends EventEmitter {
       run.delegation.workspace.resourceId !== resourceId || proof?.generation !== generation ||
       (proof.phase !== 'complete' && !(admittingQueued && proof.phase === 'queued'))) return false;
     const record = this.readWorkerProcesses(id, generation);
-    if (record === 'unknown') return false;
+    if (record === 'unknown' || !agentTmpDirOwnershipProven(this.dataDir, id)) return false;
     const paths = [run.delegation.workspace.path, ...agentTmpDirLocations(this.dataDir, id)];
     // Nothing can be deleted/reused at an absent path. This lets explicit history deletion
     // retire completed cleanup despite ambient denial, while recorded survivors/unknown evidence
@@ -2105,7 +2105,7 @@ export class RunStore extends EventEmitter {
     // supplies no new authority; only the private terminal checkpoint authorizes scratch.
     if (run && run.delegation?.role !== 'invalid') return false;
     const record = this.readWorkerProcesses(id, generation);
-    if (record === 'unknown') return false;
+    if (record === 'unknown' || !agentTmpDirOwnershipProven(this.dataDir, id)) return false;
     return inspectGeneration({ ...(record === 'absent' ? {} : { record }),
       paths: [proof.scratchCleanup.path, ...agentTmpDirLocations(this.dataDir, id)] }).liveness === 'gone';
   }
