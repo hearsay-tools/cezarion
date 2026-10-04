@@ -2,6 +2,7 @@ import { delegationStateSchema } from '@open-mercato/cezar-contract';
 import type { DelegationErrorResponse, WorkerOperation, WorkerCollectedResult, ModelChoices } from '@open-mercato/cezar-contract';
 import type { RunRecord } from '../runs/store.ts';
 import { isAuthenticatedCaller, type Caller } from './credentials.ts';
+import { capacityError, workerCapacity } from './capacity.ts';
 
 export type { WorkerOperation } from '@open-mercato/cezar-contract';
 
@@ -60,13 +61,13 @@ export function authorizeSpawnReplay(caller: Caller, parent: RunRecord | undefin
   }
 }
 
-/** Authorizes a NEW creation. The service resolves existing idempotency receipts before this cap. */
-export function authorizeSpawn(caller: Caller, parent: RunRecord | undefined, projectId: string): void {
+/** Authorizes a NEW creation against reclaimable capacity and the creation ceiling (#816).
+ * The service resolves existing idempotency receipts before these limits. */
+export function authorizeSpawn(caller: Caller, parent: RunRecord | undefined, projectId: string, getRun: (id: string) => RunRecord | undefined): void {
   authorizeSpawnReplay(caller, parent, projectId);
   if (parent?.delegation?.role !== 'root') denyScope();
-  if (parent.delegation.receipts.length >= 32) {
-    throw new DelegationPolicyError('capacity_limit', 'Parent worker creation limit reached');
-  }
+  const refusal = capacityError(workerCapacity(parent, getRun));
+  if (refusal) throw new DelegationPolicyError('capacity_limit', refusal);
 }
 
 /** Cancellation and settled receipt reads share ownership and the wait grant, not registration's active-session requirement. */
