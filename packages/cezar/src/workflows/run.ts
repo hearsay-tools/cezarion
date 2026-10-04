@@ -386,7 +386,7 @@ export const MAX_AUTO_CONTINUES = 40;
 export const AUTONOMOUS_NUDGE =
   'Continue working autonomously until the task is fully complete. Do not ask me for confirmation or clarification — make reasonable assumptions and proceed. When everything is done, end the session with your done signal.';
 const MONITORING_WAKE_NUDGE =
-  'Re-check the downstream work you were monitoring. Continue toward the task goal; emit CEZ:MONITORING again only if it is still pending.';
+  'Re-check the downstream work you were monitoring. Continue toward the task goal. When the watched work is finished and the task goal is complete, end your final message with CEZ:DONE. If the watched work is still pending, end with CEZ:MONITORING. Never yield markerless for a monitoring wrap-up. If you genuinely need user input, follow the normal question path instead.';
 
 /**
  * Auto-resume after a provider usage limit (spec 2026-08-03-auto-resume-after-usage-limit).
