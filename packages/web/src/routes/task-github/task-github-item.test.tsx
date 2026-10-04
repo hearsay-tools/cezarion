@@ -155,6 +155,31 @@ const tabRow = async () =>
   }))
 
 describe('TaskGithubItemRoute', () => {
+  it.each(['issue', 'pr'] as const)('renders GitHub label colours on the task %s tab', async (kind) => {
+    const number = kind === 'issue' ? 7 : 5
+    item = () => json({
+      available: true,
+      item: { ...PR_5, kind, number, labels: ['bug', 'unknown'] },
+      labelColors: { bug: 'd73a4a' },
+    })
+    renderAt(`/p/other/tasks/r1/${kind}/${number}`)
+    await waitFor(() => expect(inRoute('[data-slot="gh-label"][data-label="bug"]')).not.toBeNull())
+    const bug = inRoute('[data-slot="gh-label"][data-label="bug"]') as HTMLElement
+    expect(bug.style.backgroundColor).toBe('rgba(215, 58, 74, 0.133)')
+    expect(bug.style.borderColor).toBe('rgba(215, 58, 74, 0.4)')
+    expect((inRoute('[data-slot="gh-label"][data-label="unknown"]') as HTMLElement).style.backgroundColor).toBe('')
+  })
+
+  it.each([undefined, {}])('keeps labels neutral when the colour map is %j', async (labelColors) => {
+    item = () => json({ available: true, item: { ...PR_5, labels: ['bug'] }, labelColors })
+    renderAt('/p/other/tasks/r1/pr/5')
+    await waitFor(() => expect(inRoute('[data-slot="gh-label"]')).not.toBeNull())
+    const chip = inRoute('[data-slot="gh-label"]') as HTMLElement
+    expect(chip.textContent).toBe('bug')
+    expect(chip.style.backgroundColor).toBe('')
+    expect(chip.style.color).toBe('var(--muted-foreground)')
+  })
+
   it('shares the real hand-to-agent panel and prompt draft across the GitHub and task issue routes', async () => {
     const issue = { ...PR_5, kind: 'issue', number: 7, url: `${REPO}/issues/7` }
     item = () => json({ available: true, item: issue })

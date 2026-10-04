@@ -94,6 +94,37 @@ function openPrFromChip({ revealDetails = false } = {}) {
 }
 
 describe('task GitHub item tabs against the dry-run mock', () => {
+  it.each([
+    { width: 360, height: 640, theme: 'light' },
+    { width: 360, height: 640, theme: 'dark' },
+    { width: 1280, height: 900, theme: 'light' },
+    { width: 1280, height: 900, theme: 'dark' },
+  ])('preserves issue and PR label colours at $width×$height in $theme', ({ width, height, theme }) => {
+    browser.setViewport(width, height)
+    for (const { kind, number, label, fill } of [
+      { kind: 'issue', number: ISSUE, label: 'bug', fill: 'rgba(215, 58, 74, 0.133)' },
+      { kind: 'pr', number: PR, label: 'tests', fill: 'rgba(197, 222, 245, 0.133)' },
+    ]) {
+      browser.goto(`${baseUrl}${scoped(`/tasks/${runId}/${kind}/${number}`)}`)
+      browser.waitForValue(`document.querySelector('[data-slot="gh-label"][data-label="${label}"]') !== null`)
+      browser.evaluate(`document.documentElement.classList.remove('light', 'dark'); document.documentElement.classList.add('${theme}')`)
+      const facts = browser.waitForValue<{ fill: string; inside: boolean; text: string }>(`(() => {
+        const chip = document.querySelector('[data-slot="gh-label"][data-label="${label}"]')
+        if (!chip || !document.documentElement.classList.contains('${theme}')) return null
+        const rect = chip.getBoundingClientRect()
+        return { fill: getComputedStyle(chip).backgroundColor,
+          inside: rect.width > 0 && rect.left >= 0 && rect.right <= innerWidth, text: chip.textContent }
+      })()`)
+      expect(facts.fill).toBe(fill)
+      expect(facts.inside).toBe(true)
+      expect(facts.text).toBe(label)
+      const evidence = resolve(import.meta.dirname, '../../../.ai/qa/issue-735')
+      mkdirSync(evidence, { recursive: true })
+      writeFileSync(join(evidence, `${kind}-${width}-${theme}.json`), JSON.stringify(facts, null, 2))
+      browser.screenshot(join(evidence, `${kind}-${width}-${theme}.png`), { viewport: true })
+    }
+  })
+
   it('the header PR chip opens the PR tab with its merge box, and the issue tab shows the issue body', () => {
     const active = openPrFromChip()
     expect(active).toContain(`#${PR}`)

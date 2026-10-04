@@ -1164,7 +1164,7 @@ export function __clearCommentsCacheForTests(): void {
 
 // Single-item cache (#692): same key shape, TTL and LRU bound as `commentsCache`. Only a real
 // answer (an item or a confirmed absence) is cached, never an unavailable one.
-const itemCache = new Map<string, { at: number; item: ForgeItem | null }>();
+const itemCache = new Map<string, { at: number; data: Extract<GithubItemResponse, { available: true }> }>();
 
 function itemCacheKey(repoRoot: string, kind: 'issue' | 'pr', number: number): string {
   return `${repoRoot}\0${kind}#${number}`;
@@ -1188,23 +1188,29 @@ export async function fetchGithubItem(
   if (process.env.CEZ_DRY_RUN === '1') {
     const mock = mockGithub();
     const item = (kind === 'issue' ? mock.issues : mock.prs).find((i) => i.number === number);
-    return { available: true, item: item ?? null };
+    return item
+      ? { available: true, item, labelColors: mock.labelColors ?? {} }
+      : { available: true, item: null };
   }
   const key = itemCacheKey(repoRoot, kind, number);
   const hit = itemCache.get(key);
-  if (!refresh && hit && Date.now() - hit.at < CACHE_MS) return { available: true, item: hit.item };
+  if (!refresh && hit && Date.now() - hit.at < CACHE_MS) return hit.data;
   try {
     const forge = await detectGithub(repoRoot);
     if (!forge.available) return { available: false, reason: forge.reason ?? 'GitHub is unavailable' };
-    const item = await viewGithubItem(repoRoot, kind, number);
+    const labelColors: Record<string, string> = {};
+    const item = await viewGithubItem(repoRoot, kind, number, labelColors);
+    const data: Extract<GithubItemResponse, { available: true }> = {
+      available: true, item, ...(item ? { labelColors } : {}),
+    };
     itemCache.delete(key); // re-insert so this key becomes the newest
-    itemCache.set(key, { at: Date.now(), item });
+    itemCache.set(key, { at: Date.now(), data });
     while (itemCache.size > COMMENTS_CACHE_MAX) {
       const oldest = itemCache.keys().next().value;
       if (oldest === undefined) break;
       itemCache.delete(oldest);
     }
-    return { available: true, item };
+    return data;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return {
