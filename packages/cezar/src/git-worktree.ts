@@ -1,3 +1,4 @@
+import { inspectGeneration } from './delegation/process-liveness.ts';
 import { execFile } from 'node:child_process';
 import { autosaveGit, type AutosaveOptions } from './autosave-git.ts';
 import { workerWorkspaceSchema } from '@open-mercato/cezar-contract';
@@ -329,6 +330,8 @@ export type RemoveWorktreeOptions = {
   /** Runs once every check that can decline the removal has passed, right before git removes
    *  the checkout (#781: the run's preview is released here). A declined removal never calls it. */
   beforeRemove?: () => Promise<void>;
+  /** Fresh generation/resource authorization, after all awaits and before destructive Git. */
+  assertCurrent?: () => void;
 };
 
 export async function removeWorktree(
@@ -344,7 +347,13 @@ async function removeWorktreeLocked(
   repoRoot: string, worktreePath: string, branch: string | undefined,
   opts: RemoveWorktreeOptions | undefined, git: WorktreeGit,
 ): Promise<void> {
-  const beforeRemove = () => opts?.beforeRemove?.().catch(() => undefined);
+  const beforeRemove = async () => {
+    await opts?.beforeRemove?.().catch(() => undefined);
+    opts?.assertCurrent?.();
+    if (protection.paths.has(worktreePath) && inspectGeneration({ paths: [worktreePath] }).liveness !== 'gone') {
+      throw new Error('Owned worktree may still be held by a process');
+    }
+  };
   const protection = await ownedCleanupProtection(repoRoot);
   // Directory-only retention (#575) may reclaim a finished owned-worker checkout
   // while keeping its branch and receipts. Unowned deletion still refuses owned
@@ -384,10 +393,12 @@ async function removeWorktreeLocked(
     return;
   }
   await beforeRemove();
-  const removed = await git(repoRoot, ['worktree', 'remove', '--force', worktreePath]);
+  await git(repoRoot, ['worktree', 'remove', '--force', worktreePath]);
   // Owned-path reclaim must not `rm` a receipt path that is no longer a git
   // worktree — the directory may have been replaced with unrelated files.
-  if (reclaimOwnedDirectory && protection.paths.has(worktreePath) && !removed.ok) return;
+  // For owned resources Git already removed the exact checkout. Never recursively delete a
+  // path recreated after that operation (possibly by another execution/controller).
+  if (reclaimOwnedDirectory && protection.paths.has(worktreePath)) return;
   await rm(worktreePath, { recursive: true, force: true }).catch(() => undefined);
   if (protection.paths.size === 0) await git(repoRoot, ['worktree', 'prune']);
   if (branch) await git(repoRoot, ['branch', '-D', branch]);

@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { removeAgentTmpDir } from './agent-tmpdir.ts';
+import { agentTmpDirLocations, agentTmpDirMayExist, removeAgentTmpDir } from './agent-tmpdir.ts';
 import { removeArtifacts } from '../artifacts/lifecycle.ts';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
@@ -16,7 +16,7 @@ import { storedDelegationStateSchema } from './delegation-state.ts';
 import { refreshHumanAskSummary } from './human-ask-summary.ts';
 import { workerExecutionIdentitySchema, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
 import { reconcileWorkerWait } from '../delegation/wait.ts';
-import { processStartToken, type RecordedProcess, type WorkerProcessRecord } from '../delegation/process-liveness.ts';
+import { inspectGeneration, isCurrentProcess, recordedProcessLive, processStartToken, type RecordedProcess, type WorkerProcessRecord } from '../delegation/process-liveness.ts';
 import { collectSecretValues, redactDeep, redactSecrets } from '../core/secret-redaction.ts';
 // Pure, dependency-free reference helpers — the same sanity bound the marker parser applies.
 import { MAX_REF } from './task-refs.ts';
@@ -2063,12 +2063,37 @@ export class RunStore extends EventEmitter {
     try { renameSync(temporary, path); } finally { rmSync(temporary, { force: true }); }
   }
 
+  /** Complete execution is not permission to reuse/delete persistent resources (#738).
+   * Synchronous, fresh and generation/resource fenced; callers hold admission off across awaits. */
+  workerResourcesSafe(id: string, generation: string, resourceId: string, admittingQueued = false): boolean {
+    const run = this.runs.get(id);
+    const proof = this.readWorkerExecution(id);
+    if (run?.delegation?.role !== 'worker' || run.delegation.workspace.ownerRunId !== id ||
+      run.delegation.workspace.resourceId !== resourceId || proof?.generation !== generation ||
+      (proof.phase !== 'complete' && !(admittingQueued && proof.phase === 'queued'))) return false;
+    const record = this.readWorkerProcesses(id, generation);
+    if (record === 'unknown') return false;
+    const paths = [run.delegation.workspace.path, ...agentTmpDirLocations(this.dataDir, id)];
+    // Nothing can be deleted/reused at an absent path. This lets explicit history deletion
+    // retire completed cleanup despite ambient denial, while recorded survivors/unknown evidence
+    // still block. Only ENOENT proves absence; existsSync would also hide access errors.
+    const absent = paths.every(path => {
+      try { lstatSync(path); return false; } catch (error) { return (error as NodeJS.ErrnoException).code === 'ENOENT'; }
+    });
+    if (absent) return record === 'absent' ||
+      ((!recordedProcessLive(record.controller) || isCurrentProcess(record.controller)) && !record.processes.some(recordedProcessLive));
+    return inspectGeneration({ ...(record === 'absent' ? {} : { record }), paths }).liveness === 'gone';
+  }
+
   commitWorkerExecutionStart(id: string): string {
     const run = this.runs.get(id);
     if (run?.delegation?.role !== 'worker' || run.delegation.destroy) throw new Error('Worker cannot start');
     const prior = this.readWorkerExecution(id);
     if (!prior || (prior.phase !== 'queued' && prior.phase !== 'complete')) {
       throw new Error('Worker execution checkpoint does not prove safe admission');
+    }
+    if (!this.workerResourcesSafe(id, prior.generation, run.delegation.workspace.resourceId, true)) {
+      throw new Error('Worker resources may still be held by a process; reuse is not proven safe');
     }
     const generation = randomUUID();
     // #469: the controller is durable before `starting`, so a crash leaves a provable generation.
@@ -2176,6 +2201,10 @@ export class RunStore extends EventEmitter {
     const { state: _state, ...workspace } = result.workspace;
     if (JSON.stringify(workspace) !== JSON.stringify(child.delegation.workspace)) return false;
     const proof = this.readWorkerExecution(id);
+    // Retain process evidence until scratch is safely removed. A prior pending deletion may
+    // already have removed those files; it never authorizes deleting newly appeared scratch.
+    if (proof && !this.workerResourcesSafe(id, proof.generation, workspace.resourceId)) return false;
+    if (!proof && agentTmpDirMayExist(this.dataDir, id)) return false;
     if (receipt.deletion) return receipt.deletion.revision === result.revision &&
       receipt.deletion.resourceId === workspace.resourceId && receipt.deletion.phase === 'pending' &&
       (proof ? proof.phase === 'complete' && proof.generation === receipt.deletion.generation : !existsSync(this.executionPath(id)));
@@ -2223,6 +2252,9 @@ export class RunStore extends EventEmitter {
           } : result.artifacts,
         }, this.readWorkerResultDiff(parent.id, id));
         this.removeRunHistoryBytes(id);
+        // Delete scratch while its generation evidence still exists; failed removal keeps it.
+        removeAgentTmpDir(this.dataDir, id);
+        if (agentTmpDirMayExist(this.dataDir, id)) return false;
         // Private process/account evidence is now replaced by the exact parent receipt.
         rmSync(this.identityPath(id), { force: true });
         rmSync(this.processesPath(id), { force: true });

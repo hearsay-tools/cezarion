@@ -1,3 +1,5 @@
+import { scopeFixtureProcesses } from './process-scope.testkit.ts';
+import { syncBuiltinESMExports } from 'node:module';
 import { createFixtureManager, drainFixtureManagers } from '../workflows/fixture-cleanup.testkit.ts';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -5,13 +7,16 @@ import { existsSync } from 'node:fs';
 import { lstat, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { workerDiffSchema } from '@open-mercato/cezar-contract';
 import type { WorkerWorkspace } from '@open-mercato/cezar-contract';
 import { RunStore } from '../runs/store.ts';
 import type { RunManager } from '../workflows/run.ts';
 import { autosaveCommit, createWorktree, pruneOrphans, removeWorktree } from '../git-worktree.ts';
 import { createOwnedWorkspace, ensureOwnedWorkspace, planOwnedWorkspace, readOwnedDiff, removeOwnedWorkspace, resolveWorkerBaseline, verifyOwnedWorkspace } from './workspace.ts';
+
+beforeEach(() => scopeFixtureProcesses());
+afterEach(() => { vi.restoreAllMocks(); syncBuiltinESMExports(); });
 
 const roots: string[] = [];
 const stores: RunStore[] = [];

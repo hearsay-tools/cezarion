@@ -754,11 +754,16 @@ this normative contract.
 
 **R36** (#738), in `workflows/worker-reboot-parity.test.ts`, drives every `RUNNER_IDS`
 backend's `HARNESS_ADAPTERS` native wire through worker cancellation and a successful twin.
-Linux prior-boot controller evidence excludes unrelated unreadable cwd candidates, allowing
-collect-first and destroy-first orphan settlement, resource cleanup and parent Finish after
-collection. Only the reboot and unreadable `/proc` boundary are simulated. Linux-only OS
-coverage does not exempt any runner; conservative same-boot, unknown-boot and real-holder
-guards live in `delegation/process-liveness.test.ts`.
+Linux prior-boot controller evidence settles the old execution independently of resource cleanup.
+Both collect-first and destroy-first unblock parent Finish after collection while a real same-user
+`PR_SET_DUMPABLE=0` holder retains scratch/worktree and keeps writing. Fresh holder proof still
+blocks deletion, retention, history removal and reuse, including after a complete checkpoint and
+restart. Production 60-second retries release resources only after real holder exit; a stale retry
+cannot touch a newly admitted native execution. Disposal/detach stops retries; recovery/reattach
+reconstructs their durable intents. If uncertainty never clears, files remain indefinitely.
+Only prior-boot evidence and process enumeration scope are synthetic; cwd permission denial,
+process exit, native wires, stores and Git remain real. Linux-only OS coverage exempts no runner;
+legacy/unknown-boot and recorded-process guards live in `delegation/process-liveness.test.ts`.
 
 Crash-diagnostic rows **S15–S17** (#499) drive every `RUNNER_IDS` adapter's
 native transport through an uncaught-exception-shaped stderr fixture, a plain

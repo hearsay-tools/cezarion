@@ -46,7 +46,7 @@
  */
 import { createHash } from 'node:crypto';
 import type { Dirent } from 'node:fs';
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join } from 'node:path';
 
@@ -378,6 +378,13 @@ export function agentTmpDirLocations(dataDir: string, runId: string): string[] {
   const recorded = ownedRecordedFallback(dataDir, runId);
   if (recorded) locations.push(recorded);
   return [...new Set(locations)];
+}
+
+/** Only ENOENT proves cleanup finished. Permission/read errors retain the durable intent. */
+export function agentTmpDirMayExist(dataDir: string, runId: string): boolean {
+  return agentTmpDirLocations(dataDir, runId).some(path => {
+    try { lstatSync(path); return true; } catch (error) { return (error as NodeJS.ErrnoException).code !== 'ENOENT'; }
+  });
 }
 
 /**

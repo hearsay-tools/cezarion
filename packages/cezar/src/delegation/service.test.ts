@@ -1,3 +1,5 @@
+import { scopeFixtureProcesses } from './process-scope.testkit.ts';
+import { syncBuiltinESMExports } from 'node:module';
 import { createFixtureManager } from '../workflows/fixture-cleanup.testkit.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
@@ -16,8 +18,8 @@ import { DelegationService } from './service.ts';
 
 describe('delegation service durable authority', () => {
   let f: ReturnType<typeof fixture>;
-  beforeEach(() => { vi.stubEnv('CEZ_DELEGATION', '1'); f = fixture(); });
-  afterEach(async () => { await f?.close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
+  beforeEach(() => { scopeFixtureProcesses(); vi.stubEnv('CEZ_DELEGATION', '1'); f = fixture(); });
+  afterEach(async () => { await f?.close(); vi.restoreAllMocks(); syncBuiltinESMExports(); vi.unstubAllEnvs(); });
   const input = () => ({ task: 'do work', baseline: 'parent-head', requestId: randomUUID() });
   it('accepts one durable owned creation, no resource before admission, replay survives moving HEAD and restart', async () => {
     const request = input();

@@ -1,3 +1,4 @@
+import { scopeFixtureProcesses } from '../delegation/process-scope.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -29,6 +30,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
   const releases: Array<() => void> = [];
   const executions: Promise<unknown>[] = [];
   beforeEach(() => {
+    scopeFixtureProcesses();
     vi.stubEnv('CEZ_DRY_RUN', '1'); vi.stubEnv('CEZ_AUTONAME', '0');
     root = mkdtempSync(join(tmpdir(), 'cez-worker-destroy-'));
     execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: root });
