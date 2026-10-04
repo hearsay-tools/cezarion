@@ -259,10 +259,71 @@ describe('omp ui mapper (golden fixtures)', () => {
         sessionSettled: true,
       },
     ]);
+    // The failure response reports it; its `prompt_result` (same id) only ends the turn.
     expect(events.slice(1)).toEqual([
-      { type: 'session.error', message: 'omp: anthropic/claude-opus-5-5 request failed: No API key for anthropic', fatal: false },
+      { type: 'session.error', message: 'omp: prompt failed: No API key for anthropic', fatal: false },
       { type: 'turn.completed', turnId: 'turn_1', stopReason: 'error' },
     ]);
+  });
+
+  it('a prompt that fails before admission reports the error and leaves the turn to the runner', () => {
+    // rpc.md: a failure before admission is the command's error response, and no
+    // `prompt_result` follows (rpc-mode.ts discards the ticket).
+    const { events, state } = fold([
+      { id: 'p', type: 'response', command: 'prompt', success: false, error: 'input hook rejected the prompt' },
+    ]);
+    expect(events.slice(1)).toEqual([
+      { type: 'session.error', message: 'omp: prompt failed: input hook rejected the prompt', fatal: false },
+    ]);
+    expect(state.turnId).toBe('turn_1');
+  });
+
+  it('dedupes a prompt_result error only for the prompt whose response already failed', () => {
+    const result = (id: string) => ({
+      type: 'prompt_result',
+      id,
+      agentInvoked: false,
+      status: 'error',
+      error: { message: 'boom', retryable: false },
+      sessionSettled: true,
+    });
+    const { events } = fold([
+      { id: 'a', type: 'response', command: 'prompt', success: false, error: 'boom' },
+      result('b'),
+    ]);
+    expect(events.filter((event) => event.type === 'session.error').map((event) => event.message)).toEqual([
+      'omp: prompt failed: boom',
+      'omp: provider request failed: boom',
+    ]);
+  });
+
+  it('a reused sub-agent id under a new parent call opens a new row instead of reusing the old one', () => {
+    // v18.4.11 `AgentOutputManager.allocate` keeps ids unique within one session, but a
+    // `new_session` in the same RPC process starts a fresh allocator; events carry only the id.
+    const batch = (callId: string) => ({
+      type: 'tool_execution_start',
+      toolCallId: callId,
+      toolName: 'task',
+      args: { context: 'c', tasks: [{ name: 'Anna', agent: 'explore', task: `work for ${callId}`, solutionSpace: 's' }] },
+    });
+    const lifecycle = (callId: string, status: string) => ({
+      type: 'subagent_lifecycle',
+      payload: { id: 'Anna', agent: 'explore', status, parentToolCallId: callId, index: 0 },
+    });
+    const text = {
+      type: 'subagent_event',
+      payload: { id: 'Anna', event: { type: 'message_update', assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: 'hi' } } },
+    };
+    const { events } = fold([batch('A'), lifecycle('A', 'started'), lifecycle('A', 'completed'), batch('B'), lifecycle('B', 'started'), text]);
+    expect(events).toContainEqual({
+      type: 'item.started',
+      item: expect.objectContaining({ id: 'B#Anna', title: 'Task: work for B', status: 'running' }),
+    });
+    expect(events).toContainEqual({
+      type: 'item.started',
+      item: expect.objectContaining({ kind: 'message', parentItemId: 'B#Anna' }),
+    });
+    expect(events.some((event) => 'item' in event && event.item.parentItemId === 'A#Anna')).toBe(false);
   });
 
   it('agent-invoked prompt_result waits for session_settled', () => {

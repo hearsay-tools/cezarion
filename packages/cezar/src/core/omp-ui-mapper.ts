@@ -63,6 +63,8 @@ export interface OmpUiMapperState extends OmpTextLane {
   readonly childLanes: ReadonlyMap<string, OmpTextLane>;
   /** The one "events dropped" error for an overflowing early buffer has been emitted. */
   readonly subagentDropReported: boolean;
+  /** Ids of `prompt` commands whose failure response already reported the error (R10). */
+  readonly failedPrompts: ReadonlySet<string>;
 }
 
 export interface OmpUiMapping {
@@ -74,6 +76,8 @@ export interface OmpUiMapping {
 const PENDING_SUBAGENT_EVENTS_PER_ID = 200;
 const PENDING_SUBAGENT_IDS = 8;
 const SUBAGENT_DROP_MESSAGE = 'omp: sub-agent events dropped before lifecycle';
+/** A failure before admission never gets a `prompt_result`, so its id is never released: bound it. */
+const FAILED_PROMPTS_KEPT = 32;
 
 const EMPTY_LANE: OmpTextLane = {
   textBlock: 0,
@@ -99,6 +103,7 @@ export function createOmpUiState(): OmpUiMapperState {
     batchCalls: new Set(),
     childLanes: new Map(),
     subagentDropReported: false,
+    failedPrompts: new Set(),
   };
 }
 
@@ -220,8 +225,23 @@ function mapResponse(value: Record<string, unknown>, state: OmpUiMapperState): O
     return { events: [], state };
   }
   if (command === 'prompt') {
-    // A failed prompt is reported by its `prompt_result` (rpc.md § prompt payload), so the
-    // legacy error response stays silent here rather than doubling the error.
+    if (value.success === false) {
+      // rpc.md § Request/Response Correlation: a prompt that fails before admission gets only
+      // this error response — no `prompt_result` follows — so it is reported here. A failure
+      // after admission can send a later error response with the same id AND a `prompt_result`,
+      // whose error is then skipped. The turn stays open: only the runner knows whether this
+      // prompt opened it or was a steer.
+      const id = string(value.id);
+      let failedPrompts = state.failedPrompts;
+      if (id) {
+        const kept = [...failedPrompts, id].slice(-FAILED_PROMPTS_KEPT);
+        failedPrompts = new Set(kept);
+      }
+      return {
+        events: [{ type: 'session.error', message: `omp: prompt failed: ${rpcError(value)}`, fatal: false }],
+        state: { ...state, failedPrompts },
+      };
+    }
     return ompTurnBoundary(value) === 'local' ? completeTurn(state.stopReason, state) : { events: [], state };
   }
   // `set_*` failures are configuration notes for the runner (v1), not session errors.
@@ -235,6 +255,13 @@ function mapPromptResult(value: Record<string, unknown>, state: OmpUiMapperState
   // An agent-invoked prompt yields here, but the turn runs on until `session_settled`.
   if (ompTurnBoundary(value) !== 'local') return { events: [], state };
   const status = string(value.status);
+  const id = string(value.id);
+  if (status === 'error' && id && state.failedPrompts.has(id)) {
+    // Its failure response already reported the error; this frame only ends the turn.
+    const failedPrompts = new Set(state.failedPrompts);
+    failedPrompts.delete(id);
+    return completeTurn('error', { ...state, failedPrompts });
+  }
   if (status === 'error') {
     const error = isRecord(value.error) ? value.error : {};
     const message = ompProviderErrorMessage({
@@ -511,7 +538,9 @@ function toolEnded(
   if (diffs) {
     item.diffs = diffs;
     // Hashline edits carry the path only in `{input}` text; the result names it.
-    if (item.title === 'Edit') item.title = diffs.length === 1 ? `Edit ${diffs[0]!.path}` : `Edit ${diffs.length} files`;
+    if (previous.name.toLowerCase() === 'edit' && !argsPath(previous.input)) {
+      item.title = diffs.length === 1 ? `Edit ${diffs[0]!.path}` : `Edit ${diffs.length} files`;
+    }
   }
   const tools = new Map(state.tools);
   tools.set(id, item);
@@ -551,10 +580,16 @@ function detailDiff(file: Record<string, unknown>): FileDiff | undefined {
   return { path, oldText: oldText ?? null, ...(newText !== undefined ? { newText } : {}) };
 }
 
+/** The path keys `toolDisplay` titles an edit from. */
+function argsPath(input: unknown): string | undefined {
+  if (!isRecord(input)) return undefined;
+  return string(input.path) ?? string(input.file_path) ?? string(input.filePath);
+}
+
 /** Same reading as pi-ui-mapper.ts `toolDiffs`. */
 function argsDiffs(key: string, input: unknown): FileDiff[] | undefined {
   if (!isRecord(input)) return undefined;
-  const path = string(input.path) ?? string(input.file_path) ?? string(input.filePath);
+  const path = argsPath(input);
   if (!path) return undefined;
   const oldText = string(input.oldText) ?? string(input.old_string) ?? (key === 'write' ? null : undefined);
   const newText = string(input.newText) ?? string(input.new_string) ?? string(input.content);
@@ -616,10 +651,16 @@ function mapSubagentLifecycle(payload: Record<string, unknown>, state: OmpUiMapp
   if (!id) return { events: [], state };
   const status = lifecycleStatus(string(payload.status));
   const events: UiEvent[] = [];
+  const parentToolCallId = string(payload.parentToolCallId) ?? '';
   let entry = state.subagents.get(id);
+  // v18.4.11 `AgentOutputManager.allocate` keeps ids unique within one session, but a
+  // `new_session` in the same process starts a fresh allocator. A `started` frame naming
+  // another parent call is a new agent: rebind the id so its events cannot reach the old row.
+  if (entry && string(payload.status) === 'started' && parentToolCallId && entry.parentToolCallId !== parentToolCallId) {
+    entry = undefined;
+  }
 
   if (!entry) {
-    const parentToolCallId = string(payload.parentToolCallId) ?? '';
     const parent = parentToolCallId ? state.tools.get(parentToolCallId) : undefined;
     // A single-form call IS the sub-agent's row; a batch call (or an unknown parent) gets one
     // synthetic `task` row per sub-agent so the drawer counts agents, not calls.
