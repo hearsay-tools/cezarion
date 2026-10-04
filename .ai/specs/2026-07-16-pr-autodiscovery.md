@@ -116,3 +116,9 @@ The created tier always wins. Both fields are additive and optional — old
 > when present it owns the referenced tier's resolution (a candidate URL must
 > end in the declared number). The created tier and this spec's janitor rules
 > are unchanged for runs without markers.
+
+> Citation clarification: the wrong-chip report above is a real incident, not a
+> hypothetical example. The incorrect PR-chip value and the task's reported issue
+> number are incident observations. Neither repository is verified
+> from the retained incident evidence. These values are unresolved citation debt,
+> not references to either cezar tracker inferred from their numbers.

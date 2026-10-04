@@ -63,8 +63,8 @@ historical `wjarka/cezar` links, are preserved.
 
 ## Remaining citation debt
 
-These four references are retained, not attributed by guesswork. Include this
-table in the PR's remaining-debt section:
+These production and wrong-chip incident references are retained without guessing
+their repositories. Include every row below in the PR's remaining-debt section:
 
 | File:line | Unresolved reference |
 | --- | --- |
@@ -72,15 +72,28 @@ table in the PR's remaining-debt section:
 | `.ai/specs/2026-07-24-long-running-waiting-sessions.md:39` | Production PR 4457. |
 | `.ai/specs/2026-07-24-long-running-waiting-sessions.md:40` | Production PR 4461. |
 | `.ai/specs/2026-07-24-long-running-waiting-sessions.md:41` | Production PR 4465. |
+| `.ai/specs/2026-07-16-pr-autodiscovery.md:114` | Real wrong-chip incident: literal displayed PR-chip value 777 and reported task issue 500; repositories unverified. |
+| `.ai/specs/2026-07-18-task-ref-markers.md:16` | Same real incident: reported task issue 500 and literal incorrect PR-chip value 777; repositories unverified. |
+| `.ai/runs/2026-07-18-task-ref-markers.md:13` | Companion run record's literal incorrect PR-chip value 777; originating PR URL unverified. |
+| `.ai/runs/2026-07-18-task-ref-markers.md:14` | Companion run record's reported task issue 500; repository unverified. |
 
 The source names the local project `mercato-development`, not a repository slug.
 `open-mercato/cezar#654` links an Open Mercato application PR, so that repository
 is plausible, but existence of matching numbers is insufficient proof. Its four
 tracker titles concern different features, whereas the source calls them
 replacement PRs. Resolving this needs the original production run URLs; those
-ignored runtime records are outside this tracked-file audit. No other ambiguous
-issue/PR citation remains outside the documented archive/source scopes and
-literal examples in the requested documentation surfaces.
+ignored runtime records are outside this tracked-file audit.
+
+The wrong-chip references are real incident observations, as the original
+`b912b05e` spec explicitly states, not hypothetical examples. The displayed PR-chip
+value does not prove a valid PR citation, and the task issue's number does not
+prove a repository. Upstream tracker provenance for the document cannot establish
+provenance for a task it describes. Local exception notes now make that distinction
+explicit. The earlier assertion that no other ambiguity remained was too broad:
+this revised inventory includes the four production PRs and all three retained
+wrong-chip incident documents. Other retained bare values have documented source
+scopes or are literal examples; these incident references must not be silently
+covered by either category.
 
 ## Verification
 
@@ -103,3 +116,20 @@ literal examples in the requested documentation surfaces.
 
 The full application gate was deliberately left to the integrating parent under
 the worker assignment. These focused checks do not substitute for that gate.
+
+## Focused review follow-up
+
+- Preserved all seven old citation-bearing heading anchors in `AGENT_PROTOCOL.md`
+  with explicit HTML anchors, including `ci-wait-tool-contract-474` used by
+  `README.md:574`. The qualified headings remain visible; old external deep links
+  continue to resolve.
+- Checked all 50 of the citation audit's changed heading fragments against tracked
+  Markdown links. The README CI-wait link was the only incoming match found.
+- Checked every debt table file and line against its retained literal incident or
+  production value. The three incident clarifications qualify the evidence, not
+  the unknown repositories, and do not alter those observed numbers.
+- Targeted anchor/debt QA and `git diff --check` passed. The original archive-body
+  comparison above predates these review clarification notes in the two archived
+  task-ref-marker documents; no historical incident text was rewritten.
+- No runtime/configuration changes or runtime test reruns; the parent's integrated
+  full gate remains authoritative.

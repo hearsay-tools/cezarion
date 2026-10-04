@@ -16,6 +16,11 @@ PR-number auto-discovery still mislabels tasks. Real failure from the cockpit
 (2026-07-18): a task implementing issue #500 wears a `#777` PR chip. The chain
 that produces it:
 
+> Citation exception to the historical source note: this is a real incident.
+> The literal incorrect PR-chip value and the reported task issue number are
+> unresolved citation debt: neither repository is verified;
+> the archive's upstream provenance does not identify the incident's repositories.
+
 - The **referenced-PR janitor** (spec 2026-07-16) adopts any
   `github.com/…/pull/N` URL the conversation mentions. One stray URL — a PR the
   agent merely listed, a link inside a fetched issue body — becomes "the PR this

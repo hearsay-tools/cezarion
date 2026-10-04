@@ -17,6 +17,11 @@ direction (2026-07-18): let the **main agent thread declare its own subject** vi
 an in-band marker protocol like `CEZ:DONE` — structured, zero extra LLM calls —
 and make marker-declared values authoritative over every fuzzy layer.
 
+> Citation exception to the historical source note: the wrong-chip value and
+> reported task issue number above are observations from a real incident. Their
+> repositories are unverified. These remain unresolved incident references,
+> not hypothetical examples or known upstream tracker citations.
+
 ## Scope
 
 - New markers `CEZ:PR=<n>`, `CEZ:ISSUE=<n>`, `CEZ:TITLE=<phrase>` parsed from the

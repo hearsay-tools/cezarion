@@ -525,6 +525,8 @@ messages" tests).
 
 ---
 
+<a id="cursor-acp-264"></a>
+
 ### Cursor ACP (hearsay-tools/cezarion#264)
 
 `cursor-acp-runner.ts` launches `agent --force acp` and holds one JSON-RPC stdio
@@ -622,6 +624,8 @@ a wire gap.
 
 That covers what a mapper EMITS. The other half of the same requirement — what a
 runner DOES — is §7, and a new backend has to satisfy both.
+
+<a id="ci-wait-tool-contract-474"></a>
 
 ## CI-wait tool contract (hearsay-tools/cezarion#474)
 
@@ -1150,6 +1154,8 @@ never answered by lifecycle input, and no automatic merge/review acceptance exis
 
 ---
 
+<a id="codex-retrying-stream-errors-550"></a>
+
 ### Codex retrying stream errors (hearsay-tools/cezarion#550)
 
 App-server `error` notifications map `error.message` plus nonempty
@@ -1219,6 +1225,8 @@ these events get persisted as NDJSON), and asserts `toStrictEqual` against the
   a protected contract (see `BACKWARD_COMPATIBILITY.md` §2).
 
 ---
+
+<a id="10-adding-a-new-runner-the-387-pi-checklist"></a>
 
 ## 10. Adding a new runner (the open-mercato/cezar#387 `pi` checklist)
 
@@ -1351,6 +1359,8 @@ To be first-class:
    must receive credentials for every provider its own model ids can name
    without widening other backends.
 
+<a id="11-the-plan-channel-pr-443"></a>
+
 ## 11. The plan channel (PR open-mercato/cezar#443)
 
 PR open-mercato/cezar#443 (`fix/issue-433-render-plan-todo`, open at the time of writing) hardens
@@ -1392,12 +1402,16 @@ breaking change requiring the documented deprecation path.
 - `.ai/analysis/cockpit-ui-redesign/agent-event-protocols.md` — the deep design record (§7, §7.1).
 - `.ai/specs/2026-07-14-cockpit-ui-redesign.md` — the spec (protocol v2, parity requirement).
 
+<a id="bounded-structured-question-recovery-88"></a>
+
 ### Bounded structured-question recovery (hearsay-tools/cezarion#88)
 
 A CEZ:ASK payload missing only closing braces/brackets after a complete structural value gets one bounded repair, then the existing schema validation. Mid-string truncation, mismatched delimiters and invalid question structures remain rejected. Fresh and continuation turns persist a danger note for recovery or rejection; a recovered card warns users to check the options and how many they may pick, since repair cannot restore missing meaning. The raw recovered marker stays in the audit stream until the cockpit hides it alongside a validated card, preserving rejected split-stream fallback. Existing and unknown note tones stay dim. DONE/ASK precedence, Claude wakeups and monitoring serialization are unchanged.
 
 Harness row S13 verifies the late auto-end veto and subsequent reply completion against every `RUNNER_IDS` backend’s real offline wire.
 
+
+<a id="codex-managed-permissions-708"></a>
 
 ### Codex managed permissions (hearsay-tools/cezarion#708)
 
