@@ -364,7 +364,7 @@ const server = createServer((req, res) => {
       // #401: one completed text snapshot, without an earlier streaming part.
       if (body.includes('mock:ask-snapshot')) {
         send({ type: 'message.updated', properties: { info: info({}) } });
-        send({ type: 'message.part.updated', properties: { part: { id: 'ask-snapshot', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text', text: 'Using the CEZ:ASK structured question format instead:\n\nCEZ:ASK {"questions":[{"header":"Library","question":"Which test library?","options":[{"label":"Vitest"},{"label":"Node test"}]}]}', time: { start: 1, end: 2 } } } });
+        send({ type: 'message.part.updated', properties: { part: { id: 'ask-snapshot', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text', text: body.includes('mock:ask-snapshot-bad') ? 'CEZ:ASK {not valid json' : 'Using the CEZ:ASK structured question format instead:\n\nCEZ:ASK {"questions":[{"header":"Library","question":"Which test library?","options":[{"label":"Vitest"},{"label":"Node test"}]}]}', time: { start: 1, end: 2 } } } });
         send({ type: 'session.idle', properties: { sessionID: SESSION_ID } });
         return;
       }

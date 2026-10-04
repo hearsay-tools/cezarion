@@ -158,7 +158,7 @@ async function respond(userText, imageCount, uuid) {
   }
   // #401: result-only full text; mapResult and v1 use the same fallback.
   if (!userText.includes('[cez-namer]') && userText.includes('mock:ask-snapshot')) {
-    emit({ type: 'result', subtype: 'success', result: 'Using the CEZ:ASK structured question format instead:\n\nCEZ:ASK {"questions":[{"header":"Library","question":"Which test library?","options":[{"label":"Vitest"},{"label":"Node test"}]}]}', usage: { input_tokens: 10, output_tokens: 5 } });
+    emit({ type: 'result', subtype: 'success', result: userText.includes('mock:ask-snapshot-bad') ? 'CEZ:ASK {not valid json' : 'Using the CEZ:ASK structured question format instead:\n\nCEZ:ASK {"questions":[{"header":"Library","question":"Which test library?","options":[{"label":"Vitest"},{"label":"Node test"}]}]}', usage: { input_tokens: 10, output_tokens: 5 } });
     return;
   }
   if (!userText.includes('[cez-namer]') && userText.includes('mock:ask-prose')) {
