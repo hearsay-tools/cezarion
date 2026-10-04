@@ -931,7 +931,10 @@ export function GithubRoute({
         {selected ? (
           <GithubItemDetail
             item={selected}
-            afterHeading={selected.kind === 'issue' ? <IssueLinkedTasks number={selected.number} repo={gh.repo} /> : undefined}
+            afterHeading={selected.kind === 'issue' ? (
+              // The list can retain this same issue as its preview; reopening still resets it.
+              <IssueLinkedTasks key={n ?? 'list'} number={selected.number} repo={gh.repo} />
+            ) : undefined}
             backLink={{ to: listPath }}
             subNav={{ filter: linkFilter, changes }}
             onRunAgent={focusHandToAgentPrompt}

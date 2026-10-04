@@ -11,6 +11,7 @@ import {
   formatCount,
   githubFilterPath,
   issueNumbersWithTask,
+  linkedIssueTasks,
   parseGithubFilter,
   rowsFromSearch,
 } from './github-sidebar-model'
@@ -139,5 +140,40 @@ describe('filterCounts', () => {
   it('exposes the exact qualifier queries', () => {
     expect(REVIEW_QUERY).toBe('is:open review-requested:@me')
     expect(FAILING_QUERY).toBe('is:open status:failure')
+  })
+})
+
+
+describe('linkedIssueTasks', () => {
+  const linked = (over: Record<string, unknown>) => run({
+    issueNumber: 787, createdAt: '2026-10-01T12:00:00Z', ...over,
+  })
+
+  it('excludes active and archived owned workers while keeping ordinary and explicit root history', () => {
+    expect(linkedIssueTasks([
+      linked({ id: 'ordinary' }),
+      linked({ id: 'root', delegation: { role: 'root' } }),
+      linked({ id: 'archived-parent', archived: true, delegation: { role: 'root' } }),
+      linked({ id: 'worker', delegation: { role: 'worker', parentRunId: 'root' } }),
+      linked({ id: 'archived-worker', archived: true, delegation: { role: 'worker', parentRunId: 'archived-parent' } }),
+    ], 787, 'acme/demo', 'p1').map(task => task.id)).toEqual(['archived-parent', 'ordinary', 'root'])
+  })
+
+  it('returns no tasks for worker-only issue matches', () => {
+    expect(linkedIssueTasks([
+      linked({ id: 'worker', delegation: { role: 'worker' } }),
+    ], 787, 'acme/demo', 'p1')).toEqual([])
+  })
+
+  it('preserves deduplication, newest-first ordering and own-repository issue matching', () => {
+    const newest = linked({ id: 'newest', createdAt: '2026-10-02T12:00:00Z' })
+    const tasks = [
+      linked({ id: 'ordinary' }), newest, newest,
+      linked({ id: 'url', issueNumber: undefined, referencedIssueUrl: 'https://github.com/ACME/DEMO/issues/787' }),
+      linked({ id: 'foreign', referencedIssueUrl: 'https://github.com/other/repo/issues/787' }),
+      linked({ id: 'pr', issueNumber: undefined, prNumber: 787 }),
+    ]
+    expect(linkedIssueTasks(tasks, 787, 'acme/demo', 'p1').map(task => task.id)).toEqual(['newest', 'ordinary', 'url'])
+    expect(linkedIssueTasks(tasks, 787, undefined, 'p1').map(task => task.id)).toEqual(['newest', 'ordinary'])
   })
 })
