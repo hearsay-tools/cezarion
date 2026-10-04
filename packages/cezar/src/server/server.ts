@@ -2,6 +2,7 @@ import { sidebarLimitsSchema } from '@open-mercato/cezar-contract';
 import type { ApiRun } from '@open-mercato/cezar-contract';
 import { automationKindSchema, automationScheduleSchema, localTimeZone, nextOccurrence, type AutomationKind } from '@open-mercato/cezar-contract';
 import { DelegationService } from '../delegation/service.ts';
+import { workerCapacity } from '../delegation/capacity.ts';
 import type { DelegationController } from '../delegation/provision.ts';
 import { delegationFailure } from '../delegation/routes.ts';
 import { githubItemParamsSchema, CLIENT_REQUEST_VARIANTS_ERROR, workerEmptyRequestSchema, runRelationshipsSchema, runDelegationSummarySchema } from '@open-mercato/cezar-contract';
@@ -3892,9 +3893,12 @@ export function createApp(deps: ServerDeps) {
           ...(worker.activity === undefined ? {} : { activity: worker.activity }),
           ...(owned.destroy ? { destroy: owned.destroy } : {}),
         }];
-      }).slice(0, 32);
+      });
+      // #816: every owned worker, bounded by the 1,024 creation ceiling rather than sliced, and
+      // the root's capacity from the same derivation the spawn policy enforces.
       return c.json(runRelationshipsSchema.parse({
         ...(run.delegation?.role === 'worker' ? { parentRunId: run.delegation.parentRunId } : {}), workers,
+        ...(run.delegation?.role === 'root' ? { capacity: workerCapacity(run, id => store.getRun(id)) } : {}),
       }));
     })
     .post('/runs/:id/worker-destroy', queryZodValidator(workerEmptyRequestSchema, { code: 'invalid_input', message: 'Invalid cleanup query' }), paramZodValidator(runIdParamSchema, { code: 'invalid_input', message: 'Invalid worker ID' }), jsonZodValidator(workerEmptyRequestSchema, { absent: {}, malformed: null, code: 'invalid_input', message: 'Invalid cleanup input' }), async c => {

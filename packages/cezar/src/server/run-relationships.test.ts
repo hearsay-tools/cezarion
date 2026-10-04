@@ -53,7 +53,8 @@ it('serves a parent\'s workers off its receipts without walking the run index', 
   const app = createApp({ repoRoot: f.root, store: f.store, manager: f.manager, version: 'test', bootProjectId: 'project' });
   const scan = vi.spyOn(f.store, 'listRuns');
   const read = (id: string) => app.request(`http://127.0.0.1/api/v1/runs/${id}/relationships`, { headers: { host: '127.0.0.1' } });
-  expect(await (await read(f.parent.id)).json()).toEqual({ workers: [expect.objectContaining({ workerId: spawned.workerId, parentRunId: f.parent.id })] });
+  expect(await (await read(f.parent.id)).json()).toEqual({ workers: [expect.objectContaining({ workerId: spawned.workerId, parentRunId: f.parent.id })],
+    capacity: { outstanding: 1, limit: 32, created: 1, creationLimit: 1024 } });
   // A worker owns no workers, and an ordinary run owns none: neither reads a single other record.
   expect(await (await read(spawned.workerId)).json()).toEqual({ parentRunId: f.parent.id, workers: [] });
   expect(await (await read(unrelated.id)).json()).toEqual({ workers: [] });
@@ -63,5 +64,20 @@ it('serves a parent\'s workers off its receipts without walking the run index', 
   if (root?.role !== 'root') throw new Error('missing root fixture');
   const stale = { ...root.receipts[0]!, requestId: randomUUID(), workerId: randomUUID() };
   f.store.updateRun(f.parent.id, { delegation: { ...root, receipts: [...root.receipts, stale] } });
-  expect(await (await read(f.parent.id)).json()).toEqual({ workers: [expect.objectContaining({ workerId: spawned.workerId })] });
+  // The stale receipt still holds its slot: no deletion marker proves its resources are gone.
+  expect(await (await read(f.parent.id)).json()).toEqual({ workers: [expect.objectContaining({ workerId: spawned.workerId })],
+    capacity: { outstanding: 2, limit: 32, created: 2, creationLimit: 1024 } });
+});
+// #816: history beyond the old 32 is listed in full, never sliced, with the parent's capacity.
+it('lists all 33 owned workers and the parent capacity after a verified destroy frees a slot', { timeout: 60_000 }, async () => {
+  const workers: WorkerSpawnResult[] = [];
+  for (let i = 0; i < 32; i++) workers.push(await f.service.spawn(f.caller, { task: `worker ${i}`, baseline: 'HEAD', requestId: randomUUID() }));
+  expect(await f.service.destroy(f.caller, { workerId: workers[0]!.workerId })).toMatchObject({ state: 'complete' });
+  workers.push(await f.service.spawn(f.caller, { task: 'worker 33', baseline: 'HEAD', requestId: randomUUID() }));
+  const app = createApp({ repoRoot: f.root, store: f.store, manager: f.manager, version: 'test', bootProjectId: 'project' });
+  const read = (id: string) => app.request(`http://127.0.0.1/api/v1/runs/${id}/relationships`, { headers: { host: '127.0.0.1' } });
+  const data = runRelationshipsSchema.parse(await (await read(f.parent.id)).json());
+  expect(data.workers.map(worker => worker.workerId).sort()).toEqual(workers.map(worker => worker.workerId).sort());
+  expect(data.capacity).toEqual({ outstanding: 32, limit: 32, created: 33, creationLimit: 1024 });
+  expect(await (await read(workers[32]!.workerId)).json()).not.toHaveProperty('capacity');
 });
