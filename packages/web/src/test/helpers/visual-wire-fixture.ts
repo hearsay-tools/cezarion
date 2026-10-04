@@ -9,7 +9,12 @@ export function scriptedVisualResult(expression: string, value: unknown): unknow
   try { header = JSON.parse(expression.slice('/*cez-visual:'.length, end)) }
   catch { throw new Error('malformed scripted visual header') }
   if (!header || Object.keys(header).sort().join(',') !== 'attempt,kind,token,version' || header.version !== 1 || !['visual', 'settled'].includes(header.kind) || typeof header.token !== 'string' || !header.token || !Number.isInteger(header.attempt) || header.attempt < 1) throw new Error('malformed scripted visual header')
-  return { protocol: 'cez.visual', ...header, public: value === undefined ? { present: false } : { present: true, value },
+  // Original hold fixtures supply changing boxes/focus/value only. Complete
+  // their generated layout wire with constant metadata; legacy stays untouched.
+  const sample = value as { layout?: object } | null | undefined
+  const publicValue = header.kind === 'settled' && sample && typeof sample.layout === 'object' && sample.layout !== null
+    ? { ...sample, layout: { text: 'scripted', scrollWidth: 100, viewport: 100, ...sample.layout } } : value
+  return { protocol: 'cez.visual', ...header, public: value === undefined ? { present: false } : { present: true, value: publicValue },
     evidence: { reason: value === null ? 'fonts' : header.kind === 'visual' ? 'visual-ready' : 'sample-ready', phase: value === null || header.kind === 'visual' ? 'visual' : 'measurement',
       fontObserved: true, fontStatus: value === null ? 'loading' : 'loaded',
       document: { timeOrigin: 123, path: '/scripted-transport-seam', readyState: 'complete', visibilityState: 'visible', observedAt: header.attempt * 10 },

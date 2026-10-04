@@ -47,7 +47,30 @@ function keys(value: unknown, required: string[], optional: string[] = []): asse
 const text = (value: unknown, max: number): value is string => typeof value === 'string' && value.length <= max
 const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0
 
-/** JSON transport only; public payload is opaque and is neither cloned nor inspected. */
+/** Only the generated signature is structural; never inspect measured value. */
+function visualSignature(value: unknown): void {
+  keys(value, ['boxes', 'text', 'scrollWidth', 'viewport'])
+  const number = (coordinate: unknown) => typeof coordinate === 'number' && Number.isFinite(coordinate)
+  if (!Array.isArray(value.boxes) || !value.boxes.every(box => Array.isArray(box) && box.length === 4 && box.every(number))
+    || (value.text !== null && typeof value.text !== 'string') || !number(value.scrollWidth) || !number(value.viewport)) {
+    throw new VisualProtocolError('visual signature')
+  }
+}
+
+function generatedRoot(kind: VisualProgram['kind'], reason: VisualReason, publicSlot: Record<string, unknown>): void {
+  if (publicSlot.present !== true) throw new VisualProtocolError('generated public presence')
+  if (kind === 'settled' && ['theme', 'width', 'idle', 'visual-ready'].includes(reason)) throw new VisualProtocolError('generated kind/reason')
+  if (reason === 'visual-ready') visualSignature(publicSlot.value)
+  else if (reason === 'sample-ready') {
+    keys(publicSlot.value, ['layout', 'focus', 'value'])
+    visualSignature(publicSlot.value.layout)
+    if (typeof publicSlot.value.focus !== 'number' || !Number.isInteger(publicSlot.value.focus) || publicSlot.value.focus < -1) throw new VisualProtocolError('focus index')
+    // The own value slot is opaque: false/zero and provider-serialized nested
+    // Promise/thenable objects keep their original identity and semantics.
+  } else if (publicSlot.value !== null) throw new VisualProtocolError('rejection public value')
+}
+
+/** JSON transport only; nested measured payload is neither cloned nor inspected. */
 export function decodeVisualSample(raw: unknown, resultPropertyPresent: boolean, expected: { token: string; attempt: number; kind: VisualProgram['kind']; session: string }): { value: unknown; observation: VisualObservation } {
   if (raw === null || raw === undefined) return { value: raw, observation: { qualification: raw === null ? 'unqualified-provider-null' : 'missing-provider-result', attempt: expected.attempt, resultPropertyPresent } }
   keys(raw, ['protocol', 'version', 'token', 'attempt', 'kind', 'public', 'evidence'])
@@ -61,6 +84,8 @@ export function decodeVisualSample(raw: unknown, resultPropertyPresent: boolean,
   if ((reason.startsWith('measurement-') || reason === 'sample-ready') !== (evidence.phase === 'measurement') || (expected.kind === 'visual' && evidence.phase !== 'visual')) throw new VisualProtocolError('phase')
   if (typeof evidence.fontObserved !== 'boolean' || owns(evidence, 'fontStatus') !== evidence.fontObserved || (evidence.fontObserved && evidence.fontStatus !== null && !text(evidence.fontStatus, 64))) throw new VisualProtocolError('font observation')
   if ((reason === 'missing-target') === evidence.fontObserved) throw new VisualProtocolError('font short-circuit')
+  if (evidence.fontObserved && (reason === 'fonts' ? evidence.fontStatus === 'loaded' : evidence.fontStatus !== 'loaded')) throw new VisualProtocolError('font branch')
+  generatedRoot(expected.kind, reason, raw.public)
   keys(evidence.document, ['timeOrigin', 'path', 'readyState', 'visibilityState', 'observedAt'])
   const doc = evidence.document
   if (!finite(doc.timeOrigin) || !finite(doc.observedAt) || !text(doc.path, 512) || !text(doc.readyState, 32) || !text(doc.visibilityState, 32)) throw new VisualProtocolError('document qualification')

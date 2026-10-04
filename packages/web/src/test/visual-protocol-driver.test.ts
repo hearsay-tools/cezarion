@@ -16,9 +16,11 @@ afterEach(() => {
 })
 // Capture the descriptor from the actual helper; neither enrollment nor its
 // expression is synthesized by this fixture. Wire values are explicitly scripted.
-function program(): VisualProgram {
+function program(kind: 'visual' | 'settled' = 'visual'): VisualProgram {
   let result!: VisualProgram
-  settleVisual({ waitForStable: (_js: string, options: { visualDiagnostic: VisualProgram }) => { result = options.visualDiagnostic } } as unknown as AgentBrowser, 'body')
+  const browser = { waitForStable: (_js: string, options: { visualDiagnostic: VisualProgram }) => { result = options.visualDiagnostic; return { value: 0 } } } as unknown as AgentBrowser
+  if (kind === 'visual') settleVisual(browser, 'body')
+  else waitForSettledSample(browser, '0')
   return result
 }
 type Step = { at: number; value?: unknown; error?: Error; response?: (expression: string, advance: (time: number) => void) => Record<string, unknown> }
@@ -114,17 +116,24 @@ it.each([
   expect(bundle.poll.visual.reasons).toEqual({ fonts: 1 })
   expect(bundle.poll.decoderErrors).toBe(0)
 })
-it('separates explicit wire undefined presence from null without touching the payload', () => {
-  const descriptor = program()
-  if (descriptor.mode !== 'envelope') throw new Error('expected diagnostic program')
-  for (const value of [null, undefined, false, 0, { then: 'opaque' }]) {
-    const result = decodeVisualSample(wire(descriptor.build('token', 1), value), true, { token: 'token', attempt: 1, kind: 'visual', session: 'owned' })
-    expect(result.value).toBe(value)
+it('rejects impossible ready roots while preserving nested payload and raw missing distinction', () => {
+  const descriptor = program(), settled = program('settled')
+  if (descriptor.mode !== 'envelope' || settled.mode !== 'envelope') throw new Error('expected diagnostic programs')
+  for (const value of [undefined, false, 0, { then: 'opaque' }]) {
+    expect(() => decodeVisualSample(wire(descriptor.build('token', 1), value), true, { token: 'token', attempt: 1, kind: 'visual', session: 'owned' })).toThrow(VisualProtocolError)
+  }
+  expect(decodeVisualSample(wire(descriptor.build('token', 1), null), true, { token: 'token', attempt: 1, kind: 'visual', session: 'owned' }).value).toBeNull()
+  expect(decodeVisualSample(undefined, false, { token: 'token', attempt: 1, kind: 'visual', session: 'owned' })).toMatchObject({ value: undefined, observation: { qualification: 'missing-provider-result' } })
+  for (const value of [false, 0, { then: 'opaque' }]) {
+    const raw = wire(settled.build('token', 1), { layout: { boxes: [] }, focus: -1, value })
+    const result = decodeVisualSample(raw, true, { token: 'token', attempt: 1, kind: 'settled', session: 'owned' })
+    expect(result.value).toBe(raw.public.value)
+    expect((result.value as { value: unknown }).value).toBe(value)
     expect(result.observation.qualification).toBe('qualified')
   }
 })
 it('keeps bounded first/latest evidence and counts while metadata identity changes do not reset the hold', () => {
-  const stable = { layout: { boxes: [1] }, focus: 0, value: false }
+  const stable = { layout: { boxes: [[0, 0, 1, 1]] }, focus: 0, value: false }
   const state = controlled([100, 200, 300].map(at => ({ at, response: (expression: string) => {
     const value = wire(expression, stable)
     value.evidence.document.timeOrigin = at; value.evidence.document.path = `/page-${at}`
@@ -159,19 +168,21 @@ it('keeps decoder failure distinct from command and matcher errors after a prior
     terminalProbe: { outcome: 'returned-after-deadline', browserCompletion: 'returned' } })
 })
 it('recovers from a page error using only public samples and original hold', () => {
-  const state = controlled([{ at: 100, error: new Error('page error') }, { at: 200, value: 0 }, { at: 400, value: 0 }])
-  expect(state.browser.waitForStable('original', { holdMs: 200, intervalMs: 0, visualDiagnostic: program(), matcher: value => value === 0 })).toBe(0)
+  const sample = { layout: { boxes: [] }, focus: -1, value: 0 }
+  const state = controlled([{ at: 100, error: new Error('page error') }, { at: 200, value: sample }, { at: 400, value: sample }])
+  expect(state.browser.waitForStable<{ value: number }>('original', { holdMs: 200, intervalMs: 0, visualDiagnostic: program('settled'), matcher: sample => sample.value === 0 }).value).toBe(0)
   expect(state.probes).toHaveLength(3); expect(state.captures).toEqual([])
 })
 it('classifies matcher exceptions after decoding without transport or decoder errors', () => {
-  const state = controlled([{ at: 25000, value: 0 }])
-  const { error, bundle } = failed(state, { matcher: () => { throw new Error('match') } })
-  expect(error.lastValue).toBe(0)
+  const state = controlled([{ at: 25000, value: { layout: { boxes: [] }, focus: -1, value: 0 } }])
+  const { error, bundle } = failed(state, { visualDiagnostic: program('settled'), matcher: () => { throw new Error('match') } })
+  expect((error.lastValue as { value: number }).value).toBe(0)
   expect(bundle.poll).toMatchObject({ commandErrors: 0, decoderErrors: 0, matcherErrors: 1, terminalProbe: { matcherError: 'Error: match' } })
 })
 it('decodes late evidence but never calls a matcher or replaces the previous eligible value', () => {
-  const state = controlled([{ at: 100, value: null }, { at: 25001, value: 0 }])
-  const matcher = vi.fn(value => value === 0)
+  const ready = { boxes: [], text: '', scrollWidth: 100, viewport: 100 }
+  const state = controlled([{ at: 100, value: null }, { at: 25001, value: ready }])
+  const matcher = vi.fn(value => value === ready)
   const { error, bundle } = failed(state, { matcher })
   expect(error.lastValue).toBeNull(); expect(matcher.mock.calls).toEqual([[null], [null]])
   expect(bundle.poll.visual.latestQualified).toMatchObject({ attempt: 2, reason: 'visual-ready' })
@@ -186,13 +197,14 @@ it('charges expression construction to the original remaining command budget', (
   expect(bundle.poll.terminalProbe).toMatchObject({ startMs: 75, endMs: 25000, budgetMs: 24925 })
 })
 it('discards a timely command if decoding consumes the remaining deadline', () => {
+  const ready = { boxes: [], text: '', scrollWidth: 100, viewport: 100 }
   const state = controlled([{ at: 100, value: null }, { at: 24999, response: (expression, advance) => {
-    const value = wire(expression, 0)
+    const value = wire(expression, ready)
     // Scripted seam models decoder work; native JSON objects have no getters.
     Object.defineProperty(value.evidence.document, 'observedAt', { enumerable: true, get: () => { advance(25001); return 100 } })
     return { result: value }
   } }])
-  const matcher = vi.fn(value => value === 0)
+  const matcher = vi.fn(value => value === ready)
   const { error, bundle } = failed(state, { holdMs: 0, matcher })
   expect(error.lastValue).toBeNull(); expect(matcher.mock.calls).toEqual([[null], [null]])
   expect(bundle.poll).toMatchObject({ completedSamples: 1, lateReturns: 0,
