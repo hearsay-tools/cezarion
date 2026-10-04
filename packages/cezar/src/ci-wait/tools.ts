@@ -1,6 +1,6 @@
-import { ciWaitRequestSchema, previewServeRequestSchema } from '@open-mercato/cezar-contract';
+import { ciWaitRequestSchema, previewStopRequestSchema, previewServeRequestSchema } from '@open-mercato/cezar-contract';
 import { z } from 'zod';
-import { callCiWait, callPreviewServe } from './client.ts';
+import { callCiWait, callPreviewServe, callPreviewStop } from './client.ts';
 
 /**
  * The one list of cezar tools (#781). The MCP adapter lists it, Pi's extension registers it, and
@@ -47,11 +47,22 @@ export async function invokePreviewTool(input: unknown) {
   return { content: [{ type: 'text' as const, text: `${JSON.stringify(result)}\n${result.hint}` }], isError: !result.ok, details: result };
 }
 
+export const previewStopToolDefinition = {
+  name: 'cezar_preview_stop',
+  description: 'Stop a preview server Cezar started for your own task. Set restart to true to reuse the unchanged command the owner approved, including after a crash. Adopted servers cannot be stopped; changed registrations need the owner to press Run and open again.',
+  inputSchema: { ...z.toJSONSchema(previewStopRequestSchema, { io: 'input' }), type: 'object' as const },
+};
+export async function invokePreviewStopTool(input: unknown) {
+  const result = await callPreviewStop(input);
+  return { content: [{ type: 'text' as const, text: `${JSON.stringify(result)}\n${result.hint}` }], isError: !result.ok, details: result };
+}
+const PREVIEW_STOP_TOOL: CezarTool = { definition: previewStopToolDefinition, trigger: 'load when your Cezar-started preview server needs stopping or restarting.', label: 'Stop live preview', invoke: invokePreviewStopTool };
+
 const CI_TOOL: CezarTool = { definition: ciToolDefinition, trigger: 'load when opening or updating a PR you want to watch CI on.', label: 'Wait for CI', invoke: invokeCiTool };
 const PREVIEW_TOOL: CezarTool = { definition: previewToolDefinition, trigger: 'load when you have started, or are about to start, a web server the user should click through.', label: 'Live preview', invoke: invokePreviewTool };
 
 export function cezarTools(env: NodeJS.ProcessEnv = process.env): CezarTool[] {
-  return previewToolEnabled(env) ? [CI_TOOL, PREVIEW_TOOL] : [CI_TOOL];
+  return previewToolEnabled(env) ? [CI_TOOL, PREVIEW_TOOL, PREVIEW_STOP_TOOL] : [CI_TOOL];
 }
 export function cezarToolNames(env: NodeJS.ProcessEnv = process.env): string[] {
   return cezarTools(env).map(tool => tool.definition.name);
