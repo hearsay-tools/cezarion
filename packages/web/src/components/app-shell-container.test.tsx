@@ -1000,7 +1000,7 @@ it.each(['/p/shop/settings/agents', '/settings/global/appearance'])('shows scope
   // The project group leads with General, the project index; no "Settings" heading.
   expect(within(group).getByRole('link', { name: 'General' }).getAttribute('href')).toBe(`/p/${project}/settings`)
   expect(document.querySelector('[data-slot="settings-sidebar"] h2')).toBeNull()
-  expect([...group.querySelectorAll('a')].map((a) => a.textContent)).toEqual(['General', 'Agents', 'Agent config', 'Worktrees', 'Bookmarklets', 'Prompt templates'])
+  expect([...group.querySelectorAll('a')].map((a) => a.textContent)).toEqual(['General', 'Sidebar', 'Agents', 'Agent config', 'Worktrees', 'Bookmarklets', 'Prompt templates'])
   const global = screen.getByRole('navigation', { name: 'Global · every project' })
   expect(within(global).getByRole('link', { name: 'Appearance' }).getAttribute('href')).toBe('/settings/global/appearance')
   expect([...global.querySelectorAll('a')].map((a) => a.textContent)).toEqual(['Appearance', 'Notifications', 'Resources', 'Skills', 'Agent accounts', 'Projects'])

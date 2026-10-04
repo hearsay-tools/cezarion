@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { UiState } from '@open-mercato/cezar-contract';
+import { normalizeSidebarLimits, type UiState } from '@open-mercato/cezar-contract';
 
 /**
  * `.ai/cezar/ui-state.json` — small GUI preferences the cockpit persists (files, not a DB).
@@ -24,15 +24,18 @@ export function uiStatePath(repoRoot: string): string {
  * `z.looseObject`, so the index signature (and with it the round-trip promise of
  * BACKWARD_COMPATIBILITY.md §3) survives; what it adds is the NAMES of the keys the server knows.
  *
- * The cast is unchanged in kind — the file is user-editable JSON and is deliberately NOT parsed
- * through the schema, because a single malformed pref must not discard the whole bag (§3). What
+ * Only sidebarLimits is normalized field by field through its contract schema. Unrelated
+ * preferences retain their existing open-bag behavior. The file is user-editable JSON and is
+ * deliberately NOT parsed through the whole schema, because a single malformed pref must not discard the whole bag (§3). What
  * the type asserts is the wire shape the route promises; the write side (`PUT /ui-state`, validated
  * by `uiStateBody`) is what actually enforces it.
  */
 export async function readUiState(repoRoot: string): Promise<UiState> {
   try {
     const parsed: unknown = JSON.parse(await readFile(uiStatePath(repoRoot), 'utf8'));
-    return parsed && typeof parsed === 'object' ? (parsed as UiState) : {};
+    if (!parsed || typeof parsed !== 'object') return {};
+    const state = parsed as UiState;
+    return 'sidebarLimits' in state ? { ...state, sidebarLimits: normalizeSidebarLimits(state.sidebarLimits) } : state;
   } catch {
     return {};
   }

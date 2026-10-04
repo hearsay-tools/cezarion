@@ -592,10 +592,10 @@ export async function getRunHistoryContext(id: string, opts?: ReadOptions): Prom
   )
 }
 
-export async function getUiState(opts?: ReadOptions): Promise<UiState> {
+export async function getUiState(opts?: ReadOptions, scope = queryScope()): Promise<UiState> {
   return unwrap(
     await cez.api.v1.p[':projectId']['ui-state'].$get(
-      { param: { projectId: queryScope() } },
+      { param: { projectId: scope } },
       init(opts),
     ),
     '/ui-state',
@@ -1970,10 +1970,10 @@ export async function deleteWorkflow(name: string): Promise<DeleteWorkflowRespon
 // ---- prefs ---------------------------------------------------------------------------------
 
 /** Merges server-side (the stored object spread under the patch) and answers the merged state. */
-export async function putUiState(patch: UiState): Promise<UiState> {
+export async function putUiState(patch: UiState, scope = queryScope()): Promise<UiState> {
   return unwrap(
     await cez.api.v1.p[':projectId']['ui-state'].$put({
-      param: { projectId: queryScope() },
+      param: { projectId: scope },
       json: patch,
     }),
     '/ui-state',

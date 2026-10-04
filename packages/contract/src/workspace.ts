@@ -131,6 +131,29 @@ const taskTableUiStateSchema = z.looseObject({
   expandedColumns: z.record(z.string(), z.boolean()).optional(),
 });
 
+/** Per-project sidebar row budgets. Missing fields preserve the shipped defaults;
+ * null disables only that particular constraint. */
+export const sidebarLimitsSchema = z.object({
+  overall: z.number().int().positive().nullable().optional(),
+  needsYou: z.number().int().positive().nullable().optional(),
+  finished: z.number().int().positive().nullable().optional(),
+  working: z.number().int().positive().nullable().optional(),
+});
+export type SidebarLimits = z.infer<typeof sidebarLimitsSchema>;
+
+/** Stored preferences may predate validation or be edited by hand. Salvage each valid
+ * field independently, without relaxing the request schema or parsing the open UI-state bag. */
+export function normalizeSidebarLimits(value: unknown): Required<SidebarLimits> {
+  const defaults: Required<SidebarLimits> = { overall: 10, needsYou: null, finished: null, working: null };
+  const input = value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown> : {};
+  for (const key of Object.keys(defaults) as (keyof SidebarLimits)[]) {
+    const parsed = sidebarLimitsSchema.shape[key].safeParse(input[key]);
+    if (parsed.success && parsed.data !== undefined) defaults[key] = parsed.data;
+  }
+  return defaults;
+}
+
 /**
  * `GET/PUT /api/v1/ui-state` — the per-repo GUI prefs in `.ai/cezar/ui-state.json`.
  *
@@ -146,6 +169,7 @@ const taskTableUiStateSchema = z.looseObject({
  * listed it, which made it wider than the route.
  */
 export const uiStateSchema = z.looseObject({
+  sidebarLimits: sidebarLimitsSchema.optional(),
   /** What the last started run used. `null` is a VALUE, not an absence: it records a run that
    *  chose neither a skill nor a workflow (the plain built-in `quick-task`), which the composer
    *  can now express since the source picker grew an empty state. Absent still means "no

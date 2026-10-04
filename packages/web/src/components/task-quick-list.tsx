@@ -6,9 +6,9 @@ import { queryScope } from '@open-mercato/cezar-api-client'
 import { useSidebarArchive } from '@/components/sidebar-archive'
 import { useSidebarNavigate } from '@/components/app-shell'
 import { useSwipeToArchive } from '@/components/use-swipe-to-archive'
-import { useHealth, usePinRun, useProjectRuns, useProjectRepoBase, useProjects, useReferenceProjectId, useRuns } from '@/api/queries'
+import { useHealth, usePinRun, useProjectUiState, useProjectRuns, useProjectRepoBase, useProjects, useReferenceProjectId, useRuns } from '@/api/queries'
 import { Link, scopeTo, useNavigate, useProjectMatch } from '@/lib/project-router'
-import type { ArchiveFinishedScope, RunRecord } from '@open-mercato/cezar-api-client'
+import type { ArchiveFinishedScope, RunRecord, SidebarLimits } from '@open-mercato/cezar-api-client'
 import { DiffStatLabel } from '@/components/diff-stat'
 import { useListView } from '@/components/list-view'
 import { PinToggle } from '@/components/pin-toggle'
@@ -64,6 +64,7 @@ export function TaskQuickList({
   sweeping = null,
   showViewControls = true,
   rowLimit,
+  sidebarLimits,
   projectId = null,
 }: {
   runs: RunRecord[]
@@ -89,13 +90,14 @@ export function TaskQuickList({
   sweeping?: ArchiveFinishedScope | null
   showViewControls?: boolean
   rowLimit?: number
+  sidebarLimits?: SidebarLimits
   /** Canonical project id for browser-local section folding; null while discovery is pending. */
   projectId?: string | null
 }) {
   const onNavigate = useSidebarNavigate()
   const counts = listCounts(runs)
   const allBuckets = groupRuns(runs, view)
-  const buckets = rowLimit === undefined ? allBuckets : capBuckets(allBuckets, rowLimit)
+  const buckets = capBuckets(allBuckets, sidebarLimits ?? rowLimit ?? { overall: null })
   // Withheld in the archived view, where `groupRuns` answers one `Archived` bucket and never
   // reads `run.pinned` — the same call the thread header makes on an archived run.
   const pinToggle = view === 'archived' ? undefined : onTogglePin
@@ -1263,6 +1265,8 @@ export function TaskQuickListContainer({ showViewControls = true, projectId: exp
   const onNavigate = useSidebarNavigate()
   const scope = explicitProjectId ?? queryScope()
   const runs = useProjectRuns(scope, true, boot)
+  const uiState = useProjectUiState(scope, true, boot)
+  const sidebarLimits = uiState.data?.sidebarLimits ?? {}
   const pin = usePinRun(scope, boot ? 'default' : scope)
   const archive = useSidebarArchive(scope, boot ? 'default' : scope, onNavigate)
   const health = useHealth()
@@ -1279,7 +1283,7 @@ export function TaskQuickListContainer({ showViewControls = true, projectId: exp
   const referenceProjectId = useReferenceProjectId()
   const projectId = explicitProjectId ?? referenceProjectId
   const repoBase = useProjectRepoBase(projectId)
-  const buckets = capBuckets(groupRuns(runs.data ?? [], view), 10)
+  const buckets = capBuckets(groupRuns(runs.data ?? [], view), sidebarLimits)
   const referenceRequests = projectId === undefined ? [] : buckets.flatMap(bucket =>
     bucket.rows.flatMap(row => taskReferences(row.kind === 'run' ? row.run : row.members[0]!).map(
       reference => ({ projectId, kind: reference.kind, number: reference.number }),
@@ -1294,7 +1298,7 @@ export function TaskQuickListContainer({ showViewControls = true, projectId: exp
     <ReferenceStatusProvider projectId={projectId} repoBase={repoBase} requests={referenceRequests}>
       <TaskQuickList
         showViewControls={showViewControls}
-        rowLimit={10}
+        sidebarLimits={sidebarLimits}
         projectId={projectId === 'default' ? health.data?.bootProject ?? null : projectId ?? null}
         runs={runs.data}
         view={view}

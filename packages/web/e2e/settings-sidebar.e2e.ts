@@ -46,7 +46,7 @@ describe('Settings view sidebar (#622)', () => {
       })()`)
       expect(board).toEqual({
         pad: '12px', gap: '12px', heading: false,
-        rows: [['General', 'Agents', 'Agent config', 'Worktrees', 'Bookmarklets', 'Prompt templates'], ['Appearance', 'Notifications', 'Resources', 'Skills', 'Agent accounts', 'Projects']],
+        rows: [['General', 'Sidebar', 'Agents', 'Agent config', 'Worktrees', 'Bookmarklets', 'Prompt templates'], ['Appearance', 'Notifications', 'Resources', 'Skills', 'Agent accounts', 'Projects']],
         headerPad: '16px 28px', rule: '1px', title: true, titleSize: '15px', titleWeight: '600',
       })
       browser.screenshot(`${artifacts}/settings-sidebar-${theme}.png`, { viewport: true })

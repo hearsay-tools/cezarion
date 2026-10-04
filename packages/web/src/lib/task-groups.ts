@@ -1,5 +1,5 @@
 import { ATTENTION_RANK, deriveAttention } from './attention'
-import type { RunRecord } from '@open-mercato/cezar-api-client'
+import { normalizeSidebarLimits, type RunRecord, type SidebarLimits } from '@open-mercato/cezar-api-client'
 
 /**
  * How the task list is bucketed, sorted and collapsed — the pure half of the sidebar quick-list
@@ -321,8 +321,8 @@ export function groupRuns(runs: readonly RunRecord[], view: ListView): QuickList
 }
 
 /**
- * Cap a bucketed list at `limit` rows ACROSS buckets, preserving bucket order (multi-project
- * spec, step 3.3: each sidebar project group shows its "10 most recent tasks" and a More… row).
+ * Apply the overall and per-section row budgets in bucket order. Missing preferences keep
+ * ten rows overall with unlimited sections; null disables only its corresponding constraint.
  * A collapsed variant-group tile counts as one row — it occupies one row of sidebar. Buckets
  * emptied by the cap are dropped, like `groupRuns` drops empty ones.
  *
@@ -333,16 +333,20 @@ export function groupRuns(runs: readonly RunRecord[], view: ListView): QuickList
  * task that needs you. The pathological case (thirty pins in one project) is one the user built
  * themselves, one click at a time, and can undo the same way.
  */
-export function capBuckets(buckets: readonly QuickListBucket[], limit: number): QuickListBucket[] {
+export function capBuckets(buckets: readonly QuickListBucket[], limits: SidebarLimits | number = {}): QuickListBucket[] {
+  const preferences: SidebarLimits = typeof limits === 'number' ? { overall: limits } : normalizeSidebarLimits(limits)
+  const sectionKeys = { 'Needs you': 'needsYou', Finished: 'finished', Working: 'working' } as const
   const capped: QuickListBucket[] = []
-  let remaining = limit
+  let remaining = preferences.overall === undefined ? 10 : preferences.overall ?? Infinity
   for (const bucket of buckets) {
+    let sectionRemaining = bucket.label === 'Archived' ? Infinity : preferences[sectionKeys[bucket.label]] ?? Infinity
     const rows = bucket.rows.filter((row) => {
       const pinned = row.kind === 'run' ? row.run.pinned : row.members.some((member) => member.pinned)
       // Archived records cannot use stale pin flags to escape the history cap.
-       if (bucket.label !== 'Archived' && pinned) return true
-      if (remaining <= 0) return false
+      if (bucket.label !== 'Archived' && pinned) return true
+      if (remaining <= 0 || sectionRemaining <= 0) return false
       remaining -= 1
+      sectionRemaining -= 1
       return true
     })
     if (rows.length) capped.push({ label: bucket.label, rows })

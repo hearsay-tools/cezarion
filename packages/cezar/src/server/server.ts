@@ -1,3 +1,4 @@
+import { sidebarLimitsSchema } from '@open-mercato/cezar-contract';
 import type { ApiRun } from '@open-mercato/cezar-contract';
 import { automationKindSchema, automationScheduleSchema, localTimeZone, nextOccurrence, type AutomationKind } from '@open-mercato/cezar-contract';
 import { DelegationService } from '../delegation/service.ts';
@@ -814,6 +815,7 @@ const appearanceSchema = z.object({
 
 const uiStateSchema = z
   .object({
+    sidebarLimits: sidebarLimitsSchema.optional(),
     // `null` clears the recorded choice — the composer's "no skill, no workflow" state,
     // which is a plain quick-task run. Written through to the file like any other value, so an
     // older cockpit reading it falls back to its own default instead of restoring a stale skill.

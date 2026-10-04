@@ -14,6 +14,7 @@ import { ProjectsSection } from './projects-section'
 import { PromptTemplatesSection } from './prompt-templates-section'
 import { ResourcesSection } from './resources-section'
 import { SkillsSection } from './skills-section'
+import { SidebarSection } from './sidebar-section'
 import { WorktreesSection } from './worktrees-section'
 
 /**
@@ -33,6 +34,7 @@ import { WorktreesSection } from './worktrees-section'
  */
 
 export type SettingsSectionId =
+  | 'sidebar'
   | 'bookmarklets'
   | 'appearance'
   | 'accounts'
@@ -78,6 +80,14 @@ function comingSoon(title: string, Icon: ComponentType<SVGProps<SVGSVGElement>>)
 }
 
 export const SETTINGS_SECTIONS: SettingsSection[] = [
+  {
+    id: 'sidebar',
+    title: 'Sidebar',
+    description: 'Overall and per-section task limits for this project.',
+    icon: GaugeIcon,
+    component: SidebarSection,
+    scope: 'project',
+  },
   // ---- project scope (`/p/<projectId>/settings/…`) — settings that describe THIS repo -------
   {
     id: 'agents',
