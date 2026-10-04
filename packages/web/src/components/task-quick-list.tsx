@@ -210,19 +210,33 @@ export function QuickListBuckets({
   const headingId = React.useId()
   const sections = useSidebarSections(sectionProjectId)
   const listRef = React.useRef<HTMLDivElement>(null)
-  const focusedRow = React.useRef<{ id: string; element: HTMLElement } | null>(null)
+  const focusedRow = React.useRef<{ kind: 'run' | 'group'; id: string; element: HTMLElement } | null>(null)
   React.useLayoutEffect(() => {
     const previous = focusedRow.current
-    if (!previous || previous.element.isConnected || document.activeElement !== document.body) return
+    if (!previous || previous.element.isConnected) return
+    // A disconnected control gets one recovery attempt, never a claim on future focus after
+    // removal or navigation. A successful focus below captures the newly mounted control.
+    focusedRow.current = null
+    if (document.activeElement !== document.body) return
     const destination = allBuckets.find(bucket => bucket.rows.some(row =>
-      row.kind === 'run' ? row.run.id === previous.id : row.members.some(member => member.id === previous.id),
+      previous.kind === 'group'
+        ? row.kind === 'group' && row.groupId === previous.id
+        : row.kind === 'run' ? row.run.id === previous.id : row.members.some(member => member.id === previous.id),
     ))
     // Removal belongs to the archive controller. A status move belongs to this list; if its
     // destination is folded, focus the disclosure rather than silently unfolding the section.
     if (!destination) return
     const bucket = Array.from(listRef.current?.children ?? []).find(el => (el as HTMLElement).dataset.bucket === destination.label)
-    const row = Array.from(bucket?.querySelectorAll<HTMLElement>('[data-run-id]') ?? []).find(el => el.dataset.runId === previous.id)
-    const target = row?.querySelector<HTMLElement>('a') ?? bucket?.querySelector<HTMLElement>('[data-slot="section-toggle"]')
+    const row = Array.from(bucket?.querySelectorAll<HTMLElement>('[data-slot="task-row"], [data-slot="group-row"]') ?? [])
+      .find(el => (previous.kind === 'group' ? el.dataset.groupId : el.dataset.runId) === previous.id)
+    // Group links include compare AND shared references. Keep the same link when it survives;
+    // otherwise return to the group's disclosure. Member rows keep their own run-link target.
+    const rowTarget = previous.kind === 'group'
+      ? Array.from(row?.querySelectorAll<HTMLElement>('a') ?? []).find(el =>
+          previous.element.tagName === 'A' && el.getAttribute('href') === previous.element.getAttribute('href'))
+        ?? row?.querySelector<HTMLElement>('[data-slot="group-tile"]')
+      : row?.querySelector<HTMLElement>('a')
+    const target = rowTarget ?? bucket?.querySelector<HTMLElement>('[data-slot="section-toggle"]')
     target?.focus({ preventScroll: true })
   })
   // Which variant groups are open. Local: it is view state about this list, nothing else reads it.
@@ -238,8 +252,14 @@ export function QuickListBuckets({
 
   return (
     <div ref={listRef} className="flex flex-col gap-3" onFocusCapture={event => {
-      const row = event.target.closest<HTMLElement>('[data-run-id]')
-      focusedRow.current = row?.dataset.runId ? { id: row.dataset.runId, element: event.target } : null
+      const row = event.target.closest<HTMLElement>('[data-slot="task-row"], [data-slot="group-row"]')
+      focusedRow.current = row?.dataset.runId
+        ? { kind: 'run', id: row.dataset.runId, element: event.target }
+        : row?.dataset.groupId ? { kind: 'group', id: row.dataset.groupId, element: event.target } : null
+    }} onBlurCapture={event => {
+      // An intentional exit (including blur to body) must not be restored by a later update.
+      // Removing a focused row does not emit blur; that is the status-move path above.
+      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) focusedRow.current = null
     }}>
       {allBuckets.map((bucket) => {
         const archived = bucket.label === 'Archived'

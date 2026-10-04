@@ -102,6 +102,122 @@ describe('status section folding (#811)', () => {
   beforeEach(() => localStorage.clear())
   afterEach(() => localStorage.clear())
 
+  describe('focus across live status moves', () => {
+    afterEach(() => vi.unstubAllGlobals())
+    const variants = () => [
+      run({ id: 'va', groupId: 'g', variant: 'A', status: 'running' }),
+      run({ id: 'vb', groupId: 'g', variant: 'B', status: 'running' }),
+    ]
+    const tree = (runs: RunRecord[]) => <QueryClientProvider client={createQueryClient()}><MemoryRouter>
+      <button type="button">Outside navigation</button>
+      <TaskQuickList projectId="focus" runs={runs} view="active" onViewChange={() => {}} />
+    </MemoryRouter></QueryClientProvider>
+    const control = (selector: string) => {
+      const element = document.querySelector<HTMLElement>(selector)
+      expect(element).not.toBeNull()
+      return element!
+    }
+
+    it.each(['group-tile', 'group-compare'])('retains the group %s control when its section changes', slot => {
+      const runs = variants()
+      // A run with the same id must not be mistaken for the group in an earlier section.
+      const sameId = run({ id: 'g', status: 'waiting' })
+      const { rerender } = render(tree([sameId, ...runs]))
+      const selector = `[data-slot="${slot}"]`
+      const previous = control(selector)
+      act(() => previous.focus())
+      expect(document.activeElement).toBe(previous)
+      rerender(tree([sameId, ...runs.map(member => ({ ...member, status: 'done' as const }))]))
+      const next = control(selector)
+      expect(previous.isConnected).toBe(false)
+      expect(next.closest('[data-bucket]')?.getAttribute('data-bucket')).toBe('Finished')
+      expect(document.activeElement).toBe(next)
+    })
+
+    it.each(['group-tile', 'group-compare'])('focuses the folded destination disclosure for group %s', slot => {
+      const runs = variants()
+      const done = run({ id: 'done' })
+      const { rerender } = render(tree([done, ...runs]))
+      fireEvent.click(screen.getByRole('button', { name: 'Finished 1' }))
+      act(() => control(`[data-slot="${slot}"]`).focus())
+      rerender(tree([done, ...runs.map(member => ({ ...member, status: 'done' as const }))]))
+      const disclosure = screen.getByRole('button', { name: 'Finished 3' })
+      expect(disclosure.getAttribute('aria-expanded')).toBe('false')
+      expect(document.querySelector('[data-slot="group-row"]')).toBeNull()
+      expect(document.activeElement).toBe(disclosure)
+    })
+
+    it.each([false, true])('restores a shared reference or falls back to the group toggle when removed=%s', removed => {
+      stubMedia({ noHover: false, desktop: true })
+      const runs = variants().map(member => ({ ...member, referencedIssueUrl: 'https://github.com/o/r/issues/425' }))
+      const { rerender } = render(tree(runs))
+      const selector = '[data-slot="group-meta"] a'
+      act(() => control(selector).focus())
+      rerender(tree(runs.map(member => ({ ...member, status: 'done' as const, referencedIssueUrl: removed ? undefined : member.referencedIssueUrl }))))
+      expect(document.activeElement).toBe(control(removed ? '[data-slot="group-tile"]' : selector))
+    })
+
+    it.each([false, true])('retains expanded member identity with destination folded=%s', folded => {
+      const runs = variants()
+      const done = run({ id: 'done' })
+      const { rerender } = render(tree([done, ...runs]))
+      fireEvent.click(control('[data-slot="group-tile"]'))
+      if (folded) fireEvent.click(screen.getByRole('button', { name: 'Finished 1' }))
+      const selector = '[data-run-id="vb"] a[href="/tasks/vb"]'
+      act(() => control(selector).focus())
+      rerender(tree([done, ...runs.map(member => ({ ...member, status: 'done' as const }))]))
+      expect(document.activeElement).toBe(folded ? screen.getByRole('button', { name: 'Finished 3' }) : control(selector))
+      if (!folded) expect(control('[data-slot="group-tile"]').getAttribute('aria-expanded')).toBe('true')
+    })
+
+    it('retains an individual run link across an unfolded status move', () => {
+      const working = run({ id: 'work', status: 'running' })
+      const { rerender } = render(tree([working]))
+      act(() => control('[data-run-id="work"] a').focus())
+      rerender(tree([{ ...working, status: 'done' }]))
+      expect(document.activeElement).toBe(control('[data-run-id="work"] a'))
+    })
+
+    it('does not redirect focus on group removal to a run with the same id', () => {
+      const runs = variants()
+      const sameId = run({ id: 'g' })
+      const { rerender } = render(tree([sameId, ...runs]))
+      act(() => control('[data-slot="group-tile"]').focus())
+      rerender(tree([sameId]))
+      expect(document.activeElement).toBe(document.body)
+    })
+
+    it.each([false, true])('does not steal focus after outside navigation, blurred=%s', blurred => {
+      const runs = variants()
+      const { rerender } = render(tree(runs))
+      act(() => control('[data-slot="group-tile"]').focus())
+      const outside = screen.getByRole('button', { name: 'Outside navigation' })
+      act(() => outside.focus())
+      if (blurred) act(() => outside.blur())
+      rerender(tree(runs.map(member => ({ ...member, status: 'done' as const }))))
+      expect(document.activeElement).toBe(blurred ? document.body : outside)
+    })
+
+    it.each(['before return', 'after return'])('forgets removed group focus when outside navigation blurs %s', when => {
+      const runs = variants()
+      const other = run({ id: 'other' })
+      const { rerender } = render(tree([other, ...runs]))
+      act(() => control('[data-slot="group-tile"]').focus())
+      rerender(tree([other]))
+      expect(document.activeElement).toBe(document.body)
+      const outside = screen.getByRole('button', { name: 'Outside navigation' })
+      act(() => outside.focus())
+      if (when === 'before return') act(() => outside.blur())
+      rerender(tree([other, ...runs]))
+      if (when === 'after return') {
+        expect(document.activeElement).toBe(outside)
+        act(() => outside.blur())
+        rerender(tree([{ ...other, title: 'Unrelated title update' }, ...runs]))
+      }
+      expect(document.activeElement).toBe(document.body)
+    })
+  })
+
   it('starts expanded, folds independently, and remembers each section after remount', () => {
     const runs = [run({ id: 'ask', status: 'waiting' }), run({ id: 'done' }), run({ id: 'work', status: 'running' })]
     renderList({ runs })
