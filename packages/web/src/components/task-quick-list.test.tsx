@@ -47,7 +47,7 @@ function renderList(
   repo?: { projectId: string; repoBase: string },
 ) {
   const onViewChange = props.onViewChange ?? vi.fn()
-  const list = <TaskQuickList runs={[]} view="active" now={NOW} {...props} onViewChange={onViewChange} />
+  const list = <TaskQuickList runs={[]} view="active" now={NOW} projectId="test-project" {...props} onViewChange={onViewChange} />
   const utils = render(
     <QueryClientProvider client={createQueryClient()}>
       <MemoryRouter initialEntries={[route]}>
@@ -98,6 +98,84 @@ const rowsIn = (label: string): string[] =>
 
 afterEach(cleanup)
 
+describe('status section folding (#811)', () => {
+  beforeEach(() => localStorage.clear())
+  afterEach(() => localStorage.clear())
+
+  it('starts expanded, folds independently, and remembers each section after remount', () => {
+    const runs = [run({ id: 'ask', status: 'waiting' }), run({ id: 'done' }), run({ id: 'work', status: 'running' })]
+    renderList({ runs })
+    const toggle = screen.getByRole('button', { name: 'Finished 1' })
+    expect(toggle.getAttribute('aria-expanded')).toBe('true')
+    fireEvent.click(toggle)
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    expect(row('done')).toBeNull()
+    expect(row('ask')).not.toBeNull()
+    expect(row('work')).not.toBeNull()
+    cleanup()
+    renderList({ runs })
+    expect(screen.getByRole('button', { name: 'Finished 1' }).getAttribute('aria-expanded')).toBe('false')
+    expect(row('done')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Finished 1' }))
+    expect(row('done')).not.toBeNull()
+  })
+
+  it('shows full task counts and live attention for folded sections, including capped variants', () => {
+    const runs = [run({ id: 'a', groupId: 'g', variant: 'A', status: 'waiting' }), run({ id: 'b', groupId: 'g', variant: 'B' }), run({ id: 'c' })]
+    renderList({ runs, rowLimit: 1 })
+    const toggle = screen.getByRole('button', { name: 'Needs you 2' })
+    fireEvent.click(toggle)
+    expect(within(toggle).getByRole('img', { name: 'needs you' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Finished 1' })).toBeTruthy()
+    cleanup()
+    renderList({ runs: [...runs, run({ id: 'new', status: 'review' })], rowLimit: 1 })
+    expect(screen.getByRole('button', { name: 'Needs you 3' }).getAttribute('aria-expanded')).toBe('false')
+    expect(document.querySelector('[data-slot="group-row"]')).toBeNull()
+  })
+
+  it('offers only the unpinned Finished sweep even when folded and every row is capped', () => {
+    const onSweep = vi.fn()
+    renderList({ runs: [run({ id: 'plain' }), run({ id: 'pin', pinned: true })], rowLimit: 0, onSweep })
+    fireEvent.click(screen.getByRole('button', { name: 'Finished 2' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Archive all' }))
+    expect(onSweep).toHaveBeenCalledExactlyOnceWith('unpinned')
+    expect(document.querySelector('[data-scope="pinned"]')).toBeNull()
+  })
+
+  it('moves live updates into saved folded sections without duplication, retaining attention and focus', () => {
+    const done = run({ id: 'done', status: 'done', finishedAt: ago(1000) })
+    const working = run({ id: 'move', status: 'running' })
+    const tree = (runs: RunRecord[]) => <QueryClientProvider client={createQueryClient()}><MemoryRouter><TaskQuickList projectId="live" runs={runs} view="active" onViewChange={() => {}} /></MemoryRouter></QueryClientProvider>
+    const { rerender } = render(tree([done, working]))
+    fireEvent.click(screen.getByRole('button', { name: 'Finished 1' }))
+    act(() => (row('move')?.querySelector('a') as HTMLElement).focus())
+    rerender(tree([done, { ...working, status: 'failed', finishedAt: ago(500) }]))
+    const folded = screen.getByRole('button', { name: 'Finished 2' })
+    expect(folded.getAttribute('aria-expanded')).toBe('false')
+    expect(document.activeElement).toBe(folded)
+    expect(within(folded).getByRole('img', { name: 'failed' })).toBeTruthy()
+    expect(within(folded).getByRole('img', { name: 'unread' })).toBeTruthy()
+    expect(row('move')).toBeNull()
+    fireEvent.click(folded)
+    expect(document.querySelectorAll('[data-run-id="move"]')).toHaveLength(1)
+    expect(document.querySelector('[data-bucket="Working"]')).toBeNull()
+  })
+
+  it('shares section state between mounted copies, handles corrupt storage and stays usable when writes fail', () => {
+    localStorage.setItem('cez-sidebar-sections-collapsed', '{broken')
+    const runs = [run()]
+    const first = renderList({ runs, projectId: 'same' })
+    const second = renderList({ runs, projectId: 'same' })
+    const write = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('blocked') })
+    try {
+      fireEvent.click(within(first.container).getByRole('button', { name: 'Finished 1' }))
+      expect(within(second.container).getByRole('button', { name: 'Finished 1' }).getAttribute('aria-expanded')).toBe('false')
+      fireEvent.click(within(second.container).getByRole('button', { name: 'Finished 1' }))
+      expect(within(first.container).getByRole('button', { name: 'Finished 1' }).getAttribute('aria-expanded')).toBe('true')
+    } finally { write.mockRestore() }
+  })
+})
+
 describe('TaskQuickList', () => {
   it('renders the buckets in the mockup order with their runs', () => {
     renderList({
@@ -110,10 +188,10 @@ describe('TaskQuickList', () => {
     })
 
     const headers = [...document.querySelectorAll('[data-slot="quick-list-bucket"] h2')].map((h) => h.textContent)
-    expect(headers).toEqual(['Needs you 1', 'Pinned 1', 'Working 1', 'Finished 1'])
+    expect(headers).toEqual(['Needs you 1', 'Finished 2', 'Working 1'])
     expect(rowsIn('Needs you')).toEqual(['Structured changes endpointneeds review · 1m'])
     expect(rowsIn('Working')).toEqual(['Normalize agent-event protocolrunning · 1m'])
-    expect(rowsIn('Finished')).toEqual(['README parallel-agents tagline1m'])
+    expect(rowsIn('Finished')).toEqual(['Kept1m', 'README parallel-agents tagline1m'])
   })
 
   it('links every row to its task', () => {
@@ -616,7 +694,7 @@ describe('TaskQuickList', () => {
       renderList({ runs: variants() })
 
       fireEvent.click(screen.getByRole('button', { expanded: false }))
-      expect(screen.getByRole('button', { expanded: true })).not.toBeNull()
+      expect(screen.getByRole('button', { name: /Add skills autocomplete/, expanded: true })).not.toBeNull()
 
       // The letter chip, its own dot, and what actually differs between the variants.
       // Line two is the meta line: state word (and references), never an age (#617 decision 1).
@@ -627,7 +705,7 @@ describe('TaskQuickList', () => {
       // Each variant is still its own deep link.
       expect(row('vb')?.querySelector('a')?.getAttribute('href')).toBe('/tasks/vb')
 
-      fireEvent.click(screen.getByRole('button', { expanded: true }))
+      fireEvent.click(screen.getByRole('button', { name: /Add skills autocomplete/, expanded: true }))
       expect(row('va')).toBeNull()
     })
 
@@ -659,7 +737,7 @@ describe('TaskQuickList', () => {
   })
 
   describe('the pin (#935)', () => {
-    it('renders pinned runs under a Pinned header after Needs you, once', () => {
+    it('renders pinned runs in their status section after Needs you, once', () => {
       renderList({
         runs: [
           run({ id: 'waiting', title: 'Wants you', status: 'waiting' }),
@@ -668,9 +746,9 @@ describe('TaskQuickList', () => {
         onTogglePin: vi.fn(),
       })
       const headers = [...document.querySelectorAll('[data-slot="quick-list-bucket"] h2')].map((h) => h.textContent)
-      expect(headers).toEqual(['Needs you 1', 'Pinned 1'])
-      expect(rowsIn('Pinned')).toHaveLength(1)
-      expect(bucket('Pinned').querySelector('[data-run-id="kept"]')).not.toBeNull()
+      expect(headers).toEqual(['Needs you 1', 'Finished 1'])
+      expect(rowsIn('Finished')).toHaveLength(1)
+      expect(bucket('Finished').querySelector('[data-run-id="kept"]')).not.toBeNull()
       expect(bucket('Needs you').querySelector('[data-run-id="kept"]')).toBeNull()
     })
 
@@ -735,7 +813,7 @@ describe('TaskQuickList', () => {
       expect(document.querySelector('[data-slot="pin-toggle"]')).toBeNull()
     })
 
-    it('keeps the status dot on a pinned row — Pinned says where it is, not how it is', () => {
+    it('keeps the status dot on a pinned row', () => {
       renderList({ runs: [run({ id: 'kept', status: 'waiting', pinned: true })], onTogglePin: vi.fn() })
       expect(dotOf('kept')?.getAttribute('data-tone')).toBe('pending')
     })
@@ -1144,9 +1222,9 @@ describe('the calmer row (#617)', () => {
     expect(kept.querySelector('[data-slot="pin-icon"]')?.getAttribute('fill')).toBe('currentColor')
   })
 
-  it('Pinned bucket: the pin is hidden at rest and shows filled (unpin) on hover', () => {
+  it('a pinned row keeps its filled unpin affordance on hover', () => {
     renderList({ runs: [run({ id: 'kept', pinned: true })], onTogglePin: vi.fn() })
-    const pin = bucket('Pinned').querySelector('[data-run-id="kept"] [data-slot="pin-toggle"]') as HTMLElement
+    const pin = bucket('Finished').querySelector('[data-run-id="kept"] [data-slot="pin-toggle"]') as HTMLElement
     expect(pin.getAttribute('aria-label')).toBe('Unpin task')
     expect(pin.className).toContain('opacity-0')
     expect(pin.className).toContain('group-hover/task-row:opacity-100')
@@ -1987,8 +2065,8 @@ describe('sidebar archive (#780)', () => {
     const finished = document.querySelector('[data-bucket="Finished"]') as HTMLElement
     const button = within(finished).getByRole('button', { name: 'Archive all' })
     expect(button).toBe(groupButton('unpinned'))
-    // The heading's accessible name stays `Finished 1`; the button sits beside it.
-    expect(within(finished).getByRole('heading', { name: 'Finished 1' })).toBeTruthy()
+    // The heading includes both tasks; the sweep button sits beside it.
+    expect(within(finished).getByRole('heading', { name: 'Finished 2' })).toBeTruthy()
     fireEvent.click(button)
     expect(onSweep).toHaveBeenCalledWith('unpinned')
     cleanup()
@@ -2003,13 +2081,10 @@ describe('sidebar archive (#780)', () => {
     expect(groupButton('unpinned')).not.toBeNull()
   })
 
-  it('shows "Archive finished" on Pinned only while it holds a finished, non-scheduled row', () => {
+  it('offers no sweep when only pins or scheduled runs are present', () => {
     const onSweep = vi.fn()
     renderList({ runs: [run({ id: 'p1', pinned: true, status: 'done' }), run({ id: 'p2', pinned: true, status: 'running' })], onSweep, onTogglePin: vi.fn() })
-    const button = within(document.querySelector('[data-bucket="Pinned"]') as HTMLElement).getByRole('button', { name: 'Archive finished' })
-    expect(button).toBe(groupButton('pinned'))
-    fireEvent.click(button)
-    expect(onSweep).toHaveBeenCalledWith('pinned')
+    expect(document.querySelectorAll('[data-action="archive-group"]')).toHaveLength(0)
     cleanup()
     // Review Focus 3: a pinned run that is only waiting out a usage limit has nothing to sweep.
     renderList({
@@ -2019,7 +2094,7 @@ describe('sidebar archive (#780)', () => {
       ],
       onSweep,
     })
-    expect(document.querySelector('[data-bucket="Pinned"]')).not.toBeNull()
+    expect(document.querySelector('[data-bucket="Working"]')).not.toBeNull()
     expect(groupButton('pinned')).toBeNull()
   })
 
@@ -2028,8 +2103,7 @@ describe('sidebar archive (#780)', () => {
     const busy = groupButton('unpinned') as HTMLButtonElement
     expect(busy.disabled).toBe(true)
     expect(busy.getAttribute('aria-busy')).toBe('true')
-    const other = groupButton('pinned') as HTMLButtonElement
-    expect(other.getAttribute('aria-busy')).toBeNull()
+    expect(groupButton('pinned')).toBeNull()
   })
 
   it('gives the group buttons a 44px target on touch', () => {
@@ -2170,7 +2244,7 @@ describe('swipe to archive on touch (#780 §7)', () => {
     expect(layer('fin').style.transform).toBe('translateX(-50px)')
   })
 
-  it('keeps the row mounted, and its link focused, when the run finishes', () => {
+  it('keeps the task link focused when finishing moves a pin into Finished', () => {
     const client = createQueryClient()
     const live = run({ id: 'flip', title: 'Flip', status: 'running', pinned: true })
     const tree = (record: RunRecord) => (
@@ -2184,10 +2258,10 @@ describe('swipe to archive on touch (#780 §7)', () => {
     const link = within(layer('flip')).getByRole('link')
     link.focus()
     expect(surface('flip')).toBeNull()
-    // Still Pinned, so the bucket does not change; only swipeability does.
+    // The status move remounts the row in Finished, but keyboard focus follows it.
     rerender(tree({ ...live, status: 'done', finishedAt: ago(1_000) }))
-    expect(link.isConnected).toBe(true)
-    expect(document.activeElement).toBe(link)
+    expect(document.activeElement).toBe(row('flip')?.querySelector('a'))
+    expect(bucket('Finished').contains(document.activeElement)).toBe(true)
     expect(surface('flip')).not.toBeNull()
   })
 

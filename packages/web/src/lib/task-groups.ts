@@ -16,10 +16,14 @@ import type { RunRecord } from '@open-mercato/cezar-api-client'
 /** Active/Archived. The same type on both surfaces; each surface holds its own value. */
 export type ListView = 'active' | 'archived'
 
-export type BucketLabel = 'Pinned' | 'Needs you' | 'Working' | 'Finished' | 'Archived'
+export type BucketLabel = 'Needs you' | 'Working' | 'Finished' | 'Archived'
 
 /** Rendering order. Also the exhaustive set — `groupRuns` emits a subset of these, in this order. */
-export const BUCKET_ORDER: readonly BucketLabel[] = ['Needs you', 'Pinned', 'Working', 'Finished', 'Archived']
+export const BUCKET_ORDER: readonly BucketLabel[] = ['Needs you', 'Finished', 'Working', 'Archived']
+
+/** A variant tile remains in flight until all siblings finish. Its status priority is not the
+ * presentation/budget order: putting Finished second must not file a live sibling as history. */
+const GROUP_STATUS_ORDER: readonly BucketLabel[] = ['Needs you', 'Working', 'Finished', 'Archived']
 
 /**
  * Sort weight per status: needs-you first, then the pipeline in the order it will actually
@@ -99,13 +103,12 @@ export interface QuickListBucket {
  * (`RunStore.setArchived`), so a pinned archived record is only reachable by hand-editing
  * `runs.json`, and even then history is what that view is showing.
  *
- * Attention takes priority over a pin: a pinned task that wants you appears in Needs you.
- * The pin stays on the record, including its exemption from the sidebar row cap.
+ * Pins change ordering within the status section, never the section itself (#811).
+ * They retain their exemption from the sidebar row cap.
  */
 export function bucketOf(run: RunRecord, view: ListView): BucketLabel {
   if (view === 'archived') return 'Archived'
   if (deriveAttention(run).bucket === 'waiting') return 'Needs you'
-  if (run.pinned) return 'Pinned'
   if (run.status === 'waiting') return 'Working'
   if (run.status === 'running' || run.status === 'queued') return 'Working'
   // A run waiting out a provider usage limit is `failed` on the record but has an appointment to
@@ -224,7 +227,7 @@ export function sortRuns(runs: readonly RunRecord[], view: ListView): RunRecord[
       // Pinned first (#935), ahead of every status weight — that IS what a pin asks for, and it
       // orders the flat Tasks table and rows within each bucket. Variant placement
       // separately follows bucket priority so attention beats the pin.
-      // Inside `Pinned` the ordinary rules below then apply unchanged.
+       // Within each pin partition the ordinary rules below apply unchanged.
       //
       // Ignored in the archived view, where `bucketOf` collapses everything into one bucket:
       // archiving unpins, so a pin there is a hand-edit, and history has no "what happens next".
@@ -303,7 +306,7 @@ export function groupRuns(runs: readonly RunRecord[], view: ListView): QuickList
       if (members.length > 1) {
         // Bucket priority is independent of sortRuns' flat-table pin ordering: any
         // attentive member lifts the whole group above even a pinned quiet sibling.
-        const label = BUCKET_ORDER.find((label) => members.some((member) => bucketOf(member, view) === label))!
+        const label = GROUP_STATUS_ORDER.find((label) => members.some((member) => bucketOf(member, view) === label))!
         push(label, { kind: 'group', groupId: run.groupId, title: groupTitle(run), members, lead: loudestMember(members) })
         continue
       }
@@ -337,7 +340,7 @@ export function capBuckets(buckets: readonly QuickListBucket[], limit: number): 
     const rows = bucket.rows.filter((row) => {
       const pinned = row.kind === 'run' ? row.run.pinned : row.members.some((member) => member.pinned)
       // Archived records cannot use stale pin flags to escape the history cap.
-      if (bucket.label === 'Pinned' || (bucket.label !== 'Archived' && pinned)) return true
+       if (bucket.label !== 'Archived' && pinned) return true
       if (remaining <= 0) return false
       remaining -= 1
       return true

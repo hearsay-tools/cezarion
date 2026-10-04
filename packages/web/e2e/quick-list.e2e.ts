@@ -19,6 +19,7 @@ import {
   type ContrastSample,
 } from './contrast'
 import { waitForHealth } from './poll'
+import { settleVisual } from './visual-ready'
 
 /**
  * The task quick-list, in a real browser, against a real cezar serving real runs.
@@ -1695,6 +1696,7 @@ describe('archive from the sidebar (#780)', () => {
     ...extra,
   })
   const ARCHIVE_FIXTURE = [
+    finishedRun('arc-review', 'Review the release checklist', 5, { status: 'review' }),
     finishedRun('arc-a', 'Tidy the release notes', 10),
     finishedRun('arc-b', 'Rename the config loader', 20),
     finishedRun('arc-pinned', 'Pinned and finished', 30, { pinned: true, pinnedAt: ago(5 * 60_000) }),
@@ -1770,13 +1772,13 @@ describe('archive from the sidebar (#780)', () => {
     expect((await stored('arc-b')).archived).toBeFalsy()
   })
 
-  it('brings a pinned row back pinned, under Pinned', async () => {
-    expect(ids('Pinned')).toEqual(['arc-pinned'])
+  it('brings a pinned row back pinned, first in Finished', async () => {
+    expect(ids('Finished')).toEqual(['arc-pinned', 'arc-a', 'arc-b'])
     browser.hover(rowSel('arc-pinned'))
     browser.click(archiveBtn('arc-pinned'))
     browser.waitForFunction(`document.querySelector('${rowSel('arc-pinned')}') === null`)
     browser.click('[data-slot="toast-action"]')
-    browser.waitForFunction(`document.querySelector('[data-bucket="Pinned"] ${rowSel('arc-pinned')}') !== null`)
+    browser.waitForFunction(`document.querySelector('[data-bucket="Finished"] ${rowSel('arc-pinned')} [data-pinned="true"]') !== null`)
     const back = await stored('arc-pinned')
     expect(back.archived).toBeFalsy()
     expect(back.pinned).toBe(true)
@@ -1784,26 +1786,22 @@ describe('archive from the sidebar (#780)', () => {
 
   it('"Archive all" takes the Finished rows only, and Undo restores them', async () => {
     browser.click('[data-action="archive-group"][data-scope="unpinned"]')
-    browser.waitForFunction(`document.querySelector('[data-bucket="Finished"]') === null`)
+    browser.waitForFunction(`document.querySelectorAll('[data-bucket="Finished"] ${ROW}').length === 1`)
     expect(browser.waitForValue(`document.querySelector('[data-slot="toast"]')?.textContent ?? null`)).toContain('Archived 2 tasks')
-    // Pinned is untouched, and so is the scheduled run (it sits in Working and keeps its resume).
-    expect(ids('Pinned')).toEqual(['arc-pinned'])
+    // The pin is untouched, and so is the scheduled run (Working keeps its resume).
+    expect(ids('Finished')).toEqual(['arc-pinned'])
     expect((await stored('arc-scheduled')).archived).toBeFalsy()
     expect((await stored('arc-scheduled')).autoResumeAt).toBeTruthy()
     browser.click('[data-slot="toast-action"]')
-    browser.waitForFunction(`document.querySelectorAll('[data-bucket="Finished"] ${ROW}').length === 2`)
+    browser.waitForFunction(`document.querySelectorAll('[data-bucket="Finished"] ${ROW}').length === 3`)
   })
 
-  it('"Archive finished" on Pinned takes the pinned finished row and comes back pinned on Undo', async () => {
-    browser.click('[data-action="archive-group"][data-scope="pinned"]')
-    browser.waitForFunction(`document.querySelector('[data-bucket="Pinned"]') === null`)
-    expect(browser.waitForValue(`document.querySelector('[data-slot="toast"]')?.textContent ?? null`)).toContain('Archived 1 task')
-    browser.click('[data-slot="toast-action"]')
-    browser.waitForFunction(`document.querySelector('[data-bucket="Pinned"] ${rowSel('arc-pinned')}') !== null`)
+  it('offers Archive all only in Finished, never a pinned sweep', async () => {
+    expect(browser.waitForValue(`Array.from(document.querySelectorAll('[data-action="archive-group"]')).map(el => [el.closest('[data-bucket]').dataset.bucket, el.dataset.scope])`)).toEqual([['Finished', 'unpinned']])
     expect((await stored('arc-pinned')).pinned).toBe(true)
   })
 
-  it('keeps the row button and both group buttons readable, at rest and hovered, in both themes', () => {
+  it('keeps the row button and Finished sweep readable, at rest and hovered, in both themes', () => {
     try {
       for (const variant of contrastQaVariants.filter(({ viewport }) => viewport.width === 1440)) {
         applyContrastQaVariant(browser, variant)
@@ -1811,7 +1809,7 @@ describe('archive from the sidebar (#780)', () => {
         browser.waitForValue(`getComputedStyle(document.querySelector('${archiveBtn('arc-a')}')).opacity`, (v) => v === '1')
         const icon = browser.evaluate(contrastSampleExpression(`${archiveBtn('arc-a')} svg`, 'color', 'parent')) as ContrastSample
         expect(icon.ratio, `${variant.id} row button: ${icon.foreground} on ${icon.background}`).toBeGreaterThanOrEqual(3)
-        for (const scope of ['unpinned', 'pinned']) {
+        for (const scope of ['unpinned']) {
           const group = `[data-action="archive-group"][data-scope="${scope}"]`
           browser.moveTo(0, 0)
           const rest = browser.evaluate(contrastSampleExpression(group, 'color', 'parent')) as ContrastSample
@@ -1828,6 +1826,51 @@ describe('archive from the sidebar (#780)', () => {
       restoreContrastQaDefaults(browser)
     }
   })
+
+  it('folds sections with the keyboard, persists across canonical routes, and shares mobile state (#811)', () => {
+    const desktop = '[data-slot="sidebar"]'
+    const finished = `${desktop} [data-bucket="Finished"] [data-slot="section-toggle"]`
+    expect(browser.waitForValue(`Array.from(document.querySelectorAll('${desktop} [data-bucket]')).map(el => el.dataset.bucket)`)).toEqual(['Needs you', 'Finished', 'Working'])
+    focusWithKeyboard(browser, finished)
+    browser.press('Enter')
+    expect(browser.waitForValue(`document.querySelector('${finished}').getAttribute('aria-expanded')`, value => value === 'false')).toBe('false')
+    browser.goto(`${archiveUrl}/p/default/`)
+    expect(browser.waitForValue(`document.querySelector('${finished}')?.getAttribute('aria-expanded')`, value => value === 'false')).toBe('false')
+    try {
+      for (const variant of contrastQaVariants.filter(v => v.density === 'comfortable')) {
+        applyContrastQaVariant(browser, variant)
+        const mobile = variant.viewport.width === 360
+        if (mobile) browser.click('[data-slot="mobile-top-bar"] button[aria-label^="Open projects"]')
+        const surface = mobile ? '[data-slot="drawer-tasks"]' : desktop
+        const toggle = `${surface} [data-bucket="Finished"] [data-slot="section-toggle"]`
+        expect(browser.waitForValue(`document.querySelector('${toggle}')?.getAttribute('aria-expanded')`, value => value === 'false')).toBe('false')
+        if (mobile) browser.waitForValue(`(() => { const el = document.querySelector('${surface}'); el.scrollIntoView({ block: 'start' }); const toggle = el.querySelector('[data-bucket="Finished"] [data-slot="section-toggle"]'); const r = toggle.getBoundingClientRect(); const scroller = el.closest('[data-slot="drawer-scroll"]').getBoundingClientRect(); return r.top >= scroller.top && r.bottom <= scroller.bottom; })()`)
+        settleVisual(browser, surface, { theme: variant.theme })
+        const facts = browser.waitForValue<{ height: number; count: string; unread: boolean }>(`(() => { const el = document.querySelector('${toggle}'); return { height: el.getBoundingClientRect().height, count: el.getAttribute('aria-label'), unread: !!el.querySelector('[aria-label="unread"]') }; })()`)
+        expect(facts.count).toBe('Finished 3')
+        expect(facts.unread).toBe(true)
+        if (mobile) expect(facts.height).toBeGreaterThanOrEqual(44)
+        const contrast = browser.evaluate(contrastSampleExpression(toggle)) as ContrastSample
+        expect(contrast.ratio).toBeGreaterThanOrEqual(4.5)
+        browser.screenshot(`${artifactsDir}/sidebar-sections-${variant.id}.png`)
+        focusWithKeyboard(browser, toggle)
+        browser.press('Space')
+        expect(browser.waitForValue(`document.querySelector('${toggle}').getAttribute('aria-expanded')`, value => value === 'true')).toBe('true')
+        browser.click(toggle)
+        expect(browser.waitForValue(`document.querySelector('${toggle}').getAttribute('aria-expanded')`, value => value === 'false')).toBe('false')
+        if (mobile) {
+          browser.click('[data-slot="mobile-nav-drawer"] [aria-label="Close menu"]')
+          browser.waitForFunction(`document.querySelector('[data-slot="mobile-nav-drawer"]') === null`)
+        }
+      }
+    } finally {
+      restoreContrastQaDefaults(browser)
+      browser.goto(`${archiveUrl}${archiveScoped('/')}`)
+      browser.waitForFunction(`document.querySelector('${finished}') !== null`)
+      browser.click(finished)
+      browser.waitForFunction(`document.querySelector('${finished}').getAttribute('aria-expanded') === 'true'`)
+    }
+  }, 120_000)
 })
 
 describe('swipe to archive on touch (#780 §7)', () => {
@@ -1856,7 +1899,7 @@ describe('swipe to archive on touch (#780 §7)', () => {
   const SWIPE_FIXTURE = [
     // Not finished as far as the sidebar is concerned: it sits in Working, waiting out a usage
     // limit. (A `running` record would not survive the store's boot-time reconcile.)
-    swipeRun('sw-live', 'Waiting out a usage limit', 1, { status: 'failed', autoResumeAt: new Date(Date.now() + 86_400_000).toISOString() }),
+    swipeRun('sw-live', 'Waiting out a usage limit', 1, { status: 'failed', pinned: true, autoResumeAt: new Date(Date.now() + 86_400_000).toISOString() }),
     ...Array.from({ length: 10 }, (_, i) => swipeRun(`sw-${i}`, `Finished task ${i}`, 10 + i)),
   ]
   const rowSel = (id: string) => `${ROW}[data-run-id="${id}"]`

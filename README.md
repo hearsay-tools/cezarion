@@ -371,7 +371,16 @@ Every view is project-scoped:
 `<projectId>` is a slug derived from the folder name (`my-app`, then `my-app-2`
 on a collision), and `/p/default/…` always means the project cezar was started
 in. The desktop rail selects the project. Its sidebar shows the project header,
-view tabs and task list, with Needs you before Pinned, Working and Finished.
+view tabs and task list, ordered **Needs you → Finished → Working**.
+Pins stay first within their status section and do not spend the default ten-row
+budget; Finished takes priority over Working when that budget fills up. Each
+section starts expanded and folds independently using its heading (click, Enter
+or Space). Folding is remembered per browser, project and section, separately
+from folding a project. Folded headings keep full task counts and attention
+indicators, including tasks outside the visible row limit. These controls work
+in the mobile drawer too. **Archive all** appears only on Finished and archives
+all eligible unpinned tasks, including hidden rows; individual archive actions
+and Undo remain available. Archived keeps its existing history view.
 Inbox and Automations appear in More views when enabled. The project menu
 offers Mark all read and project settings; local mode also offers Open in and
 Copy path. Active/Archived remains below the Tasks heading. The new-task

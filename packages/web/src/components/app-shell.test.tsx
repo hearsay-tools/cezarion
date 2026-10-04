@@ -984,7 +984,7 @@ describe('AppShell', () => {
       await waitFor(() => expect(drawer()).toBeNull())
     })
 
-    it('renders no SidebarContent: no nav, quick list, New task or search hint (#621)', () => {
+    it('shares the task list in the mobile drawer without desktop nav or composer chrome (#811)', () => {
       renderShell('/', { taskQuickList: <p>list</p> })
       openMenu()
       const root = drawer() as HTMLElement
@@ -992,7 +992,7 @@ describe('AppShell', () => {
       expect(within(root).queryByRole('navigation', { name: 'Main' })).toBeNull()
       expect(within(root).queryByRole('link', { name: 'Git' })).toBeNull()
       expect(within(root).queryByRole('link', { name: /New task/ })).toBeNull()
-      expect(within(root).queryByText('list')).toBeNull()
+      expect(within(root).getByText('list')).toBeTruthy()
       // The desktop sidebar still carries all of it.
       expect(allNavLinks().length).toBeGreaterThan(0)
     })

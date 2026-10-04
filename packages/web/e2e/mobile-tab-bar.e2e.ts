@@ -260,7 +260,7 @@ describe('mobile tab bar, More sheet and pushed task screen', () => {
     browser.waitForFunction(`location.pathname === ${JSON.stringify(scoped('/'))} && document.querySelector('${TAB_BAR}') !== null`)
   })
 
-  it('leaves the drawer projects-only, with Tools and the project menu in their new homes', () => {
+  it('shows projects and current task sections, with Tools and the project menu in their own homes', () => {
     browser.setViewport(PHONE.width, PHONE.height)
     openList()
     browser.click(MENU_BUTTON)
@@ -270,13 +270,13 @@ describe('mobile tab bar, More sheet and pushed task screen', () => {
       const tools = root.querySelector('[data-slot="drawer-tools"]')
       if (!tools) return null
       return { nav: root.querySelectorAll('nav').length, content: root.querySelectorAll('[data-slot="sidebar-content"]').length,
-        quickList: root.querySelectorAll('[data-slot="quick-list"], [data-slot="view-tab"], [data-slot="view-tabs"]').length,
+        quickList: root.querySelectorAll('[data-slot="drawer-tasks"] [data-slot="quick-list"]').length,
         newTask: root.querySelectorAll('[data-sidebar-item="new-task"]').length,
         projects: root.querySelectorAll('[data-slot="drawer-project"]').length,
         toolsHref: tools.getAttribute('href'), current: root.querySelectorAll('[data-slot="drawer-project"][aria-current="page"]').length,
         menuInLink: !!root.querySelector('[data-slot="drawer-project-current"] [data-slot="project-menu-trigger"]')?.closest('a') }
     })()`) as { nav: number; content: number; quickList: number; newTask: number; projects: number; toolsHref: string; current: number; menuInLink: boolean }
-    expect(drawer).toMatchObject({ nav: 0, content: 0, quickList: 0, newTask: 0, current: 1, menuInLink: false, toolsHref: '/tools' })
+    expect(drawer).toMatchObject({ nav: 0, content: 0, quickList: 1, newTask: 0, current: 1, menuInLink: false, toolsHref: '/tools' })
     expect(drawer.projects).toBeGreaterThanOrEqual(1)
 
     // The current project's `…` is the same menu the desktop header opens.

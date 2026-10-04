@@ -434,6 +434,15 @@ leading `projectId` segment.
 
 ### Sidebar (mockup: `sidebar.html`)
 
+**Task-section update (#811, 2026-10-04):** active lists now order Needs you,
+Finished, Working. Pins sort first within their status section and are exempt
+from the shared ten-row budget, which allocates Finished before Working.
+Section folding starts expanded and persists separately from project folding
+in `cez-sidebar-sections-collapsed`, keyed by canonical project id and section.
+Full task counts (including variant members) and attention remain visible on
+folded headers and update with the list. Finished alone offers Archive all,
+using the existing full-list unpinned sweep. Archived remains unchanged.
+
 - **Header** — brand tile + wordmark; beneath it the **New task** CTA and, next
   to it, a **folder-open icon button** → the *Add project* dropdown with two
   options: "Open local folder…" and "Clone from GitHub…" (the second disabled

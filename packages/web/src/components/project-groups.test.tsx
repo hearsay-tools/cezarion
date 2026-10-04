@@ -124,6 +124,25 @@ function refStatusUrls(): string[] {
 }
 
 describe('ProjectGroups', () => {
+  it('remembers section folds per project independently of project folding (#811)', async () => {
+    const projects = [project(), project({ id: 'shop', name: 'shop' })]
+    serve({ '/api/v1/p/cezar/runs': [run({ title: 'Cez done' })], '/api/v1/p/shop/runs': [run({ title: 'Shop done' })] })
+    storeCollapsed({ cezar: false, shop: false })
+    renderGroups(projects)
+    const toggle = await within(group('cezar')).findByRole('button', { name: 'Finished 1' })
+    await within(group('shop')).findByRole('button', { name: 'Finished 1' })
+    fireEvent.click(toggle)
+    expect(within(group('shop')).getByRole('button', { name: 'Finished 1' }).getAttribute('aria-expanded')).toBe('true')
+    fireEvent.click(within(group('cezar')).getByRole('button', { name: 'Toggle cezar' }))
+    fireEvent.click(within(group('cezar')).getByRole('button', { name: 'Toggle cezar' }))
+    expect(within(group('cezar')).getByRole('button', { name: 'Finished 1' }).getAttribute('aria-expanded')).toBe('false')
+    expect(storedCollapsed()).toEqual({ cezar: false, shop: false })
+    cleanup()
+    renderGroups(projects)
+    expect((await within(group('cezar')).findByRole('button', { name: 'Finished 1' })).getAttribute('aria-expanded')).toBe('false')
+    expect((await within(group('shop')).findByRole('button', { name: 'Finished 1' })).getAttribute('aria-expanded')).toBe('true')
+  })
+
   it('caps an expanded group at 10 rows and links More… at that project’s tasks pane', async () => {
     const runs = Array.from({ length: 15 }, () => run())
     serve({ '/api/v1/p/cezar/runs': runs })
@@ -441,8 +460,8 @@ describe('ProjectGroups', () => {
     await waitFor(() => expect(taskLinks('cezar').length).toBeGreaterThan(0))
     // Twelve: both pins, plus the ten the ordinary buckets are still allowed.
     expect(taskLinks('cezar')).toHaveLength(12)
-    const pinnedBucket = group('cezar').querySelector('[data-bucket="Pinned"]')
-    expect(pinnedBucket?.querySelectorAll('[data-slot="task-row"]')).toHaveLength(2)
+    const finished = group('cezar').querySelector('[data-bucket="Finished"]')
+    expect(Array.from(finished?.querySelectorAll('[data-slot="task-row"]') ?? []).slice(0, 2).map(el => el.getAttribute('data-run-id'))).toEqual(['kept-a', 'kept-b'])
   })
 
   it("pins through the row's OWN project, not the one the URL names (#935)", async () => {
@@ -543,10 +562,10 @@ describe('ProjectGroups', () => {
     fireEvent.click(within(group('cezar')).getByRole('button', { name: 'Unpin task' }))
     await waitFor(() => expect(screen.getByRole('status').textContent).toMatch(/retry/i))
     expect(screen.getByRole('status').textContent).toContain('temporarily unavailable')
-    expect(group('cezar').querySelector('[data-bucket="Pinned"]')).not.toBeNull()
+    expect(group('cezar').querySelector('[data-bucket="Finished"] [data-pinned="true"]')).not.toBeNull()
     fireEvent.click(within(group('cezar')).getByRole('button', { name: 'Unpin task', pressed: true }))
     await waitFor(() => expect(within(group('cezar')).getByRole('button', { name: 'Pin task', pressed: false })).toBeTruthy())
-    expect(group('cezar').querySelector('[data-bucket="Pinned"]')).toBeNull()
+    expect(group('cezar').querySelector('[data-bucket="Finished"] [data-pinned="true"]')).toBeNull()
     resetToasts()
   })
 

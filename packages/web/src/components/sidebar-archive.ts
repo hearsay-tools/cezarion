@@ -100,7 +100,7 @@ const linkOf = (row: Element | undefined) => row?.querySelector('a') ?? null
  * `usePinRun` takes: the request goes to the row's own project, and the invalidated cache is the
  * one that project's list is stored under (`'default'` for the boot project).
  */
-export function useSidebarArchive(projectId: string | undefined, cacheScope: string | undefined) {
+export function useSidebarArchive(projectId: string | undefined, cacheScope: string | undefined, onArchived?: () => void) {
   const queryClient = useQueryClient()
   const [sweeping, setSweeping] = React.useState<ArchiveFinishedScope | null>(null)
 
@@ -140,6 +140,8 @@ export function useSidebarArchive(projectId: string | undefined, cacheScope: str
           void refresh(scope)
           offerUndo(archivedToastMessage({ title: runTitle(run) }), scope, [run.id], wasPinned ? [run.id] : [])
           restoreFocus()
+          // A modal drawer must close before its root-level Undo can receive keyboard focus.
+          onArchived?.()
           return true
         },
         (error: Error) => {
@@ -170,6 +172,7 @@ export function useSidebarArchive(projectId: string | undefined, cacheScope: str
           // moment ago may be in it, and Undo restores it too.
           if (ids.length > 0) offerUndo(archivedToastMessage({ count: ids.length }), scope, ids, pinnedIds)
           restoreFocus()
+          if (ids.length > 0) onArchived?.()
         },
         (error: Error) => toast(error.message, { tone: 'danger' }),
       )

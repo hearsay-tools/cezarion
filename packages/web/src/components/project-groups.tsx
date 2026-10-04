@@ -239,7 +239,8 @@ function ProjectGroup({
   const archive = useSidebarArchive(project.id, boot ? 'default' : project.id)
 
   const waiting = runs.data ? listCounts(runs.data).waiting : 0
-  const buckets = runs.data ? capBuckets(groupRuns(runs.data, view), RECENT_LIMIT) : []
+  const allBuckets = groupRuns(runs.data ?? [], view)
+  const buckets = capBuckets(allBuckets, RECENT_LIMIT)
   // Only the rows this group actually paints: `buckets` is the capped list, so a project with
   // four hundred runs asks about the handful on screen rather than all of them.
   //
@@ -373,6 +374,7 @@ function ProjectGroup({
           <ReferenceStatusProvider projectId={project.id} repoBase={project.repoUrl} requests={referenceRequests}>
             <QuickListBuckets
               buckets={buckets}
+              allBuckets={view === 'active' ? allBuckets : buckets}
               currentRunId={active ? sidebarActiveRunId(currentRunId, runs.data ?? []) : null}
               currentGroupId={active ? currentGroupId : null}
               now={now}
