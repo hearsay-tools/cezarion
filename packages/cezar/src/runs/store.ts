@@ -17,6 +17,7 @@ import { storedDelegationStateSchema } from './delegation-state.ts';
 import { refreshHumanAskSummary } from './human-ask-summary.ts';
 import { workerExecutionIdentitySchema, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
 import { reconcileWorkerWait } from '../delegation/wait.ts';
+import { capacityError, workerCapacity } from '../delegation/capacity.ts';
 import { inspectGeneration, isCurrentProcess, recordedProcessLive, processStartToken, type RecordedProcess, type WorkerProcessRecord } from '../delegation/process-liveness.ts';
 import { collectSecretValues, redactDeep, redactSecrets } from '../core/secret-redaction.ts';
 // Pure, dependency-free reference helpers — the same sanity bound the marker parser applies.
@@ -892,7 +893,7 @@ export class RunStore extends EventEmitter {
   /**
    * The workers a root run owns, newest first, read off its own `receipts` (#659). Every
    * `createOwnedRun` writes the receipt and the worker record in one transaction, and the
-   * receipt list is capped at 32, so this is a bounded lookup rather than a walk of the whole
+   * receipt list is capped at 1,024 creations (#816), so this is a bounded lookup rather than a walk of the whole
    * project index. An ordinary or worker run owns nothing and costs one map read; a receipt
    * whose record has been deleted is skipped, never invented. A parent quarantined to
    * `invalid` has no readable receipts and reports none, which is also what the cockpit
@@ -1418,6 +1419,10 @@ export class RunStore extends EventEmitter {
         existing.id === parentId) throw new Error('invalid request receipt ownership');
       return existing;
     }
+    // #816: the same check the spawn policy makes, inside the receipt transaction, so no path
+    // writes a receipt past either limit.
+    const refusal = capacityError(workerCapacity(parent, id => this.runs.get(id)));
+    if (refusal) throw new Error(refusal);
     const metadata = delegationStateSchema.parse(worker);
     if (metadata.role !== 'worker' || metadata.parentRunId !== parentId ||
       metadata.workspace.ownerRunId === parentId || input.worktree === false) {

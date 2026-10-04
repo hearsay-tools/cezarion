@@ -5,7 +5,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { ProjectScopeProvider } from '@/api/project-scope-context'
 import { createQueryClient } from '@/api/query-client'
 import type { ApiRun, WorkerInspection } from '@open-mercato/cezar-api-client'
-import { RunRelationshipsPanel } from './run-relationships'
+import { RunRelationshipsPanel, WorkerActivitySection } from './run-relationships'
 
 const parentId = '10000000-0000-4000-8000-000000000001'
 const workerId = '10000000-0000-4000-8000-000000000002'
@@ -16,11 +16,14 @@ const ordinary: ApiRun = { id: parentId, title: 'Parent', task: 'Do task', workf
 const root: ApiRun = { ...ordinary, delegation: { role: 'root', permissions: [], receipts: [{ requestId: workerId, workerId, requestHash: 'b'.repeat(64) }] } }
 const child: ApiRun = { ...ordinary, id: workerId, delegation: { role: 'worker', permissions: [], parentRunId: parentId, workspace } }
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } })
-function setup(run: ApiRun, response: () => Promise<Response> = async () => json({ workers: [] })) {
+function setup(run: ApiRun, response: () => Promise<Response> = async () => json({ workers: [] }),
+  destroyResponse: () => Promise<Response> = async () => json({ workerId, state: 'complete', remaining: [] }),
+  surface: 'panel' | 'dock' = 'panel') {
   const requests: string[] = []
   vi.stubGlobal('fetch', vi.fn(async (url: RequestInfo | URL) => {
     const path = String(url); requests.push(path)
     if (path.endsWith('/relationships')) return response()
+    if (path.endsWith('/worker-destroy')) return destroyResponse()
     if (path.endsWith('/runs')) return json([])
     if (path.endsWith('/providers/status')) return json({ providers: [] })
     if (path.endsWith(`/runs/${parentId}`)) return json({ error: 'not found' }, 404)
@@ -31,7 +34,7 @@ function setup(run: ApiRun, response: () => Promise<Response> = async () => json
     <QueryClientProvider client={client}>
       <ProjectScopeProvider projectId="sample">
         <MemoryRouter initialEntries={[`/p/sample/tasks/${run.id}`]}>
-          <RunRelationshipsPanel run={run} />
+          {surface === 'dock' ? <WorkerActivitySection run={run} open onToggle={() => {}} /> : <RunRelationshipsPanel run={run} />}
         </MemoryRouter>
       </ProjectScopeProvider>
     </QueryClientProvider>,
@@ -162,4 +165,75 @@ it('collapses worker navigation on phones and preserves its scoped links when re
   expect(screen.getByRole('link', { name: `Worker task ${workerId}` }).getAttribute('href')).toBe(`/p/sample/tasks/${workerId}`)
   fireEvent.click(switcher)
   expect(screen.queryByRole('link', { name: `Worker task ${workerId}` })).toBeNull()
+})
+
+// #816: capacity is reclaimable, so history beyond the old 32 is listed in full. These target the
+// mounted surface — the activity dock's Workers section — not the header panel.
+const workerAt = (n: number): WorkerInspection => {
+  const id = `20000000-0000-4000-8000-${String(n).padStart(12, '0')}`
+  return { workerId: id, parentRunId: parentId, status: 'done', workspace: { ...workspace, ownerRunId: id, resourceId: id }, destroy: { requestedAt: at, phase: 'complete', remaining: [] } }
+}
+const rootOf = (workers: WorkerInspection[]): ApiRun => ({ ...ordinary, delegation: { role: 'root', permissions: [], receipts: workers.map(w => ({ requestId: w.workerId, workerId: w.workerId, requestHash: 'b'.repeat(64) })) } })
+const capacityOf = (outstanding: number, created = outstanding) => ({ outstanding, limit: 32, created, creationLimit: 1024 })
+const dock = (run: ApiRun, response: () => Promise<Response>, destroyResponse?: () => Promise<Response>) => setup(run, response, destroyResponse, 'dock')
+const section = () => screen.findByRole('group', { name: 'Task relationships' })
+const cleanUp = (id: string) => ({ name: `Clean up worker ${id.slice(0, 8)}` })
+const settled: WorkerInspection = { ...worker, status: 'done', destroy: undefined }
+
+it('lists every historical worker beyond 32 without slicing (#816)', async () => {
+  const many = Array.from({ length: 33 }, (_, n) => workerAt(n))
+  dock(rootOf(many), async () => json({ workers: many, capacity: capacityOf(0, 33) }))
+  const group = await section()
+  await waitFor(() => expect(within(group).getAllByRole('link', { name: /^Worker task / })).toHaveLength(33))
+})
+it('shows how much worker capacity the parent uses (#816)', async () => {
+  dock(root, async () => json({ workers: [worker], capacity: capacityOf(12, 40) }))
+  const group = await section()
+  expect(await within(group).findByText('Capacity 12 of 32 in use')).toBeTruthy()
+  expect(within(group).queryByText(/All 32 worker slots are in use/)).toBeNull()
+})
+it('explains exhausted capacity and its recovery (#816)', async () => {
+  dock(root, async () => json({ workers: [worker], capacity: capacityOf(32) }))
+  const group = await section()
+  expect(await within(group).findByText('All 32 worker slots are in use. Clean up finished workers to free a slot.')).toBeTruthy()
+})
+it('offers Clean up only for settled workers that are not verifiably destroyed (#816)', async () => {
+  const live = { ...workerAt(1), status: 'running' as const, destroy: undefined }
+  const gone = workerAt(2)
+  dock(rootOf([settled, live, gone]), async () => json({ workers: [settled, live, gone], capacity: capacityOf(2, 3) }))
+  const group = await section()
+  const button = await within(group).findByRole('button', cleanUp(workerId))
+  expect(within(group).getAllByRole('button', { name: /^Clean up worker/ })).toHaveLength(1)
+  expect(button.className).toContain('min-h-11')
+})
+it('asks for confirmation before removing the worktree and branch, and cancel posts nothing (#816)', async () => {
+  const { requests } = dock(rootOf([settled]), async () => json({ workers: [settled], capacity: capacityOf(1) }))
+  const group = await section()
+  fireEvent.click(await within(group).findByRole('button', cleanUp(workerId)))
+  expect(within(group).getByText(/Removes this worker's worktree and branch/)).toBeTruthy()
+  fireEvent.click(within(group).getByRole('button', { name: 'Cancel' }))
+  expect(requests.some(path => path.endsWith('/worker-destroy'))).toBe(false)
+  fireEvent.click(within(group).getByRole('button', cleanUp(workerId)))
+  const confirm = within(group).getByRole('button', { name: `Confirm clean up of worker ${workerId.slice(0, 8)}` })
+  expect(confirm.className).toContain('min-h-11')
+  fireEvent.click(confirm)
+  await waitFor(() => expect(requests).toContain(`/api/v1/p/sample/runs/${workerId}/worker-destroy`))
+})
+it('reports an incomplete cleanup in the server\'s words and keeps Clean up available (#816)', async () => {
+  dock(rootOf([settled]), async () => json({ workers: [settled], capacity: capacityOf(1) }),
+    async () => json({ workerId, state: 'incomplete', remaining: ['branch'], error: 'Branch is checked out' }, 409))
+  const group = await section()
+  fireEvent.click(await within(group).findByRole('button', cleanUp(workerId)))
+  fireEvent.click(within(group).getByRole('button', { name: `Confirm clean up of worker ${workerId.slice(0, 8)}` }))
+  expect(await within(group).findByText('Cleanup did not finish: Branch is checked out')).toBeTruthy()
+  expect((within(group).getByRole('button', cleanUp(workerId)) as HTMLButtonElement).disabled).toBe(false)
+})
+it('surfaces a refusal the user cannot fix by retrying Clean up (#816)', async () => {
+  dock(rootOf([settled]), async () => json({ workers: [settled], capacity: capacityOf(1) }),
+    async () => json({ code: 'incompatible_state', error: 'Worker history deletion has begun; retry history deletion' }, 409))
+  const group = await section()
+  fireEvent.click(await within(group).findByRole('button', cleanUp(workerId)))
+  fireEvent.click(within(group).getByRole('button', { name: `Confirm clean up of worker ${workerId.slice(0, 8)}` }))
+  expect(await within(group).findByText('Cleanup did not finish: Worker history deletion has begun; retry history deletion')).toBeTruthy()
+  expect(within(group).queryByText(/Retry Clean up/)).toBeNull()
 })

@@ -146,12 +146,13 @@ export const delegationStateSchema = z.discriminatedUnion('role', [
     role: z.literal('root'),
     conversation: conversationStateSchema.optional(),
     permissions: permissionsSchema,
-    receipts: z.array(workerCreationReceiptSchema).max(32).refine(receipts =>
+    // #816: bounded by the creation ceiling (WORKER_CREATION_LIMIT), not by capacity.
+    receipts: z.array(workerCreationReceiptSchema).max(1_024).refine(receipts =>
       new Set(receipts.map(receipt => receipt.requestId)).size === receipts.length &&
       new Set(receipts.map(receipt => receipt.workerId)).size === receipts.length),
     wait: workerWaitSchema.optional(),
     lastWait: workerWaitSchema.optional(),
-    results: z.array(workerResultReferenceSchema).max(32).refine(results => new Set(results.map(result => result.workerId)).size === results.length).optional(),
+    results: z.array(workerResultReferenceSchema).max(1_024).refine(results => new Set(results.map(result => result.workerId)).size === results.length).optional(),
     finishRequestedAt: z.iso.datetime().optional(),
     historyDeletion: z.literal('pending').optional(),
     completion: z.object({ phase: z.enum(['waiting', 'attention']), waitId: z.uuid().optional() }).strict().optional(),
@@ -279,9 +280,20 @@ export const workerDestroyResultSchema = z.object({
 });
 export type WorkerDestroyResult = z.infer<typeof workerDestroyResultSchema>;
 
+/** #816: outstanding allocations against `limit`, lifetime creations against `creationLimit`. */
+export const workerCapacitySchema = z.object({
+  outstanding: z.number().int().nonnegative(),
+  limit: z.number().int().nonnegative(),
+  created: z.number().int().nonnegative(),
+  creationLimit: z.number().int().nonnegative(),
+}).strict();
+export type WorkerCapacity = z.infer<typeof workerCapacitySchema>;
+
 export const runRelationshipsSchema = z.object({
   parentRunId: z.uuid().optional(),
-  workers: z.array(workerInspectionSchema).max(32),
+  workers: z.array(workerInspectionSchema).max(1_024),
+  /** Present for a delegation root only. */
+  capacity: workerCapacitySchema.optional(),
 });
 export type RunRelationships = z.infer<typeof runRelationshipsSchema>;
 
