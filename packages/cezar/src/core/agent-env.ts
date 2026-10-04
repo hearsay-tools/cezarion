@@ -233,7 +233,8 @@ const BACKEND_ALLOW_PREFIXES: Record<AgentBackend, readonly string[]> = {
   // OMP (Oh My Pi) is pi's fork and selects models the same `provider/model` way, so it gets the
   // same multi-provider set. Not `CLAUDE_`, for pi's reason above. `OMP_` is its own config and
   // `PI_` is kept because OMP still reads `PI_CODING_AGENT_DIR` / `PI_CONFIG_DIR`
-  // (env-variables.md). The reverse does not hold: pi gets no `OMP_`.
+  // (OMP v18.4.11; `can1357/oh-my-pi` `docs/environment-variables.md` at main @ 7318a70cf4ed).
+  // The reverse does not hold: pi gets no `OMP_`.
   omp: ['OMP_', 'PI_', ...MULTI_PROVIDER_PREFIXES],
 };
 

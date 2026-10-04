@@ -91,7 +91,7 @@ function resultFor(executable: string): ProviderCommandResult {
   if (executable === 'claude') return connectedResults.claude!;
   if (executable.includes('codex')) return connectedResults.codex!;
   if (executable.includes('opencode')) return connectedResults.opencode!;
-  if (executable.includes('omp')) return connectedResults.omp!;
+  if (executable === 'omp') return connectedResults.omp!;
   return connectedResults.pi!;
 }
 
