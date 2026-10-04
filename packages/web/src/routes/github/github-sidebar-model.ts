@@ -6,6 +6,7 @@ import {
   type RunRecord,
 } from '@open-mercato/cezar-api-client'
 
+import { isOwnedWorker } from '@/lib/task-groups'
 import { taskReferences } from '@/lib/tasks-table'
 
 /**
@@ -150,7 +151,7 @@ function ownIssueNumbers(run: RunRecord, repo: string | undefined, projectId: st
     .map((reference) => reference.number)
 }
 
-/** All recorded history for an issue, including archived runs. Input is the project's runs
+/** Parent and ordinary task history for an issue, including archived runs. Input is the project's runs
  * query, never the workspace index. The sidebar keeps its non-archived membership rule. */
 export function linkedIssueTasks(
   runs: readonly RunRecord[],
@@ -160,7 +161,7 @@ export function linkedIssueTasks(
 ): RunRecord[] {
   const tasks = new Map<string, RunRecord>()
   for (const run of runs) {
-    if (ownIssueNumbers(run, repo, projectId).includes(number)) tasks.set(run.id, run)
+    if (!isOwnedWorker(run) && ownIssueNumbers(run, repo, projectId).includes(number)) tasks.set(run.id, run)
   }
   return [...tasks.values()].sort((a, b) =>
     Date.parse(b.createdAt) - Date.parse(a.createdAt) || a.id.localeCompare(b.id))

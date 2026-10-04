@@ -3724,11 +3724,13 @@ describe('issue linked tasks (#750)', () => {
     createdAt: '2026-09-01T12:00:00Z', tokensUsed: 0, archived: false, steps: [],
     issueNumber: 142, ...over,
   })
+  const expand = async () => fireEvent.click(await screen.findByRole('button', { name: /^Linked tasks/ }))
   const linked = () => screen.getByRole('region', { name: /Linked tasks/ })
 
   it('opens a single linked task from a direct project-scoped issue URL', async () => {
     stubFetch({ 'GET /api/v1/runs': () => jsonResponse([task('diagnosis')]) })
     renderAt('/p/boot/github/issues/142')
+    await expand()
     const link = await screen.findByRole('link', { name: /diagnosis/ })
     expect(link.getAttribute('href')).toBe('/p/boot/tasks/diagnosis')
     expect(within(linked()).getByRole('heading').textContent).toBe('Linked tasks (1)')
@@ -3745,6 +3747,7 @@ describe('issue linked tasks (#750)', () => {
       task('pr-only', { issueNumber: undefined, prNumber: 142 }),
     ]) })
     renderAt('/github/issues/142')
+    await expand()
     await screen.findByRole('heading', { name: 'Linked tasks (2)' })
     const links = within(linked()).getAllByRole('link')
     expect(links.map((link) => link.getAttribute('href'))).toEqual(['/tasks/fix', '/tasks/diagnosis'])
@@ -3760,6 +3763,7 @@ describe('issue linked tasks (#750)', () => {
     let resolve!: (response: Response) => void
     stubFetch({ 'GET /api/v1/runs': () => new Promise<Response>((r) => { resolve = r }) })
     const client = renderAt('/github/issues/142')
+    await expand()
     expect(await screen.findByText('Loading linked tasks…')).toBeTruthy()
     await act(async () => resolve(jsonResponse([])))
     expect(await screen.findByText('No linked tasks yet.')).toBeTruthy()
@@ -3773,6 +3777,7 @@ describe('issue linked tasks (#750)', () => {
       ? jsonResponse({ error: 'Unavailable' }, 403)
       : jsonResponse([task('recovered')]) })
     renderAt('/github/issues/142')
+    await expand()
     const retry = await screen.findByRole('button', { name: 'Retry linked tasks' })
     expect(detail()?.textContent).toContain(ISSUE_142.title)
     fail = false
@@ -3786,6 +3791,28 @@ describe('issue linked tasks (#750)', () => {
       'GET /api/v1/github/items/issue/4507': () => jsonResponse({ available: true, item: { ...ISSUE_142, number: 4507 } }),
     })
     renderAt('/github/issues/4507')
+    await expand()
     expect(await screen.findByRole('link', { name: /old-task/ })).toBeTruthy()
+  })
+
+  it('collapses when switching issues and when reopening the same issue through the real route', async () => {
+    stubFetch({ 'GET /api/v1/runs': () => jsonResponse([task('diagnosis')]) })
+    renderAt('/github/issues/142')
+    const toggle = () => screen.getByRole('button', { name: /^Linked tasks/ })
+    await screen.findByRole('button', { name: 'Linked tasks (1)' })
+    expect(toggle().getAttribute('aria-expanded')).toBe('false')
+    await expand()
+    fireEvent.click(rows().find(row => row.textContent?.includes(ISSUE_139.title))!)
+    await waitFor(() => expect(detail()?.textContent).toContain(ISSUE_139.title))
+    expect(toggle().getAttribute('aria-expanded')).toBe('false')
+    fireEvent.click(rows().find(row => row.textContent?.includes(ISSUE_142.title))!)
+    await screen.findByRole('button', { name: 'Linked tasks (1)' })
+    await expand()
+    fireEvent.click(screen.getByRole('link', { name: /Back to the list/ }))
+    // The list keeps its first issue mounted as a desktop preview, even on a phone.
+    await waitFor(() => expect(toggle().getAttribute('aria-expanded')).toBe('false'))
+    await expand()
+    fireEvent.click(rows().find(row => row.textContent?.includes(ISSUE_142.title))!)
+    await waitFor(() => expect(toggle().getAttribute('aria-expanded')).toBe('false'))
   })
 })
