@@ -186,11 +186,13 @@ export class PreviewHost implements PreviewHostLike {
     }
     entry.port = server.port;
     const current = entry.servers.get(server.port);
-    if (live(current)) return this.report(entry, server.port, current);
+    // A terminal state can precede process-group teardown. Keep its owned identity until stop settles.
+    if (live(current) || (owned(current) && this.stopping.has(current))) return this.report(entry, server.port, current);
     // Another task's server would answer the probe: streaming it here would show that task's app.
     if (this.heldByOther(entry, server)) return;
     const answering = await this.deps.probe(server.port).catch(() => false);
-    if (this.entries.get(ctx.runId) !== entry || entry.viewer !== viewer || entry.port !== server.port) return;
+    if (this.entries.get(ctx.runId) !== entry || entry.viewer !== viewer || entry.port !== server.port || entry.servers.get(server.port) !== current) return;
+    if (owned(current) && this.stopping.has(current)) return this.report(entry, server.port, current);
     if (answering) {
       entry.servers.set(server.port, 'adopted');
       return this.showServer(entry, server, true, true);
@@ -223,6 +225,7 @@ export class PreviewHost implements PreviewHostLike {
     this.recordState(entry, port, 'starting', dev);
     this.report(entry, port, dev);
     dev.start();
+    this.armServerIdle(entry);
   }
 
   /**
@@ -308,7 +311,14 @@ export class PreviewHost implements PreviewHostLike {
     entry.session?.detach(viewer);
     this.clearIdle(entry);
     entry.idleTimers.browser = setTimeout(() => this.closeBrowser(entry), PREVIEW_BROWSER_IDLE_MS);
+    this.armServerIdle(entry);
+  }
+
+  /** Agent restarts without a viewer need a bound even after the previous idle timer fired. */
+  private armServerIdle(entry: RunEntry): void {
+    if (entry.viewer || entry.released || entry.idleTimers.server) return;
     entry.idleTimers.server = setTimeout(() => {
+      entry.idleTimers.server = undefined;
       for (const server of entry.servers.values()) if (live(server)) void this.stopServer(server, 'idle');
     }, PREVIEW_SERVER_IDLE_MS);
   }

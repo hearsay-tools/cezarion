@@ -316,6 +316,72 @@ describe('PreviewHost', () => {
     expect(stages(back)).not.toContain('needs-approval');
   });
 
+  it('a late open probe cannot replace a newly restarted owned process with an adoption', async () => {
+    const { host, ctx, devServers, probe } = make();
+    await host.open(ctx, fakeViewer(), { port: 5173 });
+    await host.run('run-1', 5173);
+    await host.stopPreview('run-1', { port: 5173 });
+    let finish!: (answering: boolean) => void;
+    probe.mockImplementationOnce(() => new Promise<boolean>(resolve => { finish = resolve; }));
+    const opening = host.open(ctx, fakeViewer(), { port: 5173 });
+    await host.stopPreview('run-1', { port: 5173, restart: true });
+    finish(true);
+    await opening;
+    await host.release('run-1');
+    expect(devServers[1]!.stop).toHaveBeenCalledWith('release');
+  });
+
+  it('agent restart after the no-viewer idle deadline always receives another cleanup deadline', async () => {
+    const { host, ctx, devServers } = make();
+    const viewer = fakeViewer();
+    await host.open(ctx, viewer, { port: 5173 });
+    await host.run('run-1', 5173);
+    host.detach('run-1', viewer);
+    await vi.advanceTimersByTimeAsync(PREVIEW_SERVER_IDLE_MS);
+    expect(devServers[0]!.stop).toHaveBeenCalledWith('idle');
+    expect(vi.getTimerCount()).toBe(0);
+    for (let index = 1; index <= 2; index++) {
+      expect(await host.stopPreview('run-1', { port: 5173, restart: true })).toMatchObject({ code: 'restarted' });
+      await vi.advanceTimersByTimeAsync(PREVIEW_SERVER_IDLE_MS - 1);
+      expect(devServers[index]!.stop).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(devServers[index]!.stop).toHaveBeenCalledWith('idle');
+      expect(vi.getTimerCount()).toBe(0);
+    }
+  });
+
+  it('agent restart preserves existing server and browser idle deadlines', async () => {
+    const { host, ctx, devServers, browsers } = make([server(5173), server(5174)]);
+    const viewer = fakeViewer();
+    await host.open(ctx, viewer, { port: 5173 });
+    await host.run('run-1', 5173);
+    devServers[0]!.set('up');
+    await flush();
+    await host.run('run-1', 5174);
+    host.detach('run-1', viewer);
+    await vi.advanceTimersByTimeAsync(PREVIEW_BROWSER_IDLE_MS - 1);
+    expect(await host.stopPreview('run-1', { port: 5173, restart: true })).toMatchObject({ code: 'restarted' });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(browsers[0]!.close).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(PREVIEW_SERVER_IDLE_MS - PREVIEW_BROWSER_IDLE_MS);
+    expect(devServers[1]!.stop).toHaveBeenCalledWith('idle');
+    expect(devServers[2]!.stop).toHaveBeenCalledWith('idle');
+  });
+
+  it('a returning viewer cancels the cleanup deadline armed by an agent restart', async () => {
+    const { host, ctx, devServers } = make();
+    const viewer = fakeViewer();
+    await host.open(ctx, viewer, { port: 5173 });
+    await host.run('run-1', 5173);
+    host.detach('run-1', viewer);
+    await vi.advanceTimersByTimeAsync(PREVIEW_SERVER_IDLE_MS);
+    await host.stopPreview('run-1', { port: 5173, restart: true });
+    await host.open(ctx, fakeViewer(), { port: 5173 });
+    await vi.advanceTimersByTimeAsync(PREVIEW_SERVER_IDLE_MS);
+    expect(devServers[1]!.stop).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it('a viewer that comes back before the idle window cancels both timers', async () => {
     const { host, ctx, devServers, browsers } = make();
     const viewer = fakeViewer();
