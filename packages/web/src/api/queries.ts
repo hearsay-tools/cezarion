@@ -1254,11 +1254,18 @@ export function useProjectWorktrees(scope: string) {
   })
 }
 
-export function useUiState() {
+/** Explicit scope for shell consumers above ProjectScopeProvider. Boot shares its cache
+ * with routed settings; capture the request scope before any asynchronous work. */
+export function useProjectUiState(projectId: string, enabled = true, boot = false) {
   return useQuery({
-    queryKey: queryKeys.uiState,
-    queryFn: ({ signal }) => getUiState({ signal }),
+    queryKey: [boot ? 'default' : projectId, 'ui-state'] as const,
+    queryFn: ({ signal }) => getUiState({ signal }, projectId),
+    enabled,
   })
+}
+
+export function useUiState() {
+  return useProjectUiState(queryScope())
 }
 
 /** The selected project's agent-owned config files and precedence metadata. */

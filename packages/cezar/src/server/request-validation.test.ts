@@ -264,6 +264,20 @@ describe('request validation bounds (#429)', () => {
       body: JSON.stringify(body),
     });
 
+  it.each([0, -1, 1.5, '2', ''])('rejects invalid sidebar budgets at middleware: %j', async value => {
+    const response = await putJson('/api/v1/ui-state', { sidebarLimits: { overall: value } });
+    expect(response.status).toBe(400);
+    expect(await (await apiRequest(app, '/api/v1/ui-state')).json()).not.toHaveProperty('sidebarLimits');
+  });
+
+  it('persists sidebar budgets on disk and reloads them through the default alias', async () => {
+    const sidebarLimits = { overall: null, needsYou: 3, finished: 2, working: null };
+    expect((await putJson('/api/v1/ui-state', { sidebarLimits })).status).toBe(200);
+    expect(JSON.parse(readFileSync(join(repoRoot, '.ai/cezar/ui-state.json'), 'utf8')).sidebarLimits).toEqual(sidebarLimits);
+    const reopened = createApp({ repoRoot, store, manager: {} as RunManager, version: 'test', providerAuth: connectedProviderAuth() });
+    expect(await (await apiRequest(reopened, '/api/v1/p/default/ui-state')).json()).toMatchObject({ sidebarLimits });
+  });
+
   it('passes an unknown ui-state key through and persists it', async () => {
     const res = await putJson('/api/v1/ui-state', { someFuturePref: 'keep-me' });
     expect(res.status).toBe(200);

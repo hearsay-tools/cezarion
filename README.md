@@ -420,10 +420,19 @@ server stopped, and `CEZ_HOME` selects which workspace they operate on.
 
 Settings split along the same line: **General** (the project's folder, its
 registry facts, its parallel-task ceiling, and Remove), **Agents**, **Agent config**,
-**Worktrees**, **Bookmarklets** and **Prompt templates** describe one
+**Worktrees**, **Sidebar**, **Bookmarklets** and **Prompt templates** describe one
 repo and live under `/p/<projectId>/settings`; **Appearance**,
 **Notifications**, **Resources**, **Skills**, **Agent accounts** and **Projects**
 are yours or the machine's and live at `/settings/global`.
+
+**Settings → Sidebar** controls this project's task rows on desktop and mobile.
+Set **Overall**, **Needs You**, **Finished**, and **Working** to a positive whole
+number or **Unlimited**. Defaults are 10 overall and Unlimited for each section.
+The overall budget is allocated in section order (Needs You, Finished, Working),
+and each section must also fit its own limit. Unlimited removes only its selected
+constraint. Pinned rows and groups containing pins bypass both budgets; a grouped
+task counts as one row. Archived uses only the overall limit, with no pin exemption.
+Save applies the preferences to this project and keeps them after a reload.
 
 On desktop, Settings replaces the sidebar task list with two groups: **This project**
 and **Global · every project**. Each group includes General and its available sections;

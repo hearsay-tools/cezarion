@@ -131,6 +131,16 @@ const taskTableUiStateSchema = z.looseObject({
   expandedColumns: z.record(z.string(), z.boolean()).optional(),
 });
 
+/** Per-project sidebar row budgets. Missing fields preserve the shipped defaults;
+ * null disables only that particular constraint. */
+export const sidebarLimitsSchema = z.object({
+  overall: z.number().int().positive().nullable().optional(),
+  needsYou: z.number().int().positive().nullable().optional(),
+  finished: z.number().int().positive().nullable().optional(),
+  working: z.number().int().positive().nullable().optional(),
+});
+export type SidebarLimits = z.infer<typeof sidebarLimitsSchema>;
+
 /**
  * `GET/PUT /api/v1/ui-state` — the per-repo GUI prefs in `.ai/cezar/ui-state.json`.
  *
@@ -146,6 +156,7 @@ const taskTableUiStateSchema = z.looseObject({
  * listed it, which made it wider than the route.
  */
 export const uiStateSchema = z.looseObject({
+  sidebarLimits: sidebarLimitsSchema.optional(),
   /** What the last started run used. `null` is a VALUE, not an absence: it records a run that
    *  chose neither a skill nor a workflow (the plain built-in `quick-task`), which the composer
    *  can now express since the source picker grew an empty state. Absent still means "no
