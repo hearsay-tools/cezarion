@@ -178,7 +178,9 @@ export const runDelegationSummarySchema = z.discriminatedUnion('role', [
   delegationStateSchema.options[0].pick({ role: true }).strip().extend({
     wait: workerWaitSchema.pick({ phase: true, requestIds: true }).strip().optional(),
   }),
-  delegationStateSchema.options[1].pick({ role: true }).strip().extend({
+  // `parentRunId` is the one worker field a list needs: the sidebar lights the parent's row for
+  // a worker URL, and `cez task list` hides workers by it (#817). Never paths or permissions.
+  delegationStateSchema.options[1].pick({ role: true, parentRunId: true }).strip().extend({
     wait: workerWaitSchema.pick({ phase: true, requestIds: true }).strip().optional(),
   }),
   delegationStateSchema.options[2].strip(),
