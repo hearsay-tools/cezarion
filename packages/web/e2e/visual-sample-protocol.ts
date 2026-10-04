@@ -5,12 +5,14 @@ export type VisualProgram =
 
 export const visualReasons = ['missing-target', 'fonts', 'native', 'theme', 'width', 'idle', 'finite-animation', 'zero-box', 'visual-ready', 'measurement-null', 'measurement-undefined', 'sample-ready'] as const
 export type VisualReason = typeof visualReasons[number]
+type MeasurementSerialization = 'finite-scalar' | 'nonfinite-number' | 'opaque'
 export type QualifiedVisualObservation = {
   qualification: 'qualified'
   attempt: number
   reason: VisualReason
   phase: 'visual' | 'measurement'
   fontStatus?: string | null
+  measurementSerialization?: MeasurementSerialization
   document: {
     kind: 'session-timeOrigin-path'
     session: string
@@ -70,6 +72,19 @@ function generatedRoot(kind: VisualProgram['kind'], reason: VisualReason, public
   } else if (publicSlot.value !== null) throw new VisualProtocolError('rejection public value')
 }
 
+/** Original scalar category is observed before JSON. Opaque toJSON results can
+ * legitimately be null; this is consistency evidence, not wire authentication. */
+function measurementSerialization(reason: VisualReason, evidence: Record<string, unknown>, publicValue: unknown): void {
+  if ((reason === 'sample-ready') !== owns(evidence, 'measurementSerialization')) throw new VisualProtocolError('measurement qualification presence')
+  if (reason !== 'sample-ready') return
+  const category = evidence.measurementSerialization
+  if (!['finite-scalar', 'nonfinite-number', 'opaque'].includes(category as string)) throw new VisualProtocolError('measurement qualification')
+  const value = (publicValue as Record<string, unknown>).value
+  if (value === undefined
+    || (category === 'finite-scalar' && !(typeof value === 'boolean' || typeof value === 'string' || typeof value === 'number' && Number.isFinite(value)))
+    || (category === 'nonfinite-number' && value !== null)) throw new VisualProtocolError('measurement serialization')
+}
+
 /** JSON transport only; nested measured payload is neither cloned nor inspected. */
 export function decodeVisualSample(raw: unknown, resultPropertyPresent: boolean, expected: { token: string; attempt: number; kind: VisualProgram['kind']; session: string }): { value: unknown; observation: VisualObservation } {
   if (raw === null || raw === undefined) return { value: raw, observation: { qualification: raw === null ? 'unqualified-provider-null' : 'missing-provider-result', attempt: expected.attempt, resultPropertyPresent } }
@@ -77,7 +92,7 @@ export function decodeVisualSample(raw: unknown, resultPropertyPresent: boolean,
   if (raw.protocol !== 'cez.visual' || raw.version !== 1 || raw.token !== expected.token || raw.attempt !== expected.attempt || raw.kind !== expected.kind) throw new VisualProtocolError('correlation')
   keys(raw.public, ['present'], ['value'])
   if (typeof raw.public.present !== 'boolean' || owns(raw.public, 'value') !== raw.public.present) throw new VisualProtocolError('public presence')
-  keys(raw.evidence, ['reason', 'phase', 'fontObserved', 'document'], ['fontStatus'])
+  keys(raw.evidence, ['reason', 'phase', 'fontObserved', 'document'], ['fontStatus', 'measurementSerialization'])
   const evidence = raw.evidence
   if (!visualReasons.includes(evidence.reason as VisualReason) || !['visual', 'measurement'].includes(evidence.phase as string)) throw new VisualProtocolError('reason')
   const reason = evidence.reason as VisualReason
@@ -86,11 +101,13 @@ export function decodeVisualSample(raw: unknown, resultPropertyPresent: boolean,
   if ((reason === 'missing-target') === evidence.fontObserved) throw new VisualProtocolError('font short-circuit')
   if (evidence.fontObserved && (reason === 'fonts' ? evidence.fontStatus === 'loaded' : evidence.fontStatus !== 'loaded')) throw new VisualProtocolError('font branch')
   generatedRoot(expected.kind, reason, raw.public)
+  measurementSerialization(reason, evidence, raw.public.value)
   keys(evidence.document, ['timeOrigin', 'path', 'readyState', 'visibilityState', 'observedAt'])
   const doc = evidence.document
   if (!finite(doc.timeOrigin) || !finite(doc.observedAt) || !text(doc.path, 512) || !text(doc.readyState, 32) || !text(doc.visibilityState, 32)) throw new VisualProtocolError('document qualification')
   return { value: raw.public.present ? raw.public.value : undefined, observation: {
     qualification: 'qualified', attempt: expected.attempt, reason, phase: evidence.phase as 'visual' | 'measurement',
+    ...(reason === 'sample-ready' ? { measurementSerialization: evidence.measurementSerialization as MeasurementSerialization } : {}),
     ...(evidence.fontObserved ? { fontStatus: evidence.fontStatus as string | null } : {}),
     document: { kind: 'session-timeOrigin-path', session: expected.session, timeOrigin: doc.timeOrigin, path: doc.path, readyState: doc.readyState, visibilityState: doc.visibilityState, observedAt: doc.observedAt },
   } }

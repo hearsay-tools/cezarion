@@ -14,8 +14,11 @@ export function scriptedVisualResult(expression: string, value: unknown): unknow
   const sample = value as { layout?: object } | null | undefined
   const publicValue = header.kind === 'settled' && sample && typeof sample.layout === 'object' && sample.layout !== null
     ? { ...sample, layout: { text: 'scripted', scrollWidth: 100, viewport: 100, ...sample.layout } } : value
+  const measured = (sample as { value?: unknown } | null | undefined)?.value
+  const measurementSerialization = typeof measured === 'number' ? (Number.isFinite(measured) ? 'finite-scalar' : 'nonfinite-number') : typeof measured === 'boolean' || typeof measured === 'string' ? 'finite-scalar' : 'opaque'
   return { protocol: 'cez.visual', ...header, public: value === undefined ? { present: false } : { present: true, value: publicValue },
     evidence: { reason: value === null ? 'fonts' : header.kind === 'visual' ? 'visual-ready' : 'sample-ready', phase: value === null || header.kind === 'visual' ? 'visual' : 'measurement',
+      ...(value !== null && header.kind === 'settled' ? { measurementSerialization } : {}),
       fontObserved: true, fontStatus: value === null ? 'loading' : 'loaded',
       document: { timeOrigin: 123, path: '/scripted-transport-seam', readyState: 'complete', visibilityState: 'visible', observedAt: header.attempt * 10 },
     },

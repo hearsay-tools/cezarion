@@ -78,6 +78,7 @@ function generatedRoot(kind: Kind, reason: VisualReason, measured: unknown = fal
   return { protocol: 'cez.visual', version: 1, token: 'root-token', attempt: 3, kind,
     public: { present: true, value },
     evidence: { reason, phase: reason.startsWith('measurement-') || reason === 'sample-ready' ? 'measurement' : 'visual',
+      ...(reason === 'sample-ready' ? { measurementSerialization: typeof measured === 'number' ? (Number.isFinite(measured) ? 'finite-scalar' : 'nonfinite-number') : typeof measured === 'boolean' || typeof measured === 'string' ? 'finite-scalar' : 'opaque' } : {}),
       fontObserved: reason !== 'missing-target', ...(reason === 'missing-target' ? {} : { fontStatus: reason === 'fonts' ? 'loading' : 'loaded' }),
       document: { timeOrigin: 123, path: '/root-contract', readyState: 'complete', visibilityState: 'visible', observedAt: 4 } },
   }

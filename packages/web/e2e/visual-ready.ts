@@ -63,6 +63,7 @@ function settledProgram(expression: string, selector: string, recorder?: string,
     const focus = active ? [...document.querySelectorAll('*')].indexOf(active) : -1;
     const value = (${expression});
     ${recorder ? `if (value === null || value === undefined) return (${recorder}.reason = value === null ? 'measurement-null' : 'measurement-undefined', ${recorder}.finish(null));
+    ${recorder}.measurementSerialization = typeof value === 'number' ? (value - value === 0 ? 'finite-scalar' : 'nonfinite-number') : typeof value === 'boolean' || typeof value === 'string' ? 'finite-scalar' : 'opaque';
     return (${recorder}.reason = 'sample-ready', ${recorder}.finish({ layout, focus, value }));` : `if (value === null || value === undefined) return null;
     return { layout, focus, value };`}
   })()`
@@ -100,11 +101,12 @@ function diagnosticProgram(kind: 'visual' | 'settled', selector: string, appeara
     const header = { version: 1, token, attempt, kind }
     const declaration = `
     const ${recorder} = {
-      sourceDocument: document, reason: 'missing-target', fontObserved: false, fontStatus: undefined, document: null,
+      sourceDocument: document, reason: 'missing-target', fontObserved: false, fontStatus: undefined, document: null, measurementSerialization: undefined,
       finish(value) {
         return { protocol: 'cez.visual', version: 1, token: ${JSON.stringify(token)}, attempt: ${attempt}, kind: ${JSON.stringify(kind)},
           public: value === undefined ? { present: false } : { present: true, value },
           evidence: { reason: this.reason, phase: this.reason.startsWith('measurement-') || this.reason === 'sample-ready' ? 'measurement' : 'visual',
+            ...(this.reason === 'sample-ready' ? { measurementSerialization: this.measurementSerialization } : {}),
             fontObserved: this.fontObserved, ...(this.fontObserved ? { fontStatus: this.fontStatus ?? null } : {}), document: this.document } };
       }
     };
