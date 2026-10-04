@@ -1,5 +1,3 @@
-import { randomUUID } from 'node:crypto'
-import { decodeVisualSample, type VisualProgram, type VisualPollEvidence } from './visual-sample-protocol'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -100,72 +98,8 @@ export function lastAttachedBrowser(): AgentBrowser | null {
 type FailureReason =
   | { kind: 'wait-selector'; action: 'click' | 'hover' | 'fill'; selector: string }
   | { kind: 'wait-fn'; predicate: string }
-  | { kind: 'wait-value'; expression: string; lastValue: unknown; lastError?: string; poll?: PollDiagnostics }
+  | { kind: 'wait-value'; expression: string; lastValue: unknown; lastError?: string }
   | { kind: 'test' }
-
-type PollAttempt = {
-  attempt: number
-  startMs: number
-  endMs: number
-  budgetMs: number
-} & (
-  | { outcome: 'returned' | 'returned-after-deadline'; value: unknown; matcherError?: unknown; decoderError?: unknown; decoderExceededDeadline?: true }
-  | { outcome: 'threw'; error: unknown }
-)
-
-type PollDiagnostics = {
-  timeoutMs: number
-  holdMs: number
-  elapsedMs: number
-  attempts: number
-  completedSamples: number // Returned within the deadline, eligible for the matcher.
-  nullSamples: number
-  commandErrors: number
-  lateReturns: number
-  matcherErrors: number
-  decoderErrors?: number
-  visual?: VisualPollEvidence
-  // All timestamps are monotonic offsets from the start of this wait.
-  lastSample: { attempt: number; completedAtMs: number } | null
-  terminalProbe: {
-    attempt: number
-    startMs: number
-    endMs: number
-    durationMs: number
-    budgetMs: number
-    outcome: PollAttempt['outcome']
-    browserCompletion: 'returned' | 'unknown'
-    result?: { type: string; present: boolean; summary: string }
-    error?: string
-    matcherError?: string
-    decoderError?: string
-    decoderExceededDeadline?: true
-  } | null
-}
-
-/** Bound each cause separately so a long expression cannot hide the transport error.
- * Never serialize child-process stdout, stderr or environment into the poll record. */
-function describePollError(error: unknown): string {
-  const lines: string[] = []
-  try {
-    for (let current: unknown = error, depth = 0; depth < 5; depth += 1) {
-      if (current !== null && typeof current === 'object' && 'message' in current) {
-        const item = current as { name?: unknown; message: unknown; code?: unknown; signal?: unknown; cause?: unknown }
-        const tags = [item.name, item.code, item.signal].filter(value => typeof value === 'string').map(value => value.slice(0, 40))
-        lines.push(`${tags.join(' ')}: ${String(item.message).slice(0, 250)}`)
-        current = item.cause
-        if (current == null) break
-      } else {
-        lines.push((typeof current === 'object' ? Object.prototype.toString.call(current) : String(current)).slice(0, 250))
-        break
-      }
-    }
-  } catch {
-    // Diagnostics must not replace the original failure if an error has getters.
-    lines.push('<unreadable error>')
-  }
-  return lines.join('\n  caused by: ').slice(0, 2_000)
-}
 
 /**
  * The CLI's own default wait budget, read from the variable agent-browser reads
@@ -623,11 +557,11 @@ export class AgentBrowser {
    *  first truth, which is how `waitForValue` is built on this rather than beside it. */
   waitForStable<T, U extends T>(
     js: string,
-    options: { holdMs: number; matcher: (value: T) => value is U; intervalMs?: number; failure?: string; visualDiagnostic?: VisualProgram },
+    options: { holdMs: number; matcher: (value: T) => value is U; intervalMs?: number; failure?: string },
   ): U
   waitForStable<T = unknown>(
     js: string,
-    options: { holdMs: number; matcher?: (value: T) => boolean; intervalMs?: number; failure?: string; visualDiagnostic?: VisualProgram },
+    options: { holdMs: number; matcher?: (value: T) => boolean; intervalMs?: number; failure?: string },
   ): T
   waitForStable<T = unknown>(
     js: string,
@@ -636,63 +570,19 @@ export class AgentBrowser {
       matcher = (value: T) => value !== null && value !== undefined && value !== false,
       intervalMs = 100,
       failure,
-      visualDiagnostic,
-    }: { holdMs: number; matcher?: (value: T) => boolean; intervalMs?: number; failure?: string; visualDiagnostic?: VisualProgram },
+    }: { holdMs: number; matcher?: (value: T) => boolean; intervalMs?: number; failure?: string },
   ): T {
-    const startedAt = performance.now()
-    const timeoutMs = defaultWaitTimeoutMs()
-    const deadline = startedAt + timeoutMs
+    const deadline = performance.now() + defaultWaitTimeoutMs()
     let lastValue: unknown = undefined
     let lastError: unknown = undefined
     let holdStartedAt: number | null = null
     let holdValue: unknown = undefined
-    let attempts = 0, completedSamples = 0, nullSamples = 0, commandErrors = 0, lateReturns = 0, matcherErrors = 0
-    let lastSample: PollDiagnostics['lastSample'] = null
-    let terminalProbe: PollAttempt | null = null
-    const token = visualDiagnostic?.mode === 'envelope' ? randomUUID() : undefined
-    const visual: VisualPollEvidence | undefined = visualDiagnostic && { kind: visualDiagnostic.kind, ...(token ? { token } : {}),
-      ...(visualDiagnostic.mode === 'legacy' ? { fallback: visualDiagnostic.fallback } : {}),
-      latest: null, firstQualified: null, latestQualified: null, reasons: {},
-    }
-    let decoderErrors = 0
     for (;;) {
-      const attempt = ++attempts
-      // Construction uses this same deadline; its cost never buys more CLI time.
-      const expression = visualDiagnostic?.mode === 'envelope' ? visualDiagnostic.build(token!, attempt) : js
-      const probeStartedAt = performance.now()
-      const budgetMs = deadline - probeStartedAt
-      let returned = false, decoded = false
       try {
-        const response = this.run(['eval', expression], budgetMs)
-        const raw = response.result
+        const value = this.run(['eval', js], deadline - performance.now()).result as T
         // A hold starts at an observed sample, after transport/evaluation completes.
         const now = performance.now()
-        returned = true
-        terminalProbe = { attempt, startMs: probeStartedAt - startedAt, endMs: now - startedAt, budgetMs, outcome: now > deadline ? 'returned-after-deadline' : 'returned', value: visualDiagnostic?.mode === 'envelope' ? undefined : raw }
-        if (now > deadline) lateReturns += 1
-        let value = raw as T
-        if (visualDiagnostic?.mode === 'envelope') {
-          const sample = decodeVisualSample(raw, Object.prototype.hasOwnProperty.call(response, 'result'), { token: token!, attempt, kind: visualDiagnostic.kind, session: this.session })
-          value = sample.value as T
-          visual!.latest = sample.observation
-          if (sample.observation.qualification === 'qualified') {
-            visual!.firstQualified ??= sample.observation
-            visual!.latestQualified = sample.observation
-            visual!.reasons[sample.observation.reason] = (visual!.reasons[sample.observation.reason] ?? 0) + 1
-          }
-        } else if (visual) visual.latest = { qualification: 'legacy-fallback', attempt }
-        decoded = true
-        terminalProbe.value = value
         if (now > deadline) break
-        // Transport completion anchors the original hold. Codec work also spends
-        // this deadline and cannot make an otherwise late match eligible.
-        if (visualDiagnostic?.mode === 'envelope' && performance.now() > deadline) {
-          terminalProbe.decoderExceededDeadline = true
-          break
-        }
-        completedSamples += 1
-        if (value === null) nullSamples += 1
-        lastSample = { attempt, completedAtMs: now - startedAt }
         lastValue = value
         lastError = undefined
         if (matcher(value) && (holdStartedAt === null || sameSample(value, holdValue))) {
@@ -708,20 +598,7 @@ export class AgentBrowser {
           holdStartedAt = null
         }
       } catch (cause) {
-        const now = performance.now()
-        if (!returned) {
-          commandErrors += 1
-          terminalProbe = { attempt, startMs: probeStartedAt - startedAt, endMs: now - startedAt, budgetMs, outcome: 'threw', error: cause }
-          if (visual) visual.latest = { qualification: 'command-error', attempt }
-        } else if (!decoded && terminalProbe && terminalProbe.outcome !== 'threw') {
-          decoderErrors += 1
-          terminalProbe.decoderError = cause
-          visual!.latest = { qualification: 'protocol-error', attempt }
-        } else if (terminalProbe?.outcome === 'returned') {
-          matcherErrors += 1
-          terminalProbe.matcherError = cause
-        }
-        if (now < deadline || (lastError === undefined && lastValue === undefined)) lastError = cause
+        if (performance.now() < deadline || (lastError === undefined && lastValue === undefined)) lastError = cause
         holdStartedAt = null
       }
       if (performance.now() >= deadline) break
@@ -732,28 +609,6 @@ export class AgentBrowser {
       expression: js,
       lastValue,
       ...(lastError !== undefined ? { lastError: describeError(lastError) } : {}),
-      // #795: keep the last eligible value AND the terminal command outcome. A
-      // null followed by a deadline kill must not look like 25s of returned nulls.
-      // This metadata is failure-only and never enters the matcher/held payload.
-      poll: {
-        timeoutMs, holdMs, elapsedMs: performance.now() - startedAt,
-        attempts, completedSamples, nullSamples, commandErrors, lateReturns, matcherErrors, lastSample,
-        ...(visual ? { decoderErrors, visual } : {}),
-        terminalProbe: terminalProbe && {
-          attempt: terminalProbe.attempt, startMs: terminalProbe.startMs, endMs: terminalProbe.endMs,
-          durationMs: terminalProbe.endMs - terminalProbe.startMs, budgetMs: terminalProbe.budgetMs,
-          outcome: terminalProbe.outcome,
-          ...(terminalProbe.outcome === 'threw'
-            ? { browserCompletion: 'unknown' as const, error: describePollError(terminalProbe.error) }
-            : { browserCompletion: 'returned' as const,
-              ...(terminalProbe.decoderError !== undefined ? { decoderError: describePollError(terminalProbe.decoderError) } : {
-                result: { type: terminalProbe.value === null ? 'null' : typeof terminalProbe.value, present: terminalProbe.value !== undefined, summary: summarize(terminalProbe.value) },
-              }),
-              ...(terminalProbe.matcherError !== undefined ? { matcherError: describePollError(terminalProbe.matcherError) } : {}),
-              ...(terminalProbe.decoderExceededDeadline ? { decoderExceededDeadline: true as const } : {}),
-            }),
-        },
-      },
     }
     const bundle = this.captureFailure(reason, lastError ?? new Error(`last value: ${summarize(lastValue)}`))
     const last = lastError !== undefined ? `last error: ${describeError(lastError)}` : `last value: ${summarize(lastValue)}`

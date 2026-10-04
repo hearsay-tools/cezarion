@@ -794,3 +794,33 @@ The final exhaustive inventory is **63 specs**, **16 shared/setup files plus one
 driver**, and **212 actual accepted-sample calls**. The original 462 baseline sampling calls,
 45 affected spec rows and 18 NONE rows remain the baseline audit counts. All #758 and #794
 coverage is retained. Local acceptance is complete; draft-PR CI remains a separate verification.
+
+
+## User-directed wrap-up — 2026-10-04
+
+The owner stopped the font investigation and moved its remaining acceptance work to
+[#808](https://github.com/hearsay-tools/cezarion/issues/808). The historical October 3
+acceptance above describes that revision; it does not establish the later requested
+three-plus-five loaded streak.
+
+The final PR keeps the demonstrated fixes for live list HTTP/SSE freshness (including
+archive, cold, inactive and recovery paths), appearance control readiness, conditional
+settings control mounting, independent per-lane Git administration and objects, and
+fixture readiness tied to the owned child's announced listener. It preserves the
+original assertions, waits, holds and readiness guards. Each class received regression
+red/green proof and independent review. Those earlier classes did not recur in the recent
+complete loaded runs.
+
+Font-investigation-only bookkeeping, generated diagnostic envelopes, scripted wire
+adapters and their tests were removed. The shared driver/sampler and original wait tests
+return exactly to `fa9389cea7100686eb9ab4f31233f544d3739431`. Disposable probes, diagnostic
+packages and owned worker workspaces are cleaned up; a sanitized metrics-only handoff
+belongs to #808.
+
+Fresh checks after that cleanup: **257 focused tests in seven files**, **64 service and
+525 root Node tests**, and **all workspace typechecks** passed. No browser or loaded
+suite was rerun during wrap-up. The latest clean acceptance batch at `653a1ef2` passed
+once (614 passed, seven existing skips), then failed only the six smoke font-readiness
+cases (608 passed, six failed, seven existing skips); the batch stopped. The last
+loaded diagnostic passed 614 tests with seven existing skips and triggered no font
+probe. Neither result claims a font cure or a completed three-plus-five streak.
