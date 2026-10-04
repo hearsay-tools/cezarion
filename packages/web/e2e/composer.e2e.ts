@@ -144,6 +144,9 @@ describe('the thread composer against a live waiting session', () => {
     await waitForStatus(baseUrl, runId, ['waiting'])
     // The agent's answer to our message rendered — the round trip is complete.
     browser.waitForFunction(`document.querySelector('[data-slot="paused-hint"]') !== null`)
+    // Finish eligibility arrives on a later detail response than the paused hint.
+    // Wait for its final footer before targeting the adjacent dictation button.
+    browser.waitForFunction(`document.querySelector('[data-slot="composer-finish"]')?.disabled === false`)
   }, 90_000)
 
   it('dictation: recording swaps the footer for the overlay — timer, partial transcript', () => {
