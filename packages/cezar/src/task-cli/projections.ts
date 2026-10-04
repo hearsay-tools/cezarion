@@ -1,4 +1,4 @@
-import { deriveAttention, type ApiRun, type AttentionBucket, type RunStatus } from '@open-mercato/cezar-contract';
+import { deriveAttention, type ApiRun, type AttentionBucket, type RunStatus, type RunSummary } from '@open-mercato/cezar-contract';
 
 /**
  * The slim shapes `cez task` prints (#504). A bot polls these every few seconds, so each one
@@ -59,7 +59,7 @@ export function projectStatus(run: ApiRun, url: string, question?: unknown) {
 }
 
 /** The record carries no `updatedAt`; the newest lifecycle stamp is the honest stand-in. */
-export function projectListRow(run: ApiRun) {
+export function projectListRow(run: RunSummary | ApiRun) {
   return defined({
     id: run.id,
     title: runTitle(run),

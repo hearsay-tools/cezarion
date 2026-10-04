@@ -222,7 +222,7 @@ describe('cez task watching', () => {
 
 /**
  * Review round 1 (#504): behaviour a real cockpit cannot be timed into reliably, so a fake one
- * scripts the exact wire — a slow `/runs`, and a live `run` frame landing mid-replay.
+ * scripts the exact wire — a slow `/run-summaries`, and a live `run` frame landing mid-replay.
  */
 describe('cez task watching against a scripted cockpit', () => {
   let server: import('node:http').Server;
@@ -258,7 +258,7 @@ describe('cez task watching against a scripted cockpit', () => {
 
   it('wait answers timeout (exit 3) on time even when a poll is slower than the budget', async () => {
     handler = (req, res) => {
-      if (req.url === '/api/v1/p/default/runs') setTimeout(() => json(res, [apiRun('queued')]), 4_000);
+      if (req.url === '/api/v1/p/default/run-summaries') setTimeout(() => json(res, [apiRun('queued')]), 4_000);
       else { res.statusCode = 404; res.end(); }
     };
     const started = Date.now();
@@ -271,7 +271,7 @@ describe('cez task watching against a scripted cockpit', () => {
     // The socket dies 750ms into a 1s budget — inside the abort grace window,
     // but not an abort, so the exact deadline check still applies.
     handler = (req, res) => {
-      if (req.url === '/api/v1/p/default/runs') setTimeout(() => res.destroy(), 750);
+      if (req.url === '/api/v1/p/default/run-summaries') setTimeout(() => res.destroy(), 750);
       else { res.statusCode = 404; res.end(); }
     };
     expect(await run(['wait', 'r1', '--timeout-seconds', '1'])).toBe(2);

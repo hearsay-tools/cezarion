@@ -1,9 +1,9 @@
 import {
   ATTENTION_RANK,
-  apiRunSchema,
   runHistoryPageSchema,
   runRecordSchema,
-  type ApiRun,
+  runSummarySchema,
+  type RunSummary,
   type RunHistoryEvent,
   type RunStatus,
 } from '@open-mercato/cezar-contract';
@@ -48,7 +48,7 @@ export interface WaitResult {
   timedOut: boolean;
 }
 
-function entryFor(id: string, run: ApiRun | undefined): WaitEntry {
+function entryFor(id: string, run: RunSummary | undefined): WaitEntry {
   if (!run) return { id, status: 'missing' };
   return {
     id,
@@ -107,7 +107,7 @@ export function abortedPoll(error: unknown): boolean {
 }
 
 /**
- * Polls `GET /runs`: one call covers any number of runs and holds no socket open. Each poll is
+ * Polls `GET /run-summaries` (#817): one call covers any number of runs and holds no socket open. Each poll is
  * bounded by what is left of the deadline, so a slow cockpit answers "timed out" on time rather
  * than holding the caller for a full request timeout.
  */
@@ -125,14 +125,14 @@ export async function waitForRuns(
     const pollStart = Date.now();
     let result;
     try {
-      result = await request(cockpit, '/runs', { timeoutMs: budget });
+      result = await request(cockpit, '/run-summaries', { timeoutMs: budget });
     } catch (error) {
       if (Date.now() >= deadline) return timedOut();
       if (abortedPoll(error) && pollHitDeadline(pollStart, budget)) return timedOut();
       throw error;
     }
     if (result.status !== 200) refuse(result);
-    const runs = apiRunSchema.array().safeParse(result.data);
+    const runs = runSummarySchema.array().safeParse(result.data);
     if (!runs.success) invalidResponse('run list');
     const byId = new Map(runs.data.map((run) => [run.id, run]));
     entries = ids.map((id) => entryFor(id, byId.get(id)));

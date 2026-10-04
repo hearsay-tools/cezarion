@@ -82,10 +82,11 @@ export async function fetchJson(url: string, init: { method?: string; body?: unk
 
 /** A project-scoped route: `path` starts with `/`, relative to `/api/v1/p/:projectId`. */
 export function request(cockpit: Cockpit, path: string, init: { method?: string; body?: unknown; timeoutMs?: number } = {}): Promise<HttpResult> {
-  // GET /runs is the existing unpaginated full history. Even 32 valid 100k-character tasks
-  // exceed the ordinary cap. Match the cockpit's full-list read rather than making list/wait
-  // fail as history grows; retain deadlines, error-body caps and every other route's cap.
-  const fullRunList = path === '/runs' && (init.method ?? (init.body === undefined ? 'GET' : 'POST')) === 'GET';
+  // GET /runs (`list --full`) and GET /run-summaries (#817) are unpaginated full histories. Even
+  // 32 valid 100k-character tasks exceed the ordinary cap on /runs, and summaries grow with run
+  // count. Match the cockpit's list read rather than making list/wait fail as history grows;
+  // retain deadlines, error-body caps and every other route's cap.
+  const fullRunList = (path === '/runs' || path === '/run-summaries') && (init.method ?? (init.body === undefined ? 'GET' : 'POST')) === 'GET';
   return fetchJson(`${cockpit.api}${path}`, {
     ...init,
     ...(fullRunList ? { responseLimitBytes: Infinity } : {}),
