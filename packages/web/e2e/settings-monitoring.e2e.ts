@@ -1,13 +1,12 @@
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
+import { execFileSync, type ChildProcess } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { AgentBrowser, cezarCli, fixtureServeEnv, getJson } from './agent-browser'
-import { stopFixtureServer } from './fixture-server'
-import { pollFor, waitForHealth } from './poll'
+import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
+import { pollFor } from './poll'
 
 /**
  * Global Resources monitoring controls against an isolated fixture server.
@@ -40,22 +39,8 @@ let cezHome: string
 let baseUrl: string
 let port: number
 
-function freePort(): Promise<number> {
-  return new Promise((done, fail) => {
-    const probe = createServer()
-    probe.once('error', fail)
-    probe.listen(0, '127.0.0.1', () => {
-      const address = probe.address()
-      const nextPort = typeof address === 'object' && address ? address.port : 0
-      probe.close(() => done(nextPort))
-    })
-  })
-}
-
-
 function startServer(): ChildProcess {
-  return spawn(
-    process.execPath,
+  return spawnFixtureServer(
     [cezarCli, 'serve', '--repo', dataRoot, '--port', String(port), '--no-open'],
     { env: fixtureServeEnv(dataRoot), stdio: 'ignore' },
   )
@@ -186,10 +171,10 @@ beforeAll(async () => {
     'utf8',
   )
 
-  port = await freePort()
-  baseUrl = `http://localhost:${port}`
+  port = 0
   server = startServer()
-  await waitForHealth(baseUrl)
+  baseUrl = await waitForFixtureServer(server)
+  port = Number(new URL(baseUrl).port)
   browser = AgentBrowser.open(sessionId)
   browser.setViewport(DESKTOP.width, DESKTOP.height)
 }, 60_000)
@@ -228,7 +213,7 @@ describe('global Resources monitoring controls', () => {
 
     await stopFixtureServer(server)
     server = startServer()
-    await waitForHealth(baseUrl)
+    await waitForFixtureServer(server, { expectedOrigin: baseUrl })
     const restored = (await workspaceConfig()).resources
     expect(restored.maxMonitoringSessions, mutationFailure('cold GET capacity', restored)).toBe(3)
     expect(restored.monitoringWakeIntervalMinutes, mutationFailure('cold GET interval', restored)).toBe(7)

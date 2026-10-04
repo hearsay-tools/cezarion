@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AgentBrowser, WaitForValueError, configureFailureCapture } from '../../e2e/agent-browser'
+import { waitForSettledSample } from '../../e2e/visual-ready'
 import { dismissWithEscape, focusWithKeyboard, hoverVisiblePoint } from '../../e2e/contrast'
 
 /**
@@ -325,4 +326,22 @@ it('bounds the CLI probe and rejects a matching sample arriving after the wait d
   const started = Date.now()
   expect(() => fake.browser.waitForValue('late()', value => value === 'ready', { intervalMs: 0 })).toThrow(WaitForValueError)
   expect(Date.now() - started).toBeLessThan(1000)
+})
+
+// #795: first truth, changing geometry, and returned focus may all precede
+// settlement. Exercise the real seam hold, including a false assertion value.
+it.each([false, 0])('returns the held measurement %s after geometry and focus settle', value => {
+  const { browser } = open([])
+  const sample = (width: number, focus: number) => ({ layout: { boxes: [[0, 0, width, 44]] }, focus, value })
+  const states = [null, sample(20, 1), sample(30, 1), sample(30, 2), sample(30, 2), sample(30, 2)]
+  let now = 0
+  let probes = 0
+  const monotonic = vi.spyOn(performance, 'now').mockImplementation(() => now)
+  const pause = vi.spyOn(Atomics, 'wait').mockReturnValue('timed-out')
+  const run = vi.spyOn(browser as unknown as { run: (args: string[], timeoutMs?: number) => { result: unknown } }, 'run')
+    .mockImplementation(() => { now += 100; return { result: states[probes++] } })
+  try {
+    expect(waitForSettledSample(browser, String(value))).toBe(value)
+    expect(probes).toBe(6) // no second read after the accepted sample
+  } finally { run.mockRestore(); pause.mockRestore(); monotonic.mockRestore() }
 })

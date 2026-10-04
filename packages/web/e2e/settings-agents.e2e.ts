@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { AgentBrowser, readTestEnv } from './agent-browser'
 import { waitForConfig } from './poll'
+import { waitForSettingsControl } from './settings-control'
 
 /**
  * Settings → Agents (R6 Step 1.5) end-to-end against the shared dry-run environment: edit each
@@ -54,6 +55,7 @@ interface ConfigAnswer {
 /** Set a native <select> the way a user would, through React's synthetic change — the native
  *  value setter defeats React's value tracker so the dispatched event is not deduped away. */
 function setSelect(selector: string, value: string) {
+  waitForSettingsControl(browser, selector)
   browser.evaluate(`(() => {
     const el = document.querySelector(${JSON.stringify(selector)})
     Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(el, ${JSON.stringify(value)})
@@ -62,6 +64,7 @@ function setSelect(selector: string, value: string) {
 }
 
 function setTextarea(selector: string, value: string) {
+  waitForSettingsControl(browser, selector)
   browser.evaluate(`(() => {
     const el = document.querySelector(${JSON.stringify(selector)})
     el.focus()
@@ -95,6 +98,7 @@ describe('settings → agents against the live dry-run server', () => {
   it('default runner: click writes config.json and GET /api/v1/config reads it back', async () => {
     gotoAgents()
     browser.click('.settings-agent-picker summary')
+    waitForSettingsControl(browser, '[data-slot="agents-runner"] [data-value="codex"]')
     browser.click('[data-slot="agents-runner"] [data-value="codex"]')
     await waitForConfig<ConfigAnswer>(baseUrl, (c) => c.defaultRunner === 'codex', 'defaultRunner codex')
     browser.waitForFunction(`document.querySelector('[data-slot="agents-runner"] [data-value="codex"]')?.getAttribute('aria-checked') === 'true'`)
@@ -122,6 +126,7 @@ describe('settings → agents against the live dry-run server', () => {
 
   it('base branch: picking a real branch persists; clearing goes back to the checkout', async () => {
     // Whatever branch the dry-run repo actually has, first option after "follow checked-out branch".
+    waitForSettingsControl(browser, '[data-slot="agents-base-branch"]')
     const branch = String(
       browser.evaluate(`document.querySelector('[data-slot="agents-base-branch"]').options[1]?.value ?? ''`),
     )
@@ -136,9 +141,11 @@ describe('settings → agents against the live dry-run server', () => {
   it('a cold load renders the persisted knobs — the form is a view of config.json', async () => {
     gotoAgents()
     expect(browser.count('[data-slot="agents-runner"] [data-value="codex"][aria-checked="true"]')).toBe(1)
+    waitForSettingsControl(browser, '[data-slot="agents-model"][data-runner="claude"]', { enabled: false })
     expect(
       String(browser.evaluate(`document.querySelector('[data-slot="agents-model"][data-runner="claude"]').value`)),
     ).toBe('opus')
+    waitForSettingsControl(browser, '[data-slot="agents-system-prompt"]', { enabled: false })
     expect(
       String(browser.evaluate(`document.querySelector('[data-slot="agents-system-prompt"]').value`)),
     ).toBe('Always add tests. (e2e)')
@@ -146,6 +153,7 @@ describe('settings → agents against the live dry-run server', () => {
 
     // Neutralize for the suites that follow (afterAll restores the file itself too).
     browser.click('.settings-agent-picker summary')
+    waitForSettingsControl(browser, '[data-slot="agents-runner"] [data-value="claude"]')
     browser.click('[data-slot="agents-runner"] [data-value="claude"]')
     await waitForConfig<ConfigAnswer>(baseUrl, (c) => c.defaultRunner === 'claude', 'defaultRunner claude')
   })

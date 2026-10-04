@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
+import { waitForSettledSample } from './visual-ready'
 import { AgentBrowser, bootProjectId, readTestEnv } from './agent-browser'
 import { readSharedProjects, writeSharedProjects } from './workspace-registry'
 
@@ -110,7 +111,7 @@ type BrandFacts = {
 
 /** Measure the token-driven Poppins project name as the browser actually paints it. */
 function brandFacts(scope: string): BrandFacts {
-  return browser.waitForValue(`(() => {
+  return waitForSettledSample(browser, `(() => {
     const root = document.querySelector(${JSON.stringify(scope)})
     const wordmark = root.querySelector('[data-slot="project-header-name"]')
     // Local run 1790758761212-3950840 lane-4.log: theme samples were "Loading project…" and "lane-4".
@@ -197,7 +198,7 @@ describe('cockpit app shell', () => {
 
     // Global controls belong to the rail; project tools and version stay in the footer.
     expect(browser.isVisible('[data-slot="project-rail"] [data-slot="theme-toggle"]')).toBe(true)
-    const layout = browser.waitForValue(`(() => {
+    const layout = waitForSettledSample(browser, `(() => {
       const footer = document.querySelector('[data-slot="sidebar-footer"]')
       const search = document.querySelector('[data-slot="command-palette-hint"]')
       const create = document.querySelector('[data-slot="sidebar"] a[href$="/new"]')
@@ -216,7 +217,7 @@ describe('cockpit app shell', () => {
     browser.waitForFunction(`document.querySelector('${nav} a[aria-current="page"]') !== null`)
     const expected = expectedOverflowLabels()
     const trigger = `${nav} [aria-label="More views"]`
-    const facts = browser.waitForValue(`(() => {
+    const facts = waitForSettledSample(browser, `(() => {
       const nav = document.querySelector('${nav}')
       if (!nav || !window.__cezIdle) return null
       const links = [...nav.querySelectorAll('a')]
@@ -297,7 +298,7 @@ describe('cockpit app shell', () => {
     let overflow: { label: string; title: string; escaped: string[]; truncated: boolean }
     try {
       browser.goto(baseUrl + scoped('/'))
-      overflow = browser.waitForValue(`(() => {
+      overflow = waitForSettledSample(browser, `(() => {
       const chip = document.querySelector('[data-slot="version-chip"]')
       if (chip?.textContent !== ${JSON.stringify(`v${NIGHTLY}`)}) return null
       const label = chip.querySelector('span:not([data-slot])')
@@ -393,7 +394,7 @@ describe('cockpit app shell', () => {
   it('makes main the only scroller — the document never scrolls', () => {
     browser.goto(baseUrl + scoped('/'))
 
-    const layout = browser.evaluate(`(() => {
+    const layout = waitForSettledSample(browser, `(() => {
       const shell = document.querySelector('[data-slot="app-shell"]')
       const main = document.querySelector('[data-slot="main"]')
       return {
@@ -447,7 +448,7 @@ describe('mobile shell', () => {
     expect(browser.isVisible('[data-slot="mobile-top-bar"]')).toBe(true)
     expect(browser.text('[data-slot="mobile-top-bar"]')).toContain('Tasks')
 
-    const bar = browser.evaluate(`(() => {
+    const bar = waitForSettledSample(browser, `(() => {
       const top = document.querySelector('[data-slot="mobile-top-bar"]')
       const menu = top.querySelector('button')
       const rect = menu.getBoundingClientRect()
@@ -476,7 +477,7 @@ describe('mobile shell', () => {
     // A 264px sidebar that failed to hide, or a nav row wider than the phone, shows up here
     // first — as a page that scrolls sideways. `<=`, not `===`: the document may legitimately
     // be narrower than the viewport, it just must never be wider.
-    const overflow = browser.evaluate(
+    const overflow = waitForSettledSample(browser,
       `[document.documentElement.scrollWidth, window.innerWidth]`
     ) as [number, number]
     expect(overflow[0]).toBeLessThanOrEqual(overflow[1])
@@ -509,7 +510,7 @@ describe('mobile shell', () => {
       expect(browser.isVisible(DRAWER)).toBe(true)
       expect(browser.isVisible('[data-slot="sheet-overlay"]')).toBe(true)
 
-      const box = browser.evaluate(`(() => {
+      const box = waitForSettledSample(browser, `(() => {
         const rect = document.querySelector('${DRAWER}').getBoundingClientRect()
         const rows = Array.from(document.querySelectorAll('${DRAWER} [data-slot="drawer-global"] a, ${DRAWER} [data-slot="drawer-global"] button'))
         const overlay = document.querySelector('[data-slot="sheet-overlay"]').getBoundingClientRect()
@@ -549,7 +550,7 @@ describe('mobile shell', () => {
       // The project header left the drawer (#621, #620): its identity row's wordmark is the brand
       // text left to measure. (The project rows need a registry this spec deliberately empties.)
       const name = `${DRAWER} [data-slot="drawer-identity"] span.font-bold`
-      const facts = () => browser.waitForValue(`(() => {
+      const facts = () => waitForSettledSample(browser, `(() => {
         const el = document.querySelector(${JSON.stringify(name)})
         if (!el || el.getBoundingClientRect().width === 0) return null
         const probe = document.createElement('span')
@@ -650,7 +651,7 @@ describe('mobile shell', () => {
 
       // The drawer is `fixed` and 264px of a 390px viewport, but a stray `w-3/4`/`sm:max-w-sm`
       // interaction or a too-wide nav row would push the document sideways.
-      const overflow = browser.evaluate(
+      const overflow = waitForSettledSample(browser,
         `[document.documentElement.scrollWidth, window.innerWidth]`
       ) as [number, number]
       expect(overflow[0]).toBeLessThanOrEqual(overflow[1])

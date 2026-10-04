@@ -1,4 +1,5 @@
 import { expect } from 'vitest'
+import { waitForSettledSample } from './visual-ready'
 import type { AgentBrowser } from './agent-browser'
 
 /**
@@ -45,6 +46,8 @@ export function expectGroupRowHeightMatchesTaskRow(
           const task = [...document.querySelectorAll(${JSON.stringify(`${scope}[data-slot="task-row"]`)})]
             .find((el) => !el.closest('[data-slot="variant-list"]'))
           if (!row || !toggle || !compare || !task || toggle.getAttribute('aria-expanded') !== ${JSON.stringify(expanded)}) return null
+          // #795: a mounted group/density attribute can precede its rendered frame.
+          if ([row, toggle, compare, task].some(el => !el.checkVisibility({ contentVisibilityAuto: true }))) return null
           const g = row.getBoundingClientRect(), t = toggle.getBoundingClientRect(), c = compare.getBoundingClientRect()
           if (g.height === 0) return null
           return { density, expanded: toggle.getAttribute('aria-expanded'),
@@ -56,7 +59,7 @@ export function expectGroupRowHeightMatchesTaskRow(
           if (expanded === 'true') browser.click(`${group} [data-slot="group-tile"]`)
           // Wait, then read (e2e README): the density attribute, the drawer and the expand all land
           // a frame after the action that caused them, so the sample is taken once they have.
-          const sample = browser.waitForValue(heights(expanded), (h: Heights | null) => h !== null) as Heights
+          const sample = waitForSettledSample(browser, heights(expanded), (h: Heights | null) => h !== null) as Heights
           const label = `${width}px ${density} expanded=${expanded}: ${JSON.stringify(sample)}`
           expect(sample.group, label).toBe(sample.task)
           if (density === 'comfortable') expect(sample.group, label).toBe(47)

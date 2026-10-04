@@ -1,4 +1,4 @@
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
+import { execFileSync, type ChildProcess } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -6,8 +6,7 @@ import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
-import { stopFixtureServer } from './fixture-server'
-import { waitForHealth } from './poll'
+import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 
 /**
  * Live preview, end to end (#781): the dry-run mock agent registers a dev server through the
@@ -69,19 +68,17 @@ beforeAll(async () => {
   git('commit', '-qm', 'init')
 
   appPort = await freePort()
-  const port = await freePort()
-  baseUrl = `http://localhost:${port}`
   // The cockpit's own browser is launched with --no-sandbox exactly where this machine needs it.
   // Whether the Chromium cezar resolves can use its sandbox depends on the host: GitHub's Ubuntu
   // runners and this repo's dev boxes restrict unprivileged user namespaces (AppArmor), and the
   // pane then shows 5.4 (failure bundle live-preview/registers-runs-streams-takes-a-click-and-stops-1,
   // PR #792). That state has its own unit coverage; this spec is about streaming, so it always opts
   // out the documented way.
-  server = spawn(process.execPath, [cezarCli, 'serve', '--repo', dataRoot, '--port', String(port), '--no-open'], {
+  server = spawnFixtureServer([cezarCli, 'serve', '--repo', dataRoot, '--port', '0', '--no-open'], {
     env: fixtureServeEnv(dataRoot, { CEZ_PREVIEW: '1', CEZ_PREVIEW_NO_SANDBOX: '1' }),
     stdio: 'ignore',
   })
-  await waitForHealth(baseUrl)
+  baseUrl = await waitForFixtureServer(server)
   const bootProject = await bootProjectId(baseUrl)
 
   const created = await fetch(`${baseUrl}/api/v1/runs`, {

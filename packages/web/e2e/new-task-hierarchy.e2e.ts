@@ -1,31 +1,17 @@
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
+import { execFileSync, type ChildProcess } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import { stopFixtureServer } from './fixture-server'
+import { waitForSettledSample } from './visual-ready'
+import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, cezarCli, fixtureServeEnv } from './agent-browser'
-import { waitForHealth } from './poll'
 
 /** Real-browser geometry and state preservation for the New Task execution disclosure.
  * Uses an isolated dry-run server; the unit suite pins the exact submission payloads. */
 const artifactsDir = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_e2e')
 const sessionId = `hier-${process.pid}`
-
-function freePort(): Promise<number> {
-  return new Promise((done, fail) => {
-    const probe = createServer()
-    probe.once('error', fail)
-    probe.listen(0, '127.0.0.1', () => {
-      const address = probe.address()
-      const port = typeof address === 'object' && address ? address.port : 0
-      probe.close(() => done(port))
-    })
-  })
-}
-
 
 let browser: AgentBrowser
 let server: ChildProcess
@@ -46,14 +32,10 @@ beforeAll(async () => {
   mkdirSync(join(dataRoot, '.ai/skills'), { recursive: true })
   writeFileSync(join(dataRoot, '.ai/skills/lint-fix.md'), '---\ndescription: Fix lint findings\n---\n\nFix lint findings.\n')
 
-  const port = await freePort()
-  baseUrl = `http://localhost:${port}`
-  server = spawn(
-    process.execPath,
-    [cezarCli, 'serve', '--repo', dataRoot, '--port', String(port), '--no-open'],
+  server = spawnFixtureServer([cezarCli, 'serve', '--repo', dataRoot, '--port', '0', '--no-open'],
     { env: fixtureServeEnv(dataRoot), stdio: 'ignore' },
   )
-  await waitForHealth(baseUrl)
+  baseUrl = await waitForFixtureServer(server)
 
   browser = AgentBrowser.open(sessionId)
   browser.setViewport(1440, 900)
@@ -76,7 +58,7 @@ const matrix = [360, 1440].flatMap((width) =>
 )
 
 function geometry() {
-  return browser.evaluate(`(() => {
+  return waitForSettledSample(browser, `(() => {
     const root = document.querySelector('${composer}');
     const box = (selector) => { const r = document.querySelector(selector).getBoundingClientRect(); return { top: r.top, right: r.right, bottom: r.bottom, left: r.left }; };
     const controls = [...root.querySelectorAll('button, summary')].filter(el => el.checkVisibility());
@@ -158,7 +140,7 @@ describe('New Task hierarchy (#168)', () => {
 
   it('keeps submission feedback and the read-only disclosure stable through a delayed failure', () => {
     browser.fill(prompt, 'Retain this failed task')
-    const height = browser.evaluate(`document.querySelector('${composer}').getBoundingClientRect().height`)
+    const height = waitForSettledSample(browser, `document.querySelector('${composer}').getBoundingClientRect().height`)
     browser.evaluate(`(() => {
       window.hierarchyFetch = window.fetch;
       window.hierarchyAttempts = 0;
@@ -176,13 +158,13 @@ describe('New Task hierarchy (#168)', () => {
     expect(browser.evaluate(`document.querySelector('[aria-label="Start task"]').disabled`)).toBe(true)
     browser.press('Control+Enter')
     expect(browser.evaluate('window.hierarchyAttempts')).toBe(1)
-    expect(browser.evaluate(`document.querySelector('${composer}').getBoundingClientRect().height`)).toBe(height)
+    expect(waitForSettledSample(browser, `document.querySelector('${composer}').getBoundingClientRect().height`)).toBe(height)
     browser.evaluate('window.hierarchyFail()')
     browser.waitForFunction(`document.querySelector('${composer} [role="alert"]') !== null`)
     expect(browser.text(`${composer} [role="alert"]`)).toContain('Check Tasks')
     expect(browser.evaluate(`document.querySelector('${prompt}').value`)).toBe('Retain this failed task')
     expect(browser.evaluate(`document.querySelector('${disclosure}').closest('[inert]')`)).toBe(null)
-    expect(browser.evaluate(`document.querySelector('${composer}').getBoundingClientRect().height`)).toBe(height)
+    expect(waitForSettledSample(browser, `document.querySelector('${composer}').getBoundingClientRect().height`)).toBe(height)
     browser.screenshot(`${artifactsDir}/hierarchy-submission-failure.png`)
     browser.evaluate('window.fetch = window.hierarchyFetch')
   })

@@ -1,14 +1,14 @@
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
+import { execFileSync, type ChildProcess } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+
+import { waitForSettledSample } from './visual-ready'
 import type { RunRecord } from '@open-mercato/cezar-api-client'
 
-import { stopFixtureServer } from './fixture-server'
+import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
-import { waitForHealth } from './poll'
 
 /**
  * Task GitHub item tabs (#692) end-to-end: a task that references an own-repo PR and issue gets
@@ -36,17 +36,6 @@ const tabs = '[data-slot="run-tabs"]'
 const activeTab = `${tabs} a[aria-current="page"]`
 const prChip = '[data-slot="run-meta"] [data-slot="pr-chip"]'
 
-function freePort(): Promise<number> {
-  return new Promise((done, fail) => {
-    const probe = createServer()
-    probe.once('error', fail)
-    probe.listen(0, '127.0.0.1', () => {
-      const address = probe.address()
-      const port = typeof address === 'object' && address ? address.port : 0
-      probe.close(() => done(port))
-    })
-  })
-}
 
 beforeAll(async () => {
   dataRoot = mkdtempSync(join(tmpdir(), 'cezar-e2e-items-'))
@@ -75,13 +64,11 @@ beforeAll(async () => {
   mkdirSync(join(dataRoot, '.ai/cezar'), { recursive: true })
   writeFileSync(join(dataRoot, '.ai/cezar/runs.json'), JSON.stringify([seeded], null, 2), 'utf8')
 
-  const port = await freePort()
-  baseUrl = `http://localhost:${port}`
-  server = spawn(process.execPath, [cezarCli, 'serve', '--repo', dataRoot, '--port', String(port), '--no-open'], {
+  server = spawnFixtureServer([cezarCli, 'serve', '--repo', dataRoot, '--port', '0', '--no-open'], {
     env: fixtureServeEnv(dataRoot),
     stdio: 'ignore',
   })
-  await waitForHealth(baseUrl)
+  baseUrl = await waitForFixtureServer(server)
   bootProject = await bootProjectId(baseUrl)
   browser = AgentBrowser.open(sessionId)
 }, 120_000)
@@ -112,7 +99,7 @@ describe('task GitHub item tabs against the dry-run mock', () => {
     expect(active).toContain(`#${PR}`)
     expect(browser.url()).toBe(`${baseUrl}${scoped(`/tasks/${runId}/pr/${PR}`)}`)
     // Visible, not merely mounted: a nonzero box with a visible computed style, read as one sample.
-    const mergeBox = browser.waitForValue<{ width: number; height: number }>(
+    const mergeBox = waitForSettledSample<{ width: number; height: number }>(browser,
       `(() => {
         const box = document.querySelector('[data-slot="gh-merge-box"]')
         if (!box) return null
@@ -143,7 +130,7 @@ describe('task GitHub item tabs against the dry-run mock', () => {
       browser.evaluate(`document.documentElement.classList.remove('light', 'dark'); document.documentElement.classList.add('${theme}')`)
       browser.fill('[data-slot="gh-custom-prompt"]', `Draft in ${theme}`)
       browser.press('Tab')
-      const facts = browser.waitForValue<{ inside: boolean; overflow: boolean; height: number }>(`(() => {
+      const facts = waitForSettledSample<{ inside: boolean; overflow: boolean; height: number }>(browser, `(() => {
         const panel = document.querySelector('[data-slot="gh-hand"]')
         const input = panel?.querySelector('textarea')
         if (!panel || !input || !panel.contains(document.activeElement) || input === document.activeElement) return null
@@ -163,14 +150,15 @@ describe('task GitHub item tabs against the dry-run mock', () => {
   it('on a phone the chip lands on a PR tab that is inside the viewport', () => {
     browser.setViewport(390, 844)
     openPrFromChip({ revealDetails: true })
-    const rect = browser.waitForValue<{ left: number; right: number; width: number }>(
+    const rect = waitForSettledSample<{ left: number; right: number; width: number }>(browser,
       `(() => {
         const tab = document.querySelector('${activeTab}')
         if (!tab) return null
         const r = tab.getBoundingClientRect()
-        return r.left >= 0 && r.right <= innerWidth ? { left: r.left, right: r.right, width: innerWidth } : null
+        return { left: r.left, right: r.right, width: innerWidth }
       })()`,
     )
+    expect(rect.left).toBeGreaterThanOrEqual(0)
     expect(rect.right).toBeLessThanOrEqual(rect.width)
   })
 })

@@ -1,14 +1,13 @@
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
+import { execFileSync, type ChildProcess } from 'node:child_process'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { createServer } from 'node:net'
-import { once } from 'node:events'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import { stopFixtureServer } from './fixture-server'
+import { waitForSettledSample } from './visual-ready'
+import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
-import { waitForHealth, waitForStatus } from './poll'
+import { waitForStatus } from './poll'
 
 /**
  * The Changes tab (R5 Step 1.5) end-to-end against a LIVE dry run, same doctrine as
@@ -31,20 +30,6 @@ import { waitForHealth, waitForStatus } from './poll'
 
 const artifactsDir = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_e2e')
 const sessionId = `e2e-changes-${process.pid}`
-
-function freePort(): Promise<number> {
-  return new Promise((done, fail) => {
-    const probe = createServer()
-    probe.once('error', fail)
-    probe.listen(0, '127.0.0.1', () => {
-      const address = probe.address()
-      const port = typeof address === 'object' && address ? address.port : 0
-      probe.close(() => done(port))
-    })
-  })
-}
-
-
 
 let browser: AgentBrowser
 let server: ChildProcess
@@ -72,17 +57,13 @@ beforeAll(async () => {
   // detect() answers available without touching the network. Nothing ever pushes to it.
   git('remote', 'add', 'origin', 'git@github.com:acme/changes-e2e.git')
 
-  const port = await freePort()
-  baseUrl = `http://localhost:${port}`
-  server = spawn(
-    process.execPath,
-    [cezarCli, 'serve', '--repo', dataRoot, '--port', String(port), '--no-open'],
+  server = spawnFixtureServer([cezarCli, 'serve', '--repo', dataRoot, '--port', '0', '--no-open'],
     // CEZ_REVIEW_GATE=1 because this spec is ABOUT the gate: it is opt-in (#489, default OFF),
     // so pinning it here is what makes the parked-at-review fixture reproducible instead of
     // depending on whatever the operator happens to export.
     { env: fixtureServeEnv(dataRoot, { CEZ_REVIEW_GATE: '1' }), stdio: 'ignore' },
   )
-  await waitForHealth(baseUrl)
+  baseUrl = await waitForFixtureServer(server)
   bootProject = await bootProjectId(baseUrl)
 
   const created = (await (
@@ -258,14 +239,14 @@ describe('the Changes tab against a live dry run', () => {
     ).toBe('none')
     // The integrated mobile design stacks the selectable file tree above the diff.
     expect(
-      browser.evaluate(
+      waitForSettledSample(browser,
         `(() => { const el = document.querySelector('[data-slot="changes-tree"]'); return el !== null && el.checkVisibility() && el.getBoundingClientRect().width <= innerWidth })()`,
       ),
     ).toBe(true)
     // The tabs remain a tappable segment row and the page does not overflow sideways.
     // Session / Changes / Commits / Files — the whole row survives the phone framing.
     expect(browser.count('[data-slot="run-tabs"] a')).toBe(4)
-    expect(browser.evaluate(`document.documentElement.scrollWidth <= window.innerWidth`)).toBe(true)
+    expect(waitForSettledSample(browser, `document.documentElement.scrollWidth <= window.innerWidth`)).toBe(true)
 
     browser.screenshot(`${artifactsDir}/changes-mobile.png`)
     browser.setViewport(1440, 900)

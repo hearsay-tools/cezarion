@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { beforeAll, afterAll, expect, it } from 'vitest'
 import { settleVisual } from './visual-ready'
-import { stopFixtureServer } from './fixture-server'
+import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { waitForHealth, pollFor, pollJson } from './poll'
 import record from './fixtures/thread-run.record.json'
@@ -32,10 +32,8 @@ beforeAll(async () => {
     { id: 'follow-up', summary: 'Validate task layouts on desktop and mobile.', suggestedPrompt: 'Check task views.', runnable: true, taskId: 'fixture-A' },
     { id: 'note', summary: 'Review the proposed chain before starting work.', runnable: false, taskId: 'fixture-B' },
   ]))
-  const port = await new Promise<number>((done) => { const probe = createServer(); probe.listen(0, '127.0.0.1', () => { const port = (probe.address() as { port: number }).port; probe.close(() => done(port)) }) })
-  base = `http://localhost:${port}`
-  server = spawn(process.execPath, [cezarCli, 'serve', '--repo', root, '--port', String(port), '--no-open'], { env: fixtureServeEnv(root, { CEZ_FOLLOWUPS: '1', CEZ_AUTOMATIONS: '1' }), stdio: 'ignore' })
-  await waitForHealth(base)
+  server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], { env: fixtureServeEnv(root, { CEZ_FOLLOWUPS: '1', CEZ_AUTOMATIONS: '1' }), stdio: 'ignore' })
+  base = await waitForFixtureServer(server)
   project = await bootProjectId(base)
   // The fixture has no GitHub remote, so create refuses a GitHub automation (#766); a schedule needs none.
   const response = await fetch(`${base}/api/v1/automations`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Nightly review', kind: 'schedule', schedule: { type: 'daily', hour: 4, minute: 0 }, task: { prompt: 'Review the open work on {{date}}', workflow: 'quick-task' }, enable: false }) })

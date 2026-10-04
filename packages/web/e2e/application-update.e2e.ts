@@ -1,5 +1,6 @@
 import { resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { waitForSettledSample } from './visual-ready'
 import { AgentBrowser, bootProjectId, readTestEnv } from './agent-browser'
 
 const artifacts = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_e2e/application-update')
@@ -52,7 +53,7 @@ describe('application update chrome', () => {
     browser.goto(`${baseUrl}/p/${project}/skills`)
     browser.waitForFunction(`document.documentElement.classList.contains('light') === ${theme === 'light'}`)
     if (phone) browser.click('[aria-label^="Open projects"]')
-    const aligned = browser.waitForValue(`(() => {
+    const aligned = waitForSettledSample(browser, `(() => {
       const root = document.querySelector('${root}')
       const chip = root?.querySelector('${versionChip}')
       if (!chip || root.getAnimations().some(a => a.playState === 'running')) return null
@@ -71,7 +72,7 @@ describe('application update chrome', () => {
     browser.screenshot(`${artifacts}/preview-${width}-${theme}.png`, { viewport: true })
     fixture({ status: 'idle', supported: false, message: 'Update this installation manually.' }, preview)
     reconcile()
-    const guidance = browser.waitForValue(`(() => {
+    const guidance = waitForSettledSample(browser, `(() => {
       const root = document.querySelector('${root}')
       const feedback = root?.querySelector('[data-slot="application-update-feedback"]')
       if (!feedback?.textContent.includes('Install the newer release')) return null
@@ -99,7 +100,7 @@ describe('application update chrome', () => {
     browser.goto(`${baseUrl}/p/${project}/skills`)
     browser.waitForFunction(`document.documentElement.classList.contains('light')`)
     browser.waitForFunction(`document.querySelector('${desktop} [aria-label="Update application"]') !== null`)
-    const before = browser.waitForValue(`(() => { const root = document.querySelector('${desktop}'); const header = root.querySelector('[data-slot="version-action"]').getBoundingClientRect(); const button = root.querySelector('[aria-label="Update application"]').getBoundingClientRect(); return { width: root.getBoundingClientRect().width, height: header.height, button: [button.width, button.height], title: root.querySelector('[aria-label="Update application"]').title, version: root.querySelector('[data-slot="version-chip"]').textContent }; })()`)
+    const before = waitForSettledSample(browser, `(() => { const root = document.querySelector('${desktop}'); const header = root.querySelector('[data-slot="version-action"]').getBoundingClientRect(); const button = root.querySelector('[aria-label="Update application"]').getBoundingClientRect(); return { width: root.getBoundingClientRect().width, height: header.height, button: [button.width, button.height], title: root.querySelector('[aria-label="Update application"]').title, version: root.querySelector('[data-slot="version-chip"]').textContent }; })()`)
     expect(before).toMatchObject({ width: 264, button: [44, 44], title: 'Update from v1.0.0 to v2.0.0', version: 'v1.0.0' })
     browser.hover(`${desktop} [aria-label="Update application"]`)
     expect(browser.waitForValue(`document.querySelector('[data-slot="tooltip-content"]')?.textContent?.includes('Update from v1.0.0 to v2.0.0') ? true : null`)).toBe(true)
@@ -112,7 +113,7 @@ describe('application update chrome', () => {
     browser.screenshot(`${artifacts}/desktop-error-light.png`, { viewport: true })
     browser.click(`${desktop} [aria-label="Update application"]`)
     browser.waitForFunction(`document.querySelector('${desktop} [aria-label="Restart application"]') !== null`)
-    const after = browser.waitForValue(`(() => { const root = document.querySelector('${desktop}'); const header = root.querySelector('[data-slot="version-action"]').getBoundingClientRect(); const button = root.querySelector('[aria-label="Restart application"]').getBoundingClientRect(); return { height: header.height, button: [button.width, button.height], title: root.querySelector('[aria-label="Restart application"]').title }; })()`)
+    const after = waitForSettledSample(browser, `(() => { const root = document.querySelector('${desktop}'); const header = root.querySelector('[data-slot="version-action"]').getBoundingClientRect(); const button = root.querySelector('[aria-label="Restart application"]').getBoundingClientRect(); return { height: header.height, button: [button.width, button.height], title: root.querySelector('[aria-label="Restart application"]').title }; })()`)
     expect(after).toEqual({ height: (before as { height: number }).height, button: [44, 44], title: 'Restart required' })
     browser.screenshot(`${artifacts}/desktop-ready-light.png`, { viewport: true })
   })
@@ -144,7 +145,7 @@ describe('application update chrome', () => {
     browser.waitForFunction(`!document.documentElement.classList.contains('light')`)
     browser.click('button[aria-label^="Open projects"]')
     browser.waitForFunction(`document.querySelector('${drawer}')?.getBoundingClientRect().left === 0`)
-    const nightly = browser.waitForValue(`(() => {
+    const nightly = waitForSettledSample(browser, `(() => {
       const chip = document.querySelector('${drawer} [data-slot="drawer-version"]')
       const header = chip?.closest('[data-slot="drawer-identity"]')
       if (!chip || !header) return null
@@ -155,7 +156,7 @@ describe('application update chrome', () => {
     browser.click(`${drawer} [aria-label="Restart application"]`)
     browser.waitForFunction(`document.querySelector('[role="alertdialog"]') !== null`)
     expect(browser.text('[role="alertdialog"]')).toContain('Running tasks will be recovered after restart.')
-    const modal = browser.waitForValue(`(() => {
+    const modal = waitForSettledSample(browser, `(() => {
       const dialog = document.querySelector('[role="alertdialog"]')
       const overlay = document.querySelector('[data-slot="alert-dialog-overlay"]')
       const sheet = document.querySelector('${drawer}')
@@ -208,7 +209,7 @@ describe('application update chrome', () => {
     browser.waitForFunction(`document.querySelector('${desktop} [aria-label="Update application"]')?.disabled === false`)
     browser.setReducedMotion()
     browser.evaluate(`document.documentElement.style.zoom = '2'`)
-    const geometry = browser.waitForValue(`(() => { const root = document.querySelector('${desktop}'); const action = root.querySelector('[aria-label="Update application"]'); const header = root.querySelector('[data-slot="version-action"]'); return { reduced: matchMedia('(prefers-reduced-motion: reduce)').matches, width: action.getBoundingClientRect().width, overflow: header.scrollWidth - header.clientWidth, title: action.title }; })()`)
+    const geometry = waitForSettledSample(browser, `(() => { const root = document.querySelector('${desktop}'); const action = root.querySelector('[aria-label="Update application"]'); const header = root.querySelector('[data-slot="version-action"]'); return { reduced: matchMedia('(prefers-reduced-motion: reduce)').matches, width: action.getBoundingClientRect().width, overflow: header.scrollWidth - header.clientWidth, title: action.title }; })()`)
     expect(geometry).toMatchObject({ reduced: true, width: 88, title: 'Update from v1.0.0 to v2.0.0' })
     expect((geometry as { overflow: number }).overflow).toBeLessThanOrEqual(0)
     browser.screenshot(`${artifacts}/desktop-zoom-200-reduced-dark.png`, { viewport: true })

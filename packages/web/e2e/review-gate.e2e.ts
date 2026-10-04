@@ -1,13 +1,12 @@
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
+import { execFileSync, type ChildProcess } from 'node:child_process'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import { stopFixtureServer } from './fixture-server'
+import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, cezarCli, fixtureServeEnv } from './agent-browser'
-import { waitForHealth, waitForStatus } from './poll'
+import { waitForStatus } from './poll'
 
 /**
  * The review gate (R3 Step 2.2) end-to-end, against a LIVE dry run — cezar's core promise
@@ -24,20 +23,6 @@ import { waitForHealth, waitForStatus } from './poll'
 
 const artifactsDir = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_e2e')
 const sessionId = `e2e-review-${process.pid}`
-
-function freePort(): Promise<number> {
-  return new Promise((done, fail) => {
-    const probe = createServer()
-    probe.once('error', fail)
-    probe.listen(0, '127.0.0.1', () => {
-      const address = probe.address()
-      const port = typeof address === 'object' && address ? address.port : 0
-      probe.close(() => done(port))
-    })
-  })
-}
-
-
 
 let browser: AgentBrowser
 let server: ChildProcess
@@ -57,17 +42,13 @@ beforeAll(async () => {
   git('add', '.')
   git('commit', '-qm', 'init')
 
-  const port = await freePort()
-  baseUrl = `http://localhost:${port}`
-  server = spawn(
-    process.execPath,
-    [cezarCli, 'serve', '--repo', dataRoot, '--port', String(port), '--no-open'],
+  server = spawnFixtureServer([cezarCli, 'serve', '--repo', dataRoot, '--port', '0', '--no-open'],
     // CEZ_REVIEW_GATE=1 because this spec is ABOUT the gate: it is opt-in (#489, default OFF),
     // so pinning it here is what makes the parked-at-review fixture reproducible instead of
     // depending on whatever the operator happens to export.
     { env: fixtureServeEnv(dataRoot, { CEZ_REVIEW_GATE: '1' }), stdio: 'ignore' },
   )
-  await waitForHealth(baseUrl)
+  baseUrl = await waitForFixtureServer(server)
 
   const created = (await (
     await fetch(`${baseUrl}/api/v1/runs`, {

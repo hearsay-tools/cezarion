@@ -1,16 +1,15 @@
-import { spawn, type ChildProcess } from 'node:child_process'
+import type { ChildProcess } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import { captureFixtureServer, stopFixtureServer } from './fixture-server'
+import { captureFixtureServer, spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, fixtureServeEnv } from './agent-browser'
 import { largeThreadEvents } from './fixtures/make-large-thread'
 import record from './fixtures/thread-run.record.json'
-import { waitForHealth, waitForStatus } from './poll'
-import { settleVisual } from './visual-ready'
+import { waitForStatus } from './poll'
+import { settleVisual, waitForSettledSample } from './visual-ready'
 import { HISTORY_BOUNDARY_SLACK_PX, isNearHistoryStart } from '../src/routes/task-thread/thread-scroll'
 
 const repoRoot = resolve(import.meta.dirname, '../../..')
@@ -73,19 +72,6 @@ const events = [...contextPrefix, ...largeThreadEvents(300)].map((event, index) 
   seq: index + 1,
   ts: new Date(Date.parse('2026-07-30T00:00:00.000Z') + index * 10).toISOString(),
 }))
-
-function freePort(): Promise<number> {
-  return new Promise((resolvePort, reject) => {
-    const probe = createServer()
-    probe.once('error', reject)
-    probe.listen(0, '127.0.0.1', () => {
-      const address = probe.address()
-      const port = typeof address === 'object' && address ? address.port : 0
-      probe.close(() => resolvePort(port))
-    })
-  })
-}
-
 
 let browser: AgentBrowser
 let server: ChildProcess
@@ -194,7 +180,7 @@ function parkAndSettleHistoryStart(): HistoryAnchor {
     const main = ${MAIN}
     window.__cezThreadScrollTo(main.scrollHeight - main.clientHeight)
   })()`)
-  browser.waitForValue(`(() => { const main = ${MAIN}; return main && { scrollTop:main.scrollTop, clientHeight:main.clientHeight, maxTop:main.scrollHeight-main.clientHeight } })()`,
+  waitForSettledSample(browser, `(() => { const main = ${MAIN}; return main && { scrollTop:main.scrollTop, clientHeight:main.clientHeight, maxTop:main.scrollHeight-main.clientHeight } })()`,
     (sample: { scrollTop: number; clientHeight: number } | null) => sample !== null && !isNearHistoryStart(sample))
   browser.evaluate(`(() => {
     const main = ${MAIN}
@@ -281,16 +267,13 @@ beforeAll(async () => {
       'utf8',
     )
   }
-  const port = await freePort()
-  baseUrl = `http://localhost:${port}`
-  server = spawn(
-    process.execPath,
-    [join(repoRoot, 'packages/cezar/dist/index.js'), 'serve', '--repo', dataRoot, '--port', String(port), '--no-open'],
+
+  server = spawnFixtureServer([join(repoRoot, 'packages/cezar/dist/index.js'), 'serve', '--repo', dataRoot, '--port', '0', '--no-open'],
     { env: fixtureServeEnv(dataRoot), stdio: ['ignore', 'pipe', 'pipe'] },
   )
   serverDiagnostics = captureFixtureServer(server)
   try {
-    await waitForHealth(baseUrl)
+    baseUrl = await waitForFixtureServer(server)
     healthReady = true
     healthReadyAfterMs = serverDiagnostics().elapsedMs
   } catch (error) {
@@ -525,11 +508,11 @@ describe('progressive long-session history', () => {
     const after = settleNamedHistoryAnchor(before.key)
     expect(Math.abs(after.top - before.top), JSON.stringify({ before, after })).toBeLessThan(2)
     parkAndSettleHistoryStart()
-    expect(browser.evaluate(`(() => {
+    expect(waitForSettledSample(browser, `(() => {
       const task = document.querySelector('[data-row-key="task"]')
       return task && getComputedStyle(task).visibility === 'visible' && task.getBoundingClientRect().height > 0
     })()`)).toBe(true)
-    expect(browser.evaluate(`(() => {
+    expect(waitForSettledSample(browser, `(() => {
       const rows = [...document.querySelectorAll('[data-slot="thread-row"]')]
         .filter(row => getComputedStyle(row).visibility === 'visible')
         .map(row => row.getBoundingClientRect())

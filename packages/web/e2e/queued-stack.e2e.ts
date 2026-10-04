@@ -1,13 +1,12 @@
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
+import { execFileSync, type ChildProcess } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import { stopFixtureServer } from './fixture-server'
+import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, cezarCli, fixtureServeEnv } from './agent-browser'
-import { waitForHealth, waitForStatus, pollFor, pollJson } from './poll'
+import { waitForStatus, pollFor, pollJson } from './poll'
 
 /**
  * Stacking, editing and removing a queued run's prompt (#472), end-to-end against a LIVE
@@ -30,24 +29,10 @@ import { waitForHealth, waitForStatus, pollFor, pollJson } from './poll'
 const artifactsDir = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_e2e')
 const sessionId = `e2e-queued-stack-${process.pid}`
 
-function freePort(): Promise<number> {
-  return new Promise((done, fail) => {
-    const probe = createServer()
-    probe.once('error', fail)
-    probe.listen(0, '127.0.0.1', () => {
-      const address = probe.address()
-      const port = typeof address === 'object' && address ? address.port : 0
-      probe.close(() => done(port))
-    })
-  })
-}
-
-
 async function getRun(url: string, id: string): Promise<{ status: string; task: string; queuedMessages?: Array<{ id: string; text: string }> }> {
   return pollFor(signal => pollJson(`${url}/api/v1/runs/${id}`, signal),
     () => `GET ${url}/api/v1/runs/${id} never answered`, { timeoutMs: 10_000, intervalMs: 100 })
 }
-
 
 const startRun = async (url: string, task: string): Promise<string> => {
   const created = (await (
@@ -87,14 +72,10 @@ beforeAll(async () => {
     'utf8',
   )
 
-  const port = await freePort()
-  baseUrl = `http://localhost:${port}`
-  server = spawn(
-    process.execPath,
-    [cezarCli, 'serve', '--repo', dataRoot, '--port', String(port), '--no-open'],
+  server = spawnFixtureServer([cezarCli, 'serve', '--repo', dataRoot, '--port', '0', '--no-open'],
     { env: fixtureServeEnv(dataRoot), stdio: 'ignore' },
-  )
-  await waitForHealth(baseUrl, 'queued-stack fixture', { deadline })
+    { deadline })
+  baseUrl = await waitForFixtureServer(server)
 
   // Hold the only slot with a slow turn, then queue the run under test behind it.
   //
