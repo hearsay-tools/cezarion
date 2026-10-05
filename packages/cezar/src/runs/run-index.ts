@@ -120,10 +120,15 @@ function readLegacyIndex(dataDir: string, { handle, limit }: { handle?: RepoHand
   const indexPath = join(dataDir, LEGACY_INDEX_FILE);
   if (!existsSync(indexPath)) return EMPTY;
   try {
-    const parsed = parseRunRecords(JSON.parse(readFileSync(indexPath, 'utf8')));
-    if (!parsed.success) return EMPTY;
+    const raw: unknown = JSON.parse(readFileSync(indexPath, 'utf8'));
+    if (!Array.isArray(raw)) return EMPTY;
+    // A record that does not parse costs that record only, exactly as its import will (store.ts).
+    const records = raw.flatMap((entry: unknown) => {
+      const parsed = parseRunRecords([entry]);
+      return parsed.success ? parsed.data : [];
+    });
     // Reconciling never moves `createdAt`, so sorting first lets only the kept runs be projected.
-    const newest = parsed.data.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    const newest = records.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     const truncated = limit !== undefined && newest.length > limit;
     const kept = truncated ? newest.slice(0, limit) : newest;
     return { runs: kept.map((run) => coldSummary(run, dataDir, handle)), truncated };

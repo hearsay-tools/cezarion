@@ -898,11 +898,12 @@ export function __setLegacyImportHookForTests(hook?: { beforeTransaction?: () =>
   legacyImportHook = hook;
 }
 
-/** `runs.json`'s records as rows. Each row's `data` is the record's own JSON as `runs.json` held
- *  it, so nothing this cezar's schema does not know is lost (raw-record.ts); its summary and
- *  columns come from the parsed record, which is what decoding that JSON gives back. Undefined
- *  when the index does not parse. */
-function legacyIndexRows(bytes: Buffer): RunRowInput[] | undefined {
+/** `runs.json`'s records as rows, and how many of its entries were left out. Each row's `data` is
+ *  the record's own JSON as `runs.json` held it, so nothing this cezar's schema does not know is lost
+ *  (raw-record.ts); its summary and columns come from the parsed record, which is what decoding that
+ *  JSON gives back. An entry that does not parse is skipped and costs that entry only, as an
+ *  unreadable row does once it is in the database. Undefined when the file is not a JSON array. */
+function legacyIndexRows(bytes: Buffer): { rows: RunRowInput[]; skipped: number; total: number } | undefined {
   let raw: unknown;
   try {
     raw = JSON.parse(bytes.toString('utf8'));
@@ -910,14 +911,21 @@ function legacyIndexRows(bytes: Buffer): RunRowInput[] | undefined {
     return undefined;
   }
   if (!Array.isArray(raw)) return undefined;
-  // `parseRunRecords`' salvage rewrites top-level keys: the stored JSON is taken from copies.
-  const stored = raw.map((record: unknown) => (record !== null && typeof record === 'object' && !Array.isArray(record) ? { ...record } : record));
-  const parsed = parseRunRecords(raw);
-  if (!parsed.success) return undefined;
   // A hand-edited index may repeat an id; the last one won when it loaded into a map, so it still does.
   const rows = new Map<string, RunRowInput>();
-  parsed.data.forEach((run, index) => rows.set(run.id, encodeRunRow(run, JSON.stringify(stored[index]))));
-  return [...rows.values()];
+  let skipped = 0;
+  for (const entry of raw as unknown[]) {
+    // `parseRunRecords`' salvage rewrites top-level keys: the stored JSON is taken from a copy.
+    const stored = entry !== null && typeof entry === 'object' && !Array.isArray(entry) ? { ...entry } : entry;
+    const parsed = parseRunRecords([entry]);
+    if (!parsed.success) {
+      skipped += 1;
+      continue;
+    }
+    const run = parsed.data[0]!;
+    rows.set(run.id, encodeRunRow(run, JSON.stringify(stored)));
+  }
+  return { rows: [...rows.values()], skipped, total: raw.length };
 }
 
 /**
@@ -939,28 +947,38 @@ function legacyIndexRows(bytes: Buffer): RunRowInput[] | undefined {
  * `runs.json` itself is left as it was, and nothing writes it again: an older cezar keeps reading
  * the history as it stood at the upgrade, and what it writes afterwards is never imported.
  *
- * An index that does not parse starts the store fresh, as it always has. Its bytes survive in the
- * backup and in `runs.json`, which used to be overwritten by the next save instead.
+ * A record that does not parse is skipped and the rest are imported; an index that does not parse
+ * at all imports as an empty history. Either way the import that commits says so once, naming the
+ * backup: the bytes survive there and in `runs.json`, which used to be overwritten by the next save
+ * instead.
  */
 function importLegacyIndex(db: RunDatabase, dataDir: string): void {
   assertNoLegacyCockpit(dataDir);
   const snapshot = readLegacyIndex(join(dataDir, LEGACY_INDEX_FILE));
   const parsed = snapshot ? legacyIndexRows(snapshot.bytes) : undefined;
-  const rows = parsed ?? [];
+  const rows = parsed?.rows ?? [];
+  const skipped = parsed?.skipped ?? 0;
   const source = !snapshot ? 'none' : parsed ? LEGACY_INDEX_FILE : `${LEGACY_INDEX_FILE} (unparseable)`;
   assertNoLegacyWriter(dataDir, snapshot);
   legacyImportHook?.beforeTransaction?.();
-  db.transaction({
+  let backup: string | undefined;
+  const commit = db.transaction({
     upserts: rows,
     deletes: [],
     onlyIfMetaAbsent: RUNS_IMPORT_COMPLETE_KEY,
     beforeCommit: () => {
       legacyImportHook?.beforeCommit?.();
       assertNoLegacyWriter(dataDir, snapshot);
-      const read = snapshot ? { bytes: snapshot.bytes.length, sha256: snapshot.sha256, backup: backUpLegacyIndex(dataDir, snapshot) } : {};
-      return { [RUNS_IMPORT_COMPLETE_KEY]: JSON.stringify({ at: new Date().toISOString(), source, records: rows.length, ...read }) };
+      backup = snapshot ? backUpLegacyIndex(dataDir, snapshot) : undefined;
+      const read = snapshot ? { bytes: snapshot.bytes.length, sha256: snapshot.sha256, backup } : {};
+      return { [RUNS_IMPORT_COMPLETE_KEY]: JSON.stringify({ at: new Date().toISOString(), source, records: rows.length, ...(skipped > 0 ? { skipped } : {}), ...read }) };
     },
   });
+  // Told once, by the import that committed: the marker means no later open reads runs.json again.
+  if (commit.skipped || backup === undefined) return;
+  const kept = `Its exact bytes are kept in ${join(dataDir, backup)}; BACKWARD_COMPATIBILITY.md §3 says how to import it after a repair.`;
+  if (!parsed) console.warn(`[cez] ${LEGACY_INDEX_FILE} could not be read; no run was imported, and this project starts with an empty history. ${kept}`);
+  else if (skipped > 0) console.warn(`[cez] ${skipped} of ${parsed.total} runs in ${LEGACY_INDEX_FILE} could not be read and were not imported. ${kept}`);
 }
 
 /**

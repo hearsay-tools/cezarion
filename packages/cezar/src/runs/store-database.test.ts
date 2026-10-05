@@ -38,6 +38,11 @@ const row = (id: string) => {
   const db = RunDatabase.openReadOnly(join(dataDir, RUNS_DB_FILE))!;
   try { return db.get(id); } finally { db.close(); }
 };
+/** What the import's completion marker recorded. */
+const importMeta = (): Record<string, unknown> => {
+  const db = RunDatabase.openReadOnly(join(dataDir, RUNS_DB_FILE))!;
+  try { return JSON.parse(db.getMeta(RUNS_IMPORT_COMPLETE_KEY)!); } finally { db.close(); }
+};
 
 beforeEach(() => {
   dataDir = mkdtempSync(join(tmpdir(), 'cez-store-db-'));
@@ -86,18 +91,51 @@ describe('importing runs.json', () => {
 
   it.each([
     ['not JSON', '{ this is not json'],
-    ['a record the schema rejects', JSON.stringify([record('a'), { id: 'broken' }])],
-  ])('starts fresh from an unparseable runs.json (%s), as it always has, and keeps its bytes', (_, bytes) => {
+    ['JSON that is not a list of runs', JSON.stringify({ runs: [record('a')] })],
+  ])('starts fresh from a runs.json that does not parse (%s), says so once, and keeps its bytes', (_, bytes) => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     writeFileSync(join(dataDir, 'runs.json'), bytes);
     const store = open();
     expect(runIds(store)).toEqual([]);
     expect(readFileSync(join(dataDir, LEGACY_INDEX_BACKUP_FILE), 'utf8')).toBe(bytes);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]![0]).toMatch(/runs\.json could not be read; no run was imported/);
+    expect(warn.mock.calls[0]![0]).toContain(join(dataDir, LEGACY_INDEX_BACKUP_FILE));
+    expect(warn.mock.calls[0]![0]).toContain('BACKWARD_COMPATIBILITY.md §3');
+    expect(importMeta()).toMatchObject({ source: 'runs.json (unparseable)', records: 0 });
 
     const run = store.createRun({ title: 'new', workflow: 'w', task: 't', steps: [] });
     store.flush();
     // Before #779 the next save overwrote the unreadable file; now nothing writes it.
     expect(readFileSync(join(dataDir, 'runs.json'), 'utf8')).toBe(bytes);
-    expect(runIds(RunStore.open(dataDir))).toEqual([run.id]);
+    expect(runIds(open())).toEqual([run.id]);
+    // The import is done: a later open neither imports nor warns again.
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it('imports every record that parses, skips the rest, says how many once, and keeps the bytes', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const bytes = JSON.stringify([record('a'), { id: 'broken' }, 'not a run', record('bb', { status: 'review' })]);
+    writeFileSync(join(dataDir, 'runs.json'), bytes);
+    const store = open();
+    expect(runIds(store)).toEqual(['bb', 'a']);
+    expect(readFileSync(join(dataDir, LEGACY_INDEX_BACKUP_FILE), 'utf8')).toBe(bytes);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]![0]).toMatch(/2 of 4 runs in runs\.json could not be read and were not imported/);
+    expect(warn.mock.calls[0]![0]).toContain(join(dataDir, LEGACY_INDEX_BACKUP_FILE));
+    expect(warn.mock.calls[0]![0]).toContain('BACKWARD_COMPATIBILITY.md §3');
+    expect(importMeta()).toMatchObject({ source: 'runs.json', records: 2, skipped: 2 });
+
+    expect(runIds(open())).toEqual(['bb', 'a']);
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it('says nothing when every record imports', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    writeFileSync(join(dataDir, 'runs.json'), JSON.stringify([record('a')]));
+    expect(runIds(open())).toEqual(['a']);
+    expect(warn).not.toHaveBeenCalled();
+    expect(importMeta()).not.toHaveProperty('skipped');
   });
 
   it('starts an empty database when there is nothing to import', () => {

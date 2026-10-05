@@ -1,7 +1,7 @@
 import { chmodSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { toRunSummary } from '@open-mercato/cezar-contract';
 import { readRunIndexFromDisk } from './run-index.ts';
 import { RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY, RunDatabase } from './run-database.ts';
@@ -25,6 +25,7 @@ const record = (over: Record<string, unknown> = {}) => ({
 let dir: string;
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'cez-cold-refs-')); });
 afterEach(() => {
+  vi.restoreAllMocks();
   chmodSync(dir, 0o755);
   rmSync(dir, { recursive: true, force: true });
 });
@@ -144,6 +145,14 @@ describe('cold reads of runs.db', () => {
     RunStore.open(dir).close();
     writeFileSync(join(dir, 'runs.json'), JSON.stringify([record({ id: 'written-by-an-older-cezar' })]));
     expect(readRunIndexFromDisk(dir).runs.map((run) => run.id)).toEqual(['legacy']);
+  });
+
+  it('reads every record of a never-imported runs.json that parses, as its import will', () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    writeFileSync(join(dir, 'runs.json'), JSON.stringify([record({ id: 'a' }), { id: 'broken' }, record({ id: 'bb' })]));
+    expect(readRunIndexFromDisk(dir).runs.map((run) => run.id).sort()).toEqual(['a', 'bb']);
+    RunStore.open(dir, {}).close();
+    expect(readRunIndexFromDisk(dir).runs.map((run) => run.id).sort()).toEqual(['a', 'bb']);
   });
 
   it('creates no database, directory or migration', () => {

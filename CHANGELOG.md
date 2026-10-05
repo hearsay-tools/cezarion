@@ -3,7 +3,7 @@
 ## ⚠️ Breaking
 
 - **cezar now needs Node 24.15 or newer.** The package `engines` floor rises to `>=24.15.0` because the run store uses the `node:sqlite` module that ships with Node. CI proves the floor on exactly Node 24.15.0. Upgrade Node before you upgrade cezar. (#779)
-- **Run history moves from `runs.json` to `.ai/cezar/runs.db`.** The first start of this version imports `runs.json` once, keeps the exact original bytes in `runs.json.pre-sqlite.bak` and never rewrites or deletes `runs.json`. Nothing is written back to `runs.json`, so an older cezar that you start afterwards sees your history as of the import and none of the runs made since. Stop every older cezar process for the project before you upgrade. Recovery steps are in `BACKWARD_COMPATIBILITY.md` section 3. (#779)
+- **Run history moves from `runs.json` to `.ai/cezar/runs.db`.** The first start of this version imports `runs.json` once, keeps the exact original bytes in `runs.json.pre-sqlite.bak` and never rewrites or deletes `runs.json`. A run in `runs.json` that cannot be read is skipped with one warning instead of hiding every other run. Nothing is written back to `runs.json`, so an older cezar that you start afterwards sees your history as of the import and none of the runs made since. Stop every older cezar process for the project before you upgrade. Recovery steps are in `BACKWARD_COMPATIBILITY.md` section 3. (#779)
 
 ## Fixed
 
