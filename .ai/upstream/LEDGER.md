@@ -4,10 +4,10 @@ Generated from `ledger.yaml` by `node .github/scripts/upstream-scan.cjs render`.
 
 - Upstream: [open-mercato/cezar](https://github.com/open-mercato/cezar) `main`
 - Fork point: `feb85666` (2026-08-31)
-- Last scan: 2026-09-28 to `ff27c45e` ([report](scans/2026-09-28.md))
-- Entries: 91 · pending: 54 · planned: 1 · ported: 22 · partial: 1 · diverged: 6 · n/a: 7
+- Last scan: 2026-10-05 to `dab947e9` ([report](scans/2026-10-05.md))
+- Entries: 130 · pending: 93 · planned: 1 · ported: 22 · partial: 1 · diverged: 6 · n/a: 7
 
-## Pending (54)
+## Pending (93)
 
 | Upstream | Date | Title | Conflicts | Note |
 | --- | --- | --- | --- | --- |
@@ -65,6 +65,45 @@ Generated from `ledger.yaml` by `node .github/scripts/upstream-scan.cjs render`.
 | [#1123](https://github.com/open-mercato/cezar/pull/1123) | 2026-09-28 | docs(brand): add brand guidelines and logo files (#1123) | 0 |  |
 | [#1130](https://github.com/open-mercato/cezar/pull/1130) | 2026-09-28 | fix(docs): drop the permalink icons from the README hero on mobile (#1130) | 1 |  |
 | [#1131](https://github.com/open-mercato/cezar/pull/1131) | 2026-09-28 | fix(docs): put the README hero back on headings, with the black brand icon (#1131) | 1 |  |
+| [#1132](https://github.com/open-mercato/cezar/pull/1132) | 2026-09-28 | feat: managed install, in-cockpit self-update and desktop app (#1132) | 12 |  |
+| [#1136](https://github.com/open-mercato/cezar/pull/1136) | 2026-09-28 | docs(readme): refresh screenshots and feature coverage for 0.12.0 (#1136) | 1 |  |
+| [#1137](https://github.com/open-mercato/cezar/pull/1137) | 2026-09-28 | fix(desktop-release): dry run mode, and three fixes the first run needed (#1137) | 0 |  |
+| [#1138](https://github.com/open-mercato/cezar/pull/1138) | 2026-09-28 | chore(desktop-release): macOS builds without a Developer ID are sealed ad-hoc, not left unsigned (#1138) | 0 |  |
+| [#1140](https://github.com/open-mercato/cezar/pull/1140) | 2026-09-28 | feat(desktop-release): an Arch Linux package (Omarchy, Manjaro, EndeavourOS) (#1140) | 0 |  |
+| [#1142](https://github.com/open-mercato/cezar/pull/1142) | 2026-09-28 | desktop-release: a second release of the rolling links no longer tries to move a tag (#1142) | 0 |  |
+| [#1143](https://github.com/open-mercato/cezar/pull/1143) | 2026-09-28 | desktop-release: the .deb gets a permanent link like every other installer (#1143) | 0 |  |
+| [#1144](https://github.com/open-mercato/cezar/pull/1144) | 2026-09-28 | fix(desktop): the version chip landed on the brand row (shell 0.1.2) (#1144) | 0 |  |
+| [#1145](https://github.com/open-mercato/cezar/pull/1145) | 2026-09-28 | docs(readme): add a website pill to the badge row (#1145) | 1 |  |
+| [#807](https://github.com/open-mercato/cezar/pull/807) | 2026-09-28 | feat: Cursor Agent CLI first-class runner (#807) | 60 |  |
+| [#1146](https://github.com/open-mercato/cezar/pull/1146) | 2026-09-28 | chore(release): bump the release set to 0.13.0 and add the changelog entry (#1146) | 6 |  |
+| [#1147](https://github.com/open-mercato/cezar/pull/1147) | 2026-09-28 | test(runs): cancel store saves still pending when a case ends (#1147) | 0 |  |
+| [#1150](https://github.com/open-mercato/cezar/pull/1150) | 2026-09-30 | fix(runs): preserve monitoring before autonomous nudges (#1150) | 5 |  |
+| [#1151](https://github.com/open-mercato/cezar/pull/1151) | 2026-09-30 | fix(runs): preserve multiple task PR references (#1151) | 8 |  |
+| [#1122](https://github.com/open-mercato/cezar/pull/1122) | 2026-09-30 | fix(web): give native selects the cockpit focus ring, not the browser's blue one (#1122) | 1 |  |
+| [#1125](https://github.com/open-mercato/cezar/pull/1125) | 2026-09-30 | fix(web): preserve renamed task titles (#1125) | 1 |  |
+| [#1195](https://github.com/open-mercato/cezar/pull/1195) | 2026-09-30 | feat(self-update): development channel — run the desktop app on a worktree or a PR build (#1195) | 11 |  |
+| [#1196](https://github.com/open-mercato/cezar/pull/1196) | 2026-09-30 | fix(runs): keep tasks on the account you picked; bump desktop to 0.1.3 (#1196) | 1 |  |
+| [#1177](https://github.com/open-mercato/cezar/pull/1177) | 2026-09-30 | fix(contract): strip bidi controls from attachment names (#1177) | 2 |  |
+| [#1199](https://github.com/open-mercato/cezar/pull/1199) | 2026-09-30 | fix: fork task worktrees from the freshly fetched base tip (#1199) | 2 |  |
+| [efaba0db](https://github.com/open-mercato/cezar/commit/efaba0dbd37eac2144b6f140b9f79392c8a3bc62) | 2026-10-01 | qa evidence pr-1210 | 0 |  |
+| [f0fc118a](https://github.com/open-mercato/cezar/commit/f0fc118a9db4887f1fc1806534911f518a4410f7) | 2026-10-01 | remove accidentally uploaded QA evidence from default branch | 0 |  |
+| [#1201](https://github.com/open-mercato/cezar/pull/1201) | 2026-10-01 | feat(github): sort the GitHub tab newest or oldest first (#1201) | 2 |  |
+| [#1200](https://github.com/open-mercato/cezar/pull/1200) | 2026-10-01 | feat(cockpit): ask for a GitHub star — sidebar chip, one-time toast, banner line (#1200) | 11 |  |
+| [#1197](https://github.com/open-mercato/cezar/pull/1197) | 2026-10-01 | feat(dashboard): modern cockpit redesign + delivery, failure, backend and automation insights (#1197) | 2 |  |
+| [#1202](https://github.com/open-mercato/cezar/pull/1202) | 2026-10-02 | fix(cockpit): stop counting a skill invocation as a running sub-agent (#1202) | 3 |  |
+| [#1176](https://github.com/open-mercato/cezar/pull/1176) | 2026-10-02 | fix(workflows): configure waiting-session idle timeout (#1176) | 5 |  |
+| [#1043](https://github.com/open-mercato/cezar/pull/1043) | 2026-10-02 | docs(specs): adaptive admission governor (reduction below the user's dispatch ceiling) (#1043) | 0 |  |
+| [#1041](https://github.com/open-mercato/cezar/pull/1041) | 2026-10-02 | docs(specs): container-aware effective host telemetry v2.3 (quota + cpuset + pressure pin) (#1041) | 0 |  |
+| [#1178](https://github.com/open-mercato/cezar/pull/1178) | 2026-10-02 | perf(claude): stream assistant text into the cockpit as it is generated (#1178) | 3 |  |
+| [#1175](https://github.com/open-mercato/cezar/pull/1175) | 2026-10-02 | fix(web): block local transcript filesystem links (#1175) | 2 |  |
+| [#1113](https://github.com/open-mercato/cezar/pull/1113) | 2026-10-02 | feat(runners): GitHub Copilot CLI runner over ACP (#582) (#1113) | 54 |  |
+| [#866](https://github.com/open-mercato/cezar/pull/866) | 2026-10-02 | test(e2e): browser-level spec for foldable Tasks-table columns (#866) | 0 |  |
+| [#1111](https://github.com/open-mercato/cezar/pull/1111) | 2026-10-02 | feat: add Junie CLI backend (#1111) | 56 |  |
+| [#1239](https://github.com/open-mercato/cezar/pull/1239) | 2026-10-02 | feat(cockpit): ask for a star in a dialog, only when the user really uses cezar and is at the screen (#1239) | 2 |  |
+| [#1240](https://github.com/open-mercato/cezar/pull/1240) | 2026-10-02 | chore(release): bump the release set to 0.14.0 and add the changelog entry (#1240) | 6 |  |
+| [#907](https://github.com/open-mercato/cezar/pull/907) | 2026-10-04 | fix(ui): remember the engine pick on the GitHub and Inbox hand-offs (#906) (#907) | 5 |  |
+| [#1255](https://github.com/open-mercato/cezar/pull/1255) | 2026-10-04 | fix(web): preserve drafts on project switch (#1095) (#1255) | 4 |  |
+| [#1269](https://github.com/open-mercato/cezar/pull/1269) | 2026-10-04 | fix(web): offer the subtask runner's own models in the Dispatch settings (#1269) | 3 |  |
 
 ## Planned (1)
 
