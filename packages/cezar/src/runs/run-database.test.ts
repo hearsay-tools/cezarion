@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync, openSync, readFileSync, readdirSync, rmSync, writeFileSync, writeSync, closeSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, rmSync, writeFileSync, writeSync, closeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   RUN_DATABASE_SCHEMA_VERSION,
   RUNS_DB_FILE,
+  RUNS_IMPORT_COMPLETE_KEY,
   RunDatabase,
   RunDatabaseBusyError,
   RunDatabaseCorruptError,
@@ -155,6 +156,35 @@ describe('RunDatabase', () => {
     ]);
   });
 
+  it('serves the newest-first summary read from one index, without a sort step', () => {
+    openDb();
+    const raw = new DatabaseSync(path);
+    try {
+      const plan = raw.prepare('EXPLAIN QUERY PLAN SELECT id, created_at, revision, summary FROM runs ORDER BY created_at DESC, id DESC LIMIT 201')
+        .all().map((step) => String(step.detail));
+      expect(plan).toEqual(['SCAN runs USING INDEX runs_created_at']);
+    } finally {
+      raw.close();
+    }
+  });
+
+  it('lists every row newest first', () => {
+    const db = openDb();
+    db.transaction({
+      upserts: [
+        row('old', { createdAt: '2026-01-01T00:00:00.000Z' }),
+        row('new', { createdAt: '2026-03-01T00:00:00.000Z' }),
+        row('mid', { createdAt: '2026-02-01T00:00:00.000Z' }),
+      ],
+      deletes: [],
+    });
+    expect(db.listAll().map((r) => [r.id, r.data])).toEqual([
+      ['new', JSON.stringify({ id: 'new', payload: 'full' })],
+      ['mid', JSON.stringify({ id: 'mid', payload: 'full' })],
+      ['old', JSON.stringify({ id: 'old', payload: 'full' })],
+    ]);
+  });
+
   it('stores private metadata through the transaction and deletes it with null', () => {
     const db = openDb();
     expect(db.getMeta('import')).toBeUndefined();
@@ -212,7 +242,7 @@ describe('RunDatabase', () => {
       expect(readFileSync(path).equals(garbage)).toBe(true);
     });
 
-    it('reports a malformed page as corrupt and leaves the database and WAL in place', () => {
+    it('reports a malformed page as corrupt and leaves the database file in place', () => {
       const db = RunDatabase.open(path);
       db.transaction({ upserts: Array.from({ length: 200 }, (_, i) => row(`run-${i}`, { data: 'x'.repeat(500) })), deletes: [] });
       db.close();
@@ -247,6 +277,33 @@ describe('RunDatabase', () => {
       // Contention is transient: once the other writer lets go, the same change commits.
       db.transaction({ upserts: [row('a')], deletes: [] });
       expect(db.get('a')?.revision).toBe(1);
+    });
+
+    it('leaves a corrupt database and its WAL and SHM files exactly as found', () => {
+      const files = { [RUNS_DB_FILE]: 'not a database '.repeat(300), [`${RUNS_DB_FILE}-wal`]: 'wal '.repeat(300), [`${RUNS_DB_FILE}-shm`]: 'shm '.repeat(300) };
+      for (const [name, text] of Object.entries(files)) writeFileSync(join(dir, name), text);
+
+      expect(() => openDb()).toThrow(RunDatabaseCorruptError);
+      for (const [name, text] of Object.entries(files)) expect(readFileSync(join(dir, name), 'utf8')).toBe(text);
+    });
+
+    it('does not report a path it cannot open for another reason as permission denied', () => {
+      // An existing, writable directory where the database file should be: SQLITE_CANTOPEN, and
+      // telling the user to fix permissions would send them looking in the wrong place.
+      mkdirSync(path);
+      let caught: unknown;
+      try { openDb(); } catch (error) { caught = error; }
+      expect(caught).toBeInstanceOf(RunDatabaseError);
+      expect(caught).not.toBeInstanceOf(RunDatabasePermissionError);
+      expect(caught).toMatchObject({ kind: 'other', sqliteCode: 14 });
+    });
+
+    it('keeps the original error when the rollback after it fails too', () => {
+      const db = RunDatabase.open(path);
+      // Closing the connection mid-transaction makes the upsert fail, and then the rollback has
+      // no connection left to run on. The caller must learn about the first failure, not the second.
+      const closing = { ...row('a'), get summary() { db.close(); return '{}'; } };
+      expect(() => db.transaction({ upserts: [closing], deletes: [] })).toThrow('statement has been finalized');
     });
 
     it.skipIf(process.getuid?.() === 0)('reports a read-only data directory as permission denied', () => {
@@ -285,6 +342,68 @@ describe('RunDatabase', () => {
       expect(other).toMatchObject({ kind: 'other', sqliteCode: 19 });
       const plain = new TypeError('not sqlite');
       expect(toRunDatabaseError(plain)).toBe(plain);
+    });
+  });
+
+  describe('read-only open', () => {
+    it('reads rows, summaries and metadata without being able to write', () => {
+      const writer = openDb();
+      writer.transaction({ upserts: [row('a'), row('bb')], deletes: [], meta: { [RUNS_IMPORT_COMPLETE_KEY]: '{}' } });
+      const reader = RunDatabase.openReadOnly(path)!;
+      open.push(reader);
+      expect(reader.get('a')?.id).toBe('a');
+      expect(reader.listSummaries({ limit: 1 }).map((s) => s.id)).toHaveLength(1);
+      expect(reader.getMeta(RUNS_IMPORT_COMPLETE_KEY)).toBe('{}');
+      expect(() => reader.transaction({ upserts: [row('c')], deletes: [] })).toThrow(RunDatabasePermissionError);
+      expect(writer.get('c')).toBeUndefined();
+    });
+
+    it('answers null for a missing file and creates nothing', () => {
+      expect(RunDatabase.openReadOnly(path)).toBeNull();
+      expect(readdirSync(dir)).toEqual([]);
+    });
+
+    it('answers null for a database this build has not migrated yet, and does not migrate it', () => {
+      // A zero-byte file is an empty SQLite database at schema 0: what a failed first open leaves.
+      writeFileSync(path, '');
+      expect(RunDatabase.openReadOnly(path)).toBeNull();
+      const raw = new DatabaseSync(path);
+      try {
+        expect(raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 0 });
+        expect(raw.prepare("SELECT count(*) AS n FROM sqlite_master WHERE type = 'table'").get()).toEqual({ n: 0 });
+      } finally {
+        raw.close();
+      }
+    });
+
+    it('refuses a newer schema', () => {
+      RunDatabase.open(path).close();
+      const raw = new DatabaseSync(path);
+      raw.exec(`PRAGMA user_version = ${RUN_DATABASE_SCHEMA_VERSION + 1}`);
+      raw.close();
+      expect(() => RunDatabase.openReadOnly(path)).toThrow(RunDatabaseUnsupportedSchemaError);
+    });
+
+    it.skipIf(process.getuid?.() === 0)('reads a read-only directory while a writer keeps the WAL open, creating nothing', () => {
+      const writer = openDb();
+      writer.transaction({ upserts: [row('a')], deletes: [] });
+      const before = readdirSync(dir).sort();
+      chmodSync(dir, 0o555);
+      const reader = RunDatabase.openReadOnly(path)!;
+      open.push(reader);
+      expect(reader.get('a')?.id).toBe('a');
+      expect(readdirSync(dir).sort()).toEqual(before);
+    });
+
+    it.skipIf(process.getuid?.() === 0)('fails typed, creating nothing, in a read-only directory with no WAL to read through', () => {
+      const writer = RunDatabase.open(path);
+      writer.transaction({ upserts: [row('a')], deletes: [] });
+      writer.close();
+      chmodSync(dir, 0o555);
+      // SQLite cannot build the WAL index without creating the -shm file. Opening the database
+      // immutable would read it anyway, but would also miss a writer's later commits.
+      expect(() => RunDatabase.openReadOnly(path)).toThrow(RunDatabasePermissionError);
+      expect(readdirSync(dir)).toEqual([RUNS_DB_FILE]);
     });
   });
 });

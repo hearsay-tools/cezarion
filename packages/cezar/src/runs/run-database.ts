@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { accessSync, closeSync, constants, existsSync, openSync, readSync, statSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
 
@@ -21,6 +21,11 @@ import { DatabaseSync, type StatementSync } from 'node:sqlite';
  */
 
 export const RUNS_DB_FILE = 'runs.db';
+
+/** `meta` key whose presence means the legacy `runs.json` import committed (or there was nothing
+ *  to import): from then on this database is authoritative and `runs.json` is history. Written in
+ *  the same transaction as the imported rows, so it can never describe a half-finished import. */
+export const RUNS_IMPORT_COMPLETE_KEY = 'import-complete';
 
 /** `PRAGMA user_version` of a database this build created. A higher number means a newer cezar
  *  wrote it; that is refused rather than read, because a newer schema may store what this one
@@ -60,7 +65,9 @@ const MIGRATIONS: readonly string[] = [
     -- The record's toRunSummary() JSON, so list routes never decode data.
     summary TEXT NOT NULL
   ) STRICT;
-  CREATE INDEX runs_created_at ON runs (created_at);
+  -- (created_at, id) rather than created_at alone: the newest-first reads order by both, and the
+  -- second column is what lets SQLite walk the index instead of sorting the tie groups.
+  CREATE INDEX runs_created_at ON runs (created_at, id);
   CREATE INDEX runs_parent_run_id ON runs (parent_run_id) WHERE parent_run_id IS NOT NULL;
   CREATE INDEX runs_status ON runs (status);
   CREATE INDEX runs_wake_at ON runs (wake_at) WHERE wake_at IS NOT NULL;
@@ -179,8 +186,9 @@ const SQLITE_NOTADB = 26;
  * Anything that is not a SQLite error — a closed connection, a bad argument — passes through
  * unchanged, because wrapping it would claim a database failure that did not happen.
  *
- * `path`, when given, lets SQLITE_CANTOPEN be told apart: an existing directory that refuses the
- * file is a permission problem, a missing directory is not.
+ * `path`, when given, lets SQLITE_CANTOPEN be told apart: it is a permission problem only when
+ * the directory, or the file itself, refuses this user. A missing directory, or a directory where
+ * the file should be, is not — and "check your permissions" would send the user the wrong way.
  */
 export function toRunDatabaseError(error: unknown, path?: string): unknown {
   if (error instanceof RunDatabaseError) return error;
@@ -199,7 +207,7 @@ export function toRunDatabaseError(error: unknown, path?: string): unknown {
     case SQLITE_AUTH:
       return new RunDatabasePermissionError('permission', message, options);
     case SQLITE_CANTOPEN:
-      return path === undefined || existsSync(dirname(path))
+      return path !== undefined && accessDenied(path)
         ? new RunDatabasePermissionError('permission', message, options)
         : new RunDatabaseError('other', message, options);
     case SQLITE_FULL:
@@ -210,6 +218,42 @@ export function toRunDatabaseError(error: unknown, path?: string): unknown {
     default:
       return new RunDatabaseError('other', message, options);
   }
+}
+
+/** Whether this user is refused read-write access to the database file, or (when the file does
+ *  not exist yet) to the directory that would hold it. */
+function accessDenied(path: string): boolean {
+  const target = existsSync(path) ? path : dirname(path);
+  if (!existsSync(target)) return false;
+  try {
+    accessSync(target, constants.R_OK | constants.W_OK);
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+/** The 16 bytes every SQLite database file starts with (https://sqlite.org/fileformat.html). */
+const SQLITE_HEADER = Buffer.from('SQLite format 3\0', 'latin1');
+
+/**
+ * Refuse a non-empty file that does not start with the SQLite header before SQLite sees it.
+ * SQLite would also report it as not a database, but closing that connection deletes the `-wal`
+ * and `-shm` files beside it — and those may be the only intact copy of recent commits. An empty
+ * file is a valid new database. Anything that is not a regular file is left to SQLite to refuse.
+ */
+function assertDatabaseHeader(path: string): void {
+  if (!statSync(path, { throwIfNoEntry: false })?.isFile()) return;
+  const fd = openSync(path, 'r');
+  let header: Buffer;
+  try {
+    header = Buffer.alloc(SQLITE_HEADER.length);
+    header = header.subarray(0, readSync(fd, header, 0, header.length, 0));
+  } finally {
+    closeSync(fd);
+  }
+  if (header.length === 0 || header.equals(SQLITE_HEADER)) return;
+  throw new RunDatabaseCorruptError('corrupt', `runs database: ${path} is not a database`, { sqliteCode: SQLITE_NOTADB });
 }
 
 const ROW_COLUMNS = 'id, created_at, finished_at, status, archived, parent_run_id, wake_at, revision, data, summary';
@@ -249,6 +293,7 @@ export class RunDatabase {
     get: StatementSync;
     getMany: StatementSync;
     listSummaries: StatementSync;
+    listAll: StatementSync;
     listRevisions: StatementSync;
     getMeta: StatementSync;
     upsert: StatementSync;
@@ -264,6 +309,7 @@ export class RunDatabase {
       get: db.prepare(`SELECT ${ROW_COLUMNS} FROM runs WHERE id = ?`),
       getMany: db.prepare(`SELECT ${ROW_COLUMNS} FROM runs WHERE id IN (SELECT value FROM json_each(?))`),
       listSummaries: db.prepare('SELECT id, created_at, revision, summary FROM runs ORDER BY created_at DESC, id DESC LIMIT ?'),
+      listAll: db.prepare(`SELECT ${ROW_COLUMNS} FROM runs ORDER BY created_at DESC, id DESC`),
       listRevisions: db.prepare('SELECT id, revision FROM runs ORDER BY id'),
       getMeta: db.prepare('SELECT value FROM meta WHERE key = ?'),
       upsert: db.prepare(`
@@ -283,11 +329,14 @@ export class RunDatabase {
   /**
    * Open (creating if absent) the database at `path` and bring its schema up to date. The
    * directory must already exist; creating it is the caller's decision. On any failure the
-   * connection is closed and the files are left exactly as found.
+   * connection is closed and no existing data is deleted or rewritten — but a fresh path may be
+   * left holding an empty database (and its WAL), which the next open migrates. A reader that must
+   * create nothing uses `openReadOnly`.
    */
   static open(path: string): RunDatabase {
     let db: DatabaseSync | undefined;
     try {
+      assertDatabaseHeader(path);
       db = new DatabaseSync(path);
       // busy_timeout first, so every later statement here (including the migration) waits on a
       // concurrent opener instead of failing at once.
@@ -295,6 +344,37 @@ export class RunDatabase {
       db.exec('PRAGMA journal_mode = WAL');
       db.exec('PRAGMA synchronous = NORMAL');
       migrate(db);
+      return new RunDatabase(db, path);
+    } catch (error) {
+      if (db?.isOpen) db.close();
+      throw toRunDatabaseError(error, path);
+    }
+  }
+
+  /**
+   * Open an existing database for reading only: never creates the file, never migrates it, never
+   * changes journal mode. Answers `null` when there is nothing this build can read yet — no file,
+   * or a file still below the current schema (what a failed first open leaves) — so the caller can
+   * fall back to whatever it read before the database existed. A newer schema is still refused.
+   *
+   * SQLite may create the `-wal`/`-shm` coordination files beside the database; that is the price
+   * of seeing a live writer's commits. In a read-only directory with neither file present it
+   * cannot, and the open fails as permission denied — deliberately not worked around with
+   * `immutable=1`, which would read a stale snapshot without saying so.
+   */
+  static openReadOnly(path: string): RunDatabase | null {
+    if (!existsSync(path)) return null;
+    let db: DatabaseSync | undefined;
+    try {
+      assertDatabaseHeader(path);
+      db = new DatabaseSync(path, { readOnly: true });
+      db.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`);
+      const found = readSchemaVersion(db);
+      if (found > RUN_DATABASE_SCHEMA_VERSION) throw new RunDatabaseUnsupportedSchemaError(found, RUN_DATABASE_SCHEMA_VERSION);
+      if (found < RUN_DATABASE_SCHEMA_VERSION) {
+        db.close();
+        return null;
+      }
       return new RunDatabase(db, path);
     } catch (error) {
       if (db?.isOpen) db.close();
@@ -323,6 +403,11 @@ export class RunDatabase {
       revision: row.revision as number,
       summary: row.summary as string,
     }));
+  }
+
+  /** Every row, newest first (`created_at`, then `id`, descending). */
+  listAll(): RunRow[] {
+    return this.run(() => this.statements.listAll.all()).map(toRunRow);
   }
 
   /** Every id with its revision, ordered by id. */
@@ -370,7 +455,7 @@ export class RunDatabase {
         }
         this.db.exec('COMMIT');
       } catch (error) {
-        if (this.db.isTransaction) this.db.exec('ROLLBACK');
+        rollback(this.db);
         throw error;
       }
     });
@@ -421,7 +506,18 @@ function migrate(db: DatabaseSync): void {
     db.exec(`PRAGMA user_version = ${RUN_DATABASE_SCHEMA_VERSION}`);
     db.exec('COMMIT');
   } catch (error) {
-    if (db.isTransaction) db.exec('ROLLBACK');
+    rollback(db);
     throw error;
+  }
+}
+
+/** Undo an open transaction, if there is one. Never throws: the caller is already handling the
+ *  error that got it here, and a failed rollback must not replace that error with its own. SQLite
+ *  rolls back by itself on FULL, IOERR and BUSY, which is why "no transaction" is not a failure. */
+function rollback(db: DatabaseSync): void {
+  try {
+    if (db.isTransaction) db.exec('ROLLBACK');
+  } catch {
+    // The connection is closed or broken; whatever the transaction held is gone with it.
   }
 }
