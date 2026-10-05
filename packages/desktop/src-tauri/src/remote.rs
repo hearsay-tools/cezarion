@@ -28,18 +28,50 @@ fn bundled_caller(window: &WebviewWindow) -> bool {
     }).unwrap_or(false)
 }
 
+/// A separately trusted sign-in server must be an HTTPS origin, never a credential URL.
+fn validate_sign_in_origin(raw: Option<&str>) -> Result<Option<Url>, String> {
+    let Some(raw) = raw.map(str::trim).filter(|s| !s.is_empty()) else { return Ok(None); };
+    let url = validate_endpoint(raw)?;
+    if url.scheme() != "https" || url.path() != "/" {
+        return Err("The trusted sign-in origin must be HTTPS with no path, for example https://auth.example.com.".into());
+    }
+    Ok(Some(url))
+}
+
+fn navigation_allowed(target: &Url, endpoint: &Url, sign_in: Option<&Url>) -> bool {
+    target.username().is_empty() && target.password().is_none()
+        && matches!(target.scheme(), "https" | "http")
+        && (target.origin() == endpoint.origin() || sign_in.is_some_and(|url| target.origin() == url.origin()))
+}
+
 #[tauri::command]
-pub fn connect_remote(app: AppHandle, window: WebviewWindow, endpoint: String) -> Result<(), String> {
+pub fn connect_remote(app: AppHandle, window: WebviewWindow, endpoint: String, sign_in_origin: Option<String>) -> Result<(), String> {
     if !bundled_caller(&window) { return Err("Connections can only be opened from the native connection screen.".into()); }
     let url = validate_endpoint(&endpoint)?;
+    let sign_in = validate_sign_in_origin(sign_in_origin.as_deref())?;
     let origin = url.origin();
     let label = format!("remote-{}", NEXT_WINDOW.fetch_add(1, Ordering::Relaxed));
     let title = format!("Cezarion — {}", origin.ascii_serialization());
+    let endpoint = url.clone();
+    let navigation_app = app.clone();
     WebviewWindowBuilder::new(&app, label, WebviewUrl::External(url))
         .title(&title).inner_size(1360.0, 900.0).min_inner_size(720.0, 480.0)
         // No persistent credentials/cookies, no sharing the local cockpit's web storage.
         .incognito(true)
-        .on_navigation(move |target| target.origin() == origin && matches!(target.scheme(), "https" | "http"))
+        .on_navigation(move |target| {
+            if navigation_allowed(target, &endpoint, sign_in.as_ref()) { return true; }
+            // Never include the redirect query/fragment: it may contain an SSO token.
+            // The blocked origin is informational; it is NOT automatically trusted.
+            let message = format!("Blocked redirect to {}. If this is your sign-in provider, enter its HTTPS origin in Trusted sign-in origin and reconnect.", target.origin().ascii_serialization());
+            let feedback = ConnectionFeedback {
+                endpoint: endpoint.as_str().to_string(),
+                sign_in_origin: sign_in.as_ref().map(|url| url.origin().ascii_serialization()).unwrap_or_default(),
+                message,
+            };
+            let app = navigation_app.clone();
+            let _ = navigation_app.run_on_main_thread(move || { let _ = show_connection_form(&app, Some(feedback)); });
+            false
+        })
         .on_new_window(|url, _| {
             if url.scheme() == "https" { super::open_url(url.as_str()); }
             tauri::webview::NewWindowResponse::Deny
@@ -48,15 +80,39 @@ pub fn connect_remote(app: AppHandle, window: WebviewWindow, endpoint: String) -
     Ok(())
 }
 
+#[derive(serde::Serialize)]
+struct ConnectionFeedback {
+    endpoint: String,
+    sign_in_origin: String,
+    message: String,
+}
+
 pub fn show_connections(app: &AppHandle) -> tauri::Result<()> {
+    show_connection_form(app, None)
+}
+
+fn show_connection_form(app: &AppHandle, feedback: Option<ConnectionFeedback>) -> tauri::Result<()> {
+    // This script executes only in the bundled, navigation-restricted connection form.
+    let script = feedback.map(|feedback| format!(r#"(() => {{
+        const data = {};
+        const apply = () => {{
+            document.getElementById('endpoint').value = data.endpoint;
+            document.getElementById('sign-in-origin').value = data.sign_in_origin;
+            document.getElementById('error').textContent = data.message;
+        }};
+        if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', apply, {{ once: true }});
+        else apply();
+    }})()"#, serde_json::to_string(&feedback).expect("serializable feedback")));
     if let Some(window) = app.get_webview_window("connections") {
+        if let Some(script) = script { window.eval(&script)?; }
         window.show()?; return window.set_focus();
     }
-    WebviewWindowBuilder::new(app, "connections", WebviewUrl::App("connections.html".into()))
-        .title("Cezarion — Connect to a server").inner_size(600.0, 440.0).resizable(false)
+    let builder = WebviewWindowBuilder::new(app, "connections", WebviewUrl::App("connections.html".into()))
+        .title("Cezarion — Connect to a server").inner_size(640.0, 620.0).resizable(false)
         .on_navigation(|u| u.scheme() == "tauri" && u.host_str() == Some("localhost") ||
-            matches!(u.scheme(), "http" | "https") && u.host_str() == Some("tauri.localhost"))
-        .build()?;
+            matches!(u.scheme(), "http" | "https") && u.host_str() == Some("tauri.localhost"));
+    let builder = if let Some(script) = script { builder.initialization_script(script) } else { builder };
+    builder.build()?;
     Ok(())
 }
 
@@ -72,6 +128,29 @@ mod tests {
             assert!(validate_endpoint(value).is_err(), "{value}");
         }
     }
+    #[test]
+    fn sign_in_origin_is_optional_and_https_only() {
+        assert!(validate_sign_in_origin(None).unwrap().is_none());
+        assert!(validate_sign_in_origin(Some(" ")).unwrap().is_none());
+        assert!(validate_sign_in_origin(Some("https://auth.example.com")).unwrap().is_some());
+        for raw in ["http://localhost", "https://auth.example.com/login", "https://u:p@auth.example.com", "https://auth.example.com/?token=x", "https://auth.example.com/#x"] {
+            assert!(validate_sign_in_origin(Some(raw)).is_err(), "{raw}");
+        }
+    }
+
+    #[test]
+    fn only_the_explicit_sign_in_origin_and_cockpit_may_navigate() {
+        let endpoint = Url::parse("https://cockpit.example.com").unwrap();
+        let auth = Url::parse("https://auth.example.com").unwrap();
+        let login = Url::parse("https://auth.example.com/?rd=https%3A%2F%2Fcockpit.example.com").unwrap();
+        assert!(!navigation_allowed(&login, &endpoint, None));
+        assert!(navigation_allowed(&login, &endpoint, Some(&auth)));
+        assert!(navigation_allowed(&Url::parse("https://cockpit.example.com/p/project/?code=secret").unwrap(), &endpoint, Some(&auth)));
+        for raw in ["http://auth.example.com", "https://auth.example.com.evil.test", "https://elsewhere.example.com", "https://auth.example.com:8443", "https://u:p@auth.example.com", "file:///etc/passwd", "https://127.0.0.1"] {
+            assert!(!navigation_allowed(&Url::parse(raw).unwrap(), &endpoint, Some(&auth)), "{raw}");
+        }
+    }
+
     #[test]
     fn remote_windows_have_no_capability_grants() {
         let local: serde_json::Value = serde_json::from_str(include_str!("../capabilities/default.json")).unwrap();
