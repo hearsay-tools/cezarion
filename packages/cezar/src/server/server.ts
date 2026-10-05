@@ -29,14 +29,14 @@ import {
   isScheduleAutomation,
   type AutomationDefinition,
 } from '../automations/types.ts';
-import type { IncomingMessage } from 'node:http';
+import type { IncomingMessage, Server } from 'node:http';
 import { access, constants as fsConstants, mkdir, readFile, realpath, stat, unlink, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Hono, type Context } from 'hono';
 import type { Next } from 'hono';
-import { serve, type ServerType } from '@hono/node-server';
+import { getRequestListener, serve, type ServerType } from '@hono/node-server';
 import { bodyLimit } from 'hono/body-limit';
 import { streamSSE } from 'hono/streaming';
 import { matchedRoutes } from 'hono/route';
@@ -182,6 +182,7 @@ import {
 import { PROFILE_CAPABLE_PROVIDERS, profileEnv, supportsProfiles } from '../core/agent-profiles.ts';
 import { quoteExecutable, withEnvPrefix } from '../core/shell-env.ts';
 import { resolveCursorExecutable } from '../core/cursor-model-catalog.ts';
+import { resolveOmpExecutable } from '../core/omp-model-catalog.ts';
 import {
   allocateProjectSlug,
   listProjects,
@@ -2008,7 +2009,7 @@ export function createApp(deps: ServerDeps) {
       },
     )
 
-    .post('/providers/connect', jsonZodValidator(providerConnectSchema, { message: 'provider must be claude, codex, opencode, pi, or cursor' }), async (c) => {
+    .post('/providers/connect', jsonZodValidator(providerConnectSchema, { message: 'provider must be claude, codex, opencode, pi, cursor, or omp' }), async (c) => {
       const body = { data: c.req.valid('json') };
 
       const provider = body.data.provider as ProviderId;
@@ -3278,6 +3279,7 @@ export function createApp(deps: ServerDeps) {
             codex: z.string().trim().min(1).max(200).nullable().optional(),
             opencode: z.string().trim().min(1).max(200).nullable().optional(),
             pi: z.string().trim().min(1).max(200).nullable().optional(),
+            omp: z.string().trim().min(1).max(200).nullable().optional(),
             cursor: z.string().trim().min(1).max(200).nullable().optional(),
           })
           .optional(),
@@ -3859,7 +3861,8 @@ export function createApp(deps: ServerDeps) {
     const sessionStep = [...run.steps].reverse().find(step => step.sessionId);
     const sessionId = sessionStep?.sessionId;
     const backend = sessionStep?.backend ?? run.runner ?? 'claude';
-    const command = backend === 'cursor' && sessionId ? resumeCommand(backend, sessionId) : null;
+    // Runners whose take-over command depends on a server-side binary override (CEZ_*_BIN).
+    const command = (backend === 'cursor' || backend === 'omp') && sessionId ? resumeCommand(backend, sessionId) : null;
     return { ...run, ...(usage ? { usage } : {}), ...(command ? { cliResumeCommand: command } : {}),
       ...(finishBlocked !== undefined ? { finishBlocked } : {}) };
   };
@@ -4548,8 +4551,13 @@ export function createApp(deps: ServerDeps) {
         // An id resumeCommand refuses (#431) degrades to a fresh CLI in the worktree,
         // exactly like a run that never recorded a session.
         const resume = sessionId && cliRunner === (sessionStep?.backend ?? run.runner ?? 'claude') ? resumeCommand(cliRunner, sessionId) : null;
-        const command = resume ?? (cliRunner === 'cursor' ? quoteExecutable(resolveCursorExecutable(), process.platform) : cliRunner);
-        if (command === null) return c.json({ error: 'the configured Cursor executable cannot be used in a terminal command' }, 409);
+        // Runners with a CEZ_*_BIN override launch the configured binary, not the PATH name.
+        const command = resume ?? (cliRunner === 'cursor'
+          ? quoteExecutable(resolveCursorExecutable(), process.platform)
+          : cliRunner === 'omp' ? quoteExecutable(resolveOmpExecutable(), process.platform) : cliRunner);
+        if (command === null) {
+          return c.json({ error: `the configured ${cliRunner === 'omp' ? 'OMP' : 'Cursor'} executable cannot be used in a terminal command` }, 409);
+        }
         // BOTH branches carry the account (spec 2026-07-29-agent-profiles): a resume needs the
         // config dir that holds its session, and a FRESH CLI in this worktree should still open
         // on the account the project works under — otherwise "Open in → Claude CLI" quietly
@@ -6003,6 +6011,7 @@ export function createApp(deps: ServerDeps) {
         codex: modelPresetSchema,
         opencode: modelPresetSchema,
         pi: modelPresetSchema,
+        omp: modelPresetSchema,
         cursor: modelPresetSchema,
       })
       .optional(),
@@ -6288,7 +6297,7 @@ function taskWebhookHost(bindHost: string | undefined): string {
 const NO_WEBHOOK_ERROR =
   'this project has no task webhook — set one in Settings → General → Task webhook, or start without notify';
 
-export function startServer(deps: ServerDeps, port: number): ServerType & { shutdownForRestart: () => Promise<void> } {
+export function startServer(deps: ServerDeps, port: number, listener?: Server): ServerType & { shutdownForRestart: () => Promise<void> } {
   const workspaceEvents = deps.workspaceEvents ?? new WorkspaceEventBus();
   const skillsUpdate = deps.skillsUpdate ?? new SkillsUpdateService({ invalidateCatalog: refreshTeamSkills });
   // The subscription hub rides the same HTTP server (one port, zero config):
@@ -6337,8 +6346,8 @@ export function startServer(deps: ServerDeps, port: number): ServerType & { shut
   // same-origin-trusted (only /api/health is CORS-open); binding to a non-loopback host would
   // expose an agent-executing box to the network. `bindHost` exists only for a deliberate
   // hosted/VPS deployment (which also flips CEZ_REMOTE to gate the local-handoff endpoints) —
-  // src/index.ts never passes it, so the loopback guarantee holds for the normal CLI.
-  const server = serve({
+  // The CLI passes it only when explicitly requested; normal startup stays on loopback.
+  const serverOptions: Parameters<typeof serve>[0] = {
     fetch: async (request, env) => {
       const result = await app.fetch(request, env);
       if (request.method === 'POST' && new URL(request.url).pathname === '/api/v1/workspace/application-update/restart'
@@ -6362,7 +6371,14 @@ export function startServer(deps: ServerDeps, port: number): ServerType & { shut
     },
     port,
     hostname: deps.bindHost ?? '127.0.0.1',
-  });
+  };
+  // The CLI already owns this listener before recovery. Replace its temporary 503
+  // handler without closing/rebinding; direct server callers retain normal startup.
+  if (listener) {
+    listener.removeAllListeners('request');
+    listener.on('request', getRequestListener(serverOptions.fetch, { hostname: serverOptions.hostname }));
+  }
+  const server = listener ?? serve(serverOptions);
   const coordinator = new SkillsUpdateCoordinator(skillsUpdate, async () =>
     effectiveSkillsAutoUpdate(await loadWorkspaceConfig()));
   // EVERY registered project, remote or not: a schedule needs none. `github` is present only for
@@ -6472,7 +6488,7 @@ export function startServer(deps: ServerDeps, port: number): ServerType & { shut
       }
     }
   });
-  server.once('listening', () => {
+  const startBackgroundServices = () => {
     void listProjects().then((projects) => {
       const all = projects.some((project) => project.root === deps.repoRoot)
         ? projects : [{ id: deps.bootProjectId ?? 'default', root: deps.repoRoot, status: 'ok' as const }, ...projects];
@@ -6495,7 +6511,9 @@ export function startServer(deps: ServerDeps, port: number): ServerType & { shut
         brakeIdleAutomations(project.id, automationStore);
       })).then(() => automationScheduler.start()).catch(() => undefined);
     }).catch(() => undefined);
-  });
+  };
+  if (server.listening) startBackgroundServices();
+  else server.once('listening', startBackgroundServices);
   // The boot store's preview leftovers and run deletions; lazy projects arm theirs at build.
   armPreview(deps.store, join(deps.repoRoot, '.ai/cezar'), deps.previewHost);
   const previewSocket = createPreviewSocket({
@@ -6697,6 +6715,11 @@ export function resumeCommand(runner: string | undefined, sessionId: string): st
     }
     case 'pi':
       return `pi --session ${sessionId}`;
+    case 'omp': {
+      // CEZ_OMP_BIN may name a different install than `omp` on PATH; resume with the configured one.
+      const executable = quoteExecutable(resolveOmpExecutable(), process.platform);
+      return executable === null ? null : `${executable} --resume ${sessionId}`;
+    }
     default:
       return `claude --resume ${sessionId}`;
   }

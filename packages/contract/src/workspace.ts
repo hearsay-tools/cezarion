@@ -66,6 +66,7 @@ export const workspaceConfigResponseSchema = z.object({
       opencode: z.string().optional(),
       pi: z.string().optional(),
       cursor: z.string().optional(),
+      omp: z.string().optional(),
     }).optional(),
   }),
 });
@@ -100,6 +101,7 @@ export const setWorkspaceConfigInputSchema = z.object({
           opencode: z.string().trim().min(1).max(200).nullable().optional(),
           pi: z.string().trim().min(1).max(200).nullable().optional(),
           cursor: z.string().trim().min(1).max(200).nullable().optional(),
+          omp: z.string().trim().min(1).max(200).nullable().optional(),
         })
         .optional(),
     })
@@ -250,6 +252,7 @@ export const workspaceUiStateSchema = z.looseObject({
       opencode: z.string().optional(),
       pi: z.string().optional(),
       cursor: z.string().optional(),
+      omp: z.string().optional(),
     })
     .optional(),
   /** Settings → Appearance, GLOBAL since step 3.5: accent + density describe the person at the
@@ -300,6 +303,7 @@ export const setWorkspaceUiStateInputSchema = z
         opencode: z.string().min(1).max(128).optional(),
         pi: z.string().min(1).max(128).optional(),
         cursor: z.string().min(1).max(128).optional(),
+        omp: z.string().min(1).max(128).optional(),
       })
       .optional(),
     importedSkills: z
@@ -339,6 +343,7 @@ export const runnerModelsSchema = z.object({
   opencode: z.string().optional(),
   pi: z.string().optional(),
   cursor: z.string().optional(),
+  omp: z.string().optional(),
 });
 export type RunnerModels = z.infer<typeof runnerModelsSchema>;
 
@@ -387,6 +392,7 @@ export const setConfigInputSchema = z.object({
       opencode: z.string().trim().max(200).nullable().optional(),
       pi: z.string().trim().max(200).nullable().optional(),
       cursor: z.string().trim().max(200).nullable().optional(),
+      omp: z.string().trim().max(200).nullable().optional(),
     })
     .optional(),
   maxParallel: z.number().int().min(1).max(16).optional(),
@@ -500,7 +506,7 @@ export type ProviderConnectResponse = z.infer<typeof providerConnectResponseSche
  * through `pi --list-models`, Cursor through `agent --list-models`, and Claude through
  * stream-json `list_models`. One definition, used by the route's query validator and the picker.
  */
-export const modelDiscoveryRunnerSchema = z.enum(['claude', 'codex', 'opencode', 'pi', 'cursor']);
+export const modelDiscoveryRunnerSchema = z.enum(['claude', 'codex', 'opencode', 'pi', 'cursor', 'omp']);
 export type ModelDiscoveryRunner = z.infer<typeof modelDiscoveryRunnerSchema>;
 export const MODEL_DISCOVERY_RUNNERS: readonly ModelDiscoveryRunner[] =
   modelDiscoveryRunnerSchema.options;

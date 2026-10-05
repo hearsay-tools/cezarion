@@ -1,5 +1,10 @@
 # Checkpoint 1 — Steps 1.1..1.6 (Phase 1: Platform)
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 - UTC: see NOTIFY.md entry
 - Commits covered: `4f3bf43`..`03b58d0` (plus run-folder/pipeline commits `8c336d5`, `0472ada`, `6a58f66`)
 - Touched areas: `web/app/**` (new React app), `src/server/server.ts` + `src/server/static-ui.ts`, `package.json`, `tsconfig*.json`, `vitest.config.ts`, `.ai/agentic.config.json`, `.ai/browsers/`, `.ai/scripts/test-env-up.sh`

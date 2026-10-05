@@ -16,7 +16,7 @@ QA found and fixed a real history bug: a worker whose transcript contained only 
 
 Validation: 179 focused tests passed across CLI, provision, thread reducer/rendering, relationship header, and event history. `npm run build` passed during the final test-env boot. Full integration and provider execution verification are tracked by the parent task.
 
-## Issue #442 presentation QA
+## Issue hearsay-tools/cezarion#442 presentation QA
 
 Date: 2026-09-18. A temporary replay fixture drove the production build through the repository's native `agent-browser` seam. It contained one human ask, two identical parallel requests from “Parent coordinator” to “Alpha parser worker” and “Bravo test worker”, one correlated reply, one replied outcome, and one pending outcome. The fixture spec was removed after the run; the four screenshots remain as evidence.
 
@@ -29,7 +29,7 @@ Date: 2026-09-18. A temporary replay fixture drove the production build through 
 
 Validation: the temporary real-browser QA spec passed all four viewport/theme cases.
 
-## Chronology correction after #445
+## Chronology correction after hearsay-tools/cezarion#445
 
 Date: 2026-09-20. Read the original screenshot attached to task
 `b9e13434-318b-4f3a-bf7f-f5fc81953748`: blue sends and purple receives, with

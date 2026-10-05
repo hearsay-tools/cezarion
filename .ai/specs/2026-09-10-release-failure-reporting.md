@@ -1,6 +1,6 @@
-# Release and Nightly failure reporting (#204)
+# Release and Nightly failure reporting (hearsay-tools/cezarion#204)
 
-Approved in conversation on 2026-09-10. Broad scheduled CI pattern detection belongs to #205.
+Approved in conversation on 2026-09-10. Broad scheduled CI pattern detection belongs to hearsay-tools/cezarion#205.
 
 ## Design
 

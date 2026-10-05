@@ -1,5 +1,10 @@
 # Checkpoint 2 — Steps 2.1..2.4 (Phase 2: Shell)
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 - Commits covered: `d4ebaeb`..`807805e`
 - Touched areas: `web/app/src` (routes, theme, shell, drawer), `src/server/{server,static-ui}.ts` (SPA catch-all)
 

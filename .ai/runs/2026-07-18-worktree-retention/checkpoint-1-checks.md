@@ -1,5 +1,10 @@
 # Checkpoint 1 — Phase 1 (retention engine) complete
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 Covers Steps **0.1 → 1.6** (CI fix + full Phase 1). Commit range `8e71da3..da9186f`.
 
 ## Steps in this window

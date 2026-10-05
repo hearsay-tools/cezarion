@@ -1,6 +1,6 @@
 # Unified composer actions implementation plan
 
-> Execute the approved issue #201 design in this worktree using test-driven development; use subagent-driven-development for the engine task and review while the controller owns composer integration.
+> Execute the approved issue hearsay-tools/cezarion#201 design in this worktree using test-driven development; use subagent-driven-development for the engine task and review while the controller owns composer integration.
 
 **Goal:** Continue, Send and Stop share the task composer and preserve work and drafts.
 **Spec:** https://github.com/hearsay-tools/cezarion/issues/201 (body and Agent context), approved in this session.

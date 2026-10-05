@@ -56,6 +56,11 @@ export function resumeCommand(runner: Runner | undefined, sessionId: string): st
       return undefined
     case 'opencode':
       return `opencode --session ${sessionId}`
+    case 'pi':
+      return `pi --session ${sessionId}`
+    case 'omp':
+      // Only the server knows CEZ_OMP_BIN; it sends the command as `cliResumeCommand`.
+      return undefined
     default:
       return `claude --resume ${sessionId}`
   }
@@ -71,7 +76,7 @@ export function resumeHint(run: ApiRun): string | undefined {
   if (sessionId === undefined) return undefined
   if (!SAFE_SESSION_ID.test(sessionId)) return undefined
   const backend = lastSessionBackend(run)
-  const command = backend === 'cursor' ? run.cliResumeCommand : resumeCommand(backend, sessionId)
+  const command = backend === 'cursor' || backend === 'omp' ? run.cliResumeCommand : resumeCommand(backend, sessionId)
   if (command === undefined) return undefined
   return run.worktreePath ? `cd ${run.worktreePath} && ${command}` : command
 }

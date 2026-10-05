@@ -1,3 +1,4 @@
+import { nonDumpableHolder } from '../delegation/non-dumpable.testkit.ts';
 import { scopeFixtureProcesses } from '../delegation/process-scope.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
@@ -142,6 +143,15 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
       expect(execFileSync('git', ['branch', '--list', workspace(w).branch], { cwd: root, encoding: 'utf8' })).toContain(workspace(w).branch);
       expect(JSON.stringify(reopened.getRun(w.id))).not.toMatch(/neverMaterialized|generation/);
     } finally { other.dispose(); reopened.flush(); }
+  });
+
+  it('contradictory abandonment cannot authorize no-materialization cleanup (hearsay-tools/cezarion#839)', async () => {
+    const w = await worker(); destroy(w); manager.requestWorkerStop(w.id);
+    const proof = store.readWorkerExecution(w.id)!;
+    expect(proof.neverMaterialized).toBe(true);
+    writeFileSync(join(root, '.ai/cezar/runs', `${w.id}.execution.json`), JSON.stringify({ ...proof, abandoned: true }), { mode: 0o600 });
+    expect(manager.getWorkerNoMaterializationProof(w.id)).toBeUndefined();
+    expect(await removeOwnedWorkspace(root, workspace(w))).toMatchObject({ state: 'incomplete' });
   });
 
   it('no-materialization proof is generation-bound and cannot survive starting or legacy completion', async () => {
@@ -897,6 +907,24 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
         finally { clearTimeout(exit); }
         expect(existsSync(workspace(w).path)).toBe(false); expect(branchExists(workspace(w).branch)).toBe(false);
       } finally { other.dispose(); reopened.flush(); }
+    });
+
+    it.runIf(process.platform === 'linux')('refuses unreadable unverified candidates promptly without signalling or claiming holder membership (hearsay-tools/cezarion#839)', async () => {
+      const w = await worker(); await ensureOwnedWorkspace(root, w);
+      store.commitWorkerExecutionStart(w.id); store.updateRun(w.id, { status: 'failed' }); store.flush();
+      manager.dispose(); rmSync(recordPath(w.id)); // absent legacy ledger never authorizes abandonment
+      const holder = await nonDumpableHolder(root);
+      const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true }); const other = new RunManager(reopened, root);
+      const service = new DelegationService(); const detach = service.registerProject({ id: 'reopened', root, store: reopened, manager: other });
+      Object.assign(service, { terminationTimeoutMs: 1_500 });
+      try {
+        const began = performance.now();
+        expect(await service.destroyForHuman('reopened', w.id)).toMatchObject({ state: 'incomplete', remaining: ['process', 'worktree', 'branch'],
+          error: expect.stringMatching(/unverified|unreadable/) });
+        expect(performance.now() - began).toBeLessThan(1_200);
+        expect(reopened.readWorkerExecution(w.id)?.phase).toBe('starting');
+        expect(existsSync(workspace(w).path)).toBe(true); await holder.write();
+      } finally { detach(); other.dispose(); reopened.flush(); await holder.close(); }
     });
 
     it('a legacy generation (no record) with no process in the worktree is finalized', async () => {

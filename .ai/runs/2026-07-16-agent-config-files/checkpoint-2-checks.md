@@ -1,5 +1,10 @@
 # Checkpoint 2 — Phases 2 & 3 (editor + Settings UI)
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 Covers Steps 2.1, 2.2, 3.2, 3.3, 3.4, 3.1 (`2e5334b`..`c1933bc`).
 
 Touched areas: `web/app/src/lib/highlighter.ts` (+toml), `web/app/src/components/code-editor.tsx` (new), `web/app/src/api/{types,client,queries}.ts`, `web/app/src/routes/settings/{agent-config-section,mcp-section,registry}.tsx` (+ tests), `web/app/src/routes.test.tsx`.

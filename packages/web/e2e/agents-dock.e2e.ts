@@ -1,4 +1,4 @@
-import type { ChildProcess } from 'node:child_process'
+import { execFileSync, type ChildProcess } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { waitForSettledSample } from './visual-ready'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
-import { AgentBrowser, cezarCli, fixtureServeEnv } from './agent-browser'
+import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import record from './fixtures/subagents-run.record.json'
 
 /**
@@ -268,5 +268,73 @@ describe('the Agents dock against a replayed fan-out', () => {
     ).toBe('false')
 
     browser.screenshot(join(artifactsDir, 'agents-dock-collapsed.png'))
+  }, 120_000)
+})
+
+/**
+ * An OMP run (#595): the dry-run mock `omp` emits a single-form `task` call whose sub-agent
+ * streams `subagent_lifecycle` / `subagent_event` frames nested under it (`mock:subagent`). The
+ * rows must reach the same Agents section a Claude `Task` does — mapper → store → SSE → reducer →
+ * collector — which the unit gate cannot show, because it never runs the OMP wire.
+ */
+describe('the Agents dock against a dry-run OMP sub-agent', () => {
+  let ompServer: ChildProcess
+  let ompRoot: string
+  let ompBase: string
+  let ompTaskUrl: string
+
+  beforeAll(async () => {
+    ompRoot = mkdtempSync(join(tmpdir(), 'cezar-e2e-omp-agents-'))
+    const git = (...args: string[]) => execFileSync('git', ['-C', ompRoot, ...args])
+    git('init', '-q', '-b', 'main')
+    git('config', 'user.email', 'e2e@cezar.test')
+    git('config', 'user.name', 'cezar e2e')
+    writeFileSync(join(ompRoot, 'README.md'), '# omp agents dock e2e fixture repo\n', 'utf8')
+    git('add', '.')
+    git('commit', '-qm', 'init')
+    ompServer = spawnFixtureServer(
+      [cezarCli, 'serve', '--repo', ompRoot, '--port', '0', '--no-open'],
+      { env: fixtureServeEnv(ompRoot), stdio: 'ignore' },
+    )
+    ompBase = await waitForFixtureServer(ompServer)
+    const bootProject = await bootProjectId(ompBase)
+    const created = await fetch(`${ompBase}/api/v1/runs`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ task: 'mock:subagent review the change', workflow: 'quick-task', runner: 'omp' }),
+    })
+    // A refused POST fails here, at its cause, not as a 120 s wait for a run that never existed.
+    if (!created.ok) throw new Error(`POST /api/v1/runs answered ${created.status}: ${await created.text()}`)
+    const runId = ((await created.json()) as { id: string }).id
+    ompTaskUrl = `${ompBase}/p/${bootProject}/tasks/${runId}`
+  }, 120_000)
+
+  afterAll(async () => {
+    await stopFixtureServer(ompServer)
+    if (ompRoot) rmSync(ompRoot, { recursive: true, force: true })
+  })
+
+  it('lists the OMP sub-agent as a row with its type and tool count', () => {
+    browser.goto(ompTaskUrl)
+    revealSubagentSection()
+    browser.waitForFunction(`document.querySelector('${METER}')?.textContent === '1 of 1 complete'`)
+    clickThreadControl(`${DOCK} > button`)
+    browser.waitForFunction(`document.querySelectorAll('${ROW}').length === 1`)
+
+    const row = JSON.parse(
+      browser.evaluate(`JSON.stringify((() => {
+        const row = document.querySelector('${ROW}')
+        return {
+          text: row.textContent,
+          type: row.querySelector('[data-slot="agent-type"]')?.textContent,
+          tools: row.querySelector('[data-slot="agent-tools"]')?.textContent,
+        }
+      })())`) as string,
+    ) as { text: string; type?: string; tools?: string }
+    expect(row.text).toContain('Review the change')
+    // OMP carries the type in `input.agent`, not claude's `subagent_type`.
+    expect(row.type).toBe('explore')
+    expect(row.tools).toBe('1 tool')
+    browser.screenshot(join(artifactsDir, 'agents-dock-omp.png'))
   }, 120_000)
 })

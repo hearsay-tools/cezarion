@@ -18,6 +18,7 @@
  * `workflows/run.ts` for claude and pi — groups 1, 3 and 6 are only uniform
  * above the seam.
  */
+import { MONITORING_TURN_CRITERIA, MONITORING_ACK_CRITERIA, MONITORING_ORDER_CRITERIA } from '../workflows/monitoring-turn.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdtempSync, mkdirSync, realpathSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -538,16 +539,18 @@ const CONTROL_CRITERIA = [
   // workflows/worker-reboot-parity.test.ts and worker-location-evidence.test.ts: native exit/Continue,
   // independent reboot proof, legacy location uncertainty, real holders, cleanup retries and parent Finish.
   { id: 'R43', scenario: 'baseline' },
+  // workflows/worker-restart-parity.test.ts: same-boot abandonment, mixed-holder polling and bounded cleanup locks.
+  { id: 'R47', scenario: 'baseline' },
   // #779: Continue on a run only runs.db holds, through both ActiveRun construction sites.
-  { id: 'R47', scenario: 'done' },
-  // #779: restart still repairs a cancelled root's stale Finish intent, so Continue is not refused.
   { id: 'R48', scenario: 'done' },
+  // #779: restart still repairs a cancelled root's stale Finish intent, so Continue is not refused.
+  { id: 'R49', scenario: 'done' },
   // #779 plan step 3: a headless open beside the owner leaves its parked run alone.
-  { id: 'R49', scenario: 'ask' },
+  { id: 'R50', scenario: 'ask' },
   // #779 plan step 3: adopting a dead owner's mid-turn run for a control resumes nothing; Continue does.
-  { id: 'R50', scenario: 'hold' },
-  // #779: Stop on a dead owner's mid-turn run ends it cancelled, not interrupted, and starts nothing.
   { id: 'R51', scenario: 'hold' },
+  // #779: Stop on a dead owner's mid-turn run ends it cancelled, not interrupted, and starts nothing.
+  { id: 'R52', scenario: 'hold' },
 ] as const;
 
 /**
@@ -730,7 +733,7 @@ async function leavesMemory(store: RunStore, runId: string): Promise<boolean> {
 describe('harness parity — Continue on a finished run (#779)', () => {
   for (const backend of RUNNER_IDS) {
     parityRow<{ pins: string[]; left: boolean; heldWhileContinuing: boolean; leftAgain: boolean; obs: RunObservation }>(backend, {
-      id: 'R47', name: 'R47 Continue loads a finished run into memory and lets it go after it settles', scenario: 'done',
+      id: 'R48', name: 'R48 Continue loads a finished run into memory and lets it go after it settles', scenario: 'done',
       assert: ({ pins, left, heldWhileContinuing, leftAgain, obs }) => {
         expect(left).toBe(true);
         expect(heldWhileContinuing).toBe(true);
@@ -767,7 +770,7 @@ describe('harness parity — Continue on a finished run (#779)', () => {
 describe('harness parity — restart repairs a stale root Finish intent (#779)', () => {
   for (const backend of RUNNER_IDS) {
     parityRow<{ repaired: boolean; left: boolean; continued: { ok: boolean; error?: string }; final: RunRecord | undefined }>(backend, {
-      id: 'R48', name: "R48 restart clears a cancelled root's stale Finish intent and Continue resumes it", scenario: 'done',
+      id: 'R49', name: "R49 restart clears a cancelled root's stale Finish intent and Continue resumes it", scenario: 'done',
       assert: ({ repaired, left, continued, final }) => {
         expect(continued).toEqual({ ok: true });
         expect(repaired).toBe(true);
@@ -818,7 +821,7 @@ describe('harness parity — restart repairs a stale root Finish intent (#779)',
 describe('harness parity — a second process leaves a parked run to its owner (#779)', () => {
   for (const backend of RUNNER_IDS) {
     parityRow<{ afterHeadless: string | undefined; afterRestart: string | undefined; answered: { ok: boolean; error?: string }; final: RunRecord | undefined }>(backend, {
-      id: 'R49', name: 'R49 a headless open beside the owner leaves its parked run waiting, and a restart still answers it', scenario: 'ask',
+      id: 'R50', name: 'R50 a headless open beside the owner leaves its parked run waiting, and a restart still answers it', scenario: 'ask',
       assert: ({ afterHeadless, afterRestart, answered, final }) => {
         expect(afterHeadless).toBe('waiting');
         expect(afterRestart).toBe('waiting');
@@ -865,7 +868,7 @@ describe('harness parity — a second process leaves a parked run to its owner (
 describe('harness parity — adopting a dead owner\'s run mid-turn (#779)', () => {
   for (const backend of RUNNER_IDS) {
     parityRow<{ adopted: boolean; startedByAdoption: string[]; settled: RunRecord | undefined; continued: { ok: boolean; error?: string }; startedByContinue: string[]; resumed: RunRecord | undefined }>(backend, {
-      id: 'R50', name: 'R50 adopting a dead owner\'s run mid-turn starts no agent, and Continue resumes it', scenario: 'hold',
+      id: 'R51', name: 'R51 adopting a dead owner\'s run mid-turn starts no agent, and Continue resumes it', scenario: 'hold',
       assert: ({ adopted, startedByAdoption, settled, continued, startedByContinue, resumed }) => {
         expect(adopted).toBe(true);
         expect(startedByAdoption).toEqual([]);
@@ -921,7 +924,7 @@ describe('harness parity — adopting a dead owner\'s run mid-turn (#779)', () =
 describe('harness parity — Stop on a dead owner\'s run mid-turn (#779)', () => {
   for (const backend of RUNNER_IDS) {
     parityRow<{ adopted: boolean; started: string[]; stopped: RunRecord | undefined }>(backend, {
-      id: 'R51', name: 'R51 Stop on a dead owner\'s run mid-turn ends it cancelled and starts no agent', scenario: 'hold',
+      id: 'R52', name: 'R52 Stop on a dead owner\'s run mid-turn ends it cancelled and starts no agent', scenario: 'hold',
       assert: ({ adopted, started, stopped }) => {
         expect(adopted).toBe(true);
         expect(started).toEqual([]);
@@ -1640,6 +1643,9 @@ describe('OpenCode durable input acknowledgements', () => {
 
 describe('harness parity — the matrix itself', () => {
   const allIds = [
+    ...MONITORING_TURN_CRITERIA.map(c => c.id),
+    ...MONITORING_ACK_CRITERIA.map(c => c.id),
+    ...MONITORING_ORDER_CRITERIA.map(c => c.id),
     ...WORKFLOW_ASK_CRITERIA.map(c => c.id),
     ...AUTONOMOUS_CRITERIA.map(c => c.id),
     ...NO_PROGRESS_CRITERIA.map(c => c.id),
@@ -1650,6 +1656,8 @@ describe('harness parity — the matrix itself', () => {
     ...RUN_CRITERIA.map((c) => c.id),
   ];
   const scenarioOf = (id: string): ScenarioName => {
+    const monitor = [...MONITORING_TURN_CRITERIA, ...MONITORING_ACK_CRITERIA, ...MONITORING_ORDER_CRITERIA].find(c => c.id === id);
+    if (monitor) return monitor.scenario;
     const ask = WORKFLOW_ASK_CRITERIA.find(c => c.id === id);
     if (ask) return ask.scenario;
     const autonomous = AUTONOMOUS_CRITERIA.find(c => c.id === id);
@@ -1688,6 +1696,7 @@ describe('harness parity — the matrix itself', () => {
       opencode: ['question.asked'],
       pi: ['CEZ:ASK'],
       cursor: ['cursor/ask_question', 'cursor/create_plan'],
+      omp: ['CEZ:ASK'],
     };
     for (const backend of RUNNER_IDS) {
       const cases = HARNESS_ADAPTERS[backend]?.askResumeCases;
@@ -1745,7 +1754,7 @@ describe('harness parity — the matrix itself', () => {
   });
 
   it('uses no skipped or pending cell — an inapplicable one is a declared exemption', () => {
-    for (const url of [new URL(import.meta.url), new URL('../workflows/worker-parent-attention.test.ts', import.meta.url)]) {
+    for (const url of [new URL(import.meta.url), new URL('../workflows/worker-parent-attention.test.ts', import.meta.url), new URL('../workflows/monitoring-turn.test.ts', import.meta.url)]) {
       const source = readFileSync(url, 'utf8');
       expect(source).not.toMatch(/\b(?:it|test|describe)\s*\.\s*(?:skip|todo)\s*\(/);
     }
@@ -1792,6 +1801,16 @@ describe('harness parity — D1 governed native delegation', () => {
             const { config: _config, ...rest } = controlled.params;
             expect(rest).toEqual(normal.params);
             expect(normal.params).not.toHaveProperty('config');
+          } else if (backend === 'omp') {
+            // A static `--config` overlay denies `task`; the tool list was already narrowed by
+            // the bash allowlist, so nothing else in the argv moves.
+            const args = restricted![0] as string[];
+            const index = args.indexOf('--config');
+            expect(index).toBeGreaterThanOrEqual(0);
+            expect(args[index + 1]).toMatch(/omp-restrict-delegation\.yml$/);
+            expect(args.filter((_, i) => i !== index && i !== index + 1)).toEqual(ordinary![0]);
+            expect(ordinary![0]).not.toContain('--config');
+            // The `task` strip from the default tool list is proven in omp-runner.test.ts (D1).
           } else if (backend === 'cursor') {
             const normal = ordinary!.find(row => row.method === 'initialize');
             const controlled = restricted!.find(row => row.method === 'initialize');
@@ -2302,11 +2321,13 @@ describe('harness parity — monitoring wrap-up contract (#399)', () => {
   };
   const records = (path: string): (Wire | string[])[] => existsSync(path)
     ? readFileSync(path, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line)) : [];
+  // These wires record each user message on the stdin hook and the system prompt in argv.
+  const stdinWire = (backend: RunnerId) => backend === 'claude' || backend === 'pi' || backend === 'omp';
   const messages = (backend: RunnerId, dir: string): string[] => {
-    const channel = backend === 'claude' || backend === 'pi' ? 'stdin' : 'args';
+    const channel = stdinWire(backend) ? 'stdin' : 'args';
     return records(join(dir, channel)).flatMap(row => {
       if (Array.isArray(row)) return [];
-      if (backend === 'claude' || backend === 'pi') return row.userText === undefined ? [] : [row.userText];
+      if (stdinWire(backend)) return row.userText === undefined ? [] : [row.userText];
       const parts = backend === 'codex' && row.method === 'turn/start' ? row.params?.input
         : backend === 'cursor' && row.method === 'session/prompt' ? row.params?.prompt
         : backend === 'opencode' && /\/(message|prompt_async)$/.test(row.url ?? '') ? row.body?.parts : undefined;
@@ -2314,7 +2335,7 @@ describe('harness parity — monitoring wrap-up contract (#399)', () => {
     });
   };
   const systemPrompt = (backend: RunnerId, dir: string): string => {
-    if (backend !== 'claude' && backend !== 'pi') return messages(backend, dir)[0] ?? '';
+    if (!stdinWire(backend)) return messages(backend, dir)[0] ?? '';
     const argv = records(join(dir, 'args')).find(Array.isArray) ?? [];
     const index = argv.indexOf('--append-system-prompt');
     expect(index).toBeGreaterThanOrEqual(0);

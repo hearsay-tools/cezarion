@@ -1,0 +1,419 @@
+[
+  {
+    "type": "turn.started",
+    "turnId": "turn_1"
+  },
+  {
+    "type": "item.started",
+    "item": {
+      "kind": "message",
+      "id": "turn_1_text_0_0",
+      "role": "assistant",
+      "text": ""
+    }
+  },
+  {
+    "type": "item.delta",
+    "itemId": "turn_1_text_0_0",
+    "field": "text",
+    "delta": "Planning the change."
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "message",
+      "id": "turn_1_text_0_0",
+      "role": "assistant",
+      "text": "Planning the change."
+    }
+  },
+  {
+    "type": "usage.updated",
+    "usage": {
+      "input": 900,
+      "output": 60,
+      "total": 960,
+      "cacheRead": 0,
+      "cacheWrite": 0
+    },
+    "costUsd": 0.004
+  },
+  {
+    "type": "item.started",
+    "item": {
+      "kind": "tool",
+      "id": "toolu_todo_1",
+      "name": "todo",
+      "toolKind": "plan",
+      "title": "Update plan",
+      "status": "running",
+      "input": {
+        "op": "init",
+        "list": [
+          {
+            "phase": "Build",
+            "items": [
+              "Write mapper",
+              "Add fixtures"
+            ]
+          },
+          {
+            "phase": "Verify",
+            "items": [
+              "Run tests",
+              "Publish"
+            ]
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "tool",
+      "id": "toolu_todo_1",
+      "name": "todo",
+      "toolKind": "plan",
+      "title": "Update plan",
+      "status": "completed",
+      "input": {
+        "op": "init",
+        "list": [
+          {
+            "phase": "Build",
+            "items": [
+              "Write mapper",
+              "Add fixtures"
+            ]
+          },
+          {
+            "phase": "Verify",
+            "items": [
+              "Run tests",
+              "Publish"
+            ]
+          }
+        ]
+      },
+      "output": "Build\n  - [>] Write mapper\n  - [ ] Add fixtures"
+    }
+  },
+  {
+    "type": "plan.updated",
+    "entries": [
+      {
+        "content": "Write mapper",
+        "status": "in_progress"
+      },
+      {
+        "content": "Add fixtures",
+        "status": "pending"
+      },
+      {
+        "content": "Run tests",
+        "status": "pending"
+      },
+      {
+        "content": "Publish",
+        "status": "pending"
+      }
+    ]
+  },
+  {
+    "type": "item.started",
+    "item": {
+      "kind": "tool",
+      "id": "toolu_edit_1",
+      "name": "edit",
+      "toolKind": "edit",
+      "title": "Edit",
+      "status": "running",
+      "input": {
+        "input": "src/greet.ts\n3:7f|  return 'hi';\n=  return 'hello';\n"
+      }
+    }
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "tool",
+      "id": "toolu_edit_1",
+      "name": "edit",
+      "toolKind": "edit",
+      "title": "Edit src/greet.ts",
+      "status": "completed",
+      "input": {
+        "input": "src/greet.ts\n3:7f|  return 'hi';\n=  return 'hello';\n"
+      },
+      "output": "Edited src/greet.ts",
+      "diffs": [
+        {
+          "path": "src/greet.ts",
+          "oldText": "export function greet() {\n  return 'hi';\n}\n",
+          "newText": "export function greet() {\n  return 'hello';\n}\n"
+        }
+      ]
+    }
+  },
+  {
+    "type": "item.started",
+    "item": {
+      "kind": "tool",
+      "id": "toolu_edit_2",
+      "name": "edit",
+      "toolKind": "edit",
+      "title": "Edit",
+      "status": "running",
+      "input": {
+        "input": "src/a.ts\n1:2c|export const a = 1;\n=export const a = 2;\nsrc/b.ts\n+export const b = 2;\n"
+      }
+    }
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "tool",
+      "id": "toolu_edit_2",
+      "name": "edit",
+      "toolKind": "edit",
+      "title": "Edit 2 files",
+      "status": "completed",
+      "input": {
+        "input": "src/a.ts\n1:2c|export const a = 1;\n=export const a = 2;\nsrc/b.ts\n+export const b = 2;\n"
+      },
+      "output": "Edited 2 files",
+      "diffs": [
+        {
+          "path": "src/a.ts",
+          "oldText": "export const a = 1;\n",
+          "newText": "export const a = 2;\n"
+        },
+        {
+          "path": "src/b.ts",
+          "oldText": null,
+          "newText": "export const b = 2;\n"
+        }
+      ]
+    }
+  },
+  {
+    "type": "item.started",
+    "item": {
+      "kind": "tool",
+      "id": "toolu_write_1",
+      "name": "write",
+      "toolKind": "edit",
+      "title": "Write docs/notes.md",
+      "status": "running",
+      "input": {
+        "path": "docs/notes.md",
+        "content": "# Notes\n"
+      }
+    }
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "tool",
+      "id": "toolu_write_1",
+      "name": "write",
+      "toolKind": "edit",
+      "title": "Write docs/notes.md",
+      "status": "completed",
+      "input": {
+        "path": "docs/notes.md",
+        "content": "# Notes\n"
+      },
+      "output": "Wrote docs/notes.md",
+      "diffs": [
+        {
+          "path": "docs/notes.md",
+          "oldText": null,
+          "newText": "# Notes\n"
+        }
+      ]
+    }
+  },
+  {
+    "type": "item.started",
+    "item": {
+      "kind": "tool",
+      "id": "toolu_todo_2",
+      "name": "todo",
+      "toolKind": "plan",
+      "title": "Update plan",
+      "status": "running",
+      "input": {
+        "op": "done",
+        "task": "Write mapper"
+      }
+    }
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "tool",
+      "id": "toolu_todo_2",
+      "name": "todo",
+      "toolKind": "plan",
+      "title": "Update plan",
+      "status": "completed",
+      "input": {
+        "op": "done",
+        "task": "Write mapper"
+      },
+      "output": "Build\n  - [x] Write mapper\n  - [>] Add fixtures"
+    }
+  },
+  {
+    "type": "plan.updated",
+    "entries": [
+      {
+        "content": "Write mapper",
+        "status": "completed"
+      },
+      {
+        "content": "Add fixtures",
+        "status": "in_progress"
+      },
+      {
+        "content": "Run tests",
+        "status": "pending"
+      },
+      {
+        "content": "Publish",
+        "status": "pending"
+      }
+    ]
+  },
+  {
+    "type": "item.started",
+    "item": {
+      "kind": "tool",
+      "id": "toolu_todo_3",
+      "name": "todo",
+      "toolKind": "plan",
+      "title": "Update plan",
+      "status": "running",
+      "input": {
+        "op": "drop",
+        "task": "Publish"
+      }
+    }
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "tool",
+      "id": "toolu_todo_3",
+      "name": "todo",
+      "toolKind": "plan",
+      "title": "Update plan",
+      "status": "completed",
+      "input": {
+        "op": "drop",
+        "task": "Publish"
+      },
+      "output": "Verify\n  - [ ] Run tests (blocked)\n  - [-] Publish"
+    }
+  },
+  {
+    "type": "plan.updated",
+    "entries": [
+      {
+        "content": "Write mapper",
+        "status": "completed"
+      },
+      {
+        "content": "Add fixtures",
+        "status": "in_progress"
+      },
+      {
+        "content": "Run tests",
+        "status": "pending"
+      },
+      {
+        "content": "Publish",
+        "status": "cancelled"
+      }
+    ]
+  },
+  {
+    "type": "item.started",
+    "item": {
+      "kind": "tool",
+      "id": "toolu_todo_4",
+      "name": "todo",
+      "toolKind": "plan",
+      "title": "Update plan",
+      "status": "running",
+      "input": {
+        "op": "view"
+      }
+    }
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "tool",
+      "id": "toolu_todo_4",
+      "name": "todo",
+      "toolKind": "plan",
+      "title": "Update plan",
+      "status": "completed",
+      "input": {
+        "op": "view"
+      },
+      "output": "Build\n  - [x] Write mapper"
+    }
+  },
+  {
+    "type": "item.started",
+    "item": {
+      "kind": "message",
+      "id": "turn_1_text_0_8",
+      "role": "assistant",
+      "text": ""
+    }
+  },
+  {
+    "type": "item.delta",
+    "itemId": "turn_1_text_0_8",
+    "field": "text",
+    "delta": "Edits applied."
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "message",
+      "id": "turn_1_text_0_8",
+      "role": "assistant",
+      "text": "Edits applied."
+    }
+  },
+  {
+    "type": "usage.updated",
+    "usage": {
+      "input": 2100,
+      "output": 30,
+      "total": 2130,
+      "cacheRead": 0,
+      "cacheWrite": 0
+    },
+    "costUsd": 0.006
+  },
+  {
+    "type": "turn.completed",
+    "turnId": "turn_1",
+    "stopReason": "end_turn",
+    "usage": {
+      "input": 2100,
+      "output": 30,
+      "total": 2130,
+      "cacheRead": 0,
+      "cacheWrite": 0
+    },
+    "costUsd": 0.006
+  }
+]

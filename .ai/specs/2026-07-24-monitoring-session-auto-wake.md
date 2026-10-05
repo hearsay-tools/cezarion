@@ -1,6 +1,6 @@
 # Periodically wake monitoring sessions
 
-> Issue: #654 · Amended by: #810, #59 · Depends on: `2026-07-24-long-running-waiting-sessions.md`
+> Issue: open-mercato/cezar#654 · Amended by: open-mercato/cezar#810, hearsay-tools/cezarion#59 · Depends on: `2026-07-24-long-running-waiting-sessions.md`
 
 ## TLDR
 
@@ -11,7 +11,7 @@ Durable bounded monitoring can wait indefinitely at zero model cost, but stabili
 | # | Question | Applied default | Why | Confirm? |
 |---|----------|-----------------|-----|----------|
 | Q1 | Fixed or adaptive cadence? | Fixed 1–60 minute interval; the default is 5 minutes. | It is predictable across backends and easy to explain, test, and budget. | ok |
-| Q2 | Default behavior? | `monitoringWakeIntervalMinutes: 5`; explicit `null` means park until externally resumed. | #810 established that a default-off wake leaves monitoring with no on-by-default exit after the idle timer was removed. | ok |
+| Q2 | Default behavior? | `monitoringWakeIntervalMinutes: 5`; explicit `null` means park until externally resumed. | open-mercato/cezar#810 established that a default-off wake leaves monitoring with no on-by-default exit after the idle timer was removed. | ok |
 | Q3 | Native backend scheduler or cezar timer? | Cezar timer using `AgentSession.sendMessage`. | Claude has `/loop`, but Codex CLI/app-server has no documented equivalent; parity belongs at the runner seam. | ok |
 | Q4 | Safety bound? | 40 automatic wakeups per monitoring epoch. | Reuses cezar's existing autonomous continuation ceiling and prevents forgotten loops from spending indefinitely. | ok |
 

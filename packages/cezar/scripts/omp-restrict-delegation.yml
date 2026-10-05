@@ -1,0 +1,4 @@
+# cezar D1: governed delegation. A user deny is absolute in every approval mode (approval-mode.md, OMP v18.4.11).
+tools:
+  approval:
+    task: deny

@@ -1,5 +1,10 @@
 # GitHub PR merge controls
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 ## Overview
 
 Add scannable requirement status icons to the GitHub pull-request merge box and an explicit, confirmed path for authorized users to ask GitHub to merge without waiting for non-hard requirements.

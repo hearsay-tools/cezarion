@@ -199,7 +199,7 @@ describe('the full-screen /new against a live dry-run server', () => {
       )
       return snapshot.checks.length > 0 ? snapshot : undefined
     }, () => 'runner availability never finished its first background sweep', { tries: 120 })
-    const runners = ['claude', 'codex', 'cursor', 'opencode', 'pi'].filter((id) =>
+    const runners = ['claude', 'codex', 'cursor', 'omp', 'opencode', 'pi'].filter((id) =>
       health.checks.some((c) => c.name === id && c.available),
     )
     const expectedPills = runners.length > 1 ? 1 : 0
@@ -323,9 +323,15 @@ describe('the full-screen /new against a live dry-run server', () => {
 
     // The source is recorded as lastTask — a record of what ran, not a preselection for the
     // next task (see the next spec, and `resolveSource`).
-    const uiState = await getJson<{ lastTask?: { source: string; ref: string } | null }>(
-      `${baseUrl}/api/v1/ui-state`,
-    )
+    // Delayed-save failure bundle: https://github.com/hearsay-tools/cezarion/pull/841#discussion_r4185080127
+    let lastTask: unknown
+    const uiState = await pollFor(async signal => {
+      const state = await pollJson<{ lastTask?: { source: string; ref: string } | null }>(
+        `${baseUrl}/api/v1/ui-state`, signal,
+      )
+      lastTask = state.lastTask
+      return state.lastTask?.source === 'skill' && state.lastTask.ref === 'spec-writer' ? state : undefined
+    }, () => `UI-state never recorded the spec-writer skill; lastTask: ${JSON.stringify(lastTask)}`)
     expect(uiState.lastTask).toEqual({ source: 'skill', ref: 'spec-writer' })
 
     // The thread really rendered (the run parks at waiting under the dry-run mock).

@@ -6,8 +6,11 @@ import { z } from 'zod';
  * generation replaces this entire checkpoint, so an old cleanup cannot authorize reuse. */
 export const workerExecutionSchema = z.object({
   generation: z.string().uuid(), phase: z.enum(['queued', 'starting', 'complete']), neverMaterialized: z.literal(true).optional(),
+  // Settlement after a same-boot crash with unverified holders is not exit proof (hearsay-tools/cezarion#839).
+  abandoned: z.literal(true).optional(),
   scratchCleanup: z.object({ resourceId: z.string().uuid(), path: z.string().refine(isAbsolute) }).strict().optional(),
-}).strict().refine(proof => (!proof.neverMaterialized && !proof.scratchCleanup) || proof.phase === 'complete');
+}).strict().refine(proof => ((!proof.neverMaterialized && !proof.scratchCleanup && !proof.abandoned) || proof.phase === 'complete') &&
+  !(proof.abandoned && proof.neverMaterialized));
 export type WorkerExecution = z.infer<typeof workerExecutionSchema>;
 
 /** Presence, not parseability, reserves scratch. Unknown evidence must never turn into an

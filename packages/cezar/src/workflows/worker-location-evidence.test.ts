@@ -20,7 +20,9 @@ function setTmpRoot(value: string | undefined) {
 }
 
 const cases = ['malformed receipt', 'denied receipt', 'malformed pointer', 'denied pointer'];
-describe.runIf(process.platform === 'linux' && process.getuid?.() !== 0)('R43 orphan execution location evidence', () => {
+// Real Git, native runner startup/termination and durable settlement exceed 5s under load.
+// Match the worker suites' process-work budget; keep the inner 15s state/termination limits.
+describe.runIf(process.platform === 'linux' && process.getuid?.() !== 0)('R43 orphan execution location evidence', { timeout: 30_000 }, () => {
   useWorkerWaitFixture();
   let savedTmpdir: string | undefined;
   const temporaryRoots: string[] = [];

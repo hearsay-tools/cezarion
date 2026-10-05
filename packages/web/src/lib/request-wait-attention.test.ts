@@ -66,3 +66,23 @@ it('keeps absent or invalid delegation and workers without a request wait visibl
   expect(deriveAttention({ ...record, delegation: { role: 'invalid' } }).label).toBe('needs you')
   expect(deriveAttention({ ...record, delegation: { ...record.delegation, wait: { ...record.delegation.wait, requestIds: undefined } } }).label).toBe('needs you')
 })
+
+it('keeps monitoring quiet and notifies for later human and completion gates (fork #772)', () => {
+  const base = summaryOf({ ...waiting('root'), delegation: undefined, status: 'running', hasPendingHumanAsk: false })
+  const previous = diffRunTransitions(new Map(), [base]).statuses
+  const monitor = { ...base, activity: 'monitoring' as const }
+  const monitoring = diffRunTransitions(previous, [monitor])
+  expect(deriveAttention(monitor).label).toBe('monitoring')
+  expect(bucketOf(monitor, 'active')).toBe('Working')
+  expect(wantsAttention(monitor)).toBe(false)
+  expect(monitoring.entering).toEqual([])
+  for (const gate of [
+    { ...monitor, status: 'waiting' as const, activity: undefined }, // explicit prose gate, no ASK
+    { ...monitor, status: 'waiting' as const, activity: undefined, hasPendingHumanAsk: true },
+    { ...monitor, status: 'review' as const, activity: undefined },
+    { ...monitor, status: 'failed' as const, activity: undefined },
+  ]) {
+    expect(wantsAttention(gate)).toBe(true)
+    expect(diffRunTransitions(monitoring.statuses, [gate]).entering).toEqual([gate])
+  }
+})

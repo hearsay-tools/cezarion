@@ -63,6 +63,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  * | `steer-late` | the final text first; agent input sent after it arrives after the last model call (#505) |
  */
 export const SCENARIOS = [
+  'turn-messages',
   'skill-warning',
   'missing-binary',
   'crash-stderr-pre-ack',
@@ -172,6 +173,8 @@ export interface HarnessAdapter {
 /** Resolved from this file, not the cwd, so the paths hold wherever vitest runs. */
 const CLAUDE_MOCK = join(HERE, '..', '..', 'scripts', 'mock-claude.mjs');
 const PI_MOCK = join(HERE, '..', '..', 'scripts', 'mock-pi-rpc.mjs');
+/** Created by the OMP runner's mock task; HARNESS_ADAPTERS.omp stays red until it exists. */
+const OMP_MOCK = join(HERE, '..', '..', 'scripts', 'mock-omp-rpc.mjs');
 const CODEX_MOCK = join(HERE, '..', '..', 'scripts', 'mock-codex-app-server.mjs');
 const OPENCODE_MOCK = join(HERE, '..', '..', 'scripts', 'mock-opencode-serve.mjs');
 
@@ -188,6 +191,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     binEnv: 'CEZ_CLAUDE_BIN',
     mockBin: CLAUDE_MOCK,
     scenarios: {
+      'turn-messages': 'mock:turn-messages',
       'missing-binary': BASELINE_PROMPT,
       autonomous: 'mock:autonomous',
       'autonomous-cap': 'mock:autonomous-cap',
@@ -224,6 +228,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     binEnv: 'CEZ_CODEX_BIN',
     mockBin: CODEX_MOCK,
     scenarios: {
+      'turn-messages': 'mock:turn-messages',
       'missing-binary': BASELINE_PROMPT,
       autonomous: 'mock:autonomous',
       'autonomous-cap': 'mock:autonomous-cap',
@@ -261,6 +266,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     mockBin: OPENCODE_MOCK,
     scenarios: {
       'skill-warning': 'mock:skill-warning mock:done',
+      'turn-messages': 'mock:turn-messages',
       'missing-binary': BASELINE_PROMPT,
       autonomous: 'mock:autonomous',
       'autonomous-cap': 'mock:autonomous-cap',
@@ -298,7 +304,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     ],
     binEnv: 'CEZ_CURSOR_BIN',
     mockBin: join(HERE, '..', '..', 'scripts', 'mock-cursor-acp.mjs'),
-    scenarios: { 'missing-binary': BASELINE_PROMPT,
+    scenarios: { 'turn-messages': 'mock:turn-messages', 'missing-binary': BASELINE_PROMPT,
       autonomous: 'mock:autonomous',
       'autonomous-cap': 'mock:autonomous-cap',
       'autonomous-ask-cap': 'mock:autonomous-ask-cap',
@@ -323,6 +329,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     binEnv: 'CEZ_PI_BIN',
     mockBin: PI_MOCK,
     scenarios: {
+      'turn-messages': 'mock:turn-messages',
       'missing-binary': BASELINE_PROMPT,
       autonomous: 'mock:autonomous',
       'autonomous-cap': 'mock:autonomous-cap',
@@ -348,6 +355,43 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'steer-tool': 'mock:steer-tool',
       'steer-late': 'mock:steer-late',
       // No `subagent`: see the S9 and R12 entries in PARITY_EXEMPTIONS.
+    },
+  },
+  // OMP is pi's fork on the same RPC wire, so it answers pi's scenario map, plus the two
+  // subagent scenarios pi is exempt from: OMP's `task` tool surfaces subagent events natively.
+  omp: {
+    backend: 'omp',
+    askResumeCases: [{ kind: 'CEZ:ASK', scenario: 'ask-resume', answer: 'Library: Vitest' }],
+    binEnv: 'CEZ_OMP_BIN',
+    mockBin: OMP_MOCK,
+    scenarios: {
+      'turn-messages': 'mock:turn-messages',
+      'missing-binary': BASELINE_PROMPT,
+      autonomous: 'mock:autonomous',
+      'autonomous-cap': 'mock:autonomous-cap',
+      'autonomous-ask-cap': 'mock:autonomous-ask-cap',
+      baseline: BASELINE_PROMPT,
+      'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
+      'crash-stderr-held-pipe': 'mock:crash-stderr-held-pipe',
+      'shutdown-stderr': 'mock:crash-stderr-clean',
+      'crash-stderr': 'mock:crash-stderr',
+      'crash-stderr-single': 'mock:crash-stderr-single',
+      done: 'mock:done',
+      hold: 'mock:hold', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'busy-progress': 'mock:busy-progress',
+      'split-text': 'mock:split-text',
+      'provider-error': 'mock:provider-error',
+      'provider-unavailable': 'mock:provider-error',
+      ask: 'mock:ask',
+      'ask-resume': 'mock:ask mock:resume-done',
+      'ask-reply-late': 'mock:ask',
+      'ask-snapshot': 'mock:ask-snapshot',
+      'ask-snapshot-bad': 'mock:ask-snapshot-bad',
+      'ask-prose': 'mock:ask-prose',
+      'ask-bad': 'mock:ask-bad',
+      'steer-tool': 'mock:steer-tool',
+      'steer-late': 'mock:steer-late',
+      subagent: 'mock:subagent',
+      'subagent-after-park': 'mock:subagent-after-park',
     },
   },
 };
@@ -394,11 +438,11 @@ export interface ParityExemption {
  * is the runner, not this table.
  */
 export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
-  ...(['R44', 'R45'] as const).flatMap(criterion => (['claude', 'codex', 'pi', 'cursor'] as const).map(backend => ({
+  ...(['R44', 'R45'] as const).flatMap(criterion => (['claude', 'codex', 'pi', 'cursor', 'omp'] as const).map(backend => ({
     criterion, backend, kind: 'scenario-unconstructible' as const,
     reason: 'The OpenCode server-wide unscoped session.error UnknownError skill-discovery diagnostic has no equivalent on this native wire. R2/R46 retain native provider failure coverage.',
   }))),
-  ...(['A13', 'A14'] as const).flatMap(criterion => (['claude', 'codex', 'pi', 'cursor'] as const).map(backend => ({
+  ...(['A13', 'A14'] as const).flatMap(criterion => (['claude', 'codex', 'pi', 'cursor', 'omp'] as const).map(backend => ({
     criterion, backend, kind: 'scenario-unconstructible' as const,
     reason: 'This wire has no separate portable-answer HTTP ACK retained after turn completion. The executable cell checks ordinary root idle expiry and successful Continue through its native wire instead.',
   }))),
@@ -409,6 +453,10 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
   {
     criterion: 'A9', backend: 'pi', kind: 'capability-absent',
     reason: 'Pi RPC uses the turn-end CEZ:ASK fallback; its ask wire emits no native mid-turn ask.requested (A3/A4 cover the portable policy).',
+  },
+  {
+    criterion: 'A9', backend: 'omp', kind: 'capability-absent',
+    reason: 'OMP v18.4.11 plain `--mode rpc` never constructs the ask tool: sessionOptions.hasUI is true only for interactive or rpc-ui (src/main.ts) and AskTool.createIf returns null without it, so the native ask path cannot exist on the wire cezar uses. The turn-end CEZ:ASK fallback applies (A3/A4 cover the portable policy).',
   },
   {
     criterion: 'R16', backend: 'claude', kind: 'capability-absent',
@@ -431,6 +479,10 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
     reason: 'Cursor ACP agent_message_chunk has a single text channel; cursor-acp-runner emits v1 directly from each completed parent v2 message (acp-lifecycle.ndjson). A completed marker cannot be present only on v2.',
   },
   {
+    criterion: 'R16', backend: 'omp', kind: 'capability-absent',
+    reason: 'OMP RPC text_end.content is the one assistant-text channel for v1 and v2 (rpc-lifecycle.ndjson, v18.4.11); message_end has no separately mapped text channel.',
+  },
+  {
     criterion: 'R15', backend: 'pi', kind: 'scenario-unconstructible',
     reason: 'Pi RPC has no child session or nested child transcript (rpc-lifecycle.ndjson); like S9/R12, post-park child items cannot be constructed on that wire.',
   },
@@ -449,6 +501,10 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
   {
     criterion: 'I2', backend: 'pi', kind: 'capability-absent',
     reason: 'pi 0.87.0 delivers an acknowledged steer in the running turn or runs it as the next prompt (rpc.md steer; #505 repro), so accepted input is never left unread.',
+  },
+  {
+    criterion: 'I2', backend: 'omp', kind: 'capability-absent',
+    reason: 'OMP v18.4.11 session_settled requires queuedMessageCount === 0 (isRpcSessionSettled, modes/rpc/rpc-session-settle.ts), and agent_end is rewritten to isTerminal:false while agent.hasQueuedMessages() (session/agent-session.ts), so a steer accepted before settle is read in the same turn and accepted input is never left unread.',
   },
   {
     criterion: 'S4', backend: 'cursor', kind: 'capability-absent',

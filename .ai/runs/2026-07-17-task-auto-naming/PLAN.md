@@ -1,5 +1,10 @@
 # Execution plan — task auto-naming (spec 2026-07-17-task-auto-naming)
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 Source spec: `.ai/specs/2026-07-17-task-auto-naming.md`
 Tracker issue: #432 (naming quality) + owner direction on PR #479
 Branch: `feat/task-auto-naming-spec`

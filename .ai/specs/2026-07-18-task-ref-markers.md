@@ -1,5 +1,10 @@
 # In-band task-reference markers — CEZ:PR / CEZ:ISSUE / CEZ:TITLE
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 Status: proposed · Date: 2026-07-18 · Owner direction 2026-07-18 · Relates:
 spec 2026-07-16-pr-autodiscovery (the fuzzy tier this overrides), spec
 2026-07-17-task-auto-naming (the namer this can silence), #347 (`CEZ:DONE`,
@@ -10,6 +15,11 @@ the marker this extends)
 PR-number auto-discovery still mislabels tasks. Real failure from the cockpit
 (2026-07-18): a task implementing issue #500 wears a `#777` PR chip. The chain
 that produces it:
+
+> Citation exception to the historical source note: this is a real incident.
+> The literal incorrect PR-chip value and the reported task issue number are
+> unresolved citation debt: neither repository is verified;
+> the archive's upstream provenance does not identify the incident's repositories.
 
 - The **referenced-PR janitor** (spec 2026-07-16) adopts any
   `github.com/…/pull/N` URL the conversation mentions. One stray URL — a PR the
@@ -81,8 +91,8 @@ this spec or `handoff.ts` cannot poison its own record via tool output echoes.
 The instruction fragment asks the agent to re-emit `CEZ:PR` when it opens a PR later in the task,
 so on such a run the LAST declaration is the number of the run's OWN PR — not the PR it is about.
 Fed to the referenced tier that declaration erased the subject: no candidate ends in the created
-number, and "no match → unset" cleared the chip (seen on a task started on open-mercato#4326 that
-pushed a follow-up as #5366 and dropped from two chips to one).
+number, and "no match → unset" cleared the chip (seen on a task started on open-mercato/open-mercato#4326 that
+pushed a follow-up as open-mercato/open-mercato#5366 and dropped from two chips to one).
 
 So a declaration equal to the number in `pullRequestUrl` is read as a statement about the
 **created** tier, which already carries it, and the referenced tier resolves as if it had not been

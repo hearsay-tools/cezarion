@@ -48,7 +48,7 @@ describe('owned fixture server readiness (#795)', () => {
       if (starts.length) expect(source, `${file}: await owned health before seeding or browser setup`).toContain('await waitForFixtureServer(')
     }
     // The complete construction audit is documented in e2e/fixture-server.md.
-    expect(constructions).toBe(48)
+    expect(constructions).toBe(50)
   })
 
   it('uses the actual child listener when the requested endpoint belongs to a 404 server', async () => {

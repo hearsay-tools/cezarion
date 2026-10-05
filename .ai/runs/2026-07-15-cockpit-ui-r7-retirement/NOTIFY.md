@@ -1,5 +1,10 @@
 # Notifications — R7
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 - 2026-07-15T12:24:48Z — run start (R7, final phase), 4 steps, executor-dispatch mode (continuation of the PR #396 resume; user asked to continue until the program is done).
 
 ## 2026-07-15T13:44:56Z — final gate, R7 + program complete

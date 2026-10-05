@@ -1,5 +1,10 @@
 # Checkpoint 1 — steps 1.1..2.3
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 - **Steps covered:** 1.1 (e925166) .. 2.3 (aaa5648) — #442 merge, task-refs, RunRecord fields, number-first titles, namer core, runner call + mock, startRun wiring.
 - **Touched areas:** `src/runs/` (new task-refs, auto-name; store schema), `src/workflows/run.ts` + `system-prompt.test.ts`, `src/server/server.ts` (PATCH) + `patch-run.test.ts`, `src/config.ts`, `scripts/mock-claude.mjs`, `web/app/src/api/types.ts` (type mirror only).
 

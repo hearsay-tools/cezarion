@@ -1,5 +1,10 @@
 # Handoff — R7
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 ## State
 
 **R7 complete — the R1–R7 redesign program is done.** All 5 Tasks rows done (`6f848d2`..`c7da6b9`) plus the `origin/main` merge (`63a2d78`). Final gate green (`final-gate-checks.md`): typecheck · vitest 1855 · node:test unit · build + check:pack · packaged CLI · e2e 154/154 ×3 · design-guardian clean. PR #396 body flips to `Status: complete`.

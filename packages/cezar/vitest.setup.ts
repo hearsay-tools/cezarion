@@ -46,6 +46,7 @@ const HOST_BIN_AND_MODE_KEYS = [
   'CEZ_CODEX_BIN', // Use the default Codex executable, not the host wrapper.
   'CEZ_OPENCODE_BIN', // Use the default OpenCode executable, not the host wrapper.
   'CEZ_PI_BIN', // Use the default Pi executable, not the host wrapper.
+  'CEZ_OMP_BIN', // Use the default OMP executable, not the host wrapper.
   'CEZ_REMOTE', // Keep local-mode capabilities unless the test opts into hosted mode.
   'CEZ_AUTOMATIONS', // Keep automation routes and scheduling opt-in for each test.
   'CEZ_PREVIEW', // Keep preview capabilities and tool registration opt-in for each test.

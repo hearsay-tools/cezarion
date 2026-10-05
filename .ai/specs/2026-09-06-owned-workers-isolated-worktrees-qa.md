@@ -1,6 +1,6 @@
 # Owned workers acceptance and QA
 
-Date: 2026-09-07. Issue #111. The five ordered gates and all eight issue-specific
+Date: 2026-09-07. Issue hearsay-tools/cezarion#111. The five ordered gates and all eight issue-specific
 browser cases passed. The full browser run remains failed on two separately
 tracked baseline issues; publication and CI are pending. This file records the
 actual results and their limits. The approved spec and implementation plan share this filename prefix.
@@ -87,7 +87,7 @@ are executed by the full Vitest gate, not inferred from source presence alone.
 | Default off, inherited env, degraded provisioning | `delegation/provision.test.ts`: no listener/ordinary metadata off; failed listener leaves ordinary runs unprovisioned; invalid metadata never promoted; all runner environments. `core/agent-env.test.ts`: all four backends strip inherited URL/token under full and passthrough modes, then merge only controller-generated values. `delegation/provision-workflows.test.ts`: ordinary native Claude off/Continue guard; controller close revokes without terminalizing; lazy projects provision before recovery. |
 | Supported execution identity across constructors | `delegation/provision-workflows.test.ts`: queued/restart/Continue keep accepted account after registry deletion/repoint, native versus explicit/named Claude layout, same-directory override and changed-HOME refusal, actual merged environment, missing/malformed private evidence/home, model/effort locks and supported provider limits. `workflows/run.ts` has both ActiveRun construction sites, both call shared account preparation/provisioning and hydrate pending asks; recovery launches through these paths. |
 | Persistence/quarantine, termination versus shutdown | `runs/delegation-state.test.ts` validates optional legacy metadata, malformed authority quarantine, atomic ownership/receipts/private evidence and failed-write no-publication. `workflows/worker-wait.test.ts` covers parent cancelled/failed/review/done cascade separately from disposal and late callbacks; waits/children survive shutdown. |
-| Human deletion and retention | `server/delegation-cleanup.test.ts`, `server/worktrees-api.test.ts`, `workflows/worker-destroy.test.ts` and `delegation/workspace.test.ts` cover off-mode human cleanup, malformed body no mutation, blocked continuation/rematerialization/deletion, missing parent receipts and protected orphan resources. `runs/store.ts:canDeleteRun` scans both receipts and actual children; worker/invalid history is retained. `runs/retention.ts` reclaims finished owned-worker directories under keep-N (#575) and still excludes live/`review`/`invalid`/mid-destroy at `isReclaimable`; rematerialize refuses unverified owned/invalid recreation. |
+| Human deletion and retention | `server/delegation-cleanup.test.ts`, `server/worktrees-api.test.ts`, `workflows/worker-destroy.test.ts` and `delegation/workspace.test.ts` cover off-mode human cleanup, malformed body no mutation, blocked continuation/rematerialization/deletion, missing parent receipts and protected orphan resources. `runs/store.ts:canDeleteRun` scans both receipts and actual children; worker/invalid history is retained. `runs/retention.ts` reclaims finished owned-worker directories under keep-N (hearsay-tools/cezarion#575) and still excludes live/`review`/`invalid`/mid-destroy at `isReclaimable`; rematerialize refuses unverified owned/invalid recreation. |
 | HTTP contract and inventory | `server/contract-parity.delegation.test.ts` checks both directions and scoped/boot aliases; `server/run-relationships.test.ts` reads complete archived ownership with strict params/query; `server/runs-index-api.test.ts` verifies slim role/wait projection; typed bodies, route parity, version surface and `bc-route-inventory.test.ts` run in the full suite. API-client re-exports schemas; service runtime does not import it. |
 | Current human ask across compact/paginated history | Existing ask schemas moved unchanged to the Node-free contract and re-exported from core. One pure pending-ask reducer is shared by manager delivery, compact producer and current cockpit attention. Compact context retains only the latest valid pending question; only its matching successful human-delivery receipt retires it. Separate visible/current tests cover refused attempts, stale receipts, agent input and answered/old history; legacy transcript rendering remains unchanged. Real browser asserts header and dock as well as visible question. |
 | Cockpit | `packages/web/e2e/worker-relationships.e2e.ts` is discovered by the existing `*.e2e.ts` include. Actual browser observations and suite outcome are recorded below after execution. Component/cache tests cover query errors/retry, durable IDs, ask priority, attribution, all four tabs, full 32-worker list and all local/global/palette consumers. |
@@ -389,7 +389,7 @@ The actual guarded `npm run test:e2e` exited 1 with
 `TEST_E2E_STATUS=failed`: 34 files passed/two failed; 222 tests passed/two failed,
 six existing conditional skips; 349.98s. It is **not** reported as a full-browser
 pass. Under the user's instruction to keep existing fixes and focus further work
-on #111, these unrelated failures were investigated and filed separately:
+on hearsay-tools/cezarion#111, these unrelated failures were investigated and filed separately:
 
 - [#136: Repo Git test assumes a flat diff DOM](https://github.com/wjarka/cezar/issues/136).
   Actual API and UI totals both showed 45 changed files, with all paths in the
@@ -500,7 +500,7 @@ passed **8/8**, exit 0, 16.25s, using the same guarded native browser setup.
 Six fresh screenshots were inspected; 32 links/four tabs, desktop/mobile
 light/dark keyboard focus, 44px targets, pending human ask, retry/offline and
 global status checks remain correct. No new full-browser verdict is claimed;
-#136/#137 remain separate.
+hearsay-tools/cezarion#136/#137 remain separate.
 
 Exact fixture PID512776 was stopped through the required script after identity
 verification. Final audit found it absent and no accessible matching test-home
@@ -540,7 +540,7 @@ offline relationships and the preserved human question. All four tabs retain
 44px, horizontal overflow is absent, and reduced motion is enabled. Scroll
 measurements remain 1304px desktop / 1836px mobile. The pending question keeps
 its needs-you status beside attributed agent input; retry/reconnect and global
-Tasks/palette checks pass. Broader baseline failures #136/#137 remain separately
+Tasks/palette checks pass. Broader baseline failures hearsay-tools/cezarion#136/#137 remain separately
 attributed; their historical failed-run evidence above is unchanged.
 
 The browser used sanitized Git variables, external `/tmp`, the actual native

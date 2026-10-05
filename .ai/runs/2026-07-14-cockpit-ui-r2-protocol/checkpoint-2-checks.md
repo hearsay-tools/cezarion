@@ -1,5 +1,10 @@
 # Checkpoint 2 / final — R2 Steps 2.1..2.4 (Phase 2) — R2 COMPLETE (8/8)
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 - Commits: `28a75b3`..`7de1ad2` (+ merge `6ca3e35` bringing the user's two branch fixes into the consolidated PR #396)
 - Gate: typecheck ✓ · `npm test` **959/959** ×2 ✓ · build ✓ · `npm run test:e2e` **44/44** (agent-browser) ✓
 - Artifacts: `checkpoint-2-artifacts/screenshot-tasks-table-v2.png` (summary titles + ± live in the table)

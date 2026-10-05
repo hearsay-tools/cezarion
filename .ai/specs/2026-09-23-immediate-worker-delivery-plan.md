@@ -1,5 +1,9 @@
 # Immediate Worker Delivery and Parent-Routed Questions Implementation Plan
 
+> Citation scope: issue references in this plan are to `hearsay-tools/cezarion`
+> (fork), especially `hearsay-tools/cezarion#505`. Test names and `-t` filters
+> retain their literal spelling. The separate OpenCode source is identified inline.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Submit parent/worker messages through each harness's native steering the moment they are accepted, record harness acceptance and model consumption separately, and route worker questions to the owning parent.
@@ -554,7 +558,7 @@ Behavior (probe, OpenCode 1.18.32):
 - Agent input POSTs `prompt_async` immediately even while `turnActive`. `prompt(text, 'agent', signal, inputIds)` skips the `while (this.turnActive) await this.turnFinished` wait and, when a turn is active, does not open a new turn (no `turnActive` reset, no `opencodeTurnStarted`). When idle it opens a turn as today. Human prompts keep the client-side wait (no change to human semantics in this issue).
 - `sendAgentMessage` refuses only when `!serverOpen || pendingQuestion || questionReply || agentRequest`.
 - Record `submissions.accept(submissionId, inputIds, text)`. A `message.part.updated` text part whose text equals a pending submission's text, on a `user` message (`msgRole`), maps `userMessageId → submissionId` (keep a `Map`). A `message.updated` for an `assistant` whose `parentID` is a mapped user message id calls `onAgentInputConsumed(submissions.consume(submissionId))`.
-- `finishTurn` emits `turn-end` with `unconsumedInputIds: submissions.takeUnconsumed()` when non-empty — the upstream lost-wake case (opencode#46842).
+- `finishTurn` emits `turn-end` with `unconsumedInputIds: submissions.takeUnconsumed()` when non-empty — the upstream lost-wake case (anomalyco/opencode#46842).
 
 - [ ] **Step 1: Extend the mock** — `mock:steer-tool`: on the opening prompt, emit a tool part, keep the turn open `CEZ_MOCK_STEER_MS`; every `prompt_async` POSTed meanwhile gets a `message.updated { info: { id: 'msg_u<n>', role: 'user' } }` plus a text `message.part.updated` immediately, and after the tool ends a `message.updated { info: { id: 'msg_a<n>', role: 'assistant', parentID: 'msg_u<n>' } }` with a `saw: <text>` part, then one `session.idle`. `mock:steer-late`: after the last assistant part, accept POSTs for 300 ms (user message only, no assistant with that parentID), then `session.idle`.
 

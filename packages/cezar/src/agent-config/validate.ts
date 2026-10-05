@@ -1,4 +1,5 @@
 import { parse as parseToml } from 'smol-toml';
+import { parse as parseYaml } from 'yaml';
 import type { ConfigFormat } from './catalog.ts';
 
 /**
@@ -75,6 +76,11 @@ export function validateConfig(content: string, format: ConfigFormat): Validatio
         return { ok: true };
       case 'toml':
         parseToml(content);
+        return { ok: true };
+      case 'yaml':
+        // `parse` throws on the first error (duplicate keys and unclosed flow collections included),
+        // where `parseDocument` would collect them silently.
+        parseYaml(content);
         return { ok: true };
     }
   } catch (err) {

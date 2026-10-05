@@ -1,6 +1,6 @@
-# Finalizing a crashed worker's execution proof (#469)
+# Finalizing a crashed worker's execution proof (hearsay-tools/cezarion#469)
 
-Status: approved design (2026-09-26), revised with human approval for #738 (2026-10-04). Extends
+Status: approved design (2026-09-26), revised with human approval for hearsay-tools/cezarion#738 (2026-10-04). Extends
 `2026-09-06-owned-workers-isolated-worktrees.md` ("destroy awaits proven termination").
 
 ## Problem
@@ -14,10 +14,10 @@ controller process exits mid-worker, the proof stays `starting` forever:
   worktree and branch leak;
 - `commitWorkerExecutionStart` refuses to replace an incomplete generation, so recovery,
   `worker send --resume` and a parent's reply to a routed question all fail with
-  `worker execution checkpoint unavailable` (comment on #469, reproduced on v0.14.9);
+  `worker execution checkpoint unavailable` (comment on hearsay-tools/cezarion#469, reproduced on v0.14.9);
 - `collect` stays `settled: false`.
 
-The conservative rule is right while a process of that generation lives: in the #469
+The conservative rule is right while a process of that generation lives: in the hearsay-tools/cezarion#469
 reproduction both a Claude and a Cursor agent outlived a SIGTERM'd cockpit by minutes. The
 bug is that nothing ever proves the opposite, so the state has no exit.
 
@@ -77,7 +77,7 @@ A synchronous, dependency-free module (a sync probe lets `continueRun` stay sync
 - `processesWithCwdUnder(dirs)`: the worker's worktree and every agent tmp dir location
   (`agentTmpDirLocationEvidence` supplies both candidates and discovery completeness). Independent
   cleanup can delete terminal-task scratch; execution settlement cannot. Live tasks retain
-  scratch across finalized process generations and restart (#515). Linux reads `/proc/*/cwd`,
+  scratch across finalized process generations and restart (hearsay-tools/cezarion#515). Linux reads `/proc/*/cwd`,
   skipping `ENOENT` (the process vanished) and `EACCES` on another user's process. An
   unreadable process of our own user is non-dumpable (`systemd --user`, `sshd`,
   `gpg-agent`). It counts as a possible holder, reported by PID and never signalled, unless it
@@ -86,7 +86,7 @@ A synchronous, dependency-free module (a sync probe lets `continueRun` stay sync
   some. The cutoff is the worker's creation, not the current generation's start, because an
   earlier generation can leave a daemon holding the worktree.
 
-  **Execution and resource proofs are separate (#738, approved revision).** A valid Linux
+  **Execution and resource proofs are separate (hearsay-tools/cezarion#738, approved revision).** A valid Linux
   controller boot UUID different from the current readable boot UUID proves old descendants
   cannot survive, but only after checking that neither the controller nor any recorded process
   is live. `inspectExecutionGeneration` uses this fast proof without scanning paths. Unknown,
@@ -155,7 +155,7 @@ Callers:
 - **`recover()`** runs it for every worker before computing `retained` and before the
   live loop, so an interrupted worker re-launches through the ordinary `continueRun` path.
 - **`beginWorkerExecution`** runs it first (`fresh`) when no execution exists. This one
-  site covers Continue, `--resume`, parent replies (#505) and queued revival. Over a live
+  site covers Continue, `--resume`, parent replies (hearsay-tools/cezarion#505) and queued revival. Over a live
   orphan, the refusal names the process:
   `a process of the previous execution is still running (pid N)`, or
   `the worker is still controlled by a live cezar (pid N)` when a foreign controller lives.
@@ -245,7 +245,7 @@ resume, replies and pump admission. A stale retry cannot delete a newer executio
 History deletion checks holders before removing evidence, removes scratch while process/generation
 evidence still exists, and refuses to forget an intent whose scratch removal failed.
 
-The original #738 acceptance criterion that cleanup always succeeds after reboot is explicitly
+The original hearsay-tools/cezarion#738 acceptance criterion that cleanup always succeeds after reboot is explicitly
 narrowed: **execution settlement, collection and parent Finish unblock once execution is proven
 terminated; eventual cleanup requires independent fresh proof that no holder or unresolved
 candidate remains. If that proof never becomes available, files remain indefinitely.**
@@ -263,7 +263,7 @@ candidate remains. If that proof never becomes available, files remain indefinit
 ## Known limitations
 
 - Legacy process records without a controller boot ID, or an unreadable current Linux
-  boot ID, cannot use the #738 reboot proof. Unreadable same-user cwd candidates may
+  boot ID, cannot use the hearsay-tools/cezarion#738 reboot proof. Unreadable same-user cwd candidates may
   still block those generations; uncertainty never authorizes cleanup.
 - Reaping signals only the recorded session leader. Runners do not spawn detached, so there
   is no process group to kill. A descendant that survives the leader keeps its cwd in the
@@ -279,7 +279,7 @@ candidate remains. If that proof never becomes available, files remain indefinit
     after it exits;
   - an unsupported platform returns `unknown`;
   - PID reuse (token mismatch) counts as gone.
-  - #738: denied cwd candidates remain possible resource holders even across boots; readable
+  - hearsay-tools/cezarion#738: denied cwd candidates remain possible resource holders even across boots; readable
     holders and matching live process records also block. Same-boot controllers for
     old-created workers, legacy/missing tokens, unknown boot IDs and scan errors retain
     conservative behavior.
@@ -311,7 +311,7 @@ candidate remains. If that proof never becomes available, files remain indefinit
   checkpoint…`, `refuses %s recovery and Continue over a surviving prior process…`,
   `cannot replace %s private execution evidence…`) stay green unchanged.
 - `service.test.ts`: `collect` becomes settled after finalization.
-- `worker-questions.test.ts`: the #505 "parent reply answers the worker after a restart"
+- `worker-questions.test.ts`: the hearsay-tools/cezarion#505 "parent reply answers the worker after a restart"
   case also passes with the worker's pre-cancel `starting` proof restored and a dead
   controller.
 
@@ -324,7 +324,7 @@ candidate remains. If that proof never becomes available, files remain indefinit
 4. Destroy reaping + service `collect` hook.
 5. Regression tests, each shown red without the fix (`git stash push -- <sources>`).
 
-## Verification of the approved #738 revision (2026-10-04)
+## Verification of the approved hearsay-tools/cezarion#738 revision (2026-10-04)
 
 - Baseline `d2c66da2`, production sources temporarily restored, native R43 filter
   `clears parent Finish`: **10 behavioral failures** (five collect cases deleted held scratch;

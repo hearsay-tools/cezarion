@@ -6,7 +6,7 @@ Status: Detailed spec approved by the owner on 2026-09-08.
 
 ## Approved direction
 
-Extend the owned-worker implementation landed by #138 (`252d530e`) for #111.
+Extend the owned-worker implementation landed by hearsay-tools/cezarion#138 (`252d530e`) for hearsay-tools/cezarion#111.
 Keep its CLI, delegation service, scoped credentials, ordinary runs, scheduler,
 owned workspaces, and event models. Do not add another delegation service.
 
@@ -27,7 +27,7 @@ One generation of isolated workers, explicit input transfer, backend/model
 selection, typed collection, one/any/all waits, completion gating, and cleanup.
 No correlated conversations, descendants, peers, shared workspaces, automatic
 conversation cloning, dirty parent snapshots, automatic merging, or hard process
-isolation. Those remain outside #116.
+isolation. Those remain outside hearsay-tools/cezarion#116.
 
 Preserve `CEZ_DELEGATION=1` opt-in and its default-off behavior. Add no required
 configuration, dependency, daemon, or new environment knob. Existing limits of
@@ -195,7 +195,7 @@ and worker wake-ups cannot reopen stopped sessions.
 Parent failure/cancellation stops outstanding direct workers and awaits/proves
 termination through existing bounded lifecycle machinery. Preserve completed and
 review artifacts. Failed termination stays explicitly unresolved and retryable;
-never claim the process ended because a signal was sent. Keep #111's private
+never claim the process ended because a signal was sent. Keep hearsay-tools/cezarion#111's private
 process evidence, no-materialization proof, escalation, and cleanup locks intact.
 
 ## Integration, destruction, and deletion
@@ -281,7 +281,7 @@ Run the five binding commands in order: `npm run typecheck`, `npm test`,
 while implementing; run actual browser checks for any UI behavior changed.
 No draft PR opens with failing required verification. Commit and push with
 Conventional Commits, merge freshly fetched origin/main and reverify changes,
-open a draft PR closing #116, move the board to In review, and run pr-checks to
+open a draft PR closing hearsay-tools/cezarion#116, move the board to In review, and run pr-checks to
 CI's verdict. Never auto-merge or mark the draft ready.
 
 ## Spec self-review

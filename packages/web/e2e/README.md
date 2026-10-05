@@ -166,6 +166,14 @@ are passed intact to Vitest. A literal `--` ends wrapper option parsing.
 With no arguments the full sequential suite still runs. A filtered run's
 `TEST_E2E_STATUS=passed` verifies only that selection, not the full browser gate.
 
+The launcher waits up to 180 elapsed seconds for app health after starting the server.
+Set `TEST_ENV_HEALTH_TIMEOUT_SECONDS` to a positive integer to override that budget
+(for example, `TEST_ENV_HEALTH_TIMEOUT_SECONDS=5 npm run test:e2e -- smoke.e2e.ts`).
+Unset or empty values use the default; malformed values fail before boot. Each HTTP
+probe is bounded by the remaining budget. On timeout the launcher prints elapsed
+seconds and the last 20 lines of `.ai/qa/test-env-app.log`, then stops the app.
+This budget covers the health wait, excluding build and browser preparation.
+
 ## Full local suite in four lanes
 
 Run `npm run test:e2e:local` for the complete suite on a machine with roughly **8 GiB

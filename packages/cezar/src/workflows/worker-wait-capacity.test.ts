@@ -54,7 +54,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     expect(engine.workerWaiting.has(run.id)).toBe(false);
   });
 
-  it.each(['codex', 'opencode', 'pi'].flatMap(backend => ['agent', 'check'].map(next => ({ backend: backend as 'codex' | 'opencode' | 'pi', next }))))(
+  it.each(['codex', 'opencode', 'pi', 'omp'].flatMap(backend => ['agent', 'check'].map(next => ({ backend: backend as 'codex' | 'opencode' | 'pi' | 'omp', next }))))(
     '$backend keeps a completed wake and following $next held until its real transport ACK at cap one', async ({ backend, next }) => {
       await withDelayedCommand(backend, async release => {
         process.env.CEZ_DRY_RUN = '0';

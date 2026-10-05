@@ -1,0 +1,209 @@
+[
+  {
+    "type": "turn.started",
+    "turnId": "turn_1"
+  },
+  {
+    "type": "session.started",
+    "sessionId": "01a108f7-7ffa-7134-93b2-09b71ed8e347",
+    "backend": "omp",
+    "model": "claude-opus-5-5"
+  },
+  {
+    "type": "item.started",
+    "item": {
+      "kind": "reasoning",
+      "id": "turn_1_reasoning_0_0",
+      "text": ""
+    }
+  },
+  {
+    "type": "item.delta",
+    "itemId": "turn_1_reasoning_0_0",
+    "field": "reasoning",
+    "delta": "Read the entry "
+  },
+  {
+    "type": "item.delta",
+    "itemId": "turn_1_reasoning_0_0",
+    "field": "reasoning",
+    "delta": "point first."
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "reasoning",
+      "id": "turn_1_reasoning_0_0",
+      "text": "Read the entry point first."
+    }
+  },
+  {
+    "type": "item.started",
+    "item": {
+      "kind": "message",
+      "id": "turn_1_text_1_0",
+      "role": "assistant",
+      "text": ""
+    }
+  },
+  {
+    "type": "item.delta",
+    "itemId": "turn_1_text_1_0",
+    "field": "text",
+    "delta": "Checking "
+  },
+  {
+    "type": "item.delta",
+    "itemId": "turn_1_text_1_0",
+    "field": "text",
+    "delta": "the suite."
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "message",
+      "id": "turn_1_text_1_0",
+      "role": "assistant",
+      "text": "Checking the suite."
+    }
+  },
+  {
+    "type": "usage.updated",
+    "usage": {
+      "input": 1200,
+      "output": 80,
+      "total": 10580,
+      "cacheRead": 9000,
+      "cacheWrite": 300
+    },
+    "costUsd": 0.0123
+  },
+  {
+    "type": "item.started",
+    "item": {
+      "kind": "tool",
+      "id": "toolu_read_1",
+      "name": "read",
+      "toolKind": "read",
+      "title": "Read src/index.ts",
+      "status": "running",
+      "input": {
+        "path": "src/index.ts"
+      }
+    }
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "tool",
+      "id": "toolu_read_1",
+      "name": "read",
+      "toolKind": "read",
+      "title": "Read src/index.ts",
+      "status": "completed",
+      "input": {
+        "path": "src/index.ts"
+      },
+      "output": "export { main } from './main.js';\n"
+    }
+  },
+  {
+    "type": "item.started",
+    "item": {
+      "kind": "tool",
+      "id": "toolu_bash_1",
+      "name": "bash",
+      "toolKind": "execute",
+      "title": "Ran npm test",
+      "status": "running",
+      "input": {
+        "command": "npm test"
+      }
+    }
+  },
+  {
+    "type": "item.updated",
+    "item": {
+      "kind": "tool",
+      "id": "toolu_bash_1",
+      "name": "bash",
+      "toolKind": "execute",
+      "title": "Ran npm test",
+      "status": "running",
+      "input": {
+        "command": "npm test"
+      },
+      "output": "> vitest run\n"
+    }
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "tool",
+      "id": "toolu_bash_1",
+      "name": "bash",
+      "toolKind": "execute",
+      "title": "Ran npm test",
+      "status": "failed",
+      "input": {
+        "command": "npm test"
+      },
+      "output": "> vitest run\n",
+      "error": "> vitest run\nFAIL src/main.test.ts\nCommand exited with code 1"
+    }
+  },
+  {
+    "type": "item.started",
+    "item": {
+      "kind": "message",
+      "id": "turn_1_text_0_3",
+      "role": "assistant",
+      "text": ""
+    }
+  },
+  {
+    "type": "item.delta",
+    "itemId": "turn_1_text_0_3",
+    "field": "text",
+    "delta": "One test fails: "
+  },
+  {
+    "type": "item.delta",
+    "itemId": "turn_1_text_0_3",
+    "field": "text",
+    "delta": "src/main.test.ts."
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "message",
+      "id": "turn_1_text_0_3",
+      "role": "assistant",
+      "text": "One test fails: src/main.test.ts."
+    }
+  },
+  {
+    "type": "usage.updated",
+    "usage": {
+      "input": 1500,
+      "output": 40,
+      "total": 11740,
+      "cacheRead": 10200,
+      "cacheWrite": 0
+    },
+    "costUsd": 0.0081
+  },
+  {
+    "type": "turn.completed",
+    "turnId": "turn_1",
+    "stopReason": "end_turn",
+    "usage": {
+      "input": 1500,
+      "output": 40,
+      "total": 11740,
+      "cacheRead": 10200,
+      "cacheWrite": 0
+    },
+    "costUsd": 0.0081
+  }
+]

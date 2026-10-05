@@ -1,0 +1,41 @@
+{"type":"ready","protocolVersion":1,"supportedProtocolVersions":[1,2],"maxFrameBytes":1048576,"maxReassembledFrameBytes":67108864}
+{"type":"extension_ui_request","id":"15998b342a300273","method":"setWidget","widgetKey":"autoresearch"}
+{"type":"advisor_cost_changed"}
+{"type":"available_commands_update","commands":[{"name":"model","aliases":["models"],"description":"Show current model selection","source":"builtin"},{"name":"switch","description":"Switch model for this session only","input":{"hint":"[model]"},"source":"builtin"}]}
+{"id":"s1","type":"response","command":"get_state","success":true,"data":{"model":{"id":"claude-opus-5-5","name":"Claude Opus 5.5","api":"anthropic-messages","provider":"anthropic","baseUrl":"https://api.anthropic.com","reasoning":true,"input":["text","image"],"cost":{"input":4,"output":20,"cacheRead":0.2,"cacheWrite":5},"contextWindow":1000000,"maxTokens":128000,"int":57.6,"tps":92.9,"thinking":{"mode":"anthropic-adaptive","efforts":["low","medium","high","xhigh","max"],"supportsDisplay":true,"prefixBinding":true},"identity":{"class":"anthropic","family":"opus","revision":"5.5.0"},"requiresGlyphTokenization":true,"tokenizer":"claude-v5","supportsComputerUse":false,"compat":{"officialEndpoint":true,"signingEndpoint":true,"supportsContextManagement":true,"supportsServerCompaction":true,"firstPartyProvider":true,"supportsOutputEffort":true,"disableStrictTools":false,"disableAdaptiveThinking":false,"allowAnthropicHeaderOverrides":false,"supportsEagerToolInputStreaming":true,"supportsLongCacheRetention":true,"supportsMidConversationSystem":true,"supportsTurnScopedSystem":true,"supportsMidConversationToolChanges":true,"supportsPerMessageEffort":true,"supportsThinkingBindingControls":false,"supportsBetweenToolsThinking":false,"supportsForcedToolChoice":false,"supportsSamplingParams":false,"requiresToolResultId":false,"requiresThinkingEnabled":false,"replayUnsignedThinking":false,"escapeBuiltinToolNames":false,"injectClaudeCodeInstruction":true,"stripImageInput":false},"webSearch":"anthropic","webSearchModel":"claude-haiku-4-5","promptCache":{"short":300,"long":3600}},"thinkingLevel":"high","isStreaming":false,"isCompacting":false,"steeringMode":"one-at-a-time","followUpMode":"one-at-a-time","interruptMode":"immediate","sessionFile":"/home/dev/.omp/agent/sessions/--home-dev-repo--/2026-10-04T22-10-00-314Z_01a108f7-7ffa-7134-93b2-09b71ed8e347.jsonl","sessionId":"01a108f7-7ffa-7134-93b2-09b71ed8e347","autoCompactionEnabled":true,"queuedMessageCount":0,"hasPendingAsyncWork":false,"isSettled":true,"queuedMessages":{"steering":[],"followUp":[]},"todoPhases":[],"fastModeEnabled":false,"tokensPerSecond":null,"fastModeActive":false,"messageCount":0,"contextUsage":{"tokens":9760,"contextWindow":1000000,"percent":0.976},"goal":null}}
+{"id":"m1","type":"response","command":"set_steering_mode","success":true}
+{"id":"m2","type":"response","command":"set_subagent_subscription","success":true,"data":{"level":"events"}}
+{"id":"m3","type":"response","command":"set_event_filter","success":true,"data":{"events":null,"messageUpdates":"delta"}}
+{"id":"cezar-prompt-1","type":"response","command":"prompt","success":true}
+{"type":"agent_start"}
+{"type":"turn_start"}
+{"type":"message_start","messageId":"msg-1","message":{"role":"user","content":[{"type":"text","text":"Run the tests and tell me what fails"}],"timestamp":1791151799000}}
+{"type":"message_end","messageId":"msg-1","message":{"role":"user","content":[{"type":"text","text":"Run the tests and tell me what fails"}],"timestamp":1791151799000}}
+{"type":"message_start","messageId":"msg-2","message":{"role":"assistant","content":[],"timestamp":1791151800000}}
+{"type":"message_update","messageId":"msg-2","message":{"role":"assistant"},"assistantMessageEvent":{"type":"thinking_start","contentIndex":0}}
+{"type":"message_update","messageId":"msg-2","message":{"role":"assistant"},"assistantMessageEvent":{"type":"thinking_delta","contentIndex":0,"delta":"Read the entry "}}
+{"type":"message_update","messageId":"msg-2","message":{"role":"assistant"},"assistantMessageEvent":{"type":"thinking_delta","contentIndex":0,"delta":"point first."}}
+{"type":"message_update","messageId":"msg-2","message":{"role":"assistant"},"assistantMessageEvent":{"type":"thinking_end","contentIndex":0,"content":"Read the entry point first."}}
+{"type":"message_update","messageId":"msg-2","message":{"role":"assistant"},"assistantMessageEvent":{"type":"text_start","contentIndex":1}}
+{"type":"message_update","messageId":"msg-2","message":{"role":"assistant"},"assistantMessageEvent":{"type":"text_delta","contentIndex":1,"delta":"Checking "}}
+{"type":"message_update","messageId":"msg-2","message":{"role":"assistant"},"assistantMessageEvent":{"type":"text_delta","contentIndex":1,"delta":"the suite."}}
+{"type":"message_update","messageId":"msg-2","message":{"role":"assistant"},"assistantMessageEvent":{"type":"text_end","contentIndex":1,"content":"Checking the suite."}}
+{"type":"message_update","messageId":"msg-2","message":{"role":"assistant"},"assistantMessageEvent":{"type":"toolcall_end","contentIndex":2,"toolCall":{"type":"toolCall","id":"toolu_read_1","name":"read","arguments":{"path":"src/index.ts"}}}}
+{"type":"message_end","messageId":"msg-2","message":{"role":"assistant","content":[{"type":"thinking","thinking":"Read the entry point first."},{"type":"text","text":"Checking the suite."}],"api":"anthropic-messages","provider":"anthropic","model":"claude-opus-5-5","usage":{"input":1200,"output":80,"cacheRead":9000,"cacheWrite":300,"totalTokens":10580,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0.0123}},"stopReason":"toolUse","timestamp":1791151800000}}
+{"type":"tool_execution_start","toolCallId":"toolu_read_1","toolName":"read","args":{"path":"src/index.ts"}}
+{"type":"tool_execution_end","toolCallId":"toolu_read_1","toolName":"read","result":{"content":[{"type":"text","text":"export { main } from './main.js';\n"}]}}
+{"type":"tool_execution_start","toolCallId":"toolu_bash_1","toolName":"bash","args":{"command":"npm test"}}
+{"type":"tool_execution_update","toolCallId":"toolu_bash_1","toolName":"bash","args":{"command":"npm test"},"partialResult":{"content":[{"type":"text","text":"> vitest run\n"}]}}
+{"type":"tool_execution_end","toolCallId":"toolu_bash_1","toolName":"bash","result":{"content":[{"type":"text","text":"> vitest run\nFAIL src/main.test.ts\nCommand exited with code 1"}]},"isError":true}
+{"type":"turn_end"}
+{"type":"turn_start"}
+{"type":"message_start","messageId":"msg-3","message":{"role":"assistant","content":[],"timestamp":1791151801000}}
+{"type":"message_update","messageId":"msg-3","message":{"role":"assistant"},"assistantMessageEvent":{"type":"text_start","contentIndex":0}}
+{"type":"message_update","messageId":"msg-3","message":{"role":"assistant"},"assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"One test fails: "}}
+{"type":"message_update","messageId":"msg-3","message":{"role":"assistant"},"assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"src/main.test.ts."}}
+{"type":"message_update","messageId":"msg-3","message":{"role":"assistant"},"assistantMessageEvent":{"type":"text_end","contentIndex":0,"content":"One test fails: src/main.test.ts."}}
+{"type":"message_end","messageId":"msg-3","message":{"role":"assistant","content":[{"type":"text","text":"One test fails: src/main.test.ts."}],"api":"anthropic-messages","provider":"anthropic","model":"claude-opus-5-5","usage":{"input":1500,"output":40,"cacheRead":10200,"cacheWrite":0,"totalTokens":11740,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0.0081}},"stopReason":"stop","timestamp":1791151800000}}
+{"type":"turn_end"}
+{"type":"agent_end","messages":[],"isTerminal":true,"yielded":true}
+{"type":"prompt_result","id":"cezar-prompt-1","agentInvoked":true,"status":"completed","sessionSettled":true}
+{"type":"session_settled"}

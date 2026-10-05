@@ -1,13 +1,13 @@
 # Shared harness parity test matrix
 
-> Issue: #68 · Depends on: `2026-07-14-cockpit-ui-redesign.md` (protocol v2 and its backend-parity requirement)
+> Issue: hearsay-tools/cezarion#68 · Depends on: `2026-07-14-cockpit-ui-redesign.md` (protocol v2 and its backend-parity requirement)
 
 ## TLDR
 
 `ui-parity.test.ts` pins one thing: every mapper emits every v2 UI capability. Everything else a
 runner owes cezar — session lifecycle, provider-failure surfacing, `sendMessage`, ask routing, park
 declarations — is asserted per runner, ad hoc, in per-runner test files. Nine recent fixes
-(#2, #3, #4, #5, #6, #46, #48, #53, #54) each repaired a failure mode that no shared contract
+(hearsay-tools/cezarion#2, hearsay-tools/cezarion#3, hearsay-tools/cezarion#4, hearsay-tools/cezarion#5, hearsay-tools/cezarion#6, hearsay-tools/cezarion#46, hearsay-tools/cezarion#48, hearsay-tools/cezarion#53, hearsay-tools/cezarion#54) each repaired a failure mode that no shared contract
 covered, so the next one repeats on the next backend.
 
 This spec adds a second executable matrix beside the first: one criterion catalog, two tiers, every
@@ -20,10 +20,10 @@ answer the shared scenario catalog and pass every row".
 |---|---|---|---|---|
 | Q1 | Where do rows assert? | Two tiers: the `AgentRunner`/`AgentSession` seam, and a real `RunManager` run. | `ask.requested` is emitted by the RUNNER for codex, opencode and cursor, and by `workflows/run.ts` for claude and pi. Groups 1, 3 and 6 are only uniform above the seam; a seam-only matrix would exempt the marker-based ask paths on exactly the rows the recent fixes were about. | confirmed by owner |
 | Q2 | A cell a backend cannot satisfy? | A declared `PARITY_EXEMPTIONS` entry carrying a reason, asserted INVERTED so a stale exemption fails. | An `it.skip` is invisible; an inverted assertion is a ratchet. AC #6 needs exemptions to be data the suite validates, not a comment. | confirmed by owner |
-| Q3 | What transport drives a row? | Each backend's real runner class against its own existing mock binary, selected by the `CEZ_*_BIN` var it already reads. | A test-owned fake transport would be a second wire-shape source of truth, drifting from the mocks. `AGENT_PROTOCOL.md` §7 names that drift as PR #443's root cause. | ok |
+| Q3 | What transport drives a row? | Each backend's real runner class against its own existing mock binary, selected by the `CEZ_*_BIN` var it already reads. | A test-owned fake transport would be a second wire-shape source of truth, drifting from the mocks. `AGENT_PROTOCOL.md` §7 names that drift as PR open-mercato/cezar#443's root cause. | ok |
 | Q4 | Shared scenario names, or shared markers? | Shared NAMES; the adapter maps each to that backend's own `mock:` spelling. | Renaming `mock:turn-failed` or `mock:auth-error` would churn passing runner tests for no gain, and the existing markers are already wire-faithful. | ok |
 | Q6 | S3 — every backend echoes a `session` event? | No: the criterion is a RESUMABLE id, from the v1 `session` event or the settled `AgentRunResult`. | Codex, opencode and pi mint their own id and echo it; claude pins the id cezar supplied (`--session-id`) and returns it. Both are how `resumeCommand()` gets an id, and demanding the event would have failed claude for conforming to its own documented wire. | applied during implementation |
-| Q7 | S7 — every backend emits `session.error`? | No: v2 must signal the failure, and the CHANNEL is per-wire. | opencode and pi have a session-level error frame, codex reports a failed turn, claude has only the result envelope's stop reason. What #53 and #54 both WERE is the run looking finished, so that is what the row pins. | applied during implementation |
+| Q7 | S7 — every backend emits `session.error`? | No: v2 must signal the failure, and the CHANNEL is per-wire. | opencode and pi have a session-level error frame, codex reports a failed turn, claude has only the result envelope's stop reason. What hearsay-tools/cezarion#53 and hearsay-tools/cezarion#54 both WERE is the run looking finished, so that is what the row pins. | applied during implementation |
 | Q8 | R1 — does a clean run reach a terminal status? | Only when the agent DECLARES completion, so R1 needs its own `done` scenario. | A markerless turn-end parks as `waiting` on every backend, and that is correct cezar behaviour. R1's first draft asserted a terminal status off `baseline` and failed every backend for the wrong reason. | applied during implementation |
 | Q5 | New env var for the matrix? | None. | The mock selectors in `HARNESS_ADAPTERS` already exist and are documented. Zero-config: never trade a working default for a knob. | ok |
 
@@ -39,12 +39,12 @@ backend, after the same class of bug had already been fixed on another:
 
 | Group | Issues | The failure mode |
 |---|---|---|
-| 1. Provider / auth failure surfacing | #53 (opencode), #54 (pi) | A runtime provider rejection parked the run as "Needs You" instead of failing it. |
-| 2. Turn / session liveness | #4 (opencode) | undici's 300s headers timeout ended a healthy long turn; the runner took turn-end from an HTTP response instead of the backend's own idle signal. |
-| 3. Native ask / question bridge | #6 (opencode) | The native question tool never became an `ask.requested` card. |
-| 4. Sub-agent / child session binding | #5 (opencode), #600 (codex) | A child session's `turn/completed` ended the PARENT turn. |
-| 5. Text coalescing / message boundaries | #2, #3 (pi) | One v1 `text` per token, so a trailing `CEZ:ASK` marker never matched its regex. |
-| 6. Monitoring / wake / auto-continue | #46, #48 (claude) | A park declaration was missed, or produced overlapping wakes. |
+| 1. Provider / auth failure surfacing | hearsay-tools/cezarion#53 (opencode), hearsay-tools/cezarion#54 (pi) | A runtime provider rejection parked the run as "Needs You" instead of failing it. |
+| 2. Turn / session liveness | hearsay-tools/cezarion#4 (opencode) | undici's 300s headers timeout ended a healthy long turn; the runner took turn-end from an HTTP response instead of the backend's own idle signal. |
+| 3. Native ask / question bridge | hearsay-tools/cezarion#6 (opencode) | The native question tool never became an `ask.requested` card. |
+| 4. Sub-agent / child session binding | hearsay-tools/cezarion#5 (opencode), open-mercato/cezar#600 (codex) | A child session's `turn/completed` ended the PARENT turn. |
+| 5. Text coalescing / message boundaries | hearsay-tools/cezarion#2, hearsay-tools/cezarion#3 (pi) | One v1 `text` per token, so a trailing `CEZ:ASK` marker never matched its regex. |
+| 6. Monitoring / wake / auto-continue | hearsay-tools/cezarion#46, hearsay-tools/cezarion#48 (claude) | A park declaration was missed, or produced overlapping wakes. |
 | 7. Baseline `AgentSession` contract | — | Never asserted uniformly at all. |
 
 Groups 1, 3 and 6 share a structural property that decides this spec's shape: **their uniform
@@ -68,7 +68,7 @@ binary that the runner selects from an env var it already reads, and each mock i
 | cursor | `packages/cezar/scripts/mock-cursor-acp.mjs` | `CEZ_CURSOR_BIN` | `ask`, `plan`, `resume-done` |
 | pi | `packages/cezar/scripts/mock-pi-rpc.mjs` | `CEZ_PI_BIN`, or `CEZ_DRY_RUN=1` | `monitoring`, `backend-resume`, `backend-resume-text` |
 
-`workflows/run.test.ts` already proves the second tier is reachable offline: its #565 suite points
+`workflows/run.test.ts` already proves the second tier is reachable offline: its open-mercato/cezar#565 suite points
 `CEZ_CODEX_BIN` at the codex mock, inits a temp git repo, and drives a real `RunManager` run to a
 parked state. The matrix generalizes that one suite across `RUNNER_IDS` instead of inventing a
 mechanism.
@@ -167,7 +167,7 @@ Driven by `driveSeam()`: the real runner class, a real child process, the real m
 | S9 | `subagent` | the parent turn ends exactly once, after the child's content — a child terminal signal never ends the parent | 4 |
 | S10 | `baseline` | `session.pid` is a number while the session is open | 7 |
 
-S8 is group 5 and group 6 in one row on purpose. #2's real damage was not split text as such — it was
+S8 is group 5 and group 6 in one row on purpose. hearsay-tools/cezarion#2's real damage was not split text as such — it was
 that a cezar marker assembled across deltas stopped matching its anchored regex (`CEZ:ASK` there,
 `CEZ:MONITORING` here; the two are the same integrity property, and `CEZ:MONITORING` is the one R5
 also needs). Splitting that into two scenarios would let a backend pass the coalescing row while
@@ -186,7 +186,7 @@ Driven by `driveRun()`: a real `RunManager` run in a temp git repo, the shape
 | R4 | `ask-bad` | the run reaches a terminal status and emits no `ask.requested` | 3 |
 | R5 | `split-text` | status `running` with `activity: 'monitoring'` — not `waiting` | 6 |
 
-| R26 | `ask-resume`, plus `plan-resume` for Cursor | every exposed ask kind reaches completion after one human answer; no later `waiting` or second human prompt | #398 |
+| R26 | `ask-resume`, plus `plan-resume` for Cursor | every exposed ask kind reaches completion after one human answer; no later `waiting` or second human prompt | hearsay-tools/cezarion#398 |
 
 R26 loops `RUNNER_IDS` and each adapter’s `askResumeCases`: native question wires
 for Codex/OpenCode, question and plan wires for Cursor, and `CEZ:ASK` for Claude/Pi.
@@ -196,7 +196,7 @@ Cursor must resume work after it. R6 keeps its markerless owned-input drain cont
 A prose guard rejects counted runner rosters in `AGENT_PROTOCOL.md`, this spec and
 harness-parity comments; use `RUNNER_IDS` or explicit backend names instead.
 
-R2 and R5 are the two rows that would have caught #53, #54 and #48 on any backend rather than on the
+R2 and R5 are the two rows that would have caught hearsay-tools/cezarion#53, hearsay-tools/cezarion#54 and hearsay-tools/cezarion#48 on any backend rather than on the
 one that shipped the bug.
 
 ### Exemptions are data the suite validates
@@ -252,7 +252,7 @@ The matrix IS the test. Two things about it need their own proof:
   AGENTS.md's "prove the regression test fails without the fix".
 - **Each new mock scenario must be wire-faithful.** Every addition cites the fixture or runner test it
   was derived from, as `AGENT_PROTOCOL.md` §7 requires. A scenario invented from assumption is the
-  #443 failure repeating inside the very suite meant to prevent it.
+  open-mercato/cezar#443 failure repeating inside the very suite meant to prevent it.
 
 ## Cost
 
@@ -270,12 +270,12 @@ Authoring it turned up one real defect, which is the point rather than a side ef
 returned `end_turn` and never consulted `is_error` — and Claude Code reports a revoked credential in
 an `is_error: true` result whose subtype is still `success`. v1 emitted the error correctly, so the
 run failed, but the cockpit was told the auth failure was a clean end of turn. That is group 1 on
-claude's wire, unfixed after #53 and #54 fixed it on opencode and pi, and no test covered it. Row S7
+claude's wire, unfixed after hearsay-tools/cezarion#53 and hearsay-tools/cezarion#54 fixed it on opencode and pi, and no test covered it. Row S7
 is what found it; the fix ships in the same branch, with its own `resultStopReason` case.
 
 Every row was verified red by reintroducing the defect it pins — ending the opencode turn on its
-`prompt_async` ack (#4), publishing each delta as its own v1 `text` (#2), suppressing pi's provider
-error (#54), letting any `session.idle` close the parent turn (#600), ignoring a malformed codex
+`prompt_async` ack (hearsay-tools/cezarion#4), publishing each delta as its own v1 `text` (hearsay-tools/cezarion#2), suppressing pi's provider
+error (hearsay-tools/cezarion#54), letting any `session.idle` close the parent turn (open-mercato/cezar#600), ignoring a malformed codex
 `requestUserInput` (a wedge), and reverting the claude fix above. The three guard tests were verified
 red the same way.
 

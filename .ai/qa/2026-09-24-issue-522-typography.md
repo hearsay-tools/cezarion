@@ -1,4 +1,4 @@
-# Issue 522 typography browser report — 2026-09-24
+# Issue hearsay-tools/cezarion#522 typography browser report — 2026-09-24
 
 Run `npm run test:e2e` to regenerate the PNGs under `.ai/qa/artifacts_issue-522/`. These screenshots show the selected values at real browser widths. The picker keeps its field prefix when the full label fits its label slot (within 0.5px); otherwise it removes the whole prefix before truncating the value. The 360px long-model pill ends with a visible ellipsis.
 
@@ -17,4 +17,4 @@ Run `npm run test:e2e` to regenerate the PNGs under `.ai/qa/artifacts_issue-522/
 | OpenCode command | `grok-4.6` | 906px | Collapsed mono command with ellipsis | `.ai/qa/artifacts_issue-522/522-opencode-command-collapsed.png` |
 | OpenCode command | `grok-4.6` | 906px | Expanded full command | `.ai/qa/artifacts_issue-522/522-opencode-command-expanded.png` |
 
-The browser tests in `packages/web/e2e/new-task-picker-layout.e2e.ts` and `task-thread.e2e.ts` assert prefix fit using fractional bounding rectangles. They also verify the collapsed command's ellipsis, tooltip, and expanded content. The long Model value can truncate while sibling prefixes remain; that row-level limitation is tracked in #541.
+The browser tests in `packages/web/e2e/new-task-picker-layout.e2e.ts` and `task-thread.e2e.ts` assert prefix fit using fractional bounding rectangles. They also verify the collapsed command's ellipsis, tooltip, and expanded content. The long Model value can truncate while sibling prefixes remain; that row-level limitation is tracked in hearsay-tools/cezarion#541.

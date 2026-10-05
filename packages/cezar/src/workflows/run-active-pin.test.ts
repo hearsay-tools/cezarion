@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
  * #779: the store keeps a run in memory while this manager executes it because every `ActiveRun`
  * enters `active` through `activate`, which pins it. A construction site that set `active` itself
  * would execute a run the store may evict between two writes — the #811 shape, where one of two
- * construction sites missed a field. Harness parity R47 drives both sites on every runner; this
+ * construction sites missed a field. Harness parity R48 drives both sites on every runner; this
  * pins the shape so a third site cannot appear without the pin.
  */
 describe('RunManager pins every executing run through one helper', () => {

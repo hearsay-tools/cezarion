@@ -1,5 +1,10 @@
 # Checkpoint 3 — Steps 2.1..2.5
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 **When:** 2026-07-20T17:03:13Z
 **Steps covered:** 2.1 (`29bab9f`) … 2.5 (`9abbf6e`)
 **Touched areas:** `src/server/project-context.ts` (new), `src/server/server.ts` (context-resolver refactor, 53-route table mounted at `/api/p/:projectId/*` + legacy aliases), `src/todos.ts` (per-dataDir watchers), `src/workflows/run.ts` (dispose, usage filtering, workspace-semaphore gating), `src/core/process-usage.ts`, `src/workspace/semaphore.ts` (new), `src/index.ts`

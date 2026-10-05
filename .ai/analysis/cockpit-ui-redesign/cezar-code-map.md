@@ -1,5 +1,10 @@
 # cezar web cockpit — deep code map
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 Repo: the repo root (branch `main`). Frontend: `web/index.html` (110 ln), `web/app.js` (3755 ln, vanilla JS, zero deps, no build step), `web/style.css` (1862 ln). Server: `src/server/server.ts` (Hono, 859 ln), served at `127.0.0.1:<port>` (default **4321**; bookmarklets scan 4321–4330). Data dir: `<repo>/.ai/cezar/` (runs.json, `runs/<id>.ndjson`, `<id>.handoff.md`, `<id>-images/`, `todos.json`, `config.json`, `ui-state.json`, `workflows/*.yaml`, launch-key).
 
 ---

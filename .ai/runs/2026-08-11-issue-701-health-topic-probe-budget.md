@@ -1,5 +1,10 @@
 # Execution plan — answer @patzick's review: drive `health-topic.test.ts` time through vitest's fake-timer API (adopted from PR #733)
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 **Origin:** adopted — reconstructed by `om-auto-continue-pr` on 2026-08-11 because PR #733 carried no execution plan (it predates the `Tracking plan:` convention on this branch).
 **PR:** #733 · **Branch:** `fix/issue-701-health-topic-probe-budget` · **Base:** `main`
 **Author:** @wojciechszyjka — this plan interprets the remaining review feedback; correct it by editing this file or commenting on the PR.

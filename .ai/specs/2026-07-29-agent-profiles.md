@@ -1,5 +1,10 @@
 # Agent profiles — a second login of the same agent CLI
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 Status: implemented · 2026-07-29
 
 ### `default` on the wire is not the same as sending nothing

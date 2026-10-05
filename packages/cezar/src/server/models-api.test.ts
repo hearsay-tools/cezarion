@@ -26,7 +26,12 @@ describe('workspace model catalog API', () => {
 
   type Discover = () => Promise<Array<{ id: string; label: string; description: string }>>;
 
-  const app = (discover: Discover, opencodeDiscover: Discover = discover, piDiscover?: Discover) =>
+  const app = (
+    discover: Discover,
+    opencodeDiscover: Discover = discover,
+    piDiscover?: Discover,
+    ompDiscover?: Discover,
+  ) =>
     createApp({
       repoRoot: root,
       store,
@@ -39,6 +44,7 @@ describe('workspace model catalog API', () => {
           cursor: { discover },
           opencode: { discover: opencodeDiscover },
           ...(piDiscover ? { pi: { discover: piDiscover } } : {}),
+          ...(ompDiscover ? { omp: { discover: ompDiscover } } : {}),
         },
       }),
     });
@@ -135,6 +141,43 @@ describe('workspace model catalog API', () => {
     expect(await response.json()).toEqual({
       runner: 'pi', models: [], source: 'unavailable', stale: false,
       reason: 'Pi model discovery is temporarily unavailable',
+    });
+  });
+
+  it('answers the OMP catalog through the injected adapter', async () => {
+    const server = app(
+      async () => [],
+      async () => [],
+      undefined,
+      async () => [{
+        id: 'anthropic/claude-fable-5-1',
+        label: 'Claude Fable 5.1',
+        description: 'anthropic',
+        effortLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
+      }],
+    );
+    const response = await apiRequest(server, '/api/v1/models?runner=omp');
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      runner: 'omp',
+      models: [{
+        id: 'anthropic/claude-fable-5-1',
+        label: 'Claude Fable 5.1',
+        description: 'anthropic',
+        effortLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
+      }],
+      source: 'live',
+      stale: false,
+    });
+  });
+
+  it('degrades an OMP discovery failure without leaking its reason', async () => {
+    const server = app(async () => [], async () => [], undefined, async () => { throw new Error('OMP CLI not installed'); });
+    const response = await apiRequest(server, '/api/v1/models?runner=omp');
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      runner: 'omp', models: [], source: 'unavailable', stale: false,
+      reason: 'OMP model discovery is temporarily unavailable',
     });
   });
 
@@ -293,7 +336,7 @@ describe('workspace model catalog API', () => {
     expect(calls).toBe(2);
   });
 
-  it.each(['claude', 'pi'] as const)('Check again invalidates %s without losing its last good catalog', async (runner) => {
+  it.each(['claude', 'pi', 'omp'] as const)('Check again invalidates %s without losing its last good catalog', async (runner) => {
     let calls = 0;
     const catalog = new RunnerModelCatalog({
       adapters: {

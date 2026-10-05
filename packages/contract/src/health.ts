@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { applicationUpdateStateSchema } from './application-update.ts';
 
 /** The agent backends a run can be dispatched to. */
-export const runnerSchema = z.enum(['claude', 'codex', 'opencode', 'pi', 'cursor']);
+export const runnerSchema = z.enum(['claude', 'codex', 'opencode', 'pi', 'cursor', 'omp']);
 export type Runner = z.infer<typeof runnerSchema>;
 
 /** Git facts about the project root, or `null` when it is not a repository. */
@@ -15,7 +15,7 @@ export type RepoInfo = z.infer<typeof repoInfoSchema>;
 
 /** One probed CLI behind the Tools menu. */
 export const backendCheckSchema = z.object({
-  name: z.enum(['claude', 'codex', 'opencode', 'pi', 'cursor', 'gh', 'git']),
+  name: z.enum(['claude', 'codex', 'opencode', 'pi', 'cursor', 'omp', 'gh', 'git']),
   available: z.boolean(),
   version: z.string().optional(),
   hint: z.string().optional(),

@@ -3256,6 +3256,7 @@ export class RunStore extends EventEmitter {
     const run = this.peek(id);
     if (run?.delegation?.role !== 'worker' || run.delegation.destroy) throw new Error('Worker cannot start');
     const prior = this.readWorkerExecution(id);
+    if (prior?.abandoned) throw new Error('Worker execution was abandoned; spawn a new worker instead of resuming it');
     if (!prior || (prior.phase !== 'queued' && prior.phase !== 'complete')) {
       throw new Error('Worker execution checkpoint does not prove safe admission');
     }
@@ -3313,16 +3314,18 @@ export class RunStore extends EventEmitter {
     return true;
   }
 
-  commitWorkerExecutionComplete(id: string, generation: string): boolean {
+  commitWorkerExecutionComplete(id: string, generation: string, abandoned = false): boolean {
     const proof = this.readWorkerExecution(id);
     if (!proof || proof.generation !== generation) return false;
     if (proof.phase === 'queued' && this.peek(id)?.status !== 'cancelled') return false;
+    if (abandoned && (proof.phase !== 'starting' || this.peek(id)?.status !== 'cancelled')) return false;
     try {
       const run = this.peek(id);
       if (run?.delegation?.role !== 'worker') return false;
       this.commitIndex(new Map([[id, run]]));
       if (this.readWorkerExecution(id)?.generation !== generation) return false;
       this.writeWorkerExecution(id, { generation, phase: 'complete',
+        ...(abandoned || proof.abandoned ? { abandoned: true as const } : {}),
         ...(proof.phase === 'queued' || proof.neverMaterialized ? { neverMaterialized: true as const } : {}),
         ...(!['queued', 'running', 'waiting'].includes(run.status) ? { scratchCleanup: {
           resourceId: run.delegation.workspace.resourceId, path: run.delegation.workspace.path } } : {}) });

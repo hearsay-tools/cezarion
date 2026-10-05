@@ -1,5 +1,10 @@
 # Worktree File Editing from the Files Tab (#530)
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 ## TLDR
 
 The cockpit's **Files** tab can browse a run's worktree but not change it: `GET

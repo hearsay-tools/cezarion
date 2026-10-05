@@ -161,6 +161,29 @@ describe('AgentConfigSection', () => {
     expect(mcpGroup.querySelectorAll('[data-slot="agent-config-file"]').length).toBe(0)
   })
 
+  it('OMP’s pane lists its YAML settings and MCP files, labelled yaml, with no empty-state copy', async () => {
+    serve(
+      {
+        editable: true,
+        files: [
+          fileOf({ id: 'omp.user.settings', label: '~/.omp/agent/config.yml', runners: ['omp'], scope: 'user', format: 'yaml', tracked: 'outside-repo' }),
+          fileOf({ id: 'omp.project.mcp', label: '.omp/mcp.json', runners: ['omp'], kind: 'mcp', holdsMcp: true }),
+        ],
+        userMcp: null,
+      },
+      'retry:\n  enabled: true\n',
+    )
+    renderSection()
+    await waitFor(() => expect(agentTab('omp')).toBeTruthy())
+    fireEvent.click(agentTab('omp'))
+    await waitFor(() => expect(screen.getByText('~/.omp/agent/config.yml')).toBeTruthy())
+    expect(screen.getAllByText('.omp/mcp.json').length).toBeGreaterThan(0)
+    fireEvent.click(screen.getByText('~/.omp/agent/config.yml'))
+    await waitFor(() => expect(screen.getByLabelText('~/.omp/agent/config.yml contents')).toBeTruthy())
+    expect(screen.getByText('yaml')).toBeTruthy()
+    expect(document.querySelector('[data-slot="agent-config-group-empty"]')).toBeNull()
+  })
+
   it('an empty group without empty-state copy still renders nothing (Claude’s MCP stays as it was)', async () => {
     serve({
       editable: true,

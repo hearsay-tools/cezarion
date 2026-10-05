@@ -1,5 +1,10 @@
 # Implement durable monitoring sessions and periodic wake-up
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 Source doc: `.ai/specs/2026-07-24-long-running-waiting-sessions.md`
 Related source doc: `.ai/specs/2026-07-24-monitoring-session-auto-wake.md`
 Spec PR: #655

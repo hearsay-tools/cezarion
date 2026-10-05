@@ -31,7 +31,7 @@ test('the release tarball installs and runs the dry-run CLI workflow', { timeout
     assert.ok(record, 'npm pack should describe the generated tarball');
 
     const packagedPaths = new Set(record.files.map((file) => file.path));
-    for (const requiredPath of ['dist/index.js', 'web/dist/index.html', 'scripts/mock-claude.mjs', 'scripts/mock-codex-app-server.mjs', 'scripts/mock-opencode-serve.mjs', 'dist/ci-wait/controller.js', 'dist/ci-wait/client.js', 'dist/ci-wait/mcp.js', 'dist/ci-wait/tools.js', 'scripts/pi-ci-wait.mjs', 'README.md']) {
+    for (const requiredPath of ['dist/index.js', 'web/dist/index.html', 'scripts/mock-claude.mjs', 'scripts/mock-codex-app-server.mjs', 'scripts/mock-opencode-serve.mjs', 'dist/ci-wait/controller.js', 'dist/ci-wait/client.js', 'dist/ci-wait/mcp.js', 'dist/ci-wait/tools.js', 'scripts/pi-ci-wait.mjs', 'scripts/omp-ci-wait.mjs', 'scripts/omp-restrict-delegation.yml', 'scripts/mock-omp-rpc.mjs', 'README.md']) {
       assert.ok(packagedPaths.has(requiredPath), `release tarball should contain ${requiredPath}`);
     }
     assert.equal(packagedPaths.has('src/index.ts'), false, 'release tarball should not contain TypeScript sources');
@@ -65,6 +65,8 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { CiToolController } from ${JSON.stringify(pathToFileURL(join(packageRoot, 'dist/ci-wait/controller.js')).href)};
 import { createRunner } from ${JSON.stringify(pathToFileURL(join(packageRoot, 'dist/core/runner-factory.js')).href)};
 import piExtension from ${JSON.stringify(pathToFileURL(join(packageRoot, 'scripts/pi-ci-wait.mjs')).href)};
+// The installed tarball has no src/, so this takes the dist/ci-wait/tools.js path end users hit.
+import ompExtension from ${JSON.stringify(pathToFileURL(join(packageRoot, 'scripts/omp-ci-wait.mjs')).href)};
 // Live preview is opt-in: the flag-off assertions below must not depend on the caller's environment.
 delete process.env.CEZ_PREVIEW;
 const controller = await CiToolController.start();
@@ -103,15 +105,22 @@ try {
  const piResult = await registered[0].execute('pi-call', {pr:wait.prUrl});
  assert.notEqual(piResult.isError, true);
  assert.equal(count, 2);
+ const ompRegistered = [];
+ ompExtension({ registerTool(tool) { ompRegistered.push(tool); } });
+ assert.deepEqual(ompRegistered.map(tool => tool.name), ['cezar_wait_for_ci']);
+ const ompResult = await ompRegistered[0].execute('omp-call', {pr:wait.prUrl});
+ assert.notEqual(ompResult.isError, true);
+ assert.equal(count, 3);
  process.env.CEZ_DRY_RUN = '1';
  delete process.env.CEZ_CODEX_BIN;
  delete process.env.CEZ_OPENCODE_BIN;
- for (const backend of ['codex', 'opencode']) {
+ delete process.env.CEZ_OMP_BIN;
+ for (const backend of ['codex', 'opencode', 'omp']) {
    const events = [];
    await createRunner(backend).run({ cwd:process.cwd(), userPrompt:'mock:ci-wait ' + wait.prUrl, cezarTools:session.descriptor, env:session.env, timeoutMs:10_000 }, event => events.push(event));
    assert.ok(!events.some(event => event.type === 'error'), JSON.stringify(events));
  }
- assert.equal(count, 4);
+ assert.equal(count, 6);
  console.log('installed CI adapters passed');
 } finally { await client.close(); await controller.close(); }
 `);

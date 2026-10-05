@@ -92,7 +92,7 @@ edits survive reruns. PR creation uses the repository's configured release App t
 native CI; git pushes and PR lookup keep `GITHUB_TOKEN`. Only generated ledger files qualify
 for the docs-only matrix skip, and the unconditional build/package job still validates the
 ledger and rendered view. Legacy bot-created PRs need a maintainer close/reopen once after the
-fix reaches `main`; diagnostic dispatch does not satisfy required PR checks (#579).
+fix reaches `main`; diagnostic dispatch does not satisfy required PR checks (hearsay-tools/cezarion#579).
 The PR body lists the new rows
 with upstream links so the reviewer can decide each one by editing `status`, `fork`, `reason` and
 `decided` in the ledger before merging.

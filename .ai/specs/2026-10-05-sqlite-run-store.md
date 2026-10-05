@@ -37,7 +37,7 @@ Written in `BACKWARD_COMPATIBILITY.md` section 3 (owner sign-off) and summarised
 ## Verification
 
 - Import crashes and retries, rollback with dirty work pending, full-field preservation, corruption and each error kind, two-process writes, conflicts, deletions and ownership, cold read parity, connection cleanup.
-- Runner recovery behaviour has an exhaustive `RUNNER_IDS` regression (R49 in `harness-parity.test.ts`) over each runner's native mock wire.
+- Runner recovery behaviour has an exhaustive `RUNNER_IDS` regression (R50 in `harness-parity.test.ts`) over each runner's native mock wire.
 - Benchmark: `packages/cezar/scripts/benchmark-run-store.ts`. The acceptance bound for each size and profile is `x_N <= x_100 + max(0.25 * x_100, 1 ms)` for median and p95 single-run save, including checkpoint costs. Contention is reported separately. A final pass reports heap after open, `getRun()` for live and finished records, and `GET /run-summaries`.
 - CI: the unit gate runs on exactly Node 24.15.0 beside the `lts/*` jobs.
 

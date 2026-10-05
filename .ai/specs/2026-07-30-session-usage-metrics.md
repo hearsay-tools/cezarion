@@ -312,6 +312,6 @@ Ship mapper-normalized per-turn accounting, optional run aggregates, separate he
 8. Update both task-overview layouts. Replace the total token column/card item with IN/OUT, gate IN/OUT and Cost independently, compute semantic columns/queue spans from rendered columns, and add desktop/mobile tests for all four capability states.
 9. Run `npm run typecheck`, `npm test`, `npm run test:unit`, `npm run build`, and `npm run test:package`, then run `npm run test:e2e` against the real dry-run cockpit. Capture the task header and overview in default mode plus token-hidden-only and cost-hidden-only states to prove the matrix and zero-config default.
 
-### 2026-09-25 cost-accounting correction (#543)
+### 2026-09-25 cost-accounting correction (hearsay-tools/cezarion#543)
 
 The v1 `cost` event kept its wire shape, but its value did not have one common meaning. Claude's `total_cost_usd` is cumulative for the conversation, including resumed Continue steps; Pi reports each assistant message's `usage.cost.total`; OpenCode reports cost per assistant message, with later snapshots of that message replacing earlier ones. RunManager now records only the increase in Claude's cumulative report for a session, while Pi and OpenCode emit message deltas. A reported zero remains distinguishable from a backend that reports no USD. No token count is converted to dollars, and old run records are not migrated.

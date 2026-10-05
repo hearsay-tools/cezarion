@@ -3,7 +3,7 @@
 cezar runs coding-agent CLIs behind **one backend-agnostic seam** and renders
 every backend through **one normalized event vocabulary**. This document is the
 operational contract for that seam: what a runner must implement, what it must
-emit, how the emissions are tested, and what a *new* runner (e.g. `pi`, PR #387)
+emit, how the emissions are tested, and what a *new* runner (e.g. `pi`, PR open-mercato/cezar#387)
 has to satisfy to be a first-class backend rather than a second-class one.
 
 It is the concise, load-bearing contract. The deep design record lives in
@@ -35,7 +35,7 @@ id — that is the whole point of the seam.
 ### Identity
 
 ```ts
-const RUNNER_IDS = ['claude', 'codex', 'opencode', 'pi', 'cursor'] as const;  // the source of truth
+const RUNNER_IDS = ['claude', 'codex', 'opencode', 'pi', 'cursor', 'omp'] as const;  // the source of truth
 type RunnerId     = (typeof RUNNER_IDS)[number];                   // user-selectable
 type AgentBackend = RunnerId | 'claude-cli';                       // + legacy id, still parses
 ```
@@ -43,7 +43,7 @@ type AgentBackend = RunnerId | 'claude-cli';                       // + legacy i
 `RUNNER_IDS` is the tuple every other enumeration derives from — the zod schemas
 (config, run store, workflow steps, the API bodies), the server-install
 "at least one agent CLI" gate, and the CLI-handoff registry. Re-listing the ids
-by hand is how a runner silently goes missing from one seam (#387 review); use
+by hand is how a runner silently goes missing from one seam (open-mercato/cezar#387 review); use
 `RUNNER_IDS` / `isRunnerId()` instead.
 
 `claude-cli` is a **legacy** backend id kept so old `runs.json` records and
@@ -58,7 +58,7 @@ interface AgentRunner {
   run(spec: AgentRunSpec, onEvent?: (e: AgentEvent) => void): Promise<AgentRunResult>;
   startSession(spec: AgentRunSpec, onEvent?: (e: AgentEvent) => void, opts?: SessionOptions): AgentSession;
   interrupt(): Promise<void>;
-  readonly inputDelivery?: InputDelivery; // absent = boundary (#505)
+  readonly inputDelivery?: InputDelivery; // absent = boundary (hearsay-tools/cezarion#505)
 }
 interface InputDelivery {
   readonly mode: 'steer' | 'boundary';                 // mid-turn admission, or refused while busy
@@ -72,7 +72,9 @@ interface InputDelivery {
   `waiting`, interrupt and resume all work: claude = stream-json over
   stdin/stdout; codex = `codex app-server` JSON-RPC 2.0 (JSONL) over
   stdin/stdout; opencode = `opencode serve` over HTTP + SSE; pi =
-  `pi --mode rpc` over JSONL stdin/stdout.
+  `pi --mode rpc` over JSONL stdin/stdout; omp (Oh My Pi, hearsay-tools/cezarion#595) =
+  `omp --mode rpc` over JSONL stdin/stdout, a distinct backend from `pi`
+  (`.ai/specs/2026-10-02-omp-runner.md`).
 
 ### `AgentSession`
 
@@ -81,7 +83,7 @@ A live session over one spawned process, alive between turns:
 ```ts
 interface AgentSession {
   result: Promise<AgentRunResult>;   // resolves when the process exits
-  readonly pid?: number;             // root of the run's process tree (resource telemetry, #348)
+  readonly pid?: number;             // root of the run's process tree (resource telemetry, open-mercato/cezar#348)
   sendMessage(content: ContentBlock[]): boolean;  // human input; false when closed
   sendAgentMessage(content: ContentBlock[], inputIds?: readonly string[]): false | Promise<void>; // reserve now, harness acceptance later
   discardQueuedMessages(): void;     // drop mid-turn follow-ups; CEZ:ASK park calls this
@@ -91,7 +93,7 @@ interface AgentSession {
 }
 ```
 
-A termination the runner itself caused is **not** an agent failure (#703).
+A termination the runner itself caused is **not** an agent failure (open-mercato/cezar#703).
 `end()` arms a SIGTERM→SIGKILL watchdog for CLIs that ignore EOF, and
 `interrupt()` signals outright; the agent CLIs install their own handlers and
 exit `128 + signal`. A runner MUST therefore record that it sent the signal and
@@ -100,7 +102,7 @@ settle such an exit on the normal path — `isSignalTerminationExit(exitCode)`
 a finished run settle as `failed` and a cancelled run settle as `failed` too.
 
 That watchdog MUST gate its SIGKILL escalation on real termination, never on
-`ChildProcess.killed` (#844). Node sets `killed` when a signal is *delivered*,
+`ChildProcess.killed` (open-mercato/cezar#844). Node sets `killed` when a signal is *delivered*,
 so the watchdog's own SIGTERM flips it while the CLI — which handles the
 signal — keeps running, and the escalation written for exactly that case is
 skipped. Use `trackChildExit(child)` (`packages/cezar/src/core/agent-runner.ts`),
@@ -118,7 +120,7 @@ real exit (or a failed spawn). After exit, inherited stdout gets a bounded
 250ms drain; remaining pipe handles are closed. Neither a timeout nor sending
 a signal can fabricate an exit or free a still-live session's capacity.
 
-**Non-human input (owned workers, 2026-09-06; immediate delivery, #505).** `sendAgentMessage`
+**Non-human input (owned workers, 2026-09-06; immediate delivery, hearsay-tools/cezarion#505).** `sendAgentMessage`
 must never resolve a native question or a portable marker ask. False means the caller
 still owns the input and must retry later, NEVER fall back to `sendMessage`. A runner
 whose `inputDelivery.mode` is `steer` admits it while a turn runs, through the
@@ -142,8 +144,9 @@ opened a turn counts as read when that turn completes.
 | Claude 2.1.280 | steer, observable | stdin line with `uuid`; argv `--replay-user-messages` | the replay echo with that uuid, or a `result` listing it in `user_message_uuids` | none: a line written after the last model call runs as the CLI's next queued turn |
 | Codex 0.155.1 | steer, observable | `turn/steer` with `expectedTurnId` and `clientUserMessageId` | `item/started` `userMessage` whose `clientId` matches — the input entered the thread's history and the next model call reads it (not a sampling timestamp: probes saw it 0.8 s and 26.7 s after the steer, mid-tool); a `turn/start` submission at its turn's completion | `turn-end.unconsumedInputIds`; a steer refused because its turn ended, or acknowledged after it completed, starts a turn with the same client id |
 | Pi 0.87.0 | steer, observable | `prompt` with `streamingBehavior: 'steer'` (never `followUp`); session starts with `set_steering_mode: all` (overrides Pi's default `one-at-a-time` — cezar owns the session and `get_state` cannot tell the default from an explicit user setting) | the user `message_start` with the submitted text; a burst of steers in `all` mode all match at the same next step, oldest pending submission first | none: pi runs an acknowledged steer in the turn or as the next prompt |
-| OpenCode 1.18.32 (V1) | steer, observable | `prompt_async` while busy; no second turn opens | the first assistant `message.updated` naming the steered user message as `parentID` | `input-unconsumed` after a 2 s quiet idle (opencode#46842 lost wake); a later server run for it opens its own turn |
+| OpenCode 1.18.32 (V1) | steer, observable | `prompt_async` while busy; no second turn opens | the first assistant `message.updated` naming the steered user message as `parentID` | `input-unconsumed` after a 2 s quiet idle (anomalyco/opencode#46842 lost wake); a later server run for it opens its own turn |
 | Cursor 2026.09.18 | boundary | refused while busy: a second ACP `session/prompt` cancels the running turn | the turn it opens | none |
+| OMP 18.4.11 | steer, observable | `prompt` with `streamingBehavior: 'steer'`; session starts with `set_steering_mode: all` | the user `message_start` with the submitted text | none: OMP's settle predicate (`rpc-session-settle.ts`) requires `queuedMessageCount === 0`, so a queued steer is read before the session settles. Source-derived; no live turn was possible (see §4 OMP) |
 
 Probe evidence for this table is in `.ai/specs/2026-09-23-immediate-worker-delivery.md`;
 `.ai/scripts/probe-steering.ts` re-runs it against the installed CLIs (paid sessions,
@@ -160,7 +163,7 @@ replays input still `awaitingRead`: delivery is at-least-once and the replayed t
 keeps the input ID. The method remains synchronous: false refuses without a write; a Promise
 reserves one submission immediately, but is not a delivery receipt. Codex resolves
 at the matching turn/start or turn/steer RPC result, OpenCode at successful prompt
-HTTP acknowledgement, and Pi at the matching prompt response id. Claude has no
+HTTP acknowledgement, and Pi and OMP at the matching prompt response id. Claude has no
 per-prompt RPC receipt: its write callback proves only successful pipe delivery,
 not model execution. A transport rejection remains replayable; a successfully
 accepted command followed by a provider failure retains its transport receipt.
@@ -238,7 +241,7 @@ turn instead of waiting for it. The cockpit distinguishes that confirmation from
 transport ACK time and from the later event projection timestamp.
 Stopped/destroyed workers cannot be resumed by messages; workers cannot resume
 their parent. Parent review and genuine human questions still require a human.
-Only a human can answer an outstanding human ask, with one exception (#505): a
+Only a human can answer an outstanding human ask, with one exception (hearsay-tools/cezarion#505): a
 worker's question (native or `CEZ:ASK`) is routed to its parent as a conversation
 request carrying the question (`worker-question-routed`), and the parent's `reply`
 to it answers the ask through the same seam a human answer uses, recording
@@ -276,7 +279,7 @@ not exactly-once delivery); it must never silently drop it or claim success.
   reply turn and pending delivery acknowledgement, including nonfinal agent steps. Explicit end/interrupt and provider
   failures keep their existing semantics; a timer is never termination proof.
 - `onAgentInputConsumed?: (inputIds) => void` — the model received these inputs
-  (#505). At most once per ID; never from a transport acknowledgement.
+  (hearsay-tools/cezarion#505). At most once per ID; never from a transport acknowledgement.
 - `onAgentInputReady?: () => void` — optional in-process retry hint, NOT delivery
   acknowledgement or completion. Only a successful late reply/prompt at an idle,
   open session with no queued human prompt emits it. The manager checks current session identity, pending asks,
@@ -296,12 +299,12 @@ Notable fields (full doc-comments in the source):
   `model?`, `timeoutMs?`, `env?` (merged over `process.env` — carries
   `CEZ_HANDOFF_FILE` / `CEZ_TODOS_FILE` / `CEZ_TASK_ID`).
 - `allowedTools?` / `bashAllowlist?` / `additionalDirectories?` — tool access.
-  **Caveat (#430):** the zero-config default (`DEFAULT_ALLOWED_TOOLS`) includes
+  **Caveat (open-mercato/cezar#430):** the zero-config default (`DEFAULT_ALLOWED_TOOLS`) includes
   unrestricted `Bash`, and Codex/OpenCode do not honor `allowedTools` at all.
   Treat the default `auto` permission mode as full shell access, not a
   sandbox: Codex uses `danger-full-access` with `approvalPolicy: never`, and
   OpenCode auto-approves every permission. Configurable restrictive modes are
-  specified by `2026-07-17-permission-modes` (#475).
+  specified by `2026-07-17-permission-modes` (open-mercato/cezar#475).
 - `restrictNativeDelegation?` — optional per-invocation intent, mapped only inside
   adapters; absent preserves ordinary settings. Governed session provisioning
   supplies it on initial steps, Continue and recovery. See D1 below for precise
@@ -309,7 +312,7 @@ Notable fields (full doc-comments in the source):
 - `sessionId?` / `resume?` — stable session id for interactive takeover and for
   `--resume` ("Continue" after a run ends).
 
-**Per-runner support declarations (#284).** Not every field crosses every wire,
+**Per-runner support declarations (hearsay-tools/cezarion#284).** Not every field crosses every wire,
 and the seam says so in code rather than only in the caveat above: every runner
 carries `specSupport: AgentRunSpecSupport` — one entry per `AgentRunSpec` field,
 either `{ honored: true, via }` naming the flag, request field or process option
@@ -319,9 +322,9 @@ reason). `AGENT_RUN_SPEC_FIELDS` is the same field list at runtime, typed as a
 full `Record` over `keyof AgentRunSpec`, so adding a field to the spec is a
 compile error until every runner declares it, and a new runner class without a
 declaration does not compile at all. The constants (`CLAUDE_SPEC_SUPPORT`,
-`CODEX_SPEC_SUPPORT`, `OPENCODE_SPEC_SUPPORT`, `PI_SPEC_SUPPORT`, each next to its
-class) are the source; §7's spec-support rows hold each one against the runner's
-real boundary in both directions. As declared at #284, a reading aid only:
+`CODEX_SPEC_SUPPORT`, `OPENCODE_SPEC_SUPPORT`, `PI_SPEC_SUPPORT`, `CURSOR_SPEC_SUPPORT`,
+`OMP_SPEC_SUPPORT`, each next to its class) are the source; §7's spec-support rows hold each one against the runner's
+real boundary in both directions. As declared at hearsay-tools/cezarion#284, a reading aid only:
 
 | Field | claude | codex | opencode | pi |
 | --- | --- | --- | --- | --- |
@@ -339,6 +342,11 @@ real boundary in both directions. As declared at #284, a reading aid only:
 | `timeoutMs` | kill switch | kill switch | kill switch | kill switch |
 | `sessionId` | `--session-id` / `--resume` | `thread/resume` threadId | **dropped** | `--session-id` / `--session` |
 | `resume` | `--resume` | `thread/resume` | **dropped** | `--session` |
+
+`OMP_SPEC_SUPPORT` honors every field (it has no column here): `allowedTools` through `--tools` with
+OMP names (or `--no-tools`), `additionalDirectories` through `--add-dir` (Pi drops it), `effort`
+through `--thinking`, and `sessionId` only as `--resume <id>`: OMP has no `--session-id`, a fresh
+session mints its own id and the runner reads it from `get_state`.
 
 **System prompt channel** — a backend without a dedicated system-prompt input
 must deliver `spec.systemPrompt` as a leading block of the opening user message.
@@ -370,8 +378,8 @@ type AgentEvent =
   | { type: 'token-usage'; tokensUsed: number }
   | { type: 'cost'; usd: number }
   | { type: 'session'; sessionId: string }                    // backend's real session id, once known
-  | { type: 'turn-end'; unconsumedInputIds?: readonly string[] } // #505
-  | { type: 'input-unconsumed'; inputIds: readonly string[] }    // #505: out-of-turn unread report
+  | { type: 'turn-end'; unconsumedInputIds?: readonly string[] } // hearsay-tools/cezarion#505
+  | { type: 'input-unconsumed'; inputIds: readonly string[] }    // hearsay-tools/cezarion#505: out-of-turn unread report
   | { type: 'note'; message: string }
   | { type: 'done' }
   | { type: 'error'; message: string };
@@ -460,7 +468,7 @@ type UiEvent =
   | UiImageEvent;            // 'image'            — itemId?, mediaType, data (base64; manager re-emits URL)
 ```
 
-**AskUser (`ask.requested`, #473, #565).** The portable path remains
+**AskUser (`ask.requested`, open-mercato/cezar#473, open-mercato/cezar#565).** The portable path remains
 backend-neutral: the agent asks a structured
 multiple-choice question by ending a turn with a `CEZ:ASK <json>` control marker
 (a sibling of `CEZ:DONE` / `CEZ:MONITORING`); the RunManager detects it on the
@@ -525,7 +533,9 @@ messages" tests).
 
 ---
 
-### Cursor ACP (#264)
+<a id="cursor-acp-264"></a>
+
+### Cursor ACP (hearsay-tools/cezarion#264)
 
 `cursor-acp-runner.ts` launches `agent --force acp` and holds one JSON-RPC stdio
 connection across prompts. `initialize` precedes `session/new` or `session/load`;
@@ -541,7 +551,7 @@ nonhuman input never answers it. Option labels map back to the original option
 IDs. Free text skips the choice request and follows as a new prompt. Plan
 approval displays the plan and asks explicitly. After a human native answer,
 a successful markerless `end_turn` resumes once on the same session without a
-second human prompt (#383). An already queued human prompt takes precedence;
+second human prompt (hearsay-tools/cezarion#383). An already queued human prompt takes precedence;
 rejection remains rejection. Pending asks, DONE/MONITORING markers and non-success
 stop reasons prevent this automatic resume. The intermediate ACP boundary remains
 in v2 turn accounting but emits no v1 idle handoff. Ordinary markerless turns
@@ -580,6 +590,67 @@ See [ACP Session Config Options](https://agentclientprotocol.com/protocol/v1/ses
 
 ---
 
+### OMP RPC (hearsay-tools/cezarion#595)
+
+`omp-runner.ts` launches `omp --mode rpc` and holds one persistent JSONL connection, like Pi.
+OMP is a Pi fork with its own dialect, so it is a standalone runner, mapper and mock (Pi files
+are untouched; pure helpers proven identical to Pi's are copied with a comment naming the Pi
+function). Design record: `.ai/specs/2026-10-02-omp-runner.md`, wire contract oh-my-pi
+v18.4.11 `docs/rpc.md` and `rpc-types.ts`.
+
+`omp-ui-mapper.ts` is the pure mapper. The load-bearing differences from Pi:
+
+- **No `agent_settled`.** The turn ends at `session_settled`, or at a `prompt_result`
+  `agentInvoked: false` (or a `prompt` response carrying it) for the prompt that **opened** the
+  turn. `agent_end` is never a boundary: it also fires with `yielded: false` while OMP retries,
+  compacts or answers a reminder. A steer OMP completes locally, or that fails after admission,
+  does not end the running turn. A `prompt` response with `success: false` (pre-admission, no
+  `prompt_result` follows) emits one non-fatal `session.error` and ends the turn only when it
+  answers the opening prompt; the mapper remembers the id so a later `prompt_result` does not
+  duplicate the error.
+- **Result-based diffs and plan.** Edit/write diffs come from the tool **result** `details`
+  (`path`, `oldText`, `newText`, `perFileResults[]`; default `edit.mode` is `hashline`, whose args
+  are only `{input}`), falling back to replace-mode args. `plan.updated` comes from the `todo`
+  result `details.phases[].tasks[]` (`abandoned` is `cancelled`, `blocked` is `pending`).
+- **Sub-agents** stream as `subagent_lifecycle` / `subagent_event` after
+  `set_subagent_subscription {level: "events"}`. Children nest under their `task` call by
+  `parentItemId` and never reach v1 text or end the parent turn (S9). A batch `task` call
+  (`args.tasks[]`) becomes one synthetic task item per sub-agent (`<toolCallId>#<id>`) so the
+  Agents drawer shows N rows. A child event that arrives before its lifecycle frame is held in a
+  bounded buffer (200 frames, 8 ids) and replayed.
+- **Ignored frames:** `ready`, `extension_ui_request` (`setWidget` and friends, sent unsolicited
+  at startup in plain rpc mode), `advisor_cost_changed`, `available_commands_update`, `queue_update`,
+  `auto_*`, `cache_warming_*`. The wire stays on protocol v1; opt in to
+  `set_event_filter {messageUpdates: "delta"}` to drop per-delta snapshots.
+- **Ask** is the portable `CEZ:ASK` marker: plain `--mode rpc` never builds OMP's native ask tool.
+- Startup writes `get_state`, `set_steering_mode all`, `set_subagent_subscription events`,
+  `set_event_filter`, then the first `prompt`. A fresh session's id comes from `get_state`;
+  Continue uses `--resume <id>`.
+
+Tools: `--tools` is an allowlist validated against OMP's registry, so cezar maps names onto OMP's
+(`TodoWrite` to `todo`; `WebFetch` has no web-only equivalent and is dropped) and drops anything unmapped with one v1 `note`;
+`allowedTools: []` is `--no-tools`. The zero-config default adds `todo, lsp, ast_edit, task, wait`
+to the cezar defaults. `find` and `ast_grep` are gated behind settings that default off and are
+**not** in it: naming an unavailable built-in exits 2. When settings the user chose disable a
+named tool, the runner respawns once without exactly those names, keeping accepted input in a
+stdin outbox so none is lost. MCP tools: OMP registers `mcp__<server>_<tool>` (one underscore,
+lowercased and sanitized), so a Claude-spelled grant `mcp__<server>__<tool>` is translated before
+it reaches `--tools`. OMP validates `--tools` right after its 250 ms RPC MCP discovery window, so a
+slow server's tool can still read as unknown: the same one-time respawn also drops the `mcp__`
+names this spawn passed from an `Unknown tool(s) in --tools: a, b.` refusal, with one v1 `note`
+for everything dropped. Any other unknown name stays fatal, and the respawn never widens.
+
+Models: `omp models --json` prints an object, `{"models": [...]}`, which feeds discovery and the
+provider status probe (empty means not logged in). Settings, MCP and memory files are edited from
+Settings → Agent config, including OMP's YAML config.
+
+Verified on the real binary: `omp/18.4.11` startup frames, the `set_*` acknowledgements,
+`omp models --json`, `--tools` refusals and `get_state.dumpTools`. **Not verified live:** no
+model turn ran, so turn fixtures and `inputDelivery` are source-derived with citations (the
+fixtures README separates observed from constructed lines).
+
+---
+
 ## 5. The tool display model (`packages/cezar/src/core/tool-display.ts`)
 
 `toolDisplay(name, input)` turns a backend tool name + raw input into
@@ -609,7 +680,7 @@ or a new fixture set forgets one — a named row fails. The matrix:
   sub-agent: codex's `enteredReviewMode`/`exitedReviewMode` pair folds into a
   single `task` item with a running→completed lifecycle, so a consumer counting
   task items counts agents, not frames (spec
-  `.ai/specs/2026-07-20-grouped-subagent-display.md`, #474)
+  `.ai/specs/2026-07-20-grouped-subagent-display.md`, open-mercato/cezar#474)
 - `usage.updated` with raw token counts
 - `turn.completed` with a `stopReason`
 - sub-agent **nesting** via `parentItemId` where the upstream wire attributes
@@ -623,7 +694,9 @@ a wire gap.
 That covers what a mapper EMITS. The other half of the same requirement — what a
 runner DOES — is §7, and a new backend has to satisfy both.
 
-## CI-wait tool contract (#474)
+<a id="ci-wait-tool-contract-474"></a>
+
+## CI-wait tool contract (hearsay-tools/cezarion#474)
 
 `cezar_wait_for_ci` registers an external CI observation; it never grants merge,
 review acceptance, or task-completion authority. Its request, receipt, durable
@@ -692,7 +765,7 @@ pipe closure after a hard exit. Never recover ownership from a stale PID alone.
 
 The tool is provisioned through `AgentRunSpec.cezarTools` independently of worker
 permissions. Claude, Codex, OpenCode and Cursor use the bundled stdio MCP adapter;
-Pi uses a bundled extension over the same shared client. The private chained Hono
+Pi and OMP use a bundled extension over the same shared client. The private chained Hono
 family accepts `POST /api/v1/tools/ci-wait` over a Unix-domain socket or Windows
 named pipe; authenticated GET holds the adapter lifetime connection. It is **not** a cockpit HTTP route or network listener. Middleware
 validates the shared schema. A memory-only session capability binds project, run
@@ -702,7 +775,7 @@ prompts, persisted records, descriptor snapshots or user-authored settings.
 Capabilities are revoked on session replacement, stop and controller disposal.
 This is cooperative same-user authorization, not isolation from unrestricted shell.
 
-CI registration refusals name the blocking state (#713), with separate contract
+CI registration refusals name the blocking state (hearsay-tools/cezarion#713), with separate contract
 codes for manager disposal, capability revocation, missing/inactive/stopping runs,
 missing/replaced/closed sessions, cancellation/finish, stale session generation,
 pending/unanswered human questions, worker waits, stopped worker execution and
@@ -717,11 +790,11 @@ settlement alone must not discard the result or start competing waits. Harness r
 R27 reproduces this sequence through every runner's native mock wire and the real
 private CI controller, then verifies CI registration succeeds after delivery.
 
-Every cezar tool comes from one list (`packages/cezar/src/ci-wait/tools.ts`, #781):
-the adapter's `tools/list` and server instructions, Pi's extension, Claude's
-generated allow-list entries, Pi's tool admission and the environment names each
+Every cezar tool comes from one list (`packages/cezar/src/ci-wait/tools.ts`, hearsay-tools/cezarion#781):
+the adapter's `tools/list` and server instructions, Pi's and OMP's extensions, Claude's
+generated allow-list entries, Pi's and OMP's tool admission and the environment names each
 harness forwards to the adapter all read it. `cezar_preview_serve` and
-`cezar_preview_stop` (#803) are on that list only under `CEZ_PREVIEW=1`; the
+`cezar_preview_stop` (hearsay-tools/cezarion#803) are on that list only under `CEZ_PREVIEW=1`; the
 provisioned session environment carries the opt-in,
 and Claude, Codex and Cursor forward it explicitly because they start MCP servers
 from an environment allowlist. Harness row R35 lists the tools through every
@@ -743,11 +816,12 @@ extensions and permissions when adding a collision-resistant per-session tool na
 | OpenCode | Merge the local MCP entry into parsed runtime configuration without discarding supplied config or replacing unrelated servers; malformed configuration fails explicitly. |
 | Cursor | Supply the supported ACP descriptor and environment on `session/new` and `session/load`; verify invocation and existing permission routing. |
 | Pi | Add an explicit CI extension alongside the retry extension; exercise actual tool registration and calls without replacing discovered extensions or tool settings. |
+| OMP | Add an explicit CI `--extension scripts/omp-ci-wait.mjs` alongside the user's discovered extensions (never `--no-extensions`); registration is proven by `get_state.dumpTools` listing `cezar_wait_for_ci` on the real binary (v18.4.11). `--tools` admits exactly the names the extension registers, since OMP exits 2 on an unknown name. The extension imports `src/ci-wait/tools.ts` in a source checkout; real OMP cannot resolve the workspace contract package there, so it falls back to `dist/ci-wait/tools.js` only when that file exists and otherwise rethrows the source error. MCP injection is rejected: OMP has no CLI flag for it, only `.omp/mcp.json` files. |
 
 These are **release requirements**, not a claim that a configuration fixture alone
 proves tool discovery. Every `RUNNER_IDS` backend needs named executable parity
 coverage, installed upstream interface/version evidence, and real bundled
-`tools/list`/`tools/call` transport (Pi registration/call for Pi) over its offline
+`tools/list`/`tools/call` transport (Pi and OMP registration/call for the extension runners) over its offline
 wire on fresh, Continue and recovery paths. A wire limitation requires owner
 review before shipping; there is no silent skip, permission widening or marker
 fallback. Pack/install and `CEZ_DRY_RUN=1` checks must exercise the bundled helpers
@@ -757,7 +831,7 @@ this normative contract.
 
 ## 7. Harness parity — session and lifecycle (`packages/cezar/src/core/harness-parity.test.ts`)
 
-**R43** (#738), in `workflows/worker-reboot-parity.test.ts` and
+**R43** (hearsay-tools/cezarion#738), in `workflows/worker-reboot-parity.test.ts` and
 `workflows/worker-location-evidence.test.ts`, drives every `RUNNER_IDS`
 backend's `HARNESS_ADAPTERS` native wire through worker cancellation and a successful twin.
 Linux prior-boot controller evidence settles the old execution independently of resource cleanup.
@@ -782,7 +856,26 @@ Only prior-boot evidence and process enumeration scope are synthetic; cwd permis
 process exit, native wires, stores and Git remain real. Linux-only OS coverage exempts no runner;
 legacy/unknown-boot and recorded-process guards live in `delegation/process-liveness.test.ts`.
 
-Crash-diagnostic rows **S15–S17** (#499) drive every `RUNNER_IDS` adapter's
+**R47** (hearsay-tools/cezarion#839), in `workflows/worker-restart-parity.test.ts`,
+drives every `RUNNER_IDS` backend through its native `HARNESS_ADAPTERS` wire,
+cancellation, and same-boot interrupted checkpoint recovery. A valid token ledger
+with dead recorded incarnations and only unverified unreadable cwd candidates
+permits durable cancellation/abandonment, never a fabricated exit proof. Stale
+partial collection cannot authorize parent Finish; latest settled collection can.
+Restart preserves abandonment and the generation; abandoned intent cannot start a
+new generation even after holders clear. Strict fresh resource proof
+still blocks worktree/branch/scratch cleanup, history deletion and reuse. A live
+recorded unreadable process still blocks settlement. Real mutation keepers make
+owned cleanup refuse promptly and withdraw its queued claim, preserving resources
+until an explicit retry after unlock. Linux-only OS coverage exempts no runner.
+Missing/malformed ledgers and incomplete location evidence retain their existing
+conservative settlement guards; candidate-only destruction refusals report
+unverified membership without waiting out the full termination timeout. Mixed
+readable-holder/candidate probes with absent or incomplete ledgers recheck each
+fresh poll: after the verified holder exits, destruction refuses promptly with
+the candidate reason and retains the execution generation, worktree, branch and scratch.
+
+Crash-diagnostic rows **S15–S17** (hearsay-tools/cezarion#499) drive every `RUNNER_IDS` adapter's
 native transport through an uncaught-exception-shaped stderr fixture, a plain
 single-line failure, and a clean/requested shutdown with stderr. RPC mocks send
 a malformed native frame before the crash. Crash summaries preserve the
@@ -814,7 +907,7 @@ channel. No turn starts. OpenCode's focused spawn test additionally requires
 exactly one wrapped error event with PATH/installation guidance before rejecting
 the result, without a turn-end or done event.
 
-Workflow deadline rows **T1–T6** (#470) live in
+Workflow deadline rows **T1–T6** (hearsay-tools/cezarion#470) live in
 `core/workflow-timeout-parity.test.ts` and are registered in the shared parity
 guard. Each `RUNNER_IDS` backend uses its own `HARNESS_ADAPTERS` native wire:
 non-final managed steps outlive the default runner deadline, explicit zero disables
@@ -823,7 +916,7 @@ retain their default cap. Longer authored limits override that cap, while defaul
 tasks retain no wall-clock cap. The tests shorten only `DEFAULT_RUN_TIMEOUT_MS`; the
 manager, runners, transports and terminal signals remain real.
 
-Intermediate question rows **Q1–Q10** (#427) live in
+Intermediate question rows **Q1–Q10** (hearsay-tools/cezarion#427) live in
 `core/workflow-ask-parity.test.ts` and the shared parity guard. Every
 `RUNNER_IDS` adapter sends portable ASK text through its native assistant-message
 and turn-completion wire; the malformed variant changes only the text inside
@@ -852,7 +945,7 @@ emits a failure and interrupts the runner; it never synthesizes process exit or
 releases capacity early. Standalone wall-clock limits remain unchanged.
 
 Autonomous turn-end rows **A1–A14** live in
-`core/workflow-autonomous-parity.test.ts` and the same parity guard (#426).
+`core/workflow-autonomous-parity.test.ts` and the same parity guard (hearsay-tools/cezarion#426).
 Every adapter covers fresh and Continue nudges, portable ASK attribution, the
 40-nudge cap, non-autonomous parking, monitoring, DONE and persisted-question
 priority. A9 preserves native mid-turn questions; Claude/Pi have executable
@@ -884,8 +977,8 @@ their existing policies.
 
 §6 pins what a mapper emits. This pins the rest of the contract in
 `agent-runner.ts`: session lifecycle, provider-failure surfacing, `sendMessage`,
-ask routing and park declarations. It exists because nine fixes (#2, #3, #4, #5,
-#6, #46, #48, #53, #54) each repaired a failure mode on ONE backend that no
+ask routing and park declarations. It exists because nine fixes (hearsay-tools/cezarion#2, hearsay-tools/cezarion#3, hearsay-tools/cezarion#4, hearsay-tools/cezarion#5,
+hearsay-tools/cezarion#6, hearsay-tools/cezarion#46, hearsay-tools/cezarion#48, hearsay-tools/cezarion#53, hearsay-tools/cezarion#54) each repaired a failure mode on ONE backend that no
 shared contract covered, so the same class of bug shipped again on the next one.
 
 **Regression coverage belongs in the fixing PR.** A fix to runner lifecycle,
@@ -935,12 +1028,12 @@ it, so no existing marker is renamed. A new runner declares its own map:
 
 S9 also pins parent-only v1/result text while child messages remain nested on v2.
 R12 asserts the `subagent` turn parks as `running`/`monitoring`, never `waiting`
-(#149). Pi is explicitly exempt from S9 and R12 because its RPC has no child
+(hearsay-tools/cezarion#149). Pi is explicitly exempt from S9 and R12 because its RPC has no child
 session transcript. Codex filters both child message deltas and completions;
 Claude excludes child assistant text from v1 and its result fallback buffer;
 the v2 fallback uses the same parent-only guard.
 
-R36–R39 (#399) record the shared monitoring wrap-up contract on every native
+R36–R39 (hearsay-tools/cezarion#399) record the shared monitoring wrap-up contract on every native
 prompt channel for fresh, Continue and restart-recovered sessions, and the
 automatic monitoring wake. Finished work with the task goal complete requires
 `CEZ:DONE`; pending work requires `CEZ:MONITORING`. Genuine user questions retain
@@ -948,23 +1041,37 @@ their own paths. R40 keeps completion prose without a marker parked as waiting;
 the harness does not infer completion from prose. Offline prompt recordings prove
 delivery, not live model compliance.
 
-R26 (#398) runs every `HARNESS_ADAPTERS.askResumeCases` entry for every
-`RUNNER_IDS` backend: Claude/Pi `CEZ:ASK`, Codex `item/tool/requestUserInput`,
+R26 (hearsay-tools/cezarion#398) runs every `HARNESS_ADAPTERS.askResumeCases` entry for every
+`RUNNER_IDS` backend: Claude/Pi/OMP `CEZ:ASK`, Codex `item/tool/requestUserInput`,
 OpenCode `question.asked`, and Cursor `cursor/ask_question` plus `cursor/create_plan`.
 One human answer must reach completion with no later `waiting` transition and no
 second human prompt. R3 proves parking; R6 deliberately returns to markerless
 waiting to test owned-input draining. Neither replaces R26. New runners must
 supply a nonempty ask-kind inventory and native prompts, or a named executable
 wire exemption. The prose guard rejects counted runner rosters in this contract,
-the #68 spec and harness-parity comments so adding an id cannot stale their counts.
+the hearsay-tools/cezarion#68 spec and harness-parity comments so adding an id cannot stale their counts.
 
-R15 (#121/#401) releases native child updates only after the run has parked,
+R15 (hearsay-tools/cezarion#121/#401) releases native child updates only after the run has parked,
 then checks that status, activity and the monitoring wake deadline survive.
 Claude and Codex retain nested items; Cursor retains attributed late task
 metadata while dropping closed child-session chunks; OpenCode discards closed
-child scopes. Pi has the same explicit child-wire exemption as S9/R12.
+child scopes. Pi has the same explicit child-wire exemption as S9/R12. OMP has none: its
+`subagent_lifecycle`/`subagent_event` frames carry the child transcript, so S9, R12 and R15
+run on OMP's native mock wire including `subagent` and `subagent-after-park`. The mock's
+frames after `session_settled` are constructed (real OMP settles only when it has no pending
+async work) and kept as a stricter robustness check.
 
-R16 (#134/#401) checks a stored assistant ASK and exactly one waiting question
+**OMP exemptions** (`PARITY_EXEMPTIONS` in `harness-parity.testkit.ts`; each names a wire fact,
+never "not implemented"):
+
+| Row | Kind | Why |
+| --- | --- | --- |
+| A9 | capability-absent | v18.4.11 plain `--mode rpc` never constructs the ask tool: `sessionOptions.hasUI` is true only for interactive or `rpc-ui` (`src/main.ts`) and `AskTool.createIf` returns null without it. The turn-end `CEZ:ASK` fallback applies (A3/A4). |
+| R16 | capability-absent | `text_end.content` is the one assistant-text channel for v1 and v2; `message_end` has no separately mapped text. |
+| I2 | capability-absent | `session_settled` requires `queuedMessageCount === 0` (`isRpcSessionSettled`, `modes/rpc/rpc-session-settle.ts`) and `agent_end` is rewritten to non-terminal while the agent has queued messages (`session/agent-session.ts`), so a steer accepted before settle is read in the same turn. Source-derived (no live turn). |
+| A13, A14 | scenario-unconstructible | Same as every runner: no portable-answer HTTP ACK retained after turn completion; the executable cell checks idle expiry and Continue instead. |
+
+R16 (hearsay-tools/cezarion#134/#401) checks a stored assistant ASK and exactly one waiting question
 card on every runner. All current wires couple their completed parent text to
 v1, so the v2-only precondition has named `capability-absent` exemptions pinned
 by the opposite assertion: the raw v1 stream must contain that same marker.
@@ -973,12 +1080,12 @@ case instead. The isolated manager fallback tests remain in `run.test.ts`; the
 wire rows do not pretend to reproduce a missing-v1 envelope these protocols do
 not supply.
 
-R22/R23 (#515) preserve task scratch across native session close and host temp-environment changes: ordinary
+R22/R23 (hearsay-tools/cezarion#515) preserve task scratch across native session close and host temp-environment changes: ordinary
 runs keep files through fresh and continuation idle-close paths, and workers
 with a pending question keep files after private process completion. Terminal
 Finish still reaps both repo-local and fallback scratch. Every runner is covered.
 
-R28/R29 (#473) idle-close and Continue twice on every native runner wire, then
+R28/R29 (hearsay-tools/cezarion#473) idle-close and Continue twice on every native runner wire, then
 Finish into `done` or `review`. Intermediate Continue steps remain waiting while
 parked and become done with a completion timestamp only when the run succeeds.
 R30 delays the final diff check and cancels during it: cancellation wins over
@@ -993,12 +1100,12 @@ starts and idle-closes or remains queued behind capacity. Continue acceptance
 supersedes that settlement before scheduling; returning to no active session must
 not let the earlier Finish close the newer execution or its steps.
 
-R20/R21 (#661) complete an owned worker over each native mock wire, then commit a
+R20/R21 (hearsay-tools/cezarion#661) complete an owned worker over each native mock wire, then commit a
 cleanup checkpoint. Enabled delegation reads only that worker's family; disabled
 delegation enters no terminal-checkpoint reconciliation and reads no histories.
 The persisted execution proof remains complete in both cases.
 
-R24/R25 (#495, `core/harness-autosave.test.ts`) keep initial and Continue cleanup
+R24/R25 (hearsay-tools/cezarion#495, `core/harness-autosave.test.ts`) keep initial and Continue cleanup
 active across stalled autosave Git commands on every native runner wire. Each
 command gets 30 seconds, then TERM and (after one second) KILL. An unsuccessful
 save is reported without deleting working files. Two further seconds without
@@ -1015,12 +1122,63 @@ snapshots can hide its descendants; this is observation, not kernel containment.
 If the platform probe is unavailable, autosave fails before spawning Git and
 cleanup continues with working files preserved.
 
-R18/R19 (#548) use every runner's native message wire to check final-line ASK
+R18/R19 (hearsay-tools/cezarion#548) use every runner's native message wire to check final-line ASK
 selection after an earlier prose mention, and quoted ASK examples without a
 marker. Parsing and transcript stripping must select the same final line;
 ordinary examples leave no question card or rejection note.
 
-`worker-parent-attention.test.ts` (#249/#401) loops every runner for fresh and
+Monitoring turn rows **M1–M30** (hearsay-tools/cezarion#772) live in
+`workflows/monitoring-turn.test.ts`, `workflows/worker-parent-attention.test.ts`
+and `workflows/monitoring-channel-order.test.ts` and enter the shared parity guard.
+Every `RUNNER_IDS` adapter carries multiple parent assistant text segments through its native wire on fresh and Continue sessions.
+A standalone `CEZ:MONITORING` declaration survives a same-turn acknowledgement;
+subsequent explicit human questions and direct review/approval requests take
+precedence. A later monitoring declaration supersedes an earlier prose question
+resolved within the same turn; durable structured questions, DONE and spent parent
+completion gates retain their existing precedence. Ordinary markerless autonomous
+turns retain their nudge policy (M13/M14); prose recognition changes only quiet
+monitoring/dependency parks. Quoted/indented marker
+examples and fenced code cannot declare monitoring, and routine mentions of
+review or checks cannot create a human gate. M1 fires the real monitoring wake
+callback and proves capacity was released. M7 closes the actual idle session,
+retains the unanswered question, then delivers its answer through Continue and
+checks that a later monitoring turn carries no stale attention. M15 recognizes
+active Markdown lists/emphasis while retaining example exclusions. M16 withdraws
+a wait superseded by a prose gate, keeps its child alive on idle closure, retains
+the gate across restart and holds later worker input until a successful human
+answer. M9/M10 hold later worker input across delayed ACKs as well, then deliver
+it with the human answer. M17 pins the fresh path's genuine accepted-wait
+session-failure protection. Prose gates use a durable note plus the existing exact delivery receipt;
+they do not manufacture a structured question card. M18 retains a real ASK
+card across a routine acknowledgement, idle close and delivered answer; M19
+retains DONE through an acknowledgement and reaches review. M20 excludes
+quoted/fenced/indented/example ASK and DONE declarations. M21 retains later
+DONE precedence over an earlier portable ASK; M22 retains the latest malformed
+ASK diagnostic and raw fallback. M23 keeps autonomous portable overrides on
+both turn-end paths. M24 retains rejected active ASK intent over monitoring
+without a card, including latest malformed replacement and later valid replacement.
+M25 carries that fallback through registered wait withdrawal, idle/restart and
+late worker input until an exact delivered human response. M26/M27 pin delayed
+ACK admission; M28 preserves ordinary rejected-ASK autonomous nudging. Active
+ASK lines use the existing payload parser unchanged.
+M29/M30 in `workflows/monitoring-channel-order.test.ts` retain ordering across
+partial channels on fresh/Continue. Native Codex completion refreshes and
+Codex/OpenCode omitted completion text exercise actual channel divergence;
+the native observer pins each capability. Claude/Pi/OMP/Cursor carry coupled
+completion text; OpenCode also deduplicates refreshed completed parts. Those
+named executable wire controls assert equality rather than inject divergence.
+When one channel is an ordered expansion of the other, classify its raw text
+once; neither channel always wins. Incomparable transcripts retain the existing
+conservative gate policy. This partial/replayed-frame coverage differs from
+R16's canonical complete-snapshot coupling guarantee.
+The native rows
+also assert CLI attention-wait and webhook projections. Cockpit grouping and
+notification transitions remain consumers of the same contract attention rule.
+M9/M10 extend owned-input ACK coverage with explicit human gates and live workers;
+the existing executable Claude/Cursor pipe-write exemptions retain their native
+acceptance-before-response proof. No new wire exemption is needed.
+
+`worker-parent-attention.test.ts` (hearsay-tools/cezarion#249/#401) loops every runner for fresh and
 Continue sessions: markerless turns with live workers stay monitoring, and real
 ASK still wins. Codex/OpenCode/Pi delay transport acknowledgement past turn-end.
 Claude/Cursor acknowledge pipe writes, so their named executable exemptions hold
@@ -1029,23 +1187,23 @@ makes a new runner fail until its transport is classified and exercised.
 
 Owned-input rows S11/S12 pin ask separation and each runner's declared delivery mode:
 a `steer` runner admits busy input, a `boundary` runner refuses and retries at its
-boundary, and a closed session refuses. Input rows I1/I2 (#505) pin that mid-turn
+boundary, and a closed session refuses. Input rows I1/I2 (hearsay-tools/cezarion#505) pin that mid-turn
 input is reported read before its turn ends, and that accepted input a finished turn
-never read is reported; Cursor is scenario-unconstructible for both, and Claude and
-Pi are capability-absent for I2 because they never leave acknowledged input unread. R6–R11 exercise durable queued/startup input, before/during/
+never read is reported; Cursor is scenario-unconstructible for both, and Claude,
+Pi and OMP are capability-absent for I2 because they never leave acknowledged input unread. R6–R11 exercise durable queued/startup input, before/during/
 after asks, restart with an unanswered ask, continuation asks, delayed native replies,
 DONE/explicit-stop precedence and post-send checkpoint failure. R13 runs a persisted
 catalog chain (an agent step plus a check step) inside the owned worker on every
-runner, proving the check executes in the worker's own worktree (#451). R14 runs an
+runner, proving the check executes in the worker's own worktree (hearsay-tools/cezarion#451). R14 runs an
 accepted mixed-runner chain — a step on the runner under test followed by a step on
 another runner — under a per-step identity, proving each step binds its own pinned
-account and provider instead of the run-level one (#452). Echo probes use the
+account and provider instead of the run-level one (hearsay-tools/cezarion#452). Echo probes use the
 same documented assistant/item and terminal frames as each mock's baseline, with
 unique item IDs across turns; no new vendor wire event is invented.
 
 New scenarios are **wire-faithful** on the same terms as the golden fixtures
 (§8): derive the shape from that backend's real transcripts and cite the source.
-A scenario invented from assumption is #443 repeating inside the suite meant to
+A scenario invented from assumption is open-mercato/cezar#443 repeating inside the suite meant to
 prevent it.
 
 **Exemptions are data the suite validates, never an `it.skip`.** An entry in
@@ -1067,7 +1225,7 @@ exemption, that a kind agrees with whether a prompt is declared, and that the
 file contains no skipped cell. A new id in `RUNNER_IDS` therefore fails the suite
 until every row is addressed.
 
-**Spec-support rows (#284).** The same file holds every runner's `specSupport`
+**Spec-support rows (hearsay-tools/cezarion#284).** The same file holds every runner's `specSupport`
 declaration (§1) against its recorded boundary. Each `AgentRunSpec` field has
 one probe. A `boundary` probe drives the runner twice against its mock, the two
 specs differing in that field only, and compares what the mock recorded — argv
@@ -1108,6 +1266,7 @@ accepted identity, empty grants and distinct per-session delegation credentials.
 | Codex 0.153.4 | `thread/start` and `thread/resume` `config: { "features.multi_agent": false, "features.multi_agent_v2": false }` | `codex features list` names both flags; `codex --help` documents dotted config overrides; `codex app-server generate-json-schema` confirms both request config fields. Existing sandbox, approval, account and model settings remain unchanged. |
 | OpenCode 1.18.29 | `POST /session` `permission: [{ permission: "task", pattern: "*", action: "deny" }]` | Installed server `/doc` declares `PermissionRuleset`; its embedded `TaskTool.execute` checks `task`. Later prompt requests contain no `tools` map that would replace session rules. The current adapter creates a fresh session on Continue, so the deny applies there too. It still does not map general `allowedTools`. |
 | Cursor 2026.09.15-d2fe57e | `initialize.clientCapabilities._meta.subagents = false` | Installed `src/acp/agent.ts` negotiates native delegation from this capability; `src/acp/session.ts` passes it to the agent. Ordinary runs advertise `true`; start and Continue use the same handshake. Custom tools and unrestricted shell remain outside hard isolation. |
+| OMP 18.4.11 | `--config` overlay `tools.approval.task: deny`, plus `task`, `wait` and `eval` left out of `--tools` | OMP's user `deny` is absolute in every approval mode (`approval-mode.md`). OMP has no `--exclude-tools`, and no setting disables `eval`'s `agent()`/`workpool()` helpers, so `eval` is dropped from the list. With no workflow `allowedTools`, D1 passes an explicit list (OMP's default set minus those three) instead of no `--tools`, failing closed. Verified with `get_state.dumpTools` on the real binary. |
 | pi 0.85.1 | `--exclude-tools subagent` | Installed `pi --help` applies exclusions to built-in/extension/custom names; the shipped `examples/extensions/subagent/index.ts` registers `subagent`. Other extension discovery and ordinary tool settings remain unchanged. |
 
 **Explicit D1 pi exemption:** pi's RPC has no native delegation primitive or
@@ -1155,7 +1314,9 @@ never answered by lifecycle input, and no automatic merge/review acceptance exis
 
 ---
 
-### Codex retrying stream errors (#550)
+<a id="codex-retrying-stream-errors-550"></a>
+
+### Codex retrying stream errors (hearsay-tools/cezarion#550)
 
 App-server `error` notifications map `error.message` plus nonempty
 `error.additionalDetails` to a v1 `note` and v2 `session.error` with `fatal: false`
@@ -1205,10 +1366,10 @@ these events get persisted as NDJSON), and asserts `toStrictEqual` against the
 `.expected.json`. The same `.expected.json` files feed the parity test in §6.
 
 > Verify fixtures against **upstream wire shapes**, never against your own
-> assumptions. PR #443's root cause was a fixture that encoded an *assumed*
+> assumptions. PR open-mercato/cezar#443's root cause was a fixture that encoded an *assumed*
 > codex shape (`todoList` items that the app-server never emits), which hid a bug
 > where a codex plan never rendered at all. When adding a fixture, cite the
-> upstream schema/source it was derived from, as #443 did.
+> upstream schema/source it was derived from, as open-mercato/cezar#443 did.
 
 ## 9. Persistence & transport
 
@@ -1225,11 +1386,13 @@ these events get persisted as NDJSON), and asserts `toStrictEqual` against the
 
 ---
 
-## 10. Adding a new runner (the #387 `pi` checklist)
+<a id="10-adding-a-new-runner-the-387-pi-checklist"></a>
+
+## 10. Adding a new runner (the open-mercato/cezar#387 `pi` checklist)
 
 A new backend is a **single class behind the seam** plus its mapper, fixtures and
 its rows in **both** parity matrices — never backend-specific types leaking past
-`packages/cezar/src/core/`. PR #387 added `pi` and enumerated every place the
+`packages/cezar/src/core/`. PR open-mercato/cezar#387 added `pi` and enumerated every place the
 runner union was duplicated; that list is the concrete map, and the union now
 derives from one `RUNNER_IDS` tuple in `agent-runner.ts` so most of it is
 typecheck-enforced rather than hand-tracked.
@@ -1300,17 +1463,17 @@ To be first-class:
    `agentHomePaths()` only when the vendor documents one). The guard in
    `agent-descriptors.test.ts` fails the suite for any `RUNNER_IDS` member
    without a descriptor, the way item 11's guard fails one without a
-   model-discovery adapter (#321). A vendor that documents no editable file still gets its
+   model-discovery adapter (hearsay-tools/cezarion#321). A vendor that documents no editable file still gets its
    tab — give the group `empty` copy that says why and what to try, never omit
-   the agent (#322, Pi's MCP group: "No MCP.").
-10. **Model selection** — accept `provider/model` where relevant; #387 documents
+   the agent (hearsay-tools/cezarion#322, Pi's MCP group: "No MCP.").
+10. **Model selection** — accept `provider/model` where relevant; open-mercato/cezar#387 documents
    the existing inconsistencies (opencode drops a bare model silently) — do not
    reproduce a silent-drop. A backend with no default provider gets no entry in
    `BACKEND_MODEL_MAP`'s default column, so a bare id fails loud.
 11. **Host model discovery** — the picker lists the models the user's own CLI can run
    today, never a preset table. Discovery landed one runner at a time after each had
-   shipped without it (#1 pi, #18 invalidation after login, #74 codex failure reasons,
-   #89 claude), which is why it is a checklist step and not a follow-up. Nothing derives
+   shipped without it (hearsay-tools/cezarion#1 pi, hearsay-tools/cezarion#18 invalidation after login, hearsay-tools/cezarion#74 codex failure reasons,
+   hearsay-tools/cezarion#89 claude), which is why it is a checklist step and not a follow-up. Nothing derives
    it from `RUNNER_IDS`: `modelDiscoveryRunnerSchema` is a hand-kept enum and
    `RunnerModelCatalog` takes a `Partial` adapter map, so a runner that skips this step
    fails nowhere — `GET /models` answers `unavailable` and the picker shows presets
@@ -1338,11 +1501,11 @@ To be first-class:
      `runnerDiscoversModels` holds, and `DISCOVERY_RUNNER_LABEL` needs the runner's
      display name for the "cached" / "unavailable" hint.
    - **Sanitized `unavailableReason`** — a `reason` is a stable one-line category
-     (spec `.ai/specs/2026-07-21-codex-latest-model-discovery.md`, #74): never raw
+     (spec `.ai/specs/2026-07-21-codex-latest-model-discovery.md`, hearsay-tools/cezarion#74): never raw
      stderr, a command line, env or config content. A stale cache is served with the
      reason attached, not dropped.
    - **Invalidation** — `RunnerModelCatalog.invalidate(runner)` after provider
-     Connect / Check / refresh (`invalidateHostModels` in `server.ts`, #18), so an
+     Connect / Check / refresh (`invalidateHostModels` in `server.ts`, hearsay-tools/cezarion#18), so an
      `unavailable` answer is never cached across a login. Retry is the same call.
 
    The pin is `packages/cezar/src/core/model-discovery-guard.test.ts`: every `RUNNER_IDS`
@@ -1356,9 +1519,45 @@ To be first-class:
    must receive credentials for every provider its own model ids can name
    without widening other backends.
 
-## 11. The plan channel (PR #443)
+### OMP lessons (hearsay-tools/cezarion#595)
 
-PR #443 (`fix/issue-433-render-plan-todo`, open at the time of writing) hardens
+OMP is the second Pi-shaped runner, and each place it differs from Pi broke a Pi assumption.
+Check these before copying an existing runner's code for a fork or near-fork of its wire:
+
+- **No `agent_settled`.** Copying Pi's turn trigger would hang every OMP turn. Read the
+  upstream docs' own statement of the boundary (`prompt_result`, `session_settled`) and never
+  treat `agent_end` as terminal: it is non-terminal while OMP retries or compacts.
+- **No `--session-id`.** The session id is discovered from `get_state` and Continue uses
+  `--resume <id>` (the Codex/Cursor precedent).
+- **No `--exclude-tools`.** `--tools` is an allowlist validated against OMP's registry: an unknown
+  name, or a built-in the session has not enabled, exits 2 before any frame. Never pass an unmapped
+  name through, keep the default list to tools that are on by default (`find` and `ast_grep` are
+  not), and handle the refusal for tools a user's settings disabled, or MCP tools OMP has not
+  registered, by respawning once without them. OMP spells MCP tools `mcp__<server>_<tool>`, not
+  Claude's `mcp__<server>__<tool>`.
+- **Not every omp build takes every flag.** OMP fails fast on an unrecognized flag
+  (`Error: unknown flag(s): …`, exit 2). `--add-dir` is the one optional flag cezar passes, so a
+  build that rejects it is respawned once without it, with a note; any other unknown flag stays
+  fatal, because model, prompt, resume and tools are not optional.
+- **Diffs and plan come from the tool result**, not the args: the default `hashline` edit mode has
+  args `{input}` only.
+- **The ask marker works in plain `--mode rpc`** because OMP never registers its native ask tool
+  without a UI; do not build a native ask bridge there.
+- **Sub-agents are on the wire**, so S9/R12/R15 are constructible and carry no exemption.
+- **`omp models --json` prints an object** (`{"models": [...]}`), not an array, and exits 0 with an
+  empty list when logged out.
+- **Record real-binary evidence, and say what you could not run.** Startup frames, `--tools`
+  refusals and `dumpTools` were recorded first, and the turn fixtures were source-derived and
+  labeled while no OMP login existed; live turns later confirmed streaming, a same-turn steer,
+  `--resume` and interrupt (fixtures README verification ledger). A constructed frame (the mock
+  sends frames after settle that the real wire never does) is labeled constructed, not passed off
+  as a capture.
+
+<a id="11-the-plan-channel-pr-443"></a>
+
+## 11. The plan channel (PR open-mercato/cezar#443)
+
+PR open-mercato/cezar#443 (`fix/issue-433-render-plan-todo`, open at the time of writing) hardens
 `plan.updated` across Claude, Codex and OpenCode after finding the plan never reached the
 cockpit dock — for a different reason on each backend. Its direction, which any
 new runner should follow:
@@ -1376,7 +1575,7 @@ new runner should follow:
 - **General** — `plan.updated` is full-replacement; only a genuinely empty list
   clears the dock (a malformed frame maps to zero events, never a wipe).
 
-The `plan.updated` **event name and payload structure are unchanged**; #443
+The `plan.updated` **event name and payload structure are unchanged**; open-mercato/cezar#443
 extends the *handling*, not the wire shape (on `main`, `PlanStatus` is the three
 values in §3).
 
@@ -1397,14 +1596,18 @@ breaking change requiring the documented deprecation path.
 - `.ai/analysis/cockpit-ui-redesign/agent-event-protocols.md` — the deep design record (§7, §7.1).
 - `.ai/specs/2026-07-14-cockpit-ui-redesign.md` — the spec (protocol v2, parity requirement).
 
-### Bounded structured-question recovery (#88)
+<a id="bounded-structured-question-recovery-88"></a>
+
+### Bounded structured-question recovery (hearsay-tools/cezarion#88)
 
 A CEZ:ASK payload missing only closing braces/brackets after a complete structural value gets one bounded repair, then the existing schema validation. Mid-string truncation, mismatched delimiters and invalid question structures remain rejected. Fresh and continuation turns persist a danger note for recovery or rejection; a recovered card warns users to check the options and how many they may pick, since repair cannot restore missing meaning. The raw recovered marker stays in the audit stream until the cockpit hides it alongside a validated card, preserving rejected split-stream fallback. Existing and unknown note tones stay dim. DONE/ASK precedence, Claude wakeups and monitoring serialization are unchanged.
 
 Harness row S13 verifies the late auto-end veto and subsequent reply completion against every `RUNNER_IDS` backend’s real offline wire.
 
 
-### Codex managed permissions (#708)
+<a id="codex-managed-permissions-708"></a>
+
+### Codex managed permissions (hearsay-tools/cezarion#708)
 
 Before fresh or resumed threads, query `configRequirements/read` on the session's
 own app-server. Only `requirements: null` selects Cezar's unmanaged full-access
@@ -1427,7 +1630,9 @@ enterprise-account trace. `codex-permissions.test.ts` additionally covers sandbo
 and profile requirements, read-only policy, unknown discovery, network restriction
 and mid-turn steering. Removing the startup selection must fail the managed cells.
 
-### Recoverable OpenCode skill discovery (#723)
+<a id="recoverable-opencode-skill-discovery-723"></a>
+
+### Recoverable OpenCode skill discovery (hearsay-tools/cezarion#723)
 
 OpenCode 1.18.33's [skill loader](https://github.com/anomalyco/opencode/blob/v1.18.33/packages/opencode/src/skill/index.ts#L96-L111)
 skips an unreadable optional skill after publishing an unscoped `session.error`
