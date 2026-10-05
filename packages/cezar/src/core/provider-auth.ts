@@ -341,7 +341,7 @@ const DESCRIPTORS: readonly ProviderDescriptor[] = [
     parse: parseOmpStatus,
     // `omp models --json` lists every model of every configured provider at ~350 bytes each:
     // OpenRouter alone is 561 models (~200 KB) on v18.4.11, and four keys pass 256 KiB. An
-    // overflow answers `unknown`, which hides a logged-in OMP from every picker (Ruling R19).
+    // overflow answers `unknown`, which hides a logged-in OMP from every picker (Ruling 19).
     maxBuffer: 4 * 1024 * 1024,
   },
 ];

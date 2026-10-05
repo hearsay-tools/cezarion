@@ -152,7 +152,7 @@ describe('parseOmpModels', () => {
     expect(model).toEqual({ id: 'a/x', label: 'x', description: 'a' });
   });
 
-  // Ruling R19 (final review #2): OpenRouter alone lists 561 chat models on v18.4.11, so a cap
+  // Ruling 19 (final review #2): OpenRouter alone lists 561 chat models on v18.4.11, so a cap
   // that throws made one common key turn the whole catalog `unavailable`. Volume never throws:
   // the first 2000 in OMP's own order are kept and the cut is logged once.
   it('keeps the first 2000 models in OMP order and logs the cut once', () => {
@@ -258,7 +258,7 @@ describe('discoverOmpModels', () => {
     expect(big.fake.signals).toEqual(['SIGTERM']);
   });
 
-  // Ruling R19: ~350 bytes per model on v18.4.11, so 1,500 models already pass the old 512 KiB
+  // Ruling 19: ~350 bytes per model on v18.4.11, so 1,500 models already pass the old 512 KiB
   // stdout cap. The 2 MiB cap admits the 2000-model cut with room to spare.
   it('reads a listing larger than 512 KiB', async () => {
     const models = Array.from({ length: 1_500 }, (_, i) => ({ provider: 'openrouter', kind: 'chat', id: `v/m${i}`, name: 'n'.repeat(380) }));

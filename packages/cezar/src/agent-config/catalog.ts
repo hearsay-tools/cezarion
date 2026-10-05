@@ -13,7 +13,9 @@ import type { RunnerId } from '../core/agent-runner.ts';
  * A raw editor cannot drift on a vendor's *schema*; it can drift on *paths and
  * precedence strings*, so every entry carries a `docsUrl` and this table is the
  * single maintenance surface. Facts verified against primary docs 2026-07-16;
- * the Pi entries against Pi's README and docs/settings.md on 2026-09-15 (#322).
+ * the Pi entries against Pi's README and docs/settings.md on 2026-09-15 (#322);
+ * the OMP entries against OMP's docs/config-usage.md and docs/mcp-config.md at
+ * main @ 7318a70cf4ed on 2026-10-05 (#595).
  */
 
 export type ConfigFormat = 'json' | 'jsonc' | 'toml' | 'yaml' | 'markdown';
@@ -82,9 +84,9 @@ const CODEX_AGENTS_DOCS = 'https://developers.openai.com/codex/guides/agents-md'
 const OPENCODE_CONFIG_DOCS = 'https://opencode.ai/docs/config/';
 const OPENCODE_RULES_DOCS = 'https://opencode.ai/docs/rules/';
 const PI_SETTINGS_DOCS = 'https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/settings.md';
+const PI_CONTEXT_FILES_DOCS = 'https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/README.md#context-files';
 const OMP_CONFIG_DOCS = 'https://github.com/can1357/oh-my-pi/blob/main/docs/config-usage.md';
 const OMP_MCP_DOCS = 'https://github.com/can1357/oh-my-pi/blob/main/docs/mcp-config.md';
-const PI_CONTEXT_FILES_DOCS = 'https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/README.md#context-files';
 
 /**
  * The table. Order is presentation order: per runner, then user → project →
@@ -347,8 +349,10 @@ export const CONFIG_FILES: ConfigFileDef[] = [
   // `AgentHomePaths.omp` (`$PI_CODING_AGENT_DIR` or `~/${PI_CONFIG_DIR || '.omp'}/agent`, the default
   // profile; a named profile relocates it and is not modelled). Project files always live in
   // `<repo>/.omp/`. Settings are YAML (`config.yml`); no `modelKey`, because OMP has no native-default
-  // strategy cezar reads (spec § Model selection). `.omp/AGENTS.md` and the `.mcp.json` compatibility
-  // spellings are deliberately not listed: OMP writes only the primary paths below.
+  // strategy cezar reads (spec § Model selection). Precedence strings quote the docs in doc order;
+  // a numbered doc list is joined with "; ", its wording untouched. Not listed, by the spec's
+  // scope: `.omp/AGENTS.md` (OMP's native project context file; project memory is the shared root
+  // `AGENTS.md` row) and the `.omp/.mcp.json` / user `.mcp.json` compatibility spellings.
   {
     id: 'omp.user.settings',
     runners: ['omp'],
@@ -359,7 +363,8 @@ export const CONFIG_FILES: ConfigFileDef[] = [
     format: 'yaml',
     tracked: 'outside-repo',
     precedence:
-      'Global settings: the first present file among `~/.omp/agent/config.yml` and `config.yaml`. Effective precedence, highest first: environment variable declared on the definition, runtime overrides, config overlays (`PI_CONFIG_FILES`, then repeated `omp --config <path>` files), project settings, global settings, definition default.',
+      // config-usage.md § Layers, the six-tier list.
+      'Effective precedence, highest first: 1. Environment variable declared on the definition (`env: "NAME"`), parsed by the setting\'s type; unparseable text counts as unset. Booleans follow `parseFlag`: empty is unset, `1`/`y`/`true`/`yes`/`on` (lower or upper case) is true, any other text is false; 2. Runtime overrides: in-memory, non-persistent; 3. Config overlays: `PI_CONFIG_FILES` (platform path-list), followed by repeated `omp --config <path>` files; all are loaded as `config.yml`-style YAML for this process only; 4. Project settings: discovered via the settings capability (`settings.json` and `config.yml` from providers); 5. Global settings: the first present file among `~/.omp/agent/config.yml` and `config.yaml`; 6. Definition default',
     docsUrl: OMP_CONFIG_DOCS,
   },
   {
@@ -386,7 +391,7 @@ export const CONFIG_FILES: ConfigFileDef[] = [
     tracked: 'outside-repo',
     holdsMcp: true,
     precedence:
-      'Within OMP native config, project `.omp/mcp.json` precedes `.omp/.mcp.json`, then the active profile’s user `mcp.json` and `.mcp.json`. Across providers, the first definition wins. Duplicate names are not merged.',
+      'Across providers, the first definition wins. Duplicate names are not merged; OpenCode\'s internal config layers are the exception described above. Within OMP native config, project `.omp/mcp.json` precedes `.omp/.mcp.json`, then the active profile\'s user `mcp.json` and `.mcp.json`.',
     docsUrl: OMP_MCP_DOCS,
   },
   {
@@ -400,7 +405,7 @@ export const CONFIG_FILES: ConfigFileDef[] = [
     tracked: 'tracked',
     holdsMcp: true,
     precedence:
-      'Within OMP native config, project `.omp/mcp.json` precedes `.omp/.mcp.json`, then the active profile’s user `mcp.json` and `.mcp.json`. Across providers, the first definition wins. Duplicate names are not merged. Runs read the committed copy.',
+      'Across providers, the first definition wins. Duplicate names are not merged; OpenCode\'s internal config layers are the exception described above. Within OMP native config, project `.omp/mcp.json` precedes `.omp/.mcp.json`, then the active profile\'s user `mcp.json` and `.mcp.json`. Runs read the committed copy.',
     docsUrl: OMP_MCP_DOCS,
   },
   {
@@ -413,7 +418,7 @@ export const CONFIG_FILES: ConfigFileDef[] = [
     format: 'markdown',
     tracked: 'outside-repo',
     precedence:
-      'User-level context file, read directly by the native provider. Standalone ancestor `AGENTS.md` files are loaded separately by the low-priority `agents-md` provider.',
+      '`SYSTEM.md`, `SYSTEM_TEMPLATE.md`, `RULES.md`, and `.omp/AGENTS.md` read user-level files directly and use the nearest non-empty ancestor `.omp` directory for project files. Context files: `.omp/AGENTS.md`; standalone ancestor `AGENTS.md` files are loaded separately by the low-priority `agents-md` provider',
     docsUrl: OMP_CONFIG_DOCS,
   },
 

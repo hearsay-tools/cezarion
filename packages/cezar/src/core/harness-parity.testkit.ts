@@ -491,7 +491,7 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
   },
   {
     criterion: 'I2', backend: 'omp', kind: 'capability-absent',
-    reason: 'OMP v18.4.11 session_settled requires queuedMessageCount === 0 (agent-session.ts), and agent_end is rewritten to isTerminal:false while agent.hasQueuedMessages(), so a steer accepted before settle is read in the same turn and accepted input is never left unread.',
+    reason: 'OMP v18.4.11 session_settled requires queuedMessageCount === 0 (isRpcSessionSettled, modes/rpc/rpc-session-settle.ts), and agent_end is rewritten to isTerminal:false while agent.hasQueuedMessages() (session/agent-session.ts), so a steer accepted before settle is read in the same turn and accepted input is never left unread.',
   },
   {
     criterion: 'S4', backend: 'cursor', kind: 'capability-absent',

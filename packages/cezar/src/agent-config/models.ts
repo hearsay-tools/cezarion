@@ -22,8 +22,9 @@ const MODEL_SETTINGS_STRATEGIES: Record<RunnerId, AgentModelSettingsStrategy> = 
   // Do not flatten that object into a guessed model string: leaving the prompt
   // unpinned preserves the CLI's own effective default and model parameters.
   cursor: { runner: 'cursor', async read() { return {}; } },
-  // OMP's native model settings are not read yet (agent-config catalog lands with its own task);
-  // returning nothing leaves the prompt unpinned, which is the OMP CLI's own default.
+  // OMP's native default model (its model roles) is not read: no native-default strategy, by the
+  // spec's scope (§ Model selection). Returning nothing leaves the prompt unpinned, so OMP's own
+  // model roles apply.
   omp: { runner: 'omp', async read() { return {}; } },
 };
 

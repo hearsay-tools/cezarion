@@ -66,13 +66,13 @@ const OMP_TOOL_MAP: Readonly<Record<string, string>> = {
   Task: 'task',
   TodoWrite: 'todo',
   WebSearch: 'web_search',
-  // R2: OMP v18.4.11 has no `fetch` built-in; `read` reads static web pages per its own description.
+  // Ruling 2: OMP v18.4.11 has no `fetch` built-in; `read` reads static web pages per its own description.
   WebFetch: 'read',
 };
 
 /**
  * D1: tools that let the agent spawn agents outside cezar's governance. `wait` only joins `task`
- * work; `eval` has `agent()`/`workpool()` helpers and no v18.4.11 setting turns them off (R6).
+ * work; `eval` has `agent()`/`workpool()` helpers and no v18.4.11 setting turns them off (Ruling 6).
  */
 const OMP_DELEGATION_TOOLS: ReadonlySet<string> = new Set(['task', 'wait', 'eval']);
 
@@ -122,7 +122,7 @@ export function ompTools(
     cezarTools?: boolean;
     /** Env the extension will read: `CEZ_PREVIEW=1` there decides which cezar tools it registers. */
     env?: NodeJS.ProcessEnv;
-    /** OMP names the user's settings disabled (R13), removed from the list; never added to it. */
+    /** OMP names the user's settings disabled (Ruling 13), removed from the list; never added to it. */
     exclude?: readonly string[];
   },
 ): OmpToolSelection {
@@ -147,7 +147,7 @@ export function ompTools(
   // Narrow before the CI tool joins: a refusal never leaves a CI-only list where --no-tools belongs.
   for (const name of opts.exclude ?? []) tools.delete(name);
   if (tools.size === 0) return { flag: 'no-tools', tools: [], dropped: [...dropped] };
-  // Exactly the names omp-ci-wait.mjs registers (R11): OMP exits 2 on an unknown --tools name.
+  // Exactly the names omp-ci-wait.mjs registers (Ruling 11): OMP exits 2 on an unknown --tools name.
   if (opts.cezarTools) for (const name of cezarToolNames(opts.env ?? {})) tools.add(name);
   return { flag: 'tools', tools: [...tools], dropped: [...dropped] };
 }
@@ -155,7 +155,7 @@ export function ompTools(
 const MCP_PREFIX = 'mcp__';
 
 /**
- * OMP's name for an MCP tool granted in Claude's `mcp__<server>__<tool>` spelling (Ruling R20).
+ * OMP's name for an MCP tool granted in Claude's `mcp__<server>__<tool>` spelling (Ruling 20).
  * v18.4.11 registers `mcp__<server>_<tool>` (`qjn`): each part lowercased, runs of anything but
  * `[a-z0-9_]` and repeated underscores folded to one `_`, edges trimmed, and a tool name that
  * repeats its server's prefix stripped of it. `--tools` validation matches exact names, so the
@@ -268,7 +268,7 @@ export class OmpRunner implements AgentRunner {
       spawned.stderr.on('data', (chunk: string) => stderr.push(chunk));
       return spawned;
     };
-    // Reassigned once at most: R13 respawns without the tools the user's OMP settings disabled.
+    // Reassigned once at most: Ruling 13 respawns without the tools the user's OMP settings disabled.
     const firstArgs = buildOmpArgs(spec);
     let child = spawnOmp(firstArgs);
     let respawned = false;
@@ -346,7 +346,7 @@ export class OmpRunner implements AgentRunner {
       }
     };
     // Until the current child speaks (OMP's `ready` frame) nothing is written to it: a spawn the
-    // R13 refusal rejects exits without reading stdin, and what it was handed would be lost with
+    // Ruling 13 refusal rejects exits without reading stdin, and what it was handed would be lost with
     // it. Accepted commands wait here, in order, and the respawned child gets the same ones.
     const outbox: Array<Record<string, unknown>> = [];
     const flushOutbox = (): void => {
@@ -551,7 +551,7 @@ export class OmpRunner implements AgentRunner {
           } else if (value.type === 'response' && value.command === 'prompt') {
             if (value.success === false) {
               // The turn-opening prompt rejected before admission gets no `prompt_result`, so it
-              // is the turn's error here (R10). A failure after admission is reported by the
+              // is the turn's error here (Ruling 10). A failure after admission is reported by the
               // `prompt_result` that follows it (rpc-prompt-results.ts `fail`), and a steer's
               // failure leaves the turn running: both are only a note.
               const message = `omp: prompt failed: ${rpcError(value)}`;
@@ -683,9 +683,9 @@ export class OmpRunner implements AgentRunner {
       emitLatchedUiProviderError();
       const exitCode = await waitForExit(child);
       if (interruptKillTimer) clearTimeout(interruptKillTimer);
-      // R13: exit 2 before any frame, naming tools the user's OMP settings disabled. Respawn
+      // Ruling 13: exit 2 before any frame, naming tools the user's OMP settings disabled. Respawn
       // once without them: the list only narrows, so this never widens what the step granted.
-      // Ruling R20 widens the same respawn to MCP names OMP did not register (a Claude spelling
+      // Ruling 20 widens the same respawn to MCP names OMP did not register (a Claude spelling
       // it cannot match, or a server slower than OMP's discovery window).
       const refusal =
         exitCode === 2 && !spawnError && retryPossible()
@@ -756,7 +756,7 @@ export class OmpRunner implements AgentRunner {
       discardQueuedMessages: () => undefined,
       end,
       interrupt,
-      // The live child: an R13 respawn replaces it (`onPidChange` tells the caller who read it).
+      // The live child: a Ruling 13 respawn replaces it (`onPidChange` tells the caller who read it).
       get pid() {
         return child.pid;
       },
@@ -788,8 +788,8 @@ function ompToolList(args: readonly string[]): string[] {
 /**
  * What OMP's startup refusal (v18.4.11 `emt()`, exit 2) lets a respawn drop, limited to names this
  * spawn passed so a retry only narrows. One error carries up to two lists:
- * `Built-in tool(s) unavailable in this session: a, b.` (tools the user's settings disable, R13)
- * and `Unknown tool(s) in --tools: a, b.` (Ruling R20: droppable only when every name is an
+ * `Built-in tool(s) unavailable in this session: a, b.` (tools the user's settings disable, Ruling 13)
+ * and `Unknown tool(s) in --tools: a, b.` (Ruling 20: droppable only when every name is an
  * `mcp__` name this spawn passed; any other unknown name stays fatal, so nothing is retried).
  * `null` when there is nothing to drop.
  */

@@ -2,7 +2,7 @@
 
 Status: approved design (2026-10-02). Approved by the owner section by section in
 brainstorming and then as this written spec. This is the committed design record that code
-comments cite. Decisions made while implementing it (rulings R0 to R17, checked against a real
+comments cite. Decisions made while implementing it (rulings 0 to 20, written "Ruling N" so they cannot be read as harness rows, checked against a real
 OMP v18.4.11 binary on 2026-10-05) are folded into the sections they change and listed together
 in [Implementation decisions](#implementation-decisions-2026-10-05).
 
@@ -59,7 +59,7 @@ Acceptance criteria (#595), each owned by a section below:
 |---|---|
 | Approach | **A. Standalone** `OmpRunner` + `omp-ui-mapper` + mock + fixtures. Pi untouched. Pure helpers proven identical to Pi's (usage, content text) are duplicated with a comment citing the Pi function, not shared |
 | Ask path | **Ask marker**: plain `--mode rpc`, where OMP never registers its `ask` tool; the agent asks through cezar's portable marker exactly like Pi |
-| Default tools | **Code tools**: cezar defaults plus `todo`, `lsp`, `ast_edit`, `task`, `wait`. `find` and `ast_grep` were in the approved list and are out of the zero-config default (R1, see Tools) |
+| Default tools | **Code tools**: cezar defaults plus `todo`, `lsp`, `ast_edit`, `task`, `wait`. `find` and `ast_grep` were in the approved list and are out of the zero-config default (Ruling 1, see Tools) |
 | Sub-agents | Listed in the Agents drawer, one row per OMP sub-agent, including batch `task` calls |
 
 ## Upstream facts (verified 2026-10-02)
@@ -82,7 +82,7 @@ What differs from Pi (each one breaks a Pi assumption):
 | Startup writes a `ready` frame (`protocolVersion`, `supportedProtocolVersions`, `maxFrameBytes`) before handling commands; v1 caps each stdout frame at 1 MiB and elides oversized fields | Ignore `ready`; stay on v1 |
 | `message_*` frames carry a `messageId`; `set_event_filter {messageUpdates:"delta"}` drops the per-delta `partial` message snapshot | Opt in; detect support from the echoed `data.messageUpdates` |
 | No `--session-id`. `--resume [id]` / `--session [id]` resume by id prefix or path; a fresh session mints its id (`get_state.sessionId`) | Codex/Cursor precedent: id discovered, `--resume` on Continue |
-| No `--exclude-tools`. `--tools a,b` is an allowlist validated against the discovered registry: **an unknown name, or a built-in the session has not enabled, is a startup error with exit code 2** (real binary, R4) | Never pass an unmapped name through; handle the refusal (R13, and R20 for MCP names) |
+| No `--exclude-tools`. `--tools a,b` is an allowlist validated against the discovered registry: **an unknown name, or a built-in the session has not enabled, is a startup error with exit code 2** (real binary, Ruling 4) | Never pass an unmapped name through; handle the refusal (Ruling 13, and Ruling 20 for MCP names) |
 | `--add-dir <dir>` (repeatable) exists | `additionalDirectories` honored (Pi drops it) |
 | Plain `--mode rpc`: `sessionOptions.hasUI = isInteractive \|\| mode === "rpc-ui"` (`main.ts`), so `AskTool.createIf` returns null | No native ask tool; marker path |
 | Approval: `tools.approvalMode` default `yolo`; with no UI a prompt-requiring call fails closed | Same posture as Claude's `dontAsk`; cezar passes no approval flag |
@@ -113,7 +113,7 @@ errorMessage}`; `tool_execution_start{toolCallId, toolName, args}`,
 |---|---|
 | `packages/cezar/src/core/omp-runner.ts` | `OmpRunner` implementing `AgentRunner`/`AgentSession`: one persistent `omp --mode rpc` child per session; `OMP_SPEC_SUPPORT`; `inputDelivery`; v1 `AgentEvent` stream; drives the mapper for v2 |
 | `packages/cezar/src/core/omp-ui-mapper.ts` | Pure OMP RPC → v2 `UiEvent` mapper with explicit immutable state; never throws; owns the turn boundary, provider-error latch, sub-agent nesting, result-based diffs and plan |
-| `packages/cezar/src/core/omp-model-catalog.ts` | `discoverOmpModels({ cwd })` over `omp models --json`; Discovery caps: 10 s, 2 MiB stdout, 2000 models (past the model cap the first 2000 in OMP's order are kept with one log line, never a throw; Ruling R19); throws on every other failure |
+| `packages/cezar/src/core/omp-model-catalog.ts` | `discoverOmpModels({ cwd })` over `omp models --json`; Discovery caps: 10 s, 2 MiB stdout, 2000 models (past the model cap the first 2000 in OMP's order are kept with one log line, never a throw; Ruling 19); throws on every other failure |
 | `packages/cezar/scripts/mock-omp-rpc.mjs` | Offline mock in OMP's own wire shape (`ready`, ids, `prompt_result`, `session_settled`, sub-agent frames, todo/edit result details) for `CEZ_DRY_RUN=1` and both parity matrices |
 | `packages/cezar/scripts/omp-ci-wait.mjs` | OMP extension registering `cezar_wait_for_ci` through the shared CI client (`../dist/ci-wait/mcp.js`, `src` in a dev checkout, like `pi-ci-wait.mjs`) |
 | `packages/cezar/scripts/omp-restrict-delegation.yml` | Static `--config` overlay: `tools: { approval: { task: deny } }` |
@@ -177,14 +177,14 @@ Default (step without `allowedTools`): `HARNESS_EXTRA_TOOLS.omp = ['todo', 'lsp'
 `--tools read,edit,write,grep,glob,bash,todo,lsp,ast_edit,task,wait`.
 No web, `eval`, browser, GitHub, memory or checkpoint tools unless a workflow grants them.
 
-`find` and `ast_grep` are not in the default (R1). The real v18.4.11 binary gates them behind the
+`find` and `ast_grep` are not in the default (Ruling 1). The real v18.4.11 binary gates them behind the
 settings `find.enabled` and `astGrep.enabled`, both off by default, and a `--tools` list that names
 an unavailable built-in exits 2 with `Built-in tools unavailable in this session: find, ast_grep.`
 Naming them by default would fail every zero-config run. A workflow can still grant them through
 `allowedTools` for a user who enabled them.
 
 The other config-gated names in the default (`todo`, `lsp`, `ast_edit`, `web_search` when granted)
-can be switched off in a user's own settings. Those users must not lose the run (R13): when the
+can be switched off in a user's own settings. Those users must not lose the run (Ruling 13): when the
 child exits 2 before its first frame and stderr reads `Built-in tool(s) unavailable in this
 session: X[, Y]`, the runner respawns **once** with exactly those names removed from `--tools`
 and emits one v1 `note` naming them. The respawn only ever narrows; it never adds a name or
@@ -194,7 +194,7 @@ commands, the opening `prompt`, a human steer) waits in order and is replayed to
 child, so no accepted input is lost. `session.pid` is a getter that follows the live child, and
 `SessionOptions.onPidChange` tells the run manager when a respawn replaced it.
 
-MCP tools (Ruling R20). In RPC mode OMP validates `--tools` right after a 250 ms MCP discovery
+MCP tools (Ruling 20). In RPC mode OMP validates `--tools` right after a 250 ms MCP discovery
 window (`docs/mcp-config.md`), so a correctly spelled tool from a slow server can read as unknown.
 The same one-time respawn therefore also reads `Unknown tool(s) in --tools: a, b.`: when every
 name in it is an `mcp__` name this spawn passed, those names are removed too. Both lines arrive in
@@ -208,20 +208,20 @@ unknown name (a built-in, a cezar tool, an MCP name cezar never passed) stays fa
 | `Read` / `Edit` / `Write` / `Bash` / `Grep` / `Glob` | `read` / `edit` / `write` / `bash` / `grep` / `glob` |
 | `Subagent`, `Task` | `task` |
 | `TodoWrite` | `todo` |
-| `WebSearch` / `WebFetch` | `web_search` / `read` (R2: `fetch` is not a v18.4.11 built-in; `read` reads static web pages per its own description) |
+| `WebSearch` / `WebFetch` | `web_search` / `read` (Ruling 2: `fetch` is not a v18.4.11 built-in; `read` reads static web pages per its own description) |
 | any OMP built-in name (`BUILTIN_TOOL_NAMES` at the pinned version, lower-case) | itself |
-| `mcp__<server>__<tool>` (Claude's spelling) | `mcp__<server>_<tool>`, OMP's own spelling (v18.4.11 `qjn`: each part lowercased, anything but `[a-z0-9_]` and repeated underscores folded to one `_`, edges trimmed, a tool name repeating its server's prefix stripped of it). Ruling R20 |
-| any other `mcp__*` (already OMP's spelling) | itself; validated against the registry OMP discovered, so an unregistered one is dropped by the R13/R20 respawn |
+| `mcp__<server>__<tool>` (Claude's spelling) | `mcp__<server>_<tool>`, OMP's own spelling (v18.4.11 `qjn`: each part lowercased, anything but `[a-z0-9_]` and repeated underscores folded to one `_`, edges trimmed, a tool name repeating its server's prefix stripped of it). Ruling 20 |
+| any other `mcp__*` (already OMP's spelling) | itself; validated against the registry OMP discovered, so an unregistered one is dropped by the Ruling 13 / Ruling 20 respawn |
 | anything else | dropped, with one v1 `note` naming the dropped tools |
 
 Rules: dedupe; `bash` dropped under `bashAllowlist`; `task`, `wait` and `eval` dropped under D1;
-names the R13 respawn excludes removed; append `cezar_wait_for_ci` (and, under `CEZ_PREVIEW=1`,
-`cezar_preview_serve`: exactly the names `omp-ci-wait.mjs` registers, R11) when `cezarTools` is
+names the Ruling 13 respawn excludes removed; append `cezar_wait_for_ci` (and, under `CEZ_PREVIEW=1`,
+`cezar_preview_serve`: exactly the names `omp-ci-wait.mjs` registers, Ruling 11) when `cezarTools` is
 set and the list is non-empty. The flag itself:
 
 | `spec.allowedTools` | Flag |
 |---|---|
-| `undefined` | none: OMP's own default set (Pi's behaviour for the same input). Exception: under `restrictNativeDelegation` an explicit list, see D1 (R14) |
+| `undefined` | none: OMP's own default set (Pi's behaviour for the same input). Exception: under `restrictNativeDelegation` an explicit list, see D1 (Ruling 14) |
 | `[]` (planner, auto-name: "no tools") | `--no-tools` (Claude's default-deny intent; Pi enables everything here, OMP does not copy that) |
 | non-empty, maps to at least one OMP name | `--tools <list>` |
 | non-empty, every entry dropped | `--no-tools`, plus the drop `note` (fail closed, never wider)|
@@ -238,7 +238,7 @@ then the first `prompt`. OMP queues commands until it is ready.
 | `response` to `get_state` | `session` (discovered id) | `session.started {backend:'omp', sessionId, model?}` |
 | `response` to `set_*` with `success:false` | `note` | none |
 | `response` to `prompt` (by id), success | agent-input ack, Pi's #505 bookkeeping | none; marks the opening prompt admitted |
-| `response` to `prompt`, `success:false` (pre-admission; no `prompt_result` follows) | `error` | `session.error` (non-fatal); when it answers the **opening** prompt the turn ends `turn.completed {stopReason:'error'}` (R10) |
+| `response` to `prompt`, `success:false` (pre-admission; no `prompt_result` follows) | `error` | `session.error` (non-fatal); when it answers the **opening** prompt the turn ends `turn.completed {stopReason:'error'}` (Ruling 10) |
 | `response`, other `success:false` | `error` | `session.error` (non-fatal) |
 | `message_update` `text_*` | coalesced `text` per block (`V1TextCoalescer`) | message `item.*` |
 | `message_update` `thinking_*` | none | reasoning `item.*` |
@@ -256,7 +256,7 @@ then the first `prompt`. OMP queues commands until it is ready.
 | `subagent_event` | **never** v1 text, never `turn-end` | child items with `parentItemId` |
 | `extension_error` | `note` | `session.error` (non-fatal) |
 | `notice` | `note` | `session.error` (non-fatal) when `level:error` |
-| `extension_ui_request` (`setWidget`, ...), `advisor_cost_changed`, `queue_update`, `available_commands_update`, `auto_*`, `cache_warming_*`, other | none | none (R7: observed unsolicited at startup in plain rpc mode; an interactive extension UI request goes unanswered and OMP times it out) |
+| `extension_ui_request` (`setWidget`, ...), `advisor_cost_changed`, `queue_update`, `available_commands_update`, `auto_*`, `cache_warming_*`, other | none | none (Ruling 7: observed unsolicited at startup in plain rpc mode; an interactive extension UI request goes unanswered and OMP times it out) |
 
 Turns: a message sent while a turn runs goes out as `prompt` with `streamingBehavior:"steer"`;
 an idle one opens a turn. The mapper remembers the **id of the prompt that opened the turn**
@@ -265,7 +265,7 @@ or pre-admission failure ends the turn: a steer OMP handles locally, or that fai
 admission, leaves the running turn alone (a local completion of a steer must not end a turn
 that is still running). Startup commands and the opening prompt go through the stdin outbox
 described under Tools. `inputDelivery` is `steer` / `observable`, as Pi, derived
-from the source because no live turn was possible (R0). Interrupt: `abort`, then SIGTERM, then SIGKILL after
+from the source because no live turn was possible (Ruling 0). Interrupt: `abort`, then SIGTERM, then SIGKILL after
 `KILL_GRACE_MS`. End: close stdin, SIGTERM after the grace period. `resumeCommand()`:
 `omp --resume <id>`.
 
@@ -319,12 +319,12 @@ Under `restrictNativeDelegation`: the `--config omp-restrict-delegation.yml` ove
 `task` (user `deny` is absolute in every approval mode), and `task`/`wait` are dropped from
 `--tools`. OMP's `eval` tool has `agent()`/`workpool()` helpers that can still spawn agents, and
 v18.4.11 has no setting that disables them (only `eval.tools.enabled` and
-`eval.workpool.freshAgents`; R6), so **D1 also drops `eval`** and the spec-support row says why.
+`eval.workpool.freshAgents`; Ruling 6), so **D1 also drops `eval`** and the spec-support row says why.
 
 With `allowedTools` undefined, OMP's own default set contains `task`, `wait` and `eval`, so
 passing no `--tools` would leave delegation open. D1 therefore passes an **explicit list**: OMP's
 v18.4.11 default set (`read, bash, edit, eval, glob, grep, task, wait, todo, web_search, write`,
-recorded from `get_state.dumpTools`) minus `task`, `wait` and `eval` (R14). This deviates from
+recorded from `get_state.dumpTools`) minus `task`, `wait` and `eval` (Ruling 14). This deviates from
 the "no flag" row for `undefined` on purpose: it fails closed. The cost is that D1 runs lack OMP
 default extras added after that version. The `via` string on the spec-support row states the
 deviation.
@@ -343,7 +343,7 @@ credentials.
   loud); `model-presets`: no presets (discovery owns the list; cross-runner guard treats `omp`
   like `pi`).
 - `discoverOmpModels`: `omp models --json` under `buildChildEnv({backend:'omp'})`; the output is
-  an **object** `{"models":[...]}`, not a bare array (R3, real binary); keep `kind === 'chat'`
+  an **object** `{"models":[...]}`, not a bare array (Ruling 3, real binary); keep `kind === 'chat'`
   (or absent); id = `provider/id` (the entry's `selector`); effort levels from the entry's
   `thinking` array of levels (null when the model has none); skip under `CEZ_DRY_RUN=1` without `CEZ_OMP_BIN`; reasons are
   stable one-line categories (`not installed`, `timed out`, `malformed output`, `no models`).
@@ -356,7 +356,7 @@ credentials.
 
 `provider-auth` descriptor `omp`: executable `CEZ_OMP_BIN ?? 'omp'`, login `omp login`, install
 hint "Install OMP (`curl -fsSL https://omp.sh/install | sh`), then run `omp login`." Status
-probe: `omp models --json` (R3). Verified on the real binary: with no credentials it exits 0 and
+probe: `omp models --json` (Ruling 3). Verified on the real binary: with no credentials it exits 0 and
 prints `{"models":[]}`; with a provider key it lists that provider's models. `parseOmpStatus`
 therefore reads an empty `models` array as disconnected, a non-empty one as connected, and
 anything else as unknown (null). No `get_login_providers` call is needed. The parser is
@@ -414,7 +414,7 @@ adapter, which is the point):
   every scenario **including `subagent` and `subagent-after-park`**). Exemptions only where the
   wire genuinely lacks the cell, each with an OMP-specific reason: R16 (`text_end.content` is the
   one text channel for v1 and v2), I2 (the settle predicate reads a queued steer before
-  settling, R16 ruling), A9 (plain `--mode rpc` never constructs the ask tool, R15 ruling) and
+  settling, Ruling 16), A9 (plain `--mode rpc` never constructs the ask tool, Ruling 15) and
   A13/A14 (no portable-answer HTTP ACK retained after turn completion; shared with every
   runner). No S9, R12 or R15 exemption.
 - `model-discovery-guard`, `agent-descriptors.test`, the `UiBackend` exactness test,
@@ -435,10 +435,10 @@ OMP-owned tests:
 - One focused browser spec: an OMP dry-run run with sub-agents shows its rows in the Agents
   drawer.
 
-Also pinned: the R10 failed-prompt and steer-local boundaries, the R13 respawn and stdin outbox
+Also pinned: the Ruling 10 failed-prompt and steer-local boundaries, the Ruling 13 respawn and stdin outbox
 (a human message sent before the first frame reaches the respawned child), the D1 explicit list
-(R14) and the exit-2 mock. The mock frames after `session_settled` that drive the harness R15
-cell are constructed (R17).
+(Ruling 14) and the exit-2 mock. The mock frames after `session_settled` that drive the harness R15
+cell are constructed (Ruling 17).
 
 Red proofs (stash the source, run, confirm red, restore): the turn-boundary test (`agent_end
 {yielded:false}` must not end the turn) and S9 on the OMP mock (a child terminal frame must not
@@ -466,7 +466,7 @@ frames and says which fixture lines are observed and which are source-derived.
 | eval `agent()`/`workpool()` | no setting disables them |
 | `cezar_wait_for_ci` | listed by `get_state.dumpTools` with the bundled `--extension` (registration proven) |
 
-**Not verified live (R0):** no live model turn. The host had no OMP provider login and none was
+**Not verified live (Ruling 0):** no live model turn. The host had no OMP provider login and none was
 offered, so every turn fixture (text, tools, edit/todo details, sub-agents, retry, settle,
 `inputDelivery` steer behaviour, the order of an early `subagent_event` against its lifecycle)
 is source-derived with citations to the pinned upstream files, and the fixtures README says so.
@@ -491,8 +491,8 @@ The first live run on a logged-in host is the open check.
   failure, not a hang (the stream-end path releases latches and ends the session).
 - `--tools` validation means a wrong default name fails every run; the default list is checked
   against `BUILTIN_TOOL_NAMES` of the pinned version and by the real-binary probe.
-- Bun-loaded extension compatibility for `omp-ci-wait.mjs` is unproven until the real-binary
-  `dumpTools` check passes.
+- Bun-loaded extension compatibility for `omp-ci-wait.mjs`: resolved. The real-binary
+  `get_state.dumpTools` check lists `cezar_wait_for_ci` (v18.4.11; see § Verification evidence).
 
 ## Follow-ups (separate issues)
 
@@ -510,24 +510,24 @@ differs from the approved text above, the ruling wins and the cost of being wron
 
 | # | Decision | Cost if wrong |
 |---|---|---|
-| R0 | No live OMP turn: no provider login on the host; turn fixtures are source-derived and labeled | `inputDelivery` and the I2 reasoning stay unverified live |
-| R1 | Default tools exclude `find` and `ast_grep` (settings-gated, default off; `--tools` naming them exits 2) | Users who enabled them do not get them by default; a workflow can grant them |
-| R2 | `WebFetch` maps to `read`, not `fetch` (not a v18.4.11 built-in) | A `WebFetch` grant gives no web fetch beyond `read`'s static pages |
-| R3 | `omp models --json` is `{"models":[...]}`; status: empty is disconnected, non-empty connected, else null; effort levels from `thinking` | Status misreports |
-| R4 | Unknown or unavailable `--tools` names exit 2 (not 1); the mock mirrors it with OMP's stderr | None |
-| R5 | Runner argv builder and spawn/session lifecycle shipped together (same file) | Larger single diff |
-| R6 | D1 also drops `eval`: no v18.4.11 setting disables its `agent()`/`workpool()` helpers | `eval` unavailable under governed delegation |
-| R7 | The mapper ignores `extension_ui_request`, `advisor_cost_changed`, `available_commands_update` (unsolicited at startup in plain rpc mode) | An interactive extension UI request goes unanswered; OMP times it out |
-| R10 | A failed `prompt` response (pre-admission, no `prompt_result` follows) emits a non-fatal `session.error`; the mapper remembers its id so a later `prompt_result` does not duplicate it; the runner closes the turn only when the failed prompt **opened** it | One extra error line |
+| Ruling 0 | No live OMP turn: no provider login on the host; turn fixtures are source-derived and labeled | `inputDelivery` and the I2 reasoning stay unverified live |
+| Ruling 1 | Default tools exclude `find` and `ast_grep` (settings-gated, default off; `--tools` naming them exits 2) | Users who enabled them do not get them by default; a workflow can grant them |
+| Ruling 2 | `WebFetch` maps to `read`, not `fetch` (not a v18.4.11 built-in) | A `WebFetch` grant gives no web fetch beyond `read`'s static pages |
+| Ruling 3 | `omp models --json` is `{"models":[...]}`; status: empty is disconnected, non-empty connected, else null; effort levels from `thinking` | Status misreports |
+| Ruling 4 | Unknown or unavailable `--tools` names exit 2 (not 1); the mock mirrors it with OMP's stderr | None |
+| Ruling 5 | Runner argv builder and spawn/session lifecycle shipped together (same file) | Larger single diff |
+| Ruling 6 | D1 also drops `eval`: no v18.4.11 setting disables its `agent()`/`workpool()` helpers | `eval` unavailable under governed delegation |
+| Ruling 7 | The mapper ignores `extension_ui_request`, `advisor_cost_changed`, `available_commands_update` (unsolicited at startup in plain rpc mode) | An interactive extension UI request goes unanswered; OMP times it out |
+| Ruling 10 | A failed `prompt` response (pre-admission, no `prompt_result` follows) emits a non-fatal `session.error`; the mapper remembers its id so a later `prompt_result` does not duplicate it; the runner closes the turn only when the failed prompt **opened** it | One extra error line |
 | steer-local | A local `agentInvoked:false` completion ends the turn only for the opening prompt's id; a steer handled locally never ends a running turn | A steer would end a live turn |
-| R11 | The CI tool list is whatever `omp-ci-wait.mjs` registers (`cezarToolNames`, including `cezar_preview_serve` under `CEZ_PREVIEW=1`) | R35 preview row red |
-| R13 | Exit 2 before any frame naming settings-disabled built-ins: respawn once without them, one v1 `note`, stdin outbox until the first frame replayed to the respawned child, `session.pid` follows the live child | One extra spawn on startup |
-| R14 | D1 with `allowedTools` undefined passes an explicit `--tools` list (fail closed; deviates from "no flag") | D1 runs lack OMP default extras such as `web_search` |
-| R15 | A9 exemption reason: plain `--mode rpc` never constructs the ask tool (`sessionOptions.hasUI` is true only for interactive or `rpc-ui`; `AskTool.createIf` returns null); a wire limitation, not "not implemented" | A9 row hides a gap |
-| R16 | I2 exemption accepted: the settle predicate requires `queuedMessageCount === 0` and a queued steer is read before settle; the reason names the settle predicate (`rpc-session-settle.ts`) | I2 gap hidden |
-| R17 | Mock frames emitted after `session_settled` (the R15 regression) are **constructed**: real OMP settles only when `!hasPendingAsyncWork`. Kept as a stricter robustness test and labeled so in the fixtures README | None (stricter than the wire) |
-| R19 | Volume never fails discovery or the status probe: model cap 2000 and 2 MiB stdout, past the cap the first 2000 in OMP's order with one log line; the `omp models --json` status probe gets a 4 MiB buffer (per-descriptor `maxBuffer`). OpenRouter alone lists 561 models on v18.4.11 | Larger buffers for one probe |
-| R20 | Claude-spelled `mcp__<server>__<tool>` grants are translated to OMP's `mcp__<server>_<tool>`; the R13 respawn also drops passed `mcp__` names from `Unknown tool(s) in --tools` (never widens; any other unknown stays fatal) | An MCP grant silently missing, with a v1 note |
+| Ruling 11 | The CI tool list is whatever `omp-ci-wait.mjs` registers (`cezarToolNames`, including `cezar_preview_serve` under `CEZ_PREVIEW=1`) | R35 preview row red |
+| Ruling 13 | Exit 2 before any frame naming settings-disabled built-ins: respawn once without them, one v1 `note`, stdin outbox until the first frame replayed to the respawned child, `session.pid` follows the live child | One extra spawn on startup |
+| Ruling 14 | D1 with `allowedTools` undefined passes an explicit `--tools` list (fail closed; deviates from "no flag") | D1 runs lack OMP default extras such as `web_search` |
+| Ruling 15 | A9 exemption reason: plain `--mode rpc` never constructs the ask tool (`sessionOptions.hasUI` is true only for interactive or `rpc-ui`; `AskTool.createIf` returns null); a wire limitation, not "not implemented" | A9 row hides a gap |
+| Ruling 16 | I2 exemption accepted: the settle predicate requires `queuedMessageCount === 0` and a queued steer is read before settle; the reason names the settle predicate (`rpc-session-settle.ts`) | I2 gap hidden |
+| Ruling 17 | Mock frames emitted after `session_settled` (the harness R15 regression) are **constructed**: real OMP settles only when `!hasPendingAsyncWork`. Kept as a stricter robustness test and labeled so in the fixtures README | None (stricter than the wire) |
+| Ruling 19 | Volume never fails discovery or the status probe: model cap 2000 and 2 MiB stdout, past the cap the first 2000 in OMP's order with one log line; the `omp models --json` status probe gets a 4 MiB buffer (per-descriptor `maxBuffer`). OpenRouter alone lists 561 models on v18.4.11 | Larger buffers for one probe |
+| Ruling 20 | Claude-spelled `mcp__<server>__<tool>` grants are translated to OMP's `mcp__<server>_<tool>`; the Ruling 13 respawn also drops passed `mcp__` names from `Unknown tool(s) in --tools` (never widens; any other unknown stays fatal) | An MCP grant silently missing, with a v1 note |
 
 ## Docs to update in the same change
 

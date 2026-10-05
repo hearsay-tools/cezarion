@@ -82,7 +82,7 @@ export interface OmpUiMapperState extends OmpTextLane {
   readonly childLanes: ReadonlyMap<string, OmpTextLane>;
   /** The one "events dropped" error for an overflowing early buffer has been emitted. */
   readonly subagentDropReported: boolean;
-  /** Ids of `prompt` commands whose failure response already reported the error (R10). */
+  /** Ids of `prompt` commands whose failure response already reported the error (Ruling 10). */
   readonly failedPrompts: ReadonlySet<string>;
 }
 
@@ -270,7 +270,7 @@ function mapResponse(value: Record<string, unknown>, state: OmpUiMapperState): O
       // this error response — no `prompt_result` follows — so it is reported here. A failure
       // after admission sends this response after the success ack, AND a `prompt_result`,
       // whose error is then skipped. The opening prompt failing before its ack ends the turn
-      // (R10); a steer failing leaves it running.
+      // (Ruling 10); a steer failing leaves it running.
       const id = string(value.id);
       let failedPrompts = state.failedPrompts;
       if (id) {

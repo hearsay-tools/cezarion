@@ -146,7 +146,7 @@ opened a turn counts as read when that turn completes.
 | Pi 0.87.0 | steer, observable | `prompt` with `streamingBehavior: 'steer'` (never `followUp`); session starts with `set_steering_mode: all` (overrides Pi's default `one-at-a-time` — cezar owns the session and `get_state` cannot tell the default from an explicit user setting) | the user `message_start` with the submitted text; a burst of steers in `all` mode all match at the same next step, oldest pending submission first | none: pi runs an acknowledged steer in the turn or as the next prompt |
 | OpenCode 1.18.32 (V1) | steer, observable | `prompt_async` while busy; no second turn opens | the first assistant `message.updated` naming the steered user message as `parentID` | `input-unconsumed` after a 2 s quiet idle (opencode#46842 lost wake); a later server run for it opens its own turn |
 | Cursor 2026.09.18 | boundary | refused while busy: a second ACP `session/prompt` cancels the running turn | the turn it opens | none |
-| OMP 18.4.11 | steer, observable | `prompt` with `streamingBehavior: 'steer'`; session starts with `set_steering_mode: all` | the user `message_start` with the submitted text | none: OMP's settle predicate requires `queuedMessageCount === 0`, so a queued steer is read before the session settles. Source-derived; no live turn was possible (see §4 OMP) |
+| OMP 18.4.11 | steer, observable | `prompt` with `streamingBehavior: 'steer'`; session starts with `set_steering_mode: all` | the user `message_start` with the submitted text | none: OMP's settle predicate (`rpc-session-settle.ts`) requires `queuedMessageCount === 0`, so a queued steer is read before the session settles. Source-derived; no live turn was possible (see §4 OMP) |
 
 Probe evidence for this table is in `.ai/specs/2026-09-23-immediate-worker-delivery.md`;
 `.ai/scripts/probe-steering.ts` re-runs it against the installed CLIs (paid sessions,
@@ -322,8 +322,8 @@ reason). `AGENT_RUN_SPEC_FIELDS` is the same field list at runtime, typed as a
 full `Record` over `keyof AgentRunSpec`, so adding a field to the spec is a
 compile error until every runner declares it, and a new runner class without a
 declaration does not compile at all. The constants (`CLAUDE_SPEC_SUPPORT`,
-`CODEX_SPEC_SUPPORT`, `OPENCODE_SPEC_SUPPORT`, `PI_SPEC_SUPPORT`, each next to its
-class) are the source; §7's spec-support rows hold each one against the runner's
+`CODEX_SPEC_SUPPORT`, `OPENCODE_SPEC_SUPPORT`, `PI_SPEC_SUPPORT`, `CURSOR_SPEC_SUPPORT`,
+`OMP_SPEC_SUPPORT`, each next to its class) are the source; §7's spec-support rows hold each one against the runner's
 real boundary in both directions. As declared at #284, a reading aid only:
 
 | Field | claude | codex | opencode | pi |
@@ -342,11 +342,12 @@ real boundary in both directions. As declared at #284, a reading aid only:
 | `timeoutMs` | kill switch | kill switch | kill switch | kill switch |
 | `sessionId` | `--session-id` / `--resume` | `thread/resume` threadId | **dropped** | `--session-id` / `--session` |
 
+| `resume` | `--resume` | `thread/resume` | **dropped** | `--session` |
+
 `OMP_SPEC_SUPPORT` honors every field (it has no column here): `allowedTools` through `--tools` with
 OMP names (or `--no-tools`), `additionalDirectories` through `--add-dir` (Pi drops it), `effort`
 through `--thinking`, and `sessionId` only as `--resume <id>`: OMP has no `--session-id`, a fresh
 session mints its own id and the runner reads it from `get_state`.
-| `resume` | `--resume` | `thread/resume` | **dropped** | `--session` |
 
 **System prompt channel** — a backend without a dedicated system-prompt input
 must deliver `spec.systemPrompt` as a leading block of the opening user message.
@@ -1040,7 +1041,7 @@ never "not implemented"):
 | --- | --- | --- |
 | A9 | capability-absent | v18.4.11 plain `--mode rpc` never constructs the ask tool: `sessionOptions.hasUI` is true only for interactive or `rpc-ui` (`src/main.ts`) and `AskTool.createIf` returns null without it. The turn-end `CEZ:ASK` fallback applies (A3/A4). |
 | R16 | capability-absent | `text_end.content` is the one assistant-text channel for v1 and v2; `message_end` has no separately mapped text. |
-| I2 | capability-absent | `session_settled` requires `queuedMessageCount === 0` and `agent_end` is rewritten to non-terminal while the agent has queued messages, so a steer accepted before settle is read in the same turn. Source-derived (no live turn). |
+| I2 | capability-absent | `session_settled` requires `queuedMessageCount === 0` (`isRpcSessionSettled`, `modes/rpc/rpc-session-settle.ts`) and `agent_end` is rewritten to non-terminal while the agent has queued messages (`session/agent-session.ts`), so a steer accepted before settle is read in the same turn. Source-derived (no live turn). |
 | A13, A14 | scenario-unconstructible | Same as every runner: no portable-answer HTTP ACK retained after turn completion; the executable cell checks idle expiry and Continue instead. |
 
 R16 (#134/#401) checks a stored assistant ASK and exactly one waiting question

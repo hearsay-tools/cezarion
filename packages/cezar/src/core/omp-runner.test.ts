@@ -39,7 +39,7 @@ describe('ompTools', () => {
     ]);
   });
 
-  // Ruling R20: OMP names an MCP tool `mcp__<server>_<tool>` (one underscore, lowercased and
+  // Ruling 20: OMP names an MCP tool `mcp__<server>_<tool>` (one underscore, lowercased and
   // sanitized, v18.4.11 `qjn`) and validates `--tools` by exact name, so Claude's
   // `mcp__<server>__<tool>` spelling is translated before it reaches the flag.
   it.each([
@@ -85,7 +85,7 @@ describe('ompTools', () => {
     expect(ompTools(['constructor'], {})).toEqual({ flag: 'no-tools', tools: [], dropped: ['constructor'] });
   });
 
-  it('exclude only removes names, and an empty remainder is --no-tools (R13)', () => {
+  it('exclude only removes names, and an empty remainder is --no-tools (Ruling 13)', () => {
     expect(ompTools(['Read', 'TodoWrite', 'lsp'], { exclude: ['todo', 'lsp'] })).toMatchObject({ flag: 'tools', tools: ['read'] });
     expect(ompTools(['TodoWrite'], { exclude: ['todo'] })).toMatchObject({ flag: 'no-tools', tools: [] });
     expect(ompTools(['Read'], { exclude: ['todo'] })).toMatchObject({ flag: 'tools', tools: ['read'] });
@@ -184,7 +184,7 @@ describe('OMP_SPEC_SUPPORT', () => {
     for (const support of Object.values(OMP_SPEC_SUPPORT)) expect(support.honored).toBe(true);
     expect(OMP_SPEC_SUPPORT.additionalDirectories).toEqual({ honored: true, via: '--add-dir per directory' });
     expect(OMP_SPEC_SUPPORT.restrictNativeDelegation).toMatchObject({ via: expect.stringContaining('eval') });
-    // R14: D1 with no allowedTools names a list, so it never widens to OMP's defaults.
+    // Ruling 14: D1 with no allowedTools names a list, so it never widens to OMP's defaults.
     expect(OMP_SPEC_SUPPORT.restrictNativeDelegation).toMatchObject({ via: expect.stringContaining('allowedTools undefined') });
     expect(OMP_SPEC_SUPPORT.restrictNativeDelegation).toMatchObject({ via: expect.stringContaining('failing closed') });
   });
@@ -411,7 +411,7 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
     expect(ui).toContainEqual(expect.objectContaining({ type: 'session.error', message: expect.stringContaining('steer lost the race') }));
   });
 
-  it('the turn-opening prompt rejected before admission is a v1 error and the turn-end (R10)', async () => {
+  it('the turn-opening prompt rejected before admission is a v1 error and the turn-end (Ruling 10)', async () => {
     const { events, ui } = await runSession(spec('mock:prompt-rejected'));
     expect(events.filter(event => event.type === 'error')).toEqual([
       { type: 'error', message: 'omp: prompt failed: input hook rejected the prompt' },
@@ -567,7 +567,7 @@ process.exit(2);
     child.kill('SIGKILL');
   });
 
-  describe('MCP tools OMP has not registered (R20)', () => {
+  describe('MCP tools OMP has not registered (Ruling 20)', () => {
     it('respawns once without the passed MCP names OMP did not know, with one v1 note', async () => {
       const { events, ui, result } = await runSession(spec('inspect the working tree', {
         allowedTools: ['Read', 'mcp__github__create_issue', 'mcp__slow_server__query'],
@@ -639,7 +639,7 @@ process.exit(2);
   };
   const invocations = (): string[][] => lines('invocations.ndjson') as unknown as string[][];
 
-  describe('tools disabled by the user\'s OMP settings (R13)', () => {
+  describe('tools disabled by the user\'s OMP settings (Ruling 13)', () => {
     it.each([
       ['one tool', ['Read', 'TodoWrite'], 'todo', ['--tools', 'read,todo'], ['--tools', 'read'], 'todo'],
       ['two tools', ['Read', 'TodoWrite', 'lsp'], 'todo,lsp', ['--tools', 'read,todo,lsp'], ['--tools', 'read'], 'todo, lsp'],
@@ -688,7 +688,7 @@ process.exit(2);
     });
   });
 
-  describe('input accepted before the first frame, across an R13 respawn', () => {
+  describe('input accepted before the first frame, across a Ruling 13 respawn', () => {
     /** The mock behind a wrapper that records each child's pid, so a test knows which child it talks to. */
     const pidBin = (): string => {
       const bin = join(cwd, 'pid-omp.mjs');

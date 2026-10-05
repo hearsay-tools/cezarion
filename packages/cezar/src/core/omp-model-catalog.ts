@@ -15,7 +15,7 @@ const DEFAULT_DISCOVERY_TIMEOUT_MS = 10_000;
 /** Grace between the probe's SIGTERM and the SIGKILL that follows it. */
 export const KILL_GRACE_MS = 2_000;
 /**
- * Ruling R19: volume never makes discovery fail. `omp models --json` prints ~350 bytes per model
+ * Ruling 19: volume never makes discovery fail. `omp models --json` prints ~350 bytes per model
  * and OpenRouter alone lists 561 chat models on v18.4.11, so past this cap the first models in
  * OMP's own order are kept and the cut is logged once.
  */

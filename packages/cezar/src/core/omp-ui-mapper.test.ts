@@ -76,7 +76,7 @@ describe('omp ui mapper (golden fixtures)', () => {
     ]);
   });
 
-  it('ignores the unsolicited startup frames (ruling R7) and the set_* acknowledgements', () => {
+  it('ignores the unsolicited startup frames (Ruling 7) and the set_* acknowledgements', () => {
     const state = createOmpUiState();
     for (const value of frames('rpc-lifecycle').slice(0, 8)) {
       const mapped = mapOmpRpcMessage(value, state);
@@ -270,7 +270,7 @@ describe('omp ui mapper (golden fixtures)', () => {
     ]);
   });
 
-  it('the turn-opening prompt failing before admission reports the error and ends the turn as error (R10)', () => {
+  it('the turn-opening prompt failing before admission reports the error and ends the turn as error (Ruling 10)', () => {
     // rpc.md: a failure before admission is the command's error response, and no
     // `prompt_result` follows (rpc-mode.ts discards the ticket).
     const { events, state } = fold([
