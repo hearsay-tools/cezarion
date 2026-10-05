@@ -323,6 +323,7 @@ describe('the full-screen /new against a live dry-run server', () => {
 
     // The source is recorded as lastTask — a record of what ran, not a preselection for the
     // next task (see the next spec, and `resolveSource`).
+    // Delayed-save failure bundle: https://github.com/hearsay-tools/cezarion/pull/841#discussion_r4185080127
     let lastTask: unknown
     const uiState = await pollFor(async signal => {
       const state = await pollJson<{ lastTask?: { source: string; ref: string } | null }>(

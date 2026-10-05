@@ -99,6 +99,7 @@ afterAll(async () => {
   else process.env.AGENT_BROWSER_DEFAULT_TIMEOUT = priorWaitBudget
   browser?.close()
   await stopFixtureServer(server)
+  // Local ENOTEMPTY evidence: https://github.com/hearsay-tools/cezarion/pull/841#discussion_r4185080113
   // Retry transient directory-writer races after shutdown; persistent failures still throw.
   if (dataRoot) rmSync(dataRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
 })
