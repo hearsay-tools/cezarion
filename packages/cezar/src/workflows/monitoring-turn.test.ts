@@ -13,7 +13,7 @@ import { endsWait } from '../task-cli/watch.ts';
 import { TaskWebhook, type TaskWebhookPayload } from '../runs/webhook.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 import { manager, store, root, worker, until, semaphore, useWorkerWaitFixture, register, waitOf, restart, eventCheckpoint } from './worker-wait.testkit.ts';
-import { MONITORING_TURN_CRITERIA, messagesPrompt, MONITORING_TEXT, ACK_TEXT, ASK_TEXT } from './monitoring-turn.testkit.ts';
+import { MONITORING_TURN_CRITERIA, messagesPrompt, MONITORING_TEXT, ACK_TEXT, ASK_TEXT, REJECTED_ASK_TEXT } from './monitoring-turn.testkit.ts';
 
 for (const backend of RUNNER_IDS) describe(`${backend} monitoring turn`, { timeout: 30_000 }, () => {
   useWorkerWaitFixture();
@@ -54,18 +54,25 @@ for (const backend of RUNNER_IDS) describe(`${backend} monitoring turn`, { timeo
       });
       store.updateRun(p.id, { notify: true });
       try {
-        if (row.id === 'M16') {
+        if (row.id === 'M16' || row.id === 'M25') {
           store.commitDelegation([{ id: p.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
           const w = await worker(p.id);
           process.env.CEZ_CLAUDE_BIN = HARNESS_ADAPTERS.claude.mockBin;
           manager.enqueueOwnedRun(w.id);
           await until(() => store.getRun(w.id)?.status === 'waiting');
           let acceptedWaitId = '';
-          await send([MONITORING_TEXT, 'Please review the changes before I continue.'], () => {
+          await send([MONITORING_TEXT, ...(row.id === 'M25' ? [ASK_TEXT, REJECTED_ASK_TEXT, ACK_TEXT] : ['Please review the changes before I continue.'])], () => {
             acceptedWaitId = register(p.id, [w.id]).id;
             expect(waitOf(run())?.phase).toBe('registered');
           });
           attention('needs you', true);
+          expect(run().hasPendingHumanAsk).not.toBe(true);
+          expect(store.readEvents(p.id).filter(event => event.type === 'ask.requested')).toHaveLength(0);
+          const gateSeq = store.readEvents(p.id).filter(event => event.type === 'note' && event.code === 'unstructured-human-gate').at(-1)!.seq;
+          if (row.id === 'M25') {
+            expect(run().invalidAsk).toBe(true);
+            expect(store.readEvents(p.id).some(event => event.type === 'text' && String(event.text).includes(REJECTED_ASK_TEXT))).toBe(true);
+          }
           const timer = manager['active'].get(p.id)!.idleTimer! as NodeJS.Timeout & { _onTimeout(): void };
           const expire = timer._onTimeout; clearTimeout(timer); expire();
           await until(() => !manager.isActive(p.id));
@@ -97,7 +104,8 @@ for (const backend of RUNNER_IDS) describe(`${backend} monitoring turn`, { timeo
           expect(manager.continueRun(p.id, { text: messagesPrompt(backend, [MONITORING_TEXT, ACK_TEXT]) }).ok).toBe(true);
           await until(() => run().activity === 'monitoring');
           attention('monitoring', false);
-          expect(store.readEvents(p.id).some(event => event.type === 'human-input-delivered')).toBe(true);
+          expect(store.readEvents(p.id).some(event => event.type === 'human-input-delivered' && event.askSeq === gateSeq)).toBe(true);
+          expect(run().invalidAsk).not.toBe(true);
           expect(run().agentInputs?.find(input => input.id === id)?.deliveredAt).toBeDefined();
         } else if (row.id === 'M1') {
           await send([MONITORING_TEXT, ACK_TEXT]);
@@ -130,6 +138,25 @@ for (const backend of RUNNER_IDS) describe(`${backend} monitoring turn`, { timeo
           }
           expect(run().hasPendingHumanAsk).not.toBe(true);
           expect(run().monitoringWakeAt).toBeUndefined();
+        } else if (row.id === 'M24') {
+          for (const messages of [[MONITORING_TEXT, REJECTED_ASK_TEXT], [MONITORING_TEXT, ASK_TEXT, REJECTED_ASK_TEXT, ACK_TEXT], [MONITORING_TEXT, REJECTED_ASK_TEXT, ACK_TEXT, MONITORING_TEXT], [MONITORING_TEXT, 'CEZ:ASK {', ACK_TEXT]]) {
+            const before = store.readEvents(p.id).at(-1)!.seq;
+            await send(messages);
+            const turnEvents = store.readEvents(p.id).filter(event => event.seq > before);
+            attention('needs you', true);
+            expect(run().invalidAsk).toBe(true);
+            expect(run().hasPendingHumanAsk).not.toBe(true);
+            expect(run().monitoringWakeAt).toBeUndefined();
+            expect(store.readEvents(p.id).filter(event => event.type === 'ask.requested')).toHaveLength(0);
+            expect(turnEvents.some(event => event.type === 'text' && String(event.text).includes(messages.includes(REJECTED_ASK_TEXT) ? REJECTED_ASK_TEXT : 'CEZ:ASK {'))).toBe(true);
+            expect(turnEvents.some(event => event.type === 'note' && event.tone === 'danger')).toBe(true);
+          }
+          // The latest valid declaration replaces a rejected payload.
+          await send([MONITORING_TEXT, REJECTED_ASK_TEXT, ASK_TEXT, ACK_TEXT]);
+          attention('needs you', true);
+          expect(run().invalidAsk).not.toBe(true);
+          expect(run().hasPendingHumanAsk).toBe(true);
+          expect(store.readEvents(p.id).filter(event => event.type === 'ask.requested')).toHaveLength(1);
         } else if (row.id === 'M22') {
           const malformed = 'CEZ:ASK {"questions":[]}';
           await send([ASK_TEXT, malformed]);
@@ -140,11 +167,13 @@ for (const backend of RUNNER_IDS) describe(`${backend} monitoring turn`, { timeo
           expect(store.readEvents(p.id).some(event => event.type === 'note' && event.tone === 'danger' && String(event.message).includes('payload failed validation'))).toBe(true);
           expect(store.readEvents(p.id).some(event => event.type === 'text' && String(event.text).includes(malformed))).toBe(true);
         } else if (row.id === 'M20') {
-          for (const example of [`> ${ASK_TEXT}`, `\`\`\`text\n${ASK_TEXT}\nCEZ:DONE\n\`\`\``, `Example:\n${ASK_TEXT}`, 'Example:\nCEZ:DONE', `    ${ASK_TEXT}`, '    CEZ:DONE']) {
+          for (const example of [`> ${REJECTED_ASK_TEXT}`, `Example:\n${REJECTED_ASK_TEXT}`, `\`\`\`text\n${REJECTED_ASK_TEXT}\n\`\`\``, `> ${ASK_TEXT}`, `\`\`\`text\n${ASK_TEXT}\nCEZ:DONE\n\`\`\``, `Example:\n${ASK_TEXT}`, 'Example:\nCEZ:DONE', `    ${ASK_TEXT}`, '    CEZ:DONE']) {
             await send([MONITORING_TEXT, example, ACK_TEXT]);
             attention('monitoring', false);
             expect(run().hasPendingHumanAsk).not.toBe(true);
             expect(store.readEvents(p.id).filter(event => event.type === 'ask.requested')).toHaveLength(0);
+            expect(run().invalidAsk).not.toBe(true);
+            expect(store.readEvents(p.id).some(event => event.type === 'note' && event.tone === 'danger')).toBe(false);
           }
           // Examples at the final line remain inert too.
           for (const example of [`Example:\n${ASK_TEXT}`, 'Example:\nCEZ:DONE']) {
@@ -206,7 +235,7 @@ for (const backend of RUNNER_IDS) describe(`${backend} monitoring turn`, { timeo
         }
         await hook.idle();
         const final = calls.at(-1)!;
-        if (row.id !== 'M16') expect(final.task.attentionLabel).toBe(deriveAttention(run()).label);
+        if (row.id !== 'M16' && row.id !== 'M25') expect(final.task.attentionLabel).toBe(deriveAttention(run()).label);
         if (row.id === 'M1') expect(calls.some(call => call.activity === 'monitoring' && call.task.attentionLabel === 'monitoring')).toBe(true);
       } finally { hook.dispose(); }
     });
@@ -244,10 +273,10 @@ for (const backend of RUNNER_IDS) describe(`${backend} monitoring turn`, { timeo
     expect(store.getRun(w.id)?.status).toBe('cancelled');
   });
 
-  for (const mode of ['fresh', 'continuation'] as const) it(`${mode} M23 portable ASK followed by acknowledgement keeps the existing autonomous override`, async () => {
+  for (const mode of ['fresh', 'continuation'] as const) for (const rejected of [false, true]) it(`${mode} ${rejected ? 'M28 ordinary rejected ASK keeps the existing autonomous nudge policy' : 'M23 portable ASK followed by acknowledgement keeps the existing autonomous override'}`, async () => {
     process.env.CEZ_DRY_RUN = '0';
     process.env[HARNESS_ADAPTERS[backend].binEnv] = HARNESS_ADAPTERS[backend].mockBin;
-    const prompt = messagesPrompt(backend, [MONITORING_TEXT, ASK_TEXT, ACK_TEXT]);
+    const prompt = messagesPrompt(backend, rejected ? [REJECTED_ASK_TEXT] : [MONITORING_TEXT, ASK_TEXT, ACK_TEXT]);
     const p = manager.startRun(QUICK_TASK_WORKFLOW, { task: mode === 'fresh' ? prompt : 'mock:hold', runner: backend, autonomous: mode === 'fresh' });
     if (mode === 'continuation') {
       await until(() => store.getRun(p.id)?.status === 'waiting');
@@ -258,7 +287,8 @@ for (const backend of RUNNER_IDS) describe(`${backend} monitoring turn`, { timeo
     }
     await until(() => !manager.isActive(p.id));
     expect(store.getRun(p.id)?.status).toBe('done');
-    expect(store.readEvents(p.id).some(event => event.type === 'note' && String(event.message).includes('question overridden'))).toBe(true);
+    expect(store.readEvents(p.id).some(event => event.type === 'note' && String(event.message).includes(rejected ? 'autonomous — continuing without pausing' : 'question overridden'))).toBe(true);
+    expect(store.readEvents(p.id).some(event => event.type === 'note' && event.code === 'unstructured-human-gate')).toBe(false);
     expect(store.readEvents(p.id).filter(event => event.type === 'ask.requested' || event.type === 'human-input-delivered')).toHaveLength(0);
   });
 

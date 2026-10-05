@@ -1024,7 +1024,7 @@ selection after an earlier prose mention, and quoted ASK examples without a
 marker. Parsing and transcript stripping must select the same final line;
 ordinary examples leave no question card or rejection note.
 
-Monitoring turn rows **M1–M23** (hearsay-tools/cezarion#772) live in
+Monitoring turn rows **M1–M28** (hearsay-tools/cezarion#772) live in
 `workflows/monitoring-turn.test.ts` and `workflows/worker-parent-attention.test.ts`
 and enter the shared parity guard. Every `RUNNER_IDS` adapter carries multiple
 parent assistant text segments through its native wire on fresh and Continue sessions.
@@ -1052,7 +1052,12 @@ retains DONE through an acknowledgement and reaches review. M20 excludes
 quoted/fenced/indented/example ASK and DONE declarations. M21 retains later
 DONE precedence over an earlier portable ASK; M22 retains the latest malformed
 ASK diagnostic and raw fallback. M23 keeps autonomous portable overrides on
-both turn-end paths. Active ASK lines use the existing payload parser unchanged.
+both turn-end paths. M24 retains rejected active ASK intent over monitoring
+without a card, including latest malformed replacement and later valid replacement.
+M25 carries that fallback through registered wait withdrawal, idle/restart and
+late worker input until an exact delivered human response. M26/M27 pin delayed
+ACK admission; M28 preserves ordinary rejected-ASK autonomous nudging. Active
+ASK lines use the existing payload parser unchanged.
 The native rows
 also assert CLI attention-wait and webhook projections. Cockpit grouping and
 notification transitions remain consumers of the same contract attention rule.

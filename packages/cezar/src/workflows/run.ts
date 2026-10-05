@@ -306,9 +306,11 @@ function classifyTurnEnd(turnText: string, completedAssistantText: string, optio
     v1.askResult.kind === 'none' && v2.askResult.kind === 'none' && !v1.humanGate && !v2.humanGate;
   const askTurn = resolveAskTurn(v1.askResult, v2.askResult, options.sessionOpen && !done);
   // Ordinary markerless autonomous turns keep their existing nudge policy.
-  // Prose gates only override a quiet park this turn would otherwise enter.
+  // Prose and rejected-ASK fallbacks override a quiet park this turn would
+  // otherwise enter. Recovery notes beside a valid card are not rejections.
   const quietPark = v1.monitoring || v2.monitoring || options.scheduledWake || options.liveWorkers || options.dependencyWait;
-  const humanGate = !done && quietPark && (v1.humanGate || v2.humanGate);
+  const rejectedAsk = !askTurn.ask && askTurn.notes.length > 0;
+  const humanGate = !done && quietPark && (v1.humanGate || v2.humanGate || rejectedAsk);
   const monitoring = options.interactive && options.sessionOpen && !done && !askTurn.ask &&
     !options.pendingHumanAsk && !options.completionAttention && !humanGate &&
     (v1.monitoring || v2.monitoring || options.scheduledWake || options.liveWorkers);
@@ -4211,7 +4213,7 @@ export class RunManager {
   private pendingHumanAskSeq(runId: string): number | undefined {
     let pending: RunEvent | undefined;
     for (const event of this.store.readEvents(runId)) {
-      // Prose gates use the same exact successful-delivery receipt as asks,
+      // Fallback human gates use the same exact successful-delivery receipt as asks,
       // without inventing a structured question card or changing its summary.
       pending = event.type === 'note' && event.code === PROSE_HUMAN_GATE
         ? event : advancePendingHumanAsk(pending, event);
@@ -6550,7 +6552,7 @@ export class RunManager {
     }
   }
 
-  /** A direct prose gate supersedes a registered autonomous wait. Keep the
+  /** A prose or rejected-ASK fallback supersedes a registered autonomous wait. Keep the
    * checkpoint through idle closure/restart and hold worker input until a
    * successful human delivery, just as for a structured ask. */
   private prepareProseHumanGate(runId: string, state: ActiveRun): void {

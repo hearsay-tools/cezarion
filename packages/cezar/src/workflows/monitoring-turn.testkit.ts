@@ -18,6 +18,8 @@ export const MONITORING_TURN_CRITERIA = [
   { id: 'M20', scenario: 'turn-messages', name: 'quoted, fenced and example ASK and DONE declarations remain inert' },
   { id: 'M21', scenario: 'turn-messages', name: 'a later DONE supersedes an earlier portable ASK before acknowledgement' },
   { id: 'M22', scenario: 'turn-messages', name: 'a trailing malformed ASK keeps its diagnostic and raw fallback over an earlier valid ASK' },
+  { id: 'M24', scenario: 'turn-messages', name: 'a rejected active ASK beats monitoring without a manufactured card' },
+  { id: 'M25', scenario: 'turn-messages', name: 'a rejected ASK retires its wait and survives idle, restart and late worker input' },
   { id: 'M8', scenario: 'turn-messages', name: 'spent parent completion remains actionable' },
 ] as const;
 export const MONITORING_ORDER_CRITERIA = [
@@ -25,12 +27,15 @@ export const MONITORING_ORDER_CRITERIA = [
   { id: 'M14', scenario: 'turn-messages', name: 'Continue ordinary markerless prose questions keep autonomous nudges' },
   { id: 'M17', scenario: 'turn-messages', name: 'fresh genuine accepted-wait session loss still fails' },
   { id: 'M23', scenario: 'turn-messages', name: 'portable ASK followed by acknowledgement keeps the existing autonomous override' },
+  { id: 'M28', scenario: 'turn-messages', name: 'an ordinary rejected ASK keeps the existing autonomous nudge policy' },
 ] as const;
 
 // Agent-echo follows a real owned-input ACK on each adapter's existing wire.
 export const MONITORING_ACK_CRITERIA = [
   { id: 'M9', scenario: 'baseline', name: 'fresh input ACK retains an explicit human gate with live workers' },
   { id: 'M10', scenario: 'baseline', name: 'Continue input ACK retains an explicit human gate with live workers' },
+  { id: 'M26', scenario: 'baseline', name: 'fresh input ACK retains a rejected ASK gate with live workers' },
+  { id: 'M27', scenario: 'baseline', name: 'Continue input ACK retains a rejected ASK gate with live workers' },
 ] as const;
 export function messagesPrompt(backend: RunnerId, messages: string[]): string {
   return `${HARNESS_ADAPTERS[backend].scenarios['turn-messages']}:${Buffer.from(JSON.stringify(messages)).toString('base64')}`;
@@ -38,3 +43,4 @@ export function messagesPrompt(backend: RunnerId, messages: string[]): string {
 export const MONITORING_TEXT = 'The diagnostics are reviewed and approved. The load campaign is still running.\n\nCEZ:MONITORING';
 export const ACK_TEXT = 'I’ll fetch and merge the latest `main` before opening the draft PR, resolve any conflicts, and rerun the checks affected by the merged changes.';
 export const ASK_TEXT = 'CEZ:ASK {"questions":[{"header":"Choice","question":"Which module?","options":[{"label":"Parser"},{"label":"Runner"}]}]}';
+export const REJECTED_ASK_TEXT = 'CEZ:ASK {"questions":[{"header":"Deploy","question":"Should I deploy?","options":[{"label":"Deploy"}]}]}';
