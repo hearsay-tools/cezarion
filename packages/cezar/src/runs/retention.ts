@@ -200,6 +200,13 @@ export async function reclaimWorktree(
   if (!run.worktreePath) return null;
   const release = opts.claim ? opts.claim(run) : () => undefined;
   if (!release) return null; // in use since it was selected
+  // Claimed in the run database too, for the whole reclaim (#779, plan step 3): no other cezar
+  // process writes this run or reclaims it meanwhile, and another process's run is left alone.
+  // Structural test stores have no claims.
+  const real = store as Partial<RunStore>;
+  let pinned = typeof real.pin !== 'function';
+  try { pinned ||= real.pin!.call(store, run.id, 'cleanup') !== undefined; } catch { /* busy: not claimed */ }
+  if (!pinned) { release(); return null; }
   try {
     if (!(await preserveWorkerResult(repoRoot, store, run).catch(() => false))) return null;
     if (opts.remove) assertSafe(); // injected reclaimer has no final callback
@@ -212,6 +219,7 @@ export async function reclaimWorktree(
     // best-effort: never let retention crash a terminal transition or startup.
     return null;
   } finally {
+    real.unpin?.call(store, run.id, 'cleanup');
     release();
   }
 }

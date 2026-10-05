@@ -446,9 +446,9 @@ async function waitForHealth(healthUrl: string, timeoutMs: number): Promise<bool
 // ---- run (headless) ----------------------------------------------------------
 
 /**
- * Headless `run` stays headless (#504), but a cockpit already serving this repo will never see
- * the run until it restarts — say so once, on stderr. Capped so it never delays the run, and
- * silent on any failure.
+ * Headless `run` stays headless (#504). A cockpit already serving this repo lists the run, but
+ * cannot control it while this process owns it (#779, plan step 3), and gets none of its live
+ * events — say so once, on stderr. Capped so it never delays the run, and silent on any failure.
  */
 async function hintRunningCockpit(repoRoot: string): Promise<void> {
   const { discoverCockpit } = await import('./task-cli/discovery.ts');

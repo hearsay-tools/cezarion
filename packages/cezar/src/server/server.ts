@@ -3879,10 +3879,35 @@ export function createApp(deps: ServerDeps) {
     }
   };
 
+  /**
+   * Every control on one run (any `/runs/:id` request that is not a read) first asks who owns it
+   * (#779, plan step 3): a `serve` and a headless `cez run` can share a project's runs.
+   * - Another live cezar process's run answers `409 { error }`, the shape these routes already
+   *   use for a run that exists but cannot be acted on now. Reads are never refused.
+   * - A run whose owner is proven dead is adopted first — claimed, loaded and recovered as a
+   *   restart would — and the control then applies. Otherwise Stop on a crashed `cez run` would
+   *   be a dead end until this cockpit restarted.
+   * - A run this process stopped writing after a conflicting write answers 409 too.
+   *
+   * Registered against explicit paths, like `requireAutomations`: `route()` re-registers it under
+   * the mount prefix, and it gates every family's `/runs/:id` routes registered after it.
+   */
+  const requireRunControl = async (c: Context<ProjectApiEnv>, next: Next) => {
+    const id = c.req.param('id');
+    if (c.req.method === 'GET' || c.req.method === 'HEAD' || id === undefined) return next();
+    const { store, manager } = c.get('project');
+    if (store.runOwnership(id) === 'orphaned') await manager.adoptOrphanedRun(id);
+    const refusal = store.writeRefusal(id);
+    if (refusal) return c.json({ error: refusal }, 409);
+    await next();
+  };
+
   // ---- chained family: runs lifecycle + artifacts (project-scoped) ----
   const delegationService = deps.delegation?.service ?? new DelegationService();
   delegationService.setDiscovery({ models: modelCatalog, providers: providerStatus });
   const runsRoutes = new Hono<ProjectApiEnv>()
+    .use('/runs/:id', requireRunControl)
+    .use('/runs/:id/*', requireRunControl)
     // Legacy (older clients): every full record. The cockpit and `cez task` read `/run-summaries`.
     .get('/runs', (c) => c.json(c.get('project').store.listAllRunsForLegacyRoute().map(run => withUsage(run))))
     // The slim list (#817): the same runs in the same order as `GET /runs`, from the stored
