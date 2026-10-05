@@ -410,13 +410,15 @@ export interface DecodedRun {
 /** A row as this store last read or wrote it (see `RunStore.base`). */
 interface StoredRow {
   revision: number;
+  /** The row's insertion order, where it lists among runs created in the same millisecond. */
+  seq: number;
   data: string;
   extras?: RawExtras;
 }
 
 /** Just the `StoredRow` part of a `coldBase` entry. */
-function storedRow({ revision, data, extras }: StoredRow): StoredRow {
-  return { revision, data, extras };
+function storedRow({ revision, seq, data, extras }: StoredRow): StoredRow {
+  return { revision, seq, data, extras };
 }
 
 /** One stored record (a row's `data`) through `parseRunRecords`' salvage and schema, with what the
@@ -1084,9 +1086,23 @@ function replaceRecord(target: RunRecord, source: RunRecord): void {
   Object.assign(target, source);
 }
 
-/** Newest first, with the database's tie-break, so memory and `runs.db` list in one order. */
-function newestFirst(a: { createdAt: string; id: string }, b: { createdAt: string; id: string }): number {
-  return a.createdAt === b.createdAt ? (a.id < b.id ? 1 : a.id > b.id ? -1 : 0) : (a.createdAt < b.createdAt ? 1 : -1);
+/** Where a run lists: by `createdAt`, then by `seq`, its row's insertion order (see the `runs`
+ *  schema). A `RunRow` is one. */
+interface ListOrder {
+  createdAt: string;
+  seq: number;
+}
+
+/** Newest first, runs created in the same millisecond in insertion order: the order `runs.db`
+ *  lists in, and the order every list had while it was a stable sort of the in-memory map. */
+function newestFirst(a: ListOrder, b: ListOrder): number {
+  if (a.createdAt !== b.createdAt) return a.createdAt < b.createdAt ? 1 : -1;
+  return a.seq < b.seq ? -1 : a.seq > b.seq ? 1 : 0;
+}
+
+/** The items newest first, each by the order beside it. Stable: ties keep their input order. */
+function sortNewestFirst<T>(entries: Iterable<readonly [T, ListOrder]>): T[] {
+  return [...entries].sort(([, a], [, b]) => newestFirst(a, b)).map(([item]) => item);
 }
 
 /** The delegation family a run belongs to, by its root's id: a root is its own, a worker its
@@ -1366,7 +1382,7 @@ export class RunStore extends EventEmitter {
     const changed = loadNormalizedFields(run) !== before;
     if (opts.onlyIfChanged && !changed) return;
     this.held.set(run.id, run);
-    this.base.set(run.id, { revision: row.revision, data: row.data, extras });
+    this.base.set(run.id, { revision: row.revision, seq: row.seq, data: row.data, extras });
     if (changed) this.dirty.add(run.id);
   }
 
@@ -1583,7 +1599,7 @@ export class RunStore extends EventEmitter {
     const { run, extras } = decoded;
     if (this.coldBase.size === 0) queueMicrotask(() => this.coldBase.clear());
     const family = rowFamily(row);
-    this.coldBase.set(row.id, { revision: row.revision, data: row.data, extras, owned: this.claimed.has(family) || this.pendingClaims.has(family) });
+    this.coldBase.set(row.id, { revision: row.revision, seq: row.seq, data: row.data, extras, owned: this.claimed.has(family) || this.pendingClaims.has(family) });
     reconcileLoadedRun(run, { keepLive: this.keepLive });
     rescopeRun(run, this.repoHandle);
     return run;
@@ -1743,7 +1759,14 @@ export class RunStore extends EventEmitter {
    * `listBranchOwners`), or as list rows (`listRunSummaries`).
    */
   listRuns(): RunRecord[] {
-    return [...this.held].filter(([id, run]) => isLiveRecord(run) || this.pins.has(id)).map(([, run]) => run).sort(newestFirst);
+    return sortNewestFirst([...this.held].filter(([id, run]) => isLiveRecord(run) || this.pins.has(id)).map(([, run]) => [run, this.listOrder(run)]));
+  }
+
+  /** Where a held run lists: its row's insertion order, or after every row while this store has
+   *  not written it yet. The held set keeps such runs in creation order, and so does every list
+   *  that sorts them in held-set order (`sortNewestFirst` is stable). */
+  private listOrder(run: RunRecord): ListOrder {
+    return { createdAt: run.createdAt, seq: this.base.get(run.id)?.seq ?? Number.POSITIVE_INFINITY };
   }
 
   /**
@@ -1752,14 +1775,14 @@ export class RunStore extends EventEmitter {
    * whole-history parse #779 exists to remove from everything else.
    */
   listAllRunsForLegacyRoute(): RunRecord[] {
-    const runs = new Map<string, RunRecord>();
+    const runs = new Map<string, readonly [RunRecord, ListOrder]>();
     for (const row of this.db?.listAll() ?? []) {
       if (this.deleted.has(row.id) || this.held.has(row.id)) continue;
       const run = this.decodeCold(row);
-      if (run) runs.set(row.id, run);
+      if (run) runs.set(row.id, [run, row]);
     }
-    for (const [id, run] of this.held) runs.set(id, run);
-    return [...runs.values()].sort(newestFirst);
+    for (const [id, run] of this.held) runs.set(id, [run, this.listOrder(run)]);
+    return sortNewestFirst(runs.values());
   }
 
   /**
@@ -1775,14 +1798,14 @@ export class RunStore extends EventEmitter {
   listRunSummaries(options: { limit?: number } = {}): { runs: RunSummary[]; truncated: boolean } {
     const { limit } = options;
     const rows = this.db?.listSummaries(limit === undefined ? {} : { limit: limit + 1 + this.deleted.size + this.unreadable.size }) ?? [];
-    const summaries = new Map<string, RunSummary>();
+    const summaries = new Map<string, readonly [RunSummary, ListOrder]>();
     for (const row of rows) {
       if (this.deleted.has(row.id) || this.held.has(row.id) || this.unreadable.has(row.id)) continue;
       const summary = parseStoredSummary(row.summary) ?? this.coldSummary(row.id);
-      if (summary) summaries.set(row.id, summary);
+      if (summary) summaries.set(row.id, [summary, row]);
     }
-    for (const [id, run] of this.held) summaries.set(id, toRunSummary(run));
-    const runs = [...summaries.values()].sort(newestFirst);
+    for (const [id, run] of this.held) summaries.set(id, [toRunSummary(run), this.listOrder(run)]);
+    const runs = sortNewestFirst(summaries.values());
     if (limit === undefined || runs.length <= limit) return { runs, truncated: false };
     return { runs: runs.slice(0, limit), truncated: true };
   }
@@ -1839,17 +1862,17 @@ export class RunStore extends EventEmitter {
   /** Every worker filed under `parentId` (the `parent_run_id` index plus memory), newest first:
    *  receipts or not, which is what the reconcile and deletion checks ask. */
   listWorkersOf(parentId: string): RunRecord[] {
-    const workers = new Map<string, RunRecord>();
+    const workers = new Map<string, readonly [RunRecord, ListOrder]>();
     for (const run of this.held.values()) {
-      if (run.delegation?.role === 'worker' && run.delegation.parentRunId === parentId) workers.set(run.id, run);
+      if (run.delegation?.role === 'worker' && run.delegation.parentRunId === parentId) workers.set(run.id, [run, this.listOrder(run)]);
     }
     // Ids first: a live family's workers are usually all held, and then no record is read at all.
     const cold = (this.db?.listIdsByParent(parentId) ?? []).filter((id) => !this.held.has(id) && !this.deleted.has(id));
     for (const row of cold.length > 0 ? this.db!.getMany(cold) : []) {
       const run = this.fromRow(row);
-      if (run?.delegation?.role === 'worker' && run.delegation.parentRunId === parentId) workers.set(row.id, run);
+      if (run?.delegation?.role === 'worker' && run.delegation.parentRunId === parentId) workers.set(row.id, [run, row]);
     }
-    return [...workers.values()].sort(newestFirst);
+    return sortNewestFirst(workers.values());
   }
 
   /** The id of every worker, held or stored, without decoding any (recovery's worker passes). */
@@ -1923,15 +1946,15 @@ export class RunStore extends EventEmitter {
 
   /** The members of one parallel-variant group (spec 010), in no particular order. */
   listGroupRuns(groupId: string): RunRecord[] {
-    return this.queryRuns(this.db?.listByGroup(groupId) ?? [], (run) => run.groupId === groupId);
+    return this.queryRuns(this.db?.listByGroup(groupId) ?? [], (run) => run.groupId === groupId).map(([run]) => run);
   }
 
   /** Runs with a materialized worktree directory (`worktreePath`, not reclaimed), most recently
-   *  finished first: worktree retention and the worktrees panel. */
+   *  finished first, then newest first: worktree retention and the worktrees panel. */
   listRunsWithWorktree(): RunRecord[] {
     const runs = this.queryRuns(this.db?.listWithWorktree() ?? [], (run) => run.worktreePath !== undefined && run.worktreeReclaimedAt === undefined);
-    const recency = (run: RunRecord) => run.finishedAt ?? run.createdAt;
-    return runs.sort((a, b) => (recency(a) < recency(b) ? 1 : recency(a) > recency(b) ? -1 : newestFirst(a, b)));
+    const recency = ([run]: readonly [RunRecord, ListOrder]) => run.finishedAt ?? run.createdAt;
+    return runs.sort((a, b) => (recency(a) < recency(b) ? 1 : recency(a) > recency(b) ? -1 : newestFirst(a[1], b[1]))).map(([run]) => run);
   }
 
   /**
@@ -1962,13 +1985,13 @@ export class RunStore extends EventEmitter {
 
   /** The rows a column query returned, as records, with memory laid over them: a held run
    *  answers from memory (matching `matches` there, not on its maybe-older row). */
-  private queryRuns(rows: readonly RunRow[], matches: (run: RunRecord) => boolean): RunRecord[] {
-    const runs = new Map<string, RunRecord>();
-    for (const run of this.held.values()) if (matches(run)) runs.set(run.id, run);
+  private queryRuns(rows: readonly RunRow[], matches: (run: RunRecord) => boolean): Array<readonly [RunRecord, ListOrder]> {
+    const runs = new Map<string, readonly [RunRecord, ListOrder]>();
+    for (const run of this.held.values()) if (matches(run)) runs.set(run.id, [run, this.listOrder(run)]);
     for (const row of rows) {
       if (runs.has(row.id) || this.held.has(row.id) || this.deleted.has(row.id)) continue;
       const run = this.fromRow(row);
-      if (run && matches(run)) runs.set(row.id, run);
+      if (run && matches(run)) runs.set(row.id, [run, row]);
     }
     return [...runs.values()];
   }
@@ -2765,17 +2788,17 @@ export class RunStore extends EventEmitter {
     // Snapshot first: cascade may archive still-live workers, mutating the held set, and the pin
     // has to be read before `applyArchived` clears it. Runs not in memory are picked off their
     // stored summary, which carries every field `isSweepable` reads.
-    const picked: Array<Parameters<typeof isSweepable>[0] & { id: string; createdAt: string }> =
-      [...this.held.values()].filter((run) => isSweepable(run, scope));
+    const picked: Array<readonly [Parameters<typeof isSweepable>[0] & { id: string }, ListOrder]> =
+      [...this.held.values()].filter((run) => isSweepable(run, scope)).map((run) => [run, this.listOrder(run)]);
     for (const row of this.db?.listWhere("archived = 0 AND status IN ('done', 'failed', 'cancelled') AND parent_run_id IS NULL") ?? []) {
       if (this.held.has(row.id) || this.deleted.has(row.id)) continue;
       const summary = parseStoredSummary(row.summary);
-      if (summary && isSweepable(summary, scope)) picked.push(summary);
+      if (summary && isSweepable(summary, scope)) picked.push([summary, row]);
     }
     // Another process's runs are not this store's to archive (#779, plan step 3): they stay out.
     // A sweepable run is never a worker (`isSweepable`), so each is its own family.
-    const writable = this.claimFamilies(picked.map((run) => run.id));
-    const mine = picked.filter((run) => writable.has(run.id)).sort(newestFirst);
+    const writable = this.claimFamilies(picked.map(([run]) => run.id));
+    const mine = sortNewestFirst(picked.filter(([run]) => writable.has(run.id)));
     const ids = mine.map((run) => run.id);
     const pinnedIds = mine.filter((run) => run.pinned).map((run) => run.id);
     for (const id of ids) {
@@ -3540,11 +3563,11 @@ export class RunStore extends EventEmitter {
    */
   private pruneOldRuns(): void {
     for (const [archived, keep] of [[false, MAX_RUNS_KEPT], [true, MAX_ARCHIVED_KEPT]] as const) {
-      const ranked = new Map<string, { id: string; createdAt: string }>();
+      const ranked = new Map<string, ListOrder & { id: string }>();
       for (const key of this.db?.listKeysWhere('archived = ?', [archived ? 1 : 0]) ?? []) {
         if (!this.held.has(key.id) && !this.deleted.has(key.id)) ranked.set(key.id, key);
       }
-      for (const run of this.held.values()) if (run.archived === archived) ranked.set(run.id, run);
+      for (const run of this.held.values()) if (run.archived === archived) ranked.set(run.id, { id: run.id, ...this.listOrder(run) });
       const overflow = [...ranked.values()].sort(newestFirst).slice(keep).map((key) => key.id);
       if (overflow.length === 0) continue;
       const stale = overflow.flatMap((id) => {
@@ -3566,7 +3589,7 @@ export class RunStore extends EventEmitter {
         if (!this.canDeleteRun(id)) continue;
         const family = this.familyOf(id);
         const row = coldRows.get(id);
-        if (row) this.base.set(id, { revision: row.revision, data: row.data });
+        if (row) this.base.set(id, { revision: row.revision, seq: row.seq, data: row.data });
         this.held.delete(id);
         this.markDeleted(id, family);
         removeAgentTmpDir(this.dataDir, id);
@@ -3625,6 +3648,14 @@ export class RunStore extends EventEmitter {
       deletes.push(id);
       families.set(id, this.familyOf(id));
     }
+    // A row's insertion order (`seq`) is the order this write inserts it in, and it is where the
+    // run lists among runs created in the same millisecond. Insert new runs in creation order (the
+    // held set's, then staged runs not held yet), whether staged or dirty brought them here.
+    if (upserts.filter((row) => !this.base.has(row.id)).length > 1) {
+      const created = new Map<string, number>();
+      for (const id of [...this.held.keys(), ...staged.keys()]) if (!created.has(id)) created.set(id, created.size);
+      upserts.sort((a, b) => created.get(a.id)! - created.get(b.id)!);
+    }
     // A held run whose write moved it into a new family (a worker quarantined to `invalid`) takes
     // that family's claim first; one it cannot take fails the fence below as claim-lost.
     const moved = [...new Set(families.values())].filter((family) => !this.claimed.has(family) && !this.pendingClaims.has(family));
@@ -3640,7 +3671,9 @@ export class RunStore extends EventEmitter {
       this.claimed.set(family, generation);
       this.pendingClaims.delete(family);
     }
-    for (const row of upserts) this.base.set(row.id, { revision: commit.revisions.get(row.id)!, data: row.data, extras: extras.get(row.id) });
+    for (const row of upserts) {
+      this.base.set(row.id, { revision: commit.revisions.get(row.id)!, seq: commit.seqs.get(row.id)!, data: row.data, extras: extras.get(row.id) });
+    }
     for (const id of deletes) {
       this.base.delete(id);
       this.deletedFamilies.delete(id);
@@ -3729,7 +3762,7 @@ export class RunStore extends EventEmitter {
         reconcileLoadedRun(current, { keepLive: true });
         rescopeRun(current, this.repoHandle);
         if (held) replaceRecord(held, current);
-        this.base.set(conflict.id, { revision: conflict.current.revision, data: conflict.current.data, extras: decoded!.extras });
+        this.base.set(conflict.id, { revision: conflict.current.revision, seq: conflict.current.seq, data: conflict.current.data, extras: decoded!.extras });
         this.emit('run', held ?? current);
       } else {
         this.held.delete(conflict.id);

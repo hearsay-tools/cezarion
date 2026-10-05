@@ -49,7 +49,12 @@ const MIGRATIONS: readonly string[] = [
   -- copies of record fields (or of one predicate over the record), computed by the caller in the
   -- same upsert as data and summary, so a row can never disagree with its own columns.
   CREATE TABLE runs (
-    id TEXT PRIMARY KEY,
+    -- Insertion order, the rowid itself: given by a row's first insert (runs.json order on import,
+    -- then the order runs are first written) and kept by every upsert. Runs created in the same
+    -- millisecond list in this order, as they did when every list was a stable sort of the
+    -- in-memory map: recovery and the queue start tied runs in it.
+    seq INTEGER PRIMARY KEY,
+    id TEXT NOT NULL UNIQUE,
     -- Newest-first order: GET /run-summaries, /workspace/runs-index, the cold newest-200 read,
     -- and count-based history retention (the runs past the newest N).
     created_at TEXT NOT NULL,
@@ -86,9 +91,9 @@ const MIGRATIONS: readonly string[] = [
     -- The record's toRunSummary() JSON, so list routes never decode data.
     summary TEXT NOT NULL
   ) STRICT;
-  -- (created_at, id) rather than created_at alone: the newest-first reads order by both, and the
-  -- second column is what lets SQLite walk the index instead of sorting the tie groups.
-  CREATE INDEX runs_created_at ON runs (created_at, id);
+  -- Newest first, ties in insertion order: the order every newest-first read asks for, so SQLite
+  -- walks the index instead of sorting the tie groups.
+  CREATE INDEX runs_created_at ON runs (created_at DESC, seq);
   CREATE INDEX runs_status ON runs (status);
   -- Partial indexes: each query asks for the rows that HAVE the value, and most rows do not.
   CREATE INDEX runs_live ON runs (live) WHERE live = 1;
@@ -162,6 +167,8 @@ export interface RunRowInput {
 }
 
 export interface RunRow {
+  /** Insertion order: assigned by the row's first insert, never changed (see the schema). */
+  seq: number;
   id: string;
   createdAt: string;
   finishedAt: string | null;
@@ -180,6 +187,7 @@ export interface RunRow {
 }
 
 export interface RunSummaryRow {
+  seq: number;
   id: string;
   createdAt: string;
   revision: number;
@@ -237,6 +245,8 @@ export interface RunWriteFence {
 export interface RunDatabaseCommit {
   /** The revision each upserted row now has. */
   revisions: Map<string, number>;
+  /** The insertion order (`seq`) of each upserted row: new for a row this commit inserted. */
+  seqs: Map<string, number>;
   /** The generation of each claim the fence took. */
   claims: Map<string, number>;
   /** Nothing was written: the `onlyIfMetaAbsent` key was present. */
@@ -408,14 +418,16 @@ function assertDatabaseHeader(path: string): void {
   throw new RunDatabaseCorruptError('corrupt', `runs database: ${path} is not a database`, { sqliteCode: SQLITE_NOTADB });
 }
 
-const ROW_COLUMNS = 'id, created_at, finished_at, status, archived, live, parent_run_id, client_request_id, group_id, worktree_path, branch, base_branch, revision, data, summary';
-/** Newest first, with a deterministic tie-break: the one order every list read uses. */
-const NEWEST_FIRST = 'ORDER BY created_at DESC, id DESC';
+const ROW_COLUMNS = 'seq, id, created_at, finished_at, status, archived, live, parent_run_id, client_request_id, group_id, worktree_path, branch, base_branch, revision, data, summary';
+/** Newest first, runs created in the same millisecond in insertion order (`seq`): the one order
+ *  every list read uses. */
+const NEWEST_FIRST = 'ORDER BY created_at DESC, seq';
 
 type SqlRow = Record<string, unknown>;
 
 function toRunRow(row: SqlRow): RunRow {
   return {
+    seq: row.seq as number,
     id: row.id as string,
     createdAt: row.created_at as string,
     finishedAt: row.finished_at as string | null,
@@ -507,15 +519,15 @@ export class RunDatabase {
     this.statements = {
       get: db.prepare(`SELECT ${ROW_COLUMNS} FROM runs WHERE id = ?`),
       getMany: db.prepare(`SELECT ${ROW_COLUMNS} FROM runs WHERE id IN (SELECT value FROM json_each(?))`),
-      listSummaries: db.prepare(`SELECT id, created_at, revision, summary FROM runs ${NEWEST_FIRST} LIMIT ?`),
+      listSummaries: db.prepare(`SELECT seq, id, created_at, revision, summary FROM runs ${NEWEST_FIRST} LIMIT ?`),
       listAll: db.prepare(`SELECT ${ROW_COLUMNS} FROM runs ${NEWEST_FIRST}`),
-      listLive: db.prepare(`SELECT ${ROW_COLUMNS} FROM runs WHERE live = 1`),
+      listLive: db.prepare(`SELECT ${ROW_COLUMNS} FROM runs WHERE live = 1 ORDER BY seq`),
       listByParent: db.prepare(`SELECT ${ROW_COLUMNS} FROM runs WHERE parent_run_id = ? ${NEWEST_FIRST}`),
       listWorkerIds: db.prepare('SELECT id FROM runs WHERE parent_run_id IS NOT NULL'),
       listIdsByParent: db.prepare('SELECT id FROM runs WHERE parent_run_id = ?'),
       findByClientRequestId: db.prepare(`SELECT ${ROW_COLUMNS} FROM runs WHERE client_request_id = ? LIMIT 1`),
       listByGroup: db.prepare(`SELECT ${ROW_COLUMNS} FROM runs WHERE group_id = ?`),
-      listWithWorktree: db.prepare(`SELECT ${ROW_COLUMNS} FROM runs WHERE worktree_path IS NOT NULL ORDER BY coalesce(finished_at, created_at) DESC, id DESC`),
+      listWithWorktree: db.prepare(`SELECT ${ROW_COLUMNS} FROM runs WHERE worktree_path IS NOT NULL ORDER BY coalesce(finished_at, created_at) DESC, created_at DESC, seq`),
       findResourceHolders: db.prepare('SELECT id FROM runs WHERE branch = :branch UNION SELECT id FROM runs WHERE worktree_path = :worktreePath'),
       listIds: db.prepare('SELECT id FROM runs'),
       has: db.prepare('SELECT 1 FROM runs WHERE id = ?'),
@@ -531,7 +543,8 @@ export class RunDatabase {
           archived = excluded.archived, live = excluded.live, parent_run_id = excluded.parent_run_id,
           client_request_id = excluded.client_request_id, group_id = excluded.group_id,
           worktree_path = excluded.worktree_path, branch = excluded.branch, base_branch = excluded.base_branch,
-          revision = excluded.revision, data = excluded.data, summary = excluded.summary`),
+          revision = excluded.revision, data = excluded.data, summary = excluded.summary
+        RETURNING seq`),
       delete: db.prepare('DELETE FROM runs WHERE id = ?'),
       setMeta: db.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value'),
       deleteMeta: db.prepare('DELETE FROM meta WHERE key = ?'),
@@ -627,11 +640,12 @@ export class RunDatabase {
     return this.run(() => this.statements.getMany.all(JSON.stringify(ids))).map(toRunRow);
   }
 
-  /** Summaries newest first (`created_at`, then `id`, descending). Archived runs are included,
+  /** Summaries newest first (`created_at` descending, then insertion order). Archived runs are included,
    *  as every list route includes them. Without a limit, every row. */
   listSummaries(options: { limit?: number } = {}): RunSummaryRow[] {
     const limit = options.limit ?? -1;
     return this.run(() => this.statements.listSummaries.all(limit)).map((row) => ({
+      seq: row.seq as number,
       id: row.id as string,
       createdAt: row.created_at as string,
       revision: row.revision as number,
@@ -639,12 +653,12 @@ export class RunDatabase {
     }));
   }
 
-  /** Every row, newest first (`created_at`, then `id`, descending). */
+  /** Every row, newest first (`created_at` descending, then insertion order). */
   listAll(): RunRow[] {
     return this.run(() => this.statements.listAll.all()).map(toRunRow);
   }
 
-  /** The rows `RunStore.open` holds in memory: those whose `live` column is set. */
+  /** The rows `RunStore.open` holds in memory: those whose `live` column is set, in insertion order. */
   listLive(): RunRow[] {
     return this.run(() => this.statements.listLive.all()).map(toRunRow);
   }
@@ -674,7 +688,7 @@ export class RunDatabase {
     return this.run(() => this.statements.listByGroup.all(groupId)).map(toRunRow);
   }
 
-  /** Rows with a materialized worktree, most recently finished (else created) first. */
+  /** Rows with a materialized worktree, most recently finished (else created) first, then newest first. */
   listWithWorktree(): RunRow[] {
     return this.run(() => this.statements.listWithWorktree.all()).map(toRunRow);
   }
@@ -722,9 +736,10 @@ export class RunDatabase {
   /** The id and creation time of each row matching `where`, newest first, read off the
    *  `created_at` index without touching `data` or `summary` (history retention's ranking).
    *  Same contract for `where` as `listWhere`. */
-  listKeysWhere(where: string, params: readonly (string | number)[] = []): Array<{ id: string; createdAt: string }> {
-    const sql = `SELECT id, created_at FROM runs WHERE ${where} ${NEWEST_FIRST}`;
-    return this.run(() => this.db.prepare(sql).all(...params)).map((row) => ({ id: row.id as string, createdAt: row.created_at as string }));
+  listKeysWhere(where: string, params: readonly (string | number)[] = []): Array<{ id: string; createdAt: string; seq: number }> {
+    const sql = `SELECT seq, id, created_at FROM runs WHERE ${where} ${NEWEST_FIRST}`;
+    return this.run(() => this.db.prepare(sql).all(...params))
+      .map((row) => ({ id: row.id as string, createdAt: row.created_at as string, seq: row.seq as number }));
   }
 
   /** Every id with its revision, ordered by id. */
@@ -750,6 +765,7 @@ export class RunDatabase {
   transaction(changes: RunDatabaseChanges): RunDatabaseCommit {
     validateChanges(changes);
     const revisions = new Map<string, number>();
+    const seqs = new Map<string, number>();
     let claims = new Map<string, number>();
     let skipped = false;
     this.run(() => {
@@ -764,7 +780,7 @@ export class RunDatabase {
         for (const id of changes.deletes) this.statements.delete.run(id);
         const revision = changes.upserts.length > 0 ? this.nextSequence(COMMIT_SEQ_KEY) : 0;
         for (const row of changes.upserts) {
-          this.statements.upsert.run({
+          const inserted = this.statements.upsert.get({
             id: row.id,
             createdAt: row.createdAt,
             finishedAt: row.finishedAt ?? null,
@@ -782,6 +798,7 @@ export class RunDatabase {
             summary: row.summary,
           });
           revisions.set(row.id, revision);
+          seqs.set(row.id, inserted!.seq as number);
         }
         for (const [key, value] of Object.entries(changes.meta ?? {})) {
           if (value === null) this.statements.deleteMeta.run(key);
@@ -794,7 +811,7 @@ export class RunDatabase {
         throw error;
       }
     });
-    return { revisions, claims, skipped };
+    return { revisions, seqs, claims, skipped };
   }
 
   /** Inside a write transaction: take the claims the fence asks for, then throw `RunConflictError`

@@ -83,6 +83,7 @@ describe('RunDatabase', () => {
       deletes: [],
     });
     expect(db.get('a')).toEqual({
+      seq: 1,
       id: 'a',
       createdAt: '2026-10-01T00:00:00.000Z',
       finishedAt: '2026-10-05T01:00:00.000Z',
@@ -163,29 +164,34 @@ describe('RunDatabase', () => {
     expect(db.listRevisions()).toEqual([]);
   });
 
-  it('lists summaries newest first, capped at N, with a deterministic tie-break', () => {
+  it('lists summaries newest first, capped at N, ties in insertion order', () => {
     const db = openDb();
     db.transaction({
       upserts: [
         row('old', { createdAt: '2026-01-01T00:00:00.000Z' }),
         row('new', { createdAt: '2026-03-01T00:00:00.000Z', archived: true }),
-        row('mid-a', { createdAt: '2026-02-01T00:00:00.000Z' }),
         row('mid-b', { createdAt: '2026-02-01T00:00:00.000Z' }),
+        row('mid-a', { createdAt: '2026-02-01T00:00:00.000Z' }),
       ],
       deletes: [],
     });
+    // Inserted b then a: neither id order.
     expect(db.listSummaries().map((s) => s.id)).toEqual(['new', 'mid-b', 'mid-a', 'old']);
     expect(db.listSummaries({ limit: 2 })).toEqual([
-      { id: 'new', createdAt: '2026-03-01T00:00:00.000Z', revision: 1, summary: JSON.stringify({ id: 'new' }) },
-      { id: 'mid-b', createdAt: '2026-02-01T00:00:00.000Z', revision: 1, summary: JSON.stringify({ id: 'mid-b' }) },
+      { seq: 2, id: 'new', createdAt: '2026-03-01T00:00:00.000Z', revision: 1, summary: JSON.stringify({ id: 'new' }) },
+      { seq: 3, id: 'mid-b', createdAt: '2026-02-01T00:00:00.000Z', revision: 1, summary: JSON.stringify({ id: 'mid-b' }) },
     ]);
+    // A later write keeps a row where it was inserted.
+    const commit = db.transaction({ upserts: [row('mid-b', { createdAt: '2026-02-01T00:00:00.000Z' })], deletes: [] });
+    expect(commit.seqs).toEqual(new Map([['mid-b', 3]]));
+    expect(db.listSummaries().map((s) => s.id)).toEqual(['new', 'mid-b', 'mid-a', 'old']);
   });
 
   it('serves the newest-first summary read from one index, without a sort step', () => {
     openDb();
     const raw = new DatabaseSync(path);
     try {
-      const plan = raw.prepare('EXPLAIN QUERY PLAN SELECT id, created_at, revision, summary FROM runs ORDER BY created_at DESC, id DESC LIMIT 201')
+      const plan = raw.prepare('EXPLAIN QUERY PLAN SELECT id, created_at, revision, summary FROM runs ORDER BY created_at DESC, seq LIMIT 201')
         .all().map((step) => String(step.detail));
       expect(plan).toEqual(['SCAN runs USING INDEX runs_created_at']);
     } finally {
