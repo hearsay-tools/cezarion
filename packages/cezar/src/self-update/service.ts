@@ -7,6 +7,7 @@
 
 import type { SelfUpdateDevelopment, SelfUpdateJob, SelfUpdateStatus, UpdateChannel } from '@open-mercato/cezar-contract';
 
+import { cezarHomeDir } from '../paths.ts';
 import { loadWorkspaceConfig, mergeWriteWorkspaceConfig } from '../workspace/config.ts';
 import { installFromLocal, installFromRegistry } from './installer.ts';
 import { buildCheckout, discoverCheckouts } from './checkouts.ts';
@@ -105,7 +106,17 @@ export class SelfUpdateService {
     const nightly = doc?.distTags.nightly ?? null;
     const target = channel === 'stable' ? stable : channel === 'nightly' ? nightly : null;
     const { canSelfUpdate, reason } = this.capability();
-    const trim = this.deps.trimPaths?.() ?? false;
+    const trim = !!registryOnly;
+    // Keep raw diagnostics for local callers, but never disclose the managed home through
+    // hosted npm command output or the final error. npm can normalize Windows separators.
+    const home = cezarHomeDir(this.env);
+    const redact = (line: string) => [home, home.replaceAll('\\', '/')]
+      .reduce((text, path) => text.replaceAll(path, '[cezar home]'), line);
+    const job = this.job && trim ? {
+      ...this.job,
+      log: this.job.log.map(redact),
+      ...(this.job.error ? { error: redact(this.job.error) } : {}),
+    } : this.job;
     return {
       version: this.deps.version,
       installKind: this.installKind,
@@ -137,7 +148,7 @@ export class SelfUpdateService {
           publishedAt: entry.publishedAt,
           installed: installedIds.has(entry.version),
         })),
-      job: this.job,
+      job,
       activeRuns: this.deps.activeRuns?.() ?? 0,
     };
   }
