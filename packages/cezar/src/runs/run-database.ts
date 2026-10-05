@@ -532,7 +532,7 @@ export class RunDatabase {
           start_token = excluded.start_token, generation = excluded.generation`),
       releaseClaims: db.prepare('DELETE FROM run_claims WHERE session = ? AND family IN (SELECT value FROM json_each(?))'),
       releaseSessionClaims: db.prepare('DELETE FROM run_claims WHERE session = ?'),
-      listForeignClaimedIds: db.prepare(`SELECT runs.id AS id FROM run_claims JOIN runs
+      listForeignClaimedIds: db.prepare(`SELECT runs.id AS id, run_claims.family AS family FROM run_claims JOIN runs
         ON runs.id = run_claims.family OR runs.parent_run_id = run_claims.family WHERE run_claims.session <> ?`),
       insertConflict: db.prepare(`INSERT INTO run_conflicts (run_id, detected_at, session, reason, base_revision, base_data,
           local_data, local_deleted, current_revision, current_data)
@@ -876,9 +876,9 @@ export class RunDatabase {
     });
   }
 
-  /** The ids of every row whose family a session other than `session` claims, live or not. */
-  listForeignClaimedIds(session: string): string[] {
-    return this.run(() => this.statements.listForeignClaimedIds.all(session)).map((row) => row.id as string);
+  /** Every row whose family a session other than `session` claims, live or not, with that family. */
+  listForeignClaimedIds(session: string): Array<{ id: string; family: string }> {
+    return this.run(() => this.statements.listForeignClaimedIds.all(session)).map((row) => ({ id: row.id as string, family: row.family as string }));
   }
 
   /** Store conflict evidence in one transaction; returns each entry's `seq`. */

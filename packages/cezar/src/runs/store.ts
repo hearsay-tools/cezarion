@@ -918,9 +918,11 @@ export type RunPinHolder = 'active' | 'continue' | 'cleanup';
 /**
  * Who may change a run, as this store sees it (#779, plan step 3; `RunStore.runOwnership`):
  * - `held`: this store claims its delegation family;
- * - `free`: no live process claims it and nothing in its family is live; a write takes it;
- * - `orphaned`: its owner is proven dead, or nobody claims a family with a live run: taking it
- *   means recovering it first (`RunStore.adoptFamily`, then the manager's recovery);
+ * - `free`: no live process claims it and nothing in its family is live; a write takes it. A
+ *   proven-dead owner's claim on such a family counts for nothing: there is nothing to recover;
+ * - `orphaned`: nobody alive owns a family that still has a live run (its owner died, or nobody
+ *   claimed it): taking it means adopting it first (`RunStore.adoptFamily`, then the manager's
+ *   recovery);
  * - `foreign`: another process that is alive (or cannot be proven dead) holds it: read-only here;
  * - `quarantined`: a write found it changed under this store; refused until cezar restarts.
  */
@@ -1313,7 +1315,8 @@ export class RunStore extends EventEmitter {
     if (this.claimed.has(family) || this.pendingClaims.has(family)) return 'held';
     const claim = this.db.getClaim(family);
     if (claim && claimOwnerLive(claim)) return 'foreign';
-    return claim || this.db.familyHasLive(family) ? 'orphaned' : 'free';
+    // The same rule `claimFamilies` writes by: a dead owner left only settled runs → free.
+    return this.db.familyHasLive(family) ? 'orphaned' : 'free';
   }
 
   /** Why a control on this run must be refused here, or undefined when this store may change it. */
@@ -1336,10 +1339,15 @@ export class RunStore extends EventEmitter {
     return family;
   }
 
-  /** Every run whose family another process claims, live owner or not (cleanup keeps their
-   *  scratch: it is theirs, or recovery's once someone takes them over). */
+  /** Every run whose family another process owns — alive, or dead with a live run left to
+   *  recover (cleanup keeps their scratch: it is theirs, or recovery's once someone adopts them).
+   *  A dead owner's claim on a family with nothing live is no claim (see `runOwnership`). */
   listForeignClaimedRunIds(): string[] {
-    return this.db && this.owner ? this.db.listForeignClaimedIds(this.owner.session) : [];
+    const db = this.db, owner = this.owner;
+    if (!db || !owner) return [];
+    const kept = new Set(db.listClaims().filter((claim) => claim.session !== owner.session &&
+      (claimOwnerLive(claim) || db.familyHasLive(claim.family))).map((claim) => claim.family));
+    return kept.size === 0 ? [] : db.listForeignClaimedIds(owner.session).filter((row) => kept.has(row.family)).map((row) => row.id);
   }
 
   /**

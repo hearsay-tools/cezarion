@@ -281,7 +281,7 @@ describe('RunDatabase', () => {
       expect(db.familyHasLive('solo')).toBe(false);
       db.takeClaims(owner('mine'), [{ family: 'solo', expect: null }]);
       db.takeClaims(owner('theirs'), [{ family: 'root', expect: null }]);
-      expect(db.listForeignClaimedIds('mine').sort()).toEqual(['root', 'w1']);
+      expect(db.listForeignClaimedIds('mine').map((row) => `${row.id}:${row.family}`).sort()).toEqual(['root:root', 'w1:root']);
     });
 
     it('commits a fenced write only while its claims and rows are as the writer last saw them', () => {
