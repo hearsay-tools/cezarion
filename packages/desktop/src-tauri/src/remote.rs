@@ -134,7 +134,7 @@ pub async fn forget_connection(app: AppHandle, window: WebviewWindow, id: String
             .await.map_err(|e| e.to_string())?.map_err(|_| "Close the remote window, then try forgetting it again.")?;
     }
     #[cfg(target_os = "macos")]
-    if persistent_sessions_supported() {
+    if persistent_sessions_supported() && app.fetch_data_store_identifiers().await.map_err(|e| e.to_string())?.contains(connection.id.as_bytes()) {
         for attempt in 0..30 {
             match app.remove_data_store(*connection.id.as_bytes()).await {
                 Ok(()) => break,
