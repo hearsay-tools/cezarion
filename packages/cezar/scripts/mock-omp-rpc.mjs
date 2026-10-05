@@ -77,8 +77,11 @@ if (process.env.CEZ_MOCK_OMP_NO_AUTH === '1') {
 // The extension loads while OMP starts: with a CI target the mock lists and calls its tools now.
 if (process.env.CEZ_MOCK_CI_PR) { const { probeCiTool } = await import('./mock-ci-tool.mjs'); await probeCiTool('omp', argv); }
 
-// A fresh session mints a uuid v7; `--resume <id>` keeps the resumed session's id.
-const sessionId = typeof flags.get('--resume') === 'string' ? flags.get('--resume') : '019a0000-0000-7000-8000-0000000000aa';
+// OMP v18.6.1 main.ts createSessionManager can implicitly continueRecent when autoResume
+// is enabled. rpc-mode.ts get_state reports the restored conversation's messageCount.
+const autoResume = process.env.CEZ_MOCK_OMP_AUTO_RESUME === '1';
+const sessionId = typeof flags.get('--resume') === 'string' ? flags.get('--resume')
+  : autoResume ? '019a0000-0000-7000-8000-0000000000bb' : '019a0000-0000-7000-8000-0000000000aa';
 let steeringMode = 'one-at-a-time';
 let messageUpdates = 'full';
 const write = (value) => process.stdout.write(`${JSON.stringify(value)}\n`);
@@ -256,7 +259,7 @@ async function handle(command) {
         followUpMode: 'one-at-a-time',
         interruptMode: 'immediate',
         autoCompactionEnabled: true,
-        messageCount: 0,
+        messageCount: autoResume || flags.has('--resume') ? 4 : 0,
         ...(command.dumpTools ? { dumpTools: tools.map((name) => ({ name })) } : {}),
       });
       return;

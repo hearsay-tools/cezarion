@@ -290,6 +290,68 @@ describe('OmpRunner session over the mock', () => {
     expect(ui.at(-1)).toEqual({ type: 'session.ended', reason: 'end_turn' });
   });
 
+  it('warns once when a fresh step unexpectedly restores conversation history', async () => {
+    const { events, ui, result } = await runSession(spec('inspect the working tree', {
+      env: { CEZ_MOCK_OMP_AUTO_RESUME: '1' },
+    }));
+    const warnings = ui.filter(event => event.type === 'session.error');
+    expect(warnings).toEqual([{
+      type: 'session.error', fatal: false,
+      message: expect.stringMatching(/restored.*4.*autoResume/),
+    }]);
+    expect(events.filter(event => event.type === 'note')).toEqual([
+      { type: 'note', message: warnings[0]!.message },
+    ]);
+    expect(events.some(event => event.type === 'error')).toBe(false);
+    expect(ui).toContainEqual(expect.objectContaining({ type: 'turn.completed', stopReason: 'end_turn' }));
+    expect(result.sessionId).toBe('019a0000-0000-7000-8000-0000000000bb');
+    expect(result.text).toContain('Investigating:');
+  });
+
+  it.each([false, true])('explicit resume remains quiet with autoResume=%s', async (autoResume) => {
+    const { events, ui, result } = await runSession(spec('inspect the working tree', {
+      resume: true, sessionId: 'requested-session',
+      env: { CEZ_MOCK_OMP_AUTO_RESUME: autoResume ? '1' : '0' },
+    }));
+    expect(ui.some(event => event.type === 'session.error')).toBe(false);
+    expect(events.filter(event => event.type === 'note' || event.type === 'error')).toEqual([]);
+    expect(result.sessionId).toBe('requested-session');
+    expect(lines('args.ndjson')[0]).toEqual(expect.arrayContaining(['--resume', 'requested-session']));
+  });
+
+  it.each([undefined, null, 0, -1, '4', 4])('checks only the startup response once with messageCount=%s', async (messageCount) => {
+    const bin = join(cwd, 'mock-omp-state.mjs');
+    writeFileSync(bin, `#!/usr/bin/env node
+import readline from 'node:readline';
+const send = value => process.stdout.write(JSON.stringify(value) + '\\n');
+send({ type: 'ready' });
+readline.createInterface({ input: process.stdin }).on('line', line => {
+  const command = JSON.parse(line);
+  if (command.type === 'get_state') {
+    send({ id: 'unrelated-state', type: 'response', command: 'get_state', success: true,
+      data: { sessionId: 'state-test', messageCount: 4 } });
+    const startup = { id: command.id, type: 'response', command: 'get_state', success: true,
+      data: ${JSON.stringify({ sessionId: 'state-test', messageCount })} };
+    send(startup);
+    send(startup);
+    // A later state read sees this turn's history, not a startup auto-resume.
+    send({ id: 'later-state', type: 'response', command: 'get_state', success: true,
+      data: { sessionId: 'state-test', messageCount: 4 } });
+  }
+  if (command.type === 'prompt') {
+    send({ id: command.id, type: 'response', command: 'prompt', success: true });
+    send({ type: 'session_settled' });
+  }
+});
+`, { mode: 0o755 });
+    const { events, ui } = await runSession(spec('inspect'), undefined, bin);
+    const warnings = ui.filter(event => event.type === 'session.error');
+    expect(warnings).toHaveLength(messageCount === 4 ? 1 : 0);
+    expect(events.filter(event => event.type === 'note' && event.message.includes('autoResume')))
+      .toHaveLength(warnings.length);
+    expect(events.some(event => event.type === 'error')).toBe(false);
+  });
+
   it('session_settled ends the turn; agent_end alone does not, nor an idle settle', async () => {
     const bin = join(cwd, 'mock-omp-retry.mjs');
     writeFileSync(bin, `#!/usr/bin/env node

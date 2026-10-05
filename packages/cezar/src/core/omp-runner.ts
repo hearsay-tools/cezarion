@@ -334,6 +334,7 @@ export class OmpRunner implements AgentRunner {
     };
     const toolCalls: AgentToolCallRecord[] = [];
     let sessionId = spec.sessionId;
+    let startupStateChecked = false;
     let tokensUsed = 0;
     let latchedProviderError: string | undefined;
     const emitLatchedProviderError = (): void => {
@@ -568,6 +569,18 @@ export class OmpRunner implements AgentRunner {
             if (discovered && discovered !== sessionId) {
               sessionId = discovered;
               onEvent?.({ type: 'session', sessionId: discovered });
+            }
+            // OMP v18.6.1 still has no fresh persistent-session flag. Its autoResume
+            // setting can restore history without --resume (hearsay-tools/cezarion#832).
+            // Only the startup query is evidence: later reads include our own messages.
+            if (value.id === 'cezar-state' && !startupStateChecked) {
+              startupStateChecked = true;
+              const count = value.data.messageCount;
+              if (!spec.resume && typeof count === 'number' && count > 0) {
+                const message = `omp: unexpectedly restored a session with ${count} messages for a fresh step. Previous conversation context is active; check OMP's autoResume setting.`;
+                onEvent?.({ type: 'note', message });
+                emitUiEvent({ type: 'session.error', message, fatal: false });
+              }
             }
           } else if (value.type === 'response' && string(value.command)?.startsWith('set_')) {
             if (value.success !== true) {

@@ -82,6 +82,28 @@ const sessionEvents = (v1: readonly AgentEvent[]) =>
 
 const SEAM_CRITERIA: readonly SeamCriterion[] = [
   {
+    // hearsay-tools/cezarion#832: restored history must not silently cross workflow steps.
+    id: 'S21',
+    name: 'S21 warns about unexpected startup history without failing the turn',
+    scenario: 'auto-resumed',
+    assert: ({ v1, v2, result, failure }) => {
+      const warnings = v2.filter(event => event.type === 'session.error');
+      expect(warnings).toEqual([{
+        type: 'session.error', fatal: false,
+        message: expect.stringMatching(/restored.*4.*autoResume/),
+      }]);
+      expect(v1.filter(event => event.type === 'note')).toEqual([
+        { type: 'note', message: warnings[0]!.message },
+      ]);
+      expect(v1.some(event => event.type === 'error')).toBe(false);
+      expect(failure).toBeUndefined();
+      expect(result.text).not.toBe('');
+      expect(v1.filter(event => event.type === 'done')).toHaveLength(1);
+      expect(v2).toContainEqual(expect.objectContaining({ type: 'turn.completed', stopReason: 'end_turn' }));
+      expect(v2.indexOf(warnings[0]!)).toBeLessThan(v2.findIndex(event => event.type === 'turn.completed'));
+    },
+  },
+  {
     id: 'S20',
     name: 'S20 reports missing executables through its existing failure channel without starting a turn',
     scenario: 'missing-binary',
