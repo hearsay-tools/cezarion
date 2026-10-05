@@ -1,6 +1,8 @@
 //! Remote pages never receive native capabilities or the local shell's initialization script.
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use url::{Host, Url};
+mod profiles;
+use profiles::{Connection, load, save, persistent_sessions_supported};
 use std::sync::atomic::{AtomicU64, Ordering};
 static NEXT_WINDOW: AtomicU64 = AtomicU64::new(1);
 
@@ -45,19 +47,30 @@ fn navigation_allowed(target: &Url, endpoint: &Url, sign_in: Option<&Url>) -> bo
 }
 
 #[tauri::command]
-pub fn connect_remote(app: AppHandle, window: WebviewWindow, endpoint: String, sign_in_origin: Option<String>) -> Result<(), String> {
+pub async fn connect_remote(app: AppHandle, window: WebviewWindow, endpoint: String, sign_in_origin: Option<String>, remember: Option<bool>) -> Result<(), String> {
     if !bundled_caller(&window) { return Err("Connections can only be opened from the native connection screen.".into()); }
     let url = validate_endpoint(&endpoint)?;
     let sign_in = validate_sign_in_origin(sign_in_origin.as_deref())?;
+    let profile = if remember.unwrap_or(false) {
+        let _guard = profiles::STORE_LOCK.lock().map_err(|e| e.to_string())?;
+        let mut entries = load(&profiles::store_path());
+        let connection = profiles::find_or_create(&mut entries, &url, sign_in.as_ref())?;
+        save(&profiles::store_path(), &entries)?;
+        Some(connection)
+    } else { None };
     let origin = url.origin();
-    let label = format!("remote-{}", NEXT_WINDOW.fetch_add(1, Ordering::Relaxed));
+    let label = profile.as_ref().map(|p| format!("remote-{}", p.id)).unwrap_or_else(|| format!("remote-temporary-{}", NEXT_WINDOW.fetch_add(1, Ordering::Relaxed)));
+    if let Some(existing) = app.get_webview_window(&label) {
+        existing.show().map_err(|e| e.to_string())?;
+        return existing.set_focus().map_err(|e| e.to_string());
+    }
     let title = format!("Cezarion — {}", origin.ascii_serialization());
     let endpoint = url.clone();
     let navigation_app = app.clone();
-    WebviewWindowBuilder::new(&app, label, WebviewUrl::External(url))
+    let builder = WebviewWindowBuilder::new(&app, label, WebviewUrl::External(url));
+    let builder = profile_builder(builder, profile.as_ref());
+    builder
         .title(&title).inner_size(1360.0, 900.0).min_inner_size(720.0, 480.0)
-        // No persistent credentials/cookies, no sharing the local cockpit's web storage.
-        .incognito(true)
         .on_navigation(move |target| {
             if navigation_allowed(target, &endpoint, sign_in.as_ref()) { return true; }
             // Never include the redirect query/fragment: it may contain an SSO token.
@@ -80,6 +93,82 @@ pub fn connect_remote(app: AppHandle, window: WebviewWindow, endpoint: String, s
     Ok(())
 }
 
+// Persistent profiles never share the local cockpit's or another connection's storage.
+fn profile_builder<'a>(builder: WebviewWindowBuilder<'a, tauri::Wry, AppHandle>, profile: Option<&Connection>) -> WebviewWindowBuilder<'a, tauri::Wry, AppHandle> {
+    if let Some(profile) = profile.filter(|_| persistent_sessions_supported()) {
+        #[cfg(target_os = "macos")]
+        { return builder.data_store_identifier(*profile.id.as_bytes()); }
+        #[cfg(not(target_os = "macos"))]
+        { return builder.data_directory(profiles::profile_path(profile.id)); }
+    }
+    builder.incognito(true)
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectionList {
+    connections: Vec<Connection>,
+    persistent_sessions: bool,
+}
+
+#[tauri::command]
+pub fn list_connections(window: WebviewWindow) -> Result<ConnectionList, String> {
+    if !bundled_caller(&window) { return Err("Only the connection screen can read saved connections.".into()); }
+    Ok(ConnectionList { connections: load(&profiles::store_path()), persistent_sessions: persistent_sessions_supported() })
+}
+
+#[tauri::command]
+pub async fn forget_connection(app: AppHandle, window: WebviewWindow, id: String) -> Result<(), String> {
+    if !bundled_caller(&window) { return Err("Only the connection screen can forget connections.".into()); }
+    let id = uuid::Uuid::parse_str(&id).map_err(|_| "Invalid connection ID.")?;
+    let connection = load(&profiles::store_path()).into_iter().find(|p| p.id == id).ok_or("Connection no longer exists.")?;
+    // Wait until the live webview is gone before deleting its profile. Otherwise a
+    // page still running could recreate cookies during sign-out.
+    if let Some(active) = app.get_webview_window(&format!("remote-{}", id)) {
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        active.on_window_event(move |event| {
+            if matches!(event, tauri::WindowEvent::Destroyed) { let _ = tx.try_send(()); }
+        });
+        active.close().map_err(|e| e.to_string())?;
+        tauri::async_runtime::spawn_blocking(move || rx.recv_timeout(std::time::Duration::from_secs(5)))
+            .await.map_err(|e| e.to_string())?.map_err(|_| "Close the remote window, then try forgetting it again.")?;
+    }
+    #[cfg(target_os = "macos")]
+    if persistent_sessions_supported() {
+        for attempt in 0..30 {
+            match app.remove_data_store(*connection.id.as_bytes()).await {
+                Ok(()) => break,
+                Err(e) if attempt == 29 => return Err(format!("Could not clear the saved sign-in: {e}")),
+                Err(_) => {
+                    // WKWebView can retain its data store briefly after Destroyed.
+                    tauri::async_runtime::spawn_blocking(|| std::thread::sleep(std::time::Duration::from_millis(100)))
+                        .await.map_err(|e| e.to_string())?;
+                }
+            }
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let directory = profiles::profile_path(connection.id);
+        tauri::async_runtime::spawn_blocking(move || {
+            // WebView2 can briefly hold profile files after its window is destroyed.
+            for attempt in 0..30 {
+                match std::fs::remove_dir_all(&directory) {
+                    Ok(()) => return Ok(()),
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+                    Err(e) if attempt == 29 => return Err(e.to_string()),
+                    Err(_) => std::thread::sleep(std::time::Duration::from_millis(100)),
+                }
+            }
+            unreachable!()
+        }).await.map_err(|e| e.to_string())??;
+    }
+    let _guard = profiles::STORE_LOCK.lock().map_err(|e| e.to_string())?;
+    let mut entries = load(&profiles::store_path());
+    entries.retain(|p| p.id != id);
+    save(&profiles::store_path(), &entries)
+}
+
 #[derive(serde::Serialize)]
 struct ConnectionFeedback {
     endpoint: String,
@@ -96,9 +185,11 @@ fn show_connection_form(app: &AppHandle, feedback: Option<ConnectionFeedback>) -
     let script = feedback.map(|feedback| format!(r#"(() => {{
         const data = {};
         const apply = () => {{
+            window.connectionFeedback = data;
             document.getElementById('endpoint').value = data.endpoint;
             document.getElementById('sign-in-origin').value = data.sign_in_origin;
             document.getElementById('error').textContent = data.message;
+            document.dispatchEvent(new Event('connection-feedback'));
         }};
         if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', apply, {{ once: true }});
         else apply();
@@ -108,7 +199,7 @@ fn show_connection_form(app: &AppHandle, feedback: Option<ConnectionFeedback>) -
         window.show()?; return window.set_focus();
     }
     let builder = WebviewWindowBuilder::new(app, "connections", WebviewUrl::App("connections.html".into()))
-        .title("Cezarion — Connect to a server").inner_size(640.0, 620.0).resizable(false)
+        .title("Cezarion — Connect to a server").inner_size(960.0, 700.0).min_inner_size(740.0, 600.0)
         .on_navigation(|u| u.scheme() == "tauri" && u.host_str() == Some("localhost") ||
             matches!(u.scheme(), "http" | "https") && u.host_str() == Some("tauri.localhost"));
     let builder = if let Some(script) = script { builder.initialization_script(script) } else { builder };

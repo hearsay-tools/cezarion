@@ -551,7 +551,7 @@ pub fn run() {
     let shell_for_state = shell.clone();
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .invoke_handler(tauri::generate_handler![update_cezar_command, retry_start, show_versions_menu, remote::connect_remote])
+        .invoke_handler(tauri::generate_handler![update_cezar_command, retry_start, show_versions_menu, remote::connect_remote, remote::list_connections, remote::forget_connection])
         .setup(move |app| {
             app.manage(shell_for_state.clone());
             let handle = app.handle().clone();
