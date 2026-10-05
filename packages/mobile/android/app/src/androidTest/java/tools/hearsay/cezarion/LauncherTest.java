@@ -11,8 +11,10 @@ import android.view.View;
 import android.view.ViewGroup;
 import androidx.test.espresso.action.CoordinatesProvider;
 import androidx.test.espresso.action.GeneralSwipeAction;
+import androidx.test.espresso.action.GeneralClickAction;
 import androidx.test.espresso.action.Press;
 import androidx.test.espresso.action.Swipe;
+import androidx.test.espresso.action.Tap;
 import androidx.test.core.app.ActivityScenario;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
@@ -45,7 +47,11 @@ public class LauncherTest {
     private static String script(ActivityScenario<MainActivity> activity, String source) throws Exception {
         CountDownLatch done = new CountDownLatch(1);
         AtomicReference<String> value = new AtomicReference<>();
-        activity.onActivity(app -> findWeb(app.findViewById(android.R.id.content)).evaluateJavascript(source, result -> { value.set(result); done.countDown(); }));
+        activity.onActivity(app -> {
+            WebView web = findWeb(app.findViewById(android.R.id.content));
+            assertNotNull("Cockpit must remain open while evaluating: " + source, web);
+            web.evaluateJavascript(source, result -> { value.set(result); done.countDown(); });
+        });
         assertTrue(done.await(5, TimeUnit.SECONDS)); return value.get();
     }
     private static void connect(ActivityScenario<MainActivity> activity) throws Exception {
@@ -80,7 +86,7 @@ public class LauncherTest {
         try (ActivityScenario<MainActivity> activity = ActivityScenario.launch(MainActivity.class)) {
             connect(activity);
             // A real WebView with the cockpit's fixed-document/nested-scroller shape.
-            String fixture = "<meta name='viewport' content='width=device-width,initial-scale=1'><style>body{margin:0;height:100dvh;overflow:hidden}header{height:48px}main{height:calc(100dvh - 48px);overflow:auto;overscroll-behavior:contain}p{height:100px}</style><header>Gesture test</header><main><div id='page'>First page</div><div id='rows'></div></main><script>for(let i=0;i<30;i++)document.getElementById('rows').innerHTML+='<p>Row '+i+'</p>';onpopstate=()=>document.getElementById('page').textContent='First page';</script>";
+            String fixture = "<meta name='viewport' content='width=device-width,initial-scale=1'><style>body{margin:0;height:100dvh;overflow:hidden}header,button{height:48px}button{width:160px}main{height:calc(100dvh - 48px);overflow:auto;overscroll-behavior:contain}p{height:100px}</style><header><button onclick=\"history.pushState({},'', '/second');document.getElementById('page').textContent='Second page'\">Next page</button></header><main><div id='page'>First page</div><div id='rows'></div></main><script>for(let i=0;i<30;i++)document.getElementById('rows').innerHTML+='<p>Row '+i+'</p>';onpopstate=()=>document.getElementById('page').textContent='First page';</script>";
             activity.onActivity(app -> {
                 WebView web = findWeb(app.findViewById(android.R.id.content));
                 WebViewClient original = web.getWebViewClient();
@@ -97,7 +103,23 @@ public class LauncherTest {
                 web.loadUrl("https://127.0.0.1:65534/first");
             });
             until(() -> "\"First page\"".equals(script(activity, "document.getElementById('page')?.textContent")));
-            script(activity, "history.pushState({},'', '/second');document.getElementById('page').textContent='Second page'");
+            until(() -> "\"complete\"".equals(script(activity, "document.readyState")));
+            // Exercise user-initiated history. Chromium may skip script-created entries
+            // with no user activation when processing the browser/system Back action.
+            onView(withContentDescription("Cockpit")).perform(new GeneralClickAction(Tap.SINGLE, view -> {
+                int[] location = new int[2]; view.getLocationOnScreen(location);
+                float density = view.getResources().getDisplayMetrics().density;
+                return new float[]{location[0] + 80 * density, location[1] + 24 * density};
+            }, Press.FINGER));
+            until(() -> "\"Second page\"".equals(script(activity, "document.getElementById('page')?.textContent")));
+            until(() -> {
+                AtomicReference<Boolean> ready = new AtomicReference<>(false);
+                activity.onActivity(app -> {
+                    WebView web = findWeb(app.findViewById(android.R.id.content));
+                    ready.set(web != null && web.canGoBack() && web.getUrl().endsWith("/second"));
+                });
+                return ready.get();
+            });
             drag(.8f, .25f); drag(.4f, .85f);
             assertEquals("\"Second page\"", script(activity, "document.getElementById('page').textContent"));
             androidx.test.espresso.Espresso.pressBack();
