@@ -40,6 +40,13 @@ The affected iOS navigation UI test passed again; Android unit tests, lint, and 
 build passed again. The updated signed iPhone archive was installed in place and
 its launch succeeded. This follow-up changes labels and documentation only.
 
+The first GitHub Android job also passed and its downloaded APK signature verified.
+The first GitHub iOS job compiled but had not started a test after eight minutes
+when a newer commit cancelled it. CI now explicitly boots and waits for the chosen
+simulator, runs tests serially, and bounds startup/test steps. That exact boot and
+serial-test command passed locally: six tests passed and the optional network test
+was skipped. The updated cloud run is pending; it is not recorded as a CI pass.
+
 ## Repository-wide gate
 
 All six required root commands were invoked in order against the uncommitted mobile
