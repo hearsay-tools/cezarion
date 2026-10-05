@@ -334,7 +334,8 @@ describe('a run nobody alive owns', () => {
     expect(store.updateRun(run.id, { title: 'mine' })).toBeUndefined();
     expect(store.adoptFamily(run.id)).toBe(run.id);
     expect(store.runOwnership(run.id)).toBe('held');
-    expect(store.getRun(run.id)?.status).toBe('running');
+    // Adopted for a control, it is settled, never kept running for recovery to resume.
+    expect(store.getRun(run.id)).toMatchObject({ status: 'failed', error: expect.stringContaining('interrupted') });
     expect(store.updateRun(run.id, { title: 'mine' })?.title).toBe('mine');
   });
 

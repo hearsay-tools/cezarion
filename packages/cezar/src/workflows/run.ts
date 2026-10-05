@@ -2482,10 +2482,12 @@ export class RunManager {
 
   /**
    * Take over a run whose owning process is gone (#779, plan step 3): a control (Stop, Continue,
-   * archive…) reached a run `runOwnership` calls `orphaned`. Its family is claimed and loaded as
-   * open would have, then recovered exactly as a restart recovers it, so the control that follows
-   * acts on a run this process now drives — rather than on a record nobody owns, which is a dead
-   * end until a restart. False when a live process holds it after all (or it is gone): the
+   * archive…) reached a run `runOwnership` calls `orphaned`. Its family is claimed, its live runs
+   * are settled rather than resumed (`settleOrphanedRun`: interrupted, or cancelled before they
+   * began), and the family is recovered as a restart would, which repairs it but finds nothing live
+   * to resume. The control that follows then acts on a run this process now owns — rather than on
+   * a record nobody owns, a dead end until a restart — and only Continue starts agent work, with
+   * the user's own input. False when a live process holds it after all (or it is gone): the
    * control is refused as another process's. Adoptions run one at a time, after any recovery
    * already in progress.
    */

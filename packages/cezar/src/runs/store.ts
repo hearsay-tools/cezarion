@@ -777,6 +777,22 @@ export function reconcileLoadedRun(run: RunRecord, opts?: { keepLive?: boolean }
 }
 
 /**
+ * Settle a live run whose owning process died, when a control adopts it (#779, plan step 3), so
+ * that adopting never starts agent work: only Continue may, with the user's own input. A run that
+ * never started is cancelled before it began, which Continue restarts as it would after a Stop (the
+ * same "untouched" test as `isUntouchedCancelledRun`); any other live run is interrupted, exactly as
+ * an open that does not recover settles it, and Continue resumes its last session. Mutates `run`.
+ */
+export function settleOrphanedRun(run: RunRecord): RunRecord {
+  if (run.status === 'queued' && !run.startedAt && run.workflowDef !== undefined &&
+    run.steps.every((step) => step.status === 'pending' && !step.startedAt && !step.sessionId)) {
+    run.status = 'cancelled';
+    run.finishedAt ??= new Date().toISOString();
+  }
+  return reconcileLoadedRun(run, { keepLive: false });
+}
+
+/**
  * Drop this run's referenced PR/issue if the project's handle proves it foreign and the prompt
  * does not corroborate it (#945). Returns whether anything changed.
  *
@@ -921,8 +937,8 @@ export type RunPinHolder = 'active' | 'continue' | 'cleanup';
  * - `free`: no live process claims it and nothing in its family is live; a write takes it. A
  *   proven-dead owner's claim on such a family counts for nothing: there is nothing to recover;
  * - `orphaned`: nobody alive owns a family that still has a live run (its owner died, or nobody
- *   claimed it): taking it means adopting it first (`RunStore.adoptFamily`, then the manager's
- *   recovery);
+ *   claimed it): taking it means adopting it first (`RunStore.adoptFamily` settles it, then the
+ *   manager recovers the family);
  * - `foreign`: another process that is alive (or cannot be proven dead) holds it: read-only here;
  * - `quarantined`: a write found it changed under this store; refused until cezar restarts.
  */
@@ -1189,12 +1205,13 @@ export class RunStore extends EventEmitter {
   /** Normalize a record just read from `row` (see `reconcileLoadedRun`) and hold it. Marks the row
    *  dirty only when normalization changed it, so the next save persists exactly the runs open()
    *  rewrote. The caller has claimed the row's family. */
-  private adoptLoadedRun(run: RunRecord, opts: { keepLive?: boolean; onlyIfChanged?: boolean }, row: RunRow): void {
+  private adoptLoadedRun(run: RunRecord, opts: { keepLive?: boolean; onlyIfChanged?: boolean; settle?: boolean }, row: RunRow): void {
     const before = loadNormalizedFields(run);
     if (run.delegation?.role === 'root' && (run.status === 'waiting' || run.delegation.wait !== undefined)) {
       refreshHumanAskSummary(run, this.dataDir);
     }
-    reconcileLoadedRun(run, opts);
+    if (opts.settle) settleOrphanedRun(run);
+    else reconcileLoadedRun(run, opts);
     const changed = loadNormalizedFields(run) !== before;
     if (opts.onlyIfChanged && !changed) return;
     this.held.set(run.id, run);
@@ -1205,14 +1222,15 @@ export class RunStore extends EventEmitter {
   /**
    * Hold one delegation family: its root and the root's direct workers, read through the
    * `parent_run_id` index. No recursion: workers cannot delegate, so a worker's own id never
-   * names a family. The caller has claimed it.
+   * names a family. The caller has claimed it. `settle` settles its live rows instead of keeping
+   * them for recovery (`settleOrphanedRun`).
    */
-  private holdFamily(rootId: string, decode: (row: RunRow) => RunRecord | undefined = (row) => decodeRunRecord(row.data)): void {
+  private holdFamily(rootId: string, decode: (row: RunRow) => RunRecord | undefined = (row) => decodeRunRecord(row.data), settle = false): void {
     const rows = [this.db!.get(rootId), ...this.db!.listByParent(rootId)];
     for (const row of rows) {
       if (!row || this.held.has(row.id) || this.deleted.has(row.id)) continue;
       const run = decode(row);
-      if (run) this.adoptLoadedRun(run, { keepLive: this.keepLive }, row);
+      if (run) this.adoptLoadedRun(run, { keepLive: this.keepLive, settle }, row);
     }
   }
 
@@ -1327,15 +1345,16 @@ export class RunStore extends EventEmitter {
   }
 
   /**
-   * Take over the delegation family of an `orphaned` run, exactly as `open` would have: claim it
-   * from its dead owner (or from nobody), then load and normalize its rows and hold them. Returns
-   * the family's root id, or undefined when a live owner holds it after all or it is gone. The
-   * caller runs recovery for that family next (`RunManager.adoptOrphanedRun`).
+   * Take over the delegation family of an `orphaned` run for a control: claim it from its dead
+   * owner (or from nobody), then load it and settle its live rows (`settleOrphanedRun`) — never
+   * keep them for recovery to resume, since only Continue may start agent work. Returns the
+   * family's root id, or undefined when a live owner holds it after all or it is gone. The caller
+   * runs recovery for that family next (`RunManager.adoptOrphanedRun`), which then repairs it.
    */
   adoptFamily(id: string): string | undefined {
     const family = this.db?.familyOf(id);
     if (family === undefined || !this.claimFamilies([family], { allowLive: true, wait: true }).has(family)) return undefined;
-    this.holdFamily(family);
+    this.holdFamily(family, undefined, true);
     return family;
   }
 

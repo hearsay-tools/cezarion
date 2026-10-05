@@ -65,7 +65,7 @@ import {
   type SeamObservation,
   waitFor,
 } from './harness-parity.testkit.ts';
-import { blockRunWrites, readPersistedRuns, seedRuns } from '../runs/run-store.testkit.ts';
+import { blockRunWrites, crashStore, readPersistedRuns, seedRuns } from '../runs/run-store.testkit.ts';
 import { RunStore, type RunRecord } from '../runs/store.ts';
 import { createFixtureManager, drainFixtureManagers } from '../workflows/fixture-cleanup.testkit.ts';
 
@@ -544,6 +544,8 @@ const CONTROL_CRITERIA = [
   { id: 'R48', scenario: 'done' },
   // #779 plan step 3: a headless open beside the owner leaves its parked run alone.
   { id: 'R49', scenario: 'ask' },
+  // #779 plan step 3: adopting a dead owner's mid-turn run for a control resumes nothing; Continue does.
+  { id: 'R50', scenario: 'hold' },
 ] as const;
 
 /**
@@ -851,6 +853,63 @@ describe('harness parity — a second process leaves a parked run to its owner (
           }
         });
       return { afterHeadless, afterRestart, answered, final };
+    });
+  }
+});
+
+// #779 plan step 3: a control (archive, Stop, Continue…) on a run whose owning process died adopts
+// it first. Adopting settles it — nothing is resumed behind the user's back, whichever runner it
+// used — and Continue is the one control that starts its agent again, on its own session.
+describe('harness parity — adopting a dead owner\'s run mid-turn (#779)', () => {
+  for (const backend of RUNNER_IDS) {
+    parityRow<{ adopted: boolean; startedByAdoption: string[]; settled: RunRecord | undefined; continued: { ok: boolean; error?: string }; startedByContinue: string[]; resumed: RunRecord | undefined }>(backend, {
+      id: 'R50', name: 'R50 adopting a dead owner\'s run mid-turn starts no agent, and Continue resumes it', scenario: 'hold',
+      assert: ({ adopted, startedByAdoption, settled, continued, startedByContinue, resumed }) => {
+        expect(adopted).toBe(true);
+        expect(startedByAdoption).toEqual([]);
+        expect(settled).toMatchObject({ status: 'failed', error: expect.stringContaining('interrupted') });
+        expect(continued).toEqual({ ok: true });
+        // Continue resumes the session the dead owner opened, through the one continuation path.
+        expect(startedByContinue).toEqual(['runContinuation']);
+        expect(resumed?.steps.map((step) => step.id)).toContain('continue-1');
+      },
+    }, async () => {
+      let adopted = false;
+      const startedByAdoption: string[] = [], startedByContinue: string[] = [];
+      let settled: RunRecord | undefined, resumed: RunRecord | undefined;
+      let continued: { ok: boolean; error?: string } = { ok: false };
+      // Mid-turn, with the session the owner opened recorded: what a restart would resume.
+      await driveRun(backend, 'hold', record => record?.status === 'running' && record.steps.some((step) => step.sessionId !== undefined), 30_000,
+        async ({ store, manager, runId }) => {
+          const repoRoot = manager['repoRoot'] as string;
+          const dataDir = join(repoRoot, '.ai/cezar');
+          store.flush();
+          // This cockpit was already running beside the owner, which then crashed mid-session.
+          const cockpit = RunStore.open(dataDir, { keepLive: true });
+          try {
+            manager.dispose();
+            crashStore(store);
+            await drainFixtureManagers(repoRoot);
+            const recovered = createFixtureManager(cockpit, repoRoot);
+            const engine = recovered as unknown as Record<'execute' | 'runContinuation', (...args: unknown[]) => Promise<unknown>>;
+            let adopting = true;
+            for (const name of ['execute', 'runContinuation'] as const) {
+              const real = engine[name].bind(recovered);
+              engine[name] = (...args) => { (adopting ? startedByAdoption : startedByContinue).push(name); return real(...args); };
+            }
+            adopted = await recovered.adoptOrphanedRun(runId);
+            await new Promise((resolve) => setTimeout(resolve, 300));
+            adopting = false;
+            settled = structuredClone(cockpit.getRun(runId));
+            continued = recovered.continueRun(runId, { text: promptFor(backend, 'done') });
+            if (continued.ok) await waitFor(() => startedByContinue.length > 0, 30_000);
+            resumed = structuredClone(cockpit.getRun(runId));
+          } finally {
+            await drainFixtureManagers(repoRoot);
+            cockpit.close();
+          }
+        });
+      return { adopted, startedByAdoption, settled, continued, startedByContinue, resumed };
     });
   }
 });
