@@ -12,11 +12,13 @@ export const MONITORING_TURN_CRITERIA = [
   { id: 'M11', scenario: 'turn-messages', name: 'quoted human gates and routine review progress do not cancel monitoring' },
   { id: 'M12', scenario: 'turn-messages', name: 'a resolved prose question before monitoring does not latch attention' },
   { id: 'M15', scenario: 'turn-messages', name: 'active Markdown human gates beat monitoring' },
+  { id: 'M16', scenario: 'turn-messages', name: 'a prose gate retires its registered wait and survives idle, restart and late worker input' },
   { id: 'M8', scenario: 'turn-messages', name: 'spent parent completion remains actionable' },
 ] as const;
 export const MONITORING_ORDER_CRITERIA = [
   { id: 'M13', scenario: 'turn-messages', name: 'fresh ordinary markerless prose questions keep autonomous nudges' },
   { id: 'M14', scenario: 'turn-messages', name: 'Continue ordinary markerless prose questions keep autonomous nudges' },
+  { id: 'M17', scenario: 'turn-messages', name: 'fresh genuine accepted-wait session loss still fails' },
 ] as const;
 
 // Agent-echo follows a real owned-input ACK on each adapter's existing wire.

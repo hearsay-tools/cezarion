@@ -49,6 +49,7 @@ import { todosPath } from '../todos.ts';
 // wire and the disk can never disagree about what counts as an image (#950).
 import {
   type AgentInput,
+  type RunEvent,
   type InboxClaim,
   type WorkerStopResult,
   type WorkerWait,
@@ -60,6 +61,7 @@ import {
   attachmentExtension,
   delegationStateSchema,
   pendingHumanAsk,
+  advancePendingHumanAsk,
   askRequestSchema,
   isImageAttachmentName,
   isImageMediaType,
@@ -128,6 +130,7 @@ export const IDLE_TIMEOUT_MS = 15 * 60_000;
  * (codex, opencode) can't split the marker across text events.
  */
 const DONE_MARKER_RE = /CEZ:DONE\s*$/;
+const PROSE_HUMAN_GATE = 'unstructured-human-gate';
 /** Classify only active prose: quoted/indented examples and fenced code cannot
  * declare a park or request a human. A standalone monitoring line belongs to
  * this turn even when a later assistant block acknowledges a new instruction. */
@@ -147,7 +150,8 @@ function turnParkSignals(text: string): { monitoring: boolean; humanGate: boolea
     if (fence || /^(?: {4}|\t|\s*>)/.test(raw)) continue;
     // Lists and emphasis format active prose; they do not quote it. Exclude
     // fenced/indented/blockquote examples before removing their decoration.
-    const line = raw.trim().replace(/^(?:[-+*]|\d+[.)])\s+/, '').replace(/\*{1,2}|_{1,2}/g, '');
+    const line = raw.trim().replace(/^(?:[-+*]|\d+[.)])\s+(?:\[[ xX]\]\s+)?/, '')
+      .replace(/^#{1,6}\s+/, '').replace(/\*{1,2}|_{1,2}/g, '');
     if (!line) continue;
     const example = /\b(?:example|sample|literal|quoted)(?: marker)?\s*:\s*$/i.test(previous);
     if (!example && raw.trim() === 'CEZ:MONITORING') {
@@ -299,8 +303,8 @@ function classifyTurnEnd(turnText: string, completedAssistantText: string, optio
 /** A trailing ASK marker — valid card or rejected payload — means the user
  *  must answer. Drop follow-ups queued mid-turn so they cannot start a new
  *  turn the moment idle fires (OpenCode serializes `sendMessage` that way). */
-function discardQueuedMessagesOnAsk(session: AgentSession | undefined, outcome: AskTurnOutcome): void {
-  if (outcome.ask || outcome.notes.length) session?.discardQueuedMessages();
+function discardQueuedMessagesOnAsk(session: AgentSession | undefined, outcome: AskTurnOutcome & { humanGate?: boolean }): void {
+  if (outcome.ask || outcome.notes.length || outcome.humanGate) session?.discardQueuedMessages();
 }
 function isSyntheticContinuation(run: RunRecord, step: StepState): boolean {
   if (step.synthetic === 'continuation') return true;
@@ -2328,6 +2332,12 @@ export class RunManager {
         continue;
       }
       if (run.delegation && run.delegation.role !== 'invalid' && this.hasPendingHumanAsk(run.id)) {
+        // A crash between the prose checkpoint and wait withdrawal must not
+        // recover the superseded wait as an autonomous wake.
+        const gateSeq = this.pendingHumanAskSeq(run.id);
+        if (this.store.readEvents(run.id).some(event => event.seq === gateSeq && event.type === 'note' && event.code === PROSE_HUMAN_GATE)) {
+          this.withdrawCiWait(run.id); this.withdrawWorkerWait(run.id);
+        }
         this.store.updateRun(run.id, { status: 'waiting', activity: undefined });
         // Only the durable, explicitly human payload may resume an unanswered
         // question. A refused recovery leaves attention, not terminal failure.
@@ -4185,7 +4195,14 @@ export class RunManager {
   /** Transcript bubbles include refused sends. Only a successful delivery
    * checkpoint can answer the specific ask observed before that send. */
   private pendingHumanAskSeq(runId: string): number | undefined {
-    return pendingHumanAsk(this.store.readEvents(runId))?.seq;
+    let pending: RunEvent | undefined;
+    for (const event of this.store.readEvents(runId)) {
+      // Prose gates use the same exact successful-delivery receipt as asks,
+      // without inventing a structured question card or changing its summary.
+      pending = event.type === 'note' && event.code === PROSE_HUMAN_GATE
+        ? event : advancePendingHumanAsk(pending, event);
+    }
+    return pending?.seq;
   }
 
   private hasPendingHumanAsk(runId: string): boolean {
@@ -4304,7 +4321,8 @@ export class RunManager {
    * run parks as waiting or monitoring. Shared by acknowledgements that land after a
    * turn ended and by the unread-input grace timer (#505). */
   private settleIdleBoundary(runId: string, state: ActiveRun, session: AgentSession): void {
-    if (state.atTurnBoundary !== session || state.pendingHumanAsk || this.workerWait(runId) || this.store.getRun(runId)?.ciWait || this.hasQueuedAgentInputs(runId)) return;
+    const proseGate = state.parkAfterAck?.session === session && state.parkAfterAck.humanGate;
+    if (state.atTurnBoundary !== session || (state.pendingHumanAsk && !proseGate) || this.workerWait(runId) || this.store.getRun(runId)?.ciWait || (!proseGate && this.hasQueuedAgentInputs(runId))) return;
     if (state.doneAtBoundary === session) {
       if (this.deferParentCompletion(runId)) return;
       this.store.appendEvent(runId, { type: 'lifecycle', message: 'goal achieved — session closed' });
@@ -4349,11 +4367,11 @@ export class RunManager {
   private armUnreadInputTimer(runId: string, state: ActiveRun): void {
     this.clearUnreadInputTimer(state);
     const session = state.session;
-    if (!session?.open || !this.harnessOwesInput(state) || state.agentInputFlight) return;
+    if (!session?.open || state.pendingHumanAsk || !this.harnessOwesInput(state) || state.agentInputFlight) return;
     const timer = setTimeout(() => {
       state.unreadInputTimer = undefined;
       if (this.disposed || this.active.get(runId) !== state || state.session !== session || !session.open || state.cancelled ||
-        state.agentInputFlight || !this.harnessOwesInput(state)) return;
+        state.pendingHumanAsk || state.agentInputFlight || !this.harnessOwesInput(state)) return;
       const ids = [...state.unreadInputIds!];
       const retried = ids.filter(id => state.unreadRetried?.has(id));
       const fresh = ids.filter(id => !state.unreadRetried?.has(id));
@@ -5301,6 +5319,7 @@ export class RunManager {
         // prepareHumanAsk latches it; an existing/native ask still blocks the helper.
         let autoContinued = !!ask && !!sessionOpen && this.tryAutonomousNudge(runId, state, stepId, ask);
         if (ask && !autoContinued) this.prepareHumanAsk(runId, state);
+        if (humanGate && !ask && !state.pendingHumanAsk) this.prepareProseHumanGate(runId, state);
         const ciWaitParked = !humanGate && !!sessionOpen && this.parkCiWait(runId, state);
         const completionBlocked = !ciWaitParked && !!done && this.deferParentCompletion(runId);
         const workerWaitParked = ciWaitParked || completionBlocked || (!humanGate && !!sessionOpen && this.parkWorkerWait(runId, state));
@@ -5308,7 +5327,7 @@ export class RunManager {
         state.parkAfterAck = sessionOpen && state.session ? { session: state.session, monitoring, humanGate } : undefined;
         // #505: input the harness accepted but has not read yet runs as its next turn.
         // An in-flight submission is settled by its acknowledgement (parkAfterAck), not here.
-        const agentInputDelivered = autoContinued || (!ask && !workerWaitParked && (this.flushAgentInputs(runId) || this.harnessOwesInput(state) || !!state.agentInputFlight));
+        const agentInputDelivered = autoContinued || (!ask && !workerWaitParked && (this.flushAgentInputs(runId) || (!humanGate && this.harnessOwesInput(state)) || !!state.agentInputFlight));
         if (!ask && !workerWaitParked) this.armUnreadInputTimer(runId, state);
         if (state.agentInputError) return;
         if (done && !workerWaitParked && !state.pendingHumanAsk && !agentInputDelivered && !state.agentInputFlight && !this.hasQueuedAgentInputs(runId)) {
@@ -6207,14 +6226,15 @@ export class RunManager {
         // prepareHumanAsk latches it; an existing/native ask still blocks the helper.
         let autoContinued = !!ask && !!sessionOpen && this.tryAutonomousNudge(runId, state, step.id, ask);
         if (ask && !autoContinued) this.prepareHumanAsk(runId, state);
+        if (humanGate && !ask && !state.pendingHumanAsk) this.prepareProseHumanGate(runId, state);
         const ciWaitParked = !humanGate && !!sessionOpen && this.parkCiWait(runId, state);
         const completionBlocked = !ciWaitParked && !!done && this.deferParentCompletion(runId);
         const workerWaitParked = ciWaitParked || completionBlocked || (!humanGate && !!sessionOpen && this.parkWorkerWait(runId, state));
         state.doneAtBoundary = done ? state.session : undefined;
-        state.parkAfterAck = interactive && sessionOpen && state.session ? { session: state.session, monitoring, humanGate } : undefined;
+        state.parkAfterAck = (interactive || humanGate) && sessionOpen && state.session ? { session: state.session, monitoring, humanGate } : undefined;
         // #505: input the harness accepted but has not read yet runs as its next turn.
         // An in-flight submission is settled by its acknowledgement (parkAfterAck), not here.
-        const agentInputDelivered = autoContinued || (!ask && !workerWaitParked && (this.flushAgentInputs(runId) || this.harnessOwesInput(state) || !!state.agentInputFlight));
+        const agentInputDelivered = autoContinued || (!ask && !workerWaitParked && (this.flushAgentInputs(runId) || (!humanGate && this.harnessOwesInput(state)) || !!state.agentInputFlight));
         if (!ask && !workerWaitParked) this.armUnreadInputTimer(runId, state);
         if (state.agentInputError) return;
         if (done && !workerWaitParked && !state.pendingHumanAsk && !agentInputDelivered && !state.agentInputFlight && !this.hasQueuedAgentInputs(runId)) {
@@ -6225,7 +6245,7 @@ export class RunManager {
           state.session?.end();
           return;
         }
-        const waiting = (interactive || !!ask) && sessionOpen && !agentInputDelivered && !workerWaitParked && !this.workerWakeAdmitted.has(runId);
+        const waiting = (interactive || !!ask || humanGate) && sessionOpen && !agentInputDelivered && !workerWaitParked && !this.workerWakeAdmitted.has(runId);
         if (waiting && interactive && !ask && !humanGate) autoContinued = this.tryAutonomousNudge(runId, state, step.id, null);
         if (waiting && !autoContinued && state.autonomousNudgePending !== state.session) {
           // Turn over, session open. Either the ball is in the user's court
@@ -6514,6 +6534,17 @@ export class RunManager {
     if (this.workerWakeQueuedAt.delete(runId)) {
       const at = this.queue.indexOf(runId); if (at >= 0) this.queue.splice(at, 1);
     }
+  }
+
+  /** A direct prose gate supersedes a registered autonomous wait. Keep the
+   * checkpoint through idle closure/restart and hold worker input until a
+   * successful human delivery, just as for a structured ask. */
+  private prepareProseHumanGate(runId: string, state: ActiveRun): void {
+    this.store.appendEvent(runId, { type: 'note', stepId: state.currentStepId,
+      code: PROSE_HUMAN_GATE, message: 'waiting for a human response to the assistant’s request' });
+    this.prepareHumanAsk(runId, state);
+    this.withdrawWorkerWait(runId);
+    this.clearUnreadInputTimer(state);
   }
 
   /** Native backend asks arrive before turn-end. Persist and park immediately

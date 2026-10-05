@@ -1,15 +1,18 @@
 import { execFileSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, it, describe } from 'vitest';
 import { deriveAttention, type ApiRun } from '@open-mercato/cezar-contract';
 import { RUNNER_IDS } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
+import { CredentialRegistry } from '../delegation/credentials.ts';
+import { DelegationService } from '../delegation/service.ts';
 import { attentionFields, projectStatus } from '../task-cli/projections.ts';
 import { endsWait } from '../task-cli/watch.ts';
 import { TaskWebhook, type TaskWebhookPayload } from '../runs/webhook.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
-import { manager, store, root, worker, until, semaphore, useWorkerWaitFixture } from './worker-wait.testkit.ts';
+import { manager, store, root, worker, until, semaphore, useWorkerWaitFixture, register, waitOf, restart, eventCheckpoint } from './worker-wait.testkit.ts';
 import { MONITORING_TURN_CRITERIA, messagesPrompt, MONITORING_TEXT, ACK_TEXT, ASK_TEXT } from './monitoring-turn.testkit.ts';
 
 for (const backend of RUNNER_IDS) describe(`${backend} monitoring turn`, { timeout: 30_000 }, () => {
@@ -51,7 +54,52 @@ for (const backend of RUNNER_IDS) describe(`${backend} monitoring turn`, { timeo
       });
       store.updateRun(p.id, { notify: true });
       try {
-        if (row.id === 'M1') {
+        if (row.id === 'M16') {
+          store.commitDelegation([{ id: p.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
+          const w = await worker(p.id);
+          process.env.CEZ_CLAUDE_BIN = HARNESS_ADAPTERS.claude.mockBin;
+          manager.enqueueOwnedRun(w.id);
+          await until(() => store.getRun(w.id)?.status === 'waiting');
+          let acceptedWaitId = '';
+          await send([MONITORING_TEXT, 'Please review the changes before I continue.'], () => {
+            acceptedWaitId = register(p.id, [w.id]).id;
+            expect(waitOf(run())?.phase).toBe('registered');
+          });
+          attention('needs you', true);
+          const timer = manager['active'].get(p.id)!.idleTimer! as NodeJS.Timeout & { _onTimeout(): void };
+          const expire = timer._onTimeout; clearTimeout(timer); expire();
+          await until(() => !manager.isActive(p.id));
+          expect(run().status).toBe('waiting');
+          expect(run().error).toBeUndefined();
+          expect(store.getRun(w.id)?.status).toBe('waiting');
+          expect(manager.isActive(w.id)).toBe(true);
+          expect(waitOf(run())).toBeUndefined();
+          expect(run().agentInputs?.some(input => input.id === acceptedWaitId)).not.toBe(true);
+          const credentials = new CredentialRegistry();
+          const service = new DelegationService();
+          service.registerProject({ id: 'project', root, store, manager });
+          const id = randomUUID();
+          try {
+            const caller = credentials.authenticate(credentials.issue('project', w.id, randomUUID()))!;
+            await service.send(caller, { id, recipientRunId: p.id, kind: 'progress',
+              text: messagesPrompt(backend, [MONITORING_TEXT, ACK_TEXT]), timeoutSeconds: 600 });
+            expect(run().agentInputs?.find(input => input.id === id)?.deliveredAt).toBeUndefined();
+            attention('needs you', true);
+          } finally { credentials.close(); }
+          const events = eventCheckpoint();
+          hook.dispose(); // restart replaces the fixture store
+          await restart(false, undefined, events);
+          attention('needs you', true);
+          expect(manager.isActive(p.id)).toBe(false);
+          expect(waitOf(run())).toBeUndefined();
+          expect(run().agentInputs?.find(input => input.id === id)?.deliveredAt).toBeUndefined();
+          expect(store.getRun(w.id)?.status).not.toBe('cancelled');
+          expect(manager.continueRun(p.id, { text: messagesPrompt(backend, [MONITORING_TEXT, ACK_TEXT]) }).ok).toBe(true);
+          await until(() => run().activity === 'monitoring');
+          attention('monitoring', false);
+          expect(store.readEvents(p.id).some(event => event.type === 'human-input-delivered')).toBe(true);
+          expect(run().agentInputs?.find(input => input.id === id)?.deliveredAt).toBeDefined();
+        } else if (row.id === 'M1') {
           await send([MONITORING_TEXT, ACK_TEXT]);
           attention('monitoring', false);
           expect(run().monitoringWakeAt).toBeDefined();
@@ -62,7 +110,7 @@ for (const backend of RUNNER_IDS) describe(`${backend} monitoring turn`, { timeo
           await until(() => run().status === 'waiting'); // mock wake response has no declaration
           attention('needs you', true);
         } else if (row.id === 'M15') {
-          for (const gate of ['- Should I merge this PR?', '**Please review the changes before I continue.**', '1. __I need your approval before proceeding.__', '*Should I merge this PR?* Please let me know.']) {
+          for (const gate of ['### Should I merge this PR?', '- [ ] Please review the changes before I continue.', '- Should I merge this PR?', '**Please review the changes before I continue.**', '1. __I need your approval before proceeding.__', '*Should I merge this PR?* Please let me know.']) {
             await send([MONITORING_TEXT, gate]);
             attention('needs you', true);
             expect(run().monitoringWakeAt).toBeUndefined();
@@ -122,7 +170,7 @@ for (const backend of RUNNER_IDS) describe(`${backend} monitoring turn`, { timeo
         }
         await hook.idle();
         const final = calls.at(-1)!;
-        expect(final.task.attentionLabel).toBe(deriveAttention(run()).label);
+        if (row.id !== 'M16') expect(final.task.attentionLabel).toBe(deriveAttention(run()).label);
         if (row.id === 'M1') expect(calls.some(call => call.activity === 'monitoring' && call.task.attentionLabel === 'monitoring')).toBe(true);
       } finally { hook.dispose(); }
     });
@@ -142,6 +190,22 @@ for (const backend of RUNNER_IDS) describe(`${backend} monitoring turn`, { timeo
     await until(() => store.getRun(p.id)?.status === 'waiting' || !manager.isActive(p.id));
     expect(store.getRun(p.id)?.status).toBe('done');
     expect(store.readEvents(p.id).some(event => event.type === 'note' && String(event.message).includes('autonomous — continuing without pausing'))).toBe(true);
+  });
+
+  it('fresh M17 genuine accepted-wait session loss still fails', async () => {
+    process.env.CEZ_DRY_RUN = '0';
+    process.env[HARNESS_ADAPTERS[backend].binEnv] = HARNESS_ADAPTERS[backend].mockBin;
+    const p = manager.startRun(QUICK_TASK_WORKFLOW, { task: 'mock:hold', runner: backend });
+    await until(() => store.getRun(p.id)?.status === 'waiting');
+    store.commitDelegation([{ id: p.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
+    const w = await worker(p.id);
+    expect(manager.sendMessage(p.id, [{ type: 'text', text: messagesPrompt(backend, [MONITORING_TEXT, ACK_TEXT]) }])).toBe(true);
+    register(p.id, [w.id]);
+    await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
+    manager['active'].get(p.id)!.session!.end();
+    await until(() => !manager.isActive(p.id));
+    expect(store.getRun(p.id)).toMatchObject({ status: 'failed', error: 'step "task" failed: Agent session ended before its accepted worker wait completed' });
+    expect(store.getRun(w.id)?.status).toBe('cancelled');
   });
 
 });

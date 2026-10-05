@@ -1024,7 +1024,7 @@ selection after an earlier prose mention, and quoted ASK examples without a
 marker. Parsing and transcript stripping must select the same final line;
 ordinary examples leave no question card or rejection note.
 
-Monitoring turn rows **M1–M14** (hearsay-tools/cezarion#772) live in
+Monitoring turn rows **M1–M17** (hearsay-tools/cezarion#772) live in
 `workflows/monitoring-turn.test.ts` and `workflows/worker-parent-attention.test.ts`
 and enter the shared parity guard. Every `RUNNER_IDS` adapter carries multiple
 parent assistant text segments through its native wire on fresh and Continue sessions.
@@ -1039,7 +1039,14 @@ examples and fenced code cannot declare monitoring, and routine mentions of
 review or checks cannot create a human gate. M1 fires the real monitoring wake
 callback and proves capacity was released. M7 closes the actual idle session,
 retains the unanswered question, then delivers its answer through Continue and
-checks that a later monitoring turn carries no stale attention. The native rows
+checks that a later monitoring turn carries no stale attention. M15 recognizes
+active Markdown lists/emphasis while retaining example exclusions. M16 withdraws
+a wait superseded by a prose gate, keeps its child alive on idle closure, retains
+the gate across restart and holds later worker input until a successful human
+answer. M9/M10 hold later worker input across delayed ACKs as well, then deliver
+it with the human answer. M17 pins the fresh path's genuine accepted-wait
+session-failure protection. Prose gates use a durable note plus the existing exact delivery receipt;
+they do not manufacture a structured question card. The native rows
 also assert CLI attention-wait and webhook projections. Cockpit grouping and
 notification transitions remain consumers of the same contract attention rule.
 M9/M10 extend owned-input ACK coverage with explicit human gates and live workers;

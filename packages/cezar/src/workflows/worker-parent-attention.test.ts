@@ -6,7 +6,7 @@ import { RUNNER_IDS, type RunnerId } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { withDelayedCommand, withHeldPipeResponse } from '../core/owned-input-delivery.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
-import { manager, store, root, worker, until, semaphore, useWorkerWaitFixture } from './worker-wait.testkit.ts';
+import { manager, store, root, worker, until, semaphore, useWorkerWaitFixture, waitOf } from './worker-wait.testkit.ts';
 
 // Exhaustive transport classification: a new runner must provide either the real
 // delayed-ACK race or an executable wire limitation, never an omitted/skip row.
@@ -66,6 +66,14 @@ for (const backend of RUNNER_IDS) describe(`${backend} worker parent attention`,
               expect(store.getRun(p.id)?.agentInputs?.find(input => input.id === id)?.deliveredAt).toBeUndefined();
               expect(semaphore.busy()).toBe(1);
             }
+            let laterId: string | undefined;
+            if (humanGate) {
+              laterId = randomUUID();
+              await service.send(caller, { id: laterId, recipientRunId: p.id, kind: 'progress', text: 'Later progress mock:hold', timeoutSeconds: 600 });
+              expect(store.getRun(p.id)?.agentInputs?.find(input => input.id === laterId)?.deliveredAt).toBeUndefined();
+              expect(waitOf(store.getRun(p.id))).toBeUndefined();
+              expect(manager['flushAgentInputs'](p.id)).toBe(false);
+            }
             release();
             await until(() => !!store.getRun(p.id)?.agentInputs?.find(input => input.id === id)?.deliveredAt);
             await until(() => semaphore.busy() === 0);
@@ -75,6 +83,10 @@ for (const backend of RUNNER_IDS) describe(`${backend} worker parent attention`,
             if (humanGate) {
               expect(store.getRun(p.id)?.activity).toBeUndefined();
               expect(store.getRun(p.id)?.monitoringWakeAt).toBeUndefined();
+              expect(store.getRun(p.id)?.agentInputs?.find(input => input.id === laterId)?.deliveredAt).toBeUndefined();
+              expect(manager.sendMessage(p.id, [{ type: 'text', text: 'Approved, continue mock:hold' }])).toBe(true);
+              await until(() => !!store.getRun(p.id)?.agentInputs?.find(input => input.id === laterId)?.deliveredAt && store.getRun(p.id)?.activity === 'monitoring');
+              expect(store.readEvents(p.id).some(event => event.type === 'human-input-delivered')).toBe(true);
             } else expect(store.getRun(p.id)?.monitoringWakeAt).toBeDefined();
           } finally { release(); credentials.close(); }
         };
