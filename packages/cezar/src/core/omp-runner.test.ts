@@ -72,6 +72,13 @@ describe('ompTools', () => {
     expect(ompTools(['WebFetch'], {})).toEqual({ flag: 'no-tools', tools: [], dropped: ['WebFetch'] });
   });
 
+  it('a bashAllowlist with no allowedTools names the default set without bash', () => {
+    const selection = ompTools(undefined, { bashAllowlist: ['git status'] });
+    expect(selection.flag).toBe('tools');
+    expect(selection.tools).not.toContain('bash');
+    expect(selection.tools).toEqual(expect.arrayContaining(['read', 'edit', 'write', 'grep', 'glob']));
+  });
+
   it('dedupes and never passes a name OMP would reject at startup', () => {
     const selection = ompTools(['Read', 'read', 'WebFetch', 'Lsp', 'fetch', 'goal', 'SubagentWait'], {});
     expect(selection).toEqual({ flag: 'tools', tools: ['read'], dropped: ['WebFetch', 'Lsp', 'fetch', 'goal', 'SubagentWait'] });

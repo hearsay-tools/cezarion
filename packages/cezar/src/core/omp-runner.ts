@@ -91,7 +91,7 @@ export const OMP_SPEC_SUPPORT: AgentRunSpecSupport = {
     honored: true,
     via: '--config overlay denying task, and task/wait left out of --tools (D1); eval is left out too, since OMP v18.4.11 has no setting that disables its agent()/workpool() helpers; with allowedTools undefined D1 passes an explicit --tools list (OMP\'s default set minus those), failing closed rather than widening to the defaults',
   },
-  bashAllowlist: { honored: true, via: "no prefix equivalent: bash dropped from --tools when an allowlist is set (Pi's rule)" },
+  bashAllowlist: { honored: true, via: "no prefix equivalent: bash dropped from --tools when an allowlist is set (Pi's rule); with allowedTools unset, OMP's default set is named first so bash can be left out" },
   additionalDirectories: { honored: true, via: '--add-dir per directory' },
   env: { honored: true, via: 'merged over the child env through buildChildEnv' },
   model: { honored: true, via: '--model provider/model' },
@@ -126,8 +126,10 @@ export function ompTools(
     exclude?: readonly string[];
   },
 ): OmpToolSelection {
-  // OMP's default set includes task, wait and eval; D1 has to name a list to leave them out.
-  const requested = allowedTools ?? (opts.restrictNativeDelegation ? [...OMP_DEFAULT_TOOL_NAMES] : undefined);
+  // OMP's default set includes task, wait, eval and unrestricted bash: D1 and a bash allowlist
+  // each have to name a list to leave something out.
+  const narrows = opts.restrictNativeDelegation || (opts.bashAllowlist?.length ?? 0) > 0;
+  const requested = allowedTools ?? (narrows ? [...OMP_DEFAULT_TOOL_NAMES] : undefined);
   if (requested === undefined) return { flag: null, tools: [], dropped: [] };
   const tools = new Set<string>();
   const dropped = new Set<string>();
