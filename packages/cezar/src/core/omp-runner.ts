@@ -66,8 +66,8 @@ const OMP_TOOL_MAP: Readonly<Record<string, string>> = {
   Task: 'task',
   TodoWrite: 'todo',
   WebSearch: 'web_search',
-  // Ruling 2: OMP v18.4.11 has no `fetch` built-in; `read` reads static web pages per its own description.
-  WebFetch: 'read',
+  // No `WebFetch`: OMP v18.4.11 has no `fetch` built-in, and its `read` also reads local files,
+  // so mapping a web-only grant onto it would widen the grant. It is dropped (fail closed).
 };
 
 /**

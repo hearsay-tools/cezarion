@@ -208,7 +208,8 @@ unknown name (a built-in, a cezar tool, an MCP name cezar never passed) stays fa
 | `Read` / `Edit` / `Write` / `Bash` / `Grep` / `Glob` | `read` / `edit` / `write` / `bash` / `grep` / `glob` |
 | `Subagent`, `Task` | `task` |
 | `TodoWrite` | `todo` |
-| `WebSearch` / `WebFetch` | `web_search` / `read` (Ruling 2: `fetch` is not a v18.4.11 built-in; `read` reads static web pages per its own description) |
+| `WebSearch` | `web_search` |
+| `WebFetch` | dropped (Ruling 2, revised in review: `fetch` is not a v18.4.11 built-in, and `read` also reads local files, so mapping onto it would widen a web-only grant) |
 | any OMP built-in name (`BUILTIN_TOOL_NAMES` at the pinned version, lower-case) | itself |
 | `mcp__<server>__<tool>` (Claude's spelling) | `mcp__<server>_<tool>`, OMP's own spelling (v18.4.11 `qjn`: each part lowercased, anything but `[a-z0-9_]` and repeated underscores folded to one `_`, edges trimmed, a tool name repeating its server's prefix stripped of it). Ruling 20 |
 | any other `mcp__*` (already OMP's spelling) | itself; validated against the registry OMP discovered, so an unregistered one is dropped by the Ruling 13 / Ruling 20 respawn |
@@ -513,7 +514,7 @@ differs from the approved text above, the ruling wins and the cost of being wron
 |---|---|---|
 | Ruling 0 | Turn fixtures are source-derived and labeled. Updated 2026-10-05: once an OMP login existed, live turns through `OmpRunner` (`xai-oauth/grok-4.6`) confirmed streaming, a same-turn steer, `--resume` and interrupt; see the fixtures README verification ledger | The fixtures could drift from the live wire; the live check covers the main paths only |
 | Ruling 1 | Default tools exclude `find` and `ast_grep` (settings-gated, default off; `--tools` naming them exits 2) | Users who enabled them do not get them by default; a workflow can grant them |
-| Ruling 2 | `WebFetch` maps to `read`, not `fetch` (not a v18.4.11 built-in) | A `WebFetch` grant gives no web fetch beyond `read`'s static pages |
+| Ruling 2 | `WebFetch` has no OMP equivalent and is dropped with the other unmapped names (revised in PR review: mapping it to `read` widened the grant) | A workflow granting only `WebFetch` runs with no web fetch |
 | Ruling 3 | `omp models --json` is `{"models":[...]}`; status: empty is disconnected, non-empty connected, else null; effort levels from `thinking` | Status misreports |
 | Ruling 4 | Unknown or unavailable `--tools` names exit 2 (not 1); the mock mirrors it with OMP's stderr | None |
 | Ruling 5 | Runner argv builder and spawn/session lifecycle shipped together (same file) | Larger single diff |

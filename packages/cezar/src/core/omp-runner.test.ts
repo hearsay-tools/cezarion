@@ -60,17 +60,21 @@ describe('ompTools', () => {
   it('maps cezar names, keeps OMP built-ins and mcp__ names, drops the rest', () => {
     expect(ompTools(['Subagent', 'TodoWrite', 'WebFetch', 'lsp', 'mcp__srv_tool', 'NotebookEdit'], {})).toEqual({
       flag: 'tools',
-      tools: ['task', 'todo', 'read', 'lsp', 'mcp__srv_tool'],
-      dropped: ['NotebookEdit'],
+      tools: ['task', 'todo', 'lsp', 'mcp__srv_tool'],
+      dropped: ['WebFetch', 'NotebookEdit'],
     });
     expect(ompTools(['Read', 'Edit', 'Write', 'Bash', 'Grep', 'Glob', 'Task', 'WebSearch'], {}).tools).toEqual([
       'read', 'edit', 'write', 'bash', 'grep', 'glob', 'task', 'web_search',
     ]);
   });
 
+  it('WebFetch alone fails closed: OMP read would widen a web grant to local files', () => {
+    expect(ompTools(['WebFetch'], {})).toEqual({ flag: 'no-tools', tools: [], dropped: ['WebFetch'] });
+  });
+
   it('dedupes and never passes a name OMP would reject at startup', () => {
     const selection = ompTools(['Read', 'read', 'WebFetch', 'Lsp', 'fetch', 'goal', 'SubagentWait'], {});
-    expect(selection).toEqual({ flag: 'tools', tools: ['read'], dropped: ['Lsp', 'fetch', 'goal', 'SubagentWait'] });
+    expect(selection).toEqual({ flag: 'tools', tools: ['read'], dropped: ['WebFetch', 'Lsp', 'fetch', 'goal', 'SubagentWait'] });
     for (const tool of ompTools([...OMP_BUILTIN_TOOL_NAMES, 'Glob', 'TodoWrite'], {}).tools) {
       expect(OMP_BUILTIN_TOOL_NAMES).toContain(tool);
     }

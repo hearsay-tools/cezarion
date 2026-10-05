@@ -626,7 +626,7 @@ v18.4.11 `docs/rpc.md` and `rpc-types.ts`.
   Continue uses `--resume <id>`.
 
 Tools: `--tools` is an allowlist validated against OMP's registry, so cezar maps names onto OMP's
-(`WebFetch` to `read`, `TodoWrite` to `todo`) and drops anything unmapped with one v1 `note`;
+(`TodoWrite` to `todo`; `WebFetch` has no web-only equivalent and is dropped) and drops anything unmapped with one v1 `note`;
 `allowedTools: []` is `--no-tools`. The zero-config default adds `todo, lsp, ast_edit, task, wait`
 to the cezar defaults. `find` and `ast_grep` are gated behind settings that default off and are
 **not** in it: naming an unavailable built-in exits 2. When settings the user chose disable a
