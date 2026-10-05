@@ -1,0 +1,531 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		0875F8F2C6D9D4359C057918 /* ConnectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18CDE5B5F4CAA68FFA94DA0C /* ConnectionTests.swift */; };
+		0F9C16C54C91BB79EC4B8D84 /* BrowserSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E57E0003AAA8F74BBFE7CAF /* BrowserSessionTests.swift */; };
+		162078CA841DB0DA7C9B16A9 /* Connection.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1F26F122E73D39FC7FC8771 /* Connection.swift */; };
+		30814E5F999EBC7A225FA416 /* App.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2921ADDA28F9B5CD8860F123 /* App.swift */; };
+		62DC3FB235FD20E22F1CBEA7 /* LauncherTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F916F1890CF77C1E99264159 /* LauncherTests.swift */; };
+		A0381754D4DE31DDADBBFEBD /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 6EAB4E6574FC44C8C5363275 /* Assets.xcassets */; };
+		A363AFDC69F4D2BCCB7F13EB /* BrowserSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1980DB12193DB3FB87F47976 /* BrowserSession.swift */; };
+		CE91493B7073FEFF664207DD /* CockpitController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 299F85B3623F04A250428F7A /* CockpitController.swift */; };
+		D870654D09222820D2515D74 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = DE8DCF35F296296ED6A05829 /* PrivacyInfo.xcprivacy */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		36F421270DA263EEFB7261C0 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = CFE3F432347971A3929523A9 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B362C398174B2519FF17830D;
+			remoteInfo = Cezarion;
+		};
+		699FA685BF24F3FC8E6604CF /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = CFE3F432347971A3929523A9 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B362C398174B2519FF17830D;
+			remoteInfo = Cezarion;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		18CDE5B5F4CAA68FFA94DA0C /* ConnectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionTests.swift; sourceTree = "<group>"; };
+		1980DB12193DB3FB87F47976 /* BrowserSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserSession.swift; sourceTree = "<group>"; };
+		2921ADDA28F9B5CD8860F123 /* App.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App.swift; sourceTree = "<group>"; };
+		299F85B3623F04A250428F7A /* CockpitController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CockpitController.swift; sourceTree = "<group>"; };
+		3E57E0003AAA8F74BBFE7CAF /* BrowserSessionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserSessionTests.swift; sourceTree = "<group>"; };
+		6EAB4E6574FC44C8C5363275 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		888D939F5AE5E636FBA5F364 /* CezarionUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = CezarionUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A515E1A0ACEA5F332E7B8B0C /* Cezarion.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Cezarion.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A9E71545B0690E05892885E2 /* CezarionTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = CezarionTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		B1F26F122E73D39FC7FC8771 /* Connection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Connection.swift; sourceTree = "<group>"; };
+		DAB652DAB7C4F591E79F05FA /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		DE8DCF35F296296ED6A05829 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		F916F1890CF77C1E99264159 /* LauncherTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LauncherTests.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		358B481CBBA26A3C8BFE4248 = {
+			isa = PBXGroup;
+			children = (
+				48DD1BB0258FA029EEDA8AED /* Cezarion */,
+				ADEF162BD1C19BF161208066 /* Tests */,
+				FE1A4933B8D01E9F25048B9D /* UITests */,
+				CAC78DB450B7C36E7BBC8AB1 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		48DD1BB0258FA029EEDA8AED /* Cezarion */ = {
+			isa = PBXGroup;
+			children = (
+				2921ADDA28F9B5CD8860F123 /* App.swift */,
+				6EAB4E6574FC44C8C5363275 /* Assets.xcassets */,
+				1980DB12193DB3FB87F47976 /* BrowserSession.swift */,
+				299F85B3623F04A250428F7A /* CockpitController.swift */,
+				B1F26F122E73D39FC7FC8771 /* Connection.swift */,
+				DAB652DAB7C4F591E79F05FA /* Info.plist */,
+				DE8DCF35F296296ED6A05829 /* PrivacyInfo.xcprivacy */,
+			);
+			path = Cezarion;
+			sourceTree = "<group>";
+		};
+		ADEF162BD1C19BF161208066 /* Tests */ = {
+			isa = PBXGroup;
+			children = (
+				3E57E0003AAA8F74BBFE7CAF /* BrowserSessionTests.swift */,
+				18CDE5B5F4CAA68FFA94DA0C /* ConnectionTests.swift */,
+			);
+			path = Tests;
+			sourceTree = "<group>";
+		};
+		CAC78DB450B7C36E7BBC8AB1 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A515E1A0ACEA5F332E7B8B0C /* Cezarion.app */,
+				A9E71545B0690E05892885E2 /* CezarionTests.xctest */,
+				888D939F5AE5E636FBA5F364 /* CezarionUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		FE1A4933B8D01E9F25048B9D /* UITests */ = {
+			isa = PBXGroup;
+			children = (
+				F916F1890CF77C1E99264159 /* LauncherTests.swift */,
+			);
+			path = UITests;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		6599366C78E5484DEDF72DB1 /* CezarionUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = CBEF73BD56CC5E122DDF7026 /* Build configuration list for PBXNativeTarget "CezarionUITests" */;
+			buildPhases = (
+				406D845A4B883B1FB6353D55 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				B6168EB4D93AA11D4AFAE00F /* PBXTargetDependency */,
+			);
+			name = CezarionUITests;
+			packageProductDependencies = (
+			);
+			productName = CezarionUITests;
+			productReference = 888D939F5AE5E636FBA5F364 /* CezarionUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+		A4FB196D98F6CCF3358439AF /* CezarionTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 3A10720F20476921BD2E832B /* Build configuration list for PBXNativeTarget "CezarionTests" */;
+			buildPhases = (
+				B5508BBABEFCE36F93498857 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				46D4222311FEAAF381C60618 /* PBXTargetDependency */,
+			);
+			name = CezarionTests;
+			packageProductDependencies = (
+			);
+			productName = CezarionTests;
+			productReference = A9E71545B0690E05892885E2 /* CezarionTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		B362C398174B2519FF17830D /* Cezarion */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B1F53048BAC4A0C1F90B898D /* Build configuration list for PBXNativeTarget "Cezarion" */;
+			buildPhases = (
+				45A934B5BB031EF97E1A74B1 /* Sources */,
+				D122D982052D305B61AEBC4D /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Cezarion;
+			packageProductDependencies = (
+			);
+			productName = Cezarion;
+			productReference = A515E1A0ACEA5F332E7B8B0C /* Cezarion.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		CFE3F432347971A3929523A9 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					6599366C78E5484DEDF72DB1 = {
+						ProvisioningStyle = Automatic;
+						TestTargetID = B362C398174B2519FF17830D;
+					};
+					A4FB196D98F6CCF3358439AF = {
+						ProvisioningStyle = Automatic;
+					};
+					B362C398174B2519FF17830D = {
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = D4B5C40E6D76FFDB55BE321C /* Build configuration list for PBXProject "Cezarion" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 358B481CBBA26A3C8BFE4248;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				B362C398174B2519FF17830D /* Cezarion */,
+				A4FB196D98F6CCF3358439AF /* CezarionTests */,
+				6599366C78E5484DEDF72DB1 /* CezarionUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		D122D982052D305B61AEBC4D /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A0381754D4DE31DDADBBFEBD /* Assets.xcassets in Resources */,
+				D870654D09222820D2515D74 /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		406D845A4B883B1FB6353D55 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				62DC3FB235FD20E22F1CBEA7 /* LauncherTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		45A934B5BB031EF97E1A74B1 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				30814E5F999EBC7A225FA416 /* App.swift in Sources */,
+				A363AFDC69F4D2BCCB7F13EB /* BrowserSession.swift in Sources */,
+				CE91493B7073FEFF664207DD /* CockpitController.swift in Sources */,
+				162078CA841DB0DA7C9B16A9 /* Connection.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B5508BBABEFCE36F93498857 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0F9C16C54C91BB79EC4B8D84 /* BrowserSessionTests.swift in Sources */,
+				0875F8F2C6D9D4359C057918 /* ConnectionTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		46D4222311FEAAF381C60618 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B362C398174B2519FF17830D /* Cezarion */;
+			targetProxy = 36F421270DA263EEFB7261C0 /* PBXContainerItemProxy */;
+		};
+		B6168EB4D93AA11D4AFAE00F /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B362C398174B2519FF17830D /* Cezarion */;
+			targetProxy = 699FA685BF24F3FC8E6604CF /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		03FEDBF6BB8BA245DA8DDDE7 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = tools.hearsay.cezarion.CezarionUITests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Cezarion;
+			};
+			name = Release;
+		};
+		09272D58769CD8F043FAD9B8 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		1B599557A46812F66CA561C0 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = tools.hearsay.cezarion.CezarionUITests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Cezarion;
+			};
+			name = Debug;
+		};
+		360E70D92BCC1E359E4A86EC /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = tools.hearsay.cezarion.CezarionTests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Cezarion.app/Cezarion";
+			};
+			name = Debug;
+		};
+		48AA03A026E688FA020ABC2A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = Cezarion/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = tools.hearsay.cezarion.mobile;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		7CD4ED043ADA5F7C10A2AF29 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = tools.hearsay.cezarion.CezarionTests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Cezarion.app/Cezarion";
+			};
+			name = Release;
+		};
+		82DDB6B666E79A5498C7D41F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = Cezarion/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = tools.hearsay.cezarion.mobile;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		8C9E488BC7A494F821BA0577 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		3A10720F20476921BD2E832B /* Build configuration list for PBXNativeTarget "CezarionTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				360E70D92BCC1E359E4A86EC /* Debug */,
+				7CD4ED043ADA5F7C10A2AF29 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		B1F53048BAC4A0C1F90B898D /* Build configuration list for PBXNativeTarget "Cezarion" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				82DDB6B666E79A5498C7D41F /* Debug */,
+				48AA03A026E688FA020ABC2A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		CBEF73BD56CC5E122DDF7026 /* Build configuration list for PBXNativeTarget "CezarionUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1B599557A46812F66CA561C0 /* Debug */,
+				03FEDBF6BB8BA245DA8DDDE7 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		D4B5C40E6D76FFDB55BE321C /* Build configuration list for PBXProject "Cezarion" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				09272D58769CD8F043FAD9B8 /* Debug */,
+				8C9E488BC7A494F821BA0577 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = CFE3F432347971A3929523A9 /* Project object */;
+}
