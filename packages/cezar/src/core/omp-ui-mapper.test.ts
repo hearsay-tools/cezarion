@@ -164,8 +164,8 @@ describe('omp ui mapper (golden fixtures)', () => {
     expect(child('toolu_task_2#Tests')).toEqual([
       expect.objectContaining({ kind: 'message', text: 'Starting on the lifecycle fixture' }),
     ]);
-    // Child usage never moves the parent's usage panel.
-    expect(events.filter((event) => event.type === 'usage.updated')).toHaveLength(2);
+    // Parent and both children's model calls contribute to session telemetry.
+    expect(events.filter((event) => event.type === 'usage.updated')).toHaveLength(4);
   });
 
   it('sub-agent events before their lifecycle frame are replayed once it arrives', () => {
@@ -490,9 +490,61 @@ describe('omp ui mapper (golden fixtures)', () => {
       type: 'turn.completed',
       turnId: 'turn_1',
       stopReason: 'end_turn',
-      usage: { input: 1500, output: 40, total: 11740, cacheRead: 10200, cacheWrite: 0 },
-      costUsd: 0.0081,
+      usage: { input: 2700, output: 120, total: 22320, cacheRead: 19200, cacheWrite: 300 },
+      costUsd: 0.0204,
     });
+  });
+
+  it('sums parent and early child usage once, with separate turn and session totals', () => {
+    const message = { type: 'message_end', message: { role: 'assistant', usage: {
+      input: 10, output: 5, cacheRead: 20, cacheWrite: 4, totalTokens: 39, cost: { total: 0.125 },
+    } } };
+    const child = { type: 'subagent_event', payload: { id: 'early', event: message } };
+    const lifecycle = { type: 'subagent_lifecycle', payload: { id: 'early', agent: 'explore', status: 'started', parentToolCallId: 'task', index: 0 } };
+    const first = fold([message, child, lifecycle, message, { type: 'session_settled' }]);
+    expect(first.perFrame[1]).toContainEqual({ type: 'usage.updated', usage: {
+      input: 20, output: 10, cacheRead: 40, cacheWrite: 8, total: 78,
+    }, costUsd: 0.25 });
+    expect(first.perFrame[2]!.filter(event => event.type === 'usage.updated')).toEqual([]);
+    expect(first.events.at(-1)).toMatchObject({ type: 'turn.completed', usage: {
+      input: 30, output: 15, cacheRead: 60, cacheWrite: 12, total: 117,
+    }, costUsd: 0.375 });
+    // Late child usage is session telemetry, not a new parent turn or the next turn's spend.
+    const late = mapOmpRpcMessage(child, first.state);
+    expect(late.events.filter(event => event.type === 'turn.started')).toEqual([]);
+    const second = fold([message, { type: 'session_settled' }], ompTurnStarted(late.state).state);
+    expect(second.events).toContainEqual({ type: 'usage.updated', usage: {
+      input: 50, output: 25, cacheRead: 100, cacheWrite: 20, total: 195,
+    }, costUsd: 0.625 });
+    expect(second.events.at(-1)).toMatchObject({ type: 'turn.completed', usage: {
+      input: 10, output: 5, cacheRead: 20, cacheWrite: 4, total: 39,
+    }, costUsd: 0.125 });
+  });
+
+  it('counts child usage even when the visual early-event buffer overflows', () => {
+    const { events } = fold(Array.from({ length: 205 }, () => ({ type: 'subagent_event', payload: {
+      id: 'early', event: { type: 'message_end', message: { role: 'assistant', usage: { input: 1, output: 1 } } },
+    } })));
+    expect(events.filter(event => event.type === 'usage.updated').at(-1)).toEqual({
+      type: 'usage.updated', usage: { input: 205, output: 205, total: 410 },
+    });
+    expect(events.filter(event => event.type === 'session.error')).toHaveLength(1);
+  });
+
+  it('keeps known cost across costless reports and accepts cost-only child usage', () => {
+    const child = (usage: unknown, role = 'assistant') => ({ type: 'subagent_event', payload: {
+      id: 'child', event: { type: 'message_end', message: { role, usage } },
+    } });
+    const { events } = fold([
+      child({ cost: { total: 0.25 } }), child({ input: 2, output: 3 }),
+      child({ input: 100, cost: { total: 10 } }, 'user'),
+      child(null), { type: 'session_settled' },
+    ]);
+    expect(events.filter(event => event.type === 'usage.updated')).toEqual([
+      { type: 'usage.updated', usage: { input: 0, output: 0, total: 0 }, costUsd: 0.25 },
+      { type: 'usage.updated', usage: { input: 2, output: 3, total: 5 }, costUsd: 0.25 },
+    ]);
+    expect(events.at(-1)).toMatchObject({ type: 'turn.completed', usage: { input: 2, output: 3, total: 5 }, costUsd: 0.25 });
   });
 
   it('flushes a latched provider error once', () => {

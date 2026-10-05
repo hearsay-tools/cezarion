@@ -395,25 +395,25 @@
   {
     "type": "usage.updated",
     "usage": {
-      "input": 2100,
-      "output": 30,
-      "total": 2130,
+      "input": 3000,
+      "output": 90,
+      "total": 3090,
       "cacheRead": 0,
       "cacheWrite": 0
     },
-    "costUsd": 0.006
+    "costUsd": 0.01
   },
   {
     "type": "turn.completed",
     "turnId": "turn_1",
     "stopReason": "end_turn",
     "usage": {
-      "input": 2100,
-      "output": 30,
-      "total": 2130,
+      "input": 3000,
+      "output": 90,
+      "total": 3090,
       "cacheRead": 0,
       "cacheWrite": 0
     },
-    "costUsd": 0.006
+    "costUsd": 0.01
   }
 ]

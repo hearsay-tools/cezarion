@@ -1,4 +1,5 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { once } from 'node:events';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -290,6 +291,20 @@ describe('OmpRunner session over the mock', () => {
     expect(ui.at(-1)).toEqual({ type: 'session.ended', reason: 'end_turn' });
   });
 
+  it('includes child spend in v1, v2 and the session result', async () => {
+    const { events, ui, result } = await runSession(spec('mock:subagent'));
+    expect(events.filter(event => event.type === 'token-usage').at(-1)).toEqual({ type: 'token-usage', tokensUsed: 60 });
+    expect(result.tokensUsed).toBe(60); // 15 parent + 20 + 10 + 100 * .1 + 4 * 1.25 child.
+    expect(events.filter(event => event.type === 'cost').map(event => event.usd)).toEqual([0.001, 0.002]);
+    expect(ui.filter(event => event.type === 'usage.updated').at(-1)).toEqual({
+      type: 'usage.updated', usage: { input: 30, output: 15, cacheRead: 100, cacheWrite: 4, total: 149 }, costUsd: 0.003,
+    });
+    expect(ui.filter(event => event.type === 'turn.completed')).toEqual([{
+      type: 'turn.completed', turnId: 'turn_1', stopReason: 'end_turn',
+      usage: { input: 30, output: 15, cacheRead: 100, cacheWrite: 4, total: 149 }, costUsd: 0.003,
+    }]);
+  });
+
   it('session_settled ends the turn; agent_end alone does not, nor an idle settle', async () => {
     const bin = join(cwd, 'mock-omp-retry.mjs');
     writeFileSync(bin, `#!/usr/bin/env node
@@ -538,10 +553,30 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
   });
 
   it('timeoutMs kills the session as a timeout, not a crash', async () => {
-    const { events } = await runSession(spec('mock:hold', { timeoutMs: 150 }));
-    expect(events.filter(event => event.type === 'error')).toEqual([{ type: 'error', message: expect.stringMatching(/^omp CLI timed out after .* and was killed$/) }]);
-    expect(lines('commands.ndjson').at(-1)).toEqual({ type: 'abort' });
-    expect(events.at(-1)).toEqual({ type: 'done' });
+    // Keep real child IO, but let startup finish before spending the runner's budget.
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    const events: AgentEvent[] = [];
+    let ready!: () => void;
+    const childReady = new Promise<void>(resolve => { ready = resolve; });
+    const session = new OmpRunner({ bin: MOCK }).startSession(
+      spec('mock:hold', { timeoutMs: 150 }),
+      event => { events.push(event); if (event.type === 'session') ready(); },
+      { autoEndAfterFirstTurn: false },
+    );
+    try {
+      await childReady;
+      vi.advanceTimersByTime(149);
+      expect(session.open).toBe(true);
+      vi.advanceTimersByTime(1);
+      expect(session.open).toBe(false);
+      await session.result;
+      expect(events.filter(event => event.type === 'error')).toEqual([{ type: 'error', message: expect.stringMatching(/^omp CLI timed out after .* and was killed$/) }]);
+      expect(lines('commands.ndjson').at(-1)).toEqual({ type: 'abort' });
+      expect(events.at(-1)).toEqual({ type: 'done' });
+    } finally {
+      session.interrupt();
+      vi.useRealTimers();
+    }
   });
 
   /** A bin that exits 2 printing `text` on stderr and records each invocation's argv. */
@@ -753,19 +788,42 @@ import { appendFileSync, readFileSync } from 'node:fs';
 const countFile = ${JSON.stringify(join(cwd, 'invocations.ndjson'))};
 appendFileSync(countFile, JSON.stringify(process.argv.slice(2)) + '\\n');
 if (readFileSync(countFile, 'utf8').split('\\n').filter(Boolean).length === 1) {
-  await new Promise((resolve) => setTimeout(resolve, 400));
+  // The parent advances its clock only after this child is ready to refuse.
+  process.stdin.resume();
+  process.stderr.write('ready to refuse\\n');
+  await new Promise((resolve) => process.stdin.once('data', resolve));
   process.stderr.write('Error: Built-in tool unavailable in this session: todo.\\n');
   process.exit(2);
 }
 await import(${JSON.stringify(MOCK)});
 `, { mode: 0o755 });
-      const started = Date.now();
+      vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
       const events: AgentEvent[] = [];
-      await new OmpRunner({ bin }).run(spec('mock:hold', { allowedTools: ['Read', 'TodoWrite'], timeoutMs: 700 }), event => events.push(event));
-      expect(invocations()).toHaveLength(2);
-      expect(events.some(event => event.type === 'error' && event.message.startsWith('omp CLI timed out'))).toBe(true);
-      // One wall-clock limit for the whole run: well under the ~1100 ms a re-armed full timeout gives.
-      expect(Date.now() - started).toBeLessThan(1000);
+      let ready!: () => void;
+      const retryReady = new Promise<void>(resolve => { ready = resolve; });
+      const session = new OmpRunner({ bin }).startSession(
+        spec('mock:hold', { allowedTools: ['Read', 'TodoWrite'], timeoutMs: 700 }),
+        event => { events.push(event); if (event.type === 'session') ready(); },
+        { autoEndAfterFirstTurn: false },
+      );
+      const firstChild = spawned.at(-1)!;
+      try {
+        await once(firstChild.stderr!, 'data');
+        vi.advanceTimersByTime(400);
+        firstChild.stdin!.write('refuse\n');
+        await retryReady;
+        expect(invocations()).toHaveLength(2);
+        // The retry has 300 ms left, irrespective of either child's real startup time.
+        vi.advanceTimersByTime(299);
+        expect(session.open).toBe(true);
+        vi.advanceTimersByTime(1);
+        expect(session.open).toBe(false);
+        await session.result;
+        expect(events.some(event => event.type === 'error' && event.message.startsWith('omp CLI timed out'))).toBe(true);
+      } finally {
+        session.interrupt();
+        vi.useRealTimers();
+      }
     });
 
     it('a second refusal is surfaced as today, never a third spawn', async () => {

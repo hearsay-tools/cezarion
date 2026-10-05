@@ -81,6 +81,17 @@
     }
   },
   {
+    "type": "usage.updated",
+    "usage": {
+      "input": 1400,
+      "output": 70,
+      "total": 1470,
+      "cacheRead": 0,
+      "cacheWrite": 0
+    },
+    "costUsd": 0.006
+  },
+  {
     "type": "item.started",
     "item": {
       "kind": "tool",
@@ -302,6 +313,17 @@
     }
   },
   {
+    "type": "usage.updated",
+    "usage": {
+      "input": 1800,
+      "output": 90,
+      "total": 1890,
+      "cacheRead": 0,
+      "cacheWrite": 0
+    },
+    "costUsd": 0.007
+  },
+  {
     "type": "item.started",
     "item": {
       "kind": "tool",
@@ -484,25 +506,25 @@
   {
     "type": "usage.updated",
     "usage": {
-      "input": 3000,
-      "output": 70,
-      "total": 4070,
+      "input": 4800,
+      "output": 160,
+      "total": 5960,
       "cacheRead": 1000,
       "cacheWrite": 0
     },
-    "costUsd": 0.012
+    "costUsd": 0.019
   },
   {
     "type": "turn.completed",
     "turnId": "turn_1",
     "stopReason": "end_turn",
     "usage": {
-      "input": 3000,
-      "output": 70,
-      "total": 4070,
+      "input": 4800,
+      "output": 160,
+      "total": 5960,
       "cacheRead": 1000,
       "cacheWrite": 0
     },
-    "costUsd": 0.012
+    "costUsd": 0.019
   }
 ]

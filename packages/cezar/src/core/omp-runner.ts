@@ -24,6 +24,7 @@ import {
   createOmpUiState,
   mapOmpRpcMessage,
   ompFlushProviderError,
+  ompMessageUsage,
   ompProviderErrorMessage,
   ompTurnStarted,
 } from './omp-ui-mapper.js';
@@ -559,6 +560,15 @@ export class OmpRunner implements AgentRunner {
           // second boundary for the same prompt must not end the next one.
           const turnOpen = ompUi.turnId !== null;
           emitUi(value);
+          const usageReport = ompMessageUsage(value);
+          if (usageReport) {
+            const { input, output, cacheRead = 0, cacheWrite = 0 } = usageReport.usage;
+            // v1 keeps its historical per-message weighted token convention; v2 exposes
+            // the raw components of these same parent and child reports.
+            tokensUsed += Math.round(input + output + cacheRead * 0.1 + cacheWrite * 1.25);
+            onEvent?.({ type: 'token-usage', tokensUsed });
+            if (usageReport.costUsd !== undefined) onEvent?.({ type: 'cost', usd: usageReport.costUsd });
+          }
           // The mapper closed its turn on this frame: v1 ends the turn with it.
           const endsTurn = turnOpen && ompUi.turnId === null;
           if (!isRecord(value)) continue;
@@ -623,12 +633,6 @@ export class OmpRunner implements AgentRunner {
             }
           } else if (value.type === 'message_end' && isRecord(value.message) && value.message.role === 'assistant') {
             flushText();
-            const usage = usageValues(value.message.usage);
-            if (usage) {
-              tokensUsed += usage.weighted;
-              onEvent?.({ type: 'token-usage', tokensUsed });
-              if (usage.cost !== undefined) onEvent?.({ type: 'cost', usd: usage.cost });
-            }
             // Latched until the turn ends, cleared by a later success: OMP retries past
             // provider flakes and a recovered retry must stay silent (#256, #316).
             if (string(value.message.stopReason) === 'error') {
@@ -886,20 +890,6 @@ function toOmpPrompt(content: ContentBlock[]): {
   return { message: text.join('\n'), images };
 }
 
-/** Same as pi-runner.ts `usageValues`. */
-function usageValues(value: unknown): { weighted: number; cost?: number } | undefined {
-  if (!isRecord(value)) return undefined;
-  const input = number(value.input) ?? 0;
-  const output = number(value.output) ?? 0;
-  const cacheRead = number(value.cacheRead) ?? 0;
-  const cacheWrite = number(value.cacheWrite) ?? 0;
-  const cost = isRecord(value.cost) ? number(value.cost.total) : undefined;
-  return {
-    weighted: Math.round(input + output + cacheRead * 0.1 + cacheWrite * 1.25),
-    ...(cost !== undefined && cost >= 0 ? { cost } : {}),
-  };
-}
-
 /** Same as pi-runner.ts `emitImages`. */
 function emitImages(value: unknown, onEvent?: (event: AgentEvent) => void): void {
   if (!Array.isArray(value)) return;
@@ -966,8 +956,4 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function string(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
-}
-
-function number(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
