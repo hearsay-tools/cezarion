@@ -55,6 +55,7 @@ for (const backend of RUNNER_IDS) describe(`${backend} monitoring turn`, { timeo
       store.updateRun(p.id, { notify: true });
       try {
         if (row.id === 'M16' || row.id === 'M25') {
+          process.env.CEZ_DELEGATION = '1';
           store.commitDelegation([{ id: p.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
           const w = await worker(p.id);
           process.env.CEZ_CLAUDE_BIN = HARNESS_ADAPTERS.claude.mockBin;
