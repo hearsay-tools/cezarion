@@ -394,7 +394,7 @@ runner switches; Settings → Agents tab.
 | Case | Behaviour |
 |---|---|
 | `omp` absent at boot | `probeOmp` `available:false` + hint; boot continues; pill disabled |
-| `omp` absent at spawn | ENOENT → "`omp` not found on PATH: install OMP (Bun ≥ 1.3.14) and run `omp login`" |
+| `omp` absent at spawn | ENOENT → "`omp` not found on PATH: install OMP (https://omp.sh) and run `omp login`" |
 | Unparseable line / `parse` failure | v1 `note`; loop continues |
 | Provider failure | latched on assistant `message_end` `stopReason:error`, cleared by a later success, released at `session_settled` or stream end without settle (#256, #316) |
 | `prompt_result status:error` before the agent ran | v1 `error` + `turn-end`; never waits for a settle that will not come |

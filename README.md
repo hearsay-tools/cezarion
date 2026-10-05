@@ -958,8 +958,8 @@ because a complete credential-and-session home override has not been verified.
 
 ### OMP (Oh My Pi)
 
-Install [OMP](https://github.com/can1357/oh-my-pi) (`curl -fsSL https://omp.sh/install | sh`;
-it needs Bun 1.3.14 or newer) and run `omp login`. Cezar discovers `omp` on PATH;
+Install [OMP](https://github.com/can1357/oh-my-pi) (`curl -fsSL https://omp.sh/install | sh`
+installs a prebuilt binary; Bun is needed only for `--source`) and run `omp login`. Cezar discovers `omp` on PATH;
 `CEZ_OMP_BIN` overrides its location. `omp` is a separate backend from `pi`: a host with
 both binaries keeps both, and `CEZ_PI_BIN` never selects OMP. Select **OMP** in the runner
 picker to use a persistent `--mode rpc` session. A missing CLI leaves the other backends

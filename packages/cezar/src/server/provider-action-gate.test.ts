@@ -56,6 +56,12 @@ describe('provider action gate', () => {
     },
   );
 
+  it('names OMP the way every other surface does', () => {
+    expect(unavailableProviderMessage(['omp'], {
+      providers: [{ provider: 'omp', status: 'connected', enabled: false }],
+    })).toBe('OMP is disabled. Enable it in Settings → Agents → Providers.');
+  });
+
   it('reports unavailable credentials when the provider status row is missing', () => {
     expect(unavailableProviderMessage(['opencode'], { providers: [] }))
       .toBe('OpenCode credentials are unavailable. Authorize it in Settings → Agents → Providers.');

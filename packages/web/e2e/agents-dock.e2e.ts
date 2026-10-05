@@ -303,6 +303,8 @@ describe('the Agents dock against a dry-run OMP sub-agent', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ task: 'mock:subagent review the change', workflow: 'quick-task', runner: 'omp' }),
     })
+    // A refused POST fails here, at its cause, not as a 120 s wait for a run that never existed.
+    if (!created.ok) throw new Error(`POST /api/v1/runs answered ${created.status}: ${await created.text()}`)
     const runId = ((await created.json()) as { id: string }).id
     ompTaskUrl = `${ompBase}/p/${bootProject}/tasks/${runId}`
   }, 120_000)
