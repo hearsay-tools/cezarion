@@ -725,6 +725,11 @@ export class OmpRunner implements AgentRunner {
           type: 'note',
           message: `omp CLI did not exit on its own after close; terminated by cezar (code ${exitCode})`,
         });
+      } else if (exitCode === null && child.signalCode !== null && !terminatedByCezar) {
+        // Killed from outside (OOM killer, a stray kill): a truncated run, never a success.
+        const message = `omp CLI was killed by signal ${child.signalCode}`;
+        onEvent?.({ type: 'error', message });
+        throw new Error(message);
       } else if (exitCode !== 0 && exitCode !== null) {
         const diagnostic = stderr.join('');
         if (diagnostic.trim()) onEvent?.({ type: 'note', message: `omp CLI stderr:\n${diagnostic}` });

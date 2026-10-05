@@ -302,6 +302,12 @@ async function prompt(command) {
     return;
   }
 
+  if (message.includes('mock:self-kill')) {
+    // An outside SIGKILL (OOM killer): close reports exitCode null with signalCode set.
+    process.kill(process.pid, 'SIGKILL');
+    return;
+  }
+
   if (message.includes('mock:crash-stderr')) {
     // Every crash scenario dies before the prompt's ack (as the Pi mock), after a malformed frame.
     const { crashWithStderr } = await import('./mock-runner-crash.mjs');

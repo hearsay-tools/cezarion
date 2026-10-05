@@ -815,6 +815,10 @@ await import(${JSON.stringify(MOCK)});
     expect(events).toContainEqual({ type: 'note', message: expect.stringContaining('ANTHROPIC_API_KEY, OPENAI_API_KEY') });
   });
 
+  it('a child killed by a signal cezar did not send fails the run', async () => {
+    await expect(new OmpRunner({ bin: MOCK }).run(spec('mock:self-kill'))).rejects.toThrow(/omp CLI was killed by signal SIGKILL/);
+  });
+
   it('ENOENT names omp and omp login', async () => {
     await expect(new OmpRunner({ bin: join(cwd, 'omp-does-not-exist') }).run(spec('x')))
       .rejects.toThrow(/omp-does-not-exist` not found on PATH: install OMP .* and run `omp login`/);
