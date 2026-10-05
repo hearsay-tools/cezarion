@@ -286,15 +286,16 @@ test('health wait still detects an app that exits during boot', () => {
   assert.equal(result.stdout, '');
 });
 
-for (const timeout of ['0', '-1', '1.5', 'invalid']) {
+for (const timeout of ['0', '-1', '1.5', 'invalid', '--version', '--help']) {
   test(`malformed health timeout ${timeout} is rejected before starting the app`, () => {
     const fixture = makeFixture(false);
+    // Malformed input must fail before preparation. A failing build also prevents
+    // a regressed option parser from leaving a detached app without a descriptor.
+    writeFileSync(join(fixture.root, 'bin/npm'), '#!/bin/sh\nexit 99\n', { mode: 0o755 });
     const result = spawnSync('/bin/sh', [join(fixture.root, '.ai/scripts/test-env-up.sh')], {
       encoding: 'utf8', env: { ...process.env, PATH: fixture.path, TEST_ENV_HEALTH_TIMEOUT_SECONDS: timeout },
       timeout: 9_000, killSignal: 'SIGKILL',
     });
-    // Track the app for cleanup if a regressed launcher incorrectly accepts the value.
-    if (result.status === 0) launchedPids.add(descriptor(fixture.root).app.pid);
     assert.equal(result.status, 2, result.stderr);
     assert.match(result.stderr, /TEST_ENV_HEALTH_TIMEOUT_SECONDS.*positive integer/);
     assert.equal(result.stdout, '');

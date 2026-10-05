@@ -41,7 +41,7 @@ BROWSER_DOCTOR_JSON="$QA_DIR/browser-doctor.json"
 PREFERRED_PORT=4321
 HEALTH_PATH="/api/v1/health"
 HEALTH_TIMEOUT=${TEST_ENV_HEALTH_TIMEOUT_SECONDS:-180}
-if ! node -e 'const s=process.argv[1]; process.exit(/^[1-9][0-9]*$/.test(s) && Number.isSafeInteger(Number(s)) ? 0 : 1)' "$HEALTH_TIMEOUT"; then
+if ! node -e 'const s=process.argv[1]; process.exit(/^[1-9][0-9]*$/.test(s) && Number.isSafeInteger(Number(s)) ? 0 : 1)' -- "$HEALTH_TIMEOUT"; then
   echo "TEST_ENV_HEALTH_TIMEOUT_SECONDS must be a positive integer number of seconds" >&2
   exit 2
 fi
