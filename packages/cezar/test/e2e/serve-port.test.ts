@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import { existsSync } from 'node:fs';
 import { mkdtemp, mkdir, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
@@ -33,6 +34,14 @@ async function localGet(url: string): Promise<{ status: number | undefined; text
       request.setTimeout(5_000, () => request.destroy(new Error(`Local request timed out: ${url}`)));
     });
   } finally { agent.destroy(); }
+}
+
+/** The run store as a clean shutdown leaves it: `runs.db` checkpointed, with no `-wal` or `-shm`.
+ * A boot that opened it leaves its writes in the sidecars, or changes the bytes when it closes
+ * cleanly (hearsay-tools/cezarion#779), so this is what "the index is unchanged" means now. */
+async function storeSnapshot(dataDir: string): Promise<string> {
+  const sidecars = ['-wal', '-shm'].filter((suffix) => existsSync(join(dataDir, `runs.db${suffix}`)));
+  return `${createHash('sha256').update(await readFile(join(dataDir, 'runs.db'))).digest('hex')} ${sidecars.join(',')}`;
 }
 
 async function fixture() {
@@ -112,15 +121,17 @@ test('busy cockpit port from a different cwd refuses before recovery or startup 
     const store = RunStore.open(dataDir);
     store.createRun({ title: 'must not recover', workflow: 'quick-task', task: 'must not run', worktree: false,
       steps: [{ id: 'task', name: 'Task', kind: 'agent' }] });
-    store.flush();
-    const index = await readFile(join(dataDir, 'runs.json'), 'utf8');
+    // A clean shutdown: the run is durable in runs.db and its claim is released, so a boot that
+    // went on to recover would be free to take it over (hearsay-tools/cezarion#779).
+    store.close();
+    const index = await storeSnapshot(dataDir);
     const orphan = join(dataDir, 'worktrees', 'orphan-sentinel');
     await mkdir(orphan, { recursive: true });
     await writeFile(join(orphan, 'sentinel'), 'preserve');
     const homeConfig = await readFile(join(f.root, 'home', 'config.json'), 'utf8');
 
     refused(await f.start(secondRepo, ['serve', '--port', String(port)]).outcome(), port);
-    assert.equal(await readFile(join(dataDir, 'runs.json'), 'utf8'), index, 'rejected boot must not recover runs');
+    assert.equal(await storeSnapshot(dataDir), index, 'rejected boot must not recover runs');
     assert.deepEqual(await readdir(join(dataDir, 'runs')), [], 'no recovery event or agent resources');
     assert.equal(await readFile(join(orphan, 'sentinel'), 'utf8'), 'preserve', 'no startup pruning');
     assert.equal(await readFile(join(f.root, 'home', 'config.json'), 'utf8'), homeConfig, 'no registry mutation');
@@ -188,8 +199,8 @@ test('different cwd contenders acquire the exact port once before either can rec
       const store = RunStore.open(join(repo, '.ai/cezar'));
       store.createRun({ title: 'recovery sentinel', workflow: 'quick-task', task: 'sentinel', worktree: false,
         steps: [{ id: 'task', name: 'Task', kind: 'agent' }] });
-      store.flush();
-      indexes.push(await readFile(join(repo, '.ai/cezar/runs.json'), 'utf8'));
+      store.close(); // as above: durable, and free for a boot that wrongly recovered to take
+      indexes.push(await storeSnapshot(join(repo, '.ai/cezar')));
     }
     const free = await f.occupy();
     await new Promise<void>((done) => free.server.close(() => done()));
@@ -199,7 +210,7 @@ test('different cwd contenders acquire the exact port once before either can rec
     const loser = outcomes.findIndex((outcome) => outcome.code === 1);
     assert.ok(loser >= 0, JSON.stringify(outcomes));
     refused(outcomes[loser]!, free.port);
-    assert.equal(await readFile(join(repos[loser]!, '.ai/cezar/runs.json'), 'utf8'), indexes[loser]);
+    assert.equal(await storeSnapshot(join(repos[loser]!, '.ai/cezar')), indexes[loser]);
     assert.deepEqual(await readdir(join(repos[loser]!, '.ai/cezar/runs')), []);
     assert.equal(existsSync(join(repos[loser]!, '.ai/cezar/cockpit.lock')), false);
     const winner = outcomes.find((outcome) => outcome.url)!;

@@ -912,7 +912,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     it.runIf(process.platform === 'linux')('refuses unreadable unverified candidates promptly without signalling or claiming holder membership (hearsay-tools/cezarion#839)', async () => {
       const w = await worker(); await ensureOwnedWorkspace(root, w);
       store.commitWorkerExecutionStart(w.id); store.updateRun(w.id, { status: 'failed' }); store.flush();
-      manager.dispose(); rmSync(recordPath(w.id)); // absent legacy ledger never authorizes abandonment
+      manager.dispose(); store.close(); rmSync(recordPath(w.id)); // absent legacy ledger never authorizes abandonment
       const holder = await nonDumpableHolder(root);
       const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true }); const other = new RunManager(reopened, root);
       const service = new DelegationService(); const detach = service.registerProject({ id: 'reopened', root, store: reopened, manager: other });
