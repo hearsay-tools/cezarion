@@ -1,8 +1,8 @@
 import { workerEvidenceRunIds } from '../runs/worker-execution.ts';
 import { ciErrorMessage } from '../ci-wait/errors.ts';
-import { ciWaitRequestSchema, ciWaitResultSchema, previewServeRequestSchema, type CiWait, type CiWaitRequest, type CiWaitResult, type CiWaitErrorCode, type PreviewServeRequest, type PreviewServeResult } from '@open-mercato/cezar-contract';
+import { ciWaitRequestSchema, ciWaitResultSchema, previewStopRequestSchema, type PreviewStopRequest, type PreviewStopResult, previewServeRequestSchema, type CiWait, type CiWaitRequest, type CiWaitResult, type CiWaitErrorCode, type PreviewServeRequest, type PreviewServeResult } from '@open-mercato/cezar-contract';
 import { previewToolEnabled } from '../ci-wait/tools.ts';
-import { previewResult, validateRegistration, type PreviewHostLike } from '../preview/registration.ts';
+import { previewStopResult, previewResult, validateRegistration, type PreviewHostLike } from '../preview/registration.ts';
 import { acquireCiResources } from '../ci-wait/resources.ts';
 import { artifactInstructions, provisionArtifactDirectory } from '../artifacts/lifecycle.ts';
 import type { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
@@ -1443,9 +1443,23 @@ export class RunManager {
     const provisioned = controller.provision(
       (request, signal) => this.registerCiWait(runId, request, generation, signal),
       (request, signal) => this.registerPreviewServer(runId, request, signal),
+      (request, signal) => this.stopPreviewServer(runId, request, signal),
     );
     state.revokeCiTools = provisioned.revoke;
     return provisioned;
+  }
+
+  async stopPreviewServer(runId: string, request: PreviewStopRequest, signal?: AbortSignal): Promise<PreviewStopResult> {
+    const parsed = previewStopRequestSchema.parse(request);
+    if (!previewToolEnabled()) return previewStopResult('preview_disabled');
+    if (!this.preview) return previewStopResult('headless');
+    if (this.disposed || signal?.aborted) return previewStopResult('unavailable');
+    const run = this.store.getRun(runId);
+    if (!run?.worktreePath || !existsSync(run.worktreePath)) return previewStopResult('worktree_missing');
+    const owner = this.preview.portOwner(parsed.port);
+    if (owner && owner.runId !== runId) return previewStopResult('port_held');
+    if (!run.previewServers?.some(server => server.port === parsed.port)) return previewStopResult('not_registered');
+    return this.preview.stopPreview(runId, parsed, signal);
   }
 
   /**

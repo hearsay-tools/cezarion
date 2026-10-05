@@ -37,18 +37,19 @@ const pinSandboxHome = (): void => {
   if (!process.env.CEZ_HOME) process.env.CEZ_HOME = sandboxHome
 }
 
-// Cezar task runners inject host wrappers (`CEZ_CLAUDE_BIN=…/cezar-claude`,
-// `CEZ_PI_BIN=…/cezar-pi`, `CEZ_REMOTE=1`). Provider/status suites assume bare
-// `claude`/`pi` executables and local mode unless a case opts in — clear the
+// Cezar tasks inherit host wrappers, deployment mode and feature flags. Suites
+// assume default executables, local mode and opt-in features off — clear the
 // host values so a suite run inside a task worktree matches CI. Cases that set
 // an override themselves still win: this hook runs before theirs.
 const HOST_BIN_AND_MODE_KEYS = [
-  'CEZ_CLAUDE_BIN',
-  'CEZ_CODEX_BIN',
-  'CEZ_OPENCODE_BIN',
-  'CEZ_PI_BIN',
-  'CEZ_OMP_BIN',
-  'CEZ_REMOTE',
+  'CEZ_CLAUDE_BIN', // Use the default Claude executable, not the host wrapper.
+  'CEZ_CODEX_BIN', // Use the default Codex executable, not the host wrapper.
+  'CEZ_OPENCODE_BIN', // Use the default OpenCode executable, not the host wrapper.
+  'CEZ_PI_BIN', // Use the default Pi executable, not the host wrapper.
+  'CEZ_OMP_BIN', // Use the default OMP executable, not the host wrapper.
+  'CEZ_REMOTE', // Keep local-mode capabilities unless the test opts into hosted mode.
+  'CEZ_AUTOMATIONS', // Keep automation routes and scheduling opt-in for each test.
+  'CEZ_PREVIEW', // Keep preview capabilities and tool registration opt-in for each test.
 ] as const
 
 const clearHostBinAndModeOverrides = (): void => {

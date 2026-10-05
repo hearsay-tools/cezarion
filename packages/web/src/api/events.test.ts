@@ -11,7 +11,7 @@ import {
   parseWorkspaceEvent,
   type GlobalEvent,
 } from './events'
-import type { ApiRun, RunRecord } from '@open-mercato/cezar-api-client'
+import { toRunSummary, type ApiRun, type RunRecord, type RunSummary } from '@open-mercato/cezar-api-client'
 
 function run(id: string, over: Partial<RunRecord> = {}): RunRecord {
   return {
@@ -26,6 +26,11 @@ function run(id: string, over: Partial<RunRecord> = {}): RunRecord {
     steps: [],
     ...over,
   }
+}
+
+/** A list row, as `GET /run-summaries` answers it (#817). */
+function summary(id: string, over: Partial<RunRecord> = {}): RunSummary {
+  return toRunSummary(run(id, over))
 }
 
 const SAMPLE = { cpuPct: 12, rssBytes: 1024, procCount: 3 }
@@ -103,11 +108,28 @@ describe('applyRunEvent', () => {
 
   it('upserts a run the list has never seen', () => {
     const next = applyRunEvent([], run('r1'))
-    expect(next).toEqual([run('r1')])
+    expect(next).toEqual([summary('r1')])
+  })
+
+  it('patches the list with a summary, never the streamed record (#817)', () => {
+    const next = applyRunEvent([], run('r1', {
+      workflow: '(planned)',
+      systemPrompt: 'be brief',
+      steps: [{ id: 'a', name: 'Fix bug', kind: 'agent', status: 'running', iterations: 1, tokensUsed: 0 }],
+    }))
+    const row = next?.[0] as Record<string, unknown> | undefined
+    for (const key of ['task', 'steps', 'systemPrompt']) expect(row).not.toHaveProperty(key)
+    expect(row?.workflowLabel).toBe('Fix bug')
+  })
+
+  it('keeps the cached live usage when the streamed record carries none', () => {
+    const next = applyRunEvent([{ ...summary('r1'), usage: SAMPLE }], run('r1', { status: 'review' }))
+    expect(next?.[0]?.usage).toEqual(SAMPLE)
+    expect(next?.[0]?.status).toBe('review')
   })
 
   it('updates an existing run in place — one run stays one row', () => {
-    const list: ApiRun[] = [run('r1', { status: 'queued' }), run('r2')]
+    const list: RunSummary[] = [summary('r1', { status: 'queued' }), summary('r2')]
     const next = applyRunEvent(list, run('r1', { status: 'done', tokensUsed: 99 }))
 
     expect(next).toHaveLength(2)
@@ -117,7 +139,7 @@ describe('applyRunEvent', () => {
   })
 
   it('does not duplicate a row however many events one run emits', () => {
-    let list: ApiRun[] | undefined = []
+    let list: RunSummary[] | undefined = []
     for (const status of ['queued', 'running', 'review', 'done'] as const) {
       list = applyRunEvent(list, run('r1', { status }))
     }
@@ -126,9 +148,9 @@ describe('applyRunEvent', () => {
   })
 
   it('inserts a new run by createdAt descending, matching the server order', () => {
-    const list: ApiRun[] = [
-      run('newest', { createdAt: '2026-07-14T12:00:00.000Z' }),
-      run('oldest', { createdAt: '2026-07-14T08:00:00.000Z' }),
+    const list: RunSummary[] = [
+      summary('newest', { createdAt: '2026-07-14T12:00:00.000Z' }),
+      summary('oldest', { createdAt: '2026-07-14T08:00:00.000Z' }),
     ]
 
     const middle = applyRunEvent(list, run('middle', { createdAt: '2026-07-14T10:00:00.000Z' }))
@@ -144,16 +166,16 @@ describe('applyRunEvent', () => {
   })
 
   it('never mutates the list it was given', () => {
-    const list: ApiRun[] = [run('r1', { status: 'queued' })]
+    const list: RunSummary[] = [summary('r1', { status: 'queued' })]
     const frozen = Object.freeze([...list])
-    applyRunEvent(frozen as ApiRun[], run('r1', { status: 'done' }))
-    applyRunEvent(frozen as ApiRun[], run('r2'))
+    applyRunEvent(frozen as RunSummary[], run('r1', { status: 'done' }))
+    applyRunEvent(frozen as RunSummary[], run('r2'))
     expect(list[0]?.status).toBe('queued')
     expect(frozen).toHaveLength(1)
   })
 
   it('keeps the usage the GET attached — the stream record simply has no such field', () => {
-    const list: ApiRun[] = [{ ...run('r1'), usage: SAMPLE }]
+    const list: RunSummary[] = [{ ...summary('r1'), usage: SAMPLE }]
     const next = applyRunEvent(list, run('r1', { status: 'done' }))
     expect(next?.[0]?.usage).toEqual(SAMPLE)
     expect(next?.[0]?.status).toBe('done')

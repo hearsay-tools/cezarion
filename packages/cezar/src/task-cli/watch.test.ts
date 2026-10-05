@@ -222,7 +222,7 @@ describe('cez task watching', () => {
 
 /**
  * Review round 1 (#504): behaviour a real cockpit cannot be timed into reliably, so a fake one
- * scripts the exact wire — a slow `/runs`, and a live `run` frame landing mid-replay.
+ * scripts the exact wire — a slow `/run-summaries`, and a live `run` frame landing mid-replay.
  */
 describe('cez task watching against a scripted cockpit', () => {
   let server: import('node:http').Server;
@@ -258,7 +258,7 @@ describe('cez task watching against a scripted cockpit', () => {
 
   it('wait answers timeout (exit 3) on time even when a poll is slower than the budget', async () => {
     handler = (req, res) => {
-      if (req.url === '/api/v1/p/default/runs') setTimeout(() => json(res, [apiRun('queued')]), 4_000);
+      if (req.url === '/api/v1/p/default/run-summaries') setTimeout(() => json(res, [apiRun('queued')]), 4_000);
       else { res.statusCode = 404; res.end(); }
     };
     const started = Date.now();
@@ -271,11 +271,38 @@ describe('cez task watching against a scripted cockpit', () => {
     // The socket dies 750ms into a 1s budget — inside the abort grace window,
     // but not an abort, so the exact deadline check still applies.
     handler = (req, res) => {
-      if (req.url === '/api/v1/p/default/runs') setTimeout(() => res.destroy(), 750);
+      if (req.url === '/api/v1/p/default/run-summaries') setTimeout(() => res.destroy(), 750);
       else { res.statusCode = 404; res.end(); }
     };
     expect(await run(['wait', 'r1', '--timeout-seconds', '1'])).toBe(2);
     expect(JSON.parse(out.at(-1)!)).toMatchObject({ code: 'unavailable' });
+  });
+
+  it('falls back to GET /runs when an older cockpit has no summary route (#817)', async () => {
+    const seen: string[] = [];
+    handler = (req, res) => {
+      seen.push(req.url ?? '');
+      if (req.url === '/api/v1/p/default/runs') return json(res, [{ ...apiRun('done'), id: 'r1' }]);
+      res.statusCode = 404;
+      json(res, { error: 'not found' });
+    };
+    expect(await run(['wait', 'r1', '--timeout-seconds', '5'])).toBe(0);
+    expect(JSON.parse(out.at(-1)!)).toMatchObject({ timedOut: false, runs: [{ id: 'r1', status: 'done' }] });
+    expect(await run(['list'])).toBe(0);
+    expect(JSON.parse(out.at(-1)!)).toMatchObject({ total: 1, runs: [{ id: 'r1', status: 'done' }] });
+    expect(seen.slice(0, 2)).toEqual(['/api/v1/p/default/run-summaries', '/api/v1/p/default/runs']);
+  });
+
+  it('passes a non-404 summary refusal through without the fallback', async () => {
+    const seen: string[] = [];
+    handler = (req, res) => {
+      seen.push(req.url ?? '');
+      res.statusCode = 409;
+      json(res, { error: 'project root is gone' });
+    };
+    expect(await run(['list'])).toBe(2);
+    expect(JSON.parse(out.at(-1)!)).toMatchObject({ code: 'refused', status: 409, error: 'project root is gone' });
+    expect(seen).toEqual(['/api/v1/p/default/run-summaries']);
   });
 
   /** Replay of seq 1..3 with a live `run` frame (already terminal) arriving after seq 1. */

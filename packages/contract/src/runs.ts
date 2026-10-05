@@ -364,25 +364,23 @@ export type ApiRun = z.infer<typeof apiRunSchema>;
 // ---- the cross-project index --------------------------------------------------------------
 
 /**
- * One run in the WORKSPACE-level index (`GET /api/v1/workspace/runs-index`) — the ⌘K palette's
- * "find a task in any project" list, and the global Tasks page's rows.
+ * One run as a LIST reads it (#817): `GET /run-summaries` answers these for one project, and the
+ * workspace index (`GET /api/v1/workspace/runs-index`, the ⌘K palette and the global Tasks page)
+ * answers them with a `projectId` for every project at once.
  *
- * Deliberately a separate, slim shape rather than `ApiRun`. The index answers for every
- * registered project at once, and `runRecordSchema` carries `steps[]` and `workflowDef` — a fat
- * record whose cost is fine per project and absurd multiplied by the registry. These are exactly
- * the fields a palette row renders: `runTitle`'s three (`title`, `titleSummary`, `titleOrigin`),
- * `deriveAttention`'s `AttentionInput`, `isUnread`'s `ReadStateInput`, and the timestamps
- * `shortAge` reads. Adding a field here is cheap; adding the whole record is what this exists to
- * avoid — but note that widening either of those two `Pick`s means widening this too, or the
- * palette's cross-project rows silently answer differently from every other surface.
+ * Deliberately a separate, slim shape rather than `ApiRun`. `runRecordSchema` carries `task`,
+ * `steps[]`, `workflowDef` and the full delegation state — a fat record that is fine for one
+ * detail view and absurd for a list of hundreds, times every project in the sidebar. These are
+ * the fields the list views read: `runTitle`'s three (`title`, `titleSummary`, `titleOrigin`),
+ * `deriveAttention`'s `AttentionInput`, `isUnread`'s `ReadStateInput`, the timestamps `shortAge`
+ * reads, and the task table's columns. Adding a field here is cheap; adding the whole record is
+ * what this exists to avoid — but note that widening either of those two `Pick`s means widening
+ * this too, or list rows silently answer differently from every other surface.
  *
- * `projectId` is the join key, NOT the project name: the registry is already on the client and is
- * authoritative for display names, and duplicating one here would let a renamed project show two
- * different labels in one palette.
+ * `toRunSummary` below is the only projection from a record to this shape. The route, the index
+ * and the cockpit's stream patches all go through it, so a list and its stream cannot disagree.
  */
-export const runIndexEntrySchema = z.object({
-  /** The registered project this run belongs to. Joins against `GET /projects`. */
-  projectId: z.string(),
+export const runSummarySchema = z.object({
   id: z.string(),
   title: z.string(),
   titleSummary: z.string().optional(),
@@ -407,9 +405,8 @@ export const runIndexEntrySchema = z.object({
    *  Recently finished for work that is simply waiting for its appointment. */
   autoResumeAt: z.string().optional(),
   /** The workflow the run executes — the global Tasks page shows it in a column and groups by
-   *  it. Always present on the record (`RunRecord.workflow`), so required here; the display
-   *  refinement `workflowLabel` applies needs `steps[]`, which this row deliberately omits, so
-   *  a `(planned)` chain reads as itself here rather than as its first agent's name. */
+   *  it. Always present on the record (`RunRecord.workflow`), so required here. The display
+   *  name, which reads a `(planned)` chain as its first agent's name, is `workflowLabel` below. */
   workflow: z.string(),
   /** The task's branch, when it has one — a column on the global page, and the one field that
    *  makes a cross-project row identifiable at a glance without opening it. */
@@ -452,8 +449,93 @@ export const runIndexEntrySchema = z.object({
    * event stream per project (it could not — the run stream is project-scoped).
    */
   usage: processUsageSchema.optional(),
+  /** The Workflow column's text (#817): for a `(planned)` or `(inbox)` chain, its first agent
+   *  step's name when it has one, otherwise `workflow`. Derived here because it is the one thing
+   *  a list row ever read off `steps[]`. */
+  workflowLabel: z.string(),
+  /** Variant group membership (spec 010): the list collapses a group into one row. */
+  groupId: z.string().optional(),
+  variant: z.string().optional(),
+  pinned: z.boolean().optional(),
+  runner: runRecordSchema.shape.runner,
+  model: z.string().optional(),
+  notify: z.boolean().optional(),
+  diffStat: diffStatSchema.optional(),
+  tokensUsed: z.number(),
+  inputTokens: runRecordSchema.shape.inputTokens,
+  outputTokens: runRecordSchema.shape.outputTokens,
+  currentStepId: z.string().optional(),
+  /** The backend of the step `currentStepId` names, when it recorded one — the conversation view
+   *  labels a delegated peer by the agent actually running it, which can differ from `runner`. */
+  currentStepBackend: runnerSchema.optional(),
+  error: z.string().optional(),
+  /** Present while the run's isolated worktree exists — the breadcrumb says "Isolated worktree". */
+  worktreePath: z.string().optional(),
+});
+export type RunSummary = z.infer<typeof runSummarySchema>;
+
+/** The workspace index row: a run summary plus the project it belongs to.
+ *
+ * `projectId` is the join key, NOT the project name: the registry is already on the client and is
+ * authoritative for display names, and duplicating one here would let a renamed project show two
+ * different labels in one palette. */
+export const runIndexEntrySchema = runSummarySchema.extend({
+  /** The registered project this run belongs to. Joins against `GET /projects`. */
+  projectId: z.string(),
 });
 export type RunIndexEntry = z.infer<typeof runIndexEntrySchema>;
+
+/** Keys a summary copies verbatim from the record when the record has them. */
+const SUMMARY_OPTIONAL_KEYS = [
+  'titleSummary', 'titleOrigin', 'activity', 'hasPendingHumanAsk', 'finishedAt', 'seenAt',
+  'autoResumeAt', 'branch', 'startedAt', 'pullRequestUrl', 'referencedPullRequestUrl', 'prNumber',
+  'issueNumber', 'referencedIssueUrl', 'markerRefs', 'costUsd', 'peakRssBytes', 'peakProcCount',
+  'groupId', 'variant', 'pinned', 'runner', 'model', 'notify', 'diffStat', 'inputTokens',
+  'outputTokens', 'currentStepId', 'error', 'worktreePath',
+] as const satisfies readonly (keyof RunSummary & keyof RunRecord)[];
+
+/** `(planned)` and `(inbox)` chains carry their meaning in their first agent step's name. */
+export function runWorkflowLabel(run: Pick<RunRecord, 'workflow' | 'steps'>): string {
+  if (run.workflow === '(planned)' || run.workflow === '(inbox)') {
+    // `?? []`: the cockpit also projects streamed records, whose shape only `id` was checked on.
+    const agent = (run.steps ?? []).find((step) => step.kind === 'agent');
+    if (agent?.name) return agent.name;
+  }
+  return run.workflow;
+}
+
+/**
+ * The one projection from a run record to its list row (#817). Optional keys are copied only when
+ * present, so the wire never carries an `undefined` the schema calls absent; `delegation` goes
+ * through `runDelegationSummarySchema`, which strips paths, permissions and receipts; `usage` is
+ * the live sample a caller attached, never persisted.
+ */
+export function toRunSummary(run: RunRecord & { usage?: ProcessUsage }): RunSummary {
+  const summary: Record<string, unknown> = {
+    id: run.id,
+    title: run.title,
+    status: run.status,
+    createdAt: run.createdAt,
+    archived: run.archived,
+    workflow: run.workflow,
+    workflowLabel: runWorkflowLabel(run),
+    tokensUsed: run.tokensUsed,
+  };
+  for (const key of SUMMARY_OPTIONAL_KEYS) {
+    if (run[key] !== undefined) summary[key] = run[key];
+  }
+  const currentStepBackend = (run.steps ?? []).find((step) => step.id === run.currentStepId)?.backend;
+  if (currentStepBackend !== undefined) summary.currentStepBackend = currentStepBackend;
+  if (run.delegation) {
+    // Never throw: one malformed record must cost its own row's delegation, not the whole list or
+    // the cockpit's stream loop. A delegation that does not parse grants nothing, which is exactly
+    // what the persisted quarantine role says.
+    const delegation = runDelegationSummarySchema.safeParse(run.delegation);
+    summary.delegation = delegation.success ? delegation.data : { role: 'invalid' };
+  }
+  if (run.usage) summary.usage = run.usage;
+  return summary as RunSummary;
+}
 
 /**
  * `GET /workspace/runs-index`.

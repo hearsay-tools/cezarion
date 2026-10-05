@@ -80,15 +80,19 @@ try {
  assert.match(client.getInstructions() ?? '', /^The interface to Cezarion[^\\n]*\\n- cezar_wait_for_ci: /);
  const tools = await client.listTools();
  assert.deepEqual(tools.tools.map(tool => tool.name), ['cezar_wait_for_ci']);
- // Flag unset: no cezar_preview_serve in the listing or in the instructions.
+ // Flag unset: neither preview tool appears in the listing or in the instructions.
  assert.ok(!tools.tools.some(tool => tool.name === 'cezar_preview_serve'));
  assert.ok(!(client.getInstructions() ?? '').includes('cezar_preview_serve'));
+ assert.ok(!tools.tools.some(tool => tool.name === 'cezar_preview_stop'));
+ assert.ok(!(client.getInstructions() ?? '').includes('cezar_preview_stop'));
  assert.equal(count, 0);
- // Flag set: the installed adapter lists the preview tool next to the CI one.
+ // Flag set: the installed adapter lists both preview tools with their trigger lines.
  const previewClient = new Client({ name:'installed-preview-smoke', version:'1' });
  try {
    await previewClient.connect(new StdioClientTransport({ ...session.descriptor, env:{ ...session.env, CEZ_PREVIEW:'1' }, stderr:'pipe' }));
-   assert.deepEqual((await previewClient.listTools()).tools.map(tool => tool.name), ['cezar_wait_for_ci', 'cezar_preview_serve']);
+   assert.deepEqual((await previewClient.listTools()).tools.map(tool => tool.name), ['cezar_wait_for_ci', 'cezar_preview_serve', 'cezar_preview_stop']);
+   assert.match(previewClient.getInstructions() ?? '', /^- cezar_preview_serve: load when you have started, or are about to start, a web server the user should click through\\.$/m);
+   assert.match(previewClient.getInstructions() ?? '', /^- cezar_preview_stop: load when your Cezar-started preview server needs stopping or restarting\\.$/m);
  } finally { await previewClient.close(); }
  const result = await client.callTool({ name:'cezar_wait_for_ci', arguments:{pr:wait.prUrl} });
  assert.notEqual(result.isError, true);

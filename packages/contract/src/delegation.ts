@@ -177,9 +177,15 @@ export type DelegationState = z.infer<typeof delegationStateSchema>;
 /** Slim list/palette projection. Never copies resource paths, permissions or receipts. */
 export const runDelegationSummarySchema = z.discriminatedUnion('role', [
   delegationStateSchema.options[0].pick({ role: true }).strip().extend({
-    wait: workerWaitSchema.pick({ phase: true, requestIds: true }).strip().optional(),
+    // The awaited worker ids and which of them reported (ids only) keep a list's counted label,
+    // "waiting on 2 workers" (#617), now that lists read summaries instead of records (#817).
+    wait: workerWaitSchema.pick({ phase: true, requestIds: true, workerIds: true }).partial({ workerIds: true }).strip().extend({
+      outcomes: z.array(workerOutcomeSchema.pick({ workerId: true }).strip()).max(32).optional(),
+    }).optional(),
   }),
-  delegationStateSchema.options[1].pick({ role: true }).strip().extend({
+  // `parentRunId` is the one worker field a list needs: the sidebar lights the parent's row for
+  // a worker URL, and `cez task list` hides workers by it (#817). Never paths or permissions.
+  delegationStateSchema.options[1].pick({ role: true, parentRunId: true }).strip().extend({
     wait: workerWaitSchema.pick({ phase: true, requestIds: true }).strip().optional(),
   }),
   delegationStateSchema.options[2].strip(),

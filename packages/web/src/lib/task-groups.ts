@@ -1,5 +1,5 @@
 import { ATTENTION_RANK, deriveAttention } from './attention'
-import { normalizeSidebarLimits, type RunRecord, type SidebarLimits } from '@open-mercato/cezar-api-client'
+import { normalizeSidebarLimits, type RunSummary, type SidebarLimits } from '@open-mercato/cezar-api-client'
 
 /**
  * How the task list is bucketed, sorted and collapsed — the pure half of the sidebar quick-list
@@ -36,7 +36,7 @@ const GROUP_STATUS_ORDER: readonly BucketLabel[] = ['Needs you', 'Working', 'Fin
  * limit — sits between running and queued, because it is work with an appointment rather than an
  * outcome (spec 2026-08-03-auto-resume-after-usage-limit).
  */
-const STATUS_ORDER: Partial<Record<RunRecord['status'], number>> = {
+const STATUS_ORDER: Partial<Record<RunSummary['status'], number>> = {
   waiting: 0,
   review: 1,
   running: 2,
@@ -50,7 +50,7 @@ const STATUS_ORDER: Partial<Record<RunRecord['status'], number>> = {
  *  is the same rule the status pill and the sidebar bucket read (`lib/attention.ts`). */
 const SCHEDULED_WEIGHT = 3
 
-const statusWeight = (run: RunRecord): number =>
+const statusWeight = (run: RunSummary): number =>
   run.status === 'failed' && run.autoResumeAt !== undefined
     ? SCHEDULED_WEIGHT
     : STATUS_ORDER[run.status] ?? 9
@@ -62,8 +62,8 @@ const statusWeight = (run: RunRecord): number =>
  * first and ranks done ahead of failed, which is right for placement and wrong for the dot.
  * Ties break on status weight (queued before done inside the quiet rung), then variant letter.
  */
-export function loudestMember(members: readonly RunRecord[]): RunRecord {
-  const rank = (run: RunRecord) => ATTENTION_RANK[deriveAttention(run).bucket]
+export function loudestMember(members: readonly RunSummary[]): RunSummary {
+  const rank = (run: RunSummary) => ATTENTION_RANK[deriveAttention(run).bucket]
   return [...members].sort(
     (a, b) => rank(a) - rank(b) || statusWeight(a) - statusWeight(b) || (a.variant ?? '').localeCompare(b.variant ?? ''),
   )[0]!
@@ -73,7 +73,7 @@ export function loudestMember(members: readonly RunRecord[]): RunRecord {
 export type QuickListRow =
   | {
       kind: 'run'
-      run: RunRecord
+      run: RunSummary
       /** 1-based position among queued runs, `null` unless the run is queued. */
       queuePosition: number | null
     }
@@ -83,10 +83,10 @@ export type QuickListRow =
       /** The shared task title, without the per-variant suffix. */
       title: string
       /** Every member, ordered by variant letter (A, B, C). Always ≥ 2 — see `groupRuns`. */
-      members: RunRecord[]
+      members: RunSummary[]
       /** The member whose dot the group row shows — the loudest by attention (`loudestMember`),
        *  which is not necessarily the one that picked the bucket (#617 01a). */
-      lead: RunRecord
+      lead: RunSummary
     }
 
 export interface QuickListBucket {
@@ -106,7 +106,7 @@ export interface QuickListBucket {
  * Pins change ordering within the status section, never the section itself (#811).
  * They retain their exemption from the sidebar row cap.
  */
-export function bucketOf(run: RunRecord, view: ListView): BucketLabel {
+export function bucketOf(run: RunSummary, view: ListView): BucketLabel {
   if (view === 'archived') return 'Archived'
   if (deriveAttention(run).bucket === 'waiting') return 'Needs you'
   if (run.status === 'waiting') return 'Working'
@@ -129,12 +129,12 @@ export function bucketOf(run: RunRecord, view: ListView): BucketLabel {
  * `??`, not `||`: the server never stores an empty summary (trimmed, 1–300 chars), so only
  * absence falls back — a falsy-but-present value would be a server bug worth seeing.
  *
- * Takes the three fields it reads rather than a whole `RunRecord`, for the same reason
+ * Takes the three fields it reads rather than a whole `RunSummary`, for the same reason
  * `AttentionInput` does: the ⌘K palette's cross-project index (`RunIndexEntry`) is a slim row,
  * not a record, and it must name a task exactly as every other surface does. Widening the
  * parameter is what makes that a shared function instead of a second title rule.
  */
-export type RunTitleInput = Pick<RunRecord, 'title' | 'titleSummary' | 'titleOrigin'>
+export type RunTitleInput = Pick<RunSummary, 'title' | 'titleSummary' | 'titleOrigin'>
 
 export function runTitle(run: RunTitleInput): string {
   const summary = run.titleSummary
@@ -186,7 +186,7 @@ export function refPrefixMatches(title: string, reference: number | undefined): 
  * The suffix is the server's own convention (`startVariants` appends ` (A)`…` (C)`), so this
  * strips exactly that shape — a title that merely ends in "(D)" or "(draft)" is left alone.
  */
-export function groupTitle(run: Pick<RunRecord, 'title'>): string {
+export function groupTitle(run: Pick<RunSummary, 'title'>): string {
   return run.title.replace(/ \([A-C]\)$/, '')
 }
 
@@ -198,7 +198,7 @@ export function groupTitle(run: Pick<RunRecord, 'title'>): string {
  * the sidebar re-sorted underneath it. Archived runs are excluded for the same reason: they are
  * not in the queue.
  */
-export function queuePositions(runs: readonly RunRecord[]): Map<string, number> {
+export function queuePositions(runs: readonly RunSummary[]): Map<string, number> {
   const queued = runs
     .filter((run) => !run.archived && run.status === 'queued')
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
@@ -220,7 +220,7 @@ export function queuePositions(runs: readonly RunRecord[]): Map<string, number> 
  * ISO-8601 strings compare lexicographically because every timestamp cezar writes is UTC
  * (`toISOString()` → trailing `Z`), the same reason `read-state.ts` compares them directly.
  */
-export function sortRuns(runs: readonly RunRecord[], view: ListView): RunRecord[] {
+export function sortRuns(runs: readonly RunSummary[], view: ListView): RunSummary[] {
   return runs
     .filter((run) => (view === 'archived' ? run.archived : !run.archived))
     .sort((a, b) => {
@@ -251,7 +251,7 @@ export function sortRuns(runs: readonly RunRecord[], view: ListView): RunRecord[
 }
 
 /** Owned workers are not task-list rows — they live on the parent’s Run activity dock (#312).
- *  The argument is role-only so a full `RunRecord` and a slim index row both type-check. */
+ *  The argument is role-only so a full `RunSummary` and a slim index row both type-check. */
 export function isOwnedWorker(run: { delegation?: { role?: string } | null }): boolean {
   return run.delegation?.role === 'worker'
 }
@@ -283,7 +283,7 @@ export function sidebarActiveRunId(
  * Empty buckets are omitted rather than rendered headerless-and-empty; a fully empty result is the
  * component's cue for the empty state.
  */
-export function groupRuns(runs: readonly RunRecord[], view: ListView): QuickListBucket[] {
+export function groupRuns(runs: readonly RunSummary[], view: ListView): QuickListBucket[] {
   const positions = queuePositions(runs)
   const sorted = sortRuns(runs, view).filter((run) => !isOwnedWorker(run))
   const byBucket = new Map<BucketLabel, QuickListRow[]>()
@@ -356,7 +356,7 @@ export function capBuckets(buckets: readonly QuickListBucket[], limits: SidebarL
 
 /** The tab counts. `waiting` drives the Active tab's attention dot — the one thing that makes an
  *  un-selected tab worth looking at. */
-export function listCounts(runs: readonly RunRecord[]): {
+export function listCounts(runs: readonly RunSummary[]): {
   active: number
   archived: number
   waiting: number

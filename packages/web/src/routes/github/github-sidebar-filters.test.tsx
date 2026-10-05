@@ -67,7 +67,7 @@ function stub(opts: Stub = {}) {
     const path = String(input)
     sent.push(path)
     const method = init.method ?? 'GET'
-    if (method === 'GET' && /\/runs$/.test(path)) return opts.runs === 'error' ? json({ error: 'boom' }, 400) : json(opts.runs ?? [])
+    if (method === 'GET' && /\/run-summaries$/.test(path)) return opts.runs === 'error' ? json({ error: 'boom' }, 400) : json(opts.runs ?? [])
     if (method === 'GET' && path.includes('/github/search')) {
       const q = decodeURIComponent((new URL(path, 'http://x').searchParams.get('q') ?? '').replace(/\+/g, ' '))
       const out = opts.search?.(q) ?? { available: true, items: [] }

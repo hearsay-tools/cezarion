@@ -22,6 +22,7 @@ import type {
   ProjectsResponse,
   ProviderStatusResponse,
   RunRecord,
+  RunSummary,
 } from '@open-mercato/cezar-api-client'
 
 /**
@@ -245,7 +246,7 @@ function runListCacheKey(project: string, bootProject: string | undefined): read
  * changing project scope before the frame must not move an earlier project's update. */
 function createRunListBatcher(queryClient: QueryClient) {
   const pending = new Map<string, {
-    key: readonly [string, 'runs', 'list']; baseList: ApiRun[] | undefined
+    key: readonly [string, 'runs', 'list']; baseList: RunSummary[] | undefined
     baseQuery: object | undefined; baseUpdateCount: number | undefined; runs: Map<string, RunRecord>
   }>()
   type Reconciliation = {
@@ -343,7 +344,7 @@ function createRunListBatcher(queryClient: QueryClient) {
         continue
       }
       protectBeforeWrite(key, reconcileKeys)
-      queryClient.setQueryData<ApiRun[]>(key, list => {
+      queryClient.setQueryData<RunSummary[]>(key, list => {
         let next = list
         for (const run of runs.values()) next = applyRunEvent(next, run)
         return next
@@ -373,7 +374,7 @@ function createRunListBatcher(queryClient: QueryClient) {
       // Batch only the first archive transition. Archived workers remain live and can continue
       // changing status or title without changing archivedAt; those updates still land now.
       const firstArchive = event.type === 'run' && event.run.archived && keys.every(key =>
-        !queryClient.getQueryData<ApiRun[]>(key)?.find(row => row.id === event.run.id)?.archived)
+        !queryClient.getQueryData<RunSummary[]>(key)?.find(row => row.id === event.run.id)?.archived)
       if (firstArchive && event.type === 'run') {
         for (const key of keys) {
           const cacheKey = JSON.stringify(key)
@@ -385,7 +386,7 @@ function createRunListBatcher(queryClient: QueryClient) {
           if (!entry) {
             const query = queryClient.getQueryCache().find({ queryKey: key, exact: true })
             entry = {
-              key, baseList: query?.state.data as ApiRun[] | undefined,
+              key, baseList: query?.state.data as RunSummary[] | undefined,
               baseQuery: query, baseUpdateCount: query?.state.dataUpdateCount, runs: new Map(),
             }
             pending.set(cacheKey, entry)
@@ -402,8 +403,8 @@ function createRunListBatcher(queryClient: QueryClient) {
       const reconcileAfterWrite = flush(true)
       for (const key of keys) {
         protectBeforeWrite(key, reconcileAfterWrite)
-        if (event.type === 'run') queryClient.setQueryData<ApiRun[]>(key, list => applyRunEvent(list, event.run))
-        else queryClient.setQueryData<ApiRun[]>(key, list => applyRunDeleted(list, event.id))
+        if (event.type === 'run') queryClient.setQueryData<RunSummary[]>(key, list => applyRunEvent(list, event.run))
+        else queryClient.setQueryData<RunSummary[]>(key, list => applyRunDeleted(list, event.id))
       }
       // Start recovery only after the current event's manual write. A pre-event GET must be
       // replaced once; subsequent SSE writes keep that new request in flight.

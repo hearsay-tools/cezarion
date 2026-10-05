@@ -311,6 +311,22 @@ const server = createServer((req, res) => {
         }, 60);
         return;
       }
+      // #723: native GET /skill diagnostic captured on 1.18.33; upstream
+      // packages/opencode/src/skill/index.ts:96-111 skips the unreadable skill.
+      if (body.includes('mock:skill-warning')) {
+        for (const root of ['.claude', '.agents']) send({ type: 'session.error', properties: {
+          error: { name: 'UnknownError', data: { message: `Failed to parse skill /home/agent/${root}/skills/pen-design/SKILL.md` } },
+        } });
+      }
+      if (body.includes('mock:unscoped-provider-failure') || body.includes('mock:scoped-skill-failure')) {
+        send({ type: 'session.error', properties: {
+          ...(body.includes('mock:scoped-skill-failure') ? { sessionID: SESSION_ID } : {}),
+          error: { name: 'UnknownError', data: { message: body.includes('mock:scoped-skill-failure')
+            ? 'Failed to parse skill /skills/required/SKILL.md' : 'provider unavailable — retry after restoring service' } },
+        } });
+        setTimeout(() => send({ type: 'session.idle', properties: { sessionID: SESSION_ID } }), 30);
+        return;
+      }
       if (body.includes('mock:provider-error-early')) {
         // #505 review: the provider rejects before any assistant message exists.
         send({ type: 'session.error', properties: { sessionID: SESSION_ID, error: { name: 'ProviderAuthError', data: { message: 'API key expired' } } } });

@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import type { GithubData, GithubItem, GithubSearchData, RunRecord } from '@open-mercato/cezar-api-client'
+import type { GithubData, GithubItem, GithubSearchData, RunSummary } from '@open-mercato/cezar-api-client'
 
 import {
   FAILING_QUERY,
@@ -27,7 +27,7 @@ const pr = (number: number, over: Partial<GithubItem> = {}): GithubItem => ({
 const data = (over: Partial<GithubData> = {}): GithubData => ({
   available: true, repo: 'acme/demo', viewerLogin: 'Ada', issues: [], prs: [], ...over,
 })
-const run = (over: Record<string, unknown>) => ({ id: 'r', archived: false, ...over }) as unknown as RunRecord
+const run = (over: Record<string, unknown>) => ({ id: 'r', archived: false, ...over }) as unknown as RunSummary
 
 describe('parseGithubFilter', () => {
   it('accepts only the view’s own values; absent is null, unknown falls back to all', () => {

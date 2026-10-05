@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, expect, it } from 'vitest';
-import { apiRunSchema, runIndexEntrySchema } from '@open-mercato/cezar-contract';
+import { apiRunSchema, runIndexEntrySchema, toRunSummary } from '@open-mercato/cezar-contract';
 import { RunStore } from './store.ts';
 import { readRunIndexFromDisk } from './run-index.ts';
 
@@ -23,7 +23,7 @@ afterEach(() => { store.flush(); rmSync(dir, { recursive: true, force: true }); 
 it('keeps the pending-human summary in full and slim contracts', () => {
   const run = { ...store.getRun(id)!, hasPendingHumanAsk: true };
   expect(apiRunSchema.parse(run)).toHaveProperty('hasPendingHumanAsk', true);
-  expect(runIndexEntrySchema.parse({ ...run, projectId: 'project' })).toHaveProperty('hasPendingHumanAsk', true);
+  expect(runIndexEntrySchema.parse({ ...toRunSummary(run), projectId: 'project' })).toHaveProperty('hasPendingHumanAsk', true);
 });
 
 it('publishes and persists human attention without changing a parked worker wait', () => {

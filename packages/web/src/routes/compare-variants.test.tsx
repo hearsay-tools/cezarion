@@ -79,7 +79,7 @@ function stubFetch(groupBody: GroupResponse, overrides: Record<string, () => Res
       const override = overrides[`${method} ${path}`]
       if (override) return override()
       if (method === 'GET' && path === '/api/v1/groups/g1') return jsonResponse(groupBody)
-      if (method === 'GET' && path === '/api/v1/runs') return jsonResponse([])
+      if (method === 'GET' && path === '/api/v1/run-summaries') return jsonResponse([])
       if (method === 'GET' && /^\/api\/v1\/runs\/[^/]+\/diff$/.test(path)) return new Response(DIFF, { status: 200 })
       return jsonResponse({})
     }),

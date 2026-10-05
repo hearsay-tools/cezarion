@@ -160,6 +160,7 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
   interface MockServerOptions {
     promptStatus?: number;
     followupPromptDelayMs?: number;
+    holdFollowupPrompt?: boolean;
     refuseSse?: boolean;
     sseStatus?: number;
     questionReplyStatus?: number;
@@ -172,6 +173,7 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
   async function startMockServer(opts: MockServerOptions = {}) {
     const clients: ServerResponse[] = [];
     const promptPosts: string[] = [];
+    const heldAcknowledgements: Array<() => void> = [];
     const promptBodies: unknown[] = [];
     const questionGets: number[] = [];
     const questionReplies: Array<{ path: string; body: unknown }> = [];
@@ -221,7 +223,8 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
             res.writeHead(opts.promptStatus ?? 200, { 'content-type': 'application/json' });
             res.end('{}');
           };
-          if (promptPosts.length > 1 && opts.followupPromptDelayMs) setTimeout(acknowledge, opts.followupPromptDelayMs);
+          if (promptPosts.length > 1 && opts.holdFollowupPrompt) heldAcknowledgements.push(acknowledge);
+          else if (promptPosts.length > 1 && opts.followupPromptDelayMs) setTimeout(acknowledge, opts.followupPromptDelayMs);
           else acknowledge();
           return;
         }
@@ -250,6 +253,7 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
     return {
       url: `http://127.0.0.1:${port}`,
       promptPosts,
+      acknowledgeFollowups: () => heldAcknowledgements.splice(0).forEach(ack => ack()),
       promptBodies,
       questionGets,
       questionReplies,
@@ -570,6 +574,36 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
       const texts = events.filter((e) => e.type === 'text').map((e) => e.text);
       expect(texts).toContain('ours');
       expect(texts.join('\n')).not.toContain('foreign');
+    });
+  });
+
+  it('skill diagnostics bypass the agent ACK barrier and leave subsequent input usable (#723)', async () => {
+    await withSession({ holdFollowupPrompt: true }, async ({ events, uiEvents, mock, session }) => {
+      await waitFor(() => mock.promptPosts.length === 1);
+      mock.send({ type: 'session.idle', properties: { sessionID: 'ses_test' } });
+      await waitFor(() => count(events, 'turn-end') === 1);
+      let acknowledged = false;
+      const ack = session.sendAgentMessage([{ type: 'text', text: 'follow-up' }]);
+      expect(ack).not.toBe(false);
+      if (!ack) return;
+      void ack.then(() => { acknowledged = true; }, () => undefined);
+      await waitFor(() => mock.promptPosts.length === 2);
+      mock.send({ type: 'session.error', properties: {
+        error: { name: 'UnknownError', data: { message: 'Failed to parse skill /skills/pen-design/SKILL.md' } },
+      } });
+      mock.send({ type: 'session.idle', properties: { sessionID: 'ses_test' } });
+      await waitFor(() => count(events, 'turn-end') === 2);
+      expect(acknowledged).toBe(false);
+      expect(events.filter(e => e.type === 'error')).toEqual([]);
+      expect(events).toContainEqual(expect.objectContaining({ type: 'note', message: expect.stringContaining('/skills/pen-design/SKILL.md') }));
+      expect(uiEvents.filter(e => e.type === 'turn.completed').map(e => e.stopReason)).toEqual(['end_turn', 'end_turn']);
+      mock.acknowledgeFollowups();
+      await ack;
+      const next = session.sendAgentMessage([{ type: 'text', text: 'still usable' }]);
+      expect(next).not.toBe(false);
+      await waitFor(() => mock.promptPosts.length === 3);
+      mock.acknowledgeFollowups();
+      if (next) await next;
     });
   });
 

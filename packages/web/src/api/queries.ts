@@ -109,6 +109,7 @@ import type {
   ProviderStatusResponse,
   ReferenceStatus,
   RunRecord,
+  RunSummary,
   SelectAgentProfileInput,
   SetAgentConfigInput,
   SkillsUpdateState,
@@ -1426,7 +1427,7 @@ export function useMarkRunSeen(projectId?: string, cacheScope?: string) {
     listKey: ReturnType<typeof queryKeys.runs.list>
     detailKey: ReturnType<typeof queryKeys.runs.detail>
   }
-  type Snapshot = { id: string; prevList: RunRecord[] | undefined; prevDetail: RunRecord | undefined }
+  type Snapshot = { id: string; prevList: RunSummary[] | undefined; prevDetail: RunRecord | undefined }
   const mutation = useMutation<RunRecord, Error, Receipt, Snapshot>({
     mutationFn: ({ id, projectId: target }) => markRunSeen(id, target),
     onMutate: async ({ id, listKey, detailKey }) => {
@@ -1434,10 +1435,10 @@ export function useMarkRunSeen(projectId?: string, cacheScope?: string) {
       // awaits its own callbacks or cancellation. Navigation cannot retarget any phase.
       await queryClient.cancelQueries({ queryKey: listKey })
       await queryClient.cancelQueries({ queryKey: detailKey })
-      const prevList = queryClient.getQueryData<RunRecord[]>(listKey)
+      const prevList = queryClient.getQueryData<RunSummary[]>(listKey)
       const prevDetail = queryClient.getQueryData<RunRecord>(detailKey)
       const now = new Date().toISOString()
-      queryClient.setQueryData<RunRecord[]>(listKey, (list) =>
+      queryClient.setQueryData<RunSummary[]>(listKey, (list) =>
         list?.map((run) => (run.id === id ? { ...run, seenAt: now } : run)),
       )
       queryClient.setQueryData<RunRecord>(detailKey, (run) =>
@@ -1448,12 +1449,12 @@ export function useMarkRunSeen(projectId?: string, cacheScope?: string) {
     onError: (_error, { id, listKey, detailKey }, snapshot) => {
       // Roll back only the receipt. The stream may have advanced unrelated fields or
       // inserted another run while the request was in flight; those changes belong to it.
-      const restore = (current: RunRecord, previous: RunRecord): RunRecord => {
+      const restore = <T extends { seenAt?: string }>(current: T, previous: { seenAt?: string }): T => {
         const { seenAt: _receipt, ...rest } = current
-        return previous.seenAt === undefined ? rest : { ...rest, seenAt: previous.seenAt }
+        return (previous.seenAt === undefined ? rest : { ...rest, seenAt: previous.seenAt }) as T
       }
       const previous = snapshot?.prevList?.find((run) => run.id === id)
-      if (previous) queryClient.setQueryData<RunRecord[]>(listKey, (list) =>
+      if (previous) queryClient.setQueryData<RunSummary[]>(listKey, (list) =>
         list?.map((run) => run.id === id ? restore(run, previous) : run),
       )
       const previousDetail = snapshot?.prevDetail
@@ -1464,9 +1465,9 @@ export function useMarkRunSeen(projectId?: string, cacheScope?: string) {
     onSuccess: (updated, { id, listKey, detailKey }) => {
       // A receipt response is an older snapshot: accept its receipt only, preserving
       // newer stream fields such as autoResumeAt and token totals (#auto-resume).
-      const stampReceipt = (run: RunRecord): RunRecord =>
+      const stampReceipt = <T extends { id: string; seenAt?: string }>(run: T): T =>
         run.id === id ? { ...run, seenAt: updated.seenAt } : run
-      queryClient.setQueryData<RunRecord[]>(listKey, (list) => list?.map(stampReceipt))
+      queryClient.setQueryData<RunSummary[]>(listKey, (list) => list?.map(stampReceipt))
       queryClient.setQueryData<RunRecord>(detailKey, (current) => current ? stampReceipt(current) : updated)
       invalidateRunsIndex(queryClient)
     },
@@ -1513,9 +1514,9 @@ export function useMarkRunUnseen() {
     onMutate: async (id: string) => {
       await queryClient.cancelQueries({ queryKey: queryKeys.runs.list() })
       await queryClient.cancelQueries({ queryKey: queryKeys.runs.detail(id) })
-      const prevList = queryClient.getQueryData<RunRecord[]>(queryKeys.runs.list())
+      const prevList = queryClient.getQueryData<RunSummary[]>(queryKeys.runs.list())
       const prevDetail = queryClient.getQueryData<RunRecord>(queryKeys.runs.detail(id))
-      queryClient.setQueryData<RunRecord[]>(queryKeys.runs.list(), (list) =>
+      queryClient.setQueryData<RunSummary[]>(queryKeys.runs.list(), (list) =>
         list?.map((run) => (run.id === id ? withoutReceipt(run) : run)),
       )
       queryClient.setQueryData<RunRecord>(queryKeys.runs.detail(id), (run) =>
@@ -1536,9 +1537,9 @@ export function useMarkRunUnseen() {
       // finished run is quieter than a just-finished one, but it is not silent — the janitor still
       // discovers PR links, titles still get summarized, and a `failed` run still publishes its
       // `autoResumeAt`. Clearing the one field this mutation owns cannot lose any of them.
-      const clearReceipt = (run: RunRecord): RunRecord =>
+      const clearReceipt = <T extends { id: string; seenAt?: string }>(run: T): T =>
         run.id === updated.id ? withoutReceipt(run) : run
-      queryClient.setQueryData<RunRecord[]>(queryKeys.runs.list(), (list) => list?.map(clearReceipt))
+      queryClient.setQueryData<RunSummary[]>(queryKeys.runs.list(), (list) => list?.map(clearReceipt))
       queryClient.setQueryData<RunRecord>(queryKeys.runs.detail(updated.id), (current) =>
         current ? clearReceipt(current) : updated,
       )
@@ -1548,9 +1549,9 @@ export function useMarkRunUnseen() {
 }
 
 /** A copy of the record with the read receipt gone — the optimistic half of `useMarkRunUnseen`. */
-function withoutReceipt(run: RunRecord): RunRecord {
+function withoutReceipt<T extends { seenAt?: string }>(run: T): T {
   const { seenAt: _dropped, ...rest } = run
-  return rest
+  return rest as T
 }
 
 /**

@@ -49,9 +49,10 @@ function setup(servers: PreviewServer[] = [server(5173)], launchError?: () => Er
   const store = fakeStore(servers);
   const answering = new Set<number>();
   const devServers: FakeDevServer[] = [];
+  const probe = vi.fn(async (port: number) => answering.has(port));
   const browsers: Array<BrowserHandle & { cdpFake: ReturnType<typeof fakeCdp>; exit(info: { signal?: string; stderrTail: string }): void; profileDir: string }> = [];
   const host = new PreviewHost({
-    probe: async port => answering.has(port),
+    probe,
     createServer: opts => {
       const dev = new FakeDevServer(opts);
       devServers.push(dev);
@@ -77,7 +78,7 @@ function setup(servers: PreviewServer[] = [server(5173)], launchError?: () => Er
     osRelease: () => 'ID=ubuntu\n',
   });
   const ctx: RunContext = { runId: 'run-1', title: 'Build the app', worktreePath: '/repo/wt', dataDir, store: store as unknown as RunContext['store'] };
-  return { host, ctx, store, answering, devServers, browsers, dataDir };
+  return { host, ctx, store, answering, devServers, browsers, dataDir, probe };
 }
 
 const flush = () => vi.advanceTimersByTimeAsync(0);
@@ -101,6 +102,111 @@ describe('PreviewHost', () => {
     dirs.push(env.dataDir);
     return env;
   };
+
+  it('agent stop preserves approval through stop and crash and reports Stopped', async () => {
+    const { host, ctx, devServers, store } = make();
+    const viewer = fakeViewer();
+    await host.open(ctx, viewer, { port: 5173 });
+    expect(await host.stopPreview('run-1', { port: 5173, restart: true })).toMatchObject({ ok: false, code: 'approval_required' });
+    await host.run('run-1', 5173);
+    expect(await host.stopPreview('run-1', { port: 5173 })).toMatchObject({ ok: true, code: 'stopped' });
+    expect(store.stateEvents().at(-1)).toMatchObject({ state: 'stopped' });
+    expect(stages(viewer).at(-1)).toBe('server-stopped');
+    store.getRun('run-1')!.previewServers = [server(5173, { label: 'renamed' })];
+    expect(await host.stopPreview('run-1', { port: 5173, restart: true })).toMatchObject({ ok: true, code: 'restarted' });
+    devServers[1]!.set('exited');
+    expect(await host.stopPreview('run-1', { port: 5173, restart: true })).toMatchObject({ ok: true, code: 'restarted' });
+    expect(devServers).toHaveLength(3);
+    expect(devServers.map(dev => dev.opts.server.command)).toEqual(['npm run dev', 'npm run dev', 'npm run dev']);
+  });
+
+  it.each(['command', 'cwd', 'path'] as const)('agent restart requires owner approval after %s changes', async field => {
+    const { host, ctx, devServers, store } = make();
+    const viewer = fakeViewer();
+    await host.open(ctx, viewer, { port: 5173 });
+    await host.run('run-1', 5173);
+    store.getRun('run-1')!.previewServers = [server(5173, { [field]: 'changed' })];
+    await host.replaced('run-1', 5173);
+    expect(await host.stopPreview('run-1', { port: 5173, restart: true })).toMatchObject({ ok: false, code: 'approval_required', hint: expect.stringContaining('Run and open') });
+    expect(devServers[0]!.state).toBe('stopped');
+    expect(devServers).toHaveLength(1);
+    expect(stages(viewer).at(-1)).toBe('needs-approval');
+  });
+
+  it('agent refuses adopted servers, other runs and a newly occupied restart port', async () => {
+    const { host, ctx, devServers, answering } = make();
+    answering.add(5173);
+    await host.open(ctx, fakeViewer(), { port: 5173 });
+    expect(await host.stopPreview('run-1', { port: 5173 })).toMatchObject({ code: 'adopted', hint: expect.any(String) });
+    answering.clear();
+    await host.open(ctx, fakeViewer(), { port: 5173 });
+    await host.run('run-1', 5173);
+    expect(await host.stopPreview('run-2', { port: 5173 })).toMatchObject({ code: 'port_held' });
+    expect(devServers[0]!.stop).not.toHaveBeenCalled();
+    await host.stopPreview('run-1', { port: 5173 });
+    answering.add(5173);
+    expect(await host.stopPreview('run-1', { port: 5173, restart: true })).toMatchObject({ code: 'port_in_use' });
+    expect(devServers).toHaveLength(1);
+  });
+
+  it.each(['replace', 'release', 'revoke'] as const)('agent restart cannot outlive concurrent %s or orphan the stopping process', async action => {
+    const { host, ctx, devServers, store } = make();
+    await host.open(ctx, fakeViewer(), { port: 5173 });
+    await host.run('run-1', 5173);
+    const dev = devServers[0]!;
+    let finish!: () => void;
+    dev.stop.mockImplementation(() => new Promise<void>(resolve => { finish = () => { dev.set('stopped'); resolve(); }; }));
+    const lifetime = new AbortController();
+    const restarting = host.stopPreview('run-1', { port: 5173, restart: true }, lifetime.signal);
+    await Promise.resolve();
+    let cleanup: Promise<void> | undefined;
+    if (action === 'replace') {
+      store.getRun('run-1')!.previewServers = [server(5173, { command: 'changed' })];
+      cleanup = host.replaced('run-1', 5173);
+      await host.run('run-1', 5173);
+    } else if (action === 'release') cleanup = host.release('run-1');
+    else lifetime.abort();
+    if (action === 'release') {
+      await host.open({ ...ctx, runId: 'run-2' }, fakeViewer(), { port: 5173 });
+      await host.run('run-2', 5173);
+    }
+    expect(devServers).toHaveLength(1);
+    expect(dev.stop).toHaveBeenCalledTimes(1);
+    finish();
+    await cleanup;
+    expect((await restarting).ok).toBe(false);
+    expect(devServers).toHaveLength(1);
+    expect(dev.state).toBe('stopped');
+  });
+
+  it.each(['replace', 'release', 'revoke', 'other-owner', 'concurrent-restart'] as const)('rechecks authority after the restart probe: %s', async action => {
+    const { host, ctx, devServers, store, probe } = make();
+    await host.open(ctx, fakeViewer(), { port: 5173 });
+    await host.run('run-1', 5173);
+    let finish!: (answering: boolean) => void;
+    let entered!: () => void;
+    const ready = new Promise<void>(resolve => { entered = resolve; });
+    probe.mockImplementationOnce(() => { entered(); return new Promise<boolean>(resolve => { finish = resolve; }); });
+    const lifetime = new AbortController();
+    const restarting = host.stopPreview('run-1', { port: 5173, restart: true }, lifetime.signal);
+    await ready;
+    if (action === 'replace') {
+      store.getRun('run-1')!.previewServers = [server(5173, { command: 'changed' })];
+      await host.replaced('run-1', 5173);
+    } else if (action === 'release') await host.release('run-1');
+    else if (action === 'revoke') lifetime.abort();
+    else if (action === 'other-owner') {
+      await host.open({ ...ctx, runId: 'run-2' }, fakeViewer(), { port: 5173 });
+      await host.run('run-2', 5173);
+    } else {
+      expect(await host.stopPreview('run-1', { port: 5173, restart: true })).toMatchObject({ code: 'restarted' });
+    }
+    const count = devServers.length;
+    finish(false);
+    expect((await restarting).ok).toBe(false);
+    expect(devServers).toHaveLength(count);
+    if (action === 'other-owner' || action === 'concurrent-restart') expect(devServers[1]!.stop).not.toHaveBeenCalled();
+  });
 
   it('answers open on a silent registered port with needs-approval and spawns nothing', async () => {
     const { host, ctx, devServers, browsers } = make([server(5173, { answeredAtRegistration: true })]);
@@ -208,6 +314,72 @@ describe('PreviewHost', () => {
     const back = fakeViewer();
     await host.open(ctx, back, { port: 3000 });
     expect(stages(back)).not.toContain('needs-approval');
+  });
+
+  it('a late open probe cannot replace a newly restarted owned process with an adoption', async () => {
+    const { host, ctx, devServers, probe } = make();
+    await host.open(ctx, fakeViewer(), { port: 5173 });
+    await host.run('run-1', 5173);
+    await host.stopPreview('run-1', { port: 5173 });
+    let finish!: (answering: boolean) => void;
+    probe.mockImplementationOnce(() => new Promise<boolean>(resolve => { finish = resolve; }));
+    const opening = host.open(ctx, fakeViewer(), { port: 5173 });
+    await host.stopPreview('run-1', { port: 5173, restart: true });
+    finish(true);
+    await opening;
+    await host.release('run-1');
+    expect(devServers[1]!.stop).toHaveBeenCalledWith('release');
+  });
+
+  it('agent restart after the no-viewer idle deadline always receives another cleanup deadline', async () => {
+    const { host, ctx, devServers } = make();
+    const viewer = fakeViewer();
+    await host.open(ctx, viewer, { port: 5173 });
+    await host.run('run-1', 5173);
+    host.detach('run-1', viewer);
+    await vi.advanceTimersByTimeAsync(PREVIEW_SERVER_IDLE_MS);
+    expect(devServers[0]!.stop).toHaveBeenCalledWith('idle');
+    expect(vi.getTimerCount()).toBe(0);
+    for (let index = 1; index <= 2; index++) {
+      expect(await host.stopPreview('run-1', { port: 5173, restart: true })).toMatchObject({ code: 'restarted' });
+      await vi.advanceTimersByTimeAsync(PREVIEW_SERVER_IDLE_MS - 1);
+      expect(devServers[index]!.stop).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(devServers[index]!.stop).toHaveBeenCalledWith('idle');
+      expect(vi.getTimerCount()).toBe(0);
+    }
+  });
+
+  it('agent restart preserves existing server and browser idle deadlines', async () => {
+    const { host, ctx, devServers, browsers } = make([server(5173), server(5174)]);
+    const viewer = fakeViewer();
+    await host.open(ctx, viewer, { port: 5173 });
+    await host.run('run-1', 5173);
+    devServers[0]!.set('up');
+    await flush();
+    await host.run('run-1', 5174);
+    host.detach('run-1', viewer);
+    await vi.advanceTimersByTimeAsync(PREVIEW_BROWSER_IDLE_MS - 1);
+    expect(await host.stopPreview('run-1', { port: 5173, restart: true })).toMatchObject({ code: 'restarted' });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(browsers[0]!.close).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(PREVIEW_SERVER_IDLE_MS - PREVIEW_BROWSER_IDLE_MS);
+    expect(devServers[1]!.stop).toHaveBeenCalledWith('idle');
+    expect(devServers[2]!.stop).toHaveBeenCalledWith('idle');
+  });
+
+  it('a returning viewer cancels the cleanup deadline armed by an agent restart', async () => {
+    const { host, ctx, devServers } = make();
+    const viewer = fakeViewer();
+    await host.open(ctx, viewer, { port: 5173 });
+    await host.run('run-1', 5173);
+    host.detach('run-1', viewer);
+    await vi.advanceTimersByTimeAsync(PREVIEW_SERVER_IDLE_MS);
+    await host.stopPreview('run-1', { port: 5173, restart: true });
+    await host.open(ctx, fakeViewer(), { port: 5173 });
+    await vi.advanceTimersByTimeAsync(PREVIEW_SERVER_IDLE_MS);
+    expect(devServers[1]!.stop).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it('a viewer that comes back before the idle window cancels both timers', async () => {

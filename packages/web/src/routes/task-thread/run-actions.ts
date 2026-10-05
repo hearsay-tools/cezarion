@@ -187,7 +187,7 @@ export function finishTitle(status: RunStatus): string {
  * queued-placeholder math (web/app.js `queuePosition`, spec 006). Undefined when the run is
  * not itself queued (or the list doesn't know it yet — SSE races the detail fetch).
  */
-export function queuePosition(runs: RunRecord[], runId: string): number | undefined {
+export function queuePosition(runs: readonly Pick<RunRecord, 'id' | 'archived' | 'status' | 'createdAt'>[], runId: string): number | undefined {
   const queued = runs
     .filter((run) => !run.archived && run.status === 'queued')
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt))

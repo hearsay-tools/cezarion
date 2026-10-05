@@ -23,6 +23,7 @@ import type {
   removeWorktreeResponseSchema,
   runCommitsResponseSchema,
   runRecordSchema,
+  runSummarySchema,
 } from '@open-mercato/cezar-contract';
 import type { AppType } from './app-type.ts';
 import type { AgentInput, DelegationState } from '@open-mercato/cezar-contract';
@@ -54,6 +55,7 @@ describe('src/contract/runs.ts matches the runs routes exactly', () => {
   type Run = Runs[':id'];
 
   type RunsList200 = InferResponseType<Runs['$get'], 200>;
+  type RunSummaries200 = InferResponseType<(typeof client.api.v1)['run-summaries']['$get'], 200>;
   type RunGet200 = InferResponseType<Run['$get'], 200>;
   type RunCreate201 = InferResponseType<Runs['$post'], 201>;
   type RunCreate200 = InferResponseType<Runs['$post'], 200>;
@@ -86,6 +88,8 @@ describe('src/contract/runs.ts matches the runs routes exactly', () => {
     // the record, in both of its two forms
     Assert<Exact<z.infer<typeof apiRunSchema>[], RunsList200[number][]>>,
     Assert<Exact<z.infer<typeof apiRunSchema>, RunGet200>>,
+    // the slim list (#817) — its own row shape, never the record
+    Assert<Exact<z.infer<typeof runSummarySchema>[], RunSummaries200[number][]>>,
     Assert<Exact<z.infer<typeof runRecordSchema>, RunArchive200>>,
     // the pin (#935) answers the record too — pinned here is what stops it drifting into a
     // bespoke `{pinned: true}` payload the moment someone finds that shorter to write
