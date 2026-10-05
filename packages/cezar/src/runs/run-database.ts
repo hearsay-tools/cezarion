@@ -39,6 +39,9 @@ const BUSY_TIMEOUT_MS = 50;
 /**
  * Forward-only migrations: entry `i` takes a database from `user_version` i to i + 1. Never edit
  * a shipped entry; append a new one and raise `RUN_DATABASE_SCHEMA_VERSION`.
+ *
+ * Changing `isLiveRecord` (run-row.ts) needs an entry that recomputes the `live` column for every
+ * row. That predicate is TypeScript over the decoded record, so such an entry cannot be SQL alone.
  */
 const MIGRATIONS: readonly string[] = [
   `
@@ -57,7 +60,8 @@ const MIGRATIONS: readonly string[] = [
     -- History retention, mark-all-read and archive-finished skip or select archived runs (0/1).
     archived INTEGER NOT NULL,
     -- isLiveRecord() (run-row.ts): the rows RunStore.open loads into memory and recovers. Every
-    -- other row stays here until something reads it.
+    -- other row stays here until something reads it. Written with the row, never recomputed
+    -- (see the note above MIGRATIONS).
     live INTEGER NOT NULL,
     -- The workers of a parent (delegation.parentRunId): delegation families, archive cascades and
     -- the "every worker" recovery passes, replacing whole-map scans.

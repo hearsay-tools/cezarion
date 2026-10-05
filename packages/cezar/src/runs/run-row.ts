@@ -24,6 +24,11 @@ const LIVE_STATUSES: ReadonlySet<string> = new Set(['queued', 'running', 'waitin
  *
  * Only what the record itself says. The store adds what a record cannot know: the runs a
  * RunManager pins, and their delegation families (see `RunStore`'s held set).
+ *
+ * The `live` column is computed when a row is written and never recomputed on read. Once a
+ * release has shipped `runs.db`, changing this predicate needs a migration (`MIGRATIONS` in
+ * run-database.ts) that recomputes `live` for every row; without one, a row keeps the old answer
+ * until it is next written, and a run the new predicate calls live is never loaded or recovered.
  */
 export function isLiveRecord(run: RunRecord): boolean {
   if (LIVE_STATUSES.has(run.status)) return true;
