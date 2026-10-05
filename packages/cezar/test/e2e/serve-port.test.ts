@@ -11,7 +11,11 @@ import test from 'node:test';
 import { RunStore } from '../../src/runs/store.ts';
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-const cli = join(packageRoot, process.env.TEST_COCKPIT_SOURCE_CLI === '1' ? 'src/index.ts' : 'dist/index.js');
+// Child cwd is a temporary repo: resolve the source loader here, never there.
+// Built CLI coverage must run plain JS without a development-only loader.
+const cliArgs = process.env.TEST_COCKPIT_SOURCE_CLI === '1'
+  ? ['--import', import.meta.resolve('tsx'), join(packageRoot, 'src/index.ts')]
+  : [join(packageRoot, 'dist/index.js')];
 
 // Use node:http so ambient HTTP proxies cannot intercept loopback aliases.
 async function localGet(url: string): Promise<{ status: number | undefined; text: string }> {
@@ -52,7 +56,7 @@ async function fixture() {
     return { server, port: address.port };
   };
   const start = (directory: string, args: string[] = []) => {
-    const child = spawn(process.execPath, ['--import', 'tsx', cli, ...args, '--no-open'], {
+    const child = spawn(process.execPath, [...cliArgs, ...args, '--no-open'], {
       cwd: directory,
       env: { ...process.env, CEZ_HOME: join(root, 'home'), CEZ_DRY_RUN: '1', CEZ_NO_BANNER: '1', CEZ_SKILLS_AUTO_UPDATE: '0', CEZ_AUTONAME: '0', CEZ_REMOTE: '0' },
       stdio: ['ignore', 'pipe', 'pipe'],
