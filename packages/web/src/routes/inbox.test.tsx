@@ -28,7 +28,7 @@ const TODO_FULL: TodoItem = {
   suggestedSkill: 'om-fix',
 }
 
-/** Its source task is NOT in `/api/v1/runs` — the legacy "source task deleted" case. */
+/** Its source task is NOT in `/api/v1/run-summaries` — the legacy "source task deleted" case. */
 const TODO_ORPHAN: TodoItem = {
   id: 't2',
   taskId: 'run-gone',
@@ -128,7 +128,7 @@ function stubFetch(
       const override = overrides[`${method} ${path}`]
       if (override) return override()
       if (method === 'GET' && path === '/api/v1/todos') return jsonResponse(inbox)
-      if (method === 'GET' && path === '/api/v1/runs') return jsonResponse([RUN_1])
+      if (method === 'GET' && path === '/api/v1/run-summaries') return jsonResponse([RUN_1])
       // The runner/model pills (#401) read the host's backends and the per-runner defaults.
       if (method === 'GET' && path === '/api/v1/health') return jsonResponse(health(backends))
       if (method === 'GET' && path === '/api/v1/providers/status') return jsonResponse(providers)
@@ -741,7 +741,7 @@ describe('Add instructions', () => {
         const body = typeof init.body === 'string' ? (JSON.parse(init.body) as unknown) : undefined
         captured.push({ path, method, body })
         if (method === 'GET' && path === '/api/v1/todos') return jsonResponse(TODOS)
-        if (method === 'GET' && path === '/api/v1/runs') return jsonResponse([RUN_1])
+        if (method === 'GET' && path === '/api/v1/run-summaries') return jsonResponse([RUN_1])
         if (method === 'GET' && path === '/api/v1/ui-state') return jsonResponse(uiState)
         if (method === 'GET' && path === '/api/v1/providers/status') {
           return jsonResponse(connectedProviders(['claude']))

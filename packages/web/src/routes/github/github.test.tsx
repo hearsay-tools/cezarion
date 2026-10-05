@@ -226,7 +226,7 @@ function stubFetch(
       if (method === 'GET' && (path === '/api/v1/github' || path.startsWith('/api/v1/github?'))) {
         return jsonResponse(GITHUB)
       }
-      if (method === 'GET' && path === '/api/v1/runs') return jsonResponse([])
+      if (method === 'GET' && path === '/api/v1/run-summaries') return jsonResponse([])
       if (method === 'GET' && path === '/api/v1/workflows') return jsonResponse(WORKFLOWS)
       if (method === 'GET' && path === '/api/v1/skills') return jsonResponse(SKILLS)
       if (method === 'GET' && path === '/api/v1/providers/status') {
@@ -3728,7 +3728,7 @@ describe('issue linked tasks (#750)', () => {
   const linked = () => screen.getByRole('region', { name: /Linked tasks/ })
 
   it('opens a single linked task from a direct project-scoped issue URL', async () => {
-    stubFetch({ 'GET /api/v1/runs': () => jsonResponse([task('diagnosis')]) })
+    stubFetch({ 'GET /api/v1/run-summaries': () => jsonResponse([task('diagnosis')]) })
     renderAt('/p/boot/github/issues/142')
     await expand()
     const link = await screen.findByRole('link', { name: /diagnosis/ })
@@ -3739,7 +3739,7 @@ describe('issue linked tasks (#750)', () => {
   })
 
   it('lists diagnosis and fix separately, newest first, with archived history and no duplicate or foreign tasks', async () => {
-    stubFetch({ 'GET /api/v1/runs': () => jsonResponse([
+    stubFetch({ 'GET /api/v1/run-summaries': () => jsonResponse([
       task('diagnosis', { archived: true, referencedIssueUrl: ISSUE_142.url }),
       task('fix', { status: 'running', createdAt: '2026-10-01T12:00:00Z' }),
       task('fix', { status: 'running', createdAt: '2026-10-01T12:00:00Z' }),
@@ -3761,7 +3761,7 @@ describe('issue linked tasks (#750)', () => {
 
   it('shows loading before an empty answer and reacts to the existing live runs cache', async () => {
     let resolve!: (response: Response) => void
-    stubFetch({ 'GET /api/v1/runs': () => new Promise<Response>((r) => { resolve = r }) })
+    stubFetch({ 'GET /api/v1/run-summaries': () => new Promise<Response>((r) => { resolve = r }) })
     const client = renderAt('/github/issues/142')
     await expand()
     expect(await screen.findByText('Loading linked tasks…')).toBeTruthy()
@@ -3773,7 +3773,7 @@ describe('issue linked tasks (#750)', () => {
 
   it('retries a failed runs request without hiding the issue', async () => {
     let fail = true
-    stubFetch({ 'GET /api/v1/runs': () => fail
+    stubFetch({ 'GET /api/v1/run-summaries': () => fail
       ? jsonResponse({ error: 'Unavailable' }, 403)
       : jsonResponse([task('recovered')]) })
     renderAt('/github/issues/142')
@@ -3787,7 +3787,7 @@ describe('issue linked tasks (#750)', () => {
 
   it('includes archived tasks for an exact issue absent from the open list', async () => {
     stubFetch({
-      'GET /api/v1/runs': () => jsonResponse([task('old-task', { issueNumber: 4507, archived: true })]),
+      'GET /api/v1/run-summaries': () => jsonResponse([task('old-task', { issueNumber: 4507, archived: true })]),
       'GET /api/v1/github/items/issue/4507': () => jsonResponse({ available: true, item: { ...ISSUE_142, number: 4507 } }),
     })
     renderAt('/github/issues/4507')
@@ -3796,7 +3796,7 @@ describe('issue linked tasks (#750)', () => {
   })
 
   it('collapses when switching issues and when reopening the same issue through the real route', async () => {
-    stubFetch({ 'GET /api/v1/runs': () => jsonResponse([task('diagnosis')]) })
+    stubFetch({ 'GET /api/v1/run-summaries': () => jsonResponse([task('diagnosis')]) })
     renderAt('/github/issues/142')
     const toggle = () => screen.getByRole('button', { name: /^Linked tasks/ })
     await screen.findByRole('button', { name: 'Linked tasks (1)' })

@@ -1,7 +1,7 @@
 import { useState } from 'react'
-import type { ApiRun } from '@open-mercato/cezar-api-client'
+import type { ApiRun, RunSummary } from '@open-mercato/cezar-api-client'
 
-import { useProjectRun } from '@/api/queries'
+import { useProjectRun, useRun } from '@/api/queries'
 import { ReferenceChip, useCloseReferenceCard } from '@/components/reference-chip'
 import { useReferenceScope } from '@/components/reference-status'
 import { Button } from '@/components/ui/button'
@@ -122,7 +122,31 @@ export function ResolveConflictsForRun({
 }
 
 /**
- * A reference chip for a row that HAS its run record — the chip plus the action, in one call.
+ * The same button for a list row (#817): list rows are slim summaries, so the full record the
+ * delivery needs is fetched here, inside the open panel. A row inside a project's own reference
+ * scope (another project's sidebar group) reads and delivers through THAT project; elsewhere the
+ * mounted scope is the row's own.
+ */
+function ResolveConflictsForListRun({ runId, prNumber }: { runId: string; prNumber?: number }) {
+  const { projectId } = useReferenceScope()
+  if (projectId !== undefined) return <ResolveConflictsForRun projectId={projectId} runId={runId} prNumber={prNumber} />
+  return <ResolveConflictsForMountedRun runId={runId} prNumber={prNumber} />
+}
+
+function ResolveConflictsForMountedRun({ runId, prNumber }: { runId: string; prNumber?: number }) {
+  const run = useRun(runId)
+  if (!run.data) {
+    return (
+      <Button type="button" size="sm" disabled className="h-7 w-full text-xs">
+        {run.isError ? 'Unavailable' : 'Loading…'}
+      </Button>
+    )
+  }
+  return <ResolveConflictsButton run={run.data} prNumber={prNumber} />
+}
+
+/**
+ * A reference chip for a list row — the chip plus the action, in one call.
  *
  * What the tasks tables render, so a conflicting pull request behaves the same whether the user
  * is looking at the task or at the list it came from. The task page keeps the bare `ReferenceChip`
@@ -137,7 +161,7 @@ export function TaskReferenceChip({
   plain = false,
   inert = false,
 }: {
-  run: ApiRun
+  run: Pick<RunSummary, 'id' | 'title' | 'titleSummary' | 'titleOrigin'>
   reference: { kind: 'PR' | 'Issue'; number?: number; url?: string }
   className?: string
   /** The narrow sidebar row — the chip's own abbreviation. The panel it opens is the full one:
@@ -160,7 +184,7 @@ export function TaskReferenceChip({
       reference={reference}
       taskTitle={runTitle(run)}
       to={to}
-      conflictAction={<ResolveConflictsButton run={run} prNumber={reference.number} />}
+      conflictAction={<ResolveConflictsForListRun runId={run.id} prNumber={reference.number} />}
       className={className}
       compact={compact}
       plain={plain}

@@ -3,7 +3,7 @@ import {
   type GithubData,
   type GithubItem,
   type GithubSearchData,
-  type RunRecord,
+  type RunSummary,
 } from '@open-mercato/cezar-api-client'
 
 import { isOwnedWorker } from '@/lib/task-groups'
@@ -135,7 +135,7 @@ function repoOfUrl(url: string): string | null {
  * (a task that never named its issue) but never claims a foreign issue.
  */
 export function issueNumbersWithTask(
-  runs: readonly RunRecord[],
+  runs: readonly RunSummary[],
   repo: string | undefined,
   projectId: string | undefined,
 ): Set<number> {
@@ -143,7 +143,7 @@ export function issueNumbersWithTask(
     .flatMap((run) => ownIssueNumbers(run, repo, projectId)))
 }
 
-function ownIssueNumbers(run: RunRecord, repo: string | undefined, projectId: string | undefined): number[] {
+function ownIssueNumbers(run: RunSummary, repo: string | undefined, projectId: string | undefined): number[] {
   const own = repo?.toLowerCase()
   return taskReferences(run, undefined, projectId)
     .filter((reference) => reference.kind === 'Issue'
@@ -154,12 +154,12 @@ function ownIssueNumbers(run: RunRecord, repo: string | undefined, projectId: st
 /** Parent and ordinary task history for an issue, including archived runs. Input is the project's runs
  * query, never the workspace index. The sidebar keeps its non-archived membership rule. */
 export function linkedIssueTasks(
-  runs: readonly RunRecord[],
+  runs: readonly RunSummary[],
   number: number,
   repo: string | undefined,
   projectId: string | undefined,
-): RunRecord[] {
-  const tasks = new Map<string, RunRecord>()
+): RunSummary[] {
+  const tasks = new Map<string, RunSummary>()
   for (const run of runs) {
     if (!isOwnedWorker(run) && ownIssueNumbers(run, repo, projectId).includes(number)) tasks.set(run.id, run)
   }

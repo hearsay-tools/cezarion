@@ -28,7 +28,7 @@ function setup(run: ApiRun, response: () => Promise<Response> = async () => json
     const path = String(url); requests.push(path)
     if (path.endsWith('/relationships')) return response()
     if (path.endsWith('/worker-destroy')) return destroyResponse()
-    if (path.endsWith('/runs')) return json([])
+    if (path.endsWith('/run-summaries')) return json([])
     if (path.endsWith('/providers/status')) return json({ providers: [] })
     if (path.endsWith(`/runs/${parentId}`)) return json({ error: 'not found' }, 404)
     return json({})

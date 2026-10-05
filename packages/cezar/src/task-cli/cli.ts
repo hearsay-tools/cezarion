@@ -15,13 +15,14 @@ import {
   type RunRecord,
   skillSchema,
   type ApiRun,
+  type RunSummary,
 } from '@open-mercato/cezar-contract';
 import { openUrl } from '../open-url.ts';
 import { skillFlagIssue, skillTaskSteps } from '../workflows/types.ts';
 import { discoverCockpit, type DiscoverOptions } from './discovery.ts';
 import { invalidResponse, refuse, request, TaskCliError, threadUrl, type Cockpit } from './http.ts';
 import { projectListRow, projectStatus } from './projections.ts';
-import { DEFAULT_WAIT_UNTIL, readLog, waitForRuns, type WaitMode, type WaitUntil } from './watch.ts';
+import { DEFAULT_WAIT_UNTIL, readLog, requestRunSummaries, waitForRuns, type WaitMode, type WaitUntil } from './watch.ts';
 
 /**
  * `cez task` — start, watch and steer cockpit tasks from a terminal or a bot (#504, spec
@@ -348,6 +349,7 @@ async function getRun(cockpit: Cockpit, id: string): Promise<ApiRun> {
   return run.success ? run.data : invalidResponse('run');
 }
 
+/** `list --full` prints contract `ApiRun` rows, so it alone still reads every full record. */
 async function listRuns(cockpit: Cockpit): Promise<ApiRun[]> {
   const result = await request(cockpit, '/runs');
   if (result.status !== 200) refuse(result);
@@ -360,7 +362,7 @@ async function listRuns(cockpit: Cockpit): Promise<ApiRun[]> {
  * out, and subscribing one to the webhook is refused with the parent to subscribe instead. Every
  * other id-addressed operation still reaches a worker.
  */
-function workerParent(run: Pick<ApiRun, 'delegation'>): string | undefined {
+function workerParent(run: Pick<ApiRun, 'delegation'> | Pick<RunSummary, 'delegation'>): string | undefined {
   return run.delegation?.role === 'worker' ? run.delegation.parentRunId : undefined;
 }
 
@@ -525,11 +527,12 @@ async function execute(
     case 'list': {
       const wanted = statuses(values.status);
       const limit = positiveInt(values.limit, 'limit', 1_000) ?? 20;
-      const runs = (await listRuns(cockpit))
+      const listed = <T extends RunSummary | ApiRun>(runs: T[]): T[] => runs
         .filter((run) => workerParent(run) === undefined)
         .filter((run) => values.all || !run.archived)
         .filter((run) => !wanted || wanted.has(run.status))
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      const runs = values.full ? listed(await listRuns(cockpit)) : listed(await requestRunSummaries(cockpit));
       print({ runs: runs.slice(0, limit).map((run) => (values.full ? run : projectListRow(run))), total: runs.length });
       return EXIT.ok;
     }

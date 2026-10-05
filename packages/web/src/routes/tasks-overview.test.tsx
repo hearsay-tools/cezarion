@@ -1,3 +1,4 @@
+import { summaryOf } from '@/test/run-summary-fixture'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { ComponentProps } from 'react'
@@ -7,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { GlobalEventsProvider } from '@/api/global-events'
 import { queryKeys } from '@/api/queries'
 import { createQueryClient } from '@/api/query-client'
-import type { ProcessUsage, RunRecord } from '@open-mercato/cezar-api-client'
+import type { ProcessUsage, RunRecord, RunSummary } from '@open-mercato/cezar-api-client'
 import { ListViewProvider } from '@/components/list-view'
 import { ReferenceStatusProvider } from '@/components/reference-status'
 import { TaskQuickListContainer } from '@/components/task-quick-list'
@@ -19,9 +20,9 @@ const ago = (ms: number) => new Date(NOW - ms).toISOString()
 
 let seq = 0
 
-function run(over: Partial<RunRecord> = {}): RunRecord {
+function run(over: Partial<RunRecord> = {}): RunSummary {
   seq += 1
-  return {
+  return summaryOf({
     id: `r${seq}`,
     title: `Task ${seq}`,
     workflow: 'default',
@@ -32,7 +33,7 @@ function run(over: Partial<RunRecord> = {}): RunRecord {
     archived: false,
     steps: [],
     ...over,
-  }
+  })
 }
 
 /** Where the router currently is — the probe row-click and don't-hijack assertions read. */
@@ -793,7 +794,7 @@ describe('TasksOverview — usage cells', () => {
     FakeEventSource.last = undefined
   })
 
-  function renderWithUsage(runs: RunRecord[]) {
+  function renderWithUsage(runs: RunSummary[]) {
     const client = createQueryClient()
     // The workspace stream stamps every frame with its owner (step 3.1); unscoped, the filter
     // compares stamps against health's bootProject — seed what the first fetch would establish.
@@ -1174,10 +1175,10 @@ describe('TasksOverviewRoute — wired to the app', () => {
     vi.unstubAllGlobals()
   })
 
-  function renderApp(runs: RunRecord[]) {
+  function renderApp(runs: RunSummary[]) {
     fetchMock.mockImplementation(async (input) => {
       const url = String(input)
-      if (url === '/api/v1/runs') return new Response(JSON.stringify(runs), { status: 200 })
+      if (url === '/api/v1/run-summaries') return new Response(JSON.stringify(runs), { status: 200 })
       if (url === '/api/v1/runs/archive-finished')
         return new Response(JSON.stringify({ archived: 1 }), { status: 200 })
       return new Response('[]', { status: 200 })
@@ -1256,7 +1257,7 @@ describe('TasksOverviewRoute — wired to the app', () => {
         }
         return json(workspaceState)
       }
-      if (url === '/api/v1/runs') return json([run({ id: 'persisted', branch: 'feat/persisted' })])
+      if (url === '/api/v1/run-summaries') return json([run({ id: 'persisted', branch: 'feat/persisted' })])
       return json({})
     })
 
@@ -1318,7 +1319,7 @@ describe('TasksOverviewRoute — wired to the app', () => {
     })
     // The doctrine: after the mutation, ask the endpoint again rather than trusting the cache.
     await waitFor(() => {
-      const listFetches = fetchMock.mock.calls.filter(([path]) => String(path) === '/api/v1/runs')
+      const listFetches = fetchMock.mock.calls.filter(([path]) => String(path) === '/api/v1/run-summaries')
       expect(listFetches.length).toBeGreaterThan(1)
     })
   })
@@ -1356,7 +1357,7 @@ describe('TasksOverviewRoute — wired to the app', () => {
     })
     // Same doctrine as archive: the endpoint's answer is the truth — refetch, don't trust.
     await waitFor(() => {
-      const listFetches = fetchMock.mock.calls.filter(([path]) => String(path) === '/api/v1/runs')
+      const listFetches = fetchMock.mock.calls.filter(([path]) => String(path) === '/api/v1/run-summaries')
       expect(listFetches.length).toBeGreaterThan(1)
     })
   })

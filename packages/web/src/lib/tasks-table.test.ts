@@ -1,8 +1,9 @@
 // @vitest-environment node
 
+import { summaryOf } from '@/test/run-summary-fixture'
 import { describe, expect, it } from 'vitest'
 
-import type { ProcessUsage, RunRecord } from '@open-mercato/cezar-api-client'
+import type { ProcessUsage, RunRecord, RunSummary } from '@open-mercato/cezar-api-client'
 import {
   compareGroups,
   filterRuns,
@@ -26,9 +27,9 @@ import {
 
 let seq = 0
 
-function run(over: Partial<RunRecord> = {}): RunRecord {
+function run(over: Partial<RunRecord> = {}): RunSummary {
   seq += 1
-  return {
+  return summaryOf({
     id: `r${seq}`,
     title: `Task ${seq}`,
     workflow: 'default',
@@ -39,7 +40,7 @@ function run(over: Partial<RunRecord> = {}): RunRecord {
     archived: false,
     steps: [],
     ...over,
-  }
+  })
 }
 
 const SAMPLE: ProcessUsage = { cpuPct: 38.4, rssBytes: 612 * 1024 ** 2, procCount: 5 }
@@ -629,7 +630,7 @@ describe('usageCells', () => {
 })
 
 describe('compareGroups', () => {
-  const finishedPair = (groupId: string, status: RunRecord['status'] = 'review'): [RunRecord, RunRecord] => [
+  const finishedPair = (groupId: string, status: RunRecord['status'] = 'review'): [RunSummary, RunSummary] => [
     run({ groupId, variant: 'A', title: 'Add autocomplete (A)', status }),
     run({ groupId, variant: 'B', title: 'Add autocomplete (B)', status }),
   ]

@@ -326,6 +326,16 @@ describe('cez task', () => {
       expect(last()).toMatchObject({ timedOut: false, runs: [{ id: runs[0]!.id, status: 'done' }] });
     });
 
+    it('reads the run summaries, and only --full reads every full record (#817)', async () => {
+      await start('a');
+      const fetchSpy = vi.spyOn(globalThis, 'fetch');
+      try {
+        expect(await run(['list'])).toBe(0);
+        expect(await run(['list', '--full'])).toBe(0);
+        expect(fetchSpy.mock.calls.map(([url]) => String(url))).toEqual([`${cockpit.api}/run-summaries`, `${cockpit.api}/runs`]);
+      } finally { fetchSpy.mockRestore(); }
+    });
+
     it('lists slim rows newest first, hides archived unless --all, filters and limits', async () => {
       const a = await start('a');
       const b = await start('b');

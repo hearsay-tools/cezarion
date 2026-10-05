@@ -24,7 +24,7 @@ it.each([['desktop', true], ['mobile', true], ['desktop', false], ['mobile', fal
   const requested: string[] = []
   vi.stubGlobal('fetch', vi.fn(async input => {
     const url = String(input); requested.push(url)
-    const body = url.endsWith('/runs') ? runs : url.endsWith('/health') ? { bootProject: 'boot' } : url.includes('/ref-status') ? { available: true, prs: {}, issues: {}, conflicts: [], recheckAfterMs: null } : {}
+    const body = url.endsWith('/run-summaries') ? runs : url.endsWith('/health') ? { bootProject: 'boot' } : url.includes('/ref-status') ? { available: true, prs: {}, issues: {}, conflicts: [], recheckAfterMs: null } : {}
     return new Response(JSON.stringify(body), { status: 200 })
   }))
   render(<QueryClientProvider client={client}><MemoryRouter initialEntries={[`/p/${projectId}/`]}><ListViewProvider>
@@ -48,7 +48,7 @@ it.each((['desktop', 'mobile'] as const).flatMap(surface => [null, [], 3, 'bad',
   const requested: string[] = []
   vi.stubGlobal('fetch', vi.fn(async input => {
     const url = String(input); requested.push(url)
-    return new Response(JSON.stringify(url.endsWith('/runs') ? runs : url.includes('/ref-status') ? { available: true, prs: {}, issues: {}, conflicts: [], recheckAfterMs: null } : {}))
+    return new Response(JSON.stringify(url.endsWith('/run-summaries') ? runs : url.includes('/ref-status') ? { available: true, prs: {}, issues: {}, conflicts: [], recheckAfterMs: null } : {}))
   }))
   render(<QueryClientProvider client={client}><MemoryRouter><ListViewProvider>
     {surface === 'desktop' ? <ProjectGroups projects={[project]} bootProjectId="boot" /> : <TaskQuickListContainer projectId="boot" boot />}

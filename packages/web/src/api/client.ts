@@ -26,6 +26,7 @@ import type {
   UpdateAutomationInput,
   AgentConfigListing,
   ApiRun,
+  RunSummary,
   RunRelationships,
   ArchiveFinishedResponse,
   ArchiveFinishedScope,
@@ -501,20 +502,21 @@ export async function browseFs(
   )
 }
 
-/** The authoritative run list — sorted newest-first by the server. */
-export async function getRuns(opts?: ReadOptions): Promise<ApiRun[]> {
+/** The authoritative run list — slim summaries (#817), sorted newest-first by the server. Detail
+ *  views read the full record through `getRun`. */
+export async function getRuns(opts?: ReadOptions): Promise<RunSummary[]> {
   return unwrap(
-    await cez.api.v1.p[':projectId'].runs.$get({ param: { projectId: queryScope() } }, init(opts)),
-    '/runs',
+    await cez.api.v1.p[':projectId']['run-summaries'].$get({ param: { projectId: queryScope() } }, init(opts)),
+    '/run-summaries',
   )
 }
 
-/** One project's run list by EXPLICIT id (`GET /api/p/:projectId/runs`, step 3.3): the sidebar
- *  reads non-active projects' tasks, which the active-scope `send()` prefix cannot reach. An
- *  already-`/api/p/`-prefixed path passes through `apiPath` untouched, so this stays
+/** One project's run list by EXPLICIT id (`GET /api/p/:projectId/run-summaries`, step 3.3): the
+ *  sidebar reads non-active projects' tasks, which the active-scope `send()` prefix cannot reach.
+ *  An already-`/api/p/`-prefixed path passes through `apiPath` untouched, so this stays
  *  correct whatever scope is mounted. */
-export async function getProjectRuns(projectId: string, opts?: ReadOptions): Promise<ApiRun[]> {
-  return unwrap(await cez.api.v1.p[':projectId'].runs.$get({ param: { projectId } }, init(opts)), '/runs')
+export async function getProjectRuns(projectId: string, opts?: ReadOptions): Promise<RunSummary[]> {
+  return unwrap(await cez.api.v1.p[':projectId']['run-summaries'].$get({ param: { projectId } }, init(opts)), '/run-summaries')
 }
 
 /** The cross-project task index (`GET /api/v1/workspace/runs-index`) — what lets ⌘K find a task

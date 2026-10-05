@@ -1079,7 +1079,7 @@ function stubPendingDetailGets(id = 'r1') {
     const body = history !== undefined ? history
       : init.method === 'POST' && path.endsWith('/cancel') ? { cancelled: true }
       : path === '/api/v1/providers/status' ? { providers: [] }
-      : path === '/api/v1/runs' ? [] : {}
+      : path === '/api/v1/run-summaries' ? [] : {}
     return Promise.resolve(new Response(JSON.stringify(body), {
       status: 200, headers: { 'content-type': 'application/json' },
     }))
@@ -1249,7 +1249,7 @@ describe('TaskThreadRoute — read receipts', () => {
         const history = historyBodyFor(path, initial.id)
         if (history !== undefined) return Promise.resolve(jsonResponse(history))
         if (path === `/api/v1/runs/${initial.id}`) return Promise.resolve(jsonResponse(current))
-        if (path === '/api/v1/runs') return Promise.resolve(jsonResponse([]))
+        if (path === '/api/v1/run-summaries') return Promise.resolve(jsonResponse([]))
         if (path === '/api/v1/providers/status') {
           return Promise.resolve(
             jsonResponse({

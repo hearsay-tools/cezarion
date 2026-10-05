@@ -1,4 +1,4 @@
-import type { RunRecord } from '@open-mercato/cezar-api-client'
+import type { RunSummary } from '@open-mercato/cezar-api-client'
 import { isOwnedWorker } from './task-groups'
 
 /**
@@ -13,16 +13,16 @@ import { isOwnedWorker } from './task-groups'
  */
 
 /** The terminal statuses a *done item* can be — the sidebar's "Finished" set. */
-const DONE_STATUSES: readonly RunRecord['status'][] = ['done', 'failed', 'cancelled']
+const DONE_STATUSES: readonly RunSummary['status'][] = ['done', 'failed', 'cancelled']
 
 /** The subset that can carry an *unread* marker. Cancelled is excluded on purpose: you stopped
  *  the run yourself, so there is nothing you "haven't seen". */
-const UNREAD_ELIGIBLE: readonly RunRecord['status'][] = ['done', 'failed']
+const UNREAD_ELIGIBLE: readonly RunSummary['status'][] = ['done', 'failed']
 
 /** What the read/unread rule reads — `Pick`ed (like `AttentionInput`) so a test or a partial
- *  record can call it without a full `RunRecord`. */
+ *  record can call it without a full `RunSummary`. */
 export type ReadStateInput = Pick<
-  RunRecord,
+  RunSummary,
   'status' | 'finishedAt' | 'seenAt' | 'archived' | 'autoResumeAt'
 > & { delegation?: { role?: string } | null }
 
@@ -41,7 +41,7 @@ export function isScheduledResume(run: ReadStateInput): boolean {
 
 /** A finished run — done, failed, or cancelled. These are the rows the read/unread treatment
  *  applies to (the "Finished" bucket); everything else carries its live attention signal instead. */
-export function isDoneItem(status: RunRecord['status']): boolean {
+export function isDoneItem(status: RunSummary['status']): boolean {
   return DONE_STATUSES.includes(status)
 }
 
@@ -113,6 +113,6 @@ export function unreadDoneCount(runs: readonly ReadStateInput[]): number {
  * unread done run and red for an unread failed one repeat the outcome the marker is about.
  * Returned as a StatusDot tone name so this module stays UI-free.
  */
-export function unreadMarkerTone(run: Pick<RunRecord, 'status'>): 'success' | 'danger' {
+export function unreadMarkerTone(run: Pick<RunSummary, 'status'>): 'success' | 'danger' {
   return run.status === 'failed' ? 'danger' : 'success'
 }
