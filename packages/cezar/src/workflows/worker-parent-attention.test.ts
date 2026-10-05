@@ -5,8 +5,9 @@ import { DelegationService } from '../delegation/service.ts';
 import { RUNNER_IDS, type RunnerId } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { withDelayedCommand, withHeldPipeResponse } from '../core/owned-input-delivery.testkit.ts';
+import { MONITORING_TEXT, REJECTED_ASK_TEXT } from './monitoring-turn.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
-import { manager, store, root, worker, until, semaphore, useWorkerWaitFixture } from './worker-wait.testkit.ts';
+import { manager, store, root, worker, until, semaphore, useWorkerWaitFixture, waitOf } from './worker-wait.testkit.ts';
 
 // Exhaustive transport classification: a new runner must provide either the real
 // delayed-ACK race or an executable wire limitation, never an omitted/skip row.
@@ -21,8 +22,9 @@ it('classifies every RUNNER_IDS delayed-ACK cell without omissions', () => {
 for (const backend of RUNNER_IDS) describe(`${backend} worker parent attention`, { timeout: 30_000 }, () => {
   useWorkerWaitFixture();
   for (const mode of ['fresh', 'continuation'] as const) {
-    for (const transport of ['ordinary', ACK_WIRES[backend]] as const) {
-      it(`${mode} worker progress then markerless turn stays Working (${transport === 'pipe-write' ? 'pipe-write ACK exemption: acceptance precedes provider response' : transport === 'protocol' ? 'delayed ACK' : 'ordinary ACK'})`, async () => {
+    for (const transport of ['ordinary', ACK_WIRES[backend]] as const) for (const gate of ['none', 'prose', 'rejected'] as const) {
+      it(`${mode} ${gate === 'rejected' ? mode === 'fresh' ? 'M26' : 'M27' : gate === 'prose' ? mode === 'fresh' ? 'M9' : 'M10' : ''} worker progress then ${gate === 'rejected' ? 'rejected ASK stays Needs-you' : gate === 'prose' ? 'explicit review gate stays Needs-you' : 'markerless turn stays Working'} (${transport === 'pipe-write' ? 'pipe-write ACK exemption: acceptance precedes provider response' : transport === 'protocol' ? 'delayed ACK' : 'ordinary ACK'})`, async () => {
+        const humanGate = gate !== 'none';
         const exercise = async (release: () => void, responseHeld?: () => boolean) => {
           process.env.CEZ_DRY_RUN = '0';
           process.env.CEZ_DELEGATION = '1';
@@ -52,7 +54,7 @@ for (const backend of RUNNER_IDS) describe(`${backend} worker parent attention`,
             const caller = credentials.authenticate(credentials.issue('project', w.id, randomUUID()))!;
             const id = randomUUID();
             const boundaries = store.readEvents(p.id).filter(event => event.type === 'turn-end').length;
-            await service.send(caller, { id, recipientRunId: p.id, kind: 'progress', text: 'Progress mock:agent-echo delay-owned-ack', timeoutSeconds: 600 });
+            await service.send(caller, { id, recipientRunId: p.id, kind: 'progress', text: `Progress mock:agent-echo delay-owned-ack${gate === 'rejected' ? `\n${MONITORING_TEXT}\n${REJECTED_ASK_TEXT}` : humanGate ? '\nPlease review the changes before I continue.' : ''}`, timeoutSeconds: 600 });
             if (responseHeld) {
               // Claude and Cursor acknowledge the local pipe write, not any
               // provider reply. A held wire response cannot delay that ACK.
@@ -66,13 +68,32 @@ for (const backend of RUNNER_IDS) describe(`${backend} worker parent attention`,
               expect(store.getRun(p.id)?.agentInputs?.find(input => input.id === id)?.deliveredAt).toBeUndefined();
               expect(semaphore.busy()).toBe(1);
             }
+            let laterId: string | undefined;
+            if (humanGate) {
+              laterId = randomUUID();
+              await service.send(caller, { id: laterId, recipientRunId: p.id, kind: 'progress', text: 'Later progress mock:hold', timeoutSeconds: 600 });
+              expect(store.getRun(p.id)?.agentInputs?.find(input => input.id === laterId)?.deliveredAt).toBeUndefined();
+              expect(waitOf(store.getRun(p.id))).toBeUndefined();
+              expect(manager['flushAgentInputs'](p.id)).toBe(false);
+            }
             release();
             await until(() => !!store.getRun(p.id)?.agentInputs?.find(input => input.id === id)?.deliveredAt);
             await until(() => semaphore.busy() === 0);
             expect(store.readEvents(p.id).some(event => event.type === 'conversation-message')).toBe(true);
-            expect(store.getRun(p.id)).toMatchObject({ status: 'running', activity: 'monitoring' });
+            expect(store.getRun(p.id)).toMatchObject(humanGate ? { status: 'waiting' } : { status: 'running', activity: 'monitoring' });
             expect(store.getRun(p.id)?.hasPendingHumanAsk).not.toBe(true);
-            expect(store.getRun(p.id)?.monitoringWakeAt).toBeDefined();
+            if (humanGate) {
+              if (gate === 'rejected') {
+                expect(store.getRun(p.id)?.invalidAsk).toBe(true);
+                expect(store.readEvents(p.id).filter(event => event.type === 'ask.requested')).toHaveLength(0);
+              }
+              expect(store.getRun(p.id)?.activity).toBeUndefined();
+              expect(store.getRun(p.id)?.monitoringWakeAt).toBeUndefined();
+              expect(store.getRun(p.id)?.agentInputs?.find(input => input.id === laterId)?.deliveredAt).toBeUndefined();
+              expect(manager.sendMessage(p.id, [{ type: 'text', text: 'Approved, continue mock:hold' }])).toBe(true);
+              await until(() => !!store.getRun(p.id)?.agentInputs?.find(input => input.id === laterId)?.deliveredAt && store.getRun(p.id)?.activity === 'monitoring');
+              expect(store.readEvents(p.id).some(event => event.type === 'human-input-delivered')).toBe(true);
+            } else expect(store.getRun(p.id)?.monitoringWakeAt).toBeDefined();
           } finally { release(); credentials.close(); }
         };
         if (transport === 'protocol' && backend !== 'claude' && backend !== 'cursor') await withDelayedCommand(backend, exercise);

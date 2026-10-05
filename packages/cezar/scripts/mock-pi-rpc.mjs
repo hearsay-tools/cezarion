@@ -166,6 +166,12 @@ async function handle(command) {
     activeTurn.late = true;
     await sleep(300);
     sendTurnEnd();
+  } else if (command.type === 'prompt' && command.message.includes('mock:turn-messages:')) {
+    const { turnMessages } = await import('./mock-turn-messages.mjs');
+    send({ id: command.id, type: 'response', command: 'prompt', success: true });
+    send({ type: 'agent_start' }); send({ type: 'turn_start' });
+    for (const text of turnMessages(command.message)) sendText([text]);
+    sendTurnEnd();
   } else if (command.type === 'prompt' && command.message.includes('mock:agent-echo')) {
     // rpc-lifecycle.ndjson's normal prompt/assistant/settled sequence.
     send({ id: command.id, type: 'response', command: 'prompt', success: true });

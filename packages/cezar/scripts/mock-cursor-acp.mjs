@@ -103,6 +103,11 @@ async function prompt(id, content) {
   if (input.includes('mock:provider-error-verbose')) { text(`\n\nError: usage limit reached. The request ${'x'.repeat(600)} could not be completed, try again at ${new Date(Date.now() + 6 * 3600000).toISOString()}.`); complete(id); return; }
   if (input.includes('mock:provider-error') && !input.includes('mock:provider-error-')) { text('\n\nError: [unauthenticated] Backend rejected authentication.'); complete(id); return; }
   // #401: ACP has chunks only, so completion must flush the same text to v1/v2.
+  if (input.includes('mock:turn-messages:')) {
+    const { turnMessages } = await import('./mock-turn-messages.mjs');
+    for (const message of turnMessages(input)) text(message + '\n');
+    complete(id); return;
+  }
   if (input.includes('mock:ask-snapshot')) {
     text(input.includes('mock:ask-snapshot-bad') ? 'CEZ:ASK {not valid json' : 'Using the CEZ:ASK structured question format instead:\n\nCEZ:ASK {"questions":[{"header":"Library","question":"Which test library?","options":[{"label":"Vitest"},{"label":"Node test"}]}]}'); complete(id); return;
   }

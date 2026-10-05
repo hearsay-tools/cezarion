@@ -1127,6 +1127,57 @@ selection after an earlier prose mention, and quoted ASK examples without a
 marker. Parsing and transcript stripping must select the same final line;
 ordinary examples leave no question card or rejection note.
 
+Monitoring turn rows **M1–M30** (hearsay-tools/cezarion#772) live in
+`workflows/monitoring-turn.test.ts`, `workflows/worker-parent-attention.test.ts`
+and `workflows/monitoring-channel-order.test.ts` and enter the shared parity guard.
+Every `RUNNER_IDS` adapter carries multiple parent assistant text segments through its native wire on fresh and Continue sessions.
+A standalone `CEZ:MONITORING` declaration survives a same-turn acknowledgement;
+subsequent explicit human questions and direct review/approval requests take
+precedence. A later monitoring declaration supersedes an earlier prose question
+resolved within the same turn; durable structured questions, DONE and spent parent
+completion gates retain their existing precedence. Ordinary markerless autonomous
+turns retain their nudge policy (M13/M14); prose recognition changes only quiet
+monitoring/dependency parks. Quoted/indented marker
+examples and fenced code cannot declare monitoring, and routine mentions of
+review or checks cannot create a human gate. M1 fires the real monitoring wake
+callback and proves capacity was released. M7 closes the actual idle session,
+retains the unanswered question, then delivers its answer through Continue and
+checks that a later monitoring turn carries no stale attention. M15 recognizes
+active Markdown lists/emphasis while retaining example exclusions. M16 withdraws
+a wait superseded by a prose gate, keeps its child alive on idle closure, retains
+the gate across restart and holds later worker input until a successful human
+answer. M9/M10 hold later worker input across delayed ACKs as well, then deliver
+it with the human answer. M17 pins the fresh path's genuine accepted-wait
+session-failure protection. Prose gates use a durable note plus the existing exact delivery receipt;
+they do not manufacture a structured question card. M18 retains a real ASK
+card across a routine acknowledgement, idle close and delivered answer; M19
+retains DONE through an acknowledgement and reaches review. M20 excludes
+quoted/fenced/indented/example ASK and DONE declarations. M21 retains later
+DONE precedence over an earlier portable ASK; M22 retains the latest malformed
+ASK diagnostic and raw fallback. M23 keeps autonomous portable overrides on
+both turn-end paths. M24 retains rejected active ASK intent over monitoring
+without a card, including latest malformed replacement and later valid replacement.
+M25 carries that fallback through registered wait withdrawal, idle/restart and
+late worker input until an exact delivered human response. M26/M27 pin delayed
+ACK admission; M28 preserves ordinary rejected-ASK autonomous nudging. Active
+ASK lines use the existing payload parser unchanged.
+M29/M30 in `workflows/monitoring-channel-order.test.ts` retain ordering across
+partial channels on fresh/Continue. Native Codex completion refreshes and
+Codex/OpenCode omitted completion text exercise actual channel divergence;
+the native observer pins each capability. Claude/Pi/OMP/Cursor carry coupled
+completion text; OpenCode also deduplicates refreshed completed parts. Those
+named executable wire controls assert equality rather than inject divergence.
+When one channel is an ordered expansion of the other, classify its raw text
+once; neither channel always wins. Incomparable transcripts retain the existing
+conservative gate policy. This partial/replayed-frame coverage differs from
+R16's canonical complete-snapshot coupling guarantee.
+The native rows
+also assert CLI attention-wait and webhook projections. Cockpit grouping and
+notification transitions remain consumers of the same contract attention rule.
+M9/M10 extend owned-input ACK coverage with explicit human gates and live workers;
+the existing executable Claude/Cursor pipe-write exemptions retain their native
+acceptance-before-response proof. No new wire exemption is needed.
+
 `worker-parent-attention.test.ts` (hearsay-tools/cezarion#249/#401) loops every runner for fresh and
 Continue sessions: markerless turns with live workers stay monitoring, and real
 ASK still wins. Codex/OpenCode/Pi delay transport acknowledgement past turn-end.

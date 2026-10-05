@@ -49,6 +49,7 @@ import { todosPath } from '../todos.ts';
 // wire and the disk can never disagree about what counts as an image (#950).
 import {
   type AgentInput,
+  type RunEvent,
   type InboxClaim,
   type WorkerStopResult,
   type WorkerWait,
@@ -60,6 +61,7 @@ import {
   attachmentExtension,
   delegationStateSchema,
   pendingHumanAsk,
+  advancePendingHumanAsk,
   askRequestSchema,
   isImageAttachmentName,
   isImageMediaType,
@@ -121,24 +123,69 @@ async function configuredModelProvider(
 /** An interactive session that hears nothing from the user closes itself. */
 export const IDLE_TIMEOUT_MS = 15 * 60_000;
 /**
- * Task-completion marker from the agent contract (HANDOFF_INSTRUCTIONS): a
- * turn whose text ends with `CEZ:DONE` means "goal achieved, nothing to ask" —
+ * Task-completion marker from the agent contract (HANDOFF_INSTRUCTIONS):
+ * an active `CEZ:DONE` declaration means "goal achieved, nothing to ask" —
  * the session is closed right away instead of parking at `waiting` (#347).
  * Detection runs on the accumulated turn text so delta-streaming backends
  * (codex, opencode) can't split the marker across text events.
  */
-const DONE_MARKER_RE = /CEZ:DONE\s*$/;
-/**
- * Still-working marker from the agent contract (spec
- * 2026-07-18-subagent-monitoring-status, #490): a turn whose text ends with
- * `CEZ:MONITORING` means "I ended this turn but I'm still working on my own
- * downstream work (a sub-agent / a command I'm monitoring), not waiting on the
- * user" — cezar parks it as `running`/`activity:'monitoring'` instead of
- * `waiting`, so the cockpit shows a non-attention state. `CEZ:DONE` wins if both
- * appear. Detected on accumulated turn text (like `CEZ:DONE`) so delta-streaming
- * backends can't split the marker across text events.
- */
-const MONITORING_MARKER_RE = /CEZ:MONITORING\s*$/;
+const PROSE_HUMAN_GATE = 'unstructured-human-gate';
+/** Classify only active prose: quoted/indented examples and fenced code cannot
+ * declare a park or request a human. A standalone monitoring line belongs to
+ * this turn even when a later assistant block acknowledges a new instruction. */
+function turnParkSignals(text: string): { monitoring: boolean; humanGate: boolean; done: boolean; askResult: AskMarkerParseResult } {
+  let fence: { char: string; length: number } | undefined;
+  let monitoring = false;
+  let humanGate = false;
+  let done = false;
+  let askResult: AskMarkerParseResult = { kind: 'none' };
+  let previous = '';
+  for (const raw of text.split('\n')) {
+    const delimiter = raw.match(/^ {0,3}(`{3,}|~{3,})/);
+    if (delimiter) {
+      previous = ''; // a fenced example consumes its heading, not the next declaration
+      const token = delimiter[1]!;
+      if (!fence) fence = { char: token[0]!, length: token.length };
+      else if (token[0] === fence.char && token.length >= fence.length) fence = undefined;
+      continue;
+    }
+    if (fence) continue;
+    if (/^(?: {4}|\t|\s*>)/.test(raw)) { if (raw.trim()) previous = ''; continue; }
+    // Lists and emphasis format active prose; they do not quote it. Exclude
+    // fenced/indented/blockquote examples before removing their decoration.
+    const line = raw.trim().replace(/^(?:[-+*]|\d+[.)])\s+(?:\[[ xX]\]\s+)?/, '')
+      .replace(/^#{1,6}\s+/, '').replace(/\*{1,2}|_{1,2}/g, '');
+    if (!line) continue;
+    const example = /\b(?:example|sample|literal|quoted)(?: marker)?\s*:\s*$/i.test(previous);
+    if (!example && raw.trim() === 'CEZ:MONITORING') {
+      monitoring = true;
+      humanGate = false; // a later declaration supersedes earlier, resolved prose
+      done = false;
+    }
+    if (!example && raw.trim() === 'CEZ:DONE') {
+      done = true;
+      humanGate = false;
+      askResult = { kind: 'none' }; // retain the existing later-DONE precedence
+    }
+    // Preserve the existing payload validation/repair and latest malformed
+    // marker diagnostics. Only active declarations participate: an ACK after
+    // a real ASK must not erase its card, nor turn examples into questions.
+    const candidate = example ? { kind: 'none' as const } : parseAskMarkerResult(raw);
+    if (candidate.kind !== 'none') { askResult = candidate; done = false; }
+    // Deliberately require a direct question/request, not words like "review",
+    // "checks" or "approval" in progress reports (hearsay-tools/cezarion#772 and hearsay-tools/cezarion#609).
+    const prose = line.replace(/`[^`]*`|"[^"]*"/g, '');
+    if (!example && prose.split(/(?<=[.!?])\s+/).some(sentence =>
+      /^(?:(?:should|shall|can|may) I\b|(?:do|would|could|can|will|are) you\b).*\?\s*$/i.test(sentence) ||
+      /^(?:which|what|how|where|when|who)\b.*\b(?:you|(?:should|shall|can|may) (?:I|we))\b.*\?\s*$/i.test(sentence) ||
+      /^(?:which|what) (?:module|option|approach|strategy|framework|library)\?\s*$/i.test(sentence) ||
+      /^(?:is|are) (?:this|these|that|it)\b.*\b(?:ok(?:ay)?|acceptable|approved)\?\s*$/i.test(sentence) ||
+      /^(?:please\s+(?:review|approve|confirm|choose|decide|answer|select|provide)\b|(?:I(?:['’]m| am)?\s+)?(?:need|awaiting|waiting for)\s+your\s+(?:review|approval|confirmation|answer|decision|input|permission)\b|(?:the )?PR (?:is )?ready for (?:your )?review\b)/i.test(sentence)
+    )) { humanGate = true; done = false; }
+    previous = line;
+  }
+  return { monitoring, humanGate, done, askResult };
+}
 /** Claude's native scheduler is the backend-level equivalent of the textual
  * monitoring marker. Keep this recognition here, at the workflow boundary,
  * so the v1 event protocol stays unchanged and other backends do not acquire
@@ -220,7 +267,7 @@ function askMarkerRecovery(result: AskMarkerParseResult): string | undefined {
     ? 'structured question recovered from an unbalanced CEZ:ASK payload — check the options, and how many you may pick, match what was asked'
     : undefined;
 }
-/** What a turn's trailing `CEZ:ASK` marker resolves to: the card to raise, and
+/** What a turn's active `CEZ:ASK` declaration resolves to: the card to raise, and
  * the notes to persist alongside it. */
 type AskTurnOutcome = {
   ask: AskRequest | null;
@@ -234,12 +281,11 @@ type AskTurnOutcome = {
  * exactly that kind of change. `enabled` is the caller's own precondition (the
  * session is open and the turn is not a terminating `CEZ:DONE`); when false
  * there is no marker to look for. Intermediate steps can ask too (#427). */
-function resolveAskTurn(turnText: string, completedAssistantText: string, enabled: boolean): AskTurnOutcome {
+function resolveAskTurn(v1Result: AskMarkerParseResult, v2Result: AskMarkerParseResult, enabled: boolean): AskTurnOutcome {
   if (!enabled) return { ask: null, notes: [] };
-  const v1Result = parseAskMarkerResult(turnText);
-  // v1 is authoritative whenever it carries an ASK marker. Claude can omit
-  // the trailing marker from v1 while v2 retains the complete message.
-  const result = v1Result.kind === 'none' ? parseAskMarkerResult(completedAssistantText) : v1Result;
+  // For unreconciled channels, v1 remains authoritative when it carries an
+  // ASK; a marker absent from v1 can still come from the complete v2 message.
+  const result = v1Result.kind === 'none' ? v2Result : v1Result;
   const notes: AskTurnOutcome['notes'] = [];
   const rejection = askMarkerRejection(result);
   if (rejection) notes.push({ message: rejection, tone: 'danger' });
@@ -247,11 +293,55 @@ function resolveAskTurn(turnText: string, completedAssistantText: string, enable
   if (recovery) notes.push({ message: recovery, tone: 'danger' });
   return { ask: result.kind === 'valid' ? result.request : null, notes };
 }
-/** A trailing ASK marker — valid card or rejected payload — means the user
+/** A partial channel cannot keep an earlier gate alive when the other carries
+ * the same transcript plus later declarations. Compare raw lines in order,
+ * preserving fences/examples and ACKs between declarations. Neither channel
+ * always wins: v1 reconstructs omitted snapshots, v2 can retain refreshed ones.
+ * Incomparable transcripts keep the existing conservative channel policy. */
+function orderedTurnText(v1: string, v2: string): string | undefined {
+  if (!v1) return v2;
+  if (!v2 || v1 === v2) return v1;
+  const contains = (full: string, partial: string): boolean => {
+    const lines = partial.split('\n');
+    let next = 0;
+    for (const line of full.split('\n')) {
+      if (line === lines[next]) next++;
+    }
+    return next === lines.length;
+  };
+  if (contains(v2, v1)) return v2;
+  if (contains(v1, v2)) return v1;
+  return undefined;
+}
+/** One turn-end decision for fresh and Continue, also retained until an input
+ * ACK settles. DONE and human/completion gates take precedence over a quiet
+ * declaration or live workers; a false pending-ASK flag alone proves nothing. */
+function classifyTurnEnd(turnText: string, completedAssistantText: string, options: {
+  sessionOpen: boolean; interactive: boolean; pendingHumanAsk: boolean;
+  completionAttention: boolean; scheduledWake: boolean; liveWorkers: boolean; dependencyWait: boolean;
+}): AskTurnOutcome & { done: boolean; monitoring: boolean; humanGate: boolean } {
+  const complete = orderedTurnText(turnText, completedAssistantText);
+  const v1 = turnParkSignals(complete ?? turnText);
+  const v2 = complete === undefined ? turnParkSignals(completedAssistantText) : v1;
+  const done = options.interactive && options.sessionOpen && (v1.done || v2.done) &&
+    v1.askResult.kind === 'none' && v2.askResult.kind === 'none' && !v1.humanGate && !v2.humanGate;
+  const askTurn = resolveAskTurn(v1.askResult, v2.askResult, options.sessionOpen && !done);
+  // Ordinary markerless autonomous turns keep their existing nudge policy.
+  // Prose and rejected-ASK fallbacks override a quiet park this turn would
+  // otherwise enter. Recovery notes beside a valid card are not rejections.
+  const quietPark = v1.monitoring || v2.monitoring || options.scheduledWake || options.liveWorkers || options.dependencyWait;
+  const rejectedAsk = !askTurn.ask && askTurn.notes.length > 0;
+  const humanGate = !done && quietPark && (v1.humanGate || v2.humanGate || rejectedAsk);
+  const monitoring = options.interactive && options.sessionOpen && !done && !askTurn.ask &&
+    !options.pendingHumanAsk && !options.completionAttention && !humanGate &&
+    (v1.monitoring || v2.monitoring || options.scheduledWake || options.liveWorkers);
+  return { ...askTurn, done, monitoring, humanGate };
+}
+/** An active ASK marker — valid card or rejected payload — means the user
  *  must answer. Drop follow-ups queued mid-turn so they cannot start a new
  *  turn the moment idle fires (OpenCode serializes `sendMessage` that way). */
-function discardQueuedMessagesOnAsk(session: AgentSession | undefined, outcome: AskTurnOutcome): void {
-  if (outcome.ask || outcome.notes.length) session?.discardQueuedMessages();
+function discardQueuedMessagesOnAsk(session: AgentSession | undefined, outcome: AskTurnOutcome & { humanGate?: boolean }): void {
+  if (outcome.ask || outcome.notes.length || outcome.humanGate) session?.discardQueuedMessages();
 }
 function isSyntheticContinuation(run: RunRecord, step: StepState): boolean {
   if (step.synthetic === 'continuation') return true;
@@ -332,7 +422,7 @@ interface ActiveRun {
   openingAgentInputId?: string;
   agentSessionError?: string;
   doneAtBoundary?: AgentSession;
-  parkAfterAck?: { session: AgentSession; monitoring: boolean };
+  parkAfterAck?: { session: AgentSession; monitoring: boolean; humanGate?: boolean };
   /** A delivered worker wake must receive its own turn before nonfinal auto-end. */
   workerWakeTurn?: AgentSession;
   /** Last completed boundary belongs to exactly this still-open session. */
@@ -2295,6 +2385,12 @@ export class RunManager {
         continue;
       }
       if (run.delegation && run.delegation.role !== 'invalid' && this.hasPendingHumanAsk(run.id)) {
+        // A crash between the prose checkpoint and wait withdrawal must not
+        // recover the superseded wait as an autonomous wake.
+        const gateSeq = this.pendingHumanAskSeq(run.id);
+        if (this.store.readEvents(run.id).some(event => event.seq === gateSeq && event.type === 'note' && event.code === PROSE_HUMAN_GATE)) {
+          this.withdrawCiWait(run.id); this.withdrawWorkerWait(run.id);
+        }
         this.store.updateRun(run.id, { status: 'waiting', activity: undefined });
         // Only the durable, explicitly human payload may resume an unanswered
         // question. A refused recovery leaves attention, not terminal failure.
@@ -4152,7 +4248,14 @@ export class RunManager {
   /** Transcript bubbles include refused sends. Only a successful delivery
    * checkpoint can answer the specific ask observed before that send. */
   private pendingHumanAskSeq(runId: string): number | undefined {
-    return pendingHumanAsk(this.store.readEvents(runId))?.seq;
+    let pending: RunEvent | undefined;
+    for (const event of this.store.readEvents(runId)) {
+      // Fallback human gates use the same exact successful-delivery receipt as asks,
+      // without inventing a structured question card or changing its summary.
+      pending = event.type === 'note' && event.code === PROSE_HUMAN_GATE
+        ? event : advancePendingHumanAsk(pending, event);
+    }
+    return pending?.seq;
   }
 
   private hasPendingHumanAsk(runId: string): boolean {
@@ -4271,7 +4374,8 @@ export class RunManager {
    * run parks as waiting or monitoring. Shared by acknowledgements that land after a
    * turn ended and by the unread-input grace timer (#505). */
   private settleIdleBoundary(runId: string, state: ActiveRun, session: AgentSession): void {
-    if (state.atTurnBoundary !== session || state.pendingHumanAsk || this.workerWait(runId) || this.store.getRun(runId)?.ciWait || this.hasQueuedAgentInputs(runId)) return;
+    const proseGate = state.parkAfterAck?.session === session && state.parkAfterAck.humanGate;
+    if (state.atTurnBoundary !== session || (state.pendingHumanAsk && !proseGate) || this.workerWait(runId) || this.store.getRun(runId)?.ciWait || (!proseGate && this.hasQueuedAgentInputs(runId))) return;
     if (state.doneAtBoundary === session) {
       if (this.deferParentCompletion(runId)) return;
       this.store.appendEvent(runId, { type: 'lifecycle', message: 'goal achieved — session closed' });
@@ -4281,7 +4385,7 @@ export class RunManager {
       // The nudged turn may finish before its transport ACK (OpenCode HTTP/SSE).
       // Its turn-end deferred to agentInputFlight; now apply the same policy
       // before parking, with DONE and queued/accepted input still taking priority.
-      if (state.currentStepId && this.tryAutonomousNudge(runId, state, state.currentStepId, null)) {
+      if (!state.parkAfterAck.humanGate && state.currentStepId && this.tryAutonomousNudge(runId, state, state.currentStepId, null)) {
         appendHandoffHeartbeat(this.dataDir, runId, 'turn complete — status=running (autonomous nudge)');
         return;
       }
@@ -4291,7 +4395,7 @@ export class RunManager {
       }
       // A wake turn can finish before its HTTP/RPC acknowledgement. Retiring
       // that wait must release its completed turn, not invent another turn.
-      if ((state.parkAfterAck.monitoring || this.hasLiveWorkers(runId)) && !this.parentCompletionAttention(runId)) {
+      if ((state.parkAfterAck.monitoring || (!state.parkAfterAck.humanGate && this.hasLiveWorkers(runId))) && !this.parentCompletionAttention(runId)) {
         this.store.updateRun(runId, { status: 'running', activity: 'monitoring' });
         if (state.currentStepId) this.store.updateStep(runId, state.currentStepId, { status: 'running' });
         this.monitoring.add(runId);
@@ -4316,11 +4420,11 @@ export class RunManager {
   private armUnreadInputTimer(runId: string, state: ActiveRun): void {
     this.clearUnreadInputTimer(state);
     const session = state.session;
-    if (!session?.open || !this.harnessOwesInput(state) || state.agentInputFlight) return;
+    if (!session?.open || state.pendingHumanAsk || !this.harnessOwesInput(state) || state.agentInputFlight) return;
     const timer = setTimeout(() => {
       state.unreadInputTimer = undefined;
       if (this.disposed || this.active.get(runId) !== state || state.session !== session || !session.open || state.cancelled ||
-        state.agentInputFlight || !this.harnessOwesInput(state)) return;
+        state.pendingHumanAsk || state.agentInputFlight || !this.harnessOwesInput(state)) return;
       const ids = [...state.unreadInputIds!];
       const retried = ids.filter(id => state.unreadRetried?.has(id));
       const fresh = ids.filter(id => !state.unreadRetried?.has(id));
@@ -5251,21 +5355,14 @@ export class RunManager {
         sink.flushAll();
         this.trackTurnEnd(runId, turnText); // titleSummary + diffStat (#389)
         const sessionOpen = !state.cancelled && state.session?.open;
-        const done = sessionOpen && DONE_MARKER_RE.test(turnText.trimEnd());
-        // `CEZ:ASK` → the user is genuinely blocked; wins over `CEZ:MONITORING`
-        // (a pending question is always attention), loses to `CEZ:DONE` (#473).
-        // Continue can be answering an intermediate workflow ask too (#427):
-        // keep subsequent questions on this session before resuming its tail.
-        const askTurn = resolveAskTurn(turnText, completedAssistantText, Boolean(sessionOpen) && !done);
-        const { ask, notes: askNotes } = askTurn;
-        discardQueuedMessagesOnAsk(state.session, askTurn);
-        const monitoring =
-          !this.parentCompletionAttention(runId) &&
-          sessionOpen &&
-          !done &&
-          !ask &&
-          !state.pendingHumanAsk &&
-          (MONITORING_MARKER_RE.test(turnText.trimEnd()) || sawClaudeScheduleWakeup || this.hasLiveWorkers(runId));
+        const turn = classifyTurnEnd(turnText, completedAssistantText, {
+          sessionOpen: !!sessionOpen, interactive: true, pendingHumanAsk: !!state.pendingHumanAsk,
+          completionAttention: this.parentCompletionAttention(runId), scheduledWake: sawClaudeScheduleWakeup,
+          liveWorkers: this.hasLiveWorkers(runId),
+          dependencyWait: !!(this.workerWait(runId) || this.store.getRun(runId)?.ciWait),
+        });
+        const { done, monitoring, humanGate, ask, notes: askNotes } = turn;
+        discardQueuedMessagesOnAsk(state.session, turn);
         turnText = '';
         completedAssistantText = '';
         sawClaudeScheduleWakeup = false;
@@ -5275,14 +5372,15 @@ export class RunManager {
         // prepareHumanAsk latches it; an existing/native ask still blocks the helper.
         let autoContinued = !!ask && !!sessionOpen && this.tryAutonomousNudge(runId, state, stepId, ask);
         if (ask && !autoContinued) this.prepareHumanAsk(runId, state);
-        const ciWaitParked = !!sessionOpen && this.parkCiWait(runId, state);
+        if (humanGate && !ask && !state.pendingHumanAsk) this.prepareProseHumanGate(runId, state);
+        const ciWaitParked = !humanGate && !!sessionOpen && this.parkCiWait(runId, state);
         const completionBlocked = !ciWaitParked && !!done && this.deferParentCompletion(runId);
-        const workerWaitParked = ciWaitParked || completionBlocked || (!!sessionOpen && this.parkWorkerWait(runId, state));
+        const workerWaitParked = ciWaitParked || completionBlocked || (!humanGate && !!sessionOpen && this.parkWorkerWait(runId, state));
         state.doneAtBoundary = done ? state.session : undefined;
-        state.parkAfterAck = sessionOpen && state.session ? { session: state.session, monitoring: !!monitoring } : undefined;
+        state.parkAfterAck = sessionOpen && state.session ? { session: state.session, monitoring, humanGate } : undefined;
         // #505: input the harness accepted but has not read yet runs as its next turn.
         // An in-flight submission is settled by its acknowledgement (parkAfterAck), not here.
-        const agentInputDelivered = autoContinued || (!ask && !workerWaitParked && (this.flushAgentInputs(runId) || this.harnessOwesInput(state) || !!state.agentInputFlight));
+        const agentInputDelivered = autoContinued || (!ask && !workerWaitParked && (this.flushAgentInputs(runId) || (!humanGate && this.harnessOwesInput(state)) || !!state.agentInputFlight));
         if (!ask && !workerWaitParked) this.armUnreadInputTimer(runId, state);
         if (state.agentInputError) return;
         if (done && !workerWaitParked && !state.pendingHumanAsk && !agentInputDelivered && !state.agentInputFlight && !this.hasQueuedAgentInputs(runId)) {
@@ -5293,7 +5391,7 @@ export class RunManager {
           return;
         }
         if (sessionOpen && !agentInputDelivered && !workerWaitParked && !this.workerWakeAdmitted.has(runId)) {
-          if (!ask) autoContinued = this.tryAutonomousNudge(runId, state, stepId, null);
+          if (!ask && !humanGate) autoContinued = this.tryAutonomousNudge(runId, state, stepId, null);
           if (!autoContinued && state.autonomousNudgePending !== state.session) {
             // `CEZ:ASK` → park `waiting` (attention) AND surface the structured
             // question as an ask card (#473). `CEZ:MONITORING` or Claude's native
@@ -6165,22 +6263,14 @@ export class RunManager {
         sink.flushAll();
         this.trackTurnEnd(runId, turnText); // titleSummary + diffStat (#389)
         const sessionOpen = !state.cancelled && state.session?.open;
-        const done = interactive && sessionOpen && DONE_MARKER_RE.test(turnText.trimEnd());
-        // `CEZ:ASK` → the user is blocked; wins over `CEZ:MONITORING`, loses to
-        // `CEZ:DONE` (#473).
-        // Every agent step may ask. Malformed markers only produce a note;
-        // without a parsed question an intermediate step advances normally.
-        const askTurn = resolveAskTurn(turnText, completedAssistantText, Boolean(sessionOpen) && !done);
-        const { ask, notes: askNotes } = askTurn;
-        discardQueuedMessagesOnAsk(state.session, askTurn);
-        const monitoring =
-          !this.parentCompletionAttention(runId) &&
-          interactive &&
-          sessionOpen &&
-          !done &&
-          !ask &&
-          !state.pendingHumanAsk &&
-          (MONITORING_MARKER_RE.test(turnText.trimEnd()) || sawClaudeScheduleWakeup || this.hasLiveWorkers(runId));
+        const turn = classifyTurnEnd(turnText, completedAssistantText, {
+          sessionOpen: !!sessionOpen, interactive, pendingHumanAsk: !!state.pendingHumanAsk,
+          completionAttention: this.parentCompletionAttention(runId), scheduledWake: sawClaudeScheduleWakeup,
+          liveWorkers: this.hasLiveWorkers(runId),
+          dependencyWait: !!(this.workerWait(runId) || this.store.getRun(runId)?.ciWait),
+        });
+        const { done, monitoring, humanGate, ask, notes: askNotes } = turn;
+        discardQueuedMessagesOnAsk(state.session, turn);
         turnText = '';
         completedAssistantText = '';
         sawClaudeScheduleWakeup = false;
@@ -6190,14 +6280,15 @@ export class RunManager {
         // prepareHumanAsk latches it; an existing/native ask still blocks the helper.
         let autoContinued = !!ask && !!sessionOpen && this.tryAutonomousNudge(runId, state, step.id, ask);
         if (ask && !autoContinued) this.prepareHumanAsk(runId, state);
-        const ciWaitParked = !!sessionOpen && this.parkCiWait(runId, state);
+        if (humanGate && !ask && !state.pendingHumanAsk) this.prepareProseHumanGate(runId, state);
+        const ciWaitParked = !humanGate && !!sessionOpen && this.parkCiWait(runId, state);
         const completionBlocked = !ciWaitParked && !!done && this.deferParentCompletion(runId);
-        const workerWaitParked = ciWaitParked || completionBlocked || (!!sessionOpen && this.parkWorkerWait(runId, state));
+        const workerWaitParked = ciWaitParked || completionBlocked || (!humanGate && !!sessionOpen && this.parkWorkerWait(runId, state));
         state.doneAtBoundary = done ? state.session : undefined;
-        state.parkAfterAck = interactive && sessionOpen && state.session ? { session: state.session, monitoring: !!monitoring } : undefined;
+        state.parkAfterAck = (interactive || humanGate) && sessionOpen && state.session ? { session: state.session, monitoring, humanGate } : undefined;
         // #505: input the harness accepted but has not read yet runs as its next turn.
         // An in-flight submission is settled by its acknowledgement (parkAfterAck), not here.
-        const agentInputDelivered = autoContinued || (!ask && !workerWaitParked && (this.flushAgentInputs(runId) || this.harnessOwesInput(state) || !!state.agentInputFlight));
+        const agentInputDelivered = autoContinued || (!ask && !workerWaitParked && (this.flushAgentInputs(runId) || (!humanGate && this.harnessOwesInput(state)) || !!state.agentInputFlight));
         if (!ask && !workerWaitParked) this.armUnreadInputTimer(runId, state);
         if (state.agentInputError) return;
         if (done && !workerWaitParked && !state.pendingHumanAsk && !agentInputDelivered && !state.agentInputFlight && !this.hasQueuedAgentInputs(runId)) {
@@ -6208,8 +6299,8 @@ export class RunManager {
           state.session?.end();
           return;
         }
-        const waiting = (interactive || !!ask) && sessionOpen && !agentInputDelivered && !workerWaitParked && !this.workerWakeAdmitted.has(runId);
-        if (waiting && interactive && !ask) autoContinued = this.tryAutonomousNudge(runId, state, step.id, null);
+        const waiting = (interactive || !!ask || humanGate) && sessionOpen && !agentInputDelivered && !workerWaitParked && !this.workerWakeAdmitted.has(runId);
+        if (waiting && interactive && !ask && !humanGate) autoContinued = this.tryAutonomousNudge(runId, state, step.id, null);
         if (waiting && !autoContinued && state.autonomousNudgePending !== state.session) {
           // Turn over, session open. Either the ball is in the user's court
           // (`waiting`) — optionally with a structured `CEZ:ASK` question the
@@ -6498,6 +6589,17 @@ export class RunManager {
     if (this.workerWakeQueuedAt.delete(runId)) {
       const at = this.queue.indexOf(runId); if (at >= 0) this.queue.splice(at, 1);
     }
+  }
+
+  /** A prose or rejected-ASK fallback supersedes a registered autonomous wait. Keep the
+   * checkpoint through idle closure/restart and hold worker input until a
+   * successful human delivery, just as for a structured ask. */
+  private prepareProseHumanGate(runId: string, state: ActiveRun): void {
+    this.store.appendEvent(runId, { type: 'note', stepId: state.currentStepId,
+      code: PROSE_HUMAN_GATE, message: 'waiting for a human response to the assistant’s request' });
+    this.prepareHumanAsk(runId, state);
+    this.withdrawWorkerWait(runId);
+    this.clearUnreadInputTimer(state);
   }
 
   /** Native backend asks arrive before turn-end. Persist and park immediately

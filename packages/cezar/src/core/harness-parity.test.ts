@@ -18,6 +18,7 @@
  * `workflows/run.ts` for claude and pi — groups 1, 3 and 6 are only uniform
  * above the seam.
  */
+import { MONITORING_TURN_CRITERIA, MONITORING_ACK_CRITERIA, MONITORING_ORDER_CRITERIA } from '../workflows/monitoring-turn.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdtempSync, mkdirSync, realpathSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -1379,6 +1380,9 @@ describe('OpenCode durable input acknowledgements', () => {
 
 describe('harness parity — the matrix itself', () => {
   const allIds = [
+    ...MONITORING_TURN_CRITERIA.map(c => c.id),
+    ...MONITORING_ACK_CRITERIA.map(c => c.id),
+    ...MONITORING_ORDER_CRITERIA.map(c => c.id),
     ...WORKFLOW_ASK_CRITERIA.map(c => c.id),
     ...AUTONOMOUS_CRITERIA.map(c => c.id),
     ...NO_PROGRESS_CRITERIA.map(c => c.id),
@@ -1389,6 +1393,8 @@ describe('harness parity — the matrix itself', () => {
     ...RUN_CRITERIA.map((c) => c.id),
   ];
   const scenarioOf = (id: string): ScenarioName => {
+    const monitor = [...MONITORING_TURN_CRITERIA, ...MONITORING_ACK_CRITERIA, ...MONITORING_ORDER_CRITERIA].find(c => c.id === id);
+    if (monitor) return monitor.scenario;
     const ask = WORKFLOW_ASK_CRITERIA.find(c => c.id === id);
     if (ask) return ask.scenario;
     const autonomous = AUTONOMOUS_CRITERIA.find(c => c.id === id);
@@ -1485,7 +1491,7 @@ describe('harness parity — the matrix itself', () => {
   });
 
   it('uses no skipped or pending cell — an inapplicable one is a declared exemption', () => {
-    for (const url of [new URL(import.meta.url), new URL('../workflows/worker-parent-attention.test.ts', import.meta.url)]) {
+    for (const url of [new URL(import.meta.url), new URL('../workflows/worker-parent-attention.test.ts', import.meta.url), new URL('../workflows/monitoring-turn.test.ts', import.meta.url)]) {
       const source = readFileSync(url, 'utf8');
       expect(source).not.toMatch(/\b(?:it|test|describe)\s*\.\s*(?:skip|todo)\s*\(/);
     }

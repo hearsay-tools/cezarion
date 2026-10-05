@@ -235,6 +235,15 @@ const server = createServer((req, res) => {
         send({ type: 'session.idle', properties: { sessionID: SESSION_ID } });
         return;
       }
+      if (body.includes('mock:turn-messages:')) {
+        const { turnMessages } = await import('./mock-turn-messages.mjs');
+        send({ type: 'message.updated', properties: { info: info({}) } });
+        for (const text of turnMessages(JSON.parse(body).parts.map(part => part.text ?? '').join('\n'))) {
+          send({ type: 'message.part.updated', properties: { part: { id: `prt_multi_${++echoSerial}`, messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text', text, time: { start: 1, end: 2 } } } });
+        }
+        send({ type: 'session.idle', properties: { sessionID: SESSION_ID } });
+        return;
+      }
       if (body.includes('mock:agent-echo')) {
         send({ type: 'message.updated', properties: { info: info({}) } });
         send({ type: 'message.part.updated', properties: { part: {
