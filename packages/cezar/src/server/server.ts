@@ -6495,7 +6495,7 @@ export function startServer(deps: ServerDeps, port: number): ServerType & { shut
   // The one `upgrade` listener: the subscription bus and the preview pane's socket (#781).
   attachUpgradeRouter(server, [socketHubRoute(socketHub, (req) => verifyWsUpgrade(req, deps.bindHost)), previewSocket.route]);
   const shutdownForRestart = async (): Promise<void> => {
-    sharedContexts.disposeAll(); // flush every built secondary project before old process exits
+    sharedContexts.disposeAll(); // close every built secondary project before old process exits
     deps.store.flush();
     socketHub.close();
     // Dev servers run in their own process groups: they outlive cezar unless stopped here.
@@ -6507,6 +6507,9 @@ export function startServer(deps: ServerDeps, port: number): ServerType & { shut
       server.close(() => resolve());
       if ('closeAllConnections' in server) server.closeAllConnections();
     });
+    // Last, with no request left to serve: write what is still pending and release every claim,
+    // so the replacement process finds the live runs nobody's, as a clean stop leaves them (#779).
+    deps.store.close();
   };
   // The task webhook's thread links name the port the listener BOUND (#594 review): `--port 0`
   // asks for an ephemeral one, so the requested number is not an address. Deliveries queue

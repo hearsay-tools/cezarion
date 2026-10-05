@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { once } from 'node:events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { applicationUpdateResponseSchema, healthResponseSchema } from '@open-mercato/cezar-contract';
+import { RUNS_DB_FILE, RunDatabase } from '../runs/run-database.ts';
 import { RunStore } from '../runs/store.ts';
 import type { RunManager } from '../workflows/run.ts';
 import { createApp, startServer } from './server.ts';
@@ -139,7 +140,7 @@ describe('application update routes', () => {
     } finally { await server.shutdownForRestart(); }
   });
 
-  it('flushes queued, waiting and running records for the existing recovery path', async () => {
+  it('saves queued, waiting and running records and releases their claims for the existing recovery path', async () => {
     const root = mkdtempSync(join(tmpdir(), 'cez-app-update-runs-')); roots.push(root);
     const dataDir = join(root, '.ai/cezar');
     const store = RunStore.open(dataDir, { keepLive: true });
@@ -151,6 +152,9 @@ describe('application update routes', () => {
     const server = startServer({ repoRoot: root, store, manager: {} as RunManager, version: '1.0.0' }, 0);
     if (!server.listening) await once(server, 'listening');
     await server.shutdownForRestart();
+    // The replacement process finds these runs nobody's, as a clean stop leaves them (#779).
+    const db = RunDatabase.open(join(dataDir, RUNS_DB_FILE));
+    try { expect(db.listClaims()).toEqual([]); } finally { db.close(); }
     const reopened = RunStore.open(dataDir, { keepLive: true });
     expect(ids.map((id) => reopened.getRun(id)?.status)).toEqual(['queued', 'waiting', 'running']);
   });
