@@ -681,6 +681,14 @@ export class OmpRunner implements AgentRunner {
           // A live child whose stream failed is not a refusal: no respawn follows, so nothing
           // may still be accepted into the outbox.
           open = false;
+          // The run is reported failed, so the CLI must not keep running tools in the worktree:
+          // SIGTERM now, SIGKILL after the grace period (a timer `finally` does not clear).
+          terminatedByCezar = true;
+          child.kill('SIGTERM');
+          const reap = setTimeout(() => {
+            if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+          }, killGraceMs);
+          reap.unref?.();
           throw error;
         }
       } finally {

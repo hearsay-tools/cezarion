@@ -578,6 +578,21 @@ process.exit(2);
     child.kill('SIGKILL');
   });
 
+  it('tears the live child down when stdout fails, escalating to SIGKILL', async () => {
+    const bin = join(cwd, 'stubborn-omp.mjs');
+    writeFileSync(bin, "#!/usr/bin/env node\nprocess.on('SIGTERM', () => {});\nsetTimeout(() => undefined, 20_000);\n", { mode: 0o755 });
+    spawned.length = 0;
+    const session = new OmpRunner({ bin, killGraceMs: 100 }).startSession(spec('x', { allowedTools: ['Read'] }), undefined, { autoEndAfterFirstTurn: false });
+    const child = spawned.at(-1)!;
+    const exited = new Promise<NodeJS.Signals | null>((resolve) => child.once('exit', (_code, signal) => resolve(signal)));
+    // Let the stub install its SIGTERM handler before the stream breaks.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    child.stdout!.destroy(new Error('stdout broke'));
+    await expect(session.result).rejects.toThrow('stdout broke');
+    // The run is reported failed; the CLI must not keep running tools in the worktree.
+    expect(await exited).toBe('SIGKILL');
+  });
+
   describe('MCP tools OMP has not registered (Ruling 20)', () => {
     it('respawns once without the passed MCP names OMP did not know, with one v1 note', async () => {
       const { events, ui, result } = await runSession(spec('inspect the working tree', {
