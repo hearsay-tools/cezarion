@@ -20,7 +20,7 @@ function stepsText(job) {
 test('dispatched verification checks out the attributed SHA even after its branch moves', () => {
   const { runInNewContext } = require('node:vm');
   const ci = workflow();
-  for (const name of ['build-and-package', 'vitest', 'cockpit-browser']) {
+  for (const name of ['build-and-package', 'vitest', 'node-floor', 'cockpit-browser']) {
     const checkout = ci.jobs[name].steps.find((s) => s.uses?.startsWith('actions/checkout@'));
     const expression = checkout.with.ref.slice(3, -2).trim();
     const ref = runInNewContext(expression, { github: {
@@ -140,7 +140,7 @@ test('CI classifies pull request changes from a trusted base checkout', () => {
 
 test('PR jobs check out the merge ref when CI runs from the trusted target workflow', () => {
   const ci = workflow();
-  for (const name of ['build-and-package', 'vitest', 'cockpit-browser']) {
+  for (const name of ['build-and-package', 'vitest', 'node-floor', 'cockpit-browser']) {
     const checkout = ci.jobs[name].steps.find((step) => step.uses?.startsWith('actions/checkout@'));
     assert.match(checkout?.with?.ref || '', /format\('refs\/pull\/\{0\}\/merge', github\.event\.pull_request\.number \|\| inputs\.pr_number\)/);
     assert.equal(checkout?.with?.['allow-unsafe-pr-checkout'], true, `${name} must opt in to fork PR merge checkout explicitly`);
@@ -199,7 +199,7 @@ test('ledger-only PRs skip both matrices but cannot bypass the required build an
   assert.equal(classified.output, 'surface=docs-only\n');
   const ci = workflow();
   const surface = classified.output.trim().split('=')[1];
-  for (const name of ['vitest', 'cockpit-browser']) {
+  for (const name of ['vitest', 'node-floor', 'cockpit-browser']) {
     // Actions permits hyphens in property names; JavaScript requires brackets.
     const condition = ci.jobs[name].if.replace(/needs\.([a-z]+-[a-z]+)/g, "needs['$1']");
     assert.equal(runInNewContext(condition, { needs: {
@@ -209,7 +209,7 @@ test('ledger-only PRs skip both matrices but cannot bypass the required build an
   const gate = ci.jobs.verify.steps.find(step => step.name === 'Require every verification job');
   for (const buildResult of ['success', 'failure', 'skipped']) {
     const result = runShell(gate.run, {
-      BUILD_AND_PACKAGE_RESULT: buildResult, VITEST_RESULT: 'skipped', COCKPIT_BROWSER_RESULT: 'skipped',
+      BUILD_AND_PACKAGE_RESULT: buildResult, VITEST_RESULT: 'skipped', NODE_FLOOR_RESULT: 'skipped', COCKPIT_BROWSER_RESULT: 'skipped',
       CHANGE_SURFACE: surface, BUMP_PR: 'false',
     });
     assert.equal(result.status === 0, buildResult === 'success');
@@ -232,7 +232,7 @@ test('classification is not a path filter and build-and-package stays unconditio
 
 test('test jobs require full-matrix classification without losing the bot bump skip', () => {
   const ci = workflow();
-  for (const name of ['vitest', 'cockpit-browser']) {
+  for (const name of ['vitest', 'node-floor', 'cockpit-browser']) {
     const job = ci.jobs[name];
     assert.ok(job.needs?.includes('change-surface'));
     assert.match(job.if, /needs\.change-surface\.outputs\.surface == ['"]full-matrix['"]/);
@@ -270,6 +270,7 @@ test('verify requires the classifier and permits skipped tests only for docs-onl
       CHANGE_SURFACE: scenario.surface,
       BUMP_PR: scenario.bump,
       VITEST_RESULT: scenario.vitest,
+      NODE_FLOOR_RESULT: scenario.vitest,
       COCKPIT_BROWSER_RESULT: scenario.cockpit,
     });
     assert.equal(result.status, scenario.status, `${scenario.name}: ${result.stderr}`);
@@ -297,6 +298,7 @@ test('bot-authored release/v* PRs skip Vitest and cockpit E2E via classify-pr fi
   assert.equal(classifyStep.env.EXPECTED_HEAD_SHA, '${{ github.event.pull_request.head.sha || github.sha }}');
   assert.deepEqual(ci.jobs.vitest.needs, ['change-surface', 'classify-pr']);
   assert.deepEqual(ci.jobs['cockpit-browser'].needs, ['change-surface', 'classify-pr']);
+  assert.deepEqual(ci.jobs['node-floor'].needs, ['change-surface', 'classify-pr']);
   assert.match(ci.jobs.vitest.if, /needs\.classify-pr\.outputs\.bump_pr != 'true'/);
   assert.match(ci.jobs['cockpit-browser'].if, /needs\.classify-pr\.outputs\.bump_pr != 'true'/);
   assert.ok(ci.jobs.verify.needs.includes('classify-pr'));
@@ -351,11 +353,32 @@ test('verification bindings use four local cockpit lanes while CI keeps serial s
   assert.ok(prepare.steps.some(s => s.uses?.startsWith('actions/upload-artifact@')));
 });
 
+test('the engines floor is proven on exactly the minimum Node, and verify requires it (#779)', () => {
+  const ci = workflow();
+  const floor = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')).engines.node;
+  assert.match(floor, /^>=\d+\.\d+\.\d+$/);
+  const job = ci.jobs['node-floor'];
+  const setup = job.steps.find(s => s.uses?.startsWith('actions/setup-node@'));
+  assert.equal(setup.with['node-version'], floor.slice(2), 'the floor job must pin the engines minimum, not a range');
+  const runs = job.steps.map(s => s.run);
+  for (const command of ['npm ci', 'npm run typecheck', 'npm run test:unit']) assert.ok(runs.includes(command), command);
+  assert.ok(runs.some(r => r?.startsWith('npm test -- --shard=')));
+  assert.ok(ci.jobs.verify.needs.includes('node-floor'));
+  const gate = ci.jobs.verify.steps.find(s => s.name === 'Require every verification job');
+  assert.equal(gate.env.NODE_FLOOR_RESULT, "${{ needs['node-floor'].result }}");
+  for (const surface of ['full-matrix', 'docs-only']) {
+    const env = { BUILD_AND_PACKAGE_RESULT: 'success', VITEST_RESULT: 'success', COCKPIT_BROWSER_RESULT: 'success', CHANGE_SURFACE: surface, BUMP_PR: 'false', NODE_FLOOR_RESULT: 'failure' };
+    assert.notEqual(runShell(gate.run, env).status, 0, surface);
+  }
+  const skipped = { BUILD_AND_PACKAGE_RESULT: 'success', VITEST_RESULT: 'success', COCKPIT_BROWSER_RESULT: 'success', CHANGE_SURFACE: 'full-matrix', BUMP_PR: 'false', NODE_FLOOR_RESULT: 'skipped' };
+  assert.notEqual(runShell(gate.run, skipped).status, 0, 'a skipped floor job must not green a full-matrix run');
+});
+
 test('genuine failure and cancellation never green the aggregate', () => {
   const gate = workflow().jobs.verify.steps.find(s => s.name === 'Require every verification job');
   for (const result of ['failure', 'cancelled', 'timed_out']) {
-    for (const key of ['BUILD_AND_PACKAGE_RESULT', 'VITEST_RESULT', 'COCKPIT_BROWSER_RESULT']) {
-      const env = { BUILD_AND_PACKAGE_RESULT: 'success', VITEST_RESULT: 'success', COCKPIT_BROWSER_RESULT: 'success', CHANGE_SURFACE: 'full-matrix', BUMP_PR: 'false', [key]: result };
+    for (const key of ['BUILD_AND_PACKAGE_RESULT', 'VITEST_RESULT', 'NODE_FLOOR_RESULT', 'COCKPIT_BROWSER_RESULT']) {
+      const env = { BUILD_AND_PACKAGE_RESULT: 'success', VITEST_RESULT: 'success', NODE_FLOOR_RESULT: 'success', COCKPIT_BROWSER_RESULT: 'success', CHANGE_SURFACE: 'full-matrix', BUMP_PR: 'false', [key]: result };
       assert.notEqual(runShell(gate.run, env).status, 0, `${key}=${result}`);
     }
   }
@@ -402,7 +425,7 @@ test('PR dispatch and PR event share concurrency and verification merge refs', (
   const group = ctx => config.concurrency.group.replace(/\$\{\{(.*?)\}\}/g, (_, expression) => runInNewContext(expression, ctx));
   assert.equal(group(context(42, '')), group(context(undefined, '42')));
   assert.notEqual(group(context(42, '')), group(context(undefined, '43')));
-  for (const name of ['build-and-package', 'vitest', 'cockpit-browser']) {
+  for (const name of ['build-and-package', 'vitest', 'node-floor', 'cockpit-browser']) {
     const ref = config.jobs[name].steps.find(s => s.uses?.startsWith('actions/checkout@')).with.ref;
     assert.equal(evaluate(ref, context(undefined, '42')), 'refs/pull/42/merge');
     assert.equal(evaluate(ref, context(42, '')), 'refs/pull/42/merge');

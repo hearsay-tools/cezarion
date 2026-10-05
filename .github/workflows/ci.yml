@@ -299,6 +299,62 @@ jobs:
       - name: Run server and cockpit unit suites
         run: npm test -- --shard=${{ matrix.shard }}/2 --maxWorkers=4
 
+  # Proves the engines floor. Every other job runs on `lts/*`, so none of them
+  # would notice a `node:sqlite` call the floor does not have (#779). This one
+  # pins exactly the root manifest's `engines.node` and runs the unit gate there.
+  # Typecheck and the Node unit suites are version-independent in their inputs,
+  # so shard 1 runs them once; both shards split the Vitest suites.
+  node-floor:
+    name: Node 24.15.0 floor, unit shard ${{ matrix.shard }}/2
+    # Same docs-only, infra-only, and verified bump-PR skips as Vitest.
+    needs: [change-surface, classify-pr]
+    if: >-
+      needs.change-surface.outputs.surface == 'full-matrix' &&
+      needs.classify-pr.outputs.bump_pr != 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    permissions:
+      contents: read
+      pull-requests: read
+
+    steps:
+      - *resolve-dispatch
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ (github.event.pull_request.number || steps['resolve-dispatch'].outputs.valid == 'true') && format('refs/pull/{0}/merge', github.event.pull_request.number || inputs.pr_number) || github.sha }}
+          allow-unsafe-pr-checkout: true
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24.15.0'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        if: matrix.shard == 1
+        run: npm run typecheck
+
+      # TypeScript test imports resolve through the server build, as in the vitest job.
+      - name: Build server dependencies
+        run: npm run build:server
+
+      - name: Run server and cockpit unit suites
+        run: npm test -- --shard=${{ matrix.shard }}/2 --maxWorkers=4
+
+      - name: Run Node unit suites
+        if: matrix.shard == 1
+        run: npm run test:unit
+
   # Own GitHub check, separate from the packaged CLI E2E step in build-and-package.
   # Skip is a failure here: a machine that cannot drive the cockpit must not
   # green the required aggregate. Local `npm run test:e2e` keeps its skip-exit-0
@@ -378,7 +434,7 @@ jobs:
   # cockpit browser jobs.
   verify:
     name: Unit, build, E2E, and package
-    needs: [change-surface, classify-pr, build-and-package, vitest, cockpit-browser]
+    needs: [change-surface, classify-pr, build-and-package, vitest, node-floor, cockpit-browser]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -388,6 +444,7 @@ jobs:
         env:
           BUILD_AND_PACKAGE_RESULT: ${{ needs['build-and-package'].result }}
           VITEST_RESULT: ${{ needs.vitest.result }}
+          NODE_FLOOR_RESULT: ${{ needs['node-floor'].result }}
           COCKPIT_BROWSER_RESULT: ${{ needs['cockpit-browser'].result }}
           CHANGE_SURFACE: ${{ needs.change-surface.outputs.surface }}
           # Same output as classify-pr / release-bump-pr.cjs: only a verified
@@ -398,9 +455,11 @@ jobs:
           test "$BUILD_AND_PACKAGE_RESULT" = success
           if [ "$CHANGE_SURFACE" = docs-only ] || [ "$CHANGE_SURFACE" = infra-only ] || [ "$BUMP_PR" = true ]; then
             test "$VITEST_RESULT" = success -o "$VITEST_RESULT" = skipped
+            test "$NODE_FLOOR_RESULT" = success -o "$NODE_FLOOR_RESULT" = skipped
             test "$COCKPIT_BROWSER_RESULT" = success -o "$COCKPIT_BROWSER_RESULT" = skipped
           else
             test "$VITEST_RESULT" = success
+            test "$NODE_FLOOR_RESULT" = success
             test "$COCKPIT_BROWSER_RESULT" = success
           fi
 

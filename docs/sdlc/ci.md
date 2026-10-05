@@ -76,13 +76,14 @@ intentionally trading single-run latency for lower concurrency on a shared host.
 
 ### CI verification
 
-Verification runs in seven parallel jobs with the current Node LTS:
+Verification runs in nine parallel jobs. Seven use the current Node LTS; the two Node floor shards use exactly the `engines.node` minimum (Node 24.15.0):
 
 - Two Vitest shards on `ubuntu-24.04` each install dependencies, build the server, and run `npm test -- --shard=N/2 --maxWorkers=4`.
+- Two Node floor shards on `ubuntu-24.04` (`node-floor`) run on exactly Node 24.15.0, the root `engines.node` minimum, so a Node API newer than the floor (such as a `node:sqlite` call) fails here instead of on a user's machine. Both install dependencies, build the server and run `npm test -- --shard=N/2 --maxWorkers=4`; shard 1 also runs `npm run typecheck` and `npm run test:unit`.
 - The build/package job on `ubuntu-24.04` runs typechecking, Node unit tests, the full application build, packaged CLI E2E tests, and release-package dry-run packing.
 - Four cockpit browser E2E shards on `ubuntu-latest` each provision the `agent-browser` provider, build and start their own test environment, and run `npm run test:e2e -- --shard=N/4`. Every shard rejects skipped or failed `TEST_E2E_STATUS` logs.
 
-The required check keeps its name, **Unit, build, E2E, and package**. It succeeds only when the build/package job, both Vitest shards, and all four cockpit browser shards succeed. Packaged CLI E2E and cockpit browser E2E stay separate named checks. The aggregate and snapshot jobs remain on GitHub-hosted Ubuntu. Develop snapshot publishing still waits for this aggregate. Same-repository
+The required check keeps its name, **Unit, build, E2E, and package**. It succeeds only when the build/package job, both Vitest shards, both Node floor shards, and all four cockpit browser shards succeed. Packaged CLI E2E and cockpit browser E2E stay separate named checks. The aggregate and snapshot jobs remain on GitHub-hosted Ubuntu. Develop snapshot publishing still waits for this aggregate. Same-repository
 PRs instead run `prepare-pr-snapshot` after verification, packing snapshot
 archives without publishing credentials. `publish-pr-snapshot.yml` listens for
 completed CI, validates the current open PR head, authoritative run/attempt,
