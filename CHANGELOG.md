@@ -1,10 +1,16 @@
 # Unreleased
 
+## ⚠️ Breaking
+
+- **cezar now needs Node 24.15 or newer.** The package `engines` floor rises to `>=24.15.0` because the run store uses the `node:sqlite` module that ships with Node. CI proves the floor on exactly Node 24.15.0. Upgrade Node before you upgrade cezar. (#779)
+- **Run history moves from `runs.json` to `.ai/cezar/runs.db`.** The first start of this version imports `runs.json` once, keeps the exact original bytes in `runs.json.pre-sqlite.bak` and never rewrites or deletes `runs.json`. Nothing is written back to `runs.json`, so an older cezar that you start afterwards sees your history as of the import and none of the runs made since. Stop every older cezar process for the project before you upgrade. Recovery steps are in `BACKWARD_COMPATIBILITY.md` section 3. (#779)
+
 ## Fixed
 
 - Recover structured questions missing only closing brackets, with a persistent warning to check options and selection count; preserve fork monitoring and Claude wakeups (#88).
 
 ## ✨ Features
+- Run state lives in one embedded SQLite file, `.ai/cezar/runs.db`, built into Node: no server, no install, no config. Saving a run writes only the rows that changed, not the whole history. Finished runs load from the file on demand, so memory grows with live runs, not with history. Task lists and the ⌘K finder of a project that is not open read summaries from the file without starting it. A second cezar process on the same project refuses controls on runs another process owns, with a 409 `{ error }`, instead of overwriting them. A run store that cannot open (damaged file, busy, no permission, disk full, newer schema) answers 409 with the cause and never reads as an empty history. (#779)
 - Task lists read a slim run summary instead of every full record. The new `GET /api/v1/run-summaries` (and its `/api/v1/p/:projectId` alias) answers the same runs in the same order as `GET /api/v1/runs`, without `task`, `steps`, `systemPrompt`, `agentInputs`, `workflowDef` or the full delegation state. The cockpit's sidebar, task table, palette and GitHub task links, its live stream patches, and `cez task list`/`cez task watch` all read it; `cez task list --full` and older clients keep `GET /api/v1/runs`, which is unchanged. The workspace runs index row is now the summary plus `projectId`, so it gains fields additively. (#817)
 - Each task-thread turn now shows a short local time in the top-right corner of user, agent, and parent/worker message cards, plus the agent's completion time and duration (`14:36 · 4m 12s`). Turns on different local days are parted by a dated rule. Times follow the browser locale, never tick, and omit themselves when a stamp is missing or invalid. Queued messages keep their own queued-at time but do not date the older conversation they sit above. Batched worker requests show each recipient's own time, with the first send labeled in the card corner. (#435; port of upstream #942)
 - Pin tasks from project sidebars, task tables, mobile cards and thread actions. A visible pinned variant promotes its entire group once; pins keep status/attention indicators and spend no recent-row budget. Pins persist per project, archive clears them, and failed updates retain the prior state with retry feedback. (#93; port of upstream #938)
