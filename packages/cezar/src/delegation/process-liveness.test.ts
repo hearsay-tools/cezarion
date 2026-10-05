@@ -4,26 +4,47 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { nonDumpableHolder } from './non-dumpable.testkit.ts';
-import { inspectExecutionGeneration, parseProcStat, probeGeneration, processesWithCwdUnder, processStartToken, recordedProcessLive } from './process-liveness.ts';
+import { inspectExecutionGeneration, parseProcStat, probeGeneration, processesWithCwdUnder, processStartToken, recordedProcessLive, type WorkerProcessRecord } from './process-liveness.ts';
 
 // Scope only enumeration to the processes this fixture owns. A full-host scan may
 // conservatively include an unrelated same-user process whose cwd is unreadable.
 // Keep cwd/stat/token reads real, including ENOENT after our child has exited;
 // the injected-reader cases below cover unreadable holders separately.
-const procScope = vi.hoisted(() => ({ entries: undefined as string[] | undefined, boot: undefined as string | null | undefined }));
+const procScope = vi.hoisted(() => ({
+  entries: undefined as string[] | undefined, boot: undefined as string | null | undefined,
+  unknownOwnerPid: undefined as number | undefined, unknownStartPid: undefined as number | undefined,
+  cwdErrorPid: undefined as number | undefined, unreadableEnumeration: false,
+}));
 vi.mock('node:fs', async importOriginal => {
   const actual = await importOriginal<typeof import('node:fs')>();
   return {
     ...actual,
+    statSync: (...args: Parameters<typeof actual.statSync>) => {
+      if (procScope.unknownOwnerPid !== undefined && args[0] === `/proc/${procScope.unknownOwnerPid}`) {
+        throw Object.assign(Error('unreadable process owner'), { code: 'EACCES' });
+      }
+      return actual.statSync(...args);
+    },
+    readlinkSync: (...args: Parameters<typeof actual.readlinkSync>) => {
+      if (procScope.cwdErrorPid !== undefined && args[0] === `/proc/${procScope.cwdErrorPid}/cwd`) {
+        throw Object.assign(Error('unexpected cwd error'), { code: 'EIO' });
+      }
+      return actual.readlinkSync(...args);
+    },
     readFileSync: (...args: Parameters<typeof actual.readFileSync>) => {
+      if (procScope.unknownStartPid !== undefined && args[0] === `/proc/${procScope.unknownStartPid}/stat`) {
+        throw Object.assign(Error('unreadable process start time'), { code: 'EACCES' });
+      }
       if (args[0] === '/proc/sys/kernel/random/boot_id' && procScope.boot !== undefined) {
         if (procScope.boot === null) throw Object.assign(Error('unreadable boot ID'), { code: 'EACCES' });
         return procScope.boot;
       }
       return actual.readFileSync(...args);
     },
-    readdirSync: (...args: Parameters<typeof actual.readdirSync>) =>
-      args[0] === '/proc' && procScope.entries ? procScope.entries : actual.readdirSync(...args),
+    readdirSync: (...args: Parameters<typeof actual.readdirSync>) => {
+      if (args[0] === '/proc' && procScope.unreadableEnumeration) throw Object.assign(Error('unreadable proc'), { code: 'EACCES' });
+      return args[0] === '/proc' && procScope.entries ? procScope.entries : actual.readdirSync(...args);
+    },
   };
 });
 
@@ -31,6 +52,8 @@ const linux = process.platform === 'linux';
 const dirs: string[] = [];
 afterEach(() => {
   procScope.entries = undefined; procScope.boot = undefined;
+  procScope.unknownOwnerPid = undefined; procScope.unknownStartPid = undefined;
+  procScope.cwdErrorPid = undefined; procScope.unreadableEnumeration = false;
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -144,6 +167,54 @@ describe('process liveness (#469)', () => {
     } finally { await holder.close(); }
     expect(executionProbe({ ...input, pathsComplete: false }).liveness).toBe('unknown');
     expect(executionProbe(input).liveness).toBe('gone');
+  });
+
+  it.runIf(linux).each([
+    'absent ledger', 'missing controller token', 'legacy controller token', 'malformed controller boot', 'malformed controller start',
+    'missing process token', 'legacy process token', 'malformed process boot', 'malformed process start', 'foreign process boot',
+    'unknown boot', 'malformed boot', 'unknown ownership', 'unknown start time', 'unexpected cwd error', 'unreadable enumeration',
+  ] as const)('rejects otherwise-qualifying abandonment with %s (hearsay-tools/cezarion#839)', async shape => {
+    const dir = mkdtempSync(join(tmpdir(), 'cez-abandonment-guard-')); dirs.push(dir);
+    const ambient = await nonDumpableHolder(dir); procScope.entries = [String(ambient.pid)];
+    const boot = readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim();
+    let record: WorkerProcessRecord | undefined = {
+      generation: 'g', controller: { pid: 2147483001, startToken: `${boot}:100` },
+      processes: [{ pid: 2147483002, startToken: `${boot}:101` }],
+    };
+    const locations = { paths: [dir], pathsComplete: true, since: 0 };
+    try {
+      // Control: the same real unreadable process and complete locations qualify before
+      // exactly one input is damaged. Omitting pathsComplete would bypass the ledger gate.
+      vi.resetModules();
+      const { inspectExecutionGeneration: qualifyingProbe } = await import('./process-liveness.ts');
+      expect(qualifyingProbe({ ...locations, record })).toMatchObject({ liveness: 'unknown', pids: [], abandonable: true });
+      switch (shape) {
+        case 'absent ledger': record = undefined; break;
+        case 'missing controller token': record.controller = { pid: 2147483001 }; break;
+        case 'legacy controller token': record.controller.startToken = '100'; break;
+        case 'malformed controller boot': record.controller.startToken = 'invalid:100'; break;
+        case 'malformed controller start': record.controller.startToken = `${boot}:invalid`; break;
+        case 'missing process token': record.processes = [{ pid: 2147483002 }]; break;
+        case 'legacy process token': record.processes[0]!.startToken = '101'; break;
+        case 'malformed process boot': record.processes[0]!.startToken = 'invalid:101'; break;
+        case 'malformed process start': record.processes[0]!.startToken = `${boot}:invalid`; break;
+        case 'foreign process boot': record.processes[0]!.startToken = `${oldBoot}:101`; break;
+        case 'unknown boot': procScope.boot = null; break;
+        case 'malformed boot': procScope.boot = 'invalid'; break;
+        case 'unknown ownership': procScope.unknownOwnerPid = ambient.pid; break;
+        case 'unknown start time': procScope.unknownStartPid = ambient.pid; break;
+        case 'unexpected cwd error': procScope.cwdErrorPid = ambient.pid; break;
+        case 'unreadable enumeration': procScope.unreadableEnumeration = true; break;
+      }
+      // Re-import to exercise boot discovery rather than a previous probe's cached boot ID.
+      vi.resetModules();
+      const { inspectExecutionGeneration: guardedProbe, probeGeneration: resourceProbe } = await import('./process-liveness.ts');
+      const input = { ...locations, ...(record ? { record } : {}) };
+      expect(guardedProbe(input)).toMatchObject({ liveness: shape === 'unreadable enumeration' ? 'unknown' : 'alive' });
+      expect(guardedProbe(input)).not.toHaveProperty('abandonable', true);
+      expect(resourceProbe(input)).not.toBe('gone');
+      await ambient.write(); // rejected evidence never changes or terminates the candidate
+    } finally { await ambient.close(); }
   });
 
   it.runIf(linux)('separates unknown same-boot candidates from live execution evidence (hearsay-tools/cezarion#839)', async () => {

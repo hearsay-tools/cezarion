@@ -59,9 +59,12 @@ Owned cleanup gives the existing mutation keeper a 1-second acquisition budget.
 Its timeout withdraws only its own queued claim before returning; no queued
 operation can run later. Creation and other normal mutations keep their 120-second
 budget. An admitted Git command retains the existing keeper/process-group exclusion
-until it exits. No public API, dependency or user configuration was added. The
-private optional abandonment field leaves old checkpoints valid; an older version
-that cannot read it fails closed.
+until it exits. The 1-second bound applies to lock acquisition, not the entire
+cleanup request: existing read-only HEAD/diff evidence commands before the lock
+can each take up to 30 seconds when Git is degraded. This existing timing limit
+does not leave a queued mutation running after refusal. No public API, dependency
+or user configuration was added. The private optional abandonment field leaves
+old checkpoints valid; an older version that cannot read it fails closed.
 
 ## Verification
 
@@ -121,3 +124,40 @@ indefinitely. Abandoned task intent requires a new worker for further execution.
 Native tests use offline backend wires and synthetic crash PID/enumeration scope,
 with real process tokens, kernel permission denial, filesystem, Git keeper and
 cleanup. This is not a live-provider or archived-host recovery experiment.
+
+## Review follow-up
+
+Astra identified that the original negative ledger cases omitted
+`pathsComplete: true`, bypassing the same-boot abandonment gate. The follow-up
+adds 16 otherwise-qualifying negative cases. Every case first qualifies with a
+valid controller/process ledger, complete locations and a real non-dumpable
+same-user process, then changes one input: absent ledger; missing, legacy or
+malformed controller/process tokens; foreign process boot; unknown/malformed
+current boot; unknown ownership/start time; unexpected cwd error; unreadable
+process enumeration. Resource proof remains conservative and the candidate
+remains writable.
+
+Mutation verification used this focused filter, restoring production source after
+each mutation:
+
+```sh
+npx vitest run packages/cezar/src/delegation/process-liveness.test.ts -t 'rejects otherwise-qualifying abandonment' --maxWorkers=1
+```
+
+- Validating only the controller and omitting recorded-process token validation
+  caused **five expected failures**.
+- Replacing the valid same-boot ledger predicate with `true` caused **12 expected
+  failures**, including absent/invalid controller and boot evidence.
+- Removing scan certainty (`!scan.uncertain`) caused **three expected failures**
+  for unknown ownership/start time and unexpected cwd errors.
+
+Final green with all production guards restored:
+
+```sh
+npx vitest run packages/cezar/src/delegation/process-liveness.test.ts --maxWorkers=1
+npm run typecheck:server
+```
+
+The complete focused process-liveness suite passes **35 tests**, and server
+typecheck passes. This follow-up changes tests and this note only; the parent
+owns full repository verification and triage of its loaded-host test failures.
