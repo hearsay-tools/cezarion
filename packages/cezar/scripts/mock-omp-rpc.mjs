@@ -42,18 +42,24 @@ if (typeof flags.get('--tools') === 'string') {
   // The CI extension registers cezar's tools (the preview tool only under CEZ_PREVIEW=1); an MCP name needs a configured server, which the mock
   // takes from CEZ_MOCK_OMP_MCP_TOOLS (none by default, like a home without .omp/mcp.json).
   const mcpTools = (process.env.CEZ_MOCK_OMP_MCP_TOOLS ?? '').split(',').filter(Boolean);
-  const known = (name) => BUILTIN_TOOLS.includes(name) || mcpTools.includes(name) || (extensions.length > 0 && (name === 'cezar_wait_for_ci' || (name === 'cezar_preview_serve' && process.env.CEZ_PREVIEW === '1')));
-  const unknown = tools.find((name) => !known(name));
-  if (unknown) {
-    startupError(2, `Error: Unknown tool in --tools: ${unknown}.\nBuilt-in tools: ${BUILTIN_TOOLS.join(', ')}. Other registered tools: goal, init_experiment, run_experiment, log_experiment, update_notes.`);
-  }
-  const gated = tools.filter((name) => GATED_TOOLS.has(name));
-  if (gated.length > 0) startupError(2, `Error: Built-in tools unavailable in this session: ${gated.join(', ')}.`);
-  // Tools a user setting disabled (`todo.enabled: false`, `lsp.enabled: false`, ...): real v18.4.11
-  // rejects them the same way, in the singular for one name.
+  // Tools a user setting disabled (`todo.enabled: false`, `lsp.enabled: false`, ...) are built-ins
+  // missing from the session, exactly like the settings-gated ones.
   const disabled = (process.env.CEZ_MOCK_OMP_DISABLED_TOOLS ?? '').split(',').filter(Boolean);
-  const named = tools.filter((name) => disabled.includes(name));
-  if (named.length > 0) startupError(2, `Error: Built-in tool${named.length > 1 ? 's' : ''} unavailable in this session: ${named.join(', ')}.`);
+  const registered = (name) => (BUILTIN_TOOLS.includes(name) && !GATED_TOOLS.has(name) && !disabled.includes(name))
+    || mcpTools.includes(name)
+    || (extensions.length > 0 && (name === 'cezar_wait_for_ci' || (name === 'cezar_preview_serve' && process.env.CEZ_PREVIEW === '1')));
+  // Mirrors v18.4.11 `emt()`: every missing name in ONE error, unknown names first, then the
+  // built-ins this session lacks, each line singular for one name.
+  const missing = tools.filter((name) => !registered(name));
+  const unknown = missing.filter((name) => !BUILTIN_TOOLS.includes(name));
+  const unavailable = missing.filter((name) => BUILTIN_TOOLS.includes(name));
+  const lines = [];
+  if (unknown.length > 0) {
+    lines.push(`Unknown tool${unknown.length === 1 ? '' : 's'} in --tools: ${unknown.join(', ')}.`);
+    lines.push(`Built-in tools: ${BUILTIN_TOOLS.join(', ')}. Other registered tools: goal, init_experiment, run_experiment, log_experiment, update_notes.`);
+  }
+  if (unavailable.length > 0) lines.push(`Built-in tool${unavailable.length === 1 ? '' : 's'} unavailable in this session: ${unavailable.join(', ')}.`);
+  if (lines.length > 0) startupError(2, `Error: ${lines.join('\n')}`);
 }
 
 if (process.env.CEZ_MOCK_OMP_NO_AUTH === '1') {

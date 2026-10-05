@@ -631,7 +631,12 @@ Tools: `--tools` is an allowlist validated against OMP's registry, so cezar maps
 to the cezar defaults. `find` and `ast_grep` are gated behind settings that default off and are
 **not** in it: naming an unavailable built-in exits 2. When settings the user chose disable a
 named tool, the runner respawns once without exactly those names, keeping accepted input in a
-stdin outbox so none is lost.
+stdin outbox so none is lost. MCP tools: OMP registers `mcp__<server>_<tool>` (one underscore,
+lowercased and sanitized), so a Claude-spelled grant `mcp__<server>__<tool>` is translated before
+it reaches `--tools`. OMP validates `--tools` right after its 250 ms RPC MCP discovery window, so a
+slow server's tool can still read as unknown: the same one-time respawn also drops the `mcp__`
+names this spawn passed from an `Unknown tool(s) in --tools: a, b.` refusal, with one v1 `note`
+for everything dropped. Any other unknown name stays fatal, and the respawn never widens.
 
 Models: `omp models --json` prints an object, `{"models": [...]}`, which feeds discovery and the
 provider status probe (empty means not logged in). Settings, MCP and memory files are edited from
@@ -1444,8 +1449,9 @@ Check these before copying an existing runner's code for a fork or near-fork of 
 - **No `--exclude-tools`.** `--tools` is an allowlist validated against OMP's registry: an unknown
   name, or a built-in the session has not enabled, exits 2 before any frame. Never pass an unmapped
   name through, keep the default list to tools that are on by default (`find` and `ast_grep` are
-  not), and handle the refusal for tools a user's settings disabled by respawning once without
-  them.
+  not), and handle the refusal for tools a user's settings disabled, or MCP tools OMP has not
+  registered, by respawning once without them. OMP spells MCP tools `mcp__<server>_<tool>`, not
+  Claude's `mcp__<server>__<tool>`.
 - **Diffs and plan come from the tool result**, not the args: the default `hashline` edit mode has
   args `{input}` only.
 - **The ask marker works in plain `--mode rpc`** because OMP never registers its native ask tool

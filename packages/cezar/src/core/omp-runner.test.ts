@@ -23,6 +23,24 @@ describe('ompTools', () => {
     ]);
   });
 
+  // Ruling R20: OMP names an MCP tool `mcp__<server>_<tool>` (one underscore, lowercased and
+  // sanitized, v18.4.11 `qjn`) and validates `--tools` by exact name, so Claude's
+  // `mcp__<server>__<tool>` spelling is translated before it reaches the flag.
+  it.each([
+    ['mcp__github__create_issue', 'mcp__github_create_issue'],
+    ['mcp__My-Server__Do Thing', 'mcp__my_server_do_thing'],
+    ['mcp__github__github_search', 'mcp__github_search'],
+    ['mcp__a.b__c__d', 'mcp__a_b_c_d'],
+    ['mcp__srv_tool', 'mcp__srv_tool'],
+    ['mcp__srv__', 'mcp__srv__'],
+  ])('translates the Claude MCP spelling %s to %s', (name, expected) => {
+    expect(ompTools([name], {}).tools).toEqual([expected]);
+  });
+
+  it('collapses a Claude and an OMP spelling of one MCP tool into one name', () => {
+    expect(ompTools(['mcp__github__create_issue', 'mcp__github_create_issue'], {}).tools).toEqual(['mcp__github_create_issue']);
+  });
+
   it('maps cezar names, keeps OMP built-ins and mcp__ names, drops the rest', () => {
     expect(ompTools(['Subagent', 'TodoWrite', 'WebFetch', 'lsp', 'mcp__srv_tool', 'NotebookEdit'], {})).toEqual({
       flag: 'tools',
@@ -496,11 +514,80 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
     expect(events.at(-1)).toEqual({ type: 'done' });
   });
 
-  it('unknown --tools name surfaces OMP stderr in the thrown error', async () => {
+  /** A bin that exits 2 printing `text` on stderr and records each invocation's argv. */
+  const refusingBin = (text: string): string => {
+    const bin = join(cwd, 'refusing-omp.mjs');
+    writeFileSync(bin, `#!/usr/bin/env node
+import { appendFileSync } from 'node:fs';
+appendFileSync(${JSON.stringify(join(cwd, 'invocations.ndjson'))}, JSON.stringify(process.argv.slice(2)) + '\\n');
+process.stderr.write(${JSON.stringify(text)});
+process.exit(2);
+`, { mode: 0o755 });
+    return bin;
+  };
+
+  it('an unknown non-MCP --tools name stays fatal and surfaces OMP stderr in the thrown error', async () => {
     const events: AgentEvent[] = [];
-    const failed = new OmpRunner({ bin: MOCK }).run(spec('x', { allowedTools: ['Read', 'mcp__not_a_tool'] }), event => events.push(event));
-    await expect(failed).rejects.toThrow('omp CLI exited with code 2 — Error: Unknown tool in --tools: mcp__not_a_tool.');
-    expect(events).toContainEqual({ type: 'note', message: expect.stringContaining('omp CLI stderr:\nError: Unknown tool in --tools: mcp__not_a_tool.') });
+    const bin = refusingBin('Error: Unknown tool in --tools: cezar_wait_for_ci.\nBuilt-in tools: read.\n');
+    const failed = new OmpRunner({ bin }).run(spec('x', { allowedTools: ['Read'], cezarTools: { name: 'cezar', command: process.execPath, args: [] } }), event => events.push(event));
+    await expect(failed).rejects.toThrow('omp CLI exited with code 2 — Error: Unknown tool in --tools: cezar_wait_for_ci.');
+    expect(events).toContainEqual({ type: 'note', message: expect.stringContaining('omp CLI stderr:\nError: Unknown tool in --tools: cezar_wait_for_ci.') });
+    expect(invocations()).toHaveLength(1);
+  });
+
+  describe('MCP tools OMP has not registered (R20)', () => {
+    it('respawns once without the passed MCP names OMP did not know, with one v1 note', async () => {
+      const { events, ui, result } = await runSession(spec('inspect the working tree', {
+        allowedTools: ['Read', 'mcp__github__create_issue', 'mcp__slow_server__query'],
+        env: { CEZ_MOCK_OMP_MCP_TOOLS: 'mcp__github_create_issue' },
+      }));
+      const argvs = lines('args.ndjson') as unknown as string[][];
+      expect(argvs).toHaveLength(2);
+      expect(argvs[0]?.slice(-2)).toEqual(['--tools', 'read,mcp__github_create_issue,mcp__slow_server_query']);
+      expect(argvs[1]?.slice(-2)).toEqual(['--tools', 'read,mcp__github_create_issue']);
+      expect(events.filter(event => event.type === 'note' && event.message.startsWith('omp: '))).toEqual([
+        { type: 'note', message: 'omp: MCP tools OMP has not registered were dropped: mcp__slow_server_query' },
+      ]);
+      expect(events.filter(event => event.type === 'error')).toEqual([]);
+      expect(result.text).toBe('Investigating: inspect the working tree');
+      expect(ui.filter(event => event.type === 'turn.started')).toHaveLength(1);
+    });
+
+    it('drops settings-disabled built-ins and unregistered MCP names reported in one exit with one respawn', async () => {
+      const { events } = await runSession(spec('inspect the working tree', {
+        allowedTools: ['Read', 'TodoWrite', 'mcp__slow__query'],
+        env: { CEZ_MOCK_OMP_DISABLED_TOOLS: 'todo' },
+      }));
+      const argvs = lines('args.ndjson') as unknown as string[][];
+      expect(argvs).toHaveLength(2);
+      expect(argvs[1]?.slice(-2)).toEqual(['--tools', 'read']);
+      expect(events.filter(event => event.type === 'note' && event.message.startsWith('omp: '))).toEqual([
+        { type: 'note', message: 'omp: tools disabled by your OMP settings were dropped: todo; MCP tools OMP has not registered were dropped: mcp__slow_query' },
+      ]);
+      expect(events.at(-1)).toEqual({ type: 'done' });
+    });
+
+    it('never retries when an unknown name is not an MCP name it passed', async () => {
+      await expect(new OmpRunner({ bin: refusingBin('Error: Unknown tools in --tools: mcp__x_y, goal.\n') })
+        .run(spec('x', { allowedTools: ['Read', 'mcp__x_y'] })))
+        .rejects.toThrow('Error: Unknown tools in --tools: mcp__x_y, goal.');
+      expect(invocations()).toHaveLength(1);
+      rmSync(join(cwd, 'invocations.ndjson'));
+      await expect(new OmpRunner({ bin: refusingBin('Error: Unknown tool in --tools: mcp__other_tool.\n') })
+        .run(spec('x', { allowedTools: ['Read', 'mcp__x_y'] })))
+        .rejects.toThrow('Error: Unknown tool in --tools: mcp__other_tool.');
+      expect(invocations()).toHaveLength(1);
+    });
+
+    it('a second refusal of a remaining MCP name is surfaced, never a third spawn', async () => {
+      const events: AgentEvent[] = [];
+      const failed = new OmpRunner({ bin: refusingBin('Error: Unknown tool in --tools: mcp__x_y.\n') })
+        .run(spec('x', { allowedTools: ['Read', 'mcp__x_y'] }), event => events.push(event));
+      // The respawn drops mcp__x_y; the fake refuses again with a name it no longer passed.
+      await expect(failed).rejects.toThrow('omp CLI exited with code 2 — Error: Unknown tool in --tools: mcp__x_y.');
+      expect(invocations()).toHaveLength(2);
+      expect(invocations()[1]?.slice(-2)).toEqual(['--tools', 'read']);
+    });
   });
 
   /** A bin that exits 2 with OMP's gated-tool text; `names` is one entry per invocation. */

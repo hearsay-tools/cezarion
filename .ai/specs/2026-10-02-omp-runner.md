@@ -82,7 +82,7 @@ What differs from Pi (each one breaks a Pi assumption):
 | Startup writes a `ready` frame (`protocolVersion`, `supportedProtocolVersions`, `maxFrameBytes`) before handling commands; v1 caps each stdout frame at 1 MiB and elides oversized fields | Ignore `ready`; stay on v1 |
 | `message_*` frames carry a `messageId`; `set_event_filter {messageUpdates:"delta"}` drops the per-delta `partial` message snapshot | Opt in; detect support from the echoed `data.messageUpdates` |
 | No `--session-id`. `--resume [id]` / `--session [id]` resume by id prefix or path; a fresh session mints its id (`get_state.sessionId`) | Codex/Cursor precedent: id discovered, `--resume` on Continue |
-| No `--exclude-tools`. `--tools a,b` is an allowlist validated against the discovered registry: **an unknown name, or a built-in the session has not enabled, is a startup error with exit code 2** (real binary, R4) | Never pass an unmapped name through; handle the refusal (R13) |
+| No `--exclude-tools`. `--tools a,b` is an allowlist validated against the discovered registry: **an unknown name, or a built-in the session has not enabled, is a startup error with exit code 2** (real binary, R4) | Never pass an unmapped name through; handle the refusal (R13, and R20 for MCP names) |
 | `--add-dir <dir>` (repeatable) exists | `additionalDirectories` honored (Pi drops it) |
 | Plain `--mode rpc`: `sessionOptions.hasUI = isInteractive \|\| mode === "rpc-ui"` (`main.ts`), so `AskTool.createIf` returns null | No native ask tool; marker path |
 | Approval: `tools.approvalMode` default `yolo`; with no UI a prompt-requiring call fails closed | Same posture as Claude's `dontAsk`; cezar passes no approval flag |
@@ -194,6 +194,13 @@ commands, the opening `prompt`, a human steer) waits in order and is replayed to
 child, so no accepted input is lost. `session.pid` is a getter that follows the live child, and
 `SessionOptions.onPidChange` tells the run manager when a respawn replaced it.
 
+MCP tools (Ruling R20). In RPC mode OMP validates `--tools` right after a 250 ms MCP discovery
+window (`docs/mcp-config.md`), so a correctly spelled tool from a slow server can read as unknown.
+The same one-time respawn therefore also reads `Unknown tool(s) in --tools: a, b.`: when every
+name in it is an `mcp__` name this spawn passed, those names are removed too. Both lines arrive in
+one exit, so one respawn covers both, with one v1 `note` naming everything dropped. Any other
+unknown name (a built-in, a cezar tool, an MCP name cezar never passed) stays fatal.
+
 `ompTools(allowedTools, bashAllowlist, restrictNativeDelegation)`:
 
 | cezar name | OMP name |
@@ -203,7 +210,8 @@ child, so no accepted input is lost. `session.pid` is a getter that follows the 
 | `TodoWrite` | `todo` |
 | `WebSearch` / `WebFetch` | `web_search` / `read` (R2: `fetch` is not a v18.4.11 built-in; `read` reads static web pages per its own description) |
 | any OMP built-in name (`BUILTIN_TOOL_NAMES` at the pinned version, lower-case) | itself |
-| `mcp__*` | itself (OMP validates against its discovered registry) |
+| `mcp__<server>__<tool>` (Claude's spelling) | `mcp__<server>_<tool>`, OMP's own spelling (v18.4.11 `qjn`: each part lowercased, anything but `[a-z0-9_]` and repeated underscores folded to one `_`, edges trimmed, a tool name repeating its server's prefix stripped of it). Ruling R20 |
+| any other `mcp__*` (already OMP's spelling) | itself; validated against the registry OMP discovered, so an unregistered one is dropped by the R13/R20 respawn |
 | anything else | dropped, with one v1 `note` naming the dropped tools |
 
 Rules: dedupe; `bash` dropped under `bashAllowlist`; `task`, `wait` and `eval` dropped under D1;
@@ -513,6 +521,8 @@ differs from the approved text above, the ruling wins and the cost of being wron
 | R15 | A9 exemption reason: plain `--mode rpc` never constructs the ask tool (`sessionOptions.hasUI` is true only for interactive or `rpc-ui`; `AskTool.createIf` returns null); a wire limitation, not "not implemented" | A9 row hides a gap |
 | R16 | I2 exemption accepted: the settle predicate requires `queuedMessageCount === 0` and a queued steer is read before settle; the reason names the settle predicate (`rpc-session-settle.ts`) | I2 gap hidden |
 | R17 | Mock frames emitted after `session_settled` (the R15 regression) are **constructed**: real OMP settles only when `!hasPendingAsyncWork`. Kept as a stricter robustness test and labeled so in the fixtures README | None (stricter than the wire) |
+| R19 | Volume never fails discovery or the status probe: model cap 2000 and 2 MiB stdout, past the cap the first 2000 in OMP's order with one log line; the `omp models --json` status probe gets a 4 MiB buffer (per-descriptor `maxBuffer`). OpenRouter alone lists 561 models on v18.4.11 | Larger buffers for one probe |
+| R20 | Claude-spelled `mcp__<server>__<tool>` grants are translated to OMP's `mcp__<server>_<tool>`; the R13 respawn also drops passed `mcp__` names from `Unknown tool(s) in --tools` (never widens; any other unknown stays fatal) | An MCP grant silently missing, with a v1 note |
 
 ## Docs to update in the same change
 

@@ -135,7 +135,8 @@ export function ompTools(
     // `hasOwn`: a plain-object lookup would map `constructor` onto Object's own function.
     const mapped = Object.hasOwn(OMP_TOOL_MAP, name)
       ? OMP_TOOL_MAP[name]
-      : OMP_BUILTIN_TOOL_NAMES.includes(name) || name.startsWith('mcp__') ? name : undefined;
+      : name.startsWith(MCP_PREFIX) ? ompMcpToolName(name)
+        : OMP_BUILTIN_TOOL_NAMES.includes(name) ? name : undefined;
     if (mapped === undefined) dropped.add(name);
     else tools.add(mapped);
   }
@@ -149,6 +150,32 @@ export function ompTools(
   // Exactly the names omp-ci-wait.mjs registers (R11): OMP exits 2 on an unknown --tools name.
   if (opts.cezarTools) for (const name of cezarToolNames(opts.env ?? {})) tools.add(name);
   return { flag: 'tools', tools: [...tools], dropped: [...dropped] };
+}
+
+const MCP_PREFIX = 'mcp__';
+
+/**
+ * OMP's name for an MCP tool granted in Claude's `mcp__<server>__<tool>` spelling (Ruling R20).
+ * v18.4.11 registers `mcp__<server>_<tool>` (`qjn`): each part lowercased, runs of anything but
+ * `[a-z0-9_]` and repeated underscores folded to one `_`, edges trimmed, and a tool name that
+ * repeats its server's prefix stripped of it. `--tools` validation matches exact names, so the
+ * Claude spelling would exit 2. A name without a second `__` is already OMP's spelling (OMP
+ * folds every `__` in it) and passes verbatim. OMP shortens names past 64 characters with a
+ * Bun hash cezar cannot reproduce; such a name stays unknown and the startup refusal drops it.
+ */
+function ompMcpToolName(name: string): string {
+  const rest = name.slice(MCP_PREFIX.length);
+  const split = rest.indexOf('__');
+  if (split <= 0 || split + 2 >= rest.length) return name;
+  const server = ompMcpNamePart(rest.slice(0, split), 'server');
+  const tool = ompMcpNamePart(rest.slice(split + 2), 'tool');
+  return `${MCP_PREFIX}${server}_${tool.startsWith(`${server}_`) ? tool.slice(server.length + 1) : tool}`;
+}
+
+/** v18.4.11 `x7s` with digits kept, the variant OMP registers under. */
+function ompMcpNamePart(value: string, fallback: string): string {
+  const part = value.toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/_+/g, '_').replace(/^_+|_+$/g, '');
+  return part.length > 0 ? part : fallback;
 }
 
 /** `omp --mode rpc` argv, in the order of the spec's spawn block. */
@@ -653,14 +680,21 @@ export class OmpRunner implements AgentRunner {
       if (interruptKillTimer) clearTimeout(interruptKillTimer);
       // R13: exit 2 before any frame, naming tools the user's OMP settings disabled. Respawn
       // once without them: the list only narrows, so this never widens what the step granted.
-      const refused =
+      // Ruling R20 widens the same respawn to MCP names OMP did not register (a Claude spelling
+      // it cannot match, or a server slower than OMP's discovery window).
+      const refusal =
         exitCode === 2 && !spawnError && retryPossible()
           ? refusedOmpTools(stderr.join(''), ompToolList(firstArgs))
-          : [];
-      if (refused.length > 0) {
+          : null;
+      if (refusal) {
+        const refused = [...refusal.disabled, ...refusal.mcp];
         respawned = true;
         stderr.length = 0;
-        onEvent?.({ type: 'note', message: `omp: tools disabled by your OMP settings were dropped: ${refused.join(', ')}` });
+        const dropped = [
+          ...(refusal.disabled.length > 0 ? [`tools disabled by your OMP settings were dropped: ${refusal.disabled.join(', ')}`] : []),
+          ...(refusal.mcp.length > 0 ? [`MCP tools OMP has not registered were dropped: ${refusal.mcp.join(', ')}`] : []),
+        ];
+        onEvent?.({ type: 'note', message: `omp: ${dropped.join('; ')}` });
         // Session state (mapper, held v2 events, ack sets) follows what was accepted, not the
         // child, and the outbox still holds every command accepted so far: the new child is
         // sent exactly those, once, when it speaks.
@@ -747,14 +781,23 @@ function ompToolList(args: readonly string[]): string[] {
 }
 
 /**
- * Names in OMP's `Built-in tool(s) unavailable in this session: a, b.` startup refusal (v18.4.11,
- * a tool its settings disable), limited to names this spawn passed, so a retry only narrows.
+ * What OMP's startup refusal (v18.4.11 `emt()`, exit 2) lets a respawn drop, limited to names this
+ * spawn passed so a retry only narrows. One error carries up to two lists:
+ * `Built-in tool(s) unavailable in this session: a, b.` (tools the user's settings disable, R13)
+ * and `Unknown tool(s) in --tools: a, b.` (Ruling R20: droppable only when every name is an
+ * `mcp__` name this spawn passed; any other unknown name stays fatal, so nothing is retried).
+ * `null` when there is nothing to drop.
  */
-function refusedOmpTools(stderr: string, passed: readonly string[]): string[] {
-  const match = /Built-in tools? unavailable in this session:[ \t]*([^\r\n]*)/.exec(stderr);
-  if (!match) return [];
-  const named = (match[1] ?? '').replace(/\.\s*$/, '').split(/[\s,]+/).filter(Boolean);
-  return named.filter(name => passed.includes(name));
+function refusedOmpTools(stderr: string, passed: readonly string[]): { disabled: string[]; mcp: string[] } | null {
+  const listed = (pattern: RegExp): string[] | undefined => {
+    const match = pattern.exec(stderr);
+    return match ? (match[1] ?? '').replace(/\.\s*$/, '').split(/[\s,]+/).filter(Boolean) : undefined;
+  };
+  const unknown = listed(/Unknown tools? in --tools:[ \t]*([^\r\n]*)/) ?? [];
+  if (unknown.some(name => !name.startsWith(MCP_PREFIX) || !passed.includes(name))) return null;
+  const disabled = (listed(/Built-in tools? unavailable in this session:[ \t]*([^\r\n]*)/) ?? [])
+    .filter(name => passed.includes(name));
+  return disabled.length + unknown.length > 0 ? { disabled, mcp: unknown } : null;
 }
 
 /** Same as pi-runner.ts `toPiPrompt`. */
