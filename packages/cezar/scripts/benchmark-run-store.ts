@@ -82,11 +82,16 @@ const METRICS = ['open', 'coldRead', 'save', 'commit', 'runs', 'runsIndex', 'run
 type Metric = typeof METRICS[number];
 /** What a child result measured before `--metrics` existed. */
 const FIRST_TABLE_METRICS: readonly Metric[] = ['open', 'coldRead', 'save', 'commit', 'runs', 'runsIndex', 'active'];
-const SYNC_OPS = ['open', 'cold read', 'save (flush)', 'save (debounced)', 'commit (1 row)', 'commit (10 rows)'] as const;
+const SYNC_OPS = ['open', 'cold read', 'save (flush)', 'save (debounced)', 'commit (1 row)', 'commit (10 rows)', 'commit (held run)', 'commit (cold run)'] as const;
 type SyncOp = typeof SYNC_OPS[number];
 const SYNC_OP_METRIC: Record<SyncOp, Metric> = {
   open: 'open', 'cold read': 'coldRead', 'save (flush)': 'save', 'save (debounced)': 'save', 'commit (1 row)': 'commit', 'commit (10 rows)': 'commit',
+  'commit (held run)': 'commit', 'commit (cold run)': 'commit',
 };
+/** The same one-row commit split by claim state (#779, plan step 3): on a run this store already
+ *  holds and claims (the fence alone), and on a run it must claim first. Reported, never gated:
+ *  `commit (1 row)` is the gate's commit and the first table's. */
+const CLAIM_OPS: readonly SyncOp[] = ['commit (held run)', 'commit (cold run)'];
 const ROUTE_PATHS = {
   'GET /runs': { metric: 'runs', path: '/api/v1/runs' },
   'GET /run-summaries': { metric: 'runSummaries', path: '/api/v1/run-summaries' },
@@ -302,6 +307,20 @@ async function runChild(options: ChildOptions, resultPath: string): Promise<void
       gc();
       sync['commit (10 rows)'] = await sampleSync(options, () => { commit(multiTargets); });
       gc();
+      // #779 plan step 3: every durable commit is fenced (claim and revision checked in its
+      // transaction). A run already held and claimed pays the fence alone; a run that left memory
+      // is claimed first. Its claim is released when it leaves again — the untimed flush.
+      s.pin(singleTarget, 'cleanup');
+      sync['commit (held run)'] = await sampleSync(options, () => { commit([singleTarget]); });
+      s.unpin(singleTarget, 'cleanup');
+      gc();
+      sync['commit (cold run)'] = await sampleSync(options, () => {
+        s.flush();
+        const t0 = performance.now();
+        commit([singleTarget]);
+        return performance.now() - t0;
+      });
+      gc();
     }
 
     const routes = ROUTES.filter((route) => has(ROUTE_PATHS[route].metric));
@@ -450,7 +469,7 @@ const mb = (bytes: number) => `${(bytes / 1e6).toFixed(1)} MB`;
 const SAVE_METRICS = ['save (flush)', 'save (debounced)', 'commit (1 row)', 'commit (10 rows)'];
 /** The gate's "largest block" candidates. `GET /runs` is left out: since #817 the cockpit lists
  *  through `GET /run-summaries`, and `GET /runs` serves only older clients. */
-const BLOCKING_METRICS = [...SYNC_OPS, 'GET /workspace/runs-index block', 'GET /run-summaries block'];
+const BLOCKING_METRICS = [...SYNC_OPS.filter((op) => !CLAIM_OPS.includes(op)), 'GET /workspace/runs-index block', 'GET /run-summaries block'];
 const BLOCKING_INPUTS: Record<string, Metric> = {
   ...SYNC_OP_METRIC, 'GET /workspace/runs-index block': 'runsIndex', 'GET /run-summaries block': 'runSummaries',
 };
@@ -491,6 +510,8 @@ function report(aggregated: ReturnType<typeof aggregate>, options: ParentOptions
     row('Save (real 300 ms debounce), longest block', 'save (debounced)');
     row('Commit 1 row (`commitDelegation`), sync', 'commit (1 row)');
     row(`Commit ${MULTI_ROWS} rows (\`commitDelegation\`), sync`, 'commit (10 rows)');
+    row('Commit 1 row, run held and claimed (fence only), sync', 'commit (held run)');
+    row('Commit 1 row, run claimed first (claim + fence), sync', 'commit (cold run)');
     for (const route of ROUTES) {
       const label = route === 'GET /runs' ? 'GET /runs (older clients)' : route;
       row(`${label}, longest block`, `${route} block`);
