@@ -16,6 +16,7 @@ The server, contract, API client, and web application sources are unchanged.
 | Android network smoke | Installed APK, entered the same supplied origin pair, and verified the Authelia sign-in form rendered |
 | iOS Release archive/export | Signed development archive and IPA exported using the operator's existing local Apple team |
 | iOS signature verification | `codesign --verify --deep --strict` passed |
+| Physical iPhone | Version 0.1.0 installed and launched on an iPhone 14 Pro running iOS 26.6.2 after developer-profile trust |
 | Diff hygiene | `git diff --cached --check` passed; no signing keys, profiles, personal server URLs, or build outputs staged |
 
 The native UI checks cover a recoverable connection failure, return to the
@@ -32,6 +33,12 @@ creation, message sending, MFA, device background/resume behavior, and file uplo
 still need the operator's signed-in device smoke test described in
 [the installation guide](../../docs/mobile.md#connect-and-test). Store distribution
 is not exercised.
+
+After the initial checks, device feedback identified the misleading **Servers**
+button. It is now **Connection**, matching the single saved connection in v1.
+The affected iOS navigation UI test passed again; Android unit tests, lint, and APK
+build passed again. The updated signed iPhone archive was installed in place and
+its launch succeeded. This follow-up changes labels and documentation only.
 
 ## Repository-wide gate
 

@@ -83,14 +83,16 @@ and [Developer Mode](https://developer.apple.com/documentation/xcode/enabling-de
 5. Switch apps or lock the phone, then return. The existing cockpit reconciles its
    stream when it becomes visible. **Refresh** reconnects at the cockpit address
    if the page or network is stuck. It does not rerun a task.
-6. Use **Servers** to return to the connection screen. Close and reopen the app:
+6. Use **Connection** to return to the connection screen. Close and reopen the app:
    the address is remembered; tap **Connect** to reopen it.
 7. Use **Forget connection & sign out**, confirm, and reconnect. You should have to
    sign in again. This clears this app's website data, not your browser's sessions.
 
-The native header provides **Servers**, **Back**, and **Refresh**. External HTTPS
+The native header provides **Connection** (edit the one remembered server), **Back**
+(previous web page), and **Refresh** (reload the cockpit's starting address without
+restarting any tasks). There is no saved multi-server list in this version. External HTTPS
 links ask before opening in the system browser. A blocked SSO redirect shows only
-its origin; return to Servers and correct the trusted origin. Redirects never add
+its origin; return to Connection and correct the trusted origin. Redirects never add
 trust automatically.
 
 ## Scope and session behavior

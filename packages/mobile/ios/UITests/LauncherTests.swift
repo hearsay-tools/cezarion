@@ -21,11 +21,11 @@ final class LauncherTests: XCTestCase {
         app.launchArguments = ["--endpoint", "https://127.0.0.1:65534", "--auth-origin", ""]
         app.launch()
         app.buttons["connect"].tap()
-        XCTAssertTrue(app.buttons["Servers"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["Connection"].waitForExistence(timeout: 10))
         let error = NSPredicate(format: "label CONTAINS 'Refresh'")
         expectation(for: error, evaluatedWith: app.staticTexts["connectionStatus"])
         waitForExpectations(timeout: 35)
-        app.buttons["Servers"].tap()
+        app.buttons["Connection"].tap()
         XCTAssertTrue(app.buttons["connect"].waitForExistence(timeout: 5))
     }
 
