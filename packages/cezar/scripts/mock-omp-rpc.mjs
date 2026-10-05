@@ -65,6 +65,9 @@ const record = (value) => {
   if (!process.env.CEZ_MOCK_STDIN_FILE) return;
   try { appendFileSync(process.env.CEZ_MOCK_STDIN_FILE, `${JSON.stringify(value)}\n`); } catch { /* best effort */ }
 };
+const fail = (command, error) => write({ ...(command.id ? { id: command.id } : {}), type: 'response', command: command.type, success: false, error });
+/** `RpcPromptResults.fail`/`completeLocal`: a prompt finished without the agent (v18.4.11). */
+const localResult = (command, status, error) => write({ type: 'prompt_result', ...(command.id ? { id: command.id } : {}), agentInvoked: false, status, ...(error ? { error } : {}), sessionSettled: false });
 const respond = (command, data) => write({ ...(command.id ? { id: command.id } : {}), type: 'response', command: command.type, success: true, ...(data === undefined ? {} : { data }) });
 
 // Real startup order: `ready`, then three unsolicited frames before any command is answered.
@@ -141,8 +144,24 @@ rl.on('line', (line) => {
   const command = JSON.parse(line);
   if (command.type === 'prompt' && command.streamingBehavior === 'steer' && activeTurn) {
     record({ userText: command.message, imageCount: (command.images ?? []).length, streamingBehavior: 'steer' });
-    activeTurn.steers.push({ id: command.id, message: command.message });
-    respond(command);
+    // Steers OMP never hands to the running agent: none of them may end its turn.
+    if (command.message.includes('mock:steer-rejected')) {
+      // Rejected before admission: the error response only, the ticket is discarded.
+      fail(command, 'input hook rejected the steer');
+    } else if (command.message.includes('mock:steer-local-result')) {
+      respond(command);
+      localResult(command, 'completed');
+    } else if (command.message.includes('mock:steer-local')) {
+      respond(command, { agentInvoked: false });
+    } else if (command.message.includes('mock:steer-failed')) {
+      // Failed after admission: the ack, `onError`'s failure response, then `fail()`'s result.
+      respond(command);
+      fail(command, 'steer failed');
+      localResult(command, 'error', { message: 'steer failed', retryable: false });
+    } else {
+      activeTurn.steers.push({ id: command.id, message: command.message });
+      respond(command);
+    }
     return;
   }
   queue = queue.then(() => handle(command));
@@ -207,9 +226,16 @@ async function prompt(command) {
     return;
   }
   if (message.includes('mock:prompt-error')) {
-    // The prompt failed before the agent ran: an error response, then its prompt_result.
-    write({ ...(command.id ? { id: command.id } : {}), type: 'response', command: 'prompt', success: false, error: 'Model not found: anthropic/claude-missing' });
+    // The prompt failed after admission, before the agent ran: the ack, an error response,
+    // then its prompt_result (rpc-mode.ts `onError` + `RpcPromptResults.fail`).
+    respond(command);
+    fail(command, 'Model not found: anthropic/claude-missing');
     write({ type: 'prompt_result', ...(command.id ? { id: command.id } : {}), agentInvoked: false, status: 'error', error: { message: 'Model not found: anthropic/claude-missing', provider: 'anthropic', model: 'claude-missing', retryable: false }, sessionSettled: true });
+    return;
+  }
+  if (message.includes('mock:prompt-rejected')) {
+    // Rejected before admission (an input hook threw): the error response only, no prompt_result.
+    fail(command, 'input hook rejected the prompt');
     return;
   }
 

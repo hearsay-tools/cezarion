@@ -38,6 +38,13 @@ export interface OmpUiMapperState extends OmpTextLane {
   readonly sessionId: string | null;
   readonly turnSeq: number;
   readonly turnId: string | null;
+  /**
+   * Id of the `prompt` that opened the turn in flight (null when OMP woke on its own), and
+   * whether OMP acknowledged it. Only this prompt's local completion or pre-admission failure
+   * ends the turn; a steer's never does.
+   */
+  readonly turnPromptId: string | null;
+  readonly turnPromptAdmitted: boolean;
   readonly stopReason: StopReason;
   /** Usage of the turn in flight, held from `message_end` to `session_settled` (as Pi's `turnUsage`). */
   readonly turnUsage: TokenUsage | null;
@@ -92,6 +99,8 @@ export function createOmpUiState(): OmpUiMapperState {
     sessionId: null,
     turnSeq: 0,
     turnId: null,
+    turnPromptId: null,
+    turnPromptAdmitted: false,
     stopReason: 'end_turn',
     turnUsage: null,
     turnCostUsd: null,
@@ -107,21 +116,40 @@ export function createOmpUiState(): OmpUiMapperState {
   };
 }
 
-/** Same as `pi-ui-mapper.ts` `piTurnStarted`. */
-export function ompTurnStarted(state: OmpUiMapperState): OmpUiMapping {
+/**
+ * Same as `pi-ui-mapper.ts` `piTurnStarted`, plus the id of the `prompt` that opens the turn
+ * (the runner's; omitted when OMP's own activity opened it).
+ */
+export function ompTurnStarted(state: OmpUiMapperState, promptId?: string): OmpUiMapping {
   const turnSeq = state.turnSeq + 1;
   const turnId = `turn_${turnSeq}`;
   return {
     events: [{ type: 'turn.started', turnId }],
-    state: { ...state, turnSeq, turnId, stopReason: 'end_turn', textBlock: 0 },
+    state: {
+      ...state,
+      turnSeq,
+      turnId,
+      turnPromptId: promptId ?? null,
+      turnPromptAdmitted: false,
+      stopReason: 'end_turn',
+      textBlock: 0,
+    },
   };
 }
 
+/** The frame answers the `prompt` that opened the turn in flight (ids are the runner's). */
+function opensTurn(value: Record<string, unknown>, state: OmpUiMapperState): boolean {
+  const id = string(value.id);
+  return state.turnId !== null && id !== undefined && id === state.turnPromptId;
+}
+
 /**
- * Which frame ends a turn (rpc.md § Yield vs settled): `session_settled` when the session went
- * quiet, or a prompt OMP finished without invoking the agent — a `prompt_result` with
+ * Which frame can end a turn (rpc.md § Yield vs settled): `session_settled` when the session
+ * went quiet, or a prompt OMP finished without invoking the agent — a `prompt_result` with
  * `agentInvoked: false`, or the prompt's own success response carrying `data.agentInvoked:
- * false` (no `prompt_result` follows that one). `agent_end` is never a boundary.
+ * false` (no `prompt_result` follows that one). `agent_end` is never a boundary. A `local`
+ * boundary ends the turn only for the prompt that opened it: a steer answered locally, or
+ * failing after admission (`RpcPromptResults.fail`), leaves the running turn alone.
  */
 export function ompTurnBoundary(value: unknown): 'settled' | 'local' | null {
   if (!isRecord(value)) return null;
@@ -228,21 +256,25 @@ function mapResponse(value: Record<string, unknown>, state: OmpUiMapperState): O
     if (value.success === false) {
       // rpc.md § Request/Response Correlation: a prompt that fails before admission gets only
       // this error response — no `prompt_result` follows — so it is reported here. A failure
-      // after admission can send a later error response with the same id AND a `prompt_result`,
-      // whose error is then skipped. The turn stays open: only the runner knows whether this
-      // prompt opened it or was a steer.
+      // after admission sends this response after the success ack, AND a `prompt_result`,
+      // whose error is then skipped. The opening prompt failing before its ack ends the turn
+      // (R10); a steer failing leaves it running.
       const id = string(value.id);
       let failedPrompts = state.failedPrompts;
       if (id) {
         const kept = [...failedPrompts, id].slice(-FAILED_PROMPTS_KEPT);
         failedPrompts = new Set(kept);
       }
-      return {
-        events: [{ type: 'session.error', message: `omp: prompt failed: ${rpcError(value)}`, fatal: false }],
-        state: { ...state, failedPrompts },
-      };
+      const error: UiEvent = { type: 'session.error', message: `omp: prompt failed: ${rpcError(value)}`, fatal: false };
+      if (opensTurn(value, state) && !state.turnPromptAdmitted) {
+        const completed = completeTurn('error', state);
+        return { events: [error, ...completed.events], state: { ...completed.state, failedPrompts } };
+      }
+      return { events: [error], state: { ...state, failedPrompts } };
     }
-    return ompTurnBoundary(value) === 'local' ? completeTurn(state.stopReason, state) : { events: [], state };
+    if (value.success !== true || !opensTurn(value, state)) return { events: [], state };
+    const admitted = { ...state, turnPromptAdmitted: true };
+    return ompTurnBoundary(value) === 'local' ? completeTurn(state.stopReason, admitted) : { events: [], state: admitted };
   }
   // `set_*` failures are configuration notes for the runner (v1), not session errors.
   if (value.success === false && !command?.startsWith('set_')) {
@@ -256,11 +288,15 @@ function mapPromptResult(value: Record<string, unknown>, state: OmpUiMapperState
   if (ompTurnBoundary(value) !== 'local') return { events: [], state };
   const status = string(value.status);
   const id = string(value.id);
+  // Only the prompt that opened the turn ends it; a steer's local completion does not.
+  const ends = opensTurn(value, state);
+  const end = (reason: StopReason, next: OmpUiMapperState): OmpUiMapping =>
+    ends ? completeTurn(reason, next) : { events: [], state: next };
   if (status === 'error' && id && state.failedPrompts.has(id)) {
     // Its failure response already reported the error; this frame only ends the turn.
     const failedPrompts = new Set(state.failedPrompts);
     failedPrompts.delete(id);
-    return completeTurn('error', { ...state, failedPrompts });
+    return end('error', { ...state, failedPrompts });
   }
   if (status === 'error') {
     const error = isRecord(value.error) ? value.error : {};
@@ -269,10 +305,10 @@ function mapPromptResult(value: Record<string, unknown>, state: OmpUiMapperState
       model: error.model,
       errorMessage: error.message,
     });
-    const completed = completeTurn('error', state);
+    const completed = end('error', state);
     return { events: [{ type: 'session.error', message, fatal: false }, ...completed.events], state: completed.state };
   }
-  return completeTurn(status === 'aborted' ? 'cancelled' : state.stopReason, state);
+  return end(status === 'aborted' ? 'cancelled' : state.stopReason, state);
 }
 
 /* ------------------------------------------------------------------ */
@@ -809,7 +845,7 @@ function completeTurn(reason: StopReason, state: OmpUiMapperState): OmpUiMapping
   if (state.turnCostUsd !== null) event.costUsd = state.turnCostUsd;
   return {
     events: [...events, ...flushed.events, event],
-    state: { ...state, turnId: null, turnUsage: null, turnCostUsd: null },
+    state: { ...state, turnId: null, turnPromptId: null, turnPromptAdmitted: false, turnUsage: null, turnCostUsd: null },
   };
 }
 

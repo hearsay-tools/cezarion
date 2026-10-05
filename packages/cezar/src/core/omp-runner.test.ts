@@ -189,7 +189,7 @@ describe('OmpRunner session over the mock', () => {
       { id: 'cezar-steering', type: 'set_steering_mode', mode: 'all' },
       { id: 'cezar-subagents', type: 'set_subagent_subscription', level: 'events' },
       { id: 'cezar-event-filter', type: 'set_event_filter', events: null, messageUpdates: 'delta' },
-      { type: 'prompt', message: 'inspect the working tree' },
+      { type: 'prompt', id: 'cezar-prompt-1', message: 'inspect the working tree' },
     ]);
   });
 
@@ -226,7 +226,7 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
   const command = JSON.parse(line);
   if (command.type === 'get_state') send({ id: command.id, type: 'response', command: 'get_state', success: true, data: { sessionId: 'retry' } });
   else if (command.type === 'prompt') {
-    send({ type: 'response', command: 'prompt', success: true });
+    send({ id: command.id, type: 'response', command: 'prompt', success: true });
     send({ type: 'agent_start' });
     text('before the retry');
     send({ type: 'message_end', message: { role: 'assistant', stopReason: 'error', errorMessage: 'overloaded', usage: { input: 1, output: 1 } } });
@@ -305,6 +305,74 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
     expect(events).toContainEqual({ type: 'note', message: 'omp: prompt failed: Model not found: anthropic/claude-missing' });
     expect(turnEnds(events)).toBe(1);
     expect(ui).toContainEqual(expect.objectContaining({ type: 'turn.completed', stopReason: 'error' }));
+  });
+
+  it('the turn-opening prompt rejected before admission is a v1 error and the turn-end (R10)', async () => {
+    const { events, ui } = await runSession(spec('mock:prompt-rejected'));
+    expect(events.filter(event => event.type === 'error')).toEqual([
+      { type: 'error', message: 'omp: prompt failed: input hook rejected the prompt' },
+    ]);
+    const kinds = events.map(event => event.type);
+    expect(kinds.indexOf('error')).toBeLessThan(kinds.indexOf('turn-end'));
+    expect(turnEnds(events)).toBe(1);
+    expect(events.at(-1)).toEqual({ type: 'done' });
+    expect(events).not.toContainEqual(expect.objectContaining({ message: 'omp RPC session ended before session_settled' }));
+    expect(ui.filter(event => event.type === 'turn.completed' || event.type === 'session.error')).toEqual([
+      { type: 'session.error', message: 'omp: prompt failed: input hook rejected the prompt', fatal: false },
+      { type: 'turn.completed', turnId: 'turn_1', stopReason: 'error' },
+    ]);
+  });
+
+  it.each(['mock:steer-local', 'mock:steer-local-result', 'mock:steer-failed'])(
+    'a human steer OMP finishes without the agent keeps the running turn open (%s)',
+    async (steer) => {
+      const { events, ui } = await runSession(spec('mock:steer-tool'), (event, session) => {
+        if (event.type === 'tool-call' && event.id === 'tool-steer') session.sendMessage([{ type: 'text', text: steer }]);
+      });
+      expect(lines('commands.ndjson').filter(command => command.type === 'prompt').at(-1)).toEqual({
+        type: 'prompt', id: 'cezar-prompt-2', message: steer, streamingBehavior: 'steer',
+      });
+      const kinds = events.map(event => event.type === 'text' ? `text:${event.text}` : event.type);
+      expect(turnEnds(events)).toBe(1);
+      expect(kinds.indexOf('text:steer tool done')).toBeLessThan(kinds.indexOf('turn-end'));
+      expect(events.filter(event => event.type === 'error')).toEqual([]);
+      const completed = ui.filter(event => event.type === 'turn.completed');
+      expect(completed).toEqual([expect.objectContaining({ turnId: 'turn_1', stopReason: 'end_turn' })]);
+      const toolDone = ui.findIndex(event => event.type === 'item.completed' && event.item.id === 'tool-steer');
+      expect(toolDone).toBeGreaterThanOrEqual(0);
+      expect(toolDone).toBeLessThan(ui.indexOf(completed[0]!));
+    },
+  );
+
+  it('a mid-turn agent steer rejected before admission rejects only its submission', async () => {
+    let acknowledged: Promise<void> | boolean | undefined;
+    const consumed: string[][] = [];
+    const events: AgentEvent[] = [];
+    const ui: UiEvent[] = [];
+    let session: AgentSession;
+    session = new OmpRunner({ bin: MOCK }).startSession(
+      spec('mock:steer-tool'),
+      (event) => {
+        events.push(event);
+        if (event.type === 'tool-call' && acknowledged === undefined) {
+          acknowledged = session.sendAgentMessage([{ type: 'text', text: 'mock:steer-rejected' }], ['input-1']);
+          if (acknowledged instanceof Promise) acknowledged.catch(() => undefined);
+        }
+      },
+      { autoEndAfterFirstTurn: true, onAgentInputConsumed: (ids) => consumed.push([...ids]), onUiEvent: (event) => ui.push(event) },
+    );
+    await session.result;
+    expect(acknowledged).toBeInstanceOf(Promise);
+    await expect(acknowledged).rejects.toThrow('input hook rejected the steer');
+    expect(consumed).toEqual([]);
+    const kinds = events.map(event => event.type === 'text' ? `text:${event.text}` : event.type);
+    expect(turnEnds(events)).toBe(1);
+    expect(kinds.indexOf('text:steer tool done')).toBeLessThan(kinds.indexOf('turn-end'));
+    expect(events).toContainEqual({ type: 'note', message: 'omp: prompt failed: input hook rejected the steer' });
+    expect(events.filter(event => event.type === 'error')).toEqual([]);
+    expect(ui.filter(event => event.type === 'turn.completed')).toEqual([
+      expect.objectContaining({ turnId: 'turn_1', stopReason: 'end_turn' }),
+    ]);
   });
 
   it('a mid-turn sendAgentMessage goes out as a steer and resolves on its prompt ack', async () => {

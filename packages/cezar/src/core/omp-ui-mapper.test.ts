@@ -26,8 +26,8 @@ function frames(fixture: string): unknown[] {
 }
 
 /** Folds `mapOmpRpcMessage` over a frame list, opening the turn first as the runner does
- *  when it writes the `prompt`. */
-function fold(values: readonly unknown[], start: OmpUiMapperState = ompTurnStarted(createOmpUiState()).state) {
+ *  when it writes the `prompt` (id `p`). */
+function fold(values: readonly unknown[], start: OmpUiMapperState = ompTurnStarted(createOmpUiState(), 'p').state) {
   let state = start;
   const events: UiEvent[] = start.turnId ? [{ type: 'turn.started', turnId: start.turnId }] : [];
   const perFrame: UiEvent[][] = [];
@@ -247,8 +247,11 @@ describe('omp ui mapper (golden fixtures)', () => {
     expect(result.events.at(-1)).toEqual({ type: 'turn.completed', turnId: 'turn_1', stopReason: 'end_turn' });
   });
 
-  it('a prompt that fails before the agent ran reports the error and ends the turn as error', () => {
-    const { events } = fold([
+  it('a prompt that fails after admission reports the error once and ends the turn at its prompt_result', () => {
+    // rpc-mode.ts v18.4.11: the success ack, then `onError`'s failure response, then `fail()`'s
+    // `prompt_result` (agentInvoked false) with the same id.
+    const { events, perFrame } = fold([
+      { id: 'p', type: 'response', command: 'prompt', success: true },
       { id: 'p', type: 'response', command: 'prompt', success: false, error: 'No API key for anthropic' },
       {
         type: 'prompt_result',
@@ -260,13 +263,14 @@ describe('omp ui mapper (golden fixtures)', () => {
       },
     ]);
     // The failure response reports it; its `prompt_result` (same id) only ends the turn.
+    expect(perFrame[1]).toEqual([{ type: 'session.error', message: 'omp: prompt failed: No API key for anthropic', fatal: false }]);
     expect(events.slice(1)).toEqual([
       { type: 'session.error', message: 'omp: prompt failed: No API key for anthropic', fatal: false },
       { type: 'turn.completed', turnId: 'turn_1', stopReason: 'error' },
     ]);
   });
 
-  it('a prompt that fails before admission reports the error and leaves the turn to the runner', () => {
+  it('the turn-opening prompt failing before admission reports the error and ends the turn as error (R10)', () => {
     // rpc.md: a failure before admission is the command's error response, and no
     // `prompt_result` follows (rpc-mode.ts discards the ticket).
     const { events, state } = fold([
@@ -274,7 +278,51 @@ describe('omp ui mapper (golden fixtures)', () => {
     ]);
     expect(events.slice(1)).toEqual([
       { type: 'session.error', message: 'omp: prompt failed: input hook rejected the prompt', fatal: false },
+      { type: 'turn.completed', turnId: 'turn_1', stopReason: 'error' },
     ]);
+    expect(state.turnId).toBeNull();
+  });
+
+  it('a steer failing before admission reports the error and keeps the running turn open', () => {
+    const { events, state } = fold([
+      { id: 'p', type: 'response', command: 'prompt', success: true },
+      { id: 's', type: 'response', command: 'prompt', success: false, error: 'input hook rejected the steer' },
+    ]);
+    expect(events.slice(1)).toEqual([
+      { type: 'session.error', message: 'omp: prompt failed: input hook rejected the steer', fatal: false },
+    ]);
+    expect(state.turnId).toBe('turn_1');
+  });
+
+  it('a steer completed locally or failing mid-turn never ends the running turn', () => {
+    const { events, perFrame } = fold([
+      { id: 'p', type: 'response', command: 'prompt', success: true },
+      { id: 's1', type: 'response', command: 'prompt', success: true, data: { agentInvoked: false } },
+      { id: 's2', type: 'response', command: 'prompt', success: true },
+      { type: 'prompt_result', id: 's2', agentInvoked: false, status: 'completed', sessionSettled: false },
+      { id: 's3', type: 'response', command: 'prompt', success: true },
+      { type: 'prompt_result', id: 's3', agentInvoked: false, status: 'error', error: { message: 'steer failed' }, sessionSettled: false },
+      { type: 'session_settled' },
+    ]);
+    expect(events.filter((event) => event.type === 'turn.completed')).toEqual([
+      { type: 'turn.completed', turnId: 'turn_1', stopReason: 'end_turn' },
+    ]);
+    expect(perFrame.at(-1)?.at(-1)).toEqual({ type: 'turn.completed', turnId: 'turn_1', stopReason: 'end_turn' });
+    expect(events).toContainEqual({ type: 'session.error', message: 'omp: provider request failed: steer failed', fatal: false });
+  });
+
+  it('a local boundary never ends a turn no prompt opened', () => {
+    // Activity after a settle re-opens a turn on its own (OMP woke up); a prompt finished
+    // locally while it runs is someone else's.
+    const { events, state } = fold(
+      [
+        { type: 'message_update', assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: 'woke' } },
+        { type: 'prompt_result', agentInvoked: false, status: 'completed', sessionSettled: false },
+        { id: 's', type: 'response', command: 'prompt', success: true, data: { agentInvoked: false } },
+      ],
+      createOmpUiState(),
+    );
+    expect(events.filter((event) => event.type === 'turn.completed')).toEqual([]);
     expect(state.turnId).toBe('turn_1');
   });
 

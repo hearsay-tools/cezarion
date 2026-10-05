@@ -24,7 +24,6 @@ import {
   mapOmpRpcMessage,
   ompFlushProviderError,
   ompProviderErrorMessage,
-  ompTurnBoundary,
   ompTurnStarted,
 } from './omp-ui-mapper.js';
 import { summarizeRunnerStderr } from './runner-stderr.ts';
@@ -173,8 +172,10 @@ export interface OmpRunnerOptions {
 /**
  * Persistent subprocess adapter for OMP's RPC mode (#595), one `omp --mode rpc` child per
  * session. Structure follows `pi-runner.ts` step for step (Pi stays untouched); what OMP changes
- * is the turn boundary — `session_settled`, or a prompt OMP completed without the agent
- * (`ompTurnBoundary`), never `agent_end` — plus the startup commands and the error paths.
+ * is the turn boundary — `session_settled`, or the turn-opening prompt OMP completed without the
+ * agent or rejected before admission (`ompTurnBoundary`, gated by prompt id in the mapper), never
+ * `agent_end` — plus the startup commands and the error paths. v1 `turn-end` follows the mapper
+ * closing its turn, so the two streams cannot disagree on a boundary.
  *
  * Contract: oh-my-pi v18.4.11 `docs/rpc.md`, `packages/coding-agent/src/modes/rpc/rpc-mode.ts`.
  */
@@ -281,14 +282,17 @@ export class OmpRunner implements AgentRunner {
     };
     let agentInputReady = false;
     let promptSerial = 0;
-    let humanPromptAcks = 0;
+    let humanSerial = 0;
+    // Every prompt carries an id: a local completion or failure ends the turn only when it
+    // answers the prompt that opened it, never a steer (the mapper gates on this id).
+    const humanAcks = new Set<string>();
     let agentAck: { id: string; resolve: () => void; reject: (error: Error) => void } | undefined;
     const rejectAgentAck = () => {
       const pending = agentAck; agentAck = undefined;
       pending?.reject(new Error('omp closed before prompt acknowledgement'));
     };
     const scheduleAutoEnd = () => {
-      if (!opts.autoEndAfterFirstTurn || !open || autoEndTimer || agentAck || humanPromptAcks) return;
+      if (!opts.autoEndAfterFirstTurn || !open || autoEndTimer || agentAck || humanAcks.size) return;
       autoEndTimer = setTimeout(() => {
         autoEndTimer = undefined;
         if (opts.shouldAutoEnd?.() !== false) end();
@@ -299,10 +303,10 @@ export class OmpRunner implements AgentRunner {
     // acknowledgement gets one readiness hint when it lands, even mid-turn.
     let refusedForAck = false;
     const readyAfterAck = () => {
-      if (open && agentInputReady && !ompUi.turnId && !agentAck && !humanPromptAcks) {
+      if (open && agentInputReady && !ompUi.turnId && !agentAck && !humanAcks.size) {
         refusedForAck = false;
         opts.onAgentInputReady?.(); scheduleAutoEnd();
-      } else if (refusedForAck && open && !agentAck && !humanPromptAcks && !pendingMarkerAsk) {
+      } else if (refusedForAck && open && !agentAck && !humanAcks.size && !pendingMarkerAsk) {
         refusedForAck = false;
         opts.onAgentInputReady?.();
       }
@@ -326,6 +330,7 @@ export class OmpRunner implements AgentRunner {
         turnTextStart = textChunks.length;
       }
       const { message, images } = toOmpPrompt(content);
+      const id = requestId ?? `cezar-prompt-${++humanSerial}`;
       if (autoEndTimer) {
         clearTimeout(autoEndTimer);
         autoEndTimer = undefined;
@@ -333,7 +338,7 @@ export class OmpRunner implements AgentRunner {
       if (
         !write({
           type: 'prompt',
-          ...(requestId ? { id: requestId } : {}),
+          id,
           message,
           ...(images.length > 0 ? { images } : {}),
           ...(ompUi.turnId ? { streamingBehavior: 'steer' } : {}),
@@ -341,10 +346,10 @@ export class OmpRunner implements AgentRunner {
       ) {
         return false;
       }
-      if (!requestId) humanPromptAcks += 1;
+      if (!requestId) humanAcks.add(id);
       else submissions.accept(requestId, inputIds, message);
       if (!ompUi.turnId) {
-        const mapped = ompTurnStarted(ompUi);
+        const mapped = ompTurnStarted(ompUi, id);
         ompUi = mapped.state;
         for (const event of mapped.events) opts.onUiEvent?.(event);
       }
@@ -430,6 +435,8 @@ export class OmpRunner implements AgentRunner {
           // second boundary for the same prompt must not end the next one.
           const turnOpen = ompUi.turnId !== null;
           emitUi(value);
+          // The mapper closed its turn on this frame: v1 ends the turn with it.
+          const endsTurn = turnOpen && ompUi.turnId === null;
           if (!isRecord(value)) continue;
 
           if (value.type === 'response' && value.command === 'get_state' && value.success === true && isRecord(value.data)) {
@@ -443,29 +450,41 @@ export class OmpRunner implements AgentRunner {
               onEvent?.({ type: 'note', message: `omp: ${string(value.command)} failed: ${rpcError(value)}` });
             }
           } else if (value.type === 'response' && value.command === 'prompt') {
-            // A failed prompt is reported by the `prompt_result` that follows it
-            // (rpc-prompt-results.ts `fail`), so this response is only a note, never a 2nd error.
-            if (value.success === false) onEvent?.({ type: 'note', message: `omp: prompt failed: ${rpcError(value)}` });
+            if (value.success === false) {
+              // The turn-opening prompt rejected before admission gets no `prompt_result`, so it
+              // is the turn's error here (R10). A failure after admission is reported by the
+              // `prompt_result` that follows it (rpc-prompt-results.ts `fail`), and a steer's
+              // failure leaves the turn running: both are only a note.
+              const message = `omp: prompt failed: ${rpcError(value)}`;
+              if (endsTurn) {
+                onEvent?.({ type: 'error', message });
+                turnFailed = true;
+              } else {
+                onEvent?.({ type: 'note', message });
+              }
+            }
             const pending = agentAck;
-            if (pending && value.id === pending.id) {
+            const id = string(value.id);
+            if (pending && id === pending.id) {
               agentAck = undefined;
               if (value.success === true) { acked.add(pending.id); pending.resolve(); }
               else pending.reject(new Error(rpcError(value)));
-            } else if (value.id === undefined) {
-              humanPromptAcks = Math.max(0, humanPromptAcks - 1);
+            } else if (id) {
+              humanAcks.delete(id);
             }
             readyAfterAck();
           } else if (value.type === 'response' && value.success === false) {
             onEvent?.({ type: 'error', message: rpcError(value) });
           } else if (value.type === 'prompt_result' && value.agentInvoked === false && value.status === 'error') {
-            // The prompt failed before the agent ran: no settle follows, so the turn ends here.
+            // The prompt failed before the agent ran: no settle follows, so the turn ends here
+            // when it opened the turn. A steer failing mid-turn leaves it running.
             const error = isRecord(value.error) ? value.error : {};
-            if (turnOpen) {
-              onEvent?.({
-                type: 'error',
-                message: ompProviderErrorMessage({ provider: error.provider, model: error.model, errorMessage: error.message }),
-              });
+            const message = ompProviderErrorMessage({ provider: error.provider, model: error.model, errorMessage: error.message });
+            if (endsTurn) {
+              onEvent?.({ type: 'error', message });
               turnFailed = true;
+            } else if (turnOpen) {
+              onEvent?.({ type: 'note', message });
             }
           } else if (value.type === 'message_update' && isRecord(value.assistantMessageEvent)) {
             const update = value.assistantMessageEvent;
@@ -527,7 +546,7 @@ export class OmpRunner implements AgentRunner {
             if (message) onEvent?.({ type: 'note', message: `omp: ${message}` });
           }
 
-          if (turnOpen && ompTurnBoundary(value) !== null) {
+          if (endsTurn) {
             flushText();
             emitLatchedProviderError();
             pendingMarkerAsk = parseAskMarker(textChunks.slice(turnTextStart).join('\n')) !== null;
@@ -591,7 +610,7 @@ export class OmpRunner implements AgentRunner {
       sendAgentMessage: (content, inputIds = []) => {
         // #505: a running turn is steered; only a pending CEZ:ASK or an unacknowledged
         // prompt refuses.
-        if (open && !pendingMarkerAsk && (agentAck || humanPromptAcks)) { refusedForAck = true; return false; }
+        if (open && !pendingMarkerAsk && (agentAck || humanAcks.size)) { refusedForAck = true; return false; }
         if (!open || pendingMarkerAsk) return false;
         const id = `cezar-agent-${++promptSerial}`;
         let resolve!: () => void, reject!: (error: Error) => void;
