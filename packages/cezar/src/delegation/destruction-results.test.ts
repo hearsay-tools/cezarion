@@ -77,6 +77,7 @@ describe('verified destruction retains results through explicit history deletion
     expect(f.store.canDeleteRun(f.parent.id)).toBe(false);
     expect(f.store.deleteRun(workerId)).toBe(true);
     for (const name of [`${workerId}.ndjson`, `${workerId}.handoff.md`, `${workerId}-images`]) expect(existsSync(join(files, name))).toBe(false);
+    f.store.close(); // a restart: the old store must not still own the parent's family
     const reopened = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true });
     f.service.registerProject({ id: 'project', root: f.root, store: reopened, manager: f.manager });
     const result = await f.service.collect(f.caller, { workerId });
@@ -115,6 +116,7 @@ describe('verified destruction retains results through explicit history deletion
     expect(f.store.getRun(workerId)).toBeDefined();
     expect(existsSync(join(files, `${workerId}-images/worker-context-0.input`))).toBe(true);
     vi.mocked(rmSync).mockImplementation(real);
+    f.store.close(); // a restart: the old store must not still own the parent's family
     const reopened = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true });
     expect(reopened.deleteRun(workerId)).toBe(true);
     expect(existsSync(join(files, `${workerId}-images`))).toBe(false);
@@ -168,6 +170,7 @@ describe('verified destruction retains results through explicit history deletion
     expect(f.store.deleteRun(f.parent.id)).toBe(false);
     expect(existsSync(join(files, `${f.parent.id}-worker-results`))).toBe(false);
     fault.mockRestore();
+    f.store.close(); // a restart: the old store must not still own the parent's family
     const reopened = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true });
     expect(reopened.deleteRun(f.parent.id)).toBe(true); reopened.flush();
   });
@@ -175,6 +178,7 @@ describe('verified destruction retains results through explicit history deletion
     const { workerId, files } = await completed(); await f.service.destroy(f.caller, { workerId });
     const records = f.store.listRuns();
     const parent = records.find(run => run.id === f.parent.id)!;
+    f.store.close(); // a restart: the old store must not still own the parent's family
     seedRuns(join(f.root, '.ai/cezar'), kind === 'missing' ? records.filter(run => run.id !== parent.id)
       : records.map(run => run.id === parent.id ? { ...run, delegation: { invalid: true } } : run));
     const reopened = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true });
@@ -217,6 +221,7 @@ describe('verified destruction retains results through explicit history deletion
   });
   it('denies parent deletion when a missing child has a result but no completed deletion receipt', async () => {
     const { workerId } = await completed(); await f.service.destroy(f.caller, { workerId });
+    f.store.close(); // a restart: the old store must not still own the parent's family
     seedRuns(join(f.root, '.ai/cezar'), f.store.listRuns().filter(run => run.id !== workerId));
     const reopened = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true });
     expect(reopened.readWorkerResult(f.parent.id, workerId)).toBeDefined();
@@ -286,7 +291,7 @@ describe('verified destruction retains results through explicit history deletion
     expect(f.store.deleteRun(f.parent.id)).toBe(true);
   });
   it.each(['queued', 'running'] as const)('does not revive a %s parent with interrupted deletion on restart', async status => {
-    interruptedParentDeletion(); f.store.updateRun(f.parent.id, { status }); f.store.flush();
+    interruptedParentDeletion(); f.store.updateRun(f.parent.id, { status }); f.store.close();
     const reopened = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true });
     const manager = createFixtureManager(reopened, f.root);
     vi.spyOn(manager as unknown as { pump(): Promise<void> }, 'pump').mockResolvedValue();

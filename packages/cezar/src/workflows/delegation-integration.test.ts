@@ -183,7 +183,7 @@ describe('public delegation completion integration', () => {
     await until(() => !manager.isActive(p.id), 'parent session closes at review');
     expect(store.getRun(p.id)?.status).toBe('review');
     await Promise.all(executions.splice(0)); await Promise.all(turns.splice(0));
-    manager.dispose(); store.flush(); await controller.close();
+    manager.dispose(); store.close(); await controller.close();
     store = RunStore.open(join(repo, '.ai/cezar'), { keepLive: true });
     manager = new RunManager(store, repo); track();
     controller = await DelegationController.start(); controller.attachProject({ id: 'integration', root: repo, store, manager });

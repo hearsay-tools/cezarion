@@ -7,6 +7,7 @@ import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { managerDisposed } from './fixture-cleanup.testkit.ts';
 import { RunStore, type RunRecord } from '../runs/store.ts';
 import { agentTmpDirLocations, resolveAgentTmpDir } from '../runs/agent-tmpdir.ts';
 import { ensureOwnedWorkspace, planOwnedWorkspace, removeOwnedWorkspace } from '../delegation/workspace.ts';
@@ -50,7 +51,8 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
   });
   afterEach(async () => {
     for (const release of releases.splice(0)) release();
-    for (const run of store.listRuns()) manager.cancel(run.id);
+    // A test that restarted disposed this manager and closed this store: nothing to cancel here.
+    if (!managerDisposed(manager)) for (const run of store.listRuns()) manager.cancel(run.id);
     await Promise.allSettled(executions.splice(0));
     await until(() => store.listRuns().every(run => !manager.isActive(run.id)));
     manager.dispose(); store.flush(); vi.restoreAllMocks(); vi.unstubAllEnvs();
@@ -74,7 +76,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     expect(manager.requestWorkerStop(w.id)).toEqual({ workerId: w.id, state: 'terminated' });
     expect(await manager.awaitRunTermination(w.id, 10)).toBe(true);
     expect(manager.requestWorkerStop(w.id).state).toBe('terminated');
-    const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
+    store.close(); const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
     expect(reopened.getRun(w.id)?.status).toBe('cancelled');
     expect(reopened.readWorkerExecution(w.id)).toMatchObject({ phase: 'complete' });
     expect(JSON.stringify(reopened.getRun(w.id))).not.toMatch(/execution|generation/);
@@ -121,7 +123,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     expect(manager.getWorkerNoMaterializationProof(w.id)).toBeUndefined();
     destroy(w); manager.requestWorkerStop(w.id);
     expect(await manager.awaitRunTermination(w.id, 10)).toBe(true);
-    const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
+    manager.dispose(); store.close(); const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
     const other = new RunManager(reopened, root);
     try {
       expect(reopened.readWorkerExecution(w.id)).toMatchObject({ phase: 'complete', neverMaterialized: true });
@@ -287,7 +289,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     mkdirSync(scratchDir, { recursive: true });
     const scratch = join(scratchDir, 'retained.txt'); writeFileSync(scratch, 'old process scratch');
     manager.dispose(); store.updateRun(w.id, { status }); store.flush();
-    const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true }); const other = new RunManager(reopened, root);
+    store.close(); const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true }); const other = new RunManager(reopened, root);
     try {
       await other.recover();
       await until(() => !other.isActive(w.id) && reopened.getRun(w.id)?.status !== 'queued');
@@ -325,7 +327,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     expect(store.commitWorkerExecutionComplete(w.id, first.generation)).toBe(false);
     await until(() => store.getRun(w.id)?.status === 'waiting'); manager.requestWorkerStop(w.id);
     expect(await manager.awaitRunTermination(w.id, 15_000)).toBe(true);
-    const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true }); const other = new RunManager(reopened, root);
+    store.close(); const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true }); const other = new RunManager(reopened, root);
     expect(await other.awaitRunTermination(w.id, 10)).toBe(true); other.dispose(); reopened.flush();
   });
 
@@ -397,8 +399,8 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
   });
 
   it('queued destruction recovery never launches and missing or stale private evidence remains incomplete', async () => {
-    const w = await worker(); destroy(w); store.flush();
-    const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true }); const other = new RunManager(reopened, root);
+    const w = await worker(); destroy(w);
+    manager.dispose(); store.close(); const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true }); const other = new RunManager(reopened, root);
     await other.recover(); expect(reopened.getRun(w.id)?.status).toBe('queued');
     expect(other.isActive(w.id)).toBe(false); expect(existsSync(workspace(w).path)).toBe(false);
     rmSync(join(root, '.ai/cezar/runs', `${w.id}.execution.json`));
@@ -596,7 +598,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
       expect(readRecord(w.id)).toMatchObject({ generation: prior.generation, controller: { pid: process.pid }, processes: [{ pid: first!.proc.pid }] });
       manager.dispose(); store.updateRun(w.id, { status }); store.flush();
       setController(w.id, { pid: await deadPid(), startToken: '1' });
-      const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true }); const other = new RunManager(reopened, root);
+      store.close(); const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true }); const other = new RunManager(reopened, root);
       const service = new DelegationService(); service.registerProject({ id: 'reopened', root, store: reopened, manager: other });
       return { w, child: first!, prior, reopened, other, service, launches: () => launches };
     }
@@ -663,7 +665,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
       // A missing record makes these two real cwd holders scan-only evidence.
       rmSync(recordPath(w.id));
       const prior = store.readWorkerExecution(w.id);
-      const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
+      store.close(); const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
       const other = new RunManager(reopened, root);
       const service = new DelegationService(); service.registerProject({ id: 'reopened', root, store: reopened, manager: other });
       const since = Date.parse(w.createdAt) - 1_000;

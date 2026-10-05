@@ -49,7 +49,8 @@ describe('live repository identity recovery', () => {
     store.updateRun(owned.id, { referencedIssueUrl: foreignIssue, issueNumber: 99 });
     const explicit = create(store, `Work on ${foreignPr}`);
     store.appendEvent(explicit.id, { type: 'result', result: foreignPr });
-    store.flush();
+    // A restart: the old store goes, or it would still own these queued runs.
+    store.close();
     // Recovery must heal retained records too, not just runs created in this process.
     store = RunStore.open(root);
     expect(armRepoHandle(store, root, controller.signal)).toBeUndefined();

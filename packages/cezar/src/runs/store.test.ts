@@ -281,13 +281,14 @@ describe('RunStore — titleSummary + diffStat (#389)', () => {
     const store = RunStore.open(dataDir);
     const run = store.createRun({ title: 't', workflow: 'w', task: 'task', steps: [] });
     store.updateRun(run.id, { worktreeReclaimedAt: '2026-07-18T00:00:00.000Z' });
-    store.flush();
+    // Each reopen is a restart: the previous store goes first, or it still owns the queued run.
+    store.close();
 
     const reopened = RunStore.open(dataDir);
     expect(reopened.getRun(run.id)?.worktreeReclaimedAt).toBe('2026-07-18T00:00:00.000Z');
     // Re-materialization clears the stamp so retention sees the run again.
     reopened.updateRun(run.id, { worktreeReclaimedAt: undefined });
-    reopened.flush();
+    reopened.close();
     expect(RunStore.open(dataDir).getRun(run.id)?.worktreeReclaimedAt).toBeUndefined();
   });
 
@@ -297,13 +298,13 @@ describe('RunStore — titleSummary + diffStat (#389)', () => {
     // A fresh record has no activity (additive/optional).
     expect(run.activity).toBeUndefined();
     store.updateRun(run.id, { status: 'running', activity: 'monitoring' });
-    store.flush();
+    store.close();
 
     const reopened = RunStore.open(dataDir, { keepLive: true });
     expect(reopened.getRun(run.id)?.activity).toBe('monitoring');
     // Resume/terminal transitions clear it back to a plain running/other state.
     reopened.updateRun(run.id, { status: 'running', activity: undefined });
-    reopened.flush();
+    reopened.close();
     expect(RunStore.open(dataDir, { keepLive: true }).getRun(run.id)?.activity).toBeUndefined();
   });
 
@@ -1245,7 +1246,7 @@ describe('RunStore — referenced-issue discovery (spec 2026-07-21-report-ref-di
       result: 'See https://github.com/open-mercato/cezar/issues/1',
     });
     expect(firstStore.getRun(run.id)?.issueNumber).toBe(1);
-    firstStore.flush();
+    firstStore.close();
     const store = RunStore.open(dataDir, { keepLive: true });
     store.appendEvent(run.id, {
       type: 'result',
@@ -1609,7 +1610,7 @@ describe("RunStore — a task never adopts another repository's ref (#945)", () 
       const seed = RunStore.open(dataDir);
       const run = seed.createRun({ title: 't', workflow: 'w', task, steps: [] });
       seed.appendEvent(run.id, { type: 'result', result: `${foreignPr} ${foreignIssue}` });
-      seed.flush();
+      seed.close();
       const store = RunStore.open(dataDir);
       expect(store.getRun(run.id)?.referencedPullRequestUrl).toBe(foreignPr);
       store.setRepoHandle(project);
@@ -1859,7 +1860,7 @@ describe('RunStore — seq survives a restart (#424 symptom class)', () => {
     const run = store.createRun({ title: 't', workflow: 'w', task: 't', steps: [] });
     store.appendEvent(run.id, { type: 'note', message: 'one' });
     store.appendEvent(run.id, { type: 'note', message: 'two' });
-    store.flush();
+    store.close();
 
     // A client that replayed the file now dedups with maxSeq = 2. A restarted
     // process restarting seqs at 1 would have every resumed event dropped.

@@ -54,7 +54,7 @@ it('only matching delivered human input retires the latest valid question', () =
 });
 
 it.each([undefined, false])('reconstructs a pending question after a legacy/crash scalar %s without writing cold state', scalar => {
-  store.flush();
+  store.close(); // the reopen below is a restart: this store must not still own the live root
   const index = readPersistedRuns(dir);
   if (scalar !== undefined) index[0].hasPendingHumanAsk = scalar;
   seedRuns(dir, index);
@@ -66,7 +66,7 @@ it.each([undefined, false])('reconstructs a pending question after a legacy/cras
 });
 
 it('reconciles a stale true summary from a matching durable answer', () => {
-  store.flush();
+  store.close(); // the reopen below is a restart: this store must not still own the live root
   const index = readPersistedRuns(dir); index[0].hasPendingHumanAsk = true;
   seedRuns(dir, index);
   writeFileSync(join(dir, 'runs', `${id}.ndjson`), [
@@ -78,7 +78,7 @@ it('reconciles a stale true summary from a matching durable answer', () => {
 });
 
 it.each([undefined, false, true])('requests human attention when history is unreadable and the saved summary is %s', scalar => {
-  store.flush();
+  store.close(); // the reopen below is a restart: this store must not still own the live root
   const index = readPersistedRuns(dir); index[0].hasPendingHumanAsk = scalar;
   seedRuns(dir, index);
   const events = join(dir, 'runs', `${id}.ndjson`); rmSync(events, { force: true }); mkdirSync(events);
@@ -87,14 +87,14 @@ it.each([undefined, false, true])('requests human attention when history is unre
 });
 
 it('keeps legacy pure worker waits free of human attention when no history exists', () => {
-  store.flush();
+  store.close(); // the reopen below is a restart: this store must not still own the live root
   expect(RunStore.open(dir, { keepLive: true }).getRun(id)).toHaveProperty('hasPendingHumanAsk', false);
   expect(readRunIndexFromDisk(dir).runs[0]).toHaveProperty('hasPendingHumanAsk', false);
 });
 
 it('recovers human attention for a running root with a durable worker wait before manager recovery parks it', () => {
   store.updateRun(id, { status: 'running', hasPendingHumanAsk: false });
-  store.flush();
+  store.close(); // the reopen below is a restart: this store must not still own the live root
   writeFileSync(join(dir, 'runs', `${id}.ndjson`), JSON.stringify({ ...ask(), seq: 1, ts: new Date().toISOString() }) + '\n');
   expect(RunStore.open(dir, { keepLive: true }).getRun(id)).toMatchObject({ status: 'running', hasPendingHumanAsk: true });
   expect(readRunIndexFromDisk(dir).runs[0]).toMatchObject({ status: 'failed', hasPendingHumanAsk: true });

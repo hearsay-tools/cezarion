@@ -299,6 +299,7 @@ describe('delegation service durable authority', () => {
     });
     await expect(f.service.spawn(f.caller, input())).rejects.toThrow();
     expect(f.store.listRuns()).toHaveLength(1); expect(f.parent.delegation).toMatchObject({ receipts: [] });
+    f.store.close(); // a restart: the old store must not still own the parent's family
     const reopened = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true });
     expect(reopened.listRuns()).toHaveLength(1); expect(reopened.getRun(f.parent.id)?.delegation).toMatchObject({ receipts: [] }); reopened.flush();
   });
@@ -599,7 +600,8 @@ describe('delegation service durable authority', () => {
     const record = join(f.root, '.ai/cezar/runs', `${workerId}.processes.json`);
     const dead = spawn(process.execPath, ['-e', '']); await new Promise(resolve => dead.once('exit', resolve));
     writeFileSync(record, JSON.stringify({ ...JSON.parse(readFileSync(record, 'utf8')), controller: { pid: dead.pid, startToken: '1' } }));
-    f.store.flush();
+    // The restart: the old manager and store go with the process.
+    f.manager.dispose(); f.store.close();
     // The restarted cezar: a fresh manager owns no execution or queue entry for the worker.
     const reopened = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true }); const manager = createFixtureManager(reopened, f.root);
     f.service.registerProject({ id: 'project', root: f.root, store: reopened, manager });

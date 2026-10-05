@@ -154,6 +154,7 @@ describe('parent-owned collected worker results', () => {
     await f.service.destroy(f.caller, { workerId: run.id });
     const result = await f.service.collect(f.caller, { workerId: run.id });
     expect(f.store.deleteRun(run.id)).toBe(true);
+    f.store.close(); // a restart: the old store must not still own the parent's family
     const reopened = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true });
     f.service.registerProject({ id: 'project', root: f.root, store: reopened, manager: f.manager });
     expect(await f.service.collect(f.caller, { workerId: run.id })).toMatchObject({ summary: result.summary, outcome: 'destroyed', artifacts: { state: 'available', items: [{ state: 'deleted', id: 'result.png' }] } });

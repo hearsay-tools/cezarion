@@ -480,7 +480,7 @@ describe('RunStore durable delegation', () => {
     const created = store.createOwnedRun({ ...input, runner: 'codex', model: 'model', agentProfile: 'account' }, run.id, requestId, metadata, requestHash);
     expect(created).toMatchObject({ id: workerId, delegation: metadata, status: 'queued', runner: 'codex', model: 'model', agentProfile: 'account' });
     expect(emitted.sort()).toEqual([run.id, workerId].sort());
-    store.flush();
+    store.close();
     store = RunStore.open(dataDir, { keepLive: true });
     // The selector hash is unchanged even if parent HEAD and inherited settings have moved.
     const retry = store.createOwnedRun(input, run.id, requestId, worker(run.id, randomUUID()), requestHash);
@@ -533,12 +533,12 @@ describe('RunStore durable delegation', () => {
         ...metadata, destroy: { requestedAt: now, phase: 'complete', remaining: [] },
       } }]);
     }
-    store.flush();
+    store.close();
     store = RunStore.open(dataDir, { keepLive: true });
     const thirtyThird = randomUUID();
     expect(store.createOwnedRun(input, run.id, randomUUID(), worker(run.id, thirtyThird), requestHash).id).toBe(thirtyThird);
     expect(store.createOwnedRun(input, run.id, requestId, worker(run.id, randomUUID()), requestHash).delegation).toMatchObject({ destroy: { phase: 'complete' } });
-    store.flush();
+    store.close();
     store = RunStore.open(dataDir, { keepLive: true });
     const reopened = store.getRun(run.id)!.delegation;
     expect(reopened?.role === 'root' ? reopened.receipts.length : 0).toBe(33);
@@ -564,7 +564,7 @@ describe('RunStore durable delegation', () => {
       store.createOwnedRun(input, run.id, randomUUID(), metadata, requestHash);
       if (i < 32) store.commitDelegation([{ id, delegation: { ...metadata, destroy: { requestedAt: now, phase: 'complete', remaining: [] } } }]);
     }
-    store.flush();
+    store.close();
     store = RunStore.open(dataDir, { keepLive: true });
     const blockers = parentReadiness(store.getRun(run.id)!, ids.map(id => ({ workerId: id, run: store.getRun(id), terminated: false })));
     expect(blockers).toHaveLength(33);
@@ -574,7 +574,7 @@ describe('RunStore durable delegation', () => {
   it('fails closed when a retry receipt points at a missing worker', () => {
     const run = parent();
     store.createOwnedRun(input, run.id, requestId, worker(run.id), requestHash);
-    store.flush();
+    store.close();
     seedRuns(dataDir, disk().filter((r: { id: string }) => r.id !== workerId));
     store = RunStore.open(dataDir, { keepLive: true });
     expect(() => store.createOwnedRun(input, run.id, requestId, worker(run.id, randomUUID()), requestHash)).toThrow(/receipt/i);
@@ -592,7 +592,7 @@ describe('RunStore durable delegation', () => {
     const legacy = store.createRun(input);
     const broken = store.createRun(input);
     const valid = parent();
-    store.flush();
+    store.close();
     const rows = disk().map((r: { id: string }) => r.id === broken.id ? { ...r, delegation: { role: 'worker', parentRunId: 'bad' } } : r);
     seedRuns(dataDir, rows);
     store = RunStore.open(dataDir, { keepLive: true });

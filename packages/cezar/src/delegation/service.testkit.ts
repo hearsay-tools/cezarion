@@ -1,4 +1,4 @@
-import { createFixtureManager, drainFixtureManagers } from '../workflows/fixture-cleanup.testkit.ts';
+import { createFixtureManager, drainFixtureManagers, managerDisposed } from '../workflows/fixture-cleanup.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -11,6 +11,8 @@ import { CredentialRegistry, type Caller } from './credentials.ts';
 import { DelegationService } from './service.ts';
 
 export async function waitForOwnedWork(manager: RunManager, store: RunStore): Promise<void> {
+  // A manager a restart disposed owns nothing any more: the recovered one does (#779).
+  if (managerDisposed(manager)) return;
   // Root runs have no worker execution proof; fixture tracking drains those.
   // Every worker id: a manager may still hold a worker whose record already settled (#779).
   for (const id of store.listWorkerIds().filter(id => manager.isActive(id))) {

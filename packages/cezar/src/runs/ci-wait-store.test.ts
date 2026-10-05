@@ -83,7 +83,8 @@ describe('atomic CI wait checkpoints', () => {
     expect(reopened.getRun(id)?.ciWait).toBeUndefined();
   });
   it.each(['running', 'done'] as const)('retains an unreadable previous observation for %s runs across repeated reads', (status) => {
-    store.updateRun(id, { status }); store.flush();
+    // The reopen below is a restart: this store goes first, or it still owns the running run.
+    store.updateRun(id, { status }); store.close();
     const records = readPersistedRuns(directory);
     records[0].lastCiWait = { ...wait, phase: 'delivered', result: { outcome: 'passed' } };
     seedRuns(directory, records);

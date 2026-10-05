@@ -186,6 +186,8 @@ export async function queuedWake() {
 
 export function setFailureState(value: unknown) { failureState = value; }
 export function reopenRuntime() {
+  // A restart: the old store goes first, or it would still own every live family (#779).
+  store.close();
   store = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
   manager = new RunManager(store, root, { semaphore });
   track();

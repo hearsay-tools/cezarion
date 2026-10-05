@@ -9,6 +9,7 @@ import type { ContentBlock } from '../core/agent-runner.ts';
 import { shellQuote } from '../core/shell-env.ts';
 import { HANDOFF_INSTRUCTIONS } from '../handoff.ts';
 import { RunStore } from '../runs/store.ts';
+import { crashStore } from '../runs/run-store.testkit.ts';
 import type { WorkflowDef } from './types.ts';
 import {
   RunManager,
@@ -602,7 +603,8 @@ describe('pasted screenshots materialize to disk and reach the agent as file pat
           { type: 'image', source: { type: 'base64', media_type: 'image/png', data: TINY_PNG_B64 } },
         ],
       }, mode === 'capacity').ok).toBe(true);
-      // No shutdown/flush: accepting Continue must itself make the message durable.
+      // No shutdown/flush: accepting Continue must itself make the message durable. A crash.
+      launcher.dispose(); crashStore(store);
       store = RunStore.open(dataDir, { keepLive: true });
       expect(store.getRun(record.id)?.status).toBe(mode === 'capacity' ? 'queued' : 'running');
       const directory = join(dataDir, 'runs', `${record.id}-images`);
@@ -610,7 +612,7 @@ describe('pasted screenshots materialize to disk and reach the agent as file pat
       if (mode === 'missing') rmSync(join(directory, 'pasted-1.pdf'));
       if (mode === 'running') {
         store.updateStep(record.id, 'continue-1', { status: 'running', sessionId: 'new-session', backend: 'claude' });
-        store.flush();
+        store.close();
         store = RunStore.open(dataDir, { keepLive: true });
       }
       manager = createFixtureManager(store, repoRoot);

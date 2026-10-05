@@ -343,7 +343,8 @@ it.each(['live', 'expired'] as const)('restart recovers a %s receipt and expiry 
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
     const first = enqueue('recovered input'), generation = randomUUID();
     const receipt = manager.reserveInboxInputs(runId, generation, [first.id])!;
-    store.updateRun(runId, { status: 'waiting' }); store.flush(); manager.dispose();
+    // A restart: the old store goes too, or it would still own the run.
+    store.updateRun(runId, { status: 'waiting' }); store.close(); manager.dispose();
     vi.setSystemTime(Date.now() + (mode === 'live' ? 60_000 : 120_001));
     const reopened = RunStore.open(dir, { keepLive: true }), recovered = new RunManager(reopened, dir);
     // Hold scheduler admission while observing the real durable wake produced by expiry.
@@ -423,7 +424,7 @@ it('restart after durable inbox ACK retires the wake without creating a continua
     store.updateRun(runId, { status: 'waiting' });
     // Simulate the crash boundary after the atomic ACK and before manager reconciliation.
     store.ackInboxInputs(runId, receiptId, generation, new Date().toISOString());
-    manager.dispose(); store.flush();
+    manager.dispose(); store.close();
     const reopened = RunStore.open(dir, { keepLive: true }), recovered = new RunManager(reopened, dir);
     const pump = vi.spyOn(recovered as unknown as { pump(): Promise<void> }, 'pump').mockResolvedValue();
     try {
