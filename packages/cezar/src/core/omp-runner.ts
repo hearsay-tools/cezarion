@@ -486,13 +486,15 @@ export class OmpRunner implements AgentRunner {
     startup();
 
     const limitMs = spec.timeoutMs ?? this.timeoutMs;
+    // One wall-clock limit for the whole run: a Ruling 13 respawn re-arms with what is left.
+    const deadlineAt = Date.now() + limitMs;
     const armDeadline = (): NodeJS.Timeout | undefined => {
       const timer =
         limitMs > 0
           ? setTimeout(() => {
               timedOut = true;
               interrupt();
-            }, limitMs)
+            }, Math.max(0, deadlineAt - Date.now()))
           : undefined;
       timer?.unref?.();
       return timer;

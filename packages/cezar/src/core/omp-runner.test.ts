@@ -678,6 +678,28 @@ process.exit(2);
       expect(lines('commands.ndjson').filter(command => command.type === 'prompt')).toHaveLength(1);
     });
 
+    it('the respawn gets only the time left on the original deadline', async () => {
+      const bin = join(cwd, 'slow-refusal-omp.mjs');
+      writeFileSync(bin, `#!/usr/bin/env node
+import { appendFileSync, readFileSync } from 'node:fs';
+const countFile = ${JSON.stringify(join(cwd, 'invocations.ndjson'))};
+appendFileSync(countFile, JSON.stringify(process.argv.slice(2)) + '\\n');
+if (readFileSync(countFile, 'utf8').split('\\n').filter(Boolean).length === 1) {
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  process.stderr.write('Error: Built-in tool unavailable in this session: todo.\\n');
+  process.exit(2);
+}
+await import(${JSON.stringify(MOCK)});
+`, { mode: 0o755 });
+      const started = Date.now();
+      const events: AgentEvent[] = [];
+      await new OmpRunner({ bin }).run(spec('mock:hold', { allowedTools: ['Read', 'TodoWrite'], timeoutMs: 700 }), event => events.push(event));
+      expect(invocations()).toHaveLength(2);
+      expect(events.some(event => event.type === 'error' && event.message.startsWith('omp CLI timed out'))).toBe(true);
+      // One wall-clock limit for the whole run: well under the ~1100 ms a re-armed full timeout gives.
+      expect(Date.now() - started).toBeLessThan(1000);
+    });
+
     it('a second refusal is surfaced as today, never a third spawn', async () => {
       const events: AgentEvent[] = [];
       const failed = new OmpRunner({ bin: gatedBin(['todo', 'read']) })
