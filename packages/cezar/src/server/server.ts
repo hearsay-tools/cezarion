@@ -3897,9 +3897,9 @@ export function createApp(deps: ServerDeps) {
    * (#779, plan step 3): a `serve` and a headless `cez run` can share a project's runs.
    * - Another live cezar process's run answers `409 { error }`, the shape these routes already
    *   use for a run that exists but cannot be acted on now. Reads are never refused.
-   * - A run whose owner is proven dead is adopted first — claimed, loaded and recovered as a
-   *   restart would — and the control then applies. Otherwise Stop on a crashed `cez run` would
-   *   be a dead end until this cockpit restarted.
+   * - A run whose owner is proven dead is adopted first — claimed, loaded and settled as
+   *   interrupted, never resumed (`settleOrphanedRun`) — and the control then applies. Otherwise
+   *   Stop on a crashed `cez run` would be a dead end until this cockpit restarted.
    * - A run this process stopped writing after a conflicting write answers 409 too.
    *
    * Registered against explicit paths, like `requireAutomations`: `route()` re-registers it under
