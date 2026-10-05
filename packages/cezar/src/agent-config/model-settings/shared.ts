@@ -1,4 +1,5 @@
 import { parse as parseToml } from 'smol-toml';
+import { parse as parseYaml } from 'yaml';
 import type { RunnerId } from '../../core/agent-runner.ts';
 import { CONFIG_FILES, type ConfigFileDef, type ConfigFormat } from '../catalog.ts';
 import { readConfigFile } from '../files.ts';
@@ -46,9 +47,9 @@ function valueAtPath(value: unknown, path: string): unknown {
 }
 
 export function parseConfigContent(content: string, format: ConfigFormat): unknown {
-  return format === 'toml'
-    ? parseToml(content)
-    : JSON.parse(format === 'jsonc' ? stripJsonTrailingCommas(stripJsonComments(content)) : content);
+  if (format === 'toml') return parseToml(content);
+  if (format === 'yaml') return parseYaml(content);
+  return JSON.parse(format === 'jsonc' ? stripJsonTrailingCommas(stripJsonComments(content)) : content);
 }
 
 function stringAtPath(content: string, format: ConfigFormat, path: string): string | undefined {

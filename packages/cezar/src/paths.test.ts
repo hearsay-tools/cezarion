@@ -95,6 +95,23 @@ describe('agentHomePaths', () => {
     expect(paths.opencodeConfig).toBe('/home/u/.config/opencode');
     expect(paths.pi).toBe('/home/u/.pi/agent');
     expect(paths.cursor).toBe('/home/u/.cursor');
+    expect(paths.omp).toBe('/home/u/.omp/agent');
+  });
+
+  it('resolves the OMP home from PI_CODING_AGENT_DIR, then PI_CONFIG_DIR, then ~/.omp/agent', () => {
+    const home = { HOME: '/home/u' };
+    expect(agentHomePaths({ ...home } as NodeJS.ProcessEnv).omp).toBe('/home/u/.omp/agent');
+    expect(agentHomePaths({ ...home, PI_CONFIG_DIR: '.omp-work' } as NodeJS.ProcessEnv).omp).toBe(
+      '/home/u/.omp-work/agent',
+    );
+    expect(
+      agentHomePaths({ ...home, PI_CONFIG_DIR: '.omp-work', PI_CODING_AGENT_DIR: '/opt/omp-agent' } as NodeJS.ProcessEnv)
+        .omp,
+    ).toBe('/opt/omp-agent');
+    // blank values fall through rather than yielding a relative path
+    expect(
+      agentHomePaths({ ...home, PI_CONFIG_DIR: '  ', PI_CODING_AGENT_DIR: ' ' } as NodeJS.ProcessEnv).omp,
+    ).toBe('/home/u/.omp/agent');
   });
 
   it('honors agent-specific home overrides', () => {

@@ -24,10 +24,10 @@ describe('agent-config catalog', () => {
     }
   });
 
-  it('<repo>/AGENTS.md is ONE entry read by every runner that loads it (Codex, OpenCode, Pi)', () => {
+  it('<repo>/AGENTS.md is ONE entry read by every runner that loads it (Codex, OpenCode, Pi, Cursor, OMP)', () => {
     const agents = CONFIG_FILES.filter((f) => f.label === 'AGENTS.md' && f.scope === 'project');
     expect(agents).toHaveLength(1);
-    expect(agents[0]!.runners).toEqual(['codex', 'opencode', 'pi', 'cursor']);
+    expect(agents[0]!.runners).toEqual(['codex', 'opencode', 'pi', 'cursor', 'omp']);
   });
 
   it('lists Pi’s documented files: settings at both scopes and the global AGENTS.md — and no MCP file', () => {
@@ -37,6 +37,40 @@ describe('agent-config catalog', () => {
     expect(findConfigFile('pi.user.settings')!.resolve('/repo', HOME)).toBe('/home/u/.pi/agent/settings.json');
     expect(findConfigFile('pi.project.settings')!.resolve('/repo', HOME)).toBe('/repo/.pi/settings.json');
     expect(findConfigFile('pi.user.memory')!.resolve('/repo', HOME)).toBe('/home/u/.pi/agent/AGENTS.md');
+  });
+
+  it('lists the five OMP files and shares AGENTS.md with omp', () => {
+    const omp = CONFIG_FILES.filter((f) => f.runners.includes('omp'));
+    expect(omp.map((f) => f.id)).toEqual([
+      'omp.user.settings',
+      'omp.project.settings',
+      'omp.user.mcp',
+      'omp.project.mcp',
+      'omp.user.memory',
+      'project.agents',
+    ]);
+    expect(omp.map((f) => [f.id, f.kind, f.scope, f.format, f.label])).toEqual([
+      ['omp.user.settings', 'settings', 'user', 'yaml', '~/.omp/agent/config.yml'],
+      ['omp.project.settings', 'settings', 'project', 'yaml', '.omp/config.yml'],
+      ['omp.user.mcp', 'mcp', 'user', 'json', '~/.omp/agent/mcp.json'],
+      ['omp.project.mcp', 'mcp', 'project', 'json', '.omp/mcp.json'],
+      ['omp.user.memory', 'memory', 'user', 'markdown', '~/.omp/agent/AGENTS.md'],
+      ['project.agents', 'memory', 'project', 'markdown', 'AGENTS.md'],
+    ]);
+    expect(omp.filter((f) => f.holdsMcp).map((f) => f.id)).toEqual(['omp.user.mcp', 'omp.project.mcp']);
+    expect(findConfigFile('omp.user.settings')!.resolve('/repo', HOME)).toBe('/home/u/.omp/agent/config.yml');
+    expect(findConfigFile('omp.project.settings')!.resolve('/repo', HOME)).toBe('/repo/.omp/config.yml');
+    expect(findConfigFile('omp.user.mcp')!.resolve('/repo', HOME)).toBe('/home/u/.omp/agent/mcp.json');
+    expect(findConfigFile('omp.project.mcp')!.resolve('/repo', HOME)).toBe('/repo/.omp/mcp.json');
+    expect(findConfigFile('omp.user.memory')!.resolve('/repo', HOME)).toBe('/home/u/.omp/agent/AGENTS.md');
+    // no native-default model strategy for OMP (spec § Model selection)
+    for (const f of omp) {
+      expect(f.modelKey).toBeUndefined();
+      expect(f.modelKeys).toBeUndefined();
+    }
+    for (const f of omp.filter((x) => x.id.startsWith('omp.'))) {
+      expect(f.docsUrl).toMatch(/^https:\/\/github\.com\/can1357\/oh-my-pi\/blob\/main\/docs\/[a-z-]+\.md$/);
+    }
   });
 
   it('Pi’s settings expose defaultModel + defaultProvider, project over user', () => {
@@ -83,6 +117,8 @@ describe('agent-config catalog', () => {
       'codex.project.config',
       'codex.user.config',
       'cursor.project.mcp',
+      'omp.project.mcp',
+      'omp.user.mcp',
       'opencode.project.config',
       'opencode.user.config',
     ]);

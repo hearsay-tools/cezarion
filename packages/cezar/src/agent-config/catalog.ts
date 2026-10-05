@@ -16,7 +16,7 @@ import type { RunnerId } from '../core/agent-runner.ts';
  * the Pi entries against Pi's README and docs/settings.md on 2026-09-15 (#322).
  */
 
-export type ConfigFormat = 'json' | 'jsonc' | 'toml' | 'markdown';
+export type ConfigFormat = 'json' | 'jsonc' | 'toml' | 'yaml' | 'markdown';
 export type ConfigScope = 'user' | 'project' | 'local';
 /** `settings` = behavior knobs; `memory` = instruction/markdown; `mcp` = a dedicated MCP file. */
 export type ConfigKind = 'settings' | 'memory' | 'mcp';
@@ -82,6 +82,8 @@ const CODEX_AGENTS_DOCS = 'https://developers.openai.com/codex/guides/agents-md'
 const OPENCODE_CONFIG_DOCS = 'https://opencode.ai/docs/config/';
 const OPENCODE_RULES_DOCS = 'https://opencode.ai/docs/rules/';
 const PI_SETTINGS_DOCS = 'https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/settings.md';
+const OMP_CONFIG_DOCS = 'https://github.com/can1357/oh-my-pi/blob/main/docs/config-usage.md';
+const OMP_MCP_DOCS = 'https://github.com/can1357/oh-my-pi/blob/main/docs/mcp-config.md';
 const PI_CONTEXT_FILES_DOCS = 'https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/README.md#context-files';
 
 /**
@@ -340,6 +342,81 @@ export const CONFIG_FILES: ConfigFileDef[] = [
     docsUrl: PI_CONTEXT_FILES_DOCS,
   },
 
+  // ---- OMP: verified 2026-10-02 against v18.4.11 ----
+  // Oh My Pi (`can1357/oh-my-pi`, docs at main @ 7318a70cf4ed). The user layer lives in
+  // `AgentHomePaths.omp` (`$PI_CODING_AGENT_DIR` or `~/${PI_CONFIG_DIR || '.omp'}/agent`, the default
+  // profile; a named profile relocates it and is not modelled). Project files always live in
+  // `<repo>/.omp/`. Settings are YAML (`config.yml`); no `modelKey`, because OMP has no native-default
+  // strategy cezar reads (spec § Model selection). `.omp/AGENTS.md` and the `.mcp.json` compatibility
+  // spellings are deliberately not listed: OMP writes only the primary paths below.
+  {
+    id: 'omp.user.settings',
+    runners: ['omp'],
+    kind: 'settings',
+    scope: 'user',
+    resolve: (_repo, home) => join(home.omp, 'config.yml'),
+    label: '~/.omp/agent/config.yml',
+    format: 'yaml',
+    tracked: 'outside-repo',
+    precedence:
+      'Global settings: the first present file among `~/.omp/agent/config.yml` and `config.yaml`. Effective precedence, highest first: environment variable declared on the definition, runtime overrides, config overlays (`PI_CONFIG_FILES`, then repeated `omp --config <path>` files), project settings, global settings, definition default.',
+    docsUrl: OMP_CONFIG_DOCS,
+  },
+  {
+    id: 'omp.project.settings',
+    runners: ['omp'],
+    kind: 'settings',
+    scope: 'project',
+    resolve: (repo) => join(repo, '.omp', 'config.yml'),
+    label: '.omp/config.yml',
+    format: 'yaml',
+    tracked: 'tracked',
+    precedence:
+      'Project settings: discovered via the settings capability (`settings.json` and `config.yml` from providers). Within the native provider, project `config.yml` follows and overrides `settings.json`. Runs read the committed copy.',
+    docsUrl: OMP_CONFIG_DOCS,
+  },
+  {
+    id: 'omp.user.mcp',
+    runners: ['omp'],
+    kind: 'mcp',
+    scope: 'user',
+    resolve: (_repo, home) => join(home.omp, 'mcp.json'),
+    label: '~/.omp/agent/mcp.json',
+    format: 'json',
+    tracked: 'outside-repo',
+    holdsMcp: true,
+    precedence:
+      'Within OMP native config, project `.omp/mcp.json` precedes `.omp/.mcp.json`, then the active profile’s user `mcp.json` and `.mcp.json`. Across providers, the first definition wins. Duplicate names are not merged.',
+    docsUrl: OMP_MCP_DOCS,
+  },
+  {
+    id: 'omp.project.mcp',
+    runners: ['omp'],
+    kind: 'mcp',
+    scope: 'project',
+    resolve: (repo) => join(repo, '.omp', 'mcp.json'),
+    label: '.omp/mcp.json',
+    format: 'json',
+    tracked: 'tracked',
+    holdsMcp: true,
+    precedence:
+      'Within OMP native config, project `.omp/mcp.json` precedes `.omp/.mcp.json`, then the active profile’s user `mcp.json` and `.mcp.json`. Across providers, the first definition wins. Duplicate names are not merged. Runs read the committed copy.',
+    docsUrl: OMP_MCP_DOCS,
+  },
+  {
+    id: 'omp.user.memory',
+    runners: ['omp'],
+    kind: 'memory',
+    scope: 'user',
+    resolve: (_repo, home) => join(home.omp, 'AGENTS.md'),
+    label: '~/.omp/agent/AGENTS.md',
+    format: 'markdown',
+    tracked: 'outside-repo',
+    precedence:
+      'User-level context file, read directly by the native provider. Standalone ancestor `AGENTS.md` files are loaded separately by the low-priority `agents-md` provider.',
+    docsUrl: OMP_CONFIG_DOCS,
+  },
+
   // ---- Cursor — verified against vendor docs 2026-09-16 ----
   {
     id: 'cursor.user.settings',
@@ -379,10 +456,10 @@ export const CONFIG_FILES: ConfigFileDef[] = [
     docsUrl: 'https://cursor.com/docs/cli/mcp',
   },
 
-  // ---- Shared: <repo>/AGENTS.md is read by Codex, OpenCode AND Pi ----
+  // ---- Shared: <repo>/AGENTS.md is read by Codex, OpenCode, Pi, Cursor AND OMP ----
   {
     id: 'project.agents',
-    runners: ['codex', 'opencode', 'pi', 'cursor'],
+    runners: ['codex', 'opencode', 'pi', 'cursor', 'omp'],
     kind: 'memory',
     scope: 'project',
     resolve: (repo) => join(repo, 'AGENTS.md'),
@@ -390,7 +467,7 @@ export const CONFIG_FILES: ConfigFileDef[] = [
     format: 'markdown',
     tracked: 'tracked',
     precedence:
-      'Read by Codex, OpenCode, Pi and Cursor (Claude ignores it). Codex concatenates it root-down; OpenCode uses the first match and prefers it over CLAUDE.md; Pi concatenates every AGENTS.md (or CLAUDE.md) from the parent directories down, after its global file. Runs read the committed copy.',
+      'Read by Codex, OpenCode, Pi, Cursor and OMP (Claude ignores it). Codex concatenates it root-down; OpenCode uses the first match and prefers it over CLAUDE.md; Pi concatenates every AGENTS.md (or CLAUDE.md) from the parent directories down, after its global file; OMP loads standalone ancestor AGENTS.md files through its low-priority `agents-md` provider. Runs read the committed copy.',
     docsUrl: OPENCODE_RULES_DOCS,
   },
 ];
