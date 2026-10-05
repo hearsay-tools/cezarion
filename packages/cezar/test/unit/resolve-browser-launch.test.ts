@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, rmSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { test } from 'node:test';
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const resolverPath = resolve(import.meta.dirname, '../../../../.ai/scripts/resolve-browser-launch.mjs');
@@ -18,6 +21,31 @@ const desktopHost = {
   kubernetesServiceHost: '',
   cgroup: '0::/init.scope',
 };
+
+test('the resolver CLI emits launch settings when invoked through a symlink', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'cez-browser-resolver-'));
+  try {
+    const entry = join(fixture, 'resolve-browser-launch.mjs');
+    symlinkSync(resolverPath, entry);
+    const result = spawnSync(process.execPath, [entry], {
+      encoding: 'utf8',
+      env: { ...process.env, E2E_BROWSER_NAMESPACE: 'cez-e2e-symlink' },
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.notEqual(result.stdout.trim(), '', 'CLI entrypoint did not emit launch settings');
+    assert.equal(JSON.parse(result.stdout).namespace, 'cez-e2e-symlink');
+  } finally {
+    rmSync(fixture, { recursive: true, force: true });
+  }
+});
+
+test('importing the resolver does not emit CLI launch settings', () => {
+  const result = spawnSync(process.execPath, ['--input-type=module', '-e', `await import(${JSON.stringify(pathToFileURL(resolverPath).href)})`], {
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, '');
+});
 
 test('desktop Linux keeps sandboxed defaults and leaves a short TMPDIR alone', () => {
   const resolved = resolveBrowserLaunch({
