@@ -49,5 +49,5 @@ for (let i = 0; i < 200; i++) {
   });
   store.updateRun(extra.id, { status: 'review' });
 }
-store.flush();
 console.log(JSON.stringify({ root, runs: store.listRuns().length, finished: 12 }));
+store.close();

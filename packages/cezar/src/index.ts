@@ -397,7 +397,7 @@ async function serveCommand(
     // Dev servers run in their own process groups: stop them before this process exits.
     void Promise.all([delegation.close(), previewHost?.close()]).finally(() => {
       server.close();
-      store.flush();
+      store.close();
       process.exit(0);
     });
   };
@@ -565,7 +565,7 @@ async function runCommand(
     // A slow GitHub child must not keep a completed headless task alive. Any handle that
     // already arrived has repaired the store; an unfinished lookup remains unknown.
     repoHandleController.abort();
-    store.flush();
+    store.close();
   }
 }
 
@@ -792,6 +792,10 @@ function ensureDataGitignore(repoRoot: string): void {
   const wanted = [
     'runs.json',
     'runs.json.tmp',
+    'runs.json.pre-sqlite.bak', // the exact runs.json the run database was imported from (#779)
+    'runs.db',
+    'runs.db-wal',
+    'runs.db-shm',
     'runs/',
     'worktrees/',
     'tmp/', // per-run agent temp directories (#785)

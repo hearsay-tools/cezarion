@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RUNNER_IDS } from '../core/agent-runner.ts';
@@ -8,6 +8,7 @@ import { QUICK_TASK_WORKFLOW } from './types.ts';
 import type { AgentSession } from '../core/agent-runner.ts';
 import type { CiWait, CiWaitResult } from '@open-mercato/cezar-contract';
 import { controlledWire, manager, parent, root, restart, semaphore, store, until, worker, waitOf, useWorkerWaitFixture } from './worker-wait.testkit.ts';
+import { readPersistedRuns } from '../runs/run-store.testkit.ts';
 
 // Tool transport is exercised by adapter parity; lifecycle tests control only external resources.
 const externalResource = vi.hoisted(() => ({ supervisor: {} }));
@@ -54,7 +55,7 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     await until(wire.initialReceived);
     const receipt = await register(run.id);
     expect(receipt.phase).toBe('registered');
-    const persisted = JSON.parse(readFileSync(join(root, '.ai/cezar/runs.json'), 'utf8')) as Array<{ id: string; ciWait?: CiWait }>;
+    const persisted = readPersistedRuns(join(root, '.ai/cezar')) as Array<{ id: string; ciWait?: CiWait }>;
     expect(persisted.find(row => row.id === run.id)?.ciWait?.id).toBe(receipt.id);
     expect(store.getRun(run.id)?.activity).not.toBe('monitoring');
     writeFileSync(gate, 'end');

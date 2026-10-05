@@ -1,8 +1,9 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runsIndexResponseSchema, type RunsIndexResponse } from '@open-mercato/cezar-contract';
+import { readPersistedText, seedRuns } from '../runs/run-store.testkit.ts';
 const resolveRepoHandle = vi.hoisted(() => vi.fn());
 vi.mock('./forge/github.ts', async (importOriginal) => ({
   ...await importOriginal<typeof import('./forge/github.ts')>(),
@@ -27,7 +28,7 @@ import { __seedRefStatusCacheForTests } from './forge/github.ts';
  * `RunRecord` carries `steps[]`.
  */
 
-/** A stored record, written straight to a cold project's `runs.json`. */
+/** A stored record, written straight to a cold project's run database. */
 function storedRun(over: Record<string, unknown> & { id: string; title: string }) {
   return {
     workflow: 'build',
@@ -78,10 +79,10 @@ describe('workspace runs index API', () => {
     return (await res.json()) as RunsIndexResponse;
   };
 
-  /** Give `root` a `runs.json` without ever opening a store on it — a genuinely COLD project. */
+  /** Give `root` persisted runs without ever opening a store on it — a genuinely COLD project. */
   const seedColdProject = (root: string, runs: unknown[]) => {
     mkdirSync(join(root, '.ai/cezar'), { recursive: true });
-    writeFileSync(join(root, '.ai/cezar/runs.json'), JSON.stringify(runs), 'utf8');
+    seedRuns(join(root, '.ai/cezar'), runs);
   };
 
   it('answers an empty index for an empty registry — never a 404', async () => {
@@ -131,8 +132,7 @@ describe('workspace runs index API', () => {
       referencedIssueUrl: foreignIssue, issueNumber: 43, referencedIssueNumberSeeded: true,
       referencedPrCandidates: [foreignPr], referencedIssueCandidates: [foreignIssue],
     })]);
-    const indexPath = join(otherRoot, '.ai/cezar/runs.json');
-    const original = readFileSync(indexPath, 'utf8');
+    const original = readPersistedText(join(otherRoot, '.ai/cezar'));
     let finish!: (handle: { owner: string; name: string }) => void;
     resolveRepoHandle.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
     const contexts = new ProjectContexts({ listProjects });
@@ -155,7 +155,7 @@ describe('workspace runs index API', () => {
     expect(contexts.peek(other.id)).toBeUndefined();
     expect(contexts.ids()).toEqual([]);
     expect(existsSync(join(otherRoot, '.ai/cezar/runs'))).toBe(false);
-    expect(readFileSync(indexPath, 'utf8')).toBe(original);
+    expect(readPersistedText(join(otherRoot, '.ai/cezar'))).toBe(original);
     contexts.disposeAll();
   });
 
@@ -359,7 +359,7 @@ describe('workspace runs index API', () => {
     seedColdProject(otherRoot, [storedRun({ id: 'cold-question', title: 'Cold question', status: 'waiting', delegation, hasPendingHumanAsk: false })]);
     mkdirSync(join(otherRoot, '.ai/cezar/runs'));
     writeFileSync(join(otherRoot, '.ai/cezar/runs/cold-question.ndjson'), JSON.stringify({ ...question, seq: 1, ts: new Date().toISOString() }) + '\n');
-    const before = readFileSync(join(otherRoot, '.ai/cezar/runs.json'), 'utf8');
+    const before = readPersistedText(join(otherRoot, '.ai/cezar'));
     const contexts = new ProjectContexts({ listProjects });
     const app = makeApp({ contexts });
     try {
@@ -368,7 +368,7 @@ describe('workspace runs index API', () => {
       const full = await (await apiRequest(app, `/api/v1/runs/${live.id}`)).json();
       expect(full).toHaveProperty('hasPendingHumanAsk', true);
       expect(contexts.peek(other.id)).toBeUndefined();
-      expect(readFileSync(join(otherRoot, '.ai/cezar/runs.json'), 'utf8')).toBe(before);
+      expect(readPersistedText(join(otherRoot, '.ai/cezar'))).toBe(before);
     } finally { contexts.disposeAll(); }
   });
 
@@ -412,6 +412,7 @@ describe('workspace runs index API', () => {
     await registerProject(repoRoot);
     await registerProject(otherRoot);
     mkdirSync(join(otherRoot, '.ai/cezar'), { recursive: true });
+    // Never migrated, so the legacy file is what the cold reader parses.
     writeFileSync(join(otherRoot, '.ai/cezar/runs.json'), '{ not json', 'utf8');
     const live = store.createRun({ title: 'Boot task', workflow: 'build', task: 't', steps: [] });
 

@@ -245,8 +245,8 @@ export class ProjectContexts {
   /**
    * Tear down one project's context (project removal): the manager stops
    * making moves on its own (`RunManager.dispose()` — usage-sampler
-   * unsubscribe, timers, queued state) and the store is closed — index
-   * flushed to disk, every event-bus subscriber detached. Returns false when
+   * unsubscribe, timers, queued state) and the store is closed — pending
+   * rows written, its database released, every event-bus subscriber detached. Returns false when
    * nothing was built for `projectId`.
    */
   dispose(projectId: string, opts: { releasePreviews?: boolean } = {}): boolean {
@@ -328,9 +328,10 @@ export class ProjectContexts {
   }
 }
 
-/** Shared teardown for built and half-built contexts. */
+/** Shared teardown for built and half-built contexts. Closing the store writes what is pending
+ *  and releases its database connection; a late write to it afterwards saves nothing. */
 function teardown(ctx: { store: RunStore; manager: RunManager }): void {
   ctx.manager.dispose();
-  ctx.store.flush();
+  ctx.store.close();
   ctx.store.removeAllListeners();
 }

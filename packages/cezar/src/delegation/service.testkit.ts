@@ -47,6 +47,6 @@ export function fixture(): { root: string; sha: string; store: RunStore; manager
     async close() {
       unregister();
       credentials.close();
-      await removeAfterOwnedWork(root, waitForOwnedWork(manager, store).then(() => drainFixtureManagers(root)));
+      await removeAfterOwnedWork(root, waitForOwnedWork(manager, store).then(() => drainFixtureManagers(root)).then(() => store.close()));
     } };
 }

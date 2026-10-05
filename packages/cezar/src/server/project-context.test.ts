@@ -9,6 +9,7 @@ import { emitUsageForTest } from '../core/process-usage.ts';
 import { processStartToken } from '../delegation/process-liveness.ts';
 import type { PreviewHost } from '../preview/host.ts';
 import { ProjectContextError, ProjectContexts, type ProjectContextSource } from './project-context.ts';
+import { readPersistedRuns } from '../runs/run-store.testkit.ts';
 
 /**
  * Lazy per-project context map (spec 2026-07-20-multi-project-workspace,
@@ -168,9 +169,10 @@ describe('ProjectContexts', () => {
     expect(err).toBeInstanceOf(ProjectContextError);
   });
 
-  it('dispose(): the manager receives no further usage ticks and the index is flushed', async () => {
+  it('dispose(): the manager receives no further usage ticks and the store is flushed and closed', async () => {
     const contexts = makeContexts([{ id: 'a', root: rootA, status: 'not-git' }]);
     const ctx = await contexts.context('a');
+    const run = ctx.store.createRun({ title: 'pending', workflow: 'w', task: 't', steps: [] });
     // The constructor's onUsage listener calls `this.enforceMemoryLimit` —
     // spy on the instance and drive the fan-out directly, the way the shared
     // `ps` sampler would. An empty snapshot keeps the real method a sync no-op.
@@ -185,8 +187,12 @@ describe('ProjectContexts', () => {
     expect(contexts.dispose('a')).toBe(true);
     emitUsageForTest({});
     expect(spy).toHaveBeenCalledTimes(1); // unsubscribed — no further ticks
-    // Store closed: the index landed on disk despite the debounced save.
-    expect(existsSync(join(rootA, '.ai/cezar', 'runs.json'))).toBe(true);
+    // Store closed: the pending row landed on disk despite the debounced save, and a late write
+    // to the disposed store saves nothing.
+    expect(readPersistedRuns(join(rootA, '.ai/cezar')).map((saved) => saved.id)).toEqual([run.id]);
+    ctx.store.updateRun(run.id, { title: 'after dispose' });
+    ctx.store.flush();
+    expect(readPersistedRuns(join(rootA, '.ai/cezar'))[0]?.title).toBe('pending');
     expect(ctx.store.listenerCount('event')).toBe(0);
 
     // Disposed id is gone from the map; the next access builds a fresh context.

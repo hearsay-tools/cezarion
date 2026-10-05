@@ -65,6 +65,7 @@ import {
   type SeamObservation,
   waitFor,
 } from './harness-parity.testkit.ts';
+import { blockRunWrites } from '../runs/run-store.testkit.ts';
 
 /** One row of the matrix, named once and applied to every harness. */
 interface SeamCriterion<T = SeamObservation> {
@@ -1216,9 +1217,9 @@ describe('harness parity — owned input run tier', () => {
         manager.enqueueOwnedRun(runId);
         await waitFor(() => store.getRun(runId)?.status === 'waiting');
         store.flush();
-        const tmp = join(repoRoot, '.ai/cezar/runs.json.tmp');
+        let unblock: (() => void) | undefined;
         const failAfterEnqueue = ({ event }: { event: { type: string } }) => {
-          if (event.type === 'agent-input') mkdirSync(tmp);
+          if (event.type === 'agent-input') unblock ??= blockRunWrites(join(repoRoot, '.ai/cezar'));
         };
         store.on('event', failAfterEnqueue);
         const input = agentInput(parentRunId, 'mock:hold');
@@ -1228,7 +1229,7 @@ describe('harness parity — owned input run tier', () => {
           expect(store.getRun(runId)?.agentInputs).toEqual([input]);
         } finally {
           store.off('event', failAfterEnqueue);
-          rmSync(tmp, { recursive: true, force: true });
+          unblock?.();
         }
         await waitFor(() => !manager.isActive(runId));
         expect(store.getRun(runId)?.status).toBe('failed');
@@ -1259,13 +1260,12 @@ describe('harness parity — owned input run tier', () => {
       await withOwnedInputRun(backend, 'hold', async fixture => {
         const { runId, parentRunId, repoRoot } = fixture;
         fixture.store.flush();
-        const tmp = join(repoRoot, '.ai/cezar/runs.json.tmp');
-        mkdirSync(tmp);
+        const unblock = blockRunWrites(join(repoRoot, '.ai/cezar'));
         try {
           expect(() => fixture.manager.steerWorker(runId, agentInput(parentRunId))).toThrow();
           expect(fixture.store.getRun(runId)?.agentInputs).toBeUndefined();
           expect(fixture.store.readEvents(runId).filter(e => e.type === 'agent-input')).toEqual([]);
-        } finally { rmSync(tmp, { recursive: true }); }
+        } finally { unblock(); }
         const input = agentInput(parentRunId);
         expect(fixture.manager.steerWorker(runId, input)).toBe('queued');
         const { store, manager } = await fixture.restart();

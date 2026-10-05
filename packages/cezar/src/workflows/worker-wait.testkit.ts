@@ -17,6 +17,7 @@ import type { AgentSession } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { withDelayedCommand } from '../core/owned-input-delivery.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
+import { readPersistedRuns, seedRuns } from '../runs/run-store.testkit.ts';
 
 export const terminal = ['review', 'done', 'failed', 'cancelled'];
 export async function until(predicate: () => boolean) { await vi.waitFor(() => expect(predicate()).toBe(true), { timeout: 15_000, interval: 10 }); }
@@ -80,7 +81,7 @@ export function useWorkerWaitFixture(options: { processScope?: false } = {}): vo
     await until(() => store.listRuns().every(run => !manager.isActive(run.id)));
     await Promise.all(executions.splice(0));
     await Promise.all(bookkeeping.splice(0));
-    manager.dispose(); store.flush();
+    manager.dispose(); store.close();
     rmSync(root, { recursive: true, force: true });
     process.env = saved;
   }, 30_000);
@@ -139,14 +140,16 @@ export function eventCheckpoint(): Map<string, string> {
   const dir = join(root, '.ai/cezar/runs');
   return new Map(readdirSync(dir).filter(name => name.endsWith('.ndjson')).map(name => [join(dir, name), readFileSync(join(dir, name), 'utf8')]));
 }
-export async function restart(fakeClock = false, diskCheckpoint?: string, events?: Map<string, string>) {
+/** Stop everything, put the persisted runs back to `diskCheckpoint` (or to what they were when
+ * this was called), and recover in a fresh store, as after a real crash. */
+export async function restart(fakeClock = false, diskCheckpoint?: readonly unknown[], events?: Map<string, string>) {
   checkpoint('restart-stop-start');
-  store.flush(); const disk = diskCheckpoint ?? readFileSync(join(root, '.ai/cezar/runs.json'), 'utf8');
+  store.flush(); const disk = diskCheckpoint ?? readPersistedRuns(join(root, '.ai/cezar'));
   for (const run of store.listRuns()) manager.cancel(run.id);
   await until(() => store.listRuns().every(run => !manager.isActive(run.id)));
   await Promise.all(executions.splice(0));
-  await Promise.all(bookkeeping.splice(0)); manager.dispose(); store.flush(); checkpoint('restart-stopped');
-  writeFileSync(join(root, '.ai/cezar/runs.json'), disk);
+  await Promise.all(bookkeeping.splice(0)); manager.dispose(); store.close(); checkpoint('restart-stopped');
+  seedRuns(join(root, '.ai/cezar'), disk);
   for (const [path, content] of events ?? []) writeFileSync(path, content);
   store = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
   if (fakeClock) vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });

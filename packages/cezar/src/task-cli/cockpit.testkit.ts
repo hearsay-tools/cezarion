@@ -42,7 +42,7 @@ export async function startTestCockpit(): Promise<TestCockpit> {
       (server as unknown as { closeAllConnections?: () => void }).closeAllConnections?.();
       await new Promise((resolve) => server.close(resolve));
       manager.dispose();
-      store.flush();
+      store.close();
       rmSync(repoRoot, { recursive: true, force: true });
       if (savedDryRun === undefined) delete process.env.CEZ_DRY_RUN;
       else process.env.CEZ_DRY_RUN = savedDryRun;

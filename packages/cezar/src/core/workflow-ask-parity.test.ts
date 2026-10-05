@@ -1,4 +1,3 @@
-import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { RUNNER_IDS } from './agent-runner.ts';
@@ -6,6 +5,7 @@ import { driveRun, promptFor, waitFor, WORKFLOW_ASK_CRITERIA } from './harness-p
 import { RunStore } from '../runs/store.ts';
 import { workflowDefSchema } from '../workflows/types.ts';
 import { createFixtureManager, drainFixtureManagers } from '../workflows/fixture-cleanup.testkit.ts';
+import { readPersistedRuns, seedRuns } from '../runs/run-store.testkit.ts';
 
 describe('intermediate workflow ASK parity — #427', () => {
   for (const backend of RUNNER_IDS) for (const row of WORKFLOW_ASK_CRITERIA) {
@@ -52,11 +52,12 @@ describe('intermediate workflow ASK parity — #427', () => {
           if (row.id === 'Q5') {
             const repoRoot = manager['repoRoot'];
             store.flush();
-            const path = join(repoRoot, '.ai/cezar/runs.json');
-            const checkpoint = readFileSync(path, 'utf8');
+            const dataDir = join(repoRoot, '.ai/cezar');
+            const checkpoint = readPersistedRuns(dataDir);
             // Preserve the exact disk boundary while stopping test-owned processes.
             await drainFixtureManagers(repoRoot);
-            writeFileSync(path, checkpoint);
+            store.close();
+            seedRuns(dataDir, checkpoint);
             store = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true });
             manager = createFixtureManager(store, repoRoot);
             await manager.recover();

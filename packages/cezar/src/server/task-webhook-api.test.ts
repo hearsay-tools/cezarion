@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -13,6 +13,7 @@ import { createApp, startServer, type ServerDeps } from './server.ts';
 import { TaskWebhooks } from '../runs/webhook.ts';
 import { once } from 'node:events';
 import type { AddressInfo } from 'node:net';
+import { seedRuns } from '../runs/run-store.testkit.ts';
 
 /**
  * The task webhook's HTTP surface (#589): the registry field and its write-only token, the
@@ -199,10 +200,10 @@ describe('task webhook API', () => {
         // A run that was live when the last process exited: recovery moves it on, and that move
         // is exactly what an opted-in bot is waiting for.
         mkdirSync(join(other, '.ai/cezar'), { recursive: true });
-        writeFileSync(join(other, '.ai/cezar/runs.json'), JSON.stringify([{
+        seedRuns(join(other, '.ai/cezar'), [{
           id: 'live', title: 'live', task: 'live', workflow: 'quick-task', status: 'running', notify: true,
           createdAt: '2026-09-25T10:00:00.000Z', tokensUsed: 0, archived: false, steps: [],
-        }]));
+        }]);
         const entry = await registerProject(other);
         await mergeWriteWorkspaceConfig((config) => {
           config.projects.find((p) => p.id === entry.id)!.webhook = { url: 'https://bot.example/hook', token: 't' };

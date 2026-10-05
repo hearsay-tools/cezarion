@@ -39,6 +39,7 @@ import { plannedWorkflow, skillTaskSteps } from '../workflows/types.ts';
 import { planOwnedWorkspace } from '../delegation/workspace.ts';
 import { workerWorkflowHash, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
 import { stepKind, type WorkflowDef } from '../workflows/types.ts';
+import { readPersistedRuns, seedRuns } from '../runs/run-store.testkit.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -680,7 +681,7 @@ export async function driveRun(
     return { statuses, record: structuredClone(record()), events: readRunEvents(repoRoot, started.id) };
   } finally {
     await drainFixtureManagers(repoRoot);
-    store?.flush();
+    store?.close();
     if (savedBin === undefined) delete process.env[adapter.binEnv];
     else process.env[adapter.binEnv] = savedBin;
     if (savedDry !== undefined) process.env.CEZ_DRY_RUN = savedDry;
@@ -803,15 +804,15 @@ export async function withOwnedInputRun(
     drainBookkeeping = trackTurnBookkeeping(manager);
     const restart = async () => {
       store!.flush();
-      const index = readFileSync(join(repoRoot, '.ai/cezar/runs.json'), 'utf8');
+      const index = readPersistedRuns(join(repoRoot, '.ai/cezar'));
       // Stop only test-owned processes, then restore the precise pre-crash disk
       // checkpoint. No fake manager/session: recovery opens a new real store.
       manager!.cancel(runId!);
       await waitFor(() => !manager!.isActive(runId!));
       await drainBookkeeping();
       manager!.dispose();
-      store!.flush();
-      writeFileSync(join(repoRoot, '.ai/cezar/runs.json'), index);
+      store!.close();
+      seedRuns(join(repoRoot, '.ai/cezar'), index);
       store = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true });
       manager = new RunManager(store, repoRoot);
       drainBookkeeping = trackTurnBookkeeping(manager);
@@ -827,7 +828,7 @@ export async function withOwnedInputRun(
       }
       await drainBookkeeping();
       manager?.dispose();
-      store?.flush();
+      store?.close();
       if (savedBin === undefined) delete process.env[adapter.binEnv];
       else process.env[adapter.binEnv] = savedBin;
       for (const [name, saved] of savedExtraBins) {
@@ -898,7 +899,7 @@ export async function withSkillParentRun(
     await drainBookkeeping();
     await controller?.close();
     manager?.dispose();
-    store?.flush();
+    store?.close();
     for (const [name, value] of saved) {
       if (value === undefined) delete process.env[name]; else process.env[name] = value;
     }

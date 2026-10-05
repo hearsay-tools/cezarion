@@ -18,9 +18,10 @@
  * - Fixtures come from `benchmark-run-store-fixture.ts` (seeded, two profiles; see its header for
  *   how #778 is modeled, and the live share: max(3, 1% of runs) queued/running/waiting records on
  *   top of the finished ones, which keep the bytes the first table measured) and are generated
- *   before any timer starts. `seedRunStore` is the ONLY place that knows the storage format; swap
- *   it for a store-level seeder after the migration. Every store opens with `keepLive`, as
- *   `serve` does, so live records load as themselves.
+ *   before any timer starts. `seedRunStore` is the ONLY place that knows the storage format: since
+ *   #779 it writes `runs.db` through the tests' shared seeder, so "open" reads the database and
+ *   "cold read" reads its summaries, the way a migrated project does. Every store opens with
+ *   `keepLive`, as `serve` does, so live records load as themselves.
  * - The parent spawns one fresh process per size x profile x process index, in shuffled order,
  *   one at a time. Each process measures every operation after 3 untimed warm-up calls, taking up
  *   to --samples samples and stopping early once it has 20 and --budget-seconds have passed.
@@ -112,19 +113,6 @@ interface ChildResult {
   getRun?: { live: number[]; finished: number[]; liveIds: number; finishedIds: number };
 }
 
-// ---- fixture seeding: the one storage-format-specific step --------------------------------
-
-/**
- * Put `records` where `RunStore.open(dataDir)` finds them, exactly as `writeIndex` would write
- * them, and return the bytes stored. Replace with a store-level seeder after the migration.
- */
-function seedRunStore(dataDir: string, records: readonly RunRecord[]): number {
-  mkdirSync(join(dataDir, 'runs'), { recursive: true });
-  const path = join(dataDir, 'runs.json');
-  writeFileSync(path, JSON.stringify(records, null, 2), 'utf8');
-  return statSync(path).size;
-}
-
 // ---- measurement helpers ------------------------------------------------------------------
 
 /** Times `fn` per sample; when `fn` returns a number, that number is the sample instead. */
@@ -201,6 +189,13 @@ async function runChild(options: ChildOptions, resultPath: string): Promise<void
   process.env.CEZ_DRY_RUN = '1';
   try {
     const { RunStore } = await import('../src/runs/store.ts');
+    const { seedRuns } = await import('../src/runs/run-store.testkit.ts');
+    // ---- fixture seeding: the one storage-format-specific step ----
+    /** Put `records` where `RunStore.open(dataDir)` finds them and return the bytes stored. */
+    const seedRunStore = (dataDir: string, records: readonly RunRecord[]): number => {
+      seedRuns(dataDir, records);
+      return statSync(join(dataDir, 'runs.db')).size;
+    };
     const { readRunIndexFromDisk } = await import('../src/runs/run-index.ts');
     const { createApp } = await import('../src/server/server.ts');
     const { registerProject } = await import('../src/workspace/projects.ts');
@@ -276,7 +271,8 @@ async function runChild(options: ChildOptions, resultPath: string): Promise<void
       gc();
     }
     if (has('coldRead')) {
-      sync['cold read'] = await sampleSync(options, () => { readRunIndexFromDisk(join(coldRoot, '.ai/cezar')); });
+      // The limit `/workspace/runs-index` reads with.
+      sync['cold read'] = await sampleSync(options, () => { readRunIndexFromDisk(join(coldRoot, '.ai/cezar'), { limit: 200 }); });
       gc();
     }
     if (has('save')) {

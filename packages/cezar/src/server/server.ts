@@ -6083,7 +6083,7 @@ export function createApp(deps: ServerDeps) {
    * from the first. This feeds a CACHE READ, which costs nothing per number, so asking about one
    * the client will not paint is free and asking about one it will is the whole point.
    */
-  const mentionedReferenceNumbers = (run: RunRecord): number[] => {
+  const mentionedReferenceNumbers = (run: RunSummary): number[] => {
     const numbers: number[] = [];
     for (const url of [run.pullRequestUrl, run.referencedPullRequestUrl, run.referencedIssueUrl]) {
       const number = url ? refNumberFromUrl(url) : null;
@@ -6096,8 +6096,12 @@ export function createApp(deps: ServerDeps) {
   };
 
   // The live sample rides along on the same terms as `GET /runs`: the sampler is process-wide, so
-  // a workspace-level answer can carry it for every project's runs at once.
-  const runIndexEntry = (projectId: string, run: RunRecord): RunIndexEntry => ({ projectId, ...runSummary(run) });
+  // a workspace-level answer can carry it for every project's runs at once — a cold project's
+  // stored summaries included.
+  const withLiveUsage = (summary: RunSummary): RunSummary => {
+    const usage = currentUsage(summary.id);
+    return usage ? { ...summary, usage } : summary;
+  };
 
   /**
    * `GET /workspace/runs-index` — every registered project's recent tasks in one slim answer, so
@@ -6139,22 +6143,28 @@ export function createApp(deps: ServerDeps) {
         // No folder, no runs to read. `not-git` still has an `.ai/cezar` worth indexing.
         if (project.status === 'missing') continue;
         const owned = project.id === bootId ? bootContext : contexts.peek(project.id);
-        // `listRuns()` already sorts newest-first; the disk reader returns file order, so both
-        // paths get sorted below rather than trusting either.
+        // Both sources answer newest-first. An owned project projects the newest of its held
+        // records; a cold one reads its stored summaries, at most one past the limit.
         //
         // Archived runs are INCLUDED. The active project's rows reach the palette through
         // `GET /runs`, which has always carried them, and excluding them here would mean a task
         // is findable while you stand in its project and vanishes the moment you leave — the
         // exact asymmetry a cross-project finder exists to remove.
-        const recent = (
-          owned ? owned.store.listRuns() : readRunIndexFromDisk(
-            join(project.root, '.ai/cezar'), coldRepoHandles.get(project.root),
-          )
-        ).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-        if (recent.length > RUNS_INDEX_PER_PROJECT) truncated.push(project.id);
+        let recent: RunSummary[];
+        if (owned) {
+          const all = owned.store.listRuns();
+          if (all.length > RUNS_INDEX_PER_PROJECT) truncated.push(project.id);
+          recent = all.slice(0, RUNS_INDEX_PER_PROJECT).map((run) => runSummary(run));
+        } else {
+          const cold = readRunIndexFromDisk(join(project.root, '.ai/cezar'), {
+            handle: coldRepoHandles.get(project.root), limit: RUNS_INDEX_PER_PROJECT,
+          });
+          if (cold.truncated) truncated.push(project.id);
+          recent = cold.runs.map(withLiveUsage);
+        }
         const mentioned: number[] = [];
-        for (const run of recent.slice(0, RUNS_INDEX_PER_PROJECT)) {
-          runs.push(runIndexEntry(project.id, run));
+        for (const run of recent) {
+          runs.push({ projectId: project.id, ...run });
           mentioned.push(...mentionedReferenceNumbers(run));
         }
         if (mentioned.length > 0) {

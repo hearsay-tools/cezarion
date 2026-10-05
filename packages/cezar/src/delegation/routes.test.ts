@@ -9,6 +9,7 @@ import { Hono } from 'hono';
 import { createDelegationRoutes } from './routes.ts';
 import { fixture } from './service.testkit.ts';
 import { conversationSendResultSchema, conversationInspectResultSchema, inboxReserveResultSchema, inboxReceiptResultSchema, requestOutcomeSchema, delegationErrorResponseSchema, workerSpawnResultSchema, workerInspectionSchema, workerSteerResultSchema, workerStopResultSchema, workerDestroyResultSchema } from '@open-mercato/cezar-contract';
+import { seedRuns } from '../runs/run-store.testkit.ts';
 
 describe('authenticated delegation HTTP family', () => {
   let f: ReturnType<typeof fixture>, app: ReturnType<typeof createDelegationRoutes>;
@@ -181,7 +182,7 @@ describe('authenticated delegation HTTP family', () => {
       deadline: new Date(Date.now() - 1000).toISOString(), outcomes: [] };
     const records = f.store.listRuns().map(run => run.id === f.parent.id ? { ...run, status,
       delegation: { ...run.delegation, permissions: ['wait'], wait: legacy ? { id: wait.id, workerIds: wait.workerIds, phase: wait.phase, deadline: wait.deadline, outcomes: wait.outcomes } : wait } } : run);
-    writeFileSync(join(f.root, '.ai/cezar/runs.json'), JSON.stringify(records));
+    seedRuns(join(f.root, '.ai/cezar'), records);
     const reopened = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true }); const manager = createFixtureManager(reopened, f.root);
     f.service.registerProject({ id: 'project', root: f.root, store: reopened, manager });
     try {

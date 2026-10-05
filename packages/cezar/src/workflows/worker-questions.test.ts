@@ -10,6 +10,7 @@ import { DelegationPolicyError } from '../delegation/policy.ts';
 import { DelegationService } from '../delegation/service.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 import { eventCheckpoint, fixtureUpdateRun, manager, parent, register, restart, root, semaphore, store, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
+import { readPersistedRuns } from '../runs/run-store.testkit.ts';
 
 /** #505 PR B: a worker's question goes to its owning parent, not to the human. */
 describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () => {
@@ -273,9 +274,9 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     const f = await askedPair();
     f.close();
     const events = eventCheckpoint();
-    const disk = JSON.parse(readFileSync(join(root, '.ai/cezar/runs.json'), 'utf8')) as Array<{ id: string; status: string }>;
+    const disk = readPersistedRuns(join(root, '.ai/cezar')) as Array<{ id: string; status: string }>;
     for (const run of disk) if (run.id === f.p.id) run.status = 'done';
-    await restart(false, JSON.stringify(disk), events);
+    await restart(false, disk, events);
     await until(() => eventsOf(f.w.id, 'worker-question-fallback').length === 1);
     expect(eventsOf(f.w.id, 'worker-question-fallback')[0]).toMatchObject({ reason: 'parent-done' });
     expect(conversationOf(f.p.id)?.outcomes).toEqual([expect.objectContaining({ requestId: f.questionId, status: 'human-fallback' })]);
@@ -321,9 +322,9 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     const f = await askedPair();
     f.close();
     const events = eventCheckpoint();
-    const disk = JSON.parse(readFileSync(join(root, '.ai/cezar/runs.json'), 'utf8')) as Array<{ id: string; status: string }>;
+    const disk = readPersistedRuns(join(root, '.ai/cezar')) as Array<{ id: string; status: string }>;
     for (const run of disk) if (run.id === f.p.id) run.status = 'review';
-    await restart(false, JSON.stringify(disk), events);
+    await restart(false, disk, events);
     await until(() => eventsOf(f.w.id, 'worker-question-fallback').length === 1);
     await until(() => !manager.isActive(f.w.id));
     expect(manager.continueRun(f.w.id, { text: 'mock:agent-echo human answer' })).toEqual({ ok: true });
@@ -358,13 +359,13 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     const events = eventCheckpoint();
     for (const [path, content] of events) events.set(path, content.split('\n').filter(line => !line.includes('"worker-question-routed"')).join('\n'));
     type DiskRun = { id: string; agentInputs?: Array<{ id: string }>; delegation?: { conversation?: { messages: Array<{ id: string }> } } };
-    const disk = JSON.parse(readFileSync(join(root, '.ai/cezar/runs.json'), 'utf8')) as DiskRun[];
+    const disk = readPersistedRuns(join(root, '.ai/cezar')) as DiskRun[];
     for (const run of disk) if (run.id === f.p.id) {
       run.agentInputs = run.agentInputs?.filter(input => input.id !== f.questionId);
       const conversation = run.delegation?.conversation;
       if (conversation) conversation.messages = conversation.messages.filter(message => message.id !== f.questionId);
     }
-    await restart(false, JSON.stringify(disk), events);
+    await restart(false, disk, events);
     await until(() => eventsOf(f.w.id, 'worker-question-routed').length === 1);
     expect(eventsOf(f.w.id, 'worker-question-routed')[0]).toMatchObject({ messageId: f.questionId });
     expect(conversationOf(f.p.id)?.messages.some(message => message.id === f.questionId)).toBe(true);

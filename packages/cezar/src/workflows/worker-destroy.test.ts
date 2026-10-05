@@ -19,6 +19,7 @@ import { CLAUDE_SPEC_SUPPORT } from '../core/claude-cli-runner.ts';
 import { RunManager } from './run.ts';
 import { DelegationService } from '../delegation/service.ts';
 import { parseProcStat, processStartToken } from '../delegation/process-liveness.ts';
+import { blockRunWrites } from '../runs/run-store.testkit.ts';
 
 const until = async (predicate: () => boolean) => vi.waitFor(() => expect(predicate()).toBe(true), { timeout: 15_000, interval: 10 });
 function gate() { let release!: () => void; const promise = new Promise<void>(resolve => { release = resolve; }); return { promise, release }; }
@@ -466,11 +467,11 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
   it('private completion does not publish when final index persistence fails', async () => {
     const w = await worker(); const generation = store.commitWorkerExecutionStart(w.id);
     store.updateRun(w.id, { status: 'done' }); store.flush();
-    const indexTemp = join(root, '.ai/cezar/runs.json.tmp'); mkdirSync(indexTemp);
-    releases.push(() => rmSync(indexTemp, { recursive: true, force: true }));
+    const release = blockRunWrites(join(root, '.ai/cezar'));
+    releases.push(release);
     expect(store.commitWorkerExecutionComplete(w.id, generation)).toBe(false);
     expect(store.readWorkerExecution(w.id)?.phase).toBe('starting');
-    rmSync(indexTemp, { recursive: true });
+    release();
     expect(store.commitWorkerExecutionComplete(w.id, generation)).toBe(true);
   });
 

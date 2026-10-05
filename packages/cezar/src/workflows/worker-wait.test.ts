@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, onTestFailed, vi } from 'vitest';
@@ -23,6 +23,7 @@ import {
   manager, parent, queuedWake, register, reopenRuntime, restart, root, semaphore, setFailureState,
   store, terminal, track, until, useWorkerWaitFixture, waitOf, worker,
 } from './worker-wait.testkit.ts';
+import { blockRunWrites, readPersistedRuns } from '../runs/run-store.testkit.ts';
 
 // Real Git, durable fsync checkpoints and process shutdown share this outer budget.
 // Keep the separate 15s state/termination assertions and actual runner timers intact.
@@ -333,7 +334,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
           vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
           vi.setSystemTime(wait.deadline); manager.reconcileWorkerWaits();
           expect.soft(store.getRun(p.id)?.delegation).toMatchObject({ completion: { phase: 'attention' } });
-          const persisted = (JSON.parse(readFileSync(join(root, '.ai/cezar/runs.json'), 'utf8')) as RunRecord[]).find(run => run.id === p.id);
+          const persisted = (readPersistedRuns(join(root, '.ai/cezar')) as RunRecord[]).find(run => run.id === p.id);
           expect.soft(persisted?.delegation).toMatchObject({ completion: { phase: 'attention' }, wait: { id: wait.id, reason: 'timeout' } });
           await until(() => store.readEvents(p.id).filter(event => event.type === 'turn-end').length > boundaries);
           if (delayedAck) {
@@ -413,7 +414,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     const cancelled = manager.cancelWorkerWait(p.id, wait.id);
     expect(cancelled).toMatchObject({ id: wait.id, phase: 'wake-pending', reason: 'cancelled', wakeId: wait.id });
     expect(semaphore.busy()).toBe(1); expect(store.getRun(w.id)?.status).toBe('queued');
-    const disk = JSON.parse(readFileSync(join(root, '.ai/cezar/runs.json'), 'utf8')) as RunRecord[];
+    const disk = readPersistedRuns(join(root, '.ai/cezar')) as RunRecord[];
     expect(disk.find(run => run.id === p.id)?.delegation).toMatchObject({ lastWait: { id: wait.id, reason: 'cancelled' } });
     expect(store.getRun(p.id)?.agentInputs?.some(input => input.deliveredAt)).not.toBe(true);
     expect(manager.cancelWorkerWait(p.id, wait.id)).toEqual(cancelled);
@@ -445,7 +446,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     const release = join(root, 'release-recovered-turn'); const wire = controlledWire({ firstResultGate: release });
     const p = await parent(); await until(wire.initialReceived); const w = await worker(p.id);
     const wait = register(p.id, [w.id]); manager.cancelWorkerWait(p.id, wait.id);
-    const disk = readFileSync(join(root, '.ai/cezar/runs.json'), 'utf8');
+    const disk = readPersistedRuns(join(root, '.ai/cezar'));
     writeFileSync(release, 'release');
     await restart(false, disk);
     await until(() => !waitOf(store.getRun(p.id)));
@@ -459,15 +460,14 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
 
   it('failed cancellation checkpoint publishes no wake and keeps the original wait retryable', async () => {
     const p = await parent('mock:slow'); const w = await worker(p.id); const wait = register(p.id, [w.id]);
-    store.flush(); const diskPath = join(root, '.ai/cezar/runs.json'); const disk = readFileSync(diskPath, 'utf8');
-    rmSync(diskPath); mkdirSync(diskPath);
+    store.flush(); const release = blockRunWrites(join(root, '.ai/cezar'));
     try {
       expect(() => manager.cancelWorkerWait(p.id, wait.id)).toThrow();
       expect(waitOf(store.getRun(p.id))).toEqual(wait);
       expect(store.getRun(p.id)?.agentInputs).toBeUndefined();
       expect(store.getRun(p.id)?.delegation).not.toHaveProperty('lastWait');
       expect(semaphore.busy()).toBe(1);
-    } finally { rmSync(diskPath, { recursive: true }); writeFileSync(diskPath, disk); }
+    } finally { release(); }
     expect(manager.cancelWorkerWait(p.id, wait.id).reason).toBe('cancelled');
   });
 

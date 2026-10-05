@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runRecordSchema as contractRunRecordSchema } from '@open-mercato/cezar-contract';
 import { RunStore, runRecordSchema } from './store.ts';
+import { blockRunWrites, readPersistedRuns, readPersistedText, seedRuns } from './run-store.testkit.ts';
 
 import type { RunRecord } from './store.ts';
 
@@ -43,7 +44,7 @@ describe('RunStore save lifecycle (#124)', () => {
     const kept = Array.from({ length: archived ? 500 : 300 }, (_, index) => ({
       ...LEGACY_RUN, id: `newer-${index}`, archived, createdAt: '2026-02-01T00:00:00.000Z',
     }));
-    writeFileSync(join(dataDir, 'runs.json'), JSON.stringify([...oldRuns, ...kept]));
+    seedRuns(dataDir, [...oldRuns, ...kept]);
     for (const { id } of oldRuns) {
       mkdirSync(join(dataDir, 'tmp', id), { recursive: true });
       writeFileSync(join(dataDir, 'tmp', id, 'note.txt'), id);
@@ -73,32 +74,25 @@ describe('RunStore save lifecycle (#124)', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it('logs non-ENOENT write failures while the data directory exists', () => {
+  it('logs write failures while the data directory exists, and retries the rows later', () => {
     const store = RunStore.open(dataDir);
-    store.createRun({ title: 't', workflow: 'w', task: 'task', steps: [] });
-    mkdirSync(join(dataDir, 'runs.json.tmp'));
+    const run = store.createRun({ title: 't', workflow: 'w', task: 'task', steps: [] });
+    const release = blockRunWrites(dataDir);
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
-
-    vi.advanceTimersByTime(300);
+    try {
+      vi.advanceTimersByTime(300);
+    } finally {
+      release();
+    }
 
     expect(existsSync(dataDir)).toBe(true);
     expect(error).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(
-      /\[cez\] failed to save runs\.json: (EISDIR|EACCES|EPERM)/,
+      /\[cez\] failed to save runs\.db: .*locked/,
     ));
-  });
-
-  it('logs ENOENT write failures when only the temporary-file target is missing', () => {
-    const store = RunStore.open(dataDir);
-    store.createRun({ title: 't', workflow: 'w', task: 'task', steps: [] });
-    symlinkSync(join(dataDir, 'missing', 'tmp'), join(dataDir, 'runs.json.tmp'));
-    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
-
+    expect(readPersistedRuns(dataDir)).toEqual([]);
+    // The failed save left the row pending, so the next one writes it.
     store.flush();
-
-    expect(existsSync(dataDir)).toBe(true);
-    expect(error).toHaveBeenCalledExactlyOnceWith(expect.stringContaining(
-      '[cez] failed to save runs.json: ENOENT',
-    ));
+    expect(readPersistedRuns(dataDir).map((saved) => saved.id)).toEqual([run.id]);
   });
 
   it('coalesces usage updates without postponing persistence or scheduling idle writes', () => {
@@ -109,18 +103,18 @@ describe('RunStore save lifecycle (#124)', () => {
       store.updateRun(run.id, { tokensUsed });
     }
     expect(vi.getTimerCount()).toBe(1);
-    expect(existsSync(join(dataDir, 'runs.json'))).toBe(false);
+    expect(readPersistedRuns(dataDir)).toEqual([]);
 
     vi.advanceTimersByTime(100);
 
-    expect(JSON.parse(readFileSync(join(dataDir, 'runs.json'), 'utf8'))).toMatchObject([
+    expect(readPersistedRuns(dataDir)).toMatchObject([
       { id: run.id, tokensUsed: 100 },
     ]);
     expect(vi.getTimerCount()).toBe(0);
     store.updateRun(run.id, { tokensUsed: 101 });
     expect(vi.getTimerCount()).toBe(1);
     vi.advanceTimersByTime(300);
-    expect(JSON.parse(readFileSync(join(dataDir, 'runs.json'), 'utf8'))).toMatchObject([
+    expect(readPersistedRuns(dataDir)).toMatchObject([
       { id: run.id, tokensUsed: 101 },
     ]);
     expect(vi.getTimerCount()).toBe(0);
@@ -138,7 +132,7 @@ describe('RunStore — directional usage persistence', () => {
     rmSync(dataDir, { recursive: true, force: true });
   });
 
-  it('round-trips step checkpoints and complete run aggregates through runs.json', () => {
+  it('round-trips step checkpoints and complete run aggregates through the run database', () => {
     const store = RunStore.open(dataDir);
     const run = store.createRun({
       title: 'metered task',
@@ -191,7 +185,7 @@ describe('RunStore — directional usage persistence', () => {
   });
 
   it('keeps aggregates absent for old records and incomplete invocation or turn checkpoints', () => {
-    writeFileSync(join(dataDir, 'runs.json'), JSON.stringify([LEGACY_RUN]), 'utf8');
+    seedRuns(dataDir, [LEGACY_RUN]);
     expect(RunStore.open(dataDir).getRun(LEGACY_RUN.id)?.inputTokens).toBeUndefined();
 
     const store = RunStore.open(dataDir);
@@ -227,7 +221,7 @@ describe('RunStore — titleSummary + diffStat (#389)', () => {
     rmSync(dataDir, { recursive: true, force: true });
   });
 
-  it('round-trips the new fields through runs.json', () => {
+  it('round-trips the new fields through the run database', () => {
     const store = RunStore.open(dataDir);
     const run = store.createRun({
       title: 'fix the login bug',
@@ -264,18 +258,14 @@ describe('RunStore — titleSummary + diffStat (#389)', () => {
   });
 
   it('still loads a pre-#751 diffStat that has no repointed key', () => {
-    writeFileSync(
-      join(dataDir, 'runs.json'),
-      JSON.stringify([{ ...LEGACY_RUN, diffStat: { adds: 4, dels: 1, files: 2 } }]),
-      'utf8',
-    );
+    seedRuns(dataDir, [{ ...LEGACY_RUN, diffStat: { adds: 4, dels: 1, files: 2 } }]);
     const run = RunStore.open(dataDir).getRun('legacy-1');
     expect(run?.diffStat).toEqual({ adds: 4, dels: 1, files: 2 });
     expect(run?.diffStat?.repointed).toBeUndefined();
   });
 
-  it('still loads an old runs.json that predates the fields', () => {
-    writeFileSync(join(dataDir, 'runs.json'), JSON.stringify([LEGACY_RUN]), 'utf8');
+  it('still loads an old record that predates the fields', () => {
+    seedRuns(dataDir, [LEGACY_RUN]);
     const store = RunStore.open(dataDir);
     const run = store.getRun('legacy-1');
     expect(run).toBeDefined();
@@ -340,29 +330,25 @@ describe('RunStore — titleSummary + diffStat (#389)', () => {
   });
 
   it('salvages a malformed wake deadline and stale terminal monitoring activity', () => {
-    writeFileSync(join(dataDir, 'runs.json'), JSON.stringify([{
+    seedRuns(dataDir, [{
       ...LEGACY_RUN,
       activity: 'monitoring',
       monitoringWakeAt: 'not-a-date',
-    }]), 'utf8');
+    }]);
     const loaded = RunStore.open(dataDir).getRun(LEGACY_RUN.id);
     expect(loaded?.status).toBe('done');
     expect(loaded?.activity).toBeUndefined();
     expect(loaded?.monitoringWakeAt).toBeUndefined();
   });
 
-  it('still loads an old runs.json that predates activity (#490)', () => {
-    writeFileSync(join(dataDir, 'runs.json'), JSON.stringify([LEGACY_RUN]), 'utf8');
+  it('still loads an old record that predates activity (#490)', () => {
+    seedRuns(dataDir, [LEGACY_RUN]);
     const store = RunStore.open(dataDir);
     expect(store.getRun('legacy-1')?.activity).toBeUndefined();
   });
 
   it('rejects an unknown activity value at the schema boundary (#490)', () => {
-    writeFileSync(
-      join(dataDir, 'runs.json'),
-      JSON.stringify([{ ...LEGACY_RUN, id: 'bad-activity', status: 'running', activity: 'bogus' }]),
-      'utf8',
-    );
+    seedRuns(dataDir, [{ ...LEGACY_RUN, id: 'bad-activity', status: 'running', activity: 'bogus' }]);
     // A corrupt/unknown activity must not smuggle a run in with an invalid value:
     // the schema drops the bad record (degrade-to-fresh), so it does not load.
     const store = RunStore.open(dataDir);
@@ -390,7 +376,7 @@ describe('RunStore — titleSummary + diffStat (#389)', () => {
     expect(reopened.getRun(pinned.id)?.effort).toBe('high');
     expect(reopened.getRun(omitted.id)?.effort).toBeUndefined();
 
-    writeFileSync(join(dataDir, 'runs.json'), JSON.stringify([LEGACY_RUN]), 'utf8');
+    seedRuns(dataDir, [LEGACY_RUN]);
     expect(RunStore.open(dataDir).getRun(LEGACY_RUN.id)?.effort).toBeUndefined();
   });
 
@@ -658,7 +644,7 @@ describe('RunStore — secret redaction before persistence (#427)', () => {
    * output, so a token the agent echoed was `[REDACTED]` in the transcript and
    * verbatim in the file the "no secrets in state files" rule names explicitly.
    */
-  it('scrubs a host secret from titleSummary and error before runs.json is written', () => {
+  it('scrubs a host secret from titleSummary and error before the run is saved', () => {
     process.env.GITHUB_TOKEN = 'gho_thisisarealsecrettoken123456';
     delete process.env.CEZ_REDACT_SECRETS;
     const store = RunStore.open(dataDir);
@@ -670,7 +656,7 @@ describe('RunStore — secret redaction before persistence (#427)', () => {
     store.flush();
 
     expect(store.getRun(run.id)?.error).toBe('auth failed for [REDACTED]');
-    const raw = readFileSync(join(dataDir, 'runs.json'), 'utf8');
+    const raw = readPersistedText(dataDir);
     expect(raw).not.toContain('gho_thisisarealsecrettoken123456');
     expect(raw).toContain('[REDACTED]');
     // …and it survives the round-trip scrubbed (reopening rewrites `error` on
@@ -708,7 +694,7 @@ describe('RunStore — secret redaction before persistence (#427)', () => {
    * `steps[].error` one field away. `touch()` fans the record out over SSE too,
    * so it also reached the browser.
    */
-  it('scrubs a host secret from steps[].error before runs.json is written', () => {
+  it('scrubs a host secret from steps[].error before the run is saved', () => {
     process.env.GITHUB_TOKEN = 'gho_thisisarealsecrettoken123456';
     delete process.env.CEZ_REDACT_SECRETS;
     const store = RunStore.open(dataDir);
@@ -726,7 +712,7 @@ describe('RunStore — secret redaction before persistence (#427)', () => {
     store.flush();
 
     expect(store.getRun(run.id)?.steps[0]?.error).toBe('auth failed for [REDACTED]');
-    const raw = readFileSync(join(dataDir, 'runs.json'), 'utf8');
+    const raw = readPersistedText(dataDir);
     expect(raw).not.toContain('gho_thisisarealsecrettoken123456');
     expect(raw).toContain('[REDACTED]');
     // Survives a reopen — the scrub happened on the way in, not on read.
@@ -778,7 +764,7 @@ describe('RunStore — secret redaction before persistence (#427)', () => {
     });
     expect(run.title).toBe('rotate [REDACTED]');
     store.flush();
-    expect(readFileSync(join(dataDir, 'runs.json'), 'utf8')).not.toContain(
+    expect(readPersistedText(dataDir)).not.toContain(
       'gho_thisisarealsecrettoken123456',
     );
   });
@@ -794,7 +780,7 @@ describe('RunStore — secret redaction before persistence (#427)', () => {
     expect(store.getRun(run.id)?.task).toBe('deploy the thing');
   });
 
-  it('CEZ_REDACT_SECRETS=0 opts runs.json out as well', () => {
+  it('CEZ_REDACT_SECRETS=0 opts the saved run out as well', () => {
     process.env.GITHUB_TOKEN = 'gho_thisisarealsecrettoken123456';
     process.env.CEZ_REDACT_SECRETS = '0';
     const store = RunStore.open(dataDir);
@@ -944,7 +930,7 @@ describe('RunStore — referenced-PR discovery (#407, spec 2026-07-16-pr-autodis
     );
   });
 
-  it('round-trips the new fields through runs.json and keeps loading old files', () => {
+  it('round-trips the new fields through the run database and keeps loading old records', () => {
     const { store, run } = freshRun();
     store.appendEvent(run.id, {
       type: 'result',
@@ -959,7 +945,7 @@ describe('RunStore — referenced-PR discovery (#407, spec 2026-07-16-pr-autodis
       'https://github.com/open-mercato/cezar/pull/1',
     ]);
     // legacy record without the fields still parses (see LEGACY_RUN above)
-    writeFileSync(join(dataDir, 'runs.json'), JSON.stringify([LEGACY_RUN]), 'utf8');
+    seedRuns(dataDir, [LEGACY_RUN]);
     const legacyStore = RunStore.open(dataDir);
     expect(legacyStore.getRun('legacy-1')?.referencedPullRequestUrl).toBeUndefined();
   });
@@ -1415,7 +1401,7 @@ describe("RunStore — a task never adopts another repository's ref (#945)", () 
       expect(run.referencedPrCandidates).toEqual([foreignPr]);
       expect(run.referencedIssueCandidates).toEqual([foreignIssue]);
       expect(seen).toEqual([undefined]);
-      const saved = JSON.parse(readFileSync(join(dataDir, 'runs.json'), 'utf8'))[0];
+      const saved = readPersistedRuns(dataDir)[0];
       expect(saved.referencedPullRequestUrl).toBeUndefined();
       expect(saved.referencedIssueUrl).toBeUndefined();
     });
@@ -1509,7 +1495,7 @@ describe("RunStore — a task never adopts another repository's ref (#945)", () 
       expect(run.referencedPrCandidates).toEqual([foreignPr]);
       expect(run.referencedIssueCandidates).toEqual([foreignIssue]);
       store.flush();
-      expect(JSON.parse(readFileSync(join(dataDir, 'runs.json'), 'utf8'))[0].referencedPullRequestUrl).toBe(foreignPr);
+      expect(readPersistedRuns(dataDir)[0].referencedPullRequestUrl).toBe(foreignPr);
     });
 
     it('resolves retained candidates on a newly corroborating prompt without inventing number ownership', () => {
@@ -1627,7 +1613,7 @@ describe("RunStore — a task never adopts another repository's ref (#945)", () 
       const store = RunStore.open(dataDir);
       expect(store.getRun(run.id)?.referencedPullRequestUrl).toBe(foreignPr);
       store.setRepoHandle(project);
-      const saved = JSON.parse(readFileSync(join(dataDir, 'runs.json'), 'utf8'))[0];
+      const saved = readPersistedRuns(dataDir)[0];
       expect(saved.referencedPullRequestUrl).toBeUndefined();
       expect(saved.referencedIssueUrl).toBeUndefined();
       expect(saved.issueNumber).toBeUndefined();
@@ -1818,7 +1804,7 @@ describe("RunStore — a task never adopts another repository's ref (#945)", () 
       store.setRepoHandle(HANDLE);
 
       // Read the wire immediately: an unref'd debounce may never fire after the lookup finishes.
-      const saved = JSON.parse(readFileSync(join(dataDir, 'runs.json'), 'utf8'))[0];
+      const saved = readPersistedRuns(dataDir)[0];
       expect(saved.referencedPullRequestUrl).toBeUndefined();
       expect(saved.referencedIssueUrl).toBeUndefined();
       expect(saved.issueNumber).toBeUndefined();
@@ -1939,8 +1925,8 @@ describe('RunStore — queuedMessages (#472)', () => {
     delete process.env.CEZ_REDACT_SECRETS;
   });
 
-  it('parses a runs.json written before the field existed', () => {
-    writeFileSync(join(dataDir, 'runs.json'), JSON.stringify([LEGACY_RUN]));
+  it('parses a record written before the field existed', () => {
+    seedRuns(dataDir, [LEGACY_RUN]);
     const store = RunStore.open(dataDir);
     const run = store.getRun('legacy-1');
     expect(run).toBeDefined();
@@ -2074,8 +2060,8 @@ describe('RunStore — read receipts (#unread-done-items)', () => {
     expect(store.getRun(id)?.seenAt).toBeDefined();
   });
 
-  it('still loads an old runs.json with no seenAt (additive)', () => {
-    writeFileSync(join(dataDir, 'runs.json'), JSON.stringify([LEGACY_RUN]), 'utf8');
+  it('still loads an old record with no seenAt (additive)', () => {
+    seedRuns(dataDir, [LEGACY_RUN]);
     expect(RunStore.open(dataDir).getRun('legacy-1')?.seenAt).toBeUndefined();
   });
 
@@ -2190,9 +2176,7 @@ describe('RunStore — the legacy `claude-cli` runner id (#547)', () => {
   });
 
   it('loads a record carrying `claude-cli` and folds it to `claude`', () => {
-    writeFileSync(
-      join(dataDir, 'runs.json'),
-      JSON.stringify([
+    seedRuns(dataDir, [
         {
           ...LEGACY_RUN,
           runner: 'claude-cli',
@@ -2209,9 +2193,7 @@ describe('RunStore — the legacy `claude-cli` runner id (#547)', () => {
             },
           ],
         },
-      ]),
-      'utf8',
-    );
+      ]);
 
     const run = RunStore.open(dataDir).getRun('legacy-1');
     // Parsed, not dropped — and normalized, so no consumer sees a fourth runner id.
@@ -2222,15 +2204,12 @@ describe('RunStore — the legacy `claude-cli` runner id (#547)', () => {
   it('does not let one `claude-cli` record evict the rest of runs.json', () => {
     // The regression this guards: the loader `safeParse`s the WHOLE array, so before #547 a
     // single record carrying the legacy id took every other run in the file down with it —
-    // the exact failure mode BACKWARD_COMPATIBILITY.md §3 warns about.
-    writeFileSync(
-      join(dataDir, 'runs.json'),
-      JSON.stringify([
-        { ...LEGACY_RUN, id: 'legacy-cli', runner: 'claude-cli' },
-        { ...LEGACY_RUN, id: 'modern', runner: 'codex' },
-      ]),
-      'utf8',
-    );
+    // the exact failure mode BACKWARD_COMPATIBILITY.md §3 warns about. The import of a legacy
+    // `runs.json` still parses it as one array (#779), so this keeps seeding that file.
+    writeFileSync(join(dataDir, 'runs.json'), JSON.stringify([
+      { ...LEGACY_RUN, id: 'legacy-cli', runner: 'claude-cli' },
+      { ...LEGACY_RUN, id: 'modern', runner: 'codex' },
+    ]), 'utf8');
 
     const store = RunStore.open(dataDir);
     expect(store.getRun('legacy-cli')?.runner).toBe('claude');
@@ -2238,29 +2217,22 @@ describe('RunStore — the legacy `claude-cli` runner id (#547)', () => {
   });
 
   it('rewrites the folded id on the next save, so the narrowing is one-way', () => {
-    writeFileSync(
-      join(dataDir, 'runs.json'),
-      JSON.stringify([{ ...LEGACY_RUN, runner: 'claude-cli' }]),
-      'utf8',
-    );
+    seedRuns(dataDir, [{ ...LEGACY_RUN, runner: 'claude-cli' }]);
 
     const store = RunStore.open(dataDir);
     store.updateRun('legacy-1', { title: 'touched' });
     store.flush();
 
-    // The index is re-serialized from the PARSED records, so `claude-cli` is gone from disk.
-    const onDisk = readFileSync(join(dataDir, 'runs.json'), 'utf8');
-    expect(onDisk).not.toContain('claude-cli');
-    expect(JSON.parse(onDisk)[0].runner).toBe('claude');
+    // A saved row is re-serialized from the PARSED record, so `claude-cli` is gone from disk.
+    expect(readPersistedText(dataDir)).not.toContain('claude-cli');
+    expect(readPersistedRuns(dataDir)[0]!.runner).toBe('claude');
   });
 
   it('persists and reloads a `pi` run, index and step alike (#387)', () => {
     // `storedRunnerSchema` derives from `RUNNER_IDS` rather than re-listing the ids, so a new
     // runner is readable the moment it is registered. Without this, a completed pi run would
     // fail the whole-array parse on the next boot and take every other run down with it.
-    writeFileSync(
-      join(dataDir, 'runs.json'),
-      JSON.stringify([
+    seedRuns(dataDir, [
         {
           ...LEGACY_RUN,
           runner: 'pi',
@@ -2277,9 +2249,7 @@ describe('RunStore — the legacy `claude-cli` runner id (#547)', () => {
             },
           ],
         },
-      ]),
-      'utf8',
-    );
+      ]);
 
     const run = RunStore.open(dataDir).getRun('legacy-1');
     expect(run?.runner).toBe('pi');
@@ -2289,11 +2259,7 @@ describe('RunStore — the legacy `claude-cli` runner id (#547)', () => {
   it('still rejects a runner id that is not a legacy spelling of a real backend', () => {
     // Widening the READ side is not an invitation to accept anything: an unknown id is still
     // a parse failure, which is what keeps the enum meaningful.
-    writeFileSync(
-      join(dataDir, 'runs.json'),
-      JSON.stringify([{ ...LEGACY_RUN, runner: 'gemini' }]),
-      'utf8',
-    );
+    seedRuns(dataDir, [{ ...LEGACY_RUN, runner: 'gemini' }]);
     expect(RunStore.open(dataDir).getRun('legacy-1')).toBeUndefined();
   });
 });
@@ -2334,7 +2300,7 @@ describe('RunStore — pinned tasks (#935)', () => {
     store.setPinned(id, false);
     store.flush();
 
-    const persisted = JSON.parse(readFileSync(join(dataDir, 'runs.json'), 'utf8')) as Array<
+    const persisted = readPersistedRuns(dataDir) as Array<
       Record<string, unknown>
     >;
     const record = persisted.find((entry) => entry.id === id);
@@ -2398,14 +2364,10 @@ describe('RunStore — pinned tasks (#935)', () => {
   });
 
   it('loads a record written before pins existed, and one hand-edited to carry them', () => {
-    writeFileSync(
-      join(dataDir, 'runs.json'),
-      JSON.stringify([
+    seedRuns(dataDir, [
         { ...LEGACY_RUN, id: 'no-pin' },
         { ...LEGACY_RUN, id: 'hand-pinned', pinned: true, pinnedAt: '2026-08-29T10:00:00.000Z' },
-      ]),
-      'utf8',
-    );
+      ]);
 
     const store = RunStore.open(dataDir);
     expect(store.getRun('no-pin')?.pinned).toBeUndefined();
@@ -2632,7 +2594,7 @@ describe('RunStore — agent input consumption receipts (#505)', () => {
     const input = (id: string, extra: Record<string, string>) => ({ id, source: 'agent', parentRunId, text: 'hello',
       createdAt: '2026-09-23T10:00:00.000Z', deliveredAt: '2026-09-23T10:00:01.000Z', ...extra });
     const inputs = [input(randomUUID(), {}), input(randomUUID(), { consumedAt: '2026-09-23T10:00:05.000Z' })];
-    writeFileSync(join(dataDir, 'runs.json'), JSON.stringify([{ ...LEGACY_RUN, agentInputs: inputs }]), 'utf8');
+    seedRuns(dataDir, [{ ...LEGACY_RUN, agentInputs: inputs }]);
     expect(RunStore.open(dataDir).getRun(LEGACY_RUN.id)?.agentInputs).toEqual(inputs);
   });
 });
@@ -2648,7 +2610,7 @@ describe('RunStore — replaying accepted but unread input after a crash (#505)'
     const unread = { ...base, id: randomUUID(), awaitingRead: true };
     const read = { ...base, id: randomUUID(), consumedAt: '2026-09-23T10:00:02.000Z' };
     const historical = { ...base, id: randomUUID() };
-    writeFileSync(join(dataDir, 'runs.json'), JSON.stringify([{ ...LEGACY_RUN, agentInputs: [unread, read, historical] }]), 'utf8');
+    seedRuns(dataDir, [{ ...LEGACY_RUN, agentInputs: [unread, read, historical] }]);
     const store = RunStore.open(dataDir);
     expect(store.requeueAwaitingReadInputs(LEGACY_RUN.id)).toEqual([unread.id]);
     const { deliveredAt: _d, awaitingRead: _a, ...queued } = unread;
@@ -2664,22 +2626,22 @@ describe('RunStore — previewServers survive a partly unreadable entry (#781)',
   const valid = { port: 5173, command: 'npm run dev', label: 'vite', registeredAt: '2026-10-02T10:00:00.000Z', answeredAtRegistration: false };
 
   it('keeps the valid entry and drops the malformed one', () => {
-    writeFileSync(join(dataDir, 'runs.json'), JSON.stringify([
+    seedRuns(dataDir, [
       { ...LEGACY_RUN, previewServers: [valid, { port: 'nope', command: 3 }] },
-    ]));
+    ]);
     const store = RunStore.open(dataDir, { keepLive: true });
     expect(store.getRun('legacy-1')?.previewServers).toEqual([valid]);
   });
 
   it('loads a record whose previewServers is not an array, without the field', () => {
-    writeFileSync(join(dataDir, 'runs.json'), JSON.stringify([{ ...LEGACY_RUN, previewServers: 'garbage' }]));
+    seedRuns(dataDir, [{ ...LEGACY_RUN, previewServers: 'garbage' }]);
     const store = RunStore.open(dataDir, { keepLive: true });
     expect(store.getRun('legacy-1')).toBeDefined();
     expect(store.getRun('legacy-1')?.previewServers).toBeUndefined();
   });
 
   it('loads a pre-#781 record with no previewServers field', () => {
-    writeFileSync(join(dataDir, 'runs.json'), JSON.stringify([LEGACY_RUN]));
+    seedRuns(dataDir, [LEGACY_RUN]);
     const store = RunStore.open(dataDir, { keepLive: true });
     expect(store.getRun('legacy-1')?.previewServers).toBeUndefined();
   });

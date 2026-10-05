@@ -19,6 +19,7 @@ import type { RunManager } from '../workflows/run.ts';
 import { agentHomePaths, claudeStateFilePath } from '../paths.ts';
 import { buildChildEnv } from '../core/agent-env.ts';
 import { ProjectContexts } from '../server/project-context.ts';
+import { readPersistedRuns, readPersistedText, seedRuns } from '../runs/run-store.testkit.ts';
 
 const until = (predicate: () => boolean) => vi.waitFor(() => expect(predicate()).toBe(true), { timeout: 15000, interval: 10 });
 // Git worktrees + a live RunManager contend under full-suite workers. until() is already 15s;
@@ -388,13 +389,13 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
       sessions[1]!.finish(); expect(await f.manager.awaitRunTermination(a.child.workerId, 15000)).toBe(true);
     }
     // Simulate exactly the public on-disk salvage boundary, keeping private identity intact.
-    f.store.flush(); const path = join(f.root, '.ai/cezar/runs.json');
-    const records = JSON.parse(readFileSync(path, 'utf8'));
-    const record = records.find((r: { id: string }) => r.id === a.child.workerId);
+    f.store.flush(); const dataDir = join(f.root, '.ai/cezar');
+    const records = readPersistedRuns(dataDir);
+    const record = records.find((r: { id: string }) => r.id === a.child.workerId)!;
     if (damage === 'missing') delete record.workflowDef;
     else if (damage === 'malformed') record.workflowDef.name = 42;
     else record.workflowDef.steps = [{ id: 'different', prompt: '{{task}}' }];
-    writeFileSync(path, JSON.stringify(records));
+    seedRuns(dataDir, records);
     f.manager.dispose(); sessions[0]!.finish();
     const store = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true });
     const manager = createFixtureManager(store, f.root); recoveredManagers.push(manager); recoveredStores.push(store);
@@ -634,7 +635,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
       children.push(await controller.service.spawn(caller, { task: `child ${index}`, baseline: 'HEAD', requestId: randomUUID() }));
     }
     f.store.flush();
-    expect(readFileSync(join(f.root, '.ai/cezar/runs.json'), 'utf8')).not.toContain('PARENT SKILL BODY 778');
+    expect(readPersistedText(join(f.root, '.ai/cezar'))).not.toContain('PARENT SKILL BODY 778');
     for (const child of children) expect(f.store.getRun(child.workerId)?.systemPrompt).toBe('parent extra');
   });
   it('gives first-session and post-Continue spawns the same inherited prompt', async () => {

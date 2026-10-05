@@ -4,7 +4,7 @@ import { agentTmpDirLocations, agentTmpDirMayExist, agentTmpDirOwnershipProven, 
 import { removeArtifacts } from '../artifacts/lifecycle.ts';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import { appendFileSync, closeSync, constants, fstatSync, fsyncSync, lstatSync, openSync, readSync, realpathSync, readdirSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, closeSync, constants, copyFileSync, fstatSync, fsyncSync, lstatSync, openSync, readSync, realpathSync, readdirSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { z } from 'zod';
 import {
@@ -26,6 +26,8 @@ import { MAX_REF } from './task-refs.ts';
 import { workflowDefSchema } from '../workflows/types.ts';
 
 import { RUNNER_IDS } from '../core/agent-runner.ts';
+import { RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY, RunDatabase, RunDatabaseError, type RunDatabaseChanges, type RunRowInput } from './run-database.ts';
+import { encodeRunRow } from './run-row.ts';
 
 import type { RunnerId } from '../core/agent-runner.ts';
 
@@ -122,8 +124,8 @@ const queuedMessageSchema = z.object({
   createdAt: z.string(),
 });
 
-/** Exported for `./run-index.ts`, the read-only reader of the same file. Nothing else should
- *  parse `runs.json` — see `reconcileLoadedRun` for why a second parser is a correctness risk. */
+/** Exported for `./run-index.ts`, the read-only reader of the same records. Nothing else should
+ *  parse a stored run — see `reconcileLoadedRun` for why a second parser is a correctness risk. */
 export const runRecordSchema = z.object({
   id: z.string(),
   title: z.string(),
@@ -390,6 +392,22 @@ export function parseRunRecords(raw: unknown) {
   }
   return z.array(runRecordSchema).safeParse(raw);
 }
+
+/** One database row's `data` back into a record, through the same salvage and schema as
+ *  `parseRunRecords`. Undefined when it does not parse: one unreadable row costs that row only. */
+export function decodeRunRecord(data: string): RunRecord | undefined {
+  try {
+    const parsed = parseRunRecords([JSON.parse(data)]);
+    return parsed.success ? parsed.data[0] : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The legacy index (#779): read once, imported into `runs.db`, never written again. */
+export const LEGACY_INDEX_FILE = 'runs.json';
+/** The exact bytes `runs.json` held when it was imported, kept beside it. */
+export const LEGACY_INDEX_BACKUP_FILE = 'runs.json.pre-sqlite.bak';
 
 export type StepState = z.infer<typeof stepStateSchema>;
 export type QueuedMessage = z.infer<typeof queuedMessageSchema>;
@@ -789,6 +807,74 @@ export function rescopeRun(run: RunRecord, handle?: RepoHandle | null): boolean 
   return changed;
 }
 
+/**
+ * Every field `RunStore.open` may rewrite while loading a record: what `reconcileLoadedRun` and
+ * `refreshHumanAskSummary` assign. Compared before and after, it tells open() which rows
+ * normalization changed, so it marks those dirty and no others. Edit it together with either
+ * function, or a normalized row stays unsaved (the store tests pin each field).
+ */
+function loadNormalizedFields(run: RunRecord): string {
+  return JSON.stringify([
+    run.stopping, run.status, run.finishedAt, run.error, run.activity, run.monitoringWakeAt, run.autoResumeAt,
+    run.monitoringWakeCapReached, run.referencedPullRequestUrl, run.hasPendingHumanAsk, run.steps.map((step) => step.status),
+  ]);
+}
+
+/**
+ * Import `runs.json` into a database that has never completed an import (#779, plan step 4).
+ *
+ * The exact bytes go to `runs.json.pre-sqlite.bak` first (never overwriting an earlier backup),
+ * then every record and the completion marker commit in ONE transaction, so a crash leaves either
+ * no import or a whole one. `runs.json` itself is left as it was, and nothing writes it again:
+ * an older cezar keeps reading the history as it stood at the upgrade.
+ *
+ * An index that does not parse starts the store fresh, as it always has. The bytes survive in
+ * the backup and in `runs.json`, which used to be overwritten by the next save instead.
+ * Crash-safe retries of a failed import are a later step (T4).
+ */
+function importLegacyIndex(db: RunDatabase, dataDir: string): RunRecord[] {
+  const indexPath = join(dataDir, LEGACY_INDEX_FILE);
+  let records: RunRecord[] = [];
+  let source = 'none';
+  if (existsSync(indexPath)) {
+    try {
+      copyFileSync(indexPath, join(dataDir, LEGACY_INDEX_BACKUP_FILE), constants.COPYFILE_EXCL);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+    }
+    source = LEGACY_INDEX_FILE;
+    try {
+      const parsed = parseRunRecords(JSON.parse(readFileSync(indexPath, 'utf8')));
+      if (parsed.success) records = parsed.data;
+      else source = `${LEGACY_INDEX_FILE} (unparseable)`;
+    } catch {
+      source = `${LEGACY_INDEX_FILE} (unparseable)`;
+    }
+  }
+  // A hand-edited index may repeat an id; the last one won when it loaded into a map, so it still does.
+  records = [...new Map(records.map((run) => [run.id, run])).values()];
+  db.transaction({
+    upserts: records.map(encodeRunRow),
+    deletes: [],
+    meta: { [RUNS_IMPORT_COMPLETE_KEY]: JSON.stringify({ at: new Date().toISOString(), source, records: records.length }) },
+  });
+  return records;
+}
+
+/** Every row of a database whose import is complete, newest first. A row that does not parse is
+ *  skipped and left in the database untouched; one warning says how many. */
+function loadRows(db: RunDatabase): RunRecord[] {
+  const records: RunRecord[] = [];
+  let unreadable = 0;
+  for (const row of db.listAll()) {
+    const run = decodeRunRecord(row.data);
+    if (run) records.push(run);
+    else unreadable++;
+  }
+  if (unreadable > 0) console.warn(`[cez] ${unreadable} run(s) in ${RUNS_DB_FILE} could not be read; they are left in the database untouched.`);
+  return records;
+}
+
 const WORKER_PROCESS_CAP = 32;
 const recordedProcessSchema = z.object({ pid: z.number().int().positive(), startToken: z.string().min(1).max(128).optional() }).strict();
 const workerProcessRecordSchema = z.object({ generation: z.string().uuid(), controller: recordedProcessSchema,
@@ -809,14 +895,28 @@ export function isSweepable(run: RunRecord, scope?: ArchiveFinishedScope): boole
 }
 
 /**
- * File-backed run store: `runs.json` index (atomic tmp+rename writes, the
- * pattern from @cezar/core's IssueStore) plus one append-only NDJSON event
- * file per run. Also the in-process event bus the SSE endpoints subscribe to:
- * emits `('run', RunRecord)` and `('event', { runId, event: RunEvent })`.
+ * File-backed run store: one row per run in `runs.db` (#779, `./run-database.ts`) plus one
+ * append-only NDJSON event file per run. Every record is also held in memory, and that copy is
+ * what callers read. Also the in-process event bus the SSE endpoints subscribe to: emits
+ * `('run', RunRecord)` and `('event', { runId, event: RunEvent })`.
+ *
+ * Two write paths, both through `writeIndex`:
+ * - optimistic: a method changes the held record, marks it dirty and schedules the debounced
+ *   save, which writes the dirty rows and deletions only;
+ * - durable (`commitIndex`): one transaction with the changed rows AND everything a debounced
+ *   save still owes. Only once it commits do the records change in memory, and only then do
+ *   subscribers hear about it.
  */
 export class RunStore extends EventEmitter {
   private runs = new Map<string, RunRecord>();
   private saveTimer: NodeJS.Timeout | null = null;
+  /** `null` when the database could not be opened (memory only: nothing is written) or once the
+   *  store is closed. */
+  private db: RunDatabase | null = null;
+  /** Runs whose held record is ahead of its row; the next save or commit writes them. */
+  private readonly dirty = new Set<string>();
+  /** Runs gone from memory whose rows the next save or commit deletes. */
+  private readonly deleted = new Set<string>();
   /** The repository this project IS (#945), armed after `open()` by `setRepoHandle`. Undefined
    *  until it arrives and `null` when it cannot be known — both mean "unscoped", which is
    *  exactly the pre-#945 behavior. */
@@ -827,28 +927,46 @@ export class RunStore extends EventEmitter {
     this.setMaxListeners(100);
   }
 
-  /** See `reconcileLoadedRun` for what `keepLive` (#367) decides about live-looking rows. */
+  /**
+   * Open the project's run store. See `reconcileLoadedRun` for what `keepLive` (#367) decides
+   * about live-looking rows.
+   *
+   * Reads `runs.db` once its import is complete. Before that, `runs.json` is imported into it in
+   * one transaction (`importLegacyIndex`) and left exactly as it was, for older cezars to read.
+   * A database that cannot be opened is never reset: the store starts empty and writes nothing.
+   */
   static open(dataDir: string, opts?: { keepLive?: boolean }): RunStore {
     mkdirSync(join(dataDir, 'runs'), { recursive: true });
     const store = new RunStore(dataDir);
-    const indexPath = join(dataDir, 'runs.json');
-    if (existsSync(indexPath)) {
+    const path = join(dataDir, RUNS_DB_FILE);
+    let records: RunRecord[] = [];
+    try {
+      const db = RunDatabase.open(path);
       try {
-        const raw = JSON.parse(readFileSync(indexPath, 'utf8'));
-        const parsed = parseRunRecords(raw);
-        if (parsed.success) {
-          for (const run of parsed.data) {
-            if (run.delegation?.role === 'root' && (run.status === 'waiting' || run.delegation.wait !== undefined)) {
-              refreshHumanAskSummary(run, dataDir);
-            }
-            store.runs.set(run.id, reconcileLoadedRun(run, opts));
-          }
-        }
-      } catch {
-        // corrupt index — start fresh; event files stay on disk untouched
+        records = db.getMeta(RUNS_IMPORT_COMPLETE_KEY) === undefined ? importLegacyIndex(db, dataDir) : loadRows(db);
+      } catch (error) {
+        db.close();
+        throw error;
       }
+      store.db = db;
+    } catch (error) {
+      const kind = error instanceof RunDatabaseError ? error.kind : 'other';
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`[cez] runs database unavailable (${kind}): ${message}. Runs are kept in memory only and nothing is saved; ${path} is left as it is.`);
     }
+    for (const run of records) store.adoptLoadedRun(run, opts);
     return store;
+  }
+
+  /** Normalize a record just read (see `reconcileLoadedRun`) and hold it. Marks the row dirty only
+   *  when normalization changed it, so the next save persists exactly the runs open() rewrote. */
+  private adoptLoadedRun(run: RunRecord, opts?: { keepLive?: boolean }): void {
+    const before = loadNormalizedFields(run);
+    if (run.delegation?.role === 'root' && (run.status === 'waiting' || run.delegation.wait !== undefined)) {
+      refreshHumanAskSummary(run, this.dataDir);
+    }
+    this.runs.set(run.id, reconcileLoadedRun(run, opts));
+    if (loadNormalizedFields(run) !== before) this.dirty.add(run.id);
   }
 
   /**
@@ -996,19 +1114,17 @@ export class RunStore extends EventEmitter {
   commitConversation(rootId: string, conversation: ConversationState, delivery?: { recipientRunId: string; input: AgentInput }): void {
     const root = this.runs.get(rootId);
     if (root?.delegation?.role !== 'root') throw new Error('missing conversation root');
-    const proposed = new Map(this.runs);
-    proposed.set(rootId, { ...root, delegation: delegationStateSchema.parse({ ...root.delegation, conversation: { ...conversation,
+    const staged = new Map<string, RunRecord>();
+    staged.set(rootId, { ...root, delegation: delegationStateSchema.parse({ ...root.delegation, conversation: { ...conversation,
       messages: conversation.messages.map(message => ({ ...message, text: this.redactText(message.text) })),
     } }) });
-    const changed = new Set([rootId]);
     if (delivery) {
-      const recipient = proposed.get(delivery.recipientRunId);
+      const recipient = staged.get(delivery.recipientRunId) ?? this.runs.get(delivery.recipientRunId);
       if (!recipient) throw new Error('missing conversation recipient');
       const input = agentInputSchema.parse({ ...delivery.input, text: this.redactText(delivery.input.text) });
-      proposed.set(recipient.id, { ...recipient, agentInputs: [...(recipient.agentInputs ?? []), input] });
-      changed.add(recipient.id);
+      staged.set(recipient.id, { ...recipient, agentInputs: [...(recipient.agentInputs ?? []), input] });
     }
-    this.commitIndex(proposed, changed);
+    this.commitIndex(staged);
   }
 
   /** Observable atomic input checkpoint: a failed write publishes nothing. */
@@ -1069,9 +1185,7 @@ export class RunStore extends EventEmitter {
     }
     if (openingContinuationInputId && (run.continuationMessage?.agentInputId !== openingContinuationInputId ||
       !agentInputs.some(input => input.id === openingContinuationInputId && input.deliveredAt))) throw new Error('opening agent input checkpoint changed');
-    const proposed = new Map(this.runs);
-    proposed.set(id, { ...run, agentInputs, ...(openingContinuationInputId ? { continuationMessage: undefined } : {}) });
-    this.commitIndex(proposed, new Set([id]));
+    this.commitIndex(new Map([[id, { ...run, agentInputs, ...(openingContinuationInputId ? { continuationMessage: undefined } : {}) }]]));
   }
 
   /** Reserve only unread conversation inputs in one durable index replacement. */
@@ -1091,10 +1205,8 @@ export class RunStore extends EventEmitter {
       }
     }
     const selectedIds = new Set(selected);
-    const proposed = new Map(this.runs);
-    proposed.set(runId, { ...run, agentInputs: inputs.map(input => selectedIds.has(input.id)
-      ? agentInputSchema.parse({ ...input, inboxClaim: receipt }) : input) });
-    this.commitIndex(proposed, new Set([runId]));
+    this.commitIndex(new Map([[runId, { ...run, agentInputs: inputs.map(input => selectedIds.has(input.id)
+      ? agentInputSchema.parse({ ...input, inboxClaim: receipt }) : input) }]]));
   }
 
   /** A receipt owns every matching input or none; exact ACK retries preserve the first timestamp. */
@@ -1118,10 +1230,8 @@ export class RunStore extends EventEmitter {
     if (matching.some(input => input.deliveredAt || input.inboxClaim?.acknowledgedAt || input.inboxClaim!.expiresAt <= at)) {
       throw new Error('inbox receipt expired or displaced');
     }
-    const proposed = new Map(this.runs);
-    proposed.set(runId, { ...run, agentInputs: run.agentInputs!.map(input => input.inboxClaim?.receiptId === receiptId
-      ? agentInputSchema.parse({ ...input, deliveredAt: at, inboxClaim: { ...input.inboxClaim, acknowledgedAt: at } }) : input) });
-    this.commitIndex(proposed, new Set([runId]));
+    this.commitIndex(new Map([[runId, { ...run, agentInputs: run.agentInputs!.map(input => input.inboxClaim?.receiptId === receiptId
+      ? agentInputSchema.parse({ ...input, deliveredAt: at, inboxClaim: { ...input.inboxClaim, acknowledgedAt: at } }) : input) }]]));
     return 'acknowledged';
   }
 
@@ -1133,13 +1243,11 @@ export class RunStore extends EventEmitter {
     const matching = (run.agentInputs ?? []).filter(input => input.inboxClaim?.receiptId === receiptId);
     if (!matching.length || matching.some(input => input.inboxClaim?.generation !== generation ||
       input.inboxClaim?.acknowledgedAt || input.deliveredAt)) throw new Error('inbox receipt changed');
-    const proposed = new Map(this.runs);
-    proposed.set(runId, { ...run, agentInputs: run.agentInputs!.map(input => {
+    this.commitIndex(new Map([[runId, { ...run, agentInputs: run.agentInputs!.map(input => {
       if (input.inboxClaim?.receiptId !== receiptId) return input;
       const { inboxClaim: _claim, ...unclaimed } = input;
       return agentInputSchema.parse(unclaimed);
-    }) });
-    this.commitIndex(proposed, new Set([runId]));
+    }) }]]));
     return 'released';
   }
 
@@ -1148,13 +1256,11 @@ export class RunStore extends EventEmitter {
     if (!run) throw new Error('missing inbox recipient');
     inboxClaimSchema.shape.expiresAt.parse(now);
     if (!run.agentInputs?.some(input => input.inboxClaim && !input.inboxClaim.acknowledgedAt && input.inboxClaim.expiresAt <= now)) return;
-    const proposed = new Map(this.runs);
-    proposed.set(runId, { ...run, agentInputs: run.agentInputs.map(input => {
+    this.commitIndex(new Map([[runId, { ...run, agentInputs: run.agentInputs.map(input => {
       if (!input.inboxClaim || input.inboxClaim.acknowledgedAt || input.inboxClaim.expiresAt > now) return input;
       const { inboxClaim: _claim, ...unclaimed } = input;
       return agentInputSchema.parse(unclaimed);
-    }) });
-    this.commitIndex(proposed, new Set([runId]));
+    }) }]]));
   }
 
   /** CI intent and its wake entry share one atomic index replacement. */
@@ -1163,10 +1269,8 @@ export class RunStore extends EventEmitter {
     if (!run) throw new Error('missing CI wait target');
     const ciWait = ciWaitSchema.parse(wait);
     const entry = input ? agentInputSchema.parse(input) : undefined;
-    const proposed = new Map(this.runs);
-    proposed.set(id, { ...run, ciWait, lastCiWaitError: undefined, ...(entry ? { agentInputs: run.agentInputs?.some(row => row.id === entry.id)
-      ? run.agentInputs : [...(run.agentInputs ?? []), entry] } : {}) });
-    this.commitIndex(proposed, new Set([id]));
+    this.commitIndex(new Map([[id, { ...run, ciWait, lastCiWaitError: undefined, ...(entry ? { agentInputs: run.agentInputs?.some(row => row.id === entry.id)
+      ? run.agentInputs : [...(run.agentInputs ?? []), entry] } : {}) }]]));
   }
 
   /** Retire the wait and precisely its pending wake, optionally accepting human input. */
@@ -1175,12 +1279,10 @@ export class RunStore extends EventEmitter {
     if (!run?.ciWait) return;
     const { ciWait, ...rest } = run;
     const lastCiWait: CiWait = { ...ciWait, phase: 'withdrawn' };
-    const proposed = new Map(this.runs);
-    proposed.set(id, { ...rest, ciWait: undefined, lastCiWait,
+    this.commitIndex(new Map([[id, { ...rest, ciWait: undefined, lastCiWait,
       ...(run.agentInputs ? { agentInputs: run.agentInputs.filter(input => input.id !== ciWait.wakeId || input.deliveredAt) } : {}),
       ...(acceptedHumanMessage ? { queuedMessages: [...(run.queuedMessages ?? []), queuedMessageSchema.parse(acceptedHumanMessage)] } : {}),
-    });
-    this.commitIndex(proposed, new Set([id]));
+    }]]));
   }
 
   /** Provider acceptance and receipt retirement have one delivery checkpoint. */
@@ -1189,11 +1291,9 @@ export class RunStore extends EventEmitter {
     if (!run?.ciWait || run.ciWait.wakeId !== inputId) return;
     const { ciWait, ...rest } = run;
     const deliveredAt = new Date().toISOString();
-    const proposed = new Map(this.runs);
-    proposed.set(id, { ...rest, ciWait: undefined, lastCiWait: { ...ciWait, phase: 'delivered', deliveredAt },
+    this.commitIndex(new Map([[id, { ...rest, ciWait: undefined, lastCiWait: { ...ciWait, phase: 'delivered' as const, deliveredAt },
       agentInputs: (run.agentInputs ?? []).map(input => input.id === inputId ? { ...input, deliveredAt } : input),
-    });
-    this.commitIndex(proposed, new Set([id]));
+    }]]));
   }
 
   /** Retain the settled receipt and retire exactly one wait together with any human message that superseded it. */
@@ -1204,8 +1304,7 @@ export class RunStore extends EventEmitter {
     }
     const { wait, ...delegation } = run.delegation;
     const message = acceptedHumanMessage ? queuedMessageSchema.parse(acceptedHumanMessage) : undefined;
-    const proposed = new Map(this.runs);
-    proposed.set(id, { ...run, delegation: { ...delegation, lastWait: wait.phase === 'wake-pending'
+    this.commitIndex(new Map([[id, { ...run, delegation: { ...delegation, lastWait: wait.phase === 'wake-pending'
       ? reconcileWorkerWait(wait, [], new Date().toISOString())
       : { ...wait, phase: 'wake-pending', reason: wait.reason ?? 'cancelled', wakeId: wait.wakeId ?? wait.id } },
       // An adopted agent input belongs to its sender, even when it carries the wait receipt.
@@ -1217,8 +1316,7 @@ export class RunStore extends EventEmitter {
           text: run.continuationMessage.origin === 'lifecycle' ? '' : run.continuationMessage.text,
         } } : {}),
       } : {}),
-    });
-    this.commitIndex(proposed, new Set([id]));
+    }]]));
   }
 
   /** Successful deferred human delivery consumes only its persisted queue ID.
@@ -1226,9 +1324,7 @@ export class RunStore extends EventEmitter {
   commitQueuedMessageDelivery(id: string, messageId: string): void {
     const run = this.runs.get(id);
     if (!run) throw new Error('missing queued message target');
-    const proposed = new Map(this.runs);
-    proposed.set(id, { ...run, queuedMessages: (run.queuedMessages ?? []).filter(message => message.id !== messageId) });
-    this.commitIndex(proposed, new Set([id]));
+    this.commitIndex(new Map([[id, { ...run, queuedMessages: (run.queuedMessages ?? []).filter(message => message.id !== messageId) }]]));
   }
 
   /** An acknowledged inactive-root Finish must survive the async diff and restart. */
@@ -1246,9 +1342,7 @@ export class RunStore extends EventEmitter {
     if (run?.delegation?.role !== 'root' || !run.delegation.finishRequestedAt ||
       !['waiting', 'cancelled'].includes(run.status)) return false;
     const { finishRequestedAt: _intent, ...delegation } = run.delegation;
-    const proposed = new Map(this.runs);
-    proposed.set(id, { ...run, delegation, status: 'cancelled', finishedAt: run.finishedAt ?? new Date().toISOString() });
-    this.commitIndex(proposed, new Set([id]));
+    this.commitIndex(new Map([[id, { ...run, delegation, status: 'cancelled' as const, finishedAt: run.finishedAt ?? new Date().toISOString() }]]));
     return true;
   }
 
@@ -1259,31 +1353,27 @@ export class RunStore extends EventEmitter {
     if (run?.status !== 'waiting' || run.delegation?.role !== 'root' || !run.delegation.finishRequestedAt) return false;
     const { finishRequestedAt: _intent, ...delegation } = run.delegation;
     const finishedAt = new Date().toISOString();
-    const proposed = new Map(this.runs);
-    proposed.set(id, { ...run, delegation, status, finishedAt, currentStepId: undefined, autoResumeAttempts: undefined,
+    this.commitIndex(new Map([[id, { ...run, delegation, status, finishedAt, currentStepId: undefined, autoResumeAttempts: undefined,
       activity: undefined, monitoringWakeAt: undefined, monitoringWakeCapReached: undefined,
       steps: run.steps.map(step => step.status === 'waiting' || step.status === 'running'
         ? { ...step, status: 'done' as const, finishedAt: step.finishedAt ?? finishedAt } : step),
-    });
-    this.commitIndex(proposed, new Set([id]));
+    }]]));
     return true;
   }
 
   /** Persist all authority patches before exposing any of them to the engine or subscribers. */
   commitDelegation(patches: ReadonlyArray<{ id: string; delegation: DelegationState }>): void {
     if (patches.length === 0) return;
-    const proposed = new Map(this.runs);
-    const changed = new Set<string>();
+    const staged = new Map<string, RunRecord>();
     for (const patch of patches) {
-      const run = proposed.get(patch.id);
-      if (!run || changed.has(patch.id)) throw new Error('missing or duplicate delegation patch target');
+      const run = this.runs.get(patch.id);
+      if (!run || staged.has(patch.id)) throw new Error('missing or duplicate delegation patch target');
       const delegation = delegationStateSchema.parse(patch.delegation);
-      proposed.set(patch.id, { ...run, delegation });
-      changed.add(patch.id);
+      staged.set(patch.id, { ...run, delegation });
     }
     // In-process cause only: consumers can skip metadata replay when delegation
     // is disabled without dropping real status or termination-proof notifications.
-    this.commitIndex(proposed, changed, 'delegation-checkpoint');
+    this.commitIndex(staged, 'delegation-checkpoint');
   }
 
   /** Accepted execution revision is public lifecycle identity, separate from process generations. */
@@ -1295,22 +1385,20 @@ export class RunStore extends EventEmitter {
       executionRevision: (run.delegation.executionRevision ?? 0) + 1,
       executionStartSeq: this.readEvents(id).reduce((seq, event) => Math.max(seq, event.seq), 0),
     });
-    const proposed = new Map(this.runs);
-    proposed.set(id, { ...run, ...this.redactPatch(patch), delegation,
+    const staged = new Map<string, RunRecord>();
+    staged.set(id, { ...run, ...this.redactPatch(patch), delegation,
       ...(step ? { steps: [...run.steps, { ...step, status: 'pending' as const, iterations: 0, tokensUsed: 0 }] } : {}),
     });
-    const changed = new Set([id]);
     if (conversation) {
       const root = this.runs.get(conversation.rootId);
       if (root?.delegation?.role !== 'root' || run.delegation.parentRunId !== root.id) throw new Error('missing conversation ownership');
-      proposed.set(root.id, { ...root, delegation: delegationStateSchema.parse({ ...root.delegation, conversation: { ...conversation.state,
+      staged.set(root.id, { ...root, delegation: delegationStateSchema.parse({ ...root.delegation, conversation: { ...conversation.state,
         messages: conversation.state.messages.map(message => ({ ...message, text: this.redactText(message.text) })),
       } }) });
       const input = agentInputSchema.parse({ ...conversation.input, text: this.redactText(conversation.input.text) });
-      proposed.set(id, { ...proposed.get(id)!, agentInputs: [...(run.agentInputs ?? []), input] });
-      changed.add(root.id);
+      staged.set(id, { ...staged.get(id)!, agentInputs: [...(run.agentInputs ?? []), input] });
     }
-    this.commitIndex(proposed, changed);
+    this.commitIndex(staged);
   }
 
   private workerResultsDir(parentId: string): string {
@@ -1442,34 +1530,36 @@ export class RunStore extends EventEmitter {
       receipts: [...authority.data.receipts, { ...identity, workerId: workspace.ownerRunId }],
     });
     const run = { ...this.buildRun(input, workspace.ownerRunId), delegation: metadata };
-    const proposed = new Map(this.runs);
-    proposed.set(parentId, { ...parent, delegation });
-    proposed.set(run.id, run);
     // This transaction precedes materialization. Every launch must rotate this
     // generation to starting before touching the workspace or a session.
     this.writeWorkerIdentity(run.id, workerExecutionIdentitySchema.parse(executionIdentity));
     this.writeWorkerExecution(run.id, { generation: randomUUID(), phase: 'queued' }, true);
     // No pruning here: deleting run history cannot be part of a proposed index transaction.
-    this.commitIndex(proposed, new Set([parentId, run.id]));
+    this.commitIndex(new Map([[parentId, { ...parent, delegation }], [run.id, run]]));
     return run;
   }
 
-  /** Atomic file replacement is the durability boundary; flush() is deliberately best-effort. */
-  private commitIndex(proposed: Map<string, RunRecord>, changed: ReadonlySet<string>, source?: 'delegation-checkpoint'): void {
-    this.writeIndex([...proposed.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
-    if (this.saveTimer) {
-      clearTimeout(this.saveTimer);
-      this.saveTimer = null;
-    }
+  /**
+   * The durable write: `staged` holds the records this operation replaces (`null` deletes one),
+   * in the order subscribers hear about them. The transaction is the durability boundary;
+   * flush() is deliberately best-effort.
+   *
+   * One transaction carries the staged rows and every row a debounced save still owes, so the
+   * database never holds a commit without the optimistic writes made before it. If it fails,
+   * nothing changed anywhere: the held records, the database, the pending dirty rows and the
+   * subscribers all see the store as it was.
+   */
+  private commitIndex(staged: ReadonlyMap<string, RunRecord | null>, source?: 'delegation-checkpoint'): void {
+    if (!this.db) throw new Error('runs database unavailable: nothing can be saved');
+    this.persist(staged);
     // Preserve existing record references, but expose the entire transaction before its first event.
-    for (const id of changed) {
-      const next = proposed.get(id);
+    for (const [id, next] of staged) {
       if (!next) { this.runs.delete(id); continue; }
       const current = this.runs.get(id);
       if (current) Object.assign(current, next);
       else this.runs.set(id, next);
     }
-    for (const id of changed) {
+    for (const id of staged.keys()) {
       const run = this.runs.get(id);
       if (run) this.emit('run', run, source); else this.emit('deleted', id);
     }
@@ -2183,7 +2273,7 @@ export class RunStore extends EventEmitter {
     try {
       const run = this.runs.get(id);
       if (run?.delegation?.role !== 'worker') return false;
-      this.commitIndex(new Map(this.runs), new Set([id]));
+      this.commitIndex(new Map([[id, run]]));
       if (this.readWorkerExecution(id)?.generation !== generation) return false;
       this.writeWorkerExecution(id, { generation, phase: 'complete',
         ...(proof.phase === 'queued' || proof.neverMaterialized ? { neverMaterialized: true as const } : {}),
@@ -2200,9 +2290,7 @@ export class RunStore extends EventEmitter {
   commitWorkerCancellation(id: string): void {
     const run = this.runs.get(id);
     if (run?.delegation?.role !== 'worker') throw new Error('Worker not found');
-    const proposed = new Map(this.runs);
-    proposed.set(id, { ...run, status: 'cancelled', finishedAt: new Date().toISOString() });
-    this.commitIndex(proposed, new Set([id]));
+    this.commitIndex(new Map([[id, { ...run, status: 'cancelled' as const, finishedAt: new Date().toISOString() }]]));
   }
 
   /** Complete replacement evidence can stand in for absent child history, never for a present execution. */
@@ -2300,18 +2388,14 @@ export class RunStore extends EventEmitter {
             items: retained.artifacts.items.map(item => ({ state: 'deleted' as const, reason: 'missing' as const, id: item.id, path: item.path })),
           } : retained.artifacts,
         }, this.readWorkerResultDiff(parent.id, id));
-        const proposed = new Map(this.runs);
-        proposed.delete(id);
-        proposed.set(parent.id, { ...parent, delegation: { ...parent.delegation,
+        this.commitIndex(new Map<string, RunRecord | null>([[parent.id, { ...parent, delegation: { ...parent.delegation,
           receipts: parent.delegation.receipts.map(entry => entry.workerId === id ? { ...entry, deletion: { ...deletion, phase: 'complete' as const } } : entry),
-        } });
-        this.commitIndex(proposed, new Set([parent.id, id]));
+        } }], [id, null]]));
       } else if (run.delegation?.role === 'root') {
         this.commitDelegation([{ id, delegation: { ...run.delegation, historyDeletion: 'pending' } }]);
         this.removeRunHistoryBytes(id);
         rmSync(join(this.dataDir, 'runs', `${id}-worker-results`), { recursive: true, force: true });
-        const proposed = new Map(this.runs); proposed.delete(id);
-        this.commitIndex(proposed, new Set([id]));
+        this.commitIndex(new Map([[id, null]]));
       } else return false;
       removeAgentTmpDir(this.dataDir, id);
       this.seqs.delete(id);
@@ -2336,6 +2420,7 @@ export class RunStore extends EventEmitter {
     if (run?.delegation?.role === 'worker' || run?.delegation?.role === 'root') return this.deleteDelegatedRun(id);
     const existed = this.runs.delete(id);
     if (existed) {
+      this.markDeleted(id);
       try {
         rmSync(this.eventsPath(id), { force: true });
         rmSync(this.handoffPath(id), { force: true });
@@ -2350,7 +2435,7 @@ export class RunStore extends EventEmitter {
     return existed;
   }
 
-  /** Write the index out now (used on shutdown). */
+  /** Write the pending rows out now (used on shutdown). */
   flush(): void {
     if (this.saveTimer) {
       clearTimeout(this.saveTimer);
@@ -2398,8 +2483,15 @@ export class RunStore extends EventEmitter {
   }
 
   private touch(run: RunRecord): void {
+    this.dirty.add(run.id);
     this.scheduleSave();
     this.emit('run', run);
+  }
+
+  /** The held record is gone; the next save or commit deletes its row. */
+  private markDeleted(id: string): void {
+    this.dirty.delete(id);
+    this.deleted.add(id);
   }
 
   private pruneOldRuns(): void {
@@ -2414,6 +2506,7 @@ export class RunStore extends EventEmitter {
       // Delegation promises history and parent snapshots until explicit deletion.
       if (stale.delegation || !this.canDeleteRun(stale.id)) continue;
       this.runs.delete(stale.id);
+      this.markDeleted(stale.id);
       try {
         rmSync(this.eventsPath(stale.id), { force: true });
         rmSync(this.handoffPath(stale.id), { force: true });
@@ -2426,9 +2519,10 @@ export class RunStore extends EventEmitter {
     }
   }
 
-  /** Debounced so token-usage updates don't rewrite the index per event. */
+  /** Debounced so token-usage updates don't rewrite a row per event. Nothing to schedule without
+   *  a database: a store that could not open one, or a closed one, writes nothing. */
   private scheduleSave(): void {
-    if (this.saveTimer) return;
+    if (this.saveTimer || !this.db) return;
     this.saveTimer = setTimeout(() => {
       this.saveTimer = null;
       this.saveNow();
@@ -2436,27 +2530,58 @@ export class RunStore extends EventEmitter {
     this.saveTimer.unref?.();
   }
 
-  private writeIndex(runs: readonly RunRecord[]): void {
-    const indexPath = join(this.dataDir, 'runs.json');
-    const tmpPath = `${indexPath}.tmp`;
-    writeFileSync(tmpPath, JSON.stringify(runs, null, 2), 'utf8');
-    renameSync(tmpPath, indexPath);
+  /** The single database write, so a test can fail it the way a full disk would. */
+  private writeIndex(changes: RunDatabaseChanges): void {
+    this.db!.transaction(changes);
+  }
+
+  /**
+   * Write `staged` plus everything still pending — dirty rows from memory, deletions — in one
+   * transaction, then clear the pending marks. Throws with nothing cleared when it fails.
+   * Never copies or sorts the whole store: the cost is the rows that changed.
+   */
+  private persist(staged: ReadonlyMap<string, RunRecord | null>): void {
+    const upserts: RunRowInput[] = [];
+    const deletes: string[] = [];
+    for (const [id, next] of staged) {
+      if (next) upserts.push(encodeRunRow(next));
+      else deletes.push(id);
+    }
+    for (const id of this.dirty) {
+      const run = this.runs.get(id);
+      if (run && !staged.has(id)) upserts.push(encodeRunRow(run));
+    }
+    for (const id of this.deleted) if (!staged.has(id)) deletes.push(id);
+    this.writeIndex({ upserts, deletes });
+    this.dirty.clear();
+    this.deleted.clear();
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer);
+      this.saveTimer = null;
+    }
   }
 
   private saveNow(): void {
+    if (!this.db || (this.dirty.size === 0 && this.deleted.size === 0)) return;
     try {
-      this.writeIndex(this.listRuns());
+      this.persist(new Map());
     } catch (err) {
-      if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') {
-        try {
-          statSync(this.dataDir);
-        } catch (dirErr) {
-          // A pending save may outlive its directory; never recreate it or hide live-directory failures.
-          if ((dirErr as NodeJS.ErrnoException)?.code === 'ENOENT') return;
-        }
-      }
+      // A pending save may outlive its directory; never recreate it or hide live-directory
+      // failures. The rows stay pending, so the next save or commit retries them.
+      if (!existsSync(this.dataDir)) return;
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`[cez] failed to save runs.json: ${message}`);
+      console.error(`[cez] failed to save ${RUNS_DB_FILE}: ${message}`);
     }
+  }
+
+  /**
+   * Write what is pending and release the database (store disposal, process shutdown).
+   * Idempotent. A closed store keeps answering reads from memory but saves nothing more, and a
+   * durable commit on it throws.
+   */
+  close(): void {
+    this.flush();
+    this.db?.close();
+    this.db = null;
   }
 }

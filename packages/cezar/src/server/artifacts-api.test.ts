@@ -46,6 +46,7 @@ describe('task file links', () => {
     symlinkSync('/etc', join(working, 'escape'));
     expect(await (await link('escape/passwd')).json()).toMatchObject({ type: 'unavailable' });
     expect(await (await link(join(dataDir, 'runs.json'))).json()).toMatchObject({ type: 'unavailable' });
+    expect(await (await link(join(dataDir, 'runs.db'))).json()).toMatchObject({ type: 'unavailable' });
     mkdirSync(join(working, '.git')); writeFileSync(join(working, '.git', 'config'), 'private config');
     symlinkSync(join(working, '.git'), join(working, 'alias'));
     expect(await (await link('alias/config')).json()).toMatchObject({ type: 'unavailable' });

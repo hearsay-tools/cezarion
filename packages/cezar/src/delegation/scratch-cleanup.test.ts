@@ -8,6 +8,7 @@ import { agentTmpDir, agentTmpDirMayExist, agentTmpEnv, removeAgentTmpDir } from
 import { manager, store, root, worker, reopenRuntime, useWorkerWaitFixture } from '../workflows/worker-wait.testkit.ts';
 import { nonDumpableHolder } from './non-dumpable.testkit.ts';
 import { WorkerScratchCleanup } from './scratch-cleanup.ts';
+import { readPersistedRuns, seedRuns } from '../runs/run-store.testkit.ts';
 
 // os.tmpdir reads Node's original environment even after the workflow fixture replaces process.env.
 const nativeEnvironment = process.env;
@@ -144,16 +145,20 @@ describe('durable scratch cleanup evidence', () => {
     try {
       // The helper asserts a real kernel EACCES/EPERM; no cwd or liveness read is mocked.
       await holder.write();
-      manager.dispose(); store.flush();
-      const index = join(dataDir, 'runs.json');
-      if (mode === 'corrupt') writeFileSync(index, '{corrupt');
-      else if (mode === 'missing') rmSync(index);
+      manager.dispose(); store.close();
+      const database = join(dataDir, 'runs.db');
+      if (mode === 'corrupt') writeFileSync(database, '{corrupt');
+      else if (mode === 'missing') for (const file of [database, `${database}-wal`, `${database}-shm`]) rmSync(file, { force: true });
       else {
-        const rows = JSON.parse(readFileSync(index, 'utf8'));
-        delete rows.find((row: { id: string }) => row.id === run.id).delegation.workspace.resourceId;
-        writeFileSync(index, JSON.stringify(rows));
+        const rows = readPersistedRuns(dataDir);
+        delete rows.find((row: { id: string }) => row.id === run.id)!.delegation.workspace.resourceId;
+        seedRuns(dataDir, rows);
       }
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
       reopenRuntime();
+      // An unreadable database is never reset: the store starts empty and says so once.
+      if (mode === 'corrupt') expect(warn).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('runs database unavailable (corrupt)'));
+      warn.mockRestore();
       expect(store.getRun(run.id)?.delegation?.role).not.toBe('worker');
       vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
       await manager.recover(); await vi.advanceTimersByTimeAsync(120_000);
@@ -176,7 +181,7 @@ describe('durable scratch cleanup evidence', () => {
       const proof = JSON.parse(original.toString()); delete proof.scratchCleanup;
       writeFileSync(evidence, JSON.stringify(proof));
     } else writeFileSync(evidence, '{corrupt');
-    manager.dispose(); store.flush(); rmSync(join(dataDir, 'runs.json'));
+    manager.dispose(); store.close(); seedRuns(dataDir, []);
     reopenRuntime(); vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     try {
       await manager.recover(); await vi.advanceTimersByTimeAsync(120_000);
@@ -191,7 +196,7 @@ describe('durable scratch cleanup evidence', () => {
     const { dataDir, scratch } = await completed();
     const files = join(dataDir, 'runs'), orphan = agentTmpDir(dataDir, 'ordinary-orphan');
     mkdirSync(orphan, { recursive: true });
-    manager.dispose(); store.flush(); rmSync(join(dataDir, 'runs.json'));
+    manager.dispose(); store.close(); seedRuns(dataDir, []);
     reopenRuntime(); vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     try {
       chmodSync(files, 0);
@@ -207,10 +212,10 @@ describe('durable scratch cleanup evidence', () => {
 
   it('cannot treat a worker with stripped role metadata as an ordinary terminal run or deletable history', async () => {
     const { run, dataDir, scratch } = await completed();
-    manager.dispose(); store.flush();
-    const index = join(dataDir, 'runs.json'), rows = JSON.parse(readFileSync(index, 'utf8'));
-    delete rows.find((row: { id: string }) => row.id === run.id).delegation;
-    writeFileSync(index, JSON.stringify(rows)); reopenRuntime();
+    manager.dispose(); store.close();
+    const rows = readPersistedRuns(dataDir);
+    delete rows.find((row: { id: string }) => row.id === run.id)!.delegation;
+    seedRuns(dataDir, rows); reopenRuntime();
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     try {
       await manager.recover(); store.updateRun(run.id, { status: 'cancelled' });

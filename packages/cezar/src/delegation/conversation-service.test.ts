@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
-import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RunStore } from '../runs/store.ts';
 import { fixture } from './service.testkit.ts';
@@ -9,6 +8,7 @@ import {
   conversationInspectResultSchema, conversationStateSchema, inboxClaimSchema, inboxReceiptRequestSchema,
   inboxReceiptResultSchema, inboxReserveResultSchema,
 } from '@open-mercato/cezar-contract';
+import { readPersistedText } from '../runs/run-store.testkit.ts';
 
 describe('worker inbox contract', () => {
   const at = '2026-09-06T12:00:00.000Z';
@@ -312,7 +312,7 @@ describe('durable conversations', () => {
     expect(inspected.messages[0]?.text).toBe('Inspect [REDACTED]');
     expect(f.store.getRun(w.id)?.agentInputs?.[0]?.text).toBe('Inspect [REDACTED]');
     const surfaces = [f.store.getRun(f.parent.id)?.delegation, f.store.getRun(w.id)?.agentInputs, sent, inspected,
-      f.store.readEvents(f.parent.id), f.store.readEvents(w.id), readFileSync(join(f.root, '.ai/cezar/runs.json'), 'utf8')];
+      f.store.readEvents(f.parent.id), f.store.readEvents(w.id), readPersistedText(join(f.root, '.ai/cezar'))];
     for (const surface of surfaces) { expect(JSON.stringify(surface)).not.toContain(token); expect(JSON.stringify(surface)).toContain('[REDACTED]'); }
   });
 

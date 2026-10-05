@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -13,6 +14,7 @@ import {
 import type { DelegationState } from '@open-mercato/cezar-contract';
 import { RunStore, runRecordSchema } from './store.ts';
 import { parentReadiness } from '../delegation/readiness.ts';
+import { blockRunWrites, readPersistedRuns, readPersistedText, seedRuns } from './run-store.testkit.ts';
 
 const workerId = randomUUID();
 const requestId = randomUUID();
@@ -176,7 +178,7 @@ describe('RunStore durable delegation', () => {
     store.commitDelegation([{ id: run.id, delegation: root }]);
     return run;
   }
-  function disk() { return JSON.parse(readFileSync(join(dataDir, 'runs.json'), 'utf8')); }
+  function disk() { return readPersistedRuns(dataDir); }
 
   const claimExpiry = new Date(Date.now() + 120_000).toISOString();
   const ackTime = new Date(Date.now() + 60_000).toISOString();
@@ -367,15 +369,15 @@ describe('RunStore durable delegation', () => {
     store.commitDelegation([{ id: run.id, delegation: { ...root, wait: selected } }]);
     const delivered = { id: wakeId, source: 'lifecycle' as const, parentRunId: run.id, text: 'wake', createdAt: now, deliveredAt: now };
     store.commitAgentInputs(run.id, [delivered]);
-    const before = readFileSync(join(dataDir, 'runs.json'), 'utf8');
+    const before = readPersistedText(dataDir);
     const notifications: unknown[] = []; store.on('run', value => notifications.push(value));
-    mkdirSync(join(dataDir, 'runs.json.tmp'));
+    const release = blockRunWrites(dataDir);
     try {
       expect(() => store.commitWorkerWaitWithdrawal(run.id, selected.id, { id: randomUUID(), text: 'new', createdAt: now })).toThrow();
       expect(notifications).toEqual([]);
-      expect(readFileSync(join(dataDir, 'runs.json'), 'utf8')).toBe(before);
+      expect(readPersistedText(dataDir)).toBe(before);
       expect(store.getRun(run.id)?.delegation).toEqual({ ...root, wait: selected });
-    } finally { rmSync(join(dataDir, 'runs.json.tmp'), { recursive: true }); }
+    } finally { release(); }
     store.commitWorkerWaitWithdrawal(run.id, selected.id);
     expect(RunStore.open(dataDir, { keepLive: true }).getRun(run.id)?.agentInputs).toEqual([delivered]);
   });
@@ -384,16 +386,16 @@ describe('RunStore durable delegation', () => {
     const run = parent();
     store.updateRun(run.id, { status: 'waiting' });
     store.commitRootFinishIntent(run.id);
-    const before = readFileSync(join(dataDir, 'runs.json'), 'utf8');
+    const before = readPersistedText(dataDir);
     const snapshot = structuredClone(store.getRun(run.id));
     const notifications: unknown[] = []; store.on('run', value => notifications.push(value));
-    mkdirSync(join(dataDir, 'runs.json.tmp'));
+    const release = blockRunWrites(dataDir);
     try {
       expect(() => store.commitRootFinishCancellation(run.id)).toThrow();
       expect(store.getRun(run.id)).toEqual(snapshot);
-      expect(readFileSync(join(dataDir, 'runs.json'), 'utf8')).toBe(before);
+      expect(readPersistedText(dataDir)).toBe(before);
       expect(notifications).toEqual([]);
-    } finally { rmSync(join(dataDir, 'runs.json.tmp'), { recursive: true }); }
+    } finally { release(); }
     expect(store.commitRootFinishCancellation(run.id)).toBe(true);
     const cancelled = RunStore.open(dataDir, { keepLive: true }).getRun(run.id);
     expect(cancelled).toMatchObject({ status: 'cancelled', delegation: root });
@@ -426,35 +428,42 @@ describe('RunStore durable delegation', () => {
 
   it('failed atomic writes publish no metadata, receipts, workers or events', () => {
     const run = parent();
-    const original = readFileSync(join(dataDir, 'runs.json'), 'utf8');
+    const original = readPersistedText(dataDir);
     const emitted: unknown[] = [];
     store.on('run', r => emitted.push(r));
     store.on('event', e => emitted.push(e));
-    // Real filesystem write failure, even under root: a directory cannot be opened as a file.
-    mkdirSync(join(dataDir, 'runs.json.tmp'));
+    // A real write failure, even under root: another connection holds the database's write lock.
+    const release = blockRunWrites(dataDir);
     try {
       expect(() => store.commitDelegation([{ id: run.id, delegation: { ...root, wait: workerWaitSchema.parse(wait) } }])).toThrow();
       expect(() => store.createOwnedRun(input, run.id, requestId, worker(run.id), requestHash)).toThrow();
       expect(store.listRuns()).toHaveLength(1);
       expect(store.getRun(run.id)?.delegation).toEqual(root);
       expect(emitted).toEqual([]);
-      expect(readFileSync(join(dataDir, 'runs.json'), 'utf8')).toBe(original);
-    } finally { rmSync(join(dataDir, 'runs.json.tmp'), { recursive: true }); }
+      expect(readPersistedText(dataDir)).toBe(original);
+    } finally { release(); }
   });
 
-  it('failed rename publishes nothing even after the temporary file is written', () => {
+  it('a write that fails after its first row publishes nothing and keeps nothing', () => {
     const run = parent();
+    store.flush();
     const before = store.getRun(run.id)?.delegation;
-    rmSync(join(dataDir, 'runs.json'));
-    mkdirSync(join(dataDir, 'runs.json'));
+    const persisted = readPersistedText(dataDir);
+    // The parent's receipt row is written first; the worker's insert then aborts the transaction.
+    const raw = new DatabaseSync(join(dataDir, 'runs.db'));
+    raw.exec(`CREATE TRIGGER fail_worker BEFORE INSERT ON runs WHEN NEW.id = '${workerId}' BEGIN SELECT RAISE(ABORT, 'disk failure'); END`);
     const emitted: unknown[] = [];
     store.on('run', r => emitted.push(r));
     try {
-      expect(() => store.createOwnedRun(input, run.id, requestId, worker(run.id), requestHash)).toThrow();
+      expect(() => store.createOwnedRun(input, run.id, requestId, worker(run.id), requestHash)).toThrow('disk failure');
       expect(store.listRuns()).toHaveLength(1);
       expect(store.getRun(run.id)?.delegation).toEqual(before);
       expect(emitted).toEqual([]);
-    } finally { rmSync(join(dataDir, 'runs.json'), { recursive: true }); }
+      expect(readPersistedText(dataDir)).toBe(persisted);
+    } finally {
+      raw.exec('DROP TRIGGER fail_worker');
+      raw.close();
+    }
   });
 
   it('atomically persists receipt and worker, replays retries after restart, and rejects a changed request', () => {
@@ -483,14 +492,14 @@ describe('RunStore durable delegation', () => {
 
   it('rejects missing, malformed or duplicate patch targets without a partial commit', () => {
     const run = parent();
-    const original = readFileSync(join(dataDir, 'runs.json'), 'utf8');
+    const original = readPersistedText(dataDir);
     for (const patches of [
       [{ id: run.id, delegation: { role: 'invalid' } }, { id: randomUUID(), delegation: root }],
       [{ id: run.id, delegation: { role: 'invalid' } }, { id: run.id, delegation: root }],
       [{ id: run.id, delegation: { role: 'worker' } }],
     ]) expect(() => store.commitDelegation(patches as Parameters<RunStore['commitDelegation']>[0])).toThrow();
     expect(store.getRun(run.id)?.delegation).toEqual(root);
-    expect(readFileSync(join(dataDir, 'runs.json'), 'utf8')).toBe(original);
+    expect(readPersistedText(dataDir)).toBe(original);
   });
 
   it('denies invalid parents and worker/parent/resource collisions', () => {
@@ -566,7 +575,7 @@ describe('RunStore durable delegation', () => {
     const run = parent();
     store.createOwnedRun(input, run.id, requestId, worker(run.id), requestHash);
     store.flush();
-    writeFileSync(join(dataDir, 'runs.json'), JSON.stringify(disk().filter((r: { id: string }) => r.id !== workerId)));
+    seedRuns(dataDir, disk().filter((r: { id: string }) => r.id !== workerId));
     store = RunStore.open(dataDir, { keepLive: true });
     expect(() => store.createOwnedRun(input, run.id, requestId, worker(run.id, randomUUID()), requestHash)).toThrow(/receipt/i);
     expect(store.listRuns()).toHaveLength(1);
@@ -585,7 +594,7 @@ describe('RunStore durable delegation', () => {
     const valid = parent();
     store.flush();
     const rows = disk().map((r: { id: string }) => r.id === broken.id ? { ...r, delegation: { role: 'worker', parentRunId: 'bad' } } : r);
-    writeFileSync(join(dataDir, 'runs.json'), JSON.stringify(rows));
+    seedRuns(dataDir, rows);
     store = RunStore.open(dataDir, { keepLive: true });
     expect(store.listRuns()).toHaveLength(3);
     expect(store.getRun(legacy.id)?.delegation).toBeUndefined();

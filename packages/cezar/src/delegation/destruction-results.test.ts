@@ -10,6 +10,7 @@ import { ensureOwnedWorkspace, planOwnedWorkspace } from './workspace.ts';
 import { RunStore } from '../runs/store.ts';
 
 import { QUICK_TASK_WORKFLOW } from '../workflows/types.ts';
+import { readPersistedRuns, seedRuns } from '../runs/run-store.testkit.ts';
 
 vi.mock('node:fs', async original => {
   const fs = await original<typeof import('node:fs') & { default: typeof import('node:fs') }>();
@@ -104,7 +105,7 @@ describe('verified destruction retains results through explicit history deletion
     const real = vi.mocked(rmSync).getMockImplementation()!;
     vi.mocked(rmSync).mockImplementation((path, options) => {
       if (path === join(files, `${workerId}-images`)) {
-        const disk = JSON.parse(readFileSync(join(f.root, '.ai/cezar/runs.json'), 'utf8'));
+        const disk = readPersistedRuns(join(f.root, '.ai/cezar'));
         expect(disk.find((r: { id: string }) => r.id === f.parent.id).delegation.receipts[0].deletion.phase).toBe('pending');
         throw Error('directory busy');
       }
@@ -143,10 +144,11 @@ describe('verified destruction retains results through explicit history deletion
   });
   it('collection and destroy cannot erase evidence during an interrupted child deletion', async () => {
     const { workerId, files } = await completed(); await f.service.destroy(f.caller, { workerId });
-    const original = (f.store as unknown as { writeIndex(runs: unknown[]): void }).writeIndex.bind(f.store);
-    const fault = vi.spyOn(f.store as unknown as { writeIndex(runs: Array<{ id: string }>): void }, 'writeIndex').mockImplementation(runs => {
-      if (!runs.some(run => run.id === workerId)) throw Error('final deletion checkpoint failed');
-      return original(runs);
+    type Changes = { deletes: readonly string[] };
+    const original = (f.store as unknown as { writeIndex(changes: Changes): void }).writeIndex.bind(f.store);
+    const fault = vi.spyOn(f.store as unknown as { writeIndex(changes: Changes): void }, 'writeIndex').mockImplementation(changes => {
+      if (changes.deletes.includes(workerId)) throw Error('final deletion checkpoint failed');
+      return original(changes);
     });
     expect(f.store.deleteRun(workerId)).toBe(false);
     expect(existsSync(join(files, `${workerId}.execution.json`))).toBe(false);
@@ -157,10 +159,11 @@ describe('verified destruction retains results through explicit history deletion
   });
   it('retries interrupted parent deletion after its snapshot directory was removed', async () => {
     const { workerId, files } = await completed(); await f.service.destroy(f.caller, { workerId }); expect(f.store.deleteRun(workerId)).toBe(true);
-    const original = (f.store as unknown as { writeIndex(runs: unknown[]): void }).writeIndex.bind(f.store);
-    const fault = vi.spyOn(f.store as unknown as { writeIndex(runs: Array<{ id: string }>): void }, 'writeIndex').mockImplementation(runs => {
-      if (!runs.some(run => run.id === f.parent.id)) throw Error('final parent checkpoint failed');
-      return original(runs);
+    type Changes = { deletes: readonly string[] };
+    const original = (f.store as unknown as { writeIndex(changes: Changes): void }).writeIndex.bind(f.store);
+    const fault = vi.spyOn(f.store as unknown as { writeIndex(changes: Changes): void }, 'writeIndex').mockImplementation(changes => {
+      if (changes.deletes.includes(f.parent.id)) throw Error('final parent checkpoint failed');
+      return original(changes);
     });
     expect(f.store.deleteRun(f.parent.id)).toBe(false);
     expect(existsSync(join(files, `${f.parent.id}-worker-results`))).toBe(false);
@@ -172,8 +175,8 @@ describe('verified destruction retains results through explicit history deletion
     const { workerId, files } = await completed(); await f.service.destroy(f.caller, { workerId });
     const records = f.store.listRuns();
     const parent = records.find(run => run.id === f.parent.id)!;
-    writeFileSync(join(f.root, '.ai/cezar/runs.json'), JSON.stringify(kind === 'missing' ? records.filter(run => run.id !== parent.id)
-      : records.map(run => run.id === parent.id ? { ...run, delegation: { invalid: true } } : run)));
+    seedRuns(join(f.root, '.ai/cezar'), kind === 'missing' ? records.filter(run => run.id !== parent.id)
+      : records.map(run => run.id === parent.id ? { ...run, delegation: { invalid: true } } : run));
     const reopened = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true });
     expect(reopened.deleteRun(workerId)).toBe(false);
     expect(existsSync(join(files, `${workerId}.ndjson`))).toBe(true); reopened.flush();
@@ -214,7 +217,7 @@ describe('verified destruction retains results through explicit history deletion
   });
   it('denies parent deletion when a missing child has a result but no completed deletion receipt', async () => {
     const { workerId } = await completed(); await f.service.destroy(f.caller, { workerId });
-    writeFileSync(join(f.root, '.ai/cezar/runs.json'), JSON.stringify(f.store.listRuns().filter(run => run.id !== workerId)));
+    seedRuns(join(f.root, '.ai/cezar'), f.store.listRuns().filter(run => run.id !== workerId));
     const reopened = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true });
     expect(reopened.readWorkerResult(f.parent.id, workerId)).toBeDefined();
     expect(reopened.deleteRun(f.parent.id)).toBe(false); reopened.flush();
