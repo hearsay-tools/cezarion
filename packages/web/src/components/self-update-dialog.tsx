@@ -308,7 +308,7 @@ function LatestCard({
       data-slot="self-update-latest"
       className={cn(
         'flex items-center justify-between gap-3 rounded-md border px-3 py-2.5',
-        target ? 'border-primary/40 bg-primary/5' : 'border-border bg-card',
+        target ? 'border-accent-strong/40 bg-accent-strong/5' : 'border-border bg-card',
       )}
     >
       <div className="min-w-0 text-[13px]">

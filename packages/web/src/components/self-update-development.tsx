@@ -245,7 +245,7 @@ function Row({
       className={cn(
         'flex min-w-0 flex-col gap-0.5 border-b border-border px-3 py-2 last:border-b-0 outline-none',
         disabled ? 'cursor-not-allowed opacity-55' : 'cursor-pointer hover:bg-muted/50 focus-visible:bg-muted/60',
-        selected && 'bg-primary/10 hover:bg-primary/10',
+        selected && 'bg-accent-strong/10 hover:bg-accent-strong/10',
       )}
     >
       {children}
