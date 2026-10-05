@@ -70,7 +70,7 @@ export function SelfUpdateDialog({
       onOpenChange={(next) => {
         // An install in flight ends in a restart of the cockpit. Closing the dialog would stop
         // the polling and leave nothing on screen saying so — it stays until the job settles.
-        if (!next && data?.job?.status === 'running') return
+        if (!next && (apply.isPending || data?.job?.status === 'running' || data?.job?.status === 'restarting')) return
         onOpenChange(next)
       }}
     >
