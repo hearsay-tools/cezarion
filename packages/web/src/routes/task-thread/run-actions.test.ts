@@ -1,14 +1,13 @@
 // @vitest-environment node
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 
-import type { ApiRun, RunRecord, RunStatus, StepState } from '@open-mercato/cezar-api-client'
+import { runnerSchema, type ApiRun, type RunRecord, type RunStatus, type Runner, type StepState } from '@open-mercato/cezar-api-client'
 
 import { isUnread } from '@/lib/read-state'
 
-// Test-only source imports compare the real implementations without bundling server code.
-import { RUNNER_IDS } from '../../../../cezar/src/core/agent-runner.ts'
-import { resumeCommand as serverResumeCommand } from '../../../../cezar/src/server/server.ts'
+// Cross-package golden fixture: both helpers must match the same expected commands.
+import { commands as goldenCommands, sessionId, unsafeSessionIds } from '../../../../cezar/test/fixtures/resume-commands.ts'
 
 import {
   cliTargetResumes,
@@ -223,34 +222,22 @@ describe('resumeCommand — per backend, mirroring the server', () => {
   })
 })
 
-describe('resume commands — web/server parity across RUNNER_IDS', () => {
-  beforeEach(() => vi.stubEnv('CEZ_CURSOR_BIN', undefined))
-  afterEach(() => vi.unstubAllEnvs())
+describe('resume commands — shared golden parity across runners', () => {
+  const commands = goldenCommands satisfies Record<Runner, string>
 
-  const commands = {
-    claude: 'claude --resume s1',
-    codex: 'codex resume s1',
-    opencode: 'opencode --session s1',
-    pi: 'pi --session s1',
-    cursor: 'agent --resume s1',
-  } satisfies Record<(typeof RUNNER_IDS)[number], string>
-
-  it.each([...RUNNER_IDS, undefined])('keeps %s take-over commands in sync', (runner) => {
+  it.each([...runnerSchema.options, undefined])('keeps %s take-over commands in sync', (runner) => {
     const expected = commands[runner ?? 'claude']
-    const serverCommand = serverResumeCommand(runner, 's1')
-    expect(serverCommand).toBe(expected)
     // Cursor's executable/quoting belongs to the server; the web uses cliResumeCommand.
-    expect(resumeCommand(runner, 's1')).toBe(runner === 'cursor' ? undefined : serverCommand)
+    expect(resumeCommand(runner, sessionId)).toBe(runner === 'cursor' ? undefined : expected)
     expect(resumeHint(run('done', {
       runner,
-      steps: [step({ sessionId: 's1', backend: runner })],
+      steps: [step({ sessionId, backend: runner })],
       ...(runner === 'cursor' ? { cliResumeCommand: expected } : {}),
     }))).toBe(expected)
   })
 
-  it.each([...RUNNER_IDS, undefined])('rejects unsafe session ids for %s on both sides', (runner) => {
-    for (const sessionId of ['', 'a b', "a'b", 'a`id`', 'a && calc.exe', '$(id)', '-x', '--help', 'a'.repeat(201)]) {
-      expect(serverResumeCommand(runner, sessionId)).toBeNull()
+  it.each([...runnerSchema.options, undefined])('rejects unsafe session ids for %s', (runner) => {
+    for (const sessionId of unsafeSessionIds) {
       expect(resumeCommand(runner, sessionId)).toBeUndefined()
       expect(resumeHint(run('done', {
         runner,
