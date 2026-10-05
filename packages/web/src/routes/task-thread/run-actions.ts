@@ -56,6 +56,8 @@ export function resumeCommand(runner: Runner | undefined, sessionId: string): st
       return undefined
     case 'opencode':
       return `opencode --session ${sessionId}`
+    case 'omp':
+      return `omp --resume ${sessionId}`
     default:
       return `claude --resume ${sessionId}`
   }

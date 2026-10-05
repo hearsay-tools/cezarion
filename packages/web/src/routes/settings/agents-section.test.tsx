@@ -89,6 +89,7 @@ function serve({
       { provider: 'codex', status: 'connected', enabled: true },
       { provider: 'opencode', status: 'connected', enabled: true },
       { provider: 'pi', status: 'connected', enabled: true },
+      { provider: 'omp', status: 'connected', enabled: true },
     ],
   },
   providerStatusCode = 200,
@@ -446,7 +447,7 @@ describe('the agents form', () => {
     expect(screen.getByText(/The model preselected in the composer/)).toBeTruthy()
     expect(
       [...document.querySelectorAll('[data-slot="agents-model"]')].map((el) => el.getAttribute('data-runner')),
-    ).toEqual(['claude', 'codex', 'opencode', 'pi', 'cursor'])
+    ).toEqual(['claude', 'codex', 'opencode', 'pi', 'cursor', 'omp'])
   })
 
   it('offers each runner the models its own host CLI reports (#794)', async () => {
@@ -613,7 +614,7 @@ describe('the agents form', () => {
       await waitFor(() => expect(form()).not.toBeNull())
       // Settled: the default-models field below it has rendered, so the pane is not mid-load.
       await screen.findByLabelText('Default model for claude')
-      expect(rows().map((r) => r.getAttribute('data-value'))).toEqual(['claude', 'codex', 'opencode', 'pi', 'cursor'])
+      expect(rows().map((r) => r.getAttribute('data-value'))).toEqual(['claude', 'codex', 'opencode', 'pi', 'cursor', 'omp'])
       expect(document.body.textContent).toContain('Default runner')
     })
 
@@ -621,7 +622,7 @@ describe('the agents form', () => {
       serve({ agentProfiles: WITH_WORK_ACCOUNT })
       renderAt('/settings/agents')
 
-      await waitFor(() => expect(rows()).toHaveLength(6))
+      await waitFor(() => expect(rows()).toHaveLength(7))
       expect(rows().map((r) => r.textContent)).toEqual([
         'claude · Default/home/u/.claude',
         'claude · Klaudiusz~/.claude-klaudiusz',
@@ -629,6 +630,7 @@ describe('the agents form', () => {
         'opencodeOpenCode (serve)',
         'pipi CLI (provider/model)',
         'CursorCursor CLI (ACP)',
+        'OMPOh My Pi CLI (provider/model)',
       ])
       // The discovered account is the checked row until the repo says otherwise.
       expect(rowFor('claude', '')?.getAttribute('aria-checked')).toBe('true')
@@ -651,7 +653,7 @@ describe('the agents form', () => {
       serve({ agentProfiles: WITH_WORK_ACCOUNT })
       renderAt('/settings/agents')
 
-      await waitFor(() => expect(rows()).toHaveLength(6))
+      await waitFor(() => expect(rows()).toHaveLength(7))
       fireEvent.click(rowFor('claude', 'klaudiusz')!)
 
       await waitFor(() => expect(selections()).toHaveLength(1))
@@ -674,7 +676,7 @@ describe('the agents form', () => {
 
       // Wait for the SPLIT state: until the accounts land, claude is one plain row, and clicking
       // that one writes no selection — which is correct, and would make this pass for no reason.
-      await waitFor(() => expect(rows()).toHaveLength(6))
+      await waitFor(() => expect(rows()).toHaveLength(7))
       fireEvent.click(rowFor('claude', '')!)
 
       await waitFor(() => expect(selections()).toHaveLength(1))
@@ -689,7 +691,7 @@ describe('the agents form', () => {
       serve({ agentProfiles: WITH_WORK_ACCOUNT })
       renderAt('/settings/agents')
 
-      await waitFor(() => expect(rows()).toHaveLength(6))
+      await waitFor(() => expect(rows()).toHaveLength(7))
       fireEvent.click(rowFor('codex')!)
 
       await waitFor(() => expect(puts()).toHaveLength(1))
@@ -721,7 +723,7 @@ describe('the agents form', () => {
       serve({ agentProfiles: WITH_WORK_ACCOUNT })
       renderAt('/settings/agents')
 
-      await waitFor(() => expect(rows()).toHaveLength(6))
+      await waitFor(() => expect(rows()).toHaveLength(7))
       const pane = document.querySelector('[data-slot="agents-runner"]')?.closest('section')
       expect(pane?.textContent).toContain('never committed')
       // The consequence a reader cannot guess: sessions live in the account's own folder.

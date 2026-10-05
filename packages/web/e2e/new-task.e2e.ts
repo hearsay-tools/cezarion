@@ -199,7 +199,7 @@ describe('the full-screen /new against a live dry-run server', () => {
       )
       return snapshot.checks.length > 0 ? snapshot : undefined
     }, () => 'runner availability never finished its first background sweep', { tries: 120 })
-    const runners = ['claude', 'codex', 'cursor', 'opencode', 'pi'].filter((id) =>
+    const runners = ['claude', 'codex', 'cursor', 'omp', 'opencode', 'pi'].filter((id) =>
       health.checks.some((c) => c.name === id && c.available),
     )
     const expectedPills = runners.length > 1 ? 1 : 0

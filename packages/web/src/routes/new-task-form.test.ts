@@ -20,6 +20,7 @@ import {
   modelCatalogStatus,
   pushRecentSource,
   resolveEffort,
+  RUNNERS,
   resolveModel,
   resolveRunner,
   resolveSource,
@@ -49,6 +50,11 @@ describe('availableRunners (legacy renderChrome rule)', () => {
     expect(availableRunners([check('cursor', true)])).toEqual(['cursor'])
     expect(availableRunners([check('claude', true), check('cursor', false)])).toEqual(['claude'])
     expect(modelsForRunner('cursor')[0]).toMatchObject({ id: '', desc: 'Use your Cursor default model' })
+  })
+  it('offers OMP only when detected, after the other backends', () => {
+    expect(availableRunners([check('omp', true), check('claude', true)])).toEqual(['claude', 'omp'])
+    expect(availableRunners([check('claude', true), check('omp', false)])).toEqual(['claude'])
+    expect(RUNNERS.find((runner) => runner.id === 'omp')).toMatchObject({ label: 'OMP' })
   })
   it('offers exactly the detected backends, in RUNNERS order', () => {
     const checks = [check('opencode', true), check('git', true), check('claude', true), check('codex', false)]
@@ -157,6 +163,24 @@ describe('model option resolution', () => {
         stale: false,
       }).map((m) => m.id),
     ).toEqual(['', 'xai/grok-4.6'])
+  })
+
+  it('omp: auto alone until the host catalog answers, and never conflicts', () => {
+    expect(modelsForRunner('omp').map((m) => m.id)).toEqual([''])
+    expect(modelsForRunner('omp')[0]).toMatchObject({ desc: 'Use your OMP default model' })
+    expect(
+      modelsForRunner('omp', {
+        runner: 'omp',
+        models: [{ id: 'anthropic/claude-sonnet-5', label: 'sonnet-5', description: '' }],
+        source: 'live',
+        stale: false,
+      }).map((m) => m.id),
+    ).toEqual(['', 'anthropic/claude-sonnet-5'])
+    // OMP spans every configured provider like pi, so its ids are never another runner's exclusive model
+    // and `opus` stays a claude-only bare id from its point of view too.
+    expect(modelConflictsWithRunner('openai/gpt-5.1', 'omp')).toBe(false)
+    expect(modelConflictsWithRunner('openai/gpt-5.1', 'codex')).toBe(false)
+    expect(modelCatalogStatus('omp', undefined, true)).toBe('Latest OMP models unavailable')
   })
 
   it('names the runner whose catalog is stale or unavailable', () => {
