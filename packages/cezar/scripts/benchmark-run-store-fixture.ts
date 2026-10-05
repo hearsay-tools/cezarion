@@ -35,6 +35,24 @@ const LIVE_STATUSES: ReadonlyArray<RunRecord['status']> = ['queued', 'running', 
 export const liveRunCount = (runs: number) => Math.max(3, Math.ceil(runs * 0.01));
 export const isLiveRun = (run: RunRecord) => LIVE_STATUSES.includes(run.status);
 
+/**
+ * The record the benchmark's save rows write: the finished one whose serialized size is closest
+ * to the median finished record, ties broken by id. A save costs what the changed record weighs,
+ * and the rows exist to show how save cost scales with HISTORY, so the target must not change
+ * shape with the size. The old pick, `finished[length / 2]`, landed on a 231 KB record (99.9th
+ * percentile; the median is ~7 KB) at 2,000 runs and on 2.5-16 KB ones at every other size,
+ * which is why only the 2,000-run save cells read 2.8-3 ms against ~0.5 ms.
+ */
+export function pickSaveTarget(finished: readonly RunRecord[]): RunRecord {
+  const sized = finished.map((run) => ({ run, bytes: JSON.stringify(run).length }));
+  const median = sized.map((entry) => entry.bytes).sort((a, b) => a - b)[Math.floor(sized.length / 2)]!;
+  return sized.reduce((best, entry) => {
+    const distance = Math.abs(entry.bytes - median);
+    const bestDistance = Math.abs(best.bytes - median);
+    return distance < bestDistance || (distance === bestDistance && entry.run.id < best.run.id) ? entry : best;
+  }).run;
+}
+
 /** Sizes (chars) and weights of the distinct worker skill prompts in the sample (#778). */
 const SKILL_PROMPTS: ReadonlyArray<{ chars: number; weight: number }> = [
   { chars: 86_157, weight: 36 }, { chars: 83_049, weight: 18 }, { chars: 72_587, weight: 14 },

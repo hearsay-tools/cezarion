@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { delegationStateSchema } from '@open-mercato/cezar-contract';
-import { generateRunFixture, isLiveRun, liveRunCount } from '../../scripts/benchmark-run-store-fixture.ts';
+import { generateRunFixture, isLiveRun, liveRunCount, pickSaveTarget } from '../../scripts/benchmark-run-store-fixture.ts';
 import { parseRunRecords, reconcileLoadedRun } from './store.ts';
 
 /** Smoke test for the #779 benchmark fixture: it must be reproducible and must be what the real
@@ -72,5 +72,22 @@ describe('run-store benchmark fixture', () => {
     expect(sizes.at(-1)).toBeGreaterThan(150_000);
     expect(records.filter((run) => run.archived).length).toBeGreaterThan(680);
     expect(records.filter((run) => run.delegation).length).toBeGreaterThan(680);
+  });
+
+  // The benchmark measures how save cost scales with HISTORY, and a save costs what the changed
+  // record weighs. The old target (`finished[length / 2]`) was 231 KB at 2,000 runs, so that cell
+  // alone read 3 ms against ~0.5 ms everywhere else.
+  it.each([100, 500, 2000, 5000])('saves on a median-size finished record at %i runs', (size) => {
+    for (const profile of ['legacy', 'post-778'] as const) {
+      const finished = generateRunFixture({ runs: size, profile }).filter((run) => !isLiveRun(run));
+      const target = pickSaveTarget(finished);
+      expect(finished.some((run) => run.id === target.id)).toBe(true);
+      const sizes = finished.map((run) => JSON.stringify(run).length);
+      const targetBytes = JSON.stringify(target).length;
+      const percentile = (sizes.filter((bytes) => bytes < targetBytes).length + sizes.filter((bytes) => bytes <= targetBytes).length) / 2 / sizes.length;
+      expect(percentile).toBeGreaterThanOrEqual(0.4);
+      expect(percentile).toBeLessThanOrEqual(0.6);
+      expect(pickSaveTarget([...finished].reverse()).id).toBe(target.id); // order-independent
+    }
   });
 });

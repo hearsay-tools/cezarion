@@ -38,7 +38,9 @@
  *   spaced finished records plus the largest one (50 ids, or 49 when the largest is among them).
  * - Synchronous calls are timed with `performance.now()` around the call.
  * - "save (flush)" is `updateRun` + `flush()`: `flush` runs the same `saveNow` the 300 ms debounce
- *   timer calls, synchronously, so it is the debounced write without the timer.
+ *   timer calls, synchronously, so it is the debounced write without the timer. Both save rows
+ *   write the finished record closest to the median finished size (`pickSaveTarget`), and the
+ *   results table prints that size per cell.
  * - "save (debounced)" is the real path: `updateRun`, then the timer fires on its own. It is
  *   measured as the longest gap a `setImmediate` loop sees while waiting for the save (stop after
  *   a gap of at least half the flush median once 300 ms have passed, or at a timeout).
@@ -65,7 +67,7 @@ import { parseArgs } from 'node:util';
 import { monitorEventLoopDelay, performance } from 'node:perf_hooks';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { RunRecord, RunStore as RunStoreInstance } from '../src/runs/store.ts';
-import { DEFAULT_FIXTURE_SEED, FIXTURE_PROFILES, generateRunFixture, isLiveRun, type FixtureProfile } from './benchmark-run-store-fixture.ts';
+import { DEFAULT_FIXTURE_SEED, FIXTURE_PROFILES, generateRunFixture, isLiveRun, pickSaveTarget, type FixtureProfile } from './benchmark-run-store-fixture.ts';
 
 const SCRIPT = fileURLToPath(import.meta.url);
 const WARM_UP = 3;
@@ -105,6 +107,8 @@ interface ChildResult {
   size: number; profile: FixtureProfile; process: number; fixtureBytes: number; records: number;
   /** Live records among `records`; absent on results written before the fixture had any. */
   liveRecords?: number;
+  /** Serialized size of the record the save rows write; absent on results written before the target was a median-size record. */
+  saveTargetBytes?: number;
   /** Absent on results written before `--metrics` existed: those measured `FIRST_TABLE_METRICS`. */
   metrics?: Metric[];
   /** Added by the parent; absent on results written before `--resume` existed. */
@@ -228,7 +232,10 @@ async function runChild(options: ChildOptions, resultPath: string): Promise<void
     const singleTarget = roots.find((run) => run.delegation?.role === 'root' && run.delegation.conversation)?.id ?? roots[0]!.id;
     const multiTargets = finished.filter((run) => run.delegation && run.delegation.role !== 'invalid').slice(0, MULTI_ROWS).map((run) => run.id);
     const active = finished.find((run) => !run.archived)!;
-    const saveTarget = finished[Math.floor(finished.length / 2)]!.id;
+    // A median-size record, not `finished[length / 2]` (see `pickSaveTarget`): save cost tracks the
+    // changed record's size, and that position was 231 KB at 2,000 runs.
+    const saveRecord = pickSaveTarget(finished);
+    const saveTarget = saveRecord.id;
     const bytes = finished.map((run) => JSON.stringify(run).length);
     const largest = finished[bytes.indexOf(Math.max(...bytes))]!;
     const spaced = Math.min(finished.length, GET_RUN_FINISHED_IDS - 1);
@@ -237,7 +244,7 @@ async function runChild(options: ChildOptions, resultPath: string): Promise<void
 
     const result: ChildResult = {
       size: options.size, profile: options.profile, process: options.process, fixtureBytes, records: records.length,
-      liveRecords: live.length, metrics: options.metrics, sync: {}, routes: {},
+      liveRecords: live.length, saveTargetBytes: JSON.stringify(saveRecord).length, metrics: options.metrics, sync: {}, routes: {},
     };
     const sync = result.sync;
     let store: RunStoreInstance | undefined;
@@ -429,7 +436,7 @@ const cellOf = (group: readonly ChildResult[], pick: (result: ChildResult) => nu
 };
 
 interface SizeAggregate {
-  metrics: Record<string, Cell>; fixtureBytes: number; records: number; liveRecords: number;
+  metrics: Record<string, Cell>; fixtureBytes: number; records: number; liveRecords: number; saveTargetBytes?: number;
   responseBytes: Partial<Record<Route, number>>; getRunIds?: { live: number; finished: number };
   loop?: Record<'p50' | 'p99' | 'max' | 'touchRate', Cell>;
 }
@@ -464,6 +471,7 @@ function aggregate(results: ChildResult[], options: ParentOptions) {
         fixtureBytes: group[0]!.fixtureBytes,
         records: group[0]!.records,
         liveRecords: group[0]!.liveRecords ?? 0,
+        ...(group[0]!.saveTargetBytes !== undefined ? { saveTargetBytes: group[0]!.saveTargetBytes } : {}),
         responseBytes,
         ...(withGetRun ? { getRunIds: { live: withGetRun.getRun!.liveIds, finished: withGetRun.getRun!.finishedIds } } : {}),
         ...(loops.length > 0 ? {
@@ -508,6 +516,9 @@ function report(aggregated: ReturnType<typeof aggregate>, options: ParentOptions
     lines.push(`## ${profile}`, '', `| Metric | ${sizes.map((size) => `${size} runs`).join(' | ')} |`, `| --- | ${sizes.map(() => '---:').join(' | ')} |`);
     lines.push(`| Records (live) | ${sizes.map((size) => `${bySize[size]!.records} (${bySize[size]!.liveRecords})`).join(' | ')} |`);
     lines.push(`| Fixture bytes | ${sizes.map((size) => mb(bySize[size]!.fixtureBytes)).join(' | ')} |`);
+    if (sizes.some((size) => bySize[size]!.saveTargetBytes !== undefined)) {
+      lines.push(`| Save target bytes (median-size finished record) | ${sizes.map((size) => bySize[size]!.saveTargetBytes?.toLocaleString('en-US') ?? '-').join(' | ')} |`);
+    }
     const row = (label: string, key: string, expectedN = options.processes * options.samples) => {
       if (!sizes.some((size) => bySize[size]!.metrics[key])) return;
       lines.push(`| ${label} | ${sizes.map((size) => {
