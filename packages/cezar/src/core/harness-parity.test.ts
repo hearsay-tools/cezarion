@@ -66,6 +66,7 @@ import {
   waitFor,
 } from './harness-parity.testkit.ts';
 import { blockRunWrites } from '../runs/run-store.testkit.ts';
+import type { RunStore } from '../runs/store.ts';
 
 /** One row of the matrix, named once and applied to every harness. */
 interface SeamCriterion<T = SeamObservation> {
@@ -536,6 +537,8 @@ const CONTROL_CRITERIA = [
   // workflows/worker-reboot-parity.test.ts and worker-location-evidence.test.ts: native exit/Continue,
   // independent reboot proof, legacy location uncertainty, real holders, cleanup retries and parent Finish.
   { id: 'R43', scenario: 'baseline' },
+  // #779: Continue on a run only runs.db holds, through both ActiveRun construction sites.
+  { id: 'R47', scenario: 'done' },
 ] as const;
 
 /**
@@ -699,6 +702,53 @@ describe('harness parity — recoverable skill diagnostics (#723)', () => {
       expect(obs.record?.error).toContain('provider');
       expect(obs.record?.error).toContain(scenario === 'scoped-skill-failure' ? '/skills/required/SKILL.md' : 'restoring service');
     }, 45_000);
+  }
+});
+
+/** Flush until `runId` has left the store's memory; false if it never does. */
+async function leavesMemory(store: RunStore, runId: string): Promise<boolean> {
+  try {
+    await waitFor(() => { store.flush(); return !store.heldIds().includes(runId); }, 10_000);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// #779: only the live set is in memory. A finished run is read back from runs.db; Continue loads
+// it into the held set (the `continue` pin), `runContinuation` pins it through the same `activate`
+// helper `execute` uses, and it leaves memory again once the continuation settles.
+describe('harness parity — Continue on a finished run (#779)', () => {
+  for (const backend of RUNNER_IDS) {
+    parityRow<{ pins: string[]; left: boolean; heldWhileContinuing: boolean; leftAgain: boolean; obs: RunObservation }>(backend, {
+      id: 'R47', name: 'R47 Continue loads a finished run into memory and lets it go after it settles', scenario: 'done',
+      assert: ({ pins, left, heldWhileContinuing, leftAgain, obs }) => {
+        expect(left).toBe(true);
+        expect(heldWhileContinuing).toBe(true);
+        expect(leftAgain).toBe(true);
+        // `execute` pins the first execution, then Continue's admission and `runContinuation`.
+        expect(pins).toEqual(['active', 'continue', 'active']);
+        expect(TERMINAL).toContain(obs.record?.status);
+        expect(obs.record?.steps.map((step) => step.id)).toContain('continue-1');
+      },
+    }, async () => {
+      const pins: string[] = [];
+      let left = false, heldWhileContinuing = false, leftAgain = false;
+      const obs = await driveRun(backend, 'done', record => TERMINAL.includes(record?.status ?? ''), 30_000,
+        async ({ store, manager, runId }) => {
+          await waitFor(() => !manager.isActive(runId));
+          left = await leavesMemory(store, runId);
+          expect(manager.continueRun(runId, { text: promptFor(backend, 'done') }).ok).toBe(true);
+          heldWhileContinuing = store.heldIds().includes(runId);
+          await waitFor(() => TERMINAL.includes(store.getRun(runId)?.status ?? '') && !manager.isActive(runId), 30_000);
+          leftAgain = await leavesMemory(store, runId);
+        },
+        { beforeStart: ({ store }) => {
+          const pin = store.pin.bind(store);
+          store.pin = (id, holder) => { pins.push(holder); return pin(id, holder); };
+        } });
+      return { pins, left, heldWhileContinuing, leftAgain, obs };
+    });
   }
 });
 
