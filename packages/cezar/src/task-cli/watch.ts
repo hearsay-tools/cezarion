@@ -1,9 +1,11 @@
 import {
   ATTENTION_RANK,
   apiRunSchema,
+  toRunSummary,
   runHistoryPageSchema,
   runRecordSchema,
-  type ApiRun,
+  runSummarySchema,
+  type RunSummary,
   type RunHistoryEvent,
   type RunStatus,
 } from '@open-mercato/cezar-contract';
@@ -48,7 +50,7 @@ export interface WaitResult {
   timedOut: boolean;
 }
 
-function entryFor(id: string, run: ApiRun | undefined): WaitEntry {
+function entryFor(id: string, run: RunSummary | undefined): WaitEntry {
   if (!run) return { id, status: 'missing' };
   return {
     id,
@@ -107,7 +109,28 @@ export function abortedPoll(error: unknown): boolean {
 }
 
 /**
- * Polls `GET /runs`: one call covers any number of runs and holds no socket open. Each poll is
+ * The project's run list as summaries (#817). A cockpit older than the summary route answers it
+ * 404 (an `apply` waiting for its restart, or a remote cockpit on an older release), and the CLI
+ * then reads the full `GET /runs` it always read and projects it the same way the server would,
+ * inside what is left of the same deadline. Any other refusal passes through.
+ */
+export async function requestRunSummaries(cockpit: Cockpit, timeoutMs?: number): Promise<RunSummary[]> {
+  const start = Date.now();
+  const result = await request(cockpit, '/run-summaries', timeoutMs === undefined ? {} : { timeoutMs });
+  if (result.status === 404) {
+    const left = timeoutMs === undefined ? undefined : Math.max(1, timeoutMs - (Date.now() - start));
+    const full = await request(cockpit, '/runs', left === undefined ? {} : { timeoutMs: left });
+    if (full.status !== 200) refuse(full);
+    const runs = apiRunSchema.array().safeParse(full.data);
+    return runs.success ? runs.data.map((run) => toRunSummary(run)) : invalidResponse('run list');
+  }
+  if (result.status !== 200) refuse(result);
+  const runs = runSummarySchema.array().safeParse(result.data);
+  return runs.success ? runs.data : invalidResponse('run list');
+}
+
+/**
+ * Polls `GET /run-summaries` (#817): one call covers any number of runs and holds no socket open. Each poll is
  * bounded by what is left of the deadline, so a slow cockpit answers "timed out" on time rather
  * than holding the caller for a full request timeout.
  */
@@ -125,16 +148,13 @@ export async function waitForRuns(
     const pollStart = Date.now();
     let result;
     try {
-      result = await request(cockpit, '/runs', { timeoutMs: budget });
+      result = await requestRunSummaries(cockpit, budget);
     } catch (error) {
       if (Date.now() >= deadline) return timedOut();
       if (abortedPoll(error) && pollHitDeadline(pollStart, budget)) return timedOut();
       throw error;
     }
-    if (result.status !== 200) refuse(result);
-    const runs = apiRunSchema.array().safeParse(result.data);
-    if (!runs.success) invalidResponse('run list');
-    const byId = new Map(runs.data.map((run) => [run.id, run]));
+    const byId = new Map(result.map((run) => [run.id, run]));
     entries = ids.map((id) => entryFor(id, byId.get(id)));
     const ended = entries.filter((entry) => endsWait(entry, options.until));
     const done = options.mode === 'any' ? ended.length > 0 : ended.length === entries.length;

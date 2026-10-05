@@ -75,7 +75,7 @@ function stubFetch(overrides: Record<string, () => Response> = {}): SentRequest[
       if (override) return override()
       if (path === '/api/v1/models?runner=claude') return jsonResponse({ runner: 'claude', models: [], source: 'unavailable', stale: false })
       if (method === 'GET' && path === '/api/v1/runs/r1/diff') return new Response(DIFF, { status: 200 })
-      if (method === 'GET' && path === '/api/v1/runs') return jsonResponse([])
+      if (method === 'GET' && path === '/api/v1/run-summaries') return jsonResponse([])
       if (method === 'GET' && path === '/api/v1/providers/status') {
         return jsonResponse({
           providers: [

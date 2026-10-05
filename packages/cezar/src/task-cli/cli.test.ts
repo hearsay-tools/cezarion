@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { apiRunSchema } from '@open-mercato/cezar-contract';
+import { apiRunSchema, runStatusSchema } from '@open-mercato/cezar-contract';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RunStore } from '../runs/store.ts';
 import type { RunManager } from '../workflows/run.ts';
@@ -280,7 +280,7 @@ describe('cez task', () => {
       expect(await run(['status', id])).toBe(0);
       const printed = last();
       expect(Object.keys(printed).sort()).toEqual(
-        ['id', 'title', 'status', 'attention', 'attentionLabel', 'hasPendingHumanAsk', 'tokensUsed', 'url'].sort(),
+        ['id', 'title', 'status', 'attention', 'attentionLabel', 'hasPendingHumanAsk', 'tokensUsed', 'url', 'handoffUrl'].sort(),
       );
       expect(printed).toMatchObject({ id, status: 'queued', hasPendingHumanAsk: false, attention: 'none', attentionLabel: 'queued' });
     });
@@ -324,6 +324,16 @@ describe('cez task', () => {
       expect(last().runs).toHaveLength(32);
       expect(await run(['wait', runs[0]!.id, '--timeout-seconds', '10'])).toBe(0);
       expect(last()).toMatchObject({ timedOut: false, runs: [{ id: runs[0]!.id, status: 'done' }] });
+    });
+
+    it('reads the run summaries, and only --full reads every full record (#817)', async () => {
+      await start('a');
+      const fetchSpy = vi.spyOn(globalThis, 'fetch');
+      try {
+        expect(await run(['list'])).toBe(0);
+        expect(await run(['list', '--full'])).toBe(0);
+        expect(fetchSpy.mock.calls.map(([url]) => String(url))).toEqual([`${cockpit.api}/run-summaries`, `${cockpit.api}/runs`]);
+      } finally { fetchSpy.mockRestore(); }
     });
 
     it('lists slim rows newest first, hides archived unless --all, filters and limits', async () => {
@@ -371,6 +381,94 @@ describe('cez task', () => {
       // Still id-addressed: the operator had to get the id from somewhere.
       expect(await run(['status', child])).toBe(0);
       expect(last()).toMatchObject({ id: child });
+    });
+  });
+
+  describe('default output and help (#572, #573, #574)', () => {
+    it.each(runStatusSchema.options)('prints only the next-action datum for %s rows', async (status) => {
+      const id = await start();
+      store.updateRun(id, {
+        status, currentStepId: 'implement', pullRequestUrl: 'https://github.com/example/repo/pull/1',
+        error: 'failed step\nstack trace', branch: 'cez/test', diffStat: { adds: 1, dels: 2, files: 1 }, tokensUsed: 123,
+      });
+      expect(await run(['list'])).toBe(0);
+      const datum = status === 'running' ? { currentStepId: 'implement' }
+        : status === 'done' || status === 'review' ? { pullRequestUrl: 'https://github.com/example/repo/pull/1' }
+          : status === 'failed' ? { error: 'failed step…' } : {};
+      const rows = last().runs as Array<Record<string, unknown>>;
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toEqual({
+        id, title: 'do the thing', status, attention: expect.any(String), attentionLabel: expect.any(String),
+        hasPendingHumanAsk: false, updatedAt: expect.any(String), ...datum,
+      });
+      const response = await fetch(`${cockpit.api}/runs`);
+      expect(await run(['list', '--full'])).toBe(0);
+      expect(last().runs).toEqual(await response.json());
+    });
+
+    it.each([
+      ['199 characters', 'x'.repeat(199), 'x'.repeat(199)],
+      ['200 characters', 'x'.repeat(200), 'x'.repeat(200)],
+      ['201 characters', 'x'.repeat(201), `${'x'.repeat(199)}…`],
+      ['multiple lines', 'first line\nsecond line', 'first line…'],
+      ['CRLF', 'first line\r\nsecond line', 'first line…'],
+      ['long first line', `${'x'.repeat(200)}\nsecond line`, `${'x'.repeat(199)}…`],
+    ])('caps list errors: %s; keeps status and --full errors intact', async (_label, error, expected) => {
+      const id = await start();
+      store.updateRun(id, { status: 'failed', error });
+      expect(await run(['list'])).toBe(0);
+      expect((last().runs as Array<Record<string, unknown>>)[0]?.error).toBe(expected);
+      expect(await run(['status', id])).toBe(0);
+      expect(last().error).toBe(error);
+      const response = await fetch(`${cockpit.api}/runs/${id}`);
+      expect(await run(['status', id, '--full'])).toBe(0);
+      expect(last()).toEqual(await response.json());
+    });
+
+    it.each(['running', 'review', 'failed'] as const)('omits absent next-action fields for %s', async (status) => {
+      const id = await start();
+      store.updateRun(id, { status });
+      expect(await run(['list'])).toBe(0);
+      const row = (last().runs as Array<Record<string, unknown>>)[0]!;
+      for (const field of ['currentStepId', 'pullRequestUrl', 'error', 'branch', 'diffStat', 'tokensUsed']) {
+        expect(row).not.toHaveProperty(field);
+      }
+    });
+
+    it('always prints the existing handoff route on default status, including an unseeded run', async () => {
+      const id = await start();
+      expect(await run(['status', id])).toBe(0);
+      expect(last().handoffUrl).toBe(`${cockpit.origin}/api/v1/p/default/runs/${id}/handoff`);
+      const response = await fetch(last().handoffUrl as string);
+      expect(response.status).toBe(200);
+      expect(await run(['status', id, '--full'])).toBe(0);
+      expect(last()).not.toHaveProperty('handoffUrl');
+    });
+
+    it.each([['list', '--help'], ['--help']])('enumerates exactly the contract statuses in %j', async (...args) => {
+      expect(await run(args)).toBe(0);
+      const line = out.at(-1)!.split('\n').find((line) => line.startsWith('  --status '));
+      expect(line?.split('Only these statuses: ')[1]).toBe(`${runStatusSchema.options.join(', ')}.`);
+      expect(discoveries).toBe(0);
+    });
+
+    it('repeats the contract statuses in invalid-value errors before discovery', async () => {
+      expect(await run(['list', '--status', 'active'])).toBe(64);
+      expect(last().error).toBe(`unknown status 'active'; one of ${runStatusSchema.options.join(', ')}`);
+      expect(discoveries).toBe(0);
+    });
+
+    it.each([['send', '--help'], ['--help']])('teaches steer, answer and resume in %j', async (...args) => {
+      expect(await run(args)).toBe(0);
+      const help = out.at(-1)!;
+      for (const text of [
+        "cez task send <id> 'Use the retry helper instead'",
+        "cez task send <id> 'Use option A'",
+        "cez task send <id> --resume '…'",
+        'delivered', 'queued', 'resumed', 'attention: waiting', 'question',
+        'delivery: not-delivered', 'next', '--text-file <path|->', '--text-file -', 'cez task start --help',
+      ]) expect(help).toContain(text);
+      expect(discoveries).toBe(0);
     });
   });
 

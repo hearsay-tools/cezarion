@@ -1,5 +1,5 @@
-import { useId, useState } from 'react'
-import { ArrowUpRightIcon, BotIcon, ChevronDownIcon, CircleCheckIcon, CircleIcon, CircleSlashIcon, CircleXIcon, GitBranchIcon } from '@/components/design-icons'
+import { useState } from 'react'
+import { ArrowUpRightIcon, CircleCheckIcon, CircleIcon, CircleSlashIcon, CircleXIcon, GitBranchIcon } from '@/components/design-icons'
 import { LoaderCircleIcon } from 'lucide-react'
 import { useIsDesktop } from '@/lib/use-desktop'
 import { delegationWaitLabel } from '@/lib/attention'
@@ -14,17 +14,11 @@ import { cn } from '@/lib/utils'
 import { ActivityRow } from './run-activity-row'
 
 /** The run's own delegation metadata, and the wait note's half of it — read off `ApiRun` so the
- *  two panels below never drift from whichever schema the record actually carries. */
+ *  Workers section and dock header never drift from whichever schema the record actually carries. */
 type Delegation = NonNullable<ApiRun['delegation']>
 type DelegationWait = NonNullable<Exclude<Delegation, { role: 'invalid' }>['wait']>
 
 const linkClass = 'flex min-h-11 min-w-0 items-center rounded-md px-2 text-sm text-foreground hover:bg-muted break-words focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
-
-/** Ordinary records mount no query and retain their existing header. */
-export function RunRelationshipsPanel({ run }: { run: ApiRun }) {
-  if (!run.delegation || run.delegation.role === 'invalid') return null
-  return <Relationships run={run} />
-}
 
 /** The worker ids this run is known to link, receipts first — the durable list that survives a
  *  failed or offline relationships lookup (a fetched-only list would blink the links away). */
@@ -74,71 +68,10 @@ export function useWorkersVerdict(run: ApiRun): WorkersVerdict {
   return verdicts.includes('issue') ? 'issue' : 'complete'
 }
 
-function Relationships({ run }: { run: ApiRun }) {
-  const query = useRunRelationships(run.id)
-  const desktop = useIsDesktop()
-  const [expandedRun, setExpandedRun] = useState<string | null>(null)
-  const expanded = desktop || expandedRun === run.id
-  const navigationId = useId()
-  const runs = useRuns()
-  const metadata = run.delegation
-  const parentId = metadata?.role === 'worker' ? metadata.parentRunId : query.data?.parentRunId
-  const workers = new Map(query.data?.workers.map(worker => [worker.workerId, worker]))
-  const ids = workerIdsOf(metadata, query.data)
-  const wait = metadata && metadata.role !== 'invalid' ? metadata.wait : undefined
-  const dependencyLabel = delegationWaitLabel(metadata)
-  return (
-    <section aria-label="Task relationships" className="min-w-0 border-t border-border py-2 text-sm text-muted-foreground">
-      <button
-        type="button"
-        className="flex min-h-11 w-full items-center gap-2 text-left text-xs md:hidden"
-        aria-expanded={expanded}
-        aria-controls={navigationId}
-        onClick={() => setExpandedRun(expandedRun === run.id ? null : run.id)}
-      >
-        <GitBranchIcon aria-hidden="true" className="size-4 text-accent-text" />
-        {metadata?.role === 'worker' ? 'Worker session' : 'Parent'}
-        <BotIcon aria-hidden="true" className="ml-1 size-4" />
-        {metadata?.role === 'worker' ? 'Parent & workers' : ids.length > 0 ? `Workers ${ids.length}` : query.isSuccess ? 'Workers 0' : query.isError ? 'Workers unavailable' : 'Workers…'}
-        <ChevronDownIcon aria-hidden="true" className={`ml-auto size-4 ${expanded ? 'rotate-180' : ''}`} />
-      </button>
-        {metadata?.role === 'worker' && metadata.destroy ? <Cleanup state={metadata.destroy} /> : null}
-        {wait ? <WaitNote wait={wait} dependencyLabel={dependencyLabel} /> : null}
-      <div id={navigationId} hidden={!expanded}>
-        {query.data?.capacity ? <CapacityNote capacity={query.data.capacity} /> : null}
-        {parentId ? <ParentLink id={parentId} /> : null}
-        {ids.length > 0 ? (
-          <ul className="grid max-h-64 min-w-0 gap-1 overflow-y-auto">
-            {ids.map(id => {
-              const worker = workers.get(id)
-              const record = runs.data?.find(candidate => candidate.id === id)
-              return <li key={id} className="min-w-0 rounded-md bg-muted/40 px-1">
-                <div className="flex min-w-0 flex-wrap items-center gap-x-2">
-                  <Link to={`/tasks/${id}`} aria-label={`Worker task ${id}`} className={linkClass}>{record ? runTitle(record) : `Worker ${id.slice(0, 8)}`}</Link>
-                  <span className="px-2 text-xs">{worker?.status ?? (query.isSuccess ? 'Record unavailable or deleted' : 'Status unavailable')}</span>
-                  {worker ? <CleanUpWorker parentRunId={run.id} worker={worker} /> : null}
-                </div>
-                {worker?.destroy ? <Cleanup state={worker.destroy} /> : null}
-              </li>
-            })}
-          </ul>
-        ) : metadata?.role === 'root' && query.isSuccess ? <p className="px-2">No workers</p> : null}
-        {query.fetchStatus === 'paused' ? <p role="status" className="px-2">Offline — relationship details will refresh when connected.</p>
-          : query.isPending ? <p role="status" className="px-2">Loading relationships…</p> : null}
-        {query.isError ? <div className="flex flex-wrap items-center gap-2 px-2">
-          <p role="status">Could not load relationships. Known task links are retained.</p>
-          <Button variant="outline" className="min-h-11" onClick={() => void query.refetch()}>Retry relationships</Button>
-        </div> : null}
-      </div>
-    </section>
-  )
-}
-
 /**
- * The **Workers** row of the Run activity accordion (#402, mockups `pasted-2/3.png`): the same
- * relationships query as the header panel, rendered as one accordion section — `Workers ·
- * 2 linked · 1 done · 1 cancelled`, opening to a row per worker with its status and a jump
- * control to the worker task.
+ * The **Workers** row of the Run activity accordion (#402, mockups `pasted-2/3.png`): relationships
+ * rendered as one accordion section — `Workers · 2 linked · 1 done · 1 cancelled`, opening
+ * to a row per worker with its status and a jump control to the worker task.
  *
  * It builds its own `ActivityRow` rather than handing the dock a body, because the meter in
  * the head is fetched data: only the component holding the query knows it. The dock still owns

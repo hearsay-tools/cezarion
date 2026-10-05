@@ -1,4 +1,4 @@
-import { deriveAttention, type ApiRun, type AttentionBucket, type RunStatus } from '@open-mercato/cezar-contract';
+import { deriveAttention, type ApiRun, type AttentionBucket, type RunStatus, type RunSummary } from '@open-mercato/cezar-contract';
 
 /**
  * The slim shapes `cez task` prints (#504). A bot polls these every few seconds, so each one
@@ -58,8 +58,17 @@ export function projectStatus(run: ApiRun, url: string, question?: unknown) {
   });
 }
 
+/** First line only, with the ellipsis inside the 200-character budget whenever text is cut. */
+function listError(error: string | undefined): string | undefined {
+  if (error === undefined) return undefined;
+  const firstLine = error.split(/[\r\n]/, 1)[0]!;
+  return firstLine.length < error.length || firstLine.length > 200
+    ? `${firstLine.slice(0, 199)}…`
+    : firstLine;
+}
+
 /** The record carries no `updatedAt`; the newest lifecycle stamp is the honest stand-in. */
-export function projectListRow(run: ApiRun) {
+export function projectListRow(run: RunSummary | ApiRun) {
   return defined({
     id: run.id,
     title: runTitle(run),
@@ -67,6 +76,10 @@ export function projectListRow(run: ApiRun) {
     activity: run.activity,
     ...attentionFields(run),
     hasPendingHumanAsk: run.hasPendingHumanAsk ?? false,
+    // One next-action datum per status; details such as branch/diff/tokens stay on status.
+    currentStepId: run.status === 'running' ? run.currentStepId : undefined,
+    pullRequestUrl: SUCCESS_STATUSES.includes(run.status) ? run.pullRequestUrl : undefined,
+    error: run.status === 'failed' ? listError(run.error) : undefined,
     updatedAt: run.finishedAt ?? run.startedAt ?? run.createdAt,
   });
 }

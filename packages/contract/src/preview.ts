@@ -40,6 +40,20 @@ export const previewServeResultSchema = z.object({
 });
 export type PreviewServeResult = z.infer<typeof previewServeResultSchema>;
 
+/** Agent control carries no run identity or command: both come from its capability and approval. */
+export const previewStopRequestSchema = z.object({
+  port: z.number().int().min(1).max(65535),
+  restart: z.boolean().optional(),
+}).strict();
+export type PreviewStopRequest = z.infer<typeof previewStopRequestSchema>;
+export const previewStopResultSchema = z.object({
+  ok: z.boolean(),
+  code: z.enum(['stopped', 'restarted', 'approval_required', 'adopted', 'not_registered', 'port_held', 'port_in_use', 'invalid_input', 'preview_disabled', 'headless', 'worktree_missing', 'unavailable']),
+  message: z.string(),
+  hint: z.string(),
+});
+export type PreviewStopResult = z.infer<typeof previewStopResultSchema>;
+
 /**
  * One registered dev server, as the run record keeps it. `answeredAtRegistration` is a single TCP
  * probe at registration: a historical observation, never a promise that Open runs nothing.

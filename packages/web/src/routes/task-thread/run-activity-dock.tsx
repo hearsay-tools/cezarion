@@ -56,8 +56,7 @@ export function RunActivityDock({
   const [open, setOpen] = useState(() => openByRun.get(run.id) ?? desktop)
   // Nested rows start closed on every viewport — the mockup's expanded card is a list of
   // section heads, and a reader opens the one they came for. Workers are the exception, open
-  // by default in the mockup and load-bearing before it: the header panel this replaced
-  // listed the worker links on desktop without a click, and they are navigation, not detail.
+  // by default so their task links stay directly reachable: they are navigation, not detail.
   const [sections, setSections] = useState<Record<string, boolean>>({})
   const sessionOpen = run.status === 'running' || run.status === 'waiting'
   const runIsTerminal = !sessionOpen && run.status !== 'queued'
@@ -65,7 +64,7 @@ export function RunActivityDock({
   const agents = useMemo(() => collectSubagents(currentThread.turns, runIsTerminal), [currentThread.turns, runIsTerminal])
   const planEntries = latestPlanEntries(currentThread) ?? []
   // `invalid` is the contract's parking spot for unreadable delegation metadata, and
-  // RunRelationshipsPanel renders nothing for it — so it is not a section to count or frame.
+  // carries no usable worker links, so it is not a section to count or frame.
   const hasWorkers = run.delegation !== undefined && run.delegation.role !== 'invalid'
   // Mounted for every run so the hook order never changes; it only fetches for a delegated one.
   const workers = useWorkersVerdict(run)

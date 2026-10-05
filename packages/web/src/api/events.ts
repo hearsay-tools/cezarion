@@ -1,4 +1,4 @@
-import type { ApiRun, ProcessUsage, RunRecord, TodoItem } from '@open-mercato/cezar-api-client'
+import { toRunSummary, type ApiRun, type ProcessUsage, type RunRecord, type RunSummary, type TodoItem } from '@open-mercato/cezar-api-client'
 
 /**
  * The global stream's data layer: parse one SSE message, and fold it into cached state.
@@ -132,14 +132,18 @@ function isRunRecord(value: unknown): value is RunRecord {
  * one row, at its position, rather than churning the list order under the reader's cursor. A new
  * one is inserted by `createdAt` descending, matching `store.listRuns()`'s order, so a run that
  * appears mid-session lands where a refetch would have put it.
+ *
+ * The list holds summaries (#817), and the stream carries the full record, so every row written
+ * here goes through `toRunSummary`, the same projection `GET /run-summaries` uses. A list row
+ * never holds a field its route would not have sent.
  */
-export function applyRunEvent(list: ApiRun[] | undefined, run: RunRecord): ApiRun[] | undefined {
+export function applyRunEvent(list: RunSummary[] | undefined, run: RunRecord): RunSummary[] | undefined {
   if (!list) return undefined
 
   const index = list.findIndex((r) => r.id === run.id)
   if (index >= 0) {
     const next = [...list]
-    next[index] = mergeRun(list[index], run)
+    next[index] = mergeSummary(list[index], run)
     return next
   }
 
@@ -148,13 +152,13 @@ export function applyRunEvent(list: ApiRun[] | undefined, run: RunRecord): ApiRu
   const createdAt = run.createdAt ?? ''
   const at = list.findIndex((r) => (r.createdAt ?? '').localeCompare(createdAt) < 0)
   const next = [...list]
-  next.splice(at < 0 ? list.length : at, 0, run)
+  next.splice(at < 0 ? list.length : at, 0, toRunSummary(run))
   return next
 }
 
 /** Drop a deleted run. Same reference back when the id isn't there — an event about a run this
  *  cache never held must not re-render every list on screen. */
-export function applyRunDeleted(list: ApiRun[] | undefined, id: string): ApiRun[] | undefined {
+export function applyRunDeleted<T extends { id: string }>(list: T[] | undefined, id: string): T[] | undefined {
   if (!list) return undefined
   const next = list.filter((r) => r.id !== id)
   return next.length === list.length ? list : next
@@ -170,6 +174,11 @@ export function applyRunDeleted(list: ApiRun[] | undefined, id: string): ApiRun[
  */
 export function mergeRun(previous: ApiRun | undefined, run: RunRecord): ApiRun {
   return previous?.usage ? { ...run, usage: previous.usage } : run
+}
+
+/** `mergeRun` for a list row: the same `usage` carry-over, then the summary projection. */
+export function mergeSummary(previous: RunSummary | undefined, run: RunRecord): RunSummary {
+  return toRunSummary(previous?.usage ? { ...run, usage: previous.usage } : run)
 }
 
 // ---- live usage --------------------------------------------------------------------------

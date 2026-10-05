@@ -45,7 +45,7 @@ describe('RunManager.registerPreviewServer (#781)', { timeout: 30_000 }, () => {
   beforeEach(async () => {
     vi.stubEnv('CEZ_PREVIEW', '1');
     sessions.release.length = 0;
-    preview = { portOwner: () => undefined, probe: async () => false, release: async () => undefined, replaced: vi.fn(async () => undefined) };
+    preview = { stopPreview: vi.fn(async () => ({ ok: true, code: 'stopped' as const, message: 'Stopped', hint: 'Continue.' })), portOwner: () => undefined, probe: async () => false, release: async () => undefined, replaced: vi.fn(async () => undefined) };
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-preview-reg-'));
     await run('git', ['init', '-q', '-b', 'main'], { cwd: repoRoot });
     writeFileSync(join(repoRoot, 'a.txt'), 'one\n');
@@ -103,6 +103,41 @@ describe('RunManager.registerPreviewServer (#781)', { timeout: 30_000 }, () => {
     // The same registration again changes nothing the running server depends on.
     await second({ command: 'npm run dev -- --port 5173 --strictPort --host', port: 5173 });
     expect(preview.replaced).toHaveBeenCalledTimes(1);
+  });
+
+  it('provisions stop for fresh and continued sessions with trusted run identity and lifetime', async () => {
+    const provision = vi.spyOn(CiToolController.prototype, 'provision');
+    const record = manager!.startRun(QUICK_TASK_WORKFLOW, { task: 'build the app' });
+    await (await callbackAt(provision, 0))({ command: 'npm run dev', port: 5173 });
+    const first = provision.mock.calls[0]![2]!;
+    expect(first).toBeTypeOf('function');
+    const signal = new AbortController().signal;
+    expect(await first({ port: 5173, restart: true }, signal)).toMatchObject({ ok: true });
+    expect(preview.stopPreview).toHaveBeenCalledWith(record.id, { port: 5173, restart: true }, signal);
+    const revoked = new AbortController(); revoked.abort();
+    expect(await first({ port: 5173 }, revoked.signal)).toMatchObject({ code: 'unavailable' });
+    expect(await first({ port: 6000 }, signal)).toMatchObject({ code: 'not_registered' });
+    expect(preview.stopPreview).toHaveBeenCalledTimes(1);
+    sessions.release[0]!();
+    await expect.poll(() => store.getRun(record.id)?.status, { timeout: 15_000 }).toSatisfy(status => ['done', 'review'].includes(String(status)));
+    expect(manager!.continueRun(record.id, { text: 'restart preview' })).toEqual({ ok: true });
+    await callbackAt(provision, 1);
+    const next = provision.mock.calls[1]![2]!;
+    expect(await next({ port: 5173 }, signal)).toMatchObject({ ok: true });
+    expect(preview.stopPreview).toHaveBeenLastCalledWith(record.id, { port: 5173 }, signal);
+  });
+
+  it('recovery provisions the stop capability through the continuation construction path', async () => {
+    const provision = vi.spyOn(CiToolController.prototype, 'provision');
+    const record = store.createRun({ title: 'recover preview', workflow: 'quick-task', task: 'continue', runner: 'claude', steps: [{ id: 'work', name: 'Work', kind: 'agent' }] });
+    store.updateStep(record.id, 'work', { status: 'running', iterations: 1, sessionId: 'saved-session', backend: 'claude' });
+    store.updateRun(record.id, { status: 'running', currentStepId: 'work', worktreePath: repoRoot, previewServers: [{ port: 5173, command: 'npm run dev', label: 'web', registeredAt: new Date().toISOString(), answeredAtRegistration: false }] });
+    await manager!.recover();
+    await callbackAt(provision, 0);
+    const stop = provision.mock.calls[0]![2]!;
+    const signal = new AbortController().signal;
+    expect(await stop({ port: 5173, restart: true }, signal)).toMatchObject({ ok: true });
+    expect(preview.stopPreview).toHaveBeenCalledWith(record.id, { port: 5173, restart: true }, signal);
   });
 
   it('a capability revoked while the port probe is pending records nothing', async () => {

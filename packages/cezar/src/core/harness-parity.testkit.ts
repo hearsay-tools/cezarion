@@ -62,6 +62,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  * | `steer-late` | the final text first; agent input sent after it arrives after the last model call (#505) |
  */
 export const SCENARIOS = [
+  'skill-warning',
   'missing-binary',
   'crash-stderr-pre-ack',
   'crash-stderr-held-pipe',
@@ -258,6 +259,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     binEnv: 'CEZ_OPENCODE_BIN',
     mockBin: OPENCODE_MOCK,
     scenarios: {
+      'skill-warning': 'mock:skill-warning mock:done',
       'missing-binary': BASELINE_PROMPT,
       autonomous: 'mock:autonomous',
       'autonomous-cap': 'mock:autonomous-cap',
@@ -391,6 +393,10 @@ export interface ParityExemption {
  * is the runner, not this table.
  */
 export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
+  ...(['R44', 'R45'] as const).flatMap(criterion => (['claude', 'codex', 'pi', 'cursor'] as const).map(backend => ({
+    criterion, backend, kind: 'scenario-unconstructible' as const,
+    reason: 'The OpenCode server-wide unscoped session.error UnknownError skill-discovery diagnostic has no equivalent on this native wire. R2/R46 retain native provider failure coverage.',
+  }))),
   ...(['A13', 'A14'] as const).flatMap(criterion => (['claude', 'codex', 'pi', 'cursor'] as const).map(backend => ({
     criterion, backend, kind: 'scenario-unconstructible' as const,
     reason: 'This wire has no separate portable-answer HTTP ACK retained after turn completion. The executable cell checks ordinary root idle expiry and successful Continue through its native wire instead.',

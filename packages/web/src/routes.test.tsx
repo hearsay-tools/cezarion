@@ -13,7 +13,7 @@ import { LAST_LOCATION_STORAGE_KEY } from './lib/last-location'
 import { AppRoutes, pageTitleContext } from './routes'
 import { resetDraft } from './routes/new-task-draft'
 
-// The `/` overview fetches `/api/v1/runs` on mount. A never-answering fetch keeps every route
+// The `/` overview fetches `/api/v1/run-summaries` on mount. A never-answering fetch keeps every route
 // honestly in its loading state — this file is about the URL map, not about data.
 beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn(() => new Promise<never>(() => {})))
@@ -315,7 +315,7 @@ describe('scoped route map (/p/:projectId)', () => {
   it('remounts the same page and loads its new scope when the project param changes', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input)
-      if (path === '/api/v1/runs' || path === '/api/v1/p/other/runs') {
+      if (path === '/api/v1/run-summaries' || path === '/api/v1/p/other/run-summaries') {
         return new Response('[]', { headers: { 'content-type': 'application/json' } })
       }
       return new Promise<never>(() => {})
@@ -341,13 +341,13 @@ describe('scoped route map (/p/:projectId)', () => {
     )
 
     await waitFor(() =>
-      expect(fetchMock.mock.calls.some(([path]) => String(path) === '/api/v1/runs')).toBe(true),
+      expect(fetchMock.mock.calls.some(([path]) => String(path) === '/api/v1/run-summaries')).toBe(true),
     )
     fireEvent.change(screen.getByLabelText('Search tasks'), { target: { value: 'stale filter' } })
     fireEvent.click(screen.getByRole('button', { name: 'Switch project' }))
 
     await waitFor(() =>
-      expect(fetchMock.mock.calls.some(([path]) => String(path) === '/api/v1/p/other/runs')).toBe(true),
+      expect(fetchMock.mock.calls.some(([path]) => String(path) === '/api/v1/p/other/run-summaries')).toBe(true),
     )
     expect((screen.getByLabelText('Search tasks') as HTMLInputElement).value).toBe('')
   })

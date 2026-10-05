@@ -165,9 +165,9 @@ export class DevServer extends EventEmitter {
         if (this.stopping || pid === undefined) return this.finish(this.stopping ? 'stopped' : 'exited');
         // A leader that dies on its own can leave a forked server holding the port. Reap the group
         // the way a stop does (SIGKILL after the grace period, so a holder that ignores SIGTERM goes
-        // too), and keep the pid record until the group is gone: `stop()` is a no-op from here on.
+        // too), and keep the pid record until the group is gone: `stop()` awaits the same cleanup.
         this.finish('exited', { keepRecord: true });
-        void terminateGroup(pid).finally(() => this.removeRecord(pid));
+        this.stopping = terminateGroup(pid).finally(() => this.removeRecord(pid));
       });
     });
     if (child.pid !== undefined) {
@@ -186,6 +186,7 @@ export class DevServer extends EventEmitter {
   }
 
   stop(reason: DevServerStopReason): Promise<void> {
+    if (this.stopping) return this.stopping;
     if (this.state === 'exited' || this.state === 'stopped') return Promise.resolve();
     this.stopping ??= this.terminate(reason);
     return this.stopping;

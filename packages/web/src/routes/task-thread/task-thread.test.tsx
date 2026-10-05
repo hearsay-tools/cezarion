@@ -818,7 +818,7 @@ describe('ThreadView', () => {
 
   it('quarantined delegation metadata adds no workers section — and no dock of its own', () => {
     // `{ role: 'invalid' }` is what the contract parks unreadable metadata as, and
-    // RunRelationshipsPanel renders nothing for it. Counting it as a section would inflate the
+    // carries no usable worker links. Counting it as a section would inflate the
     // dock's tally and leave an empty bordered panel behind.
     renderView(<ThreadView run={run('done', { delegation: { role: 'invalid' } } as Partial<ApiRun>)} thread={reduceThread(EVENTS)} />)
     expect(document.querySelector('[data-slot="run-activity-workers"]')).toBeNull()
@@ -1079,7 +1079,7 @@ function stubPendingDetailGets(id = 'r1') {
     const body = history !== undefined ? history
       : init.method === 'POST' && path.endsWith('/cancel') ? { cancelled: true }
       : path === '/api/v1/providers/status' ? { providers: [] }
-      : path === '/api/v1/runs' ? [] : {}
+      : path === '/api/v1/run-summaries' ? [] : {}
     return Promise.resolve(new Response(JSON.stringify(body), {
       status: 200, headers: { 'content-type': 'application/json' },
     }))
@@ -1249,7 +1249,7 @@ describe('TaskThreadRoute — read receipts', () => {
         const history = historyBodyFor(path, initial.id)
         if (history !== undefined) return Promise.resolve(jsonResponse(history))
         if (path === `/api/v1/runs/${initial.id}`) return Promise.resolve(jsonResponse(current))
-        if (path === '/api/v1/runs') return Promise.resolve(jsonResponse([]))
+        if (path === '/api/v1/run-summaries') return Promise.resolve(jsonResponse([]))
         if (path === '/api/v1/providers/status') {
           return Promise.resolve(
             jsonResponse({

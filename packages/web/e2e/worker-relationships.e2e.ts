@@ -181,11 +181,13 @@ it('shows unavailable parent with retry, successful empty state, worker wait and
   const projectAsk = `[data-slot="task-row"][data-run-id="${askId}"]`
   browser.waitForFunction(`document.querySelector('${projectAsk} [aria-label="needs you"]') !== null`)
   expect(browser.count(`${projectAsk} [aria-label="needs you"]`)).toBe(1)
-  expect(browser.count(`${projectAsk} [aria-label="waiting on workers"]`)).toBe(0)
+  // Since #817 list rows carry the awaited worker ids, so a parked root reads "waiting on N
+  // worker(s)": match the whole family, not only the uncounted spelling.
+  expect(browser.count(`${projectAsk} [aria-label^="waiting on"]`)).toBe(0)
   browser.goto(`${base}/tasks`)
   const globalAsk = `[data-slot="global-task-row"][data-run-id="${askId}"]`
   browser.waitForFunction(`document.querySelector('${globalAsk}')?.textContent.includes('needs you')`)
-  expect(browser.text(globalAsk)).not.toContain('waiting on workers')
+  expect(browser.text(globalAsk)).not.toMatch(/waiting on (\d+ )?workers?/)
   observations.push({ pendingHumanAsk: 'project and global lists need you before detail history loads' })
   open(askId)
   browser.waitForFunction(`document.body.textContent.includes('Which implementation should I use?')`)
@@ -237,12 +239,13 @@ it('retains known IDs during loading, request error and offline pause, then retr
 it('global Tasks and cross-project palette keep parked-root status without listing workers', () => {
   browser.goto(`${base}/tasks`)
   browser.waitForFunction(`document.querySelector('[data-slot="global-task-row"][data-run-id="${waitingId}"]') !== null`)
-  expect(browser.text(`[data-slot="global-task-row"][data-run-id="${waitingId}"]`)).toContain('waiting on workers')
+  // The index row is the run summary since #817, which carries the awaited worker ids: counted.
+  expect(browser.text(`[data-slot="global-task-row"][data-run-id="${waitingId}"]`)).toContain('waiting on 1 worker')
   expect(browser.text('body')).not.toContain('Worker')
   browser.press('Control+k')
   browser.fill('[cmdk-input]', 'Waiting root fixture')
   browser.waitForFunction(`document.querySelector('[cmdk-list]')?.textContent.includes('Waiting root fixture')`)
-  expect(browser.count('[cmdk-list] [aria-label="waiting on workers"]')).toBe(1)
+  expect(browser.count('[cmdk-list] [aria-label="waiting on 1 worker"]')).toBe(1)
   browser.fill('[cmdk-input]', 'Owned worker 1')
   const workerSearch = browser.waitForValue(`(() => {
     const input = document.querySelector('[cmdk-input]')
@@ -257,7 +260,7 @@ it('global Tasks and cross-project palette keep parked-root status without listi
   expect(workerSearch.text).not.toContain('Worker')
   expect(workerSearch.tasks).toEqual([])
   browser.press('Escape')
-  observations.push({ globalTasks: 'waiting on workers without worker rows', palette: 'cross-project index omits workers' })
+  observations.push({ globalTasks: 'waiting on 1 worker without worker rows', palette: 'cross-project index omits workers' })
 })
 
 

@@ -37,7 +37,7 @@ describe('cezar-ci MCP server instructions', () => {
   it('lists cezar_preview_serve with its trigger line only when CEZ_PREVIEW=1', async () => {
     const on = await connect({ CEZ_PREVIEW: '1' });
     try {
-      expect((await on.client.listTools()).tools.map(tool => tool.name)).toEqual(['cezar_wait_for_ci', 'cezar_preview_serve']);
+      expect((await on.client.listTools()).tools.map(tool => tool.name)).toEqual(['cezar_wait_for_ci', 'cezar_preview_serve', 'cezar_preview_stop']);
       const instructions = on.client.getInstructions()!;
       expect(instructions).toContain('- cezar_wait_for_ci: load when opening or updating a PR you want to watch CI on.');
       expect(instructions).toContain('- cezar_preview_serve: load when you have started, or are about to start, a web server the user should click through.');

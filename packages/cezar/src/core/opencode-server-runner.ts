@@ -1,3 +1,4 @@
+import { opencodeSkillWarning } from './opencode-session-error.ts';
 import { summarizeRunnerStderr } from './runner-stderr.ts';
 import { finished } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
@@ -784,7 +785,7 @@ class OpencodeSession implements AgentSession {
     }
     this.emitUi((state) => mapOpencodeEvent(evt, state));
     const sid = stringField(evt.properties ?? {}, 'sessionID');
-    if (evt.type === 'session.error' && (sid === undefined || sid === this.sessionId) && this.agentRequest) {
+    if (evt.type === 'session.error' && !opencodeSkillWarning(evt.properties ?? {}) && (sid === undefined || sid === this.sessionId) && this.agentRequest) {
       // HTTP and SSE are independent sockets: the error can overtake a positive
       // prompt ACK. Let that exact request settle before v1 makes RunManager
       // interrupt it. Keep later SSE idle frames behind the same barrier.
@@ -848,7 +849,12 @@ class OpencodeSession implements AgentSession {
       const sid = stringField(props, 'sessionID');
       if (sid === undefined || sid === this.sessionId) this.finishTurn();
     } else if (type === 'session.error') {
-      // The wire's only failure signal, now that the prompt POST returns
+      const warning = opencodeSkillWarning(props);
+      if (warning) {
+        this.emit({ type: 'note', message: warning });
+        return;
+      }
+      // The wire's failure signal, now that the prompt POST returns
       // before the turn runs: forward it to v1, whose `error` events are what
       // run.ts records failed steps from — dropped, the terminal idle would
       // file a provider/auth failure as a successful step. The idle that

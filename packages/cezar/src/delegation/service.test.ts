@@ -344,7 +344,7 @@ describe('delegation service durable authority', () => {
     f.store.updateRun(workerId, { status: 'review', worktreePath: workspace.path, branch: workspace.branch });
     expect(f.store.commitWorkerExecutionComplete(workerId, f.store.readWorkerExecution(workerId)!.generation)).toBe(true);
     const released: Array<{ runId: string; checkoutExisted: boolean }> = [];
-    const host = { portOwner: () => undefined, probe: async () => false, release: async (runId: string) => { released.push({ runId, checkoutExisted: existsSync(workspace.path) }); }, replaced: async () => undefined };
+    const host = { stopPreview: async () => ({ ok: false, code: 'unavailable' as const, message: 'Unavailable', hint: 'Retry.' }), portOwner: () => undefined, probe: async () => false, release: async (runId: string) => { released.push({ runId, checkoutExisted: existsSync(workspace.path) }); }, replaced: async () => undefined };
     vi.spyOn(f.manager, 'previewHost', 'get').mockReturnValue(host);
     expect(await f.service.destroy(f.caller, { workerId })).toMatchObject({ state: 'complete', remaining: [] });
     expect(released).toEqual([{ runId: workerId, checkoutExisted: true }]);

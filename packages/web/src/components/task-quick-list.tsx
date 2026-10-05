@@ -8,7 +8,7 @@ import { useSidebarNavigate } from '@/components/app-shell'
 import { useSwipeToArchive } from '@/components/use-swipe-to-archive'
 import { useHealth, usePinRun, useProjectUiState, useProjectRuns, useProjectRepoBase, useProjects, useReferenceProjectId, useRuns } from '@/api/queries'
 import { Link, scopeTo, useNavigate, useProjectMatch } from '@/lib/project-router'
-import type { ArchiveFinishedScope, RunRecord, SidebarLimits } from '@open-mercato/cezar-api-client'
+import type { ArchiveFinishedScope, RunSummary, SidebarLimits } from '@open-mercato/cezar-api-client'
 import { DiffStatLabel } from '@/components/diff-stat'
 import { useListView } from '@/components/list-view'
 import { PinToggle } from '@/components/pin-toggle'
@@ -67,7 +67,7 @@ export function TaskQuickList({
   sidebarLimits,
   projectId = null,
 }: {
-  runs: RunRecord[]
+  runs: RunSummary[]
   view: ListView
   onViewChange: (view: ListView) => void
   /** The run open at `/tasks/:id`, so its row can show as active. */
@@ -81,9 +81,9 @@ export function TaskQuickList({
   showCost?: boolean
   /** Pin/unpin one row (#935). The container owns the mutation, because WHICH project a row
    *  belongs to is a container's question — this list is painted for other projects too. */
-  onTogglePin?: (run: RunRecord, pinned: boolean) => void
+  onTogglePin?: (run: RunSummary, pinned: boolean) => void
   /** Archive one finished row (#780). Like the pin, the container owns the mutation. */
-  onArchiveRun?: (run: RunRecord) => void | Promise<unknown>
+  onArchiveRun?: (run: RunSummary) => void | Promise<unknown>
   /** Sweep unpinned finished rows across the full project list. */
   onSweep?: (scope: ArchiveFinishedScope) => void
   /** The sweep in flight, so its button reads busy. */
@@ -161,7 +161,7 @@ export function TaskQuickList({
 }
 
 /** How many runs each group sweep would take: the same predicate the server sweeps with. */
-export function sweepCountsOf(runs: readonly RunRecord[]): { unpinned: number; pinned: number } {
+export function sweepCountsOf(runs: readonly RunSummary[]): { unpinned: number; pinned: number } {
   return { unpinned: sweepableRunCount(runs, 'unpinned'), pinned: sweepableRunCount(runs, 'pinned') }
 }
 
@@ -200,8 +200,8 @@ export function QuickListBuckets({
   scope?: string | null
   showTokens?: boolean
   showCost?: boolean
-  onTogglePin?: (run: RunRecord, pinned: boolean) => void
-  onArchiveRun?: (run: RunRecord) => void | Promise<unknown>
+  onTogglePin?: (run: RunSummary, pinned: boolean) => void
+  onArchiveRun?: (run: RunSummary) => void | Promise<unknown>
   onSweep?: (scope: ArchiveFinishedScope) => void
   sweeping?: ArchiveFinishedScope | null
   /** What each group sweep would take, from the whole list. Absent = no group buttons. */
@@ -361,8 +361,8 @@ function Row({
   onToggle: (groupId: string) => void
   showTokens: boolean
   showCost: boolean
-  onTogglePin?: (run: RunRecord, pinned: boolean) => void
-  onArchiveRun?: (run: RunRecord) => void | Promise<unknown>
+  onTogglePin?: (run: RunSummary, pinned: boolean) => void
+  onArchiveRun?: (run: RunSummary) => void | Promise<unknown>
 }) {
   if (row.kind === 'run') {
     return (
@@ -600,14 +600,14 @@ function ExpandedVariantMembers({
   onTogglePin,
   onArchiveRun,
 }: {
-  members: RunRecord[]
+  members: RunSummary[]
   currentRunId: string | null
   now: number
   scope: string | null
   showTokens: boolean
   showCost: boolean
-  onTogglePin?: (run: RunRecord, pinned: boolean) => void
-  onArchiveRun?: (run: RunRecord) => void | Promise<unknown>
+  onTogglePin?: (run: RunSummary, pinned: boolean) => void
+  onArchiveRun?: (run: RunSummary) => void | Promise<unknown>
 }) {
   const shared = sharedReferenceKeys(members, scope ?? undefined)
   // 15.5px in, a 1px guide line, then 6px: with the row's own 10px padding that puts each
@@ -848,7 +848,7 @@ function useAgeDropped(ref: React.RefObject<HTMLElement | null>, enabled: boolea
  *  on worker replies, on a parent reply), needs review, needs permission, failed, scheduled,
  *  queued (with its position, `queued #2`) and running. `needs you`, `done` and `cancelled` get
  *  none: the amber, green and grey filled dots already are the whole story. */
-function metaStateWord(attention: Attention, queuePosition: number | null, run: RunRecord, now: number): string | undefined {
+function metaStateWord(attention: Attention, queuePosition: number | null, run: RunSummary, now: number): string | undefined {
   const { label } = attention
   if (label === 'queued') return queuePosition !== null ? `queued #${queuePosition}` : label
   if (label === 'needs you' || label === 'done' || label === 'cancelled') return undefined
@@ -874,7 +874,7 @@ function RunRow({
   onTogglePin,
   onArchiveRun,
 }: {
-  run: RunRecord
+  run: RunSummary
   queuePosition: number | null
   currentRunId: string | null
   now: number
@@ -888,11 +888,11 @@ function RunRow({
   groupReferences?: ReadonlySet<string>
   showTokens: boolean
   showCost: boolean
-  onTogglePin?: (run: RunRecord, pinned: boolean) => void
+  onTogglePin?: (run: RunSummary, pinned: boolean) => void
   /** Archive this row (#780). Where references are inert (touch, the mobile shell) the swipe
    *  replaces the button, so it only renders on a device that can hover. A promise that
    *  resolves `false` says the archive failed, and a swiped row snaps back. */
-  onArchiveRun?: (run: RunRecord) => void | Promise<unknown>
+  onArchiveRun?: (run: RunSummary) => void | Promise<unknown>
 }) {
   const navigate = useNavigate()
   const onNavigate = useSidebarNavigate()
@@ -1331,13 +1331,13 @@ export function SidebarSessionScope() {
   const otherLists = useQueries({
     queries: otherProjects.map((project) => ({
       queryKey: [project.id, 'runs', 'list'] as const,
-      queryFn: async () => [] as RunRecord[],
+      queryFn: async () => [] as RunSummary[],
       enabled: false,
     })),
   })
   const seen = new Set<string>()
-  const combined: RunRecord[] = []
-  const add = (projectId: string, run: RunRecord) => {
+  const combined: RunSummary[] = []
+  const add = (projectId: string, run: RunSummary) => {
     const key = `${projectId}:${run.id}`
     if (seen.has(key)) return
     seen.add(key)

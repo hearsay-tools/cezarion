@@ -231,7 +231,8 @@ describe('DevServer', () => {
     await until(() => supervisor.state === 'exited');
     expect(supervisor.exitCode).toBe(3);
     expect(existsSync(recordPath)).toBe(true);
-    await until(() => !existsSync(recordPath), 8_000);
+    await supervisor.stop('user');
+    expect(existsSync(recordPath)).toBe(false);
     expect(await probePort(port)).toBe(false);
   }, 15_000);
 
