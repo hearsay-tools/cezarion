@@ -12,7 +12,7 @@ import { manager, store, root, worker, until, semaphore, useWorkerWaitFixture, w
 // Exhaustive transport classification: a new runner must provide either the real
 // delayed-ACK race or an executable wire limitation, never an omitted/skip row.
 const ACK_WIRES = {
-  claude: 'pipe-write', codex: 'protocol', opencode: 'protocol', pi: 'protocol', cursor: 'pipe-write',
+  claude: 'pipe-write', codex: 'protocol', opencode: 'protocol', pi: 'protocol', cursor: 'pipe-write', omp: 'protocol',
 } as const satisfies Record<RunnerId, 'pipe-write' | 'protocol'>;
 
 it('classifies every RUNNER_IDS delayed-ACK cell without omissions', () => {

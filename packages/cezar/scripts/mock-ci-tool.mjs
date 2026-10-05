@@ -10,12 +10,12 @@ export async function probeCiTool(backend, wire, pr = process.env.CEZ_MOCK_CI_PR
   return probeCezarTool(backend, wire, 'cezar_wait_for_ci', { pr });
 }
 
-// Calls one cezar tool the way the real harness would: through the wired MCP server (or Pi extension).
+// Calls one cezar tool the way the real harness would: through the wired MCP server (or Pi/OMP extension).
 export async function probeCezarTool(backend, wire, name, args) {
   let result;
-  if (backend === 'pi') {
+  if (backend === 'pi' || backend === 'omp') {
     const extensions = wire.flatMap((arg, index) => arg === '--extension' ? [wire[index + 1]] : []);
-    const path = extensions.find(path => basename(path) === 'pi-ci-wait.mjs');
+    const path = extensions.find(path => basename(path) === `${backend}-ci-wait.mjs`);
     if (!path) throw new Error('CI extension absent');
     // The real Pi loader compiles TS when running from source; installed script uses JS.
     if (existsSync(new URL('../src/ci-wait/mcp.ts', import.meta.url))) { const { register } = await import('tsx/esm/api'); register(); }

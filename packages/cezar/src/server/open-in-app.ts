@@ -132,6 +132,7 @@ const AGENT_CLIS: Array<{ runner: RunnerId; label: string; icon: string; bin: st
   { runner: 'opencode', label: 'OpenCode', icon: 'opencode', bin: 'opencode', envBin: process.env.CEZ_OPENCODE_BIN },
   { runner: 'cursor', label: 'Cursor CLI', icon: 'cursor', bin: 'agent', envBin: process.env.CEZ_CURSOR_BIN },
   { runner: 'pi', label: 'pi CLI', icon: 'pi', bin: 'pi', envBin: process.env.CEZ_PI_BIN },
+  { runner: 'omp', label: 'OMP CLI', icon: 'omp', bin: 'omp', envBin: process.env.CEZ_OMP_BIN },
 ];
 
 /** The runner behind a `cli:<runner>` open target, or null when the id isn't a CLI handoff. */

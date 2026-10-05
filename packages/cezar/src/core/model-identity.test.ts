@@ -91,6 +91,13 @@ describe('resolveModelIdentity — bare ids per backend', () => {
     }
   });
 
+  it('omp rejects a bare id like pi — same provider/model convention', () => {
+    expect(() => resolveModelIdentity('omp', 'sonnet')).toThrow(/ambiguous/);
+    expect(toBackendModel('omp', { provider: 'anthropic', model: 'claude-opus-4-8' })).toBe(
+      toBackendModel('pi', { provider: 'anthropic', model: 'claude-opus-4-8' }),
+    );
+  });
+
   it('pi rejects a bare id like opencode — same provider/model convention (#387)', () => {
     expect(() => resolveModelIdentity('pi', 'sonnet')).toThrow(ModelIdentityError);
     try {

@@ -114,7 +114,7 @@ afterEach(() => {
 })
 
 describe('ProviderSettings', () => {
-  it('always renders Claude Code, Codex, OpenCode, and pi cards in that order', async () => {
+  it('always renders Claude Code, Codex, OpenCode, pi, Cursor and OMP cards in that order', async () => {
     serve()
     renderSettings()
 
@@ -123,7 +123,7 @@ describe('ProviderSettings', () => {
       [...document.querySelectorAll('[data-slot="provider-card"]')].map((item) =>
         item.querySelector('h3')?.textContent,
       ),
-    ).toEqual(['Claude Code', 'Codex', 'OpenCode', 'pi', 'Cursor'])
+    ).toEqual(['Claude Code', 'Codex', 'OpenCode', 'pi', 'Cursor', 'OMP'])
   })
 
   it('presents discovery truth, enablement, and runtime recovery without hiding diagnostics', async () => {
@@ -280,7 +280,7 @@ describe('ProviderSettings', () => {
 
     expect(await screen.findByText('Provider status could not be loaded')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy()
-    expect(document.querySelectorAll('[data-slot="provider-card"]')).toHaveLength(5)
+    expect(document.querySelectorAll('[data-slot="provider-card"]')).toHaveLength(6)
   })
 
   it('treats a malformed successful response as a safe verification error', async () => {
@@ -290,7 +290,7 @@ describe('ProviderSettings', () => {
 
     expect(await screen.findByText('Provider status could not be loaded')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy()
-    expect(document.querySelectorAll('[data-slot="provider-card"]')).toHaveLength(5)
+    expect(document.querySelectorAll('[data-slot="provider-card"]')).toHaveLength(6)
     expect(screen.queryByText(secret)).toBeNull()
   })
 

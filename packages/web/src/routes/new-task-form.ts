@@ -53,6 +53,7 @@ export const RUNNERS: readonly RunnerOption[] = [
   { id: 'opencode', label: 'opencode', desc: 'OpenCode (serve)' },
   { id: 'pi', label: 'pi', desc: 'pi CLI (provider/model)' },
   { id: 'cursor', label: 'Cursor', desc: 'Cursor CLI (ACP)' },
+  { id: 'omp', label: 'OMP', desc: 'Oh My Pi CLI (provider/model)' },
 ]
 
 export interface ModelPreset {
@@ -81,6 +82,9 @@ export const MODELS_BY_RUNNER: Record<Runner, readonly ModelPreset[]> = {
   cursor: [{ id: '', label: 'auto', desc: 'Use your Cursor default model' }],
   pi: [
     { id: '', label: 'auto', desc: 'Use your pi default model' },
+  ],
+  omp: [
+    { id: '', label: 'auto', desc: 'Use your OMP default model' },
   ],
 }
 
@@ -131,15 +135,15 @@ export function resolveEffort(
 }
 
 /** Runners that pick with the canonical `provider/model` convention and span every provider the
- *  host has configured, so an id they list is never EXCLUSIVE to them: both pi and OpenCode
- *  can serve `openai/gpt-5.1` from the same provider. Their discovered ids are therefore
+ *  host has configured, so an id they list is never EXCLUSIVE to them: pi, OMP and OpenCode
+ *  can all serve `openai/gpt-5.1` from the same provider. Their discovered ids are therefore
  *  skipped when judging another runner's id.
  *
  *  This is the cockpit's half of the rule the server states structurally — a runner with no
  *  default provider cannot be contradicted, which is why `KNOWN_PRESETS_BY_RUNNER.pi` is empty
  *  in `packages/cezar/src/core/model-presets.ts`. Without it, treating a discovered pi id as
  *  "another runner's preset" would silently strip a pinned OpenCode model from the OpenCode picker. */
-const PROVIDER_SPANNING_RUNNERS: readonly Runner[] = ['opencode', 'pi']
+const PROVIDER_SPANNING_RUNNERS: readonly Runner[] = ['opencode', 'pi', 'omp']
 
 /** Keep recognized presets from another backend out of a runner's custom-model escape hatch
  * (#480).
@@ -193,6 +197,7 @@ const DISCOVERY_RUNNER_LABEL: Record<ModelDiscoveryRunner, string> = {
   opencode: 'OpenCode',
   pi: 'Pi',
   cursor: 'Cursor',
+  omp: 'OMP',
 }
 
 export function modelCatalogStatus(

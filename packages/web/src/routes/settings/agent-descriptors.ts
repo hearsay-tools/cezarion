@@ -140,6 +140,21 @@ export const AGENT_DESCRIPTORS: AgentDescriptor[] = [
       group('cursor', 'memory', 'Memory & instructions', 'Cursor also reads CLAUDE.md and .cursor/rules.'),
     ],
   },
+  {
+    id: 'omp',
+    label: 'OMP',
+    note: EDITOR_PLUS_COMMIT,
+    groups: [
+      group('omp', 'settings', 'Settings'),
+      group(
+        'omp',
+        'mcp',
+        'MCP',
+        'A dedicated mcp.json (key: mcpServers) at ~/.omp/agent and in the project’s .omp/ folder.',
+      ),
+      group('omp', 'memory', 'Memory & instructions'),
+    ],
+  },
 ]
 
 export function descriptorFor(agent: Runner): AgentDescriptor {

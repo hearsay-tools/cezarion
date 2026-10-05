@@ -51,6 +51,25 @@ describe('AGENT_DESCRIPTORS', () => {
     expect(descriptorFor('pi').groups.find((g) => g.id === 'settings')!.empty).toBeUndefined()
   })
 
+  it('OMP’s pane shows its YAML settings, both MCP files and the shared AGENTS.md', () => {
+    const omp = descriptorFor('omp')
+    const group = (id: 'settings' | 'mcp' | 'memory') => omp.groups.find((g) => g.id === id)!
+    const settings = fileOf({ id: 'omp.project.settings', runners: ['omp'], kind: 'settings', format: 'yaml' })
+    const userMcp = fileOf({ id: 'omp.user.mcp', runners: ['omp'], kind: 'mcp', holdsMcp: true, scope: 'user' })
+    const memory = fileOf({ id: 'omp.user.memory', runners: ['omp'], kind: 'memory', format: 'markdown' })
+    const shared = fileOf({ id: 'project.agents', runners: ['codex', 'omp'], kind: 'memory', format: 'markdown' })
+    expect(group('settings').files(settings)).toBe(true)
+    expect(group('mcp').files(userMcp)).toBe(true)
+    expect(group('settings').files(userMcp)).toBe(false)
+    expect(group('memory').files(memory)).toBe(true)
+    expect(group('memory').files(shared)).toBe(true)
+    expect(group('mcp').files(settings)).toBe(false)
+    // OMP has real MCP files, so no empty-state copy (unlike Pi)
+    expect(group('mcp').empty).toBeUndefined()
+    expect(group('mcp').note).toMatch(/mcp\.json/)
+    expect(descriptorFor('claude').groups.find((g) => g.id === 'settings')!.files(settings)).toBe(false)
+  })
+
   it('a Pi-owned file lands in Pi’s pane and nowhere else', () => {
     const piSettings = fileOf({ id: 'pi.project.settings', runners: ['pi'], kind: 'settings' })
     expect(descriptorFor('pi').groups.find((g) => g.id === 'settings')!.files(piSettings)).toBe(true)

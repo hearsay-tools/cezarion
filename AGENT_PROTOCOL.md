@@ -35,7 +35,7 @@ id — that is the whole point of the seam.
 ### Identity
 
 ```ts
-const RUNNER_IDS = ['claude', 'codex', 'opencode', 'pi', 'cursor'] as const;  // the source of truth
+const RUNNER_IDS = ['claude', 'codex', 'opencode', 'pi', 'cursor', 'omp'] as const;  // the source of truth
 type RunnerId     = (typeof RUNNER_IDS)[number];                   // user-selectable
 type AgentBackend = RunnerId | 'claude-cli';                       // + legacy id, still parses
 ```
@@ -72,7 +72,9 @@ interface InputDelivery {
   `waiting`, interrupt and resume all work: claude = stream-json over
   stdin/stdout; codex = `codex app-server` JSON-RPC 2.0 (JSONL) over
   stdin/stdout; opencode = `opencode serve` over HTTP + SSE; pi =
-  `pi --mode rpc` over JSONL stdin/stdout.
+  `pi --mode rpc` over JSONL stdin/stdout; omp (Oh My Pi, hearsay-tools/cezarion#595) =
+  `omp --mode rpc` over JSONL stdin/stdout, a distinct backend from `pi`
+  (`.ai/specs/2026-10-02-omp-runner.md`).
 
 ### `AgentSession`
 
@@ -144,6 +146,7 @@ opened a turn counts as read when that turn completes.
 | Pi 0.87.0 | steer, observable | `prompt` with `streamingBehavior: 'steer'` (never `followUp`); session starts with `set_steering_mode: all` (overrides Pi's default `one-at-a-time` — cezar owns the session and `get_state` cannot tell the default from an explicit user setting) | the user `message_start` with the submitted text; a burst of steers in `all` mode all match at the same next step, oldest pending submission first | none: pi runs an acknowledged steer in the turn or as the next prompt |
 | OpenCode 1.18.32 (V1) | steer, observable | `prompt_async` while busy; no second turn opens | the first assistant `message.updated` naming the steered user message as `parentID` | `input-unconsumed` after a 2 s quiet idle (anomalyco/opencode#46842 lost wake); a later server run for it opens its own turn |
 | Cursor 2026.09.18 | boundary | refused while busy: a second ACP `session/prompt` cancels the running turn | the turn it opens | none |
+| OMP 18.4.11 | steer, observable | `prompt` with `streamingBehavior: 'steer'`; session starts with `set_steering_mode: all` | the user `message_start` with the submitted text | none: OMP's settle predicate (`rpc-session-settle.ts`) requires `queuedMessageCount === 0`, so a queued steer is read before the session settles. Source-derived; no live turn was possible (see §4 OMP) |
 
 Probe evidence for this table is in `.ai/specs/2026-09-23-immediate-worker-delivery.md`;
 `.ai/scripts/probe-steering.ts` re-runs it against the installed CLIs (paid sessions,
@@ -160,7 +163,7 @@ replays input still `awaitingRead`: delivery is at-least-once and the replayed t
 keeps the input ID. The method remains synchronous: false refuses without a write; a Promise
 reserves one submission immediately, but is not a delivery receipt. Codex resolves
 at the matching turn/start or turn/steer RPC result, OpenCode at successful prompt
-HTTP acknowledgement, and Pi at the matching prompt response id. Claude has no
+HTTP acknowledgement, and Pi and OMP at the matching prompt response id. Claude has no
 per-prompt RPC receipt: its write callback proves only successful pipe delivery,
 not model execution. A transport rejection remains replayable; a successfully
 accepted command followed by a provider failure retains its transport receipt.
@@ -319,8 +322,8 @@ reason). `AGENT_RUN_SPEC_FIELDS` is the same field list at runtime, typed as a
 full `Record` over `keyof AgentRunSpec`, so adding a field to the spec is a
 compile error until every runner declares it, and a new runner class without a
 declaration does not compile at all. The constants (`CLAUDE_SPEC_SUPPORT`,
-`CODEX_SPEC_SUPPORT`, `OPENCODE_SPEC_SUPPORT`, `PI_SPEC_SUPPORT`, each next to its
-class) are the source; §7's spec-support rows hold each one against the runner's
+`CODEX_SPEC_SUPPORT`, `OPENCODE_SPEC_SUPPORT`, `PI_SPEC_SUPPORT`, `CURSOR_SPEC_SUPPORT`,
+`OMP_SPEC_SUPPORT`, each next to its class) are the source; §7's spec-support rows hold each one against the runner's
 real boundary in both directions. As declared at hearsay-tools/cezarion#284, a reading aid only:
 
 | Field | claude | codex | opencode | pi |
@@ -339,6 +342,11 @@ real boundary in both directions. As declared at hearsay-tools/cezarion#284, a r
 | `timeoutMs` | kill switch | kill switch | kill switch | kill switch |
 | `sessionId` | `--session-id` / `--resume` | `thread/resume` threadId | **dropped** | `--session-id` / `--session` |
 | `resume` | `--resume` | `thread/resume` | **dropped** | `--session` |
+
+`OMP_SPEC_SUPPORT` honors every field (it has no column here): `allowedTools` through `--tools` with
+OMP names (or `--no-tools`), `additionalDirectories` through `--add-dir` (Pi drops it), `effort`
+through `--thinking`, and `sessionId` only as `--resume <id>`: OMP has no `--session-id`, a fresh
+session mints its own id and the runner reads it from `get_state`.
 
 **System prompt channel** — a backend without a dedicated system-prompt input
 must deliver `spec.systemPrompt` as a leading block of the opening user message.
@@ -582,6 +590,67 @@ See [ACP Session Config Options](https://agentclientprotocol.com/protocol/v1/ses
 
 ---
 
+### OMP RPC (hearsay-tools/cezarion#595)
+
+`omp-runner.ts` launches `omp --mode rpc` and holds one persistent JSONL connection, like Pi.
+OMP is a Pi fork with its own dialect, so it is a standalone runner, mapper and mock (Pi files
+are untouched; pure helpers proven identical to Pi's are copied with a comment naming the Pi
+function). Design record: `.ai/specs/2026-10-02-omp-runner.md`, wire contract oh-my-pi
+v18.4.11 `docs/rpc.md` and `rpc-types.ts`.
+
+`omp-ui-mapper.ts` is the pure mapper. The load-bearing differences from Pi:
+
+- **No `agent_settled`.** The turn ends at `session_settled`, or at a `prompt_result`
+  `agentInvoked: false` (or a `prompt` response carrying it) for the prompt that **opened** the
+  turn. `agent_end` is never a boundary: it also fires with `yielded: false` while OMP retries,
+  compacts or answers a reminder. A steer OMP completes locally, or that fails after admission,
+  does not end the running turn. A `prompt` response with `success: false` (pre-admission, no
+  `prompt_result` follows) emits one non-fatal `session.error` and ends the turn only when it
+  answers the opening prompt; the mapper remembers the id so a later `prompt_result` does not
+  duplicate the error.
+- **Result-based diffs and plan.** Edit/write diffs come from the tool **result** `details`
+  (`path`, `oldText`, `newText`, `perFileResults[]`; default `edit.mode` is `hashline`, whose args
+  are only `{input}`), falling back to replace-mode args. `plan.updated` comes from the `todo`
+  result `details.phases[].tasks[]` (`abandoned` is `cancelled`, `blocked` is `pending`).
+- **Sub-agents** stream as `subagent_lifecycle` / `subagent_event` after
+  `set_subagent_subscription {level: "events"}`. Children nest under their `task` call by
+  `parentItemId` and never reach v1 text or end the parent turn (S9). A batch `task` call
+  (`args.tasks[]`) becomes one synthetic task item per sub-agent (`<toolCallId>#<id>`) so the
+  Agents drawer shows N rows. A child event that arrives before its lifecycle frame is held in a
+  bounded buffer (200 frames, 8 ids) and replayed.
+- **Ignored frames:** `ready`, `extension_ui_request` (`setWidget` and friends, sent unsolicited
+  at startup in plain rpc mode), `advisor_cost_changed`, `available_commands_update`, `queue_update`,
+  `auto_*`, `cache_warming_*`. The wire stays on protocol v1; opt in to
+  `set_event_filter {messageUpdates: "delta"}` to drop per-delta snapshots.
+- **Ask** is the portable `CEZ:ASK` marker: plain `--mode rpc` never builds OMP's native ask tool.
+- Startup writes `get_state`, `set_steering_mode all`, `set_subagent_subscription events`,
+  `set_event_filter`, then the first `prompt`. A fresh session's id comes from `get_state`;
+  Continue uses `--resume <id>`.
+
+Tools: `--tools` is an allowlist validated against OMP's registry, so cezar maps names onto OMP's
+(`TodoWrite` to `todo`; `WebFetch` has no web-only equivalent and is dropped) and drops anything unmapped with one v1 `note`;
+`allowedTools: []` is `--no-tools`. The zero-config default adds `todo, lsp, ast_edit, task, wait`
+to the cezar defaults. `find` and `ast_grep` are gated behind settings that default off and are
+**not** in it: naming an unavailable built-in exits 2. When settings the user chose disable a
+named tool, the runner respawns once without exactly those names, keeping accepted input in a
+stdin outbox so none is lost. MCP tools: OMP registers `mcp__<server>_<tool>` (one underscore,
+lowercased and sanitized), so a Claude-spelled grant `mcp__<server>__<tool>` is translated before
+it reaches `--tools`. OMP validates `--tools` right after its 250 ms RPC MCP discovery window, so a
+slow server's tool can still read as unknown: the same one-time respawn also drops the `mcp__`
+names this spawn passed from an `Unknown tool(s) in --tools: a, b.` refusal, with one v1 `note`
+for everything dropped. Any other unknown name stays fatal, and the respawn never widens.
+
+Models: `omp models --json` prints an object, `{"models": [...]}`, which feeds discovery and the
+provider status probe (empty means not logged in). Settings, MCP and memory files are edited from
+Settings → Agent config, including OMP's YAML config.
+
+Verified on the real binary: `omp/18.4.11` startup frames, the `set_*` acknowledgements,
+`omp models --json`, `--tools` refusals and `get_state.dumpTools`. **Not verified live:** no
+model turn ran, so turn fixtures and `inputDelivery` are source-derived with citations (the
+fixtures README separates observed from constructed lines).
+
+---
+
 ## 5. The tool display model (`packages/cezar/src/core/tool-display.ts`)
 
 `toolDisplay(name, input)` turns a backend tool name + raw input into
@@ -696,7 +765,7 @@ pipe closure after a hard exit. Never recover ownership from a stale PID alone.
 
 The tool is provisioned through `AgentRunSpec.cezarTools` independently of worker
 permissions. Claude, Codex, OpenCode and Cursor use the bundled stdio MCP adapter;
-Pi uses a bundled extension over the same shared client. The private chained Hono
+Pi and OMP use a bundled extension over the same shared client. The private chained Hono
 family accepts `POST /api/v1/tools/ci-wait` over a Unix-domain socket or Windows
 named pipe; authenticated GET holds the adapter lifetime connection. It is **not** a cockpit HTTP route or network listener. Middleware
 validates the shared schema. A memory-only session capability binds project, run
@@ -722,8 +791,8 @@ R27 reproduces this sequence through every runner's native mock wire and the rea
 private CI controller, then verifies CI registration succeeds after delivery.
 
 Every cezar tool comes from one list (`packages/cezar/src/ci-wait/tools.ts`, hearsay-tools/cezarion#781):
-the adapter's `tools/list` and server instructions, Pi's extension, Claude's
-generated allow-list entries, Pi's tool admission and the environment names each
+the adapter's `tools/list` and server instructions, Pi's and OMP's extensions, Claude's
+generated allow-list entries, Pi's and OMP's tool admission and the environment names each
 harness forwards to the adapter all read it. `cezar_preview_serve` and
 `cezar_preview_stop` (hearsay-tools/cezarion#803) are on that list only under `CEZ_PREVIEW=1`; the
 provisioned session environment carries the opt-in,
@@ -747,11 +816,12 @@ extensions and permissions when adding a collision-resistant per-session tool na
 | OpenCode | Merge the local MCP entry into parsed runtime configuration without discarding supplied config or replacing unrelated servers; malformed configuration fails explicitly. |
 | Cursor | Supply the supported ACP descriptor and environment on `session/new` and `session/load`; verify invocation and existing permission routing. |
 | Pi | Add an explicit CI extension alongside the retry extension; exercise actual tool registration and calls without replacing discovered extensions or tool settings. |
+| OMP | Add an explicit CI `--extension scripts/omp-ci-wait.mjs` alongside the user's discovered extensions (never `--no-extensions`); registration is proven by `get_state.dumpTools` listing `cezar_wait_for_ci` on the real binary (v18.4.11). `--tools` admits exactly the names the extension registers, since OMP exits 2 on an unknown name. The extension imports `src/ci-wait/tools.ts` in a source checkout; real OMP cannot resolve the workspace contract package there, so it falls back to `dist/ci-wait/tools.js` only when that file exists and otherwise rethrows the source error. MCP injection is rejected: OMP has no CLI flag for it, only `.omp/mcp.json` files. |
 
 These are **release requirements**, not a claim that a configuration fixture alone
 proves tool discovery. Every `RUNNER_IDS` backend needs named executable parity
 coverage, installed upstream interface/version evidence, and real bundled
-`tools/list`/`tools/call` transport (Pi registration/call for Pi) over its offline
+`tools/list`/`tools/call` transport (Pi and OMP registration/call for the extension runners) over its offline
 wire on fresh, Continue and recovery paths. A wire limitation requires owner
 review before shipping; there is no silent skip, permission widening or marker
 fallback. Pack/install and `CEZ_DRY_RUN=1` checks must exercise the bundled helpers
@@ -785,6 +855,25 @@ holder scans when cleanup metadata is damaged, while independent cleanup remains
 Only prior-boot evidence and process enumeration scope are synthetic; cwd permission denial,
 process exit, native wires, stores and Git remain real. Linux-only OS coverage exempts no runner;
 legacy/unknown-boot and recorded-process guards live in `delegation/process-liveness.test.ts`.
+
+**R47** (hearsay-tools/cezarion#839), in `workflows/worker-restart-parity.test.ts`,
+drives every `RUNNER_IDS` backend through its native `HARNESS_ADAPTERS` wire,
+cancellation, and same-boot interrupted checkpoint recovery. A valid token ledger
+with dead recorded incarnations and only unverified unreadable cwd candidates
+permits durable cancellation/abandonment, never a fabricated exit proof. Stale
+partial collection cannot authorize parent Finish; latest settled collection can.
+Restart preserves abandonment and the generation; abandoned intent cannot start a
+new generation even after holders clear. Strict fresh resource proof
+still blocks worktree/branch/scratch cleanup, history deletion and reuse. A live
+recorded unreadable process still blocks settlement. Real mutation keepers make
+owned cleanup refuse promptly and withdraw its queued claim, preserving resources
+until an explicit retry after unlock. Linux-only OS coverage exempts no runner.
+Missing/malformed ledgers and incomplete location evidence retain their existing
+conservative settlement guards; candidate-only destruction refusals report
+unverified membership without waiting out the full termination timeout. Mixed
+readable-holder/candidate probes with absent or incomplete ledgers recheck each
+fresh poll: after the verified holder exits, destruction refuses promptly with
+the candidate reason and retains the execution generation, worktree, branch and scratch.
 
 Crash-diagnostic rows **S15–S17** (hearsay-tools/cezarion#499) drive every `RUNNER_IDS` adapter's
 native transport through an uncaught-exception-shaped stderr fixture, a plain
@@ -953,7 +1042,7 @@ the harness does not infer completion from prose. Offline prompt recordings prov
 delivery, not live model compliance.
 
 R26 (hearsay-tools/cezarion#398) runs every `HARNESS_ADAPTERS.askResumeCases` entry for every
-`RUNNER_IDS` backend: Claude/Pi `CEZ:ASK`, Codex `item/tool/requestUserInput`,
+`RUNNER_IDS` backend: Claude/Pi/OMP `CEZ:ASK`, Codex `item/tool/requestUserInput`,
 OpenCode `question.asked`, and Cursor `cursor/ask_question` plus `cursor/create_plan`.
 One human answer must reach completion with no later `waiting` transition and no
 second human prompt. R3 proves parking; R6 deliberately returns to markerless
@@ -966,7 +1055,21 @@ R15 (hearsay-tools/cezarion#121/#401) releases native child updates only after t
 then checks that status, activity and the monitoring wake deadline survive.
 Claude and Codex retain nested items; Cursor retains attributed late task
 metadata while dropping closed child-session chunks; OpenCode discards closed
-child scopes. Pi has the same explicit child-wire exemption as S9/R12.
+child scopes. Pi has the same explicit child-wire exemption as S9/R12. OMP has none: its
+`subagent_lifecycle`/`subagent_event` frames carry the child transcript, so S9, R12 and R15
+run on OMP's native mock wire including `subagent` and `subagent-after-park`. The mock's
+frames after `session_settled` are constructed (real OMP settles only when it has no pending
+async work) and kept as a stricter robustness check.
+
+**OMP exemptions** (`PARITY_EXEMPTIONS` in `harness-parity.testkit.ts`; each names a wire fact,
+never "not implemented"):
+
+| Row | Kind | Why |
+| --- | --- | --- |
+| A9 | capability-absent | v18.4.11 plain `--mode rpc` never constructs the ask tool: `sessionOptions.hasUI` is true only for interactive or `rpc-ui` (`src/main.ts`) and `AskTool.createIf` returns null without it. The turn-end `CEZ:ASK` fallback applies (A3/A4). |
+| R16 | capability-absent | `text_end.content` is the one assistant-text channel for v1 and v2; `message_end` has no separately mapped text. |
+| I2 | capability-absent | `session_settled` requires `queuedMessageCount === 0` (`isRpcSessionSettled`, `modes/rpc/rpc-session-settle.ts`) and `agent_end` is rewritten to non-terminal while the agent has queued messages (`session/agent-session.ts`), so a steer accepted before settle is read in the same turn. Source-derived (no live turn). |
+| A13, A14 | scenario-unconstructible | Same as every runner: no portable-answer HTTP ACK retained after turn completion; the executable cell checks idle expiry and Continue instead. |
 
 R16 (hearsay-tools/cezarion#134/#401) checks a stored assistant ASK and exactly one waiting question
 card on every runner. All current wires couple their completed parent text to
@@ -1086,8 +1189,8 @@ Owned-input rows S11/S12 pin ask separation and each runner's declared delivery 
 a `steer` runner admits busy input, a `boundary` runner refuses and retries at its
 boundary, and a closed session refuses. Input rows I1/I2 (hearsay-tools/cezarion#505) pin that mid-turn
 input is reported read before its turn ends, and that accepted input a finished turn
-never read is reported; Cursor is scenario-unconstructible for both, and Claude and
-Pi are capability-absent for I2 because they never leave acknowledged input unread. R6–R11 exercise durable queued/startup input, before/during/
+never read is reported; Cursor is scenario-unconstructible for both, and Claude,
+Pi and OMP are capability-absent for I2 because they never leave acknowledged input unread. R6–R11 exercise durable queued/startup input, before/during/
 after asks, restart with an unanswered ask, continuation asks, delayed native replies,
 DONE/explicit-stop precedence and post-send checkpoint failure. R13 runs a persisted
 catalog chain (an agent step plus a check step) inside the owned worker on every
@@ -1163,6 +1266,7 @@ accepted identity, empty grants and distinct per-session delegation credentials.
 | Codex 0.153.4 | `thread/start` and `thread/resume` `config: { "features.multi_agent": false, "features.multi_agent_v2": false }` | `codex features list` names both flags; `codex --help` documents dotted config overrides; `codex app-server generate-json-schema` confirms both request config fields. Existing sandbox, approval, account and model settings remain unchanged. |
 | OpenCode 1.18.29 | `POST /session` `permission: [{ permission: "task", pattern: "*", action: "deny" }]` | Installed server `/doc` declares `PermissionRuleset`; its embedded `TaskTool.execute` checks `task`. Later prompt requests contain no `tools` map that would replace session rules. The current adapter creates a fresh session on Continue, so the deny applies there too. It still does not map general `allowedTools`. |
 | Cursor 2026.09.15-d2fe57e | `initialize.clientCapabilities._meta.subagents = false` | Installed `src/acp/agent.ts` negotiates native delegation from this capability; `src/acp/session.ts` passes it to the agent. Ordinary runs advertise `true`; start and Continue use the same handshake. Custom tools and unrestricted shell remain outside hard isolation. |
+| OMP 18.4.11 | `--config` overlay `tools.approval.task: deny`, plus `task`, `wait` and `eval` left out of `--tools` | OMP's user `deny` is absolute in every approval mode (`approval-mode.md`). OMP has no `--exclude-tools`, and no setting disables `eval`'s `agent()`/`workpool()` helpers, so `eval` is dropped from the list. With no workflow `allowedTools`, D1 passes an explicit list (OMP's default set minus those three) instead of no `--tools`, failing closed. Verified with `get_state.dumpTools` on the real binary. |
 | pi 0.85.1 | `--exclude-tools subagent` | Installed `pi --help` applies exclusions to built-in/extension/custom names; the shipped `examples/extensions/subagent/index.ts` registers `subagent`. Other extension discovery and ordinary tool settings remain unchanged. |
 
 **Explicit D1 pi exemption:** pi's RPC has no native delegation primitive or
@@ -1414,6 +1518,40 @@ To be first-class:
    `buildChildEnv` is least-privilege per backend, so a multi-provider runner
    must receive credentials for every provider its own model ids can name
    without widening other backends.
+
+### OMP lessons (hearsay-tools/cezarion#595)
+
+OMP is the second Pi-shaped runner, and each place it differs from Pi broke a Pi assumption.
+Check these before copying an existing runner's code for a fork or near-fork of its wire:
+
+- **No `agent_settled`.** Copying Pi's turn trigger would hang every OMP turn. Read the
+  upstream docs' own statement of the boundary (`prompt_result`, `session_settled`) and never
+  treat `agent_end` as terminal: it is non-terminal while OMP retries or compacts.
+- **No `--session-id`.** The session id is discovered from `get_state` and Continue uses
+  `--resume <id>` (the Codex/Cursor precedent).
+- **No `--exclude-tools`.** `--tools` is an allowlist validated against OMP's registry: an unknown
+  name, or a built-in the session has not enabled, exits 2 before any frame. Never pass an unmapped
+  name through, keep the default list to tools that are on by default (`find` and `ast_grep` are
+  not), and handle the refusal for tools a user's settings disabled, or MCP tools OMP has not
+  registered, by respawning once without them. OMP spells MCP tools `mcp__<server>_<tool>`, not
+  Claude's `mcp__<server>__<tool>`.
+- **Not every omp build takes every flag.** OMP fails fast on an unrecognized flag
+  (`Error: unknown flag(s): …`, exit 2). `--add-dir` is the one optional flag cezar passes, so a
+  build that rejects it is respawned once without it, with a note; any other unknown flag stays
+  fatal, because model, prompt, resume and tools are not optional.
+- **Diffs and plan come from the tool result**, not the args: the default `hashline` edit mode has
+  args `{input}` only.
+- **The ask marker works in plain `--mode rpc`** because OMP never registers its native ask tool
+  without a UI; do not build a native ask bridge there.
+- **Sub-agents are on the wire**, so S9/R12/R15 are constructible and carry no exemption.
+- **`omp models --json` prints an object** (`{"models": [...]}`), not an array, and exits 0 with an
+  empty list when logged out.
+- **Record real-binary evidence, and say what you could not run.** Startup frames, `--tools`
+  refusals and `dumpTools` were recorded first, and the turn fixtures were source-derived and
+  labeled while no OMP login existed; live turns later confirmed streaming, a same-turn steer,
+  `--resume` and interrupt (fixtures README verification ledger). A constructed frame (the mock
+  sends frames after settle that the real wire never does) is labeled constructed, not passed off
+  as a capture.
 
 <a id="11-the-plan-channel-pr-443"></a>
 

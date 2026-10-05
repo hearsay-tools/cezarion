@@ -20,6 +20,17 @@ const CONNECTED: ProviderStatusResponse = {
   ],
 }
 
+describe('provider-status runner order', () => {
+  it('lists OMP last and accepts its SSE rows', () => {
+    const rows = ['omp', 'claude', 'pi'].map((provider) => ({ provider, status: 'connected' as const, enabled: true }))
+    expect(usableRunners({ providers: rows as ProviderStatusResponse['providers'] })).toEqual(['claude', 'pi', 'omp'])
+    expect(parseProviderStatusEventRow({ provider: 'omp', status: 'disconnected' })).toEqual({
+      provider: 'omp',
+      status: 'disconnected',
+    })
+  })
+})
+
 describe('provider-status SSE rows', () => {
   it('parses one coarse provider-status SSE row', () => {
     expect(parseProviderStatusEventRow({

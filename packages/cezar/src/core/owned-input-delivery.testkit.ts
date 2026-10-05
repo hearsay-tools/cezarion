@@ -6,12 +6,13 @@ import { HARNESS_ADAPTERS } from './harness-parity.testkit.ts';
 
 /** Reject exactly one identified command through the real protocol; a reopened
  * process accepts it. No session/manager mock and no transport-error inference. */
-export async function withRejectedCommand(backend: 'codex' | 'opencode' | 'pi', body: () => Promise<void>): Promise<void> {
+export async function withRejectedCommand(backend: 'codex' | 'opencode' | 'pi' | 'omp', body: () => Promise<void>): Promise<void> {
   const root = mkdtempSync(join(tmpdir(), 'cez-delivery-reject-'));
   const once = join(root, 'rejected-once');
   const adapter = HARNESS_ADAPTERS[backend] as { mockBin: string };
   const original = adapter.mockBin, mock = join(root, 'mock.mjs');
-  let source = "import {existsSync,writeFileSync} from 'node:fs';\n" + readFileSync(original, 'utf8').replace(/^#!.*\n/, '');
+  // mock-omp-rpc.mjs already imports both; a second import of the same name is a SyntaxError.
+  let source = (backend === 'omp' ? '' : "import {existsSync,writeFileSync} from 'node:fs';\n") + readFileSync(original, 'utf8').replace(/^#!.*\n/, '');
   const rejected = `existsSync(${JSON.stringify(once)})`, mark = `writeFileSync(${JSON.stringify(once)},'rejected')`;
   try {
     if (backend === 'codex') {
@@ -22,6 +23,11 @@ export async function withRejectedCommand(backend: 'codex' | 'opencode' | 'pi', 
       const anchor = "      if (body.includes('mock:reject-agent-post')) {";
       expect(source.split(anchor)).toHaveLength(2);
       source = source.replace(anchor, `      if (body.includes('mock:reject-agent-post') && !${rejected}) {${mark};`);
+    } else if (backend === 'omp') {
+      // Rejected before admission: OMP's error response only, no prompt_result (rpc-mode.ts).
+      const anchor = "async function prompt(command) {\n  const message = command.message;\n";
+      expect(source.split(anchor)).toHaveLength(2);
+      source = source.replace(anchor, anchor + `  if(message.includes('reject-owned-turn') && !${rejected}) {${mark};fail(command,'owned turn rejected');return;}\n`);
     } else {
       const anchor = "  } else if (command.type === 'prompt' && command.message.includes('mock:agent-echo')) {";
       expect(source.split(anchor)).toHaveLength(2);
@@ -37,14 +43,15 @@ export async function withRejectedCommand(backend: 'codex' | 'opencode' | 'pi', 
 }
 
 /** Hold only the transport ACK; normal real turn frames still reach the runner. */
-export async function withDelayedCommand(backend: 'codex' | 'opencode' | 'pi', body: (release: () => void) => Promise<void>, marker = 'delay-owned-ack'): Promise<void> {
+export async function withDelayedCommand(backend: 'codex' | 'opencode' | 'pi' | 'omp', body: (release: () => void) => Promise<void>, marker = 'delay-owned-ack'): Promise<void> {
   const root = mkdtempSync(join(tmpdir(), 'cez-delivery-delay-'));
   const released = join(root, 'released');
   const adapter = HARNESS_ADAPTERS[backend] as { mockBin: string };
   const original = adapter.mockBin, mock = join(root, 'mock.mjs');
   let source = readFileSync(original, 'utf8').replace(/^#!.*\n/, '');
-  const delay = `function delayedAck(send) { const timer=setInterval(()=>{if(existsSync(${JSON.stringify(released)})){clearInterval(timer);send();}},5); }`;
-  source = `import {existsSync} from 'node:fs';\n${delay}\n${source}`;
+  // Aliased: a mock may already import `existsSync` itself (mock-omp-rpc.mjs does).
+  const delay = `function delayedAck(send) { const timer=setInterval(()=>{if(ackReleased(${JSON.stringify(released)})){clearInterval(timer);send();}},5); }`;
+  source = `import {existsSync as ackReleased} from 'node:fs';\n${delay}\n${source}`;
   try {
     if (backend === 'codex') {
       const anchor = "    emit({ id: msg.id, result: { turn: { id: 'turn_mock_1' } } });";
@@ -54,6 +61,11 @@ export async function withDelayedCommand(backend: 'codex' | 'opencode' | 'pi', b
       const anchor = "      res.end(JSON.stringify({ info: info({}), parts: [] }));";
       expect(source.split(anchor)).toHaveLength(2);
       source = source.replace(anchor, `      if(body.includes(${JSON.stringify(marker)})) delayedAck(()=>{${anchor}}); else {${anchor}}`);
+    } else if (backend === 'omp') {
+      // The baseline echoes the prompt, so only the ack moves; the turn frames stream on.
+      const anchor = "  respond(command);\n  beginTurn(command);\n";
+      expect(source.split(anchor)).toHaveLength(2);
+      source = source.replace(anchor, `  if(message.includes(${JSON.stringify(marker)})) delayedAck(()=>respond(command)); else respond(command);\n  beginTurn(command);\n`);
     } else {
       const anchor = "    send({ id: command.id, type: 'response', command: 'prompt', success: true });\n    send({ type: 'agent_start' });\n    send({ type: 'turn_start' });\n    sendText([command.message]);";
       expect(source.split(anchor)).toHaveLength(2);

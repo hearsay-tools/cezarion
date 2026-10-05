@@ -9,7 +9,7 @@ import { QUICK_TASK_WORKFLOW } from './types.ts';
 // Only the external CI completion time is controlled; metadata uses the dry-run gh process.
 describe('CI tool registration and scheduled delivery across harnesses', { timeout: 30_000 }, () => {
   useWorkerWaitFixture();
-  const cases = (['claude', 'codex', 'opencode', 'pi', 'cursor'] as const).flatMap(runner =>
+  const cases = (['claude', 'codex', 'opencode', 'pi', 'cursor', 'omp'] as const).flatMap(runner =>
     (['fresh', 'continued', 'recovered'] as const).map(mode => ({ runner, mode })));
   it.each(cases)('$runner $mode parks from a real tool call and resumes with one observation', async ({ runner, mode }) => {
     let settle!: (result: CiWaitResult) => void;

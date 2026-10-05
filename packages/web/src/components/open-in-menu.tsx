@@ -76,6 +76,7 @@ const OPEN_IN_ICONS: Record<string, LucideIcon> = {
   codex: SparklesIcon,
   opencode: BotIcon,
   pi: BotIcon,
+  omp: BotIcon,
 }
 
 /** The icon component for a target — `target.icon` when it's one the UI knows, else the
@@ -88,7 +89,7 @@ export function openInIcon(target: OpenTarget): LucideIcon {
  *  target (editors, Finder, terminal) — mirrors the server's `agentCliRunner` (open-in-app.ts)
  *  without importing server code into the bundle. */
 export function cliTargetRunner(targetId: string): Runner | undefined {
-  const match = /^cli:(claude|codex|opencode|pi|cursor)$/.exec(targetId)
+  const match = /^cli:(claude|codex|opencode|pi|cursor|omp)$/.exec(targetId)
   return match ? (match[1] as Runner) : undefined
 }
 

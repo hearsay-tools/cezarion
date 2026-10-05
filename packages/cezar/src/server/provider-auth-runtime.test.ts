@@ -26,11 +26,12 @@ const CONNECTED_OUTPUT: Record<ProviderId, string> = {
     '└  1 credential',
   ].join('\n'),
   pi: 'provider  model  context  max-out  thinking  images\nanthropic  claude  200K  64K  yes  yes',
+  omp: '{"models":[{"provider":"anthropic","id":"claude-sonnet-4-5"}]}',
 };
 
 const providerForExecutable = (executable: string): ProviderId => {
   if (executable === 'agent') return 'cursor';
-  if (executable === 'claude' || executable === 'codex' || executable === 'opencode' || executable === 'pi') return executable;
+  if (executable === 'claude' || executable === 'codex' || executable === 'opencode' || executable === 'pi' || executable === 'omp') return executable;
   throw new Error(`unexpected executable: ${executable}`);
 };
 

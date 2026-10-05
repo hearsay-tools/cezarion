@@ -7,15 +7,21 @@ export interface WorktreeGitResult { ok: boolean; stdout: string; stderr: string
 /** `input` is written to git's stdin — what `update-ref --stdin` needs for a multi-ref transaction. */
 export type WorktreeGit = (cwd: string, args: string[], timeout?: number, input?: string) => Promise<WorktreeGitResult>;
 
+export class WorktreeMutationLockTimeout extends Error {
+  constructor() { super('timed out waiting for worktree mutation lock'); }
+}
+
 /**
  * Serialize worktree mutations by canonical Git common directory, across processes.
  * A short-lived keeper owns both the claim and Git children: losing the caller's
  * IPC channel releases the claim only AFTER its Git command exits. No heartbeat
  * expiry can admit a prune beside a slow/stopped add. No daemon or dependency.
  */
-export async function withWorktreeMutation<T>(repoRoot: string, operation: (git: WorktreeGit) => Promise<T>): Promise<T> {
+export async function withWorktreeMutation<T>(repoRoot: string, operation: (git: WorktreeGit) => Promise<T>, options: { waitMs?: number } = {}): Promise<T> {
+  const waitMs = options.waitMs ?? 120_000;
+  if (!Number.isSafeInteger(waitMs) || waitMs < 0 || waitMs > 120_000) throw new Error('invalid worktree mutation wait budget');
   const common = await new Promise<string>((resolve, reject) => {
-    execFile('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { cwd: repoRoot, encoding: 'utf8', timeout: 30_000 }, (error, stdout, stderr) => {
+    execFile('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { cwd: repoRoot, encoding: 'utf8', timeout: Math.max(1, Math.min(30_000, waitMs)) }, (error, stdout, stderr) => {
       if (error) reject(new Error(`cannot resolve Git common directory: ${stderr.trim() || error.message}`));
       else resolve(stdout.trim());
     });
@@ -23,7 +29,7 @@ export async function withWorktreeMutation<T>(repoRoot: string, operation: (git:
   const claims = join(await realpath(common), 'cezar-worktree-mutations');
   const source = import.meta.url.endsWith('.ts');
   const helper = fileURLToPath(new URL(source ? './git-worktree-lock-helper.ts' : './git-worktree-lock-helper.js', import.meta.url));
-  const keeper = spawn(process.execPath, [...(source ? ['--import', import.meta.resolve('tsx')] : []), helper, claims], {
+  const keeper = spawn(process.execPath, [...(source ? ['--import', import.meta.resolve('tsx')] : []), helper, claims, String(waitMs)], {
     stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
     // Establish the process group before a claim or Git child can exist.
     detached: process.platform !== 'win32',
@@ -44,9 +50,9 @@ export async function withWorktreeMutation<T>(repoRoot: string, operation: (git:
     pending.clear();
   };
   keeper.on('error', fail);
-  keeper.on('message', (message: { kind: string; id: number; result: WorktreeGitResult; error: string }) => {
+  keeper.on('message', (message: { kind: string; id: number; result: WorktreeGitResult; error: string; code?: string }) => {
     if (message.kind === 'ready') readyResolve();
-    else if (message.kind === 'error') fail(new Error(message.error));
+    else if (message.kind === 'error') fail(message.code === 'lock_timeout' ? new WorktreeMutationLockTimeout() : new Error(message.error));
     else if (message.kind === 'result') {
       pending.get(message.id)?.resolve(message.result);
       pending.delete(message.id);

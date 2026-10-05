@@ -23,6 +23,7 @@ const providerAuth = (disconnected: ProviderId[] = []) => new ProviderAuthServic
   platform: 'linux',
   runCommand: async (executable) => {
     if (executable === (process.env.CEZ_CURSOR_BIN ?? 'agent')) return { stdout: '{"status":"authenticated","isAuthenticated":true}', stderr: '', exitCode: 0 };
+    if (executable === (process.env.CEZ_OMP_BIN ?? 'omp')) return { stdout: '{"models":[{"provider":"xai","id":"grok"}]}', stderr: '', exitCode: 0 };
     const provider = executable === 'claude'
       ? 'claude'
       : executable === 'codex'
@@ -155,6 +156,22 @@ describe('POST /api/v1/runs/:id/open-in — agent CLI resume vs fresh launch', (
     } finally {
       if (prior === undefined) delete process.env.CEZ_CURSOR_BIN;
       else process.env.CEZ_CURSOR_BIN = prior;
+    }
+  });
+
+  it('exposes the configured OMP resume command, quoting a CEZ_OMP_BIN override', async () => {
+    vi.stubEnv('CEZ_OMP_BIN', '/opt/Oh My Pi/omp');
+    try {
+      const run = makeRun('omp', 'sess-1');
+      const response = await apiRequest(app(), `/api/v1/runs/${run.id}`);
+      expect(await response.json()).toMatchObject({ cliResumeCommand: "'/opt/Oh My Pi/omp' --resume sess-1" });
+      const res = await openIn(run.id, 'cli:omp');
+      expect(((await res.json()) as { command: string }).command).toBe("'/opt/Oh My Pi/omp' --resume sess-1");
+      // A fresh launch (no session of its own to resume) uses the same configured binary.
+      const fresh = await openIn(makeRun('claude', 'sess-2').id, 'cli:omp');
+      expect(((await fresh.json()) as { command: string }).command).toBe("'/opt/Oh My Pi/omp'");
+    } finally {
+      vi.unstubAllEnvs();
     }
   });
 

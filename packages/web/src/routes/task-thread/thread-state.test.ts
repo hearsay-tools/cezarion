@@ -595,6 +595,17 @@ describe('reduceThread — provider authorization recovery', () => {
     }])
   })
 
+  it.each(['claude', 'codex', 'opencode', 'pi', 'cursor', 'omp'] as const)('keeps a %s incident', (provider) => {
+    expect(reduceThread([
+      line(1, 'provider-auth-required', { provider, authFailureId: 'incident-1' }),
+    ]).turns[0]?.items).toEqual([{
+      kind: 'provider-auth-required',
+      id: 'v1:1',
+      provider,
+      authFailureId: 'incident-1',
+    }])
+  })
+
   it.each([
     ['an unknown provider', { provider: 'future', authFailureId: 'incident-1' }],
     ['a blank incident id', { provider: 'claude', authFailureId: '' }],
