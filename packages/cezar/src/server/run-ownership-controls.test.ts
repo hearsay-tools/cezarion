@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { Hono } from 'hono';
+import { delegationErrorResponseSchema } from '@open-mercato/cezar-contract';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { RUNS_DB_FILE } from '../runs/run-database.ts';
@@ -62,13 +63,17 @@ describe('controls on a run another cezar process owns', () => {
     // notify, read, unread, PATCH, DELETE, auto-resume, remove-worktree, pr, git, open-in, …
     expect(routes.length).toBeGreaterThanOrEqual(20);
     const before = readPersistedRuns(dataDir);
-    const answers: Array<{ route: string; status: number; body: { error?: string } }> = [];
+    const answers: Array<{ route: string; status: number; body: Record<string, unknown> }> = [];
     for (const route of routes) {
       const path = `/api/v1${route.path.replace(':id', runId).replace(/:[A-Za-z]+/g, 'x')}`;
       const response = await apiRequest(app, path, { method: route.method, headers: { 'content-type': 'application/json' }, body: '{}' });
-      answers.push({ route: `${route.method} ${route.path}`, status: response.status, body: await response.json() as { error?: string } });
+      answers.push({ route: `${route.method} ${route.path}`, status: response.status, body: await response.json() as Record<string, unknown> });
     }
     expect(answers.filter((answer) => answer.status !== 409 || answer.body.error !== RUN_IN_USE_ELSEWHERE)).toEqual([]);
+    // Each in the error shape its route already answers with: the delegation route keeps its code.
+    const destroy = answers.find((answer) => answer.route === 'POST /runs/:id/worker-destroy')!;
+    expect(delegationErrorResponseSchema.parse(destroy.body)).toEqual({ code: 'incompatible_state', error: RUN_IN_USE_ELSEWHERE });
+    expect(answers.filter((answer) => answer !== destroy).every((answer) => Object.keys(answer.body).join() === 'error')).toBe(true);
     expect(readPersistedRuns(dataDir)).toEqual(before);
     expect(store.heldIds()).toEqual([]);
 

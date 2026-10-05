@@ -3898,8 +3898,11 @@ export function createApp(deps: ServerDeps) {
     const { store, manager } = c.get('project');
     if (store.runOwnership(id) === 'orphaned') await manager.adoptOrphanedRun(id);
     const refusal = store.writeRefusal(id);
-    if (refusal) return c.json({ error: refusal }, 409);
-    await next();
+    if (!refusal) return next();
+    // The delegation route in this family answers in the delegation error shape it always uses.
+    return c.req.path.endsWith('/worker-destroy')
+      ? c.json({ code: 'incompatible_state' as const, error: refusal }, 409)
+      : c.json({ error: refusal }, 409);
   };
 
   // ---- chained family: runs lifecycle + artifacts (project-scoped) ----
