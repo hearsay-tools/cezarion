@@ -206,6 +206,13 @@ export interface RunDatabaseChanges {
   /** What must still hold for this writer to commit (#779, plan step 3), checked inside the
    *  transaction before anything is written. A violation throws `RunConflictError`. */
   fence?: RunWriteFence;
+  /** Write nothing if this `meta` key is present when the transaction holds the write lock: the
+   *  commit comes back `skipped`. How exactly one of two concurrent importers imports (#779, plan
+   *  step 4) — a check made before the lock is only a hint. */
+  onlyIfMetaAbsent?: string;
+  /** Runs inside the transaction after every write, just before COMMIT; throwing rolls it all
+   *  back. The last moment a caller can still refuse what it wrote. */
+  beforeCommit?: () => void;
 }
 
 /** A family a fenced write touches: held at `generation`, or to `take` in that same transaction if
@@ -227,6 +234,8 @@ export interface RunDatabaseCommit {
   revisions: Map<string, number>;
   /** The generation of each claim the fence took. */
   claims: Map<string, number>;
+  /** Nothing was written: the `onlyIfMetaAbsent` key was present. */
+  skipped: boolean;
 }
 
 /** One family's owner in `run_claims`. */
@@ -450,6 +459,8 @@ function toRunClaim(row: SqlRow): RunClaim {
 export class RunDatabase {
   private readonly db: DatabaseSync;
   private readonly path: string;
+  /** Set by the first statement that reports the file damaged (SQLITE_CORRUPT or NOTADB). */
+  private damaged = false;
   private readonly statements: {
     get: StatementSync;
     getMany: StatementSync;
@@ -562,8 +573,10 @@ export class RunDatabase {
       migrate(db);
       return new RunDatabase(db, path);
     } catch (error) {
-      if (db?.isOpen) db.close();
-      throw toRunDatabaseError(error, path);
+      const typed = toRunDatabaseError(error, path);
+      if (db && typed instanceof RunDatabaseCorruptError) closeLeavingFiles(db, path);
+      else if (db?.isOpen) db.close();
+      throw typed;
     }
   }
 
@@ -733,9 +746,15 @@ export class RunDatabase {
     validateChanges(changes);
     const revisions = new Map<string, number>();
     let claims = new Map<string, number>();
+    let skipped = false;
     this.run(() => {
       this.db.exec('BEGIN IMMEDIATE');
       try {
+        if (changes.onlyIfMetaAbsent !== undefined && this.statements.getMeta.get(changes.onlyIfMetaAbsent) !== undefined) {
+          skipped = true;
+          this.db.exec('ROLLBACK');
+          return;
+        }
         if (changes.fence) claims = this.checkFence(changes.fence);
         for (const id of changes.deletes) this.statements.delete.run(id);
         const revision = changes.upserts.length > 0 ? this.nextSequence(COMMIT_SEQ_KEY) : 0;
@@ -763,13 +782,14 @@ export class RunDatabase {
           if (value === null) this.statements.deleteMeta.run(key);
           else this.statements.setMeta.run(key, value);
         }
+        changes.beforeCommit?.();
         this.db.exec('COMMIT');
       } catch (error) {
         rollback(this.db);
         throw error;
       }
     });
-    return { revisions, claims };
+    return { revisions, claims, skipped };
   }
 
   /** Inside a write transaction: take the claims the fence asks for, then throw `RunConflictError`
@@ -926,17 +946,53 @@ export class RunDatabase {
     }));
   }
 
-  /** Idempotent: closing a closed database does nothing. */
+  /** Idempotent: closing a closed database does nothing. Once any statement found the file
+   *  damaged, the close leaves every file exactly as it is (`closeLeavingFiles`). */
   close(): void {
-    if (this.db.isOpen) this.db.close();
+    if (this.damaged) closeLeavingFiles(this.db, this.path);
+    else if (this.db.isOpen) this.db.close();
   }
 
   private run<T>(fn: () => T): T {
     try {
       return fn();
     } catch (error) {
-      throw toRunDatabaseError(error, this.path);
+      const typed = toRunDatabaseError(error, this.path);
+      if (typed instanceof RunDatabaseCorruptError) this.damaged = true;
+      throw typed;
     }
+  }
+}
+
+/** Connections to a damaged database that could not be closed safely (`closeLeavingFiles`). */
+const leftOpen: DatabaseSync[] = [];
+
+/**
+ * Close `db` without letting SQLite touch the files of a damaged database. The last connection to
+ * close checkpoints the WAL into the database file and then deletes `-wal` and `-shm`: over a
+ * malformed page that rewrites the damaged file and removes what may be the only intact copy of
+ * the latest commits. A read-only connection opened first keeps a shared lock on the file, so the
+ * closing one is not the last and does neither; the read-only one cannot write, so its own close
+ * does neither either. Any failure on the way still closes `db` the same guarded way or not at all.
+ */
+function closeLeavingFiles(db: DatabaseSync, path: string): void {
+  if (!db.isOpen) return;
+  let guard: DatabaseSync | undefined;
+  try {
+    guard = new DatabaseSync(path, { readOnly: true });
+    // A read takes the shared lock; a WAL database keeps it for as long as the connection is open.
+    guard.prepare('PRAGMA user_version').get();
+  } catch {
+    // Without a guard, leaving the connection open is the only close that changes nothing. Held
+    // here so garbage collection cannot close it either; the process lets it go when it exits.
+    guard?.close();
+    leftOpen.push(db);
+    return;
+  }
+  try {
+    db.close();
+  } finally {
+    guard.close();
   }
 }
 

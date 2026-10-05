@@ -96,12 +96,19 @@ function claim(path: string, owner: Owner, depth = 0): boolean {
   } finally { release(guard, gate); }
 }
 
+/** The live cockpit other than this process that owns `dataDir`, if any: its pid and, once it
+ *  listens, its URL. Read-only: nothing is claimed. */
+export function anotherCockpitOwner(dataDir: string): { pid: number; url?: string } | undefined {
+  let canonical: string;
+  try { canonical = realpathSync(dataDir); } catch { return undefined; }
+  const owner = readOwner(join(canonical, 'cockpit.lock'));
+  if (owner === undefined || owner.pid === process.pid || !alive(owner)) return undefined;
+  return { pid: owner.pid, ...(owner.url ? { url: owner.url } : {}) };
+}
+
 /** Whether a live cockpit other than this process owns `dataDir`. Read-only: nothing is claimed. */
 export function ownedByAnotherCockpit(dataDir: string): boolean {
-  let canonical: string;
-  try { canonical = realpathSync(dataDir); } catch { return false; }
-  const owner = readOwner(join(canonical, 'cockpit.lock'));
-  return owner !== undefined && owner.pid !== process.pid && alive(owner);
+  return anotherCockpitOwner(dataDir) !== undefined;
 }
 
 /** One owner per cockpit process, shared by boot and lazy project contexts. */

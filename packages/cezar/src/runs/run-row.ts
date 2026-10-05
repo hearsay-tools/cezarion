@@ -43,8 +43,12 @@ export function isLiveRecord(run: RunRecord): boolean {
  *
  * `summary` carries everything derivable from the record. The live `usage` sample the list routes
  * attach is not: it describes a process, not the run, and is never persisted.
+ *
+ * `data` defaults to the record itself. The store passes the record merged with what its stored
+ * JSON held beyond the schema (`encodeRawRecord`, raw-record.ts), and the import passes the
+ * record's original JSON, so a field this cezar does not know is never lost by a write.
  */
-export function encodeRunRow(run: RunRecord): RunRowInput {
+export function encodeRunRow(run: RunRecord, data: string = JSON.stringify(run)): RunRowInput {
   const worker = run.delegation?.role === 'worker' ? run.delegation : undefined;
   return {
     id: run.id,
@@ -60,7 +64,7 @@ export function encodeRunRow(run: RunRecord): RunRowInput {
     worktreePath: run.worktreePath !== undefined && run.worktreeReclaimedAt === undefined ? run.worktreePath : null,
     branch: ownedBranch(run, worker?.workspace.branch),
     baseBranch: run.baseBranch ?? null,
-    data: JSON.stringify(run),
+    data,
     summary: JSON.stringify(toRunSummary(run)),
   };
 }

@@ -116,13 +116,11 @@ describe('importing runs.json', () => {
     writeFileSync(join(dataDir, 'runs.json'), JSON.stringify([record('a'), record('bb')]));
     RunDatabase.open(join(dataDir, RUNS_DB_FILE)).close();
     const release = blockRunWrites(dataDir);
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
-      expect(runIds(open())).toEqual([]);
+      expect(() => open()).toThrow(expect.objectContaining({ kind: 'busy' }));
     } finally {
       release();
     }
-    expect(warn).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('runs database unavailable (busy)'));
     const db = RunDatabase.openReadOnly(join(dataDir, RUNS_DB_FILE))!;
     try {
       expect(db.listAll()).toEqual([]);
@@ -135,28 +133,8 @@ describe('importing runs.json', () => {
   });
 });
 
-describe('a database that cannot be opened', () => {
-  it('is never reset: the store starts empty, warns once and writes nothing', () => {
-    const files = { [RUNS_DB_FILE]: 'corrupt '.repeat(600), [`${RUNS_DB_FILE}-wal`]: 'wal '.repeat(300), 'runs.json': JSON.stringify([record('a')]) };
-    for (const [name, text] of Object.entries(files)) writeFileSync(join(dataDir, name), text);
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-
-    const store = open();
-    expect(runIds(store)).toEqual([]);
-    expect(warn).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('runs database unavailable (corrupt)'));
-
-    vi.useFakeTimers();
-    const run = store.createRun({ title: 'in memory', workflow: 'w', task: 't', steps: [] });
-    expect(store.getRun(run.id)).toBeDefined();
-    expect(vi.getTimerCount()).toBe(0);
-    store.flush();
-    expect(() => store.commitDelegation([{ id: run.id, delegation: { role: 'invalid' } }])).toThrow('runs database unavailable');
-    store.close();
-    for (const [name, text] of Object.entries(files)) expect(readFileSync(join(dataDir, name), 'utf8')).toBe(text);
-    expect(existsSync(join(dataDir, LEGACY_INDEX_BACKUP_FILE))).toBe(false);
-    expect(warn).toHaveBeenCalledTimes(1);
-  });
-
+// A database that cannot be opened at all: store-import.test.ts.
+describe('a database with an unreadable row', () => {
   it('loads every readable row and leaves an unreadable one in the database untouched', () => {
     // Open decodes the live rows only, so the unreadable live row is the one it reports; the
     // unreadable finished row is skipped wherever it is read.

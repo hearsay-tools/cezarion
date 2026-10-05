@@ -4,7 +4,7 @@ import { agentTmpDirLocations, agentTmpDirMayExist, agentTmpDirOwnershipProven, 
 import { removeArtifacts } from '../artifacts/lifecycle.ts';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import { appendFileSync, closeSync, constants, copyFileSync, fstatSync, fsyncSync, lstatSync, openSync, readSync, realpathSync, readdirSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, closeSync, constants, fstatSync, fsyncSync, lstatSync, openSync, readSync, realpathSync, readdirSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { z } from 'zod';
 import {
@@ -27,10 +27,13 @@ import { workflowDefSchema } from '../workflows/types.ts';
 
 import { RUNNER_IDS } from '../core/agent-runner.ts';
 import {
-  RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY, RunConflictError, RunDatabase, RunDatabaseBusyError, RunDatabaseError,
+  RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY, RunConflictError, RunDatabase, RunDatabaseBusyError,
   type RunConflictEvidence, type RunDatabaseChanges, type RunDatabaseCommit, type RunFenceClaim, type RunRow, type RunRowInput, type RunWriteFence,
 } from './run-database.ts';
 import { encodeRunRow, isLiveRecord } from './run-row.ts';
+import { collectRawExtras, encodeRawRecord, type RawExtras } from './raw-record.ts';
+import { assertNoLegacyWriter, backUpLegacyIndex, LEGACY_INDEX_FILE, LegacyWriterError, readLegacyIndex } from './legacy-index.ts';
+import { RunStoreOpenError, toRunStoreOpenError } from './store-open-error.ts';
 import { claimOwnerLive, closeClaimSession, openClaimSession, type ClaimOwner } from './run-claims.ts';
 
 import type { RunnerId } from '../core/agent-runner.ts';
@@ -397,8 +400,47 @@ export function parseRunRecords(raw: unknown) {
   return z.array(runRecordSchema).safeParse(raw);
 }
 
-/** One database row's `data` back into a record, through the same salvage and schema as
- *  `parseRunRecords`. Undefined when it does not parse: one unreadable row costs that row only. */
+/** One stored record and what its JSON holds beyond the runtime schema (raw-record.ts), which
+ *  the next write of its row puts back. */
+export interface DecodedRun {
+  run: RunRecord;
+  extras: RawExtras | undefined;
+}
+
+/** A row as this store last read or wrote it (see `RunStore.base`). */
+interface StoredRow {
+  revision: number;
+  data: string;
+  extras?: RawExtras;
+}
+
+/** Just the `StoredRow` part of a `coldBase` entry. */
+function storedRow({ revision, data, extras }: StoredRow): StoredRow {
+  return { revision, data, extras };
+}
+
+/** One stored record (a row's `data`) through `parseRunRecords`' salvage and schema, with what the
+ *  schema dropped. Read after the salvage ran: what it removes (an unreadable CI wait, a preview
+ *  server entry) the runtime has decided to drop, and keeps dropping on the next write, as it always
+ *  has; only what the schema does not know is put back. */
+function decodeStoredRecord(raw: unknown): DecodedRun | undefined {
+  const parsed = parseRunRecords([raw]);
+  if (!parsed.success) return undefined;
+  const run = parsed.data[0]!;
+  return { run, extras: collectRawExtras(raw, run) };
+}
+
+/** One database row's `data` back into a record and its extras. Undefined when it does not parse:
+ *  one unreadable row costs that row only. */
+export function decodeRunRow(data: string): DecodedRun | undefined {
+  try {
+    return decodeStoredRecord(JSON.parse(data));
+  } catch {
+    return undefined;
+  }
+}
+
+/** One database row's `data` back into a record, for a reader that never writes it back. */
 export function decodeRunRecord(data: string): RunRecord | undefined {
   try {
     const parsed = parseRunRecords([JSON.parse(data)]);
@@ -408,10 +450,7 @@ export function decodeRunRecord(data: string): RunRecord | undefined {
   }
 }
 
-/** The legacy index (#779): read once, imported into `runs.db`, never written again. */
-export const LEGACY_INDEX_FILE = 'runs.json';
-/** The exact bytes `runs.json` held when it was imported, kept beside it. */
-export const LEGACY_INDEX_BACKUP_FILE = 'runs.json.pre-sqlite.bak';
+export { LEGACY_INDEX_BACKUP_FILE, LEGACY_INDEX_FILE } from './legacy-index.ts';
 
 export type StepState = z.infer<typeof stepStateSchema>;
 export type QueuedMessage = z.infer<typeof queuedMessageSchema>;
@@ -424,6 +463,16 @@ export interface RunEvent {
   stepId?: string;
   type: string;
   [key: string]: unknown;
+}
+
+/** The pauses between open attempts while the database is busy, when `open` may wait (a boot):
+ *  about 3.5 s in all, with each attempt's own busy timeout. Long enough for another process to
+ *  finish importing a large `runs.json`. */
+const OPEN_RETRY_DELAYS_MS = [50, 100, 200, 400, 800, 1600];
+
+/** Block this thread for `ms`. Only `open` does, at boot, when there is nothing else to run. */
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
 const MAX_RUNS_KEPT = 300;
@@ -840,43 +889,77 @@ function loadNormalizedFields(run: RunRecord): string {
   ]);
 }
 
+/** Test seam (#779): `beforeTransaction` runs once `runs.json` is read and backed up, before the
+ *  import asks for the write lock; `beforeCommit` runs inside the import transaction, after every
+ *  row is written and before the last check that no older cezar wrote `runs.json` meanwhile. */
+let legacyImportHook: { beforeTransaction?: () => void; beforeCommit?: () => void } | undefined;
+
+export function __setLegacyImportHookForTests(hook?: { beforeTransaction?: () => void; beforeCommit?: () => void }): void {
+  legacyImportHook = hook;
+}
+
+/** `runs.json`'s records as rows. Each row's `data` is the record's own JSON as `runs.json` held
+ *  it, so nothing this cezar's schema does not know is lost (raw-record.ts); its summary and
+ *  columns come from the parsed record, which is what decoding that JSON gives back. Undefined
+ *  when the index does not parse. */
+function legacyIndexRows(bytes: Buffer): RunRowInput[] | undefined {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(bytes.toString('utf8'));
+  } catch {
+    return undefined;
+  }
+  if (!Array.isArray(raw)) return undefined;
+  // `parseRunRecords`' salvage rewrites top-level keys: the stored JSON is taken from copies.
+  const stored = raw.map((record: unknown) => (record !== null && typeof record === 'object' && !Array.isArray(record) ? { ...record } : record));
+  const parsed = parseRunRecords(raw);
+  if (!parsed.success) return undefined;
+  // A hand-edited index may repeat an id; the last one won when it loaded into a map, so it still does.
+  const rows = new Map<string, RunRowInput>();
+  parsed.data.forEach((run, index) => rows.set(run.id, encodeRunRow(run, JSON.stringify(stored[index]))));
+  return [...rows.values()];
+}
+
 /**
  * Import `runs.json` into a database that has never completed an import (#779, plan step 4).
  *
- * The exact bytes go to `runs.json.pre-sqlite.bak` first (never overwriting an earlier backup),
- * then every record and the completion marker commit in ONE transaction, so a crash leaves either
- * no import or a whole one. `runs.json` itself is left as it was, and nothing writes it again:
- * an older cezar keeps reading the history as it stood at the upgrade.
+ * The file is read once, through one descriptor, and its exact bytes are kept beside it first
+ * (`backUpLegacyIndex`: synced, never half-written, an existing backup trusted only when it holds
+ * the same bytes). Then ONE transaction writes every record, the completion marker and what the
+ * import read — size, sha256, backup — or nothing:
+ * - the marker is checked again once the transaction holds the write lock, so of two processes
+ *   importing at once exactly one writes; the other finds the marker and writes nothing;
+ * - right before COMMIT it refuses (`LegacyWriterError`) when an older cezar may still be writing
+ *   `runs.json` (`assertNoLegacyWriter`);
+ * - a crash or refusal leaves no marker, so the next open imports again from the start.
+ * `runs.json` itself is left as it was, and nothing writes it again: an older cezar keeps reading
+ * the history as it stood at the upgrade, and what it writes afterwards is never imported.
  *
- * An index that does not parse starts the store fresh, as it always has. The bytes survive in
- * the backup and in `runs.json`, which used to be overwritten by the next save instead.
- * Crash-safe retries of a failed import are a later step (T4).
+ * An index that does not parse starts the store fresh, as it always has. Its bytes survive in the
+ * backup and in `runs.json`, which used to be overwritten by the next save instead.
  */
 function importLegacyIndex(db: RunDatabase, dataDir: string): void {
-  const indexPath = join(dataDir, LEGACY_INDEX_FILE);
-  let records: RunRecord[] = [];
+  const snapshot = readLegacyIndex(join(dataDir, LEGACY_INDEX_FILE));
+  let rows: RunRowInput[] = [];
   let source = 'none';
-  if (existsSync(indexPath)) {
-    try {
-      copyFileSync(indexPath, join(dataDir, LEGACY_INDEX_BACKUP_FILE), constants.COPYFILE_EXCL);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-    }
-    source = LEGACY_INDEX_FILE;
-    try {
-      const parsed = parseRunRecords(JSON.parse(readFileSync(indexPath, 'utf8')));
-      if (parsed.success) records = parsed.data;
-      else source = `${LEGACY_INDEX_FILE} (unparseable)`;
-    } catch {
-      source = `${LEGACY_INDEX_FILE} (unparseable)`;
-    }
+  let read: Record<string, unknown> = {};
+  if (snapshot) {
+    const backup = backUpLegacyIndex(dataDir, snapshot);
+    read = { bytes: snapshot.bytes.length, sha256: snapshot.sha256, backup };
+    const parsed = legacyIndexRows(snapshot.bytes);
+    source = parsed ? LEGACY_INDEX_FILE : `${LEGACY_INDEX_FILE} (unparseable)`;
+    rows = parsed ?? [];
   }
-  // A hand-edited index may repeat an id; the last one won when it loaded into a map, so it still does.
-  records = [...new Map(records.map((run) => [run.id, run])).values()];
+  legacyImportHook?.beforeTransaction?.();
   db.transaction({
-    upserts: records.map(encodeRunRow),
+    upserts: rows,
     deletes: [],
-    meta: { [RUNS_IMPORT_COMPLETE_KEY]: JSON.stringify({ at: new Date().toISOString(), source, records: records.length }) },
+    meta: { [RUNS_IMPORT_COMPLETE_KEY]: JSON.stringify({ at: new Date().toISOString(), source, records: rows.length, ...read }) },
+    onlyIfMetaAbsent: RUNS_IMPORT_COMPLETE_KEY,
+    beforeCommit: () => {
+      legacyImportHook?.beforeCommit?.();
+      assertNoLegacyWriter(dataDir, snapshot);
+    },
   });
 }
 
@@ -1081,9 +1164,11 @@ export class RunStore extends EventEmitter {
   /** Staged ids while a durable commit installs and announces them: never evicted mid-commit. */
   private readonly committing = new Set<string>();
   private saveTimer: NodeJS.Timeout | null = null;
-  /** `null` when the database could not be opened (memory only: nothing is written, nothing is
-   *  evicted) or once the store is closed. */
+  /** `null` once the store is closed, and in a `RunStore.unavailable` store (nothing is written,
+   *  nothing is evicted). */
   private db: RunDatabase | null = null;
+  /** Why `open` failed, in a `RunStore.unavailable` store. */
+  private openFailure: RunStoreOpenError | undefined;
   /** Runs whose held record is ahead of its row; the next save or commit writes them. */
   private readonly dirty = new Set<string>();
   /** Runs gone from memory whose rows the next save or commit deletes. */
@@ -1103,12 +1188,13 @@ export class RunStore extends EventEmitter {
   private readonly pendingClaims = new Map<string, { session: string; generation: number } | null>();
   /** The revision and `data` of each held row (and pending deletion) as this store last read or
    *  wrote it: what a write is fenced against, and a conflict's "original". No entry: this store
-   *  created the row and has not written it yet. */
-  private readonly base = new Map<string, { revision: number; data: string }>();
+   *  created the row and has not written it yet. `extras` is what that `data` holds beyond the
+   *  schema, which the next write of the row puts back (raw-record.ts). */
+  private readonly base = new Map<string, StoredRow>();
   /** Rows read cold in the current synchronous turn, so a commit staged from one is fenced against
    *  the version it was computed from. `owned`: its family was already this store's when read.
    *  Cleared at the next microtask: no commit spans a turn. */
-  private readonly coldBase = new Map<string, { revision: number; data: string; owned: boolean }>();
+  private readonly coldBase = new Map<string, StoredRow & { owned: boolean }>();
   /** The family of each pending deletion, whose claim the deleting write is fenced against. */
   private readonly deletedFamilies = new Map<string, string>();
   /** Rows a conflicting write excluded: this store refuses to write them until it is reopened. */
@@ -1127,41 +1213,76 @@ export class RunStore extends EventEmitter {
    * one transaction (`importLegacyIndex`) and left exactly as it was, for older cezars to read.
    * Either way only the held set is decoded: the live rows (by the indexed `live` column), the
    * few finished rows a normalization still repairs, and the delegation families of the live
-   * ones. A database that cannot be opened is never reset: the store starts empty and writes
-   * nothing.
+   * ones.
+   *
+   * A store that cannot be opened is never an empty one (#779, plan step 4): `open` throws a
+   * `RunStoreOpenError` naming the cause, and nothing is reset, restored or deleted. `retryBusy`
+   * waits out a busy database (and a cockpit that may still be importing) with growing pauses,
+   * about 3.5 s in all, before it gives up. Open is synchronous, so the wait blocks this thread:
+   * only a boot passes it, while nothing else runs yet. Without it a busy database fails after
+   * one busy timeout.
    */
-  static open(dataDir: string, opts?: { keepLive?: boolean }): RunStore {
+  static open(dataDir: string, opts?: { keepLive?: boolean; retryBusy?: boolean }): RunStore {
+    const path = join(dataDir, RUNS_DB_FILE);
+    const delays = opts?.retryBusy ? OPEN_RETRY_DELAYS_MS : [];
+    const started = Date.now();
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return RunStore.openOnce(dataDir, path, opts?.keepLive === true);
+      } catch (error) {
+        const transient = error instanceof RunDatabaseBusyError || (error instanceof LegacyWriterError && error.reason === 'cockpit');
+        if (!transient || attempt >= delays.length) {
+          throw toRunStoreOpenError(error, path, attempt > 0 ? { waitedMs: Date.now() - started } : {});
+        }
+        sleepSync(delays[attempt]!);
+      }
+    }
+  }
+
+  private static openOnce(dataDir: string, path: string, keepLive: boolean): RunStore {
     mkdirSync(join(dataDir, 'runs'), { recursive: true });
     const store = new RunStore(dataDir);
-    store.keepLive = opts?.keepLive === true;
-    const path = join(dataDir, RUNS_DB_FILE);
+    store.keepLive = keepLive;
+    const db = RunDatabase.open(path);
     try {
-      const db = RunDatabase.open(path);
-      try {
-        if (db.getMeta(RUNS_IMPORT_COMPLETE_KEY) === undefined) importLegacyIndex(db, dataDir);
-        store.db = db;
-        store.owner = openClaimSession();
-        store.loadHeldRows();
-      } catch (error) {
-        if (store.owner) {
-          try { db.releaseClaims(store.owner.session); } catch { /* the session closes below: its claims are provably dead */ }
-          closeClaimSession(store.owner.session);
-        }
-        store.owner = undefined;
-        store.db = null;
-        store.held.clear();
-        store.dirty.clear();
-        store.claimed.clear();
-        store.base.clear();
-        db.close();
-        throw error;
-      }
+      if (db.getMeta(RUNS_IMPORT_COMPLETE_KEY) === undefined) importLegacyIndex(db, dataDir);
+      store.db = db;
+      store.owner = openClaimSession();
+      store.loadHeldRows();
     } catch (error) {
-      const kind = error instanceof RunDatabaseError ? error.kind : 'other';
-      const message = error instanceof Error ? error.message : String(error);
-      console.warn(`[cez] runs database unavailable (${kind}): ${message}. Runs are kept in memory only and nothing is saved; ${path} is left as it is.`);
+      if (store.owner) {
+        try { db.releaseClaims(store.owner.session); } catch { /* the session closes below: its claims are provably dead */ }
+        closeClaimSession(store.owner.session);
+      }
+      store.owner = undefined;
+      store.db = null;
+      store.held.clear();
+      store.dirty.clear();
+      store.claimed.clear();
+      store.base.clear();
+      db.close();
+      throw error;
     }
     return store;
+  }
+
+  /**
+   * The store `serve` keeps for its boot project when `open` failed: no database, nothing held,
+   * and every attempt to create or save a run refused with `failure`. The cockpit answers every
+   * route of that project with `failure`'s message, and boot skips everything that would read
+   * its empty run list as "no runs" (orphan pruning, retention, recovery, scratch sweeps). The
+   * way out is a restart once the cause is gone.
+   */
+  static unavailable(dataDir: string, failure: RunStoreOpenError): RunStore {
+    const store = new RunStore(dataDir);
+    store.openFailure = failure;
+    return store;
+  }
+
+  /** Why this store has no database, when it is `RunStore.unavailable`'s: its runs are unknown,
+   *  not absent. */
+  get unavailable(): RunStoreOpenError | undefined {
+    return this.openFailure;
   }
 
   /**
@@ -1177,25 +1298,25 @@ export class RunStore extends EventEmitter {
    */
   private loadHeldRows(): void {
     let unreadable = 0;
-    const decode = (row: RunRow): RunRecord | undefined => {
-      const run = decodeRunRecord(row.data);
-      if (!run) unreadable++;
-      return run;
+    const decode = (row: RunRow): DecodedRun | undefined => {
+      const decoded = decodeRunRow(row.data);
+      if (!decoded) unreadable++;
+      return decoded;
     };
     const live = this.db!.listLive();
     const owned = this.claimFamilies(live.map(rowFamily), { allowLive: true, wait: true });
     for (const row of live) {
       if (!owned.has(rowFamily(row))) continue;
-      const run = decode(row);
-      if (run) this.adoptLoadedRun(run, { keepLive: this.keepLive }, row);
+      const decoded = decode(row);
+      if (decoded) this.adoptLoadedRun(decoded, { keepLive: this.keepLive }, row);
     }
     const heal = this.db!.listWhere(LEGACY_REFERENCE_HEAL_SQL).filter((row) => !this.held.has(row.id));
     const healable = this.claimFamilies(heal.map(rowFamily));
     for (const row of heal) {
       if (!healable.has(rowFamily(row))) continue;
-      const run = decode(row);
+      const decoded = decode(row);
       // Held only when the repair changed it: the next save writes it, then it leaves.
-      if (run) this.adoptLoadedRun(run, { keepLive: this.keepLive, onlyIfChanged: true }, row);
+      if (decoded) this.adoptLoadedRun(decoded, { keepLive: this.keepLive, onlyIfChanged: true }, row);
     }
     for (const rootId of this.anchoredFamilies()) this.holdFamily(rootId, decode);
     this.releaseUnheldClaims();
@@ -1205,7 +1326,7 @@ export class RunStore extends EventEmitter {
   /** Normalize a record just read from `row` (see `reconcileLoadedRun`) and hold it. Marks the row
    *  dirty only when normalization changed it, so the next save persists exactly the runs open()
    *  rewrote. The caller has claimed the row's family. */
-  private adoptLoadedRun(run: RunRecord, opts: { keepLive?: boolean; onlyIfChanged?: boolean; settle?: boolean }, row: RunRow): void {
+  private adoptLoadedRun({ run, extras }: DecodedRun, opts: { keepLive?: boolean; onlyIfChanged?: boolean; settle?: boolean }, row: RunRow): void {
     const before = loadNormalizedFields(run);
     if (run.delegation?.role === 'root' && (run.status === 'waiting' || run.delegation.wait !== undefined)) {
       refreshHumanAskSummary(run, this.dataDir);
@@ -1215,7 +1336,7 @@ export class RunStore extends EventEmitter {
     const changed = loadNormalizedFields(run) !== before;
     if (opts.onlyIfChanged && !changed) return;
     this.held.set(run.id, run);
-    this.base.set(run.id, { revision: row.revision, data: row.data });
+    this.base.set(run.id, { revision: row.revision, data: row.data, extras });
     if (changed) this.dirty.add(run.id);
   }
 
@@ -1225,12 +1346,12 @@ export class RunStore extends EventEmitter {
    * names a family. The caller has claimed it. `settle` settles its live rows instead of keeping
    * them for recovery (`settleOrphanedRun`).
    */
-  private holdFamily(rootId: string, decode: (row: RunRow) => RunRecord | undefined = (row) => decodeRunRecord(row.data), settle = false): void {
+  private holdFamily(rootId: string, decode: (row: RunRow) => DecodedRun | undefined = (row) => decodeRunRow(row.data), settle = false): void {
     const rows = [this.db!.get(rootId), ...this.db!.listByParent(rootId)];
     for (const row of rows) {
       if (!row || this.held.has(row.id) || this.deleted.has(row.id)) continue;
-      const run = decode(row);
-      if (run) this.adoptLoadedRun(run, { keepLive: this.keepLive, settle }, row);
+      const decoded = decode(row);
+      if (decoded) this.adoptLoadedRun(decoded, { keepLive: this.keepLive, settle }, row);
     }
   }
 
@@ -1422,11 +1543,12 @@ export class RunStore extends EventEmitter {
   }
 
   private decodeCold(row: RunRow): RunRecord | undefined {
-    const run = decodeRunRecord(row.data);
-    if (!run) return undefined;
+    const decoded = decodeRunRow(row.data);
+    if (!decoded) return undefined;
+    const { run, extras } = decoded;
     if (this.coldBase.size === 0) queueMicrotask(() => this.coldBase.clear());
     const family = rowFamily(row);
-    this.coldBase.set(row.id, { revision: row.revision, data: row.data, owned: this.claimed.has(family) || this.pendingClaims.has(family) });
+    this.coldBase.set(row.id, { revision: row.revision, data: row.data, extras, owned: this.claimed.has(family) || this.pendingClaims.has(family) });
     reconcileLoadedRun(run, { keepLive: this.keepLive });
     rescopeRun(run, this.repoHandle);
     return run;
@@ -1436,7 +1558,7 @@ export class RunStore extends EventEmitter {
   private holdDecoded(run: RunRecord): RunRecord {
     const read = this.coldBase.get(run.id);
     this.held.set(run.id, run);
-    if (read) this.base.set(run.id, { revision: read.revision, data: read.data });
+    if (read) this.base.set(run.id, storedRow(read));
     return run;
   }
 
@@ -1839,6 +1961,7 @@ export class RunStore extends EventEmitter {
     clientRequestHash?: string;
     steps: Array<Pick<StepState, 'id' | 'name' | 'kind'>>;
   }): RunRecord {
+    if (this.openFailure) throw this.openFailure;
     const run = this.buildRun(input, randomUUID());
     // A new family, so nobody else can hold it; claimed before anything (an NDJSON event) is written.
     if (this.db && !this.claimFamilies([run.id]).has(run.id)) throw new RunWriteRefusedError(run.id, 'foreign');
@@ -2338,7 +2461,7 @@ export class RunStore extends EventEmitter {
    * subscribers all see the store as it was.
    */
   private commitIndex(staged: ReadonlyMap<string, RunRecord | null>, source?: 'delegation-checkpoint'): void {
-    if (!this.db) throw new Error('runs database unavailable: nothing can be saved');
+    if (!this.db) throw this.openFailure ?? new Error('runs database unavailable: nothing can be saved');
     this.assertWritable(staged);
     this.persist(staged);
     // Preserve existing record references, but expose the entire transaction before its first event.
@@ -3350,7 +3473,7 @@ export class RunStore extends EventEmitter {
    *  and by the revision this store last saw (kept in `base` until the delete is written). */
   private markDeleted(id: string, family: string): void {
     const read = this.coldBase.get(id);
-    if (!this.base.has(id) && read) this.base.set(id, { revision: read.revision, data: read.data });
+    if (!this.base.has(id) && read) this.base.set(id, storedRow(read));
     this.dirty.delete(id);
     this.deleted.add(id);
     this.deletedFamilies.set(id, family);
@@ -3408,7 +3531,7 @@ export class RunStore extends EventEmitter {
   }
 
   /** Debounced so token-usage updates don't rewrite a row per event. Nothing to schedule without
-   *  a database: a store that could not open one, or a closed one, writes nothing. */
+   *  a database: a `RunStore.unavailable` store, or a closed one, writes nothing. */
   private scheduleSave(): void {
     if (this.saveTimer || !this.db) return;
     this.saveTimer = setTimeout(() => {
@@ -3436,15 +3559,21 @@ export class RunStore extends EventEmitter {
     const upserts: RunRowInput[] = [];
     const deletes: string[] = [];
     const families = new Map<string, string>();
+    const extras = new Map<string, RawExtras | undefined>();
+    const encode = (run: RunRecord) => {
+      const encoded = encodeRawRecord(run, (this.base.get(run.id) ?? this.coldBase.get(run.id))?.extras);
+      extras.set(run.id, encoded.extras);
+      upserts.push(encodeRunRow(run, encoded.data));
+    };
     for (const [id, next] of staged) {
-      if (next) upserts.push(encodeRunRow(next));
+      if (next) encode(next);
       else deletes.push(id);
       families.set(id, next ? familyKey(next) : this.familyOf(id));
     }
     for (const id of this.dirty) {
       const run = this.held.get(id);
       if (!run || staged.has(id)) continue;
-      upserts.push(encodeRunRow(run));
+      encode(run);
       families.set(id, familyKey(run));
     }
     for (const id of this.deleted) {
@@ -3467,7 +3596,7 @@ export class RunStore extends EventEmitter {
       this.claimed.set(family, generation);
       this.pendingClaims.delete(family);
     }
-    for (const row of upserts) this.base.set(row.id, { revision: commit.revisions.get(row.id)!, data: row.data });
+    for (const row of upserts) this.base.set(row.id, { revision: commit.revisions.get(row.id)!, data: row.data, extras: extras.get(row.id) });
     for (const id of deletes) {
       this.base.delete(id);
       this.deletedFamilies.delete(id);
@@ -3545,14 +3674,15 @@ export class RunStore extends EventEmitter {
         this.claimed.delete(family);
         this.pendingClaims.delete(family);
       }
-      const current = conflict.current ? decodeRunRecord(conflict.current.data) : undefined;
+      const decoded = conflict.current ? decodeRunRow(conflict.current.data) : undefined;
+      const current = decoded?.run;
       const held = this.held.get(conflict.id);
       if (current && conflict.current) {
         // The other writer's record as it stands, normalized only as a live owner's run would be.
         reconcileLoadedRun(current, { keepLive: true });
         rescopeRun(current, this.repoHandle);
         if (held) replaceRecord(held, current);
-        this.base.set(conflict.id, { revision: conflict.current.revision, data: conflict.current.data });
+        this.base.set(conflict.id, { revision: conflict.current.revision, data: conflict.current.data, extras: decoded!.extras });
         this.emit('run', held ?? current);
       } else {
         this.held.delete(conflict.id);

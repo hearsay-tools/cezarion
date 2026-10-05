@@ -219,6 +219,34 @@ describe('RunDatabase', () => {
     expect(db.getMeta('owner')).toBeUndefined();
   });
 
+  it('writes nothing when the onlyIfMetaAbsent key is there once it holds the write lock (#779)', () => {
+    const db = openDb();
+    const first = db.transaction({ upserts: [row('a')], deletes: [], meta: { [RUNS_IMPORT_COMPLETE_KEY]: 'one' }, onlyIfMetaAbsent: RUNS_IMPORT_COMPLETE_KEY });
+    expect(first.skipped).toBe(false);
+    let ran = false;
+    const second = db.transaction({
+      upserts: [row('a', { status: 'cancelled' }), row('b')], deletes: [], meta: { [RUNS_IMPORT_COMPLETE_KEY]: 'two' },
+      onlyIfMetaAbsent: RUNS_IMPORT_COMPLETE_KEY, beforeCommit: () => { ran = true; },
+    });
+    expect(second).toMatchObject({ skipped: true, revisions: new Map() });
+    expect(ran).toBe(false);
+    expect(db.listAll().map((r) => [r.id, r.status])).toEqual([['a', 'done']]);
+    expect(db.getMeta(RUNS_IMPORT_COMPLETE_KEY)).toBe('one');
+    // The lock was let go: the next writer is not kept waiting.
+    expect(RunDatabase.open(path).transaction({ upserts: [row('c')], deletes: [] }).skipped).toBe(false);
+  });
+
+  it('runs beforeCommit after every write, and rolls the whole transaction back when it throws (#779)', () => {
+    const db = openDb();
+    expect(() => db.transaction({
+      upserts: [row('a')], deletes: [], meta: { marker: 'x' },
+      beforeCommit: () => { throw new Error('refused at the last moment'); },
+    })).toThrow('refused at the last moment');
+    expect(db.listAll()).toEqual([]);
+    expect(db.getMeta('marker')).toBeUndefined();
+    expect(db.transaction({ upserts: [row('a')], deletes: [], beforeCommit: () => {} }).revisions.get('a')).toBeGreaterThan(0);
+  });
+
   it('persists across close and reopen', () => {
     const first = RunDatabase.open(path);
     first.transaction({ upserts: [row('a'), row('b')], deletes: [], meta: { import: 'complete' } });
@@ -573,6 +601,52 @@ describe('RunDatabase', () => {
       const plain = new TypeError('not sqlite');
       expect(toRunDatabaseError(plain)).toBe(plain);
     });
+  });
+
+  it('leaves a damaged database and its WAL byte-identical when it closes after reading a malformed page (#779)', () => {
+    openDb().transaction({ upserts: [row('a')], deletes: [], meta: { marker: 'x' } });
+    for (const db of open.splice(0)) db.close();
+    // A process that committed more and died without closing: those commits exist only in the WAL.
+    const writer = new DatabaseSync(path);
+    writer.exec('PRAGMA wal_autocheckpoint = 0');
+    const insert = writer.prepare("INSERT INTO runs (id, created_at, status, archived, live, revision, data, summary) VALUES (?, '2026-10-01', 'done', 0, 0, 1, '{}', '{}')");
+    for (let i = 0; i < 50; i++) insert.run(`wal-only-${i}`);
+    const crashed = (name: string) => {
+      mkdirSync(join(dir, name));
+      for (const suffix of ['', '-wal', '-shm']) writeFileSync(join(dir, name, `${RUNS_DB_FILE}${suffix}`), readFileSync(`${path}${suffix}`));
+      const at = join(dir, name, RUNS_DB_FILE);
+      // The meta table's first page, which the WAL does not hold, overwritten with garbage.
+      const raw = new DatabaseSync(path, { readOnly: true });
+      const root = raw.prepare("SELECT rootpage FROM sqlite_master WHERE name = 'meta'").get()!.rootpage as number;
+      const size = raw.prepare('PRAGMA page_size').get()!.page_size as number;
+      raw.close();
+      const bytes = readFileSync(at);
+      bytes.fill(0xab, (root - 1) * size, root * size);
+      writeFileSync(at, bytes);
+      return at;
+    };
+    const guarded = crashed('guarded');
+    const plain = crashed('plain');
+    writer.close();
+    const files = (at: string) => ['', '-wal', '-shm'].map((suffix) => readFileSync(`${at}${suffix}`).toString('base64'));
+    const before = files(guarded);
+
+    const db = RunDatabase.open(guarded);
+    expect(() => db.getMeta('marker')).toThrow(RunDatabaseCorruptError);
+    db.close();
+    // The database and the WAL are exactly as they were. The SHM stays too; its contents are
+    // SQLite's index of the WAL, which any connection refreshes when it opens (this copy was taken
+    // under a live writer). The store test with a writer that really died keeps all three intact.
+    const [database, wal] = files(guarded);
+    expect([database, wal]).toEqual(before.slice(0, 2));
+    expect(readdirSync(join(dir, 'guarded')).sort()).toEqual([RUNS_DB_FILE, `${RUNS_DB_FILE}-shm`, `${RUNS_DB_FILE}-wal`]);
+
+    // What the guard prevents: the last plain close checkpoints into the damaged file and deletes
+    // the WAL that held the only copy of the later commits.
+    const unguarded = new DatabaseSync(plain);
+    expect(() => unguarded.prepare("SELECT value FROM meta WHERE key = 'marker'").get()).toThrow(/malformed/);
+    unguarded.close();
+    expect(readdirSync(join(dir, 'plain'))).toEqual([RUNS_DB_FILE]);
   });
 
   describe('read-only open', () => {
