@@ -43,7 +43,7 @@ Manual-dispatch review runs use the full matrix and bypass docs-only and infra-o
 
 - Every mutating API route parses its body with `schema.safeParse(await c.req.json().catch(() => null))` and returns `{ error: issues.join('; ') }` with 400 on failure — the established pattern in `packages/cezar/src/server/server.ts`. New routes must follow it; a route that trusts `c.req.json()` raw is a blocker.
 - External process output crossing into the app (`gh … --json` in `packages/cezar/src/server/github.ts`, agent CLI streams) is zod-validated at the boundary, extras stripped.
-- Persisted files read back in (`runs.json`, `config.json`, workflow YAML) go through their schema; parse failure degrades to a sane default, never a crash.
+- Persisted files read back in (`config.json`, workflow YAML, the run records in `runs.db`) go through their schema; parse failure degrades to a sane default, never a crash. The one exception is the run store itself: a `runs.db` that cannot be opened is never treated as an empty history (`RunStoreOpenError`, the project answers 409), and a damaged file is left as found.
 - Schemas carry the limits (`.max()` on strings/arrays, image size caps, `variants` 1–3, steps ≤ 8). New inputs need explicit bounds — unbounded user input into a file write or a spawned process is a blocker.
 
 ### Graceful degradation

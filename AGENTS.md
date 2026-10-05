@@ -277,7 +277,7 @@ row's value when the thing it names changes, rather than its label.
 | Code host | GitHub |
 | CI provider | GitHub Actions |
 | Issue tracker | GitHub Issues |
-| Stack | TypeScript (Node ≥20), npm workspaces; Hono + Zod server; React 19 + Vite + Tailwind v4 cockpit |
+| Stack | TypeScript (Node ≥24.15), npm workspaces; Hono + Zod server; React 19 + Vite + Tailwind v4 cockpit |
 | Verification | `npm run typecheck`, `npm test`, `npm run test:unit`, `npm run build`, `npm run test:package`, `npm run test:e2e:local` |
 | Automated reviewer | `AUTOMATED_REVIEWER=codex` |
 | Automated review rounds | `AUTOMATED_REVIEW_ROUNDS` (default 3) |
