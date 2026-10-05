@@ -154,7 +154,7 @@
           <button id="retry" class="button" type="button">Try again</button>
         </div>
         <div id="start-options"><button class="button primary" id="local-start">Start local cockpit</button>
-        <form id="connect" style="margin-top:20px"><label for="endpoint">Or connect to a server</label><br><input id="endpoint" type="url" required placeholder="https://cezarion.example.com" style="margin-top:8px;padding:8px;width:280px"><button class="button">Connect</button></form><p id="error" role="alert"></p><p>HTTPS, or a loopback address for an SSH tunnel. Remote sessions have no native permissions.</p></div>
+        <form id="connect" style="margin-top:20px"><label for="endpoint">Or connect to a server</label><br><input id="endpoint" type="url" required placeholder="https://cezarion.example.com" style="margin-top:8px;padding:8px;width:280px"><br><label for="sign-in-origin">Trusted sign-in origin (optional)</label><br><input id="sign-in-origin" type="url" placeholder="https://auth.example.com" autocomplete="off" style="margin-top:8px;padding:8px;width:280px"><p>Only add a sign-in server you trust with your login.</p><button class="button">Connect</button></form><p id="error" role="alert"></p><p>HTTPS, or a loopback address for an SSH tunnel. Remote sessions have no native permissions.</p></div>
         <p id="hint" class="hidden"></p>
       </div>
     </main>

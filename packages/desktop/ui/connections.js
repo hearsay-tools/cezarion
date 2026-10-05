@@ -4,7 +4,7 @@ document.getElementById('connect').addEventListener('submit', async event => {
   button.disabled = true;
   const error = document.getElementById('error');
   error.textContent = '';
-  try { await window.__TAURI_INTERNALS__.invoke('connect_remote', { endpoint: document.getElementById('endpoint').value }); }
+  try { await window.__TAURI_INTERNALS__.invoke('connect_remote', { endpoint: document.getElementById('endpoint').value, signInOrigin: document.getElementById('sign-in-origin').value || null }); }
   catch (message) { error.textContent = String(message); }
   finally { button.disabled = false; }
 });

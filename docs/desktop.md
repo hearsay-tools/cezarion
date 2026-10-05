@@ -55,9 +55,13 @@ connecting. Use an HTTPS server with a valid certificate and authentication
 provided by its reverse proxy. Cezarion itself has no built-in server auth.
 Do not expose an unauthenticated cockpit on the internet.
 
-Sign in on the remote site's own same-origin login page. Credentials must not
-be embedded in the URL. Cross-origin navigation (including cross-site SSO) is
-blocked, and certificate verification is never disabled. For SSH access:
+Sign in on the remote site’s login page. For a separate identity provider such as
+Authelia, enter its exact HTTPS origin in **Trusted sign-in origin** before
+connecting (for example `https://auth.example.com`). Only the cockpit origin and
+that explicitly trusted sign-in origin may navigate in the remote window. Other
+redirects show a connection error; their destinations are never trusted automatically.
+Credentials must not be embedded in either address. Certificate verification is
+never disabled. The native window title continues to identify the selected cockpit. For SSH access:
 
 ```sh
 ssh -N -L 54321:127.0.0.1:4321 user@server
@@ -71,7 +75,8 @@ Every connection gets an incognito webview with no Tauri capability grants,
 no local shell initialization script and no access to local version switching.
 The native title identifies the selected origin. Sessions are not persisted by
 the app. This does not add a local reverse proxy or weaken server CORS/CSRF rules.
-External HTTPS links open in the system browser. Cross-site identity-provider
+External HTTPS links open in the system browser. Full-page identity-provider
+redirects are supported through the explicit trusted sign-in origin; popup login
 flows and an app-managed Basic Auth credential form are not supported. For the
 installer’s default Basic-Auth reverse proxy, connect through an SSH tunnel to
 the server’s loopback cockpit port; SSH provides the authentication.
