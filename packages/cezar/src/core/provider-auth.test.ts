@@ -1,3 +1,6 @@
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ProviderAuthService,
@@ -552,6 +555,36 @@ describe('omp provider status (omp models --json)', () => {
     ['empty output', { stdout: '', stderr: '', exitCode: 0 }],
   ] satisfies Array<[string, ProviderCommandResult]>)('does not guess from %s', async (_label, result) => {
     await expect(statuses(onlyOmp(result))).resolves.toMatchObject({ omp: { status: 'unknown' } });
+  });
+
+  // Final review #1: `omp models --json` prints ~350 bytes per model, so a user with a few
+  // provider keys (OpenRouter alone lists 561 models on v18.4.11) overflowed execFile's 256 KiB
+  // default and the probe answered `unknown`, hiding a logged-in OMP from every picker. This runs
+  // the REAL default command seam against a fake binary, because the buffer lives there.
+  it.skipIf(process.platform === 'win32')('reads a models list larger than 256 KiB through the real command seam', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cez-omp-status-'));
+    const bin = join(dir, 'omp');
+    writeFileSync(bin, [
+      '#!/usr/bin/env node',
+      "const models = Array.from({ length: 1200 }, (_, i) => ({ provider: 'openrouter', id: `vendor/model-${i}`, name: 'x'.repeat(280) }));",
+      "process.stdout.write(JSON.stringify({ models }) + '\\n');",
+    ].join('\n'));
+    chmodSync(bin, 0o755);
+    const keys = ['CEZ_CLAUDE_BIN', 'CEZ_CODEX_BIN', 'CEZ_OPENCODE_BIN', 'CEZ_PI_BIN', 'CEZ_CURSOR_BIN', 'CEZ_OMP_BIN'] as const;
+    const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+    try {
+      // Every other provider points at a path that cannot exist, so this case never spawns a
+      // real CLI from the developer's PATH.
+      for (const key of keys) process.env[key] = join(dir, 'missing', key);
+      process.env.CEZ_OMP_BIN = bin;
+      const service = new ProviderAuthService();
+      await expect(statuses(service)).resolves.toMatchObject({ omp: { status: 'connected' } });
+    } finally {
+      for (const key of keys) {
+        if (previous[key] === undefined) delete process.env[key]; else process.env[key] = previous[key];
+      }
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('builds its login command from CEZ_OMP_BIN and the `login` subcommand', () => {

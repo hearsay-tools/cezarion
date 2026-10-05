@@ -14,9 +14,15 @@ export interface OmpModelDiscoveryOptions {
 const DEFAULT_DISCOVERY_TIMEOUT_MS = 10_000;
 /** Grace between the probe's SIGTERM and the SIGKILL that follows it. */
 export const KILL_GRACE_MS = 2_000;
-const MAX_MODELS = 500;
-/** Defensive cap on what we buffer from a misbehaving child (characters of stdout). */
-const MAX_OUTPUT_CHARS = 512 * 1_024;
+/**
+ * Ruling R19: volume never makes discovery fail. `omp models --json` prints ~350 bytes per model
+ * and OpenRouter alone lists 561 chat models on v18.4.11, so past this cap the first models in
+ * OMP's own order are kept and the cut is logged once.
+ */
+const MAX_MODELS = 2_000;
+/** Defensive cap on what we buffer from a misbehaving child (characters of stdout): ~6,000
+ *  models at v18.4.11's entry size, well past the model cap. */
+const MAX_OUTPUT_CHARS = 2 * 1_024 * 1_024;
 
 /** The host binary, resolved exactly like `OmpRunner` and the backend probe. */
 export function resolveOmpExecutable(bin?: string): string {
@@ -32,7 +38,8 @@ export function resolveOmpExecutable(bin?: string): string {
  * `unavailable` answer, and `auto` stays selectable either way. The throw messages are stable
  * one-line categories (never the child's output); the catalog does not surface them to the
  * client, they are for logs and direct callers. No config is read or written; the child is
- * short-lived and bounded by a deadline, a stdout cap and a model cap.
+ * short-lived and bounded by a deadline and a stdout cap; a model list past the model cap is
+ * cut, never refused.
  */
 export async function discoverOmpModels(options: OmpModelDiscoveryOptions): Promise<ModelOption[]> {
   // `OmpRunner` swaps in the bundled mock under CEZ_DRY_RUN=1. Without an explicit binary, skip
@@ -137,7 +144,10 @@ export function parseOmpModels(stdout: string): ModelOption[] {
     if (typeof provider !== 'string' || !provider || typeof id !== 'string' || !id) continue;
     const modelId = `${provider}/${id}`;
     if (ids.has(modelId)) continue;
-    if (models.length >= MAX_MODELS) throw new Error('OMP model discovery exceeded the size limit');
+    if (models.length >= MAX_MODELS) {
+      console.warn(`[cez] OMP lists more than ${MAX_MODELS} models; the picker keeps the first ${MAX_MODELS} in OMP's order`);
+      break;
+    }
     ids.add(modelId);
     const effortLevels = effortLevelsOf(entry.thinking);
     models.push({

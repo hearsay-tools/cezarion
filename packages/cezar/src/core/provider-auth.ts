@@ -44,7 +44,15 @@ export type RunProviderCommand = (
    *  2026-07-29-agent-profiles). Optional so every existing caller and the test kit keep their
    *  three-argument signature; absent means the default profile, which needs nothing. */
   env?: Record<string, string>,
+  /** Per-descriptor command options. Optional and passed only by a descriptor that declares
+   *  one, so every other provider's probe keeps its exact call shape. */
+  options?: ProviderCommandOptions,
 ) => Promise<ProviderCommandResult>;
+
+export interface ProviderCommandOptions {
+  /** stdout/stderr ceiling in bytes; absent means the 256 KiB default. */
+  maxBuffer?: number;
+}
 
 /**
  * The explicit environment lock delegates model and credential configuration
@@ -67,7 +75,11 @@ interface ProviderDescriptor {
   loginArgs: readonly string[];
   installHint: string;
   parse: (result: ProviderCommandResult) => ProviderConnectionState | null;
+  /** A larger output ceiling for a status command whose output grows with the user's setup. */
+  maxBuffer?: number;
 }
+
+const DEFAULT_MAX_BUFFER = 256 * 1024;
 
 const COMMAND_TIMEOUT_MS = 10_000;
 /**
@@ -327,6 +339,10 @@ const DESCRIPTORS: readonly ProviderDescriptor[] = [
     loginArgs: ['login'],
     installHint: 'Install OMP (curl -fsSL https://omp.sh/install | sh), then run `omp login`.',
     parse: parseOmpStatus,
+    // `omp models --json` lists every model of every configured provider at ~350 bytes each:
+    // OpenRouter alone is 561 models (~200 KB) on v18.4.11, and four keys pass 256 KiB. An
+    // overflow answers `unknown`, which hides a logged-in OMP from every picker (Ruling R19).
+    maxBuffer: 4 * 1024 * 1024,
   },
 ];
 
@@ -335,6 +351,7 @@ function defaultRunProviderCommand(
   args: readonly string[],
   timeoutMs: number,
   env?: Record<string, string>,
+  options?: ProviderCommandOptions,
 ): Promise<ProviderCommandResult> {
   return new Promise((resolve) => {
     execFile(
@@ -343,7 +360,7 @@ function defaultRunProviderCommand(
       {
         timeout: timeoutMs,
         windowsHide: true,
-        maxBuffer: 256 * 1024,
+        maxBuffer: options?.maxBuffer ?? DEFAULT_MAX_BUFFER,
         // Inherit, then override: an auth probe is a short read-only CLI call, not a spawned
         // agent, so it does not go through `buildChildEnv`'s allowlist — the CLI still needs the
         // host's PATH and HOME to run at all. `env` is only ever a profile's config-dir variable.
@@ -871,9 +888,11 @@ export class ProviderAuthService {
     // path for no gain.
     const env = configDir ? profileEnv(descriptor.id, configDir) : undefined;
     try {
-      result = await (env === undefined
-        ? this.runCommand(descriptor.executable(), descriptor.statusArgs, COMMAND_TIMEOUT_MS)
-        : this.runCommand(descriptor.executable(), descriptor.statusArgs, COMMAND_TIMEOUT_MS, env));
+      result = await (descriptor.maxBuffer !== undefined
+        ? this.runCommand(descriptor.executable(), descriptor.statusArgs, COMMAND_TIMEOUT_MS, env, { maxBuffer: descriptor.maxBuffer })
+        : env === undefined
+          ? this.runCommand(descriptor.executable(), descriptor.statusArgs, COMMAND_TIMEOUT_MS)
+          : this.runCommand(descriptor.executable(), descriptor.statusArgs, COMMAND_TIMEOUT_MS, env));
     } catch {
       return { provider: descriptor.id, status: 'unknown', hint: UNKNOWN_HINT };
     }

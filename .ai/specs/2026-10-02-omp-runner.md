@@ -113,7 +113,7 @@ errorMessage}`; `tool_execution_start{toolCallId, toolName, args}`,
 |---|---|
 | `packages/cezar/src/core/omp-runner.ts` | `OmpRunner` implementing `AgentRunner`/`AgentSession`: one persistent `omp --mode rpc` child per session; `OMP_SPEC_SUPPORT`; `inputDelivery`; v1 `AgentEvent` stream; drives the mapper for v2 |
 | `packages/cezar/src/core/omp-ui-mapper.ts` | Pure OMP RPC → v2 `UiEvent` mapper with explicit immutable state; never throws; owns the turn boundary, provider-error latch, sub-agent nesting, result-based diffs and plan |
-| `packages/cezar/src/core/omp-model-catalog.ts` | `discoverOmpModels({ cwd })` over `omp models --json`; 10 s, 512 KB stdout, 500 models; throws on every failure |
+| `packages/cezar/src/core/omp-model-catalog.ts` | `discoverOmpModels({ cwd })` over `omp models --json`; Discovery caps: 10 s, 2 MiB stdout, 2000 models (past the model cap the first 2000 in OMP's order are kept with one log line, never a throw; Ruling R19); throws on every other failure |
 | `packages/cezar/scripts/mock-omp-rpc.mjs` | Offline mock in OMP's own wire shape (`ready`, ids, `prompt_result`, `session_settled`, sub-agent frames, todo/edit result details) for `CEZ_DRY_RUN=1` and both parity matrices |
 | `packages/cezar/scripts/omp-ci-wait.mjs` | OMP extension registering `cezar_wait_for_ci` through the shared CI client (`../dist/ci-wait/mcp.js`, `src` in a dev checkout, like `pi-ci-wait.mjs`) |
 | `packages/cezar/scripts/omp-restrict-delegation.yml` | Static `--config` overlay: `tools: { approval: { task: deny } }` |

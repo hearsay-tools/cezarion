@@ -152,10 +152,33 @@ describe('parseOmpModels', () => {
     expect(model).toEqual({ id: 'a/x', label: 'x', description: 'a' });
   });
 
-  it('caps the catalog at 500 models', () => {
-    const models = Array.from({ length: 501 }, (_, i) => ({ provider: 'p', kind: 'chat', id: `m${i}` }));
-    expect(() => parseOmpModels(JSON.stringify({ models }))).toThrow('OMP model discovery exceeded the size limit');
-    expect(parseOmpModels(JSON.stringify({ models: models.slice(0, 500) }))).toHaveLength(500);
+  // Ruling R19 (final review #2): OpenRouter alone lists 561 chat models on v18.4.11, so a cap
+  // that throws made one common key turn the whole catalog `unavailable`. Volume never throws:
+  // the first 2000 in OMP's own order are kept and the cut is logged once.
+  it('keeps the first 2000 models in OMP order and logs the cut once', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const models = Array.from({ length: 2_101 }, (_, i) => ({ provider: 'p', kind: 'chat', id: `m${i}` }));
+      const parsed = parseOmpModels(JSON.stringify({ models }));
+      expect(parsed).toHaveLength(2_000);
+      expect(parsed[0]!.id).toBe('p/m0');
+      expect(parsed.at(-1)!.id).toBe('p/m1999');
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0]![0])).toContain('2000');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('keeps a 561-model OpenRouter-sized catalog whole, without a log line', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const models = Array.from({ length: 561 }, (_, i) => ({ provider: 'openrouter', kind: 'chat', id: `v/m${i}` }));
+      expect(parseOmpModels(JSON.stringify({ models }))).toHaveLength(561);
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it.each([
@@ -230,9 +253,22 @@ describe('discoverOmpModels', () => {
         fake.close(3);
       }).promise,
     ).rejects.toThrow('OMP model discovery failed (exit 3)');
-    const big = discover((fake) => fake.say('x'.repeat(512 * 1024 + 1)));
+    const big = discover((fake) => fake.say('x'.repeat(2 * 1024 * 1024 + 1)));
     await expect(big.promise).rejects.toThrow('OMP model discovery returned malformed output');
     expect(big.fake.signals).toEqual(['SIGTERM']);
+  });
+
+  // Ruling R19: ~350 bytes per model on v18.4.11, so 1,500 models already pass the old 512 KiB
+  // stdout cap. The 2 MiB cap admits the 2000-model cut with room to spare.
+  it('reads a listing larger than 512 KiB', async () => {
+    const models = Array.from({ length: 1_500 }, (_, i) => ({ provider: 'openrouter', kind: 'chat', id: `v/m${i}`, name: 'n'.repeat(380) }));
+    const stdout = JSON.stringify({ models });
+    expect(stdout.length).toBeGreaterThan(512 * 1024);
+    const { promise } = discover((fake) => {
+      fake.say(stdout);
+      fake.close(0);
+    });
+    await expect(promise).resolves.toHaveLength(1_500);
   });
 
   it('returns [] under CEZ_DRY_RUN=1 without spawning', async () => {
