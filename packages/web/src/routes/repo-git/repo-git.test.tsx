@@ -146,7 +146,7 @@ function stubFetch(overrides: Record<string, () => Response | Promise<Response>>
       if (override) return override()
       if (method === 'GET' && path === '/api/v1/repo') return jsonResponse(REPO)
       if (method === 'GET' && path === '/api/v1/repo/branches') return jsonResponse(BRANCHES)
-      if (method === 'GET' && path === '/api/v1/runs') return jsonResponse([])
+      if (method === 'GET' && path === '/api/v1/run-summaries') return jsonResponse([])
       if (method === 'GET' && path === '/api/v1/repo/pull') return jsonResponse({ branches: ['feature', 'main'] })
       if (method === 'GET' && path === '/api/v1/repo/changes') return jsonResponse(CHANGES)
       if (method === 'GET' && path === '/api/v1/repo/commit/abc1234?structured=1') return jsonResponse(COMMIT)

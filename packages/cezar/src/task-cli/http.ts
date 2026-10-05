@@ -31,6 +31,11 @@ export function threadUrl(cockpit: Cockpit, runId: string): string {
   return `${cockpit.origin}/p/${encodeURIComponent(cockpit.projectId)}/tasks/${encodeURIComponent(runId)}`;
 }
 
+/** Reachable for every known run, including one without seeded handoff contents. */
+export function handoffUrl(cockpit: Cockpit, runId: string): string {
+  return `${cockpit.origin}/api/v1/p/${encodeURIComponent(cockpit.projectId)}/runs/${encodeURIComponent(runId)}/handoff`;
+}
+
 /** Enforce a byte limit where the route has a bounded response, including error bodies. */
 async function boundedText(response: Response, limit: number): Promise<string> {
   if (Number(response.headers.get('content-length')) > limit) {
@@ -82,10 +87,11 @@ export async function fetchJson(url: string, init: { method?: string; body?: unk
 
 /** A project-scoped route: `path` starts with `/`, relative to `/api/v1/p/:projectId`. */
 export function request(cockpit: Cockpit, path: string, init: { method?: string; body?: unknown; timeoutMs?: number } = {}): Promise<HttpResult> {
-  // GET /runs is the existing unpaginated full history. Even 32 valid 100k-character tasks
-  // exceed the ordinary cap. Match the cockpit's full-list read rather than making list/wait
-  // fail as history grows; retain deadlines, error-body caps and every other route's cap.
-  const fullRunList = path === '/runs' && (init.method ?? (init.body === undefined ? 'GET' : 'POST')) === 'GET';
+  // GET /runs (`list --full`) and GET /run-summaries (#817) are unpaginated full histories. Even
+  // 32 valid 100k-character tasks exceed the ordinary cap on /runs, and summaries grow with run
+  // count. Match the cockpit's list read rather than making list/wait fail as history grows;
+  // retain deadlines, error-body caps and every other route's cap.
+  const fullRunList = (path === '/runs' || path === '/run-summaries') && (init.method ?? (init.body === undefined ? 'GET' : 'POST')) === 'GET';
   return fetchJson(`${cockpit.api}${path}`, {
     ...init,
     ...(fullRunList ? { responseLimitBytes: Infinity } : {}),

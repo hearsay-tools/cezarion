@@ -854,7 +854,7 @@ describe('useRuns', () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
     expect(result.current.data).toHaveLength(1)
     expect(result.current.data?.[0]?.title).toBe('Fix it')
-    expect(fetchMock.mock.calls.at(-1)?.[0]).toBe('/api/v1/runs')
+    expect(fetchMock.mock.calls.at(-1)?.[0]).toBe('/api/v1/run-summaries')
   })
 })
 

@@ -420,10 +420,22 @@ server stopped, and `CEZ_HOME` selects which workspace they operate on.
 
 Settings split along the same line: **General** (the project's folder, its
 registry facts, its parallel-task ceiling, and Remove), **Agents**, **Agent config**,
-**Worktrees**, **Bookmarklets** and **Prompt templates** describe one
+**Worktrees**, **Sidebar**, **Bookmarklets** and **Prompt templates** describe one
 repo and live under `/p/<projectId>/settings`; **Appearance**,
 **Notifications**, **Resources**, **Skills**, **Agent accounts** and **Projects**
 are yours or the machine's and live at `/settings/global`.
+
+**Settings → Sidebar** controls this project's task rows on desktop and mobile.
+Set **Overall**, **Needs You**, **Finished**, and **Working** to a positive whole
+number or **Unlimited**. Defaults are 10 overall and Unlimited for each section.
+The overall budget is allocated in section order (Needs You, Finished, Working),
+and each section must also fit its own limit. Unlimited removes only its selected
+constraint. Pinned rows and groups containing pins bypass both budgets; a grouped
+task counts as one row. Archived uses only the overall limit, with no pin exemption.
+Save applies the preferences to this project and keeps them after a reload.
+Refreshed preferences update an untouched form; unsaved edits stay in place.
+Malformed stored sidebar limits fall back field by field to these defaults,
+while valid limits and unrelated preferences are preserved.
 
 On desktop, Settings replaces the sidebar task list with two groups: **This project**
 and **Global · every project**. Each group includes General and its available sections;
@@ -608,7 +620,7 @@ cez worker stop <worker-id>
 cez worker destroy <worker-id>
 ```
 
-Use `cez worker --help` to list operations and flags, or `cez worker <operation> --help` for one operation. Explicit help prints human-readable text and exits successfully without an active delegation session. Commands otherwise return bounded JSON and a nonzero exit on failure or incomplete cleanup. Spawn requires a committed baseline (`parent-head` or an explicit ref) and pins its SHA at acceptance; dirty parent edits are excluded. Optional `--context '<text>'` or `--context-file <UTF-8-file>` supplies selected context, not the parent's conversation. The two flags are mutually exclusive, and combined task/context text is limited to 100,000 characters. The API also accepts up to 32 pinned-baseline file or parent-attachment references, with at most 8 MiB of copied attachments. Inspect reports worker-local input locations. Reuse a request ID only with the same task, baseline, context, backend, model, effort and workflow when retrying a lost response. There are at most 32 accepted creations per parent, counting destroyed workers, and 32 undelivered steering messages per worker.
+Use `cez worker --help` to list operations and flags, or `cez worker <operation> --help` for one operation. Explicit help prints human-readable text and exits successfully without an active delegation session. Commands otherwise return bounded JSON and a nonzero exit on failure or incomplete cleanup. Spawn requires a committed baseline (`parent-head` or an explicit ref) and pins its SHA at acceptance; dirty parent edits are excluded. Optional `--context '<text>'` or `--context-file <UTF-8-file>` supplies selected context, not the parent's conversation. The two flags are mutually exclusive, and combined task/context text is limited to 100,000 characters. The API also accepts up to 32 pinned-baseline file or parent-attachment references, with at most 8 MiB of copied attachments. Inspect reports worker-local input locations. Reuse a request ID only with the same task, baseline, context, backend, model, effort and workflow when retrying a lost response. A parent holds at most 32 outstanding workers: accepted, live, or not yet verifiably destroyed. A verified destroy (`cez worker destroy`, or **Clean up** on a finished worker in the cockpit's Workers list) frees a slot; incomplete cleanup keeps its slot until a retry completes. A parent can create at most 1,024 workers in total; past that, start a new task. These limits bound disk resources and runaway spawning, not spending: a worker can be resumed with Continue, and destroying it does not undo charges already made. Cost stays bounded by `maxParallel` and by stopping the parent. There are at most 32 undelivered steering messages per worker.
 
 An incomplete destroy reports the remaining resources and a reason. Cezar retries that recorded request after a delay, including after the project's context recovers on server restart. It removes the owned checkout only after process termination and ownership are verified. If the reason persists, inspect the worker process, Git worktree lock and ownership receipt; correct the blocker and use `cez worker destroy <worker-id>` or the cockpit Destroy action to retry immediately. Cezar leaves ambiguous or replaced resources in place for operator review.
 
@@ -652,10 +664,22 @@ Fix the `cez task` docs. Keep $(example) and "quotes" literal.
 EOF
 )
 cez task wait "$id" --timeout-seconds 900                     # 0 done/review/needs you · 1 failed · 3 timeout
-cez task status "$id"                                         # slim JSON: status, attention, question, branch…
-cez task send "$id" 'Use the retry helper instead'            # queued, delivered, or --resume to reopen
+cez task list                                                # currentStepId (running), pullRequestUrl (done/review), capped error (failed)
+cez task status "$id"                                       # slim JSON: status, attention, question, branch, handoffUrl…
+cez task send "$id" 'Use the retry helper instead'            # delivered live, queued before start
+cez task send "$id" --resume 'Continue with the next step'    # resumed: reopen a settled session
 cez task log "$id" --follow --timeout-seconds 300             # JSON lines until it ends
 ```
+
+`list --status` accepts comma-separated values: `queued`, `running`, `waiting`, `review`,
+`done`, `failed`, `cancelled`. Default rows include only the next-action field for their status
+when defined; errors use the first line, at most 200 characters including `…` when cut.
+Default `status` includes `handoffUrl`, a URL to the existing handoff endpoint even before
+contents are seeded, and keeps the full error. `--full` still prints the contract unchanged.
+To answer a pending `question`, use the same `send` with the answer text. Without `--resume`,
+a closed session returns `delivery: not-delivered` and the `next` command. For multi-line or
+shell-sensitive messages use `send <id> --text-file <path|->` (`-` reads stdin); the quoting
+rules below apply to messages too.
 
 Use `--task-file PATH` to read a saved task (for example, `cez task start --task-file task.md`),
 or `--task-file -` to read stdin as above. The quoted heredoc delimiter (`<<'EOF'`) keeps
@@ -821,7 +845,7 @@ Useful environment variables:
 | `CEZ_CLAUDE_SETTING_SOURCES` | When set, Claude agent runs also pass `--setting-sources <value>` (e.g. `user,project,local`). Unset or empty omits the flag. Provider verification is never given this flag. |
 | `CEZ_FOLLOWUPS=1` | Turn on the global follow-up **Inbox**: agents are asked to leave follow-ups in `todos.json` when they finish, and the Inbox view appears. Off by default — each task's own **Notes** handoff journal runs either way. |
 | `CEZ_AUTOMATIONS=1` | Turn on **automations** (GitHub polls and schedules): the Automations view appears and cezar runs each enabled automation while it is open, launching an ordinary task per match or per occurrence. A schedule (daily, weekdays, weekly, every N hours, in the server's time zone) needs no GitHub remote; a GitHub automation polls on its interval. Off by default, and only the exact value `1` enables it — without it nothing polls or fires, the automations endpoints answer `409`, and the nav item is absent. Read at boot, so restart after changing it; definitions, receipts and high-watermarks are retained, so unsetting it and restarting restores the feature without migration or data loss. |
-| `CEZ_PREVIEW=1` | Turn on **live preview** (experimental): agents register a dev server with the `cezar_preview_serve` tool, and the cockpit opens it in a headless Chromium on the host, docked next to the task. cezar runs a registered command only after you press Run and open. Off by default, and only the exact value `1` enables it — without it the tool is not listed, its route and the preview WebSocket refuse, and `capabilities.preview` is `false`. Read at boot, so restart after changing it. |
+| `CEZ_PREVIEW=1` | Turn on **live preview** (experimental): agents register a dev server with the `cezar_preview_serve` tool, and the cockpit opens it in a headless Chromium on the host, docked next to the task. cezar first runs a registered command after you press Run and open. Agents can then use `cezar_preview_stop({ port, restart?: boolean })` to stop or restart their own Cezar-started server with that unchanged approval; changed command, cwd or path needs Run and open again. Adopted servers cannot be stopped by this tool. Off by default, and only the exact value `1` enables it — without it the tool is not listed, its route and the preview WebSocket refuse, and `capabilities.preview` is `false`. Read at boot, so restart after changing it. |
 | `CEZ_PREVIEW_NO_SANDBOX=1` | Launch the preview's Chromium with `--no-sandbox`. Off by default and never added automatically, not even for root or in a container; use it only where Chromium's sandbox cannot start, and only for pages you trust. Only the exact value `1` applies. Read at boot. |
 | `CEZ_AUTOSAVE=1` | Re-enable the periodic (90 s) autosave commit in task worktrees. Off by default (#471) — turn-end and pre-PR flushes always run, so branches still end complete. Every autosave names its trigger in the commit subject (`cezar autosave (periodic)` vs `(turn end)` / `(run finalize)` / `(pre-PR)`), so the flushes you keep are distinguishable from the timer you disabled. |
 | `CEZ_CLAUDE_BIN=/path/to/claude` | Override which `claude` binary is used. |

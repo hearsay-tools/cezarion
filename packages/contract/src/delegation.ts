@@ -146,12 +146,13 @@ export const delegationStateSchema = z.discriminatedUnion('role', [
     role: z.literal('root'),
     conversation: conversationStateSchema.optional(),
     permissions: permissionsSchema,
-    receipts: z.array(workerCreationReceiptSchema).max(32).refine(receipts =>
+    // #816: bounded by the creation ceiling (WORKER_CREATION_LIMIT), not by capacity.
+    receipts: z.array(workerCreationReceiptSchema).max(1_024).refine(receipts =>
       new Set(receipts.map(receipt => receipt.requestId)).size === receipts.length &&
       new Set(receipts.map(receipt => receipt.workerId)).size === receipts.length),
     wait: workerWaitSchema.optional(),
     lastWait: workerWaitSchema.optional(),
-    results: z.array(workerResultReferenceSchema).max(32).refine(results => new Set(results.map(result => result.workerId)).size === results.length).optional(),
+    results: z.array(workerResultReferenceSchema).max(1_024).refine(results => new Set(results.map(result => result.workerId)).size === results.length).optional(),
     finishRequestedAt: z.iso.datetime().optional(),
     historyDeletion: z.literal('pending').optional(),
     completion: z.object({ phase: z.enum(['waiting', 'attention']), waitId: z.uuid().optional() }).strict().optional(),
@@ -176,9 +177,15 @@ export type DelegationState = z.infer<typeof delegationStateSchema>;
 /** Slim list/palette projection. Never copies resource paths, permissions or receipts. */
 export const runDelegationSummarySchema = z.discriminatedUnion('role', [
   delegationStateSchema.options[0].pick({ role: true }).strip().extend({
-    wait: workerWaitSchema.pick({ phase: true, requestIds: true }).strip().optional(),
+    // The awaited worker ids and which of them reported (ids only) keep a list's counted label,
+    // "waiting on 2 workers" (#617), now that lists read summaries instead of records (#817).
+    wait: workerWaitSchema.pick({ phase: true, requestIds: true, workerIds: true }).partial({ workerIds: true }).strip().extend({
+      outcomes: z.array(workerOutcomeSchema.pick({ workerId: true }).strip()).max(32).optional(),
+    }).optional(),
   }),
-  delegationStateSchema.options[1].pick({ role: true }).strip().extend({
+  // `parentRunId` is the one worker field a list needs: the sidebar lights the parent's row for
+  // a worker URL, and `cez task list` hides workers by it (#817). Never paths or permissions.
+  delegationStateSchema.options[1].pick({ role: true, parentRunId: true }).strip().extend({
     wait: workerWaitSchema.pick({ phase: true, requestIds: true }).strip().optional(),
   }),
   delegationStateSchema.options[2].strip(),
@@ -279,9 +286,20 @@ export const workerDestroyResultSchema = z.object({
 });
 export type WorkerDestroyResult = z.infer<typeof workerDestroyResultSchema>;
 
+/** #816: outstanding allocations against `limit`, lifetime creations against `creationLimit`. */
+export const workerCapacitySchema = z.object({
+  outstanding: z.number().int().nonnegative(),
+  limit: z.number().int().nonnegative(),
+  created: z.number().int().nonnegative(),
+  creationLimit: z.number().int().nonnegative(),
+}).strict();
+export type WorkerCapacity = z.infer<typeof workerCapacitySchema>;
+
 export const runRelationshipsSchema = z.object({
   parentRunId: z.uuid().optional(),
-  workers: z.array(workerInspectionSchema).max(32),
+  workers: z.array(workerInspectionSchema).max(1_024),
+  /** Present for a delegation root only. */
+  capacity: workerCapacitySchema.optional(),
 });
 export type RunRelationships = z.infer<typeof runRelationshipsSchema>;
 

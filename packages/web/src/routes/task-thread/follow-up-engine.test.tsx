@@ -119,7 +119,7 @@ function serve(
           maxParallel: 1,
           memoryLimitMb: null,
         })
-      if (url === '/api/v1/runs' && method === 'GET') return json([])
+      if (url === '/api/v1/run-summaries' && method === 'GET') return json([])
       if (url === '/api/v1/workspace/agent-profiles' && method === 'GET')
         return agentProfiles ? json(agentProfiles) : json({ error: 'not found' }, 404)
       if (url === '/api/v1/repo' && method === 'GET')

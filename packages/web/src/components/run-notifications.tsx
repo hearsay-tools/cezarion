@@ -2,7 +2,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef } from 'react'
 
 import { useWorkspaceUiState } from '@/api/queries'
-import type { ApiRun } from '@open-mercato/cezar-api-client'
+import type { RunSummary } from '@open-mercato/cezar-api-client'
 import {
   diffRunTransitions,
   type RunNotificationState,
@@ -66,7 +66,7 @@ export function RunNotifications() {
         }
       }
     }
-    const observe = (hash: string, runs: readonly ApiRun[], seed = false, fetchedAt = Infinity): void => {
+    const observe = (hash: string, runs: readonly RunSummary[], seed = false, fetchedAt = Infinity): void => {
       const previous = lists.get(hash)
       const { statuses } = diffRunTransitions(new Map(), runs)
       // Compare within each alias first: a token tick on an old alias must not rewind the
@@ -114,7 +114,7 @@ export function RunNotifications() {
     // Seed every project already loaded, silently, including aliases with different snapshots.
     for (const query of cache.getAll().sort((a, b) => a.state.dataUpdatedAt - b.state.dataUpdatedAt)) {
       if (isRunList(query.queryKey) && Array.isArray(query.state.data)) {
-        observe(query.queryHash, query.state.data as ApiRun[], true)
+        observe(query.queryHash, query.state.data as RunSummary[], true)
       }
     }
 
@@ -129,7 +129,7 @@ export function RunNotifications() {
         if (event.action.type === 'success' && Array.isArray(event.query.state.data)) {
           // A fetch already in flight at mount predates every baseline observed here.
           const fetchedAt = event.action.manual ? Infinity : (fetches.get(event.query.queryHash) ?? 0)
-          observe(event.query.queryHash, event.query.state.data as ApiRun[], false, fetchedAt)
+          observe(event.query.queryHash, event.query.state.data as RunSummary[], false, fetchedAt)
           if (!event.action.manual) fetches.delete(event.query.queryHash)
         }
       }
@@ -143,7 +143,7 @@ export function RunNotifications() {
  *  modes are real — no constructor at all (tests, old WebViews), and a constructor that THROWS
  *  on page-context construction (Chrome on Android insists on a ServiceWorker). A notification
  *  is a courtesy; it must never take the message loop down with it. */
-function fireRunNotification(run: ApiRun): void {
+function fireRunNotification(run: RunSummary): void {
   const N = globalThis.Notification
   if (typeof N !== 'function') return
   const content = describeRunNotification(run)

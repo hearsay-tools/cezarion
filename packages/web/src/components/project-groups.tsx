@@ -3,7 +3,7 @@ import { ChevronDownIcon, FolderIcon, FolderOpenIcon } from '@/components/design
 import * as React from 'react'
 import { useLocation } from 'react-router'
 
-import { useHealth, usePinRun, useProjectRuns } from '@/api/queries'
+import { useHealth, usePinRun, useProjectUiState, useProjectRuns } from '@/api/queries'
 import type { ProjectListEntry } from '@open-mercato/cezar-api-client'
 import { useSidebarNavigate } from '@/components/app-shell'
 import { useListView } from '@/components/list-view'
@@ -30,10 +30,6 @@ import { cn } from '@/lib/utils'
  * bolted on: with one project the group header would only repeat the repo chip, and every nav
  * row would gain a level of indentation to distinguish it from nothing.
  */
-
-/** The spec's "10 most recent tasks", counted ACROSS buckets — a collapsed variant tile is one
- *  row, because it occupies one row of sidebar. */
-const RECENT_LIMIT = 10
 
 /**
  * Read + write of the per-project collapse map (`lib/sidebar-collapse.ts`), which lives in
@@ -231,6 +227,7 @@ function ProjectGroup({
   // request, not 40 run lists. A collapsed group still READS whatever is cached, which is what
   // keeps its attention badge alive after the user shuts it.
   const runs = useProjectRuns(project.id, !collapsed && !missing, boot)
+  const uiState = useProjectUiState(project.id, !collapsed && !missing, boot)
   const onNavigate = useSidebarNavigate()
   // Pinning (#935) from a group that may not be the scoped project: the request is addressed to
   // THIS project, and the cache invalidated is the one `useProjectRuns` above writes — which is
@@ -240,7 +237,7 @@ function ProjectGroup({
 
   const waiting = runs.data ? listCounts(runs.data).waiting : 0
   const allBuckets = groupRuns(runs.data ?? [], view)
-  const buckets = capBuckets(allBuckets, RECENT_LIMIT)
+  const buckets = capBuckets(allBuckets, uiState.data?.sidebarLimits)
   // Only the rows this group actually paints: `buckets` is the capped list, so a project with
   // four hundred runs asks about the handful on screen rather than all of them.
   //

@@ -26,6 +26,7 @@ import type {
   UpdateAutomationInput,
   AgentConfigListing,
   ApiRun,
+  RunSummary,
   RunRelationships,
   ArchiveFinishedResponse,
   ArchiveFinishedScope,
@@ -122,6 +123,7 @@ import type {
   WorkspaceConfigResponse,
   WorkspaceUiState,
   SkillsUpdateState,
+  WorkerDestroyResult,
 } from '@open-mercato/cezar-api-client'
 import { parseProviderStatusResponse } from '@/lib/provider-status'
 import {
@@ -500,20 +502,21 @@ export async function browseFs(
   )
 }
 
-/** The authoritative run list — sorted newest-first by the server. */
-export async function getRuns(opts?: ReadOptions): Promise<ApiRun[]> {
+/** The authoritative run list — slim summaries (#817), sorted newest-first by the server. Detail
+ *  views read the full record through `getRun`. */
+export async function getRuns(opts?: ReadOptions): Promise<RunSummary[]> {
   return unwrap(
-    await cez.api.v1.p[':projectId'].runs.$get({ param: { projectId: queryScope() } }, init(opts)),
-    '/runs',
+    await cez.api.v1.p[':projectId']['run-summaries'].$get({ param: { projectId: queryScope() } }, init(opts)),
+    '/run-summaries',
   )
 }
 
-/** One project's run list by EXPLICIT id (`GET /api/p/:projectId/runs`, step 3.3): the sidebar
- *  reads non-active projects' tasks, which the active-scope `send()` prefix cannot reach. An
- *  already-`/api/p/`-prefixed path passes through `apiPath` untouched, so this stays
+/** One project's run list by EXPLICIT id (`GET /api/p/:projectId/run-summaries`, step 3.3): the
+ *  sidebar reads non-active projects' tasks, which the active-scope `send()` prefix cannot reach.
+ *  An already-`/api/p/`-prefixed path passes through `apiPath` untouched, so this stays
  *  correct whatever scope is mounted. */
-export async function getProjectRuns(projectId: string, opts?: ReadOptions): Promise<ApiRun[]> {
-  return unwrap(await cez.api.v1.p[':projectId'].runs.$get({ param: { projectId } }, init(opts)), '/runs')
+export async function getProjectRuns(projectId: string, opts?: ReadOptions): Promise<RunSummary[]> {
+  return unwrap(await cez.api.v1.p[':projectId']['run-summaries'].$get({ param: { projectId } }, init(opts)), '/run-summaries')
 }
 
 /** The cross-project task index (`GET /api/v1/workspace/runs-index`) — what lets ⌘K find a task
@@ -592,10 +595,10 @@ export async function getRunHistoryContext(id: string, opts?: ReadOptions): Prom
   )
 }
 
-export async function getUiState(opts?: ReadOptions): Promise<UiState> {
+export async function getUiState(opts?: ReadOptions, scope = queryScope()): Promise<UiState> {
   return unwrap(
     await cez.api.v1.p[':projectId']['ui-state'].$get(
-      { param: { projectId: queryScope() } },
+      { param: { projectId: scope } },
       init(opts),
     ),
     '/ui-state',
@@ -1312,6 +1315,20 @@ export async function cancelRun(id: string): Promise<CancelResponse> {
   )
 }
 
+/** A human's verified cleanup of one owned worker (#816), freeing its capacity slot only when
+ *  every resource is proven removed. An incomplete cleanup answers 409 and throws; the
+ *  relationships refetch then shows what remains. */
+export async function destroyWorker(id: string): Promise<WorkerDestroyResult> {
+  return unwrap(
+    await cez.api.v1.p[':projectId'].runs[':id']['worker-destroy'].$post({
+      param: { projectId: queryScope(), id: encodeURIComponent(id) },
+      query: {},
+      json: {},
+    }),
+    runPath(id, '/worker-destroy'),
+  )
+}
+
 /** Archives by default; pass `false` to bring a run back into the live list. */
 export async function archiveRun(id: string, archived = true): Promise<RunRecord> {
   return unwrap(
@@ -1970,10 +1987,10 @@ export async function deleteWorkflow(name: string): Promise<DeleteWorkflowRespon
 // ---- prefs ---------------------------------------------------------------------------------
 
 /** Merges server-side (the stored object spread under the patch) and answers the merged state. */
-export async function putUiState(patch: UiState): Promise<UiState> {
+export async function putUiState(patch: UiState, scope = queryScope()): Promise<UiState> {
   return unwrap(
     await cez.api.v1.p[':projectId']['ui-state'].$put({
-      param: { projectId: queryScope() },
+      param: { projectId: scope },
       json: patch,
     }),
     '/ui-state',

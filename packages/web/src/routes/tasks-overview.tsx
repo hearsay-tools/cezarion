@@ -8,7 +8,7 @@ import { Link, useNavigate } from '@/lib/project-router'
 import { archiveFinished, markAllRunsSeen, patchRun } from '@/api/client'
 import { useRunUsage } from '@/api/global-events'
 import { queryKeys, useHealth, usePinRun, useProjects, useProjectRepoBase, useReferenceProjectId, useRuns } from '@/api/queries'
-import type { RunRecord } from '@open-mercato/cezar-api-client'
+import type { RunSummary } from '@open-mercato/cezar-api-client'
 import { CenteredState } from '@/components/centered-state'
 import { DiffStatLabel } from '@/components/diff-stat'
 import { DirectionalUsage, directionalUsageLabel } from '@/components/directional-usage'
@@ -90,7 +90,7 @@ export function TasksOverview({
 }: {
   /** Undefined while `/api/runs` has not answered: the header renders, the body stays empty —
    *  an empty state before we know there are no runs would be a lie. */
-  runs: RunRecord[] | undefined
+  runs: RunSummary[] | undefined
   view: ListView
   onViewChange: (view: ListView) => void
   archivePending?: boolean
@@ -103,7 +103,7 @@ export function TasksOverview({
   /** Pin/unpin one task (#935). Pinned rows sort to the top of the table — `sortRuns` does that
    *  for every surface at once — so the row's own control is also the only thing on this page
    *  that explains why one is up there. */
-  onTogglePin?: (run: RunRecord, pinned: boolean) => void
+  onTogglePin?: (run: RunSummary, pinned: boolean) => void
   /** Injected so the ages are not racing the clock in tests. */
   now?: number
   /** Presentation capability; defaults visible for older health responses and direct renders. */
@@ -413,10 +413,10 @@ function TasksEmptyState({ view, query }: { view: ListView; query: string }) {
  * above still owns workspace column preferences, so switching presentation never rewrites them. */
 function SummaryTasksTable({ projectName, runs, positions, onRename, onTogglePin, now, showTokens, showCost }: {
   projectName?: string
-  runs: RunRecord[]
+  runs: RunSummary[]
   positions: Map<string, number>
   onRename: (id: string, title: string) => void
-  onTogglePin?: (run: RunRecord, pinned: boolean) => void
+  onTogglePin?: (run: RunSummary, pinned: boolean) => void
   now: number
   showTokens: boolean
   showCost: boolean
@@ -456,7 +456,7 @@ function SummaryTasksTable({ projectName, runs, positions, onRename, onTogglePin
   </div>
 }
 
-function TaskResourceDetails({ run, showTokens, showCost }: { run: RunRecord; showTokens: boolean; showCost: boolean }) {
+function TaskResourceDetails({ run, showTokens, showCost }: { run: RunSummary; showTokens: boolean; showCost: boolean }) {
   const sample = useRunUsage(run.id)
   const usage = usageCells(run, sample)
   return <dl className="grid grid-cols-2 gap-4 text-xs md:grid-cols-4">
@@ -629,10 +629,10 @@ function TableRow({
   columns,
   expandedColumns,
 }: {
-  run: RunRecord
+  run: RunSummary
   queuePosition: number | null
   onRename: (id: string, title: string) => void
-  onTogglePin?: (run: RunRecord, pinned: boolean) => void
+  onTogglePin?: (run: RunSummary, pinned: boolean) => void
   now: number
   columns: readonly TaskColumnDefinition[]
   expandedColumns: NormalizedExpandedColumns
@@ -714,14 +714,14 @@ function TaskTableCell({
 }: {
   column: TaskColumnDefinition
   expanded: boolean
-  run: RunRecord
+  run: RunSummary
   attention: ReturnType<typeof deriveAttention>
   scheduled: ReturnType<typeof scheduledResume>
   reference: ReturnType<typeof taskReference>
   cost: string
   to: string
   onRename: (id: string, title: string) => void
-  onTogglePin?: (run: RunRecord, pinned: boolean) => void
+  onTogglePin?: (run: RunSummary, pinned: boolean) => void
   now: number
 }) {
   if (!expanded) return <FoldedTd column={column.id} />
@@ -842,10 +842,10 @@ function TitleCell({
   onRename,
   onTogglePin,
 }: {
-  run: RunRecord
+  run: RunSummary
   to: string
   onRename: (id: string, title: string) => void
-  onTogglePin?: (run: RunRecord, pinned: boolean) => void
+  onTogglePin?: (run: RunSummary, pinned: boolean) => void
 }) {
   const title = runTitle(run)
   const editor = useTitleEditor(title, (next) => onRename(run.id, next))
@@ -922,7 +922,7 @@ function UsageTds({
   cpuExpanded,
   memoryExpanded,
 }: {
-  run: RunRecord
+  run: RunSummary
   cpuExpanded: boolean
   memoryExpanded: boolean
 }) {
@@ -979,13 +979,13 @@ function TaskCard({
   showCost,
   onTogglePin,
 }: {
-  run: RunRecord
+  run: RunSummary
   projectName?: string
   queuePosition: number | null
   now: number
   showTokens: boolean
   showCost: boolean
-  onTogglePin?: (run: RunRecord, pinned: boolean) => void
+  onTogglePin?: (run: RunSummary, pinned: boolean) => void
 }) {
   const navigate = useNavigate()
   const [resourcesOpen, setResourcesOpen] = React.useState(false)
@@ -1058,7 +1058,7 @@ function TaskCard({
 }
 
 /** Subscribe to live resource samples only while this card's details are open. */
-function MobileResources({ run, showTokens, showCost }: { run: RunRecord; showTokens: boolean; showCost: boolean }) {
+function MobileResources({ run, showTokens, showCost }: { run: RunSummary; showTokens: boolean; showCost: boolean }) {
   const sample = useRunUsage(run.id)
   const resources = usageCells(run, sample)
   return <dl id={`mobile-resources-${run.id}`} className="mt-3 grid grid-cols-2 gap-3 rounded-md bg-muted p-3 text-xs">

@@ -72,6 +72,8 @@ const RUNS: RunIndexEntry[] = [
     createdAt: '2026-07-14T10:00:00Z',
     archived: false,
     workflow: 'quick-task',
+    workflowLabel: 'quick-task',
+    tokensUsed: 0,
     branch: 'feat/checkout',
     // Several at once: opened on an issue, about one PR, having created another.
     pullRequestUrl: 'https://github.com/acme/api/pull/42',
@@ -87,6 +89,8 @@ const RUNS: RunIndexEntry[] = [
     createdAt: '2026-07-14T09:00:00Z',
     archived: false,
     workflow: 'plan-first',
+    workflowLabel: 'plan-first',
+    tokensUsed: 0,
     issueNumber: 7,
     referencedIssueUrl: 'https://github.com/acme/web/issues/7',
   },
@@ -98,6 +102,8 @@ const RUNS: RunIndexEntry[] = [
     createdAt: '2026-07-14T08:00:00Z',
     archived: false,
     workflow: 'quick-task',
+    workflowLabel: 'quick-task',
+    tokensUsed: 0,
   },
 ]
 
@@ -1112,7 +1118,7 @@ describe('global tasks page', () => {
 
 it('hides indexed workers while preserving parked-parent waiting phases', async () => {
   const runs = [
-    { ...RUNS[0]!, id: 'worker', delegation: { role: 'worker' as const } },
+    { ...RUNS[0]!, id: 'worker', delegation: { role: 'worker' as const, parentRunId: 'parent' } },
     ...(['registered', 'parked', 'wake-pending'] as const).map(phase => ({ ...RUNS[0]!, id: phase, status: 'waiting' as const, delegation: { role: 'root' as const, wait: { phase } } })),
   ]
   stubFetch({ runs }); renderPage()
@@ -1158,7 +1164,7 @@ it('renders a parent request-wait as a global-task-row and hides the worker', as
         id: 'request-wait',
         title: 'Worker wait',
         status: 'waiting',
-        delegation: { role: 'worker', wait: { phase: 'parked', requestIds: ['10000000-0000-4000-8000-000000000001'] } },
+        delegation: { role: 'worker', parentRunId: 'parent', wait: { phase: 'parked', requestIds: ['10000000-0000-4000-8000-000000000001'] } },
       },
     ],
   })

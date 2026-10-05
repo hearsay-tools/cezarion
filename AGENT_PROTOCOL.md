@@ -502,7 +502,7 @@ transport into `UiEvent`s. The authoritative table is
 |---|---|---|---|
 | `session.started` | `system/init` (model, tools, cwd) | `thread/started` / `thread/start` result | `POST /session` response |
 | `turn.started` | each stdin user message | `turn/started` | each prompt POST |
-| `turn.completed` + `stopReason` | `result` subtype (`success→end_turn`, `error_max_turns→max_tokens`, `error_during_execution→error`) | `turn/completed→end_turn` (failed status or provider error → `error`), `turn/failed→error`, interrupt→`cancelled` | `session.idle→end_turn` (or `error` if a `session.error` preceded) |
+| `turn.completed` + `stopReason` | `result` subtype (`success→end_turn`, `error_max_turns→max_tokens`, `error_during_execution→error`) | `turn/completed→end_turn` (failed status or provider error → `error`), `turn/failed→error`, interrupt→`cancelled` | `session.idle→end_turn` (or `error` if a failure `session.error` preceded) |
 | message item | `assistant` `text` blocks (deltas via `--include-partial-messages`) | `agentMessage` items | text parts |
 | reasoning item | `thinking` blocks | `reasoning` items (+ `textDelta`) | `reasoning` parts |
 | tool item | `tool_use`→running, `tool_result`→completed/failed, `permission_denials`→`declined` | `commandExecution`→execute (+`exitCode`, `outputDelta`), `fileChange`→edit (`diffs`), `mcpToolCall`→other, `webSearch`→fetch, collaboration spawn→task | tool parts (state `pending/running/completed/error→failed`, `patch` parts→`diffs`) |
@@ -720,11 +720,16 @@ private CI controller, then verifies CI registration succeeds after delivery.
 Every cezar tool comes from one list (`packages/cezar/src/ci-wait/tools.ts`, #781):
 the adapter's `tools/list` and server instructions, Pi's extension, Claude's
 generated allow-list entries, Pi's tool admission and the environment names each
-harness forwards to the adapter all read it. `cezar_preview_serve` is on that list
-only under `CEZ_PREVIEW=1`; the provisioned session environment carries the opt-in,
+harness forwards to the adapter all read it. `cezar_preview_serve` and
+`cezar_preview_stop` (#803) are on that list only under `CEZ_PREVIEW=1`; the
+provisioned session environment carries the opt-in,
 and Claude, Codex and Cursor forward it explicitly because they start MCP servers
 from an environment allowlist. Harness row R35 lists the tools through every
 runner's native mock wire and the real bundled adapter, with the flag on and off.
+The stop tool uses the same run-scoped session capability on fresh, continued and
+recovered launches. It accepts only a port and optional restart, stops only owned
+servers, and reuses owner approval only while command, cwd and path remain unchanged.
+Replacement, release or capability revocation during teardown prevents restart.
 
 Startup and tool listing do no GitHub work. IPC failure preserves ordinary boot
 and execution, surfaces a bounded unavailable diagnostic, and never substitutes
@@ -817,6 +822,17 @@ it, authored positive limits fail before trailing checks, and standalone session
 retain their default cap. Longer authored limits override that cap, while default
 tasks retain no wall-clock cap. The tests shorten only `DEFAULT_RUN_TIMEOUT_MS`; the
 manager, runners, transports and terminal signals remain real.
+
+Intermediate question rows **Q1–Q10** (#427) live in
+`core/workflow-ask-parity.test.ts` and the shared parity guard. Every
+`RUNNER_IDS` adapter sends portable ASK text through its native assistant-message
+and turn-completion wire; the malformed variant changes only the text inside
+the existing snapshot fixture. No wire exemption is needed. The rows cover
+same-session answers and trailing checks, malformed markers, final interactive
+asks, idle close/Continue, disk-round-trip restart recovery, cancellation,
+Finish on fresh and continued sessions, authored timeouts, autonomous overrides,
+and clean unanswered session exit. Unrun checks remain pending on stop/failure;
+an unanswered clean close retains durable waiting and releases capacity.
 
 
 Open-turn inactivity rows **N1–N8** live in `core/workflow-no-progress-parity.test.ts`
@@ -1410,3 +1426,24 @@ this reproduces the reported diagnostic pattern, not an independently captured
 enterprise-account trace. `codex-permissions.test.ts` additionally covers sandbox
 and profile requirements, read-only policy, unknown discovery, network restriction
 and mid-turn steering. Removing the startup selection must fail the managed cells.
+
+### Recoverable OpenCode skill discovery (#723)
+
+OpenCode 1.18.33's [skill loader](https://github.com/anomalyco/opencode/blob/v1.18.33/packages/opencode/src/skill/index.ts#L96-L111)
+skips an unreadable optional skill after publishing an unscoped `session.error`
+with `error.name: UnknownError` and `error.data.message: Failed to parse skill <path>`.
+For that exact prefix and a path ending in `/SKILL.md` (or a Windows separator),
+Cezar emits a v1 `note` and a v2 `session.error` with `fatal: false`, preserving the
+path and suggesting checking readability and repairing or reinstalling the skill.
+This warning neither sets the turn's error flag nor enters the agent-input ACK
+barrier. A successful later idle remains `end_turn`. All scoped errors and all
+other unscoped errors keep existing failure handling; free-form frontmatter errors
+cannot safely be classified from this wire and are not guessed recoverable.
+No protocol shape changes or automatic filesystem repairs are involved.
+
+Harness cells R44/R45 exercise fresh and Continue success through the native
+OpenCode wire. Other `RUNNER_IDS` members have named executable wire exemptions
+for this server-wide discovery diagnostic. R46 exercises genuine provider failure
+on Continue through every native `HARNESS_ADAPTERS` wire, complementing fresh R2.
+The OpenCode cells also retain scoped skill-text and unscoped provider failures;
+mapper and withheld-ACK tests cover completion state and barrier bypass.

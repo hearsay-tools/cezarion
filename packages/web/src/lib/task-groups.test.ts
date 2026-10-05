@@ -1,8 +1,9 @@
 // @vitest-environment node
 
+import { summaryOf } from '@/test/run-summary-fixture'
 import { describe, expect, it } from 'vitest'
 
-import type { RunRecord, RunStatus } from '@open-mercato/cezar-api-client'
+import type { RunRecord, RunSummary, RunStatus } from '@open-mercato/cezar-api-client'
 import {
   BUCKET_ORDER,
   bucketOf,
@@ -21,9 +22,9 @@ import {
 
 let seq = 0
 
-function run(over: Partial<RunRecord> = {}): RunRecord {
+function run(over: Partial<RunRecord> = {}): RunSummary {
   seq += 1
-  return {
+  return summaryOf({
     id: `r${seq}`,
     title: `Task ${seq}`,
     workflow: 'default',
@@ -34,7 +35,7 @@ function run(over: Partial<RunRecord> = {}): RunRecord {
     archived: false,
     steps: [],
     ...over,
-  }
+  })
 }
 
 /** Flatten to `Bucket: id, id` lines — the assertions are about placement and order, and a
@@ -319,7 +320,7 @@ describe('groupRuns', () => {
   })
 
   describe('variant groups (spec 010)', () => {
-    const group = (over: Partial<RunRecord>[]): RunRecord[] =>
+    const group = (over: Partial<RunRecord>[]): RunSummary[] =>
       over.map((o) => run({ groupId: 'g1', title: 'Add autocomplete (X)', ...o }))
 
     it('collapses a groupId into one tile, members ordered by letter', () => {
@@ -667,23 +668,11 @@ it('counts a parked parent question as Needs you from the run summary', () => {
   expect(bucketOf({ ...record, hasPendingHumanAsk: false }, 'active')).toBe('Working')
 })
 
-function ownedWorker(over: Partial<RunRecord> = {}, parentRunId = 'parent'): RunRecord {
+function ownedWorker(over: Partial<RunRecord> = {}, parentRunId = 'parent'): RunSummary {
   const base = run(over)
   return {
     ...base,
-    delegation: over.delegation ?? {
-      role: 'worker',
-      permissions: [],
-      parentRunId,
-      workspace: {
-        ownerRunId: base.id,
-        resourceId: base.id,
-        kind: 'owned-isolated',
-        path: `/${base.id}`,
-        branch: `cez/${base.id}`,
-        baselineSha: 'a'.repeat(40),
-      },
-    },
+    delegation: (over.delegation as RunSummary['delegation']) ?? { role: 'worker', parentRunId },
   }
 }
 
@@ -753,7 +742,7 @@ describe('owned workers are not list rows (#312)', () => {
 })
 
 describe("a variant group's lead dot (#617): the loudest member by attention, not the list's first", () => {
-  const groupOf = (members: RunRecord[]) => {
+  const groupOf = (members: RunSummary[]) => {
     const row = groupRuns(members, 'active').flatMap((bucket) => bucket.rows).find((r) => r.kind === 'group')
     if (!row || row.kind !== 'group') throw new Error('no group row')
     return row
@@ -810,4 +799,42 @@ it('does not bury an attentive variant behind a non-attentive waiting parent', (
 
 it('does not exempt a stale archived pin from the row cap', () => {
   expect(capBuckets(groupRuns([run({ archived: true, pinned: true })], 'archived'), 0)).toEqual([])
+})
+
+describe('project sidebar combined limits (#810)', () => {
+  const records = () => ['waiting', 'done', 'running'].flatMap((status, section) =>
+    Array.from({ length: 5 }, (_, i) => run({ id: `${section}-${i}`, status: status as RunStatus })))
+  it('defaults to ten overall with unlimited sections', () => {
+    expect(shape(capBuckets(groupRuns(records(), 'active')))).toEqual([
+      'Needs you: 0-0, 0-1, 0-2, 0-3, 0-4', 'Finished: 1-0, 1-1, 1-2, 1-3, 1-4',
+    ])
+  })
+  it.each([
+    [{ overall: 4, needsYou: 1, finished: 2, working: 3 }, ['Needs you: 0-0', 'Finished: 1-0, 1-1', 'Working: 2-0']],
+    [{ overall: null, needsYou: 1, finished: 1, working: 1 }, ['Needs you: 0-0', 'Finished: 1-0', 'Working: 2-0']],
+    [{ overall: 6, needsYou: null, finished: 1, working: null }, ['Needs you: 0-0, 0-1, 0-2, 0-3, 0-4', 'Finished: 1-0']],
+  ])('combines overall and independent section constraints: %j', (limits, expected) => {
+    expect(shape(capBuckets(groupRuns(records(), 'active'), limits))).toEqual(expected)
+  })
+  it('counts groups as one row and exempts pins from both budgets', () => {
+    const rows = [
+      run({ id: 'a', groupId: 'g', variant: 'A', status: 'waiting' }),
+      run({ id: 'b', groupId: 'g', variant: 'B', status: 'waiting' }),
+      run({ id: 'c', groupId: 'p', variant: 'A', status: 'done', pinned: true }),
+      run({ id: 'd', groupId: 'p', variant: 'B', status: 'done' }),
+      run({ id: 'pin', status: 'running', pinned: true }), ...records(),
+    ]
+    expect(shape(capBuckets(groupRuns(rows, 'active'), { overall: 1, needsYou: 1, finished: 1, working: 1 })))
+      .toEqual(['Needs you: [AB]', 'Finished: [AB]', 'Working: pin'])
+  })
+  it('Archived ignores section caps and denies stale pin exemptions', () => {
+    const rows = records().map(row => ({ ...row, archived: true, pinned: true }))
+    expect(capBuckets(groupRuns(rows, 'archived'), { overall: 3, needsYou: 1, finished: 1, working: 1 })[0]?.rows).toHaveLength(3)
+    expect(capBuckets(groupRuns(rows, 'archived'), { overall: null, needsYou: 1, finished: 1, working: 1 })[0]?.rows).toHaveLength(15)
+  })
+})
+
+it.each([null, [], 'broken', { overall: -1 }, { overall: 'unlimited' }].map(value => [value]))('applies shipped defaults to malformed stored limits %j', limits => {
+  const buckets = groupRuns(Array.from({ length: 12 }, (_, i) => run({ id: `malformed-${i}` })), 'active')
+  expect(capBuckets(buckets, limits as never).flatMap(bucket => bucket.rows)).toHaveLength(10)
 })

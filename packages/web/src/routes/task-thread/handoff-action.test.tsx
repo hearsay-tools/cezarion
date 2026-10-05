@@ -48,7 +48,7 @@ function serve(webhook?: { url: string; tokenSet: boolean }, notifyAnswer: (body
         projectsDir: '~/cezar/projects',
       })
     }
-    if (path === '/api/v1/runs') return json([])
+    if (path === '/api/v1/run-summaries') return json([])
     if (path.endsWith('/notify') && method === 'POST') return notifyAnswer(body)
     return json({})
   }))

@@ -62,6 +62,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  * | `steer-late` | the final text first; agent input sent after it arrives after the last model call (#505) |
  */
 export const SCENARIOS = [
+  'skill-warning',
   'missing-binary',
   'crash-stderr-pre-ack',
   'crash-stderr-held-pipe',
@@ -86,6 +87,7 @@ export const SCENARIOS = [
   'ask-resume',
   'plan-resume',
   'ask-snapshot',
+  'ask-snapshot-bad',
   'ask-prose',
   'ask-bad',
   'ask-reply-late',
@@ -95,6 +97,20 @@ export const SCENARIOS = [
   'steer-late',
 ] as const;
 export type ScenarioName = (typeof SCENARIOS)[number];
+
+/** #427: portable intermediate asks, through every native message wire. */
+export const WORKFLOW_ASK_CRITERIA = [
+  { id: 'Q1', scenario: 'ask-snapshot', name: 'holds the same intermediate session until answered, then runs the tail' },
+  { id: 'Q2', scenario: 'ask-snapshot-bad', name: 'notes a malformed intermediate marker and runs the tail' },
+  { id: 'Q3', scenario: 'ask-snapshot', name: 'preserves final interactive asks' },
+  { id: 'Q4', scenario: 'ask-snapshot', name: 'idle close and a second question on Continue retain the workflow tail' },
+  { id: 'Q5', scenario: 'ask-snapshot', name: 'restart preserves the unanswered question and resumes the tail after an answer' },
+  { id: 'Q6', scenario: 'ask-snapshot', name: 'cancel leaves later steps pending' },
+  { id: 'Q7', scenario: 'ask-snapshot', name: 'Finish stops at the parked step on fresh and Continue sessions' },
+  { id: 'Q8', scenario: 'ask-snapshot', name: 'an authored timeout fails without running later steps' },
+  { id: 'Q9', scenario: 'ask-snapshot', name: 'autonomous intermediate asks use the bounded override before the tail' },
+  { id: 'Q10', scenario: 'ask-snapshot', name: 'an unanswered clean session close stays resumable without success' },
+] as const;
 
 /** #470: exercised in workflow-timeout-parity.test.ts against every native wire. */
 export const WORKFLOW_TIMEOUT_CRITERIA = [
@@ -191,6 +207,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'ask-resume': 'mock:ask mock:resume-done',
       'ask-reply-late': 'mock:ask',
       'ask-snapshot': 'mock:ask-snapshot',
+      'ask-snapshot-bad': 'mock:ask-snapshot-bad',
       'ask-prose': 'mock:ask-prose',
       'ask-bad': 'mock:ask-bad',
       subagent: 'mock:subagents',
@@ -226,6 +243,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'ask-resume': 'mock:native-codex-ask mock:resume-done',
       'ask-reply-late': 'mock:native-codex-ask',
       'ask-snapshot': 'mock:ask-snapshot',
+      'ask-snapshot-bad': 'mock:ask-snapshot-bad',
       'ask-prose': 'mock:ask-prose',
       'ask-bad': 'mock:ask-bad',
       // #600's repro: a child thread's own turn/completed must not end the parent.
@@ -241,6 +259,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     binEnv: 'CEZ_OPENCODE_BIN',
     mockBin: OPENCODE_MOCK,
     scenarios: {
+      'skill-warning': 'mock:skill-warning mock:done',
       'missing-binary': BASELINE_PROMPT,
       autonomous: 'mock:autonomous',
       'autonomous-cap': 'mock:autonomous-cap',
@@ -261,6 +280,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'ask-resume': 'mock:ask mock:resume-done',
       'ask-reply-late': 'mock:ask-reply-late',
       'ask-snapshot': 'mock:ask-snapshot',
+      'ask-snapshot-bad': 'mock:ask-snapshot-bad',
       'ask-prose': 'mock:ask-prose',
       'ask-bad': 'mock:ask-bad',
       subagent: 'mock:subagent',
@@ -292,7 +312,8 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       ask: 'mock:ask',
       'ask-resume': 'mock:ask mock:resume-done',
       'plan-resume': 'mock:plan mock:resume-done',
-      'ask-snapshot': 'mock:ask-snapshot', 'ask-prose': 'mock:ask-prose', 'ask-bad': 'mock:ask-bad', 'ask-reply-late': 'mock:ask', subagent: 'mock:subagent',
+      'ask-snapshot': 'mock:ask-snapshot',
+      'ask-snapshot-bad': 'mock:ask-snapshot-bad', 'ask-prose': 'mock:ask-prose', 'ask-bad': 'mock:ask-bad', 'ask-reply-late': 'mock:ask', subagent: 'mock:subagent',
       'subagent-after-park': 'mock:subagent-after-park' },
   },
   pi: {
@@ -320,6 +341,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'ask-resume': 'mock:ask mock:resume-done',
       'ask-reply-late': 'mock:ask',
       'ask-snapshot': 'mock:ask-snapshot',
+      'ask-snapshot-bad': 'mock:ask-snapshot-bad',
       'ask-prose': 'mock:ask-prose',
       'ask-bad': 'mock:ask-bad',
       'steer-tool': 'mock:steer-tool',
@@ -371,6 +393,10 @@ export interface ParityExemption {
  * is the runner, not this table.
  */
 export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
+  ...(['R44', 'R45'] as const).flatMap(criterion => (['claude', 'codex', 'pi', 'cursor'] as const).map(backend => ({
+    criterion, backend, kind: 'scenario-unconstructible' as const,
+    reason: 'The OpenCode server-wide unscoped session.error UnknownError skill-discovery diagnostic has no equivalent on this native wire. R2/R46 retain native provider failure coverage.',
+  }))),
   ...(['A13', 'A14'] as const).flatMap(criterion => (['claude', 'codex', 'pi', 'cursor'] as const).map(backend => ({
     criterion, backend, kind: 'scenario-unconstructible' as const,
     reason: 'This wire has no separate portable-answer HTTP ACK retained after turn completion. The executable cell checks ordinary root idle expiry and successful Continue through its native wire instead.',
@@ -606,7 +632,7 @@ export async function driveRun(
   settled: (record: RunRecord | undefined) => boolean,
   timeoutMs = 30_000,
   afterSettled?: (context: { store: RunStore; manager: RunManager; runId: string }) => Promise<void>,
-  options: { autonomous?: boolean } = {},
+  options: { autonomous?: boolean; workflowDef?: WorkflowDef } = {},
 ): Promise<RunObservation> {
   const adapter = HARNESS_ADAPTERS[backend];
   const savedBin = process.env[adapter.binEnv];
@@ -627,7 +653,7 @@ export async function driveRun(
     await execFileAsync('git', [...GIT_IDENTITY, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
     manager = createFixtureManager(store, repoRoot);
-    const started = manager.startRun(SINGLE_STEP, {
+    const started = manager.startRun(options.workflowDef ?? SINGLE_STEP, {
       ...options,
       task: typeof scenario === 'string' ? promptFor(backend, scenario) : scenario.prompt,
       runner: backend,

@@ -69,7 +69,7 @@ function stubFetch(overrides: Record<string, () => Response> = {}): SentRequest[
       })
       const override = overrides[path]
       if (override) return override()
-      if (method === 'GET' && path === '/api/v1/runs') return jsonResponse([])
+      if (method === 'GET' && path === '/api/v1/run-summaries') return jsonResponse([])
       if (method === 'GET' && path === '/api/v1/providers/status') {
         return jsonResponse({
           providers: [
@@ -1710,7 +1710,7 @@ describe('meta line, tabs, pill and resume hint', () => {
 
   it('a queued run shows its position in the pill, from the shared runs list', async () => {
     stubFetch({
-      '/api/v1/runs': () =>
+      '/api/v1/run-summaries': () =>
         jsonResponse([
           run('queued', { id: 'earlier', createdAt: '2026-07-14T11:00:00.000Z' }),
           run('queued'),

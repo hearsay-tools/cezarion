@@ -436,7 +436,7 @@ export class DelegationService {
         if (worker?.delegation?.role !== 'worker' || worker.delegation.parentRunId !== parent.id || worker.delegation.workspace.ownerRunId !== worker.id) throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
         return { workerId: worker.id, baselineSha: worker.delegation.workspace.baselineSha };
       }
-      authorizeSpawn(caller, parent, project.id);
+      authorizeSpawn(caller, parent, project.id, id => project.store.getRun(id));
       const catalog = await resolveSpawnWorkflow(project.root, request);
       const resolvedSteps = await resolveSpawnSteps(project.manager, parent.id, request, catalog, (step, settings) => this.validateModels(request, [{ step, settings }]));
       // Run-level fields hold the first agent step (cockpit columns, pre-#452 evidence readers);
@@ -457,7 +457,7 @@ export class DelegationService {
         // Ref resolution yields to Finish, revocation and project disposal; recheck before acceptance.
         const current = this.context(caller);
         if (current !== project) throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
-        authorizeSpawn(caller, project.store.getRun(parent.id), project.id);
+        authorizeSpawn(caller, project.store.getRun(parent.id), project.id, id => project.store.getRun(id));
         // The public definition carries what each agent step RESOLVED to — runner, account,
         // model, effort and the narrowed grants — so the bound `workflowDef` and the private
         // per-step identity describe the same launch and the manager can hold them against each

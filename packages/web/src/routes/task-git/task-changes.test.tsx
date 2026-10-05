@@ -108,7 +108,7 @@ function stubFetch(overrides: Record<string, () => Response> = {}): SentRequest[
       if (method === 'GET' && path === '/api/v1/runs/r1/changes') return jsonResponse(CHANGES)
       if (method === 'GET' && path === '/api/v1/health') return jsonResponse(HEALTH)
       if (method === 'GET' && path === '/api/v1/repo') return jsonResponse(REPO)
-      if (method === 'GET' && path === '/api/v1/runs') return jsonResponse([])
+      if (method === 'GET' && path === '/api/v1/run-summaries') return jsonResponse([])
       return jsonResponse({})
     }),
   )

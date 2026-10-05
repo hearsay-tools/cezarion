@@ -57,6 +57,7 @@ import {
   WORKFLOW_TIMEOUT_CRITERIA,
   NO_PROGRESS_CRITERIA,
   AUTONOMOUS_CRITERIA,
+  WORKFLOW_ASK_CRITERIA,
   PARITY_EXEMPTIONS,
   PINNED_SESSION_ID,
   type RunObservation,
@@ -493,6 +494,9 @@ const CONTROL_CRITERIA = [
   { id: 'S12', scenario: 'hold' },
   { id: 'S13', scenario: 'hold' },
   { id: 'S14', scenario: 'baseline' },
+  { id: 'R44', scenario: 'skill-warning' },
+  { id: 'R45', scenario: 'skill-warning' },
+  { id: 'R46', scenario: 'provider-error' },
   { id: 'R6', scenario: 'ask' },
   { id: 'R7', scenario: 'ask' },
   { id: 'R8', scenario: 'hold' },
@@ -518,7 +522,7 @@ const CONTROL_CRITERIA = [
   { id: 'R32', scenario: 'baseline' },
   { id: 'R33', scenario: 'baseline' },
   { id: 'R34', scenario: 'baseline' },
-  // The shared cezar tool list, `describe('harness parity — cezarTools list behind CEZ_PREVIEW')` (#781).
+  // R35 covers both preview serve (#781) and stop/restart (#803) discovery on every native wire.
   { id: 'R35', scenario: 'baseline' },
   // #399: shared monitoring instructions on each native prompt channel.
   { id: 'R36', scenario: 'baseline' },
@@ -640,6 +644,60 @@ describe('harness parity — input delivery (#505)', () => {
     for (const criterion of INPUT_CRITERIA) {
       parityRow(backend, criterion, () => observeInput(backend, criterion.scenario, `parity-${criterion.id}`));
     }
+  }
+});
+
+// #723: use the real RunManager on both event-handler construction paths.
+async function continueDiagnosticRun(backend: RunnerId, prompt: string): Promise<RunObservation> {
+  return driveRun(backend, 'baseline', record => record?.status === 'waiting', 30_000,
+    async ({ store, manager, runId }) => {
+      const internal = manager as unknown as { active: Map<string, { idleTimer?: NodeJS.Timeout }> };
+      const timer = internal.active.get(runId)?.idleTimer as NodeJS.Timeout & { _onTimeout(): void };
+      expect(timer).toBeDefined();
+      timer._onTimeout();
+      await waitFor(() => !manager.isActive(runId));
+      expect(manager.continueRun(runId, { text: prompt }).ok).toBe(true);
+      await waitFor(() => TERMINAL.includes(store.getRun(runId)?.status ?? ''), 30_000);
+    });
+}
+
+describe('harness parity — recoverable skill diagnostics (#723)', () => {
+  for (const backend of RUNNER_IDS) {
+    for (const continuation of [false, true]) {
+      const id = continuation ? 'R45' : 'R44';
+      parityRow<RunObservation>(backend, {
+        id, name: `${id} ${continuation ? 'continued' : 'fresh'} skill warnings preserve successful completion`, scenario: 'skill-warning',
+        assert: obs => {
+          expect(['review', 'done']).toContain(obs.record?.status);
+          expect(obs.record?.error).toBeFalsy();
+          expect(obs.events.filter(e => e.type === 'error')).toEqual([]);
+          for (const root of ['.claude', '.agents']) {
+            expect(obs.events).toContainEqual(expect.objectContaining({ type: 'note',
+              message: `opencode: optional skill skipped: Failed to parse skill /home/agent/${root}/skills/pen-design/SKILL.md. Check that the skill file and any symlink target are readable; repair or reinstall the skill.`,
+            }));
+          }
+          expect(obs.events.filter(e => e.type === 'turn.completed').every(e => e.stopReason === 'end_turn')).toBe(true);
+          expect(obs.events.some(e => e.type === 'turn.completed')).toBe(true);
+        },
+      }, () => continuation ? continueDiagnosticRun(backend, promptFor(backend, 'skill-warning'))
+        : driveRun(backend, 'skill-warning', record => TERMINAL.includes(record?.status ?? '')));
+    }
+    it(`${backend} R46 continued provider failures stay fatal and actionable`, async () => {
+      const obs = await continueDiagnosticRun(backend, promptFor(backend, 'provider-error'));
+      expect(obs.record?.status).toBe('failed');
+      expect(obs.record?.error?.trim()).toBeTruthy();
+      expect(obs.events).toContainEqual(expect.objectContaining({ type: 'error' }));
+    }, 45_000);
+  }
+  for (const continuation of [false, true]) for (const scenario of ['unscoped-provider-failure', 'scoped-skill-failure']) {
+    it(`opencode ${continuation ? 'continued' : 'fresh'} ${scenario} remains fatal`, async () => {
+      const prompt = `mock:${scenario}`;
+      const obs = continuation ? await continueDiagnosticRun('opencode', prompt)
+        : await driveRun('opencode', { prompt }, record => TERMINAL.includes(record?.status ?? ''));
+      expect(obs.record?.status).toBe('failed');
+      expect(obs.record?.error).toContain('provider');
+      expect(obs.record?.error).toContain(scenario === 'scoped-skill-failure' ? '/skills/required/SKILL.md' : 'restoring service');
+    }, 45_000);
   }
 });
 
@@ -1319,6 +1377,7 @@ describe('OpenCode durable input acknowledgements', () => {
 
 describe('harness parity — the matrix itself', () => {
   const allIds = [
+    ...WORKFLOW_ASK_CRITERIA.map(c => c.id),
     ...AUTONOMOUS_CRITERIA.map(c => c.id),
     ...NO_PROGRESS_CRITERIA.map(c => c.id),
     ...WORKFLOW_TIMEOUT_CRITERIA.map((c) => c.id),
@@ -1328,6 +1387,8 @@ describe('harness parity — the matrix itself', () => {
     ...RUN_CRITERIA.map((c) => c.id),
   ];
   const scenarioOf = (id: string): ScenarioName => {
+    const ask = WORKFLOW_ASK_CRITERIA.find(c => c.id === id);
+    if (ask) return ask.scenario;
     const autonomous = AUTONOMOUS_CRITERIA.find(c => c.id === id);
     if (autonomous) return autonomous.scenario;
     const inactivity = NO_PROGRESS_CRITERIA.find(c => c.id === id);
@@ -1656,11 +1717,11 @@ describe('harness parity — AgentRunSpec support declarations', () => {
 // runner's own wire (Claude's MCP config and generated allow-list entry, Codex
 // and Cursor forwarded env, OpenCode's runtime config, Pi's extension and tool
 // admission), and each mock lists the tools through the real bundled adapter.
-// `cezar_preview_serve` is there under `CEZ_PREVIEW=1` exactly, and nowhere else.
+// `cezar_preview_serve` and `cezar_preview_stop` are listed under `CEZ_PREVIEW=1` exactly.
 describe('harness parity — cezarTools list behind CEZ_PREVIEW', () => {
   const wait = { id: '11111111-1111-4111-8111-111111111111', generation: 'gen', turnId: 'turn', timeoutSeconds: 1800, prUrl: 'https://github.com/owner/repo/pull/1', repository: 'owner/repo', prNumber: 1, headSha: 'a'.repeat(40), registeredAt: '2026-09-22T00:00:00.000Z', deadline: '2026-09-22T00:30:00.000Z', phase: 'registered' as const };
   for (const backend of RUNNER_IDS) for (const enabled of [true, false]) {
-    it(`${backend} R35 ${enabled ? 'exposes' : 'hides'} cezar_preview_serve with CEZ_PREVIEW ${enabled ? 'on' : 'off'}`, async () => {
+    it(`${backend} R35 ${enabled ? 'exposes' : 'hides'} preview serve and stop with CEZ_PREVIEW ${enabled ? 'on' : 'off'}`, async () => {
       vi.stubEnv('CEZ_PREVIEW', enabled ? '1' : '');
       const { CiToolController } = await import('../ci-wait/controller.ts');
       const controller = await CiToolController.start();
@@ -1669,7 +1730,7 @@ describe('harness parity — cezarTools list behind CEZ_PREVIEW', () => {
         const session = controller.provision(async () => wait);
         const obs = await driveSeam(backend, 'baseline', { spec: { cezarTools: session.descriptor, allowedTools: ['Read'], env: { ...session.env, CEZ_MOCK_ARGS_FILE: join(dir, 'wire'), CEZ_MOCK_CI_PR: wait.prUrl, CEZ_MOCK_CI_RESULT: join(dir, 'result'), CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' } } });
         expect(obs.v1.filter((event) => event.type === 'error')).toEqual([]);
-        const expected = enabled ? ['cezar_wait_for_ci', 'cezar_preview_serve'] : ['cezar_wait_for_ci'];
+        const expected = enabled ? ['cezar_wait_for_ci', 'cezar_preview_serve', 'cezar_preview_stop'] : ['cezar_wait_for_ci'];
         expect(JSON.parse(readFileSync(join(dir, 'result'), 'utf8')).names).toEqual(expected);
         const argv: string[] = JSON.parse(readFileSync(join(dir, 'wire'), 'utf8').trim().split('\n')[0]!);
         if (backend === 'claude') {

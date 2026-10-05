@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { expect, it } from 'vitest'
+import { summaryOf } from '@/test/run-summary-fixture'
 import { runDelegationSummarySchema, type RunRecord } from '@open-mercato/cezar-api-client'
 import { deriveAttention, wantsAttention } from './attention'
 import { bucketOf, listCounts } from './task-groups'
@@ -22,7 +23,7 @@ it.each([
   ['root', 'waiting on worker replies'],
   ['worker', 'waiting on parent reply'],
 ] as const)('keeps %s request waits out of human attention on full and projected records', (role, label) => {
-  const record = waiting(role)
+  const record = summaryOf(waiting(role))
   const projected = { ...record, delegation: runDelegationSummarySchema.parse(record.delegation) }
   for (const input of [record, projected]) {
     // Violet family (#617): a root waits on its own workers (robot); a worker on its parent (ring).

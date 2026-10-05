@@ -5,8 +5,7 @@ import { useNavigate as useRouterNavigate } from 'react-router'
 import { useHealth, useProjects, useRuns, useRunsIndex, useSkills, useUiState } from '@/api/queries'
 import { useProjectSwitch } from '@/components/use-project-switch'
 import { scopeTo, useActiveProjectId, useNavigate } from '@/lib/project-router'
-import { runDelegationSummarySchema } from '@open-mercato/cezar-api-client'
-import type { ProjectListEntry, RunIndexEntry, RunRecord } from '@open-mercato/cezar-api-client'
+import type { ProjectListEntry, RunIndexEntry, RunSummary } from '@open-mercato/cezar-api-client'
 import { visibleNavItems } from '@/components/nav-items'
 import { StatusDot } from '@/components/status-dot'
 import { NEXT_THEME } from '@/components/theme-toggle'
@@ -47,7 +46,7 @@ export function openCommandPalette(): void {
 
 /** Newest first — the palette's unfiltered Tasks group should lead with what you touched last,
  *  exactly like the sidebar. Stable for equal timestamps (variant groups started together). */
-export function orderRuns(runs: readonly RunRecord[]): RunRecord[] {
+export function orderRuns(runs: readonly RunSummary[]): RunSummary[] {
   return [...runs].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
 }
 
@@ -121,31 +120,13 @@ export type PaletteTask = Omit<RunIndexEntry, 'projectId'> & { projectId: string
  * scores those hits on merit once you do.
  */
 export function mergeTasks(
-  activeRuns: readonly RunRecord[],
+  activeRuns: readonly RunSummary[],
   runsProjectId: string | null,
   indexed: readonly RunIndexEntry[] | undefined,
 ): PaletteTask[] {
   const mine: PaletteTask[] = orderRuns(
     activeRuns.filter((run) => !isOwnedWorker(run)),
-  ).map((run) => ({
-    projectId: runsProjectId,
-    id: run.id,
-    title: run.title,
-    titleSummary: run.titleSummary,
-    titleOrigin: run.titleOrigin,
-    status: run.status,
-    activity: run.activity,
-    createdAt: run.createdAt,
-    finishedAt: run.finishedAt,
-    seenAt: run.seenAt,
-    archived: run.archived,
-    autoResumeAt: run.autoResumeAt,
-    ...(run.hasPendingHumanAsk !== undefined ? { hasPendingHumanAsk: run.hasPendingHumanAsk } : {}),
-    ...(run.delegation ? { delegation: runDelegationSummarySchema.parse(run.delegation) } : {}),
-    workflow: run.workflow,
-    branch: run.branch,
-    startedAt: run.startedAt,
-  }))
+  ).map((run) => ({ ...run, projectId: runsProjectId }))
   const live = new Set(mine.map(taskKey))
   const theirs = (indexed ?? [])
     .filter((entry) => !isOwnedWorker(entry) && !live.has(taskKey(entry)))
