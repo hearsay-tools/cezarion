@@ -1,10 +1,14 @@
 // @vitest-environment node
 
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ApiRun, RunRecord, RunStatus, StepState } from '@open-mercato/cezar-api-client'
 
 import { isUnread } from '@/lib/read-state'
+
+// Test-only source imports compare the real implementations without bundling server code.
+import { RUNNER_IDS } from '../../../../cezar/src/core/agent-runner.ts'
+import { resumeCommand as serverResumeCommand } from '../../../../cezar/src/server/server.ts'
 
 import {
   cliTargetResumes,
@@ -216,6 +220,44 @@ describe('resumeCommand — per backend, mirroring the server', () => {
   it('bounds the id length, like the server', () => {
     expect(resumeCommand('claude', 'a'.repeat(200))).toBe(`claude --resume ${'a'.repeat(200)}`)
     expect(resumeCommand('claude', 'a'.repeat(201))).toBeUndefined()
+  })
+})
+
+describe('resume commands — web/server parity across RUNNER_IDS', () => {
+  beforeEach(() => vi.stubEnv('CEZ_CURSOR_BIN', undefined))
+  afterEach(() => vi.unstubAllEnvs())
+
+  const commands = {
+    claude: 'claude --resume s1',
+    codex: 'codex resume s1',
+    opencode: 'opencode --session s1',
+    pi: 'pi --session s1',
+    cursor: 'agent --resume s1',
+  } satisfies Record<(typeof RUNNER_IDS)[number], string>
+
+  it.each([...RUNNER_IDS, undefined])('keeps %s take-over commands in sync', (runner) => {
+    const expected = commands[runner ?? 'claude']
+    const serverCommand = serverResumeCommand(runner, 's1')
+    expect(serverCommand).toBe(expected)
+    // Cursor's executable/quoting belongs to the server; the web uses cliResumeCommand.
+    expect(resumeCommand(runner, 's1')).toBe(runner === 'cursor' ? undefined : serverCommand)
+    expect(resumeHint(run('done', {
+      runner,
+      steps: [step({ sessionId: 's1', backend: runner })],
+      ...(runner === 'cursor' ? { cliResumeCommand: expected } : {}),
+    }))).toBe(expected)
+  })
+
+  it.each([...RUNNER_IDS, undefined])('rejects unsafe session ids for %s on both sides', (runner) => {
+    for (const sessionId of ['', 'a b', "a'b", 'a`id`', 'a && calc.exe', '$(id)', '-x', '--help', 'a'.repeat(201)]) {
+      expect(serverResumeCommand(runner, sessionId)).toBeNull()
+      expect(resumeCommand(runner, sessionId)).toBeUndefined()
+      expect(resumeHint(run('done', {
+        runner,
+        steps: [step({ sessionId, backend: runner })],
+        cliResumeCommand: 'agent --resume s1',
+      }))).toBeUndefined()
+    }
   })
 })
 
