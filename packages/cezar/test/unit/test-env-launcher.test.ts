@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, test } from 'node:test';
@@ -202,13 +202,113 @@ function descriptor(root: string): {
   };
 }
 
+function unhealthyFixture(mode: 'stalled' | 'unavailable' | 'exited') {
+  const fixture = makeFixture(false);
+  const env = { ...process.env, PATH: fixture.path, E2E_PREBUILT_ASSETS: '1' };
+  const built = spawnSync(join(fixture.root, 'bin/npm'), ['run', 'build'], {
+    cwd: fixture.root, encoding: 'utf8', env: { ...env, VITE_CEZ_E2E: '1' },
+  });
+  assert.equal(built.status, 0, built.stderr);
+  writeFileSync(join(fixture.root, 'packages/cezar/dist/index.js'), `
+const fs = require('node:fs');
+fs.writeFileSync('app.pid', String(process.pid));
+for (let i = 1; i <= 25; i++) console.log('boot-line-' + i);
+${mode === 'exited' ? 'process.exit(1);' : `
+require('node:http').createServer((req, res) => {
+  ${mode === 'unavailable' ? 'res.writeHead(503); res.end();' : '/* Keep the health request open until curl times out. */'}
+}).listen(Number(process.argv[process.argv.indexOf('--port') + 1]), '127.0.0.1');
+`}
+`);
+  return { ...fixture, env };
+}
+
+test('health timeout bounds elapsed time even when a real HTTP probe stalls', async () => {
+  const fixture = unhealthyFixture('stalled');
+  const started = performance.now();
+  const result = spawnSync('/bin/sh', [join(fixture.root, '.ai/scripts/test-env-up.sh')], {
+    encoding: 'utf8', env: { ...fixture.env, TEST_ENV_HEALTH_TIMEOUT_SECONDS: '5' }, timeout: 9_000, killSignal: 'SIGKILL',
+  });
+  const elapsed = (performance.now() - started) / 1_000;
+  const pid = Number(readFileSync(join(fixture.root, 'app.pid'), 'utf8'));
+  launchedPids.add(pid);
+  assert.equal(result.status, 1, `launcher did not enforce its health deadline (${elapsed}s): ${result.stderr}`);
+  assert.ok(elapsed >= 4 && elapsed < 8, `five-second health wait took ${elapsed}s`);
+  assert.match(result.stderr, /health wait timed out after 5s/);
+  assert.deepEqual(result.stderr.match(/^boot-line-\d+$/gm),
+    Array.from({ length: 20 }, (_, i) => `boot-line-${i + 6}`));
+  assert.equal(result.stdout, '', 'a failed boot must not emit running markers');
+  // Observe termination, including delivery of the launcher's SIGTERM after it exits.
+  for (let tries = 0; tries < 100; tries++) {
+    try { process.kill(pid, 0); } catch { launchedPids.delete(pid); return; }
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 10));
+  }
+  assert.fail('timed-out app is still alive');
+});
+
+test('unset health timeout allows 180 elapsed seconds before stopping an unhealthy app', () => {
+  const fixture = unhealthyFixture('unavailable');
+  // Advance only the health clock; ISO timestamps still come from the real date.
+  rmSync(join(fixture.root, 'bin/date'));
+  writeFileSync(join(fixture.root, 'bin/date'), `#!/bin/sh
+if [ "\${1-}" = +%s ]; then
+  tick=0
+  [ ! -f "$0.tick" ] || read -r tick < "$0.tick"
+  printf '%s\\n' "$tick"
+  printf '%s\\n' "$((tick + 30))" > "$0.tick"
+else
+  exec "${commandPath('date')}" "$@"
+fi
+`, { mode: 0o755 });
+  rmSync(join(fixture.root, 'bin/sleep'));
+  writeFileSync(join(fixture.root, 'bin/sleep'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  const env: NodeJS.ProcessEnv = { ...fixture.env };
+  delete env.TEST_ENV_HEALTH_TIMEOUT_SECONDS;
+  const result = spawnSync('/bin/sh', [join(fixture.root, '.ai/scripts/test-env-up.sh')], {
+    encoding: 'utf8', env, timeout: 9_000, killSignal: 'SIGKILL',
+  });
+  // The accelerated clock can exhaust the budget before Node begins executing.
+  if (existsSync(join(fixture.root, 'app.pid'))) {
+    launchedPids.add(Number(readFileSync(join(fixture.root, 'app.pid'), 'utf8')));
+  }
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stderr, /health wait timed out after 180s/);
+});
+
+test('health wait still detects an app that exits during boot', () => {
+  const fixture = unhealthyFixture('exited');
+  const result = spawnSync('/bin/sh', [join(fixture.root, '.ai/scripts/test-env-up.sh')], {
+    encoding: 'utf8', env: { ...fixture.env, TEST_ENV_HEALTH_TIMEOUT_SECONDS: '5' }, timeout: 9_000, killSignal: 'SIGKILL',
+  });
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stderr, /the app exited during boot/);
+  assert.match(result.stderr, /boot-line-25/);
+  assert.doesNotMatch(result.stderr, /health wait timed out/);
+  assert.equal(result.stdout, '');
+});
+
+for (const timeout of ['0', '-1', '1.5', 'invalid', '--version', '--help']) {
+  test(`malformed health timeout ${timeout} is rejected before starting the app`, () => {
+    const fixture = makeFixture(false);
+    // Malformed input must fail before preparation. A failing build also prevents
+    // a regressed option parser from leaving a detached app without a descriptor.
+    writeFileSync(join(fixture.root, 'bin/npm'), '#!/bin/sh\nexit 99\n', { mode: 0o755 });
+    const result = spawnSync('/bin/sh', [join(fixture.root, '.ai/scripts/test-env-up.sh')], {
+      encoding: 'utf8', env: { ...process.env, PATH: fixture.path, TEST_ENV_HEALTH_TIMEOUT_SECONDS: timeout },
+      timeout: 9_000, killSignal: 'SIGKILL',
+    });
+    assert.equal(result.status, 2, result.stderr);
+    assert.match(result.stderr, /TEST_ENV_HEALTH_TIMEOUT_SECONDS.*positive integer/);
+    assert.equal(result.stdout, '');
+  });
+}
+
 for (const withSetsid of [true, false]) {
   test(
     `generated launcher survives its caller and stops by descriptor PID (${withSetsid ? 'setsid' : 'nohup fallback'})`,
     { skip: withSetsid && !hasSetsid ? 'setsid is not available on this platform' : false },
     async () => {
       const fixture = makeFixture(withSetsid);
-      const env = { ...process.env, PATH: fixture.path, TEST_ENV_CACHE_TTL_SECONDS: '600' };
+      const env = { ...process.env, PATH: fixture.path, TEST_ENV_CACHE_TTL_SECONDS: '600', TEST_ENV_HEALTH_TIMEOUT_SECONDS: '5' };
       const up = join(fixture.root, '.ai/scripts/test-env-up.sh');
       const down = join(fixture.root, '.ai/scripts/test-env-down.sh');
       const callerPidFile = join(fixture.root, 'caller.pid');
