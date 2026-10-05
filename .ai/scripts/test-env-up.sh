@@ -40,7 +40,11 @@ BROWSER_DOCTOR_JSON="$QA_DIR/browser-doctor.json"
 
 PREFERRED_PORT=4321
 HEALTH_PATH="/api/v1/health"
-HEALTH_TIMEOUT=60
+HEALTH_TIMEOUT=${TEST_ENV_HEALTH_TIMEOUT_SECONDS:-180}
+if ! node -e 'const s=process.argv[1]; process.exit(/^[1-9][0-9]*$/.test(s) && Number.isSafeInteger(Number(s)) ? 0 : 1)' "$HEALTH_TIMEOUT"; then
+  echo "TEST_ENV_HEALTH_TIMEOUT_SECONDS must be a positive integer number of seconds" >&2
+  exit 2
+fi
 TEST_ENV_CACHE_TTL_SECONDS=${TEST_ENV_CACHE_TTL_SECONDS:-600}
 
 # The preparation chain: install workspace links/dependencies, server `tsc` →
@@ -116,7 +120,7 @@ port_free() {
   ' "$1" 2>/dev/null
 }
 
-http_ok() { curl -fsS --max-time 5 "$1" >/dev/null 2>&1; }
+http_ok() { curl -fsS --max-time "${2:-5}" "$1" >/dev/null 2>&1; }
 
 json_get() { node -e '
   const fs = require("fs");
@@ -478,21 +482,34 @@ start_app() {
   fi
   APP_PID=$!
 
-  waited=0
-  while [ "$waited" -lt "$HEALTH_TIMEOUT" ]; do
+  health_started=$(date +%s)
+  health_deadline=$((health_started + HEALTH_TIMEOUT))
+  while : ; do
     if ! kill -0 "$APP_PID" 2>/dev/null; then
       log "the app exited during boot — see .ai/qa/test-env-app.log"
       tail -20 "$APP_LOG" >&2 || true
       exit 1
     fi
-    if http_ok "$BASE_URL$HEALTH_PATH"; then
-      log "healthy after ${waited}s"
-      return 0
+    health_now=$(date +%s)
+    remaining=$((health_deadline - health_now))
+    [ "$remaining" -gt 0 ] || break
+    # A slow probe must not spend five extra seconds past the overall deadline.
+    probe_timeout=5
+    [ "$remaining" -ge 5 ] || probe_timeout=$remaining
+    if http_ok "$BASE_URL$HEALTH_PATH" "$probe_timeout"; then
+      health_now=$(date +%s)
+      if [ "$health_now" -lt "$health_deadline" ]; then
+        log "healthy after $((health_now - health_started))s"
+        return 0
+      fi
+      break
     fi
+    health_now=$(date +%s)
+    [ "$health_now" -lt "$health_deadline" ] || break
     sleep 1
-    waited=$((waited + 1))
   done
-  log "health wait timed out after ${HEALTH_TIMEOUT}s — see .ai/qa/test-env-app.log"
+  log "health wait timed out after $((health_now - health_started))s — see .ai/qa/test-env-app.log"
+  tail -20 "$APP_LOG" >&2 || true
   kill "$APP_PID" 2>/dev/null || true
   exit 1
 }
