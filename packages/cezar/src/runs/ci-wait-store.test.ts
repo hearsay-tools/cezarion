@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentInput, CiWait } from '@open-mercato/cezar-contract';
 import { RunStore } from './store.ts';
 import { readRunIndexFromDisk } from './run-index.ts';
-import { readPersistedRuns, readPersistedText, seedRuns } from './run-store.testkit.ts';
+import { readPersistedRuns, readPersistedText, runIds, seedRuns } from './run-store.testkit.ts';
 
 describe('atomic CI wait checkpoints', () => {
   let directory: string;
@@ -78,7 +78,7 @@ describe('atomic CI wait checkpoints', () => {
     expect(indexed).toHaveLength(1);
     expect(indexed[0]).toMatchObject({ status: 'failed', error: expect.stringContaining('CI wait state is unreadable') });
     const reopened = RunStore.open(directory, { keepLive: true });
-    expect(reopened.listRuns()).toHaveLength(1);
+    expect(runIds(reopened)).toHaveLength(1);
     expect(reopened.getRun(id)).toMatchObject({ status: 'failed', error: expect.stringContaining('CI wait state is unreadable') });
     expect(reopened.getRun(id)?.ciWait).toBeUndefined();
   });

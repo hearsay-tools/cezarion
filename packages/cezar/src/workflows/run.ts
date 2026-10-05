@@ -2242,6 +2242,9 @@ export class RunManager {
     if (this.disposed || this.recovering) return;
     this.recovering = true;
     try {
+    // Recovery reads the live set (#779): `listRuns()` is the runs `open` loaded by the `live`
+    // column, and finished runs have nothing to recover. The worker passes below go through
+    // indexed queries instead.
     for (const run of this.store.listRuns()) {
       this.store.clearExpiredInboxClaims(run.id, new Date().toISOString());
       this.armInboxClaimExpiry(run.id);
@@ -2254,7 +2257,12 @@ export class RunManager {
     }
     // #469: a generation whose processes died with the old controller is finalized first, so it
     // re-launches through the ordinary Continue path; live task scratch is retained.
-    for (const run of this.store.listRuns()) if (run.delegation?.role === 'worker' && !this.settleOrphanedWorkerExecution(run.id)) this.armOrphanReprobe(run.id);
+    // Any worker, finished or not, may hold a generation a dead controller left `starting`. Its
+    // private proof is read first, so only those workers' records are decoded: settling and
+    // re-probing are no-ops for every other proof phase.
+    for (const id of this.store.listWorkerIds()) {
+      if (this.store.readWorkerExecution(id)?.phase === 'starting' && !this.settleOrphanedWorkerExecution(id)) this.armOrphanReprobe(id);
+    }
     this.reconcileWorkerWaits();
     const live = this.store
       .listRuns()
@@ -2388,9 +2396,11 @@ export class RunManager {
     // one — see `reconcileAutoResumes`.
     } finally { this.recovering = false; }
     // A question a crash caught before or after its commit to the parent still gets routed (#505).
-    for (const run of this.store.listRuns()) if (run.delegation?.role === 'worker') this.routeWorkerQuestion(run.id);
-    this.reconcileWorkerWaits();
-    // A parent reply accepted just before the crash still answers its worker (#505).
+    // Only a family with a live member has anyone left to route to or fall back from.
+    for (const run of this.liveFamilyMembers()) if (run.delegation?.role === 'worker') this.routeWorkerQuestion(run.id);
+    this.reconcileAllWorkerFamilies();
+    // A parent reply accepted just before the crash still answers its worker (#505), and only a
+    // live worker takes one.
     for (const run of this.store.listRuns()) if (run.delegation?.role === 'worker') this.answerRoutedQuestion(run.id);
     for (const run of this.store.listRuns()) {
       if (run.ciWait && !['running', 'waiting', 'queued'].includes(run.status)) this.withdrawCiWait(run.id);
@@ -2421,6 +2431,18 @@ export class RunManager {
     return this.isDisposedDelegatedRun(runId) && !state.cancelled && !state.finishRequested;
   }
 
+  /**
+   * Register an executing run: the ONE way an `ActiveRun` enters `active`. Both construction
+   * sites (`execute` and `runContinuation`, which serves Continue and restart recovery) call it,
+   * so the store pins every run this manager executes (#779) — its record stays the held object
+   * every turn-end handler reads and writes until `dropActive` lets it go. A second site that set
+   * `active` directly would execute a run the store could evict mid-turn (the #811 shape).
+   */
+  private activate(runId: string, state: ActiveRun): void {
+    this.active.set(runId, state);
+    this.store.pin(runId, 'active');
+  }
+
   /** Remove a run from the live registries — keeps `waiting ⊆ active`. */
   private dropActive(runId: string): void {
     const state = this.active.get(runId);
@@ -2441,6 +2463,7 @@ export class RunManager {
     }
     if (state) this.clearMonitoringWakeTimer(state, runId);
     this.active.delete(runId);
+    this.store.unpin(runId, 'active');
     if (!this.disposed && this.store.getRun(runId)?.ciWait) this.queueCiWake(runId);
     if (!this.executions.has(runId) && this.store.getRun(runId)?.stopping) this.store.updateRun(runId, { stopping: undefined });
     this.memoryPausing.delete(runId);
@@ -2460,8 +2483,15 @@ export class RunManager {
     // left a window — measured as exactly one extra task — where the queue saw a free slot and
     // an account that looked healthy, and started work that was already doomed.
     this.scheduleAutoResumeIfLimited(runId);
-    // Closed-session success may have parked a completion wait without a live wire.
-    if (this.store.getRun(runId)?.delegation) this.reconcileWorkerWaits();
+    // Closed-session success may have parked a completion wait without a live wire. The global
+    // pass covers the families still in memory (#779); this run's own family may have just left
+    // the live set with it, so it is reconciled by name first.
+    const settled = this.store.getRun(runId);
+    if (settled?.delegation) {
+      const familyRoot = settled.delegation.role === 'root' ? settled.id : settled.delegation.role === 'worker' ? settled.delegation.parentRunId : undefined;
+      if (familyRoot !== undefined) this.reconcileWorkerWaits(familyRoot);
+      this.reconcileWorkerWaits();
+    }
     this.releaseSlot();
     // A run leaving the active registry may have reached a terminal transition
     // (done/review/failed/cancelled), increasing the finished-worktree count.
@@ -2956,7 +2986,7 @@ export class RunManager {
   claimWorktreeReclaim(runId: string): (() => void) | null {
     if (this.reclaiming.has(runId) || this.isActive(runId)) return null;
     const run = this.store.getRun(runId);
-    if (!run || !isReclaimable(run, this.store.listRuns())) return null;
+    if (!run || !isReclaimable(run, (id) => this.store.getRun(id))) return null;
     this.reclaiming.add(runId);
     return () => { this.reclaiming.delete(runId); };
   }
@@ -3307,7 +3337,7 @@ export class RunManager {
     const parent = this.store.getRun(runId);
     if (parent?.delegation?.role !== 'root') return [];
     const ids = new Set([...parent.delegation.receipts.map(receipt => receipt.workerId),
-      ...this.store.listRuns().filter(run => run.delegation?.role === 'worker' && run.delegation.parentRunId === runId).map(run => run.id)]);
+      ...this.store.listWorkersOf(runId).map(run => run.id)]);
     return parentReadiness(parent, [...ids].map(workerId => ({ workerId, run: this.store.getRun(workerId),
       terminated: this.store.readWorkerExecution(workerId)?.phase === 'complete', result: this.store.getRun(workerId)
         ? this.store.readWorkerResult(runId, workerId) : this.store.readDeletedWorkerResult(runId, workerId),
@@ -3747,8 +3777,7 @@ export class RunManager {
 
   /** Routed questions this parent has not answered yet, by asking worker. */
   private unansweredQuestions(parentId: string): { workerId: string; messageId: string }[] {
-    return this.store.listRuns().flatMap(run => {
-      if (run.delegation?.role !== 'worker' || run.delegation.parentRunId !== parentId) return [];
+    return this.store.listWorkersOf(parentId).flatMap(run => {
       const routed = this.routedAsk(run.id);
       const root = this.store.getRun(parentId);
       const answered = root?.delegation?.role === 'root' && root.delegation.conversation?.outcomes.some(outcome => outcome.requestId === routed?.message.id);
@@ -3762,8 +3791,8 @@ export class RunManager {
     const parent = this.store.getRun(parentId);
     if (parent?.delegation?.role !== 'root') return;
     const state = parent.delegation.conversation ?? { messages: [], outcomes: [] };
-    const routed = this.store.listRuns().flatMap(run => {
-      const ask = run.delegation?.role === 'worker' && run.delegation.parentRunId === parentId ? this.routedAsk(run.id) : undefined;
+    const routed = this.store.listWorkersOf(parentId).flatMap(run => {
+      const ask = this.routedAsk(run.id);
       // An accepted reply still on its way to a live worker answers it; no human card beside it.
       const replied = ask && state.outcomes.some(outcome => outcome.requestId === ask.message.id && outcome.status === 'replied');
       return ask && !(replied && ['queued', 'running', 'waiting'].includes(run.status) && !run.stopping) ? [{ workerId: run.id, ...ask }] : [];
@@ -3845,7 +3874,7 @@ export class RunManager {
     const now = new Date().toISOString();
     for (const root of family) {
       if (root.delegation?.role !== 'root' || !root.delegation.conversation) continue;
-      const next = reconcileConversationState(root, this.store.listRuns(), now, run =>
+      const next = reconcileConversationState(root, (id) => this.store.getRun(id), now, run =>
         run.delegation?.role === 'worker' ? this.store.readWorkerExecution(run.id)?.phase === 'complete' : !this.isActive(run.id));
       if (next && next !== root.delegation.conversation) this.store.commitConversation(root.id, next);
       projectConversationEvents(this.store, this.store.getRun(root.id)!);
@@ -3859,7 +3888,9 @@ export class RunManager {
         const arm = (delay: number) => {
           const handle = setTimeout(() => {
             this.workerWaitTimers.delete(key);
-            try { this.reconcileWorkerWaits(); }
+            // This root's own family by name: it may have no live member left by its deadline
+            // (#779), which the pass over live families would skip.
+            try { this.reconcileWorkerWaits(root.id); this.reconcileWorkerWaits(); }
             catch {
               // A failed disk checkpoint retains the obligation; bounded retry follows the
               // same failure policy as worker wait deadlines, never drops an unhandled error.
@@ -3873,7 +3904,37 @@ export class RunManager {
     }
   }
 
-  /** Authority and wait live on disk; these collections are admission/timer caches only. */
+  /** One delegation family: its root, then the root's direct workers (the store's
+   *  `parent_run_id` query). Workers cannot delegate, so this never recurses. */
+  private familyMembers(rootId: string): RunRecord[] {
+    const root = this.store.getRun(rootId);
+    return [...(root ? [root] : []), ...this.store.listWorkersOf(rootId)];
+  }
+
+  /** Every member of every family with a live member, each once: the families the store holds
+   *  in memory (#779), which is where every delegation sweep that is not about one family looks. */
+  private liveFamilyMembers(): RunRecord[] {
+    const roots = new Set<string>();
+    for (const run of this.store.listRuns()) {
+      if (run.delegation?.role === 'root') roots.add(run.id);
+      else if (run.delegation?.role === 'worker') roots.add(run.delegation.parentRunId);
+    }
+    return [...roots].flatMap(rootId => this.familyMembers(rootId));
+  }
+
+  /**
+   * Recovery's full pass (#661): every family whose root carries a conversation — settled ones
+   * too, so a projection or outcome a crash interrupted is repaired — then every live family.
+   * Only roots with a conversation are read; a settled family without one has nothing to settle.
+   * Everything else asks `reconcileWorkerWaits()`, which covers the live families (#779).
+   */
+  reconcileAllWorkerFamilies(): void {
+    for (const rootId of this.store.listConversationRootIds()) this.reconcileWorkerWaits(rootId);
+    this.reconcileWorkerWaits();
+  }
+
+  /** Authority and wait live on disk; these collections are admission/timer caches only. One
+   *  family by its root's id, or (no id) every family with a live member. */
   reconcileWorkerWaits(familyRootId?: string): void {
     if (this.disposed) return;
     if (this.reconcilingWorkers) {
@@ -3896,10 +3957,11 @@ export class RunManager {
     this.reconcilingWorkers = true;
     this.reconcilingFamily = familyRootId;
     try {
-      const inFamily = (run: RunRecord) => familyRootId === undefined || run.id === familyRootId ||
-        (run.delegation?.role === 'worker' && run.delegation.parentRunId === familyRootId);
-      this.reconcileConversations(this.store.listRuns().filter(inFamily));
-      for (const parent of this.store.listRuns().filter(inFamily)) {
+      // One family by name, or every family with a live member (#779): a family nobody in it is
+      // live has nothing left to settle, and its members are no longer in memory.
+      const family = familyRootId === undefined ? this.liveFamilyMembers() : this.familyMembers(familyRootId);
+      this.reconcileConversations(family);
+      for (const parent of family) {
         if (!parent.delegation || parent.delegation.role === 'invalid' || this.historyDeletionPending(parent.id)) continue;
         if (parent.status === 'cancelled' && parent.delegation.role === 'root' && parent.delegation.finishRequestedAt) {
           this.store.commitRootFinishCancellation(parent.id);
@@ -3908,7 +3970,7 @@ export class RunManager {
           if (!this.recovering) {
             this.withdrawWorkerWait(parent.id);
             this.fallbackRoutedQuestions(parent.id, `parent-${parent.status}`);
-            for (const child of this.store.listRuns().filter(child => parent.delegation?.role === 'root' && parent.status !== 'review' && child.delegation?.role === 'worker' && child.delegation.parentRunId === parent.id)) {
+            for (const child of parent.delegation.role === 'root' && parent.status !== 'review' ? this.store.listWorkersOf(parent.id) : []) {
               if (['queued', 'running', 'waiting'].includes(child.status)) this.cancel(child.id);
             }
           }
@@ -3938,7 +4000,7 @@ export class RunManager {
           continue;
         }
         const now = new Date().toISOString();
-        const outcomes = this.store.listRuns().filter(child => child.delegation?.role === 'worker' && child.delegation.parentRunId === parent.id).flatMap(child => {
+        const outcomes = this.store.listWorkersOf(parent.id).flatMap(child => {
           const outcome = workerOutcome(child, now);
           return outcome && this.store.readWorkerExecution(child.id)?.phase === 'complete' ? [outcome] : [];
         });
@@ -4724,7 +4786,20 @@ export class RunManager {
    * behaves exactly like an interactive step: `waiting` after each turn,
    * messages via sendMessage, closed by finish/idle/cancel.
    */
-  continueRun(
+  continueRun(...args: Parameters<RunManager['admitContinuation']>): ReturnType<RunManager['admitContinuation']> {
+    // A finished run is loaded and held for the whole admission (#779): every read below sees
+    // the record its own writes change, exactly as for a live run. Admission makes it live
+    // (queued or running) or refuses it; either way the `continue` pin ends here.
+    const [runId] = args;
+    this.store.pin(runId, 'continue');
+    try {
+      return this.admitContinuation(...args);
+    } finally {
+      this.store.unpin(runId, 'continue');
+    }
+  }
+
+  private admitContinuation(
     runId: string,
     opts: {
       text?: string;
@@ -5070,7 +5145,7 @@ export class RunManager {
       pendingHumanAsk: this.hasPendingHumanAsk(runId),
       autonomous: record?.autonomous === true, autoContinues: 0,
     };
-    this.active.set(runId, state);
+    this.activate(runId, state);
     this.starting.delete(runId);
     if (state.cwd === this.repoRoot) {
       if (repositoryRootLockDisabled()) {
@@ -5642,7 +5717,7 @@ export class RunManager {
       autonomous: input.autonomous === true,
       autoContinues: 0,
     };
-    this.active.set(runId, state);
+    this.activate(runId, state);
     this.starting.delete(runId);
     const emit = (event: { type: string; stepId?: string; [k: string]: unknown }) =>
       this.store.appendEvent(runId, event);

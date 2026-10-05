@@ -633,8 +633,14 @@ export async function driveRun(
   settled: (record: RunRecord | undefined) => boolean,
   timeoutMs = 30_000,
   afterSettled?: (context: { store: RunStore; manager: RunManager; runId: string }) => Promise<void>,
-  options: { autonomous?: boolean; workflowDef?: WorkflowDef } = {},
+  options: {
+    autonomous?: boolean;
+    workflowDef?: WorkflowDef;
+    /** Called with the fresh store and manager before the run starts (to observe either). */
+    beforeStart?: (context: { store: RunStore; manager: RunManager }) => void;
+  } = {},
 ): Promise<RunObservation> {
+  const { beforeStart, ...runOptions } = options;
   const adapter = HARNESS_ADAPTERS[backend];
   const savedBin = process.env[adapter.binEnv];
   const savedDry = process.env.CEZ_DRY_RUN;
@@ -654,8 +660,9 @@ export async function driveRun(
     await execFileAsync('git', [...GIT_IDENTITY, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
     manager = createFixtureManager(store, repoRoot);
-    const started = manager.startRun(options.workflowDef ?? SINGLE_STEP, {
-      ...options,
+    beforeStart?.({ store, manager });
+    const started = manager.startRun(runOptions.workflowDef ?? SINGLE_STEP, {
+      ...runOptions,
       task: typeof scenario === 'string' ? promptFor(backend, scenario) : scenario.prompt,
       runner: backend,
       worktree: false,
@@ -894,8 +901,8 @@ export async function withSkillParentRun(
     });
     await body({ repoRoot, parentRunId: parent.id, runId: child.workerId, store, manager });
   } finally {
-    for (const run of store?.listRuns() ?? []) manager?.cancel(run.id);
-    if (manager && store) await waitFor(() => store!.listRuns().every(run => !manager!.isActive(run.id)), 30_000);
+    for (const id of store?.listRunIds() ?? []) manager?.cancel(id);
+    if (manager && store) await waitFor(() => store!.listRunIds().every(id => !manager!.isActive(id)), 30_000);
     await drainBookkeeping();
     await controller?.close();
     manager?.dispose();

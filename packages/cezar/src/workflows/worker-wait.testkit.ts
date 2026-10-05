@@ -37,7 +37,7 @@ let began = 0;
 let failureState: unknown;
 export function checkpoint(value: string) { phase = value; checkpoints.push({ phase, ms: Math.round(performance.now() - began) }); }
 export function captureState() { return { root, phase, checkpoints: checkpoints.map(entry => ({ ...entry })), elapsedMs: Math.round(performance.now() - began), busy: semaphore?.busy(),
-  runs: store?.listRuns().map(run => ({ id: run.id, status: run.status, error: run.error, step: run.currentStepId, wait: waitOf(run)?.phase,
+  runs: store?.listRunIds().flatMap(id => store!.getRun(id) ?? []).map(run => ({ id: run.id, status: run.status, error: run.error, step: run.currentStepId, wait: waitOf(run)?.phase,
     events: store.readEvents(run.id).slice(-6).map(event => ({ type: event.type, seq: event.seq, ...('message' in event ? { message: String(event.message).slice(0, 256) } : {}) })) })),
 }; }
 export const bookkeeping: Promise<unknown>[] = [];
@@ -77,8 +77,8 @@ export function useWorkerWaitFixture(options: { processScope?: false } = {}): vo
       const engine = manager as unknown as { starting: Set<string>; active: Map<string, { sessionEverOpened?: boolean }> };
       return engine.starting.size === 0 && [...engine.active.values()].every(state => state.sessionEverOpened);
     });
-    for (const run of store.listRuns()) manager.cancel(run.id);
-    await until(() => store.listRuns().every(run => !manager.isActive(run.id)));
+    for (const id of store.listRunIds()) manager.cancel(id);
+    await until(() => store.listRunIds().every(id => !manager.isActive(id)));
     await Promise.all(executions.splice(0));
     await Promise.all(bookkeeping.splice(0));
     manager.dispose(); store.close();
@@ -145,8 +145,8 @@ export function eventCheckpoint(): Map<string, string> {
 export async function restart(fakeClock = false, diskCheckpoint?: readonly unknown[], events?: Map<string, string>) {
   checkpoint('restart-stop-start');
   store.flush(); const disk = diskCheckpoint ?? readPersistedRuns(join(root, '.ai/cezar'));
-  for (const run of store.listRuns()) manager.cancel(run.id);
-  await until(() => store.listRuns().every(run => !manager.isActive(run.id)));
+  for (const id of store.listRunIds()) manager.cancel(id);
+  await until(() => store.listRunIds().every(id => !manager.isActive(id)));
   await Promise.all(executions.splice(0));
   await Promise.all(bookkeeping.splice(0)); manager.dispose(); store.close(); checkpoint('restart-stopped');
   seedRuns(join(root, '.ai/cezar'), disk);

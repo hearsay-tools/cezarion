@@ -49,17 +49,29 @@ describe('terminal delegation checkpoint reconciliation (#661)', () => {
   });
 
   it('retains global reconciliation for recovery and explicit callers', () => {
-    manager.reconcileWorkerWaits();
+    // The full pass recovery runs (#779): settled families are no longer in memory, and the
+    // pass over live families would skip them.
+    manager.reconcileAllWorkerFamilies();
     for (const family of [a, b]) expect(store.readEvents(family.parentId).some(e => e.type === 'conversation-message')).toBe(true);
   });
 
-  it.each(['family', 'global'] as const)('does not lose a %s request emitted during reconciliation', scope => {
+  it('reconciles only the families with a live member when no family is named', () => {
+    store.updateRun(b.workerId, { status: 'running' });
+    manager.reconcileWorkerWaits();
+    expect(store.readEvents(a.parentId).some(e => e.type === 'conversation-message')).toBe(false);
+    expect(store.readEvents(b.parentId).some(e => e.type === 'conversation-message')).toBe(true);
+  });
+
+  it.each(['family', 'full', 'live'] as const)('does not lose a %s request emitted during reconciliation', scope => {
+    // A live family is reached by the unnamed pass; the settled one only by name or the full pass.
+    if (scope === 'live') store.updateRun(b.workerId, { status: 'running' });
     const append = store.appendEvent.bind(store);
     let changed = false;
     vi.spyOn(store, 'appendEvent').mockImplementation((id, event) => {
       if (!changed && id === a.parentId && event.type === 'conversation-message') {
         changed = true;
         if (scope === 'family') cleanupCheckpoint(store, b.workerId);
+        else if (scope === 'full') manager.reconcileAllWorkerFamilies();
         else manager.reconcileWorkerWaits();
       }
       return append(id, event);

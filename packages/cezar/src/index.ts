@@ -284,7 +284,7 @@ async function serveCommand(
 
   // Startup reconcile (spec 006): sweep worktrees whose run no longer exists.
   if (repo) {
-    const orphans = await pruneOrphans(repoRoot, new Set(store.listRuns().map((r) => r.id))).catch(
+    const orphans = await pruneOrphans(repoRoot, new Set(store.listRunIds())).catch(
       () => [] as string[],
     );
     if (orphans.length > 0) {

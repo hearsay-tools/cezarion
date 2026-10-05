@@ -1,4 +1,5 @@
 import { scopeFixtureProcesses } from './process-scope.testkit.ts';
+import { runIds } from '../runs/run-store.testkit.ts';
 import { syncBuiltinESMExports } from 'node:module';
 import { createFixtureManager } from '../workflows/fixture-cleanup.testkit.ts';
 import { createHash, randomUUID } from 'node:crypto';
@@ -523,7 +524,8 @@ describe('delegation service durable authority', () => {
     expect(thirtyThird.workerId).not.toBe(result.workerId);
     await expect(f.service.spawn(f.caller, input())).rejects.toMatchObject({ code: 'capacity_limit' });
     expect(await f.service.spawn(f.caller, first)).toEqual(result);
-    expect(f.store.listRuns()).toHaveLength(34);
+    // Every run, the destroyed worker included: it is settled, so no longer in memory (#779).
+    expect(runIds(f.store)).toHaveLength(34);
   });
   it('keeps capacity during incomplete cleanup and releases it once when a retry completes (#816)', { timeout: 60_000 }, async () => {
     const { workerId } = await f.service.spawn(f.caller, input());

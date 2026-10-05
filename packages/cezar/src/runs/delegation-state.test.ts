@@ -14,7 +14,7 @@ import {
 import type { DelegationState } from '@open-mercato/cezar-contract';
 import { RunStore, runRecordSchema } from './store.ts';
 import { parentReadiness } from '../delegation/readiness.ts';
-import { blockRunWrites, readPersistedRuns, readPersistedText, seedRuns } from './run-store.testkit.ts';
+import { blockRunWrites, readPersistedRuns, readPersistedText, runIds, seedRuns } from './run-store.testkit.ts';
 
 const workerId = randomUUID();
 const requestId = randomUUID();
@@ -596,7 +596,7 @@ describe('RunStore durable delegation', () => {
     const rows = disk().map((r: { id: string }) => r.id === broken.id ? { ...r, delegation: { role: 'worker', parentRunId: 'bad' } } : r);
     seedRuns(dataDir, rows);
     store = RunStore.open(dataDir, { keepLive: true });
-    expect(store.listRuns()).toHaveLength(3);
+    expect(runIds(store)).toHaveLength(3);
     expect(store.getRun(legacy.id)?.delegation).toBeUndefined();
     expect(store.getRun(broken.id)?.delegation).toEqual({ role: 'invalid' });
     expect(store.getRun(valid.id)?.delegation).toEqual(root);

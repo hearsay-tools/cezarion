@@ -10,7 +10,7 @@ import { ensureOwnedWorkspace, planOwnedWorkspace } from './workspace.ts';
 import { RunStore } from '../runs/store.ts';
 
 import { QUICK_TASK_WORKFLOW } from '../workflows/types.ts';
-import { readPersistedRuns, seedRuns } from '../runs/run-store.testkit.ts';
+import { readPersistedRuns, seedRuns, runIds } from '../runs/run-store.testkit.ts';
 
 vi.mock('node:fs', async original => {
   const fs = await original<typeof import('node:fs') & { default: typeof import('node:fs') }>();
@@ -317,7 +317,7 @@ describe('verified destruction retains results through explicit history deletion
     expect(() => f.store.createOwnedRun({ title: 'child', task: 'child', workflow: 'quick-task', steps: [] }, f.parent.id, randomUUID(), {
       role: 'worker', permissions: [], parentRunId: f.parent.id, workspace,
     }, 'a'.repeat(64))).toThrow('invalid delegation parent');
-    expect(f.store.listRuns()).toHaveLength(1);
+    expect(runIds(f.store)).toHaveLength(1);
     expect(f.store.deleteRun(f.parent.id)).toBe(true);
   });
 

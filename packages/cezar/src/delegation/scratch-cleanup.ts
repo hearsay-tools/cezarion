@@ -20,19 +20,25 @@ export class WorkerScratchCleanup {
     this.enabled = true;
     clearTimeout(this.recoveryTimer); this.recoveryTimer = undefined;
     const retained = workerEvidenceRunIds(this.dataDir);
-    for (const id of new Set([...this.store.listRuns().map(run => run.id), ...(retained ?? [])])) this.schedule(id);
+    // Only runs that can own scratch matter: the live set, and every worker or quarantined run
+    // by id (indexed, nothing decoded, #779). Other finished runs were reaped when they ended.
+    const live = this.store.listRuns();
+    const owners = [...this.store.listWorkerIds(), ...this.store.listQuarantinedRunIds()];
+    for (const id of new Set([...live.map(run => run.id), ...owners, ...(retained ?? [])])) this.schedule(id);
     // The sweep independently reserves every private-evidence id, even if the index lost it.
-    sweepAgentTmpDirs(this.dataDir, this.store.listRuns().filter(run =>
-      this.busy(run.id) || ['queued', 'running', 'waiting'].includes(run.status) || run.delegation?.role === 'worker' || run.delegation?.role === 'invalid').map(run => run.id));
+    sweepAgentTmpDirs(this.dataDir, [...new Set([...live.filter(run =>
+      this.busy(run.id) || ['queued', 'running', 'waiting'].includes(run.status)).map(run => run.id), ...owners])]);
     if (!retained) { // failed enumeration must not permanently lose a wake source
       this.recoveryTimer = setTimeout(() => this.recover(), 60_000); this.recoveryTimer.unref?.();
     }
   }
   schedule(id: string, delay = 0): void {
-    const run = this.store.getRun(id);
-    if (!this.enabled || this.timers.has(id) || (run && (['queued', 'running', 'waiting'].includes(run.status) ||
-      (run.delegation?.role !== 'worker' && run.delegation?.role !== 'invalid')))) return;
+    if (!this.enabled || this.timers.has(id)) return;
+    // The scratch check first: most ids have none, and a finished record is decoded to ask (#779).
     if (!agentTmpDirMayExist(this.dataDir, id)) return;
+    const run = this.store.getRun(id);
+    if (run && (['queued', 'running', 'waiting'].includes(run.status) ||
+      (run.delegation?.role !== 'worker' && run.delegation?.role !== 'invalid'))) return;
     // Reconstruct older complete checkpoints while the valid terminal index still exists.
     try { this.store.retainWorkerScratchCleanup(id); } catch { /* retry unreadable evidence */ }
     const proof = this.store.readWorkerExecution(id);

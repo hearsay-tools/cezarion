@@ -4,7 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 
 import { RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY, RunDatabase, type RunRowInput } from './run-database.ts';
 import { encodeRunRow } from './run-row.ts';
-import type { RunRecord } from './store.ts';
+import type { RunRecord, RunStore } from './store.ts';
 
 /**
  * The one way tests put runs on disk and read them back (#779). Every test that seeded or read
@@ -57,6 +57,12 @@ function seedRow(record: Record<string, unknown>): RunRowInput {
     data: JSON.stringify(record),
     summary: encoded?.summary ?? '{}',
   };
+}
+
+/** The id of every run the store knows, held or only in `runs.db`, newest first. `listRuns()` is
+ *  the live set only (#779), so a test about every run reads the list rows instead. */
+export function runIds(store: RunStore): string[] {
+  return store.listRunSummaries().runs.map((run) => run.id);
 }
 
 /**

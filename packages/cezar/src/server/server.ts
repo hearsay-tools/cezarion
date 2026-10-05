@@ -3851,10 +3851,12 @@ export function createApp(deps: ServerDeps) {
       ...(finishBlocked !== undefined ? { finishBlocked } : {}) };
   };
 
-  // A list row (#817), with the same live `usage` sample `withUsage` attaches.
-  const runSummary = (run: RunRecord): RunSummary => {
-    const usage = currentUsage(run.id);
-    return toRunSummary(usage ? { ...run, usage } : run);
+  // A list row (#817) with the same live `usage` sample `withUsage` attaches. The sampler is
+  // process-wide, so a workspace-level answer can carry it for every project's runs at once — a
+  // cold project's stored summaries included. Appended last, exactly where `toRunSummary` puts it.
+  const withLiveUsage = (summary: RunSummary): RunSummary => {
+    const usage = currentUsage(summary.id);
+    return usage ? { ...summary, usage } : summary;
   };
 
   // The inbox half of a composer launch (#374). Since the cockpit's "▶ Run"
@@ -3881,10 +3883,11 @@ export function createApp(deps: ServerDeps) {
   const delegationService = deps.delegation?.service ?? new DelegationService();
   delegationService.setDiscovery({ models: modelCatalog, providers: providerStatus });
   const runsRoutes = new Hono<ProjectApiEnv>()
-    .get('/runs', (c) => c.json(c.get('project').store.listRuns().map(run => withUsage(run))))
-    // The slim list (#817): the same runs in the same order as `GET /runs`, projected by the one
-    // shared `toRunSummary` so lists never parse `task`, `steps[]` or the full delegation state.
-    .get('/run-summaries', (c) => c.json(c.get('project').store.listRuns().map(run => runSummary(run))))
+    // Legacy (older clients): every full record. The cockpit and `cez task` read `/run-summaries`.
+    .get('/runs', (c) => c.json(c.get('project').store.listAllRunsForLegacyRoute().map(run => withUsage(run))))
+    // The slim list (#817): the same runs in the same order as `GET /runs`, from the stored
+    // `toRunSummary` column with memory laid over it (#779), so the list decodes no record.
+    .get('/run-summaries', (c) => c.json(c.get('project').store.listRunSummaries().runs.map(withLiveUsage)))
     .get('/runs/:id/relationships', paramZodValidator(runIdParamSchema), queryZodValidator(workerEmptyRequestSchema), (c) => {
       const { store } = c.get('project');
       const run = store.getRun(c.req.valid('param').id);
@@ -4854,8 +4857,7 @@ export function createApp(deps: ServerDeps) {
 
   const groupRuns = (store: RunStore, groupId: string): RunRecord[] =>
     store
-      .listRuns()
-      .filter((r) => r.groupId === groupId)
+      .listGroupRuns(groupId)
       .sort((a, b) => (a.variant ?? '').localeCompare(b.variant ?? ''));
 
   // ---- chained family: variant groups (project-scoped) ----
@@ -5032,12 +5034,12 @@ export function createApp(deps: ServerDeps) {
       // The keep-limit the panel reports is the one the enforcer will actually
       // apply — inherited from the workspace default when this repo sets none.
       const keep = await resolveWorktreeRetention(repoRoot);
-      const allRuns = store.listRuns();
-      // Listing is on-disk dirs only; parent liveness for #575 uses the full store
+      const withWorktree = store.listRunsWithWorktree();
+      // Listing is on-disk dirs only; parent liveness for #575 reads the store by id
       // so a live `worktree: false` parent is not treated as gone (#570 honesty).
-      const runs = allRuns.filter((r) => r.worktreePath && existsSync(r.worktreePath));
+      const runs = withWorktree.filter((r) => r.worktreePath && existsSync(r.worktreePath));
       // The rows the enforcer would reclaim right now: reclaimable AND past the newest `keep`.
-      const pastKeep = new Set(selectReclaimableWorktrees(allRuns, keep));
+      const pastKeep = new Set(selectReclaimableWorktrees(withWorktree, keep, (id) => store.getRun(id)));
       const worktrees = await Promise.all(
         runs.map(async (r) => ({
           runId: r.id,
@@ -5047,7 +5049,7 @@ export function createApp(deps: ServerDeps) {
           // POSIX `du` — degrades to null (Windows / du missing / error); never blocks.
           sizeBytes: await worktreeSizeBytes(r.worktreePath as string),
           finishedAt: r.finishedAt ?? null,
-          reclaimable: isReclaimable(r, allRuns),
+          reclaimable: isReclaimable(r, (id) => store.getRun(id)),
           pastKeep: pastKeep.has(r.id),
         })),
       );
@@ -5659,7 +5661,7 @@ export function createApp(deps: ServerDeps) {
     const config = await loadConfig(project.root);
     return {
       root: info.root,
-      runs: project.store.listRuns(),
+      runs: project.store.listBranchOwners(),
       isActive: (id) => project.manager.isActive(id),
       configuredBase: config.baseBranch,
       currentBranch: info.branch,
@@ -5691,7 +5693,7 @@ export function createApp(deps: ServerDeps) {
       ]);
       const [tracking, sources] = await Promise.all([
         getTracking(info.root, config.baseBranch ?? info.branch),
-        attributeLog(info.root, rawLog, c.get('project').store.listRuns()),
+        attributeLog(info.root, rawLog, c.get('project').store.listBranchOwners()),
       ]);
       // `source` is spread conditionally: absent, never `null`, when no task is known.
       const log = rawLog.map(({ parents: _parents, ...entry }, i) => {
@@ -5802,7 +5804,9 @@ export function createApp(deps: ServerDeps) {
       if (!info) return c.json({ error: 'not a git repository' }, 409);
       const config = await loadConfig(root);
       const result = await pullRepoCheckout(info.root, c.req.valid('json'), config.baseBranch,
-        () => store.listRuns().some((run) => manager.isActive(run.id)));
+        // Every id, not the live set: the manager may still hold a run whose record already
+        // settled (a worker's execution winding down). Ids only, nothing decoded.
+        () => store.listRunIds().some((id) => manager.isActive(id)));
       if (!result.ok) return c.json(result.value, 409);
       return c.json(result.value, 200);
     })
@@ -6095,14 +6099,6 @@ export function createApp(deps: ServerDeps) {
     return numbers;
   };
 
-  // The live sample rides along on the same terms as `GET /runs`: the sampler is process-wide, so
-  // a workspace-level answer can carry it for every project's runs at once — a cold project's
-  // stored summaries included.
-  const withLiveUsage = (summary: RunSummary): RunSummary => {
-    const usage = currentUsage(summary.id);
-    return usage ? { ...summary, usage } : summary;
-  };
-
   /**
    * `GET /workspace/runs-index` — every registered project's recent tasks in one slim answer, so
    * ⌘K can find a task without knowing which project it lives in.
@@ -6152,9 +6148,9 @@ export function createApp(deps: ServerDeps) {
         // exact asymmetry a cross-project finder exists to remove.
         let recent: RunSummary[];
         if (owned) {
-          const all = owned.store.listRuns();
-          if (all.length > RUNS_INDEX_PER_PROJECT) truncated.push(project.id);
-          recent = all.slice(0, RUNS_INDEX_PER_PROJECT).map((run) => runSummary(run));
+          const newest = owned.store.listRunSummaries({ limit: RUNS_INDEX_PER_PROJECT });
+          if (newest.truncated) truncated.push(project.id);
+          recent = newest.runs.map(withLiveUsage);
         } else {
           const cold = readRunIndexFromDisk(join(project.root, '.ai/cezar'), {
             handle: coldRepoHandles.get(project.root), limit: RUNS_INDEX_PER_PROJECT,

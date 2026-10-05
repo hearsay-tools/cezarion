@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { toRunSummary } from '@open-mercato/cezar-contract';
 
 import { RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY, RunDatabase, type RunDatabaseChanges } from './run-database.ts';
-import { blockRunWrites, readPersistedRuns, seedRuns } from './run-store.testkit.ts';
+import { blockRunWrites, readPersistedRuns, runIds, seedRuns } from './run-store.testkit.ts';
 import { LEGACY_INDEX_BACKUP_FILE, RunStore, type RunRecord } from './store.ts';
 
 /** RunStore on `runs.db` (#779): import, failure ordering, dirty-only saves, disposal. */
@@ -56,7 +56,7 @@ describe('importing runs.json', () => {
     writeFileSync(join(dataDir, 'runs.json'), bytes);
 
     const store = open();
-    expect(store.listRuns().map((run) => run.id)).toEqual(['bb', 'a']);
+    expect(runIds(store)).toEqual(['bb', 'a']);
     expect(readFileSync(join(dataDir, LEGACY_INDEX_BACKUP_FILE), 'utf8')).toBe(bytes);
     expect(readPersistedRuns(dataDir).map((run) => run.id)).toEqual(['bb', 'a']);
 
@@ -90,19 +90,19 @@ describe('importing runs.json', () => {
   ])('starts fresh from an unparseable runs.json (%s), as it always has, and keeps its bytes', (_, bytes) => {
     writeFileSync(join(dataDir, 'runs.json'), bytes);
     const store = open();
-    expect(store.listRuns()).toEqual([]);
+    expect(runIds(store)).toEqual([]);
     expect(readFileSync(join(dataDir, LEGACY_INDEX_BACKUP_FILE), 'utf8')).toBe(bytes);
 
     const run = store.createRun({ title: 'new', workflow: 'w', task: 't', steps: [] });
     store.flush();
     // Before #779 the next save overwrote the unreadable file; now nothing writes it.
     expect(readFileSync(join(dataDir, 'runs.json'), 'utf8')).toBe(bytes);
-    expect(RunStore.open(dataDir).listRuns().map((saved) => saved.id)).toEqual([run.id]);
+    expect(runIds(RunStore.open(dataDir))).toEqual([run.id]);
   });
 
   it('starts an empty database when there is nothing to import', () => {
     const store = open();
-    expect(store.listRuns()).toEqual([]);
+    expect(runIds(store)).toEqual([]);
     expect(existsSync(join(dataDir, LEGACY_INDEX_BACKUP_FILE))).toBe(false);
     const run = store.createRun({ title: 'new', workflow: 'w', task: 't', steps: [] });
     store.flush();
@@ -118,7 +118,7 @@ describe('importing runs.json', () => {
     const release = blockRunWrites(dataDir);
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
-      expect(open().listRuns()).toEqual([]);
+      expect(runIds(open())).toEqual([]);
     } finally {
       release();
     }
@@ -131,7 +131,7 @@ describe('importing runs.json', () => {
       db.close();
     }
     // Nothing was half-imported, so the next open simply imports.
-    expect(open().listRuns().map((run) => run.id)).toEqual(['bb', 'a']);
+    expect(runIds(open())).toEqual(['bb', 'a']);
   });
 });
 
@@ -142,7 +142,7 @@ describe('a database that cannot be opened', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     const store = open();
-    expect(store.listRuns()).toEqual([]);
+    expect(runIds(store)).toEqual([]);
     expect(warn).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('runs database unavailable (corrupt)'));
 
     vi.useFakeTimers();
@@ -158,14 +158,20 @@ describe('a database that cannot be opened', () => {
   });
 
   it('loads every readable row and leaves an unreadable one in the database untouched', () => {
-    seedRuns(dataDir, [record('a'), { id: 'broken', status: 'done', createdAt: '2026-09-09T00:00:00.000Z' }, record('bb')]);
+    // Open decodes the live rows only, so the unreadable live row is the one it reports; the
+    // unreadable finished row is skipped wherever it is read.
+    seedRuns(dataDir, [
+      record('a'), { id: 'broken', status: 'running', createdAt: '2026-09-09T00:00:00.000Z' },
+      { id: 'broken-done', status: 'done', createdAt: '2026-09-08T00:00:00.000Z' }, record('bb'),
+    ]);
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const store = open();
-    expect(store.listRuns().map((run) => run.id)).toEqual(['bb', 'a']);
+    expect(runIds(store)).toEqual(['bb', 'a']);
+    expect(store.getRun('broken-done')).toBeUndefined();
     expect(warn).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('1 run(s) in runs.db could not be read'));
     store.updateRun('a', { title: 'touched' });
     store.flush();
-    expect(readPersistedRuns(dataDir).map((run) => run.id)).toEqual(['broken', 'bb', 'a']);
+    expect(readPersistedRuns(dataDir).map((run) => run.id)).toEqual(['broken', 'broken-done', 'bb', 'a']);
   });
 });
 

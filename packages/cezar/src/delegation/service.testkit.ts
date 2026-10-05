@@ -12,9 +12,10 @@ import { DelegationService } from './service.ts';
 
 export async function waitForOwnedWork(manager: RunManager, store: RunStore): Promise<void> {
   // Root runs have no worker execution proof; fixture tracking drains those.
-  for (const run of store.listRuns().filter(run => run.delegation?.role === 'worker' && manager.isActive(run.id))) {
-    manager.cancel(run.id);
-    if (!await manager.awaitRunTermination(run.id, 8_000)) throw new Error(`Worker did not terminate: ${run.id}`);
+  // Every worker id: a manager may still hold a worker whose record already settled (#779).
+  for (const id of store.listWorkerIds().filter(id => manager.isActive(id))) {
+    manager.cancel(id);
+    if (!await manager.awaitRunTermination(id, 8_000)) throw new Error(`Worker did not terminate: ${id}`);
   }
 }
 

@@ -256,7 +256,9 @@ export class ProjectContexts {
     // The preview host is process-wide and outlives this context: a removed project's dev servers
     // and browsers go with it (#781). Shutdown leaves that to `PreviewHost.close()`.
     if (opts.releasePreviews !== false && this.deps.preview) {
-      for (const run of ctx.store.listRuns()) void this.deps.preview.release(run.id).catch(() => undefined);
+      // Every run id, not only the held ones: a finished run's dev server may still be up. A run
+      // without one is a no-op for the host.
+      for (const id of ctx.store.listRunIds()) void this.deps.preview.release(id).catch(() => undefined);
     }
     this.repoHandleControllers.get(ctx.store)?.abort();
     this.repoHandleControllers.delete(ctx.store);
@@ -296,7 +298,7 @@ export class ProjectContexts {
       // best-effort sweeps serveCommand runs for the boot project, gated on the
       // root actually being a git repo.
       if (await getRepoInfo(project.root)) {
-        await pruneOrphans(project.root, new Set(store.listRuns().map((r) => r.id))).catch(
+        await pruneOrphans(project.root, new Set(store.listRunIds())).catch(
           () => [] as string[],
         );
         const keep = await resolveWorktreeRetention(project.root).catch(

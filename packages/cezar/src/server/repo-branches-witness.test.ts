@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { RunRecord } from '../runs/store.ts';
+import { branchOwnerOf, type RunRecord } from '../runs/store.ts';
 
 const exec = promisify(execFile);
 const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
@@ -61,7 +61,7 @@ describe('deleting an empty branch whose commits another ref keeps (issue 08)', 
     const runs = [{
       id: 'aaaaaaaa-1', title: 't', workflow: 'w', task: 't', status: 'done', steps: [],
       createdAt: '2026-09-01T00:00:00.000Z', archived: false, branch: 'cez/aaaaaaaa', baseBranch: 'topic',
-    } as unknown as RunRecord];
+    } as unknown as RunRecord].flatMap((run) => branchOwnerOf(run) ?? []);
     const result = await deleteBranches(
       { root, runs, isActive: () => false, currentBranch: 'main', hasRemote: false, forge: { prStates: async () => ({ available: true, states: {} }), listPrs: async () => ({ available: true, prs: [] }) } },
       ['cez/aaaaaaaa'],

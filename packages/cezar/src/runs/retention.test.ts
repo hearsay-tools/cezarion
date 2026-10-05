@@ -145,14 +145,14 @@ describe('selectReclaimableWorktrees (#483)', () => {
       role: 'worker',
       finishedAt: '2026-07-01T00:00:00Z',
     });
-    expect(isReclaimable(worker, [parent, worker])).toBe(false);
+    expect(isReclaimable(worker, (id) => [parent, worker].find((r) => r.id === id))).toBe(false);
     expect(selectReclaimableWorktrees([parent, worker], 1)).toEqual([]);
     const finishedParent = run({
       id: 'parent',
       status: 'done',
       finishedAt: '2026-07-02T00:00:00Z',
     });
-    expect(isReclaimable(worker, [finishedParent, worker])).toBe(true);
+    expect(isReclaimable(worker, (id) => [finishedParent, worker].find((r) => r.id === id))).toBe(true);
     expect(selectReclaimableWorktrees([finishedParent, worker], 1)).toEqual(['w']);
   });
 

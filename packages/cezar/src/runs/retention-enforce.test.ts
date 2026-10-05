@@ -40,7 +40,8 @@ async function branchExists(repo: string, runId: string): Promise<boolean> {
 function fakeStore(runs: RunRecord[]): RetentionStore & { runs: RunRecord[] } {
   return {
     runs,
-    listRuns: () => runs,
+    listRunsWithWorktree: () => runs.filter((r) => r.worktreePath !== undefined && r.worktreeReclaimedAt === undefined),
+    getRun: (id) => runs.find((r) => r.id === id),
     updateRun: (id, patch) => {
       const r = runs.find((x) => x.id === id);
       if (r) Object.assign(r, patch);

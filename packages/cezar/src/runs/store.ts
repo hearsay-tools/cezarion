@@ -9,10 +9,10 @@ import { join, resolve } from 'node:path';
 import { z } from 'zod';
 import {
   ciWaitSchema, agentInputSchema, inboxClaimSchema, delegationStateSchema, workerCreationReceiptSchema, workerCollectedResultSchema, workerResultFileSchema,
-  continuationMessageSchema, previewServerSchema,
+  continuationMessageSchema, previewServerSchema, runSummarySchema, toRunSummary,
   runRecordSchema as contractRunRecordSchema,
 } from '@open-mercato/cezar-contract';
-import type { ArchiveFinishedScope, CiWait, ConversationState, AgentInput, InboxClaim, DelegationState, WorkerCollectedResult } from '@open-mercato/cezar-contract';
+import type { ArchiveFinishedScope, CiWait, ConversationState, AgentInput, InboxClaim, DelegationState, RunSummary, WorkerCollectedResult } from '@open-mercato/cezar-contract';
 import { storedDelegationStateSchema } from './delegation-state.ts';
 import { refreshHumanAskSummary } from './human-ask-summary.ts';
 import { workerExecutionIdentitySchema, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
@@ -26,8 +26,8 @@ import { MAX_REF } from './task-refs.ts';
 import { workflowDefSchema } from '../workflows/types.ts';
 
 import { RUNNER_IDS } from '../core/agent-runner.ts';
-import { RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY, RunDatabase, RunDatabaseError, type RunDatabaseChanges, type RunRowInput } from './run-database.ts';
-import { encodeRunRow } from './run-row.ts';
+import { RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY, RunDatabase, RunDatabaseError, type RunDatabaseChanges, type RunRow, type RunRowInput } from './run-database.ts';
+import { encodeRunRow, isLiveRecord } from './run-row.ts';
 
 import type { RunnerId } from '../core/agent-runner.ts';
 
@@ -832,7 +832,7 @@ function loadNormalizedFields(run: RunRecord): string {
  * the backup and in `runs.json`, which used to be overwritten by the next save instead.
  * Crash-safe retries of a failed import are a later step (T4).
  */
-function importLegacyIndex(db: RunDatabase, dataDir: string): RunRecord[] {
+function importLegacyIndex(db: RunDatabase, dataDir: string): void {
   const indexPath = join(dataDir, LEGACY_INDEX_FILE);
   let records: RunRecord[] = [];
   let source = 'none';
@@ -858,21 +858,91 @@ function importLegacyIndex(db: RunDatabase, dataDir: string): RunRecord[] {
     deletes: [],
     meta: { [RUNS_IMPORT_COMPLETE_KEY]: JSON.stringify({ at: new Date().toISOString(), source, records: records.length }) },
   });
-  return records;
 }
 
-/** Every row of a database whose import is complete, newest first. A row that does not parse is
- *  skipped and left in the database untouched; one warning says how many. */
-function loadRows(db: RunDatabase): RunRecord[] {
-  const records: RunRecord[] = [];
-  let unreadable = 0;
-  for (const row of db.listAll()) {
-    const run = decodeRunRecord(row.data);
-    if (run) records.push(run);
-    else unreadable++;
+/**
+ * Finished rows whose stored summary an open-time normalization would still change: a referenced
+ * PR an older cezar's created-PR declaration erased (see `reconcileLoadedRun`). Not live, so not
+ * in the `live` column; open decodes these few and keeps the ones it actually repaired.
+ */
+const LEGACY_REFERENCE_HEAL_SQL =
+  "json_extract(summary, '$.markerRefs.pr') IS NOT NULL AND json_extract(summary, '$.referencedPullRequestUrl') IS NULL";
+
+/** Mark-all-read's rule (see `RunStore.markAllRead`) over the columns and the stored summary. */
+const MARK_ALL_READ_SQL = "archived = 0 AND status IN ('done', 'failed') AND finished_at IS NOT NULL" +
+  " AND NOT (status = 'failed' AND json_extract(summary, '$.autoResumeAt') IS NOT NULL)" +
+  " AND (json_extract(summary, '$.seenAt') IS NULL OR json_extract(summary, '$.seenAt') < finished_at)";
+
+/** History retention's candidates among the given ids (a JSON array): finished and without
+ *  delegation. */
+const RETENTION_CANDIDATES_SQL = "id IN (SELECT value FROM json_each(?)) AND status NOT IN ('queued', 'running', 'waiting')" +
+  " AND parent_run_id IS NULL AND json_extract(summary, '$.delegation') IS NULL";
+
+/** Rows whose stored summary names a referenced PR or issue: what a repository handle can veto. */
+const REFERENCED_SQL =
+  "json_extract(summary, '$.referencedPullRequestUrl') IS NOT NULL OR json_extract(summary, '$.referencedIssueUrl') IS NOT NULL";
+
+/** What branch cleanup and git-log attribution read about a run (`RunStore.listBranchOwners`). */
+export interface BranchOwner {
+  id: string;
+  title: string;
+  status: RunStatus;
+  archived: boolean;
+  createdAt: string;
+  /** The branch the run owns (see `encodeRunRow`); absent for a run listed for its PR alone. */
+  branch?: string;
+  baseBranch?: string;
+  pullRequestUrl?: string;
+}
+
+/** A record as a branch owner, or undefined when it owns no branch and created no PR: the
+ *  projection `listBranchOwners` reads off a row's summary and columns, computed from memory. */
+export function branchOwnerOf(run: RunRecord): BranchOwner | undefined {
+  const branch = encodeRunRow(run).branch;
+  if (!branch && run.pullRequestUrl === undefined) return undefined;
+  return {
+    id: run.id, title: run.title, status: run.status, archived: run.archived, createdAt: run.createdAt,
+    ...(branch ? { branch } : {}),
+    ...(run.baseBranch === undefined ? {} : { baseBranch: run.baseBranch }),
+    ...(run.pullRequestUrl === undefined ? {} : { pullRequestUrl: run.pullRequestUrl }),
+  };
+}
+
+/** Who may hold a run in memory besides its own record (see `RunStore.pin`). */
+export type RunPinHolder = 'active' | 'continue';
+
+/** Newest first, with the database's tie-break, so memory and `runs.db` list in one order. */
+function newestFirst(a: { createdAt: string; id: string }, b: { createdAt: string; id: string }): number {
+  return a.createdAt === b.createdAt ? (a.id < b.id ? 1 : a.id > b.id ? -1 : 0) : (a.createdAt < b.createdAt ? 1 : -1);
+}
+
+/** The delegation family a run belongs to, by its root's id: a root is its own, a worker its
+ *  parent's. Workers cannot delegate, so a family is one root and its direct workers, never more. */
+function familyRootOf(run: Pick<RunRecord, 'id' | 'delegation'>): string | undefined {
+  if (run.delegation?.role === 'root') return run.id;
+  if (run.delegation?.role === 'worker') return run.delegation.parentRunId;
+  return undefined;
+}
+
+/** Tests freeze the copies of cold runs, so an in-place write to one throws instead of vanishing. */
+function deepFreeze<T>(value: T): T {
+  if (value && typeof value === 'object' && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    for (const child of Object.values(value)) deepFreeze(child);
   }
-  if (unreadable > 0) console.warn(`[cez] ${unreadable} run(s) in ${RUNS_DB_FILE} could not be read; they are left in the database untouched.`);
-  return records;
+  return value;
+}
+
+/** A stored summary, or undefined when it no longer fits the contract (a newer or older cezar
+ *  wrote it): the caller then projects the record instead. */
+export function parseStoredSummary(text: string): RunSummary | undefined {
+  try {
+    // The parsed JSON, not zod's output: the route sends a summary in `toRunSummary`'s key order.
+    const raw: unknown = JSON.parse(text);
+    return runSummarySchema.safeParse(raw).success ? raw as RunSummary : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 const WORKER_PROCESS_CAP = 32;
@@ -885,7 +955,10 @@ const startToken = (pid: number) => { const token = processStartToken(pid); retu
  *  `failed` run waiting out a usage limit), not an owned worker (those leave with their parent),
  *  then filtered by pin state. Mirrored clause for clause by `isSweepable` in the cockpit's
  *  `lib/tasks-table.ts`. */
-export function isSweepable(run: RunRecord, scope?: ArchiveFinishedScope): boolean {
+export function isSweepable(
+  run: Pick<RunRecord, 'archived' | 'status' | 'autoResumeAt' | 'pinned'> & { delegation?: { role: string } },
+  scope?: ArchiveFinishedScope,
+): boolean {
   if (run.archived || !['done', 'failed', 'cancelled'].includes(run.status)) return false;
   if (run.status === 'failed' && run.autoResumeAt !== undefined) return false;
   if (run.delegation?.role === 'worker') return false;
@@ -896,9 +969,15 @@ export function isSweepable(run: RunRecord, scope?: ArchiveFinishedScope): boole
 
 /**
  * File-backed run store: one row per run in `runs.db` (#779, `./run-database.ts`) plus one
- * append-only NDJSON event file per run. Every record is also held in memory, and that copy is
- * what callers read. Also the in-process event bus the SSE endpoints subscribe to: emits
- * `('run', RunRecord)` and `('event', { runId, event: RunEvent })`.
+ * append-only NDJSON event file per run. Also the in-process event bus the SSE endpoints
+ * subscribe to: emits `('run', RunRecord)` and `('event', { runId, event: RunEvent })`.
+ *
+ * Only the held set lives in memory (#779, Amendment 2): live runs, the runs a RunManager pins,
+ * their delegation families, and runs whose latest write has not settled yet (see `isHeld`).
+ * `getRun` answers a held run with the held object, so `commitIndex` still installs into the
+ * record a caller holds; any other run is read from `runs.db` as a fresh copy every time (frozen
+ * under vitest, so an in-place write throws instead of being lost). Writes to a finished run go
+ * through the methods here, which load it, change it and persist the row like any other.
  *
  * Two write paths, both through `writeIndex`:
  * - optimistic: a method changes the held record, marks it dirty and schedules the debounced
@@ -908,10 +987,15 @@ export function isSweepable(run: RunRecord, scope?: ArchiveFinishedScope): boole
  *   subscribers hear about it.
  */
 export class RunStore extends EventEmitter {
-  private runs = new Map<string, RunRecord>();
+  /** The held set: every record this store keeps in memory, by id. */
+  private readonly held = new Map<string, RunRecord>();
+  /** Who holds a run beyond its record, by holder, so one holder's unpin never releases another. */
+  private readonly pins = new Map<string, Set<RunPinHolder>>();
+  /** Staged ids while a durable commit installs and announces them: never evicted mid-commit. */
+  private readonly committing = new Set<string>();
   private saveTimer: NodeJS.Timeout | null = null;
-  /** `null` when the database could not be opened (memory only: nothing is written) or once the
-   *  store is closed. */
+  /** `null` when the database could not be opened (memory only: nothing is written, nothing is
+   *  evicted) or once the store is closed. */
   private db: RunDatabase | null = null;
   /** Runs whose held record is ahead of its row; the next save or commit writes them. */
   private readonly dirty = new Set<string>();
@@ -921,6 +1005,8 @@ export class RunStore extends EventEmitter {
    *  until it arrives and `null` when it cannot be known — both mean "unscoped", which is
    *  exactly the pre-#945 behavior. */
   private repoHandle: RepoHandle | null | undefined;
+  /** `open()`'s `keepLive`, which a run read later from `runs.db` is reconciled with too. */
+  private keepLive = false;
 
   private constructor(private readonly dataDir: string) {
     super();
@@ -933,40 +1019,221 @@ export class RunStore extends EventEmitter {
    *
    * Reads `runs.db` once its import is complete. Before that, `runs.json` is imported into it in
    * one transaction (`importLegacyIndex`) and left exactly as it was, for older cezars to read.
-   * A database that cannot be opened is never reset: the store starts empty and writes nothing.
+   * Either way only the held set is decoded: the live rows (by the indexed `live` column), the
+   * few finished rows a normalization still repairs, and the delegation families of the live
+   * ones. A database that cannot be opened is never reset: the store starts empty and writes
+   * nothing.
    */
   static open(dataDir: string, opts?: { keepLive?: boolean }): RunStore {
     mkdirSync(join(dataDir, 'runs'), { recursive: true });
     const store = new RunStore(dataDir);
+    store.keepLive = opts?.keepLive === true;
     const path = join(dataDir, RUNS_DB_FILE);
-    let records: RunRecord[] = [];
     try {
       const db = RunDatabase.open(path);
       try {
-        records = db.getMeta(RUNS_IMPORT_COMPLETE_KEY) === undefined ? importLegacyIndex(db, dataDir) : loadRows(db);
+        if (db.getMeta(RUNS_IMPORT_COMPLETE_KEY) === undefined) importLegacyIndex(db, dataDir);
+        store.db = db;
+        store.loadHeldRows();
       } catch (error) {
+        store.db = null;
+        store.held.clear();
+        store.dirty.clear();
         db.close();
         throw error;
       }
-      store.db = db;
     } catch (error) {
       const kind = error instanceof RunDatabaseError ? error.kind : 'other';
       const message = error instanceof Error ? error.message : String(error);
       console.warn(`[cez] runs database unavailable (${kind}): ${message}. Runs are kept in memory only and nothing is saved; ${path} is left as it is.`);
     }
-    for (const run of records) store.adoptLoadedRun(run, opts);
     return store;
+  }
+
+  /** Open-time load: the live rows, the finished rows a load normalization repairs, then the
+   *  delegation families of the live ones. A row that does not parse is skipped and left in the
+   *  database untouched; one warning says how many. */
+  private loadHeldRows(): void {
+    let unreadable = 0;
+    const decode = (row: RunRow): RunRecord | undefined => {
+      const run = decodeRunRecord(row.data);
+      if (!run) unreadable++;
+      return run;
+    };
+    for (const row of this.db!.listLive()) {
+      const run = decode(row);
+      if (run) this.adoptLoadedRun(run, { keepLive: this.keepLive });
+    }
+    for (const row of this.db!.listWhere(LEGACY_REFERENCE_HEAL_SQL)) {
+      if (this.held.has(row.id)) continue;
+      const run = decode(row);
+      // Held only when the repair changed it: the next save writes it, then it leaves.
+      if (run) this.adoptLoadedRun(run, { keepLive: this.keepLive, onlyIfChanged: true });
+    }
+    for (const rootId of this.anchoredFamilies()) this.holdFamily(rootId, decode);
+    if (unreadable > 0) console.warn(`[cez] ${unreadable} run(s) in ${RUNS_DB_FILE} could not be read; they are left in the database untouched.`);
   }
 
   /** Normalize a record just read (see `reconcileLoadedRun`) and hold it. Marks the row dirty only
    *  when normalization changed it, so the next save persists exactly the runs open() rewrote. */
-  private adoptLoadedRun(run: RunRecord, opts?: { keepLive?: boolean }): void {
+  private adoptLoadedRun(run: RunRecord, opts: { keepLive?: boolean; onlyIfChanged?: boolean }): void {
     const before = loadNormalizedFields(run);
     if (run.delegation?.role === 'root' && (run.status === 'waiting' || run.delegation.wait !== undefined)) {
       refreshHumanAskSummary(run, this.dataDir);
     }
-    this.runs.set(run.id, reconcileLoadedRun(run, opts));
-    if (loadNormalizedFields(run) !== before) this.dirty.add(run.id);
+    reconcileLoadedRun(run, opts);
+    const changed = loadNormalizedFields(run) !== before;
+    if (opts.onlyIfChanged && !changed) return;
+    this.held.set(run.id, run);
+    if (changed) this.dirty.add(run.id);
+  }
+
+  /**
+   * Hold one delegation family: its root and the root's direct workers, read through the
+   * `parent_run_id` index. No recursion: workers cannot delegate, so a worker's own id never
+   * names a family.
+   */
+  private holdFamily(rootId: string, decode: (row: RunRow) => RunRecord | undefined = (row) => decodeRunRecord(row.data)): void {
+    const rows = [this.db!.get(rootId), ...this.db!.listByParent(rootId)];
+    for (const row of rows) {
+      if (!row || this.held.has(row.id) || this.deleted.has(row.id)) continue;
+      const run = decode(row);
+      if (run) this.adoptLoadedRun(run, { keepLive: this.keepLive });
+    }
+  }
+
+  /**
+   * Whether a held run anchors itself (and its family) in memory. Anything else held is a family
+   * member or a settled write, and leaves at the next sweep (`evictSettled`).
+   *
+   * The held set is: every run that is live (`isLiveRecord`), pinned by a RunManager (`pin`),
+   * dirty, or inside a durable commit; plus the whole delegation family (root and direct
+   * workers) of any such run. Families are held because the RunManager reads a live run's family
+   * on every run event — `GET /runs/:id/relationships`, the global `reconcileWorkerWaits` pass
+   * (about twenty call sites), completion blockers and conversations — and decoding a cold
+   * record costs about 200 µs (JSON.parse plus the schema). Measured on a copy of a real
+   * cockpit's `runs.json` (958 runs, 957 of them delegated): a running root with 26 workers
+   * paid about 5 ms per family read, and the live families together about 10 ms per global
+   * pass, all on the event loop. Holding them costs memory in proportion to active work, not to
+   * history.
+   */
+  private isAnchor(id: string, run: RunRecord): boolean {
+    return isLiveRecord(run) || this.pins.has(id) || this.dirty.has(id) || this.committing.has(id);
+  }
+
+  /** The family roots with an anchoring member in memory. */
+  private anchoredFamilies(): Set<string> {
+    const roots = new Set<string>();
+    for (const [id, run] of this.held) {
+      const root = familyRootOf(run);
+      if (root !== undefined && this.isAnchor(id, run)) roots.add(root);
+    }
+    return roots;
+  }
+
+  /** Drop every held run that is neither an anchor nor in an anchored family. A store without a
+   *  database keeps everything: memory is the only copy it has. */
+  private evictSettled(): void {
+    if (!this.db) return;
+    const families = this.anchoredFamilies();
+    for (const [id, run] of this.held) {
+      if (this.isAnchor(id, run)) continue;
+      const root = familyRootOf(run);
+      if (root !== undefined && families.has(root)) continue;
+      this.held.delete(id);
+    }
+  }
+
+  /** A run read from `runs.db`, normalized like a loaded one (`reconcileLoadedRun`, then the
+   *  repository scope) but held by nobody. Undefined when absent, deleted or unreadable. */
+  private loadCold(id: string): RunRecord | undefined {
+    if (!this.db || this.deleted.has(id)) return undefined;
+    const row = this.db.get(id);
+    return row ? this.decodeCold(row) : undefined;
+  }
+
+  private decodeCold(row: RunRow): RunRecord | undefined {
+    const run = decodeRunRecord(row.data);
+    if (!run) return undefined;
+    reconcileLoadedRun(run, { keepLive: this.keepLive });
+    rescopeRun(run, this.repoHandle);
+    return run;
+  }
+
+  /** Bring a run into memory and return the held object: the record a write changes in place.
+   *  It leaves again at the first sweep after its write settles, unless something anchors it. */
+  private hold(id: string): RunRecord | undefined {
+    const held = this.held.get(id);
+    if (held) return held;
+    const run = this.loadCold(id);
+    if (!run) return undefined;
+    this.held.set(id, run);
+    this.scheduleSave();
+    return run;
+  }
+
+  /** The record a store write changes in place: held, or loaded to be. */
+  private record(id: string): RunRecord | undefined {
+    return this.held.get(id) ?? this.hold(id);
+  }
+
+  /** The current record for reading: the held object, the held copy of a run whose family is in
+   *  memory, or else a fresh copy nobody holds. */
+  private peek(id: string): RunRecord | undefined {
+    const held = this.held.get(id);
+    if (held) return held;
+    const run = this.loadCold(id);
+    return run && this.answerCold(run, false);
+  }
+
+  /**
+   * A run just read off its row, as reads answer it: held when its family is in memory (a live
+   * family's members are read on every run event), else a copy nobody holds — frozen under
+   * vitest when it leaves the store (`freeze`).
+   */
+  private answerCold(run: RunRecord, freeze: boolean): RunRecord {
+    const root = familyRootOf(run);
+    if (root !== undefined && this.anchoredFamilies().has(root)) {
+      this.held.set(run.id, run);
+      return run;
+    }
+    return freeze && process.env.VITEST ? deepFreeze(run) : run;
+  }
+
+  /** `getRun` for a row a query already read: the held object, else decoded from `row`. */
+  private fromRow(row: RunRow): RunRecord | undefined {
+    const held = this.held.get(row.id);
+    if (held) return held;
+    if (this.deleted.has(row.id)) return undefined;
+    const run = this.decodeCold(row);
+    return run && this.answerCold(run, true);
+  }
+
+  /** Whether the run exists, held or not, without decoding it. */
+  private hasRun(id: string): boolean {
+    return this.held.has(id) || (!!this.db && !this.deleted.has(id) && this.db.has(id));
+  }
+
+  /**
+   * Keep a run in memory for `holder` until `unpin(id, holder)`: a RunManager pins the runs it is
+   * executing (`active`) and the run a Continue is admitting (`continue`). A finished run is
+   * loaded. Pins are per holder, so releasing one never releases another. Returns the held record.
+   */
+  pin(id: string, holder: RunPinHolder): RunRecord | undefined {
+    const run = this.record(id);
+    if (!run) return undefined;
+    let holders = this.pins.get(id);
+    if (!holders) this.pins.set(id, holders = new Set());
+    holders.add(holder);
+    return run;
+  }
+
+  /** Release `holder`'s pin. The run leaves memory at the next sweep once nothing else holds it. */
+  unpin(id: string, holder: RunPinHolder): void {
+    const holders = this.pins.get(id);
+    if (!holders?.delete(holder)) return;
+    if (holders.size === 0) this.pins.delete(id);
+    this.sweepIfSettled([id]);
   }
 
   /**
@@ -981,7 +1248,9 @@ export class RunStore extends EventEmitter {
    * Arming also HEALS records already poisoned by the un-scoped rule, on the `reconcileLoadedRun`
    * precedent: the evidence is all still on the record (`referenced*Candidates`), only the
    * conclusion drawn from it was wrong, so re-deciding beats asking for a migration. It rewrites
-   * values, never the format, and is one-directional by construction — see `rescopeRun`.
+   * values, never the format, and is one-directional by construction — see `rescopeRun`. Held
+   * runs are re-checked in memory; of the rest, only rows whose stored summary references another
+   * repository are decoded, and the healed ones are written, so their summaries heal too.
    */
   setRepoHandle(handle: RepoHandle | null): void {
     this.repoHandle = handle;
@@ -989,23 +1258,107 @@ export class RunStore extends EventEmitter {
     // `touch` per healed run: the cockpit is already live when the handle lands, so a corrected
     // chip has to reach the open page over SSE, not just the next `runs.json` write.
     let healed = false;
-    for (const run of this.runs.values()) {
+    const own = `${handle.owner}/${handle.name}`.toLowerCase();
+    const foreign = (url: string | undefined) => url !== undefined && refUrlRepo(url) !== own;
+    const stored = this.db?.listWhere(REFERENCED_SQL).filter((row) => {
+      if (this.held.has(row.id) || this.deleted.has(row.id)) return false;
+      const summary = parseStoredSummary(row.summary);
+      return !summary || foreign(summary.referencedPullRequestUrl) || foreign(summary.referencedIssueUrl);
+    }) ?? [];
+    for (const run of [...this.held.values()]) {
       if (rescopeRun(run, this.repoHandle)) {
         this.touch(run);
         healed = true;
       }
+    }
+    for (const row of stored) {
+      const run = this.decodeCold(row);
+      // `decodeCold` already scoped it with the handle just armed; write it when that changed it.
+      if (!run || !this.storedScopeDiffers(row, run)) continue;
+      this.held.set(run.id, run);
+      this.touch(run);
+      healed = true;
     }
     // Discovery may finish after headless shutdown's final flush. Persist repairs now: the
     // debounced save is unref'd, so it cannot keep the CLI alive once the lookup completes.
     if (healed) this.flush();
   }
 
-  listRuns(): RunRecord[] {
-    return [...this.runs.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  /** Whether the stored summary still names a reference the scoped record no longer has. */
+  private storedScopeDiffers(row: RunRow, run: RunRecord): boolean {
+    const summary = parseStoredSummary(row.summary);
+    return summary?.referencedPullRequestUrl !== run.referencedPullRequestUrl ||
+      summary?.referencedIssueUrl !== run.referencedIssueUrl || summary?.issueNumber !== run.issueNumber;
   }
 
+  /**
+   * The live set, newest first: runs whose record is live (`isLiveRecord`) or that a RunManager
+   * pins. Finished runs are not here — read one by id (`getRun`), by an indexed query
+   * (`listWorkersOf`, `findRunByClientRequestId`, `listGroupRuns`, `listRunsWithWorktree`,
+   * `listBranchOwners`), or as list rows (`listRunSummaries`).
+   */
+  listRuns(): RunRecord[] {
+    return [...this.held].filter(([id, run]) => isLiveRecord(run) || this.pins.has(id)).map(([, run]) => run).sort(newestFirst);
+  }
+
+  /**
+   * EVERY run as a full record, newest first — decoded row by row. Only the legacy `GET /runs`
+   * (older clients; the cockpit reads `GET /run-summaries`) may call this: it is exactly the
+   * whole-history parse #779 exists to remove from everything else.
+   */
+  listAllRunsForLegacyRoute(): RunRecord[] {
+    const runs = new Map<string, RunRecord>();
+    for (const row of this.db?.listAll() ?? []) {
+      if (this.deleted.has(row.id) || this.held.has(row.id)) continue;
+      const run = this.decodeCold(row);
+      if (run) runs.set(row.id, run);
+    }
+    for (const [id, run] of this.held) runs.set(id, run);
+    return [...runs.values()].sort(newestFirst);
+  }
+
+  /**
+   * Every run as its list row, newest first: the stored `summary` column, with each held run's
+   * own projection laid over it — a debounced save keeps memory up to 300 ms ahead of the row,
+   * and a run created since the last save has no row yet. With `limit`, the newest `limit` rows
+   * and whether older ones were left out. `usage` is the caller's to attach.
+   */
+  listRunSummaries(options: { limit?: number } = {}): { runs: RunSummary[]; truncated: boolean } {
+    const { limit } = options;
+    const rows = this.db?.listSummaries(limit === undefined ? {} : { limit: limit + 1 + this.deleted.size }) ?? [];
+    const summaries = new Map<string, RunSummary>();
+    for (const row of rows) {
+      if (this.deleted.has(row.id) || this.held.has(row.id)) continue;
+      const summary = parseStoredSummary(row.summary) ?? this.coldSummary(row.id);
+      if (summary) summaries.set(row.id, summary);
+    }
+    for (const [id, run] of this.held) summaries.set(id, toRunSummary(run));
+    const runs = [...summaries.values()].sort(newestFirst);
+    if (limit === undefined || runs.length <= limit) return { runs, truncated: false };
+    return { runs: runs.slice(0, limit), truncated: true };
+  }
+
+  /** A row whose stored summary does not fit the contract any more, projected from its record. */
+  private coldSummary(id: string): RunSummary | undefined {
+    const run = this.loadCold(id);
+    return run ? toRunSummary(run) : undefined;
+  }
+
+  /**
+   * The run, or undefined. A held run is the held object (writes install into it). Any other run
+   * is a fresh copy of its row each call, normalized like a loaded record — frozen under vitest —
+   * so changing it means a store method, never an assignment.
+   */
   getRun(id: string): RunRecord | undefined {
-    return this.runs.get(id);
+    const held = this.held.get(id);
+    if (held) return held;
+    const run = this.loadCold(id);
+    return run && this.answerCold(run, true);
+  }
+
+  /** The ids in memory right now: the held set, for diagnostics and the benchmark's heap pass. */
+  heldIds(): string[] {
+    return [...this.held.keys()];
   }
 
   /**
@@ -1018,21 +1371,161 @@ export class RunStore extends EventEmitter {
    * assumes for that role.
    */
   listOwnedWorkers(parentId: string): RunRecord[] {
-    const parent = this.runs.get(parentId);
+    const parent = this.getRun(parentId);
     if (parent?.delegation?.role !== 'root') return [];
     const workers: RunRecord[] = [];
     for (const receipt of parent.delegation.receipts) {
-      const worker = this.runs.get(receipt.workerId);
+      const worker = this.getRun(receipt.workerId);
       if (worker?.delegation?.role === 'worker' && worker.delegation.parentRunId === parentId) workers.push(worker);
     }
     return workers.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
+  /** Every worker filed under `parentId` (the `parent_run_id` index plus memory), newest first:
+   *  receipts or not, which is what the reconcile and deletion checks ask. */
+  listWorkersOf(parentId: string): RunRecord[] {
+    const workers = new Map<string, RunRecord>();
+    for (const run of this.held.values()) {
+      if (run.delegation?.role === 'worker' && run.delegation.parentRunId === parentId) workers.set(run.id, run);
+    }
+    // Ids first: a live family's workers are usually all held, and then no record is read at all.
+    const cold = (this.db?.listIdsByParent(parentId) ?? []).filter((id) => !this.held.has(id) && !this.deleted.has(id));
+    for (const row of cold.length > 0 ? this.db!.getMany(cold) : []) {
+      const run = this.fromRow(row);
+      if (run?.delegation?.role === 'worker' && run.delegation.parentRunId === parentId) workers.set(row.id, run);
+    }
+    return [...workers.values()].sort(newestFirst);
+  }
+
+  /** The id of every worker, held or stored, without decoding any (recovery's worker passes). */
+  listWorkerIds(): string[] {
+    const ids = new Set(this.db?.listWorkerIds() ?? []);
+    for (const id of this.deleted) ids.delete(id);
+    for (const run of this.held.values()) if (run.delegation?.role === 'worker') ids.add(run.id);
+    return [...ids];
+  }
+
+  /** The id of every run whose delegation is quarantined (`invalid`), held or stored: its stored
+   *  summary says so, so nothing is decoded (scratch cleanup). */
+  listQuarantinedRunIds(): string[] {
+    const ids = new Set((this.db?.listKeysWhere("json_extract(summary, '$.delegation.role') = 'invalid'") ?? []).map((key) => key.id));
+    for (const id of this.deleted) ids.delete(id);
+    for (const [id, run] of this.held) {
+      if (run.delegation?.role === 'invalid') ids.add(id);
+      else ids.delete(id);
+    }
+    return [...ids];
+  }
+
+  /**
+   * The runs automation receipts launched, by receipt id (`automation.receiptId` or
+   * `automationTrigger.receiptId`). Memory answers first; a receipt it does not know costs one
+   * pass over `runs.db` that reads the records' JSON in SQLite — only a crash leftover (a
+   * receipt still `reserved` at startup) ever asks.
+   */
+  findRunIdsByAutomationReceipt(receiptIds: readonly string[]): Map<string, string> {
+    const wanted = new Set(receiptIds);
+    const found = new Map<string, string>();
+    const receiptOf = (run: RunRecord) => run.automation?.receiptId ?? run.automationTrigger?.receiptId;
+    for (const run of this.held.values()) {
+      const receipt = receiptOf(run);
+      if (receipt !== undefined && wanted.has(receipt)) found.set(receipt, run.id);
+    }
+    const missing = [...wanted].filter((receipt) => !found.has(receipt));
+    if (missing.length === 0 || !this.db) return found;
+    const where = "json_extract(data, '$.automation.receiptId') IN (SELECT value FROM json_each(?))" +
+      " OR json_extract(data, '$.automationTrigger.receiptId') IN (SELECT value FROM json_each(?))";
+    for (const key of this.db.listKeysWhere(where, [JSON.stringify(missing), JSON.stringify(missing)])) {
+      if (this.held.has(key.id) || this.deleted.has(key.id)) continue;
+      const run = this.getRun(key.id);
+      const receipt = run && receiptOf(run);
+      if (receipt !== undefined && wanted.has(receipt) && !found.has(receipt)) found.set(receipt, key.id);
+    }
+    return found;
+  }
+
+  /** The id of every root whose delegation carries a conversation, held or stored: recovery's
+   *  full reconcile pass (#661). The stored summary names the role, so only roots' records are
+   *  read, in SQLite. */
+  listConversationRootIds(): string[] {
+    const where = "json_extract(summary, '$.delegation.role') = 'root' AND json_extract(data, '$.delegation.conversation') IS NOT NULL";
+    const ids = new Set((this.db?.listKeysWhere(where) ?? []).map((key) => key.id));
+    for (const id of this.deleted) ids.delete(id);
+    for (const [id, run] of this.held) {
+      if (run.delegation?.role === 'root' && run.delegation.conversation) ids.add(id);
+      else ids.delete(id);
+    }
+    return [...ids];
+  }
+
+  /** The id of every run, held or stored, without decoding any (orphan-worktree sweeps). */
+  listRunIds(): string[] {
+    const ids = new Set(this.db?.listIds() ?? []);
+    for (const id of this.deleted) ids.delete(id);
+    for (const id of this.held.keys()) ids.add(id);
+    return [...ids];
+  }
+
+  /** The members of one parallel-variant group (spec 010), in no particular order. */
+  listGroupRuns(groupId: string): RunRecord[] {
+    return this.queryRuns(this.db?.listByGroup(groupId) ?? [], (run) => run.groupId === groupId);
+  }
+
+  /** Runs with a materialized worktree directory (`worktreePath`, not reclaimed), most recently
+   *  finished first: worktree retention and the worktrees panel. */
+  listRunsWithWorktree(): RunRecord[] {
+    const runs = this.queryRuns(this.db?.listWithWorktree() ?? [], (run) => run.worktreePath !== undefined && run.worktreeReclaimedAt === undefined);
+    const recency = (run: RunRecord) => run.finishedAt ?? run.createdAt;
+    return runs.sort((a, b) => (recency(a) < recency(b) ? 1 : recency(a) > recency(b) ? -1 : newestFirst(a, b)));
+  }
+
+  /**
+   * Every run that owns a branch or names the PR it created, as the few fields branch cleanup and
+   * git-log attribution read (issue 08 §B3, §B5; a squash commit is attributed by its PR number):
+   * the stored summary plus the `branch` and `base_branch` columns, so a Git-tab request decodes
+   * no record. Held runs answer from memory.
+   */
+  listBranchOwners(): BranchOwner[] {
+    const owners = new Map<string, BranchOwner>();
+    for (const row of this.db?.listBranchOwners("branch IS NOT NULL OR json_extract(summary, '$.pullRequestUrl') IS NOT NULL") ?? []) {
+      if (this.deleted.has(row.id) || this.held.has(row.id)) continue;
+      const summary = parseStoredSummary(row.summary);
+      owners.set(row.id, {
+        id: row.id, createdAt: row.createdAt, status: row.status as RunStatus, archived: row.archived,
+        ...(row.branch === null ? {} : { branch: row.branch }),
+        ...(row.baseBranch === null ? {} : { baseBranch: row.baseBranch }),
+        title: summary?.title ?? row.id,
+        ...(summary?.pullRequestUrl === undefined ? {} : { pullRequestUrl: summary.pullRequestUrl }),
+      });
+    }
+    for (const run of this.held.values()) {
+      const owner = branchOwnerOf(run);
+      if (owner) owners.set(run.id, owner);
+    }
+    return [...owners.values()];
+  }
+
+  /** The rows a column query returned, as records, with memory laid over them: a held run
+   *  answers from memory (matching `matches` there, not on its maybe-older row). */
+  private queryRuns(rows: readonly RunRow[], matches: (run: RunRecord) => boolean): RunRecord[] {
+    const runs = new Map<string, RunRecord>();
+    for (const run of this.held.values()) if (matches(run)) runs.set(run.id, run);
+    for (const row of rows) {
+      if (runs.has(row.id) || this.held.has(row.id) || this.deleted.has(row.id)) continue;
+      const run = this.fromRow(row);
+      if (run && matches(run)) runs.set(row.id, run);
+    }
+    return [...runs.values()];
+  }
+
   /** The run an idempotent start already created (#504), archived or not. A deleted run is gone
    *  with its record, so a retry after deletion honestly creates a fresh one. */
   findRunByClientRequestId(clientRequestId: string): RunRecord | undefined {
-    for (const run of this.runs.values()) if (run.clientRequestId === clientRequestId) return run;
-    return undefined;
+    for (const run of this.held.values()) if (run.clientRequestId === clientRequestId) return run;
+    const row = this.db?.findByClientRequestId(clientRequestId);
+    if (!row || this.held.has(row.id)) return undefined;
+    const run = this.getRun(row.id);
+    return run?.clientRequestId === clientRequestId ? run : undefined;
   }
 
   createRun(input: {
@@ -1059,7 +1552,7 @@ export class RunStore extends EventEmitter {
     steps: Array<Pick<StepState, 'id' | 'name' | 'kind'>>;
   }): RunRecord {
     const run = this.buildRun(input, randomUUID());
-    this.runs.set(run.id, run);
+    this.held.set(run.id, run);
     this.pruneOldRuns();
     this.touch(run);
     return run;
@@ -1112,14 +1605,14 @@ export class RunStore extends EventEmitter {
 
   /** Accept the family ledger and its recipient queue in a single durable index replacement. */
   commitConversation(rootId: string, conversation: ConversationState, delivery?: { recipientRunId: string; input: AgentInput }): void {
-    const root = this.runs.get(rootId);
+    const root = this.peek(rootId);
     if (root?.delegation?.role !== 'root') throw new Error('missing conversation root');
     const staged = new Map<string, RunRecord>();
     staged.set(rootId, { ...root, delegation: delegationStateSchema.parse({ ...root.delegation, conversation: { ...conversation,
       messages: conversation.messages.map(message => ({ ...message, text: this.redactText(message.text) })),
     } }) });
     if (delivery) {
-      const recipient = staged.get(delivery.recipientRunId) ?? this.runs.get(delivery.recipientRunId);
+      const recipient = staged.get(delivery.recipientRunId) ?? this.peek(delivery.recipientRunId);
       if (!recipient) throw new Error('missing conversation recipient');
       const input = agentInputSchema.parse({ ...delivery.input, text: this.redactText(delivery.input.text) });
       staged.set(recipient.id, { ...recipient, agentInputs: [...(recipient.agentInputs ?? []), input] });
@@ -1131,7 +1624,7 @@ export class RunStore extends EventEmitter {
   /** Accepted input the harness will never read returns to the queue (#505): only its
    * delivery and consumption receipts are cleared; order and identity are kept. */
   requeueUnconsumedAgentInputs(id: string, ids: readonly string[]): void {
-    const run = this.runs.get(id);
+    const run = this.peek(id);
     if (!run?.agentInputs || !ids.length) return;
     this.commitAgentInputs(id, run.agentInputs.map(input => {
       if (!ids.includes(input.id)) return input;
@@ -1142,7 +1635,7 @@ export class RunStore extends EventEmitter {
 
   /** Model consumption observed by the current session (#505). Never un-sets deliveredAt. */
   commitAgentInputsConsumed(id: string, ids: readonly string[], at: string): void {
-    const run = this.runs.get(id);
+    const run = this.peek(id);
     if (!run?.agentInputs || !ids.length) return;
     this.commitAgentInputs(id, run.agentInputs.map(input => {
       if (!ids.includes(input.id) || !input.deliveredAt || input.consumedAt) return input;
@@ -1153,7 +1646,7 @@ export class RunStore extends EventEmitter {
 
   /** Delivered, but the harness never confirmed reading it (#505): stop awaiting a read. */
   commitAgentInputsUnconfirmed(id: string, ids: readonly string[]): void {
-    const run = this.runs.get(id);
+    const run = this.peek(id);
     if (!run?.agentInputs || !ids.length) return;
     this.commitAgentInputs(id, run.agentInputs.map(input => {
       if (!ids.includes(input.id) || !input.awaitingRead) return input;
@@ -1165,13 +1658,13 @@ export class RunStore extends EventEmitter {
   /** Crash recovery (#505): input a harness accepted but was never seen reading goes
    * back to the queue. Returns the requeued IDs. */
   requeueAwaitingReadInputs(id: string): string[] {
-    const ids = (this.runs.get(id)?.agentInputs ?? []).filter(input => input.awaitingRead && input.deliveredAt && !input.consumedAt).map(input => input.id);
+    const ids = (this.peek(id)?.agentInputs ?? []).filter(input => input.awaitingRead && input.deliveredAt && !input.consumedAt).map(input => input.id);
     this.requeueUnconsumedAgentInputs(id, ids);
     return ids;
   }
 
   commitAgentInputs(id: string, inputs: readonly AgentInput[], openingContinuationInputId?: string): void {
-    const run = this.runs.get(id);
+    const run = this.peek(id);
     if (!run) throw new Error('missing agent input target');
     const agentInputs = inputs.map(input => agentInputSchema.parse(input));
     const now = new Date().toISOString();
@@ -1190,7 +1683,7 @@ export class RunStore extends EventEmitter {
 
   /** Reserve only unread conversation inputs in one durable index replacement. */
   claimInboxInputs(runId: string, ids: readonly string[], claim: InboxClaim): void {
-    const run = this.runs.get(runId);
+    const run = this.peek(runId);
     if (!run) throw new Error('missing inbox recipient');
     const selected = z.array(z.uuid()).min(1).max(32).refine(values => new Set(values).size === values.length).parse(ids);
     const receipt = inboxClaimSchema.parse({ ...claim, memberIds: selected });
@@ -1211,7 +1704,7 @@ export class RunStore extends EventEmitter {
 
   /** A receipt owns every matching input or none; exact ACK retries preserve the first timestamp. */
   ackInboxInputs(runId: string, receiptId: string, generation: string, at: string): 'acknowledged' | 'already-acknowledged' {
-    const run = this.runs.get(runId);
+    const run = this.peek(runId);
     if (!run) throw new Error('missing inbox recipient');
     inboxClaimSchema.shape.receiptId.parse(receiptId);
     inboxClaimSchema.shape.generation.parse(generation);
@@ -1236,7 +1729,7 @@ export class RunStore extends EventEmitter {
   }
 
   releaseInboxInputs(runId: string, receiptId: string, generation: string): 'released' {
-    const run = this.runs.get(runId);
+    const run = this.peek(runId);
     if (!run) throw new Error('missing inbox recipient');
     inboxClaimSchema.shape.receiptId.parse(receiptId);
     inboxClaimSchema.shape.generation.parse(generation);
@@ -1252,7 +1745,7 @@ export class RunStore extends EventEmitter {
   }
 
   clearExpiredInboxClaims(runId: string, now: string): void {
-    const run = this.runs.get(runId);
+    const run = this.peek(runId);
     if (!run) throw new Error('missing inbox recipient');
     inboxClaimSchema.shape.expiresAt.parse(now);
     if (!run.agentInputs?.some(input => input.inboxClaim && !input.inboxClaim.acknowledgedAt && input.inboxClaim.expiresAt <= now)) return;
@@ -1265,7 +1758,7 @@ export class RunStore extends EventEmitter {
 
   /** CI intent and its wake entry share one atomic index replacement. */
   commitCiWait(id: string, wait: CiWait, input?: AgentInput): void {
-    const run = this.runs.get(id);
+    const run = this.peek(id);
     if (!run) throw new Error('missing CI wait target');
     const ciWait = ciWaitSchema.parse(wait);
     const entry = input ? agentInputSchema.parse(input) : undefined;
@@ -1275,7 +1768,7 @@ export class RunStore extends EventEmitter {
 
   /** Retire the wait and precisely its pending wake, optionally accepting human input. */
   commitCiWaitWithdrawal(id: string, acceptedHumanMessage?: QueuedMessage): void {
-    const run = this.runs.get(id);
+    const run = this.peek(id);
     if (!run?.ciWait) return;
     const { ciWait, ...rest } = run;
     const lastCiWait: CiWait = { ...ciWait, phase: 'withdrawn' };
@@ -1287,7 +1780,7 @@ export class RunStore extends EventEmitter {
 
   /** Provider acceptance and receipt retirement have one delivery checkpoint. */
   commitCiWaitDelivery(id: string, inputId: string): void {
-    const run = this.runs.get(id);
+    const run = this.peek(id);
     if (!run?.ciWait || run.ciWait.wakeId !== inputId) return;
     const { ciWait, ...rest } = run;
     const deliveredAt = new Date().toISOString();
@@ -1298,7 +1791,7 @@ export class RunStore extends EventEmitter {
 
   /** Retain the settled receipt and retire exactly one wait together with any human message that superseded it. */
   commitWorkerWaitWithdrawal(id: string, waitId: string, acceptedHumanMessage?: QueuedMessage): void {
-    const run = this.runs.get(id);
+    const run = this.peek(id);
     if (!run?.delegation || run.delegation.role === 'invalid' || run.delegation.wait?.id !== waitId) {
       throw new Error('worker wait changed before withdrawal');
     }
@@ -1322,14 +1815,14 @@ export class RunStore extends EventEmitter {
   /** Successful deferred human delivery consumes only its persisted queue ID.
    * A crash before this checkpoint may replay that same message on recovery. */
   commitQueuedMessageDelivery(id: string, messageId: string): void {
-    const run = this.runs.get(id);
+    const run = this.peek(id);
     if (!run) throw new Error('missing queued message target');
     this.commitIndex(new Map([[id, { ...run, queuedMessages: (run.queuedMessages ?? []).filter(message => message.id !== messageId) }]]));
   }
 
   /** An acknowledged inactive-root Finish must survive the async diff and restart. */
   commitRootFinishIntent(id: string): void {
-    const run = this.runs.get(id);
+    const run = this.peek(id);
     if (run?.status !== 'waiting' || run.delegation?.role !== 'root') throw new Error('root is not waiting');
     if (run.delegation.finishRequestedAt) return;
     this.commitDelegation([{ id, delegation: { ...run.delegation, finishRequestedAt: new Date().toISOString() } }]);
@@ -1338,7 +1831,7 @@ export class RunStore extends EventEmitter {
   /** Cancellation supersedes pending Finish in one durable checkpoint. Also
    * repairs cancelled-plus-intent snapshots left by older controllers. */
   commitRootFinishCancellation(id: string): boolean {
-    const run = this.runs.get(id);
+    const run = this.peek(id);
     if (run?.delegation?.role !== 'root' || !run.delegation.finishRequestedAt ||
       !['waiting', 'cancelled'].includes(run.status)) return false;
     const { finishRequestedAt: _intent, ...delegation } = run.delegation;
@@ -1349,7 +1842,7 @@ export class RunStore extends EventEmitter {
   /** Publish terminal success and completed steps only after their atomic checkpoint.
    * A concurrent explicit cancellation is never overwritten by the async diff. */
   commitRootFinishSuccess(id: string, status: 'done' | 'review'): boolean {
-    const run = this.runs.get(id);
+    const run = this.peek(id);
     if (run?.status !== 'waiting' || run.delegation?.role !== 'root' || !run.delegation.finishRequestedAt) return false;
     const { finishRequestedAt: _intent, ...delegation } = run.delegation;
     const finishedAt = new Date().toISOString();
@@ -1366,7 +1859,7 @@ export class RunStore extends EventEmitter {
     if (patches.length === 0) return;
     const staged = new Map<string, RunRecord>();
     for (const patch of patches) {
-      const run = this.runs.get(patch.id);
+      const run = this.peek(patch.id);
       if (!run || staged.has(patch.id)) throw new Error('missing or duplicate delegation patch target');
       const delegation = delegationStateSchema.parse(patch.delegation);
       staged.set(patch.id, { ...run, delegation });
@@ -1379,7 +1872,7 @@ export class RunStore extends EventEmitter {
   /** Accepted execution revision is public lifecycle identity, separate from process generations. */
   commitWorkerContinuation(id: string, patch: Partial<Omit<RunRecord, 'id' | 'steps' | 'delegation'>>, step?: Pick<StepState, 'id' | 'name' | 'kind' | 'synthetic'>,
     conversation?: { rootId: string; state: ConversationState; input: AgentInput }): void {
-    const run = this.runs.get(id);
+    const run = this.peek(id);
     if (run?.delegation?.role !== 'worker') throw new Error('missing worker continuation target');
     const delegation = delegationStateSchema.parse({ ...run.delegation,
       executionRevision: (run.delegation.executionRevision ?? 0) + 1,
@@ -1390,7 +1883,7 @@ export class RunStore extends EventEmitter {
       ...(step ? { steps: [...run.steps, { ...step, status: 'pending' as const, iterations: 0, tokensUsed: 0 }] } : {}),
     });
     if (conversation) {
-      const root = this.runs.get(conversation.rootId);
+      const root = this.peek(conversation.rootId);
       if (root?.delegation?.role !== 'root' || run.delegation.parentRunId !== root.id) throw new Error('missing conversation ownership');
       staged.set(root.id, { ...root, delegation: delegationStateSchema.parse({ ...root.delegation, conversation: { ...conversation.state,
         messages: conversation.state.messages.map(message => ({ ...message, text: this.redactText(message.text) })),
@@ -1414,7 +1907,7 @@ export class RunStore extends EventEmitter {
   }
 
   private readWorkerResultFile(parentId: string, workerId: string): z.infer<typeof workerResultFileSchema> | undefined {
-    const parent = this.runs.get(parentId);
+    const parent = this.peek(parentId);
     if (parent?.delegation?.role !== 'root' || !parent.delegation.receipts.some(receipt => receipt.workerId === workerId)) return undefined;
     const reference = parent.delegation.results?.find(result => result.workerId === workerId);
     if (!reference) return undefined;
@@ -1441,8 +1934,8 @@ export class RunStore extends EventEmitter {
   /** Publish a pointer only after its redacted immutable snapshot reaches disk. Failed index writes retain the old evidence. */
   commitWorkerResult(parentId: string, value: WorkerCollectedResult, diffSnapshot?: string): WorkerCollectedResult {
     const result = workerCollectedResultSchema.parse(this.redact({ type: 'worker-result', seq: 0, ts: value.observedAt, result: value }).result);
-    const parent = this.runs.get(parentId);
-    const worker = this.runs.get(result.workerId);
+    const parent = this.peek(parentId);
+    const worker = this.peek(result.workerId);
     if (parent?.delegation?.role !== 'root' || result.parentRunId !== parentId ||
       !parent.delegation.receipts.some(receipt => receipt.workerId === result.workerId)) throw new Error('missing result ownership');
     if (worker && (worker.delegation?.role !== 'worker' || worker.delegation.parentRunId !== parentId ||
@@ -1489,7 +1982,7 @@ export class RunStore extends EventEmitter {
     requestHash: string,
     executionIdentity: WorkerExecutionIdentity = { kind: 'internal' },
   ): RunRecord {
-    const parent = this.runs.get(parentId);
+    const parent = this.peek(parentId);
     const authority = delegationStateSchema.safeParse(parent?.delegation);
     if (!parent || !authority.success || authority.data.role !== 'root' || authority.data.historyDeletion) {
       throw new Error('invalid delegation parent');
@@ -1500,7 +1993,7 @@ export class RunStore extends EventEmitter {
     const receipt = authority.data.receipts.find(entry => entry.requestId === identity.requestId);
     if (receipt) {
       if (receipt.requestHash !== identity.requestHash) throw new Error('request ID payload conflict');
-      const existing = this.runs.get(receipt.workerId);
+      const existing = this.peek(receipt.workerId);
       const metadata = delegationStateSchema.safeParse(existing?.delegation);
       if (!existing || !metadata.success || metadata.data.role !== 'worker' ||
         metadata.data.parentRunId !== parentId || metadata.data.workspace.ownerRunId !== existing.id ||
@@ -1509,7 +2002,7 @@ export class RunStore extends EventEmitter {
     }
     // #816: the same check the spawn policy makes, inside the receipt transaction, so no path
     // writes a receipt past either limit.
-    const refusal = capacityError(workerCapacity(parent, id => this.runs.get(id)));
+    const refusal = capacityError(workerCapacity(parent, id => this.peek(id)));
     if (refusal) throw new Error(refusal);
     const metadata = delegationStateSchema.parse(worker);
     if (metadata.role !== 'worker' || metadata.parentRunId !== parentId ||
@@ -1517,14 +2010,19 @@ export class RunStore extends EventEmitter {
       throw new Error('invalid worker ownership');
     }
     const workspace = metadata.workspace;
-    if (this.runs.has(workspace.ownerRunId)) throw new Error('worker run ID collision');
-    for (const run of this.runs.values()) {
+    if (this.hasRun(workspace.ownerRunId)) throw new Error('worker run ID collision');
+    for (const run of this.held.values()) {
       const owned = run.delegation?.role === 'worker' ? run.delegation.workspace : undefined;
       if ((owned && (owned.resourceId === workspace.resourceId || owned.path === workspace.path ||
         owned.branch === workspace.branch)) || run.worktreePath === workspace.path || run.branch === workspace.branch) {
         throw new Error('worker resource ownership collision');
       }
     }
+    // Runs not in memory answer through the branch and worktree columns. A worker's planned
+    // branch is its `branch` column; its path and resource id derive from its own run id, which
+    // the id check above already proved unused.
+    if ((this.db?.findResourceHolders({ branch: workspace.branch, worktreePath: workspace.path }) ?? [])
+      .some((id) => !this.held.has(id) && !this.deleted.has(id))) throw new Error('worker resource ownership collision');
     const delegation = delegationStateSchema.parse({
       ...authority.data,
       receipts: [...authority.data.receipts, { ...identity, workerId: workspace.ownerRunId }],
@@ -1553,20 +2051,35 @@ export class RunStore extends EventEmitter {
     if (!this.db) throw new Error('runs database unavailable: nothing can be saved');
     this.persist(staged);
     // Preserve existing record references, but expose the entire transaction before its first event.
+    // A finished run joins the held set for the commit and leaves at the next sweep.
     for (const [id, next] of staged) {
-      if (!next) { this.runs.delete(id); continue; }
-      const current = this.runs.get(id);
+      if (!next) { this.held.delete(id); continue; }
+      this.committing.add(id);
+      const current = this.held.get(id);
       if (current) Object.assign(current, next);
-      else this.runs.set(id, next);
+      else this.held.set(id, next);
     }
-    for (const id of staged.keys()) {
-      const run = this.runs.get(id);
-      if (run) this.emit('run', run, source); else this.emit('deleted', id);
+    try {
+      for (const id of staged.keys()) {
+        const run = this.held.get(id);
+        if (run) this.emit('run', run, source); else this.emit('deleted', id);
+      }
+    } finally {
+      for (const id of staged.keys()) this.committing.delete(id);
+      this.sweepIfSettled(staged.keys());
+    }
+  }
+
+  /** Schedule the sweep that lets any of `ids` leave memory, when one of them now can. */
+  private sweepIfSettled(ids: Iterable<string>): void {
+    for (const id of ids) {
+      const run = this.held.get(id);
+      if (run && !this.isAnchor(id, run)) { this.scheduleSave(); return; }
     }
   }
 
   updateRun(id: string, patch: Partial<Omit<RunRecord, 'id' | 'steps'>>): RunRecord | undefined {
-    const run = this.runs.get(id);
+    const run = this.record(id);
     if (!run) return undefined;
     if (Object.prototype.hasOwnProperty.call(patch, 'issueNumber')) {
       delete run.referencedIssueNumberSeeded;
@@ -1664,14 +2177,14 @@ export class RunStore extends EventEmitter {
 
   /** Append a step to an existing run (used by "Continue" — spec 003). */
   addStep(runId: string, step: Pick<StepState, 'id' | 'name' | 'kind' | 'synthetic'>): void {
-    const run = this.runs.get(runId);
+    const run = this.record(runId);
     if (!run || run.steps.some((s) => s.id === step.id)) return;
     run.steps.push({ ...step, status: 'pending', iterations: 0, tokensUsed: 0 });
     this.touch(run);
   }
 
   updateStep(runId: string, stepId: string, patch: Partial<Omit<StepState, 'id'>>): void {
-    const run = this.runs.get(runId);
+    const run = this.record(runId);
     const step = run?.steps.find((s) => s.id === stepId);
     if (!run || !step) return;
     Object.assign(step, this.redactStepPatch(patch));
@@ -1704,7 +2217,7 @@ export class RunStore extends EventEmitter {
   }
 
   setArchived(id: string, archived: boolean): RunRecord | undefined {
-    const run = this.runs.get(id);
+    const run = this.record(id);
     if (!run) return undefined;
     this.applyArchivedCascade(run, archived);
     return run;
@@ -1717,10 +2230,9 @@ export class RunStore extends EventEmitter {
     // Owned workers nest under their parent only while both share Active/Archived (#250).
     // Cascade from the parent only — archiving one worker stays independent.
     if (run.delegation?.role !== 'worker') {
-      for (const child of this.runs.values()) {
-        if (child.delegation?.role === 'worker' && child.delegation.parentRunId === run.id) {
-          if (this.applyArchived(child, archived)) changed++;
-        }
+      for (const { id } of this.listWorkersOf(run.id)) {
+        const child = this.record(id);
+        if (child && this.applyArchived(child, archived)) changed++;
       }
     }
     return changed;
@@ -1746,7 +2258,7 @@ export class RunStore extends EventEmitter {
    *  Every active status is pinnable. Archived requests clear stale metadata instead, so a
    *  late click racing archive cannot leave a hidden pin that reappears on unarchive. */
   setPinned(id: string, pinned: boolean): RunRecord | undefined {
-    const run = this.runs.get(id);
+    const run = this.record(id);
     if (!run) return undefined;
     if (pinned && !run.archived) {
       run.pinned = true;
@@ -1763,14 +2275,22 @@ export class RunStore extends EventEmitter {
    *  `pinnedIds` the subset that carried a pin before `clearPin` dropped it. */
   archiveFinished(scope?: ArchiveFinishedScope): { archived: number; ids: string[]; pinnedIds: string[] } {
     let archived = 0;
-    // Snapshot first: cascade may archive still-live workers, mutating the map view, and the pin
-    // has to be read before `applyArchived` clears it.
-    const picked = [...this.runs.values()].filter((run) => isSweepable(run, scope));
+    // Snapshot first: cascade may archive still-live workers, mutating the held set, and the pin
+    // has to be read before `applyArchived` clears it. Runs not in memory are picked off their
+    // stored summary, which carries every field `isSweepable` reads.
+    const picked: Array<Parameters<typeof isSweepable>[0] & { id: string; createdAt: string }> =
+      [...this.held.values()].filter((run) => isSweepable(run, scope));
+    for (const row of this.db?.listWhere("archived = 0 AND status IN ('done', 'failed', 'cancelled') AND parent_run_id IS NULL") ?? []) {
+      if (this.held.has(row.id) || this.deleted.has(row.id)) continue;
+      const summary = parseStoredSummary(row.summary);
+      if (summary && isSweepable(summary, scope)) picked.push(summary);
+    }
+    picked.sort(newestFirst);
     const ids = picked.map((run) => run.id);
     const pinnedIds = picked.filter((run) => run.pinned).map((run) => run.id);
     for (const id of ids) {
       // Re-check: a prior cascade may already have archived this id.
-      const run = this.runs.get(id);
+      const run = this.record(id);
       if (!run || run.archived) continue;
       archived += this.applyArchivedCascade(run, true);
     }
@@ -1782,7 +2302,7 @@ export class RunStore extends EventEmitter {
    *  updated record rides the existing `run` SSE with no new event. Idempotent by
    *  design: opening an already-read thread just re-stamps a later `seenAt`. */
   setRead(id: string): RunRecord | undefined {
-    const run = this.runs.get(id);
+    const run = this.record(id);
     if (!run) return undefined;
     run.seenAt = new Date().toISOString();
     this.touch(run);
@@ -1803,7 +2323,7 @@ export class RunStore extends EventEmitter {
    *  the marker. WHETHER the action means anything for a given run is UI policy, and lives
    *  in the cockpit's `runActionFlags` — the same split the rest of the store keeps. */
   setUnread(id: string): RunRecord | undefined {
-    const run = this.runs.get(id);
+    const run = this.record(id);
     if (!run) return undefined;
     delete run.seenAt;
     this.touch(run);
@@ -1837,7 +2357,15 @@ export class RunStore extends EventEmitter {
   markAllRead(): number {
     const now = new Date().toISOString();
     let count = 0;
-    for (const run of this.runs.values()) {
+    // Runs not in memory are picked by the same rule over their stored summary, then re-checked
+    // on the record before they are stamped.
+    const candidates = [...this.held.values()];
+    for (const row of this.db?.listWhere(MARK_ALL_READ_SQL) ?? []) {
+      if (this.held.has(row.id) || this.deleted.has(row.id)) continue;
+      const run = this.record(row.id);
+      if (run) candidates.push(run);
+    }
+    for (const run of candidates) {
       const unread =
         !run.archived &&
         (run.status === 'done' || run.status === 'failed') &&
@@ -1853,7 +2381,7 @@ export class RunStore extends EventEmitter {
   }
 
   appendEvent(runId: string, event: { type: string; stepId?: string; [key: string]: unknown }): RunEvent {
-    const run = this.runs.get(runId);
+    const run = this.record(runId);
     if (!run) throw new Error(`unknown run: ${runId}`);
     const seq = this.nextSeq(runId);
     // Scrub credentials before the event touches disk or the live wire (#427):
@@ -2001,7 +2529,7 @@ export class RunStore extends EventEmitter {
    * re-declare after it opens a PR, and taking that literally cost the task the PR it was about.
    */
   applyMarkerRefs(runId: string, refs: { pr?: number; issue?: number }): RunRecord | undefined {
-    const run = this.runs.get(runId);
+    const run = this.record(runId);
     if (!run || (refs.pr === undefined && refs.issue === undefined)) return run;
     run.markerRefs = {
       ...run.markerRefs,
@@ -2160,7 +2688,7 @@ export class RunStore extends EventEmitter {
   /** Complete execution is not permission to reuse/delete persistent resources (#738).
    * Synchronous, fresh and generation/resource fenced; callers hold admission off across awaits. */
   workerResourcesSafe(id: string, generation: string, resourceId: string, admittingQueued = false): boolean {
-    const run = this.runs.get(id);
+    const run = this.peek(id);
     const proof = this.readWorkerExecution(id);
     if (run?.delegation?.role !== 'worker' || run.delegation.workspace.ownerRunId !== id ||
       run.delegation.workspace.resourceId !== resourceId || proof?.generation !== generation ||
@@ -2182,7 +2710,7 @@ export class RunStore extends EventEmitter {
   /** Upgrade a legacy completed checkpoint while terminal task ownership is still known.
    * No holder scan here: settlement and scheduling must never wait on cleanup proof. */
   retainWorkerScratchCleanup(id: string): void {
-    const run = this.runs.get(id), proof = this.readWorkerExecution(id);
+    const run = this.peek(id), proof = this.readWorkerExecution(id);
     if (run?.delegation?.role !== 'worker' || ['queued', 'running', 'waiting'].includes(run.status) || proof?.phase !== 'complete') return;
     const { resourceId, path } = run.delegation.workspace;
     if (proof.scratchCleanup?.resourceId === resourceId && proof.scratchCleanup.path === path) return;
@@ -2191,7 +2719,7 @@ export class RunStore extends EventEmitter {
 
   /** Cleanup can outlive its index row, but never its generation or terminal task intent. */
   workerScratchResourcesSafe(id: string, generation: string, resourceId: string): boolean {
-    const run = this.runs.get(id), proof = this.readWorkerExecution(id);
+    const run = this.peek(id), proof = this.readWorkerExecution(id);
     if (proof?.phase !== 'complete' || proof.generation !== generation || proof.scratchCleanup?.resourceId !== resourceId ||
       (run && ['queued', 'running', 'waiting'].includes(run.status))) return false;
     if (run?.delegation?.role === 'worker') return run.delegation.workspace.path === proof.scratchCleanup.path &&
@@ -2206,7 +2734,7 @@ export class RunStore extends EventEmitter {
   }
 
   commitWorkerExecutionStart(id: string): string {
-    const run = this.runs.get(id);
+    const run = this.peek(id);
     if (run?.delegation?.role !== 'worker' || run.delegation.destroy) throw new Error('Worker cannot start');
     const prior = this.readWorkerExecution(id);
     if (!prior || (prior.phase !== 'queued' && prior.phase !== 'complete')) {
@@ -2269,9 +2797,9 @@ export class RunStore extends EventEmitter {
   commitWorkerExecutionComplete(id: string, generation: string): boolean {
     const proof = this.readWorkerExecution(id);
     if (!proof || proof.generation !== generation) return false;
-    if (proof.phase === 'queued' && this.runs.get(id)?.status !== 'cancelled') return false;
+    if (proof.phase === 'queued' && this.peek(id)?.status !== 'cancelled') return false;
     try {
-      const run = this.runs.get(id);
+      const run = this.peek(id);
       if (run?.delegation?.role !== 'worker') return false;
       this.commitIndex(new Map([[id, run]]));
       if (this.readWorkerExecution(id)?.generation !== generation) return false;
@@ -2281,22 +2809,22 @@ export class RunStore extends EventEmitter {
           resourceId: run.delegation.workspace.resourceId, path: run.delegation.workspace.path } } : {}) });
       // The earlier index event cannot attest exit: subscribers must observe the
       // durable private proof before a terminal worker can satisfy a lifecycle wait.
-      this.emit('run', this.runs.get(id)!);
+      this.emit('run', this.peek(id)!);
       return true;
     } catch { return false; }
   }
 
   /** Cancellation must hit disk before queued no-start evidence authorizes cleanup. */
   commitWorkerCancellation(id: string): void {
-    const run = this.runs.get(id);
+    const run = this.peek(id);
     if (run?.delegation?.role !== 'worker') throw new Error('Worker not found');
     this.commitIndex(new Map([[id, { ...run, status: 'cancelled' as const, finishedAt: new Date().toISOString() }]]));
   }
 
   /** Complete replacement evidence can stand in for absent child history, never for a present execution. */
   readDeletedWorkerResult(parentId: string, workerId: string): WorkerCollectedResult | undefined {
-    if (this.runs.has(workerId)) return undefined;
-    const parent = this.runs.get(parentId);
+    if (this.hasRun(workerId)) return undefined;
+    const parent = this.peek(parentId);
     if (parent?.delegation?.role !== 'root' || parent.delegation.historyDeletion) return undefined;
     const deletion = parent.delegation.receipts.find(receipt => receipt.workerId === workerId)?.deletion;
     if (deletion?.phase !== 'complete') return undefined;
@@ -2308,11 +2836,11 @@ export class RunStore extends EventEmitter {
 
   /** A deleted child's receipt replaces the private proof only after the deletion checkpoint. */
   private workerDeletionEvidence(id: string): boolean {
-    const child = this.runs.get(id);
+    const child = this.peek(id);
     if (child?.delegation?.role !== 'worker' || child.delegation.workspace.ownerRunId !== id ||
       child.delegation.destroy?.phase !== 'complete' || child.delegation.destroy.remaining.length ||
       !['review', 'done', 'failed', 'cancelled'].includes(child.status)) return false;
-    const parent = this.runs.get(child.delegation.parentRunId);
+    const parent = this.peek(child.delegation.parentRunId);
     if (parent?.delegation?.role !== 'root' || parent.delegation.historyDeletion) return false;
     const receipt = parent.delegation.receipts.find(entry => entry.workerId === id);
     const result = this.readWorkerResult(parent.id, id);
@@ -2332,7 +2860,7 @@ export class RunStore extends EventEmitter {
   }
 
   canDeleteRun(id: string): boolean {
-    const run = this.runs.get(id);
+    const run = this.peek(id);
     if (run?.delegation?.role === 'invalid') return false;
     if (run?.delegation?.role === 'worker') return this.workerDeletionEvidence(id);
     const privateWorkers = workerEvidenceRunIds(this.dataDir);
@@ -2340,23 +2868,23 @@ export class RunStore extends EventEmitter {
     if (run?.delegation?.role === 'root') {
       if (run.delegation.finishRequestedAt && ['queued', 'running', 'waiting'].includes(run.status)) return false;
       // Keep the parent's receipt and result ownership until each child history is explicitly removed.
-      if ([...this.runs.values()].some(child => child.delegation?.role === 'worker' && child.delegation.parentRunId === id)) return false;
+      if (this.listWorkersOf(id).length > 0) return false;
       return run.delegation.receipts.every(receipt => {
-        if (this.runs.has(receipt.workerId) || receipt.deletion?.phase !== 'complete') return false;
+        if (this.hasRun(receipt.workerId) || receipt.deletion?.phase !== 'complete') return false;
         // A pending parent deletion already validated the results before removing their bytes.
         if (run.delegation?.role === 'root' && run.delegation.historyDeletion === 'pending') return true;
         return this.readDeletedWorkerResult(id, receipt.workerId) !== undefined;
       });
     }
-    return ![...this.runs.values()].some(child => child.delegation?.role === 'worker' && child.delegation.parentRunId === id);
+    return this.listWorkersOf(id).length === 0;
   }
 
   /** Delegated history deletion is synchronous and checkpointed; any failed byte/index removal remains retryable. */
   private deleteDelegatedRun(id: string): boolean {
-    const run = this.runs.get(id)!;
+    const run = this.peek(id)!;
     try {
       if (run.delegation?.role === 'worker') {
-        const parent = this.runs.get(run.delegation.parentRunId)!;
+        const parent = this.peek(run.delegation.parentRunId)!;
         if (parent.delegation?.role !== 'root') return false;
         const receipt = parent.delegation.receipts.find(entry => entry.workerId === id)!;
         const result = this.readWorkerResult(parent.id, id)!;
@@ -2416,9 +2944,10 @@ export class RunStore extends EventEmitter {
 
   deleteRun(id: string): boolean {
     if (!this.canDeleteRun(id)) return false;
-    const run = this.runs.get(id);
+    const run = this.peek(id);
     if (run?.delegation?.role === 'worker' || run?.delegation?.role === 'root') return this.deleteDelegatedRun(id);
-    const existed = this.runs.delete(id);
+    const existed = run !== undefined;
+    this.held.delete(id);
     if (existed) {
       this.markDeleted(id);
       try {
@@ -2494,28 +3023,44 @@ export class RunStore extends EventEmitter {
     this.deleted.add(id);
   }
 
+  /**
+   * Count-based history retention: of the runs past the newest `MAX_RUNS_KEPT` unarchived (and
+   * `MAX_ARCHIVED_KEPT` archived) ones, delete each finished run without delegation that
+   * `canDeleteRun` allows. Ranked over the row keys (the `created_at` index, no record decoded)
+   * with memory laid over them, since a run created or archived since the last save has no row
+   * yet; the rows past the cut are then filtered in `runs.db`, so only real candidates decode.
+   */
   private pruneOldRuns(): void {
-    const all = this.listRuns();
-    const stalePool = [
-      ...all.filter((r) => !r.archived).slice(MAX_RUNS_KEPT),
-      ...all.filter((r) => r.archived).slice(MAX_ARCHIVED_KEPT),
-    ];
-    for (const stale of stalePool) {
-      // Retention must not evict a live task's history or scratch between turns.
-      if (['queued', 'running', 'waiting'].includes(stale.status)) continue;
-      // Delegation promises history and parent snapshots until explicit deletion.
-      if (stale.delegation || !this.canDeleteRun(stale.id)) continue;
-      this.runs.delete(stale.id);
-      this.markDeleted(stale.id);
-      try {
-        rmSync(this.eventsPath(stale.id), { force: true });
-        rmSync(this.handoffPath(stale.id), { force: true });
-        rmSync(this.imagesDir(stale.id), { recursive: true, force: true });
-        removeArtifacts(this.dataDir, stale.id);
-      } catch {
-        // best effort
+    for (const [archived, keep] of [[false, MAX_RUNS_KEPT], [true, MAX_ARCHIVED_KEPT]] as const) {
+      const ranked = new Map<string, { id: string; createdAt: string }>();
+      for (const key of this.db?.listKeysWhere('archived = ?', [archived ? 1 : 0]) ?? []) {
+        if (!this.held.has(key.id) && !this.deleted.has(key.id)) ranked.set(key.id, key);
       }
-      removeAgentTmpDir(this.dataDir, stale.id);
+      for (const run of this.held.values()) if (run.archived === archived) ranked.set(run.id, run);
+      const overflow = [...ranked.values()].sort(newestFirst).slice(keep).map((key) => key.id);
+      if (overflow.length === 0) continue;
+      const stale = overflow.flatMap((id) => {
+        const run = this.held.get(id);
+        // Retention must not evict a live task's history or scratch between turns, and delegation
+        // promises history and parent snapshots until explicit deletion.
+        return run && !['queued', 'running', 'waiting'].includes(run.status) && !run.delegation ? [id] : [];
+      });
+      const cold = overflow.filter((id) => !this.held.has(id));
+      if (cold.length > 0) stale.push(...this.db!.listWhere(RETENTION_CANDIDATES_SQL, [JSON.stringify(cold)]).map((row) => row.id));
+      for (const id of stale) {
+        if (!this.canDeleteRun(id)) continue;
+        this.held.delete(id);
+        this.markDeleted(id);
+        try {
+          rmSync(this.eventsPath(id), { force: true });
+          rmSync(this.handoffPath(id), { force: true });
+          rmSync(this.imagesDir(id), { recursive: true, force: true });
+          removeArtifacts(this.dataDir, id);
+        } catch {
+          // best effort
+        }
+        removeAgentTmpDir(this.dataDir, id);
+      }
     }
   }
 
@@ -2548,7 +3093,7 @@ export class RunStore extends EventEmitter {
       else deletes.push(id);
     }
     for (const id of this.dirty) {
-      const run = this.runs.get(id);
+      const run = this.held.get(id);
       if (run && !staged.has(id)) upserts.push(encodeRunRow(run));
     }
     for (const id of this.deleted) if (!staged.has(id)) deletes.push(id);
@@ -2561,26 +3106,36 @@ export class RunStore extends EventEmitter {
     }
   }
 
-  private saveNow(): void {
-    if (!this.db || (this.dirty.size === 0 && this.deleted.size === 0)) return;
-    try {
-      this.persist(new Map());
-    } catch (err) {
-      // A pending save may outlive its directory; never recreate it or hide live-directory
-      // failures. The rows stay pending, so the next save or commit retries them.
-      if (!existsSync(this.dataDir)) return;
-      const message = err instanceof Error ? err.message : String(err);
-      console.error(`[cez] failed to save ${RUNS_DB_FILE}: ${message}`);
+  /** Write what is pending, then (unless closing) let every run whose write settled leave memory. */
+  private saveNow(evict = true): void {
+    if (!this.db) return;
+    if (this.dirty.size > 0 || this.deleted.size > 0) {
+      try {
+        this.persist(new Map());
+      } catch (err) {
+        // A pending save may outlive its directory; never recreate it or hide live-directory
+        // failures. The rows stay pending (and held), so the next save or commit retries them.
+        if (existsSync(this.dataDir)) {
+          const message = err instanceof Error ? err.message : String(err);
+          console.error(`[cez] failed to save ${RUNS_DB_FILE}: ${message}`);
+        }
+      }
     }
+    if (evict) this.evictSettled();
   }
 
   /**
    * Write what is pending and release the database (store disposal, process shutdown).
-   * Idempotent. A closed store keeps answering reads from memory but saves nothing more, and a
-   * durable commit on it throws.
+   * Idempotent. A closed store keeps answering reads for what it holds — the final save evicts
+   * nothing — but cannot read `runs.db` any more, so a run that had already left memory reads as
+   * absent. It saves nothing more, and a durable commit on it throws.
    */
   close(): void {
-    this.flush();
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer);
+      this.saveTimer = null;
+    }
+    this.saveNow(false);
     this.db?.close();
     this.db = null;
   }
