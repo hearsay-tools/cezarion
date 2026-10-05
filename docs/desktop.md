@@ -140,6 +140,14 @@ and to a separate local cockpit over loopback (must open a separate remote
 window). Remote pages must not be able to invoke native update/connect commands.
 Use the ordinary app launch without these variables for your real projects.
 
+## App icon
+
+The native app and installer icons use the same Cezarion mark as the cockpit
+sidebar: `packages/web/public/cezarion-mark-dark.svg`. Regenerate all macOS,
+Windows and Linux sizes with `npm run icon --prefix packages/desktop`, then
+rebuild the app. The generator uses the installed Tauri CLI and also refreshes
+the launcher mark.
+
 ## Public release setup
 
 Store these GitHub Actions secrets in the fork:
