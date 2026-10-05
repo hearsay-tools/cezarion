@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { toRunSummary } from '@open-mercato/cezar-contract';
 
 import { RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY, RunDatabase, type RunDatabaseChanges, type RunDatabaseCommit } from './run-database.ts';
+import { readRunIndexFromDisk } from './run-index.ts';
 import { blockRunWrites, readPersistedRuns, runIds, seedRuns } from './run-store.testkit.ts';
 import { LEGACY_INDEX_BACKUP_FILE, RunStore, type RunRecord } from './store.ts';
 
@@ -188,6 +189,23 @@ describe('a database with an unreadable row', () => {
     store.updateRun('a', { title: 'touched' });
     store.flush();
     expect(readPersistedRuns(dataDir).map((run) => run.id)).toEqual(['broken', 'broken-done', 'bb', 'a']);
+  });
+
+  it('drops a row it found unreadable from its list rows, as the cold reader does: a live one at open, any other once a read fails', () => {
+    // Every stored summary is valid: only decoding the record finds the step status it rejects.
+    const steps = [{ id: 's', name: 's', kind: 'agent', status: 'bogus', iterations: 1, tokensUsed: 0 }] as unknown as RunRecord['steps'];
+    seedRuns(dataDir, [record('a'), record('live', { status: 'running', steps }), record('done', { steps })]);
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const store = open();
+    // A finished row nobody has decoded is served from its summary, by both readers alike.
+    expect(runIds(store).sort()).toEqual(['a', 'done']);
+    expect(readRunIndexFromDisk(dataDir).runs.map((run) => run.id).sort()).toEqual(['a', 'done']);
+    expect(store.isUnreadable('done')).toBe(false);
+
+    expect(store.getRun('done')).toBeUndefined();
+    expect(store.isUnreadable('done')).toBe(true);
+    expect(store.isUnreadable('a')).toBe(false);
+    expect(runIds(store)).toEqual(['a']);
   });
 });
 

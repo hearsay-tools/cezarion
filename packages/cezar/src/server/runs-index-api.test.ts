@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { runsIndexResponseSchema, type RunsIndexResponse } from '@open-mercato/cezar-contract';
 import { readPersistedText, seedRuns } from '../runs/run-store.testkit.ts';
 const resolveRepoHandle = vi.hoisted(() => vi.fn());
@@ -104,6 +104,31 @@ describe('workspace runs index API', () => {
     expect(body.runs.map((run) => run.id)).toEqual(['cold-1', live.id]);
     expect(body.runs.map((run) => run.projectId)).toEqual([other.id, boot.id]);
     expect(body.truncated).toEqual([]);
+  });
+
+  it('agrees with a cold read on a run this cezar cannot read, and opening it says why (#779)', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    onTestFinished(() => warn.mockRestore());
+    await registerProject(repoRoot);
+    // Valid summaries, records this schema rejects: only decoding finds out.
+    const steps = [{ id: 's1', name: 'work', kind: 'agent', status: 'bogus', iterations: 1, tokensUsed: 0 }];
+    store.close();
+    seedRuns(join(repoRoot, '.ai/cezar'), [
+      storedRun({ id: 'ok', title: 'Readable' }),
+      storedRun({ id: 'live-bad', title: 'Live', status: 'running', steps }),
+      storedRun({ id: 'done-bad', title: 'Done', steps }),
+    ]);
+    store = RunStore.open(join(repoRoot, '.ai/cezar'));
+    const ids = async () => (await getIndex()).runs.map((run) => run.id).sort();
+    // The live row was read at open; a finished one is served from its summary until it is read.
+    expect(await ids()).toEqual(['done-bad', 'ok']);
+
+    const res = await apiRequest(makeApp(), '/api/v1/runs/done-bad');
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: expect.stringMatching(/could not be read by this cezar/) });
+    expect(await ids()).toEqual(['ok']);
+    const missing = await apiRequest(makeApp(), '/api/v1/runs/no-such-run');
+    expect(await missing.json()).toEqual({ error: 'not found' });
   });
 
   it('never builds a project context — a search must not resume agents', async () => {

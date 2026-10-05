@@ -1217,6 +1217,9 @@ export class RunStore extends EventEmitter {
   private readonly deletedFamilies = new Map<string, string>();
   /** Rows a conflicting write excluded: this store refuses to write them until it is reopened. */
   private readonly quarantined = new Set<string>();
+  /** Rows whose `data` this store tried to decode and could not: left in the database untouched,
+   *  and left out of the list rows from then on, as the cold reader leaves them out (run-index.ts). */
+  private readonly unreadable = new Set<string>();
 
   private constructor(private readonly dataDir: string) {
     super();
@@ -1318,7 +1321,10 @@ export class RunStore extends EventEmitter {
     let unreadable = 0;
     const decode = (row: RunRow): DecodedRun | undefined => {
       const decoded = decodeRunRow(row.data);
-      if (!decoded) unreadable++;
+      if (!decoded) {
+        unreadable++;
+        this.unreadable.add(row.id);
+      }
       return decoded;
     };
     const live = this.db!.listLive();
@@ -1562,7 +1568,11 @@ export class RunStore extends EventEmitter {
 
   private decodeCold(row: RunRow): RunRecord | undefined {
     const decoded = decodeRunRow(row.data);
-    if (!decoded) return undefined;
+    if (!decoded) {
+      this.unreadable.add(row.id);
+      return undefined;
+    }
+    this.unreadable.delete(row.id);
     const { run, extras } = decoded;
     if (this.coldBase.size === 0) queueMicrotask(() => this.coldBase.clear());
     const family = rowFamily(row);
@@ -1750,13 +1760,17 @@ export class RunStore extends EventEmitter {
    * own projection laid over it — a debounced save keeps memory up to 300 ms ahead of the row,
    * and a run created since the last save has no row yet. With `limit`, the newest `limit` rows
    * and whether older ones were left out. `usage` is the caller's to attach.
+   *
+   * A row this store found unreadable is left out, as the cold reader leaves out a row it had to
+   * decode and could not. A finished row nobody has decoded is served from its summary by both,
+   * which decodes nothing; reading it is what finds out (`isUnreadable`).
    */
   listRunSummaries(options: { limit?: number } = {}): { runs: RunSummary[]; truncated: boolean } {
     const { limit } = options;
-    const rows = this.db?.listSummaries(limit === undefined ? {} : { limit: limit + 1 + this.deleted.size }) ?? [];
+    const rows = this.db?.listSummaries(limit === undefined ? {} : { limit: limit + 1 + this.deleted.size + this.unreadable.size }) ?? [];
     const summaries = new Map<string, RunSummary>();
     for (const row of rows) {
-      if (this.deleted.has(row.id) || this.held.has(row.id)) continue;
+      if (this.deleted.has(row.id) || this.held.has(row.id) || this.unreadable.has(row.id)) continue;
       const summary = parseStoredSummary(row.summary) ?? this.coldSummary(row.id);
       if (summary) summaries.set(row.id, summary);
     }
@@ -1782,6 +1796,12 @@ export class RunStore extends EventEmitter {
     if (held) return held;
     const run = this.loadCold(id);
     return run && this.answerCold(run, true);
+  }
+
+  /** Whether the run's row is in `runs.db` but its record could not be read here: what tells a
+   *  run that cannot open from one that does not exist. Known once something tried to read it. */
+  isUnreadable(id: string): boolean {
+    return this.unreadable.has(id) && !this.held.has(id) && !this.deleted.has(id);
   }
 
   /** The ids in memory right now: the held set, for diagnostics and the benchmark's heap pass. */

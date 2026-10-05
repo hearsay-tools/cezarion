@@ -136,6 +136,15 @@ describe('cold reads of runs.db', () => {
     expect(readRunIndexFromDisk(dir).runs).toEqual([JSON.parse(JSON.stringify(toRunSummary(run)))]);
   });
 
+  it('leaves out a row it had to decode and could not, and says so once per project', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const steps = [{ id: 's', name: 's', kind: 'agent', status: 'bogus', iterations: 1, tokensUsed: 0 }];
+    seedRuns(dir, [record({ id: 'ok', referencedPullRequestUrl: undefined, referencedIssueUrl: undefined }), record({ id: 'live', status: 'running', steps })]);
+    expect(readRunIndexFromDisk(dir).runs.map((run) => run.id)).toEqual(['ok']);
+    expect(readRunIndexFromDisk(dir).runs.map((run) => run.id)).toEqual(['ok']);
+    expect(warn).toHaveBeenCalledExactlyOnceWith(expect.stringContaining(`1 run(s) in ${join(dir, RUNS_DB_FILE)} could not be read`));
+  });
+
   it('ignores the frozen runs.json once the import is complete, and reads it until then', () => {
     writeFileSync(join(dir, 'runs.json'), JSON.stringify([record({ id: 'legacy' })]));
     expect(readRunIndexFromDisk(dir).runs.map((run) => run.id)).toEqual(['legacy']);

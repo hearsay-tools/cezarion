@@ -558,6 +558,9 @@ const FOLLOWUPS_OFF = 'the follow-up inbox is disabled — set CEZ_FOLLOWUPS=1 t
 /** 409 body for every automations route while GitHub automations are off (#801). */
 const AUTOMATIONS_OFF = 'Automations are disabled — set CEZ_AUTOMATIONS=1 to enable them';
 
+/** 404 body for a run whose row is in runs.db but whose record this cezar cannot decode (#779). */
+const UNREADABLE_RUN_ERROR = 'this run could not be read by this cezar: its record in runs.db does not fit this version (a newer cezar may have written it). It is left in the database untouched.';
+
 // ---- variant-compare response shapes (spec 010) ----------------------------
 // Named and exported so `api-types.test.ts` can drift-guard the cockpit's
 // hand-mirrored copies (`web/app/src/api/types.ts`) against the real thing.
@@ -4147,8 +4150,11 @@ export function createApp(deps: ServerDeps) {
 
     .get('/runs/:id', (c) => {
       const { store, manager } = c.get('project');
-      const run = store.getRun(c.req.param('id'));
-      return run ? c.json(withUsage(run, manager.finishBlockedReason(run.id) ?? null)) : c.json({ error: 'not found' }, 404);
+      const id = c.req.param('id');
+      const run = store.getRun(id);
+      if (run) return c.json(withUsage(run, manager.finishBlockedReason(run.id) ?? null));
+      // A row in runs.db this version cannot decode (#779): listed until read, so say why it will not open.
+      return c.json({ error: store.isUnreadable(id) ? UNREADABLE_RUN_ERROR : 'not found' }, 404);
     })
 
     .get(

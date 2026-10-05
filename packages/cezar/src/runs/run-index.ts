@@ -14,6 +14,10 @@ export interface ColdRunIndex {
 
 const EMPTY: ColdRunIndex = { runs: [], truncated: false };
 
+/** Projects whose unreadable rows this process has already reported: ⌘K reads the index on every
+ *  keystroke's request, and one warning per project is enough. */
+const reportedUnreadable = new Set<string>();
+
 /**
  * The READ-ONLY reader of a project's runs, for the workspace-level run index (`GET
  * /workspace/runs-index`) — the one place that must read a project's runs WITHOUT owning it.
@@ -71,16 +75,22 @@ function readDatabase(db: RunDatabase, dataDir: string, { handle, limit }: { han
   });
   const records = new Map(db.getMany(decode.map((row) => row.id)).map((row) => [row.id, decodeRunRecord(row.data)]));
   const runs: RunSummary[] = [];
+  let unreadable = 0;
   kept.forEach((row, i) => {
     const summary = summaries[i];
     if (summary !== undefined && !needsRecord(summary, handle)) {
       runs.push(summary);
       return;
     }
-    // A row that decodes to nothing is one the store would not load either.
+    // A row that decodes to nothing is one the store leaves out of its list rows too.
     const record = records.get(row.id);
     if (record) runs.push(coldSummary(record, dataDir, handle));
+    else unreadable++;
   });
+  if (unreadable > 0 && !reportedUnreadable.has(dataDir)) {
+    reportedUnreadable.add(dataDir);
+    console.warn(`[cez] ${unreadable} run(s) in ${join(dataDir, RUNS_DB_FILE)} could not be read; they are left out of the run index and left in the database untouched.`);
+  }
   return { runs, truncated };
 }
 
