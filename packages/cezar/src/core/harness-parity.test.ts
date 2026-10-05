@@ -65,7 +65,7 @@ import {
   type SeamObservation,
   waitFor,
 } from './harness-parity.testkit.ts';
-import { blockRunWrites, crashStore, readPersistedRuns, seedRuns } from '../runs/run-store.testkit.ts';
+import { blockRunWrites, crashStore, muteLockedDatabaseLogs, readPersistedRuns, seedRuns } from '../runs/run-store.testkit.ts';
 import { RunStore, type RunRecord } from '../runs/store.ts';
 import { createFixtureManager, drainFixtureManagers } from '../workflows/fixture-cleanup.testkit.ts';
 
@@ -1484,6 +1484,7 @@ describe('harness parity — owned input run tier', () => {
         };
         store.on('event', failAfterEnqueue);
         const input = agentInput(parentRunId, 'mock:hold');
+        const unmute = muteLockedDatabaseLogs();
         try {
           expect(manager.steerWorker(runId, input)).toBe('queued');
           await waitFor(() => store.readEvents(runId).some(event => event.type === 'error' && String(event.message).includes('agent input delivery checkpoint failed')));
@@ -1491,6 +1492,7 @@ describe('harness parity — owned input run tier', () => {
         } finally {
           store.off('event', failAfterEnqueue);
           unblock?.();
+          unmute();
         }
         await waitFor(() => !manager.isActive(runId));
         expect(store.getRun(runId)?.status).toBe('failed');

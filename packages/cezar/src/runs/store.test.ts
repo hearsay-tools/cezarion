@@ -367,8 +367,10 @@ describe('RunStore — titleSummary + diffStat (#389)', () => {
     seedRuns(dataDir, [{ ...LEGACY_RUN, id: 'bad-activity', status: 'running', activity: 'bogus' }]);
     // A corrupt/unknown activity must not smuggle a run in with an invalid value:
     // the schema drops the bad record (degrade-to-fresh), so it does not load.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const store = RunStore.open(dataDir);
     expect(store.getRun('bad-activity')?.activity).not.toBe('bogus');
+    expect(warn).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('1 run(s) in runs.db could not be read'));
   });
 
   it('round-trips an effort pin while omission stays compatible (#45)', () => {

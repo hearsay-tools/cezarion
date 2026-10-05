@@ -224,7 +224,16 @@ describe('the import marker is checked inside the import transaction', () => {
     writeFileSync(join(dataDir, 'runs.json'), JSON.stringify(manyRecords(1_500)));
     const opener = (name: string) => runChild(name, `
       const [dataDir, scratch, name] = process.argv.slice(2);
-      __setLegacyImportHookForTests({ beforeCommit: () => writeFileSync(scratch + '/imported-' + name, '') });
+      __setLegacyImportHookForTests({
+        // Neither asks for the write lock before both have read "not imported": the race itself,
+        // whatever the host's speed, rather than a hope that the two opens overlap.
+        beforeTransaction: () => {
+          writeFileSync(scratch + '/read-' + name, '');
+          waitFor(scratch + '/read-one');
+          waitFor(scratch + '/read-two');
+        },
+        beforeCommit: () => writeFileSync(scratch + '/imported-' + name, ''),
+      });
       writeFileSync(scratch + '/ready-' + name, '');
       waitFor(scratch + '/go');
       const store = RunStore.open(dataDir, { retryBusy: true });
@@ -240,6 +249,7 @@ describe('the import marker is checked inside the import transaction', () => {
       expect(code).toBe(0);
       expect(stdout).toBe('1500');
     }
+    expect(readdirSync(scratch).filter((name) => name.startsWith('read-'))).toHaveLength(2);
     expect(readdirSync(scratch).filter((name) => name.startsWith('imported-'))).toHaveLength(1);
   });
 });

@@ -108,6 +108,24 @@ export function blockRunWrites(dataDir: string): () => void {
 }
 
 /**
+ * Keep the lines a deliberate `blockRunWrites` fault makes the store and the manager log ("failed
+ * to save runs.db: … database is locked") out of the test output. Anything else logged meanwhile
+ * still prints. Call the returned function to stop.
+ */
+export function muteLockedDatabaseLogs(): () => void {
+  const original = { error: console.error, warn: console.warn };
+  const filter = (level: 'error' | 'warn') => (...args: unknown[]) => {
+    if (!args.some((arg) => String(arg).includes('database is locked'))) original[level](...args);
+  };
+  console.error = filter('error');
+  console.warn = filter('warn');
+  return () => {
+    console.error = original.error;
+    console.warn = original.warn;
+  };
+}
+
+/**
  * End `store` the way a crash ends its process (#779, plan step 3): nothing still pending is
  * written, the connection goes, and the claims it held stay in `runs.db` under a session no live
  * process has open, so the next store on the project takes them over as a restart would.

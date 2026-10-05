@@ -4,7 +4,7 @@ import { expect, it, vi } from 'vitest';
 import { OpencodeServerRunner } from './opencode-server-runner.ts';
 import type { AgentSession } from './agent-runner.ts';
 import { waitFor, withOwnedInputRun } from './harness-parity.testkit.ts';
-import { blockRunWrites } from '../runs/run-store.testkit.ts';
+import { blockRunWrites, muteLockedDatabaseLogs } from '../runs/run-store.testkit.ts';
 
 type Fixture = Parameters<Parameters<typeof withOwnedInputRun>[2]>[0];
 
@@ -55,6 +55,7 @@ it.each(['fresh', 'continuation'] as const)('%s acknowledged input checkpoint re
       };
       const input = { id: randomUUID(), source: 'agent' as const, parentRunId, text: 'mock:hold', createdAt: new Date().toISOString() };
       store.on('event', observe);
+      const unmute = muteLockedDatabaseLogs();
       try {
         expect(manager.steerWorker(runId, input)).toBe('queued');
         await waitFor(() => injected);
@@ -69,6 +70,7 @@ it.each(['fresh', 'continuation'] as const)('%s acknowledged input checkpoint re
       } finally {
         store.off('event', observe);
         unblock?.();
+        unmute();
       }
     });
   } finally { spy.mockRestore(); }
