@@ -33,7 +33,7 @@ export interface CezarCheckout {
   linked: boolean;
   commit: { sha: string; subject: string; at: string } | null;
   builtAt: string | null;
-  /** Built, but the last commit is newer than the build. */
+  /** Built, but HEAD is newer than the build or uncommitted changes require rebuilding. */
   stale: boolean;
   /** The cezar task that owns the worktree, from the repo's own run index. */
   task: { id: string; title: string; status: string } | null;
@@ -78,6 +78,19 @@ async function lastCommit(worktree: string): Promise<{ sha: string; subject: str
     return sha && at ? { sha, subject: subject ?? '', at: new Date(at).toISOString() } : null;
   } catch {
     return null;
+  }
+}
+
+/** A dirty tree cannot prove its build matches its sources. Include staged, deleted and
+ *  untracked files; ignored build output does not count. A git failure also requires a rebuild. */
+async function hasUncommittedChanges(worktree: string): Promise<boolean> {
+  try {
+    const { stdout } = await exec('git', ['status', '--porcelain', '--untracked-files=normal'], {
+      cwd: worktree, timeout: 5_000, maxBuffer: 4 * 1024 * 1024,
+    });
+    return stdout.trim().length > 0;
+  } catch {
+    return true;
   }
 }
 
@@ -188,8 +201,11 @@ export async function discoverCheckouts(env: NodeJS.ProcessEnv = process.env): P
   assignUniqueIds(found, links, env);
   const out = await Promise.all(
     found.map(async (checkout): Promise<CezarCheckout> => {
-      const commit = await lastCommit(checkout.worktree);
-      const stale = !!(checkout.builtAt && commit && commit.at > checkout.builtAt);
+      const [commit, dirty] = await Promise.all([
+        lastCommit(checkout.worktree),
+        checkout.built ? hasUncommittedChanges(checkout.worktree) : false,
+      ]);
+      const stale = checkout.built && (dirty || !!(checkout.builtAt && commit && commit.at > checkout.builtAt));
       return { ...checkout, commit, stale };
     }),
   );

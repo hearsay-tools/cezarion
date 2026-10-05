@@ -194,12 +194,12 @@ export function DevelopmentPanel({
         <p className="min-w-0 truncate text-[11.5px] text-muted-foreground" title={pickedCheckout?.worktree}>
           {pickedCheckout
             ? needsBuild
-              ? `${pickedCheckout.built ? 'Built before its last commit' : 'Not built yet'} — runs npm run build in ${pickedCheckout.worktree} first (about a minute).`
+              ? `${pickedCheckout.built ? 'Needs rebuild' : 'Not built yet'} — runs npm run build in ${pickedCheckout.worktree} first (about a minute).`
               : pickedCheckout.worktree
             : pickedPull
               ? `Installs ${pickedPull.version} from npm.`
               : tab === 'worktrees'
-                ? 'Linked, not copied: a worktree that is not built, or built before its last commit, is built before the switch.'
+                ? 'Linked, not copied: a worktree with uncommitted changes, a missing build, or a build older than its last commit is built before the switch.'
                 : 'Preview builds CI publishes for green same-repo pull requests.'}
         </p>
         <Button
