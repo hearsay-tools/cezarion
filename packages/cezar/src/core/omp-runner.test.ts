@@ -69,6 +69,12 @@ describe('ompTools', () => {
     expect(ompTools(['NotebookEdit'], {})).toMatchObject({ flag: 'no-tools', dropped: ['NotebookEdit'] });
   });
 
+  it('cezarTools admits cezar_preview_serve exactly when the extension registers it (CEZ_PREVIEW=1)', () => {
+    expect(ompTools(['Read'], { cezarTools: true, env: { CEZ_PREVIEW: '1' } }).tools).toEqual(['read', 'cezar_wait_for_ci', 'cezar_preview_serve']);
+    expect(ompTools(['Read'], { cezarTools: true, env: { CEZ_PREVIEW: '0' } }).tools).toEqual(['read', 'cezar_wait_for_ci']);
+    expect(ompTools(['Read'], { env: { CEZ_PREVIEW: '1' } }).tools).toEqual(['read']);
+  });
+
   it('bashAllowlist drops bash; D1 drops task, wait and eval; cezarTools appends cezar_wait_for_ci', () => {
     expect(ompTools(['Read', 'Bash'], { bashAllowlist: ['npm test'] }).tools).toEqual(['read']);
     expect(ompTools(['Read', 'Bash'], { bashAllowlist: [] }).tools).toEqual(['read', 'bash']);

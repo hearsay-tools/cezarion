@@ -39,10 +39,10 @@ for (let i = 0; i < argv.length; i++) {
 let tools = flags.has('--no-tools') ? [] : DEFAULT_TOOLS;
 if (typeof flags.get('--tools') === 'string') {
   tools = flags.get('--tools').split(',');
-  // An extension registers cezar's tool; an MCP name needs a configured server, which the mock
+  // The CI extension registers cezar's tools (the preview tool only under CEZ_PREVIEW=1); an MCP name needs a configured server, which the mock
   // takes from CEZ_MOCK_OMP_MCP_TOOLS (none by default, like a home without .omp/mcp.json).
   const mcpTools = (process.env.CEZ_MOCK_OMP_MCP_TOOLS ?? '').split(',').filter(Boolean);
-  const known = (name) => BUILTIN_TOOLS.includes(name) || mcpTools.includes(name) || (name === 'cezar_wait_for_ci' && extensions.length > 0);
+  const known = (name) => BUILTIN_TOOLS.includes(name) || mcpTools.includes(name) || (extensions.length > 0 && (name === 'cezar_wait_for_ci' || (name === 'cezar_preview_serve' && process.env.CEZ_PREVIEW === '1')));
   const unknown = tools.find((name) => !known(name));
   if (unknown) {
     startupError(2, `Error: Unknown tool in --tools: ${unknown}.\nBuilt-in tools: ${BUILTIN_TOOLS.join(', ')}. Other registered tools: goal, init_experiment, run_experiment, log_experiment, update_notes.`);
@@ -60,6 +60,9 @@ if (process.env.CEZ_MOCK_OMP_NO_AUTH === '1') {
   process.stderr.write('No models available. Use /login or set an API key environment variable. Then use /model to select a model.\n\nSet an API key environment variable:\n  ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, etc.\n\nOr create ~/.omp/agent/models.yml\n');
   process.exit(1);
 }
+
+// The extension loads while OMP starts: with a CI target the mock lists and calls its tools now.
+if (process.env.CEZ_MOCK_CI_PR) { const { probeCiTool } = await import('./mock-ci-tool.mjs'); await probeCiTool('omp', argv); }
 
 // A fresh session mints a uuid v7; `--resume <id>` keeps the resumed session's id.
 const sessionId = typeof flags.get('--resume') === 'string' ? flags.get('--resume') : '019a0000-0000-7000-8000-0000000000aa';
@@ -409,6 +412,12 @@ async function prompt(command) {
   if (message.includes('mock:done') || (resumeAfterAsk && message.trim() === 'Library: Vitest')) {
     resumeAfterAsk = false;
     assistantText(['parity done: the task is complete\n\nCEZ:DONE']);
+    endTurn();
+    return;
+  }
+  if (message.includes('mock:ci-wait')) {
+    const { ciPrompt } = await import('./mock-ci-tool.mjs');
+    assistantText([await ciPrompt('omp', argv, message)]);
     endTurn();
     return;
   }

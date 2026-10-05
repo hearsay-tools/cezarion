@@ -18,7 +18,7 @@ import type {
 import { isSignalTerminationExit } from './agent-runner.js';
 import { buildChildEnv } from './agent-env.js';
 import type { UiEvent } from './ui-events.js';
-import { ciToolDefinition } from '../ci-wait/tools.js';
+import { cezarToolNames } from '../ci-wait/tools.js';
 import { readNdjson } from './ndjson.js';
 import {
   createOmpUiState,
@@ -120,6 +120,8 @@ export function ompTools(
     bashAllowlist?: string[];
     restrictNativeDelegation?: boolean;
     cezarTools?: boolean;
+    /** Env the extension will read: `CEZ_PREVIEW=1` there decides which cezar tools it registers. */
+    env?: NodeJS.ProcessEnv;
     /** OMP names the user's settings disabled (R13), removed from the list; never added to it. */
     exclude?: readonly string[];
   },
@@ -144,7 +146,8 @@ export function ompTools(
   // Narrow before the CI tool joins: a refusal never leaves a CI-only list where --no-tools belongs.
   for (const name of opts.exclude ?? []) tools.delete(name);
   if (tools.size === 0) return { flag: 'no-tools', tools: [], dropped: [...dropped] };
-  if (opts.cezarTools) tools.add(ciToolDefinition.name);
+  // Exactly the names omp-ci-wait.mjs registers (R11): OMP exits 2 on an unknown --tools name.
+  if (opts.cezarTools) for (const name of cezarToolNames(opts.env ?? {})) tools.add(name);
   return { flag: 'tools', tools: [...tools], dropped: [...dropped] };
 }
 
@@ -164,6 +167,7 @@ export function buildOmpArgs(spec: AgentRunSpec, excludeTools?: readonly string[
     bashAllowlist: spec.bashAllowlist,
     restrictNativeDelegation: spec.restrictNativeDelegation,
     cezarTools: spec.cezarTools !== undefined,
+    env: spec.env,
     exclude: excludeTools,
   });
   if (selection.flag === 'tools') args.push('--tools', selection.tools.join(','));
