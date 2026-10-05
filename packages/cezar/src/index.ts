@@ -3,7 +3,7 @@ import { createHostDiscovery } from './discovery/catalog.ts';
 import { DelegationController } from './delegation/provision.ts';
 import { parseArgs } from 'node:util';
 import { execFileSync } from 'node:child_process';
-import { createServer } from 'node:net';
+import { createServer, type Server } from 'node:http';
 import { once } from 'node:events';
 import { mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -247,6 +247,9 @@ async function serveCommand(
   const ownership = new CockpitOwnership();
   process.once('exit', () => ownership.releaseAll());
   await ownership.acquire(join(repoRoot, '.ai/cezar'));
+  // Hold the real listener before workspace writes, recovery or background resources.
+  // A probe followed by a later bind would allow another cwd to win in between.
+  const listener = await acquireServeListener(preferredPort, bindHost);
   const bootProjectId = await initWorkspace(repoRoot);
   // ONE workspace semaphore for the whole process (spec 2026-07-20, step 2.5):
   // the boot manager and every lazily-built project context count their runs
@@ -321,7 +324,7 @@ async function serveCommand(
     console.log(`\n  ⬆ cezar ${latest} is available (running ${version}) — restart with: npx ${pkgName}@latest\n`);
   });
 
-  const port = restartExact ? preferredPort : await pickPort(preferredPort);
+  const port = preferredPort;
   // SECURITY: cezar executes agents. A non-loopback bind exposes that box to
   // whatever can reach the interface, and cezar itself has NO auth — it is only
   // for a deliberate hosted setup where a reverse proxy in front provides TLS +
@@ -367,7 +370,7 @@ async function serveCommand(
     taskWebhooks,
     previewHost,
     cezarPort,
-  }, port);
+  }, port, listener);
   if (!server.listening) await once(server, 'listening');
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('cockpit TCP listener is unavailable');
@@ -388,7 +391,6 @@ async function serveCommand(
     const detail = check.available ? (check.version ?? 'ok') : (check.hint ?? 'missing');
     console.log(`  ${mark} ${check.name.padEnd(6)} ${detail}`);
   }
-  if (preferredPort !== 0 && boundPort !== preferredPort) console.log(`  (port ${preferredPort} was busy — using ${boundPort})`);
   console.log(`\n  cockpit → ${url}\n`);
   // Silenced by CEZ_NO_BANNER=1 or by dismissing the cockpit's banner (#391).
   await printSkillsBanner(repoRoot);
@@ -412,21 +414,27 @@ async function serveCommand(
   }
 }
 
-/** First free port starting at `start` (the launch.mjs pattern from janitor). */
-async function pickPort(start: number): Promise<number> {
-  for (let port = start; port < start + 50; port++) {
-    if (await canListen(port)) return port;
-  }
-  return start; // let the server fail loudly if 50 ports are somehow busy
-}
-
-function canListen(port: number): Promise<boolean> {
-  return new Promise((resolvePort) => {
-    const probe = createServer();
-    probe.once('error', () => resolvePort(false));
-    probe.once('listening', () => probe.close(() => resolvePort(true)));
-    probe.listen(port, '127.0.0.1');
+/** Acquire once, on the actual bind host; --port 0 delegates selection to the OS. */
+async function acquireServeListener(port: number, bindHost = '127.0.0.1'): Promise<Server> {
+  const listener = createServer((_request, response) => {
+    response.writeHead(503, { 'Content-Type': 'text/plain', 'Connection': 'close' });
+    response.end('Cockpit is starting; retry shortly.\n');
   });
+  try {
+    listener.listen(port, bindHost);
+    await once(listener, 'listening');
+    return listener;
+  } catch (error) {
+    listener.close();
+    if ((error as NodeJS.ErrnoException).code === 'EADDRINUSE') {
+      throw new Error(
+        `Cockpit port ${port} on ${bindHost} is already in use. ` +
+        'Open the existing cockpit if it is serving there, stop the process using this port, ' +
+        'or pass --port <free-port> to deliberately start another cockpit.',
+      );
+    }
+    throw error;
+  }
 }
 
 async function waitForHealth(healthUrl: string, timeoutMs: number): Promise<boolean> {
