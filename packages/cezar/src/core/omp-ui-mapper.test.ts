@@ -140,6 +140,8 @@ describe('omp ui mapper (golden fixtures)', () => {
     const items = toolItems(replay('rpc-subagents'));
     expect(items.filter((i) => i.toolKind === 'task' && !i.parentItemId)).toHaveLength(5); // 2 single + 3 batch
     expect(items.find((i) => i.title === 'Task batch · 3 agents')?.toolKind).toBe('other');
+    const single = mapOmpRpcMessage({ type: 'tool_execution_start', toolCallId: 'one', toolName: 'task', args: { tasks: [{ agent: 'explore', task: 'read a.txt' }] } }, createOmpUiState());
+    expect(single.events.find((e) => e.type === 'item.started')).toMatchObject({ item: { title: 'Task batch · 1 agent' } });
     const rows = Object.fromEntries(items.filter((i) => i.id.startsWith('toolu_task_2#')).map((i) => [i.id, i]));
     expect(rows['toolu_task_2#Docs']).toMatchObject({
       name: 'task',

@@ -494,7 +494,7 @@ function ompToolDisplay(name: string, args: unknown): { toolKind: UiToolItem['to
   if (name === 'todo') return { toolKind: 'plan', title: 'Update plan' };
   if (name === 'task' && isRecord(args) && Array.isArray(args.tasks)) {
     // The drawer lists one synthetic row per sub-agent; the card itself must not be a row too.
-    return { toolKind: 'other', title: `Task batch · ${args.tasks.length} agents` };
+    return { toolKind: 'other', title: `Task batch · ${args.tasks.length} agent${args.tasks.length === 1 ? '' : 's'}` };
   }
   // The single form has no `description`; its `task` text is the row's label.
   const display =

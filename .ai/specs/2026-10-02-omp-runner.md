@@ -265,7 +265,8 @@ or pre-admission failure ends the turn: a steer OMP handles locally, or that fai
 admission, leaves the running turn alone (a local completion of a steer must not end a turn
 that is still running). Startup commands and the opening prompt go through the stdin outbox
 described under Tools. `inputDelivery` is `steer` / `observable`, as Pi, derived
-from the source because no live turn was possible (Ruling 0). Interrupt: `abort`, then SIGTERM, then SIGKILL after
+from the source and then confirmed by a live turn on 2026-10-05: a mid-turn steer was
+consumed in the same turn (Ruling 0, updated). Interrupt: `abort`, then SIGTERM, then SIGKILL after
 `KILL_GRACE_MS`. End: close stdin, SIGTERM after the grace period. `resumeCommand()`:
 `omp --resume <id>`.
 
@@ -510,7 +511,7 @@ differs from the approved text above, the ruling wins and the cost of being wron
 
 | # | Decision | Cost if wrong |
 |---|---|---|
-| Ruling 0 | No live OMP turn: no provider login on the host; turn fixtures are source-derived and labeled | `inputDelivery` and the I2 reasoning stay unverified live |
+| Ruling 0 | Turn fixtures are source-derived and labeled. Updated 2026-10-05: once an OMP login existed, live turns through `OmpRunner` (`xai-oauth/grok-4.6`) confirmed streaming, a same-turn steer, `--resume` and interrupt; see the fixtures README verification ledger | The fixtures could drift from the live wire; the live check covers the main paths only |
 | Ruling 1 | Default tools exclude `find` and `ast_grep` (settings-gated, default off; `--tools` naming them exits 2) | Users who enabled them do not get them by default; a workflow can grant them |
 | Ruling 2 | `WebFetch` maps to `read`, not `fetch` (not a v18.4.11 built-in) | A `WebFetch` grant gives no web fetch beyond `read`'s static pages |
 | Ruling 3 | `omp models --json` is `{"models":[...]}`; status: empty is disconnected, non-empty connected, else null; effort levels from `thinking` | Status misreports |
