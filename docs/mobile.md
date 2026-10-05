@@ -81,19 +81,37 @@ and [Developer Mode](https://developer.apple.com/documentation/xcode/enabling-de
 4. Open a task, read the conversation, and send a message or create a small test
    task. Verify streamed updates and any **Needs You** response flow you use.
 5. Switch apps or lock the phone, then return. The existing cockpit reconciles its
-   stream when it becomes visible. **Refresh** reconnects at the cockpit address
-   if the page or network is stuck. It does not rerun a task.
-6. Use **Connection** to return to the connection screen. Close and reopen the app:
+   stream when it becomes visible. Use pull-to-refresh or **⋯ → Refresh** if stuck.
+   It does not rerun a task.
+6. Use **⋯ → Connection settings** to return to the connection screen. Close and reopen the app:
    the address is remembered; tap **Connect** to reopen it.
 7. Use **Forget connection & sign out**, confirm, and reconnect. You should have to
    sign in again. This clears this app's website data, not your browser's sessions.
 
-The native header provides **Connection** (edit the one remembered server), **Back**
-(previous web page), and **Refresh** (reload the cockpit's starting address without
-restarting any tasks). There is no saved multi-server list in this version. External HTTPS
-links ask before opening in the system browser. A blocked SSO redirect shows only
-its origin; return to Connection and correct the trusted origin. Redirects never add
-trust automatically.
+The cockpit fills the available screen, with no permanent native toolbar. A small
+**⋯** button floats at the right edge; drag it up or down if it covers something.
+It is announced as **Browser controls** by screen readers. Tap it for the current
+server origin, **Back**, **Refresh**, or **Connection settings**. There is no saved
+multi-server list in this version.
+
+- **Back:** on iPhone, swipe right from the left edge to navigate web history.
+  Swipe left from the right edge to go forward again. Android uses the system Back
+  gesture/button. The menu also offers Back when there
+  is a previous page. On iPhone, an edge swipe never dismisses the cockpit to the
+  connection form; use the menu for that.
+- **Refresh:** pull down starting at the **top edge of the web content**, until
+  **Release to refresh** appears, then release. Pulling inside a conversation only
+  scrolls it. The cockpit deliberately contains its nested panels' scrolling, so
+  arbitrary downward swipes must not reload the page or lose a draft. The menu's
+  Refresh action is an accessible alternative.
+- Refresh keeps the current cockpit route. When recovering from a connection
+  error or a sign-in redirect, it starts at the saved cockpit address instead.
+- Connection settings preserves the current session. Connecting to a different
+  server/auth pair or choosing Forget still clears it.
+
+External HTTPS links ask before opening in the system browser. A blocked SSO
+redirect shows only its origin; open **⋯ → Connection settings** and correct the
+trusted origin. Redirects never add trust automatically.
 
 ## Scope and session behavior
 

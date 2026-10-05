@@ -21,9 +21,10 @@ public final class MainActivity extends Activity {
     private SharedPreferences prefs;
     private LinearLayout root;
     private EditText endpoint, auth;
-    private TextView status, origin;
+    private TextView status;
     private Button connect, forget;
     private WebView web;
+    private CockpitFrame cockpit;
     private Connection connection;
     private boolean failed;
     private ValueCallback<Uri[]> fileCallback;
@@ -120,13 +121,10 @@ public final class MainActivity extends Activity {
 
     private void openCockpit(Connection selected) {
         connection = selected; failed = false; setRoot();
-        LinearLayout toolbar = new LinearLayout(this);
-        toolbar.addView(button("Connection", this::showLauncher), new LinearLayout.LayoutParams(0, -2, 1));
-        toolbar.addView(button("Back", () -> { if (web.canGoBack()) web.goBack(); }), new LinearLayout.LayoutParams(0, -2, 1));
-        toolbar.addView(button("Refresh", this::reload), new LinearLayout.LayoutParams(0, -2, 1)); root.addView(toolbar);
-        origin = text(Connection.safeOrigin(selected.endpoint), 12); origin.setPadding(dp(12), 0, dp(12), dp(4)); root.addView(origin);
         status = text("", 13); status.setTextColor(AMBER); status.setVisibility(View.GONE); root.addView(status);
         web = new WebView(this);
+        web.setContentDescription("Cockpit");
+        cockpit = new CockpitFrame(this, web, this::refresh, this::showControls);
         WebSettings settings = web.getSettings();
         settings.setJavaScriptEnabled(true); settings.setDomStorageEnabled(true);
         settings.setAllowFileAccess(false); settings.setAllowContentAccess(false);
@@ -145,15 +143,16 @@ public final class MainActivity extends Activity {
                 return true;
             }
             @Override public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
+                if (web != view || cockpit == null) return;
                 if (!selected.allows(url)) { view.stopLoading(); blocked(url); return; }
-                status.setVisibility(View.GONE); origin.setText(Connection.safeOrigin(url));
+                status.setVisibility(View.GONE); cockpit.loading(true); failed = false;
             }
-            @Override public void onPageFinished(WebView view, String url) { CookieManager.getInstance().flush(); }
+            @Override public void onPageFinished(WebView view, String url) { if (web == view && cockpit != null) cockpit.loading(false); CookieManager.getInstance().flush(); }
             @Override public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
-                if (request.isForMainFrame()) { failed = true; showError("Could not connect. Check your network or VPN, then tap Refresh."); }
+                if (request.isForMainFrame()) { failed = true; showError("Could not connect. Check your network or VPN, then choose Refresh in ⋯."); }
             }
             @Override public void onReceivedHttpError(WebView view, WebResourceRequest request, WebResourceResponse response) {
-                if (request.isForMainFrame() && response.getStatusCode() >= 500) { failed = true; showError("The server is unavailable. Tap Refresh to retry."); }
+                if (request.isForMainFrame() && response.getStatusCode() >= 500) { failed = true; showError("The server is unavailable. Choose Refresh in ⋯ to retry."); }
             }
             @Override public void onReceivedSslError(WebView view, SslErrorHandler handler, SslError error) {
                 handler.cancel(); failed = true; showError("The server certificate could not be verified. Check your server's HTTPS setup.");
@@ -185,15 +184,27 @@ public final class MainActivity extends Activity {
                 return true;
             }
         });
-        root.addView(web, new LinearLayout.LayoutParams(-1, 0, 1));
+        root.addView(cockpit, new LinearLayout.LayoutParams(-1, 0, 1));
         web.loadUrl(selected.endpoint);
+    }
+
+    private void showControls(View anchor) {
+        if (web == null) return;
+        PopupMenu menu = new PopupMenu(this, anchor);
+        String currentOrigin = Connection.safeOrigin(web.getUrl());
+        menu.getMenu().add(currentOrigin == null ? Connection.safeOrigin(connection.endpoint) : currentOrigin).setEnabled(false);
+        menu.getMenu().add("Back").setEnabled(web.canGoBack()).setOnMenuItemClickListener(item -> { web.goBack(); return true; });
+        menu.getMenu().add("Refresh").setOnMenuItemClickListener(item -> { refresh(); return true; });
+        menu.getMenu().add("Connection settings").setOnMenuItemClickListener(item -> { showLauncher(); return true; });
+        menu.show();
     }
 
     private void blocked(String url) {
         String host = Connection.safeOrigin(url);
-        showError("Blocked navigation to " + (host == null ? "an unsupported address" : host) + ". Check the trusted sign-in origin in Connection.");
+        failed = true;
+        showError("Blocked navigation to " + (host == null ? "an unsupported address" : host) + ". Check ⋯ → Connection settings.");
     }
-    private void showError(String message) { status.setText(message); status.setVisibility(View.VISIBLE); }
+    private void showError(String message) { if (cockpit != null) cockpit.loading(false); status.setText(message); status.setVisibility(View.VISIBLE); }
     private void external(String target) {
         String host = Connection.safeOrigin(target); if (host == null) { blocked(target); return; }
         new AlertDialog.Builder(this).setTitle("Open in browser?").setMessage(host)
@@ -203,6 +214,11 @@ public final class MainActivity extends Activity {
             }).show();
     }
     private void reload() { if (web != null) { failed = false; status.setVisibility(View.GONE); web.loadUrl(connection.endpoint); } }
+    private void refresh() {
+        if (web == null) return;
+        if (!failed && Connection.safeOrigin(connection.endpoint).equals(Connection.safeOrigin(web.getUrl()))) web.reload();
+        else reload();
+    }
     private void disposeWeb() {
         if (fileCallback != null) { fileCallback.onReceiveValue(null); fileCallback = null; }
         if (web != null) {
@@ -210,6 +226,7 @@ public final class MainActivity extends Activity {
             if (web.getParent() instanceof android.view.ViewGroup parent) parent.removeView(web);
             web.destroy(); web = null;
         }
+        cockpit = null;
     }
     @Override public void onBackPressed() { if (web != null && web.canGoBack()) web.goBack(); else if (web != null) showLauncher(); else super.onBackPressed(); }
     @Override protected void onPause() { if (web != null) { web.onPause(); CookieManager.getInstance().flush(); } super.onPause(); }
