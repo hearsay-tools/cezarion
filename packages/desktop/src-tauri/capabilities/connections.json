@@ -3,5 +3,5 @@
   "identifier": "connections",
   "description": "Only bundled connection forms may create unprivileged remote windows.",
   "windows": ["main", "connections"],
-  "permissions": ["allow-connect-remote"]
+  "permissions": ["allow-connect-remote", "allow-list-connections", "allow-forget-connection"]
 }

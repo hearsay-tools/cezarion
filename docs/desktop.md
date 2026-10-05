@@ -71,10 +71,36 @@ Then connect to `http://127.0.0.1:54321`. Other unencrypted remote addresses are
 rejected. The tunnel carries SSH's authentication and encryption; the server
 should use its remote-mode protections (`CEZ_REMOTE=1`).
 
-Every connection gets an incognito webview with no Tauri capability grants,
-no local shell initialization script and no access to local version switching.
-The native title identifies the selected origin. Sessions are not persisted by
-the app. This does not add a local reverse proxy or weaken server CORS/CSRF rules.
+**Remember this connection and sign-in** is checked by default. Saved cockpits
+appear in the launcher's sidebar with their address and trusted sign-in origin
+already filled in. Select one and choose **Open cockpit** on later launches.
+Each saved connection has a separate persistent browser profile, isolated from
+other connections and the local cockpit. Changing the cockpit address or trusted
+sign-in origin creates a separate profile. Cookies and web storage are managed by
+the OS webview; the app never reads or stores your password. Server expiration,
+logout, MFA and any “Remember me” setting on the sign-in page still apply.
+
+Uncheck Remember for a temporary, isolated session. **Forget connection…** closes
+that connection and clears its saved sign-in/browser profile before removing the
+bookmark. This clears local authentication state; it does not revoke sessions on
+other devices. Persistent isolated profiles require macOS 14 or later; macOS
+12–13 still remember addresses, explicitly show this limitation and use temporary
+sessions. Windows and Linux use separate webview data directories.
+
+Bookmarks live in `CEZ_HOME/desktop/connections.json` (by default
+`~/.cezar/desktop/connections.json`), with owner-only permissions on Unix. Windows
+and Linux browser profiles live beside it in `desktop/profiles/<uuid>`; macOS
+profiles are managed by WebKit under the app's data store. Use Forget to clear a
+profile, rather than deleting just the bookmark file.
+
+Remote webviews have no Tauri capability grants, local initialization script or
+local version switching. The native title identifies the selected origin. This
+does not add a local reverse proxy or weaken server CORS/CSRF rules.
+
+Password-manager browser extensions are not bundled or integrated. Use your
+manager's desktop copy/paste flow when needed; native autofill availability
+varies by platform and provider and is not guaranteed. The app does not intercept
+login fields or copy cookies from your regular browser.
 External HTTPS links open in the system browser. Full-page identity-provider
 redirects are supported through the explicit trusted sign-in origin; popup login
 flows and an app-managed Basic Auth credential form are not supported. For the
@@ -107,7 +133,7 @@ CEZ_DESKTOP_CWD="$PWD" CEZ_DESKTOP_NO_UPDATE=1 \
 "$PWD/packages/desktop/src-tauri/target/debug/bundle/macos/Cezarion.app/Contents/MacOS/cezar-desktop"
 ```
 
-Click Start local cockpit, check the project list and task view, then open
+Click Local cockpit, check the project list and task view, then open
 Versions & updates. Create a dry-run task if desired. Quit the app (Cmd+Q on macOS; closing its window keeps it running) and confirm
 its owned server exits. Try connecting to `http://example.com` (must reject),
 and to a separate local cockpit over loopback (must open a separate remote

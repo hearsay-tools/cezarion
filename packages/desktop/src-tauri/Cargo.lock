@@ -310,6 +310,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-updater",
  "url",
+ "uuid",
 ]
 
 [[package]]
