@@ -35,6 +35,7 @@ function row(id: string, overrides: Partial<RunRowInput> = {}): RunRowInput {
     createdAt: `2026-10-0${id.length % 9}T00:00:00.000Z`,
     status: 'done',
     archived: false,
+    live: false,
     data: JSON.stringify({ id, payload: 'full' }),
     summary: JSON.stringify({ id }),
     ...overrides,
@@ -72,7 +73,10 @@ describe('RunDatabase', () => {
     const db = openDb();
     db.transaction({
       upserts: [
-        row('a', { finishedAt: '2026-10-05T01:00:00.000Z', parentRunId: 'p', wakeAt: '2026-10-06T00:00:00.000Z' }),
+        row('a', {
+          finishedAt: '2026-10-05T01:00:00.000Z', parentRunId: 'p', live: true, clientRequestId: 'req-1', groupId: 'g',
+          worktreePath: '/repo/.ai/cezar/worktrees/a', branch: 'cez/a', baseBranch: 'main',
+        }),
         row('bb', { archived: true, status: 'failed' }),
       ],
       deletes: [],
@@ -83,13 +87,21 @@ describe('RunDatabase', () => {
       finishedAt: '2026-10-05T01:00:00.000Z',
       status: 'done',
       archived: false,
+      live: true,
       parentRunId: 'p',
-      wakeAt: '2026-10-06T00:00:00.000Z',
+      clientRequestId: 'req-1',
+      groupId: 'g',
+      worktreePath: '/repo/.ai/cezar/worktrees/a',
+      branch: 'cez/a',
+      baseBranch: 'main',
       revision: 1,
       data: JSON.stringify({ id: 'a', payload: 'full' }),
       summary: JSON.stringify({ id: 'a' }),
     });
-    expect(db.get('bb')).toMatchObject({ archived: true, status: 'failed', finishedAt: null, parentRunId: null, wakeAt: null });
+    expect(db.get('bb')).toMatchObject({
+      archived: true, status: 'failed', live: false, finishedAt: null, parentRunId: null, clientRequestId: null,
+      groupId: null, worktreePath: null, branch: null, baseBranch: null,
+    });
     expect(db.get('missing')).toBeUndefined();
     expect(db.getMany(['bb', 'missing', 'a']).map((r) => r.id).sort()).toEqual(['a', 'bb']);
     expect(db.getMany([])).toEqual([]);
@@ -216,6 +228,115 @@ describe('RunDatabase', () => {
     RunDatabase.open(path).close();
     const db = openDb();
     expect(db.listRevisions()).toEqual([]);
+  });
+
+  describe('named queries', () => {
+    // Each query reads one column the caller computed; the rows are seeded with the column set or
+    // not, so a query that ignored its column (or read another) returns the wrong ids.
+    function seed(db: RunDatabase): void {
+      db.transaction({
+        upserts: [
+          row('live-1', { createdAt: '2026-10-03T00:00:00.000Z', status: 'running', live: true }),
+          row('live-2', { createdAt: '2026-10-04T00:00:00.000Z', status: 'failed', live: true }),
+          row('done-1', { createdAt: '2026-10-01T00:00:00.000Z' }),
+          row('w-1', { createdAt: '2026-10-02T00:00:00.000Z', parentRunId: 'root-1', branch: 'cez/w-1' }),
+          row('w-2', { createdAt: '2026-10-05T00:00:00.000Z', parentRunId: 'root-1' }),
+          row('w-3', { createdAt: '2026-10-06T00:00:00.000Z', parentRunId: 'root-2' }),
+          row('req', { clientRequestId: 'client-1' }),
+          row('v-a', { createdAt: '2026-10-07T00:00:00.000Z', groupId: 'group-1' }),
+          row('v-b', { createdAt: '2026-10-07T00:00:00.000Z', groupId: 'group-1' }),
+          row('tree-old', { finishedAt: '2026-10-01T00:00:00.000Z', worktreePath: '/w/old', branch: 'cez/old', baseBranch: 'main' }),
+          row('tree-new', { createdAt: '2026-10-02T00:00:00.000Z', worktreePath: '/w/new', branch: 'cez/new' }),
+        ],
+        deletes: [],
+      });
+    }
+
+    it('lists the live rows', () => {
+      const db = openDb();
+      seed(db);
+      expect(db.listLive().map((r) => r.id).sort()).toEqual(['live-1', 'live-2']);
+    });
+
+    it("lists a parent's workers newest first, and every worker id", () => {
+      const db = openDb();
+      seed(db);
+      expect(db.listByParent('root-1').map((r) => r.id)).toEqual(['w-2', 'w-1']);
+      expect(db.listByParent('nobody')).toEqual([]);
+      expect(db.listIdsByParent('root-1').sort()).toEqual(['w-1', 'w-2']);
+      expect(db.listWorkerIds().sort()).toEqual(['w-1', 'w-2', 'w-3']);
+    });
+
+    it('finds a run by its client request id', () => {
+      const db = openDb();
+      seed(db);
+      expect(db.findByClientRequestId('client-1')?.id).toBe('req');
+      expect(db.findByClientRequestId('client-2')).toBeUndefined();
+    });
+
+    it("lists a variant group's members", () => {
+      const db = openDb();
+      seed(db);
+      expect(db.listByGroup('group-1').map((r) => r.id).sort()).toEqual(['v-a', 'v-b']);
+      expect(db.listByGroup('group-2')).toEqual([]);
+    });
+
+    it('lists runs with a materialized worktree, most recently finished first', () => {
+      const db = openDb();
+      seed(db);
+      // tree-new never finished, so it ranks by when it was created — after tree-old finished.
+      expect(db.listWithWorktree().map((r) => r.id)).toEqual(['tree-new', 'tree-old']);
+    });
+
+    it('lists the branch owners with their summary, and the rows holding a branch or checkout', () => {
+      const db = openDb();
+      seed(db);
+      expect(db.listBranchOwners().map((r) => [r.id, r.branch, r.baseBranch]).sort()).toEqual([
+        ['tree-new', 'cez/new', null], ['tree-old', 'cez/old', 'main'], ['w-1', 'cez/w-1', null],
+      ]);
+      expect(db.listBranchOwners().find((r) => r.id === 'tree-old')).toMatchObject({ status: 'done', archived: false, summary: JSON.stringify({ id: 'tree-old' }) });
+      expect(db.findResourceHolders({ branch: 'cez/new', worktreePath: '/w/old' }).sort()).toEqual(['tree-new', 'tree-old']);
+      expect(db.findResourceHolders({ branch: 'cez/none', worktreePath: '/w/none' })).toEqual([]);
+    });
+
+    it('lists every id', () => {
+      const db = openDb();
+      seed(db);
+      expect(db.listIds().length).toBe(11);
+      expect(db.has('req')).toBe(true);
+      expect(db.has('missing')).toBe(false);
+    });
+
+    it('selects rows by a filter over the stored summary', () => {
+      const db = openDb();
+      db.transaction({
+        upserts: [
+          row('pinned', { summary: JSON.stringify({ id: 'pinned', pinned: true }) }),
+          row('plain', { summary: JSON.stringify({ id: 'plain' }) }),
+          row('archived-pinned', { archived: true, summary: JSON.stringify({ id: 'archived-pinned', pinned: true }) }),
+        ],
+        deletes: [],
+      });
+      expect(db.listWhere("archived = 0 AND json_extract(summary, '$.pinned') = 1").map((r) => r.id)).toEqual(['pinned']);
+      expect(db.listWhere('status = ?', ['done']).length).toBe(3);
+    });
+
+    it('serves every named query from its index', () => {
+      const db = openDb();
+      seed(db);
+      const raw = new DatabaseSync(path);
+      try {
+        const plan = (sql: string) => raw.prepare(`EXPLAIN QUERY PLAN ${sql}`).all().map((r) => String(r.detail)).join(' | ');
+        expect(plan('SELECT id FROM runs WHERE live = 1')).toContain('USING INDEX runs_live');
+        expect(plan("SELECT id FROM runs WHERE parent_run_id = 'x'")).toContain('runs_parent_run_id');
+        expect(plan("SELECT id FROM runs WHERE client_request_id = 'x'")).toContain('runs_client_request_id');
+        expect(plan("SELECT id FROM runs WHERE group_id = 'x'")).toContain('runs_group_id');
+        expect(plan('SELECT id FROM runs WHERE worktree_path IS NOT NULL')).toContain('runs_worktree_path');
+        expect(plan('SELECT id FROM runs WHERE branch IS NOT NULL')).toContain('runs_branch');
+      } finally {
+        raw.close();
+      }
+    });
   });
 
   describe('errors', () => {

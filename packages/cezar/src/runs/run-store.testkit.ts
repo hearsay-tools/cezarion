@@ -53,6 +53,7 @@ function seedRow(record: Record<string, unknown>): RunRowInput {
     createdAt: typeof record.createdAt === 'string' ? record.createdAt : '',
     status: typeof record.status === 'string' ? record.status : '',
     archived: record.archived === true,
+    live: encoded?.live ?? ['queued', 'running', 'waiting'].includes(String(record.status)),
     data: JSON.stringify(record),
     summary: encoded?.summary ?? '{}',
   };

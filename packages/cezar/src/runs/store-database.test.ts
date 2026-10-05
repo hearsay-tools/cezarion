@@ -315,7 +315,7 @@ describe('debounced saves write only what changed', () => {
     expect(JSON.parse(saved.data)).toEqual(JSON.parse(JSON.stringify(store.getRun(run.id))));
     expect(JSON.parse(saved.summary)).toEqual(JSON.parse(JSON.stringify(toRunSummary(store.getRun(run.id)!))));
     expect(saved).toMatchObject({
-      status: 'failed', archived: false, finishedAt: '2026-10-05T00:00:00.000Z', wakeAt: '2026-10-06T00:00:00.000Z', parentRunId: null,
+      status: 'failed', archived: false, finishedAt: '2026-10-05T00:00:00.000Z', live: true, parentRunId: null,
     });
   });
 });

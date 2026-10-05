@@ -43,21 +43,36 @@ const BUSY_TIMEOUT_MS = 50;
 const MIGRATIONS: readonly string[] = [
   `
   -- Every column beyond id/data/summary/revision exists for a query the spec names. They are
-  -- copies of record fields, kept in step by the caller in the same transaction as data.
+  -- copies of record fields (or of one predicate over the record), computed by the caller in the
+  -- same upsert as data and summary, so a row can never disagree with its own columns.
   CREATE TABLE runs (
     id TEXT PRIMARY KEY,
-    -- Newest-first order: GET /run-summaries, /workspace/runs-index and the cold newest-200 read.
+    -- Newest-first order: GET /run-summaries, /workspace/runs-index, the cold newest-200 read,
+    -- and count-based history retention (the runs past the newest N).
     created_at TEXT NOT NULL,
-    -- Retention: how long ago a finished run finished (falls back to created_at in the caller).
+    -- Worktree retention: most recently finished first (falls back to created_at).
     finished_at TEXT,
-    -- The live set (queued/running/waiting) and open-time recovery of interrupted runs.
+    -- The mark-all-read and archive-finished sweeps select finished statuses.
     status TEXT NOT NULL,
-    -- Retention and the bulk-archive sweep skip or select archived runs (0/1).
+    -- History retention, mark-all-read and archive-finished skip or select archived runs (0/1).
     archived INTEGER NOT NULL,
-    -- The workers of a parent (delegation.parentRunId), replacing whole-map scans.
+    -- isLiveRecord() (run-row.ts): the rows RunStore.open loads into memory and recovers. Every
+    -- other row stays here until something reads it.
+    live INTEGER NOT NULL,
+    -- The workers of a parent (delegation.parentRunId): delegation families, archive cascades and
+    -- the "every worker" recovery passes, replacing whole-map scans.
     parent_run_id TEXT,
-    -- The live set's "a wake timer or autoResumeAt is pending" clause: the earliest pending wake.
-    wake_at TEXT,
+    -- The run an idempotent start already created (#504).
+    client_request_id TEXT,
+    -- The members of a parallel-variant group (spec 010).
+    group_id TEXT,
+    -- A materialized worktree directory (the path, unless retention reclaimed it): worktree
+    -- retention, the worktrees panel and the owned-worker resource collision check.
+    worktree_path TEXT,
+    -- The branch the run owns: branch cleanup, git-log attribution and the collision check.
+    branch TEXT,
+    -- Where that branch forked, which branch cleanup reads with it.
+    base_branch TEXT,
     -- Bumped by every upsert; lets a reader tell which rows changed since it last looked.
     revision INTEGER NOT NULL,
     -- The complete record JSON, opaque here.
@@ -68,9 +83,14 @@ const MIGRATIONS: readonly string[] = [
   -- (created_at, id) rather than created_at alone: the newest-first reads order by both, and the
   -- second column is what lets SQLite walk the index instead of sorting the tie groups.
   CREATE INDEX runs_created_at ON runs (created_at, id);
-  CREATE INDEX runs_parent_run_id ON runs (parent_run_id) WHERE parent_run_id IS NOT NULL;
   CREATE INDEX runs_status ON runs (status);
-  CREATE INDEX runs_wake_at ON runs (wake_at) WHERE wake_at IS NOT NULL;
+  -- Partial indexes: each query asks for the rows that HAVE the value, and most rows do not.
+  CREATE INDEX runs_live ON runs (live) WHERE live = 1;
+  CREATE INDEX runs_parent_run_id ON runs (parent_run_id) WHERE parent_run_id IS NOT NULL;
+  CREATE INDEX runs_client_request_id ON runs (client_request_id) WHERE client_request_id IS NOT NULL;
+  CREATE INDEX runs_group_id ON runs (group_id) WHERE group_id IS NOT NULL;
+  CREATE INDEX runs_worktree_path ON runs (worktree_path) WHERE worktree_path IS NOT NULL;
+  CREATE INDEX runs_branch ON runs (branch) WHERE branch IS NOT NULL;
   -- Private key/value metadata: import completion, ownership claims, conflict evidence.
   CREATE TABLE meta (
     key TEXT PRIMARY KEY,
@@ -86,8 +106,13 @@ export interface RunRowInput {
   finishedAt?: string | null;
   status: string;
   archived: boolean;
+  live: boolean;
   parentRunId?: string | null;
-  wakeAt?: string | null;
+  clientRequestId?: string | null;
+  groupId?: string | null;
+  worktreePath?: string | null;
+  branch?: string | null;
+  baseBranch?: string | null;
   /** The complete record, serialized. */
   data: string;
   /** The record's summary projection, serialized. */
@@ -100,8 +125,13 @@ export interface RunRow {
   finishedAt: string | null;
   status: string;
   archived: boolean;
+  live: boolean;
   parentRunId: string | null;
-  wakeAt: string | null;
+  clientRequestId: string | null;
+  groupId: string | null;
+  worktreePath: string | null;
+  branch: string | null;
+  baseBranch: string | null;
   revision: number;
   data: string;
   summary: string;
@@ -111,6 +141,17 @@ export interface RunSummaryRow {
   id: string;
   createdAt: string;
   revision: number;
+  summary: string;
+}
+
+/** What branch cleanup and git-log attribution read about one run, without its record. */
+export interface BranchOwnerRow {
+  id: string;
+  createdAt: string;
+  status: string;
+  archived: boolean;
+  branch: string | null;
+  baseBranch: string | null;
   summary: string;
 }
 
@@ -256,7 +297,9 @@ function assertDatabaseHeader(path: string): void {
   throw new RunDatabaseCorruptError('corrupt', `runs database: ${path} is not a database`, { sqliteCode: SQLITE_NOTADB });
 }
 
-const ROW_COLUMNS = 'id, created_at, finished_at, status, archived, parent_run_id, wake_at, revision, data, summary';
+const ROW_COLUMNS = 'id, created_at, finished_at, status, archived, live, parent_run_id, client_request_id, group_id, worktree_path, branch, base_branch, revision, data, summary';
+/** Newest first, with a deterministic tie-break: the one order every list read uses. */
+const NEWEST_FIRST = 'ORDER BY created_at DESC, id DESC';
 
 type SqlRow = Record<string, unknown>;
 
@@ -267,8 +310,13 @@ function toRunRow(row: SqlRow): RunRow {
     finishedAt: row.finished_at as string | null,
     status: row.status as string,
     archived: row.archived === 1,
+    live: row.live === 1,
     parentRunId: row.parent_run_id as string | null,
-    wakeAt: row.wake_at as string | null,
+    clientRequestId: row.client_request_id as string | null,
+    groupId: row.group_id as string | null,
+    worktreePath: row.worktree_path as string | null,
+    branch: row.branch as string | null,
+    baseBranch: row.base_branch as string | null,
     revision: row.revision as number,
     data: row.data as string,
     summary: row.summary as string,
@@ -294,6 +342,16 @@ export class RunDatabase {
     getMany: StatementSync;
     listSummaries: StatementSync;
     listAll: StatementSync;
+    listLive: StatementSync;
+    listByParent: StatementSync;
+    listWorkerIds: StatementSync;
+    listIdsByParent: StatementSync;
+    findByClientRequestId: StatementSync;
+    listByGroup: StatementSync;
+    listWithWorktree: StatementSync;
+    findResourceHolders: StatementSync;
+    listIds: StatementSync;
+    has: StatementSync;
     listRevisions: StatementSync;
     getMeta: StatementSync;
     upsert: StatementSync;
@@ -308,16 +366,30 @@ export class RunDatabase {
     this.statements = {
       get: db.prepare(`SELECT ${ROW_COLUMNS} FROM runs WHERE id = ?`),
       getMany: db.prepare(`SELECT ${ROW_COLUMNS} FROM runs WHERE id IN (SELECT value FROM json_each(?))`),
-      listSummaries: db.prepare('SELECT id, created_at, revision, summary FROM runs ORDER BY created_at DESC, id DESC LIMIT ?'),
-      listAll: db.prepare(`SELECT ${ROW_COLUMNS} FROM runs ORDER BY created_at DESC, id DESC`),
+      listSummaries: db.prepare(`SELECT id, created_at, revision, summary FROM runs ${NEWEST_FIRST} LIMIT ?`),
+      listAll: db.prepare(`SELECT ${ROW_COLUMNS} FROM runs ${NEWEST_FIRST}`),
+      listLive: db.prepare(`SELECT ${ROW_COLUMNS} FROM runs WHERE live = 1`),
+      listByParent: db.prepare(`SELECT ${ROW_COLUMNS} FROM runs WHERE parent_run_id = ? ${NEWEST_FIRST}`),
+      listWorkerIds: db.prepare('SELECT id FROM runs WHERE parent_run_id IS NOT NULL'),
+      listIdsByParent: db.prepare('SELECT id FROM runs WHERE parent_run_id = ?'),
+      findByClientRequestId: db.prepare(`SELECT ${ROW_COLUMNS} FROM runs WHERE client_request_id = ? LIMIT 1`),
+      listByGroup: db.prepare(`SELECT ${ROW_COLUMNS} FROM runs WHERE group_id = ?`),
+      listWithWorktree: db.prepare(`SELECT ${ROW_COLUMNS} FROM runs WHERE worktree_path IS NOT NULL ORDER BY coalesce(finished_at, created_at) DESC, id DESC`),
+      findResourceHolders: db.prepare('SELECT id FROM runs WHERE branch = :branch UNION SELECT id FROM runs WHERE worktree_path = :worktreePath'),
+      listIds: db.prepare('SELECT id FROM runs'),
+      has: db.prepare('SELECT 1 FROM runs WHERE id = ?'),
       listRevisions: db.prepare('SELECT id, revision FROM runs ORDER BY id'),
       getMeta: db.prepare('SELECT value FROM meta WHERE key = ?'),
       upsert: db.prepare(`
-        INSERT INTO runs (id, created_at, finished_at, status, archived, parent_run_id, wake_at, revision, data, summary)
-        VALUES (:id, :createdAt, :finishedAt, :status, :archived, :parentRunId, :wakeAt, 1, :data, :summary)
+        INSERT INTO runs (id, created_at, finished_at, status, archived, live, parent_run_id, client_request_id, group_id,
+          worktree_path, branch, base_branch, revision, data, summary)
+        VALUES (:id, :createdAt, :finishedAt, :status, :archived, :live, :parentRunId, :clientRequestId, :groupId,
+          :worktreePath, :branch, :baseBranch, 1, :data, :summary)
         ON CONFLICT (id) DO UPDATE SET
           created_at = excluded.created_at, finished_at = excluded.finished_at, status = excluded.status,
-          archived = excluded.archived, parent_run_id = excluded.parent_run_id, wake_at = excluded.wake_at,
+          archived = excluded.archived, live = excluded.live, parent_run_id = excluded.parent_run_id,
+          client_request_id = excluded.client_request_id, group_id = excluded.group_id,
+          worktree_path = excluded.worktree_path, branch = excluded.branch, base_branch = excluded.base_branch,
           revision = runs.revision + 1, data = excluded.data, summary = excluded.summary
         RETURNING revision`),
       delete: db.prepare('DELETE FROM runs WHERE id = ?'),
@@ -410,6 +482,89 @@ export class RunDatabase {
     return this.run(() => this.statements.listAll.all()).map(toRunRow);
   }
 
+  /** The rows `RunStore.open` holds in memory: those whose `live` column is set. */
+  listLive(): RunRow[] {
+    return this.run(() => this.statements.listLive.all()).map(toRunRow);
+  }
+
+  /** The workers of one parent, newest first. */
+  listByParent(parentId: string): RunRow[] {
+    return this.run(() => this.statements.listByParent.all(parentId)).map(toRunRow);
+  }
+
+  /** The ids of one parent's workers, in no particular order, without reading their records. */
+  listIdsByParent(parentId: string): string[] {
+    return this.run(() => this.statements.listIdsByParent.all(parentId)).map((row) => row.id as string);
+  }
+
+  /** The id of every worker row, in no particular order. */
+  listWorkerIds(): string[] {
+    return this.run(() => this.statements.listWorkerIds.all()).map((row) => row.id as string);
+  }
+
+  findByClientRequestId(clientRequestId: string): RunRow | undefined {
+    const row = this.run(() => this.statements.findByClientRequestId.get(clientRequestId));
+    return row ? toRunRow(row) : undefined;
+  }
+
+  /** The members of one variant group, in no particular order. */
+  listByGroup(groupId: string): RunRow[] {
+    return this.run(() => this.statements.listByGroup.all(groupId)).map(toRunRow);
+  }
+
+  /** Rows with a materialized worktree, most recently finished (else created) first. */
+  listWithWorktree(): RunRow[] {
+    return this.run(() => this.statements.listWithWorktree.all()).map(toRunRow);
+  }
+
+  /** The rows matching `where` (by default, every row that owns a branch) as branch owners,
+   *  with their summary, in no particular order. Same contract for `where` as `listWhere`. */
+  listBranchOwners(where = 'branch IS NOT NULL'): BranchOwnerRow[] {
+    const sql = `SELECT id, created_at, status, archived, branch, base_branch, summary FROM runs WHERE ${where}`;
+    return this.run(() => this.db.prepare(sql).all()).map((row) => ({
+      id: row.id as string,
+      createdAt: row.created_at as string,
+      status: row.status as string,
+      archived: row.archived === 1,
+      branch: row.branch as string | null,
+      baseBranch: row.base_branch as string | null,
+      summary: row.summary as string,
+    }));
+  }
+
+  /** The ids of the rows that own `branch` or hold a worktree at `worktreePath`. */
+  findResourceHolders(resource: { branch: string; worktreePath: string }): string[] {
+    return this.run(() => this.statements.findResourceHolders.all(resource)).map((row) => row.id as string);
+  }
+
+  /** Every id, in no particular order. */
+  listIds(): string[] {
+    return this.run(() => this.statements.listIds.all()).map((row) => row.id as string);
+  }
+
+  has(id: string): boolean {
+    return this.run(() => this.statements.has.get(id)) !== undefined;
+  }
+
+  /**
+   * Rows matching `where`, newest first — the store's candidate filters (mark all read, archive
+   * finished, retention, the reference heal), which combine these columns with `json_extract`
+   * over `summary`. `where` is the caller's constant SQL; values go in `params`, never into it.
+   * `offset` skips the newest rows first (retention keeps the newest N).
+   */
+  listWhere(where: string, params: readonly (string | number)[] = [], options: { offset?: number } = {}): RunRow[] {
+    const sql = `SELECT ${ROW_COLUMNS} FROM runs WHERE ${where} ${NEWEST_FIRST} LIMIT -1 OFFSET ?`;
+    return this.run(() => this.db.prepare(sql).all(...params, options.offset ?? 0)).map(toRunRow);
+  }
+
+  /** The id and creation time of each row matching `where`, newest first, read off the
+   *  `created_at` index without touching `data` or `summary` (history retention's ranking).
+   *  Same contract for `where` as `listWhere`. */
+  listKeysWhere(where: string, params: readonly (string | number)[] = []): Array<{ id: string; createdAt: string }> {
+    const sql = `SELECT id, created_at FROM runs WHERE ${where} ${NEWEST_FIRST}`;
+    return this.run(() => this.db.prepare(sql).all(...params)).map((row) => ({ id: row.id as string, createdAt: row.created_at as string }));
+  }
+
   /** Every id with its revision, ordered by id. */
   listRevisions(): RunRevision[] {
     return this.run(() => this.statements.listRevisions.all()).map((row) => ({
@@ -442,8 +597,13 @@ export class RunDatabase {
             finishedAt: row.finishedAt ?? null,
             status: row.status,
             archived: row.archived ? 1 : 0,
+            live: row.live ? 1 : 0,
             parentRunId: row.parentRunId ?? null,
-            wakeAt: row.wakeAt ?? null,
+            clientRequestId: row.clientRequestId ?? null,
+            groupId: row.groupId ?? null,
+            worktreePath: row.worktreePath ?? null,
+            branch: row.branch ?? null,
+            baseBranch: row.baseBranch ?? null,
             data: row.data,
             summary: row.summary,
           });
