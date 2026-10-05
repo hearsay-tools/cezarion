@@ -1,6 +1,28 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RUNNER_IDS } from '../core/agent-runner.ts';
 import { isSafeSessionId, resumeCommand } from './server.ts';
+import { commands as goldenCommands, sessionId, unsafeSessionIds } from '../../test/fixtures/resume-commands.ts';
+
+describe('resume commands — shared golden parity across RUNNER_IDS', () => {
+  beforeEach(() => { vi.stubEnv('CEZ_CURSOR_BIN', undefined); vi.stubEnv('CEZ_OMP_BIN', undefined); });
+  afterEach(() => vi.unstubAllEnvs());
+
+  const commands = goldenCommands satisfies Record<(typeof RUNNER_IDS)[number], string>;
+
+  it('covers exactly the registered runners', () => {
+    expect(Object.keys(commands).sort()).toEqual([...RUNNER_IDS].sort());
+  });
+
+  it.each([...RUNNER_IDS, undefined])('matches the golden take-over command for %s', (runner) => {
+    expect(resumeCommand(runner, sessionId)).toBe(commands[runner ?? 'claude']);
+  });
+
+  it.each([...RUNNER_IDS, undefined])('rejects unsafe session ids for %s', (runner) => {
+    for (const id of unsafeSessionIds) {
+      expect(resumeCommand(runner, id)).toBeNull();
+    }
+  });
+});
 
 /**
  * Terminal take-over (#431): `resumeCommand`'s session id is the only variable

@@ -2,9 +2,12 @@
 
 import { describe, expect, it } from 'vitest'
 
-import type { ApiRun, RunRecord, RunStatus, StepState } from '@open-mercato/cezar-api-client'
+import { runnerSchema, type ApiRun, type RunRecord, type RunStatus, type Runner, type StepState } from '@open-mercato/cezar-api-client'
 
 import { isUnread } from '@/lib/read-state'
+
+// Cross-package golden fixture: both helpers must match the same expected commands.
+import { commands as goldenCommands, sessionId, unsafeSessionIds } from '../../../../cezar/test/fixtures/resume-commands.ts'
 
 import {
   cliTargetResumes,
@@ -217,6 +220,33 @@ describe('resumeCommand — per backend, mirroring the server', () => {
   it('bounds the id length, like the server', () => {
     expect(resumeCommand('claude', 'a'.repeat(200))).toBe(`claude --resume ${'a'.repeat(200)}`)
     expect(resumeCommand('claude', 'a'.repeat(201))).toBeUndefined()
+  })
+})
+
+describe('resume commands — shared golden parity across runners', () => {
+  const commands = goldenCommands satisfies Record<Runner, string>
+
+  it.each([...runnerSchema.options, undefined])('keeps %s take-over commands in sync', (runner) => {
+    const expected = commands[runner ?? 'claude']
+    // Cursor's and OMP's executable/quoting belong to the server (CEZ_*_BIN); the web uses cliResumeCommand.
+    const serverResolved = runner === 'cursor' || runner === 'omp'
+    expect(resumeCommand(runner, sessionId)).toBe(serverResolved ? undefined : expected)
+    expect(resumeHint(run('done', {
+      runner,
+      steps: [step({ sessionId, backend: runner })],
+      ...(serverResolved ? { cliResumeCommand: expected } : {}),
+    }))).toBe(expected)
+  })
+
+  it.each([...runnerSchema.options, undefined])('rejects unsafe session ids for %s', (runner) => {
+    for (const sessionId of unsafeSessionIds) {
+      expect(resumeCommand(runner, sessionId)).toBeUndefined()
+      expect(resumeHint(run('done', {
+        runner,
+        steps: [step({ sessionId, backend: runner })],
+        cliResumeCommand: 'agent --resume s1',
+      }))).toBeUndefined()
+    }
   })
 })
 

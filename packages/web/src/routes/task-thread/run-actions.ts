@@ -56,6 +56,8 @@ export function resumeCommand(runner: Runner | undefined, sessionId: string): st
       return undefined
     case 'opencode':
       return `opencode --session ${sessionId}`
+    case 'pi':
+      return `pi --session ${sessionId}`
     case 'omp':
       // Only the server knows CEZ_OMP_BIN; it sends the command as `cliResumeCommand`.
       return undefined
