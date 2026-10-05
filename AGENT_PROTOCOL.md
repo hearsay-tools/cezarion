@@ -1024,10 +1024,10 @@ selection after an earlier prose mention, and quoted ASK examples without a
 marker. Parsing and transcript stripping must select the same final line;
 ordinary examples leave no question card or rejection note.
 
-Monitoring turn rows **M1–M28** (hearsay-tools/cezarion#772) live in
-`workflows/monitoring-turn.test.ts` and `workflows/worker-parent-attention.test.ts`
-and enter the shared parity guard. Every `RUNNER_IDS` adapter carries multiple
-parent assistant text segments through its native wire on fresh and Continue sessions.
+Monitoring turn rows **M1–M30** (hearsay-tools/cezarion#772) live in
+`workflows/monitoring-turn.test.ts`, `workflows/worker-parent-attention.test.ts`
+and `workflows/monitoring-channel-order.test.ts` and enter the shared parity guard.
+Every `RUNNER_IDS` adapter carries multiple parent assistant text segments through its native wire on fresh and Continue sessions.
 A standalone `CEZ:MONITORING` declaration survives a same-turn acknowledgement;
 subsequent explicit human questions and direct review/approval requests take
 precedence. A later monitoring declaration supersedes an earlier prose question
@@ -1058,6 +1058,16 @@ M25 carries that fallback through registered wait withdrawal, idle/restart and
 late worker input until an exact delivered human response. M26/M27 pin delayed
 ACK admission; M28 preserves ordinary rejected-ASK autonomous nudging. Active
 ASK lines use the existing payload parser unchanged.
+M29/M30 in `workflows/monitoring-channel-order.test.ts` retain ordering across
+partial channels on fresh/Continue. Native Codex completion refreshes and
+Codex/OpenCode omitted completion text exercise actual channel divergence;
+the native observer pins each capability. Claude/Pi/Cursor carry coupled
+completion text; OpenCode also deduplicates refreshed completed parts. Those
+named executable wire controls assert equality rather than inject divergence.
+When one channel is an ordered expansion of the other, classify its raw text
+once; neither channel always wins. Incomparable transcripts retain the existing
+conservative gate policy. This partial/replayed-frame coverage differs from
+R16's canonical complete-snapshot coupling guarantee.
 The native rows
 also assert CLI attention-wait and webhook projections. Cockpit grouping and
 notification transitions remain consumers of the same contract attention rule.

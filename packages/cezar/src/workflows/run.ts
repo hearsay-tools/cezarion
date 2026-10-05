@@ -283,8 +283,8 @@ type AskTurnOutcome = {
  * there is no marker to look for. Intermediate steps can ask too (#427). */
 function resolveAskTurn(v1Result: AskMarkerParseResult, v2Result: AskMarkerParseResult, enabled: boolean): AskTurnOutcome {
   if (!enabled) return { ask: null, notes: [] };
-  // v1 is authoritative whenever it carries an ASK marker. Claude can omit
-  // the trailing marker from v1 while v2 retains the complete message.
+  // For unreconciled channels, v1 remains authoritative when it carries an
+  // ASK; a marker absent from v1 can still come from the complete v2 message.
   const result = v1Result.kind === 'none' ? v2Result : v1Result;
   const notes: AskTurnOutcome['notes'] = [];
   const rejection = askMarkerRejection(result);
@@ -293,6 +293,26 @@ function resolveAskTurn(v1Result: AskMarkerParseResult, v2Result: AskMarkerParse
   if (recovery) notes.push({ message: recovery, tone: 'danger' });
   return { ask: result.kind === 'valid' ? result.request : null, notes };
 }
+/** A partial channel cannot keep an earlier gate alive when the other carries
+ * the same transcript plus later declarations. Compare raw lines in order,
+ * preserving fences/examples and ACKs between declarations. Neither channel
+ * always wins: v1 reconstructs omitted snapshots, v2 can retain refreshed ones.
+ * Incomparable transcripts keep the existing conservative channel policy. */
+function orderedTurnText(v1: string, v2: string): string | undefined {
+  if (!v1) return v2;
+  if (!v2 || v1 === v2) return v1;
+  const contains = (full: string, partial: string): boolean => {
+    const lines = partial.split('\n');
+    let next = 0;
+    for (const line of full.split('\n')) {
+      if (line === lines[next]) next++;
+    }
+    return next === lines.length;
+  };
+  if (contains(v2, v1)) return v2;
+  if (contains(v1, v2)) return v1;
+  return undefined;
+}
 /** One turn-end decision for fresh and Continue, also retained until an input
  * ACK settles. DONE and human/completion gates take precedence over a quiet
  * declaration or live workers; a false pending-ASK flag alone proves nothing. */
@@ -300,8 +320,9 @@ function classifyTurnEnd(turnText: string, completedAssistantText: string, optio
   sessionOpen: boolean; interactive: boolean; pendingHumanAsk: boolean;
   completionAttention: boolean; scheduledWake: boolean; liveWorkers: boolean; dependencyWait: boolean;
 }): AskTurnOutcome & { done: boolean; monitoring: boolean; humanGate: boolean } {
-  const v1 = turnParkSignals(turnText);
-  const v2 = turnParkSignals(completedAssistantText);
+  const complete = orderedTurnText(turnText, completedAssistantText);
+  const v1 = turnParkSignals(complete ?? turnText);
+  const v2 = complete === undefined ? turnParkSignals(completedAssistantText) : v1;
   const done = options.interactive && options.sessionOpen && (v1.done || v2.done) &&
     v1.askResult.kind === 'none' && v2.askResult.kind === 'none' && !v1.humanGate && !v2.humanGate;
   const askTurn = resolveAskTurn(v1.askResult, v2.askResult, options.sessionOpen && !done);

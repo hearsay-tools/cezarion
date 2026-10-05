@@ -28,6 +28,8 @@ export const MONITORING_ORDER_CRITERIA = [
   { id: 'M17', scenario: 'turn-messages', name: 'fresh genuine accepted-wait session loss still fails' },
   { id: 'M23', scenario: 'turn-messages', name: 'portable ASK followed by acknowledgement keeps the existing autonomous override' },
   { id: 'M28', scenario: 'turn-messages', name: 'an ordinary rejected ASK keeps the existing autonomous nudge policy' },
+  { id: 'M29', scenario: 'turn-messages', name: 'ordered channel expansion clears resolved prose but retains structured and rejected ASK gates' },
+  { id: 'M30', scenario: 'turn-messages', name: 'ordered channel expansion retains later DONE precedence' },
 ] as const;
 
 // Agent-echo follows a real owned-input ACK on each adapter's existing wire.
