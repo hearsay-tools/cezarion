@@ -593,6 +593,56 @@ process.exit(2);
     expect(await exited).toBe('SIGKILL');
   });
 
+  describe('an omp build that rejects --add-dir (Ruling 22)', () => {
+    it('respawns once without --add-dir and names the dropped directories', async () => {
+      const { events, result } = await runSession(spec('inspect the working tree', {
+        additionalDirectories: ['/srv/a', '/srv/b'],
+        env: { CEZ_MOCK_OMP_UNKNOWN_FLAGS: '--add-dir' },
+      }));
+      const argvs = lines('args.ndjson') as unknown as string[][];
+      expect(argvs).toHaveLength(2);
+      expect(argvs[0]).toEqual(expect.arrayContaining(['--add-dir', '/srv/a', '/srv/b']));
+      expect(argvs[1]).not.toContain('--add-dir');
+      expect(events.filter(event => event.type === 'note' && event.message.startsWith('omp: '))).toEqual([
+        { type: 'note', message: 'omp: this omp CLI does not accept --add-dir (update OMP); ran without the additional directories: /srv/a, /srv/b' },
+      ]);
+      expect(events.filter(event => event.type === 'error')).toEqual([]);
+      expect(turnEnds(events)).toBe(1);
+      expect(result.text).toBe('Investigating: inspect the working tree');
+    });
+
+    it('retries even when no --tools list was passed', async () => {
+      const { events } = await runSession(spec('inspect the working tree', {
+        allowedTools: undefined,
+        additionalDirectories: ['/srv/a'],
+        env: { CEZ_MOCK_OMP_UNKNOWN_FLAGS: '--add-dir' },
+      }));
+      expect(lines('args.ndjson')).toHaveLength(2);
+      expect(turnEnds(events)).toBe(1);
+    });
+
+    it('a flag refusal and a later tool refusal each get their one retry', async () => {
+      const { events } = await runSession(spec('inspect the working tree', {
+        allowedTools: ['Read', 'TodoWrite'],
+        additionalDirectories: ['/srv/a'],
+        env: { CEZ_MOCK_OMP_UNKNOWN_FLAGS: '--add-dir', CEZ_MOCK_OMP_DISABLED_TOOLS: 'todo' },
+      }));
+      const argvs = lines('args.ndjson') as unknown as string[][];
+      expect(argvs).toHaveLength(3);
+      expect(argvs[2]).not.toContain('--add-dir');
+      expect(argvs[2]?.slice(-2)).toEqual(['--tools', 'read']);
+      expect(turnEnds(events)).toBe(1);
+    });
+
+    it('any other unknown flag stays fatal, with no retry', async () => {
+      await expect(new OmpRunner({ bin: MOCK }).run(spec('x', {
+        effort: 'high',
+        env: { CEZ_MOCK_OMP_UNKNOWN_FLAGS: '--thinking' },
+      }))).rejects.toThrow('omp CLI exited with code 2 — Error: unknown flag: --thinking');
+      expect(lines('args.ndjson')).toHaveLength(1);
+    });
+  });
+
   describe('MCP tools OMP has not registered (Ruling 20)', () => {
     it('respawns once without the passed MCP names OMP did not know, with one v1 note', async () => {
       const { events, ui, result } = await runSession(spec('inspect the working tree', {

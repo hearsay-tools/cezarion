@@ -1465,6 +1465,10 @@ Check these before copying an existing runner's code for a fork or near-fork of 
   not), and handle the refusal for tools a user's settings disabled, or MCP tools OMP has not
   registered, by respawning once without them. OMP spells MCP tools `mcp__<server>_<tool>`, not
   Claude's `mcp__<server>__<tool>`.
+- **Not every omp build takes every flag.** OMP fails fast on an unrecognized flag
+  (`Error: unknown flag(s): …`, exit 2). `--add-dir` is the one optional flag cezar passes, so a
+  build that rejects it is respawned once without it, with a note; any other unknown flag stays
+  fatal, because model, prompt, resume and tools are not optional.
 - **Diffs and plan come from the tool result**, not the args: the default `hashline` edit mode has
   args `{input}` only.
 - **The ask marker works in plain `--mode rpc`** because OMP never registers its native ask tool

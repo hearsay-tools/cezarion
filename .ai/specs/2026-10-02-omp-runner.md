@@ -530,6 +530,7 @@ differs from the approved text above, the ruling wins and the cost of being wron
 | Ruling 17 | Mock frames emitted after `session_settled` (the harness R15 regression) are **constructed**: real OMP settles only when `!hasPendingAsyncWork`. Kept as a stricter robustness test and labeled so in the fixtures README | None (stricter than the wire) |
 | Ruling 19 | Volume never fails discovery or the status probe: model cap 2000 and 2 MiB stdout, past the cap the first 2000 in OMP's order with one log line; the `omp models --json` status probe gets a 4 MiB buffer (per-descriptor `maxBuffer`). OpenRouter alone lists 561 models on v18.4.11 | Larger buffers for one probe |
 | Ruling 20 | Claude-spelled `mcp__<server>__<tool>` grants are translated to OMP's `mcp__<server>_<tool>`; the Ruling 13 respawn also drops passed `mcp__` names from `Unknown tool(s) in --tools` (never widens; any other unknown stays fatal) | An MCP grant silently missing, with a v1 note |
+| Ruling 22 | An omp build that exits 2 with `Error: unknown flag(s): --add-dir` before any frame is respawned once without `--add-dir`, with a v1 note naming the dropped directories; any other unknown flag stays fatal. A flag refusal and a tool refusal (Rulings 13 and 20) each get one retry, since OMP parses flags before it validates `--tools` (reported by the owner, 2026-10-05) | The step runs without its additional directories on that OMP build |
 
 ## Docs to update in the same change
 

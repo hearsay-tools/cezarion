@@ -27,13 +27,20 @@ function startupError(code, message) {
 
 const flags = new Map();
 const extensions = [];
+// An older or different omp build without some flag: CEZ_MOCK_OMP_UNKNOWN_FLAGS=--add-dir.
+const missingFlags = new Set((process.env.CEZ_MOCK_OMP_UNKNOWN_FLAGS ?? '').split(',').filter(Boolean));
+const unknownFlags = [];
 for (let i = 0; i < argv.length; i++) {
   const flag = argv[i];
   if (BOOLEAN_FLAGS.has(flag)) { flags.set(flag, true); continue; }
-  if (!VALUE_FLAGS.has(flag)) startupError(2, `Error: unknown flag: ${flag}`);
+  if (!VALUE_FLAGS.has(flag) || missingFlags.has(flag)) { unknownFlags.push(flag); if (VALUE_FLAGS.has(flag)) i++; continue; }
   const value = argv[++i];
   if (flag === '--extension') extensions.push(value);
   flags.set(flag, value);
+}
+// OMP's parser reports every unrecognized occurrence in one error before any session work.
+if (unknownFlags.length > 0) {
+  startupError(2, `Error: unknown flag${unknownFlags.length === 1 ? '' : 's'}: ${unknownFlags.join(', ')}`);
 }
 
 let tools = flags.has('--no-tools') ? [] : DEFAULT_TOOLS;

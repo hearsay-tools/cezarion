@@ -92,7 +92,7 @@ export const OMP_SPEC_SUPPORT: AgentRunSpecSupport = {
     via: '--config overlay denying task, and task/wait left out of --tools (D1); eval is left out too, since OMP v18.4.11 has no setting that disables its agent()/workpool() helpers; with allowedTools undefined D1 passes an explicit --tools list (OMP\'s default set minus those), failing closed rather than widening to the defaults',
   },
   bashAllowlist: { honored: true, via: "no prefix equivalent: bash dropped from --tools when an allowlist is set (Pi's rule); with allowedTools unset, OMP's default set is named first so bash can be left out" },
-  additionalDirectories: { honored: true, via: '--add-dir per directory' },
+  additionalDirectories: { honored: true, via: '--add-dir per directory; an omp build that rejects --add-dir is respawned once without it, with a v1 note (Ruling 22)' },
   env: { honored: true, via: 'merged over the child env through buildChildEnv' },
   model: { honored: true, via: '--model provider/model' },
   effort: { honored: true, via: '--thinking, canonical level' },
@@ -181,7 +181,12 @@ function ompMcpNamePart(value: string, fallback: string): string {
 }
 
 /** `omp --mode rpc` argv, in the order of the spec's spawn block. */
-export function buildOmpArgs(spec: AgentRunSpec, excludeTools?: readonly string[]): string[] {
+export function buildOmpArgs(
+  spec: AgentRunSpec,
+  excludeTools?: readonly string[],
+  /** Ruling 22: an omp build that rejects `--add-dir` runs without the additional directories. */
+  opts: { omitAddDir?: boolean } = {},
+): string[] {
   const args = ['--mode', 'rpc'];
   if (spec.cezarTools) args.push('--extension', ompScriptPath('omp-ci-wait.mjs'));
   // OMP has no --session-id: a fresh session mints its id, which get_state reports.
@@ -190,7 +195,7 @@ export function buildOmpArgs(spec: AgentRunSpec, excludeTools?: readonly string[
   if (spec.model) args.push('--model', spec.model);
   const effort = parseEffort(spec.effort);
   if (effort) args.push('--thinking', effort);
-  for (const dir of spec.additionalDirectories ?? []) args.push('--add-dir', dir);
+  if (!opts.omitAddDir) for (const dir of spec.additionalDirectories ?? []) args.push('--add-dir', dir);
   if (spec.restrictNativeDelegation) args.push('--config', ompScriptPath('omp-restrict-delegation.yml'));
   const selection = ompTools(spec.allowedTools, {
     bashAllowlist: spec.bashAllowlist,
@@ -275,15 +280,20 @@ export class OmpRunner implements AgentRunner {
       spawned.stderr.on('data', (chunk: string) => stderr.push(chunk));
       return spawned;
     };
-    // Reassigned once at most: Ruling 13 respawns without the tools the user's OMP settings disabled.
+    // Reassigned at most once per refusal class: Ruling 13/20 narrow `--tools`, Ruling 22 drops
+    // `--add-dir` for an omp build that does not accept it.
     const firstArgs = buildOmpArgs(spec);
+    let spawnArgs = firstArgs;
     let child = spawnOmp(firstArgs);
-    let respawned = false;
+    let toolsRetried = false;
+    let flagsRetried = false;
+    let refusedTools: string[] = [];
+    let omitAddDir = false;
     let sawFrame = false;
     let closedByCaller = false;
     // A refused spawn must leave nothing in v2, so its events wait for the first stdout frame.
-    // Held only when a `--tools` list can be narrowed and retried.
-    let uiHold: UiEvent[] | null = firstArgs.includes('--tools') ? [] : null;
+    // Held only when something can be dropped and retried: a `--tools` list or `--add-dir`.
+    let uiHold: UiEvent[] | null = firstArgs.includes('--tools') || firstArgs.includes('--add-dir') ? [] : null;
     const emitUiEvent = (event: UiEvent): void => {
       if (uiHold) uiHold.push(event);
       else opts.onUiEvent?.(event);
@@ -512,10 +522,10 @@ export class OmpRunner implements AgentRunner {
     };
     let deadline = armDeadline();
 
-    // A refusal is only retried before any frame, once, and never after the caller or a deadline
-    // ended the session; a spawn with no `--tools` list has nothing to narrow (`uiHold` is null).
+    // A refusal is only retried before any frame, once per class, and never after the caller or a
+    // deadline ended the session; a spawn with nothing to drop has `uiHold` null.
     const retryPossible = (): boolean =>
-      !sawFrame && !respawned && !timedOut && !terminatedByCezar && !closedByCaller && uiHold !== null;
+      !sawFrame && !(toolsRetried && flagsRetried) && !timedOut && !terminatedByCezar && !closedByCaller && uiHold !== null;
     const result = (async function runOmp(): Promise<AgentRunResult> {
       try {
         for await (const line of readNdjson(child.stdout)) {
@@ -710,23 +720,37 @@ export class OmpRunner implements AgentRunner {
       // once without them: the list only narrows, so this never widens what the step granted.
       // Ruling 20 widens the same respawn to MCP names OMP did not register (a Claude spelling
       // it cannot match, or a server slower than OMP's discovery window).
-      const refusal =
-        exitCode === 2 && !spawnError && retryPossible()
-          ? refusedOmpTools(stderr.join(''), ompToolList(firstArgs))
-          : null;
-      if (refusal) {
-        const refused = [...refusal.disabled, ...refusal.mcp];
-        respawned = true;
+      const canRetry = exitCode === 2 && !spawnError && retryPossible();
+      // Ruling 22: OMP rejects unknown flags while parsing, before it validates --tools, so this
+      // refusal comes first and a tool refusal may still follow on the respawn.
+      const droppedDirs = canRetry && !flagsRetried ? refusedOmpAddDir(stderr.join(''), spawnArgs) : null;
+      const refusal = canRetry && !droppedDirs && !toolsRetried
+        ? refusedOmpTools(stderr.join(''), ompToolList(spawnArgs))
+        : null;
+      if (droppedDirs || refusal) {
         stderr.length = 0;
-        const dropped = [
-          ...(refusal.disabled.length > 0 ? [`tools disabled by your OMP settings were dropped: ${refusal.disabled.join(', ')}`] : []),
-          ...(refusal.mcp.length > 0 ? [`MCP tools OMP has not registered were dropped: ${refusal.mcp.join(', ')}`] : []),
-        ];
-        onEvent?.({ type: 'note', message: `omp: ${dropped.join('; ')}` });
+        if (droppedDirs) {
+          flagsRetried = true;
+          omitAddDir = true;
+          onEvent?.({
+            type: 'note',
+            message: `omp: this omp CLI does not accept --add-dir (update OMP); ran without the additional directories: ${droppedDirs.join(', ')}`,
+          });
+        }
+        if (refusal) {
+          toolsRetried = true;
+          refusedTools = [...refusal.disabled, ...refusal.mcp];
+          const dropped = [
+            ...(refusal.disabled.length > 0 ? [`tools disabled by your OMP settings were dropped: ${refusal.disabled.join(', ')}`] : []),
+            ...(refusal.mcp.length > 0 ? [`MCP tools OMP has not registered were dropped: ${refusal.mcp.join(', ')}`] : []),
+          ];
+          onEvent?.({ type: 'note', message: `omp: ${dropped.join('; ')}` });
+        }
         // Session state (mapper, held v2 events, ack sets) follows what was accepted, not the
         // child, and the outbox still holds every command accepted so far: the new child is
         // sent exactly those, once, when it speaks.
-        child = spawnOmp(buildOmpArgs(spec, refused));
+        spawnArgs = buildOmpArgs(spec, refusedTools, { omitAddDir });
+        child = spawnOmp(spawnArgs);
         if (child.pid !== undefined) opts.onPidChange?.(child.pid);
         deadline = armDeadline();
         return runOmp();
@@ -831,6 +855,21 @@ function refusedOmpTools(stderr: string, passed: readonly string[]): { disabled:
   const disabled = (listed(/Built-in tools? unavailable in this session:[ \t]*([^\r\n]*)/) ?? [])
     .filter(name => passed.includes(name));
   return disabled.length + unknown.length > 0 ? { disabled, mcp: unknown } : null;
+}
+
+/**
+ * Ruling 22: the directories to drop when this omp build refused `--add-dir` (`Error: unknown
+ * flag(s): …`, exit 2, before any session work). Only `--add-dir` is droppable: every other
+ * unknown flag carries something the step needs (model, prompt, resume, tools), so the refusal
+ * stays fatal and nothing is retried. `null` when there is nothing to drop.
+ */
+function refusedOmpAddDir(stderr: string, args: readonly string[]): string[] | null {
+  const match = /unknown flags?:[ \t]*([^\r\n]*)/i.exec(stderr);
+  if (!match) return null;
+  const unknown = (match[1] ?? '').replace(/\.\s*$/, '').split(/[\s,]+/).filter(Boolean);
+  if (unknown.length === 0 || unknown.some(flag => flag !== '--add-dir')) return null;
+  const dirs = args.flatMap((arg, i) => (arg === '--add-dir' ? [args[i + 1] ?? ''] : [])).filter(Boolean);
+  return dirs.length > 0 ? dirs : null;
 }
 
 /** Same as pi-runner.ts `toPiPrompt`. */
