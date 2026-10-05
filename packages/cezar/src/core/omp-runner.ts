@@ -213,6 +213,8 @@ export interface OmpRunnerOptions {
   bin?: string;
   /** Wall-clock timeout for a run (ms); per-spec `timeoutMs` still wins. */
   timeoutMs?: number;
+  /** Grace before each shutdown signal escalates (ms); defaults to `KILL_GRACE_MS`. Tests shorten it. */
+  killGraceMs?: number;
 }
 
 /**
@@ -235,11 +237,13 @@ export class OmpRunner implements AgentRunner {
   };
   private readonly bin: string;
   private readonly timeoutMs: number;
+  private readonly killGraceMs: number;
   private lastSession: AgentSession | null = null;
 
   constructor(opts: OmpRunnerOptions = {}) {
     this.bin = opts.bin ?? process.env.CEZ_OMP_BIN ?? (process.env.CEZ_DRY_RUN === '1' ? mockOmpPath() : 'omp');
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS;
+    this.killGraceMs = opts.killGraceMs ?? KILL_GRACE_MS;
   }
 
   run(spec: AgentRunSpec, onEvent?: (event: AgentEvent) => void): Promise<AgentRunResult> {
@@ -255,6 +259,7 @@ export class OmpRunner implements AgentRunner {
     onEvent?: (event: AgentEvent) => void,
     opts: SessionOptions = {},
   ): AgentSession {
+    const killGraceMs = this.killGraceMs;
     let spawnError: Error | null = null;
     const stderr: string[] = [];
     const spawnOmp = (args: string[]): ChildProcessWithoutNullStreams => {
@@ -448,7 +453,13 @@ export class OmpRunner implements AgentRunner {
         if (child.exitCode !== null || child.signalCode !== null) return;
         terminatedByCezar = true;
         child.kill('SIGTERM');
-      }, KILL_GRACE_MS);
+        // An OMP that ignores SIGTERM would otherwise hold `result` open forever: the deadline's
+        // interrupt() is a no-op once `open` is false.
+        killTimer = setTimeout(() => {
+          if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+        }, killGraceMs);
+        killTimer.unref?.();
+      }, killGraceMs);
       killTimer.unref?.();
     };
     const interrupt = (): void => {
@@ -461,7 +472,7 @@ export class OmpRunner implements AgentRunner {
       child.kill('SIGTERM');
       interruptKillTimer = setTimeout(() => {
         if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
-      }, KILL_GRACE_MS);
+      }, killGraceMs);
       interruptKillTimer.unref?.();
     };
 
@@ -722,10 +733,10 @@ export class OmpRunner implements AgentRunner {
         return { text: textChunks.join('\n').trim(), toolCalls, tokensUsed, sessionId };
       }
       // A signal we sent is teardown, not a second agent failure (#73).
-      if (terminatedByCezar && isSignalTerminationExit(exitCode)) {
+      if (terminatedByCezar && (isSignalTerminationExit(exitCode) || (exitCode === null && child.signalCode !== null))) {
         onEvent?.({
           type: 'note',
-          message: `omp CLI did not exit on its own after close; terminated by cezar (code ${exitCode})`,
+          message: `omp CLI did not exit on its own after close; terminated by cezar (${exitCode === null ? child.signalCode : `code ${exitCode}`})`,
         });
       } else if (exitCode === null && child.signalCode !== null && !terminatedByCezar) {
         // Killed from outside (OOM killer, a stray kill): a truncated run, never a success.

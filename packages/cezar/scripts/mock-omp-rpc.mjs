@@ -230,7 +230,9 @@ rl.on('line', (line) => {
   queue = queue.then(() => handle(command));
 });
 // stdin EOF drains the queue and exits 0 (real binary, 2026-10-05).
-rl.on('close', () => { queue.then(() => process.exit(0)); });
+/** Set by `mock:linger`: stdin EOF does not exit and SIGTERM is ignored (a wedged OMP). */
+let linger = false;
+rl.on('close', () => { if (!linger) queue.then(() => process.exit(0)); });
 
 async function handle(command) {
   switch (command.type) {
@@ -300,6 +302,15 @@ async function prompt(command) {
     // Rejected before admission (an input hook threw): the error response only, no prompt_result.
     fail(command, 'input hook rejected the prompt');
     return;
+  }
+
+  if (message.includes('mock:linger')) {
+    linger = true;
+    process.removeAllListeners('SIGTERM');
+    process.on('SIGTERM', () => {});
+    // Test-cleanup backstop, deliberately longer than the asserted teardown bound.
+    setTimeout(() => process.exit(0), 12_000).unref?.();
+    setInterval(() => {}, 1_000);
   }
 
   if (message.includes('mock:self-kill')) {

@@ -841,6 +841,19 @@ await import(${JSON.stringify(MOCK)});
     await expect(new OmpRunner({ bin: MOCK }).run(spec('mock:self-kill'))).rejects.toThrow(/omp CLI was killed by signal SIGKILL/);
   });
 
+  it('end escalates to SIGKILL when omp ignores SIGTERM after stdin closes', async () => {
+    const started = Date.now();
+    const events: AgentEvent[] = [];
+    const session = new OmpRunner({ bin: MOCK, killGraceMs: 100 }).startSession(
+      spec('mock:linger'), event => events.push(event), { autoEndAfterFirstTurn: true },
+    );
+    await session.result;
+    expect(turnEnds(events)).toBe(1);
+    expect(events.some(event => event.type === 'note' && /terminated by cezar \(SIGKILL\)/.test(event.message))).toBe(true);
+    // Two short grace periods plus the auto-end delay: nowhere near the mock's own 12 s backstop.
+    expect(Date.now() - started).toBeLessThan(8_000);
+  });
+
   it('ENOENT names omp and omp login', async () => {
     await expect(new OmpRunner({ bin: join(cwd, 'omp-does-not-exist') }).run(spec('x')))
       .rejects.toThrow(/omp-does-not-exist` not found on PATH: install OMP .* and run `omp login`/);
