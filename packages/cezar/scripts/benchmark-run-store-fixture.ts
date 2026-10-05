@@ -18,14 +18,22 @@
  *   the parent's extra system prompt, which few runs set; legacy records keep their inline copy
  *   until retention removes them, so this profile models a file written entirely after #778.
  *
- * Statuses stay terminal (`done`/`cancelled`/`failed`, `review` for the few unarchived rows):
- * a `running` row would be rewritten by `reconcileLoadedRun` on every open.
+ * The `runs` records are finished (`done`/`cancelled`/`failed`, `review` for the few unarchived
+ * rows). On top of them sits a live share of max(3, ceil(1% of runs)) records, newest first:
+ * repeating groups of one `waiting` root with up to two `running` workers, one `queued` run and one
+ * `running` run. It draws from its own seeded stream, so the finished records keep the bytes and
+ * ids the first benchmark table measured; `serve` opens with `keepLive`, which leaves them live.
  */
 import type { RunRecord } from '../src/runs/store.ts';
 
 export const FIXTURE_PROFILES = ['legacy', 'post-778'] as const;
 export type FixtureProfile = typeof FIXTURE_PROFILES[number];
 export const DEFAULT_FIXTURE_SEED = 779;
+const LIVE_STATUSES: ReadonlyArray<RunRecord['status']> = ['queued', 'running', 'waiting'];
+
+/** Live (`queued`/`running`/`waiting`) records added on top of `runs` finished ones. */
+export const liveRunCount = (runs: number) => Math.max(3, Math.ceil(runs * 0.01));
+export const isLiveRun = (run: RunRecord) => LIVE_STATUSES.includes(run.status);
 
 /** Sizes (chars) and weights of the distinct worker skill prompts in the sample (#778). */
 const SKILL_PROMPTS: ReadonlyArray<{ chars: number; weight: number }> = [
@@ -113,7 +121,8 @@ const MINUTE = 60_000;
 interface Draft { record: RunRecord; skillPrompt?: string; extraPrompt?: string }
 
 /**
- * `runs` records, newest first (the order `RunStore` writes). Same inputs, same bytes.
+ * `runs` finished records plus `liveRunCount(runs)` live ones, newest first (the order `RunStore`
+ * writes). Same inputs, same bytes.
  */
 export function generateRunFixture(options: { runs: number; profile: FixtureProfile; seed?: number }): RunRecord[] {
   const rng = new Rng((options.seed ?? DEFAULT_FIXTURE_SEED) * 1_000_003 + options.runs);
@@ -142,10 +151,8 @@ export function generateRunFixture(options: { runs: number; profile: FixtureProf
   }
 
   const unarchived = Math.ceil(options.runs * 0.02);
-  return drafts.map((draft, index) => {
-    const record = draft.record;
-    const systemPrompt = options.profile === 'legacy' ? draft.skillPrompt ?? draft.extraPrompt : draft.extraPrompt;
-    if (systemPrompt !== undefined) record.systemPrompt = systemPrompt;
+  const finished = drafts.map((draft, index) => {
+    const record = withSystemPrompt(draft, options.profile);
     if (index >= options.runs - unarchived) {
       record.archived = false;
       if (record.status === 'done') record.status = 'review';
@@ -155,6 +162,53 @@ export function generateRunFixture(options: { runs: number; profile: FixtureProf
     }
     return record;
   }).reverse();
+  const live = liveRuns(new Rng((options.seed ?? DEFAULT_FIXTURE_SEED) * 1_000_003 + options.runs + 0x11fe),
+    skillPrompts, liveRunCount(options.runs), end).map((draft) => withSystemPrompt(draft, options.profile));
+  return [...live.reverse(), ...finished];
+}
+
+function withSystemPrompt(draft: Draft, profile: FixtureProfile): RunRecord {
+  const systemPrompt = profile === 'legacy' ? draft.skillPrompt ?? draft.extraPrompt : draft.extraPrompt;
+  if (systemPrompt !== undefined) draft.record.systemPrompt = systemPrompt;
+  return draft.record;
+}
+
+/** `count` live records, oldest first, created after `end` (every finished record). */
+function liveRuns(rng: Rng, skillPrompts: ReadonlyArray<{ weight: number; text: string }>, count: number, end: number): Draft[] {
+  const drafts: Draft[] = [];
+  const at = () => end + (drafts.length + 1) * MINUTE;
+  const goLive = (record: RunRecord, status: RunRecord['status']): RunRecord => {
+    record.status = status;
+    delete record.finishedAt;
+    delete record.error;
+    delete record.seenAt;
+    if (status === 'queued') delete record.startedAt;
+    for (const step of record.steps) {
+      step.status = status === 'queued' ? 'pending' : status;
+      delete step.finishedAt;
+      if (status === 'queued') delete step.startedAt;
+    }
+    return record;
+  };
+  for (let group = 0; drafts.length < count; group++) {
+    if (group % 3 !== 0) {
+      drafts.push({ record: goLive(plainRun(rng, at()), group % 3 === 1 ? 'queued' : 'running') });
+      continue;
+    }
+    const skillDriven = rng.chance(0.28);
+    const rootId = rng.uuid();
+    const workerIds = Array.from({ length: Math.min(2, count - drafts.length - 1) }, () => rng.uuid());
+    drafts.push({ record: goLive(rootRun(rng, rootId, workerIds, at()), 'waiting') });
+    for (const workerId of workerIds) {
+      const draft = workerRun(rng, workerId, rootId, at());
+      goLive(draft.record, 'running');
+      const skill = rng.weighted(skillPrompts).text;
+      draft.extraPrompt = rng.chance(0.1) ? text(rng, rng.logNormal(400, 2_000, 40, 4_000)) : undefined;
+      if (skillDriven) draft.skillPrompt = skill;
+      drafts.push(draft);
+    }
+  }
+  return drafts;
 }
 
 function baseRun(rng: Rng, id: string, at: number, worker: boolean): RunRecord {
