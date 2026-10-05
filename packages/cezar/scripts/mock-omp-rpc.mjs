@@ -389,6 +389,7 @@ async function prompt(command) {
     write({ type: 'subagent_event', payload: { id: 'Reviewer', event: { type: 'tool_execution_start', toolCallId: 'toolu_child_grep', toolName: 'grep', args: { pattern: 'ask' } } } });
     write({ type: 'subagent_event', payload: { id: 'Reviewer', event: { type: 'tool_execution_end', toolCallId: 'toolu_child_grep', toolName: 'grep', result: { content: [{ type: 'text', text: '3 matches' }] } } } });
     write({ type: 'subagent_event', payload: { id: 'Reviewer', event: { type: 'agent_end', messages: [], isTerminal: true, yielded: true } } });
+    write({ type: 'subagent_lifecycle', payload: { id: 'Reviewer', agent: 'explore', status: 'completed', parentToolCallId: 'toolu_task_1', index: 0 } });
     write({ type: 'tool_execution_end', toolCallId: 'toolu_task_1', toolName: 'task', result: { content: [{ type: 'text', text: 'Reviewer: done' }] }, isError: false });
     // The parent keeps streaming after the child's terminal frame.
     assistantText(['Still working after the sub-agent.\nCEZ:MONITORING']);

@@ -341,7 +341,6 @@ real boundary in both directions. As declared at #284, a reading aid only:
 | `effort` | `--effort` | `turn/start` effort | `prompt_async` variant | `--thinking` |
 | `timeoutMs` | kill switch | kill switch | kill switch | kill switch |
 | `sessionId` | `--session-id` / `--resume` | `thread/resume` threadId | **dropped** | `--session-id` / `--session` |
-
 | `resume` | `--resume` | `thread/resume` | **dropped** | `--session` |
 
 `OMP_SPEC_SUPPORT` honors every field (it has no column here): `allowedTools` through `--tools` with
