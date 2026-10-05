@@ -102,7 +102,7 @@ async function updateCommand(opts: SelfUpdateCliOptions): Promise<number> {
   }
   const active = status.installed.find((entry) => entry.active);
   console.log(`\n  cez update — channel ${channel}, running ${status.version}${active ? ` (${active.id})` : ''}, target ${target}\n`);
-  if (!opts.version && compareVersions(target, status.version) <= 0 && active?.source !== 'local') {
+  if (!opts.version && compareVersions(target, status.version) <= 0 && active?.source === 'registry') {
     console.log('  ✓ already up to date\n');
     return 0;
   }
@@ -154,7 +154,8 @@ async function useCommand(id: string | undefined): Promise<number> {
     console.error('  usage: cez use <id>   (see: cez versions)');
     return 1;
   }
-  const match = listInstalled().find((entry) => entry.id === id || entry.version === id);
+  const installed = listInstalled();
+  const match = installed.find((entry) => entry.id === id) ?? installed.find((entry) => entry.version === id);
   if (!match) {
     console.error(`  ✗ ${id} is not installed — see: cez versions`);
     return 1;
