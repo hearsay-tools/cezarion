@@ -31,7 +31,7 @@ import { MONITORING_TURN_CRITERIA, MONITORING_ACK_CRITERIA, MONITORING_ORDER_CRI
 import { WAIT_CRITERIA } from '../workflows/waits-parity.testkit.ts';
 import { monitoringTimerOf, monitoringWakeOf } from '../workflows/waits.testkit.ts';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdtempSync, mkdirSync, realpathSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, realpathSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { readMockRecords } from '../mock-records.testkit.ts';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -53,6 +53,7 @@ import {
   type ToolGrant,
 } from './agent-runner.ts';
 import { createRunner } from './runner-factory.ts';
+import { shellQuote } from './shell-env.ts';
 import { explicitToolGrant } from './tool-grant.testkit.ts';
 import { describeToolGrantParity } from './tool-grant-parity-cells.testkit.ts';
 import { inputDeliveryOf } from './agent-runner.ts';
@@ -593,6 +594,7 @@ const CONTROL_CRITERIA = [
   { id: 'D3', scenario: 'baseline' },
   { id: 'S5', scenario: 'baseline' },
   { id: 'S6', scenario: 'baseline' },
+  { id: 'S35', scenario: 'baseline' },
   { id: 'S11', scenario: 'ask' },
   { id: 'S12', scenario: 'hold' },
   { id: 'S13', scenario: 'hold' },
@@ -1457,6 +1459,25 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
         },
         45_000,
       );
+
+      // Desktop privacy attribution: macOS execs this shim in place; other platforms bypass it.
+      it(`${backend} S35 keeps the native session working through the desktop launch trampoline`, async () => {
+        const dir = mkdtempSync(join(tmpdir(), 'cez-desktop-parity-'));
+        const trampoline = join(dir, 'desktop');
+        const marker = join(dir, 'called');
+        writeFileSync(trampoline, `#!/bin/sh\n[ "$1" = "--cez-disclaim-exec" ] || exit 91\nshift\nprintf called > ${shellQuote(marker)}\nexec "$@"\n`);
+        chmodSync(trampoline, 0o755);
+        vi.stubEnv('CEZ_DISCLAIM_EXEC', trampoline);
+        try {
+          const obs = await driveSeam(backend, 'baseline');
+          expect(obs.failure).toBeUndefined();
+          expect(obs.v1.some((e) => e.type === 'turn-end')).toBe(true);
+          expect(existsSync(marker)).toBe(process.platform === 'darwin');
+        } finally {
+          vi.unstubAllEnvs();
+          rmSync(dir, { recursive: true, force: true });
+        }
+      }, 45_000);
     }
   });
 

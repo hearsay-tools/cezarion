@@ -36,6 +36,9 @@ import {
   providersRequiredByWorkflow,
   unavailableProviderMessage,
 } from './server/provider-action-gate.ts';
+import { SelfUpdateService } from './self-update/service.ts';
+import { runSelfUpdateCommand } from './self-update/cli.ts';
+import { watchSupervisor } from './self-update/supervisor.ts';
 import { checkForUpdate } from './update-check.ts';
 import { loadWorkspaceConfig } from './workspace/config.ts';
 import { runMigrations } from './workspace/migrations.ts';
@@ -43,7 +46,7 @@ import { registerProject, shouldRegisterProject } from './workspace/projects.ts'
 import { runProjectsCommand } from './workspace/projects-cli.ts';
 import { WorkspaceSemaphore } from './workspace/semaphore.ts';
 import { openUrl } from './open-url.ts';
-import { reconcileServeWorktrees, recoverServeProject, warnServeBind, createServeApplicationUpdate, printServeBanner } from './serve-boot.ts';
+import { reconcileServeWorktrees, recoverServeProject, warnServeBind, createServeApplicationUpdate, createServeSelfUpdate, printServeBanner } from './serve-boot.ts';
 import { CockpitOwnership } from './server/cockpit-ownership.ts';
 
 const HELP = `cezar — local cockpit for AI agent tasks in your repo
@@ -65,6 +68,9 @@ Usage:
   cez server-install        interactive wizard to host cezar on a server
   cez server-deploy         redeploy a new version (reload the service) + verify
   cez server-uninstall      reverse a server-install
+  cez install | update      manage the desktop installation under ~/.cezar/versions
+  cez versions | use <id>   list or switch managed versions
+  cez link [dir] [--use]    link a built development checkout (unlink <id> removes it)
 
 Options:
   -p, --port <n>              cockpit port (default 4321; server-install: this
@@ -96,6 +102,16 @@ Skills live in .ai/skills/, .ai/cezar/skills/ and your team skills repos
 workflows in .ai/cezar/workflows/.`;
 
 async function main(): Promise<void> {
+  const managedCommand = process.argv[2];
+  if (managedCommand && ['install', 'update', 'versions', 'use', 'link', 'unlink'].includes(managedCommand)) {
+    const { values, positionals } = parseArgs({ args: process.argv.slice(3), allowPositionals: true,
+      options: { channel: { type: 'string' }, version: { type: 'string' }, use: { type: 'boolean' }, 'no-modify-path': { type: 'boolean' } } });
+    process.exitCode = await runSelfUpdateCommand(managedCommand, positionals, {
+      service: new SelfUpdateService({ pkgName: readOwnName(), version: readOwnVersion(), entry: resolve(process.argv[1] ?? ''), restart: () => {} }),
+      channel: values.channel, version: values.version, use: values.use, modifyPath: !values['no-modify-path'],
+    });
+    return;
+  }
   // Subcommands with flags of their own run before the global parseArgs (#504, #774, #1576).
   const subcommandExit = await runSubcommand(process.argv.slice(2), process.env);
   if (subcommandExit !== undefined) {
@@ -296,6 +312,7 @@ async function serveCommand(
   const port = preferredPort;
   warnServeBind(bindHost, port);
   let server: ReturnType<typeof startServer>;
+  const selfUpdate = createServeSelfUpdate({ pkgName, version, store, bindHost }, () => server);
   const applicationUpdate = createServeApplicationUpdate(repoRoot, update, () => server);
   server = startServer({
     ownership,
@@ -306,6 +323,7 @@ async function serveCommand(
     version,
     update,
     applicationUpdate,
+    selfUpdate,
     bootProjectId,
     semaphore,
     bindHost,
@@ -348,6 +366,7 @@ async function serveCommand(
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   if (onTerminal()) process.on('SIGHUP', () => shutdown('SIGHUP'));
   else ignoreHangupOffTerminal();
+  watchSupervisor(() => shutdown('SIGTERM'));
 
   // Open the browser only once the server actually answers, so the first
   // paint is the cockpit and never a connection error.

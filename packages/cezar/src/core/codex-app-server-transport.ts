@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url';
-import { spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import type { ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawnAgent as nodeSpawn } from './disclaim-spawn.ts';
 import { trackChildExit } from './agent-runner.ts';
 import { probeLeaderState, type LeaderState, signalSession, spawnSessionLeader } from './session-process.ts';
 import { buildChildEnv } from './agent-env.ts';

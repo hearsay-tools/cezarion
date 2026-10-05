@@ -1,6 +1,7 @@
 import { ChildProcess, execFile, spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { readdirSync, readFileSync } from 'node:fs';
 import { afterExitDrain, exitDrainBudget, KILL_GRACE_MS } from './runner-runtime.ts';
+import { disclaimedCommand } from './disclaim-spawn.ts';
 
 /**
  * Own POSIX session process groups and track member incarnations before signalling after leader
@@ -233,14 +234,16 @@ function reap(pgid: number, leader: Leader): void {
 }
 
 /** Spawn an agent session leader. Only a real detached `ChildProcess` with a pid is registered,
- * so a test's fake child (made-up pid) never reaches `process.kill(-pid)`. */
+ * so a test's fake child (made-up pid) never reaches `process.kill(-pid)`. Under the macOS desktop
+ * shell the leader starts through its trampoline, which execs in place (same pid and group). */
 export function spawnSessionLeader(
   bin: string,
   args: readonly string[],
   options: { cwd: string; env: NodeJS.ProcessEnv },
 ): ChildProcessWithoutNullStreams {
   const grouped = process.platform !== 'win32';
-  const child = spawn(bin, [...args], { cwd: options.cwd, env: options.env, detached: grouped });
+  const [file, argv] = disclaimedCommand(bin, args, options.env);
+  const child = spawn(file, argv, { cwd: options.cwd, env: options.env, detached: grouped });
   spawned.add(child);
   const pid = child.pid;
   if (!grouped || !(child instanceof ChildProcess) || pid === undefined || !groupId(pid)) return child;

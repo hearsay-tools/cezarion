@@ -9,6 +9,9 @@ import { readNpmConfiguration } from './application-update/npm-process.ts';
 import { restartEndpoint } from './application-update/helper.ts';
 import { armRestartHelper } from './application-update/launcher.ts';
 import { ApplicationUpdateService } from './application-update/service.ts';
+import { SelfUpdateService } from './self-update/service.ts';
+import { isSupervised, restartProcess } from './self-update/restart.ts';
+import { resolveCapabilities } from './server/capabilities.ts';
 import { pruneOrphans } from './git-worktree.ts';
 import { DEFAULT_WORKTREE_RETENTION, resolveWorktreeRetention } from './config.ts';
 import { reclaimWorktrees } from './runs/retention.ts';
@@ -109,6 +112,23 @@ export function createServeApplicationUpdate(
       armRestart: (plan) => armRestartHelper(plan, { repoRoot, ...restartEndpoint(getServer().address()), npmBin: npm?.npmBin ?? 'npm' }),
       handoff: () => { void getServer().shutdownForRestart().then(() => process.exit(0)); },
     }) : undefined;
+}
+
+/** The managed desktop updater; a restart re-execs this serve on the same port. */
+export function createServeSelfUpdate(
+  opts: { pkgName: string; version: string; store: RunStore; bindHost: string | undefined },
+  getServer: () => ReturnType<typeof startServer>,
+): SelfUpdateService {
+  return new SelfUpdateService({
+    pkgName: opts.pkgName, version: opts.version, entry: resolve(process.argv[1] ?? ''), supervised: isSupervised(),
+    activeRuns: () => opts.store.listRuns().filter(r => ['queued', 'waiting', 'running'].includes(r.status)).length,
+    trimPaths: () => !resolveCapabilities(process.env, opts.bindHost).localHandoff,
+    restart: () => {
+      const server = getServer();
+      const restartPort = restartEndpoint(server.address()).port;
+      void server.shutdownForRestart().then(() => restartProcess({ server: null, args: process.argv.slice(2), port: restartPort, supervised: isSupervised() }));
+    },
+  });
 }
 
 export function printServeBanner(

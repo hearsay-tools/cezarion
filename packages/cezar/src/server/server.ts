@@ -161,6 +161,8 @@ import {
 } from '../workflows/types.ts';
 import { planChain, slugify } from '../planner.ts';
 import { discoverSkills, type Skill } from '../skills.ts';
+import { selfUpdateApplyRequestSchema, selfUpdateChannelRequestSchema, selfUpdateDevelopmentQuerySchema } from '@open-mercato/cezar-contract/self-update';
+import { SelfUpdateBusyError, SelfUpdateService } from '../self-update/service.ts';
 import { getTeamSkillsCached, refreshTeamSkills, waitForTeamSkills } from '../skills-remote.ts';
 import { readHandoff, renderHandoffRecords } from '../handoff.ts';
 import { ARCHIVED_WINDOW, type RepoHandle, type RunEvent, type RunRecord, type RunStatus, type RunStore } from '../runs/store.ts';
@@ -397,6 +399,10 @@ export interface ServerDeps {
    *  reaches `openInTerminal`. Injected for the same reason as the two above: a test that reaches
    *  this for real opens a window on the developer's machine (#820). */
   openApp?: typeof openInApp;
+  /** The cockpit's own updater (`/api/v1/workspace/self-update`, src/self-update/). Built by
+   *  the CLI, which knows the entry file, the port and how to restart; absent in tests and for
+   *  bare `createApp` callers, where the family answers a read-only "not available" status. */
+  selfUpdate?: SelfUpdateService;
   /** WebSocket subscription hub (`/api/v1/ws`, src/server/ws.ts). `createApp`
    *  only registers topics on it — `startServer` builds one and attaches it
    *  to the HTTP server it binds. Optional so legacy callers/tests change
@@ -737,6 +743,19 @@ export function createApp(deps: ServerDeps) {
     resolveServerDeps(deps, bootRoot);
   const { providerStatus, providerActionError, invalidateHostModels } =
     createProviderStatus({ modelCatalog, providerAuth, workspaceConfig });
+  // No injected updater (tests, embedded callers): a READ-ONLY service over the running entry.
+  // It has no way to restart the process, so it must not install either — an install that
+  // flips `current` under a process that keeps running the old code is the worst of both.
+  const selfUpdate =
+    deps.selfUpdate ??
+    new SelfUpdateService({
+      pkgName: '@wjarka/cezarion',
+      version: deps.version,
+      entry: process.argv[1] ?? '',
+      restart: () => {},
+      readOnly: true,
+      trimPaths: () => !capabilities().localHandoff,
+    });
 
   // ---- workspace boot-project identity (multi-project spec) ----------------
   // The boot flow (`initWorkspace` in src/index.ts) registers the boot repo
@@ -2678,6 +2697,59 @@ export function createApp(deps: ServerDeps) {
       if (!deps.applicationUpdate) return c.json({ error: 'Application update is unavailable.' }, 409);
       try { return c.json({ state: await deps.applicationUpdate.restart() }); }
       catch (error) { return c.json({ error: error instanceof ApplicationUpdateConflictError ? error.message : 'Application restart is unavailable.' }, error instanceof ApplicationUpdateConflictError ? 409 : 500); }
+    });
+
+  // ---- chained family: cezar self-update (workspace-level) ----
+  // The browser supplies a version STRING (validated shape, never a URL, a path or a tarball)
+  // and a channel; the server resolves both against the npm registry and its own managed
+  // layout. Allowed in hosted mode on purpose: an update pulls a published package from the
+  // registry, so the request cannot inject code, and a VPS behind the installer's Basic auth
+  // is exactly where "update from the cockpit" replaces `cezar server-deploy` — but hosted
+  // applies are FORWARD-ONLY (see the guard on /apply below).
+  const managedUpdateStatus = async (opts?: { refresh?: boolean }) => {
+    const stores = new Set([deps.store, ...contexts.ids().flatMap(id => { const ctx = contexts.peek(id); return ctx ? [ctx.store] : []; })]);
+    const activeRuns = [...stores].reduce((count, store) => count + store.listRuns().filter(run => ['queued', 'waiting', 'running'].includes(run.status)).length, 0);
+    return { ...await selfUpdate.status(opts), activeRuns };
+  };
+  const selfUpdateRoutes = new Hono()
+    .get('/workspace/self-update', async (c) => c.json(await managedUpdateStatus()))
+
+    .post('/workspace/self-update/refresh', async (c) => c.json(await managedUpdateStatus({ refresh: true })))
+
+    // The development channel's pickers: cezar's own worktrees and its open PRs' preview builds.
+    // A separate read because it costs a git call per worktree and a GitHub round trip.
+    .get('/workspace/self-update/development', queryZodValidator(selfUpdateDevelopmentQuerySchema), async (c) =>
+      c.json(await selfUpdate.development({ refresh: c.req.valid('query').refresh === '1' })),
+    )
+
+    .put('/workspace/self-update/channel', jsonZodValidator(selfUpdateChannelRequestSchema, { message: 'body must be { channel: "stable" | "nightly" | "development" }' }), async (c) => {
+      const { channel } = c.req.valid('json');
+      await selfUpdate.setChannel(channel);
+      return c.json(await managedUpdateStatus());
+    })
+
+    .post('/workspace/self-update/apply', jsonZodValidator(selfUpdateApplyRequestSchema, { message: 'body must be { version }' }), async (c) => {
+      const { version: target } = c.req.valid('json');
+      // SECURITY: a hosted cockpit may only move FORWARD. Installing a published package cannot
+      // inject code, but installing an OLDER one can: every hosted-mode guard — the `/api/*`
+      // request-origin check (open-mercato/cezar#426), the `localHandoff` 409 that closes the agent-config hooks
+      // RCE path — lives in the running version, so a downgrade to a release that predates them
+      // re-opens exactly what they close, through a route those guards never get to see. A
+      // local cockpit keeps the full picker, downgrades included: there is no boundary left to
+      // escalate across when the caller already owns the machine. `forwardOnlyRefusal` decides
+      // what "forward" means — publish time, not just semver order, because a nightly for the
+      // next minor outranks every later patch of the current one.
+      if (!capabilities().localHandoff) {
+        const refusal = await selfUpdate.forwardOnlyRefusal(target);
+        if (refusal) return c.json({ error: refusal }, 409);
+      }
+      try {
+        selfUpdate.apply(target);
+      } catch (error) {
+        if (error instanceof SelfUpdateBusyError) return c.json({ error: error.message }, 409);
+        return c.json({ error: error instanceof Error ? error.message : String(error) }, 409);
+      }
+      return c.json(await managedUpdateStatus());
     });
 
   // ---- GUI clone (multi-project spec, step 4.3) ----------------------------
@@ -5386,6 +5458,7 @@ export function createApp(deps: ServerDeps) {
     .route('/', providersRoutes)
     .route('/', projectsRoutes)
     .route('/', agentProfilesRoutes)
+    .route('/', selfUpdateRoutes)
     .route('/', applicationUpdateRoutes)
     .route('/', workspaceConfigRoutes)
     .route('/', fsBrowseRoutes)
