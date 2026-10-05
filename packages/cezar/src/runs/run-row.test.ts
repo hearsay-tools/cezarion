@@ -34,6 +34,7 @@ describe('isLiveRecord', () => {
     ['a parent waiting on workers', { delegation: { role: 'root', wait: { id: 'wait' } } }],
     ['a worker waiting on its parent', { delegation: worker({ wait: { id: 'wait' } }) }],
     ['a worker whose destroy is still owed', { delegation: worker({ destroy: { phase: 'requested' } }) }],
+    ['a root whose Finish has not settled', { status: 'cancelled', delegation: { role: 'root', finishRequestedAt: '2026-10-05T00:00:00.000Z' } }],
     ['an accepted Stop not yet settled', { stopping: { requestedAt: '2026-10-05T00:00:00.000Z' } }],
     ['a monitoring activity left on the record', { activity: 'monitoring' }],
   ])('is true for %s', (_name, overrides) => {

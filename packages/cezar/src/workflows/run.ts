@@ -3942,7 +3942,9 @@ export class RunManager {
   /**
    * Recovery's full pass (#661): every family whose root carries a conversation — settled ones
    * too, so a projection or outcome a crash interrupted is repaired — then every live family.
-   * Only roots with a conversation are read; a settled family without one has nothing to settle.
+   * Only roots with a conversation are read; a settled family without one has nothing to settle:
+   * every other repair the sweep makes on a finished member (a stale `wait`, a cancelled root's
+   * Finish intent) is a clause of `isLiveRecord`, so open already holds that family.
    * Everything else asks `reconcileWorkerWaits()`, which covers the live families (#779).
    */
   reconcileAllWorkerFamilies(): void {

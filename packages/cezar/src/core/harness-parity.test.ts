@@ -65,8 +65,9 @@ import {
   type SeamObservation,
   waitFor,
 } from './harness-parity.testkit.ts';
-import { blockRunWrites } from '../runs/run-store.testkit.ts';
-import type { RunStore } from '../runs/store.ts';
+import { blockRunWrites, readPersistedRuns, seedRuns } from '../runs/run-store.testkit.ts';
+import { RunStore, type RunRecord } from '../runs/store.ts';
+import { createFixtureManager, drainFixtureManagers } from '../workflows/fixture-cleanup.testkit.ts';
 
 /** One row of the matrix, named once and applied to every harness. */
 interface SeamCriterion<T = SeamObservation> {
@@ -539,6 +540,8 @@ const CONTROL_CRITERIA = [
   { id: 'R43', scenario: 'baseline' },
   // #779: Continue on a run only runs.db holds, through both ActiveRun construction sites.
   { id: 'R47', scenario: 'done' },
+  // #779: restart still repairs a cancelled root's stale Finish intent, so Continue is not refused.
+  { id: 'R48', scenario: 'done' },
 ] as const;
 
 /**
@@ -748,6 +751,56 @@ describe('harness parity — Continue on a finished run (#779)', () => {
           store.pin = (id, holder) => { pins.push(holder); return pin(id, holder); };
         } });
       return { pins, left, heldWhileContinuing, leftAgain, obs };
+    });
+  }
+});
+
+// #779: older controllers could cancel a root and leave its Finish intent on the record. Restart
+// repairs that in the delegation sweep, which since #779 reaches only what `open` loads; a finished
+// root the sweep missed would be refused by every Continue ("parent finish is pending") for good.
+describe('harness parity — restart repairs a stale root Finish intent (#779)', () => {
+  for (const backend of RUNNER_IDS) {
+    parityRow<{ repaired: boolean; left: boolean; continued: { ok: boolean; error?: string }; final: RunRecord | undefined }>(backend, {
+      id: 'R48', name: "R48 restart clears a cancelled root's stale Finish intent and Continue resumes it", scenario: 'done',
+      assert: ({ repaired, left, continued, final }) => {
+        expect(continued).toEqual({ ok: true });
+        expect(repaired).toBe(true);
+        expect(left).toBe(true);
+        expect(TERMINAL).toContain(final?.status);
+        expect(final?.steps.map((step) => step.id)).toContain('continue-1');
+      },
+    }, async () => {
+      let repaired = false, left = false;
+      let continued: { ok: boolean; error?: string } = { ok: false };
+      let final: RunRecord | undefined;
+      await driveRun(backend, 'done', record => TERMINAL.includes(record?.status ?? ''), 30_000,
+        async ({ store, manager, runId }) => {
+          await waitFor(() => !manager.isActive(runId));
+          const repoRoot = manager['repoRoot'] as string;
+          const dataDir = join(repoRoot, '.ai/cezar');
+          store.flush();
+          const records = readPersistedRuns(dataDir);
+          await drainFixtureManagers(repoRoot);
+          store.close();
+          // The snapshot an older controller left: cancelled, intent still on it, no conversation.
+          seedRuns(dataDir, records.map((record) => record.id !== runId ? record : { ...record, status: 'cancelled',
+            delegation: { role: 'root', permissions: [], receipts: [], finishRequestedAt: new Date().toISOString() } }));
+          const rebooted = RunStore.open(dataDir, { keepLive: true });
+          const recovered = createFixtureManager(rebooted, repoRoot);
+          try {
+            await recovered.recover();
+            const root = rebooted.getRun(runId)?.delegation;
+            repaired = root?.role === 'root' && root.finishRequestedAt === undefined;
+            left = await leavesMemory(rebooted, runId);
+            continued = recovered.continueRun(runId, { text: promptFor(backend, 'done') });
+            if (continued.ok) await waitFor(() => TERMINAL.includes(rebooted.getRun(runId)?.status ?? '') && !recovered.isActive(runId), 30_000);
+            final = structuredClone(rebooted.getRun(runId));
+          } finally {
+            await drainFixtureManagers(repoRoot);
+            rebooted.close();
+          }
+        });
+      return { repaired, left, continued, final };
     });
   }
 });

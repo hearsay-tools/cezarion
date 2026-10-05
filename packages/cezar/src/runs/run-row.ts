@@ -15,6 +15,9 @@ const LIVE_STATUSES: ReadonlySet<string> = new Set(['queued', 'running', 'waitin
  *   (`autoResumeAt`) or a CI wait (`ciWait`);
  * - it waits on its delegation family: a parent on its workers, or a worker on its parent;
  * - an owned worker's destroy has not completed (its retry is pending);
+ * - a root's Finish has not settled (`finishRequestedAt`). A waiting root is live anyway; a
+ *   cancelled one is a snapshot older controllers left, which only the delegation sweep repairs
+ *   (`commitRootFinishCancellation`), and until it does, Continue refuses the root and its workers;
  * - an accepted Stop has not settled yet (`stopping`), or a monitoring `activity` is still on it.
  *   `reconcileLoadedRun` rewrites both, so open loads those rows and the next save persists the
  *   normalized record and its summary.
@@ -27,6 +30,7 @@ export function isLiveRecord(run: RunRecord): boolean {
   if (run.monitoringWakeAt !== undefined || run.autoResumeAt !== undefined || run.ciWait !== undefined) return true;
   if (run.delegation && run.delegation.role !== 'invalid' && run.delegation.wait !== undefined) return true;
   if (run.delegation?.role === 'worker' && run.delegation.destroy !== undefined && run.delegation.destroy.phase !== 'complete') return true;
+  if (run.delegation?.role === 'root' && run.delegation.finishRequestedAt !== undefined) return true;
   return run.stopping !== undefined || run.activity !== undefined;
 }
 
