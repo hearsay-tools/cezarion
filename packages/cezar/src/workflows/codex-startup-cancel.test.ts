@@ -104,7 +104,9 @@ describe('Stop before the first Codex turn (#493)', { timeout: 15_000 }, () => {
     expect(a.manager.continueRun(runId).ok).toBe(false);
     await vi.waitFor(() => expect(processExited(pid)).toBe(true), waitOptions);
     await vi.waitFor(() => expect(a.store.getRun(runId)?.status).toBe('cancelled'), waitOptions);
-    expect(a.store.getRun(runId)).toMatchObject({ currentStepId: undefined, stopping: undefined, finishedAt: expect.any(String) });
+    // Cleared fields are absent once the settled run is read back from runs.db (#779).
+    expect(a.store.getRun(runId)?.finishedAt).toEqual(expect.any(String));
+    expect([a.store.getRun(runId)?.currentStepId, a.store.getRun(runId)?.stopping]).toEqual([undefined, undefined]);
     expect(a.store.getRun(runId)?.steps.find(step => step.id === stepId)?.status).toBe('cancelled');
     expect(a.manager.isActive(runId)).toBe(false);
     expect(a.store.readEvents(runId).filter(event => event.type === 'lifecycle' && event.message === 'run cancelled')).toHaveLength(1);

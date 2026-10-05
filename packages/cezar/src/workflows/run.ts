@@ -293,6 +293,23 @@ const REPOSITORY_ROOT_LOCK_DISABLED_NOTE =
 
 export type DelegationExecutionSettings = { cwd: string; runner: RunnerId; model?: string; modelIdentity?: string; effort?: string; agentProfile: string; accountBinding?: WorkerAccountBinding; systemPrompt?: string; allowedTools?: string[]; bashAllowlist?: string[] };
 
+/** What a Continue may carry (`RunManager.continueRun`). */
+type ContinueRunOptions = {
+  text?: string;
+  images?: PastedContent[];
+  runner?: RunnerId;
+  /** Internal configured fallback for an untouched workflow, resolved by the route. */
+  originalRunner?: RunnerId;
+  model?: string;
+  /** Reasoning-effort pin (#45). Omitted keeps the run's pin; empty string clears it. */
+  effort?: string;
+  /** Agent account for the reopened session (spec 2026-07-29-agent-profiles). Omitted = the
+   *  account the run is already on. */
+  agentProfile?: string;
+  /** #505: the parent reply this continuation delivers as the answer to a routed question. */
+  answerInputId?: string;
+};
+
 interface ActiveRun {
   /** Last cumulative Claude report per provider session during this process. */
   reportedClaudeCost?: Map<string, number>;
@@ -4786,14 +4803,20 @@ export class RunManager {
    * behaves exactly like an interactive step: `waiting` after each turn,
    * messages via sendMessage, closed by finish/idle/cancel.
    */
-  continueRun(...args: Parameters<RunManager['admitContinuation']>): ReturnType<RunManager['admitContinuation']> {
+  continueRun(
+    runId: string,
+    opts: ContinueRunOptions = {},
+    /** Restart recovery may discover several interrupted tasks at once. Those
+     *  continuations are queued; an explicit user Continue remains immediate. */
+    deferForCapacity = false,
+    conversation?: Parameters<RunStore['commitWorkerContinuation']>[3],
+  ): { ok: boolean; error?: string } {
     // A finished run is loaded and held for the whole admission (#779): every read below sees
     // the record its own writes change, exactly as for a live run. Admission makes it live
     // (queued or running) or refuses it; either way the `continue` pin ends here.
-    const [runId] = args;
     this.store.pin(runId, 'continue');
     try {
-      return this.admitContinuation(...args);
+      return this.admitContinuation(runId, opts, deferForCapacity, conversation);
     } finally {
       this.store.unpin(runId, 'continue');
     }
@@ -4801,25 +4824,9 @@ export class RunManager {
 
   private admitContinuation(
     runId: string,
-    opts: {
-      text?: string;
-      images?: PastedContent[];
-      runner?: RunnerId;
-      /** Internal configured fallback for an untouched workflow, resolved by the route. */
-      originalRunner?: RunnerId;
-      model?: string;
-      /** Reasoning-effort pin (#45). Omitted keeps the run's pin; empty string clears it. */
-      effort?: string;
-      /** Agent account for the reopened session (spec 2026-07-29-agent-profiles). Omitted = the
-       *  account the run is already on. */
-      agentProfile?: string;
-      /** #505: the parent reply this continuation delivers as the answer to a routed question. */
-      answerInputId?: string;
-    } = {},
-    /** Restart recovery may discover several interrupted tasks at once. Those
-     *  continuations are queued; an explicit user Continue remains immediate. */
-    deferForCapacity = false,
-    conversation?: Parameters<RunStore['commitWorkerContinuation']>[3],
+    opts: ContinueRunOptions,
+    deferForCapacity: boolean,
+    conversation: Parameters<RunStore['commitWorkerContinuation']>[3] | undefined,
   ): { ok: boolean; error?: string } {
     if (agentModelsLocked(this.repoRoot) && (opts.model?.trim() || opts.effort?.trim())) {
       return { ok: false, error: AGENT_MODELS_LOCKED_ERROR };
