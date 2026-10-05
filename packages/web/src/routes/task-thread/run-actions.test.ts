@@ -187,7 +187,7 @@ describe('resumeCommand — per backend, mirroring the server', () => {
     ['codex', 'codex resume s1'],
     ['cursor', undefined],
     ['opencode', 'opencode --session s1'],
-    ['omp', 'omp --resume s1'],
+    ['omp', undefined], // the server resolves CEZ_OMP_BIN and sends cliResumeCommand, as for Cursor
   ] as Array<[RunRecord['runner'], string | undefined]>)('%s → %s', (runner, expected) => {
     expect(resumeCommand(runner, 's1')).toBe(expected)
   })
@@ -236,6 +236,12 @@ describe('resumeHint', () => {
     const cursor = run('done', { runner: 'cursor' })
     expect(resumeHint(cursor)).toBeUndefined()
     expect(resumeHint({ ...cursor, cliResumeCommand: "'/opt/Cursor Agent/agent' --resume sess-1" })).toBe("'/opt/Cursor Agent/agent' --resume sess-1")
+  })
+
+  it('uses the server-resolved OMP executable, so a CEZ_OMP_BIN override reaches the hint', () => {
+    const omp = run('done', { runner: 'omp', steps: [step({ backend: 'omp', sessionId: 'sess-1' })] })
+    expect(resumeHint(omp)).toBeUndefined()
+    expect(resumeHint({ ...omp, cliResumeCommand: "'/opt/Oh My Pi/omp' --resume sess-1" })).toBe("'/opt/Oh My Pi/omp' --resume sess-1")
   })
 
   it('cd-prefixes into the worktree when the run has one', () => {
