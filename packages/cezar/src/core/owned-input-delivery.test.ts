@@ -150,7 +150,7 @@ for (const backend of ['codex', 'opencode', 'pi', 'omp'] as const) {
   }, 60_000);
 }
 
-for (const backend of ['claude', 'codex', 'opencode', 'pi'] as const) {
+for (const backend of ['claude', 'codex', 'opencode', 'pi', 'omp'] as const) {
   it(`${backend} transport acceptance remains delivered when the accepted turn subsequently reports a provider failure`, async () => {
     await withOwnedInputRun(backend, 'baseline', async ({ store, manager, runId, parentRunId }) => {
       manager.enqueueOwnedRun(runId);
