@@ -15,10 +15,11 @@ const execFile = promisify(execFileCallback);
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const cli = join(packageRoot, 'dist/index.js');
 
-// This fixture needs automatic discovery, so deliberately select a free port in
-// its supported range. Production startup no longer bounces (hearsay-tools/cezarion#722).
+// This fixture needs automatic discovery, so select a free non-default port in
+// its supported range. Leave 4321 to serve-port.test.ts's default refusal fixture:
+// production startup no longer bounces (hearsay-tools/cezarion#722).
 async function freeDiscoveryPort(): Promise<number> {
-  for (const port of COCKPIT_PORTS) {
+  for (const port of COCKPIT_PORTS.filter((port) => port !== 4321)) {
     const probe = createServer();
     try {
       probe.listen(port, '127.0.0.1');
