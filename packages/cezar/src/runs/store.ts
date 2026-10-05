@@ -26,8 +26,12 @@ import { MAX_REF } from './task-refs.ts';
 import { workflowDefSchema } from '../workflows/types.ts';
 
 import { RUNNER_IDS } from '../core/agent-runner.ts';
-import { RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY, RunDatabase, RunDatabaseError, type RunDatabaseChanges, type RunRow, type RunRowInput } from './run-database.ts';
+import {
+  RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY, RunConflictError, RunDatabase, RunDatabaseBusyError, RunDatabaseError,
+  type RunConflictEvidence, type RunDatabaseChanges, type RunDatabaseCommit, type RunFenceClaim, type RunRow, type RunRowInput, type RunWriteFence,
+} from './run-database.ts';
 import { encodeRunRow, isLiveRecord } from './run-row.ts';
+import { claimOwnerLive, closeClaimSession, openClaimSession, type ClaimOwner } from './run-claims.ts';
 
 import type { RunnerId } from '../core/agent-runner.ts';
 
@@ -909,7 +913,54 @@ export function branchOwnerOf(run: RunRecord): BranchOwner | undefined {
 }
 
 /** Who may hold a run in memory besides its own record (see `RunStore.pin`). */
-export type RunPinHolder = 'active' | 'continue';
+export type RunPinHolder = 'active' | 'continue' | 'cleanup';
+
+/**
+ * Who may change a run, as this store sees it (#779, plan step 3; `RunStore.runOwnership`):
+ * - `held`: this store claims its delegation family;
+ * - `free`: no live process claims it and nothing in its family is live; a write takes it;
+ * - `orphaned`: its owner is proven dead, or nobody claims a family with a live run: taking it
+ *   means recovering it first (`RunStore.adoptFamily`, then the manager's recovery);
+ * - `foreign`: another process that is alive (or cannot be proven dead) holds it: read-only here;
+ * - `quarantined`: a write found it changed under this store; refused until cezar restarts.
+ */
+export type RunOwnership = 'held' | 'free' | 'orphaned' | 'foreign' | 'quarantined';
+
+/** The one answer every control gives for a run another cezar process owns (`409 { error }`). */
+export const RUN_IN_USE_ELSEWHERE = 'run is in use by another cezar process';
+/** The answer for a run this process stopped writing after a conflicting write. */
+export const RUN_QUARANTINED = 'run changed under this cezar process — restart cezar to reload it';
+
+/** A write this store must not make: another process owns the run, its owner died with work
+ *  still live (adopt it first), or a conflict quarantined it. Nothing was changed. */
+export class RunWriteRefusedError extends Error {
+  constructor(readonly runId: string, readonly ownership: Exclude<RunOwnership, 'held' | 'free'>) {
+    super(ownership === 'quarantined' ? `${RUN_QUARANTINED}: ${runId}`
+      : ownership === 'orphaned' ? `run ${runId} belongs to a cezar process that exited; take it over before writing it`
+        : `${RUN_IN_USE_ELSEWHERE}: ${runId}`);
+    this.name = 'RunWriteRefusedError';
+  }
+}
+
+/** How many times open (or an adoption) tries to take its claims while another connection holds
+ *  the write lock, each waiting out the 50 ms busy timeout: recovery cannot start without them. */
+const ADOPT_CLAIM_ATTEMPTS = 10;
+
+/** The `run_claims` family of a run: a worker's parent, else the run itself (`parent_run_id ?? id`). */
+function familyKey(run: Pick<RunRecord, 'id' | 'delegation'>): string {
+  return run.delegation?.role === 'worker' ? run.delegation.parentRunId : run.id;
+}
+
+/** The same family, off a stored row's columns. */
+function rowFamily(row: Pick<RunRow, 'id' | 'parentRunId'>): string {
+  return row.parentRunId ?? row.id;
+}
+
+/** Make `target` hold exactly `source`'s fields, keeping the object every holder references. */
+function replaceRecord(target: RunRecord, source: RunRecord): void {
+  for (const key of Object.keys(target)) if (!(key in source)) delete (target as Record<string, unknown>)[key];
+  Object.assign(target, source);
+}
 
 /** Newest first, with the database's tie-break, so memory and `runs.db` list in one order. */
 function newestFirst(a: { createdAt: string; id: string }, b: { createdAt: string; id: string }): number {
@@ -993,6 +1044,16 @@ export function isSweepable(
  * - durable (`commitIndex`): one transaction with the changed rows AND everything a debounced
  *   save still owes. Only once it commits do the records change in memory, and only then do
  *   subscribers hear about it.
+ *
+ * Several processes may open one project (`serve` and a headless `cez run`), so a store writes
+ * only the delegation families it claims in `run_claims` (#779, plan step 3; `run-claims.ts`).
+ * Everything it holds is claimed: open claims the live rows nobody alive owns and leaves the rest
+ * alone, and a write to a run not in memory claims its family first, or refuses it while another
+ * live process owns it. Claims are released once a family leaves memory, and all of them on
+ * `close()`; a crashed owner's are taken over only once it is proven dead. Every write is fenced
+ * in its transaction: if a row is not as this store last saw it, or its claim is gone, nothing is
+ * written, the evidence goes to `run_conflicts` and this store stops writing that row
+ * (`handleConflicts`).
  */
 export class RunStore extends EventEmitter {
   /** The held set: every record this store keeps in memory, by id. */
@@ -1015,6 +1076,25 @@ export class RunStore extends EventEmitter {
   private repoHandle: RepoHandle | null | undefined;
   /** `open()`'s `keepLive`, which a run read later from `runs.db` is reconciled with too. */
   private keepLive = false;
+  /** This store's identity in `run_claims`; undefined without a database. */
+  private owner: ClaimOwner | undefined;
+  /** The families this store claims, with the generation each acquisition got. */
+  private readonly claimed = new Map<string, number>();
+  /** Families judged free whose claim a busy database kept this store from taking: the next write
+   *  of their rows takes it in its own transaction, if it is still as judged (null: absent). */
+  private readonly pendingClaims = new Map<string, { session: string; generation: number } | null>();
+  /** The revision and `data` of each held row (and pending deletion) as this store last read or
+   *  wrote it: what a write is fenced against, and a conflict's "original". No entry: this store
+   *  created the row and has not written it yet. */
+  private readonly base = new Map<string, { revision: number; data: string }>();
+  /** Rows read cold in the current synchronous turn, so a commit staged from one is fenced against
+   *  the version it was computed from. `owned`: its family was already this store's when read.
+   *  Cleared at the next microtask: no commit spans a turn. */
+  private readonly coldBase = new Map<string, { revision: number; data: string; owned: boolean }>();
+  /** The family of each pending deletion, whose claim the deleting write is fenced against. */
+  private readonly deletedFamilies = new Map<string, string>();
+  /** Rows a conflicting write excluded: this store refuses to write them until it is reopened. */
+  private readonly quarantined = new Set<string>();
 
   private constructor(private readonly dataDir: string) {
     super();
@@ -1042,11 +1122,19 @@ export class RunStore extends EventEmitter {
       try {
         if (db.getMeta(RUNS_IMPORT_COMPLETE_KEY) === undefined) importLegacyIndex(db, dataDir);
         store.db = db;
+        store.owner = openClaimSession();
         store.loadHeldRows();
       } catch (error) {
+        if (store.owner) {
+          try { db.releaseClaims(store.owner.session); } catch { /* the session closes below: its claims are provably dead */ }
+          closeClaimSession(store.owner.session);
+        }
+        store.owner = undefined;
         store.db = null;
         store.held.clear();
         store.dirty.clear();
+        store.claimed.clear();
+        store.base.clear();
         db.close();
         throw error;
       }
@@ -1058,9 +1146,17 @@ export class RunStore extends EventEmitter {
     return store;
   }
 
-  /** Open-time load: the live rows, the finished rows a load normalization repairs, then the
-   *  delegation families of the live ones. A row that does not parse is skipped and left in the
-   *  database untouched; one warning says how many. */
+  /**
+   * Open-time load: the live rows, the finished rows a load normalization repairs, then the
+   * delegation families of the live ones. A row that does not parse is skipped and left in the
+   * database untouched; one warning says how many.
+   *
+   * Only rows this store can claim are loaded (#779, plan step 3). A live row whose family another
+   * live process claims — `serve`'s parked run, seen by a headless `cez run` — is that process's:
+   * it is not loaded, normalized or recovered here, and stays readable through `getRun` and the
+   * list rows. A live row nobody alive claims is taken over, as before: this open recovers it
+   * (`keepLive`) or settles it as interrupted.
+   */
   private loadHeldRows(): void {
     let unreadable = 0;
     const decode = (row: RunRow): RunRecord | undefined => {
@@ -1068,23 +1164,30 @@ export class RunStore extends EventEmitter {
       if (!run) unreadable++;
       return run;
     };
-    for (const row of this.db!.listLive()) {
+    const live = this.db!.listLive();
+    const owned = this.claimFamilies(live.map(rowFamily), { allowLive: true, wait: true });
+    for (const row of live) {
+      if (!owned.has(rowFamily(row))) continue;
       const run = decode(row);
-      if (run) this.adoptLoadedRun(run, { keepLive: this.keepLive });
+      if (run) this.adoptLoadedRun(run, { keepLive: this.keepLive }, row);
     }
-    for (const row of this.db!.listWhere(LEGACY_REFERENCE_HEAL_SQL)) {
-      if (this.held.has(row.id)) continue;
+    const heal = this.db!.listWhere(LEGACY_REFERENCE_HEAL_SQL).filter((row) => !this.held.has(row.id));
+    const healable = this.claimFamilies(heal.map(rowFamily));
+    for (const row of heal) {
+      if (!healable.has(rowFamily(row))) continue;
       const run = decode(row);
       // Held only when the repair changed it: the next save writes it, then it leaves.
-      if (run) this.adoptLoadedRun(run, { keepLive: this.keepLive, onlyIfChanged: true });
+      if (run) this.adoptLoadedRun(run, { keepLive: this.keepLive, onlyIfChanged: true }, row);
     }
     for (const rootId of this.anchoredFamilies()) this.holdFamily(rootId, decode);
+    this.releaseUnheldClaims();
     if (unreadable > 0) console.warn(`[cez] ${unreadable} run(s) in ${RUNS_DB_FILE} could not be read; they are left in the database untouched.`);
   }
 
-  /** Normalize a record just read (see `reconcileLoadedRun`) and hold it. Marks the row dirty only
-   *  when normalization changed it, so the next save persists exactly the runs open() rewrote. */
-  private adoptLoadedRun(run: RunRecord, opts: { keepLive?: boolean; onlyIfChanged?: boolean }): void {
+  /** Normalize a record just read from `row` (see `reconcileLoadedRun`) and hold it. Marks the row
+   *  dirty only when normalization changed it, so the next save persists exactly the runs open()
+   *  rewrote. The caller has claimed the row's family. */
+  private adoptLoadedRun(run: RunRecord, opts: { keepLive?: boolean; onlyIfChanged?: boolean }, row: RunRow): void {
     const before = loadNormalizedFields(run);
     if (run.delegation?.role === 'root' && (run.status === 'waiting' || run.delegation.wait !== undefined)) {
       refreshHumanAskSummary(run, this.dataDir);
@@ -1093,21 +1196,150 @@ export class RunStore extends EventEmitter {
     const changed = loadNormalizedFields(run) !== before;
     if (opts.onlyIfChanged && !changed) return;
     this.held.set(run.id, run);
+    this.base.set(run.id, { revision: row.revision, data: row.data });
     if (changed) this.dirty.add(run.id);
   }
 
   /**
    * Hold one delegation family: its root and the root's direct workers, read through the
    * `parent_run_id` index. No recursion: workers cannot delegate, so a worker's own id never
-   * names a family.
+   * names a family. The caller has claimed it.
    */
   private holdFamily(rootId: string, decode: (row: RunRow) => RunRecord | undefined = (row) => decodeRunRecord(row.data)): void {
     const rows = [this.db!.get(rootId), ...this.db!.listByParent(rootId)];
     for (const row of rows) {
       if (!row || this.held.has(row.id) || this.deleted.has(row.id)) continue;
       const run = decode(row);
-      if (run) this.adoptLoadedRun(run, { keepLive: this.keepLive });
+      if (run) this.adoptLoadedRun(run, { keepLive: this.keepLive }, row);
     }
+  }
+
+  /**
+   * Make sure this store claims each of `families`, taking every one no live process holds, and
+   * return the ones it now holds. Liveness is judged here (`claimOwnerLive`), outside the write
+   * transaction; `takeClaims` then takes a claim only if it is still exactly what was judged.
+   *
+   * `allowLive` also takes a family that still has a live row although no live process owns it.
+   * Open and `adoptFamily` pass it, because recovery follows both, and so does a write moving a
+   * run this store holds into a new family (a worker quarantined to `invalid` becomes its own):
+   * an ordinary write must not quietly inherit a dead process's live run and leave it unrecovered.
+   * `wait` retries a busy database instead of leaving the claim to the next write: recovery
+   * cannot start without it.
+   */
+  private claimFamilies(families: Iterable<string>, opts: { allowLive?: boolean; wait?: boolean } = {}): Set<string> {
+    const owned = new Set<string>();
+    const wanted: string[] = [];
+    for (const family of new Set(families)) {
+      if (this.claimed.has(family) || this.pendingClaims.has(family)) owned.add(family);
+      else wanted.push(family);
+    }
+    if (!this.db || !this.owner || wanted.length === 0) return owned;
+    const claims = this.db.getClaims(wanted);
+    const take: Array<{ family: string; expect: { session: string; generation: number } | null }> = [];
+    for (const family of wanted) {
+      const claim = claims.get(family);
+      if (claim && claimOwnerLive(claim)) continue;
+      if (!opts.allowLive && this.db.familyHasLive(family)) continue;
+      take.push({ family, expect: claim ? { session: claim.session, generation: claim.generation } : null });
+    }
+    if (take.length === 0) return owned;
+    let taken: Map<string, number>;
+    try {
+      taken = this.takeClaims(take, opts.wait ? ADOPT_CLAIM_ATTEMPTS : 1);
+    } catch (error) {
+      if (!(error instanceof RunDatabaseBusyError)) throw error;
+      // Recovery follows an adoption, so it must hold the claim first: those families stay
+      // unclaimed and orphaned (a control or the next restart adopts them). A write does not wait:
+      // its next transaction takes the claim (`fence`), or meets whoever took it meanwhile.
+      if (opts.wait) return owned;
+      for (const { family, expect } of take) {
+        this.pendingClaims.set(family, expect);
+        owned.add(family);
+      }
+      this.scheduleSave();
+      return owned;
+    }
+    for (const [family, generation] of taken) {
+      this.claimed.set(family, generation);
+      owned.add(family);
+    }
+    // A claim taken for a write that then changes nothing still leaves at the next sweep.
+    if (taken.size > 0) this.scheduleSave();
+    return owned;
+  }
+
+  /** `takeClaims`, retried while another connection holds the write lock (each try waits out the
+   *  busy timeout), then the busy error. */
+  private takeClaims(take: Parameters<RunDatabase['takeClaims']>[1], attempts: number): Map<string, number> {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return this.db!.takeClaims(this.owner!, take);
+      } catch (error) {
+        if (!(error instanceof RunDatabaseBusyError) || attempt >= attempts) throw error;
+      }
+    }
+  }
+
+  /** Release the claim of every family with nothing left in memory, once nothing is pending: a
+   *  failed save keeps its families claimed until it succeeds. A failed release retries at the
+   *  next sweep; `close()` releases the rest. */
+  private releaseUnheldClaims(): void {
+    if (!this.db || !this.owner || this.dirty.size > 0 || this.deleted.size > 0) return;
+    const kept = new Set<string>();
+    for (const run of this.held.values()) kept.add(familyKey(run));
+    // A claim never taken has nothing to release in the database.
+    for (const family of this.pendingClaims.keys()) if (!kept.has(family)) this.pendingClaims.delete(family);
+    const released = [...this.claimed.keys()].filter((family) => !kept.has(family));
+    if (released.length === 0) return;
+    try {
+      this.db.releaseClaims(this.owner.session, released);
+      for (const family of released) this.claimed.delete(family);
+    } catch {
+      // Busy or failing: the next sweep tries again.
+    }
+  }
+
+  /**
+   * Who may change this run right now (see `RunOwnership`), or undefined when there is no such
+   * run. Read-only: nothing is claimed. Controls ask this first, so a run another process owns is
+   * refused with `RUN_IN_USE_ELSEWHERE` and a dead process's run is adopted before it is changed.
+   */
+  runOwnership(id: string): RunOwnership | undefined {
+    if (this.quarantined.has(id)) return 'quarantined';
+    const held = this.held.get(id);
+    if (!this.db) return held ? 'held' : undefined;
+    const family = held ? familyKey(held) : this.deleted.has(id) ? undefined : this.db.familyOf(id);
+    if (family === undefined) return undefined;
+    if (this.claimed.has(family) || this.pendingClaims.has(family)) return 'held';
+    const claim = this.db.getClaim(family);
+    if (claim && claimOwnerLive(claim)) return 'foreign';
+    return claim || this.db.familyHasLive(family) ? 'orphaned' : 'free';
+  }
+
+  /** Why a control on this run must be refused here, or undefined when this store may change it. */
+  writeRefusal(id: string): string | undefined {
+    const ownership = this.runOwnership(id);
+    if (ownership === 'quarantined') return RUN_QUARANTINED;
+    return ownership === 'foreign' || ownership === 'orphaned' ? RUN_IN_USE_ELSEWHERE : undefined;
+  }
+
+  /**
+   * Take over the delegation family of an `orphaned` run, exactly as `open` would have: claim it
+   * from its dead owner (or from nobody), then load and normalize its rows and hold them. Returns
+   * the family's root id, or undefined when a live owner holds it after all or it is gone. The
+   * caller runs recovery for that family next (`RunManager.adoptOrphanedRun`).
+   */
+  adoptFamily(id: string): string | undefined {
+    const family = this.db?.familyOf(id);
+    if (family === undefined || !this.claimFamilies([family], { allowLive: true, wait: true }).has(family)) return undefined;
+    this.holdFamily(family);
+    return family;
+  }
+
+  /** Every run whose family another process claims, live owner or not (cleanup keeps their
+   *  scratch: it is theirs, or recovery's once someone takes them over). */
+  listForeignClaimedRunIds(): string[] {
+    return this.db && this.owner ? this.db.listForeignClaimedIds(this.owner.session) : [];
   }
 
   /**
@@ -1149,7 +1381,9 @@ export class RunStore extends EventEmitter {
       const root = familyRootOf(run);
       if (root !== undefined && families.has(root)) continue;
       this.held.delete(id);
+      this.base.delete(id);
     }
+    this.releaseUnheldClaims();
   }
 
   /** A run read from `runs.db`, normalized like a loaded one (`reconcileLoadedRun`, then the
@@ -1163,25 +1397,44 @@ export class RunStore extends EventEmitter {
   private decodeCold(row: RunRow): RunRecord | undefined {
     const run = decodeRunRecord(row.data);
     if (!run) return undefined;
+    if (this.coldBase.size === 0) queueMicrotask(() => this.coldBase.clear());
+    const family = rowFamily(row);
+    this.coldBase.set(row.id, { revision: row.revision, data: row.data, owned: this.claimed.has(family) || this.pendingClaims.has(family) });
     reconcileLoadedRun(run, { keepLive: this.keepLive });
     rescopeRun(run, this.repoHandle);
     return run;
   }
 
-  /** Bring a run into memory and return the held object: the record a write changes in place.
-   *  It leaves again at the first sweep after its write settles, unless something anchors it. */
+  /** Hold a run just decoded from its row: the object every later read and write shares. */
+  private holdDecoded(run: RunRecord): RunRecord {
+    const read = this.coldBase.get(run.id);
+    this.held.set(run.id, run);
+    if (read) this.base.set(run.id, { revision: read.revision, data: read.data });
+    return run;
+  }
+
+  /**
+   * Bring a run into memory and return the held object: the record a write changes in place.
+   * It leaves again at the first sweep after its write settles, unless something anchors it.
+   * Its family is claimed first, then the row is read, so the version held is the claimed one;
+   * undefined while another process owns it (see `claimFamilies`).
+   */
   private hold(id: string): RunRecord | undefined {
     const held = this.held.get(id);
     if (held) return held;
+    const family = this.db && !this.deleted.has(id) ? this.db.familyOf(id) : undefined;
+    if (family === undefined || !this.claimFamilies([family]).has(family)) return undefined;
     const run = this.loadCold(id);
     if (!run) return undefined;
-    this.held.set(id, run);
+    this.holdDecoded(run);
     this.scheduleSave();
     return run;
   }
 
-  /** The record a store write changes in place: held, or loaded to be. */
+  /** The record a store write changes in place: held, or loaded to be. Undefined for a run this
+   *  store may not write (another process's, or quarantined), so the write changes nothing. */
   private record(id: string): RunRecord | undefined {
+    if (this.quarantined.has(id)) return undefined;
     return this.held.get(id) ?? this.hold(id);
   }
 
@@ -1201,10 +1454,7 @@ export class RunStore extends EventEmitter {
    */
   private answerCold(run: RunRecord, freeze: boolean): RunRecord {
     const root = familyRootOf(run);
-    if (root !== undefined && this.anchoredFamilies().has(root)) {
-      this.held.set(run.id, run);
-      return run;
-    }
+    if (root !== undefined && this.anchoredFamilies().has(root)) return this.holdDecoded(run);
     return freeze && process.env.VITEST ? deepFreeze(run) : run;
   }
 
@@ -1279,11 +1529,14 @@ export class RunStore extends EventEmitter {
         healed = true;
       }
     }
+    // Only rows this store may write: another process's runs heal when their owner arms its handle.
+    const writable = this.claimFamilies(stored.map(rowFamily));
     for (const row of stored) {
+      if (!writable.has(rowFamily(row))) continue;
       const run = this.decodeCold(row);
       // `decodeCold` already scoped it with the handle just armed; write it when that changed it.
       if (!run || !this.storedScopeDiffers(row, run)) continue;
-      this.held.set(run.id, run);
+      this.holdDecoded(run);
       this.touch(run);
       healed = true;
     }
@@ -1560,6 +1813,8 @@ export class RunStore extends EventEmitter {
     steps: Array<Pick<StepState, 'id' | 'name' | 'kind'>>;
   }): RunRecord {
     const run = this.buildRun(input, randomUUID());
+    // A new family, so nobody else can hold it; claimed before anything (an NDJSON event) is written.
+    if (this.db && !this.claimFamilies([run.id]).has(run.id)) throw new RunWriteRefusedError(run.id, 'foreign');
     this.held.set(run.id, run);
     this.pruneOldRuns();
     this.touch(run);
@@ -2057,6 +2312,7 @@ export class RunStore extends EventEmitter {
    */
   private commitIndex(staged: ReadonlyMap<string, RunRecord | null>, source?: 'delegation-checkpoint'): void {
     if (!this.db) throw new Error('runs database unavailable: nothing can be saved');
+    this.assertWritable(staged);
     this.persist(staged);
     // Preserve existing record references, but expose the entire transaction before its first event.
     // A finished run joins the held set for the commit and leaves at the next sweep.
@@ -2076,6 +2332,34 @@ export class RunStore extends EventEmitter {
       for (const id of staged.keys()) this.committing.delete(id);
       this.sweepIfSettled(staged.keys());
     }
+  }
+
+  /**
+   * Refuse (throwing, with nothing changed) a commit that stages a quarantined run, or a run whose
+   * family this store does not claim and cannot take: another process owns it, or a dead process
+   * left it live and it has not been adopted.
+   */
+  private assertWritable(staged: ReadonlyMap<string, RunRecord | null>): void {
+    const families = new Map<string, string>();
+    const held = new Set<string>();
+    for (const [id, next] of staged) {
+      if (this.quarantined.has(id)) throw new RunWriteRefusedError(id, 'quarantined');
+      const family = next ? familyKey(next) : this.familyOf(id);
+      families.set(id, family);
+      if (this.held.has(id)) held.add(family);
+    }
+    // A run this store holds may move to a new family; any other row is claimed as a plain write.
+    const owned = new Set([...this.claimFamilies(held, { allowLive: true }),
+      ...this.claimFamilies([...families.values()].filter((family) => !held.has(family)))]);
+    for (const [id, family] of families) {
+      if (!owned.has(family)) throw new RunWriteRefusedError(id, this.runOwnership(id) === 'orphaned' ? 'orphaned' : 'foreign');
+    }
+  }
+
+  /** The family of a run this store knows: held, else its row; a run nowhere is its own. */
+  private familyOf(id: string): string {
+    const held = this.held.get(id);
+    return held ? familyKey(held) : this.deletedFamilies.get(id) ?? this.db?.familyOf(id) ?? id;
   }
 
   /** Schedule the sweep that lets any of `ids` leave memory, when one of them now can. */
@@ -2293,9 +2577,12 @@ export class RunStore extends EventEmitter {
       const summary = parseStoredSummary(row.summary);
       if (summary && isSweepable(summary, scope)) picked.push(summary);
     }
-    picked.sort(newestFirst);
-    const ids = picked.map((run) => run.id);
-    const pinnedIds = picked.filter((run) => run.pinned).map((run) => run.id);
+    // Another process's runs are not this store's to archive (#779, plan step 3): they stay out.
+    // A sweepable run is never a worker (`isSweepable`), so each is its own family.
+    const writable = this.claimFamilies(picked.map((run) => run.id));
+    const mine = picked.filter((run) => writable.has(run.id)).sort(newestFirst);
+    const ids = mine.map((run) => run.id);
+    const pinnedIds = mine.filter((run) => run.pinned).map((run) => run.id);
     for (const id of ids) {
       // Re-check: a prior cascade may already have archived this id.
       const run = this.record(id);
@@ -2368,8 +2655,10 @@ export class RunStore extends EventEmitter {
     // Runs not in memory are picked by the same rule over their stored summary, then re-checked
     // on the record before they are stamped.
     const candidates = [...this.held.values()];
-    for (const row of this.db?.listWhere(MARK_ALL_READ_SQL) ?? []) {
-      if (this.held.has(row.id) || this.deleted.has(row.id)) continue;
+    const stored = (this.db?.listWhere(MARK_ALL_READ_SQL) ?? []).filter((row) => !this.held.has(row.id) && !this.deleted.has(row.id));
+    // One claim transaction for them all; another process's runs are skipped (`record` refuses).
+    this.claimFamilies(stored.map(rowFamily));
+    for (const row of stored) {
       const run = this.record(row.id);
       if (run) candidates.push(run);
     }
@@ -2390,7 +2679,11 @@ export class RunStore extends EventEmitter {
 
   appendEvent(runId: string, event: { type: string; stepId?: string; [key: string]: unknown }): RunEvent {
     const run = this.record(runId);
-    if (!run) throw new Error(`unknown run: ${runId}`);
+    if (!run) {
+      const ownership = this.runOwnership(runId);
+      if (ownership === 'foreign' || ownership === 'orphaned' || ownership === 'quarantined') throw new RunWriteRefusedError(runId, ownership);
+      throw new Error(`unknown run: ${runId}`);
+    }
     const seq = this.nextSeq(runId);
     // Scrub credentials before the event touches disk or the live wire (#427):
     // tool-result output is persisted verbatim and served back over the API, so
@@ -2953,11 +3246,12 @@ export class RunStore extends EventEmitter {
   deleteRun(id: string): boolean {
     if (!this.canDeleteRun(id)) return false;
     const run = this.peek(id);
+    if (run && this.db && (this.quarantined.has(id) || !this.claimFamilies([familyKey(run)]).size)) return false;
     if (run?.delegation?.role === 'worker' || run?.delegation?.role === 'root') return this.deleteDelegatedRun(id);
     const existed = run !== undefined;
     this.held.delete(id);
     if (existed) {
-      this.markDeleted(id);
+      this.markDeleted(id, familyKey(run));
       try {
         rmSync(this.eventsPath(id), { force: true });
         rmSync(this.handoffPath(id), { force: true });
@@ -3025,10 +3319,14 @@ export class RunStore extends EventEmitter {
     this.emit('run', run);
   }
 
-  /** The held record is gone; the next save or commit deletes its row. */
-  private markDeleted(id: string): void {
+  /** The held record is gone; the next save or commit deletes its row, fenced by `family`'s claim
+   *  and by the revision this store last saw (kept in `base` until the delete is written). */
+  private markDeleted(id: string, family: string): void {
+    const read = this.coldBase.get(id);
+    if (!this.base.has(id) && read) this.base.set(id, { revision: read.revision, data: read.data });
     this.dirty.delete(id);
     this.deleted.add(id);
+    this.deletedFamilies.set(id, family);
   }
 
   /**
@@ -3054,11 +3352,21 @@ export class RunStore extends EventEmitter {
         return run && !['queued', 'running', 'waiting'].includes(run.status) && !run.delegation ? [id] : [];
       });
       const cold = overflow.filter((id) => !this.held.has(id));
-      if (cold.length > 0) stale.push(...this.db!.listWhere(RETENTION_CANDIDATES_SQL, [JSON.stringify(cold)]).map((row) => row.id));
+      const coldRows = new Map<string, RunRow>();
+      if (cold.length > 0) {
+        // Another process's runs are its own to keep or delete (#779, plan step 3).
+        const rows = this.db!.listWhere(RETENTION_CANDIDATES_SQL, [JSON.stringify(cold)]);
+        const writable = this.claimFamilies(rows.map(rowFamily));
+        for (const row of rows) if (writable.has(rowFamily(row))) coldRows.set(row.id, row);
+        stale.push(...coldRows.keys());
+      }
       for (const id of stale) {
         if (!this.canDeleteRun(id)) continue;
+        const family = this.familyOf(id);
+        const row = coldRows.get(id);
+        if (row) this.base.set(id, { revision: row.revision, data: row.data });
         this.held.delete(id);
-        this.markDeleted(id);
+        this.markDeleted(id, family);
         try {
           rmSync(this.eventsPath(id), { force: true });
           rmSync(this.handoffPath(id), { force: true });
@@ -3084,28 +3392,59 @@ export class RunStore extends EventEmitter {
   }
 
   /** The single database write, so a test can fail it the way a full disk would. */
-  private writeIndex(changes: RunDatabaseChanges): void {
-    this.db!.transaction(changes);
+  private writeIndex(changes: RunDatabaseChanges): RunDatabaseCommit {
+    return this.db!.transaction(changes);
   }
 
   /**
    * Write `staged` plus everything still pending — dirty rows from memory, deletions — in one
    * transaction, then clear the pending marks. Throws with nothing cleared when it fails.
    * Never copies or sorts the whole store: the cost is the rows that changed.
+   *
+   * Fenced (#779, plan step 3): the transaction commits only if every family it writes still
+   * carries this store's claim and every row is at the revision this store last saw. Otherwise
+   * nothing is written and `handleConflicts` deals with the rows that changed under it.
    */
   private persist(staged: ReadonlyMap<string, RunRecord | null>): void {
     const upserts: RunRowInput[] = [];
     const deletes: string[] = [];
+    const families = new Map<string, string>();
     for (const [id, next] of staged) {
       if (next) upserts.push(encodeRunRow(next));
       else deletes.push(id);
+      families.set(id, next ? familyKey(next) : this.familyOf(id));
     }
     for (const id of this.dirty) {
       const run = this.held.get(id);
-      if (run && !staged.has(id)) upserts.push(encodeRunRow(run));
+      if (!run || staged.has(id)) continue;
+      upserts.push(encodeRunRow(run));
+      families.set(id, familyKey(run));
     }
-    for (const id of this.deleted) if (!staged.has(id)) deletes.push(id);
-    this.writeIndex({ upserts, deletes });
+    for (const id of this.deleted) {
+      if (staged.has(id)) continue;
+      deletes.push(id);
+      families.set(id, this.familyOf(id));
+    }
+    // A held run whose write moved it into a new family (a worker quarantined to `invalid`) takes
+    // that family's claim first; one it cannot take fails the fence below as claim-lost.
+    const moved = [...new Set(families.values())].filter((family) => !this.claimed.has(family) && !this.pendingClaims.has(family));
+    if (moved.length > 0) this.claimFamilies(moved, { allowLive: true });
+    let commit: RunDatabaseCommit;
+    try {
+      commit = this.writeIndex({ upserts, deletes, ...(this.owner ? { fence: this.fence(families) } : {}) });
+    } catch (error) {
+      if (error instanceof RunConflictError) this.handleConflicts(error, staged);
+      throw error;
+    }
+    for (const [family, generation] of commit.claims) {
+      this.claimed.set(family, generation);
+      this.pendingClaims.delete(family);
+    }
+    for (const row of upserts) this.base.set(row.id, { revision: commit.revisions.get(row.id)!, data: row.data });
+    for (const id of deletes) {
+      this.base.delete(id);
+      this.deletedFamilies.delete(id);
+    }
     this.dirty.clear();
     this.deleted.clear();
     if (this.saveTimer) {
@@ -3114,19 +3453,107 @@ export class RunStore extends EventEmitter {
     }
   }
 
+  /** What a write of these rows (id → family) must still find: this store's claims, at the
+   *  generations it took them, and each row at the revision it last saw (none for a new row). */
+  private fence(families: ReadonlyMap<string, string>): RunWriteFence {
+    const claims = new Map<string, RunFenceClaim>();
+    const rows = new Map<string, { revision: number | null; family: string }>();
+    for (const [id, family] of families) {
+      const pending = this.pendingClaims.get(family);
+      // Generations start at 1, so an unclaimed family's 0 fails the fence as claim-lost.
+      claims.set(family, pending !== undefined ? { take: pending } : { generation: this.claimed.get(family) ?? 0 });
+      rows.set(id, { revision: (this.base.get(id) ?? this.coldBase.get(id))?.revision ?? null, family });
+    }
+    return { owner: this.owner!, claims, rows };
+  }
+
+  /**
+   * A fenced write found rows that changed under this store (#779, plan step 3); the write itself
+   * has already failed with nothing changed, and its caller sees that error.
+   *
+   * A conflict is UNEXPECTED when this store owned the row's family when it last read or wrote it:
+   * a held or pending row, or one read inside a family it claimed. Another writer then broke the
+   * claim. For each such row the original (what this store last saw), local (what it meant to
+   * write, or that it meant to delete it) and current versions go to `run_conflicts` first. Only
+   * once that evidence is stored does the row leave the pending set, so no retry rewrites it; this
+   * store then refuses to write it again, and its held copy is replaced by the current row (or
+   * dropped when deleted) and announced. That refusal lasts as long as this store: the explicit
+   * recovery is a restart, which reads the row as it now stands, and the evidence row stays for a
+   * person to compare. Other pending rows stay pending and the next save writes them.
+   *
+   * If the evidence cannot be stored, nothing changes: the rows stay pending, and the next write
+   * meets the same conflict and tries again. A row read before its family was claimed may simply
+   * have been finished by its previous owner in between: a stale read, not a conflict, so only the
+   * write fails.
+   */
+  private handleConflicts(error: RunConflictError, staged: ReadonlyMap<string, RunRecord | null>): void {
+    const unexpected = error.conflicts.filter((conflict) =>
+      this.held.has(conflict.id) || this.deleted.has(conflict.id) || this.coldBase.get(conflict.id)?.owned === true);
+    if (unexpected.length === 0 || !this.db || !this.owner) return;
+    const evidence: RunConflictEvidence[] = unexpected.map((conflict) => {
+      const seen = this.base.get(conflict.id) ?? this.coldBase.get(conflict.id);
+      const local = staged.has(conflict.id) ? staged.get(conflict.id)! : this.deleted.has(conflict.id) ? null : this.held.get(conflict.id) ?? null;
+      return {
+        runId: conflict.id, reason: conflict.reason,
+        baseRevision: seen?.revision ?? null, baseData: seen?.data ?? null,
+        localData: local === null ? null : JSON.stringify(local), localDeleted: local === null,
+        currentRevision: conflict.current?.revision ?? null, currentData: conflict.current?.data ?? null,
+      };
+    });
+    let seqs: number[];
+    try {
+      seqs = this.db.recordConflicts(this.owner.session, evidence);
+    } catch (evidenceError) {
+      const message = evidenceError instanceof Error ? evidenceError.message : String(evidenceError);
+      console.error(`[cez] ${RUNS_DB_FILE}: could not record the conflicting write on ${unexpected.map((c) => c.id).join(', ')}; it stays pending: ${message}`);
+      return;
+    }
+    unexpected.forEach((conflict, index) => {
+      const family = this.familyOf(conflict.id);
+      this.quarantined.add(conflict.id);
+      this.dirty.delete(conflict.id);
+      this.deleted.delete(conflict.id);
+      this.deletedFamilies.delete(conflict.id);
+      if (conflict.reason === 'claim-lost') {
+        this.claimed.delete(family);
+        this.pendingClaims.delete(family);
+      }
+      const current = conflict.current ? decodeRunRecord(conflict.current.data) : undefined;
+      const held = this.held.get(conflict.id);
+      if (current && conflict.current) {
+        // The other writer's record as it stands, normalized only as a live owner's run would be.
+        reconcileLoadedRun(current, { keepLive: true });
+        rescopeRun(current, this.repoHandle);
+        if (held) replaceRecord(held, current);
+        this.base.set(conflict.id, { revision: conflict.current.revision, data: conflict.current.data });
+        this.emit('run', held ?? current);
+      } else {
+        this.held.delete(conflict.id);
+        this.base.delete(conflict.id);
+        this.emit('deleted', conflict.id);
+      }
+      console.error(`[cez] run ${conflict.id} was changed by another writer (${conflict.reason}); this process will not write it again until cezar restarts. Evidence: ${join(this.dataDir, RUNS_DB_FILE)}, table run_conflicts, seq ${seqs[index]}.`);
+    });
+    this.scheduleSave();
+  }
+
   /** Write what is pending, then (unless closing) let every run whose write settled leave memory. */
   private saveNow(evict = true): void {
     if (!this.db) return;
-    if (this.dirty.size > 0 || this.deleted.size > 0) {
+    // A second attempt only after a conflict excluded its rows: the unrelated rest goes out at once.
+    for (let attempt = 0; attempt < 2 && (this.dirty.size > 0 || this.deleted.size > 0); attempt++) {
+      const quarantined = this.quarantined.size;
       try {
         this.persist(new Map());
       } catch (err) {
+        if (err instanceof RunConflictError && this.quarantined.size > quarantined) continue;
         // A pending save may outlive its directory; never recreate it or hide live-directory
         // failures. The rows stay pending (and held), so the next save or commit retries them.
         if (existsSync(this.dataDir)) {
           const message = err instanceof Error ? err.message : String(err);
           console.error(`[cez] failed to save ${RUNS_DB_FILE}: ${message}`);
         }
+        break;
       }
     }
     if (evict) this.evictSettled();
@@ -3144,6 +3571,14 @@ export class RunStore extends EventEmitter {
       this.saveTimer = null;
     }
     this.saveNow(false);
+    if (this.db && this.owner) {
+      // Every claim goes with the store. Should the release fail, the claims stay until this
+      // process exits; from then on they are provably dead and the next opener takes them.
+      try { this.db.releaseClaims(this.owner.session); } catch { /* see above */ }
+    }
+    this.claimed.clear();
+    this.pendingClaims.clear();
+    if (this.owner) closeClaimSession(this.owner.session);
     this.db?.close();
     this.db = null;
   }

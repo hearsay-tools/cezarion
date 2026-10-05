@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { toRunSummary } from '@open-mercato/cezar-contract';
 
-import { RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY, RunDatabase, type RunDatabaseChanges } from './run-database.ts';
+import { RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY, RunDatabase, type RunDatabaseChanges, type RunDatabaseCommit } from './run-database.ts';
 import { blockRunWrites, readPersistedRuns, runIds, seedRuns } from './run-store.testkit.ts';
 import { LEGACY_INDEX_BACKUP_FILE, RunStore, type RunRecord } from './store.ts';
 
@@ -25,12 +25,12 @@ const open = (opts?: { keepLive?: boolean }) => {
 };
 /** The change sets `store` hands the database, in order. */
 const writes = (store: RunStore) => {
-  const target = store as unknown as { writeIndex(changes: RunDatabaseChanges): void };
+  const target = store as unknown as { writeIndex(changes: RunDatabaseChanges): RunDatabaseCommit };
   const original = target.writeIndex.bind(store);
   const seen: Array<{ upserts: string[]; deletes: string[] }> = [];
   vi.spyOn(target, 'writeIndex').mockImplementation((changes) => {
     seen.push({ upserts: changes.upserts.map((row) => row.id), deletes: [...changes.deletes] });
-    original(changes);
+    return original(changes);
   });
   return seen;
 };
@@ -241,20 +241,25 @@ describe('durable commits', () => {
     // Before #779 every save rewrote the whole index from memory, so the second store's save put
     // back its stale copy of the first store's run. Each store now writes only what it changed.
     // keepLive, as `serve` opens a project: these runs are still queued.
+    // Each store writes the runs it owns (#779, plan step 3): the other's are read-only to it.
     const first = open({ keepLive: true });
     const a = first.createRun({ title: 'a', workflow: 'w', task: 't', steps: [] });
     const b = first.createRun({ title: 'b', workflow: 'w', task: 't', steps: [] });
     first.flush();
     const second = open({ keepLive: true });
+    const c = second.createRun({ title: 'c', workflow: 'w', task: 't', steps: [] });
+    second.flush();
 
     first.updateRun(a.id, { title: 'a from first' });
     first.flush();
-    second.updateRun(b.id, { title: 'b from second' });
+    second.updateRun(c.id, { title: 'c from second' });
+    expect(second.updateRun(b.id, { title: 'b from second' })).toBeUndefined();
     second.flush();
 
     const reopened = RunStore.open(dataDir, { keepLive: true });
     expect(reopened.getRun(a.id)?.title).toBe('a from first');
-    expect(reopened.getRun(b.id)?.title).toBe('b from second');
+    expect(reopened.getRun(b.id)?.title).toBe('b');
+    expect(reopened.getRun(c.id)?.title).toBe('c from second');
   });
 
   it('a failed commit does not let a later save clobber what another store wrote meanwhile', () => {

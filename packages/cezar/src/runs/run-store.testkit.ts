@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
 import { RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY, RunDatabase, type RunRowInput } from './run-database.ts';
+import { closeClaimSession } from './run-claims.ts';
 import { encodeRunRow } from './run-row.ts';
 import type { RunRecord, RunStore } from './store.ts';
 
@@ -104,4 +105,22 @@ export function blockRunWrites(dataDir: string): () => void {
     if (db.isTransaction) db.exec('ROLLBACK');
     db.close();
   };
+}
+
+/**
+ * End `store` the way a crash ends its process (#779, plan step 3): nothing still pending is
+ * written, the connection goes, and the claims it held stay in `runs.db` under a session no live
+ * process has open, so the next store on the project takes them over as a restart would.
+ * `close()` is the clean shutdown instead: it writes what is pending and releases the claims.
+ * Like a closed store, a crashed one still answers reads for what it held and saves nothing.
+ */
+export function crashStore(store: RunStore): void {
+  const internals = store as unknown as {
+    saveTimer: NodeJS.Timeout | null; db: { close(): void } | null; owner: { session: string } | undefined;
+  };
+  if (internals.saveTimer) clearTimeout(internals.saveTimer);
+  internals.saveTimer = null;
+  internals.db?.close();
+  internals.db = null;
+  if (internals.owner) closeClaimSession(internals.owner.session);
 }

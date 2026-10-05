@@ -9,6 +9,7 @@ import {
   RUNS_DB_FILE,
   RUNS_IMPORT_COMPLETE_KEY,
   RunDatabase,
+  RunConflictError,
   RunDatabaseBusyError,
   RunDatabaseCorruptError,
   RunDatabaseDiskFullError,
@@ -138,9 +139,21 @@ describe('RunDatabase', () => {
 
     expect({ a: db.get('a'), b: db.get('b'), revisions: db.listRevisions(), meta: db.getMeta('importedAt') }).toEqual(before);
     expect(db.get('c')).toBeUndefined();
-    // The connection is usable again: the failed transaction was rolled back, not left open.
+    // The connection is usable again: the failed transaction was rolled back, not left open —
+    // its revision too, so the next commit takes the one after the last that committed.
     db.transaction({ upserts: [row('c')], deletes: [] });
-    expect(db.get('c')?.revision).toBe(1);
+    expect(db.get('c')?.revision).toBe(2);
+  });
+
+  it('never reuses a revision, not even for a row deleted and created again under its id (#779)', () => {
+    const db = openDb();
+    db.transaction({ upserts: [row('a')], deletes: [] });
+    const first = db.get('a')!.revision;
+    db.transaction({ upserts: [], deletes: ['a'] });
+    db.transaction({ upserts: [row('a', { status: 'running' })], deletes: [] });
+    // Per-row counters restarted at 1 here, so (id, revision) named two different rows over time.
+    expect(db.get('a')!.revision).toBeGreaterThan(first);
+    expect(db.transaction({ upserts: [row('b')], deletes: [] }).revisions.get('b')).toBeGreaterThan(db.get('a')!.revision);
   });
 
   it('refuses a change set that both upserts and deletes one id, or upserts it twice', () => {
@@ -228,6 +241,102 @@ describe('RunDatabase', () => {
     RunDatabase.open(path).close();
     const db = openDb();
     expect(db.listRevisions()).toEqual([]);
+  });
+
+  describe('claims and fenced writes (#779, plan step 3)', () => {
+    const owner = (session: string) => ({ session, pid: 4242, startToken: 'boot:1' });
+
+    it('takes absent claims and dead owners\' claims only while they are as the taker read them', () => {
+      const db = openDb();
+      const first = db.takeClaims(owner('s1'), [{ family: 'f1', expect: null }, { family: 'f2', expect: null }]);
+      expect([...first.keys()]).toEqual(['f1', 'f2']);
+      expect(first.get('f2')).toBeGreaterThan(first.get('f1')!);
+      // A second taker that also read "absent" loses: the claim is no longer what it judged.
+      expect(db.takeClaims(owner('s2'), [{ family: 'f1', expect: null }]).size).toBe(0);
+      // Taking over from the owner read (judged dead elsewhere) works once, with a new generation.
+      const held = db.getClaim('f1')!;
+      const taken = db.takeClaims(owner('s2'), [{ family: 'f1', expect: { session: held.session, generation: held.generation } }]);
+      expect(taken.get('f1')).toBeGreaterThan(first.get('f2')!);
+      expect(db.getClaim('f1')).toEqual({ family: 'f1', session: 's2', pid: 4242, startToken: 'boot:1', generation: taken.get('f1') });
+      expect(db.takeClaims(owner('s3'), [{ family: 'f1', expect: { session: held.session, generation: held.generation } }]).size).toBe(0);
+    });
+
+    it('releases one session\'s claims, by family or all at once, and never another\'s', () => {
+      const db = openDb();
+      db.takeClaims(owner('s1'), [{ family: 'a', expect: null }, { family: 'b', expect: null }]);
+      db.takeClaims(owner('s2'), [{ family: 'c', expect: null }]);
+      db.releaseClaims('s1', ['a', 'c']);
+      expect(db.listClaims().map((c) => c.family).sort()).toEqual(['b', 'c']);
+      db.releaseClaims('s1');
+      expect(db.listClaims().map((c) => c.family)).toEqual(['c']);
+    });
+
+    it('names a family and whether anything in it is live, and the rows other sessions claim', () => {
+      const db = openDb();
+      db.transaction({ upserts: [row('root', { live: false }), row('w1', { parentRunId: 'root', live: true }), row('solo')], deletes: [] });
+      expect(db.familyOf('w1')).toBe('root');
+      expect(db.familyOf('root')).toBe('root');
+      expect(db.familyOf('missing')).toBeUndefined();
+      expect(db.familyHasLive('root')).toBe(true);
+      expect(db.familyHasLive('solo')).toBe(false);
+      db.takeClaims(owner('mine'), [{ family: 'solo', expect: null }]);
+      db.takeClaims(owner('theirs'), [{ family: 'root', expect: null }]);
+      expect(db.listForeignClaimedIds('mine').sort()).toEqual(['root', 'w1']);
+    });
+
+    it('commits a fenced write only while its claims and rows are as the writer last saw them', () => {
+      const db = openDb();
+      const generation = db.takeClaims(owner('s1'), [{ family: 'a', expect: null }]).get('a')!;
+      db.transaction({ upserts: [row('a')], deletes: [] });
+      const seen = db.get('a')!.revision;
+      const fence = (revision: number | null, gen = generation) => ({
+        owner: owner('s1'), claims: new Map([['a', { generation: gen }]]), rows: new Map([['a', { revision, family: 'a' }]]),
+      });
+      // As seen: commits.
+      db.transaction({ upserts: [row('a', { status: 'running' })], deletes: [], fence: fence(seen) });
+      const now = db.get('a')!;
+      // A stale revision, a stale generation, or "expected absent" over a real row: nothing is written.
+      for (const [stale, reason] of [[fence(seen), 'changed'], [fence(now.revision, generation + 99), 'claim-lost'], [fence(null), 'created']] as const) {
+        let caught: unknown;
+        try { db.transaction({ upserts: [row('a', { status: 'failed' })], deletes: [], meta: { touched: 'yes' }, fence: stale }); } catch (error) { caught = error; }
+        expect(caught).toBeInstanceOf(RunConflictError);
+        expect((caught as RunConflictError).kind).toBe('conflict');
+        expect((caught as RunConflictError).conflicts).toEqual([{ id: 'a', reason, current: now }]);
+      }
+      expect(db.get('a')).toEqual(now);
+      expect(db.getMeta('touched')).toBeUndefined();
+      // Deleted under the writer.
+      db.transaction({ upserts: [], deletes: ['a'] });
+      expect(() => db.transaction({ upserts: [], deletes: ['a'], fence: fence(now.revision) })).toThrow(expect.objectContaining({
+        conflicts: [{ id: 'a', reason: 'deleted', current: undefined }],
+      }));
+    });
+
+    it('takes a claim inside the write that needs it, only while it is as the writer judged it', () => {
+      const db = openDb();
+      const take = (expect: { session: string; generation: number } | null) => ({
+        owner: owner('s1'), claims: new Map([['a', { take: expect }]]), rows: new Map([['a', { revision: null, family: 'a' }]]),
+      });
+      const commit = db.transaction({ upserts: [row('a')], deletes: [], fence: take(null) });
+      expect(commit.claims.get('a')).toBe(db.getClaim('a')!.generation);
+      expect(db.getClaim('a')).toMatchObject({ session: 's1' });
+      // Someone took it after the writer judged it absent: nothing is written, no claim changes.
+      db.releaseClaims('s1');
+      db.takeClaims(owner('s2'), [{ family: 'a', expect: null }]);
+      const before = db.getClaim('a');
+      expect(() => db.transaction({ upserts: [row('a', { status: 'failed' })], deletes: [], fence: { ...take(null), rows: new Map([['a', { revision: db.get('a')!.revision, family: 'a' }]]) } }))
+        .toThrow(expect.objectContaining({ conflicts: [expect.objectContaining({ id: 'a', reason: 'claim-lost' })] }));
+      expect(db.getClaim('a')).toEqual(before);
+      expect(db.get('a')?.status).toBe('done');
+    });
+
+    it('stores conflict evidence and lists it back', () => {
+      const db = openDb();
+      const [seq] = db.recordConflicts('s1', [{ runId: 'a', reason: 'changed', baseRevision: 1, baseData: '{"v":1}', localData: '{"v":2}',
+        localDeleted: false, currentRevision: 3, currentData: '{"v":3}' }]);
+      expect(db.listConflicts()).toEqual([expect.objectContaining({ seq, runId: 'a', session: 's1', reason: 'changed', baseRevision: 1,
+        baseData: '{"v":1}', localData: '{"v":2}', localDeleted: false, currentRevision: 3, currentData: '{"v":3}' })]);
+    });
   });
 
   describe('named queries', () => {

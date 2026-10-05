@@ -73,7 +73,9 @@ const MIGRATIONS: readonly string[] = [
     branch TEXT,
     -- Where that branch forked, which branch cleanup reads with it.
     base_branch TEXT,
-    -- Bumped by every upsert; lets a reader tell which rows changed since it last looked.
+    -- The commit that last wrote the row: one database-wide sequence (meta 'commit-seq'), so a
+    -- revision is never reused, not even by a row deleted and created again under the same id.
+    -- A writer compares it with the revision it last read to tell whether the row changed under it.
     revision INTEGER NOT NULL,
     -- The complete record JSON, opaque here.
     data TEXT NOT NULL,
@@ -91,10 +93,46 @@ const MIGRATIONS: readonly string[] = [
   CREATE INDEX runs_group_id ON runs (group_id) WHERE group_id IS NOT NULL;
   CREATE INDEX runs_worktree_path ON runs (worktree_path) WHERE worktree_path IS NOT NULL;
   CREATE INDEX runs_branch ON runs (branch) WHERE branch IS NOT NULL;
-  -- Private key/value metadata: import completion, ownership claims, conflict evidence.
+  -- Private key/value metadata: import completion and the two sequences below.
   CREATE TABLE meta (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
+  ) STRICT;
+  -- Cross-process ownership (#779, plan step 3): which RunStore may write a delegation family —
+  -- a root and its direct workers, or an ordinary run on its own. Only the holder writes the
+  -- family's rows, its NDJSON and its cleanup; everyone else reads them.
+  CREATE TABLE run_claims (
+    -- The family's root id: parent_run_id for a worker, the run's own id otherwise.
+    family TEXT PRIMARY KEY,
+    -- The RunStore holding it: a random id per open, so two stores in one process differ.
+    session TEXT NOT NULL,
+    -- That store's process and the process's start identity, so a reused pid is never taken for
+    -- the owner. start_token is NULL only where the platform cannot read one.
+    pid INTEGER NOT NULL,
+    start_token TEXT,
+    -- From meta 'claim-generation', bumped by every acquisition. Every write checks that its
+    -- family still carries this store's session and generation.
+    generation INTEGER NOT NULL
+  ) STRICT;
+  CREATE INDEX run_claims_session ON run_claims (session);
+  -- Private recovery evidence: a write that found its row changed, created or deleted under it,
+  -- or its family's claim gone. Never served; kept for a person to inspect.
+  CREATE TABLE run_conflicts (
+    seq INTEGER PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    detected_at TEXT NOT NULL,
+    session TEXT NOT NULL,
+    -- changed | created | deleted | claim-lost
+    reason TEXT NOT NULL,
+    -- The row as the writer last read or wrote it (the original); NULL for a row it created.
+    base_revision INTEGER,
+    base_data TEXT,
+    -- What the writer meant to store; NULL with local_deleted = 1 when it meant to delete it.
+    local_data TEXT,
+    local_deleted INTEGER NOT NULL,
+    -- The row as it stands; NULL when another writer deleted it.
+    current_revision INTEGER,
+    current_data TEXT
   ) STRICT;
   `,
 ];
@@ -165,14 +203,62 @@ export interface RunDatabaseChanges {
   deletes: readonly string[];
   /** Private metadata in the same commit; `null` deletes the key. */
   meta?: Readonly<Record<string, string | null>>;
+  /** What must still hold for this writer to commit (#779, plan step 3), checked inside the
+   *  transaction before anything is written. A violation throws `RunConflictError`. */
+  fence?: RunWriteFence;
+}
+
+/** A family a fenced write touches: held at `generation`, or to `take` in that same transaction if
+ *  its claim is still exactly as the writer judged it (absent, or a dead owner's) — the claim a
+ *  busy database kept the writer from taking before. */
+export type RunFenceClaim = { generation: number } | { take: { session: string; generation: number } | null };
+
+export interface RunWriteFence {
+  owner: { session: string; pid: number; startToken: string | null };
+  /** Each family this change set writes. */
+  claims: ReadonlyMap<string, RunFenceClaim>;
+  /** Each row it writes or deletes: the revision the writer last saw (`null`: it expects no row),
+   *  and the family the row belongs to. */
+  rows: ReadonlyMap<string, { revision: number | null; family: string }>;
 }
 
 export interface RunDatabaseCommit {
   /** The revision each upserted row now has. */
   revisions: Map<string, number>;
+  /** The generation of each claim the fence took. */
+  claims: Map<string, number>;
 }
 
-export type RunDatabaseErrorKind = 'busy' | 'permission' | 'disk-full' | 'corrupt' | 'unsupported-schema' | 'other';
+/** One family's owner in `run_claims`. */
+export interface RunClaim {
+  family: string;
+  session: string;
+  pid: number;
+  startToken: string | null;
+  generation: number;
+}
+
+/** A row a fenced write found other than its writer last saw it. */
+export interface RunRowConflict {
+  id: string;
+  reason: 'changed' | 'created' | 'deleted' | 'claim-lost';
+  /** The row as it stands, or undefined when another writer deleted it. */
+  current: RunRow | undefined;
+}
+
+/** One `run_conflicts` row: the original, local and current versions of a conflicted run. */
+export interface RunConflictEvidence {
+  runId: string;
+  reason: RunRowConflict['reason'];
+  baseRevision: number | null;
+  baseData: string | null;
+  localData: string | null;
+  localDeleted: boolean;
+  currentRevision: number | null;
+  currentData: string | null;
+}
+
+export type RunDatabaseErrorKind = 'busy' | 'permission' | 'disk-full' | 'corrupt' | 'unsupported-schema' | 'conflict' | 'other';
 
 /** Every failure this module reports. `kind` is the discriminant; the subclasses exist so a
  *  caller can also `instanceof` the one case it handles. */
@@ -207,6 +293,17 @@ export class RunDatabaseUnsupportedSchemaError extends RunDatabaseError {
     super('unsupported-schema', `runs database schema ${found} is newer than this cezar supports (${supported})`);
     this.found = found;
     this.supported = supported;
+  }
+}
+
+/** A fenced write found rows changed, created or deleted under it, or its claim gone. Nothing was
+ *  written. `conflicts` names every such row of the change set, each with its current row. */
+export class RunConflictError extends RunDatabaseError {
+  readonly conflicts: readonly RunRowConflict[];
+
+  constructor(conflicts: readonly RunRowConflict[]) {
+    super('conflict', `runs database: ${conflicts.map((c) => `${c.id} (${c.reason})`).join(', ')} changed under this writer`);
+    this.conflicts = conflicts;
   }
 }
 
@@ -334,6 +431,22 @@ function validateChanges(changes: RunDatabaseChanges): void {
   }
 }
 
+/** `meta` key of the database-wide commit sequence every upsert stamps as its row's revision. */
+const COMMIT_SEQ_KEY = 'commit-seq';
+/** `meta` key of the sequence every claim acquisition takes its generation from. */
+const CLAIM_GENERATION_KEY = 'claim-generation';
+const CLAIM_COLUMNS = 'family, session, pid, start_token, generation';
+
+function toRunClaim(row: SqlRow): RunClaim {
+  return {
+    family: row.family as string,
+    session: row.session as string,
+    pid: row.pid as number,
+    startToken: row.start_token as string | null,
+    generation: row.generation as number,
+  };
+}
+
 export class RunDatabase {
   private readonly db: DatabaseSync;
   private readonly path: string;
@@ -358,6 +471,18 @@ export class RunDatabase {
     delete: StatementSync;
     setMeta: StatementSync;
     deleteMeta: StatementSync;
+    nextSequence: StatementSync;
+    familyOf: StatementSync;
+    familyHasLive: StatementSync;
+    getClaim: StatementSync;
+    getClaims: StatementSync;
+    listClaims: StatementSync;
+    putClaim: StatementSync;
+    releaseClaims: StatementSync;
+    releaseSessionClaims: StatementSync;
+    listForeignClaimedIds: StatementSync;
+    insertConflict: StatementSync;
+    listConflicts: StatementSync;
   };
 
   private constructor(db: DatabaseSync, path: string) {
@@ -384,17 +509,36 @@ export class RunDatabase {
         INSERT INTO runs (id, created_at, finished_at, status, archived, live, parent_run_id, client_request_id, group_id,
           worktree_path, branch, base_branch, revision, data, summary)
         VALUES (:id, :createdAt, :finishedAt, :status, :archived, :live, :parentRunId, :clientRequestId, :groupId,
-          :worktreePath, :branch, :baseBranch, 1, :data, :summary)
+          :worktreePath, :branch, :baseBranch, :revision, :data, :summary)
         ON CONFLICT (id) DO UPDATE SET
           created_at = excluded.created_at, finished_at = excluded.finished_at, status = excluded.status,
           archived = excluded.archived, live = excluded.live, parent_run_id = excluded.parent_run_id,
           client_request_id = excluded.client_request_id, group_id = excluded.group_id,
           worktree_path = excluded.worktree_path, branch = excluded.branch, base_branch = excluded.base_branch,
-          revision = runs.revision + 1, data = excluded.data, summary = excluded.summary
-        RETURNING revision`),
+          revision = excluded.revision, data = excluded.data, summary = excluded.summary`),
       delete: db.prepare('DELETE FROM runs WHERE id = ?'),
       setMeta: db.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value'),
       deleteMeta: db.prepare('DELETE FROM meta WHERE key = ?'),
+      nextSequence: db.prepare(`INSERT INTO meta (key, value) VALUES (?, '1')
+        ON CONFLICT (key) DO UPDATE SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT) RETURNING value`),
+      familyOf: db.prepare('SELECT coalesce(parent_run_id, id) AS family FROM runs WHERE id = ?'),
+      familyHasLive: db.prepare('SELECT 1 FROM runs WHERE live = 1 AND (id = :family OR parent_run_id = :family) LIMIT 1'),
+      getClaim: db.prepare(`SELECT ${CLAIM_COLUMNS} FROM run_claims WHERE family = ?`),
+      getClaims: db.prepare(`SELECT ${CLAIM_COLUMNS} FROM run_claims WHERE family IN (SELECT value FROM json_each(?))`),
+      listClaims: db.prepare(`SELECT ${CLAIM_COLUMNS} FROM run_claims`),
+      putClaim: db.prepare(`INSERT INTO run_claims (family, session, pid, start_token, generation)
+        VALUES (:family, :session, :pid, :startToken, :generation)
+        ON CONFLICT (family) DO UPDATE SET session = excluded.session, pid = excluded.pid,
+          start_token = excluded.start_token, generation = excluded.generation`),
+      releaseClaims: db.prepare('DELETE FROM run_claims WHERE session = ? AND family IN (SELECT value FROM json_each(?))'),
+      releaseSessionClaims: db.prepare('DELETE FROM run_claims WHERE session = ?'),
+      listForeignClaimedIds: db.prepare(`SELECT runs.id AS id FROM run_claims JOIN runs
+        ON runs.id = run_claims.family OR runs.parent_run_id = run_claims.family WHERE run_claims.session <> ?`),
+      insertConflict: db.prepare(`INSERT INTO run_conflicts (run_id, detected_at, session, reason, base_revision, base_data,
+          local_data, local_deleted, current_revision, current_data)
+        VALUES (:runId, :detectedAt, :session, :reason, :baseRevision, :baseData, :localData, :localDeleted,
+          :currentRevision, :currentData) RETURNING seq`),
+      listConflicts: db.prepare('SELECT * FROM run_conflicts ORDER BY seq'),
     };
   }
 
@@ -579,19 +723,24 @@ export class RunDatabase {
   }
 
   /**
-   * The only write. Deletes, upserts and metadata commit together or not at all: on any failure
-   * the transaction is rolled back and the error is rethrown typed, with the database exactly as
-   * it was. Each upsert bumps the row's revision (a new row starts at 1).
+   * The only write of run rows. Deletes, upserts and metadata commit together or not at all: on
+   * any failure the transaction is rolled back and the error is rethrown typed, with the database
+   * exactly as it was. Every upserted row gets this commit's revision from the database-wide
+   * sequence. With a `fence`, nothing is written unless every claim and row is still as the writer
+   * last saw it (`RunConflictError` otherwise).
    */
   transaction(changes: RunDatabaseChanges): RunDatabaseCommit {
     validateChanges(changes);
     const revisions = new Map<string, number>();
+    let claims = new Map<string, number>();
     this.run(() => {
       this.db.exec('BEGIN IMMEDIATE');
       try {
+        if (changes.fence) claims = this.checkFence(changes.fence);
         for (const id of changes.deletes) this.statements.delete.run(id);
+        const revision = changes.upserts.length > 0 ? this.nextSequence(COMMIT_SEQ_KEY) : 0;
         for (const row of changes.upserts) {
-          const written = this.statements.upsert.get({
+          this.statements.upsert.run({
             id: row.id,
             createdAt: row.createdAt,
             finishedAt: row.finishedAt ?? null,
@@ -604,10 +753,11 @@ export class RunDatabase {
             worktreePath: row.worktreePath ?? null,
             branch: row.branch ?? null,
             baseBranch: row.baseBranch ?? null,
+            revision,
             data: row.data,
             summary: row.summary,
           });
-          revisions.set(row.id, written!.revision as number);
+          revisions.set(row.id, revision);
         }
         for (const [key, value] of Object.entries(changes.meta ?? {})) {
           if (value === null) this.statements.deleteMeta.run(key);
@@ -619,7 +769,152 @@ export class RunDatabase {
         throw error;
       }
     });
-    return { revisions };
+    return { revisions, claims };
+  }
+
+  /** Inside a write transaction: take the claims the fence asks for, then throw `RunConflictError`
+   *  naming every row of the fence that is not as its writer last saw it, before anything is
+   *  written (the claims taken roll back with it). Returns the claims taken. */
+  private checkFence(fence: RunWriteFence): Map<string, number> {
+    const lost = new Set<string>();
+    const taken = new Map<string, number>();
+    for (const [family, expected] of fence.claims) {
+      const claim = this.statements.getClaim.get(family);
+      if ('generation' in expected) {
+        if (!claim || claim.session !== fence.owner.session || claim.generation !== expected.generation) lost.add(family);
+        continue;
+      }
+      const unchanged = expected.take === null ? !claim
+        : claim?.session === expected.take.session && claim.generation === expected.take.generation;
+      if (!unchanged) { lost.add(family); continue; }
+      const generation = this.nextSequence(CLAIM_GENERATION_KEY);
+      this.statements.putClaim.run({ family, ...fence.owner, generation });
+      taken.set(family, generation);
+    }
+    const conflicts: RunRowConflict[] = [];
+    for (const [id, expected] of fence.rows) {
+      const found = this.statements.get.get(id);
+      const current = found ? toRunRow(found) : undefined;
+      const reason = lost.has(expected.family) ? 'claim-lost'
+        : expected.revision === null ? (current ? 'created' : undefined)
+          : !current ? 'deleted' : current.revision !== expected.revision ? 'changed' : undefined;
+      if (reason) conflicts.push({ id, reason, current });
+    }
+    if (conflicts.length > 0) throw new RunConflictError(conflicts);
+    return taken;
+  }
+
+  /** Inside a write transaction: the next value of a database-wide sequence kept in `meta`. */
+  private nextSequence(key: string): number {
+    return Number(this.statements.nextSequence.get(key)!.value);
+  }
+
+  /** The family a stored run belongs to (`parent_run_id`, else its own id), or undefined. */
+  familyOf(id: string): string | undefined {
+    const row = this.run(() => this.statements.familyOf.get(id));
+    return row ? (row.family as string) : undefined;
+  }
+
+  /** Whether any row of `family` (its root or a direct worker) is live. */
+  familyHasLive(family: string): boolean {
+    return this.run(() => this.statements.familyHasLive.get({ family })) !== undefined;
+  }
+
+  getClaim(family: string): RunClaim | undefined {
+    const row = this.run(() => this.statements.getClaim.get(family));
+    return row ? toRunClaim(row) : undefined;
+  }
+
+  /** The claims on `families` that exist, by family. */
+  getClaims(families: readonly string[]): Map<string, RunClaim> {
+    if (families.length === 0) return new Map();
+    return new Map(this.run(() => this.statements.getClaims.all(JSON.stringify(families))).map((row) => [row.family as string, toRunClaim(row)]));
+  }
+
+  listClaims(): RunClaim[] {
+    return this.run(() => this.statements.listClaims.all()).map(toRunClaim);
+  }
+
+  /**
+   * Take the claims in `take` for `owner`, in one transaction. Each is taken only when its claim
+   * is still exactly what the caller judged it to be: absent (`expect: null`) or held by the dead
+   * owner it read (same session and generation) — so two takers racing for one family cannot both
+   * win. Returns the generation of each claim taken.
+   */
+  takeClaims(
+    owner: { session: string; pid: number; startToken: string | null },
+    take: ReadonlyArray<{ family: string; expect: { session: string; generation: number } | null }>,
+  ): Map<string, number> {
+    const taken = new Map<string, number>();
+    if (take.length === 0) return taken;
+    this.run(() => {
+      this.db.exec('BEGIN IMMEDIATE');
+      try {
+        for (const { family, expect } of take) {
+          const current = this.statements.getClaim.get(family);
+          const unchanged = expect === null ? !current
+            : current?.session === expect.session && current.generation === expect.generation;
+          if (!unchanged) continue;
+          const generation = this.nextSequence(CLAIM_GENERATION_KEY);
+          this.statements.putClaim.run({ family, ...owner, generation });
+          taken.set(family, generation);
+        }
+        this.db.exec('COMMIT');
+      } catch (error) {
+        rollback(this.db);
+        throw error;
+      }
+    });
+    return taken;
+  }
+
+  /** Drop `session`'s claims on `families`, or on everything it holds when omitted. */
+  releaseClaims(session: string, families?: readonly string[]): void {
+    this.run(() => {
+      if (families === undefined) this.statements.releaseSessionClaims.run(session);
+      else if (families.length > 0) this.statements.releaseClaims.run(session, JSON.stringify(families));
+    });
+  }
+
+  /** The ids of every row whose family a session other than `session` claims, live or not. */
+  listForeignClaimedIds(session: string): string[] {
+    return this.run(() => this.statements.listForeignClaimedIds.all(session)).map((row) => row.id as string);
+  }
+
+  /** Store conflict evidence in one transaction; returns each entry's `seq`. */
+  recordConflicts(session: string, entries: readonly RunConflictEvidence[]): number[] {
+    const detectedAt = new Date().toISOString();
+    const seqs: number[] = [];
+    this.run(() => {
+      this.db.exec('BEGIN IMMEDIATE');
+      try {
+        for (const entry of entries) {
+          seqs.push(this.statements.insertConflict.get({ ...entry, session, detectedAt, localDeleted: entry.localDeleted ? 1 : 0 })!.seq as number);
+        }
+        this.db.exec('COMMIT');
+      } catch (error) {
+        rollback(this.db);
+        throw error;
+      }
+    });
+    return seqs;
+  }
+
+  /** Every stored conflict, oldest first (diagnostics and tests). */
+  listConflicts(): Array<RunConflictEvidence & { seq: number; session: string; detectedAt: string }> {
+    return this.run(() => this.statements.listConflicts.all()).map((row) => ({
+      seq: row.seq as number,
+      runId: row.run_id as string,
+      detectedAt: row.detected_at as string,
+      session: row.session as string,
+      reason: row.reason as RunRowConflict['reason'],
+      baseRevision: row.base_revision as number | null,
+      baseData: row.base_data as string | null,
+      localData: row.local_data as string | null,
+      localDeleted: row.local_deleted === 1,
+      currentRevision: row.current_revision as number | null,
+      currentData: row.current_data as string | null,
+    }));
   }
 
   /** The connection's effective settings, for diagnostics. */
