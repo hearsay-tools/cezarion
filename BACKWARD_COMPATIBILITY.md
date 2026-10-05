@@ -229,7 +229,7 @@ Every step needs every cezar process of the project stopped: `serve`, a headless
 | `legacy-writer` | A live older cezar serves the project, or `runs.json` changed during the import | Stop every older cezar process of the project, then restart. Nothing was imported, so the next start imports from the beginning. |
 | `other` | Anything else, with SQLite's detail | Restart cezar to try again. |
 
-A boot project that failed to open skips worktree pruning, scratch cleanup and run recovery for that start, so nothing is mistaken for an orphan; restart cezar after the fix. A headless `cez run` that cannot open exits 1.
+A boot project that failed to open skips worktree pruning, scratch cleanup and run recovery for that start, so nothing is mistaken for an orphan; restart cezar after the fix. With `CEZ_AUTOMATIONS=1`, a project whose run store cannot open launches no automation: a due occurrence waits without counting towards the three-failure auto-pause, and fires once the store opens, within the usual one-day catch-up window. A headless `cez run` that cannot open exits 1.
 
 Breaking: any change that makes an existing file unparseable, silently discarded, or rewritten into a new shape without reading the old one. Required path: read old + new shapes for at least one minor release (a lazy upgrade-on-read is fine since writes go through the schema), or ship an explicit migration; never require the user to delete `.ai/cezar/`.
 

@@ -1,6 +1,6 @@
 import type { AutomationCoordinator } from './coordinator.ts';
 import type { GithubCandidate, GithubPoller, GithubPollResult } from './github-poller.ts';
-import { ScheduleRunner, type ScheduleLauncher } from './schedule-runner.ts';
+import { AutomationProjectUnavailableError, ScheduleRunner, type ScheduleLauncher } from './schedule-runner.ts';
 import type { AutomationLease, AutomationStore } from './store.ts';
 import { isGithubAutomation, isScheduleAutomation, type GithubAutomationDefinition } from './types.ts';
 
@@ -28,6 +28,8 @@ export interface ProjectAutomationHandle {
   now?: () => number;
   /** See `ScheduleRunnerHandle.reconcile`. */
   reconcileReceipts?: () => Promise<void>;
+  /** See `ScheduleRunnerHandle.ready`; a poll asks it before it launches what it found. */
+  ready?: () => Promise<void>;
 }
 
 /** One request chain process-wide. The promise tail also prevents a failed request from
@@ -83,6 +85,7 @@ export class ProjectAutomationScheduler {
         return Date.parse(candidate.timestamp) >= overlap;
       });
       if (mode === 'execute' && this.handle.launch) {
+        if (eligible.length > 0) await this.handle.ready?.();
         for (const candidate of eligible) await this.launch(definition, candidate);
       }
       if (mode === 'execute') {
@@ -114,6 +117,8 @@ export class ProjectAutomationScheduler {
       return { ...result, candidates: eligible };
     } catch (error) {
       if (error instanceof LeaseHeldError) await this.recordSkip(definition, error);
+      // Not a failure: nothing was launched or moved, and the timer retries at its floor.
+      else if (error instanceof AutomationProjectUnavailableError) { /* see above */ }
       else if (mode === 'execute') await this.recordFailure(definition, error);
       else await store.appendLog({ automationId: definition.id, revision: definition.revision, result: 'error', reason: error instanceof Error ? error.message : String(error) });
       throw error;
@@ -263,6 +268,7 @@ export class WorkspaceAutomationScheduler {
         ...(handle.onChange ? { onChange: handle.onChange } : {}),
         ...(handle.now ? { now: handle.now } : {}),
         ...(handle.reconcileReceipts ? { reconcile: handle.reconcileReceipts } : {}),
+        ...(handle.ready ? { ready: handle.ready } : {}),
       });
       for (const definition of enabled.filter(isScheduleAutomation)) {
         const key = `${projectId}:${definition.id}`;

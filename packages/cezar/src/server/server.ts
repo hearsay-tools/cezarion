@@ -12,7 +12,7 @@ import { AutomationStore } from '../automations/store.ts';
 import { AutomationCoordinator } from '../automations/coordinator.ts';
 import { GithubPoller } from '../automations/github-poller.ts';
 import { ProjectAutomationScheduler, WorkspaceAutomationScheduler } from '../automations/scheduler.ts';
-import { SCHEDULE_LEASE_HELD_REASON, ScheduleRunner, type ScheduleRunnerHandle } from '../automations/schedule-runner.ts';
+import { AutomationProjectUnavailableError, SCHEDULE_LEASE_HELD_REASON, ScheduleRunner, type ScheduleRunnerHandle } from '../automations/schedule-runner.ts';
 import {
   launchAutomationRun,
   launchScheduledRun,
@@ -6405,6 +6405,17 @@ export function startServer(deps: ServerDeps, port: number): ServerType & { shut
         // Building a lazy project's context reconciles on its own; the explicit call covers the
         // boot project and a context built before another process left the reservation.
         reconcileReceipts: async () => { reconcileAutomationReceipts(store, (await launchContext()).store); },
+        // A run store that cannot open (#779) launches nothing. Firing anyway would count every
+        // refusal towards the auto-pause, and the pause would outlive the restart that fixed it.
+        ready: async () => {
+          try {
+            const { store: runs } = await launchContext();
+            if (runs.unavailable) throw runs.unavailable;
+          } catch (error) {
+            if (error instanceof RunStoreOpenError) throw new AutomationProjectUnavailableError(error.message, { cause: error });
+            throw error;
+          }
+        },
         launchSchedule: async (definition, occurrence, receiptId) => {
           const context = await launchContext();
           return launchScheduledRun({
