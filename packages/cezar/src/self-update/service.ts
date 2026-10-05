@@ -86,10 +86,12 @@ export class SelfUpdateService {
   }
 
   /** Reuse a cached snapshot immediately, refreshing stale data in the background. A cold
-   *  read waits for the bounded initial registry request so the dialog receives its result. */
+   *  read waits for the bounded initial registry request so the dialog receives its result.
+   *  Active jobs must report progress before restart even when the registry is unreachable. */
   async status(opts: { refresh?: boolean; registryOnly?: boolean } = {}): Promise<SelfUpdateStatus> {
     let doc: PackageDocument | null;
-    if (opts.refresh) doc = await this.registry.refresh();
+    if (this.job?.status === 'running' || this.job?.status === 'restarting') doc = this.registry.current();
+    else if (opts.refresh) doc = await this.registry.refresh();
     else {
       doc = this.registry.current();
       if (!doc) doc = await this.registry.get();
