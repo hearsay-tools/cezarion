@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** An agent registers its dev server with `cezar_preview_serve`; the owner runs it and clicks through it in a per-task headless Chromium docked next to the task (#781).
+**Goal:** An agent registers its dev server with `cezar_preview_serve`; the owner runs it and clicks through it in a per-task headless Chromium docked next to the task (hearsay-tools/cezarion#781).
 
 **Architecture:** A workspace-wide `PreviewHost` in the server process owns every cezar-started dev server and every task's Chromium, keyed by run id. Agents reach it through the existing private tool socket; the cockpit reaches it through one same-origin WebSocket per open pane, carrying JPEG screencast frames down and a whitelisted input vocabulary up. Everything is gated by `CEZ_PREVIEW=1`.
 
@@ -64,13 +64,13 @@
 - [ ] **Step 2: Run** `npm test -- packages/contract/src/preview.test.ts packages/cezar/src/server/capabilities.test.ts packages/cezar/src/runs/store.test.ts`; expect FAIL (module missing / property missing).
 - [ ] **Step 3: Implement** the schemas, `preview: env.CEZ_PREVIEW === '1'` in `resolveCapabilities`, the optional run-record field with per-entry salvage in the store, the `.env.example` block for both vars (format of the `CEZ_AUTOMATIONS` block), the README rows, and the spec edits listed under "Decisions made while planning".
 - [ ] **Step 4: Run** the same command plus `npm test -- contract-parity`; expect PASS.
-- [ ] **Step 5: Commit** `feat(contract): live preview schemas and CEZ_PREVIEW capability (#781)`
+- [ ] **Step 5: Commit** `feat(contract): live preview schemas and CEZ_PREVIEW capability (hearsay-tools/cezarion#781)`
 
 ### Task 2: Shared cezar tool list and the private preview route
 
 **Files:**
 - Create: `packages/cezar/src/ci-wait/tools.ts` (the one list of cezar tools)
-- Modify: `packages/cezar/src/ci-wait/mcp.ts`, `packages/cezar/src/ci-wait/controller.ts:58-110`, `packages/cezar/src/ci-wait/client.ts`, `packages/cezar/scripts/pi-ci-wait.mjs`, `packages/cezar/src/core/claude-cli-runner.ts:533-537`, `packages/cezar/src/core/pi-runner.ts` (tool admission), `BACKWARD_COMPATIBILITY.md` §"Private CI tool IPC (#474)"
+- Modify: `packages/cezar/src/ci-wait/mcp.ts`, `packages/cezar/src/ci-wait/controller.ts:58-110`, `packages/cezar/src/ci-wait/client.ts`, `packages/cezar/scripts/pi-ci-wait.mjs`, `packages/cezar/src/core/claude-cli-runner.ts:533-537`, `packages/cezar/src/core/pi-runner.ts` (tool admission), `BACKWARD_COMPATIBILITY.md` §"Private CI tool IPC (hearsay-tools/cezarion#474)"
 - Test: `packages/cezar/src/ci-wait/mcp.test.ts`, `packages/cezar/src/ci-wait/contract.test.ts`, `packages/cezar/src/core/harness-parity.test.ts:1353`
 
 **Interfaces:**
@@ -87,7 +87,7 @@
 - [ ] **Step 2: Run** `npm test -- packages/cezar/src/ci-wait packages/cezar/src/core/harness-parity.test.ts`; expect FAIL.
 - [ ] **Step 3: Implement**: move the tool list and instructions into `tools.ts`, make `mcp.ts`, Pi's extension and Claude's allow-list read `cezarToolNames`, add the route and `invokePreviewTool`. Keep the MCP server name prefix `cezar_ci_` (existing runs and mocks match it).
 - [ ] **Step 4: Prove the parity test is load-bearing**: `git stash push -u -m lp-task2 -- packages/cezar/src/ci-wait packages/cezar/src/core/claude-cli-runner.ts packages/cezar/src/core/pi-runner.ts packages/cezar/scripts/pi-ci-wait.mjs`, run the parity test, confirm red, `git stash apply` the captured SHA, drop it. Then run Step 2's command; expect PASS.
-- [ ] **Step 5: Commit** `feat(cezar): cezar_preview_serve tool on every runner (#781)`
+- [ ] **Step 5: Commit** `feat(cezar): cezar_preview_serve tool on every runner (hearsay-tools/cezarion#781)`
 
 ### Task 3: Registration semantics in RunManager
 
@@ -105,11 +105,11 @@
   - `RunManagerDeps.preview?: PreviewHost` and `cezarPort?: () => number | undefined`; absent `preview` means headless.
 - `provisionCiSession` passes the preview callback on every start, Continue and recovered launch (the single construction path for the capability; no second site).
 
-- [ ] **Step 1: Write failing tests**: one `registration.test.ts` case per code: `cwd: '../x'` → `cwd_outside_worktree`; `port` equal to `cezarPort` → `cezar_port`; owner from another run → `port_held` with hint containing `Do not stop the other task's server` and the title, not its path; 8 existing + new port → `too_many`; same port again → `replaced`; `enabled: false` → `preview_disabled` with hint starting `Do not retry`; `headless: true` → `headless`; no worktree → `worktree_missing`. `run-preview.test.ts`: a running run registers, `store.getRun(id).previewServers[0]` has `answeredAtRegistration: false` and the event log ends with `preview.server-registered`; after Continue the same callback still registers (the #811 class).
+- [ ] **Step 1: Write failing tests**: one `registration.test.ts` case per code: `cwd: '../x'` → `cwd_outside_worktree`; `port` equal to `cezarPort` → `cezar_port`; owner from another run → `port_held` with hint containing `Do not stop the other task's server` and the title, not its path; 8 existing + new port → `too_many`; same port again → `replaced`; `enabled: false` → `preview_disabled` with hint starting `Do not retry`; `headless: true` → `headless`; no worktree → `worktree_missing`. `run-preview.test.ts`: a running run registers, `store.getRun(id).previewServers[0]` has `answeredAtRegistration: false` and the event log ends with `preview.server-registered`; after Continue the same callback still registers (the open-mercato/cezar#811 class).
 - [ ] **Step 2: Run** `npm test -- packages/cezar/src/preview/registration.test.ts packages/cezar/src/workflows/run-preview.test.ts`; expect FAIL.
 - [ ] **Step 3: Implement** as specified.
 - [ ] **Step 4: Run** Step 2's command; expect PASS.
-- [ ] **Step 5: Commit** `feat(cezar): register preview servers on the run (#781)`
+- [ ] **Step 5: Commit** `feat(cezar): register preview servers on the run (hearsay-tools/cezarion#781)`
 
 ### Task 4: Dev-server supervisor
 
@@ -129,7 +129,7 @@
 - [ ] **Step 2: Run** `npm test -- packages/cezar/src/preview/dev-server.test.ts`; expect FAIL.
 - [ ] **Step 3: Implement** `dev-server.ts`.
 - [ ] **Step 4: Run** Step 2's command; expect PASS.
-- [ ] **Step 5: Commit** `feat(cezar): preview dev-server supervisor (#781)`
+- [ ] **Step 5: Commit** `feat(cezar): preview dev-server supervisor (hearsay-tools/cezarion#781)`
 
 ### Task 5: Chromium resolution, download and launch; minimal CDP client
 
@@ -150,7 +150,7 @@
 - [ ] **Step 2: Run** `npm test -- packages/cezar/src/preview/chromium.test.ts packages/cezar/src/preview/cdp.test.ts`; expect FAIL.
 - [ ] **Step 3: Implement** both files.
 - [ ] **Step 4: Run** Step 2's command; expect PASS.
-- [ ] **Step 5: Commit** `feat(cezar): preview Chromium launcher and CDP client (#781)`
+- [ ] **Step 5: Commit** `feat(cezar): preview Chromium launcher and CDP client (hearsay-tools/cezarion#781)`
 
 ### Task 6: Preview session and host
 
@@ -170,7 +170,7 @@
 - [ ] **Step 2: Run** `npm test -- packages/cezar/src/preview`; expect the new tests FAIL.
 - [ ] **Step 3: Implement** the three files.
 - [ ] **Step 4: Run** Step 2's command; expect PASS.
-- [ ] **Step 5: Commit** `feat(cezar): preview session and host lifecycle (#781)`
+- [ ] **Step 5: Commit** `feat(cezar): preview session and host lifecycle (hearsay-tools/cezarion#781)`
 
 ### Task 7: WebSocket endpoint, upgrade dispatcher and lifecycle wiring
 
@@ -191,7 +191,7 @@
 - [ ] **Step 2: Run** `npm test -- packages/cezar/src/server/upgrade-router.test.ts packages/cezar/src/server/preview-socket.test.ts packages/cezar/src/git-worktree-release.test.ts packages/cezar/src/server/ws.test.ts`; expect FAIL.
 - [ ] **Step 3: Implement** and wire as listed.
 - [ ] **Step 4: Run** Step 2's command plus `npm test -- versioned-surface bc-route-inventory route-parity`; expect PASS.
-- [ ] **Step 5: Commit** `feat(cezar): preview WebSocket and process lifecycle wiring (#781)`
+- [ ] **Step 5: Commit** `feat(cezar): preview WebSocket and process lifecycle wiring (hearsay-tools/cezarion#781)`
 
 ### Task 8: Cockpit preview client and thread card
 
@@ -212,7 +212,7 @@
 - [ ] **Step 2: Run** `npm test -- packages/web/src/api/preview-socket.test.ts packages/web/src/routes/task-thread`; expect the new tests FAIL.
 - [ ] **Step 3: Implement**.
 - [ ] **Step 4: Run** Step 2's command; expect PASS.
-- [ ] **Step 5: Commit** `feat(web): preview server card, header toggle and socket client (#781)`
+- [ ] **Step 5: Commit** `feat(web): preview server card, header toggle and socket client (hearsay-tools/cezarion#781)`
 
 ### Task 9: Preview pane shell and states
 
@@ -232,7 +232,7 @@
 - [ ] **Step 2: Run** `npm test -- packages/web/src/routes/task-thread/preview`; expect FAIL.
 - [ ] **Step 3: Implement**.
 - [ ] **Step 4: Run** Step 2's command; expect PASS.
-- [ ] **Step 5: Commit** `feat(web): live preview pane and states (#781)`
+- [ ] **Step 5: Commit** `feat(web): live preview pane and states (hearsay-tools/cezarion#781)`
 
 ### Task 10: Canvas rendering and input mapping
 
@@ -253,7 +253,7 @@
 - [ ] **Step 2: Run** `npm test -- packages/web/src/routes/task-thread/preview/input-map.test.ts packages/web/src/routes/task-thread/preview/page-dialog.test.tsx`; expect FAIL.
 - [ ] **Step 3: Implement**.
 - [ ] **Step 4: Run** Step 2's command; expect PASS.
-- [ ] **Step 5: Commit** `feat(web): preview canvas input mapping (#781)`
+- [ ] **Step 5: Commit** `feat(web): preview canvas input mapping (hearsay-tools/cezarion#781)`
 
 ### Task 11: Dry-run mock, cockpit e2e and package check
 
@@ -270,10 +270,10 @@
 - [ ] **Step 2: Run** `npm run test:e2e -- live-preview.e2e.ts`; expect FAIL before the mock marker exists, then implement the mock changes.
 - [ ] **Step 3: Run** `npm run test:e2e -- live-preview.e2e.ts`; expect `TEST_E2E_STATUS=passed`.
 - [ ] **Step 4: Run** `npm run build && TMPDIR=/tmp npm run test:package`; expect PASS including the new flag-off assertion.
-- [ ] **Step 5: Commit** `test(e2e): live preview register, open, click and stop (#781)`
+- [ ] **Step 5: Commit** `test(e2e): live preview register, open, click and stop (hearsay-tools/cezarion#781)`
 
 ### Task 12: Final gate and manual QA
 
 - [ ] **Step 1:** In the worktree: `npm ci`, then `npm run typecheck`, `npm test`, `npm run test:unit`, `npm run build`, `TMPDIR=/tmp npm run test:package`, `npm run test:e2e:local`. Record the tested revision and each outcome in the handoff. (Run the unit gate and the e2e boot sequentially, never in parallel.)
 - [ ] **Step 2: Manual QA** (record in the PR): through Traefik + Authelia, open, click and type in a preview, then let the Authelia session expire and confirm the pane shows 5.11 then a clean reconnect after login; on the ubuntu-vps behind Basic Auth, open the pane in Chrome, Safari and Firefox and record which show the page and which show 5.14 without a prompt loop; one session at 390 px wide confirming tap and swipe.
-- [ ] **Step 3: Experience criteria check** against #781: every state in screens 09 to 26 matches its primary action; light and dark themes; 44 px targets at 390 px.
+- [ ] **Step 3: Experience criteria check** against hearsay-tools/cezarion#781: every state in screens 09 to 26 matches its primary action; light and dark themes; 44 px targets at 390 px.

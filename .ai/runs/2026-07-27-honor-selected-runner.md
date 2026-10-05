@@ -1,5 +1,10 @@
 # Honor selected runners across task starts
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 ## Goal
 
 Ensure every task-start and continuation surface honors the runner shown or explicitly selected for the active project, even when the boot project's default runner differs.

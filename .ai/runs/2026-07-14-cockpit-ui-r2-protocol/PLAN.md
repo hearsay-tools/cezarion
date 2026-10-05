@@ -1,5 +1,10 @@
 # Run: Cockpit UI redesign — Phase R2 (Protocol v2)
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 - Date: 2026-07-14
 - Branch: `feat/cockpit-ui-r2-protocol` (stacked on `feat/cockpit-ui-r1-platform-shell`, PR #396; GitHub retargets to main when #396 merges)
 - Source spec: `.ai/specs/2026-07-14-cockpit-ui-redesign.md` — §"Normalized agent-event protocol v2", §"Backend parity requirement", Implementation Plan steps 5–7

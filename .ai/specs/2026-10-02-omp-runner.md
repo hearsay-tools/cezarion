@@ -1,4 +1,4 @@
-# OMP (Oh My Pi) agent runner (#595)
+# OMP (Oh My Pi) agent runner (hearsay-tools/cezarion#595)
 
 Status: approved design (2026-10-02). Approved by the owner section by section in
 brainstorming and then as this written spec. This is the committed design record that code
@@ -6,8 +6,8 @@ comments cite. Decisions made while implementing it (rulings 0 to 20, written "R
 OMP v18.4.11 binary on 2026-10-05) are folded into the sections they change and listed together
 in [Implementation decisions](#implementation-decisions-2026-10-05).
 
-Related: `AGENT_PROTOCOL.md` §4, §6, §7, §10 and the CI-wait contract; #387/#470 (pi runner);
-#376 (cursor runner); #265 (same shape of work); `.ai/specs/2026-07-20-grouped-subagent-display.md`
+Related: `AGENT_PROTOCOL.md` §4, §6, §7, §10 and the CI-wait contract; open-mercato/cezar#387/#470 (pi runner);
+hearsay-tools/cezarion#376 (cursor runner); hearsay-tools/cezarion#265 (same shape of work); `.ai/specs/2026-07-20-grouped-subagent-display.md`
 (Agents drawer).
 
 ## Problem
@@ -26,7 +26,7 @@ session that streams text, reasoning, tools, diffs, plan and usage; Continue, st
 interrupt; Needs You, monitoring and CI-wait; sub-agents in the Agents drawer; Settings → Agent
 config; host model discovery. A host without `omp` boots unchanged and shows OMP as unavailable.
 
-Acceptance criteria (#595), each owned by a section below:
+Acceptance criteria (hearsay-tools/cezarion#595), each owned by a section below:
 
 | AC | Where |
 |---|---|
@@ -96,7 +96,7 @@ What differs from Pi (each one breaks a Pi assumption):
 | Config is YAML: `~/.omp/agent/config.yml`, project `.omp/` (`settings.json`, then `config.yml`); `--config <file>` overlays are read-only YAML layers | New `yaml` config format; D1 overlay |
 | OMP reads `OMP_*` and the Pi names `PI_CODING_AGENT_DIR`, `PI_CONFIG_DIR`, `PI_CODING_AGENT_SESSION_DIR` | Credential allowlist; profiles deferred |
 | Thinking levels: `off, minimal, low, medium, high, xhigh, max` (`--thinking`) | cezar effort maps 1:1 |
-| Queue defaults `steeringMode: one-at-a-time` | `set_steering_mode all` (#551 parity) |
+| Queue defaults `steeringMode: one-at-a-time` | `set_steering_mode all` (hearsay-tools/cezarion#551 parity) |
 
 Identical to Pi (shapes cezar's Pi code already handles): `prompt` with optional
 `streamingBehavior:"steer"` and id-echoed `response`; `message_update.assistantMessageEvent`
@@ -238,7 +238,7 @@ then the first `prompt`. OMP queues commands until it is ready.
 | `ready` | none | none (protocol v1 stays; the `maxFrameBytes` cap is not negotiated) |
 | `response` to `get_state` | `session` (discovered id) | `session.started {backend:'omp', sessionId, model?}` |
 | `response` to `set_*` with `success:false` | `note` | none |
-| `response` to `prompt` (by id), success | agent-input ack, Pi's #505 bookkeeping | none; marks the opening prompt admitted |
+| `response` to `prompt` (by id), success | agent-input ack, Pi's hearsay-tools/cezarion#505 bookkeeping | none; marks the opening prompt admitted |
 | `response` to `prompt`, `success:false` (pre-admission; no `prompt_result` follows) | `error` | `session.error` (non-fatal); when it answers the **opening** prompt the turn ends `turn.completed {stopReason:'error'}` (Ruling 10) |
 | `response`, other `success:false` | `error` | `session.error` (non-fatal) |
 | `message_update` `text_*` | coalesced `text` per block (`V1TextCoalescer`) | message `item.*` |
@@ -248,7 +248,7 @@ then the first `prompt`. OMP queues commands until it is ready.
 | `tool_execution_start` | `tool-call` | tool `item.started` (`toolDisplay`) |
 | `tool_execution_update` | none | `item.updated` with partial output |
 | `tool_execution_end` | `tool-result`, `image` parts | `item.completed`; `diffs` from edit/write `result.details` (`path`, `oldText`, `newText`, `perFileResults[]`), falling back to replace-mode args; `plan.updated` from todo `result.details.phases` (`abandoned` → `cancelled`, `blocked` → `pending`) |
-| `agent_start` | snapshot of acknowledged, unconsumed submissions (#505) | re-opens a turn if activity resumes after settle (Pi's `mapActivity` rule) |
+| `agent_start` | snapshot of acknowledged, unconsumed submissions (hearsay-tools/cezarion#505) | re-opens a turn if activity resumes after settle (Pi's `mapActivity` rule) |
 | `agent_end` (any) | none | none (never a boundary) |
 | `prompt_result` `agentInvoked:false`, or a `prompt` response with `data.agentInvoked:false`, **for the prompt that opened the turn** | `turn-end` | `turn.completed` |
 | `prompt_result` `status:error` before the agent ran | `error`, then `turn-end` | `session.error`, `turn.completed {stopReason:'error'}`; if the failed `prompt` response already reported it, only the turn end follows (no duplicate) |
@@ -398,9 +398,9 @@ runner switches; Settings → Agents tab.
 | `omp` absent at boot | `probeOmp` `available:false` + hint; boot continues; pill disabled |
 | `omp` absent at spawn | ENOENT → "`omp` not found on PATH: install OMP (https://omp.sh) and run `omp login`" |
 | Unparseable line / `parse` failure | v1 `note`; loop continues |
-| Provider failure | latched on assistant `message_end` `stopReason:error`, cleared by a later success, released at `session_settled` or stream end without settle (#256, #316) |
+| Provider failure | latched on assistant `message_end` `stopReason:error`, cleared by a later success, released at `session_settled` or stream end without settle (hearsay-tools/cezarion#256, hearsay-tools/cezarion#316) |
 | `prompt_result status:error` before the agent ran | v1 `error` + `turn-end`; never waits for a settle that will not come |
-| Non-zero exit | error with the last three stderr lines; a cezar-sent signal is teardown (#73) |
+| Non-zero exit | error with the last three stderr lines; a cezar-sent signal is teardown (hearsay-tools/cezarion#73) |
 | Timeout | wall-clock kill switch, Pi's message shape |
 | Oversized v1 frame | OMP elides fields; the mapper tolerates missing fields |
 | Model discovery failure | adapter throws a stable reason; catalog `unavailable`; stale cache keeps its reason |

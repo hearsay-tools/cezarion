@@ -1,5 +1,10 @@
 # Foldable Task Table Columns
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 ## 📝 TLDR
 
 Let users fold optional columns in the desktop Tasks table to reclaim horizontal space without losing the table’s core status and task identity. Branch starts folded on a fresh workspace, every optional column—including Workflow—can be toggled from its header, and the choice persists as workspace UI state across projects and browser sessions.

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox syntax for tracking.
 
-**Goal:** Ship #112's durable parent/worker request/reply conversations through the existing delegation transport, waits, and cockpit.
+**Goal:** Ship hearsay-tools/cezarion#112's durable parent/worker request/reply conversations through the existing delegation transport, waits, and cockpit.
 
 **Architecture:** Store one authoritative conversation ledger on the root and atomically insert accepted inputs into recipient queues. Extend the existing wait receipt with request selections for either role; lifecycle and request reconciliation use the same scheduler and wake acknowledgement.
 
@@ -65,7 +65,7 @@ Files: `workflows/worker-wait.test.ts`, `core/conversation-delivery.test.ts`, ha
 - [x] Review the complete change against every issue criterion and the accepted spec; fix identified defects with regression tests. Verify that new regression tests fail without the source fix.
 - [x] Run `npm run typecheck`, `npm test`, `npm run test:unit`, `npm run build`, `npm run test:package` and read each result. No PR on red.
 - [ ] Commit, push feature branch, fetch and merge origin/main; rerun required verification if the merge changes the tree.
-- [ ] Create draft PR based on main with repository template, Closes #112, design reference, Experience/QA, command results, and Left undone. Move board to In review. Run pr-checks and required SDLC docs check through CI/review verdict; never merge or mark ready.
+- [ ] Create draft PR based on main with repository template, Closes hearsay-tools/cezarion#112, design reference, Experience/QA, command results, and Left undone. Move board to In review. Run pr-checks and required SDLC docs check through CI/review verdict; never merge or mark ready.
 
 ## Review record
 

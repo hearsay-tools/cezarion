@@ -1,5 +1,10 @@
 # Publishable Cezar React components for composable embedding
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 > Dependent follow-on to `.ai/specs/2026-07-23-independent-server-web-packages.md`.
 > The independent-server spec is the normative foundation for the API client, package layout,
 > versioned HTTP contract, remote-access model, and release ordering used here. It deliberately

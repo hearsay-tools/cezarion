@@ -1,5 +1,10 @@
 # Notifications — GitHub timeline events
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 Append-only, UTC timestamps, newest at the bottom.
 
 - **2026-07-21T00:00Z — run start.** `om-auto-fix-issue 525` classified #525 as a feature request

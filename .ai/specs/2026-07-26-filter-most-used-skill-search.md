@@ -1,5 +1,10 @@
 # Filter Most-Used Skills in Every Picker
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 ## TLDR
 
 All grouped skill pickers must apply the same search pipeline: rank and filter the complete skill catalog first, then partition only the matches into Most used, Project, and Global tiers. This fixes unrelated frequently used skills remaining visible during a search while preserving the established frequency/locality ordering for an empty query.

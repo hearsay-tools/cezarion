@@ -1,5 +1,10 @@
 # Final gate — R7 (Retirement + polish) — closes the R1–R7 program
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 - Steps covered: 1.1–1.5 (`6f848d2`..`c7da6b9`) plus the `origin/main` merge (`63a2d78`,
   reconciling the #398 CI validation system). The phase closed within a 5-step window, so this
   gate subsumes the checkpoint.

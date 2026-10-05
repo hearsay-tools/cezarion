@@ -1,5 +1,10 @@
 # Resume interactive answers after inactivity
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 ## Goal
 
 Make a structured question's option chips reliably resume an agent session after the inactivity timer closes it, including the short teardown interval where the cockpit still has a `waiting` record and the server still considers the old run active.

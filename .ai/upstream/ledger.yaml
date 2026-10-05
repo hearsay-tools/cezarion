@@ -1,3 +1,6 @@
+# Citation provenance: see README.md#citation-provenance.
+# Entry sha/pr/title/date are upstream; fork.* is hearsay-tools/cezarion.
+# Titles preserve upstream commit subjects verbatim; reason/note qualify citations.
 upstream:
   repo: open-mercato/cezar
   branch: main
@@ -48,7 +51,7 @@ entries:
     fork:
       pr: 94
     decided: 2026-09-06
-    note: "follow-ups #105 (cold workspace references) and #106 (repository identity recovery)"
+    note: "follow-ups hearsay-tools/cezarion#105 (cold workspace references) and hearsay-tools/cezarion#106 (repository identity recovery)"
   - sha: ff9c44ed191955e53931331e83b5c2751a81c60f
     pr: 951
     title: "feat(composer): accept PDF, TXT and MD attachments, not just images (#951)"
@@ -167,7 +170,7 @@ entries:
       conflicts: 9
     fork:
       pr: 140
-    reason: "the fork did its own transcript virtualization and anchor work in #140, #162, #306 and #333; upstream patch is not applicable, ideas only"
+    reason: "the fork did its own transcript virtualization and anchor work in hearsay-tools/cezarion#140, hearsay-tools/cezarion#162, hearsay-tools/cezarion#306 and hearsay-tools/cezarion#333; upstream patch is not applicable, ideas only"
     decided: 2026-09-18
   - sha: af7e828963cca1a2825af3df7421c8509ce0f6d6
     pr: 972
@@ -180,7 +183,7 @@ entries:
     fork:
       pr: 138
     decided: 2026-09-18
-    reason: "the fork built owned workers behind an authenticated controller (PRs #138, #151, #159, opt-in CEZ_DELEGATION=1) instead of upstream dispatch (cez task, default-on, budget carve-out); same primitive, incompatible control plane. Owner decision 2026-09-18: nothing borrowed"
+    reason: "the fork built owned workers behind an authenticated controller (PRs hearsay-tools/cezarion#138, hearsay-tools/cezarion#151, hearsay-tools/cezarion#159, opt-in CEZ_DELEGATION=1) instead of upstream dispatch (cez task, default-on, budget carve-out); same primitive, incompatible control plane. Owner decision 2026-09-18: nothing borrowed"
   - sha: 7619b3328ea43f42fbe4a4e4c457c6e0180a96a1
     pr: 809
     title: "fix(composer): scroll skill menu on arrow key navigation (#809)"
@@ -300,7 +303,7 @@ entries:
       conflicts: 6
     fork:
       pr: 303
-    reason: "mobile thread jumps were fixed differently in #303; the throttling helpers here would conflict with the fork virtualizer"
+    reason: "mobile thread jumps were fixed differently in hearsay-tools/cezarion#303; the throttling helpers here would conflict with the fork virtualizer"
     decided: 2026-09-18
   - sha: d988258f1e569efaad24cfc9ddae73a27f79ad6b
     pr: 968
@@ -331,7 +334,7 @@ entries:
     status: pending
     hint:
       conflicts: 7
-    note: "fork stores attachments per run under runs/<id>-images; depends on #940 drafts"
+    note: "fork stores attachments per run under runs/<id>-images; depends on open-mercato/cezar#940 drafts"
   - sha: fbfb492493058acd8ddfca1a311c92f107c24386
     pr: 985
     title: "feat(automations): scheduled triggers, default-on, redesigned surface, creation from a prompt (#985)"
@@ -343,7 +346,7 @@ entries:
     fork:
       issue: 766
     decided: 2026-10-02
-    reason: "stage 1 (#766) ported the schedule trigger, run-now, the kind-aware editor, list and log; the fork keeps CEZ_AUTOMATIONS=1 opt-in, the #651 lease and governed workers instead of default-on, lock replacement and task.dispatch. The CLI, built-in skill, prompt part, templates, calendars and stats are stages 2 and 3"
+    reason: "stage 1 (hearsay-tools/cezarion#766) ported the schedule trigger, run-now, the kind-aware editor, list and log; the fork keeps CEZ_AUTOMATIONS=1 opt-in, the hearsay-tools/cezarion#651 lease and governed workers instead of default-on, lock replacement and task.dispatch. The CLI, built-in skill, prompt part, templates, calendars and stats are stages 2 and 3"
   - sha: 67fc941f0cc79c2aca3c77ed7d0f953afadf8f5e
     pr: 990
     title: "chore(release): bump main to 0.11.0 and cut the changelog entry (#990)"
@@ -402,7 +405,7 @@ entries:
     fork:
       pr: 24
     decided: 2026-09-18
-    reason: "the fork already takes the OpenCode turn end from session.idle instead of the 300 s undici long-poll (PR #24, 2026-09-01), which is the same fix"
+    reason: "the fork already takes the OpenCode turn end from session.idle instead of the 300 s undici long-poll (PR hearsay-tools/cezarion#24, 2026-09-01), which is the same fix"
   - sha: 97d269bd806caa0fcb6968ae3cb2efa69afae3f8
     pr: 1014
     title: "fix(providers): a runtime auth rejection verifies itself before it sticks (#1014)"
@@ -424,7 +427,7 @@ entries:
     fork:
       pr: 138
     decided: 2026-09-18
-    reason: "dispatch prompt fix for --budget; the fork has no dispatch budget and its worker CLI is documented in PR #138"
+    reason: "dispatch prompt fix for --budget; the fork has no dispatch budget and its worker CLI is documented in PR hearsay-tools/cezarion#138"
   - sha: 52636b25f236304ed3ceda027d4bb2889aef4ade
     pr: 1009
     title: "fix(server-deploy): fail the deploy when the service did not actually restart (#1009)"
@@ -479,7 +482,7 @@ entries:
     fork:
       pr: 258
     decided: 2026-09-18
-    reason: "dispatch-specific fix; the fork keeps live worker parents out of human attention in PR #258"
+    reason: "dispatch-specific fix; the fork keeps live worker parents out of human attention in PR hearsay-tools/cezarion#258"
   - sha: 8e59c0ac8f70fe02202d147e2aed7091459b5452
     pr: 1012
     title: "fix(attachments): file named image uploads in the attachment library too (#1012)"

@@ -1,8 +1,8 @@
-# Scheduled automations — stage 1 of three (issue #766)
+# Scheduled automations — stage 1 of three (issue hearsay-tools/cezarion#766)
 
-> Status: implemented (stage 1) · Fork adaptation of upstream open-mercato/cezar #985
+> Status: implemented (stage 1) · Fork adaptation of upstream open-mercato/cezar#985
 > (`fbfb492493058acd8ddfca1a311c92f107c24386`). Extends the fork's
-> `.ai/specs/2026-07-25-github-automations.md` (amended by #801 opt-in gating and #651 lease
+> `.ai/specs/2026-07-25-github-automations.md` (amended by open-mercato/cezar#801 opt-in gating and hearsay-tools/cezarion#651 lease
 > safeguards).
 
 ## TLDR
@@ -27,7 +27,7 @@ day calendars, statistics) are filed as follow-up issues. Dollar figures follow
 |---|---|---|
 | Gating | `capabilities.automations = CEZ_AUTOMATIONS === '1'`, unchanged. No breaking-change path. | Default-on (`!== '0'`). |
 | Nav / route gate | Follow `capabilities.automations` alone; the forge no longer gates the item. Deep-link copy: "Automations are off". | Same change. |
-| Lease | The #651 store lease (reclaim guard, identity checks) stays. The schedule runner takes it and checks `isCurrent()` before reserving. A held or lost lease logs `skipped` and retries through the existing workspace floor; it never advances the shared `nextRunAt`. | #985 advanced the loser's `nextRunAt`; #1099 replaced the lock with `proper-lockfile`. Neither adopted. |
+| Lease | The hearsay-tools/cezarion#651 store lease (reclaim guard, identity checks) stays. The schedule runner takes it and checks `isCurrent()` before reserving. A held or lost lease logs `skipped` and retries through the existing workspace floor; it never advances the shared `nextRunAt`. | open-mercato/cezar#985 advanced the loser's `nextRunAt`; open-mercato/cezar#1099 replaced the lock with `proper-lockfile`. Neither adopted. |
 | `setState` | Read-modify-write against a fresh disk read, function form. | Same. |
 | Delegation | No `task.dispatch`, no review-child suffix. Launched runs get governed workers like every run. | `task.dispatch` → dispatch intent. |
 | Boot brake | Ported: an enabled poll idle longer than its lookback is re-baselined at boot with a `baseline` log row. Idleness is measured from the later of `lastSuccessAt` and `baselineAt`, so a poll enabled or re-enabled but not yet due is left alone. | Measures from `lastSuccessAt` alone. |
@@ -41,7 +41,7 @@ day calendars, statistics) are filed as follow-up issues. Dollar figures follow
 WorkspaceAutomationScheduler (existing, one timer)
   ├─ ProjectAutomationScheduler.check(github definition)   existing, needs handle.github
   └─ ScheduleRunner.fire(schedule definition)              NEW, needs no remote
-        → store.acquireLease() (#651) → reserveReceipt(schedule:<iso>) → launchScheduledRun → log → setState
+        → store.acquireLease() (hearsay-tools/cezarion#651) → reserveReceipt(schedule:<iso>) → launchScheduledRun → log → setState
 contract/automation-schedule.ts (NEW, pure, Intl only): nextOccurrence, occurrencesBetween, cronOf, parseCron, scheduleLabel
 contract/zoned-time.ts (NEW, moved out of core/usage-limit.ts)
 server.ts automations family: kind-aware routes, POST /automations/:id/run, every project gets a handle
@@ -65,7 +65,7 @@ web routes/automations/*: route shell, list, editor (+ schedule / github fields)
 | `packages/web/src/components/nav-items.ts` | Automations item: `automations: true`, no `forge`. |
 | `packages/web/src/api/client.ts` | `runAutomationNow`, `deleteAutomation`. |
 | `packages/web/src/routes/automations/` | `automations.tsx` is replaced by `automations-route.tsx` (gate, data, mode switch), `automations-list.tsx`, `editor.tsx`, `editor-schedule-fields.tsx`, `editor-github-fields.tsx`, `next-runs-preview.tsx`, `log.tsx`. `lib/automation-format.ts` (`relativeIn`, `dayTime`). |
-| `.env.example`, `README.md`, `BACKWARD_COMPATIBILITY.md`, `AGENTS.md`, `.ai/upstream/ledger.yaml` | Env row rewritten for both kinds; README Automations paragraph; §2 lists `POST /automations/:id/run` and the schedule semantics, §3 `automationTrigger`; AGENTS.md routing row for automations; ledger row for #985 → `partial`, `fork.issue: 766`. |
+| `.env.example`, `README.md`, `BACKWARD_COMPATIBILITY.md`, `AGENTS.md`, `.ai/upstream/ledger.yaml` | Env row rewritten for both kinds; README Automations paragraph; §2 lists `POST /automations/:id/run` and the schedule semantics, §3 `automationTrigger`; AGENTS.md routing row for automations; ledger row for open-mercato/cezar#985 → `partial`, `fork.issue: 766`. |
 
 ## Lifecycle (schedule kind)
 
@@ -292,5 +292,5 @@ is the "cockpit attached" signal that gates the prompt part and the built-in ski
 run` injects nothing and composes nothing. Stage 3: built-in and cross-project templates
 (`GET /workspace/automation-templates`), week and day calendars, next-runs rail, this-week stats
 strip and per-row 7-day tallies (cost following `costMetrics`), owned workers nested in the log.
-Also not done: default-on, `task.dispatch`, PR-review triggers (upstream #1016/#1056), Jira/Linear
+Also not done: default-on, `task.dispatch`, PR-review triggers (upstream #1016 / upstream #1056), Jira/Linear
 (upstream #1045), full cron expressions, automations while the server is stopped.

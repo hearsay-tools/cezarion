@@ -219,7 +219,7 @@ Four different situations used to render as the same silent violet chip. Each no
 A remembered status shown while the forge is down keeps its colour and says *last known — GitHub is
 unreachable*, so a dated answer is never mistaken for a fresh one. Every tooltip also carries the
 reference's URL, which the native `title` used to and which is the only thing that reveals a
-reference pointing at a *different* repository (#526).
+reference pointing at a *different* repository (open-mercato/cezar#526).
 
 ### How often a status is rechecked
 
@@ -316,7 +316,7 @@ issues}}` map of whatever the server ALREADY had cached. Status hydration reads 
 waits on `gh`; a reference nothing has looked up yet is simply absent, and
 `/github/ref-status` stays the route that actually goes and asks.
 
-Cold-row repository scoping (#97) discovers identity separately in the background. The index
+Cold-row repository scoping (hearsay-tools/cezarion#97) discovers identity separately in the background. The index
 returns immediately with the known identity, or keeps existing references while identity is
 unknown. Discovery is deduplicated per root, capped at four active lookups with a five-second
 abort deadline; failed lookups retry only on later index demand after a one-minute cooldown.
@@ -327,7 +327,7 @@ independently owned issue numbers. The index never opens a store/context, recove
 prunes worktrees, or persists those scoped records. Cross-repository status hydration is unchanged.
 
 Being free is what lets it be a SUPERSET. The server looks up every number a run mentions rather
-than re-deriving which one the cockpit will display — that rule (#407, #526) lives client-side, and
+than re-deriving which one the cockpit will display — that rule (open-mercato/cezar#407, open-mercato/cezar#526) lives client-side, and
 a second copy is how the two would drift. A cache read costs nothing per number, so asking about
 one the client will not paint is harmless, and the client applies its own rule to whatever it gets.
 

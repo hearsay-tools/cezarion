@@ -1,10 +1,10 @@
-# Mobile Tasks controls — #175
+# Mobile Tasks controls — hearsay-tools/cezarion#175
 
 Supervisor-approved bounded design, September 9, 2026. Start point: `eab3fb3e`.
 
 People managing coding tasks on a phone, often one-handed, need to find and archive tasks without leaving the list. The existing header now puts search above Active/Archived on mobile, with Archive finished in the existing Radix actions menu. Desktop retains its header. No new artwork, API, persistence, dependencies, or task-row changes.
 
-The drawer has **no task-query input**: its search-shaped footer opens the command palette. The supervisor confirmed that adding drawer search is outside #175. Active/Archived remains shared through `ListViewProvider`; the page retains its one local query and input across breakpoints and view changes.
+The drawer has **no task-query input**: its search-shaped footer opens the command palette. The supervisor confirmed that adding drawer search is outside hearsay-tools/cezarion#175. Active/Archived remains shared through `ListViewProvider`; the page retains its one local query and input across breakpoints and view changes.
 
 ## Acceptance evidence
 
@@ -55,7 +55,7 @@ These are automated real-Chrome checks plus inspection of representative screens
 
 ## Repository and integration gates
 
-Before the clean merge of main `b6df0f65` (#168): typecheck passed; full Vitest **376 files / 7,832 tests** passed; node unit **177 tests** passed; build and **555-file** package inventory passed; packaged CLI **24 tests** passed.
+Before the clean merge of main `b6df0f65` (hearsay-tools/cezarion#168): typecheck passed; full Vitest **376 files / 7,832 tests** passed; node unit **177 tests** passed; build and **555-file** package inventory passed; packaged CLI **24 tests** passed.
 
 The first full Vitest attempt had one existing OpenCode harness S4 token-event failure (7,831 passed). The unchanged focused test and a fresh complete suite then passed. No backend files or test assertions were changed to obtain the pass.
 

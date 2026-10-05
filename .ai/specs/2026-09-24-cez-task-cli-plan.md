@@ -1,4 +1,4 @@
-# `cez task` Implementation Plan — #504
+# `cez task` Implementation Plan — hearsay-tools/cezarion#504
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -8,7 +8,7 @@
 
 **Tech Stack:** TypeScript ESM, Node ≥20 `fetch`, zod contract schemas from `@open-mercato/cezar-contract`, Hono (server), vitest.
 
-**Spec:** `.ai/specs/2026-09-24-cez-task-cli.md` (requirements record: issue #504).
+**Spec:** `.ai/specs/2026-09-24-cez-task-cli.md` (requirements record: issue hearsay-tools/cezarion#504).
 
 ## Global Constraints
 
@@ -82,7 +82,7 @@ export function clientRequestHash(body: ClientRequestPayload): string {
 Contract: `clientRequestId: z.string().uuid().optional()` and `clientRequestHash: z.string().optional()` on `runRecordSchema`; `createRunInputSchema = createRunInputBaseSchema.extend({ clientRequestId: z.string().uuid().optional() }).refine(xor).refine(b => !(b.clientRequestId && (b.variants ?? 1) > 1), { message: 'clientRequestId names one run; it cannot be combined with variants > 1' })`. Mirror the same key and refine on the server's `startRunSchema`. Store schema, `createRun` input and `buildRun` gain both fields; `findRunByClientRequestId` scans `this.runs.values()`.
 
 - [ ] Step 4: tests pass; `npm run typecheck` green.
-- [ ] Step 5: commit `feat(runs): record an optional client request id on runs (#504)`.
+- [ ] Step 5: commit `feat(runs): record an optional client request id on runs (hearsay-tools/cezarion#504)`.
 
 ### Task 2: Idempotent `POST /runs`
 
@@ -132,7 +132,7 @@ Parity test: add `type RunCreate200 = InferResponseType<Runs['$post'], 200>` and
 
 - [ ] Step 4: `npm test -- packages/cezar/src/server/start-run` green; `npm run typecheck` green.
 - [ ] Step 5: prove red: `git stash push -m cez504-t2 -- packages/cezar/src/server/server.ts packages/cezar/src/workflows/run.ts`, run the new test → FAIL, `git stash apply` + drop by sha.
-- [ ] Step 6: commit `feat(server): make POST /runs idempotent on clientRequestId (#504)`.
+- [ ] Step 6: commit `feat(server): make POST /runs idempotent on clientRequestId (hearsay-tools/cezarion#504)`.
 
 ### Task 3: HTTP client and cockpit discovery
 
@@ -158,7 +158,7 @@ Parity test: add `type RunCreate200 = InferResponseType<Runs['$post'], 200>` and
 - [ ] Step 2: run → FAIL.
 - [ ] Step 3: implement. `checkoutRoot` runs `git -C dir rev-parse --path-format=absolute --git-common-dir` (execFile, never throws: falls back to `realpath(dir)`), takes `dirname` when it ends in `.git`, then `realpath`. Discovery probes all ports with `Promise.all`, validates with `healthResponseSchema.safeParse`, then `projectsResponseSchema.safeParse` of `/api/v1/projects`, picks the lowest port whose project root (realpath) equals the checkout root.
 - [ ] Step 4: tests pass.
-- [ ] Step 5: commit `feat(cli): discover the cockpit serving this checkout (#504)`.
+- [ ] Step 5: commit `feat(cli): discover the cockpit serving this checkout (hearsay-tools/cezarion#504)`.
 
 ### Task 4: `cez task` commands (start, list, status, open, stop, finish, diff, send)
 
@@ -186,7 +186,7 @@ Parity test: add `type RunCreate200 = InferResponseType<Runs['$post'], 200>` and
 - [ ] Step 2: run → FAIL.
 - [ ] Step 3: implement. Parse with `node:util` `parseArgs` per op (strict). `start` body: `{ task, workflow ?? 'quick-task', runner, model, effort, autonomous, worktree: noWorktree ? false : undefined, clientRequestId: requestId ?? randomUUID() }`; `created` = `status === 201`. `send` ladder: `/messages` → map `delivered|queued|deferred`; `409` whose `error === 'session closed'` → not-delivered or, with `--resume`, `/continue { text }`. `diff --stat` → `/changes` summarised to `{ files: [{ path, additions, deletions }], additions, deletions }`; otherwise `/diff` text as `{ diff }`. `status.question` from `/history-context` `contextEvents` last `ask.requested` when `hasPendingHumanAsk`.
 - [ ] Step 4: tests pass.
-- [ ] Step 5: commit `feat(cli): add cez task start/status/list/send/stop/finish/diff/open (#504)`.
+- [ ] Step 5: commit `feat(cli): add cez task start/status/list/send/stop/finish/diff/open (hearsay-tools/cezarion#504)`.
 
 ### Task 5: `wait`, `log`, `log --follow`, `start --wait`
 
@@ -202,7 +202,7 @@ Parity test: add `type RunCreate200 = InferResponseType<Runs['$post'], 200>` and
 - [ ] Step 2: run → FAIL.
 - [ ] Step 3: implement. Polling via `GET /runs` every `pollMs` (1500). SSE: `fetch` the stream, split on blank lines, parse `event:`/`data:`, abort at deadline. Exit code per spec table.
 - [ ] Step 4: tests pass.
-- [ ] Step 5: commit `feat(cli): wait for and follow cez task runs (#504)`.
+- [ ] Step 5: commit `feat(cli): wait for and follow cez task runs (hearsay-tools/cezarion#504)`.
 
 ### Task 6: Wiring, docs, `cez run` hint
 
@@ -214,7 +214,7 @@ Parity test: add `type RunCreate200 = InferResponseType<Runs['$post'], 200>` and
 - [ ] Step 2: in the `run` case, before executing, `discoverCockpit({ repoDir: repoRoot, timeoutMs: 300 }).then(c => console.error(`a cockpit is running at ${c.origin}; use "cez task start" to run this task there instead`)).catch(() => {})`, awaited with a 500 ms cap so it never blocks.
 - [ ] Step 3: `.env.example`: `CEZ_URL` entry; README env table row and a "From the terminal" section.
 - [ ] Step 4: `npm run typecheck && npm test` green.
-- [ ] Step 5: commit `feat(cli): wire cez task into the CLI and document CEZ_URL (#504)`.
+- [ ] Step 5: commit `feat(cli): wire cez task into the CLI and document CEZ_URL (hearsay-tools/cezarion#504)`.
 
 ### Task 7: Packaged e2e
 
@@ -223,4 +223,4 @@ Parity test: add `type RunCreate200 = InferResponseType<Runs['$post'], 200>` and
 
 - [ ] Step 1: test boots the installed tarball's `cez --no-open --port <free>` with `CEZ_DRY_RUN=1`, `CEZ_HOME` sandbox, in a temp git repo; waits for health; runs `cez task start 'e2e' --wait --timeout-seconds 120` → exit 0, `status` in `done|review`; `cez task status <id>` → slim JSON; `GET /api/v1/runs` contains the id; `cez task send <id> 'again' --resume` → exit 0; `cez task stop <id>` → exit 0; with the server killed, `cez task list` → exit 2 `no-cockpit`.
 - [ ] Step 2: `npm run build && TMPDIR=/tmp npm run test:package` green.
-- [ ] Step 3: commit `test(e2e): drive cez task against a dry-run cockpit (#504)`.
+- [ ] Step 3: commit `test(e2e): drive cez task against a dry-run cockpit (hearsay-tools/cezarion#504)`.

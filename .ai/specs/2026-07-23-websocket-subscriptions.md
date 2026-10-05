@@ -3,7 +3,7 @@
 A single per-cockpit WebSocket carrying **topic subscriptions**: the frontend subscribes to the
 named event streams it currently needs and unsubscribes the moment it stops needing them, and the
 server does the work behind a topic **only while someone is subscribed**. It replaced the
-per-tab `GET /api/health` poll (#369) and is the pattern every future live signal should use
+per-tab `GET /api/health` poll (open-mercato/cezar#369) and is the pattern every future live signal should use
 instead of a `refetchInterval`.
 
 - Server hub: `src/server/ws.ts` (built in `src/server/server.ts` `startServer`, reached through
@@ -54,7 +54,7 @@ bus is that a tab pays for exactly the streams it is looking at and **nothing el
   add a topic and subscribe to it. N components subscribing to the same topic share **one**
   server-side publisher and **one** subscribe frame — the client ref-counts listeners per topic.
 
-  **Named exception: the live preview pane** (#781, spec `2026-10-02-live-preview-v1`,
+  **Named exception: the live preview pane** (hearsay-tools/cezarion#781, spec `2026-10-02-live-preview-v1`,
   `src/server/preview-socket.ts`). Its socket, `/api/v1/p/:projectId/runs/:id/preview/ws`,
   carries one viewer's JPEG screencast frames and input for one run, lives only while that pane
   is open, and requires a `trusted` upgrade. None of that fits a shared topic: frames are binary
@@ -133,7 +133,7 @@ Rules: publish **only on change**; make `start`/stop symmetric (whatever `start`
 returned function must close); keep `snapshot` cheap (cache if it is not — see the `health` cache
 in `server.ts`). Topic names carry workspace-level data, so the hub is single-mount on `/api/ws`
 and never mirrored under `/api/p/:projectId`. The hub never listens on the HTTP server itself:
-`socketHubRoute` is its route in the one upgrade router (#781), and the hub starts its heartbeat
+`socketHubRoute` is its route in the one upgrade router (hearsay-tools/cezarion#781), and the hub starts its heartbeat
 on the first upgrade, so a hub nobody connects to holds no timer.
 
 A third argument controls who may read the topic — and its default is the safe one:
@@ -179,7 +179,7 @@ verdict, and the hub enforces it per subscription:
 Because `loopbackReadable` **defaults to `false`**, a new topic carrying run/repo/PR content is
 safe the moment it is registered — a foreign local page cannot read it and no one had to remember
 to tighten anything. `health` is the one topic that opts in (`{ loopbackReadable: true }`), because
-it is the same payload the CORS-open `GET /api/health` already exposes (#431). This is the
+it is the same payload the CORS-open `GET /api/health` already exposes (open-mercato/cezar#431). This is the
 mechanical form of what used to be a written caveat: adding a sensitive topic requires *doing
 nothing* special; exposing one to any local page requires an *explicit* opt-in.
 

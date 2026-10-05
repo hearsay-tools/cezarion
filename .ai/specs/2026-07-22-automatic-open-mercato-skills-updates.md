@@ -1,5 +1,10 @@
 # Automatic Open Mercato skills updates
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 ## TLDR
 
 cezar should detect updates for locally installed skills that came from `open-mercato/skills`, update them through the existing `npx skills` CLI without adding a dependency, and surface actionable update state in the cockpit. A global Settings preference controls automatic application; an environment variable supplies its inherited default, which is enabled when neither source says otherwise.

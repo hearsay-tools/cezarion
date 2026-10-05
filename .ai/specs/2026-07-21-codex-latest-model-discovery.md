@@ -1,5 +1,10 @@
 # Codex latest-model discovery
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 ## TLDR
 
 cezar currently renders a hard-coded Codex model list that has drifted far behind the models the same host's Codex CLI makes available. Replace Codex's static presets with a zero-config, host-local catalog discovered through the Codex app-server `model/list` protocol, expose that catalog through a small workspace API, and let every model picker consume the same query result. Discovery is best-effort and cached: `auto` always remains usable, an unavailable or incompatible CLI never blocks cockpit boot, and configured/custom model identifiers remain representable.

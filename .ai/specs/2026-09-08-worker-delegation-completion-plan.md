@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox syntax for tracking.
 
-**Goal:** Ship #116 with explicit delegation inputs, durable usable results, reliable waits and a parent completion gate.
+**Goal:** Ship hearsay-tools/cezarion#116 with explicit delegation inputs, durable usable results, reliable waits and a parent completion gate.
 
 **Architecture:** Extend the existing delegation service, CLI, RunStore and RunManager. Keep durable authority and lifecycle decisions in their existing owners; extract focused pure helpers for wait reconciliation, result projection and readiness checks.
 
@@ -164,4 +164,4 @@ expect(childSpec.env?.CEZ_DELEGATION_TOKEN).not.toBe(parentSpec.env?.CEZ_DELEGAT
 - [x] Run required commands in order, retain logs and inspect failures: `npm run typecheck`, `npm test`, `npm run test:unit`, `npm run build`, `npm run test:package`. Debug failures; no PR on red.
 - [x] Independent whole-branch review of spec compliance, lifecycle races, public contracts and retained cleanup evidence; fix findings and reverify affected checks.
 - [ ] Commit final QA/docs. Fetch origin and merge origin/main; resolve/reverify any merged changes; push feature branch.
-- [ ] Use repository PR template with Closes #116, Summary, Design decision/spec, Experience, command-result Verification and Left undone. Create draft with base main, board In review; execute pr-checks through CI verdict without auto-merge/ready flip.
+- [ ] Use repository PR template with Closes hearsay-tools/cezarion#116, Summary, Design decision/spec, Experience, command-result Verification and Left undone. Create draft with base main, board In review; execute pr-checks through CI verdict without auto-merge/ready flip.

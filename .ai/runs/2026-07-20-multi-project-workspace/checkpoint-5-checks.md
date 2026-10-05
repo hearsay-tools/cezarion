@@ -1,5 +1,10 @@
 # Checkpoint 5 — steps 3.3..3.8 (Phase 3 close)
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 **Ran:** 2026-07-21T07:30:00Z (om-auto-continue-pr-loop resume)
 **Steps covered:** 3.3, 3.4, 3.5, 3.6, 3.7, 3.8 — SHAs `ed8faa3`..`3ccc943`
 **Resume point on entry:** 3.3 (Phase 3 was 2/7 done)

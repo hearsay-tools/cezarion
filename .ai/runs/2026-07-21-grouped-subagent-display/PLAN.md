@@ -1,5 +1,10 @@
 # Execution plan — grouped sub-agent display within a single session
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 **Run:** `2026-07-21-grouped-subagent-display`
 **Branch:** `feat/grouped-subagent-display`
 **Base:** `main`

@@ -35,7 +35,7 @@ etc. suffixes for same-day scans) skip Vitest and cockpit browser shards. The re
 build/package job, including ledger validation. Other files under this directory are not
 covered by the scan-file allowlist.
 
-For a legacy scan PR created with `GITHUB_TOKEN` (including PR #577), after this fix lands on
+For a legacy scan PR created with `GITHUB_TOKEN` (including PR hearsay-tools/cezarion#577), after this fix lands on
 `main`, a maintainer must close and reopen the PR once to start native CI. Confirm the required
 aggregate passes on the current head before merging. Re-running the scan leaves an existing PR
 alone; manually dispatching CI is diagnostic verification, not a substitute for required PR
@@ -59,3 +59,21 @@ Set `status`, add `decided: YYYY-MM-DD`, and fill the fields that status require
 `hint.conflicts` is the number of files a 3-way dry run of the upstream commit could not apply
 onto this fork when the scan ran. It is advisory and goes stale as the fork moves. A free-form
 `note` is allowed on any row.
+
+## Citation provenance
+
+Upstream is `open-mercato/cezar`; this fork is `hearsay-tools/cezarion`.
+In `ledger.yaml`, each entry's `sha`, `pr`, `title` and `date` describe the
+**upstream** source commit. The `title` is a verbatim upstream commit subject:
+its issue/PR numbers belong to `open-mercato/cezar` unless the subject itself
+names another repository. This source attribution also applies to the **Title**
+column in generated `LEDGER.md` and the archived scan reports, whose headers
+name the upstream repository and scanned revision. Do not rewrite source titles
+as fork citations.
+
+The structured `fork.pr`, `fork.issue` and `fork.commits` values belong to
+`hearsay-tools/cezarion`. Generated **Upstream** and **Fork** links retain those
+identities. In free-form `reason` and `note` prose, always qualify citations as
+`hearsay-tools/cezarion#N` / `open-mercato/cezar#N` (or `fork #N` / `upstream #N`).
+Edit these fields in `ledger.yaml`, then run `validate` and `render`; never edit
+`LEDGER.md` alone. Citation cleanup must not change decisions, dates or identities.

@@ -1,5 +1,10 @@
 # Fix queued follow-up provider routing
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 ## Goal
 
 Allow users to append prompt messages to an already-queued run without requiring an unrelated provider to be authorized, while preserving provider authorization gates for live messages and session continuations.
