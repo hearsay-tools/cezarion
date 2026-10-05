@@ -9,7 +9,7 @@ import { join, resolve } from 'node:path';
 import { z } from 'zod';
 import {
   ciWaitSchema, agentInputSchema, inboxClaimSchema, delegationStateSchema, workerCreationReceiptSchema, workerCollectedResultSchema, workerResultFileSchema,
-  continuationMessageSchema, previewServerSchema, runSummarySchema, toRunSummary,
+  continuationMessageSchema, previewServerSchema, toRunSummary,
   runRecordSchema as contractRunRecordSchema,
 } from '@open-mercato/cezar-contract';
 import type { ArchiveFinishedScope, CiWait, ConversationState, AgentInput, InboxClaim, DelegationState, RunSummary, WorkerCollectedResult } from '@open-mercato/cezar-contract';
@@ -933,13 +933,21 @@ function deepFreeze<T>(value: T): T {
   return value;
 }
 
-/** A stored summary, or undefined when it no longer fits the contract (a newer or older cezar
- *  wrote it): the caller then projects the record instead. */
+/**
+ * A stored summary, or undefined when the row holds none (a row seeded without one, or text that
+ * is not a summary): the caller then projects the record instead. The column is written only by
+ * `encodeRunRow`, from a record the schema accepted, so this checks the shape a list row cannot
+ * do without rather than running the full contract schema — on a cockpit's thousand rows that
+ * schema costs more than reading them. The cold reader (`run-index.ts`), which reads other
+ * projects' databases, still validates in full.
+ */
 export function parseStoredSummary(text: string): RunSummary | undefined {
   try {
-    // The parsed JSON, not zod's output: the route sends a summary in `toRunSummary`'s key order.
     const raw: unknown = JSON.parse(text);
-    return runSummarySchema.safeParse(raw).success ? raw as RunSummary : undefined;
+    if (!raw || typeof raw !== 'object') return undefined;
+    const row = raw as Record<string, unknown>;
+    return typeof row.id === 'string' && typeof row.title === 'string' && typeof row.status === 'string' &&
+      typeof row.createdAt === 'string' && typeof row.archived === 'boolean' ? raw as RunSummary : undefined;
   } catch {
     return undefined;
   }
