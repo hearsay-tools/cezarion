@@ -62,6 +62,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  * | `steer-late` | the final text first; agent input sent after it arrives after the last model call (#505) |
  */
 export const SCENARIOS = [
+  'turn-messages',
   'skill-warning',
   'missing-binary',
   'crash-stderr-pre-ack',
@@ -187,6 +188,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     binEnv: 'CEZ_CLAUDE_BIN',
     mockBin: CLAUDE_MOCK,
     scenarios: {
+      'turn-messages': 'mock:turn-messages',
       'missing-binary': BASELINE_PROMPT,
       autonomous: 'mock:autonomous',
       'autonomous-cap': 'mock:autonomous-cap',
@@ -223,6 +225,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     binEnv: 'CEZ_CODEX_BIN',
     mockBin: CODEX_MOCK,
     scenarios: {
+      'turn-messages': 'mock:turn-messages',
       'missing-binary': BASELINE_PROMPT,
       autonomous: 'mock:autonomous',
       'autonomous-cap': 'mock:autonomous-cap',
@@ -260,6 +263,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     mockBin: OPENCODE_MOCK,
     scenarios: {
       'skill-warning': 'mock:skill-warning mock:done',
+      'turn-messages': 'mock:turn-messages',
       'missing-binary': BASELINE_PROMPT,
       autonomous: 'mock:autonomous',
       'autonomous-cap': 'mock:autonomous-cap',
@@ -297,7 +301,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     ],
     binEnv: 'CEZ_CURSOR_BIN',
     mockBin: join(HERE, '..', '..', 'scripts', 'mock-cursor-acp.mjs'),
-    scenarios: { 'missing-binary': BASELINE_PROMPT,
+    scenarios: { 'turn-messages': 'mock:turn-messages', 'missing-binary': BASELINE_PROMPT,
       autonomous: 'mock:autonomous',
       'autonomous-cap': 'mock:autonomous-cap',
       'autonomous-ask-cap': 'mock:autonomous-ask-cap',
@@ -322,6 +326,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     binEnv: 'CEZ_PI_BIN',
     mockBin: PI_MOCK,
     scenarios: {
+      'turn-messages': 'mock:turn-messages',
       'missing-binary': BASELINE_PROMPT,
       autonomous: 'mock:autonomous',
       'autonomous-cap': 'mock:autonomous-cap',

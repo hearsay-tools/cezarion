@@ -21,8 +21,8 @@ it('classifies every RUNNER_IDS delayed-ACK cell without omissions', () => {
 for (const backend of RUNNER_IDS) describe(`${backend} worker parent attention`, { timeout: 30_000 }, () => {
   useWorkerWaitFixture();
   for (const mode of ['fresh', 'continuation'] as const) {
-    for (const transport of ['ordinary', ACK_WIRES[backend]] as const) {
-      it(`${mode} worker progress then markerless turn stays Working (${transport === 'pipe-write' ? 'pipe-write ACK exemption: acceptance precedes provider response' : transport === 'protocol' ? 'delayed ACK' : 'ordinary ACK'})`, async () => {
+    for (const transport of ['ordinary', ACK_WIRES[backend]] as const) for (const humanGate of [false, true]) {
+      it(`${mode} ${humanGate ? mode === 'fresh' ? 'M9' : 'M10' : ''} worker progress then ${humanGate ? 'explicit review gate stays Needs-you' : 'markerless turn stays Working'} (${transport === 'pipe-write' ? 'pipe-write ACK exemption: acceptance precedes provider response' : transport === 'protocol' ? 'delayed ACK' : 'ordinary ACK'})`, async () => {
         const exercise = async (release: () => void, responseHeld?: () => boolean) => {
           process.env.CEZ_DRY_RUN = '0';
           process.env.CEZ_DELEGATION = '1';
@@ -52,7 +52,7 @@ for (const backend of RUNNER_IDS) describe(`${backend} worker parent attention`,
             const caller = credentials.authenticate(credentials.issue('project', w.id, randomUUID()))!;
             const id = randomUUID();
             const boundaries = store.readEvents(p.id).filter(event => event.type === 'turn-end').length;
-            await service.send(caller, { id, recipientRunId: p.id, kind: 'progress', text: 'Progress mock:agent-echo delay-owned-ack', timeoutSeconds: 600 });
+            await service.send(caller, { id, recipientRunId: p.id, kind: 'progress', text: `Progress mock:agent-echo delay-owned-ack${humanGate ? '\nPlease review the changes before I continue.' : ''}`, timeoutSeconds: 600 });
             if (responseHeld) {
               // Claude and Cursor acknowledge the local pipe write, not any
               // provider reply. A held wire response cannot delay that ACK.
@@ -70,9 +70,12 @@ for (const backend of RUNNER_IDS) describe(`${backend} worker parent attention`,
             await until(() => !!store.getRun(p.id)?.agentInputs?.find(input => input.id === id)?.deliveredAt);
             await until(() => semaphore.busy() === 0);
             expect(store.readEvents(p.id).some(event => event.type === 'conversation-message')).toBe(true);
-            expect(store.getRun(p.id)).toMatchObject({ status: 'running', activity: 'monitoring' });
+            expect(store.getRun(p.id)).toMatchObject(humanGate ? { status: 'waiting' } : { status: 'running', activity: 'monitoring' });
             expect(store.getRun(p.id)?.hasPendingHumanAsk).not.toBe(true);
-            expect(store.getRun(p.id)?.monitoringWakeAt).toBeDefined();
+            if (humanGate) {
+              expect(store.getRun(p.id)?.activity).toBeUndefined();
+              expect(store.getRun(p.id)?.monitoringWakeAt).toBeUndefined();
+            } else expect(store.getRun(p.id)?.monitoringWakeAt).toBeDefined();
           } finally { release(); credentials.close(); }
         };
         if (transport === 'protocol' && backend !== 'claude' && backend !== 'cursor') await withDelayedCommand(backend, exercise);

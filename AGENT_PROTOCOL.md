@@ -1024,6 +1024,28 @@ selection after an earlier prose mention, and quoted ASK examples without a
 marker. Parsing and transcript stripping must select the same final line;
 ordinary examples leave no question card or rejection note.
 
+Monitoring turn rows **M1–M14** (hearsay-tools/cezarion#772) live in
+`workflows/monitoring-turn.test.ts` and `workflows/worker-parent-attention.test.ts`
+and enter the shared parity guard. Every `RUNNER_IDS` adapter carries multiple
+parent assistant text segments through its native wire on fresh and Continue sessions.
+A standalone `CEZ:MONITORING` declaration survives a same-turn acknowledgement;
+subsequent explicit human questions and direct review/approval requests take
+precedence. A later monitoring declaration supersedes an earlier prose question
+resolved within the same turn; durable structured questions, DONE and spent parent
+completion gates retain their existing precedence. Ordinary markerless autonomous
+turns retain their nudge policy (M13/M14); prose recognition changes only quiet
+monitoring/dependency parks. Quoted/indented marker
+examples and fenced code cannot declare monitoring, and routine mentions of
+review or checks cannot create a human gate. M1 fires the real monitoring wake
+callback and proves capacity was released. M7 closes the actual idle session,
+retains the unanswered question, then delivers its answer through Continue and
+checks that a later monitoring turn carries no stale attention. The native rows
+also assert CLI attention-wait and webhook projections. Cockpit grouping and
+notification transitions remain consumers of the same contract attention rule.
+M9/M10 extend owned-input ACK coverage with explicit human gates and live workers;
+the existing executable Claude/Cursor pipe-write exemptions retain their native
+acceptance-before-response proof. No new wire exemption is needed.
+
 `worker-parent-attention.test.ts` (hearsay-tools/cezarion#249/#401) loops every runner for fresh and
 Continue sessions: markerless turns with live workers stay monitoring, and real
 ASK still wins. Codex/OpenCode/Pi delay transport acknowledgement past turn-end.
