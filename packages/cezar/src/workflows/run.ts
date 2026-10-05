@@ -1082,7 +1082,9 @@ export class RunManager {
   private reconcilingWorkers = false;
   private reconcilingFamily: string | undefined;
   private readonly pendingReconciliations = new Set<string | undefined>();
-  private recovering = false;
+  /** What the recovery in progress covers: every run at boot (`family` undefined), or the one
+   *  family an adoption hands it (#779, plan step 3). Undefined: no recovery in progress. */
+  private recoveryScope: { family?: string } | undefined;
   /** Settles when the recovery in progress (if any) has finished. */
   private recoveryInFlight: Promise<void> | undefined;
   /** Adoptions of dead processes' runs, one at a time (`adoptOrphanedRun`). */
@@ -1090,6 +1092,26 @@ export class RunManager {
   /** Quiet window before unread input is resubmitted or left unconfirmed (#505). */
   private readonly unreadInputGraceMs: number;
   private disposed = false;
+
+  /** Whether any recovery is in progress: one at a time (`recover`), and `pump` waits for it. */
+  private get recovering(): boolean {
+    return this.recoveryScope !== undefined;
+  }
+
+  /**
+   * Whether a recovery in progress holds this run, so its wakes, input flushes and delegation
+   * reconciles wait for that recovery's own passes: every run during boot recovery, and only the
+   * adopted family's during a recovery scoped to one. The rest of a running project stays live: a
+   * wake held back for an unrelated family would be lost, since the scoped passes never revisit it.
+   */
+  private recoveringRun(run: RunRecord | string | undefined): boolean {
+    const scope = this.recoveryScope;
+    if (!scope) return false;
+    if (scope.family === undefined) return true;
+    const record = typeof run === 'string' ? this.store.getRun(run) : run;
+    return record !== undefined && familyOf(record) === scope.family;
+  }
+
   private readonly onDelegationRun = (run: RunRecord, source?: 'delegation-checkpoint'): void => {
     // Delegation metadata checkpoints do not change task status.
     if (!this.disposed && source !== 'delegation-checkpoint') this.reapTerminalScratch(run.id);
@@ -1097,7 +1119,7 @@ export class RunManager {
     if (run.delegation && !['queued', 'running', 'waiting'].includes(run.status)) this.active.get(run.id)?.revokeDelegation?.();
     // Cleanup checkpoints emit terminal records too. With delegation disabled,
     // these observations must not replay the project's conversation histories.
-    if (this.disposed || this.recovering || (source === 'delegation-checkpoint' && process.env.CEZ_DELEGATION !== '1')) return;
+    if (this.disposed || this.recoveringRun(run) || (source === 'delegation-checkpoint' && process.env.CEZ_DELEGATION !== '1')) return;
     if (run.delegation && run.delegation.role !== 'invalid' && !['queued', 'running', 'waiting'].includes(run.status)) {
       this.reconcileWorkerWaits(run.delegation.role === 'root' ? run.id : run.delegation.parentRunId);
     }
@@ -1664,7 +1686,7 @@ export class RunManager {
   private queueCiWake(runId: string): void {
     const run = this.store.getRun(runId);
     const wait = run?.ciWait;
-    if (this.disposed || this.recovering || !run || !wait?.result || !wait.wakeId ||
+    if (this.disposed || this.recoveringRun(run) || !run || !wait?.result || !wait.wakeId ||
       !['running', 'waiting', 'queued'].includes(run.status) || run.stopping ||
       this.hasPendingHumanAsk(runId) || this.workerExecutionStopped(runId) || this.executionBlockedByRootFinish(run)) return;
     // Settlement ends the watcher. Keep a bounded-rate wake source until ACK,
@@ -1965,6 +1987,7 @@ export class RunManager {
    * root (spec 006 degradation rule), which is always the tighter bound.
    */
   private async pump(): Promise<void> {
+    // Any recovery, scoped or not: each ends with a pump of its own, so nothing waits for long.
     if (this.disposed || this.recovering) return;
     this.reconcileMonitoringWakeTimers();
     this.reconcileAutoResumes();
@@ -2271,7 +2294,7 @@ export class RunManager {
    */
   async recover(familyRootId?: string): Promise<void> {
     if (this.disposed || this.recovering) return;
-    this.recovering = true;
+    this.recoveryScope = { ...(familyRootId === undefined ? {} : { family: familyRootId }) };
     let settled!: () => void;
     this.recoveryInFlight = new Promise<void>((resolve) => { settled = resolve; });
     const inScope = (run: RunRecord) => familyRootId === undefined || familyOf(run) === familyRootId;
@@ -2434,7 +2457,7 @@ export class RunManager {
     // from it. `pump()` reconciles again on every sweep, so this is the fast path, not the only
     // one — see `reconcileAutoResumes`.
     } finally {
-      this.recovering = false;
+      this.recoveryScope = undefined;
       this.recoveryInFlight = undefined;
       settled();
     }
@@ -3701,7 +3724,7 @@ export class RunManager {
         this.store.updateRun(runId, { status: 'waiting', activity: undefined });
       }
       this.queueWorkerWake(runId);
-    } else if (!this.recovering) this.flushAgentInputs(runId);
+    } else if (!this.recoveringRun(runId)) this.flushAgentInputs(runId);
   }
 
   /** A worker's pending question goes to its owning parent as a conversation request
@@ -4041,7 +4064,7 @@ export class RunManager {
           this.store.commitRootFinishCancellation(parent.id);
         }
         if (!['queued', 'running', 'waiting'].includes(parent.status)) {
-          if (!this.recovering) {
+          if (!this.recoveringRun(parent)) {
             this.withdrawWorkerWait(parent.id);
             this.fallbackRoutedQuestions(parent.id, `parent-${parent.status}`);
             for (const child of parent.delegation.role === 'root' && parent.status !== 'review' ? this.store.listWorkersOf(parent.id) : []) {
@@ -4057,7 +4080,7 @@ export class RunManager {
         if (delivered) {
           // Receipt persistence precedes the live status update. After a crash
           // this is interrupted execution, not generic waiting-run success.
-          if (this.recovering && !delivered.inboxClaim?.acknowledgedAt && parent.status === 'waiting' && !this.hasPendingHumanAsk(parent.id)) {
+          if (this.recoveringRun(parent) && !delivered.inboxClaim?.acknowledgedAt && parent.status === 'waiting' && !this.hasPendingHumanAsk(parent.id)) {
             this.store.updateRun(parent.id, { status: 'running', activity: undefined });
           }
           const state = this.active.get(parent.id);
@@ -4202,7 +4225,7 @@ export class RunManager {
       this.store.commitAgentInputs(parentId, (run.agentInputs ?? []).map(entry => entry.id === input.id ? input : entry));
     }
     // Rebuild ordinary queued work before appending new wake admissions on restart.
-    if (this.recovering) return;
+    if (this.recoveringRun(run)) return;
     const state = this.active.get(parentId);
     // A parent's reply to a routed question (#505) is the one message a pending ask admits.
     const parentAnswer = wait.reason === 'message' && this.routedAsk(parentId) !== undefined;
