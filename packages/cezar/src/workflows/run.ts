@@ -708,7 +708,7 @@ export function isUntouchedCancelledRun(run: RunRecord): boolean {
 /** #469: how long a non-gone orphan probe stands before the next scan. */
 const ORPHAN_PROBE_CACHE_MS = 2_000;
 /** #469: why destroy could not prove a crashed generation's termination. */
-export type WorkerTerminationBlocker = { kind: 'unreadable' } | { kind: 'controller'; pid: number } | { kind: 'processes'; pids: number[] };
+export type WorkerTerminationBlocker = { kind: 'unreadable' } | { kind: 'controller'; pid: number } | { kind: 'processes'; pids: number[]; candidates?: number[] };
 /** #469: admission refused because a process of the previous generation still runs. */
 class WorkerOrphanAliveError extends Error {}
 const admissionError = (error: unknown, fallback: string) => error instanceof WorkerOrphanAliveError ? error.message : fallback;
@@ -833,7 +833,7 @@ export class RunManager {
     return orphan.state === 'orphan' ? orphan : undefined;
   }
 
-  /** Completes a crashed generation's proof once every one of its processes is proven gone (#469).
+  /** Settles a crashed generation after exit proof or explicit conservative abandonment (hearsay-tools/cezarion#839).
    * Sync and signal-free; recovery, resume, delivery, collect and destroy then take their normal paths.
    * A non-gone probe is cached briefly: on darwin the scan is a synchronous `lsof` on the event loop. */
   settleOrphanedWorkerExecution(runId: string, opts: { admitting?: boolean; fresh?: boolean } = {}): boolean {
@@ -842,12 +842,19 @@ export class RunManager {
     const cached = this.orphanProbes.get(runId);
     if (!opts.fresh && cached?.generation === orphan.generation && Date.now() - cached.at < ORPHAN_PROBE_CACHE_MS) return false;
     const probe = inspectExecutionGeneration(orphan);
-    if (probe.liveness !== 'gone') { this.orphanProbes.set(runId, { generation: orphan.generation, at: Date.now(), probe }); return false; }
+    if (probe.liveness !== 'gone' && !probe.abandonable) { this.orphanProbes.set(runId, { generation: orphan.generation, at: Date.now(), probe }); return false; }
     // A stale `alive` must not outlive a `gone` probe, even when the commit below fails.
     this.orphanProbes.delete(runId);
-    try { if (!this.store.commitWorkerExecutionComplete(runId, orphan.generation)) return false; } catch { return false; }
+    try {
+      // Unknown ambient holders cannot be resumed safely; retain the partial result and cancel
+      // task intent before settlement. A later cleanup still needs fresh strict holder proof.
+      if (probe.abandonable) this.store.commitWorkerCancellation(runId);
+      if (!this.store.commitWorkerExecutionComplete(runId, orphan.generation, probe.abandonable === true)) return false;
+    } catch { return false; }
     this.orphanProbes.delete(runId); this.orphanBlockers.delete(runId); this.reportedOrphanBlockers.delete(runId); this.clearOrphanReprobe(runId);
-    this.store.appendEvent(runId, { type: 'lifecycle', message: "the interrupted worker's processes are gone; its execution was finalized" });
+    this.store.appendEvent(runId, { type: 'lifecycle', message: probe.abandonable
+      ? "the interrupted worker's controller and recorded processes exited; execution abandoned with unverified holders; resources retained until cleanup is proven safe"
+      : "the interrupted worker's processes are gone; its execution was finalized" });
     this.reapTerminalScratch(runId);
     return true;
   }
@@ -909,6 +916,7 @@ export class RunManager {
     if (!probe || probe.generation !== orphan.generation) return undefined;
     if (probe.probe.controller !== undefined) return `the worker is still controlled by a live cezar (pid ${probe.probe.controller})`;
     const pid = probe.probe.pids[0];
+    if (pid !== undefined && probe.probe.candidates?.includes(pid)) return `previous execution membership is unverified: process cwd is unreadable (pid ${pid}); resources retained`;
     return pid === undefined ? undefined : `a process of the previous execution is still running (pid ${pid})`;
   }
 
@@ -926,8 +934,16 @@ export class RunManager {
     const pause = () => new Promise(resolve => setTimeout(resolve, Math.max(0, Math.min(500, deadline - Date.now()))));
     // A live controller is another cezar's: nothing to signal or wait for. Otherwise signal only
     // recorded, token-verified survivors (none for a legacy record-less generation), then wait
-    // out every other holder until the deadline; the scan's processes are never signalled.
-    if (!orphan.record || !recordedProcessLive(orphan.record.controller)) {
+    // for verified cwd holders until the deadline; unverified candidates alone refuse promptly.
+    // An unreadable candidate cannot be signalled and has no verified relationship to this
+    // generation. Refuse promptly; the durable orphan re-probe still observes later recovery.
+    const onlyCandidates = () => {
+      const latest = this.orphanProbes.get(runId);
+      const probe = latest?.generation === orphan.generation ? latest.probe : undefined;
+      return probe !== undefined && probe.pids.length > 0 &&
+        probe.pids.every(pid => probe.candidates?.includes(pid));
+    };
+    if (!onlyCandidates() && (!orphan.record || !recordedProcessLive(orphan.record.controller))) {
       if (orphan.record) {
         const targets = orphan.record.processes.filter(entry => entry.startToken !== undefined && recordedProcessLive(entry));
         const signal = (name: NodeJS.Signals) => {
@@ -942,12 +958,12 @@ export class RunManager {
         while (Date.now() < killAt && targets.some(recordedProcessLive)) await pause();
         if (targets.some(recordedProcessLive)) signal('SIGKILL');
       }
-      while (!this.settleOrphanedWorkerExecution(runId, { fresh: true }) && Date.now() < deadline && same()) await pause();
+      while (!this.settleOrphanedWorkerExecution(runId, { fresh: true }) && Date.now() < deadline && same() && !onlyCandidates()) await pause();
     }
     if (!same()) return;
     const probe = this.orphanProbes.get(runId)?.probe;
     if (probe?.controller !== undefined) this.orphanBlockers.set(runId, { kind: 'controller', pid: probe.controller });
-    else if (probe?.pids.length) this.orphanBlockers.set(runId, { kind: 'processes', pids: probe.pids });
+    else if (probe?.pids.length) this.orphanBlockers.set(runId, { kind: 'processes', pids: probe.pids, ...(probe.candidates?.length ? { candidates: probe.candidates } : {}) });
   }
 
   /** Best effort: a failed write leaves the working-directory scan as this process's evidence. */

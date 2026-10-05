@@ -131,3 +131,21 @@ it.each(['win32', 'linux'] as const)('retains claims when the %s process probe i
   })).resolves.toEqual(claim);
   expect(JSON.parse(await readFile(path, 'utf8'))).toEqual(claim);
 });
+
+it('withdraws timed-out cleanup without running its queued mutation after unlock (hearsay-tools/cezarion#839)', async () => {
+  const root = await repo();
+  let release!: () => void; let entered!: () => void;
+  const ready = new Promise<void>(resolve => { entered = resolve; });
+  const held = withWorktreeMutation(root, async () => { entered(); await new Promise<void>(resolve => { release = resolve; }); });
+  await ready;
+  const timer = setTimeout(() => release(), 2_000);
+  let ran = false;
+  try {
+    await expect(withWorktreeMutation(root, async () => { ran = true; }, { waitMs: 100 })).rejects.toThrow(/timed out waiting for worktree mutation lock/);
+    expect(ran).toBe(false);
+    expect(await readdir(join(root, '.git/cezar-worktree-mutations'))).toHaveLength(1);
+  } finally { clearTimeout(timer); release(); await held; }
+  await withWorktreeMutation(root, async () => {});
+  expect(ran).toBe(false);
+  expect(await readdir(join(root, '.git/cezar-worktree-mutations'))).toEqual([]);
+});

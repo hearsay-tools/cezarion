@@ -9,7 +9,7 @@ import { z } from 'zod';
 import { delegationStateSchema, workerWorkspaceSchema } from '@open-mercato/cezar-contract';
 import type { WorkerDestroyResult, WorkerDiff, WorkerWorkspace } from '@open-mercato/cezar-contract';
 import { branchFor, createWorktree, DIFF_CAP, worktreePathFor } from '../git-worktree.ts';
-import { withWorktreeMutation } from '../git-worktree-lock.ts';
+import { withWorktreeMutation, WorktreeMutationLockTimeout } from '../git-worktree-lock.ts';
 import { resolveTaskDiffBase } from '../git-diff-base.ts';
 import { isSafeGitRef } from '../git-refs.ts';
 import type { RunRecord } from '../runs/store.ts';
@@ -255,9 +255,9 @@ export type WorkerNoMaterializationProof = (workspace: WorkerWorkspace) => boole
 export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorkspace, neverMaterialized?: WorkerNoMaterializationProof,
   assertCurrent?: () => void, beforeRemove?: () => Promise<void>, assertUnheld?: () => void): Promise<WorkerDestroyResult> {
   let remaining: Array<'worktree' | 'branch'> = ['worktree', 'branch'];
-  let provisioned = false;
+  let provisioned = false; let lockBusy = false;
   const result = (): WorkerDestroyResult => ({ workerId: value.ownerRunId, state: remaining.length ? 'incomplete' : 'complete', remaining,
-    ...(remaining.length ? { error: 'Owned resources remain: resource identity or Git cleanup could not be verified. Check the worker worktree, Git lock and ownership receipt, then retry destroy after correcting the blocker' } : {}),
+    ...(remaining.length ? { error: lockBusy ? 'Owned resources retained: worktree mutation lock is busy; retry destroy later' : 'Owned resources remain: resource identity or Git cleanup could not be verified. Check the worker worktree, Git lock and ownership receipt, then retry destroy after correcting the blocker' } : {}),
     ...(provisioned ? { deleted: [
       ...(!remaining.includes('worktree') ? [{ kind: 'worktree' as const, path: value.path }] : []),
       ...(!remaining.includes('branch') ? [{ kind: 'branch' as const, ref: `refs/heads/${value.branch}` }] : []),
@@ -338,7 +338,7 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
       await writeCleanup(checkpointPath, { ...checkpoint, phase: 'complete' }, assertCurrent);
       remaining = [];
       return result();
-    });
-  } catch { /* Ambiguous ownership and every failed Git/filesystem operation fail closed. */ }
+    }, { waitMs: 1_000 });
+  } catch (error) { lockBusy = error instanceof WorktreeMutationLockTimeout; /* Ambiguous ownership and every failed Git/filesystem operation fail closed. */ }
   return result();
 }
