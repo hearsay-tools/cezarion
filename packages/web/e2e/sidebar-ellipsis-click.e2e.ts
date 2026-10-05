@@ -13,6 +13,7 @@ import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './f
 const id = 'ellipsis-row'
 const row = `[data-slot="task-row"][data-run-id="${id}"]`
 const meta = `${row} [data-slot="task-row-meta"]`
+const originalArgs = process.env.AGENT_BROWSER_ARGS
 let browser: AgentBrowser
 let server: ChildProcess
 let root: string
@@ -20,6 +21,9 @@ let base: string
 let project: string
 
 beforeAll(async () => {
+  // References are links only where the pointer can hover (#617 01b). Headless Linux Chrome
+  // reports a primary pointer that cannot, which would render them as inert text.
+  process.env.AGENT_BROWSER_ARGS = [originalArgs, '--blink-settings=primaryHoverType=2'].filter(Boolean).join(',')
   root = mkdtempSync(join(tmpdir(), 'cez-ellipsis-click-'))
   mkdirSync(join(root, '.ai/cezar'), { recursive: true })
   const finished = new Date(Date.now() - 60 * 60_000).toISOString()
@@ -43,6 +47,8 @@ beforeAll(async () => {
 
 afterAll(async () => {
   browser?.close()
+  if (originalArgs === undefined) delete process.env.AGENT_BROWSER_ARGS
+  else process.env.AGENT_BROWSER_ARGS = originalArgs
   await stopFixtureServer(server)
   if (root) rmSync(root, { recursive: true, force: true })
 })
@@ -52,7 +58,7 @@ describe('sidebar meta line ellipsis', () => {
     browser.goto(`${base}/p/${project}`)
     // Settled, not first truth: the web font changes every width on the line, and the marks follow
     // it a ResizeObserver callback later. The line overflows, so the ellipsis hid a reference.
-    const point = waitForSettledSample<{ x: number; y: number; hit: string | null; firstChip: string | null; hidden: string[] }>(browser, `(() => {
+    const point = waitForSettledSample<{ hover: boolean; x: number; y: number; hit: string | null; firstChip: string | null; hidden: string[] }>(browser, `(() => {
       const line = document.querySelector(${JSON.stringify(meta)})
       const chip = line?.querySelector('[data-slot="pr-chip"]')
       if (!line || !chip || line.scrollWidth <= line.clientWidth) return null
@@ -60,8 +66,9 @@ describe('sidebar meta line ellipsis', () => {
       const x = Math.round(box.right - 2), y = Math.round(box.top + box.height / 2)
       const at = (px, py) => document.elementFromPoint(px, py)?.closest('a')?.getAttribute('href') ?? null
       const hidden = [...line.querySelectorAll(':scope > [data-ellipsis-hidden]')].map((el) => el.getAttribute('href') ?? el.textContent)
-      return { x, y, hit: at(x, y), firstChip: at(first.left + first.width / 2, first.top + first.height / 2), hidden }
+      return { hover: matchMedia('(hover: hover)').matches, x, y, hit: at(x, y), firstChip: at(first.left + first.width / 2, first.top + first.height / 2), hidden }
     })()`, undefined, meta)
+    expect(point.hover, 'references are links only under a hover-capable pointer').toBe(true)
     // The reference the line still paints stays a link; the space behind the ellipsis is the row.
     expect(point.firstChip, `marked hidden: ${point.hidden.join(', ')}`).toBe('https://github.com/o/r/pull/47240001')
     expect(point.hit).toBeNull()
