@@ -1,6 +1,6 @@
-# SQLite run store (#779)
+# SQLite run store (hearsay-tools/cezarion#779)
 
-Status: implemented on the #779 branch, 2026-10-05. This is the short design record of what shipped. The long form is the [Plan handoff](https://github.com/hearsay-tools/cezarion/issues/779#issuecomment-5983809598) comment on #779, with its Amendment 1 and Amendment 2. The evidence that justified the move is the [benchmark comment](https://github.com/hearsay-tools/cezarion/issues/779#issuecomment-5992577996).
+Status: implemented on the hearsay-tools/cezarion#779 branch, 2026-10-05. This is the short design record of what shipped. The long form is the [Plan handoff](https://github.com/hearsay-tools/cezarion/issues/779#issuecomment-5983809598) comment on hearsay-tools/cezarion#779, with its Amendment 1 and Amendment 2. The evidence that justified the move is the [benchmark comment](https://github.com/hearsay-tools/cezarion/issues/779#issuecomment-5992577996).
 
 ## Problem
 
@@ -8,7 +8,7 @@ Status: implemented on the #779 branch, 2026-10-05. This is the short design rec
 
 ## Decision
 
-Store runs in one `node:sqlite` file per project, `.ai/cezar/runs.db`. Move only after the committed benchmark showed that a save is the largest block that a current client causes. #817 (slim run list) landed first, so the gate compares against `GET /run-summaries`, not `GET /runs`.
+Store runs in one `node:sqlite` file per project, `.ai/cezar/runs.db`. Move only after the committed benchmark showed that a save is the largest block that a current client causes. hearsay-tools/cezarion#817 (slim run list) landed first, so the gate compares against `GET /run-summaries`, not `GET /runs`.
 
 SQLite ships inside Node, so the zero-config rule holds: no server, no install, no setting. The price is a higher Node floor: `engines.node` is `>=24.15.0`, the first release where `node:sqlite` is a release candidate (stability 1.2), and CI runs the unit gate on exactly 24.15.0 (`node-floor` job).
 
