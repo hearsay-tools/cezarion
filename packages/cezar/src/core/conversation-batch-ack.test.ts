@@ -4,7 +4,7 @@ import type { AgentInput, ConversationMessage } from '@open-mercato/cezar-contra
 import { waitFor, withOwnedInputRun } from './harness-parity.testkit.ts';
 import { withDelayedCommand } from './owned-input-delivery.testkit.ts';
 
-for (const backend of ['codex', 'opencode', 'pi'] as const) {
+for (const backend of ['codex', 'opencode', 'pi', 'omp'] as const) {
   it.each(['acknowledged', 'cancelled'] as const)(`${backend}: %s batch keeps independent receipts and concurrent arrivals`, async mode => {
     await withDelayedCommand(backend, async release => {
       await withOwnedInputRun(backend, 'baseline', async ({ store, manager, runId, parentRunId }) => {
@@ -51,7 +51,7 @@ for (const backend of ['codex', 'opencode', 'pi'] as const) {
 }
 
 
-for (const backend of ['codex', 'opencode', 'pi'] as const) {
+for (const backend of ['codex', 'opencode', 'pi', 'omp'] as const) {
   it(`${backend}: provider-first reservation preserves a later inbox claim across its ACK`, async () => {
     await withDelayedCommand(backend, async release => {
       await withOwnedInputRun(backend, 'baseline', async ({ store, manager, runId, parentRunId }) => {

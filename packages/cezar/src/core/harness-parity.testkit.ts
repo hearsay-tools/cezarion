@@ -429,7 +429,7 @@ export interface ParityExemption {
  * is the runner, not this table.
  */
 export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
-  ...(['A13', 'A14'] as const).flatMap(criterion => (['claude', 'codex', 'pi', 'cursor'] as const).map(backend => ({
+  ...(['A13', 'A14'] as const).flatMap(criterion => (['claude', 'codex', 'pi', 'cursor', 'omp'] as const).map(backend => ({
     criterion, backend, kind: 'scenario-unconstructible' as const,
     reason: 'This wire has no separate portable-answer HTTP ACK retained after turn completion. The executable cell checks ordinary root idle expiry and successful Continue through its native wire instead.',
   }))),
@@ -440,6 +440,10 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
   {
     criterion: 'A9', backend: 'pi', kind: 'capability-absent',
     reason: 'Pi RPC uses the turn-end CEZ:ASK fallback; its ask wire emits no native mid-turn ask.requested (A3/A4 cover the portable policy).',
+  },
+  {
+    criterion: 'A9', backend: 'omp', kind: 'capability-absent',
+    reason: 'OMP RPC uses the turn-end CEZ:ASK fallback: its `ask` tool is outside the v18.4.11 default registry (get_state.dumpTools) and asks through extension_ui_request, which cezar does not answer (R7), so no native mid-turn ask.requested reaches the run (A3/A4 cover the portable policy).',
   },
   {
     criterion: 'R16', backend: 'claude', kind: 'capability-absent',
@@ -462,6 +466,10 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
     reason: 'Cursor ACP agent_message_chunk has a single text channel; cursor-acp-runner emits v1 directly from each completed parent v2 message (acp-lifecycle.ndjson). A completed marker cannot be present only on v2.',
   },
   {
+    criterion: 'R16', backend: 'omp', kind: 'capability-absent',
+    reason: 'OMP RPC text_end.content is the one assistant-text channel for v1 and v2 (rpc-lifecycle.ndjson, v18.4.11); message_end has no separately mapped text channel.',
+  },
+  {
     criterion: 'R15', backend: 'pi', kind: 'scenario-unconstructible',
     reason: 'Pi RPC has no child session or nested child transcript (rpc-lifecycle.ndjson); like S9/R12, post-park child items cannot be constructed on that wire.',
   },
@@ -480,6 +488,10 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
   {
     criterion: 'I2', backend: 'pi', kind: 'capability-absent',
     reason: 'pi 0.87.0 delivers an acknowledged steer in the running turn or runs it as the next prompt (rpc.md steer; #505 repro), so accepted input is never left unread.',
+  },
+  {
+    criterion: 'I2', backend: 'omp', kind: 'capability-absent',
+    reason: 'OMP v18.4.11 AgentSession rewrites agent_end to isTerminal:false while agent.hasQueuedMessages(), runs the queued steer before session_settled, and RpcPromptResults reports it only at the next terminal agent_end with an empty queue (agent-session.ts, rpc-prompt-results.ts in the release binary), so accepted input is never left unread.',
   },
   {
     criterion: 'S4', backend: 'cursor', kind: 'capability-absent',

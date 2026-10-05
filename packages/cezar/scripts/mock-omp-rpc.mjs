@@ -4,7 +4,8 @@
 // are copied from the real binary (2026-10-05). Keep it standalone: optional scenario helpers
 // are imported lazily.
 import readline from 'node:readline';
-import { appendFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { appendFileSync, existsSync, writeFileSync } from 'node:fs';
 
 const argv = process.argv.slice(2);
 if (process.env.CEZ_MOCK_ARGS_FILE) appendFileSync(process.env.CEZ_MOCK_ARGS_FILE, `${JSON.stringify(argv)}\n`);
@@ -76,6 +77,35 @@ write({ type: 'extension_ui_request', id: 'mock-widget-1', method: 'setWidget', 
 write({ type: 'advisor_cost_changed' });
 write({ type: 'available_commands_update', commands: [{ name: 'model', description: 'Select model' }] });
 
+/** One valid CEZ:ASK payload (spec #473), as mock-pi-rpc.mjs `ASK_MARKER_BODY`. */
+const ASK_MARKER_BODY = '{"questions":[{"header":"Library","question":"Which test library?","multiSelect":false,"options":[{"label":"Vitest","description":"Use the existing test runner"},{"label":"Node test","description":"Use node:test"}]}]}';
+const SNAPSHOT_ASK = 'Using the CEZ:ASK structured question format instead:\n\nCEZ:ASK {"questions":[{"header":"Library","question":"Which test library?","options":[{"label":"Vitest"},{"label":"Node test"}]}]}';
+// OMP's tool-approval error with no interactive UI (v18.4.11 tool wrapper, `runner.hasUI()` false).
+const NO_UI_APPROVAL_ERROR = 'Tool "bash" requires approval but no interactive UI available.\nOptions:\n  1. Set tools.approvalMode: yolo in /settings\n  2. Add tools.approval.bash: allow to config\n  3. Use an interactive UI to approve the tool call';
+/** Set by `mock:ask mock:resume-done`: the human answer then finishes with CEZ:DONE. */
+let resumeAfterAsk = false;
+
+/** Same as mock-pi-rpc.mjs `watchdogStall`: a turn that never progresses (no-progress rows). */
+function watchdogStall(message) {
+  writeFileSync('watchdog.pid', String(process.pid));
+  if (message.includes('ignore-term')) {
+    process.removeAllListeners('SIGTERM');
+    process.on('SIGTERM', () => {});
+    // Test-cleanup backstop, deliberately longer than the asserted teardown bound.
+    setTimeout(() => process.exit(0), 12_000);
+  }
+  if (message.includes('held-pipe')) {
+    spawn(process.execPath, ['-e', 'setTimeout(() => {}, 5000)'], { stdio: ['ignore', process.stdout, process.stderr] });
+  }
+}
+
+/** #401: hold late wire frames until the test has observed the park (as the codex mock). */
+async function afterParityPark(message) {
+  const gate = /parity-release=([^\s"\\]+)/.exec(message)?.[1];
+  if (!gate) throw new Error('post-park scenario requires a release path');
+  while (!existsSync(gate)) await sleep(10);
+}
+
 /** The turn in flight: steers admitted into it are read before it ends (#505). */
 let activeTurn = null;
 let messageSeq = 0;
@@ -106,6 +136,16 @@ function assistantText(deltas, { stopReason = 'stop', usage = { input: 10, outpu
   write({ type: 'message_end', messageId, message: { role: 'assistant', content: [{ type: 'text', text: deltas.join('') }], provider: 'anthropic', model: 'claude-mock', usage, stopReason, ...extra } });
 }
 
+/** One complete sub-agent text message, wrapped in `subagent_event` (rpc-subagents.ndjson). */
+function subagentText(id, text) {
+  const event = (inner) => write({ type: 'subagent_event', payload: { id, event: inner } });
+  event({ type: 'message_start', message: { role: 'assistant', content: [] } });
+  event({ type: 'message_update', message: { role: 'assistant' }, assistantMessageEvent: { type: 'text_start', contentIndex: 0 } });
+  event({ type: 'message_update', message: { role: 'assistant' }, assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: text } });
+  event({ type: 'message_update', message: { role: 'assistant' }, assistantMessageEvent: { type: 'text_end', contentIndex: 0, content: text } });
+  event({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text }], stopReason: 'stop' } });
+}
+
 function beginTurn(command) {
   activeTurn = { id: command?.id, steers: [] };
   write({ type: 'agent_start' });
@@ -123,6 +163,15 @@ function endTurn({ status = 'completed', error, settle = true } = {}) {
   activeTurn = null;
   const readNow = steeringMode === 'all' ? turn.steers : turn.steers.slice(0, 1);
   const deferred = steeringMode === 'all' ? [] : turn.steers.slice(1);
+  if (turn.late && readNow.length > 0) {
+    // A steer queued after the last model call: `AgentSession` rewrites this agent_end to
+    // `isTerminal: false` while `agent.hasQueuedMessages()`, and the next run reads the queue
+    // before the session settles (agent-session.ts, v18.4.11).
+    write({ type: 'turn_end' });
+    write({ type: 'agent_end', messages: [], isTerminal: false, yielded: false });
+    write({ type: 'agent_start' });
+    write({ type: 'turn_start' });
+  }
   for (const steer of readNow) {
     userMessage(steer.message);
     assistantText([steer.message], { usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { total: 0 } } });
@@ -239,8 +288,125 @@ async function prompt(command) {
     return;
   }
 
+  if (message.includes('mock:crash-stderr')) {
+    // Every crash scenario dies before the prompt's ack (as the Pi mock), after a malformed frame.
+    const { crashWithStderr } = await import('./mock-runner-crash.mjs');
+    if (crashWithStderr(message, '{"type":"tool_execution_update","toolCallId":"truncated')) return;
+  }
+
   respond(command);
   beginTurn(command);
+  if (message.includes('mock:autonomous') || message.startsWith('Continue working autonomously until the task is fully complete.')) {
+    const { autonomousReply } = await import('./mock-autonomous.mjs');
+    assistantText([autonomousReply(message)]);
+    endTurn();
+    return;
+  }
+  if (/mock:(no-progress|busy-progress)/.test(message)) {
+    if (message.includes('mock:no-progress')) {
+      // The turn never progresses and never settles.
+      watchdogStall(message);
+      return;
+    }
+    for (let i = 0; i < 24; i++) {
+      write({ type: 'tool_execution_update', toolCallId: 'busy', toolName: 'bash', args: { command: 'build' }, partialResult: { content: [{ type: 'text', text: 'working' }] } });
+      await sleep(100);
+    }
+    assistantText(['busy progress finished']);
+    endTurn();
+    return;
+  }
+  if (message.includes('mock:split-text')) {
+    // One text_delta per token, so the marker is split across deltas (harness parity S8).
+    assistantText(['parity split text', '\n\n', 'CEZ:', 'MONITORING']);
+    endTurn();
+    return;
+  }
+  if (message.includes('mock:ask-snapshot')) {
+    // #401: an authoritative text_end with no deltas.
+    const messageId = `msg-${++messageSeq}`;
+    const text = message.includes('mock:ask-snapshot-bad') ? 'CEZ:ASK {not valid json' : SNAPSHOT_ASK;
+    write({ type: 'message_start', messageId, message: { role: 'assistant', content: [] } });
+    messageUpdate(messageId, { type: 'text_end', contentIndex: 0, content: text });
+    write({ type: 'message_end', messageId, message: { role: 'assistant', content: [{ type: 'text', text }], provider: 'anthropic', model: 'claude-mock', usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 15, cost: { total: 0.001 } }, stopReason: 'stop' } });
+    endTurn();
+    return;
+  }
+  if (message.includes('mock:ask-prose')) {
+    assistantText(['Use `CEZ:ASK {"questions":[]}` in your reply.\n> CEZ:ASK {not valid json']);
+    endTurn();
+    return;
+  }
+  if (message.includes('mock:ask-bad')) {
+    // OMP's `ask` tool needs an interactive UI, so the CEZ:ASK marker is the ask path (as Pi's).
+    assistantText(['Pick one.\n\nCEZ:ASK {not valid json']);
+    endTurn();
+    return;
+  }
+  if (message.includes('mock:ask')) {
+    resumeAfterAsk = message.includes('mock:resume-done');
+    // The marker and its JSON body land in separate deltas (the #2 boundary).
+    assistantText(['Pick one.\n\n', 'CEZ:ASK', ' ', ASK_MARKER_BODY]);
+    endTurn();
+    return;
+  }
+  if (message.includes('mock:subagent-after-park')) {
+    // A `task` call whose sub-agent is still reporting after the parent parked on its marker.
+    write({ type: 'tool_execution_start', toolCallId: 'toolu_park_task', toolName: 'task', args: { agent: 'explore', task: 'Review the change' } });
+    write({ type: 'subagent_lifecycle', payload: { id: 'ParkReviewer', agent: 'explore', status: 'started', parentToolCallId: 'toolu_park_task', index: 0 } });
+    subagentText('ParkReviewer', 'Child review started.');
+    write({ type: 'tool_execution_end', toolCallId: 'toolu_park_task', toolName: 'task', result: { content: [{ type: 'text', text: 'ParkReviewer: running' }] }, isError: false });
+    assistantText(['Watching the child.\nCEZ:MONITORING']);
+    endTurn();
+    await afterParityPark(message);
+    write({ type: 'subagent_event', payload: { id: 'ParkReviewer', event: { type: 'tool_execution_start', toolCallId: 'toolu_park_read', toolName: 'read', args: { path: 'README.md' } } } });
+    write({ type: 'subagent_event', payload: { id: 'ParkReviewer', event: { type: 'tool_execution_end', toolCallId: 'toolu_park_read', toolName: 'read', result: { content: [{ type: 'text', text: 'mock file' }] } } } });
+    subagentText('ParkReviewer', 'Post-park child update processed.');
+    write({ type: 'subagent_event', payload: { id: 'ParkReviewer', event: { type: 'agent_end', messages: [], isTerminal: true, yielded: true } } });
+    write({ type: 'subagent_lifecycle', payload: { id: 'ParkReviewer', agent: 'explore', status: 'completed', parentToolCallId: 'toolu_park_task', index: 0 } });
+    return;
+  }
+  if (message.includes('mock:subagent')) {
+    // #5/#600: the sub-agent's own terminal agent_end, nested under the parent's `task` call
+    // (rpc-subagents.ndjson), must not end the parent turn; #149: its text stays nested.
+    write({ type: 'tool_execution_start', toolCallId: 'toolu_task_1', toolName: 'task', args: { agent: 'explore', task: 'Review the change' } });
+    write({ type: 'subagent_lifecycle', payload: { id: 'Reviewer', agent: 'explore', status: 'started', parentToolCallId: 'toolu_task_1', index: 0 } });
+    write({ type: 'subagent_event', payload: { id: 'Reviewer', event: { type: 'agent_start' } } });
+    write({ type: 'subagent_event', payload: { id: 'Reviewer', event: { type: 'tool_execution_start', toolCallId: 'toolu_child_grep', toolName: 'grep', args: { pattern: 'ask' } } } });
+    write({ type: 'subagent_event', payload: { id: 'Reviewer', event: { type: 'tool_execution_end', toolCallId: 'toolu_child_grep', toolName: 'grep', result: { content: [{ type: 'text', text: '3 matches' }] } } } });
+    write({ type: 'subagent_event', payload: { id: 'Reviewer', event: { type: 'agent_end', messages: [], isTerminal: true, yielded: true } } });
+    write({ type: 'tool_execution_end', toolCallId: 'toolu_task_1', toolName: 'task', result: { content: [{ type: 'text', text: 'Reviewer: done' }] }, isError: false });
+    // The parent keeps streaming after the child's terminal frame.
+    assistantText(['Still working after the sub-agent.\nCEZ:MONITORING']);
+    // Late child text after the parent marker; the second block never completes.
+    subagentText('Reviewer', 'Child review finished.');
+    write({ type: 'subagent_event', payload: { id: 'Reviewer', event: { type: 'message_update', message: { role: 'assistant' }, assistantMessageEvent: { type: 'text_start', contentIndex: 0 } } } });
+    write({ type: 'subagent_event', payload: { id: 'Reviewer', event: { type: 'message_update', message: { role: 'assistant' }, assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: 'Child review still streaming.' } } } });
+    endTurn();
+    return;
+  }
+  if (message.includes('mock:approval-denied')) {
+    // A user's stricter `tools.approvalMode`: OMP fails the call closed when no UI can approve it.
+    write({ type: 'tool_execution_start', toolCallId: 'tool-denied', toolName: 'bash', args: { command: 'rm -rf build' } });
+    write({ type: 'tool_execution_end', toolCallId: 'tool-denied', toolName: 'bash', result: { content: [{ type: 'text', text: NO_UI_APPROVAL_ERROR }] }, isError: true });
+    assistantText(['The command needs approval I cannot get here.']);
+    endTurn();
+    return;
+  }
+  if (message.includes('mock:steer-late')) {
+    // The final text first; a steer admitted now arrives after the last model call (#505).
+    assistantText(['late window: final message already sent']);
+    activeTurn.late = true;
+    await sleep(300);
+    endTurn();
+    return;
+  }
+  if (message.includes('mock:done') || (resumeAfterAsk && message.trim() === 'Library: Vitest')) {
+    resumeAfterAsk = false;
+    assistantText(['parity done: the task is complete\n\nCEZ:DONE']);
+    endTurn();
+    return;
+  }
   if (message.includes('mock:steer-tool')) {
     write({ type: 'tool_execution_start', toolCallId: 'tool-steer', toolName: 'bash', args: { command: 'wait' } });
     await sleep(Number(process.env.CEZ_MOCK_STEER_MS ?? 600));
@@ -269,13 +435,8 @@ async function prompt(command) {
     endTurn();
     return;
   }
-  if (message.includes('mock:done')) {
-    assistantText(['parity done: the task is complete\n\nCEZ:DONE']);
-    endTurn();
-    return;
-  }
 
-  assistantText([`Investigating: `, message]);
+  assistantText([`Investigating: `, message, ...(message.includes('mock:monitoring') ? ['\n\nCEZ:MONITORING'] : [])]);
   write({ type: 'tool_execution_start', toolCallId: 'tool-1', toolName: 'read', args: { path: 'README.md' } });
   write({ type: 'tool_execution_end', toolCallId: 'tool-1', toolName: 'read', result: { content: [{ type: 'text', text: 'mock file' }] }, isError: false });
   endTurn();

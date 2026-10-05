@@ -297,6 +297,20 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
     expect(turnEnds(events)).toBe(1);
   });
 
+  it('a tool denied by a no-UI approval prompt fails on its card and the turn still settles', async () => {
+    const { events, ui } = await runSession(spec('mock:approval-denied'));
+    const denial = 'Tool "bash" requires approval but no interactive UI available.';
+    const result = events.find(event => event.type === 'tool-result');
+    expect(result).toMatchObject({ type: 'tool-result', toolCallId: 'tool-denied', isError: true });
+    expect(result?.type === 'tool-result' && result.result).toContain(denial);
+    const failed = ui.find(event => event.type === 'item.completed' && event.item.kind === 'tool' && event.item.id === 'tool-denied');
+    expect(failed).toMatchObject({ item: { status: 'failed', error: expect.stringContaining(denial) } });
+    expect(events.filter(event => event.type === 'error')).toEqual([]);
+    expect(turnEnds(events)).toBe(1);
+    expect(events.findIndex(event => event.type === 'turn-end')).toBeGreaterThan(events.indexOf(result!));
+    expect(ui.filter(event => event.type === 'turn.completed')).toHaveLength(1);
+  });
+
   it('a prompt that fails before the agent ran is one v1 error, then the turn-end', async () => {
     const { events, ui } = await runSession(spec('mock:prompt-error'));
     expect(events.filter(event => event.type === 'error')).toEqual([

@@ -9,7 +9,7 @@ const delivered = (input: object, stored: { consumedAt?: string; awaitingRead?: 
     ...(stored?.awaitingRead ? { awaitingRead: true } : {}) });
 import { driveSeam, promptFor, waitFor, withOwnedInputRun } from './harness-parity.testkit.ts';
 
-for (const backend of ['codex', 'opencode', 'pi'] as const) {
+for (const backend of ['codex', 'opencode', 'pi', 'omp'] as const) {
   it.each(['fresh', 'continuation'] as const)(`${backend} %s rejected transport remains queued and replays the same input after reopening`, async mode => {
     await withRejectedCommand(backend, async () => {
       await withOwnedInputRun(backend, 'baseline', async fixture => {
@@ -40,7 +40,7 @@ for (const backend of ['codex', 'opencode', 'pi'] as const) {
   }, 60_000);
 }
 
-for (const backend of ['codex', 'opencode', 'pi'] as const) {
+for (const backend of ['codex', 'opencode', 'pi', 'omp'] as const) {
   it(`${backend} delayed ACK keeps the in-flight input in the 32 cap and merges concurrent queue writes exactly once`, async () => {
     await withDelayedCommand(backend, async release => {
       await withOwnedInputRun(backend, 'baseline', async ({ store, manager, runId, parentRunId }) => {
@@ -89,7 +89,7 @@ for (const backend of ['codex', 'opencode', 'pi'] as const) {
   }, 60_000);
 }
 
-for (const backend of ['codex', 'opencode', 'pi'] as const) {
+for (const backend of ['codex', 'opencode', 'pi', 'omp'] as const) {
   it(`${backend} a completed turn with a delayed ACK holds auto-end and resumes it after acceptance`, async () => {
     await withDelayedCommand(backend, async release => {
       await driveSeam(backend, 'hold', {
