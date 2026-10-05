@@ -1,5 +1,5 @@
 import { QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -203,9 +203,13 @@ describe('RunActivityDock — the workers section', () => {
     expect(document.querySelectorAll('[data-slot="worker-item"]')).toHaveLength(0)
   })
 
-  it('never mounts a workers section for an ordinary run', () => {
-    renderDock(run())
+  it.each([
+    ['ordinary', undefined],
+    ['invalid delegation', { role: 'invalid' }],
+  ] as const)('never mounts or fetches workers for an %s run', async (_label, delegation) => {
+    await act(async () => { renderDock(run({ delegation })) })
     expect(section('workers')).toBeNull()
+    expect(vi.mocked(fetch).mock.calls.filter(([input]) => String(input).endsWith('/relationships'))).toEqual([])
   })
 })
 
