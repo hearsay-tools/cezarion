@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import { versionEntry, writeManifest } from '../self-update/layout.ts';
 import type { Hono } from 'hono';
 import { selfUpdateStatusSchema } from '@open-mercato/cezar-contract';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RunStore } from '../runs/store.ts';
 import { RegistryCache } from '../self-update/registry.ts';
 import { SelfUpdateService } from '../self-update/service.ts';
@@ -97,6 +97,46 @@ describe('the self-update API', () => {
     expect(body.version).toBe(RUNNING);
     expect(['managed', 'global-npm', 'npx', 'checkout', 'unknown']).toContain(body.installKind);
     expect(body.job).toBeNull();
+  });
+
+  it('returns offline installed-version apply and polling status before restart', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    let release!: (response: Response) => void;
+    const pendingRegistry = new Promise<Response>(resolve => { release = resolve; });
+    const fetchRegistry = vi.fn(() => pendingRegistry);
+    const registry = new RegistryCache('@wjarka/cezarion', fetchRegistry);
+    const restart = vi.fn();
+    for (const id of [RUNNING, '0.13.0']) {
+      const entry = versionEntry(id);
+      mkdirSync(dirname(entry), { recursive: true }); writeFileSync(entry, '// fixture');
+      writeManifest(id, { source: 'registry', version: id, installedAt: '2026-10-01T00:00:00Z' });
+    }
+    const selfUpdate = new SelfUpdateService({
+      pkgName: '@wjarka/cezarion', version: RUNNING, entry: versionEntry(RUNNING), restart, registry,
+    });
+    app = createApp({ repoRoot, store, manager: {} as RunManager, version: RUNNING, selfUpdate });
+    // An initial dialog read may already be stalled by an unreachable registry.
+    const firstRead = registry.get();
+    try {
+      const received = vi.fn();
+      const response = apply('0.13.0').then(res => { received(res); return res; });
+      await vi.waitFor(() => expect(received).toHaveBeenCalledOnce(), { timeout: 500 });
+      const res = await response;
+      expect(res.status).toBe(200);
+      expect(selfUpdateStatusSchema.parse(await res.json()).job).toMatchObject({ status: 'restarting', target: '0.13.0' });
+      const polled = vi.fn();
+      const poll = apiRequest(app, '/api/v1/workspace/self-update').then(res => { polled(res); return res; });
+      await vi.waitFor(() => expect(polled).toHaveBeenCalledOnce(), { timeout: 100 });
+      expect(selfUpdateStatusSchema.parse(await (await poll).json()).job?.status).toBe('restarting');
+      expect(restart).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(750);
+      expect(restart).toHaveBeenCalledOnce();
+      expect(fetchRegistry).toHaveBeenCalledOnce();
+    } finally {
+      release(new Response(null, { status: 503 }));
+      await firstRead;
+      vi.clearAllTimers(); vi.useRealTimers();
+    }
   });
 
   it('rejects a body that is not a plain version string', async () => {
