@@ -39,6 +39,7 @@ import type { Next } from 'hono';
 import { serve, type ServerType } from '@hono/node-server';
 import { bodyLimit } from 'hono/body-limit';
 import { streamSSE } from 'hono/streaming';
+import { matchedRoutes } from 'hono/route';
 import { jsonZodValidator, paramZodValidator, queryZodValidator } from './validators.ts';
 import { deliverOnce, TaskWebhooks } from '../runs/webhook.ts';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
@@ -211,6 +212,7 @@ import { parseRemote, resolveForge, type ForgeAvailability } from './forge/index
 import { fetchGithub, fetchGithubProjects, fetchGithubChecks, fetchGithubComments, fetchGithubItem, forgetGithubItem, fetchGithubPrDiff, fetchGithubRefStatus, forgetRefStatus, readCachedRefStatuses, refNumberFromUrl, searchGithubItems, GithubPrNotFoundError, GH_CHECKS_MAX, GH_REF_STATUS_MAX } from './github.ts';
 import { ensureLaunchKey } from './launch-key.ts';
 import { CockpitAlreadyRunningError, type CockpitOwnership } from './cockpit-ownership.ts';
+import { RunStoreOpenError } from '../runs/store-open-error.ts';
 import { openInTerminal } from './open-in-terminal.ts';
 import { agentCliRunner, detectOpenTargets, openFileInDefaultApp, openInApp } from './open-in-app.ts';
 import { createDraftPr } from './pr.ts';
@@ -1506,30 +1508,38 @@ export function createApp(deps: ServerDeps) {
   }
   const resolveProjectScope = async (c: Context<ProjectApiEnv>, next: Next): Promise<Response | void> => {
     const raw = c.req.param('projectId');
-    if (raw === undefined) {
-      c.set('project', bootContext);
-      return next();
-    }
-    if (!projectIdSchema.safeParse(raw).success) {
-      return c.json({ error: `unknown project: ${raw}` }, 404);
-    }
-    if (raw === 'default' || raw === (await resolveBootProject())) {
-      c.set('project', bootContext);
-      return next();
-    }
-    try {
-      c.set('project', await contexts.context(raw));
-    } catch (err) {
-      if (err instanceof CockpitAlreadyRunningError) return c.json({ error: err.message }, 409);
-      if (err instanceof ProjectContextError) {
-        return err.reason === 'missing-root'
-          ? c.json({ error: `project folder not found: ${err.projectId}` }, 409)
-          : c.json({ error: err.message }, 404);
+    let project = bootContext;
+    if (raw !== undefined) {
+      if (!projectIdSchema.safeParse(raw).success) {
+        return c.json({ error: `unknown project: ${raw}` }, 404);
       }
-      throw err;
+      if (raw !== 'default' && raw !== (await resolveBootProject())) {
+        try {
+          project = await contexts.context(raw);
+        } catch (err) {
+          if (err instanceof CockpitAlreadyRunningError) return c.json({ error: err.message }, 409);
+          // Nothing is cached for a failed build, so the next request opens the store again.
+          if (err instanceof RunStoreOpenError) return c.json({ error: err.message }, 409);
+          if (err instanceof ProjectContextError) {
+            return err.reason === 'missing-root'
+              ? c.json({ error: `project folder not found: ${err.projectId}` }, 409)
+              : c.json({ error: err.message }, 404);
+          }
+          throw err;
+        }
+      }
     }
+    // The boot project's store could not open (#779): its runs are unknown, not absent, so its
+    // routes answer with why rather than as an empty project. Only its routes: this resolver also
+    // runs in front of every workspace route (`/health` above all), which must keep answering.
+    if (project.store.unavailable && servesProjectRoute(c)) return c.json({ error: project.store.unavailable.message }, 409);
+    c.set('project', project);
     return next();
   };
+  /** Every method+path of the project table, under both prefixes; filled once `v1` is built. */
+  let projectRoutePaths: ReadonlySet<string> = new Set();
+  const servesProjectRoute = (c: Context): boolean =>
+    matchedRoutes(c).some((route) => route.method !== 'ALL' && projectRoutePaths.has(`${route.method} ${route.path}`));
 
   // ---- static GUI ----------------------------------------------------------
   const webDir = resolveWebDir();
@@ -6093,6 +6103,8 @@ export function createApp(deps: ServerDeps) {
     .route('/', repoRoutes)
     .route('/', configRoutes)
     .route('/', agentConfigRoutes);
+  projectRoutePaths = new Set(v1.routes.filter((route) => route.method !== 'ALL')
+    .flatMap((route) => [V1_PREFIX, V1_SCOPED_PREFIX].map((prefix) => `${route.method} ${prefix}${route.path}`)));
 
   // ---- chained family: the cross-project run index (workspace-level) -------
   /**
@@ -6454,7 +6466,8 @@ export function startServer(deps: ServerDeps, port: number): ServerType & { shut
         const runStore = project.id === (deps.bootProjectId ?? 'default')
           ? deps.store
           : sharedContexts.peek(project.id)?.store;
-        if (automationStore && runStore) reconcileAutomationReceipts(automationStore, runStore);
+        // A run store that could not open (#779) cannot say which receipts launched a run.
+        if (automationStore && runStore && !runStore.unavailable) reconcileAutomationReceipts(automationStore, runStore);
         // After reconciliation and before the timer arms.
         brakeIdleAutomations(project.id, automationStore);
       })).then(() => automationScheduler.start()).catch(() => undefined);

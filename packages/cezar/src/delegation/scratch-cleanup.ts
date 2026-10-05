@@ -17,6 +17,8 @@ export class WorkerScratchCleanup {
     clearTimeout(this.recoveryTimer); this.recoveryTimer = undefined;
   }
   recover(): void {
+    // A store that could not open (#779) knows none of its runs: every scratch dir would look orphaned.
+    if (this.store.unavailable) return;
     this.enabled = true;
     clearTimeout(this.recoveryTimer); this.recoveryTimer = undefined;
     const retained = workerEvidenceRunIds(this.dataDir);
@@ -36,7 +38,7 @@ export class WorkerScratchCleanup {
     }
   }
   schedule(id: string, delay = 0): void {
-    if (!this.enabled || this.timers.has(id)) return;
+    if (!this.enabled || this.timers.has(id) || this.store.unavailable) return;
     // The scratch check first: most ids have none, and a finished record is decoded to ask (#779).
     if (!agentTmpDirMayExist(this.dataDir, id)) return;
     // Another process's run (#779, plan step 3): cleaning up after it is its owner's job, or the

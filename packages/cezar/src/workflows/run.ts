@@ -2293,7 +2293,8 @@ export class RunManager {
    * worker or root skip their families (#779, plan step 3).
    */
   async recover(familyRootId?: string): Promise<void> {
-    if (this.disposed || this.recovering) return;
+    // A store that could not open (#779) knows none of its runs: recovering it would read "none".
+    if (this.disposed || this.recovering || this.store.unavailable) return;
     this.recoveryScope = { ...(familyRootId === undefined ? {} : { family: familyRootId }) };
     let settled!: () => void;
     this.recoveryInFlight = new Promise<void>((resolve) => { settled = resolve; });

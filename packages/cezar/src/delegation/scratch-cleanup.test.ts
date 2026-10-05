@@ -154,11 +154,9 @@ describe('durable scratch cleanup evidence', () => {
         delete rows.find((row: { id: string }) => row.id === run.id)!.delegation.workspace.resourceId;
         seedRuns(dataDir, rows);
       }
-      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
       reopenRuntime();
-      // An unreadable database is never reset: the store starts empty and says so once.
-      if (mode === 'corrupt') expect(warn).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('runs database unavailable (corrupt)'));
-      warn.mockRestore();
+      // An unreadable database is never reset: the store is unavailable, not empty (#779).
+      if (mode === 'corrupt') expect(store.unavailable?.kind).toBe('corrupt');
       expect(store.getRun(run.id)?.delegation?.role).not.toBe('worker');
       vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
       await manager.recover(); await vi.advanceTimersByTimeAsync(120_000);
@@ -169,7 +167,8 @@ describe('durable scratch cleanup evidence', () => {
       expect(readFileSync(join(scratch, 'holder-writes'), 'utf8')).toBe('still writable\nstill writable\n');
       await holder.close();
       await vi.advanceTimersByTimeAsync(60_000);
-      expect(existsSync(scratch)).toBe(false);
+      // Without an index nothing is cleaned up, held or not: it waits for the database to be restored.
+      expect(existsSync(scratch)).toBe(mode === 'corrupt');
     } finally { await holder.close(); removeAgentTmpDir(dataDir, run.id); vi.useRealTimers(); }
   });
 

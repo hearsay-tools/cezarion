@@ -283,6 +283,9 @@ export class ProjectContexts {
     await this.deps.ownership?.acquire(dataDir);
     // keepLive + recover() (#367), same as serveCommand: runs that were live
     // when this project's context last existed are re-queued or resumed.
+    // A store that cannot open throws `RunStoreOpenError` (#779): nothing is
+    // cached, the route answers 409 with why, and the next request opens again.
+    // One attempt only: this runs on a live cockpit's event loop.
     const store = RunStore.open(dataDir, { keepLive: true });
     const automationStore = this.deps.automationStore?.(project.id, project.root)
       ?? AutomationStore.open(dataDir);

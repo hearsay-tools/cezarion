@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, onTestFailed, onTestFinished, vi } from 'vitest';
 import { workerWaitRequestSchema, type WorkerWait } from '@open-mercato/cezar-contract';
 import { RunStore, type RunRecord } from '../runs/store.ts';
+import { RunStoreOpenError } from '../runs/store-open-error.ts';
 import * as runnerFactory from '../core/runner-factory.ts';
 import { collectWorkerEvidence } from '../delegation/results.ts';
 import { planOwnedWorkspace } from '../delegation/workspace.ts';
@@ -188,7 +189,13 @@ export function setFailureState(value: unknown) { failureState = value; }
 export function reopenRuntime() {
   // A restart: the old store goes first, or it would still own every live family (#779).
   store.close();
-  store = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
+  // As `serve` boots: a store that cannot open is kept as `RunStore.unavailable` (#779).
+  try {
+    store = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
+  } catch (error) {
+    if (!(error instanceof RunStoreOpenError)) throw error;
+    store = RunStore.unavailable(join(root, '.ai/cezar'), error);
+  }
   manager = new RunManager(store, root, { semaphore });
   track();
 }

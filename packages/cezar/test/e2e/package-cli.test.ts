@@ -168,7 +168,7 @@ try {
     assert.ok(['done', 'review'].includes(runs[0]?.status ?? ''), 'the dry-run workflow should finish successfully');
     // The run database and its sidecars stay out of the user's repository history.
     const dataIgnore = (await readFile(join(fixtureRepo, '.ai', 'cezar', '.gitignore'), 'utf8')).split('\n');
-    for (const entry of ['runs.db', 'runs.db-wal', 'runs.db-shm', 'runs.json.pre-sqlite.bak']) {
+    for (const entry of ['runs.db', 'runs.db-wal', 'runs.db-shm', 'runs.json.pre-sqlite.bak', 'runs.json.pre-sqlite.*']) {
       assert.ok(dataIgnore.includes(entry), `.ai/cezar/.gitignore should list ${entry}`);
     }
 
