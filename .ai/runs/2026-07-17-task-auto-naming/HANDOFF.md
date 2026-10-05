@@ -1,5 +1,10 @@
 # Handoff — task auto-naming (PR #479)
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 **Run folder:** `.ai/runs/2026-07-17-task-auto-naming/`
 **Branch:** `feat/task-auto-naming-spec` (base `main`) — PR #479
 

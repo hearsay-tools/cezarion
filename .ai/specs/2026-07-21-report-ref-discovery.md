@@ -58,12 +58,12 @@ pretty distinguished"):
   subject; several resolve only when the task prompt names exactly one;
   ambiguity clears the chip; and the winner is **repo-scoped** — a foreign
   `owner/repo` resolves only when the task prompt names it.
-- **Amendment — the issue tier is repo-scoped too (#945).** Sharing
+- **Amendment — the issue tier is repo-scoped too (open-mercato/cezar#945).** Sharing
   `resolveReferencedRef` meant sharing its hole: an issue link to another
   repository, spotted once in a transcript, became the task's subject. It now
   shares the repo-scope guard as well — see the amendment in
   `2026-07-16-pr-autodiscovery.md` for the rule, the corroboration source, and
-  why an unknown repository keeps the pre-#945 behavior. The issue side had
+  why an unknown repository keeps the pre-open-mercato/cezar#945 behavior. The issue side had
   one extra edge the PR side does not: a vetoed URL must not seed
   `issueNumber` either. It cannot — the seed below is gated on a resolution
   existing — and when the heal drops a stored foreign URL it revokes the
@@ -88,7 +88,7 @@ pretty distinguished"):
 - The cockpit renders the strongest known task reference in the tasks table:
   PR first, otherwise issue. Issue URLs are seeded from the prompt at run
   creation, so an issue-driven run has its linked issue chip while queued
-  (#554), before the first agent event.
+  (open-mercato/cezar#554), before the first agent event.
 
 ## Test plan
 
@@ -102,6 +102,6 @@ pretty distinguished"):
   disambiguation; declared-issue candidate filtering; marker-owned
   `issueNumber` never overwritten by stray links.
 
-## Prompt-edit reference selection (#86 review)
+## Prompt-edit reference selection (hearsay-tools/cezarion#86 review)
 
 Edited prompts contribute PR and issue URLs to retained candidate evidence. Without an explicit marker, a unique exact prompt URL wins before numeric disambiguation, so replacing a URL with another repository's same-number URL selects the new subject. Multiple exact URLs remain ambiguous. Repository scoping still vetoes only the resolved result; marker authority and created-PR ownership remain unchanged.

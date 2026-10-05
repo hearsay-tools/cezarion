@@ -1,4 +1,4 @@
-# #764 verification
+# hearsay-tools/cezarion#764 verification
 
 Replace timing assumptions with observable waits. Production behavior, scheduling, and concurrency policy are unchanged.
 
@@ -33,7 +33,7 @@ Raw iteration logs, screenshots, probes, reproduction patches, campaign script a
 
 An earlier loaded fixture startup failed before browser creation without sufficient child output to establish its cause. Bounded diagnostics were added without changing budgets; the following 80-invocation campaign had no recurrence. This is not a claimed startup fix. Controlled theme-click evidence demonstrates the missing ordering guarantee; the exact original CI event sequence was not retained.
 
-Latest main was merged normally before opening draft PR #773, with no conflicts. Review findings and addressing commits are recorded in the PR threads.
+Latest main was merged normally before opening draft PR hearsay-tools/cezarion#773, with no conflicts. Review findings and addressing commits are recorded in the PR threads.
 
 ## Review follow-ups
 

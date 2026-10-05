@@ -1,7 +1,7 @@
 # Multi-project workspace
 
 > Status: draft
-> Supersedes: PR #406 *multi-project switcher* (closed unmerged — the per-process
+> Supersedes: PR open-mercato/cezar#406 *multi-project switcher* (closed unmerged — the per-process
 > instances + loopback-proxy design is abandoned; this spec replaces it with a
 > single-process workspace).
 > Mockups: [sidebar](assets/2026-07-20-multi-project-workspace/sidebar.html) ·
@@ -44,7 +44,7 @@ three ports, three cockpits — and each cockpit is blind to the others:
   to serve — the same knob has N values on one machine, and resource caps that
   exist to protect the *host* are enforced per-repo, so N cockpits multiply
   them.
-- **The previous answer (PR #406) was per-process instances behind a loopback
+- **The previous answer (PR open-mercato/cezar#406) was per-process instances behind a loopback
   proxy.** It kept process isolation but added a registry of *live* processes,
   a proxy with SSE subtleties, version-skew rules, and still required one
   process per repo. The user has rejected that direction: one server should
@@ -74,14 +74,14 @@ one cockpit bundle, and multiplexes projects by an explicit id in the path:
 
 ### Why this shape, and not the alternatives
 
-**Rejected — per-process instances + reverse proxy (PR #406).** Explicitly
+**Rejected — per-process instances + reverse proxy (PR open-mercato/cezar#406).** Explicitly
 abandoned by the user. Beyond that decision it also carried real cost: version
 skew between one project's bundle and another's server, SSE proxy corrections,
 pid-liveness pruning, and it never solved "cezar knows all my projects when
 none of them are running".
 
 **Rejected — N ports, one launcher.** A thin `cezar workspace` that spawns one
-server per project keeps today's code untouched but re-imports every #406
+server per project keeps today's code untouched but re-imports every open-mercato/cezar#406
 problem (port discovery, cross-origin, N processes to babysit) and makes
 "one sidebar over everything" impossible without a proxy again.
 
@@ -214,14 +214,14 @@ every 2s tick) switches to the workspace config, **cached in memory** and
 refreshed on `PUT /api/workspace/config` — not N per-tick file reads across N
 projects. The semaphore contract: a slot is acquired before a manager starts
 an agent process and released when the run settles (finish/fail/cancel, or
-memory-pause frees its slot); variants queue as today. **The #347 exception
+memory-pause frees its slot); variants queue as today. **The open-mercato/cezar#347 exception
 must be carried over exactly as it is today** (`run.ts:384-386`, inside
 `pump()`): a `waiting` run does *not* hold a slot, and a message into a
 waiting run resumes it immediately even when that momentarily exceeds
 `maxParallel`. This is queue-slot accounting, not crash recovery — making a
 resumed `waiting` run acquire a workspace slot would hang the resume whenever
 the workspace-wide cap is saturated by other projects, which is the exact
-failure #347 fixed. Crash recovery (`RunManager.recover`) is a separate path
+failure open-mercato/cezar#347 fixed. Crash recovery (`RunManager.recover`) is a separate path
 and acquires slots normally.
 
 ## Data Model
@@ -377,7 +377,7 @@ external tooling can enumerate the workspace without a breaking change.
 **`root` is deliberately absent from the health payload.** Health is the one
 CORS-open route, and `server.ts:462` already trims `repoRoot` to a basename
 under `CEZ_REMOTE` precisely so a cross-origin reader cannot learn the
-developer's absolute path and username (#431). Shipping `projects[].root`
+developer's absolute path and username (open-mercato/cezar#431). Shipping `projects[].root`
 there would reintroduce that leak once per registered project; `id` + `name`
 are all enumeration needs. Absolute roots stay on `GET /api/projects`, which
 is same-origin and behind the cockpit.
@@ -434,7 +434,7 @@ leading `projectId` segment.
 
 ### Sidebar (mockup: `sidebar.html`)
 
-**Task-section update (#811, 2026-10-04):** active lists now order Needs you,
+**Task-section update (hearsay-tools/cezarion#811, 2026-10-04):** active lists now order Needs you,
 Finished, Working. Pins sort first within their status section and are exempt
 from the shared ten-row budget, which allocates Finished before Working.
 Section folding starts expanded and persists separately from project folding
@@ -586,7 +586,7 @@ bookmarklets keep working via the redirect (boot project).
   hosts no longer need one unit per repo; domain-keyed instances that want
   disjoint project sets run with distinct `CEZ_HOME` (existing, documented
   mechanism — each home carries its own registry and global config). The
-  `~/.cezar/instances/` live-instance dir from #406 is never created;
+  `~/.cezar/instances/` live-instance dir from open-mercato/cezar#406 is never created;
   `liveInstancesExist()` (`server-install/engine.ts:380`, module-private, called
   at `:271`) keeps working (always empty) and its removal is noted as a
   follow-up cleanup, not part of this spec — being unexported, that cleanup is
@@ -637,7 +637,7 @@ Each phase ships independently and leaves the app fully working.
 1.1 `src/paths.ts`: add `workspaceConfigPath()`, `workspaceUiStatePath()`
     (under `cezarHomeDir()`); update the stale `:56-57` docstring that still
     points the "per-project registry" at `~/.cezar/instances/` (the abandoned
-    #406 design). *Test:* unit, `CEZ_HOME` override.
+    open-mercato/cezar#406 design). *Test:* unit, `CEZ_HOME` override.
 1.2 `src/workspace/config.ts`: zod schema (all fields `.catch`/optional,
     `.passthrough()`), `loadWorkspaceConfig`, `mergeWriteWorkspaceConfig`
     (read-modify-write + tmp/rename `0600`). *Test:* round-trip, corrupt →
@@ -677,11 +677,11 @@ Each phase ships independently and leaves the app fully working.
     excludes B's samples; memory enforcement unaffected.
 2.5 Workspace semaphore honoring global `resources.maxParallel` across
     managers (acquire before agent start, release on settle, memory-pause
-    frees the slot, #347 resume exception preserved); memory guard + cap read
+    frees the slot, open-mercato/cezar#347 resume exception preserved); memory guard + cap read
     the **cached** workspace config (refreshed on PUT), not per-tick file
     reads; per-repo legacy keys ignored post-migration. *Test:* two projects,
     cap 2 → third run queues; a message into a `waiting` run resumes it even at
-    cap (#347 exemption, asserted across projects); config PUT takes effect
+    cap (open-mercato/cezar#347 exemption, asserted across projects); config PUT takes effect
     without restart.
 2.6 Per-project cache keying: GitHub list cache, GitHub comments cache
     (`forge/github.ts:194`, `:420`), team-skills cache
@@ -744,7 +744,7 @@ Each phase ships independently and leaves the app fully working.
     user's workspace; `CEZ_HOME` for disjoint sets). *Test:* e2e package test
     lists the registered project.
 5.3 Follow-up issue: retire `liveInstancesExist()`/`~/.cezar/instances/`
-    remnants of #406.
+    remnants of open-mercato/cezar#406.
 
 ### Validation
 

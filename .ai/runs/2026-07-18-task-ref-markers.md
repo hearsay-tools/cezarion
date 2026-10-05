@@ -1,5 +1,10 @@
 # Execution plan — in-band task-reference markers (CEZ:PR / CEZ:ISSUE / CEZ:TITLE)
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 Date: 2026-07-18 · Owner: pkarw · Branch: `feat/task-ref-markers`
 Source doc: `.ai/specs/2026-07-18-task-ref-markers.md` (written in Phase 1)
 
@@ -11,6 +16,11 @@ mentions, and the separate LLM namer costs tokens and still guesses. Owner
 direction (2026-07-18): let the **main agent thread declare its own subject** via
 an in-band marker protocol like `CEZ:DONE` — structured, zero extra LLM calls —
 and make marker-declared values authoritative over every fuzzy layer.
+
+> Citation exception to the historical source note: the wrong-chip value and
+> reported task issue number above are observations from a real incident. Their
+> repositories are unverified. These remain unresolved incident references,
+> not hypothetical examples or known upstream tracker citations.
 
 ## Scope
 

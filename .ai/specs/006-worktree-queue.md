@@ -34,7 +34,7 @@ pracę ("agent robi, ja dalej koduję u siebie").
    `git add -A && git commit --no-verify -m "cez autosave"` w worktree —
    postęp agenta zawsze odzyskiwalny z historii. Commity autosave squashuje
    krok PR (009) — na razie zostają w branchu.
-   *Aneks (2026-07-17, #471):* okresowy timer 90 s jest **opt-in** przez
+   *Aneks (2026-07-17, open-mercato/cezar#471):* okresowy timer 90 s jest **opt-in** przez
    `CEZ_AUTOSAVE=1` (domyślnie wyłączony — commity autosave w środku runa
    zaśmiecały historię PR-ów). Flushe na końcu tury i przed draft-PR zostają
    bez zmian, więc branch nadal kończy z pełnym stanem, a diff/review/PR
@@ -86,7 +86,7 @@ pracę ("agent robi, ja dalej koduję u siebie").
   worktrees (prune + raport w logu startowym).
 - W katalogu nie-git wszystko działa po staremu.
 
-## Hardening 2026-07-16 — issue #438
+## Hardening 2026-07-16 — issue open-mercato/cezar#438
 
 The original degradation rule was too broad: a Git task that requested the
 default isolated mode could silently execute in the user's repository working
@@ -124,7 +124,7 @@ Hardening acceptance checks:
   default; with `CEZ_DISABLE_REPO_LOCK=1`, two root runs may overlap and each
   emits a visible unsafe-mode note.
 
-## Hardening 2026-09-29 — issue #502
+## Hardening 2026-09-29 — issue hearsay-tools/cezarion#502
 
 Cezar serializes creation (including fresh-only owned creation), reattachment,
 removal and orphan pruning by the canonical Git common directory. This covers

@@ -1,4 +1,4 @@
-# Document attachments (#91)
+# Document attachments (hearsay-tools/cezarion#91)
 
 Approved by the delegated parent on 2026-09-05. Port upstream ff9c44ed onto fork origin/main 9760978f in the existing isolated worktree.
 

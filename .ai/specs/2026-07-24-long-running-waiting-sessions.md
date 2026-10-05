@@ -1,6 +1,6 @@
 # Durable monitoring sessions with bounded background capacity
 
-> Issue: #654 · Extends: `2026-07-18-subagent-monitoring-status.md` (#490)
+> Issue: open-mercato/cezar#654 · Extends: `2026-07-18-subagent-monitoring-status.md` (open-mercato/cezar#490)
 
 ## TLDR
 
@@ -18,7 +18,7 @@ Stabilization agents can correctly declare `CEZ:MONITORING` while they wait for 
 
 ## Problem Statement
 
-Issue #654 records stabilization workflows that wait for CI and then end due to inactivity before CI finishes. The first half of the lifecycle already exists: #490 introduced `CEZ:MONITORING`, maps the run to `status: 'running', activity: 'monitoring'`, suppresses false “needs you” attention, and frees the normal task slot. The second half still uses the ordinary waiting lifecycle. Both turn-end paths call `armIdleTimer()`, and `src/workflows/run.ts` closes the backend session after the fixed `IDLE_TIMEOUT_MS = 15 * 60_000`.
+Issue open-mercato/cezar#654 records stabilization workflows that wait for CI and then end due to inactivity before CI finishes. The first half of the lifecycle already exists: open-mercato/cezar#490 introduced `CEZ:MONITORING`, maps the run to `status: 'running', activity: 'monitoring'`, suppresses false “needs you” attention, and frees the normal task slot. The second half still uses the ordinary waiting lifecycle. Both turn-end paths call `armIdleTimer()`, and `src/workflows/run.ts` closes the backend session after the fixed `IDLE_TIMEOUT_MS = 15 * 60_000`.
 
 That creates two failures:
 
@@ -194,4 +194,4 @@ The Tasks UI does not change: durable sessions already display the violet “mon
 
 8. **Add Resources control.** Render the 0–16 capacity select and dynamic “Y active + X monitoring” helper; save through the existing workspace config mutation. *Tests:* initial value, change payload, cache refresh, disabled state, 0 semantics, error toast, and accessible label.
 9. **Add regression-level UI coverage.** Extend the browser smoke suite to change the setting, reload Resources, and verify persistence plus the capacity helper. Capture before/after screenshots for the PR; keep `needs-qa` until human sign-off.
-10. **Document the lifecycle contract.** Update the #490 spec’s superseding note and user-facing resource documentation to state that monitoring is durable but bounded, ordinary waiting still expires, and overflow back-pressures the queue. Run the complete validation gate and package test because workspace config is a shipped compatibility surface.
+10. **Document the lifecycle contract.** Update the open-mercato/cezar#490 spec’s superseding note and user-facing resource documentation to state that monitoring is durable but bounded, ordinary waiting still expires, and overflow back-pressures the queue. Run the complete validation gate and package test because workspace config is a shipped compatibility surface.

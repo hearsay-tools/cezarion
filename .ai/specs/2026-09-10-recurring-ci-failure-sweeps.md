@@ -1,6 +1,6 @@
-# Recurring CI failure sweeps (#205)
+# Recurring CI failure sweeps (hearsay-tools/cezarion#205)
 
-Status: approved by the task owner on 2026-09-10. Extends the reporter shipped by #204 / PR #207.
+Status: approved by the task owner on 2026-09-10. Extends the reporter shipped by hearsay-tools/cezarion#204 / PR hearsay-tools/cezarion#207.
 
 ## Outcome and scope
 
@@ -22,7 +22,7 @@ with its current behavior. Add separate sweep collection and classification
 modules with injected GitHub APIs and clock for fixture tests.
 
 This avoids two independent writers and preserves compatibility with reports
-already created by #204. Both workflows use the existing repository-wide
+already created by hearsay-tools/cezarion#204. Both workflows use the existing repository-wide
 `release-nightly-failure-reports` concurrency group, `queue: max`, and
 `cancel-in-progress: false`; retaining its name preserves exclusion during rollout.
 
@@ -113,7 +113,7 @@ Two issue thresholds:
 Both classifications state observed evidence and uncertainty. Successful retry
 can also reflect dependency, runner, or infrastructure changes; it does not prove
 that the test itself is nondeterministic. Two different tests failing in one step
-remain distinct, including the two symptoms described in #195.
+remain distinct, including the two symptoms described in hearsay-tools/cezarion#195.
 
 ## Reporting, reconciliation, and counts
 
@@ -129,7 +129,7 @@ matching occurrence run/attempt or job link. A title, suite filename, or general
 mention of CI is insufficient. Adopt only one unambiguous open match, preserving
 its body and existing markers. Multiple plausible owners surface in the summary
 for maintainer reconciliation; no new duplicate is created for that cause. This
-allows evidence-backed reuse of issues such as #195 without hard-coding its number.
+allows evidence-backed reuse of issues such as hearsay-tools/cezarion#195 without hard-coding its number.
 
 New issues follow the task template with concise human requirements. Agent
 context comments carry bounded sanitized evidence through the shared formatter.
@@ -190,7 +190,7 @@ It is evidence, not required mutable state. Every sweep rebuilds from GitHub and
 rechecks the full overlapping window; no cursor advances past failed work.
 Missing artifacts do not stop the next run. Evidence committed to issues survives
 source log expiry. Deleted issues/markers remove their deduplication history,
-as documented for #204.
+as documented for hearsay-tools/cezarion#204.
 
 Normal partial scans are recovered by the next overlapping sweep. If a backlog
 continually reaches a cap, replay smaller explicit windows, splitting until every
@@ -200,12 +200,12 @@ printed bounds. Expired source logs are unrecoverable and remain visible as
 recorded evidence gaps that do not fail the job on their own. Preserve previous
 manifests when auditing coverage across windows.
 
-Revised on 2026-09-11 (#225): the first scheduled sweep (run 34581855648) wrote
+Revised on 2026-09-11 (hearsay-tools/cezarion#225): the first scheduled sweep (run 34581855648) wrote
 `complete: false` because its own in-progress attempt, the 100-log cap on a
 14-day window, and four expired logs all marked coverage incomplete. Reporting
 machinery is now skipped before the in-progress check, the log budget is 400,
 and missing/expired/oversized logs are recorded gaps that do not fail the job.
-Revised again on 2026-09-11 (review of #228): only missing/expired/oversized
+Revised again on 2026-09-11 (review of hearsay-tools/cezarion#228): only missing/expired/oversized
 logs stay non-fatal gaps; transient transport failures are recorded as
 `logs-fetch-failed` and keep `complete: false` so a temporary outage can never
 publish a complete-sweep artifact with evidence silently omitted.
@@ -244,7 +244,7 @@ permissions, shared concurrency and failure-summary/artifact behavior.
 Run the five binding commands before commits/PR: `npm run typecheck`, `npm test`,
 `npm run test:unit`, `npm run build`, `npm run test:package`. Demonstrate new
 regression checks fail against their unfixed source. No user-facing UI changes;
-experience checks are not applicable. Open a draft PR for #205 and monitor CI
+experience checks are not applicable. Open a draft PR for hearsay-tools/cezarion#205 and monitor CI
 and review feedback with `pr-checks`.
 
 ## Sources

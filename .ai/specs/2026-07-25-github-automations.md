@@ -1,5 +1,10 @@
 # GitHub Automations
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 ## TLDR
 
 Add a project-scoped **Automations** page directly below GitHub in the sidebar. Users define bounded, polling-based GitHub triggers and pair them with the same prompt, workflow, skill, model, runner, worktree, and autonomy controls used by New task; matching issues or pull requests enqueue ordinary cezar tasks, while a durable execution log makes every decision debuggable.

@@ -1,5 +1,10 @@
 # Progressive long-session history loading
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 Tracking issue: [#717](https://github.com/open-mercato/cezar/issues/717)
 
 ## TLDR

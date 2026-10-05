@@ -1,5 +1,10 @@
 # Plan — queued-session-prompt-stacking
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 **Brief:** Implement the spec at `.ai/specs/2026-07-21-queued-session-prompt-stacking.md`
 **Source spec:** `.ai/specs/2026-07-21-queued-session-prompt-stacking.md`
 **Issue:** #472

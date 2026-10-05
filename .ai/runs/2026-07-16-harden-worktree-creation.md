@@ -1,5 +1,10 @@
 # Run: harden worktree creation
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 Date: 2026-07-16
 Branch: `fix/issue-438-worktrees-separation` (detached local worktree; push target is the PR branch)
 Start commit: `60df2c42e63b42b5a9596807e81c7b1bb4791ddd`

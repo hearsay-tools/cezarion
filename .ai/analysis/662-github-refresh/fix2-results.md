@@ -1,6 +1,6 @@
-# #662 ranked fix 2 — asynchronous project metadata
+# hearsay-tools/cezarion#662 ranked fix 2 — asynchronous project metadata
 
-Base: `e97c6314629502298e89919b8774762307fb1b77` (`main`, 2026-09-28). PR #673 was still open when work began; none of its discovery/coalescing changes are included. This is a partial fix, related to #662.
+Base: `e97c6314629502298e89919b8774762307fb1b77` (`main`, 2026-09-28). PR hearsay-tools/cezarion#673 was still open when work began; none of its discovery/coalescing changes are included. This is a partial fix, related to hearsay-tools/cezarion#662.
 
 ## First list delivery
 

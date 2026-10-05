@@ -1,6 +1,6 @@
-# PR 675 integration onto shared discovery
+# PR hearsay-tools/cezarion#675 integration onto shared discovery
 
-The intentional merge retains main's shared discovery and reference coalescing and PR 675's deferred project membership lookup. All list cache reads, request-order publication, generation updates and hydration endpoint reads now use the shared repository/host/account context key. Previous verified memberships compare against the shared resolved repository handle. Viewer and deferred project calls retain the captured context. The profiling harness keeps hydration draining/sampling so pending work cannot contaminate the following sample.
+The intentional merge retains main's shared discovery and reference coalescing and PR hearsay-tools/cezarion#675's deferred project membership lookup. All list cache reads, request-order publication, generation updates and hydration endpoint reads now use the shared repository/host/account context key. Previous verified memberships compare against the shared resolved repository handle. Viewer and deferred project calls retain the captured context. The profiling harness keeps hydration draining/sampling so pending work cannot contaminate the following sample.
 
 ## Live HTTP measurements
 

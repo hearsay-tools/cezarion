@@ -1,6 +1,6 @@
 # Immediate waiting state for markerless turn ends
 
-> Issue: #119
+> Issue: hearsay-tools/cezarion#119
 
 ## Problem
 

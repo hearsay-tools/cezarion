@@ -6,7 +6,7 @@ Status: accepted by the user on 2026-09-08.
 
 ## Foundation and approach
 
-#111 and #116 are closed through merged PRs #138 and #151. The existing
+hearsay-tools/cezarion#111 and hearsay-tools/cezarion#116 are closed through merged PRs hearsay-tools/cezarion#138 and hearsay-tools/cezarion#151. The existing
 DelegationService supplies scoped commands; RunManager owns durable agent-input
 delivery, worker waits, scheduler admission, and recovery. AgentSession already
 provides sendAgentMessage with separate asynchronous transport acknowledgement.
@@ -91,7 +91,7 @@ Explicit request cancellation is idempotent and never stops either agent.
 Review readiness remains visible but does not settle an unanswered request as
 reply or completion. A later normal completion settles completed-without-reply;
 failure/cancellation and proven destruction have their own outcomes. Lifecycle
-proof requirements from #116 remain intact; sending a signal is not termination.
+proof requirements from hearsay-tools/cezarion#116 remain intact; sending a signal is not termination.
 
 New delivery to review/completed/failed/cancelled recipients returns an explicit
 continuation-required outcome and starts no execution. These messages are durable rejection receipts: they create no queued input, deadline,
@@ -133,7 +133,7 @@ Render sender/recipient links, message kind, request correlation, delivery statu
 and explicit request outcomes within existing task threads and relationship views.
 Use the current loading, empty, error, and offline surfaces. No artwork is needed.
 
-Presentation correction after #442 / #445 (2026-09-20): requests are non-blocking.
+Presentation correction after hearsay-tools/cezarion#442 / hearsay-tools/cezarion#445 (2026-09-20): requests are non-blocking.
 Keep every request, follow-up, progress update, and reply at its chronological
 position among thinking, tools, and assistant messages. Only adjacent identical
 requests from one sender to distinct recipients may batch. Outcomes remain current
@@ -163,5 +163,5 @@ npm run test:package. Record actual browser observations for UI changes.
 
 After approval, write the implementation plan, implement and verify, commit/push,
 merge freshly fetched origin/main and reverify if changed, open a draft PR closing
-#112, move its board card to In review, and monitor CI/review through pr-checks.
+hearsay-tools/cezarion#112, move its board card to In review, and monitor CI/review through pr-checks.
 No automatic ready-for-review or merge.

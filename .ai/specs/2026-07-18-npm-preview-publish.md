@@ -1,5 +1,10 @@
 # npm preview publishing — snapshot releases from CI (`cezar-cli@<snapshot>`)
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 Status: proposed · Date: 2026-07-18 · Issue: #482 · Relates: spec 001 (packaging/npx — decided the scoped-package + unscoped-alias split this spec finishes), spec 2026-07-16-server-installer (the `server-deploy` flow that consumes published versions)
 
 ## TLDR

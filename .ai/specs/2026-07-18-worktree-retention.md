@@ -1,4 +1,4 @@
-# Worktree Retention & Management (#483)
+# Worktree Retention & Management (open-mercato/cezar#483)
 
 ## TLDR
 
@@ -29,7 +29,7 @@ A normal finished run stays in `runs.json`, so its worktree is **never**
 reclaimed automatically. Nothing bounds the total. On an active machine that
 runs dozens of tasks a day, `.ai/cezar/worktrees/` grows without limit until
 the disk fills — at which point new tasks fail to create a worktree and the
-cockpit degrades. The user asked (#483) for management/rotation that keeps "up
+cockpit degrades. The user asked (open-mercato/cezar#483) for management/rotation that keeps "up
 to X" worktrees, configurable, "so old WTs don't saturate full disk space".
 
 ## Proposed Solution
@@ -43,7 +43,7 @@ An always-on **count-based retention policy** layered on the existing
 - **Reclaimable** = a run whose status is `done`, `failed`, or `cancelled`
   (the same "finished" set `archiveFinished` already uses) **and** whose worktree
   directory still exists. Finished owned workers (`delegation.role === 'worker'`)
-  count under the same keep-N budget (#575) once their parent is gone or `done`
+  count under the same keep-N budget (hearsay-tools/cezarion#575) once their parent is gone or `done`
   (collection-gated). A live, failed, or cancelled parent can still collect/diff.
   They are most
   of the on-disk directories on a busy cockpit. `running`, `queued`, and `waiting` are live work;
@@ -51,7 +51,7 @@ An always-on **count-based retention policy** layered on the existing
   its worktree to render the diff and open a draft PR. Reclaiming it would
   break the gate. `invalid` ownership and workers mid-destroy stay excluded;
   verified destroy still owns branch/process/history cleanup. The Settings
-  panel reclaimable count and **Reclaim now** follow this selector (#570).
+  panel reclaimable count and **Reclaim now** follow this selector (hearsay-tools/cezarion#570).
 - **Reclaim = directory only.** Call `removeWorktree(repoRoot, path)` *without*
   the branch argument, so the `cez/<id8>` branch (and every autosave commit on
   it) survives. The work is fully recoverable — re-materialize with
@@ -153,7 +153,7 @@ worktreeReclaimedAt: z.string().optional(),
 New config key (`src/config.ts`):
 
 ```ts
-/** Count-based worktree retention (#483): keep the last N *finished*
+/** Count-based worktree retention (open-mercato/cezar#483): keep the last N *finished*
  *  worktrees on disk; reclaim older ones (directory only — branch kept).
  *  0 = unlimited (never auto-reclaim). Default 10. `.catch(10)` keeps it
  *  additive-safe: a bad value degrades to the default. */
@@ -241,7 +241,7 @@ explicit `aria-label`s and a confirm step; respects existing light/dark theming.
   an optional override, never required (AGENTS.md).
 - **Default-on deletion is intentional.** This is a behavioral change — cezar
   keeps every worktree today; this ships auto-deleting directories at N=10 by
-  default. It is deliberately default-on (owner call on #483: "so old WTs don't
+  default. It is deliberately default-on (owner call on open-mercato/cezar#483: "so old WTs don't
   saturate disk"), made safe by keeping the branch (recoverable), excluding
   in-review/live runs, a generous default, and `0` as a full opt-out. Flagged
   here so review treats the default-on behavior as a decision, not an accident.
@@ -276,7 +276,7 @@ Each step leaves the app working and is unit-testable.
   `updateRun` sets it.
 - 1.3 Write `selectReclaimableWorktrees(runs, keep)` in `src/runs/retention.ts`
   (pure). Tests: keeps newest N, excludes `review`/live/reclaimed/`invalid`/
-  mid-destroy, includes finished workers (#575), `keep=0` returns none, recency
+  mid-destroy, includes finished workers (hearsay-tools/cezarion#575), `keep=0` returns none, recency
   ordering by `finishedAt ?? createdAt`.
 - 1.4 Write `reclaimWorktrees(repoRoot, store, keep)` (I/O wrapper over the
   selector + `removeWorktree` dir-only + stamp). Test with a temp git repo:
@@ -303,5 +303,5 @@ Each step leaves the app working and is unit-testable.
   per-row Delete (existing `remove-worktree`), total-disk footer, "Reclaim now",
   empty state, SSE live-update. Component tests: renders rows, delete calls the
   route, reclaim calls the route, empty state.
-- 2.4 Docs: note the knob in the README env/settings table and cite `#483` +
+- 2.4 Docs: note the knob in the README env/settings table and cite `open-mercato/cezar#483` +
   this spec where the code touches worktree lifecycle.

@@ -1,5 +1,10 @@
 # Checkpoint 2 / final — R3 COMPLETE (8/8)
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 - Commits `b5cb131`..`b0bcde1`. Gate: typecheck ✓ · `npm test` ×2 **1349/1349** ✓ · build ✓ · `npm run test:e2e` **88/88** (agent-browser, real Chrome, live dry-run servers) ✓.
 
 ## Landed (Phase 2)

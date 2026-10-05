@@ -1,4 +1,4 @@
-# Immediate worker delivery and parent-routed questions — #505
+# Immediate worker delivery and parent-routed questions — hearsay-tools/cezarion#505
 
 Parent/worker messages waited for the recipient's whole turn to end. In task
 `45914a6c-564d-4792-bdad-c84eb09cf8ec` the median parent → worker delay was 31
@@ -8,7 +8,7 @@ human, although the parent owns them.
 
 This change submits coordination messages through each harness's native input
 mechanism as soon as they are accepted, and routes worker questions to the owning
-parent. It ships as two pull requests against #505: **A** (delivery) first, then
+parent. It ships as two pull requests against hearsay-tools/cezarion#505: **A** (delivery) first, then
 **B** (question routing), which closes the issue.
 
 ## Where the delay lives
@@ -83,7 +83,7 @@ stays false after a human follow-up.
 
 OpenCode V2's durable admission and explicit `delivery: "steer"` need an API and
 event migration and are not installed locally. V1 already steers, so V2 is a
-follow-up issue, not part of #505.
+follow-up issue, not part of hearsay-tools/cezarion#505.
 
 ### Orchestrator (`workflows/run.ts`)
 
@@ -119,7 +119,7 @@ follow-up issue, not part of #505.
 - **Crash recovery.** Acceptance on an observable session writes `awaitingRead`,
   cleared when the input is read. On restart, input still `awaitingRead` is
   replayed. Its text keeps the input ID, so a repeat is recognizable: the
-  guarantee is at-least-once, not exactly-once. Records written before #505 never
+  guarantee is at-least-once, not exactly-once. Records written before hearsay-tools/cezarion#505 never
   carry the marker, so nothing historical replays; unobservable backends keep
   today's semantics, where acceptance means delivered.
 - **Human answers first.** No agent input is submitted while a human question is
@@ -218,5 +218,5 @@ Every new regression is proven red against the old gates before the fix lands.
 ## Out of scope
 
 Interrupting running tools for coordination messages; conversation-card and
-transcript presentation (#484, #485); human follow-up repair (#486); OpenCode V2;
+transcript presentation (hearsay-tools/cezarion#484, hearsay-tools/cezarion#485); human follow-up repair (hearsay-tools/cezarion#486); OpenCode V2;
 wider worker permissions or workers answering the root parent's human questions.

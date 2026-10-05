@@ -1,5 +1,10 @@
 # Execution plan — `CEZ_AUTOMATIONS` feature flag (issue #801)
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 **Issue:** [#801](https://github.com/open-mercato/cezar/issues/801) — Implement: `CEZ_AUTOMATIONS` feature flag — gate GitHub Automations off by default and hide its sidebar item
 **Source doc:** `.ai/specs/2026-07-25-github-automations.md` (the feature being gated; its "No new `CEZ_*` variable is proposed" line is amended by this run)
 **Engine:** `om-auto-create-pr` (plain)

@@ -1,5 +1,10 @@
 # Checkpoint 1 — after Step 1.5 (Phase 1 engine + API, minus the client mirror)
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 **When:** 2026-07-21T11:40:00Z
 **Steps covered:** 1.1 – 1.5 (`163e6ff` … `b7d8b55`)
 

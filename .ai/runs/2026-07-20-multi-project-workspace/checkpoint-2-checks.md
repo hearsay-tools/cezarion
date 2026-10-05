@@ -1,5 +1,10 @@
 # Checkpoint 2 — Steps 1.6..1.7 (Phase 1 close)
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 **When:** 2026-07-20T13:12:00Z
 **Steps covered:** 1.6 (`941e7a7`) … 1.7 (`8d881f3`)
 **Touched areas:** `src/server/server.ts` (`GET /api/projects`, additive health fields), `src/index.ts` (bootProjectId plumbing), `src/server/projects-api.test.ts`, `BACKWARD_COMPATIBILITY.md` (§2 route inventory + new §9 workspace state files/migrations contract)

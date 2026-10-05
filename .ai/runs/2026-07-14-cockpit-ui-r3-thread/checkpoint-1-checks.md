@@ -1,5 +1,10 @@
 # Checkpoint 1 — R3 Steps 1.1..1.4 (thread core)
 
+> Historical source: `open-mercato/cezar` (upstream), preserved at fork point
+> `feb85666` (2026-08-31). Unqualified cezar issue/PR citations below belong to
+> that upstream tracker; example numbers, UI values and command literals retain
+> their original meaning. New citations must name their repository.
+
 - Commits `a19391d`..`1b7a72e`. Gate: typecheck ✓ · `npm test` ×2 **1169/1169** ✓ · build ✓ · `npm run test:e2e` **64/64** (agent-browser) ✓.
 - Artifacts: screenshots (thread desktop/mobile, header desktop) — verified by eye against `docs/mockups/thread.html`.
 
