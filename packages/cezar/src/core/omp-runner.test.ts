@@ -2,8 +2,24 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { ChildProcess } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parse as parseYaml } from 'yaml';
+
+// Pass-through: every test spawns the real child; a test that needs the child's own streams
+// (to fail one) reads it from here.
+const spawned = vi.hoisted(() => [] as ChildProcess[]);
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:child_process')>();
+  return {
+    ...actual,
+    spawn: ((...args: Parameters<typeof actual.spawn>) => {
+      const child = actual.spawn(...args);
+      spawned.push(child);
+      return child;
+    }) as typeof actual.spawn,
+  };
+});
 
 import type { AgentEvent, AgentRunSpec, AgentSession } from './agent-runner.js';
 import type { UiEvent } from './ui-events.js';
@@ -533,6 +549,22 @@ process.exit(2);
     await expect(failed).rejects.toThrow('omp CLI exited with code 2 — Error: Unknown tool in --tools: cezar_wait_for_ci.');
     expect(events).toContainEqual({ type: 'note', message: expect.stringContaining('omp CLI stderr:\nError: Unknown tool in --tools: cezar_wait_for_ci.') });
     expect(invocations()).toHaveLength(1);
+  });
+
+  // Final review #13: a stream that throws before the first frame, with the child alive, used
+  // to leave the session open (a retry was still possible) while `result` rejected, so later
+  // input reported acceptance into an outbox nobody drained.
+  it('closes the session when stdout fails before the first frame', async () => {
+    const bin = join(cwd, 'silent-omp.mjs');
+    writeFileSync(bin, '#!/usr/bin/env node\nsetTimeout(() => undefined, 20_000);\n', { mode: 0o755 });
+    spawned.length = 0;
+    const session = new OmpRunner({ bin }).startSession(spec('x', { allowedTools: ['Read'] }), undefined, { autoEndAfterFirstTurn: false });
+    const child = spawned.at(-1)!;
+    child.stdout!.destroy(new Error('stdout broke'));
+    await expect(session.result).rejects.toThrow('stdout broke');
+    expect(session.open).toBe(false);
+    expect(session.sendMessage([{ type: 'text', text: 'late' }])).toBe(false);
+    child.kill('SIGKILL');
   });
 
   describe('MCP tools OMP has not registered (R20)', () => {

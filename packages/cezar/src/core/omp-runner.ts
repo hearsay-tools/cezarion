@@ -662,7 +662,12 @@ export class OmpRunner implements AgentRunner {
           }
         }
       } catch (error) {
-        if (child.exitCode === null && child.signalCode === null) throw error;
+        if (child.exitCode === null && child.signalCode === null) {
+          // A live child whose stream failed is not a refusal: no respawn follows, so nothing
+          // may still be accepted into the outbox.
+          open = false;
+          throw error;
+        }
       } finally {
         if (deadline) clearTimeout(deadline);
         if (autoEndTimer) clearTimeout(autoEndTimer);
@@ -872,7 +877,7 @@ function waitForExit(child: ChildProcessWithoutNullStreams): Promise<number | nu
 
 function wrapSpawnError(error: NodeJS.ErrnoException, bin: string): Error {
   if (error.code === 'ENOENT') {
-    return new Error(`\`${bin}\` not found on PATH: install OMP (Bun ≥ 1.3.14) and run \`omp login\``);
+    return new Error(`\`${bin}\` not found on PATH: install OMP (https://omp.sh) and run \`omp login\``);
   }
   return error;
 }
