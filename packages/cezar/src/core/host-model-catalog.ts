@@ -4,6 +4,7 @@ import { discoverCodexModels } from './codex-model-catalog.ts';
 import { discoverOpencodeModels } from './opencode-model-catalog.ts';
 import { discoverCursorModels } from './cursor-model-catalog.ts';
 import { discoverPiModels } from './pi-model-catalog.ts';
+import { discoverOmpModels } from './omp-model-catalog.ts';
 import type { RunnerModelCatalogAdapter } from './runner-model-catalog.ts';
 
 /**
@@ -24,9 +25,6 @@ export function hostModelCatalogAdapters(cwd: string): Record<ModelDiscoveryRunn
     opencode: { discover: () => discoverOpencodeModels({ cwd }) },
     cursor: { discover: () => discoverCursorModels({ cwd }) },
     pi: { discover: () => discoverPiModels({ cwd }) },
-    // Placeholder until OMP's discovery (`omp models --json`) lands: a rejection is reported by
-    // `RunnerModelCatalog` as `unavailable`, so the picker falls back exactly as for any
-    // runner whose discovery failed.
-    omp: { discover: () => Promise.reject(new Error('OMP model discovery is not implemented yet')) },
+    omp: { discover: () => discoverOmpModels({ cwd }) },
   };
 }
