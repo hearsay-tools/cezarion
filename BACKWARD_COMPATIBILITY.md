@@ -133,6 +133,16 @@ when the session carries no preview registration. The MCP tool `cezar_preview_se
 listed, and admitted on every runner, only under `CEZ_PREVIEW=1`, which the provisioned
 session environment carries to the adapter. `cezar_wait_for_ci` and its route are unchanged.
 
+Additive for #803: `POST /api/v1/tools/preview-stop` uses that same private capability,
+16 KiB limit and exact opt-in. Its Zod request is `{ port, restart?: boolean }`; extra
+fields (including run identity or a command) are rejected. `PreviewStopResult` uses
+`{ ok, code, message, hint }` with the same 200/401 convention. The adjacent MCP tool
+`cezar_preview_stop` controls only this run's Cezar-started servers. Restart reuses an
+unchanged owner-approved command after stop or crash; command, cwd or path changes
+invalidate approval and require Run and open again. Adopted/other-run servers and
+ports occupied after teardown are refused with recovery hints. Approval is local to
+the running host, not persisted across cockpit restarts.
+
 - Task file links and published output (#418, additive): `GET /api/v1/runs/:id/file-link`, `GET /api/v1/runs/:id/artifacts`, `GET /api/v1/runs/:id/artifacts/:artifactId`, `GET /api/v1/runs/:id/artifacts/:artifactId/download`, `GET /api/v1/runs/:id/artifacts/:artifactId/image`. All have the normal project aliases. The resolver accepts a bounded `path` and optional `raw=1` (raster images only); external paths match published metadata only and never authorize a source-file read. Artifact routes address validated IDs, not host paths. Download uses attachment disposition and `nosniff`; active documents are never served inline. Existing `/files` and pasted-attachment behavior is unchanged. Files-page query selectors `path` and `artifact` are mutually exclusive.
 
 ## 3. `.ai/cezar/` state files (`packages/cezar/src/runs/store.ts` and friends)

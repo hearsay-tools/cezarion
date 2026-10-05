@@ -1,12 +1,12 @@
 import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import type { PreviewClientMessage, PreviewServer, PreviewServerMessage, PreviewStateMessage } from '@open-mercato/cezar-contract';
+import type { PreviewStopRequest, PreviewStopResult, PreviewClientMessage, PreviewServer, PreviewServerMessage, PreviewStateMessage } from '@open-mercato/cezar-contract';
 import { z } from 'zod';
 import type { RunStore } from '../runs/store.ts';
 import { connectCdp, type Cdp } from './cdp.ts';
 import { ChromiumError, downloadChromium, downloadTarget, installCommand, launchChromium, resolveChromium } from './chromium.ts';
 import { DevServer, probePort, type DevServerState } from './dev-server.ts';
-import type { PreviewHostLike } from './registration.ts';
+import { previewStopResult, type PreviewHostLike } from './registration.ts';
 import { PreviewSession, type Viewer } from './session.ts';
 import { normalizePreviewUrl } from './url.ts';
 
@@ -14,7 +14,7 @@ import { normalizePreviewUrl } from './url.ts';
  * The workspace-wide preview host (#781, spec 2026-10-02-live-preview-v1): one per server process,
  * because ports are host-global. Keyed by run id, it owns every cezar-started dev server and every
  * task's Chromium, and every exit in the spec's lifecycle table: idle timers, release on worktree
- * removal or run deletion, and shutdown. It never spawns a command on its own: only `run` does.
+ * removal or run deletion, and shutdown. It starts commands only on owner approval or agent reuse of that unchanged approval.
  */
 
 export const PREVIEW_SERVER_IDLE_MS = 15 * 60_000;
@@ -64,6 +64,7 @@ type RunEntry = {
   ctx: RunContext;
   servers: Map<number, ServerEntry>;
   startedAt: Map<number, string>;
+  approvals: Map<number, PreviewServer>;
   session?: PreviewSession;
   browser?: BrowserHandle;
   launching?: Promise<PreviewSession | undefined>;
@@ -138,6 +139,7 @@ function readOsRelease(): string {
 }
 
 export class PreviewHost implements PreviewHostLike {
+  private readonly stopping = new Map<DevServerLike, Promise<void>>();
   private readonly entries = new Map<string, RunEntry>();
   private readonly deps: Required<Omit<PreviewHostDeps, 'env' | 'platform' | 'arch'>> & { env: NodeJS.ProcessEnv; platform: string; arch: string };
   /** Chromium lands in one shared cache, so there is one download for the whole host. */
@@ -163,6 +165,7 @@ export class PreviewHost implements PreviewHostLike {
    */
   async open(ctx: RunContext, viewer: Viewer, target: PreviewTarget): Promise<void> {
     const entry = this.entryFor(ctx);
+    if (entry.released) return;
     this.claim(entry, viewer);
     // Whatever this open shows, a show still waiting on Chromium for an older target is stale.
     entry.targetGen += 1;
@@ -183,11 +186,13 @@ export class PreviewHost implements PreviewHostLike {
     }
     entry.port = server.port;
     const current = entry.servers.get(server.port);
-    if (live(current)) return this.report(entry, server.port, current);
+    // A terminal state can precede process-group teardown. Keep its owned identity until stop settles.
+    if (live(current) || (owned(current) && this.stopping.has(current))) return this.report(entry, server.port, current);
     // Another task's server would answer the probe: streaming it here would show that task's app.
     if (this.heldByOther(entry, server)) return;
     const answering = await this.deps.probe(server.port).catch(() => false);
-    if (this.entries.get(ctx.runId) !== entry || entry.viewer !== viewer || entry.port !== server.port) return;
+    if (this.entries.get(ctx.runId) !== entry || entry.viewer !== viewer || entry.port !== server.port || entry.servers.get(server.port) !== current) return;
+    if (owned(current) && this.stopping.has(current)) return this.report(entry, server.port, current);
     if (answering) {
       entry.servers.set(server.port, 'adopted');
       return this.showServer(entry, server, true, true);
@@ -198,14 +203,17 @@ export class PreviewHost implements PreviewHostLike {
     this.tell(entry, { t: 'state', stage: 'needs-approval', server, wasRunning: current === 'adopted' || server.answeredAtRegistration });
   }
 
-  /** The owner's approval: the only path that runs a registered command. */
+  /** The owner's approval, also reused by stopPreview after checking the saved approval. */
   async run(runId: string, port: number): Promise<void> {
     const entry = this.entries.get(runId);
     const server = entry && this.registration(entry, port);
-    if (!entry || !server || live(entry.servers.get(port))) return;
+    if (!entry || entry.released || !server || live(entry.servers.get(port))) return;
+    const previous = entry.servers.get(port);
+    if (owned(previous) && this.stopping.has(previous)) return;
     if (this.heldByOther(entry, server)) return;
     const dev = this.deps.createServer({ server, worktreePath: entry.ctx.worktreePath, dir: this.runDir(entry.ctx) });
     entry.servers.set(port, dev);
+    entry.approvals.set(port, { ...server });
     entry.startedAt.set(port, new Date().toISOString());
     entry.port = port;
     dev.on('state', (state: DevServerState) => this.onServerState(entry, port, dev, state));
@@ -217,6 +225,7 @@ export class PreviewHost implements PreviewHostLike {
     this.recordState(entry, port, 'starting', dev);
     this.report(entry, port, dev);
     dev.start();
+    this.armServerIdle(entry);
   }
 
   /**
@@ -228,8 +237,10 @@ export class PreviewHost implements PreviewHostLike {
     const entry = this.entries.get(runId);
     if (!entry) return;
     const current = entry.servers.get(port);
-    entry.servers.delete(port);
-    if (live(current)) await current.stop('release');
+    entry.approvals.delete(port);
+    // Keep the old process reachable until teardown finishes: release must await it too.
+    if (owned(current)) await this.stopServer(current, 'release');
+    if (entry.servers.get(port) === current) entry.servers.delete(port);
     const server = this.registration(entry, port);
     if (server && entry.viewer && entry.port === port) {
       this.tell(entry, { t: 'state', stage: 'needs-approval', server, wasRunning: false });
@@ -240,8 +251,51 @@ export class PreviewHost implements PreviewHostLike {
   async stop(runId: string, port: number, reason: 'user' | 'idle'): Promise<boolean> {
     const dev = this.entries.get(runId)?.servers.get(port);
     if (!live(dev)) return false;
-    await dev.stop(reason);
+    await this.stopServer(dev, reason);
     return true;
+  }
+
+  /** Reuse only the approval attached to this exact owned process, including after a crash. */
+  async stopPreview(runId: string, request: PreviewStopRequest, signal?: AbortSignal): Promise<PreviewStopResult> {
+    const { port, restart } = request;
+    const owner = this.portOwner(port);
+    if (owner && owner.runId !== runId) return previewStopResult('port_held');
+    const entry = this.entries.get(runId);
+    const server = entry && this.registration(entry, port);
+    if (signal?.aborted || entry?.released) return previewStopResult('unavailable');
+    if (!entry) return previewStopResult('approval_required');
+    if (!server) return previewStopResult('not_registered');
+    const dev = entry.servers.get(port);
+    if (dev === 'adopted') return previewStopResult('adopted');
+    const approval = entry.approvals.get(port);
+    const approved = () => {
+      const current = this.registration(entry, port);
+      return !!approval && entry.approvals.get(port) === approval && !!current
+        && current.command === approval.command && current.cwd === approval.cwd && current.path === approval.path;
+    };
+    if (!owned(dev)) return previewStopResult('approval_required');
+    await this.stopServer(dev, 'user');
+    if (signal?.aborted || entry.released || this.entries.get(runId) !== entry) return previewStopResult('unavailable');
+    if (!restart) return previewStopResult('stopped');
+    if (!approved()) return previewStopResult('approval_required');
+    // Another process can take the port after stop/crash. Never adopt it or spawn over it.
+    const answering = await this.deps.probe(port);
+    if (signal?.aborted || entry.released || this.entries.get(runId) !== entry) return previewStopResult('unavailable');
+    if (!approved()) return previewStopResult('approval_required');
+    if (entry.servers.get(port) !== dev) return previewStopResult('unavailable');
+    const holder = this.portOwner(port);
+    if (holder && holder.runId !== runId) return previewStopResult('port_held');
+    if (answering) return previewStopResult('port_in_use');
+    await this.run(runId, port);
+    return previewStopResult('restarted');
+  }
+
+  private stopServer(dev: DevServerLike, reason: 'user' | 'idle' | 'release'): Promise<void> {
+    const pending = this.stopping.get(dev);
+    if (pending) return pending;
+    const stop = dev.stop(reason).finally(() => { this.stopping.delete(dev); });
+    this.stopping.set(dev, stop);
+    return stop;
   }
 
   keepWaiting(runId: string, port: number): void {
@@ -257,8 +311,15 @@ export class PreviewHost implements PreviewHostLike {
     entry.session?.detach(viewer);
     this.clearIdle(entry);
     entry.idleTimers.browser = setTimeout(() => this.closeBrowser(entry), PREVIEW_BROWSER_IDLE_MS);
+    this.armServerIdle(entry);
+  }
+
+  /** Agent restarts without a viewer need a bound even after the previous idle timer fired. */
+  private armServerIdle(entry: RunEntry): void {
+    if (entry.viewer || entry.released || entry.idleTimers.server) return;
     entry.idleTimers.server = setTimeout(() => {
-      for (const server of entry.servers.values()) if (live(server)) void server.stop('idle');
+      entry.idleTimers.server = undefined;
+      for (const server of entry.servers.values()) if (live(server)) void this.stopServer(server, 'idle');
     }, PREVIEW_SERVER_IDLE_MS);
   }
 
@@ -301,7 +362,8 @@ export class PreviewHost implements PreviewHostLike {
   /** The task whose cezar-owned dev server holds `port`. Adopted ports belong to nobody. */
   portOwner(port: number): { runId: string; title: string } | undefined {
     for (const entry of this.entries.values()) {
-      if (live(entry.servers.get(port))) return { runId: entry.ctx.runId, title: entry.ctx.title };
+      const server = entry.servers.get(port);
+      if (live(server) || (owned(server) && this.stopping.has(server))) return { runId: entry.ctx.runId, title: entry.ctx.title };
     }
     return undefined;
   }
@@ -333,7 +395,7 @@ export class PreviewHost implements PreviewHostLike {
       existing.ctx = ctx;
       return existing;
     }
-    const entry: RunEntry = { ctx, servers: new Map(), startedAt: new Map(), browserGen: 0, targetGen: 0, adopted: false, idleTimers: {}, released: false };
+    const entry: RunEntry = { ctx, servers: new Map(), startedAt: new Map(), approvals: new Map(), browserGen: 0, targetGen: 0, adopted: false, idleTimers: {}, released: false };
     this.entries.set(ctx.runId, entry);
     return entry;
   }
@@ -619,15 +681,15 @@ export class PreviewHost implements PreviewHostLike {
 
   private async releaseEntry(entry: RunEntry, notify: boolean, awaitBrowserExit: boolean): Promise<void> {
     entry.released = true;
-    // Gone from the map at once: an open that arrives meanwhile starts a fresh entry.
-    if (this.entries.get(entry.ctx.runId) === entry) this.entries.delete(entry.ctx.runId);
+    // Retain ownership while stopping so no run can reuse this port during teardown.
     this.clearIdle(entry);
     this.download?.watchers.delete(entry);
     // A launch in flight has no browser on the entry yet; it sees `released` and closes its own.
     const launching = entry.launching;
     const browser = this.closeBrowser(entry);
-    const stops = [...entry.servers.values()].filter(live).map(server => server.stop('release'));
+    const stops = [...entry.servers.values()].filter(owned).map(server => this.stopServer(server, 'release'));
     await Promise.all(stops);
+    if (this.entries.get(entry.ctx.runId) === entry) this.entries.delete(entry.ctx.runId);
     if (awaitBrowserExit) {
       if (browser) await waitForExit(browser);
       if (launching) await launching.catch(() => undefined);

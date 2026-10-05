@@ -1,5 +1,5 @@
 import { isAbsolute, relative, resolve, sep } from 'node:path';
-import type { PreviewResultCode, PreviewServeRequest, PreviewServeResult, PreviewServer } from '@open-mercato/cezar-contract';
+import type { PreviewStopRequest, PreviewStopResult, PreviewResultCode, PreviewServeRequest, PreviewServeResult, PreviewServer } from '@open-mercato/cezar-contract';
 import { previewRefusal } from '../ci-wait/errors.ts';
 
 /**
@@ -12,6 +12,8 @@ export const PREVIEW_MAX_SERVERS = 8;
 
 /** What the run manager needs from the workspace-wide preview host; `PreviewHost` implements it. */
 export interface PreviewHostLike {
+  /** Stop/restart only a server started for this run under an unchanged owner approval. */
+  stopPreview(runId: string, request: PreviewStopRequest, signal?: AbortSignal): Promise<PreviewStopResult>;
   /** The task whose dev server holds `port`, across every project. */
   portOwner(port: number): { runId: string; title: string } | undefined;
   /** One TCP probe: does anything answer on `port` now? */
@@ -117,4 +119,24 @@ function previewMessage(code: PreviewResultCode, ctx: PreviewHintContext): strin
 /** The tool's whole answer for `code`. */
 export function previewResult(code: PreviewResultCode, ctx: PreviewHintContext): PreviewServeResult {
   return { ok: code === 'registered' || code === 'replaced', code, message: previewMessage(code, ctx), hint: previewHint(code, ctx) };
+}
+
+/** Bounded diagnostics for agent controls; no command, path or process details escape. */
+export function previewStopResult(code: PreviewStopResult['code']): PreviewStopResult {
+  const answers: Record<PreviewStopResult['code'], [string, string]> = {
+    stopped: ['The preview server is stopped.', 'Continue your work. Set restart to true to reuse the approved command.'],
+    restarted: ['The approved preview server is starting again.', 'Continue your work. Check the preview for readiness or startup errors.'],
+    approval_required: ['This registration has no current owner approval.', 'Ask the owner to press Run and open in the preview to approve this registration.'],
+    adopted: ['Cezar did not start this server and cannot stop it.', 'Use the terminal or process owner that started it, or register a free port.'],
+    not_registered: ['This port is not registered for your run.', 'Call cezar_preview_serve for your own server first.'],
+    port_held: ['Another task owns this preview server.', "Do not stop the other task's server. Register your server on a free port."],
+    port_in_use: ['The port still answers after this server stopped.', 'Stop the process from the terminal that owns it, or register a free port; Cezar will not replace it.'],
+    invalid_input: ['Invalid preview stop arguments.', 'Call with { "port": 5173, "restart": true }; port must be an integer from 1 to 65535 and restart must be a boolean.'],
+    preview_disabled: ['Live preview is not enabled.', 'Do not retry. Report the command and port in your final message.'],
+    headless: ['No cockpit is attached to this run.', 'Do not retry. Report the command and port in your final message.'],
+    worktree_missing: ["This task's worktree no longer exists.", 'Do not retry.'],
+    unavailable: ['The preview control is no longer available for this session.', 'Retry once from the current session. If it fails again, continue without preview.'],
+  };
+  const [message, hint] = answers[code];
+  return { ok: code === 'stopped' || code === 'restarted', code, message, hint };
 }
