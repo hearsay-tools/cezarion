@@ -86,7 +86,10 @@ operation prints text without a server. `--full` returns the contract shape.
   prints `{ id, url, status, created, branch? }`. `--task-file -` reads stdin.
 - `status` is the slim projection; `question` comes from
   `GET /runs/:id/history-context`'s pending ask, fetched only when
-  `hasPendingHumanAsk` is true.
+  `hasPendingHumanAsk` is true. Default status always includes `handoffUrl`, built next
+  to `threadUrl` in `http.ts`: `<origin>/api/v1/p/<projectId>/runs/<id>/handoff`.
+  The route answers for every known run, even before contents are seeded; the CLI
+  prints the URL, never a filesystem path or the handoff contents.
 - `log` prints one JSON line per `text`/`tool-call`/`tool-result`/`step-start`/
   `error`/`user-message` event from `GET /runs/:id/history`, bounded by
   `--max-chars`. `--follow` reads `GET /runs/:id/events` from the last printed
@@ -100,6 +103,12 @@ operation prints text without a server. `--full` returns the contract shape.
 - `list` leaves out runs whose `delegation.role` is `worker`, with or without
   `--all` (`--all` means "include archived"), and `total` counts parents only
   (#635). No flag brings workers back; add one only when someone asks.
+  Default rows carry one next-action datum per status (#573): `currentStepId` for
+  running, `pullRequestUrl` for done/review, `error` for failed, each only when defined.
+  Row errors use the first line and at most 200 characters, including a trailing `…`
+  whenever cut. The full unpaginated history multiplies every row field; `branch`,
+  `diffStat` and `tokensUsed` remain status details. Status keeps the full error,
+  and `--full` remains the unchanged contract.
 - `notify <id>` and `send <id> --notify` on a worker exit 64 with
   `{ code: "invalid_input", error, parentId }`, naming the parent to notify
   instead, before anything is subscribed or delivered. `notify --off` still
