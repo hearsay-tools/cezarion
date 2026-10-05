@@ -4,9 +4,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { installFromRegistry, type InstallOptions } from './installer.ts';
+import { installFromLocal, installFromRegistry, type InstallOptions } from './installer.ts';
 import { ensurePathHook } from './launcher.ts';
-import { listInstalled, readManifest, versionDir, versionEntry, versionsDir } from './layout.ts';
+import { activate, activeId, currentEntry, listInstalled, readManifest, versionDir, versionEntry, versionsDir } from './layout.ts';
 import { SelfUpdateService } from './service.ts';
 
 /**
@@ -84,6 +84,32 @@ describe('installing into the managed layout', () => {
     });
     expect(ran).toBe(false);
     expect(readFileSync(versionEntry('0.12.1', env), 'utf8')).toContain('first');
+  });
+
+  it.each(['npm failure', 'missing entry', 'success'])('keeps the active local install until replacement is ready: %s', async outcome => {
+    const pkg = join(home, 'checkout');
+    mkdirSync(pkg); writeFileSync(join(pkg, 'package.json'), JSON.stringify({ name: '@wjarka/cezarion', version: '0.12.1' }));
+    const pack: NonNullable<InstallOptions['runNpm']> = async (args) => {
+      const dir = args[args.indexOf('--pack-destination') + 1]!;
+      writeFileSync(join(dir, 'fixture.tgz'), 'fixture');
+    };
+    await installFromLocal(pkg, { env, runNpm: async (args, cwd, log) => args[0] === 'pack' ? pack(args, cwd, log) : npmThatInstalls('original')(args, cwd, log) });
+    activate('0.12.1+local', env);
+    const originalManifest = readManifest('0.12.1+local', env);
+    let oldEntryWhileStaging = '';
+    const replacement = installFromLocal(pkg, { env, runNpm: async (args, cwd, log) => {
+      if (args[0] === 'pack') return pack(args, cwd, log);
+      oldEntryWhileStaging = existsSync(currentEntry(env)) ? readFileSync(currentEntry(env), 'utf8') : 'missing';
+      if (outcome === 'npm failure') throw new Error('ETARGET');
+      if (outcome === 'success') await npmThatInstalls('replacement')(args, cwd, log);
+    } });
+    if (outcome === 'success') await replacement;
+    else await expect(replacement).rejects.toThrow(outcome === 'npm failure' ? 'ETARGET' : 'entry file is missing');
+    expect(oldEntryWhileStaging).toContain('original');
+    expect(activeId(env)).toBe('0.12.1+local');
+    expect(readFileSync(currentEntry(env), 'utf8')).toContain(outcome === 'success' ? 'replacement' : 'original');
+    if (outcome !== 'success') expect(readManifest('0.12.1+local', env)).toEqual(originalManifest);
+    expect(staged()).toEqual([]);
   });
 
   it('never builds a path from an unsafe version id', async () => {

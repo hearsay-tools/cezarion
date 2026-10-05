@@ -71,9 +71,8 @@ export async function installFromLocal(packageRoot: string, opts: InstallOptions
     await (opts.runNpm ?? runNpm)(['pack', '--pack-destination', packDir, '--silent'], packageRoot, opts.onLog);
     const tarball = readdirSync(packDir).find((name) => name.endsWith('.tgz'));
     if (!tarball) throw new Error('npm pack produced no tarball');
-    // A local reinstall replaces the previous local build of the same version — it is the
-    // point of the exercise when iterating on a checkout.
-    rmSync(versionDir(id, env), { recursive: true, force: true });
+    // installSpec replaces the previous local build only after staging has a valid entry.
+    // Keep the active build usable if npm fails or produces an incomplete replacement.
     await installSpec(id, join(packDir, tarball), { version, source: 'local' }, opts);
   } finally {
     rmSync(packDir, { recursive: true, force: true });
