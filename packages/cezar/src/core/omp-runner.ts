@@ -195,6 +195,7 @@ export interface OmpRunnerOptions {
  * closing its turn, so the two streams cannot disagree on a boundary.
  *
  * Contract: oh-my-pi v18.4.11 `docs/rpc.md`, `packages/coding-agent/src/modes/rpc/rpc-mode.ts`.
+ * Design record and the implementation-time rulings: `.ai/specs/2026-10-02-omp-runner.md`.
  */
 export class OmpRunner implements AgentRunner {
   readonly backend = 'omp' as const;

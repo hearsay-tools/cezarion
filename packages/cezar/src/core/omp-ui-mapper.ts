@@ -12,6 +12,8 @@
  * - sub-agents stream as `subagent_lifecycle` / `subagent_event` and nest under their `task` call.
  *
  * Unknown or malformed wire data is ignored; this mapper never throws.
+ *
+ * Design record: `.ai/specs/2026-10-02-omp-runner.md`; protocol summary: `AGENT_PROTOCOL.md` §4.
  */
 import type {
   FileDiff,
