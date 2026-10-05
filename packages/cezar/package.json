@@ -20,7 +20,7 @@
     "README.md"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=24.15.0"
   },
   "scripts": {
     "prebuild": "node scripts/sync-readme.mjs",
@@ -54,7 +54,7 @@
   "devDependencies": {
     "@open-mercato/cezar-api-client": "^0.15.1",
     "@open-mercato/cezar-contract": "^0.15.1",
-    "@types/node": "^20.14.0",
+    "@types/node": "^24.19.1",
     "@types/ws": "^8.18.1",
     "esbuild": "^0.28.1",
     "tsx": "^4.19.0",
