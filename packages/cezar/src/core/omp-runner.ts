@@ -141,9 +141,10 @@ export function ompTools(
   if (opts.bashAllowlist && opts.bashAllowlist.length > 0) tools.delete('bash');
   if (opts.restrictNativeDelegation) for (const name of OMP_DELEGATION_TOOLS) tools.delete(name);
   if (tools.size === 0) return { flag: 'no-tools', tools: [], dropped: [...dropped] };
-  if (opts.cezarTools) tools.add(ciToolDefinition.name);
+  // Narrow before the CI tool joins: a refusal never leaves a CI-only list where --no-tools belongs.
   for (const name of opts.exclude ?? []) tools.delete(name);
   if (tools.size === 0) return { flag: 'no-tools', tools: [], dropped: [...dropped] };
+  if (opts.cezarTools) tools.add(ciToolDefinition.name);
   return { flag: 'tools', tools: [...tools], dropped: [...dropped] };
 }
 
@@ -303,14 +304,29 @@ export class OmpRunner implements AgentRunner {
       ompUi = mapped.state;
       for (const event of mapped.events) emitUiEvent(event);
     };
-    const write = (command: Record<string, unknown>): boolean => {
-      if (!open || !child.stdin.writable) return false;
+    const writeNow = (command: Record<string, unknown>): boolean => {
+      if (!child.stdin.writable) return false;
       try {
         child.stdin.write(`${JSON.stringify(command)}\n`);
         return true;
       } catch {
         return false;
       }
+    };
+    // Until the current child speaks (OMP's `ready` frame) nothing is written to it: a spawn the
+    // R13 refusal rejects exits without reading stdin, and what it was handed would be lost with
+    // it. Accepted commands wait here, in order, and the respawned child gets the same ones.
+    const outbox: Array<Record<string, unknown>> = [];
+    const flushOutbox = (): void => {
+      for (const command of outbox.splice(0)) writeNow(command);
+    };
+    const write = (command: Record<string, unknown>): boolean => {
+      if (!open) return false;
+      if (!sawFrame) {
+        outbox.push(command);
+        return true;
+      }
+      return writeNow(command);
     };
     let agentInputReady = false;
     let promptSerial = 0;
@@ -392,6 +408,7 @@ export class OmpRunner implements AgentRunner {
       open = false;
       closedByCaller = true;
       rejectAgentAck();
+      flushOutbox();
       child.stdin.end();
       killTimer = setTimeout(() => {
         if (child.exitCode !== null || child.signalCode !== null) return;
@@ -402,7 +419,7 @@ export class OmpRunner implements AgentRunner {
     };
     const interrupt = (): void => {
       if (!open) return;
-      write({ type: 'abort' });
+      if (sawFrame) writeNow({ type: 'abort' });
       open = false;
       closedByCaller = true;
       rejectAgentAck();
@@ -448,12 +465,17 @@ export class OmpRunner implements AgentRunner {
     };
     let deadline = armDeadline();
 
+    // A refusal is only retried before any frame, once, and never after the caller or a deadline
+    // ended the session; a spawn with no `--tools` list has nothing to narrow (`uiHold` is null).
+    const retryPossible = (): boolean =>
+      !sawFrame && !respawned && !timedOut && !terminatedByCezar && !closedByCaller && uiHold !== null;
     const result = (async function runOmp(): Promise<AgentRunResult> {
       try {
         for await (const line of readNdjson(child.stdout)) {
           if (!sawFrame) {
             sawFrame = true;
             releaseUiHold();
+            flushOutbox();
           }
           let value: unknown;
           try {
@@ -613,7 +635,9 @@ export class OmpRunner implements AgentRunner {
         if (deadline) clearTimeout(deadline);
         if (autoEndTimer) clearTimeout(autoEndTimer);
         if (killTimer) clearTimeout(killTimer);
-        open = false;
+        // A refused spawn may still be respawned: stay open so input accepted meanwhile is kept
+        // for the new child instead of being refused in the gap.
+        if (!retryPossible()) open = false;
         rejectAgentAck();
       }
 
@@ -625,24 +649,22 @@ export class OmpRunner implements AgentRunner {
       // R13: exit 2 before any frame, naming tools the user's OMP settings disabled. Respawn
       // once without them: the list only narrows, so this never widens what the step granted.
       const refused =
-        exitCode === 2 && !spawnError && !timedOut && !terminatedByCezar && !closedByCaller && !respawned && !sawFrame
+        exitCode === 2 && !spawnError && retryPossible()
           ? refusedOmpTools(stderr.join(''), ompToolList(firstArgs))
           : [];
       if (refused.length > 0) {
         respawned = true;
-        uiHold = null;
         stderr.length = 0;
-        ompUi = createOmpUiState();
-        humanSerial = 0;
-        humanAcks.clear();
-        agentInputReady = false;
-        open = true;
         onEvent?.({ type: 'note', message: `omp: tools disabled by your OMP settings were dropped: ${refused.join(', ')}` });
+        // Session state (mapper, held v2 events, ack sets) follows what was accepted, not the
+        // child, and the outbox still holds every command accepted so far: the new child is
+        // sent exactly those, once, when it speaks.
         child = spawnOmp(buildOmpArgs(spec, refused));
-        startup();
+        if (child.pid !== undefined) opts.onPidChange?.(child.pid);
         deadline = armDeadline();
         return runOmp();
       }
+      open = false;
       releaseUiHold();
       if (spawnError) throw spawnError;
       if (timedOut) {
@@ -690,7 +712,10 @@ export class OmpRunner implements AgentRunner {
       discardQueuedMessages: () => undefined,
       end,
       interrupt,
-      pid: child.pid,
+      // The live child: an R13 respawn replaces it (`onPidChange` tells the caller who read it).
+      get pid() {
+        return child.pid;
+      },
       get open() {
         return open;
       },

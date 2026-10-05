@@ -58,6 +58,11 @@ describe('ompTools', () => {
     expect(ompTools(undefined, { exclude: ['todo'] })).toEqual({ flag: null, tools: [], dropped: [] });
   });
 
+  it('exclude narrows before cezar_wait_for_ci is appended, so it never turns --no-tools into a CI-only list', () => {
+    expect(ompTools(['TodoWrite'], { cezarTools: true, exclude: ['todo'] })).toEqual({ flag: 'no-tools', tools: [], dropped: [] });
+    expect(ompTools(['Read', 'TodoWrite'], { cezarTools: true, exclude: ['todo'] }).tools).toEqual(['read', 'cezar_wait_for_ci']);
+  });
+
   it('undefined passes no flag, [] passes --no-tools, all-dropped passes --no-tools', () => {
     expect(ompTools(undefined, {}).flag).toBeNull();
     expect(ompTools([], {}).flag).toBe('no-tools');
@@ -241,6 +246,8 @@ const text = (t) => {
   send({ type: 'message_update', message: { role: 'assistant' }, assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: t } });
   send({ type: 'message_update', message: { role: 'assistant' }, assistantMessageEvent: { type: 'text_end', contentIndex: 0, content: t } });
 };
+// Real OMP speaks first: the runner writes nothing until this frame arrives.
+send({ type: 'ready', protocolVersion: 1, supportedProtocolVersions: [1, 2] });
 for await (const line of readline.createInterface({ input: process.stdin })) {
   const command = JSON.parse(line);
   if (command.type === 'get_state') send({ id: command.id, type: 'response', command: 'get_state', success: true, data: { sessionId: 'retry' } });
@@ -539,6 +546,113 @@ process.exit(2);
       await expect(new OmpRunner({ bin: gatedBin(['todo']) }).run(spec('x', { allowedTools: undefined })))
         .rejects.toThrow('Error: Built-in tool unavailable in this session: todo.');
       expect(invocations()).toHaveLength(1);
+    });
+  });
+
+  describe('input accepted before the first frame, across an R13 respawn', () => {
+    /** The mock behind a wrapper that records each child's pid, so a test knows which child it talks to. */
+    const pidBin = (): string => {
+      const bin = join(cwd, 'pid-omp.mjs');
+      writeFileSync(bin, `#!/usr/bin/env node
+import { appendFileSync } from 'node:fs';
+appendFileSync(${JSON.stringify(join(cwd, 'pids.txt'))}, process.pid + '\\n');
+await import(${JSON.stringify(MOCK)});
+`, { mode: 0o755 });
+      return bin;
+    };
+    const pids = (): number[] => readFileSync(join(cwd, 'pids.txt'), 'utf8').split('\n').filter(Boolean).map(Number);
+    const refused = (prompt: string, extra: Partial<AgentRunSpec> = {}): AgentRunSpec =>
+      spec(prompt, { allowedTools: ['Read', 'TodoWrite'], ...extra, env: { CEZ_MOCK_OMP_DISABLED_TOOLS: 'todo', ...extra.env } });
+    const prompts = () => lines('commands.ndjson').filter(command => command.type === 'prompt');
+
+    it('a human message sent right after start survives the respawn and reaches the second child once, in order', async () => {
+      const events: AgentEvent[] = [];
+      const session = new OmpRunner({ bin: pidBin() }).startSession(
+        refused('mock:hold'), event => events.push(event), { autoEndAfterFirstTurn: false },
+      );
+      // run.ts flushDeferred does exactly this, synchronously after startSession returns.
+      expect(session.sendMessage([{ type: 'text', text: 'while starting' }])).toBe(true);
+      expect(session.sendMessage([{ type: 'text', text: 'second one' }])).toBe(true);
+      await vi.waitFor(() => expect(prompts()).toHaveLength(3));
+      expect(pids()).toHaveLength(2);
+      expect(prompts().map(command => [command.id, command.message, command.streamingBehavior])).toEqual([
+        ['cezar-prompt-1', 'mock:hold', undefined],
+        ['cezar-prompt-2', 'while starting', 'steer'],
+        ['cezar-prompt-3', 'second one', 'steer'],
+      ]);
+      // The startup commands precede the first prompt, as for an unrefused child.
+      expect(lines('commands.ndjson').slice(0, 4).map(command => command.type)).toEqual([
+        'get_state', 'set_steering_mode', 'set_subagent_subscription', 'set_event_filter',
+      ]);
+      session.interrupt();
+      await session.result.catch(() => undefined);
+      expect(prompts()).toHaveLength(3);
+    });
+
+    it('keeps the opener ack pending, so an agent message offered before the first frame is refused', async () => {
+      const session = new OmpRunner({ bin: pidBin() }).startSession(refused('mock:hold'), undefined, { autoEndAfterFirstTurn: false });
+      expect(session.sendAgentMessage([{ type: 'text', text: 'carried' }], ['in-1'])).toBe(false);
+      await vi.waitFor(() => expect(prompts()).toHaveLength(1));
+      session.interrupt();
+      await session.result.catch(() => undefined);
+    });
+
+    it('a human message accepted before the first frame is written only once the child speaks', async () => {
+      const session = new OmpRunner({ bin: pidBin() }).startSession(
+        spec('mock:hold', { allowedTools: ['Read'] }), undefined, { autoEndAfterFirstTurn: false },
+      );
+      expect(session.sendMessage([{ type: 'text', text: 'early' }])).toBe(true);
+      await vi.waitFor(() => expect(prompts().map(command => command.message)).toEqual(['mock:hold', 'early']));
+      session.interrupt();
+      await session.result.catch(() => undefined);
+    });
+
+    it('pid is the live child after a respawn, and onPidChange reports it', async () => {
+      const changes: number[] = [];
+      const ui: UiEvent[] = [];
+      const session = new OmpRunner({ bin: pidBin() }).startSession(
+        refused('mock:hold'), undefined,
+        { autoEndAfterFirstTurn: false, onUiEvent: event => ui.push(event), onPidChange: pid => changes.push(pid) },
+      );
+      const first = session.pid;
+      await vi.waitFor(() => expect(ui.length).toBeGreaterThan(0));
+      const [firstChild, secondChild] = pids();
+      expect(pids()).toHaveLength(2);
+      expect(first).toBe(firstChild);
+      expect(session.pid).toBe(secondChild);
+      expect(session.pid).not.toBe(first);
+      expect(changes).toEqual([secondChild]);
+      session.interrupt();
+      await session.result.catch(() => undefined);
+    });
+
+    it('interrupt after a respawn aborts and kills the second child', async () => {
+      const ui: UiEvent[] = [];
+      const session = new OmpRunner({ bin: pidBin() }).startSession(
+        refused('mock:hold'), undefined, { autoEndAfterFirstTurn: false, onUiEvent: event => ui.push(event) },
+      );
+      await vi.waitFor(() => expect(ui.length).toBeGreaterThan(0));
+      const second = pids()[1]!;
+      session.interrupt();
+      await session.result.catch(() => undefined);
+      expect(lines('commands.ndjson').at(-1)).toEqual({ type: 'abort' });
+      expect(() => process.kill(second, 0)).toThrow();
+      expect(session.open).toBe(false);
+    });
+
+    it('end after a respawn closes the second child and finishes the run', async () => {
+      const ui: UiEvent[] = [];
+      const events: AgentEvent[] = [];
+      const session = new OmpRunner({ bin: pidBin() }).startSession(
+        refused('mock:hold'), event => events.push(event), { autoEndAfterFirstTurn: false, onUiEvent: event => ui.push(event) },
+      );
+      await vi.waitFor(() => expect(ui.length).toBeGreaterThan(0));
+      const second = pids()[1]!;
+      session.end();
+      await session.result.catch(() => undefined);
+      expect(() => process.kill(second, 0)).toThrow();
+      expect(session.open).toBe(false);
+      expect(events.filter(event => event.type === 'error')).toEqual([]);
     });
   });
 
