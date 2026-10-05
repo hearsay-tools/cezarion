@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFile as execFileCallback, spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { createServer } from 'node:net';
 import { mkdtemp, mkdir, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -7,10 +9,29 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import test from 'node:test';
 import { stopChild } from './stop-child.js';
+import { COCKPIT_PORTS } from '../../src/task-cli/discovery.ts';
 
 const execFile = promisify(execFileCallback);
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const cli = join(packageRoot, 'dist/index.js');
+
+// This fixture needs automatic discovery, so deliberately select a free port in
+// its supported range. Production startup no longer bounces (hearsay-tools/cezarion#722).
+async function freeDiscoveryPort(): Promise<number> {
+  for (const port of COCKPIT_PORTS) {
+    const probe = createServer();
+    try {
+      probe.listen(port, '127.0.0.1');
+      await once(probe, 'listening');
+      return port;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EADDRINUSE') throw error;
+    } finally {
+      await new Promise<void>((done) => probe.close(() => done()));
+    }
+  }
+  throw new Error('No free cockpit discovery port for the task CLI fixture');
+}
 
 interface Result { code: number; stdout: string; stderr: string; json: Record<string, unknown> }
 
@@ -36,10 +57,16 @@ test('built cez task drives a dry-run cockpit it discovers from the checkout', {
     return { ...result, json };
   };
 
-  const server = spawn(process.execPath, [cli, '--repo', repo, '--no-open'], { cwd: repo, env, stdio: 'ignore' });
+  const port = await freeDiscoveryPort();
+  const server = spawn(process.execPath, [cli, '--repo', repo, '--port', String(port), '--no-open'], { cwd: repo, env, stdio: ['ignore', 'pipe', 'pipe'] });
+  let startupOutput = '';
+  server.stdout.on('data', (chunk) => { startupOutput += String(chunk); });
+  server.stderr.on('data', (chunk) => { startupOutput += String(chunk); });
   try {
     let listed: Result | undefined;
     for (let attempt = 0; attempt < 100; attempt += 1) {
+      assert.equal(server.exitCode, null, `cockpit exited before discovery: ${startupOutput}`);
+      assert.equal(server.signalCode, null, `cockpit stopped before discovery: ${startupOutput}`);
       listed = await task(['list']);
       if (listed.code === 0) break;
       // e2e-wait: condition-poll — retry interval follows the fixture state probe; never signals readiness
