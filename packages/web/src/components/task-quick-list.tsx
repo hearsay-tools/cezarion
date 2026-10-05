@@ -16,6 +16,7 @@ import { TaskReferenceChip } from '@/components/reference-conflict-action'
 import { ReferenceStatusProvider } from '@/components/reference-status'
 import { StatusDot } from '@/components/status-dot'
 import { deriveAttention, type Attention } from '@/lib/attention'
+import { ELLIPSIS_HIDDEN_CLASS, useEllipsisHiddenChildren } from '@/lib/ellipsis-hidden'
 import { groupMetaParts, referenceKey, resumeLabel, sharedReferenceKeys } from '@/lib/group-summary'
 import { useNoHover } from '@/lib/use-no-hover'
 import { useIsDesktop } from '@/lib/use-desktop'
@@ -463,6 +464,13 @@ function GroupRow({
   const touch = useRowReferencesInert()
   const first = row.members[0]!
   const sharedReferences = taskReferences(first, undefined, projectId).filter((reference) => shared.has(referenceKey(reference)))
+  // Line 2's links, like a task row's, must not take a click from behind its ellipsis.
+  const metaRef = React.useRef<HTMLDivElement | null>(null)
+  useEllipsisHiddenChildren(
+    metaRef,
+    !touch && sharedReferences.length > 0,
+    `${families.join(',')}|${sharedReferences.map(referenceKey).join(',')}|${age}`,
+  )
   // Line 2 in the task row's own grammar: words, then the shared references as the same plain
   // links (with the status panel) a task row uses — inert text on touch (#617 01b) — then the age.
   const meta: React.ReactNode[] = [
@@ -551,7 +559,7 @@ function GroupRow({
           >
             {lineOne}
           </button>
-          <div data-slot="group-meta" className={lineTwoClass}>{lineTwo}</div>
+          <div ref={metaRef} data-slot="group-meta" className={cn(lineTwoClass, ELLIPSIS_HIDDEN_CLASS)}>{lineTwo}</div>
         </div>
       )}
       {/* 36px on a pointer device; on touch the compare link is a 44px target of its own, beside
@@ -939,7 +947,10 @@ function RunRow({
   // goes first, whole and with its separator, before anything is ellipsized. The hand-off glyph
   // never goes: it leads the line, and the line truncates at its end.
   const metaRef = React.useRef<HTMLDivElement | null>(null)
-  const ageDropped = useAgeDropped(metaRef, Boolean(age), `${age}|${stateWord ?? ''}|${references.map((ref) => `${ref.kind}-${ref.number}-${ref.url}`).join(',')}|${run.notify ? 1 : 0}`)
+  const metaKey = `${age}|${stateWord ?? ''}|${references.map((ref) => `${ref.kind}-${ref.number}-${ref.url}`).join(',')}|${run.notify ? 1 : 0}`
+  const ageDropped = useAgeDropped(metaRef, Boolean(age), metaKey)
+  // A reference the line's ellipsis hid must not take the click meant for the row.
+  useEllipsisHiddenChildren(metaRef, !inertReferences && references.length > 0, `${metaKey}|${ageDropped ? 1 : 0}`)
 
   const meta: React.ReactNode[] = []
   if (stateWord) meta.push(<span key="state" data-slot="task-row-state">{stateWord}</span>)
@@ -1074,6 +1085,7 @@ function RunRow({
           data-slot="task-row-meta"
           className={cn(
             'h-[16px] min-w-0 truncate text-[11.5px] leading-[1.4] font-normal text-soft-foreground',
+            ELLIPSIS_HIDDEN_CLASS,
             // On the selected fill `--soft-foreground` is 4.45:1 (dark) / 4.25:1 (light), under
             // the 4.5:1 an 11.5px line needs; it steps up one ink, as the title steps to
             // `--foreground`.
