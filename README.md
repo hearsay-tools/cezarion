@@ -67,6 +67,10 @@ Click any thumbnail for the full-size screenshot.
 
 ## What cezar does best 🏆
 
+**On your phone:** the [iPhone and Android companion apps](docs/mobile.md) connect
+to your existing HTTPS cockpit. Personal installation and device testing are
+documented; agents continue running on your server.
+
 Plenty of tools wrap a single coding agent in a nicer window — a "Codex GUI", a
 conductor-style app, one-agent front-ends. cezar's bet is different. Three things
 it does better than any of them:
