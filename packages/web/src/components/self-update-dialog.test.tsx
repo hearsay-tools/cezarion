@@ -341,15 +341,23 @@ describe('SelfUpdateDialog', () => {
     expect(dialog.querySelector('[data-slot="self-update-development"]')).toBeNull()
   })
 
-  it('stays open while an install is running', async () => {
+  it.each(['running', 'restarting'] as const)('stays open while an update is %s', async (jobStatus) => {
     vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => {})))
     const onOpenChange = vi.fn()
     renderDialog(
-      { job: { status: 'running', target: '0.12.1', startedAt: '2026-09-28T09:00:00.000Z', finishedAt: null, log: [] } },
+      { job: { status: jobStatus, target: '0.12.1', startedAt: '2026-09-28T09:00:00.000Z', finishedAt: null, log: [] } },
       { onOpenChange },
     )
     fireEvent.click(await screen.findByRole('button', { name: /close/i }))
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' })
     expect(onOpenChange).not.toHaveBeenCalled()
+  })
+
+  it('can close after an update fails', async () => {
+    const onOpenChange = vi.fn()
+    renderDialog({ job: { status: 'failed', target: '0.12.1', startedAt: '2026-09-28T09:00:00Z', finishedAt: null, log: [], error: 'offline' } }, { onOpenChange })
+    fireEvent.click(await screen.findByRole('button', { name: /close/i }))
+    expect(onOpenChange).toHaveBeenCalledWith(false)
   })
 })
 
