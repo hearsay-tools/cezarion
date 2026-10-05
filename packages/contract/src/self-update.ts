@@ -115,7 +115,7 @@ export type CheckoutTask = z.infer<typeof checkoutTaskSchema>;
 /** A cezar checkout (a worktree of a registered cezar repo) the cockpit can switch to by
  *  applying its `id` — linked on the spot, no copy, no publish. Only built ones can be applied.
  *  Everything past `linked` is there to tell forty task branches apart: what the task was, what
- *  was last committed and when, and whether the build predates that commit. */
+ *  was last committed and when, and whether the build needs refreshing. */
 export const cezarCheckoutSchema = z.object({
   id: z.string(),
   branch: z.string(),
@@ -127,7 +127,7 @@ export const cezarCheckoutSchema = z.object({
   commit: z.object({ sha: z.string(), subject: z.string(), at: z.string() }).nullable(),
   /** When `dist/index.js` was last written; null when not built. */
   builtAt: z.string().nullable(),
-  /** Built, but the last commit is newer than the build. */
+  /** Built, but HEAD is newer than the build or uncommitted changes require rebuilding. */
   stale: z.boolean(),
   /** The task that owns this worktree, when it is one of cezar's own. */
   task: checkoutTaskSchema.nullable(),

@@ -174,6 +174,36 @@ describe('linked checkouts', () => {
     expect(found[1]).toMatchObject({ task: null, commit: { subject: 'init' }, stale: false });
   });
 
+  it.each(['modified', 'staged', 'untracked', 'deleted'])('rebuilds a built checkout with %s source changes before activating it', async change => {
+    const repo = join(home, 'dirty-repo');
+    const pkg = fakeCheckout(repo);
+    const source = join(pkg, 'source.ts');
+    writeFileSync(source, 'old source');
+    writeFileSync(join(repo, '.gitignore'), 'dist\nweb/dist\n');
+    git(repo, 'init', '-q', '-b', 'main'); git(repo, 'add', '.'); git(repo, 'commit', '-q', '-m', 'init');
+    // The build is newer than HEAD: only the dirty worktree can make it stale.
+    const future = new Date(Date.now() + 60_000);
+    utimesSync(join(pkg, 'dist', 'index.js'), future, future);
+    mkdirSync(env.CEZ_HOME!, { recursive: true });
+    writeFileSync(join(env.CEZ_HOME!, 'config.json'), JSON.stringify({ projects: [{ id: 'cezar', root: realpathSync(repo) }] }));
+    expect((await discoverCheckouts(env))[0]?.stale).toBe(false);
+    if (change === 'deleted') rmSync(source);
+    else writeFileSync(change === 'untracked' ? join(pkg, 'new-source.ts') : source, 'new source');
+    if (change === 'staged') git(repo, 'add', '.');
+    const [checkout] = await discoverCheckouts(env);
+    expect(checkout?.stale).toBe(true);
+    const build = vi.fn(async () => { writeFileSync(join(pkg, 'dist', 'index.js'), '// rebuilt dirty source'); });
+    const svc = new SelfUpdateService({
+      pkgName: '@wjarka/cezarion', version: '0.13.0',
+      entry: join(versionsDir(env), 'current', 'node_modules', '@wjarka', 'cezarion', 'dist', 'index.js'),
+      env, restart: () => {}, buildCheckout: build,
+    });
+    const job = svc.apply(checkout!.id);
+    await vi.waitFor(() => expect(job.status).toBe('restarting'));
+    expect(build).toHaveBeenCalledOnce();
+    expect(readFileSync(currentEntry(env), 'utf8')).toBe('// rebuilt dirty source');
+  });
+
   it('builds a checkout: npm install only when dependencies are missing, then server and cockpit', async () => {
     const worktree = join(home, 'wt');
     const pkg = fakeCheckout(worktree, '0.13.0', false);
