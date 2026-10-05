@@ -19,6 +19,9 @@
 {"type":"subagent_event","payload":{"id":"RpcMapper","event":{"type":"agent_end","messages":[],"isTerminal":true,"yielded":true}}}
 {"type":"subagent_lifecycle","payload":{"id":"RpcMapper","agent":"explore","status":"completed","sessionFile":"/home/dev/.omp/agent/sessions/--home-dev-repo--/artifacts/RpcMapper.jsonl","parentToolCallId":"toolu_task_1","index":0}}
 {"type":"tool_execution_end","toolCallId":"toolu_task_1","toolName":"task","result":{"content":[{"type":"text","text":"RpcMapper: rpc-mode.ts owns the stdin loop."}]}}
+{"type":"tool_execution_start","toolCallId":"toolu_task_3","toolName":"task","args":{"agent":"explore","task":"Watch the CI run","solutionSpace":"Read-only; report the verdict"}}
+{"type":"subagent_lifecycle","payload":{"id":"CiWatch","agent":"explore","status":"started","sessionFile":"/home/dev/.omp/agent/sessions/--home-dev-repo--/artifacts/CiWatch.jsonl","parentToolCallId":"toolu_task_3","index":0}}
+{"type":"tool_execution_end","toolCallId":"toolu_task_3","toolName":"task","result":{"content":[{"type":"text","text":"CiWatch: running in the background"}]}}
 {"type":"tool_execution_start","toolCallId":"toolu_task_2","toolName":"task","args":{"context":"Survey the OMP RPC surface for the cezar runner.","tasks":[{"name":"Docs","agent":"explore","task":"Summarise docs/rpc.md","solutionSpace":"docs only"},{"name":"Types","agent":"explore","task":"List every frame in rpc-types.ts","solutionSpace":"types only"},{"name":"Tests","agent":"task","task":"Draft mapper tests","solutionSpace":"tests only"}]}}
 {"type":"tool_execution_update","toolCallId":"toolu_task_2","toolName":"task","args":{"context":"Survey the OMP RPC surface for the cezar runner.","tasks":[{"name":"Docs","agent":"explore","task":"Summarise docs/rpc.md","solutionSpace":"docs only"},{"name":"Types","agent":"explore","task":"List every frame in rpc-types.ts","solutionSpace":"types only"},{"name":"Tests","agent":"task","task":"Draft mapper tests","solutionSpace":"tests only"}]},"partialResult":{"content":[{"type":"text","text":"3 agents running"}]}}
 {"type":"subagent_lifecycle","payload":{"id":"Docs","agent":"explore","status":"started","sessionFile":"/home/dev/.omp/agent/sessions/--home-dev-repo--/artifacts/Docs.jsonl","parentToolCallId":"toolu_task_2","index":0,"description":"Read the RPC docs"}}
@@ -40,6 +43,7 @@
 {"type":"subagent_lifecycle","payload":{"id":"Types","agent":"explore","status":"completed","sessionFile":"/home/dev/.omp/agent/sessions/--home-dev-repo--/artifacts/Types.jsonl","parentToolCallId":"toolu_task_2","index":1}}
 {"type":"subagent_lifecycle","payload":{"id":"Tests","agent":"task","status":"aborted","sessionFile":"/home/dev/.omp/agent/sessions/--home-dev-repo--/artifacts/Tests.jsonl","parentToolCallId":"toolu_task_2","index":2}}
 {"type":"tool_execution_end","toolCallId":"toolu_task_2","toolName":"task","result":{"content":[{"type":"text","text":"Docs: done\nTypes: done\nTests: aborted"}]}}
+{"type":"subagent_lifecycle","payload":{"id":"CiWatch","agent":"explore","status":"completed","sessionFile":"/home/dev/.omp/agent/sessions/--home-dev-repo--/artifacts/CiWatch.jsonl","parentToolCallId":"toolu_task_3","index":0}}
 {"type":"turn_end"}
 {"type":"turn_start"}
 {"type":"message_start","messageId":"msg-2","message":{"role":"assistant","content":[],"timestamp":1791151803000}}

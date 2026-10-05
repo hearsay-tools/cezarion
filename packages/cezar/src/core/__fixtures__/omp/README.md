@@ -57,6 +57,9 @@ strings are placeholders, not a claim about the hashline grammar. Specific choic
   exercise the early-event buffer. Whether v18.4.11 can emit a child event ahead of its lifecycle
   frame is not established; the mapper handles both orders.
 - The batch's `Tests` agent ends `aborted` with an open text block.
+- `CiWatch` is a single-form `task` whose result arrives while its sub-agent still runs (v18.4.11
+  runs `task` asynchronously in RPC by default: `async.enabled`, protocolDefault `["rpc"]`). Its
+  row stays `running` until the `completed` lifecycle frame after the batch.
 
 ## Expected files
 

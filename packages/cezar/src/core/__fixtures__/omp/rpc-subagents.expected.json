@@ -132,6 +132,39 @@
     "type": "item.started",
     "item": {
       "kind": "tool",
+      "id": "toolu_task_3",
+      "name": "task",
+      "toolKind": "task",
+      "title": "Task: Watch the CI run",
+      "status": "running",
+      "input": {
+        "agent": "explore",
+        "task": "Watch the CI run",
+        "solutionSpace": "Read-only; report the verdict"
+      }
+    }
+  },
+  {
+    "type": "item.updated",
+    "item": {
+      "kind": "tool",
+      "id": "toolu_task_3",
+      "name": "task",
+      "toolKind": "task",
+      "title": "Task: Watch the CI run",
+      "status": "running",
+      "input": {
+        "agent": "explore",
+        "task": "Watch the CI run",
+        "solutionSpace": "Read-only; report the verdict"
+      },
+      "output": "CiWatch: running in the background"
+    }
+  },
+  {
+    "type": "item.started",
+    "item": {
+      "kind": "tool",
       "id": "toolu_task_2",
       "name": "task",
       "toolKind": "other",
@@ -408,17 +441,34 @@
     }
   },
   {
+    "type": "item.completed",
+    "item": {
+      "kind": "tool",
+      "id": "toolu_task_3",
+      "name": "task",
+      "toolKind": "task",
+      "title": "Task: Watch the CI run",
+      "status": "completed",
+      "input": {
+        "agent": "explore",
+        "task": "Watch the CI run",
+        "solutionSpace": "Read-only; report the verdict"
+      },
+      "output": "CiWatch: running in the background"
+    }
+  },
+  {
     "type": "item.started",
     "item": {
       "kind": "message",
-      "id": "turn_1_text_0_3",
+      "id": "turn_1_text_0_4",
       "role": "assistant",
       "text": ""
     }
   },
   {
     "type": "item.delta",
-    "itemId": "turn_1_text_0_3",
+    "itemId": "turn_1_text_0_4",
     "field": "text",
     "delta": "Survey complete; the test draft was aborted."
   },
@@ -426,7 +476,7 @@
     "type": "item.completed",
     "item": {
       "kind": "message",
-      "id": "turn_1_text_0_3",
+      "id": "turn_1_text_0_4",
       "role": "assistant",
       "text": "Survey complete; the test draft was aborted."
     }

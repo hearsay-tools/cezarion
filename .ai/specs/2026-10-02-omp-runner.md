@@ -281,8 +281,13 @@ that shape; no web change is needed beyond tests.
 | Batch-form call (`args.tasks[]`) | one synthetic tool item per sub-agent: `id = <toolCallId>#<lifecycle.id>`, `name:'task'`, `toolKind:'task'`, title from `description` (else the task text), `input {agent, task}` | `parentItemId` = the synthetic id |
 | Batch call card | rendered as a plain tool item (`toolKind: 'other'`), title "Task batch · N agents", so the drawer shows N rows, not N+1 | none |
 
-Status: `started` → `running`, `completed` → `completed`, `failed`/`aborted` → `failed`; a run
-that ends mid-agent shows as stalled (existing rule). Agent type comes from the input `agent`
+Status: `started` → `running`, `completed` → `completed`, `failed`/`aborted` → `failed`, for
+batch and single-form rows alike; a run that ends mid-agent shows as stalled (existing rule).
+v18.4.11 runs `task` asynchronously in RPC by default (`async.enabled`, protocolDefault
+`["rpc"]`), so a single-form call's `tool_execution_end` can arrive while its agent still runs:
+the row then stays `running` with the result attached (`item.updated`) and completes on the
+agent's terminal lifecycle frame. A lifecycle already terminal at the result decides the row's
+status; a failed result fails the row at once. Agent type comes from the input `agent`
 key the drawer already reads. Child `agent_end`/`session_settled`-shaped events inside
 `subagent_event` never close the parent turn (S9). A `subagent_event` whose id has no lifecycle
 frame yet cannot be attributed (only the lifecycle carries `parentToolCallId`): it is held in a

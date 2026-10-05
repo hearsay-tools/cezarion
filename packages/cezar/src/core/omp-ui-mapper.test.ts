@@ -138,7 +138,7 @@ describe('omp ui mapper (golden fixtures)', () => {
 
   it('batch task yields one task row per sub-agent and no task-kind batch card', () => {
     const items = toolItems(replay('rpc-subagents'));
-    expect(items.filter((i) => i.toolKind === 'task' && !i.parentItemId)).toHaveLength(4); // 1 single + 3 batch
+    expect(items.filter((i) => i.toolKind === 'task' && !i.parentItemId)).toHaveLength(5); // 2 single + 3 batch
     expect(items.find((i) => i.title === 'Task batch · 3 agents')?.toolKind).toBe('other');
     const rows = Object.fromEntries(items.filter((i) => i.id.startsWith('toolu_task_2#')).map((i) => [i.id, i]));
     expect(rows['toolu_task_2#Docs']).toMatchObject({
@@ -372,6 +372,56 @@ describe('omp ui mapper (golden fixtures)', () => {
       item: expect.objectContaining({ kind: 'message', parentItemId: 'B#Anna' }),
     });
     expect(events.some((event) => 'item' in event && event.item.parentItemId === 'A#Anna')).toBe(false);
+  });
+
+  describe('a single-form task row follows its sub-agent lifecycle (final review #4)', () => {
+    // v18.4.11 runs `task` asynchronously in RPC by default (`async.enabled`, protocolDefault
+    // ["rpc"]): the call can return while its sub-agent still runs, so the row's status is the
+    // lifecycle's, not the tool result's.
+    const start = { type: 'tool_execution_start', toolCallId: 'T', toolName: 'task', args: { agent: 'explore', task: 'watch CI', solutionSpace: 's' } };
+    const lifecycle = (status: string) => ({
+      type: 'subagent_lifecycle',
+      payload: { id: 'Watcher', agent: 'explore', status, parentToolCallId: 'T', index: 0 },
+    });
+    const end = (isError = false) => ({
+      type: 'tool_execution_end', toolCallId: 'T', toolName: 'task', isError,
+      result: { content: [{ type: 'text', text: 'Watcher: running in the background' }] },
+    });
+    const rowEvents = (events: UiEvent[]) => events.filter((event) => 'item' in event && event.item.id === 'T');
+
+    it('stays running past an early tool result and completes with the agent', () => {
+      const { events } = fold([start, lifecycle('started'), end(), lifecycle('completed')]);
+      expect(rowEvents(events).map((event) => [event.type, (event as { item: UiToolItem }).item.status])).toEqual([
+        ['item.started', 'running'],
+        ['item.updated', 'running'],
+        ['item.completed', 'completed'],
+      ]);
+      expect(rowEvents(events).at(-1)).toMatchObject({ item: { output: 'Watcher: running in the background' } });
+    });
+
+    it('an agent aborted after the tool result fails the row', () => {
+      const { events } = fold([start, lifecycle('started'), end(), lifecycle('aborted')]);
+      expect(rowEvents(events).at(-1)).toMatchObject({ type: 'item.completed', item: { status: 'failed' } });
+    });
+
+    it('an agent aborted before a successful tool result still fails the row', () => {
+      const { events } = fold([start, lifecycle('started'), lifecycle('aborted'), end()]);
+      expect(rowEvents(events).map((event) => event.type)).toEqual(['item.started', 'item.completed']);
+      expect(rowEvents(events).at(-1)).toMatchObject({ item: { status: 'failed' } });
+    });
+
+    it('a failed tool result completes the row at once, and a later lifecycle frame leaves it alone', () => {
+      const { events } = fold([start, lifecycle('started'), end(true), lifecycle('completed')]);
+      expect(rowEvents(events).map((event) => [event.type, (event as { item: UiToolItem }).item.status])).toEqual([
+        ['item.started', 'running'],
+        ['item.completed', 'failed'],
+      ]);
+    });
+
+    it('a task call with no lifecycle frame completes on its result, as before', () => {
+      const { events } = fold([start, end()]);
+      expect(rowEvents(events).at(-1)).toMatchObject({ type: 'item.completed', item: { status: 'completed' } });
+    });
   });
 
   it('agent-invoked prompt_result waits for session_settled', () => {

@@ -35,6 +35,16 @@ interface OmpTextLane {
   readonly textByItem: ReadonlyMap<string, string>;
 }
 
+/** One sub-agent's dock row, and what its lifecycle and (single form) its `task` call said. */
+export interface OmpSubagentEntry {
+  rowId: string;
+  parentToolCallId: string;
+  /** The last lifecycle status, mapped onto the row vocabulary. */
+  status: UiToolItem['status'];
+  /** Single form only: the `task` call's `tool_execution_end` has been mapped. */
+  ended: boolean;
+}
+
 export interface OmpUiMapperState extends OmpTextLane {
   readonly sessionStarted: boolean;
   readonly sessionId: string | null;
@@ -63,7 +73,7 @@ export interface OmpUiMapperState extends OmpTextLane {
    * Sub-agent id → its dock row. `rowId` is the single-form `task` call itself, or the synthetic
    * `<toolCallId>#<id>` row of a batch call. `parentToolCallId` is empty when OMP sent none.
    */
-  readonly subagents: ReadonlyMap<string, { rowId: string; parentToolCallId: string }>;
+  readonly subagents: ReadonlyMap<string, OmpSubagentEntry>;
   /** `subagent_event` frames that arrived before their lifecycle frame named the parent. */
   readonly pendingSubagentEvents: ReadonlyMap<string, readonly unknown[]>;
   /** `task` calls in batch form (`args.tasks[]`): their card is not a dock row. */
@@ -567,9 +577,15 @@ function toolEnded(
   const result = isRecord(value.result) ? value.result : {};
   const output = contentText(result.content);
   const isError = value.isError === true || result.isError === true;
+  // A single-form `task` row is its sub-agent's: in RPC OMP runs `task` asynchronously by
+  // default, so the result can arrive while the agent still runs, and an aborted agent's result
+  // can still read as success. Its lifecycle status wins over a successful result.
+  const agent = scope.toolPrefix === '' ? singleFormSubagent(state, id) : undefined;
+  if (agent) state = withSubagent(state, agent[0], { ...agent[1], ended: true });
+  const status = isError ? 'failed' : agent ? agent[1].status : 'completed';
   const item: UiToolItem = {
     ...previous,
-    status: isError ? 'failed' : 'completed',
+    status,
     ...(isError ? { error: output ?? 'omp tool failed' } : output !== undefined ? { output } : {}),
   };
   const diffs = isError ? undefined : ompToolDiffs(previous.name, previous.input, result);
@@ -582,7 +598,7 @@ function toolEnded(
   }
   const tools = new Map(state.tools);
   tools.set(id, item);
-  const events: UiEvent[] = [{ type: 'item.completed', item }];
+  const events: UiEvent[] = [{ type: status === 'running' ? 'item.updated' : 'item.completed', item }];
   // A sub-agent's todo list is its own; it never replaces the session's plan dock.
   const plan = publishPlan && !isError ? ompToolPlan(previous.name, result) : undefined;
   if (plan) events.push({ type: 'plan.updated', entries: plan });
@@ -704,10 +720,8 @@ function mapSubagentLifecycle(payload: Record<string, unknown>, state: OmpUiMapp
     // synthetic `task` row per sub-agent so the drawer counts agents, not calls.
     const single = parent !== undefined && !state.batchCalls.has(parentToolCallId);
     const rowId = single ? parentToolCallId : `${parentToolCallId || 'omp-subagent'}#${id}`;
-    entry = { rowId, parentToolCallId };
-    const subagents = new Map(state.subagents);
-    subagents.set(id, entry);
-    state = { ...state, subagents };
+    entry = { rowId, parentToolCallId, status, ended: false };
+    state = withSubagent(state, id, entry);
     if (!single) {
       const agent = string(payload.agent);
       const task = batchTask(parent, id, number(payload.index));
@@ -752,8 +766,16 @@ function mapSubagentLifecycle(payload: Record<string, unknown>, state: OmpUiMapp
     }
   }
 
-  const row = entry.rowId !== entry.parentToolCallId ? state.tools.get(entry.rowId) : undefined;
-  if (row && row.status !== status) {
+  if (entry.status !== status) {
+    entry = { ...entry, status };
+    state = withSubagent(state, id, entry);
+  }
+
+  // A batch row is the agent's own; a single-form row is the `task` call, which follows the
+  // lifecycle only once its result has arrived (`toolEnded` reads `status` up to then).
+  const single = entry.rowId === entry.parentToolCallId;
+  const row = !single || (entry.ended && status !== 'running') ? state.tools.get(entry.rowId) : undefined;
+  if (row && row.status !== status && (!single || row.status === 'running')) {
     const item: UiToolItem = { ...row, status };
     const tools = new Map(state.tools);
     tools.set(row.id, item);
@@ -761,6 +783,20 @@ function mapSubagentLifecycle(payload: Record<string, unknown>, state: OmpUiMapp
     events.push({ type: status === 'running' ? 'item.updated' : 'item.completed', item });
   }
   return { events, state };
+}
+
+/** The sub-agent whose single-form `task` call is row `rowId`, with its id. */
+function singleFormSubagent(state: OmpUiMapperState, rowId: string): [string, OmpSubagentEntry] | undefined {
+  for (const [id, entry] of state.subagents) {
+    if (entry.rowId === rowId && entry.parentToolCallId === rowId) return [id, entry];
+  }
+  return undefined;
+}
+
+function withSubagent(state: OmpUiMapperState, id: string, entry: OmpSubagentEntry): OmpUiMapperState {
+  const subagents = new Map(state.subagents);
+  subagents.set(id, entry);
+  return { ...state, subagents };
 }
 
 function mapSubagentEvent(payload: Record<string, unknown>, state: OmpUiMapperState): OmpUiMapping {
