@@ -145,10 +145,12 @@ function turnParkSignals(text: string): { monitoring: boolean; humanGate: boolea
       continue;
     }
     if (fence || /^(?: {4}|\t|\s*>)/.test(raw)) continue;
-    const line = raw.trim();
+    // Lists and emphasis format active prose; they do not quote it. Exclude
+    // fenced/indented/blockquote examples before removing their decoration.
+    const line = raw.trim().replace(/^(?:[-+*]|\d+[.)])\s+/, '').replace(/\*{1,2}|_{1,2}/g, '');
     if (!line) continue;
     const example = /\b(?:example|sample|literal|quoted)(?: marker)?\s*:\s*$/i.test(previous);
-    if (!example && line === 'CEZ:MONITORING') {
+    if (!example && raw.trim() === 'CEZ:MONITORING') {
       monitoring = true;
       humanGate = false; // a later declaration supersedes earlier, resolved prose
     }

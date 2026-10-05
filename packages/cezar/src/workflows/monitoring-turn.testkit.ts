@@ -11,6 +11,7 @@ export const MONITORING_TURN_CRITERIA = [
   { id: 'M7', scenario: 'turn-messages', name: 'idle closure preserves a question and its delivered answer clears later monitoring' },
   { id: 'M11', scenario: 'turn-messages', name: 'quoted human gates and routine review progress do not cancel monitoring' },
   { id: 'M12', scenario: 'turn-messages', name: 'a resolved prose question before monitoring does not latch attention' },
+  { id: 'M15', scenario: 'turn-messages', name: 'active Markdown human gates beat monitoring' },
   { id: 'M8', scenario: 'turn-messages', name: 'spent parent completion remains actionable' },
 ] as const;
 export const MONITORING_ORDER_CRITERIA = [

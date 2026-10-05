@@ -61,12 +61,18 @@ for (const backend of RUNNER_IDS) describe(`${backend} monitoring turn`, { timeo
           await until(() => store.readEvents(p.id).some(event => event.type === 'note' && String(event.message).includes('automatic monitoring wake-up (1/')));
           await until(() => run().status === 'waiting'); // mock wake response has no declaration
           attention('needs you', true);
+        } else if (row.id === 'M15') {
+          for (const gate of ['- Should I merge this PR?', '**Please review the changes before I continue.**', '1. __I need your approval before proceeding.__', '*Should I merge this PR?* Please let me know.']) {
+            await send([MONITORING_TEXT, gate]);
+            attention('needs you', true);
+            expect(run().monitoringWakeAt).toBeUndefined();
+          }
         } else if (row.id === 'M12') {
           await send(['Should I merge this PR?', 'That step is approved; the load campaign is still running.\nCEZ:MONITORING', ACK_TEXT]);
           attention('monitoring', false);
           expect(run().monitoringWakeAt).toBeDefined();
         } else if (row.id === 'M11') {
-          await send([MONITORING_TEXT, ACK_TEXT + '\nWhat changed?\nThe startup checks now record diagnostics.\n> Should I merge this PR?\n> Please review the changes.\n```text\nI need your approval.\n```\nThe review checks are approved.']);
+          await send([MONITORING_TEXT, ACK_TEXT + '\nWhat changed?\nThe startup checks now record diagnostics.\n> - Should I merge this PR?\n> **Please review the changes.**\n```text\n**I need your approval.**\n```\n**Example:**\n- Should I merge this PR?\nThe review checks are approved.']);
           attention('monitoring', false);
           expect(run().monitoringWakeAt).toBeDefined();
         } else if (row.id === 'M2' || row.id === 'M3') {
