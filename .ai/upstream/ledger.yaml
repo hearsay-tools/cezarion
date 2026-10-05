@@ -834,7 +834,11 @@ entries:
     pr: 1132
     title: "feat: managed install, in-cockpit self-update and desktop app (#1132)"
     date: 2026-09-28
-    status: pending
+    status: diverged
+    decided: 2026-10-05
+    fork:
+      pr: 847
+    reason: "Ported the managed installer and native shell; added isolated remote windows, retained the fork npm updater, and kept fork branding and title-bar controls."
     hint:
       conflicts: 12
   - sha: a1e392b23dfb38a793aa41f9ad6ee5b401e19b16
@@ -848,42 +852,66 @@ entries:
     pr: 1137
     title: "fix(desktop-release): dry run mode, and three fixes the first run needed (#1137)"
     date: 2026-09-28
-    status: pending
+    status: diverged
+    decided: 2026-10-05
+    fork:
+      pr: 847
+    reason: "Ported dry-run and packaging fixes; public releases now require platform and updater signing instead of publishing unsigned installers."
     hint:
       conflicts: 0
   - sha: c5cff155f41b2eed353ba4e0ae0dbde0740f0d15
     pr: 1138
     title: "chore(desktop-release): macOS builds without a Developer ID are sealed ad-hoc, not left unsigned (#1138)"
     date: 2026-09-28
-    status: pending
+    status: ported
+    decided: 2026-10-05
+    fork:
+      pr: 847
+    reason: "Ad-hoc sealing retained for macOS test artifacts; public releases require Developer ID signing and notarization."
     hint:
       conflicts: 0
   - sha: bab4e2192acf1f05aa3466cfb5d92c5b9bd89c39
     pr: 1140
     title: "feat(desktop-release): an Arch Linux package (Omarchy, Manjaro, EndeavourOS) (#1140)"
     date: 2026-09-28
-    status: pending
+    status: ported
+    decided: 2026-10-05
+    fork:
+      pr: 847
+    reason: "Arch package and release dependency validation ported with fork asset names."
     hint:
       conflicts: 0
   - sha: c3e50f914b36d1f8d34698d412462366dcc37efc
     pr: 1142
     title: "desktop-release: a second release of the rolling links no longer tries to move a tag (#1142)"
     date: 2026-09-28
-    status: pending
+    status: ported
+    decided: 2026-10-05
+    fork:
+      pr: 847
+    reason: "Rolling release refresh preserves its existing tag and replaces assets."
     hint:
       conflicts: 0
   - sha: 1e3462fd1072e89185b302306fa4f409ab2841c4
     pr: 1143
     title: "desktop-release: the .deb gets a permanent link like every other installer (#1143)"
     date: 2026-09-28
-    status: pending
+    status: ported
+    decided: 2026-10-05
+    fork:
+      pr: 847
+    reason: "DEB stable download and checksum included in the rolling installer set."
     hint:
       conflicts: 0
   - sha: 8ac1b79165663e5d9d5cde9fc5cf42b23d7ffa71
     pr: 1144
     title: "fix(desktop): the version chip landed on the brand row (shell 0.1.2) (#1144)"
     date: 2026-09-28
-    status: pending
+    status: diverged
+    decided: 2026-10-05
+    fork:
+      pr: 847
+    reason: "Retained the legacy shell overlay correction; the fork cockpit renders its own dedicated title band and update controls."
     hint:
       conflicts: 0
   - sha: b4bb98a92e16d5d335001130ba34899f8df331f8
@@ -946,14 +974,22 @@ entries:
     pr: 1195
     title: "feat(self-update): development channel — run the desktop app on a worktree or a PR build (#1195)"
     date: 2026-09-30
-    status: pending
+    status: ported
+    decided: 2026-10-05
+    fork:
+      pr: 847
+    reason: "Development worktrees and fork PR builds, macOS folder privacy handling and all-runner process attribution ported."
     hint:
       conflicts: 11
   - sha: ab2c35d070d8c8f8a583bf3cfe16087cede6d8dd
     pr: 1196
     title: "fix(runs): keep tasks on the account you picked; bump desktop to 0.1.3 (#1196)"
     date: 2026-09-30
-    status: pending
+    status: partial
+    decided: 2026-10-05
+    fork:
+      pr: 847
+    reason: "Desktop source snapshot integrated with an independent fork shell version of 0.1.0. The unrelated account-selection and workflow preflight changes remain unported."
     hint:
       conflicts: 1
   - sha: 30541854ac0614eecdecccaae5f65b8d45d5ce42
