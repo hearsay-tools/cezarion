@@ -5489,6 +5489,7 @@ export class RunManager {
         },
         onAgentInputReady: () => this.handleAgentInputReady(runId, state, session),
         onAgentInputConsumed: (ids) => this.handleAgentInputConsumed(runId, state, session, ids),
+        onPidChange: (pid) => { registerRunProcess(runId, pid); this.recordWorkerProcess(runId, pid); },
       },
     );
     } catch (error) { ciTools?.revoke(); state.revokeCiTools = undefined; delegation?.revoke(); state.revokeDelegation = undefined; throw error; }
@@ -6351,6 +6352,7 @@ export class RunManager {
           },
           onAgentInputReady: () => this.handleAgentInputReady(runId, state, session),
           onAgentInputConsumed: (ids) => this.handleAgentInputConsumed(runId, state, session, ids),
+          onPidChange: (pid) => { registerRunProcess(runId, pid); this.recordWorkerProcess(runId, pid); },
         },
       );
     } catch (err) {

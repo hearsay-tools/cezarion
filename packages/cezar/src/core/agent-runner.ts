@@ -246,6 +246,10 @@ export interface SessionOptions {
   /** The model received these inputs (replay echo, userMessage item, …). Fires at most
    * once per ID and never from a transport acknowledgement (#505). */
   onAgentInputConsumed?: (inputIds: readonly string[]) => void;
+  /** The session's backend process was replaced after `startSession` returned (OMP's R13
+   *  respawn); `AgentSession.pid` already names the new one. Callers that registered the
+   *  first pid for telemetry or cleanup register this one instead. */
+  onPidChange?: (pid: number) => void;
 }
 
 /**

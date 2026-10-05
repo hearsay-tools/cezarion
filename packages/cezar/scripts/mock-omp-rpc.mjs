@@ -49,6 +49,11 @@ if (typeof flags.get('--tools') === 'string') {
   }
   const gated = tools.filter((name) => GATED_TOOLS.has(name));
   if (gated.length > 0) startupError(2, `Error: Built-in tools unavailable in this session: ${gated.join(', ')}.`);
+  // Tools a user setting disabled (`todo.enabled: false`, `lsp.enabled: false`, ...): real v18.4.11
+  // rejects them the same way, in the singular for one name.
+  const disabled = (process.env.CEZ_MOCK_OMP_DISABLED_TOOLS ?? '').split(',').filter(Boolean);
+  const named = tools.filter((name) => disabled.includes(name));
+  if (named.length > 0) startupError(2, `Error: Built-in tool${named.length > 1 ? 's' : ''} unavailable in this session: ${named.join(', ')}.`);
 }
 
 if (process.env.CEZ_MOCK_OMP_NO_AUTH === '1') {

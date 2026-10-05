@@ -17,6 +17,7 @@ import type {
 } from './agent-runner.js';
 import { isSignalTerminationExit } from './agent-runner.js';
 import { buildChildEnv } from './agent-env.js';
+import type { UiEvent } from './ui-events.js';
 import { ciToolDefinition } from '../ci-wait/tools.js';
 import { readNdjson } from './ndjson.js';
 import {
@@ -88,7 +89,7 @@ export const OMP_SPEC_SUPPORT: AgentRunSpecSupport = {
   allowedTools: { honored: true, via: '--tools, mapped onto OMP names; unmapped names dropped (fail closed)' },
   restrictNativeDelegation: {
     honored: true,
-    via: '--config overlay denying task, and task/wait left out of --tools (D1); eval is left out too, since OMP v18.4.11 has no setting that disables its agent()/workpool() helpers',
+    via: '--config overlay denying task, and task/wait left out of --tools (D1); eval is left out too, since OMP v18.4.11 has no setting that disables its agent()/workpool() helpers; with allowedTools undefined D1 passes an explicit --tools list (OMP\'s default set minus those), failing closed rather than widening to the defaults',
   },
   bashAllowlist: { honored: true, via: "no prefix equivalent: bash dropped from --tools when an allowlist is set (Pi's rule)" },
   additionalDirectories: { honored: true, via: '--add-dir per directory' },
@@ -115,7 +116,13 @@ export interface OmpToolSelection {
  */
 export function ompTools(
   allowedTools: string[] | undefined,
-  opts: { bashAllowlist?: string[]; restrictNativeDelegation?: boolean; cezarTools?: boolean },
+  opts: {
+    bashAllowlist?: string[];
+    restrictNativeDelegation?: boolean;
+    cezarTools?: boolean;
+    /** OMP names the user's settings disabled (R13), removed from the list; never added to it. */
+    exclude?: readonly string[];
+  },
 ): OmpToolSelection {
   // OMP's default set includes task, wait and eval; D1 has to name a list to leave them out.
   const requested = allowedTools ?? (opts.restrictNativeDelegation ? [...OMP_DEFAULT_TOOL_NAMES] : undefined);
@@ -123,8 +130,10 @@ export function ompTools(
   const tools = new Set<string>();
   const dropped = new Set<string>();
   for (const name of requested) {
-    const mapped =
-      OMP_TOOL_MAP[name] ?? (OMP_BUILTIN_TOOL_NAMES.includes(name) || name.startsWith('mcp__') ? name : undefined);
+    // `hasOwn`: a plain-object lookup would map `constructor` onto Object's own function.
+    const mapped = Object.hasOwn(OMP_TOOL_MAP, name)
+      ? OMP_TOOL_MAP[name]
+      : OMP_BUILTIN_TOOL_NAMES.includes(name) || name.startsWith('mcp__') ? name : undefined;
     if (mapped === undefined) dropped.add(name);
     else tools.add(mapped);
   }
@@ -132,12 +141,15 @@ export function ompTools(
   if (opts.bashAllowlist && opts.bashAllowlist.length > 0) tools.delete('bash');
   if (opts.restrictNativeDelegation) for (const name of OMP_DELEGATION_TOOLS) tools.delete(name);
   if (tools.size === 0) return { flag: 'no-tools', tools: [], dropped: [...dropped] };
+  // Narrow before the CI tool joins: a refusal never leaves a CI-only list where --no-tools belongs.
+  for (const name of opts.exclude ?? []) tools.delete(name);
+  if (tools.size === 0) return { flag: 'no-tools', tools: [], dropped: [...dropped] };
   if (opts.cezarTools) tools.add(ciToolDefinition.name);
   return { flag: 'tools', tools: [...tools], dropped: [...dropped] };
 }
 
 /** `omp --mode rpc` argv, in the order of the spec's spawn block. */
-export function buildOmpArgs(spec: AgentRunSpec): string[] {
+export function buildOmpArgs(spec: AgentRunSpec, excludeTools?: readonly string[]): string[] {
   const args = ['--mode', 'rpc'];
   if (spec.cezarTools) args.push('--extension', ompScriptPath('omp-ci-wait.mjs'));
   // OMP has no --session-id: a fresh session mints its id, which get_state reports.
@@ -152,6 +164,7 @@ export function buildOmpArgs(spec: AgentRunSpec): string[] {
     bashAllowlist: spec.bashAllowlist,
     restrictNativeDelegation: spec.restrictNativeDelegation,
     cezarTools: spec.cezarTools !== undefined,
+    exclude: excludeTools,
   });
   if (selection.flag === 'tools') args.push('--tools', selection.tools.join(','));
   else if (selection.flag === 'no-tools') args.push('--no-tools');
@@ -208,11 +221,39 @@ export class OmpRunner implements AgentRunner {
     onEvent?: (event: AgentEvent) => void,
     opts: SessionOptions = {},
   ): AgentSession {
-    const child = nodeSpawn(this.bin, buildOmpArgs(spec), {
-      cwd: spec.cwd,
-      env: buildChildEnv({ backend: this.backend, extraEnv: spec.env }),
-    });
-    boundOutputDrainAfterExit(child);
+    let spawnError: Error | null = null;
+    const stderr: string[] = [];
+    const spawnOmp = (args: string[]): ChildProcessWithoutNullStreams => {
+      const spawned = nodeSpawn(this.bin, args, {
+        cwd: spec.cwd,
+        env: buildChildEnv({ backend: this.backend, extraEnv: spec.env }),
+      });
+      boundOutputDrainAfterExit(spawned);
+      spawned.on('error', (error: NodeJS.ErrnoException) => {
+        spawnError = wrapSpawnError(error, this.bin);
+      });
+      spawned.stderr.setEncoding('utf8');
+      spawned.stderr.on('data', (chunk: string) => stderr.push(chunk));
+      return spawned;
+    };
+    // Reassigned once at most: R13 respawns without the tools the user's OMP settings disabled.
+    const firstArgs = buildOmpArgs(spec);
+    let child = spawnOmp(firstArgs);
+    let respawned = false;
+    let sawFrame = false;
+    let closedByCaller = false;
+    // A refused spawn must leave nothing in v2, so its events wait for the first stdout frame.
+    // Held only when a `--tools` list can be narrowed and retried.
+    let uiHold: UiEvent[] | null = firstArgs.includes('--tools') ? [] : null;
+    const emitUiEvent = (event: UiEvent): void => {
+      if (uiHold) uiHold.push(event);
+      else opts.onUiEvent?.(event);
+    };
+    const releaseUiHold = (): void => {
+      const held = uiHold;
+      uiHold = null;
+      for (const event of held ?? []) opts.onUiEvent?.(event);
+    };
     let open = true;
     let timedOut = false;
     let terminatedByCezar = false;
@@ -251,34 +292,41 @@ export class OmpRunner implements AgentRunner {
       onEvent?.({ type: 'error', message: latchedProviderError });
       latchedProviderError = undefined;
     };
-    let spawnError: Error | null = null;
-    const stderr: string[] = [];
-
-    child.on('error', (error: NodeJS.ErrnoException) => {
-      spawnError = wrapSpawnError(error, this.bin);
-    });
-    child.stderr.setEncoding('utf8');
-    child.stderr.on('data', (chunk: string) => stderr.push(chunk));
 
     const emitUi = (value: unknown): void => {
       const mapped = mapOmpRpcMessage(value, ompUi);
       ompUi = mapped.state;
-      for (const event of mapped.events) opts.onUiEvent?.(event);
+      for (const event of mapped.events) emitUiEvent(event);
     };
     /** Releases the mapper's provider-error latch when the stream ends without a settle. */
     const emitLatchedUiProviderError = (): void => {
       const mapped = ompFlushProviderError(ompUi);
       ompUi = mapped.state;
-      for (const event of mapped.events) opts.onUiEvent?.(event);
+      for (const event of mapped.events) emitUiEvent(event);
     };
-    const write = (command: Record<string, unknown>): boolean => {
-      if (!open || !child.stdin.writable) return false;
+    const writeNow = (command: Record<string, unknown>): boolean => {
+      if (!child.stdin.writable) return false;
       try {
         child.stdin.write(`${JSON.stringify(command)}\n`);
         return true;
       } catch {
         return false;
       }
+    };
+    // Until the current child speaks (OMP's `ready` frame) nothing is written to it: a spawn the
+    // R13 refusal rejects exits without reading stdin, and what it was handed would be lost with
+    // it. Accepted commands wait here, in order, and the respawned child gets the same ones.
+    const outbox: Array<Record<string, unknown>> = [];
+    const flushOutbox = (): void => {
+      for (const command of outbox.splice(0)) writeNow(command);
+    };
+    const write = (command: Record<string, unknown>): boolean => {
+      if (!open) return false;
+      if (!sawFrame) {
+        outbox.push(command);
+        return true;
+      }
+      return writeNow(command);
     };
     let agentInputReady = false;
     let promptSerial = 0;
@@ -351,14 +399,16 @@ export class OmpRunner implements AgentRunner {
       if (!ompUi.turnId) {
         const mapped = ompTurnStarted(ompUi, id);
         ompUi = mapped.state;
-        for (const event of mapped.events) opts.onUiEvent?.(event);
+        for (const event of mapped.events) emitUiEvent(event);
       }
       return true;
     };
     const end = (): void => {
       if (!open) return;
       open = false;
+      closedByCaller = true;
       rejectAgentAck();
+      flushOutbox();
       child.stdin.end();
       killTimer = setTimeout(() => {
         if (child.exitCode !== null || child.signalCode !== null) return;
@@ -369,8 +419,9 @@ export class OmpRunner implements AgentRunner {
     };
     const interrupt = (): void => {
       if (!open) return;
-      write({ type: 'abort' });
+      if (sawFrame) writeNow({ type: 'abort' });
       open = false;
+      closedByCaller = true;
       rejectAgentAck();
       terminatedByCezar = true;
       child.kill('SIGTERM');
@@ -387,29 +438,45 @@ export class OmpRunner implements AgentRunner {
     if (dropped.length > 0) {
       onEvent?.({ type: 'note', message: `omp: dropped tools with no OMP equivalent: ${dropped.join(', ')}` });
     }
-    // Spec § Session lifecycle: OMP queues these until it is ready.
-    write({ id: 'cezar-state', type: 'get_state' });
-    // #551 parity: OMP defaults steeringMode to one-at-a-time, and sendAgentMessage requires
-    // every accepted steer at the next model call.
-    write({ id: 'cezar-steering', type: 'set_steering_mode', mode: 'all' });
-    write({ id: 'cezar-subagents', type: 'set_subagent_subscription', level: 'events' });
-    // Drops the per-delta `partial` snapshot; the coalescer and the mapper read deltas only.
-    write({ id: 'cezar-event-filter', type: 'set_event_filter', events: null, messageUpdates: 'delta' });
-    sendMessage([...(spec.images ?? []), { type: 'text', text: spec.userPrompt }]);
+    const startup = (): void => {
+      // Spec § Session lifecycle: OMP queues these until it is ready.
+      write({ id: 'cezar-state', type: 'get_state' });
+      // #551 parity: OMP defaults steeringMode to one-at-a-time, and sendAgentMessage requires
+      // every accepted steer at the next model call.
+      write({ id: 'cezar-steering', type: 'set_steering_mode', mode: 'all' });
+      write({ id: 'cezar-subagents', type: 'set_subagent_subscription', level: 'events' });
+      // Drops the per-delta `partial` snapshot; the coalescer and the mapper read deltas only.
+      write({ id: 'cezar-event-filter', type: 'set_event_filter', events: null, messageUpdates: 'delta' });
+      sendMessage([...(spec.images ?? []), { type: 'text', text: spec.userPrompt }]);
+    };
+    startup();
 
     const limitMs = spec.timeoutMs ?? this.timeoutMs;
-    const deadline =
-      limitMs > 0
-        ? setTimeout(() => {
-            timedOut = true;
-            interrupt();
-          }, limitMs)
-        : undefined;
-    deadline?.unref?.();
+    const armDeadline = (): NodeJS.Timeout | undefined => {
+      const timer =
+        limitMs > 0
+          ? setTimeout(() => {
+              timedOut = true;
+              interrupt();
+            }, limitMs)
+          : undefined;
+      timer?.unref?.();
+      return timer;
+    };
+    let deadline = armDeadline();
 
-    const result = (async (): Promise<AgentRunResult> => {
+    // A refusal is only retried before any frame, once, and never after the caller or a deadline
+    // ended the session; a spawn with no `--tools` list has nothing to narrow (`uiHold` is null).
+    const retryPossible = (): boolean =>
+      !sawFrame && !respawned && !timedOut && !terminatedByCezar && !closedByCaller && uiHold !== null;
+    const result = (async function runOmp(): Promise<AgentRunResult> {
       try {
         for await (const line of readNdjson(child.stdout)) {
+          if (!sawFrame) {
+            sawFrame = true;
+            releaseUiHold();
+            flushOutbox();
+          }
           let value: unknown;
           try {
             value = JSON.parse(line);
@@ -483,7 +550,8 @@ export class OmpRunner implements AgentRunner {
             if (endsTurn) {
               onEvent?.({ type: 'error', message });
               turnFailed = true;
-            } else if (turnOpen) {
+            } else {
+              // v2 reports it as a session error whether or not a turn is open.
               onEvent?.({ type: 'note', message });
             }
           } else if (value.type === 'message_update' && isRecord(value.assistantMessageEvent)) {
@@ -567,7 +635,9 @@ export class OmpRunner implements AgentRunner {
         if (deadline) clearTimeout(deadline);
         if (autoEndTimer) clearTimeout(autoEndTimer);
         if (killTimer) clearTimeout(killTimer);
-        open = false;
+        // A refused spawn may still be respawned: stay open so input accepted meanwhile is kept
+        // for the new child instead of being refused in the gap.
+        if (!retryPossible()) open = false;
         rejectAgentAck();
       }
 
@@ -576,6 +646,26 @@ export class OmpRunner implements AgentRunner {
       emitLatchedUiProviderError();
       const exitCode = await waitForExit(child);
       if (interruptKillTimer) clearTimeout(interruptKillTimer);
+      // R13: exit 2 before any frame, naming tools the user's OMP settings disabled. Respawn
+      // once without them: the list only narrows, so this never widens what the step granted.
+      const refused =
+        exitCode === 2 && !spawnError && retryPossible()
+          ? refusedOmpTools(stderr.join(''), ompToolList(firstArgs))
+          : [];
+      if (refused.length > 0) {
+        respawned = true;
+        stderr.length = 0;
+        onEvent?.({ type: 'note', message: `omp: tools disabled by your OMP settings were dropped: ${refused.join(', ')}` });
+        // Session state (mapper, held v2 events, ack sets) follows what was accepted, not the
+        // child, and the outbox still holds every command accepted so far: the new child is
+        // sent exactly those, once, when it speaks.
+        child = spawnOmp(buildOmpArgs(spec, refused));
+        if (child.pid !== undefined) opts.onPidChange?.(child.pid);
+        deadline = armDeadline();
+        return runOmp();
+      }
+      open = false;
+      releaseUiHold();
       if (spawnError) throw spawnError;
       if (timedOut) {
         const message = `omp CLI timed out after ${Math.round((limitMs / 60_000) * 10) / 10}m and was killed`;
@@ -599,7 +689,7 @@ export class OmpRunner implements AgentRunner {
       }
       if (ompUi.turnId) onEvent?.({ type: 'note', message: 'omp RPC session ended before session_settled' });
       if (tokensUsed === 0) onEvent?.({ type: 'note', message: 'token usage not reported by omp CLI' });
-      opts.onUiEvent?.({ type: 'session.ended', reason: ompUi.stopReason });
+      emitUiEvent({ type: 'session.ended', reason: ompUi.stopReason });
       onEvent?.({ type: 'done' });
       return { text: textChunks.join('\n').trim(), toolCalls, tokensUsed, sessionId };
     })();
@@ -622,7 +712,10 @@ export class OmpRunner implements AgentRunner {
       discardQueuedMessages: () => undefined,
       end,
       interrupt,
-      pid: child.pid,
+      // The live child: an R13 respawn replaces it (`onPidChange` tells the caller who read it).
+      get pid() {
+        return child.pid;
+      },
       get open() {
         return open;
       },
@@ -640,6 +733,23 @@ function ompStderrDetail(stderr: string): string {
   const first = stderr.split(/\r?\n/).find(line => line.trim())?.trim();
   if (first?.startsWith('No models available')) return first;
   return summarizeRunnerStderr(stderr);
+}
+
+/** The `--tools` list in an omp argv; empty when none was passed. */
+function ompToolList(args: readonly string[]): string[] {
+  const at = args.indexOf('--tools');
+  return at >= 0 ? (args[at + 1] ?? '').split(',').filter(Boolean) : [];
+}
+
+/**
+ * Names in OMP's `Built-in tool(s) unavailable in this session: a, b.` startup refusal (v18.4.11,
+ * a tool its settings disable), limited to names this spawn passed, so a retry only narrows.
+ */
+function refusedOmpTools(stderr: string, passed: readonly string[]): string[] {
+  const match = /Built-in tools? unavailable in this session:[ \t]*([^\r\n]*)/.exec(stderr);
+  if (!match) return [];
+  const named = (match[1] ?? '').replace(/\.\s*$/, '').split(/[\s,]+/).filter(Boolean);
+  return named.filter(name => passed.includes(name));
 }
 
 /** Same as pi-runner.ts `toPiPrompt`. */
