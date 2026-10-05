@@ -193,7 +193,10 @@ describe('buildOmpArgs', () => {
 describe('OMP_SPEC_SUPPORT', () => {
   it('honors every field, including the extra roots Pi drops', () => {
     for (const support of Object.values(OMP_SPEC_SUPPORT)) expect(support.honored).toBe(true);
-    expect(OMP_SPEC_SUPPORT.additionalDirectories).toEqual({ honored: true, via: '--add-dir per directory' });
+    expect(OMP_SPEC_SUPPORT.additionalDirectories).toEqual({
+      honored: true,
+      via: '--add-dir per directory; an omp build that rejects --add-dir is respawned once without it, with a v1 note (Ruling 22)',
+    });
     expect(OMP_SPEC_SUPPORT.restrictNativeDelegation).toMatchObject({ via: expect.stringContaining('eval') });
     // Ruling 14: D1 with no allowedTools names a list, so it never widens to OMP's defaults.
     expect(OMP_SPEC_SUPPORT.restrictNativeDelegation).toMatchObject({ via: expect.stringContaining('allowedTools undefined') });
