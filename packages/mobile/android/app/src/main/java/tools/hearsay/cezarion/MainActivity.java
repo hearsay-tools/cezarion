@@ -121,7 +121,7 @@ public final class MainActivity extends Activity {
     private void openCockpit(Connection selected) {
         connection = selected; failed = false; setRoot();
         LinearLayout toolbar = new LinearLayout(this);
-        toolbar.addView(button("Servers", this::showLauncher), new LinearLayout.LayoutParams(0, -2, 1));
+        toolbar.addView(button("Connection", this::showLauncher), new LinearLayout.LayoutParams(0, -2, 1));
         toolbar.addView(button("Back", () -> { if (web.canGoBack()) web.goBack(); }), new LinearLayout.LayoutParams(0, -2, 1));
         toolbar.addView(button("Refresh", this::reload), new LinearLayout.LayoutParams(0, -2, 1)); root.addView(toolbar);
         origin = text(Connection.safeOrigin(selected.endpoint), 12); origin.setPadding(dp(12), 0, dp(12), dp(4)); root.addView(origin);
@@ -191,7 +191,7 @@ public final class MainActivity extends Activity {
 
     private void blocked(String url) {
         String host = Connection.safeOrigin(url);
-        showError("Blocked navigation to " + (host == null ? "an unsupported address" : host) + ". Check the trusted sign-in origin in Servers.");
+        showError("Blocked navigation to " + (host == null ? "an unsupported address" : host) + ". Check the trusted sign-in origin in Connection.");
     }
     private void showError(String message) { status.setText(message); status.setVisibility(View.VISIBLE); }
     private void external(String target) {

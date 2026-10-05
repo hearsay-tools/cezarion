@@ -14,7 +14,7 @@ final class CockpitController: UIViewController, WKNavigationDelegate, WKUIDeleg
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
         navigationItem.largeTitleDisplayMode = .never
-        navigationItem.leftBarButtonItem = UIBarButtonItem(title: "Servers", style: .plain, target: self, action: #selector(close))
+        navigationItem.leftBarButtonItem = UIBarButtonItem(title: "Connection", style: .plain, target: self, action: #selector(close))
         navigationItem.rightBarButtonItems = [
             UIBarButtonItem(barButtonSystemItem: .refresh, target: self, action: #selector(reload)),
             UIBarButtonItem(title: "Back", style: .plain, target: self, action: #selector(back))
@@ -89,7 +89,7 @@ final class CockpitController: UIViewController, WKNavigationDelegate, WKUIDeleg
         if action.navigationType == .linkActivated, Connection.origin(url) != nil {
             external(url)
         } else {
-            show("Blocked navigation to \(Connection.origin(url) ?? "an unsupported address"). Check the trusted sign-in origin in Servers.")
+            show("Blocked navigation to \(Connection.origin(url) ?? "an unsupported address"). Check the trusted sign-in origin in Connection.")
         }
     }
 
