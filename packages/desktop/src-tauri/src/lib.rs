@@ -1193,13 +1193,13 @@ fn iso_from_unix(seconds: u64) -> String {
     format!("{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z", rest / 3_600, rest % 3_600 / 60, rest % 60)
 }
 
-/// The bundled splash (`tauri://` / `http://tauri.localhost`) and the cockpit — loopback http on
+/// The bundled splash (exact localhost authority and default port) and the cockpit — loopback http on
 /// the port THIS shell spawned it on, and no other. `port` 0 means no sidecar yet: nothing on
 /// loopback is ours.
 fn is_own_origin(url: &url::Url, port: u16) -> bool {
     match (url.scheme(), url.host_str()) {
-        ("tauri", _) => true,
-        ("http" | "https", Some("tauri.localhost")) => true,
+        ("tauri", Some("localhost")) => url.port().is_none(),
+        ("http" | "https", Some("tauri.localhost")) => url.port().is_none(),
         ("http", Some("127.0.0.1" | "localhost")) => port != 0 && url.port_or_known_default() == Some(port),
         _ => false,
     }
@@ -1565,6 +1565,23 @@ mod tests {
         assert!(is_own_origin(&url("http://tauri.localhost/"), 4321));
         assert!(is_own_origin(&url("http://127.0.0.1:4321/p/x/tasks"), 4321));
         assert!(is_own_origin(&url("http://localhost:4321/"), 4321));
+    }
+
+    #[test]
+    fn bundled_origins_reject_other_authorities_and_ports() {
+        for raw in [
+            "tauri://evil.example/index.html",
+            "tauri:///index.html",
+            "tauri://localhost:4321/index.html",
+            "http://tauri.localhost:4321/index.html",
+            "https://tauri.localhost:4321/index.html",
+            "http://tauri.localhost.evil.example/index.html",
+        ] {
+            assert!(!is_own_origin(&url(raw), 4321), "unexpected trusted origin: {raw}");
+        }
+        assert!(is_own_origin(&url("https://tauri.localhost/index.html"), 0));
+        assert!(is_own_origin(&url("http://tauri.localhost:80/index.html"), 0));
+        assert!(is_own_origin(&url("https://tauri.localhost:443/index.html"), 0));
     }
 
     #[test]
