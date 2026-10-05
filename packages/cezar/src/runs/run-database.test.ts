@@ -236,7 +236,7 @@ describe('RunDatabase', () => {
     expect(RunDatabase.open(path).transaction({ upserts: [row('c')], deletes: [] }).skipped).toBe(false);
   });
 
-  it('runs beforeCommit after every write, and rolls the whole transaction back when it throws (#779)', () => {
+  it('runs beforeCommit after every write, rolls the whole transaction back when it throws, and writes the metadata it returns (#779)', () => {
     const db = openDb();
     expect(() => db.transaction({
       upserts: [row('a')], deletes: [], meta: { marker: 'x' },
@@ -245,6 +245,9 @@ describe('RunDatabase', () => {
     expect(db.listAll()).toEqual([]);
     expect(db.getMeta('marker')).toBeUndefined();
     expect(db.transaction({ upserts: [row('a')], deletes: [], beforeCommit: () => {} }).revisions.get('a')).toBeGreaterThan(0);
+    // What it returns is metadata, in the same commit: decided only once nothing can refuse it.
+    db.transaction({ upserts: [row('b')], deletes: [], meta: { first: '1' }, beforeCommit: () => ({ decided: 'late' }) });
+    expect([db.getMeta('first'), db.getMeta('decided')]).toEqual(['1', 'late']);
   });
 
   it('persists across close and reopen', () => {

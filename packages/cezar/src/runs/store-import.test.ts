@@ -51,6 +51,8 @@ const openFailure = (opts?: { keepLive?: boolean; retryBusy?: boolean }): RunSto
   throw new Error('the store opened');
 };
 const persisted = (id: string) => readPersistedRuns(dataDir).find((run) => run.id === id);
+/** Every pre-import backup in the data directory, temp files included. */
+const backups = () => readdirSync(dataDir).filter((name) => name.startsWith('runs.json.pre-sqlite')).sort();
 const importMeta = (): Record<string, unknown> | undefined => {
   const db = RunDatabase.openReadOnly(join(dataDir, RUNS_DB_FILE));
   if (!db) return undefined;
@@ -223,6 +225,7 @@ describe('the import marker is checked inside the import transaction', () => {
     const opener = (name: string) => runChild(name, `
       const [dataDir, scratch, name] = process.argv.slice(2);
       __setLegacyImportHookForTests({ beforeCommit: () => writeFileSync(scratch + '/imported-' + name, '') });
+      writeFileSync(scratch + '/ready-' + name, '');
       waitFor(scratch + '/go');
       const store = RunStore.open(dataDir, { retryBusy: true });
       process.stdout.write(String(store.listRunSummaries().runs.length));
@@ -230,7 +233,7 @@ describe('the import marker is checked inside the import transaction', () => {
     `, [name]);
     const results = Promise.all([exitOf(opener('one')), exitOf(opener('two'))]);
     // Both are past their startup before either opens.
-    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    await Promise.all([waitForFile(join(scratch, 'ready-one')), waitForFile(join(scratch, 'ready-two'))]);
     writeFileSync(join(scratch, 'go'), '');
     for (const { code, stdout, stderr } of await results) {
       expect(stderr).toBe('');
@@ -327,9 +330,22 @@ describe('the pre-import backup', () => {
 
 describe('an older cezar still writing runs.json', () => {
   /** A live process holding cockpit.lock for `dataDir`, as an older cockpit does, until it exits
-   *  by itself after `lifetimeMs` (open is synchronous: nothing in this process can stop it). */
-  async function olderCockpit(lifetimeMs = 60_000): Promise<ChildProcess> {
-    const child = runChild('older-cockpit', `setTimeout(() => process.exit(0), ${lifetimeMs});`);
+   *  by itself after `lifetimeMs` (open is synchronous: nothing in this process can stop it).
+   *  `saving`: it also saves runs.json every 50 ms, by temp file and rename, as one at work does. */
+  async function olderCockpit(lifetimeMs = 60_000, saving = false): Promise<ChildProcess> {
+    const child = runChild('older-cockpit', `
+      const [dataDir] = process.argv.slice(2);
+      const { renameSync } = await import('node:fs');
+      if (${saving}) {
+        let saves = 0;
+        setInterval(() => {
+          saves++;
+          writeFileSync(dataDir + '/runs.json.tmp', JSON.stringify([{ id: 'a', title: 'save ' + saves, workflow: 'w', task: 't', status: 'running', createdAt: '2026-09-01T00:00:00.000Z', tokensUsed: 0, archived: false, steps: [] }]));
+          renameSync(dataDir + '/runs.json.tmp', dataDir + '/runs.json');
+        }, 50);
+      }
+      setTimeout(() => process.exit(0), ${lifetimeMs});
+    `);
     await new Promise((resolve) => setTimeout(resolve, 200));
     const startToken = processStartToken(child.pid!);
     writeFileSync(join(dataDir, 'cockpit.lock'), JSON.stringify({
@@ -351,6 +367,53 @@ describe('an older cezar still writing runs.json', () => {
     cockpit.kill('SIGKILL');
     await exited;
     expect(runIds(open())).toEqual(['a']);
+  });
+
+  it.skipIf(process.getuid?.() === 0)('holding cockpit.lock: the refused open reads, parses and backs up nothing', async () => {
+    writeFileSync(join(dataDir, 'runs.json'), JSON.stringify(manyRecords(50)));
+    // Unreadable, so an open that read it would fail as a permission error instead.
+    chmodSync(join(dataDir, 'runs.json'), 0o000);
+    let reachedTransaction = 0;
+    __setLegacyImportHookForTests({ beforeTransaction: () => { reachedTransaction++; } });
+    await olderCockpit();
+    try {
+      expect(openFailure().kind).toBe('legacy-writer');
+    } finally {
+      chmodSync(join(dataDir, 'runs.json'), 0o600);
+    }
+    expect(reachedTransaction).toBe(0);
+    expect(backups()).toEqual([]);
+  });
+
+  it('holding cockpit.lock and saving at boot: every refused retry is cheap and leaves no backup', async () => {
+    writeFileSync(join(dataDir, 'runs.json'), JSON.stringify([record('a')]));
+    let reachedTransaction = 0;
+    __setLegacyImportHookForTests({ beforeTransaction: () => { reachedTransaction++; } });
+    await olderCockpit(60_000, true);
+    const started = performance.now();
+    expect(openFailure({ retryBusy: true }).kind).toBe('legacy-writer');
+    // The pauses between attempts, and nothing more: no attempt imports anything.
+    expect(performance.now() - started).toBeLessThan(5_000);
+    expect(reachedTransaction).toBe(0);
+    expect(backups()).toEqual([]);
+  }, 15_000);
+
+  it('saving runs.json during every attempt: no refused attempt leaves a backup, and the import that commits leaves one', () => {
+    writeFileSync(join(dataDir, 'runs.json'), JSON.stringify([record('a')]));
+    let saves = 0;
+    __setLegacyImportHookForTests({
+      beforeCommit: () => {
+        saves++;
+        writeFileSync(join(dataDir, 'runs.json.tmp'), JSON.stringify([record('a', { title: `save ${saves}` })]));
+        renameSync(join(dataDir, 'runs.json.tmp'), join(dataDir, 'runs.json'));
+      },
+    });
+    for (let attempt = 0; attempt < 5; attempt++) expect(openFailure().kind).toBe('legacy-writer');
+    expect(backups()).toEqual([]);
+    __setLegacyImportHookForTests(undefined);
+    expect(open().getRun('a')?.title).toBe('save 5');
+    expect(backups()).toEqual([LEGACY_INDEX_BACKUP_FILE]);
+    expect(readFileSync(join(dataDir, LEGACY_INDEX_BACKUP_FILE), 'utf8')).toBe(readFileSync(join(dataDir, 'runs.json'), 'utf8'));
   });
 
   it('holding cockpit.lock at boot: the open waits for it to go before it gives up', async () => {
@@ -391,7 +454,7 @@ describe('a store that cannot be opened is never an empty one', () => {
     for (const [name, text] of Object.entries(files)) writeFileSync(join(dataDir, name), text);
     const failure = openFailure({ retryBusy: true });
     expect(failure.kind).toBe('corrupt');
-    expect(failure.message).toMatch(/runs\.db is damaged \(.*\)\. cezar left it and its -wal and -shm files exactly as they are: restore them from a backup, or rebuild them from runs\.json\.pre-sqlite\.bak as the docs describe, then restart cezar\.$/);
+    expect(failure.message).toMatch(/runs\.db is damaged \(.*\)\. cezar left it and its -wal and -shm files exactly as they are: restore them from a backup, or rebuild them from runs\.json\.pre-sqlite\.bak as BACKWARD_COMPATIBILITY\.md §3 "Recovering run history" describes, then restart cezar\.$/);
     for (const [name, text] of Object.entries(files)) expect(readFileSync(join(dataDir, name), 'utf8')).toBe(text);
     expect(readdirSync(dataDir).sort()).toEqual([...Object.keys(files), 'runs'].sort());
   });
@@ -527,8 +590,8 @@ function corruptPage(path: string, table: string): void {
   writeFileSync(path, bytes);
 }
 
-describe('test helpers', () => {
-  it('mkdir of a fresh data directory is all a failed open leaves behind', () => {
+describe('what a failed open leaves behind', () => {
+  it('in a fresh data directory, only the runs/ directory beside the damaged file', () => {
     rmSync(dataDir, { recursive: true, force: true });
     mkdirSync(dataDir);
     writeFileSync(join(dataDir, RUNS_DB_FILE), 'not a database at all, and long enough');

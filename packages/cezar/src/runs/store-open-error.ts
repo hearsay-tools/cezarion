@@ -45,7 +45,7 @@ export function toRunStoreOpenError(error: unknown, path: string, opts: { waited
   const kind = error instanceof RunDatabaseError ? error.kind : errnoKind(error) ?? 'other';
   switch (kind) {
     case 'corrupt':
-      return new RunStoreOpenError(kind, path, `${path} is damaged (${detail}). cezar left it and its -wal and -shm files exactly as they are: restore them from a backup, or rebuild them from runs.json.pre-sqlite.bak as the docs describe, then restart cezar.`, cause);
+      return new RunStoreOpenError(kind, path, `${path} is damaged (${detail}). cezar left it and its -wal and -shm files exactly as they are: restore them from a backup, or rebuild them from runs.json.pre-sqlite.bak as BACKWARD_COMPATIBILITY.md §3 "Recovering run history" describes, then restart cezar.`, cause);
     case 'busy': {
       const held = opts.waitedMs ? ` for over ${(opts.waitedMs / 1000).toFixed(1)} s` : '';
       return new RunStoreOpenError(kind, path, `${path} is busy: another cezar process has held its write lock${held}. Wait for it to finish, then restart cezar.`, cause);

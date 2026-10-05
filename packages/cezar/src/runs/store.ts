@@ -32,7 +32,7 @@ import {
 } from './run-database.ts';
 import { encodeRunRow, isLiveRecord } from './run-row.ts';
 import { collectRawExtras, encodeRawRecord, type RawExtras } from './raw-record.ts';
-import { assertNoLegacyWriter, backUpLegacyIndex, LEGACY_INDEX_FILE, LegacyWriterError, readLegacyIndex } from './legacy-index.ts';
+import { assertNoLegacyCockpit, assertNoLegacyWriter, backUpLegacyIndex, LEGACY_INDEX_FILE, LegacyWriterError, readLegacyIndex } from './legacy-index.ts';
 import { RunStoreOpenError, toRunStoreOpenError } from './store-open-error.ts';
 import { claimOwnerLive, closeClaimSession, openClaimSession, type ClaimOwner } from './run-claims.ts';
 
@@ -889,7 +889,7 @@ function loadNormalizedFields(run: RunRecord): string {
   ]);
 }
 
-/** Test seam (#779): `beforeTransaction` runs once `runs.json` is read and backed up, before the
+/** Test seam (#779): `beforeTransaction` runs once `runs.json` is read and parsed, before the
  *  import asks for the write lock; `beforeCommit` runs inside the import transaction, after every
  *  row is written and before the last check that no older cezar wrote `runs.json` meanwhile. */
 let legacyImportHook: { beforeTransaction?: () => void; beforeCommit?: () => void } | undefined;
@@ -923,14 +923,18 @@ function legacyIndexRows(bytes: Buffer): RunRowInput[] | undefined {
 /**
  * Import `runs.json` into a database that has never completed an import (#779, plan step 4).
  *
- * The file is read once, through one descriptor, and its exact bytes are kept beside it first
- * (`backUpLegacyIndex`: synced, never half-written, an existing backup trusted only when it holds
- * the same bytes). Then ONE transaction writes every record, the completion marker and what the
- * import read — size, sha256, backup — or nothing:
+ * Nothing is read while a live cockpit other than this process owns the project
+ * (`assertNoLegacyCockpit`): an older cezar still writes `runs.json` then, and the import could
+ * not commit. Otherwise the file is read once, through one descriptor, and parsed; it is checked
+ * again before anything is written, so a file that moved while it was parsed costs no write. Then
+ * ONE transaction writes every record and the completion marker, or nothing:
  * - the marker is checked again once the transaction holds the write lock, so of two processes
  *   importing at once exactly one writes; the other finds the marker and writes nothing;
  * - right before COMMIT it refuses (`LegacyWriterError`) when an older cezar may still be writing
- *   `runs.json` (`assertNoLegacyWriter`);
+ *   `runs.json` (`assertNoLegacyWriter`) — the check that decides;
+ * - only then are the exact bytes kept beside it (`backUpLegacyIndex`: synced, never half-written,
+ *   an existing backup trusted only when it holds the same bytes), and the marker records what
+ *   the import read: size, sha256 and the backup's name. A refused attempt leaves no backup;
  * - a crash or refusal leaves no marker, so the next open imports again from the start.
  * `runs.json` itself is left as it was, and nothing writes it again: an older cezar keeps reading
  * the history as it stood at the upgrade, and what it writes afterwards is never imported.
@@ -939,26 +943,22 @@ function legacyIndexRows(bytes: Buffer): RunRowInput[] | undefined {
  * backup and in `runs.json`, which used to be overwritten by the next save instead.
  */
 function importLegacyIndex(db: RunDatabase, dataDir: string): void {
+  assertNoLegacyCockpit(dataDir);
   const snapshot = readLegacyIndex(join(dataDir, LEGACY_INDEX_FILE));
-  let rows: RunRowInput[] = [];
-  let source = 'none';
-  let read: Record<string, unknown> = {};
-  if (snapshot) {
-    const backup = backUpLegacyIndex(dataDir, snapshot);
-    read = { bytes: snapshot.bytes.length, sha256: snapshot.sha256, backup };
-    const parsed = legacyIndexRows(snapshot.bytes);
-    source = parsed ? LEGACY_INDEX_FILE : `${LEGACY_INDEX_FILE} (unparseable)`;
-    rows = parsed ?? [];
-  }
+  const parsed = snapshot ? legacyIndexRows(snapshot.bytes) : undefined;
+  const rows = parsed ?? [];
+  const source = !snapshot ? 'none' : parsed ? LEGACY_INDEX_FILE : `${LEGACY_INDEX_FILE} (unparseable)`;
+  assertNoLegacyWriter(dataDir, snapshot);
   legacyImportHook?.beforeTransaction?.();
   db.transaction({
     upserts: rows,
     deletes: [],
-    meta: { [RUNS_IMPORT_COMPLETE_KEY]: JSON.stringify({ at: new Date().toISOString(), source, records: rows.length, ...read }) },
     onlyIfMetaAbsent: RUNS_IMPORT_COMPLETE_KEY,
     beforeCommit: () => {
       legacyImportHook?.beforeCommit?.();
       assertNoLegacyWriter(dataDir, snapshot);
+      const read = snapshot ? { bytes: snapshot.bytes.length, sha256: snapshot.sha256, backup: backUpLegacyIndex(dataDir, snapshot) } : {};
+      return { [RUNS_IMPORT_COMPLETE_KEY]: JSON.stringify({ at: new Date().toISOString(), source, records: rows.length, ...read }) };
     },
   });
 }

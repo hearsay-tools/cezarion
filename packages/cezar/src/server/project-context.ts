@@ -6,6 +6,7 @@ import { pruneOrphans } from '../git-worktree.ts';
 import { sweepPreviewLeftovers } from '../preview/dev-server.ts';
 import type { PreviewHost } from '../preview/host.ts';
 import { armRepoHandle } from '../runs/arm-repo-handle.ts';
+import { ensureDataGitignore } from '../data-gitignore.ts';
 import { reclaimWorktrees } from '../runs/retention.ts';
 import { RunStore } from '../runs/store.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
@@ -285,7 +286,9 @@ export class ProjectContexts {
     // when this project's context last existed are re-queued or resumed.
     // A store that cannot open throws `RunStoreOpenError` (#779): nothing is
     // cached, the route answers 409 with why, and the next request opens again.
-    // One attempt only: this runs on a live cockpit's event loop.
+    // One attempt only: this runs on a live cockpit's event loop. The ignore file comes first: a
+    // failed open may already have created the database and the history backups.
+    ensureDataGitignore(project.root);
     const store = RunStore.open(dataDir, { keepLive: true });
     const automationStore = this.deps.automationStore?.(project.id, project.root)
       ?? AutomationStore.open(dataDir);

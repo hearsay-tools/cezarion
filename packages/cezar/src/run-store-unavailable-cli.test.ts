@@ -57,6 +57,13 @@ afterEach(async () => {
   rmSync(root, { recursive: true, force: true });
 });
 
+/** The run database and the history backups stay out of the user's repository, even when the
+ *  open that created them failed. */
+const runDataIgnored = () => {
+  const ignore = existsSync(join(dataDir, '.gitignore')) ? readFileSync(join(dataDir, '.gitignore'), 'utf8').split('\n') : [];
+  return ['runs.db', 'runs.db-wal', 'runs.db-shm', 'runs.json.pre-sqlite.bak', 'runs.json.pre-sqlite.*'].filter((entry) => !ignore.includes(entry));
+};
+
 const damagedFilesUnchanged = () => {
   for (const [name, text] of Object.entries(DAMAGED)) expect(readFileSync(join(dataDir, name), 'utf8'), name).toBe(text);
 };
@@ -79,6 +86,7 @@ it('serve boots with the boot project unavailable, and prunes, sweeps and recove
   for (const [name, text] of Object.entries(DAMAGED)) {
     expect.soft(existsSync(join(dataDir, name)) && readFileSync(join(dataDir, name), 'utf8') === text, name).toBe(true);
   }
+  expect.soft(runDataIgnored(), 'not in .ai/cezar/.gitignore').toEqual([]);
 
   expect.soft(stderr).toMatch(/runs\.db is damaged/);
   const summaries = await fetch(`${url}/api/v1/run-summaries`);
@@ -94,6 +102,7 @@ it('headless run refuses to start, says why, and leaves every file as it was', a
   expect(result.code).toBe(1);
   expect(result.stderr).toMatch(/runs\.db is damaged \(.*\)\. cezar left it and its -wal and -shm files exactly as they are/);
   damagedFilesUnchanged();
+  expect(runDataIgnored(), 'not in .ai/cezar/.gitignore').toEqual([]);
   expect(existsSync(join(dataDir, 'worktrees', RUN_ID, 'work-in-progress.txt'))).toBe(true);
   expect(readdirSync(join(dataDir, 'worktrees'))).toEqual([RUN_ID]);
 }, 60_000);

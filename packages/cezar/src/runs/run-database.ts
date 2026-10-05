@@ -211,8 +211,9 @@ export interface RunDatabaseChanges {
    *  step 4) — a check made before the lock is only a hint. */
   onlyIfMetaAbsent?: string;
   /** Runs inside the transaction after every write, just before COMMIT; throwing rolls it all
-   *  back. The last moment a caller can still refuse what it wrote. */
-  beforeCommit?: () => void;
+   *  back. The last moment a caller can still refuse what it wrote. What it returns is more
+   *  private metadata, written in the same commit. */
+  beforeCommit?: () => Readonly<Record<string, string>> | void;
 }
 
 /** A family a fenced write touches: held at `generation`, or to `take` in that same transaction if
@@ -782,7 +783,7 @@ export class RunDatabase {
           if (value === null) this.statements.deleteMeta.run(key);
           else this.statements.setMeta.run(key, value);
         }
-        changes.beforeCommit?.();
+        for (const [key, value] of Object.entries(changes.beforeCommit?.() ?? {})) this.statements.setMeta.run(key, value);
         this.db.exec('COMMIT');
       } catch (error) {
         rollback(this.db);

@@ -79,14 +79,15 @@ function holds(path: string, snapshot: LegacyIndexSnapshot): boolean {
  */
 function createDurably(path: string, bytes: Buffer): boolean {
   const temp = `${path}.${randomUUID()}.tmp`;
-  const fd = openSync(temp, 'wx');
+  // Removed on every way out, a failed write (ENOSPC) included: the name is either linked or gone.
   try {
-    for (let written = 0; written < bytes.length;) written += writeSync(fd, bytes, written);
-    fsyncSync(fd);
-  } finally {
-    closeSync(fd);
-  }
-  try {
+    const fd = openSync(temp, 'wx');
+    try {
+      for (let written = 0; written < bytes.length;) written += writeSync(fd, bytes, written);
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
     try {
       linkSync(temp, path);
     } catch (error) {
@@ -97,7 +98,7 @@ function createDurably(path: string, bytes: Buffer): boolean {
       renameSync(temp, path);
     }
   } finally {
-    try { unlinkSync(temp); } catch { /* renamed into place */ }
+    try { unlinkSync(temp); } catch { /* never created, or renamed into place */ }
   }
   syncDirectory(path);
   return true;
@@ -120,13 +121,16 @@ function syncDirectory(path: string): void {
  * `runs.json.pre-sqlite.bak` is trusted only when it holds those very bytes (same size and
  * sha256). One that does not — an earlier snapshot, a file a crash cut short — is never touched:
  * the bytes go to `runs.json.pre-sqlite.<sha256 prefix>.bak` instead.
+ *
+ * The import calls this only inside its transaction, once nothing can refuse it any more: an
+ * attempt an older cezar's writes refuse leaves no backup, so retries cannot multiply them.
  */
 export function backUpLegacyIndex(dataDir: string, snapshot: LegacyIndexSnapshot): string {
   for (const name of [LEGACY_INDEX_BACKUP_FILE, `runs.json.pre-sqlite.${snapshot.sha256.slice(0, 12)}.bak`]) {
     const path = join(dataDir, name);
-    // Re-checked after the attempt: a concurrent importer may have created the same bytes first.
-    if (!holds(path, snapshot)) createDurably(path, snapshot.bytes);
     if (holds(path, snapshot)) return name;
+    // Re-checked only after creating it: a file this did not create may hold other bytes.
+    if (createDurably(path, snapshot.bytes) || holds(path, snapshot)) return name;
   }
   throw new Error(`cannot back up ${LEGACY_INDEX_FILE}: both backup names are taken by other contents`);
 }
@@ -144,16 +148,23 @@ export class LegacyWriterError extends Error {
   }
 }
 
-/**
- * Throw `LegacyWriterError` when an older cezar may still be writing `runs.json`: another live
- * cockpit owns `dataDir`, or the file is no longer what `snapshot` read (undefined: there was
- * none). Called inside the import transaction, right before it commits.
- */
-export function assertNoLegacyWriter(dataDir: string, snapshot: LegacyIndexSnapshot | undefined): void {
+/** Throw `LegacyWriterError` when a live cockpit other than this process owns `dataDir`. Cheap: one
+ *  small file read and a liveness probe, so the import asks it before it reads anything. */
+export function assertNoLegacyCockpit(dataDir: string): void {
   const owner = anotherCockpitOwner(dataDir);
   if (owner) {
     throw new LegacyWriterError('cockpit', `An older cezar (pid ${owner.pid}${owner.url ? ` at ${owner.url}` : ''}) still serves this project and writes ${LEGACY_INDEX_FILE}. Stop it, then restart cezar: ${LEGACY_INDEX_FILE} is imported once, while nothing else writes it.`);
   }
+}
+
+/**
+ * Throw `LegacyWriterError` when an older cezar may still be writing `runs.json`: another live
+ * cockpit owns `dataDir` (`assertNoLegacyCockpit`), or the file is no longer what `snapshot` read
+ * (undefined: there was none). Inside the import transaction, right before it commits, this is
+ * the authority; asked earlier it only saves the work of an import that could not commit.
+ */
+export function assertNoLegacyWriter(dataDir: string, snapshot: LegacyIndexSnapshot | undefined): void {
+  assertNoLegacyCockpit(dataDir);
   const now = statSync(join(dataDir, LEGACY_INDEX_FILE), { throwIfNoEntry: false });
   const read = snapshot?.identity;
   const same = now === undefined ? read === undefined

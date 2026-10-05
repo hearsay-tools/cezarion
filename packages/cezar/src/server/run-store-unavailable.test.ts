@@ -76,6 +76,8 @@ describe('a project whose run store cannot be opened', () => {
     }
     expect(contexts.peek(other.id)).toBeUndefined();
     expect(readFileSync(database, 'utf8')).toBe(DAMAGED);
+    // The open failed, and the run database still stays out of the user's repository.
+    expect(readFileSync(join(otherRoot, '.ai/cezar/.gitignore'), 'utf8').split('\n')).toEqual(expect.arrayContaining(['runs.db', 'runs.db-wal', 'runs.db-shm', 'runs.json.pre-sqlite.bak', 'runs.json.pre-sqlite.*']));
     // The project still works as a project: the workspace lists it, and the boot project is fine.
     expect((await apiRequest(server, '/api/v1/projects')).status).toBe(200);
     expect((await apiRequest(server, '/api/v1/run-summaries')).status).toBe(200);
