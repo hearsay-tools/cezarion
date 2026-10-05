@@ -213,7 +213,12 @@ async function runChild(options: ChildOptions, resultPath: string): Promise<void
     seedRunStore(join(coldRoot, '.ai/cezar'), records);
     await registerProject(coldRoot);
     const has = (metric: Metric) => options.metrics.includes(metric);
-    const open = () => RunStore.open(bootDir, { keepLive: true });
+    // Each open stands for a freshly started process, so the store opened before it is closed
+    // first, untimed: left open, its claims (#779, plan step 3) would keep the new one off every
+    // live run.
+    let opened: RunStoreInstance | undefined;
+    const closePrevious = () => { opened?.close(); opened = undefined; };
+    const open = () => (opened = RunStore.open(bootDir, { keepLive: true }));
 
     // Targets are picked from the fixture data, never from store internals. The first table's
     // targets come from the finished records, which are that table's whole fixture.
@@ -239,6 +244,7 @@ async function runChild(options: ChildOptions, resultPath: string): Promise<void
     if (has('heap')) {
       const heap: number[] = [];
       for (let i = 0; i < HEAP_SAMPLES; i++) {
+        closePrevious();
         store = undefined;
         gc();
         const before = process.memoryUsage().heapUsed;
@@ -249,7 +255,14 @@ async function runChild(options: ChildOptions, resultPath: string): Promise<void
       result.heap = heap;
     }
     gc();
-    if (has('open')) sync.open = await sampleSync(options, () => { store = open(); });
+    if (has('open')) {
+      sync.open = await sampleSync(options, () => {
+        closePrevious();
+        const t0 = performance.now();
+        store = open();
+        return performance.now() - t0;
+      });
+    }
     store ??= open();
     gc();
     if (has('getRun')) {
@@ -325,6 +338,7 @@ async function runChild(options: ChildOptions, resultPath: string): Promise<void
 
     const routes = ROUTES.filter((route) => has(ROUTE_PATHS[route].metric));
     if (routes.length > 0) {
+      closePrevious();
       const routeStore = open();
       const app = createApp({
         repoRoot: join(root, 'boot'), store: routeStore, version: '0.0.0-bench',
@@ -348,6 +362,7 @@ async function runChild(options: ChildOptions, resultPath: string): Promise<void
     }
 
     if (has('active')) {
+      if (opened !== store) { closePrevious(); store = open(); }
       const s = store;
       const histogram = monitorEventLoopDelay({ resolution: 1 });
       let touches = 0;
