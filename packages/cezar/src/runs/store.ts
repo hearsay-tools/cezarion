@@ -830,9 +830,12 @@ export function reconcileLoadedRun(run: RunRecord, opts?: { keepLive?: boolean }
  * that adopting never starts agent work: only Continue may, with the user's own input. A run that
  * never started is cancelled before it began, which Continue restarts as it would after a Stop (the
  * same "untouched" test as `isUntouchedCancelledRun`); any other live run is interrupted, exactly as
- * an open that does not recover settles it, and Continue resumes its last session. Mutates `run`.
+ * an open that does not recover settles it, and Continue resumes its last session. With `stop`
+ * (the control is Stop, and this is its run) a live run is cancelled instead, as an accepted Stop
+ * always reads. Mutates `run`.
  */
-export function settleOrphanedRun(run: RunRecord): RunRecord {
+export function settleOrphanedRun(run: RunRecord, opts: { stop?: boolean } = {}): RunRecord {
+  if (opts.stop && (run.status === 'queued' || run.status === 'running' || run.status === 'waiting')) run.stopping = true;
   if (run.status === 'queued' && !run.startedAt && run.workflowDef !== undefined &&
     run.steps.every((step) => step.status === 'pending' && !step.startedAt && !step.sessionId)) {
     run.status = 'cancelled';
@@ -1353,12 +1356,12 @@ export class RunStore extends EventEmitter {
   /** Normalize a record just read from `row` (see `reconcileLoadedRun`) and hold it. Marks the row
    *  dirty only when normalization changed it, so the next save persists exactly the runs open()
    *  rewrote. The caller has claimed the row's family. */
-  private adoptLoadedRun({ run, extras }: DecodedRun, opts: { keepLive?: boolean; onlyIfChanged?: boolean; settle?: boolean }, row: RunRow): void {
+  private adoptLoadedRun({ run, extras }: DecodedRun, opts: { keepLive?: boolean; onlyIfChanged?: boolean; settle?: boolean; stop?: boolean }, row: RunRow): void {
     const before = loadNormalizedFields(run);
     if (run.delegation?.role === 'root' && (run.status === 'waiting' || run.delegation.wait !== undefined)) {
       refreshHumanAskSummary(run, this.dataDir);
     }
-    if (opts.settle) settleOrphanedRun(run);
+    if (opts.settle) settleOrphanedRun(run, { stop: opts.stop });
     else reconcileLoadedRun(run, opts);
     const changed = loadNormalizedFields(run) !== before;
     if (opts.onlyIfChanged && !changed) return;
@@ -1371,14 +1374,14 @@ export class RunStore extends EventEmitter {
    * Hold one delegation family: its root and the root's direct workers, read through the
    * `parent_run_id` index. No recursion: workers cannot delegate, so a worker's own id never
    * names a family. The caller has claimed it. `settle` settles its live rows instead of keeping
-   * them for recovery (`settleOrphanedRun`).
+   * them for recovery (`settleOrphanedRun`); `stopId` is the run a Stop settles as cancelled.
    */
-  private holdFamily(rootId: string, decode: (row: RunRow) => DecodedRun | undefined = (row) => decodeRunRow(row.data), settle = false): void {
+  private holdFamily(rootId: string, decode: (row: RunRow) => DecodedRun | undefined = (row) => decodeRunRow(row.data), settle = false, stopId?: string): void {
     const rows = [this.db!.get(rootId), ...this.db!.listByParent(rootId)];
     for (const row of rows) {
       if (!row || this.held.has(row.id) || this.deleted.has(row.id)) continue;
       const decoded = decode(row);
-      if (decoded) this.adoptLoadedRun(decoded, { keepLive: this.keepLive, settle }, row);
+      if (decoded) this.adoptLoadedRun(decoded, { keepLive: this.keepLive, settle, stop: row.id === stopId }, row);
     }
   }
 
@@ -1495,14 +1498,15 @@ export class RunStore extends EventEmitter {
   /**
    * Take over the delegation family of an `orphaned` run for a control: claim it from its dead
    * owner (or from nobody), then load it and settle its live rows (`settleOrphanedRun`) — never
-   * keep them for recovery to resume, since only Continue may start agent work. Returns the
+   * keep them for recovery to resume, since only Continue may start agent work. With `stop` the
+   * control is Stop: `id` itself is settled as cancelled rather than interrupted. Returns the
    * family's root id, or undefined when a live owner holds it after all or it is gone. The caller
    * runs recovery for that family next (`RunManager.adoptOrphanedRun`), which then repairs it.
    */
-  adoptFamily(id: string): string | undefined {
+  adoptFamily(id: string, opts: { stop?: boolean } = {}): string | undefined {
     const family = this.db?.familyOf(id);
     if (family === undefined || !this.claimFamilies([family], { allowLive: true, wait: true }).has(family)) return undefined;
-    this.holdFamily(family, undefined, true);
+    this.holdFamily(family, undefined, true, opts.stop ? id : undefined);
     return family;
   }
 

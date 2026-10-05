@@ -94,12 +94,12 @@ describe('controls on a run another cezar process owns', () => {
     expect(store.runOwnership(runId)).toBe('orphaned');
 
     const response = await apiRequest(app, `/api/v1/runs/${runId}/cancel`, { method: 'POST' });
-    // Adoption settled it as interrupted, so nothing was left for Stop itself to cancel.
+    // The adoption carried the Stop out: the run ends cancelled, and Stop says it stopped it.
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ cancelled: false });
-    expect(store.getRun(runId)).toMatchObject({ status: 'failed', error: expect.stringContaining('interrupted') });
+    expect(await response.json()).toEqual({ cancelled: true });
+    expect(store.getRun(runId)).toMatchObject({ status: 'cancelled' });
     store.flush();
-    expect(readPersistedRuns(dataDir).find((run) => run.id === runId)).toMatchObject({ status: 'failed' });
+    expect(readPersistedRuns(dataDir).find((run) => run.id === runId)).toMatchObject({ status: 'cancelled' });
     // Settled and let go: nobody claims it now.
     expect(store.runOwnership(runId)).toBe('free');
   });
@@ -190,6 +190,20 @@ describe('adopting a dead owner\'s run for a control', () => {
     // Settled, never resumed: interrupted mid-turn, or cancelled before it ever began.
     expect(store.getRun(id)).toMatchObject(shape === 'running'
       ? { status: 'failed', error: expect.stringContaining('interrupted') } : { status: 'cancelled' });
+  });
+
+  it.each(['unstarted', 'running'] as const)('Stop on an adopted %s run ends it cancelled, says so, and starts no agent', async (shape) => {
+    const id = crashed(shape);
+    const response = await apiRequest(app, `/api/v1/runs/${id}/cancel`, { method: 'POST' });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ cancelled: true });
+    await settle();
+    expect(started).toEqual([]);
+    expect(manager.isActive(id)).toBe(false);
+    const run = store.getRun(id);
+    expect(run).toMatchObject({ status: 'cancelled' });
+    expect(run?.error).toBeUndefined();
+    expect(run?.steps.every((step) => step.status !== 'running')).toBe(true);
   });
 
   it.each(['unstarted', 'running'] as const)('Continue on an adopted %s run resumes it with the user\'s input', async (shape) => {

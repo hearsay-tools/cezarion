@@ -339,7 +339,7 @@ export interface ServerDeps {
 
 /** Hono env for the mirrored project-route table: the scope resolver puts the
  *  request's `ProjectContext` on the context, handlers read `c.get('project')`. */
-type ProjectApiEnv = { Variables: { project: ProjectContext } };
+type ProjectApiEnv = { Variables: { project: ProjectContext; stoppedOnAdoption?: boolean } };
 
 /** `projectId` gate at the route boundary (spec "Project identity"): the slug
  *  shape or the reserved `default` alias — validated BEFORE touching any map
@@ -3899,7 +3899,9 @@ export function createApp(deps: ServerDeps) {
    *   use for a run that exists but cannot be acted on now. Reads are never refused.
    * - A run whose owner is proven dead is adopted first — claimed, loaded and settled as
    *   interrupted, never resumed (`settleOrphanedRun`) — and the control then applies. Otherwise
-   *   Stop on a crashed `cez run` would be a dead end until this cockpit restarted.
+   *   Stop on a crashed `cez run` would be a dead end until this cockpit restarted. Stop is the one
+   *   control the adoption carries out itself: its run settles as cancelled, and Stop answers that
+   *   it stopped it (`stoppedOnAdoption`).
    * - A run this process stopped writing after a conflicting write answers 409 too.
    *
    * Registered against explicit paths, like `requireAutomations`: `route()` re-registers it under
@@ -3909,7 +3911,10 @@ export function createApp(deps: ServerDeps) {
     const id = c.req.param('id');
     if (c.req.method === 'GET' || c.req.method === 'HEAD' || id === undefined) return next();
     const { store, manager } = c.get('project');
-    if (store.runOwnership(id) === 'orphaned') await manager.adoptOrphanedRun(id);
+    if (store.runOwnership(id) === 'orphaned') {
+      const stop = c.req.method === 'POST' && c.req.path.endsWith('/cancel');
+      if (await manager.adoptOrphanedRun(id, { stop }) && stop && store.getRun(id)?.status === 'cancelled') c.set('stoppedOnAdoption', true);
+    }
     const refusal = store.writeRefusal(id);
     if (!refusal) return next();
     // The delegation route in this family answers in the delegation error shape it always uses.
@@ -4231,7 +4236,8 @@ export function createApp(deps: ServerDeps) {
       const { store, manager } = c.get('project');
       const id = c.req.param('id');
       if (!store.getRun(id)) return c.json({ error: 'not found' }, 404);
-      const cancelled = manager.cancel(id);
+      // Still asked of the manager after an adoption stopped the run: a worker's stop bookkeeping is its.
+      const cancelled = manager.cancel(id) || c.get('stoppedOnAdoption') === true;
       return c.json({ cancelled });
     })
 

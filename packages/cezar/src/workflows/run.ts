@@ -2488,15 +2488,16 @@ export class RunManager {
    * began), and the family is recovered as a restart would, which repairs it but finds nothing live
    * to resume. The control that follows then acts on a run this process now owns — rather than on
    * a record nobody owns, a dead end until a restart — and only Continue starts agent work, with
-   * the user's own input. False when a live process holds it after all (or it is gone): the
-   * control is refused as another process's. Adoptions run one at a time, after any recovery
-   * already in progress.
+   * the user's own input. With `stop` the control is Stop, which the adoption carries out itself:
+   * `runId` ends cancelled, as an accepted Stop reads, rather than interrupted. False when a live
+   * process holds it after all (or it is gone): the control is refused as another process's.
+   * Adoptions run one at a time, after any recovery already in progress.
    */
-  adoptOrphanedRun(runId: string): Promise<boolean> {
+  adoptOrphanedRun(runId: string, opts: { stop?: boolean } = {}): Promise<boolean> {
     const adoption = this.adoptionTail.then(async () => {
       while (this.recovering && this.recoveryInFlight) await this.recoveryInFlight;
       if (this.disposed) return false;
-      const family = this.store.adoptFamily(runId);
+      const family = this.store.adoptFamily(runId, opts);
       if (family === undefined) return false;
       await this.recover(family);
       return true;

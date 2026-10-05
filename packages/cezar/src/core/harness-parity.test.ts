@@ -546,6 +546,8 @@ const CONTROL_CRITERIA = [
   { id: 'R49', scenario: 'ask' },
   // #779 plan step 3: adopting a dead owner's mid-turn run for a control resumes nothing; Continue does.
   { id: 'R50', scenario: 'hold' },
+  // #779: Stop on a dead owner's mid-turn run ends it cancelled, not interrupted, and starts nothing.
+  { id: 'R51', scenario: 'hold' },
 ] as const;
 
 /**
@@ -910,6 +912,53 @@ describe('harness parity — adopting a dead owner\'s run mid-turn (#779)', () =
           }
         });
       return { adopted, startedByAdoption, settled, continued, startedByContinue, resumed };
+    });
+  }
+});
+
+// #779: Stop is the control an adoption carries out itself. The run it stops ends cancelled, as an
+// accepted Stop always reads, rather than interrupted, whichever runner it used; nothing starts.
+describe('harness parity — Stop on a dead owner\'s run mid-turn (#779)', () => {
+  for (const backend of RUNNER_IDS) {
+    parityRow<{ adopted: boolean; started: string[]; stopped: RunRecord | undefined }>(backend, {
+      id: 'R51', name: 'R51 Stop on a dead owner\'s run mid-turn ends it cancelled and starts no agent', scenario: 'hold',
+      assert: ({ adopted, started, stopped }) => {
+        expect(adopted).toBe(true);
+        expect(started).toEqual([]);
+        expect(stopped).toMatchObject({ status: 'cancelled' });
+        expect(stopped?.error).toBeUndefined();
+        expect(stopped?.stopping).toBeUndefined();
+        expect(stopped?.steps.some((step) => step.status === 'running' || step.status === 'waiting')).toBe(false);
+      },
+    }, async () => {
+      let adopted = false;
+      const started: string[] = [];
+      let stopped: RunRecord | undefined;
+      await driveRun(backend, 'hold', record => record?.status === 'running' && record.steps.some((step) => step.sessionId !== undefined), 30_000,
+        async ({ store, manager, runId }) => {
+          const repoRoot = manager['repoRoot'] as string;
+          const dataDir = join(repoRoot, '.ai/cezar');
+          store.flush();
+          const cockpit = RunStore.open(dataDir, { keepLive: true });
+          try {
+            manager.dispose();
+            crashStore(store);
+            await drainFixtureManagers(repoRoot);
+            const recovered = createFixtureManager(cockpit, repoRoot);
+            const engine = recovered as unknown as Record<'execute' | 'runContinuation', (...args: unknown[]) => Promise<unknown>>;
+            for (const name of ['execute', 'runContinuation'] as const) {
+              const real = engine[name].bind(recovered);
+              engine[name] = (...args) => { started.push(name); return real(...args); };
+            }
+            adopted = await recovered.adoptOrphanedRun(runId, { stop: true });
+            await new Promise((resolve) => setTimeout(resolve, 300));
+            stopped = structuredClone(cockpit.getRun(runId));
+          } finally {
+            await drainFixtureManagers(repoRoot);
+            cockpit.close();
+          }
+        });
+      return { adopted, started, stopped };
     });
   }
 });
