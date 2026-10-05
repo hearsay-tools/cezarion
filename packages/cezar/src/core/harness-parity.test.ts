@@ -535,6 +535,8 @@ const CONTROL_CRITERIA = [
   // workflows/worker-reboot-parity.test.ts and worker-location-evidence.test.ts: native exit/Continue,
   // independent reboot proof, legacy location uncertainty, real holders, cleanup retries and parent Finish.
   { id: 'R43', scenario: 'baseline' },
+  // workflows/worker-restart-parity.test.ts: same-boot abandonment and bounded cleanup locks.
+  { id: 'R47', scenario: 'baseline' },
 ] as const;
 
 /**

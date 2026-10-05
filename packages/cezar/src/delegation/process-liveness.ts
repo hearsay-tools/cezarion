@@ -130,16 +130,25 @@ const realProc: ProcReader = {
  * `since` is only for conservative legacy execution/descendant checks. Resource proof never
  * supplies it: reboot cannot exclude holders. */
 export function processesWithCwdUnder(dirs: string | readonly string[], platform: NodeJS.Platform = process.platform, proc: ProcReader = realProc, since?: number, darwin: DarwinReader = realDarwin): number[] | 'unknown' {
+  const scan = scanCwd(dirs, platform, proc, since, darwin);
+  return scan === 'unknown' ? scan : [...new Set(scan.all)];
+}
+
+type CwdScan = { pids: number[]; candidates: number[]; all: number[]; uncertain: boolean };
+
+/** Keep confirmed cwd matches separate from permission-denied candidates. Only the resource
+ * API above combines them: an unreadable cwd is no evidence of execution membership (hearsay-tools/cezarion#839). */
+function scanCwd(dirs: string | readonly string[], platform: NodeJS.Platform, proc: ProcReader, since: number | undefined, darwin: DarwinReader): CwdScan | 'unknown' {
   const targets = (typeof dirs === 'string' ? [dirs] : dirs).map(dir => { try { return realpathSync(dir); } catch { return resolve(dir); } });
   const under = (cwd: string) => { const path = cwd.replace(/ \(deleted\)$/, ''); return targets.some(target => path === target || path.startsWith(target + sep)); };
-  const found: number[] = [];
+  const found: number[] = []; const candidates: number[] = []; const all: number[] = []; let uncertain = false;
   if (platform === 'linux') {
     let entries: string[];
     try { entries = proc.readdir(); } catch { return 'unknown'; }
     const uid = process.getuid?.();
     for (const entry of entries) {
       if (!/^\d+$/.test(entry) || Number(entry) === process.pid) continue;
-      try { if (under(proc.readlink(entry))) found.push(Number(entry)); }
+      try { if (under(proc.readlink(entry))) { found.push(Number(entry)); all.push(Number(entry)); } }
       catch (error) {
         // A vanished process is gone; another user's is unreadable by design and skipped. Our own
         // user's non-dumpable processes are unreadable too (systemd --user, sshd, gpg-agent, which
@@ -149,10 +158,14 @@ export function processesWithCwdUnder(dirs: string | readonly string[], platform
         const owner = proc.ownerUid(entry);
         if (uid !== undefined && owner !== undefined && owner !== uid) continue;
         const started = since === undefined ? undefined : proc.startedAtMs(entry);
-        if (started === undefined || started >= since!) found.push(Number(entry));
+        if (started === undefined || started >= since!) {
+          candidates.push(Number(entry)); all.push(Number(entry));
+          if (owner === undefined || uid === undefined || started === undefined ||
+            !['EACCES', 'EPERM'].includes((error as NodeJS.ErrnoException).code ?? '')) uncertain = true;
+        }
       }
     }
-    return found;
+    return { pids: found, candidates, all, uncertain };
   }
   if (platform !== 'darwin') return 'unknown';
   const lsof = darwin.lsof();
@@ -161,7 +174,7 @@ export function processesWithCwdUnder(dirs: string | readonly string[], platform
   let pid: number | undefined;
   for (const line of lsof.stdout.split('\n')) {
     if (line.startsWith('p')) { pid = Number(line.slice(1)); seen.add(pid); }
-    else if (line.startsWith('n') && pid !== undefined && pid !== process.pid && under(line.slice(1))) found.push(pid);
+    else if (line.startsWith('n') && pid !== undefined && pid !== process.pid && under(line.slice(1))) { found.push(pid); all.push(pid); }
   }
   // lsof silently omits what it cannot read. An own-user process it omitted is judged by the
   // Linux EACCES rule: a possible holder unless it predates the worker. Other users' are skipped.
@@ -169,12 +182,16 @@ export function processesWithCwdUnder(dirs: string | readonly string[], platform
   if (!own) return 'unknown';
   for (const entry of own) {
     if (seen.has(entry.pid) || entry.pid === process.pid) continue;
-    if (since === undefined || entry.startedAtMs === undefined || entry.startedAtMs >= since) found.push(entry.pid);
+    if (since === undefined || entry.startedAtMs === undefined || entry.startedAtMs >= since) { candidates.push(entry.pid); all.push(entry.pid); }
   }
-  return [...new Set(found)];
+  return { pids: [...new Set(found)], candidates, all, uncertain };
 }
 
-export type GenerationProbe = { liveness: GenerationLiveness; controller?: number; pids: number[] };
+export type GenerationProbe = { liveness: GenerationLiveness; controller?: number; pids: number[];
+  /** Execution may be abandoned, never declared gone. Resource proof remains independent. */
+  abandonable?: true;
+  candidates?: number[]; // cwd unreadable; never evidence of worker membership
+};
 
 /** A missing record (legacy) relies on the working-directory scan alone. `paths` are the
  * worktree and every scratch location. Execution settlement itself deletes nothing. A live foreign controller
@@ -182,9 +199,11 @@ export type GenerationProbe = { liveness: GenerationLiveness; controller?: numbe
 function inspect({ record, paths, since }: { record?: WorkerProcessRecord; paths: readonly string[]; since?: number }): GenerationProbe {
   if (record && !isCurrentProcess(record.controller) && recordedProcessLive(record.controller)) return { liveness: 'alive', controller: record.controller.pid, pids: [] };
   const recorded = record?.processes.filter(recordedProcessLive).map(entry => entry.pid) ?? [];
-  const scan = processesWithCwdUnder(paths, process.platform, realProc, since, realDarwin);
-  const pids = [...new Set([...recorded, ...(scan === 'unknown' ? [] : scan)])];
-  return { liveness: pids.length ? 'alive' : scan === 'unknown' ? 'unknown' : 'gone', pids };
+  const scan = scanCwd(paths, process.platform, realProc, since, realDarwin);
+  const pids = [...new Set([...recorded, ...(scan === 'unknown' ? [] : scan.all)])];
+  const candidates = scan === 'unknown' ? [] : scan.candidates.filter(pid => !recorded.includes(pid));
+  return { liveness: pids.length ? 'alive' : scan === 'unknown' ? 'unknown' : 'gone', pids,
+    ...(candidates.length ? { candidates } : {}) };
 }
 
 export function probeGeneration(input: { record?: WorkerProcessRecord; paths: readonly string[]; since?: number }): GenerationLiveness {
@@ -206,6 +225,19 @@ export function inspectExecutionGeneration(input: { record?: WorkerProcessRecord
   const pids = record?.processes.filter(recordedProcessLive).map(entry => entry.pid) ?? [];
   if (pids.length) return { liveness: 'alive', pids };
   if (process.platform === 'linux' && controllerPredatesBoot(record?.controller.startToken, linuxBootId())) return { liveness: 'gone', pids: [] };
+  // Same-boot crash: a valid ledger can exclude its recorded incarnations, but cannot prove
+  // an unreadable ambient process is (or is not) a detached descendant. Abandon the execution
+  // honestly instead of inventing either membership or exit. Never authorize reuse/deletion.
+  const boot = process.platform === 'linux' ? linuxBootId() : undefined;
+  const sameBootLedger = boot !== undefined && LINUX_BOOT_ID.test(boot) && record !== undefined &&
+    [record.controller, ...record.processes].every(entry => entry.startToken !== undefined &&
+      entry.startToken.startsWith(`${boot}:`) && /^\d+$/.test(entry.startToken.slice(boot.length + 1)));
+  if (sameBootLedger && input.pathsComplete === true && input.since !== undefined) {
+    const scan = scanCwd(input.paths, process.platform, realProc, input.since, realDarwin);
+    if (scan !== 'unknown' && !scan.uncertain && scan.pids.length === 0 && scan.candidates.length > 0) {
+      return { liveness: 'unknown', pids: [], abandonable: true };
+    }
+  }
   const probe = inspect(input);
   // Unknown scratch locations can hide a legacy descendant even when every known path is
   // clear. Keep live PID diagnostics, but never turn a partial scan into proof of termination.

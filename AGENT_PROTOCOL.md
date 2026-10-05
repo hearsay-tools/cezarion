@@ -786,6 +786,22 @@ Only prior-boot evidence and process enumeration scope are synthetic; cwd permis
 process exit, native wires, stores and Git remain real. Linux-only OS coverage exempts no runner;
 legacy/unknown-boot and recorded-process guards live in `delegation/process-liveness.test.ts`.
 
+**R47** (hearsay-tools/cezarion#839), in `workflows/worker-restart-parity.test.ts`,
+drives every `RUNNER_IDS` backend through its native `HARNESS_ADAPTERS` wire,
+cancellation, and same-boot interrupted checkpoint recovery. A valid token ledger
+with dead recorded incarnations and only unverified unreadable cwd candidates
+permits durable cancellation/abandonment, never a fabricated exit proof. Stale
+partial collection cannot authorize parent Finish; latest settled collection can.
+Restart preserves abandonment and the generation; abandoned intent cannot start a
+new generation even after holders clear. Strict fresh resource proof
+still blocks worktree/branch/scratch cleanup, history deletion and reuse. A live
+recorded unreadable process still blocks settlement. Real mutation keepers make
+owned cleanup refuse promptly and withdraw its queued claim, preserving resources
+until an explicit retry after unlock. Linux-only OS coverage exempts no runner.
+Missing/malformed ledgers and incomplete location evidence retain their existing
+conservative settlement guards; candidate-only destruction refusals report
+unverified membership without waiting out the full termination timeout.
+
 Crash-diagnostic rows **S15–S17** (hearsay-tools/cezarion#499) drive every `RUNNER_IDS` adapter's
 native transport through an uncaught-exception-shaped stderr fixture, a plain
 single-line failure, and a clean/requested shutdown with stderr. RPC mocks send

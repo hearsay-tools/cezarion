@@ -146,6 +146,24 @@ describe('process liveness (#469)', () => {
     expect(executionProbe(input).liveness).toBe('gone');
   });
 
+  it.runIf(linux)('separates unknown same-boot candidates from live execution evidence (hearsay-tools/cezarion#839)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cez-same-boot-')); dirs.push(dir);
+    const ambient = await nonDumpableHolder(tmpdir()); procScope.entries = [String(ambient.pid)];
+    const boot = readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim();
+    const input = { paths: [dir], pathsComplete: true, since: 0, record: {
+      generation: 'g', controller: { pid: 2147483001, startToken: `${boot}:100` },
+      processes: [{ pid: ambient.pid, startToken: `${boot}:1` }], // reused old PID, not this daemon
+    } };
+    try {
+      expect(inspectExecutionGeneration(input)).toMatchObject({ liveness: 'unknown', pids: [], abandonable: true });
+      expect(probeGeneration(input)).toBe('alive'); // no deletion authority
+      expect(inspectExecutionGeneration({ ...input, pathsComplete: false })).not.toHaveProperty('abandonable', true);
+      expect(inspectExecutionGeneration({ ...input, record: { ...input.record, processes: [{ pid: ambient.pid, startToken: processStartToken(ambient.pid) }] } })).toMatchObject({ liveness: 'alive', pids: [ambient.pid] });
+      await ambient.write();
+    } finally { await ambient.close(); }
+    expect(inspectExecutionGeneration(input).liveness).toBe('gone');
+  });
+
   it.runIf(linux)('finds a real child by its working directory and loses it after exit', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'cez-liveness-')); dirs.push(dir);
     const nested = join(dir, 'nested'); mkdirSync(nested);
@@ -156,6 +174,10 @@ describe('process liveness (#469)', () => {
       expect(processesWithCwdUnder(`${dir}-sibling`)).not.toContain(proc.pid);
       expect(processesWithCwdUnder(dir)).not.toContain(process.pid);
       expect(probeGeneration({ paths: [dir], since })).toBe('alive');
+      const boot = readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim();
+      expect(inspectExecutionGeneration({ paths: [dir], pathsComplete: true, since,
+        record: { generation: 'g', controller: { pid: 2147483001, startToken: `${boot}:100` }, processes: [] } }))
+        .toMatchObject({ liveness: 'alive', pids: [proc.pid] }); // verified readable holder, never abandonment
       // Reboot proof only excludes unreadable possible descendants, never an actual cwd holder.
       expect(probeGeneration({ paths: [dir], since: 0,
         record: { generation: 'g', controller: { pid: 2147483001, startToken: `${oldBoot}:100` }, processes: [] } })).toBe('alive');
