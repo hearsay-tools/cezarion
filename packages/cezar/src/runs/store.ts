@@ -1191,6 +1191,9 @@ export class RunStore extends EventEmitter {
   private readonly dirty = new Set<string>();
   /** Runs gone from memory whose rows the next save or commit deletes. */
   private readonly deleted = new Set<string>();
+  /** Deleted runs whose history files (events, handoff, images, artifacts) go once the delete of
+   *  their row commits: until then a conflict can undo the delete and bring the row back. */
+  private readonly historyOwed = new Set<string>();
   /** The repository this project IS (#945), armed after `open()` by `setRepoHandle`. Undefined
    *  until it arrives and `null` when it cannot be known — both mean "unscoped", which is
    *  exactly the pre-#945 behavior. */
@@ -3440,12 +3443,6 @@ export class RunStore extends EventEmitter {
     this.held.delete(id);
     if (existed) {
       this.markDeleted(id, familyKey(run));
-      try {
-        rmSync(this.eventsPath(id), { force: true });
-        rmSync(this.handoffPath(id), { force: true });
-        rmSync(this.imagesDir(id), { recursive: true, force: true });
-        removeArtifacts(this.dataDir, id);
-      } catch { /* Ordinary run deletion preserves its existing best-effort behavior. */ }
       removeAgentTmpDir(this.dataDir, id);
       this.seqs.delete(id);
       this.scheduleSave();
@@ -3515,6 +3512,19 @@ export class RunStore extends EventEmitter {
     this.dirty.delete(id);
     this.deleted.add(id);
     this.deletedFamilies.set(id, family);
+    this.historyOwed.add(id);
+  }
+
+  /** A deleted run's history files, once the delete of its row has committed. Best effort, as
+   *  deletion always was. */
+  private removeOwedHistory(id: string): void {
+    if (!this.historyOwed.delete(id)) return;
+    try {
+      rmSync(this.eventsPath(id), { force: true });
+      rmSync(this.handoffPath(id), { force: true });
+      rmSync(this.imagesDir(id), { recursive: true, force: true });
+      removeArtifacts(this.dataDir, id);
+    } catch { /* best effort */ }
   }
 
   /**
@@ -3555,14 +3565,6 @@ export class RunStore extends EventEmitter {
         if (row) this.base.set(id, { revision: row.revision, data: row.data });
         this.held.delete(id);
         this.markDeleted(id, family);
-        try {
-          rmSync(this.eventsPath(id), { force: true });
-          rmSync(this.handoffPath(id), { force: true });
-          rmSync(this.imagesDir(id), { recursive: true, force: true });
-          removeArtifacts(this.dataDir, id);
-        } catch {
-          // best effort
-        }
         removeAgentTmpDir(this.dataDir, id);
       }
     }
@@ -3638,6 +3640,7 @@ export class RunStore extends EventEmitter {
     for (const id of deletes) {
       this.base.delete(id);
       this.deletedFamilies.delete(id);
+      this.removeOwedHistory(id);
     }
     this.dirty.clear();
     this.deleted.clear();
@@ -3708,6 +3711,8 @@ export class RunStore extends EventEmitter {
       this.dirty.delete(conflict.id);
       this.deleted.delete(conflict.id);
       this.deletedFamilies.delete(conflict.id);
+      // The delete did not happen, so the history stays with the row.
+      this.historyOwed.delete(conflict.id);
       if (conflict.reason === 'claim-lost') {
         this.claimed.delete(family);
         this.pendingClaims.delete(family);

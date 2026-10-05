@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -37,6 +37,15 @@ const persisted = (id: string) => readPersistedRuns(dataDir).find((run) => run.i
 const writeBehindItsBack = (run: RunRecord | null, id = run?.id) => {
   const raw = db();
   try { raw.transaction({ upserts: run ? [encodeRunRow(run)] : [], deletes: run ? [] : [id!] }); } finally { raw.close(); }
+};
+/** A run's events, handoff and images on disk, as a finished run leaves them. */
+const historyFiles = (id: string): string[] => {
+  const runs = join(dataDir, 'runs');
+  mkdirSync(join(runs, `${id}-images`), { recursive: true });
+  writeFileSync(join(runs, `${id}.ndjson`), '{"seq":1}\n');
+  writeFileSync(join(runs, `${id}.handoff.md`), '# handoff\n');
+  writeFileSync(join(runs, `${id}-images`, 'shot.png'), 'png');
+  return [join(runs, `${id}.ndjson`), join(runs, `${id}.handoff.md`), join(runs, `${id}-images`, 'shot.png')];
 };
 const conflicts = () => {
   const raw = db();
@@ -186,6 +195,19 @@ describe('claims follow memory', () => {
   });
 });
 
+describe('deleting a run', () => {
+  it('removes its history files once the delete commits, never before', () => {
+    seedRuns(dataDir, [record('old')]);
+    const files = historyFiles('old');
+    const store = open();
+    expect(store.deleteRun('old')).toBe(true);
+    for (const file of files) expect(existsSync(file), file).toBe(true);
+    store.flush();
+    expect(persisted('old')).toBeUndefined();
+    for (const file of files) expect(existsSync(file), file).toBe(false);
+  });
+});
+
 describe('a run changed under this store', () => {
   it('fails the write unchanged, stores original/local/current, stops writing that row and lets the rest through', () => {
     const store = open({ keepLive: true });
@@ -283,6 +305,22 @@ describe('a run changed under this store', () => {
     store.flush();
     expect(conflicts()).toEqual([expect.objectContaining({ runId: 'old', reason: 'changed', localDeleted: true, localData: null })]);
     expect(persisted('old')).toMatchObject({ title: 'touched elsewhere' });
+  });
+
+  it('keeps the history files of a deletion a conflict undid: the row is back, and so are its events', () => {
+    seedRuns(dataDir, [record('old')]);
+    const files = historyFiles('old');
+    const store = open({ keepLive: true });
+    store.setRead('old');
+    store.flush();
+    store.pin('old', 'cleanup');
+    writeBehindItsBack({ ...persisted('old'), title: 'touched elsewhere' });
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    store.unpin('old', 'cleanup');
+    expect(store.deleteRun('old')).toBe(true);
+    store.flush();
+    expect(persisted('old')).toMatchObject({ title: 'touched elsewhere' });
+    for (const file of files) expect(existsSync(file), file).toBe(true);
   });
 
   it('never takes a row deleted and created again for the one it read, though its id is the same', () => {

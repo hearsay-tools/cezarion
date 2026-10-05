@@ -60,6 +60,21 @@ describe('RunStore save lifecycle (#124)', () => {
     store.flush();
   });
 
+  it('retention removes a pruned run\'s history files only once its delete commits', () => {
+    const kept = Array.from({ length: 300 }, (_, index) => ({ ...LEGACY_RUN, id: `newer-${index}`, createdAt: '2026-02-01T00:00:00.000Z' }));
+    seedRuns(dataDir, [{ ...LEGACY_RUN, id: 'old', status: 'done' }, ...kept]);
+    mkdirSync(join(dataDir, 'runs'), { recursive: true });
+    const events = join(dataDir, 'runs', 'old.ndjson');
+    writeFileSync(events, '{"seq":1}\n');
+    const store = RunStore.open(dataDir);
+    store.createRun({ title: 'trigger retention', workflow: 'w', task: 'task', steps: [] });
+    expect(store.getRun('old')).toBeUndefined();
+    expect(existsSync(events)).toBe(true);
+    store.flush();
+    expect(readPersistedRuns(dataDir).some((run) => run.id === 'old')).toBe(false);
+    expect(existsSync(events)).toBe(false);
+  });
+
   it.each(['timer', 'flush'] as const)('silently skips a %s save after the data directory is removed', (trigger) => {
     const store = RunStore.open(dataDir);
     store.createRun({ title: 't', workflow: 'w', task: 'task', steps: [] });
