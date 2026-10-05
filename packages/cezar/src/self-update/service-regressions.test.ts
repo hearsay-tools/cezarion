@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { activate, activeId, versionEntry, writeManifest } from './layout.ts';
 import { RegistryCache } from './registry.ts';
+import * as installer from './installer.ts';
 import { SelfUpdateService } from './service.ts';
 
 describe('managed update review regressions', () => {
@@ -14,6 +15,7 @@ describe('managed update review regressions', () => {
     vi.useFakeTimers();
   });
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.clearAllTimers(); vi.useRealTimers(); vi.unstubAllEnvs();
     rmSync(home, { recursive: true, force: true });
   });
@@ -72,6 +74,27 @@ describe('managed update review regressions', () => {
     const local = service(registry()); install('0.16.0+local', 'local', '0.16.0');
     expect(local.apply('0.16.0+local').status).toBe('restarting');
     expect(activeId()).toBe('0.16.0+local');
+  });
+
+  it.each([false, true])('redacts hosted job logs and errors without changing local diagnostics (trimPaths=%s)', async hosted => {
+    const staging = join(home, 'versions', '.staging-0.16.0-123');
+    vi.spyOn(installer, 'installFromRegistry').mockImplementation(async (_target, opts) => {
+      opts?.onLog?.('npm install --prefix ' + staging + ' @wjarka/cezarion@0.16.0');
+      throw new Error('EACCES: permission denied, mkdir ' + staging);
+    });
+    const svc = service(registry(), hosted);
+    await svc.status();
+    const job = svc.apply('0.16.0', { registryOnly: true });
+    await vi.waitFor(() => expect(job.status).toBe('failed'));
+    const status = await svc.status({ registryOnly: true });
+    expect(status.job?.log.join('\n')).not.toContain(home);
+    expect(status.job?.error).not.toContain(home);
+    expect(status.job?.error).toContain('EACCES');
+    expect(status.job?.log.join('\n')).toContain('npm install --prefix');
+    // Redaction is a response projection; local troubleshooting keeps the original failure.
+    expect(job.log.join('\n')).toContain(staging);
+    expect(job.error).toContain(staging);
+    if (!hosted) expect((await svc.status()).job?.error).toContain(staging);
   });
 
   it('waits for the first registry read so the initial dialog receives versions', async () => {
