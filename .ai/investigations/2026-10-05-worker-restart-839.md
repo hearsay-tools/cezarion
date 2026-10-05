@@ -161,3 +161,42 @@ npm run typecheck:server
 The complete focused process-liveness suite passes **35 tests**, and server
 typecheck passes. This follow-up changes tests and this note only; the parent
 owns full repository verification and triage of its loaded-host test failures.
+
+## Mixed-holder polling follow-up — hearsay-tools/cezarion#842
+
+The [confirmed automated-review finding](https://github.com/hearsay-tools/cezarion/pull/842#discussion_r4185182113)
+identified a stale candidate-only check in `reapOrphanedWorker`: a verified
+readable holder could exit during polling while an unreadable candidate remained,
+but absent/incomplete ledgers prevented abandonment and cleanup waited until the
+termination deadline. The predicate now reads the latest probe for the same
+execution generation after each fresh settlement attempt. Recorded-process
+TERM/KILL policy, unknown-evidence safety and strict resource proof are unchanged.
+
+R47 extends every `RUNNER_IDS` native `HARNESS_ADAPTERS` wire with both absent
+and incomplete ledgers. After native cancellation, it restores the interrupted
+checkpoint, observes a real readable worktree holder across a poll, and lets that
+holder exit normally while a real non-dumpable scratch candidate remains. The
+result must name only the unreadable candidate, retain the starting generation
+without abandonment, preserve worktree/branch/scratch, and leave the candidate
+writable. Enumeration and the crash checkpoint are synthetic; readlink/token
+reads, permission denial, process exit, stores and Git are real.
+
+Red proof was run before changing production source:
+
+```sh
+npx vitest run packages/cezar/src/workflows/worker-restart-parity.test.ts -t 'mixed-holder cleanup' --maxWorkers=1
+```
+
+All ten cells failed only on elapsed time: **4004–4008 ms** against the
+**<2500 ms** assertion with a 4000 ms termination budget. The verified-holder
+exit, honest candidate reason and retained-resource assertions passed against
+the bug. With the minimal loop fix, the same command passes all ten cells.
+Test subprocesses remove inherited `CEZ_*` and use `TMPDIR=/tmp`; the worker CLI
+retains its controller environment. `npm ci` ran before tests.
+
+Final green: the nine-suite focused command listed in Verification above passes
+**269 tests in nine suites**, including all 15 R47 cells. The registered native
+matrix guard passes **seven tests**; `npm run build:server` and
+`npm run typecheck:server` both pass. `git diff --check` is clean. The parent
+owns the full repository gates, review and PR updates. This follow-up changes
+only the polling predicate, R47 coverage and its registration/documentation.

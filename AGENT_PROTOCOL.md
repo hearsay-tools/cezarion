@@ -800,7 +800,10 @@ owned cleanup refuse promptly and withdraw its queued claim, preserving resource
 until an explicit retry after unlock. Linux-only OS coverage exempts no runner.
 Missing/malformed ledgers and incomplete location evidence retain their existing
 conservative settlement guards; candidate-only destruction refusals report
-unverified membership without waiting out the full termination timeout.
+unverified membership without waiting out the full termination timeout. Mixed
+readable-holder/candidate probes with absent or incomplete ledgers recheck each
+fresh poll: after the verified holder exits, destruction refuses promptly with
+the candidate reason and retains the execution generation, worktree, branch and scratch.
 
 Crash-diagnostic rows **S15–S17** (hearsay-tools/cezarion#499) drive every `RUNNER_IDS` adapter's
 native transport through an uncaught-exception-shaped stderr fixture, a plain

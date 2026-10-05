@@ -935,12 +935,15 @@ export class RunManager {
     // A live controller is another cezar's: nothing to signal or wait for. Otherwise signal only
     // recorded, token-verified survivors (none for a legacy record-less generation), then wait
     // for verified cwd holders until the deadline; unverified candidates alone refuse promptly.
-    const initialProbe = this.orphanProbes.get(runId)?.probe;
     // An unreadable candidate cannot be signalled and has no verified relationship to this
     // generation. Refuse promptly; the durable orphan re-probe still observes later recovery.
-    const onlyCandidates = initialProbe !== undefined && initialProbe.pids.length > 0 &&
-      initialProbe.pids.every(pid => initialProbe.candidates?.includes(pid));
-    if (!onlyCandidates && (!orphan.record || !recordedProcessLive(orphan.record.controller))) {
+    const onlyCandidates = () => {
+      const latest = this.orphanProbes.get(runId);
+      const probe = latest?.generation === orphan.generation ? latest.probe : undefined;
+      return probe !== undefined && probe.pids.length > 0 &&
+        probe.pids.every(pid => probe.candidates?.includes(pid));
+    };
+    if (!onlyCandidates() && (!orphan.record || !recordedProcessLive(orphan.record.controller))) {
       if (orphan.record) {
         const targets = orphan.record.processes.filter(entry => entry.startToken !== undefined && recordedProcessLive(entry));
         const signal = (name: NodeJS.Signals) => {
@@ -955,7 +958,7 @@ export class RunManager {
         while (Date.now() < killAt && targets.some(recordedProcessLive)) await pause();
         if (targets.some(recordedProcessLive)) signal('SIGKILL');
       }
-      while (!this.settleOrphanedWorkerExecution(runId, { fresh: true }) && Date.now() < deadline && same()) await pause();
+      while (!this.settleOrphanedWorkerExecution(runId, { fresh: true }) && Date.now() < deadline && same() && !onlyCandidates()) await pause();
     }
     if (!same()) return;
     const probe = this.orphanProbes.get(runId)?.probe;
