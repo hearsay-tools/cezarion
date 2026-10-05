@@ -1,7 +1,9 @@
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { versionEntry, writeManifest } from '../self-update/layout.ts';
 import type { Hono } from 'hono';
+import { selfUpdateStatusSchema } from '@open-mercato/cezar-contract';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { RunStore } from '../runs/store.ts';
 import { RegistryCache } from '../self-update/registry.ts';
@@ -120,11 +122,24 @@ describe('the self-update API', () => {
     expect(await errorOf(res)).toContain('was published before the running');
   });
 
-  it('refuses a prerelease the registry cannot date, when the running version is a release', async () => {
+  it('refuses a prerelease absent from the registry', async () => {
     process.env.CEZ_REMOTE = '1';
     const res = await apply('0.99.0-nightly.20260101.1');
     expect(res.status).toBe(409);
-    expect(await errorOf(res)).toContain('gave no publish date to check it against');
+    expect(await errorOf(res)).toContain('published registry version');
+  });
+
+  it.each(['local', 'link'] as const)('refuses installed %s targets and hides them in hosted status', async source => {
+    const id = '0.16.0+' + source;
+    const entry = versionEntry(id);
+    mkdirSync(dirname(entry), { recursive: true }); writeFileSync(entry, '// fixture');
+    writeManifest(id, { source, version: '0.16.0', installedAt: '2026-10-01T00:00:00Z' });
+    const local = selfUpdateStatusSchema.parse(await (await apiRequest(app, '/api/v1/workspace/self-update')).json());
+    expect(local.installed.some((row) => row.id === id)).toBe(true);
+    process.env.CEZ_REMOTE = '1';
+    expect(await errorOf(await apply(id))).toContain('published registry version');
+    const hosted = selfUpdateStatusSchema.parse(await (await apiRequest(app, '/api/v1/workspace/self-update')).json());
+    expect(hosted.installed).toEqual([]);
   });
 
   it('lets a genuinely newer version past the hosted guard', async () => {
