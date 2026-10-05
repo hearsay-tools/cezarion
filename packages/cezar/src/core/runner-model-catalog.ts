@@ -143,6 +143,7 @@ const RUNNER_DISPLAY_NAME: Record<RunnerId, string> = {
   opencode: 'OpenCode',
   pi: 'Pi',
   cursor: 'Cursor',
+  omp: 'OMP',
 };
 
 function unavailableReason(runner: RunnerId): string {

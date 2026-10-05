@@ -439,3 +439,80 @@ describe('subagentChildren', () => {
     expect(subagentChildren(turns, 'ghost')).toEqual([])
   })
 })
+
+describe('collectSubagents — OMP turns (shapes from omp-ui-mapper)', () => {
+  /** A single-form `task` call: the call IS the row, its id the toolCallId, `input.agent` the type. */
+  const ompSingle = (status: ToolStatus): UiToolItem => ({
+    kind: 'tool',
+    id: 'call-1',
+    name: 'task',
+    toolKind: 'task',
+    title: 'Task: Audit the store',
+    status,
+    input: { agent: 'explore', task: 'Audit the store' },
+  })
+  /** The batch call's card: toolKind `other`, never a dock row itself. */
+  const ompBatchCard: UiToolItem = {
+    kind: 'tool',
+    id: 'call-2',
+    name: 'task',
+    toolKind: 'other',
+    title: 'Task batch · 3 agents',
+    status: 'running',
+  }
+  /** One synthetic row per batch agent: `${toolCallId}#${lifecycleId}`. */
+  const ompBatchRow = (lifecycleId: string, status: ToolStatus, agent: string): UiToolItem => ({
+    kind: 'tool',
+    id: `call-2#${lifecycleId}`,
+    name: 'task',
+    toolKind: 'task',
+    title: `Task: ${lifecycleId} work`,
+    status,
+    input: { agent, task: `${lifecycleId} work` },
+  })
+
+  it('collects OMP single-form and batch sub-agents as one row each', () => {
+    const agents = collectSubagents([
+      turn('turn-1', [
+        ompSingle('completed'),
+        ompBatchCard,
+        ompBatchRow('a', 'running', 'explore'),
+        ompBatchRow('b', 'running', 'explore'),
+        ompBatchRow('c', 'completed', 'task'),
+      ]),
+    ])
+    expect(agents.map((row) => row.id)).toEqual(['call-1', 'call-2#a', 'call-2#b', 'call-2#c'])
+    expect(subagentCounts(agents)).toEqual({ done: 2, total: 4 })
+  })
+
+  it('counts a sub-agent’s own tools and text as the batch row’s children', () => {
+    const turns = [
+      turn('turn-1', [
+        ompBatchCard,
+        ompBatchRow('a', 'running', 'explore'),
+        childTool('call-2#a/t1', 'call-2#a', 'Read src/a.ts'),
+        childText('call-2#a/m1', 'call-2#a', 'Found two callers'),
+      ]),
+    ]
+    const [row] = collectSubagents(turns)
+    expect(row!.toolCalls).toBe(1)
+    expect(row!.activity).toBe('Found two callers')
+    expect(subagentChildren(turns, 'call-2#a').map((child) => child.id)).toEqual(['call-2#a/t1', 'call-2#a/m1'])
+  })
+
+  it('marks an OMP sub-agent stalled when the run ended mid-agent', () => {
+    const turns = [turn('turn-1', [ompSingle('running'), ompBatchCard, ompBatchRow('a', 'running', 'explore')])]
+    const rows = collectSubagents(turns, true)
+    expect(rows.map((row) => row.stalled)).toEqual([true, true])
+    expect(subagentActivityText(rows[0]!)).toBe('never finished')
+    expect(findSubagent(turns, 'call-2#a', true)?.stalled).toBe(true)
+  })
+
+  it('reads the OMP agent type from input.agent', () => {
+    const [single, batched] = collectSubagents([
+      turn('turn-1', [ompSingle('running'), ompBatchCard, ompBatchRow('a', 'running', 'reviewer')]),
+    ])
+    expect(single!.agentType).toBe('explore')
+    expect(batched!.agentType).toBe('reviewer')
+  })
+})

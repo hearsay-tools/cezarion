@@ -4,7 +4,7 @@ import { isSafeSessionId, resumeCommand } from './server.ts';
 import { commands as goldenCommands, sessionId, unsafeSessionIds } from '../../test/fixtures/resume-commands.ts';
 
 describe('resume commands — shared golden parity across RUNNER_IDS', () => {
-  beforeEach(() => vi.stubEnv('CEZ_CURSOR_BIN', undefined));
+  beforeEach(() => { vi.stubEnv('CEZ_CURSOR_BIN', undefined); vi.stubEnv('CEZ_OMP_BIN', undefined); });
   afterEach(() => vi.unstubAllEnvs());
 
   const commands = goldenCommands satisfies Record<(typeof RUNNER_IDS)[number], string>;
@@ -39,6 +39,7 @@ describe('resumeCommand — session id validation', () => {
     expect(resumeCommand('opencode', id)).toBe(`opencode --session ${id}`);
     expect(resumeCommand('cursor', id)).toBe(`agent --resume ${id}`);
     expect(resumeCommand('pi', id)).toBe(`pi --session ${id}`);
+    expect(resumeCommand('omp', id)).toBe(`omp --resume ${id}`);
   });
 
   // Every runner id must map to a command — an id that fell through to the `claude` default

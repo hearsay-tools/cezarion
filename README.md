@@ -5,8 +5,8 @@
 **Parallel coding agents orchestrator** — a local cockpit for running and
 tracking AI coding-agent tasks in your repo.
 
-Type a task, pick a workflow and an agent — **Claude Code, Codex, OpenCode or pi
-(the latter two experimental), or a mix of them per step** — and watch it work live: steps, tool calls,
+Type a task, pick a workflow and an agent — **Claude Code, Codex, OpenCode, pi or OMP
+(OpenCode, pi and OMP experimental), or a mix of them per step** — and watch it work live: steps, tool calls,
 tokens, diffs, in a browser cockpit that runs entirely on your machine.
 Your CLI logins, your `gh`, your files. No accounts, no database, no cloud.
 
@@ -73,7 +73,7 @@ it does better than any of them:
 
 - 🪶 **Genuinely zero config.** `npx cezarion` in your repo and you're running —
   no wizard, no API keys, no env vars, no schema, no database. It rides the
-  `claude` / `codex` / `opencode` / `pi` logins and the `gh` you already have, and every
+  `claude` / `codex` / `opencode` / `pi` / `omp` logins and the `gh` you already have, and every
   missing piece degrades gracefully instead of blocking you.
 - 🖥️ **Built for a server (VPS mode).** cezar is made to live on a **VPS, cloud,
   or dedicated box** as an always-on janitor for your repo — headless-first, with
@@ -574,7 +574,7 @@ pending human question. Controller recovery can replay an observation after an
 ambiguous delivery checkpoint, identified by its stable lifecycle input ID.
 
 The adapters are bundled for Claude (including `claude-cli`), Codex, OpenCode,
-Cursor and Pi. Internal socket/capability environment values are runtime wiring,
+Cursor, Pi and OMP. Internal socket/capability environment values are runtime wiring,
 not settings to create or share. If the tool is unavailable or denied, its error
 is surfaced while ordinary tasks continue. See [the CI-wait protocol](AGENT_PROTOCOL.md#ci-wait-tool-contract-474)
 for limits and the executable harness verification required before release.
@@ -633,7 +633,7 @@ An incomplete destroy reports the remaining resources and a reason. Cezar retrie
 
 Explicit default-account model pins are checked against a fresh, nonempty host catalog after account/model resolution and before a worker is created. Named accounts retain existing validation because a default-account catalog cannot disprove their model access. A miss returns `invalid_input`, available models with advertised efforts, and other runners listing the requested ID in `modelChoices`. Empty, stale, or unavailable discovery leaves existing selection validation in place. Accepted retries and omitted model defaults are unchanged.
 
-Omitted `--backend` inherits the parent's active backend. Same-backend workers inherit omitted model/account/effort; `--backend <claude|codex|opencode|pi|cursor>` selecting another backend resolves that backend's project/default account and model without forwarding another provider's settings. `--model <model>` selects a supported model, subject to existing locks. `--effort <low|medium|high|xhigh|max>` pins reasoning effort on same-backend and mixed-backend spawn; omitted `--effort` still inherits the parent pin on same-backend spawn and drops it on mixed-backend spawn. Accepted identity and grants remain fixed across queuing, restart and Continue, including explicit empty grants. Changing or deleting an account registry entry does not rebind a worker. Missing accepted identity evidence or account homes, incompatible Claude state-file layouts, and conflicting later model locks refuse execution explicitly. Credentials and vendor configuration are never copied; each worker receives its own delegation credential, and unspecified native models stay unspecified.
+Omitted `--backend` inherits the parent's active backend. Same-backend workers inherit omitted model/account/effort; `--backend <claude|codex|opencode|pi|cursor|omp>` selecting another backend resolves that backend's project/default account and model without forwarding another provider's settings. `--model <model>` selects a supported model, subject to existing locks. `--effort <low|medium|high|xhigh|max>` pins reasoning effort on same-backend and mixed-backend spawn; omitted `--effort` still inherits the parent pin on same-backend spawn and drops it on mixed-backend spawn. Accepted identity and grants remain fixed across queuing, restart and Continue, including explicit empty grants. Changing or deleting an account registry entry does not rebind a worker. Missing accepted identity evidence or account homes, incompatible Claude state-file layouts, and conflicting later model locks refuse execution explicitly. Credentials and vendor configuration are never copied; each worker receives its own delegation credential, and unspecified native models stay unspecified.
 
 Wait registers immediately. End the parent turn to release scheduler capacity; Cezar resumes it on a selected settled outcome or the finite deadline. `any` is the default, `one` requires exactly one worker, and `all` waits for every selected worker. Review, completion, failure, cancellation with proven termination, and destruction are outcomes. Timeout defaults to 600 seconds (1–1800 accepted). `cancel-wait` is idempotent for the retained wait ID and cannot cancel a newer wait. Timeout and wait cancellation report partial outcomes and unresolved workers, never cancel workers, and never automatically re-wait. Steering is attributed agent input and cannot answer a pending human question.
 
@@ -641,7 +641,7 @@ Parents and owned workers can converse in both directions; a worker may address 
 
 Messages allow 100,000 characters each, with at most 32 undelivered inputs per recipient, 1,024 messages per family, and 32 pending requests. Request deadlines default to 600 seconds, configurable per message with `--timeout-seconds 1–1800`. Request waits use the same limits and `one`/`any`/`all` modes as worker waits, and each run has one active wait. Incoming conversation can interrupt a parked wait without settling its requests. `cancel-request` cancels an obligation; `cancel-wait` only stops waiting. Completion without a reply, failure, cancellation, destruction, timeout, or sender closure settle obligations distinctly. Late replies remain visible without reopening them.
 
-Messages reach a live recipient as soon as they are accepted, including mid-turn: Claude, Codex, Pi and OpenCode steer them into the running turn, and the model reads them at its next step. Cursor delivers at the turn boundary, because a second prompt would cancel its running turn. Pending conversations go together, in order, up to 32 messages and 100,000 formatted characters per batch; a single valid message is never split. Every message keeps its ID, sender, delivery receipt and request outcome; receipts show queued, delivered and read (when the agent's harness can tell) separately. A pending human question holds messages until it is answered, then they follow right behind the answer. The thread's Details distinguish creation, delivery confirmation and event-recording times.
+Messages reach a live recipient as soon as they are accepted, including mid-turn: Claude, Codex, Pi, OMP and OpenCode steer them into the running turn, and the model reads them at its next step. Cursor delivers at the turn boundary, because a second prompt would cancel its running turn. Pending conversations go together, in order, up to 32 messages and 100,000 formatted characters per batch; a single valid message is never split. Every message keeps its ID, sender, delivery receipt and request outcome; receipts show queued, delivered and read (when the agent's harness can tell) separately. A pending human question holds messages until it is answered, then they follow right behind the answer. The thread's Details distinguish creation, delivery confirmation and event-recording times.
 
 Sending to a review or terminal participant without `--resume` reports `not-delivered` and `continuation-required`, with the reason and next command; the CLI exits 1. An active parent can use `worker send --resume` (request or progress) to continue its settled done/review/failed worker with that message as the new instruction. No human Continue is needed for this parent-controlled action. A retry with the same payload and ID never creates another continuation; changing a rejected send to use `--resume` requires a new ID. Stopped or destroyed workers need a new worker. Workers cannot resume parents, and conversation never answers a pending human question. Durable IDs deduplicate accepted queue entries and event replay, but a crash between provider acceptance and its durable delivery checkpoint can leave transport delivery ambiguous; this is not an exactly-once execution guarantee.
 
@@ -857,6 +857,7 @@ Useful environment variables:
 | `CEZ_CODEX_BIN=/path/to/codex` | Override which `codex` binary is used. |
 | `CEZ_OPENCODE_BIN=/path/to/opencode` | Override which `opencode` binary is used. |
 | `CEZ_PI_BIN=/path/to/pi` | Override which `pi` binary is used. |
+| `CEZ_OMP_BIN=/path/to/omp` | Override which `omp` (Oh My Pi) binary is used. |
 | `CEZ_CURSOR_BIN=/path/to/agent` | Override the Cursor CLI (`agent`) executable. |
 | `CLAUDE_CONFIG_DIR`, `CODEX_HOME` | The agents' **own** variables, honoured where the vendor documents one. Setting one moves that agent's **default account** — the config folder cezar discovers. A *second* login of the same CLI is deliberately not an environment setting, since one process-wide value cannot differ per project: add it under **Settings → Agent accounts** and pick it per project. |
 | `CEZ_BROWSE_ROOT=~/` | Default root for **Add project → Open local folder…**. The picker cannot navigate above it; a saved workspace value overrides the environment default and must name an existing folder. |
@@ -931,7 +932,7 @@ ends. Checkouts whose path already fits keep the repo-local directory.
 ## Coding agent backends
 
 cezar is not married to one vendor. Every agent step runs through a single
-`AgentRunner` seam with five built-in backends:
+`AgentRunner` seam with six built-in backends:
 
 | Backend | CLI | How cezar drives it | Tool access |
 |---|---|---|---|
@@ -940,14 +941,15 @@ cezar is not married to one vendor. Every agent step runs through a single
 | **OpenCode** _(experimental)_ | [`opencode`](https://opencode.ai) | `opencode serve` — a local HTTP server with an SSE event stream. | Ignores `allowedTools` entirely; every permission is auto-approved. |
 | **Cursor** | [`agent`](https://cursor.com/docs/cli/installation) | Persistent ACP over stdio. | Uses `--force` and approves ACP allow-once requests; Cursor’s native deny rules still apply. Per-run `allowedTools` and `bashAllowlist` are unsupported. |
 | **pi** _(experimental)_ | [`pi`](https://github.com/badlogic/pi-mono) | Persistent `--mode rpc` over JSONL; models are picked with the `provider/model` convention. | Maps `allowedTools` onto pi's `--tools` allowlist; default sessions also pass harness extras (`Subagent`, `SubagentSupervisor`, `SubagentWait`) through `--tools`, and an explicit `allowedTools` still restricts. A configured `bashAllowlist` disables Bash because pi cannot express command-prefix rules. |
+| **OMP** _(experimental)_ | [`omp`](https://github.com/can1357/oh-my-pi) | Persistent `--mode rpc` over JSONL (Oh My Pi, a pi fork); models use the `provider/model` convention and are discovered from `omp models --json`. | Maps `allowedTools` onto OMP's `--tools` allowlist (`[]` becomes `--no-tools`); default sessions also pass `todo`, `lsp`, `ast_edit`, `task` and `wait`. A configured `bashAllowlist` disables `bash` because OMP cannot express command-prefix rules. |
 
-> ⚠️ **OpenCode and pi support are experimental.** Both runners work but are less
+> ⚠️ **OpenCode, pi and OMP support are experimental.** These runners work but are less
 > battle-tested than the Claude Code and Codex backends, and OpenCode auto-approves
 > every permission (it ignores `allowedTools`). Treat them as previews and expect
 > rough edges.
 
 On startup cezar probes which CLIs are installed and the cockpit only offers
-the backends it found — install any one of the five and you're operational.
+the backends it found — install any one of the six and you're operational.
 
 ### Cursor CLI
 
@@ -970,6 +972,19 @@ documents `CURSOR_CONFIG_DIR` and the Linux/BSD `XDG_CONFIG_HOME/cursor` overrid
 These select configuration; Cezar does not offer alternate Cursor account profiles
 because a complete credential-and-session home override has not been verified.
 
+
+### OMP (Oh My Pi)
+
+Install [OMP](https://github.com/can1357/oh-my-pi) (`curl -fsSL https://omp.sh/install | sh`
+installs a prebuilt binary; Bun is needed only for `--source`) and run `omp login`. Cezar discovers `omp` on PATH;
+`CEZ_OMP_BIN` overrides its location. `omp` is a separate backend from `pi`: a host with
+both binaries keeps both, and `CEZ_PI_BIN` never selects OMP. Select **OMP** in the runner
+picker to use a persistent `--mode rpc` session. A missing CLI leaves the other backends
+available and shows OMP as unavailable. `CEZ_DRY_RUN=1` uses the mock.
+
+Agents ask questions through cezar's `CEZ:ASK` marker, and OMP's own sub-agents appear in the
+Agents drawer. Settings → Agent config exposes OMP's `config.yml`, `mcp.json` and
+`AGENTS.md` files. Named OMP profiles and accounts are not supported yet.
 
 **Pick a backend at three levels** (most specific wins):
 

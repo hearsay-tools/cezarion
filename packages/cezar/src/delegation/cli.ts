@@ -71,7 +71,7 @@ const WORKER_HELP: Record<string, { args: string; description: string }> = {
 const WORKER_FLAG_HELP: Record<string, string> = {
   '--baseline': '<ref>                 Committed ref or parent-head; excludes dirty edits.',
   '--request-id': '<UUID>              Spawn retry ID, or request being followed up/replied to.',
-  '--backend': '<name>                 claude | codex | opencode | pi | cursor.',
+  '--backend': '<name>                 claude | codex | opencode | pi | cursor | omp.',
   '--model': '<model>                  Model override.',
   '--effort': '<level>                 low | medium | high | xhigh | max | auto.',
   '--workflow': '<name>                Catalog workflow to run (built-in quick-task or .ai/cezar/workflows); default quick-task.',

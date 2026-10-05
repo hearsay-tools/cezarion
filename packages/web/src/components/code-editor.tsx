@@ -45,7 +45,7 @@ function useCodeTokens(text: string, lang: string): SynToken[][] {
 export interface CodeEditorProps {
   value: string
   onChange?: (next: string) => void
-  /** Highlighter fence language (the catalog's `format`: json | jsonc | toml | markdown). */
+  /** Highlighter fence language (the catalog's `format`: json | jsonc | toml | yaml | markdown). */
   language: string
   readOnly?: boolean
   className?: string

@@ -23,6 +23,7 @@ function holdNativeTurn(runner: RunnerId) {
   } else {
     const anchor = runner === 'claude' ? "const held = 'parity hold: content after the pause';"
       : runner === 'pi' ? "sendText(['parity hold: content after the pause']);"
+      : runner === 'omp' ? "assistantText(['parity hold: content after the pause']);"
       : "if (input.includes('mock:hold')) await new Promise(r => setTimeout(r, 500));";
     expect(source.split(anchor)).toHaveLength(2);
     source = source.replace(anchor, runner === 'cursor' ? `if (input.includes('mock:hold')) { ${gate} }` : `${gate}\n${anchor}`);

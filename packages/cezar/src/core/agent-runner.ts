@@ -21,7 +21,7 @@ import type { UiEvent } from './ui-events.ts';
  * server-install "at least one agent CLI" gate, the CLI-handoff registry) rather than repeating
  * the literals, so adding runner #5 is a one-line change here and typecheck finds the rest.
  */
-export const RUNNER_IDS = ['claude', 'codex', 'opencode', 'pi', 'cursor'] as const;
+export const RUNNER_IDS = ['claude', 'codex', 'opencode', 'pi', 'cursor', 'omp'] as const;
 
 /** The user-selectable runners (what config/GUI expose). */
 export type RunnerId = (typeof RUNNER_IDS)[number];
@@ -246,6 +246,10 @@ export interface SessionOptions {
   /** The model received these inputs (replay echo, userMessage item, …). Fires at most
    * once per ID and never from a transport acknowledgement (#505). */
   onAgentInputConsumed?: (inputIds: readonly string[]) => void;
+  /** The session's backend process was replaced after `startSession` returned (OMP's R13
+   *  respawn); `AgentSession.pid` already names the new one. Callers that registered the
+   *  first pid for telemetry or cleanup register this one instead. */
+  onPidChange?: (pid: number) => void;
 }
 
 /**

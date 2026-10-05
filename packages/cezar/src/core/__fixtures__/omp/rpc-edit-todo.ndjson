@@ -1,0 +1,33 @@
+{"id":"cezar-prompt-1","type":"response","command":"prompt","success":true}
+{"type":"agent_start"}
+{"type":"turn_start"}
+{"type":"message_start","messageId":"msg-1","message":{"role":"assistant","content":[],"timestamp":1791151800000}}
+{"type":"message_update","messageId":"msg-1","message":{"role":"assistant"},"assistantMessageEvent":{"type":"text_start","contentIndex":0}}
+{"type":"message_update","messageId":"msg-1","message":{"role":"assistant"},"assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"Planning the change."}}
+{"type":"message_update","messageId":"msg-1","message":{"role":"assistant"},"assistantMessageEvent":{"type":"text_end","contentIndex":0,"content":"Planning the change."}}
+{"type":"message_end","messageId":"msg-1","message":{"role":"assistant","content":[{"type":"text","text":"Planning the change."}],"api":"anthropic-messages","provider":"anthropic","model":"claude-opus-5-5","usage":{"input":900,"output":60,"cacheRead":0,"cacheWrite":0,"totalTokens":960,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0.004}},"stopReason":"toolUse","timestamp":1791151800000}}
+{"type":"tool_execution_start","toolCallId":"toolu_todo_1","toolName":"todo","args":{"op":"init","list":[{"phase":"Build","items":["Write mapper","Add fixtures"]},{"phase":"Verify","items":["Run tests","Publish"]}]}}
+{"type":"tool_execution_end","toolCallId":"toolu_todo_1","toolName":"todo","result":{"content":[{"type":"text","text":"Build\n  - [>] Write mapper\n  - [ ] Add fixtures"}],"details":{"op":"init","phases":[{"name":"Build","tasks":[{"content":"Write mapper","status":"in_progress"},{"content":"Add fixtures","status":"pending"}]},{"name":"Verify","tasks":[{"content":"Run tests","status":"pending"},{"content":"Publish","status":"pending"}]}],"storage":"session"}}}
+{"type":"tool_execution_start","toolCallId":"toolu_edit_1","toolName":"edit","args":{"input":"src/greet.ts\n3:7f|  return 'hi';\n=  return 'hello';\n"}}
+{"type":"tool_execution_end","toolCallId":"toolu_edit_1","toolName":"edit","result":{"content":[{"type":"text","text":"Edited src/greet.ts"}],"details":{"diff":"-3   return 'hi';\n+3   return 'hello';","firstChangedLine":3,"op":"update","path":"src/greet.ts","oldText":"export function greet() {\n  return 'hi';\n}\n","newText":"export function greet() {\n  return 'hello';\n}\n"}}}
+{"type":"tool_execution_start","toolCallId":"toolu_edit_2","toolName":"edit","args":{"input":"src/a.ts\n1:2c|export const a = 1;\n=export const a = 2;\nsrc/b.ts\n+export const b = 2;\n"}}
+{"type":"tool_execution_end","toolCallId":"toolu_edit_2","toolName":"edit","result":{"content":[{"type":"text","text":"Edited 2 files"}],"details":{"diff":"-1 export const a = 1;\n+1 export const a = 2;\n+1 export const b = 2;","firstChangedLine":1,"perFileResults":[{"path":"src/a.ts","diff":"-1 export const a = 1;\n+1 export const a = 2;","firstChangedLine":1,"op":"update","oldText":"export const a = 1;\n","newText":"export const a = 2;\n"},{"path":"src/b.ts","diff":"+1 export const b = 2;","firstChangedLine":1,"op":"create","newText":"export const b = 2;\n"}]}}}
+{"type":"tool_execution_start","toolCallId":"toolu_write_1","toolName":"write","args":{"path":"docs/notes.md","content":"# Notes\n"}}
+{"type":"tool_execution_end","toolCallId":"toolu_write_1","toolName":"write","result":{"content":[{"type":"text","text":"Wrote docs/notes.md"}],"details":{"resolvedPath":"/home/dev/repo/docs/notes.md"}}}
+{"type":"tool_execution_start","toolCallId":"toolu_todo_2","toolName":"todo","args":{"op":"done","task":"Write mapper"}}
+{"type":"tool_execution_end","toolCallId":"toolu_todo_2","toolName":"todo","result":{"content":[{"type":"text","text":"Build\n  - [x] Write mapper\n  - [>] Add fixtures"}],"details":{"op":"done","phases":[{"name":"Build","tasks":[{"content":"Write mapper","status":"completed"},{"content":"Add fixtures","status":"in_progress"}]},{"name":"Verify","tasks":[{"content":"Run tests","status":"pending"},{"content":"Publish","status":"pending"}]}],"storage":"session","completedTasks":[{"content":"Write mapper","status":"completed"}]}}}
+{"type":"tool_execution_start","toolCallId":"toolu_todo_3","toolName":"todo","args":{"op":"drop","task":"Publish"}}
+{"type":"tool_execution_end","toolCallId":"toolu_todo_3","toolName":"todo","result":{"content":[{"type":"text","text":"Verify\n  - [ ] Run tests (blocked)\n  - [-] Publish"}],"details":{"op":"drop","phases":[{"name":"Build","tasks":[{"content":"Write mapper","status":"completed"},{"content":"Add fixtures","status":"in_progress"}]},{"name":"Verify","tasks":[{"content":"Run tests","status":"blocked"},{"content":"Publish","status":"abandoned"}]}],"storage":"session"}}}
+{"type":"tool_execution_start","toolCallId":"toolu_todo_4","toolName":"todo","args":{"op":"view"}}
+{"type":"tool_execution_end","toolCallId":"toolu_todo_4","toolName":"todo","result":{"content":[{"type":"text","text":"Build\n  - [x] Write mapper"}],"details":{"op":"view","phases":[{"name":"Build","tasks":[{"content":"Write mapper","status":"completed"},{"content":"Add fixtures","status":"in_progress"}]},{"name":"Verify","tasks":[{"content":"Run tests","status":"blocked"},{"content":"Publish","status":"abandoned"}]}],"storage":"session"}}}
+{"type":"turn_end"}
+{"type":"turn_start"}
+{"type":"message_start","messageId":"msg-2","message":{"role":"assistant","content":[],"timestamp":1791151801000}}
+{"type":"message_update","messageId":"msg-2","message":{"role":"assistant"},"assistantMessageEvent":{"type":"text_start","contentIndex":0}}
+{"type":"message_update","messageId":"msg-2","message":{"role":"assistant"},"assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"Edits applied."}}
+{"type":"message_update","messageId":"msg-2","message":{"role":"assistant"},"assistantMessageEvent":{"type":"text_end","contentIndex":0,"content":"Edits applied."}}
+{"type":"message_end","messageId":"msg-2","message":{"role":"assistant","content":[{"type":"text","text":"Edits applied."}],"api":"anthropic-messages","provider":"anthropic","model":"claude-opus-5-5","usage":{"input":2100,"output":30,"cacheRead":0,"cacheWrite":0,"totalTokens":2130,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0.006}},"stopReason":"stop","timestamp":1791151800000}}
+{"type":"turn_end"}
+{"type":"agent_end","messages":[],"isTerminal":true,"yielded":true}
+{"type":"prompt_result","id":"cezar-prompt-1","agentInvoked":true,"status":"completed","sessionSettled":true}
+{"type":"session_settled"}

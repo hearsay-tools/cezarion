@@ -1,0 +1,508 @@
+[
+  {
+    "type": "turn.started",
+    "turnId": "turn_1"
+  },
+  {
+    "type": "item.started",
+    "item": {
+      "kind": "message",
+      "id": "turn_1_text_0_0",
+      "role": "assistant",
+      "text": ""
+    }
+  },
+  {
+    "type": "item.delta",
+    "itemId": "turn_1_text_0_0",
+    "field": "text",
+    "delta": "Delegating the survey."
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "message",
+      "id": "turn_1_text_0_0",
+      "role": "assistant",
+      "text": "Delegating the survey."
+    }
+  },
+  {
+    "type": "usage.updated",
+    "usage": {
+      "input": 1000,
+      "output": 50,
+      "total": 1050,
+      "cacheRead": 0,
+      "cacheWrite": 0
+    },
+    "costUsd": 0.005
+  },
+  {
+    "type": "item.started",
+    "item": {
+      "kind": "tool",
+      "id": "toolu_task_1",
+      "name": "task",
+      "toolKind": "task",
+      "title": "Task: Map the RPC layer",
+      "status": "running",
+      "input": {
+        "agent": "explore",
+        "task": "Map the RPC layer",
+        "solutionSpace": "Read-only survey of src/modes/rpc"
+      }
+    }
+  },
+  {
+    "type": "item.started",
+    "item": {
+      "kind": "message",
+      "id": "toolu_task_1/text_0_0",
+      "role": "assistant",
+      "text": "",
+      "parentItemId": "toolu_task_1"
+    }
+  },
+  {
+    "type": "item.delta",
+    "itemId": "toolu_task_1/text_0_0",
+    "field": "text",
+    "delta": "Looking at rpc-mode.ts"
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "message",
+      "id": "toolu_task_1/text_0_0",
+      "role": "assistant",
+      "text": "Looking at rpc-mode.ts",
+      "parentItemId": "toolu_task_1"
+    }
+  },
+  {
+    "type": "item.started",
+    "item": {
+      "kind": "tool",
+      "id": "toolu_task_1/toolu_c1_read",
+      "name": "read",
+      "toolKind": "read",
+      "title": "Read src/modes/rpc/rpc-mode.ts",
+      "status": "running",
+      "input": {
+        "path": "src/modes/rpc/rpc-mode.ts"
+      },
+      "parentItemId": "toolu_task_1"
+    }
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "tool",
+      "id": "toolu_task_1/toolu_c1_read",
+      "name": "read",
+      "toolKind": "read",
+      "title": "Read src/modes/rpc/rpc-mode.ts",
+      "status": "completed",
+      "input": {
+        "path": "src/modes/rpc/rpc-mode.ts"
+      },
+      "parentItemId": "toolu_task_1",
+      "output": "export async function runRpcMode() {}"
+    }
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "tool",
+      "id": "toolu_task_1",
+      "name": "task",
+      "toolKind": "task",
+      "title": "Task: Map the RPC layer",
+      "status": "completed",
+      "input": {
+        "agent": "explore",
+        "task": "Map the RPC layer",
+        "solutionSpace": "Read-only survey of src/modes/rpc"
+      },
+      "output": "RpcMapper: rpc-mode.ts owns the stdin loop."
+    }
+  },
+  {
+    "type": "item.started",
+    "item": {
+      "kind": "tool",
+      "id": "toolu_task_3",
+      "name": "task",
+      "toolKind": "task",
+      "title": "Task: Watch the CI run",
+      "status": "running",
+      "input": {
+        "agent": "explore",
+        "task": "Watch the CI run",
+        "solutionSpace": "Read-only; report the verdict"
+      }
+    }
+  },
+  {
+    "type": "item.updated",
+    "item": {
+      "kind": "tool",
+      "id": "toolu_task_3",
+      "name": "task",
+      "toolKind": "task",
+      "title": "Task: Watch the CI run",
+      "status": "running",
+      "input": {
+        "agent": "explore",
+        "task": "Watch the CI run",
+        "solutionSpace": "Read-only; report the verdict"
+      },
+      "output": "CiWatch: running in the background"
+    }
+  },
+  {
+    "type": "item.started",
+    "item": {
+      "kind": "tool",
+      "id": "toolu_task_2",
+      "name": "task",
+      "toolKind": "other",
+      "title": "Task batch · 3 agents",
+      "status": "running",
+      "input": {
+        "context": "Survey the OMP RPC surface for the cezar runner.",
+        "tasks": [
+          {
+            "name": "Docs",
+            "agent": "explore",
+            "task": "Summarise docs/rpc.md",
+            "solutionSpace": "docs only"
+          },
+          {
+            "name": "Types",
+            "agent": "explore",
+            "task": "List every frame in rpc-types.ts",
+            "solutionSpace": "types only"
+          },
+          {
+            "name": "Tests",
+            "agent": "task",
+            "task": "Draft mapper tests",
+            "solutionSpace": "tests only"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "item.updated",
+    "item": {
+      "kind": "tool",
+      "id": "toolu_task_2",
+      "name": "task",
+      "toolKind": "other",
+      "title": "Task batch · 3 agents",
+      "status": "running",
+      "input": {
+        "context": "Survey the OMP RPC surface for the cezar runner.",
+        "tasks": [
+          {
+            "name": "Docs",
+            "agent": "explore",
+            "task": "Summarise docs/rpc.md",
+            "solutionSpace": "docs only"
+          },
+          {
+            "name": "Types",
+            "agent": "explore",
+            "task": "List every frame in rpc-types.ts",
+            "solutionSpace": "types only"
+          },
+          {
+            "name": "Tests",
+            "agent": "task",
+            "task": "Draft mapper tests",
+            "solutionSpace": "tests only"
+          }
+        ]
+      },
+      "output": "3 agents running"
+    }
+  },
+  {
+    "type": "item.started",
+    "item": {
+      "kind": "tool",
+      "id": "toolu_task_2#Docs",
+      "name": "task",
+      "toolKind": "task",
+      "title": "Task: Read the RPC docs",
+      "status": "running",
+      "input": {
+        "agent": "explore",
+        "task": "Summarise docs/rpc.md"
+      }
+    }
+  },
+  {
+    "type": "item.started",
+    "item": {
+      "kind": "tool",
+      "id": "toolu_task_2#Types",
+      "name": "task",
+      "toolKind": "task",
+      "title": "Task: List every frame in rpc-types.ts",
+      "status": "running",
+      "input": {
+        "agent": "explore",
+        "task": "List every frame in rpc-types.ts"
+      }
+    }
+  },
+  {
+    "type": "item.started",
+    "item": {
+      "kind": "tool",
+      "id": "toolu_task_2#Tests",
+      "name": "task",
+      "toolKind": "task",
+      "title": "Task: Draft mapper tests",
+      "status": "running",
+      "input": {
+        "agent": "task",
+        "task": "Draft mapper tests"
+      }
+    }
+  },
+  {
+    "type": "item.started",
+    "item": {
+      "kind": "message",
+      "id": "toolu_task_2#Docs/text_0_0",
+      "role": "assistant",
+      "text": "",
+      "parentItemId": "toolu_task_2#Docs"
+    }
+  },
+  {
+    "type": "item.delta",
+    "itemId": "toolu_task_2#Docs/text_0_0",
+    "field": "text",
+    "delta": "rpc.md documents prompt_result and session_settled."
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "message",
+      "id": "toolu_task_2#Docs/text_0_0",
+      "role": "assistant",
+      "text": "rpc.md documents prompt_result and session_settled.",
+      "parentItemId": "toolu_task_2#Docs"
+    }
+  },
+  {
+    "type": "item.started",
+    "item": {
+      "kind": "tool",
+      "id": "toolu_task_2#Types/toolu_c2_grep",
+      "name": "grep",
+      "toolKind": "search",
+      "title": "Search type: \"",
+      "status": "running",
+      "input": {
+        "pattern": "type: \"",
+        "path": "src/modes/rpc/rpc-types.ts"
+      },
+      "parentItemId": "toolu_task_2#Types"
+    }
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "tool",
+      "id": "toolu_task_2#Types/toolu_c2_grep",
+      "name": "grep",
+      "toolKind": "search",
+      "title": "Search type: \"",
+      "status": "completed",
+      "input": {
+        "pattern": "type: \"",
+        "path": "src/modes/rpc/rpc-types.ts"
+      },
+      "parentItemId": "toolu_task_2#Types",
+      "output": "48 matches"
+    }
+  },
+  {
+    "type": "item.started",
+    "item": {
+      "kind": "message",
+      "id": "toolu_task_2#Tests/text_0_0",
+      "role": "assistant",
+      "text": "",
+      "parentItemId": "toolu_task_2#Tests"
+    }
+  },
+  {
+    "type": "item.delta",
+    "itemId": "toolu_task_2#Tests/text_0_0",
+    "field": "text",
+    "delta": "Starting on the lifecycle fixture"
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "tool",
+      "id": "toolu_task_2#Docs",
+      "name": "task",
+      "toolKind": "task",
+      "title": "Task: Read the RPC docs",
+      "status": "completed",
+      "input": {
+        "agent": "explore",
+        "task": "Summarise docs/rpc.md"
+      }
+    }
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "tool",
+      "id": "toolu_task_2#Types",
+      "name": "task",
+      "toolKind": "task",
+      "title": "Task: List every frame in rpc-types.ts",
+      "status": "completed",
+      "input": {
+        "agent": "explore",
+        "task": "List every frame in rpc-types.ts"
+      }
+    }
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "message",
+      "id": "toolu_task_2#Tests/text_0_0",
+      "role": "assistant",
+      "text": "Starting on the lifecycle fixture",
+      "parentItemId": "toolu_task_2#Tests"
+    }
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "tool",
+      "id": "toolu_task_2#Tests",
+      "name": "task",
+      "toolKind": "task",
+      "title": "Task: Draft mapper tests",
+      "status": "failed",
+      "input": {
+        "agent": "task",
+        "task": "Draft mapper tests"
+      }
+    }
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "tool",
+      "id": "toolu_task_2",
+      "name": "task",
+      "toolKind": "other",
+      "title": "Task batch · 3 agents",
+      "status": "completed",
+      "input": {
+        "context": "Survey the OMP RPC surface for the cezar runner.",
+        "tasks": [
+          {
+            "name": "Docs",
+            "agent": "explore",
+            "task": "Summarise docs/rpc.md",
+            "solutionSpace": "docs only"
+          },
+          {
+            "name": "Types",
+            "agent": "explore",
+            "task": "List every frame in rpc-types.ts",
+            "solutionSpace": "types only"
+          },
+          {
+            "name": "Tests",
+            "agent": "task",
+            "task": "Draft mapper tests",
+            "solutionSpace": "tests only"
+          }
+        ]
+      },
+      "output": "Docs: done\nTypes: done\nTests: aborted"
+    }
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "tool",
+      "id": "toolu_task_3",
+      "name": "task",
+      "toolKind": "task",
+      "title": "Task: Watch the CI run",
+      "status": "completed",
+      "input": {
+        "agent": "explore",
+        "task": "Watch the CI run",
+        "solutionSpace": "Read-only; report the verdict"
+      },
+      "output": "CiWatch: running in the background"
+    }
+  },
+  {
+    "type": "item.started",
+    "item": {
+      "kind": "message",
+      "id": "turn_1_text_0_4",
+      "role": "assistant",
+      "text": ""
+    }
+  },
+  {
+    "type": "item.delta",
+    "itemId": "turn_1_text_0_4",
+    "field": "text",
+    "delta": "Survey complete; the test draft was aborted."
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "message",
+      "id": "turn_1_text_0_4",
+      "role": "assistant",
+      "text": "Survey complete; the test draft was aborted."
+    }
+  },
+  {
+    "type": "usage.updated",
+    "usage": {
+      "input": 3000,
+      "output": 70,
+      "total": 4070,
+      "cacheRead": 1000,
+      "cacheWrite": 0
+    },
+    "costUsd": 0.012
+  },
+  {
+    "type": "turn.completed",
+    "turnId": "turn_1",
+    "stopReason": "end_turn",
+    "usage": {
+      "input": 3000,
+      "output": 70,
+      "total": 4070,
+      "cacheRead": 1000,
+      "cacheWrite": 0
+    },
+    "costUsd": 0.012
+  }
+]

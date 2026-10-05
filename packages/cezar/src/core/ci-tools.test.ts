@@ -64,6 +64,7 @@ describe('CI tool injection', () => {
         const rows = readFileSync(file, 'utf8').trim().split('\n').map(line => JSON.parse(line));
         if (backend === 'claude') expect(rows[0]).toContain('--mcp-config');
         if (backend === 'pi') expect(rows[0].filter((item: string) => item === '--extension')).toHaveLength(2);
+        if (backend === 'omp') expect(rows[0].filter((item: string) => item === '--extension')).toHaveLength(1);
         if (backend === 'codex') {
           const config = rows.find(row => row.method === (resume ? 'thread/resume' : 'thread/start')).params.config;
           expect(config['features.multi_agent']).toBe(false);

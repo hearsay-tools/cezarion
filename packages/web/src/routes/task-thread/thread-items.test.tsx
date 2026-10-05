@@ -38,6 +38,9 @@ describe('ProviderAuthRequiredCard', () => {
     ['claude', 'Claude Code'],
     ['codex', 'Codex'],
     ['opencode', 'OpenCode'],
+    ['pi', 'pi'],
+    ['cursor', 'Cursor'],
+    ['omp', 'OMP'],
   ] as const)('renders accessible fixed recovery guidance for %s', (provider, label) => {
     render(
       <MemoryRouter initialEntries={['/p/acme/tasks/r1']}>
