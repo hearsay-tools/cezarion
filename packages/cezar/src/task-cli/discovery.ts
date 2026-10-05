@@ -6,11 +6,12 @@ import { fetchJson, TaskCliError, type Cockpit } from './http.ts';
 
 /**
  * Which cockpit serves this checkout (#504, spec 2026-09-24-cez-task-cli). Zero config: probe the
- * range `pickPort` can land on and match the registry's project roots against this repo. Never
- * starts a server and never writes anything — a missing cockpit is an answer, not a fallback.
+ * historical auto-port range (also covering deliberately selected ports) and match the
+ * registry's project roots against this repo. Never starts a server and never writes anything
+ * — a missing cockpit is an answer, not a fallback.
  */
 
-/** The ports `cez` can bind: 4321 plus the 49 `pickPort` tries after it. */
+/** Retain discovery of older auto-port cockpits and explicitly selected nearby ports. */
 export const COCKPIT_PORTS: readonly number[] = Array.from({ length: 50 }, (_, index) => 4321 + index);
 const PROBE_TIMEOUT_MS = 1_500;
 

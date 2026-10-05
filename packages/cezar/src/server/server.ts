@@ -29,14 +29,14 @@ import {
   isScheduleAutomation,
   type AutomationDefinition,
 } from '../automations/types.ts';
-import type { IncomingMessage } from 'node:http';
+import type { IncomingMessage, Server } from 'node:http';
 import { access, constants as fsConstants, mkdir, readFile, realpath, stat, unlink, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Hono, type Context } from 'hono';
 import type { Next } from 'hono';
-import { serve, type ServerType } from '@hono/node-server';
+import { getRequestListener, serve, type ServerType } from '@hono/node-server';
 import { bodyLimit } from 'hono/body-limit';
 import { streamSSE } from 'hono/streaming';
 import { jsonZodValidator, paramZodValidator, queryZodValidator } from './validators.ts';
@@ -6230,7 +6230,7 @@ function taskWebhookHost(bindHost: string | undefined): string {
 const NO_WEBHOOK_ERROR =
   'this project has no task webhook — set one in Settings → General → Task webhook, or start without notify';
 
-export function startServer(deps: ServerDeps, port: number): ServerType & { shutdownForRestart: () => Promise<void> } {
+export function startServer(deps: ServerDeps, port: number, listener?: Server): ServerType & { shutdownForRestart: () => Promise<void> } {
   const workspaceEvents = deps.workspaceEvents ?? new WorkspaceEventBus();
   const skillsUpdate = deps.skillsUpdate ?? new SkillsUpdateService({ invalidateCatalog: refreshTeamSkills });
   // The subscription hub rides the same HTTP server (one port, zero config):
@@ -6279,8 +6279,8 @@ export function startServer(deps: ServerDeps, port: number): ServerType & { shut
   // same-origin-trusted (only /api/health is CORS-open); binding to a non-loopback host would
   // expose an agent-executing box to the network. `bindHost` exists only for a deliberate
   // hosted/VPS deployment (which also flips CEZ_REMOTE to gate the local-handoff endpoints) —
-  // src/index.ts never passes it, so the loopback guarantee holds for the normal CLI.
-  const server = serve({
+  // The CLI passes it only when explicitly requested; normal startup stays on loopback.
+  const serverOptions: Parameters<typeof serve>[0] = {
     fetch: async (request, env) => {
       const result = await app.fetch(request, env);
       if (request.method === 'POST' && new URL(request.url).pathname === '/api/v1/workspace/application-update/restart'
@@ -6304,7 +6304,14 @@ export function startServer(deps: ServerDeps, port: number): ServerType & { shut
     },
     port,
     hostname: deps.bindHost ?? '127.0.0.1',
-  });
+  };
+  // The CLI already owns this listener before recovery. Replace its temporary 503
+  // handler without closing/rebinding; direct server callers retain normal startup.
+  if (listener) {
+    listener.removeAllListeners('request');
+    listener.on('request', getRequestListener(serverOptions.fetch, { hostname: serverOptions.hostname }));
+  }
+  const server = listener ?? serve(serverOptions);
   const coordinator = new SkillsUpdateCoordinator(skillsUpdate, async () =>
     effectiveSkillsAutoUpdate(await loadWorkspaceConfig()));
   // EVERY registered project, remote or not: a schedule needs none. `github` is present only for
@@ -6403,7 +6410,7 @@ export function startServer(deps: ServerDeps, port: number): ServerType & { shut
       }
     }
   });
-  server.once('listening', () => {
+  const startBackgroundServices = () => {
     void listProjects().then((projects) => {
       const all = projects.some((project) => project.root === deps.repoRoot)
         ? projects : [{ id: deps.bootProjectId ?? 'default', root: deps.repoRoot, status: 'ok' as const }, ...projects];
@@ -6425,7 +6432,9 @@ export function startServer(deps: ServerDeps, port: number): ServerType & { shut
         brakeIdleAutomations(project.id, automationStore);
       })).then(() => automationScheduler.start()).catch(() => undefined);
     }).catch(() => undefined);
-  });
+  };
+  if (server.listening) startBackgroundServices();
+  else server.once('listening', startBackgroundServices);
   // The boot store's preview leftovers and run deletions; lazy projects arm theirs at build.
   armPreview(deps.store, join(deps.repoRoot, '.ai/cezar'), deps.previewHost);
   const previewSocket = createPreviewSocket({

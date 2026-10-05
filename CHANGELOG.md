@@ -1,5 +1,9 @@
 # Unreleased
 
+## Breaking changes
+
+- `cez serve` refuses an occupied requested port instead of silently starting on the next port (hearsay-tools/cezarion#722). Rejection happens before task recovery or background startup. Open the existing cockpit, stop the occupant, select `--port <free-port>` for another cockpit, or use `--port 0` for an ephemeral listener. Free default/explicit ports, directory ownership, bind-host and application-update exact restart behavior remain supported. Release this intentional CLI behavior change in the next minor version.
+
 ## Fixed
 
 - Recover structured questions missing only closing brackets, with a persistent warning to check options and selection count; preserve fork monitoring and Claude wakeups (#88).

@@ -162,10 +162,15 @@ npx cezarion               # start the cockpit for the current repo
 #   or: npx @wjarka/cezarion
 ```
 
-The cockpit opens at `http://localhost:4321` (auto-picks the next free port if
-busy). If another cockpit already serves this repository, the command prints its
-URL and exits with an error. Different repositories can run side by side; after
-a cockpit exits or crashes, its repository can start again without cleanup.
+The cockpit opens at `http://localhost:4321`. If the requested port is occupied,
+startup exits with an actionable error before recovering tasks. Automatic port
+bounce has been removed (hearsay-tools/cezarion#722): open the existing cockpit,
+stop the process using that port, or choose `cez --port <free-port>` deliberately.
+Use `cez --port 0` to ask the OS for an ephemeral port. If another cockpit already
+serves this repository, the command prints its URL and exits with an error,
+even with a different port. Different repositories can run side by side on
+explicitly different ports; after a cockpit exits or crashes, its repository
+can start again without cleanup.
 Type a task, pick a workflow, hit **Start**. That's it.
 
 ```bash
