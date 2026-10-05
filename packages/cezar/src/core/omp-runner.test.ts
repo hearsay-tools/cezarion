@@ -42,6 +42,22 @@ describe('ompTools', () => {
     }
   });
 
+  it('never maps an inherited Object.prototype name', () => {
+    expect(ompTools(['constructor', 'toString', 'valueOf', 'Read'], {})).toEqual({
+      flag: 'tools',
+      tools: ['read'],
+      dropped: ['constructor', 'toString', 'valueOf'],
+    });
+    expect(ompTools(['constructor'], {})).toEqual({ flag: 'no-tools', tools: [], dropped: ['constructor'] });
+  });
+
+  it('exclude only removes names, and an empty remainder is --no-tools (R13)', () => {
+    expect(ompTools(['Read', 'TodoWrite', 'lsp'], { exclude: ['todo', 'lsp'] })).toMatchObject({ flag: 'tools', tools: ['read'] });
+    expect(ompTools(['TodoWrite'], { exclude: ['todo'] })).toMatchObject({ flag: 'no-tools', tools: [] });
+    expect(ompTools(['Read'], { exclude: ['todo'] })).toMatchObject({ flag: 'tools', tools: ['read'] });
+    expect(ompTools(undefined, { exclude: ['todo'] })).toEqual({ flag: null, tools: [], dropped: [] });
+  });
+
   it('undefined passes no flag, [] passes --no-tools, all-dropped passes --no-tools', () => {
     expect(ompTools(undefined, {}).flag).toBeNull();
     expect(ompTools([], {}).flag).toBe('no-tools');
@@ -123,6 +139,9 @@ describe('OMP_SPEC_SUPPORT', () => {
     for (const support of Object.values(OMP_SPEC_SUPPORT)) expect(support.honored).toBe(true);
     expect(OMP_SPEC_SUPPORT.additionalDirectories).toEqual({ honored: true, via: '--add-dir per directory' });
     expect(OMP_SPEC_SUPPORT.restrictNativeDelegation).toMatchObject({ via: expect.stringContaining('eval') });
+    // R14: D1 with no allowedTools names a list, so it never widens to OMP's defaults.
+    expect(OMP_SPEC_SUPPORT.restrictNativeDelegation).toMatchObject({ via: expect.stringContaining('allowedTools undefined') });
+    expect(OMP_SPEC_SUPPORT.restrictNativeDelegation).toMatchObject({ via: expect.stringContaining('failing closed') });
   });
 });
 
@@ -307,6 +326,30 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
     expect(ui).toContainEqual(expect.objectContaining({ type: 'turn.completed', stopReason: 'error' }));
   });
 
+  it('a prompt_result error with no turn open is still a v1 note, as in v2', async () => {
+    const bin = join(cwd, 'mock-omp-idle-error.mjs');
+    writeFileSync(bin, `#!/usr/bin/env node
+import readline from 'node:readline';
+const send = (value) => process.stdout.write(JSON.stringify(value) + '\\n');
+send({ type: 'ready', protocolVersion: 1 });
+readline.createInterface({ input: process.stdin }).on('line', (line) => {
+  const command = JSON.parse(line);
+  if (command.type === 'get_state') send({ id: command.id, type: 'response', command: 'get_state', success: true, data: { sessionId: 'idle' } });
+  if (command.type !== 'prompt') return;
+  send({ id: command.id, type: 'response', command: 'prompt', success: true });
+  send({ type: 'agent_start' });
+  send({ type: 'prompt_result', id: command.id, agentInvoked: true, status: 'completed', sessionSettled: true });
+  send({ type: 'session_settled' });
+  send({ type: 'prompt_result', id: 'cezar-prompt-late', agentInvoked: false, status: 'error', error: { message: 'steer lost the race' } });
+});
+`, { mode: 0o755 });
+    const { events, ui } = await runSession(spec('idle error'), undefined, bin);
+    expect(turnEnds(events)).toBe(1);
+    expect(events).toContainEqual({ type: 'note', message: expect.stringContaining('steer lost the race') });
+    expect(events.filter(event => event.type === 'error')).toEqual([]);
+    expect(ui).toContainEqual(expect.objectContaining({ type: 'session.error', message: expect.stringContaining('steer lost the race') }));
+  });
+
   it('the turn-opening prompt rejected before admission is a v1 error and the turn-end (R10)', async () => {
     const { events, ui } = await runSession(spec('mock:prompt-rejected'));
     expect(events.filter(event => event.type === 'error')).toEqual([
@@ -431,9 +474,72 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
     const failed = new OmpRunner({ bin: MOCK }).run(spec('x', { allowedTools: ['Read', 'mcp__not_a_tool'] }), event => events.push(event));
     await expect(failed).rejects.toThrow('omp CLI exited with code 2 — Error: Unknown tool in --tools: mcp__not_a_tool.');
     expect(events).toContainEqual({ type: 'note', message: expect.stringContaining('omp CLI stderr:\nError: Unknown tool in --tools: mcp__not_a_tool.') });
-    // A gated built-in is the same startup failure (R1).
-    await expect(new OmpRunner({ bin: MOCK }).run(spec('x', { allowedTools: ['find'] })))
-      .rejects.toThrow('Error: Built-in tools unavailable in this session: find.');
+  });
+
+  /** A bin that exits 2 with OMP's gated-tool text; `names` is one entry per invocation. */
+  const gatedBin = (names: string[]): string => {
+    const bin = join(cwd, 'gated-omp.mjs');
+    writeFileSync(bin, `#!/usr/bin/env node
+import { appendFileSync, readFileSync, existsSync } from 'node:fs';
+const countFile = ${JSON.stringify(join(cwd, 'invocations.ndjson'))};
+appendFileSync(countFile, JSON.stringify(process.argv.slice(2)) + '\\n');
+const n = readFileSync(countFile, 'utf8').split('\\n').filter(Boolean).length;
+const names = ${JSON.stringify(names)};
+const name = names[Math.min(n, names.length) - 1];
+process.stderr.write('Error: Built-in tool unavailable in this session: ' + name + '.\\n');
+process.exit(2);
+`, { mode: 0o755 });
+    return bin;
+  };
+  const invocations = (): string[][] => lines('invocations.ndjson') as unknown as string[][];
+
+  describe('tools disabled by the user\'s OMP settings (R13)', () => {
+    it.each([
+      ['one tool', ['Read', 'TodoWrite'], 'todo', ['--tools', 'read,todo'], ['--tools', 'read'], 'todo'],
+      ['two tools', ['Read', 'TodoWrite', 'lsp'], 'todo,lsp', ['--tools', 'read,todo,lsp'], ['--tools', 'read'], 'todo, lsp'],
+      ['every tool', ['TodoWrite'], 'todo', ['--tools', 'todo'], ['--no-tools'], 'todo'],
+    ])('respawns once without the names OMP refused: %s', async (_label, allowedTools, disabled, first, second, named) => {
+      const { events, ui, result } = await runSession(spec('inspect the working tree', {
+        allowedTools,
+        env: { CEZ_MOCK_OMP_DISABLED_TOOLS: disabled },
+      }));
+      const argvs = lines('args.ndjson') as unknown as string[][];
+      expect(argvs).toHaveLength(2);
+      expect(argvs[0]?.slice(-2)).toEqual(first);
+      expect(argvs[1]?.slice(-second.length)).toEqual(second);
+      expect(events.filter(event => event.type === 'note' && event.message.includes('tools disabled by your OMP settings'))).toEqual([
+        { type: 'note', message: `omp: tools disabled by your OMP settings were dropped: ${named}` },
+      ]);
+      expect(events.filter(event => event.type === 'error')).toEqual([]);
+      expect(events.some(event => event.type === 'note' && event.message.includes('omp CLI stderr'))).toBe(false);
+      expect(turnEnds(events)).toBe(1);
+      expect(events.at(-1)).toEqual({ type: 'done' });
+      expect(result.text).toBe('Investigating: inspect the working tree');
+      // The refused spawn leaves nothing in v2: one turn, as if the first spawn never happened.
+      expect(ui.filter(event => event.type === 'turn.started')).toHaveLength(1);
+      expect(ui.filter(event => event.type === 'turn.completed')).toHaveLength(1);
+      expect(lines('commands.ndjson').filter(command => command.type === 'prompt')).toHaveLength(1);
+    });
+
+    it('a second refusal is surfaced as today, never a third spawn', async () => {
+      const events: AgentEvent[] = [];
+      const failed = new OmpRunner({ bin: gatedBin(['todo', 'read']) })
+        .run(spec('x', { allowedTools: ['Read', 'TodoWrite'] }), event => events.push(event));
+      await expect(failed).rejects.toThrow('omp CLI exited with code 2 — Error: Built-in tool unavailable in this session: read.');
+      expect(invocations()).toHaveLength(2);
+      expect(invocations()[1]?.slice(-2)).toEqual(['--tools', 'read']);
+      expect(events.filter(event => event.type === 'error')).toHaveLength(1);
+    });
+
+    it('never retries for a name it did not pass, or when no tool list was passed', async () => {
+      await expect(new OmpRunner({ bin: gatedBin(['find']) }).run(spec('x', { allowedTools: ['Read'] })))
+        .rejects.toThrow('Error: Built-in tool unavailable in this session: find.');
+      expect(invocations()).toHaveLength(1);
+      rmSync(join(cwd, 'invocations.ndjson'));
+      await expect(new OmpRunner({ bin: gatedBin(['todo']) }).run(spec('x', { allowedTools: undefined })))
+        .rejects.toThrow('Error: Built-in tool unavailable in this session: todo.');
+      expect(invocations()).toHaveLength(1);
+    });
   });
 
   it('an unauthenticated omp surfaces its no-models reason, not the setup hints after it', async () => {
