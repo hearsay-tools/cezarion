@@ -181,6 +181,7 @@ import {
 import { PROFILE_CAPABLE_PROVIDERS, profileEnv, supportsProfiles } from '../core/agent-profiles.ts';
 import { quoteExecutable, withEnvPrefix } from '../core/shell-env.ts';
 import { resolveCursorExecutable } from '../core/cursor-model-catalog.ts';
+import { resolveOmpExecutable } from '../core/omp-model-catalog.ts';
 import {
   allocateProjectSlug,
   listProjects,
@@ -1995,7 +1996,7 @@ export function createApp(deps: ServerDeps) {
       },
     )
 
-    .post('/providers/connect', jsonZodValidator(providerConnectSchema, { message: 'provider must be claude, codex, opencode, pi, or cursor' }), async (c) => {
+    .post('/providers/connect', jsonZodValidator(providerConnectSchema, { message: 'provider must be claude, codex, opencode, pi, cursor, or omp' }), async (c) => {
       const body = { data: c.req.valid('json') };
 
       const provider = body.data.provider as ProviderId;
@@ -3265,6 +3266,7 @@ export function createApp(deps: ServerDeps) {
             codex: z.string().trim().min(1).max(200).nullable().optional(),
             opencode: z.string().trim().min(1).max(200).nullable().optional(),
             pi: z.string().trim().min(1).max(200).nullable().optional(),
+            omp: z.string().trim().min(1).max(200).nullable().optional(),
             cursor: z.string().trim().min(1).max(200).nullable().optional(),
           })
           .optional(),
@@ -3846,7 +3848,8 @@ export function createApp(deps: ServerDeps) {
     const sessionStep = [...run.steps].reverse().find(step => step.sessionId);
     const sessionId = sessionStep?.sessionId;
     const backend = sessionStep?.backend ?? run.runner ?? 'claude';
-    const command = backend === 'cursor' && sessionId ? resumeCommand(backend, sessionId) : null;
+    // Runners whose take-over command depends on a server-side binary override (CEZ_*_BIN).
+    const command = (backend === 'cursor' || backend === 'omp') && sessionId ? resumeCommand(backend, sessionId) : null;
     return { ...run, ...(usage ? { usage } : {}), ...(command ? { cliResumeCommand: command } : {}),
       ...(finishBlocked !== undefined ? { finishBlocked } : {}) };
   };
@@ -4495,8 +4498,13 @@ export function createApp(deps: ServerDeps) {
         // An id resumeCommand refuses (#431) degrades to a fresh CLI in the worktree,
         // exactly like a run that never recorded a session.
         const resume = sessionId && cliRunner === (sessionStep?.backend ?? run.runner ?? 'claude') ? resumeCommand(cliRunner, sessionId) : null;
-        const command = resume ?? (cliRunner === 'cursor' ? quoteExecutable(resolveCursorExecutable(), process.platform) : cliRunner);
-        if (command === null) return c.json({ error: 'the configured Cursor executable cannot be used in a terminal command' }, 409);
+        // Runners with a CEZ_*_BIN override launch the configured binary, not the PATH name.
+        const command = resume ?? (cliRunner === 'cursor'
+          ? quoteExecutable(resolveCursorExecutable(), process.platform)
+          : cliRunner === 'omp' ? quoteExecutable(resolveOmpExecutable(), process.platform) : cliRunner);
+        if (command === null) {
+          return c.json({ error: `the configured ${cliRunner === 'omp' ? 'OMP' : 'Cursor'} executable cannot be used in a terminal command` }, 409);
+        }
         // BOTH branches carry the account (spec 2026-07-29-agent-profiles): a resume needs the
         // config dir that holds its session, and a FRESH CLI in this worktree should still open
         // on the account the project works under — otherwise "Open in → Claude CLI" quietly
@@ -5949,6 +5957,7 @@ export function createApp(deps: ServerDeps) {
         codex: modelPresetSchema,
         opencode: modelPresetSchema,
         pi: modelPresetSchema,
+        omp: modelPresetSchema,
         cursor: modelPresetSchema,
       })
       .optional(),
@@ -6633,6 +6642,11 @@ export function resumeCommand(runner: string | undefined, sessionId: string): st
     }
     case 'pi':
       return `pi --session ${sessionId}`;
+    case 'omp': {
+      // CEZ_OMP_BIN may name a different install than `omp` on PATH; resume with the configured one.
+      const executable = quoteExecutable(resolveOmpExecutable(), process.platform);
+      return executable === null ? null : `${executable} --resume ${sessionId}`;
+    }
     default:
       return `claude --resume ${sessionId}`;
   }

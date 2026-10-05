@@ -80,7 +80,9 @@ async function keepWorktreeLock(): Promise<void> {
       if (claim) ticket = Math.max(ticket, claim.ticket + 1);
     }
     await write(ticket);
-    const deadline = Date.now() + 120_000;
+    const waitMs = Number(process.argv[3] ?? 120_000);
+    if (!Number.isSafeInteger(waitMs) || waitMs < 0 || waitMs > 120_000) throw new Error('invalid worktree mutation wait budget');
+    const deadline = Date.now() + waitMs;
     for (;;) {
       if (stopping) return;
       let blocked = false;
@@ -90,7 +92,10 @@ async function keepWorktreeLock(): Promise<void> {
         if (claim && (claim.ticket === 0 || claim.ticket < ticket || (claim.ticket === ticket && entry < name))) { blocked = true; break; }
       }
       if (!blocked) break;
-      if (Date.now() >= deadline) throw new Error('timed out waiting for worktree mutation lock');
+      if (Date.now() >= deadline) {
+        send({ kind: 'error', code: 'lock_timeout', error: 'timed out waiting for worktree mutation lock' });
+        return; // finally withdraws ONLY this queued claim; no mutation was admitted
+      }
       await wait();
     }
     process.on('message', (message: { kind: string; id: number; cwd: string; args: string[]; timeout?: number; input?: string }) => {

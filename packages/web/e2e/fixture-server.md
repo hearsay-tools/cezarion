@@ -83,10 +83,14 @@ Issue #810 adds `sidebar-limits.e2e.ts`: one CLI construction with port 0,
 owned listener readiness within the original 15 s health budget, and awaited
 shutdown before fixture removal. The guard now pins 48 starts across 41 specs.
 
+The OMP sub-agent case in `agents-dock.e2e.ts` (#595) adds a second CLI construction to an
+existing spec: port 0, owned listener readiness, awaited shutdown before fixture removal.
+The guard now pins 49 starts across 41 specs.
+
 hearsay-tools/cezarion#845 adds `sidebar-ellipsis-click.e2e.ts`: one CLI
 construction with port 0, owned listener readiness within the original 15 s
 health budget, and awaited shutdown before fixture removal. The guard now pins
-49 starts across 42 specs.
+50 starts across 42 specs.
 
 ## Other server classes audited
 
@@ -100,7 +104,7 @@ health budget, and awaited shutdown before fixture removal. The guard now pins
   zero-config repo-identity discovery rather than a requested health endpoint.
   Application-update tests use their own IPC actual-listener acknowledgement with
   exact-restart identity checks, or packaged mock servers with fixed explicit binds.
-  They are distinct from the 49 cockpit-spec CLI preference/health constructions.
+  They are distinct from the 50 cockpit-spec CLI preference/health constructions.
 - In-process Hono/server tests use their returned listener or app and do not spawn
   an adaptive CLI port. Browser mock API fixtures do not spawn this CLI.
 

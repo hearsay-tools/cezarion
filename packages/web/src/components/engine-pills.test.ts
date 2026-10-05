@@ -277,7 +277,7 @@ describe('engineBody', () => {
     expect(engineBody(resolved({ effort: 'max', modelsLocked: true })).effort).toBeUndefined()
   })
 
-  it.each<Runner>(['claude', 'codex', 'opencode', 'pi'])(
+  it.each<Runner>(['claude', 'codex', 'opencode', 'pi', 'cursor', 'omp'])(
     'is symmetric for %s as the host default',
     (runner) => {
       expect(engineBody(resolved({ runner, defaultRunner: runner })).runner).toBeUndefined()

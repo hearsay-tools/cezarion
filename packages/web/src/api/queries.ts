@@ -360,7 +360,8 @@ export function useRunnerModelCatalogs(
   const opencode = useRunnerModels('opencode', enabled)
   const pi = useRunnerModels('pi', enabled)
   const cursor = useRunnerModels('cursor', enabled)
-  return { claude, codex, opencode, pi, cursor }
+  const omp = useRunnerModels('omp', enabled)
+  return { claude, codex, opencode, pi, cursor, omp }
 }
 
 export function useProviderStatus() {

@@ -535,6 +535,8 @@ const CONTROL_CRITERIA = [
   // workflows/worker-reboot-parity.test.ts and worker-location-evidence.test.ts: native exit/Continue,
   // independent reboot proof, legacy location uncertainty, real holders, cleanup retries and parent Finish.
   { id: 'R43', scenario: 'baseline' },
+  // workflows/worker-restart-parity.test.ts: same-boot abandonment, mixed-holder polling and bounded cleanup locks.
+  { id: 'R47', scenario: 'baseline' },
 ] as const;
 
 /**
@@ -1425,6 +1427,7 @@ describe('harness parity — the matrix itself', () => {
       opencode: ['question.asked'],
       pi: ['CEZ:ASK'],
       cursor: ['cursor/ask_question', 'cursor/create_plan'],
+      omp: ['CEZ:ASK'],
     };
     for (const backend of RUNNER_IDS) {
       const cases = HARNESS_ADAPTERS[backend]?.askResumeCases;
@@ -1529,6 +1532,16 @@ describe('harness parity — D1 governed native delegation', () => {
             const { config: _config, ...rest } = controlled.params;
             expect(rest).toEqual(normal.params);
             expect(normal.params).not.toHaveProperty('config');
+          } else if (backend === 'omp') {
+            // A static `--config` overlay denies `task`; the tool list was already narrowed by
+            // the bash allowlist, so nothing else in the argv moves.
+            const args = restricted![0] as string[];
+            const index = args.indexOf('--config');
+            expect(index).toBeGreaterThanOrEqual(0);
+            expect(args[index + 1]).toMatch(/omp-restrict-delegation\.yml$/);
+            expect(args.filter((_, i) => i !== index && i !== index + 1)).toEqual(ordinary![0]);
+            expect(ordinary![0]).not.toContain('--config');
+            // The `task` strip from the default tool list is proven in omp-runner.test.ts (D1).
           } else if (backend === 'cursor') {
             const normal = ordinary!.find(row => row.method === 'initialize');
             const controlled = restricted!.find(row => row.method === 'initialize');
@@ -2039,11 +2052,13 @@ describe('harness parity — monitoring wrap-up contract (#399)', () => {
   };
   const records = (path: string): (Wire | string[])[] => existsSync(path)
     ? readFileSync(path, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line)) : [];
+  // These wires record each user message on the stdin hook and the system prompt in argv.
+  const stdinWire = (backend: RunnerId) => backend === 'claude' || backend === 'pi' || backend === 'omp';
   const messages = (backend: RunnerId, dir: string): string[] => {
-    const channel = backend === 'claude' || backend === 'pi' ? 'stdin' : 'args';
+    const channel = stdinWire(backend) ? 'stdin' : 'args';
     return records(join(dir, channel)).flatMap(row => {
       if (Array.isArray(row)) return [];
-      if (backend === 'claude' || backend === 'pi') return row.userText === undefined ? [] : [row.userText];
+      if (stdinWire(backend)) return row.userText === undefined ? [] : [row.userText];
       const parts = backend === 'codex' && row.method === 'turn/start' ? row.params?.input
         : backend === 'cursor' && row.method === 'session/prompt' ? row.params?.prompt
         : backend === 'opencode' && /\/(message|prompt_async)$/.test(row.url ?? '') ? row.body?.parts : undefined;
@@ -2051,7 +2066,7 @@ describe('harness parity — monitoring wrap-up contract (#399)', () => {
     });
   };
   const systemPrompt = (backend: RunnerId, dir: string): string => {
-    if (backend !== 'claude' && backend !== 'pi') return messages(backend, dir)[0] ?? '';
+    if (!stdinWire(backend)) return messages(backend, dir)[0] ?? '';
     const argv = records(join(dir, 'args')).find(Array.isArray) ?? [];
     const index = argv.indexOf('--append-system-prompt');
     expect(index).toBeGreaterThanOrEqual(0);

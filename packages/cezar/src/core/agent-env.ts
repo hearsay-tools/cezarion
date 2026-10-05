@@ -230,6 +230,12 @@ const BACKEND_ALLOW_PREFIXES: Record<AgentBackend, readonly string[]> = {
   // granting it here handed pi the whole `AWS_*` / `GOOGLE_CLOUD_*` family on any host that had
   // set `CLAUDE_CODE_USE_BEDROCK=1` for Claude Code, plus Claude's own config dir.
   pi: ['PI_', ...MULTI_PROVIDER_PREFIXES],
+  // OMP (Oh My Pi) is pi's fork and selects models the same `provider/model` way, so it gets the
+  // same multi-provider set. Not `CLAUDE_`, for pi's reason above. `OMP_` is its own config and
+  // `PI_` is kept because OMP still reads `PI_CODING_AGENT_DIR` / `PI_CONFIG_DIR`
+  // (OMP v18.4.11; `can1357/oh-my-pi` `docs/environment-variables.md` at main @ 7318a70cf4ed).
+  // The reverse does not hold: pi gets no `OMP_`.
+  omp: ['OMP_', 'PI_', ...MULTI_PROVIDER_PREFIXES],
 };
 
 /** `gh` handoff (draft PRs) works in every backend — the one credential the

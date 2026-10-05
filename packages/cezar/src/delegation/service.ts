@@ -614,6 +614,7 @@ export class DelegationService {
         const taken = project.manager.takeWorkerTerminationBlocker(workerId);
         const reason = taken && (taken.blocker.kind === 'unreadable' ? 'worker process record is unreadable; termination cannot be proven'
           : taken.blocker.kind === 'controller' ? `the worker is still controlled by a live cezar (pid ${taken.blocker.pid})`
+          : taken.blocker.candidates?.length ? `process cwd is unreadable (pids ${taken.blocker.candidates.join(', ')}); holder membership is unverified; resources retained`
           : `${taken.blocker.pids.length === 1 ? 'process' : 'processes'} ${taken.blocker.pids.join(', ')} still ${taken.blocker.pids.length === 1 ? 'holds' : 'hold'} the worker's worktree or scratch`);
         if (taken?.changed) project.store.appendEvent(workerId, { type: 'lifecycle', message: `destroy blocked: ${reason}` });
         result = { workerId, state: 'incomplete', remaining: ['process', ...resources], error: !taken ? 'Worker termination is not proven; retry cleanup later'

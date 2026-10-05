@@ -1,0 +1,20 @@
+{"id":"cezar-prompt-1","type":"response","command":"prompt","success":true}
+{"type":"agent_start"}
+{"type":"turn_start"}
+{"type":"message_start","messageId":"msg-1","message":{"role":"assistant","content":[],"timestamp":1791151800000}}
+{"type":"message_end","messageId":"msg-1","message":{"role":"assistant","content":[],"api":"anthropic-messages","provider":"anthropic","model":"claude-opus-5-5","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0.0}},"stopReason":"error","timestamp":1791151800000,"errorMessage":"529 overloaded_error: Overloaded"}}
+{"type":"turn_end"}
+{"type":"agent_end","messages":[],"isTerminal":false,"yielded":false}
+{"type":"auto_retry_start","attempt":1,"maxAttempts":3,"delayMs":2000,"errorMessage":"529 overloaded_error: Overloaded"}
+{"type":"agent_start"}
+{"type":"turn_start"}
+{"type":"message_start","messageId":"msg-2","message":{"role":"assistant","content":[],"timestamp":1791151802000}}
+{"type":"message_update","messageId":"msg-2","message":{"role":"assistant"},"assistantMessageEvent":{"type":"text_start","contentIndex":0}}
+{"type":"message_update","messageId":"msg-2","message":{"role":"assistant"},"assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"Recovered after a retry."}}
+{"type":"message_update","messageId":"msg-2","message":{"role":"assistant"},"assistantMessageEvent":{"type":"text_end","contentIndex":0,"content":"Recovered after a retry."}}
+{"type":"message_end","messageId":"msg-2","message":{"role":"assistant","content":[{"type":"text","text":"Recovered after a retry."}],"api":"anthropic-messages","provider":"anthropic","model":"claude-opus-5-5","usage":{"input":800,"output":25,"cacheRead":0,"cacheWrite":0,"totalTokens":825,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0.003}},"stopReason":"stop","timestamp":1791151800000}}
+{"type":"auto_retry_end","success":true,"attempt":1}
+{"type":"turn_end"}
+{"type":"agent_end","messages":[],"isTerminal":true,"yielded":true}
+{"type":"prompt_result","id":"cezar-prompt-1","agentInvoked":true,"status":"completed","sessionSettled":true}
+{"type":"session_settled"}

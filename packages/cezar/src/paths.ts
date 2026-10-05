@@ -152,7 +152,7 @@ export function serverLockPath(instance: string = DEFAULT_SERVER_INSTANCE): stri
  * vendors document: `$CLAUDE_CONFIG_DIR` relocates Claude Code's home;
  * `$CODEX_HOME` relocates Codex's; `$XDG_CONFIG_HOME` relocates OpenCode's config
  * dir (falling back to `~/.config`); `$PI_CODING_AGENT_DIR` relocates Pi's agent dir
- * (default `~/.pi/agent`). Read per call so tests and ops can set env live.
+ * (default `~/.pi/agent`); OMP shares that variable (default `~/.omp/agent`). Read per call so tests and ops can set env live.
  *
  * These are the DEFAULT profile's dirs. A second login of the same CLI is an
  * agent profile (`src/core/agent-profiles.ts`) and resolves through
@@ -170,6 +170,10 @@ export function agentHomePaths(env: NodeJS.ProcessEnv = process.env): AgentHomeP
     cursor: env.CURSOR_CONFIG_DIR?.trim()
       || ((process.platform === 'linux' || process.platform === 'freebsd') && env.XDG_CONFIG_HOME?.trim()
         ? join(env.XDG_CONFIG_HOME.trim(), 'cursor') : join(home, '.cursor')),
+    // OMP (Oh My Pi) reads Pi's `PI_CODING_AGENT_DIR`; otherwise `~/<PI_CONFIG_DIR or .omp>/agent`
+    // (OMP v18.4.11, `can1357/oh-my-pi` `docs/environment-variables.md` and `docs/config-usage.md`,
+    // main @ 7318a70cf4ed).
+    omp: env.PI_CODING_AGENT_DIR?.trim() || join(home, env.PI_CONFIG_DIR?.trim() || '.omp', 'agent'),
   };
 }
 

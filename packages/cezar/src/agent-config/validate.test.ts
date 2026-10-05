@@ -51,6 +51,17 @@ describe('validateConfig', () => {
     expect(validateConfig('key = = 1', 'toml').ok).toBe(false);
   });
 
+  it('validates yaml and reports the parse error', () => {
+    expect(validateConfig('tools:\n  approvalMode: yolo\n', 'yaml')).toEqual({ ok: true });
+    expect(validateConfig('# comments are fine\nretry:\n  enabled: true\n', 'yaml').ok).toBe(true);
+    expect(validateConfig('   \n', 'yaml').ok).toBe(true);
+    const bad = validateConfig('tools: [unclosed', 'yaml');
+    expect(bad.ok).toBe(false);
+    expect(bad.error).toBeTruthy();
+    // duplicate keys are a parse error in the `yaml` library, and would be in OMP's loader too
+    expect(validateConfig('a: 1\na: 2\n', 'yaml').ok).toBe(false);
+  });
+
   it('plain json comments are rejected under strict json but ok under jsonc', () => {
     expect(validateConfig('{"a":1} // c', 'json').ok).toBe(false);
     expect(validateConfig('{"a":1} // c', 'jsonc').ok).toBe(true);

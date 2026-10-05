@@ -75,7 +75,7 @@ export const OPERATIONS: Record<string, Operation> = {
       'request-id': { type: 'string', help: '<UUID>     Retry-safe id; reuse it when retrying this start.' },
       workflow: { type: 'string', help: '<name>       Workflow (default quick-task).' },
       skill: { type: 'string', help: '<name>          Run one discovered skill instead of a workflow.' },
-      backend: { type: 'string', help: '<id>          claude | codex | opencode | pi | cursor.' },
+      backend: { type: 'string', help: '<id>          claude | codex | opencode | pi | cursor | omp.' },
       model: { type: 'string', help: '<model>         Model override.' },
       effort: { type: 'string', help: '<level>       Reasoning effort.' },
       autonomous: { type: 'boolean', help: '         Never park for input; run to completion.' },

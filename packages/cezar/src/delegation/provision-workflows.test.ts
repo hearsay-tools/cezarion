@@ -585,7 +585,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     await until(() => store.getRun(a.child.workerId)?.status === 'failed' || sessions.length > 1);
     expect(store.getRun(a.child.workerId)?.error).toContain('identity is unavailable'); expect(sessions).toHaveLength(1);
   });
-  it.each(['codex', 'opencode', 'pi'] as const)('pins supported homes while preserving %s profile limits', async runner => {
+  it.each(['codex', 'opencode', 'pi', 'omp'] as const)('pins supported homes while preserving %s profile limits', async runner => {
     const home = join(f.root, 'provider-home'); mkdirSync(home);
     const profile = runner === 'codex' ? 'work' : 'default';
     if (runner === 'codex') await mergeWriteAgentAccounts(store => { store.accounts = [{ id: profile, provider: runner, configDir: home, label: '', addedAt: '' }]; });

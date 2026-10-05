@@ -10,7 +10,8 @@
  * cover one — a named row fails here.
  *
  * `BACKENDS` lists every backend that owns a wire mapper. Pi uses its documented
- * RPC protocol and therefore has its own wire-faithful fixture set.
+ * RPC protocol and therefore has its own wire-faithful fixture set; so does OMP, whose RPC
+ * extends Pi's with its own turn boundary and sub-agent frames.
  *
  * This file is one of TWO parity matrices, and they split by axis: this one asks
  * what a mapper EMITS, over the golden fixtures. Its sibling
@@ -27,7 +28,7 @@ import { describe, expect, it } from 'vitest';
 import type { UiEvent, UiItem } from './ui-events.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const BACKENDS = ['claude', 'codex', 'opencode', 'pi', 'cursor'] as const;
+const BACKENDS = ['claude', 'codex', 'opencode', 'pi', 'cursor', 'omp'] as const;
 
 /** Every event across every golden fixture of one backend. */
 function fixtureEvents(backend: (typeof BACKENDS)[number]): UiEvent[] {
@@ -122,9 +123,10 @@ describe('protocol v2 backend parity (every mapper emits every matrix capability
 
   // Sub-agent NESTING rides on parentItemId where the wire attributes work
   // to its parent: claude `parent_tool_use_id` and opencode child-session
-  // parts under a `subtask`; Cursor capability-negotiated subagent sessions. Codex's wire has no parent attribution — its
-  // matrix cell is the review-mode task items asserted above.
-  for (const backend of ['claude', 'opencode', 'cursor'] as const) {
+  // parts under a `subtask`; Cursor capability-negotiated subagent sessions; OMP `subagent_event`
+  // frames under their `task` call (`subagent_lifecycle.parentToolCallId`). Codex's wire has no
+  // parent attribution — its matrix cell is the review-mode task items asserted above.
+  for (const backend of ['claude', 'opencode', 'cursor', 'omp'] as const) {
     it(`${backend} nests sub-agent work via parentItemId`, () => {
       expect(items(fixtureEvents(backend)).some((item) => item.parentItemId !== undefined)).toBe(true);
     });
