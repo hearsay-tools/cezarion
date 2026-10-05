@@ -1024,7 +1024,7 @@ selection after an earlier prose mention, and quoted ASK examples without a
 marker. Parsing and transcript stripping must select the same final line;
 ordinary examples leave no question card or rejection note.
 
-Monitoring turn rows **M1–M17** (hearsay-tools/cezarion#772) live in
+Monitoring turn rows **M1–M23** (hearsay-tools/cezarion#772) live in
 `workflows/monitoring-turn.test.ts` and `workflows/worker-parent-attention.test.ts`
 and enter the shared parity guard. Every `RUNNER_IDS` adapter carries multiple
 parent assistant text segments through its native wire on fresh and Continue sessions.
@@ -1046,7 +1046,14 @@ the gate across restart and holds later worker input until a successful human
 answer. M9/M10 hold later worker input across delayed ACKs as well, then deliver
 it with the human answer. M17 pins the fresh path's genuine accepted-wait
 session-failure protection. Prose gates use a durable note plus the existing exact delivery receipt;
-they do not manufacture a structured question card. The native rows
+they do not manufacture a structured question card. M18 retains a real ASK
+card across a routine acknowledgement, idle close and delivered answer; M19
+retains DONE through an acknowledgement and reaches review. M20 excludes
+quoted/fenced/indented/example ASK and DONE declarations. M21 retains later
+DONE precedence over an earlier portable ASK; M22 retains the latest malformed
+ASK diagnostic and raw fallback. M23 keeps autonomous portable overrides on
+both turn-end paths. Active ASK lines use the existing payload parser unchanged.
+The native rows
 also assert CLI attention-wait and webhook projections. Cockpit grouping and
 notification transitions remain consumers of the same contract attention rule.
 M9/M10 extend owned-input ACK coverage with explicit human gates and live workers;

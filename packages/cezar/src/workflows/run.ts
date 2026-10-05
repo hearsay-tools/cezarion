@@ -123,31 +123,34 @@ async function configuredModelProvider(
 /** An interactive session that hears nothing from the user closes itself. */
 export const IDLE_TIMEOUT_MS = 15 * 60_000;
 /**
- * Task-completion marker from the agent contract (HANDOFF_INSTRUCTIONS): a
- * turn whose text ends with `CEZ:DONE` means "goal achieved, nothing to ask" —
+ * Task-completion marker from the agent contract (HANDOFF_INSTRUCTIONS):
+ * an active `CEZ:DONE` declaration means "goal achieved, nothing to ask" —
  * the session is closed right away instead of parking at `waiting` (#347).
  * Detection runs on the accumulated turn text so delta-streaming backends
  * (codex, opencode) can't split the marker across text events.
  */
-const DONE_MARKER_RE = /CEZ:DONE\s*$/;
 const PROSE_HUMAN_GATE = 'unstructured-human-gate';
 /** Classify only active prose: quoted/indented examples and fenced code cannot
  * declare a park or request a human. A standalone monitoring line belongs to
  * this turn even when a later assistant block acknowledges a new instruction. */
-function turnParkSignals(text: string): { monitoring: boolean; humanGate: boolean } {
+function turnParkSignals(text: string): { monitoring: boolean; humanGate: boolean; done: boolean; askResult: AskMarkerParseResult } {
   let fence: { char: string; length: number } | undefined;
   let monitoring = false;
   let humanGate = false;
+  let done = false;
+  let askResult: AskMarkerParseResult = { kind: 'none' };
   let previous = '';
   for (const raw of text.split('\n')) {
     const delimiter = raw.match(/^ {0,3}(`{3,}|~{3,})/);
     if (delimiter) {
+      previous = ''; // a fenced example consumes its heading, not the next declaration
       const token = delimiter[1]!;
       if (!fence) fence = { char: token[0]!, length: token.length };
       else if (token[0] === fence.char && token.length >= fence.length) fence = undefined;
       continue;
     }
-    if (fence || /^(?: {4}|\t|\s*>)/.test(raw)) continue;
+    if (fence) continue;
+    if (/^(?: {4}|\t|\s*>)/.test(raw)) { if (raw.trim()) previous = ''; continue; }
     // Lists and emphasis format active prose; they do not quote it. Exclude
     // fenced/indented/blockquote examples before removing their decoration.
     const line = raw.trim().replace(/^(?:[-+*]|\d+[.)])\s+(?:\[[ xX]\]\s+)?/, '')
@@ -157,7 +160,18 @@ function turnParkSignals(text: string): { monitoring: boolean; humanGate: boolea
     if (!example && raw.trim() === 'CEZ:MONITORING') {
       monitoring = true;
       humanGate = false; // a later declaration supersedes earlier, resolved prose
+      done = false;
     }
+    if (!example && raw.trim() === 'CEZ:DONE') {
+      done = true;
+      humanGate = false;
+      askResult = { kind: 'none' }; // retain the existing later-DONE precedence
+    }
+    // Preserve the existing payload validation/repair and latest malformed
+    // marker diagnostics. Only active declarations participate: an ACK after
+    // a real ASK must not erase its card, nor turn examples into questions.
+    const candidate = example ? { kind: 'none' as const } : parseAskMarkerResult(raw);
+    if (candidate.kind !== 'none') { askResult = candidate; done = false; }
     // Deliberately require a direct question/request, not words like "review",
     // "checks" or "approval" in progress reports (hearsay-tools/cezarion#772 and hearsay-tools/cezarion#609).
     const prose = line.replace(/`[^`]*`|"[^"]*"/g, '');
@@ -167,10 +181,10 @@ function turnParkSignals(text: string): { monitoring: boolean; humanGate: boolea
       /^(?:which|what) (?:module|option|approach|strategy|framework|library)\?\s*$/i.test(sentence) ||
       /^(?:is|are) (?:this|these|that|it)\b.*\b(?:ok(?:ay)?|acceptable|approved)\?\s*$/i.test(sentence) ||
       /^(?:please\s+(?:review|approve|confirm|choose|decide|answer|select|provide)\b|(?:I(?:['’]m| am)?\s+)?(?:need|awaiting|waiting for)\s+your\s+(?:review|approval|confirmation|answer|decision|input|permission)\b|(?:the )?PR (?:is )?ready for (?:your )?review\b)/i.test(sentence)
-    )) humanGate = true;
+    )) { humanGate = true; done = false; }
     previous = line;
   }
-  return { monitoring, humanGate };
+  return { monitoring, humanGate, done, askResult };
 }
 /** Claude's native scheduler is the backend-level equivalent of the textual
  * monitoring marker. Keep this recognition here, at the workflow boundary,
@@ -253,7 +267,7 @@ function askMarkerRecovery(result: AskMarkerParseResult): string | undefined {
     ? 'structured question recovered from an unbalanced CEZ:ASK payload — check the options, and how many you may pick, match what was asked'
     : undefined;
 }
-/** What a turn's trailing `CEZ:ASK` marker resolves to: the card to raise, and
+/** What a turn's active `CEZ:ASK` declaration resolves to: the card to raise, and
  * the notes to persist alongside it. */
 type AskTurnOutcome = {
   ask: AskRequest | null;
@@ -267,12 +281,11 @@ type AskTurnOutcome = {
  * exactly that kind of change. `enabled` is the caller's own precondition (the
  * session is open and the turn is not a terminating `CEZ:DONE`); when false
  * there is no marker to look for. Intermediate steps can ask too (#427). */
-function resolveAskTurn(turnText: string, completedAssistantText: string, enabled: boolean): AskTurnOutcome {
+function resolveAskTurn(v1Result: AskMarkerParseResult, v2Result: AskMarkerParseResult, enabled: boolean): AskTurnOutcome {
   if (!enabled) return { ask: null, notes: [] };
-  const v1Result = parseAskMarkerResult(turnText);
   // v1 is authoritative whenever it carries an ASK marker. Claude can omit
   // the trailing marker from v1 while v2 retains the complete message.
-  const result = v1Result.kind === 'none' ? parseAskMarkerResult(completedAssistantText) : v1Result;
+  const result = v1Result.kind === 'none' ? v2Result : v1Result;
   const notes: AskTurnOutcome['notes'] = [];
   const rejection = askMarkerRejection(result);
   if (rejection) notes.push({ message: rejection, tone: 'danger' });
@@ -287,10 +300,11 @@ function classifyTurnEnd(turnText: string, completedAssistantText: string, optio
   sessionOpen: boolean; interactive: boolean; pendingHumanAsk: boolean;
   completionAttention: boolean; scheduledWake: boolean; liveWorkers: boolean; dependencyWait: boolean;
 }): AskTurnOutcome & { done: boolean; monitoring: boolean; humanGate: boolean } {
-  const done = options.interactive && options.sessionOpen && DONE_MARKER_RE.test(turnText.trimEnd());
-  const askTurn = resolveAskTurn(turnText, completedAssistantText, options.sessionOpen && !done);
   const v1 = turnParkSignals(turnText);
   const v2 = turnParkSignals(completedAssistantText);
+  const done = options.interactive && options.sessionOpen && (v1.done || v2.done) &&
+    v1.askResult.kind === 'none' && v2.askResult.kind === 'none' && !v1.humanGate && !v2.humanGate;
+  const askTurn = resolveAskTurn(v1.askResult, v2.askResult, options.sessionOpen && !done);
   // Ordinary markerless autonomous turns keep their existing nudge policy.
   // Prose gates only override a quiet park this turn would otherwise enter.
   const quietPark = v1.monitoring || v2.monitoring || options.scheduledWake || options.liveWorkers || options.dependencyWait;
@@ -300,7 +314,7 @@ function classifyTurnEnd(turnText: string, completedAssistantText: string, optio
     (v1.monitoring || v2.monitoring || options.scheduledWake || options.liveWorkers);
   return { ...askTurn, done, monitoring, humanGate };
 }
-/** A trailing ASK marker — valid card or rejected payload — means the user
+/** An active ASK marker — valid card or rejected payload — means the user
  *  must answer. Drop follow-ups queued mid-turn so they cannot start a new
  *  turn the moment idle fires (OpenCode serializes `sendMessage` that way). */
 function discardQueuedMessagesOnAsk(session: AgentSession | undefined, outcome: AskTurnOutcome & { humanGate?: boolean }): void {

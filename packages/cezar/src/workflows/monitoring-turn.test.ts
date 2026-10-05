@@ -130,11 +130,45 @@ for (const backend of RUNNER_IDS) describe(`${backend} monitoring turn`, { timeo
           }
           expect(run().hasPendingHumanAsk).not.toBe(true);
           expect(run().monitoringWakeAt).toBeUndefined();
-        } else if (row.id === 'M4' || row.id === 'M7') {
-          await send([MONITORING_TEXT, ASK_TEXT]);
+        } else if (row.id === 'M22') {
+          const malformed = 'CEZ:ASK {"questions":[]}';
+          await send([ASK_TEXT, malformed]);
+          attention('needs you', true);
+          expect(run().hasPendingHumanAsk).not.toBe(true);
+          expect(run().invalidAsk).toBe(true);
+          expect(store.readEvents(p.id).filter(event => event.type === 'ask.requested')).toHaveLength(0);
+          expect(store.readEvents(p.id).some(event => event.type === 'note' && event.tone === 'danger' && String(event.message).includes('payload failed validation'))).toBe(true);
+          expect(store.readEvents(p.id).some(event => event.type === 'text' && String(event.text).includes(malformed))).toBe(true);
+        } else if (row.id === 'M20') {
+          for (const example of [`> ${ASK_TEXT}`, `\`\`\`text\n${ASK_TEXT}\nCEZ:DONE\n\`\`\``, `Example:\n${ASK_TEXT}`, 'Example:\nCEZ:DONE', `    ${ASK_TEXT}`, '    CEZ:DONE']) {
+            await send([MONITORING_TEXT, example, ACK_TEXT]);
+            attention('monitoring', false);
+            expect(run().hasPendingHumanAsk).not.toBe(true);
+            expect(store.readEvents(p.id).filter(event => event.type === 'ask.requested')).toHaveLength(0);
+          }
+          // Examples at the final line remain inert too.
+          for (const example of [`Example:\n${ASK_TEXT}`, 'Example:\nCEZ:DONE']) {
+            await send([MONITORING_TEXT, example]);
+            attention('monitoring', false);
+            expect(run().hasPendingHumanAsk).not.toBe(true);
+          }
+        } else if (row.id === 'M4' || row.id === 'M7' || row.id === 'M18') {
+          if (row.id === 'M18') {
+            for (const messages of [[MONITORING_TEXT, ASK_TEXT, ACK_TEXT], [MONITORING_TEXT, 'CEZ:DONE', ASK_TEXT, ACK_TEXT], [MONITORING_TEXT, ASK_TEXT, ACK_TEXT, MONITORING_TEXT],
+              [MONITORING_TEXT, `Example:\n\`\`\`text\n${ASK_TEXT}\n\`\`\``, ASK_TEXT, ACK_TEXT],
+              [MONITORING_TEXT, `Example:\n> ${ASK_TEXT}`, ASK_TEXT, ACK_TEXT],
+              [MONITORING_TEXT, `Example:\n    ${ASK_TEXT}`, ASK_TEXT, ACK_TEXT]]) {
+              await send(messages);
+              attention('needs you', true);
+              expect(run().hasPendingHumanAsk).toBe(true);
+              expect(store.readEvents(p.id).filter(event => event.type === 'ask.requested').at(-1)?.questions).toEqual(JSON.parse(ASK_TEXT.slice('CEZ:ASK '.length)).questions);
+              expect(store.readEvents(p.id).some(event => event.type === 'note' && event.code === 'unstructured-human-gate')).toBe(false);
+            }
+          } else await send([MONITORING_TEXT, ASK_TEXT]);
           attention('needs you', true);
           expect(run().hasPendingHumanAsk).toBe(true);
-          if (row.id === 'M7') {
+          if (row.id === 'M7' || row.id === 'M18') {
+            const askSeq = store.readEvents(p.id).filter(event => event.type === 'ask.requested').at(-1)!.seq;
             const timer = manager['active'].get(p.id)!.idleTimer! as NodeJS.Timeout & { _onTimeout(): void };
             const expire = timer._onTimeout; clearTimeout(timer); expire();
             await until(() => !manager.isActive(p.id));
@@ -145,15 +179,17 @@ for (const backend of RUNNER_IDS) describe(`${backend} monitoring turn`, { timeo
             attention('monitoring', false);
             expect(run().hasPendingHumanAsk).not.toBe(true);
             expect(store.readEvents(p.id).some(event => event.type === 'human-input-delivered')).toBe(true);
+            expect(store.readEvents(p.id).some(event => event.type === 'human-input-delivered' && event.askSeq === askSeq)).toBe(true);
           }
-        } else if (row.id === 'M5') {
+        } else if (row.id === 'M5' || row.id === 'M19' || row.id === 'M21') {
           process.env.CEZ_REVIEW_GATE = '1';
           const cwd = run().worktreePath!;
           expect(cwd).toBeDefined();
           writeFileSync(join(cwd, 'review.txt'), 'review this change');
           execFileSync('git', ['add', 'review.txt'], { cwd });
           execFileSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@local', 'commit', '-qm', 'review change'], { cwd });
-          await send([MONITORING_TEXT, 'Complete.\nCEZ:DONE']);
+          await send([MONITORING_TEXT, ...(row.id === 'M21' ? [ASK_TEXT] : []), 'Complete.\nCEZ:DONE', ...(row.id === 'M5' ? [] : [ACK_TEXT])]);
+          expect(run().status).toBe('review');
           await until(() => !manager.isActive(p.id));
           expect(run().status).toBe('review');
           attention('needs review', true);
@@ -206,6 +242,24 @@ for (const backend of RUNNER_IDS) describe(`${backend} monitoring turn`, { timeo
     await until(() => !manager.isActive(p.id));
     expect(store.getRun(p.id)).toMatchObject({ status: 'failed', error: 'step "task" failed: Agent session ended before its accepted worker wait completed' });
     expect(store.getRun(w.id)?.status).toBe('cancelled');
+  });
+
+  for (const mode of ['fresh', 'continuation'] as const) it(`${mode} M23 portable ASK followed by acknowledgement keeps the existing autonomous override`, async () => {
+    process.env.CEZ_DRY_RUN = '0';
+    process.env[HARNESS_ADAPTERS[backend].binEnv] = HARNESS_ADAPTERS[backend].mockBin;
+    const prompt = messagesPrompt(backend, [MONITORING_TEXT, ASK_TEXT, ACK_TEXT]);
+    const p = manager.startRun(QUICK_TASK_WORKFLOW, { task: mode === 'fresh' ? prompt : 'mock:hold', runner: backend, autonomous: mode === 'fresh' });
+    if (mode === 'continuation') {
+      await until(() => store.getRun(p.id)?.status === 'waiting');
+      expect(manager.finish(p.id)).toBe(true);
+      await until(() => !manager.isActive(p.id));
+      store.updateRun(p.id, { autonomous: true });
+      expect(manager.continueRun(p.id, { text: prompt }).ok).toBe(true);
+    }
+    await until(() => !manager.isActive(p.id));
+    expect(store.getRun(p.id)?.status).toBe('done');
+    expect(store.readEvents(p.id).some(event => event.type === 'note' && String(event.message).includes('question overridden'))).toBe(true);
+    expect(store.readEvents(p.id).filter(event => event.type === 'ask.requested' || event.type === 'human-input-delivered')).toHaveLength(0);
   });
 
 });

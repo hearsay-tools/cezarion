@@ -13,12 +13,18 @@ export const MONITORING_TURN_CRITERIA = [
   { id: 'M12', scenario: 'turn-messages', name: 'a resolved prose question before monitoring does not latch attention' },
   { id: 'M15', scenario: 'turn-messages', name: 'active Markdown human gates beat monitoring' },
   { id: 'M16', scenario: 'turn-messages', name: 'a prose gate retires its registered wait and survives idle, restart and late worker input' },
+  { id: 'M18', scenario: 'turn-messages', name: 'a structured ASK survives later acknowledgement with its card and answer lifecycle' },
+  { id: 'M19', scenario: 'turn-messages', name: 'a DONE declaration survives later acknowledgement and reaches review' },
+  { id: 'M20', scenario: 'turn-messages', name: 'quoted, fenced and example ASK and DONE declarations remain inert' },
+  { id: 'M21', scenario: 'turn-messages', name: 'a later DONE supersedes an earlier portable ASK before acknowledgement' },
+  { id: 'M22', scenario: 'turn-messages', name: 'a trailing malformed ASK keeps its diagnostic and raw fallback over an earlier valid ASK' },
   { id: 'M8', scenario: 'turn-messages', name: 'spent parent completion remains actionable' },
 ] as const;
 export const MONITORING_ORDER_CRITERIA = [
   { id: 'M13', scenario: 'turn-messages', name: 'fresh ordinary markerless prose questions keep autonomous nudges' },
   { id: 'M14', scenario: 'turn-messages', name: 'Continue ordinary markerless prose questions keep autonomous nudges' },
   { id: 'M17', scenario: 'turn-messages', name: 'fresh genuine accepted-wait session loss still fails' },
+  { id: 'M23', scenario: 'turn-messages', name: 'portable ASK followed by acknowledgement keeps the existing autonomous override' },
 ] as const;
 
 // Agent-echo follows a real owned-input ACK on each adapter's existing wire.
