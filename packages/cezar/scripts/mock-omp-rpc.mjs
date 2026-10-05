@@ -334,6 +334,18 @@ async function prompt(command) {
 
   respond(command);
   beginTurn(command);
+  if (message.includes('mock:turn-messages:')) {
+    const { turnMessages } = await import('./mock-turn-messages.mjs');
+    // Separate assistant messages within one native OMP turn; settle only after all of them.
+    for (const text of turnMessages(message)) assistantText([text]);
+    endTurn();
+    return;
+  }
+  if (message.includes('mock:agent-echo')) {
+    assistantText([message]);
+    endTurn();
+    return;
+  }
   if (message.includes('mock:autonomous') || message.startsWith('Continue working autonomously until the task is fully complete.')) {
     const { autonomousReply } = await import('./mock-autonomous.mjs');
     assistantText([autonomousReply(message)]);

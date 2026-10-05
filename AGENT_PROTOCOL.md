@@ -1164,7 +1164,7 @@ ASK lines use the existing payload parser unchanged.
 M29/M30 in `workflows/monitoring-channel-order.test.ts` retain ordering across
 partial channels on fresh/Continue. Native Codex completion refreshes and
 Codex/OpenCode omitted completion text exercise actual channel divergence;
-the native observer pins each capability. Claude/Pi/Cursor carry coupled
+the native observer pins each capability. Claude/Pi/OMP/Cursor carry coupled
 completion text; OpenCode also deduplicates refreshed completed parts. Those
 named executable wire controls assert equality rather than inject divergence.
 When one channel is an ordered expansion of the other, classify its raw text

@@ -10,6 +10,7 @@ export const CHANNEL_WIRES = {
   codex: { missing: true, refresh: true, reason: 'v1 buffers absent snapshots and deduplicates completed ids; v2 maps each snapshot' },
   opencode: { missing: true, refresh: false, reason: 'v1 buffers absent snapshots; both channels deduplicate completed parts' },
   pi: { missing: false, refresh: false, reason: 'text_end snapshot/delta fallback feeds both channels' },
+  omp: { missing: false, refresh: false, reason: 'text_end snapshot/delta fallback feeds both channels' },
   cursor: { missing: false, refresh: false, reason: 'v1 is emitted directly from completed v2 messages' },
 } as const satisfies Record<RunnerId, { missing: boolean; refresh: boolean; reason: string }>;
 

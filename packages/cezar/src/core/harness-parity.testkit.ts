@@ -364,6 +364,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     binEnv: 'CEZ_OMP_BIN',
     mockBin: OMP_MOCK,
     scenarios: {
+      'turn-messages': 'mock:turn-messages',
       'missing-binary': BASELINE_PROMPT,
       autonomous: 'mock:autonomous',
       'autonomous-cap': 'mock:autonomous-cap',
