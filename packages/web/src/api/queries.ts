@@ -1,3 +1,4 @@
+import type { UpdateChannel } from '@open-mercato/cezar-api-client'
 import { normalizeSidebarLimits, runnerModelCatalogResponseSchema } from '@open-mercato/cezar-api-client'
 import { toast } from '@/components/ui/toaster'
 import { useMutation, useQueries, useQuery, useQueryClient, type QueryClient, type MutateOptions } from '@tanstack/react-query'
@@ -64,6 +65,11 @@ import {
   getWorkspaceConfig,
   getWorkspaceUiState,
   getSkillsUpdate,
+  getSelfUpdate,
+  getSelfUpdateDevelopment,
+  refreshSelfUpdate,
+  setSelfUpdateChannel,
+  applySelfUpdate,
   checkSkillsUpdate,
   applySkillsUpdate,
   getWorktrees,
@@ -277,6 +283,9 @@ export const workspaceQueryKeys = {
   agentAccountStatus: (routeId: string) =>
     ['workspace', 'agent-profiles', 'status', routeId] as const,
   skillsUpdate: (projectId: string) => ['workspace', 'skills-update', projectId] as const,
+  /** cezar's own updater via `GET /api/v1/workspace/self-update` (self-update PoC). */
+  selfUpdate: ['workspace', 'self-update'] as const,
+  selfUpdateDevelopment: ['workspace', 'self-update', 'development'] as const,
   /** One directory listing from `GET /api/fs/browse` (step 4.2's folder picker). Keyed by the
    *  browsed path — `null` is the browse root, whose absolute location only the server knows.
    *  Not scope-led: there is one filesystem behind the workspace, not one per project. */
@@ -1379,6 +1388,61 @@ export function useApplySkillsUpdate(projectId: string) {
   const queryClient = useQueryClient()
   const key = workspaceQueryKeys.skillsUpdate(projectId)
   return useMutation({ mutationFn: () => applySkillsUpdate(projectId), onSuccess: (state) => queryClient.setQueryData(key, state) })
+}
+
+/** cezar's own update state (self-update PoC). Polls fast while an install job runs so the
+ *  dialog's log follows npm, and sits idle otherwise — the health chip carries the "update
+ *  available" signal on its own. `enabled` gates the fetch to the open dialog. */
+export function useSelfUpdate(enabled = true) {
+  return useQuery({
+    queryKey: workspaceQueryKeys.selfUpdate,
+    queryFn: ({ signal }) => getSelfUpdate({ signal }),
+    enabled,
+    refetchInterval: (query) => (query.state.data?.job?.status === 'running' ? 1_000 : false),
+  })
+}
+
+/** The development channel's worktrees and PR builds — fetched only while that channel's
+ *  panel is on screen (a git call per worktree plus a GitHub round trip). */
+export function useSelfUpdateDevelopment(enabled = true) {
+  return useQuery({
+    queryKey: workspaceQueryKeys.selfUpdateDevelopment,
+    queryFn: ({ signal }) => getSelfUpdateDevelopment({ signal }),
+    enabled,
+    staleTime: 30_000,
+  })
+}
+
+export function useRefreshSelfUpdateDevelopment() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () => getSelfUpdateDevelopment({ refresh: true }),
+    onSuccess: (state) => queryClient.setQueryData(workspaceQueryKeys.selfUpdateDevelopment, state),
+  })
+}
+
+export function useRefreshSelfUpdate() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () => refreshSelfUpdate(),
+    onSuccess: (state) => queryClient.setQueryData(workspaceQueryKeys.selfUpdate, state),
+  })
+}
+
+export function useSetSelfUpdateChannel() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (channel: UpdateChannel) => setSelfUpdateChannel(channel),
+    onSuccess: (state) => queryClient.setQueryData(workspaceQueryKeys.selfUpdate, state),
+  })
+}
+
+export function useApplySelfUpdate() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (version: string) => applySelfUpdate(version),
+    onSuccess: (state) => queryClient.setQueryData(workspaceQueryKeys.selfUpdate, state),
+  })
 }
 
 /** Rename a run (#389): `PATCH /api/runs/:id`. Invalidates `runs.*` so the list and the detail

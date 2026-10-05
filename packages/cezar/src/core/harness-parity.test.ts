@@ -19,7 +19,7 @@
  * above the seam.
  */
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdtempSync, mkdirSync, realpathSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, realpathSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { agentInputEventSchema, type AgentInput } from '@open-mercato/cezar-contract';
@@ -488,6 +488,7 @@ const RUN_CRITERIA: readonly RunCriterion[] = [
 /** Criteria driven through `whileOpen` rather than one settled observation. */
 const CONTROL_CRITERIA = [
   { id: 'D1', scenario: 'baseline' },
+  { id: 'S21', scenario: 'baseline' },
   { id: 'S5', scenario: 'baseline' },
   { id: 'S6', scenario: 'baseline' },
   { id: 'S11', scenario: 'ask' },
@@ -2151,4 +2152,28 @@ describe('harness parity — monitoring wrap-up contract (#399)', () => {
         });
     }, 60_000);
   }
+});
+
+
+describe('desktop process trampoline — S21 native wire parity', () => {
+  for (const backend of RUNNER_IDS) it(backend + ' S21 keeps the native session working through desktop launch', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cez-desktop-parity-'));
+    const trampoline = join(dir, 'desktop');
+    const marker = join(dir, 'called');
+    // macOS execs this shim in place; other platforms exercise the intentional bypass.
+    writeFileSync(trampoline, '#!/bin/sh\n[ "$1" = "--cez-disclaim-exec" ] || exit 91\nshift\nprintf called > ' + "'" + marker.replaceAll("'", "'\"'\"'") + "'" + '\nexec "$@"\n');
+    chmodSync(trampoline, 0o755);
+    const previous = process.env.CEZ_DISCLAIM_EXEC;
+    process.env.CEZ_DISCLAIM_EXEC = trampoline;
+    try {
+      const result = await driveSeam(backend, 'baseline');
+      expect(result.failure).toBeUndefined();
+      expect(result.v1.some(event => event.type === 'turn-end')).toBe(true);
+      expect(existsSync(marker)).toBe(process.platform === 'darwin');
+    } finally {
+      if (previous === undefined) delete process.env.CEZ_DISCLAIM_EXEC;
+      else process.env.CEZ_DISCLAIM_EXEC = previous;
+      rmSync(dir, {recursive:true, force:true});
+    }
+  }, 45_000);
 });

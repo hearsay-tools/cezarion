@@ -900,6 +900,9 @@ pipe deadline; an opening HTTP rejection keeps its note and failure reason, whil
 a concurrent process crash supplies the authoritative error. Codex startup crash
 errors retain their phase context alongside the terminal stderr exception.
 
+**S21** starts every adapter through the desktop privacy trampoline on macOS and
+checks the native turn completes; other platforms assert that the trampoline is bypassed.
+
 **S20** exercises missing executables through every adapter's binary setting.
 There is no child process or backend wire on ENOENT, so it uses the OS spawn
 boundary and preserves each runner's existing event/rejected-result failure

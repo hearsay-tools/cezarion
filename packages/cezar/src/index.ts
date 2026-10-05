@@ -34,6 +34,11 @@ import {
   providersRequiredByWorkflow,
   unavailableProviderMessage,
 } from './server/provider-action-gate.ts';
+import { SelfUpdateService } from './self-update/service.ts';
+import { isSupervised, restartProcess } from './self-update/restart.ts';
+import { runSelfUpdateCommand } from './self-update/cli.ts';
+import { watchSupervisor } from './self-update/supervisor.ts';
+import { resolveCapabilities } from './server/capabilities.ts';
 import { checkForUpdate } from './update-check.ts';
 import { printSkillsBanner } from './skills-banner.ts';
 import { loadWorkspaceConfig } from './workspace/config.ts';
@@ -65,6 +70,9 @@ Usage:
   cez server-install        interactive wizard to host cezar on a server
   cez server-deploy         redeploy a new version (reload the service) + verify
   cez server-uninstall      reverse a server-install
+  cez install | update      manage the desktop installation under ~/.cezar/versions
+  cez versions | use <id>   list or switch managed versions
+  cez link [dir] [--use]    link a built development checkout (unlink <id> removes it)
 
 Options:
   -p, --port <n>              cockpit port (default 4321; server-install: this
@@ -96,6 +104,16 @@ Skills live in .ai/skills/, .ai/cezar/skills/ and your team skills repo
 workflows in .ai/cezar/workflows/.`;
 
 async function main(): Promise<void> {
+  const managedCommand = process.argv[2];
+  if (managedCommand && ['install', 'update', 'versions', 'use', 'link', 'unlink'].includes(managedCommand)) {
+    const { values, positionals } = parseArgs({ args: process.argv.slice(3), allowPositionals: true,
+      options: { channel: { type: 'string' }, version: { type: 'string' }, use: { type: 'boolean' }, 'no-modify-path': { type: 'boolean' } } });
+    process.exitCode = await runSelfUpdateCommand(managedCommand, positionals, {
+      service: new SelfUpdateService({ pkgName: readOwnName(), version: readOwnVersion(), entry: resolve(process.argv[1] ?? ''), restart: () => {} }),
+      channel: values.channel, version: values.version, use: values.use, modifyPath: !values['no-modify-path'],
+    });
+    return;
+  }
   if (process.argv[2] === 'discover') {
     const { runDiscoverCommand } = await import('./discovery/cli.ts');
     process.exitCode = await runDiscoverCommand(process.argv.slice(3), process.env);
@@ -341,6 +359,12 @@ async function serveCommand(
   const npmPrefix = npm?.prefix;
   const npmCache = npm?.cache;
   let server: ReturnType<typeof startServer>;
+  const selfUpdate = new SelfUpdateService({
+    pkgName, version, entry: resolve(process.argv[1] ?? ''), supervised: isSupervised(),
+    activeRuns: () => store.listRuns().filter(r => ['queued', 'waiting', 'running'].includes(r.status)).length,
+    trimPaths: () => !resolveCapabilities(process.env, bindHost).localHandoff,
+    restart: () => { const restartPort = restartEndpoint(server.address()).port; void server.shutdownForRestart().then(() => restartProcess({ server: null, args: process.argv.slice(2), port: restartPort, supervised: isSupervised() })); },
+  });
   const applicationUpdate = (npmPrefix && npmCache) || process.env.CEZ_DRY_RUN === '1'
     ? new ApplicationUpdateService({
       packageRoot: join(dirname(fileURLToPath(import.meta.url)), '..'),
@@ -360,6 +384,7 @@ async function serveCommand(
     version,
     update,
     applicationUpdate,
+    selfUpdate,
     bootProjectId,
     semaphore,
     bindHost,
@@ -405,6 +430,7 @@ async function serveCommand(
   };
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
+  watchSupervisor(shutdown);
 
   // Open the browser only once the server actually answers, so the first
   // paint is the cockpit and never a connection error.

@@ -1,4 +1,5 @@
-import { spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import type { ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawnAgent as nodeSpawn } from './disclaim-spawn.ts';
 import { parseEffort } from '@open-mercato/cezar-contract';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve as resolvePath } from 'node:path';

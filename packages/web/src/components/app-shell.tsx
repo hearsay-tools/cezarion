@@ -1,3 +1,4 @@
+import { DesktopControls, isDesktopShell } from './desktop-controls'
 import { ChevronDownIcon, FolderIcon, MenuIcon, PlusIcon, SearchIcon, ShieldCheckIcon } from '@/components/design-icons'
 
 import { ChevronLeftIcon } from 'lucide-react'
@@ -290,8 +291,10 @@ export function AppShell({
     // The Sheet root renders no DOM of its own — it is the context that lets the top bar's menu
     // button be a real SheetTrigger while the open state stays ours to close on navigation.
     <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
+      {isDesktopShell() ? <DesktopControls /> : null}
       <div
         data-slot="app-shell"
+        style={isDesktopShell() ? { paddingTop: 28 } : undefined}
         className="flex h-dvh overflow-hidden bg-background text-foreground pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]"
       >
         {/* Outside the resizable sidebar: SidebarResize only ever changes the aside's width. */}

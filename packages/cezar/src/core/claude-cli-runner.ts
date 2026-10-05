@@ -1,5 +1,6 @@
 import { summarizeRunnerStderr } from './runner-stderr.ts';
-import { execFileSync, spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { execFileSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawnAgent as nodeSpawn } from './disclaim-spawn.ts';
 import { randomUUID } from 'node:crypto';
 import { parseEffort } from '@open-mercato/cezar-contract';
 import { fileURLToPath } from 'node:url';
