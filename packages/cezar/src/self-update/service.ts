@@ -85,17 +85,19 @@ export class SelfUpdateService {
     return target && isNewer(target, this.deps.version) ? target : null;
   }
 
-  /** Read the status without waiting on the network: the cached document answers, and a stale
-   *  or missing one is refreshed behind the response. `refresh` forces a registry round trip. */
-  async status(opts: { refresh?: boolean } = {}): Promise<SelfUpdateStatus> {
+  /** Reuse a cached snapshot immediately, refreshing stale data in the background. A cold
+   *  read waits for the bounded initial registry request so the dialog receives its result. */
+  async status(opts: { refresh?: boolean; registryOnly?: boolean } = {}): Promise<SelfUpdateStatus> {
     let doc: PackageDocument | null;
     if (opts.refresh) doc = await this.registry.refresh();
     else {
       doc = this.registry.current();
-      void this.registry.get().catch(() => {});
+      if (!doc) doc = await this.registry.get();
+      else void this.registry.get().catch(() => {});
     }
     const channel = await this.channel();
-    const installed = listInstalled(this.env);
+    const registryOnly = opts.registryOnly || this.deps.trimPaths?.();
+    const installed = listInstalled(this.env).filter(entry => !registryOnly || entry.source === 'registry');
     const installedIds = new Set(installed.map((entry) => entry.id));
     const stable = doc?.distTags.latest ?? null;
     const nightly = doc?.distTags.nightly ?? null;
@@ -191,19 +193,21 @@ export class SelfUpdateService {
    * `<next-version>-nightly.<date>.<run>`, so every `0.13.0-nightly.*` outranks every later
    * `0.12.x` patch: a semver-only rule would let a hosted cockpit on 0.12.1 install a 0.13.0
    * nightly cut months earlier and restart into code that predates the guards this rule exists
-   * to protect. The registry's publish dates are the honest signal; when it cannot supply them
-   * (offline, or a version it does not list) the residual risk is a prerelease outranking a
-   * release, so that shape is refused outright.
+   * to protect. The target must be listed by the registry and may not resolve to a local or
+   * linked install. Publish dates order known releases; when dates are missing, a prerelease
+   * outranking a stable release is refused outright.
    *
    * Returns the refusal reason, or null when the target may be applied.
    */
   async forwardOnlyRefusal(target: string): Promise<string | null> {
     const running = this.deps.version;
-    const suffix = 'apply it on the host itself (`cezar use <id>`)';
+    const suffix = 'apply it on the host itself (`cez use <id>`)';
     if (!isNewer(target, running)) {
       return `a hosted cockpit can only update forward — ${target} is not newer than the running ${running}; ${suffix}`;
     }
     const doc = this.registry.current() ?? (await this.registry.get());
+    const sourceRefusal = this.registryTargetRefusal(target, doc);
+    if (sourceRefusal) return sourceRefusal;
     const publishedAt = (version: string) => doc?.versions.find((entry) => entry.version === version)?.publishedAt ?? null;
     const targetAt = publishedAt(target);
     const runningAt = publishedAt(running);
@@ -214,6 +218,15 @@ export class SelfUpdateService {
     }
     if (classifyVersion(target) !== 'stable' && classifyVersion(running) === 'stable') {
       return `a hosted cockpit can only update forward — ${target} is a prerelease and the registry gave no publish date to check it against; ${suffix}`;
+    }
+    return null;
+  }
+
+  private registryTargetRefusal(target: string, doc = this.registry.current()): string | null {
+    const installed = findInstalled(target, this.env);
+    if (!doc?.versions.some(entry => entry.version === target) ||
+        (installed && (installed.source !== 'registry' || installed.id !== target || installed.version !== target))) {
+      return 'Hosted updates require a published registry version; switch local builds on the host with `cez use <id>`.';
     }
     return null;
   }
@@ -245,10 +258,15 @@ export class SelfUpdateService {
    * id of a built cezar checkout `status()` lists — linked on the spot), activate it and restart.
    * Returns as soon as the job is started; progress is on `status()`.
    */
-  apply(target: string): SelfUpdateJob {
+  apply(target: string, opts: { registryOnly?: boolean } = {}): SelfUpdateJob {
     if (this.job?.status === 'running' || this.job?.status === 'restarting') throw new SelfUpdateBusyError();
     const { canSelfUpdate, reason } = this.capability();
     if (!canSelfUpdate) throw new Error(reason ?? 'self-update is not available for this install');
+    const registryOnly = opts.registryOnly || this.deps.trimPaths?.();
+    if (registryOnly) {
+      const refusal = this.registryTargetRefusal(target);
+      if (refusal) throw new Error(refusal);
+    }
     const job: SelfUpdateJob = { status: 'running', target, startedAt: new Date().toISOString(), finishedAt: null, log: [] };
     this.job = job;
     const log = (line: string) => {
@@ -259,7 +277,7 @@ export class SelfUpdateService {
       try {
         const installed = findInstalled(target, this.env);
         // A linked checkout goes through discovery too: it may need a rebuild before it runs.
-        const linked = !installed || installed.source === 'link' ? await this.linkDiscovered(target, log) : null;
+        const linked = !registryOnly && (!installed || installed.source === 'link') ? await this.linkDiscovered(target, log) : null;
         const id = linked ?? installed?.id ?? (await installFromRegistry(target, { onLog: log, env: this.env })).id;
         if (installed && !linked) log(`${id} is already installed`);
         activate(id, this.env);
@@ -282,8 +300,7 @@ export class SelfUpdateService {
   /** A checkout `status()` offers under `target`: build it when it is unbuilt or older than its
    *  last commit, link it and return its id. Null when no checkout answers to that id — the
    *  target is then an installed entry or a registry version. A hosted cockpit never builds or
-   *  links here (`trimPaths`); at most it activates a link the host itself created, and only one
-   *  `forwardOnlyRefusal` lets through. */
+   *  links here (`trimPaths`), and hosted apply also refuses already-installed local/link targets. */
   private async linkDiscovered(target: string, log: (line: string) => void): Promise<string | null> {
     if (this.deps.trimPaths?.()) return null;
     const checkout = (await discoverCheckouts(this.env)).find((entry) => entry.id === target);

@@ -5,6 +5,7 @@
  */
 
 import { resolve } from 'node:path';
+import { cezarHomeDir } from '../paths.ts';
 
 import { branchOf, cezarPackageRoot, discoverCheckouts } from './checkouts.ts';
 import { activate, activeId, findInstalled, linkCheckout, listInstalled, listLinks, removeInstalled } from './layout.ts';
@@ -44,26 +45,26 @@ export async function runSelfUpdateCommand(command: string, args: string[], opts
 
 async function installCommand(opts: SelfUpdateCliOptions): Promise<number> {
   const { service } = opts;
-  console.log(`\n  cez install — managed layout under ~/.cez (this build: ${service.installKind})\n`);
+  console.log(`\n  cez install — managed layout under ${cezarHomeDir()} (this build: ${service.installKind})\n`);
   try {
     const result = await service.installSelf((line) => console.log(`  · ${line}`));
     const dir = writeLaunchers();
     console.log(`\n  ✓ installed ${result.id} and made it current`);
     console.log(`  ✓ launchers: ${dir}/cezarion, ${dir}/cez`);
     if (isOnPath(dir)) {
-      console.log(`  ✓ ${dir} is already on PATH — run: cezar\n`);
+      console.log(`  ✓ ${dir} is already on PATH — run: cezarion\n`);
       return 0;
     }
     if (!opts.modifyPath) {
-      console.log(`\n  add this to your shell profile, then run \`cezar\`:\n\n    export PATH="${dir}:$PATH"\n`);
+      console.log(`\n  add this to your shell profile, then run \`cezarion\`:\n\n    export PATH="${dir}:$PATH"\n`);
       return 0;
     }
     const hook = ensurePathHook(dir);
     if (hook.file) {
       console.log(`  ${hook.alreadyPresent ? '✓' : '+'} PATH hook in ${hook.file}${hook.alreadyPresent ? ' (already there)' : ''}`);
-      console.log(`\n  open a new terminal (or: source ${hook.file}) and run: cezar\n`);
+      console.log(`\n  open a new terminal (or: source ${hook.file}) and run: cezarion\n`);
     } else {
-      console.log(`\n  add ${dir} to PATH, then run \`cezar\`:\n\n    ${hook.line}\n`);
+      console.log(`\n  add ${dir} to PATH, then run \`cezarion\`:\n\n    ${hook.line}\n`);
     }
     return 0;
   } catch (error) {
@@ -107,7 +108,7 @@ async function updateCommand(opts: SelfUpdateCliOptions): Promise<number> {
   }
   if (!status.canSelfUpdate) {
     // Not managed: install the target into the managed layout anyway, then explain the switch.
-    console.log(`  ${status.reason ?? ''}\n  installing ${target} into the managed layout so \`cezar\` can run it:\n`);
+    console.log(`  ${status.reason ?? ''}\n  installing ${target} into the managed layout so \`cezarion\` can run it:\n`);
   }
   try {
     const installed = findInstalled(target);

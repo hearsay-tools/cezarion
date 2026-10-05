@@ -3087,7 +3087,7 @@ export function createApp(deps: ServerDeps) {
   const managedUpdateStatus = async (opts?: { refresh?: boolean }) => {
     const stores = new Set([deps.store, ...contexts.ids().flatMap(id => { const ctx = contexts.peek(id); return ctx ? [ctx.store] : []; })]);
     const activeRuns = [...stores].reduce((count, store) => count + store.listRuns().filter(run => ['queued', 'waiting', 'running', 'monitoring'].includes(run.status)).length, 0);
-    return { ...await selfUpdate.status(opts), activeRuns };
+    return { ...await selfUpdate.status({ ...opts, registryOnly: !capabilities().localHandoff }), activeRuns };
   };
   const selfUpdateRoutes = new Hono()
     .get('/workspace/self-update', async (c) => c.json(await managedUpdateStatus()))
@@ -3122,7 +3122,7 @@ export function createApp(deps: ServerDeps) {
         if (refusal) return c.json({ error: refusal }, 409);
       }
       try {
-        selfUpdate.apply(target);
+        selfUpdate.apply(target, { registryOnly: !capabilities().localHandoff });
       } catch (error) {
         if (error instanceof SelfUpdateBusyError) return c.json({ error: error.message }, 409);
         return c.json({ error: error instanceof Error ? error.message : String(error) }, 409);
