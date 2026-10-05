@@ -1482,7 +1482,7 @@ describe('harness parity — D1 governed native delegation', () => {
             expect(args[index + 1]).toMatch(/omp-restrict-delegation\.yml$/);
             expect(args.filter((_, i) => i !== index && i !== index + 1)).toEqual(ordinary![0]);
             expect(ordinary![0]).not.toContain('--config');
-            expect(args[args.indexOf('--tools') + 1]?.split(',')).not.toContain('task');
+            // The `task` strip from the default tool list is proven in omp-runner.test.ts (D1).
           } else if (backend === 'cursor') {
             const normal = ordinary!.find(row => row.method === 'initialize');
             const controlled = restricted!.find(row => row.method === 'initialize');

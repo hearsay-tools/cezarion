@@ -443,7 +443,7 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
   },
   {
     criterion: 'A9', backend: 'omp', kind: 'capability-absent',
-    reason: 'OMP RPC uses the turn-end CEZ:ASK fallback: its `ask` tool is outside the v18.4.11 default registry (get_state.dumpTools) and asks through extension_ui_request, which cezar does not answer (R7), so no native mid-turn ask.requested reaches the run (A3/A4 cover the portable policy).',
+    reason: 'OMP v18.4.11 plain `--mode rpc` never constructs the ask tool: sessionOptions.hasUI is true only for interactive or rpc-ui (src/main.ts) and AskTool.createIf returns null without it, so the native ask path cannot exist on the wire cezar uses. The turn-end CEZ:ASK fallback applies (A3/A4 cover the portable policy).',
   },
   {
     criterion: 'R16', backend: 'claude', kind: 'capability-absent',
@@ -491,7 +491,7 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
   },
   {
     criterion: 'I2', backend: 'omp', kind: 'capability-absent',
-    reason: 'OMP v18.4.11 AgentSession rewrites agent_end to isTerminal:false while agent.hasQueuedMessages(), runs the queued steer before session_settled, and RpcPromptResults reports it only at the next terminal agent_end with an empty queue (agent-session.ts, rpc-prompt-results.ts in the release binary), so accepted input is never left unread.',
+    reason: 'OMP v18.4.11 session_settled requires queuedMessageCount === 0 (agent-session.ts), and agent_end is rewritten to isTerminal:false while agent.hasQueuedMessages(), so a steer accepted before settle is read in the same turn and accepted input is never left unread.',
   },
   {
     criterion: 'S4', backend: 'cursor', kind: 'capability-absent',

@@ -46,6 +46,7 @@ possible on the recording host (no OMP provider login), so no turn frame here is
 Text, paths, ids, tool arguments, outputs and usage numbers are synthetic; the hashline `input`
 strings are placeholders, not a claim about the hashline grammar. Specific choices:
 
+- The mock frames emitted after `session_settled` (used by the R15 regression) are constructed: real OMP settles only when `!hasPendingAsyncWork`, so the wire never sends them. They are kept as a stricter robustness test.
 - Session `message_update` frames use the delta projection the runner opts into
   (`{type, messageId, message: {role}, assistantMessageEvent}` with no `partial`); `subagent_event`
   payloads keep the full snapshot, as `rpc.md` says the projection does not apply to them.
