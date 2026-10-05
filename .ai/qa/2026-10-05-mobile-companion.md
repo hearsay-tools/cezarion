@@ -62,6 +62,19 @@ vertically if it covers a page control.
 
 ![Fullscreen iPhone sign-in with movable controls](assets/mobile-companion/ios-fullscreen.png)
 
+The signed fullscreen build at `2ffc2aca` was installed in place on the physical
+iPhone. Automatic launch was refused because the phone was locked; the operator
+can unlock it and open Cezarion. No uninstall or session reset was performed.
+
+Cloud run `37380998749` passed the iOS test step but exposed an Android fixture
+failure after system Back: the test's script-created history had no real user
+activation. The follow-up test now taps an actual page button, waits for completed
+loading and native history readiness, and reports a useful assertion if the web
+view disappears. All four Android instrumentation tests passed locally after this
+test-only correction. Cloud validation of the correction remains pending.
+Chromium documents the relevant history-skipping behavior in its
+[history manipulation intervention](https://chromium.googlesource.com/chromium/src/+/HEAD/docs/history_manipulation_intervention.md).
+
 ## Repository-wide gate
 
 All six required root commands were invoked in order against the uncommitted mobile
