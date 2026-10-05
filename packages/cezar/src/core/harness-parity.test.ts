@@ -494,6 +494,9 @@ const CONTROL_CRITERIA = [
   { id: 'S12', scenario: 'hold' },
   { id: 'S13', scenario: 'hold' },
   { id: 'S14', scenario: 'baseline' },
+  { id: 'R44', scenario: 'skill-warning' },
+  { id: 'R45', scenario: 'skill-warning' },
+  { id: 'R46', scenario: 'provider-error' },
   { id: 'R6', scenario: 'ask' },
   { id: 'R7', scenario: 'ask' },
   { id: 'R8', scenario: 'hold' },
@@ -641,6 +644,60 @@ describe('harness parity — input delivery (#505)', () => {
     for (const criterion of INPUT_CRITERIA) {
       parityRow(backend, criterion, () => observeInput(backend, criterion.scenario, `parity-${criterion.id}`));
     }
+  }
+});
+
+// #723: use the real RunManager on both event-handler construction paths.
+async function continueDiagnosticRun(backend: RunnerId, prompt: string): Promise<RunObservation> {
+  return driveRun(backend, 'baseline', record => record?.status === 'waiting', 30_000,
+    async ({ store, manager, runId }) => {
+      const internal = manager as unknown as { active: Map<string, { idleTimer?: NodeJS.Timeout }> };
+      const timer = internal.active.get(runId)?.idleTimer as NodeJS.Timeout & { _onTimeout(): void };
+      expect(timer).toBeDefined();
+      timer._onTimeout();
+      await waitFor(() => !manager.isActive(runId));
+      expect(manager.continueRun(runId, { text: prompt }).ok).toBe(true);
+      await waitFor(() => TERMINAL.includes(store.getRun(runId)?.status ?? ''), 30_000);
+    });
+}
+
+describe('harness parity — recoverable skill diagnostics (#723)', () => {
+  for (const backend of RUNNER_IDS) {
+    for (const continuation of [false, true]) {
+      const id = continuation ? 'R45' : 'R44';
+      parityRow<RunObservation>(backend, {
+        id, name: `${id} ${continuation ? 'continued' : 'fresh'} skill warnings preserve successful completion`, scenario: 'skill-warning',
+        assert: obs => {
+          expect(['review', 'done']).toContain(obs.record?.status);
+          expect(obs.record?.error).toBeFalsy();
+          expect(obs.events.filter(e => e.type === 'error')).toEqual([]);
+          for (const root of ['.claude', '.agents']) {
+            expect(obs.events).toContainEqual(expect.objectContaining({ type: 'note',
+              message: `opencode: optional skill skipped: Failed to parse skill /home/agent/${root}/skills/pen-design/SKILL.md. Check that the skill file and any symlink target are readable; repair or reinstall the skill.`,
+            }));
+          }
+          expect(obs.events.filter(e => e.type === 'turn.completed').every(e => e.stopReason === 'end_turn')).toBe(true);
+          expect(obs.events.some(e => e.type === 'turn.completed')).toBe(true);
+        },
+      }, () => continuation ? continueDiagnosticRun(backend, promptFor(backend, 'skill-warning'))
+        : driveRun(backend, 'skill-warning', record => TERMINAL.includes(record?.status ?? '')));
+    }
+    it(`${backend} R46 continued provider failures stay fatal and actionable`, async () => {
+      const obs = await continueDiagnosticRun(backend, promptFor(backend, 'provider-error'));
+      expect(obs.record?.status).toBe('failed');
+      expect(obs.record?.error?.trim()).toBeTruthy();
+      expect(obs.events).toContainEqual(expect.objectContaining({ type: 'error' }));
+    }, 45_000);
+  }
+  for (const continuation of [false, true]) for (const scenario of ['unscoped-provider-failure', 'scoped-skill-failure']) {
+    it(`opencode ${continuation ? 'continued' : 'fresh'} ${scenario} remains fatal`, async () => {
+      const prompt = `mock:${scenario}`;
+      const obs = continuation ? await continueDiagnosticRun('opencode', prompt)
+        : await driveRun('opencode', { prompt }, record => TERMINAL.includes(record?.status ?? ''));
+      expect(obs.record?.status).toBe('failed');
+      expect(obs.record?.error).toContain('provider');
+      expect(obs.record?.error).toContain(scenario === 'scoped-skill-failure' ? '/skills/required/SKILL.md' : 'restoring service');
+    }, 45_000);
   }
 });
 

@@ -1,3 +1,4 @@
+import { opencodeSkillWarning } from './opencode-session-error.ts';
 /**
  * Pure opencode SSE-bus → protocol-v2 mapper. `mapOpencodeEvent` folds one
  * parsed `{type, properties}` bus event into `UiEvent`s plus the next mapper
@@ -758,6 +759,8 @@ function mapIdle(props: Record<string, unknown>, state: OpencodeUiMapperState): 
 /** `session.error` → non-fatal `session.error` (the mapper can't know the
  *  session died — the runner owns fatality) + the turn closes as 'error'. */
 function mapSessionError(props: Record<string, unknown>, state: OpencodeUiMapperState): OpencodeUiMapping {
+  const warning = opencodeSkillWarning(props);
+  if (warning) return { events: [{ type: 'session.error', message: warning, fatal: false }], state };
   const sid = str(props.sessionID);
   const foreign = sid !== undefined && state.sessionId !== null && sid !== state.sessionId;
   const resolved = foreign && sid !== undefined ? resolveSubtask(sid, state) : undefined;
