@@ -15,6 +15,7 @@ import {
 import type { ArchiveFinishedScope, CiWait, ConversationState, AgentInput, InboxClaim, DelegationState, RunSummary, WorkerCollectedResult } from '@open-mercato/cezar-contract';
 import { storedDelegationStateSchema } from './delegation-state.ts';
 import { refreshHumanAskSummary } from './human-ask-summary.ts';
+import { HistoryCompressor } from './history-compressor.ts';
 import { hasPlainHistory, historyPaths, readHistoryText, removeHistory, restoreHistory } from './history-file.ts';
 import { workerExecutionIdentitySchema, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
 import { reconcileWorkerWait } from '../delegation/wait.ts';
@@ -1244,10 +1245,13 @@ export class RunStore extends EventEmitter {
   /** Rows whose `data` this store tried to decode and could not: left in the database untouched,
    *  and left out of the list rows from then on, as the cold reader leaves them out (run-index.ts). */
   private readonly unreadable = new Set<string>();
+  /** Background one-at-a-time compressor for archived transcripts (#818). */
+  private readonly compressor: HistoryCompressor;
 
   private constructor(private readonly dataDir: string) {
     super();
     this.setMaxListeners(100);
+    this.compressor = new HistoryCompressor(dataDir, (id) => this.isHistoryCompressEligible(id));
   }
 
   /**
@@ -2362,9 +2366,11 @@ export class RunStore extends EventEmitter {
       executionStartSeq: this.readEvents(id).reduce((seq, event) => Math.max(seq, event.seq), 0),
     });
     const staged = new Map<string, RunRecord>();
-    staged.set(id, { ...run, ...this.redactPatch(patch), delegation,
+    const next: RunRecord = { ...run, ...this.redactPatch(patch), delegation,
       ...(step ? { steps: [...run.steps, { ...step, status: 'pending' as const, iterations: 0, tokensUsed: 0 }] } : {}),
-    });
+    };
+    staged.set(id, next);
+    if (Object.prototype.hasOwnProperty.call(patch, 'archived')) this.syncTranscriptForm(id, next.archived);
     if (conversation) {
       const root = this.peek(conversation.rootId);
       if (root?.delegation?.role !== 'root' || run.delegation.parentRunId !== root.id) throw new Error('missing conversation ownership');
@@ -2609,9 +2615,17 @@ export class RunStore extends EventEmitter {
     if (normalized.status && ['running', 'waiting', 'queued'].includes(normalized.status)) {
       normalized.autoResumeAt = undefined;
     }
+    const archived = Object.prototype.hasOwnProperty.call(normalized, 'archived')
+      ? Boolean(normalized.archived)
+      : undefined;
+    if (archived !== undefined) {
+      delete normalized.archived;
+      delete normalized.archivedAt;
+    }
     Object.assign(run, this.redactPatch(normalized));
     if (normalized.task !== undefined) this.resolveEditedTaskRefs(run);
-    this.touch(run);
+    if (archived !== undefined) this.applyArchived(run, archived);
+    else this.touch(run);
     return run;
   }
 
@@ -2758,8 +2772,52 @@ export class RunStore extends EventEmitter {
       clearPendingAutoResume(run);
       clearPin(run);
     }
+    this.syncTranscriptForm(run.id, archived);
     this.touch(run);
     return changed;
+  }
+
+  /** Transcript form follows `archived`: enqueue compression, or restore the plain file now. */
+  private syncTranscriptForm(id: string, archived: boolean): void {
+    if (archived) this.compressor.enqueue(id);
+    else {
+      this.compressor.cancel(id);
+      restoreHistory(this.dataDir, id);
+    }
+  }
+
+  private isHistoryCompressEligible(id: string): boolean {
+    if (this.deleted.has(id)) return false;
+    try {
+      const run = this.held.get(id) ?? this.peek(id);
+      if (!run) return false;
+      return run.archived === true && !['queued', 'running', 'waiting'].includes(run.status);
+    } catch {
+      return false;
+    }
+  }
+
+  /** Startup sweep: enqueue every archived non-live run that still has a plain transcript. */
+  compressArchivedHistory(): void {
+    const ids = new Set<string>();
+    for (const key of this.db?.listKeysWhere('archived = 1 AND live = 0') ?? []) {
+      if (!this.deleted.has(key.id)) ids.add(key.id);
+    }
+    for (const run of this.held.values()) {
+      if (run.archived && !['queued', 'running', 'waiting'].includes(run.status) && !this.deleted.has(run.id)) {
+        ids.add(run.id);
+      }
+    }
+    for (const id of ids) {
+      const { plain, compressed } = historyPaths(this.dataDir, id);
+      if (existsSync(plain) && existsSync(compressed)) restoreHistory(this.dataDir, id);
+      if (hasPlainHistory(this.dataDir, id)) this.compressor.enqueue(id);
+    }
+  }
+
+  /** Resolves when the transcript compressor is idle (tests, shutdown). */
+  historyIdle(): Promise<void> {
+    return this.compressor.idle();
   }
 
   /** Pin one run to the top of this project's task list, or unpin it (#935). Mirrors
@@ -3810,6 +3868,7 @@ export class RunStore extends EventEmitter {
    * absent. It saves nothing more, and a durable commit on it throws.
    */
   close(): void {
+    this.compressor.stop();
     if (this.saveTimer) {
       clearTimeout(this.saveTimer);
       this.saveTimer = null;
