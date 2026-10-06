@@ -4596,7 +4596,13 @@ export class RunManager {
         this.monitoring.add(runId);
         this.clearIdleTimer(state);
         this.armMonitoringWakeTimer(runId, state);
-      } else if (!state.parkAfterAck.humanGate && !state.parkAfterAck.monitoring && state.parkAfterAck.silentTail && !state.parkAfterAck.alreadyFinalMessageNudged && state.currentStepId && this.tryFinalMessageNudge(runId, state, state.currentStepId)) {
+      } else if (state.currentStepId && this.maybeFinalMessageNudge(runId, state, state.currentStepId, {
+        ask: false,
+        humanGate: !!state.parkAfterAck.humanGate,
+        monitoring: !!state.parkAfterAck.monitoring,
+        silentTail: !!state.parkAfterAck.silentTail,
+        alreadyNudged: !!state.parkAfterAck.alreadyFinalMessageNudged,
+      })) {
         appendHandoffHeartbeat(this.dataDir, runId, 'turn complete — status=running (final message nudge)');
         return;
       } else {
@@ -5605,7 +5611,9 @@ export class RunManager {
         }
         if (sessionOpen && !agentInputDelivered && !workerWaitParked && !this.workerWakeAdmitted.has(runId)) {
           if (!ask && !humanGate) autoContinued = this.tryAutonomousNudge(runId, state, stepId, null);
-          if (!autoContinued && !ask && !humanGate && !monitoring && silentTail && !alreadyFinalMessageNudged) autoContinued = this.tryFinalMessageNudge(runId, state, stepId);
+          if (!autoContinued) autoContinued = this.maybeFinalMessageNudge(runId, state, stepId, {
+            ask: !!ask, humanGate, monitoring, silentTail, alreadyNudged: alreadyFinalMessageNudged,
+          });
           if (!autoContinued && state.autonomousNudgePending !== state.session) {
             // `CEZ:ASK` → park `waiting` (attention) AND surface the structured
             // question as an ask card (#473). `CEZ:MONITORING` or Claude's native
@@ -6521,7 +6529,9 @@ export class RunManager {
         }
         const waiting = (interactive || !!ask || humanGate) && sessionOpen && !agentInputDelivered && !workerWaitParked && !this.workerWakeAdmitted.has(runId);
         if (waiting && interactive && !ask && !humanGate) autoContinued = this.tryAutonomousNudge(runId, state, step.id, null);
-        if (waiting && interactive && !ask && !humanGate && !monitoring && silentTail && !alreadyFinalMessageNudged) autoContinued = this.tryFinalMessageNudge(runId, state, step.id);
+        if (waiting && interactive && !autoContinued) autoContinued = this.maybeFinalMessageNudge(runId, state, step.id, {
+          ask: !!ask, humanGate, monitoring, silentTail, alreadyNudged: alreadyFinalMessageNudged,
+        });
         if (waiting && !autoContinued && state.autonomousNudgePending !== state.session) {
           // Turn over, session open. Either the ball is in the user's court
           // (`waiting`) — optionally with a structured `CEZ:ASK` question the
@@ -7347,6 +7357,16 @@ export class RunManager {
     }
   }
 
+  /** Shared stop/input/liveness guards for an automatic continuation. */
+  private canAutoContinue(runId: string, state: ActiveRun): boolean {
+    const run = this.store.getRun(runId);
+    return !!run && !this.disposed && !run.stopping && !state.cancelled && !state.finishRequested &&
+      !state.agentInputError && !state.pendingHumanAsk && !this.hasPendingHumanAsk(runId) && !!state.session?.open &&
+      !this.workerExecutionStopped(runId) && !this.executionBlockedByRootFinish(run) && !this.parentCompletionPending(runId) &&
+      !this.workerWait(runId) && !run.ciWait && !this.workerWakeAdmitted.has(runId) &&
+      !state.agentInputFlight && !this.harnessOwesInput(state) && !this.hasQueuedAgentInputs(runId);
+  }
+
   /**
    * Both turn-end paths keep a nudged session running, with no user-wait timer or
    * released slot. The next turn can finish with DONE, nudge again, or park at the
@@ -7358,15 +7378,6 @@ export class RunManager {
    * timeout bounds a missing readiness signal. New activity/input invalidates it.
    * A refused portable override falls back to normal question parking.
    */
-  private canAutoContinue(runId: string, state: ActiveRun): boolean {
-    const run = this.store.getRun(runId);
-    return !!run && !this.disposed && !run.stopping && !state.cancelled && !state.finishRequested &&
-      !state.agentInputError && !state.pendingHumanAsk && !this.hasPendingHumanAsk(runId) && !!state.session?.open &&
-      !this.workerExecutionStopped(runId) && !this.executionBlockedByRootFinish(run) && !this.parentCompletionPending(runId) &&
-      !this.workerWait(runId) && !run.ciWait && !this.workerWakeAdmitted.has(runId) &&
-      !state.agentInputFlight && !this.harnessOwesInput(state) && !this.hasQueuedAgentInputs(runId);
-  }
-
   private tryAutonomousNudge(runId: string, state: ActiveRun, stepId: string, ask: AskRequest | null): boolean {
     const session = state.session;
     if (!state.autonomous || !session || !this.canAutoContinue(runId, state)) return false;
@@ -7409,7 +7420,24 @@ export class RunManager {
     return true;
   }
 
-  /** One-shot visible-message nudge when a turn ends on reasoning or a tool (#544, #119). */
+  /** Shared silent-tail conditions for the one-shot visible-message nudge. Callers must
+   *  invoke this only when nothing else already continued. */
+  private maybeFinalMessageNudge(
+    runId: string,
+    state: ActiveRun,
+    stepId: string,
+    turn: { ask: boolean; humanGate: boolean; monitoring: boolean; silentTail: boolean; alreadyNudged: boolean },
+  ): boolean {
+    if (turn.ask || turn.humanGate || turn.monitoring || !turn.silentTail || turn.alreadyNudged) return false;
+    return this.tryFinalMessageNudge(runId, state, stepId);
+  }
+
+  /** One-shot visible-message nudge when a turn ends on reasoning or a tool (#544, #119).
+   *  Liveness: this path has no inputIds, so #505's unread-input timer does not apply, and
+   *  resumeParkedRun / clearIdleTimer drop the user-wait idle bound. Do not re-arm idle until
+   *  `turn.started` — some harnesses omit that event and still run (N8); idle would then kill a
+   *  live turn. `sendAgentMessage` already rearms the managed-session no-progress guard after
+   *  turn-end, which is the bound for an ACK that never produces a turn. */
   private tryFinalMessageNudge(runId: string, state: ActiveRun, stepId: string): boolean {
     if (state.finalMessageNudged === state.session || !this.canAutoContinue(runId, state)) return false;
     const sent = this.submitAgentInput(runId, state, [{ type: 'text', text: FINAL_MESSAGE_NUDGE }]);
