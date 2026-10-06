@@ -192,9 +192,11 @@ describe('verified destruction retains results through explicit history deletion
     const ordinary = f.store.createRun({ task: 'old', title: 'old', workflow: 'quick-task', steps: [] });
     f.store.updateRun(ordinary.id, { createdAt: '2000-01-01T00:00:00.000Z', status: 'done' });
     for (let i = 0; i < 302; i++) f.store.createRun({ task: 'new', title: 'new', workflow: 'quick-task', steps: [] });
-    expect(f.store.getRun(ordinary.id)).toBeUndefined();
+    expect(f.store.getRun(ordinary.id)).toMatchObject({ archived: true });
     expect(f.store.getRun(workerId)).toBeDefined();
+    expect(f.store.getRun(workerId)?.archived).not.toBe(true);
     expect(f.store.getRun(f.parent.id)).toBeDefined();
+    expect(f.store.getRun(f.parent.id)?.archived).not.toBe(true);
     expect(f.store.readWorkerResultDiff(f.parent.id, workerId)).toContain('+retained patch');
   });
 

@@ -90,10 +90,12 @@ export const CLAUDE_SPEC_SUPPORT: AgentRunSpecSupport = {
   timeoutMs: { honored: true, via: 'wall-clock kill switch on the child process' },
   sessionId: { honored: true, via: '--session-id, or --resume when resume is set' },
   resume: { honored: true, via: '--resume <sessionId> in place of --session-id' },
+  resumeFallbackSystemPrompt: { honored: false, reason: 'Continue already resends spec.systemPrompt on every process; a separate fallback prompt is unused' },
 };
 export class ClaudeCliRunner implements AgentRunner {
   readonly backend = 'claude' as const;
   readonly specSupport = CLAUDE_SPEC_SUPPORT;
+  readonly systemPromptOnResume = 'resent' as const;
   readonly inputDelivery: InputDelivery = {
     mode: 'steer', consumption: 'observable',
     via: 'stream-json stdin line with uuid; --replay-user-messages echo at consumption',
@@ -210,7 +212,8 @@ export class ClaudeCliRunner implements AgentRunner {
       try {
         child.stdin.write(`${line}\n`, acknowledge);
         unsettled.add(uuid);
-        if (inputIds.length === 0) humanUnsettled.add(uuid);
+        // Agent writes always pass an acknowledgement, even without inputIds (nudges, #544).
+        if (!acknowledge) humanUnsettled.add(uuid);
         submissions.accept(uuid, inputIds, '');
         // A user message written to an idle session begins a turn (§7.1).
         if (opensTurn) emitUi(claudeTurnStarted);

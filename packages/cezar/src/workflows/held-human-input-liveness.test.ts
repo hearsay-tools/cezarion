@@ -61,7 +61,7 @@ describe('held human input liveness bound (#486)', () => {
     let open = true;
     let finish!: (result: AgentRunResult) => void;
     runnerHook.runner = {
-      backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT,
+      backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT, systemPromptOnResume: 'resent',
       run: async () => ({ text: '', toolCalls: [], tokensUsed: 0 }),
       interrupt: async () => undefined,
       startSession(spec, onEvent, opts): AgentSession {
@@ -106,7 +106,7 @@ describe('held human input liveness bound (#486)', () => {
     let open = true;
     let finish!: (result: AgentRunResult) => void;
     runnerHook.runner = {
-      backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT,
+      backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT, systemPromptOnResume: 'resent',
       run: async () => ({ text: '', toolCalls: [], tokensUsed: 0 }),
       interrupt: async () => undefined,
       startSession(spec, onEvent, opts): AgentSession {

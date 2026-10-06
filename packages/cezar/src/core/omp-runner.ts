@@ -100,6 +100,7 @@ export const OMP_SPEC_SUPPORT: AgentRunSpecSupport = {
   timeoutMs: { honored: true, via: 'wall-clock kill switch' },
   sessionId: { honored: true, via: '--resume <id> when resume is set; a fresh session mints its own id, reported from get_state' },
   resume: { honored: true, via: '--resume in place of a fresh session' },
+  resumeFallbackSystemPrompt: { honored: false, reason: 'Continue already resends spec.systemPrompt on every process; a separate fallback prompt is unused' },
 };
 
 export interface OmpToolSelection {
@@ -237,6 +238,7 @@ export interface OmpRunnerOptions {
 export class OmpRunner implements AgentRunner {
   readonly backend = 'omp' as const;
   readonly specSupport = OMP_SPEC_SUPPORT;
+  readonly systemPromptOnResume = 'resent' as const;
   readonly inputDelivery: InputDelivery = {
     mode: 'steer', consumption: 'observable',
     via: 'prompt with streamingBehavior steer; set_steering_mode all at session start; user message_start with the submitted text',

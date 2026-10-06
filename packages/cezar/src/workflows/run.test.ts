@@ -25,7 +25,7 @@ import { resolveAgentTmpDir } from '../runs/agent-tmpdir.ts';
 import { RunStore, type RunRecord, type StepState } from '../runs/store.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { parseTaskMarkers } from '../runs/task-markers.ts';
-import { appendTurnText, RunManager } from './run.ts';
+import { appendTurnText, trackTurnTail, RunManager } from './run.ts';
 import type { WorkflowDef } from './types.ts';
 import { readPersistedRuns, crashStore } from '../runs/run-store.testkit.ts';
 
@@ -82,6 +82,30 @@ describe('appendTurnText', () => {
     expect(appendTurnText('', 'first')).toBe('first');
     expect(appendTurnText('first', '')).toBe('first');
     expect(appendTurnText(appendTurnText('', 'first'), 'second')).toBe('first\nsecond');
+  });
+});
+
+describe('trackTurnTail', () => {
+  const completed = (item: Extract<UiEvent, { type: 'item.completed' }>['item']): UiEvent => ({ type: 'item.completed', item });
+  it('marks a non-empty top-level assistant message as a visible tail', () => {
+    expect(trackTurnTail('none', completed({ kind: 'message', id: 'm', role: 'assistant', text: 'hi' }))).toBe('visible');
+  });
+  it('marks reasoning as a silent tail even after a visible message', () => {
+    expect(trackTurnTail('visible', completed({ kind: 'reasoning', id: 'r', text: 'think' }))).toBe('silent');
+  });
+  it('marks a tool as a silent tail even after a visible message', () => {
+    expect(trackTurnTail('visible', completed({ kind: 'tool', id: 't', name: 'Bash', toolKind: 'execute', title: 'Ran', status: 'completed' }))).toBe('silent');
+  });
+  it('marks a tool-only turn silent, not none', () => {
+    expect(trackTurnTail('none', completed({ kind: 'tool', id: 't', name: 'Bash', toolKind: 'execute', title: 'Ran', status: 'completed' }))).toBe('silent');
+  });
+  it('ignores nested child items', () => {
+    expect(trackTurnTail('visible', completed({ kind: 'message', id: 'c', role: 'assistant', text: 'child', parentItemId: 'p' }))).toBe('visible');
+    expect(trackTurnTail('none', completed({ kind: 'reasoning', id: 'c', text: 'child', parentItemId: 'p' }))).toBe('none');
+  });
+  it('ignores empty assistant text and unrelated events', () => {
+    expect(trackTurnTail('none', completed({ kind: 'message', id: 'e', role: 'assistant', text: '  ' }))).toBe('none');
+    expect(trackTurnTail('visible', { type: 'turn.started', turnId: 't1' })).toBe('visible');
   });
 });
 
@@ -269,7 +293,7 @@ describe('RunManager reported cost accounting', () => {
   it.each(['fresh', 'legacy-inflated', 'missed-persist'] as const)('counts cumulative Claude USD across Continue steps (%s)', async (priorState) => {
     let launches = 0;
     runnerHook.runner = {
-      backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT,
+      backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT, systemPromptOnResume: 'resent',
       run: async () => ({ text: '', toolCalls: [], tokensUsed: 0 }),
       interrupt: async () => undefined,
       startSession(spec, onEvent, opts): AgentSession {
@@ -1680,7 +1704,7 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
   it('publishes a runner failure that occurs during idle shutdown', async () => {
     runnerHook.runner = {
       backend: 'claude',
-      specSupport: CLAUDE_SPEC_SUPPORT,
+      specSupport: CLAUDE_SPEC_SUPPORT, systemPromptOnResume: 'resent',
       run: async () => ({ text: '', toolCalls: [], tokensUsed: 0 }),
       interrupt: async () => undefined,
       startSession: (_spec, onEvent) => {
@@ -1751,7 +1775,7 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
     let receivedImages: ContentBlock[] | undefined;
     runnerHook.runner = {
       backend: 'claude',
-      specSupport: CLAUDE_SPEC_SUPPORT,
+      specSupport: CLAUDE_SPEC_SUPPORT, systemPromptOnResume: 'resent',
       run: async () => ({ text: 'done', toolCalls: [], tokensUsed: 0 }),
       interrupt: async () => undefined,
       startSession: (spec) => {
@@ -2381,7 +2405,7 @@ describe('CEZ:ASK parks as waiting and emits ask.requested (#473)', () => {
 
   const v2OnlyAskRunner = (marker: string, parentItemId?: string): AgentRunner => ({
     backend: 'claude',
-    specSupport: CLAUDE_SPEC_SUPPORT,
+    specSupport: CLAUDE_SPEC_SUPPORT, systemPromptOnResume: 'resent',
     run: async () => ({ text: 'Choose an option.', toolCalls: [], tokensUsed: 0 }),
     interrupt: async () => undefined,
     startSession(_spec, onEvent, opts: SessionOptions = {}): AgentSession {

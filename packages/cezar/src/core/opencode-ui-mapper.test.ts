@@ -9,11 +9,12 @@
  * including that both streams take their turn-end from `session.idle`, not
  * from the `prompt_async` HTTP response (#4).
  */
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createServer } from 'node:net';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { AgentEvent } from './agent-runner.ts';
 import type { UiEvent } from './ui-events.ts';
@@ -1017,6 +1018,13 @@ function isBareTool(frame: unknown): boolean {
 
 describe('OpencodeServerRunner v2 wiring (against the bundled mock server)', () => {
   const mockBin = join(FIXTURES, 'mock-opencode-serve.mjs');
+  const dirs: string[] = [];
+  afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
+  const isolatedCwd = () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cez-opencode-ui-'));
+    dirs.push(dir);
+    return dir;
+  };
 
   it('uses the mock’s announced port when the runner’s requested port is occupied', async () => {
     const occupied = createServer();
@@ -1027,7 +1035,7 @@ describe('OpencodeServerRunner v2 wiring (against the bundled mock server)', () 
     try {
       const events: AgentEvent[] = [];
       const session = new OpencodeServerRunner({ bin: mockBin, timeoutMs: 60_000 }).startSession(
-        { userPrompt: 'check the working tree', cwd: process.cwd() }, event => events.push(event), { autoEndAfterFirstTurn: true },
+        { userPrompt: 'check the working tree', cwd: isolatedCwd() }, event => events.push(event), { autoEndAfterFirstTurn: true },
       );
       await session.result;
       expect(events.filter(event => event.type === 'error')).toEqual([]);
@@ -1040,7 +1048,7 @@ describe('OpencodeServerRunner v2 wiring (against the bundled mock server)', () 
     const v1: AgentEvent[] = [];
     const v2: UiEvent[] = [];
     const session = runner.startSession(
-      { userPrompt: 'check the working tree', cwd: process.cwd() },
+      { userPrompt: 'check the working tree', cwd: isolatedCwd() },
       (e) => v1.push(e),
       { autoEndAfterFirstTurn: true, onUiEvent: (e) => v2.push(e) },
     );

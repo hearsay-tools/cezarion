@@ -19,6 +19,7 @@ const sessions = vi.hoisted(() => ({ release: [] as Array<() => void> }));
 vi.mock('../core/runner-factory.ts', () => ({
   createRunner: () => ({
     backend: 'claude' as const,
+    systemPromptOnResume: 'resent' as const,
     run: async () => ({ text: '', toolCalls: [], tokensUsed: 0 }),
     startSession: () => {
       let release!: () => void;

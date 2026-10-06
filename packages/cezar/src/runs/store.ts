@@ -15,6 +15,8 @@ import {
 import type { ArchiveFinishedScope, CiWait, ConversationState, AgentInput, InboxClaim, DelegationState, RunSummary, WorkerCollectedResult } from '@open-mercato/cezar-contract';
 import { storedDelegationStateSchema } from './delegation-state.ts';
 import { refreshHumanAskSummary } from './human-ask-summary.ts';
+import { HistoryCompressor } from './history-compressor.ts';
+import { hasPlainHistory, historyPaths, readHistoryText, removeHistory, restoreHistory } from './history-file.ts';
 import { workerExecutionIdentitySchema, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
 import { reconcileWorkerWait } from '../delegation/wait.ts';
 import { capacityError, workerCapacity } from '../delegation/capacity.ts';
@@ -30,7 +32,7 @@ import {
   RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY, RunConflictError, RunDatabase, RunDatabaseBusyError,
   type RunConflictEvidence, type RunDatabaseChanges, type RunDatabaseCommit, type RunFenceClaim, type RunRow, type RunRowInput, type RunWriteFence,
 } from './run-database.ts';
-import { encodeRunRow, isLiveRecord } from './run-row.ts';
+import { encodeRunRow, isLiveRecord, isLiveStatus } from './run-row.ts';
 import { collectRawExtras, encodeRawRecord, type RawExtras } from './raw-record.ts';
 import { assertNoLegacyCockpit, assertNoLegacyWriter, backUpLegacyIndex, LEGACY_INDEX_FILE, LegacyWriterError, readLegacyIndex } from './legacy-index.ts';
 import { RunStoreOpenError, toRunStoreOpenError } from './store-open-error.ts';
@@ -478,7 +480,6 @@ function sleepSync(ms: number): void {
 }
 
 const MAX_RUNS_KEPT = 300;
-const MAX_ARCHIVED_KEPT = 500;
 
 const PR_URL_RE = /https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/\d+/;
 const ISSUE_URL_RE = /https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/issues\/\d+/;
@@ -999,10 +1000,11 @@ const MARK_ALL_READ_SQL = "archived = 0 AND status IN ('done', 'failed') AND fin
   " AND NOT (status = 'failed' AND json_extract(summary, '$.autoResumeAt') IS NOT NULL)" +
   " AND (json_extract(summary, '$.seenAt') IS NULL OR json_extract(summary, '$.seenAt') < finished_at)";
 
-/** History retention's candidates among the given ids (a JSON array): finished and without
- *  delegation. */
+/** History retention's candidates among the given ids (a JSON array): finished, without
+ *  delegation, and not pinned. */
 const RETENTION_CANDIDATES_SQL = "id IN (SELECT value FROM json_each(?)) AND status NOT IN ('queued', 'running', 'waiting')" +
-  " AND parent_run_id IS NULL AND json_extract(summary, '$.delegation') IS NULL";
+  " AND parent_run_id IS NULL AND json_extract(summary, '$.delegation') IS NULL" +
+  " AND json_extract(summary, '$.pinned') IS NOT 1";
 
 /** Rows whose stored summary names a referenced PR or issue: what a repository handle can veto. */
 const REFERENCED_SQL =
@@ -1243,10 +1245,13 @@ export class RunStore extends EventEmitter {
   /** Rows whose `data` this store tried to decode and could not: left in the database untouched,
    *  and left out of the list rows from then on, as the cold reader leaves them out (run-index.ts). */
   private readonly unreadable = new Set<string>();
+  /** Background one-at-a-time compressor for archived transcripts (#818). */
+  private readonly compressor: HistoryCompressor;
 
   private constructor(private readonly dataDir: string) {
     super();
     this.setMaxListeners(100);
+    this.compressor = new HistoryCompressor(dataDir, (id) => this.isHistoryCompressEligible(id));
   }
 
   /**
@@ -2361,9 +2366,11 @@ export class RunStore extends EventEmitter {
       executionStartSeq: this.readEvents(id).reduce((seq, event) => Math.max(seq, event.seq), 0),
     });
     const staged = new Map<string, RunRecord>();
-    staged.set(id, { ...run, ...this.redactPatch(patch), delegation,
+    const next: RunRecord = { ...run, ...this.redactPatch(patch), delegation,
       ...(step ? { steps: [...run.steps, { ...step, status: 'pending' as const, iterations: 0, tokensUsed: 0 }] } : {}),
-    });
+    };
+    staged.set(id, next);
+    if (Object.prototype.hasOwnProperty.call(patch, 'archived')) this.syncTranscriptForm(id, next.archived);
     if (conversation) {
       const root = this.peek(conversation.rootId);
       if (root?.delegation?.role !== 'root' || run.delegation.parentRunId !== root.id) throw new Error('missing conversation ownership');
@@ -2608,9 +2615,19 @@ export class RunStore extends EventEmitter {
     if (normalized.status && ['running', 'waiting', 'queued'].includes(normalized.status)) {
       normalized.autoResumeAt = undefined;
     }
+    const archived = Object.prototype.hasOwnProperty.call(normalized, 'archived')
+      ? Boolean(normalized.archived)
+      : undefined;
+    if (archived !== undefined) {
+      delete normalized.archived;
+      delete normalized.archivedAt;
+    }
+    // Restore before mutating so a throw leaves status and archived unchanged (#818 S3).
+    if (archived === false) restoreHistory(this.dataDir, id);
     Object.assign(run, this.redactPatch(normalized));
     if (normalized.task !== undefined) this.resolveEditedTaskRefs(run);
-    this.touch(run);
+    if (archived !== undefined) this.applyArchived(run, archived);
+    else this.touch(run);
     return run;
   }
 
@@ -2751,6 +2768,8 @@ export class RunStore extends EventEmitter {
 
   private applyArchived(run: RunRecord, archived: boolean): boolean {
     const changed = run.archived !== archived;
+    // Transcript first: a restore throw aborts with the record unchanged (#818 S3).
+    this.syncTranscriptForm(run.id, archived);
     run.archived = archived;
     run.archivedAt = archived ? new Date().toISOString() : undefined;
     if (archived) {
@@ -2759,6 +2778,68 @@ export class RunStore extends EventEmitter {
     }
     this.touch(run);
     return changed;
+  }
+
+  /** Transcript form follows `archived`: enqueue compression, or restore the plain file now. */
+  private syncTranscriptForm(id: string, archived: boolean): void {
+    if (archived) this.compressor.enqueue(id);
+    else {
+      this.compressor.cancel(id);
+      restoreHistory(this.dataDir, id);
+    }
+  }
+
+  /**
+   * Whether this store may compress `id`'s transcript: the run exists, is archived, is not in a
+   * live status (queued/running/waiting), and this process holds the family's claim in `claimed`
+   * (not merely `pendingClaims`). Two processes never both write a run (#779, #818 B1).
+   */
+  private isHistoryCompressEligible(id: string): boolean {
+    if (this.deleted.has(id)) return false;
+    try {
+      const run = this.held.get(id) ?? this.peek(id);
+      if (!run || run.archived !== true || isLiveStatus(run.status)) return false;
+      return this.holdsCompressClaim(id);
+    } catch {
+      return false;
+    }
+  }
+
+  /** Take the family claim if free and require it to be in `this.claimed`, not only pending. */
+  private holdsCompressClaim(id: string): boolean {
+    const family = this.familyOf(id);
+    return this.claimFamilies([family]).has(family) && this.claimed.has(family);
+  }
+
+  /** Startup sweep: enqueue every archived non-live run that still has a plain transcript. */
+  compressArchivedHistory(): void {
+    try {
+      const ids = new Set<string>();
+      for (const key of this.db?.listKeysWhere('archived = 1 AND live = 0') ?? []) {
+        if (!this.deleted.has(key.id)) ids.add(key.id);
+      }
+      for (const run of this.held.values()) {
+        if (run.archived && !isLiveStatus(run.status) && !this.deleted.has(run.id)) ids.add(run.id);
+      }
+      for (const id of ids) {
+        try {
+          const { plain } = historyPaths(this.dataDir, id);
+          // Claim only ids with work: a plain file to compress, including both-present leftovers.
+          if (!existsSync(plain)) continue;
+          if (!this.holdsCompressClaim(id)) continue;
+          if (hasPlainHistory(this.dataDir, id)) this.compressor.enqueue(id);
+        } catch {
+          // Best effort: one id must not stop the sweep or boot (#818 S2).
+        }
+      }
+    } catch {
+      // listKeysWhere / open-time fs: never throw out of boot.
+    }
+  }
+
+  /** Resolves when the transcript compressor is idle (tests, shutdown). */
+  historyIdle(): Promise<void> {
+    return this.compressor.idle();
   }
 
   /** Pin one run to the top of this project's task list, or unpin it (#935). Mirrors
@@ -2910,7 +2991,9 @@ export class RunStore extends EventEmitter {
     const full: RunEvent = this.redact({ ...event, seq, ts: new Date().toISOString() });
     // Sync append keeps event order without a write queue; local NDJSON
     // appends at agent-event rates are effectively free.
+    if (!hasPlainHistory(this.dataDir, runId)) restoreHistory(this.dataDir, runId);
     appendFileSync(this.eventsPath(runId), `${JSON.stringify(full)}\n`, 'utf8');
+    this.maybeEnqueueHistoryCompress(run);
     if ((full.type === 'ask.requested' || full.type === 'human-input-delivered') &&
       refreshHumanAskSummary(run, this.dataDir)) this.touch(run);
     this.emit('event', { runId, event: full });
@@ -3132,7 +3215,8 @@ export class RunStore extends EventEmitter {
 
   readEvents(runId: string): RunEvent[] {
     try {
-      const raw = readFileSync(this.eventsPath(runId), 'utf8');
+      const raw = readHistoryText(this.dataDir, runId);
+      if (raw === undefined) return [];
       return raw
         .split('\n')
         .filter(Boolean)
@@ -3468,7 +3552,7 @@ export class RunStore extends EventEmitter {
     z.uuid().parse(id);
     const dir = join(this.dataDir, 'runs');
     if (realpathSync(dir) !== resolve(dir)) throw new Error('History storage redirected');
-    rmSync(this.eventsPath(id), { force: true });
+    removeHistory(this.dataDir, id);
     rmSync(this.handoffPath(id), { force: true });
     rmSync(this.imagesDir(id), { recursive: true, force: true });
     removeArtifacts(this.dataDir, id);
@@ -3524,7 +3608,7 @@ export class RunStore extends EventEmitter {
   }
 
   private eventsPath(runId: string): string {
-    return join(this.dataDir, 'runs', `${runId}.ndjson`);
+    return historyPaths(this.dataDir, runId).plain;
   }
 
   /** Same location `handoffPath()` in handoff.ts produces — inlined to keep
@@ -3542,6 +3626,14 @@ export class RunStore extends EventEmitter {
     this.dirty.add(run.id);
     this.scheduleSave();
     this.emit('run', run);
+    this.maybeEnqueueHistoryCompress(run);
+  }
+
+  /** Form follows archived: a terminal archived run with a plain transcript is queued again. */
+  private maybeEnqueueHistoryCompress(run: RunRecord): void {
+    if (run.archived && !isLiveStatus(run.status) && hasPlainHistory(this.dataDir, run.id)) {
+      this.compressor.enqueue(run.id);
+    }
   }
 
   /** The held record is gone; the next save or commit deletes its row, fenced by `family`'s claim
@@ -3560,7 +3652,7 @@ export class RunStore extends EventEmitter {
   private removeOwedHistory(id: string): void {
     if (!this.historyOwed.delete(id)) return;
     try {
-      rmSync(this.eventsPath(id), { force: true });
+      removeHistory(this.dataDir, id);
       rmSync(this.handoffPath(id), { force: true });
       rmSync(this.imagesDir(id), { recursive: true, force: true });
       removeArtifacts(this.dataDir, id);
@@ -3568,45 +3660,40 @@ export class RunStore extends EventEmitter {
   }
 
   /**
-   * Count-based history retention: of the runs past the newest `MAX_RUNS_KEPT` unarchived (and
-   * `MAX_ARCHIVED_KEPT` archived) ones, delete each finished run without delegation that
-   * `canDeleteRun` allows. Ranked over the row keys (the `created_at` index, no record decoded)
-   * with memory laid over them, since a run created or archived since the last save has no row
-   * yet; the rows past the cut are then filtered in `runs.db`, so only real candidates decode.
+   * Count-based history retention: of the runs past the newest `MAX_RUNS_KEPT` unarchived ones,
+   * archive each finished run without delegation that is not pinned and whose family this store
+   * can claim. Ranked over the row keys (the `created_at` index, no record decoded) with memory
+   * laid over them, since a run created or archived since the last save has no row yet; the rows
+   * past the cut are then filtered in `runs.db`, so only real candidates decode. Archived runs
+   * are never deleted by retention — only an explicit delete, worker destruction, or history
+   * deletion removes a run.
    */
   private pruneOldRuns(): void {
-    for (const [archived, keep] of [[false, MAX_RUNS_KEPT], [true, MAX_ARCHIVED_KEPT]] as const) {
-      const ranked = new Map<string, ListOrder & { id: string }>();
-      for (const key of this.db?.listKeysWhere('archived = ?', [archived ? 1 : 0]) ?? []) {
-        if (!this.held.has(key.id) && !this.deleted.has(key.id)) ranked.set(key.id, key);
-      }
-      for (const run of this.held.values()) if (run.archived === archived) ranked.set(run.id, { id: run.id, ...this.listOrder(run) });
-      const overflow = [...ranked.values()].sort(newestFirst).slice(keep).map((key) => key.id);
-      if (overflow.length === 0) continue;
-      const stale = overflow.flatMap((id) => {
-        const run = this.held.get(id);
-        // Retention must not evict a live task's history or scratch between turns, and delegation
-        // promises history and parent snapshots until explicit deletion.
-        return run && !['queued', 'running', 'waiting'].includes(run.status) && !run.delegation ? [id] : [];
-      });
-      const cold = overflow.filter((id) => !this.held.has(id));
-      const coldRows = new Map<string, RunRow>();
-      if (cold.length > 0) {
-        // Another process's runs are its own to keep or delete (#779, plan step 3).
-        const rows = this.db!.listWhere(RETENTION_CANDIDATES_SQL, [JSON.stringify(cold)]);
-        const writable = this.claimFamilies(rows.map(rowFamily));
-        for (const row of rows) if (writable.has(rowFamily(row))) coldRows.set(row.id, row);
-        stale.push(...coldRows.keys());
-      }
-      for (const id of stale) {
-        if (!this.canDeleteRun(id)) continue;
-        const family = this.familyOf(id);
-        const row = coldRows.get(id);
-        if (row) this.base.set(id, { revision: row.revision, seq: row.seq, data: row.data });
-        this.held.delete(id);
-        this.markDeleted(id, family);
-        removeAgentTmpDir(this.dataDir, id);
-      }
+    const ranked = new Map<string, ListOrder & { id: string }>();
+    for (const key of this.db?.listKeysWhere('archived = ?', [0]) ?? []) {
+      if (!this.held.has(key.id) && !this.deleted.has(key.id)) ranked.set(key.id, key);
+    }
+    for (const run of this.held.values()) if (!run.archived) ranked.set(run.id, { id: run.id, ...this.listOrder(run) });
+    const overflow = [...ranked.values()].sort(newestFirst).slice(MAX_RUNS_KEPT).map((key) => key.id);
+    if (overflow.length === 0) return;
+    const stale = overflow.flatMap((id) => {
+      const run = this.held.get(id);
+      // Retention must not archive a live task between turns, a pinned run, or a delegation
+      // family whose history is promised until explicit deletion.
+      return run && !isLiveStatus(run.status) && !run.delegation && !run.pinned ? [id] : [];
+    });
+    const cold = overflow.filter((id) => !this.held.has(id));
+    if (cold.length > 0) {
+      // Another process's runs are its own to keep or archive (#779, plan step 3).
+      const rows = this.db!.listWhere(RETENTION_CANDIDATES_SQL, [JSON.stringify(cold)]);
+      const writable = this.claimFamilies(rows.map(rowFamily));
+      for (const row of rows) if (writable.has(rowFamily(row))) stale.push(row.id);
+    }
+    for (const id of stale) {
+      const run = this.record(id);
+      if (!run || run.archived) continue;
+      this.applyArchived(run, true);
+      removeAgentTmpDir(this.dataDir, id);
     }
   }
 
@@ -3816,6 +3903,7 @@ export class RunStore extends EventEmitter {
    * absent. It saves nothing more, and a durable commit on it throws.
    */
   close(): void {
+    this.compressor.stop();
     if (this.saveTimer) {
       clearTimeout(this.saveTimer);
       this.saveTimer = null;

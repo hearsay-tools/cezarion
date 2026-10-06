@@ -1,6 +1,10 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { existsSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { resolveCodexExecutable } from './codex-app-server-transport.ts';
+import { driveSeam } from './harness-parity.testkit.ts';
 import { OpencodeServerRunner } from './opencode-server-runner.ts';
 import { OmpRunner } from './omp-runner.ts';
 
@@ -32,3 +36,23 @@ it('preserves explicit binary overrides during dry runs', () => {
   expect((new OmpRunner() as unknown as { bin: string }).bin).toBe('/configured/omp');
   expect((new OmpRunner({ bin: '/explicit/omp' }) as unknown as { bin: string }).bin).toBe('/explicit/omp');
 });
+it('dry-run OpenCode Continue in the same cwd resumes without CEZ_MOCK_ARGS_FILE', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'cez-dry-opencode-cwd-'));
+  const store = join(tmpdir(), `cez-mock-opencode-sessions-${createHash('sha256').update(dir).digest('hex')}.json`);
+  try {
+    const first = await driveSeam('opencode', 'baseline', { spec: { cwd: dir } });
+    expect(first.v1.filter(event => event.type === 'error')).toEqual([]);
+    const session = first.v1.find(event => event.type === 'session');
+    expect(session).toEqual(expect.objectContaining({ type: 'session', sessionId: expect.stringMatching(/^ses_mock_/) }));
+    const sessionId = (session as { sessionId: string }).sessionId;
+    const second = await driveSeam('opencode', 'baseline', {
+      spec: { cwd: dir, resume: true, sessionId },
+    });
+    expect(second.v1.filter(event => event.type === 'error')).toEqual([]);
+    expect(second.v1.filter(event => event.type === 'note' && String(event.message).includes('no longer exists'))).toEqual([]);
+    expect(second.v1.find(event => event.type === 'session')).toEqual(expect.objectContaining({ sessionId }));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(store, { force: true });
+  }
+}, 30_000);

@@ -12,7 +12,7 @@ import type { RunManager } from './run.ts';
 
 const captured = vi.hoisted(() => ({ specs: [] as AgentRunSpec[], release: undefined as (() => void) | undefined }));
 vi.mock('../core/runner-factory.ts', () => ({ createRunner: () => ({
-  backend: 'claude', interrupt: async () => {},
+  backend: 'claude', systemPromptOnResume: 'resent' as const, interrupt: async () => {},
   startSession: (spec: AgentRunSpec) => {
     captured.specs.push(spec);
     return { result: new Promise(resolve => { captured.release = () => resolve({ text: 'ok', toolCalls: [], tokensUsed: 0 }); }),

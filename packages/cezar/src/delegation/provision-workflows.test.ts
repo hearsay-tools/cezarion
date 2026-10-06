@@ -35,7 +35,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     f = fixture(); vi.restoreAllMocks();
     onTestFinished(scopeFixtureProcesses());
     const home = join(f.root, 'default-claude'); mkdirSync(home); vi.stubEnv('CLAUDE_CONFIG_DIR', home);
-    vi.spyOn(runners, 'createRunner').mockImplementation(backend => ({ backend: backend ?? 'claude', specSupport: CLAUDE_SPEC_SUPPORT, interrupt: async () => {}, run: async () => ({ text: '', toolCalls: [], tokensUsed: 0 }), startSession: (spec, emit) => {
+    vi.spyOn(runners, 'createRunner').mockImplementation(backend => ({ backend: backend ?? 'claude', specSupport: CLAUDE_SPEC_SUPPORT, systemPromptOnResume: 'resent', interrupt: async () => {}, run: async () => ({ text: '', toolCalls: [], tokensUsed: 0 }), startSession: (spec, emit) => {
       let resolve!: (value: AgentRunResult) => void; let open = true;
       const result = new Promise<AgentRunResult>(done => { resolve = done; });
       const finish = (text = '') => { open = false; resolve({ text, toolCalls: [], tokensUsed: 0 }); };

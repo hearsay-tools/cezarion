@@ -90,6 +90,13 @@ function sendText(deltas) {
   send({ type: 'message_update', message: {}, assistantMessageEvent: { type: 'text_end', contentIndex: 0, content, partial: {} } });
 }
 
+/** Native thinking block — contentIndex 1 when a text block already occupied 0. */
+function sendThinking(text, contentIndex = 0) {
+  send({ type: 'message_update', message: {}, assistantMessageEvent: { type: 'thinking_start', contentIndex, partial: {} } });
+  send({ type: 'message_update', message: {}, assistantMessageEvent: { type: 'thinking_delta', contentIndex, delta: text, partial: {} } });
+  send({ type: 'message_update', message: {}, assistantMessageEvent: { type: 'thinking_end', contentIndex, content: text, partial: {} } });
+}
+
 /** The terminal quartet: usage-bearing message_end, then turn/agent settle. */
 function sendTurnEnd(usage = { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, cost: { total: 0.001 } }) {
   send({ type: 'message_end', message: { role: 'assistant', usage } });
@@ -121,6 +128,47 @@ async function handle(command) {
     sendText([autonomousReply(command.message)]);
     sendTurnEnd();
     return;
+  }
+  if (command.type === 'prompt' && (command.message.includes('mock:silent-tail') || command.message.includes('mock:tool-tail') || command.message.includes('Your last turn ended without a message to the user.'))) {
+    const silent = await import('./mock-silent-tail.mjs');
+    silent.noteSilentTailPrompt(command.message);
+    if (silent.isFinalMessageNudge(command.message)) {
+      send({ id: command.id, type: 'response', command: 'prompt', success: true });
+      const kind = silent.finalMessageNudgeKind();
+      if (kind === 'ack-only') return;
+      if (kind === 'late') await silent.sleep(silent.LATE_REPLY_MS);
+      send({ type: 'agent_start' });
+      send({ type: 'turn_start' });
+      if (kind === 'silent') sendThinking(silent.SILENT_TAIL_REASONING);
+      else if (kind === 'slow-done') {
+        sendText([silent.SLOW_DONE_PREFIX]);
+        await silent.sleep(silent.SLOW_DONE_TAIL_MS);
+        sendText([silent.SILENT_TAIL_DONE]);
+      } else sendText([kind === 'standing' ? silent.FINAL_MESSAGE_STANDING : silent.SILENT_TAIL_DONE]);
+      sendTurnEnd();
+      return;
+    }
+    if (silent.isSilentTailScenario(command.message)) {
+      send({ id: command.id, type: 'response', command: 'prompt', success: true });
+      send({ type: 'agent_start' });
+      send({ type: 'turn_start' });
+      sendText([silent.SILENT_TAIL_OPENING]);
+      send({ type: 'tool_execution_start', toolCallId: 'tool-silent-gh', toolName: 'bash', args: { command: 'gh issue create' } });
+      send({ type: 'tool_execution_end', toolCallId: 'tool-silent-gh', toolName: 'bash', result: { content: [{ type: 'text', text: 'created' }] }, isError: false });
+      sendThinking(silent.SILENT_TAIL_REASONING, 1);
+      sendTurnEnd();
+      return;
+    }
+    if (silent.isToolTailScenario(command.message)) {
+      send({ id: command.id, type: 'response', command: 'prompt', success: true });
+      send({ type: 'agent_start' });
+      send({ type: 'turn_start' });
+      sendText([silent.TOOL_TAIL_OPENING]);
+      send({ type: 'tool_execution_start', toolCallId: 'tool-tail-git', toolName: 'bash', args: { command: 'git status --short' } });
+      send({ type: 'tool_execution_end', toolCallId: 'tool-tail-git', toolName: 'bash', result: { content: [{ type: 'text', text: ' M src/example.ts' }] }, isError: false });
+      sendTurnEnd();
+      return;
+    }
   }
   if (command.type === 'prompt' && command.message.includes('mock:crash-stderr')) {
     const { crashWithStderr } = await import('./mock-runner-crash.mjs');
@@ -342,6 +390,7 @@ async function handle(command) {
       result: { content: [{ type: 'text', text: 'mock file' }] },
       isError: false,
     });
+    if (!monitoringMarker) sendText(['Done with the first pass.']);
     send({
       type: 'message_end',
       message: {

@@ -193,7 +193,13 @@ describe('buildOmpArgs', () => {
 
 describe('OMP_SPEC_SUPPORT', () => {
   it('honors every field, including the extra roots Pi drops', () => {
-    for (const support of Object.values(OMP_SPEC_SUPPORT)) expect(support.honored).toBe(true);
+    for (const [field, support] of Object.entries(OMP_SPEC_SUPPORT)) {
+      if (field === 'resumeFallbackSystemPrompt') {
+        expect(support.honored).toBe(false);
+        continue;
+      }
+      expect(support.honored, field).toBe(true);
+    }
     expect(OMP_SPEC_SUPPORT.additionalDirectories).toEqual({
       honored: true,
       via: '--add-dir per directory; an omp build that rejects --add-dir is respawned once without it, with a v1 note (Ruling 22)',
@@ -279,12 +285,13 @@ describe('OmpRunner session over the mock', () => {
       { type: 'text', text: 'Investigating: inspect the working tree' },
       { type: 'tool-call', id: 'tool-1', tool: 'read', input: { path: 'README.md' } },
       { type: 'tool-result', toolCallId: 'tool-1', result: 'mock file', isError: false },
+      { type: 'text', text: 'Done with the first pass.' },
       { type: 'turn-end' },
       { type: 'done' },
     ]);
     expect(events).toContainEqual({ type: 'token-usage', tokensUsed: 15 });
     expect(events).toContainEqual({ type: 'cost', usd: 0.001 });
-    expect(result).toMatchObject({ text: 'Investigating: inspect the working tree', tokensUsed: 15, sessionId: '019a0000-0000-7000-8000-0000000000aa' });
+    expect(result).toMatchObject({ text: 'Investigating: inspect the working tree\nDone with the first pass.', tokensUsed: 15, sessionId: '019a0000-0000-7000-8000-0000000000aa' });
     expect(ui[0]).toEqual({ type: 'turn.started', turnId: 'turn_1' });
     expect(ui).toContainEqual({ type: 'session.started', sessionId: '019a0000-0000-7000-8000-0000000000aa', backend: 'omp', model: 'claude-mock' });
     expect(ui.filter(event => event.type === 'turn.completed')).toHaveLength(1);
@@ -720,7 +727,7 @@ process.exit(2);
       ]);
       expect(events.filter(event => event.type === 'error')).toEqual([]);
       expect(turnEnds(events)).toBe(1);
-      expect(result.text).toBe('Investigating: inspect the working tree');
+      expect(result.text).toBe('Investigating: inspect the working tree\nDone with the first pass.');
     });
 
     it('retries even when no --tools list was passed', async () => {
@@ -769,7 +776,7 @@ process.exit(2);
         { type: 'note', message: 'omp: MCP tools OMP has not registered were dropped: mcp__slow_server_query' },
       ]);
       expect(events.filter(event => event.type === 'error')).toEqual([]);
-      expect(result.text).toBe('Investigating: inspect the working tree');
+      expect(result.text).toBe('Investigating: inspect the working tree\nDone with the first pass.');
       expect(ui.filter(event => event.type === 'turn.started')).toHaveLength(1);
     });
 
@@ -848,7 +855,7 @@ process.exit(2);
       expect(events.some(event => event.type === 'note' && event.message.includes('omp CLI stderr'))).toBe(false);
       expect(turnEnds(events)).toBe(1);
       expect(events.at(-1)).toEqual({ type: 'done' });
-      expect(result.text).toBe('Investigating: inspect the working tree');
+      expect(result.text).toBe('Investigating: inspect the working tree\nDone with the first pass.');
       // The refused spawn leaves nothing in v2: one turn, as if the first spawn never happened.
       expect(ui.filter(event => event.type === 'turn.started')).toHaveLength(1);
       expect(ui.filter(event => event.type === 'turn.completed')).toHaveLength(1);

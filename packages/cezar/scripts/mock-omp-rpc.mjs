@@ -157,6 +157,16 @@ function userMessage(text) {
   write({ type: 'message_end', messageId, message });
 }
 
+/** One assistant thinking block, then its usage-bearing message_end. */
+function assistantThinking(text, { stopReason = 'stop', usage = { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 15, cost: { total: 0.001 } } } = {}) {
+  const messageId = `msg-${++messageSeq}`;
+  write({ type: 'message_start', messageId, message: { role: 'assistant', content: [] } });
+  messageUpdate(messageId, { type: 'thinking_start', contentIndex: 0 });
+  messageUpdate(messageId, { type: 'thinking_delta', contentIndex: 0, delta: text });
+  messageUpdate(messageId, { type: 'thinking_end', contentIndex: 0, content: text });
+  write({ type: 'message_end', messageId, message: { role: 'assistant', content: [{ type: 'thinking', thinking: text }], provider: 'anthropic', model: 'claude-mock', usage, stopReason } });
+}
+
 /** One assistant message: text block (streamed as `deltas`), then its usage-bearing message_end. */
 function assistantText(deltas, { stopReason = 'stop', usage = { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 15, cost: { total: 0.001 } }, extra = {} } = {}) {
   const messageId = `msg-${++messageSeq}`;
@@ -344,8 +354,22 @@ async function prompt(command) {
     if (crashWithStderr(message, '{"type":"tool_execution_update","toolCallId":"truncated')) return;
   }
 
+  if (message.includes('mock:silent-tail') || message.includes('Your last turn ended without a message to the user.')) {
+    const silentEarly = await import('./mock-silent-tail.mjs');
+    silentEarly.noteSilentTailPrompt(message);
+    if (silentEarly.isAckOnlyNudge(message)) { respond(command); return; }
+    if (silentEarly.isLateNudge(message)) {
+      respond(command);
+      await silentEarly.sleep(silentEarly.LATE_REPLY_MS);
+      beginTurn(command);
+    } else {
+      respond(command);
+      beginTurn(command);
+    }
+  } else {
   respond(command);
   beginTurn(command);
+  }
   if (message.includes('mock:turn-messages:')) {
     const { turnMessages } = await import('./mock-turn-messages.mjs');
     // Separate assistant messages within one native OMP turn; settle only after all of them.
@@ -363,6 +387,36 @@ async function prompt(command) {
     assistantText([autonomousReply(message)]);
     endTurn();
     return;
+  }
+  if (message.includes('mock:silent-tail') || message.includes('mock:tool-tail') || message.includes('Your last turn ended without a message to the user.')) {
+    const silent = await import('./mock-silent-tail.mjs');
+    silent.noteSilentTailPrompt(message);
+    if (silent.isFinalMessageNudge(message)) {
+      const kind = silent.finalMessageNudgeKind();
+      if (kind === 'silent') assistantThinking(silent.SILENT_TAIL_REASONING);
+      else if (kind === 'slow-done') {
+        assistantText([silent.SLOW_DONE_PREFIX]);
+        await silent.sleep(silent.SLOW_DONE_TAIL_MS);
+        assistantText([silent.SILENT_TAIL_DONE]);
+      } else assistantText([kind === 'standing' ? silent.FINAL_MESSAGE_STANDING : silent.SILENT_TAIL_DONE]);
+      endTurn();
+      return;
+    }
+    if (silent.isSilentTailScenario(message)) {
+      assistantText([silent.SILENT_TAIL_OPENING]);
+      write({ type: 'tool_execution_start', toolCallId: 'tool-silent-gh', toolName: 'bash', args: { command: 'gh issue create' } });
+      write({ type: 'tool_execution_end', toolCallId: 'tool-silent-gh', toolName: 'bash', result: { content: [{ type: 'text', text: 'created' }] }, isError: false });
+      assistantThinking(silent.SILENT_TAIL_REASONING);
+      endTurn();
+      return;
+    }
+    if (silent.isToolTailScenario(message)) {
+      assistantText([silent.TOOL_TAIL_OPENING]);
+      write({ type: 'tool_execution_start', toolCallId: 'tool-tail-git', toolName: 'bash', args: { command: 'git status --short' } });
+      write({ type: 'tool_execution_end', toolCallId: 'tool-tail-git', toolName: 'bash', result: { content: [{ type: 'text', text: ' M src/example.ts' }] }, isError: false });
+      endTurn();
+      return;
+    }
   }
   if (/mock:(no-progress|busy-progress)/.test(message)) {
     if (message.includes('mock:no-progress')) {
@@ -527,6 +581,9 @@ async function prompt(command) {
   assistantText([`Investigating: `, message, ...(message.includes('mock:monitoring') ? ['\n\nCEZ:MONITORING'] : [])]);
   write({ type: 'tool_execution_start', toolCallId: 'tool-1', toolName: 'read', args: { path: 'README.md' } });
   write({ type: 'tool_execution_end', toolCallId: 'tool-1', toolName: 'read', result: { content: [{ type: 'text', text: 'mock file' }] }, isError: false });
+  if (!message.includes('mock:monitoring')) {
+    assistantText(['Done with the first pass.'], { usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { total: 0 } } });
+  }
   endTurn();
   if (message.includes('mock:wake-after-settle')) {
     // OMP resumes on its own after settling (async work finished): a new agent run, no prompt.

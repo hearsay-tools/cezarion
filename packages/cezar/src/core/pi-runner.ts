@@ -61,10 +61,12 @@ export const PI_SPEC_SUPPORT: AgentRunSpecSupport = {
   timeoutMs: { honored: true, via: 'wall-clock kill switch on the child process' },
   sessionId: { honored: true, via: '--session-id, or --session when resume is set' },
   resume: { honored: true, via: '--session <sessionId> in place of --session-id' },
+  resumeFallbackSystemPrompt: { honored: false, reason: 'Continue already resends spec.systemPrompt on every process; a separate fallback prompt is unused' },
 };
 export class PiRunner implements AgentRunner {
   readonly backend = 'pi' as const;
   readonly specSupport = PI_SPEC_SUPPORT;
+  readonly systemPromptOnResume = 'resent' as const;
   readonly inputDelivery: InputDelivery = {
     mode: 'steer', consumption: 'observable',
     via: 'prompt with streamingBehavior steer; set_steering_mode all at session start; user message_start with the submitted text',
