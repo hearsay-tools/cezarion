@@ -85,6 +85,9 @@ describe('a crashed owner\'s claim on a settled family', () => {
       const cleanup = manager.claimForBranchCleanup([plain.id]);
       expect.soft(cleanup, 'branch cleanup').not.toBeNull();
       cleanup?.();
+      // The two claims above hold `plain` until the next save (PR #851 review: a claim is held
+      // across its async work); flush so the families they held are released again.
+      store.flush();
       // Nothing in either family is live: a dead owner's claim on it is no claim at all.
       for (const id of [parent.id, worker.id, plain.id]) expect.soft(store.runOwnership(id), `ownership of ${id}`).toBe('free');
     } finally {

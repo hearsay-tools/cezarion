@@ -86,7 +86,7 @@ import { parentReadiness } from '../delegation/readiness.ts';
 import { answersQuestion, openQuestions, questionMessage } from '../delegation/questions.ts';
 import { workerOutcome } from '../runs/delegation-state.ts';
 import { loadWorkflows } from './load.ts';
-import type { QueuedMessage, RunRecord, RunStore, StepState } from '../runs/store.ts';
+import { RUN_IN_USE_ELSEWHERE, type QueuedMessage, type RunRecord, type RunStore, type StepState } from '../runs/store.ts';
 import { isReclaimable, reclaimWorktrees, rematerializeReclaimedWorktree } from '../runs/retention.ts';
 import {
   AgentTempDirError,
@@ -3197,8 +3197,29 @@ export class RunManager {
     if (this.reclaiming.has(runId) || this.isActive(runId) || this.store.writeRefusal(runId)) return null;
     const run = this.store.getRun(runId);
     if (!run || !isReclaimable(run, (id) => this.store.getRun(id))) return null;
-    this.reclaiming.add(runId);
-    return () => { this.reclaiming.delete(runId); };
+    return this.holdForMaintenance([runId]);
+  }
+
+  /**
+   * Hold `runIds` against Continue, reclaim, publish and branch cleanup here AND in every other
+   * cezar process for the length of an async operation (#779, plan step 3; PR #851 review). An
+   * ownership check alone is a moment: pinning claims each run's family, so another process
+   * cannot claim and Continue it while this one rematerializes, publishes or deletes. Null when
+   * any hold fails (another process took the claim first); nothing stays held then.
+   */
+  private holdForMaintenance(runIds: readonly string[]): (() => void) | null {
+    const pinned: string[] = [];
+    for (const id of runIds) {
+      if (!this.store.pin(id, 'maintenance')) {
+        for (const done of pinned) this.store.unpin(done, 'maintenance');
+        return null;
+      }
+      pinned.push(id);
+    }
+    for (const id of runIds) this.reclaiming.add(id);
+    return () => {
+      for (const id of runIds) { this.reclaiming.delete(id); this.store.unpin(id, 'maintenance'); }
+    };
   }
 
   /**
@@ -3215,15 +3236,13 @@ export class RunManager {
    */
   claimForPublish(runId: string): (() => void) | null {
     if (this.reclaiming.has(runId) || this.isActive(runId) || this.store.writeRefusal(runId)) return null;
-    this.reclaiming.add(runId);
-    return () => { this.reclaiming.delete(runId); };
+    return this.holdForMaintenance([runId]);
   }
 
   claimForBranchCleanup(runIds: readonly string[]): (() => void) | null {
     const unfinished = (id: string) => !['done', 'failed', 'cancelled'].includes(this.store.getRun(id)?.status ?? 'done');
     if (runIds.some((id) => this.reclaiming.has(id) || this.isActive(id) || unfinished(id) || this.store.writeRefusal(id))) return null;
-    for (const id of runIds) this.reclaiming.add(id);
-    return () => { for (const id of runIds) this.reclaiming.delete(id); };
+    return this.holdForMaintenance(runIds);
   }
 
   /**
@@ -5021,7 +5040,11 @@ export class RunManager {
     // A finished run is loaded and held for the whole admission (#779): every read below sees
     // the record its own writes change, exactly as for a live run. Admission makes it live
     // (queued or running) or refuses it; either way the `continue` pin ends here.
-    this.store.pin(runId, 'continue');
+    // The check above is a moment: another process may claim the run before the hold lands
+    // (PR #851 review). Holding it is what claims it, so a failed hold refuses the Continue.
+    if (!this.store.pin(runId, 'continue')) {
+      return { ok: false, error: this.store.getRun(runId) ? this.store.writeRefusal(runId) ?? RUN_IN_USE_ELSEWHERE : 'not found' };
+    }
     try {
       return this.admitContinuation(runId, opts, deferForCapacity, conversation);
     } finally {

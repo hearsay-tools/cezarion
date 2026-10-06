@@ -1034,8 +1034,9 @@ export function branchOwnerOf(run: RunRecord): BranchOwner | undefined {
   };
 }
 
-/** Who may hold a run in memory besides its own record (see `RunStore.pin`). */
-export type RunPinHolder = 'active' | 'continue' | 'cleanup';
+/** Who may hold a run in memory besides its own record (see `RunStore.pin`). `maintenance` is the
+ *  RunManager's publish, worktree-reclaim and branch-cleanup claims, held across their async work. */
+export type RunPinHolder = 'active' | 'continue' | 'cleanup' | 'maintenance';
 
 /**
  * Who may change a run, as this store sees it (#779, plan step 3; `RunStore.runOwnership`):
