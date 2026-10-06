@@ -82,6 +82,8 @@ export function isCurrentProcess(entry: RecordedProcess): boolean {
 export type ProcReader = {
   readdir: () => string[]; readlink: (pid: string) => string;
   ownerUid: (pid: string) => number | undefined; startedAtMs: (pid: string) => number | undefined;
+  /** `/proc/<pid>/comm` (or argv0). Used only to skip known ambient sessions on unreadable cwd. */
+  comm?: (pid: string) => string | undefined;
 };
 let clockTicks: number | undefined;
 let bootTimeMs: number | undefined;
@@ -95,7 +97,7 @@ function procStartedAtMs(pid: string): number | undefined {
   } catch { return undefined; }
 }
 /** The darwin scan: `lsof` for working directories, `ps` for our own user's processes. */
-export type DarwinReader = { lsof: () => { ok: boolean; stdout: string }; ownProcesses: () => Array<{ pid: number; startedAtMs?: number }> | undefined };
+export type DarwinReader = { lsof: () => { ok: boolean; stdout: string }; ownProcesses: () => Array<{ pid: number; startedAtMs?: number; comm?: string }> | undefined };
 const realDarwin: DarwinReader = {
   lsof: () => {
     const lsof = spawnSync('lsof', ['-a', '-d', 'cwd', '-Fpn'], { encoding: 'utf8', timeout: 5_000, maxBuffer: 16 * 1024 * 1024 });
@@ -105,24 +107,35 @@ const realDarwin: DarwinReader = {
   ownProcesses: () => {
     const uid = process.getuid?.();
     if (uid === undefined) return undefined;
-    const ps = spawnSync('ps', ['-U', String(uid), '-o', 'pid=,stat=,lstart='], { encoding: 'utf8', timeout: 2_000, env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' } });
+    const ps = spawnSync('ps', ['-U', String(uid), '-o', 'pid=,stat=,comm=,lstart='], { encoding: 'utf8', timeout: 2_000, env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' } });
     if (ps.error || ps.status !== 0 || !ps.stdout) return undefined;
     return ps.stdout.split('\n').flatMap(line => {
-      const match = /^\s*(\d+)\s+(\S+)\s+(.+?)\s*$/.exec(line);
+      const match = /^\s*(\d+)\s+(\S+)\s+(\S+)\s+(.+?)\s*$/.exec(line);
       // `ps` lists itself, and lsof (which ran first) never saw it.
       // Zombies have exited and cannot retain a cwd, even before their parent
       // gets another event-loop turn to reap them. Other states stay conservative.
       if (!match || Number(match[1]) === ps.pid || match[2]!.startsWith('Z')) return [];
-      const startedAtMs = Date.parse(`${match[3]} UTC`);
-      return [{ pid: Number(match[1]), ...(Number.isFinite(startedAtMs) ? { startedAtMs } : {}) }];
+      const startedAtMs = Date.parse(`${match[4]} UTC`);
+      return [{ pid: Number(match[1]), comm: match[3], ...(Number.isFinite(startedAtMs) ? { startedAtMs } : {}) }];
     });
   },
 };
+const AMBIENT_SESSION_COMMS = new Set(['sshd', 'sshd-session', 'sftp-server']);
+/** Login/sftp sessions are non-dumpable on every Linux box. Unreadable cwd plus a later start
+ *  would otherwise block destroy of every older worker (ansible, grokbots, a new SSH). */
+function isAmbientSessionComm(raw: string | undefined): boolean {
+  if (!raw) return false;
+  const token = raw.trim().split(/[\s:]/, 1)[0] ?? '';
+  const name = token.split('/').pop() ?? '';
+  return AMBIENT_SESSION_COMMS.has(name);
+}
+
 const realProc: ProcReader = {
   readdir: () => readdirSync('/proc'),
   readlink: pid => readlinkSync(`/proc/${pid}/cwd`),
   ownerUid: pid => { try { return statSync(`/proc/${pid}`).uid; } catch { return undefined; } },
   startedAtMs: procStartedAtMs,
+  comm: pid => { try { return readFileSync(`/proc/${pid}/comm`, 'utf8').trimEnd(); } catch { return undefined; } },
 };
 
 /** PIDs (never this process) whose working directory is one of `dirs` or beneath it, in one scan
@@ -154,15 +167,19 @@ function scanCwd(dirs: string | readonly string[], platform: NodeJS.Platform, pr
         // A vanished process is gone; another user's is unreadable by design and skipped. Our own
         // user's non-dumpable processes are unreadable too (systemd --user, sshd, gpg-agent, which
         // every host has), so they cannot all block the proof: one that started before the worker
-        // existed cannot be its descendant. A later one is a possible holder, never signalled.
+        // existed cannot be its descendant. A later one is a possible holder, never signalled,
+        // except login/sftp sessions (sshd, sshd-session, sftp-server): a new SSH after the worker
+        // is ambient, not a descendant, and would otherwise block destroy of every leftover worktree.
         if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
         const owner = proc.ownerUid(entry);
         if (uid !== undefined && owner !== undefined && owner !== uid) continue;
+        const code = (error as NodeJS.ErrnoException).code;
+        if ((code === 'EACCES' || code === 'EPERM') && isAmbientSessionComm(proc.comm?.(entry))) continue;
         const started = since === undefined ? undefined : proc.startedAtMs(entry);
         if (started === undefined || started >= since!) {
           candidates.push(Number(entry)); all.push(Number(entry));
           if (owner === undefined || uid === undefined || started === undefined ||
-            !['EACCES', 'EPERM'].includes((error as NodeJS.ErrnoException).code ?? '')) uncertain = true;
+            !['EACCES', 'EPERM'].includes(code ?? '')) uncertain = true;
         }
       }
     }
@@ -178,11 +195,12 @@ function scanCwd(dirs: string | readonly string[], platform: NodeJS.Platform, pr
     else if (line.startsWith('n') && pid !== undefined && pid !== process.pid && under(line.slice(1))) { found.push(pid); all.push(pid); }
   }
   // lsof silently omits what it cannot read. An own-user process it omitted is judged by the
-  // Linux EACCES rule: a possible holder unless it predates the worker. Other users' are skipped.
+  // Linux EACCES rule: a possible holder unless it predates the worker or is a login/sftp session.
   const own = darwin.ownProcesses();
   if (!own) return 'unknown';
   for (const entry of own) {
     if (seen.has(entry.pid) || entry.pid === process.pid) continue;
+    if (isAmbientSessionComm(entry.comm)) continue;
     if (since === undefined || entry.startedAtMs === undefined || entry.startedAtMs >= since) { candidates.push(entry.pid); all.push(entry.pid); }
   }
   return { pids: [...new Set(found)], candidates, all, uncertain };
@@ -223,7 +241,8 @@ export function workerProcessCutoff(createdAt: string): number | undefined {
  * the caller deletes and passes `holdersSince` (`workerProcessCutoff`). Then an unreadable process
  * that predates the worker is ambient (login `sshd`, `systemd --user`, `gpg-agent`) and is
  * skipped, as execution proof skips it (hearsay-tools/cezarion#858). Readable cwds under `paths`, live
- * recorded processes and later unreadable ones still block. `since` is ignored here. */
+ * recorded processes and later unreadable ones still block, except unreadable login/sftp
+ * sessions (`sshd`, `sshd-session`, `sftp-server`). `since` is ignored here. */
 export function inspectGeneration(input: { record?: WorkerProcessRecord; paths: readonly string[]; since?: number; holdersSince?: number }): GenerationProbe {
   return inspect({ ...input, since: input.holdersSince });
 }

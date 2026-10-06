@@ -82,9 +82,11 @@ A synchronous, dependency-free module (a sync probe lets `continueRun` stay sync
   unreadable process of our own user is non-dumpable (`systemd --user`, `sshd`,
   `gpg-agent`). It counts as a possible holder, reported by PID and never signalled, unless it
   started before the worker's record was created (`since`, from `/proc/stat` btime plus
-  starttime ticks). A process that old cannot be the worker's descendant, and every host has
-  some. The cutoff is the worker's creation, not the current generation's start, because an
-  earlier generation can leave a daemon holding the worktree.
+  starttime ticks) or its comm/argv0 is a login/sftp session (`sshd`, `sshd-session`,
+  `sftp-server`). A process that old cannot be the worker's descendant, and every host has
+  some; a later SSH login is the same class of ambient session. The cutoff is the worker's
+  creation, not the current generation's start, because an earlier generation can leave a
+  daemon holding the worktree.
 
   **Execution and resource proofs are separate (hearsay-tools/cezarion#738, approved revision).** A valid Linux
   controller boot UUID different from the current readable boot UUID proves old descendants
@@ -105,9 +107,13 @@ A synchronous, dependency-free module (a sync probe lets `continueRun` stay sync
   (`workerResourceHolders(..., { deleting: true })`) and to the scan right before
   `git worktree remove`. An unreadable own-user process that started before the worker is
   ambient (login `sshd`, `systemd --user`, `gpg-agent`) and no longer blocks deletion; without
-  this, destroy never completed on a normal Linux host. A later unreadable process, a readable
-  cwd under the path and a live recorded process still block, and the incomplete destroy error
-  names their PIDs. Accepted risk, the same as execution proof's: an unreadable process older than
+  this, destroy never completed on a normal Linux host. Unreadable login/sftp sessions
+  (`sshd`, `sshd-session`, `sftp-server`) are skipped even when they started after the worker:
+  a later SSH/Ansible/sftp login is ambient on every host, not a descendant, and would otherwise
+  block destroy of every leftover worktree. A later unreadable process that is not one of those
+  sessions, a readable cwd under the path and a live recorded process still block, and the
+  incomplete destroy error names their PIDs. If cwd is readable and under the path, even `sshd`
+  still blocks. Accepted risk, the same as execution proof's: an unreadable process older than
   the worker that later changed into its worktree is deleted under. Reuse/admission, scratch
   cleanup, history deletion and reclaim keep the scan with no age exclusion.
   Only a fresh clear scan plus generation/resource ownership permits deletion or reuse.
@@ -116,7 +122,7 @@ A synchronous, dependency-free module (a sync probe lets `continueRun` stay sync
 
   macOS uses
   `lsof -a -d cwd -Fpn` with a bounded timeout. `lsof` silently omits processes it cannot
-  read, so any process of our user (`ps -U <uid> -o pid=,lstart=`, minus `ps` itself) missing
+  read, so any process of our user (`ps -U <uid> -o pid=,stat=,comm=,lstart=`, minus `ps` itself) missing
   from its output is judged by the same rule. Without that `ps` list the scan is `unknown`.
   It excludes
   `process.pid`, compares realpaths, and matches a dir itself or anything beneath it. cezar's own

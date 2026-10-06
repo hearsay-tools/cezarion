@@ -94,6 +94,31 @@ describe('process liveness (#469)', () => {
     expect(processesWithCwdUnder(tmpdir(), 'linux', vanished, since)).toEqual([]);
   });
 
+  it('skips later unreadable sshd/sftp sessions; other later unreadable comms still hold', () => {
+    const denied = () => { throw Object.assign(new Error('EACCES'), { code: 'EACCES' }); };
+    const uid = process.getuid?.() ?? 1000;
+    const since = Date.now();
+    const proc = (comm: string | undefined) => ({
+      readdir: () => ['7'], readlink: denied, ownerUid: () => uid, startedAtMs: () => since + 5_000,
+      comm: () => comm,
+    });
+    expect(processesWithCwdUnder(tmpdir(), 'linux', proc('sshd'), since)).toEqual([]);
+    expect(processesWithCwdUnder(tmpdir(), 'linux', proc('sshd-session'), since)).toEqual([]);
+    expect(processesWithCwdUnder(tmpdir(), 'linux', proc('sftp-server'), since)).toEqual([]);
+    expect(processesWithCwdUnder(tmpdir(), 'linux', proc('/usr/sbin/sshd'), since)).toEqual([]);
+    expect(processesWithCwdUnder(tmpdir(), 'linux', proc('sshd: agent@notty'), since)).toEqual([]);
+    expect(processesWithCwdUnder(tmpdir(), 'linux', proc('gpg-agent'), since)).toEqual([7]);
+    expect(processesWithCwdUnder(tmpdir(), 'linux', proc(undefined), since)).toEqual([7]);
+  });
+
+  it('still treats sshd as a holder when its cwd is readable under the worktree', () => {
+    const proc = {
+      readdir: () => ['7'], readlink: () => '/worker', ownerUid: () => process.getuid?.() ?? 1000,
+      startedAtMs: () => Date.now(), comm: () => 'sshd',
+    };
+    expect(processesWithCwdUnder('/worker', 'linux', proc)).toEqual([7]);
+  });
+
   it('darwin: an own-user process lsof could not read counts like an unreadable Linux one', () => {
     const since = Date.now();
     const linuxUnused = { readdir: () => [], readlink: () => '', ownerUid: () => undefined, startedAtMs: () => undefined };
@@ -108,6 +133,25 @@ describe('process liveness (#469)', () => {
     // Completeness cannot be judged without our own process list, and a failed lsof proves nothing.
     expect(processesWithCwdUnder(dir, 'darwin', linuxUnused, since, darwin(lsof, undefined))).toBe('unknown');
     expect(processesWithCwdUnder(dir, 'darwin', linuxUnused, since, darwin('', [], false))).toBe('unknown');
+  });
+
+  it('darwin: skips later unreadable sshd/sftp sessions omitted from lsof', () => {
+    const since = Date.now();
+    const linuxUnused = { readdir: () => [], readlink: () => '', ownerUid: () => undefined, startedAtMs: () => undefined };
+    const dir = tmpdir();
+    const lsof = `p10\nn/\np11\nn${dir}\n`;
+    const darwin = (own: { pid: number; startedAtMs?: number; comm?: string }[]) => ({
+      lsof: () => ({ ok: true, stdout: lsof }), ownProcesses: () => own,
+    });
+    expect(processesWithCwdUnder(dir, 'darwin', linuxUnused, since, darwin([
+      { pid: 10 }, { pid: 11 }, { pid: 12, startedAtMs: since + 5_000, comm: 'sshd' },
+    ]))).toEqual([11]);
+    expect(processesWithCwdUnder(dir, 'darwin', linuxUnused, since, darwin([
+      { pid: 10 }, { pid: 11 }, { pid: 13, startedAtMs: since + 5_000, comm: 'sftp-server' },
+    ]))).toEqual([11]);
+    expect(processesWithCwdUnder(dir, 'darwin', linuxUnused, since, darwin([
+      { pid: 10 }, { pid: 11 }, { pid: 14, startedAtMs: since + 5_000, comm: 'gpg-agent' },
+    ]))).toEqual([11, 14]);
   });
 
   it('darwin: exited zombies cannot hold a cwd, while unreadable live processes remain candidates', () => {
