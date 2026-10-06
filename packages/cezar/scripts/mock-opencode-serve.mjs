@@ -177,7 +177,7 @@ const server = createServer((req, res) => {
         const text = JSON.parse(body).parts.map(part => part.text ?? '').join('\n');
         const userId = `msg_steer_user_${++steerSerial}`;
         // #505 review: acknowledge a steer later than the runner's lost-wake window.
-        const ackDelay = text.includes('delay-owned-ack') ? 250 : Number(process.env.CEZ_MOCK_OPENCODE_STEER_ACK_MS ?? 0);
+        const ackDelay = Number(process.env.CEZ_MOCK_OPENCODE_STEER_ACK_MS ?? 0);
         if (ackDelay > 0) setTimeout(() => { res.writeHead(204); res.end(); }, ackDelay);
         else { res.writeHead(204); res.end(); }
         send({ type: 'message.updated', properties: { info: { id: userId, sessionID: SESSION_ID, role: 'user', time: { created: Date.now() } } } });
@@ -194,7 +194,7 @@ const server = createServer((req, res) => {
         // Keep the portable answer HTTP request unacknowledged while its SSE turn finishes.
       } else if (autonomousCap && body.includes('Continue working autonomously until the task is fully complete.')) {
         setTimeout(() => res.end(JSON.stringify({ info: info({}), parts: [] })), 100);
-      } else if (body.includes('delay-owned-ack')) {
+      } else if (body.includes('f7-delay-ack')) {
         // F7: SSE turn-end before HTTP ACK so parkAfterAck applies the silent-tail nudge.
         setTimeout(() => res.end(JSON.stringify({ info: info({}), parts: [] })), 250);
       } else {
@@ -211,6 +211,7 @@ const server = createServer((req, res) => {
           beats.unref?.();
           return;
         }
+        if (silent.isLateNudge(prompt)) await silent.sleep(silent.LATE_REPLY_MS);
       }
       if (url.endsWith('/prompt_async')) {
         currentUserId = `msg_user_${++steerSerial}`;
@@ -409,7 +410,11 @@ const server = createServer((req, res) => {
           if (kind === 'silent') {
             send({ type: 'message.part.updated', properties: { part: { id: 'silent-nudge-rsn', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'reasoning', text: silent.SILENT_TAIL_REASONING, time: { start: 1, end: 2 } } } });
           } else {
-            const text = kind === 'done' ? silent.SILENT_TAIL_DONE : silent.FINAL_MESSAGE_STANDING;
+            if (kind === 'slow-done') {
+              send({ type: 'message.part.updated', properties: { part: { id: 'silent-nudge-prefix', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text', text: silent.SLOW_DONE_PREFIX, time: { start: 1, end: 2 } } } });
+              await silent.sleep(silent.SLOW_DONE_TAIL_MS);
+            }
+            const text = kind === 'standing' ? silent.FINAL_MESSAGE_STANDING : silent.SILENT_TAIL_DONE;
             send({ type: 'message.part.updated', properties: { part: { id: 'silent-nudge-done', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text', text, time: { start: 1, end: 2 } } } });
           }
           send({ type: 'session.idle', properties: { sessionID: SESSION_ID } });

@@ -66,6 +66,8 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  * | `silent-tail-again` | the same first turn; a final-message nudge is answered with reasoning only |
  * | `silent-tail-ack-delay` | silent-tail as a follow-up whose transport ACK is held until after turn-end |
  * | `silent-tail-no-reply` | the same first turn; a final-message nudge is ACKed and never opens a turn |
+ * | `silent-tail-late-reply` | the same first turn; a final-message nudge is ACKed, then replies after the bound |
+ * | `silent-tail-slow-done` | the same first turn; a nudge reply starts before the bound and ends after it |
  */
 export const SCENARIOS = [
   'auto-resumed',
@@ -85,6 +87,8 @@ export const SCENARIOS = [
   'silent-tail-again',
   'silent-tail-ack-delay',
   'silent-tail-no-reply',
+  'silent-tail-late-reply',
+  'silent-tail-slow-done',
   'tool-tail',
   'baseline',
   'done',
@@ -182,6 +186,8 @@ export const FINAL_MESSAGE_CRITERIA = [
   { id: 'F6', scenario: 'tool-tail', name: 'keeps an autonomous silent tail running without a final-message nudge' },
   { id: 'F7', scenario: 'silent-tail-ack-delay', name: 'nudges a silent tail after a delayed ACK' },
   { id: 'F8', scenario: 'silent-tail-no-reply', name: 'parks waiting when a nudge is ACKed without a turn' },
+  { id: 'F9', scenario: 'silent-tail-late-reply', name: 'resumes when a nudge reply arrives after the bound' },
+  { id: 'F10', scenario: 'silent-tail-slow-done', name: 'content that starts before the bound clears it' },
 ] as const;
 
 export interface HarnessAdapter {
@@ -229,6 +235,8 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'silent-tail': 'mock:silent-tail',
       'silent-tail-again': 'mock:silent-tail-again',
       'silent-tail-no-reply': 'mock:silent-tail-no-reply',
+      'silent-tail-late-reply': 'mock:silent-tail-late-reply',
+      'silent-tail-slow-done': 'mock:silent-tail-slow-done',
       'tool-tail': 'mock:tool-tail',
       baseline: BASELINE_PROMPT,
       'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
@@ -270,6 +278,8 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'silent-tail': 'mock:silent-tail',
       'silent-tail-again': 'mock:silent-tail-again',
       'silent-tail-no-reply': 'mock:silent-tail-no-reply',
+      'silent-tail-late-reply': 'mock:silent-tail-late-reply',
+      'silent-tail-slow-done': 'mock:silent-tail-slow-done',
       'tool-tail': 'mock:tool-tail',
       baseline: BASELINE_PROMPT,
       'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
@@ -312,8 +322,10 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'autonomous-readiness-idle': 'mock:autonomous-readiness-idle',
       'silent-tail': 'mock:silent-tail',
       'silent-tail-again': 'mock:silent-tail-again',
-      'silent-tail-ack-delay': 'mock:silent-tail delay-owned-ack',
+      'silent-tail-ack-delay': 'mock:silent-tail f7-delay-ack',
       'silent-tail-no-reply': 'mock:silent-tail-no-reply',
+      'silent-tail-late-reply': 'mock:silent-tail-late-reply',
+      'silent-tail-slow-done': 'mock:silent-tail-slow-done',
       'tool-tail': 'mock:tool-tail',
       baseline: BASELINE_PROMPT,
       'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
@@ -353,6 +365,9 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'autonomous-ask-cap': 'mock:autonomous-ask-cap',
       'silent-tail': 'mock:silent-tail',
       'silent-tail-again': 'mock:silent-tail-again',
+      'silent-tail-no-reply': 'mock:silent-tail-no-reply',
+      'silent-tail-late-reply': 'mock:silent-tail-late-reply',
+      'silent-tail-slow-done': 'mock:silent-tail-slow-done',
       'tool-tail': 'mock:tool-tail',
       baseline: BASELINE_PROMPT,
       'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
@@ -404,6 +419,8 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'ask-bad': 'mock:ask-bad',
       'steer-tool': 'mock:steer-tool',
       'steer-late': 'mock:steer-late',
+      'silent-tail-late-reply': 'mock:silent-tail-late-reply',
+      'silent-tail-slow-done': 'mock:silent-tail-slow-done',
       // No `subagent`: see the S9 and R12 entries in PARITY_EXEMPTIONS.
     },
   },
@@ -424,6 +441,8 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'silent-tail': 'mock:silent-tail',
       'silent-tail-again': 'mock:silent-tail-again',
       'silent-tail-no-reply': 'mock:silent-tail-no-reply',
+      'silent-tail-late-reply': 'mock:silent-tail-late-reply',
+      'silent-tail-slow-done': 'mock:silent-tail-slow-done',
       'tool-tail': 'mock:tool-tail',
       baseline: BASELINE_PROMPT,
       'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
@@ -509,10 +528,6 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
     criterion: 'F7', backend, kind: 'scenario-unconstructible' as const,
     reason: 'This wire has no separate HTTP ACK retained after turn completion. Turn frames and the transport ACK share one stream, so a silent-tail turn cannot end while its agent-input ACK is still pending.',
   })),
-  {
-    criterion: 'F8', backend: 'cursor', kind: 'scenario-unconstructible' as const,
-    reason: 'Cursor ACP emits turn.started locally when session/prompt is written (cursor-acp-runner startTurn), so an ACK without opening a turn cannot be constructed.',
-  },
   {
     criterion: 'A9', backend: 'claude', kind: 'capability-absent',
     reason: 'Claude stream-json uses the turn-end CEZ:ASK fallback; its ask wire emits no native mid-turn ask.requested (A3/A4 cover the portable policy).',

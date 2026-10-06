@@ -125,12 +125,17 @@ async function handle(command) {
     silent.noteSilentTailPrompt(command.message);
     if (silent.isFinalMessageNudge(command.message)) {
       send({ id: command.id, type: 'response', command: 'prompt', success: true });
-      if (silent.finalMessageNudgeKind() === 'ack-only') return;
+      const kind = silent.finalMessageNudgeKind();
+      if (kind === 'ack-only') return;
+      if (kind === 'late') await silent.sleep(silent.LATE_REPLY_MS);
       send({ type: 'agent_start' });
       send({ type: 'turn_start' });
-      const kind = silent.finalMessageNudgeKind();
       if (kind === 'silent') sendThinking(silent.SILENT_TAIL_REASONING);
-      else sendText([kind === 'done' ? silent.SILENT_TAIL_DONE : silent.FINAL_MESSAGE_STANDING]);
+      else if (kind === 'slow-done') {
+        sendText([silent.SLOW_DONE_PREFIX]);
+        await silent.sleep(silent.SLOW_DONE_TAIL_MS);
+        sendText([silent.SILENT_TAIL_DONE]);
+      } else sendText([kind === 'standing' ? silent.FINAL_MESSAGE_STANDING : silent.SILENT_TAIL_DONE]);
       sendTurnEnd();
       return;
     }

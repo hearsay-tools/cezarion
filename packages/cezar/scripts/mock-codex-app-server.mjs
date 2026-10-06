@@ -208,6 +208,7 @@ rl.on('line', async (line) => {
       const silent = await import('./mock-silent-tail.mjs');
       silent.noteSilentTailPrompt(turnText);
       if (silent.isAckOnlyNudge(turnText)) return;
+      if (silent.isLateNudge(turnText)) await silent.sleep(silent.LATE_REPLY_MS);
     }
     if (!turnText.includes('mock:no-progress-ack-only')) {
     emit({ method: 'turn/started', params: { turn: { id: 'turn_mock_1', status: 'inProgress', items: [] } } });
@@ -238,7 +239,11 @@ rl.on('line', async (line) => {
         if (kind === 'silent') {
           emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'reasoning', id: 'silent-nudge-rsn', summary: silent.SILENT_TAIL_REASONING, content: silent.SILENT_TAIL_REASONING } } });
         } else {
-          const text = kind === 'done' ? silent.SILENT_TAIL_DONE : silent.FINAL_MESSAGE_STANDING;
+          if (kind === 'slow-done') {
+            emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: 'silent-nudge-prefix', text: silent.SLOW_DONE_PREFIX } } });
+            await silent.sleep(silent.SLOW_DONE_TAIL_MS);
+          }
+          const text = kind === 'standing' ? silent.FINAL_MESSAGE_STANDING : silent.SILENT_TAIL_DONE;
           emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: 'silent-nudge-done', text } } });
         }
         emit({ method: 'turn/completed', params: { threadId: 'th_mock_1', turn: { id: 'turn_mock_1', status: 'completed' } } });

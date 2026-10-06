@@ -169,6 +169,62 @@ describe('autonomous nudge priority and lifecycle guards', () => {
     expect(store.readEvents(id).some(e => e.type === 'note' && String(e.message).includes('no final message'))).toBe(false);
   });
 
+  it('nested subagent items do not clear the final-message nudge reply bound', () => {
+    state.finalMessageNudged = session;
+    manager['active'].set(id, state);
+    manager['armFinalMessageNudgeReplyTimer'](id, state);
+    expect(state.finalMessageNudgeReplyTimer).toBeDefined();
+    manager['noteFinalMessageNudgeContent'](id, state, {
+      type: 'item.started',
+      item: { parentItemId: 'parent' },
+    });
+    expect(state.finalMessageNudgeReplyTimer).toBeDefined();
+    manager['noteFinalMessageNudgeContent'](id, state, { type: 'item.delta' });
+    expect(state.finalMessageNudgeReplyTimer).toBeDefined();
+    manager['noteFinalMessageNudgeContent'](id, state, {
+      type: 'item.started',
+      item: {},
+    });
+    expect(state.finalMessageNudgeReplyTimer).toBeUndefined();
+  });
+
+  it('text before the reply timer is armed still prevents parking', () => {
+    state.finalMessageNudged = session;
+    manager['active'].set(id, state);
+    manager['noteFinalMessageNudgeContent'](id, state, { type: 'text' });
+    manager['armFinalMessageNudgeReplyTimer'](id, state);
+    expect(state.finalMessageNudgeReplyTimer).toBeUndefined();
+  });
+
+  it('turn.started before the reply timer is armed does not count as a nudge reply', () => {
+    state.finalMessageNudged = session;
+    manager['active'].set(id, state);
+    manager['noteFinalMessageNudgeContent'](id, state, { type: 'turn.started' });
+    manager['armFinalMessageNudgeReplyTimer'](id, state);
+    expect(state.finalMessageNudgeReplyTimer).toBeDefined();
+    manager['noteFinalMessageNudgeContent'](id, state, { type: 'turn.started' });
+    expect(state.finalMessageNudgeReplyTimer).toBeUndefined();
+  });
+
+  it('user-authored delivery resets the final-message nudge latch', () => {
+    state.finalMessageNudged = session;
+    manager['active'].set(id, state);
+    expect(manager['deliverMessage'](id, [{ type: 'text', text: 'please continue' }], true)).toBe(true);
+    expect(state.finalMessageNudged).toBeUndefined();
+  });
+
+  it('expiry parks without resetting the final-message nudge latch', async () => {
+    vi.useFakeTimers();
+    state.finalMessageNudged = session;
+    manager['active'].set(id, state);
+    (manager as unknown as { finalMessageNudgeReplyMs: number }).finalMessageNudgeReplyMs = 300;
+    manager['armFinalMessageNudgeReplyTimer'](id, state);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(state.finalMessageNudged).toBe(session);
+    expect(state.finalMessageNudgeParked).toBe(session);
+    expect(store.getRun(id)?.status).toBe('waiting');
+  });
+
   it('a transport exception fails without retaining a readiness retry', () => {
     pendingBoundary();
     vi.mocked(session.sendAgentMessage).mockImplementation(() => { throw new Error('failed transport'); });

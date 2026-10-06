@@ -9,8 +9,13 @@ import { handoffPath } from '../handoff.ts';
 
 const nudgeNotes = (events: readonly Record<string, unknown>[]) =>
   events.filter(e => e.type === 'note' && String(e.message).includes('no final message'));
+const noReplyNotes = (events: readonly Record<string, unknown>[]) =>
+  events.filter(e => e.type === 'note' && String(e.message).includes('no reply to the final-message nudge'));
 const autonomousNotes = (events: readonly Record<string, unknown>[]) =>
   events.filter(e => e.type === 'note' && String(e.message).includes('continuing without pausing'));
+const shortenNudgeBound = (manager: { finalMessageNudgeReplyMs?: number }) => {
+  manager.finalMessageNudgeReplyMs = 300;
+};
 
 function lastTopLevelTail(events: readonly UiEvent[]): Extract<UiEvent, { type: 'item.completed' }>['item'] | undefined {
   const completed = events.filter((e): e is Extract<UiEvent, { type: 'item.completed' }> =>
@@ -82,7 +87,7 @@ describe('final-message nudge parity — #544', () => {
         }
         it(`${backend} ${row.id} ${row.name}`, async () => {
           await withOwnedInputRun(backend, 'silent-tail-no-reply', async ({ store, manager, runId, repoRoot }) => {
-            (manager as unknown as { finalMessageNudgeReplyMs: number }).finalMessageNudgeReplyMs = 300;
+            shortenNudgeBound(manager as unknown as { finalMessageNudgeReplyMs?: number });
             const handoff = handoffPath(join(repoRoot, '.ai/cezar'), runId);
             const startSeq = store.readEvents(runId).length;
             manager.enqueueOwnedRun(runId);
@@ -95,8 +100,42 @@ describe('final-message nudge parity — #544', () => {
             await waitFor(() => store.getRun(runId)?.status === 'waiting');
             expect(manager['busySlots']()).toBe(0);
             expect(nudgeNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(1);
-            expect(store.readEvents(runId).some(e => e.type === 'note' && String(e.message).includes('no reply to the final-message nudge'))).toBe(true);
+            expect(noReplyNotes(store.readEvents(runId))).toHaveLength(1);
             expect(readFileSync(handoff, 'utf8')).toContain('status=waiting');
+          });
+        }, 30_000);
+        continue;
+      }
+      if (row.id === 'F9') {
+        it(`${backend} ${row.id} ${row.name}`, async () => {
+          await withOwnedInputRun(backend, 'silent-tail-late-reply', async ({ store, manager, runId }) => {
+            shortenNudgeBound(manager as unknown as { finalMessageNudgeReplyMs?: number });
+            const startSeq = store.readEvents(runId).length;
+            manager.enqueueOwnedRun(runId);
+            await waitFor(() => noReplyNotes(store.readEvents(runId).slice(startSeq)).length === 1);
+            expect(store.getRun(runId)?.status).toBe('waiting');
+            expect(manager['busySlots']()).toBe(0);
+            await waitFor(() => store.getRun(runId)?.status === 'running');
+            expect(manager['busySlots']()).toBe(1);
+            await waitFor(() => store.getRun(runId)?.status === 'done');
+            expect(nudgeNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(1);
+            expect(noReplyNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(1);
+          });
+        }, 30_000);
+        continue;
+      }
+      if (row.id === 'F10') {
+        it(`${backend} ${row.id} ${row.name}`, async () => {
+          await withOwnedInputRun(backend, 'silent-tail-slow-done', async ({ store, manager, runId, repoRoot }) => {
+            shortenNudgeBound(manager as unknown as { finalMessageNudgeReplyMs?: number });
+            const handoff = handoffPath(join(repoRoot, '.ai/cezar'), runId);
+            const startSeq = store.readEvents(runId).length;
+            manager.enqueueOwnedRun(runId);
+            await waitFor(() => store.getRun(runId)?.status === 'done' || store.getRun(runId)?.status === 'waiting');
+            expect(store.getRun(runId)?.status).toBe('done');
+            expect(nudgeNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(1);
+            expect(noReplyNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(0);
+            expect(readFileSync(handoff, 'utf8')).toContain('status=running (final message nudge)');
           });
         }, 30_000);
         continue;

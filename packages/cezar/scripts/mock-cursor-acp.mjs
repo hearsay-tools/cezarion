@@ -75,8 +75,16 @@ async function prompt(id, content) {
     silent.noteSilentTailPrompt(input);
     if (silent.isFinalMessageNudge(input)) {
       const kind = silent.finalMessageNudgeKind();
+      if (kind === 'ack-only') return;
+      if (kind === 'late') await silent.sleep(silent.LATE_REPLY_MS);
       if (kind === 'silent') update({ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: silent.SILENT_TAIL_REASONING } });
-      else text(kind === 'done' ? silent.SILENT_TAIL_DONE : silent.FINAL_MESSAGE_STANDING);
+      else {
+        if (kind === 'slow-done') {
+          text(silent.SLOW_DONE_PREFIX);
+          await silent.sleep(silent.SLOW_DONE_TAIL_MS);
+        }
+        text(kind === 'standing' ? silent.FINAL_MESSAGE_STANDING : silent.SILENT_TAIL_DONE);
+      }
       complete(id); return;
     }
     if (silent.isSilentTailScenario(input)) {

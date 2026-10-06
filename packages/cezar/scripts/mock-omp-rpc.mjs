@@ -349,9 +349,18 @@ async function prompt(command) {
     const silentEarly = await import('./mock-silent-tail.mjs');
     silentEarly.noteSilentTailPrompt(message);
     if (silentEarly.isAckOnlyNudge(message)) { respond(command); return; }
-  }
+    if (silentEarly.isLateNudge(message)) {
+      respond(command);
+      await silentEarly.sleep(silentEarly.LATE_REPLY_MS);
+      beginTurn(command);
+    } else {
+      respond(command);
+      beginTurn(command);
+    }
+  } else {
   respond(command);
   beginTurn(command);
+  }
   if (message.includes('mock:turn-messages:')) {
     const { turnMessages } = await import('./mock-turn-messages.mjs');
     // Separate assistant messages within one native OMP turn; settle only after all of them.
@@ -376,7 +385,11 @@ async function prompt(command) {
     if (silent.isFinalMessageNudge(message)) {
       const kind = silent.finalMessageNudgeKind();
       if (kind === 'silent') assistantThinking(silent.SILENT_TAIL_REASONING);
-      else assistantText([kind === 'done' ? silent.SILENT_TAIL_DONE : silent.FINAL_MESSAGE_STANDING]);
+      else if (kind === 'slow-done') {
+        assistantText([silent.SLOW_DONE_PREFIX]);
+        await silent.sleep(silent.SLOW_DONE_TAIL_MS);
+        assistantText([silent.SILENT_TAIL_DONE]);
+      } else assistantText([kind === 'standing' ? silent.FINAL_MESSAGE_STANDING : silent.SILENT_TAIL_DONE]);
       endTurn();
       return;
     }

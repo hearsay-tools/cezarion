@@ -136,11 +136,16 @@ async function respond(userText, imageCount, uuid) {
     if (silent.isFinalMessageNudge(userText)) {
       const kind = silent.finalMessageNudgeKind();
       if (kind === 'ack-only') return;
+      if (kind === 'late') await silent.sleep(silent.LATE_REPLY_MS);
       if (kind === 'silent') {
         emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'thinking', thinking: silent.SILENT_TAIL_REASONING }] } });
         emit({ type: 'result', subtype: 'success', result: '', user_message_uuids: [uuid].filter(Boolean), usage: { input_tokens: 10, output_tokens: 5 } });
       } else {
-        const text = kind === 'done' ? silent.SILENT_TAIL_DONE : silent.FINAL_MESSAGE_STANDING;
+        if (kind === 'slow-done') {
+          emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: silent.SLOW_DONE_PREFIX }] } });
+          await silent.sleep(silent.SLOW_DONE_TAIL_MS);
+        }
+        const text = kind === 'standing' ? silent.FINAL_MESSAGE_STANDING : silent.SILENT_TAIL_DONE;
         emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } });
         emit({ type: 'result', subtype: 'success', result: text, user_message_uuids: [uuid].filter(Boolean), usage: { input_tokens: 10, output_tokens: 5 } });
       }
