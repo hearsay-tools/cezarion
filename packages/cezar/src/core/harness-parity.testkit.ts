@@ -175,6 +175,7 @@ export const FINAL_MESSAGE_CRITERIA = [
   { id: 'F3', scenario: 'silent-tail-again', name: 'never completes from reasoning that names CEZ:DONE' },
   { id: 'F4', scenario: 'tool-tail', name: 'nudges a markerless message-then-tool tail once' },
   { id: 'F5', scenario: 'done', name: 'honors DONE without a final-message nudge' },
+  { id: 'F6', scenario: 'tool-tail', name: 'keeps an autonomous silent tail running without a final-message nudge' },
 ] as const;
 
 export interface HarnessAdapter {

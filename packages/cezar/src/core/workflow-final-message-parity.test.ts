@@ -46,9 +46,18 @@ describe('final-message nudge parity — #544', () => {
               manager.finish(runId);
               await waitFor(() => !manager.isActive(runId));
             }
+            if (row.id === 'F6') store.updateRun(runId, { autonomous: true });
             const startSeq = store.readEvents(runId).length;
             if (mode === 'continuation') expect(manager.continueRun(runId, { text: promptFor(backend, row.scenario) }).ok).toBe(true);
             else manager.enqueueOwnedRun(runId);
+            if (row.id === 'F6') {
+              await waitFor(() => autonomousNotes(store.readEvents(runId).slice(startSeq)).length >= 1);
+              expect(store.getRun(runId)?.status).toBe('running');
+              expect(manager['busySlots']()).toBe(1);
+              expect(manager['active'].get(runId)?.idleTimer).toBeUndefined();
+              expect(nudgeNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(0);
+              return;
+            }
             await waitFor(() => store.getRun(runId)?.status === 'waiting' || ['done', 'review', 'failed'].includes(store.getRun(runId)?.status ?? '') || store.getRun(runId)?.activity === 'monitoring');
             const events = store.readEvents(runId).slice(startSeq);
             const notes = nudgeNotes(events);
@@ -58,11 +67,23 @@ describe('final-message nudge parity — #544', () => {
               expect(notes).toHaveLength(1);
               expect(autonomousNotes(events)).toHaveLength(0);
               expect(readFileSync(handoff, 'utf8')).toContain('status=running (final message nudge)');
-            } else if (row.id === 'F2' || row.id === 'F3') {
+            } else if (row.id === 'F2') {
               expect(status).toBe('waiting');
               expect(status).not.toBe('done');
               expect(notes).toHaveLength(1);
               expect(autonomousNotes(events)).toHaveLength(0);
+            } else if (row.id === 'F3') {
+              const all = store.readEvents(runId);
+              expect(status).toBe('waiting');
+              expect(status).not.toBe('done');
+              expect(all.some(e => e.type === 'lifecycle' && String(e.message).includes('goal achieved'))).toBe(false);
+              expect(notes).toHaveLength(1);
+              expect(autonomousNotes(events)).toHaveLength(0);
+              expect(all.some(e => {
+                if (e.type !== 'item.completed') return false;
+                const item = e.item as { kind?: string; text?: string } | undefined;
+                return item?.kind === 'reasoning' && (item.text ?? '').includes('CEZ:DONE');
+              })).toBe(true);
             } else if (row.id === 'F4') {
               expect(status).toBe('waiting');
               expect(notes).toHaveLength(1);
