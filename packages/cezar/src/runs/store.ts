@@ -18,7 +18,7 @@ import { refreshHumanAskSummary } from './human-ask-summary.ts';
 import { workerExecutionIdentitySchema, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
 import { reconcileWorkerWait } from '../delegation/wait.ts';
 import { capacityError, workerCapacity } from '../delegation/capacity.ts';
-import { inspectGeneration, isCurrentProcess, recordedProcessLive, processStartToken, type RecordedProcess, type WorkerProcessRecord } from '../delegation/process-liveness.ts';
+import { inspectGeneration, isCurrentProcess, recordedProcessLive, processStartToken, workerProcessCutoff, type RecordedProcess, type WorkerProcessRecord } from '../delegation/process-liveness.ts';
 import { collectSecretValues, redactDeep, redactSecrets } from '../core/secret-redaction.ts';
 // Pure, dependency-free reference helpers — the same sanity bound the marker parser applies.
 import { MAX_REF } from './task-refs.ts';
@@ -3208,13 +3208,20 @@ export class RunStore extends EventEmitter {
   /** Complete execution is not permission to reuse/delete persistent resources (#738).
    * Synchronous, fresh and generation/resource fenced; callers hold admission off across awaits. */
   workerResourcesSafe(id: string, generation: string, resourceId: string, admittingQueued = false): boolean {
+    return this.workerResourceHolders(id, generation, resourceId, { admittingQueued }) === 'safe';
+  }
+
+  /** `workerResourcesSafe` with the refusal's live PIDs (empty when no PID explains it).
+   * `deleting` lets an unreadable process that predates the worker pass (hearsay-tools/cezarion#858). */
+  workerResourceHolders(id: string, generation: string, resourceId: string,
+    opts: { admittingQueued?: boolean; deleting?: boolean } = {}): 'safe' | number[] {
     const run = this.peek(id);
     const proof = this.readWorkerExecution(id);
     if (run?.delegation?.role !== 'worker' || run.delegation.workspace.ownerRunId !== id ||
       run.delegation.workspace.resourceId !== resourceId || proof?.generation !== generation ||
-      (proof.phase !== 'complete' && !(admittingQueued && proof.phase === 'queued'))) return false;
+      (proof.phase !== 'complete' && !(opts.admittingQueued && proof.phase === 'queued'))) return [];
     const record = this.readWorkerProcesses(id, generation);
-    if (record === 'unknown' || !agentTmpDirOwnershipProven(this.dataDir, id)) return false;
+    if (record === 'unknown' || !agentTmpDirOwnershipProven(this.dataDir, id)) return [];
     const paths = [run.delegation.workspace.path, ...agentTmpDirLocations(this.dataDir, id)];
     // Nothing can be deleted/reused at an absent path. This lets explicit history deletion
     // retire completed cleanup despite ambient denial, while recorded survivors/unknown evidence
@@ -3223,8 +3230,10 @@ export class RunStore extends EventEmitter {
       try { lstatSync(path); return false; } catch (error) { return (error as NodeJS.ErrnoException).code === 'ENOENT'; }
     });
     if (absent) return record === 'absent' ||
-      ((!recordedProcessLive(record.controller) || isCurrentProcess(record.controller)) && !record.processes.some(recordedProcessLive));
-    return inspectGeneration({ ...(record === 'absent' ? {} : { record }), paths }).liveness === 'gone';
+      ((!recordedProcessLive(record.controller) || isCurrentProcess(record.controller)) && !record.processes.some(recordedProcessLive)) ? 'safe' : [];
+    const holdersSince = opts.deleting ? workerProcessCutoff(run.createdAt) : undefined;
+    const probe = inspectGeneration({ ...(record === 'absent' ? {} : { record }), paths, ...(holdersSince !== undefined ? { holdersSince } : {}) });
+    return probe.liveness === 'gone' ? 'safe' : probe.controller !== undefined ? [probe.controller] : probe.pids;
   }
 
   /** Upgrade a legacy completed checkpoint while terminal task ownership is still known.

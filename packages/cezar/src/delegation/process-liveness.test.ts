@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { nonDumpableHolder } from './non-dumpable.testkit.ts';
-import { inspectExecutionGeneration, parseProcStat, probeGeneration, processesWithCwdUnder, processStartToken, recordedProcessLive, type WorkerProcessRecord } from './process-liveness.ts';
+import { inspectExecutionGeneration, inspectGeneration, parseProcStat, probeGeneration, processesWithCwdUnder, processStartToken, recordedProcessLive, type WorkerProcessRecord } from './process-liveness.ts';
 
 // Scope only enumeration to the processes this fixture owns. A full-host scan may
 // conservatively include an unrelated same-user process whose cwd is unreadable.
@@ -165,6 +165,24 @@ describe('process liveness (#469)', () => {
       expect(readFileSync(join(dir, 'holder-writes'), 'utf8')).toContain('still writable');
     } finally { await holder.close(); }
     expect(probeGeneration(input)).toBe('gone');
+  });
+
+  it.runIf(linux)('deletion proof skips an unreadable process older than the worker, never a later or readable one (hearsay-tools/cezarion#858)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cez-deletion-holder-')); dirs.push(dir);
+    const ambient = await nonDumpableHolder(tmpdir());
+    const readable = spawn(process.execPath, ['-e', "console.log('ready'); setInterval(()=>{},1000)"], { cwd: dir, stdio: ['ignore', 'pipe', 'ignore'] });
+    const exited = new Promise(resolve => readable.once('exit', resolve));
+    await new Promise(resolve => readable.stdout!.once('data', resolve));
+    procScope.entries = [String(ambient.pid)];
+    try {
+      const later = Date.now() + 60_000;
+      expect(inspectGeneration({ paths: [dir], holdersSince: later })).toMatchObject({ liveness: 'gone', pids: [] });
+      expect(inspectGeneration({ paths: [dir], holdersSince: 0 })).toMatchObject({ liveness: 'alive', pids: [ambient.pid] });
+      expect(inspectGeneration({ paths: [dir], since: later })).toMatchObject({ liveness: 'alive', pids: [ambient.pid] }); // reuse proof
+      procScope.entries = [String(ambient.pid), String(readable.pid)];
+      expect(inspectGeneration({ paths: [dir], holdersSince: later })).toMatchObject({ liveness: 'alive', pids: [readable.pid] });
+      await ambient.write();
+    } finally { readable.kill('SIGKILL'); await exited; await ambient.close(); }
   });
 
   it.runIf(linux).each(['absent record', 'missing token', 'legacy token', 'malformed token', 'same boot', 'unknown boot', 'malformed boot'])('keeps conservative execution proof with %s', async shape => {

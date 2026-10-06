@@ -129,8 +129,7 @@ const realProc: ProcReader = {
  * pass; `unknown` when no scan can run. cezar's own short-lived git children in a worktree make
  * this read "alive" briefly: conservative, and a retry self-heals. `since` (epoch ms) is the
  * earliest moment the worker's processes can have started; see the EACCES rule below.
- * `since` is only for conservative legacy execution/descendant checks. Resource proof never
- * supplies it: reboot cannot exclude holders. */
+ * Resource proof supplies it only for deletion (`holdersSince`): reboot cannot exclude holders. */
 export function processesWithCwdUnder(dirs: string | readonly string[], platform: NodeJS.Platform = process.platform, proc: ProcReader = realProc, since?: number, darwin: DarwinReader = realDarwin): number[] | 'unknown' {
   const scan = scanCwd(dirs, platform, proc, since, darwin);
   return scan === 'unknown' ? scan : [...new Set(scan.all)];
@@ -212,10 +211,21 @@ export function probeGeneration(input: { record?: WorkerProcessRecord; paths: re
   return inspectGeneration(input).liveness;
 }
 
-/** Fresh resource proof. Age and controller boot say nothing about who holds persistent paths.
- * Every unreadable own-user cwd remains a candidate, even when it predates this task. */
-export function inspectGeneration(input: { record?: WorkerProcessRecord; paths: readonly string[]; since?: number }): GenerationProbe {
-  return inspect({ ...input, since: undefined });
+/** Earliest start of any process a worker can own: its record's creation, less 1 s of slack
+ * for whole-second btime plus tick rounding. `undefined` when the timestamp does not parse. */
+export function workerProcessCutoff(createdAt: string): number | undefined {
+  const created = Date.parse(createdAt);
+  return Number.isFinite(created) ? created - 1_000 : undefined;
+}
+
+/** Fresh resource proof. Controller boot says nothing about who holds persistent paths, so
+ * every unreadable own-user cwd remains a candidate, even when it predates this task, unless
+ * the caller deletes and passes `holdersSince` (`workerProcessCutoff`). Then an unreadable process
+ * that predates the worker is ambient (login `sshd`, `systemd --user`, `gpg-agent`) and is
+ * skipped, as execution proof skips it (hearsay-tools/cezarion#858). Readable cwds under `paths`, live
+ * recorded processes and later unreadable ones still block. `since` is ignored here. */
+export function inspectGeneration(input: { record?: WorkerProcessRecord; paths: readonly string[]; since?: number; holdersSince?: number }): GenerationProbe {
+  return inspect({ ...input, since: input.holdersSince });
 }
 
 /** Execution-only proof: a known reboot ended all old descendants, provided neither the
