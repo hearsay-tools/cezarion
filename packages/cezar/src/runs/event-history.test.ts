@@ -1,8 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import * as fsPromises from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  return { ...actual };
+});
 
 import type { RunEvent } from '@open-mercato/cezar-contract';
 import {
@@ -117,6 +123,45 @@ describe('readRunHistoryPage', () => {
     expect(newer.events).toHaveLength(101);
     expect(newer.events.at(-1)?.seq).toBe(151);
     expect(newer.newerCursor).toBeUndefined();
+  });
+
+  it('pages identically when the plain handle returns at most 7 bytes per read', async () => {
+    const events: Array<Partial<RunEvent> & Pick<RunEvent, 'seq' | 'type'>> = [
+      { seq: 1, type: 'turn.started', turnId: 't1' },
+    ];
+    for (let seq = 2; seq <= 151; seq += 1) {
+      events.push({
+        seq,
+        type: 'item.completed',
+        item: { kind: 'message', id: `m-${seq}`, role: 'assistant', text: String(seq) },
+      });
+    }
+    const { dataDir, id, file } = fixture(events);
+    const newest = await readRunHistoryPage(dataDir, id);
+    const older = await readRunHistoryPage(dataDir, id, newest.olderCursor);
+    expect(newest.hasOlder).toBe(true);
+    expect(older.hasOlder).toBe(false);
+
+    const actualOpen = fsPromises.open;
+    vi.spyOn(fsPromises, 'open').mockImplementation(async (...args) => {
+      const handle = await actualOpen(...args);
+      if (args[0] === file) {
+        const actualRead = handle.read.bind(handle);
+        Object.defineProperty(handle, 'read', {
+          value: async (buffer: Buffer, offset?: number, length?: number, position?: number | null) => {
+            const limited = Math.min(length ?? buffer.length, 7);
+            return actualRead(buffer, offset ?? 0, limited, position ?? 0);
+          },
+        });
+      }
+      return handle;
+    });
+    try {
+      expect(await readRunHistoryPage(dataDir, id)).toEqual(newest);
+      expect(await readRunHistoryPage(dataDir, id, newest.olderCursor)).toEqual(older);
+    } finally {
+      vi.restoreAllMocks();
+    }
   });
 
   it('walks both directions through a single turn larger than five pages', async () => {

@@ -419,6 +419,41 @@ describe('history-file', () => {
     }
   });
 
+  it('fills a positional read across short handle reads', async () => {
+    const a = setup();
+    const b = setup();
+    const original = transcript();
+    writeFileSync(a.plain, original);
+    writeFileSync(b.plain, original);
+    expect(await compressHistory(b.dataDir, b.id, () => true)).toBe('compressed');
+    const actualOpen = fsPromises.open;
+    vi.spyOn(fsPromises, 'open').mockImplementation(async (...args) => {
+      const file = await actualOpen(...args);
+      if (args[0] === a.plain) {
+        const actualRead = file.read.bind(file);
+        Object.defineProperty(file, 'read', {
+          value: async (buffer: Buffer, offset?: number, length?: number, position?: number | null) => {
+            const limited = Math.min(length ?? buffer.length, 7);
+            return actualRead(buffer, offset ?? 0, limited, position ?? 0);
+          },
+        });
+      }
+      return file;
+    });
+    const plainSource = await openHistorySource(a.dataDir, a.id);
+    const compressedSource = await openHistorySource(b.dataDir, b.id);
+    expect(plainSource).toBeDefined();
+    expect(compressedSource).toBeDefined();
+    try {
+      const expected = await compressedSource!.read(100, 500);
+      expect(expected).toHaveLength(500);
+      expect(await plainSource!.read(100, 500)).toEqual(expected);
+    } finally {
+      await plainSource!.close();
+      await compressedSource!.close();
+    }
+  });
+
   it('loops short reads until the .br decodes to the full original', async () => {
     const { dataDir, id, plain, compressed } = setup();
     const original = 'abcdefghijklmnopqrstuvwxyz\n'.repeat(20);

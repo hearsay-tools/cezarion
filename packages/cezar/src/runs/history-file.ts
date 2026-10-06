@@ -76,8 +76,11 @@ export function readHistoryText(dataDir: string, id: string): string | undefined
   return decoded.toString('utf8');
 }
 
+/** Random-access transcript bytes. `read` is short only at EOF. */
 export interface HistorySource {
+  /** Decoded byte length. */
   size: number;
+  /** Random access; short only at EOF (or if the file shrank). */
   read(position: number, length: number): Promise<Buffer>;
   stream(start?: number): Readable;
   close(): Promise<void>;
@@ -380,8 +383,13 @@ function plainSource(size: number, handle: FileHandle): HistorySource {
       if (length <= 0 || position >= size) return Buffer.alloc(0);
       const toRead = Math.min(length, size - position);
       const buffer = Buffer.allocUnsafe(toRead);
-      const { bytesRead } = await handle.read(buffer, 0, toRead, position);
-      return bytesRead === toRead ? buffer : buffer.subarray(0, bytesRead);
+      let offset = 0;
+      while (offset < toRead) {
+        const { bytesRead } = await handle.read(buffer, offset, toRead - offset, position + offset);
+        if (bytesRead === 0) break;
+        offset += bytesRead;
+      }
+      return offset === toRead ? buffer : buffer.subarray(0, offset);
     },
     stream(start = 0) {
       return handle.createReadStream({ encoding: 'utf8', start, autoClose: false });
