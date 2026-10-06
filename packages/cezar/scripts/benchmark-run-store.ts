@@ -8,7 +8,7 @@
  *
  * Flags: --sizes (100,500,1000,2000,5000) --profiles (legacy,post-778) --processes (5)
  * --samples (100) --budget-seconds (60) --duration (30, seconds of active simulation) --seed (779)
- * --metrics (all: open,coldRead,save,commit,runs,runsIndex,runSummaries,active,heap,getRun)
+ * --metrics (all: open,coldRead,save,commit,runs,runsIndex,runSummaries,runSummariesRecent,archivedPage,runsSearch,active,heap,getRun)
  * --out-dir (a new /tmp directory) --resume (reuse child results already in --out-dir, run the rest) --quick (sizes 100,1000, 2 processes, 10 samples, 10 s budget,
  * 3 s simulation). Results land in <out-dir>/results.{md,json}; the Markdown also goes to stdout.
  * `--metrics heap,getRun,runSummaries` is the pass #779's second amendment added; a plain run
@@ -46,7 +46,9 @@
  *   a gap of at least half the flush median once 300 ms have passed, or at a timeout).
  * - "commit (1 row)" / "commit (10 rows)" are `commitDelegation` with each row's own delegation,
  *   the durable `commitIndex` path.
- * - The list routes (`/runs`, `/run-summaries`, `/workspace/runs-index`) run in-process through
+ * - The list routes (`/runs`, `/run-summaries`, `/workspace/runs-index`, and since #864 the windowed
+ *   `/run-summaries?archived=recent`, the first `/run-summaries/archived` page and
+ *   `/workspace/runs-search?q=the`) run in-process through
  *   `app.request` (no socket), against a second store
  *   opened on the same files, so app listeners never touch the store-under-test. "wall" is call
  *   to fully read body; "block" is the longest synchronous stretch inside it, from the same
@@ -80,7 +82,7 @@ const HEAP_SAMPLES = 3;
 const GET_RUN_MIN_MS = 2;
 const GET_RUN_FINISHED_IDS = 50;
 
-const METRICS = ['open', 'coldRead', 'save', 'commit', 'runs', 'runsIndex', 'runSummaries', 'active', 'heap', 'getRun'] as const;
+const METRICS = ['open', 'coldRead', 'save', 'commit', 'runs', 'runsIndex', 'runSummaries', 'runSummariesRecent', 'archivedPage', 'runsSearch', 'active', 'heap', 'getRun'] as const;
 type Metric = typeof METRICS[number];
 /** What a child result measured before `--metrics` existed. */
 const FIRST_TABLE_METRICS: readonly Metric[] = ['open', 'coldRead', 'save', 'commit', 'runs', 'runsIndex', 'active'];
@@ -98,6 +100,11 @@ const ROUTE_PATHS = {
   'GET /runs': { metric: 'runs', path: '/api/v1/runs' },
   'GET /run-summaries': { metric: 'runSummaries', path: '/api/v1/run-summaries' },
   'GET /workspace/runs-index': { metric: 'runsIndex', path: '/api/v1/workspace/runs-index' },
+  // The bounded lists (#864): the cockpit's windowed list, the first archived page past it, and
+  // the workspace search over a common fixture word (the cold project, as the index reads it).
+  'GET /run-summaries?archived=recent': { metric: 'runSummariesRecent', path: '/api/v1/run-summaries?archived=recent' },
+  'GET /run-summaries/archived': { metric: 'archivedPage', path: '/api/v1/run-summaries/archived?limit=50' },
+  'GET /workspace/runs-search': { metric: 'runsSearch', path: '/api/v1/workspace/runs-search?q=the' },
 } as const satisfies Record<string, { metric: Metric; path: string }>;
 type Route = keyof typeof ROUTE_PATHS;
 const ROUTES = Object.keys(ROUTE_PATHS) as Route[];
@@ -543,11 +550,11 @@ function report(aggregated: ReturnType<typeof aggregate>, options: ParentOptions
       row(`${label}, longest block`, `${route} block`);
       row(`${label}, wall (in-process)`, `${route} wall`);
     }
-    for (const route of ['GET /runs', 'GET /run-summaries'] as const) {
+    for (const route of ROUTES) {
       if (!sizes.some((size) => bySize[size]!.responseBytes[route] !== undefined)) continue;
       lines.push(`| ${route} response | ${sizes.map((size) => {
         const bytes = bySize[size]!.responseBytes[route];
-        return bytes === undefined ? '-' : mb(bytes);
+        return bytes === undefined ? '-' : bytes < 1e6 ? `${(bytes / 1e3).toFixed(0)} KB` : mb(bytes);
       }).join(' | ')} |`);
     }
     if (sizes.some((size) => bySize[size]!.loop)) {

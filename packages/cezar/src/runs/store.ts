@@ -1909,11 +1909,14 @@ export class RunStore extends EventEmitter {
    */
   searchRunSummaries(query: string, limit: number): { runs: RunSummary[]; truncated: boolean } {
     const matched = new Map<string, readonly [RunSummary, ListOrder]>();
-    for (const row of this.db?.searchRootSummaries(sqlPrefilterTokens(query)) ?? []) {
-      if (this.deleted.has(row.id) || this.held.has(row.id) || this.unreadable.has(row.id)) continue;
+    // Rows come newest first, so the newest `limit + 1` row matches are all a page can use; held
+    // runs, which may be newer than any row, are ranked in below.
+    this.db?.visitRootSummaries(sqlPrefilterTokens(query), (row) => {
+      if (this.deleted.has(row.id) || this.held.has(row.id) || this.unreadable.has(row.id)) return true;
       const summary = parseStoredSummary(row.summary) ?? this.coldSummary(row.id);
       if (summary && matchesRunQuery(summary, query)) matched.set(row.id, [summary, row]);
-    }
+      return matched.size <= limit;
+    });
     for (const [id, run] of this.held) {
       if (run.delegation?.role === 'worker') continue;
       const summary = toRunSummary(run);

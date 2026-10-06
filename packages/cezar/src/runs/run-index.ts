@@ -113,12 +113,14 @@ function readDatabase(db: RunDatabase, dataDir: string, { handle, archivedWindow
 }
 
 function searchDatabase(db: RunDatabase, dataDir: string, query: string, { handle, limit }: { handle?: RepoHandle | null; limit: number }): ColdRunIndex {
-  const rows = db.searchRootSummaries(sqlPrefilterTokens(query));
-  // Match on the stored summary first, so only candidates pay for a decode; the projected row is
-  // matched again because reading it cold can drop a foreign reference it matched on.
-  const candidates = rows.filter((row) => {
+  // Match on the stored summary first, stopping at one past the limit, so only those candidates
+  // pay for a decode; the projected row is matched again because reading it cold can drop a
+  // foreign reference it matched on.
+  const candidates: RunSummaryRow[] = [];
+  db.visitRootSummaries(sqlPrefilterTokens(query), (row) => {
     const summary = parseSummary(row.summary);
-    return summary === undefined || matchesRunQuery(summary, query);
+    if (summary === undefined || matchesRunQuery(summary, query)) candidates.push(row);
+    return candidates.length <= limit;
   });
   return firstMatches(projectRows(db, candidates, dataDir, handle), query, limit);
 }

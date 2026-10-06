@@ -684,8 +684,20 @@ export class RunDatabase {
    *  lowercased, newest first: the candidates of a run search (#864), which the caller still
    *  checks with `matchesRunQuery`. No tokens, every root. */
   searchRootSummaries(prefilter: readonly string[]): RunSummaryRow[] {
+    const rows: RunSummaryRow[] = [];
+    this.visitRootSummaries(prefilter, (row) => { rows.push(row); return true; });
+    return rows;
+  }
+
+  /** The rows `searchRootSummaries` answers, one at a time, until `visit` answers false: a search
+   *  that needs only its first matches stops reading there. */
+  visitRootSummaries(prefilter: readonly string[], visit: (row: RunSummaryRow) => boolean): void {
     const where = ['parent_run_id IS NULL', ...prefilter.map(() => 'instr(lower(summary), ?) > 0')].join(' AND ');
-    return this.run(() => this.db.prepare(`${SUMMARY_SELECT} WHERE ${where} ${NEWEST_FIRST}`).all(...prefilter)).map(toSummaryRow);
+    this.run(() => {
+      for (const row of this.db.prepare(`${SUMMARY_SELECT} WHERE ${where} ${NEWEST_FIRST}`).iterate(...prefilter)) {
+        if (!visit(toSummaryRow(row as SqlRow))) break;
+      }
+    });
   }
 
   /** Every row, newest first (`created_at` descending, then insertion order). */
