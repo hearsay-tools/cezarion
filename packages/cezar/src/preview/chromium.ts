@@ -350,9 +350,11 @@ const SANDBOX_FAILURE = /No usable sandbox|zygote_host_impl|setuid sandbox/;
 /** A cold start (fresh profile, loaded machine) can take well over 10 s; CI runners did (#781). */
 const LAUNCH_TIMEOUT_MS = 30_000;
 
-/** Chromium's argv: the prototype's, without its automatic `--no-sandbox` for root. */
+/** Chromium's argv: the prototype's, without its automatic `--no-sandbox` for root.
+ *  `--proxy-server=direct://` so Linux Chrome does not inherit HTTP(S)_PROXY: it will not send
+ *  proxy auth the way curl does, and a render-blocking third-party stylesheet then never paints. */
 export function chromiumArgs(profileDir: string, env: NodeJS.ProcessEnv): string[] {
-  const args = ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profileDir}`, '--no-first-run', '--no-default-browser-check', 'about:blank'];
+  const args = ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profileDir}`, '--no-first-run', '--no-default-browser-check', '--proxy-server=direct://', 'about:blank'];
   return env.CEZ_PREVIEW_NO_SANDBOX === '1' ? ['--no-sandbox', ...args] : args;
 }
 
