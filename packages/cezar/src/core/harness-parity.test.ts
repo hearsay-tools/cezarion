@@ -59,6 +59,7 @@ import {
   WORKFLOW_TIMEOUT_CRITERIA,
   NO_PROGRESS_CRITERIA,
   AUTONOMOUS_CRITERIA,
+  FINAL_MESSAGE_CRITERIA,
   WORKFLOW_ASK_CRITERIA,
   PARITY_EXEMPTIONS,
   PINNED_SESSION_ID,
@@ -1685,6 +1686,7 @@ describe('harness parity — the matrix itself', () => {
     ...MONITORING_ORDER_CRITERIA.map(c => c.id),
     ...WORKFLOW_ASK_CRITERIA.map(c => c.id),
     ...AUTONOMOUS_CRITERIA.map(c => c.id),
+    ...FINAL_MESSAGE_CRITERIA.map(c => c.id),
     ...NO_PROGRESS_CRITERIA.map(c => c.id),
     ...WORKFLOW_TIMEOUT_CRITERIA.map((c) => c.id),
     ...SEAM_CRITERIA.map((c) => c.id),
@@ -1701,6 +1703,8 @@ describe('harness parity — the matrix itself', () => {
     if (ask) return ask.scenario;
     const autonomous = AUTONOMOUS_CRITERIA.find(c => c.id === id);
     if (autonomous) return autonomous.scenario;
+    const finalMessage = FINAL_MESSAGE_CRITERIA.find(c => c.id === id);
+    if (finalMessage) return finalMessage.scenario;
     const inactivity = NO_PROGRESS_CRITERIA.find(c => c.id === id);
     if (inactivity) return inactivity.scenario;
     const timeout = WORKFLOW_TIMEOUT_CRITERIA.find(c => c.id === id);

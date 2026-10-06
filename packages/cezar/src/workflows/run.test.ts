@@ -25,7 +25,7 @@ import { resolveAgentTmpDir } from '../runs/agent-tmpdir.ts';
 import { RunStore, type RunRecord, type StepState } from '../runs/store.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { parseTaskMarkers } from '../runs/task-markers.ts';
-import { appendTurnText, RunManager } from './run.ts';
+import { appendTurnText, trackVisibleTail, RunManager } from './run.ts';
 import type { WorkflowDef } from './types.ts';
 import { readPersistedRuns, crashStore } from '../runs/run-store.testkit.ts';
 
@@ -82,6 +82,30 @@ describe('appendTurnText', () => {
     expect(appendTurnText('', 'first')).toBe('first');
     expect(appendTurnText('first', '')).toBe('first');
     expect(appendTurnText(appendTurnText('', 'first'), 'second')).toBe('first\nsecond');
+  });
+});
+
+describe('trackVisibleTail', () => {
+  const completed = (item: Extract<UiEvent, { type: 'item.completed' }>['item']): UiEvent => ({ type: 'item.completed', item });
+  it('marks a non-empty top-level assistant message as a visible tail', () => {
+    expect(trackVisibleTail(false, completed({ kind: 'message', id: 'm', role: 'assistant', text: 'hi' }))).toBe(true);
+  });
+  it('marks reasoning as a silent tail', () => {
+    expect(trackVisibleTail(true, completed({ kind: 'reasoning', id: 'r', text: 'think' }))).toBe(false);
+  });
+  it('does not let a tool overwrite a visible message (#48)', () => {
+    expect(trackVisibleTail(true, completed({ kind: 'tool', id: 't', name: 'Bash', toolKind: 'execute', title: 'Ran', status: 'completed' }))).toBe(true);
+  });
+  it('leaves a tool-only turn silent', () => {
+    expect(trackVisibleTail(false, completed({ kind: 'tool', id: 't', name: 'Bash', toolKind: 'execute', title: 'Ran', status: 'completed' }))).toBe(false);
+  });
+  it('ignores nested child items', () => {
+    expect(trackVisibleTail(true, completed({ kind: 'message', id: 'c', role: 'assistant', text: 'child', parentItemId: 'p' }))).toBe(true);
+    expect(trackVisibleTail(false, completed({ kind: 'reasoning', id: 'c', text: 'child', parentItemId: 'p' }))).toBe(false);
+  });
+  it('ignores empty assistant text and unrelated events', () => {
+    expect(trackVisibleTail(false, completed({ kind: 'message', id: 'e', role: 'assistant', text: '  ' }))).toBe(false);
+    expect(trackVisibleTail(true, { type: 'turn.started', turnId: 't1' })).toBe(true);
   });
 });
 

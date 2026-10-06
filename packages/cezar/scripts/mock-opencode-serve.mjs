@@ -386,6 +386,29 @@ const server = createServer((req, res) => {
         send({ type: 'session.idle', properties: { sessionID: SESSION_ID } });
         return;
       }
+      if (body.includes('mock:silent-tail') || body.includes('Your last turn ended without a message to the user.')) {
+        const silent = await import('./mock-silent-tail.mjs');
+        const prompt = (() => { try { return JSON.parse(body).parts.map(part => part.text ?? '').join('\n'); } catch { return body; } })();
+        silent.noteSilentTailPrompt(prompt);
+        if (silent.isFinalMessageNudge(prompt)) {
+          send({ type: 'message.updated', properties: { info: info({}) } });
+          if (silent.silentTailNudgeAgain()) {
+            send({ type: 'message.part.updated', properties: { part: { id: 'silent-nudge-rsn', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'reasoning', text: silent.SILENT_TAIL_REASONING, time: { start: 1, end: 2 } } } });
+          } else {
+            send({ type: 'message.part.updated', properties: { part: { id: 'silent-nudge-done', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text', text: silent.SILENT_TAIL_DONE, time: { start: 1, end: 2 } } } });
+          }
+          send({ type: 'session.idle', properties: { sessionID: SESSION_ID } });
+          return;
+        }
+        if (silent.isSilentTailScenario(prompt)) {
+          send({ type: 'message.updated', properties: { info: info({}) } });
+          send({ type: 'message.part.updated', properties: { part: { id: 'silent-open', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text', text: silent.SILENT_TAIL_OPENING, time: { start: 1, end: 2 } } } });
+          send({ type: 'message.part.updated', properties: { part: { id: 'silent-gh', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'tool', callID: 'call_silent_gh', tool: 'bash', state: { status: 'completed', input: { command: 'gh issue create' }, output: 'created', time: { start: 1, end: 2 } } } } });
+          send({ type: 'message.part.updated', properties: { part: { id: 'silent-rsn', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'reasoning', text: silent.SILENT_TAIL_REASONING, time: { start: 1, end: 2 } } } });
+          send({ type: 'session.idle', properties: { sessionID: SESSION_ID } });
+          return;
+        }
+      }
       // #401: one completed text snapshot, without an earlier streaming part.
       if (body.includes('mock:ask-snapshot')) {
         send({ type: 'message.updated', properties: { info: info({}) } });

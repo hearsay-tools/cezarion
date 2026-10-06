@@ -224,6 +224,15 @@ function appendCompletedAssistantText(current: string, event: UiEvent): string {
   }
   return appendTurnText(current, event.item.text);
 }
+/** Last top-level completed item: a non-empty assistant message is a visible tail; reasoning is silent (#544). A tool does not clear a visible message (#48) but a tool-only turn stays silent. */
+export function trackVisibleTail(visible: boolean, event: UiEvent): boolean {
+  if (event.type !== 'item.completed' || event.item.parentItemId !== undefined) return visible;
+  const item = event.item;
+  if (item.kind === 'message' && item.role === 'assistant' && item.text.trim() !== '') return true;
+  if (item.kind === 'reasoning') return false;
+  if (item.kind === 'tool') return visible;
+  return visible;
+}
 /** Strip a trailing marker from one text event so transcripts stay free of
  *  protocol noise. Delta backends may split the marker across events — then
  *  it stays visible; detection above is unaffected. */
@@ -439,7 +448,7 @@ interface ActiveRun {
   openingAgentInputId?: string;
   agentSessionError?: string;
   doneAtBoundary?: AgentSession;
-  parkAfterAck?: { session: AgentSession; monitoring: boolean; humanGate?: boolean };
+  parkAfterAck?: { session: AgentSession; monitoring: boolean; humanGate?: boolean; silentTail?: boolean; alreadyFinalMessageNudged?: boolean };
   /** A delivered worker wake must receive its own turn before nonfinal auto-end. */
   workerWakeTurn?: AgentSession;
   /** Last completed boundary belongs to exactly this still-open session. */
@@ -468,6 +477,8 @@ interface ActiveRun {
   /** An eligible boundary nudge refused until the current transport becomes ready.
    * Retains its slot, bounded by the existing idle timer; never represents a sent input. */
   autonomousNudgePending?: AgentSession;
+  /** Session that received the one-shot final-message nudge (#544). */
+  finalMessageNudged?: AgentSession;
   /** Registry snapshot used to expand `/skill` follow-ups before a backend can
    *  mistake them for its own slash commands (#676). */
   skills?: Skill[];
@@ -493,6 +504,8 @@ export const UNREAD_INPUT_GRACE_MS = 30_000;
 export const MAX_AUTO_CONTINUES = 40;
 export const AUTONOMOUS_NUDGE =
   'Continue working autonomously until the task is fully complete. Do not ask me for confirmation or clarification — make reasonable assumptions and proceed. When everything is done, end the session with your done signal.';
+export const FINAL_MESSAGE_NUDGE =
+  'Your last turn ended without a message to the user. Write your user-facing reply now: what you did, where things stand, and anything you need from the user. If the task goal is fully achieved, end that message with CEZ:DONE.';
 const MONITORING_WAKE_NUDGE =
   'Re-check the downstream work you were monitoring. Continue toward the task goal. When the watched work is finished and the task goal is complete, end your final message with CEZ:DONE. If the watched work is still pending, end with CEZ:MONITORING. Never yield markerless for a monitoring wrap-up. If you genuinely need user input, follow the normal question path instead.';
 
@@ -4583,6 +4596,9 @@ export class RunManager {
         this.monitoring.add(runId);
         this.clearIdleTimer(state);
         this.armMonitoringWakeTimer(runId, state);
+      } else if (!state.parkAfterAck.humanGate && !state.parkAfterAck.monitoring && state.parkAfterAck.silentTail && !state.parkAfterAck.alreadyFinalMessageNudged && state.currentStepId && this.tryFinalMessageNudge(runId, state, state.currentStepId)) {
+        appendHandoffHeartbeat(this.dataDir, runId, 'turn complete — status=running (final message nudge)');
+        return;
       } else {
         this.store.updateRun(runId, { status: 'waiting', activity: undefined });
         if (state.currentStepId) this.store.updateStep(runId, state.currentStepId, { status: 'waiting' });
@@ -5463,6 +5479,8 @@ export class RunManager {
 
     let turnText = '';
     let completedAssistantText = '';
+    let visibleTail = false;
+    let lastTopKind: 'message' | 'reasoning' | 'tool' | undefined;
     let sawClaudeScheduleWakeup = false;
     let sessionError: string | undefined;
     const sink = this.makeUiSink(runId, stepId);
@@ -5555,8 +5573,13 @@ export class RunManager {
         });
         const { done, monitoring, humanGate, ask, notes: askNotes } = turn;
         discardQueuedMessagesOnAsk(state.session, turn);
+        const silentTail = !visibleTail && (lastTopKind === 'reasoning' || lastTopKind === 'tool');
+        const alreadyFinalMessageNudged = state.finalMessageNudged === state.session;
+        state.finalMessageNudged = undefined;
         turnText = '';
         completedAssistantText = '';
+        visibleTail = false;
+        lastTopKind = undefined;
         sawClaudeScheduleWakeup = false;
         for (const note of askNotes) this.store.appendEvent(runId, { type: 'note', ...note, stepId });
         this.store.updateRun(runId, { invalidAsk: !ask && askNotes.length > 0 ? true : undefined });
@@ -5569,7 +5592,7 @@ export class RunManager {
         const completionBlocked = !ciWaitParked && !!done && this.deferParentCompletion(runId);
         const workerWaitParked = ciWaitParked || completionBlocked || (!humanGate && !!sessionOpen && this.parkWorkerWait(runId, state));
         state.doneAtBoundary = done ? state.session : undefined;
-        state.parkAfterAck = sessionOpen && state.session ? { session: state.session, monitoring, humanGate } : undefined;
+        state.parkAfterAck = sessionOpen && state.session ? { session: state.session, monitoring, humanGate, silentTail, alreadyFinalMessageNudged } : undefined;
         // #505: input the harness accepted but has not read yet runs as its next turn.
         // An in-flight submission is settled by its acknowledgement (parkAfterAck), not here.
         const agentInputDelivered = autoContinued || (!ask && !workerWaitParked && (this.flushAgentInputs(runId) || (!humanGate && this.harnessOwesInput(state)) || !!state.agentInputFlight));
@@ -5584,6 +5607,7 @@ export class RunManager {
         }
         if (sessionOpen && !agentInputDelivered && !workerWaitParked && !this.workerWakeAdmitted.has(runId)) {
           if (!ask && !humanGate) autoContinued = this.tryAutonomousNudge(runId, state, stepId, null);
+          if (!autoContinued && !ask && !humanGate && !monitoring && silentTail && !alreadyFinalMessageNudged) autoContinued = this.tryFinalMessageNudge(runId, state, stepId);
           if (!autoContinued && state.autonomousNudgePending !== state.session) {
             // `CEZ:ASK` → park `waiting` (attention) AND surface the structured
             // question as an ask card (#473). `CEZ:MONITORING` or Claude's native
@@ -5620,7 +5644,7 @@ export class RunManager {
         appendHandoffHeartbeat(
           this.dataDir,
           runId,
-          `turn complete — status=${autoContinued ? 'running (autonomous nudge)' : state.autonomousNudgePending && state.autonomousNudgePending === state.session ? 'running (awaiting input readiness)' : agentInputDelivered ? 'running' : monitoring ? 'monitoring' : sessionOpen ? 'waiting' : 'running'}`,
+          `turn complete — status=${autoContinued ? (state.finalMessageNudged === state.session ? 'running (final message nudge)' : 'running (autonomous nudge)') : state.autonomousNudgePending && state.autonomousNudgePending === state.session ? 'running (awaiting input readiness)' : agentInputDelivered ? 'running' : monitoring ? 'monitoring' : sessionOpen ? 'waiting' : 'running'}`,
         );
       }
     };
@@ -5804,6 +5828,8 @@ export class RunManager {
       {
         onUiEvent: (event) => {
           completedAssistantText = appendCompletedAssistantText(completedAssistantText, event);
+          visibleTail = trackVisibleTail(visibleTail, event);
+          if (event.type === 'item.completed' && event.item.parentItemId === undefined && (event.item.kind === 'message' || event.item.kind === 'reasoning' || event.item.kind === 'tool')) lastTopKind = event.item.kind;
           if (event.type === 'turn.started') this.recordOpeningAccepted(runId, state);
           this.handleRunnerUiEvent(runId, state, sink, event);
         },
@@ -6403,6 +6429,8 @@ export class RunManager {
     const startTokens = stepRecord?.tokensUsed ?? 0;
     let turnText = '';
     let completedAssistantText = '';
+    let visibleTail = false;
+    let lastTopKind: 'message' | 'reasoning' | 'tool' | undefined;
     let sawClaudeScheduleWakeup = false;
     let sessionError: string | undefined;
     const sink = this.makeUiSink(runId, step.id);
@@ -6463,8 +6491,13 @@ export class RunManager {
         });
         const { done, monitoring, humanGate, ask, notes: askNotes } = turn;
         discardQueuedMessagesOnAsk(state.session, turn);
+        const silentTail = !visibleTail && (lastTopKind === 'reasoning' || lastTopKind === 'tool');
+        const alreadyFinalMessageNudged = state.finalMessageNudged === state.session;
+        state.finalMessageNudged = undefined;
         turnText = '';
         completedAssistantText = '';
+        visibleTail = false;
+        lastTopKind = undefined;
         sawClaudeScheduleWakeup = false;
         for (const note of askNotes) emit({ type: 'note', stepId: step.id, ...note });
         this.store.updateRun(runId, { invalidAsk: !ask && askNotes.length > 0 ? true : undefined });
@@ -6477,7 +6510,7 @@ export class RunManager {
         const completionBlocked = !ciWaitParked && !!done && this.deferParentCompletion(runId);
         const workerWaitParked = ciWaitParked || completionBlocked || (!humanGate && !!sessionOpen && this.parkWorkerWait(runId, state));
         state.doneAtBoundary = done ? state.session : undefined;
-        state.parkAfterAck = (interactive || humanGate) && sessionOpen && state.session ? { session: state.session, monitoring, humanGate } : undefined;
+        state.parkAfterAck = (interactive || humanGate) && sessionOpen && state.session ? { session: state.session, monitoring, humanGate, silentTail, alreadyFinalMessageNudged } : undefined;
         // #505: input the harness accepted but has not read yet runs as its next turn.
         // An in-flight submission is settled by its acknowledgement (parkAfterAck), not here.
         const agentInputDelivered = autoContinued || (!ask && !workerWaitParked && (this.flushAgentInputs(runId) || (!humanGate && this.harnessOwesInput(state)) || !!state.agentInputFlight));
@@ -6493,6 +6526,7 @@ export class RunManager {
         }
         const waiting = (interactive || !!ask || humanGate) && sessionOpen && !agentInputDelivered && !workerWaitParked && !this.workerWakeAdmitted.has(runId);
         if (waiting && interactive && !ask && !humanGate) autoContinued = this.tryAutonomousNudge(runId, state, step.id, null);
+        if (waiting && interactive && !ask && !humanGate && !monitoring && silentTail && !alreadyFinalMessageNudged) autoContinued = this.tryFinalMessageNudge(runId, state, step.id);
         if (waiting && !autoContinued && state.autonomousNudgePending !== state.session) {
           // Turn over, session open. Either the ball is in the user's court
           // (`waiting`) — optionally with a structured `CEZ:ASK` question the
@@ -6527,7 +6561,7 @@ export class RunManager {
         appendHandoffHeartbeat(
           this.dataDir,
           runId,
-          `turn complete — status=${autoContinued ? 'running (autonomous nudge)' : state.autonomousNudgePending && state.autonomousNudgePending === state.session ? 'running (awaiting input readiness)' : monitoring ? 'monitoring' : waiting ? 'waiting' : 'running'}`,
+          `turn complete — status=${autoContinued ? (state.finalMessageNudged === state.session ? 'running (final message nudge)' : 'running (autonomous nudge)') : state.autonomousNudgePending && state.autonomousNudgePending === state.session ? 'running (awaiting input readiness)' : monitoring ? 'monitoring' : waiting ? 'waiting' : 'running'}`,
         );
       }
     };
@@ -6661,6 +6695,8 @@ export class RunManager {
           shouldAutoEnd,
           onUiEvent: (event) => {
             completedAssistantText = appendCompletedAssistantText(completedAssistantText, event);
+            visibleTail = trackVisibleTail(visibleTail, event);
+            if (event.type === 'item.completed' && event.item.parentItemId === undefined && (event.item.kind === 'message' || event.item.kind === 'reasoning' || event.item.kind === 'tool')) lastTopKind = event.item.kind;
             this.handleRunnerUiEvent(runId, state, sink, event);
           },
           onAgentInputReady: () => this.handleAgentInputReady(runId, state, session),
@@ -7328,13 +7364,18 @@ export class RunManager {
    * timeout bounds a missing readiness signal. New activity/input invalidates it.
    * A refused portable override falls back to normal question parking.
    */
-  private tryAutonomousNudge(runId: string, state: ActiveRun, stepId: string, ask: AskRequest | null): boolean {
+  private canAutoContinue(runId: string, state: ActiveRun): boolean {
     const run = this.store.getRun(runId);
-    if (!state.autonomous || this.disposed || !run || run.stopping || state.cancelled || state.finishRequested ||
-      state.agentInputError || state.pendingHumanAsk || this.hasPendingHumanAsk(runId) || !state.session?.open ||
-      this.workerExecutionStopped(runId) || this.executionBlockedByRootFinish(run) || this.parentCompletionPending(runId) ||
-      this.workerWait(runId) || run.ciWait || this.workerWakeAdmitted.has(runId) ||
-      state.agentInputFlight || this.harnessOwesInput(state) || this.hasQueuedAgentInputs(runId)) return false;
+    return !!run && !this.disposed && !run.stopping && !state.cancelled && !state.finishRequested &&
+      !state.agentInputError && !state.pendingHumanAsk && !this.hasPendingHumanAsk(runId) && !!state.session?.open &&
+      !this.workerExecutionStopped(runId) && !this.executionBlockedByRootFinish(run) && !this.parentCompletionPending(runId) &&
+      !this.workerWait(runId) && !run.ciWait && !this.workerWakeAdmitted.has(runId) &&
+      !state.agentInputFlight && !this.harnessOwesInput(state) && !this.hasQueuedAgentInputs(runId);
+  }
+
+  private tryAutonomousNudge(runId: string, state: ActiveRun, stepId: string, ask: AskRequest | null): boolean {
+    const session = state.session;
+    if (!state.autonomous || !session || !this.canAutoContinue(runId, state)) return false;
     state.autonomousNudgePending = undefined;
     this.clearIdleTimer(state);
     if ((state.autoContinues ?? 0) >= MAX_AUTO_CONTINUES) {
@@ -7347,14 +7388,14 @@ export class RunManager {
     // fresh turn-end ASK: the guards above exclude every pending native/persisted
     // question. Do not route via deliverMessage, which attributes a human answer.
     // Ordinary nudges keep #505's acknowledged agent-input failure semantics.
-    const sent = ask ? state.session.sendMessage(content) : this.submitAgentInput(runId, state, content);
+    const sent = ask ? session.sendMessage(content) : this.submitAgentInput(runId, state, content);
     if (!sent) {
       // A portable override uses sendMessage: its POST may still be awaiting ACK
       // after the next SSE turn ends. It is not an agentInputFlight. Keep this
       // exact boundary running until onAgentInputReady retries, without charging
       // the cap or claiming delivery. Missing readiness closes via the idle bound.
-      if (!ask && state.session.open && !state.agentInputError && !state.agentSessionError) {
-        state.autonomousNudgePending = state.session;
+      if (!ask && session.open && !state.agentInputError && !state.agentSessionError) {
+        state.autonomousNudgePending = session;
         this.armIdleTimer(runId, state);
       }
       return false;
@@ -7371,6 +7412,17 @@ export class RunManager {
       type: 'note', stepId,
       message: `autonomous — question overridden by the auto-continue nudge: ${ask.questions.map(question => question.question).join(' | ')}`,
     });
+    return true;
+  }
+
+  /** One-shot visible-message nudge when a turn ends on reasoning or a tool (#544, #119). */
+  private tryFinalMessageNudge(runId: string, state: ActiveRun, stepId: string): boolean {
+    if (state.finalMessageNudged === state.session || !this.canAutoContinue(runId, state)) return false;
+    const sent = this.submitAgentInput(runId, state, [{ type: 'text', text: FINAL_MESSAGE_NUDGE }]);
+    if (!sent) return false;
+    state.finalMessageNudged = state.session;
+    this.clearIdleTimer(state);
+    this.store.appendEvent(runId, { type: 'note', stepId, message: 'no final message — asking the agent for a visible reply' });
     return true;
   }
 

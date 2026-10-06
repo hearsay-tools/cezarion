@@ -61,6 +61,8 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  * | `subagent` | child work and terminal signal, then parent monitoring text followed by late child text |
  * | `steer-tool` | one slow tool; agent input sent while it runs is read before the turn ends (#505) |
  * | `steer-late` | the final text first; agent input sent after it arrives after the last model call (#505) |
+ * | `silent-tail` | visible assistant text, a tool, then reasoning that names CEZ:DONE, and no later message |
+ * | `silent-tail-again` | the same first turn; a final-message nudge is answered with reasoning only |
  */
 export const SCENARIOS = [
   'auto-resumed',
@@ -76,6 +78,8 @@ export const SCENARIOS = [
   'autonomous-cap',
   'autonomous-ask-cap',
   'autonomous-readiness-idle',
+  'silent-tail',
+  'silent-tail-again',
   'baseline',
   'done',
   'hold',
@@ -162,6 +166,15 @@ export const AUTONOMOUS_CRITERIA = [
   { id: 'A14', scenario: 'autonomous-readiness-idle', name: 'settles a continued root readiness timeout after process exit' },
 ] as const;
 
+/** #544: workflow-final-message-parity.test.ts, real native wires on both turn-end paths. */
+export const FINAL_MESSAGE_CRITERIA = [
+  { id: 'F1', scenario: 'silent-tail', name: 'nudges a silent tail to a visible DONE' },
+  { id: 'F2', scenario: 'silent-tail-again', name: 'parks waiting after one still-silent nudge' },
+  { id: 'F3', scenario: 'silent-tail-again', name: 'never completes from reasoning that names CEZ:DONE' },
+  { id: 'F4', scenario: 'baseline', name: 'keeps markerless visible text waiting without a nudge' },
+  { id: 'F5', scenario: 'done', name: 'honors DONE without a final-message nudge' },
+] as const;
+
 export interface HarnessAdapter {
   readonly backend: RunnerId;
   /** Every human ask wire this runner exposes; marker fallback when none exists. */
@@ -204,6 +217,8 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       autonomous: 'mock:autonomous',
       'autonomous-cap': 'mock:autonomous-cap',
       'autonomous-ask-cap': 'mock:autonomous-ask-cap',
+      'silent-tail': 'mock:silent-tail',
+      'silent-tail-again': 'mock:silent-tail-again',
       baseline: BASELINE_PROMPT,
       'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
       'crash-stderr-held-pipe': 'mock:crash-stderr-held-pipe',
@@ -241,6 +256,8 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       autonomous: 'mock:autonomous',
       'autonomous-cap': 'mock:autonomous-cap',
       'autonomous-ask-cap': 'mock:autonomous-ask-cap',
+      'silent-tail': 'mock:silent-tail',
+      'silent-tail-again': 'mock:silent-tail-again',
       baseline: BASELINE_PROMPT,
       'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
       'crash-stderr-held-pipe': 'mock:crash-stderr-held-pipe',
@@ -280,6 +297,8 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'autonomous-cap': 'mock:autonomous-cap',
       'autonomous-ask-cap': 'mock:autonomous-ask-cap',
       'autonomous-readiness-idle': 'mock:autonomous-readiness-idle',
+      'silent-tail': 'mock:silent-tail',
+      'silent-tail-again': 'mock:silent-tail-again',
       baseline: BASELINE_PROMPT,
       'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
       'crash-stderr-held-pipe': 'mock:crash-stderr-held-pipe',
@@ -316,6 +335,8 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       autonomous: 'mock:autonomous',
       'autonomous-cap': 'mock:autonomous-cap',
       'autonomous-ask-cap': 'mock:autonomous-ask-cap',
+      'silent-tail': 'mock:silent-tail',
+      'silent-tail-again': 'mock:silent-tail-again',
       baseline: BASELINE_PROMPT,
       'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
       'crash-stderr-held-pipe': 'mock:crash-stderr-held-pipe',
@@ -342,6 +363,8 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       autonomous: 'mock:autonomous',
       'autonomous-cap': 'mock:autonomous-cap',
       'autonomous-ask-cap': 'mock:autonomous-ask-cap',
+      'silent-tail': 'mock:silent-tail',
+      'silent-tail-again': 'mock:silent-tail-again',
       baseline: BASELINE_PROMPT,
       'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
       'crash-stderr-held-pipe': 'mock:crash-stderr-held-pipe',
@@ -379,6 +402,8 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       autonomous: 'mock:autonomous',
       'autonomous-cap': 'mock:autonomous-cap',
       'autonomous-ask-cap': 'mock:autonomous-ask-cap',
+      'silent-tail': 'mock:silent-tail',
+      'silent-tail-again': 'mock:silent-tail-again',
       baseline: BASELINE_PROMPT,
       'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
       'crash-stderr-held-pipe': 'mock:crash-stderr-held-pipe',

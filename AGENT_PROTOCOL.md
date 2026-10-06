@@ -997,6 +997,14 @@ this HTTP-only ordering and test root idle expiry/Continue on their native wires
 Owned-worker terminal settlement and explicit question/worker/CI waits retain
 their existing policies.
 
+Final-message nudge rows **F1–F5** live in
+`core/workflow-final-message-parity.test.ts` and the same parity guard (hearsay-tools/cezarion#544).
+Every adapter covers a reasoning-or-tool tail with no later assistant message, on fresh and Continue
+paths: one visible-message nudge that can complete with DONE, a still-silent nudge that parks
+waiting (#119), reasoning that names `CEZ:DONE` never completing the run (#399), markerless visible
+text staying waiting without a nudge, and an explicit DONE with zero nudge notes. Control markers
+are never read from reasoning. No runner is exempt.
+
 > Every criterion in the harness parity matrix MUST hold for **every** backend,
 > or carry a declared exemption naming the wire limitation that prevents it.
 

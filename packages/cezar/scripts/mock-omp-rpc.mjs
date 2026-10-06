@@ -148,6 +148,16 @@ function userMessage(text) {
   write({ type: 'message_end', messageId, message });
 }
 
+/** One assistant thinking block, then its usage-bearing message_end. */
+function assistantThinking(text, { stopReason = 'stop', usage = { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 15, cost: { total: 0.001 } } } = {}) {
+  const messageId = `msg-${++messageSeq}`;
+  write({ type: 'message_start', messageId, message: { role: 'assistant', content: [] } });
+  messageUpdate(messageId, { type: 'thinking_start', contentIndex: 0 });
+  messageUpdate(messageId, { type: 'thinking_delta', contentIndex: 0, delta: text });
+  messageUpdate(messageId, { type: 'thinking_end', contentIndex: 0, content: text });
+  write({ type: 'message_end', messageId, message: { role: 'assistant', content: [{ type: 'thinking', thinking: text }], provider: 'anthropic', model: 'claude-mock', usage, stopReason } });
+}
+
 /** One assistant message: text block (streamed as `deltas`), then its usage-bearing message_end. */
 function assistantText(deltas, { stopReason = 'stop', usage = { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 15, cost: { total: 0.001 } }, extra = {} } = {}) {
   const messageId = `msg-${++messageSeq}`;
@@ -354,6 +364,24 @@ async function prompt(command) {
     assistantText([autonomousReply(message)]);
     endTurn();
     return;
+  }
+  if (message.includes('mock:silent-tail') || message.includes('Your last turn ended without a message to the user.')) {
+    const silent = await import('./mock-silent-tail.mjs');
+    silent.noteSilentTailPrompt(message);
+    if (silent.isFinalMessageNudge(message)) {
+      if (silent.silentTailNudgeAgain()) assistantThinking(silent.SILENT_TAIL_REASONING);
+      else assistantText([silent.SILENT_TAIL_DONE]);
+      endTurn();
+      return;
+    }
+    if (silent.isSilentTailScenario(message)) {
+      assistantText([silent.SILENT_TAIL_OPENING]);
+      write({ type: 'tool_execution_start', toolCallId: 'tool-silent-gh', toolName: 'bash', args: { command: 'gh issue create' } });
+      write({ type: 'tool_execution_end', toolCallId: 'tool-silent-gh', toolName: 'bash', result: { content: [{ type: 'text', text: 'created' }] }, isError: false });
+      assistantThinking(silent.SILENT_TAIL_REASONING);
+      endTurn();
+      return;
+    }
   }
   if (/mock:(no-progress|busy-progress)/.test(message)) {
     if (message.includes('mock:no-progress')) {
