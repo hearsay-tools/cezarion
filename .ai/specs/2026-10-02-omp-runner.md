@@ -273,6 +273,15 @@ consumed in the same turn (Ruling 0, updated). Interrupt: `abort`, then SIGTERM,
 
 ### Sub-agents and the Agents drawer
 
+**Usage accounting (hearsay-tools/cezarion#833).** Each assistant `message_end`, parent or
+inside a `subagent_event`, contributes once on receipt. `usage.updated` carries cumulative
+session tokens and cost; `turn.completed` carries the sum received while that turn was open.
+Child reports received between turns update only the session totals and never open a parent
+turn. Accounting precedes the bounded presentation buffer, so an absent lifecycle, buffer
+overflow or replay cannot lose or duplicate spend. v1 reports the same calls through cost
+increments and cumulative tokens, retaining its cache weighting and per-message rounding;
+v2 retains raw token components. Per-child cost display remains outside this change.
+
 `collectSubagents` (`packages/web/src/routes/task-thread/subagent-dock.ts`) lists every
 parent-less `toolKind:'task'` item and gathers children by `parentItemId`. The mapper produces
 that shape; no web change is needed beyond tests.
@@ -539,4 +548,3 @@ identity, §4 OMP mapping, §7 exemptions, §10 OMP lessons: no `agent_settled`,
 `--session-id`, no `--exclude-tools`, result-based diffs, `--tools` rejects unknown names; the
 CI-wait harness table and D1 table), `BACKWARD_COMPATIBILITY.md` (new runner id, additive),
 and this file.
-

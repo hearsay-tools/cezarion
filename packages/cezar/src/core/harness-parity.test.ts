@@ -307,7 +307,7 @@ const SEAM_CRITERIA: readonly SeamCriterion[] = [
     id: 'S9',
     name: 'S9 keeps the parent turn open past a child session terminal signal',
     scenario: 'subagent',
-    assert: ({ v1, v2, result }) => {
+    assert: ({ backend, v1, v2, result }) => {
       // #149: child text stays nested on v2 and never contaminates parent text,
       // including AgentRunResult's fallback buffer and unfinished child deltas.
       const texts = v1.filter((e) => e.type === 'text').map((e) => e.text);
@@ -322,6 +322,19 @@ const SEAM_CRITERIA: readonly SeamCriterion[] = [
       // The parent's own trailing text has to land BEFORE its turn-end. Under
       // #600 the child's completion closed the turn first, so it did not.
       expect(v1.findIndex((e) => e.type === 'turn-end')).toBeGreaterThan(lastText);
+      // hearsay-tools/cezarion#833: OMP's child message_end must contribute spend without
+      // changing the shared parent/child lifecycle contract above. Other native wires keep
+      // their existing aggregate telemetry; these literals describe the OMP mock's calls.
+      if (backend === 'omp') {
+        expect(result.tokensUsed).toBe(60);
+        expect(v1.filter(event => event.type === 'cost').map(event => event.usd)).toEqual([0.001, 0.002]);
+        expect(v2.filter(event => event.type === 'usage.updated').at(-1)).toMatchObject({
+          usage: { input: 30, output: 15, total: 149, cacheRead: 100, cacheWrite: 4 }, costUsd: 0.003,
+        });
+        expect(v2.filter(event => event.type === 'turn.completed')).toEqual([
+          expect.objectContaining({ usage: { input: 30, output: 15, total: 149, cacheRead: 100, cacheWrite: 4 }, costUsd: 0.003 }),
+        ]);
+      }
     },
   },
   {

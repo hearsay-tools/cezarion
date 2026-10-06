@@ -161,13 +161,13 @@ function assistantText(deltas, { stopReason = 'stop', usage = { input: 10, outpu
 }
 
 /** One complete sub-agent text message, wrapped in `subagent_event` (rpc-subagents.ndjson). */
-function subagentText(id, text) {
+function subagentText(id, text, usage) {
   const event = (inner) => write({ type: 'subagent_event', payload: { id, event: inner } });
   event({ type: 'message_start', message: { role: 'assistant', content: [] } });
   event({ type: 'message_update', message: { role: 'assistant' }, assistantMessageEvent: { type: 'text_start', contentIndex: 0 } });
   event({ type: 'message_update', message: { role: 'assistant' }, assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: text } });
   event({ type: 'message_update', message: { role: 'assistant' }, assistantMessageEvent: { type: 'text_end', contentIndex: 0, content: text } });
-  event({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text }], stopReason: 'stop' } });
+  event({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text }], stopReason: 'stop', ...(usage ? { usage } : {}) } });
 }
 
 function beginTurn(command) {
@@ -433,7 +433,7 @@ async function prompt(command) {
     // The parent keeps streaming after the child's terminal frame.
     assistantText(['Still working after the sub-agent.\nCEZ:MONITORING']);
     // Late child text after the parent marker; the second block never completes.
-    subagentText('Reviewer', 'Child review finished.');
+    subagentText('Reviewer', 'Child review finished.', { input: 20, output: 10, cacheRead: 100, cacheWrite: 4, totalTokens: 134, cost: { total: 0.002 } });
     write({ type: 'subagent_event', payload: { id: 'Reviewer', event: { type: 'message_update', message: { role: 'assistant' }, assistantMessageEvent: { type: 'text_start', contentIndex: 0 } } } });
     write({ type: 'subagent_event', payload: { id: 'Reviewer', event: { type: 'message_update', message: { role: 'assistant' }, assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: 'Child review still streaming.' } } } });
     endTurn();

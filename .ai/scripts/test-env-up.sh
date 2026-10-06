@@ -205,7 +205,29 @@ try_reuse() {
   if [ -n "$started" ]; then
     age=$(node -e 'const t=Date.parse(process.argv[1]);process.stdout.write(String(isNaN(t)?1e9:Math.round((Date.now()-t)/1000)))' "$started")
     [ "$age" -le "$TEST_ENV_CACHE_TTL_SECONDS" ] || { log "descriptor is stale (${age}s old)"; return 1; }
-    newer=$(cd "$REPO_ROOT" && find $BUILD_INPUT_PATHS -newermt "$started" -type f -print -quit 2>/dev/null || true)
+    # BSD find cannot parse the ISO timestamp (including milliseconds) that the
+    # descriptor stores. Node compares mtimes directly on every supported host.
+    # As with find, absent/unreadable paths and symlinks are skipped.
+    newer=$(cd "$REPO_ROOT" && node -e '
+      const fs = require("fs"), path = require("path");
+      const startedMs = Date.parse(process.argv[1]);
+      const walk = (p) => {
+        try {
+          const st = fs.lstatSync(p);
+          if (st.isDirectory()) {
+            for (const entry of fs.readdirSync(p)) {
+              const newer = walk(path.join(p, entry));
+              if (newer) return newer;
+            }
+          } else if (st.isFile() && st.mtimeMs > startedMs) return p;
+        } catch { /* absent or unreadable source */ }
+        return "";
+      };
+      for (const input of process.argv.slice(2)) {
+        const newer = walk(input);
+        if (newer) { process.stdout.write(newer); break; }
+      }
+    ' "$started" $BUILD_INPUT_PATHS 2>/dev/null || true)
     [ -z "$newer" ] || { log "source changed since boot ($newer)"; return 1; }
   fi
 

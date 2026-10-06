@@ -58,9 +58,12 @@ export interface OmpUiMapperState extends OmpTextLane {
   readonly turnPromptId: string | null;
   readonly turnPromptAdmitted: boolean;
   readonly stopReason: StopReason;
-  /** Usage of the turn in flight, held from `message_end` to `session_settled` (as Pi's `turnUsage`). */
+  /** Sum of parent and child model calls received during the turn in flight. */
   readonly turnUsage: TokenUsage | null;
   readonly turnCostUsd: number | null;
+  /** Session totals survive turn completion and include late child reports. */
+  readonly sessionUsage: TokenUsage | null;
+  readonly sessionCostUsd: number | null;
   /**
    * Provider failure of the attempt in flight, released at `session_settled` or by
    * `ompFlushProviderError` on stream end, cleared by a later successful `message_end` —
@@ -116,6 +119,8 @@ export function createOmpUiState(): OmpUiMapperState {
     stopReason: 'end_turn',
     turnUsage: null,
     turnCostUsd: null,
+    sessionUsage: null,
+    sessionCostUsd: null,
     latchedProviderError: null,
     ...EMPTY_LANE,
     tools: new Map(),
@@ -461,11 +466,9 @@ function mapMessageEnd(value: Record<string, unknown>, state: OmpUiMapperState):
   const closed = closeParentText(state);
   state = closed.state;
   const events = [...closed.events];
-  const usage = usageEvent(message.usage);
-  if (usage) {
-    events.push(usage);
-    state = { ...state, turnUsage: usage.usage, turnCostUsd: usage.costUsd ?? null };
-  }
+  const accounted = accountUsage(ompMessageUsage(value), state);
+  events.push(...accounted.events);
+  state = accounted.state;
   // Latch the failed attempt, clear on a successful one (#316): `agent_end {yielded:false}`
   // follows a failed attempt OMP is about to retry, and a recovered retry must stay silent.
   if (string(message.stopReason) === 'error') {
@@ -802,8 +805,16 @@ function withSubagent(state: OmpUiMapperState, id: string, entry: OmpSubagentEnt
 function mapSubagentEvent(payload: Record<string, unknown>, state: OmpUiMapperState): OmpUiMapping {
   const id = string(payload.id);
   if (!id || !isRecord(payload.event)) return { events: [], state };
+  // Account on receipt, before the presentation buffer. Replaying or dropping visual
+  // frames must neither duplicate nor discard spend (hearsay-tools/cezarion#833).
+  const accounted = accountUsage(ompMessageUsage({ type: 'subagent_event', payload }), state);
+  const mapped = mapSubagentVisualEvent(id, payload.event, accounted.state);
+  return { events: [...accounted.events, ...mapped.events], state: mapped.state };
+}
+
+function mapSubagentVisualEvent(id: string, event: unknown, state: OmpUiMapperState): OmpUiMapping {
   const entry = state.subagents.get(id);
-  if (entry) return mapChildEvent(payload.event, entry.rowId, state);
+  if (entry) return mapChildEvent(event, entry.rowId, state);
 
   // Only the lifecycle frame names the parent call: hold the event until it arrives.
   const buffered = state.pendingSubagentEvents.get(id);
@@ -818,14 +829,14 @@ function mapSubagentEvent(payload: Record<string, unknown>, state: OmpUiMapperSt
     };
   }
   const pendingSubagentEvents = new Map(state.pendingSubagentEvents);
-  pendingSubagentEvents.set(id, [...(buffered ?? []), payload.event]);
+  pendingSubagentEvents.set(id, [...(buffered ?? []), event]);
   return { events: [], state: { ...state, pendingSubagentEvents } };
 }
 
 /**
  * One sub-agent's `AgentSessionEvent`, nested under its row. It never ends the parent turn,
- * never writes parent text, never moves the session's usage or plan: a child `agent_end` only
- * closes the child's own open text.
+ * never writes parent text or plan: a child `agent_end` only closes the child's own open
+ * text. Usage is accounted on receipt, outside this replayable presentation path.
  */
 function mapChildEvent(event: unknown, rowId: string, state: OmpUiMapperState): OmpUiMapping {
   if (!isRecord(event) || typeof event.type !== 'string') return { events: [], state };
@@ -920,7 +931,46 @@ function ompProviderErrorDetail(message: Record<string, unknown>): string | unde
   return string(message.errorMessage);
 }
 
-/** Same as pi-ui-mapper.ts `usageEvent`. */
+/** Read the same native per-message report for both v1 and v2, including child envelopes. */
+export function ompMessageUsage(value: unknown): Extract<UiEvent, { type: 'usage.updated' }> | undefined {
+  if (!isRecord(value)) return undefined;
+  if (value.type === 'subagent_event') {
+    if (!isRecord(value.payload) || !string(value.payload.id) || !isRecord(value.payload.event)) return undefined;
+    value = value.payload.event;
+  }
+  if (!isRecord(value) || value.type !== 'message_end' || !isRecord(value.message) || value.message.role !== 'assistant') return undefined;
+  return usageEvent(value.message.usage);
+}
+
+function sumUsage(previous: TokenUsage | null, next: TokenUsage): TokenUsage {
+  return {
+    input: (previous?.input ?? 0) + next.input,
+    output: (previous?.output ?? 0) + next.output,
+    total: (previous?.total ?? 0) + (next.total ?? 0),
+    ...(previous?.cacheRead !== undefined || next.cacheRead !== undefined
+      ? { cacheRead: (previous?.cacheRead ?? 0) + (next.cacheRead ?? 0) } : {}),
+    ...(previous?.cacheWrite !== undefined || next.cacheWrite !== undefined
+      ? { cacheWrite: (previous?.cacheWrite ?? 0) + (next.cacheWrite ?? 0) } : {}),
+  };
+}
+
+function accountUsage(report: ReturnType<typeof ompMessageUsage>, state: OmpUiMapperState): OmpUiMapping {
+  if (!report) return { events: [], state };
+  const sessionUsage = sumUsage(state.sessionUsage, report.usage);
+  const sessionCostUsd = report.costUsd === undefined ? state.sessionCostUsd : (state.sessionCostUsd ?? 0) + report.costUsd;
+  return {
+    events: [{ type: 'usage.updated', usage: sessionUsage, ...(sessionCostUsd !== null ? { costUsd: sessionCostUsd } : {}) }],
+    state: {
+      ...state, sessionUsage, sessionCostUsd,
+      ...(state.turnId ? {
+        turnUsage: sumUsage(state.turnUsage, report.usage),
+        turnCostUsd: report.costUsd === undefined ? state.turnCostUsd : (state.turnCostUsd ?? 0) + report.costUsd,
+      } : {}),
+    },
+  };
+}
+
+/** Native OMP message usage is an increment; the public usage.updated event is cumulative. */
 function usageEvent(value: unknown): Extract<UiEvent, { type: 'usage.updated' }> | undefined {
   if (!isRecord(value)) return undefined;
   const input = number(value.input) ?? 0;
@@ -928,8 +978,8 @@ function usageEvent(value: unknown): Extract<UiEvent, { type: 'usage.updated' }>
   const cacheRead = number(value.cacheRead);
   const cacheWrite = number(value.cacheWrite);
   const total = number(value.totalTokens) ?? input + output + (cacheRead ?? 0) + (cacheWrite ?? 0);
-  if (total <= 0) return undefined;
   const cost = isRecord(value.cost) ? number(value.cost.total) : undefined;
+  if (total <= 0 && !(cost !== undefined && cost > 0)) return undefined;
   return {
     type: 'usage.updated',
     usage: {
@@ -939,7 +989,7 @@ function usageEvent(value: unknown): Extract<UiEvent, { type: 'usage.updated' }>
       ...(cacheRead !== undefined ? { cacheRead } : {}),
       ...(cacheWrite !== undefined ? { cacheWrite } : {}),
     },
-    ...(cost !== undefined ? { costUsd: cost } : {}),
+    ...(cost !== undefined && cost >= 0 ? { costUsd: cost } : {}),
   };
 }
 
