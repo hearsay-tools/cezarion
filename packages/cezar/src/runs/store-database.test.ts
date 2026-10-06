@@ -337,7 +337,7 @@ describe('debounced saves write only what changed', () => {
     expect(row('run-07')).toBeUndefined();
   });
 
-  it('retention deletes exactly the rows it pruned', () => {
+  it('retention archives exactly the rows it overflowed', () => {
     seedRuns(dataDir, [
       record('old-1', { createdAt: '2026-01-01T00:00:00.000Z' }),
       // With the run created below, one more than the 300 unarchived runs retention keeps.
@@ -347,7 +347,10 @@ describe('debounced saves write only what changed', () => {
     const seen = writes(store);
     const run = store.createRun({ title: 'trigger retention', workflow: 'w', task: 't', steps: [] });
     store.flush();
-    expect(seen).toEqual([{ upserts: [run.id], deletes: ['old-1'] }]);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.deletes).toEqual([]);
+    expect([...seen[0]!.upserts].sort()).toEqual([run.id, 'old-1'].sort());
+    expect(store.getRun('old-1')?.archived).toBe(true);
   });
 
   it('stores the record, its toRunSummary projection and the query columns', () => {

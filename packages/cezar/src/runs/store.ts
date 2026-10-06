@@ -15,6 +15,7 @@ import {
 import type { ArchiveFinishedScope, CiWait, ConversationState, AgentInput, InboxClaim, DelegationState, RunSummary, WorkerCollectedResult } from '@open-mercato/cezar-contract';
 import { storedDelegationStateSchema } from './delegation-state.ts';
 import { refreshHumanAskSummary } from './human-ask-summary.ts';
+import { HistoryCompressor } from './history-compressor.ts';
 import { hasPlainHistory, historyPaths, readHistoryText, removeHistory, restoreHistory } from './history-file.ts';
 import { workerExecutionIdentitySchema, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
 import { reconcileWorkerWait } from '../delegation/wait.ts';
@@ -479,7 +480,6 @@ function sleepSync(ms: number): void {
 }
 
 const MAX_RUNS_KEPT = 300;
-const MAX_ARCHIVED_KEPT = 500;
 
 const PR_URL_RE = /https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/\d+/;
 const ISSUE_URL_RE = /https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/issues\/\d+/;
@@ -1000,10 +1000,11 @@ const MARK_ALL_READ_SQL = "archived = 0 AND status IN ('done', 'failed') AND fin
   " AND NOT (status = 'failed' AND json_extract(summary, '$.autoResumeAt') IS NOT NULL)" +
   " AND (json_extract(summary, '$.seenAt') IS NULL OR json_extract(summary, '$.seenAt') < finished_at)";
 
-/** History retention's candidates among the given ids (a JSON array): finished and without
- *  delegation. */
+/** History retention's candidates among the given ids (a JSON array): finished, without
+ *  delegation, and not pinned. */
 const RETENTION_CANDIDATES_SQL = "id IN (SELECT value FROM json_each(?)) AND status NOT IN ('queued', 'running', 'waiting')" +
-  " AND parent_run_id IS NULL AND json_extract(summary, '$.delegation') IS NULL";
+  " AND parent_run_id IS NULL AND json_extract(summary, '$.delegation') IS NULL" +
+  " AND json_extract(summary, '$.pinned') IS NOT 1";
 
 /** Rows whose stored summary names a referenced PR or issue: what a repository handle can veto. */
 const REFERENCED_SQL =
@@ -1244,10 +1245,13 @@ export class RunStore extends EventEmitter {
   /** Rows whose `data` this store tried to decode and could not: left in the database untouched,
    *  and left out of the list rows from then on, as the cold reader leaves them out (run-index.ts). */
   private readonly unreadable = new Set<string>();
+  /** Background one-at-a-time compressor for archived transcripts (#818). */
+  private readonly compressor: HistoryCompressor;
 
   private constructor(private readonly dataDir: string) {
     super();
     this.setMaxListeners(100);
+    this.compressor = new HistoryCompressor(dataDir, (id) => this.isHistoryCompressEligible(id));
   }
 
   /**
@@ -2362,9 +2366,11 @@ export class RunStore extends EventEmitter {
       executionStartSeq: this.readEvents(id).reduce((seq, event) => Math.max(seq, event.seq), 0),
     });
     const staged = new Map<string, RunRecord>();
-    staged.set(id, { ...run, ...this.redactPatch(patch), delegation,
+    const next: RunRecord = { ...run, ...this.redactPatch(patch), delegation,
       ...(step ? { steps: [...run.steps, { ...step, status: 'pending' as const, iterations: 0, tokensUsed: 0 }] } : {}),
-    });
+    };
+    staged.set(id, next);
+    if (Object.prototype.hasOwnProperty.call(patch, 'archived')) this.syncTranscriptForm(id, next.archived);
     if (conversation) {
       const root = this.peek(conversation.rootId);
       if (root?.delegation?.role !== 'root' || run.delegation.parentRunId !== root.id) throw new Error('missing conversation ownership');
@@ -2609,9 +2615,17 @@ export class RunStore extends EventEmitter {
     if (normalized.status && ['running', 'waiting', 'queued'].includes(normalized.status)) {
       normalized.autoResumeAt = undefined;
     }
+    const archived = Object.prototype.hasOwnProperty.call(normalized, 'archived')
+      ? Boolean(normalized.archived)
+      : undefined;
+    if (archived !== undefined) {
+      delete normalized.archived;
+      delete normalized.archivedAt;
+    }
     Object.assign(run, this.redactPatch(normalized));
     if (normalized.task !== undefined) this.resolveEditedTaskRefs(run);
-    this.touch(run);
+    if (archived !== undefined) this.applyArchived(run, archived);
+    else this.touch(run);
     return run;
   }
 
@@ -2758,8 +2772,52 @@ export class RunStore extends EventEmitter {
       clearPendingAutoResume(run);
       clearPin(run);
     }
+    this.syncTranscriptForm(run.id, archived);
     this.touch(run);
     return changed;
+  }
+
+  /** Transcript form follows `archived`: enqueue compression, or restore the plain file now. */
+  private syncTranscriptForm(id: string, archived: boolean): void {
+    if (archived) this.compressor.enqueue(id);
+    else {
+      this.compressor.cancel(id);
+      restoreHistory(this.dataDir, id);
+    }
+  }
+
+  private isHistoryCompressEligible(id: string): boolean {
+    if (this.deleted.has(id)) return false;
+    try {
+      const run = this.held.get(id) ?? this.peek(id);
+      if (!run) return false;
+      return run.archived === true && !['queued', 'running', 'waiting'].includes(run.status);
+    } catch {
+      return false;
+    }
+  }
+
+  /** Startup sweep: enqueue every archived non-live run that still has a plain transcript. */
+  compressArchivedHistory(): void {
+    const ids = new Set<string>();
+    for (const key of this.db?.listKeysWhere('archived = 1 AND live = 0') ?? []) {
+      if (!this.deleted.has(key.id)) ids.add(key.id);
+    }
+    for (const run of this.held.values()) {
+      if (run.archived && !['queued', 'running', 'waiting'].includes(run.status) && !this.deleted.has(run.id)) {
+        ids.add(run.id);
+      }
+    }
+    for (const id of ids) {
+      const { plain, compressed } = historyPaths(this.dataDir, id);
+      if (existsSync(plain) && existsSync(compressed)) restoreHistory(this.dataDir, id);
+      if (hasPlainHistory(this.dataDir, id)) this.compressor.enqueue(id);
+    }
+  }
+
+  /** Resolves when the transcript compressor is idle (tests, shutdown). */
+  historyIdle(): Promise<void> {
+    return this.compressor.idle();
   }
 
   /** Pin one run to the top of this project's task list, or unpin it (#935). Mirrors
@@ -3562,45 +3620,39 @@ export class RunStore extends EventEmitter {
   }
 
   /**
-   * Count-based history retention: of the runs past the newest `MAX_RUNS_KEPT` unarchived (and
-   * `MAX_ARCHIVED_KEPT` archived) ones, delete each finished run without delegation that
-   * `canDeleteRun` allows. Ranked over the row keys (the `created_at` index, no record decoded)
-   * with memory laid over them, since a run created or archived since the last save has no row
-   * yet; the rows past the cut are then filtered in `runs.db`, so only real candidates decode.
+   * Count-based history retention: of the runs past the newest `MAX_RUNS_KEPT` unarchived ones,
+   * archive each finished run without delegation that is not pinned and whose family this store
+   * can claim. Ranked over the row keys (the `created_at` index, no record decoded) with memory
+   * laid over them, since a run created or archived since the last save has no row yet; the rows
+   * past the cut are then filtered in `runs.db`, so only real candidates decode. Archived runs
+   * are never deleted by retention — only a human deletes a run.
    */
   private pruneOldRuns(): void {
-    for (const [archived, keep] of [[false, MAX_RUNS_KEPT], [true, MAX_ARCHIVED_KEPT]] as const) {
-      const ranked = new Map<string, ListOrder & { id: string }>();
-      for (const key of this.db?.listKeysWhere('archived = ?', [archived ? 1 : 0]) ?? []) {
-        if (!this.held.has(key.id) && !this.deleted.has(key.id)) ranked.set(key.id, key);
-      }
-      for (const run of this.held.values()) if (run.archived === archived) ranked.set(run.id, { id: run.id, ...this.listOrder(run) });
-      const overflow = [...ranked.values()].sort(newestFirst).slice(keep).map((key) => key.id);
-      if (overflow.length === 0) continue;
-      const stale = overflow.flatMap((id) => {
-        const run = this.held.get(id);
-        // Retention must not evict a live task's history or scratch between turns, and delegation
-        // promises history and parent snapshots until explicit deletion.
-        return run && !['queued', 'running', 'waiting'].includes(run.status) && !run.delegation ? [id] : [];
-      });
-      const cold = overflow.filter((id) => !this.held.has(id));
-      const coldRows = new Map<string, RunRow>();
-      if (cold.length > 0) {
-        // Another process's runs are its own to keep or delete (#779, plan step 3).
-        const rows = this.db!.listWhere(RETENTION_CANDIDATES_SQL, [JSON.stringify(cold)]);
-        const writable = this.claimFamilies(rows.map(rowFamily));
-        for (const row of rows) if (writable.has(rowFamily(row))) coldRows.set(row.id, row);
-        stale.push(...coldRows.keys());
-      }
-      for (const id of stale) {
-        if (!this.canDeleteRun(id)) continue;
-        const family = this.familyOf(id);
-        const row = coldRows.get(id);
-        if (row) this.base.set(id, { revision: row.revision, seq: row.seq, data: row.data });
-        this.held.delete(id);
-        this.markDeleted(id, family);
-        removeAgentTmpDir(this.dataDir, id);
-      }
+    const ranked = new Map<string, ListOrder & { id: string }>();
+    for (const key of this.db?.listKeysWhere('archived = ?', [0]) ?? []) {
+      if (!this.held.has(key.id) && !this.deleted.has(key.id)) ranked.set(key.id, key);
+    }
+    for (const run of this.held.values()) if (!run.archived) ranked.set(run.id, { id: run.id, ...this.listOrder(run) });
+    const overflow = [...ranked.values()].sort(newestFirst).slice(MAX_RUNS_KEPT).map((key) => key.id);
+    if (overflow.length === 0) return;
+    const stale = overflow.flatMap((id) => {
+      const run = this.held.get(id);
+      // Retention must not archive a live task between turns, a pinned run, or a delegation
+      // family whose history is promised until explicit deletion.
+      return run && !['queued', 'running', 'waiting'].includes(run.status) && !run.delegation && !run.pinned ? [id] : [];
+    });
+    const cold = overflow.filter((id) => !this.held.has(id));
+    if (cold.length > 0) {
+      // Another process's runs are its own to keep or archive (#779, plan step 3).
+      const rows = this.db!.listWhere(RETENTION_CANDIDATES_SQL, [JSON.stringify(cold)]);
+      const writable = this.claimFamilies(rows.map(rowFamily));
+      for (const row of rows) if (writable.has(rowFamily(row))) stale.push(row.id);
+    }
+    for (const id of stale) {
+      const run = this.record(id);
+      if (!run || run.archived) continue;
+      this.applyArchived(run, true);
+      removeAgentTmpDir(this.dataDir, id);
     }
   }
 
@@ -3810,6 +3862,7 @@ export class RunStore extends EventEmitter {
    * absent. It saves nothing more, and a durable commit on it throws.
    */
   close(): void {
+    this.compressor.stop();
     if (this.saveTimer) {
       clearTimeout(this.saveTimer);
       this.saveTimer = null;

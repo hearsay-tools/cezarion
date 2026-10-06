@@ -315,6 +315,8 @@ async function serveCommand(
       () => manager.recover(),
       providerRuntimeAuth,
     );
+    // Boot project never enters ProjectContexts.build(); same sweep that path runs after recover.
+    store.compressArchivedHistory();
     delegation.service.armDestroyRetries(bootProjectId ?? 'default');
   }
   if (recovered > 0) console.log(`  recovered ${recovered} run(s) from the previous session`);
