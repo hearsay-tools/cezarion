@@ -225,14 +225,16 @@ rl.on('line', async (line) => {
       emit({ method: 'turn/completed', params: { threadId: 'th_mock_1', turn: { id: 'turn_mock_1', status: 'completed' } } });
       return;
     }
-    if (turnText.includes('mock:silent-tail') || turnText.includes('Your last turn ended without a message to the user.')) {
+    if (turnText.includes('mock:silent-tail') || turnText.includes('mock:tool-tail') || turnText.includes('Your last turn ended without a message to the user.')) {
       const silent = await import('./mock-silent-tail.mjs');
       silent.noteSilentTailPrompt(turnText);
       if (silent.isFinalMessageNudge(turnText)) {
-        if (silent.silentTailNudgeAgain()) {
+        const kind = silent.finalMessageNudgeKind();
+        if (kind === 'silent') {
           emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'reasoning', id: 'silent-nudge-rsn', summary: silent.SILENT_TAIL_REASONING, content: silent.SILENT_TAIL_REASONING } } });
         } else {
-          emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: 'silent-nudge-done', text: silent.SILENT_TAIL_DONE } } });
+          const text = kind === 'done' ? silent.SILENT_TAIL_DONE : silent.FINAL_MESSAGE_STANDING;
+          emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: 'silent-nudge-done', text } } });
         }
         emit({ method: 'turn/completed', params: { threadId: 'th_mock_1', turn: { id: 'turn_mock_1', status: 'completed' } } });
         return;
@@ -241,6 +243,12 @@ rl.on('line', async (line) => {
         emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: 'silent-open', text: silent.SILENT_TAIL_OPENING } } });
         emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'commandExecution', id: 'silent-gh', command: ['bash', '-lc', 'gh issue create'], cwd: '/repo', status: 'completed', exitCode: 0 } } });
         emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'reasoning', id: 'silent-rsn', summary: silent.SILENT_TAIL_REASONING, content: silent.SILENT_TAIL_REASONING } } });
+        emit({ method: 'turn/completed', params: { threadId: 'th_mock_1', turn: { id: 'turn_mock_1', status: 'completed' } } });
+        return;
+      }
+      if (silent.isToolTailScenario(turnText)) {
+        emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: 'tool-tail-open', text: silent.TOOL_TAIL_OPENING } } });
+        emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'commandExecution', id: 'tool-tail-git', command: ['bash', '-lc', 'git status --short'], cwd: '/repo', status: 'completed', exitCode: 0 } } });
         emit({ method: 'turn/completed', params: { threadId: 'th_mock_1', turn: { id: 'turn_mock_1', status: 'completed' } } });
         return;
       }
@@ -457,6 +465,9 @@ rl.on('line', async (line) => {
     emit({ method: 'item/started', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'commandExecution', id: 'item_c1', command: ['bash', '-lc', 'git status --short'], cwd: '/repo', status: 'inProgress' } } });
     emit({ method: 'item/commandExecution/outputDelta', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', itemId: 'item_c1', delta: ' M src/example.ts\n' } });
     emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'commandExecution', id: 'item_c1', command: ['bash', '-lc', 'git status --short'], cwd: '/repo', status: 'completed', exitCode: 0 } } });
+    emit({ method: 'item/started', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: 'item_m2', text: '' } } });
+    emit({ method: 'item/agentMessage/delta', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', itemId: 'item_m2', delta: 'Done with the first pass.' } });
+    emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: 'item_m2', text: 'Done with the first pass.' } } });
     emit({ method: 'thread/tokenUsage/updated', params: { threadId: 'th_mock_1', tokenUsage: { total: { totalTokens: 1500, inputTokens: 1200, outputTokens: 300 }, last: { totalTokens: 1500, inputTokens: 1200, outputTokens: 300 } } } });
     emit({ method: 'turn/completed', params: { turn: { id: 'turn_mock_1', status: 'completed' } } });
   }

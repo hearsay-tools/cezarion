@@ -48,7 +48,8 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  *
  * | Scenario | The mock must |
  * | --- | --- |
- * | `baseline` | one text, one tool call and result, usage, then its terminal turn signal |
+ * | `baseline` | one text, one tool call and result, a later visible assistant message, usage, then its terminal turn signal |
+ * | `tool-tail` | visible assistant text, a tool call/result, then turn end with no later message |
  * | `done` | the same, with a trailing `CEZ:DONE` so the run reaches its review gate |
  * | `hold` | delay the terminal turn signal after the last content event |
  * | `split-text` | stream the reply in pieces, ending with a trailing `CEZ:MONITORING` |
@@ -80,6 +81,7 @@ export const SCENARIOS = [
   'autonomous-readiness-idle',
   'silent-tail',
   'silent-tail-again',
+  'tool-tail',
   'baseline',
   'done',
   'hold',
@@ -171,7 +173,7 @@ export const FINAL_MESSAGE_CRITERIA = [
   { id: 'F1', scenario: 'silent-tail', name: 'nudges a silent tail to a visible DONE' },
   { id: 'F2', scenario: 'silent-tail-again', name: 'parks waiting after one still-silent nudge' },
   { id: 'F3', scenario: 'silent-tail-again', name: 'never completes from reasoning that names CEZ:DONE' },
-  { id: 'F4', scenario: 'baseline', name: 'nudges a markerless message-then-tool tail once' },
+  { id: 'F4', scenario: 'tool-tail', name: 'nudges a markerless message-then-tool tail once' },
   { id: 'F5', scenario: 'done', name: 'honors DONE without a final-message nudge' },
 ] as const;
 
@@ -219,6 +221,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'autonomous-ask-cap': 'mock:autonomous-ask-cap',
       'silent-tail': 'mock:silent-tail',
       'silent-tail-again': 'mock:silent-tail-again',
+      'tool-tail': 'mock:tool-tail',
       baseline: BASELINE_PROMPT,
       'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
       'crash-stderr-held-pipe': 'mock:crash-stderr-held-pipe',
@@ -258,6 +261,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'autonomous-ask-cap': 'mock:autonomous-ask-cap',
       'silent-tail': 'mock:silent-tail',
       'silent-tail-again': 'mock:silent-tail-again',
+      'tool-tail': 'mock:tool-tail',
       baseline: BASELINE_PROMPT,
       'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
       'crash-stderr-held-pipe': 'mock:crash-stderr-held-pipe',
@@ -299,6 +303,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'autonomous-readiness-idle': 'mock:autonomous-readiness-idle',
       'silent-tail': 'mock:silent-tail',
       'silent-tail-again': 'mock:silent-tail-again',
+      'tool-tail': 'mock:tool-tail',
       baseline: BASELINE_PROMPT,
       'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
       'crash-stderr-held-pipe': 'mock:crash-stderr-held-pipe',
@@ -337,6 +342,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'autonomous-ask-cap': 'mock:autonomous-ask-cap',
       'silent-tail': 'mock:silent-tail',
       'silent-tail-again': 'mock:silent-tail-again',
+      'tool-tail': 'mock:tool-tail',
       baseline: BASELINE_PROMPT,
       'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
       'crash-stderr-held-pipe': 'mock:crash-stderr-held-pipe',
@@ -365,6 +371,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'autonomous-ask-cap': 'mock:autonomous-ask-cap',
       'silent-tail': 'mock:silent-tail',
       'silent-tail-again': 'mock:silent-tail-again',
+      'tool-tail': 'mock:tool-tail',
       baseline: BASELINE_PROMPT,
       'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
       'crash-stderr-held-pipe': 'mock:crash-stderr-held-pipe',
@@ -404,6 +411,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'autonomous-ask-cap': 'mock:autonomous-ask-cap',
       'silent-tail': 'mock:silent-tail',
       'silent-tail-again': 'mock:silent-tail-again',
+      'tool-tail': 'mock:tool-tail',
       baseline: BASELINE_PROMPT,
       'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
       'crash-stderr-held-pipe': 'mock:crash-stderr-held-pipe',

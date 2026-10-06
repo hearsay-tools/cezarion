@@ -365,12 +365,13 @@ async function prompt(command) {
     endTurn();
     return;
   }
-  if (message.includes('mock:silent-tail') || message.includes('Your last turn ended without a message to the user.')) {
+  if (message.includes('mock:silent-tail') || message.includes('mock:tool-tail') || message.includes('Your last turn ended without a message to the user.')) {
     const silent = await import('./mock-silent-tail.mjs');
     silent.noteSilentTailPrompt(message);
     if (silent.isFinalMessageNudge(message)) {
-      if (silent.silentTailNudgeAgain()) assistantThinking(silent.SILENT_TAIL_REASONING);
-      else assistantText([silent.SILENT_TAIL_DONE]);
+      const kind = silent.finalMessageNudgeKind();
+      if (kind === 'silent') assistantThinking(silent.SILENT_TAIL_REASONING);
+      else assistantText([kind === 'done' ? silent.SILENT_TAIL_DONE : silent.FINAL_MESSAGE_STANDING]);
       endTurn();
       return;
     }
@@ -379,6 +380,13 @@ async function prompt(command) {
       write({ type: 'tool_execution_start', toolCallId: 'tool-silent-gh', toolName: 'bash', args: { command: 'gh issue create' } });
       write({ type: 'tool_execution_end', toolCallId: 'tool-silent-gh', toolName: 'bash', result: { content: [{ type: 'text', text: 'created' }] }, isError: false });
       assistantThinking(silent.SILENT_TAIL_REASONING);
+      endTurn();
+      return;
+    }
+    if (silent.isToolTailScenario(message)) {
+      assistantText([silent.TOOL_TAIL_OPENING]);
+      write({ type: 'tool_execution_start', toolCallId: 'tool-tail-git', toolName: 'bash', args: { command: 'git status --short' } });
+      write({ type: 'tool_execution_end', toolCallId: 'tool-tail-git', toolName: 'bash', result: { content: [{ type: 'text', text: ' M src/example.ts' }] }, isError: false });
       endTurn();
       return;
     }
@@ -527,6 +535,9 @@ async function prompt(command) {
   assistantText([`Investigating: `, message, ...(message.includes('mock:monitoring') ? ['\n\nCEZ:MONITORING'] : [])]);
   write({ type: 'tool_execution_start', toolCallId: 'tool-1', toolName: 'read', args: { path: 'README.md' } });
   write({ type: 'tool_execution_end', toolCallId: 'tool-1', toolName: 'read', result: { content: [{ type: 'text', text: 'mock file' }] }, isError: false });
+  if (!message.includes('mock:monitoring')) {
+    assistantText(['Done with the first pass.'], { usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { total: 0 } } });
+  }
   endTurn();
   if (message.includes('mock:wake-after-settle')) {
     // OMP resumes on its own after settling (async work finished): a new agent run, no prompt.

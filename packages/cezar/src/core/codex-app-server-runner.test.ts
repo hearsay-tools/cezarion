@@ -53,7 +53,7 @@ describe('a teardown cezar initiated (codex app-server)', () => {
     session.interrupt();
     const result = await session.result;
 
-    expect(result.text).toBe('Checking the working tree.');
+    expect(result.text).toBe('Checking the working tree.\nDone with the first pass.');
     expect(events.some((e) => e.type === 'error')).toBe(false);
     expect(events.at(-1)).toEqual({ type: 'done' });
     expect(

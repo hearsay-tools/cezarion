@@ -120,15 +120,16 @@ async function handle(command) {
     sendTurnEnd();
     return;
   }
-  if (command.type === 'prompt' && (command.message.includes('mock:silent-tail') || command.message.includes('Your last turn ended without a message to the user.'))) {
+  if (command.type === 'prompt' && (command.message.includes('mock:silent-tail') || command.message.includes('mock:tool-tail') || command.message.includes('Your last turn ended without a message to the user.'))) {
     const silent = await import('./mock-silent-tail.mjs');
     silent.noteSilentTailPrompt(command.message);
     if (silent.isFinalMessageNudge(command.message)) {
       send({ id: command.id, type: 'response', command: 'prompt', success: true });
       send({ type: 'agent_start' });
       send({ type: 'turn_start' });
-      if (silent.silentTailNudgeAgain()) sendThinking(silent.SILENT_TAIL_REASONING);
-      else sendText([silent.SILENT_TAIL_DONE]);
+      const kind = silent.finalMessageNudgeKind();
+      if (kind === 'silent') sendThinking(silent.SILENT_TAIL_REASONING);
+      else sendText([kind === 'done' ? silent.SILENT_TAIL_DONE : silent.FINAL_MESSAGE_STANDING]);
       sendTurnEnd();
       return;
     }
@@ -140,6 +141,16 @@ async function handle(command) {
       send({ type: 'tool_execution_start', toolCallId: 'tool-silent-gh', toolName: 'bash', args: { command: 'gh issue create' } });
       send({ type: 'tool_execution_end', toolCallId: 'tool-silent-gh', toolName: 'bash', result: { content: [{ type: 'text', text: 'created' }] }, isError: false });
       sendThinking(silent.SILENT_TAIL_REASONING, 1);
+      sendTurnEnd();
+      return;
+    }
+    if (silent.isToolTailScenario(command.message)) {
+      send({ id: command.id, type: 'response', command: 'prompt', success: true });
+      send({ type: 'agent_start' });
+      send({ type: 'turn_start' });
+      sendText([silent.TOOL_TAIL_OPENING]);
+      send({ type: 'tool_execution_start', toolCallId: 'tool-tail-git', toolName: 'bash', args: { command: 'git status --short' } });
+      send({ type: 'tool_execution_end', toolCallId: 'tool-tail-git', toolName: 'bash', result: { content: [{ type: 'text', text: ' M src/example.ts' }] }, isError: false });
       sendTurnEnd();
       return;
     }
@@ -342,6 +353,7 @@ async function handle(command) {
       result: { content: [{ type: 'text', text: 'mock file' }] },
       isError: false,
     });
+    if (!monitoringMarker) sendText(['Done with the first pass.']);
     send({
       type: 'message_end',
       message: {

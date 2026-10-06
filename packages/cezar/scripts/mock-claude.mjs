@@ -130,16 +130,18 @@ async function respond(userText, imageCount, uuid) {
     emit({ type: 'result', subtype: 'success', result: text, user_message_uuids: [uuid].filter(Boolean), usage: { input_tokens: 10, output_tokens: 5 } });
     return;
   }
-  if (userText.includes('mock:silent-tail') || userText.includes('Your last turn ended without a message to the user.')) {
+  if (userText.includes('mock:silent-tail') || userText.includes('mock:tool-tail') || userText.includes('Your last turn ended without a message to the user.')) {
     const silent = await import('./mock-silent-tail.mjs');
     silent.noteSilentTailPrompt(userText);
     if (silent.isFinalMessageNudge(userText)) {
-      if (silent.silentTailNudgeAgain()) {
+      const kind = silent.finalMessageNudgeKind();
+      if (kind === 'silent') {
         emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'thinking', thinking: silent.SILENT_TAIL_REASONING }] } });
         emit({ type: 'result', subtype: 'success', result: '', user_message_uuids: [uuid].filter(Boolean), usage: { input_tokens: 10, output_tokens: 5 } });
       } else {
-        emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: silent.SILENT_TAIL_DONE }] } });
-        emit({ type: 'result', subtype: 'success', result: silent.SILENT_TAIL_DONE, user_message_uuids: [uuid].filter(Boolean), usage: { input_tokens: 10, output_tokens: 5 } });
+        const text = kind === 'done' ? silent.SILENT_TAIL_DONE : silent.FINAL_MESSAGE_STANDING;
+        emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } });
+        emit({ type: 'result', subtype: 'success', result: text, user_message_uuids: [uuid].filter(Boolean), usage: { input_tokens: 10, output_tokens: 5 } });
       }
       return;
     }
@@ -149,6 +151,13 @@ async function respond(userText, imageCount, uuid) {
       emit({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_silent_gh', content: 'created' }] } });
       emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'thinking', thinking: silent.SILENT_TAIL_REASONING }] } });
       emit({ type: 'result', subtype: 'success', result: silent.SILENT_TAIL_OPENING, user_message_uuids: [uuid].filter(Boolean), usage: { input_tokens: 20, output_tokens: 10 } });
+      return;
+    }
+    if (silent.isToolTailScenario(userText)) {
+      emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: silent.TOOL_TAIL_OPENING }] } });
+      emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_tool_tail', name: 'Bash', input: { command: 'git status --short' } }] } });
+      emit({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_tool_tail', content: ' M src/example.ts' }] } });
+      emit({ type: 'result', subtype: 'success', result: silent.TOOL_TAIL_OPENING, user_message_uuids: [uuid].filter(Boolean), usage: { input_tokens: 20, output_tokens: 10 } });
       return;
     }
   }
