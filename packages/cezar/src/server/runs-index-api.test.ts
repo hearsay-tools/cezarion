@@ -625,6 +625,26 @@ describe('workspace runs index API', () => {
       expect(ids((await search('?q=still')).body)).toEqual([run.id]);
     });
 
+    it('skips an owned project whose store throws, never a 500 (index and search alike)', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      onTestFinished(() => warn.mockRestore());
+      await registerProject(repoRoot);
+      const other = await registerProject(otherRoot);
+      seedColdProject(otherRoot, [storedRun({ id: 'cold-needle', title: 'Cold needle' })]);
+      vi.spyOn(store, 'searchRunSummaries').mockImplementation(() => { throw new Error('database is locked'); });
+      // Only the windowed read the index makes; the app's own boot lists every run.
+      const list = store.listRunSummaries.bind(store);
+      vi.spyOn(store, 'listRunSummaries').mockImplementation((options) => {
+        if (options?.archivedWindow !== undefined) throw new Error('database is locked');
+        return list(options);
+      });
+      const found = await search('?q=needle');
+      expect(found.status).toBe(200);
+      expect(ids(found.body)).toEqual(['cold-needle']);
+      const index = await getIndex();
+      expect(index.runs.map((run) => run.projectId)).toEqual([other.id]);
+    });
+
     it('never builds a project context', async () => {
       await registerProject(repoRoot);
       const other = await registerProject(otherRoot);

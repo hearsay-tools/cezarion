@@ -6222,6 +6222,20 @@ export function createApp(deps: ServerDeps) {
     });
   };
 
+  /**
+   * One project's contribution to a workspace run route. An owned store throws what its database
+   * throws (busy, damaged); like a cold project that cannot be read, it then contributes nothing,
+   * so one project never fails every project's index or search (#864).
+   */
+  const readProjectRuns = (projectId: string, read: () => { runs: RunSummary[]; truncated: boolean }) => {
+    try {
+      return read();
+    } catch (error) {
+      console.warn(`[cez] runs of project ${projectId} could not be read for the workspace run index: ${error instanceof Error ? error.message : String(error)}`);
+      return { runs: [], truncated: false };
+    }
+  };
+
   const runsIndexRoutes = new Hono()
     .get('/workspace/runs-index', async (c) => {
       const runs: RunIndexEntry[] = [];
@@ -6241,9 +6255,9 @@ export function createApp(deps: ServerDeps) {
         // `GET /run-summaries`, which carries them too, and excluding them here would mean a task
         // is findable while you stand in its project and vanishes the moment you leave — the
         // exact asymmetry a cross-project finder exists to remove.
-        const window = owned
+        const window = readProjectRuns(project.id, () => owned
           ? owned.listRunSummaries({ archivedWindow: RUNS_INDEX_PER_PROJECT })
-          : readRunIndexFromDisk(dataDir, { handle, archivedWindow: RUNS_INDEX_PER_PROJECT });
+          : readRunIndexFromDisk(dataDir, { handle, archivedWindow: RUNS_INDEX_PER_PROJECT }));
         if (window.truncated) truncated.push(project.id);
         const recent = window.runs.map(withLiveUsage);
         const mentioned: number[] = [];
@@ -6280,7 +6294,7 @@ export function createApp(deps: ServerDeps) {
       const runs: RunIndexEntry[] = [];
       const truncated: string[] = [];
       for (const { project, store: owned, dataDir, handle } of await projectRunSources()) {
-        const found = owned ? owned.searchRunSummaries(q, limit) : searchRunIndexFromDisk(dataDir, q, { handle, limit });
+        const found = readProjectRuns(project.id, () => owned ? owned.searchRunSummaries(q, limit) : searchRunIndexFromDisk(dataDir, q, { handle, limit }));
         if (found.truncated) truncated.push(project.id);
         for (const run of found.runs) runs.push({ projectId: project.id, ...withLiveUsage(run) });
       }
