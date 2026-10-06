@@ -304,7 +304,7 @@ function withoutMarkdownImages(source: string): string {
 }
 
 function visibleLinkLabel(raw: string): string {
-  return raw.replace(/[*_~`]+/g, '')
+  return raw.replace(/[*_~]+/g, '').split('`').join('')
 }
 
 function isSafeHref(href: string): boolean {
