@@ -457,6 +457,28 @@ export class PiRunner implements AgentRunner {
         rejectAgentAck();
       }
 
+      // Clean stdout EOF is not a read failure, but a still-running child would
+      // leave waitForExit hanging on a timeout-less session. Give the normal
+      // EOF→exit race a tick, then the same SIGTERM→SIGKILL path as a thrown read.
+      if (child.exitCode === null && child.signalCode === null) {
+        await new Promise<void>((resolve) => {
+          if (child.exitCode !== null || child.signalCode !== null) return resolve();
+          const done = () => { child.off('exit', done); child.off('close', done); clearTimeout(timer); resolve(); };
+          const timer = setTimeout(done, 50);
+          timer.unref?.();
+          child.once('exit', done);
+          child.once('close', done);
+        });
+        if (child.exitCode === null && child.signalCode === null) {
+          terminatedByCezar = true;
+          child.kill('SIGTERM');
+          const reap = setTimeout(() => {
+            if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+          }, KILL_GRACE_MS);
+          reap.unref?.();
+        }
+      }
+
       flushText();
       emitLatchedProviderError();
       emitLatchedUiProviderError();

@@ -123,5 +123,17 @@ describe('runner shutdown parity (hearsay-tools/cezarion#843)', () => {
         }
       });
     }, 15_000);
+
+    if (backend === 'pi' || backend === 'claude') {
+      it(`${backend} reaps a live child after stdout ends cleanly`, async () => {
+        await withChild(backend, async (session, child, _events, settled) => {
+          child.kill('SIGSTOP');
+          child.stdout!.push(null);
+          await vi.waitFor(() => expect(child.signalCode).toBe('SIGKILL'), { timeout: 6000 });
+          await settled;
+          expect(session.open).toBe(false);
+        });
+      }, 15_000);
+    }
   }
 });

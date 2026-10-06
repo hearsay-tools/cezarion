@@ -380,6 +380,21 @@ export class ClaudeCliRunner implements AgentRunner {
         stdinOpen = false;
       }
 
+      // Clean stdout EOF is not a read failure, but a still-running child would
+      // leave waitForExit hanging on a timeout-less session. Give the normal
+      // EOF→exit race a tick, then use the same SIGTERM→SIGKILL path as interrupt().
+      if (!timedOut && !hasExited()) {
+        await new Promise<void>((resolve) => {
+          if (hasExited()) return resolve();
+          const done = () => { child.off('exit', done); child.off('close', done); clearTimeout(timer); resolve(); };
+          const timer = setTimeout(done, 50);
+          timer.unref?.();
+          child.once('exit', done);
+          child.once('close', done);
+        });
+        if (!hasExited()) interrupt();
+      }
+
       const exitCode = await waitForExit(child);
       // Draining/destroying stdout is not process exit. Keep timeout escalation
       // armed until the child has actually settled.
