@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { brotliCompressSync, brotliDecompressSync, constants as zlibConstants } from 'node:zlib';
 
 import { historyPaths, readHistoryText } from './history-file.ts';
+import { RUNS_DB_FILE, RunDatabase } from './run-database.ts';
 import { RunStore } from './store.ts';
 import { createFixtureManager, drainFixtureManagers } from '../workflows/fixture-cleanup.testkit.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
@@ -67,6 +68,21 @@ function openStore(existing?: string): { dir: string; store: RunStore } {
 
 function finish(store: RunStore, id: string): void {
   store.updateRun(id, { status: 'done', finishedAt: new Date().toISOString() });
+}
+
+function br(data: string | Buffer): Buffer {
+  return brotliCompressSync(Buffer.from(data), {
+    params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 5 },
+  });
+}
+
+function listClaims(dir: string) {
+  const db = RunDatabase.open(join(dir, RUNS_DB_FILE));
+  try {
+    return db.listClaims();
+  } finally {
+    db.close();
+  }
 }
 
 describe('RunStore history compression', () => {
@@ -482,5 +498,167 @@ describe('RunStore history compression', () => {
     expect(existsSync(plain)).toBe(true);
     expect(existsSync(compressed)).toBe(false);
     expect(readHistoryText(dir, worker.id)).toContain('old');
+  });
+
+  it('orphans a non-prefix .br when re-archiving a run an older cezar continued', async () => {
+    const { dir, store } = openStore();
+    const run = store.createRun({ title: 't', workflow: 'w', task: 'task', steps: [] });
+    store.appendEvent(run.id, { type: 'note', message: 'placeholder' });
+    finish(store, run.id);
+    const { plain, compressed } = historyPaths(dir, run.id);
+    writeFileSync(plain, 'new');
+    writeFileSync(compressed, br('old'));
+    expect(store.getRun(run.id)!.archived).toBe(false);
+    store.setArchived(run.id, true);
+    await store.historyIdle();
+    expect(existsSync(plain)).toBe(false);
+    expect(brotliDecompressSync(readFileSync(compressed)).toString()).toBe('new');
+    expect(brotliDecompressSync(readFileSync(`${compressed}.orphaned`)).toString()).toBe('old');
+  });
+
+  it('uses a unique orphan when re-archiving beside an existing .orphaned', async () => {
+    const { dir, store } = openStore();
+    const run = store.createRun({ title: 't', workflow: 'w', task: 'task', steps: [] });
+    store.appendEvent(run.id, { type: 'note', message: 'placeholder' });
+    finish(store, run.id);
+    const { plain, compressed } = historyPaths(dir, run.id);
+    writeFileSync(plain, 'new');
+    writeFileSync(compressed, br('old'));
+    writeFileSync(`${compressed}.orphaned`, 'already');
+    expect(store.getRun(run.id)!.archived).toBe(false);
+    store.setArchived(run.id, true);
+    await store.historyIdle();
+    expect(existsSync(plain)).toBe(false);
+    expect(brotliDecompressSync(readFileSync(compressed)).toString()).toBe('new');
+    expect(readFileSync(`${compressed}.orphaned`, 'utf8')).toBe('already');
+    expect(brotliDecompressSync(readFileSync(`${compressed}.orphaned.1`)).toString()).toBe('old');
+  });
+
+  it('startup sweep does not claim already-compressed archived runs', async () => {
+    const { dir, store } = openStore();
+    for (let i = 0; i < 8; i++) {
+      const run = store.createRun({ title: `t${i}`, workflow: 'w', task: 'task', steps: [] });
+      store.appendEvent(run.id, { type: 'note', message: `m${i}` });
+      finish(store, run.id);
+      store.setArchived(run.id, true);
+    }
+    await store.historyIdle();
+    store.flush();
+    store.close();
+    stores.pop();
+
+    const reopened = openStore(dir).store;
+    const claimsBefore = listClaims(dir);
+    const take = vi.spyOn(RunDatabase.prototype, 'takeClaims');
+    reopened.compressArchivedHistory();
+    await reopened.historyIdle();
+    expect(take).not.toHaveBeenCalled();
+    expect(listClaims(dir)).toEqual(claimsBefore);
+  });
+
+  it('skips compression when another store claims the run before the job starts', async () => {
+    const { dir, store } = openStore();
+    const run = store.createRun({ title: 't', workflow: 'w', task: 'task', steps: [] });
+    store.appendEvent(run.id, { type: 'note', message: 'keep' });
+    finish(store, run.id);
+    const { plain, compressed } = historyPaths(dir, run.id);
+    const before = readFileSync(plain);
+    store.setArchived(run.id, true);
+    store.flush();
+    const other = openStore(dir).store;
+    expect(other.pin(run.id, 'active')).toBeDefined();
+    await store.historyIdle();
+    expect(existsSync(plain)).toBe(true);
+    expect(readFileSync(plain).equals(before)).toBe(true);
+    expect(existsSync(compressed)).toBe(false);
+  });
+
+  it('skips compression when another store claims the run before commit', async () => {
+    const { dir, store } = openStore();
+    const run = store.createRun({ title: 't', workflow: 'w', task: 'task', steps: [] });
+    store.appendEvent(run.id, { type: 'note', message: 'keep' });
+    finish(store, run.id);
+    const { plain, compressed } = historyPaths(dir, run.id);
+    const before = readFileSync(plain);
+    const historyFile = await import('./history-file.ts');
+    const original = historyFile.compressHistory;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const spy = vi.spyOn(historyFile, 'compressHistory').mockImplementation(async (...args) => {
+      await gate;
+      return original(...args);
+    });
+    try {
+      store.setArchived(run.id, true);
+      await vi.waitFor(() => expect(spy).toHaveBeenCalled());
+      store.flush();
+      const other = openStore(dir).store;
+      expect(other.pin(run.id, 'active')).toBeDefined();
+      release();
+      await store.historyIdle();
+      expect(existsSync(plain)).toBe(true);
+      expect(readFileSync(plain).equals(before)).toBe(true);
+      expect(existsSync(compressed)).toBe(false);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('setArchived(false) leaves the record unchanged when restoreHistory throws', async () => {
+    const { store } = openStore();
+    const run = store.createRun({ title: 't', workflow: 'w', task: 'task', steps: [] });
+    store.appendEvent(run.id, { type: 'note', message: 'keep' });
+    finish(store, run.id);
+    store.setArchived(run.id, true);
+    await store.historyIdle();
+    const before = store.getRun(run.id)!;
+    const historyFile = await import('./history-file.ts');
+    const spy = vi.spyOn(historyFile, 'restoreHistory').mockImplementation(() => {
+      throw new Error('restore failed');
+    });
+    try {
+      expect(() => store.setArchived(run.id, false)).toThrow(/restore failed/);
+      const after = store.getRun(run.id)!;
+      expect(after.archived).toBe(true);
+      expect(after.status).toBe(before.status);
+      expect(after.archivedAt).toBe(before.archivedAt);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('retries compression when the plain file grows after the job starts', async () => {
+    const { dir, store } = openStore();
+    const run = store.createRun({ title: 't', workflow: 'w', task: 'task', steps: [] });
+    store.appendEvent(run.id, { type: 'note', message: 'before' });
+    finish(store, run.id);
+    const extra = '{"type":"lifecycle","message":"variant picked"}\n';
+    const historyFile = await import('./history-file.ts');
+    const original = historyFile.compressHistory;
+    let raced = false;
+    const spy = vi.spyOn(historyFile, 'compressHistory').mockImplementation(async (dataDir, id, stillEligible) => {
+      return original(dataDir, id, () => {
+        if (!raced) {
+          raced = true;
+          appendFileSync(historyPaths(dataDir, id).plain, extra);
+        }
+        return stillEligible();
+      });
+    });
+    try {
+      store.setArchived(run.id, true);
+      await store.historyIdle();
+      const { plain, compressed } = historyPaths(dir, run.id);
+      expect(existsSync(compressed)).toBe(true);
+      expect(existsSync(plain)).toBe(false);
+      const text = readHistoryText(dir, run.id);
+      expect(text).toContain('before');
+      expect(text).toContain('variant picked');
+      expect(spy.mock.calls.length).toBeGreaterThanOrEqual(2);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

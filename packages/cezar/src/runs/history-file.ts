@@ -5,8 +5,10 @@
  * its decoded bytes are a byte prefix of the plain file; otherwise it keeps the compressed bytes
  * as `.ndjson.br.orphaned`. compressHistory reads and writes tmp asynchronously, then commits in
  * one synchronous block: re-check stillEligible() and that the plain file's size and mtime are
- * unchanged since the read, then rename tmp → `.br` and unlink plain. A size/mtime move returns
- * `'changed'` so the compressor can retry; ineligible or missing plain returns `'skipped'`.
+ * unchanged since the read. An existing `.br` is decoded at job start; the commit re-checks its
+ * size and mtime and, if the decoded bytes are not a prefix of plain, moves it to
+ * `.ndjson.br.orphaned` (or `.orphaned.<n>` if that name is taken) before renaming. A size/mtime
+ * move returns `'changed'` so the compressor can retry; ineligible or missing plain returns `'skipped'`.
  */
 import { randomBytes } from 'node:crypto';
 import {
@@ -128,7 +130,7 @@ export async function compressHistory(
   id: string,
   stillEligible: () => boolean,
 ): Promise<'compressed' | 'skipped' | 'changed'> {
-  const { plain, compressed } = historyPaths(dataDir, id);
+  const { plain, compressed, orphaned } = historyPaths(dataDir, id);
   let handle: FileHandle;
   try {
     handle = await open(plain, 'r');
@@ -146,6 +148,7 @@ export async function compressHistory(
   } finally {
     await handle.close();
   }
+  const existing = await snapshotCompressed(compressed);
   const encoded = await brotliCompressAsync(bytes, brotliParams);
   const tmp = `${compressed}.${process.pid}.${randomBytes(8).toString('hex')}.tmp`;
   try {
@@ -162,6 +165,10 @@ export async function compressHistory(
       return 'skipped';
     }
     if (current.size !== st.size || current.mtimeMs !== st.mtimeMs) {
+      rmSync(tmp, { force: true });
+      return 'changed';
+    }
+    if (!commitCompressedReplace(compressed, orphaned, existing, bytes)) {
       rmSync(tmp, { force: true });
       return 'changed';
     }
@@ -207,20 +214,15 @@ export function restoreHistory(dataDir: string, id: string): void {
 }
 
 export function removeHistory(dataDir: string, id: string): void {
-  const { plain, compressed, orphaned } = historyPaths(dataDir, id);
   const dir = join(dataDir, 'runs');
   const prefix = `${id}.ndjson`;
   try {
     for (const name of readdirSync(dir)) {
-      if (name.startsWith(prefix) && name.endsWith('.tmp')) rmSync(join(dir, name), { force: true });
+      if (name === prefix || name.startsWith(`${prefix}.`)) rmSync(join(dir, name), { force: true });
     }
   } catch (error) {
     if (!isNotFound(error)) throw error;
   }
-  rmSync(plain, { force: true });
-  rmSync(compressed, { force: true });
-  rmSync(orphaned, { force: true });
-  rmSync(`${compressed}.corrupt`, { force: true });
 }
 
 function isNotFound(error: unknown): boolean {
@@ -251,6 +253,71 @@ function isDecodedPrefix(decoded: Buffer, plain: Buffer): boolean {
   return decoded.length <= plain.length && plain.subarray(0, decoded.length).equals(decoded);
 }
 
+interface CompressedSnapshot {
+  size: number;
+  mtimeMs: number;
+  decoded: Buffer | undefined;
+}
+
+async function snapshotCompressed(compressed: string): Promise<CompressedSnapshot | undefined> {
+  let st: Stats;
+  try {
+    st = statSync(compressed);
+  } catch (error) {
+    if (isNotFound(error)) return undefined;
+    throw error;
+  }
+  let encoded: Buffer;
+  try {
+    encoded = await readFile(compressed);
+  } catch (error) {
+    if (isNotFound(error)) return undefined;
+    throw error;
+  }
+  let decoded: Buffer | undefined;
+  try {
+    decoded = await brotliDecompressAsync(encoded);
+  } catch {
+    decoded = undefined;
+  }
+  return { size: st.size, mtimeMs: st.mtimeMs, decoded };
+}
+
+/** False means the existing `.br` changed; caller must not rename over it. */
+function commitCompressedReplace(
+  compressed: string,
+  orphaned: string,
+  existing: CompressedSnapshot | undefined,
+  plainBytes: Buffer,
+): boolean {
+  let current: Stats | undefined;
+  try {
+    current = statSync(compressed);
+  } catch (error) {
+    if (!isNotFound(error)) throw error;
+  }
+  if (!current) return true;
+  if (!existing || current.size !== existing.size || current.mtimeMs !== existing.mtimeMs) return false;
+  if (existing.decoded === undefined || !isDecodedPrefix(existing.decoded, plainBytes)) {
+    moveCompressedToOrphan(compressed, orphaned);
+  }
+  return true;
+}
+
+function uniqueOrphanPath(orphaned: string): string {
+  if (!existsSync(orphaned)) return orphaned;
+  for (let n = 1; ; n++) {
+    const candidate = `${orphaned}.${n}`;
+    if (!existsSync(candidate)) return candidate;
+  }
+}
+
+function moveCompressedToOrphan(compressed: string, orphaned: string): void {
+  const dest = uniqueOrphanPath(orphaned);
+  renameSync(compressed, dest);
+  warnOrphaned(dest);
+}
+
 function disposeCompressedBesidePlain(plain: string, compressed: string, orphaned: string): void {
   if (!existsSync(compressed)) return;
   let encoded: Buffer;
@@ -265,12 +332,7 @@ function disposeCompressedBesidePlain(plain: string, compressed: string, orphane
     rmSync(compressed, { force: true });
     return;
   }
-  if (existsSync(orphaned)) {
-    warnOrphaned(orphaned);
-    return;
-  }
-  renameSync(compressed, orphaned);
-  warnOrphaned(orphaned);
+  moveCompressedToOrphan(compressed, orphaned);
 }
 
 async function writeTmpAsync(tmp: string, data: Buffer): Promise<void> {

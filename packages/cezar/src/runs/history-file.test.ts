@@ -43,6 +43,16 @@ function setup(): { dataDir: string; id: string; plain: string; compressed: stri
   return { dataDir, id, plain, compressed: `${plain}.br` };
 }
 
+function leftoverTmp(dataDir: string): string[] {
+  return readdirSync(join(dataDir, 'runs')).filter((name) => name.endsWith('.tmp'));
+}
+
+function br(data: string | Buffer): Buffer {
+  return brotliCompressSync(Buffer.from(data), {
+    params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 5 },
+  });
+}
+
 async function collect(stream: Readable): Promise<Buffer> {
   const chunks: Buffer[] = [];
   for await (const chunk of stream) {
@@ -59,7 +69,7 @@ describe('history-file', () => {
     expect(await compressHistory(dataDir, id, () => true)).toBe('compressed');
     expect(existsSync(plain)).toBe(false);
     expect(existsSync(compressed)).toBe(true);
-    expect(existsSync(`${compressed}.tmp`)).toBe(false);
+    expect(leftoverTmp(dataDir)).toEqual([]);
     expect(readHistoryText(dataDir, id)).toBe(original);
   });
 
@@ -71,7 +81,7 @@ describe('history-file', () => {
     restoreHistory(dataDir, id);
     expect(readFileSync(plain).equals(original)).toBe(true);
     expect(existsSync(compressed)).toBe(false);
-    expect(existsSync(`${plain}.tmp`)).toBe(false);
+    expect(leftoverTmp(dataDir)).toEqual([]);
   });
 
   it('drops the .br when both exist and the decoded bytes are a prefix of the plain file', () => {
@@ -125,7 +135,7 @@ describe('history-file', () => {
     expect(await pending).toBe('skipped');
     expect(readFileSync(plain, 'utf8')).toBe(original);
     expect(existsSync(compressed)).toBe(false);
-    expect(existsSync(`${compressed}.tmp`)).toBe(false);
+    expect(leftoverTmp(dataDir)).toEqual([]);
   });
 
   it('returns changed when the plain file grows mid-job', async () => {
@@ -183,6 +193,8 @@ describe('history-file', () => {
     writeFileSync(`${plain}.${process.pid}.def456.tmp`, 'plain-pid-tmp');
     writeFileSync(`${compressed}.corrupt`, 'br-corrupt');
     writeFileSync(`${compressed}.orphaned`, 'br-orphaned');
+    writeFileSync(`${compressed}.orphaned.1`, 'br-orphaned-1');
+    writeFileSync(`${compressed}.orphaned.2`, 'br-orphaned-2');
     removeHistory(dataDir, id);
     expect(existsSync(plain)).toBe(false);
     expect(existsSync(compressed)).toBe(false);
@@ -192,6 +204,8 @@ describe('history-file', () => {
     expect(existsSync(`${plain}.${process.pid}.def456.tmp`)).toBe(false);
     expect(existsSync(`${compressed}.corrupt`)).toBe(false);
     expect(existsSync(`${compressed}.orphaned`)).toBe(false);
+    expect(existsSync(`${compressed}.orphaned.1`)).toBe(false);
+    expect(existsSync(`${compressed}.orphaned.2`)).toBe(false);
   });
 
   it('readHistoryText and openHistorySource return undefined when neither form exists', async () => {
@@ -272,5 +286,83 @@ describe('history-file', () => {
     expect(existsSync(compressed)).toBe(true);
     expect(readFileSync(orphaned, 'utf8')).toBe('old-orphan');
     expect(historyPaths(dataDir, id).orphaned).toBe(orphaned);
+  });
+
+  it('orphans a non-prefix .br instead of renaming over it', async () => {
+    const { dataDir, id, plain, compressed } = setup();
+    writeFileSync(plain, 'new');
+    const encodedOld = br('old');
+    writeFileSync(compressed, encodedOld);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      expect(await compressHistory(dataDir, id, () => true)).toBe('compressed');
+      expect(existsSync(plain)).toBe(false);
+      expect(brotliDecompressSync(readFileSync(compressed)).toString()).toBe('new');
+      expect(readFileSync(`${compressed}.orphaned`).equals(encodedOld)).toBe(true);
+      expect(leftoverTmp(dataDir)).toEqual([]);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('uses a unique orphan suffix when .orphaned already exists', async () => {
+    const { dataDir, id, plain, compressed } = setup();
+    writeFileSync(plain, 'new');
+    const encodedOld = br('old');
+    writeFileSync(compressed, encodedOld);
+    writeFileSync(`${compressed}.orphaned`, 'already');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      expect(await compressHistory(dataDir, id, () => true)).toBe('compressed');
+      expect(readFileSync(`${compressed}.orphaned`, 'utf8')).toBe('already');
+      expect(readFileSync(`${compressed}.orphaned.1`).equals(encodedOld)).toBe(true);
+      expect(brotliDecompressSync(readFileSync(compressed)).toString()).toBe('new');
+      expect(existsSync(plain)).toBe(false);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('overwrites a .br whose decoded bytes are a prefix of the plain file', async () => {
+    const { dataDir, id, plain, compressed } = setup();
+    writeFileSync(plain, 'ABCDEF');
+    writeFileSync(compressed, br('ABC'));
+    expect(await compressHistory(dataDir, id, () => true)).toBe('compressed');
+    expect(existsSync(plain)).toBe(false);
+    expect(existsSync(`${compressed}.orphaned`)).toBe(false);
+    expect(brotliDecompressSync(readFileSync(compressed)).toString()).toBe('ABCDEF');
+  });
+
+  it('returns changed when an existing .br is replaced mid-job', async () => {
+    const { dataDir, id, plain, compressed } = setup();
+    writeFileSync(plain, 'new');
+    writeFileSync(compressed, br('old'));
+    const replacement = br('other');
+    expect(await compressHistory(dataDir, id, () => {
+      writeFileSync(compressed, replacement);
+      return true;
+    })).toBe('changed');
+    expect(readFileSync(plain, 'utf8')).toBe('new');
+    expect(readFileSync(compressed).equals(replacement)).toBe(true);
+    expect(existsSync(`${compressed}.orphaned`)).toBe(false);
+    expect(leftoverTmp(dataDir)).toEqual([]);
+  });
+
+  it('restore uses a unique orphan suffix so a non-prefix .br is never left in place', () => {
+    const { dataDir, id, plain, compressed } = setup();
+    writeFileSync(plain, 'A');
+    const encodedB = br('B');
+    writeFileSync(compressed, encodedB);
+    writeFileSync(`${compressed}.orphaned`, 'already');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      restoreHistory(dataDir, id);
+      expect(existsSync(compressed)).toBe(false);
+      expect(readFileSync(plain, 'utf8')).toBe('A');
+      expect(readFileSync(`${compressed}.orphaned`, 'utf8')).toBe('already');
+      expect(readFileSync(`${compressed}.orphaned.1`).equals(encodedB)).toBe(true);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
