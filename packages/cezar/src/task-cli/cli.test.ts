@@ -331,8 +331,13 @@ describe('cez task', () => {
       const fetchSpy = vi.spyOn(globalThis, 'fetch');
       try {
         expect(await run(['list'])).toBe(0);
+        expect(await run(['list', '--all'])).toBe(0);
         expect(await run(['list', '--full'])).toBe(0);
-        expect(fetchSpy.mock.calls.map(([url]) => String(url))).toEqual([`${cockpit.api}/run-summaries`, `${cockpit.api}/runs`]);
+        // #864: without --all the archived runs are filtered out anyway, so `list` reads the
+        // windowed list; --all keeps every row.
+        expect(fetchSpy.mock.calls.map(([url]) => String(url))).toEqual([
+          `${cockpit.api}/run-summaries?archived=recent`, `${cockpit.api}/run-summaries`, `${cockpit.api}/runs`,
+        ]);
       } finally { fetchSpy.mockRestore(); }
     });
 

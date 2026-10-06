@@ -548,7 +548,10 @@ async function execute(
         .filter((run) => values.all || !run.archived)
         .filter((run) => !wanted || wanted.has(run.status))
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-      const runs = values.full ? listed(await listRuns(cockpit)) : listed(await requestRunSummaries(cockpit));
+      // Without --all, archived runs are dropped above, so the windowed list (#864) has every row
+      // this prints; --all needs every archived run there is.
+      const summaries = () => requestRunSummaries(cockpit, undefined, values.all ? {} : { archived: 'recent' });
+      const runs = values.full ? listed(await listRuns(cockpit)) : listed(await summaries());
       print({ runs: runs.slice(0, limit).map((run) => (values.full ? run : projectListRow(run))), total: runs.length });
       return EXIT.ok;
     }
