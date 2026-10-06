@@ -68,7 +68,7 @@ async function child(cwd: string) {
 describe('process liveness (#469)', () => {
   it('parses the start token after the last paren of a comm holding spaces and parens', () => {
     const tail = Array.from({ length: 30 }, (_, index) => String(index + 4)).join(' ');
-    expect(parseProcStat(`42 (evil ) (x) y) S ${tail}`)).toEqual({ state: 'S', startToken: '22' });
+    expect(parseProcStat(`42 (evil ) (x) y) S ${tail}`)).toEqual({ state: 'S', ppid: 4, startToken: '22' });
     expect(parseProcStat('42 (short) S 1 2')).toBeUndefined();
     expect(parseProcStat('garbage')).toBeUndefined();
   });
@@ -94,11 +94,68 @@ describe('process liveness (#469)', () => {
     expect(processesWithCwdUnder(tmpdir(), 'linux', vanished, since)).toEqual([]);
   });
 
+  it('skips a later unreadable process another user launched: its parent chain reaches a foreign process before init (hearsay-tools/cezarion#874)', () => {
+    const denied = () => { throw Object.assign(new Error('EACCES'), { code: 'EACCES' }); };
+    const uid = process.getuid?.() ?? 1000;
+    const since = Date.now();
+    const tree = (parents: Record<string, number>, owners: Record<string, number>) => ({
+      readdir: () => ['7'], readlink: denied, ownerUid: (pid: string) => owners[pid], startedAtMs: () => since + 5_000,
+      parentPid: (pid: string) => parents[pid],
+    });
+    // `sshd: user@notty` (7) under root's privilege-separated sshd (5): a login, not a descendant.
+    expect(processesWithCwdUnder(tmpdir(), 'linux', tree({ 7: 5, 5: 1 }, { 7: uid, 5: 0 }), since)).toEqual([]);
+    // `sftp-server` (7) under that login sshd (6) under root's monitor (5): two hops up.
+    expect(processesWithCwdUnder(tmpdir(), 'linux', tree({ 7: 6, 6: 5, 5: 1 }, { 7: uid, 6: uid, 5: 0 }), since)).toEqual([]);
+    // Any other user counts, not only root.
+    expect(processesWithCwdUnder(tmpdir(), 'linux', tree({ 7: 5, 5: 1 }, { 7: uid, 5: uid + 1 }), since)).toEqual([]);
+    // The rule needs no age cutoff: reuse and reclaim scans (no `since`) skip the login too.
+    expect(processesWithCwdUnder(tmpdir(), 'linux', tree({ 7: 5, 5: 1 }, { 7: uid, 5: 0 }))).toEqual([]);
+    // An orphan adopted by `systemd --user` (6) reaches init with no foreign ancestor: still a holder.
+    expect(processesWithCwdUnder(tmpdir(), 'linux', tree({ 7: 6, 6: 1 }, { 7: uid, 6: uid }), since)).toEqual([7]);
+    expect(processesWithCwdUnder(tmpdir(), 'linux', tree({ 7: 1 }, { 7: uid }), since)).toEqual([7]);
+    // An unknown parent, or a parent of unknown ownership, is no evidence.
+    expect(processesWithCwdUnder(tmpdir(), 'linux', tree({}, { 7: uid }), since)).toEqual([7]);
+    expect(processesWithCwdUnder(tmpdir(), 'linux', tree({ 7: 5 }, { 7: uid }), since)).toEqual([7]);
+    // A reader without parent information keeps the previous rule.
+    const { parentPid: _unused, ...flat } = tree({ 7: 5, 5: 1 }, { 7: uid, 5: 0 });
+    expect(processesWithCwdUnder(tmpdir(), 'linux', flat, since)).toEqual([7]);
+  });
+
+  it('a later unreadable descendant of this cezar process holds, whatever its name and whoever launched cezar', () => {
+    const denied = () => { throw Object.assign(new Error('EACCES'), { code: 'EACCES' }); };
+    const uid = process.getuid?.() ?? 1000;
+    const since = Date.now();
+    // cezar itself runs inside an SSH login whose monitor (3) is root's. The walk stops at cezar: 7 is ours.
+    const parents: Record<string, number> = { 7: process.pid, [process.pid]: 3, 3: 1 };
+    const proc = { readdir: () => ['7'], readlink: denied, ownerUid: (pid: string) => (pid === '3' ? 0 : uid),
+      startedAtMs: () => since + 5_000, parentPid: (pid: string) => parents[pid] };
+    expect(processesWithCwdUnder(tmpdir(), 'linux', proc, since)).toEqual([7]);
+  });
+
+  it('a parent that changes between reads is PID reuse, never evidence of a foreign launcher', () => {
+    const denied = () => { throw Object.assign(new Error('EACCES'), { code: 'EACCES' }); };
+    const uid = process.getuid?.() ?? 1000;
+    const since = Date.now();
+    let reads = 0;
+    const proc = { readdir: () => ['7'], readlink: denied, ownerUid: (pid: string) => (pid === '7' ? uid : 0),
+      startedAtMs: () => since + 5_000, parentPid: (pid: string) => (pid === '7' ? (reads++ === 0 ? 5 : 9) : 1) };
+    expect(processesWithCwdUnder(tmpdir(), 'linux', proc, since)).toEqual([7]);
+  });
+
+  it('ancestry excuses only a permission-denied cwd: a readable holder and an unexpected error still block', () => {
+    const uid = process.getuid?.() ?? 1000;
+    const since = Date.now();
+    const foreign = { readdir: () => ['7'], ownerUid: (pid: string) => (pid === '7' ? uid : 0), startedAtMs: () => since + 5_000,
+      parentPid: (pid: string) => (pid === '7' ? 5 : 1) };
+    expect(processesWithCwdUnder('/worker', 'linux', { ...foreign, readlink: () => '/worker' }, since)).toEqual([7]);
+    expect(processesWithCwdUnder('/worker', 'linux', { ...foreign, readlink: () => { throw Object.assign(new Error('EIO'), { code: 'EIO' }); } }, since)).toEqual([7]);
+  });
+
   it('darwin: an own-user process lsof could not read counts like an unreadable Linux one', () => {
     const since = Date.now();
     const linuxUnused = { readdir: () => [], readlink: () => '', ownerUid: () => undefined, startedAtMs: () => undefined };
     const dir = tmpdir();
-    const darwin = (stdout: string, own: { pid: number; startedAtMs?: number }[] | undefined, ok = true) => ({ lsof: () => ({ ok, stdout }), ownProcesses: () => own });
+    const darwin = (stdout: string, table: { pid: number; ppid?: number; uid?: number; startedAtMs?: number }[] | undefined, ok = true) => ({ lsof: () => ({ ok, stdout }), processes: () => table });
     const lsof = `p10\nn/\np11\nn${dir}\n`;
     // lsof saw 10 and 11; 12 is ours but absent from its output, so its cwd is unknown.
     expect(processesWithCwdUnder(dir, 'darwin', linuxUnused, since, darwin(lsof, [{ pid: 10 }, { pid: 11 }, { pid: 12, startedAtMs: since + 5_000 }]))).toEqual([11, 12]);
@@ -110,14 +167,34 @@ describe('process liveness (#469)', () => {
     expect(processesWithCwdUnder(dir, 'darwin', linuxUnused, since, darwin('', [], false))).toBe('unknown');
   });
 
+  it('darwin: skips a later lsof-omitted process whose parent chain reaches another user before launchd (hearsay-tools/cezarion#874)', () => {
+    const since = Date.now();
+    const uid = process.getuid?.() ?? 1000;
+    const linuxUnused = { readdir: () => [], readlink: () => '', ownerUid: () => undefined, startedAtMs: () => undefined };
+    const dir = tmpdir();
+    const lsof = `p10\nn/\np11\nn${dir}\n`;
+    const scan = (table: { pid: number; ppid?: number; uid?: number; startedAtMs?: number }[]) =>
+      processesWithCwdUnder(dir, 'darwin', linuxUnused, since, { lsof: () => ({ ok: true, stdout: lsof }), processes: () => table });
+    const seen = [{ pid: 10, ppid: 1, uid }, { pid: 11, ppid: 1, uid }];
+    const monitor = { pid: 50, ppid: 1, uid: 0 }; // root's privilege-separated sshd
+    const later = since + 5_000;
+    // 12: `sshd: user@ttys000` under the root monitor; 13: `sftp-server` under 12.
+    expect(scan([...seen, monitor, { pid: 12, ppid: 50, uid, startedAtMs: later }])).toEqual([11]);
+    expect(scan([...seen, monitor, { pid: 12, ppid: 50, uid, startedAtMs: later }, { pid: 13, ppid: 12, uid, startedAtMs: later }])).toEqual([11]);
+    // 14 reaches launchd through our own processes only: still a candidate.
+    expect(scan([...seen, { pid: 14, ppid: 11, uid, startedAtMs: later }])).toEqual([11, 14]);
+    // The table lists every user now: another user's process is never a candidate; an unknown parent is no evidence.
+    expect(scan([...seen, { pid: 15, ppid: 1, uid: uid + 1, startedAtMs: later }, { pid: 16, ppid: 99, uid, startedAtMs: later }])).toEqual([11, 16]);
+  });
+
   it('darwin: exited zombies cannot hold a cwd, while unreadable live processes remain candidates', () => {
     const start = 'Mon Oct  5 23:29:05 2026';
     let failed = false;
     const spy = vi.spyOn(childProcess, 'spawnSync').mockImplementation(((command: string, args: string[]) => {
-      const states = args.at(-1)?.includes('stat=');
+      const table = args.at(-1)?.includes('stat=');
       const stdout = command === 'lsof' ? 'p10\nn/\n' :
         [[11, 'Z'], [12, 'Z+'], [13, 'S'], [14, 'R'], [15, '?']].map(([pid, state]) =>
-          `${pid} ${states ? `${state} ` : ''}${start}`).join('\n');
+          table ? `${pid} 1 ${process.getuid?.() ?? 0} ${state} ${start}` : start).join('\n');
       return { pid: 14, status: failed ? 1 : 0, signal: null, stdout, stderr: '', output: [null, stdout, ''] };
     }) as typeof childProcess.spawnSync);
     syncBuiltinESMExports();
