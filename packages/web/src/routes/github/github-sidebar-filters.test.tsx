@@ -67,6 +67,7 @@ function stub(opts: Stub = {}) {
     const path = String(input).replace('?archived=recent', '')
     sent.push(path)
     const method = init.method ?? 'GET'
+    if (method === 'GET' && path.includes('/run-summaries/archived')) return json({ runs: [], nextCursor: null, total: 0 })
     if (method === 'GET' && /\/run-summaries$/.test(path)) return opts.runs === 'error' ? json({ error: 'boom' }, 400) : json(opts.runs ?? [])
     if (method === 'GET' && path.includes('/github/search')) {
       const q = decodeURIComponent((new URL(path, 'http://x').searchParams.get('q') ?? '').replace(/\+/g, ' '))

@@ -81,3 +81,32 @@ it('keeps collapsed counts live and shows an empty state when only workers match
   expect(screen.getByRole('link', { name: /Parent task/ }).textContent).toContain('Archived')
   expect(document.getElementById(updated.getAttribute('aria-controls')!)?.contains(screen.getByRole('link'))).toBe(true)
 })
+
+it('finds a linked task older than the run list\'s archived window (#864)', async () => {
+  const client = createQueryClient()
+  const archived = {
+    id: 'old-diagnosis', title: 'Old diagnosis', task: 'Old diagnosis', issueNumber: 750, workflow: 'quick-task',
+    status: 'done', archived: true, createdAt: '2025-01-01T12:00:00Z', tokensUsed: 0, steps: [],
+  }
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input)
+    const body = url === '/api/v1/p/second/run-summaries?archived=recent'
+      ? []
+      : url === '/api/v1/p/second/run-summaries/archived?limit=200&q=%23750'
+        ? { runs: [archived], nextCursor: null, total: 1 }
+        : undefined
+    if (body === undefined) throw new Error(`Unexpected request: ${url}`)
+    return new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } })
+  }))
+  render(
+    <ProjectScopeProvider projectId="second">
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={['/p/second/github/issues/750']}>
+          <IssueLinkedTasks number={750} repo="acme/demo" />
+        </MemoryRouter>
+      </QueryClientProvider>
+    </ProjectScopeProvider>,
+  )
+  fireEvent.click(await screen.findByRole('button', { name: 'Linked tasks (1)' }))
+  expect((await screen.findByRole('link', { name: /Old diagnosis/ })).getAttribute('href')).toBe('/p/second/tasks/old-diagnosis')
+})

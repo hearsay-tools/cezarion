@@ -2,12 +2,12 @@ import { useId, useMemo, useState } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import { queryScope } from '@open-mercato/cezar-api-client'
 
-import { useProjectRuns } from '@/api/queries'
+import { useArchivedRuns, useProjectRuns } from '@/api/queries'
 import { StatusDot } from '@/components/status-dot'
 import { deriveAttention } from '@/lib/attention'
 import { Button } from '@/components/ui/button'
 import { Link } from '@/lib/project-router'
-import { runTitle } from '@/lib/task-groups'
+import { runTitle, withArchivedPages } from '@/lib/task-groups'
 import { linkedIssueTasks } from './github-sidebar-model'
 
 /** Shares the project runs cache with the sidebar and its existing live updates. */
@@ -23,9 +23,12 @@ function LinkedTasks({ number, repo, scope }: { number: number; repo?: string; s
   const [expanded, setExpanded] = useState(false)
   const Chevron = expanded ? ChevronDown : ChevronRight
   const query = useProjectRuns(scope, true, scope === 'default')
+  // The run list carries only the newest archived tasks (#864), so an issue's older, archived
+  // tasks come from the server's search for its number. The list's own row wins a duplicate.
+  const archived = useArchivedRuns(`#${number}`, true)
   const tasks = useMemo(
-    () => linkedIssueTasks(query.data ?? [], number, repo, scope),
-    [query.data, number, repo, scope],
+    () => linkedIssueTasks(withArchivedPages(query.data ?? [], archived.data?.pages.flatMap((page) => page.runs) ?? []), number, repo, scope),
+    [query.data, archived.data, number, repo, scope],
   )
   return (
     <section aria-labelledby={headingId} className="mt-4 min-w-0 rounded-lg border border-border p-3">

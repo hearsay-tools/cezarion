@@ -227,6 +227,8 @@ function stubFetch(
         return jsonResponse(GITHUB)
       }
       if (method === 'GET' && path === '/api/v1/run-summaries') return jsonResponse([])
+      // An issue's linked tasks also search the archived runs past the list's window (#864).
+      if (method === 'GET' && path.startsWith('/api/v1/run-summaries/archived')) return jsonResponse({ runs: [], nextCursor: null, total: 0 })
       if (method === 'GET' && path === '/api/v1/workflows') return jsonResponse(WORKFLOWS)
       if (method === 'GET' && path === '/api/v1/skills') return jsonResponse(SKILLS)
       if (method === 'GET' && path === '/api/v1/providers/status') {
