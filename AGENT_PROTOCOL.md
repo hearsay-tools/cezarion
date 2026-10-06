@@ -831,7 +831,14 @@ this normative contract.
 
 ## 7. Harness parity — session and lifecycle (`packages/cezar/src/core/harness-parity.test.ts`)
 
-**S21–S23** (hearsay-tools/cezarion#843), in `core/runner-shutdown-parity.test.ts`,
+**S21** (hearsay-tools/cezarion#832) detects unexpected restored history through
+OMP's startup `get_state.messageCount`. A fresh step emits one v1 note and one
+non-fatal `session.error`, and still completes normally. Other native wires have
+named `scenario-unconstructible` exemptions for this OMP-specific startup response;
+S1/S3/S14 retain their native start/resume coverage. OMP's focused tests also pin
+explicit resume, empty/absent/malformed counts, unrelated queries and duplicate replies.
+
+**S22–S24** (hearsay-tools/cezarion#843), in `core/runner-shutdown-parity.test.ts`,
 start every `RUNNER_IDS` backend through its `HARNESS_ADAPTERS` native mock.
 After prompt admission, an outside SIGKILL must fail the session; `end()` must
 escalate to SIGKILL when the child cannot handle EOF or SIGTERM; and a failed

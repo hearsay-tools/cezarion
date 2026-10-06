@@ -30,6 +30,10 @@ import { AppRoutes } from '@/routes'
 
 const BOOT = 'boot'
 const RUN_ID = 'r1'
+// Bound each observable condition explicitly; cold route imports share the CPU with the suite.
+const ROUTE_WAIT = { timeout: 5_000 }
+// Let a condition report its failure before Vitest's outer deadline expires.
+const TEST_TIMEOUT = 30_000
 
 const HEALTH = {
   version: '0.0.0-test',
@@ -98,6 +102,12 @@ beforeEach(() => {
         return json({ runs: [INDEX_ROW], perProjectLimit: 200, truncated: [], referenceStatuses: {} })
       }
       if (path === `/api/v1/p/other/runs/${RUN_ID}`) return json(RUN)
+      if (path === `/api/v1/p/other/runs/${RUN_ID}/history`) {
+        return json({ events: [], itemCount: 0, liveCursor: 'live-0', asOfSeq: 0, hasOlder: false })
+      }
+      if (path === `/api/v1/p/other/runs/${RUN_ID}/history-context`) {
+        return json({ contextEvents: [], asOfSeq: 0 })
+      }
       // What the server really answers when the boot project is asked for another one's run.
       if (UNSCOPED.includes(path)) return json({ error: 'not found' }, 404)
       // Everything else stays pending — this file is about which URL goes out, not about data.
@@ -145,32 +155,38 @@ function renderAt(entry: string) {
   )
 }
 
-/** Wait for the thread's own request, whichever spelling it chose, then hold both to account. */
+/** Wait for the arriving thread, not just the layout's earlier run request. */
 async function expectTheRunWasReadFromItsOwnProject() {
-  await waitFor(() =>
+  await waitFor(() => {
     expect(document.querySelector('[data-testid="location"]')?.getAttribute('data-pathname')).toBe(
       `/p/other/tasks/${RUN_ID}`,
-    ),
-  )
-  await waitFor(() => expect(paths.some((path) => path.includes(`/runs/${RUN_ID}`))).toBe(true))
-  expect(paths).toContain(`/api/v1/p/other/runs/${RUN_ID}`)
-  for (const path of UNSCOPED) expect(paths).not.toContain(path)
-  expect(screen.queryByText('Task not found')).toBeNull()
+    )
+    expect(document.querySelector(`[data-route="task-thread"][data-run-id="${RUN_ID}"]`)).not.toBeNull()
+    for (const path of UNSCOPED) {
+      expect(paths).toContain(path.replace('/api/v1/', '/api/v1/p/other/'))
+      expect(paths).not.toContain(path)
+    }
+    expect(screen.queryByText('Task not found')).toBeNull()
+  }, ROUTE_WAIT)
 }
 
 describe('opening another project’s task without a reload', () => {
   it('reads the run from its own project when the row is clicked on the global Tasks page', async () => {
     renderAt('/tasks')
-    fireEvent.click(await screen.findByRole('link', { name: 'Do the thing' }))
+    // Wait for the fetched task row to become an actionable link before navigating.
+    fireEvent.click(await screen.findByRole('link', { name: 'Do the thing' }, ROUTE_WAIT))
     await expectTheRunWasReadFromItsOwnProject()
-  })
+  }, TEST_TIMEOUT)
 
   // The regression proper: standing INSIDE a project (the boot one — which mounts unscoped, so a
   // leaked scope is invisible in the URL) and jumping to another project's task, with the thread
   // chunk already warm from the case above. Provider and thread mount in the same commit.
   it('reads the run from its own project when jumping out of the project in view', async () => {
     renderAt(`/p/${BOOT}/`)
-    fireEvent.click(await screen.findByRole('button', { name: 'Open the other project’s task' }))
+    // The boot project's scope must be mounted before leaving it; the probe exists even while
+    // the registry gate is loading. The first case has also waited for the thread chunk to mount.
+    await screen.findByRole('heading', { name: 'Project tasks' }, ROUTE_WAIT)
+    fireEvent.click(screen.getByRole('button', { name: 'Open the other project’s task' }))
     await expectTheRunWasReadFromItsOwnProject()
-  })
+  }, TEST_TIMEOUT)
 })

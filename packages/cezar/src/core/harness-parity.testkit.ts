@@ -62,6 +62,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  * | `steer-late` | the final text first; agent input sent after it arrives after the last model call (#505) |
  */
 export const SCENARIOS = [
+  'auto-resumed',
   'turn-messages',
   'skill-warning',
   'missing-binary',
@@ -101,9 +102,9 @@ export type ScenarioName = (typeof SCENARIOS)[number];
 
 /** hearsay-tools/cezarion#843: real OS failures after each native prompt is admitted. */
 export const SHUTDOWN_CRITERIA = [
-  { id: 'S21', scenario: 'no-progress', name: 'treats an outside signal as failure' },
-  { id: 'S22', scenario: 'no-progress', name: 'end escalates when the child cannot process EOF or SIGTERM' },
-  { id: 'S23', scenario: 'no-progress', name: 'stops the live child when its output transport fails' },
+  { id: 'S22', scenario: 'no-progress', name: 'treats an outside signal as failure' },
+  { id: 'S23', scenario: 'no-progress', name: 'end escalates when the child cannot process EOF or SIGTERM' },
+  { id: 'S24', scenario: 'no-progress', name: 'stops the live child when its output transport fails' },
 ] as const;
 
 /** #427: portable intermediate asks, through every native message wire. */
@@ -371,6 +372,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     binEnv: 'CEZ_OMP_BIN',
     mockBin: OMP_MOCK,
     scenarios: {
+      'auto-resumed': BASELINE_PROMPT,
       'turn-messages': 'mock:turn-messages',
       'missing-binary': BASELINE_PROMPT,
       autonomous: 'mock:autonomous',
@@ -444,6 +446,10 @@ export interface ParityExemption {
  * is the runner, not this table.
  */
 export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
+  ...(['claude', 'codex', 'opencode', 'pi', 'cursor'] as const).map(backend => ({
+    criterion: 'S21', backend, kind: 'scenario-unconstructible' as const,
+    reason: 'This native wire has no OMP get_state.messageCount response for an implicit autoResume. Fresh/start and explicit resume remain covered by S1/S3/S14 and spec-support rows.',
+  })),
   ...(['R44', 'R45'] as const).flatMap(criterion => (['claude', 'codex', 'pi', 'cursor', 'omp'] as const).map(backend => ({
     criterion, backend, kind: 'scenario-unconstructible' as const,
     reason: 'The OpenCode server-wide unscoped session.error UnknownError skill-discovery diagnostic has no equivalent on this native wire. R2/R46 retain native provider failure coverage.',
@@ -628,7 +634,9 @@ export async function driveSeam(
         sessionId: PINNED_SESSION_ID,
         // The claude mock writes to these when set; empty keeps a row from
         // touching a handoff file it does not own.
-        env: { CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '', CEZ_MOCK_ARGS_FILE: '' },
+        env: { CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '', CEZ_MOCK_ARGS_FILE: '',
+          ...(scenario === 'auto-resumed' ? { CEZ_MOCK_OMP_AUTO_RESUME: '1' } : {}),
+        },
         ...opts.spec,
       },
       (event) => v1.push(event),
