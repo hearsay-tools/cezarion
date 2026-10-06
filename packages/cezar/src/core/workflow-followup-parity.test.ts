@@ -42,6 +42,14 @@ function turnStartsCarryingKeep(files: readonly string[]): number {
   return rpcLines(files).filter(msg => msg.method === 'turn/start' && JSON.stringify(msg.params ?? {}).includes(KEEP)).length;
 }
 
+/** Reverse-order rows must not `release()` until `turn/steer` is on the mock wire.
+ *  sendMessage only queues the RPC; releasing first lets hold-gated complete with
+ *  no pending steer, after which the reverse wrapper held the late error forever. */
+async function waitForHumanSteer(files: readonly string[]): Promise<void> {
+  await waitFor(() => rpcLines(files).some(msg =>
+    msg.method === 'turn/steer' && JSON.stringify(msg.params ?? {}).includes(KEEP)));
+}
+
 function followUpTurnStartedIndex(
   events: readonly { type: string }[],
 ): number {
@@ -267,6 +275,7 @@ describe('mid-turn human follow-up parity — #486', () => {
           during: async ({ manager, runId, store }) => {
             await waitFor(() => store.readEvents(runId).some(e => e.type === 'turn.started'));
             expect(manager.sendMessage(runId, [{ type: 'text', text: `${KEEP} mock:done` }])).toBe(true);
+            await waitForHumanSteer(files);
             release();
           },
         });
@@ -290,6 +299,7 @@ describe('mid-turn human follow-up parity — #486', () => {
           during: async ({ manager, runId, store }) => {
             await waitFor(() => store.readEvents(runId).some(e => e.type === 'turn.started'));
             expect(manager.sendMessage(runId, [{ type: 'text', text: KEEP }])).toBe(true);
+            await waitForHumanSteer(files);
             release();
             await waitFor(() => store.getRun(runId)?.status === 'waiting'
               || ['done', 'review', 'failed'].includes(store.getRun(runId)?.status ?? ''));
@@ -317,6 +327,7 @@ describe('mid-turn human follow-up parity — #486', () => {
           during: async ({ manager, runId, store }) => {
             await waitFor(() => store.readEvents(runId).some(e => e.type === 'turn.started'));
             expect(manager.sendMessage(runId, [{ type: 'text', text: KEEP }])).toBe(true);
+            await waitForHumanSteer(files);
             release();
             // Sample from send time: a park-then-restart can start the follow-up
             // turn before waitFor(waiting) resolves, which hid the H3 violation.
@@ -372,6 +383,7 @@ describe('mid-turn human follow-up parity — #486', () => {
           during: async ({ manager, runId, store }) => {
             await waitFor(() => store.readEvents(runId).some(e => e.type === 'turn.started'));
             expect(manager.sendMessage(runId, [{ type: 'text', text: `${KEEP} mock:done` }])).toBe(true);
+            await waitForHumanSteer(files);
             release();
           },
         });
@@ -398,6 +410,7 @@ describe('mid-turn human follow-up parity — #486', () => {
           during: async ({ manager, runId, store }) => {
             await waitFor(() => store.readEvents(runId).some(e => e.type === 'turn.started'));
             expect(manager.sendMessage(runId, [{ type: 'text', text: KEEP }])).toBe(true);
+            await waitForHumanSteer(files);
             release();
             let turnsAtFirstWaiting: number | undefined;
             const until = Date.now() + 8_000;

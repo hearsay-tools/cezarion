@@ -11,6 +11,10 @@
 // keeps those echoes (read-in-turn) and still delays the steer response.
 // CEZ_MOCK_DELAY_TURN_STARTED_MS holds stdout after a follow-up turn/start
 // response so turn/started arrives later (review round 4).
+//
+// A steer that lands after this turn already completed (release() before the
+// RPC was on the wire) must not be held for a later completed that never
+// comes — that deadlocked holdsHumanInput() until teardown (#486 round 5).
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -26,6 +30,7 @@ const steeredClientIds = new Set();
 const steeredTexts = new Set();
 const followUpStartIds = new Set();
 let turnStartCount = 0;
+let forwardedCompleted = false;
 let stdinBuf = '';
 process.stdin.setEncoding('utf8');
 process.stdin.on('data', chunk => {
@@ -78,6 +83,10 @@ child.stdout.on('data', chunk => {
     try { msg = JSON.parse(line); } catch { process.stdout.write(line); continue; }
     if (typeof msg.id === 'number' && steerIds.has(msg.id) && (msg.result !== undefined || msg.error !== undefined)) {
       steerIds.delete(msg.id);
+      if (forwardedCompleted) {
+        process.stdout.write(line);
+        continue;
+      }
       held.push(line);
       continue;
     }
@@ -86,9 +95,12 @@ child.stdout.on('data', chunk => {
       continue;
     }
     if ((msg.method === 'turn/completed' || msg.method === 'turn/failed') && held.length) {
+      forwardedCompleted = true;
       process.stdout.write(line + held.splice(0).join(''));
       continue;
     }
+    if (msg.method === 'turn/completed' || msg.method === 'turn/failed') forwardedCompleted = true;
+    if (msg.method === 'turn/started') forwardedCompleted = false;
     process.stdout.write(line);
     if (delayTurnStartedMs > 0 && typeof msg.id === 'number' && followUpStartIds.has(msg.id) && msg.result !== undefined) {
       followUpStartIds.delete(msg.id);
