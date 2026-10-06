@@ -5786,7 +5786,7 @@ export class RunManager {
       } else if (!skipSkillOnResume) {
         this.store.appendEvent(runId, {
           type: 'lifecycle',
-          message: `skill /${continuedSkillName} is not in the skill registry — the continued session runs without its instructions`,
+          message: `skill /${continuedSkillName} is not in the skill registry — its instructions were not re-sent to the continued session`,
         });
       }
     }

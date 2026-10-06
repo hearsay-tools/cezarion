@@ -316,9 +316,12 @@ export function inputDeliveryOf(runner: Pick<AgentRunner, 'inputDelivery'>): Inp
  *
  * - `resent`: every session/process receives `spec.systemPrompt` again. Claude
  *   `--resume` keeps the launch `--append-system-prompt` and ignores new flags
- *   (resending is harmless). Pi `--session` *replaces* stored prompt sections
- *   with the new flags, so resend is required. OMP follows the same CLI shape.
- *   A resumed skill task lacks the playbook unless the caller sends it.
+ *   (resending is harmless; changed extra/delegation/artifact/handoff
+ *   instructions never reach a resumed session). Pi `--session` *replaces*
+ *   stored prompt sections with the new flags, so resend is required — a
+ *   resumed skill task lacks the playbook unless the caller sends it. OMP was
+ *   not live-verified (not installed here) and is declared `resent` as the
+ *   safe value.
  * - `in-thread`: the system prompt was prepended into the opening turn and is
  *   part of the resumed thread's history (OpenCode, Codex, Cursor). Re-sending
  *   the skill on the same session duplicates it; a fresh-session continuation

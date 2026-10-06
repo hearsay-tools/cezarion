@@ -31,7 +31,7 @@ const WORKER_SKILL = 'worker-skill';
 const WORKER_SKILL_BODY = 'WORKER-SKILL-BODY-790';
 const TEAM_SKILL = 'team-playbook';
 const TEAM_SKILL_BODY = 'TEAM-PLAYBOOK-BODY-790';
-const MISSING_SKILL_LIFECYCLE = `skill /${TEAM_SKILL} is not in the skill registry — the continued session runs without its instructions`;
+const MISSING_SKILL_LIFECYCLE = `skill /${TEAM_SKILL} is not in the skill registry — its instructions were not re-sent to the continued session`;
 const MATERIALIZED_NOTE = `team skill "${TEAM_SKILL}" materialized to`;
 
 function teamDirSkill(): Skill {

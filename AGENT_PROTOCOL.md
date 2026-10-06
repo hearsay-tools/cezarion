@@ -77,8 +77,11 @@ interface InputDelivery {
   Codex, Cursor and OpenCode still re-prepend the whole `spec.systemPrompt` (extra prompt +
   handoff) on every resumed opening turn. Per harness, verified live: Claude `--resume`
   keeps the launch `--append-system-prompt` and ignores new flags (resending is harmless,
-  `resent` stays the safe declaration); Pi `--session` *replaces* stored prompt sections
-  with the new flags (resend required); OpenCode and Codex/Cursor carry it in the thread.
+  `resent` stays the safe declaration; changed extra/delegation/artifact/handoff
+  instructions never reach a resumed session); Pi `--session` *replaces* stored prompt
+  sections with the new flags (resend required — a resumed skill task lacks the playbook
+  unless the caller sends it); OpenCode and Codex/Cursor carry it in the thread. OMP was
+  not live-verified (not installed here) and is declared `resent` as the safe value.
   claude, pi and omp are `resent`; opencode, codex and cursor are `in-thread`. A backend
   switch with no `sessionId` still sends the skill. OpenCode Continue GETs `/session/{id}`;
   a 404 opens one fresh session with `resumeFallbackSystemPrompt` (the skill-inclusive
@@ -1466,8 +1469,10 @@ To be first-class:
    spec-support rows hold the declaration against the mock's recording. Declare
    `systemPromptOnResume` (§1, hearsay-tools/cezarion#790): `resent` when every
    session/process delivers `spec.systemPrompt` again (so Continue must resend a
-   skill playbook — Claude keeps the launch prompt and ignores new flags; Pi replaces
-   stored sections with the new flags), `in-thread` when the opening turn prepended
+   skill playbook — Claude keeps the launch prompt and ignores new flags, so changed
+   extra/delegation/artifact/handoff instructions never reach a resumed session; Pi
+   replaces stored sections with the new flags; OMP was not live-verified and is
+   declared `resent` as the safe value), `in-thread` when the opening turn prepended
    it into resumed history (OpenCode, Codex, Cursor). The flag is the caller's
    skill-prefix dedupe policy — in-thread runners still re-prepend the whole
    `spec.systemPrompt` (extra prompt + handoff) on every resumed opening turn. Required

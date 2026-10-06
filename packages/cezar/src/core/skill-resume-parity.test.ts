@@ -32,7 +32,7 @@ const SKILL_NAME = 'resume-playbook';
 const SKILL_DESCRIPTION = 'Playbook for continued skill-driven tasks.';
 const SKILL_BODY = 'PLAYBOOK-BODY-790-SENTINEL';
 const EXTRA_PROMPT = 'EXTRA-PROMPT-790';
-const MISSING_SKILL_LIFECYCLE = `skill /${SKILL_NAME} is not in the skill registry — the continued session runs without its instructions`;
+const MISSING_SKILL_LIFECYCLE = `skill /${SKILL_NAME} is not in the skill registry — its instructions were not re-sent to the continued session`;
 
 const RESENT = new Set<RunnerId>(['claude', 'pi', 'omp']);
 const IN_THREAD = new Set<RunnerId>(['codex', 'cursor', 'opencode']);
