@@ -12,11 +12,17 @@ import {
   utimesSync,
   writeFileSync,
 } from 'node:fs';
+import * as fsPromises from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { brotliCompressSync, brotliDecompressSync, constants as zlibConstants } from 'node:zlib';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  return { ...actual };
+});
 
 import {
   compressHistory,
@@ -30,6 +36,7 @@ import {
 const dirs: string[] = [];
 
 afterEach(() => {
+  vi.restoreAllMocks();
   while (dirs.length > 0) rmSync(dirs.pop()!, { recursive: true, force: true });
 });
 
@@ -410,5 +417,49 @@ describe('history-file', () => {
     } finally {
       warn.mockRestore();
     }
+  });
+
+  it('loops short reads until the .br decodes to the full original', async () => {
+    const { dataDir, id, plain, compressed } = setup();
+    const original = 'abcdefghijklmnopqrstuvwxyz\n'.repeat(20);
+    writeFileSync(plain, original);
+    const actualOpen = fsPromises.open;
+    vi.spyOn(fsPromises, 'open').mockImplementation(async (...args) => {
+      const file = await actualOpen(...args);
+      if (args[0] === plain) {
+        const actualRead = file.read.bind(file);
+        Object.defineProperty(file, 'read', {
+          value: async (buffer: Buffer, offset?: number, length?: number, position?: number | null) => {
+            const limited = Math.min(length ?? buffer.length, 7);
+            return actualRead(buffer, offset ?? 0, limited, position ?? 0);
+          },
+        });
+      }
+      return file;
+    });
+    expect(await compressHistory(dataDir, id, () => true)).toBe('compressed');
+    expect(existsSync(plain)).toBe(false);
+    expect(brotliDecompressSync(readFileSync(compressed)).equals(Buffer.from(original))).toBe(true);
+    expect(leftoverTmp(dataDir)).toEqual([]);
+  });
+
+  it('returns changed and writes nothing when a read hits EOF early', async () => {
+    const { dataDir, id, plain, compressed } = setup();
+    const original = 'keep-this-transcript-intact\n';
+    writeFileSync(plain, original);
+    const actualOpen = fsPromises.open;
+    vi.spyOn(fsPromises, 'open').mockImplementation(async (...args) => {
+      const file = await actualOpen(...args);
+      if (args[0] === plain) {
+        Object.defineProperty(file, 'read', {
+          value: async (buffer: Buffer) => ({ bytesRead: 0, buffer }),
+        });
+      }
+      return file;
+    });
+    expect(await compressHistory(dataDir, id, () => true)).toBe('changed');
+    expect(readFileSync(plain, 'utf8')).toBe(original);
+    expect(existsSync(compressed)).toBe(false);
+    expect(leftoverTmp(dataDir)).toEqual([]);
   });
 });

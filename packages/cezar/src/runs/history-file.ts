@@ -143,8 +143,12 @@ export async function compressHistory(
   try {
     st = await handle.stat();
     bytes = Buffer.allocUnsafe(st.size);
-    const { bytesRead } = st.size === 0 ? { bytesRead: 0 } : await handle.read(bytes, 0, st.size, 0);
-    if (bytesRead !== st.size) bytes = bytes.subarray(0, bytesRead);
+    let offset = 0;
+    while (offset < st.size) {
+      const { bytesRead } = await handle.read(bytes, offset, st.size - offset, offset);
+      if (bytesRead === 0) return 'changed';
+      offset += bytesRead;
+    }
   } finally {
     await handle.close();
   }
