@@ -394,10 +394,10 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     await until(() => ['done', 'review'].includes(store.getRun(done.id)!.status));
     expect(await manager.awaitRunTermination(done.id, 15_000)).toBe(true);
     const failure = await worker();
-    vi.spyOn(runners, 'createRunner').mockReturnValue({ backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT, interrupt: async () => undefined, run: async () => { throw Error('unused'); }, startSession: () => { throw Error('startup failed'); } });
+    const runnerSpy = vi.spyOn(runners, 'createRunner').mockReturnValue({ backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT, interrupt: async () => undefined, run: async () => { throw Error('unused'); }, startSession: () => { throw Error('startup failed'); } });
     manager.enqueueOwnedRun(failure.id); await until(() => store.getRun(failure.id)?.status === 'failed');
     expect(await manager.awaitRunTermination(failure.id, 15_000)).toBe(true);
-    vi.restoreAllMocks();
+    runnerSpy.mockRestore();
     const live = await worker(); manager.enqueueOwnedRun(live.id); await until(() => store.getRun(live.id)?.status === 'waiting');
     const wait = manager.awaitRunTermination(live.id, 30_000);
     manager.cancel(live.id); manager.dispose();
