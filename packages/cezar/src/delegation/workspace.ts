@@ -333,7 +333,11 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
       if (!checkpoint) {
         // Recorded identity already gone: finish bookkeeping. Do not delete a leftover path/gitDir/branch.
         if (!await exists(workspace.path) && !await exists(receipt.gitDir) &&
-            !(await registered()).includes(`worktree ${workspace.path}`) && !await branchExists()) remaining = [];
+            !(await registered()).includes(`worktree ${workspace.path}`) && !await branchExists()) {
+          assertCurrent?.();
+          await beforeRemove?.();
+          remaining = [];
+        }
         return result();
       }
       if (await exists(workspace.path) || await exists(receipt.gitDir) || (await registered()).includes(`worktree ${workspace.path}`)) return result();

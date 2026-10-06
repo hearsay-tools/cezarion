@@ -516,6 +516,17 @@ describe('removeOwnedWorkspace verified retryable destruction', () => {
     expect(await removeOwnedWorkspace(root, workspace)).toEqual(result);
   });
 
+  it('runs beforeRemove when completing bookkeeping for already-gone recorded resources', async () => {
+    const { root, first } = await fixture();
+    const workspace = await createOwnedWorkspace(root, randomUUID(), first);
+    git(root, 'worktree', 'remove', workspace.path);
+    git(root, 'branch', '-D', workspace.branch);
+    let calls = 0;
+    expect(await removeOwnedWorkspace(root, workspace, undefined, undefined, async () => { calls += 1; }))
+      .toMatchObject({ state: 'complete', remaining: [] });
+    expect(calls).toBe(1);
+  });
+
   it('preserves the owned directory on the first cleanup attempt when its branch is checked out elsewhere', async () => {
     const { root, first } = await fixture();
     const workspace = await createOwnedWorkspace(root, randomUUID(), first);
