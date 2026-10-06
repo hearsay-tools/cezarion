@@ -101,6 +101,17 @@ describe('projectSignal', () => {
   })
 })
 
+describe('the incident behind #864', () => {
+  it('counts an old waiting root behind hundreds of newer archived runs and workers', () => {
+    const runs = [
+      entry({ id: 'old-waiting', status: 'waiting', hasPendingHumanAsk: true, createdAt: '2026-10-03T21:09:02Z' }),
+      ...Array.from({ length: 200 }, (_, i) => entry({ id: `arch-${i}`, archived: true, ...finished })),
+      ...Array.from({ length: 300 }, (_, i) => entry({ id: `w-${i}`, archived: true, ...finished, delegation: { role: 'worker', parentRunId: 'x' } as RunIndexEntry['delegation'] })),
+    ]
+    expect(projectSignal(runs)).toEqual({ ...idle, needsYou: 1 })
+  })
+})
+
 describe('signalsByProject', () => {
   it('groups by projectId and counts each project on its own rows', () => {
     const signals = signalsByProject([
@@ -127,18 +138,14 @@ describe('projectSignalLabel', () => {
     expect(projectSignalLabel('toolkit-dev', undefined)).toBe('toolkit-dev · idle')
   })
 
-  it('says so when the index only holds recent runs', () => {
-    expect(projectSignalLabel('toolkit-dev', { ...idle, needsYou: 1 }, { truncated: true })).toBe(
-      'toolkit-dev · 1 needs you · recent runs only',
-    )
-    expect(projectSignalLabel('toolkit-dev', idle, { truncated: true })).toBe('toolkit-dev · idle · recent runs only')
+  it('never qualifies the count: the index carries every unarchived run (#864)', () => {
+    expect(projectSignalLabel('toolkit-dev', { ...idle, needsYou: 1 })).toBe('toolkit-dev · 1 needs you')
   })
 })
 
 describe('projectSignalLabel when the index is unknown', () => {
   it('says the activity is unknown, never idle', () => {
     expect(projectSignalLabel('toolkit-dev', undefined, { unknown: true })).toBe('toolkit-dev · activity unknown')
-    expect(projectSignalLabel('toolkit-dev', idle, { unknown: true, truncated: true })).toBe('toolkit-dev · activity unknown')
   })
 })
 

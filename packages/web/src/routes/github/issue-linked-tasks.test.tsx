@@ -13,7 +13,7 @@ it('reads only the active project’s runs and links back to that project', asyn
   const client = createQueryClient()
   client.setQueryData(['default', 'runs', 'list'], [{ id: 'wrong-project', issueNumber: 750 }])
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
-    if (String(input) !== '/api/v1/p/second/run-summaries') throw new Error(`Unexpected request: ${String(input)}`)
+    if (String(input).replace('?archived=recent', '') !== '/api/v1/p/second/run-summaries') throw new Error(`Unexpected request: ${String(input).replace('?archived=recent', '')}`)
     return new Response(JSON.stringify([{
       id: 'diagnosis', title: 'Diagnose navigation', task: 'Diagnose navigation',
       issueNumber: 750, workflow: 'quick-task', status: 'done', archived: true,

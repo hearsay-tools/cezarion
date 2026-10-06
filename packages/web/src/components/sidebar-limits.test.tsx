@@ -23,7 +23,7 @@ it.each([['desktop', true], ['mobile', true], ['desktop', false], ['mobile', fal
   client.setQueryData([cacheScope, 'ui-state'], { sidebarLimits: { overall: 3, needsYou: 1, finished: 1, working: 1 } })
   const requested: string[] = []
   vi.stubGlobal('fetch', vi.fn(async input => {
-    const url = String(input); requested.push(url)
+    const url = String(input).replace('?archived=recent', ''); requested.push(url)
     const body = url.endsWith('/run-summaries') ? runs : url.endsWith('/health') ? { bootProject: 'boot' } : url.includes('/ref-status') ? { available: true, prs: {}, issues: {}, conflicts: [], recheckAfterMs: null } : {}
     return new Response(JSON.stringify(body), { status: 200 })
   }))
@@ -47,7 +47,7 @@ it.each((['desktop', 'mobile'] as const).flatMap(surface => [null, [], 3, 'bad',
   client.setQueryData(['default', 'ui-state'], { sidebarLimits })
   const requested: string[] = []
   vi.stubGlobal('fetch', vi.fn(async input => {
-    const url = String(input); requested.push(url)
+    const url = String(input).replace('?archived=recent', ''); requested.push(url)
     return new Response(JSON.stringify(url.endsWith('/run-summaries') ? runs : url.includes('/ref-status') ? { available: true, prs: {}, issues: {}, conflicts: [], recheckAfterMs: null } : {}))
   }))
   render(<QueryClientProvider client={client}><MemoryRouter><ListViewProvider>

@@ -25,7 +25,7 @@ function setup(run: ApiRun, response: () => Promise<Response> = async () => json
   destroyResponse: () => Promise<Response> = async () => json({ workerId, state: 'complete', remaining: [] })) {
   const requests: string[] = []
   vi.stubGlobal('fetch', vi.fn(async (url: RequestInfo | URL) => {
-    const path = String(url); requests.push(path)
+    const path = String(url).replace('?archived=recent', ''); requests.push(path)
     if (path.endsWith('/relationships')) return response()
     if (path.endsWith('/worker-destroy')) return destroyResponse()
     if (path.endsWith('/run-summaries')) return json([])

@@ -44,7 +44,6 @@ function Rail() {
     <ProjectRail
       projects={REGISTRY.projects}
       signals={new Map()}
-      truncated={new Set()}
       version="1"
       singleProject={false}
       projectTarget={projectSwitch.target}

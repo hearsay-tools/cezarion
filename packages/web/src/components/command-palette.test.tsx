@@ -117,7 +117,7 @@ function health(forgeAvailable: boolean, automations = false): HealthResponse {
 
 function serve(routes: Record<string, unknown>): void {
   fetchMock.mockImplementation(async (input) => {
-    const path = String(input)
+    const path = String(input).replace('?archived=recent', '')
     if (!(path in routes)) return new Response(JSON.stringify({ error: 'not found' }), { status: 404 })
     return new Response(JSON.stringify(routes[path]), {
       status: 200,

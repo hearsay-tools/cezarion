@@ -1,5 +1,5 @@
 import './task-lists.css'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueryClient, type InfiniteData } from '@tanstack/react-query'
 import { CheckCheckIcon, ChevronsLeftIcon, ChevronsRightIcon, Clock3Icon, CoinsIcon, DollarSignIcon, ListChecksIcon, LinkIcon, MemoryStickIcon, MoreHorizontalIcon, PencilIcon, ScaleIcon, SearchXIcon } from 'lucide-react'
 import { ArchiveIcon, CpuIcon, FileDiffIcon, GitBranchIcon, PlusIcon, SearchIcon, WorkflowIcon } from '@/components/design-icons'
 import * as React from 'react'
@@ -7,8 +7,8 @@ import { Link, useNavigate } from '@/lib/project-router'
 
 import { archiveFinished, markAllRunsSeen, patchRun } from '@/api/client'
 import { useRunUsage } from '@/api/global-events'
-import { queryKeys, useHealth, usePinRun, useProjects, useProjectRepoBase, useReferenceProjectId, useRuns } from '@/api/queries'
-import type { RunSummary } from '@open-mercato/cezar-api-client'
+import { queryKeys, useArchivedRuns, useHealth, usePinRun, useProjects, useProjectRepoBase, useReferenceProjectId, useRuns } from '@/api/queries'
+import type { ArchivedRunsResponse, RunSummary } from '@open-mercato/cezar-api-client'
 import { CenteredState } from '@/components/centered-state'
 import { DiffStatLabel } from '@/components/diff-stat'
 import { DirectionalUsage, directionalUsageLabel } from '@/components/directional-usage'
@@ -40,7 +40,7 @@ import {
   type TaskColumnIcon,
   type TaskColumnId,
 } from '@/lib/task-columns'
-import { listCounts, queuePositions, runTitle, sortRuns, type ListView } from '@/lib/task-groups'
+import { ARCHIVED_WINDOW, listCounts, queuePositions, runTitle, sortRuns, withArchivedPages, type ListView } from '@/lib/task-groups'
 import {
   compareGroups,
   filterRuns,
@@ -56,6 +56,15 @@ import { usageMetricVisibility } from '@/lib/token-metrics'
 import { useTaskTableColumns } from '@/lib/use-task-table-columns'
 import { useNow } from '@/lib/use-now'
 import { cn } from '@/lib/utils'
+
+/** Archived runs older than the run list's window, a page at a time (#864). */
+export type ArchivedPages = {
+  runs: readonly RunSummary[]
+  /** Whether the server has an older page. */
+  hasMore: boolean
+  loading: boolean
+  onLoadMore: () => void
+}
 
 /**
  * The Tasks overview — the table that IS the home at `/` (spec, "Task list & table", per PR
@@ -87,6 +96,9 @@ export function TasksOverview({
   projectName,
   error,
   onRetry,
+  archivedPages,
+  archivedTotal,
+  onArchivedSearch,
 }: {
   /** Undefined while `/api/runs` has not answered: the header renders, the body stays empty —
    *  an empty state before we know there are no runs would be a lie. */
@@ -118,8 +130,16 @@ export function TasksOverview({
   columnsPending?: boolean
   error?: string
   onRetry?: () => void
+  /** Archived runs older than the list's window (#864), from `GET /run-summaries/archived`: for
+   *  the search text when there is one, otherwise the newest pages. */
+  archivedPages?: ArchivedPages
+  /** Every archived task, when the server has counted them; until then a full window reads `200+`. */
+  archivedTotal?: number
+  /** The search text as typed, so the route can ask the server for archived matches too. */
+  onArchivedSearch?: (needle: string) => void
 }) {
   const [query, setQuery] = React.useState('')
+  React.useEffect(() => { onArchivedSearch?.(query.trim()) }, [onArchivedSearch, query])
   const [detailedTable, setDetailedTable] = React.useState(false)
   const headerRef = React.useRef<HTMLElement>(null)
   const archiveSelected = React.useRef(false)
@@ -135,7 +155,11 @@ export function TasksOverview({
   }, [])
   const all = runs ?? []
   const counts = listCounts(all)
-  const visible = sortRuns(filterRuns(all, query), view)
+  // Paged rows already matched the server's search, which also reads PR and issue numbers, so
+  // the local filter (titles, branches, workflows) must not drop them again.
+  const paged = withArchivedPages(all, archivedPages?.runs ?? []).slice(all.length)
+  const visible = sortRuns([...filterRuns(all, query), ...filterRuns(paged, '')], view)
+  const archivedCount = archivedTotal ?? (counts.archived >= ARCHIVED_WINDOW ? `${ARCHIVED_WINDOW}+` : counts.archived)
   // Positions come from the full list, never the filtered one: a search must not renumber the
   // queue the engine is actually going to drain.
   const positions = queuePositions(all)
@@ -160,7 +184,7 @@ export function TasksOverview({
           <OverviewTab view="active" current={view} onSelect={onViewChange} count={counts.active}>
             Active
           </OverviewTab>
-          <OverviewTab view="archived" current={view} onSelect={onViewChange} count={counts.archived}>
+          <OverviewTab view="archived" current={view} onSelect={onViewChange} count={archivedCount}>
             Archived
           </OverviewTab>
         </div>
@@ -338,6 +362,18 @@ export function TasksOverview({
           </>
         )}
 
+        {view === 'archived' && archivedPages?.hasMore ? (
+          <Button
+            data-slot="archived-older"
+            variant="outline"
+            className="mt-3.5 min-h-11 self-center"
+            disabled={archivedPages.loading}
+            onClick={archivedPages.onLoadMore}
+          >
+            {archivedPages.loading ? 'Loading older archived…' : 'Show older archived'}
+          </Button>
+        ) : null}
+
         {strips.map((group) => (
           <div
             key={group.groupId}
@@ -478,7 +514,8 @@ function OverviewTab({
   view: ListView
   current: ListView
   onSelect: (view: ListView) => void
-  count: number
+  /** A number, or `200+` while the list holds a full window and the total is unknown. */
+  count: number | string
   children: React.ReactNode
 }) {
   const isActive = view === current
@@ -497,7 +534,7 @@ function OverviewTab({
       )}
     >
       {children}
-      {count > 0 ? <span className="tabular-nums"> · {count}</span> : null}
+      {count !== 0 ? <span className="tabular-nums"> · {count}</span> : null}
     </button>
   )
 }
@@ -1105,6 +1142,7 @@ export function TasksOverviewRoute() {
   const metricVisibility = usageMetricVisibility(health.data)
   const [view, setView] = React.useState<ListView>('active')
   const queryClient = useQueryClient()
+  const archived = useArchivedPages(runs.data, view)
   const archive = useMutation({
     mutationFn: () => archiveFinished(),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.runs.all }),
@@ -1174,7 +1212,49 @@ export function TasksOverviewRoute() {
         expandedColumns={taskTableColumns.expandedColumns}
         onToggleColumn={taskTableColumns.toggleColumn}
         columnsPending={taskTableColumns.isPending}
+        archivedPages={archived.pages}
+        archivedTotal={archived.total}
+        onArchivedSearch={archived.search}
       />
     </ReferenceStatusProvider>
   )
+}
+
+/** How long the Archived tab waits after a keystroke before it asks the server to search. */
+const ARCHIVED_SEARCH_DEBOUNCE_MS = 150
+
+/**
+ * The Archived tab's reach past the run list's window (#864). The list carries the newest
+ * `ARCHIVED_WINDOW` archived tasks; when it holds that many there may be older ones, so the tab
+ * reads the server's pages (the first one overlaps the window, which is what lets the next one
+ * add rows rather than repeat them). A search on that tab asks the server too, debounced, since
+ * the matches can be anywhere in the history.
+ */
+function useArchivedPages(runs: readonly RunSummary[] | undefined, view: ListView): {
+  pages: ArchivedPages | undefined
+  total: number | undefined
+  search: (needle: string) => void
+} {
+  const queryClient = useQueryClient()
+  const [typed, setTyped] = React.useState('')
+  const [needle, setNeedle] = React.useState('')
+  React.useEffect(() => {
+    const timer = setTimeout(() => setNeedle(typed), ARCHIVED_SEARCH_DEBOUNCE_MS)
+    return () => clearTimeout(timer)
+  }, [typed])
+  const windowFull = runs !== undefined && listCounts(runs).archived >= ARCHIVED_WINDOW
+  const query = useArchivedRuns(needle, view === 'archived' && (needle !== '' || windowFull))
+  const loaded = query.data?.pages
+  const pages = React.useMemo<ArchivedPages | undefined>(() => (loaded ? {
+    runs: loaded.flatMap((page) => page.runs),
+    hasMore: query.hasNextPage,
+    loading: query.isFetchingNextPage,
+    onLoadMore: () => void query.fetchNextPage(),
+  } : undefined), [loaded, query])
+  // The tab counts every archived task, so only the unfiltered answer's total is the count; a
+  // search's total is its matches.
+  const unfiltered = needle === ''
+    ? loaded
+    : queryClient.getQueryData<InfiniteData<ArchivedRunsResponse>>(queryKeys.runs.archived(''))?.pages
+  return { pages, total: unfiltered?.[0]?.total, search: setTyped }
 }

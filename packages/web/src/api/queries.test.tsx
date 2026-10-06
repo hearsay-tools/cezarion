@@ -527,7 +527,7 @@ describe('host model catalog invalidation after auth changes', () => {
 
   it('Connect marks the catalog stale without refetching a mounted query', async () => {
     fetchMock.mockImplementation(async (input) => {
-      const url = String(input)
+      const url = String(input).replace('?archived=recent', '')
       if (url.includes('/providers/connect')) return json({ opened: true, command: 'codex login' })
       if (url.includes('/models')) return json({ runner: 'codex', models: [], source: 'unavailable', stale: false })
       if (url.includes('/workspace/agent-profiles')) return json({ profiles: [], profileCapableProviders: [] })
@@ -630,10 +630,10 @@ describe('useSkills', () => {
   it('renders the fast catalog, then converges when the cold team cache is ready', async () => {
     let resolveReady!: (response: Response) => void
     fetchMock.mockImplementation(async (input) => {
-      if (String(input) === '/api/v1/skills') {
+      if (String(input).replace('?archived=recent', '') === '/api/v1/skills') {
         return json([{ name: 'local', source: 'ai', body: '', path: '/repo/local.md' }])
       }
-      if (String(input) === '/api/v1/skills?wait=1') {
+      if (String(input).replace('?archived=recent', '') === '/api/v1/skills?wait=1') {
         return new Promise<Response>((resolve) => {
           resolveReady = resolve
         })
@@ -854,7 +854,7 @@ describe('useRuns', () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
     expect(result.current.data).toHaveLength(1)
     expect(result.current.data?.[0]?.title).toBe('Fix it')
-    expect(fetchMock.mock.calls.at(-1)?.[0]).toBe('/api/v1/run-summaries')
+    expect(fetchMock.mock.calls.at(-1)?.[0]).toBe('/api/v1/run-summaries?archived=recent')
   })
 })
 

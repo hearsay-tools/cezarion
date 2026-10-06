@@ -90,7 +90,7 @@ function renderDock(
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
-      const path = String(input)
+      const path = String(input).replace('?archived=recent', '')
       if (path.endsWith('/relationships')) {
         return relationships === 'error' ? json({ error: 'offline' }, 503) : json({ workers: linked })
       }
@@ -209,7 +209,7 @@ describe('RunActivityDock — the workers section', () => {
   ] as const)('never mounts or fetches workers for an %s run', async (_label, delegation) => {
     await act(async () => { renderDock(run({ delegation })) })
     expect(section('workers')).toBeNull()
-    expect(vi.mocked(fetch).mock.calls.filter(([input]) => String(input).endsWith('/relationships'))).toEqual([])
+    expect(vi.mocked(fetch).mock.calls.filter(([input]) => String(input).replace('?archived=recent', '').endsWith('/relationships'))).toEqual([])
   })
 })
 

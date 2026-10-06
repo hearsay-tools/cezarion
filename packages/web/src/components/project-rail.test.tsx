@@ -49,7 +49,6 @@ function renderRail(props: Partial<ProjectRailProps> = {}, entry = '/p/toolkit-d
         <ProjectRail
           projects={[project('toolkit-dev'), project('open_mercato')]}
           signals={new Map()}
-          truncated={new Set()}
           version="0.15.0"
           singleProject={false}
           {...props}
@@ -226,10 +225,10 @@ describe('ProjectRail accessible name', () => {
     expect(document.querySelector('[data-slot="rail-pill-top"], [data-slot="rail-pill-bottom"]')).toBeNull()
   })
 
-  it('says idle for a quiet project, and says so when only recent runs were counted', () => {
-    renderRail({ truncated: new Set(['open_mercato']) })
+  it('says idle for a quiet project', () => {
+    renderRail()
     expect(within(mark('toolkit-dev')).getByRole('link').getAttribute('aria-label')).toBe('toolkit-dev · idle')
-    expect(within(mark('open_mercato')).getByRole('link').getAttribute('aria-label')).toBe('open_mercato · idle · recent runs only')
+    expect(within(mark('open_mercato')).getByRole('link').getAttribute('aria-label')).toBe('open_mercato · idle')
   })
 })
 
@@ -274,16 +273,6 @@ describe('ProjectRail expand toggle (#711)', () => {
     localStorage.setItem('cez-project-rail-expanded', '1')
     renderRail()
     expect(nav().style.width).toBe('232px')
-  })
-
-  it('says on hover when an expanded row counted recent runs only', () => {
-    setViewport(1440)
-    localStorage.setItem('cez-project-rail-expanded', '1')
-    renderRail({ truncated: new Set(['open_mercato']) })
-    const capped = within(mark('open_mercato')).getByRole('link')
-    expect(capped.getAttribute('title')).toBe('Counts cover recent runs only')
-    expect(capped.getAttribute('aria-label')).toBe('open_mercato · idle · recent runs only')
-    expect(within(mark('toolkit-dev')).getByRole('link').getAttribute('title')).toBeNull()
   })
 
   it('collapses and hides the toggle when main would drop under 640px, and restores on widening', () => {

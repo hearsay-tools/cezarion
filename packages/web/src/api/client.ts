@@ -106,6 +106,7 @@ import type {
   RunnerModelCatalogResponse,
   RunRecord,
   RunsIndexResponse,
+  ArchivedRunsResponse,
   WorktreeEntry,
   SaveWorkflowInput,
   SaveWorkflowResponse,
@@ -503,11 +504,29 @@ export async function browseFs(
 }
 
 /** The authoritative run list — slim summaries (#817), sorted newest-first by the server. Detail
- *  views read the full record through `getRun`. */
+ *  views read the full record through `getRun`. The window (#864): every unarchived run, plus the
+ *  newest archived ones; older archived runs page in through `getArchivedRuns`. */
 export async function getRuns(opts?: ReadOptions): Promise<RunSummary[]> {
   return unwrap(
-    await cez.api.v1.p[':projectId']['run-summaries'].$get({ param: { projectId: queryScope() }, query: {} }, init(opts)),
+    await cez.api.v1.p[':projectId']['run-summaries'].$get({ param: { projectId: queryScope() }, query: { archived: 'recent' } }, init(opts)),
     '/run-summaries',
+  )
+}
+
+/** One page of the active project's archived runs past the run list's window, newest first
+ *  (`GET /run-summaries/archived`, #864). `before` is the previous page's `nextCursor`. */
+export async function getArchivedRuns(
+  params: { before?: string; limit?: number; q?: string },
+  opts?: ReadOptions,
+): Promise<ArchivedRunsResponse> {
+  const query = {
+    ...(params.before !== undefined ? { before: params.before } : {}),
+    ...(params.limit !== undefined ? { limit: params.limit } : {}),
+    ...(params.q ? { q: params.q } : {}),
+  }
+  return unwrap(
+    await cez.api.v1.p[':projectId']['run-summaries'].archived.$get({ param: { projectId: queryScope() }, query }, init(opts)),
+    '/run-summaries/archived',
   )
 }
 
@@ -516,7 +535,7 @@ export async function getRuns(opts?: ReadOptions): Promise<RunSummary[]> {
  *  An already-`/api/p/`-prefixed path passes through `apiPath` untouched, so this stays
  *  correct whatever scope is mounted. */
 export async function getProjectRuns(projectId: string, opts?: ReadOptions): Promise<RunSummary[]> {
-  return unwrap(await cez.api.v1.p[':projectId']['run-summaries'].$get({ param: { projectId }, query: {} }, init(opts)), '/run-summaries')
+  return unwrap(await cez.api.v1.p[':projectId']['run-summaries'].$get({ param: { projectId }, query: { archived: 'recent' } }, init(opts)), '/run-summaries')
 }
 
 /** The cross-project task index (`GET /api/v1/workspace/runs-index`) — what lets ⌘K find a task

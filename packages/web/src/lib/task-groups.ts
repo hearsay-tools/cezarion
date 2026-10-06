@@ -354,6 +354,31 @@ export function capBuckets(buckets: readonly QuickListBucket[], limits: SidebarL
   return capped
 }
 
+/**
+ * How many archived root runs the project's run list carries (#864): the server's `ARCHIVED_WINDOW`
+ * (`packages/cezar/src/runs/store.ts`), which `GET /run-summaries?archived=recent` applies. A list
+ * holding this many may have older archived runs past it, which page in from
+ * `GET /run-summaries/archived`.
+ */
+export const ARCHIVED_WINDOW = 200
+
+/**
+ * The run list with older archived pages laid under it, one row per run. The list's own row wins
+ * a duplicate: it is the one the stream patches, so a run unarchived since its page was fetched
+ * reads as unarchived and leaves the Archived view.
+ */
+export function withArchivedPages(runs: readonly RunSummary[], pages: readonly RunSummary[]): RunSummary[] {
+  if (pages.length === 0) return [...runs]
+  const listed = new Set(runs.map((run) => run.id))
+  const added = new Set<string>()
+  const older = pages.filter((run) => {
+    if (listed.has(run.id) || added.has(run.id)) return false
+    added.add(run.id)
+    return true
+  })
+  return [...runs, ...older]
+}
+
 /** The tab counts. `waiting` drives the Active tab's attention dot — the one thing that makes an
  *  un-selected tab worth looking at. */
 export function listCounts(runs: readonly RunSummary[]): {

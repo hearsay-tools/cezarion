@@ -30,6 +30,7 @@ import {
   getRunHistory,
   getRunHistoryContext,
   getRuns,
+  getArchivedRuns,
   getSkills,
   getSkillsWhenReady,
   getTodos,
@@ -145,7 +146,8 @@ describe('request shapes', () => {
     { name: 'getRunnerModels', call: () => getRunnerModels('codex'), path: '/api/v1/models?runner=codex', method: 'GET' },
     { name: 'getRunnerModels(opencode)', call: () => getRunnerModels('opencode'), path: '/api/v1/models?runner=opencode', method: 'GET' },
     { name: 'getRunnerModels(pi)', call: () => getRunnerModels('pi'), path: '/api/v1/models?runner=pi', method: 'GET' },
-    { name: 'getRuns', call: () => getRuns(), path: '/api/v1/run-summaries', method: 'GET' },
+    { name: 'getRuns', call: () => getRuns(), path: '/api/v1/run-summaries?archived=recent', method: 'GET' },
+    { name: 'getArchivedRuns', call: () => getArchivedRuns({ before: 'c1', limit: 200, q: '#864' }), path: '/api/v1/run-summaries/archived?before=c1&limit=200&q=%23864', method: 'GET' },
     { name: 'getRun', call: () => getRun('run-1'), path: '/api/v1/runs/run-1', method: 'GET' },
     { name: 'getRunDiff', call: () => getRunDiff('run-1'), path: '/api/v1/runs/run-1/diff', method: 'GET' },
     { name: 'getRunHandoff', call: () => getRunHandoff('run-1'), path: '/api/v1/runs/run-1/handoff', method: 'GET' },
@@ -379,7 +381,7 @@ describe('project scope (multi-project spec, step 3.1)', () => {
 
     reply({ ok: true })
     await getRuns()
-    expect(lastCall().path).toBe('/api/v1/p/proj-a/run-summaries')
+    expect(lastCall().path).toBe('/api/v1/p/proj-a/run-summaries?archived=recent')
 
     reply({ ok: true })
     await cancelRun('run-1')

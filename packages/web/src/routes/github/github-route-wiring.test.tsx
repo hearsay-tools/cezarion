@@ -87,7 +87,7 @@ function stubServer(kind: 'issue' | 'pr') {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
-      const path = String(input)
+      const path = String(input).replace('?archived=recent', '')
       if (path === '/api/v1/health') {
         return json({
           version: '0.0.0-test',

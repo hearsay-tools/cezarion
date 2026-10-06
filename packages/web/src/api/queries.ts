@@ -1,6 +1,6 @@
 import { normalizeSidebarLimits, runnerModelCatalogResponseSchema } from '@open-mercato/cezar-api-client'
 import { toast } from '@/components/ui/toaster'
-import { useMutation, useQueries, useQuery, useQueryClient, type QueryClient, type MutateOptions } from '@tanstack/react-query'
+import { keepPreviousData, useInfiniteQuery, useMutation, useQueries, useQuery, useQueryClient, type QueryClient, type MutateOptions } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo } from 'react'
 
 import { mergeProviderStatusResponse } from '@/lib/provider-status'
@@ -54,6 +54,7 @@ import {
   getRunHandoff,
   getRuns,
   getRunsIndex,
+  getArchivedRuns,
   getImportableSkills,
   getImportableSkillsWhenReady,
   getSkills,
@@ -88,7 +89,7 @@ import {
   putAgentConfigFile,
   retryProviderAuth,
 } from './client'
-import { queryScope, REFERENCE_STATUS_MAX, runnerDiscoversModels } from '@open-mercato/cezar-api-client'
+import { ARCHIVED_RUNS_PAGE_MAX, queryScope, REFERENCE_STATUS_MAX, runnerDiscoversModels } from '@open-mercato/cezar-api-client'
 import { useProjectScope } from './project-scope-context'
 import { isReferenceStatus } from '@/lib/reference-status'
 import { githubRepoBase } from '@/lib/tasks-table'
@@ -146,6 +147,8 @@ export const queryKeys = {
     },
     relationships: (id: string) => [queryScope(), 'runs', 'relationships', id] as const,
     list: (scope = queryScope()) => [scope, 'runs', 'list'] as const,
+    /** Under `all`, so every run mutation's invalidation refreshes the archived pages too. */
+    archived: (q: string) => [queryScope(), 'runs', 'archived', q] as const,
     detail: (id: string, scope = queryScope()) => [scope, 'runs', 'detail', id] as const,
     diff: (id: string) => [queryScope(), 'runs', 'diff', id] as const,
     changes: (id: string) => [queryScope(), 'runs', 'changes', id] as const,
@@ -877,6 +880,20 @@ export function useRuns() {
   return useQuery({
     queryKey: queryKeys.runs.list(),
     queryFn: ({ signal }) => getRuns({ signal }),
+  })
+}
+
+/** The archived runs past the run list's window, `ARCHIVED_RUNS_PAGE_MAX` at a time (#864): the
+ *  newest pages, or the matches for `q`. Only while `enabled` — the Archived tab, when the list's
+ *  window is full or there is something to search for. */
+export function useArchivedRuns(q: string, enabled: boolean) {
+  return useInfiniteQuery({
+    queryKey: queryKeys.runs.archived(q),
+    enabled,
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam, signal }) => getArchivedRuns({ before: pageParam, limit: ARCHIVED_RUNS_PAGE_MAX, q }, { signal }),
+    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    placeholderData: keepPreviousData,
   })
 }
 

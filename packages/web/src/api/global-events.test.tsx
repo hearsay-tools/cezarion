@@ -945,7 +945,7 @@ describe('useGlobalEvents — run events', () => {
     source.emit('run', stampedRun(runRecord('r1', { status: 'waiting' })))
     response.resolve(json({ ...runRecord('r1', { status: 'waiting' }), finishBlocked: null }))
     await waitFor(() => expect(client.getQueryData<ApiRun>(queryKeys.runs.detail('r1'))?.finishBlocked).toBeNull())
-    expect(vi.mocked(fetch).mock.calls.every(([input]) => String(input).endsWith('/runs/r1'))).toBe(true)
+    expect(vi.mocked(fetch).mock.calls.every(([input]) => String(input).replace('?archived=recent', '').endsWith('/runs/r1'))).toBe(true)
   })
 
   it('updates in place on a second event for the same run — no duplicate row', () => {
@@ -1882,7 +1882,7 @@ describe('live run list responses overlapping newer workspace events (#795)', ()
     const off = { ...record, notify: undefined }
     const stale = deferredResponse(), fresh = deferredResponse()
     vi.mocked(fetch).mockImplementation(input => {
-      if (String(input).endsWith('/run-summaries')) return stale.promise
+      if (String(input).replace('?archived=recent', '').endsWith('/run-summaries')) return stale.promise
       return Promise.resolve(json(record))
     })
     client.setQueryData(key, [record])
@@ -1907,7 +1907,7 @@ describe('live run list responses overlapping newer workspace events (#795)', ()
     await waitFor(() => expect(glyph()).toBeNull())
     await act(async () => { void client.invalidateQueries({ queryKey: key, exact: true }) })
     expect(client.getQueryState(key)?.fetchStatus).toBe('fetching')
-    vi.mocked(fetch).mockImplementation(input => String(input).endsWith('/run-summaries') ? fresh.promise : Promise.resolve(json(record)))
+    vi.mocked(fetch).mockImplementation(input => String(input).replace('?archived=recent', '').endsWith('/run-summaries') ? fresh.promise : Promise.resolve(json(record)))
     source.emit('run', stampedRun(record, project))
     await waitFor(() => expect(glyph()).not.toBeNull())
     await act(async () => stale.resolve(json([off])))

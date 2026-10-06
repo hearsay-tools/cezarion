@@ -64,7 +64,7 @@ interface Stub {
 function stub(opts: Stub = {}) {
   const sent: string[] = []
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
-    const path = String(input)
+    const path = String(input).replace('?archived=recent', '')
     sent.push(path)
     const method = init.method ?? 'GET'
     if (method === 'GET' && /\/run-summaries$/.test(path)) return opts.runs === 'error' ? json({ error: 'boom' }, 400) : json(opts.runs ?? [])

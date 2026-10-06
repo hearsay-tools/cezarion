@@ -118,7 +118,7 @@ function stubFetch(
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
-      const path = String(input)
+      const path = String(input).replace('?archived=recent', '')
       const method = init.method ?? 'GET'
       sent.push({
         path,
@@ -736,7 +736,7 @@ describe('Add instructions', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
-        const path = String(input)
+        const path = String(input).replace('?archived=recent', '')
         const method = init.method ?? 'GET'
         const body = typeof init.body === 'string' ? (JSON.parse(init.body) as unknown) : undefined
         captured.push({ path, method, body })
@@ -934,7 +934,7 @@ describe('the inbox gate (#471)', () => {
     // Re-stub health as a deferred answer so the todos query can settle first.
     const realFetch = globalThis.fetch as unknown as (i: RequestInfo | URL, x?: RequestInit) => Promise<Response>
     vi.stubGlobal('fetch', async (input: RequestInfo | URL, init: RequestInit = {}) => {
-      if (String(input) === '/api/v1/health') {
+      if (String(input).replace('?archived=recent', '') === '/api/v1/health') {
         await healthPending
         return healthResponse(false)
       }
