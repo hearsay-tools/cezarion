@@ -496,6 +496,26 @@ describe('removeOwnedWorkspace verified retryable destruction', () => {
     },
   );
 
+  it('completes bookkeeping when recorded worktree, gitDir and branch are already gone without a checkpoint', async () => {
+    const { root, first } = await fixture();
+    const workspace = await createOwnedWorkspace(root, randomUUID(), first);
+    const receipt = receiptPath(root, workspace);
+    const receiptBefore = await readFile(receipt, 'utf8');
+    const gitDir = JSON.parse(receiptBefore).gitDir as string;
+    git(root, 'worktree', 'remove', workspace.path);
+    git(root, 'branch', '-D', workspace.branch);
+    expect(existsSync(workspace.path)).toBe(false);
+    expect(existsSync(gitDir)).toBe(false);
+    const result = await removeOwnedWorkspace(root, workspace);
+    expect(result).toMatchObject({ state: 'complete', remaining: [] });
+    expect(result).not.toHaveProperty('error');
+    expect(existsSync(workspace.path)).toBe(false);
+    expect(git(root, 'branch', '--list', workspace.branch)).toBe('');
+    expect(await readFile(receipt, 'utf8')).toBe(receiptBefore);
+    expect(existsSync(receipt.replace(/\.json$/, '.cleanup.json'))).toBe(false);
+    expect(await removeOwnedWorkspace(root, workspace)).toEqual(result);
+  });
+
   it('preserves the owned directory on the first cleanup attempt when its branch is checked out elsewhere', async () => {
     const { root, first } = await fixture();
     const workspace = await createOwnedWorkspace(root, randomUUID(), first);
