@@ -7466,8 +7466,9 @@ export class RunManager {
    *  kill a live turn. OpenCode heartbeats re-arm the managed-session no-progress guard without
    *  opening a turn, so an ACK that stays silent is bounded by FINAL_MESSAGE_NUDGE_REPLY_MS:
    *  parent-level v1 content (text, tool-call, tool-result) and UiEvent items count at any time,
-   *  including before the timer is armed; `turn.started` counts only after arm (OpenCode/Cursor
-   *  emit a synthetic one inside sendAgentMessage). Nested `item.*` with `parentItemId` is ignored.
+   *  including before the timer is armed; `turn.started` counts after arm or while
+   *  `finalMessageNudgeParked` matches the session (OpenCode/Cursor emit a synthetic one inside
+   *  sendAgentMessage). Nested `item.*` with `parentItemId` is ignored.
    *  Expiry parks `waiting` and latches `finalMessageNudgeParked`; a late reply from that session
    *  resumes. User-authored delivery resets the one-shot latch; expiry does not. */
   private tryFinalMessageNudge(runId: string, state: ActiveRun, stepId: string): boolean {
@@ -7482,9 +7483,9 @@ export class RunManager {
     return true;
   }
 
-  /** Heartbeats and nested subagent items are not a reply. */
+  /** Heartbeats and nested subagent items are not a reply. OpenCode/Cursor synthetic `turn.started` inside `sendAgentMessage` cannot false-resume after expiry because a later send goes through `submitAgentInput` → `resumeParkedRun`. */
   private isFinalMessageNudgeReply(state: ActiveRun, event: { type: string; item?: { parentItemId?: string } }): boolean {
-    if (event.type === 'turn.started') return state.finalMessageNudgeReplyTimer !== undefined;
+    if (event.type === 'turn.started') return state.finalMessageNudgeReplyTimer !== undefined || state.finalMessageNudgeParked === state.session;
     if (event.type === 'text' || event.type === 'tool-call' || event.type === 'tool-result') return true;
     if (event.type === 'item.delta' || !event.type.startsWith('item.')) return false;
     return event.item?.parentItemId === undefined;
