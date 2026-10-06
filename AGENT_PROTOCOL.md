@@ -831,6 +831,13 @@ this normative contract.
 
 ## 7. Harness parity — session and lifecycle (`packages/cezar/src/core/harness-parity.test.ts`)
 
+**S21** (hearsay-tools/cezarion#832) detects unexpected restored history through
+OMP's startup `get_state.messageCount`. A fresh step emits one v1 note and one
+non-fatal `session.error`, and still completes normally. Other native wires have
+named `scenario-unconstructible` exemptions for this OMP-specific startup response;
+S1/S3/S14 retain their native start/resume coverage. OMP's focused tests also pin
+explicit resume, empty/absent/malformed counts, unrelated queries and duplicate replies.
+
 **R43** (hearsay-tools/cezarion#738), in `workflows/worker-reboot-parity.test.ts` and
 `workflows/worker-location-evidence.test.ts`, drives every `RUNNER_IDS`
 backend's `HARNESS_ADAPTERS` native wire through worker cancellation and a successful twin.
