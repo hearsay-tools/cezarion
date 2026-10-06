@@ -294,6 +294,7 @@ export class ClaudeCliRunner implements AgentRunner {
     }
 
     const result = (async (): Promise<AgentRunResult> => {
+      let outputFailure: { error: unknown } | undefined;
       try {
         for await (const line of readNdjson(child.stdout)) {
           if (timedOut) break;
@@ -367,9 +368,12 @@ export class ClaudeCliRunner implements AgentRunner {
           }
         }
       } catch (err) {
-        // A timeout destroys stdout, which surfaces here as a premature-close
-        // error — expected; rethrow anything else.
-        if (!timedOut && !hasExited()) throw err;
+        // Timeout teardown can close stdout. Any other live-child read failure
+        // must stop the agent before result releases its execution capacity.
+        if (!timedOut && !hasExited()) {
+          outputFailure = { error: err };
+          interrupt();
+        }
       } finally {
         if (deadline) clearTimeout(deadline);
         if (autoEndTimer) clearTimeout(autoEndTimer);
@@ -383,6 +387,7 @@ export class ClaudeCliRunner implements AgentRunner {
       if (eofTermTimer) clearTimeout(eofTermTimer);
       if (eofKillTimer) clearTimeout(eofKillTimer);
 
+      if (outputFailure) throw outputFailure.error;
       if (spawnFailed) throw spawnFailed;
 
       const text = textChunks.join('\n').trim();
@@ -397,13 +402,19 @@ export class ClaudeCliRunner implements AgentRunner {
       // A session cezar itself tore down (EOF watchdog after `end()`, or a
       // cancel) exits 143/137 — that is our own signal coming back, not an
       // agent failure, so it settles on the normal path with a note (#703).
-      if (terminatedByCezar && isSignalTerminationExit(exitCode)) {
+      if (terminatedByCezar && (isSignalTerminationExit(exitCode) || (exitCode === null && child.signalCode !== null))) {
         onEvent?.({
           type: 'note',
-          message: `claude CLI did not exit on its own after close; terminated by cezar (code ${exitCode})`,
+          message: `claude CLI did not exit on its own after close; terminated by cezar (${exitCode === null ? child.signalCode : `code ${exitCode}`})`,
         });
         onEvent?.({ type: 'done' });
         return { text, toolCalls, tokensUsed, sessionId: spec.sessionId };
+      }
+
+      if (exitCode === null && child.signalCode !== null) {
+        const message = `claude CLI was killed by signal ${child.signalCode}`;
+        onEvent?.({ type: 'error', message });
+        throw new Error(message);
       }
 
       if (exitCode !== 0 && exitCode !== null) {

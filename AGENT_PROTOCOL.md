@@ -831,6 +831,14 @@ this normative contract.
 
 ## 7. Harness parity — session and lifecycle (`packages/cezar/src/core/harness-parity.test.ts`)
 
+**S21–S23** (hearsay-tools/cezarion#843), in `core/runner-shutdown-parity.test.ts`,
+start every `RUNNER_IDS` backend through its `HARNESS_ADAPTERS` native mock.
+After prompt admission, an outside SIGKILL must fail the session; `end()` must
+escalate to SIGKILL when the child cannot handle EOF or SIGTERM; and a failed
+output transport must terminate the live child. OpenCode uses its real HTTP/SSE
+stream for the transport failure, while the other backends use stdout.
+Requested teardown remains successful. The matrix has no wire exemptions.
+
 **R43** (hearsay-tools/cezarion#738), in `workflows/worker-reboot-parity.test.ts` and
 `workflows/worker-location-evidence.test.ts`, drives every `RUNNER_IDS`
 backend's `HARNESS_ADAPTERS` native wire through worker cancellation and a successful twin.
