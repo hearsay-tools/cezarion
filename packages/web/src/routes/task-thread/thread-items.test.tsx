@@ -649,6 +649,40 @@ describe('AssistantMessage copy actions', () => {
     expect(html).not.toMatch(/<a[^>]+href="https:\/\/trap\.example/)
   })
 
+  it('does not let a reference definition steal an inline link href', async () => {
+    const source = [
+      'See [docs][ref] and [other](https://other.example).',
+      '',
+      '[ref]: https://trap.example',
+    ].join('\n')
+    const write = vi.fn(async () => {})
+    vi.stubGlobal('ClipboardItem', class ClipboardItem {
+      constructor(public items: Record<string, Blob>) {}
+    })
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { write, writeText: vi.fn() } })
+    render(<MemoryRouter><AssistantMessage text={source} /></MemoryRouter>)
+    fireEvent.click(copyButton())
+    await waitFor(() => expect(write).toHaveBeenCalled())
+    const html = await writtenItem(write).items['text/html']!.text()
+    expect(html).toMatch(/<a[^>]+href="https:\/\/other\.example"/)
+    expect(html).not.toMatch(/trap\.example/)
+  })
+
+  it('does not restore a javascript: destination into copied HTML', async () => {
+    const source = "See [click](javascript:location.href='https://attacker.example') and [docs](https://example.com)."
+    const write = vi.fn(async () => {})
+    vi.stubGlobal('ClipboardItem', class ClipboardItem {
+      constructor(public items: Record<string, Blob>) {}
+    })
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { write, writeText: vi.fn() } })
+    render(<MemoryRouter><AssistantMessage text={source} /></MemoryRouter>)
+    fireEvent.click(copyButton())
+    await waitFor(() => expect(write).toHaveBeenCalled())
+    const html = await writtenItem(write).items['text/html']!.text()
+    expect(html).not.toMatch(/javascript:/i)
+    expect(html).toMatch(/<a[^>]+href="https:\/\/example\.com"/)
+  })
+
   it.each(['missing', 'denied'] as const)('shows an error when clipboard is %s and does not claim success', async (failure) => {
     if (failure === 'missing') {
       vi.stubGlobal('navigator', { ...navigator, clipboard: undefined })

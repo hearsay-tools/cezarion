@@ -303,12 +303,22 @@ function withoutMarkdownImages(source: string): string {
   return source.replace(/!\[[^\]]*\]\([^)\s]*(?:\s+"[^"]*")?\)/g, ' ')
 }
 
+function isSafeHref(href: string): boolean {
+  const trimmed = href.trim()
+  if (trimmed === '' || trimmed.startsWith('#')) return true
+  if (/^(https?:|mailto:)/i.test(trimmed)) return true
+  if (/^[a-z][a-z0-9+.-]*:/i.test(trimmed)) return false
+  return true
+}
+
 function markdownHrefs(source: string): string[] {
+  const text = withoutMarkdownCode(withoutMarkdownImages(source))
+  const body = text.replace(/^\s*\[[^\]]+\]:\s*\S+.*$/gm, ' ')
   const hrefs: string[] = []
-  const re = /(?<!!)\[(?:[^\]]*)]\(([^)\s]+)(?:\s+"[^"]*")?\)|<(https?:\/\/[^>\s]+)>|(https?:\/\/[^\s<]+)/g
-  for (const match of withoutMarkdownCode(withoutMarkdownImages(source)).matchAll(re)) {
+  const re = /(?<!!)\[(?:[^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)|<(https?:\/\/[^>\s]+)>|(https?:\/\/[^\s<]+)/g
+  for (const match of body.matchAll(re)) {
     const href = match[1] ?? match[2] ?? match[3]
-    if (href) hrefs.push(href)
+    if (href && isSafeHref(href)) hrefs.push(href)
   }
   return hrefs
 }
@@ -319,7 +329,7 @@ function clipboardHtml(root: HTMLElement, source: string): string {
   const hrefs = markdownHrefs(source)
   ;[...clone.querySelectorAll('button[data-streamdown="link"]')].forEach((button, index) => {
     const href = hrefs[index]
-    if (!href) return
+    if (!href || !isSafeHref(href)) return
     const anchor = clone.ownerDocument.createElement('a')
     anchor.setAttribute('href', href)
     anchor.setAttribute('data-streamdown', 'link')
