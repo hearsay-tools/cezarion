@@ -60,6 +60,9 @@ import { cn } from '@/lib/utils'
 /** Archived runs older than the run list's window, a page at a time (#864). */
 export type ArchivedPages = {
   runs: readonly RunSummary[]
+  /** The search text these pages answer (`''` for the plain pages), or null while they are a
+   *  previous text's pages kept on screen until the next ones load. */
+  query: string | null
   /** Whether the server has an older page. */
   hasMore: boolean
   loading: boolean
@@ -157,10 +160,17 @@ export function TasksOverview({
   }, [])
   const all = runs ?? []
   const counts = listCounts(all)
-  // Paged rows already matched the server's search, which also reads PR and issue numbers, so
-  // the local filter (titles, branches, workflows) must not drop them again.
-  const paged = withArchivedPages(all, archivedPages?.runs ?? []).slice(all.length)
-  const visible = sortRuns([...filterRuns(all, query), ...filterRuns(paged, '')], view)
+  // Pages that answer this search already matched the server's rule, which also reads ids, URLs
+  // and PR/issue numbers, so the local filter (titles, branches, workflows) must not drop them
+  // again — neither an older paged row nor a list row the server matched. Pages answering other
+  // text (the plain pages, or a search still debouncing) widen nothing.
+  const answered = archivedPages !== undefined && archivedPages.query === query.trim()
+  const matched = new Set(answered ? archivedPages.runs.map((run) => run.id) : [])
+  const paged = withArchivedPages(all, answered || query.trim() === '' ? archivedPages?.runs ?? [] : []).slice(all.length)
+  const listed = filterRuns(all, query)
+  const listedIds = new Set(listed.map((run) => run.id))
+  const serverMatched = filterRuns(all.filter((run) => matched.has(run.id) && !listedIds.has(run.id)), '')
+  const visible = sortRuns([...listed, ...serverMatched, ...filterRuns(paged, '')], view)
   const archivedCount = archivedTotal ?? (counts.archived >= ARCHIVED_WINDOW ? `${ARCHIVED_WINDOW}+` : counts.archived)
   // Positions come from the full list, never the filtered one: a search must not renumber the
   // queue the engine is actually going to drain.
@@ -1254,6 +1264,8 @@ function useArchivedPages(runs: readonly RunSummary[] | undefined, view: ListVie
   const loaded = query.data?.pages
   const pages = React.useMemo<ArchivedPages | undefined>(() => (loaded || query.isError ? {
     runs: (loaded ?? []).flatMap((page) => page.runs),
+    // `placeholderData` keeps the previous text's pages on screen while the next ones load.
+    query: query.isPlaceholderData ? null : needle,
     hasMore: query.hasNextPage,
     loading: query.isFetchingNextPage,
     // A failed first page has nothing to continue from, so retrying it is a refetch.

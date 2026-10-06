@@ -1500,6 +1500,7 @@ describe('archived pages past the window', () => {
       runs: window,
       archivedPages: {
         runs: [{ ...window[1]! }, run({ id: 'older', archived: true, createdAt: ago(9_000_000) })],
+        query: '',
         hasMore: true,
         loading: false,
         onLoadMore,
@@ -1516,7 +1517,7 @@ describe('archived pages past the window', () => {
     renderOverview({
       view: 'archived',
       runs: archivedRuns(2),
-      archivedPages: { runs: [], hasMore: true, loading: false, onLoadMore, failed: true },
+      archivedPages: { runs: [], query: '', hasMore: true, loading: false, onLoadMore, failed: true },
     })
     expect(screen.getByRole('alert').textContent).toContain('Could not load older archived tasks.')
     expect(screen.queryByRole('button', { name: 'Show older archived' })).toBeNull()
@@ -1524,12 +1525,38 @@ describe('archived pages past the window', () => {
     expect(onLoadMore).toHaveBeenCalledTimes(1)
   })
 
+  it('keeps a window row the server matched by reference number, as it keeps an older one', () => {
+    const recent = run({ id: 'recent-864', title: 'Bound the lists', archived: true, issueNumber: 864 })
+    const older = run({ id: 'older-864', title: 'Older work', archived: true, issueNumber: 864, createdAt: ago(9_000_000) })
+    renderOverview({
+      view: 'archived',
+      runs: [recent, run({ id: 'unrelated', archived: true })],
+      onArchivedSearch: vi.fn(),
+      archivedPages: { runs: [recent, older], query: '#864', hasMore: false, loading: false, onLoadMore: vi.fn() },
+    })
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search tasks' }), { target: { value: '#864' } })
+    expect(tableRow('recent-864')).not.toBeNull()
+    expect(tableRow('older-864')).not.toBeNull()
+    expect(tableRow('unrelated')).toBeNull()
+  })
+
+  it('does not let stale unfiltered pages widen a search', () => {
+    renderOverview({
+      view: 'archived',
+      runs: [run({ id: 'unrelated', archived: true })],
+      onArchivedSearch: vi.fn(),
+      archivedPages: { runs: [run({ id: 'unrelated', archived: true })], query: '', hasMore: false, loading: false, onLoadMore: vi.fn() },
+    })
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search tasks' }), { target: { value: 'needle' } })
+    expect(tableRow('unrelated')).toBeNull()
+  })
+
   it('drops a paged row the live list has since unarchived', () => {
     const live = run({ id: 'came-back', archived: false })
     renderOverview({
       view: 'archived',
       runs: [live],
-      archivedPages: { runs: [{ ...live, archived: true }], hasMore: false, loading: false, onLoadMore: vi.fn() },
+      archivedPages: { runs: [{ ...live, archived: true }], query: '', hasMore: false, loading: false, onLoadMore: vi.fn() },
     })
     expect(tableRow('came-back')).toBeNull()
   })
@@ -1542,6 +1569,7 @@ describe('archived pages past the window', () => {
       onArchivedSearch,
       archivedPages: {
         runs: [run({ id: 'by-issue', title: 'Bound the lists', archived: true, issueNumber: 864, createdAt: ago(9_000_000) })],
+        query: '#864',
         hasMore: false,
         loading: false,
         onLoadMore: vi.fn(),
