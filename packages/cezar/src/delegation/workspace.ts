@@ -247,17 +247,25 @@ export async function readOwnedDiff(repoRoot: string, run: RunRecord): Promise<W
 /** Trusted in-process verifier obtained from the manager, never a wire field. */
 export type WorkerNoMaterializationProof = (workspace: WorkerWorkspace) => boolean;
 
+/** Thrown by a removal's `assertUnheld` when live processes may hold the worker's resources. */
+export class WorkspaceHeldError extends Error {
+  constructor(readonly pids: readonly number[]) { super(`Processes ${pids.join(', ')} may still hold the worker's resources`); }
+}
+
 /** Checked cleanup only. Caller must first persist destruction intent and prove termination.
  * The private checkpoint survives removal of the linked Git directory and records
  * the exact ref/log identity whose compare-and-swap deletion may be retried.
  * `beforeRemove` runs once every check has passed, right before git removes the checkout: call
- * this through `releaseThenRemoveOwnedWorkspace` so the worker's preview goes first (#781). */
+ * this through `releaseThenRemoveOwnedWorkspace` so the worker's preview goes first (#781).
+ * `holdersSince` (`workerProcessCutoff`) skips unreadable processes older than the worker. */
 export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorkspace, neverMaterialized?: WorkerNoMaterializationProof,
-  assertCurrent?: () => void, beforeRemove?: () => Promise<void>, assertUnheld?: () => void): Promise<WorkerDestroyResult> {
+  assertCurrent?: () => void, beforeRemove?: () => Promise<void>, assertUnheld?: () => void, holdersSince?: number): Promise<WorkerDestroyResult> {
   let remaining: Array<'worktree' | 'branch'> = ['worktree', 'branch'];
-  let provisioned = false; let lockBusy = false;
+  let provisioned = false; let lockBusy = false; let heldBy: readonly number[] = [];
   const result = (): WorkerDestroyResult => ({ workerId: value.ownerRunId, state: remaining.length ? 'incomplete' : 'complete', remaining,
-    ...(remaining.length ? { error: lockBusy ? 'Owned resources retained: worktree mutation lock is busy; retry destroy later' : 'Owned resources remain: resource identity or Git cleanup could not be verified. Check the worker worktree, Git lock and ownership receipt, then retry destroy after correcting the blocker' } : {}),
+    ...(remaining.length ? { error: lockBusy ? 'Owned resources retained: worktree mutation lock is busy; retry destroy later'
+      : heldBy.length ? `Owned resources retained: processes ${heldBy.join(', ')} may still hold the worker worktree or scratch; retry destroy after they exit`
+      : 'Owned resources remain: resource identity or Git cleanup could not be verified. Check the worker worktree, Git lock and ownership receipt, then retry destroy after correcting the blocker' } : {}),
     ...(provisioned ? { deleted: [
       ...(!remaining.includes('worktree') ? [{ kind: 'worktree' as const, path: value.path }] : []),
       ...(!remaining.includes('branch') ? [{ kind: 'branch' as const, ref: `refs/heads/${value.branch}` }] : []),
@@ -316,7 +324,8 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
         // Preview release may itself terminate a known owned holder. Check unrelated holders
         // only afterwards, immediately before destructive Git; they are never signalled.
         assertUnheld?.();
-        if (inspectGeneration({ paths: [workspace.path] }).liveness !== 'gone') return result();
+        const holders = inspectGeneration({ paths: [workspace.path], ...(holdersSince !== undefined ? { holdersSince } : {}) });
+        if (holders.liveness !== 'gone') { heldBy = holders.pids; return result(); }
         const removed = await mutationGit(repoRoot, ['worktree', 'remove', '--force', workspace.path]);
         if (!removed.ok) return result();
         remaining = ['branch'];
@@ -339,6 +348,10 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
       remaining = [];
       return result();
     }, { waitMs: 1_000 });
-  } catch (error) { lockBusy = error instanceof WorktreeMutationLockTimeout; /* Ambiguous ownership and every failed Git/filesystem operation fail closed. */ }
+  } catch (error) {
+    // Ambiguous ownership and every failed Git/filesystem operation fail closed.
+    lockBusy = error instanceof WorktreeMutationLockTimeout;
+    if (error instanceof WorkspaceHeldError) heldBy = error.pids;
+  }
   return result();
 }
