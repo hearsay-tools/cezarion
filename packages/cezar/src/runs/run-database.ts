@@ -672,6 +672,14 @@ export class RunDatabase {
     return this.run(() => this.statements.listWindowSummaries.all(archivedLimit)).map(toSummaryRow);
   }
 
+  /** Every root row (archived or not) whose stored summary contains each `prefilter` token,
+   *  lowercased, newest first: the candidates of a run search (#864), which the caller still
+   *  checks with `matchesRunQuery`. No tokens, every root. */
+  searchRootSummaries(prefilter: readonly string[]): RunSummaryRow[] {
+    const where = ['parent_run_id IS NULL', ...prefilter.map(() => 'instr(lower(summary), ?) > 0')].join(' AND ');
+    return this.run(() => this.db.prepare(`${SUMMARY_SELECT} WHERE ${where} ${NEWEST_FIRST}`).all(...prefilter)).map(toSummaryRow);
+  }
+
   /** Every row, newest first (`created_at` descending, then insertion order). */
   listAll(): RunRow[] {
     return this.run(() => this.statements.listAll.all()).map(toRunRow);

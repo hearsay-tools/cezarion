@@ -28,15 +28,15 @@ export function searchTokens(query: string): string[] {
 }
 
 /**
- * The tokens SQL may narrow rows with, as `instr(lower(summary), ?) > 0`. Only ASCII tokens:
- * SQLite's `lower()` folds ASCII alone, so a non-ASCII token there could drop a row the matcher
- * would keep. Leaving a token out only widens the prefilter; `matchesRunQuery` still checks it.
+ * The tokens SQL may narrow rows with, as `instr(lower(summary), ?) > 0` over the stored summary
+ * JSON. Only tokens that read the same there: ASCII, since SQLite's `lower()` folds ASCII alone,
+ * and without `"` or `\`, which JSON escapes. Leaving a token out only widens the prefilter;
+ * `matchesRunQuery` still checks it.
  */
 export function sqlPrefilterTokens(query: string): string[] {
   return searchTokens(query)
     .map((token) => token.replace(/^#/, ''))
-    // eslint-disable-next-line no-control-regex
-    .filter((token) => token !== '' && /^[\x00-\x7f]+$/.test(token));
+    .filter((token) => token !== '' && /^[\x20-\x7e]+$/.test(token) && !/["\\]/.test(token));
 }
 
 function referenceNumbers(run: RunSummary): Set<string> {

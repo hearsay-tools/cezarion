@@ -331,17 +331,18 @@ describe('workspace runs index API', () => {
     expect(body.runs.map((run) => run.id)).toEqual(['live', 'filed']);
   });
 
-  it('caps each project and names it in `truncated`, so no cap is silent', async () => {
+  it('caps each project\'s archived roots and names it in `truncated`, so no cap is silent', async () => {
     await registerProject(repoRoot);
     const other = await registerProject(otherRoot);
-    // 210 > the 200 cap. Ids sort with the timestamps so the newest survivors are predictable.
+    // 210 archived roots > the 200 window (#864: unarchived runs are never cut). Ids sort with the
+    // timestamps so the newest survivors are predictable.
     seedColdProject(
       otherRoot,
       Array.from({ length: 210 }, (_, i) => {
         const n = String(i).padStart(3, '0');
         const hour = String(10 + Math.floor(i / 60)).padStart(2, '0');
         const minute = String(i % 60).padStart(2, '0');
-        return storedRun({ id: `r-${n}`, title: `Task ${n}`, createdAt: `2026-07-14T${hour}:${minute}:00Z` });
+        return storedRun({ id: `r-${n}`, title: `Task ${n}`, createdAt: `2026-07-14T${hour}:${minute}:00Z`, archived: true });
       }),
     );
 

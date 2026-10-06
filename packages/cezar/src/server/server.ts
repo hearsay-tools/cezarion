@@ -6213,7 +6213,7 @@ export function createApp(deps: ServerDeps) {
           recent = newest.runs.map(withLiveUsage);
         } else {
           const cold = readRunIndexFromDisk(join(project.root, '.ai/cezar'), {
-            handle: coldRepoHandles.get(project.root), limit: RUNS_INDEX_PER_PROJECT,
+            handle: coldRepoHandles.get(project.root), archivedWindow: RUNS_INDEX_PER_PROJECT,
           });
           if (cold.truncated) truncated.push(project.id);
           recent = cold.runs.map(withLiveUsage);

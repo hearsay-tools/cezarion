@@ -297,7 +297,7 @@ async function runChild(options: ChildOptions, resultPath: string): Promise<void
     }
     if (has('coldRead')) {
       // The limit `/workspace/runs-index` reads with.
-      sync['cold read'] = await sampleSync(options, () => { readRunIndexFromDisk(join(coldRoot, '.ai/cezar'), { limit: 200 }); });
+      sync['cold read'] = await sampleSync(options, () => { readRunIndexFromDisk(join(coldRoot, '.ai/cezar'), { archivedWindow: 200 }); });
       gc();
     }
     if (has('save')) {

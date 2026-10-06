@@ -68,6 +68,10 @@ describe('searchTokens / sqlPrefilterTokens', () => {
     expect(sqlPrefilterTokens('zażółć #864 Fix')).toEqual(['864', 'fix']);
   });
 
+  it('leaves out tokens JSON escapes, which instr over the stored summary would miss', () => {
+    expect(sqlPrefilterTokens('"quoted" back\\slash fix')).toEqual(['fix']);
+  });
+
   it('drops a token that is only #', () => {
     expect(sqlPrefilterTokens('# fix')).toEqual(['fix']);
   });
