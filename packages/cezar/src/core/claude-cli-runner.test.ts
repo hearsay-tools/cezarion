@@ -661,10 +661,11 @@ describe('agent input steering (#505)', () => {
   it('holdsHumanInput is true while a human line is unsettled and false after its result (#486)', async () => {
     const { session, events } = start();
     await waitUntil(() => events.some(e => e.type === 'tool-call'));
-    expect(session.heldHumanInputCount?.()).toBe(1);
+    // The opening prompt is replayed as soon as the mock starts the turn; only
+    // later human stdin lines are still unread at the tool-call.
     expect(session.sendMessage([{ type: 'text', text: 'human-unsettled-1' }])).toBe(true);
     expect(session.sendMessage([{ type: 'text', text: 'human-unsettled-2' }])).toBe(true);
-    expect(session.heldHumanInputCount?.()).toBe(3);
+    expect(session.heldHumanInputCount?.()).toBe(2);
     expect(session.holdsHumanInput()).toBe(true);
     expect(session.holdsHumanInput()).toBe((session.heldHumanInputCount?.() ?? 0) > 0);
     await waitUntil(() => events.some(e => e.type === 'turn-end'));
@@ -725,6 +726,58 @@ describe('agent input written after the last model call (#505)', () => {
     // Each turn opens exactly once in v2, including the queued one.
     expect(ui.filter(e => e.type === 'turn.started')).toHaveLength(2);
     session.end(); await session.result;
+  });
+});
+
+describe('Claude humanUnsettled is not cleared by queued_turn_count fallback (#486)', () => {
+  afterEach(() => { spawnHook.override = null; });
+
+  function pipeSession() {
+    const emitter = new EventEmitter();
+    const stdout = new PassThrough(); const stdin = new PassThrough();
+    const written: Array<{ uuid: string }> = []; let buffered = '';
+    stdin.on('data', chunk => { buffered += String(chunk); let i; while ((i = buffered.indexOf('\n')) >= 0) { written.push(JSON.parse(buffered.slice(0, i))); buffered = buffered.slice(i + 1); } });
+    const child = Object.assign(emitter, { stdin, stdout, stderr: new PassThrough(), exitCode: null as number | null, signalCode: null as NodeJS.Signals | null, killed: false,
+      kill: () => { close(); return true; } }) as unknown as ChildProcessWithoutNullStreams;
+    const close = () => { if (child.exitCode !== null) return; Object.assign(child, { exitCode: 0 }); stdout.end(); emitter.emit('exit', 0, null); emitter.emit('close', 0, null); };
+    spawnHook.override = () => child;
+    const events: AgentEvent[] = [];
+    const session = new ClaudeCliRunner({ bin: 'unused-pipe-fixture' }).startSession(
+      { userPrompt: 'opening', cwd: '/tmp', timeoutMs: 0 }, event => events.push(event));
+    return { session, events, stdout, written, close };
+  }
+
+  it('keeps the human hold when a result has queued_turn_count 0 but no user_message_uuids', async () => {
+    const { session, events, stdout, written, close } = pipeSession();
+    try {
+      await vi.waitFor(() => expect(written).toHaveLength(1));
+      expect(session.sendMessage([{ type: 'text', text: 'human-mid' }])).toBe(true);
+      await vi.waitFor(() => expect(written).toHaveLength(2));
+      expect(session.holdsHumanInput()).toBe(true);
+      stdout.write(JSON.stringify({ type: 'result', subtype: 'success', result: 'done', queued_turn_count: 0,
+        usage: { input_tokens: 1, output_tokens: 1 } }) + '\n');
+      await vi.waitFor(() => expect(events.filter(event => event.type === 'turn-end')).toHaveLength(1));
+      expect(session.holdsHumanInput()).toBe(true);
+      stdout.write(JSON.stringify({ type: 'user', isReplay: true, uuid: written[1]!.uuid,
+        message: { role: 'user', content: [{ type: 'text', text: 'human-mid' }] } }) + '\n');
+      stdout.write(JSON.stringify({ type: 'result', subtype: 'success', result: 'named', queued_turn_count: 0,
+        user_message_uuids: [written[0]!.uuid], usage: { input_tokens: 1, output_tokens: 1 } }) + '\n');
+      await vi.waitFor(() => expect(session.holdsHumanInput()).toBe(false));
+    } finally { session.interrupt(); close(); await session.result; }
+  });
+
+  it('clears the human hold immediately when user_message_uuids names the line', async () => {
+    const { session, events, stdout, written, close } = pipeSession();
+    try {
+      await vi.waitFor(() => expect(written).toHaveLength(1));
+      expect(session.sendMessage([{ type: 'text', text: 'human-mid' }])).toBe(true);
+      await vi.waitFor(() => expect(written).toHaveLength(2));
+      expect(session.holdsHumanInput()).toBe(true);
+      stdout.write(JSON.stringify({ type: 'result', subtype: 'success', result: 'done', queued_turn_count: 0,
+        user_message_uuids: [written[0]!.uuid, written[1]!.uuid], usage: { input_tokens: 1, output_tokens: 1 } }) + '\n');
+      await vi.waitFor(() => expect(events.filter(event => event.type === 'turn-end')).toHaveLength(1));
+      expect(session.holdsHumanInput()).toBe(false);
+    } finally { session.interrupt(); close(); await session.result; }
   });
 });
 
