@@ -747,6 +747,29 @@ describe('Claude humanUnsettled is not cleared by queued_turn_count fallback (#4
     return { session, events, stdout, written, close };
   }
 
+  it('does not hold the opening prompt when its result has no user_message_uuids and no replay', async () => {
+    const { session, events, stdout, written, close } = pipeSession();
+    try {
+      await vi.waitFor(() => expect(written).toHaveLength(1));
+      expect(session.holdsHumanInput()).toBe(false);
+      stdout.write(JSON.stringify({
+        type: 'result', subtype: 'success', result: 'done', queued_turn_count: 0,
+        usage: { input_tokens: 1, output_tokens: 1 },
+      }) + '\n');
+      await vi.waitFor(() => expect(events.filter(event => event.type === 'turn-end')).toHaveLength(1));
+      expect(session.holdsHumanInput()).toBe(false);
+
+      expect(session.sendMessage([{ type: 'text', text: 'human-mid' }])).toBe(true);
+      await vi.waitFor(() => expect(written).toHaveLength(2));
+      expect(session.holdsHumanInput()).toBe(true);
+      stdout.write(JSON.stringify({
+        type: 'user', isReplay: true, uuid: written[1]!.uuid,
+        message: { role: 'user', content: [{ type: 'text', text: 'human-mid' }] },
+      }) + '\n');
+      await vi.waitFor(() => expect(session.holdsHumanInput()).toBe(false));
+    } finally { session.interrupt(); close(); await session.result; }
+  });
+
   it('keeps the human hold when a result has queued_turn_count 0 but no user_message_uuids', async () => {
     const { session, events, stdout, written, close } = pipeSession();
     try {

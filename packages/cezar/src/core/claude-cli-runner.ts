@@ -187,7 +187,7 @@ export class ClaudeCliRunner implements AgentRunner {
     };
     let pendingMarkerAsk = false;
     let turnTextStart = 0;
-    const sendMessage = (content: ContentBlock[], acknowledge?: (error?: Error | null) => void, inputIds: readonly string[] = []): boolean => {
+    const sendMessage = (content: ContentBlock[], acknowledge?: (error?: Error | null) => void, inputIds: readonly string[] = [], humanFollowUp = false): boolean => {
       if (!stdinOpen) return false;
       // A line written while a turn runs joins that turn instead of opening one (#505).
       const opensTurn = unsettled.size === 0;
@@ -213,7 +213,9 @@ export class ClaudeCliRunner implements AgentRunner {
         child.stdin.write(`${line}\n`, acknowledge);
         unsettled.add(uuid);
         // Agent writes always pass an acknowledgement, even without inputIds (nudges, #544).
-        if (!acknowledge) humanUnsettled.add(uuid);
+        // The opening/seed prompt shares this path without an ack, but it is not a human
+        // follow-up — only session.sendMessage holds (#871 / #486).
+        if (humanFollowUp) humanUnsettled.add(uuid);
         submissions.accept(uuid, inputIds, '');
         // A user message written to an idle session begins a turn (§7.1).
         if (opensTurn) emitUi(claudeTurnStarted);
@@ -463,7 +465,7 @@ export class ClaudeCliRunner implements AgentRunner {
 
     const session: AgentSession = {
       result,
-      sendMessage,
+      sendMessage: content => sendMessage(content, undefined, [], true),
       sendAgentMessage: (content, inputIds = []) => {
         // #505: allowed mid-turn — the CLI steers the line into the running turn.
         if (!stdinOpen || pendingMarkerAsk || agentWritePending) return false;
