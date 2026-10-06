@@ -1089,9 +1089,11 @@ describe('global tasks page', () => {
     stubFetch({ truncated: ['api'] })
     renderPage()
 
-    const notice = await screen.findByText(/Showing the newest 200 tasks per project/)
+    // #864: the cap bounds archived tasks only; every active task is listed.
+    const notice = await screen.findByText(/the newest 200 archived tasks per project/)
     // Named by its registry name, not its slug.
     expect(notice.textContent).toContain('API')
+    expect(notice.textContent).toContain('older archived tasks')
   })
 
   it('points at Settings when the workspace has no tags at all', async () => {
