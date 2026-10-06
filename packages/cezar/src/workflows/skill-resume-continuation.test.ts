@@ -31,7 +31,7 @@ const WORKER_SKILL = 'worker-skill';
 const WORKER_SKILL_BODY = 'WORKER-SKILL-BODY-790';
 const TEAM_SKILL = 'team-playbook';
 const TEAM_SKILL_BODY = 'TEAM-PLAYBOOK-BODY-790';
-const MISSING_SKILL_LIFECYCLE = `skill /${TEAM_SKILL} is no longer installed — the continued session runs without its instructions`;
+const MISSING_SKILL_LIFECYCLE = `skill /${TEAM_SKILL} is not in the skill registry — the continued session runs without its instructions`;
 const MATERIALIZED_NOTE = `team skill "${TEAM_SKILL}" materialized to`;
 
 function teamDirSkill(): Skill {
@@ -181,7 +181,7 @@ describe('skill resume continuation follow-ups (#790 review)', { timeout: 20_000
     await vi.waitFor(() => expect(launches.length).toBeGreaterThan(0));
     expect(discover).toHaveBeenCalledTimes(2);
     expect(launches[0]!.spec.systemPrompt).toContain(skillSystemPrompt(skill));
-    expect(store.readEvents(id).some((event) => event.type === 'lifecycle' && String(event.message).includes('no longer installed'))).toBe(false);
+    expect(store.readEvents(id).some((event) => event.type === 'lifecycle' && String(event.message).includes('is not in the skill registry'))).toBe(false);
     sessions[0]!.finish();
   });
 

@@ -31,7 +31,7 @@ const SKILL_NAME = 'resume-playbook';
 const SKILL_DESCRIPTION = 'Playbook for continued skill-driven tasks.';
 const SKILL_BODY = 'PLAYBOOK-BODY-790-SENTINEL';
 const EXTRA_PROMPT = 'EXTRA-PROMPT-790';
-const MISSING_SKILL_LIFECYCLE = `skill /${SKILL_NAME} is no longer installed — the continued session runs without its instructions`;
+const MISSING_SKILL_LIFECYCLE = `skill /${SKILL_NAME} is not in the skill registry — the continued session runs without its instructions`;
 
 const RESENT = new Set<RunnerId>(['claude', 'pi', 'omp', 'opencode']);
 const IN_THREAD = new Set<RunnerId>(['codex', 'cursor']);
@@ -306,11 +306,11 @@ describe('harness parity — skill system prompt on Continue (#790)', () => {
         assertLaunchKeepsSkill(backend, fixture.repoRoot, fixture.snapshotWire());
         await idleClose(fixture.manager, fixture.runId);
         rmSync(join(fixture.repoRoot, '.ai/cezar/skills', SKILL_NAME), { recursive: true, force: true });
-        const before = fixture.store.readEvents(fixture.runId).filter((event) => event.type === 'lifecycle' && String(event.message).includes('no longer installed'));
+        const before = fixture.store.readEvents(fixture.runId).filter((event) => event.type === 'lifecycle' && String(event.message).includes('is not in the skill registry'));
         expect(before).toEqual([]);
         const marked = fixture.markWire();
         const continuedWire = await continueAndPark(fixture, { text: promptFor(backend, 'baseline') }, marked);
-        const warnings = fixture.store.readEvents(fixture.runId).filter((event) => event.type === 'lifecycle' && String(event.message).includes('no longer installed'));
+        const warnings = fixture.store.readEvents(fixture.runId).filter((event) => event.type === 'lifecycle' && String(event.message).includes('is not in the skill registry'));
         const continued = systemPromptsFrom(backend, continuedWire);
         const last = continued.at(-1) ?? '';
         expect(last.includes(SKILL_BODY)).toBe(false);
