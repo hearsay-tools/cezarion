@@ -65,7 +65,8 @@ describe('final-message nudge parity — #544', () => {
               expect(autonomousNotes(events)).toHaveLength(0);
             } else if (row.id === 'F4') {
               expect(status).toBe('waiting');
-              expect(notes).toHaveLength(0);
+              expect(notes).toHaveLength(1);
+              expect(autonomousNotes(events)).toHaveLength(0);
             } else {
               expect(status).toBe('done');
               expect(notes).toHaveLength(0);

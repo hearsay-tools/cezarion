@@ -171,7 +171,7 @@ export const FINAL_MESSAGE_CRITERIA = [
   { id: 'F1', scenario: 'silent-tail', name: 'nudges a silent tail to a visible DONE' },
   { id: 'F2', scenario: 'silent-tail-again', name: 'parks waiting after one still-silent nudge' },
   { id: 'F3', scenario: 'silent-tail-again', name: 'never completes from reasoning that names CEZ:DONE' },
-  { id: 'F4', scenario: 'baseline', name: 'keeps markerless visible text waiting without a nudge' },
+  { id: 'F4', scenario: 'baseline', name: 'nudges a markerless message-then-tool tail once' },
   { id: 'F5', scenario: 'done', name: 'honors DONE without a final-message nudge' },
 ] as const;
 

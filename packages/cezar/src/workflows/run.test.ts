@@ -25,7 +25,7 @@ import { resolveAgentTmpDir } from '../runs/agent-tmpdir.ts';
 import { RunStore, type RunRecord, type StepState } from '../runs/store.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { parseTaskMarkers } from '../runs/task-markers.ts';
-import { appendTurnText, trackVisibleTail, RunManager } from './run.ts';
+import { appendTurnText, trackTurnTail, RunManager } from './run.ts';
 import type { WorkflowDef } from './types.ts';
 import { readPersistedRuns, crashStore } from '../runs/run-store.testkit.ts';
 
@@ -85,27 +85,27 @@ describe('appendTurnText', () => {
   });
 });
 
-describe('trackVisibleTail', () => {
+describe('trackTurnTail', () => {
   const completed = (item: Extract<UiEvent, { type: 'item.completed' }>['item']): UiEvent => ({ type: 'item.completed', item });
   it('marks a non-empty top-level assistant message as a visible tail', () => {
-    expect(trackVisibleTail(false, completed({ kind: 'message', id: 'm', role: 'assistant', text: 'hi' }))).toBe(true);
+    expect(trackTurnTail('none', completed({ kind: 'message', id: 'm', role: 'assistant', text: 'hi' }))).toBe('visible');
   });
-  it('marks reasoning as a silent tail', () => {
-    expect(trackVisibleTail(true, completed({ kind: 'reasoning', id: 'r', text: 'think' }))).toBe(false);
+  it('marks reasoning as a silent tail even after a visible message', () => {
+    expect(trackTurnTail('visible', completed({ kind: 'reasoning', id: 'r', text: 'think' }))).toBe('silent');
   });
-  it('does not let a tool overwrite a visible message (#48)', () => {
-    expect(trackVisibleTail(true, completed({ kind: 'tool', id: 't', name: 'Bash', toolKind: 'execute', title: 'Ran', status: 'completed' }))).toBe(true);
+  it('marks a tool as a silent tail even after a visible message', () => {
+    expect(trackTurnTail('visible', completed({ kind: 'tool', id: 't', name: 'Bash', toolKind: 'execute', title: 'Ran', status: 'completed' }))).toBe('silent');
   });
-  it('leaves a tool-only turn silent', () => {
-    expect(trackVisibleTail(false, completed({ kind: 'tool', id: 't', name: 'Bash', toolKind: 'execute', title: 'Ran', status: 'completed' }))).toBe(false);
+  it('marks a tool-only turn silent, not none', () => {
+    expect(trackTurnTail('none', completed({ kind: 'tool', id: 't', name: 'Bash', toolKind: 'execute', title: 'Ran', status: 'completed' }))).toBe('silent');
   });
   it('ignores nested child items', () => {
-    expect(trackVisibleTail(true, completed({ kind: 'message', id: 'c', role: 'assistant', text: 'child', parentItemId: 'p' }))).toBe(true);
-    expect(trackVisibleTail(false, completed({ kind: 'reasoning', id: 'c', text: 'child', parentItemId: 'p' }))).toBe(false);
+    expect(trackTurnTail('visible', completed({ kind: 'message', id: 'c', role: 'assistant', text: 'child', parentItemId: 'p' }))).toBe('visible');
+    expect(trackTurnTail('none', completed({ kind: 'reasoning', id: 'c', text: 'child', parentItemId: 'p' }))).toBe('none');
   });
   it('ignores empty assistant text and unrelated events', () => {
-    expect(trackVisibleTail(false, completed({ kind: 'message', id: 'e', role: 'assistant', text: '  ' }))).toBe(false);
-    expect(trackVisibleTail(true, { type: 'turn.started', turnId: 't1' })).toBe(true);
+    expect(trackTurnTail('none', completed({ kind: 'message', id: 'e', role: 'assistant', text: '  ' }))).toBe('none');
+    expect(trackTurnTail('visible', { type: 'turn.started', turnId: 't1' })).toBe('visible');
   });
 });
 
