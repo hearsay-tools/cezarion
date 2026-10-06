@@ -61,6 +61,7 @@ export const CURSOR_SPEC_SUPPORT: AgentRunSpecSupport = {
 export class CursorAcpRunner implements AgentRunner {
   readonly backend = 'cursor' as const;
   readonly specSupport = CURSOR_SPEC_SUPPORT;
+  readonly systemPromptOnResume = 'in-thread' as const;
   /** A second ACP session/prompt cancels the running turn (probe 2026-09-23, cursor-agent
    * 2026.09.18), so agent input waits for the turn boundary; routine messages never cancel tools (#505). */
   readonly inputDelivery: InputDelivery = { mode: 'boundary', consumption: 'unobservable', via: 'next session/prompt after end_turn' };

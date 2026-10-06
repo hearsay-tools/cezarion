@@ -162,6 +162,14 @@ export const AUTONOMOUS_CRITERIA = [
   { id: 'A14', scenario: 'autonomous-readiness-idle', name: 'settles a continued root readiness timeout after process exit' },
 ] as const;
 
+/** #790: skill system prompt on Continue and restart recovery, every native wire. */
+export const SKILL_RESUME_CRITERIA = [
+  { id: 'R53', scenario: 'baseline', name: 'keeps the skill system prompt on Continue' },
+  { id: 'R54', scenario: 'baseline', name: 'keeps the skill system prompt on restart recovery' },
+  { id: 'R55', scenario: 'baseline', name: 'warns once when a resent continued skill is gone' },
+  { id: 'R56', scenario: 'baseline', name: 'declares systemPromptOnResume matching the resume wire' },
+] as const;
+
 export interface HarnessAdapter {
   readonly backend: RunnerId;
   /** Every human ask wire this runner exposes; marker fallback when none exists. */

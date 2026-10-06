@@ -5771,13 +5771,45 @@ export class RunManager {
       return;
     }
     state.inputDelivery = inputDeliveryOf(runner); state.unreadInputIds = new Set(); state.consumedBeforeAck = new Set();
+    // Re-expand the continued step's skill from the current registry (#790).
+    // `record.systemPrompt` is only the extra prompt; the opening session put
+    // `skillSystemPrompt(skill)` in front. Skip that prefix only when this
+    // session resumes into its own thread on an in-thread runner — those
+    // already carry the playbook in history. A missing skill degrades to
+    // today's extra-only prompt with one lifecycle warning; in-thread skips
+    // do not warn. Workers still inherit only the extra prompt (#778).
+    const skipSkillOnResume = sessionId !== undefined && runner.systemPromptOnResume === 'in-thread';
+    let continuationSkillPrompt: string | undefined;
+    const continuedSkillName = toolsStep?.skill;
+    if (continuedSkillName) {
+      const skill = (state.skills ?? []).find((candidate) => candidate.name === continuedSkillName);
+      if (skill) {
+        if (!skipSkillOnResume) continuationSkillPrompt = skillSystemPrompt(skill);
+        if (skill.source === 'team' && skill.team?.dir) {
+          const seeded = await materializeSkillDir(state.cwd, skill).catch(() => false);
+          if (seeded) {
+            this.store.appendEvent(runId, {
+              type: 'note',
+              message:
+                `team skill "${skill.name}" materialized to .claude/skills/${skill.name}/ ` +
+                `.agents/skills/${skill.name}/, and .cursor/skills/${skill.name}/`,
+            });
+          }
+        }
+      } else if (!skipSkillOnResume) {
+        this.store.appendEvent(runId, {
+          type: 'lifecycle',
+          message: `skill /${continuedSkillName} is no longer installed — the continued session runs without its instructions`,
+        });
+      }
+    }
     try {
     session = startManagedSession(runner,
       {
-        // The Continue step is a fresh agent session on the same run — the
-        // run's extra system prompt (already resolved at execute time and
-        // echoed on the record) rides along with the handoff contract.
+        // Skill body (when resent), then the run's extra system prompt, then
+        // the handoff contract — the same order as the opening session (#790).
         systemPrompt: composeSystemPrompt(
+          continuationSkillPrompt,
           record?.systemPrompt,
           delegation?.instructions,
           artifactInstructions(continueProfile.env.CEZ_ARTIFACTS_DIR),

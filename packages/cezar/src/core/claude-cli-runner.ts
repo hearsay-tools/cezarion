@@ -94,6 +94,7 @@ export const CLAUDE_SPEC_SUPPORT: AgentRunSpecSupport = {
 export class ClaudeCliRunner implements AgentRunner {
   readonly backend = 'claude' as const;
   readonly specSupport = CLAUDE_SPEC_SUPPORT;
+  readonly systemPromptOnResume = 'resent' as const;
   readonly inputDelivery: InputDelivery = {
     mode: 'steer', consumption: 'observable',
     via: 'stream-json stdin line with uuid; --replay-user-messages echo at consumption',

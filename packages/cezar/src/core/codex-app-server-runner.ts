@@ -105,6 +105,7 @@ export const CODEX_SPEC_SUPPORT: AgentRunSpecSupport = {
 export class CodexAppServerRunner implements AgentRunner {
   readonly backend = 'codex' as const;
   readonly specSupport = CODEX_SPEC_SUPPORT;
+  readonly systemPromptOnResume = 'in-thread' as const;
   readonly inputDelivery: InputDelivery = {
     mode: 'steer', consumption: 'observable',
     // The userMessage item marks the input entering the thread's history (probe 2026-09-24:

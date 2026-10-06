@@ -58,6 +58,7 @@ interface AgentRunner {
   run(spec: AgentRunSpec, onEvent?: (e: AgentEvent) => void): Promise<AgentRunResult>;
   startSession(spec: AgentRunSpec, onEvent?: (e: AgentEvent) => void, opts?: SessionOptions): AgentSession;
   interrupt(): Promise<void>;
+  readonly systemPromptOnResume: 'resent' | 'in-thread'; // required (hearsay-tools/cezarion#790)
   readonly inputDelivery?: InputDelivery; // absent = boundary (hearsay-tools/cezarion#505)
 }
 interface InputDelivery {
@@ -68,6 +69,12 @@ interface InputDelivery {
 ```
 
 - `run()` is a one-shot convenience; `startSession()` is the real contract.
+- `systemPromptOnResume` is required (hearsay-tools/cezarion#790). `resent` means every
+  session/process delivers `spec.systemPrompt` again, so Continue must resend a selected
+  skill's playbook; `in-thread` means the opening turn prepended it into resumed history,
+  so the same-session resume must not. claude, pi, omp and opencode are `resent`
+  (opencode never resumes); codex and cursor are `in-thread`. A backend switch with no
+  `sessionId` still sends the skill.
 - Each backend runs as a **persistent process** so multi-turn follow-ups,
   `waiting`, interrupt and resume all work: claude = stream-json over
   stdin/stdout; codex = `codex app-server` JSON-RPC 2.0 (JSONL) over
@@ -900,6 +907,19 @@ parked run waiting, and a restart still answers it. R51: adopting a dead owner's
 middle of a turn starts no agent, and Continue resumes it. R52: Stop on a dead owner's run in
 the middle of a turn ends it as cancelled and starts no agent. No runner is exempt.
 
+**R53–R56** (hearsay-tools/cezarion#790), in `core/skill-resume-parity.test.ts`, drive every
+`RUNNER_IDS` backend through its native `HARNESS_ADAPTERS` wire on a skill-driven task.
+R53: a live Continue resends `skillSystemPrompt` before the extra prompt on `resent`
+runners (claude, pi, omp, opencode — opencode never resumes) and does not duplicate it on
+an `in-thread` same-session resume (codex, cursor). R54: restart recovery through
+`runContinuation` matches that Continue prompt. R55: a skill removed from the registry
+before Continue keeps today's extra-only prompt and emits exactly one lifecycle warning
+on `resent` runners; `in-thread` resumes skip the warning because they would not resend
+the skill. R56: each runner's required `systemPromptOnResume` declaration matches its
+resume wire (`--append-system-prompt` / prepend on every process versus `thread/resume`
+or `session/load` into history). A fresh-session continuation on an `in-thread` runner
+still receives the skill. No runner is exempt.
+
 Crash-diagnostic rows **S15–S17** (hearsay-tools/cezarion#499) drive every `RUNNER_IDS` adapter's
 native transport through an uncaught-exception-shaped stderr fixture, a plain
 single-line failure, and a clean/requested shutdown with stderr. RPC mocks send
@@ -1430,6 +1450,10 @@ To be first-class:
    backend has no native system-prompt channel — and declare `specSupport` (§1):
    every field, honored with its channel or dropped with the wire reason. The §7
    spec-support rows hold the declaration against the mock's recording. Declare
+   `systemPromptOnResume` (§1, hearsay-tools/cezarion#790): `resent` when every
+   session/process delivers `spec.systemPrompt` again (so Continue must resend a
+   skill playbook), `in-thread` when the opening turn prepended it into resumed
+   history. Required — a new runner fails to compile until it decides. Declare
    `inputDelivery` (§1) from a live probe of mid-turn input, and pass the §7 I1/I2
    rows or declare their exemption.
 2. **Factory** — add the id to `RunnerId` / `RUNNER_IDS` (`agent-runner.ts`) and

@@ -96,6 +96,7 @@ export const OPENCODE_LOST_WAKE_GRACE_MS = 2_000;
 export class OpencodeServerRunner implements AgentRunner {
   readonly backend = 'opencode' as const;
   readonly specSupport = OPENCODE_SPEC_SUPPORT;
+  readonly systemPromptOnResume = 'resent' as const;
   readonly inputDelivery: InputDelivery = {
     mode: 'steer', consumption: 'observable',
     via: 'prompt_async while busy; assistant message.updated parentID at consumption',

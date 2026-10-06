@@ -65,6 +65,7 @@ export const PI_SPEC_SUPPORT: AgentRunSpecSupport = {
 export class PiRunner implements AgentRunner {
   readonly backend = 'pi' as const;
   readonly specSupport = PI_SPEC_SUPPORT;
+  readonly systemPromptOnResume = 'resent' as const;
   readonly inputDelivery: InputDelivery = {
     mode: 'steer', consumption: 'observable',
     via: 'prompt with streamingBehavior steer; set_steering_mode all at session start; user message_start with the submitted text',

@@ -303,10 +303,26 @@ export function inputDeliveryOf(runner: Pick<AgentRunner, 'inputDelivery'>): Inp
   return runner.inputDelivery ?? BOUNDARY_INPUT_DELIVERY;
 }
 
+/**
+ * How this runner delivers `spec.systemPrompt` across session/process boundaries (#790).
+ *
+ * - `resent`: every session/process receives `spec.systemPrompt` again (CLI
+ *   `--append-system-prompt`, or a backend that never resumes and always opens
+ *   a fresh session). A resumed skill task lacks the playbook unless the caller
+ *   sends it.
+ * - `in-thread`: the system prompt was prepended into the opening turn and is
+ *   part of the resumed thread's history. Re-sending the skill on the same
+ *   session duplicates it; a fresh-session continuation (no `sessionId`) still
+ *   needs it.
+ */
+export type SystemPromptOnResume = 'resent' | 'in-thread';
+
 export interface AgentRunner {
   readonly backend: AgentBackend;
   /** Which `AgentRunSpec` fields this runner honors, and how — see `AgentRunSpecSupport`. */
   readonly specSupport: AgentRunSpecSupport;
+  /** How this runner carries `spec.systemPrompt` onto a resumed session (#790). Required. */
+  readonly systemPromptOnResume: SystemPromptOnResume;
   /** How non-human input is admitted while a turn runs; absent means `boundary` (#505). */
   readonly inputDelivery?: InputDelivery;
   run(spec: AgentRunSpec, onEvent?: (event: AgentEvent) => void): Promise<AgentRunResult>;
