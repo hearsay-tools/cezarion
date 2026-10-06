@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import { disclosureVisibilityExpression, visibilitySampleExpression, waitForSettledSample } from './visual-ready'
+import { disclosureVisibilityExpression, settleVisual, visibilitySampleExpression, waitForSettledSample } from './visual-ready'
 import { expectEditorFitsViewport } from './session-layout'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
@@ -365,6 +365,9 @@ describe('task thread', () => {
   })
 
   it('collapsing the plan section folds the list away and keeps its odometer', () => {
+    // Expanding the checklist moves the dock. Let its geometry and animations settle
+    // before targeting the plan header again, so the click lands on that header.
+    settleVisual(browser, '[data-slot="run-activity-dock"]')
     browser.click('[data-slot="run-activity-plan"] > button')
     browser.waitForFunction(`document.querySelector('[data-slot="run-activity-plan"]').dataset.state === 'collapsed'`)
     expect(browser.count('[data-slot="plan-list"]')).toBe(0)
