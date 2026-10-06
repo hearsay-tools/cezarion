@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RunStore } from '../runs/store.ts';
 import { AutomationStore } from './store.ts';
 import { reconcileAutomationReceipts } from './task-template.ts';
-import { SCHEDULE_AUTO_PAUSE_AFTER, ScheduleLeaseHeldError, ScheduleRunner } from './schedule-runner.ts';
+import { AutomationProjectUnavailableError, SCHEDULE_AUTO_PAUSE_AFTER, ScheduleLeaseHeldError, ScheduleRunner } from './schedule-runner.ts';
 import type { ScheduleAutomationDefinition } from './types.ts';
 
 const dirs: string[] = [];
@@ -264,6 +264,36 @@ describe('ScheduleRunner', () => {
     expect(winner.dueAt(definition)).toBe(FIRST_RUN);
     expect(await winner.fire(definition)).toMatchObject({ result: 'launched', occurrenceAt: iso(FIRST_RUN) });
     expect(winnerLaunch).toHaveBeenCalledTimes(1);
+  });
+
+  it('a project whose run store cannot open fires nothing and counts nothing, then fires the occurrence once it opens (#779)', async () => {
+    const { store, definition, launch, clock } = await setup();
+    // What the cockpit's launcher does then: building the project's context throws.
+    let open = false;
+    launch.mockImplementation(async () => {
+      if (!open) throw new Error('runs.db is damaged');
+      return { runId: 'run-after-fix' };
+    });
+    const runner = new ScheduleRunner({
+      projectId: 'p', store, timeZone: 'UTC', launch, now: clock.now,
+      ready: async () => { if (!open) throw new AutomationProjectUnavailableError('runs.db is damaged'); },
+    });
+    runner.dueAt(definition);
+    clock.set(FIRST_RUN + 1_000);
+    for (let attempt = 0; attempt <= SCHEDULE_AUTO_PAUSE_AFTER; attempt += 1) {
+      await expect(runner.fire(definition)).rejects.toBeInstanceOf(AutomationProjectUnavailableError);
+      clock.set(clock.now() + 60_000);
+    }
+    expect(launch).not.toHaveBeenCalled();
+    expect(store.get('nightly')?.enabled).toBe(true);
+    expect(store.state('nightly')?.nextRunAt).toBe(iso(FIRST_RUN));
+    expect(store.state('nightly')?.consecutiveFailures).toBeUndefined();
+    expect(store.latestReceipts().size).toBe(0);
+    expect(store.logs({ automationId: 'nightly' })).toEqual([]);
+
+    open = true;
+    expect(await runner.fire(definition)).toMatchObject({ result: 'launched', runId: 'run-after-fix', occurrenceAt: iso(FIRST_RUN) });
+    expect(store.state('nightly')).toMatchObject({ nextRunAt: iso(FIRST_RUN + DAY), consecutiveFailures: 0 });
   });
 
   it('three consecutive launch failures pause the definition and log the pause; a success resets the counter', async () => {

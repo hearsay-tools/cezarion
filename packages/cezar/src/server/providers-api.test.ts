@@ -434,7 +434,8 @@ describe('workspace provider API', () => {
       runner: 'claude',
       steps: [],
     });
-    lazyStore.flush();
+    // The lazily built context is the next process on this project: this store goes first.
+    lazyStore.close();
     lazyStore.removeAllListeners();
 
     const contexts = new ProjectContexts({

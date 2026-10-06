@@ -159,14 +159,13 @@ export async function launchScheduledRun(options: {
  *  launch that asked for it is still running. */
 export function reconcileAutomationReceipts(automationStore: AutomationStore, runStore: RunStore): number {
   let reconciled = 0;
-  const byReceipt = new Map(runStore.listRuns().flatMap((run) => {
-    const receiptId = run.automation?.receiptId ?? run.automationTrigger?.receiptId;
-    return receiptId ? [[receiptId, run.id] as const] : [];
-  }));
-  for (const receipt of automationStore.latestReceipts().values()) {
-    if (receipt.status !== 'reserved') continue;
-    // A launch this process is still running is not a crash leftover; its launcher settles it.
-    if (automationStore.isReservationInFlight(receipt.receiptId)) continue;
+  // A launch this process is still running is not a crash leftover; its launcher settles it.
+  const leftovers = [...automationStore.latestReceipts().values()]
+    .filter((receipt) => receipt.status === 'reserved' && !automationStore.isReservationInFlight(receipt.receiptId));
+  if (leftovers.length === 0) return 0;
+  // By receipt, not by listing every run: the launched run may long since have finished (#779).
+  const byReceipt = runStore.findRunIdsByAutomationReceipt(leftovers.map((receipt) => receipt.receiptId));
+  for (const receipt of leftovers) {
     const runId = byReceipt.get(receipt.receiptId);
     const error = 'Cezar restarted before run creation completed; explicit retry is available.';
     automationStore.appendReceipt({

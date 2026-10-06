@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, it, vi } from 'vitest';
 import { OpencodeServerRunner } from './opencode-server-runner.ts';
 import type { AgentSession } from './agent-runner.ts';
 import { waitFor, withOwnedInputRun } from './harness-parity.testkit.ts';
+import { blockRunWrites, muteLockedDatabaseLogs } from '../runs/run-store.testkit.ts';
 
 type Fixture = Parameters<Parameters<typeof withOwnedInputRun>[2]>[0];
 
@@ -49,16 +49,17 @@ it.each(['fresh', 'continuation'] as const)('%s acknowledged input checkpoint re
         interrupt();
       });
       store.flush();
-      const tmp = join(repoRoot, '.ai/cezar/runs.json.tmp');
+      let unblock: (() => void) | undefined;
       const observe = ({ event }: { event: { type: string } }) => {
-        if (event.type === 'agent-input') mkdirSync(tmp);
+        if (event.type === 'agent-input') unblock ??= blockRunWrites(join(repoRoot, '.ai/cezar'));
       };
       const input = { id: randomUUID(), source: 'agent' as const, parentRunId, text: 'mock:hold', createdAt: new Date().toISOString() };
       store.on('event', observe);
+      const unmute = muteLockedDatabaseLogs();
       try {
         expect(manager.steerWorker(runId, input)).toBe('queued');
         await waitFor(() => injected);
-        rmSync(tmp, { recursive: true, force: true });
+        unblock?.();
         await waitFor(() => !manager.isActive(runId));
         const errors = store.readEvents(runId).filter(event => event.type === 'error').map(event => event.message);
         expect(checkpointsAtInterrupt[0]).toContain('agent input delivery checkpoint failed');
@@ -68,7 +69,8 @@ it.each(['fresh', 'continuation'] as const)('%s acknowledged input checkpoint re
         expect(store.getRun(runId)?.error).toContain('agent input delivery checkpoint failed');
       } finally {
         store.off('event', observe);
-        rmSync(tmp, { recursive: true, force: true });
+        unblock?.();
+        unmute();
       }
     });
   } finally { spy.mockRestore(); }

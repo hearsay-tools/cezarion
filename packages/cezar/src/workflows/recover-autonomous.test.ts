@@ -98,7 +98,7 @@ describe('recover() and the autonomous flag (#489)', () => {
       expect(store.getRun(id)?.status).toBe('queued');
     } finally {
       manager.dispose();
-      store.flush();
+      store.close();
     }
     store = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true });
     const recovered = createFixtureManager(store, repoRoot, { semaphore: frozen() });

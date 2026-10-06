@@ -1,15 +1,17 @@
 import type { ConversationState, RequestOutcome } from '@open-mercato/cezar-contract';
 import type { RunRecord } from '../runs/store.ts';
 
-/** First durable settlement wins. Review is readiness, never request completion. */
-export function reconcileConversationState(root: RunRecord, runs: readonly RunRecord[], now: string, isSettled: (run: RunRecord) => boolean): ConversationState | undefined {
+/** First durable settlement wins. Review is readiness, never request completion. `lookup` finds a
+ *  sender or recipient by id (the store's `getRun`): a message names its runs, so nothing here
+ *  needs every run in the project. */
+export function reconcileConversationState(root: RunRecord, lookup: (id: string) => RunRecord | undefined, now: string, isSettled: (run: RunRecord) => boolean): ConversationState | undefined {
   if (root.delegation?.role !== 'root' || !root.delegation.conversation) return undefined;
   const state = root.delegation.conversation;
   const outcomes = [...state.outcomes];
   for (const request of state.messages) {
     if (request.kind !== 'request' || request.state !== 'accepted' || outcomes.some(outcome => outcome.requestId === request.id)) continue;
-    const sender = runs.find(run => run.id === request.senderRunId);
-    const recipient = runs.find(run => run.id === request.recipientRunId);
+    const sender = lookup(request.senderRunId);
+    const recipient = lookup(request.recipientRunId);
     const closed = (run: RunRecord | undefined) => run && ['done', 'failed', 'cancelled'].includes(run.status) && isSettled(run);
     let status: RequestOutcome['status'] | undefined;
     const deletedRecipient = !recipient && root.delegation.receipts.some(receipt => receipt.workerId === request.recipientRunId && receipt.deletion?.phase === 'complete');

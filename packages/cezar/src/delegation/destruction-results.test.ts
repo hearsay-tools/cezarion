@@ -10,6 +10,7 @@ import { ensureOwnedWorkspace, planOwnedWorkspace } from './workspace.ts';
 import { RunStore } from '../runs/store.ts';
 
 import { QUICK_TASK_WORKFLOW } from '../workflows/types.ts';
+import { readPersistedRuns, seedRuns, runIds } from '../runs/run-store.testkit.ts';
 
 vi.mock('node:fs', async original => {
   const fs = await original<typeof import('node:fs') & { default: typeof import('node:fs') }>();
@@ -76,6 +77,7 @@ describe('verified destruction retains results through explicit history deletion
     expect(f.store.canDeleteRun(f.parent.id)).toBe(false);
     expect(f.store.deleteRun(workerId)).toBe(true);
     for (const name of [`${workerId}.ndjson`, `${workerId}.handoff.md`, `${workerId}-images`]) expect(existsSync(join(files, name))).toBe(false);
+    f.store.close(); // a restart: the old store must not still own the parent's family
     const reopened = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true });
     f.service.registerProject({ id: 'project', root: f.root, store: reopened, manager: f.manager });
     const result = await f.service.collect(f.caller, { workerId });
@@ -104,7 +106,7 @@ describe('verified destruction retains results through explicit history deletion
     const real = vi.mocked(rmSync).getMockImplementation()!;
     vi.mocked(rmSync).mockImplementation((path, options) => {
       if (path === join(files, `${workerId}-images`)) {
-        const disk = JSON.parse(readFileSync(join(f.root, '.ai/cezar/runs.json'), 'utf8'));
+        const disk = readPersistedRuns(join(f.root, '.ai/cezar'));
         expect(disk.find((r: { id: string }) => r.id === f.parent.id).delegation.receipts[0].deletion.phase).toBe('pending');
         throw Error('directory busy');
       }
@@ -114,6 +116,7 @@ describe('verified destruction retains results through explicit history deletion
     expect(f.store.getRun(workerId)).toBeDefined();
     expect(existsSync(join(files, `${workerId}-images/worker-context-0.input`))).toBe(true);
     vi.mocked(rmSync).mockImplementation(real);
+    f.store.close(); // a restart: the old store must not still own the parent's family
     const reopened = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true });
     expect(reopened.deleteRun(workerId)).toBe(true);
     expect(existsSync(join(files, `${workerId}-images`))).toBe(false);
@@ -143,10 +146,11 @@ describe('verified destruction retains results through explicit history deletion
   });
   it('collection and destroy cannot erase evidence during an interrupted child deletion', async () => {
     const { workerId, files } = await completed(); await f.service.destroy(f.caller, { workerId });
-    const original = (f.store as unknown as { writeIndex(runs: unknown[]): void }).writeIndex.bind(f.store);
-    const fault = vi.spyOn(f.store as unknown as { writeIndex(runs: Array<{ id: string }>): void }, 'writeIndex').mockImplementation(runs => {
-      if (!runs.some(run => run.id === workerId)) throw Error('final deletion checkpoint failed');
-      return original(runs);
+    type Changes = { deletes: readonly string[] };
+    const original = (f.store as unknown as { writeIndex(changes: Changes): void }).writeIndex.bind(f.store);
+    const fault = vi.spyOn(f.store as unknown as { writeIndex(changes: Changes): void }, 'writeIndex').mockImplementation(changes => {
+      if (changes.deletes.includes(workerId)) throw Error('final deletion checkpoint failed');
+      return original(changes);
     });
     expect(f.store.deleteRun(workerId)).toBe(false);
     expect(existsSync(join(files, `${workerId}.execution.json`))).toBe(false);
@@ -157,14 +161,16 @@ describe('verified destruction retains results through explicit history deletion
   });
   it('retries interrupted parent deletion after its snapshot directory was removed', async () => {
     const { workerId, files } = await completed(); await f.service.destroy(f.caller, { workerId }); expect(f.store.deleteRun(workerId)).toBe(true);
-    const original = (f.store as unknown as { writeIndex(runs: unknown[]): void }).writeIndex.bind(f.store);
-    const fault = vi.spyOn(f.store as unknown as { writeIndex(runs: Array<{ id: string }>): void }, 'writeIndex').mockImplementation(runs => {
-      if (!runs.some(run => run.id === f.parent.id)) throw Error('final parent checkpoint failed');
-      return original(runs);
+    type Changes = { deletes: readonly string[] };
+    const original = (f.store as unknown as { writeIndex(changes: Changes): void }).writeIndex.bind(f.store);
+    const fault = vi.spyOn(f.store as unknown as { writeIndex(changes: Changes): void }, 'writeIndex').mockImplementation(changes => {
+      if (changes.deletes.includes(f.parent.id)) throw Error('final parent checkpoint failed');
+      return original(changes);
     });
     expect(f.store.deleteRun(f.parent.id)).toBe(false);
     expect(existsSync(join(files, `${f.parent.id}-worker-results`))).toBe(false);
     fault.mockRestore();
+    f.store.close(); // a restart: the old store must not still own the parent's family
     const reopened = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true });
     expect(reopened.deleteRun(f.parent.id)).toBe(true); reopened.flush();
   });
@@ -172,8 +178,9 @@ describe('verified destruction retains results through explicit history deletion
     const { workerId, files } = await completed(); await f.service.destroy(f.caller, { workerId });
     const records = f.store.listRuns();
     const parent = records.find(run => run.id === f.parent.id)!;
-    writeFileSync(join(f.root, '.ai/cezar/runs.json'), JSON.stringify(kind === 'missing' ? records.filter(run => run.id !== parent.id)
-      : records.map(run => run.id === parent.id ? { ...run, delegation: { invalid: true } } : run)));
+    f.store.close(); // a restart: the old store must not still own the parent's family
+    seedRuns(join(f.root, '.ai/cezar'), kind === 'missing' ? records.filter(run => run.id !== parent.id)
+      : records.map(run => run.id === parent.id ? { ...run, delegation: { invalid: true } } : run));
     const reopened = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true });
     expect(reopened.deleteRun(workerId)).toBe(false);
     expect(existsSync(join(files, `${workerId}.ndjson`))).toBe(true); reopened.flush();
@@ -214,7 +221,8 @@ describe('verified destruction retains results through explicit history deletion
   });
   it('denies parent deletion when a missing child has a result but no completed deletion receipt', async () => {
     const { workerId } = await completed(); await f.service.destroy(f.caller, { workerId });
-    writeFileSync(join(f.root, '.ai/cezar/runs.json'), JSON.stringify(f.store.listRuns().filter(run => run.id !== workerId)));
+    f.store.close(); // a restart: the old store must not still own the parent's family
+    seedRuns(join(f.root, '.ai/cezar'), f.store.listRuns().filter(run => run.id !== workerId));
     const reopened = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true });
     expect(reopened.readWorkerResult(f.parent.id, workerId)).toBeDefined();
     expect(reopened.deleteRun(f.parent.id)).toBe(false); reopened.flush();
@@ -283,7 +291,7 @@ describe('verified destruction retains results through explicit history deletion
     expect(f.store.deleteRun(f.parent.id)).toBe(true);
   });
   it.each(['queued', 'running'] as const)('does not revive a %s parent with interrupted deletion on restart', async status => {
-    interruptedParentDeletion(); f.store.updateRun(f.parent.id, { status }); f.store.flush();
+    interruptedParentDeletion(); f.store.updateRun(f.parent.id, { status }); f.store.close();
     const reopened = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true });
     const manager = createFixtureManager(reopened, f.root);
     vi.spyOn(manager as unknown as { pump(): Promise<void> }, 'pump').mockResolvedValue();
@@ -314,7 +322,7 @@ describe('verified destruction retains results through explicit history deletion
     expect(() => f.store.createOwnedRun({ title: 'child', task: 'child', workflow: 'quick-task', steps: [] }, f.parent.id, randomUUID(), {
       role: 'worker', permissions: [], parentRunId: f.parent.id, workspace,
     }, 'a'.repeat(64))).toThrow('invalid delegation parent');
-    expect(f.store.listRuns()).toHaveLength(1);
+    expect(runIds(f.store)).toHaveLength(1);
     expect(f.store.deleteRun(f.parent.id)).toBe(true);
   });
 

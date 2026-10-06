@@ -1,7 +1,7 @@
 import { scopeFixtureProcesses } from './process-scope.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, fsyncSync, fstatSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync, rmSync, fsyncSync, fstatSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { onTestFinished, beforeEach, afterEach, describe, it, expect, vi } from 'vitest';
 import { fixture } from './service.testkit.ts';
@@ -9,6 +9,7 @@ import { ensureOwnedWorkspace } from './workspace.ts';
 import { removeWorktree } from '../git-worktree.ts';
 import { RunStore } from '../runs/store.ts';
 import { artifactDirectory, publishArtifact } from '../artifacts/store.ts';
+import { readPersistedRuns, readPersistedText, seedRuns } from '../runs/run-store.testkit.ts';
 
 vi.mock('node:fs', async importOriginal => {
   const actual = await importOriginal<typeof import('node:fs') & { default: typeof import('node:fs') }>();
@@ -46,7 +47,7 @@ describe('parent-owned collected worker results', () => {
     const reopened = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true });
     expect(reopened.readWorkerResult(f.parent.id, run.id)).toEqual(result);
     expect(reopened.readWorkerResultDiff(f.parent.id, run.id)).toContain('[REDACTED]');
-    expect(readFileSync(join(f.root, '.ai/cezar/runs.json'), 'utf8')).not.toContain('diff --git');
+    expect(readPersistedText(join(f.root, '.ai/cezar'))).not.toContain('diff --git');
     reopened.flush();
   });
   it('reuses the retained diff after retention reclaims the worker directory (#575)', async () => {
@@ -153,6 +154,7 @@ describe('parent-owned collected worker results', () => {
     await f.service.destroy(f.caller, { workerId: run.id });
     const result = await f.service.collect(f.caller, { workerId: run.id });
     expect(f.store.deleteRun(run.id)).toBe(true);
+    f.store.close(); // a restart: the old store must not still own the parent's family
     const reopened = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true });
     f.service.registerProject({ id: 'project', root: f.root, store: reopened, manager: f.manager });
     expect(await f.service.collect(f.caller, { workerId: run.id })).toMatchObject({ summary: result.summary, outcome: 'destroyed', artifacts: { state: 'available', items: [{ state: 'deleted', id: 'result.png' }] } });
@@ -167,18 +169,18 @@ describe('parent-owned collected worker results', () => {
     f.store.appendEvent(run.id, { type: 'text', text: 'Retained result' });
     await f.service.destroy(f.caller, { workerId: run.id });
     expect(f.store.deleteRun(run.id)).toBe(true);
-    const index = join(f.root, '.ai/cezar/runs.json');
-    const records = JSON.parse(readFileSync(index, 'utf8'));
-    const receipt = records.find((record: { id: string }) => record.id === f.parent.id).delegation.receipts[0];
+    const dataDir = join(f.root, '.ai/cezar');
+    const records = readPersistedRuns(dataDir);
+    const receipt = records.find((record: { id: string }) => record.id === f.parent.id)!.delegation.receipts[0];
     if (kind === 'absent') delete receipt.deletion;
     else if (kind === 'pending') receipt.deletion.phase = 'pending';
     else receipt.deletion.generation = 'invalid-generation';
-    writeFileSync(index, JSON.stringify(records));
-    const reopened = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true });
+    seedRuns(dataDir, records);
+    const reopened = RunStore.open(dataDir, { keepLive: true });
     f.service.registerProject({ id: 'project', root: f.root, store: reopened, manager: f.manager });
-    const before = readFileSync(index, 'utf8');
+    const before = readPersistedText(dataDir);
     await expect(f.service.collect(f.caller, { workerId: run.id })).rejects.toMatchObject({ code: 'denied_scope' });
-    expect(readFileSync(index, 'utf8')).toBe(before);
+    expect(readPersistedText(dataDir)).toBe(before);
     reopened.flush();
   });
   it('a stopped public status is partial and unsettled until private termination is proven', async () => {

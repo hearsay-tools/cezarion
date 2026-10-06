@@ -1,7 +1,8 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { readPersistedText } from '../runs/run-store.testkit.ts';
 
 const discoverRepoHandle = vi.hoisted(() => vi.fn());
 vi.mock('./forge/github.ts', async (importOriginal) => ({
@@ -49,13 +50,12 @@ describe('project repository discovery lifetime', () => {
       const added = current.store.createRun({ title: 'new task', workflow: 'w', task: 'new task', steps: [] });
       current.store.updateRun(added.id, { status: 'done' });
       current.store.flush();
-      const indexPath = join(current.dataDir, 'runs.json');
-      const beforeLateLookup = readFileSync(indexPath, 'utf8');
+      const beforeLateLookup = readPersistedText(current.dataDir);
 
       release({ status: 'resolved', handle });
       await new Promise((resolve) => setImmediate(resolve));
 
-      expect(readFileSync(indexPath, 'utf8')).toBe(beforeLateLookup);
+      expect(readPersistedText(current.dataDir)).toBe(beforeLateLookup);
       expect(old.store.getRun(task.id)?.referencedPullRequestUrl).toBe(foreignPr);
     },
   );

@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, onTestFailed, onTestFinished, vi } from 'vitest';
 import { workerWaitRequestSchema, type WorkerWait } from '@open-mercato/cezar-contract';
 import { RunStore, type RunRecord } from '../runs/store.ts';
+import { RunStoreOpenError } from '../runs/store-open-error.ts';
 import * as runnerFactory from '../core/runner-factory.ts';
 import { collectWorkerEvidence } from '../delegation/results.ts';
 import { planOwnedWorkspace } from '../delegation/workspace.ts';
@@ -17,6 +18,7 @@ import type { AgentSession } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { withDelayedCommand } from '../core/owned-input-delivery.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
+import { readPersistedRuns, seedRuns } from '../runs/run-store.testkit.ts';
 
 export const terminal = ['review', 'done', 'failed', 'cancelled'];
 export async function until(predicate: () => boolean) { await vi.waitFor(() => expect(predicate()).toBe(true), { timeout: 15_000, interval: 10 }); }
@@ -36,7 +38,7 @@ let began = 0;
 let failureState: unknown;
 export function checkpoint(value: string) { phase = value; checkpoints.push({ phase, ms: Math.round(performance.now() - began) }); }
 export function captureState() { return { root, phase, checkpoints: checkpoints.map(entry => ({ ...entry })), elapsedMs: Math.round(performance.now() - began), busy: semaphore?.busy(),
-  runs: store?.listRuns().map(run => ({ id: run.id, status: run.status, error: run.error, step: run.currentStepId, wait: waitOf(run)?.phase,
+  runs: store?.listRunIds().flatMap(id => store!.getRun(id) ?? []).map(run => ({ id: run.id, status: run.status, error: run.error, step: run.currentStepId, wait: waitOf(run)?.phase,
     events: store.readEvents(run.id).slice(-6).map(event => ({ type: event.type, seq: event.seq, ...('message' in event ? { message: String(event.message).slice(0, 256) } : {}) })) })),
 }; }
 export const bookkeeping: Promise<unknown>[] = [];
@@ -76,11 +78,11 @@ export function useWorkerWaitFixture(options: { processScope?: false } = {}): vo
       const engine = manager as unknown as { starting: Set<string>; active: Map<string, { sessionEverOpened?: boolean }> };
       return engine.starting.size === 0 && [...engine.active.values()].every(state => state.sessionEverOpened);
     });
-    for (const run of store.listRuns()) manager.cancel(run.id);
-    await until(() => store.listRuns().every(run => !manager.isActive(run.id)));
+    for (const id of store.listRunIds()) manager.cancel(id);
+    await until(() => store.listRunIds().every(id => !manager.isActive(id)));
     await Promise.all(executions.splice(0));
     await Promise.all(bookkeeping.splice(0));
-    manager.dispose(); store.flush();
+    manager.dispose(); store.close();
     rmSync(root, { recursive: true, force: true });
     process.env = saved;
   }, 30_000);
@@ -139,14 +141,16 @@ export function eventCheckpoint(): Map<string, string> {
   const dir = join(root, '.ai/cezar/runs');
   return new Map(readdirSync(dir).filter(name => name.endsWith('.ndjson')).map(name => [join(dir, name), readFileSync(join(dir, name), 'utf8')]));
 }
-export async function restart(fakeClock = false, diskCheckpoint?: string, events?: Map<string, string>) {
+/** Stop everything, put the persisted runs back to `diskCheckpoint` (or to what they were when
+ * this was called), and recover in a fresh store, as after a real crash. */
+export async function restart(fakeClock = false, diskCheckpoint?: readonly unknown[], events?: Map<string, string>) {
   checkpoint('restart-stop-start');
-  store.flush(); const disk = diskCheckpoint ?? readFileSync(join(root, '.ai/cezar/runs.json'), 'utf8');
-  for (const run of store.listRuns()) manager.cancel(run.id);
-  await until(() => store.listRuns().every(run => !manager.isActive(run.id)));
+  store.flush(); const disk = diskCheckpoint ?? readPersistedRuns(join(root, '.ai/cezar'));
+  for (const id of store.listRunIds()) manager.cancel(id);
+  await until(() => store.listRunIds().every(id => !manager.isActive(id)));
   await Promise.all(executions.splice(0));
-  await Promise.all(bookkeeping.splice(0)); manager.dispose(); store.flush(); checkpoint('restart-stopped');
-  writeFileSync(join(root, '.ai/cezar/runs.json'), disk);
+  await Promise.all(bookkeeping.splice(0)); manager.dispose(); store.close(); checkpoint('restart-stopped');
+  seedRuns(join(root, '.ai/cezar'), disk);
   for (const [path, content] of events ?? []) writeFileSync(path, content);
   store = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
   if (fakeClock) vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
@@ -183,7 +187,15 @@ export async function queuedWake() {
 
 export function setFailureState(value: unknown) { failureState = value; }
 export function reopenRuntime() {
-  store = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
+  // A restart: the old store goes first, or it would still own every live family (#779).
+  store.close();
+  // As `serve` boots: a store that cannot open is kept as `RunStore.unavailable` (#779).
+  try {
+    store = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
+  } catch (error) {
+    if (!(error instanceof RunStoreOpenError)) throw error;
+    store = RunStore.unavailable(join(root, '.ai/cezar'), error);
+  }
   manager = new RunManager(store, root, { semaphore });
   track();
 }

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentRunSpec } from '../core/agent-runner.ts';
 import { RunStore } from '../runs/store.ts';
+import { crashStore } from '../runs/run-store.testkit.ts';
 import { mergeWriteAgentAccounts } from '../workspace/agent-accounts.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import type { RunManager } from './run.ts';
@@ -53,7 +54,8 @@ describe('stopped composer engine', () => {
     expect(store.getRun(run.id)?.steps.map(step => step.id)).toEqual(['work']);
     expect(store.getRun(run.id)?.queuedMessages).toHaveLength(1);
     expect(captured.specs).toHaveLength(0);
-    manager.dispose();
+    // A crash: accepting the Continue must itself have made it durable.
+    manager.dispose(); crashStore(store);
     const reopened = RunStore.open(data, { keepLive: true });
     const next = createFixtureManager(reopened, root); managers.push(next);
     await next.recover();

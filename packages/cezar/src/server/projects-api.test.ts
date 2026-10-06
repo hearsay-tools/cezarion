@@ -30,6 +30,7 @@ import {
   type ServerDeps,
   type UpdateProjectResponse,
 } from './server.ts';
+import { seedRuns } from '../runs/run-store.testkit.ts';
 
 /**
  * Multi-project workspace API (spec 2026-07-20-multi-project-workspace, step
@@ -487,7 +488,7 @@ describe('workspace projects API', () => {
       mkdirSync(join(otherRoot, '.ai/cezar/runs'), { recursive: true });
       writeFileSync(join(otherRoot, 'README.md'), '# keep me\n', 'utf8');
       writeFileSync(join(otherRoot, '.git/HEAD'), 'ref: refs/heads/main\n', 'utf8');
-      writeFileSync(join(otherRoot, '.ai/cezar/runs.json'), '[]\n', 'utf8');
+      seedRuns(join(otherRoot, '.ai/cezar'), []);
       clearProjectProbeCache();
       const other = await registerProject(otherRoot);
       const before = snapshot(otherRoot);

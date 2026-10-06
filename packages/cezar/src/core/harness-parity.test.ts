@@ -66,6 +66,9 @@ import {
   type SeamObservation,
   waitFor,
 } from './harness-parity.testkit.ts';
+import { blockRunWrites, crashStore, muteLockedDatabaseLogs, readPersistedRuns, seedRuns } from '../runs/run-store.testkit.ts';
+import { RunStore, type RunRecord } from '../runs/store.ts';
+import { createFixtureManager, drainFixtureManagers } from '../workflows/fixture-cleanup.testkit.ts';
 
 /** One row of the matrix, named once and applied to every harness. */
 interface SeamCriterion<T = SeamObservation> {
@@ -560,6 +563,16 @@ const CONTROL_CRITERIA = [
   { id: 'R43', scenario: 'baseline' },
   // workflows/worker-restart-parity.test.ts: same-boot abandonment, mixed-holder polling and bounded cleanup locks.
   { id: 'R47', scenario: 'baseline' },
+  // #779: Continue on a run only runs.db holds, through both ActiveRun construction sites.
+  { id: 'R48', scenario: 'done' },
+  // #779: restart still repairs a cancelled root's stale Finish intent, so Continue is not refused.
+  { id: 'R49', scenario: 'done' },
+  // #779 plan step 3: a headless open beside the owner leaves its parked run alone.
+  { id: 'R50', scenario: 'ask' },
+  // #779 plan step 3: adopting a dead owner's mid-turn run for a control resumes nothing; Continue does.
+  { id: 'R51', scenario: 'hold' },
+  // #779: Stop on a dead owner's mid-turn run ends it cancelled, not interrupted, and starts nothing.
+  { id: 'R52', scenario: 'hold' },
 ] as const;
 
 /**
@@ -723,6 +736,255 @@ describe('harness parity — recoverable skill diagnostics (#723)', () => {
       expect(obs.record?.error).toContain('provider');
       expect(obs.record?.error).toContain(scenario === 'scoped-skill-failure' ? '/skills/required/SKILL.md' : 'restoring service');
     }, 45_000);
+  }
+});
+
+/** Flush until `runId` has left the store's memory; false if it never does. */
+async function leavesMemory(store: RunStore, runId: string): Promise<boolean> {
+  try {
+    await waitFor(() => { store.flush(); return !store.heldIds().includes(runId); }, 10_000);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// #779: only the live set is in memory. A finished run is read back from runs.db; Continue loads
+// it into the held set (the `continue` pin), `runContinuation` pins it through the same `activate`
+// helper `execute` uses, and it leaves memory again once the continuation settles.
+describe('harness parity — Continue on a finished run (#779)', () => {
+  for (const backend of RUNNER_IDS) {
+    parityRow<{ pins: string[]; left: boolean; heldWhileContinuing: boolean; leftAgain: boolean; obs: RunObservation }>(backend, {
+      id: 'R48', name: 'R48 Continue loads a finished run into memory and lets it go after it settles', scenario: 'done',
+      assert: ({ pins, left, heldWhileContinuing, leftAgain, obs }) => {
+        expect(left).toBe(true);
+        expect(heldWhileContinuing).toBe(true);
+        expect(leftAgain).toBe(true);
+        // `execute` pins the first execution, then Continue's admission and `runContinuation`.
+        expect(pins).toEqual(['active', 'continue', 'active']);
+        expect(TERMINAL).toContain(obs.record?.status);
+        expect(obs.record?.steps.map((step) => step.id)).toContain('continue-1');
+      },
+    }, async () => {
+      const pins: string[] = [];
+      let left = false, heldWhileContinuing = false, leftAgain = false;
+      const obs = await driveRun(backend, 'done', record => TERMINAL.includes(record?.status ?? ''), 30_000,
+        async ({ store, manager, runId }) => {
+          await waitFor(() => !manager.isActive(runId));
+          left = await leavesMemory(store, runId);
+          expect(manager.continueRun(runId, { text: promptFor(backend, 'done') }).ok).toBe(true);
+          heldWhileContinuing = store.heldIds().includes(runId);
+          await waitFor(() => TERMINAL.includes(store.getRun(runId)?.status ?? '') && !manager.isActive(runId), 30_000);
+          leftAgain = await leavesMemory(store, runId);
+        },
+        { beforeStart: ({ store }) => {
+          const pin = store.pin.bind(store);
+          store.pin = (id, holder) => { pins.push(holder); return pin(id, holder); };
+        } });
+      return { pins, left, heldWhileContinuing, leftAgain, obs };
+    });
+  }
+});
+
+// #779: older controllers could cancel a root and leave its Finish intent on the record. Restart
+// repairs that in the delegation sweep, which since #779 reaches only what `open` loads; a finished
+// root the sweep missed would be refused by every Continue ("parent finish is pending") for good.
+describe('harness parity — restart repairs a stale root Finish intent (#779)', () => {
+  for (const backend of RUNNER_IDS) {
+    parityRow<{ repaired: boolean; left: boolean; continued: { ok: boolean; error?: string }; final: RunRecord | undefined }>(backend, {
+      id: 'R49', name: "R49 restart clears a cancelled root's stale Finish intent and Continue resumes it", scenario: 'done',
+      assert: ({ repaired, left, continued, final }) => {
+        expect(continued).toEqual({ ok: true });
+        expect(repaired).toBe(true);
+        expect(left).toBe(true);
+        expect(TERMINAL).toContain(final?.status);
+        expect(final?.steps.map((step) => step.id)).toContain('continue-1');
+      },
+    }, async () => {
+      let repaired = false, left = false;
+      let continued: { ok: boolean; error?: string } = { ok: false };
+      let final: RunRecord | undefined;
+      await driveRun(backend, 'done', record => TERMINAL.includes(record?.status ?? ''), 30_000,
+        async ({ store, manager, runId }) => {
+          await waitFor(() => !manager.isActive(runId));
+          const repoRoot = manager['repoRoot'] as string;
+          const dataDir = join(repoRoot, '.ai/cezar');
+          store.flush();
+          const records = readPersistedRuns(dataDir);
+          await drainFixtureManagers(repoRoot);
+          store.close();
+          // The snapshot an older controller left: cancelled, intent still on it, no conversation.
+          seedRuns(dataDir, records.map((record) => record.id !== runId ? record : { ...record, status: 'cancelled',
+            delegation: { role: 'root', permissions: [], receipts: [], finishRequestedAt: new Date().toISOString() } }));
+          const rebooted = RunStore.open(dataDir, { keepLive: true });
+          const recovered = createFixtureManager(rebooted, repoRoot);
+          try {
+            await recovered.recover();
+            const root = rebooted.getRun(runId)?.delegation;
+            repaired = root?.role === 'root' && root.finishRequestedAt === undefined;
+            left = await leavesMemory(rebooted, runId);
+            continued = recovered.continueRun(runId, { text: promptFor(backend, 'done') });
+            if (continued.ok) await waitFor(() => TERMINAL.includes(rebooted.getRun(runId)?.status ?? '') && !recovered.isActive(runId), 30_000);
+            final = structuredClone(rebooted.getRun(runId));
+          } finally {
+            await drainFixtureManagers(repoRoot);
+            rebooted.close();
+          }
+        });
+      return { repaired, left, continued, final };
+    });
+  }
+});
+
+// #779 plan step 3: `serve` and a headless `cez run` open one runs.db. A headless open (no
+// keepLive) settled every live row as interrupted and saved it, so the owner's parked run — whose
+// row only the owner's whole-file saves used to put back — loaded `failed` at the next restart and
+// its question could no longer be answered there. A run another live process claims is left alone.
+describe('harness parity — a second process leaves a parked run to its owner (#779)', () => {
+  for (const backend of RUNNER_IDS) {
+    parityRow<{ afterHeadless: string | undefined; afterRestart: string | undefined; answered: { ok: boolean; error?: string }; final: RunRecord | undefined }>(backend, {
+      id: 'R50', name: 'R50 a headless open beside the owner leaves its parked run waiting, and a restart still answers it', scenario: 'ask',
+      assert: ({ afterHeadless, afterRestart, answered, final }) => {
+        expect(afterHeadless).toBe('waiting');
+        expect(afterRestart).toBe('waiting');
+        expect(answered).toEqual({ ok: true });
+        expect(TERMINAL).toContain(final?.status);
+      },
+    }, async () => {
+      let afterHeadless: string | undefined, afterRestart: string | undefined;
+      let answered: { ok: boolean; error?: string } = { ok: false };
+      let final: RunRecord | undefined;
+      await driveRun(backend, 'ask', record => record?.status === 'waiting', 30_000,
+        async ({ store, manager, runId }) => {
+          const repoRoot = manager['repoRoot'] as string;
+          const dataDir = join(repoRoot, '.ai/cezar');
+          store.flush();
+          // A headless `cez run` opens the project and exits while the owner still runs.
+          RunStore.open(dataDir).close();
+          afterHeadless = readPersistedRuns(dataDir).find((record) => record.id === runId)?.status;
+          // The owner exits: its store closes first, so nothing its manager does from here on
+          // reaches runs.db, then its session ends as a dead process's would. A new owner recovers.
+          store.close();
+          await drainFixtureManagers(repoRoot);
+          const rebooted = RunStore.open(dataDir, { keepLive: true });
+          const recovered = createFixtureManager(rebooted, repoRoot);
+          try {
+            await recovered.recover();
+            afterRestart = rebooted.getRun(runId)?.status;
+            answered = recovered.continueRun(runId, { text: promptFor(backend, 'done') });
+            if (answered.ok) await waitFor(() => TERMINAL.includes(rebooted.getRun(runId)?.status ?? '') && !recovered.isActive(runId), 30_000);
+            final = structuredClone(rebooted.getRun(runId));
+          } finally {
+            await drainFixtureManagers(repoRoot);
+            rebooted.close();
+          }
+        });
+      return { afterHeadless, afterRestart, answered, final };
+    });
+  }
+});
+
+// #779 plan step 3: a control (archive, Stop, Continue…) on a run whose owning process died adopts
+// it first. Adopting settles it — nothing is resumed behind the user's back, whichever runner it
+// used — and Continue is the one control that starts its agent again, on its own session.
+describe('harness parity — adopting a dead owner\'s run mid-turn (#779)', () => {
+  for (const backend of RUNNER_IDS) {
+    parityRow<{ adopted: boolean; startedByAdoption: string[]; settled: RunRecord | undefined; continued: { ok: boolean; error?: string }; startedByContinue: string[]; resumed: RunRecord | undefined }>(backend, {
+      id: 'R51', name: 'R51 adopting a dead owner\'s run mid-turn starts no agent, and Continue resumes it', scenario: 'hold',
+      assert: ({ adopted, startedByAdoption, settled, continued, startedByContinue, resumed }) => {
+        expect(adopted).toBe(true);
+        expect(startedByAdoption).toEqual([]);
+        expect(settled).toMatchObject({ status: 'failed', error: expect.stringContaining('interrupted') });
+        expect(continued).toEqual({ ok: true });
+        // Continue resumes the session the dead owner opened, through the one continuation path.
+        expect(startedByContinue).toEqual(['runContinuation']);
+        expect(resumed?.steps.map((step) => step.id)).toContain('continue-1');
+      },
+    }, async () => {
+      let adopted = false;
+      const startedByAdoption: string[] = [], startedByContinue: string[] = [];
+      let settled: RunRecord | undefined, resumed: RunRecord | undefined;
+      let continued: { ok: boolean; error?: string } = { ok: false };
+      // Mid-turn, with the session the owner opened recorded: what a restart would resume.
+      await driveRun(backend, 'hold', record => record?.status === 'running' && record.steps.some((step) => step.sessionId !== undefined), 30_000,
+        async ({ store, manager, runId }) => {
+          const repoRoot = manager['repoRoot'] as string;
+          const dataDir = join(repoRoot, '.ai/cezar');
+          store.flush();
+          // This cockpit was already running beside the owner, which then crashed mid-session.
+          const cockpit = RunStore.open(dataDir, { keepLive: true });
+          try {
+            manager.dispose();
+            crashStore(store);
+            await drainFixtureManagers(repoRoot);
+            const recovered = createFixtureManager(cockpit, repoRoot);
+            const engine = recovered as unknown as Record<'execute' | 'runContinuation', (...args: unknown[]) => Promise<unknown>>;
+            let adopting = true;
+            for (const name of ['execute', 'runContinuation'] as const) {
+              const real = engine[name].bind(recovered);
+              engine[name] = (...args) => { (adopting ? startedByAdoption : startedByContinue).push(name); return real(...args); };
+            }
+            adopted = await recovered.adoptOrphanedRun(runId);
+            await new Promise((resolve) => setTimeout(resolve, 300));
+            adopting = false;
+            settled = structuredClone(cockpit.getRun(runId));
+            continued = recovered.continueRun(runId, { text: promptFor(backend, 'done') });
+            if (continued.ok) await waitFor(() => startedByContinue.length > 0, 30_000);
+            resumed = structuredClone(cockpit.getRun(runId));
+          } finally {
+            await drainFixtureManagers(repoRoot);
+            cockpit.close();
+          }
+        });
+      return { adopted, startedByAdoption, settled, continued, startedByContinue, resumed };
+    });
+  }
+});
+
+// #779: Stop is the control an adoption carries out itself. The run it stops ends cancelled, as an
+// accepted Stop always reads, rather than interrupted, whichever runner it used; nothing starts.
+describe('harness parity — Stop on a dead owner\'s run mid-turn (#779)', () => {
+  for (const backend of RUNNER_IDS) {
+    parityRow<{ adopted: boolean; started: string[]; stopped: RunRecord | undefined }>(backend, {
+      id: 'R52', name: 'R52 Stop on a dead owner\'s run mid-turn ends it cancelled and starts no agent', scenario: 'hold',
+      assert: ({ adopted, started, stopped }) => {
+        expect(adopted).toBe(true);
+        expect(started).toEqual([]);
+        expect(stopped).toMatchObject({ status: 'cancelled' });
+        expect(stopped?.error).toBeUndefined();
+        expect(stopped?.stopping).toBeUndefined();
+        expect(stopped?.steps.some((step) => step.status === 'running' || step.status === 'waiting')).toBe(false);
+      },
+    }, async () => {
+      let adopted = false;
+      const started: string[] = [];
+      let stopped: RunRecord | undefined;
+      await driveRun(backend, 'hold', record => record?.status === 'running' && record.steps.some((step) => step.sessionId !== undefined), 30_000,
+        async ({ store, manager, runId }) => {
+          const repoRoot = manager['repoRoot'] as string;
+          const dataDir = join(repoRoot, '.ai/cezar');
+          store.flush();
+          const cockpit = RunStore.open(dataDir, { keepLive: true });
+          try {
+            manager.dispose();
+            crashStore(store);
+            await drainFixtureManagers(repoRoot);
+            const recovered = createFixtureManager(cockpit, repoRoot);
+            const engine = recovered as unknown as Record<'execute' | 'runContinuation', (...args: unknown[]) => Promise<unknown>>;
+            for (const name of ['execute', 'runContinuation'] as const) {
+              const real = engine[name].bind(recovered);
+              engine[name] = (...args) => { started.push(name); return real(...args); };
+            }
+            adopted = await recovered.adoptOrphanedRun(runId, { stop: true });
+            await new Promise((resolve) => setTimeout(resolve, 300));
+            stopped = structuredClone(cockpit.getRun(runId));
+          } finally {
+            await drainFixtureManagers(repoRoot);
+            cockpit.close();
+          }
+        });
+      return { adopted, started, stopped };
+    });
   }
 });
 
@@ -1241,19 +1503,21 @@ describe('harness parity — owned input run tier', () => {
         manager.enqueueOwnedRun(runId);
         await waitFor(() => store.getRun(runId)?.status === 'waiting');
         store.flush();
-        const tmp = join(repoRoot, '.ai/cezar/runs.json.tmp');
+        let unblock: (() => void) | undefined;
         const failAfterEnqueue = ({ event }: { event: { type: string } }) => {
-          if (event.type === 'agent-input') mkdirSync(tmp);
+          if (event.type === 'agent-input') unblock ??= blockRunWrites(join(repoRoot, '.ai/cezar'));
         };
         store.on('event', failAfterEnqueue);
         const input = agentInput(parentRunId, 'mock:hold');
+        const unmute = muteLockedDatabaseLogs();
         try {
           expect(manager.steerWorker(runId, input)).toBe('queued');
           await waitFor(() => store.readEvents(runId).some(event => event.type === 'error' && String(event.message).includes('agent input delivery checkpoint failed')));
           expect(store.getRun(runId)?.agentInputs).toEqual([input]);
         } finally {
           store.off('event', failAfterEnqueue);
-          rmSync(tmp, { recursive: true, force: true });
+          unblock?.();
+          unmute();
         }
         await waitFor(() => !manager.isActive(runId));
         expect(store.getRun(runId)?.status).toBe('failed');
@@ -1284,13 +1548,12 @@ describe('harness parity — owned input run tier', () => {
       await withOwnedInputRun(backend, 'hold', async fixture => {
         const { runId, parentRunId, repoRoot } = fixture;
         fixture.store.flush();
-        const tmp = join(repoRoot, '.ai/cezar/runs.json.tmp');
-        mkdirSync(tmp);
+        const unblock = blockRunWrites(join(repoRoot, '.ai/cezar'));
         try {
           expect(() => fixture.manager.steerWorker(runId, agentInput(parentRunId))).toThrow();
           expect(fixture.store.getRun(runId)?.agentInputs).toBeUndefined();
           expect(fixture.store.readEvents(runId).filter(e => e.type === 'agent-input')).toEqual([]);
-        } finally { rmSync(tmp, { recursive: true }); }
+        } finally { unblock(); }
         const input = agentInput(parentRunId);
         expect(fixture.manager.steerWorker(runId, input)).toBe('queued');
         const { store, manager } = await fixture.restart();

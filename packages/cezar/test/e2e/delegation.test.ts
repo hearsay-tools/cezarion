@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import { once } from 'node:events';
 import { syncBuiltinESMExports } from 'node:module';
 import { fixtureProcessEnumeration } from '../../src/delegation/process-enumeration.testkit.ts';
+import { readPersistedRuns } from '../../src/runs/run-store.testkit.ts';
 import { execFile as execFileCallback, spawn as spawnProcess } from 'node:child_process';
 import { access, cp, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -51,7 +52,7 @@ test('built worker CLI runs without cez on PATH; headless provision stays local 
       cwd, env: { ...cleanEnv, CEZ_DRY_RUN: '1', CEZ_DELEGATION: '1', CEZ_AUTONAME: '0' }, timeout: 60_000,
     });
     assert.match(run.stdout, /run (done|review)/);
-    const records = JSON.parse(await readFile(join(repo, '.ai/cezar/runs.json'), 'utf8'));
+    const records = readPersistedRuns(join(repo, '.ai/cezar'));
     assert.equal(records.length, 1); assert.equal(records[0].delegation.role, 'root');
     assert.deepEqual(records[0].delegation.receipts, []);
     assert.doesNotMatch(JSON.stringify(records), /CEZ_DELEGATION_TOKEN|CEZ_DELEGATION_URL/);

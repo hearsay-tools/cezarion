@@ -39,6 +39,7 @@ import { plannedWorkflow, skillTaskSteps } from '../workflows/types.ts';
 import { planOwnedWorkspace } from '../delegation/workspace.ts';
 import { workerWorkflowHash, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
 import { stepKind, type WorkflowDef } from '../workflows/types.ts';
+import { readPersistedRuns, seedRuns } from '../runs/run-store.testkit.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -696,8 +697,14 @@ export async function driveRun(
   settled: (record: RunRecord | undefined) => boolean,
   timeoutMs = 30_000,
   afterSettled?: (context: { store: RunStore; manager: RunManager; runId: string }) => Promise<void>,
-  options: { autonomous?: boolean; workflowDef?: WorkflowDef } = {},
+  options: {
+    autonomous?: boolean;
+    workflowDef?: WorkflowDef;
+    /** Called with the fresh store and manager before the run starts (to observe either). */
+    beforeStart?: (context: { store: RunStore; manager: RunManager }) => void;
+  } = {},
 ): Promise<RunObservation> {
+  const { beforeStart, ...runOptions } = options;
   const adapter = HARNESS_ADAPTERS[backend];
   const savedBin = process.env[adapter.binEnv];
   const savedDry = process.env.CEZ_DRY_RUN;
@@ -717,8 +724,9 @@ export async function driveRun(
     await execFileAsync('git', [...GIT_IDENTITY, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
     manager = createFixtureManager(store, repoRoot);
-    const started = manager.startRun(options.workflowDef ?? SINGLE_STEP, {
-      ...options,
+    beforeStart?.({ store, manager });
+    const started = manager.startRun(runOptions.workflowDef ?? SINGLE_STEP, {
+      ...runOptions,
       task: typeof scenario === 'string' ? promptFor(backend, scenario) : scenario.prompt,
       runner: backend,
       worktree: false,
@@ -744,7 +752,7 @@ export async function driveRun(
     return { statuses, record: structuredClone(record()), events: readRunEvents(repoRoot, started.id) };
   } finally {
     await drainFixtureManagers(repoRoot);
-    store?.flush();
+    store?.close();
     if (savedBin === undefined) delete process.env[adapter.binEnv];
     else process.env[adapter.binEnv] = savedBin;
     if (savedDry !== undefined) process.env.CEZ_DRY_RUN = savedDry;
@@ -867,15 +875,15 @@ export async function withOwnedInputRun(
     drainBookkeeping = trackTurnBookkeeping(manager);
     const restart = async () => {
       store!.flush();
-      const index = readFileSync(join(repoRoot, '.ai/cezar/runs.json'), 'utf8');
+      const index = readPersistedRuns(join(repoRoot, '.ai/cezar'));
       // Stop only test-owned processes, then restore the precise pre-crash disk
       // checkpoint. No fake manager/session: recovery opens a new real store.
       manager!.cancel(runId!);
       await waitFor(() => !manager!.isActive(runId!));
       await drainBookkeeping();
       manager!.dispose();
-      store!.flush();
-      writeFileSync(join(repoRoot, '.ai/cezar/runs.json'), index);
+      store!.close();
+      seedRuns(join(repoRoot, '.ai/cezar'), index);
       store = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true });
       manager = new RunManager(store, repoRoot);
       drainBookkeeping = trackTurnBookkeeping(manager);
@@ -891,7 +899,7 @@ export async function withOwnedInputRun(
       }
       await drainBookkeeping();
       manager?.dispose();
-      store?.flush();
+      store?.close();
       if (savedBin === undefined) delete process.env[adapter.binEnv];
       else process.env[adapter.binEnv] = savedBin;
       for (const [name, saved] of savedExtraBins) {
@@ -957,12 +965,12 @@ export async function withSkillParentRun(
     });
     await body({ repoRoot, parentRunId: parent.id, runId: child.workerId, store, manager });
   } finally {
-    for (const run of store?.listRuns() ?? []) manager?.cancel(run.id);
-    if (manager && store) await waitFor(() => store!.listRuns().every(run => !manager!.isActive(run.id)), 30_000);
+    for (const id of store?.listRunIds() ?? []) manager?.cancel(id);
+    if (manager && store) await waitFor(() => store!.listRunIds().every(id => !manager!.isActive(id)), 30_000);
     await drainBookkeeping();
     await controller?.close();
     manager?.dispose();
-    store?.flush();
+    store?.close();
     for (const [name, value] of saved) {
       if (value === undefined) delete process.env[name]; else process.env[name] = value;
     }

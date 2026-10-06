@@ -12,7 +12,7 @@ import { AutomationStore } from '../automations/store.ts';
 import { AutomationCoordinator } from '../automations/coordinator.ts';
 import { GithubPoller } from '../automations/github-poller.ts';
 import { ProjectAutomationScheduler, WorkspaceAutomationScheduler } from '../automations/scheduler.ts';
-import { SCHEDULE_LEASE_HELD_REASON, ScheduleRunner, type ScheduleRunnerHandle } from '../automations/schedule-runner.ts';
+import { AutomationProjectUnavailableError, SCHEDULE_LEASE_HELD_REASON, ScheduleRunner, type ScheduleRunnerHandle } from '../automations/schedule-runner.ts';
 import {
   launchAutomationRun,
   launchScheduledRun,
@@ -39,6 +39,7 @@ import type { Next } from 'hono';
 import { getRequestListener, serve, type ServerType } from '@hono/node-server';
 import { bodyLimit } from 'hono/body-limit';
 import { streamSSE } from 'hono/streaming';
+import { matchedRoutes } from 'hono/route';
 import { jsonZodValidator, paramZodValidator, queryZodValidator } from './validators.ts';
 import { deliverOnce, TaskWebhooks } from '../runs/webhook.ts';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
@@ -212,6 +213,7 @@ import { parseRemote, resolveForge, type ForgeAvailability } from './forge/index
 import { fetchGithub, fetchGithubProjects, fetchGithubChecks, fetchGithubComments, fetchGithubItem, forgetGithubItem, fetchGithubPrDiff, fetchGithubRefStatus, forgetRefStatus, readCachedRefStatuses, refNumberFromUrl, searchGithubItems, GithubPrNotFoundError, GH_CHECKS_MAX, GH_REF_STATUS_MAX } from './github.ts';
 import { ensureLaunchKey } from './launch-key.ts';
 import { CockpitAlreadyRunningError, type CockpitOwnership } from './cockpit-ownership.ts';
+import { RunStoreOpenError } from '../runs/store-open-error.ts';
 import { openInTerminal } from './open-in-terminal.ts';
 import { agentCliRunner, detectOpenTargets, openFileInDefaultApp, openInApp } from './open-in-app.ts';
 import { createDraftPr } from './pr.ts';
@@ -338,7 +340,7 @@ export interface ServerDeps {
 
 /** Hono env for the mirrored project-route table: the scope resolver puts the
  *  request's `ProjectContext` on the context, handlers read `c.get('project')`. */
-type ProjectApiEnv = { Variables: { project: ProjectContext } };
+type ProjectApiEnv = { Variables: { project: ProjectContext; stoppedOnAdoption?: boolean } };
 
 /** `projectId` gate at the route boundary (spec "Project identity"): the slug
  *  shape or the reserved `default` alias — validated BEFORE touching any map
@@ -556,6 +558,9 @@ const FOLLOWUPS_OFF = 'the follow-up inbox is disabled — set CEZ_FOLLOWUPS=1 t
 
 /** 409 body for every automations route while GitHub automations are off (#801). */
 const AUTOMATIONS_OFF = 'Automations are disabled — set CEZ_AUTOMATIONS=1 to enable them';
+
+/** 404 body for a run whose row is in runs.db but whose record this cezar cannot decode (#779). */
+const UNREADABLE_RUN_ERROR = 'this run could not be read by this cezar: its record in runs.db does not fit this version (a newer cezar may have written it). It is left in the database untouched.';
 
 // ---- variant-compare response shapes (spec 010) ----------------------------
 // Named and exported so `api-types.test.ts` can drift-guard the cockpit's
@@ -1507,30 +1512,38 @@ export function createApp(deps: ServerDeps) {
   }
   const resolveProjectScope = async (c: Context<ProjectApiEnv>, next: Next): Promise<Response | void> => {
     const raw = c.req.param('projectId');
-    if (raw === undefined) {
-      c.set('project', bootContext);
-      return next();
-    }
-    if (!projectIdSchema.safeParse(raw).success) {
-      return c.json({ error: `unknown project: ${raw}` }, 404);
-    }
-    if (raw === 'default' || raw === (await resolveBootProject())) {
-      c.set('project', bootContext);
-      return next();
-    }
-    try {
-      c.set('project', await contexts.context(raw));
-    } catch (err) {
-      if (err instanceof CockpitAlreadyRunningError) return c.json({ error: err.message }, 409);
-      if (err instanceof ProjectContextError) {
-        return err.reason === 'missing-root'
-          ? c.json({ error: `project folder not found: ${err.projectId}` }, 409)
-          : c.json({ error: err.message }, 404);
+    let project = bootContext;
+    if (raw !== undefined) {
+      if (!projectIdSchema.safeParse(raw).success) {
+        return c.json({ error: `unknown project: ${raw}` }, 404);
       }
-      throw err;
+      if (raw !== 'default' && raw !== (await resolveBootProject())) {
+        try {
+          project = await contexts.context(raw);
+        } catch (err) {
+          if (err instanceof CockpitAlreadyRunningError) return c.json({ error: err.message }, 409);
+          // Nothing is cached for a failed build, so the next request opens the store again.
+          if (err instanceof RunStoreOpenError) return c.json({ error: err.message }, 409);
+          if (err instanceof ProjectContextError) {
+            return err.reason === 'missing-root'
+              ? c.json({ error: `project folder not found: ${err.projectId}` }, 409)
+              : c.json({ error: err.message }, 404);
+          }
+          throw err;
+        }
+      }
     }
+    // The boot project's store could not open (#779): its runs are unknown, not absent, so its
+    // routes answer with why rather than as an empty project. Only its routes: this resolver also
+    // runs in front of every workspace route (`/health` above all), which must keep answering.
+    if (project.store.unavailable && servesProjectRoute(c)) return c.json({ error: project.store.unavailable.message }, 409);
+    c.set('project', project);
     return next();
   };
+  /** Every method+path of the project table, under both prefixes; filled once `v1` is built. */
+  let projectRoutePaths: ReadonlySet<string> = new Set();
+  const servesProjectRoute = (c: Context): boolean =>
+    matchedRoutes(c).some((route) => route.method !== 'ALL' && projectRoutePaths.has(`${route.method} ${route.path}`));
 
   // ---- static GUI ----------------------------------------------------------
   const webDir = resolveWebDir();
@@ -3854,10 +3867,12 @@ export function createApp(deps: ServerDeps) {
       ...(finishBlocked !== undefined ? { finishBlocked } : {}) };
   };
 
-  // A list row (#817), with the same live `usage` sample `withUsage` attaches.
-  const runSummary = (run: RunRecord): RunSummary => {
-    const usage = currentUsage(run.id);
-    return toRunSummary(usage ? { ...run, usage } : run);
+  // A list row (#817) with the same live `usage` sample `withUsage` attaches. The sampler is
+  // process-wide, so a workspace-level answer can carry it for every project's runs at once — a
+  // cold project's stored summaries included. Appended last, exactly where `toRunSummary` puts it.
+  const withLiveUsage = (summary: RunSummary): RunSummary => {
+    const usage = currentUsage(summary.id);
+    return usage ? { ...summary, usage } : summary;
   };
 
   // The inbox half of a composer launch (#374). Since the cockpit's "▶ Run"
@@ -3880,14 +3895,48 @@ export function createApp(deps: ServerDeps) {
     }
   };
 
+  /**
+   * Every control on one run (any `/runs/:id` request that is not a read) first asks who owns it
+   * (#779, plan step 3): a `serve` and a headless `cez run` can share a project's runs.
+   * - Another live cezar process's run answers `409 { error }`, the shape these routes already
+   *   use for a run that exists but cannot be acted on now. Reads are never refused.
+   * - A run whose owner is proven dead is adopted first — claimed, loaded and settled as
+   *   interrupted, never resumed (`settleOrphanedRun`) — and the control then applies. Otherwise
+   *   Stop on a crashed `cez run` would be a dead end until this cockpit restarted. Stop is the one
+   *   control the adoption carries out itself: its run settles as cancelled, and Stop answers that
+   *   it stopped it (`stoppedOnAdoption`).
+   * - A run this process stopped writing after a conflicting write answers 409 too.
+   *
+   * Registered against explicit paths, like `requireAutomations`: `route()` re-registers it under
+   * the mount prefix, and it gates every family's `/runs/:id` routes registered after it.
+   */
+  const requireRunControl = async (c: Context<ProjectApiEnv>, next: Next) => {
+    const id = c.req.param('id');
+    if (c.req.method === 'GET' || c.req.method === 'HEAD' || id === undefined) return next();
+    const { store, manager } = c.get('project');
+    if (store.runOwnership(id) === 'orphaned') {
+      const stop = c.req.method === 'POST' && c.req.path.endsWith('/cancel');
+      if (await manager.adoptOrphanedRun(id, { stop }) && stop && store.getRun(id)?.status === 'cancelled') c.set('stoppedOnAdoption', true);
+    }
+    const refusal = store.writeRefusal(id);
+    if (!refusal) return next();
+    // The delegation route in this family answers in the delegation error shape it always uses.
+    return c.req.path.endsWith('/worker-destroy')
+      ? c.json({ code: 'incompatible_state' as const, error: refusal }, 409)
+      : c.json({ error: refusal }, 409);
+  };
+
   // ---- chained family: runs lifecycle + artifacts (project-scoped) ----
   const delegationService = deps.delegation?.service ?? new DelegationService();
   delegationService.setDiscovery({ models: modelCatalog, providers: providerStatus });
   const runsRoutes = new Hono<ProjectApiEnv>()
-    .get('/runs', (c) => c.json(c.get('project').store.listRuns().map(run => withUsage(run))))
-    // The slim list (#817): the same runs in the same order as `GET /runs`, projected by the one
-    // shared `toRunSummary` so lists never parse `task`, `steps[]` or the full delegation state.
-    .get('/run-summaries', (c) => c.json(c.get('project').store.listRuns().map(run => runSummary(run))))
+    .use('/runs/:id', requireRunControl)
+    .use('/runs/:id/*', requireRunControl)
+    // Legacy (older clients): every full record. The cockpit and `cez task` read `/run-summaries`.
+    .get('/runs', (c) => c.json(c.get('project').store.listAllRunsForLegacyRoute().map(run => withUsage(run))))
+    // The slim list (#817): the same runs in the same order as `GET /runs`, from the stored
+    // `toRunSummary` column with memory laid over it (#779), so the list decodes no record.
+    .get('/run-summaries', (c) => c.json(c.get('project').store.listRunSummaries().runs.map(withLiveUsage)))
     .get('/runs/:id/relationships', paramZodValidator(runIdParamSchema), queryZodValidator(workerEmptyRequestSchema), (c) => {
       const { store } = c.get('project');
       const run = store.getRun(c.req.valid('param').id);
@@ -4109,8 +4158,11 @@ export function createApp(deps: ServerDeps) {
 
     .get('/runs/:id', (c) => {
       const { store, manager } = c.get('project');
-      const run = store.getRun(c.req.param('id'));
-      return run ? c.json(withUsage(run, manager.finishBlockedReason(run.id) ?? null)) : c.json({ error: 'not found' }, 404);
+      const id = c.req.param('id');
+      const run = store.getRun(id);
+      if (run) return c.json(withUsage(run, manager.finishBlockedReason(run.id) ?? null));
+      // A row in runs.db this version cannot decode (#779): listed until read, so say why it will not open.
+      return c.json({ error: store.isUnreadable(id) ? UNREADABLE_RUN_ERROR : 'not found' }, 404);
     })
 
     .get(
@@ -4187,7 +4239,8 @@ export function createApp(deps: ServerDeps) {
       const { store, manager } = c.get('project');
       const id = c.req.param('id');
       if (!store.getRun(id)) return c.json({ error: 'not found' }, 404);
-      const cancelled = manager.cancel(id);
+      // Still asked of the manager after an adoption stopped the run: a worker's stop bookkeeping is its.
+      const cancelled = manager.cancel(id) || c.get('stoppedOnAdoption') === true;
       return c.json({ cancelled });
     })
 
@@ -4862,8 +4915,7 @@ export function createApp(deps: ServerDeps) {
 
   const groupRuns = (store: RunStore, groupId: string): RunRecord[] =>
     store
-      .listRuns()
-      .filter((r) => r.groupId === groupId)
+      .listGroupRuns(groupId)
       .sort((a, b) => (a.variant ?? '').localeCompare(b.variant ?? ''));
 
   // ---- chained family: variant groups (project-scoped) ----
@@ -5040,12 +5092,12 @@ export function createApp(deps: ServerDeps) {
       // The keep-limit the panel reports is the one the enforcer will actually
       // apply — inherited from the workspace default when this repo sets none.
       const keep = await resolveWorktreeRetention(repoRoot);
-      const allRuns = store.listRuns();
-      // Listing is on-disk dirs only; parent liveness for #575 uses the full store
+      const withWorktree = store.listRunsWithWorktree();
+      // Listing is on-disk dirs only; parent liveness for #575 reads the store by id
       // so a live `worktree: false` parent is not treated as gone (#570 honesty).
-      const runs = allRuns.filter((r) => r.worktreePath && existsSync(r.worktreePath));
+      const runs = withWorktree.filter((r) => r.worktreePath && existsSync(r.worktreePath));
       // The rows the enforcer would reclaim right now: reclaimable AND past the newest `keep`.
-      const pastKeep = new Set(selectReclaimableWorktrees(allRuns, keep));
+      const pastKeep = new Set(selectReclaimableWorktrees(withWorktree, keep, (id) => store.getRun(id)));
       const worktrees = await Promise.all(
         runs.map(async (r) => ({
           runId: r.id,
@@ -5055,7 +5107,7 @@ export function createApp(deps: ServerDeps) {
           // POSIX `du` — degrades to null (Windows / du missing / error); never blocks.
           sizeBytes: await worktreeSizeBytes(r.worktreePath as string),
           finishedAt: r.finishedAt ?? null,
-          reclaimable: isReclaimable(r, allRuns),
+          reclaimable: isReclaimable(r, (id) => store.getRun(id)),
           pastKeep: pastKeep.has(r.id),
         })),
       );
@@ -5667,7 +5719,7 @@ export function createApp(deps: ServerDeps) {
     const config = await loadConfig(project.root);
     return {
       root: info.root,
-      runs: project.store.listRuns(),
+      runs: project.store.listBranchOwners(),
       isActive: (id) => project.manager.isActive(id),
       configuredBase: config.baseBranch,
       currentBranch: info.branch,
@@ -5699,7 +5751,7 @@ export function createApp(deps: ServerDeps) {
       ]);
       const [tracking, sources] = await Promise.all([
         getTracking(info.root, config.baseBranch ?? info.branch),
-        attributeLog(info.root, rawLog, c.get('project').store.listRuns()),
+        attributeLog(info.root, rawLog, c.get('project').store.listBranchOwners()),
       ]);
       // `source` is spread conditionally: absent, never `null`, when no task is known.
       const log = rawLog.map(({ parents: _parents, ...entry }, i) => {
@@ -5810,7 +5862,9 @@ export function createApp(deps: ServerDeps) {
       if (!info) return c.json({ error: 'not a git repository' }, 409);
       const config = await loadConfig(root);
       const result = await pullRepoCheckout(info.root, c.req.valid('json'), config.baseBranch,
-        () => store.listRuns().some((run) => manager.isActive(run.id)));
+        // Every id, not the live set: the manager may still hold a run whose record already
+        // settled (a worker's execution winding down). Ids only, nothing decoded.
+        () => store.listRunIds().some((id) => manager.isActive(id)));
       if (!result.ok) return c.json(result.value, 409);
       return c.json(result.value, 200);
     })
@@ -6070,6 +6124,8 @@ export function createApp(deps: ServerDeps) {
     .route('/', repoRoutes)
     .route('/', configRoutes)
     .route('/', agentConfigRoutes);
+  projectRoutePaths = new Set(v1.routes.filter((route) => route.method !== 'ALL')
+    .flatMap((route) => [V1_PREFIX, V1_SCOPED_PREFIX].map((prefix) => `${route.method} ${prefix}${route.path}`)));
 
   // ---- chained family: the cross-project run index (workspace-level) -------
   /**
@@ -6092,7 +6148,7 @@ export function createApp(deps: ServerDeps) {
    * from the first. This feeds a CACHE READ, which costs nothing per number, so asking about one
    * the client will not paint is free and asking about one it will is the whole point.
    */
-  const mentionedReferenceNumbers = (run: RunRecord): number[] => {
+  const mentionedReferenceNumbers = (run: RunSummary): number[] => {
     const numbers: number[] = [];
     for (const url of [run.pullRequestUrl, run.referencedPullRequestUrl, run.referencedIssueUrl]) {
       const number = url ? refNumberFromUrl(url) : null;
@@ -6103,10 +6159,6 @@ export function createApp(deps: ServerDeps) {
     }
     return numbers;
   };
-
-  // The live sample rides along on the same terms as `GET /runs`: the sampler is process-wide, so
-  // a workspace-level answer can carry it for every project's runs at once.
-  const runIndexEntry = (projectId: string, run: RunRecord): RunIndexEntry => ({ projectId, ...runSummary(run) });
 
   /**
    * `GET /workspace/runs-index` — every registered project's recent tasks in one slim answer, so
@@ -6148,22 +6200,28 @@ export function createApp(deps: ServerDeps) {
         // No folder, no runs to read. `not-git` still has an `.ai/cezar` worth indexing.
         if (project.status === 'missing') continue;
         const owned = project.id === bootId ? bootContext : contexts.peek(project.id);
-        // `listRuns()` already sorts newest-first; the disk reader returns file order, so both
-        // paths get sorted below rather than trusting either.
+        // Both sources answer newest-first. An owned project projects the newest of its held
+        // records; a cold one reads its stored summaries, at most one past the limit.
         //
         // Archived runs are INCLUDED. The active project's rows reach the palette through
         // `GET /runs`, which has always carried them, and excluding them here would mean a task
         // is findable while you stand in its project and vanishes the moment you leave — the
         // exact asymmetry a cross-project finder exists to remove.
-        const recent = (
-          owned ? owned.store.listRuns() : readRunIndexFromDisk(
-            join(project.root, '.ai/cezar'), coldRepoHandles.get(project.root),
-          )
-        ).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-        if (recent.length > RUNS_INDEX_PER_PROJECT) truncated.push(project.id);
+        let recent: RunSummary[];
+        if (owned) {
+          const newest = owned.store.listRunSummaries({ limit: RUNS_INDEX_PER_PROJECT });
+          if (newest.truncated) truncated.push(project.id);
+          recent = newest.runs.map(withLiveUsage);
+        } else {
+          const cold = readRunIndexFromDisk(join(project.root, '.ai/cezar'), {
+            handle: coldRepoHandles.get(project.root), limit: RUNS_INDEX_PER_PROJECT,
+          });
+          if (cold.truncated) truncated.push(project.id);
+          recent = cold.runs.map(withLiveUsage);
+        }
         const mentioned: number[] = [];
-        for (const run of recent.slice(0, RUNS_INDEX_PER_PROJECT)) {
-          runs.push(runIndexEntry(project.id, run));
+        for (const run of recent) {
+          runs.push({ projectId: project.id, ...run });
           mentioned.push(...mentionedReferenceNumbers(run));
         }
         if (mentioned.length > 0) {
@@ -6363,6 +6421,17 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
         // Building a lazy project's context reconciles on its own; the explicit call covers the
         // boot project and a context built before another process left the reservation.
         reconcileReceipts: async () => { reconcileAutomationReceipts(store, (await launchContext()).store); },
+        // A run store that cannot open (#779) launches nothing. Firing anyway would count every
+        // refusal towards the auto-pause, and the pause would outlive the restart that fixed it.
+        ready: async () => {
+          try {
+            const { store: runs } = await launchContext();
+            if (runs.unavailable) throw runs.unavailable;
+          } catch (error) {
+            if (error instanceof RunStoreOpenError) throw new AutomationProjectUnavailableError(error.message, { cause: error });
+            throw error;
+          }
+        },
         launchSchedule: async (definition, occurrence, receiptId) => {
           const context = await launchContext();
           return launchScheduledRun({
@@ -6436,7 +6505,8 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
         const runStore = project.id === (deps.bootProjectId ?? 'default')
           ? deps.store
           : sharedContexts.peek(project.id)?.store;
-        if (automationStore && runStore) reconcileAutomationReceipts(automationStore, runStore);
+        // A run store that could not open (#779) cannot say which receipts launched a run.
+        if (automationStore && runStore && !runStore.unavailable) reconcileAutomationReceipts(automationStore, runStore);
         // After reconciliation and before the timer arms.
         brakeIdleAutomations(project.id, automationStore);
       })).then(() => automationScheduler.start()).catch(() => undefined);
@@ -6460,7 +6530,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
   // The one `upgrade` listener: the subscription bus and the preview pane's socket (#781).
   attachUpgradeRouter(server, [socketHubRoute(socketHub, (req) => verifyWsUpgrade(req, deps.bindHost)), previewSocket.route]);
   const shutdownForRestart = async (): Promise<void> => {
-    sharedContexts.disposeAll(); // flush every built secondary project before old process exits
+    sharedContexts.disposeAll(); // close every built secondary project before old process exits
     deps.store.flush();
     socketHub.close();
     // Dev servers run in their own process groups: they outlive cezar unless stopped here.
@@ -6472,6 +6542,9 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
       server.close(() => resolve());
       if ('closeAllConnections' in server) server.closeAllConnections();
     });
+    // Last, with no request left to serve: write what is still pending and release every claim,
+    // so the replacement process finds the live runs nobody's, as a clean stop leaves them (#779).
+    deps.store.close();
   };
   // The task webhook's thread links name the port the listener BOUND (#594 review): `--port 0`
   // asks for an ephemeral one, so the requested number is not an address. Deliveries queue

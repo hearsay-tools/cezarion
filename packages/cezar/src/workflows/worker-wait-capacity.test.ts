@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, onTestFailed, vi } from 'vitest';
@@ -22,6 +22,7 @@ import {
   manager, parent, queuedWake, register, reopenRuntime, restart, root, semaphore, setFailureState,
   store, terminal, track, until, useWorkerWaitFixture, waitOf, worker,
 } from './worker-wait.testkit.ts';
+import { blockRunWrites, readPersistedRuns } from '../runs/run-store.testkit.ts';
 
 // Real Git, durable fsync checkpoints and process shutdown share this outer budget.
 // Keep the separate 15s state/termination assertions and actual runner timers intact.
@@ -128,7 +129,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
         expect(wake?.deliveredAt).toBeUndefined();
         release(); await settled;
         // Read synchronously at settlement, before the store's 300ms debounce.
-        const disk = (JSON.parse(readFileSync(join(root, '.ai/cezar/runs.json'), 'utf8')) as RunRecord[]).find(run => run.id === p.id)!;
+        const disk = (readPersistedRuns(join(root, '.ai/cezar')) as RunRecord[]).find(run => run.id === p.id)!;
         expect.soft(disk.status).toBe('waiting');
         expect.soft(disk.steps.find(step => step.id === 'task')?.status).toBe('waiting');
         expect(waitOf(disk)).toBeUndefined();
@@ -228,7 +229,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
       // The explicit human continuation is the only authority to answer the ask.
       expect(manager.continueRun(target.id, { text: 'human answer mock:hold' }).ok).toBe(true);
       if (role === 'root') store.updateRun(w.id, { status: 'queued', finishedAt: undefined });
-      store.flush(); const checkpoint = readFileSync(join(root, '.ai/cezar/runs.json'), 'utf8');
+      store.flush(); const checkpoint = readPersistedRuns(join(root, '.ai/cezar'));
       expect(store.getRun(target.id)?.continuationMessage?.origin).toBe('human');
       await until(() => (manager as unknown as { active: Map<string, { sessionEverOpened?: boolean }> }).active.get(target.id)?.sessionEverOpened === true);
       // The real wire received the accepted input but cannot reply until released.
@@ -306,7 +307,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
       expect(manager.finish(p.id)).toBe(true);
       expect(store.getRun(p.id)?.delegation).toHaveProperty('finishRequestedAt');
       expect(manager.continueRun(p.id, { text: 'too late' }).ok).toBe(false);
-      store.flush(); const checkpoint = readFileSync(join(root, '.ai/cezar/runs.json'), 'utf8');
+      store.flush(); const checkpoint = readPersistedRuns(join(root, '.ai/cezar'));
       manager.dispose(); release(); await completion;
       expect(store.getRun(p.id)?.status).toBe(review ? 'review' : 'done');
       await restart(false, checkpoint);
@@ -323,9 +324,9 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     manager.requestWorkerStop(w.id); expect(await manager.awaitRunTermination(w.id, 15000)).toBe(true); await collect(w.id);
     await Promise.all(bookkeeping.splice(0)); store.flush();
     const snapshot = JSON.stringify(store.getRun(p.id));
-    const tmpPath = join(root, '.ai/cezar/runs.json.tmp'); mkdirSync(tmpPath);
+    const release = blockRunWrites(join(root, '.ai/cezar'));
     try { expect(manager.finish(p.id)).toBe(false); }
-    finally { rmSync(tmpPath, { recursive: true }); }
+    finally { release(); }
     expect(JSON.stringify(store.getRun(p.id))).toBe(snapshot);
     expect(store.getRun(w.id)?.status).toBe('cancelled');
     expect(manager.continueRun(p.id, { text: 'mock:hold' }).ok).toBe(true);
@@ -406,8 +407,8 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
       const commit = store.commitRootFinishSuccess.bind(store);
       if (failure === 'diff') store.updateRun(p.id, { baseBranch: 'nonexistent-ref' });
       else store.commitRootFinishSuccess = (...args) => {
-        const tmpPath = join(root, '.ai/cezar/runs.json.tmp'); mkdirSync(tmpPath);
-        try { return commit(...args); } finally { rmSync(tmpPath, { recursive: true }); }
+        const release = blockRunWrites(join(root, '.ai/cezar'));
+        try { return commit(...args); } finally { release(); }
       };
       expect(manager.finish(p.id)).toBe(true);
       await until(() => warn.mock.calls.length > 0);
@@ -421,7 +422,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
       let durableStatus: string | undefined;
       const observe = (run: RunRecord) => {
         if (run.id === p.id && run.status === 'done') {
-          durableStatus = (JSON.parse(readFileSync(join(root, '.ai/cezar/runs.json'), 'utf8')) as RunRecord[]).find(run => run.id === p.id)?.status;
+          durableStatus = (readPersistedRuns(join(root, '.ai/cezar')) as RunRecord[]).find(run => run.id === p.id)?.status;
         }
       };
       store.on('run', observe);
@@ -486,7 +487,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
       if (mode === 'failed diff') await until(() => warn.mock.calls.length > 0);
       expect(manager.cancel(p.id)).toBe(true);
       // Read disk without flush: cancellation and retirement are one durable checkpoint.
-      const disk = (JSON.parse(readFileSync(join(root, '.ai/cezar/runs.json'), 'utf8')) as RunRecord[]).find(run => run.id === p.id)!;
+      const disk = (readPersistedRuns(join(root, '.ai/cezar')) as RunRecord[]).find(run => run.id === p.id)!;
       expect(disk.status).toBe('cancelled');
       expect(disk.delegation).not.toHaveProperty('finishRequestedAt');
       release(); await completion?.catch(() => {});
@@ -503,10 +504,10 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     const p = await parent('mock:ask'); await until(() => store.getRun(p.id)?.status === 'waiting'); await restart();
     store.commitRootFinishIntent(p.id);
     store.updateRun(p.id, { status: 'cancelled', finishedAt: new Date().toISOString() });
-    store.flush(); const checkpoint = readFileSync(join(root, '.ai/cezar/runs.json'), 'utf8');
+    store.flush(); const checkpoint = readPersistedRuns(join(root, '.ai/cezar'));
     await restart(false, checkpoint);
     expect(store.getRun(p.id)?.status).toBe('cancelled');
-    const disk = (JSON.parse(readFileSync(join(root, '.ai/cezar/runs.json'), 'utf8')) as RunRecord[]).find(run => run.id === p.id)!;
+    const disk = (readPersistedRuns(join(root, '.ai/cezar')) as RunRecord[]).find(run => run.id === p.id)!;
     expect(disk.delegation).not.toHaveProperty('finishRequestedAt');
     expect(store.readEvents(p.id).filter(event => event.type === 'human-input-delivered')).toEqual([]);
     expect(manager.continueRun(p.id)).toMatchObject({ ok: false, error: 'pending human question requires an explicit answer' });

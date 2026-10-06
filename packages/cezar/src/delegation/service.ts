@@ -156,6 +156,7 @@ export class DelegationService {
     const project = this.projects.get(projectId);
     if (!project) return;
     project.manager.recoverWorkerCleanup();
+    // A pending destroy keeps its worker in the live set (`isLiveRecord`), so this is every one.
     for (const run of project.store.listRuns()) this.scheduleDestroyRetry(project, run.id);
   }
   private scheduleDestroyRetry(project: DelegationProject, workerId: string): void {
@@ -224,7 +225,7 @@ export class DelegationService {
     return { project, sender, recipient, root, worker };
   }
   private currentConversation(project: DelegationProject, root: RunRecord): ConversationState {
-    const state = reconcileConversationState(root, project.store.listRuns(), new Date().toISOString(), run => run.delegation?.role === 'worker'
+    const state = reconcileConversationState(root, (id) => project.store.getRun(id), new Date().toISOString(), run => run.delegation?.role === 'worker'
       ? project.store.readWorkerExecution(run.id)?.phase === 'complete' : !project.manager.isActive(run.id));
     if (root.delegation?.role === 'root' && state && state !== root.delegation.conversation) project.store.commitConversation(root.id, state);
     return state ?? { messages: [], outcomes: [] };

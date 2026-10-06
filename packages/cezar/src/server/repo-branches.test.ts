@@ -7,7 +7,7 @@ import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { BranchClass } from '@open-mercato/cezar-contract';
 import { createOwnedWorkspace } from '../delegation/workspace.ts';
-import type { RunRecord, RunStatus } from '../runs/store.ts';
+import { branchOwnerOf, type RunRecord, type RunStatus } from '../runs/store.ts';
 import { getTracking } from './git.ts';
 import {
   attributeLog,
@@ -18,6 +18,9 @@ import {
   type ForgePr,
 } from './repo-branches.ts';
 import { getLogWithParents } from './git.ts';
+
+/** Records as the branch owners `RunStore.listBranchOwners` would list. */
+const owners = (runs: readonly RunRecord[]) => runs.flatMap((run) => branchOwnerOf(run) ?? []);
 
 const exec = promisify(execFile);
 const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
@@ -101,9 +104,11 @@ describe('the branch classifier (issue 08 §A)', () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  const input = (extra: Partial<ClassifyInput> = {}): ClassifyInput => ({
+  /** Tests write full records; the classifier reads what the store's branch-owner query returns. */
+  type Extra = Omit<Partial<ClassifyInput>, 'runs'> & { runs?: readonly RunRecord[] };
+  const input = ({ runs = [], ...extra }: Extra = {}): ClassifyInput => ({
     root,
-    runs: [],
+    runs: owners(runs),
     isActive: () => false,
     currentBranch: 'main',
     hasRemote: true,
@@ -111,7 +116,7 @@ describe('the branch classifier (issue 08 §A)', () => {
     ...extra,
   });
 
-  const classesOf = async (extra: Partial<ClassifyInput> = {}) => {
+  const classesOf = async (extra: Extra = {}) => {
     const { payload } = await classifyBranches(input(extra));
     return { payload, cls: Object.fromEntries(payload.branches.map((b) => [b.name, b.class])) as Record<string, BranchClass> };
   };
@@ -593,7 +598,7 @@ describe('log source attribution (issue 08 §B5)', () => {
       runRecord('aaaaaaaa-1', 'done', { title: 'later, empty' }),
     ];
     const log = await getLogWithParents(root);
-    const sources = await attributeLog(root, log, runs);
+    const sources = await attributeLog(root, log, owners(runs));
     const merge = log.findIndex((entry) => entry.subject.startsWith('Merge pull request #41'));
     expect(sources[merge]).toEqual({ runId: 'zzzzzzzz-1', title: 'the work', prNumber: 41 });
   });
@@ -606,7 +611,7 @@ describe('log source attribution (issue 08 §B5)', () => {
     await git(root, 'merge', '-q', '--no-ff', '-m', 'land the second', 'cez/bbbbbbbb');
     const runs = [runRecord('aaaaaaaa-1', 'done', { title: 'first' }), runRecord('bbbbbbbb-1', 'done', { title: 'second' })];
     const log = await getLogWithParents(root);
-    const sources = await attributeLog(root, log, runs);
+    const sources = await attributeLog(root, log, owners(runs));
     const bySubject = Object.fromEntries(log.map((entry, i) => [entry.subject, sources[i]]));
     expect(bySubject['land the first']).toMatchObject({ runId: 'aaaaaaaa-1' });
     expect(bySubject['land the second']).toMatchObject({ runId: 'bbbbbbbb-1' });
@@ -622,7 +627,7 @@ describe('log source attribution (issue 08 §B5)', () => {
       runRecord('bbbbbbbb-1', 'done', { title: 'squashed task', pullRequestUrl: 'https://github.com/acme/demo/pull/42' }),
     ];
     const log = await getLogWithParents(root);
-    const sources = await attributeLog(root, log, runs);
+    const sources = await attributeLog(root, log, owners(runs));
     const bySubject = Object.fromEntries(log.map((entry, i) => [entry.subject, sources[i]]));
     expect(bySubject['Merge pull request #41 from acme/cez/aaaaaaaa']).toEqual({ runId: 'aaaaaaaa-1', title: 'merged task', prNumber: 41 });
     expect(bySubject['feat: the squashed task (#42)']).toEqual({ runId: 'bbbbbbbb-1', title: 'squashed task', prNumber: 42 });
@@ -631,7 +636,7 @@ describe('log source attribution (issue 08 §B5)', () => {
 
     // The branch deleted after merging: the subject still names it.
     await git(root, 'branch', '-D', 'cez/aaaaaaaa');
-    const again = await attributeLog(root, log, runs);
+    const again = await attributeLog(root, log, owners(runs));
     expect(again[log.findIndex((e) => e.subject.startsWith('Merge pull request #41'))]).toMatchObject({ runId: 'aaaaaaaa-1' });
   });
 });

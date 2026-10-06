@@ -1,10 +1,11 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import { apiRunSchema, runIndexEntrySchema, toRunSummary } from '@open-mercato/cezar-contract';
 import { RunStore } from './store.ts';
 import { readRunIndexFromDisk } from './run-index.ts';
+import { readPersistedRuns, readPersistedText, seedRuns } from './run-store.testkit.ts';
 
 let dir: string, store: RunStore, id: string;
 const questions = [{ header: 'Choice', question: 'Which implementation?', options: [{ label: 'First' }, { label: 'Second' }] }];
@@ -33,7 +34,7 @@ it('publishes and persists human attention without changing a parked worker wait
   expect(store.getRun(id)).toHaveProperty('hasPendingHumanAsk', true);
   expect(news.at(-1)).toMatchObject({ status: 'waiting', hasPendingHumanAsk: true, delegation: { wait: { phase: 'parked' } } });
   store.flush();
-  expect(JSON.parse(readFileSync(join(dir, 'runs.json'), 'utf8'))[0]).toHaveProperty('hasPendingHumanAsk', true);
+  expect(readPersistedRuns(dir)[0]).toHaveProperty('hasPendingHumanAsk', true);
 });
 
 it('only matching delivered human input retires the latest valid question', () => {
@@ -53,48 +54,48 @@ it('only matching delivered human input retires the latest valid question', () =
 });
 
 it.each([undefined, false])('reconstructs a pending question after a legacy/crash scalar %s without writing cold state', scalar => {
-  store.flush();
-  const index = JSON.parse(readFileSync(join(dir, 'runs.json'), 'utf8'));
+  store.close(); // the reopen below is a restart: this store must not still own the live root
+  const index = readPersistedRuns(dir);
   if (scalar !== undefined) index[0].hasPendingHumanAsk = scalar;
-  const bytes = JSON.stringify(index);
-  writeFileSync(join(dir, 'runs.json'), bytes);
+  seedRuns(dir, index);
+  const bytes = readPersistedText(dir);
   writeFileSync(join(dir, 'runs', `${id}.ndjson`), JSON.stringify({ ...ask(), seq: 1, ts: new Date().toISOString() }) + '\n');
   expect(RunStore.open(dir, { keepLive: true }).getRun(id)).toHaveProperty('hasPendingHumanAsk', true);
-  expect(readRunIndexFromDisk(dir)[0]).toHaveProperty('hasPendingHumanAsk', true);
-  expect(readFileSync(join(dir, 'runs.json'), 'utf8')).toBe(bytes);
+  expect(readRunIndexFromDisk(dir).runs[0]).toHaveProperty('hasPendingHumanAsk', true);
+  expect(readPersistedText(dir)).toBe(bytes);
 });
 
 it('reconciles a stale true summary from a matching durable answer', () => {
-  store.flush();
-  const index = JSON.parse(readFileSync(join(dir, 'runs.json'), 'utf8')); index[0].hasPendingHumanAsk = true;
-  writeFileSync(join(dir, 'runs.json'), JSON.stringify(index));
+  store.close(); // the reopen below is a restart: this store must not still own the live root
+  const index = readPersistedRuns(dir); index[0].hasPendingHumanAsk = true;
+  seedRuns(dir, index);
   writeFileSync(join(dir, 'runs', `${id}.ndjson`), [
     { ...ask(), seq: 1, ts: new Date().toISOString() },
     { type: 'human-input-delivered', askSeq: 1, seq: 2, ts: new Date().toISOString() },
   ].map(event => JSON.stringify(event)).join('\n') + '\n');
   expect(RunStore.open(dir, { keepLive: true }).getRun(id)).toHaveProperty('hasPendingHumanAsk', false);
-  expect(readRunIndexFromDisk(dir)[0]).toHaveProperty('hasPendingHumanAsk', false);
+  expect(readRunIndexFromDisk(dir).runs[0]).toHaveProperty('hasPendingHumanAsk', false);
 });
 
 it.each([undefined, false, true])('requests human attention when history is unreadable and the saved summary is %s', scalar => {
-  store.flush();
-  const index = JSON.parse(readFileSync(join(dir, 'runs.json'), 'utf8')); index[0].hasPendingHumanAsk = scalar;
-  writeFileSync(join(dir, 'runs.json'), JSON.stringify(index));
+  store.close(); // the reopen below is a restart: this store must not still own the live root
+  const index = readPersistedRuns(dir); index[0].hasPendingHumanAsk = scalar;
+  seedRuns(dir, index);
   const events = join(dir, 'runs', `${id}.ndjson`); rmSync(events, { force: true }); mkdirSync(events);
   expect(RunStore.open(dir, { keepLive: true }).getRun(id)).toHaveProperty('hasPendingHumanAsk', true);
-  expect(readRunIndexFromDisk(dir)[0]).toHaveProperty('hasPendingHumanAsk', true);
+  expect(readRunIndexFromDisk(dir).runs[0]).toHaveProperty('hasPendingHumanAsk', true);
 });
 
 it('keeps legacy pure worker waits free of human attention when no history exists', () => {
-  store.flush();
+  store.close(); // the reopen below is a restart: this store must not still own the live root
   expect(RunStore.open(dir, { keepLive: true }).getRun(id)).toHaveProperty('hasPendingHumanAsk', false);
-  expect(readRunIndexFromDisk(dir)[0]).toHaveProperty('hasPendingHumanAsk', false);
+  expect(readRunIndexFromDisk(dir).runs[0]).toHaveProperty('hasPendingHumanAsk', false);
 });
 
 it('recovers human attention for a running root with a durable worker wait before manager recovery parks it', () => {
   store.updateRun(id, { status: 'running', hasPendingHumanAsk: false });
-  store.flush();
+  store.close(); // the reopen below is a restart: this store must not still own the live root
   writeFileSync(join(dir, 'runs', `${id}.ndjson`), JSON.stringify({ ...ask(), seq: 1, ts: new Date().toISOString() }) + '\n');
   expect(RunStore.open(dir, { keepLive: true }).getRun(id)).toMatchObject({ status: 'running', hasPendingHumanAsk: true });
-  expect(readRunIndexFromDisk(dir)[0]).toMatchObject({ status: 'failed', hasPendingHumanAsk: true });
+  expect(readRunIndexFromDisk(dir).runs[0]).toMatchObject({ status: 'failed', hasPendingHumanAsk: true });
 });

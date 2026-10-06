@@ -882,6 +882,16 @@ readable-holder/candidate probes with absent or incomplete ledgers recheck each
 fresh poll: after the verified holder exits, destruction refuses promptly with
 the candidate reason and retains the execution generation, worktree, branch and scratch.
 
+**R48–R52** (hearsay-tools/cezarion#779), in `core/harness-parity.test.ts`, drive every
+`RUNNER_IDS` backend through its native `HARNESS_ADAPTERS` wire against the `runs.db` run
+store, where memory holds only live runs and their delegation families and each process
+claims the families it acts on. R48: Continue loads a finished run into memory and releases
+it after the run settles. R49: a restart clears a cancelled root's stale Finish intent, and
+Continue then resumes it. R50: a headless open beside the owning process leaves the owner's
+parked run waiting, and a restart still answers it. R51: adopting a dead owner's run in the
+middle of a turn starts no agent, and Continue resumes it. R52: Stop on a dead owner's run in
+the middle of a turn ends it as cancelled and starts no agent. No runner is exempt.
+
 Crash-diagnostic rows **S15–S17** (hearsay-tools/cezarion#499) drive every `RUNNER_IDS` adapter's
 native transport through an uncaught-exception-shaped stderr fixture, a plain
 single-line failure, and a clean/requested shutdown with stderr. RPC mocks send

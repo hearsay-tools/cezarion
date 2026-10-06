@@ -100,7 +100,9 @@ describe('Stop during CI-tool prelaunch setup (#493)', { timeout: 15_000 }, () =
     expect(launches.mock.calls.length).toBe(0);
     expect(a.manager.isActive(id)).toBe(false);
     expect(provision).not.toHaveBeenCalled();
-    expect(a.store.getRun(id)).toMatchObject({ status: 'cancelled', stopping: undefined, currentStepId: undefined, finishedAt: expect.any(String) });
+    // Cleared fields are absent once the settled run is read back from runs.db (#779).
+    expect(a.store.getRun(id)).toMatchObject({ status: 'cancelled', finishedAt: expect.any(String) });
+    expect([a.store.getRun(id)?.stopping, a.store.getRun(id)?.currentStepId]).toEqual([undefined, undefined]);
     expect(a.store.getRun(id)?.steps.find(step => step.id === stepId)?.status).toBe('cancelled');
     await vi.waitFor(() => expect(b.store.getRun(queued.id)?.status).toBe('done'), waitOptions);
     expect(semaphore.busy()).toBe(0);
@@ -124,7 +126,9 @@ describe('Stop during CI-tool prelaunch setup (#493)', { timeout: 15_000 }, () =
     await vi.waitFor(() => expect(!p.manager.isActive(id) || launches.mock.calls.length > 0).toBe(true), waitOptions);
     expect(launches.mock.calls.length).toBe(0);
     expect(revoke).toHaveBeenCalled();
-    expect(p.store.getRun(id)).toMatchObject({ status: 'cancelled', stopping: undefined, currentStepId: undefined });
+    // Cleared fields are absent once the settled run is read back from runs.db (#779).
+    expect(p.store.getRun(id)?.status).toBe('cancelled');
+    expect([p.store.getRun(id)?.stopping, p.store.getRun(id)?.currentStepId]).toEqual([undefined, undefined]);
     expect(p.manager.isActive(id)).toBe(false);
   });
 

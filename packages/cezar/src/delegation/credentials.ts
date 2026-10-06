@@ -62,6 +62,15 @@ export class CredentialRegistry {
     }
   }
 
+  /** Every credential issued for `projectId`'s runs (the project is detaching). */
+  revokeProject(projectId: string): void {
+    for (const [key, credential] of this.#credentials) {
+      if (credential.projectId !== projectId) continue;
+      if (credential.caller) authenticatedCallers.delete(credential.caller);
+      this.#credentials.delete(key);
+    }
+  }
+
   close(): void {
     this.#closed = true;
     for (const credential of this.#credentials.values()) {

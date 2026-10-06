@@ -53,6 +53,19 @@ describe('ProjectAutomationScheduler', () => {
     expect(store.state(definition.id)).toMatchObject({ consecutiveFailures: 1, backoffUntil: expect.any(String) });
   });
 
+  it('launches nothing and counts no failure while the project\'s run store cannot open (#779)', async () => {
+    const { store, definition } = await setup();
+    const launch = vi.fn(async () => { throw new Error('runs.db is damaged'); });
+    const ready = vi.fn(async () => { throw new scheduleRunner.AutomationProjectUnavailableError('runs.db is damaged'); });
+    const scheduler = new ProjectAutomationScheduler({ projectId: 'p', store, timeZone: 'UTC', github: { owner: 'acme', repo: 'demo', poller: { poll: async () => ({ candidates: [candidate], truncated: false, pages: 1 }) } as never }, launch, ready });
+    await expect(scheduler.check(definition)).rejects.toBeInstanceOf(scheduleRunner.AutomationProjectUnavailableError);
+    expect(launch).not.toHaveBeenCalled();
+    expect(store.receipts()).toEqual([]);
+    // No failure, no backoff, no cursor: the next check finds the same candidate and launches it.
+    expect(store.state(definition.id)).toBeUndefined();
+    expect(store.logs({ automationId: definition.id })).toEqual([]);
+  });
+
   it('records a held lease as skipped without writing polling state', async () => {
     const { store, definition } = await setup();
     const held = store.acquireLease();
@@ -531,6 +544,38 @@ describe('WorkspaceAutomationScheduler', () => {
         await vi.advanceTimersByTimeAsync(1);
         expect(reconcileReceipts).toHaveBeenCalledTimes(1);
         expect(launchSchedule).not.toHaveBeenCalled();
+      } finally { scheduler.stop(); }
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('hands the project\'s readiness check to the schedule runner, and retries an unavailable project at the floor (#779)', async () => {
+    vi.useFakeTimers();
+    try {
+      const now = Date.parse('2026-09-14T04:00:01Z');
+      vi.setSystemTime(now);
+      const { store } = await setup();
+      const poll = store.list()[0]!;
+      store.update(poll.id, poll.revision, { ...poll, enabled: false });
+      store.create({ name: 'Nightly', enabled: true, kind: 'schedule', schedule: { type: 'daily', hour: 4, minute: 0 }, task: { prompt: 'Bump deps' } }, 'nightly');
+      store.setState('nightly', (current) => ({ ...current, nextRunAt: '2026-09-14T04:00:00.000Z' }));
+      const ready = vi.fn(async () => { throw new scheduleRunner.AutomationProjectUnavailableError('runs.db is damaged'); });
+      const launchSchedule = vi.fn(async () => ({ runId: 'unused' }));
+      const scheduler = new WorkspaceAutomationScheduler({
+        coordinator: { refresh: async () => undefined, enabledProjectIds: () => ['p'], store: () => store, hasProjects: () => true } as never,
+        handle: () => ({ projectId: 'p', store, timeZone: 'UTC', launchSchedule, ready }),
+        now: () => Date.now(),
+      });
+      try {
+        await scheduler.start();
+        await vi.advanceTimersByTimeAsync(1);
+        expect(ready).toHaveBeenCalledTimes(1);
+        await vi.advanceTimersByTimeAsync(59_000);
+        expect(ready).toHaveBeenCalledTimes(1);
+        await vi.advanceTimersByTimeAsync(2_000);
+        expect(ready).toHaveBeenCalledTimes(2);
+        expect(launchSchedule).not.toHaveBeenCalled();
+        expect(store.get('nightly')?.enabled).toBe(true);
+        expect(store.state('nightly')?.consecutiveFailures).toBeUndefined();
       } finally { scheduler.stop(); }
     } finally { vi.useRealTimers(); }
   });

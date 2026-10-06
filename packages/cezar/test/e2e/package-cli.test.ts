@@ -6,6 +6,7 @@ import { dirname, join, resolve } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
+import { readPersistedRuns } from '../../src/runs/run-store.testkit.ts';
 
 const execFile = promisify(execFileCallback);
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -171,11 +172,14 @@ try {
     });
     assert.match(run.stdout, /run (done|review)/);
 
-    const runs = JSON.parse(await readFile(join(fixtureRepo, '.ai', 'cezar', 'runs.json'), 'utf8')) as Array<{
-      status: string;
-    }>;
+    const runs = readPersistedRuns(join(fixtureRepo, '.ai', 'cezar'));
     assert.equal(runs.length, 1);
     assert.ok(['done', 'review'].includes(runs[0]?.status ?? ''), 'the dry-run workflow should finish successfully');
+    // The run database and its sidecars stay out of the user's repository history.
+    const dataIgnore = (await readFile(join(fixtureRepo, '.ai', 'cezar', '.gitignore'), 'utf8')).split('\n');
+    for (const entry of ['runs.db', 'runs.db-wal', 'runs.db-shm', 'runs.json.pre-sqlite.bak', 'runs.json.pre-sqlite.*']) {
+      assert.ok(dataIgnore.includes(entry), `.ai/cezar/.gitignore should list ${entry}`);
+    }
 
     // Boot wiring (spec 2026-07-20-multi-project-workspace, step 1.5): the
     // headless run migrated ~/.cezar and registered the boot repo.
@@ -206,9 +210,7 @@ try {
       },
       'headless run must honor the global provider preference',
     );
-    const runsAfterDisabledAttempt = JSON.parse(
-      await readFile(join(fixtureRepo, '.ai', 'cezar', 'runs.json'), 'utf8'),
-    ) as Array<{ status: string }>;
+    const runsAfterDisabledAttempt = readPersistedRuns(join(fixtureRepo, '.ai', 'cezar'));
     assert.equal(runsAfterDisabledAttempt.length, 1, 'a disabled provider must not create a run');
     workspace.disabledProviders = [];
     await writeFile(join(cezHome, 'config.json'), `${JSON.stringify(workspace, null, 2)}\n`, 'utf8');
@@ -241,9 +243,7 @@ if (args.join(' ') === 'auth status --json') {
         maxBuffer: 10 * 1024 * 1024,
       },
     ).catch(() => undefined);
-    const runsAfterAuthFailure = JSON.parse(
-      await readFile(join(fixtureRepo, '.ai', 'cezar', 'runs.json'), 'utf8'),
-    ) as Array<{ id: string }>;
+    const runsAfterAuthFailure = readPersistedRuns(join(fixtureRepo, '.ai', 'cezar'));
     assert.equal(runsAfterAuthFailure.length, 2, 'the runtime-auth fixture creates exactly one run');
     const authFailureRun = runsAfterAuthFailure.at(0);
     assert.ok(authFailureRun, 'the auth-failure fixture creates a run');

@@ -20,7 +20,7 @@
     "README.md"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=24.15.0"
   },
   "scripts": {
     "prebuild": "node scripts/sync-readme.mjs",
@@ -30,6 +30,7 @@
     "install-as-command": "node scripts/install-as-command.mjs --mode link",
     "install-as-command:global": "node scripts/install-as-command.mjs --mode global",
     "uninstall-as-command": "node scripts/install-as-command.mjs --mode uninstall",
+    "bench:run-store": "node --import tsx scripts/benchmark-run-store.ts",
     "server-install": "tsx src/index.ts server-install",
     "server-deploy": "tsx src/index.ts server-deploy",
     "server-uninstall": "tsx src/index.ts server-uninstall",
@@ -53,7 +54,7 @@
   "devDependencies": {
     "@open-mercato/cezar-api-client": "^0.15.1",
     "@open-mercato/cezar-contract": "^0.15.1",
-    "@types/node": "^20.14.0",
+    "@types/node": "^24.19.1",
     "@types/ws": "^8.18.1",
     "esbuild": "^0.28.1",
     "tsx": "^4.19.0",

@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentInput, CiWait } from '@open-mercato/cezar-contract';
 import { RunStore } from './store.ts';
 import { readRunIndexFromDisk } from './run-index.ts';
+import { readPersistedRuns, readPersistedText, runIds, seedRuns } from './run-store.testkit.ts';
 
 describe('atomic CI wait checkpoints', () => {
   let directory: string;
@@ -26,13 +27,13 @@ describe('atomic CI wait checkpoints', () => {
 
   it('publishes neither registration nor event if the durable replacement fails', () => {
     store.flush();
-    const disk = readFileSync(join(directory, 'runs.json'), 'utf8');
+    const disk = readPersistedText(directory);
     const events = vi.fn(); store.on('run', events);
     vi.spyOn(store as unknown as { writeIndex(): void }, 'writeIndex').mockImplementation(() => { throw new Error('read only'); });
     expect(() => store.commitCiWait(id, wait)).toThrow('read only');
     expect(store.getRun(id)?.ciWait).toBeUndefined();
     expect(events).not.toHaveBeenCalled();
-    expect(readFileSync(join(directory, 'runs.json'), 'utf8')).toBe(disk);
+    expect(readPersistedText(directory)).toBe(disk);
   });
 
   it('settlement and deterministic queue entry survive reopen with no duplicate input', () => {
@@ -70,30 +71,30 @@ describe('atomic CI wait checkpoints', () => {
 
   it('a corrupt persisted wait retains the registry and requests human attention', () => {
     store.flush();
-    const records = JSON.parse(readFileSync(join(directory, 'runs.json'), 'utf8'));
+    const records = readPersistedRuns(directory);
     records[0].ciWait = { phase: 'parked', deadline: 'invalid' };
-    writeFileSync(join(directory, 'runs.json'), JSON.stringify(records));
-    const indexed = readRunIndexFromDisk(directory);
+    seedRuns(directory, records);
+    const indexed = readRunIndexFromDisk(directory).runs;
     expect(indexed).toHaveLength(1);
     expect(indexed[0]).toMatchObject({ status: 'failed', error: expect.stringContaining('CI wait state is unreadable') });
     const reopened = RunStore.open(directory, { keepLive: true });
-    expect(reopened.listRuns()).toHaveLength(1);
+    expect(runIds(reopened)).toHaveLength(1);
     expect(reopened.getRun(id)).toMatchObject({ status: 'failed', error: expect.stringContaining('CI wait state is unreadable') });
     expect(reopened.getRun(id)?.ciWait).toBeUndefined();
   });
   it.each(['running', 'done'] as const)('retains an unreadable previous observation for %s runs across repeated reads', (status) => {
-    store.updateRun(id, { status }); store.flush();
-    const records = JSON.parse(readFileSync(join(directory, 'runs.json'), 'utf8'));
+    // The reopen below is a restart: this store goes first, or it still owns the running run.
+    store.updateRun(id, { status }); store.close();
+    const records = readPersistedRuns(directory);
     records[0].lastCiWait = { ...wait, phase: 'delivered', result: { outcome: 'passed' } };
-    writeFileSync(join(directory, 'runs.json'), JSON.stringify(records));
+    seedRuns(directory, records);
     const reopened = RunStore.open(directory, { keepLive: true });
     expect(reopened.getRun(id)?.status).toBe(status);
-    // The read-only index intentionally marks orphan running records failed.
-    expect(readRunIndexFromDisk(directory)[0]?.status).toBe(status === 'running' ? 'failed' : status);
-    for (const record of [readRunIndexFromDisk(directory)[0], reopened.getRun(id)]) {
-      expect(record).toMatchObject({ lastCiWaitError: expect.stringContaining('saved observation is unreadable') });
-      expect(record?.lastCiWait).toBeUndefined();
-    }
+    // The read-only index intentionally marks orphan running records failed. It answers list rows,
+    // which carry no CI observation; the salvaged field is the store's to keep.
+    expect(readRunIndexFromDisk(directory).runs[0]?.status).toBe(status === 'running' ? 'failed' : status);
+    expect(reopened.getRun(id)).toMatchObject({ lastCiWaitError: expect.stringContaining('saved observation is unreadable') });
+    expect(reopened.getRun(id)?.lastCiWait).toBeUndefined();
     reopened.flush();
     expect(RunStore.open(directory, { keepLive: true }).getRun(id)?.lastCiWaitError).toContain('unreadable');
     reopened.commitCiWait(id, wait);

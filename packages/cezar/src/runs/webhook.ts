@@ -128,7 +128,7 @@ interface Pending {
   message?: string;
 }
 
-const seenOf = (run: RunRecord): Seen => ({
+const seenOf = (run: Pick<RunRecord, 'status' | 'activity' | 'hasPendingHumanAsk'>): Seen => ({
   status: run.status,
   activity: run.activity ?? null,
   ask: run.hasPendingHumanAsk === true,
@@ -146,9 +146,10 @@ export class TaskWebhook {
     private readonly store: RunStore,
     private readonly options: TaskWebhookOptions,
   ) {
-    // Seed from what the store already holds, so a context built after a restart does not
-    // report every existing run as a fresh transition.
-    for (const run of store.listRuns()) this.seen.set(run.id, seenOf(run));
+    // Seed from every run the store knows, so a context built after a restart does not report
+    // every existing run as a fresh transition — nor one whose `notify` turns on later. Off the
+    // list rows: a finished run is no longer in memory (#779).
+    for (const run of store.listRunSummaries().runs) this.seen.set(run.id, seenOf(run));
     store.on('run', this.onRun);
     store.on('deleted', this.onDeleted);
   }

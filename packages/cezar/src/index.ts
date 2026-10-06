@@ -22,6 +22,8 @@ import { previewToolEnabled } from './ci-wait/tools.ts';
 import { PreviewHost } from './preview/host.ts';
 import { armRepoHandle } from './runs/arm-repo-handle.ts';
 import { RunStore } from './runs/store.ts';
+import { RunStoreOpenError } from './runs/store-open-error.ts';
+import { ensureDataGitignore } from './data-gitignore.ts';
 import { TaskWebhooks } from './runs/webhook.ts';
 import { RunManager } from './workflows/run.ts';
 import { loadWorkflows } from './workflows/load.ts';
@@ -259,7 +261,7 @@ async function serveCommand(
   await semaphore.refresh();
   // keepLive + recover() (#367): runs that were queued/running/waiting when
   // the previous process exited are re-queued or resumed instead of failed.
-  const store = openStore(repoRoot, { keepLive: true });
+  const store = openBootStore(repoRoot);
   // Before recovery (#589): the runs recovery re-queues, resumes or fails are exactly the
   // transitions an opted-in bot is waiting for. Deliveries wait until startServer knows its port.
   const taskWebhooks = new TaskWebhooks();
@@ -285,9 +287,10 @@ async function serveCommand(
   const checks = await detectEnvironment();
   const repo = await getRepoInfo(repoRoot);
 
-  // Startup reconcile (spec 006): sweep worktrees whose run no longer exists.
-  if (repo) {
-    const orphans = await pruneOrphans(repoRoot, new Set(store.listRuns().map((r) => r.id))).catch(
+  // Startup reconcile (spec 006): sweep worktrees whose run no longer exists. Never over a store
+  // that could not open (#779): its runs are unknown, and every worktree would look orphaned.
+  if (repo && !store.unavailable) {
+    const orphans = await pruneOrphans(repoRoot, new Set(store.listRunIds())).catch(
       () => [] as string[],
     );
     if (orphans.length > 0) {
@@ -306,12 +309,14 @@ async function serveCommand(
   const recovered = store
     .listRuns()
     .filter((r) => ['queued', 'waiting', 'running'].includes(r.status)).length;
-  await recoverWithProviderRuntimeAuthObservation(
-    store,
-    () => manager.recover(),
-    providerRuntimeAuth,
-  );
-  delegation.service.armDestroyRetries(bootProjectId ?? 'default');
+  if (!store.unavailable) {
+    await recoverWithProviderRuntimeAuthObservation(
+      store,
+      () => manager.recover(),
+      providerRuntimeAuth,
+    );
+    delegation.service.armDestroyRetries(bootProjectId ?? 'default');
+  }
   if (recovered > 0) console.log(`  recovered ${recovered} run(s) from the previous session`);
 
   // Update discovery (#368) — fire-and-forget; the banner prints whenever the
@@ -399,7 +404,7 @@ async function serveCommand(
     // Dev servers run in their own process groups: stop them before this process exits.
     void Promise.all([delegation.close(), previewHost?.close()]).finally(() => {
       server.close();
-      store.flush();
+      store.close();
       process.exit(0);
     });
   };
@@ -454,9 +459,9 @@ async function waitForHealth(healthUrl: string, timeoutMs: number): Promise<bool
 // ---- run (headless) ----------------------------------------------------------
 
 /**
- * Headless `run` stays headless (#504), but a cockpit already serving this repo will never see
- * the run until it restarts — say so once, on stderr. Capped so it never delays the run, and
- * silent on any failure.
+ * Headless `run` stays headless (#504). A cockpit already serving this repo lists the run, but
+ * cannot control it while this process owns it (#779, plan step 3), and gets none of its live
+ * events — say so once, on stderr. Capped so it never delays the run, and silent on any failure.
  */
 async function hintRunningCockpit(repoRoot: string): Promise<void> {
   const { discoverCockpit } = await import('./task-cli/discovery.ts');
@@ -512,7 +517,15 @@ async function runCommand(
   }
 
   const repoHandleController = new AbortController();
-  const store = openStore(repoRoot, { repoHandleSignal: repoHandleController.signal });
+  let store: RunStore;
+  try {
+    store = openStore(repoRoot, { repoHandleSignal: repoHandleController.signal });
+  } catch (error) {
+    if (!(error instanceof RunStoreOpenError)) throw error;
+    console.error(error.message);
+    process.exitCode = 1;
+    return;
+  }
   const delegation = await DelegationController.start();
   delegation.service.setDiscovery(createHostDiscovery(repoRoot, providerAuth));
   try {
@@ -573,7 +586,7 @@ async function runCommand(
     // A slow GitHub child must not keep a completed headless task alive. Any handle that
     // already arrived has repaired the store; an unfinished lookup remains unknown.
     repoHandleController.abort();
-    store.flush();
+    store.close();
   }
 }
 
@@ -784,58 +797,31 @@ description: House rules the agent should follow in this repo.
 
 // ---- helpers -----------------------------------------------------------------
 
+/** The project's run store, at the start of a process: a busy database is waited out
+ *  (`retryBusy`), and a store that cannot open throws its `RunStoreOpenError`. */
 function openStore(repoRoot: string, opts?: { keepLive?: boolean; repoHandleSignal?: AbortSignal }): RunStore {
   const dataDir = join(repoRoot, '.ai/cezar');
-  const store = RunStore.open(dataDir, opts);
+  // First: an open that fails may already have created the database and the history backups.
+  ensureDataGitignore(repoRoot);
+  const store = RunStore.open(dataDir, { keepLive: opts?.keepLive, retryBusy: true });
   // Repo-scope the referenced tier (#945) — see `armRepoHandle`. Background, never awaited: a
   // `gh`-less or offline machine keeps working exactly as it did, just unscoped.
   armRepoHandle(store, repoRoot, opts?.repoHandleSignal);
-  ensureDataGitignore(repoRoot);
   return store;
 }
 
-/** Keep run data out of the user's repo history; workflows/skills stay committable. */
-function ensureDataGitignore(repoRoot: string): void {
-  const path = join(repoRoot, '.ai/cezar', '.gitignore');
-  const wanted = [
-    'runs.json',
-    'runs.json.tmp',
-    'runs/',
-    'worktrees/',
-    'tmp/', // per-run agent temp directories (#785)
-    'todos.json',
-    'todos.json.tmp',
-    'launch-key',
-    'cockpit.lock*',
-    'automations.json',
-    'automations.json.tmp',
-    'automation-state.json',
-    'automation-state.json.tmp',
-    'automation-receipts.ndjson',
-    'automation-receipts.ndjson.tmp',
-    'automation-log.ndjson',
-    'automation-log.ndjson.tmp',
-    'automation-log.lock',
-    'automation-log.reclaim*/',
-    'automation-poll.lock',
-    'automation-poll.reclaim*/',
-    'preview/', // live preview: per-task Chromium profile, dev-server logs and pid records (#781)
-    'automations.lock',
-    'automations.reclaim*/',
-    'automation-state.lock',
-    'automation-state.reclaim*/',
-  ];
+/**
+ * The boot project's store for `serve` (#779, plan step 4). One that cannot open does not stop the
+ * cockpit: the boot project answers every route with the reason (`RunStore.unavailable`), the
+ * other projects work, and a restart once the cause is gone opens it.
+ */
+function openBootStore(repoRoot: string): RunStore {
   try {
-    mkdirSync(join(repoRoot, '.ai/cezar'), { recursive: true });
-    const current = existsSync(path) ? readFileSync(path, 'utf8') : '';
-    const lines = current.split('\n');
-    const missing = wanted.filter((w) => !lines.includes(w));
-    if (missing.length > 0) {
-      const glue = current && !current.endsWith('\n') ? '\n' : '';
-      writeFileSync(path, `${current}${glue}${missing.join('\n')}\n`, 'utf8');
-    }
-  } catch {
-    // non-fatal
+    return openStore(repoRoot, { keepLive: true });
+  } catch (error) {
+    if (!(error instanceof RunStoreOpenError)) throw error;
+    console.error(`\n  ✗ ${error.message}\n`);
+    return RunStore.unavailable(join(repoRoot, '.ai/cezar'), error);
   }
 }
 

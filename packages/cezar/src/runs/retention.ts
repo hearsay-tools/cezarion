@@ -27,14 +27,14 @@ function recencyKey(run: RunRecord): string {
  *  directory, and has not already been reclaimed. Finished owned workers count
  *  (#575) once their parent is gone or `done` (collection-gated). A live,
  *  failed, or cancelled parent can still collect/diff from the dir. Live runs,
- *  `review`, `invalid`, and workers mid-destroy do not. */
-export function isReclaimable(run: RunRecord, runs: readonly RunRecord[] = []): boolean {
+ *  `review`, `invalid`, and workers mid-destroy do not. `lookup` finds the parent
+ *  by id (the store's `getRun`; a parent need not have a worktree of its own). */
+export function isReclaimable(run: RunRecord, lookup: (id: string) => RunRecord | undefined = () => undefined): boolean {
   if (run.delegation?.role === 'invalid') return false;
   if (run.delegation?.role === 'worker' && run.delegation.destroy) return false;
   if (!FINISHED.has(run.status) || !run.worktreePath || !existsSync(run.worktreePath) || run.worktreeReclaimedAt) return false;
   if (run.delegation?.role === 'worker') {
-    const parentId = run.delegation.parentRunId;
-    const parent = runs.find((candidate) => candidate.id === parentId);
+    const parent = lookup(run.delegation.parentRunId);
     // `done` is collection-gated. failed/cancelled parents can still collect later.
     if (parent && parent.status !== 'done') return false;
   }
@@ -42,17 +42,22 @@ export function isReclaimable(run: RunRecord, runs: readonly RunRecord[] = []): 
 }
 
 /**
- * Given every run and the keep-count `keep`, return the ids of the finished
+ * Given the runs with a worktree and the keep-count `keep`, return the ids of the finished
  * worktrees whose *directory* should be reclaimed: keep the `keep`
- * most-recently-finished reclaimable worktrees, reclaim the rest.
+ * most-recently-finished reclaimable worktrees, reclaim the rest. `lookup` finds an owned
+ * worker's parent; without it, the parent is looked for among `runs`.
  *
  * `keep === 0` means "unlimited — never auto-reclaim" and returns `[]`.
  * Pure: no I/O, no mutation of the input.
  */
-export function selectReclaimableWorktrees(runs: readonly RunRecord[], keep: number): string[] {
+export function selectReclaimableWorktrees(
+  runs: readonly RunRecord[],
+  keep: number,
+  lookup: (id: string) => RunRecord | undefined = (id) => runs.find((run) => run.id === id),
+): string[] {
   if (!Number.isFinite(keep) || keep <= 0) return [];
   const reclaimable = runs
-    .filter((run) => isReclaimable(run, runs))
+    .filter((run) => isReclaimable(run, lookup))
     .sort((a, b) => (recencyKey(a) < recencyKey(b) ? 1 : recencyKey(a) > recencyKey(b) ? -1 : 0));
   return reclaimable.slice(keep).map((r) => r.id);
 }
@@ -60,7 +65,9 @@ export function selectReclaimableWorktrees(runs: readonly RunRecord[], keep: num
 /** The slice of the runs store the enforcer needs. Kept structural so the
  *  enforcer stays easy to test and never imports the concrete store. */
 export interface RetentionStore {
-  listRuns(): RunRecord[];
+  /** The candidates: runs with a materialized worktree (an indexed query, #779). */
+  listRunsWithWorktree(): RunRecord[];
+  getRun(id: string): RunRecord | undefined;
   updateRun(id: string, patch: { worktreeReclaimedAt?: string }): unknown;
 }
 
@@ -149,10 +156,10 @@ export async function reclaimWorktrees(
   keep: number,
   opts: ReclaimOptions = {},
 ): Promise<string[]> {
-  const runs = store.listRuns();
+  const runs = store.listRunsWithWorktree();
   const byId = new Map(runs.map((r) => [r.id, r]));
   const reclaimed: string[] = [];
-  for (const id of selectReclaimableWorktrees(runs, keep)) {
+  for (const id of selectReclaimableWorktrees(runs, keep, (parentId) => store.getRun(parentId))) {
     const run = byId.get(id);
     if (run && (await reclaimWorktree(repoRoot, store, run, opts))) reclaimed.push(id);
   }
@@ -193,6 +200,13 @@ export async function reclaimWorktree(
   if (!run.worktreePath) return null;
   const release = opts.claim ? opts.claim(run) : () => undefined;
   if (!release) return null; // in use since it was selected
+  // Claimed in the run database too, for the whole reclaim (#779, plan step 3): no other cezar
+  // process writes this run or reclaims it meanwhile, and another process's run is left alone.
+  // Structural test stores have no claims.
+  const real = store as Partial<RunStore>;
+  let pinned = typeof real.pin !== 'function';
+  try { pinned ||= real.pin!.call(store, run.id, 'cleanup') !== undefined; } catch { /* busy: not claimed */ }
+  if (!pinned) { release(); return null; }
   try {
     if (!(await preserveWorkerResult(repoRoot, store, run).catch(() => false))) return null;
     if (opts.remove) assertSafe(); // injected reclaimer has no final callback
@@ -205,6 +219,7 @@ export async function reclaimWorktree(
     // best-effort: never let retention crash a terminal transition or startup.
     return null;
   } finally {
+    real.unpin?.call(store, run.id, 'cleanup');
     release();
   }
 }

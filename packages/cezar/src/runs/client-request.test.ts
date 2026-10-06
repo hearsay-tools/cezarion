@@ -1,9 +1,10 @@
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { clientRequestHash } from './client-request.ts';
 import { RunStore } from './store.ts';
+import { seedRuns } from './run-store.testkit.ts';
 
 /** Idempotent start (#504): the hash is what decides "same request" vs "stale id". */
 describe('clientRequestHash', () => {
@@ -62,10 +63,10 @@ describe('RunStore client request id', () => {
     expect('clientRequestId' in run).toBe(false);
   });
 
-  it('loads a runs.json written before the fields existed', () => {
+  it('loads a record written before the fields existed', () => {
     mkdirSync(dataDir, { recursive: true });
-    writeFileSync(join(dataDir, 'runs.json'), JSON.stringify([{ id: 'old', title: 'o', workflow: 'w', task: 't', status: 'done',
-      createdAt: '2026-01-01T00:00:00.000Z', tokensUsed: 0, archived: false, steps: [] }]));
+    seedRuns(dataDir, [{ id: 'old', title: 'o', workflow: 'w', task: 't', status: 'done',
+      createdAt: '2026-01-01T00:00:00.000Z', tokensUsed: 0, archived: false, steps: [] }]);
     const store = RunStore.open(dataDir);
     expect(store.getRun('old')?.clientRequestId).toBeUndefined();
   });

@@ -1,7 +1,8 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { readPersistedRuns, readPersistedText } from './run-store.testkit.ts';
 
 const execFileMock = vi.hoisted(() => vi.fn());
 vi.mock('node:child_process', async (importOriginal) => ({
@@ -48,7 +49,8 @@ describe('live repository identity recovery', () => {
     store.updateRun(owned.id, { referencedIssueUrl: foreignIssue, issueNumber: 99 });
     const explicit = create(store, `Work on ${foreignPr}`);
     store.appendEvent(explicit.id, { type: 'result', result: foreignPr });
-    store.flush();
+    // A restart: the old store goes, or it would still own these queued runs.
+    store.close();
     // Recovery must heal retained records too, not just runs created in this process.
     store = RunStore.open(root);
     expect(armRepoHandle(store, root, controller.signal)).toBeUndefined();
@@ -62,7 +64,7 @@ describe('live repository identity recovery', () => {
     expect(store.getRun(old.id)?.referencedIssueCandidates).toEqual([foreignIssue]);
     expect(store.getRun(owned.id)?.issueNumber).toBe(99);
     expect(store.getRun(explicit.id)?.referencedPullRequestUrl).toBe(foreignPr);
-    const saved = JSON.parse(readFileSync(join(root, 'runs.json'), 'utf8'));
+    const saved = readPersistedRuns(root);
     expect(saved.find((r: { id: string }) => r.id === old.id).referencedPullRequestUrl).toBeUndefined();
     const fresh = create(store);
     store.appendEvent(fresh.id, { type: 'result', result: foreignPr });
@@ -169,13 +171,13 @@ describe('live repository identity recovery', () => {
     expect(release).toBeTypeOf('function');
     controller.abort();
     store.flush();
-    const before = readFileSync(join(root, 'runs.json'), 'utf8');
+    const before = readPersistedText(root);
     execFileMock.mockImplementation(reply(null, 'replacement/repo'));
     expect(await resolveRepoHandle(root)).toEqual({ owner: 'replacement', name: 'repo' });
     release(null, { stdout: 'acme/service', stderr: '' });
     await vi.advanceTimersByTimeAsync(60_000);
     expect(await resolveRepoHandle(root)).toEqual({ owner: 'replacement', name: 'repo' });
     expect(store.getRun(run.id)?.referencedPullRequestUrl).toBe(foreignPr);
-    expect(readFileSync(join(root, 'runs.json'), 'utf8')).toBe(before);
+    expect(readPersistedText(root)).toBe(before);
   });
 });

@@ -8,7 +8,7 @@ tracking AI coding-agent tasks in your repo.
 Type a task, pick a workflow and an agent — **Claude Code, Codex, OpenCode, pi or OMP
 (OpenCode, pi and OMP experimental), or a mix of them per step** — and watch it work live: steps, tool calls,
 tokens, diffs, in a browser cockpit that runs entirely on your machine.
-Your CLI logins, your `gh`, your files. No accounts, no database, no cloud.
+Your CLI logins, your `gh`, your files. No accounts, no database server, no cloud.
 
 🔥 **Fire and forget.** Queue a stack of autonomous coding and maintenance
 tasks and let them run — cezar orchestrates them across isolated worktrees,
@@ -20,10 +20,10 @@ your phone, working your backlog while you're away.
 [A look inside](#a-look-inside) · [What cezar does best](#what-cezar-does-best) · [What it solves](#what-it-solves) · [Who it's for](#who-its-for) · [Quick start](#quick-start) · [How it works](#how-it-works) · [Core concepts](#core-concepts) · [Cockpit tour](#cockpit-tour) · [Agent backends](#coding-agent-backends) · [Remote access](#remote-access-host-cezar-on-a-server)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-![Node 20+](https://img.shields.io/badge/Node-20%2B-339933)
+![Node 24.15+](https://img.shields.io/badge/Node-24.15%2B-339933)
 ![TypeScript 7.x](https://img.shields.io/badge/TypeScript-7.x-3178c6)
 ![Zero config](https://img.shields.io/badge/config-zero-success)
-![No database](https://img.shields.io/badge/database-none-success)
+![Embedded SQLite](https://img.shields.io/badge/database-embedded%20SQLite-success)
 
 </div>
 
@@ -36,7 +36,9 @@ npx cezarion         # → cockpit at http://localhost:4321
 
 That's the whole setup. If your `claude` CLI is logged in (Pro/Max) and `gh` is
 authenticated, there is nothing else to configure. State lives in `.ai/cezar/`
-inside your repo — plain JSON, NDJSON and Markdown you can `cat` and fix by hand.
+inside your repo: your runs in one embedded SQLite file (`runs.db`, built into
+Node: no server, no install, no config), event logs in NDJSON and journals in
+Markdown. Everything except the run file you can `cat` and fix by hand.
 
 Local npm installations have a workspace update API. `POST
 /api/v1/workspace/application-update/apply` with `{}` prepares the release
@@ -72,7 +74,7 @@ conductor-style app, one-agent front-ends. cezar's bet is different. Three thing
 it does better than any of them:
 
 - 🪶 **Genuinely zero config.** `npx cezarion` in your repo and you're running —
-  no wizard, no API keys, no env vars, no schema, no database. It rides the
+  no wizard, no API keys, no env vars, no schema, no database server. It rides the
   `claude` / `codex` / `opencode` / `pi` / `omp` logins and the `gh` you already have, and every
   missing piece degrades gracefully instead of blocking you.
 - 🖥️ **Built for a server (VPS mode).** cezar is made to live on a **VPS, cloud,
@@ -151,7 +153,7 @@ and an orchestrator keeps a whole queue of them moving.
 
 ## Quick start
 
-**Prerequisites:** Node 20+, at least one logged-in agent CLI — the
+**Prerequisites:** Node 24.15+, at least one logged-in agent CLI — the
 [`claude` CLI](https://github.com/anthropics/claude-code) (Pro/Max subscription),
 the [`codex` CLI](https://github.com/openai/codex), or
 [OpenCode](https://opencode.ai) — and, optionally, `git` and the `gh` CLI.
@@ -260,7 +262,7 @@ event live and parks the run at a review gate when there's a diff to inspect.
         ▼
    ┌─────────────┐   SSE (replay + live)   ┌──────────────────────────┐
    │ .ai/cezar/  │ ──────────────────────► │  cockpit  localhost:4321 │
-   │ JSON·NDJSON │                         │  Tasks · Git · GitHub ·  │
+   │SQLite·NDJSON│                         │  Tasks · Git · GitHub ·  │
    │ ·Markdown   │                         │  Skills · Workflows      │
    └─────────────┘                         └──────────────────────────┘
                                                   │
@@ -874,7 +876,7 @@ Useful environment variables:
 | `CEZ_ENV_PASSTHROUGH=A,B` | Forward these extra host env vars to spawned agents. By default agents get a least-privilege env (safe shell/toolchain vars + the backend's own auth + `GITHUB_TOKEN` + `CEZ_*`), not your full environment — use this to add a var an agent needs. A dev server live preview starts gets the same env without the backend's auth and `GITHUB_TOKEN`, plus these names. |
 | `CEZ_AGENT_ENV_FULL=1` | Escape hatch: give spawned agents, and dev servers live preview starts, the full host environment (pre-hardening behavior). Off by default; only set it if you understand that this hands every host secret to the agent process. |
 | `CEZ_AGENT_TMPDIR=0` | Stop giving each task its own temp directory and hand agents the host `TMPDIR` again (pre-open-mercato/cezar#785 behavior). On by default: every run gets `TMPDIR`/`TEMP`/`TMP` pointing at `.ai/cezar/tmp/<task-id>`, created and write-probed before the agent spawns, kept across session close, Continue, and restart while the task is live, and reaped at terminal completion or history deletion (hearsay-tools/cezarion#515) — and kept short enough for unix-socket paths: a checkout so deep that `.ai/cezar/tmp/<task-id>` would cross the kernel's socket-path limit resolves it to a `cez-agent-…` directory under the system temp dir instead (hearsay-tools/cezarion#387), with its location recorded so host temp-environment changes cannot move live scratch. So concurrent tasks stop sharing one directory and a task refuses to start rather than run against a temp directory that silently swallows its shell output (see Troubleshooting below). Only an exact `0` disables it, and it disables the whole thing — the pre-spawn check included, so this stays an escape hatch you can actually take. |
-| `CEZ_REDACT_SECRETS=0` | Disable scrubbing of credential values/token shapes from the on-disk state (the NDJSON transcript and the free-text fields of `runs.json`). On by default; leave it on. Controller-generated delegation tokens are always scrubbed. Best-effort defense-in-depth, not a guarantee: it catches known token shapes and the values of your own secret-named env vars, so a credential in neither category can still get through. |
+| `CEZ_REDACT_SECRETS=0` | Disable scrubbing of credential values/token shapes from the on-disk state (the NDJSON transcript and the free-text fields of the run records in `runs.db`). On by default; leave it on. Controller-generated delegation tokens are always scrubbed. Best-effort defense-in-depth, not a guarantee: it catches known token shapes and the values of your own secret-named env vars, so a credential in neither category can still get through. |
 | `CEZ_TITLE_UPDATES=0` | Turn off the live task-title refresh (namer re-runs on each turn end). The Settings → Agents toggle overrides this default. |
 | `CEZ_AUTONAME=0` | Disable ALL LLM task naming (creation + live) — titles stay heuristic (`437: /om-auto-review-pr`). Under `CEZ_DRY_RUN=1` naming is already off unless forced with `CEZ_AUTONAME=1`. |
 | `CEZ_REVIEW_GATE=1` | Turn ON the optional diff-first review gate (open-mercato/cezar#489): a successful, non-autonomous run with changes parks at `review` (Accept / Send back / Draft PR) instead of finishing. Off by default — changed runs settle to `done` with the diff left in the worktree. Only `1` enables. The Settings → Agents toggle overrides this; autonomous runs always skip it. |
@@ -1142,8 +1144,9 @@ selector uses that runner's discovered model list. While locked, the model is
 shown read-only and follows the selected runner's native settings; the runner
 itself remains selectable.
 
-Run data (`runs.json`, NDJSON event logs, worktrees, `todos.json`) is
-git-ignored automatically; your workflows and skills stay committable.
+Run data (`runs.db` and its `-wal`/`-shm` files, the `runs.json.pre-sqlite*.bak`
+backups, NDJSON event logs, worktrees, `todos.json`) is git-ignored
+automatically; your workflows and skills stay committable.
 
 Settings that belong to *you* rather than to a repo — the parallel cap
 (`maxParallel`, default **2**), the per-task memory ceiling and the checkout
@@ -1173,7 +1176,7 @@ hosted cockpit (`CEZ_REMOTE=1`) is read-only and never serves home-file contents
 End-to-end, from a fresh clone to a global `cez` command you can run in **any**
 repo on your machine — no npm publish required.
 
-**1. Prerequisites** — Node 20+ and `git` (plus at least one logged-in agent CLI,
+**1. Prerequisites** — Node 24.15+ and `git` (plus at least one logged-in agent CLI,
 as in [Quick start](#quick-start)).
 
 **2. Clone & install**

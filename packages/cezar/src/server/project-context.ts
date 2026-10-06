@@ -6,6 +6,7 @@ import { pruneOrphans } from '../git-worktree.ts';
 import { sweepPreviewLeftovers } from '../preview/dev-server.ts';
 import type { PreviewHost } from '../preview/host.ts';
 import { armRepoHandle } from '../runs/arm-repo-handle.ts';
+import { ensureDataGitignore } from '../data-gitignore.ts';
 import { reclaimWorktrees } from '../runs/retention.ts';
 import { RunStore } from '../runs/store.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
@@ -245,8 +246,8 @@ export class ProjectContexts {
   /**
    * Tear down one project's context (project removal): the manager stops
    * making moves on its own (`RunManager.dispose()` — usage-sampler
-   * unsubscribe, timers, queued state) and the store is closed — index
-   * flushed to disk, every event-bus subscriber detached. Returns false when
+   * unsubscribe, timers, queued state) and the store is closed — pending
+   * rows written, its database released, every event-bus subscriber detached. Returns false when
    * nothing was built for `projectId`.
    */
   dispose(projectId: string, opts: { releasePreviews?: boolean } = {}): boolean {
@@ -256,7 +257,9 @@ export class ProjectContexts {
     // The preview host is process-wide and outlives this context: a removed project's dev servers
     // and browsers go with it (#781). Shutdown leaves that to `PreviewHost.close()`.
     if (opts.releasePreviews !== false && this.deps.preview) {
-      for (const run of ctx.store.listRuns()) void this.deps.preview.release(run.id).catch(() => undefined);
+      // Every run id, not only the held ones: a finished run's dev server may still be up. A run
+      // without one is a no-op for the host.
+      for (const id of ctx.store.listRunIds()) void this.deps.preview.release(id).catch(() => undefined);
     }
     this.repoHandleControllers.get(ctx.store)?.abort();
     this.repoHandleControllers.delete(ctx.store);
@@ -281,6 +284,11 @@ export class ProjectContexts {
     await this.deps.ownership?.acquire(dataDir);
     // keepLive + recover() (#367), same as serveCommand: runs that were live
     // when this project's context last existed are re-queued or resumed.
+    // A store that cannot open throws `RunStoreOpenError` (#779): nothing is
+    // cached, the route answers 409 with why, and the next request opens again.
+    // One attempt only: this runs on a live cockpit's event loop. The ignore file comes first: a
+    // failed open may already have created the database and the history backups.
+    ensureDataGitignore(project.root);
     const store = RunStore.open(dataDir, { keepLive: true });
     const automationStore = this.deps.automationStore?.(project.id, project.root)
       ?? AutomationStore.open(dataDir);
@@ -296,7 +304,7 @@ export class ProjectContexts {
       // best-effort sweeps serveCommand runs for the boot project, gated on the
       // root actually being a git repo.
       if (await getRepoInfo(project.root)) {
-        await pruneOrphans(project.root, new Set(store.listRuns().map((r) => r.id))).catch(
+        await pruneOrphans(project.root, new Set(store.listRunIds())).catch(
           () => [] as string[],
         );
         const keep = await resolveWorktreeRetention(project.root).catch(
@@ -328,9 +336,10 @@ export class ProjectContexts {
   }
 }
 
-/** Shared teardown for built and half-built contexts. */
+/** Shared teardown for built and half-built contexts. Closing the store writes what is pending
+ *  and releases its database connection; a late write to it afterwards saves nothing. */
 function teardown(ctx: { store: RunStore; manager: RunManager }): void {
   ctx.manager.dispose();
-  ctx.store.flush();
+  ctx.store.close();
   ctx.store.removeAllListeners();
 }

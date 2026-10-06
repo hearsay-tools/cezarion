@@ -5,6 +5,7 @@ import { delimiter, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { expect, it } from 'vitest';
+import { readPersistedRuns } from './runs/run-store.testkit.ts';
 
 const exec = promisify(execFile);
 const CLI_TIMEOUT_MS = 30_000;
@@ -60,7 +61,7 @@ setInterval(() => {}, 1000);
       expect(Number(readFileSync(stopped, 'utf8')) - Number(readFileSync(started, 'utf8')),
         'CLI must cancel discovery before the 15-second GitHub timeout').toBeLessThan(DISCOVERY_CANCEL_TIMEOUT_MS);
     }
-    const records = JSON.parse(readFileSync(join(root, '.ai/cezar/runs.json'), 'utf8'));
+    const records = readPersistedRuns(join(root, '.ai/cezar'));
     expect(records).toHaveLength(1);
     expect(['done', 'review']).toContain(records[0].status);
   } finally {

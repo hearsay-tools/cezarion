@@ -1,8 +1,12 @@
+import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { RunStore } from '../runs/store.ts';
+import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
+import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { RunManager } from './run.ts';
 import { cleanupCheckpoint, seedSettledFamily } from './delegation-reconcile.testkit.ts';
 
@@ -49,17 +53,29 @@ describe('terminal delegation checkpoint reconciliation (#661)', () => {
   });
 
   it('retains global reconciliation for recovery and explicit callers', () => {
-    manager.reconcileWorkerWaits();
+    // The full pass recovery runs (#779): settled families are no longer in memory, and the
+    // pass over live families would skip them.
+    manager.reconcileAllWorkerFamilies();
     for (const family of [a, b]) expect(store.readEvents(family.parentId).some(e => e.type === 'conversation-message')).toBe(true);
   });
 
-  it.each(['family', 'global'] as const)('does not lose a %s request emitted during reconciliation', scope => {
+  it('reconciles only the families with a live member when no family is named', () => {
+    store.updateRun(b.workerId, { status: 'running' });
+    manager.reconcileWorkerWaits();
+    expect(store.readEvents(a.parentId).some(e => e.type === 'conversation-message')).toBe(false);
+    expect(store.readEvents(b.parentId).some(e => e.type === 'conversation-message')).toBe(true);
+  });
+
+  it.each(['family', 'full', 'live'] as const)('does not lose a %s request emitted during reconciliation', scope => {
+    // A live family is reached by the unnamed pass; the settled one only by name or the full pass.
+    if (scope === 'live') store.updateRun(b.workerId, { status: 'running' });
     const append = store.appendEvent.bind(store);
     let changed = false;
     vi.spyOn(store, 'appendEvent').mockImplementation((id, event) => {
       if (!changed && id === a.parentId && event.type === 'conversation-message') {
         changed = true;
         if (scope === 'family') cleanupCheckpoint(store, b.workerId);
+        else if (scope === 'full') manager.reconcileAllWorkerFamilies();
         else manager.reconcileWorkerWaits();
       }
       return append(id, event);
@@ -67,5 +83,81 @@ describe('terminal delegation checkpoint reconciliation (#661)', () => {
     cleanupCheckpoint(store, a.workerId);
     expect(changed).toBe(true);
     expect(store.readEvents(b.parentId).some(e => e.type === 'conversation-message')).toBe(true);
+  });
+});
+
+// A finished family is only in runs.db since #779, so a boot repair reaches it only if open loads
+// one of its members. Each case seeds what an older controller could leave on a cancelled root
+// with no conversation and no live member, the family the sweeps over every run used to reach.
+describe('restart repairs on a settled family without a conversation (#779)', () => {
+  let root: string;
+  let dataDir: string;
+  beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'cez-settled-repair-')); dataDir = join(root, '.ai/cezar'); });
+  afterEach(async () => { await drainFixtureManagers(root); rmSync(root, { recursive: true, force: true }); });
+
+  /** A cancelled root with a finished worker, `leftover` written on the root's delegation. */
+  function seedCancelledRoot(leftover: (store: RunStore, parentId: string, workerId: string) => void): { parentId: string; workerId: string } {
+    const seed = RunStore.open(dataDir);
+    const parent = seed.createRun({ title: 'legacy parent', task: 'history', workflow: 'quick-task', steps: [{ id: 'work', name: 'Work', kind: 'agent' }] });
+    seed.updateStep(parent.id, 'work', { status: 'done', sessionId: 'previous-session', backend: 'claude' });
+    seed.updateRun(parent.id, { status: 'waiting', runner: 'claude', delegation: { role: 'root', permissions: [], receipts: [] } });
+    const workerId = randomUUID();
+    const worker = seed.createOwnedRun({ title: 'legacy worker', task: 'history', workflow: 'quick-task', steps: [] }, parent.id, randomUUID(), {
+      role: 'worker', parentRunId: parent.id, permissions: [], workspace: {
+        ownerRunId: workerId, resourceId: randomUUID(), kind: 'owned-isolated',
+        path: join(root, 'workers', workerId), branch: `cez/${workerId.slice(0, 8)}`, baselineSha: '0'.repeat(40),
+      },
+    }, 'a'.repeat(64));
+    seed.updateRun(worker.id, { status: 'done' });
+    leftover(seed, parent.id, worker.id);
+    seed.updateRun(parent.id, { status: 'cancelled', finishedAt: new Date().toISOString() });
+    seed.close();
+    return { parentId: parent.id, workerId: worker.id };
+  }
+
+  async function reboot<T>(body: (store: RunStore, manager: RunManager) => T | Promise<T>): Promise<T> {
+    const store = RunStore.open(dataDir, { keepLive: true });
+    const manager = createFixtureManager(store, root, { semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 0 } }) });
+    try {
+      await manager.recover();
+      return await body(store, manager);
+    } finally {
+      manager.dispose();
+      store.close();
+    }
+  }
+
+  // Older controllers could cancel a root and leave its Finish intent behind. Until the intent is
+  // cleared, Continue refuses the root ("parent finish is pending") and its workers through it.
+  it('clears a stale Finish intent at boot, lets the root go and Continue admits it', async () => {
+    const { parentId, workerId } = seedCancelledRoot((store, id) => store.commitRootFinishIntent(id));
+    expect(readPersistedRuns(dataDir).find(run => run.id === parentId)).toMatchObject({ status: 'cancelled', delegation: { finishRequestedAt: expect.any(String) } });
+    await reboot((store, manager) => {
+      expect(store.getRun(parentId)?.status).toBe('cancelled');
+      expect(store.getRun(parentId)?.delegation).not.toHaveProperty('finishRequestedAt');
+      store.flush();
+      expect(readPersistedRuns(dataDir).find(run => run.id === parentId)?.delegation).not.toHaveProperty('finishRequestedAt');
+      // Repaired, the root is finished like any other and leaves memory with its family.
+      expect(store.heldIds()).not.toContain(parentId);
+      expect(store.heldIds()).not.toContain(workerId);
+      expect(manager.continueRun(parentId, { text: 'Pick it back up' }, true)).toEqual({ ok: true });
+    });
+  });
+
+  // The other repair a settled family's sweep made: a wait left on a finished parent is withdrawn.
+  // The `wait` clause of `isLiveRecord` is what loads the root for it.
+  it('withdraws a wait left on a cancelled root at boot and lets the root go', async () => {
+    const waitId = randomUUID();
+    const { parentId } = seedCancelledRoot((store, id, workerId) => store.commitDelegation([{ id, delegation: {
+      role: 'root', permissions: [], receipts: [],
+      wait: { id: waitId, workerIds: [workerId], outcomes: [], deadline: new Date(Date.now() + 3_600_000).toISOString(), phase: 'parked' },
+    } }]));
+    await reboot((store) => {
+      const delegation = store.getRun(parentId)?.delegation;
+      expect(delegation).not.toHaveProperty('wait');
+      expect(delegation).toMatchObject({ lastWait: { id: waitId, phase: 'wake-pending' } });
+      store.flush();
+      expect(store.heldIds()).not.toContain(parentId);
+    });
   });
 });

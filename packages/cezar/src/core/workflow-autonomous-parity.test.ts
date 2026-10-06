@@ -6,6 +6,7 @@ import { RUNNER_IDS } from './agent-runner.ts';
 import { AUTONOMOUS_CRITERIA, driveRun, driveSeam, exemptionFor, promptFor, waitFor, withOwnedInputRun } from './harness-parity.testkit.ts';
 import { handoffPath } from '../handoff.ts';
 import { MAX_AUTO_CONTINUES } from '../workflows/run.ts';
+import { readPersistedRuns } from '../runs/run-store.testkit.ts';
 
 const nudges = (events: readonly Record<string, unknown>[]) => events.filter(e => e.type === 'note' && String(e.message).includes('continuing without pausing'));
 
@@ -64,7 +65,7 @@ describe('autonomous turn-end parity — #426', () => {
               expect(store.getRun(runId)?.status).toBe('waiting');
               expect(store.getRun(runId)?.steps.at(-1)?.status).toBe('waiting');
               if (retainedAck) {
-                expect(JSON.parse(readFileSync(join(manager['dataDir'], 'runs.json'), 'utf8'))).toEqual(expect.arrayContaining([
+                expect(readPersistedRuns(manager['dataDir'])).toEqual(expect.arrayContaining([
                   expect.objectContaining({ id: runId, status: 'waiting', steps: expect.arrayContaining([
                     expect.objectContaining({ id: stepId, status: 'waiting' }),
                   ]) }),

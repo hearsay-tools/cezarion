@@ -401,7 +401,11 @@ describe('the worktrees API', () => {
       const res = await apiRequest(app, `/api/v1/runs/${id}/pr`, { method: 'POST' });
       expect(res.status).toBe(201);
       expect(existsSync(join(worktreePath!, 'work.txt'))).toBe(true);
-      expect(store.getRun(id)).toMatchObject({ branch, worktreeReclaimedAt: undefined, pullRequestUrl: expect.any(String) });
+      // Cleared, whether the run is still held (the key set to undefined) or already read back
+      // from runs.db once its write settled (the key absent) — #779.
+      store.flush();
+      expect(store.getRun(id)).toMatchObject({ branch, pullRequestUrl: expect.any(String) });
+      expect(store.getRun(id)?.worktreeReclaimedAt).toBeUndefined();
     });
 
     it('holds reclaim off a restored checkout for as long as its draft PR is publishing', async () => {

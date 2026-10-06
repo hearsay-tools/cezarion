@@ -27,6 +27,7 @@ import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { parseTaskMarkers } from '../runs/task-markers.ts';
 import { appendTurnText, RunManager } from './run.ts';
 import type { WorkflowDef } from './types.ts';
+import { readPersistedRuns, crashStore } from '../runs/run-store.testkit.ts';
 
 const runnerHook = vi.hoisted(() => ({ runner: undefined as AgentRunner | undefined }));
 
@@ -599,6 +600,8 @@ describe('RunManager.continueRun override', () => {
       text: 'read this with the chosen account', agentProfile: after,
       images: [{ type: 'file', mediaType: 'application/pdf', data: 'YQ==' }],
     }, mode === 'capacity')).toEqual({ ok: true });
+    // A crash right after the Continue was accepted: nothing still pending is written.
+    manager.dispose(); crashStore(store);
     store = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true });
     manager = createFixtureManager(store, repoRoot);
     const internals = manager as unknown as {
@@ -1192,7 +1195,7 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
     });
 
   const persistedRun = (id: string): RunRecord => {
-    const records = JSON.parse(readFileSync(join(repoRoot, '.ai/cezar/runs.json'), 'utf8')) as RunRecord[];
+    const records = readPersistedRuns(join(repoRoot, '.ai/cezar')) as RunRecord[];
     const record = records.find((candidate) => candidate.id === id);
     if (!record) throw new Error(`persisted run ${id} missing`);
     return record;

@@ -26,6 +26,7 @@ import {
   resolveAgentTmpDir,
   sweepAgentTmpDirs,
 } from './agent-tmpdir.ts';
+import { seedRuns } from './run-store.testkit.ts';
 
 /**
  * #785: every agent shared the host's temp directory, and when that directory
@@ -175,12 +176,12 @@ describe('reaping the per-run temp directories (#785)', () => {
 
   // The one input that turns this helper into data loss: `join(dataDir, 'tmp', '..')`
   // is `<dataDir>` itself, so a guard that admits it would recursively remove every
-  // run's state — runs.json included.
+  // run's state — the run database included.
   it.each(['.', '..'])('refuses the relative id %j, which would resolve onto dataDir', (id) => {
-    writeFileSync(join(dataDir, 'runs.json'), '[]', 'utf8');
+    seedRuns(dataDir, []);
     agentTmpEnv(dataDir, 'live', {});
     removeAgentTmpDir(dataDir, id);
-    expect(existsSync(join(dataDir, 'runs.json'))).toBe(true);
+    expect(existsSync(join(dataDir, 'runs.db'))).toBe(true);
     expect(existsSync(agentTmpDir(dataDir, 'live'))).toBe(true);
   });
 
@@ -198,11 +199,11 @@ describe('reaping the per-run temp directories (#785)', () => {
   // confined to its own `tmp/` subtree and must never see a sibling.
   it('never touches sibling run state', () => {
     agentTmpEnv(dataDir, 'orphan', {});
+    seedRuns(dataDir, []);
     mkdirSync(join(dataDir, 'runs'), { recursive: true });
-    writeFileSync(join(dataDir, 'runs.json'), '[]', 'utf8');
     writeFileSync(join(dataDir, 'runs', 'a.ndjson'), '{}', 'utf8');
     sweepAgentTmpDirs(dataDir, []);
-    expect(existsSync(join(dataDir, 'runs.json'))).toBe(true);
+    expect(existsSync(join(dataDir, 'runs.db'))).toBe(true);
     expect(existsSync(join(dataDir, 'runs', 'a.ndjson'))).toBe(true);
   });
 

@@ -59,6 +59,13 @@ export interface ScheduleRunnerHandle {
    * retryable `failed` row — never silently consumed. Absent: the duplicate path as before.
    */
   reconcile?: () => Promise<void>;
+  /**
+   * Asked right before a timer fire launches. Throws `AutomationProjectUnavailableError` while the
+   * project cannot launch a task — its run store cannot open (#779) — and the fire then reserves,
+   * advances, logs and counts nothing: the workspace timer retries it at its floor, and the
+   * occurrence fires once the store opens again. Absent: always ready.
+   */
+  ready?: () => Promise<void>;
 }
 
 export type ScheduleFireOutcome =
@@ -70,6 +77,15 @@ export const SCHEDULE_LEASE_HELD_REASON = 'automation lease is held by another p
 /** `fire` met a held or non-current lease; the workspace timer re-arms it at the retry floor. */
 export class ScheduleLeaseHeldError extends Error {
   constructor() { super(SCHEDULE_LEASE_HELD_REASON); }
+}
+
+/** The project cannot launch a task now: its run store cannot open (#779). Not a launch failure,
+ *  so it never counts towards the auto-pause or a poll's backoff; the timer retries at its floor. */
+export class AutomationProjectUnavailableError extends Error {
+  constructor(message: string, options: { cause?: unknown } = {}) {
+    super(message, options);
+    this.name = 'AutomationProjectUnavailableError';
+  }
 }
 
 /**
@@ -123,12 +139,14 @@ export class ScheduleRunner {
       // Not due yet: another cockpit (or a PUT) moved `nextRunAt` after this fire was armed.
       if (due > now) return { result: 'skipped', occurrenceAt: new Date(due).toISOString() } as const;
       if (now - due <= SCHEDULE_GRACE_MS) {
+        await this.handle.ready?.();
         return this.launch(definition, { at: new Date(due).toISOString(), trigger: 'schedule' }, now, advance);
       }
       // Late. Every occurrence from the due one up to now was missed; the newest may catch up.
       const missed = this.missed(definition, due, now);
       const latest = missed.latest;
       if (now - latest <= SCHEDULE_CATCH_UP_MS) {
+        await this.handle.ready?.();
         if (missed.count > 1) await this.logSkipped(definition, missed.count - 1, missed.atLeast, true);
         return this.launch(definition, { at: new Date(latest).toISOString(), trigger: 'catch-up' }, now, advance);
       }

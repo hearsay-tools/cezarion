@@ -10,6 +10,7 @@ import { ScheduleRunner } from '../automations/schedule-runner.ts';
 import { WorkspaceAutomationScheduler } from '../automations/scheduler.ts';
 import { AutomationStore } from '../automations/store.ts';
 import { isScheduleAutomation } from '../automations/types.ts';
+import { RunStoreOpenError } from '../runs/store-open-error.ts';
 import { RunStore } from '../runs/store.ts';
 import { registerProject } from '../workspace/projects.ts';
 import { RunManager } from '../workflows/run.ts';
@@ -657,6 +658,46 @@ describe('GitHub automation API', () => {
       vi.restoreAllMocks();
       if (savedDryRun === undefined) delete process.env.CEZ_DRY_RUN;
       else process.env.CEZ_DRY_RUN = savedDryRun;
+    }
+  }, 30_000);
+
+  // #779: a boot project whose run store cannot open launches nothing. Each fire used to throw in
+  // the launcher, three in a row paused the automation, and the pause outlived the fixed store.
+  it('a past-due schedule on a boot project whose run store cannot open fires nothing and counts nothing', async () => {
+    const dataDir = join(root, '.ai/cezar');
+    const occurrenceAt = new Date(Date.now() - 3 * 60_000).toISOString();
+    const created = new Date(Date.now() - 86_400_000).toISOString();
+    writeFileSync(join(dataDir, 'automations.json'), JSON.stringify({
+      version: 1,
+      automations: [{
+        id: 'nightly', revision: 1, kind: 'schedule', name: 'Nightly deps', enabled: true,
+        schedule: { type: 'daily', hour: 4, minute: 0 }, task: { prompt: 'Bump {{project}} deps' },
+        createdAt: created, updatedAt: created,
+      }],
+    }));
+    writeFileSync(join(dataDir, 'automation-state.json'), JSON.stringify({ version: 1, states: { nightly: { revision: 1, nextRunAt: occurrenceAt } } }));
+    const unavailable = RunStore.unavailable(dataDir, new RunStoreOpenError('corrupt', join(dataDir, 'runs.db'), 'runs.db is damaged'));
+    const manager = Object.assign(recordingManager(), { isActive: () => false });
+    const fired = vi.spyOn(ScheduleRunner.prototype, 'fire');
+    const started = vi.spyOn(WorkspaceAutomationScheduler.prototype, 'start');
+    const project = await registerProject(root);
+    const server = startServer({ repoRoot: project.root, bootProjectId: project.id, store: unavailable, manager, version: '0.0.0-test' }, 0);
+    try {
+      await new Promise<void>((resolve) => server.once('listening', () => resolve()));
+      await vi.waitFor(() => expect(started).toHaveBeenCalledTimes(1), { timeout: 15_000, interval: 10 });
+      await vi.waitFor(() => expect(fired).toHaveBeenCalled(), { timeout: 5_000, interval: 20 });
+      // Long enough for a fire that would launch to have launched, failed and been recorded.
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      const automations = AutomationStore.open(dataDir);
+      expect(manager.startRun).not.toHaveBeenCalled();
+      expect(automations.latestReceipts().size).toBe(0);
+      expect(automations.logs({ automationId: 'nightly' })).toEqual([]);
+      expect(automations.state('nightly')).toMatchObject({ nextRunAt: occurrenceAt });
+      expect(automations.state('nightly')?.consecutiveFailures).toBeUndefined();
+      expect(automations.get('nightly')?.enabled).toBe(true);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      vi.restoreAllMocks();
     }
   }, 30_000);
 

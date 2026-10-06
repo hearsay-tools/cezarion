@@ -9,6 +9,7 @@ import { clearProjectProbeCache, listProjects, registerProject } from '../worksp
 import { ProjectContexts } from './project-context.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
 import { createApp, projectRouteManifest, type ProjectRouteInfo } from './server.ts';
+import { seedRuns } from '../runs/run-store.testkit.ts';
 
 /**
  * Alias parity for the mirrored project-route table (spec
@@ -249,7 +250,7 @@ describe('project-route alias parity (unprefixed vs /api/v1/p/<boot> vs /api/v1/
   it('pins through every boot alias and isolates colliding IDs in another project', async () => {
     store.updateRun(runId, { status: 'done' });
     store.flush();
-    writeFileSync(join(otherRoot, '.ai/cezar/runs.json'), JSON.stringify([store.getRun(runId)]));
+    seedRuns(join(otherRoot, '.ai/cezar'), [store.getRun(runId)!]);
     const other = await registerProject(otherRoot);
     for (const path of spellings(bootId, `/runs/${runId}/pin`)) {
       const response = await apiRequest(app, path, { method: 'POST' });

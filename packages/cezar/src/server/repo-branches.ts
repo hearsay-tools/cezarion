@@ -20,8 +20,8 @@ import { z } from 'zod';
 import type { BranchClass, BranchPrState, RepoBranchEntry, RepoBranchesResponse } from '@open-mercato/cezar-contract';
 import { isSafeGitRef } from '../git-refs.ts';
 import { withWorktreeMutation } from '../git-worktree-lock.ts';
-import { branchFor, ownedCleanupProtection, parseShortstat } from '../git-worktree.ts';
-import type { RunRecord, RunStatus } from '../runs/store.ts';
+import { ownedCleanupProtection, parseShortstat } from '../git-worktree.ts';
+import type { BranchOwner, RunStatus } from '../runs/store.ts';
 import { fetchGithubRefStatus, GH_REF_STATUS_MAX, refNumberFromUrl, type ReferenceStatus } from './github.ts';
 import type { LogEntryWithParents } from './git.ts';
 
@@ -146,7 +146,8 @@ export function __clearPrListCacheForTests(): void {
 export interface ClassifyInput {
   /** Repository top level (`RepoInfo.root`). */
   root: string;
-  runs: readonly RunRecord[];
+  /** Every run that owns a branch (`RunStore.listBranchOwners`): the few fields read here. */
+  runs: readonly BranchOwner[];
   /** The run manager's liveness — a run can be live while its record still says `done`. */
   isActive: (runId: string) => boolean;
   /** `config.baseBranch`, when the repo sets one. */
@@ -229,19 +230,20 @@ async function checkedOutBranches(root: string): Promise<Set<string>> {
   return out;
 }
 
-/** The branch a run owns: its recorded `branch`, or `cez/<id8>` for an old worktree run. */
-function runBranch(run: RunRecord): string | undefined {
-  return run.branch ?? (run.worktreePath ? branchFor(run.id) : undefined);
+/** The branch a run owns: its recorded `branch`, or `cez/<id8>` for an old worktree run — the
+ *  store's `branch` column already says which (`encodeRunRow`). */
+function runBranch(run: BranchOwner): string | undefined {
+  return run.branch;
 }
 
-function isFinished(run: RunRecord): boolean {
+function isFinished(run: BranchOwner): boolean {
   return FINISHED.has(run.status) || run.archived === true;
 }
 
 /** Where the run forked: a pinned sha, or the branch's creation entry in its reflog. Only an entry
  *  git wrote as a creation counts: once older entries expire, the oldest SURVIVING one can be a
  *  task commit, and reading that as the fork point would call committed work "empty". */
-async function forkPoint(root: string, run: RunRecord, branch: string): Promise<string | null> {
+async function forkPoint(root: string, run: BranchOwner, branch: string): Promise<string | null> {
   if (run.baseBranch && FULL_SHA.test(run.baseBranch)) return run.baseBranch;
   const res = await git(root, ['log', '-g', '--format=%H%x1f%gs', `refs/heads/${branch}`]);
   const oldest = res.ok ? res.stdout.trim().split('\n').filter(Boolean).at(-1) : undefined;
@@ -324,17 +326,17 @@ export async function classifyBranches(input: ClassifyInput): Promise<Classifica
   ]);
   const ahead = await aheadCounts(root, heads, baseSha);
 
-  const runsByBranch = new Map<string, RunRecord[]>();
+  const runsByBranch = new Map<string, BranchOwner[]>();
   for (const run of input.runs) {
     const branch = runBranch(run);
     if (!branch) continue;
     runsByBranch.set(branch, [...(runsByBranch.get(branch) ?? []), run]);
   }
-  const liveRun = (run: RunRecord) => input.isActive(run.id) || !isFinished(run);
-  const representative = (runs: RunRecord[] | undefined): RunRecord | undefined =>
+  const liveRun = (run: BranchOwner) => input.isActive(run.id) || !isFinished(run);
+  const representative = (runs: BranchOwner[] | undefined): BranchOwner | undefined =>
     runs?.find(liveRun) ?? runs?.slice().sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))[0];
 
-  interface Draft { head: HeadRow; run?: RunRecord; cls: BranchClass | null; ahead: number }
+  interface Draft { head: HeadRow; run?: BranchOwner; cls: BranchClass | null; ahead: number }
   const drafts: Draft[] = heads.map((head) => {
     const runs = runsByBranch.get(head.name);
     const run = representative(runs);
@@ -358,7 +360,7 @@ export async function classifyBranches(input: ClassifyInput): Promise<Classifica
     drafts
       .filter((d) => d.cls === null && d.run)
       .map(async (d) => {
-        const fork = await forkPoint(root, d.run as RunRecord, d.head.name);
+        const fork = await forkPoint(root, d.run as BranchOwner, d.head.name);
         if (fork !== d.head.sha) return;
         if (d.ahead === 0 || (await retainingRef((args) => git(root, args), d.head.sha, new Set([`refs/heads/${d.head.name}`]))) !== null) d.cls = 'empty';
       }),
@@ -487,7 +489,7 @@ async function stateKey(input: ClassifyInput): Promise<string> {
     git(input.root, ['worktree', 'list', '--porcelain']),
   ]);
   const runs = input.runs.map((r) => [
-    r.id, r.status, r.archived, r.branch, r.baseBranch, r.pullRequestUrl, r.title, r.worktreePath, input.isActive(r.id),
+    r.id, r.status, r.archived, r.branch, r.baseBranch, r.pullRequestUrl, r.title, input.isActive(r.id),
   ]);
   return createHash('sha256')
     .update(JSON.stringify([refs.stdout, worktrees.stdout, input.configuredBase, input.currentBranch, input.hasRemote, runs]))
@@ -671,11 +673,11 @@ const SQUASH_PR = /\(#(\d+)\)\s*$/;
 export async function attributeLog(
   root: string,
   entries: readonly LogEntryWithParents[],
-  runs: readonly RunRecord[],
+  runs: readonly BranchOwner[],
 ): Promise<Array<LogSource | null>> {
   if (runs.length === 0) return entries.map(() => null);
-  const byBranch = new Map<string, RunRecord>();
-  const byPr = new Map<number, RunRecord>();
+  const byBranch = new Map<string, BranchOwner>();
+  const byPr = new Map<number, BranchOwner>();
   for (const run of runs) {
     const branch = runBranch(run);
     if (branch) byBranch.set(branch, run);
@@ -696,7 +698,7 @@ export async function attributeLog(
     });
     return (await tips).get(sha) ?? [];
   };
-  const source = (run: RunRecord, prNumber: number | null): LogSource => ({
+  const source = (run: BranchOwner, prNumber: number | null): LogSource => ({
     runId: run.id,
     title: run.title ?? run.id,
     prNumber: prNumber ?? (run.pullRequestUrl ? refNumberFromUrl(run.pullRequestUrl) : null),
@@ -709,7 +711,7 @@ export async function attributeLog(
         // What the merge itself recorded comes first — the PR a task opened, then the branch the
         // subject names. A ref at the second parent is only a fallback: a later task branched at
         // that tip points there too, without having produced any of the work.
-        if (prNumber !== null && byPr.has(prNumber)) return source(byPr.get(prNumber) as RunRecord, prNumber);
+        if (prNumber !== null && byPr.has(prNumber)) return source(byPr.get(prNumber) as BranchOwner, prNumber);
         const named = mergePr?.[2] ?? MERGE_BRANCH.exec(entry.subject)?.[1];
         const run = named ? byBranch.get(named.replace(/^origin\//, '')) : undefined;
         if (run) return source(run, prNumber);

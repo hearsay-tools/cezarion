@@ -17,22 +17,36 @@ export class WorkerScratchCleanup {
     clearTimeout(this.recoveryTimer); this.recoveryTimer = undefined;
   }
   recover(): void {
+    // A store that could not open (#779) knows none of its runs: every scratch dir would look orphaned.
+    if (this.store.unavailable) return;
     this.enabled = true;
     clearTimeout(this.recoveryTimer); this.recoveryTimer = undefined;
     const retained = workerEvidenceRunIds(this.dataDir);
-    for (const id of new Set([...this.store.listRuns().map(run => run.id), ...(retained ?? [])])) this.schedule(id);
-    // The sweep independently reserves every private-evidence id, even if the index lost it.
-    sweepAgentTmpDirs(this.dataDir, this.store.listRuns().filter(run =>
-      this.busy(run.id) || ['queued', 'running', 'waiting'].includes(run.status) || run.delegation?.role === 'worker' || run.delegation?.role === 'invalid').map(run => run.id));
+    // Only runs that can own scratch matter: the live set, and every worker or quarantined run
+    // by id (indexed, nothing decoded, #779). Other finished runs were reaped when they ended.
+    const live = this.store.listRuns();
+    const owners = [...this.store.listWorkerIds(), ...this.store.listQuarantinedRunIds()];
+    for (const id of new Set([...live.map(run => run.id), ...owners, ...(retained ?? [])])) this.schedule(id);
+    // The sweep independently reserves every private-evidence id, even if the index lost it, and
+    // every run another process claims (#779): its live runs are not in this store's live set, and
+    // their scratch is theirs.
+    sweepAgentTmpDirs(this.dataDir, [...new Set([...live.filter(run =>
+      this.busy(run.id) || ['queued', 'running', 'waiting'].includes(run.status)).map(run => run.id), ...owners,
+      ...this.store.listForeignClaimedRunIds()])]);
     if (!retained) { // failed enumeration must not permanently lose a wake source
       this.recoveryTimer = setTimeout(() => this.recover(), 60_000); this.recoveryTimer.unref?.();
     }
   }
   schedule(id: string, delay = 0): void {
-    const run = this.store.getRun(id);
-    if (!this.enabled || this.timers.has(id) || (run && (['queued', 'running', 'waiting'].includes(run.status) ||
-      (run.delegation?.role !== 'worker' && run.delegation?.role !== 'invalid')))) return;
+    if (!this.enabled || this.timers.has(id) || this.store.unavailable) return;
+    // The scratch check first: most ids have none, and a finished record is decoded to ask (#779).
     if (!agentTmpDirMayExist(this.dataDir, id)) return;
+    // Another process's run (#779, plan step 3): cleaning up after it is its owner's job, or the
+    // job of whoever adopts it once that owner is gone.
+    if (this.store.writeRefusal(id)) return;
+    const run = this.store.getRun(id);
+    if (run && (['queued', 'running', 'waiting'].includes(run.status) ||
+      (run.delegation?.role !== 'worker' && run.delegation?.role !== 'invalid'))) return;
     // Reconstruct older complete checkpoints while the valid terminal index still exists.
     try { this.store.retainWorkerScratchCleanup(id); } catch { /* retry unreadable evidence */ }
     const proof = this.store.readWorkerExecution(id);

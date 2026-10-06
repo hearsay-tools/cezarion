@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, onTestFailed, vi } from 'vitest';
@@ -22,6 +22,7 @@ import {
   manager, parent, queuedWake, register, reopenRuntime, restart, root, semaphore, setFailureState,
   store, terminal, track, until, useWorkerWaitFixture, waitOf, worker,
 } from './worker-wait.testkit.ts';
+import { blockRunWrites, readPersistedRuns, readPersistedText } from '../runs/run-store.testkit.ts';
 
 // Real Git, durable fsync checkpoints and process shutdown share this outer budget.
 // Keep the separate 15s state/termination assertions and actual runner timers intact.
@@ -34,17 +35,17 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
     const wait = register(p.id, [w.id], 1); // registered: still counts as an executing turn
     const busy = semaphore.busy(); const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    store.flush(); const diskPath = join(root, '.ai/cezar/runs.json'); const disk = readFileSync(diskPath, 'utf8');
-    const tmpPath = `${diskPath}.tmp`; mkdirSync(tmpPath);
+    store.flush(); const dataDir = join(root, '.ai/cezar'); const disk = readPersistedText(dataDir);
+    const unblock = blockRunWrites(dataDir);
     try {
       await vi.advanceTimersByTimeAsync(1_000);
       await vi.advanceTimersByTimeAsync(3_000);
       expect(waitOf(store.getRun(p.id))?.phase).toBe('registered');
-      expect(readFileSync(diskPath, 'utf8')).toBe(disk);
+      expect(readPersistedText(dataDir)).toBe(disk);
       expect(store.getRun(p.id)?.agentInputs ?? []).toEqual([]);
       expect(semaphore.busy()).toBe(busy);
       expect(warn).toHaveBeenCalledTimes(1);
-    } finally { rmSync(tmpPath, { recursive: true }); }
+    } finally { unblock(); }
     await vi.advanceTimersByTimeAsync(1_000);
     expect(waitOf(store.getRun(p.id))).toMatchObject({ id: wait.id, phase: 'wake-pending' });
     expect(store.getRun(p.id)?.agentInputs?.[0]).toMatchObject({ id: wait.id });
@@ -84,13 +85,12 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
   it('a failed queued human withdrawal publishes no wait, wake, message or admission changes', async () => {
     const { p } = await queuedWake(); store.flush();
     const snapshot = JSON.stringify(store.getRun(p.id));
-    const diskPath = join(root, '.ai/cezar/runs.json'); const disk = readFileSync(diskPath, 'utf8');
-    rmSync(diskPath); mkdirSync(diskPath);
+    const release = blockRunWrites(join(root, '.ai/cezar'));
     try {
       expect(() => manager.enqueueMessage(p.id, [{ type: 'text', text: 'must not be accepted' }])).toThrow();
       expect(JSON.stringify(store.getRun(p.id))).toBe(snapshot);
       expect(semaphore.busy()).toBe(1);
-    } finally { rmSync(diskPath, { recursive: true }); writeFileSync(diskPath, disk); }
+    } finally { release(); }
   });
 
   for (const crash of ['before-delivery', 'after-delivery', 'checkpoint-failure'] as const) {
@@ -105,18 +105,18 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
         return real(id, ...args);
       };
       manager.cancel(w.id); await until(() => entered);
-      let checkpoint: string;
+      let checkpoint: unknown[];
       try {
         expect(manager.deferMessage(p.id, [{ type: 'text', text: 'startup human update' },
           { type: 'file', mediaType: 'application/pdf', data: 'YQ==' }])).toBe(true);
         expect(waitOf(store.getRun(p.id))).toBeUndefined();
         expect(store.getRun(p.id)?.queuedMessages?.at(-1)?.text).toBe('startup human update');
-        store.flush(); checkpoint = readFileSync(join(root, '.ai/cezar/runs.json'), 'utf8');
+        store.flush(); checkpoint = readPersistedRuns(join(root, '.ai/cezar'));
         if (crash === 'checkpoint-failure') {
           const commit = store.commitQueuedMessageDelivery.bind(store);
           store.commitQueuedMessageDelivery = (...args) => {
-            const tmpPath = join(root, '.ai/cezar/runs.json.tmp'); mkdirSync(tmpPath);
-            try { commit(...args); } finally { rmSync(tmpPath, { recursive: true }); }
+            const unblock = blockRunWrites(join(root, '.ai/cezar'));
+            try { commit(...args); } finally { unblock(); }
           };
         }
       } finally { release(); }
@@ -130,7 +130,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
       }
       if (crash === 'after-delivery') {
         expect(store.getRun(p.id)?.queuedMessages?.some(message => message.text === 'startup human update')).not.toBe(true);
-        store.flush(); checkpoint = readFileSync(join(root, '.ai/cezar/runs.json'), 'utf8');
+        store.flush(); checkpoint = readPersistedRuns(join(root, '.ai/cezar'));
       }
       const eventStart = store.readEvents(p.id).length;
       await restart(false, checkpoint!);
@@ -319,7 +319,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     store.commitWorkerWaitWithdrawal = (...args) => {
       commit(...args);
       if (args[0] === p.id) {
-        const records = JSON.parse(readFileSync(join(root, '.ai/cezar/runs.json'), 'utf8')) as RunRecord[];
+        const records = readPersistedRuns(join(root, '.ai/cezar')) as RunRecord[];
         retiredStatus = records.find(run => run.id === p.id)?.status;
       }
     };
@@ -411,16 +411,14 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
   it('does not release capacity before the parked intent reaches disk', async () => {
     const p = await parent('mock:slow'); const w = await worker(p.id);
     register(p.id, [w.id]); store.flush();
-    const diskPath = join(root, '.ai/cezar/runs.json');
-    const disk = readFileSync(diskPath, 'utf8');
-    rmSync(diskPath); mkdirSync(diskPath);
+    const release = blockRunWrites(join(root, '.ai/cezar'));
     const engine = manager as unknown as { active: Map<string, unknown>; parkWorkerWait(id: string, state: unknown): boolean };
     try {
       expect(() => engine.parkWorkerWait(p.id, engine.active.get(p.id))).toThrow();
       expect(waitOf(store.getRun(p.id))?.phase).toBe('registered');
       expect(semaphore.busy()).toBe(1);
     } finally {
-      rmSync(diskPath, { recursive: true }); writeFileSync(diskPath, disk);
+      release();
     }
   });
 

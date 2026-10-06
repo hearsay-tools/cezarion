@@ -1,7 +1,8 @@
 import { execFileSync, type ChildProcess } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { ApiRun, CreateRunInput, RunRecord, WorkspaceConfigResponse } from '@open-mercato/cezar-api-client'
 
@@ -24,6 +25,18 @@ async function putDefaults(autonomous: boolean | null, worktree: boolean | null)
     body: JSON.stringify({ composerDefaults: { autonomous, worktree } }),
   })
   if (!response.ok) throw new Error(`workspace config update failed: ${response.status}`)
+}
+
+/** The record the server persisted for `runId` — its `runs.db` row (#779), read the way another
+ *  process would, so a store write regression cannot hide behind the API. */
+function persistedRun(runId: string): RunRecord | undefined {
+  const db = new DatabaseSync(join(dataRoot, '.ai/cezar/runs.db'), { readOnly: true })
+  try {
+    const row = db.prepare('SELECT data FROM runs WHERE id = ?').get(runId) as { data: string } | undefined
+    return row ? (JSON.parse(row.data) as RunRecord) : undefined
+  } finally {
+    db.close()
+  }
 }
 
 function choose(selector: string, value: string): void {
@@ -190,10 +203,10 @@ describe('configurable composer run defaults', () => {
     )
     expect(record.autonomous).toBe(expected)
     expect(record.workflowDef?.steps[0]?.skill).toBe('setup')
-    // API agreement alone could miss a store write regression; inspect the flushed index too.
-    await pollFor(() => {
-      const records = JSON.parse(readFileSync(join(dataRoot, '.ai/cezar/runs.json'), 'utf8')) as RunRecord[]
-      return records.find(run => run.id === runId)?.autonomous === expected ? true : undefined
-    }, () => `Run ${runId} did not persist autonomous=${expected}`)
+    // API agreement alone could miss a store write regression; inspect the flushed row too.
+    await pollFor(
+      () => (persistedRun(runId)?.autonomous === expected ? true : undefined),
+      () => `Run ${runId} did not persist autonomous=${expected}`,
+    )
   }, 90_000)
 })

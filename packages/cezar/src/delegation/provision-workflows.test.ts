@@ -1,5 +1,5 @@
 import { scopeFixtureProcesses } from './process-scope.testkit.ts';
-import { createFixtureManager } from '../workflows/fixture-cleanup.testkit.ts';
+import { createFixtureManager, managerDisposed } from '../workflows/fixture-cleanup.testkit.ts';
 import { type WorkerSpawnRequest, workerDiffSchema, workerWaitResultSchema } from '@open-mercato/cezar-contract';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
@@ -19,6 +19,7 @@ import type { RunManager } from '../workflows/run.ts';
 import { agentHomePaths, claudeStateFilePath } from '../paths.ts';
 import { buildChildEnv } from '../core/agent-env.ts';
 import { ProjectContexts } from '../server/project-context.ts';
+import { readPersistedRuns, readPersistedText, seedRuns } from '../runs/run-store.testkit.ts';
 
 const until = (predicate: () => boolean) => vi.waitFor(() => expect(predicate()).toBe(true), { timeout: 15000, interval: 10 });
 // Git worktrees + a live RunManager contend under full-suite workers. until() is already 15s;
@@ -47,7 +48,8 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     for (const manager of recoveredManagers) {
       for (const run of f.store.listRuns()) manager.cancel(run.id);
     }
-    for (const run of f.store.listRuns()) f.manager.cancel(run.id);
+    // After a restart the fixture's manager is the dead process: the recovered ones cancel.
+    if (!managerDisposed(f.manager)) for (const run of f.store.listRuns()) f.manager.cancel(run.id);
     for (const s of sessions) s.finish();
     for (const manager of recoveredManagers) {
       await waitForOwnedWork(manager, f.store);
@@ -73,8 +75,9 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
   }
   async function launchAccepted(accepted: Awaited<ReturnType<typeof acceptIdentityWorker>>, mode: 'queued' | 'restart' | 'continue') {
     if (mode === 'restart') {
+      // A restart: the old store goes too, or it would still own the parent's family.
       f.manager.dispose(); sessions[0]!.finish();
-      f.store.updateRun(accepted.parent.id, { status: 'waiting' }); f.store.flush();
+      f.store.updateRun(accepted.parent.id, { status: 'waiting' }); f.store.close();
       const store = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true });
       const manager = createFixtureManager(store, f.root); recoveredManagers.push(manager); recoveredStores.push(store);
       controller.attachProject({ id: 'restarted', root: f.root, store, manager });
@@ -307,7 +310,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     f.store.updateRun(worker.id, { status: 'queued', finishedAt: undefined,
       continuationMessage: { id: 'continue-1', text: 'again', origin: 'human', createdAt: new Date().toISOString() } });
     f.manager.dispose(); sessions[0]!.finish();
-    f.store.updateRun(a.parent.id, { status: 'waiting' }); f.store.flush();
+    f.store.updateRun(a.parent.id, { status: 'waiting' }); f.store.close();
     const store = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true });
     const manager = createFixtureManager(store, f.root); recoveredManagers.push(manager); recoveredStores.push(store);
     controller.attachProject({ id: 'restarted', root: f.root, store, manager });
@@ -388,13 +391,14 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
       sessions[1]!.finish(); expect(await f.manager.awaitRunTermination(a.child.workerId, 15000)).toBe(true);
     }
     // Simulate exactly the public on-disk salvage boundary, keeping private identity intact.
-    f.store.flush(); const path = join(f.root, '.ai/cezar/runs.json');
-    const records = JSON.parse(readFileSync(path, 'utf8'));
-    const record = records.find((r: { id: string }) => r.id === a.child.workerId);
+    f.store.flush(); const dataDir = join(f.root, '.ai/cezar');
+    const records = readPersistedRuns(dataDir);
+    const record = records.find((r: { id: string }) => r.id === a.child.workerId)!;
     if (damage === 'missing') delete record.workflowDef;
     else if (damage === 'malformed') record.workflowDef.name = 42;
     else record.workflowDef.steps = [{ id: 'different', prompt: '{{task}}' }];
-    writeFileSync(path, JSON.stringify(records));
+    f.store.close(); // a restart: the old store must not still own the family it reloads
+    seedRuns(dataDir, records);
     f.manager.dispose(); sessions[0]!.finish();
     const store = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true });
     const manager = createFixtureManager(store, f.root); recoveredManagers.push(manager); recoveredStores.push(store);
@@ -634,7 +638,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
       children.push(await controller.service.spawn(caller, { task: `child ${index}`, baseline: 'HEAD', requestId: randomUUID() }));
     }
     f.store.flush();
-    expect(readFileSync(join(f.root, '.ai/cezar/runs.json'), 'utf8')).not.toContain('PARENT SKILL BODY 778');
+    expect(readPersistedText(join(f.root, '.ai/cezar'))).not.toContain('PARENT SKILL BODY 778');
     for (const child of children) expect(f.store.getRun(child.workerId)?.systemPrompt).toBe('parent extra');
   });
   it('gives first-session and post-Continue spawns the same inherited prompt', async () => {
@@ -670,7 +674,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     f.store.addStep(worker.id, { id: 'continue-2', name: 'Continue', kind: 'agent', synthetic: 'continuation' });
     f.store.updateRun(worker.id, { status: 'queued', finishedAt: undefined, currentStepId: undefined,
       continuationMessage: { id: 'continue-2', text: 'recover legacy', origin: 'human', createdAt: new Date().toISOString() } });
-    f.store.updateRun(f.parent.id, { status: 'waiting' }); f.store.flush(); f.manager.dispose();
+    f.store.updateRun(f.parent.id, { status: 'waiting' }); f.store.close(); f.manager.dispose();
     const store = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true }); recoveredStores.push(store);
     expect(store.getRun(worker.id)?.systemPrompt).toBe(legacyPrompt);
     const manager = createFixtureManager(store, f.root); recoveredManagers.push(manager);
@@ -777,7 +781,9 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
   });
   it('attaches lazy project provisioning before recovery can launch a session', async () => {
     // A persisted queued ordinary task becomes a root only in the recovered session.
-    const run = f.store.createRun({ title: 'queued', task: 'recover', workflow: 'quick-task', runner: 'claude', steps: [{ id: 'task', name: 'Task', kind: 'agent' }] }); f.store.flush();
+    const run = f.store.createRun({ title: 'queued', task: 'recover', workflow: 'quick-task', runner: 'claude', steps: [{ id: 'task', name: 'Task', kind: 'agent' }] });
+    // A restart into a lazily built context: the old manager and store go first.
+    f.manager.dispose(); f.store.close();
     const contexts = new ProjectContexts({ listProjects: async () => [{ id: 'lazy', root: f.root, status: 'ok' }], prepareManager: project => controller.attachProject(project) });
     try {
       const context = await contexts.context('lazy');

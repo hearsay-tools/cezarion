@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -8,6 +8,7 @@ import { RunManager } from '../workflows/run.ts';
 import type { AgentSession } from '../core/agent-runner.ts';
 import { RunStore, type RunRecord } from '../runs/store.ts';
 import { enqueueAgentInput, nextAgentInput, agentInputBatch } from './input.ts';
+import { blockRunWrites } from '../runs/run-store.testkit.ts';
 
 it('bounds batches without splitting messages or crossing lifecycle inputs', () => {
   const make = (text: string): AgentInput => ({ id: randomUUID(), source: 'agent', parentRunId: randomUUID(), text, createdAt: new Date().toISOString(),
@@ -55,13 +56,13 @@ describe('attributed input queue', () => {
     try {
       const record = store.createRun({ title: 'task', task: 'task', workflow: 'quick-task', steps: [] });
       store.flush();
-      mkdirSync(join(dir, 'runs.json.tmp'));
+      const release = blockRunWrites(dir);
       const events: unknown[] = [];
       store.on('run', event => events.push(event));
       expect(() => store.commitAgentInputs(record.id, [input])).toThrow();
       expect(record.agentInputs).toBeUndefined();
       expect(events).toEqual([]);
-      rmSync(join(dir, 'runs.json.tmp'), { recursive: true });
+      release();
       store.commitAgentInputs(record.id, [input]);
       expect(record.agentInputs).toEqual([input]);
       expect(RunStore.open(dir, { keepLive: true }).getRun(record.id)?.agentInputs).toEqual([input]);
@@ -310,15 +311,15 @@ it.each(['active', 'durable'] as const)('inbox cannot reserve an input in the %s
 it('failed claim and ACK checkpoints publish nothing and the same receipt can retry', async () => {
   await withInboxRun(({ store, manager, dir, runId, enqueue }) => {
     const first = enqueue('first'), generation = randomUUID(); store.flush();
-    mkdirSync(join(dir, 'runs.json.tmp'));
+    let release = blockRunWrites(dir);
     expect(() => manager.reserveInboxInputs(runId, generation, [first.id])).toThrow();
     expect(store.getRun(runId)?.agentInputs).toEqual([first]);
-    rmSync(join(dir, 'runs.json.tmp'), { recursive: true });
+    release();
     const receipt = manager.reserveInboxInputs(runId, generation, [first.id])!;
-    mkdirSync(join(dir, 'runs.json.tmp'));
+    release = blockRunWrites(dir);
     expect(() => manager.acknowledgeInbox(runId, generation, receipt.receiptId)).toThrow();
     expect(store.getRun(runId)?.agentInputs?.[0]?.deliveredAt).toBeUndefined();
-    rmSync(join(dir, 'runs.json.tmp'), { recursive: true });
+    release();
     expect(manager.acknowledgeInbox(runId, generation, receipt.receiptId)).toBe('acknowledged');
   });
 });
@@ -342,7 +343,8 @@ it.each(['live', 'expired'] as const)('restart recovers a %s receipt and expiry 
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
     const first = enqueue('recovered input'), generation = randomUUID();
     const receipt = manager.reserveInboxInputs(runId, generation, [first.id])!;
-    store.updateRun(runId, { status: 'waiting' }); store.flush(); manager.dispose();
+    // A restart: the old store goes too, or it would still own the run.
+    store.updateRun(runId, { status: 'waiting' }); store.close(); manager.dispose();
     vi.setSystemTime(Date.now() + (mode === 'live' ? 60_000 : 120_001));
     const reopened = RunStore.open(dir, { keepLive: true }), recovered = new RunManager(reopened, dir);
     // Hold scheduler admission while observing the real durable wake produced by expiry.
@@ -399,17 +401,17 @@ it('expiry retries a failed checkpoint without delivering or losing the durable 
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
     const first = enqueue('first'); const receipt = manager.reserveInboxInputs(runId, randomUUID(), [first.id])!;
     await vi.advanceTimersByTimeAsync(119_999);
-    mkdirSync(join(dir, 'runs.json.tmp'));
+    const release = blockRunWrites(dir);
     const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
       await vi.advanceTimersByTimeAsync(1);
       expect(sent).toEqual([]);
       expect(store.getRun(runId)?.agentInputs?.[0]?.inboxClaim?.receiptId).toBe(receipt.receiptId);
-      rmSync(join(dir, 'runs.json.tmp'), { recursive: true });
+      release();
       await vi.advanceTimersByTimeAsync(1_000);
       expect(sent).toHaveLength(1); expect(sent[0]).toContain(first.id);
       expect(store.getRun(runId)?.agentInputs?.[0]?.inboxClaim).toBeUndefined();
-    } finally { warning.mockRestore(); rmSync(join(dir, 'runs.json.tmp'), { recursive: true, force: true }); }
+    } finally { warning.mockRestore(); release(); }
   });
 });
 
@@ -422,7 +424,7 @@ it('restart after durable inbox ACK retires the wake without creating a continua
     store.updateRun(runId, { status: 'waiting' });
     // Simulate the crash boundary after the atomic ACK and before manager reconciliation.
     store.ackInboxInputs(runId, receiptId, generation, new Date().toISOString());
-    manager.dispose(); store.flush();
+    manager.dispose(); store.close();
     const reopened = RunStore.open(dir, { keepLive: true }), recovered = new RunManager(reopened, dir);
     const pump = vi.spyOn(recovered as unknown as { pump(): Promise<void> }, 'pump').mockResolvedValue();
     try {

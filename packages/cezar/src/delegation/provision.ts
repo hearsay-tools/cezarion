@@ -140,7 +140,8 @@ export class DelegationController {
     });
     const detach = () => {
       clear(); unregister();
-      for (const run of project.store.listRuns()) this.credentials.revoke(run.id);
+      // By project, not by run: a credential outlives nothing the store has to list (#779).
+      this.credentials.revokeProject(project.id);
       if (this.projects.get(project.id)?.detach === detach) this.projects.delete(project.id);
     };
     this.projects.set(project.id, { project, detach });

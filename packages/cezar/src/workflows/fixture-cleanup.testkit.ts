@@ -41,8 +41,15 @@ export function createFixtureManager(...args: ConstructorParameters<typeof RunMa
   return manager;
 }
 
+/** Whether a test already disposed `manager`, as a restart does to the process it replaces: its
+ *  runs are then the recovered manager's, and its store may already be closed (#779). */
+export function managerDisposed(manager: RunManager): boolean {
+  return (manager as unknown as { disposed: boolean }).disposed;
+}
+
 /** Stop parked sessions, wait for actual work, then dispose/flush. A timeout
- * leaves the directory intact; rm errors are never caught or retried. */
+ * leaves the directory intact; rm errors are never caught or retried. A manager a test already
+ * disposed (a restart) has its sessions interrupted but cancels nothing: it is the dead process. */
 export async function drainFixtureManagers(root: string, timeoutMs = 8_000): Promise<void> {
   const group = fixtures.get(root) ?? [];
   const deadline = Date.now() + timeoutMs;
@@ -54,9 +61,10 @@ export async function drainFixtureManagers(root: string, timeoutMs = 8_000): Pro
     for (const { manager, store, sessions } of group) {
       const ids = cancelled.get(manager) ?? new Set<string>();
       cancelled.set(manager, ids);
-      for (const run of store.listRuns()) if (manager.isActive(run.id) && !ids.has(run.id)) {
-        ids.add(run.id);
-        manager.cancel(run.id);
+      // Every id: a manager may still hold a run whose record already settled (#779).
+      for (const id of managerDisposed(manager) ? [] : store.listRunIds()) if (manager.isActive(id) && !ids.has(id)) {
+        ids.add(id);
+        manager.cancel(id);
       }
       for (const session of sessions) {
         if (!interrupted.has(session)) { interrupted.add(session); session.interrupt(); }
