@@ -27,6 +27,15 @@ import { createInterface } from 'node:readline';
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 
 import * as parityGateFs from 'node:fs';
+async function waitForMockRelease(fallbackMs) {
+  const file = process.env.CEZ_MOCK_RELEASE_FILE;
+  if (!file) { if (fallbackMs) await sleep(fallbackMs); return; }
+  const deadline = Date.now() + 15_000;
+  while (!parityGateFs.existsSync(file)) {
+    if (Date.now() > deadline) throw new Error('CEZ_MOCK_RELEASE_FILE was not created');
+    await sleep(10);
+  }
+}
 
 // #401: let the test observe the actual monitoring park before releasing late wire frames.
 async function afterParityPark(prompt) {
@@ -294,6 +303,37 @@ async function respond(userText, imageCount, uuid) {
   if (userText.includes('mock:busy-progress')) {
     for (let i = 0; i < 24; i++) { emit({ type: 'ping' }); await sleep(100); }
     emit({ type: 'result', subtype: 'success', result: 'busy complete' });
+    return;
+  }
+  if (userText.includes('mock:hold-done')) {
+    await waitForMockRelease(400);
+    const held = 'parity hold-done: content after the pause\n\nCEZ:DONE';
+    emit({
+      type: 'assistant',
+      message: { role: 'assistant', content: [{ type: 'text', text: held }], usage: { input_tokens: 20, output_tokens: 10 } },
+    });
+    emit({ type: 'result', subtype: 'success', result: held, usage: { input_tokens: 20, output_tokens: 10 }, total_cost_usd: 0.0001 });
+    return;
+  }
+  if (userText.includes('mock:hold-ask')) {
+    await waitForMockRelease(400);
+    const ask = 'Pick one.\n\nCEZ:ASK {"questions":[{"header":"Library","question":"Which test library?","options":[{"label":"Vitest"},{"label":"Node test"}]}]}';
+    emit({
+      type: 'assistant',
+      message: { role: 'assistant', content: [{ type: 'text', text: ask }], usage: { input_tokens: 20, output_tokens: 10 } },
+    });
+    emit({ type: 'result', subtype: 'success', result: ask, usage: { input_tokens: 20, output_tokens: 10 }, total_cost_usd: 0.0001 });
+    return;
+  }
+  if (userText.includes('mock:hold-gated')) {
+    await waitForMockRelease(250);
+    const gated = 'parity hold-gated: content after the pause';
+    emit({
+      type: 'assistant',
+      message: { role: 'assistant', content: [{ type: 'text', text: gated }], usage: { input_tokens: 20, output_tokens: 10 } },
+    });
+    await sleep(250);
+    emit({ type: 'result', subtype: 'success', result: gated, usage: { input_tokens: 20, output_tokens: 10 }, total_cost_usd: 0.0001 });
     return;
   }
   if (userText.includes('mock:hold')) {

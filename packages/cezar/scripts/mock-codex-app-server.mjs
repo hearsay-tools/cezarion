@@ -72,6 +72,15 @@ let ciWire;
 let steerTurn = null;
 let steerSerial = 0;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+async function waitForMockRelease(fallbackMs) {
+  const file = process.env.CEZ_MOCK_RELEASE_FILE;
+  if (!file) { if (fallbackMs) await sleep(fallbackMs); return; }
+  const deadline = Date.now() + 15_000;
+  while (!parityGateFs.existsSync(file)) {
+    if (Date.now() > deadline) throw new Error('CEZ_MOCK_RELEASE_FILE was not created');
+    await sleep(10);
+  }
+}
 const completeSteerTurn = (turnId) => {
   steerTurn = null;
   emit({ method: 'turn/completed', params: { threadId: 'th_mock_1', turn: { id: turnId, status: 'completed' } } });
@@ -317,6 +326,26 @@ rl.on('line', async (line) => {
       } });
       return;
     }
+    if (turnText.includes('mock:hold-done')) {
+      await waitForMockRelease(400);
+      const full = 'parity hold-done: content after the pause\n\nCEZ:DONE';
+      emit({ method: 'item/started', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: 'item_hd1', text: '' } } });
+      emit({ method: 'item/agentMessage/delta', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', itemId: 'item_hd1', delta: full } });
+      emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: 'item_hd1', text: full } } });
+      emit({ method: 'thread/tokenUsage/updated', params: { threadId: 'th_mock_1', tokenUsage: { total: { totalTokens: 30, inputTokens: 20, outputTokens: 10 }, last: { totalTokens: 30, inputTokens: 20, outputTokens: 10 } } } });
+      emit({ method: 'turn/completed', params: { turn: { id: 'turn_mock_1', status: 'completed' } } });
+      return;
+    }
+    if (turnText.includes('mock:hold-ask')) {
+      await waitForMockRelease(400);
+      const ask = 'Pick one.\n\nCEZ:ASK {"questions":[{"header":"Library","question":"Which test library?","options":[{"label":"Vitest"},{"label":"Node test"}]}]}';
+      emit({ method: 'item/started', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: 'item_ha1', text: '' } } });
+      emit({ method: 'item/agentMessage/delta', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', itemId: 'item_ha1', delta: ask } });
+      emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: 'item_ha1', text: ask } } });
+      emit({ method: 'thread/tokenUsage/updated', params: { threadId: 'th_mock_1', tokenUsage: { total: { totalTokens: 30, inputTokens: 20, outputTokens: 10 }, last: { totalTokens: 30, inputTokens: 20, outputTokens: 10 } } } });
+      emit({ method: 'turn/completed', params: { turn: { id: 'turn_mock_1', status: 'completed' } } });
+      return;
+    }
     if (turnText.includes('mock:done')) {
       // A turn that DECLARES the task complete, so the run reaches cezar's
       // review gate instead of parking for the user. A markerless turn-end
@@ -336,6 +365,16 @@ rl.on('line', async (line) => {
         emit({ method: 'item/commandExecution/outputDelta', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', itemId: 'busy', delta: 'working\n' } });
         await new Promise(r => setTimeout(r, 100));
       }
+      emit({ method: 'turn/completed', params: { turn: { id: 'turn_mock_1', status: 'completed' } } });
+      return;
+    }
+    if (turnText.includes('mock:hold-gated')) {
+      await waitForMockRelease(250);
+      const gated = 'parity hold-gated: content after the pause';
+      emit({ method: 'item/started', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: 'item_hg1', text: '' } } });
+      emit({ method: 'item/agentMessage/delta', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', itemId: 'item_hg1', delta: gated } });
+      emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: 'item_hg1', text: gated } } });
+      emit({ method: 'thread/tokenUsage/updated', params: { threadId: 'th_mock_1', tokenUsage: { total: { totalTokens: 30, inputTokens: 20, outputTokens: 10 }, last: { totalTokens: 30, inputTokens: 20, outputTokens: 10 } } } });
       emit({ method: 'turn/completed', params: { turn: { id: 'turn_mock_1', status: 'completed' } } });
       return;
     }

@@ -658,6 +658,16 @@ describe('agent input steering (#505)', () => {
     return { session, events };
   };
 
+  it('holdsHumanInput is true while a human line is unsettled and false after its result (#486)', async () => {
+    const { session, events } = start();
+    await waitUntil(() => events.some(e => e.type === 'tool-call'));
+    expect(session.sendMessage([{ type: 'text', text: 'human-unsettled' }])).toBe(true);
+    expect(session.holdsHumanInput()).toBe(true);
+    await waitUntil(() => events.some(e => e.type === 'turn-end'));
+    expect(session.holdsHumanInput()).toBe(false);
+    session.end(); await session.result;
+  });
+
   it('steers agent input into the running turn and reports consumption by uuid', async () => {
     const consumed: string[][] = []; const ui: UiEvent[] = [];
     const { session, events } = start({ onAgentInputConsumed: ids => consumed.push([...ids]), onUiEvent: event => ui.push(event) });

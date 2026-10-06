@@ -167,6 +167,7 @@ export class ClaudeCliRunner implements AgentRunner {
     // lists every line it covered in `user_message_uuids` (#505) — a per-line
     // counter left the runner busy forever after a merged follow-up.
     const unsettled = new Set<string>();
+    const humanUnsettled = new Set<string>();
     let queuedTurnPending = false;
     const submissions = new InputSubmissions();
     const scheduleAutoEnd = () => {
@@ -209,6 +210,7 @@ export class ClaudeCliRunner implements AgentRunner {
       try {
         child.stdin.write(`${line}\n`, acknowledge);
         unsettled.add(uuid);
+        if (inputIds.length === 0) humanUnsettled.add(uuid);
         submissions.accept(uuid, inputIds, '');
         // A user message written to an idle session begins a turn (§7.1).
         if (opensTurn) emitUi(claudeTurnStarted);
@@ -353,7 +355,7 @@ export class ClaudeCliRunner implements AgentRunner {
             // A line this result covered was read even if its replay echo was missed.
             // An error result settles its lines but proves nothing reached the model: they
             // stay pending, so a closing session returns them to the queue (#505 review).
-            const covered = settled.flatMap(id => { unsettled.delete(id); return msg.is_error === true ? [] : submissions.consume(id); });
+            const covered = settled.flatMap(id => { unsettled.delete(id); humanUnsettled.delete(id); return msg.is_error === true ? [] : submissions.consume(id); });
             if (covered.length) opts.onAgentInputConsumed?.(covered);
             // A result is not idle if human stdin messages already queued later turns.
             agentInputReady = unsettled.size === 0;
@@ -474,6 +476,7 @@ export class ClaudeCliRunner implements AgentRunner {
         return acknowledged;
       },
       discardQueuedMessages: () => undefined,
+      holdsHumanInput: () => humanUnsettled.size > 0,
       end,
       interrupt,
       pid: child.pid,

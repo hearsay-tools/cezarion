@@ -25,6 +25,16 @@ const start = (prompt: string, opts: SessionOptions = {}, extraEnv: Record<strin
 };
 
 describe('pi agent input steering (#505)', () => {
+  it('holdsHumanInput tracks humanPromptAcks until the prompt response (#486)', async () => {
+    const { session, events } = start('mock:steer-tool');
+    await waitUntil(() => events.some(e => e.type === 'tool-call'));
+    expect(session.sendMessage([{ type: 'text', text: 'human-ack' }])).toBe(true);
+    expect(session.holdsHumanInput()).toBe(true);
+    await waitUntil(() => !session.holdsHumanInput());
+    expect(session.holdsHumanInput()).toBe(false);
+    session.end(); await session.result;
+  });
+
   it('steers agent input into the running turn and reports consumption by text', async () => {
     const consumed: string[][] = [];
     const { session, events, prompts } = start('mock:steer-tool', { onAgentInputConsumed: ids => consumed.push([...ids]) });

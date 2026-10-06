@@ -743,13 +743,42 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
       session.sendMessage([{ type: 'text', text: 'follow-up' }]);
       await sleep(80);
       expect(mock.promptPosts).toHaveLength(1);
+      expect(session.holdsHumanInput()).toBe(true);
 
       mock.send({ type: 'session.idle', properties: { sessionID: 'ses_test' } });
       await waitFor(() => mock.promptPosts.length === 2);
+      expect(session.holdsHumanInput()).toBe(false);
       expect(count(events, 'turn-end')).toBe(1);
 
       mock.send({ type: 'session.idle', properties: { sessionID: 'ses_test' } });
       await waitFor(() => count(events, 'turn-end') === 2);
+    });
+  });
+
+  it('does not count an agent-origin waiter as held human input (#486)', async () => {
+    await withSession({}, async ({ mock, session }) => {
+      await waitFor(() => mock.promptPosts.length === 1);
+      const ack = session.sendAgentMessage([{ type: 'text', text: 'agent-origin' }], ['in-1']);
+      expect(ack).not.toBe(false);
+      expect(session.holdsHumanInput()).toBe(false);
+      session.interrupt();
+      await (ack as Promise<void>).catch(() => undefined);
+    });
+  });
+
+  it('holdsHumanInput is true while queuedQuestionMessages is nonempty (#486)', async () => {
+    await withSession({ questionReplyDelayMs: 250 }, async ({ uiEvents, mock, session }) => {
+      await waitFor(() => mock.promptPosts.length === 1);
+      mock.pendingQuestions.push({ id: 'q_queued', sessionID: 'ses_test' });
+      sendQuestion(mock, {
+        questions: [{ header: 'Library', question: 'Which test library?', options: [{ label: 'Vitest' }, { label: 'Node test' }] }],
+      }, 'tool_question', 'pending');
+      await waitFor(() => uiEvents.some(event => event.type === 'ask.requested'));
+      expect(session.sendMessage([{ type: 'text', text: 'Library: Vitest' }])).toBe(true);
+      expect(session.sendMessage([{ type: 'text', text: 'queued-while-reply' }])).toBe(true);
+      expect(session.holdsHumanInput()).toBe(true);
+      session.discardQueuedMessages();
+      expect(session.holdsHumanInput()).toBe(false);
     });
   });
 
@@ -760,8 +789,10 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
       session.sendMessage([{ type: 'text', text: 'follow-up' }]);
       await sleep(80);
       expect(mock.promptPosts).toHaveLength(1);
+      expect(session.holdsHumanInput()).toBe(true);
 
       session.discardQueuedMessages();
+      expect(session.holdsHumanInput()).toBe(false);
 
       mock.send({ type: 'session.idle', properties: { sessionID: 'ses_test' } });
       await sleep(80);

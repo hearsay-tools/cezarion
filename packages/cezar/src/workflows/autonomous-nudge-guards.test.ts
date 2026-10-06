@@ -30,7 +30,7 @@ describe('autonomous nudge priority and lifecycle guards', () => {
     session = {
       open: true, result: Promise.resolve({ text: '', toolCalls: [], tokensUsed: 0 }),
       sendMessage: vi.fn(() => true), sendAgentMessage: vi.fn(() => Promise.resolve()),
-      end: vi.fn(), interrupt: vi.fn(), discardQueuedMessages: vi.fn(),
+      end: vi.fn(), interrupt: vi.fn(), discardQueuedMessages: vi.fn(), holdsHumanInput: () => false,
     };
     state = { cwd: root, cancelled: false, interrupt: () => {}, pendingHumanAsk: false, autonomous: true, autoContinues: 0, session };
   });

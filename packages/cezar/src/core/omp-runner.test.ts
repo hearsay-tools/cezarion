@@ -539,6 +539,18 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
     },
   );
 
+  it('holdsHumanInput tracks humanAcks until the prompt response (#486)', async () => {
+    let held = false;
+    const { events } = await runSession(spec('mock:steer-tool'), (event, session) => {
+      if (event.type === 'tool-call' && event.id === 'tool-steer') {
+        expect(session.sendMessage([{ type: 'text', text: 'human-ack' }])).toBe(true);
+        held = session.holdsHumanInput();
+      }
+    });
+    expect(held).toBe(true);
+    expect(events.some(e => e.type === 'turn-end')).toBe(true);
+  });
+
   it('a mid-turn agent steer rejected before admission rejects only its submission', async () => {
     let acknowledged: Promise<void> | boolean | undefined;
     const consumed: string[][] = [];

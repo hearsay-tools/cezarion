@@ -207,6 +207,8 @@ class OpencodeSession implements AgentSession {
   /** Bumped by `discardQueuedMessages` so a `prompt()` waiter that captured
    * the previous generation returns instead of posting after idle. */
   private queuedPromptGeneration = 0;
+  /** Human `prompt()` waiters in the current generation that have not posted yet (#486). */
+  private humanPromptWaiters = 0;
   private autoEndTimer: NodeJS.Timeout | undefined;
   private spawnFailed: Error | null = null;
   private timedOut = false;
@@ -404,6 +406,11 @@ class OpencodeSession implements AgentSession {
   discardQueuedMessages(): void {
     this.queuedPromptGeneration += 1;
     this.queuedQuestionMessages.length = 0;
+    this.humanPromptWaiters = 0; // #486: must read false immediately, not when waiters resume
+  }
+
+  holdsHumanInput(): boolean {
+    return this.humanPromptWaiters > 0 || this.queuedQuestionMessages.length > 0;
   }
 
   private deliverPrompt(text: string): void {
@@ -559,7 +566,12 @@ class OpencodeSession implements AgentSession {
     // resume in FIFO order; a teardown (`finishTurn` runs on every exit
     // path) releases them into the `serverOpen` check below.
     const generation = this.queuedPromptGeneration;
+    const humanWaiter = origin === 'human';
+    if (humanWaiter) this.humanPromptWaiters += 1;
     while (this.turnActive) await this.turnFinished;
+    if (humanWaiter && generation === this.queuedPromptGeneration) {
+      this.humanPromptWaiters = Math.max(0, this.humanPromptWaiters - 1);
+    }
     if (generation !== this.queuedPromptGeneration) return;
     // A queued prompt may have started waiting before the preceding idle armed
     // auto-end. Cancel at actual delivery time, not only at sendMessage time.

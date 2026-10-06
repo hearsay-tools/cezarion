@@ -297,7 +297,7 @@ describe('RunManager reported cost accounting', () => {
         };
         return {
           result, sendMessage: () => false, sendAgentMessage: () => false,
-          discardQueuedMessages: () => undefined, end: close, interrupt: close,
+          discardQueuedMessages: () => undefined, holdsHumanInput: () => false, end: close, interrupt: close,
           get open() { return open; },
         };
       },
@@ -1692,7 +1692,7 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
           result,
           sendMessage: () => false,
           sendAgentMessage: () => false,
-          discardQueuedMessages: () => undefined,
+          discardQueuedMessages: () => undefined, holdsHumanInput: () => false,
           end: () => {
             open = false;
             rejectResult(new Error('provider failed during shutdown'));
@@ -1760,7 +1760,7 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
           result: Promise.resolve({ text: 'done', toolCalls: [], tokensUsed: 0 }),
           sendMessage: () => false,
           sendAgentMessage: () => false,
-          discardQueuedMessages: () => undefined,
+          discardQueuedMessages: () => undefined, holdsHumanInput: () => false,
           end: () => undefined,
           interrupt: () => undefined,
           open: false,
@@ -2407,7 +2407,7 @@ describe('CEZ:ASK parks as waiting and emits ask.requested (#473)', () => {
         result,
         sendMessage: () => false,
         sendAgentMessage: () => false,
-        discardQueuedMessages: () => undefined,
+        discardQueuedMessages: () => undefined, holdsHumanInput: () => false,
         end: () => {
           open = false;
           finish({ text: 'Choose an option.', toolCalls: [], tokensUsed: 0 });

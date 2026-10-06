@@ -37,6 +37,15 @@ async function afterParityPark(prompt) {
   if (!gate) throw new Error('post-park scenario requires a release path');
   while (!parityGateFs.existsSync(gate)) await new Promise(resolve => setTimeout(resolve, 10));
 }
+async function waitForMockRelease(fallbackMs) {
+  const file = process.env.CEZ_MOCK_RELEASE_FILE;
+  if (!file) { if (fallbackMs) await new Promise(r => setTimeout(r, fallbackMs)); return; }
+  const deadline = Date.now() + 15_000;
+  while (!parityGateFs.existsSync(file)) {
+    if (Date.now() > deadline) throw new Error('CEZ_MOCK_RELEASE_FILE was not created');
+    await new Promise(r => setTimeout(r, 10));
+  }
+}
 
 const args = process.argv.slice(2);
 const arg = (flag, fallback) => {
@@ -426,6 +435,22 @@ const server = createServer((req, res) => {
         }] });
         return;
       }
+      if (body.includes('mock:hold-done')) {
+        // Pause, then CEZ:DONE, so a mid-turn sendMessage can queue behind the
+        // running turn and race the close (#486).
+        await waitForMockRelease(400);
+        send({ type: 'message.updated', properties: { info: info({}) } });
+        send({ type: 'message.part.updated', properties: { part: {
+          id: 'prt_mock_hold_done', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text',
+          text: 'parity hold-done: content after the pause\n\nCEZ:DONE',
+          time: { start: 1760000000500, end: 1760000000600 },
+        } } });
+        send({ type: 'message.updated', properties: { info: info({
+          cost: 0.0001, tokens: { input: 20, output: 10, reasoning: 0, cache: { read: 0, write: 0 } },
+        }) } });
+        setTimeout(() => send({ type: 'session.idle', properties: { sessionID: SESSION_ID } }), 30);
+        return;
+      }
       if (body.includes('mock:done')) {
         // Declares the task complete so the run reaches cezar's review gate; a
         // markerless turn-end correctly parks as `waiting` instead (harness
@@ -445,19 +470,18 @@ const server = createServer((req, res) => {
       if (body.includes('mock:hold-ask')) {
         // Portable CEZ:ASK after a pause, so a mid-turn sendMessage can queue
         // and then race the park (run.ts must discard that waiter).
-        setTimeout(() => {
-          const ask = 'Pick one.\n\nCEZ:ASK {"questions":[{"header":"Library","question":"Which date library should I standardize on?","options":[{"label":"date-fns","description":"Tree-shakeable, functional"},{"label":"Luxon","description":"Immutable, tz-aware"}]}]}';
-          send({ type: 'message.updated', properties: { info: info({}) } });
-          send({ type: 'message.part.updated', properties: { part: {
-            id: 'prt_mock_hold_ask', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text',
-            text: ask,
-            time: { start: 1760000000500, end: 1760000000600 },
-          } } });
-          send({ type: 'message.updated', properties: { info: info({
-            cost: 0.0001, tokens: { input: 20, output: 10, reasoning: 0, cache: { read: 0, write: 0 } },
-          }) } });
-          setTimeout(() => send({ type: 'session.idle', properties: { sessionID: SESSION_ID } }), 30);
-        }, 250);
+        await waitForMockRelease(250);
+        const ask = 'Pick one.\n\nCEZ:ASK {"questions":[{"header":"Library","question":"Which date library should I standardize on?","options":[{"label":"date-fns","description":"Tree-shakeable, functional"},{"label":"Luxon","description":"Immutable, tz-aware"}]}]}';
+        send({ type: 'message.updated', properties: { info: info({}) } });
+        send({ type: 'message.part.updated', properties: { part: {
+          id: 'prt_mock_hold_ask', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text',
+          text: ask,
+          time: { start: 1760000000500, end: 1760000000600 },
+        } } });
+        send({ type: 'message.updated', properties: { info: info({
+          cost: 0.0001, tokens: { input: 20, output: 10, reasoning: 0, cache: { read: 0, write: 0 } },
+        }) } });
+        setTimeout(() => send({ type: 'session.idle', properties: { sessionID: SESSION_ID } }), 30);
         return;
       }
       if (watchdogStall(body)) return;
@@ -467,6 +491,19 @@ const server = createServer((req, res) => {
           send({ type: 'server.heartbeat', properties: {} });
           if (++ticks === 24) { clearInterval(timer); send({ type: 'session.idle', properties: { sessionID: SESSION_ID } }); }
         }, 100);
+        return;
+      }
+      if (body.includes('mock:hold-gated')) {
+        await waitForMockRelease(250);
+        const gated = 'parity hold-gated: content after the pause';
+        send({ type: 'message.updated', properties: { info: info({}) } });
+        send({ type: 'message.part.updated', properties: { part: {
+          id: 'prt_mock_hold_gated', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text', text: gated,
+        } } });
+        send({ type: 'message.updated', properties: { info: info({
+          cost: 0.0001, tokens: { input: 20, output: 10, reasoning: 0, cache: { read: 0, write: 0 } },
+        }) } });
+        setTimeout(() => send({ type: 'session.idle', properties: { sessionID: SESSION_ID } }), 30);
         return;
       }
       if (body.includes('mock:hold')) {

@@ -87,6 +87,7 @@ interface AgentSession {
   sendMessage(content: ContentBlock[]): boolean;  // human input; false when closed
   sendAgentMessage(content: ContentBlock[], inputIds?: readonly string[]): false | Promise<void>; // reserve now, harness acceptance later
   discardQueuedMessages(): void;     // drop mid-turn follow-ups; CEZ:ASK park calls this
+  holdsHumanInput(): boolean;        // true while a sendMessage follow-up is held undelivered (hearsay-tools/cezarion#486). Queueing runners drop on discardQueuedMessages and return false; write-through/steer wires report true until the harness settles that line (their discard is a no-op). A drain with no new turn notifies onAgentInputReady so run.ts re-settles.
   end(): void;                       // graceful: end input, SIGTERM→SIGKILL watchdog
   interrupt(): void;                 // hard stop (cancel)
   readonly open: boolean;
@@ -997,6 +998,38 @@ this HTTP-only ordering and test root idle expiry/Continue on their native wires
 Owned-worker terminal settlement and explicit question/worker/CI waits retain
 their existing policies.
 
+**H1–H3** (hearsay-tools/cezarion#486) live in `core/workflow-followup-parity.test.ts`
+and the same parity guard. A human follow-up sent via `manager.sendMessage` while a
+turn is running must reach the agent without a resend when that turn ends with
+`CEZ:DONE` (H1), must be dropped when the same turn parks on a portable `CEZ:ASK`
+(H2), and a markerless hold-style turn must not park or nudge between the follow-up
+and the next turn (H3). H3 is a guard that the run does not park or nudge in that
+gap, not a proof the follow-up ran as its own turn — except OpenCode continuation,
+which does pin the follow-up across Continue. `AgentSession.holdsHumanInput()` reports
+a follow-up the runner still holds and will still deliver; both turn-end handlers fold
+it into “input delivered” so the run does not close, park, or nudge.
+`discardQueuedMessagesOnAsk` still runs first, so an ASK park drops the waiter on
+queueing wires. Write-through/steer wires may consume the follow-up inside the running
+turn or open a later one; H1 still holds either way. A held follow-up that drains
+without opening a turn must re-settle the idle boundary (close, park, or nudge).
+`handleAgentInputReady` is the fast path and a 250 ms recheck timer is the backstop;
+after `UNREAD_INPUT_GRACE_MS` of a hold that never drained with no runner activity,
+the follow-up is treated as delivered-unconfirmed (a `#505`-style note) and the
+boundary settles so the run cannot keep a slot forever. Codex does not release a
+human `turn/steer` whose completed-then-response ordering left no active turn; it
+restarts an accepted-but-unread steer with `turn/start` under the same
+`clientUserMessageId`, and skips that restart when the turn already echoed the id.
+A Codex human `turn/start` keeps `holdsHumanInput()` true until `turn/started`
+(or until that turn will never start: start error, close, interrupt).
+OMP named wire limit: a human prompt rejected after `session_settled` is only a note
+and is not restarted — real OMP settles only at `queuedMessageCount === 0`, so a
+steer accepted before settle is read in-turn (I2), and a post-settle rejection has
+no cheap idle-boundary retry. Claude, Codex, Pi and OMP have named executable H2
+exemptions: their wires write or steer immediately, so `discardQueuedMessages` cannot
+unwrite a line already on the pipe. On Claude, a mid-turn line is queued by the CLI
+and runs as a fresh turn after the ASK park while the card is pending — the inverted
+H2 assertion does not pin that.
+
 > Every criterion in the harness parity matrix MUST hold for **every** backend,
 > or carry a declared exemption naming the wire limitation that prevents it.
 
@@ -1038,7 +1071,10 @@ it, so no existing marker is renamed. A new runner declares its own map:
 | --- | --- |
 | `baseline` | one text, one tool call and result, usage, then its terminal turn signal |
 | `done` | the same, with a trailing `CEZ:DONE` so the run reaches its review gate |
-| `hold` | acknowledge the prompt, then pause before the content AND the terminal signal |
+| `hold` | acknowledge the prompt, then a timed pause before the content AND the terminal signal |
+| `hold-gated` | like `hold`, but wait for `CEZ_MOCK_RELEASE_FILE` (or a fallback delay) so a mid-turn follow-up can be injected before content |
+| `hold-done` | like `hold-gated`, then end with `CEZ:DONE` so a mid-turn follow-up can race the close |
+| `hold-ask` | like `hold-gated`, then end with a portable `CEZ:ASK` so a mid-turn follow-up can race the park |
 | `split-text` | stream the reply in pieces, ending with a trailing `CEZ:MONITORING` |
 | `provider-error` | a runtime provider rejection in its own native error shape |
 | `ask` | an ask — native where the wire has one, a `CEZ:ASK` marker otherwise |
@@ -1095,6 +1131,7 @@ never "not implemented"):
 | R16 | capability-absent | `text_end.content` is the one assistant-text channel for v1 and v2; `message_end` has no separately mapped text. |
 | I2 | capability-absent | `session_settled` requires `queuedMessageCount === 0` (`isRpcSessionSettled`, `modes/rpc/rpc-session-settle.ts`) and `agent_end` is rewritten to non-terminal while the agent has queued messages (`session/agent-session.ts`), so a steer accepted before settle is read in the same turn. Source-derived (no live turn). |
 | A13, A14 | scenario-unconstructible | Same as every runner: no portable-answer HTTP ACK retained after turn completion; the executable cell checks idle expiry and Continue instead. |
+| H2 | capability-absent | Mid-turn human follow-up is steered immediately; `discardQueuedMessages` cannot unwrite it. OpenCode and Cursor queue and drop (H2 live rows). |
 
 R16 (hearsay-tools/cezarion#134/#401) checks a stored assistant ASK and exactly one waiting question
 card on every runner. All current wires couple their completed parent text to
@@ -1425,7 +1462,7 @@ typecheck-enforced rather than hand-tracked.
 To be first-class:
 
 1. **Runner** — `packages/cezar/src/core/pi-runner.ts` implementing `AgentRunner` /
-    `AgentSession` (persistent process; `pid`; `sendMessage`/`discardQueuedMessages`/`end`/`interrupt`;
+    `AgentSession` (persistent process; `pid`; `sendMessage`/`discardQueuedMessages`/`holdsHumanInput`/`end`/`interrupt`;
    `result`). Honor `AgentRunSpec` uniformly — use `prependSystemPrompt` if the
    backend has no native system-prompt channel — and declare `specSupport` (§1):
    every field, honored with its channel or dropped with the wire reason. The §7

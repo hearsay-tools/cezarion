@@ -18,7 +18,17 @@ function watchdogStall(prompt) {
 }
 
 import readline from 'node:readline';
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, existsSync as mockReleaseExists } from 'node:fs';
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+async function waitForMockRelease(fallbackMs) {
+  const file = process.env.CEZ_MOCK_RELEASE_FILE;
+  if (!file) { if (fallbackMs) await sleep(fallbackMs); return; }
+  const deadline = Date.now() + 15_000;
+  while (!mockReleaseExists(file)) {
+    if (Date.now() > deadline) throw new Error('CEZ_MOCK_RELEASE_FILE was not created');
+    await sleep(10);
+  }
+}
 if (process.env.CEZ_MOCK_ARGS_FILE) appendFileSync(process.env.CEZ_MOCK_ARGS_FILE, `${JSON.stringify(process.argv.slice(2))}\n`);
 
 // Pi handles SIGTERM and reports 128 + signal, rather than a null exit code.
@@ -66,7 +76,6 @@ const send = (value) => {
   }
   write(value);
 };
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** One valid CEZ:ASK payload (spec #473), used by the `mock:ask` scenario. */
 const ASK_MARKER_BODY = "{\"questions\":[{\"header\":\"Library\",\"question\":\"Which test library?\",\"multiSelect\":false,\"options\":[{\"label\":\"Vitest\",\"description\":\"Use the existing test runner\"},{\"label\":\"Node test\",\"description\":\"Use node:test\"}]}]}";
@@ -210,6 +219,20 @@ async function handle(command) {
       errorMessage: 'Not Found',
     } });
     send({ type: 'agent_settled' });
+  } else if (command.type === 'prompt' && command.message.includes('mock:hold-done')) {
+    send({ id: command.id, type: 'response', command: 'prompt', success: true });
+    send({ type: 'agent_start' });
+    send({ type: 'turn_start' });
+    await waitForMockRelease(400);
+    sendText(['parity hold-done: content after the pause\n\nCEZ:DONE']);
+    sendTurnEnd();
+  } else if (command.type === 'prompt' && command.message.includes('mock:hold-ask')) {
+    send({ id: command.id, type: 'response', command: 'prompt', success: true });
+    send({ type: 'agent_start' });
+    send({ type: 'turn_start' });
+    await waitForMockRelease(400);
+    sendText(['Pick one.\n\nCEZ:ASK {"questions":[{"header":"Library","question":"Which test library?","options":[{"label":"Vitest"},{"label":"Node test"}]}]}']);
+    sendTurnEnd();
   } else if (command.type === 'prompt' && (command.message.includes('mock:done') || (resumeAfterAsk && command.message.trim() === 'Library: Vitest'))) {
     resumeAfterAsk = false;
     // Declares the task complete so the run reaches cezar's review gate; a
@@ -260,6 +283,14 @@ async function handle(command) {
       for (let i = 0; i < 24; i++) { send({ type: 'tool_execution_update', toolCallId: 'busy', toolName: 'bash', partialResult: { content: [{ type: 'text', text: 'working' }] } }); await sleep(100); }
       sendTurnEnd();
     }
+  } else if (command.type === 'prompt' && command.message.includes('mock:hold-gated')) {
+    send({ id: command.id, type: 'response', command: 'prompt', success: true });
+    send({ type: 'agent_start' });
+    send({ type: 'turn_start' });
+    await waitForMockRelease(250);
+    sendText(['parity hold-gated: content after the pause']);
+    await sleep(250);
+    sendTurnEnd();
   } else if (command.type === 'prompt' && command.message.includes('mock:hold')) {
     // The `response` below is the ack. Holding the content AND the terminal
     // quartet behind it is what makes harness parity S2 meaningful: a runner

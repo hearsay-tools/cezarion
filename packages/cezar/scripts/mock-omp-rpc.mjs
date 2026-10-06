@@ -86,6 +86,15 @@ let steeringMode = 'one-at-a-time';
 let messageUpdates = 'full';
 const write = (value) => process.stdout.write(`${JSON.stringify(value)}\n`);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+async function waitForMockRelease(fallbackMs) {
+  const file = process.env.CEZ_MOCK_RELEASE_FILE;
+  if (!file) { if (fallbackMs) await sleep(fallbackMs); return; }
+  const deadline = Date.now() + 15_000;
+  while (!existsSync(file)) {
+    if (Date.now() > deadline) throw new Error('CEZ_MOCK_RELEASE_FILE was not created');
+    await sleep(10);
+  }
+}
 const record = (value) => {
   if (!process.env.CEZ_MOCK_STDIN_FILE) return;
   try { appendFileSync(process.env.CEZ_MOCK_STDIN_FILE, `${JSON.stringify(value)}\n`); } catch { /* best effort */ }
@@ -455,6 +464,18 @@ async function prompt(command) {
     endTurn();
     return;
   }
+  if (message.includes('mock:hold-done')) {
+    await waitForMockRelease(400);
+    assistantText(['parity hold-done: content after the pause\n\nCEZ:DONE']);
+    endTurn();
+    return;
+  }
+  if (message.includes('mock:hold-ask')) {
+    await waitForMockRelease(400);
+    assistantText(['Pick one.\n\nCEZ:ASK {"questions":[{"header":"Library","question":"Which test library?","options":[{"label":"Vitest"},{"label":"Node test"}]}]}']);
+    endTurn();
+    return;
+  }
   if (message.includes('mock:done') || (resumeAfterAsk && message.trim() === 'Library: Vitest')) {
     resumeAfterAsk = false;
     assistantText(['parity done: the task is complete\n\nCEZ:DONE']);
@@ -485,6 +506,13 @@ async function prompt(command) {
     // The stream ends mid-turn after a failed attempt: no agent_end, no settle.
     assistantText([], { stopReason: 'error', usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { total: 0 } }, extra: { errorMessage: 'Overloaded' } });
     process.exit(0);
+  }
+  if (message.includes('mock:hold-gated')) {
+    await waitForMockRelease(250);
+    assistantText(['parity hold-gated: content after the pause']);
+    await sleep(250);
+    endTurn();
+    return;
   }
   if (message.includes('mock:hold')) {
     // Content and the settle both trail the prompt ack, so a turn-end derived from the ack

@@ -11,7 +11,7 @@ function fixture() {
   const result = new Promise<AgentRunResult>(resolve => { settle = resolve; });
   const live: AgentSession = {
     result, open: true, sendMessage: () => true, sendAgentMessage: () => false,
-    discardQueuedMessages() {}, end: vi.fn(), interrupt: vi.fn(),
+    discardQueuedMessages() {}, holdsHumanInput() { return false; }, end: vi.fn(), interrupt: vi.fn(),
   };
   const runner: Pick<AgentRunner, 'startSession'> = {
     startSession(_spec, onEvent, opts) { emit = onEvent!; options = opts!; return live; },

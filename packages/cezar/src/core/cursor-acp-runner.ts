@@ -434,6 +434,7 @@ class CursorSession implements AgentSession {
     return new Promise((resolve, reject) => this.startTurn(content, error => error ? reject(error) : resolve()));
   }
   discardQueuedMessages(): void { this.queued = []; }
+  holdsHumanInput(): boolean { return this.queued.length > 0; }
   private clearAutoEnd(): void { if (this.autoEnd) clearTimeout(this.autoEnd); this.autoEnd = undefined; }
   private scheduleAutoEnd(): void {
     if (!this.opts.autoEndAfterFirstTurn || !this.open || this.busy || this.pendingAsk) return;

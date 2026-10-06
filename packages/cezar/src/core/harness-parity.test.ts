@@ -60,6 +60,7 @@ import {
   NO_PROGRESS_CRITERIA,
   AUTONOMOUS_CRITERIA,
   WORKFLOW_ASK_CRITERIA,
+  FOLLOWUP_CRITERIA,
   PARITY_EXEMPTIONS,
   PINNED_SESSION_ID,
   type RunObservation,
@@ -1684,6 +1685,7 @@ describe('harness parity — the matrix itself', () => {
     ...MONITORING_ACK_CRITERIA.map(c => c.id),
     ...MONITORING_ORDER_CRITERIA.map(c => c.id),
     ...WORKFLOW_ASK_CRITERIA.map(c => c.id),
+    ...FOLLOWUP_CRITERIA.map(c => c.id),
     ...AUTONOMOUS_CRITERIA.map(c => c.id),
     ...NO_PROGRESS_CRITERIA.map(c => c.id),
     ...WORKFLOW_TIMEOUT_CRITERIA.map((c) => c.id),
@@ -1699,6 +1701,8 @@ describe('harness parity — the matrix itself', () => {
     if (monitor) return monitor.scenario;
     const ask = WORKFLOW_ASK_CRITERIA.find(c => c.id === id);
     if (ask) return ask.scenario;
+    const followup = FOLLOWUP_CRITERIA.find(c => c.id === id);
+    if (followup) return followup.scenario;
     const autonomous = AUTONOMOUS_CRITERIA.find(c => c.id === id);
     if (autonomous) return autonomous.scenario;
     const inactivity = NO_PROGRESS_CRITERIA.find(c => c.id === id);

@@ -434,6 +434,10 @@ interface ActiveRun {
   /** Liveness bound for unread input (#505): timer, and IDs already resubmitted once. */
   unreadInputTimer?: NodeJS.Timeout;
   unreadRetried?: Set<string>;
+  /** #486: re-settle a boundary that deferred only because holdsHumanInput() was true. */
+  heldHumanInputTimer?: NodeJS.Timeout;
+  heldHumanInputSince?: number;
+  heldHumanInputExpired?: boolean;
   /** Only this older ask is being answered by the current continuation's opening turn. */
   openingAnswerAskSeq?: number;
   openingAgentInputId?: string;
@@ -489,6 +493,12 @@ interface ActiveRun {
 /** #505: a real steer is read at the harness's next model step; a quiet boundary this long
  * with input still unread means the harness will not read it without help. */
 export const UNREAD_INPUT_GRACE_MS = 30_000;
+/** #486: recheck a turn-end that deferred close/park only because the harness still held a human follow-up. */
+export const HELD_HUMAN_INPUT_RECHECK_MS = 250;
+
+function unreadInputUnconfirmedNote(count: number): string {
+  return `delivered ${count} message${count === 1 ? '' : 's'}; the agent did not confirm reading ${count === 1 ? 'it' : 'them'}`;
+}
 /** Bound one unattended session; an explicit Continue starts a new budget. */
 export const MAX_AUTO_CONTINUES = 40;
 export const AUTONOMOUS_NUDGE =
@@ -2660,6 +2670,7 @@ export class RunManager {
       state.releaseRepoRoot = undefined;
       this.clearIdleTimer(state);
       this.clearAutosaveTimer(state);
+      this.clearHeldHumanInputTimer(state);
     }
     this.waiting.delete(runId);
     this.monitoring.delete(runId);
@@ -4540,6 +4551,7 @@ export class RunManager {
    * goes back to the queue so a later session delivers it; never shown as delivered. */
   private requeueUnreadAtClose(runId: string, state: ActiveRun, session: AgentSession | undefined): void {
     this.clearUnreadInputTimer(state);
+    this.clearHeldHumanInputTimer(state);
     // Everything this session accepted but never saw read: steered input, messages bundled
     // behind a human answer, and an opening instruction whose turn never succeeded.
     const opening = state.openingAgentInputId && this.store.getRun(runId)?.agentInputs?.some(input =>
@@ -4556,6 +4568,8 @@ export class RunManager {
    * run parks as waiting or monitoring. Shared by acknowledgements that land after a
    * turn ended and by the unread-input grace timer (#505). */
   private settleIdleBoundary(runId: string, state: ActiveRun, session: AgentSession): void {
+    // An in-flight acknowledgement still owns this boundary; its .then re-settles.
+    if (this.harnessHoldsHumanInput(state) || state.agentInputFlight) return;
     const proseGate = state.parkAfterAck?.session === session && state.parkAfterAck.humanGate;
     if (state.atTurnBoundary !== session || (state.pendingHumanAsk && !proseGate) || this.workerWait(runId) || this.store.getRun(runId)?.ciWait || (!proseGate && this.hasQueuedAgentInputs(runId))) return;
     if (state.doneAtBoundary === session) {
@@ -4613,7 +4627,7 @@ export class RunManager {
       if (retried.length) {
         for (const id of retried) state.unreadInputIds?.delete(id);
         try { this.store.commitAgentInputsUnconfirmed(runId, retried); } catch { /* receipt stays awaiting; a restart replays it */ }
-        this.store.appendEvent(runId, { type: 'note', message: `delivered ${retried.length} message${retried.length === 1 ? '' : 's'}; the agent did not confirm reading ${retried.length === 1 ? 'it' : 'them'}` });
+        this.store.appendEvent(runId, { type: 'note', message: unreadInputUnconfirmedNote(retried.length) });
       }
       if (fresh.length) {
         state.unreadRetried ??= new Set();
@@ -4636,9 +4650,57 @@ export class RunManager {
     state.unreadInputTimer = undefined;
   }
 
+  /** #486: a turn-end deferred close/park only because the harness still held a human follow-up. */
+  private armHeldHumanInputTimer(runId: string, state: ActiveRun): void {
+    this.clearHeldHumanInputTimer(state, false);
+    const session = state.session;
+    if (!session?.open || !this.harnessHoldsHumanInput(state)) {
+      state.heldHumanInputSince = undefined;
+      return;
+    }
+    state.heldHumanInputSince ??= Date.now();
+    const timer = setTimeout(() => {
+      state.heldHumanInputTimer = undefined;
+      if (this.disposed || this.active.get(runId) !== state || state.session !== session || !session.open ||
+        state.cancelled || state.idleClosed || state.atTurnBoundary !== session) return;
+      if (this.harnessHoldsHumanInput(state)) {
+        // An in-flight ACK still owns this boundary; its .then re-settles.
+        if (state.agentInputFlight) {
+          this.armHeldHumanInputTimer(runId, state);
+          return;
+        }
+        if (Date.now() - (state.heldHumanInputSince ?? 0) >= this.unreadInputGraceMs) {
+          this.store.appendEvent(runId, { type: 'note', message: unreadInputUnconfirmedNote(Math.max(1, session.heldHumanInputCount?.() ?? 1)) });
+          state.heldHumanInputExpired = true;
+          this.settleIdleBoundary(runId, state, session);
+          return;
+        }
+        this.armHeldHumanInputTimer(runId, state);
+        return;
+      }
+      this.settleIdleBoundary(runId, state, session);
+    }, HELD_HUMAN_INPUT_RECHECK_MS);
+    timer.unref?.();
+    state.heldHumanInputTimer = timer;
+  }
+
+  private clearHeldHumanInputTimer(state: ActiveRun, resetClock = true): void {
+    if (state.heldHumanInputTimer) clearTimeout(state.heldHumanInputTimer);
+    state.heldHumanInputTimer = undefined;
+    if (resetClock) {
+      state.heldHumanInputSince = undefined;
+      state.heldHumanInputExpired = undefined;
+    }
+  }
+
   /** #505: the harness accepted input this session has not reported reading yet. */
   private harnessOwesInput(state: ActiveRun | undefined): boolean {
     return !!state?.unreadInputIds?.size;
+  }
+
+  /** #486: a human follow-up is still queued in the live session and will still be delivered. */
+  private harnessHoldsHumanInput(state: ActiveRun): boolean {
+    return !state.heldHumanInputExpired && !!state.session?.open && state.session.holdsHumanInput();
   }
 
   /** A callback from an old/replaced/disposed session carries no authority. */
@@ -4648,6 +4710,13 @@ export class RunManager {
     // Durable input always gets the first opportunity. Only the same refused,
     // completed boundary may retry; ordinary/native question parks are not wakes.
     if (this.flushAgentInputs(runId)) return;
+    // #486: held human input drained at this still-current boundary with no new turn.
+    // Runners fire onAgentInputReady from the transport ACK finally/callback while
+    // agentInputFlight is still set; settling here parks before the ACK .then can nudge.
+    if (state.atTurnBoundary === session && !this.harnessHoldsHumanInput(state) &&
+      !state.agentInputFlight && !this.harnessOwesInput(state)) {
+      this.settleIdleBoundary(runId, state, session);
+    }
     if (state.autonomousNudgePending !== session || state.atTurnBoundary !== session ||
       state.doneAtBoundary === session || !state.currentStepId) return;
     if (this.tryAutonomousNudge(runId, state, state.currentStepId, null)) {
@@ -4832,6 +4901,7 @@ export class RunManager {
   /** Restore active lifecycle/accounting when either Cezar or the backend
    * resumes work in a parked session. */
   private resumeParkedRun(runId: string, state: ActiveRun): void {
+    this.clearHeldHumanInputTimer(state);
     state.autonomousNudgePending = undefined;
     state.atTurnBoundary = undefined;
     state.doneAtBoundary = undefined;
@@ -5478,13 +5548,17 @@ export class RunManager {
       }
       if (event.type === 'text') {
         this.clearUnreadInputTimer(state); // real content: the harness is working
+        this.clearHeldHumanInputTimer(state);
         turnText = appendTurnText(turnText, event.text);
         const text = stripAskMarker(stripTaskMarkers(stripMonitoringMarker(stripDoneMarker(event.text))), false);
         if (text) this.store.appendEvent(runId, { type: 'text', text, stepId });
         return;
       }
       if (event.type === 'input-unconsumed') { this.retireUnreadInputs(runId, state, event.inputIds, true); return; }
-      if (event.type === 'tool-call' || event.type === 'tool-result') this.clearUnreadInputTimer(state);
+      if (event.type === 'tool-call' || event.type === 'tool-result') {
+        this.clearUnreadInputTimer(state);
+        this.clearHeldHumanInputTimer(state);
+      }
       this.store.appendEvent(runId, { ...event, stepId });
       if (event.type === 'cost') this.recordReportedCost(runId, stepId, state, backend, event.usd);
       if (event.type === 'error') {
@@ -5572,8 +5646,10 @@ export class RunManager {
         state.parkAfterAck = sessionOpen && state.session ? { session: state.session, monitoring, humanGate } : undefined;
         // #505: input the harness accepted but has not read yet runs as its next turn.
         // An in-flight submission is settled by its acknowledgement (parkAfterAck), not here.
-        const agentInputDelivered = autoContinued || (!ask && !workerWaitParked && (this.flushAgentInputs(runId) || (!humanGate && this.harnessOwesInput(state)) || !!state.agentInputFlight));
+        const agentInputDelivered = autoContinued || (!ask && !workerWaitParked && (this.flushAgentInputs(runId) || (!humanGate && this.harnessOwesInput(state)) || !!state.agentInputFlight || this.harnessHoldsHumanInput(state)));
         if (!ask && !workerWaitParked) this.armUnreadInputTimer(runId, state);
+        if (!ask && !workerWaitParked && this.harnessHoldsHumanInput(state)) this.armHeldHumanInputTimer(runId, state);
+        else this.clearHeldHumanInputTimer(state);
         if (state.agentInputError) return;
         if (done && !workerWaitParked && !state.pendingHumanAsk && !agentInputDelivered && !state.agentInputFlight && !this.hasQueuedAgentInputs(runId)) {
           // Goal achieved (agent contract, #347) — same as in runAgentStep.
@@ -6418,13 +6494,17 @@ export class RunManager {
       }
       if (event.type === 'text') {
         this.clearUnreadInputTimer(state); // real content: the harness is working
+        this.clearHeldHumanInputTimer(state);
         turnText = appendTurnText(turnText, event.text);
         const text = stripAskMarker(stripTaskMarkers(stripMonitoringMarker(stripDoneMarker(event.text))), false);
         if (text) emit({ type: 'text', text, stepId: step.id });
         return;
       }
       if (event.type === 'input-unconsumed') { this.retireUnreadInputs(runId, state, event.inputIds, true); return; }
-      if (event.type === 'tool-call' || event.type === 'tool-result') this.clearUnreadInputTimer(state);
+      if (event.type === 'tool-call' || event.type === 'tool-result') {
+        this.clearUnreadInputTimer(state);
+        this.clearHeldHumanInputTimer(state);
+      }
       emit({ ...event, stepId: step.id });
       if (event.type === 'cost') this.recordReportedCost(runId, step.id, state, backend, event.usd);
       if (event.type === 'error') {
@@ -6480,8 +6560,10 @@ export class RunManager {
         state.parkAfterAck = (interactive || humanGate) && sessionOpen && state.session ? { session: state.session, monitoring, humanGate } : undefined;
         // #505: input the harness accepted but has not read yet runs as its next turn.
         // An in-flight submission is settled by its acknowledgement (parkAfterAck), not here.
-        const agentInputDelivered = autoContinued || (!ask && !workerWaitParked && (this.flushAgentInputs(runId) || (!humanGate && this.harnessOwesInput(state)) || !!state.agentInputFlight));
+        const agentInputDelivered = autoContinued || (!ask && !workerWaitParked && (this.flushAgentInputs(runId) || (!humanGate && this.harnessOwesInput(state)) || !!state.agentInputFlight || this.harnessHoldsHumanInput(state)));
         if (!ask && !workerWaitParked) this.armUnreadInputTimer(runId, state);
+        if (!ask && !workerWaitParked && this.harnessHoldsHumanInput(state)) this.armHeldHumanInputTimer(runId, state);
+        else this.clearHeldHumanInputTimer(state);
         if (state.agentInputError) return;
         if (done && !workerWaitParked && !state.pendingHumanAsk && !agentInputDelivered && !state.agentInputFlight && !this.hasQueuedAgentInputs(runId)) {
           // Goal achieved (agent contract, #347): close the session instead
@@ -6527,7 +6609,7 @@ export class RunManager {
         appendHandoffHeartbeat(
           this.dataDir,
           runId,
-          `turn complete — status=${autoContinued ? 'running (autonomous nudge)' : state.autonomousNudgePending && state.autonomousNudgePending === state.session ? 'running (awaiting input readiness)' : monitoring ? 'monitoring' : waiting ? 'waiting' : 'running'}`,
+          `turn complete — status=${autoContinued ? 'running (autonomous nudge)' : state.autonomousNudgePending && state.autonomousNudgePending === state.session ? 'running (awaiting input readiness)' : agentInputDelivered ? 'running' : monitoring ? 'monitoring' : waiting ? 'waiting' : 'running'}`,
         );
       }
     };
@@ -6792,6 +6874,7 @@ export class RunManager {
     this.prepareHumanAsk(runId, state);
     this.withdrawWorkerWait(runId);
     this.clearUnreadInputTimer(state);
+    this.clearHeldHumanInputTimer(state);
   }
 
   /** Native backend asks arrive before turn-end. Persist and park immediately
@@ -6803,6 +6886,7 @@ export class RunManager {
     if (state.cancelled) return;
     if (isRunnerActivity(event)) {
       if (state.autonomousNudgePending) { state.autonomousNudgePending = undefined; this.clearIdleTimer(state); }
+      this.clearHeldHumanInputTimer(state);
       state.atTurnBoundary = undefined; state.doneAtBoundary = undefined; state.parkAfterAck = undefined;
     }
     if (event.type === 'ask.requested') {
