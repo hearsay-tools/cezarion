@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runRecordSchema as contractRunRecordSchema } from '@open-mercato/cezar-contract';
+import { historyPaths } from './history-file.ts';
+import { readRunIndexFromDisk } from './run-index.ts';
 import { RunStore, runRecordSchema } from './store.ts';
 import { blockRunWrites, readPersistedRuns, readPersistedText, seedRuns } from './run-store.testkit.ts';
 
@@ -38,11 +40,11 @@ describe('RunStore save lifecycle (#124)', () => {
     rmSync(dataDir, { recursive: true, force: true });
   });
 
-  it.each([false, true])('retention preserves live history and scratch, but reaps terminal scratch (archived=%s)', (archived) => {
+  it('retention archives overflow unarchived terminal runs, reaps their scratch, and keeps live ones', () => {
     const statuses = ['queued', 'running', 'waiting', 'done', 'review', 'failed', 'cancelled'] as const;
-    const oldRuns = statuses.map((status) => ({ ...LEGACY_RUN, id: status, status, archived }));
-    const kept = Array.from({ length: archived ? 500 : 300 }, (_, index) => ({
-      ...LEGACY_RUN, id: `newer-${index}`, archived, createdAt: '2026-02-01T00:00:00.000Z',
+    const oldRuns = statuses.map((status) => ({ ...LEGACY_RUN, id: status, status, archived: false }));
+    const kept = Array.from({ length: 300 }, (_, index) => ({
+      ...LEGACY_RUN, id: `newer-${index}`, archived: false, createdAt: '2026-02-01T00:00:00.000Z',
     }));
     seedRuns(dataDir, [...oldRuns, ...kept]);
     for (const { id } of oldRuns) {
@@ -53,26 +55,80 @@ describe('RunStore save lifecycle (#124)', () => {
     store.createRun({ title: 'trigger retention', workflow: 'w', task: 'task', steps: [] });
     for (const status of statuses) {
       const live = ['queued', 'running', 'waiting'].includes(status);
-      expect(store.getRun(status) !== undefined, status).toBe(live);
+      expect(store.getRun(status), status).toBeDefined();
+      expect(store.getRun(status)?.archived, status).toBe(!live);
       expect(existsSync(join(dataDir, 'tmp', status)), status).toBe(live);
       if (live) expect(readFileSync(join(dataDir, 'tmp', status, 'note.txt'), 'utf8')).toBe(status);
     }
     store.flush();
   });
 
-  it('retention removes a pruned run\'s history files only once its delete commits', () => {
-    const kept = Array.from({ length: 300 }, (_, index) => ({ ...LEGACY_RUN, id: `newer-${index}`, createdAt: '2026-02-01T00:00:00.000Z' }));
-    seedRuns(dataDir, [{ ...LEGACY_RUN, id: 'old', status: 'done' }, ...kept]);
+  it('retention archives a finished run past the newest 300 and keeps its row', async () => {
+    vi.useRealTimers();
+    const oldestId = randomUUID();
+    const kept = Array.from({ length: 300 }, (_, index) => ({
+      ...LEGACY_RUN, id: randomUUID(), title: `kept ${index}`, createdAt: '2026-02-01T00:00:00.000Z',
+    }));
+    seedRuns(dataDir, [{
+      ...LEGACY_RUN,
+      id: oldestId,
+      title: 'keep me',
+      status: 'done',
+      tokensUsed: 42,
+      costUsd: 1.25,
+      pullRequestUrl: 'https://github.com/o/r/pull/42',
+      issueNumber: 7,
+    }, ...kept]);
     mkdirSync(join(dataDir, 'runs'), { recursive: true });
-    const events = join(dataDir, 'runs', 'old.ndjson');
-    writeFileSync(events, '{"seq":1}\n');
+    writeFileSync(join(dataDir, 'runs', `${oldestId}.ndjson`), '{"seq":1}\n');
     const store = RunStore.open(dataDir);
     store.createRun({ title: 'trigger retention', workflow: 'w', task: 'task', steps: [] });
-    expect(store.getRun('old')).toBeUndefined();
-    expect(existsSync(events)).toBe(true);
+    const oldest = store.getRun(oldestId);
+    expect(oldest).toMatchObject({
+      archived: true, tokensUsed: 42, costUsd: 1.25,
+      pullRequestUrl: 'https://github.com/o/r/pull/42', title: 'keep me',
+    });
+    expect(store.listRunSummaries().runs.some((run) => run.id === oldestId && run.archived && run.title === 'keep me')).toBe(true);
     store.flush();
-    expect(readPersistedRuns(dataDir).some((run) => run.id === 'old')).toBe(false);
-    expect(existsSync(events)).toBe(false);
+    await store.historyIdle();
+    const indexed = readRunIndexFromDisk(dataDir).runs.find((run) => run.id === oldestId);
+    expect(indexed).toMatchObject({
+      title: 'keep me', archived: true, pullRequestUrl: 'https://github.com/o/r/pull/42', issueNumber: 7,
+    });
+    const { plain, compressed } = historyPaths(dataDir, oldestId);
+    expect(existsSync(compressed)).toBe(true);
+    expect(existsSync(plain)).toBe(false);
+    store.close();
+  });
+
+  it('retention skips a pinned run', () => {
+    const pinnedId = randomUUID();
+    const kept = Array.from({ length: 300 }, (_, index) => ({
+      ...LEGACY_RUN, id: randomUUID(), createdAt: '2026-02-01T00:00:00.000Z',
+    }));
+    seedRuns(dataDir, [{
+      ...LEGACY_RUN, id: pinnedId, title: 'pinned overflow', pinned: true, pinnedAt: '2026-01-01T00:00:00.000Z',
+    }, ...kept]);
+    const store = RunStore.open(dataDir);
+    store.createRun({ title: 'trigger retention', workflow: 'w', task: 'task', steps: [] });
+    expect(store.getRun(pinnedId)).toMatchObject({ archived: false, pinned: true, title: 'pinned overflow' });
+    store.flush();
+  });
+
+  it('retention never deletes archived runs', () => {
+    const archived = Array.from({ length: 501 }, (_, index) => ({
+      ...LEGACY_RUN,
+      id: `archived-${index}`,
+      archived: true,
+      createdAt: `2026-01-${String((index % 28) + 1).padStart(2, '0')}T00:00:00.000Z`,
+    }));
+    seedRuns(dataDir, archived);
+    const store = RunStore.open(dataDir);
+    store.createRun({ title: 'trigger retention', workflow: 'w', task: 'task', steps: [] });
+    store.flush();
+    expect(store.listRunSummaries().runs.filter((run) => run.archived)).toHaveLength(501);
+    expect(store.getRun('archived-0')).toMatchObject({ archived: true });
+    expect(store.getRun('archived-500')).toMatchObject({ archived: true });
   });
 
   it.each(['timer', 'flush'] as const)('silently skips a %s save after the data directory is removed', (trigger) => {
