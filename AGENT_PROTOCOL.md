@@ -82,7 +82,9 @@ interface InputDelivery {
   claude, pi and omp are `resent`; opencode, codex and cursor are `in-thread`. A backend
   switch with no `sessionId` still sends the skill. OpenCode Continue GETs `/session/{id}`;
   a 404 opens one fresh session with `resumeFallbackSystemPrompt` (the skill-inclusive
-  composition Continue omitted from `systemPrompt`).
+  composition Continue omitted from `systemPrompt`). When the continued skill is also
+  missing from the registry, that fallback session gets no skill and only the
+  lost-session notice is shown.
 - Each backend runs as a **persistent process** so multi-turn follow-ups,
   `waiting`, interrupt and resume all work: claude = stream-json over
   stdin/stdout; codex = `codex app-server` JSON-RPC 2.0 (JSONL) over
