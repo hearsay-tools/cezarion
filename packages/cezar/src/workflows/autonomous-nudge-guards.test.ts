@@ -159,6 +159,16 @@ describe('autonomous nudge priority and lifecycle guards', () => {
     expect(session.sendAgentMessage).toHaveBeenCalledOnce();
   });
 
+  it('a pending autonomous retry is not replaced by the final-message nudge', () => {
+    pendingBoundary();
+    expect(manager['maybeFinalMessageNudge'](id, state, 'task', {
+      ask: false, humanGate: false, monitoring: false, silentTail: true, alreadyNudged: false,
+    })).toBe(false);
+    expect(session.sendAgentMessage).not.toHaveBeenCalled();
+    expect(session.sendMessage).not.toHaveBeenCalled();
+    expect(store.readEvents(id).some(e => e.type === 'note' && String(e.message).includes('no final message'))).toBe(false);
+  });
+
   it('a transport exception fails without retaining a readiness retry', () => {
     pendingBoundary();
     vi.mocked(session.sendAgentMessage).mockImplementation(() => { throw new Error('failed transport'); });

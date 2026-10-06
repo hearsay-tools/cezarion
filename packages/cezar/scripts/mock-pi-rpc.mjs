@@ -125,6 +125,7 @@ async function handle(command) {
     silent.noteSilentTailPrompt(command.message);
     if (silent.isFinalMessageNudge(command.message)) {
       send({ id: command.id, type: 'response', command: 'prompt', success: true });
+      if (silent.finalMessageNudgeKind() === 'ack-only') return;
       send({ type: 'agent_start' });
       send({ type: 'turn_start' });
       const kind = silent.finalMessageNudgeKind();

@@ -204,6 +204,11 @@ rl.on('line', async (line) => {
     emit({ id: msg.id, result: { turn: { id: 'turn_mock_1' } } });
     }
     const turnText = msg.params?.input?.map?.((part) => part.text ?? '').join('\n') ?? '';
+    if (turnText.includes('mock:silent-tail') || turnText.includes('Your last turn ended without a message to the user.')) {
+      const silent = await import('./mock-silent-tail.mjs');
+      silent.noteSilentTailPrompt(turnText);
+      if (silent.isAckOnlyNudge(turnText)) return;
+    }
     if (!turnText.includes('mock:no-progress-ack-only')) {
     emit({ method: 'turn/started', params: { turn: { id: 'turn_mock_1', status: 'inProgress', items: [] } } });
     }

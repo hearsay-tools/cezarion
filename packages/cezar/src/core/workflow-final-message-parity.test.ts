@@ -1,9 +1,10 @@
+import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { RUNNER_IDS } from './agent-runner.ts';
 import type { UiEvent } from './ui-events.ts';
-import { FINAL_MESSAGE_CRITERIA, driveSeam, promptFor, waitFor, withOwnedInputRun } from './harness-parity.testkit.ts';
+import { FINAL_MESSAGE_CRITERIA, HARNESS_ADAPTERS, driveSeam, exemptionFor, promptFor, waitFor, withOwnedInputRun } from './harness-parity.testkit.ts';
 import { handoffPath } from '../handoff.ts';
 
 const nudgeNotes = (events: readonly Record<string, unknown>[]) =>
@@ -36,6 +37,70 @@ describe('silent-tail seam — mapper emits reasoning/tool with no later message
 describe('final-message nudge parity — #544', () => {
   for (const backend of RUNNER_IDS) {
     for (const row of FINAL_MESSAGE_CRITERIA) {
+      if (row.id === 'F7') {
+        const exemption = exemptionFor('F7', backend);
+        if (exemption) {
+          it(`${backend} F7 exemption — ${exemption.reason}`, async () => {
+            expect(HARNESS_ADAPTERS[backend].scenarios['silent-tail-ack-delay']).toBeUndefined();
+          });
+          continue;
+        }
+        it(`${backend} ${row.id} ${row.name}`, async () => {
+          await withOwnedInputRun(backend, 'baseline', async ({ store, manager, runId, parentRunId, repoRoot }) => {
+            manager.enqueueOwnedRun(runId);
+            await waitFor(() => store.getRun(runId)?.status === 'waiting');
+            const startSeq = store.readEvents(runId).length;
+            const handoff = handoffPath(join(repoRoot, '.ai/cezar'), runId);
+            expect(manager.steerWorker(runId, {
+              id: randomUUID(), source: 'agent', parentRunId,
+              text: promptFor(backend, 'silent-tail-ack-delay'), createdAt: new Date().toISOString(),
+            })).toBe('queued');
+            await waitFor(() => store.readEvents(runId).slice(startSeq).some(e => e.type === 'turn-end'));
+            expect(manager['active'].get(runId)?.agentInputFlight).toBeDefined();
+            expect(nudgeNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(0);
+            await waitFor(() => nudgeNotes(store.readEvents(runId).slice(startSeq)).length === 1);
+            expect(nudgeNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(1);
+            expect(readFileSync(handoff, 'utf8')).toContain('status=running (final message nudge)');
+          });
+        }, 30_000);
+        continue;
+      }
+      if (row.id === 'F8') {
+        const exemption = exemptionFor('F8', backend);
+        if (exemption) {
+          it(`${backend} F8 exemption — ${exemption.reason}`, async () => {
+            expect(HARNESS_ADAPTERS[backend].scenarios['silent-tail-no-reply']).toBeUndefined();
+            await withOwnedInputRun(backend, 'baseline', async ({ store, manager, runId }) => {
+              manager.enqueueOwnedRun(runId);
+              await waitFor(() => store.getRun(runId)?.status === 'waiting');
+              const started = store.readEvents(runId).filter(e => e.type === 'turn.started').length;
+              expect(manager.sendMessage(runId, [{ type: 'text', text: 'mock:hold' }])).toBe(true);
+              await waitFor(() => store.readEvents(runId).filter(e => e.type === 'turn.started').length > started);
+            });
+          }, 30_000);
+          continue;
+        }
+        it(`${backend} ${row.id} ${row.name}`, async () => {
+          await withOwnedInputRun(backend, 'silent-tail-no-reply', async ({ store, manager, runId, repoRoot }) => {
+            (manager as unknown as { finalMessageNudgeReplyMs: number }).finalMessageNudgeReplyMs = 300;
+            const handoff = handoffPath(join(repoRoot, '.ai/cezar'), runId);
+            const startSeq = store.readEvents(runId).length;
+            manager.enqueueOwnedRun(runId);
+            await waitFor(() => nudgeNotes(store.readEvents(runId).slice(startSeq)).length === 1);
+            expect(store.getRun(runId)?.status).toBe('running');
+            expect(manager['busySlots']()).toBe(1);
+            await new Promise(resolve => setTimeout(resolve, 150));
+            expect(store.getRun(runId)?.status).toBe('running');
+            expect(manager['busySlots']()).toBe(1);
+            await waitFor(() => store.getRun(runId)?.status === 'waiting');
+            expect(manager['busySlots']()).toBe(0);
+            expect(nudgeNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(1);
+            expect(store.readEvents(runId).some(e => e.type === 'note' && String(e.message).includes('no reply to the final-message nudge'))).toBe(true);
+            expect(readFileSync(handoff, 'utf8')).toContain('status=waiting');
+          });
+        }, 30_000);
+        continue;
+      }
       for (const mode of ['fresh', 'continuation'] as const) {
         it(`${backend} ${row.id} ${row.name} (${mode})`, async () => {
           await withOwnedInputRun(backend, mode === 'continuation' ? 'baseline' : row.scenario, async ({ store, manager, runId, repoRoot }) => {

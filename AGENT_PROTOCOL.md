@@ -997,15 +997,24 @@ this HTTP-only ordering and test root idle expiry/Continue on their native wires
 Owned-worker terminal settlement and explicit question/worker/CI waits retain
 their existing policies.
 
-Final-message nudge rows **F1–F6** live in
+Final-message nudge rows **F1–F8** live in
 `core/workflow-final-message-parity.test.ts` and the same parity guard (hearsay-tools/cezarion#544).
 Every adapter covers a reasoning-or-tool tail with no later assistant message, on fresh and Continue
 paths: one visible-message nudge that can complete with DONE, a still-silent nudge that parks
 waiting (#119), reasoning that names `CEZ:DONE` never completing the run (#399), a markerless
 message-then-tool tail getting exactly one nudge, an explicit DONE with zero nudge notes, and an
 autonomous silent tail that stays `running` with a held slot and no idle timer at the first
-`continuing without pausing` note, with zero final-message notes. The one-shot latch keeps #48
-closed; control markers are never read from reasoning. No runner is exempt.
+`continuing without pausing` note, with zero final-message notes. F7 covers the park-after-ACK site:
+a silent-tail turn that ends while its agent-input ACK is still pending produces exactly one
+`no final message` note and the `status=running (final message nudge)` heartbeat after the ACK.
+Only OpenCode's HTTP ACK is independent of the SSE turn; the other adapters have named executable
+exemptions because turn frames and the transport ACK share one stream, so turn-end-before-ACK
+cannot be constructed.
+F8 covers an ACKed nudge that never opens a turn (OpenCode keeps sending SSE heartbeat comments):
+after `FINAL_MESSAGE_NUDGE_REPLY_MS` the run parks `waiting` with busySlots 0. Cursor is exempt
+because ACP emits `turn.started` locally when `session/prompt` is written, so an ACK without a turn
+cannot be constructed. The one-shot latch keeps #48 closed; control markers are never read from
+reasoning. A pending autonomous retry is never replaced by the final-message nudge.
 
 > Every criterion in the harness parity matrix MUST hold for **every** backend,
 > or carry a declared exemption naming the wire limitation that prevents it.

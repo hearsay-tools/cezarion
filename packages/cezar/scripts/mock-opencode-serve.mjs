@@ -177,7 +177,7 @@ const server = createServer((req, res) => {
         const text = JSON.parse(body).parts.map(part => part.text ?? '').join('\n');
         const userId = `msg_steer_user_${++steerSerial}`;
         // #505 review: acknowledge a steer later than the runner's lost-wake window.
-        const ackDelay = Number(process.env.CEZ_MOCK_OPENCODE_STEER_ACK_MS ?? 0);
+        const ackDelay = text.includes('delay-owned-ack') ? 250 : Number(process.env.CEZ_MOCK_OPENCODE_STEER_ACK_MS ?? 0);
         if (ackDelay > 0) setTimeout(() => { res.writeHead(204); res.end(); }, ackDelay);
         else { res.writeHead(204); res.end(); }
         send({ type: 'message.updated', properties: { info: { id: userId, sessionID: SESSION_ID, role: 'user', time: { created: Date.now() } } } });
@@ -194,11 +194,24 @@ const server = createServer((req, res) => {
         // Keep the portable answer HTTP request unacknowledged while its SSE turn finishes.
       } else if (autonomousCap && body.includes('Continue working autonomously until the task is fully complete.')) {
         setTimeout(() => res.end(JSON.stringify({ info: info({}), parts: [] })), 100);
+      } else if (body.includes('delay-owned-ack')) {
+        // F7: SSE turn-end before HTTP ACK so parkAfterAck applies the silent-tail nudge.
+        setTimeout(() => res.end(JSON.stringify({ info: info({}), parts: [] })), 250);
       } else {
       res.end(JSON.stringify({ info: info({}), parts: [] }));
       }
       if (body.includes('mock:autonomous-readiness-idle')) autonomousReadinessIdle = true;
       if (body.includes('mock:autonomous-cap') || body.includes('mock:autonomous-ask-cap')) autonomousCap = true;
+      if (body.includes('mock:silent-tail') || body.includes('Your last turn ended without a message to the user.')) {
+        const silent = await import('./mock-silent-tail.mjs');
+        const prompt = (() => { try { return JSON.parse(body).parts.map(part => part.text ?? '').join('\n'); } catch { return body; } })();
+        silent.noteSilentTailPrompt(prompt);
+        if (silent.isAckOnlyNudge(prompt)) {
+          const beats = setInterval(() => { if (sse) sse.write(': heartbeat\n\n'); }, 50);
+          beats.unref?.();
+          return;
+        }
+      }
       if (url.endsWith('/prompt_async')) {
         currentUserId = `msg_user_${++steerSerial}`;
         const text = JSON.parse(body).parts.map(part => part.text ?? '').join('\n');

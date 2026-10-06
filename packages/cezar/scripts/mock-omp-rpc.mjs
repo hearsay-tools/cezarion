@@ -345,6 +345,11 @@ async function prompt(command) {
     if (crashWithStderr(message, '{"type":"tool_execution_update","toolCallId":"truncated')) return;
   }
 
+  if (message.includes('mock:silent-tail') || message.includes('Your last turn ended without a message to the user.')) {
+    const silentEarly = await import('./mock-silent-tail.mjs');
+    silentEarly.noteSilentTailPrompt(message);
+    if (silentEarly.isAckOnlyNudge(message)) { respond(command); return; }
+  }
   respond(command);
   beginTurn(command);
   if (message.includes('mock:turn-messages:')) {

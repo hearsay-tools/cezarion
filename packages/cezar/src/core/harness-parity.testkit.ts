@@ -64,6 +64,8 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  * | `steer-late` | the final text first; agent input sent after it arrives after the last model call (#505) |
  * | `silent-tail` | visible assistant text, a tool, then reasoning that names CEZ:DONE, and no later message |
  * | `silent-tail-again` | the same first turn; a final-message nudge is answered with reasoning only |
+ * | `silent-tail-ack-delay` | silent-tail as a follow-up whose transport ACK is held until after turn-end |
+ * | `silent-tail-no-reply` | the same first turn; a final-message nudge is ACKed and never opens a turn |
  */
 export const SCENARIOS = [
   'auto-resumed',
@@ -81,6 +83,8 @@ export const SCENARIOS = [
   'autonomous-readiness-idle',
   'silent-tail',
   'silent-tail-again',
+  'silent-tail-ack-delay',
+  'silent-tail-no-reply',
   'tool-tail',
   'baseline',
   'done',
@@ -176,6 +180,8 @@ export const FINAL_MESSAGE_CRITERIA = [
   { id: 'F4', scenario: 'tool-tail', name: 'nudges a markerless message-then-tool tail once' },
   { id: 'F5', scenario: 'done', name: 'honors DONE without a final-message nudge' },
   { id: 'F6', scenario: 'tool-tail', name: 'keeps an autonomous silent tail running without a final-message nudge' },
+  { id: 'F7', scenario: 'silent-tail-ack-delay', name: 'nudges a silent tail after a delayed ACK' },
+  { id: 'F8', scenario: 'silent-tail-no-reply', name: 'parks waiting when a nudge is ACKed without a turn' },
 ] as const;
 
 export interface HarnessAdapter {
@@ -222,6 +228,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'autonomous-ask-cap': 'mock:autonomous-ask-cap',
       'silent-tail': 'mock:silent-tail',
       'silent-tail-again': 'mock:silent-tail-again',
+      'silent-tail-no-reply': 'mock:silent-tail-no-reply',
       'tool-tail': 'mock:tool-tail',
       baseline: BASELINE_PROMPT,
       'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
@@ -262,6 +269,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'autonomous-ask-cap': 'mock:autonomous-ask-cap',
       'silent-tail': 'mock:silent-tail',
       'silent-tail-again': 'mock:silent-tail-again',
+      'silent-tail-no-reply': 'mock:silent-tail-no-reply',
       'tool-tail': 'mock:tool-tail',
       baseline: BASELINE_PROMPT,
       'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
@@ -304,6 +312,8 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'autonomous-readiness-idle': 'mock:autonomous-readiness-idle',
       'silent-tail': 'mock:silent-tail',
       'silent-tail-again': 'mock:silent-tail-again',
+      'silent-tail-ack-delay': 'mock:silent-tail delay-owned-ack',
+      'silent-tail-no-reply': 'mock:silent-tail-no-reply',
       'tool-tail': 'mock:tool-tail',
       baseline: BASELINE_PROMPT,
       'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
@@ -372,6 +382,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'autonomous-ask-cap': 'mock:autonomous-ask-cap',
       'silent-tail': 'mock:silent-tail',
       'silent-tail-again': 'mock:silent-tail-again',
+      'silent-tail-no-reply': 'mock:silent-tail-no-reply',
       'tool-tail': 'mock:tool-tail',
       baseline: BASELINE_PROMPT,
       'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
@@ -412,6 +423,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'autonomous-ask-cap': 'mock:autonomous-ask-cap',
       'silent-tail': 'mock:silent-tail',
       'silent-tail-again': 'mock:silent-tail-again',
+      'silent-tail-no-reply': 'mock:silent-tail-no-reply',
       'tool-tail': 'mock:tool-tail',
       baseline: BASELINE_PROMPT,
       'crash-stderr-pre-ack': 'mock:crash-stderr-pre-ack',
@@ -493,6 +505,14 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
     criterion, backend, kind: 'scenario-unconstructible' as const,
     reason: 'This wire has no separate portable-answer HTTP ACK retained after turn completion. The executable cell checks ordinary root idle expiry and successful Continue through its native wire instead.',
   }))),
+  ...(['claude', 'codex', 'pi', 'cursor', 'omp'] as const).map(backend => ({
+    criterion: 'F7', backend, kind: 'scenario-unconstructible' as const,
+    reason: 'This wire has no separate HTTP ACK retained after turn completion. Turn frames and the transport ACK share one stream, so a silent-tail turn cannot end while its agent-input ACK is still pending.',
+  })),
+  {
+    criterion: 'F8', backend: 'cursor', kind: 'scenario-unconstructible' as const,
+    reason: 'Cursor ACP emits turn.started locally when session/prompt is written (cursor-acp-runner startTurn), so an ACK without opening a turn cannot be constructed.',
+  },
   {
     criterion: 'A9', backend: 'claude', kind: 'capability-absent',
     reason: 'Claude stream-json uses the turn-end CEZ:ASK fallback; its ask wire emits no native mid-turn ask.requested (A3/A4 cover the portable policy).',

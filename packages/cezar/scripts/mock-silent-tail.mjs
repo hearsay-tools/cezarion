@@ -12,7 +12,8 @@ export const FINAL_MESSAGE_NUDGE_PREFIX = 'Your last turn ended without a messag
 
 export function noteSilentTailPrompt(prompt) {
   if (typeof prompt !== 'string' || isFinalMessageNudge(prompt)) return;
-  if (prompt.includes('mock:silent-tail-again')) opened = 'silent-tail-again';
+  if (prompt.includes('mock:silent-tail-no-reply')) opened = 'silent-tail-no-reply';
+  else if (prompt.includes('mock:silent-tail-again')) opened = 'silent-tail-again';
   else if (prompt.includes('mock:silent-tail')) opened = 'silent-tail';
 }
 
@@ -28,9 +29,15 @@ export function isFinalMessageNudge(prompt) {
   return typeof prompt === 'string' && prompt.includes(FINAL_MESSAGE_NUDGE_PREFIX);
 }
 
-/** `done` only for mock:silent-tail; `silent` only for mock:silent-tail-again; else a plain visible line. */
+/** `done` only for mock:silent-tail; `silent` only for mock:silent-tail-again;
+ *  `ack-only` ACKs the nudge and never opens a turn (OpenCode keeps heartbeats). */
 export function finalMessageNudgeKind() {
+  if (opened === 'silent-tail-no-reply') return 'ack-only';
   if (opened === 'silent-tail-again') return 'silent';
   if (opened === 'silent-tail') return 'done';
   return 'standing';
+}
+
+export function isAckOnlyNudge(prompt) {
+  return isFinalMessageNudge(prompt) && finalMessageNudgeKind() === 'ack-only';
 }
