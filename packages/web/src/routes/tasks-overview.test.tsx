@@ -1511,6 +1511,19 @@ describe('archived pages past the window', () => {
     expect(onLoadMore).toHaveBeenCalledTimes(1)
   })
 
+  it('says when an older page failed, and retries it', () => {
+    const onLoadMore = vi.fn()
+    renderOverview({
+      view: 'archived',
+      runs: archivedRuns(2),
+      archivedPages: { runs: [], hasMore: true, loading: false, onLoadMore, failed: true },
+    })
+    expect(screen.getByRole('alert').textContent).toContain('Could not load older archived tasks.')
+    expect(screen.queryByRole('button', { name: 'Show older archived' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    expect(onLoadMore).toHaveBeenCalledTimes(1)
+  })
+
   it('drops a paged row the live list has since unarchived', () => {
     const live = run({ id: 'came-back', archived: false })
     renderOverview({

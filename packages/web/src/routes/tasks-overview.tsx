@@ -64,6 +64,8 @@ export type ArchivedPages = {
   hasMore: boolean
   loading: boolean
   onLoadMore: () => void
+  /** The last page request failed: the tab still shows what it has and offers a retry. */
+  failed?: boolean
 }
 
 /**
@@ -362,7 +364,12 @@ export function TasksOverview({
           </>
         )}
 
-        {view === 'archived' && archivedPages?.hasMore ? (
+        {view === 'archived' && archivedPages?.failed ? (
+          <p role="alert" data-slot="archived-older-error" className="mt-3.5 flex items-center justify-center gap-2.5 text-[13px] text-muted-foreground">
+            Could not load older archived tasks.
+            <Button variant="outline" className="min-h-11" onClick={archivedPages.onLoadMore}>Retry</Button>
+          </p>
+        ) : view === 'archived' && archivedPages?.hasMore ? (
           <Button
             data-slot="archived-older"
             variant="outline"
@@ -1245,11 +1252,13 @@ function useArchivedPages(runs: readonly RunSummary[] | undefined, view: ListVie
   const windowFull = runs !== undefined && listCounts(runs).archived >= ARCHIVED_WINDOW
   const query = useArchivedRuns(needle, view === 'archived' && (needle !== '' || windowFull))
   const loaded = query.data?.pages
-  const pages = React.useMemo<ArchivedPages | undefined>(() => (loaded ? {
-    runs: loaded.flatMap((page) => page.runs),
+  const pages = React.useMemo<ArchivedPages | undefined>(() => (loaded || query.isError ? {
+    runs: (loaded ?? []).flatMap((page) => page.runs),
     hasMore: query.hasNextPage,
     loading: query.isFetchingNextPage,
-    onLoadMore: () => void query.fetchNextPage(),
+    // A failed first page has nothing to continue from, so retrying it is a refetch.
+    onLoadMore: () => void (loaded ? query.fetchNextPage() : query.refetch()),
+    failed: query.isError,
   } : undefined), [loaded, query])
   // The tab counts every archived task, so only the unfiltered answer's total is the count; a
   // search's total is its matches.
