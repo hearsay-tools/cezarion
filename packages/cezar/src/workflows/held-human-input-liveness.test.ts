@@ -138,7 +138,53 @@ describe('held human input liveness bound (#486)', () => {
       await new Promise(r => setTimeout(r, 20));
     }
     expect(['done', 'review']).toContain(store.getRun(record.id)?.status);
-    expect(store.readEvents(record.id).some(e => e.type === 'note' && String(e.message).includes('did not confirm reading'))).toBe(true);
+    const note = store.readEvents(record.id).filter(e => e.type === 'note').map(e => String(e.message))
+      .find(m => m.includes('did not confirm reading'));
+    expect(note).toBe('delivered held messages; the agent did not confirm reading them');
+    expect(note).not.toMatch(/\d/);
+    expect(store.readEvents(record.id).some(e => e.type === 'lifecycle' && String(e.message).includes('goal achieved'))).toBe(true);
+  }, 15_000);
+
+  it('expires a counted hold with the exact unconfirmed-read note', async () => {
+    let open = true;
+    let finish!: (result: AgentRunResult) => void;
+    runnerHook.runner = {
+      backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT, systemPromptOnResume: 'resent',
+      run: async () => ({ text: '', toolCalls: [], tokensUsed: 0 }),
+      interrupt: async () => undefined,
+      startSession(spec, onEvent, opts): AgentSession {
+        const result = new Promise<AgentRunResult>(resolve => { finish = resolve; });
+        queueMicrotask(() => {
+          opts?.onUiEvent?.({ type: 'session.started', sessionId: spec.sessionId ?? 's', backend: 'claude' });
+          opts?.onUiEvent?.({ type: 'turn.started', turnId: 't1' });
+          onEvent?.({ type: 'text', text: 'Working.\nCEZ:DONE' });
+          onEvent?.({ type: 'turn-end' });
+        });
+        const close = () => {
+          if (!open) return;
+          open = false;
+          finish({ text: 'Working.', toolCalls: [], tokensUsed: 0, sessionId: spec.sessionId });
+        };
+        return {
+          result, sendMessage: () => true, sendAgentMessage: () => false,
+          discardQueuedMessages: () => undefined, holdsHumanInput: () => true,
+          heldHumanInputCount: () => 2,
+          end: close, interrupt: close, get open() { return open; },
+        };
+      },
+    };
+
+    (manager as unknown as { unreadInputGraceMs: number }).unreadInputGraceMs = 300;
+    const record = manager.startRun(SINGLE_STEP, { task: 'hold two forever', runner: 'claude', worktree: false });
+    const deadline = Date.now() + 8_000;
+    while (!['done', 'review', 'failed', 'waiting'].includes(store.getRun(record.id)?.status ?? '')) {
+      if (Date.now() > deadline) throw new Error(`run stuck ${store.getRun(record.id)?.status}`);
+      await new Promise(r => setTimeout(r, 20));
+    }
+    expect(['done', 'review']).toContain(store.getRun(record.id)?.status);
+    const note = store.readEvents(record.id).filter(e => e.type === 'note').map(e => String(e.message))
+      .find(m => m.includes('did not confirm reading'));
+    expect(note).toBe('delivered 2 messages; the agent did not confirm reading them');
     expect(store.readEvents(record.id).some(e => e.type === 'lifecycle' && String(e.message).includes('goal achieved'))).toBe(true);
   }, 15_000);
 });

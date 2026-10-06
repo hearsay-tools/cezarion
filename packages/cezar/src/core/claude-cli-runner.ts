@@ -480,6 +480,7 @@ export class ClaudeCliRunner implements AgentRunner {
       },
       discardQueuedMessages: () => undefined,
       holdsHumanInput: () => humanUnsettled.size > 0,
+      heldHumanInputCount: () => humanUnsettled.size,
       end,
       interrupt,
       pid: child.pid,

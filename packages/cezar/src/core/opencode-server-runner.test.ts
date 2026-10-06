@@ -740,14 +740,27 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
       // Mid-turn steering: opencode gets the next prompt only once the
       // current turn's idle has closed it, so each turn gets its own idle
       // and its own turn-end instead of the first idle closing the second.
+      session.sendMessage([{ type: 'text', text: 'follow-up-a' }]);
+      session.sendMessage([{ type: 'text', text: 'follow-up-b' }]);
+      await sleep(80);
+      expect(mock.promptPosts).toHaveLength(1);
+      expect(session.heldHumanInputCount?.()).toBe(2);
+      expect(session.holdsHumanInput()).toBe(true);
+      expect(session.holdsHumanInput()).toBe((session.heldHumanInputCount?.() ?? 0) > 0);
+      session.discardQueuedMessages();
+      expect(session.holdsHumanInput()).toBe(false);
+      expect(session.heldHumanInputCount?.()).toBe(0);
+
       session.sendMessage([{ type: 'text', text: 'follow-up' }]);
       await sleep(80);
       expect(mock.promptPosts).toHaveLength(1);
+      expect(session.heldHumanInputCount?.()).toBe(1);
       expect(session.holdsHumanInput()).toBe(true);
 
       mock.send({ type: 'session.idle', properties: { sessionID: 'ses_test' } });
       await waitFor(() => mock.promptPosts.length === 2);
       expect(session.holdsHumanInput()).toBe(false);
+      expect(session.heldHumanInputCount?.()).toBe(0);
       expect(count(events, 'turn-end')).toBe(1);
 
       mock.send({ type: 'session.idle', properties: { sessionID: 'ses_test' } });
@@ -761,6 +774,8 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
       const ack = session.sendAgentMessage([{ type: 'text', text: 'agent-origin' }], ['in-1']);
       expect(ack).not.toBe(false);
       expect(session.holdsHumanInput()).toBe(false);
+      expect(session.heldHumanInputCount?.()).toBe(0);
+      expect(session.holdsHumanInput()).toBe((session.heldHumanInputCount?.() ?? 0) > 0);
       session.interrupt();
       await (ack as Promise<void>).catch(() => undefined);
     });
@@ -776,9 +791,14 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
       await waitFor(() => uiEvents.some(event => event.type === 'ask.requested'));
       expect(session.sendMessage([{ type: 'text', text: 'Library: Vitest' }])).toBe(true);
       expect(session.sendMessage([{ type: 'text', text: 'queued-while-reply' }])).toBe(true);
+      expect(session.sendMessage([{ type: 'text', text: 'queued-while-reply-2' }])).toBe(true);
+      expect(session.heldHumanInputCount?.()).toBe(2);
       expect(session.holdsHumanInput()).toBe(true);
+      expect(session.holdsHumanInput()).toBe((session.heldHumanInputCount?.() ?? 0) > 0);
       session.discardQueuedMessages();
       expect(session.holdsHumanInput()).toBe(false);
+      expect(session.heldHumanInputCount?.()).toBe(0);
+      expect(session.holdsHumanInput()).toBe((session.heldHumanInputCount?.() ?? 0) > 0);
     });
   });
 
@@ -790,9 +810,12 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
       await sleep(80);
       expect(mock.promptPosts).toHaveLength(1);
       expect(session.holdsHumanInput()).toBe(true);
+      expect(session.heldHumanInputCount?.()).toBe(1);
+      expect(session.holdsHumanInput()).toBe((session.heldHumanInputCount?.() ?? 0) > 0);
 
       session.discardQueuedMessages();
       expect(session.holdsHumanInput()).toBe(false);
+      expect(session.heldHumanInputCount?.()).toBe(0);
 
       mock.send({ type: 'session.idle', properties: { sessionID: 'ses_test' } });
       await sleep(80);

@@ -830,6 +830,7 @@ export class OmpRunner implements AgentRunner {
       },
       discardQueuedMessages: () => undefined,
       holdsHumanInput: () => humanAcks.size > 0,
+      heldHumanInputCount: () => humanAcks.size,
       end,
       interrupt,
       // The live child: a Ruling 13 respawn replaces it (`onPidChange` tells the caller who read it).

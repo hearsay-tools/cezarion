@@ -661,10 +661,16 @@ describe('agent input steering (#505)', () => {
   it('holdsHumanInput is true while a human line is unsettled and false after its result (#486)', async () => {
     const { session, events } = start();
     await waitUntil(() => events.some(e => e.type === 'tool-call'));
-    expect(session.sendMessage([{ type: 'text', text: 'human-unsettled' }])).toBe(true);
+    expect(session.heldHumanInputCount?.()).toBe(1);
+    expect(session.sendMessage([{ type: 'text', text: 'human-unsettled-1' }])).toBe(true);
+    expect(session.sendMessage([{ type: 'text', text: 'human-unsettled-2' }])).toBe(true);
+    expect(session.heldHumanInputCount?.()).toBe(3);
     expect(session.holdsHumanInput()).toBe(true);
+    expect(session.holdsHumanInput()).toBe((session.heldHumanInputCount?.() ?? 0) > 0);
     await waitUntil(() => events.some(e => e.type === 'turn-end'));
     expect(session.holdsHumanInput()).toBe(false);
+    expect(session.heldHumanInputCount?.()).toBe(0);
+    expect(session.holdsHumanInput()).toBe((session.heldHumanInputCount?.() ?? 0) > 0);
     session.end(); await session.result;
   });
 

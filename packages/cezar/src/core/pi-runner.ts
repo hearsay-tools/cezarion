@@ -540,6 +540,7 @@ export class PiRunner implements AgentRunner {
       },
       discardQueuedMessages: () => undefined,
       holdsHumanInput: () => humanPromptAcks > 0,
+      heldHumanInputCount: () => humanPromptAcks,
       end,
       interrupt,
       pid: child.pid,

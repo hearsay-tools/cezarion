@@ -415,6 +415,9 @@ class OpencodeSession implements AgentSession {
   holdsHumanInput(): boolean {
     return this.humanPromptWaiters > 0 || this.queuedQuestionMessages.length > 0;
   }
+  heldHumanInputCount(): number {
+    return this.humanPromptWaiters + this.queuedQuestionMessages.length;
+  }
 
   private deliverPrompt(text: string): void {
     this.pendingPromptRequests += 1;

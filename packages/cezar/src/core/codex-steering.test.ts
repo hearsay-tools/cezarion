@@ -27,11 +27,16 @@ describe('codex agent input steering (#505)', () => {
   it('holdsHumanInput is true while a human prompt RPC is in flight and false after its response (#486)', async () => {
     const { session, events, requests } = start('mock:steer-tool');
     await waitUntil(() => events.some(e => e.type === 'tool-call'));
-    expect(session.sendMessage([{ type: 'text', text: 'human-in-flight' }])).toBe(true);
+    expect(session.sendMessage([{ type: 'text', text: 'human-in-flight-1' }])).toBe(true);
+    expect(session.sendMessage([{ type: 'text', text: 'human-in-flight-2' }])).toBe(true);
+    expect(session.heldHumanInputCount?.()).toBe(2);
     expect(session.holdsHumanInput()).toBe(true);
+    expect(session.holdsHumanInput()).toBe((session.heldHumanInputCount?.() ?? 0) > 0);
     await waitUntil(() => requests().some(r => r.method === 'turn/steer'));
     await waitUntil(() => !session.holdsHumanInput());
     expect(session.holdsHumanInput()).toBe(false);
+    expect(session.heldHumanInputCount?.()).toBe(0);
+    expect(session.holdsHumanInput()).toBe((session.heldHumanInputCount?.() ?? 0) > 0);
     session.end(); await session.result;
   });
 

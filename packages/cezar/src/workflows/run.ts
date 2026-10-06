@@ -4706,7 +4706,13 @@ export class RunManager {
           return;
         }
         if (Date.now() - (state.heldHumanInputSince ?? 0) >= this.unreadInputGraceMs) {
-          this.store.appendEvent(runId, { type: 'note', message: unreadInputUnconfirmedNote(Math.max(1, session.heldHumanInputCount?.() ?? 1)) });
+          const held = session.heldHumanInputCount?.() ?? 0;
+          this.store.appendEvent(runId, {
+            type: 'note',
+            message: held > 0
+              ? unreadInputUnconfirmedNote(held)
+              : 'delivered held messages; the agent did not confirm reading them',
+          });
           state.heldHumanInputExpired = true;
           this.settleIdleBoundary(runId, state, session);
           return;

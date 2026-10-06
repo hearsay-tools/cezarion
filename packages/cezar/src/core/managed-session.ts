@@ -79,7 +79,7 @@ export function startManagedSession(
     },
     discardQueuedMessages: () => live.discardQueuedMessages(),
     holdsHumanInput: () => live.holdsHumanInput(),
-    heldHumanInputCount: () => live.heldHumanInputCount?.() ?? (live.holdsHumanInput() ? 1 : 0),
+    ...(live.heldHumanInputCount ? { heldHumanInputCount: () => live.heldHumanInputCount!() } : {}),
     end: () => { stop(); live.end(); },
     interrupt: () => { stop(); live.interrupt(); },
   };
