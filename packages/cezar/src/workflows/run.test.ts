@@ -293,7 +293,7 @@ describe('RunManager reported cost accounting', () => {
   it.each(['fresh', 'legacy-inflated', 'missed-persist'] as const)('counts cumulative Claude USD across Continue steps (%s)', async (priorState) => {
     let launches = 0;
     runnerHook.runner = {
-      backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT,
+      backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT, systemPromptOnResume: 'resent',
       run: async () => ({ text: '', toolCalls: [], tokensUsed: 0 }),
       interrupt: async () => undefined,
       startSession(spec, onEvent, opts): AgentSession {
@@ -1704,7 +1704,7 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
   it('publishes a runner failure that occurs during idle shutdown', async () => {
     runnerHook.runner = {
       backend: 'claude',
-      specSupport: CLAUDE_SPEC_SUPPORT,
+      specSupport: CLAUDE_SPEC_SUPPORT, systemPromptOnResume: 'resent',
       run: async () => ({ text: '', toolCalls: [], tokensUsed: 0 }),
       interrupt: async () => undefined,
       startSession: (_spec, onEvent) => {
@@ -1775,7 +1775,7 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
     let receivedImages: ContentBlock[] | undefined;
     runnerHook.runner = {
       backend: 'claude',
-      specSupport: CLAUDE_SPEC_SUPPORT,
+      specSupport: CLAUDE_SPEC_SUPPORT, systemPromptOnResume: 'resent',
       run: async () => ({ text: 'done', toolCalls: [], tokensUsed: 0 }),
       interrupt: async () => undefined,
       startSession: (spec) => {
@@ -2405,7 +2405,7 @@ describe('CEZ:ASK parks as waiting and emits ask.requested (#473)', () => {
 
   const v2OnlyAskRunner = (marker: string, parentItemId?: string): AgentRunner => ({
     backend: 'claude',
-    specSupport: CLAUDE_SPEC_SUPPORT,
+    specSupport: CLAUDE_SPEC_SUPPORT, systemPromptOnResume: 'resent',
     run: async () => ({ text: 'Choose an option.', toolCalls: [], tokensUsed: 0 }),
     interrupt: async () => undefined,
     startSession(_spec, onEvent, opts: SessionOptions = {}): AgentSession {

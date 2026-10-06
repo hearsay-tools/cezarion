@@ -61,8 +61,10 @@ import {
   AUTONOMOUS_CRITERIA,
   FINAL_MESSAGE_CRITERIA,
   WORKFLOW_ASK_CRITERIA,
+  SKILL_RESUME_CRITERIA,
   PARITY_EXEMPTIONS,
   PINNED_SESSION_ID,
+  seedOpencodeMockSession,
   type RunObservation,
   type ScenarioName,
   type SeamObservation,
@@ -1685,6 +1687,7 @@ describe('harness parity — the matrix itself', () => {
     ...MONITORING_ACK_CRITERIA.map(c => c.id),
     ...MONITORING_ORDER_CRITERIA.map(c => c.id),
     ...WORKFLOW_ASK_CRITERIA.map(c => c.id),
+    ...SKILL_RESUME_CRITERIA.map(c => c.id),
     ...AUTONOMOUS_CRITERIA.map(c => c.id),
     ...FINAL_MESSAGE_CRITERIA.map(c => c.id),
     ...NO_PROGRESS_CRITERIA.map(c => c.id),
@@ -1701,6 +1704,8 @@ describe('harness parity — the matrix itself', () => {
     if (monitor) return monitor.scenario;
     const ask = WORKFLOW_ASK_CRITERIA.find(c => c.id === id);
     if (ask) return ask.scenario;
+    const skillResume = SKILL_RESUME_CRITERIA.find(c => c.id === id);
+    if (skillResume) return skillResume.scenario;
     const autonomous = AUTONOMOUS_CRITERIA.find(c => c.id === id);
     if (autonomous) return autonomous.scenario;
     const finalMessage = FINAL_MESSAGE_CRITERIA.find(c => c.id === id);
@@ -1797,7 +1802,7 @@ describe('harness parity — the matrix itself', () => {
   });
 
   it('uses no skipped or pending cell — an inapplicable one is a declared exemption', () => {
-    for (const url of [new URL(import.meta.url), new URL('../workflows/worker-parent-attention.test.ts', import.meta.url), new URL('../workflows/monitoring-turn.test.ts', import.meta.url)]) {
+    for (const url of [new URL(import.meta.url), new URL('../workflows/worker-parent-attention.test.ts', import.meta.url), new URL('../workflows/monitoring-turn.test.ts', import.meta.url), new URL('./skill-resume-parity.test.ts', import.meta.url)]) {
       const source = readFileSync(url, 'utf8');
       expect(source).not.toMatch(/\b(?:it|test|describe)\s*\.\s*(?:skip|todo)\s*\(/);
     }
@@ -1815,6 +1820,7 @@ describe('harness parity — D1 governed native delegation', () => {
           const launches = [];
           for (const restricted of [false, true]) {
             const path = join(dir, `${restricted}.ndjson`);
+            if (backend === 'opencode' && resume) seedOpencodeMockSession(path);
             const obs = await driveSeam(backend, 'baseline', { spec: {
               cwd: dir, resume, allowedTools: ['Read', 'Bash'], bashAllowlist: ['git status'],
               systemPrompt: 'Use cezar workers. Native workers are not tracked by cezar.',
@@ -1861,6 +1867,16 @@ describe('harness parity — D1 governed native delegation', () => {
             expect(controlled.params.clientCapabilities._meta.subagents).toBe(false);
             const normalize = (rows: typeof ordinary) => rows!.filter(row => row.method !== 'initialize');
             expect(normalize(restricted)).toEqual(normalize(ordinary));
+          } else if (resume) {
+            const sessionUrl = `/session/${PINNED_SESSION_ID}`;
+            const deny = { permission: [{ permission: 'task', pattern: '*', action: 'deny' }] };
+            for (const rows of [ordinary, restricted]) {
+              expect(rows!.some(row => row.method === 'GET' && row.url === sessionUrl)).toBe(true);
+              expect(rows!.filter(row => row.method === 'POST' && row.url === '/session')).toEqual([]);
+            }
+            expect(restricted!.find(row => row.method === 'PATCH' && row.url === sessionUrl)?.body).toEqual(deny);
+            expect(ordinary!.filter(row => row.method === 'PATCH')).toEqual([]);
+            expect(restricted!.filter(row => row.url.includes('prompt_async')).every(row => row.body.tools === undefined)).toBe(true);
           } else {
             const normal = ordinary!.find(row => row.method === 'POST' && row.url === '/session');
             const controlled = restricted!.find(row => row.method === 'POST' && row.url === '/session');
@@ -1876,6 +1892,43 @@ describe('harness parity — D1 governed native delegation', () => {
       }, 45000);
     }
   }
+
+  it('opencode restricted Continue does not PATCH when the session already denies task', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cez-native-wire-sticky-'));
+    const path = join(dir, 'wire.ndjson');
+    try {
+      seedOpencodeMockSession(path, {
+        permission: [{ permission: 'task', pattern: '*', action: 'deny' }],
+      });
+      const obs = await driveSeam('opencode', 'baseline', { spec: {
+        cwd: dir, resume: true, restrictNativeDelegation: true,
+        env: { CEZ_MOCK_ARGS_FILE: path, CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' },
+      } });
+      expect(obs.v1.filter(event => event.type === 'error')).toEqual([]);
+      const rows = readFileSync(path, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+      expect(rows.some(row => row.method === 'GET' && row.url === `/session/${PINNED_SESSION_ID}`)).toBe(true);
+      expect(rows.filter(row => row.method === 'POST' && row.url === '/session')).toEqual([]);
+      expect(rows.filter(row => row.method === 'PATCH')).toEqual([]);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  }, 45000);
+
+  it('opencode restricted Continue POSTs the deny when GET /session/{id} 404s', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cez-native-wire-fallback-'));
+    const path = join(dir, 'wire.ndjson');
+    try {
+      const obs = await driveSeam('opencode', 'baseline', { spec: {
+        cwd: dir, resume: true, restrictNativeDelegation: true,
+        env: { CEZ_MOCK_ARGS_FILE: path, CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' },
+      } });
+      expect(obs.v1.filter(event => event.type === 'error')).toEqual([]);
+      const rows = readFileSync(path, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+      expect(rows.some(row => row.method === 'GET' && row.url === `/session/${PINNED_SESSION_ID}`)).toBe(true);
+      expect(rows.find(row => row.method === 'POST' && row.url === '/session')?.body.permission).toEqual(
+        [{ permission: 'task', pattern: '*', action: 'deny' }],
+      );
+      expect(rows.filter(row => row.method === 'PATCH')).toEqual([]);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  }, 45000);
 });
 
 // ---- AgentRunSpec support declarations (#284) ------------------------------
@@ -1935,6 +1988,13 @@ const SPEC_FIELD_PROBES: Readonly<Record<AgentRunSpecField, SpecFieldProbe>> = {
     kind: 'boundary',
     without: { sessionId: PINNED_SESSION_ID },
     with: { sessionId: PINNED_SESSION_ID, resume: true },
+  },
+  // Both sides resume a missing id so OpenCode takes the 404 fallback; the
+  // field is the opening prompt of that fresh session only.
+  resumeFallbackSystemPrompt: {
+    kind: 'boundary',
+    without: { resume: true, sessionId: PINNED_SESSION_ID },
+    with: { resume: true, sessionId: PINNED_SESSION_ID, resumeFallbackSystemPrompt: 'parity probe resume fallback system prompt' },
   },
 };
 

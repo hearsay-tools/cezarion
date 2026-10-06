@@ -193,7 +193,13 @@ describe('buildOmpArgs', () => {
 
 describe('OMP_SPEC_SUPPORT', () => {
   it('honors every field, including the extra roots Pi drops', () => {
-    for (const support of Object.values(OMP_SPEC_SUPPORT)) expect(support.honored).toBe(true);
+    for (const [field, support] of Object.entries(OMP_SPEC_SUPPORT)) {
+      if (field === 'resumeFallbackSystemPrompt') {
+        expect(support.honored).toBe(false);
+        continue;
+      }
+      expect(support.honored, field).toBe(true);
+    }
     expect(OMP_SPEC_SUPPORT.additionalDirectories).toEqual({
       honored: true,
       via: '--add-dir per directory; an omp build that rejects --add-dir is respawned once without it, with a v1 note (Ruling 22)',

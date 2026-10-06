@@ -110,7 +110,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
   it('readiness real stopped process wakes its parent only after actual exit and finalization', async () => {
     const p = await parent(); const w = await worker(p.id);
     let child: ReturnType<typeof spawn> | undefined; let ready = false;
-    const runner = vi.spyOn(runnerFactory, 'createRunner').mockReturnValue({ backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT, interrupt: async () => undefined,
+    const runner = vi.spyOn(runnerFactory, 'createRunner').mockReturnValue({ backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT, systemPromptOnResume: 'resent', interrupt: async () => undefined,
       run: async () => { throw Error('unused'); }, startSession: () => {
         child = spawn(process.execPath, ['-e', "process.on('SIGTERM',()=>{}); console.log('ready'); setInterval(()=>{},1000)"], { stdio: ['ignore', 'pipe', 'pipe'] });
         child.stdout!.once('data', () => { ready = true; });

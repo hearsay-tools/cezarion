@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { branchFor } from '../git-worktree.ts';
-import { encodeRunRow, isLiveRecord } from './run-row.ts';
+import { encodeRunRow, isLiveRecord, isLiveStatus } from './run-row.ts';
 import type { RunRecord } from './store.ts';
 
 const ID = '0123abcd-0000-4000-8000-000000000000';
@@ -18,6 +18,18 @@ const worker = (extra: Record<string, unknown> = {}) => ({
   workspace: { ownerRunId: ID, resourceId: 'r', kind: 'owned-isolated', path: `/repo/.ai/cezar/worktrees/${ID}`, branch: 'cez/0123abcd', baselineSha: 'a'.repeat(40) },
   ...extra,
 }) as unknown as RunRecord['delegation'];
+
+describe('isLiveStatus', () => {
+  it('is true only for queued, running and waiting', () => {
+    expect(isLiveStatus('queued')).toBe(true);
+    expect(isLiveStatus('running')).toBe(true);
+    expect(isLiveStatus('waiting')).toBe(true);
+    expect(isLiveStatus('done')).toBe(false);
+    expect(isLiveStatus('review')).toBe(false);
+    expect(isLiveStatus('failed')).toBe(false);
+    expect(isLiveStatus('cancelled')).toBe(false);
+  });
+});
 
 describe('isLiveRecord', () => {
   it('is false for a finished run with nothing pending', () => {
