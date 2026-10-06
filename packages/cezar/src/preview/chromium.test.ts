@@ -456,12 +456,22 @@ describe('launchChromium (#781)', () => {
 
   it('passes the prototype args, and --no-sandbox only for CEZ_PREVIEW_NO_SANDBOX=1, even as root', () => {
     vi.spyOn(process, 'getuid').mockReturnValue(0);
-    const base = ['--headless=new', '--remote-debugging-port=0', '--user-data-dir=/p', '--no-first-run', '--no-default-browser-check', 'about:blank'];
+    const base = ['--headless=new', '--remote-debugging-port=0', '--user-data-dir=/p', '--no-first-run', '--no-default-browser-check', '--proxy-server=direct://', 'about:blank'];
     expect(chromiumArgs('/p', {})).toEqual(base);
     expect(chromiumArgs('/p', { CEZ_PREVIEW_NO_SANDBOX: '0' })).toEqual(base);
     expect(chromiumArgs('/p', { CEZ_PREVIEW_NO_SANDBOX: 'true' })).toEqual(base);
     expect(chromiumArgs('/p', { CDP_NO_SANDBOX: '1' })).toEqual(base);
     expect(chromiumArgs('/p', { CEZ_PREVIEW_NO_SANDBOX: '1' })).toEqual(['--no-sandbox', ...base]);
+  });
+
+  it('does not pass HTTP(S)_PROXY onto Chromium argv, even when the process has one', () => {
+    const args = chromiumArgs('/p', {
+      HTTP_PROXY: 'http://proxy.example:3128',
+      HTTPS_PROXY: 'http://user:secret@proxy.example:3128',
+      NO_PROXY: 'localhost,.example.com',
+    });
+    expect(args).toContain('--proxy-server=direct://');
+    expect(args.join(' ')).not.toMatch(/proxy\.example|user:secret|3128/);
   });
 
   it.skipIf(!posix)('spawns the binary with those args, reads DevToolsActivePort and resolves with the port', async () => {
