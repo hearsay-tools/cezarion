@@ -201,6 +201,26 @@ const BASELINE_PROMPT = 'inspect the working tree';
 /** The id cezar pins on every session, mirroring `RunManager`. */
 export const PINNED_SESSION_ID = '0e5f1a7c-1c3e-4d2a-9b64-2f7a5c8d1e90';
 
+/** Pre-create a session the OpenCode mock will GET on resume, so a Continue cell
+ *  exercises GET+PATCH instead of the 404 fallback that POSTs a fresh session. */
+export function seedOpencodeMockSession(
+  argsFile: string,
+  session: { id?: string; title?: string; permission?: unknown[] } = {},
+): void {
+  const id = session.id ?? PINNED_SESSION_ID;
+  writeFileSync(`${argsFile}.opencode-sessions.json`, JSON.stringify({
+    seq: 1,
+    sessions: {
+      [id]: {
+        id,
+        title: session.title ?? 'cezar task',
+        prompts: [],
+        ...(session.permission ? { permission: session.permission } : {}),
+      },
+    },
+  }));
+}
+
 export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
   claude: {
     backend: 'claude',
