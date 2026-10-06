@@ -165,7 +165,7 @@ export const AUTONOMOUS_CRITERIA = [
 /** #790: skill system prompt on Continue and restart recovery, every native wire. */
 export const SKILL_RESUME_CRITERIA = [
   { id: 'R53', scenario: 'baseline', name: 'keeps the skill system prompt on Continue' },
-  { id: 'R54', scenario: 'baseline', name: 'keeps the skill system prompt on restart recovery' },
+  { id: 'R54', scenario: 'baseline', name: 'keeps the skill system prompt when recover() resumes a persisted continuation' },
   { id: 'R55', scenario: 'baseline', name: 'warns once when a resent continued skill is gone' },
   { id: 'R56', scenario: 'baseline', name: 'declares systemPromptOnResume matching the resume wire' },
 ] as const;

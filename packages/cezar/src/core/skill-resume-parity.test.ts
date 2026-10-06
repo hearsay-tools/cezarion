@@ -284,14 +284,20 @@ describe('harness parity — skill system prompt on Continue (#790)', () => {
       });
     }, 60_000);
 
-    it(`${backend} R54 keeps the skill system prompt on restart recovery`, async () => {
+    it(`${backend} R54 keeps the skill system prompt when recover() resumes a persisted continuation`, async () => {
       await withSkillResumeRun(backend, async (fixture) => {
         const launchPrompt = assertLaunchKeepsSkill(backend, fixture.repoRoot, fixture.snapshotWire());
         await idleClose(fixture.manager, fixture.runId);
-        await fixture.restart();
         const marked = fixture.markWire();
-        const continued = await continueAndPark(fixture, { text: promptFor(backend, 'baseline') }, marked);
-        assertContinuationSkill(backend, fixture.repoRoot, launchPrompt, continued);
+        expect(fixture.manager.continueRun(fixture.runId, { text: promptFor(backend, 'baseline') }).ok).toBe(true);
+        const persisted = fixture.store.getRun(fixture.runId);
+        expect(persisted?.continuationMessage).toBeDefined();
+        expect(['running', 'queued']).toContain(persisted?.status);
+        await fixture.restart();
+        await waitFor(() => fixture.manager.isActive(fixture.runId) || ['queued', 'running', 'waiting'].includes(fixture.store.getRun(fixture.runId)?.status ?? ''));
+        await waitFor(() => fixture.store.getRun(fixture.runId)?.status === 'waiting' && fixture.manager.isActive(fixture.runId));
+        await waitFor(() => fixture.wireSince(marked).includes('--append-system-prompt') || fixture.wireSince(marked).includes('turn/start') || fixture.wireSince(marked).includes('session/prompt') || fixture.wireSince(marked).includes('prompt_async'));
+        assertContinuationSkill(backend, fixture.repoRoot, launchPrompt, fixture.wireSince(marked));
       });
     }, 60_000);
 

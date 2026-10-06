@@ -72,7 +72,10 @@ interface InputDelivery {
 - `systemPromptOnResume` is required (hearsay-tools/cezarion#790). `resent` means every
   session/process delivers `spec.systemPrompt` again, so Continue must resend a selected
   skill's playbook; `in-thread` means the opening turn prepended it into resumed history,
-  so the same-session resume must not. claude, pi, omp and opencode are `resent`
+  so the same-session resume must not. The flag is the caller's dedupe policy for the
+  skill prefix, not a statement that in-thread runners ignore `systemPrompt` on resume:
+  codex and cursor still re-prepend the whole `spec.systemPrompt` (extra prompt + handoff)
+  on every resumed opening turn. claude, pi, omp and opencode are `resent`
   (opencode never resumes); codex and cursor are `in-thread`. A backend switch with no
   `sessionId` still sends the skill.
 - Each backend runs as a **persistent process** so multi-turn follow-ups,
@@ -911,8 +914,9 @@ the middle of a turn ends it as cancelled and starts no agent. No runner is exem
 `RUNNER_IDS` backend through its native `HARNESS_ADAPTERS` wire on a skill-driven task.
 R53: a live Continue resends `skillSystemPrompt` before the extra prompt on `resent`
 runners (claude, pi, omp, opencode — opencode never resumes) and does not duplicate it on
-an `in-thread` same-session resume (codex, cursor). R54: restart recovery through
-`runContinuation` matches that Continue prompt. R55: a skill removed from the registry
+an `in-thread` same-session resume (codex, cursor). R54: a continuation persisted as
+`running` or `queued` is resumed by `recover()` on a new manager (the boot funnel),
+and that recovered spawn matches the Continue prompt. R55: a skill removed from the registry
 before Continue keeps today's extra-only prompt and emits exactly one lifecycle warning
 on `resent` runners; `in-thread` resumes skip the warning because they would not resend
 the skill. R56: each runner's required `systemPromptOnResume` declaration matches its
@@ -1453,7 +1457,9 @@ To be first-class:
    `systemPromptOnResume` (§1, hearsay-tools/cezarion#790): `resent` when every
    session/process delivers `spec.systemPrompt` again (so Continue must resend a
    skill playbook), `in-thread` when the opening turn prepended it into resumed
-   history. Required — a new runner fails to compile until it decides. Declare
+   history. The flag is the caller's skill-prefix dedupe policy — in-thread runners
+   still re-prepend the whole `spec.systemPrompt` (extra prompt + handoff) on every
+   resumed opening turn. Required — a new runner fails to compile until it decides. Declare
    `inputDelivery` (§1) from a live probe of mid-turn input, and pass the §7 I1/I2
    rows or declare their exemption.
 2. **Factory** — add the id to `RunnerId` / `RUNNER_IDS` (`agent-runner.ts`) and

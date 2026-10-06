@@ -69,7 +69,7 @@ import {
 import type { AgentEvent, ContentBlock, InputDelivery } from '../core/agent-runner.ts';
 import { inputDeliveryOf } from '../core/agent-runner.ts';
 import { discoverSkills, type Skill } from '../skills.ts';
-import { materializeSkillDir } from '../skills-remote.ts';
+import { materializeSkillDir, waitForTeamSkills } from '../skills-remote.ts';
 import { seedAgentConfigLocalLayer } from '../agent-config/seed.ts';
 import { readAgentModelSettings, readAgentModelProvider } from '../agent-config/models.ts';
 import { loadConfig, resolveWorktreeRetention } from '../config.ts';
@@ -5741,6 +5741,52 @@ export class RunManager {
       effort: continueEffort, agentProfile: continueProfile.profileId, accountBinding: continueProfile.accountBinding,
       systemPrompt: record?.systemPrompt, allowedTools: grants.allowedTools, bashAllowlist: grants.bashAllowlist };
     const runner = createRunner(continueBackend);
+    // Re-expand the continued step's skill from the current registry (#790) BEFORE
+    // provisionSession. `await materializeSkillDir` used to sit after the pre-launch
+    // revalidation, so Stop during that await still launched with revoked tools.
+    // `record.systemPrompt` is only the extra prompt; the opening session put
+    // `skillSystemPrompt(skill)` in front. Skip that prefix only when this
+    // session resumes into its own thread on an in-thread runner — those
+    // already carry the playbook in history. A missing skill degrades to
+    // today's extra-only prompt with one lifecycle warning; in-thread skips
+    // do not warn. Workers still inherit only the extra prompt (#778).
+    const skipSkillOnResume = sessionId !== undefined && runner.systemPromptOnResume === 'in-thread';
+    let continuationSkillPrompt: string | undefined;
+    const continuedSkillName = toolsStep?.skill;
+    if (continuedSkillName) {
+      let skill = (state.skills ?? []).find((candidate) => candidate.name === continuedSkillName);
+      if (!skill) {
+        // Boot recovery can outrun the async team-skills cache (`getTeamSkillsCached`
+        // returns [] until `initialTeamSkillsLoad` resolves). Wait briefly, then
+        // re-discover; never hang Continue on the network.
+        try {
+          let timeout: ReturnType<typeof setTimeout> | undefined;
+          await Promise.race([
+            waitForTeamSkills(this.repoRoot).catch(() => undefined),
+            new Promise<void>((resolve) => {
+              timeout = setTimeout(resolve, 1_500);
+              timeout.unref?.();
+            }),
+          ]).finally(() => { if (timeout !== undefined) clearTimeout(timeout); });
+          state.skills = await discoverSkills(this.repoRoot).catch(() => state.skills ?? []);
+          skill = (state.skills ?? []).find((candidate) => candidate.name === continuedSkillName);
+        } catch {
+          // Best-effort — a slow or failing team-skills load must not fail Continue.
+        }
+      }
+      if (skill) {
+        if (!skipSkillOnResume) continuationSkillPrompt = skillSystemPrompt(skill);
+        if (skill.source === 'team' && skill.team?.dir) {
+          // Rematerialize into a #483 rematerialized worktree; do not note it on Continue.
+          await materializeSkillDir(state.cwd, skill).catch(() => false);
+        }
+      } else if (!skipSkillOnResume) {
+        this.store.appendEvent(runId, {
+          type: 'lifecycle',
+          message: `skill /${continuedSkillName} is no longer installed — the continued session runs without its instructions`,
+        });
+      }
+    }
     state.currentStepId = stepId;
     this.beginUsageInvocation(runId, state, stepId);
     // A continuation's opening message becomes the session's `userPrompt` and never passes
@@ -5771,38 +5817,6 @@ export class RunManager {
       return;
     }
     state.inputDelivery = inputDeliveryOf(runner); state.unreadInputIds = new Set(); state.consumedBeforeAck = new Set();
-    // Re-expand the continued step's skill from the current registry (#790).
-    // `record.systemPrompt` is only the extra prompt; the opening session put
-    // `skillSystemPrompt(skill)` in front. Skip that prefix only when this
-    // session resumes into its own thread on an in-thread runner — those
-    // already carry the playbook in history. A missing skill degrades to
-    // today's extra-only prompt with one lifecycle warning; in-thread skips
-    // do not warn. Workers still inherit only the extra prompt (#778).
-    const skipSkillOnResume = sessionId !== undefined && runner.systemPromptOnResume === 'in-thread';
-    let continuationSkillPrompt: string | undefined;
-    const continuedSkillName = toolsStep?.skill;
-    if (continuedSkillName) {
-      const skill = (state.skills ?? []).find((candidate) => candidate.name === continuedSkillName);
-      if (skill) {
-        if (!skipSkillOnResume) continuationSkillPrompt = skillSystemPrompt(skill);
-        if (skill.source === 'team' && skill.team?.dir) {
-          const seeded = await materializeSkillDir(state.cwd, skill).catch(() => false);
-          if (seeded) {
-            this.store.appendEvent(runId, {
-              type: 'note',
-              message:
-                `team skill "${skill.name}" materialized to .claude/skills/${skill.name}/ ` +
-                `.agents/skills/${skill.name}/, and .cursor/skills/${skill.name}/`,
-            });
-          }
-        }
-      } else if (!skipSkillOnResume) {
-        this.store.appendEvent(runId, {
-          type: 'lifecycle',
-          message: `skill /${continuedSkillName} is no longer installed — the continued session runs without its instructions`,
-        });
-      }
-    }
     try {
     session = startManagedSession(runner,
       {

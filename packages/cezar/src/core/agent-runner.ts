@@ -314,6 +314,12 @@ export function inputDeliveryOf(runner: Pick<AgentRunner, 'inputDelivery'>): Inp
  *   part of the resumed thread's history. Re-sending the skill on the same
  *   session duplicates it; a fresh-session continuation (no `sessionId`) still
  *   needs it.
+ *
+ * The flag is the caller's dedupe policy for the skill prefix, not a statement
+ * that in-thread runners ignore `systemPrompt` on resume. Codex and Cursor still
+ * re-prepend the whole `spec.systemPrompt` (extra prompt + handoff) on every
+ * resumed opening turn; Continue omits only the skill prefix on a same-session
+ * in-thread resume.
  */
 export type SystemPromptOnResume = 'resent' | 'in-thread';
 
