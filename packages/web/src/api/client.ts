@@ -138,6 +138,8 @@ import {
   runHistoryContextSchema,
   runRelationshipsSchema,
   runHistoryPageSchema,
+  archivedRunsResponseSchema,
+  runsSearchResponseSchema,
   repoPullBranchesResponseSchema,
   repoPullConfirmationSchema,
   repoPullResponseSchema,
@@ -525,9 +527,11 @@ export async function getArchivedRuns(
     ...(params.limit !== undefined ? { limit: params.limit } : {}),
     ...(params.q ? { q: params.q } : {}),
   }
-  return unwrap(
+  // Validated: the Archived tab and an issue's linked tasks merge these rows into their lists, so a
+  // malformed body must be an error the view can show, never a crash.
+  return unwrapValidated(
     await cez.api.v1.p[':projectId']['run-summaries'].archived.$get({ param: { projectId: queryScope() }, query }, init(opts)),
-    '/run-summaries/archived',
+    '/run-summaries/archived', archivedRunsResponseSchema,
   )
 }
 
@@ -549,7 +553,8 @@ export async function getRunsIndex(opts?: ReadOptions): Promise<RunsIndexRespons
 /** Every project's root runs matching `q`, archived or not (`GET /workspace/runs-search`, #864):
  *  ⌘K's reach past each project's run-list window. Workspace-level, like the index. */
 export async function searchRuns(q: string, opts?: ReadOptions): Promise<RunsSearchResponse> {
-  return unwrap(await cez.api.v1.workspace['runs-search'].$get({ query: { q } }, init(opts)), '/workspace/runs-search')
+  // Validated: the palette spreads these rows into its list, so a malformed body must be an error.
+  return unwrapValidated(await cez.api.v1.workspace['runs-search'].$get({ query: { q } }, init(opts)), '/workspace/runs-search', runsSearchResponseSchema)
 }
 
 export async function getRunRelationships(id: string, opts?: ReadOptions): Promise<RunRelationships> {

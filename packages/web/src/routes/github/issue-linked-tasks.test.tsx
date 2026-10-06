@@ -5,6 +5,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 
 import { ProjectScopeProvider } from '@/api/project-scope-context'
 import { createQueryClient } from '@/api/query-client'
+import { summaryOf } from '@/test/run-summary-fixture'
 import { IssueLinkedTasks } from './issue-linked-tasks'
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
@@ -84,10 +85,10 @@ it('keeps collapsed counts live and shows an empty state when only workers match
 
 it('finds a linked task older than the run list\'s archived window (#864)', async () => {
   const client = createQueryClient()
-  const archived = {
+  const archived = summaryOf({
     id: 'old-diagnosis', title: 'Old diagnosis', task: 'Old diagnosis', issueNumber: 750, workflow: 'quick-task',
     status: 'done', archived: true, createdAt: '2025-01-01T12:00:00Z', tokensUsed: 0, steps: [],
-  }
+  })
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input)
     const body = url === '/api/v1/p/second/run-summaries?archived=recent'

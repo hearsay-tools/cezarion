@@ -31,6 +31,7 @@ import {
   getRunHistoryContext,
   getRuns,
   getArchivedRuns,
+  searchRuns,
   getSkills,
   getSkillsWhenReady,
   getTodos,
@@ -337,7 +338,9 @@ describe('request shapes', () => {
   ]
 
   it.each(cases)('$name hits $method $path', async ({ call, path, method, body }) => {
-    reply(path.startsWith('/api/v1/providers/') ? VALID_PROVIDER_STATUS : { ok: true })
+    reply(path.startsWith('/api/v1/providers/') ? VALID_PROVIDER_STATUS
+      : path.startsWith('/api/v1/run-summaries/archived') ? { runs: [], nextCursor: null, total: 0 }
+        : { ok: true })
     await call()
 
     const sent = lastCall()
@@ -653,6 +656,16 @@ describe('history responses are validated at the boundary (#827)', () => {
     const context = await getRunHistoryContext('run-1')
     expect(context.asOfSeq).toBe(1)
     expect(context.contextEvents).toHaveLength(1)
+  })
+
+  it.each([
+    ['/run-summaries/archived', () => getArchivedRuns({})],
+    ['/workspace/runs-search', () => searchRuns('ab')],
+  ] as const)('rejects a %s answer that is not its shape (#864), never handing the view an array', async (label, call) => {
+    reply([{ id: 'r1' }])
+    const error = (await call().catch((e: unknown) => e)) as ApiError
+    expect(error).toBeInstanceOf(ApiError)
+    expect(error.message).toBe(`the cezar server answered ${label} with an unexpected body`)
   })
 
   it('rejects a 200 whose page body is the catch-all empty object', async () => {
