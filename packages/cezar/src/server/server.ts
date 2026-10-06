@@ -3964,7 +3964,8 @@ export function createApp(deps: ServerDeps) {
       // read has to cost O(workers) whatever the store holds — and nothing at all for the
       // ordinary run that owns none, delegation on or off.
       // Human reads use the bound project, never agent credentials or private evidence.
-      const workers = store.listOwnedWorkers(run.id).flatMap(worker => {
+      const ownedWorkers = store.listOwnedWorkers(run.id);
+      const workers = ownedWorkers.flatMap(worker => {
         const owned = worker.delegation;
         if (owned?.role !== 'worker') return [];
         return [{ workerId: worker.id, parentRunId: run.id, status: worker.status, workspace: owned.workspace,
@@ -3973,10 +3974,19 @@ export function createApp(deps: ServerDeps) {
           ...(owned.destroy ? { destroy: owned.destroy } : {}),
         }];
       });
+      // #864: the titles of the runs this answer names, since the cockpit's run list no longer
+      // carries archived workers (or a parent past its archived window).
+      const parent = run.delegation?.role === 'worker' ? store.getRun(run.delegation.parentRunId) : undefined;
+      const titles = [...(parent ? [parent] : []), ...ownedWorkers].map((related) => ({
+        id: related.id, title: related.title,
+        ...(related.titleSummary === undefined ? {} : { titleSummary: related.titleSummary }),
+        ...(related.titleOrigin === undefined ? {} : { titleOrigin: related.titleOrigin }),
+      }));
       // #816: every owned worker, bounded by the 1,024 creation ceiling rather than sliced, and
       // the root's capacity from the same derivation the spawn policy enforces.
       return c.json(runRelationshipsSchema.parse({
         ...(run.delegation?.role === 'worker' ? { parentRunId: run.delegation.parentRunId } : {}), workers,
+        ...(titles.length > 0 ? { titles } : {}),
         ...(run.delegation?.role === 'root' ? { capacity: workerCapacity(run, id => store.getRun(id)) } : {}),
       }));
     })

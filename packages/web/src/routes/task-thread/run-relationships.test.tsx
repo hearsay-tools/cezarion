@@ -237,3 +237,10 @@ it('surfaces a refusal the user cannot fix by retrying Clean up (#816)', async (
   expect(await within(group).findByText('Cleanup did not finish: Worker history deletion has begun; retry history deletion')).toBeTruthy()
   expect(within(group).queryByText(/Retry Clean up/)).toBeNull()
 })
+
+it('names an archived worker the run list no longer carries from the relationships titles (#864)', async () => {
+  const archivedWorker: WorkerInspection = { ...worker, status: 'done', destroy: undefined }
+  setup(root, async () => json({ workers: [archivedWorker], titles: [{ id: workerId, title: 'Old worker', titleSummary: 'Fixed the parser' }] }))
+  const group = await screen.findByRole('group', { name: 'Task relationships' })
+  expect(await within(group).findByText('Fixed the parser')).toBeTruthy()
+})
