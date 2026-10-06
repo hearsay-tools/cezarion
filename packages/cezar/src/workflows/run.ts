@@ -442,6 +442,8 @@ interface ActiveRun {
   retiredInFlight?: Set<string>;
   /** Liveness bound for unread input (#505): timer, and IDs already resubmitted once. */
   unreadInputTimer?: NodeJS.Timeout;
+  /** Liveness bound for a final-message nudge that was ACKed without a turn (#544). */
+  finalMessageNudgeReplyTimer?: NodeJS.Timeout;
   unreadRetried?: Set<string>;
   /** Only this older ask is being answered by the current continuation's opening turn. */
   openingAnswerAskSeq?: number;
@@ -500,6 +502,10 @@ interface ActiveRun {
 /** #505: a real steer is read at the harness's next model step; a quiet boundary this long
  * with input still unread means the harness will not read it without help. */
 export const UNREAD_INPUT_GRACE_MS = 30_000;
+/** Bound a final-message nudge that is ACKed but never produces a turn (#544).
+ *  OpenCode heartbeats re-arm the managed-session no-progress guard, so this is
+ *  the DEFAULT-path exit when the agent stays silent. Overridable on RunManager. */
+export const FINAL_MESSAGE_NUDGE_REPLY_MS = 5 * 60_000;
 /** Bound one unattended session; an explicit Continue starts a new budget. */
 export const MAX_AUTO_CONTINUES = 40;
 export const AUTONOMOUS_NUDGE =
@@ -1210,6 +1216,8 @@ export class RunManager {
   private adoptionTail: Promise<unknown> = Promise.resolve();
   /** Quiet window before unread input is resubmitted or left unconfirmed (#505). */
   private readonly unreadInputGraceMs: number;
+  /** Quiet window after a final-message nudge before a still-silent session parks (#544). */
+  private readonly finalMessageNudgeReplyMs: number;
   private disposed = false;
 
   /** Whether any recovery is in progress: one at a time (`recover`), and `pump` waits for it. */
@@ -1314,13 +1322,14 @@ export class RunManager {
   constructor(
     private readonly store: RunStore,
     private readonly repoRoot: string,
-    options: { semaphore?: WorkspaceSemaphore; unreadInputGraceMs?: number; preview?: PreviewHostLike; cezarPort?: () => number | undefined } = {},
+    options: { semaphore?: WorkspaceSemaphore; unreadInputGraceMs?: number; finalMessageNudgeReplyMs?: number; preview?: PreviewHostLike; cezarPort?: () => number | undefined } = {},
   ) {
     this.dataDir = join(repoRoot, '.ai/cezar');
     this.workerScratchCleanup = new WorkerScratchCleanup(store, this.dataDir, id => this.isActive(id) || this.executions.has(id) || this.reclaiming.has(id));
     this.preview = options.preview;
     this.cezarPort = options.cezarPort;
     this.unreadInputGraceMs = options.unreadInputGraceMs ?? UNREAD_INPUT_GRACE_MS;
+    this.finalMessageNudgeReplyMs = options.finalMessageNudgeReplyMs ?? FINAL_MESSAGE_NUDGE_REPLY_MS;
     this.semaphore = options.semaphore ?? new WorkspaceSemaphore();
     this.ciResources = acquireCiResources(this.semaphore);
     this.ciSupervisor = this.ciResources.supervisor;
@@ -5501,13 +5510,17 @@ export class RunManager {
       }
       if (event.type === 'text') {
         this.clearUnreadInputTimer(state); // real content: the harness is working
+        this.noteFinalMessageNudgeContent(state, event);
         turnText = appendTurnText(turnText, event.text);
         const text = stripAskMarker(stripTaskMarkers(stripMonitoringMarker(stripDoneMarker(event.text))), false);
         if (text) this.store.appendEvent(runId, { type: 'text', text, stepId });
         return;
       }
       if (event.type === 'input-unconsumed') { this.retireUnreadInputs(runId, state, event.inputIds, true); return; }
-      if (event.type === 'tool-call' || event.type === 'tool-result') this.clearUnreadInputTimer(state);
+      if (event.type === 'tool-call' || event.type === 'tool-result') {
+        this.clearUnreadInputTimer(state);
+        this.noteFinalMessageNudgeContent(state, event);
+      }
       this.store.appendEvent(runId, { ...event, stepId });
       if (event.type === 'cost') this.recordReportedCost(runId, stepId, state, backend, event.usd);
       if (event.type === 'error') {
@@ -6450,13 +6463,17 @@ export class RunManager {
       }
       if (event.type === 'text') {
         this.clearUnreadInputTimer(state); // real content: the harness is working
+        this.noteFinalMessageNudgeContent(state, event);
         turnText = appendTurnText(turnText, event.text);
         const text = stripAskMarker(stripTaskMarkers(stripMonitoringMarker(stripDoneMarker(event.text))), false);
         if (text) emit({ type: 'text', text, stepId: step.id });
         return;
       }
       if (event.type === 'input-unconsumed') { this.retireUnreadInputs(runId, state, event.inputIds, true); return; }
-      if (event.type === 'tool-call' || event.type === 'tool-result') this.clearUnreadInputTimer(state);
+      if (event.type === 'tool-call' || event.type === 'tool-result') {
+        this.clearUnreadInputTimer(state);
+        this.noteFinalMessageNudgeContent(state, event);
+      }
       emit({ ...event, stepId: step.id });
       if (event.type === 'cost') this.recordReportedCost(runId, step.id, state, backend, event.usd);
       if (event.type === 'error') {
@@ -6841,6 +6858,7 @@ export class RunManager {
     this.recordUsageUiEvent(runId, state, event);
     sink.handle(event);
     if (state.cancelled) return;
+    this.noteFinalMessageNudgeContent(state, event);
     if (isRunnerActivity(event)) {
       if (state.autonomousNudgePending) { state.autonomousNudgePending = undefined; this.clearIdleTimer(state); }
       state.atTurnBoundary = undefined; state.doneAtBoundary = undefined; state.parkAfterAck = undefined;
@@ -7429,23 +7447,66 @@ export class RunManager {
     turn: { ask: boolean; humanGate: boolean; monitoring: boolean; silentTail: boolean; alreadyNudged: boolean },
   ): boolean {
     if (turn.ask || turn.humanGate || turn.monitoring || !turn.silentTail || turn.alreadyNudged) return false;
+    if (state.autonomousNudgePending === state.session) return false;
     return this.tryFinalMessageNudge(runId, state, stepId);
   }
 
   /** One-shot visible-message nudge when a turn ends on reasoning or a tool (#544, #119).
    *  Liveness: this path has no inputIds, so #505's unread-input timer does not apply, and
    *  resumeParkedRun / clearIdleTimer drop the user-wait idle bound. Do not re-arm idle until
-   *  `turn.started` — some harnesses omit that event and still run (N8); idle would then kill a
-   *  live turn. `sendAgentMessage` already rearms the managed-session no-progress guard after
-   *  turn-end, which is the bound for an ACK that never produces a turn. */
+   *  content arrives — some harnesses omit `turn.started` and still run (N8); idle would then
+   *  kill a live turn. OpenCode heartbeats re-arm the managed-session no-progress guard without
+   *  opening a turn, so an ACK that stays silent is bounded by FINAL_MESSAGE_NUDGE_REPLY_MS:
+   *  the first v1 content event (text, tool-call, tool-result) or UiEvent (item.*, turn.started)
+   *  from this session clears it; expiry parks `waiting` and releases the slot. */
   private tryFinalMessageNudge(runId: string, state: ActiveRun, stepId: string): boolean {
     if (state.finalMessageNudged === state.session || !this.canAutoContinue(runId, state)) return false;
     const sent = this.submitAgentInput(runId, state, [{ type: 'text', text: FINAL_MESSAGE_NUDGE }]);
     if (!sent) return false;
     state.finalMessageNudged = state.session;
     this.clearIdleTimer(state);
+    this.armFinalMessageNudgeReplyTimer(runId, state);
     this.store.appendEvent(runId, { type: 'note', stepId, message: 'no final message — asking the agent for a visible reply' });
     return true;
+  }
+
+  /** Heartbeats are not content. Clear on the first real turn/item/text/tool from this session. */
+  private noteFinalMessageNudgeContent(state: ActiveRun, event: { type: string }): void {
+    if (event.type === 'text' || event.type === 'tool-call' || event.type === 'tool-result' ||
+      event.type === 'turn.started' || event.type.startsWith('item.')) {
+      this.clearFinalMessageNudgeReplyTimer(state);
+    }
+  }
+
+  private armFinalMessageNudgeReplyTimer(runId: string, state: ActiveRun): void {
+    this.clearFinalMessageNudgeReplyTimer(state);
+    const session = state.session;
+    if (!session?.open) return;
+    const timer = setTimeout(() => {
+      state.finalMessageNudgeReplyTimer = undefined;
+      if (this.disposed || this.active.get(runId) !== state || state.session !== session || !session.open ||
+        state.cancelled || state.finishRequested || this.waiting.has(runId) || this.monitoring.has(runId)) return;
+      this.store.appendEvent(runId, {
+        type: 'note', stepId: state.currentStepId,
+        message: 'no reply to the final-message nudge — waiting for you',
+      });
+      this.store.updateRun(runId, { status: 'waiting', activity: undefined });
+      if (state.currentStepId) this.store.updateStep(runId, state.currentStepId, { status: 'waiting' });
+      this.store.flush();
+      this.waiting.add(runId);
+      this.armIdleTimer(runId, state);
+      this.releaseSlot();
+      appendHandoffHeartbeat(this.dataDir, runId, 'turn complete — status=waiting');
+    }, this.finalMessageNudgeReplyMs);
+    timer.unref?.();
+    state.finalMessageNudgeReplyTimer = timer;
+  }
+
+  private clearFinalMessageNudgeReplyTimer(state: ActiveRun): void {
+    if (state.finalMessageNudgeReplyTimer) {
+      clearTimeout(state.finalMessageNudgeReplyTimer);
+      state.finalMessageNudgeReplyTimer = undefined;
+    }
   }
 
   private armIdleTimer(runId: string, state: ActiveRun): void {
@@ -7469,6 +7530,7 @@ export class RunManager {
       clearTimeout(state.idleTimer);
       state.idleTimer = undefined;
     }
+    this.clearFinalMessageNudgeReplyTimer(state);
   }
 
   private reconcileMonitoringWakeTimers(): void {
