@@ -1889,6 +1889,25 @@ describe('harness parity — D1 governed native delegation', () => {
     }
   }
 
+  it('opencode restricted Continue does not PATCH when the session already denies task', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cez-native-wire-sticky-'));
+    const path = join(dir, 'wire.ndjson');
+    try {
+      seedOpencodeMockSession(path, {
+        permission: [{ permission: 'task', pattern: '*', action: 'deny' }],
+      });
+      const obs = await driveSeam('opencode', 'baseline', { spec: {
+        cwd: dir, resume: true, restrictNativeDelegation: true,
+        env: { CEZ_MOCK_ARGS_FILE: path, CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' },
+      } });
+      expect(obs.v1.filter(event => event.type === 'error')).toEqual([]);
+      const rows = readFileSync(path, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+      expect(rows.some(row => row.method === 'GET' && row.url === `/session/${PINNED_SESSION_ID}`)).toBe(true);
+      expect(rows.filter(row => row.method === 'POST' && row.url === '/session')).toEqual([]);
+      expect(rows.filter(row => row.method === 'PATCH')).toEqual([]);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  }, 45000);
+
   it('opencode restricted Continue POSTs the deny when GET /session/{id} 404s', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'cez-native-wire-fallback-'));
     const path = join(dir, 'wire.ndjson');

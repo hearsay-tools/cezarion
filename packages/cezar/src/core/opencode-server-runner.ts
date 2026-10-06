@@ -81,7 +81,7 @@ export const OPENCODE_SPEC_SUPPORT: AgentRunSpecSupport = {
   images: { honored: false, reason: 'the adapter posts text parts only; image blocks are dropped' },
   cwd: { honored: true, via: 'opencode serve spawn cwd; the session is bound to it' },
   allowedTools: { honored: false, reason: 'permissions are auto-approved server-side and no per-tool allowlist is mapped' },
-  restrictNativeDelegation: { honored: true, via: 'POST /session permission rule denying task (D1); PATCH /session/{id} permission on resume' },
+  restrictNativeDelegation: { honored: true, via: 'POST /session permission rule denying task (D1); PATCH /session/{id} permission on resume when the deny is absent — the deny persists on the session once added (a later unrestricted Continue cannot remove it; fails closed)' },
   bashAllowlist: { honored: false, reason: 'no per-tool allowlist is mapped, so no command-prefix restriction either' },
   additionalDirectories: { honored: false, reason: 'the server works from cwd; no extra-root mapping' },
   env: { honored: true, via: 'merged over the child env through buildChildEnv' },
@@ -571,7 +571,9 @@ class OpencodeSession implements AgentSession {
           message: `OpenCode session ${requested} no longer exists; the continuation runs in a fresh session without the earlier conversation.`,
         });
       } else {
-        await this.attachSession(stringField(existing, 'id') ?? requested, Boolean(this.spec.restrictNativeDelegation));
+        const applyDelegationRule = Boolean(this.spec.restrictNativeDelegation)
+          && !hasNativeDelegationDeny(existing.permission);
+        await this.attachSession(stringField(existing, 'id') ?? requested, applyDelegationRule);
         resumed = true;
       }
     }
@@ -1241,6 +1243,17 @@ function clippedString(value: unknown, max: number): string | undefined {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** OpenCode 1.18.33 PATCHes permission by append (no replace, no dedupe). */
+function hasNativeDelegationDeny(permission: unknown): boolean {
+  if (!Array.isArray(permission)) return false;
+  return permission.some((rule) =>
+    isRecord(rule)
+    && rule.permission === 'task'
+    && rule.pattern === '*'
+    && rule.action === 'deny',
+  );
 }
 
 function sleep(ms: number): Promise<void> {

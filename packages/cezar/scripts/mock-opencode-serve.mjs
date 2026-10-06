@@ -85,11 +85,16 @@ function saveSessionStore(store) {
 function getSession(id) {
   return loadSessionStore().sessions[id] ?? null;
 }
-function createSession() {
+function createSession(body = {}) {
   const store = loadSessionStore();
   store.seq += 1;
   const id = store.seq === 1 ? DEFAULT_SESSION_ID : `ses_mock_${store.seq}`;
-  store.sessions[id] = { id, title: 'cezar task', prompts: [] };
+  store.sessions[id] = {
+    id,
+    title: typeof body.title === 'string' ? body.title : 'cezar task',
+    prompts: [],
+    ...(Array.isArray(body.permission) ? { permission: [...body.permission] } : {}),
+  };
   saveSessionStore(store);
   return id;
 }
@@ -102,7 +107,14 @@ function addPrompt(id, text) {
 function patchSession(id, body) {
   const store = loadSessionStore();
   if (!store.sessions[id]) return null;
-  store.sessions[id] = { ...store.sessions[id], ...body, id };
+  // OpenCode 1.18.33: PATCH permission APPENDS (no replace, no dedupe); a
+  // title-only PATCH leaves permission alone.
+  const next = { ...store.sessions[id], ...body, id };
+  if (Array.isArray(body.permission)) {
+    const existing = Array.isArray(store.sessions[id].permission) ? store.sessions[id].permission : [];
+    next.permission = [...existing, ...body.permission];
+  }
+  store.sessions[id] = next;
   saveSessionStore(store);
   return store.sessions[id];
 }
@@ -222,7 +234,11 @@ const server = createServer((req, res) => {
         return;
       }
       res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ id: session.id, title: session.title }));
+      res.end(JSON.stringify({
+        id: session.id,
+        title: session.title,
+        ...(Array.isArray(session.permission) ? { permission: session.permission } : {}),
+      }));
       return;
     }
     const sessionPatch = req.method === 'PATCH' && /^\/session\/([^/]+)$/.exec(url);
@@ -234,13 +250,22 @@ const server = createServer((req, res) => {
         return;
       }
       res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ id: session.id, title: session.title }));
+      res.end(JSON.stringify({
+        id: session.id,
+        title: session.title,
+        ...(Array.isArray(session.permission) ? { permission: session.permission } : {}),
+      }));
       return;
     }
     if (req.method === 'POST' && url === '/session') {
-      SESSION_ID = createSession();
+      const parsed = body ? JSON.parse(body) : {};
+      SESSION_ID = createSession(parsed);
       res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ id: SESSION_ID, title: 'cezar task' }));
+      res.end(JSON.stringify({
+        id: SESSION_ID,
+        title: parsed.title ?? 'cezar task',
+        ...(Array.isArray(parsed.permission) ? { permission: parsed.permission } : {}),
+      }));
       return;
     }
     const sessionPrompt = req.method === 'POST' && /^\/session\/([^/]+)\/(prompt_async|message)$/.exec(url);
