@@ -2823,11 +2823,10 @@ export class RunStore extends EventEmitter {
       }
       for (const id of ids) {
         try {
-          const { plain, compressed } = historyPaths(this.dataDir, id);
+          const { plain } = historyPaths(this.dataDir, id);
           // Claim only ids with work: a plain file to compress, including both-present leftovers.
           if (!existsSync(plain)) continue;
           if (!this.holdsCompressClaim(id)) continue;
-          if (existsSync(compressed)) restoreHistory(this.dataDir, id);
           if (hasPlainHistory(this.dataDir, id)) this.compressor.enqueue(id);
         } catch {
           // Best effort: one id must not stop the sweep or boot (#818 S2).

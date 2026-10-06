@@ -6,9 +6,9 @@
  * as `.ndjson.br.orphaned`. compressHistory reads and writes tmp asynchronously, then commits in
  * one synchronous block: re-check stillEligible() and that the plain file's size and mtime are
  * unchanged since the read. An existing `.br` is decoded at job start; the commit re-checks its
- * size and mtime and, if the decoded bytes are not a prefix of plain, moves it to
- * `.ndjson.br.orphaned` (or `.orphaned.<n>` if that name is taken) before renaming. A size/mtime
- * move returns `'changed'` so the compressor can retry; ineligible or missing plain returns `'skipped'`.
+ * size, mtime and inode and, if the decoded bytes are not a prefix of plain, moves it to
+ * `.ndjson.br.orphaned` (or `.orphaned.<n>` if that name is taken) before renaming. A size/mtime/inode
+ * mismatch returns `'changed'` so the compressor can retry; ineligible or missing plain returns `'skipped'`.
  */
 import { randomBytes } from 'node:crypto';
 import {
@@ -196,10 +196,9 @@ export function restoreHistory(dataDir: string, id: string): void {
   }
   const decoded = tryDecompressSync(encoded);
   if (decoded === undefined) {
-    const corrupt = `${compressed}.corrupt`;
-    rmSync(corrupt, { force: true });
-    renameSync(compressed, corrupt);
-    warnUndecodable(compressed, `; renamed to ${corrupt}`);
+    const dest = uniqueOrphanPath(`${compressed}.corrupt`);
+    renameSync(compressed, dest);
+    warnUndecodable(compressed, `; renamed to ${dest}`);
     return;
   }
   const tmp = `${plain}.${process.pid}.${randomBytes(8).toString('hex')}.tmp`;
@@ -256,6 +255,7 @@ function isDecodedPrefix(decoded: Buffer, plain: Buffer): boolean {
 interface CompressedSnapshot {
   size: number;
   mtimeMs: number;
+  ino: number;
   decoded: Buffer | undefined;
 }
 
@@ -280,7 +280,7 @@ async function snapshotCompressed(compressed: string): Promise<CompressedSnapsho
   } catch {
     decoded = undefined;
   }
-  return { size: st.size, mtimeMs: st.mtimeMs, decoded };
+  return { size: st.size, mtimeMs: st.mtimeMs, ino: st.ino, decoded };
 }
 
 /** False means the existing `.br` changed; caller must not rename over it. */
@@ -297,7 +297,14 @@ function commitCompressedReplace(
     if (!isNotFound(error)) throw error;
   }
   if (!current) return true;
-  if (!existing || current.size !== existing.size || current.mtimeMs !== existing.mtimeMs) return false;
+  if (
+    !existing ||
+    current.size !== existing.size ||
+    current.mtimeMs !== existing.mtimeMs ||
+    current.ino !== existing.ino
+  ) {
+    return false;
+  }
   if (existing.decoded === undefined || !isDecodedPrefix(existing.decoded, plainBytes)) {
     moveCompressedToOrphan(compressed, orphaned);
   }

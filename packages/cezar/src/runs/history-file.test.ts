@@ -6,7 +6,10 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
+  statSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -269,6 +272,25 @@ describe('history-file', () => {
     }
   });
 
+  it('keeps successive undecodable .br restores as unique .corrupt files', () => {
+    const { dataDir, id, plain, compressed } = setup();
+    const first = Buffer.from([0xff, 0x00, 0x01, 0xaa]);
+    const second = Buffer.from([0xbb, 0xcc, 0xdd, 0xee]);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      writeFileSync(compressed, first);
+      restoreHistory(dataDir, id);
+      writeFileSync(compressed, second);
+      restoreHistory(dataDir, id);
+      expect(existsSync(plain)).toBe(false);
+      expect(existsSync(compressed)).toBe(false);
+      expect(readFileSync(`${compressed}.corrupt`).equals(first)).toBe(true);
+      expect(readFileSync(`${compressed}.corrupt.1`).equals(second)).toBe(true);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it('writes a per-process tmp name during compress and never overwrites .br.orphaned', async () => {
     const { dataDir, id, plain, compressed } = setup();
     writeFileSync(plain, 'keep');
@@ -340,6 +362,30 @@ describe('history-file', () => {
     const replacement = br('other');
     expect(await compressHistory(dataDir, id, () => {
       writeFileSync(compressed, replacement);
+      return true;
+    })).toBe('changed');
+    expect(readFileSync(plain, 'utf8')).toBe('new');
+    expect(readFileSync(compressed).equals(replacement)).toBe(true);
+    expect(existsSync(`${compressed}.orphaned`)).toBe(false);
+    expect(leftoverTmp(dataDir)).toEqual([]);
+  });
+
+  it('returns changed when a same-size .br is rename-replaced with mtime restored', async () => {
+    const { dataDir, id, plain, compressed } = setup();
+    writeFileSync(plain, 'new');
+    const originalBr = br('old');
+    writeFileSync(compressed, originalBr);
+    const stamp = Math.floor(Date.now() / 1000);
+    utimesSync(compressed, stamp, stamp);
+    const inoBefore = statSync(compressed).ino;
+    const replacement = Buffer.alloc(originalBr.length, 0x7e);
+    expect(await compressHistory(dataDir, id, () => {
+      const swap = `${compressed}.swap`;
+      writeFileSync(swap, replacement);
+      utimesSync(swap, stamp, stamp);
+      renameSync(swap, compressed);
+      expect(statSync(compressed).ino).not.toBe(inoBefore);
+      expect(statSync(compressed).size).toBe(originalBr.length);
       return true;
     })).toBe('changed');
     expect(readFileSync(plain, 'utf8')).toBe('new');

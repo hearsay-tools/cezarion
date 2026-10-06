@@ -418,16 +418,21 @@ describe('RunStore history compression', () => {
       brotliCompressSync(Buffer.from('B'), { params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 5 } }),
     );
 
+    const historyFile = await import('./history-file.ts');
+    const restore = vi.spyOn(historyFile, 'restoreHistory');
     const reopened = openStore(dir).store;
     reopened.compressArchivedHistory();
     await reopened.historyIdle();
+    expect(restore).not.toHaveBeenCalled();
     expect(existsSync(prefixPaths.plain)).toBe(false);
     expect(existsSync(prefixPaths.compressed)).toBe(true);
     expect(existsSync(`${prefixPaths.compressed}.orphaned`)).toBe(false);
+    expect(brotliDecompressSync(readFileSync(prefixPaths.compressed)).toString()).toBe(body);
     expect(existsSync(otherPaths.plain)).toBe(false);
     expect(existsSync(otherPaths.compressed)).toBe(true);
     expect(existsSync(`${otherPaths.compressed}.orphaned`)).toBe(true);
     expect(brotliDecompressSync(readFileSync(`${otherPaths.compressed}.orphaned`)).toString()).toBe('B');
+    expect(brotliDecompressSync(readFileSync(otherPaths.compressed)).toString()).toBe('A');
   });
 
   it('archiveFinished compresses finished runs', async () => {
