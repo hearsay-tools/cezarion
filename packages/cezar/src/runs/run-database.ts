@@ -30,7 +30,16 @@ export const RUNS_IMPORT_COMPLETE_KEY = 'import-complete';
 /** `PRAGMA user_version` of a database this build created. A higher number means a newer cezar
  *  wrote it; that is refused rather than read, because a newer schema may store what this one
  *  would silently drop on its next write. */
-export const RUN_DATABASE_SCHEMA_VERSION = 1;
+export const RUN_DATABASE_SCHEMA_VERSION = 2;
+
+/**
+ * The oldest `user_version` the READ-ONLY reader can read as it stands (`openReadOnly`). It never
+ * migrates, so a project this build has not opened yet is still at the version an earlier build
+ * left; while every migration since only adds what readers can do without (indexes), that
+ * database stays readable rather than reading as empty. Raise it with any migration that changes
+ * a table or column a reader queries.
+ */
+export const RUN_DATABASE_READABLE_FROM = 1;
 
 /** How long a statement waits on another connection's lock before failing as busy. Short on
  *  purpose: the store runs on the event loop, and a blocked write is a blocked cockpit. */
@@ -143,6 +152,13 @@ const MIGRATIONS: readonly string[] = [
     current_revision INTEGER,
     current_data TEXT
   ) STRICT;
+  `,
+  `
+  -- The run lists' window (#864): every unarchived run, plus the newest archived roots. Without
+  -- these, each half scans the whole table — about 30 ms at 20,000 runs, on every list read.
+  -- Indexes only: nothing a v1 reader reads changes, which is why RUN_DATABASE_READABLE_FROM stays 1.
+  CREATE INDEX runs_unarchived ON runs (created_at DESC, seq) WHERE archived = 0;
+  CREATE INDEX runs_archived_roots ON runs (archived, created_at DESC, seq) WHERE parent_run_id IS NULL;
   `,
 ];
 
@@ -619,8 +635,10 @@ export class RunDatabase {
   /**
    * Open an existing database for reading only: never creates the file, never migrates it, never
    * changes journal mode. Answers `null` when there is nothing this build can read yet — no file,
-   * or a file still below the current schema (what a failed first open leaves) — so the caller can
-   * fall back to whatever it read before the database existed. A newer schema is still refused.
+   * or a file below `RUN_DATABASE_READABLE_FROM` (schema 0 is what a failed first open leaves) —
+   * so the caller can fall back to whatever it read before the database existed. A database from
+   * `RUN_DATABASE_READABLE_FROM` up to this build's schema is read as it stands. A newer schema is
+   * still refused.
    *
    * SQLite may create the `-wal`/`-shm` coordination files beside the database; that is the price
    * of seeing a live writer's commits. In a read-only directory with neither file present it
@@ -636,7 +654,7 @@ export class RunDatabase {
       db.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`);
       const found = readSchemaVersion(db);
       if (found > RUN_DATABASE_SCHEMA_VERSION) throw new RunDatabaseUnsupportedSchemaError(found, RUN_DATABASE_SCHEMA_VERSION);
-      if (found < RUN_DATABASE_SCHEMA_VERSION) {
+      if (found < RUN_DATABASE_READABLE_FROM) {
         db.close();
         return null;
       }

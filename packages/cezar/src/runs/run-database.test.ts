@@ -479,6 +479,9 @@ describe('RunDatabase', () => {
         expect(plan("SELECT id FROM runs WHERE group_id = 'x'")).toContain('runs_group_id');
         expect(plan('SELECT id FROM runs WHERE worktree_path IS NOT NULL')).toContain('runs_worktree_path');
         expect(plan('SELECT id FROM runs WHERE branch IS NOT NULL')).toContain('runs_branch');
+        // The run lists' window (#864): neither half scans the table.
+        expect(plan('SELECT id FROM runs WHERE archived = 0 ORDER BY created_at DESC, seq')).toContain('runs_unarchived')
+        expect(plan('SELECT id FROM runs WHERE archived = 1 AND parent_run_id IS NULL ORDER BY created_at DESC, seq LIMIT 201')).toContain('runs_archived_roots')
       } finally {
         raw.close();
       }
@@ -686,6 +689,44 @@ describe('RunDatabase', () => {
         expect(raw.prepare("SELECT count(*) AS n FROM sqlite_master WHERE type = 'table'").get()).toEqual({ n: 0 });
       } finally {
         raw.close();
+      }
+    });
+
+    it('reads a database at the previous schema without migrating it (#864: v2 only adds indexes)', () => {
+      const writer = openDb();
+      writer.transaction({ upserts: [row('a')], deletes: [] });
+      writer.close();
+      const raw = new DatabaseSync(path);
+      raw.exec('DROP INDEX runs_unarchived; DROP INDEX runs_archived_roots; PRAGMA user_version = 1');
+      raw.close();
+      const reader = RunDatabase.openReadOnly(path)!;
+      open.push(reader);
+      expect(reader.get('a')?.id).toBe('a');
+      expect(reader.listWindowSummaries(200).map((r) => r.id)).toEqual(['a']);
+      const check = new DatabaseSync(path, { readOnly: true });
+      try {
+        expect(check.prepare('PRAGMA user_version').get()).toEqual({ user_version: 1 });
+      } finally {
+        check.close();
+      }
+    });
+
+    it('migrates a v1 database to the current schema, keeping its rows', () => {
+      const writer = openDb();
+      writer.transaction({ upserts: [row('a'), row('b')], deletes: [] });
+      writer.close();
+      const raw = new DatabaseSync(path);
+      raw.exec('DROP INDEX runs_unarchived; DROP INDEX runs_archived_roots; PRAGMA user_version = 1');
+      raw.close();
+      const db = openDb();
+      expect(db.listRevisions().map((r) => r.id)).toEqual(['a', 'b']);
+      const check = new DatabaseSync(path, { readOnly: true });
+      try {
+        expect(check.prepare('PRAGMA user_version').get()).toEqual({ user_version: RUN_DATABASE_SCHEMA_VERSION });
+        const indexes = check.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name IN ('runs_unarchived', 'runs_archived_roots') ORDER BY name").all()
+        expect(indexes.map((r) => r.name)).toEqual(['runs_archived_roots', 'runs_unarchived'])
+      } finally {
+        check.close();
       }
     });
 

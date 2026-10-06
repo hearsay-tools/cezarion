@@ -558,7 +558,7 @@ describe('a store that cannot be opened is never an empty one', () => {
     const before = snapshot([RUNS_DB_FILE]);
     const failure = openFailure();
     expect(failure.kind).toBe('unsupported-schema');
-    expect(failure.message).toMatch(/runs\.db was written by a newer cezar \(schema 99; this cezar reads schema 1\)\. Upgrade cezar to open this project's runs\.$/);
+    expect(failure.message).toMatch(/runs\.db was written by a newer cezar \(schema 99; this cezar reads schema 2\)\. Upgrade cezar to open this project's runs\.$/);
     expect(snapshot([RUNS_DB_FILE])).toEqual(before);
   });
 });
