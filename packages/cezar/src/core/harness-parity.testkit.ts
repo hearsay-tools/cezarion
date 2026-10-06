@@ -201,7 +201,6 @@ export const SKILL_RESUME_CRITERIA = [
   { id: 'R56', scenario: 'baseline', name: 'declares systemPromptOnResume matching the resume wire' },
   { id: 'R57', scenario: 'baseline', name: 'reuses the recorded session id on Continue and recover' },
 ] as const;
-] as const;
 
 export interface HarnessAdapter {
   readonly backend: RunnerId;
