@@ -162,6 +162,15 @@ export const AUTONOMOUS_CRITERIA = [
   { id: 'A14', scenario: 'autonomous-readiness-idle', name: 'settles a continued root readiness timeout after process exit' },
 ] as const;
 
+/** #790: skill system prompt on Continue and restart recovery, every native wire. */
+export const SKILL_RESUME_CRITERIA = [
+  { id: 'R53', scenario: 'baseline', name: 'keeps the skill system prompt on Continue' },
+  { id: 'R54', scenario: 'baseline', name: 'keeps the skill system prompt when recover() resumes a persisted continuation' },
+  { id: 'R55', scenario: 'baseline', name: 'warns once when a resent continued skill is gone' },
+  { id: 'R56', scenario: 'baseline', name: 'declares systemPromptOnResume matching the resume wire' },
+  { id: 'R57', scenario: 'baseline', name: 'reuses the recorded session id on Continue and recover' },
+] as const;
+
 export interface HarnessAdapter {
   readonly backend: RunnerId;
   /** Every human ask wire this runner exposes; marker fallback when none exists. */
@@ -191,6 +200,26 @@ const BASELINE_PROMPT = 'inspect the working tree';
 
 /** The id cezar pins on every session, mirroring `RunManager`. */
 export const PINNED_SESSION_ID = '0e5f1a7c-1c3e-4d2a-9b64-2f7a5c8d1e90';
+
+/** Pre-create a session the OpenCode mock will GET on resume, so a Continue cell
+ *  exercises GET+PATCH instead of the 404 fallback that POSTs a fresh session. */
+export function seedOpencodeMockSession(
+  argsFile: string,
+  session: { id?: string; title?: string; permission?: unknown[] } = {},
+): void {
+  const id = session.id ?? PINNED_SESSION_ID;
+  writeFileSync(`${argsFile}.opencode-sessions.json`, JSON.stringify({
+    seq: 1,
+    sessions: {
+      [id]: {
+        id,
+        title: session.title ?? 'cezar task',
+        prompts: [],
+        ...(session.permission ? { permission: session.permission } : {}),
+      },
+    },
+  }));
+}
 
 export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
   claude: {

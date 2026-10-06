@@ -24,8 +24,13 @@ function watchdogStall(prompt) {
 // response resolves immediately — every part and the closing `session.idle`
 // arrive over SSE afterwards, so a correct stream (v1 and v2 alike) must
 // take its turn-end from `session.idle`, never from the HTTP response.
-import { appendFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+// Aliased: owned-input-delivery.testkit.ts prepends its own `existsSync`/`writeFileSync` import,
+// and a second import of the same name is a SyntaxError.
+import { appendFileSync, existsSync as sessionStoreExists, mkdirSync, readFileSync, writeFileSync as sessionStoreWrite } from 'node:fs';
 import { createServer } from 'node:http';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 
 if (process.env.CEZ_MOCK_ARGS_FILE && process.env.OPENCODE_CONFIG_CONTENT) appendFileSync(process.env.CEZ_MOCK_ARGS_FILE, JSON.stringify({ type: 'runtime-config', config: JSON.parse(process.env.OPENCODE_CONFIG_CONTENT) }) + '\n');
 if (process.env.CEZ_MOCK_CI_PR) { const { probeCiTool } = await import('./mock-ci-tool.mjs'); await probeCiTool('opencode', JSON.parse(process.env.OPENCODE_CONFIG_CONTENT ?? '{}')); }
@@ -45,8 +50,80 @@ const arg = (flag, fallback) => {
 };
 const hostname = arg('--hostname', '127.0.0.1');
 
-const SESSION_ID = 'ses_mock_1';
+const DEFAULT_SESSION_ID = 'ses_mock_1';
+let SESSION_ID = DEFAULT_SESSION_ID;
 const MESSAGE_ID = 'msg_mock_1';
+
+function sessionStorePath() {
+  if (process.env.CEZ_MOCK_OPENCODE_SESSIONS_FILE) return process.env.CEZ_MOCK_OPENCODE_SESSIONS_FILE;
+  // Keyed on the args file, not its directory: spec-support probes and D1 share a
+  // cwd and would otherwise increment ses_mock_N across unrelated launches.
+  if (process.env.CEZ_MOCK_ARGS_FILE) return `${process.env.CEZ_MOCK_ARGS_FILE}.opencode-sessions.json`;
+  // Dry-run Continue (no args file) must resume in the same worktree: persist by cwd.
+  const key = createHash('sha256').update(process.cwd()).digest('hex');
+  return join(tmpdir(), `cez-mock-opencode-sessions-${key}.json`);
+}
+function emptySessionStore() {
+  return { seq: 0, sessions: {} };
+}
+function readPersistedSessionStore() {
+  const path = sessionStorePath();
+  if (!path || !sessionStoreExists(path)) return null;
+  try {
+    const parsed = JSON.parse(readFileSync(path, 'utf8'));
+    if (parsed && typeof parsed === 'object' && parsed.sessions && typeof parsed.sessions === 'object') return parsed;
+  } catch {
+    // A corrupt store is treated as missing so a later POST can mint a session.
+  }
+  return null;
+}
+let memorySessionStore = readPersistedSessionStore() ?? emptySessionStore();
+function loadSessionStore() {
+  return readPersistedSessionStore() ?? memorySessionStore;
+}
+function saveSessionStore(store) {
+  memorySessionStore = store;
+  const path = sessionStorePath();
+  if (!path) return;
+  mkdirSync(dirname(path), { recursive: true });
+  sessionStoreWrite(path, JSON.stringify(store));
+}
+function getSession(id) {
+  return loadSessionStore().sessions[id] ?? null;
+}
+function createSession(body = {}) {
+  const store = loadSessionStore();
+  store.seq += 1;
+  const id = store.seq === 1 ? DEFAULT_SESSION_ID : `ses_mock_${store.seq}`;
+  store.sessions[id] = {
+    id,
+    title: typeof body.title === 'string' ? body.title : 'cezar task',
+    prompts: [],
+    ...(Array.isArray(body.permission) ? { permission: [...body.permission] } : {}),
+  };
+  saveSessionStore(store);
+  return id;
+}
+function addPrompt(id, text) {
+  const store = loadSessionStore();
+  if (!store.sessions[id]) return;
+  store.sessions[id].prompts = [...(store.sessions[id].prompts ?? []), text];
+  saveSessionStore(store);
+}
+function patchSession(id, body) {
+  const store = loadSessionStore();
+  if (!store.sessions[id]) return null;
+  // OpenCode 1.18.33: PATCH permission APPENDS (no replace, no dedupe); a
+  // title-only PATCH leaves permission alone.
+  const next = { ...store.sessions[id], ...body, id };
+  if (Array.isArray(body.permission)) {
+    const existing = Array.isArray(store.sessions[id].permission) ? store.sessions[id].permission : [];
+    next.permission = [...existing, ...body.permission];
+  }
+  store.sessions[id] = next;
+  saveSessionStore(store);
+  return store.sessions[id];
+}
 
 let sse = null;
 const write = (event) => {
@@ -154,15 +231,58 @@ const server = createServer((req, res) => {
       else acknowledge();
       return;
     }
-    if (req.method === 'POST' && url === '/session') {
+    const sessionGet = req.method === 'GET' && /^\/session\/([^/]+)$/.exec(url);
+    if (sessionGet) {
+      const session = getSession(sessionGet[1]);
+      if (!session) {
+        res.writeHead(404, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ error: 'NotFoundError' }));
+        return;
+      }
       res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ id: SESSION_ID, title: 'cezar task' }));
+      res.end(JSON.stringify({
+        id: session.id,
+        title: session.title,
+        ...(Array.isArray(session.permission) ? { permission: session.permission } : {}),
+      }));
       return;
     }
-    if (
-      req.method === 'POST' &&
-      (url === `/session/${SESSION_ID}/prompt_async` || url === `/session/${SESSION_ID}/message`)
-    ) {
+    const sessionPatch = req.method === 'PATCH' && /^\/session\/([^/]+)$/.exec(url);
+    if (sessionPatch) {
+      const session = patchSession(sessionPatch[1], body ? JSON.parse(body) : {});
+      if (!session) {
+        res.writeHead(404, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ error: 'NotFoundError' }));
+        return;
+      }
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({
+        id: session.id,
+        title: session.title,
+        ...(Array.isArray(session.permission) ? { permission: session.permission } : {}),
+      }));
+      return;
+    }
+    if (req.method === 'POST' && url === '/session') {
+      const parsed = body ? JSON.parse(body) : {};
+      SESSION_ID = createSession(parsed);
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({
+        id: SESSION_ID,
+        title: parsed.title ?? 'cezar task',
+        ...(Array.isArray(parsed.permission) ? { permission: parsed.permission } : {}),
+      }));
+      return;
+    }
+    const sessionPrompt = req.method === 'POST' && /^\/session\/([^/]+)\/(prompt_async|message)$/.exec(url);
+    if (sessionPrompt && getSession(sessionPrompt[1])) {
+      SESSION_ID = sessionPrompt[1];
+      try {
+        const text = body ? JSON.parse(body).parts?.map(part => part.text ?? '').join('\n') ?? '' : '';
+        if (text) addPrompt(SESSION_ID, text);
+      } catch {
+        // Keep the scripted turn even when the body is not JSON.
+      }
       if (body.includes('mock:crash-stderr-pre-ack')) {
         const { crashWithStderr } = await import('./mock-runner-crash.mjs');
         crashWithStderr(body);
