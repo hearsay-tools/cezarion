@@ -25,7 +25,6 @@ const brotliCompressAsync = promisify(brotliCompress);
 const brotliParams = { params: { [zlibConstants.BROTLI_PARAM_QUALITY]: HISTORY_BROTLI_QUALITY } };
 
 export function historyPaths(dataDir: string, id: string): { plain: string; compressed: string } {
-  z.uuid().parse(id);
   const plain = join(dataDir, 'runs', `${id}.ndjson`);
   return { plain, compressed: `${plain}.br` };
 }
@@ -83,6 +82,7 @@ export async function compressHistory(
   id: string,
   stillEligible: () => boolean,
 ): Promise<'compressed' | 'skipped'> {
+  z.uuid().parse(id);
   const { plain, compressed } = historyPaths(dataDir, id);
   let st: Stats;
   let bytes: Buffer;

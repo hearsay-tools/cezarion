@@ -4175,7 +4175,7 @@ export function createApp(deps: ServerDeps) {
         if (!store.getRun(id)) return c.json({ error: 'not found' }, 404);
         try {
           return c.json(
-            await readRunHistoryPage(join(dataDir, 'runs', `${id}.ndjson`), c.req.valid('query').cursor),
+            await readRunHistoryPage(dataDir, id, c.req.valid('query').cursor),
           );
         } catch (error) {
           if (error instanceof HistoryCursorError) return c.json({ error: error.message }, error.status);
@@ -4191,7 +4191,7 @@ export function createApp(deps: ServerDeps) {
         const { store, dataDir } = c.get('project');
         const { id } = c.req.valid('param');
         if (!store.getRun(id)) return c.json({ error: 'not found' }, 404);
-        return c.json(await deriveRunContextEvents(join(dataDir, 'runs', `${id}.ndjson`)));
+        return c.json(await deriveRunContextEvents(dataDir, id));
       },
     )
 
@@ -5275,10 +5275,9 @@ export function createApp(deps: ServerDeps) {
       const { id } = c.req.valid('param');
       if (!store.getRun(id)) return c.json({ error: 'not found' }, 404);
       const query = c.req.valid('query');
-      const eventsPath = join(dataDir, 'runs', `${id}.ndjson`);
       if (query.cursor) {
         try {
-          await validateLiveCursor(eventsPath, query.cursor);
+          await validateLiveCursor(dataDir, id, query.cursor);
         } catch (error) {
           if (error instanceof HistoryCursorError) return c.json({ error: error.message }, error.status);
           throw error;
@@ -5323,7 +5322,7 @@ export function createApp(deps: ServerDeps) {
         });
 
         const replay = query.cursor
-          ? await readEventsAfterLiveCursor(eventsPath, query.cursor)
+          ? await readEventsAfterLiveCursor(dataDir, id, query.cursor)
           : { events: store.readEvents(id), boundarySeq: 0 };
         maxSeq = Math.max(maxSeq, replay.boundarySeq);
         for (const event of replay.events) {

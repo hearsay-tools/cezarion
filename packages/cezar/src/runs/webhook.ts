@@ -236,7 +236,7 @@ export class TaskWebhook {
 
   private async pendingQuestion(runId: string): Promise<unknown> {
     try {
-      const context = await deriveRunContextEvents(join(this.options.dataDir, 'runs', `${runId}.ndjson`));
+      const context = await deriveRunContextEvents(this.options.dataDir, runId);
       return [...context.contextEvents].reverse().find((event) => event.type === 'ask.requested')?.questions;
     } catch {
       return undefined;

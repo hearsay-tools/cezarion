@@ -15,6 +15,7 @@ import {
 import type { ArchiveFinishedScope, CiWait, ConversationState, AgentInput, InboxClaim, DelegationState, RunSummary, WorkerCollectedResult } from '@open-mercato/cezar-contract';
 import { storedDelegationStateSchema } from './delegation-state.ts';
 import { refreshHumanAskSummary } from './human-ask-summary.ts';
+import { hasPlainHistory, historyPaths, readHistoryText, removeHistory, restoreHistory } from './history-file.ts';
 import { workerExecutionIdentitySchema, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
 import { reconcileWorkerWait } from '../delegation/wait.ts';
 import { capacityError, workerCapacity } from '../delegation/capacity.ts';
@@ -2910,6 +2911,7 @@ export class RunStore extends EventEmitter {
     const full: RunEvent = this.redact({ ...event, seq, ts: new Date().toISOString() });
     // Sync append keeps event order without a write queue; local NDJSON
     // appends at agent-event rates are effectively free.
+    if (!hasPlainHistory(this.dataDir, runId)) restoreHistory(this.dataDir, runId);
     appendFileSync(this.eventsPath(runId), `${JSON.stringify(full)}\n`, 'utf8');
     if ((full.type === 'ask.requested' || full.type === 'human-input-delivered') &&
       refreshHumanAskSummary(run, this.dataDir)) this.touch(run);
@@ -3132,7 +3134,8 @@ export class RunStore extends EventEmitter {
 
   readEvents(runId: string): RunEvent[] {
     try {
-      const raw = readFileSync(this.eventsPath(runId), 'utf8');
+      const raw = readHistoryText(this.dataDir, runId);
+      if (raw === undefined) return [];
       return raw
         .split('\n')
         .filter(Boolean)
@@ -3459,7 +3462,7 @@ export class RunStore extends EventEmitter {
     z.uuid().parse(id);
     const dir = join(this.dataDir, 'runs');
     if (realpathSync(dir) !== resolve(dir)) throw new Error('History storage redirected');
-    rmSync(this.eventsPath(id), { force: true });
+    removeHistory(this.dataDir, id);
     rmSync(this.handoffPath(id), { force: true });
     rmSync(this.imagesDir(id), { recursive: true, force: true });
     removeArtifacts(this.dataDir, id);
@@ -3515,7 +3518,7 @@ export class RunStore extends EventEmitter {
   }
 
   private eventsPath(runId: string): string {
-    return join(this.dataDir, 'runs', `${runId}.ndjson`);
+    return historyPaths(this.dataDir, runId).plain;
   }
 
   /** Same location `handoffPath()` in handoff.ts produces — inlined to keep
@@ -3551,7 +3554,7 @@ export class RunStore extends EventEmitter {
   private removeOwedHistory(id: string): void {
     if (!this.historyOwed.delete(id)) return;
     try {
-      rmSync(this.eventsPath(id), { force: true });
+      removeHistory(this.dataDir, id);
       rmSync(this.handoffPath(id), { force: true });
       rmSync(this.imagesDir(id), { recursive: true, force: true });
       removeArtifacts(this.dataDir, id);

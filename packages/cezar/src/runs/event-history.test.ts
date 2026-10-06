@@ -1,4 +1,5 @@
-import { appendFileSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -10,19 +11,33 @@ import {
   deriveRunContextEvents,
   readEventsAfterLiveCursor,
   readRunHistoryPage,
+  validateLiveCursor,
 } from './event-history.ts';
+import { compressHistory } from './history-file.ts';
 
 const dirs: string[] = [];
 
-function fixture(events: Array<Partial<RunEvent> & Pick<RunEvent, 'seq' | 'type'>>): string {
-  const dir = mkdtempSync(join(tmpdir(), 'cez-history-'));
-  dirs.push(dir);
-  const file = join(dir, 'run.ndjson');
+function fixture(events: Array<Partial<RunEvent> & Pick<RunEvent, 'seq' | 'type'>>): { dataDir: string; id: string; file: string } {
+  const dataDir = mkdtempSync(join(tmpdir(), 'cez-history-'));
+  dirs.push(dataDir);
+  const id = randomUUID();
+  mkdirSync(join(dataDir, 'runs'));
+  const file = join(dataDir, 'runs', `${id}.ndjson`);
   writeFileSync(
     file,
     events.map((event) => JSON.stringify({ ts: '2026-07-30T00:00:00.000Z', ...event })).join('\n') + '\n',
   );
-  return file;
+  return { dataDir, id, file };
+}
+
+async function pageFrom(events: Array<Partial<RunEvent> & Pick<RunEvent, 'seq' | 'type'>>) {
+  const { dataDir, id } = fixture(events);
+  return readRunHistoryPage(dataDir, id);
+}
+
+async function contextFrom(events: Array<Partial<RunEvent> & Pick<RunEvent, 'seq' | 'type'>>) {
+  const { dataDir, id } = fixture(events);
+  return deriveRunContextEvents(dataDir, id);
 }
 
 afterEach(() => {
@@ -78,8 +93,8 @@ describe('readRunHistoryPage', () => {
         item: { kind: 'message', id: `m-${seq}`, role: 'assistant', text: String(seq) },
       });
     }
-    const file = fixture(events);
-    const newest = await readRunHistoryPage(file);
+    const { dataDir, id } = fixture(events);
+    const newest = await readRunHistoryPage(dataDir, id);
     expect(newest.itemCount).toBe(100);
     expect(canonicalSessionItems(newest.events)).toHaveLength(100);
     expect(newest.events).toHaveLength(101);
@@ -87,7 +102,7 @@ describe('readRunHistoryPage', () => {
     expect(newest.events.at(-1)?.seq).toBe(151);
     expect(newest.olderCursor).toBeTypeOf('string');
 
-    const older = await readRunHistoryPage(file, newest.olderCursor);
+    const older = await readRunHistoryPage(dataDir, id, newest.olderCursor);
     expect(older.itemCount).toBe(50);
     expect(canonicalSessionItems(older.events)).toHaveLength(50);
     expect(older.events).toHaveLength(51);
@@ -96,7 +111,7 @@ describe('readRunHistoryPage', () => {
     expect(older.newerCursor).toBeTypeOf('string');
     expect(older.asOfSeq).toBe(151);
 
-    const newer = await readRunHistoryPage(file, older.newerCursor);
+    const newer = await readRunHistoryPage(dataDir, id, older.newerCursor);
     expect(newer.itemCount).toBe(100);
     expect(canonicalSessionItems(newer.events)).toHaveLength(100);
     expect(newer.events).toHaveLength(101);
@@ -115,10 +130,10 @@ describe('readRunHistoryPage', () => {
         item: { kind: 'message', id: `m-${seq}`, role: 'assistant', text: String(seq) },
       });
     }
-    const file = fixture(events);
-    const newest = await readRunHistoryPage(file);
-    const previous = await readRunHistoryPage(file, newest.olderCursor);
-    const forward = await readRunHistoryPage(file, previous.newerCursor);
+    const { dataDir, id } = fixture(events);
+    const newest = await readRunHistoryPage(dataDir, id);
+    const previous = await readRunHistoryPage(dataDir, id, newest.olderCursor);
+    const forward = await readRunHistoryPage(dataDir, id, previous.newerCursor);
     expect(canonicalSessionItems(newest.events)).toHaveLength(100);
     expect(newest.events).toHaveLength(101);
     expect(previous).toMatchObject({ itemCount: 100, hasOlder: true });
@@ -132,7 +147,9 @@ describe('readRunHistoryPage', () => {
   it('preserves UTF-8 when a multibyte code point crosses a reverse-read chunk boundary', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'cez-history-utf8-'));
     dirs.push(dir);
-    const file = join(dir, 'run.ndjson');
+    const id = randomUUID();
+    mkdirSync(join(dir, 'runs'));
+    const file = join(dir, 'runs', `${id}.ndjson`);
     const build = (padding: number) => {
       const text = `before 🧪${'x'.repeat(padding)}`;
       const content = [
@@ -154,19 +171,19 @@ describe('readRunHistoryPage', () => {
     expect(Buffer.byteLength(content) - 64 * 1024).toBe(emojiOffset + 1);
     writeFileSync(file, content);
 
-    const page = await readRunHistoryPage(file);
+    const page = await readRunHistoryPage(dir, id);
     const unicode = page.events.find(({ seq }) => seq === 1);
     expect((unicode?.item as { text?: string } | undefined)?.text).toBe(text);
   });
 
   it('degrades a missing transcript to an empty live page', async () => {
-    const page = await readRunHistoryPage('/no/such/transcript.ndjson');
+    const page = await readRunHistoryPage('/no/such', '00000000-0000-4000-8000-000000000000');
     expect(page).toMatchObject({ events: [], itemCount: 0, asOfSeq: 0, hasOlder: false });
     expect(page.liveCursor).toBeTypeOf('string');
   });
 
   it('rejects malformed cursors without touching a path from cursor data', async () => {
-    await expect(readRunHistoryPage('/no/such/transcript.ndjson', 'not-json')).rejects.toMatchObject({
+    await expect(readRunHistoryPage('/no/such', '00000000-0000-4000-8000-000000000000', 'not-json')).rejects.toMatchObject({
       name: 'HistoryCursorError',
       status: 400,
     });
@@ -183,9 +200,9 @@ describe('readRunHistoryPage', () => {
         item: { kind: 'message', id: `m-${index}`, role: 'assistant', text: `message ${index}` },
       });
     }
-    const file = fixture(events);
+    const { dataDir, id, file } = fixture(events);
     let measured: { fileSize: number; bytesRead: number; retainedEvents: number } | undefined;
-    const result = await readRunHistoryPage(file, undefined, (value) => {
+    const result = await readRunHistoryPage(dataDir, id, undefined, (value) => {
       measured = value;
     });
     expect(result.itemCount).toBe(100);
@@ -199,30 +216,30 @@ describe('readRunHistoryPage', () => {
 
 describe('live cursor replay and compact context', () => {
   it('replays only persisted lines appended after the captured live cursor', async () => {
-    const file = fixture([
+    const { dataDir, id, file } = fixture([
       { seq: 1, type: 'turn.started', turnId: 't1' },
       { seq: 2, type: 'note', message: 'before' },
     ]);
-    const page = await readRunHistoryPage(file);
+    const page = await readRunHistoryPage(dataDir, id);
     appendFileSync(file, JSON.stringify({ seq: 4, ts: 'x', type: 'note', message: 'after gap' }) + '\n');
-    const replay = await readEventsAfterLiveCursor(file, page.liveCursor);
+    const replay = await readEventsAfterLiveCursor(dataDir, id, page.liveCursor);
     expect(replay.boundarySeq).toBe(2);
     expect(replay.events.map(({ seq }) => seq)).toEqual([4]);
   });
 
   it('returns 409 when a valid live cursor points beyond a replaced transcript', async () => {
-    const file = fixture([
+    const { dataDir, id, file } = fixture([
       { seq: 1, type: 'note', message: 'long enough to capture an offset' },
     ]);
-    const page = await readRunHistoryPage(file);
+    const page = await readRunHistoryPage(dataDir, id);
     writeFileSync(file, '');
-    await expect(readEventsAfterLiveCursor(file, page.liveCursor)).rejects.toEqual(
+    await expect(readEventsAfterLiveCursor(dataDir, id, page.liveCursor)).rejects.toEqual(
       expect.objectContaining<Partial<HistoryCursorError>>({ status: 409 }),
     );
   });
 
   it('keeps the latest plan and selector-relevant task lifecycle in chronological order', async () => {
-    const file = fixture([
+    const { dataDir, id } = fixture([
       { seq: 1, type: 'plan.updated', entries: [{ content: 'old', status: 'pending' }] },
       { seq: 2, type: 'turn.started', turnId: 't1' },
       {
@@ -237,7 +254,7 @@ describe('live cursor replay and compact context', () => {
         item: { kind: 'tool', id: 'child-1', parentItemId: 'task-1', status: 'running' },
       },
     ]);
-    const context = await deriveRunContextEvents(file);
+    const context = await deriveRunContextEvents(dataDir, id);
     expect(context.asOfSeq).toBe(5);
     expect(context.contextEvents.map(({ seq }) => seq)).toEqual([2, 3, 4, 5]);
   });
@@ -264,7 +281,8 @@ describe('live cursor replay and compact context', () => {
         },
       });
     }
-    const context = await deriveRunContextEvents(fixture(events));
+    const active = fixture(events);
+    const context = await deriveRunContextEvents(active.dataDir, active.id);
     expect(context.contextEvents.some(({ seq }) => seq === 2)).toBe(true);
     expect(context.contextEvents.at(-1)?.seq).toBe(2_102);
     expect(context.contextEvents.length).toBeLessThan(10);
@@ -304,7 +322,8 @@ describe('live cursor replay and compact context', () => {
       },
       { seq: 9, type: 'plan.updated', entries: [] },
     ] satisfies Array<Partial<RunEvent> & Pick<RunEvent, 'seq' | 'type'>>;
-    const context = await deriveRunContextEvents(fixture(events));
+    const settled = fixture(events);
+    const context = await deriveRunContextEvents(settled.dataDir, settled.id);
     const itemEvents = context.contextEvents.filter(({ type }) => type.startsWith('item.'));
     expect(itemEvents.map(({ seq }) => seq)).toEqual([6, 8]);
     expect(context.contextEvents.at(-1)).toMatchObject({ seq: 9, type: 'plan.updated', entries: [] });
@@ -313,20 +332,20 @@ describe('live cursor replay and compact context', () => {
 
 const question = { seq: 10, type: 'ask.requested', requestId: 'pending-question', questions: [{ header: 'Choice', question: 'Choose a path?', options: [{ label: 'First' }, { label: 'Second' }] }] };
 it.each(['agent-input', 'user-message', 'turn.started', 'lifecycle'])('compact context retains a pending human ask through %s without an answer receipt', async type => {
-  const context = await deriveRunContextEvents(fixture([question, { seq: 11, type, text: 'not a successful human answer' },
+  const context = await contextFrom([question, { seq: 11, type, text: 'not a successful human answer' },
     ...Array.from({ length: 1000 }, (_, i) => ({ seq: i + 12, type: 'note', message: 'later history' })),
-  ]));
+  ]);
   expect(context.contextEvents.find(event => event.type === 'ask.requested')).toMatchObject({ seq: 10, requestId: 'pending-question' });
   expect(context.contextEvents.length).toBeLessThan(4);
 });
 it('compact context retires only the matched delivered ask and excludes answered history', async () => {
-  const file = fixture([question, { seq: 11, type: 'human-input-delivered', askSeq: 9 }]);
-  expect((await deriveRunContextEvents(file)).contextEvents).toContainEqual(expect.objectContaining({ seq: 10 }));
+  const { dataDir, id, file } = fixture([question, { seq: 11, type: 'human-input-delivered', askSeq: 9 }]);
+  expect((await deriveRunContextEvents(dataDir, id)).contextEvents).toContainEqual(expect.objectContaining({ seq: 10 }));
   appendFileSync(file, JSON.stringify({ seq: 12, ts: '2026-09-07T00:00:00.000Z', type: 'human-input-delivered', askSeq: 10 }) + '\n');
-  expect((await deriveRunContextEvents(file)).contextEvents.some(event => event.type === 'ask.requested')).toBe(false);
+  expect((await deriveRunContextEvents(dataDir, id)).contextEvents.some(event => event.type === 'ask.requested')).toBe(false);
 });
 it('compact context keeps the latest valid pending ask when a malformed ask follows', async () => {
-  const context = await deriveRunContextEvents(fixture([question, { ...question, seq: 11, requestId: 'new-question' }, { seq: 12, type: 'ask.requested', requestId: 'invalid', questions: [] }]));
+  const context = await contextFrom([question, { ...question, seq: 11, requestId: 'new-question' }, { seq: 12, type: 'ask.requested', requestId: 'invalid', questions: [] }]);
   expect(context.contextEvents.filter(event => event.type === 'ask.requested').map(event => event.requestId)).toEqual(['new-question']);
 });
 
@@ -334,7 +353,7 @@ it('returns conversation-only history and groups delivery/replay with the same m
   const senderRunId='11111111-1111-4111-8111-111111111111', recipientRunId='22222222-2222-4222-8222-222222222222', id='33333333-3333-4333-8333-333333333333';
   const message={id,senderRunId,recipientRunId,kind:'request',text:'Please review',createdAt:'2026-09-08T12:00:00.000Z',requestHash:'a'.repeat(64),state:'accepted'};
   const events=[{seq:1,type:'conversation-message',message,delivery:'queued'}, {seq:2,type:'conversation-message',message,delivery:'delivered'}, {seq:3,type:'request-outcome',outcome:{requestId:id,status:'replied',observedAt:message.createdAt}}, {seq:4,type:'agent-input',input:{id,source:'agent',parentRunId:senderRunId,text:message.text,createdAt:message.createdAt,deliveredAt:message.createdAt,conversation:{senderRunId,recipientRunId,kind:'request'}}}];
-  const page=await readRunHistoryPage(fixture(events));
+  const page=await pageFrom(events);
   expect(page.itemCount).toBe(1);
   expect(page.events.map(event=>event.seq)).toEqual([1,2,3,4]);
 });
@@ -348,7 +367,7 @@ it('keeps a request and its outcome together at the newest-page item boundary', 
     { seq: 3, type: 'request-outcome', outcome: { requestId: id, status: 'replied', observedAt: createdAt } },
     ...Array.from({ length: 99 }, (_, index) => ({ seq: index + 4, type: 'note', message: `later item ${index}` })),
   ];
-  const page = await readRunHistoryPage(fixture(events));
+  const page = await pageFrom(events);
   expect(page.itemCount).toBe(100);
   expect(page.events.map(event => event.seq)).toContain(2);
   expect(page.events.map(event => event.seq)).toContain(3);
@@ -364,7 +383,7 @@ it('retains an out-of-scan outcome without spending a visible page item on it', 
     ...Array.from({ length: 100 }, (_, index) => ({ seq: index + 103, type: 'note', message: `later item ${index} ${'x'.repeat(300)}` })),
     { seq: 203, type: 'request-outcome', outcome: { requestId: id, status: 'replied', observedAt: createdAt } },
   ];
-  const page = await readRunHistoryPage(fixture(events));
+  const page = await pageFrom(events);
   expect(page.itemCount).toBe(100);
   expect(page.events.map(event => event.seq)).not.toContain(1);
   expect(page.events.map(event => event.seq)).not.toContain(101);
@@ -374,11 +393,51 @@ it('retains an out-of-scan outcome without spending a visible page item on it', 
 it('compact context keeps the routing of a pending worker question (#505)', async () => {
   const later = Array.from({ length: 1000 }, (_, i) => ({ seq: i + 13, type: 'note', message: 'later history' }));
   const routed = { seq: 11, type: 'worker-question-routed', askSeq: 10, messageId: '11111111-2222-4333-8444-555555555555', parentRunId: '21111111-2222-4333-8444-555555555555' };
-  const context = await deriveRunContextEvents(fixture([question, routed, ...later]));
+  const context = await contextFrom([question, routed, ...later]);
   expect(context.contextEvents.map(event => event.type)).toEqual(expect.arrayContaining(['ask.requested', 'worker-question-routed']));
-  const handedBack = await deriveRunContextEvents(fixture([question, routed, { seq: 12, type: 'worker-question-fallback', askSeq: 10, reason: 'parent-done' }, ...later]));
+  const handedBack = await contextFrom([question, routed, { seq: 12, type: 'worker-question-fallback', askSeq: 10, reason: 'parent-done' }, ...later]);
   expect(handedBack.contextEvents.filter(event => event.type.startsWith('worker-question')).map(event => event.type)).toEqual(['worker-question-fallback']);
   // An answered question takes its routing with it.
-  const answered = await deriveRunContextEvents(fixture([question, routed, { seq: 12, type: 'human-input-delivered', askSeq: 10, source: 'parent' }, ...later]));
+  const answered = await contextFrom([question, routed, { seq: 12, type: 'human-input-delivered', askSeq: 10, source: 'parent' }, ...later]);
   expect(answered.contextEvents.some(event => event.type.startsWith('worker-question'))).toBe(false);
+});
+
+describe('compressed transcript parity', () => {
+  it('pages a compressed transcript exactly like the plain one', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'cez-history-br-'));
+    dirs.push(dataDir);
+    const id = randomUUID();
+    mkdirSync(join(dataDir, 'runs'));
+    const events: Array<Partial<RunEvent> & Pick<RunEvent, 'seq' | 'type'>> = [
+      { seq: 1, type: 'turn.started', turnId: 't1' },
+    ];
+    for (let seq = 2; seq <= 251; seq += 1) {
+      events.push({
+        seq,
+        type: 'item.completed',
+        item: { kind: 'message', id: `m-${seq}`, role: 'assistant', text: String(seq) },
+      });
+    }
+    writeFileSync(
+      join(dataDir, 'runs', `${id}.ndjson`),
+      events.map((event) => JSON.stringify({ ts: '2026-07-30T00:00:00.000Z', ...event })).join('\n') + '\n',
+    );
+
+    const newest = await readRunHistoryPage(dataDir, id);
+    expect(newest.hasOlder).toBe(true);
+    expect(newest.olderCursor).toBeTypeOf('string');
+    const older = await readRunHistoryPage(dataDir, id, newest.olderCursor);
+    expect(older.hasOlder).toBe(true);
+    const context = await deriveRunContextEvents(dataDir, id);
+    await validateLiveCursor(dataDir, id, newest.liveCursor);
+    const live = await readEventsAfterLiveCursor(dataDir, id, newest.liveCursor);
+
+    expect(await compressHistory(dataDir, id, () => true)).toBe('compressed');
+
+    expect(await readRunHistoryPage(dataDir, id)).toEqual(newest);
+    expect(await readRunHistoryPage(dataDir, id, newest.olderCursor)).toEqual(older);
+    expect(await deriveRunContextEvents(dataDir, id)).toEqual(context);
+    await validateLiveCursor(dataDir, id, newest.liveCursor);
+    expect(await readEventsAfterLiveCursor(dataDir, id, newest.liveCursor)).toEqual(live);
+  });
 });
