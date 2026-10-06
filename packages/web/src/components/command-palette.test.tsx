@@ -15,6 +15,7 @@ import type {
 import {
   CommandPalette,
   mergeTasks,
+  referenceKeywords,
   orderProjects,
   orderRuns,
   paletteScore,
@@ -1116,4 +1117,59 @@ it('preserves pending human attention in live and indexed palette rows', async (
   for (const id of ['live-asking', 'indexed-asking']) {
     expect(document.querySelector(`[data-slot="palette-task"][data-run-id="${id}"] [data-slot="status-dot"]`)?.getAttribute('aria-label')).toBe('needs you')
   }
+})
+
+/**
+ * The palette's reach past every project's run-list window (#864): typed queries also ask
+ * `GET /workspace/runs-search`, so a run older than a project's newest 200 is still one search
+ * away, in that project or any other.
+ */
+describe('server search past the window', () => {
+  it('merges searched rows once each, the live row winning', () => {
+    const live = run({ id: 'mine', title: 'Mine' })
+    const merged = mergeTasks([live], 'cezar', [indexed({ id: 'shop-1', projectId: 'shop', title: 'Indexed' })], [
+      indexed({ id: 'shop-old', projectId: 'shop', title: 'Old', createdAt: '2025-01-01T00:00:00Z' }),
+      indexed({ id: 'shop-1', projectId: 'shop', title: 'Indexed' }),
+      indexed({ id: 'mine', projectId: 'cezar', title: 'Stale copy' }),
+    ])
+    expect(merged.map((task) => `${task.projectId}/${task.id}`)).toEqual(['cezar/mine', 'shop/shop-1', 'shop/shop-old'])
+    expect(merged[0]?.title).toBe('Mine')
+  })
+
+  it('turns every reference number into a keyword, with and without #', () => {
+    const keywords = referenceKeywords(run({ id: 'r', title: 't', issueNumber: 864, referencedIssueUrl: 'https://github.com/o/r/issues/864', prNumber: 870 }))
+    expect(keywords).toEqual(expect.arrayContaining(['864', '#864', '870', '#870']))
+    expect(keywords).toHaveLength(4)
+  })
+
+  it('finds another project\'s archived run older than its newest 200 by issue number', async () => {
+    renderPalette({
+      projects: [project({ id: 'cezar' }), project({ id: 'shop' })],
+      entry: '/p/cezar/',
+      extraRoutes: {
+        '/api/v1/workspace/runs-search?q=%23864': {
+          runs: [indexed({ id: 'shop-old', projectId: 'shop', title: 'Bound the lists', archived: true, issueNumber: 864, createdAt: '2025-01-01T00:00:00Z' })],
+          truncated: [],
+        },
+      },
+    })
+    openWith({ metaKey: true })
+    fireEvent.change(await screen.findByRole('combobox'), { target: { value: '#864' } })
+    await waitFor(() => expect(document.querySelector('[data-slot="palette-task"][data-run-id="shop-old"]')).not.toBeNull())
+  })
+
+  it('searches the server in a single-project cockpit too', async () => {
+    renderPalette({
+      projects: [project({ id: 'cezar' })],
+      extraRoutes: {
+        '/api/v1/workspace/runs-search?q=old': {
+          runs: [indexed({ id: 'ancient', projectId: 'cezar', title: 'An old archived task', archived: true, createdAt: '2025-01-01T00:00:00Z' })],
+          truncated: [],
+        },
+      },
+    })
+    openWith({ metaKey: true })
+    fireEvent.change(await screen.findByRole('combobox'), { target: { value: 'old' } })
+    await waitFor(() => expect(document.querySelector('[data-slot="palette-task"][data-run-id="ancient"]')).not.toBeNull())
+  })
 })

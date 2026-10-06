@@ -106,6 +106,7 @@ import type {
   RunnerModelCatalogResponse,
   RunRecord,
   RunsIndexResponse,
+  RunsSearchResponse,
   ArchivedRunsResponse,
   WorktreeEntry,
   SaveWorkflowInput,
@@ -543,6 +544,12 @@ export async function getProjectRuns(projectId: string, opts?: ReadOptions): Pro
  *  project-scoped spelling and never takes `queryScope()`. */
 export async function getRunsIndex(opts?: ReadOptions): Promise<RunsIndexResponse> {
   return unwrap(await cez.api.v1.workspace['runs-index'].$get({}, init(opts)), '/workspace/runs-index')
+}
+
+/** Every project's root runs matching `q`, archived or not (`GET /workspace/runs-search`, #864):
+ *  ⌘K's reach past each project's run-list window. Workspace-level, like the index. */
+export async function searchRuns(q: string, opts?: ReadOptions): Promise<RunsSearchResponse> {
+  return unwrap(await cez.api.v1.workspace['runs-search'].$get({ query: { q } }, init(opts)), '/workspace/runs-search')
 }
 
 export async function getRunRelationships(id: string, opts?: ReadOptions): Promise<RunRelationships> {

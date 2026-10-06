@@ -55,6 +55,7 @@ import {
   getRuns,
   getRunsIndex,
   getArchivedRuns,
+  searchRuns,
   getImportableSkills,
   getImportableSkillsWhenReady,
   getSkills,
@@ -262,6 +263,7 @@ export const workspaceQueryKeys = {
   /** The cross-project task index behind ⌘K. Workspace-led for the same reason the registry is:
    *  it answers for every project at once, so no scope owns it. */
   runsIndex: ['workspace', 'runs-index'] as const,
+  runsSearch: (q: string) => ['workspace', 'runs-search', q] as const,
   /** `~/.cezar/ui-state.json` via `GET/PUT /api/workspace/ui-state` (step 2.7) — cross-project
    *  GUI prefs, e.g. the sidebar's per-project collapse map (step 3.3), and — since step 3.5 —
    *  appearance + notifications, which describe the user rather than a repo. */
@@ -896,6 +898,25 @@ export function useArchivedRuns(q: string, enabled: boolean) {
     placeholderData: keepPreviousData,
   })
 }
+
+/**
+ * Every project's runs matching `q`, at any age (#864) — what ⌘K adds to the runs it already
+ * holds once there is something typed. Off below `MIN_RUNS_SEARCH_LENGTH` characters, which the
+ * server refuses; the previous answer stays on screen while the next one loads.
+ */
+export function useRunsSearch(q: string) {
+  const query = q.trim()
+  return useQuery({
+    queryKey: workspaceQueryKeys.runsSearch(query),
+    queryFn: ({ signal }) => searchRuns(query, { signal }),
+    enabled: query.length >= MIN_RUNS_SEARCH_LENGTH,
+    placeholderData: keepPreviousData,
+    staleTime: 10_000,
+  })
+}
+
+/** The shortest query `GET /workspace/runs-search` accepts. */
+export const MIN_RUNS_SEARCH_LENGTH = 2
 
 /**
  * Every registered project's recent tasks, slim — the ⌘K palette's cross-project finder.
