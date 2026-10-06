@@ -24,6 +24,9 @@ import * as skillsRemote from '../skills-remote.ts';
 import { RunManager, skillSystemPrompt } from './run.ts';
 import { plannedWorkflow, skillTaskSteps } from './types.ts';
 
+// A launch creates a worktree and runs git; under full-suite load that outlasts
+// vi.waitFor's 1 s default (seen failing in the #790 gate run).
+const LAUNCH_WAIT_MS = 15_000;
 const execFileAsync = promisify(execFile);
 const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
 const EXTRA_PROMPT = 'EXTRA-PROMPT-790';
@@ -142,11 +145,11 @@ describe('skill resume continuation follow-ups (#790 review)', { timeout: 20_000
     const id = terminalSkillRun(TEAM_SKILL);
 
     expect(manager.continueRun(id, { text: 'keep going' })).toEqual({ ok: true });
-    await vi.waitFor(() => expect(materialize).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(materialize).toHaveBeenCalledTimes(1), { timeout: LAUNCH_WAIT_MS });
     expect(launches).toEqual([]);
     expect(manager.cancel(id)).toBe(true);
     release(true);
-    await vi.waitFor(() => expect(!manager.isActive(id) || launches.length > 0).toBe(true));
+    await vi.waitFor(() => expect(!manager.isActive(id) || launches.length > 0).toBe(true), { timeout: LAUNCH_WAIT_MS });
     expect(launches).toEqual([]);
     expect(store.getRun(id)?.status).toBe('cancelled');
     expect(manager.isActive(id)).toBe(false);
@@ -178,7 +181,7 @@ describe('skill resume continuation follow-ups (#790 review)', { timeout: 20_000
     const id = terminalSkillRun(TEAM_SKILL);
 
     expect(manager.continueRun(id, { text: 'keep going' })).toEqual({ ok: true });
-    await vi.waitFor(() => expect(launches.length).toBeGreaterThan(0));
+    await vi.waitFor(() => expect(launches.length).toBeGreaterThan(0), { timeout: LAUNCH_WAIT_MS });
     expect(discover).toHaveBeenCalledTimes(2);
     expect(launches[0]!.spec.systemPrompt).toContain(skillSystemPrompt(skill));
     expect(store.readEvents(id).some((event) => event.type === 'lifecycle' && String(event.message).includes('is not in the skill registry'))).toBe(false);
@@ -192,7 +195,7 @@ describe('skill resume continuation follow-ups (#790 review)', { timeout: 20_000
     const id = terminalSkillRun(TEAM_SKILL);
 
     expect(manager.continueRun(id, { text: 'keep going' })).toEqual({ ok: true });
-    await vi.waitFor(() => expect(launches.length).toBeGreaterThan(0));
+    await vi.waitFor(() => expect(launches.length).toBeGreaterThan(0), { timeout: LAUNCH_WAIT_MS });
     expect(materialize).toHaveBeenCalledTimes(1);
     expect(launches[0]!.spec.systemPrompt).toContain(skillSystemPrompt(skill));
     expect(store.readEvents(id).some((event) => event.type === 'note' && String(event.message).includes(MATERIALIZED_NOTE))).toBe(false);
@@ -221,7 +224,7 @@ describe('skill resume continuation follow-ups (#790 review)', { timeout: 20_000
     }, 'a'.repeat(64), { kind: 'internal', workflowHash: workerWorkflowHash(workflowDef) });
 
     manager.enqueueOwnedRun(workerId);
-    await vi.waitFor(() => expect(launches.length).toBe(1));
+    await vi.waitFor(() => expect(launches.length).toBe(1), { timeout: LAUNCH_WAIT_MS });
     const expectedSkill = skillSystemPrompt({
       name: WORKER_SKILL,
       body: WORKER_SKILL_BODY,
@@ -237,7 +240,7 @@ describe('skill resume continuation follow-ups (#790 review)', { timeout: 20_000
     expect(['done', 'review']).toContain(store.getRun(workerId)?.status);
 
     expect(manager.continueRun(workerId, { text: 'keep going' })).toEqual({ ok: true });
-    await vi.waitFor(() => expect(launches.length).toBe(2));
+    await vi.waitFor(() => expect(launches.length).toBe(2), { timeout: LAUNCH_WAIT_MS });
     expect(launches[1]!.spec.systemPrompt).toContain(expectedSkill);
     expect(launches[1]!.spec.systemPrompt).toContain(EXTRA_PROMPT);
     expect(launches[1]!.inheritedSystemPrompt).toBe(EXTRA_PROMPT);
