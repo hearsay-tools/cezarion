@@ -160,6 +160,10 @@ const pathname = () => document.querySelector('[data-testid="location"]')?.textC
 const searchBox = () => document.querySelector<HTMLInputElement>('[data-slot="gh-search"]')!
 const hits = () => document.querySelector('[data-slot="gh-search-hits"]')
 const detail = () => document.querySelector('[data-slot="gh-detail-inner"]')
+const ROUTE_WAIT = { timeout: 5_000 }
+// Cold route loading, debounced search and navigation each have a condition to settle. The
+// outer deadline must outlast those waits, rather than racing their first five-second budget.
+const TEST_TIMEOUT = 30_000
 
 beforeEach(() => {
   vi.stubGlobal(
@@ -181,43 +185,47 @@ describe('cross-state hits stay open across a real route navigation (#730)', () 
   it('/github → /github/issues/:n keeps the clicked hit', async () => {
     stubServer('issue')
     renderApp('/github')
-    await waitFor(() => expect(searchBox()).not.toBeNull(), { timeout: 5000 })
+    // Wait for the lazy route's search input, then for the actual cross-state result link.
+    await waitFor(() => expect(searchBox()).not.toBeNull(), ROUTE_WAIT)
 
     fireEvent.change(searchBox(), { target: { value: '4507' } })
-    await waitFor(() => expect(hits()).not.toBeNull(), { timeout: 5000 })
-
-    fireEvent.click(within(hits() as HTMLElement).getByRole('link'))
-
-    // The hop actually happened…
-    await waitFor(() => expect(pathname()).toMatch(/github\/issues\/4507$/), { timeout: 5000 })
-    // …and it RECONCILED rather than remounted: the query survives, the hit is still rendered,
-    // and the detail pane shows the closed issue rather than the "not among the open" shrug.
-    await waitFor(
-      () => expect(detail()?.textContent).toContain('payment session amount drifts'),
-      { timeout: 5000 },
+    const hit = await waitFor(
+      () => within(hits() as HTMLElement).getByRole('link', { name: new RegExp(CLOSED_ISSUE.title) }),
+      ROUTE_WAIT,
     )
-    expect(searchBox().value).toBe('4507')
-    expect(hits()).not.toBeNull()
-    expect(detail()?.textContent ?? '').not.toContain('is not among the open')
-  })
+    fireEvent.click(hit)
+
+    // Wait for the destination URL AND preserved search/detail state in the same render; the
+    // detail alone already exists before the click and cannot prove the route reconciled.
+    await waitFor(() => {
+      expect(pathname()).toMatch(/github\/issues\/4507$/)
+      expect(searchBox()?.value).toBe('4507')
+      expect(within(hits() as HTMLElement).getByRole('link', { name: new RegExp(CLOSED_ISSUE.title) })).toBeTruthy()
+      expect(detail()?.textContent).toContain('payment session amount drifts')
+      expect(detail()?.textContent ?? '').not.toContain('is not among the open')
+    }, ROUTE_WAIT)
+  }, TEST_TIMEOUT)
 
   it('/github/prs → /github/prs/:n keeps the clicked hit', async () => {
     stubServer('pr')
     renderApp('/github/prs')
-    await waitFor(() => expect(searchBox()).not.toBeNull(), { timeout: 5000 })
+    // Wait for the lazy route's search input, then for the actual cross-state result link.
+    await waitFor(() => expect(searchBox()).not.toBeNull(), ROUTE_WAIT)
 
     fireEvent.change(searchBox(), { target: { value: '4507' } })
-    await waitFor(() => expect(hits()).not.toBeNull(), { timeout: 5000 })
-
-    fireEvent.click(within(hits() as HTMLElement).getByRole('link'))
-
-    await waitFor(() => expect(pathname()).toMatch(/github\/prs\/4507$/), { timeout: 5000 })
-    await waitFor(
-      () => expect(detail()?.textContent).toContain('reconcile payment-session amount'),
-      { timeout: 5000 },
+    const hit = await waitFor(
+      () => within(hits() as HTMLElement).getByRole('link', { name: new RegExp(MERGED_PR.title) }),
+      ROUTE_WAIT,
     )
-    expect(searchBox().value).toBe('4507')
-    expect(hits()).not.toBeNull()
-    expect(detail()?.textContent ?? '').not.toContain('is not among the open')
-  })
+    fireEvent.click(hit)
+
+    // The URL, query, result link and detail must survive the same navigation commit.
+    await waitFor(() => {
+      expect(pathname()).toMatch(/github\/prs\/4507$/)
+      expect(searchBox()?.value).toBe('4507')
+      expect(within(hits() as HTMLElement).getByRole('link', { name: new RegExp(MERGED_PR.title) })).toBeTruthy()
+      expect(detail()?.textContent).toContain('reconcile payment-session amount')
+      expect(detail()?.textContent ?? '').not.toContain('is not among the open')
+    }, ROUTE_WAIT)
+  }, TEST_TIMEOUT)
 })

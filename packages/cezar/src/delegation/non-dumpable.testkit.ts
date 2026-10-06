@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { readlinkSync } from 'node:fs';
 import { once } from 'node:events';
+import { createInterface } from 'node:readline';
 
 /** A real same-user Linux holder: only enumeration may be scoped by callers. */
 export async function nonDumpableHolder(cwd: string) {
@@ -13,11 +14,16 @@ for line in sys.stdin:
     print('written', flush=True)
 `], { cwd, stdio: ['pipe', 'pipe', 'pipe'] });
   const exited = once(child, 'exit');
-  await Promise.race([once(child.stdout, 'data'), exited.then(() => { throw Error('Python non-dumpable fixture exited before readiness'); })]);
+  const lines = createInterface({ input: child.stdout })[Symbol.asyncIterator]();
+  const expectLine = async (expected: string) => {
+    const line = await lines.next();
+    if (line.done || line.value !== expected) throw Error(`Expected holder acknowledgment: ${expected}`);
+  };
+  await Promise.race([expectLine('ready'), exited.then(() => { throw Error('Python non-dumpable fixture exited before readiness'); })]);
   // Assert the real kernel boundary; do not simulate EACCES.
   try { readlinkSync(`/proc/${child.pid}/cwd`); throw Error('non-dumpable cwd unexpectedly readable'); }
   catch (error) { if (!['EACCES', 'EPERM'].includes((error as NodeJS.ErrnoException).code ?? '')) { child.kill(); await exited; throw error; } }
   return { pid: child.pid!, async write() {
-    const written = once(child.stdout, 'data'); child.stdin.write('still writable\n'); await written;
+    const written = expectLine('written'); child.stdin.write('still writable\n'); await written;
   }, async close() { child.stdin.end(); await exited; } };
 }
