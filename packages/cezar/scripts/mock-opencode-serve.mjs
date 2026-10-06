@@ -24,9 +24,11 @@ function watchdogStall(prompt) {
 // response resolves immediately — every part and the closing `session.idle`
 // arrive over SSE afterwards, so a correct stream (v1 and v2 alike) must
 // take its turn-end from `session.idle`, never from the HTTP response.
+import { createHash } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
-import { dirname } from 'node:path';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 
 if (process.env.CEZ_MOCK_ARGS_FILE && process.env.OPENCODE_CONFIG_CONTENT) appendFileSync(process.env.CEZ_MOCK_ARGS_FILE, JSON.stringify({ type: 'runtime-config', config: JSON.parse(process.env.OPENCODE_CONFIG_CONTENT) }) + '\n');
 if (process.env.CEZ_MOCK_CI_PR) { const { probeCiTool } = await import('./mock-ci-tool.mjs'); await probeCiTool('opencode', JSON.parse(process.env.OPENCODE_CONFIG_CONTENT ?? '{}')); }
@@ -55,7 +57,9 @@ function sessionStorePath() {
   // Keyed on the args file, not its directory: spec-support probes and D1 share a
   // cwd and would otherwise increment ses_mock_N across unrelated launches.
   if (process.env.CEZ_MOCK_ARGS_FILE) return `${process.env.CEZ_MOCK_ARGS_FILE}.opencode-sessions.json`;
-  return null;
+  // Dry-run Continue (no args file) must resume in the same worktree: persist by cwd.
+  const key = createHash('sha256').update(process.cwd()).digest('hex');
+  return join(tmpdir(), `cez-mock-opencode-sessions-${key}.json`);
 }
 function emptySessionStore() {
   return { seq: 0, sessions: {} };
