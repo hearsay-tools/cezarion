@@ -70,6 +70,37 @@ async function prompt(id, content) {
     const { autonomousReply } = await import('./mock-autonomous.mjs');
     text(autonomousReply(input)); complete(id); return;
   }
+  if (input.includes('mock:silent-tail') || input.includes('mock:tool-tail') || input.includes('Your last turn ended without a message to the user.')) {
+    const silent = await import('./mock-silent-tail.mjs');
+    silent.noteSilentTailPrompt(input);
+    if (silent.isFinalMessageNudge(input)) {
+      const kind = silent.finalMessageNudgeKind();
+      if (kind === 'ack-only') return;
+      if (kind === 'late') await silent.sleep(silent.LATE_REPLY_MS);
+      if (kind === 'silent') update({ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: silent.SILENT_TAIL_REASONING } });
+      else {
+        if (kind === 'slow-done') {
+          text(silent.SLOW_DONE_PREFIX);
+          await silent.sleep(silent.SLOW_DONE_TAIL_MS);
+        }
+        text(kind === 'standing' ? silent.FINAL_MESSAGE_STANDING : silent.SILENT_TAIL_DONE);
+      }
+      complete(id); return;
+    }
+    if (silent.isSilentTailScenario(input)) {
+      text(silent.SILENT_TAIL_OPENING);
+      update({ sessionUpdate: 'tool_call', toolCallId: 'silent-gh', title: 'Create issue', kind: 'execute', status: 'in_progress', rawInput: { command: 'gh issue create' } });
+      update({ sessionUpdate: 'tool_call_update', toolCallId: 'silent-gh', status: 'completed', content: [{ type: 'content', content: { type: 'text', text: 'created' } }] });
+      update({ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: silent.SILENT_TAIL_REASONING } });
+      complete(id); return;
+    }
+    if (silent.isToolTailScenario(input)) {
+      text(silent.TOOL_TAIL_OPENING);
+      update({ sessionUpdate: 'tool_call', toolCallId: 'tool-tail-git', title: 'git status', kind: 'execute', status: 'in_progress', rawInput: { command: 'git status --short' } });
+      update({ sessionUpdate: 'tool_call_update', toolCallId: 'tool-tail-git', status: 'completed', content: [{ type: 'content', content: { type: 'text', text: ' M src/example.ts' } }] });
+      complete(id); return;
+    }
+  }
   if (input.includes('mock:crash-stderr')) {
     const { crashWithStderr } = await import('./mock-runner-crash.mjs');
     if (crashWithStderr(input, '{"method":"session/update","params":')) return;

@@ -314,11 +314,25 @@ const server = createServer((req, res) => {
         // Keep the portable answer HTTP request unacknowledged while its SSE turn finishes.
       } else if (autonomousCap && body.includes('Continue working autonomously until the task is fully complete.')) {
         setTimeout(() => res.end(JSON.stringify({ info: info({}), parts: [] })), 100);
+      } else if (body.includes('f7-delay-ack')) {
+        // F7: SSE turn-end before HTTP ACK so parkAfterAck applies the silent-tail nudge.
+        setTimeout(() => res.end(JSON.stringify({ info: info({}), parts: [] })), 250);
       } else {
       res.end(JSON.stringify({ info: info({}), parts: [] }));
       }
       if (body.includes('mock:autonomous-readiness-idle')) autonomousReadinessIdle = true;
       if (body.includes('mock:autonomous-cap') || body.includes('mock:autonomous-ask-cap')) autonomousCap = true;
+      if (body.includes('mock:silent-tail') || body.includes('Your last turn ended without a message to the user.')) {
+        const silent = await import('./mock-silent-tail.mjs');
+        const prompt = (() => { try { return JSON.parse(body).parts.map(part => part.text ?? '').join('\n'); } catch { return body; } })();
+        silent.noteSilentTailPrompt(prompt);
+        if (silent.isAckOnlyNudge(prompt)) {
+          const beats = setInterval(() => { if (sse) sse.write(': heartbeat\n\n'); }, 50);
+          beats.unref?.();
+          return;
+        }
+        if (silent.isLateNudge(prompt)) await silent.sleep(silent.LATE_REPLY_MS);
+      }
       if (url.endsWith('/prompt_async')) {
         currentUserId = `msg_user_${++steerSerial}`;
         const text = JSON.parse(body).parts.map(part => part.text ?? '').join('\n');
@@ -505,6 +519,42 @@ const server = createServer((req, res) => {
         send({ type: 'message.part.updated', properties: { part: { id: `autonomous-${++autonomousTurn}`, messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text', text: autonomousReply(JSON.parse(body).parts.map(part => part.text ?? '').join('\n')), time: { start: 1, end: 2 } } } });
         send({ type: 'session.idle', properties: { sessionID: SESSION_ID } });
         return;
+      }
+      if (body.includes('mock:silent-tail') || body.includes('mock:tool-tail') || body.includes('Your last turn ended without a message to the user.')) {
+        const silent = await import('./mock-silent-tail.mjs');
+        const prompt = (() => { try { return JSON.parse(body).parts.map(part => part.text ?? '').join('\n'); } catch { return body; } })();
+        silent.noteSilentTailPrompt(prompt);
+        if (silent.isFinalMessageNudge(prompt)) {
+          const kind = silent.finalMessageNudgeKind();
+          send({ type: 'message.updated', properties: { info: info({}) } });
+          if (kind === 'silent') {
+            send({ type: 'message.part.updated', properties: { part: { id: 'silent-nudge-rsn', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'reasoning', text: silent.SILENT_TAIL_REASONING, time: { start: 1, end: 2 } } } });
+          } else {
+            if (kind === 'slow-done') {
+              send({ type: 'message.part.updated', properties: { part: { id: 'silent-nudge-prefix', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text', text: silent.SLOW_DONE_PREFIX, time: { start: 1, end: 2 } } } });
+              await silent.sleep(silent.SLOW_DONE_TAIL_MS);
+            }
+            const text = kind === 'standing' ? silent.FINAL_MESSAGE_STANDING : silent.SILENT_TAIL_DONE;
+            send({ type: 'message.part.updated', properties: { part: { id: 'silent-nudge-done', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text', text, time: { start: 1, end: 2 } } } });
+          }
+          send({ type: 'session.idle', properties: { sessionID: SESSION_ID } });
+          return;
+        }
+        if (silent.isSilentTailScenario(prompt)) {
+          send({ type: 'message.updated', properties: { info: info({}) } });
+          send({ type: 'message.part.updated', properties: { part: { id: 'silent-open', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text', text: silent.SILENT_TAIL_OPENING, time: { start: 1, end: 2 } } } });
+          send({ type: 'message.part.updated', properties: { part: { id: 'silent-gh', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'tool', callID: 'call_silent_gh', tool: 'bash', state: { status: 'completed', input: { command: 'gh issue create' }, output: 'created', time: { start: 1, end: 2 } } } } });
+          send({ type: 'message.part.updated', properties: { part: { id: 'silent-rsn', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'reasoning', text: silent.SILENT_TAIL_REASONING, time: { start: 1, end: 2 } } } });
+          send({ type: 'session.idle', properties: { sessionID: SESSION_ID } });
+          return;
+        }
+        if (silent.isToolTailScenario(prompt)) {
+          send({ type: 'message.updated', properties: { info: info({}) } });
+          send({ type: 'message.part.updated', properties: { part: { id: 'tool-tail-open', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text', text: silent.TOOL_TAIL_OPENING, time: { start: 1, end: 2 } } } });
+          send({ type: 'message.part.updated', properties: { part: { id: 'tool-tail-git', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'tool', callID: 'call_tool_tail', tool: 'bash', state: { status: 'completed', input: { command: 'git status --short' }, output: ' M src/example.ts', time: { start: 1, end: 2 } } } } });
+          send({ type: 'session.idle', properties: { sessionID: SESSION_ID } });
+          return;
+        }
       }
       // #401: one completed text snapshot, without an earlier streaming part.
       if (body.includes('mock:ask-snapshot')) {
