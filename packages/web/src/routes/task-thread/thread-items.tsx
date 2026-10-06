@@ -303,6 +303,10 @@ function withoutMarkdownImages(source: string): string {
   return source.replace(/!\[[^\]]*\]\([^)\s]*(?:\s+"[^"]*")?\)/g, ' ')
 }
 
+function visibleLinkLabel(raw: string): string {
+  return raw.replace(/[*_~`]+/g, '')
+}
+
 function isSafeHref(href: string): boolean {
   const trimmed = href.trim()
   if (trimmed === '' || trimmed.startsWith('#')) return true
@@ -322,13 +326,13 @@ function markdownLinks(source: string): { label: string, href: string }[] {
   const re = /(?<!!)\[([^\]]+)\](?:\(([^)\s]+)(?:\s+"[^"]*")?\)|\[([^\]]*)\])|<(https?:\/\/[^>\s]+)>|(https?:\/\/[^\s<]+)/g
   for (const match of body.matchAll(re)) {
     if (match[2]) {
-      if (isSafeHref(match[2])) links.push({ label: match[1]!, href: match[2] })
+      if (isSafeHref(match[2])) links.push({ label: visibleLinkLabel(match[1]!), href: match[2] })
       continue
     }
     if (match[1] !== undefined && match[3] !== undefined) {
       const id = (match[3].length > 0 ? match[3] : match[1]).toLowerCase()
       const href = defs.get(id)
-      if (href) links.push({ label: match[1]!, href })
+      if (href) links.push({ label: visibleLinkLabel(match[1]!), href })
       continue
     }
     const href = match[4] ?? match[5]

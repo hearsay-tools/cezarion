@@ -668,6 +668,20 @@ describe('AssistantMessage copy actions', () => {
     expect(html).not.toMatch(/trap\.example/)
   })
 
+  it('matches a link whose markdown label has emphasis', async () => {
+    const source = 'See [**docs**](https://example.com).'
+    const write = vi.fn(async () => {})
+    vi.stubGlobal('ClipboardItem', class ClipboardItem {
+      constructor(public items: Record<string, Blob>) {}
+    })
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { write, writeText: vi.fn() } })
+    render(<MemoryRouter><AssistantMessage text={source} /></MemoryRouter>)
+    fireEvent.click(copyButton())
+    await waitFor(() => expect(write).toHaveBeenCalled())
+    const html = await writtenItem(write).items['text/html']!.text()
+    expect(html).toMatch(/<a[^>]+href="https:\/\/example\.com"/)
+  })
+
   it('does not restore a javascript: destination into copied HTML', async () => {
     const source = "See [click](javascript:location.href='https://attacker.example') and [docs](https://example.com)."
     const write = vi.fn(async () => {})
