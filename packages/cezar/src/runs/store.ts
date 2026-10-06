@@ -1902,6 +1902,27 @@ export class RunStore extends EventEmitter {
     };
   }
 
+  /**
+   * The ROOT runs, archived or not, that match `query` (`matchesRunQuery`), newest first: at most
+   * `limit`, and whether more matched. The owned half of the workspace search (#864); held runs
+   * match by their record.
+   */
+  searchRunSummaries(query: string, limit: number): { runs: RunSummary[]; truncated: boolean } {
+    const matched = new Map<string, readonly [RunSummary, ListOrder]>();
+    for (const row of this.db?.searchRootSummaries(sqlPrefilterTokens(query)) ?? []) {
+      if (this.deleted.has(row.id) || this.held.has(row.id) || this.unreadable.has(row.id)) continue;
+      const summary = parseStoredSummary(row.summary) ?? this.coldSummary(row.id);
+      if (summary && matchesRunQuery(summary, query)) matched.set(row.id, [summary, row]);
+    }
+    for (const [id, run] of this.held) {
+      if (run.delegation?.role === 'worker') continue;
+      const summary = toRunSummary(run);
+      if (matchesRunQuery(summary, query)) matched.set(id, [summary, this.listOrder(run)]);
+    }
+    const runs = sortNewestFirst(matched.values());
+    return { runs: runs.slice(0, limit), truncated: runs.length > limit };
+  }
+
   /** A row whose stored summary does not fit the contract any more, projected from its record. */
   private coldSummary(id: string): RunSummary | undefined {
     const run = this.loadCold(id);

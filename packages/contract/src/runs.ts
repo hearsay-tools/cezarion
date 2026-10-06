@@ -596,18 +596,38 @@ export const archivedRunsResponseSchema = z.object({
 export type ArchivedRunsResponse = z.infer<typeof archivedRunsResponseSchema>;
 
 export const runsIndexResponseSchema = z.object({
-  /** Newest first, across every registered project. Archived runs are included — `GET /runs`
-   *  carries them for the project you are standing in, and a finder that dropped them elsewhere
-   *  would make a task vanish the moment you left its project. */
+  /** Newest first, across every registered project: each project's window (#864) — every
+   *  unarchived run, plus its newest `perProjectLimit` archived root runs. Older archived runs are
+   *  reached through `GET /workspace/runs-search`. */
   runs: z.array(runIndexEntrySchema),
   /** Additive: absent statuses mean "nothing warm", never "nothing to show". */
   referenceStatuses: referenceStatusesByProjectSchema,
-  /** The per-project cap that produced this list. */
+  /** How many archived root runs each project contributes at most. Unarchived runs are never cut. */
   perProjectLimit: z.number(),
-  /** Ids of the projects that had more runs than the cap allowed. */
+  /** Ids of the projects that had more archived root runs than `perProjectLimit`. */
   truncated: z.array(z.string()),
 });
 export type RunsIndexResponse = z.infer<typeof runsIndexResponseSchema>;
+
+/** The most matches `GET /workspace/runs-search` answers per project (#864), and its default. */
+export const RUNS_SEARCH_PER_PROJECT_MAX = 50;
+
+/** `GET /workspace/runs-search` (#864): ⌘K's reach past each project's run-list window. */
+export const runsSearchQuerySchema = z.object({
+  /** Every whitespace-separated token must match (`matchesRunQuery`). At least two characters:
+   *  one matches nearly every run. */
+  q: z.string().trim().min(2),
+  limit: z.coerce.number().int().min(1).max(RUNS_SEARCH_PER_PROJECT_MAX).optional(),
+});
+export type RunsSearchQuery = z.infer<typeof runsSearchQuerySchema>;
+
+export const runsSearchResponseSchema = z.object({
+  /** Root runs, archived or not, newest first across every registered project. */
+  runs: z.array(runIndexEntrySchema),
+  /** Ids of the projects that had more matches than `limit`. */
+  truncated: z.array(z.string()),
+});
+export type RunsSearchResponse = z.infer<typeof runsSearchResponseSchema>;
 
 // ---- mutation responses ------------------------------------------------------------------
 
