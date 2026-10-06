@@ -22,6 +22,7 @@ const captured = vi.hoisted(() => ({ specs: [] as AgentRunSpec[] }));
 vi.mock('../core/runner-factory.ts', () => ({
   createRunner: () => ({
     backend: 'claude' as const,
+    systemPromptOnResume: 'resent' as const,
     run: async () => ({ text: '', toolCalls: [], tokensUsed: 0 }),
     startSession: (spec: AgentRunSpec) => {
       captured.specs.push(spec);

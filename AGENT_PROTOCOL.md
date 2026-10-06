@@ -58,6 +58,7 @@ interface AgentRunner {
   run(spec: AgentRunSpec, onEvent?: (e: AgentEvent) => void): Promise<AgentRunResult>;
   startSession(spec: AgentRunSpec, onEvent?: (e: AgentEvent) => void, opts?: SessionOptions): AgentSession;
   interrupt(): Promise<void>;
+  readonly systemPromptOnResume: 'resent' | 'in-thread'; // required (hearsay-tools/cezarion#790)
   readonly inputDelivery?: InputDelivery; // absent = boundary (hearsay-tools/cezarion#505)
 }
 interface InputDelivery {
@@ -68,6 +69,25 @@ interface InputDelivery {
 ```
 
 - `run()` is a one-shot convenience; `startSession()` is the real contract.
+- `systemPromptOnResume` is required (hearsay-tools/cezarion#790). `resent` means every
+  session/process delivers `spec.systemPrompt` again, so Continue must resend a selected
+  skill's playbook; `in-thread` means the opening turn prepended it into resumed history,
+  so the same-session resume must not. The flag is the caller's dedupe policy for the
+  skill prefix, not a statement that in-thread runners ignore `systemPrompt` on resume:
+  Codex, Cursor and OpenCode still re-prepend the whole `spec.systemPrompt` (extra prompt +
+  handoff) on every resumed opening turn. Per harness, verified live: Claude `--resume`
+  keeps the launch `--append-system-prompt` and ignores new flags (resending is harmless,
+  `resent` stays the safe declaration; changed extra/delegation/artifact/handoff
+  instructions never reach a resumed session); Pi `--session` *replaces* stored prompt
+  sections with the new flags (resend required — a resumed skill task lacks the playbook
+  unless the caller sends it); OpenCode and Codex/Cursor carry it in the thread. OMP was
+  not live-verified (not installed here) and is declared `resent` as the safe value.
+  claude, pi and omp are `resent`; opencode, codex and cursor are `in-thread`. A backend
+  switch with no `sessionId` still sends the skill. OpenCode Continue GETs `/session/{id}`;
+  a 404 opens one fresh session with `resumeFallbackSystemPrompt` (the skill-inclusive
+  composition Continue omitted from `systemPrompt`). When the continued skill is also
+  missing from the registry, that fallback session gets no skill and only the
+  lost-session notice is shown.
 - Each backend runs as a **persistent process** so multi-turn follow-ups,
   `waiting`, interrupt and resume all work: claude = stream-json over
   stdin/stdout; codex = `codex app-server` JSON-RPC 2.0 (JSONL) over
@@ -900,6 +920,23 @@ parked run waiting, and a restart still answers it. R51: adopting a dead owner's
 middle of a turn starts no agent, and Continue resumes it. R52: Stop on a dead owner's run in
 the middle of a turn ends it as cancelled and starts no agent. No runner is exempt.
 
+**R53–R57** (hearsay-tools/cezarion#790), in `core/skill-resume-parity.test.ts`, drive every
+`RUNNER_IDS` backend through its native `HARNESS_ADAPTERS` wire on a skill-driven task.
+R53: a live Continue resends `skillSystemPrompt` before the extra prompt on `resent`
+runners (claude, pi, omp) and does not duplicate it on an `in-thread` same-session resume
+(codex, cursor, opencode). R54: a continuation persisted as `running` or `queued` is resumed
+by `recover()` on a new manager (the boot funnel), and that recovered spawn matches the
+Continue prompt. R55: a skill removed from the registry before Continue keeps today's
+extra-only prompt and emits exactly one lifecycle warning on `resent` runners; `in-thread`
+resumes skip the warning because they would not resend the skill. R56: each runner's
+required `systemPromptOnResume` declaration matches its resume wire (`--append-system-prompt`
+/ prepend on every process versus `thread/resume`, `session/load`, or OpenCode `GET
+/session/{id}` into history). R57: Continue and restart recovery reuse the recorded session
+id (OpenCode GETs `/session/{id}` and does not `POST /session`; the other runners use their
+resume channel). A fresh-session continuation on an `in-thread` runner still receives the
+skill. OpenCode's lost-session 404 fallback is covered alongside R57: one notice, a new
+session id, skill present in the fresh session's system prompt. No runner is exempt.
+
 Crash-diagnostic rows **S15–S17** (hearsay-tools/cezarion#499) drive every `RUNNER_IDS` adapter's
 native transport through an uncaught-exception-shaped stderr fixture, a plain
 single-line failure, and a clean/requested shutdown with stderr. RPC mocks send
@@ -1289,7 +1326,7 @@ accepted identity, empty grants and distinct per-session delegation credentials.
 | --- | --- | --- |
 | Claude Code 2.1.260 | `--disallowedTools Agent,Task` | `claude --help` documents the deny flag; installed `sdk-tools.d.ts` names `AgentInput`. `Task` covers the legacy name in recorded fixtures. Other tools and permission modes are preserved. |
 | Codex 0.153.4 | `thread/start` and `thread/resume` `config: { "features.multi_agent": false, "features.multi_agent_v2": false }` | `codex features list` names both flags; `codex --help` documents dotted config overrides; `codex app-server generate-json-schema` confirms both request config fields. Existing sandbox, approval, account and model settings remain unchanged. |
-| OpenCode 1.18.29 | `POST /session` `permission: [{ permission: "task", pattern: "*", action: "deny" }]` | Installed server `/doc` declares `PermissionRuleset`; its embedded `TaskTool.execute` checks `task`. Later prompt requests contain no `tools` map that would replace session rules. The current adapter creates a fresh session on Continue, so the deny applies there too. It still does not map general `allowedTools`. |
+| OpenCode 1.18.33 | `POST /session` `permission: [{ permission: "task", pattern: "*", action: "deny" }]` on a fresh session; `PATCH /session/{id}` `permission` on resume when that deny is absent (installed `/doc` `session.update` accepts `PermissionRuleset`) | Installed server `/doc` declares `PermissionRuleset`; its embedded `TaskTool.execute` checks `task`. Live 1.18.33: `PATCH` with `{permission:[X]}` **appends** X (no replace, no dedupe); a title-only PATCH leaves permission alone; GET returns the session including `permission`. The deny therefore persists on the session once added — a later unrestricted Continue cannot remove it (fails closed). Continue GETs `/session/{id}` and PATCHes the deny only when `restrictNativeDelegation` is set and the rule is not already present; a 404 fallback POSTs a fresh session with the same rule. It still does not map general `allowedTools`. |
 | Cursor 2026.09.15-d2fe57e | `initialize.clientCapabilities._meta.subagents = false` | Installed `src/acp/agent.ts` negotiates native delegation from this capability; `src/acp/session.ts` passes it to the agent. Ordinary runs advertise `true`; start and Continue use the same handshake. Custom tools and unrestricted shell remain outside hard isolation. |
 | OMP 18.4.11 | `--config` overlay `tools.approval.task: deny`, plus `task`, `wait` and `eval` left out of `--tools` | OMP's user `deny` is absolute in every approval mode (`approval-mode.md`). OMP has no `--exclude-tools`, and no setting disables `eval`'s `agent()`/`workpool()` helpers, so `eval` is dropped from the list. With no workflow `allowedTools`, D1 passes an explicit list (OMP's default set minus those three) instead of no `--tools`, failing closed. Verified with `get_state.dumpTools` on the real binary. |
 | pi 0.85.1 | `--exclude-tools subagent` | Installed `pi --help` applies exclusions to built-in/extension/custom names; the shipped `examples/extensions/subagent/index.ts` registers `subagent`. Other extension discovery and ordinary tool settings remain unchanged. |
@@ -1430,6 +1467,16 @@ To be first-class:
    backend has no native system-prompt channel — and declare `specSupport` (§1):
    every field, honored with its channel or dropped with the wire reason. The §7
    spec-support rows hold the declaration against the mock's recording. Declare
+   `systemPromptOnResume` (§1, hearsay-tools/cezarion#790): `resent` when every
+   session/process delivers `spec.systemPrompt` again (so Continue must resend a
+   skill playbook — Claude keeps the launch prompt and ignores new flags, so changed
+   extra/delegation/artifact/handoff instructions never reach a resumed session; Pi
+   replaces stored sections with the new flags; OMP was not live-verified and is
+   declared `resent` as the safe value), `in-thread` when the opening turn prepended
+   it into resumed history (OpenCode, Codex, Cursor). The flag is the caller's
+   skill-prefix dedupe policy — in-thread runners still re-prepend the whole
+   `spec.systemPrompt` (extra prompt + handoff) on every resumed opening turn. Required
+   — a new runner fails to compile until it decides. Declare
    `inputDelivery` (§1) from a live probe of mid-turn input, and pass the §7 I1/I2
    rows or declare their exemption.
 2. **Factory** — add the id to `RunnerId` / `RUNNER_IDS` (`agent-runner.ts`) and

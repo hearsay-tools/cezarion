@@ -79,6 +79,13 @@ export interface AgentRunSpec {
    * picks up the on-disk conversation (used by "Continue" after a run ends).
    */
   resume?: boolean;
+  /**
+   * Full system prompt (skill + extra + handoff) used only when an in-thread
+   * resume cannot reopen the stored session and the runner falls back to a
+   * fresh one. Continue omits the skill from `systemPrompt` on in-thread
+   * resumes; this carries it for that fallback. Absent on resent runners.
+   */
+  resumeFallbackSystemPrompt?: string;
 }
 
 /**
@@ -102,6 +109,7 @@ const AGENT_RUN_SPEC_FIELD_SET: Readonly<Record<keyof AgentRunSpec, true>> = {
   timeoutMs: true,
   sessionId: true,
   resume: true,
+  resumeFallbackSystemPrompt: true,
 };
 export type AgentRunSpecField = keyof AgentRunSpec;
 export const AGENT_RUN_SPEC_FIELDS = Object.keys(AGENT_RUN_SPEC_FIELD_SET) as readonly AgentRunSpecField[];
@@ -303,10 +311,36 @@ export function inputDeliveryOf(runner: Pick<AgentRunner, 'inputDelivery'>): Inp
   return runner.inputDelivery ?? BOUNDARY_INPUT_DELIVERY;
 }
 
+/**
+ * How this runner delivers `spec.systemPrompt` across session/process boundaries (#790).
+ *
+ * - `resent`: every session/process receives `spec.systemPrompt` again. Claude
+ *   `--resume` keeps the launch `--append-system-prompt` and ignores new flags
+ *   (resending is harmless; changed extra/delegation/artifact/handoff
+ *   instructions never reach a resumed session). Pi `--session` *replaces*
+ *   stored prompt sections with the new flags, so resend is required — a
+ *   resumed skill task lacks the playbook unless the caller sends it. OMP was
+ *   not live-verified (not installed here) and is declared `resent` as the
+ *   safe value.
+ * - `in-thread`: the system prompt was prepended into the opening turn and is
+ *   part of the resumed thread's history (OpenCode, Codex, Cursor). Re-sending
+ *   the skill on the same session duplicates it; a fresh-session continuation
+ *   (no `sessionId`, or OpenCode's lost-session fallback) still needs it.
+ *
+ * The flag is the caller's dedupe policy for the skill prefix, not a statement
+ * that in-thread runners ignore `systemPrompt` on resume. Codex, Cursor and
+ * OpenCode still re-prepend the whole `spec.systemPrompt` (extra prompt + handoff)
+ * on every resumed opening turn; Continue omits only the skill prefix on a
+ * same-session in-thread resume.
+ */
+export type SystemPromptOnResume = 'resent' | 'in-thread';
+
 export interface AgentRunner {
   readonly backend: AgentBackend;
   /** Which `AgentRunSpec` fields this runner honors, and how — see `AgentRunSpecSupport`. */
   readonly specSupport: AgentRunSpecSupport;
+  /** How this runner carries `spec.systemPrompt` onto a resumed session (#790). Required. */
+  readonly systemPromptOnResume: SystemPromptOnResume;
   /** How non-human input is admitted while a turn runs; absent means `boundary` (#505). */
   readonly inputDelivery?: InputDelivery;
   run(spec: AgentRunSpec, onEvent?: (event: AgentEvent) => void): Promise<AgentRunResult>;

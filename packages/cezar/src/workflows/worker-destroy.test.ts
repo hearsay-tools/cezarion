@@ -228,7 +228,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
       }
       return append(id, event);
     });
-    vi.spyOn(runners, 'createRunner').mockReturnValue({ backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT, interrupt: async () => undefined,
+    vi.spyOn(runners, 'createRunner').mockReturnValue({ backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT, systemPromptOnResume: 'resent', interrupt: async () => undefined,
       run: async () => { throw Error('unused'); }, startSession: () => {
         expect(manager.deferMessage(w.id, [{ type: 'text', text: 'buffered during startup' }])).toBe(true);
         return { pid: child.pid, result: closed, open: true, sendMessage: () => true, sendAgentMessage: () => Promise.resolve(), discardQueuedMessages: () => {},
@@ -252,7 +252,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
 
   it.each(['live', 'parked'])('%s ignored SIGTERM and concurrent stop waiters cannot mistake cancelled/killed for exit', async phase => {
     const w = await worker(); let child: ReturnType<typeof spawn> | undefined; let ready = false;
-    vi.spyOn(runners, 'createRunner').mockReturnValue({ backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT, interrupt: async () => undefined, run: async () => { throw Error('unused'); }, startSession: (_spec, emit) => {
+    vi.spyOn(runners, 'createRunner').mockReturnValue({ backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT, systemPromptOnResume: 'resent', interrupt: async () => undefined, run: async () => { throw Error('unused'); }, startSession: (_spec, emit) => {
       child = spawn(process.execPath, ['-e', "process.on('SIGTERM',()=>{}); console.log('ready'); setInterval(()=>{},1000)"], { stdio: ['ignore', 'pipe', 'pipe'] });
       child.stdout!.once('data', () => { ready = true; if (phase === 'parked') emit?.({ type: 'turn-end' }); });
       const result = new Promise<never>((_resolve, reject) => child!.once('close', () => reject(Error('stopped'))));
@@ -279,7 +279,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
 
   it.each(['running', 'waiting', 'queued', 'failed', 'cancelled'] as const)('refuses %s recovery and Continue over a surviving prior process, then refuses real destroy', async status => {
     const w = await worker(); let child: ReturnType<typeof spawn> | undefined; let ready = false; let launches = 0;
-    vi.spyOn(runners, 'createRunner').mockReturnValue({ backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT, interrupt: async () => undefined,
+    vi.spyOn(runners, 'createRunner').mockReturnValue({ backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT, systemPromptOnResume: 'resent', interrupt: async () => undefined,
       run: async () => { throw Error('unused'); }, startSession: () => {
         if (++launches > 1) return { result: Promise.resolve({ text: '', toolCalls: [], tokensUsed: 0 }), open: false,
           sendMessage: () => false, sendAgentMessage: () => false, discardQueuedMessages: () => {}, interrupt() {}, end() {} };
@@ -397,7 +397,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     await until(() => ['done', 'review'].includes(store.getRun(done.id)!.status));
     expect(await manager.awaitRunTermination(done.id, 15_000)).toBe(true);
     const failure = await worker();
-    const runnerSpy = vi.spyOn(runners, 'createRunner').mockReturnValue({ backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT, interrupt: async () => undefined, run: async () => { throw Error('unused'); }, startSession: () => { throw Error('startup failed'); } });
+    const runnerSpy = vi.spyOn(runners, 'createRunner').mockReturnValue({ backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT, systemPromptOnResume: 'resent', interrupt: async () => undefined, run: async () => { throw Error('unused'); }, startSession: () => { throw Error('startup failed'); } });
     manager.enqueueOwnedRun(failure.id); await until(() => store.getRun(failure.id)?.status === 'failed');
     expect(await manager.awaitRunTermination(failure.id, 15_000)).toBe(true);
     runnerSpy.mockRestore();
@@ -535,7 +535,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     manager.requestWorkerStop(w.id); expect(await manager.awaitRunTermination(w.id, 15_000)).toBe(true);
     vi.useFakeTimers(); releases.push(() => vi.useRealTimers());
     const saves = vi.spyOn(worktrees, 'autosaveCommit');
-    vi.spyOn(runners, 'createRunner').mockReturnValue({ backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT, interrupt: async () => undefined,
+    vi.spyOn(runners, 'createRunner').mockReturnValue({ backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT, systemPromptOnResume: 'resent', interrupt: async () => undefined,
       run: async () => { throw Error('unused'); }, startSession: () => { throw Error('startup failed'); } });
     expect(manager.continueRun(w.id, { text: 'mock:hold' }).ok).toBe(true);
     await until(() => !manager.isActive(w.id));
@@ -590,7 +590,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     async function crashed(status: RunRecord['status'] = 'running') {
       const w = await worker(); let first: Awaited<ReturnType<typeof spawnReady>> | undefined; let launches = 0; let ready!: () => void;
       const started = new Promise<void>(resolve => { ready = resolve; });
-      vi.spyOn(runners, 'createRunner').mockReturnValue({ backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT, interrupt: async () => undefined,
+      vi.spyOn(runners, 'createRunner').mockReturnValue({ backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT, systemPromptOnResume: 'resent', interrupt: async () => undefined,
         run: async () => { throw Error('unused'); }, startSession: () => {
           if (++launches > 1) return { result: Promise.resolve({ text: 'resumed', toolCalls: [], tokensUsed: 0 }), open: false,
             sendMessage: () => false, sendAgentMessage: () => false, discardQueuedMessages: () => {}, interrupt() {}, end() {} };

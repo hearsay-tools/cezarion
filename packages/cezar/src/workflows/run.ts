@@ -69,7 +69,7 @@ import {
 import type { AgentEvent, ContentBlock, InputDelivery } from '../core/agent-runner.ts';
 import { inputDeliveryOf } from '../core/agent-runner.ts';
 import { discoverSkills, type Skill } from '../skills.ts';
-import { materializeSkillDir } from '../skills-remote.ts';
+import { materializeSkillDir, waitForTeamSkills } from '../skills-remote.ts';
 import { seedAgentConfigLocalLayer } from '../agent-config/seed.ts';
 import { readAgentModelSettings, readAgentModelProvider } from '../agent-config/models.ts';
 import { loadConfig, resolveWorktreeRetention } from '../config.ts';
@@ -5742,6 +5742,55 @@ export class RunManager {
       effort: continueEffort, agentProfile: continueProfile.profileId, accountBinding: continueProfile.accountBinding,
       systemPrompt: record?.systemPrompt, allowedTools: grants.allowedTools, bashAllowlist: grants.bashAllowlist };
     const runner = createRunner(continueBackend);
+    // Re-expand the continued step's skill from the current registry (#790) BEFORE
+    // provisionSession. `await materializeSkillDir` used to sit after the pre-launch
+    // revalidation, so Stop during that await still launched with revoked tools.
+    // `record.systemPrompt` is only the extra prompt; the opening session put
+    // `skillSystemPrompt(skill)` in front. Skip that prefix only when this
+    // session resumes into its own thread on an in-thread runner — those
+    // already carry the playbook in history. A missing skill degrades to
+    // today's extra-only prompt with one lifecycle warning; in-thread skips
+    // do not warn. Workers still inherit only the extra prompt (#778).
+    const skipSkillOnResume = sessionId !== undefined && runner.systemPromptOnResume === 'in-thread';
+    let continuationSkillPrompt: string | undefined;
+    let fallbackSkillPrompt: string | undefined;
+    const continuedSkillName = toolsStep?.skill;
+    if (continuedSkillName) {
+      let skill = (state.skills ?? []).find((candidate) => candidate.name === continuedSkillName);
+      if (!skill) {
+        // Boot recovery can outrun the async team-skills cache (`getTeamSkillsCached`
+        // returns [] until `initialTeamSkillsLoad` resolves). Wait briefly, then
+        // re-discover; never hang Continue on the network.
+        try {
+          let timeout: ReturnType<typeof setTimeout> | undefined;
+          await Promise.race([
+            waitForTeamSkills(this.repoRoot).catch(() => undefined),
+            new Promise<void>((resolve) => {
+              timeout = setTimeout(resolve, 1_500);
+              timeout.unref?.();
+            }),
+          ]).finally(() => { if (timeout !== undefined) clearTimeout(timeout); });
+          state.skills = await discoverSkills(this.repoRoot).catch(() => state.skills ?? []);
+          skill = (state.skills ?? []).find((candidate) => candidate.name === continuedSkillName);
+        } catch {
+          // Best-effort — a slow or failing team-skills load must not fail Continue.
+        }
+      }
+      if (skill) {
+        const playbook = skillSystemPrompt(skill);
+        if (skipSkillOnResume) fallbackSkillPrompt = playbook;
+        else continuationSkillPrompt = playbook;
+        if (skill.source === 'team' && skill.team?.dir) {
+          // Rematerialize into a #483 rematerialized worktree; do not note it on Continue.
+          await materializeSkillDir(state.cwd, skill).catch(() => false);
+        }
+      } else if (!skipSkillOnResume) {
+        this.store.appendEvent(runId, {
+          type: 'lifecycle',
+          message: `skill /${continuedSkillName} is not in the skill registry — its instructions were not re-sent to the continued session`,
+        });
+      }
+    }
     state.currentStepId = stepId;
     this.beginUsageInvocation(runId, state, stepId);
     // A continuation's opening message becomes the session's `userPrompt` and never passes
@@ -5773,17 +5822,23 @@ export class RunManager {
     }
     state.inputDelivery = inputDeliveryOf(runner); state.unreadInputIds = new Set(); state.consumedBeforeAck = new Set();
     try {
+    const continuationTail = composeSystemPrompt(
+      record?.systemPrompt,
+      delegation?.instructions,
+      artifactInstructions(continueProfile.env.CEZ_ARTIFACTS_DIR),
+      generateFollowups ? HANDOFF_INSTRUCTIONS : HANDOFF_ONLY_INSTRUCTIONS,
+    );
     session = startManagedSession(runner,
       {
-        // The Continue step is a fresh agent session on the same run — the
-        // run's extra system prompt (already resolved at execute time and
-        // echoed on the record) rides along with the handoff contract.
-        systemPrompt: composeSystemPrompt(
-          record?.systemPrompt,
-          delegation?.instructions,
-          artifactInstructions(continueProfile.env.CEZ_ARTIFACTS_DIR),
-          generateFollowups ? HANDOFF_INSTRUCTIONS : HANDOFF_ONLY_INSTRUCTIONS,
-        ),
+        // Skill body (when resent), then the run's extra system prompt, then
+        // the handoff contract — the same order as the opening session (#790).
+        // In-thread resume omits the skill from systemPrompt; OpenCode's 404
+        // fallback uses resumeFallbackSystemPrompt so the fresh session still
+        // gets the playbook.
+        systemPrompt: composeSystemPrompt(continuationSkillPrompt, continuationTail),
+        ...(skipSkillOnResume ? {
+          resumeFallbackSystemPrompt: composeSystemPrompt(fallbackSkillPrompt, continuationTail),
+        } : {}),
         userPrompt: attachments.length
           ? `${openingPrompt}\n\n${pastedAttachmentsText(attachments)}`
           : openingPrompt,
