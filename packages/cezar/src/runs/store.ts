@@ -481,6 +481,11 @@ function sleepSync(ms: number): void {
 
 const MAX_RUNS_KEPT = 300;
 
+/** How many archived root runs the run lists carry per project (#864): `GET /run-summaries?archived=recent`
+ *  and `GET /workspace/runs-index`. Unarchived runs are never cut; older archived runs page in
+ *  through `GET /run-summaries/archived` and the workspace search. */
+export const ARCHIVED_WINDOW = 200;
+
 const PR_URL_RE = /https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/\d+/;
 const ISSUE_URL_RE = /https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/issues\/\d+/;
 // The transcript auto-link is convenience only (the cockpit's own `gh pr create` path sets the
@@ -1794,26 +1799,39 @@ export class RunStore extends EventEmitter {
   /**
    * Every run as its list row, newest first: the stored `summary` column, with each held run's
    * own projection laid over it — a debounced save keeps memory up to 300 ms ahead of the row,
-   * and a run created since the last save has no row yet. With `limit`, the newest `limit` rows
-   * and whether older ones were left out. `usage` is the caller's to attach.
+   * and a run created since the last save has no row yet. `usage` is the caller's to attach.
+   *
+   * With `archivedWindow` (#864), the window the cockpit's lists read: every unarchived run, plus
+   * the newest `archivedWindow` archived ROOT runs, and whether older archived roots were left
+   * out. Archived workers are never in it (see `RunDatabase.listWindowSummaries`). A held run
+   * lists by its record, so one archived or unarchived since the last save is ranked as it is now.
    *
    * A row this store found unreadable is left out, as the cold reader leaves out a row it had to
    * decode and could not. A finished row nobody has decoded is served from its summary by both,
    * which decodes nothing; reading it is what finds out (`isUnreadable`).
    */
-  listRunSummaries(options: { limit?: number } = {}): { runs: RunSummary[]; truncated: boolean } {
-    const { limit } = options;
-    const rows = this.db?.listSummaries(limit === undefined ? {} : { limit: limit + 1 + this.deleted.size + this.unreadable.size }) ?? [];
+  listRunSummaries(options: { archivedWindow?: number } = {}): { runs: RunSummary[]; truncated: boolean } {
+    const { archivedWindow } = options;
+    // Every skipped row may be an archived root, so ask for that many more: one past the window
+    // after skipping is how "older ones were left out" is known without counting them.
+    const rows = (archivedWindow === undefined
+      ? this.db?.listSummaries()
+      : this.db?.listWindowSummaries(archivedWindow + 1 + this.deleted.size + this.unreadable.size + this.held.size)) ?? [];
     const summaries = new Map<string, readonly [RunSummary, ListOrder]>();
     for (const row of rows) {
       if (this.deleted.has(row.id) || this.held.has(row.id) || this.unreadable.has(row.id)) continue;
       const summary = parseStoredSummary(row.summary) ?? this.coldSummary(row.id);
       if (summary) summaries.set(row.id, [summary, row]);
     }
-    for (const [id, run] of this.held) summaries.set(id, [toRunSummary(run), this.listOrder(run)]);
+    for (const [id, run] of this.held) {
+      if (archivedWindow !== undefined && run.archived && run.delegation?.role === 'worker') continue;
+      summaries.set(id, [toRunSummary(run), this.listOrder(run)]);
+    }
     const runs = sortNewestFirst(summaries.values());
-    if (limit === undefined || runs.length <= limit) return { runs, truncated: false };
-    return { runs: runs.slice(0, limit), truncated: true };
+    if (archivedWindow === undefined) return { runs, truncated: false };
+    let archived = 0;
+    const kept = runs.filter((run) => !run.archived || ++archived <= archivedWindow);
+    return { runs: kept, truncated: archived > archivedWindow };
   }
 
   /** A row whose stored summary does not fit the contract any more, projected from its record. */

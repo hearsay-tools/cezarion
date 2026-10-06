@@ -297,13 +297,15 @@ describe('list rows', () => {
     }
   });
 
-  it('cap at a limit and say so', () => {
-    const runs = Array.from({ length: 4 }, () => record());
-    seedRuns(dataDir, runs);
+  it('cap archived roots at the window and say so, never unarchived runs', () => {
+    const archived = Array.from({ length: 4 }, () => record({ archived: true }));
+    const active = record();
+    seedRuns(dataDir, [active, ...archived]);
     const store = open();
-    expect(store.listRunSummaries({ limit: 3 })).toMatchObject({ truncated: true });
-    expect(store.listRunSummaries({ limit: 3 }).runs.map((row) => row.id)).toEqual(runs.slice(1).reverse().map((run) => run.id));
-    expect(store.listRunSummaries({ limit: 4 }).truncated).toBe(false);
+    expect(store.listRunSummaries({ archivedWindow: 3 })).toMatchObject({ truncated: true });
+    expect(store.listRunSummaries({ archivedWindow: 3 }).runs.map((row) => row.id))
+      .toEqual([active, ...archived.slice(1).reverse()].map((run) => run.id));
+    expect(store.listRunSummaries({ archivedWindow: 4 }).truncated).toBe(false);
   });
 
   it('list only the live set from listRuns', () => {

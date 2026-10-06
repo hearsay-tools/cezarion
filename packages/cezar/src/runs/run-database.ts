@@ -422,8 +422,22 @@ const ROW_COLUMNS = 'seq, id, created_at, finished_at, status, archived, live, p
 /** Newest first, runs created in the same millisecond in insertion order (`seq`): the one order
  *  every list read uses. */
 const NEWEST_FIRST = 'ORDER BY created_at DESC, seq';
+/** The columns a list row reads, without the record. */
+const SUMMARY_SELECT = 'SELECT seq, id, created_at, revision, summary FROM runs';
+/** An archived run that is not an owned worker: what the run lists' archived window counts (#864). */
+const ARCHIVED_ROOT = 'archived = 1 AND parent_run_id IS NULL';
 
 type SqlRow = Record<string, unknown>;
+
+function toSummaryRow(row: SqlRow): RunSummaryRow {
+  return {
+    seq: row.seq as number,
+    id: row.id as string,
+    createdAt: row.created_at as string,
+    revision: row.revision as number,
+    summary: row.summary as string,
+  };
+}
 
 function toRunRow(row: SqlRow): RunRow {
   return {
@@ -482,6 +496,7 @@ export class RunDatabase {
     get: StatementSync;
     getMany: StatementSync;
     listSummaries: StatementSync;
+    listWindowSummaries: StatementSync;
     listAll: StatementSync;
     listLive: StatementSync;
     listByParent: StatementSync;
@@ -520,6 +535,7 @@ export class RunDatabase {
       get: db.prepare(`SELECT ${ROW_COLUMNS} FROM runs WHERE id = ?`),
       getMany: db.prepare(`SELECT ${ROW_COLUMNS} FROM runs WHERE id IN (SELECT value FROM json_each(?))`),
       listSummaries: db.prepare(`SELECT seq, id, created_at, revision, summary FROM runs ${NEWEST_FIRST} LIMIT ?`),
+      listWindowSummaries: db.prepare(`${SUMMARY_SELECT} WHERE archived = 0 UNION ALL SELECT * FROM (${SUMMARY_SELECT} WHERE ${ARCHIVED_ROOT} ${NEWEST_FIRST} LIMIT ?) ${NEWEST_FIRST}`),
       listAll: db.prepare(`SELECT ${ROW_COLUMNS} FROM runs ${NEWEST_FIRST}`),
       listLive: db.prepare(`SELECT ${ROW_COLUMNS} FROM runs WHERE live = 1 ORDER BY seq`),
       listByParent: db.prepare(`SELECT ${ROW_COLUMNS} FROM runs WHERE parent_run_id = ? ${NEWEST_FIRST}`),
@@ -644,13 +660,16 @@ export class RunDatabase {
    *  as every list route includes them. Without a limit, every row. */
   listSummaries(options: { limit?: number } = {}): RunSummaryRow[] {
     const limit = options.limit ?? -1;
-    return this.run(() => this.statements.listSummaries.all(limit)).map((row) => ({
-      seq: row.seq as number,
-      id: row.id as string,
-      createdAt: row.created_at as string,
-      revision: row.revision as number,
-      summary: row.summary as string,
-    }));
+    return this.run(() => this.statements.listSummaries.all(limit)).map(toSummaryRow);
+  }
+
+  /**
+   * The run lists' window (#864), newest first: every unarchived row, plus the newest
+   * `archivedLimit` archived roots. Archived workers are never in it — no list renders them, and
+   * counting them is what let them push an older live root out of a newest-N window.
+   */
+  listWindowSummaries(archivedLimit: number): RunSummaryRow[] {
+    return this.run(() => this.statements.listWindowSummaries.all(archivedLimit)).map(toSummaryRow);
   }
 
   /** Every row, newest first (`created_at` descending, then insertion order). */

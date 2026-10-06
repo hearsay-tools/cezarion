@@ -6208,7 +6208,7 @@ export function createApp(deps: ServerDeps) {
         // exact asymmetry a cross-project finder exists to remove.
         let recent: RunSummary[];
         if (owned) {
-          const newest = owned.store.listRunSummaries({ limit: RUNS_INDEX_PER_PROJECT });
+          const newest = owned.store.listRunSummaries({ archivedWindow: RUNS_INDEX_PER_PROJECT });
           if (newest.truncated) truncated.push(project.id);
           recent = newest.runs.map(withLiveUsage);
         } else {
