@@ -22,6 +22,14 @@ const DEFAULT_VIEWPORT = { w: 1280, h: 800 };
 /** A started stream with no frame after this long is restarted: Chromium can stay silent after back-to-back restarts on a page that no longer changes. */
 const FIRST_FRAME_WAIT_MS = 500;
 const FIRST_FRAME_RETRIES = 5;
+/**
+ * Page activity (a click, a key, a navigation, a load step) with no frame after it this long restarts
+ * the stream. Chromium can paint once and then go silent, so the pane kept the first frame for good,
+ * and a first paint after the first-frame retries never reached it (#870).
+ */
+const ACTIVITY_FRAME_WAIT_MS = 1000;
+/** Input that can change what the page shows. A pointer move alone is too frequent to count. */
+const ACTIVE_MOUSE = new Set(['mousePressed', 'mouseReleased', 'mouseWheel']);
 
 /**
  * The pixel size of a JPEG frame, from its first baseline/progressive SOF segment; undefined when
@@ -92,20 +100,30 @@ export class PreviewSession {
   private streaming?: { w: number; h: number };
   private watchdog?: ReturnType<typeof setTimeout>;
   private silentStarts = 0;
+  /** The top-level frame, so a subframe's load steps do not count as page activity. */
+  private mainFrameId?: string;
 
   private constructor(
     private readonly cdp: Cdp,
     private readonly opts: { onFirstFrame?: (viewer: Viewer) => void },
   ) {
     cdp.on<ScreencastFrame>('Page.screencastFrame', frame => this.onFrame(frame));
-    cdp.on<{ frame: { url: string; parentId?: string } }>('Page.frameNavigated', ({ frame }) => {
+    cdp.on<{ frame: { id?: string; url: string; parentId?: string } }>('Page.frameNavigated', ({ frame }) => {
       if (frame.parentId) return;
+      this.mainFrameId = frame.id;
       this.url = frame.url;
       this.tell({ t: 'url', url: frame.url });
+      this.expectFrame();
     });
-    cdp.on<{ url: string }>('Page.navigatedWithinDocument', ({ url }) => {
+    cdp.on<{ frameId?: string; url: string }>('Page.navigatedWithinDocument', ({ frameId, url }) => {
+      if (!this.isMainFrame(frameId)) return;
       this.url = url;
       this.tell({ t: 'url', url });
+      this.expectFrame();
+    });
+    // The page's load steps, first paint among them: the moment a page that painted late has something to show.
+    cdp.on<{ frameId?: string; name: string }>('Page.lifecycleEvent', ({ frameId }) => {
+      if (this.isMainFrame(frameId)) this.expectFrame();
     });
     cdp.on<DialogOpening>('Page.javascriptDialogOpening', dialog =>
       this.tell({
@@ -125,6 +143,7 @@ export class PreviewSession {
   static async create(cdp: Cdp, opts: { onFirstFrame?: (viewer: Viewer) => void } = {}): Promise<PreviewSession> {
     const session = new PreviewSession(cdp, opts);
     await cdp.send('Page.enable');
+    await cdp.send('Page.setLifecycleEventsEnabled', { enabled: true });
     await cdp.send('Runtime.enable');
     await cdp.send('Runtime.addBinding', { name: '__cursor' });
     await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: INJECT });
@@ -154,6 +173,7 @@ export class PreviewSession {
 
   async navigate(url: string): Promise<void> {
     this.announced = false;
+    this.expectFrame();
     await this.cdp.send('Page.navigate', { url });
   }
 
@@ -178,6 +198,7 @@ export class PreviewSession {
         return this.ackFrame(acked);
       }
       case 'mouse':
+        if (ACTIVE_MOUSE.has(msg.type)) this.expectFrame();
         await this.cdp.send('Input.dispatchMouseEvent', {
           type: msg.type,
           x: msg.x,
@@ -191,6 +212,7 @@ export class PreviewSession {
         });
         return;
       case 'key':
+        if (msg.type !== 'keyUp') this.expectFrame();
         await this.cdp.send('Input.dispatchKeyEvent', {
           type: msg.type,
           key: msg.key ?? '',
@@ -202,15 +224,18 @@ export class PreviewSession {
         });
         return;
       case 'insertText':
+        this.expectFrame();
         await this.cdp.send('Input.insertText', { text: msg.text });
         return;
       case 'nav':
         return this.navigate(normalizePreviewUrl(msg.url));
       case 'reload':
+        this.expectFrame();
         await this.cdp.send('Page.reload', { ignoreCache: msg.ignoreCache ?? false });
         return;
       case 'back':
       case 'forward': {
+        this.expectFrame();
         const { currentIndex, entries } = await this.cdp.send<{ currentIndex: number; entries: Array<{ id: number }> }>('Page.getNavigationHistory');
         const entry = entries[currentIndex + (msg.t === 'back' ? -1 : 1)];
         if (entry) await this.cdp.send('Page.navigateToHistoryEntry', { entryId: entry.id });
@@ -258,15 +283,31 @@ export class PreviewSession {
     this.armWatchdog();
   }
 
-  /** No frame, or none at the viewport size, since the last start: start again, a few times, then leave it to the owner's reload. */
-  private armWatchdog(): void {
+  /**
+   * Something happened that should paint: wait for a frame, and restart the stream if none comes.
+   * Each activity gets its own few tries, so a stream the start retries gave up on recovers on the
+   * next click or load step. A frame at the viewport size disarms it, as after a start.
+   */
+  private expectFrame(): void {
+    if (!this.viewer) return;
+    this.silentStarts = 0;
+    // Mid-restart, the start arms its own watchdog, now with fresh tries.
+    if (this.streaming) this.armWatchdog(ACTIVITY_FRAME_WAIT_MS);
+  }
+
+  private isMainFrame(frameId: string | undefined): boolean {
+    return frameId === undefined || this.mainFrameId === undefined || frameId === this.mainFrameId;
+  }
+
+  /** No frame, or none at the viewport size, since the last start or activity: start again, a few times, then wait for the next activity. */
+  private armWatchdog(waitMs = FIRST_FRAME_WAIT_MS): void {
     this.disarmWatchdog();
     this.watchdog = setTimeout(() => {
       if (!this.viewer || !this.streaming || this.silentStarts >= FIRST_FRAME_RETRIES) return;
       this.silentStarts += 1;
       this.streaming = undefined;
       void this.setViewport(this.viewport.w, this.viewport.h).catch(() => {});
-    }, FIRST_FRAME_WAIT_MS);
+    }, waitMs);
     this.watchdog.unref?.();
   }
 
