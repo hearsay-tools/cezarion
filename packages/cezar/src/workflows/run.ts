@@ -22,7 +22,7 @@ import {
 import { type AgentSession } from '../core/claude-cli-runner.ts';
 import { hasRegisteredRunProcess, onUsage, registerRunProcess, unregisterRunProcess, type ProcessUsage } from '../core/process-usage.ts';
 import { WorkerScratchCleanup } from '../delegation/scratch-cleanup.ts';
-import { inspectExecutionGeneration, isCurrentProcess, processStartToken, recordedProcessLive, type GenerationProbe, type WorkerProcessRecord } from '../delegation/process-liveness.ts';
+import { inspectExecutionGeneration, isCurrentProcess, processStartToken, recordedProcessLive, workerProcessCutoff, type GenerationProbe, type WorkerProcessRecord } from '../delegation/process-liveness.ts';
 import { parseUsageLimit } from '../core/usage-limit.ts';
 import { startManagedSession } from '../core/managed-session.ts';
 import { createRunner } from '../core/runner-factory.ts';
@@ -944,10 +944,11 @@ export class RunManager {
     if (record !== 'absent' && isCurrentProcess(record.controller)) return { state: 'none' };
     // Legacy execution proof also considers scratch holders; cleanup uses a separate strict proof.
     const locations = agentTmpDirLocationEvidence(this.dataDir, runId);
+    const since = workerProcessCutoff(run.createdAt);
     return { state: 'orphan', generation: proof.generation, ...(record === 'absent' ? {} : { record }),
       paths: [run.delegation.workspace.path, ...locations.paths], pathsComplete: locations.complete,
-      // No process of this worker can predate its record (1 s slack for tick rounding).
-      ...(Number.isFinite(Date.parse(run.createdAt)) ? { since: Date.parse(run.createdAt) - 1_000 } : {}) };
+      // No process of this worker can predate its record.
+      ...(since !== undefined ? { since } : {}) };
   }
 
   private orphanedWorkerGeneration(runId: string, admitting = false) {
