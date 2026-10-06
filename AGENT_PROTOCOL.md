@@ -997,7 +997,7 @@ this HTTP-only ordering and test root idle expiry/Continue on their native wires
 Owned-worker terminal settlement and explicit question/worker/CI waits retain
 their existing policies.
 
-Final-message nudge rows **F1–F8** live in
+Final-message nudge rows **F1–F10** live in
 `core/workflow-final-message-parity.test.ts` and the same parity guard (hearsay-tools/cezarion#544).
 Every adapter covers a reasoning-or-tool tail with no later assistant message, on fresh and Continue
 paths: one visible-message nudge that can complete with DONE, a still-silent nudge that parks
@@ -1011,10 +1011,16 @@ Only OpenCode's HTTP ACK is independent of the SSE turn; the other adapters have
 exemptions because turn frames and the transport ACK share one stream, so turn-end-before-ACK
 cannot be constructed.
 F8 covers an ACKed nudge that never opens a turn (OpenCode keeps sending SSE heartbeat comments):
-after `FINAL_MESSAGE_NUDGE_REPLY_MS` the run parks `waiting` with busySlots 0. Cursor is exempt
-because ACP emits `turn.started` locally when `session/prompt` is written, so an ACK without a turn
-cannot be constructed. The one-shot latch keeps #48 closed; control markers are never read from
-reasoning. A pending autonomous retry is never replaced by the final-message nudge.
+after `FINAL_MESSAGE_NUDGE_REPLY_MS` the run parks `waiting` with busySlots 0. Cursor's ACK is the
+stdin write callback, as for Claude: the mock accepts `session/prompt` and sends nothing. A synthetic
+`turn.started` emitted inside `sendAgentMessage` before the reply timer is armed does not count as a
+reply; items, text and tools count at any time, and nested `item.*` events with `parentItemId` do not.
+F9 lets a late reply after expiry unpark the run (`running`, slot held) and then complete normally;
+`alreadyFinalMessageNudged` still prevents a second nudge. F10 starts streaming content before the
+bound and ends after it: no `no reply to the final-message nudge` note, and a normal DONE. A user-authored
+delivery resets the one-shot latch so the next silent tail can nudge; expiry does not. The one-shot
+latch keeps #48 closed; control markers are never read from reasoning. A pending autonomous retry is
+never replaced by the final-message nudge.
 
 > Every criterion in the harness parity matrix MUST hold for **every** backend,
 > or carry a declared exemption naming the wire limitation that prevents it.
