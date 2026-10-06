@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { setApiScope } from '@open-mercato/cezar-api-client'
 import type { RunEvent } from '@open-mercato/cezar-api-client'
@@ -524,6 +524,137 @@ describe('conversation message surfaces', () => {
     expect(document.querySelector('[data-slot="assistant-message"]')).toBeNull()
     expect(document.body.textContent).not.toContain('YOUR MESSAGE')
     expect(document.body.textContent).not.toContain('AGENT RESPONSE')
+  })
+})
+
+describe('AssistantMessage copy actions', () => {
+  const SOURCE = [
+    '## Heading',
+    '',
+    '- item',
+    '',
+    '| a | b |',
+    '| --- | --- |',
+    '| 1 | 2 |',
+    '',
+    'See [docs](https://example.com).',
+    '',
+    '```ts',
+    'const a = 1',
+    '```',
+  ].join('\n')
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  function copyButton() {
+    return screen.getByRole('button', { name: 'Copy reply' })
+  }
+
+  function markdownButton() {
+    return screen.getByRole('button', { name: 'Copy reply as markdown' })
+  }
+
+  function writtenItem(write: ReturnType<typeof vi.fn>): { items: Record<string, Blob> } {
+    const items = write.mock.calls[0]?.[0] as { items: Record<string, Blob> }[] | undefined
+    const item = items?.[0]
+    if (!item) throw new Error('clipboard.write was not called with a ClipboardItem')
+    return item
+  }
+
+  it('shows Copy and Copy markdown on an agent reply, and neither on a tool-call row', () => {
+    const item = goldenItem(bashAndScreenshot, 'toolu_mock_1', 'completed')
+    render(
+      <MemoryRouter>
+        <AssistantMessage text="The answer is 42." />
+        <ToolCard item={item} />
+      </MemoryRouter>,
+    )
+    const copy = copyButton()
+    const markdown = markdownButton()
+    expect(copy.textContent).toContain('Copy')
+    expect(markdown.textContent).toContain('Copy markdown')
+    expect(copy.getAttribute('tabindex')).not.toBe('-1')
+    expect(markdown.getAttribute('tabindex')).not.toBe('-1')
+    expect(copy.className).toMatch(/(?:^|[\s:])(?:min-h-11|h-11|size-11)(?:\s|$)/)
+    expect(copy.className).toMatch(/(?:^|[\s:])(?:min-w-11|w-11|size-11)(?:\s|$)/)
+    expect(document.querySelector('[data-slot="assistant-message"] [data-slot="bubble-actions"]')?.className)
+      .toContain('no-hover:opacity-100')
+    const tool = document.querySelector('[data-slot="tool-card"]')!
+    expect(tool.querySelector('[data-slot="bubble-actions"]')).toBeNull()
+    expect(screen.queryAllByRole('button', { name: 'Copy reply' })).toHaveLength(1)
+    expect(screen.queryAllByRole('button', { name: 'Copy reply as markdown' })).toHaveLength(1)
+  })
+
+  it('places the reply markdown source on the clipboard as text/plain', async () => {
+    const writeText = vi.fn(async () => {})
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } })
+    render(<MemoryRouter><AssistantMessage text={SOURCE} /></MemoryRouter>)
+    fireEvent.click(markdownButton())
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(SOURCE))
+    expect(markdownButton().textContent).toContain('Copied')
+  })
+
+  it('places rendered HTML and markdown on the clipboard together', async () => {
+    const write = vi.fn(async () => {})
+    vi.stubGlobal('ClipboardItem', class ClipboardItem {
+      constructor(public items: Record<string, Blob>) {}
+    })
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { write, writeText: vi.fn() } })
+    render(<MemoryRouter><AssistantMessage text={SOURCE} /></MemoryRouter>)
+    fireEvent.click(copyButton())
+    await waitFor(() => expect(write).toHaveBeenCalled())
+    const item = writtenItem(write)
+    expect(await item.items['text/plain']!.text()).toBe(SOURCE)
+    const html = await item.items['text/html']!.text()
+    expect(html).toContain('Heading')
+    expect(html).toMatch(/<li\b/i)
+    expect(html).toMatch(/<table\b/i)
+    expect(html).toMatch(/<a\b/i)
+    expect(html).toContain('https://example.com')
+    expect(html).not.toContain('<button')
+    expect(copyButton().textContent).toContain('Copied')
+  })
+
+  it('does not let a fenced URL steal a markdown link href', async () => {
+    const source = ['```', 'https://trap.example', '```', '', 'See [docs](https://example.com).'].join('\n')
+    const write = vi.fn(async () => {})
+    vi.stubGlobal('ClipboardItem', class ClipboardItem {
+      constructor(public items: Record<string, Blob>) {}
+    })
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { write, writeText: vi.fn() } })
+    render(<MemoryRouter><AssistantMessage text={source} /></MemoryRouter>)
+    fireEvent.click(copyButton())
+    await waitFor(() => expect(write).toHaveBeenCalled())
+    const item = writtenItem(write)
+    const html = await item.items['text/html']!.text()
+    expect(html).toMatch(/<a[^>]+href="https:\/\/example\.com"/)
+    expect(html).not.toMatch(/<a[^>]+href="https:\/\/trap\.example"/)
+  })
+
+  it.each(['missing', 'denied'] as const)('shows an error when clipboard is %s and does not claim success', async (failure) => {
+    if (failure === 'missing') {
+      vi.stubGlobal('navigator', { ...navigator, clipboard: undefined })
+    } else {
+      vi.stubGlobal('ClipboardItem', class ClipboardItem {
+        constructor(public items: Record<string, Blob>) {}
+      })
+      vi.stubGlobal('navigator', {
+        ...navigator,
+        clipboard: {
+          write: vi.fn(async () => { throw new Error('denied') }),
+          writeText: vi.fn(async () => { throw new Error('denied') }),
+        },
+      })
+    }
+    render(<MemoryRouter><AssistantMessage text="The answer is 42." /></MemoryRouter>)
+    fireEvent.click(copyButton())
+    expect((await screen.findByRole('alert')).textContent).toMatch(/couldn['’]t copy|could not copy/i)
+    expect(screen.queryByText('Copied')).toBeNull()
+    fireEvent.click(markdownButton())
+    expect((await screen.findByRole('alert')).textContent).toMatch(/couldn['’]t copy|could not copy/i)
+    expect(screen.queryByText('Copied')).toBeNull()
   })
 })
 

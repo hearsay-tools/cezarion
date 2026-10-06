@@ -1,5 +1,5 @@
 import { BrainIcon, FileTextIcon, FolderInputIcon, GlobeIcon, LoaderCircleIcon, MessageSquareIcon, SendIcon, SquarePenIcon, SquareTerminalIcon } from 'lucide-react'
-import { BotIcon, ChevronRightIcon, ListTodoIcon, PaperclipIcon, SearchIcon, Trash2Icon, WrenchIcon } from '@/components/design-icons'
+import { BotIcon, ChevronRightIcon, CopyIcon, ListTodoIcon, PaperclipIcon, SearchIcon, Trash2Icon, WrenchIcon } from '@/components/design-icons'
 import { useContext, useEffect, useId, useRef, useState, type ComponentPropsWithoutRef, type ReactNode } from 'react'
 
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
@@ -281,14 +281,123 @@ export function UserBubble({
   )
 }
 
+const REPLY_ACTION_CLASS =
+  'inline-flex h-11 min-w-11 items-center justify-center gap-1 rounded-sm px-2 text-xs font-medium text-soft-foreground hover:bg-background hover:text-foreground focus-visible:opacity-100 focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none'
+
+const STREAMDOWN_CHROME = [
+  '[data-streamdown="code-block-actions"]',
+  '[data-streamdown="code-copy-button"]',
+  '[data-streamdown="code-block-copy-button"]',
+  '[data-streamdown="code-block-header"]',
+].join(',')
+
+/** Markdown links and bare/autolink URLs, in source order, so a Streamdown link *button*
+ *  (link-safety has no `href` in the DOM) can be restored to an `<a>` on copy. */
+function withoutMarkdownCode(source: string): string {
+  const fence = '`'.repeat(3)
+  const noFences = source.split(fence).filter((_, index) => index % 2 === 0).join(' ')
+  return noFences.split('`').filter((_, index) => index % 2 === 0).join(' ')
+}
+
+function markdownHrefs(source: string): string[] {
+  const hrefs: string[] = []
+  const re = /\[(?:[^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)|<(https?:\/\/[^>\s]+)>|(https?:\/\/[^\s<]+)/g
+  for (const match of withoutMarkdownCode(source).matchAll(re)) {
+    const href = match[1] ?? match[2] ?? match[3]
+    if (href) hrefs.push(href)
+  }
+  return hrefs
+}
+
+function clipboardHtml(root: HTMLElement, source: string): string {
+  const clone = root.cloneNode(true) as HTMLElement
+  clone.querySelectorAll(STREAMDOWN_CHROME).forEach((node) => node.remove())
+  const hrefs = markdownHrefs(source)
+  ;[...clone.querySelectorAll('button[data-streamdown="link"]')].forEach((button, index) => {
+    const href = hrefs[index]
+    if (!href) return
+    const anchor = clone.ownerDocument.createElement('a')
+    anchor.setAttribute('href', href)
+    anchor.setAttribute('data-streamdown', 'link')
+    anchor.textContent = button.textContent
+    button.replaceWith(anchor)
+  })
+  return clone.innerHTML
+}
+
+async function writeReplyClipboard(kind: 'html' | 'markdown', source: string, root: HTMLElement | null): Promise<void> {
+  if (kind === 'markdown') {
+    if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable')
+    await navigator.clipboard.writeText(source)
+    return
+  }
+  if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined' || !root) {
+    throw new Error('Clipboard unavailable')
+  }
+  const html = clipboardHtml(root, source)
+  await navigator.clipboard.write([
+    new ClipboardItem({
+      'text/html': new Blob([html], { type: 'text/html' }),
+      'text/plain': new Blob([source], { type: 'text/plain' }),
+    }),
+  ])
+}
+
 /**
  * An assistant message item, as markdown. `breaks` keeps the agent's single newlines visible
  * (#730): replies are chat prose, and CommonMark's newline-as-space flattened them into one line.
  */
 export function AssistantMessage({ text, ts }: { text: string; ts?: string }) {
+  const markdownRef = useRef<HTMLDivElement>(null)
+  const [copied, setCopied] = useState<'html' | 'markdown' | null>(null)
+  const [copyError, setCopyError] = useState<string | null>(null)
+  const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => () => {
+    if (resetTimer.current !== null) clearTimeout(resetTimer.current)
+  }, [])
+
+  const copy = async (kind: 'html' | 'markdown') => {
+    if (resetTimer.current !== null) clearTimeout(resetTimer.current)
+    setCopied(null)
+    setCopyError(null)
+    try {
+      await writeReplyClipboard(kind, text, markdownRef.current)
+      setCopied(kind)
+      resetTimer.current = setTimeout(() => setCopied(null), 2000)
+    } catch {
+      setCopyError("Couldn't copy to the clipboard")
+    }
+  }
+
   return (
-    <ConversationMessage role="agent" ts={ts} data-slot="assistant-message">
-      <Markdown breaks>{text}</Markdown>
+    <ConversationMessage role="agent" ts={ts} data-slot="assistant-message" className="group">
+      <span
+        data-slot="bubble-actions"
+        className="mb-1 flex justify-end gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 no-hover:opacity-100"
+      >
+        <button
+          type="button"
+          aria-label="Copy reply"
+          onClick={() => void copy('html')}
+          className={REPLY_ACTION_CLASS}
+        >
+          <CopyIcon className="size-3.5" aria-hidden="true" />
+          <span aria-live="polite">{copied === 'html' ? 'Copied' : 'Copy'}</span>
+        </button>
+        <button
+          type="button"
+          aria-label="Copy reply as markdown"
+          onClick={() => void copy('markdown')}
+          className={REPLY_ACTION_CLASS}
+        >
+          <FileTextIcon className="size-3.5" aria-hidden="true" />
+          <span aria-live="polite">{copied === 'markdown' ? 'Copied' : 'Copy markdown'}</span>
+        </button>
+      </span>
+      {copyError ? <p role="alert" className="mb-1 text-xs text-danger">{copyError}</p> : null}
+      <div ref={markdownRef}>
+        <Markdown breaks>{text}</Markdown>
+      </div>
     </ConversationMessage>
   )
 }
