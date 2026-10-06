@@ -82,11 +82,19 @@ A synchronous, dependency-free module (a sync probe lets `continueRun` stay sync
   unreadable process of our own user is non-dumpable (`systemd --user`, `sshd`,
   `gpg-agent`). It counts as a possible holder, reported by PID and never signalled, unless it
   started before the worker's record was created (`since`, from `/proc/stat` btime plus
-  starttime ticks) or its comm/argv0 is a login/sftp session (`sshd`, `sshd-session`,
-  `sftp-server`). A process that old cannot be the worker's descendant, and every host has
-  some; a later SSH login is the same class of ambient session. The cutoff is the worker's
-  creation, not the current generation's start, because an earlier generation can leave a
-  daemon holding the worktree.
+  starttime ticks) or another user launched it: its parent chain (`/proc/<pid>/stat` field 4,
+  world-readable, so known for non-dumpable processes too) reaches a process of another user
+  before it reaches init or cezar itself (hearsay-tools/cezarion#874). A process that old cannot be the
+  worker's descendant, and every host has some. A process with a foreign ancestor cannot be
+  one either: an unprivileged worker cannot forge a root parent, and that is what every SSH
+  login looks like (`sshd`'s privilege-separated monitor is root's, the user half under it is
+  non-dumpable, `sftp-server` hangs off that), as do cron, `su` and `login`. A name proves
+  nothing and is never consulted. The chain is no evidence when it ends at init (an orphan
+  reparents there or to a same-user subreaper such as `systemd --user`), at cezar's own PID
+  (then the process is ours), at an unreadable parent or owner, or when the parent changes
+  between reads (PID reuse); each of those keeps the process a candidate. The cutoff is the
+  worker's creation, not the current generation's start, because an earlier generation can
+  leave a daemon holding the worktree.
 
   **Execution and resource proofs are separate (hearsay-tools/cezarion#738, approved revision).** A valid Linux
   controller boot UUID different from the current readable boot UUID proves old descendants
@@ -107,23 +115,27 @@ A synchronous, dependency-free module (a sync probe lets `continueRun` stay sync
   (`workerResourceHolders(..., { deleting: true })`) and to the scan right before
   `git worktree remove`. An unreadable own-user process that started before the worker is
   ambient (login `sshd`, `systemd --user`, `gpg-agent`) and no longer blocks deletion; without
-  this, destroy never completed on a normal Linux host. Unreadable login/sftp sessions
-  (`sshd`, `sshd-session`, `sftp-server`) are skipped even when they started after the worker:
-  a later SSH/Ansible/sftp login is ambient on every host, not a descendant, and would otherwise
-  block destroy of every leftover worktree. A later unreadable process that is not one of those
-  sessions, a readable cwd under the path and a live recorded process still block, and the
-  incomplete destroy error names their PIDs. If cwd is readable and under the path, even `sshd`
-  still blocks. Accepted risk, the same as execution proof's: an unreadable process older than
-  the worker that later changed into its worktree is deleted under. Reuse/admission, scratch
-  cleanup, history deletion and reclaim keep the scan with no age exclusion.
+  this, destroy never completed on a normal Linux host. An unreadable process another user
+  launched (the foreign-ancestor rule above) is skipped whatever its age: a later SSH, Ansible
+  or sftp login is ambient on every host, not a descendant, and would otherwise block destroy
+  of every leftover worktree (hearsay-tools/cezarion#874). A later unreadable process with no foreign
+  ancestor, a readable cwd under the path and a live recorded process still block, and the
+  incomplete destroy error names their PIDs. A readable cwd under the path blocks whatever the
+  ancestry. Accepted risk, the same as execution proof's: an unreadable process older than
+  the worker that later changed into its worktree is deleted under, and so is a worker
+  descendant that gained a foreign ancestor through `sudo` or a setuid binary, or was adopted
+  by a root-owned subreaper other than init, while non-dumpable and inside the worktree.
+  Reuse/admission, scratch cleanup, history deletion and reclaim keep the scan with no age
+  exclusion; the foreign-ancestor rule applies to every scan, because it needs no cutoff.
   Only a fresh clear scan plus generation/resource ownership permits deletion or reuse.
   A process becoming readable and outside the protected paths, or exiting, may clear the
   uncertainty; elapsed time or reboot cannot. Unknown evidence is retained, never silently dropped.
 
   macOS uses
   `lsof -a -d cwd -Fpn` with a bounded timeout. `lsof` silently omits processes it cannot
-  read, so any process of our user (`ps -U <uid> -o pid=,stat=,comm=,lstart=`, minus `ps` itself) missing
-  from its output is judged by the same rule. Without that `ps` list the scan is `unknown`.
+  read, so any process of our user missing from its output is judged by the same two rules,
+  age and ancestry, from one process table (`ps -A -o pid=,ppid=,uid=,stat=,lstart=`, minus
+  `ps` itself; other users' rows only serve the parent walk). Without that table the scan is `unknown`.
   It excludes
   `process.pid`, compares realpaths, and matches a dir itself or anything beneath it. cezar's own
   `git` children in the worktree make the scan read `alive` for a moment; that is
