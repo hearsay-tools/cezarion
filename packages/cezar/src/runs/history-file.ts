@@ -1,28 +1,44 @@
+/**
+ * Both on-disk forms of a run transcript: `runs/<id>.ndjson` and `runs/<id>.ndjson.br`.
+ *
+ * Plain wins whenever both exist — readers return the plain file, and restoreHistory unlinks
+ * the `.br`. compressHistory commits in one synchronous block: re-check stillEligible() and
+ * that the plain file's size and mtime are unchanged since the read, then rename tmp → `.br`
+ * and unlink plain. A crash between rename and unlink leaves both files; the next reader still
+ * returns the plain content.
+ */
 import {
   closeSync,
-  createReadStream,
   existsSync,
+  fstatSync,
   fsyncSync,
   openSync,
   readFileSync,
+  readSync,
   renameSync,
   rmSync,
   statSync,
   unlinkSync,
-  writeFileSync,
+  writeSync,
   type Stats,
 } from 'node:fs';
-import { open } from 'node:fs/promises';
+import { open, readFile, type FileHandle } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { promisify } from 'node:util';
-import { brotliCompress, brotliDecompressSync, constants as zlibConstants } from 'node:zlib';
-import { z } from 'zod';
+import {
+  brotliCompress,
+  brotliDecompress,
+  brotliDecompressSync,
+  constants as zlibConstants,
+} from 'node:zlib';
 
 export const HISTORY_BROTLI_QUALITY = 5;
 
 const brotliCompressAsync = promisify(brotliCompress);
+const brotliDecompressAsync = promisify(brotliDecompress);
 const brotliParams = { params: { [zlibConstants.BROTLI_PARAM_QUALITY]: HISTORY_BROTLI_QUALITY } };
+const warnedUndecodable = new Set<string>();
 
 export function historyPaths(dataDir: string, id: string): { plain: string; compressed: string } {
   const plain = join(dataDir, 'runs', `${id}.ndjson`);
@@ -40,12 +56,19 @@ export function readHistoryText(dataDir: string, id: string): string | undefined
   } catch (error) {
     if (!isNotFound(error)) throw error;
   }
+  let encoded: Buffer;
   try {
-    return brotliDecompressSync(readFileSync(compressed)).toString('utf8');
+    encoded = readFileSync(compressed);
   } catch (error) {
     if (isNotFound(error)) return undefined;
     throw error;
   }
+  const decoded = tryDecompressSync(encoded);
+  if (decoded === undefined) {
+    warnUndecodable(compressed);
+    return undefined;
+  }
+  return decoded.toString('utf8');
 }
 
 export interface HistorySource {
@@ -55,13 +78,26 @@ export interface HistorySource {
   close(): Promise<void>;
 }
 
+export function emptyHistorySource(): HistorySource {
+  return {
+    size: 0,
+    async read() {
+      return Buffer.alloc(0);
+    },
+    stream() {
+      return Readable.from([]);
+    },
+    async close() {},
+  };
+}
+
 export async function openHistorySource(dataDir: string, id: string): Promise<HistorySource | undefined> {
   const { plain, compressed } = historyPaths(dataDir, id);
   try {
     const handle = await open(plain, 'r');
     try {
       const size = (await handle.stat()).size;
-      return plainSource(plain, size, handle);
+      return plainSource(size, handle);
     } catch (error) {
       await handle.close().catch(() => undefined);
       throw error;
@@ -69,11 +105,18 @@ export async function openHistorySource(dataDir: string, id: string): Promise<Hi
   } catch (error) {
     if (!isNotFound(error)) throw error;
   }
+  let encoded: Buffer;
   try {
-    return bufferSource(brotliDecompressSync(readFileSync(compressed)));
+    encoded = await readFile(compressed);
   } catch (error) {
     if (isNotFound(error)) return undefined;
     throw error;
+  }
+  try {
+    return bufferSource(await brotliDecompressAsync(encoded));
+  } catch {
+    warnUndecodable(compressed);
+    return undefined;
   }
 }
 
@@ -82,21 +125,28 @@ export async function compressHistory(
   id: string,
   stillEligible: () => boolean,
 ): Promise<'compressed' | 'skipped'> {
-  z.uuid().parse(id);
   const { plain, compressed } = historyPaths(dataDir, id);
-  let st: Stats;
-  let bytes: Buffer;
+  let fd: number;
   try {
-    st = statSync(plain);
-    bytes = readFileSync(plain);
+    fd = openSync(plain, 'r');
   } catch (error) {
     if (isNotFound(error)) return 'skipped';
     throw error;
   }
+  let st: Stats;
+  let bytes: Buffer;
+  try {
+    st = fstatSync(fd);
+    bytes = Buffer.allocUnsafe(st.size);
+    const bytesRead = st.size === 0 ? 0 : readSync(fd, bytes, 0, st.size, 0);
+    if (bytesRead !== st.size) bytes = bytes.subarray(0, bytesRead);
+  } finally {
+    closeSync(fd);
+  }
   const encoded = await brotliCompressAsync(bytes, brotliParams);
   const tmp = `${compressed}.tmp`;
-  writeFileSync(tmp, encoded);
   try {
+    writeTmpSync(tmp, encoded);
     if (!stillEligible()) {
       rmSync(tmp, { force: true });
       return 'skipped';
@@ -111,12 +161,6 @@ export async function compressHistory(
     if (current.size !== st.size || current.mtimeMs !== st.mtimeMs) {
       rmSync(tmp, { force: true });
       return 'skipped';
-    }
-    const fd = openSync(tmp, 'r');
-    try {
-      fsyncSync(fd);
-    } finally {
-      closeSync(fd);
     }
     renameSync(tmp, compressed);
     unlinkSync(plain);
@@ -140,8 +184,21 @@ export function restoreHistory(dataDir: string, id: string): void {
     if (isNotFound(error)) return;
     throw error;
   }
+  const decoded = tryDecompressSync(encoded);
+  if (decoded === undefined) {
+    const corrupt = `${compressed}.corrupt`;
+    rmSync(corrupt, { force: true });
+    renameSync(compressed, corrupt);
+    warnUndecodable(compressed, `; renamed to ${corrupt}`);
+    return;
+  }
   const tmp = `${plain}.tmp`;
-  writeFileSync(tmp, brotliDecompressSync(encoded));
+  try {
+    writeTmpSync(tmp, decoded);
+  } catch (error) {
+    rmSync(tmp, { force: true });
+    throw error;
+  }
   renameSync(tmp, plain);
   unlinkSync(compressed);
 }
@@ -152,18 +209,41 @@ export function removeHistory(dataDir: string, id: string): void {
   rmSync(compressed, { force: true });
   rmSync(`${plain}.tmp`, { force: true });
   rmSync(`${compressed}.tmp`, { force: true });
+  rmSync(`${compressed}.corrupt`, { force: true });
 }
 
 function isNotFound(error: unknown): boolean {
   return (error as NodeJS.ErrnoException).code === 'ENOENT';
 }
 
-function slice(buffer: Buffer, position: number, length: number): Buffer {
-  if (length <= 0 || position >= buffer.length) return Buffer.alloc(0);
-  return Buffer.from(buffer.subarray(position, position + length));
+function tryDecompressSync(encoded: Buffer): Buffer | undefined {
+  try {
+    return brotliDecompressSync(encoded);
+  } catch {
+    return undefined;
+  }
 }
 
-function plainSource(path: string, size: number, handle: Awaited<ReturnType<typeof open>>): HistorySource {
+function warnUndecodable(path: string, extra = ''): void {
+  if (warnedUndecodable.has(path)) return;
+  warnedUndecodable.add(path);
+  console.warn(`[cez] ignoring undecodable compressed transcript ${path}${extra}`);
+}
+
+function writeTmpSync(tmp: string, data: Buffer): void {
+  const fd = openSync(tmp, 'w');
+  try {
+    let offset = 0;
+    while (offset < data.length) {
+      offset += writeSync(fd, data, offset);
+    }
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function plainSource(size: number, handle: FileHandle): HistorySource {
   return {
     size,
     async read(position, length) {
@@ -174,7 +254,7 @@ function plainSource(path: string, size: number, handle: Awaited<ReturnType<type
       return bytesRead === toRead ? buffer : buffer.subarray(0, bytesRead);
     },
     stream(start = 0) {
-      return createReadStream(path, { encoding: 'utf8', start });
+      return handle.createReadStream({ encoding: 'utf8', start, autoClose: false });
     },
     async close() {
       await handle.close();
@@ -186,7 +266,8 @@ function bufferSource(buffer: Buffer): HistorySource {
   return {
     size: buffer.length,
     async read(position, length) {
-      return slice(buffer, position, length);
+      if (length <= 0 || position >= buffer.length) return Buffer.alloc(0);
+      return buffer.subarray(position, Math.min(position + length, buffer.length));
     },
     stream(start = 0) {
       return Readable.from([buffer.subarray(start)], { encoding: 'utf8' });

@@ -32,19 +32,49 @@ function walkTs(dir: string, acc: string[] = []): string[] {
   return acc;
 }
 
+const NDJSON_ALLOW_FILES = new Set([
+  join('automations', 'store.ts'),
+  join('data-gitignore.ts'),
+  join('runs', 'history-file.ts'),
+]);
+
+const EVENTS_PATH_ALLOW = [
+  { file: join('runs', 'store.ts'), text: 'private eventsPath(runId: string)' },
+  { file: join('runs', 'store.ts'), text: 'appendFileSync(this.eventsPath(runId)' },
+];
+
+function eventsPathViolation(rel: string, line: string): boolean {
+  if (!line.includes('eventsPath(')) return false;
+  return !EVENTS_PATH_ALLOW.some((allow) => allow.file === rel && line.includes(allow.text));
+}
+
+function ndjsonViolation(rel: string, line: string): boolean {
+  if (NDJSON_ALLOW_FILES.has(rel)) return false;
+  if (/\bfrom\s+['"][^'"]+\.ndjson['"]/.test(line)) return false;
+  if (/FIXTURES.*\.ndjson|\.ndjson.*FIXTURES/.test(line)) return false;
+  return line.includes('.ndjson');
+}
+
 describe('history readers', () => {
+  it('flags stray transcript path access', () => {
+    expect(eventsPathViolation('runs/other.ts', 'createReadStream(this.eventsPath(id))')).toBe(true);
+    expect(eventsPathViolation('runs/other.ts', 'statSync(this.eventsPath(id))')).toBe(true);
+    expect(eventsPathViolation(join('runs', 'store.ts'), 'appendFileSync(this.eventsPath(runId), line)')).toBe(false);
+    expect(eventsPathViolation(join('runs', 'store.ts'), 'private eventsPath(runId: string): string {')).toBe(false);
+    expect(ndjsonViolation('runs/store.ts', 'id + ".ndjson"')).toBe(true);
+    expect(ndjsonViolation('runs/store.ts', '`${id}.ndjson.br`')).toBe(true);
+    expect(ndjsonViolation(join('runs', 'history-file.ts'), '`${id}.ndjson`')).toBe(false);
+    expect(ndjsonViolation(join('automations', 'store.ts'), "const RECEIPTS = 'automation-receipts.ndjson';")).toBe(false);
+  });
+
   it('no module opens a transcript path directly', () => {
     const srcRoot = join(import.meta.dirname, '..');
-    const ndjsonTemplate = /\$\{[^}]*\}\.ndjson`/;
-    const allowed = 'appendFileSync(this.eventsPath(runId)';
     const hits: string[] = [];
     for (const file of walkTs(srcRoot)) {
       if (file.endsWith('.test.ts') || file.endsWith('.testkit.ts')) continue;
-      if (file.endsWith(`${join('runs', 'history-file.ts')}`)) continue;
       const rel = relative(srcRoot, file);
       for (const [index, line] of readFileSync(file, 'utf8').split('\n').entries()) {
-        if (line.includes(allowed)) continue;
-        if (ndjsonTemplate.test(line) || line.includes('appendFileSync(this.eventsPath') || line.includes('readFileSync(this.eventsPath')) {
+        if (eventsPathViolation(rel, line) || ndjsonViolation(rel, line)) {
           hits.push(`${rel}:${index + 1}:${line.trim()}`);
         }
       }
@@ -78,12 +108,16 @@ describe('history readers', () => {
     const run = store.createRun({ title: 't', workflow: 'w', task: 'task', steps: [] });
     const first = store.appendEvent(run.id, { type: 'note', message: 'old' });
     expect(await compressHistory(dir, run.id, () => true)).toBe('compressed');
-    const second = store.appendEvent(run.id, { type: 'note', message: 'new' });
+    store.close();
+    stores.pop();
+    const reopened = RunStore.open(dir);
+    stores.push(reopened);
+    const second = reopened.appendEvent(run.id, { type: 'note', message: 'new' });
     const { plain, compressed } = historyPaths(dir, run.id);
     expect(existsSync(compressed)).toBe(false);
-    const text = readFileSync(plain, 'utf8');
-    expect(text).toContain('"message":"old"');
-    expect(text).toContain('"message":"new"');
+    const lines = readFileSync(plain, 'utf8').split('\n').filter(Boolean);
+    expect(lines[0]).toContain('"message":"old"');
+    expect(lines[1]).toContain('"message":"new"');
     expect(second.seq).toBe(first.seq + 1);
   });
 });

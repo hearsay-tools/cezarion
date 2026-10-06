@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { appendFileSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { RunEvent } from '@open-mercato/cezar-contract';
 import {
@@ -408,6 +408,7 @@ describe('compressed transcript parity', () => {
     dirs.push(dataDir);
     const id = randomUUID();
     mkdirSync(join(dataDir, 'runs'));
+    const file = join(dataDir, 'runs', `${id}.ndjson`);
     const events: Array<Partial<RunEvent> & Pick<RunEvent, 'seq' | 'type'>> = [
       { seq: 1, type: 'turn.started', turnId: 't1' },
     ];
@@ -419,7 +420,7 @@ describe('compressed transcript parity', () => {
       });
     }
     writeFileSync(
-      join(dataDir, 'runs', `${id}.ndjson`),
+      file,
       events.map((event) => JSON.stringify({ ts: '2026-07-30T00:00:00.000Z', ...event })).join('\n') + '\n',
     );
 
@@ -428,16 +429,58 @@ describe('compressed transcript parity', () => {
     expect(newest.olderCursor).toBeTypeOf('string');
     const older = await readRunHistoryPage(dataDir, id, newest.olderCursor);
     expect(older.hasOlder).toBe(true);
-    const context = await deriveRunContextEvents(dataDir, id);
+    expect(older.newerCursor).toBeTypeOf('string');
     await validateLiveCursor(dataDir, id, newest.liveCursor);
-    const live = await readEventsAfterLiveCursor(dataDir, id, newest.liveCursor);
+
+    appendFileSync(
+      file,
+      [
+        JSON.stringify({ seq: 252, ts: '2026-07-30T00:00:00.000Z', type: 'note', message: 'after-1' }),
+        JSON.stringify({ seq: 253, ts: '2026-07-30T00:00:00.000Z', type: 'note', message: 'after-2' }),
+      ].join('\n') + '\n',
+    );
+
+    const livePlain = await readEventsAfterLiveCursor(dataDir, id, newest.liveCursor);
+    expect(livePlain.events.map((event) => event.seq)).toEqual([252, 253]);
+    const newerPlain = await readRunHistoryPage(dataDir, id, older.newerCursor);
+    expect(newerPlain.events.length).toBeGreaterThan(0);
+    expect(newerPlain.itemCount).toBeGreaterThan(0);
 
     expect(await compressHistory(dataDir, id, () => true)).toBe('compressed');
 
-    expect(await readRunHistoryPage(dataDir, id)).toEqual(newest);
-    expect(await readRunHistoryPage(dataDir, id, newest.olderCursor)).toEqual(older);
-    expect(await deriveRunContextEvents(dataDir, id)).toEqual(context);
-    await validateLiveCursor(dataDir, id, newest.liveCursor);
-    expect(await readEventsAfterLiveCursor(dataDir, id, newest.liveCursor)).toEqual(live);
+    expect(await readEventsAfterLiveCursor(dataDir, id, newest.liveCursor)).toEqual(livePlain);
+    expect(await readRunHistoryPage(dataDir, id, older.newerCursor)).toEqual(newerPlain);
+    await expect(
+      readEventsAfterLiveCursor(
+        dataDir,
+        id,
+        Buffer.from(
+          JSON.stringify({ v: 1, kind: 'live', offset: 2 ** 30, boundarySeq: 0 }),
+          'utf8',
+        ).toString('base64url'),
+      ),
+    ).rejects.toMatchObject({ name: 'HistoryCursorError', status: 409 });
+  });
+
+  it.each([
+    ['corrupt', Buffer.from([0xff, 0x00, 0x01, 0xaa])],
+    ['0-byte', Buffer.alloc(0)],
+  ] as const)('degrades a %s compressed transcript to an empty live page', async (_label, bytes) => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'cez-history-br-bad-'));
+    dirs.push(dataDir);
+    const id = randomUUID();
+    mkdirSync(join(dataDir, 'runs'));
+    writeFileSync(join(dataDir, 'runs', `${id}.ndjson.br`), bytes);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await expect(readRunHistoryPage(dataDir, id)).resolves.toMatchObject({
+        events: [],
+        itemCount: 0,
+        asOfSeq: 0,
+        hasOlder: false,
+      });
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

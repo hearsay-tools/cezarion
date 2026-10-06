@@ -14,7 +14,7 @@ import {
   type RunHistoryPage,
 } from '@open-mercato/cezar-contract';
 
-import { openHistorySource, type HistorySource } from './history-file.ts';
+import { emptyHistorySource, openHistorySource, type HistorySource } from './history-file.ts';
 
 const READ_CHUNK_BYTES = 64 * 1024;
 const MAX_CURSOR_BYTES = 2_048;
@@ -265,19 +265,6 @@ export function canonicalSessionItems(events: readonly RunEvent[]): CanonicalIte
   return [...items.values()].sort((a, b) => a.firstSeq - b.firstSeq);
 }
 
-function emptyHistorySource(): HistorySource {
-  return {
-    size: 0,
-    async read() {
-      return Buffer.alloc(0);
-    },
-    stream() {
-      return Readable.from([]);
-    },
-    async close() {},
-  };
-}
-
 async function withHistorySource<T>(dataDir: string, id: string, fn: (source: HistorySource) => Promise<T>): Promise<T> {
   const opened = await openHistorySource(dataDir, id);
   const source = opened ?? emptyHistorySource();
@@ -445,7 +432,14 @@ export async function readRunHistoryPage(
   onRead?: (instrumentation: HistoryReadInstrumentation) => void,
 ): Promise<RunHistoryPage> {
   const decoded = cursor === undefined ? undefined : decodePageCursor(cursor);
-  return withHistorySource(dataDir, id, async (source) => {
+  return withHistorySource(dataDir, id, (source) => pageFromSource(source, decoded, onRead));
+}
+
+async function pageFromSource(
+  source: HistorySource,
+  decoded: z.infer<typeof pageCursorSchema> | undefined,
+  onRead?: (instrumentation: HistoryReadInstrumentation) => void,
+): Promise<RunHistoryPage> {
   const currentSize = source.size;
   if (decoded && decoded.fileSize > currentSize) {
     throw new HistoryCursorError(409, 'history cursor is no longer valid — reload the newest page');
@@ -512,7 +506,6 @@ export async function readRunHistoryPage(
     asOfSeq,
     hasOlder,
   };
-  });
 }
 
 interface ContextItem {
@@ -529,7 +522,10 @@ const isSettledContextStatus = (status: string | undefined) =>
 
 /** One forward pass retaining the latest Plan snapshot and only the selector-equivalent agent episode. */
 export async function deriveRunContextEvents(dataDir: string, id: string): Promise<RunHistoryContext> {
-  return withHistorySource(dataDir, id, async (source) => {
+  return withHistorySource(dataDir, id, contextFromSource);
+}
+
+async function contextFromSource(source: HistorySource): Promise<RunHistoryContext> {
   let latestPlan: RunHistoryEvent | undefined;
   let pendingAsk: RunHistoryEvent | undefined;
   /** The pending ask's latest routing transition (#505): routed to the parent or handed back. */
@@ -661,7 +657,6 @@ export async function deriveRunContextEvents(dataDir: string, id: string): Promi
     contextEvents.set(item.latest.seq, item.latest);
   }
   return { contextEvents: [...contextEvents.values()].sort((a, b) => a.seq - b.seq), asOfSeq };
-  });
 }
 
 export async function readEventsAfterLiveCursor(dataDir: string, id: string, cursor: string): Promise<{
