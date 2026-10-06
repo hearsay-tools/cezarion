@@ -25,7 +25,9 @@ function watchdogStall(prompt) {
 // arrive over SSE afterwards, so a correct stream (v1 and v2 alike) must
 // take its turn-end from `session.idle`, never from the HTTP response.
 import { createHash } from 'node:crypto';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+// Aliased: owned-input-delivery.testkit.ts prepends its own `existsSync`/`writeFileSync` import,
+// and a second import of the same name is a SyntaxError.
+import { appendFileSync, existsSync as sessionStoreExists, mkdirSync, readFileSync, writeFileSync as sessionStoreWrite } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -66,7 +68,7 @@ function emptySessionStore() {
 }
 function readPersistedSessionStore() {
   const path = sessionStorePath();
-  if (!path || !existsSync(path)) return null;
+  if (!path || !sessionStoreExists(path)) return null;
   try {
     const parsed = JSON.parse(readFileSync(path, 'utf8'));
     if (parsed && typeof parsed === 'object' && parsed.sessions && typeof parsed.sessions === 'object') return parsed;
@@ -84,7 +86,7 @@ function saveSessionStore(store) {
   const path = sessionStorePath();
   if (!path) return;
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify(store));
+  sessionStoreWrite(path, JSON.stringify(store));
 }
 function getSession(id) {
   return loadSessionStore().sessions[id] ?? null;
