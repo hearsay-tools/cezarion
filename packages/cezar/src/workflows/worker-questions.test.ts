@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { readFileSync } from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import { join } from 'node:path';
@@ -9,12 +10,14 @@ import { CredentialRegistry } from '../delegation/credentials.ts';
 import { DelegationPolicyError } from '../delegation/policy.ts';
 import { DelegationService } from '../delegation/service.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
-import { eventCheckpoint, fixtureUpdateRun, manager, parent, register, restart, root, semaphore, store, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
+import { bookkeeping, eventCheckpoint, fixtureUpdateRun, manager, parent, register, restart, root, semaphore, store, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
 
 /** #505 PR B: a worker's question goes to its owning parent, not to the human. */
 describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () => {
-  useWorkerWaitFixture();
+  // afterEach runs in reverse registration order: keep process scoping alive
+  // through the fixture's real session/autosave shutdown, then restore mocks.
   afterEach(() => { vi.restoreAllMocks(); syncBuiltinESMExports(); });
+  useWorkerWaitFixture();
   const conversationOf = (rootId: string) => { const d = store.getRun(rootId)?.delegation; return d?.role === 'root' ? d.conversation : undefined; };
   const eventsOf = (runId: string, type: string) => store.readEvents(runId).filter(event => event.type === type);
   /** A root that may message its workers, as provisioned roots are. */
@@ -121,9 +124,16 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     } finally { f.close(); }
   });
 
-  async function replyAfterRestart(crashed: boolean) {
+  async function replyAfterRestart(crashed: boolean, holdResources = false) {
     const f = await askedPair();
     f.close();
+    const parentIdle = async () => {
+      // Routing and recovery can wake the parent. Finish that turn's real Git
+      // bookkeeping before testing a one-shot reply into a quiescent worktree.
+      await until(() => manager['waiting'].has(f.p.id));
+      await Promise.all(bookkeeping);
+    };
+    await parentIdle();
     const files = eventCheckpoint();
     if (crashed) {
       // #469: restore the worker's pre-cancel `starting` proof, as a real crash leaves it, with a dead controller.
@@ -135,33 +145,61 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     }
     await restart(false, undefined, files);
     const credentials = new CredentialRegistry();
+    let releaseHolder: (() => Promise<void>) | undefined;
     try {
       const parentCaller = credentials.authenticate(credentials.issue('project', f.p.id, randomUUID()))!;
       const service = new DelegationService();
       service.registerProject({ id: 'project', root, store, manager });
       // Recovery resumes the parent; the worker's session stays closed on its pending question.
       await until(() => ['running', 'waiting'].includes(store.getRun(f.p.id)?.status ?? '') && store.getRun(f.w.id)?.status === 'waiting');
+      await parentIdle();
       expect(manager.isActive(f.w.id)).toBe(false);
+      if (holdResources) {
+        await until(() => store.readWorkerExecution(f.w.id)?.phase === 'complete');
+        const delegation = store.getRun(f.w.id)!.delegation!;
+        if (delegation.role !== 'worker') throw Error('missing worker');
+        const holder = spawn(process.execPath, ['-e', "console.log('ready'); process.stdin.resume()"], {
+          cwd: delegation.workspace.path, stdio: ['pipe', 'pipe', 'ignore'],
+        });
+        const exited = once(holder, 'exit');
+        releaseHolder = async () => { holder.stdin.end(); await exited; };
+        await once(holder.stdout, 'data');
+        const resourcesSafe = store.workerResourcesSafe.bind(store);
+        // Release a real holder only after the first resource check sees it.
+        // Without the pre-reply wait, admission refuses the one-shot answer;
+        // closing the holder afterward cannot turn that refusal into success.
+        vi.spyOn(store, 'workerResourcesSafe').mockImplementation((...args) => {
+          const safe = resourcesSafe(...args);
+          if (args[0] === f.w.id && !safe) holder.stdin.end();
+          return safe;
+        });
+      }
       if (crashed) {
         // This case answers after the crashed execution has no possible process
         // holders. Inactive only proves our manager released it: the real #469
         // scan can still see transient Git children or unreadable same-user host
-        // processes. Wait for that physical precondition without finalizing the
-        // proof, suppressing any PIDs, or retrying the answer under test.
+        // processes. Recovery may already have finalized the execution, but that
+        // does not prove its resources can be reused (hearsay-tools/cezarion#732).
+        // Wait for that physical precondition without finalizing the proof,
+        // suppressing any PIDs, or retrying the answer under test.
         await until(() => {
           const orphan = manager['orphanedWorkerGeneration'](f.w.id);
-          return orphan ? inspectGeneration(orphan).liveness === 'gone'
-            : store.readWorkerExecution(f.w.id)?.phase === 'complete';
+          if (orphan) return inspectGeneration(orphan).liveness === 'gone';
+          const proof = store.readWorkerExecution(f.w.id);
+          const delegation = store.getRun(f.w.id)?.delegation;
+          return proof?.phase === 'complete' && delegation?.role === 'worker' &&
+            store.workerResourcesSafe(f.w.id, proof.generation, delegation.workspace.resourceId);
         });
       }
       await service.send(parentCaller, { id: randomUUID(), recipientRunId: f.w.id, kind: 'reply', requestId: f.questionId, text: 'mock:agent-echo Use the parser', timeoutSeconds: 600 });
       await until(() => answered(f.w.id).length === 1);
       await until(() => said(f.w.id, 'Use the parser'));
       expect(eventsOf(f.w.id, 'user-message').some(event => String(event.text).includes('Use the parser'))).toBe(false);
-    } finally { credentials.close(); }
+    } finally { await releaseHolder?.(); credentials.close(); }
   }
   it('a parent reply answers the worker after a restart', () => replyAfterRestart(false));
   it('a parent reply answers the worker after a crash left its execution starting (#469)', () => replyAfterRestart(true));
+  it('waits for reusable resources when recovery already completed the crashed execution (hearsay-tools/cezarion#732)', () => replyAfterRestart(true, true));
 
   it('holds a worker question while the parent waits on the human, then delivers it behind the answer', async () => {
     process.env.CEZ_DELEGATION = '1';
