@@ -1,6 +1,5 @@
-import { createReadStream } from 'node:fs';
-import { open, stat } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
+import { Readable } from 'node:stream';
 import { z } from 'zod';
 
 import {
@@ -14,6 +13,8 @@ import {
   type RunHistoryEvent,
   type RunHistoryPage,
 } from '@open-mercato/cezar-contract';
+
+import { emptyHistorySource, openHistorySource, type HistorySource } from './history-file.ts';
 
 const READ_CHUNK_BYTES = 64 * 1024;
 const MAX_CURSOR_BYTES = 2_048;
@@ -264,8 +265,23 @@ export function canonicalSessionItems(events: readonly RunEvent[]): CanonicalIte
   return [...items.values()].sort((a, b) => a.firstSeq - b.firstSeq);
 }
 
+async function withHistorySource<T>(dataDir: string, id: string, fn: (source: HistorySource) => Promise<T>): Promise<T> {
+  const opened = await openHistorySource(dataDir, id);
+  const source = opened ?? emptyHistorySource();
+  try {
+    return await fn(source);
+  } finally {
+    await source.close();
+  }
+}
+
+function streamBytesRead(input: Readable): number {
+  const value = (input as { bytesRead?: unknown }).bytesRead;
+  return typeof value === 'number' ? value : 0;
+}
+
 async function reverseEventsUntil(
-  filePath: string,
+  source: HistorySource,
   beforeSeq: number,
   wantedItems: number,
 ): Promise<{
@@ -275,108 +291,86 @@ async function reverseEventsUntil(
   reachedStart: boolean;
   bytesRead: number;
 }> {
-  let fileSize = 0;
-  try {
-    fileSize = (await stat(filePath)).size;
-  } catch {
-    return { events: [], fileSize: 0, fileHighWater: 0, reachedStart: true, bytesRead: 0 };
-  }
+  const fileSize = source.size;
   if (fileSize === 0) return { events: [], fileSize, fileHighWater: 0, reachedStart: true, bytesRead: 0 };
 
-  const handle = await open(filePath, 'r');
   let position = fileSize;
   let suffix: Buffer<ArrayBufferLike> = Buffer.alloc(0);
   const reversed: RunHistoryEvent[] = [];
   let reachedStart = false;
   let totalBytesRead = 0;
   let fileHighWater = 0;
-  try {
-    while (position > 0) {
-      const length = Math.min(READ_CHUNK_BYTES, position);
-      position -= length;
-      const buffer = Buffer.allocUnsafe(length);
-      const { bytesRead } = await handle.read(buffer, 0, length, position);
-      totalBytesRead += bytesRead;
-      const split = completeReverseLines(buffer.subarray(0, bytesRead), suffix);
-      suffix = split.prefix;
-      const { lines } = split;
-      for (let index = lines.length - 1; index >= 0; index -= 1) {
-        const event = parseLine(lines[index]!);
-        if (event) {
-          fileHighWater = Math.max(fileHighWater, event.seq);
-          if (event.seq < beforeSeq) reversed.push(event);
-        }
-      }
-      const chronological = [...reversed].reverse();
-      if (
-        canonicalSessionItems(chronological).length >= wantedItems + 1 &&
-        chronological.some((event) => event.type === 'user-message' || event.type === 'turn.started')
-      ) {
-        break;
-      }
-    }
-    if (position === 0) {
-      reachedStart = true;
-      const event = parseLine(suffix.toString('utf8'));
+  while (position > 0) {
+    const length = Math.min(READ_CHUNK_BYTES, position);
+    position -= length;
+    const buffer = await source.read(position, length);
+    totalBytesRead += buffer.length;
+    const split = completeReverseLines(buffer, suffix);
+    suffix = split.prefix;
+    const { lines } = split;
+    for (let index = lines.length - 1; index >= 0; index -= 1) {
+      const event = parseLine(lines[index]!);
       if (event) {
         fileHighWater = Math.max(fileHighWater, event.seq);
         if (event.seq < beforeSeq) reversed.push(event);
       }
     }
-  } finally {
-    await handle.close();
+    const chronological = [...reversed].reverse();
+    if (
+      canonicalSessionItems(chronological).length >= wantedItems + 1 &&
+      chronological.some((event) => event.type === 'user-message' || event.type === 'turn.started')
+    ) {
+      break;
+    }
+  }
+  if (position === 0) {
+    reachedStart = true;
+    const event = parseLine(suffix.toString('utf8'));
+    if (event) {
+      fileHighWater = Math.max(fileHighWater, event.seq);
+      if (event.seq < beforeSeq) reversed.push(event);
+    }
   }
   return { events: reversed.reverse(), fileSize, fileHighWater, reachedStart, bytesRead: totalBytesRead };
 }
 
-async function readFileTail(filePath: string): Promise<{ fileSize: number; fileHighWater: number; bytesRead: number }> {
-  let fileSize = 0;
-  try {
-    fileSize = (await stat(filePath)).size;
-  } catch {
-    return { fileSize: 0, fileHighWater: 0, bytesRead: 0 };
-  }
+async function readFileTail(source: HistorySource): Promise<{ fileSize: number; fileHighWater: number; bytesRead: number }> {
+  const fileSize = source.size;
   if (fileSize === 0) return { fileSize, fileHighWater: 0, bytesRead: 0 };
-  const handle = await open(filePath, 'r');
   let position = fileSize;
   let suffix: Buffer<ArrayBufferLike> = Buffer.alloc(0);
   let totalBytesRead = 0;
-  try {
-    while (position > 0) {
-      const length = Math.min(READ_CHUNK_BYTES, position);
-      position -= length;
-      const buffer = Buffer.allocUnsafe(length);
-      const { bytesRead } = await handle.read(buffer, 0, length, position);
-      totalBytesRead += bytesRead;
-      const split = completeReverseLines(buffer.subarray(0, bytesRead), suffix);
-      suffix = split.prefix;
-      const { lines } = split;
-      for (let index = lines.length - 1; index >= 0; index -= 1) {
-        const event = parseLine(lines[index]!);
-        if (event) return { fileSize, fileHighWater: event.seq, bytesRead: totalBytesRead };
-      }
+  while (position > 0) {
+    const length = Math.min(READ_CHUNK_BYTES, position);
+    position -= length;
+    const buffer = await source.read(position, length);
+    totalBytesRead += buffer.length;
+    const split = completeReverseLines(buffer, suffix);
+    suffix = split.prefix;
+    const { lines } = split;
+    for (let index = lines.length - 1; index >= 0; index -= 1) {
+      const event = parseLine(lines[index]!);
+      if (event) return { fileSize, fileHighWater: event.seq, bytesRead: totalBytesRead };
     }
-    return {
-      fileSize,
-      fileHighWater: parseLine(suffix.toString('utf8'))?.seq ?? 0,
-      bytesRead: totalBytesRead,
-    };
-  } finally {
-    await handle.close();
   }
+  return {
+    fileSize,
+    fileHighWater: parseLine(suffix.toString('utf8'))?.seq ?? 0,
+    bytesRead: totalBytesRead,
+  };
 }
 
 async function forwardEventsUntil(
-  filePath: string,
+  source: HistorySource,
   afterSeq: number,
   wantedItems: number,
 ): Promise<{ events: RunHistoryEvent[]; reachedEnd: boolean; bytesRead: number }> {
   const events: RunHistoryEvent[] = [];
   let previousBoundary: RunHistoryEvent | undefined;
   let reachedEnd = true;
-  let input: ReturnType<typeof createReadStream> | undefined;
+  let input: Readable | undefined;
   try {
-    input = createReadStream(filePath, { encoding: 'utf8' });
+    input = source.stream();
     const lines = createInterface({ input, crlfDelay: Infinity });
     for await (const line of lines) {
       const event = parseLine(line);
@@ -397,7 +391,7 @@ async function forwardEventsUntil(
   } finally {
     input?.destroy();
   }
-  return { events, reachedEnd, bytesRead: input?.bytesRead ?? 0 };
+  return { events, reachedEnd, bytesRead: input ? streamBytesRead(input) : 0 };
 }
 
 function pageEventSlice(events: RunHistoryEvent[], selected: CanonicalItem[]): RunHistoryEvent[] {
@@ -432,22 +426,31 @@ export interface HistoryReadInstrumentation {
 }
 
 export async function readRunHistoryPage(
-  filePath: string,
+  dataDir: string,
+  id: string,
   cursor?: string,
   onRead?: (instrumentation: HistoryReadInstrumentation) => void,
 ): Promise<RunHistoryPage> {
   const decoded = cursor === undefined ? undefined : decodePageCursor(cursor);
-  const currentSize = await stat(filePath).then(({ size }) => size).catch(() => 0);
+  return withHistorySource(dataDir, id, (source) => pageFromSource(source, decoded, onRead));
+}
+
+async function pageFromSource(
+  source: HistorySource,
+  decoded: z.infer<typeof pageCursorSchema> | undefined,
+  onRead?: (instrumentation: HistoryReadInstrumentation) => void,
+): Promise<RunHistoryPage> {
+  const currentSize = source.size;
   if (decoded && decoded.fileSize > currentSize) {
     throw new HistoryCursorError(409, 'history cursor is no longer valid — reload the newest page');
   }
-  const highWaterRead = await readFileTail(filePath);
+  const highWaterRead = await readFileTail(source);
   const forward = decoded?.direction === 'newer'
-    ? await forwardEventsUntil(filePath, decoded.boundarySeq, RUN_HISTORY_PAGE_ITEMS)
+    ? await forwardEventsUntil(source, decoded.boundarySeq, RUN_HISTORY_PAGE_ITEMS)
     : undefined;
   const reverse = forward === undefined
     ? await reverseEventsUntil(
-        filePath,
+        source,
         decoded?.boundarySeq ?? Number.MAX_SAFE_INTEGER,
         RUN_HISTORY_PAGE_ITEMS,
       )
@@ -518,7 +521,11 @@ const isSettledContextStatus = (status: string | undefined) =>
   status !== undefined && status !== 'pending' && status !== 'running';
 
 /** One forward pass retaining the latest Plan snapshot and only the selector-equivalent agent episode. */
-export async function deriveRunContextEvents(filePath: string): Promise<RunHistoryContext> {
+export async function deriveRunContextEvents(dataDir: string, id: string): Promise<RunHistoryContext> {
+  return withHistorySource(dataDir, id, contextFromSource);
+}
+
+async function contextFromSource(source: HistorySource): Promise<RunHistoryContext> {
   let latestPlan: RunHistoryEvent | undefined;
   let pendingAsk: RunHistoryEvent | undefined;
   /** The pending ask's latest routing transition (#505): routed to the parent or handed back. */
@@ -568,7 +575,7 @@ export async function deriveRunContextEvents(filePath: string): Promise<RunHisto
   };
 
   try {
-    const input = createReadStream(filePath, { encoding: 'utf8' });
+    const input = source.stream();
     const lines = createInterface({ input, crlfDelay: Infinity });
     for await (const line of lines) {
       const event = parseLine(line);
@@ -652,47 +659,38 @@ export async function deriveRunContextEvents(filePath: string): Promise<RunHisto
   return { contextEvents: [...contextEvents.values()].sort((a, b) => a.seq - b.seq), asOfSeq };
 }
 
-export async function readEventsAfterLiveCursor(filePath: string, cursor: string): Promise<{
+export async function readEventsAfterLiveCursor(dataDir: string, id: string, cursor: string): Promise<{
   events: RunHistoryEvent[];
   boundarySeq: number;
 }> {
   const decoded = decodeLiveCursor(cursor);
-  let fileSize = 0;
-  try {
-    fileSize = (await stat(filePath)).size;
-  } catch {
-    if (decoded.offset === 0) return { events: [], boundarySeq: decoded.boundarySeq };
-    throw new HistoryCursorError(409, 'history cursor is no longer valid — reload the newest page');
-  }
-  if (decoded.offset > fileSize) {
-    throw new HistoryCursorError(409, 'history cursor is no longer valid — reload the newest page');
-  }
-  if (decoded.offset === fileSize) return { events: [], boundarySeq: decoded.boundarySeq };
-  const text = await new Promise<string>((resolve, reject) => {
-    let value = '';
-    const stream = createReadStream(filePath, { encoding: 'utf8', start: decoded.offset });
-    stream.on('data', (chunk: string | Buffer) => {
-      value += chunk.toString();
+  return withHistorySource(dataDir, id, async (source) => {
+    const fileSize = source.size;
+    if (decoded.offset > fileSize) {
+      throw new HistoryCursorError(409, 'history cursor is no longer valid — reload the newest page');
+    }
+    if (decoded.offset === fileSize) return { events: [], boundarySeq: decoded.boundarySeq };
+    const text = await new Promise<string>((resolve, reject) => {
+      let value = '';
+      const stream = source.stream(decoded.offset);
+      stream.on('data', (chunk: string | Buffer) => {
+        value += chunk.toString();
+      });
+      stream.on('end', () => resolve(value));
+      stream.on('error', reject);
     });
-    stream.on('end', () => resolve(value));
-    stream.on('error', reject);
+    return {
+      events: text.split('\n').map(parseLine).filter((event): event is RunHistoryEvent => event !== null),
+      boundarySeq: decoded.boundarySeq,
+    };
   });
-  return {
-    events: text.split('\n').map(parseLine).filter((event): event is RunHistoryEvent => event !== null),
-    boundarySeq: decoded.boundarySeq,
-  };
 }
 
-export async function validateLiveCursor(filePath: string, cursor: string): Promise<void> {
+export async function validateLiveCursor(dataDir: string, id: string, cursor: string): Promise<void> {
   const decoded = decodeLiveCursor(cursor);
-  let fileSize = 0;
-  try {
-    fileSize = (await stat(filePath)).size;
-  } catch {
-    if (decoded.offset === 0) return;
-    throw new HistoryCursorError(409, 'history cursor is no longer valid — reload the newest page');
-  }
-  if (decoded.offset > fileSize) {
-    throw new HistoryCursorError(409, 'history cursor is no longer valid — reload the newest page');
-  }
+  await withHistorySource(dataDir, id, async (source) => {
+    if (decoded.offset > source.size) {
+      throw new HistoryCursorError(409, 'history cursor is no longer valid — reload the newest page');
+    }
+  });
 }

@@ -313,6 +313,9 @@ export class ProjectContexts {
         await reclaimWorktrees(project.root, store, keep, { previewHost: this.deps.preview }).catch(() => [] as string[]);
       }
       await manager.recover();
+      // Archived transcripts left plain (or both-present after a crash) — fire-and-forget,
+      // never delays boot (#818).
+      store.compressArchivedHistory();
       this.deps.afterRecover?.({ id: project.id, root: project.root, store, manager });
       // Which repository this project IS (#945), so the referenced tier stops adopting another
       // repo's PR/issue as a task's subject. Fire-and-forget on purpose — it costs a `gh` spawn

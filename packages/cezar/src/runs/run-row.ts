@@ -6,6 +6,11 @@ import type { RunRecord } from './store.ts';
 
 const LIVE_STATUSES: ReadonlySet<string> = new Set(['queued', 'running', 'waiting']);
 
+/** Status-only live predicate: queued, running or waiting. */
+export function isLiveStatus(status: string): boolean {
+  return LIVE_STATUSES.has(status);
+}
+
 /**
  * Whether this record says the run is still in motion (#779, Amendment 2 item 5): what puts a
  * row in the `live` column, so `RunStore.open` loads and recovers it, and what keeps a record in
