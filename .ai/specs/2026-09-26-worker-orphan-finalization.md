@@ -98,8 +98,18 @@ A synchronous, dependency-free module (a sync probe lets `continueRun` stay sync
   reboot and is indistinguishable from an ambient daemon whose cwd cannot be read.
 
   `inspectGeneration` is the independent **resource** proof. It always scans every protected
-  worktree/scratch path with no age or boot exclusion. EACCES/EPERM (and unknown ownership)
+  worktree/scratch path with no boot exclusion. EACCES/EPERM (and unknown ownership)
   remain unresolved candidates; readable holders and live recorded processes remain blockers.
+  **Destroy is the one age exclusion (hearsay-tools/cezarion#858).** Worker destroy passes
+  `holdersSince` (`workerProcessCutoff`: the worker's `createdAt` less 1 s) to the store proof
+  (`workerResourceHolders(..., { deleting: true })`) and to the scan right before
+  `git worktree remove`. An unreadable own-user process that started before the worker is
+  ambient (login `sshd`, `systemd --user`, `gpg-agent`) and no longer blocks deletion; without
+  this, destroy never completed on a normal Linux host. A later unreadable process, a readable
+  cwd under the path and a live recorded process still block, and the incomplete destroy error
+  names their PIDs. Accepted risk, the same as execution proof's: an unreadable process older than
+  the worker that later changed into its worktree is deleted under. Reuse/admission, scratch
+  cleanup, history deletion and reclaim keep the scan with no age exclusion.
   Only a fresh clear scan plus generation/resource ownership permits deletion or reuse.
   A process becoming readable and outside the protected paths, or exiting, may clear the
   uncertainty; elapsed time or reboot cannot. Unknown evidence is retained, never silently dropped.
