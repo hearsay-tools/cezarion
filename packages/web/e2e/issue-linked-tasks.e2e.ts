@@ -16,7 +16,7 @@ it.each(['light', 'dark'] as const)('discloses parent tasks with pointer and key
     { id: 'linked-worker', title: 'Owned worker must stay hidden', delegation: { role: 'worker', parentRunId: 'linked-parent' } },
   ].map(run => ({ task: run.title, workflow: 'quick-task', status: 'done', createdAt: '2026-10-01T12:00:00Z', tokensUsed: 0, steps: [], issueNumber: number, ...run }))
   const toggle = '[data-slot="gh-detail"] h3 button[aria-expanded]'
-  browser.routeJson('*/run-summaries', runs)
+  browser.routeJson('*/run-summaries*', runs)
   browser.setReducedMotion()
   browser.setViewport(360, 640)
   try {
@@ -52,5 +52,5 @@ it.each(['light', 'dark'] as const)('discloses parent tasks with pointer and key
     browser.waitForFunction(`document.activeElement?.getAttribute('href') === '${scoped('/tasks/linked-parent')}'`)
     browser.press('Enter')
     browser.waitForFunction(`location.pathname === '${scoped('/tasks/linked-parent')}'`)
-  } finally { browser.unroute('*/run-summaries') }
+  } finally { browser.unroute('*/run-summaries*') }
 }, 90_000)
