@@ -448,6 +448,51 @@ describe('mid-turn human follow-up parity — #486', () => {
     });
   }, 30_000);
 
+  it('codex in-turn admitted unread steer restarts as turn/start before close (#486)', async () => {
+    // Steer RPC succeeds while the turn is still active; the mock never echoes the
+    // userMessage. Admission is not a read — the follow-up must run as its own turn.
+    await withMockLogs(async ({ argsFile, stdinFile, releaseFile, files, release }) => {
+      await driveRun('codex', 'hold-done', run =>
+        ['done', 'review', 'failed', 'waiting'].includes(run?.status ?? ''), 20_000,
+        async ({ store, runId }) => {
+          expect(['done', 'review']).toContain(store.getRun(runId)?.status);
+          expect(turnStartsCarryingKeep(files)).toBe(1);
+          followUpConsumedBeforeClose(store.readEvents(runId));
+        }, {
+          env: {
+            CEZ_MOCK_ARGS_FILE: argsFile, CEZ_MOCK_STDIN_FILE: stdinFile, CEZ_MOCK_RELEASE_FILE: releaseFile,
+            CEZ_MOCK_CODEX_NO_STEER_ECHO: '1',
+          },
+          during: async ({ manager, runId, store }) => {
+            await waitFor(() => store.readEvents(runId).some(e => e.type === 'turn.started'));
+            expect(manager.sendMessage(runId, [{ type: 'text', text: `${KEEP} mock:done` }])).toBe(true);
+            await waitForHumanSteer(files);
+            release();
+          },
+        });
+    });
+  }, 30_000);
+
+  it('codex in-turn echoed steer does not restart as a second turn/start (#486)', async () => {
+    await withMockLogs(async ({ argsFile, stdinFile, releaseFile, files, release }) => {
+      await driveRun('codex', 'hold-done', run =>
+        ['done', 'review', 'failed', 'waiting'].includes(run?.status ?? ''), 20_000,
+        async ({ store, runId }) => {
+          expect(['done', 'review']).toContain(store.getRun(runId)?.status);
+          expect(turnStartsCarryingKeep(files)).toBe(0);
+          followUpConsumedBeforeClose(store.readEvents(runId));
+        }, {
+          env: { CEZ_MOCK_ARGS_FILE: argsFile, CEZ_MOCK_STDIN_FILE: stdinFile, CEZ_MOCK_RELEASE_FILE: releaseFile },
+          during: async ({ manager, runId, store }) => {
+            await waitFor(() => store.readEvents(runId).some(e => e.type === 'turn.started'));
+            expect(manager.sendMessage(runId, [{ type: 'text', text: `${KEEP} mock:done` }])).toBe(true);
+            await waitForHumanSteer(files);
+            release();
+          },
+        });
+    });
+  }, 30_000);
+
   it('codex unread race restarts the follow-up as a turn before close (#486)', async () => {
     // mock:steer-race already answers completed then the steer error; do not wrap it
     // with the reverse bin (that wrapper would hold the error until a later completed).

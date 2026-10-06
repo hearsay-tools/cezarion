@@ -176,6 +176,8 @@ class CodexSession implements AgentSession {
   private readonly releasedHuman = new Set<string>();
   /** Human client ids already echoed as an in-turn userMessage (read-in-turn). */
   private readonly echoedHuman = new Set<string>();
+  /** Human steers admitted in-turn and not yet echoed; restarted on turn end (#486). */
+  private readonly unreadHumanSteers = new Map<string, string>();
   /** Submissions that opened a turn via turn/start rather than steering one. */
   private readonly turnStartSubmissions = new Set<string>();
   /** Recent main-thread turn outcomes (true = completed without error), for a late turn/start response. */
@@ -482,12 +484,7 @@ class CodexSession implements AgentSession {
           this.emit({ type: 'note', message: `codex: turn failed: ${message}` });
         }
       })
-      .finally(() => {
-        this.humanSteerIds.delete(clientUserMessageId);
-        this.releaseHumanPrompt(clientUserMessageId);
-        this.releasedHuman.delete(clientUserMessageId);
-        this.echoedHuman.delete(clientUserMessageId);
-      });
+      .finally(() => this.finishHumanSteer(clientUserMessageId));
     return true;
   }
 
@@ -506,6 +503,54 @@ class CodexSession implements AgentSession {
     this.releasedHuman.add(clientUserMessageId);
     this.humanPromptsPending = Math.max(0, this.humanPromptsPending - 1);
     if (notify) this.notifyHumanInputDrained();
+  }
+
+  /** Drop bookkeeping once this id is no longer waiting for an echo or a restart. */
+  private finishHumanSteer(clientUserMessageId: string): void {
+    if (this.unreadHumanSteers.has(clientUserMessageId)) return;
+    this.humanSteerIds.delete(clientUserMessageId);
+    this.releaseHumanPrompt(clientUserMessageId);
+    this.releasedHuman.delete(clientUserMessageId);
+    this.echoedHuman.delete(clientUserMessageId);
+  }
+
+  /** turn/steer admitted this id into a live turn; keep holding until echo or turn end. */
+  private holdUnreadHumanSteer(clientUserMessageId: string, text: string): void {
+    this.unreadHumanSteers.set(clientUserMessageId, text);
+  }
+
+  /** Read-in-turn: the userMessage echo is the read. Do not restart this id. */
+  private noteHumanEcho(clientId: string): void {
+    if (!this.humanSteerIds.has(clientId)) return;
+    this.echoedHuman.add(clientId);
+    const heldUnread = this.unreadHumanSteers.delete(clientId);
+    this.releaseHumanPrompt(clientId);
+    if (heldUnread) this.finishHumanSteer(clientId);
+  }
+
+  /** Admitted but never echoed: start a turn under the same clientUserMessageId. */
+  private restartUnreadHumanSteers(): void {
+    if (this.unreadHumanSteers.size === 0) return;
+    const pending = [...this.unreadHumanSteers];
+    this.unreadHumanSteers.clear();
+    if (this.autoEndTimer) {
+      clearTimeout(this.autoEndTimer);
+      this.autoEndTimer = undefined;
+    }
+    for (const [id, text] of pending) {
+      if (!this.open || this.echoedHuman.has(id)) {
+        this.finishHumanSteer(id);
+        continue;
+      }
+      void this.startOrSteerTurn(text, id)
+        .catch((err: unknown) => {
+          if (this.stdinOpen) {
+            const message = err instanceof Error ? err.message : String(err);
+            this.emit({ type: 'note', message: `codex: turn failed: ${message}` });
+          }
+        })
+        .finally(() => this.finishHumanSteer(id));
+    }
   }
 
   private notifyHumanInputDrained(): void {
@@ -561,6 +606,10 @@ class CodexSession implements AgentSession {
     this.clearStreamRetry();
     this.stdinOpen = false;
     this.humanReadyOnTurnStart = false;
+    for (const id of [...this.unreadHumanSteers.keys()]) {
+      this.unreadHumanSteers.delete(id);
+      this.finishHumanSteer(id);
+    }
     this.rejectPendingUserInput(reason);
     this.agentInputReady = false;
     if (this.startupTimer) clearTimeout(this.startupTimer);
@@ -697,6 +746,11 @@ class CodexSession implements AgentSession {
           !this.activeTurnId && !echoed &&
           (this.submissions.has(clientUserMessageId) || this.humanSteerIds.has(clientUserMessageId));
         if (!stranded) {
+          // Admission is not a read: keep a human steer held until echo or turn end.
+          if (humanId && this.activeTurnId && !echoed) {
+            this.holdUnreadHumanSteer(humanId, text);
+            return;
+          }
           if (humanId) this.releaseHumanPrompt(humanId);
           return;
         }
@@ -750,13 +804,14 @@ class CodexSession implements AgentSession {
           this.humanPromptByRpc.delete(msg.id);
           this.humanStartRpcs.delete(msg.id);
         }
-        // Keep holding a steer whose turn already ended; release a turn/start
-        // response (the restart/idle prompt was accepted) even before turn/started.
-        // Defer the ready hint until turn/started so run.ts does not settle the
-        // previous DONE/idle boundary before the follow-up turn exists.
-        if (this.activeTurnId || startRpc) {
-          const startError = startRpc && msg.error !== undefined;
-          const deferHint = startRpc && !this.activeTurnId && !startError;
+        // A turn/steer result is admission, not a read (#486 review). Keep holding
+        // until the userMessage echo or the turn ends. turn/start still releases:
+        // the follow-up/idle prompt was accepted (or failed). Defer the ready hint
+        // until turn/started so run.ts does not settle the previous DONE/idle
+        // boundary before the follow-up turn exists.
+        if (startRpc) {
+          const startError = msg.error !== undefined;
+          const deferHint = !this.activeTurnId && !startError;
           if (deferHint) this.humanReadyOnTurnStart = true;
           else if (startError) this.humanReadyOnTurnStart = false;
           this.releaseHumanPrompt(humanClient, !deferHint);
@@ -884,7 +939,7 @@ class CodexSession implements AgentSession {
         if (type === 'userMessage' && !this.isForeignThreadTurn(params)) {
           // The model received this input now; `clientId` names our submission (#505).
           const clientId = stringField(item, 'clientId');
-          if (clientId && this.humanSteerIds.has(clientId)) this.echoedHuman.add(clientId);
+          if (clientId) this.noteHumanEcho(clientId);
           const ids = clientId ? this.submissions.consume(clientId) : [];
           if (ids.length) this.opts.onAgentInputConsumed?.(ids);
         }
@@ -954,7 +1009,8 @@ class CodexSession implements AgentSession {
         const unconsumedInputIds = this.submissions.takeUnconsumed();
         if (this.inFlightSubmissionId && inFlight.length) this.submissions.accept(this.inFlightSubmissionId, inFlight, '');
         this.emit(unconsumedInputIds.length ? { type: 'turn-end', unconsumedInputIds } : { type: 'turn-end' });
-        this.scheduleAutoEnd();
+        if (this.unreadHumanSteers.size) this.restartUnreadHumanSteers();
+        else this.scheduleAutoEnd();
         break;
       }
       default:

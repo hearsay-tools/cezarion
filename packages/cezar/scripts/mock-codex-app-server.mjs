@@ -48,7 +48,9 @@ let pendingSteers = [];
 let steerEchoSerial = 0;
 const emit = (obj) => {
   const ending = (obj.method === 'turn/completed' || obj.method === 'turn/failed') && (!obj.params?.threadId || obj.params.threadId === 'th_mock_1');
-  if (ending && obj.method === 'turn/completed' && pendingSteers.length) {
+  // #486 review: CEZ_MOCK_CODEX_NO_STEER_ECHO=1 admits the steer (RPC result) but never
+  // echoes its userMessage, so an accepted-but-unread follow-up can complete the turn.
+  if (ending && obj.method === 'turn/completed' && pendingSteers.length && process.env.CEZ_MOCK_CODEX_NO_STEER_ECHO !== '1') {
     const turnId = activeTurnId ?? 'turn_mock_1';
     for (const entry of pendingSteers.splice(0)) {
       const item = { type: 'userMessage', id: `item_user_generic_${++steerEchoSerial}`, clientId: entry.clientId, content: [{ type: 'text', text: entry.text }] };
