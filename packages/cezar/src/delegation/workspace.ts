@@ -336,7 +336,9 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
             !(await registered()).includes(`worktree ${workspace.path}`) && !await branchExists()) {
           assertCurrent?.();
           await beforeRemove?.();
-          remaining = [];
+          assertCurrent?.();
+          if (!await exists(workspace.path) && !await exists(receipt.gitDir) &&
+              !(await registered()).includes(`worktree ${workspace.path}`) && !await branchExists()) remaining = [];
         }
         return result();
       }
