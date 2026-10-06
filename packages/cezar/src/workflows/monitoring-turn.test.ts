@@ -215,6 +215,10 @@ for (const backend of RUNNER_IDS) describe(`${backend} monitoring turn`, { timeo
           process.env.CEZ_REVIEW_GATE = '1';
           const cwd = run().worktreePath!;
           expect(cwd).toBeDefined();
+          // The run reads `waiting` while the turn-end's diff stat (`git add -N .`, via
+          // trackTurnEnd) can still hold this worktree's index.lock; a `git add` racing it
+          // failed with "index.lock: File exists" in PR #871's CI and two local full runs.
+          await until(() => !manager['executions'].get(p.id)?.turns.size);
           writeFileSync(join(cwd, 'review.txt'), 'review this change');
           execFileSync('git', ['add', 'review.txt'], { cwd });
           execFileSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@local', 'commit', '-qm', 'review change'], { cwd });
