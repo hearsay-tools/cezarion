@@ -365,6 +365,9 @@ describe('task thread', () => {
   })
 
   it('collapsing the plan section folds the list away and keeps its odometer', () => {
+    // Local repro: `npm run test:e2e -- task-thread.e2e.ts` failed here (49/50 passed):
+    // the header moved from y=664.53 to y=542.53. This wait gives 50/50; evidence:
+    // https://github.com/hearsay-tools/cezarion/pull/853#issuecomment-6006814817
     // Expanding the checklist moves the dock. Let its geometry and animations settle
     // before targeting the plan header again, so the click lands on that header.
     settleVisual(browser, '[data-slot="run-activity-dock"]')
