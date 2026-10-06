@@ -7,6 +7,7 @@ import * as historyFile from './history-file.ts';
 export class HistoryCompressor {
   private readonly queue: string[] = [];
   private readonly queued = new Set<string>();
+  private readonly retries = new Map<string, number>();
   private running: string | null = null;
   private draining = false;
   private stopped = false;
@@ -17,7 +18,7 @@ export class HistoryCompressor {
     private readonly isEligible: (id: string) => boolean,
   ) {}
 
-  /** Dedupes; starts draining if idle. */
+  /** Dedupes; starts draining if idle. Does no file I/O inline. */
   enqueue(id: string): void {
     if (this.stopped) return;
     if (this.queued.has(id)) return;
@@ -28,6 +29,7 @@ export class HistoryCompressor {
 
   /** Drops a queued (not running) job. */
   cancel(id: string): void {
+    this.retries.delete(id);
     if (!this.queued.has(id)) return;
     this.queued.delete(id);
     const index = this.queue.indexOf(id);
@@ -46,13 +48,15 @@ export class HistoryCompressor {
     this.stopped = true;
     this.queue.length = 0;
     this.queued.clear();
+    this.retries.clear();
     this.notifyIdle();
   }
 
   private drain(): void {
     if (this.draining || this.stopped) return;
     this.draining = true;
-    void this.loop();
+    // Yield so setArchived/archiveFinished return without reading files (N3).
+    queueMicrotask(() => { void this.loop(); });
   }
 
   private async loop(): Promise<void> {
@@ -62,8 +66,18 @@ export class HistoryCompressor {
         this.queued.delete(id);
         this.running = id;
         try {
-          await historyFile.compressHistory(this.dataDir, id, () => !this.stopped && this.isEligible(id));
+          if (!this.isEligible(id)) {
+            this.retries.delete(id);
+            continue;
+          }
+          const result = await historyFile.compressHistory(
+            this.dataDir,
+            id,
+            () => !this.stopped && this.isEligible(id),
+          );
+          this.afterJob(id, result);
         } catch {
+          this.retries.delete(id);
           // Best effort, like retention.
         } finally {
           this.running = null;
@@ -74,6 +88,21 @@ export class HistoryCompressor {
       this.notifyIdle();
       if (!this.stopped && this.queue.length > 0) this.drain();
     }
+  }
+
+  private afterJob(id: string, result: 'compressed' | 'skipped' | 'changed'): void {
+    if (result === 'changed' && !this.stopped && this.isEligible(id)) {
+      const n = this.retries.get(id) ?? 0;
+      if (n < 3) {
+        this.retries.set(id, n + 1);
+        if (!this.queued.has(id)) {
+          this.queued.add(id);
+          this.queue.push(id);
+        }
+        return;
+      }
+    }
+    this.retries.delete(id);
   }
 
   private notifyIdle(): void {

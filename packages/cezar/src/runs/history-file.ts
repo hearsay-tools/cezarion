@@ -1,20 +1,21 @@
 /**
  * Both on-disk forms of a run transcript: `runs/<id>.ndjson` and `runs/<id>.ndjson.br`.
  *
- * Plain wins whenever both exist — readers return the plain file, and restoreHistory unlinks
- * the `.br`. compressHistory commits in one synchronous block: re-check stillEligible() and
- * that the plain file's size and mtime are unchanged since the read, then rename tmp → `.br`
- * and unlink plain. A crash between rename and unlink leaves both files; the next reader still
- * returns the plain content.
+ * Readers always return the plain file when it exists. restoreHistory drops the `.br` only when
+ * its decoded bytes are a byte prefix of the plain file; otherwise it keeps the compressed bytes
+ * as `.ndjson.br.orphaned`. compressHistory reads and writes tmp asynchronously, then commits in
+ * one synchronous block: re-check stillEligible() and that the plain file's size and mtime are
+ * unchanged since the read, then rename tmp → `.br` and unlink plain. A size/mtime move returns
+ * `'changed'` so the compressor can retry; ineligible or missing plain returns `'skipped'`.
  */
+import { randomBytes } from 'node:crypto';
 import {
   closeSync,
   existsSync,
-  fstatSync,
   fsyncSync,
   openSync,
+  readdirSync,
   readFileSync,
-  readSync,
   renameSync,
   rmSync,
   statSync,
@@ -39,10 +40,12 @@ const brotliCompressAsync = promisify(brotliCompress);
 const brotliDecompressAsync = promisify(brotliDecompress);
 const brotliParams = { params: { [zlibConstants.BROTLI_PARAM_QUALITY]: HISTORY_BROTLI_QUALITY } };
 const warnedUndecodable = new Set<string>();
+const warnedOrphaned = new Set<string>();
 
-export function historyPaths(dataDir: string, id: string): { plain: string; compressed: string } {
+export function historyPaths(dataDir: string, id: string): { plain: string; compressed: string; orphaned: string } {
   const plain = join(dataDir, 'runs', `${id}.ndjson`);
-  return { plain, compressed: `${plain}.br` };
+  const compressed = `${plain}.br`;
+  return { plain, compressed, orphaned: `${compressed}.orphaned` };
 }
 
 export function hasPlainHistory(dataDir: string, id: string): boolean {
@@ -124,11 +127,11 @@ export async function compressHistory(
   dataDir: string,
   id: string,
   stillEligible: () => boolean,
-): Promise<'compressed' | 'skipped'> {
+): Promise<'compressed' | 'skipped' | 'changed'> {
   const { plain, compressed } = historyPaths(dataDir, id);
-  let fd: number;
+  let handle: FileHandle;
   try {
-    fd = openSync(plain, 'r');
+    handle = await open(plain, 'r');
   } catch (error) {
     if (isNotFound(error)) return 'skipped';
     throw error;
@@ -136,17 +139,17 @@ export async function compressHistory(
   let st: Stats;
   let bytes: Buffer;
   try {
-    st = fstatSync(fd);
+    st = await handle.stat();
     bytes = Buffer.allocUnsafe(st.size);
-    const bytesRead = st.size === 0 ? 0 : readSync(fd, bytes, 0, st.size, 0);
+    const { bytesRead } = st.size === 0 ? { bytesRead: 0 } : await handle.read(bytes, 0, st.size, 0);
     if (bytesRead !== st.size) bytes = bytes.subarray(0, bytesRead);
   } finally {
-    closeSync(fd);
+    await handle.close();
   }
   const encoded = await brotliCompressAsync(bytes, brotliParams);
-  const tmp = `${compressed}.tmp`;
+  const tmp = `${compressed}.${process.pid}.${randomBytes(8).toString('hex')}.tmp`;
   try {
-    writeTmpSync(tmp, encoded);
+    await writeTmpAsync(tmp, encoded);
     if (!stillEligible()) {
       rmSync(tmp, { force: true });
       return 'skipped';
@@ -160,7 +163,7 @@ export async function compressHistory(
     }
     if (current.size !== st.size || current.mtimeMs !== st.mtimeMs) {
       rmSync(tmp, { force: true });
-      return 'skipped';
+      return 'changed';
     }
     renameSync(tmp, compressed);
     unlinkSync(plain);
@@ -172,9 +175,9 @@ export async function compressHistory(
 }
 
 export function restoreHistory(dataDir: string, id: string): void {
-  const { plain, compressed } = historyPaths(dataDir, id);
+  const { plain, compressed, orphaned } = historyPaths(dataDir, id);
   if (existsSync(plain)) {
-    rmSync(compressed, { force: true });
+    disposeCompressedBesidePlain(plain, compressed, orphaned);
     return;
   }
   let encoded: Buffer;
@@ -192,7 +195,7 @@ export function restoreHistory(dataDir: string, id: string): void {
     warnUndecodable(compressed, `; renamed to ${corrupt}`);
     return;
   }
-  const tmp = `${plain}.tmp`;
+  const tmp = `${plain}.${process.pid}.${randomBytes(8).toString('hex')}.tmp`;
   try {
     writeTmpSync(tmp, decoded);
   } catch (error) {
@@ -204,11 +207,19 @@ export function restoreHistory(dataDir: string, id: string): void {
 }
 
 export function removeHistory(dataDir: string, id: string): void {
-  const { plain, compressed } = historyPaths(dataDir, id);
+  const { plain, compressed, orphaned } = historyPaths(dataDir, id);
+  const dir = join(dataDir, 'runs');
+  const prefix = `${id}.ndjson`;
+  try {
+    for (const name of readdirSync(dir)) {
+      if (name.startsWith(prefix) && name.endsWith('.tmp')) rmSync(join(dir, name), { force: true });
+    }
+  } catch (error) {
+    if (!isNotFound(error)) throw error;
+  }
   rmSync(plain, { force: true });
   rmSync(compressed, { force: true });
-  rmSync(`${plain}.tmp`, { force: true });
-  rmSync(`${compressed}.tmp`, { force: true });
+  rmSync(orphaned, { force: true });
   rmSync(`${compressed}.corrupt`, { force: true });
 }
 
@@ -228,6 +239,52 @@ function warnUndecodable(path: string, extra = ''): void {
   if (warnedUndecodable.has(path)) return;
   warnedUndecodable.add(path);
   console.warn(`[cez] ignoring undecodable compressed transcript ${path}${extra}`);
+}
+
+function warnOrphaned(path: string): void {
+  if (warnedOrphaned.has(path)) return;
+  warnedOrphaned.add(path);
+  console.warn(`[cez] keeping non-prefix compressed transcript as ${path}`);
+}
+
+function isDecodedPrefix(decoded: Buffer, plain: Buffer): boolean {
+  return decoded.length <= plain.length && plain.subarray(0, decoded.length).equals(decoded);
+}
+
+function disposeCompressedBesidePlain(plain: string, compressed: string, orphaned: string): void {
+  if (!existsSync(compressed)) return;
+  let encoded: Buffer;
+  try {
+    encoded = readFileSync(compressed);
+  } catch (error) {
+    if (isNotFound(error)) return;
+    throw error;
+  }
+  const decoded = tryDecompressSync(encoded);
+  if (decoded !== undefined && isDecodedPrefix(decoded, readFileSync(plain))) {
+    rmSync(compressed, { force: true });
+    return;
+  }
+  if (existsSync(orphaned)) {
+    warnOrphaned(orphaned);
+    return;
+  }
+  renameSync(compressed, orphaned);
+  warnOrphaned(orphaned);
+}
+
+async function writeTmpAsync(tmp: string, data: Buffer): Promise<void> {
+  const handle = await open(tmp, 'w');
+  try {
+    let offset = 0;
+    while (offset < data.length) {
+      const { bytesWritten } = await handle.write(data, offset, data.length - offset);
+      offset += bytesWritten;
+    }
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
 }
 
 function writeTmpSync(tmp: string, data: Buffer): void {

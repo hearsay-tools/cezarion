@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { brotliCompressSync, constants as zlibConstants } from 'node:zlib';
+import { brotliCompressSync, brotliDecompressSync, constants as zlibConstants } from 'node:zlib';
 
 import { historyPaths, readHistoryText } from './history-file.ts';
 import { RunStore } from './store.ts';
@@ -42,6 +42,7 @@ const roots: string[] = [];
 const managers: RunManager[] = [];
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   captured.release?.();
   captured.release = undefined;
   captured.specs.length = 0;
@@ -56,9 +57,9 @@ afterEach(async () => {
   while (dirs.length > 0) rmSync(dirs.pop()!, { recursive: true, force: true });
 });
 
-function openStore(): { dir: string; store: RunStore } {
-  const dir = mkdtempSync(join(tmpdir(), 'cez-store-history-'));
-  dirs.push(dir);
+function openStore(existing?: string): { dir: string; store: RunStore } {
+  const dir = existing ?? mkdtempSync(join(tmpdir(), 'cez-store-history-'));
+  if (!existing) dirs.push(dir);
   const store = RunStore.open(dir);
   stores.push(store);
   return { dir, store };
@@ -165,6 +166,8 @@ describe('RunStore history compression', () => {
     expect(existsSync(bothPaths.plain)).toBe(false);
     expect(existsSync(bothPaths.compressed)).toBe(true);
     expect(readHistoryText(dir, both.id)).toBe('A');
+    expect(existsSync(`${bothPaths.compressed}.orphaned`)).toBe(true);
+    expect(brotliDecompressSync(readFileSync(`${bothPaths.compressed}.orphaned`)).toString()).toBe('B');
   });
 
   it('continue on an archived run appends after the old events', async () => {
@@ -194,6 +197,11 @@ describe('RunStore history compression', () => {
       const seqs = store.readEvents(run.id).map((event) => event.seq).filter((seq): seq is number => typeof seq === 'number');
       expect(Math.max(0, ...seqs)).toBeGreaterThan(first.seq);
     });
+    const events = store.readEvents(run.id);
+    expect(events).toContainEqual(expect.objectContaining({ seq: first.seq, type: 'note', message: 'before' }));
+    const seqs = events.map((event) => event.seq).filter((seq): seq is number => typeof seq === 'number');
+    expect(new Set(seqs).size).toBe(seqs.length);
+    for (let i = 1; i < seqs.length; i++) expect(seqs[i]).toBeGreaterThan(seqs[i - 1]!);
     expect(existsSync(plain)).toBe(true);
     expect(existsSync(compressed)).toBe(false);
   });
@@ -222,5 +230,257 @@ describe('RunStore history compression', () => {
     await store.historyIdle();
     expect(started.length).toBeLessThan(runs.length);
     spy.mockRestore();
+  });
+
+  it('does not compress or clean a transcript another live store holds', async () => {
+    const { dir, store: owner } = openStore();
+    const run = owner.createRun({ title: 'theirs', workflow: 'w', task: 'task', steps: [] });
+    owner.appendEvent(run.id, { type: 'note', message: 'owned' });
+    finish(owner, run.id);
+    expect(owner.pin(run.id, 'active')).toBeDefined();
+    const historyFile = await import('./history-file.ts');
+    const spy = vi.spyOn(historyFile, 'compressHistory').mockResolvedValue('skipped');
+    owner.setArchived(run.id, true);
+    owner.flush();
+    await owner.historyIdle();
+    spy.mockRestore();
+
+    const { plain, compressed } = historyPaths(dir, run.id);
+    expect(existsSync(plain)).toBe(true);
+    writeFileSync(
+      compressed,
+      brotliCompressSync(Buffer.from('foreign-br'), { params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 5 } }),
+    );
+
+    const other = openStore(dir).store;
+    expect(other.runOwnership(run.id)).toBe('foreign');
+    other.compressArchivedHistory();
+    await other.historyIdle();
+
+    expect(existsSync(plain)).toBe(true);
+    expect(readFileSync(plain, 'utf8')).toContain('owned');
+    expect(existsSync(compressed)).toBe(true);
+    expect(existsSync(`${compressed}.orphaned`)).toBe(false);
+  });
+
+  it('re-compresses after archive then append (variant-pick race)', async () => {
+    const { dir, store } = openStore();
+    const run = store.createRun({ title: 't', workflow: 'w', task: 'task', steps: [] });
+    store.appendEvent(run.id, { type: 'note', message: 'before' });
+    finish(store, run.id);
+    store.setArchived(run.id, true);
+    store.appendEvent(run.id, { type: 'lifecycle', message: 'variant picked' });
+    await store.historyIdle();
+    const { plain, compressed } = historyPaths(dir, run.id);
+    expect(existsSync(compressed)).toBe(true);
+    expect(existsSync(plain)).toBe(false);
+    const text = readHistoryText(dir, run.id);
+    expect(text).toContain('before');
+    expect(text).toContain('variant picked');
+  });
+
+  it('compresses when a run archived while live later finishes', async () => {
+    const { dir, store } = openStore();
+    const run = store.createRun({ title: 't', workflow: 'w', task: 'task', steps: [] });
+    store.appendEvent(run.id, { type: 'note', message: 'live' });
+    store.updateRun(run.id, { status: 'running' });
+    store.setArchived(run.id, true);
+    await store.historyIdle();
+    const { plain, compressed } = historyPaths(dir, run.id);
+    expect(existsSync(plain)).toBe(true);
+    expect(existsSync(compressed)).toBe(false);
+    finish(store, run.id);
+    await store.historyIdle();
+    expect(existsSync(compressed)).toBe(true);
+    expect(existsSync(plain)).toBe(false);
+  });
+
+  it('re-compresses after appendEvent restores an archived transcript', async () => {
+    const { dir, store } = openStore();
+    const run = store.createRun({ title: 't', workflow: 'w', task: 'task', steps: [] });
+    store.appendEvent(run.id, { type: 'note', message: 'old' });
+    finish(store, run.id);
+    store.setArchived(run.id, true);
+    await store.historyIdle();
+    const { plain, compressed } = historyPaths(dir, run.id);
+    expect(existsSync(compressed)).toBe(true);
+    store.appendEvent(run.id, { type: 'note', message: 'after-restore' });
+    expect(existsSync(plain)).toBe(true);
+    await store.historyIdle();
+    expect(existsSync(compressed)).toBe(true);
+    expect(existsSync(plain)).toBe(false);
+    expect(readHistoryText(dir, run.id)).toContain('after-restore');
+  });
+
+  it('compressArchivedHistory swallows an fs error on one id and continues', async () => {
+    const { dir, store } = openStore();
+    const ok = store.createRun({ title: 'ok', workflow: 'w', task: 'task', steps: [] });
+    store.appendEvent(ok.id, { type: 'note', message: 'ok-body' });
+    finish(store, ok.id);
+    const boom = store.createRun({ title: 'boom', workflow: 'w', task: 'task', steps: [] });
+    store.appendEvent(boom.id, { type: 'note', message: 'boom-body' });
+    finish(store, boom.id);
+    store.setArchived(ok.id, true);
+    store.setArchived(boom.id, true);
+    store.flush();
+    await store.historyIdle();
+    store.close();
+    stores.pop();
+
+    const okPaths = historyPaths(dir, ok.id);
+    writeFileSync(okPaths.plain, readHistoryText(dir, ok.id) ?? 'ok');
+    if (existsSync(okPaths.compressed)) rmSync(okPaths.compressed);
+    const boomPaths = historyPaths(dir, boom.id);
+    writeFileSync(boomPaths.plain, 'A');
+    writeFileSync(
+      boomPaths.compressed,
+      brotliCompressSync(Buffer.from('B'), { params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 5 } }),
+    );
+
+    const historyFile = await import('./history-file.ts');
+    const original = historyFile.restoreHistory;
+    const spy = vi.spyOn(historyFile, 'restoreHistory').mockImplementation((dataDir, id) => {
+      if (id === boom.id) throw new Error('fs boom');
+      return original(dataDir, id);
+    });
+    const reopened = openStore(dir).store;
+    expect(() => reopened.compressArchivedHistory()).not.toThrow();
+    await reopened.historyIdle();
+    expect(existsSync(okPaths.compressed)).toBe(true);
+    expect(existsSync(okPaths.plain)).toBe(false);
+    spy.mockRestore();
+  });
+
+  it('leaves the record unchanged when restoreHistory throws on unarchive', async () => {
+    const { store } = openStore();
+    const run = store.createRun({ title: 't', workflow: 'w', task: 'task', steps: [] });
+    store.appendEvent(run.id, { type: 'note', message: 'keep' });
+    finish(store, run.id);
+    store.setArchived(run.id, true);
+    await store.historyIdle();
+    const before = store.getRun(run.id)!;
+    const historyFile = await import('./history-file.ts');
+    const spy = vi.spyOn(historyFile, 'restoreHistory').mockImplementation(() => {
+      throw new Error('restore failed');
+    });
+    try {
+      expect(() => store.updateRun(run.id, { archived: false, status: 'queued' })).toThrow(/restore failed/);
+      const after = store.getRun(run.id)!;
+      expect(after.status).toBe(before.status);
+      expect(after.archived).toBe(true);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('drops a prefix .br on the startup sweep and orphans a non-prefix leftover', async () => {
+    const { dir, store } = openStore();
+    const prefixRun = store.createRun({ title: 'prefix', workflow: 'w', task: 'task', steps: [] });
+    store.appendEvent(prefixRun.id, { type: 'note', message: 'same' });
+    finish(store, prefixRun.id);
+    const other = store.createRun({ title: 'other', workflow: 'w', task: 'task', steps: [] });
+    store.appendEvent(other.id, { type: 'note', message: 'A' });
+    finish(store, other.id);
+    store.setArchived(prefixRun.id, true);
+    store.setArchived(other.id, true);
+    store.flush();
+    await store.historyIdle();
+    store.close();
+    stores.pop();
+
+    const prefixPaths = historyPaths(dir, prefixRun.id);
+    const body = readHistoryText(dir, prefixRun.id)!;
+    writeFileSync(prefixPaths.plain, body);
+    writeFileSync(
+      prefixPaths.compressed,
+      brotliCompressSync(Buffer.from(body), { params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 5 } }),
+    );
+    const otherPaths = historyPaths(dir, other.id);
+    writeFileSync(otherPaths.plain, 'A');
+    writeFileSync(
+      otherPaths.compressed,
+      brotliCompressSync(Buffer.from('B'), { params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 5 } }),
+    );
+
+    const reopened = openStore(dir).store;
+    reopened.compressArchivedHistory();
+    await reopened.historyIdle();
+    expect(existsSync(prefixPaths.plain)).toBe(false);
+    expect(existsSync(prefixPaths.compressed)).toBe(true);
+    expect(existsSync(`${prefixPaths.compressed}.orphaned`)).toBe(false);
+    expect(existsSync(otherPaths.plain)).toBe(false);
+    expect(existsSync(otherPaths.compressed)).toBe(true);
+    expect(existsSync(`${otherPaths.compressed}.orphaned`)).toBe(true);
+    expect(brotliDecompressSync(readFileSync(`${otherPaths.compressed}.orphaned`)).toString()).toBe('B');
+  });
+
+  it('archiveFinished compresses finished runs', async () => {
+    const { dir, store } = openStore();
+    const run = store.createRun({ title: 't', workflow: 'w', task: 'task', steps: [] });
+    store.appendEvent(run.id, { type: 'note', message: 'bulk' });
+    finish(store, run.id);
+    expect(store.archiveFinished().ids).toEqual([run.id]);
+    await store.historyIdle();
+    const { plain, compressed } = historyPaths(dir, run.id);
+    expect(existsSync(compressed)).toBe(true);
+    expect(existsSync(plain)).toBe(false);
+  });
+
+  it('updateRun({ archived }) compresses and restores through applyArchived', async () => {
+    const { dir, store } = openStore();
+    const run = store.createRun({ title: 't', workflow: 'w', task: 'task', steps: [] });
+    store.appendEvent(run.id, { type: 'note', message: 'via-update' });
+    finish(store, run.id);
+    store.updateRun(run.id, { archived: true });
+    await store.historyIdle();
+    const { plain, compressed } = historyPaths(dir, run.id);
+    expect(existsSync(compressed)).toBe(true);
+    expect(existsSync(plain)).toBe(false);
+    store.updateRun(run.id, { archived: false });
+    expect(existsSync(plain)).toBe(true);
+    expect(existsSync(compressed)).toBe(false);
+  });
+
+  it('commitWorkerContinuation restores the plain file', async () => {
+    const { dir, store } = openStore();
+    const parent = store.createRun({ title: 'parent', workflow: 'w', task: 'parent', steps: [] });
+    store.updateRun(parent.id, {
+      status: 'waiting',
+      delegation: { role: 'root', permissions: ['spawn'], receipts: [] },
+    });
+    const workerId = randomUUID();
+    const worker = store.createOwnedRun(
+      {
+        title: 'worker', task: 'worker', workflow: 'quick-task', runner: 'claude',
+        steps: [{ id: 'task', name: 'Task', kind: 'agent' }],
+      },
+      parent.id,
+      randomUUID(),
+      {
+        role: 'worker',
+        permissions: [],
+        parentRunId: parent.id,
+        workspace: {
+          ownerRunId: workerId,
+          resourceId: randomUUID(),
+          kind: 'owned-isolated',
+          path: `/managed/${workerId}`,
+          branch: `cez/${workerId.slice(0, 8)}`,
+          baselineSha: 'a'.repeat(40),
+        },
+      },
+      'a'.repeat(64),
+    );
+    store.appendEvent(worker.id, { type: 'note', message: 'old' });
+    store.updateStep(worker.id, 'task', { status: 'done', sessionId: 'old-session' });
+    store.updateRun(worker.id, { status: 'done' });
+    store.setArchived(worker.id, true);
+    await store.historyIdle();
+    const { plain, compressed } = historyPaths(dir, worker.id);
+    expect(existsSync(compressed)).toBe(true);
+    store.commitWorkerContinuation(worker.id, { archived: false, status: 'queued' });
+    expect(existsSync(plain)).toBe(true);
+    expect(existsSync(compressed)).toBe(false);
+    expect(readHistoryText(dir, worker.id)).toContain('old');
   });
 });

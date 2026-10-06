@@ -81,4 +81,32 @@ describe('HistoryCompressor', () => {
     await expect(compressor.idle()).resolves.toBeUndefined();
     compressor.stop();
   });
+
+  it('does not start a job inline on enqueue', async () => {
+    const spy = vi.spyOn(historyFile, 'compressHistory').mockResolvedValue('skipped');
+    const compressor = new HistoryCompressor(dataDir(), () => true);
+    compressor.enqueue(randomUUID());
+    expect(spy).not.toHaveBeenCalled();
+    await compressor.idle();
+    expect(spy).toHaveBeenCalledTimes(1);
+    compressor.stop();
+  });
+
+  it('re-enqueues a changed job at most 3 times', async () => {
+    const spy = vi.spyOn(historyFile, 'compressHistory').mockResolvedValue('changed');
+    const compressor = new HistoryCompressor(dataDir(), () => true);
+    compressor.enqueue(randomUUID());
+    await compressor.idle();
+    expect(spy).toHaveBeenCalledTimes(4);
+    compressor.stop();
+  });
+
+  it('does not retry a skipped job', async () => {
+    const spy = vi.spyOn(historyFile, 'compressHistory').mockResolvedValue('skipped');
+    const compressor = new HistoryCompressor(dataDir(), () => true);
+    compressor.enqueue(randomUUID());
+    await compressor.idle();
+    expect(spy).toHaveBeenCalledTimes(1);
+    compressor.stop();
+  });
 });

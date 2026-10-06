@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -11,11 +12,12 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
-import { brotliCompressSync, constants as zlibConstants } from 'node:zlib';
+import { brotliCompressSync, brotliDecompressSync, constants as zlibConstants } from 'node:zlib';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   compressHistory,
+  historyPaths,
   openHistorySource,
   readHistoryText,
   removeHistory,
@@ -72,19 +74,45 @@ describe('history-file', () => {
     expect(existsSync(`${plain}.tmp`)).toBe(false);
   });
 
-  it('plain wins when both exist', () => {
+  it('drops the .br when both exist and the decoded bytes are a prefix of the plain file', () => {
     const { dataDir, id, plain, compressed } = setup();
-    writeFileSync(plain, 'A');
+    const body = Buffer.from('ABCDEF');
+    writeFileSync(plain, body);
     writeFileSync(
       compressed,
-      brotliCompressSync(Buffer.from('B'), {
+      brotliCompressSync(body.subarray(0, 3), {
         params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 5 },
       }),
     );
-    expect(readHistoryText(dataDir, id)).toBe('A');
+    expect(readHistoryText(dataDir, id)).toBe('ABCDEF');
     restoreHistory(dataDir, id);
     expect(existsSync(compressed)).toBe(false);
-    expect(readFileSync(plain, 'utf8')).toBe('A');
+    expect(existsSync(`${compressed}.orphaned`)).toBe(false);
+    expect(readFileSync(plain, 'utf8')).toBe('ABCDEF');
+  });
+
+  it('orphans the .br when both exist and the decoded bytes are not a prefix', () => {
+    const { dataDir, id, plain, compressed } = setup();
+    writeFileSync(plain, 'A');
+    const encodedB = brotliCompressSync(Buffer.from('B'), {
+      params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 5 },
+    });
+    writeFileSync(compressed, encodedB);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      expect(readHistoryText(dataDir, id)).toBe('A');
+      restoreHistory(dataDir, id);
+      expect(existsSync(compressed)).toBe(false);
+      expect(readFileSync(plain, 'utf8')).toBe('A');
+      expect(readFileSync(`${compressed}.orphaned`).equals(encodedB)).toBe(true);
+      expect(warn).toHaveBeenCalled();
+      expect(String(warn.mock.calls[0]![0])).toContain(`${compressed}.orphaned`);
+      const calls = warn.mock.calls.length;
+      restoreHistory(dataDir, id);
+      expect(warn).toHaveBeenCalledTimes(calls);
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('skips when eligibility flips mid-job', async () => {
@@ -100,16 +128,18 @@ describe('history-file', () => {
     expect(existsSync(`${compressed}.tmp`)).toBe(false);
   });
 
-  it('skips when the plain file grows mid-job', async () => {
+  it('returns changed when the plain file grows mid-job', async () => {
     const { dataDir, id, plain, compressed } = setup();
     const original = transcript();
     writeFileSync(plain, original);
-    const pending = compressHistory(dataDir, id, () => true);
-    appendFileSync(plain, '{"seq":2001,"type":"note"}\n');
-    expect(await pending).toBe('skipped');
-    expect(readFileSync(plain, 'utf8')).toBe(`${original}{"seq":2001,"type":"note"}\n`);
+    const extra = '{"seq":2001,"type":"note"}\n';
+    expect(await compressHistory(dataDir, id, () => {
+      appendFileSync(plain, extra);
+      return true;
+    })).toBe('changed');
+    expect(readFileSync(plain, 'utf8')).toBe(`${original}${extra}`);
     expect(existsSync(compressed)).toBe(false);
-    expect(existsSync(`${compressed}.tmp`)).toBe(false);
+    expect(readdirSync(join(dataDir, 'runs')).some((name) => name.endsWith('.tmp'))).toBe(false);
   });
 
   it('source reads identically for both forms', async () => {
@@ -143,19 +173,25 @@ describe('history-file', () => {
     }
   });
 
-  it('removeHistory removes both forms and tmp leftovers', () => {
+  it('removeHistory removes both forms, orphaned files, and tmp leftovers of any name', () => {
     const { dataDir, id, plain, compressed } = setup();
     writeFileSync(plain, 'plain');
     writeFileSync(compressed, 'br');
     writeFileSync(`${plain}.tmp`, 'plain-tmp');
     writeFileSync(`${compressed}.tmp`, 'br-tmp');
+    writeFileSync(`${compressed}.${process.pid}.abc123.tmp`, 'pid-tmp');
+    writeFileSync(`${plain}.${process.pid}.def456.tmp`, 'plain-pid-tmp');
     writeFileSync(`${compressed}.corrupt`, 'br-corrupt');
+    writeFileSync(`${compressed}.orphaned`, 'br-orphaned');
     removeHistory(dataDir, id);
     expect(existsSync(plain)).toBe(false);
     expect(existsSync(compressed)).toBe(false);
     expect(existsSync(`${plain}.tmp`)).toBe(false);
     expect(existsSync(`${compressed}.tmp`)).toBe(false);
+    expect(existsSync(`${compressed}.${process.pid}.abc123.tmp`)).toBe(false);
+    expect(existsSync(`${plain}.${process.pid}.def456.tmp`)).toBe(false);
     expect(existsSync(`${compressed}.corrupt`)).toBe(false);
+    expect(existsSync(`${compressed}.orphaned`)).toBe(false);
   });
 
   it('readHistoryText and openHistorySource return undefined when neither form exists', async () => {
@@ -217,5 +253,24 @@ describe('history-file', () => {
     } finally {
       warn.mockRestore();
     }
+  });
+
+  it('writes a per-process tmp name during compress and never overwrites .br.orphaned', async () => {
+    const { dataDir, id, plain, compressed } = setup();
+    writeFileSync(plain, 'keep');
+    const orphaned = `${compressed}.orphaned`;
+    writeFileSync(orphaned, 'old-orphan');
+    let sawPidTmp = false;
+    expect(await compressHistory(dataDir, id, () => {
+      sawPidTmp = readdirSync(join(dataDir, 'runs')).some(
+        (name) => name.startsWith(`${id}.ndjson.br.${process.pid}.`) && name.endsWith('.tmp'),
+      );
+      return true;
+    })).toBe('compressed');
+    expect(sawPidTmp).toBe(true);
+    expect(existsSync(plain)).toBe(false);
+    expect(existsSync(compressed)).toBe(true);
+    expect(readFileSync(orphaned, 'utf8')).toBe('old-orphan');
+    expect(historyPaths(dataDir, id).orphaned).toBe(orphaned);
   });
 });

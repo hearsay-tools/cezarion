@@ -115,6 +115,22 @@ describe('RunStore save lifecycle (#124)', () => {
     store.flush();
   });
 
+  it('retention does not archive a held pinned run past 300', () => {
+    const pinnedId = randomUUID();
+    const kept = Array.from({ length: 300 }, (_, index) => ({
+      ...LEGACY_RUN, id: randomUUID(), createdAt: '2026-02-01T00:00:00.000Z',
+    }));
+    seedRuns(dataDir, [{
+      ...LEGACY_RUN, id: pinnedId, title: 'held pinned overflow', pinned: true, pinnedAt: '2026-01-01T00:00:00.000Z',
+    }, ...kept]);
+    const store = RunStore.open(dataDir);
+    expect(store.pin(pinnedId, 'active')?.pinned).toBe(true);
+    expect(store.heldIds()).toContain(pinnedId);
+    store.createRun({ title: 'trigger retention', workflow: 'w', task: 'task', steps: [] });
+    expect(store.getRun(pinnedId)).toMatchObject({ archived: false, pinned: true, title: 'held pinned overflow' });
+    store.flush();
+  });
+
   it('retention never deletes archived runs', () => {
     const archived = Array.from({ length: 501 }, (_, index) => ({
       ...LEGACY_RUN,
