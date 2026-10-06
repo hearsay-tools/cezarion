@@ -939,4 +939,60 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
       } finally { other.dispose(); reopened.flush(); }
     });
   });
+
+  describe('ambient unreadable processes at destroy (hearsay-tools/cezarion#858)', () => {
+    const branchExists = (branch: string) => execFileSync('git', ['branch', '--list', branch], { cwd: root, encoding: 'utf8' }).includes(branch);
+    /** A settled worker with a materialized worktree; the scratch stays unmaterialized. */
+    async function settled() {
+      const w = await worker();
+      // Admission runs before the worktree exists, so it never scans an ambient holder.
+      const generation = store.commitWorkerExecutionStart(w.id);
+      await ensureOwnedWorkspace(root, w);
+      store.updateRun(w.id, { status: 'done' }); store.commitWorkerExecutionComplete(w.id, generation); store.flush();
+      const service = new DelegationService(); const detach = service.registerProject({ id: 'p', root, store, manager });
+      return { w, service, detach };
+    }
+
+    // Login sshd, systemd --user and gpg-agent are non-dumpable and predate every worker.
+    it.runIf(process.platform === 'linux')('completes when only predating non-dumpable processes have unreadable cwds', async () => {
+      const ambient = await Promise.all([nonDumpableHolder(root), nonDumpableHolder(tmpdir())]);
+      // Start times come from whole-second btime plus ticks; clear the 1 s cutoff slack.
+      await new Promise(resolve => setTimeout(resolve, 2_100));
+      const { w, service, detach } = await settled();
+      try {
+        expect(await service.destroyForHuman('p', w.id)).toMatchObject({ state: 'complete', remaining: [] });
+        expect(existsSync(workspace(w).path)).toBe(false); expect(branchExists(workspace(w).branch)).toBe(false);
+        for (const holder of ambient) await holder.write(); // never signalled
+      } finally { detach(); for (const holder of ambient) await holder.close(); }
+    });
+
+    it.runIf(process.platform === 'linux')('retains resources and names the PID of an unreadable process started after the worker', async () => {
+      const { w, service, detach } = await settled();
+      const late = await nonDumpableHolder(root);
+      try {
+        const result = await service.destroyForHuman('p', w.id);
+        expect(result).toMatchObject({ state: 'incomplete', remaining: ['worktree', 'branch'] });
+        expect(result.error).toContain(String(late.pid));
+        expect(existsSync(workspace(w).path)).toBe(true); expect(branchExists(workspace(w).branch)).toBe(true);
+        await late.write(); await late.close();
+        expect(await service.destroyForHuman('p', w.id)).toMatchObject({ state: 'complete', remaining: [] });
+      } finally { detach(); await late.close(); }
+    });
+
+    it('retains resources and names the PID of a process whose cwd is in the worktree', async () => {
+      const { w, service, detach } = await settled();
+      const holder = spawn(process.execPath, ['-e', "console.log('ready'); setInterval(()=>{},1000)"], { cwd: workspace(w).path, stdio: ['ignore', 'pipe', 'ignore'] });
+      const exited = new Promise(resolve => holder.once('exit', resolve));
+      releases.push(() => holder.kill('SIGKILL'));
+      await new Promise(resolve => holder.stdout!.once('data', resolve));
+      try {
+        const result = await service.destroyForHuman('p', w.id);
+        expect(result).toMatchObject({ state: 'incomplete', remaining: ['worktree', 'branch'] });
+        expect(result.error).toContain(String(holder.pid));
+        expect(existsSync(workspace(w).path)).toBe(true); expect(holder.exitCode).toBeNull(); expect(holder.signalCode).toBeNull();
+        holder.kill('SIGKILL'); await exited;
+        expect(await service.destroyForHuman('p', w.id)).toMatchObject({ state: 'complete', remaining: [] });
+      } finally { holder.kill('SIGKILL'); await exited; detach(); }
+    });
+  });
 });

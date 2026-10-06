@@ -26,7 +26,8 @@ import { isAuthenticatedCaller } from './credentials.ts';
 import { parseDelegationEffort } from './effort.ts';
 import { authorizeSpawn, authorizeSpawnReplay, authorizeWorker, authorizeCancelWait, authorizeRetainedResult, DelegationPolicyError } from './policy.ts';
 import { releaseThenRemoveOwnedWorkspace } from '../git-worktree-release.ts';
-import { planOwnedWorkspace, readOwnedDiff, resolveWorkerBaseline } from './workspace.ts';
+import { planOwnedWorkspace, readOwnedDiff, resolveWorkerBaseline, WorkspaceHeldError } from './workspace.ts';
+import { workerProcessCutoff } from './process-liveness.ts';
 
 export type DelegationProject = { id: string; root: string; store: RunStore; manager: RunManager };
 
@@ -647,13 +648,15 @@ export class DelegationService {
         };
         const assertSafe = () => {
           assertCurrent();
-          if (!project.store.workerResourcesSafe(workerId, proof.generation, workspace.resourceId)) throw new Error('Worker resources may still be held; cleanup will retry');
+          const holders = project.store.workerResourceHolders(workerId, proof.generation, workspace.resourceId, { deleting: true });
+          if (holders === 'safe') return;
+          throw holders.length ? new WorkspaceHeldError(holders) : new Error('Worker resources may still be held; cleanup will retry');
         };
         try {
           assertCurrent();
           // #781: release preview before the final fresh proof immediately preceding removal.
           result = await releaseThenRemoveOwnedWorkspace({ previewHost: project.manager.previewHost }, project.root, workspace,
-            project.manager.getWorkerNoMaterializationProof(workerId), assertCurrent, assertSafe);
+            project.manager.getWorkerNoMaterializationProof(workerId), assertCurrent, assertSafe, workerProcessCutoff(snapshot.createdAt));
         } catch {
           result = { workerId, state: 'incomplete', remaining: resources, error: 'Worker resources may still be held; cleanup will retry' };
         } finally { release?.(); }

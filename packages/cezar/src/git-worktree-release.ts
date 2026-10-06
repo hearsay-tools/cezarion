@@ -37,8 +37,9 @@ export async function releaseThenRemoveOwnedWorkspace(
   neverMaterialized?: WorkerNoMaterializationProof,
   assertCurrent?: () => void,
   assertUnheld?: () => void,
+  holdersSince?: number,
 ): Promise<WorkerDestroyResult> {
   return removeOwnedWorkspace(repoRoot, workspace, neverMaterialized, assertCurrent, async () => {
     await deps.previewHost?.release(workspace.ownerRunId).catch(() => undefined);
-  }, assertUnheld);
+  }, assertUnheld, holdersSince);
 }
