@@ -519,7 +519,7 @@ describe('harness parity — systemPromptOnResume declaration (#790)', () => {
 });
 
 describe('opencode lost-session fallback (#790)', () => {
-  it('opens a fresh session with the skill, one lifecycle notice, and a new session id', async () => {
+  it('opens a fresh session with the skill, one note, and a new session id', async () => {
     await withSkillResumeRun('opencode', async (fixture) => {
       const launchPrompt = assertLaunchKeepsSkill('opencode', fixture.repoRoot, fixture.snapshotWire());
       const lostId = recordedSessionId(fixture.store, fixture.runId);
@@ -538,10 +538,12 @@ describe('opencode lost-session fallback (#790)', () => {
       expect(skillInPrompt(prompts.at(-1)!, fixture.repoRoot)).toBe(true);
       expect(prompts.at(-1)!.startsWith(expectedSkillPrompt(fixture.repoRoot))).toBe(true);
       expect(launchPrompt.startsWith(expectedSkillPrompt(fixture.repoRoot))).toBe(true);
-      const notices = fixture.store.readEvents(fixture.runId).filter((event) =>
-        (event.type === 'lifecycle' || event.type === 'note')
-        && String(event.message).includes('no longer exists'));
-      expect(notices).toEqual([expect.objectContaining({ message: LOST_OPENCODE_SESSION })]);
+      const events = fixture.store.readEvents(fixture.runId);
+      const notices = events.filter((event) => String(event.message).includes('no longer exists'));
+      expect(notices).toHaveLength(1);
+      expect(notices[0]?.type).toBe('note');
+      expect(notices[0]?.message).toBe(LOST_OPENCODE_SESSION);
+      expect(events.filter((event) => event.type === 'lifecycle' && String(event.message).includes('no longer exists'))).toEqual([]);
       const freshId = recordedSessionId(fixture.store, fixture.runId);
       expect(freshId).not.toBe(lostId);
       expect(freshId).toMatch(/^ses_mock_/);
