@@ -12,7 +12,8 @@ import {
   continuationMessageSchema, previewServerSchema, toRunSummary,
   runRecordSchema as contractRunRecordSchema,
 } from '@open-mercato/cezar-contract';
-import type { ArchiveFinishedScope, CiWait, ConversationState, AgentInput, InboxClaim, DelegationState, RunSummary, WorkerCollectedResult } from '@open-mercato/cezar-contract';
+import type { ArchiveFinishedScope, ArchivedRunsResponse, CiWait, ConversationState, AgentInput, InboxClaim, DelegationState, RunSummary, WorkerCollectedResult } from '@open-mercato/cezar-contract';
+import { matchesRunQuery, sqlPrefilterTokens } from './run-search.ts';
 import { storedDelegationStateSchema } from './delegation-state.ts';
 import { refreshHumanAskSummary } from './human-ask-summary.ts';
 import { HistoryCompressor } from './history-compressor.ts';
@@ -29,7 +30,7 @@ import { workflowDefSchema } from '../workflows/types.ts';
 
 import { RUNNER_IDS } from '../core/agent-runner.ts';
 import {
-  RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY, RunConflictError, RunDatabase, RunDatabaseBusyError,
+  ARCHIVED_ROOT, RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY, RunConflictError, RunDatabase, RunDatabaseBusyError,
   type RunConflictEvidence, type RunDatabaseChanges, type RunDatabaseCommit, type RunFenceClaim, type RunRow, type RunRowInput, type RunWriteFence,
 } from './run-database.ts';
 import { encodeRunRow, isLiveRecord, isLiveStatus } from './run-row.ts';
@@ -1108,6 +1109,24 @@ function newestFirst(a: ListOrder, b: ListOrder): number {
   return a.seq < b.seq ? -1 : a.seq > b.seq ? 1 : 0;
 }
 
+/** An archived page's cursor: the last row's order, opaque to clients. A held run with no row yet
+ *  lists after every row (`seq` is infinite), which JSON cannot carry, so it travels as null. */
+function encodeArchivedCursor(key: ListOrder): string {
+  return Buffer.from(JSON.stringify({ c: key.createdAt, s: Number.isFinite(key.seq) ? key.seq : null })).toString('base64url');
+}
+
+function decodeArchivedCursor(cursor: string): ListOrder | undefined {
+  try {
+    const parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as unknown;
+    if (typeof parsed !== 'object' || parsed === null) return undefined;
+    const { c, s } = parsed as { c?: unknown; s?: unknown };
+    if (typeof c !== 'string' || !(s === null || (typeof s === 'number' && Number.isInteger(s)))) return undefined;
+    return { createdAt: c, seq: s ?? Number.POSITIVE_INFINITY };
+  } catch {
+    return undefined;
+  }
+}
+
 /** The items newest first, each by the order beside it. Stable: ties keep their input order. */
 function sortNewestFirst<T>(entries: Iterable<readonly [T, ListOrder]>): T[] {
   return [...entries].sort(([, a], [, b]) => newestFirst(a, b)).map(([item]) => item);
@@ -1832,6 +1851,55 @@ export class RunStore extends EventEmitter {
     let archived = 0;
     const kept = runs.filter((run) => !run.archived || ++archived <= archivedWindow);
     return { runs: kept, truncated: archived > archivedWindow };
+  }
+
+  /**
+   * One page of archived ROOT runs, newest first (#864): `GET /run-summaries/archived`, the
+   * archived runs past the window. Held runs list by their record, as in `listRunSummaries`.
+   * `before` is the previous page's `nextCursor`; with `q`, only runs `matchesRunQuery` keeps, and
+   * `total` counts those. A cursor this store did not write answers `{ error }`.
+   *
+   * Ranking reads every archived root's key (id, created_at, seq: no record, no summary), so the
+   * page and `total` agree with the held overlay; only the page's own rows are read in full.
+   */
+  listArchivedRuns(options: { before?: string; limit: number; q?: string }): ArchivedRunsResponse | { error: string } {
+    let after: ListOrder | undefined;
+    if (options.before !== undefined) {
+      after = decodeArchivedCursor(options.before);
+      if (!after) return { error: 'before is not a cursor this server wrote' };
+    }
+    const q = options.q?.trim() ?? '';
+    const skipped = (id: string) => this.deleted.has(id) || this.held.has(id) || this.unreadable.has(id);
+    const ranked = new Map<string, ListOrder & { summary?: RunSummary }>();
+    if (q === '') {
+      for (const key of this.db?.listKeysWhere(ARCHIVED_ROOT) ?? []) if (!skipped(key.id)) ranked.set(key.id, key);
+    } else {
+      for (const row of this.db?.searchRootSummaries(sqlPrefilterTokens(q)) ?? []) {
+        if (skipped(row.id)) continue;
+        const summary = parseStoredSummary(row.summary) ?? this.coldSummary(row.id);
+        if (summary?.archived && matchesRunQuery(summary, q)) ranked.set(row.id, { ...row, summary });
+      }
+    }
+    for (const [id, run] of this.held) {
+      if (!run.archived || run.delegation?.role === 'worker') continue;
+      const summary = toRunSummary(run);
+      if (q === '' || matchesRunQuery(summary, q)) ranked.set(id, { ...this.listOrder(run), summary });
+    }
+    const ordered = [...ranked.entries()].sort(([, a], [, b]) => newestFirst(a, b));
+    const rest = after ? ordered.filter(([, key]) => newestFirst(key, after) > 0) : ordered;
+    const page = rest.slice(0, options.limit);
+    const cold = new Map((this.db?.getSummaries(page.filter(([, key]) => !key.summary).map(([id]) => id)) ?? [])
+      .map((row) => [row.id, parseStoredSummary(row.summary) ?? this.coldSummary(row.id)]));
+    const runs = page.flatMap(([id, key]) => {
+      const summary = key.summary ?? cold.get(id);
+      return summary ? [summary] : [];
+    });
+    const last = page.at(-1)?.[1];
+    return {
+      runs,
+      nextCursor: last && rest.length > page.length ? encodeArchivedCursor(last) : null,
+      total: ordered.length,
+    };
   }
 
   /** A row whose stored summary does not fit the contract any more, projected from its record. */

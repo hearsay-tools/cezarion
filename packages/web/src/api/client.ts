@@ -506,7 +506,7 @@ export async function browseFs(
  *  views read the full record through `getRun`. */
 export async function getRuns(opts?: ReadOptions): Promise<RunSummary[]> {
   return unwrap(
-    await cez.api.v1.p[':projectId']['run-summaries'].$get({ param: { projectId: queryScope() } }, init(opts)),
+    await cez.api.v1.p[':projectId']['run-summaries'].$get({ param: { projectId: queryScope() }, query: {} }, init(opts)),
     '/run-summaries',
   )
 }
@@ -516,7 +516,7 @@ export async function getRuns(opts?: ReadOptions): Promise<RunSummary[]> {
  *  An already-`/api/p/`-prefixed path passes through `apiPath` untouched, so this stays
  *  correct whatever scope is mounted. */
 export async function getProjectRuns(projectId: string, opts?: ReadOptions): Promise<RunSummary[]> {
-  return unwrap(await cez.api.v1.p[':projectId']['run-summaries'].$get({ param: { projectId } }, init(opts)), '/run-summaries')
+  return unwrap(await cez.api.v1.p[':projectId']['run-summaries'].$get({ param: { projectId }, query: {} }, init(opts)), '/run-summaries')
 }
 
 /** The cross-project task index (`GET /api/v1/workspace/runs-index`) — what lets ⌘K find a task

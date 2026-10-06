@@ -425,7 +425,7 @@ const NEWEST_FIRST = 'ORDER BY created_at DESC, seq';
 /** The columns a list row reads, without the record. */
 const SUMMARY_SELECT = 'SELECT seq, id, created_at, revision, summary FROM runs';
 /** An archived run that is not an owned worker: what the run lists' archived window counts (#864). */
-const ARCHIVED_ROOT = 'archived = 1 AND parent_run_id IS NULL';
+export const ARCHIVED_ROOT = 'archived = 1 AND parent_run_id IS NULL';
 
 type SqlRow = Record<string, unknown>;
 
@@ -497,6 +497,7 @@ export class RunDatabase {
     getMany: StatementSync;
     listSummaries: StatementSync;
     listWindowSummaries: StatementSync;
+    getSummaries: StatementSync;
     listAll: StatementSync;
     listLive: StatementSync;
     listByParent: StatementSync;
@@ -535,6 +536,7 @@ export class RunDatabase {
       get: db.prepare(`SELECT ${ROW_COLUMNS} FROM runs WHERE id = ?`),
       getMany: db.prepare(`SELECT ${ROW_COLUMNS} FROM runs WHERE id IN (SELECT value FROM json_each(?))`),
       listSummaries: db.prepare(`SELECT seq, id, created_at, revision, summary FROM runs ${NEWEST_FIRST} LIMIT ?`),
+      getSummaries: db.prepare(`${SUMMARY_SELECT} WHERE id IN (SELECT value FROM json_each(?))`),
       listWindowSummaries: db.prepare(`${SUMMARY_SELECT} WHERE archived = 0 UNION ALL SELECT * FROM (${SUMMARY_SELECT} WHERE ${ARCHIVED_ROOT} ${NEWEST_FIRST} LIMIT ?) ${NEWEST_FIRST}`),
       listAll: db.prepare(`SELECT ${ROW_COLUMNS} FROM runs ${NEWEST_FIRST}`),
       listLive: db.prepare(`SELECT ${ROW_COLUMNS} FROM runs WHERE live = 1 ORDER BY seq`),
@@ -670,6 +672,12 @@ export class RunDatabase {
    */
   listWindowSummaries(archivedLimit: number): RunSummaryRow[] {
     return this.run(() => this.statements.listWindowSummaries.all(archivedLimit)).map(toSummaryRow);
+  }
+
+  /** The summary rows of `ids` that exist, in no particular order. */
+  getSummaries(ids: readonly string[]): RunSummaryRow[] {
+    if (ids.length === 0) return [];
+    return this.run(() => this.statements.getSummaries.all(JSON.stringify(ids))).map(toSummaryRow);
   }
 
   /** Every root row (archived or not) whose stored summary contains each `prefilter` token,

@@ -1,5 +1,6 @@
 import { sidebarLimitsSchema } from '@open-mercato/cezar-contract';
-import type { ApiRun, RunSummary } from '@open-mercato/cezar-contract';
+import type { ApiRun, ArchivedRunsResponse, RunSummary } from '@open-mercato/cezar-contract';
+import { ARCHIVED_RUNS_PAGE_DEFAULT, archivedRunsQuerySchema, runSummariesQuerySchema } from '@open-mercato/cezar-contract';
 import { automationKindSchema, automationScheduleSchema, localTimeZone, nextOccurrence, type AutomationKind } from '@open-mercato/cezar-contract';
 import { DelegationService } from '../delegation/service.ts';
 import { workerCapacity } from '../delegation/capacity.ts';
@@ -104,7 +105,7 @@ import { SkillsUpdateConflictError, SkillsUpdateCoordinator, SkillsUpdateService
 import { getTeamSkillsCached, refreshTeamSkills, waitForTeamSkills } from '../skills-remote.ts';
 import { appendHandoffHeartbeat, handoffProgressExcerpt, readHandoff } from '../handoff.ts';
 import { markStarted, onTodosChanged, readTodos, removeTodo, todoTaskText, type TodoItem } from '../todos.ts';
-import type { RunEvent, RunRecord, RunStatus, RunStore } from '../runs/store.ts';
+import { ARCHIVED_WINDOW, type RunEvent, type RunRecord, type RunStatus, type RunStore } from '../runs/store.ts';
 import {
   HistoryCursorError,
   deriveRunContextEvents,
@@ -3936,7 +3937,24 @@ export function createApp(deps: ServerDeps) {
     .get('/runs', (c) => c.json(c.get('project').store.listAllRunsForLegacyRoute().map(run => withUsage(run))))
     // The slim list (#817): the same runs in the same order as `GET /runs`, from the stored
     // `toRunSummary` column with memory laid over it (#779), so the list decodes no record.
-    .get('/run-summaries', (c) => c.json(c.get('project').store.listRunSummaries().runs.map(withLiveUsage)))
+    // `?archived=recent` (#864) is the window the cockpit reads: every unarchived run plus the newest
+    // `ARCHIVED_WINDOW` archived roots. The default stays every run, for clients that list them all.
+    .get('/run-summaries', queryZodValidator(runSummariesQuerySchema), (c) => {
+      const archivedWindow = c.req.valid('query').archived === 'recent' ? ARCHIVED_WINDOW : undefined;
+      return c.json(c.get('project').store.listRunSummaries({ archivedWindow }).runs.map(withLiveUsage));
+    })
+    // The archived roots past that window, a page at a time, newest first (#864).
+    .get('/run-summaries/archived', queryZodValidator(archivedRunsQuerySchema), (c) => {
+      const { before, limit, q } = c.req.valid('query');
+      const page = c.get('project').store.listArchivedRuns({
+        limit: limit ?? ARCHIVED_RUNS_PAGE_DEFAULT,
+        ...(before !== undefined ? { before } : {}),
+        ...(q !== undefined ? { q } : {}),
+      });
+      if ('error' in page) return c.json({ error: page.error }, 400);
+      const body: ArchivedRunsResponse = { ...page, runs: page.runs.map(withLiveUsage) };
+      return c.json(body);
+    })
     .get('/runs/:id/relationships', paramZodValidator(runIdParamSchema), queryZodValidator(workerEmptyRequestSchema), (c) => {
       const { store } = c.get('project');
       const run = store.getRun(c.req.valid('param').id);
