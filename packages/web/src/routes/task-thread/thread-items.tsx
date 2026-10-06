@@ -311,27 +311,44 @@ function isSafeHref(href: string): boolean {
   return true
 }
 
-function markdownHrefs(source: string): string[] {
+function markdownLinks(source: string): { label: string, href: string }[] {
   const text = withoutMarkdownCode(withoutMarkdownImages(source))
-  const body = text.replace(/^\s*\[[^\]]+\]:\s*\S+.*$/gm, ' ')
-  const hrefs: string[] = []
-  const re = /(?<!!)\[(?:[^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)|<(https?:\/\/[^>\s]+)>|(https?:\/\/[^\s<]+)/g
-  for (const match of body.matchAll(re)) {
-    const href = match[1] ?? match[2] ?? match[3]
-    if (href && isSafeHref(href)) hrefs.push(href)
+  const defs = new Map<string, string>()
+  for (const match of text.matchAll(/^\s*\[([^\]]+)\]:\s*(\S+)/gm)) {
+    if (isSafeHref(match[2]!)) defs.set(match[1]!.toLowerCase(), match[2]!)
   }
-  return hrefs
+  const body = text.replace(/^\s*\[[^\]]+\]:\s*\S+.*$/gm, ' ')
+  const links: { label: string, href: string }[] = []
+  const re = /(?<!!)\[([^\]]+)\](?:\(([^)\s]+)(?:\s+"[^"]*")?\)|\[([^\]]*)\])|<(https?:\/\/[^>\s]+)>|(https?:\/\/[^\s<]+)/g
+  for (const match of body.matchAll(re)) {
+    if (match[2]) {
+      if (isSafeHref(match[2])) links.push({ label: match[1]!, href: match[2] })
+      continue
+    }
+    if (match[1] !== undefined && match[3] !== undefined) {
+      const id = (match[3].length > 0 ? match[3] : match[1]).toLowerCase()
+      const href = defs.get(id)
+      if (href) links.push({ label: match[1]!, href })
+      continue
+    }
+    const href = match[4] ?? match[5]
+    if (href && isSafeHref(href)) links.push({ label: href, href })
+  }
+  return links
 }
 
 function clipboardHtml(root: HTMLElement, source: string): string {
   const clone = root.cloneNode(true) as HTMLElement
   clone.querySelectorAll(STREAMDOWN_CHROME).forEach((node) => node.remove())
-  const hrefs = markdownHrefs(source)
-  ;[...clone.querySelectorAll('button[data-streamdown="link"]')].forEach((button, index) => {
-    const href = hrefs[index]
-    if (!href || !isSafeHref(href)) return
+  const offers = markdownLinks(source)
+  ;[...clone.querySelectorAll('button[data-streamdown="link"]')].forEach((button) => {
+    const label = button.textContent ?? ''
+    const index = offers.findIndex((offer) => offer.label === label)
+    if (index < 0) return
+    const offer = offers.splice(index, 1)[0]
+    if (!offer || !isSafeHref(offer.href)) return
     const anchor = clone.ownerDocument.createElement('a')
-    anchor.setAttribute('href', href)
+    anchor.setAttribute('href', offer.href)
     anchor.setAttribute('data-streamdown', 'link')
     anchor.textContent = button.textContent
     button.replaceWith(anchor)
