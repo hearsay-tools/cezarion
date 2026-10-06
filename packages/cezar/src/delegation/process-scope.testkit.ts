@@ -37,7 +37,8 @@ function scopeDarwinProcesses(): () => void {
   };
   const capture = (command: string, commandArgs: unknown) => {
     const isPs = command === 'ps' && Array.isArray(commandArgs) &&
-      JSON.stringify(commandArgs) === JSON.stringify(['-U', String(process.getuid?.()), '-o', 'pid=,lstart=']);
+      commandArgs[0] === '-U' && commandArgs[1] === String(process.getuid?.()) && commandArgs[2] === '-o' &&
+      commandArgs.length === 4 && ['pid=,lstart=', 'pid=,stat=,lstart='].includes(commandArgs[3]!);
     const isLsof = command === 'lsof' && Array.isArray(commandArgs) && (
       JSON.stringify(commandArgs) === JSON.stringify(['-a', '-d', 'cwd', '-Fpn']) ||
       JSON.stringify(commandArgs) === JSON.stringify(['-a', '-u', String(process.getuid?.()), '-d', 'cwd', '-Fpn']));

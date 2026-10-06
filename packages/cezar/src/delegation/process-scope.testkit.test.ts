@@ -142,6 +142,25 @@ describe('macOS fixture enumeration boundaries', () => {
     } finally { restore(); childProcess.spawnSync = original; syncBuiltinESMExports(); }
   });
 
+  it.each(['pid=,lstart=', 'pid=,stat=,lstart='])('scopes the %s darwin own-process listing', columns => {
+    const original = childProcess.spawnSync;
+    const ambient = process.pid + 100_000, child = ambient + 1;
+    childProcess.spawnSync = ((command: string, args: string[]) => {
+      const stdout = command === 'lsof' ? ''
+        : args[0] === '-axo' ? `${process.pid} 1 OWN\n${child} ${process.pid} CHILD\n${ambient} 1 AMBIENT\n`
+        : columns.includes('stat=') ? `${child} S OWN\n${ambient} S AMBIENT\n${process.ppid} S PARENT\n`
+        : `${child} OWN\n${ambient} AMBIENT\n${process.ppid} PARENT\n`;
+      return { pid: 1, status: 0, signal: null, stdout, stderr: '', output: [null, stdout, ''] };
+    }) as typeof original;
+    const restore = scopeFixtureProcesses('darwin');
+    try {
+      const result = spawnSync('ps', ['-U', String(process.getuid?.()), '-o', columns], { encoding: 'utf8' }).stdout;
+      expect(result).toContain(String(child));
+      expect(result).not.toContain(String(ambient));
+      expect(result).not.toContain(String(process.ppid));
+    } finally { restore(); childProcess.spawnSync = original; syncBuiltinESMExports(); }
+  });
+
   it.each(['failed', 'malformed'])('preserves the unfiltered probe when ancestry enumeration is %s', mode => {
     const original = childProcess.spawnSync;
     const output = `p${process.ppid}\nn/ambient\n`;
@@ -165,13 +184,17 @@ describe.runIf(process.platform === 'darwin')('macOS fixture process enumeration
     const holder = spawn(process.execPath, ['-e', 'process.stdin.resume()'], { cwd: root, stdio: ['pipe', 'ignore', 'ignore'] });
     const exited = once(holder, 'exit');
     try {
+      const pids = (stdout: string) => stdout.split('\n').map(line => Number(line.trim().split(/\s+/)[0]));
       const own = spawnSync('ps', ['-U', String(process.getuid!()), '-o', 'pid=,lstart='], { encoding: 'utf8' });
       expect(own.status).toBe(0);
-      expect(own.stdout.split('\n').map(line => Number(line.trim().split(/\s+/)[0]))).not.toContain(process.ppid);
+      expect(pids(own.stdout)).not.toContain(process.ppid);
+      const ownWithStat = spawnSync('ps', ['-U', String(process.getuid!()), '-o', 'pid=,stat=,lstart='], { encoding: 'utf8' });
+      expect(ownWithStat.status).toBe(0);
+      expect(pids(ownWithStat.stdout)).not.toContain(process.ppid);
       const asyncOwn = await new Promise<string>((resolve, reject) => childProcess.execFile('ps',
         ['-U', String(process.getuid!()), '-o', 'pid=,lstart='], { encoding: 'utf8' },
         (error, stdout) => error ? reject(error) : resolve(stdout)));
-      expect(asyncOwn.split('\n').map(line => Number(line.trim().split(/\s+/)[0]))).not.toContain(process.ppid);
+      expect(pids(asyncOwn)).not.toContain(process.ppid);
       const asyncCwd = await new Promise<string>((resolve, reject) => childProcess.execFile('lsof',
         ['-a', '-u', String(process.getuid!()), '-d', 'cwd', '-Fpn'], { encoding: 'utf8' },
         (error, stdout) => error && (error.code !== 1 || error.killed) ? reject(error) : resolve(stdout)));

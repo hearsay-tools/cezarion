@@ -365,13 +365,19 @@ class CodexSession implements AgentSession {
 
       // Our own EOF watchdog / cancel signal coming back as 143/137 — the
       // teardown cezar asked for, not a codex failure (#703).
-      if (this.terminatedByCezar && isSignalTerminationExit(exitCode)) {
+      if (this.terminatedByCezar && (isSignalTerminationExit(exitCode) || (exitCode === null && this.child.signalCode !== null))) {
         this.emit({
           type: 'note',
-          message: `codex app-server did not exit on its own after close; terminated by cezar (code ${exitCode})`,
+          message: `codex app-server did not exit on its own after close; terminated by cezar (${exitCode === null ? this.child.signalCode : `code ${exitCode}`})`,
         });
         this.emit({ type: 'done' });
         return base;
+      }
+
+      if (exitCode === null && this.child.signalCode !== null) {
+        const message = `codex app-server was killed by signal ${this.child.signalCode}`;
+        this.emit({ type: 'error', message });
+        throw new Error(message);
       }
 
       if (exitCode !== 0 && exitCode !== null) {

@@ -101,6 +101,13 @@ export const SCENARIOS = [
 ] as const;
 export type ScenarioName = (typeof SCENARIOS)[number];
 
+/** hearsay-tools/cezarion#843: real OS failures after each native prompt is admitted. */
+export const SHUTDOWN_CRITERIA = [
+  { id: 'S22', scenario: 'no-progress', name: 'treats an outside signal as failure' },
+  { id: 'S23', scenario: 'no-progress', name: 'end escalates when the child cannot process EOF or SIGTERM' },
+  { id: 'S24', scenario: 'no-progress', name: 'stops the live child when its output transport fails' },
+] as const;
+
 /** #427: portable intermediate asks, through every native message wire. */
 export const WORKFLOW_ASK_CRITERIA = [
   { id: 'Q1', scenario: 'ask-snapshot', name: 'holds the same intermediate session until answered, then runs the tail' },

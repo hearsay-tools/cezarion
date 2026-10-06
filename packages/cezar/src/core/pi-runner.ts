@@ -255,6 +255,12 @@ export class PiRunner implements AgentRunner {
         if (child.exitCode !== null || child.signalCode !== null) return;
         terminatedByCezar = true;
         child.kill('SIGTERM');
+        // Closing input makes interrupt() a no-op; this watchdog must own
+        // escalation even when Pi ignores both EOF and SIGTERM.
+        killTimer = setTimeout(() => {
+          if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+        }, KILL_GRACE_MS);
+        killTimer.unref?.();
       }, KILL_GRACE_MS);
       killTimer.unref?.();
     };
@@ -429,19 +435,55 @@ export class PiRunner implements AgentRunner {
           }
         }
       } catch (error) {
-        if (child.exitCode === null && child.signalCode === null) throw error;
+        if (child.exitCode === null && child.signalCode === null) {
+          // Revoke input immediately, but keep result pending until the agent
+          // has actually exited so its capacity cannot be released early.
+          open = false;
+          rejectAgentAck();
+          terminatedByCezar = true;
+          child.kill('SIGTERM');
+          const reap = setTimeout(() => {
+            if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+          }, KILL_GRACE_MS);
+          reap.unref?.();
+          await waitForExit(child);
+          clearTimeout(reap);
+          throw error;
+        }
       } finally {
         if (deadline) clearTimeout(deadline);
         if (autoEndTimer) clearTimeout(autoEndTimer);
-        if (killTimer) clearTimeout(killTimer);
         open = false;
         rejectAgentAck();
+      }
+
+      // Clean stdout EOF is not a read failure, but a still-running child would
+      // leave waitForExit hanging on a timeout-less session. Give the normal
+      // EOF→exit race a tick, then the same SIGTERM→SIGKILL path as a thrown read.
+      if (child.exitCode === null && child.signalCode === null) {
+        await new Promise<void>((resolve) => {
+          if (child.exitCode !== null || child.signalCode !== null) return resolve();
+          const done = () => { child.off('exit', done); child.off('close', done); clearTimeout(timer); resolve(); };
+          const timer = setTimeout(done, 50);
+          timer.unref?.();
+          child.once('exit', done);
+          child.once('close', done);
+        });
+        if (child.exitCode === null && child.signalCode === null) {
+          terminatedByCezar = true;
+          child.kill('SIGTERM');
+          const reap = setTimeout(() => {
+            if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+          }, KILL_GRACE_MS);
+          reap.unref?.();
+        }
       }
 
       flushText();
       emitLatchedProviderError();
       emitLatchedUiProviderError();
       const exitCode = await waitForExit(child);
+      if (killTimer) clearTimeout(killTimer);
       if (interruptKillTimer) clearTimeout(interruptKillTimer);
       if (spawnError) throw spawnError;
       if (timedOut) {
@@ -451,11 +493,15 @@ export class PiRunner implements AgentRunner {
         return { text: textChunks.join('\n').trim(), toolCalls, tokensUsed, sessionId };
       }
       // A signal we sent is teardown, not a second agent failure (#73).
-      if (terminatedByCezar && isSignalTerminationExit(exitCode)) {
+      if (terminatedByCezar && (isSignalTerminationExit(exitCode) || (exitCode === null && child.signalCode !== null))) {
         onEvent?.({
           type: 'note',
-          message: `pi CLI did not exit on its own after close; terminated by cezar (code ${exitCode})`,
+          message: `pi CLI did not exit on its own after close; terminated by cezar (${exitCode === null ? child.signalCode : `code ${exitCode}`})`,
         });
+      } else if (exitCode === null && child.signalCode !== null) {
+        const message = `pi CLI was killed by signal ${child.signalCode}`;
+        onEvent?.({ type: 'error', message });
+        throw new Error(message);
       } else if (exitCode !== 0 && exitCode !== null) {
         const diagnostic = stderr.join('');
         if (diagnostic.trim()) onEvent?.({ type: 'note', message: `pi CLI stderr:\n${diagnostic}` });

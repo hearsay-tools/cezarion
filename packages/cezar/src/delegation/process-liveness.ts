@@ -105,13 +105,15 @@ const realDarwin: DarwinReader = {
   ownProcesses: () => {
     const uid = process.getuid?.();
     if (uid === undefined) return undefined;
-    const ps = spawnSync('ps', ['-U', String(uid), '-o', 'pid=,lstart='], { encoding: 'utf8', timeout: 2_000, env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' } });
+    const ps = spawnSync('ps', ['-U', String(uid), '-o', 'pid=,stat=,lstart='], { encoding: 'utf8', timeout: 2_000, env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' } });
     if (ps.error || ps.status !== 0 || !ps.stdout) return undefined;
     return ps.stdout.split('\n').flatMap(line => {
-      const match = /^\s*(\d+)\s+(.+?)\s*$/.exec(line);
+      const match = /^\s*(\d+)\s+(\S+)\s+(.+?)\s*$/.exec(line);
       // `ps` lists itself, and lsof (which ran first) never saw it.
-      if (!match || Number(match[1]) === ps.pid) return [];
-      const startedAtMs = Date.parse(`${match[2]} UTC`);
+      // Zombies have exited and cannot retain a cwd, even before their parent
+      // gets another event-loop turn to reap them. Other states stay conservative.
+      if (!match || Number(match[1]) === ps.pid || match[2]!.startsWith('Z')) return [];
+      const startedAtMs = Date.parse(`${match[3]} UTC`);
       return [{ pid: Number(match[1]), ...(Number.isFinite(startedAtMs) ? { startedAtMs } : {}) }];
     });
   },

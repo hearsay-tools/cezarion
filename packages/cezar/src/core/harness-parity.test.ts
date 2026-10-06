@@ -55,6 +55,7 @@ import {
   textEvents,
   exemptionFor,
   HARNESS_ADAPTERS,
+  SHUTDOWN_CRITERIA,
   WORKFLOW_TIMEOUT_CRITERIA,
   NO_PROGRESS_CRITERIA,
   AUTONOMOUS_CRITERIA,
@@ -1678,6 +1679,7 @@ describe('OpenCode durable input acknowledgements', () => {
 
 describe('harness parity — the matrix itself', () => {
   const allIds = [
+    ...SHUTDOWN_CRITERIA.map(c => c.id),
     ...MONITORING_TURN_CRITERIA.map(c => c.id),
     ...MONITORING_ACK_CRITERIA.map(c => c.id),
     ...MONITORING_ORDER_CRITERIA.map(c => c.id),
@@ -1691,6 +1693,8 @@ describe('harness parity — the matrix itself', () => {
     ...RUN_CRITERIA.map((c) => c.id),
   ];
   const scenarioOf = (id: string): ScenarioName => {
+    const shutdown = SHUTDOWN_CRITERIA.find(c => c.id === id);
+    if (shutdown) return shutdown.scenario;
     const monitor = [...MONITORING_TURN_CRITERIA, ...MONITORING_ACK_CRITERIA, ...MONITORING_ORDER_CRITERIA].find(c => c.id === id);
     if (monitor) return monitor.scenario;
     const ask = WORKFLOW_ASK_CRITERIA.find(c => c.id === id);
