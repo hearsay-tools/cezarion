@@ -1,4 +1,5 @@
-import { spawn } from 'node:child_process';
+import childProcess, { spawn } from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -107,6 +108,24 @@ describe('process liveness (#469)', () => {
     // Completeness cannot be judged without our own process list, and a failed lsof proves nothing.
     expect(processesWithCwdUnder(dir, 'darwin', linuxUnused, since, darwin(lsof, undefined))).toBe('unknown');
     expect(processesWithCwdUnder(dir, 'darwin', linuxUnused, since, darwin('', [], false))).toBe('unknown');
+  });
+
+  it('darwin: exited zombies cannot hold a cwd, while unreadable live processes remain candidates', () => {
+    const start = 'Mon Oct  5 23:29:05 2026';
+    let failed = false;
+    const spy = vi.spyOn(childProcess, 'spawnSync').mockImplementation(((command: string, args: string[]) => {
+      const states = args.at(-1)?.includes('stat=');
+      const stdout = command === 'lsof' ? 'p10\nn/\n' :
+        [[11, 'Z'], [12, 'Z+'], [13, 'S'], [14, 'R'], [15, '?']].map(([pid, state]) =>
+          `${pid} ${states ? `${state} ` : ''}${start}`).join('\n');
+      return { pid: 14, status: failed ? 1 : 0, signal: null, stdout, stderr: '', output: [null, stdout, ''] };
+    }) as typeof childProcess.spawnSync);
+    syncBuiltinESMExports();
+    try {
+      expect(processesWithCwdUnder('/worker', 'darwin')).toEqual([13, 15]);
+      failed = true;
+      expect(processesWithCwdUnder('/worker', 'darwin')).toBe('unknown');
+    } finally { spy.mockRestore(); syncBuiltinESMExports(); }
   });
 
   const oldBoot = '11111111-1111-4111-8111-111111111111';
