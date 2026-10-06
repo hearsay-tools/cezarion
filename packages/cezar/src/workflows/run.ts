@@ -224,14 +224,14 @@ function appendCompletedAssistantText(current: string, event: UiEvent): string {
   }
   return appendTurnText(current, event.item.text);
 }
-/** Last top-level completed item: a non-empty assistant message is a visible tail; reasoning is silent (#544). A tool does not clear a visible message (#48) but a tool-only turn stays silent. */
-export function trackVisibleTail(visible: boolean, event: UiEvent): boolean {
-  if (event.type !== 'item.completed' || event.item.parentItemId !== undefined) return visible;
+export type TurnTail = 'none' | 'visible' | 'silent';
+/** Last top-level completed item: a non-empty assistant message is a visible tail; reasoning or a tool is silent even after earlier visible text (#544). An empty turn stays `none` and never nudges. */
+export function trackTurnTail(tail: TurnTail, event: UiEvent): TurnTail {
+  if (event.type !== 'item.completed' || event.item.parentItemId !== undefined) return tail;
   const item = event.item;
-  if (item.kind === 'message' && item.role === 'assistant' && item.text.trim() !== '') return true;
-  if (item.kind === 'reasoning') return false;
-  if (item.kind === 'tool') return visible;
-  return visible;
+  if (item.kind === 'message' && item.role === 'assistant' && item.text.trim() !== '') return 'visible';
+  if (item.kind === 'reasoning' || item.kind === 'tool') return 'silent';
+  return tail;
 }
 /** Strip a trailing marker from one text event so transcripts stay free of
  *  protocol noise. Delta backends may split the marker across events — then
@@ -5479,8 +5479,7 @@ export class RunManager {
 
     let turnText = '';
     let completedAssistantText = '';
-    let visibleTail = false;
-    let lastTopKind: 'message' | 'reasoning' | 'tool' | undefined;
+    let turnTail: TurnTail = 'none';
     let sawClaudeScheduleWakeup = false;
     let sessionError: string | undefined;
     const sink = this.makeUiSink(runId, stepId);
@@ -5573,13 +5572,12 @@ export class RunManager {
         });
         const { done, monitoring, humanGate, ask, notes: askNotes } = turn;
         discardQueuedMessagesOnAsk(state.session, turn);
-        const silentTail = !visibleTail && (lastTopKind === 'reasoning' || lastTopKind === 'tool');
+        const silentTail = turnTail === 'silent';
         const alreadyFinalMessageNudged = state.finalMessageNudged === state.session;
         state.finalMessageNudged = undefined;
         turnText = '';
         completedAssistantText = '';
-        visibleTail = false;
-        lastTopKind = undefined;
+        turnTail = 'none';
         sawClaudeScheduleWakeup = false;
         for (const note of askNotes) this.store.appendEvent(runId, { type: 'note', ...note, stepId });
         this.store.updateRun(runId, { invalidAsk: !ask && askNotes.length > 0 ? true : undefined });
@@ -5828,8 +5826,7 @@ export class RunManager {
       {
         onUiEvent: (event) => {
           completedAssistantText = appendCompletedAssistantText(completedAssistantText, event);
-          visibleTail = trackVisibleTail(visibleTail, event);
-          if (event.type === 'item.completed' && event.item.parentItemId === undefined && (event.item.kind === 'message' || event.item.kind === 'reasoning' || event.item.kind === 'tool')) lastTopKind = event.item.kind;
+          turnTail = trackTurnTail(turnTail, event);
           if (event.type === 'turn.started') this.recordOpeningAccepted(runId, state);
           this.handleRunnerUiEvent(runId, state, sink, event);
         },
@@ -6429,8 +6426,7 @@ export class RunManager {
     const startTokens = stepRecord?.tokensUsed ?? 0;
     let turnText = '';
     let completedAssistantText = '';
-    let visibleTail = false;
-    let lastTopKind: 'message' | 'reasoning' | 'tool' | undefined;
+    let turnTail: TurnTail = 'none';
     let sawClaudeScheduleWakeup = false;
     let sessionError: string | undefined;
     const sink = this.makeUiSink(runId, step.id);
@@ -6491,13 +6487,12 @@ export class RunManager {
         });
         const { done, monitoring, humanGate, ask, notes: askNotes } = turn;
         discardQueuedMessagesOnAsk(state.session, turn);
-        const silentTail = !visibleTail && (lastTopKind === 'reasoning' || lastTopKind === 'tool');
+        const silentTail = turnTail === 'silent';
         const alreadyFinalMessageNudged = state.finalMessageNudged === state.session;
         state.finalMessageNudged = undefined;
         turnText = '';
         completedAssistantText = '';
-        visibleTail = false;
-        lastTopKind = undefined;
+        turnTail = 'none';
         sawClaudeScheduleWakeup = false;
         for (const note of askNotes) emit({ type: 'note', stepId: step.id, ...note });
         this.store.updateRun(runId, { invalidAsk: !ask && askNotes.length > 0 ? true : undefined });
@@ -6695,8 +6690,7 @@ export class RunManager {
           shouldAutoEnd,
           onUiEvent: (event) => {
             completedAssistantText = appendCompletedAssistantText(completedAssistantText, event);
-            visibleTail = trackVisibleTail(visibleTail, event);
-            if (event.type === 'item.completed' && event.item.parentItemId === undefined && (event.item.kind === 'message' || event.item.kind === 'reasoning' || event.item.kind === 'tool')) lastTopKind = event.item.kind;
+            turnTail = trackTurnTail(turnTail, event);
             this.handleRunnerUiEvent(runId, state, sink, event);
           },
           onAgentInputReady: () => this.handleAgentInputReady(runId, state, session),
