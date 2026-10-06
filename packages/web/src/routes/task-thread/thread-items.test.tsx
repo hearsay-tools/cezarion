@@ -633,6 +633,22 @@ describe('AssistantMessage copy actions', () => {
     expect(html).not.toMatch(/<a[^>]+href="https:\/\/trap\.example"/)
   })
 
+  it('does not let a markdown image steal a later link href', async () => {
+    const source = ['![shot](https://trap.example/img.png)', '', 'See [docs](https://example.com).'].join('\n')
+    const write = vi.fn(async () => {})
+    vi.stubGlobal('ClipboardItem', class ClipboardItem {
+      constructor(public items: Record<string, Blob>) {}
+    })
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { write, writeText: vi.fn() } })
+    render(<MemoryRouter><AssistantMessage text={source} /></MemoryRouter>)
+    fireEvent.click(copyButton())
+    await waitFor(() => expect(write).toHaveBeenCalled())
+    const item = writtenItem(write)
+    const html = await item.items['text/html']!.text()
+    expect(html).toMatch(/<a[^>]+href="https:\/\/example\.com"/)
+    expect(html).not.toMatch(/<a[^>]+href="https:\/\/trap\.example/)
+  })
+
   it.each(['missing', 'denied'] as const)('shows an error when clipboard is %s and does not claim success', async (failure) => {
     if (failure === 'missing') {
       vi.stubGlobal('navigator', { ...navigator, clipboard: undefined })

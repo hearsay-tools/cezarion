@@ -299,10 +299,14 @@ function withoutMarkdownCode(source: string): string {
   return noFences.split('`').filter((_, index) => index % 2 === 0).join(' ')
 }
 
+function withoutMarkdownImages(source: string): string {
+  return source.replace(/!\[[^\]]*\]\([^)\s]*(?:\s+"[^"]*")?\)/g, ' ')
+}
+
 function markdownHrefs(source: string): string[] {
   const hrefs: string[] = []
-  const re = /\[(?:[^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)|<(https?:\/\/[^>\s]+)>|(https?:\/\/[^\s<]+)/g
-  for (const match of withoutMarkdownCode(source).matchAll(re)) {
+  const re = /(?<!!)\[(?:[^\]]*)]\(([^)\s]+)(?:\s+"[^"]*")?\)|<(https?:\/\/[^>\s]+)>|(https?:\/\/[^\s<]+)/g
+  for (const match of withoutMarkdownCode(withoutMarkdownImages(source)).matchAll(re)) {
     const href = match[1] ?? match[2] ?? match[3]
     if (href) hrefs.push(href)
   }
