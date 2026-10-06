@@ -100,6 +100,7 @@ export const OMP_SPEC_SUPPORT: AgentRunSpecSupport = {
   timeoutMs: { honored: true, via: 'wall-clock kill switch' },
   sessionId: { honored: true, via: '--resume <id> when resume is set; a fresh session mints its own id, reported from get_state' },
   resume: { honored: true, via: '--resume in place of a fresh session' },
+  resumeFallbackSystemPrompt: { honored: false, reason: 'Continue already resends spec.systemPrompt on every process; a separate fallback prompt is unused' },
 };
 
 export interface OmpToolSelection {

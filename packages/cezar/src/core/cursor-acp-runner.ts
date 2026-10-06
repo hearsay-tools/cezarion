@@ -56,6 +56,7 @@ export const CURSOR_SPEC_SUPPORT: AgentRunSpecSupport = {
   timeoutMs: { honored: true, via: 'wall-clock deadline with bounded TERM/KILL teardown' },
   sessionId: { honored: true, via: 'session/load sessionId on resume; session/new mints fresh ID' },
   resume: { honored: true, via: 'session/load instead of session/new' },
+  resumeFallbackSystemPrompt: { honored: false, reason: 'session/load fails a missing session; the adapter does not open a replacement session' },
 };
 
 export class CursorAcpRunner implements AgentRunner {

@@ -168,6 +168,7 @@ export const SKILL_RESUME_CRITERIA = [
   { id: 'R54', scenario: 'baseline', name: 'keeps the skill system prompt when recover() resumes a persisted continuation' },
   { id: 'R55', scenario: 'baseline', name: 'warns once when a resent continued skill is gone' },
   { id: 'R56', scenario: 'baseline', name: 'declares systemPromptOnResume matching the resume wire' },
+  { id: 'R57', scenario: 'baseline', name: 'reuses the recorded session id on Continue and recover' },
 ] as const;
 
 export interface HarnessAdapter {

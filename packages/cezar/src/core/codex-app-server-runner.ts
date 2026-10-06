@@ -101,6 +101,7 @@ export const CODEX_SPEC_SUPPORT: AgentRunSpecSupport = {
   timeoutMs: { honored: true, via: 'wall-clock kill switch on the child process' },
   sessionId: { honored: true, via: 'thread/resume threadId when resume is set; a fresh thread/start mints its own thread id' },
   resume: { honored: true, via: 'thread/resume in place of thread/start' },
+  resumeFallbackSystemPrompt: { honored: false, reason: 'thread/resume fails a missing thread; the adapter does not open a replacement thread' },
 };
 export class CodexAppServerRunner implements AgentRunner {
   readonly backend = 'codex' as const;

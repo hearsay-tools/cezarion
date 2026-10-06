@@ -1936,6 +1936,13 @@ const SPEC_FIELD_PROBES: Readonly<Record<AgentRunSpecField, SpecFieldProbe>> = {
     without: { sessionId: PINNED_SESSION_ID },
     with: { sessionId: PINNED_SESSION_ID, resume: true },
   },
+  // Both sides resume a missing id so OpenCode takes the 404 fallback; the
+  // field is the opening prompt of that fresh session only.
+  resumeFallbackSystemPrompt: {
+    kind: 'boundary',
+    without: { resume: true, sessionId: PINNED_SESSION_ID },
+    with: { resume: true, sessionId: PINNED_SESSION_ID, resumeFallbackSystemPrompt: 'parity probe resume fallback system prompt' },
+  },
 };
 
 const variantKey = (spec: Partial<AgentRunSpec>): string => JSON.stringify(spec);

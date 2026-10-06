@@ -5752,6 +5752,7 @@ export class RunManager {
     // do not warn. Workers still inherit only the extra prompt (#778).
     const skipSkillOnResume = sessionId !== undefined && runner.systemPromptOnResume === 'in-thread';
     let continuationSkillPrompt: string | undefined;
+    let fallbackSkillPrompt: string | undefined;
     const continuedSkillName = toolsStep?.skill;
     if (continuedSkillName) {
       let skill = (state.skills ?? []).find((candidate) => candidate.name === continuedSkillName);
@@ -5775,7 +5776,9 @@ export class RunManager {
         }
       }
       if (skill) {
-        if (!skipSkillOnResume) continuationSkillPrompt = skillSystemPrompt(skill);
+        const playbook = skillSystemPrompt(skill);
+        if (skipSkillOnResume) fallbackSkillPrompt = playbook;
+        else continuationSkillPrompt = playbook;
         if (skill.source === 'team' && skill.team?.dir) {
           // Rematerialize into a #483 rematerialized worktree; do not note it on Continue.
           await materializeSkillDir(state.cwd, skill).catch(() => false);
@@ -5818,17 +5821,23 @@ export class RunManager {
     }
     state.inputDelivery = inputDeliveryOf(runner); state.unreadInputIds = new Set(); state.consumedBeforeAck = new Set();
     try {
+    const continuationTail = composeSystemPrompt(
+      record?.systemPrompt,
+      delegation?.instructions,
+      artifactInstructions(continueProfile.env.CEZ_ARTIFACTS_DIR),
+      generateFollowups ? HANDOFF_INSTRUCTIONS : HANDOFF_ONLY_INSTRUCTIONS,
+    );
     session = startManagedSession(runner,
       {
         // Skill body (when resent), then the run's extra system prompt, then
         // the handoff contract — the same order as the opening session (#790).
-        systemPrompt: composeSystemPrompt(
-          continuationSkillPrompt,
-          record?.systemPrompt,
-          delegation?.instructions,
-          artifactInstructions(continueProfile.env.CEZ_ARTIFACTS_DIR),
-          generateFollowups ? HANDOFF_INSTRUCTIONS : HANDOFF_ONLY_INSTRUCTIONS,
-        ),
+        // In-thread resume omits the skill from systemPrompt; OpenCode's 404
+        // fallback uses resumeFallbackSystemPrompt so the fresh session still
+        // gets the playbook.
+        systemPrompt: composeSystemPrompt(continuationSkillPrompt, continuationTail),
+        ...(skipSkillOnResume ? {
+          resumeFallbackSystemPrompt: composeSystemPrompt(fallbackSkillPrompt, continuationTail),
+        } : {}),
         userPrompt: attachments.length
           ? `${openingPrompt}\n\n${pastedAttachmentsText(attachments)}`
           : openingPrompt,

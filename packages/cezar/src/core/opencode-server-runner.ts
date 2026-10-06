@@ -57,8 +57,9 @@ export const KILL_GRACE_MS = 4_000;
  * the opencode TUI talks to) with an SSE event stream. One server per session,
  * bound to the run's `cwd` (worktree), gives OpenCode the same multi-turn shape
  * as the Claude runner: each `sendMessage` posts another prompt to the same
- * session (history is kept server-side), and `session/abort` cancels. The
- * current adapter opens a fresh session with the continuation prompt on Continue.
+ * session (history is kept server-side), and `session/abort` cancels.
+ * Continue and restart recovery GET /session/{id} and prompt that session; a 404
+ * falls back to one fresh session with the full system prompt.
  *
  * Auth = the host's opencode config/logins. The agent runs autonomously
  * (auto-approved permissions); this adapter does not map `spec.allowedTools`.
@@ -69,8 +70,8 @@ export const KILL_GRACE_MS = 4_000;
  * What `opencode serve` receives from each `AgentRunSpec` field (#284). The
  * server auto-approves permissions and this adapter maps no per-tool
  * allowlist, so `allowedTools`/`bashAllowlist` are declared dropped rather than
- * mapped (spec 2026-07-17-permission-modes); every start opens a fresh session,
- * so `sessionId`/`resume` never reach the wire. Held against the recorded HTTP
+ * mapped (spec 2026-07-17-permission-modes). Resume GETs `/session/{id}` and
+ * prompts it; a 404 opens one fresh session. Held against the recorded HTTP
  * requests by the harness parity matrix.
  */
 export const OPENCODE_SPEC_SUPPORT: AgentRunSpecSupport = {
@@ -80,15 +81,16 @@ export const OPENCODE_SPEC_SUPPORT: AgentRunSpecSupport = {
   images: { honored: false, reason: 'the adapter posts text parts only; image blocks are dropped' },
   cwd: { honored: true, via: 'opencode serve spawn cwd; the session is bound to it' },
   allowedTools: { honored: false, reason: 'permissions are auto-approved server-side and no per-tool allowlist is mapped' },
-  restrictNativeDelegation: { honored: true, via: 'POST /session permission rule denying task (D1)' },
+  restrictNativeDelegation: { honored: true, via: 'POST /session permission rule denying task (D1); PATCH /session/{id} permission on resume' },
   bashAllowlist: { honored: false, reason: 'no per-tool allowlist is mapped, so no command-prefix restriction either' },
   additionalDirectories: { honored: false, reason: 'the server works from cwd; no extra-root mapping' },
   env: { honored: true, via: 'merged over the child env through buildChildEnv' },
   model: { honored: true, via: 'prompt_async model { providerID, modelID }, split from provider/model' },
   effort: { honored: true, via: 'prompt_async variant, canonical level' },
   timeoutMs: { honored: true, via: 'wall-clock kill switch on the child process' },
-  sessionId: { honored: false, reason: 'every start opens a fresh server session; the id is only reported back on the result' },
-  resume: { honored: false, reason: 'Continue opens a fresh session carrying the continuation prompt' },
+  sessionId: { honored: true, via: 'GET /session/{id} when resume is set; a fresh POST /session mints its own id' },
+  resume: { honored: true, via: 'GET /session/{id} in place of POST /session; 404 falls back to a fresh session' },
+  resumeFallbackSystemPrompt: { honored: true, via: 'opening prependSystemPrompt of a fresh POST /session when GET /session/{id} returns 404 on resume' },
 };
 /** How long an idle session may sit on steered input before it counts as a lost wake. */
 export const OPENCODE_LOST_WAKE_GRACE_MS = 2_000;
@@ -96,7 +98,7 @@ export const OPENCODE_LOST_WAKE_GRACE_MS = 2_000;
 export class OpencodeServerRunner implements AgentRunner {
   readonly backend = 'opencode' as const;
   readonly specSupport = OPENCODE_SPEC_SUPPORT;
-  readonly systemPromptOnResume = 'resent' as const;
+  readonly systemPromptOnResume = 'in-thread' as const;
   readonly inputDelivery: InputDelivery = {
     mode: 'steer', consumption: 'observable',
     via: 'prompt_async while busy; assistant message.updated parentID at consumption',
@@ -526,25 +528,77 @@ class OpencodeSession implements AgentSession {
     });
   }
 
+  private nativeDelegationPermission(): { permission: Array<{ permission: string; pattern: string; action: string }> } {
+    return { permission: [{ permission: 'task', pattern: '*', action: 'deny' }] };
+  }
+
+  /** 404 → `'missing'`. Any other non-OK status fails bootstrap (no fallback). */
+  private async tryGetSession(id: string): Promise<Record<string, unknown> | 'missing'> {
+    if (!this.baseUrl) throw new Error('opencode server not ready');
+    const res = await fetch(`${this.baseUrl}/session/${encodeURIComponent(id)}`, { method: 'GET' });
+    if (res.status === 404) return 'missing';
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      throw new Error(`GET /session/${id} → ${res.status} ${detail.slice(0, 200)}`);
+    }
+    const text = await res.text();
+    if (!text) return { id };
+    try {
+      const parsed = JSON.parse(text) as unknown;
+      return isRecord(parsed) ? parsed : { id };
+    } catch {
+      return { id };
+    }
+  }
+
+  private async attachSession(id: string, applyDelegationRule: boolean): Promise<void> {
+    this.sessionId = id;
+    this.emit({ type: 'session', sessionId: id });
+    this.emitUi((state) => opencodeSessionStarted(id, state));
+    if (applyDelegationRule) {
+      await this.http('PATCH', `/session/${encodeURIComponent(id)}`, this.nativeDelegationPermission());
+    }
+  }
+
   private async bootstrap(): Promise<void> {
-    const created = await this.http('POST', '/session', {
-      title: 'cezar task',
-      // OpenCode 1.18.29 /doc: session.create permission rules. The native task
-      // tool checks this permission; other agent/project permissions stay intact.
-      ...(this.spec.restrictNativeDelegation ? { permission: [{ permission: 'task', pattern: '*', action: 'deny' }] } : {}),
-    });
-    this.sessionId = stringField(created, 'id');
-    if (!this.sessionId) throw new Error('opencode did not return a session id');
-    this.emit({ type: 'session', sessionId: this.sessionId });
-    const sessionId = this.sessionId;
-    this.emitUi((state) => opencodeSessionStarted(sessionId, state));
+    const requested = this.spec.resume ? this.spec.sessionId : undefined;
+    let resumed = false;
+    if (requested) {
+      const existing = await this.tryGetSession(requested);
+      if (existing === 'missing') {
+        this.emit({
+          type: 'note',
+          message: `OpenCode session ${requested} no longer exists; the continuation runs in a fresh session without the earlier conversation.`,
+        });
+      } else {
+        await this.attachSession(stringField(existing, 'id') ?? requested, Boolean(this.spec.restrictNativeDelegation));
+        resumed = true;
+      }
+    }
+    if (!resumed) {
+      const created = await this.http('POST', '/session', {
+        title: 'cezar task',
+        // OpenCode 1.18.33 /doc: session.create permission rules. The native task
+        // tool checks this permission; other agent/project permissions stay intact.
+        ...(this.spec.restrictNativeDelegation ? this.nativeDelegationPermission() : {}),
+      });
+      const sessionId = stringField(created, 'id');
+      if (!sessionId) throw new Error('opencode did not return a session id');
+      await this.attachSession(sessionId, false);
+    }
 
     // The SSE subscription must be LIVE before the first prompt posts —
     // events the server emits while the POST is in flight would otherwise be
     // lost (a race this await closes; the bundled mock made it visible).
     await this.consumeEvents();
 
-    const first = prependSystemPrompt(this.spec.systemPrompt, this.spec.userPrompt);
+    // Lost-session fallback uses the full skill-inclusive prompt Continue
+    // stashed in resumeFallbackSystemPrompt; a true resume re-prepends only
+    // extra+handoff (the skill already lives in the thread).
+    const systemPrompt = !resumed && requested
+      ? (this.spec.resumeFallbackSystemPrompt ?? this.spec.systemPrompt)
+      : this.spec.systemPrompt;
+    const first = prependSystemPrompt(systemPrompt, this.spec.userPrompt);
     await this.prompt(first, 'opening');
     if (this.refusedBeforeOpening) queueMicrotask(() => {
       this.refusedBeforeOpening = false;
@@ -764,7 +818,7 @@ class OpencodeSession implements AgentSession {
       // note: the turn's remaining output is lost, so the step must record a
       // failure (run.ts classifies from v1 `error` only), never pass as an
       // empty success. Then close the turn (flushing what did arrive) and end
-      // the session; "Continue" resumes it on a fresh server.
+      // the session; "Continue" GETs this session id on the next server.
       if (this.serverOpen && !this.sse.signal.aborted) {
         this.exitFailure = 'opencode: event stream closed unexpectedly';
         this.end();

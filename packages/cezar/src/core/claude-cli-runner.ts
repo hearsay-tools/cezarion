@@ -90,6 +90,7 @@ export const CLAUDE_SPEC_SUPPORT: AgentRunSpecSupport = {
   timeoutMs: { honored: true, via: 'wall-clock kill switch on the child process' },
   sessionId: { honored: true, via: '--session-id, or --resume when resume is set' },
   resume: { honored: true, via: '--resume <sessionId> in place of --session-id' },
+  resumeFallbackSystemPrompt: { honored: false, reason: 'Continue already resends spec.systemPrompt on every process; a separate fallback prompt is unused' },
 };
 export class ClaudeCliRunner implements AgentRunner {
   readonly backend = 'claude' as const;

@@ -13,6 +13,7 @@ import { RUNNER_IDS, type RunnerId } from './agent-runner.ts';
 import { createRunner } from './runner-factory.ts';
 import {
   HARNESS_ADAPTERS,
+  PINNED_SESSION_ID,
   SKILL_RESUME_CRITERIA,
   driveSeam,
   promptFor,
@@ -33,8 +34,10 @@ const SKILL_BODY = 'PLAYBOOK-BODY-790-SENTINEL';
 const EXTRA_PROMPT = 'EXTRA-PROMPT-790';
 const MISSING_SKILL_LIFECYCLE = `skill /${SKILL_NAME} is not in the skill registry — the continued session runs without its instructions`;
 
-const RESENT = new Set<RunnerId>(['claude', 'pi', 'omp', 'opencode']);
-const IN_THREAD = new Set<RunnerId>(['codex', 'cursor']);
+const RESENT = new Set<RunnerId>(['claude', 'pi', 'omp']);
+const IN_THREAD = new Set<RunnerId>(['codex', 'cursor', 'opencode']);
+const LOST_OPENCODE_SESSION =
+  'OpenCode session ses_mock_1 no longer exists; the continuation runs in a fresh session without the earlier conversation.';
 
 function skillMarkdown(): string {
   return `---\nname: ${SKILL_NAME}\ndescription: ${SKILL_DESCRIPTION}\n---\n${SKILL_BODY}\n`;
@@ -58,6 +61,69 @@ function parsedLines(recording: string): unknown[] {
       return [];
     }
   });
+}
+
+function asRecord(row: unknown): Record<string, unknown> | undefined {
+  return row && typeof row === 'object' ? row as Record<string, unknown> : undefined;
+}
+
+function opencodeSessionPosts(recording: string): unknown[] {
+  return parsedLines(recording).filter((row) => {
+    const rec = asRecord(row);
+    return rec?.method === 'POST' && rec.url === '/session';
+  });
+}
+
+function opencodeSessionGets(recording: string): string[] {
+  return parsedLines(recording).flatMap((row) => {
+    const rec = asRecord(row);
+    if (rec?.method !== 'GET' || typeof rec.url !== 'string') return [];
+    const match = /^\/session\/([^/]+)$/.exec(rec.url);
+    return match ? [match[1]!] : [];
+  });
+}
+
+function recordedSessionId(store: RunStore, runId: string): string {
+  const ids = store.getRun(runId)?.steps.map((step) => step.sessionId).filter((value): value is string => Boolean(value)) ?? [];
+  const id = ids.at(-1);
+  expect(id, `${runId} recorded a session id`).toBeDefined();
+  return id!;
+}
+
+function assertReusedRecordedSession(
+  backend: RunnerId,
+  continuationRecording: string,
+  sessionId: string,
+): void {
+  if (backend === 'opencode') {
+    expect(opencodeSessionPosts(continuationRecording), `${backend} Continue must not POST /session`).toEqual([]);
+    expect(opencodeSessionGets(continuationRecording)).toEqual([sessionId]);
+    return;
+  }
+  if (backend === 'codex') {
+    expect(continuationRecording).toContain('thread/resume');
+    expect(continuationRecording).toContain(sessionId);
+    expect(continuationRecording).not.toContain('thread/start');
+    return;
+  }
+  if (backend === 'cursor') {
+    expect(continuationRecording).toContain('session/load');
+    expect(continuationRecording).toContain(sessionId);
+    expect(continuationRecording).not.toMatch(/"method"\s*:\s*"session\/new"/);
+    return;
+  }
+  if (backend === 'claude') {
+    expect(continuationRecording).toMatch(/--resume/);
+    expect(continuationRecording).toContain(sessionId);
+    return;
+  }
+  if (backend === 'pi') {
+    expect(continuationRecording).toMatch(/--session/);
+    expect(continuationRecording).toContain(sessionId);
+    return;
+  }
+  expect(continuationRecording).toMatch(/--resume/);
+  expect(continuationRecording).toContain(sessionId);
 }
 
 function systemFromPrepended(text: string): string {
@@ -271,7 +337,7 @@ function assertContinuationSkill(
 }
 
 describe('harness parity — skill system prompt on Continue (#790)', () => {
-  expect(SKILL_RESUME_CRITERIA.map((row) => row.id)).toEqual(['R53', 'R54', 'R55', 'R56']);
+  expect(SKILL_RESUME_CRITERIA.map((row) => row.id)).toEqual(['R53', 'R54', 'R55', 'R56', 'R57']);
 
   for (const backend of RUNNER_IDS) {
     it(`${backend} R53 keeps the skill system prompt on a live Continue`, async () => {
@@ -300,6 +366,28 @@ describe('harness parity — skill system prompt on Continue (#790)', () => {
         assertContinuationSkill(backend, fixture.repoRoot, launchPrompt, fixture.wireSince(marked));
       });
     }, 60_000);
+
+    it(`${backend} R57 reuses the recorded session id on Continue and recover`, async () => {
+      await withSkillResumeRun(backend, async (fixture) => {
+        await waitFor(() => Boolean(fixture.store.getRun(fixture.runId)?.steps?.some((step) => Boolean(step.sessionId))));
+        const sessionId = recordedSessionId(fixture.store, fixture.runId);
+        await idleClose(fixture.manager, fixture.runId);
+        const continuedMark = fixture.markWire();
+        const continued = await continueAndPark(fixture, { text: promptFor(backend, 'baseline') }, continuedMark);
+        assertReusedRecordedSession(backend, continued, sessionId);
+        expect(recordedSessionId(fixture.store, fixture.runId)).toBe(sessionId);
+
+        await idleClose(fixture.manager, fixture.runId);
+        const recoverMark = fixture.markWire();
+        expect(fixture.manager.continueRun(fixture.runId, { text: promptFor(backend, 'baseline') }).ok).toBe(true);
+        await fixture.restart();
+        await waitFor(() => fixture.manager.isActive(fixture.runId) || ['queued', 'running', 'waiting'].includes(fixture.store.getRun(fixture.runId)?.status ?? ''));
+        await waitFor(() => fixture.store.getRun(fixture.runId)?.status === 'waiting' && fixture.manager.isActive(fixture.runId));
+        await waitFor(() => fixture.wireSince(recoverMark).includes('--append-system-prompt') || fixture.wireSince(recoverMark).includes('turn/start') || fixture.wireSince(recoverMark).includes('session/prompt') || fixture.wireSince(recoverMark).includes('prompt_async') || fixture.wireSince(recoverMark).includes('session/load') || fixture.wireSince(recoverMark).includes('thread/resume'));
+        assertReusedRecordedSession(backend, fixture.wireSince(recoverMark), sessionId);
+        expect(recordedSessionId(fixture.store, fixture.runId)).toBe(sessionId);
+      });
+    }, 90_000);
 
     it(`${backend} R55 ${RESENT.has(backend) ? 'warns once when the continued skill is gone' : 'skips the missing-skill warning on an in-thread resume'}`, async () => {
       await withSkillResumeRun(backend, async (fixture) => {
@@ -363,7 +451,7 @@ describe('harness parity — systemPromptOnResume declaration (#790)', () => {
       claude: 'resent',
       pi: 'resent',
       omp: 'resent',
-      opencode: 'resent',
+      opencode: 'in-thread',
       codex: 'in-thread',
       cursor: 'in-thread',
     };
@@ -411,19 +499,52 @@ describe('harness parity — systemPromptOnResume declaration (#790)', () => {
         if (mode === 'resent') {
           expect(freshWire).toContain('SENTINEL-790-SYSTEM');
           expect(resumeWire).toContain('SENTINEL-790-SYSTEM');
-          if (backend === 'opencode') {
-            expect(resumeWire).not.toMatch(/thread\/resume|session\/load|--resume/);
-          } else {
-            expect(resumeWire).toMatch(/--resume|--session|thread\/resume|session\/load/);
-          }
+          expect(resumeWire).toMatch(/--resume|--session|thread\/resume|session\/load/);
         } else {
           expect(freshWire).toContain('SENTINEL-790-SYSTEM');
-          expect(resumeWire).toMatch(/thread\/resume|session\/load/);
-          expect(freshWire).not.toMatch(/thread\/resume|session\/load/);
+          if (backend === 'opencode') {
+            expect(opencodeSessionGets(resumeWire)).toEqual([PINNED_SESSION_ID]);
+            expect(opencodeSessionGets(freshWire)).toEqual([]);
+            expect(freshWire).not.toMatch(/thread\/resume|session\/load/);
+          } else {
+            expect(resumeWire).toMatch(/thread\/resume|session\/load/);
+            expect(freshWire).not.toMatch(/thread\/resume|session\/load/);
+          }
         }
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
     }, 45_000);
   }
+});
+
+describe('opencode lost-session fallback (#790)', () => {
+  it('opens a fresh session with the skill, one lifecycle notice, and a new session id', async () => {
+    await withSkillResumeRun('opencode', async (fixture) => {
+      const launchPrompt = assertLaunchKeepsSkill('opencode', fixture.repoRoot, fixture.snapshotWire());
+      const lostId = recordedSessionId(fixture.store, fixture.runId);
+      expect(lostId).toBe('ses_mock_1');
+      await idleClose(fixture.manager, fixture.runId);
+      const persist = `${fixture.argsFile}.opencode-sessions.json`;
+      const stored = JSON.parse(readFileSync(persist, 'utf8')) as { seq: number; sessions: Record<string, unknown> };
+      expect(stored.sessions[lostId]).toBeDefined();
+      writeFileSync(persist, JSON.stringify({ seq: stored.seq, sessions: {} }));
+      const marked = fixture.markWire();
+      const continued = await continueAndPark(fixture, { text: promptFor('opencode', 'baseline') }, marked);
+      expect(opencodeSessionGets(continued)).toEqual([lostId]);
+      expect(opencodeSessionPosts(continued)).toHaveLength(1);
+      const prompts = systemPromptsFrom('opencode', continued);
+      expect(prompts.length).toBeGreaterThan(0);
+      expect(skillInPrompt(prompts.at(-1)!, fixture.repoRoot)).toBe(true);
+      expect(prompts.at(-1)!.startsWith(expectedSkillPrompt(fixture.repoRoot))).toBe(true);
+      expect(launchPrompt.startsWith(expectedSkillPrompt(fixture.repoRoot))).toBe(true);
+      const notices = fixture.store.readEvents(fixture.runId).filter((event) =>
+        (event.type === 'lifecycle' || event.type === 'note')
+        && String(event.message).includes('no longer exists'));
+      expect(notices).toEqual([expect.objectContaining({ message: LOST_OPENCODE_SESSION })]);
+      const freshId = recordedSessionId(fixture.store, fixture.runId);
+      expect(freshId).not.toBe(lostId);
+      expect(freshId).toMatch(/^ses_mock_/);
+    });
+  }, 60_000);
 });
