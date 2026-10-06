@@ -67,6 +67,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  * | `silent-tail-ack-delay` | silent-tail as a follow-up whose transport ACK is held until after turn-end |
  * | `silent-tail-no-reply` | the same first turn; a final-message nudge is ACKed and never opens a turn |
  * | `silent-tail-late-reply` | the same first turn; a final-message nudge is ACKed, then replies after the bound |
+ * | `silent-tail-late-turn-start` | the same first turn; after the bound, native turn-start holds before any content |
  * | `silent-tail-slow-done` | the same first turn; a nudge reply starts before the bound and ends after it |
  */
 export const SCENARIOS = [
@@ -88,6 +89,7 @@ export const SCENARIOS = [
   'silent-tail-ack-delay',
   'silent-tail-no-reply',
   'silent-tail-late-reply',
+  'silent-tail-late-turn-start',
   'silent-tail-slow-done',
   'tool-tail',
   'baseline',
@@ -188,6 +190,7 @@ export const FINAL_MESSAGE_CRITERIA = [
   { id: 'F8', scenario: 'silent-tail-no-reply', name: 'parks waiting when a nudge is ACKed without a turn' },
   { id: 'F9', scenario: 'silent-tail-late-reply', name: 'resumes when a nudge reply arrives after the bound' },
   { id: 'F10', scenario: 'silent-tail-slow-done', name: 'content that starts before the bound clears it' },
+  { id: 'F11', scenario: 'silent-tail-late-turn-start', name: 'resumes on a late native turn-start before content' },
 ] as const;
 
 export interface HarnessAdapter {
@@ -279,6 +282,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'silent-tail-again': 'mock:silent-tail-again',
       'silent-tail-no-reply': 'mock:silent-tail-no-reply',
       'silent-tail-late-reply': 'mock:silent-tail-late-reply',
+      'silent-tail-late-turn-start': 'mock:silent-tail-late-turn-start',
       'silent-tail-slow-done': 'mock:silent-tail-slow-done',
       'tool-tail': 'mock:tool-tail',
       baseline: BASELINE_PROMPT,
@@ -527,6 +531,10 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
   ...(['claude', 'codex', 'pi', 'cursor', 'omp'] as const).map(backend => ({
     criterion: 'F7', backend, kind: 'scenario-unconstructible' as const,
     reason: 'This wire has no separate HTTP ACK retained after turn completion. Turn frames and the transport ACK share one stream, so a silent-tail turn cannot end while its agent-input ACK is still pending.',
+  })),
+  ...(['claude', 'opencode', 'pi', 'cursor', 'omp'] as const).map(backend => ({
+    criterion: 'F11', backend, kind: 'scenario-unconstructible' as const,
+    reason: 'This wire has no native turn-start frame that reaches v2 after the nudge is sent; turn.started is synthetic inside sendAgentMessage and fires at nudge send, before the bound.',
   })),
   {
     criterion: 'A9', backend: 'claude', kind: 'capability-absent',

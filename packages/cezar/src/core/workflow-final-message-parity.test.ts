@@ -16,6 +16,13 @@ const autonomousNotes = (events: readonly Record<string, unknown>[]) =>
 const shortenNudgeBound = (manager: { finalMessageNudgeReplyMs?: number }) => {
   manager.finalMessageNudgeReplyMs = 300;
 };
+const lateDoneContent = (events: readonly Record<string, unknown>[]) =>
+  events.some(e => {
+    if (e.type === 'text') return String(e.text).includes('Filed #543');
+    if (e.type !== 'item.completed') return false;
+    const item = e.item as { kind?: string; text?: string } | undefined;
+    return item?.kind === 'message' && (item.text ?? '').includes('Filed #543');
+  });
 
 function lastTopLevelTail(events: readonly UiEvent[]): Extract<UiEvent, { type: 'item.completed' }>['item'] | undefined {
   const completed = events.filter((e): e is Extract<UiEvent, { type: 'item.completed' }> =>
@@ -117,6 +124,34 @@ describe('final-message nudge parity — #544', () => {
             expect(manager['busySlots']()).toBe(0);
             await waitFor(() => store.getRun(runId)?.status === 'running');
             expect(manager['busySlots']()).toBe(1);
+            await waitFor(() => store.getRun(runId)?.status === 'done');
+            expect(nudgeNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(1);
+            expect(noReplyNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(1);
+          });
+        }, 30_000);
+        continue;
+      }
+      if (row.id === 'F11') {
+        const exemption = exemptionFor('F11', backend);
+        if (exemption) {
+          it(`${backend} F11 exemption — ${exemption.reason}`, async () => {
+            expect(HARNESS_ADAPTERS[backend].scenarios['silent-tail-late-turn-start']).toBeUndefined();
+          });
+          continue;
+        }
+        it(`${backend} ${row.id} ${row.name}`, async () => {
+          await withOwnedInputRun(backend, 'silent-tail-late-turn-start', async ({ store, manager, runId }) => {
+            shortenNudgeBound(manager as unknown as { finalMessageNudgeReplyMs?: number });
+            const startSeq = store.readEvents(runId).length;
+            manager.enqueueOwnedRun(runId);
+            await waitFor(() => noReplyNotes(store.readEvents(runId).slice(startSeq)).length === 1);
+            expect(store.getRun(runId)?.status).toBe('waiting');
+            expect(manager['busySlots']()).toBe(0);
+            const parkedSeq = store.readEvents(runId).length;
+            // Hold is 800 ms; this poll must expire before content if turn.started is ignored.
+            await waitFor(() => store.getRun(runId)?.status === 'running', 400);
+            expect(manager['busySlots']()).toBe(1);
+            expect(lateDoneContent(store.readEvents(runId).slice(parkedSeq))).toBe(false);
             await waitFor(() => store.getRun(runId)?.status === 'done');
             expect(nudgeNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(1);
             expect(noReplyNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(1);

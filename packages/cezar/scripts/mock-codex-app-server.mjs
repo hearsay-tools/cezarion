@@ -204,15 +204,17 @@ rl.on('line', async (line) => {
     emit({ id: msg.id, result: { turn: { id: 'turn_mock_1' } } });
     }
     const turnText = msg.params?.input?.map?.((part) => part.text ?? '').join('\n') ?? '';
+    let silent;
     if (turnText.includes('mock:silent-tail') || turnText.includes('Your last turn ended without a message to the user.')) {
-      const silent = await import('./mock-silent-tail.mjs');
+      silent = await import('./mock-silent-tail.mjs');
       silent.noteSilentTailPrompt(turnText);
       if (silent.isAckOnlyNudge(turnText)) return;
-      if (silent.isLateNudge(turnText)) await silent.sleep(silent.LATE_REPLY_MS);
+      if (silent.isLateNudge(turnText) || silent.isLateTurnStartNudge(turnText)) await silent.sleep(silent.LATE_REPLY_MS);
     }
     if (!turnText.includes('mock:no-progress-ack-only')) {
     emit({ method: 'turn/started', params: { turn: { id: 'turn_mock_1', status: 'inProgress', items: [] } } });
     }
+    if (silent?.isLateTurnStartNudge(turnText)) await silent.sleep(silent.LATE_TURN_START_HOLD_MS);
     // The real app-server records the turn's own input as a userMessage item,
     // echoing clientUserMessageId as clientId (probe 0.155.1, #505).
     const opening = { type: 'userMessage', id: `item_user_open_${++steerEchoSerial}`, clientId: msg.params?.clientUserMessageId ?? null, content: [{ type: 'text', text: turnText }] };

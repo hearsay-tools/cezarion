@@ -997,7 +997,7 @@ this HTTP-only ordering and test root idle expiry/Continue on their native wires
 Owned-worker terminal settlement and explicit question/worker/CI waits retain
 their existing policies.
 
-Final-message nudge rows **F1–F10** live in
+Final-message nudge rows **F1–F11** live in
 `core/workflow-final-message-parity.test.ts` and the same parity guard (hearsay-tools/cezarion#544).
 Every adapter covers a reasoning-or-tool tail with no later assistant message, on fresh and Continue
 paths: one visible-message nudge that can complete with DONE, a still-silent nudge that parks
@@ -1016,8 +1016,13 @@ stdin write callback, as for Claude: the mock accepts `session/prompt` and sends
 `turn.started` emitted inside `sendAgentMessage` before the reply timer is armed does not count as a
 reply; items, text and tools count at any time, and nested `item.*` events with `parentItemId` do not.
 F9 lets a late reply after expiry unpark the run (`running`, slot held) and then complete normally;
-`alreadyFinalMessageNudged` still prevents a second nudge. F10 starts streaming content before the
-bound and ends after it: no `no reply to the final-message nudge` note, and a normal DONE. A user-authored
+`alreadyFinalMessageNudged` still prevents a second nudge. F11 lets the bound expire, then starts the
+late reply turn on the wire and holds before any content longer than the test poll window: `turn.started`
+alone unparks (`running`, slot held) before content arrives, then the run completes normally. Only Codex
+emits a native `turn/started` after the nudge is sent; the other adapters have named executable exemptions
+because `turn.started` is synthetic inside `sendAgentMessage` and fires at nudge send, before the bound.
+F10 starts streaming content before the bound and ends after it: no `no reply to the final-message nudge`
+note, and a normal DONE. A user-authored
 delivery resets the one-shot latch so the next silent tail can nudge; expiry does not. The one-shot
 latch keeps #48 closed; control markers are never read from reasoning. A pending autonomous retry is
 never replaced by the final-message nudge.
