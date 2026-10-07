@@ -96,6 +96,147 @@ describe('PreviewSession', () => {
     });
   });
 
+  describe('restart after page activity (#870)', () => {
+    // Chromium can paint once and then send nothing more, so a change on screen never reaches the
+    // pane. On mvp-unveiled task 76e2a345 the first paint came at about 11s, after the first-frame
+    // retries had run out, and later clicks left the canvas on that frame.
+    afterEach(() => vi.useRealTimers());
+
+    /** A session whose stream started and painted once, then went quiet. */
+    async function idleSession() {
+      vi.useFakeTimers();
+      const fake = fakeCdp();
+      const session = await PreviewSession.create(fake.cdp);
+      const viewer = fakeViewer();
+      session.attach(viewer);
+      await vi.advanceTimersByTimeAsync(0);
+      fake.emit('Page.screencastFrame', frame('first', 1));
+      await session.handle({ t: 'ack' });
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(fake.sent('Page.startScreencast')).toHaveLength(1);
+      return { ...fake, session, viewer };
+    }
+
+    it('turns on lifecycle events so a late paint can restart the stream', async () => {
+      const { cdp, sent } = fakeCdp();
+      await PreviewSession.create(cdp);
+      expect(sent('Page.setLifecycleEventsEnabled')[0]?.params).toEqual({ enabled: true });
+    });
+
+    it('streams a first paint that comes after the first-frame retries ran out', async () => {
+      vi.useFakeTimers();
+      const { cdp, sent, emit } = fakeCdp();
+      const session = await PreviewSession.create(cdp);
+      const viewer = fakeViewer();
+      session.attach(viewer);
+      await vi.advanceTimersByTimeAsync(10_000);
+      const starts = sent('Page.startScreencast').length;
+
+      emit('Page.frameNavigated', { frame: { id: 'main', url: 'http://localhost:3825/en/events' } });
+      emit('Page.lifecycleEvent', { frameId: 'main', name: 'firstContentfulPaint' });
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(sent('Page.startScreencast')).toHaveLength(starts + 1);
+      emit('Page.screencastFrame', frame('late paint', 9));
+      expect(viewer.frames).toEqual(['late paint']);
+    });
+
+    it('a late paint the wrong size is still replaced', async () => {
+      vi.useFakeTimers();
+      const { cdp, sent, emit } = fakeCdp();
+      const session = await PreviewSession.create(cdp);
+      session.attach(fakeViewer());
+      await vi.advanceTimersByTimeAsync(10_000);
+      const starts = sent('Page.startScreencast').length;
+
+      emit('Page.lifecycleEvent', { frameId: 'main', name: 'firstContentfulPaint' });
+      emit('Page.screencastFrame', { data: jpeg(800, 600), sessionId: 9 });
+      await vi.advanceTimersByTimeAsync(500);
+      expect(sent('Page.startScreencast')).toHaveLength(starts + 1);
+    });
+
+    it('a click after idle with no frame after it restarts the stream for a new one', async () => {
+      const { session, sent, emit, viewer } = await idleSession();
+      await session.handle({ t: 'mouse', type: 'mousePressed', x: 10, y: 20, button: 'left', clickCount: 1 });
+      await session.handle({ t: 'mouse', type: 'mouseReleased', x: 10, y: 20, button: 'left', clickCount: 1 });
+      await vi.advanceTimersByTimeAsync(999);
+      expect(sent('Page.startScreencast')).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(sent('Page.startScreencast')).toHaveLength(2);
+      emit('Page.screencastFrame', frame('after click', 1));
+      expect(viewer.frames).toEqual(['first', 'after click']);
+    });
+
+    it('a full navigation after idle restarts the stream for a new frame', async () => {
+      const { sent, emit, viewer } = await idleSession();
+      emit('Page.frameNavigated', { frame: { id: 'main', url: 'http://localhost:3825/en/events?chat=1' } });
+      emit('Page.lifecycleEvent', { frameId: 'main', name: 'load' });
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(sent('Page.startScreencast')).toHaveLength(2);
+      emit('Page.screencastFrame', frame('after navigation', 1));
+      expect(viewer.frames).toEqual(['first', 'after navigation']);
+    });
+
+    it('an in-page navigation after idle restarts the stream for a new frame', async () => {
+      const { sent, emit } = await idleSession();
+      emit('Page.navigatedWithinDocument', { frameId: 'main', url: 'http://localhost:3825/en/events?chat=1' });
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(sent('Page.startScreencast')).toHaveLength(2);
+    });
+
+    it('does not restart when the page answers activity with a frame', async () => {
+      const { session, sent, emit } = await idleSession();
+      await session.handle({ t: 'key', type: 'keyDown', key: 'a', code: 'KeyA', text: 'a' });
+      emit('Page.screencastFrame', frame('typed', 2));
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(sent('Page.startScreencast')).toHaveLength(1);
+    });
+
+    it('pointer moves and a subframe\'s load steps restart nothing', async () => {
+      const { session, sent, emit } = await idleSession();
+      emit('Page.frameNavigated', { frame: { id: 'main', url: 'http://localhost:3825/' } });
+      await vi.advanceTimersByTimeAsync(10_000);
+      const starts = sent('Page.startScreencast').length;
+      await session.handle({ t: 'mouse', type: 'mouseMoved', x: 5, y: 5 });
+      emit('Page.lifecycleEvent', { frameId: 'ad', name: 'load' });
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(sent('Page.startScreencast')).toHaveLength(starts);
+    });
+
+    it('gives each activity a few tries, then stops until the next one', async () => {
+      const { session, sent } = await idleSession();
+      await session.handle({ t: 'reload' });
+      await vi.advanceTimersByTimeAsync(10_000);
+      // The first start, then five tries for the reload: one after the activity wait, four at the first-frame pace.
+      expect(sent('Page.startScreencast')).toHaveLength(6);
+      await session.handle({ t: 'insertText', text: 'x' });
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(sent('Page.startScreencast')).toHaveLength(11);
+    });
+
+    it('still dispatches input while the pane holds the last frame unacked', async () => {
+      vi.useFakeTimers();
+      const { cdp, sent, emit } = fakeCdp();
+      const session = await PreviewSession.create(cdp);
+      session.attach(fakeViewer());
+      await vi.advanceTimersByTimeAsync(0);
+      emit('Page.screencastFrame', frame('last', 1));
+      await session.handle({ t: 'mouse', type: 'mousePressed', x: 1, y: 2, button: 'left', clickCount: 1 });
+      await session.handle({ t: 'key', type: 'keyDown', key: 'Enter', code: 'Enter' });
+      expect(sent('Input.dispatchMouseEvent')).toHaveLength(1);
+      expect(sent('Input.dispatchKeyEvent')).toHaveLength(1);
+    });
+
+    it('arms nothing without a viewer', async () => {
+      vi.useFakeTimers();
+      const { cdp, sent, emit } = fakeCdp();
+      const session = await PreviewSession.create(cdp);
+      await session.handle({ t: 'mouse', type: 'mousePressed', x: 1, y: 2, button: 'left', clickCount: 1 });
+      emit('Page.lifecycleEvent', { frameId: 'main', name: 'load' });
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(sent('Page.startScreencast')).toHaveLength(0);
+    });
+  });
+
   describe('frame size check', () => {
     afterEach(() => vi.useRealTimers());
 
