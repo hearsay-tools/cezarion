@@ -1,4 +1,5 @@
-import { ChildProcess, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { ChildProcess, spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { KILL_GRACE_MS } from './runner-runtime.ts';
 
 /**
@@ -20,8 +21,26 @@ import { KILL_GRACE_MS } from './runner-runtime.ts';
 type Leader = { child: ChildProcess; signalledAt?: number };
 /** Grouped leaders this process spawned, keyed by pgid (= the leader's pid). */
 const leaders = new Map<number, Leader>();
+/** Every child `spawnSessionLeader` returned, on any platform: win32's taskkill is for these only. */
+const spawned = new WeakSet<ChildProcess>();
 
 const exited = (child: ChildProcess) => child.exitCode !== null || child.signalCode !== null;
+
+/** Exited, though Node may not have reaped it yet: a zombie still leads its group. OpenCode's SSE
+ * closes when the crashed server exits, before Node sees the exit, and its teardown signals then. */
+function leaderExited(child: ChildProcess): boolean {
+  if (exited(child)) return true;
+  const pid = child.pid!;
+  if (process.platform === 'linux') {
+    try {
+      const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+      return stat.slice(stat.lastIndexOf(')') + 1).trim()[0] === 'Z';
+    } catch { return true; }
+  }
+  if (process.platform !== 'darwin') return false;
+  const ps = spawnSync('ps', ['-o', 'stat=', '-p', String(pid)], { encoding: 'utf8', timeout: 2_000 });
+  return ps.status === 0 ? ps.stdout.trim().startsWith('Z') : ps.status === 1;
+}
 // -1 and 0 address every process and our own group: never a session.
 const groupId = (pgid: number) => Number.isSafeInteger(pgid) && pgid > 1;
 
@@ -48,6 +67,7 @@ export function spawnSessionLeader(
 ): ChildProcessWithoutNullStreams {
   const grouped = process.platform !== 'win32';
   const child = spawn(bin, [...args], { cwd: options.cwd, env: options.env, detached: grouped });
+  spawned.add(child);
   const pid = child.pid;
   if (!grouped || !(child instanceof ChildProcess) || pid === undefined || !groupId(pid)) return child;
   prune();
@@ -67,16 +87,18 @@ export function spawnSessionLeader(
   return child;
 }
 
-/** Signal a session: its whole group on POSIX, its tree on win32, else the leader alone. */
+/** Signal a session: its whole group on POSIX, its tree on win32, else the leader alone. A
+ * leader that already exited on its own ended its session: what it left behind is not signalled
+ * here, as when no signal came at all. */
 export function signalSession(child: ChildProcess, signal: NodeJS.Signals, platform: NodeJS.Platform = process.platform): void {
   const pid = child.pid;
   const leader = pid === undefined ? undefined : leaders.get(pid);
-  if (leader?.child === child) {
+  if (leader?.child === child && !leaderExited(child)) {
     leader.signalledAt ??= Date.now();
     signalProcessGroup(pid!, signal);
     return;
   }
-  if (platform === 'win32' && pid !== undefined && !exited(child)) {
+  if (platform === 'win32' && pid !== undefined && spawned.has(child) && !exited(child)) {
     try {
       const taskkill = spawn('taskkill', ['/T', '/F', '/PID', String(pid)], { stdio: 'ignore', windowsHide: true });
       taskkill.on('error', () => { if (!exited(child)) child.kill(signal); });

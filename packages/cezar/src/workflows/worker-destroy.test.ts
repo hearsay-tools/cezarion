@@ -20,7 +20,7 @@ import * as runners from '../core/runner-factory.ts';
 import { CLAUDE_SPEC_SUPPORT } from '../core/claude-cli-runner.ts';
 import { RunManager } from './run.ts';
 import { DelegationService } from '../delegation/service.ts';
-import { processStartToken } from '../delegation/process-liveness.ts';
+import { processesWithCwdUnder, processStartToken } from '../delegation/process-liveness.ts';
 import { signalSession, spawnSessionLeader } from '../core/session-process.ts';
 import { blockRunWrites } from '../runs/run-store.testkit.ts';
 
@@ -1010,12 +1010,14 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     };
 
     /** `member`: a SIGTERM-ignoring child in the leader's group, or a SIGTERM-sensitive one that
-     * left it with setsid. `leader`: stays up, or exits 0 on its own once the member runs. */
+     * left it with setsid. `leader`: stays up, or exits 0 on its own once the member runs. Before
+     * it exits, one scan sees the member as its descendant, so the fixture's scoped enumeration
+     * still counts it after it is reparented. */
     async function groupedWorker(opts: { member: 'group' | 'setsid'; leader: 'stay' | 'exit' }) {
       const w = await worker();
       const member = opts.member === 'setsid' ? "process.on('SIGTERM',()=>process.exit(42)); setInterval(()=>{},1000)" : "process.on('SIGTERM',()=>{}); setInterval(()=>{},1000)";
       const script = `const m = require('child_process').spawn(process.execPath, ['-e', ${JSON.stringify(member)}], { stdio: 'ignore', detached: ${opts.member === 'setsid'} });
-console.log(String(m.pid)); ${opts.leader === 'exit' ? 'm.unref(); setTimeout(() => process.exit(0), 50);' : 'setInterval(()=>{},1000);'}`;
+console.log(String(m.pid)); ${opts.leader === 'exit' ? "m.unref(); process.stdin.on('end', () => process.exit(0)).resume();" : 'setInterval(()=>{},1000);'}`;
       let leader: ChildProcessWithoutNullStreams | undefined; let ready!: (pid: number) => void;
       const memberPid = new Promise<number>(resolve => { ready = resolve; });
       vi.spyOn(runners, 'createRunner').mockReturnValue({ backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT, systemPromptOnResume: 'resent', interrupt: async () => undefined,
@@ -1031,6 +1033,8 @@ console.log(String(m.pid)); ${opts.leader === 'exit' ? 'm.unref(); setTimeout(()
       manager.enqueueOwnedRun(w.id);
       const pid = await memberPid;
       releases.push(() => { try { process.kill(pid, 'SIGKILL'); } catch { /* gone */ } });
+      expect(processesWithCwdUnder(workspace(w).path)).toContain(pid);
+      if (opts.leader === 'exit') leader!.stdin.end();
       return { w, leader: leader!, member: pid };
     }
 

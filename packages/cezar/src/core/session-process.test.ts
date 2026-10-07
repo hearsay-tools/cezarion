@@ -85,6 +85,17 @@ describe.skipIf(process.platform === 'win32')('session process groups (hearsay-t
     expect(sessionGroupOf(leader.pid!)).toBeUndefined();
   });
 
+  it('signalling a session whose leader already exited on its own signals nothing', async () => {
+    const { leader, member } = await start(leaderScript(IGNORES_TERM, { exit: true }));
+    await exited(leader);
+    const kill = vi.spyOn(process, 'kill');
+    signalSession(leader, 'SIGTERM');
+    signalSession(leader, 'SIGKILL');
+    expect(kill.mock.calls.filter(([pid, signal]) => pid === -leader.pid! && signal !== 0)).toEqual([]);
+    await new Promise(resolve => setTimeout(resolve, 300));
+    expect(alive(member)).toBe(true);
+  });
+
   it('never group-signals a fake child', () => {
     const kill = vi.spyOn(process, 'kill');
     const fake = { pid: 4242, exitCode: null, signalCode: null, kill: vi.fn(() => true) } as unknown as ChildProcess;
