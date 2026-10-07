@@ -54,11 +54,23 @@ export const workerWaitSchema = z.object({
 }).strict();
 export type WorkerWait = z.infer<typeof workerWaitSchema>;
 
+/** Automatic retries of a pending destroy (hearsay-tools/cezarion#879): how many scheduled
+ * attempts ran since the last explicit request, when the next one is due, and whether they
+ * reached the hourly cap with nothing changing, which the cockpit shows as needing attention.
+ * Absent until the first automatic attempt; a manual destroy clears it. */
+export const workerDestroyRetrySchema = z.object({
+  attempts: z.number().int().positive(),
+  nextAt: z.iso.datetime(),
+  needsAttention: z.literal(true).optional(),
+}).strict();
+export type WorkerDestroyRetry = z.infer<typeof workerDestroyRetrySchema>;
+
 export const workerDestroySchema = z.object({
   requestedAt: z.iso.datetime(),
   phase: z.enum(['requested', 'terminating', 'cleaning', 'complete', 'incomplete']),
   remaining: remainingSchema,
   error: errorSchema.optional(),
+  retry: workerDestroyRetrySchema.optional(),
 }).strict();
 export type WorkerDestroy = z.infer<typeof workerDestroySchema>;
 
