@@ -105,7 +105,8 @@ export function WorkerActivitySection({ run, open, onToggle }: { run: ApiRun; op
           <ul className="grid max-h-64 min-w-0 gap-0.5 overflow-y-auto">
             {ids.map(id => {
               const worker = workers.get(id)
-              const record = runs.data?.find(candidate => candidate.id === id)
+              // The run list carries only the newest archived runs (#864); the answer names the rest.
+              const record = runs.data?.find(candidate => candidate.id === id) ?? query.data?.titles?.find(candidate => candidate.id === id)
               const status = worker ? workerStatusLabel(worker.status) : query.isSuccess ? 'Record unavailable or deleted' : 'Status unavailable'
               return (
                 <li key={id} data-slot="worker-item" data-status={worker?.status} className="min-w-0">

@@ -1177,7 +1177,7 @@ describe('TasksOverviewRoute — wired to the app', () => {
 
   function renderApp(runs: RunSummary[]) {
     fetchMock.mockImplementation(async (input) => {
-      const url = String(input)
+      const url = String(input).replace('?archived=recent', '')
       if (url === '/api/v1/run-summaries') return new Response(JSON.stringify(runs), { status: 200 })
       if (url === '/api/v1/runs/archive-finished')
         return new Response(JSON.stringify({ archived: 1 }), { status: 200 })
@@ -1209,6 +1209,34 @@ describe('TasksOverviewRoute — wired to the app', () => {
   const overviewTab = (view: string) =>
     document.querySelector(`[data-slot="overview-tab"][data-view="${view}"]`) as HTMLElement
   const sidebarRow = (id: string) => document.querySelector(`[data-slot="task-row"][data-run-id="${id}"]`)
+
+  it('reads the archived pages when the window is full, and pages older ones in (#864)', { timeout: 30_000 }, async () => {
+    const window = Array.from({ length: 200 }, (_, i) => run({ id: `win-${i}`, archived: true, createdAt: ago(1_000_000 + i * 1000) }))
+    const asked: string[] = []
+    fetchMock.mockImplementation(async (input) => {
+      const url = String(input)
+      asked.push(url)
+      if (url === '/api/v1/run-summaries?archived=recent') return json(window)
+      if (url === '/api/v1/run-summaries/archived?limit=200') return json({ runs: window, nextCursor: 'c1', total: 201 })
+      if (url === '/api/v1/run-summaries/archived?before=c1&limit=200') {
+        return json({ runs: [run({ id: 'oldest', archived: true, createdAt: ago(9_000_000) })], nextCursor: null, total: 201 })
+      }
+      return json([])
+    })
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <MemoryRouter><ListViewProvider><TasksOverviewRoute /></ListViewProvider></MemoryRouter>
+      </QueryClientProvider>,
+    )
+    await waitFor(() => expect(overviewTab('archived').textContent).toBe('Archived · 200+'))
+    // The Active tab never asks for archived pages.
+    expect(asked.some((url) => url.includes('/run-summaries/archived'))).toBe(false)
+    fireEvent.click(overviewTab('archived'))
+    await waitFor(() => expect(overviewTab('archived').textContent).toBe('Archived · 201'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Show older archived' }))
+    await waitFor(() => expect(tableRow('oldest')).not.toBeNull())
+    expect(screen.queryByRole('button', { name: 'Show older archived' })).toBeNull()
+  })
 
   it('keeps the sidebar and table Active/Archived tabs independent', async () => {
     renderApp([run({ id: 'act', status: 'running' }), run({ id: 'arc', status: 'done', archived: true })])
@@ -1250,7 +1278,7 @@ describe('TasksOverviewRoute — wired to the app', () => {
       },
     }
     fetchMock.mockImplementation(async (input, init) => {
-      const url = String(input)
+      const url = String(input).replace('?archived=recent', '')
       if (url === '/api/v1/workspace/ui-state') {
         if (init?.method === 'PUT') {
           workspaceState = { ...workspaceState, ...JSON.parse(String(init.body)) }
@@ -1319,7 +1347,7 @@ describe('TasksOverviewRoute — wired to the app', () => {
     })
     // The doctrine: after the mutation, ask the endpoint again rather than trusting the cache.
     await waitFor(() => {
-      const listFetches = fetchMock.mock.calls.filter(([path]) => String(path) === '/api/v1/run-summaries')
+      const listFetches = fetchMock.mock.calls.filter(([path]) => String(path) === '/api/v1/run-summaries?archived=recent')
       expect(listFetches.length).toBeGreaterThan(1)
     })
   })
@@ -1328,7 +1356,7 @@ describe('TasksOverviewRoute — wired to the app', () => {
     renderApp([run({ id: 'failure', title: 'Keep me' })])
     await waitFor(() => expect(tableRow('failure')).not.toBeNull())
     fireEvent.change(screen.getByRole('textbox', { name: 'Search tasks' }), { target: { value: 'Keep' } })
-    fetchMock.mockImplementation(async input => String(input).endsWith('archive-finished')
+    fetchMock.mockImplementation(async input => String(input).replace('?archived=recent', '').endsWith('archive-finished')
       ? json({ error: 'Archive unavailable. Try again.' }, 503)
       : json([]))
     fireEvent.click(screen.getByRole('button', { name: 'Archive finished' }))
@@ -1357,7 +1385,7 @@ describe('TasksOverviewRoute — wired to the app', () => {
     })
     // Same doctrine as archive: the endpoint's answer is the truth — refetch, don't trust.
     await waitFor(() => {
-      const listFetches = fetchMock.mock.calls.filter(([path]) => String(path) === '/api/v1/run-summaries')
+      const listFetches = fetchMock.mock.calls.filter(([path]) => String(path) === '/api/v1/run-summaries?archived=recent')
       expect(listFetches.length).toBeGreaterThan(1)
     })
   })
@@ -1431,4 +1459,124 @@ it('offers explicit save and cancel for an inline table rename', () => {
   fireEvent.change(within(row).getByLabelText('Task title'), { target: { value: 'Saved title' } })
   fireEvent.click(within(row).getByRole('button', { name: 'Save title' }))
   expect(onRename).toHaveBeenCalledWith('buttons', 'Saved title')
+})
+
+/**
+ * The Archived tab past the run list's window (#864): `useRuns` carries every unarchived run
+ * but only the newest 200 archived roots, so older ones arrive a page at a time from
+ * `GET /run-summaries/archived`, and a search there asks the server too.
+ */
+describe('archived pages past the window', () => {
+  const archivedRuns = (count: number) => Array.from({ length: count }, (_, i) =>
+    run({ id: `win-${i}`, archived: true, createdAt: ago(1_000_000 + i * 1000) }))
+  const archivedTab = () => screen.getByRole('button', { name: /^Archived/ })
+
+  // Two renders of a full 200-row window: slow on a loaded suite, not a wait on anything.
+  it('says 200+ while the window is full and the total is unknown, then the total', { timeout: 30_000 }, () => {
+    const { rerender } = renderOverview({ view: 'archived', runs: archivedRuns(200) })
+    expect(archivedTab().textContent).toBe('Archived · 200+')
+    rerender(
+      <QueryClientProvider client={createQueryClient()}>
+        <MemoryRouter>
+          <TasksOverview runs={archivedRuns(200)} view="archived" now={NOW} archivedTotal={250}
+            onViewChange={vi.fn()} onArchiveFinished={vi.fn()} onMarkAllRead={vi.fn()} onRename={vi.fn()} />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+    expect(archivedTab().textContent).toBe('Archived · 250')
+  })
+
+  it('counts exactly below the window and offers no older page', () => {
+    renderOverview({ view: 'archived', runs: archivedRuns(3) })
+    expect(archivedTab().textContent).toBe('Archived · 3')
+    expect(screen.queryByRole('button', { name: 'Show older archived' })).toBeNull()
+  })
+
+  it('shows older pages under the window, once each, and asks for the next one', () => {
+    const onLoadMore = vi.fn()
+    const window = archivedRuns(2)
+    renderOverview({
+      view: 'archived',
+      runs: window,
+      archivedPages: {
+        runs: [{ ...window[1]! }, run({ id: 'older', archived: true, createdAt: ago(9_000_000) })],
+        query: '',
+        hasMore: true,
+        loading: false,
+        onLoadMore,
+      },
+    })
+    expect(tableRow('older')).not.toBeNull()
+    expect(document.querySelectorAll(`[data-slot="task-table-row"][data-run-id="${window[1]!.id}"]`)).toHaveLength(1)
+    fireEvent.click(screen.getByRole('button', { name: 'Show older archived' }))
+    expect(onLoadMore).toHaveBeenCalledTimes(1)
+  })
+
+  it('says when an older page failed, and retries it', () => {
+    const onLoadMore = vi.fn()
+    renderOverview({
+      view: 'archived',
+      runs: archivedRuns(2),
+      archivedPages: { runs: [], query: '', hasMore: true, loading: false, onLoadMore, failed: true },
+    })
+    expect(screen.getByRole('alert').textContent).toContain('Could not load older archived tasks.')
+    expect(screen.queryByRole('button', { name: 'Show older archived' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    expect(onLoadMore).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps a window row the server matched by reference number, as it keeps an older one', () => {
+    const recent = run({ id: 'recent-864', title: 'Bound the lists', archived: true, issueNumber: 864 })
+    const older = run({ id: 'older-864', title: 'Older work', archived: true, issueNumber: 864, createdAt: ago(9_000_000) })
+    renderOverview({
+      view: 'archived',
+      runs: [recent, run({ id: 'unrelated', archived: true })],
+      onArchivedSearch: vi.fn(),
+      archivedPages: { runs: [recent, older], query: '#864', hasMore: false, loading: false, onLoadMore: vi.fn() },
+    })
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search tasks' }), { target: { value: '#864' } })
+    expect(tableRow('recent-864')).not.toBeNull()
+    expect(tableRow('older-864')).not.toBeNull()
+    expect(tableRow('unrelated')).toBeNull()
+  })
+
+  it('does not let stale unfiltered pages widen a search', () => {
+    renderOverview({
+      view: 'archived',
+      runs: [run({ id: 'unrelated', archived: true })],
+      onArchivedSearch: vi.fn(),
+      archivedPages: { runs: [run({ id: 'unrelated', archived: true })], query: '', hasMore: false, loading: false, onLoadMore: vi.fn() },
+    })
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search tasks' }), { target: { value: 'needle' } })
+    expect(tableRow('unrelated')).toBeNull()
+  })
+
+  it('drops a paged row the live list has since unarchived', () => {
+    const live = run({ id: 'came-back', archived: false })
+    renderOverview({
+      view: 'archived',
+      runs: [live],
+      archivedPages: { runs: [{ ...live, archived: true }], query: '', hasMore: false, loading: false, onLoadMore: vi.fn() },
+    })
+    expect(tableRow('came-back')).toBeNull()
+  })
+
+  it('passes the search to the server and shows its hits even when the local filter would not', () => {
+    const onArchivedSearch = vi.fn()
+    renderOverview({
+      view: 'archived',
+      runs: archivedRuns(2),
+      onArchivedSearch,
+      archivedPages: {
+        runs: [run({ id: 'by-issue', title: 'Bound the lists', archived: true, issueNumber: 864, createdAt: ago(9_000_000) })],
+        query: '#864',
+        hasMore: false,
+        loading: false,
+        onLoadMore: vi.fn(),
+      },
+    })
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search tasks' }), { target: { value: '#864' } })
+    expect(onArchivedSearch).toHaveBeenLastCalledWith('#864')
+    expect(tableRow('by-issue')).not.toBeNull()
+  })
 })

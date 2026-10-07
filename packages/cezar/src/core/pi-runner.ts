@@ -200,6 +200,10 @@ export class PiRunner implements AgentRunner {
       } else if (refusedForAck && open && !agentAck && !humanPromptAcks && !pendingMarkerAsk) {
         refusedForAck = false;
         opts.onAgentInputReady?.();
+      } else if (open && !piUi.turnId && !agentAck && !humanPromptAcks && !pendingMarkerAsk) {
+        // #486: a human ack drained with no turn open — re-settle the idle boundary.
+        refusedForAck = false;
+        opts.onAgentInputReady?.();
       }
     };
     let pendingMarkerAsk = false;
@@ -535,6 +539,8 @@ export class PiRunner implements AgentRunner {
         return acknowledged;
       },
       discardQueuedMessages: () => undefined,
+      holdsHumanInput: () => humanPromptAcks > 0,
+      heldHumanInputCount: () => humanPromptAcks,
       end,
       interrupt,
       pid: child.pid,

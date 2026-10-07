@@ -1032,7 +1032,7 @@ describe('TaskQuickListContainer', () => {
   it('renders the live run list', async () => {
     renderContainer([run({ id: 'live', title: 'A real run', status: 'running' })])
     expect(await screen.findByText('A real run')).not.toBeNull()
-    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/run-summaries')
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/run-summaries?archived=recent')
   })
 
   it('lights the row for the task open at /tasks/:id, including its child routes', async () => {
@@ -1047,7 +1047,7 @@ describe('TaskQuickListContainer', () => {
   it('pins a row through POST /pin, in the active project scope (#935)', async () => {
     const sent: Array<{ path: string; body: unknown }> = []
     fetchMock.mockImplementation(async (input: RequestInfo | URL, init: RequestInit = {}) => {
-      const path = String(input)
+      const path = String(input).replace('?archived=recent', '')
       if (init.method === 'POST') {
         sent.push({ path, body: typeof init.body === 'string' ? JSON.parse(init.body) : undefined })
         return new Response('{}', { status: 200 })
@@ -1109,7 +1109,7 @@ describe('SidebarSessionScope', () => {
   it('keeps colliding run ids from different projects in combined counts and the waiting indicator', async () => {
     const sharedId = 'shared-across-projects'
     fetchMock.mockImplementation(async (input) => {
-      const path = String(input)
+      const path = String(input).replace('?archived=recent', '')
       if (path === '/api/v1/run-summaries') {
         return new Response(JSON.stringify([run({ id: sharedId, status: 'running' })]), { status: 200 })
       }

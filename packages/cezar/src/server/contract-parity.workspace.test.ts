@@ -20,7 +20,7 @@ import type {
   removeProjectResponseSchema,
   updateProjectResponseSchema,
 } from '@open-mercato/cezar-contract';
-import type { runsIndexResponseSchema } from '@open-mercato/cezar-contract';
+import type { runsIndexResponseSchema, runsSearchResponseSchema } from '@open-mercato/cezar-contract';
 import type {
   configResponseSchema,
   openProjectInResponseSchema,
@@ -161,12 +161,18 @@ describe('src/contract projects/workspace schemas match the routes exactly', () 
     (typeof client.api.v1.workspace)['runs-index']['$get'],
     200
   >;
+  type RunsSearch200 = InferResponseType<
+    (typeof client.api.v1.workspace)['runs-search']['$get'],
+    200
+  >;
 
   type _Checks = [
     // the registry
     Assert<Exact<z.infer<typeof projectsResponseSchema>, Projects200>>,
     // the cross-project task index behind ⌘K
     Assert<Exact<z.infer<typeof runsIndexResponseSchema>, RunsIndex200>>,
+    // and its reach past each project's window (#864)
+    Assert<Exact<z.infer<typeof runsSearchResponseSchema>, RunsSearch200>>,
     Assert<Exact<z.infer<typeof registerProjectResponseSchema>, RegisterProject200>>,
     Assert<Exact<z.infer<typeof registerProjectResponseSchema>, Checkout200>>,
     Assert<Exact<z.infer<typeof updateProjectResponseSchema>, UpdateProject200>>,

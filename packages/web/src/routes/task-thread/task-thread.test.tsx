@@ -45,7 +45,7 @@ function renderView(
   vi.stubGlobal(
     'fetch',
     vi.fn((input: RequestInfo | URL) => {
-      const path = String(input)
+      const path = String(input).replace('?archived=recent', '')
       const body =
         path === '/api/v1/models?runner=claude' ? { runner: 'claude', models: [], source: 'unavailable', stale: false }
         : path === '/api/v1/models?runner=codex' ? { runner: 'codex', models: [], source: 'unavailable', stale: false }
@@ -268,8 +268,8 @@ describe('ThreadView', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
-        calls.push({ url: String(input), method: init?.method ?? 'GET' })
-        const body = String(input).endsWith('/auto-resume') ? { cancelled: true } : []
+        calls.push({ url: String(input).replace('?archived=recent', ''), method: init?.method ?? 'GET' })
+        const body = String(input).replace('?archived=recent', '').endsWith('/auto-resume') ? { cancelled: true } : []
         return Promise.resolve(
           new Response(JSON.stringify(body), {
             status: 200,
@@ -532,7 +532,7 @@ describe('ThreadView', () => {
       'fetch',
       vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
         calls.push({
-          url: String(input),
+          url: String(input).replace('?archived=recent', ''),
           method: init?.method ?? 'GET',
           body: init?.body ? JSON.parse(String(init.body)) : undefined,
         })
@@ -604,7 +604,7 @@ describe('ThreadView', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
-        if ((init?.method ?? 'GET') === 'DELETE') calls.push(String(input))
+        if ((init?.method ?? 'GET') === 'DELETE') calls.push(String(input).replace('?archived=recent', ''))
         // GET answers `[]`: our own invalidateQueries refetches the runs LIST, and the
         // header's queuePositions would choke on a non-array.
         const body = (init?.method ?? 'GET') === 'GET' ? '[]' : '{}'
@@ -625,7 +625,7 @@ describe('ThreadView', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
-        if ((init?.method ?? 'GET') === 'PATCH' && !String(input).includes('queued-messages')) {
+        if ((init?.method ?? 'GET') === 'PATCH' && !String(input).replace('?archived=recent', '').includes('queued-messages')) {
           bodies.push(init?.body ? JSON.parse(String(init.body)) : undefined)
         }
         // GET answers `[]`: our own invalidateQueries refetches the runs LIST, and the
@@ -1009,7 +1009,7 @@ describe('TaskThreadRoute', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn((input: RequestInfo | URL) => {
-        const path = String(input)
+        const path = String(input).replace('?archived=recent', '')
         const history = historyBodyFor(path, 'r1')
         const body =
           history !== undefined ? history : path === '/api/v1/runs/r1' ? record : path === '/api/v1/health' ? {} : []
@@ -1029,7 +1029,7 @@ describe('TaskThreadRoute', () => {
 
   it('a genuine non-404 GET failure shows the load error, not a missing task', async () => {
     vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
-      const path = String(input)
+      const path = String(input).replace('?archived=recent', '')
       const history = historyBodyFor(path, 'r1')
       return Promise.resolve(history !== undefined
         ? new Response(JSON.stringify(history), { status: 200, headers: { 'content-type': 'application/json' } })
@@ -1062,7 +1062,7 @@ describe('TaskThreadRoute', () => {
 function stubPendingDetailGets(id = 'r1') {
   const requests: Array<{ signal: AbortSignal; reply: (run: ApiRun) => void }> = []
   vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init: RequestInit = {}) => {
-    const path = String(input)
+    const path = String(input).replace('?archived=recent', '')
     if (path === `/api/v1/runs/${id}` && (init.method ?? 'GET') === 'GET') {
       return new Promise<Response>((resolve, reject) => {
         const signal = init.signal as AbortSignal
@@ -1234,7 +1234,7 @@ describe('TaskThreadRoute — read receipts', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn((input: RequestInfo | URL, init: RequestInit = {}) => {
-        const path = String(input)
+        const path = String(input).replace('?archived=recent', '')
         const method = init.method ?? 'GET'
         sent.push({ path, method })
         if (method === 'POST' && path === `/api/v1/runs/${initial.id}/read`) {
@@ -1427,7 +1427,7 @@ describe('composer execution actions (#201)', () => {
     const previousFetch = globalThis.fetch
     let stops = 0
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      if (String(input).endsWith('/cancel')) { stops++; return new Response(JSON.stringify({ cancelled: true }), { headers: { 'content-type': 'application/json' } }) }
+      if (String(input).replace('?archived=recent', '').endsWith('/cancel')) { stops++; return new Response(JSON.stringify({ cancelled: true }), { headers: { 'content-type': 'application/json' } }) }
       return previousFetch(input, init)
     }))
     fireEvent.change(textarea, { target: { value: 'keep this draft' } })
@@ -1484,7 +1484,7 @@ describe('composer replies after idle close (#315)', () => {
     const posts: { path: string; body: unknown }[] = []
     let settleResume: (response: Response) => void = () => {}
     vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input)
+      const path = String(input).replace('?archived=recent', '')
       if (init?.method !== 'POST') return originalFetch(input, init)
       posts.push({ path, body: JSON.parse(String(init.body)) })
       if (path.endsWith('/continue')) return new Promise<Response>(resolve => { settleResume = resolve })
@@ -1585,7 +1585,7 @@ describe('the composer action row (#281)', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn((input: RequestInfo | URL, init: RequestInit = {}) => {
-        const path = String(input)
+        const path = String(input).replace('?archived=recent', '')
         const method = init.method ?? 'GET'
         sent.push({ path, method, body: typeof init.body === 'string' ? JSON.parse(init.body) : undefined })
         const body =

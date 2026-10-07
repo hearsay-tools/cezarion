@@ -106,6 +106,8 @@ import type {
   RunnerModelCatalogResponse,
   RunRecord,
   RunsIndexResponse,
+  RunsSearchResponse,
+  ArchivedRunsResponse,
   WorktreeEntry,
   SaveWorkflowInput,
   SaveWorkflowResponse,
@@ -136,6 +138,8 @@ import {
   runHistoryContextSchema,
   runRelationshipsSchema,
   runHistoryPageSchema,
+  archivedRunsResponseSchema,
+  runsSearchResponseSchema,
   repoPullBranchesResponseSchema,
   repoPullConfirmationSchema,
   repoPullResponseSchema,
@@ -503,11 +507,31 @@ export async function browseFs(
 }
 
 /** The authoritative run list — slim summaries (#817), sorted newest-first by the server. Detail
- *  views read the full record through `getRun`. */
+ *  views read the full record through `getRun`. The window (#864): every unarchived run, plus the
+ *  newest archived ones; older archived runs page in through `getArchivedRuns`. */
 export async function getRuns(opts?: ReadOptions): Promise<RunSummary[]> {
   return unwrap(
-    await cez.api.v1.p[':projectId']['run-summaries'].$get({ param: { projectId: queryScope() } }, init(opts)),
+    await cez.api.v1.p[':projectId']['run-summaries'].$get({ param: { projectId: queryScope() }, query: { archived: 'recent' } }, init(opts)),
     '/run-summaries',
+  )
+}
+
+/** One page of the active project's archived runs past the run list's window, newest first
+ *  (`GET /run-summaries/archived`, #864). `before` is the previous page's `nextCursor`. */
+export async function getArchivedRuns(
+  params: { before?: string; limit?: number; q?: string },
+  opts?: ReadOptions,
+): Promise<ArchivedRunsResponse> {
+  const query = {
+    ...(params.before !== undefined ? { before: params.before } : {}),
+    ...(params.limit !== undefined ? { limit: params.limit } : {}),
+    ...(params.q ? { q: params.q } : {}),
+  }
+  // Validated: the Archived tab and an issue's linked tasks merge these rows into their lists, so a
+  // malformed body must be an error the view can show, never a crash.
+  return unwrapValidated(
+    await cez.api.v1.p[':projectId']['run-summaries'].archived.$get({ param: { projectId: queryScope() }, query }, init(opts)),
+    '/run-summaries/archived', archivedRunsResponseSchema,
   )
 }
 
@@ -516,7 +540,7 @@ export async function getRuns(opts?: ReadOptions): Promise<RunSummary[]> {
  *  An already-`/api/p/`-prefixed path passes through `apiPath` untouched, so this stays
  *  correct whatever scope is mounted. */
 export async function getProjectRuns(projectId: string, opts?: ReadOptions): Promise<RunSummary[]> {
-  return unwrap(await cez.api.v1.p[':projectId']['run-summaries'].$get({ param: { projectId } }, init(opts)), '/run-summaries')
+  return unwrap(await cez.api.v1.p[':projectId']['run-summaries'].$get({ param: { projectId }, query: { archived: 'recent' } }, init(opts)), '/run-summaries')
 }
 
 /** The cross-project task index (`GET /api/v1/workspace/runs-index`) — what lets ⌘K find a task
@@ -524,6 +548,13 @@ export async function getProjectRuns(projectId: string, opts?: ReadOptions): Pro
  *  project-scoped spelling and never takes `queryScope()`. */
 export async function getRunsIndex(opts?: ReadOptions): Promise<RunsIndexResponse> {
   return unwrap(await cez.api.v1.workspace['runs-index'].$get({}, init(opts)), '/workspace/runs-index')
+}
+
+/** Every project's root runs matching `q`, archived or not (`GET /workspace/runs-search`, #864):
+ *  ⌘K's reach past each project's run-list window. Workspace-level, like the index. */
+export async function searchRuns(q: string, opts?: ReadOptions): Promise<RunsSearchResponse> {
+  // Validated: the palette spreads these rows into its list, so a malformed body must be an error.
+  return unwrapValidated(await cez.api.v1.workspace['runs-search'].$get({ query: { q } }, init(opts)), '/workspace/runs-search', runsSearchResponseSchema)
 }
 
 export async function getRunRelationships(id: string, opts?: ReadOptions): Promise<RunRelationships> {

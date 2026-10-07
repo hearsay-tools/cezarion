@@ -169,6 +169,7 @@ export class ClaudeCliRunner implements AgentRunner {
     // lists every line it covered in `user_message_uuids` (#505) — a per-line
     // counter left the runner busy forever after a merged follow-up.
     const unsettled = new Set<string>();
+    const humanUnsettled = new Set<string>();
     let queuedTurnPending = false;
     const submissions = new InputSubmissions();
     const scheduleAutoEnd = () => {
@@ -186,7 +187,7 @@ export class ClaudeCliRunner implements AgentRunner {
     };
     let pendingMarkerAsk = false;
     let turnTextStart = 0;
-    const sendMessage = (content: ContentBlock[], acknowledge?: (error?: Error | null) => void, inputIds: readonly string[] = []): boolean => {
+    const sendMessage = (content: ContentBlock[], acknowledge?: (error?: Error | null) => void, inputIds: readonly string[] = [], humanFollowUp = false): boolean => {
       if (!stdinOpen) return false;
       // A line written while a turn runs joins that turn instead of opening one (#505).
       const opensTurn = unsettled.size === 0;
@@ -211,6 +212,10 @@ export class ClaudeCliRunner implements AgentRunner {
       try {
         child.stdin.write(`${line}\n`, acknowledge);
         unsettled.add(uuid);
+        // Agent writes always pass an acknowledgement, even without inputIds (nudges, #544).
+        // The opening/seed prompt shares this path without an ack, but it is not a human
+        // follow-up — only session.sendMessage holds (#871 / #486).
+        if (humanFollowUp) humanUnsettled.add(uuid);
         submissions.accept(uuid, inputIds, '');
         // A user message written to an idle session begins a turn (§7.1).
         if (opensTurn) emitUi(claudeTurnStarted);
@@ -320,6 +325,7 @@ export class ClaudeCliRunner implements AgentRunner {
           // `--replay-user-messages` echoes a line when the model consumes it (#505).
           // Presentation-free: it is the user's own text, and it carries no tool_result.
           if (msg.type === 'user' && msg.isReplay === true) {
+            if (typeof msg.uuid === 'string') humanUnsettled.delete(msg.uuid);
             const ids = typeof msg.uuid === 'string' ? submissions.consume(msg.uuid) : [];
             if (ids.length) opts.onAgentInputConsumed?.(ids);
             continue;
@@ -349,13 +355,18 @@ export class ClaudeCliRunner implements AgentRunner {
             pendingMarkerAsk = parseAskMarker(textChunks.slice(turnTextStart).join('\n')) !== null;
             // The named lines are exact; `queued_turn_count: 0` is only a fallback, because a
             // line still in the pipe when the CLI computed this result is not covered by it.
-            const settled = Array.isArray(msg.user_message_uuids) ? msg.user_message_uuids.map(String)
-              : msg.queued_turn_count === 0 ? [...unsettled]
-              : [...unsettled].slice(0, 1);
+            const named = Array.isArray(msg.user_message_uuids) ? msg.user_message_uuids.map(String) : null;
+            const settled = named ?? (msg.queued_turn_count === 0 ? [...unsettled] : [...unsettled].slice(0, 1));
             // A line this result covered was read even if its replay echo was missed.
             // An error result settles its lines but proves nothing reached the model: they
             // stay pending, so a closing session returns them to the queue (#505 review).
-            const covered = settled.flatMap(id => { unsettled.delete(id); return msg.is_error === true ? [] : submissions.consume(id); });
+            // Fallback settlement must not clear humanUnsettled: a line may still be in the
+            // pipe, and only a named UUID or a replay echo proves the model read it (#486).
+            const covered = settled.flatMap(id => {
+              unsettled.delete(id);
+              if (named) humanUnsettled.delete(id);
+              return msg.is_error === true ? [] : submissions.consume(id);
+            });
             if (covered.length) opts.onAgentInputConsumed?.(covered);
             // A result is not idle if human stdin messages already queued later turns.
             agentInputReady = unsettled.size === 0;
@@ -454,7 +465,7 @@ export class ClaudeCliRunner implements AgentRunner {
 
     const session: AgentSession = {
       result,
-      sendMessage,
+      sendMessage: content => sendMessage(content, undefined, [], true),
       sendAgentMessage: (content, inputIds = []) => {
         // #505: allowed mid-turn — the CLI steers the line into the running turn.
         if (!stdinOpen || pendingMarkerAsk || agentWritePending) return false;
@@ -476,6 +487,8 @@ export class ClaudeCliRunner implements AgentRunner {
         return acknowledged;
       },
       discardQueuedMessages: () => undefined,
+      holdsHumanInput: () => humanUnsettled.size > 0,
+      heldHumanInputCount: () => humanUnsettled.size,
       end,
       interrupt,
       pid: child.pid,

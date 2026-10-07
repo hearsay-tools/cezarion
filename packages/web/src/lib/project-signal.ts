@@ -67,19 +67,19 @@ export function signalsByProject(runs: readonly RunIndexEntry[]): Map<string, Pr
  * 1 failed · 2 working · 1 finished`, or `toolkit-dev · idle`. Zero parts are omitted. The mobile
  * drawer reuses this string (slice 4).
  *
- * `truncated`: the index caps each project's contribution, so an old unread item may be missing
- * from the counts. Say so rather than claim the count is complete.
+ * The counts are complete: the index carries every unarchived run of every project (#864), and
+ * archived runs are never live or unread, so no caveat is needed however many runs a project has.
  * `unknown`: the index has not loaded (or never arrived), so nothing is known about this project.
  * That is not "idle" — a quiet claim needs a fetched index behind it.
  */
 export function projectSignalLabel(
   name: string,
   signal: ProjectSignal | undefined,
-  options: { truncated?: boolean; unknown?: boolean } = {},
+  options: { unknown?: boolean } = {},
 ): string {
   if (options.unknown) return `${name} · activity unknown`
   const parts = projectSignalParts(signal).map((part) => part.text)
-  return [name, parts.length > 0 ? parts.join(' · ') : 'idle', ...(options.truncated ? ['recent runs only'] : [])].join(' · ')
+  return [name, parts.length > 0 ? parts.join(' · ') : 'idle'].join(' · ')
 }
 
 /** Which of the rail's four segment colours a state word takes. */

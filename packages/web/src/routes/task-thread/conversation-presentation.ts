@@ -1,5 +1,5 @@
 import { runTitle } from '@/lib/task-groups'
-import type { ApiRun, Runner, RunSummary } from '@open-mercato/cezar-api-client'
+import type { ApiRun, RelatedRunTitle, Runner, RunSummary } from '@open-mercato/cezar-api-client'
 
 import type { ThreadConversationMessage } from './thread-state'
 
@@ -15,9 +15,13 @@ export function recipientBackendsFromRuns(current: ApiRun, runs: readonly RunSum
   return backends
 }
 
-export function titlesFromRuns(current: ApiRun, runs: readonly RunSummary[] | undefined): Record<string, string> {
-  const titles: Record<string, string> = { [current.id]: runTitle(current) }
+/** `related` is the relationships answer's titles (#864): the parent and workers the run list no
+ *  longer carries once they are archived. A run list row wins, as the fresher of the two. */
+export function titlesFromRuns(current: ApiRun, runs: readonly RunSummary[] | undefined, related: readonly RelatedRunTitle[] = []): Record<string, string> {
+  const titles: Record<string, string> = {}
+  for (const run of related) titles[run.id] = runTitle(run)
   for (const run of runs ?? []) titles[run.id] = runTitle(run)
+  titles[current.id] = runTitle(current)
   return titles
 }
 

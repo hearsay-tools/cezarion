@@ -2,7 +2,7 @@ import { CheckIcon, FolderOpenIcon, LayersIcon, PlusIcon } from '@/components/de
 import { SunMoonIcon } from '@/components/design-icons'
 import * as React from 'react'
 import { useNavigate as useRouterNavigate } from 'react-router'
-import { useHealth, useProjects, useRuns, useRunsIndex, useSkills, useUiState } from '@/api/queries'
+import { useHealth, useProjects, useRuns, useRunsIndex, useRunsSearch, useSkills, useUiState } from '@/api/queries'
 import { useProjectSwitch } from '@/components/use-project-switch'
 import { scopeTo, useActiveProjectId, useNavigate } from '@/lib/project-router'
 import type { ProjectListEntry, RunIndexEntry, RunSummary } from '@open-mercato/cezar-api-client'
@@ -97,6 +97,9 @@ export function paletteScore(value: string, search: string, keywords?: string[])
  */
 export type PaletteTask = Omit<RunIndexEntry, 'projectId'> & { projectId: string | null }
 
+/** How long the palette waits after a keystroke before it asks the server to search runs. */
+const PALETTE_SEARCH_DEBOUNCE_MS = 150
+
 /**
  * The runs `useRuns()` answered for, plus every other project's from the cross-project index.
  *
@@ -123,15 +126,37 @@ export function mergeTasks(
   activeRuns: readonly RunSummary[],
   runsProjectId: string | null,
   indexed: readonly RunIndexEntry[] | undefined,
+  searched: readonly RunIndexEntry[] = [],
 ): PaletteTask[] {
   const mine: PaletteTask[] = orderRuns(
     activeRuns.filter((run) => !isOwnedWorker(run)),
   ).map((run) => ({ ...run, projectId: runsProjectId }))
-  const live = new Set(mine.map(taskKey))
-  const theirs = (indexed ?? [])
-    .filter((entry) => !isOwnedWorker(entry) && !live.has(taskKey(entry)))
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+  const seen = new Set(mine.map(taskKey))
+  // The index first, then the server's search hits (#864): the runs older than a project's
+  // window that only a search reaches. Each task once, the fresher source winning.
+  const theirs = [...(indexed ?? []), ...searched].filter((entry) => {
+    if (isOwnedWorker(entry) || seen.has(taskKey(entry))) return false
+    seen.add(taskKey(entry))
+    return true
+  }).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
   return [...mine, ...theirs]
+}
+
+/**
+ * A task's PR and issue numbers as palette keywords, bare and with `#` (#864): the server's search
+ * matches `864` and `#864` against them, and cmdk's own filter must not then drop the hit because
+ * the number is not in the title.
+ */
+export function referenceKeywords(task: RunSummary): string[] {
+  const numbers = new Set<number>()
+  for (const url of [task.pullRequestUrl, task.referencedPullRequestUrl, task.referencedIssueUrl]) {
+    const match = url ? /\/(\d+)\/?$/.exec(url) : null
+    if (match) numbers.add(Number(match[1]))
+  }
+  for (const number of [task.prNumber, task.issueNumber, task.markerRefs?.pr, task.markerRefs?.issue]) {
+    if (typeof number === 'number' && Number.isInteger(number) && number > 0) numbers.add(number)
+  }
+  return [...numbers].flatMap((number) => [String(number), `#${number}`])
 }
 
 /** Stable identity for a row that may come from either source — the run id alone collides
@@ -255,8 +280,15 @@ function TaskItem({
       // auto-summary would surface rows for no visible reason.
       value={`task ${label} ${task.id}`}
       // The project name is filter fodder for the same reason it is rendered: with every
-      // project's tasks in one list, "shop" has to narrow to shop's tasks.
-      keywords={projectName ? [projectName] : undefined}
+      // project's tasks in one list, "shop" has to narrow to shop's tasks. The branch and
+      // workflow are the fields the server's run search also matches (#864), so a hit it found
+      // there survives cmdk's own filter — and the Tasks table's search reads them too.
+      keywords={[
+        ...(projectName ? [projectName] : []),
+        ...referenceKeywords(task),
+        ...[task.branch, task.workflow, task.workflowLabel, task.pullRequestUrl, task.referencedPullRequestUrl, task.referencedIssueUrl]
+          .filter((field): field is string => !!field),
+      ]}
       data-slot="palette-task"
       data-run-id={task.id}
       data-project-id={task.projectId ?? undefined}
@@ -325,9 +357,23 @@ function PaletteContent({ close }: { close: () => void }) {
   // Which project `useRuns()` just answered for — see `mergeTasks`. The active id when there is
   // one, else the boot project, which is what an unscoped API client always reaches.
   const runsProjectId = activeProjectId ?? registry?.bootProject ?? null
+  // What the server finds for the query (#864), a beat after typing stops: every project's runs,
+  // at any age, including the ones past each run list's window. In a single-project cockpit too,
+  // since its own run list is windowed as well.
+  const [searched, setSearched] = React.useState('')
+  React.useEffect(() => {
+    const timer = setTimeout(() => setSearched(search), PALETTE_SEARCH_DEBOUNCE_MS)
+    return () => clearTimeout(timer)
+  }, [search])
+  const serverSearch = useRunsSearch(searched)
+  const serverHits = searching ? serverSearch.data?.runs : undefined
+  // Projects whose matches the server capped (#864): said, not silently cut.
+  const cappedProjects = searching && !serverSearch.isPlaceholderData
+    ? (serverSearch.data?.truncated ?? []).map((id) => projectNames.get(id) ?? id)
+    : []
   const tasks = React.useMemo(
-    () => mergeTasks(runs.data ?? [], runsProjectId, runsIndex.data?.runs),
-    [runs.data, runsProjectId, runsIndex.data],
+    () => mergeTasks(runs.data ?? [], runsProjectId, runsIndex.data?.runs, serverHits),
+    [runs.data, runsProjectId, runsIndex.data, serverHits],
   )
   const partitioned = React.useMemo(() => partitionTasks(tasks), [tasks])
   // Searching flattens the two task sections into one ranked list — see the Tasks group below.
@@ -550,6 +596,11 @@ function PaletteContent({ close }: { close: () => void }) {
           </CommandGroup>
         ) : null}
       </CommandList>
+      {cappedProjects.length > 0 ? (
+        <p data-slot="palette-search-truncated" role="status" className="border-t border-border px-3 py-2 text-[11px] text-soft-foreground">
+          More matches in {cappedProjects.join(', ')}. Type more to narrow them.
+        </p>
+      ) : null}
     </>
   )
 }

@@ -25,7 +25,7 @@ function setup(run: ApiRun, response: () => Promise<Response> = async () => json
   destroyResponse: () => Promise<Response> = async () => json({ workerId, state: 'complete', remaining: [] })) {
   const requests: string[] = []
   vi.stubGlobal('fetch', vi.fn(async (url: RequestInfo | URL) => {
-    const path = String(url); requests.push(path)
+    const path = String(url).replace('?archived=recent', ''); requests.push(path)
     if (path.endsWith('/relationships')) return response()
     if (path.endsWith('/worker-destroy')) return destroyResponse()
     if (path.endsWith('/run-summaries')) return json([])
@@ -236,4 +236,11 @@ it('surfaces a refusal the user cannot fix by retrying Clean up (#816)', async (
   fireEvent.click(within(group).getByRole('button', { name: `Confirm clean up of worker ${workerId.slice(0, 8)}` }))
   expect(await within(group).findByText('Cleanup did not finish: Worker history deletion has begun; retry history deletion')).toBeTruthy()
   expect(within(group).queryByText(/Retry Clean up/)).toBeNull()
+})
+
+it('names an archived worker the run list no longer carries from the relationships titles (#864)', async () => {
+  const archivedWorker: WorkerInspection = { ...worker, status: 'done', destroy: undefined }
+  setup(root, async () => json({ workers: [archivedWorker], titles: [{ id: workerId, title: 'Old worker', titleSummary: 'Fixed the parser' }] }))
+  const group = await screen.findByRole('group', { name: 'Task relationships' })
+  expect(await within(group).findByText('Fixed the parser')).toBeTruthy()
 })

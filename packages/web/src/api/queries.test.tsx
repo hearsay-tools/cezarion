@@ -30,6 +30,7 @@ import {
   useRun,
   useRunChanges,
   useRuns,
+  useArchivedRuns,
   useSkills,
   useSkillsUpdate,
   workspaceQueryKeys,
@@ -527,7 +528,7 @@ describe('host model catalog invalidation after auth changes', () => {
 
   it('Connect marks the catalog stale without refetching a mounted query', async () => {
     fetchMock.mockImplementation(async (input) => {
-      const url = String(input)
+      const url = String(input).replace('?archived=recent', '')
       if (url.includes('/providers/connect')) return json({ opened: true, command: 'codex login' })
       if (url.includes('/models')) return json({ runner: 'codex', models: [], source: 'unavailable', stale: false })
       if (url.includes('/workspace/agent-profiles')) return json({ profiles: [], profileCapableProviders: [] })
@@ -630,10 +631,10 @@ describe('useSkills', () => {
   it('renders the fast catalog, then converges when the cold team cache is ready', async () => {
     let resolveReady!: (response: Response) => void
     fetchMock.mockImplementation(async (input) => {
-      if (String(input) === '/api/v1/skills') {
+      if (String(input).replace('?archived=recent', '') === '/api/v1/skills') {
         return json([{ name: 'local', source: 'ai', body: '', path: '/repo/local.md' }])
       }
-      if (String(input) === '/api/v1/skills?wait=1') {
+      if (String(input).replace('?archived=recent', '') === '/api/v1/skills?wait=1') {
         return new Promise<Response>((resolve) => {
           resolveReady = resolve
         })
@@ -854,7 +855,7 @@ describe('useRuns', () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
     expect(result.current.data).toHaveLength(1)
     expect(result.current.data?.[0]?.title).toBe('Fix it')
-    expect(fetchMock.mock.calls.at(-1)?.[0]).toBe('/api/v1/run-summaries')
+    expect(fetchMock.mock.calls.at(-1)?.[0]).toBe('/api/v1/run-summaries?archived=recent')
   })
 })
 
@@ -1455,5 +1456,31 @@ describe('read receipts keep their invocation scope across navigation', () => {
     expect(client.getQueryData(queryKeys.runs.detail(run.id))).toEqual({ ...run, tokensUsed: 99 })
     expect(client.getQueryData(queryKeys.runs.list())).toEqual([{ ...run, tokensUsed: 99 }])
     if (!failure) expect(client.getQueryState(workspaceQueryKeys.runsIndex)?.isInvalidated).toBe(true)
+  })
+})
+
+describe('useArchivedRuns', () => {
+  afterEach(() => setApiScope(null))
+
+  it('never shows one project\'s archived pages under another (#864)', async () => {
+    setApiScope('proj-a')
+    fetchMock.mockResolvedValue(json({ runs: [{ id: 'a-old', title: 'A', status: 'done', createdAt: '2025-01-01T00:00:00Z', archived: true, workflow: 'quick-task', workflowLabel: 'quick-task', tokensUsed: 0 }], nextCursor: null, total: 1 }))
+    const { result, rerender } = renderHook(({ enabled }) => useArchivedRuns('', enabled), { wrapper: wrapper(), initialProps: { enabled: true } })
+    await waitFor(() => expect(result.current.data?.pages[0]?.runs.map((run) => run.id)).toEqual(['a-old']))
+    // Project B's window is not full, so its archived query stays off.
+    setApiScope('proj-b')
+    rerender({ enabled: false })
+    expect(result.current.data).toBeUndefined()
+  })
+
+  it('keeps the previous search\'s pages while the next one loads, within one project', async () => {
+    setApiScope('proj-a')
+    const page = (id: string) => json({ runs: [{ id, title: id, status: 'done', createdAt: '2025-01-01T00:00:00Z', archived: true, workflow: 'quick-task', workflowLabel: 'quick-task', tokensUsed: 0 }], nextCursor: null, total: 1 })
+    fetchMock.mockResolvedValueOnce(page('first')).mockReturnValueOnce(new Promise(() => {}))
+    const { result, rerender } = renderHook(({ q }) => useArchivedRuns(q, true), { wrapper: wrapper(), initialProps: { q: 'one' } })
+    await waitFor(() => expect(result.current.data?.pages[0]?.runs[0]?.id).toBe('first'))
+    rerender({ q: 'two' })
+    expect(result.current.isPlaceholderData).toBe(true)
+    expect(result.current.data?.pages[0]?.runs[0]?.id).toBe('first')
   })
 })

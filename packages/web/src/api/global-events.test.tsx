@@ -945,7 +945,7 @@ describe('useGlobalEvents — run events', () => {
     source.emit('run', stampedRun(runRecord('r1', { status: 'waiting' })))
     response.resolve(json({ ...runRecord('r1', { status: 'waiting' }), finishBlocked: null }))
     await waitFor(() => expect(client.getQueryData<ApiRun>(queryKeys.runs.detail('r1'))?.finishBlocked).toBeNull())
-    expect(vi.mocked(fetch).mock.calls.every(([input]) => String(input).endsWith('/runs/r1'))).toBe(true)
+    expect(vi.mocked(fetch).mock.calls.every(([input]) => String(input).replace('?archived=recent', '').endsWith('/runs/r1'))).toBe(true)
   })
 
   it('updates in place on a second event for the same run — no duplicate row', () => {
@@ -1077,6 +1077,54 @@ describe('useGlobalEvents — run events', () => {
     expect(client.getQueryData(queryKeys.runs.detail('r1'))).toBeUndefined()
     expect(client.getQueryData(queryKeys.runs.diff('r1'))).toBeUndefined()
     expect(client.getQueryData(queryKeys.runs.detail('r2'))).toBeUndefined()
+  })
+
+  it('keeps loaded archived pages and their total in step with archive changes (#864)', () => {
+    const page = (runs: RunRecord[]) => ({ runs: runs.map((run) => ({ ...run, archived: true })), nextCursor: null, total: runs.length })
+    client.setQueryData(queryKeys.runs.archived(''), { pages: [page([runRecord('r1'), runRecord('r2')])], pageParams: [undefined] })
+    const { source } = mount()
+    const state = () => client.getQueryState(queryKeys.runs.archived(''))
+
+    // A row the pages hold is patched in place: no refetch for a title change.
+    source.emit('run', stampedRun(runRecord('r2', { title: 'Renamed', archived: true })))
+    type Pages = { pages: { runs: { id: string; title: string; archived: boolean }[] }[] }
+    expect(client.getQueryData<Pages>(queryKeys.runs.archived(''))?.pages[0]?.runs.find((r) => r.id === 'r2')?.title).toBe('Renamed')
+    expect(state()?.isInvalidated).toBe(false)
+
+    // Unarchiving one changes the total: patched, and marked stale for a refetch.
+    source.emit('run', stampedRun(runRecord('r1', { archived: false })))
+    expect(client.getQueryData<Pages>(queryKeys.runs.archived(''))?.pages[0]?.runs.find((r) => r.id === 'r1')?.archived).toBe(false)
+    expect(state()?.isInvalidated).toBe(true)
+  })
+
+  it('marks a search\'s archived pages stale when a row they hold changes (#864)', () => {
+    const page = { runs: [{ ...runRecord('r1'), archived: true }], nextCursor: null, total: 1 }
+    client.setQueryData(queryKeys.runs.archived('needle'), { pages: [page], pageParams: [undefined] })
+    const { source } = mount()
+    source.emit('run', stampedRun(runRecord('r1', { title: 'No longer matches', archived: true })))
+    expect(client.getQueryState(queryKeys.runs.archived('needle'))?.isInvalidated).toBe(true)
+  })
+
+  it('marks archived pages stale when a run they do not hold is archived (#864)', () => {
+    client.setQueryData(queryKeys.runs.archived(''), { pages: [{ runs: [], nextCursor: null, total: 0 }], pageParams: [undefined] })
+    const { source } = mount()
+    source.emit('run', stampedRun(runRecord('fresh', { archived: true })))
+    expect(client.getQueryState(queryKeys.runs.archived(''))?.isInvalidated).toBe(true)
+  })
+
+  it('drops a deleted run from loaded archived pages too, whatever their search (#864)', () => {
+    const page = (ids: string[]) => ({ runs: ids.map((id) => runRecord(id)), nextCursor: null, total: ids.length })
+    client.setQueryData(queryKeys.runs.archived(''), { pages: [page(['r1', 'r2'])], pageParams: [undefined] })
+    client.setQueryData(queryKeys.runs.archived('#864'), { pages: [page(['r1'])], pageParams: [undefined] })
+    const { source } = mount()
+
+    source.emit('run-deleted', JSON.stringify({ id: 'r1', project: BOOT }))
+
+    type Pages = { pages: { runs: { id: string }[] }[] }
+    expect(client.getQueryData<Pages>(queryKeys.runs.archived(''))?.pages[0]?.runs.map((r) => r.id)).toEqual(['r2'])
+    expect(client.getQueryData<Pages>(queryKeys.runs.archived('#864'))?.pages[0]?.runs).toEqual([])
+    // Their totals moved too: the pages are stale until they refetch.
+    expect(client.getQueryState(queryKeys.runs.archived(''))?.isInvalidated).toBe(true)
   })
 })
 
@@ -1882,7 +1930,7 @@ describe('live run list responses overlapping newer workspace events (#795)', ()
     const off = { ...record, notify: undefined }
     const stale = deferredResponse(), fresh = deferredResponse()
     vi.mocked(fetch).mockImplementation(input => {
-      if (String(input).endsWith('/run-summaries')) return stale.promise
+      if (String(input).replace('?archived=recent', '').endsWith('/run-summaries')) return stale.promise
       return Promise.resolve(json(record))
     })
     client.setQueryData(key, [record])
@@ -1907,7 +1955,7 @@ describe('live run list responses overlapping newer workspace events (#795)', ()
     await waitFor(() => expect(glyph()).toBeNull())
     await act(async () => { void client.invalidateQueries({ queryKey: key, exact: true }) })
     expect(client.getQueryState(key)?.fetchStatus).toBe('fetching')
-    vi.mocked(fetch).mockImplementation(input => String(input).endsWith('/run-summaries') ? fresh.promise : Promise.resolve(json(record)))
+    vi.mocked(fetch).mockImplementation(input => String(input).replace('?archived=recent', '').endsWith('/run-summaries') ? fresh.promise : Promise.resolve(json(record)))
     source.emit('run', stampedRun(record, project))
     await waitFor(() => expect(glyph()).not.toBeNull())
     await act(async () => stale.resolve(json([off])))

@@ -88,7 +88,7 @@ it('readiness hints ignore stale/disposed sessions and guard duplicate/reentrant
     const session: AgentSession = {
       open: true, result: Promise.resolve({ text: '', toolCalls: [], tokensUsed: 0 }),
       sendMessage: () => { throw new Error('non-human input used human seam'); },
-      discardQueuedMessages: () => {},
+      discardQueuedMessages: () => {}, holdsHumanInput: () => false,
       sendAgentMessage: () => {
         sends++;
         if (sends < 2) internal.handleAgentInputReady(record.id, state, session);
@@ -156,7 +156,7 @@ it.each(['cancelled', 'finish requested', 'disposed', 'replacement session', 're
     let acknowledge!: () => void;
     const ack = new Promise<void>(resolve => { acknowledge = resolve; });
     const session: AgentSession = { open: true, result: Promise.resolve({ text: '', toolCalls: [], tokensUsed: 0 }),
-      sendMessage: () => false, sendAgentMessage: () => ack, discardQueuedMessages() {}, end() {}, interrupt() {} };
+      sendMessage: () => false, sendAgentMessage: () => ack, discardQueuedMessages() {}, holdsHumanInput() { return false; }, end() {}, interrupt() {} };
     const state = { session, pendingHumanAsk: false, cancelled: false, finishRequested: false,
       agentInputFlight: undefined as { settled?: Promise<void> } | undefined };
     try {
@@ -192,7 +192,7 @@ it('ACK cannot answer a newly visible human ask or drain its queued successor', 
   const ack = new Promise<void>(resolve => { acknowledge = resolve; });
   const session: AgentSession = { open: true, result: Promise.resolve({ text: '', toolCalls: [], tokensUsed: 0 }),
     sendMessage: () => { throw new Error('ACK used human seam'); },
-    sendAgentMessage: () => { sends++; return ack; }, discardQueuedMessages() {}, end() {}, interrupt() {} };
+    sendAgentMessage: () => { sends++; return ack; }, discardQueuedMessages() {}, holdsHumanInput() { return false; }, end() {}, interrupt() {} };
   const state = { session, pendingHumanAsk: false, cancelled: false,
     agentInputFlight: undefined as { settled?: Promise<void> } | undefined };
   try {
@@ -221,7 +221,7 @@ it.each(['accepted', 'rejected'] as const)('%s ACK settles before a later provid
   let open = true;
   const session: AgentSession = { get open() { return open; }, result: Promise.resolve({ text: '', toolCalls: [], tokensUsed: 0 }),
     sendMessage: () => false, sendAgentMessage: () => outcome === 'accepted' ? Promise.resolve() : Promise.reject(new Error('command rejected')),
-    discardQueuedMessages() {}, end() { open = false; }, interrupt() { open = false; } };
+    discardQueuedMessages() {}, holdsHumanInput() { return false; }, end() { open = false; }, interrupt() { open = false; } };
   const state = { session, pendingHumanAsk: false, cancelled: false, agentSessionError: undefined as string | undefined,
     agentInputFlight: undefined as { settled?: Promise<void> } | undefined };
   try {
@@ -260,7 +260,7 @@ async function withInboxRun(check: (f: { store: RunStore; manager: RunManager; d
   const sent: string[] = [];
   const session: AgentSession = { open: true, result: Promise.resolve({ text: '', toolCalls: [], tokensUsed: 0 }),
     sendMessage: () => { throw Error('used human input seam'); },
-    sendAgentMessage: content => { sent.push(JSON.stringify(content)); return Promise.resolve(); }, discardQueuedMessages() {}, end() {}, interrupt() {} };
+    sendAgentMessage: content => { sent.push(JSON.stringify(content)); return Promise.resolve(); }, discardQueuedMessages() {}, holdsHumanInput() { return false; }, end() {}, interrupt() {} };
   const state = { session, pendingHumanAsk: false, cancelled: false };
   const record = store.createRun({ title: 'inbox', task: 'inbox', workflow: 'quick-task', steps: [] });
   store.updateRun(record.id, { status: 'running' });

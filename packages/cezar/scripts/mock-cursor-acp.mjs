@@ -28,6 +28,15 @@ async function afterParityPark(prompt) {
   if (!gate) throw new Error('post-park scenario requires a release path');
   while (!parityGateFs.existsSync(gate)) await new Promise(resolve => setTimeout(resolve, 10));
 }
+async function waitForMockRelease(fallbackMs) {
+  const file = process.env.CEZ_MOCK_RELEASE_FILE;
+  if (!file) { if (fallbackMs) await new Promise(r => setTimeout(r, fallbackMs)); return; }
+  const deadline = Date.now() + 15_000;
+  while (!parityGateFs.existsSync(file)) {
+    if (Date.now() > deadline) throw new Error('CEZ_MOCK_RELEASE_FILE was not created');
+    await new Promise(r => setTimeout(r, 10));
+  }
+}
 
 const record = (file, value) => { if (file) appendFileSync(file, `${JSON.stringify(value, (key, value) => key === 'env' && Array.isArray(value) ? value.map(item => item.name?.startsWith('CEZ_TOOL_') ? { ...item, value: '[redacted]' } : item) : value)}\n`); };
 record(process.env.CEZ_MOCK_ARGS_FILE, process.argv.slice(2));
@@ -110,6 +119,20 @@ async function prompt(id, content) {
   if (watchdogStall(input)) return;
   if (input.includes('mock:busy-progress')) {
     for (let i = 0; i < 24; i++) { text('working\n'); await new Promise(r => setTimeout(r, 100)); }
+    complete(id); return;
+  }
+  if (input.includes('mock:hold-done')) {
+    await waitForMockRelease(400);
+    text('parity hold-done: content after the pause\nCEZ:DONE'); complete(id); return;
+  }
+  if (input.includes('mock:hold-ask')) {
+    await waitForMockRelease(400);
+    text('Pick one.\n\nCEZ:ASK {"questions":[{"header":"Library","question":"Which test library?","options":[{"label":"Vitest"},{"label":"Node test"}]}]}');
+    complete(id); return;
+  }
+  if (input.includes('mock:hold-gated')) {
+    await waitForMockRelease(500);
+    text('parity hold-gated: content after the pause');
     complete(id); return;
   }
   if (input.includes('mock:hold')) await new Promise(r => setTimeout(r, 500));

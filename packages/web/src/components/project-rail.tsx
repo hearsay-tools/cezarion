@@ -43,7 +43,6 @@ function ProjectMark({
   project,
   signal,
   known,
-  truncated,
   current,
   target,
   onSwitchProject,
@@ -52,14 +51,13 @@ function ProjectMark({
   project: ProjectListEntry
   signal: ProjectSignal | undefined
   known: boolean
-  truncated: boolean
   current: boolean
   /** Where the mark goes: the project's remembered page, or its home. */
   target: ProjectSwitchTarget
   onSwitchProject?: (projectId: string) => void
   onSelectProject?: (projectId: string) => void
 }) {
-  const label = projectSignalLabel(project.name, signal, { truncated, unknown: !known })
+  const label = projectSignalLabel(project.name, signal, { unknown: !known })
   return (
     <div data-slot="rail-project" data-project-id={project.id} className="relative flex h-[52px] w-full shrink-0 items-center justify-center">
       {current ? (
@@ -106,7 +104,6 @@ function ExpandedProjectRow({
   project,
   signal,
   known,
-  truncated,
   current,
   target,
   onSwitchProject,
@@ -115,7 +112,6 @@ function ExpandedProjectRow({
   project: ProjectListEntry
   signal: ProjectSignal | undefined
   known: boolean
-  truncated: boolean
   current: boolean
   /** Where the mark goes: the project's remembered page, or its home. */
   target: ProjectSwitchTarget
@@ -123,7 +119,7 @@ function ExpandedProjectRow({
   onSelectProject?: (projectId: string) => void
 }) {
   // The words are on screen, so no tooltip; the accessible name still spells all four counts.
-  const label = projectSignalLabel(project.name, signal, { truncated, unknown: !known })
+  const label = projectSignalLabel(project.name, signal, { unknown: !known })
   const { top, bottom } = signalPillSegments(signal)
   // The pills' ring is the surface under them, so the cut-out follows the row's fill.
   const ring = current ? 'border-sidebar-row-selected' : 'border-background group-hover:border-sidebar-row-hover'
@@ -140,9 +136,6 @@ function ExpandedProjectRow({
           }
         }}
         aria-label={label}
-        // The state line has no room for "recent runs only" at 232px, so a capped index says so
-        // on hover instead; the counts it shows may miss older runs.
-        title={known && truncated ? 'Counts cover recent runs only' : undefined}
         aria-current={current ? 'page' : undefined}
         className={cn(
           'group flex h-[52px] w-full items-center gap-[10px] rounded-[8px] px-[6px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
@@ -171,7 +164,6 @@ function ExpandedProjectRow({
           <ProjectStateWords
             signal={signal}
             known={known}
-            truncated={false}
             current={current}
             maxParts={2}
             slot="rail-project-state"
@@ -242,8 +234,6 @@ export type ProjectRailProps = {
   /** Null while the runs index has not loaded: every mark then says its activity is unknown
    *  rather than idle. A loaded index with no entry for a project is a project with no runs. */
   signals: ReadonlyMap<string, ProjectSignal> | null
-  /** Ids of the projects whose runs index hit its per-project cap. */
-  truncated: ReadonlySet<string>
   version: string | null
   /** `capabilities.singleProject` (`CEZ_SINGLE_PROJECT=1`): the server refuses add, edit, browse
    *  and remove, so Add project and All projects go. Never inferred from the project count. */
@@ -257,7 +247,7 @@ export type ProjectRailProps = {
 
 const homeOf = (projectId: string): ProjectSwitchTarget => ({ href: String(scopeTo(projectId, '/')), verify: false })
 
-export function ProjectRail({ projects, signals, truncated, version, singleProject, projectTarget = homeOf, onSwitchProject, onSelectProject }: ProjectRailProps) {
+export function ProjectRail({ projects, signals, version, singleProject, projectTarget = homeOf, onSwitchProject, onSelectProject }: ProjectRailProps) {
   const { pathname } = useLocation()
   const { resolvedTheme } = useTheme()
   const sidebarWidth = React.useContext(ShellSidebarWidthContext)
@@ -330,7 +320,6 @@ export function ProjectRail({ projects, signals, truncated, version, singleProje
             project,
             signal: signals?.get(project.id),
             known: signals !== null,
-            truncated: truncated.has(project.id),
             current: project.id === currentProjectId,
             target: projectTarget(project.id),
             onSwitchProject,

@@ -113,10 +113,15 @@ export function abortedPoll(error: unknown): boolean {
  * 404 (an `apply` waiting for its restart, or a remote cockpit on an older release), and the CLI
  * then reads the full `GET /runs` it always read and projects it the same way the server would,
  * inside what is left of the same deadline. Any other refusal passes through.
+ *
+ * `archived: 'recent'` asks for the window (#864): every unarchived run plus the newest archived
+ * roots. A cockpit older than the window ignores the parameter and answers every run, which is
+ * still correct for a caller that filters archived runs out.
  */
-export async function requestRunSummaries(cockpit: Cockpit, timeoutMs?: number): Promise<RunSummary[]> {
+export async function requestRunSummaries(cockpit: Cockpit, timeoutMs?: number, options: { archived?: 'recent' | 'all' } = {}): Promise<RunSummary[]> {
   const start = Date.now();
-  const result = await request(cockpit, '/run-summaries', timeoutMs === undefined ? {} : { timeoutMs });
+  const path = options.archived === 'recent' ? '/run-summaries?archived=recent' : '/run-summaries';
+  const result = await request(cockpit, path, timeoutMs === undefined ? {} : { timeoutMs });
   if (result.status === 404) {
     const left = timeoutMs === undefined ? undefined : Math.max(1, timeoutMs - (Date.now() - start));
     const full = await request(cockpit, '/runs', left === undefined ? {} : { timeoutMs: left });

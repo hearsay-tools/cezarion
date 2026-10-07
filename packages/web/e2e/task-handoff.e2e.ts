@@ -140,7 +140,8 @@ describe('Hand off to webhook', () => {
       window.fetch = async (...args) => {
         const response = await window.__handoffFetch(...args);
         const url = String(args[0]?.url ?? args[0]);
-        if (url.endsWith('/run-summaries')) {
+        // The list asks for its window (\`?archived=recent\`, #864): match the path, not the URL.
+        if (new URL(url, location.href).pathname.endsWith('/run-summaries')) {
           const rows = await response.clone().json();
           if (rows.some(row => row.id === 'desktop' && row.notify !== true)) {
             window.__offListHeld = true;

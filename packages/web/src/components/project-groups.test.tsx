@@ -80,7 +80,7 @@ function json(body: unknown, status = 200): Response {
  */
 function serve(routes: Record<string, unknown>): void {
   fetchMock.mockImplementation(async (input) => {
-    const body = routes[String(input)]
+    const body = routes[String(input).replace('?archived=recent', '')]
     if (body === undefined) return json({ error: 'not found' }, 404)
     return json(body)
   })
@@ -470,7 +470,7 @@ describe('ProjectGroups', () => {
     // task in the wrong repo.
     const posts: string[] = []
     fetchMock.mockImplementation(async (input, init: RequestInit = {}) => {
-      const path = String(input)
+      const path = String(input).replace('?archived=recent', '')
       if (init.method === 'POST') {
         posts.push(path)
         return json({})
@@ -495,7 +495,7 @@ describe('ProjectGroups', () => {
     const posts: Array<{ path: string; body: unknown }> = []
     const runs = Array.from({ length: 12 }, (_, i) => run({ id: `shop-${i}`, createdAt: `2026-07-14T10:${String(i).padStart(2, '0')}:00.000Z` }))
     fetchMock.mockImplementation(async (input, init: RequestInit = {}) => {
-      const path = String(input)
+      const path = String(input).replace('?archived=recent', '')
       if (init.method === 'POST') {
         posts.push({ path, body: JSON.parse(String(init.body ?? '{}')) })
         return json(path.endsWith('archive-finished') ? { archived: 12, ids: runs.map((r) => r.id), pinnedIds: [] } : {})
@@ -545,7 +545,7 @@ describe('ProjectGroups', () => {
     let task = run({ id: 'retry-pin', pinned: true })
     let attempts = 0
     fetchMock.mockImplementation(async (input, init: RequestInit = {}) => {
-      const path = String(input)
+      const path = String(input).replace('?archived=recent', '')
       if (path === '/api/v1/p/cezar/runs/retry-pin/pin' && init.method === 'POST') {
         expect(JSON.parse(String(init.body))).toEqual({ pinned: false })
         attempts += 1
@@ -648,7 +648,7 @@ describe('ProjectGroups', () => {
       }),
     ]
     fetchMock.mockImplementation(async (input) => {
-      const path = String(input)
+      const path = String(input).replace('?archived=recent', '')
       if (path === '/api/v1/p/cezar/run-summaries') return json(variants)
       if (path.includes('/github/ref-status')) {
         return json({

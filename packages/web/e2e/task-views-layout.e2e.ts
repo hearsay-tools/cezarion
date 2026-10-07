@@ -111,7 +111,7 @@ it('renders loading, retryable error, and filtered-empty states in both themes a
     const [base, faultFile, port] = process.argv.slice(1);
     createServer((incoming, outgoing) => {
       const fault = readFileSync(faultFile, 'utf8');
-      if (incoming.url.endsWith('/run-summaries') && fault !== 'none') {
+      if (incoming.url.split('?')[0].endsWith('/run-summaries') && fault !== 'none') {
         const answer = () => { outgoing.writeHead(503, { 'content-type': 'application/json' }); outgoing.end(JSON.stringify({ error: 'Fixture service unavailable' })); };
         if (fault === 'loading') { const timer = setInterval(() => { if (readFileSync(faultFile, 'utf8') !== 'loading') { clearInterval(timer); answer(); } }, 50); outgoing.on('close', () => clearInterval(timer)); }
         else answer();

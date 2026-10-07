@@ -21,6 +21,18 @@ for (const backend of RUNNER_IDS) describe(`${backend} monitoring turn`, { timeo
     it(`${mode} ${row.id} ${row.name}`, async () => {
       process.env.CEZ_DRY_RUN = '0';
       process.env[HARNESS_ADAPTERS[backend].binEnv] = HARNESS_ADAPTERS[backend].mockBin;
+      // Turn-end bookkeeping (diff stat: `git add -N .`) runs after the run already reads
+      // `waiting`. Track it so a row that runs its own git in the worktree can wait it out.
+      const turnEndBookkeeping = new Set<Promise<void>>();
+      let turnEndsRecorded = 0;
+      const recordTurnEnd = manager.recordTurnEnd.bind(manager);
+      manager.recordTurnEnd = (id, text) => {
+        const task = recordTurnEnd(id, text);
+        turnEndsRecorded += 1;
+        turnEndBookkeeping.add(task);
+        void task.finally(() => turnEndBookkeeping.delete(task));
+        return task;
+      };
       const p = manager.startRun(QUICK_TASK_WORKFLOW, { task: 'mock:hold', runner: backend });
       await until(() => store.getRun(p.id)?.status === 'waiting');
       if (mode === 'continuation') {
@@ -215,6 +227,11 @@ for (const backend of RUNNER_IDS) describe(`${backend} monitoring turn`, { timeo
           process.env.CEZ_REVIEW_GATE = '1';
           const cwd = run().worktreePath!;
           expect(cwd).toBeDefined();
+          // The turn-end diff stat can still hold this worktree's index.lock while the run reads
+          // `waiting`; a `git add` racing it failed with "index.lock: File exists" in PR #871's CI
+          // (M5 opencode, M19 omp and cursor) and in local full runs.
+          expect(turnEndsRecorded).toBeGreaterThan(0);
+          await until(() => turnEndBookkeeping.size === 0);
           writeFileSync(join(cwd, 'review.txt'), 'review this change');
           execFileSync('git', ['add', 'review.txt'], { cwd });
           execFileSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@local', 'commit', '-qm', 'review change'], { cwd });

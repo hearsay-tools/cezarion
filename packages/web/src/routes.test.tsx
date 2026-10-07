@@ -314,7 +314,7 @@ describe('scoped route map (/p/:projectId)', () => {
 
   it('remounts the same page and loads its new scope when the project param changes', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const path = String(input)
+      const path = String(input).replace('?archived=recent', '')
       if (path === '/api/v1/run-summaries' || path === '/api/v1/p/other/run-summaries') {
         return new Response('[]', { headers: { 'content-type': 'application/json' } })
       }
@@ -341,13 +341,13 @@ describe('scoped route map (/p/:projectId)', () => {
     )
 
     await waitFor(() =>
-      expect(fetchMock.mock.calls.some(([path]) => String(path) === '/api/v1/run-summaries')).toBe(true),
+      expect(fetchMock.mock.calls.some(([path]) => String(path) === '/api/v1/run-summaries?archived=recent')).toBe(true),
     )
     fireEvent.change(screen.getByLabelText('Search tasks'), { target: { value: 'stale filter' } })
     fireEvent.click(screen.getByRole('button', { name: 'Switch project' }))
 
     await waitFor(() =>
-      expect(fetchMock.mock.calls.some(([path]) => String(path) === '/api/v1/p/other/run-summaries')).toBe(true),
+      expect(fetchMock.mock.calls.some(([path]) => String(path) === '/api/v1/p/other/run-summaries?archived=recent')).toBe(true),
     )
     expect((screen.getByLabelText('Search tasks') as HTMLInputElement).value).toBe('')
   })
@@ -541,7 +541,7 @@ describe('legacy flat URLs redirect to the boot project', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
-        if (String(input).startsWith('/api/v1/projects')) {
+        if (String(input).replace('?archived=recent', '').startsWith('/api/v1/projects')) {
           return new Response(JSON.stringify({ error: 'down' }), {
             status: 500,
             headers: { 'content-type': 'application/json' },
@@ -568,7 +568,7 @@ describe('legacy flat URLs redirect to the boot project', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
-        if (String(input).startsWith('/api/v1/health')) {
+        if (String(input).replace('?archived=recent', '').startsWith('/api/v1/health')) {
           return new Response(JSON.stringify({ error: 'down' }), {
             status: 500,
             headers: { 'content-type': 'application/json' },
@@ -592,8 +592,8 @@ describe('legacy flat URLs redirect to the boot project', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         if (
-          String(input).startsWith('/api/v1/health') ||
-          String(input).startsWith('/api/v1/projects')
+          String(input).replace('?archived=recent', '').startsWith('/api/v1/health') ||
+          String(input).replace('?archived=recent', '').startsWith('/api/v1/projects')
         ) {
           return new Response(JSON.stringify({ error: 'down' }), {
             status: 500,
@@ -698,7 +698,7 @@ describe('the /p/default alias', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
-        if (String(input).startsWith('/api/v1/projects')) {
+        if (String(input).replace('?archived=recent', '').startsWith('/api/v1/projects')) {
           return new Response(JSON.stringify({ error: 'down' }), {
             status: 500,
             headers: { 'content-type': 'application/json' },
@@ -735,7 +735,7 @@ describe('the /p/default alias', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
-        if (String(input).startsWith('/api/v1/projects')) {
+        if (String(input).replace('?archived=recent', '').startsWith('/api/v1/projects')) {
           return new Response(JSON.stringify({ error: 'down' }), {
             status: 500,
             headers: { 'content-type': 'application/json' },

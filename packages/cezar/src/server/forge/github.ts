@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { GITHUB_SEARCH_MAX, REFERENCE_STATUS_MAX, type GithubItemResponse, type GithubProjectsData } from '@open-mercato/cezar-contract';
 import { fetchIssueProjects, fetchViewerLogin } from './github-filters.ts';
 import { autosaveCommit } from '../../git-worktree.ts';
+import { refNumberFromUrl } from '../../runs/run-search.ts';
 import type {
   DraftPrInput,
   DraftPrOutcome,
@@ -2175,13 +2176,8 @@ export function readCachedRefStatuses(
   return out;
 }
 
-/** The `#N` in a forge URL — `…/pull/774` → 774. Null when the tail is not a number, so a URL
- *  shape we do not recognise invalidates nothing rather than inventing a key. */
-export function refNumberFromUrl(url: string): number | null {
-  const last = /\/(\d+)\/?$/.exec(url.trim());
-  const parsed = last ? Number(last[1]) : Number.NaN;
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
-}
+// The `#N` in a forge URL. Defined beside the run search matcher, which reads it too (#864).
+export { refNumberFromUrl } from '../../runs/run-search.ts';
 
 /** A closed issue or an abandoned PR can be REOPENED, so this is long rather than forever — but
  *  it is the rare event, and re-asking a hundred settled references every minute to catch it is

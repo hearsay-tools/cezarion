@@ -289,6 +289,17 @@ export interface AgentSession {
    * no-op.
    */
   discardQueuedMessages(): void;
+  /** True while this session still holds a human follow-up from `sendMessage`
+   *  that the model has not consumed and that the runner will still deliver (#486).
+   *  Queueing runners drop on `discardQueuedMessages` and return false immediately.
+   *  Write-through/steer wires report true until the harness settles that line
+   *  (their discard is a no-op). A drain with no new turn must call
+   *  `onAgentInputReady` so run.ts can re-settle the idle boundary. */
+  holdsHumanInput(): boolean;
+  /** Count of human follow-ups still held behind `holdsHumanInput`. Every built-in
+   *  runner reports it from the same state `holdsHumanInput` reads
+   *  (`holdsHumanInput() === count > 0`). Optional only on wrappers and test fakes. */
+  heldHumanInputCount?(): number;
   /** Graceful close: end input, then a SIGTERM→SIGKILL watchdog. */
   end(): void;
   /** Hard stop (used by cancel). */

@@ -24,6 +24,22 @@ const start = (prompt: string, opts: SessionOptions = {}, env: Record<string, st
 };
 
 describe('codex agent input steering (#505)', () => {
+  it('holdsHumanInput is true while a human prompt RPC is in flight and false after its response (#486)', async () => {
+    const { session, events, requests } = start('mock:steer-tool');
+    await waitUntil(() => events.some(e => e.type === 'tool-call'));
+    expect(session.sendMessage([{ type: 'text', text: 'human-in-flight-1' }])).toBe(true);
+    expect(session.sendMessage([{ type: 'text', text: 'human-in-flight-2' }])).toBe(true);
+    expect(session.heldHumanInputCount?.()).toBe(2);
+    expect(session.holdsHumanInput()).toBe(true);
+    expect(session.holdsHumanInput()).toBe((session.heldHumanInputCount?.() ?? 0) > 0);
+    await waitUntil(() => requests().some(r => r.method === 'turn/steer'));
+    await waitUntil(() => !session.holdsHumanInput());
+    expect(session.holdsHumanInput()).toBe(false);
+    expect(session.heldHumanInputCount?.()).toBe(0);
+    expect(session.holdsHumanInput()).toBe((session.heldHumanInputCount?.() ?? 0) > 0);
+    session.end(); await session.result;
+  });
+
   it('steers agent input into the active turn and correlates consumption', async () => {
     const consumed: string[][] = [];
     const { session, events } = start('mock:steer-tool', { onAgentInputConsumed: ids => consumed.push([...ids]) });
@@ -56,6 +72,22 @@ describe('codex agent input steering (#505)', () => {
     expect(sent.map(r => r.method)).toEqual(['turn/steer', 'turn/start']);
     expect(sent[1]!.params!.clientUserMessageId).toBe(sent[0]!.params!.clientUserMessageId);
     await waitUntil(() => events.some(e => e.type === 'text' && e.text.includes('raced')));
+    session.end(); await session.result;
+  });
+
+  it('human steer refused after turn completed restarts once as turn/start (#486)', async () => {
+    const { session, events, requests } = start('mock:steer-race');
+    await waitUntil(() => events.some(e => e.type === 'tool-call'));
+    expect(session.sendMessage([{ type: 'text', text: 'mock:agent-echo raced-human' }])).toBe(true);
+    expect(session.holdsHumanInput()).toBe(true);
+    await waitUntil(() => requests().some(r => r.method === 'turn/start'
+      && JSON.stringify(r.params ?? {}).includes('raced-human')));
+    const sent = requests().filter(r => r.method === 'turn/steer' || r.method === 'turn/start').slice(1);
+    expect(sent.map(r => r.method)).toEqual(['turn/steer', 'turn/start']);
+    expect(sent.filter(r => r.method === 'turn/start'
+      && JSON.stringify(r.params ?? {}).includes('raced-human'))).toHaveLength(1);
+    await waitUntil(() => events.some(e => e.type === 'text' && e.text.includes('raced-human')));
+    await waitUntil(() => !session.holdsHumanInput());
     session.end(); await session.result;
   });
 

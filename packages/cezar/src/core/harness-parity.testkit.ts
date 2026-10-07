@@ -52,6 +52,8 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  * | `tool-tail` | visible assistant text, a tool call/result, then turn end with no later message |
  * | `done` | the same, with a trailing `CEZ:DONE` so the run reaches its review gate |
  * | `hold` | delay the terminal turn signal after the last content event |
+ * | `hold-done` | like `hold`, then end with `CEZ:DONE` so a mid-turn follow-up can race the close (#486) |
+ * | `hold-ask` | like `hold`, then end with a portable `CEZ:ASK` so a mid-turn follow-up can race the park (#486) |
  * | `split-text` | stream the reply in pieces, ending with a trailing `CEZ:MONITORING` |
  * | `provider-error` | a runtime provider rejection in its native error shape |
  * | `ask` | an ask — native where the wire has one, a `CEZ:ASK` marker otherwise |
@@ -97,6 +99,9 @@ export const SCENARIOS = [
   'baseline',
   'done',
   'hold',
+  'hold-gated',
+  'hold-done',
+  'hold-ask',
   'no-progress',
   'no-progress-ignore-term',
   'no-progress-held-pipe',
@@ -160,6 +165,13 @@ export const NO_PROGRESS_CRITERIA = [
   { id: 'N7', scenario: 'no-progress-held-pipe', name: 'descendant-held pipes cannot retain capacity after CLI exit' },
   { id: 'N8', scenario: 'baseline', name: 'agent input rearms protection even without a native turn-start notification' },
   { id: 'N4', scenario: 'baseline', name: 'Continue sessions enforce inactivity' },
+] as const;
+
+/** #486: workflow-followup-parity.test.ts, real native wires on both turn-end paths. */
+export const FOLLOWUP_CRITERIA = [
+  { id: 'H1', scenario: 'hold-done', name: 'keeps a mid-turn human follow-up across a DONE turn' },
+  { id: 'H2', scenario: 'hold-ask', name: 'drops a mid-turn human follow-up when the turn parks on ASK' },
+  { id: 'H3', scenario: 'hold-gated', name: 'does not park or nudge between a markerless turn and a mid-turn follow-up' },
 ] as const;
 
 /** #426: workflow-autonomous-parity.test.ts, real native wires on both turn-end paths. */
@@ -279,7 +291,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'crash-stderr': 'mock:crash-stderr',
       'crash-stderr-single': 'mock:crash-stderr-single',
       done: 'mock:done',
-      hold: 'mock:hold', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'busy-progress': 'mock:busy-progress',
+      hold: 'mock:hold', 'hold-gated': 'mock:hold-gated', 'hold-done': 'mock:hold-done', 'hold-ask': 'mock:hold-ask', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'busy-progress': 'mock:busy-progress',
       'split-text': 'mock:split-text',
       // Claude's mock has carried an auth-rejection branch since #430.
       'provider-error': 'mock:auth-error',
@@ -323,7 +335,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'crash-stderr': 'mock:crash-stderr',
       'crash-stderr-single': 'mock:crash-stderr-single',
       done: 'mock:done',
-      hold: 'mock:hold', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'busy-progress': 'mock:busy-progress',
+      hold: 'mock:hold', 'hold-gated': 'mock:hold-gated', 'hold-done': 'mock:hold-done', 'hold-ask': 'mock:hold-ask', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'busy-progress': 'mock:busy-progress',
       'split-text': 'mock:split-text',
       // #83: 0.147 reports provider rejection on turn/completed with turn.error.
       'provider-error': 'mock:provider-error',
@@ -371,7 +383,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'crash-stderr': 'mock:crash-stderr',
       'crash-stderr-single': 'mock:crash-stderr-single',
       done: 'mock:done',
-      hold: 'mock:hold', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'busy-progress': 'mock:busy-progress',
+      hold: 'mock:hold', 'hold-gated': 'mock:hold-gated', 'hold-done': 'mock:hold-done', 'hold-ask': 'mock:hold-ask', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'busy-progress': 'mock:busy-progress',
       'split-text': 'mock:split-text',
       'provider-error': 'mock:provider-error',
       'provider-unavailable': 'mock:provider-error',
@@ -411,7 +423,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'crash-stderr-held-pipe': 'mock:crash-stderr-held-pipe',
       'shutdown-stderr': 'mock:crash-stderr-clean',
       'crash-stderr': 'mock:crash-stderr',
-      'crash-stderr-single': 'mock:crash-stderr-single', done: 'mock:done', hold: 'mock:hold', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'busy-progress': 'mock:busy-progress',
+      'crash-stderr-single': 'mock:crash-stderr-single', done: 'mock:done', hold: 'mock:hold', 'hold-gated': 'mock:hold-gated', 'hold-done': 'mock:hold-done', 'hold-ask': 'mock:hold-ask', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'busy-progress': 'mock:busy-progress',
       'split-text': 'mock:split-text', 'provider-error': 'mock:provider-error',
       'provider-unavailable': 'mock:provider-error',
       ask: 'mock:ask',
@@ -443,7 +455,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'crash-stderr': 'mock:crash-stderr',
       'crash-stderr-single': 'mock:crash-stderr-single',
       done: 'mock:done',
-      hold: 'mock:hold', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'busy-progress': 'mock:busy-progress',
+      hold: 'mock:hold', 'hold-gated': 'mock:hold-gated', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'busy-progress': 'mock:busy-progress',
       'split-text': 'mock:split-text',
       'provider-error': 'mock:provider-error',
       'provider-unavailable': 'mock:provider-error',
@@ -456,6 +468,8 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'ask-bad': 'mock:ask-bad',
       'steer-tool': 'mock:steer-tool',
       'steer-late': 'mock:steer-late',
+      'hold-done': 'mock:hold-done',
+      'hold-ask': 'mock:hold-ask',
       'silent-tail-late-reply': 'mock:silent-tail-late-reply',
       'silent-tail-slow-done': 'mock:silent-tail-slow-done',
       // No `subagent`: see the S9 and R12 entries in PARITY_EXEMPTIONS.
@@ -470,6 +484,8 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     mockBin: OMP_MOCK,
     scenarios: {
       'auto-resumed': BASELINE_PROMPT,
+      'hold-done': 'mock:hold-done',
+      'hold-ask': 'mock:hold-ask',
       'turn-messages': 'mock:turn-messages',
       'missing-binary': BASELINE_PROMPT,
       autonomous: 'mock:autonomous',
@@ -488,7 +504,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'crash-stderr': 'mock:crash-stderr',
       'crash-stderr-single': 'mock:crash-stderr-single',
       done: 'mock:done',
-      hold: 'mock:hold', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'busy-progress': 'mock:busy-progress',
+      hold: 'mock:hold', 'hold-gated': 'mock:hold-gated', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'busy-progress': 'mock:busy-progress',
       'split-text': 'mock:split-text',
       'provider-error': 'mock:provider-error',
       'provider-unavailable': 'mock:provider-error',
@@ -560,6 +576,10 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
   ...(['R44', 'R45'] as const).flatMap(criterion => (['claude', 'codex', 'pi', 'cursor', 'omp'] as const).map(backend => ({
     criterion, backend, kind: 'scenario-unconstructible' as const,
     reason: 'The OpenCode server-wide unscoped session.error UnknownError skill-discovery diagnostic has no equivalent on this native wire. R2/R46 retain native provider failure coverage.',
+  }))),
+  ...(['H2'] as const).flatMap(criterion => (['claude', 'codex', 'pi', 'omp'] as const).map(backend => ({
+    criterion, backend, kind: 'capability-absent' as const,
+    reason: 'This wire writes or steers a mid-turn human follow-up immediately; discardQueuedMessages cannot unwrite it. OpenCode and Cursor queue and drop (H2 live rows).',
   }))),
   ...(['A13', 'A14'] as const).flatMap(criterion => (['claude', 'codex', 'pi', 'cursor', 'omp'] as const).map(backend => ({
     criterion, backend, kind: 'scenario-unconstructible' as const,
@@ -826,15 +846,23 @@ export async function driveRun(
     workflowDef?: WorkflowDef;
     /** Called with the fresh store and manager before the run starts (to observe either). */
     beforeStart?: (context: { store: RunStore; manager: RunManager }) => void;
+    /** Runs after startRun, in parallel with the settle loop — inject a mid-turn follow-up (#486). */
+    during?: (context: { store: RunStore; manager: RunManager; runId: string }) => Promise<void>;
+    /** Environment overrides restored after the run settles. */
+    env?: Record<string, string>;
+    /** Override the adapter mock binary (Codex coalesced-steer wrapper, #486). */
+    mockBin?: string;
   } = {},
 ): Promise<RunObservation> {
-  const { beforeStart, ...runOptions } = options;
+  const { beforeStart, during, env, mockBin, ...runOptions } = options;
   const adapter = HARNESS_ADAPTERS[backend];
   const savedBin = process.env[adapter.binEnv];
   const savedDry = process.env.CEZ_DRY_RUN;
   const savedAutoName = process.env.CEZ_AUTONAME;
+  const savedEnv = Object.keys(env ?? {}).map(name => [name, process.env[name]] as const);
+  Object.assign(process.env, env);
   process.env.CEZ_AUTONAME = '0';
-  process.env[adapter.binEnv] = adapter.mockBin;
+  process.env[adapter.binEnv] = mockBin ?? adapter.mockBin;
   delete process.env.CEZ_DRY_RUN;
   const repoRoot = mkdtempSync(join(tmpdir(), `cez-parity-run-${backend}-`));
   let store: RunStore | undefined;
@@ -855,10 +883,15 @@ export async function driveRun(
       runner: backend,
       worktree: false,
     });
+    let duringError: unknown;
+    const duringWork = during
+      ? during({ store, manager, runId: started.id }).catch((err: unknown) => { duringError = err; })
+      : undefined;
     const statuses: string[] = [];
     const record = () => store?.getRun(started.id);
     const deadline = Date.now() + timeoutMs;
     for (;;) {
+      if (duringError) break;
       const current = record();
       const status = current?.status;
       if (status !== undefined && statuses.at(-1) !== status) statuses.push(status);
@@ -870,6 +903,8 @@ export async function driveRun(
       }
       await new Promise((r) => setTimeout(r, 50));
     }
+    if (duringWork) await duringWork;
+    if (duringError) throw duringError;
     if (afterSettled) await afterSettled({ store, manager, runId: started.id });
     store.flush();
     // Cleanup mutates the live record; return the observed state before cancellation.
@@ -882,6 +917,9 @@ export async function driveRun(
     if (savedDry !== undefined) process.env.CEZ_DRY_RUN = savedDry;
     if (savedAutoName === undefined) delete process.env.CEZ_AUTONAME;
     else process.env.CEZ_AUTONAME = savedAutoName;
+    for (const [name, saved] of savedEnv) {
+      if (saved === undefined) delete process.env[name]; else process.env[name] = saved;
+    }
     rmSync(repoRoot, { force: true, recursive: true });
   }
 }

@@ -2,12 +2,12 @@ import { useId, useMemo, useState } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import { queryScope } from '@open-mercato/cezar-api-client'
 
-import { useProjectRuns } from '@/api/queries'
+import { useArchivedRuns, useProjectRuns } from '@/api/queries'
 import { StatusDot } from '@/components/status-dot'
 import { deriveAttention } from '@/lib/attention'
 import { Button } from '@/components/ui/button'
 import { Link } from '@/lib/project-router'
-import { runTitle } from '@/lib/task-groups'
+import { runTitle, withArchivedPages } from '@/lib/task-groups'
 import { linkedIssueTasks } from './github-sidebar-model'
 
 /** Shares the project runs cache with the sidebar and its existing live updates. */
@@ -23,9 +23,12 @@ function LinkedTasks({ number, repo, scope }: { number: number; repo?: string; s
   const [expanded, setExpanded] = useState(false)
   const Chevron = expanded ? ChevronDown : ChevronRight
   const query = useProjectRuns(scope, true, scope === 'default')
+  // The run list carries only the newest archived tasks (#864), so an issue's older, archived
+  // tasks come from the server's search for its number. The list's own row wins a duplicate.
+  const archived = useArchivedRuns(`#${number}`, true)
   const tasks = useMemo(
-    () => linkedIssueTasks(query.data ?? [], number, repo, scope),
-    [query.data, number, repo, scope],
+    () => linkedIssueTasks(withArchivedPages(query.data ?? [], archived.data?.pages.flatMap((page) => page.runs) ?? []), number, repo, scope),
+    [query.data, archived.data, number, repo, scope],
   )
   return (
     <section aria-labelledby={headingId} className="mt-4 min-w-0 rounded-lg border border-border p-3">
@@ -38,7 +41,9 @@ function LinkedTasks({ number, repo, scope }: { number: number; repo?: string; s
           className="flex min-h-11 w-full items-center gap-2 rounded-md px-2 text-left hover:bg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
         >
           <Chevron aria-hidden="true" className="size-4 shrink-0" />
-          <span>Linked tasks{query.data ? ` (${tasks.length})` : ''}</span>
+          {/* `+` while older archived matches exist that this list has not paged in, or could not be
+              read: the count is then a lower bound, never a claim that nothing older exists. */}
+          <span>Linked tasks{query.data ? ` (${tasks.length}${archived.hasNextPage || archived.isError ? '+' : ''})` : ''}</span>
         </button>
       </h3>
       <div id={contentId}>
@@ -76,6 +81,18 @@ function LinkedTasks({ number, repo, scope }: { number: number; repo?: string; s
                 )
               })}
             </ul>
+          ) : null}
+          {archived.isError ? (
+            <div className="mt-2 text-xs text-muted-foreground">
+              <p role="status">Couldn’t load older archived linked tasks.</p>
+              <Button variant="outline" className="mt-2 min-h-11" onClick={() => void archived.refetch()} disabled={archived.isFetching}>
+                Retry older linked tasks
+              </Button>
+            </div>
+          ) : archived.hasNextPage ? (
+            <Button variant="outline" className="mt-2 min-h-11" onClick={() => void archived.fetchNextPage()} disabled={archived.isFetchingNextPage}>
+              {archived.isFetchingNextPage ? 'Loading older linked tasks…' : 'Show older linked tasks'}
+            </Button>
           ) : null}
         </> : null}
       </div>

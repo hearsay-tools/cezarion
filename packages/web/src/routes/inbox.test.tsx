@@ -118,7 +118,7 @@ function stubFetch(
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
-      const path = String(input)
+      const path = String(input).replace('?archived=recent', '')
       const method = init.method ?? 'GET'
       sent.push({
         path,
@@ -252,10 +252,21 @@ describe('the inbox card list', () => {
 
     await waitFor(() => expect(cards()).toHaveLength(2))
     const card = cards()[1]!
-    expect(card.querySelector('[data-slot="todo-source"]')).toBeNull()
-    expect(card.querySelector('[data-slot="todo-source-gone"]')?.textContent).toBe(
+    // Absent from the run list is not proof (#864): the label waits for the run's own 404.
+    await waitFor(() => expect(card.querySelector('[data-slot="todo-source-gone"]')?.textContent).toBe(
       'source task deleted',
-    )
+    ))
+    expect(card.querySelector('[data-slot="todo-source"]')).toBeNull()
+  })
+
+  it('links a source task older than the run list\'s archived window, which still exists (#864)', async () => {
+    stubFetch({ 'GET /api/v1/runs/run-gone': () => jsonResponse({ ...RUN_1, id: 'run-gone', archived: true }) })
+    renderInbox()
+
+    await waitFor(() => expect(cards()).toHaveLength(2))
+    const card = cards()[1]!
+    await waitFor(() => expect(card.querySelector('[data-slot="todo-source"]')?.getAttribute('href')).toBe('/tasks/run-gone'))
+    expect(card.querySelector('[data-slot="todo-source-gone"]')).toBeNull()
   })
 
   it('uses the design’s text-only card heading and retains its actionability label', async () => {
@@ -736,7 +747,7 @@ describe('Add instructions', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
-        const path = String(input)
+        const path = String(input).replace('?archived=recent', '')
         const method = init.method ?? 'GET'
         const body = typeof init.body === 'string' ? (JSON.parse(init.body) as unknown) : undefined
         captured.push({ path, method, body })
@@ -934,7 +945,7 @@ describe('the inbox gate (#471)', () => {
     // Re-stub health as a deferred answer so the todos query can settle first.
     const realFetch = globalThis.fetch as unknown as (i: RequestInfo | URL, x?: RequestInit) => Promise<Response>
     vi.stubGlobal('fetch', async (input: RequestInfo | URL, init: RequestInit = {}) => {
-      if (String(input) === '/api/v1/health') {
+      if (String(input).replace('?archived=recent', '') === '/api/v1/health') {
         await healthPending
         return healthResponse(false)
       }

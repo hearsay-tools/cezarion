@@ -69,7 +69,7 @@ function stubFetch(groupBody: GroupResponse, overrides: Record<string, () => Res
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
-      const path = String(input)
+      const path = String(input).replace('?archived=recent', '')
       const method = init.method ?? 'GET'
       sent.push({
         path,
