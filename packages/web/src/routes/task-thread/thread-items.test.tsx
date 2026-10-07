@@ -633,6 +633,35 @@ describe('AssistantMessage copy actions', () => {
     expect(html).not.toMatch(/<a[^>]+href="https:\/\/trap\.example"/)
   })
 
+  it('does not let a tilde-fenced URL steal a later link href', async () => {
+    const source = ['~~~', '[docs](https://trap.example)', '~~~', '', 'See [docs](https://example.com).'].join('\n')
+    const write = vi.fn(async () => {})
+    vi.stubGlobal('ClipboardItem', class ClipboardItem {
+      constructor(public items: Record<string, Blob>) {}
+    })
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { write, writeText: vi.fn() } })
+    render(<MemoryRouter><AssistantMessage text={source} /></MemoryRouter>)
+    fireEvent.click(copyButton())
+    await waitFor(() => expect(write).toHaveBeenCalled())
+    const html = await writtenItem(write).items['text/html']!.text()
+    expect(html).toMatch(/<a[^>]+href="https:\/\/example\.com"/)
+    expect(html).not.toMatch(/<a[^>]+href="https:\/\/trap\.example/)
+  })
+
+  it('keeps balanced parentheses inside a copied link href', async () => {
+    const source = 'See [math](https://example.com/Function_(x)).'
+    const write = vi.fn(async () => {})
+    vi.stubGlobal('ClipboardItem', class ClipboardItem {
+      constructor(public items: Record<string, Blob>) {}
+    })
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { write, writeText: vi.fn() } })
+    render(<MemoryRouter><AssistantMessage text={source} /></MemoryRouter>)
+    fireEvent.click(copyButton())
+    await waitFor(() => expect(write).toHaveBeenCalled())
+    const html = await writtenItem(write).items['text/html']!.text()
+    expect(html).toMatch(/<a[^>]+href="https:\/\/example\.com\/Function_\(x\)"/)
+  })
+
   it('does not let a markdown image steal a later link href', async () => {
     const source = ['![shot](https://trap.example/img.png)', '', 'See [docs](https://example.com).'].join('\n')
     const write = vi.fn(async () => {})

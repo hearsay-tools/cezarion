@@ -295,7 +295,9 @@ const STREAMDOWN_CHROME = [
  *  (link-safety has no `href` in the DOM) can be restored to an `<a>` on copy. */
 function withoutMarkdownCode(source: string): string {
   const fence = '`'.repeat(3)
-  const noFences = source.split(fence).filter((_, index) => index % 2 === 0).join(' ')
+  const tilde = '~'.repeat(3)
+  const noBacktickFences = source.split(fence).filter((_, index) => index % 2 === 0).join(' ')
+  const noFences = noBacktickFences.split(tilde).filter((_, index) => index % 2 === 0).join(' ')
   return noFences.split('`').filter((_, index) => index % 2 === 0).join(' ')
 }
 
@@ -323,7 +325,7 @@ function markdownLinks(source: string): { label: string, href: string }[] {
   }
   const body = text.replace(/^\s*\[[^\]]+\]:\s*\S+.*$/gm, ' ')
   const links: { label: string, href: string }[] = []
-  const re = /(?<!!)\[([^\]]+)\](?:\(([^)\s]+)(?:\s+"[^"]*")?\)|\[([^\]]*)\])|<(https?:\/\/[^>\s]+)>|(https?:\/\/[^\s<]+)/g
+  const re = /(?<!!)\[([^\]]+)\](?:\(((?:[^()\s]|\([^)]*\))+)(?:\s+"[^"]*")?\)|\[([^\]]*)\])|<(https?:\/\/[^>\s]+)>|(https?:\/\/[^\s<]+)/g
   for (const match of body.matchAll(re)) {
     if (match[2]) {
       if (isSafeHref(match[2])) links.push({ label: visibleLinkLabel(match[1]!), href: match[2] })
