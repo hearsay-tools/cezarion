@@ -86,6 +86,22 @@ describe('RunStore transcript facts (#880)', () => {
   });
 });
 
+describe('RunStore transcript facts across processes (#880 review)', () => {
+  it('sees appends another store made after it cached the facts', () => {
+    const { dir, store: a } = openStore();
+    const run = a.createRun({ title: 't', workflow: 'w', task: 'task', steps: [] });
+    a.appendEvent(run.id, { type: 'text', text: 'one' });
+    const b = openStore(dir).store;
+    expect(b.transcriptFacts(run.id).lastSeq).toBe(1); // cached, as warm-up caches a family
+    a.appendEvent(run.id, { type: 'conversation-message', projectionId: 'p:two' });
+    a.appendEvent(run.id, { type: 'text', text: 'three' });
+    a.close(); stores.splice(stores.indexOf(a), 1);
+    expect(b.transcriptFacts(run.id).projectionIds).toEqual(['p:two']);
+    expect(b.adoptFamily(run.id)).toBeDefined();
+    expect(b.appendEvent(run.id, { type: 'text', text: 'four' }).seq).toBe(4);
+  });
+});
+
 describe('RunStore transcript facts off the request path (#880)', () => {
   it('stamps the archive when the compressor runs', async () => {
     const { dir, store } = openStore();

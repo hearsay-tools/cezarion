@@ -142,8 +142,13 @@ export class TranscriptFactsIndex {
   /** After `line` (of `lineBytes` bytes) was appended to the plain transcript. */
   append(runId: string, event: RunEvent, lineBytes: number): void {
     const cached = this.entries.get(runId);
-    // A first load reads the transcript, which already holds this line.
-    if (!cached) { this.entry(runId); return; }
+    // A first load reads the transcript, which already holds this line. So does a reload when
+    // the transcript is not exactly the cached bytes plus this line: another writer got there.
+    if (!cached || historyStat(this.dataDir, runId).plainSize !== cached.facts.bytes + lineBytes) {
+      this.entries.delete(runId);
+      this.entry(runId);
+      return;
+    }
     delete cached.facts.archive;
     const changed = foldEvent(cached.facts, event);
     cached.facts.bytes += lineBytes;
@@ -208,7 +213,9 @@ export class TranscriptFactsIndex {
 
   private entry(runId: string): Entry | undefined {
     const cached = this.entries.get(runId);
-    if (cached) return cached;
+    if (cached && this.current(runId, cached.facts)) return cached;
+    // Another process may have written the transcript since: reload from the sidecar and tail.
+    if (cached) this.entries.delete(runId);
     let entry: Entry | undefined;
     try { entry = this.load(runId); } catch { return undefined; }
     if (entry) this.entries.set(runId, entry);
@@ -243,6 +250,19 @@ export class TranscriptFactsIndex {
     const entry = { facts, written: -1 };
     this.persist(runId, entry);
     return entry;
+  }
+
+  /** A cache hit costs one stat (two once archived): the run may have changed hands (a second
+   *  process on the project, an adopted family) since these facts were cached. */
+  private current(runId: string, facts: TranscriptFacts): boolean {
+    try {
+      const { plainSize, archive } = historyStat(this.dataDir, runId);
+      if (plainSize !== undefined) return plainSize === facts.bytes;
+      if (archive) return sameStamp(facts.archive, stampOf(archive));
+      return facts.bytes === 0;
+    } catch {
+      return false;
+    }
   }
 
   private readSidecar(path: string): TranscriptFacts | undefined {
