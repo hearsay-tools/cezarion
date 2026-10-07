@@ -1077,6 +1077,26 @@ console.log(String(m.pid)); ${opts.leader === 'exit' ? "m.unref(); process.stdin
       } finally { other.dispose(); reopened.flush(); }
     });
 
+    it.skipIf(process.platform === 'win32')("destroy never signals a dead leader's recorded group that holds nothing of the worker", async () => {
+      const w = await worker();
+      const generation = store.commitWorkerExecutionStart(w.id);
+      await ensureOwnedWorkspace(root, w);
+      store.updateRun(w.id, { status: 'done' }); store.commitWorkerExecutionComplete(w.id, generation); store.flush();
+      // An unrelated group whose number equals the recorded leader's pid, its leader already gone:
+      // the shape a double-fork daemon leaves once a freed number is reused.
+      const script = `const m = require('child_process').spawn(process.execPath, ['-e', "process.on('SIGTERM',()=>{}); setInterval(()=>{},1000)"], { stdio: 'ignore' }); console.log(String(m.pid)); m.unref(); setTimeout(() => process.exit(0), 50);`;
+      const foreign = spawn(process.execPath, ['-e', script], { cwd: tmpdir(), detached: true, stdio: ['ignore', 'pipe', 'ignore'] });
+      const member = Number(String(await new Promise<Buffer>(resolve => foreign.stdout!.once('data', resolve))).trim());
+      releases.push(() => { try { process.kill(member, 'SIGKILL'); } catch { /* gone */ } });
+      await new Promise(resolve => foreign.once('exit', resolve));
+      expect(alive(member)).toBe(true);
+      writeFileSync(recordPath(w.id), JSON.stringify({ ...readRecord(w.id), processes: [{ pid: foreign.pid!, pgid: foreign.pid! }] }));
+      const kills = vi.spyOn(process, 'kill');
+      expect(await service(store, manager).destroyForHuman('p', w.id)).toMatchObject({ state: 'complete', remaining: [] });
+      expect(kills.mock.calls.filter(([pid, signal]) => pid === -foreign.pid! && signal !== 0)).toEqual([]);
+      expect(alive(member)).toBe(true);
+    });
+
     it.skipIf(process.platform === 'win32')('a setsid child keeps destroy incomplete and is never signalled', async () => {
       const { w, member } = await groupedWorker({ member: 'setsid', leader: 'exit' });
       await until(() => !manager.isActive(w.id) && store.readWorkerExecution(w.id)?.phase === 'complete');

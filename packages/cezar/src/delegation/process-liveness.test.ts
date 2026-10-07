@@ -224,20 +224,24 @@ describe('process liveness (#469)', () => {
 });
 
 describe('recordedGroupSignalable (hearsay-tools/cezarion#890)', () => {
-  it('signals a group only when its leader is gone or is the recorded incarnation', async () => {
+  it('signals a group only when its live leader is the recorded incarnation, or a holder is in it', async () => {
     const dead = spawn(process.execPath, ['-e', '']);
     await new Promise(resolve => dead.once('exit', resolve));
     const live = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)']);
     try {
       const token = processStartToken(live.pid!);
       expect(recordedGroupSignalable({ pid: live.pid! })).toBe(false);
-      expect(recordedGroupSignalable({ pid: dead.pid!, pgid: dead.pid! })).toBe(true);
+      // A dead leader's number may have been reused (a double-fork daemon leaves exactly that
+      // shape): only a holder of the worker's paths inside the group proves it is still ours.
+      expect(recordedGroupSignalable({ pid: dead.pid!, pgid: dead.pid! })).toBe(false);
+      expect(recordedGroupSignalable({ pid: dead.pid!, pgid: dead.pid! }, [dead.pid! + 7])).toBe(false);
+      expect(recordedGroupSignalable({ pid: dead.pid!, pgid: dead.pid! }, [dead.pid!])).toBe(true);
       if (token) expect(recordedGroupSignalable({ pid: live.pid!, startToken: token, pgid: live.pid! })).toBe(true);
       // A live pid of another incarnation means our group emptied and its number was reused.
       expect(recordedGroupSignalable({ pid: live.pid!, startToken: 'another-incarnation', pgid: live.pid! })).toBe(false);
       expect(recordedGroupSignalable({ pid: live.pid!, pgid: live.pid! })).toBe(false);
       // A session leader's group is its own pid; anything else is not ours to signal.
-      expect(recordedGroupSignalable({ pid: dead.pid!, pgid: dead.pid! + 1 })).toBe(false);
+      expect(recordedGroupSignalable({ pid: dead.pid!, pgid: dead.pid! + 1 }, [dead.pid! + 1])).toBe(false);
     } finally { live.kill('SIGKILL'); }
   });
 });

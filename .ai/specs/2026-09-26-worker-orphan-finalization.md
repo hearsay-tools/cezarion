@@ -217,11 +217,13 @@ belongs to another cezar. The second is the ordinary `cancel` path.
 
 **Recorded process groups (hearsay-tools/cezarion#890).** An entry with a `pgid` is signalled as a
 group in step 1, so what the agent left in its group (a dev server, a watcher) exits with it. The
-group may be signalled when its leader is gone, or when the live leader is the exact recorded
-incarnation. A live pid of another incarnation means the group emptied and its number was
-reused, so it is skipped; so is a live leader with no token. A dead leader's group is still ours
-while it has members: Linux frees a pid number only when no task uses it as a pid, pgid or sid,
-and XNU skips a candidate pid while a process group holds it. An empty group answers ESRCH.
+group may be signalled when its live leader is the exact recorded incarnation. A live pid of
+another incarnation means the group emptied and its number was reused, so it is skipped; so is a
+live leader with no token. A dead leader proves nothing by itself: its number may have been freed
+and reused since, and a double-fork daemon leaves exactly a live group whose leader is gone. So a
+dead leader's group is signalled only while a process that holds the worker's worktree or scratch
+is in it. Linux frees a pid number only when no task uses it as a pid, pgid or sid, and XNU skips
+a candidate pid while a process group holds it, so that holder keeps the number ours.
 
 Destroy also signals the recorded groups of a **finished** generation. Once
 `awaitRunTermination` proves the generation `complete`, it sends SIGTERM to each recorded group
@@ -327,10 +329,11 @@ remain indefinitely.** An unreadable cwd never withholds that proof (hearsay-too
   `/dev/tty`, such as an ssh or gpg prompt, fails instead of prompting on cezar's terminal.
 - Closing the terminal does not signal agents: cezar handles no SIGHUP. SIGKILL or a crash of
   cezar leaves agents running, as before; destroy's reaping covers a worker's.
-- After a leader exits, cezar checks its group every second and drops it once it is empty or a
-  live process holds the leader's pid, so a freed number reused by a new `setsid` leader is never
-  signalled. The one case left needs all of this within that second: our group empties, the
-  number is reused by a new leader, and that leader exits while its own members live.
+- A leftover whose session leader already exited is reached only while it can be proven ours.
+  Shutdown forwarding signals such a group only while a member recorded at the leader's exit is
+  still the same process in it, and destroy only while a holder of the worker's paths is in it.
+  A leftover that started after its leader exited, or that holds nothing of the worker, can
+  outlive both.
 - The scan sees only same-user processes in this PID namespace. A process in another
   container that holds the worktree is invisible to it.
 

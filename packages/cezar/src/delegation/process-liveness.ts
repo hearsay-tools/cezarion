@@ -77,11 +77,13 @@ export function recordedProcessLive(entry: RecordedProcess): boolean {
 
 /** Whether a recorded session leader's group may be signalled (hearsay-tools/cezarion#890). A live
  * leader must be the exact recorded incarnation; a different one means the group emptied and its
- * number was reused. A dead leader's group is ours while it has members, because no new process
- * can take the number of a live group, and an empty one answers ESRCH. */
-export function recordedGroupSignalable(entry: RecordedProcess): boolean {
+ * number was reused. A dead leader proves nothing: its number may since have been reused, and a
+ * double-fork daemon leaves exactly a live group with a dead leader. Such a group is signalled
+ * only when it holds the worker's paths: `holderGroups` are the groups of those holders. */
+export function recordedGroupSignalable(entry: RecordedProcess, holderGroups: readonly number[] = []): boolean {
   if (entry.pgid === undefined || entry.pgid !== entry.pid) return false;
-  return !pidExists(entry.pid) || (entry.startToken !== undefined && processStartToken(entry.pid) === entry.startToken);
+  if (pidExists(entry.pid)) return entry.startToken !== undefined && processStartToken(entry.pid) === entry.startToken;
+  return holderGroups.includes(entry.pgid);
 }
 
 export function isCurrentProcess(entry: RecordedProcess): boolean {
