@@ -306,7 +306,7 @@ function withoutMarkdownImages(source: string): string {
 }
 
 function visibleLinkLabel(raw: string): string {
-  return raw.replace(/[*_~]+/g, '').split('`').join('')
+  return raw.replace(/\*\*/g, '').replace(/\*/g, '').replace(/__/g, '').replace(/~~/g, '').split('`').join('')
 }
 
 function isSafeHref(href: string): boolean {
@@ -337,7 +337,7 @@ function markdownLinks(source: string): { label: string, href: string }[] {
       if (href) links.push({ label: visibleLinkLabel(match[1]!), href })
       continue
     }
-    const href = match[4] ?? match[5]
+    const href = (match[4] ?? match[5])?.replace(/[.,;:!?]+$/, '')
     if (href && isSafeHref(href)) links.push({ label: href, href })
   }
   return links

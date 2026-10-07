@@ -697,6 +697,35 @@ describe('AssistantMessage copy actions', () => {
     expect(html).not.toMatch(/trap\.example/)
   })
 
+  it('keeps underscores in a link label that is not emphasis', async () => {
+    const source = 'See [file_name](https://example.com).'
+    const write = vi.fn(async () => {})
+    vi.stubGlobal('ClipboardItem', class ClipboardItem {
+      constructor(public items: Record<string, Blob>) {}
+    })
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { write, writeText: vi.fn() } })
+    render(<MemoryRouter><AssistantMessage text={source} /></MemoryRouter>)
+    fireEvent.click(copyButton())
+    await waitFor(() => expect(write).toHaveBeenCalled())
+    const html = await writtenItem(write).items['text/html']!.text()
+    expect(html).toMatch(/<a[^>]+href="https:\/\/example\.com"/)
+  })
+
+  it('does not keep a trailing period on a copied bare URL', async () => {
+    const source = 'See https://example.com.'
+    const write = vi.fn(async () => {})
+    vi.stubGlobal('ClipboardItem', class ClipboardItem {
+      constructor(public items: Record<string, Blob>) {}
+    })
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { write, writeText: vi.fn() } })
+    render(<MemoryRouter><AssistantMessage text={source} /></MemoryRouter>)
+    fireEvent.click(copyButton())
+    await waitFor(() => expect(write).toHaveBeenCalled())
+    const html = await writtenItem(write).items['text/html']!.text()
+    expect(html).toMatch(/<a[^>]+href="https:\/\/example\.com"/)
+    expect(html).not.toMatch(/href="https:\/\/example\.com\."/)
+  })
+
   it('matches a link whose markdown label has emphasis', async () => {
     const source = 'See [**docs**](https://example.com).'
     const write = vi.fn(async () => {})
