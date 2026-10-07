@@ -312,14 +312,21 @@ generation starts over.
 
 **Destroy skips what it already tried.** A full attempt records the state it started from
 (`delegation/destroy-observation.ts`): the worker record without `destroy`, the parent's receipt,
-the execution checkpoint, the process record, the scratch locations, the worktree, its admin dir
-and lock and, through the cached common Git dir, the ownership receipt, the branch ref,
-`packed-refs`, the branch reflog and the linked-worktree admin dirs; plus the holders it named, each
-pinned to its start token. A scheduled tick whose fresh observation is the same, with every holder
-still the same live process, skips the attempt: no transcript read, no git, no `/proc` scan, no
-snapshot write. Anything else, including a holder exiting, runs it in full. A failure with no
-visible cause (a transient Git error) is therefore not retried until an explicit destroy or a
-restart: the first tick after boot always attempts in full.
+the execution checkpoint, the process record, the scratch locations, the worktree, its admin dir,
+lock and ownership marker and, through the cached common Git dir, the ownership receipt and its
+cleanup checkpoint, the branch ref, `packed-refs`, the branch reflog and the linked-worktree admin
+dirs. File stamps include `ctime` and `mode`, so an in-place repair or a `chmod` counts. It also
+records the holders it named, each pinned to its start token; the removal turns a held error into
+an incomplete result, so they are kept where the proof finds them. A scheduled tick skips the
+attempt (no transcript read, no git, no `/proc` scan, no snapshot write) when its fresh
+observation is the same and every holder still holds: the same live process and, unless it is in
+the generation's process record, still working under the worktree or a scratch location (one
+`readlink` each on Linux; liveness alone elsewhere). Anything else, including a holder exiting or
+moving away, runs it in full. Worktree mutation lock contention is never skipped: it clears
+without changing anything observable, and every attempt takes that lock itself, so its stamp
+cannot be part of the key. A failure with no visible cause (a transient Git error) is therefore
+not retried until an explicit destroy or a restart: the first tick after boot always attempts in
+full.
 
 **Retry state and attention.** Every tick writes `destroy.retry`
 (`{ attempts, nextAt, needsAttention? }`); the write changes only `destroy`, so it does not
