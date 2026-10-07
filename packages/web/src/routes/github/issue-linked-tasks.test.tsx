@@ -111,3 +111,34 @@ it('finds a linked task older than the run list\'s archived window (#864)', asyn
   fireEvent.click(await screen.findByRole('button', { name: 'Linked tasks (1)' }))
   expect((await screen.findByRole('link', { name: /Old diagnosis/ })).getAttribute('href')).toBe('/p/second/tasks/old-diagnosis')
 })
+
+it('says there are more archived linked tasks and pages them in (#864)', async () => {
+  const client = createQueryClient()
+  const archived = (id: string) => summaryOf({
+    id, title: `Task ${id}`, task: 't', issueNumber: 750, workflow: 'quick-task',
+    status: 'done', archived: true, createdAt: '2025-01-01T12:00:00Z', tokensUsed: 0, steps: [],
+  })
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input)
+    const body = url === '/api/v1/p/second/run-summaries?archived=recent' ? []
+      : url === '/api/v1/p/second/run-summaries/archived?limit=200&q=%23750' ? { runs: [archived('first')], nextCursor: 'c1', total: 2 }
+        : url === '/api/v1/p/second/run-summaries/archived?before=c1&limit=200&q=%23750' ? { runs: [archived('second')], nextCursor: null, total: 2 }
+          : undefined
+    if (body === undefined) throw new Error(`Unexpected request: ${url}`)
+    return new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } })
+  }))
+  render(
+    <ProjectScopeProvider projectId="second">
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={['/p/second/github/issues/750']}>
+          <IssueLinkedTasks number={750} repo="acme/demo" />
+        </MemoryRouter>
+      </QueryClientProvider>
+    </ProjectScopeProvider>,
+  )
+  fireEvent.click(await screen.findByRole('button', { name: 'Linked tasks (1+)' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Show older linked tasks' }))
+  expect(await screen.findByRole('link', { name: /Task second/ })).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'Linked tasks (2)' })).toBeTruthy()
+  expect(screen.queryByRole('button', { name: 'Show older linked tasks' })).toBeNull()
+})

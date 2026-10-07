@@ -41,7 +41,8 @@ function LinkedTasks({ number, repo, scope }: { number: number; repo?: string; s
           className="flex min-h-11 w-full items-center gap-2 rounded-md px-2 text-left hover:bg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
         >
           <Chevron aria-hidden="true" className="size-4 shrink-0" />
-          <span>Linked tasks{query.data ? ` (${tasks.length})` : ''}</span>
+          {/* `+` while the server has older archived matches this list has not paged in yet. */}
+          <span>Linked tasks{query.data ? ` (${tasks.length}${archived.hasNextPage ? '+' : ''})` : ''}</span>
         </button>
       </h3>
       <div id={contentId}>
@@ -79,6 +80,11 @@ function LinkedTasks({ number, repo, scope }: { number: number; repo?: string; s
                 )
               })}
             </ul>
+          ) : null}
+          {archived.hasNextPage ? (
+            <Button variant="outline" className="mt-2 min-h-11" onClick={() => void archived.fetchNextPage()} disabled={archived.isFetchingNextPage}>
+              {archived.isFetchingNextPage ? 'Loading older linked tasks…' : 'Show older linked tasks'}
+            </Button>
           ) : null}
         </> : null}
       </div>
