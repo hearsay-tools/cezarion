@@ -295,9 +295,21 @@ export const workerCapacitySchema = z.object({
 }).strict();
 export type WorkerCapacity = z.infer<typeof workerCapacitySchema>;
 
+/** A related run's display title: the three fields `runTitle` reads (#864). The cockpit's run list
+ *  carries only the newest archived runs, so the relationships answer names its own runs. */
+export const relatedRunTitleSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  titleSummary: z.string().optional(),
+  titleOrigin: z.enum(['user', 'auto', 'marker']).optional(),
+});
+export type RelatedRunTitle = z.infer<typeof relatedRunTitleSchema>;
+
 export const runRelationshipsSchema = z.object({
   parentRunId: z.uuid().optional(),
   workers: z.array(workerInspectionSchema).max(1_024),
+  /** The parent's title for a worker, each worker's for a parent; absent when there is none. */
+  titles: z.array(relatedRunTitleSchema).max(1_025).optional(),
   /** Present for a delegation root only. */
   capacity: workerCapacitySchema.optional(),
 });

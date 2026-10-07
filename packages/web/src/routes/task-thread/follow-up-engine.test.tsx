@@ -99,7 +99,7 @@ function serve(
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
-      const url = String(input)
+      const url = String(input).replace('?archived=recent', '')
       const method = init.method ?? 'GET'
       const body = init.body ? (JSON.parse(String(init.body)) as unknown) : undefined
       requests.push({ method, url, body })

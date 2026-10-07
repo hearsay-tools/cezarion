@@ -8,6 +8,7 @@ import type {
   filePreviewDataSchema,
   artifactListSchema,
   archiveFinishedResponseSchema,
+  archivedRunsResponseSchema,
   cancelResponseSchema,
   continueResponseSchema,
   createPrResponseSchema,
@@ -56,6 +57,7 @@ describe('src/contract/runs.ts matches the runs routes exactly', () => {
 
   type RunsList200 = InferResponseType<Runs['$get'], 200>;
   type RunSummaries200 = InferResponseType<(typeof client.api.v1)['run-summaries']['$get'], 200>;
+  type ArchivedRuns200 = InferResponseType<(typeof client.api.v1)['run-summaries']['archived']['$get'], 200>;
   type RunGet200 = InferResponseType<Run['$get'], 200>;
   type RunCreate201 = InferResponseType<Runs['$post'], 201>;
   type RunCreate200 = InferResponseType<Runs['$post'], 200>;
@@ -90,6 +92,8 @@ describe('src/contract/runs.ts matches the runs routes exactly', () => {
     Assert<Exact<z.infer<typeof apiRunSchema>, RunGet200>>,
     // the slim list (#817) — its own row shape, never the record
     Assert<Exact<z.infer<typeof runSummarySchema>[], RunSummaries200[number][]>>,
+    // the archived roots past the list's window (#864), a page at a time
+    Assert<Exact<z.infer<typeof archivedRunsResponseSchema>, ArchivedRuns200>>,
     Assert<Exact<z.infer<typeof runRecordSchema>, RunArchive200>>,
     // the pin (#935) answers the record too — pinned here is what stops it drifting into a
     // bespoke `{pinned: true}` payload the moment someone finds that shorter to write

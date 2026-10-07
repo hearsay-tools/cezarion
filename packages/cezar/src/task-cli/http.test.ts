@@ -38,7 +38,7 @@ describe('task HTTP response bounds', () => {
     });
   });
 
-  it.each(['/runs', '/run-summaries'])('lifts the byte cap for a successful %s list (#817)', async (path) => {
+  it.each(['/runs', '/run-summaries', '/run-summaries?archived=recent'])('lifts the byte cap for a successful %s list (#817)', async (path) => {
     const result = await request(cockpit, path);
     expect(result.status).toBe(200);
     expect(String(result.data)).toHaveLength(3_145_729);

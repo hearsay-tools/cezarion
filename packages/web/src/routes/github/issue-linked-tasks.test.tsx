@@ -5,6 +5,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 
 import { ProjectScopeProvider } from '@/api/project-scope-context'
 import { createQueryClient } from '@/api/query-client'
+import { summaryOf } from '@/test/run-summary-fixture'
 import { IssueLinkedTasks } from './issue-linked-tasks'
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
@@ -13,7 +14,7 @@ it('reads only the active project’s runs and links back to that project', asyn
   const client = createQueryClient()
   client.setQueryData(['default', 'runs', 'list'], [{ id: 'wrong-project', issueNumber: 750 }])
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
-    if (String(input) !== '/api/v1/p/second/run-summaries') throw new Error(`Unexpected request: ${String(input)}`)
+    if (String(input).replace('?archived=recent', '') !== '/api/v1/p/second/run-summaries') throw new Error(`Unexpected request: ${String(input).replace('?archived=recent', '')}`)
     return new Response(JSON.stringify([{
       id: 'diagnosis', title: 'Diagnose navigation', task: 'Diagnose navigation',
       issueNumber: 750, workflow: 'quick-task', status: 'done', archived: true,
@@ -80,4 +81,95 @@ it('keeps collapsed counts live and shows an empty state when only workers match
   fireEvent.click(updated)
   expect(screen.getByRole('link', { name: /Parent task/ }).textContent).toContain('Archived')
   expect(document.getElementById(updated.getAttribute('aria-controls')!)?.contains(screen.getByRole('link'))).toBe(true)
+})
+
+it('finds a linked task older than the run list\'s archived window (#864)', async () => {
+  const client = createQueryClient()
+  const archived = summaryOf({
+    id: 'old-diagnosis', title: 'Old diagnosis', task: 'Old diagnosis', issueNumber: 750, workflow: 'quick-task',
+    status: 'done', archived: true, createdAt: '2025-01-01T12:00:00Z', tokensUsed: 0, steps: [],
+  })
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input)
+    const body = url === '/api/v1/p/second/run-summaries?archived=recent'
+      ? []
+      : url === '/api/v1/p/second/run-summaries/archived?limit=200&q=%23750'
+        ? { runs: [archived], nextCursor: null, total: 1 }
+        : undefined
+    if (body === undefined) throw new Error(`Unexpected request: ${url}`)
+    return new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } })
+  }))
+  render(
+    <ProjectScopeProvider projectId="second">
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={['/p/second/github/issues/750']}>
+          <IssueLinkedTasks number={750} repo="acme/demo" />
+        </MemoryRouter>
+      </QueryClientProvider>
+    </ProjectScopeProvider>,
+  )
+  fireEvent.click(await screen.findByRole('button', { name: 'Linked tasks (1)' }))
+  expect((await screen.findByRole('link', { name: /Old diagnosis/ })).getAttribute('href')).toBe('/p/second/tasks/old-diagnosis')
+})
+
+it('says there are more archived linked tasks and pages them in (#864)', async () => {
+  const client = createQueryClient()
+  const archived = (id: string) => summaryOf({
+    id, title: `Task ${id}`, task: 't', issueNumber: 750, workflow: 'quick-task',
+    status: 'done', archived: true, createdAt: '2025-01-01T12:00:00Z', tokensUsed: 0, steps: [],
+  })
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input)
+    const body = url === '/api/v1/p/second/run-summaries?archived=recent' ? []
+      : url === '/api/v1/p/second/run-summaries/archived?limit=200&q=%23750' ? { runs: [archived('first')], nextCursor: 'c1', total: 2 }
+        : url === '/api/v1/p/second/run-summaries/archived?before=c1&limit=200&q=%23750' ? { runs: [archived('second')], nextCursor: null, total: 2 }
+          : undefined
+    if (body === undefined) throw new Error(`Unexpected request: ${url}`)
+    return new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } })
+  }))
+  render(
+    <ProjectScopeProvider projectId="second">
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={['/p/second/github/issues/750']}>
+          <IssueLinkedTasks number={750} repo="acme/demo" />
+        </MemoryRouter>
+      </QueryClientProvider>
+    </ProjectScopeProvider>,
+  )
+  fireEvent.click(await screen.findByRole('button', { name: 'Linked tasks (1+)' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Show older linked tasks' }))
+  expect(await screen.findByRole('link', { name: /Task second/ })).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'Linked tasks (2)' })).toBeTruthy()
+  expect(screen.queryByRole('button', { name: 'Show older linked tasks' })).toBeNull()
+})
+
+it('says older linked tasks could not load, keeps the count a lower bound, and retries (#864)', async () => {
+  const client = createQueryClient()
+  client.setDefaultOptions({ queries: { retry: false } })
+  let archivedCalls = 0
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input)
+    if (url === '/api/v1/p/second/run-summaries?archived=recent') return new Response('[]', { headers: { 'content-type': 'application/json' } })
+    if (url === '/api/v1/p/second/run-summaries/archived?limit=200&q=%23750') {
+      archivedCalls += 1
+      return archivedCalls === 1
+        ? new Response(JSON.stringify({ error: 'boom' }), { status: 500, headers: { 'content-type': 'application/json' } })
+        : new Response(JSON.stringify({ runs: [], nextCursor: null, total: 0 }), { headers: { 'content-type': 'application/json' } })
+    }
+    throw new Error(`Unexpected request: ${url}`)
+  }))
+  render(
+    <ProjectScopeProvider projectId="second">
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={['/p/second/github/issues/750']}>
+          <IssueLinkedTasks number={750} repo="acme/demo" />
+        </MemoryRouter>
+      </QueryClientProvider>
+    </ProjectScopeProvider>,
+  )
+  fireEvent.click(await screen.findByRole('button', { name: 'Linked tasks (0+)' }))
+  expect(await screen.findByText('Couldn’t load older archived linked tasks.')).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: 'Retry older linked tasks' }))
+  expect(await screen.findByRole('button', { name: 'Linked tasks (0)' })).toBeTruthy()
+  expect(screen.queryByText('Couldn’t load older archived linked tasks.')).toBeNull()
 })

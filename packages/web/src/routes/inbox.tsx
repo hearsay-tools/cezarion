@@ -4,8 +4,8 @@ import { InboxIcon, TriangleAlertIcon } from '@/components/design-icons'
 import { useRef, useState } from 'react'
 import { Link, useNavigate } from '@/lib/project-router'
 
-import { removeTodo, startTodo } from '@/api/client'
-import { queryKeys, useHealth, useRuns, useTodos, useUiState, useProjects, useReferenceProjectId } from '@/api/queries'
+import { ApiError, removeTodo, startTodo } from '@/api/client'
+import { queryKeys, useHealth, useRun, useRuns, useTodos, useUiState, useProjects, useReferenceProjectId } from '@/api/queries'
 import type { TodoItem } from '@open-mercato/cezar-api-client'
 import { CenteredState } from '@/components/centered-state'
 import { EnginePills, engineBody, useResolvedEngine, type EnginePick } from '@/components/engine-pills'
@@ -128,7 +128,7 @@ export function InboxRoute() {
                 key={todo.id}
                 todo={todo}
                 projectName={projectName}
-                sourceTaskExists={
+                sourceTaskListed={
                   todo.taskId === undefined
                     ? null
                     : (runs.data?.some((run) => run.id === todo.taskId) ?? false)
@@ -145,13 +145,18 @@ export function InboxRoute() {
 function TodoCard({
   todo,
   projectName,
-  /** null: no source task at all; false: it existed once but was deleted. */
-  sourceTaskExists,
+  /** null: no source task at all; false: not in the run list. */
+  sourceTaskListed,
 }: {
   todo: TodoItem
   projectName?: string
-  sourceTaskExists: boolean | null
+  sourceTaskListed: boolean | null
 }) {
+  // The run list carries only the newest archived tasks (#864), so a source task missing from it
+  // may simply be old: ask for that one run before saying it was deleted. Only a 404 says so.
+  const sourceLookup = useRun(sourceTaskListed === false ? todo.taskId : undefined)
+  const sourceTaskExists = sourceTaskListed === true || sourceLookup.isSuccess
+  const sourceTaskGone = sourceTaskListed === false && sourceLookup.error instanceof ApiError && sourceLookup.error.status === 404
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const uiState = useUiState()
@@ -249,9 +254,9 @@ function TodoCard({
                 >
                   Source task <span aria-hidden="true">↗</span>
                 </Link>
-              ) : (
+              ) : sourceTaskGone ? (
                 <span data-slot="todo-source-gone">source task deleted</span>
-              )
+              ) : null
             ) : null}
             {/* href protocol guard (#431): link only for http(s) URLs. */}
             {isHttpUrl(todo.prUrl) ? (

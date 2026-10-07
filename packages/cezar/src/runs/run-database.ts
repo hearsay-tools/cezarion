@@ -30,7 +30,16 @@ export const RUNS_IMPORT_COMPLETE_KEY = 'import-complete';
 /** `PRAGMA user_version` of a database this build created. A higher number means a newer cezar
  *  wrote it; that is refused rather than read, because a newer schema may store what this one
  *  would silently drop on its next write. */
-export const RUN_DATABASE_SCHEMA_VERSION = 1;
+export const RUN_DATABASE_SCHEMA_VERSION = 2;
+
+/**
+ * The oldest `user_version` the READ-ONLY reader can read as it stands (`openReadOnly`). It never
+ * migrates, so a project this build has not opened yet is still at the version an earlier build
+ * left; while every migration since only adds what readers can do without (indexes), that
+ * database stays readable rather than reading as empty. Raise it with any migration that changes
+ * a table or column a reader queries.
+ */
+export const RUN_DATABASE_READABLE_FROM = 1;
 
 /** How long a statement waits on another connection's lock before failing as busy. Short on
  *  purpose: the store runs on the event loop, and a blocked write is a blocked cockpit. */
@@ -143,6 +152,13 @@ const MIGRATIONS: readonly string[] = [
     current_revision INTEGER,
     current_data TEXT
   ) STRICT;
+  `,
+  `
+  -- The run lists' window (#864): every unarchived run, plus the newest archived roots. Without
+  -- these, each half scans the whole table — about 30 ms at 20,000 runs, on every list read.
+  -- Indexes only: nothing a v1 reader reads changes, which is why RUN_DATABASE_READABLE_FROM stays 1.
+  CREATE INDEX runs_unarchived ON runs (created_at DESC, seq) WHERE archived = 0;
+  CREATE INDEX runs_archived_roots ON runs (archived, created_at DESC, seq) WHERE parent_run_id IS NULL;
   `,
 ];
 
@@ -422,8 +438,22 @@ const ROW_COLUMNS = 'seq, id, created_at, finished_at, status, archived, live, p
 /** Newest first, runs created in the same millisecond in insertion order (`seq`): the one order
  *  every list read uses. */
 const NEWEST_FIRST = 'ORDER BY created_at DESC, seq';
+/** The columns a list row reads, without the record. */
+const SUMMARY_SELECT = 'SELECT seq, id, created_at, revision, summary FROM runs';
+/** An archived run that is not an owned worker: what the run lists' archived window counts (#864). */
+export const ARCHIVED_ROOT = 'archived = 1 AND parent_run_id IS NULL';
 
 type SqlRow = Record<string, unknown>;
+
+function toSummaryRow(row: SqlRow): RunSummaryRow {
+  return {
+    seq: row.seq as number,
+    id: row.id as string,
+    createdAt: row.created_at as string,
+    revision: row.revision as number,
+    summary: row.summary as string,
+  };
+}
 
 function toRunRow(row: SqlRow): RunRow {
   return {
@@ -482,6 +512,9 @@ export class RunDatabase {
     get: StatementSync;
     getMany: StatementSync;
     listSummaries: StatementSync;
+    listWindowSummaries: StatementSync;
+    listRootWindowSummaries: StatementSync;
+    getSummaries: StatementSync;
     listAll: StatementSync;
     listLive: StatementSync;
     listByParent: StatementSync;
@@ -520,6 +553,9 @@ export class RunDatabase {
       get: db.prepare(`SELECT ${ROW_COLUMNS} FROM runs WHERE id = ?`),
       getMany: db.prepare(`SELECT ${ROW_COLUMNS} FROM runs WHERE id IN (SELECT value FROM json_each(?))`),
       listSummaries: db.prepare(`SELECT seq, id, created_at, revision, summary FROM runs ${NEWEST_FIRST} LIMIT ?`),
+      getSummaries: db.prepare(`${SUMMARY_SELECT} WHERE id IN (SELECT value FROM json_each(?))`),
+      listWindowSummaries: db.prepare(`${SUMMARY_SELECT} WHERE archived = 0 UNION ALL SELECT * FROM (${SUMMARY_SELECT} WHERE ${ARCHIVED_ROOT} ${NEWEST_FIRST} LIMIT ?) ${NEWEST_FIRST}`),
+      listRootWindowSummaries: db.prepare(`${SUMMARY_SELECT} WHERE archived = 0 AND parent_run_id IS NULL UNION ALL SELECT * FROM (${SUMMARY_SELECT} WHERE ${ARCHIVED_ROOT} ${NEWEST_FIRST} LIMIT ?) ${NEWEST_FIRST}`),
       listAll: db.prepare(`SELECT ${ROW_COLUMNS} FROM runs ${NEWEST_FIRST}`),
       listLive: db.prepare(`SELECT ${ROW_COLUMNS} FROM runs WHERE live = 1 ORDER BY seq`),
       listByParent: db.prepare(`SELECT ${ROW_COLUMNS} FROM runs WHERE parent_run_id = ? ${NEWEST_FIRST}`),
@@ -601,8 +637,10 @@ export class RunDatabase {
   /**
    * Open an existing database for reading only: never creates the file, never migrates it, never
    * changes journal mode. Answers `null` when there is nothing this build can read yet — no file,
-   * or a file still below the current schema (what a failed first open leaves) — so the caller can
-   * fall back to whatever it read before the database existed. A newer schema is still refused.
+   * or a file below `RUN_DATABASE_READABLE_FROM` (schema 0 is what a failed first open leaves) —
+   * so the caller can fall back to whatever it read before the database existed. A database from
+   * `RUN_DATABASE_READABLE_FROM` up to this build's schema is read as it stands. A newer schema is
+   * still refused.
    *
    * SQLite may create the `-wal`/`-shm` coordination files beside the database; that is the price
    * of seeing a live writer's commits. In a read-only directory with neither file present it
@@ -618,7 +656,7 @@ export class RunDatabase {
       db.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`);
       const found = readSchemaVersion(db);
       if (found > RUN_DATABASE_SCHEMA_VERSION) throw new RunDatabaseUnsupportedSchemaError(found, RUN_DATABASE_SCHEMA_VERSION);
-      if (found < RUN_DATABASE_SCHEMA_VERSION) {
+      if (found < RUN_DATABASE_READABLE_FROM) {
         db.close();
         return null;
       }
@@ -644,13 +682,43 @@ export class RunDatabase {
    *  as every list route includes them. Without a limit, every row. */
   listSummaries(options: { limit?: number } = {}): RunSummaryRow[] {
     const limit = options.limit ?? -1;
-    return this.run(() => this.statements.listSummaries.all(limit)).map((row) => ({
-      seq: row.seq as number,
-      id: row.id as string,
-      createdAt: row.created_at as string,
-      revision: row.revision as number,
-      summary: row.summary as string,
-    }));
+    return this.run(() => this.statements.listSummaries.all(limit)).map(toSummaryRow);
+  }
+
+  /**
+   * The run lists' window (#864), newest first: every unarchived row, plus the newest
+   * `archivedLimit` archived roots. Archived workers are never in it — no list renders them, and
+   * counting them is what let them push an older live root out of a newest-N window.
+   */
+  listWindowSummaries(archivedLimit: number, options: { roots?: boolean } = {}): RunSummaryRow[] {
+    const statement = options.roots ? this.statements.listRootWindowSummaries : this.statements.listWindowSummaries;
+    return this.run(() => statement.all(archivedLimit)).map(toSummaryRow);
+  }
+
+  /** The summary rows of `ids` that exist, in no particular order. */
+  getSummaries(ids: readonly string[]): RunSummaryRow[] {
+    if (ids.length === 0) return [];
+    return this.run(() => this.statements.getSummaries.all(JSON.stringify(ids))).map(toSummaryRow);
+  }
+
+  /** Every root row (archived or not) whose stored summary contains each `prefilter` token,
+   *  lowercased, newest first: the candidates of a run search (#864), which the caller still
+   *  checks with `matchesRunQuery`. No tokens, every root. */
+  searchRootSummaries(prefilter: readonly string[]): RunSummaryRow[] {
+    const rows: RunSummaryRow[] = [];
+    this.visitRootSummaries(prefilter, (row) => { rows.push(row); return true; });
+    return rows;
+  }
+
+  /** The rows `searchRootSummaries` answers, one at a time, until `visit` answers false: a search
+   *  that needs only its first matches stops reading there. */
+  visitRootSummaries(prefilter: readonly string[], visit: (row: RunSummaryRow) => boolean): void {
+    const where = ['parent_run_id IS NULL', ...prefilter.map(() => 'instr(lower(summary), ?) > 0')].join(' AND ');
+    this.run(() => {
+      for (const row of this.db.prepare(`${SUMMARY_SELECT} WHERE ${where} ${NEWEST_FIRST}`).iterate(...prefilter)) {
+        if (!visit(toSummaryRow(row as SqlRow))) break;
+      }
+    });
   }
 
   /** Every row, newest first (`created_at` descending, then insertion order). */

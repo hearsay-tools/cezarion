@@ -562,19 +562,73 @@ export const referenceStatusesByProjectSchema = z.record(
   }),
 );
 
+/** The archived roots `GET /run-summaries/archived` answers per page by default, and at most (#864). */
+export const ARCHIVED_RUNS_PAGE_DEFAULT = 50;
+export const ARCHIVED_RUNS_PAGE_MAX = 200;
+
+/**
+ * `GET /run-summaries?archived=` (#864). `all` (the default) is every run, as the route has always
+ * answered — an older `cez task list --all` keeps getting every row. `recent` is the window the
+ * cockpit reads: every unarchived run, plus the newest archived root runs.
+ */
+export const runSummariesQuerySchema = z.object({
+  archived: z.enum(['recent', 'all']).optional(),
+});
+export type RunSummariesQuery = z.infer<typeof runSummariesQuerySchema>;
+
+/** `GET /run-summaries/archived` (#864): one page of archived root runs, newest first. */
+export const archivedRunsQuerySchema = z.object({
+  /** `nextCursor` from the previous page. Opaque: a malformed one answers 400. */
+  before: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(ARCHIVED_RUNS_PAGE_MAX).optional(),
+  /** Only runs that match (`matchesRunQuery`): title, id, branch, workflow, PR or issue. */
+  q: z.string().optional(),
+});
+export type ArchivedRunsQuery = z.infer<typeof archivedRunsQuerySchema>;
+
+export const archivedRunsResponseSchema = z.object({
+  runs: z.array(runSummarySchema),
+  /** The `before` of the next page, or null on the last one. */
+  nextCursor: z.string().nullable(),
+  /** How many archived root runs match, across every page. */
+  total: z.number().int().nonnegative(),
+});
+export type ArchivedRunsResponse = z.infer<typeof archivedRunsResponseSchema>;
+
 export const runsIndexResponseSchema = z.object({
-  /** Newest first, across every registered project. Archived runs are included — `GET /runs`
-   *  carries them for the project you are standing in, and a finder that dropped them elsewhere
-   *  would make a task vanish the moment you left its project. */
+  /** Newest first, across every registered project: each project's window (#864) — every
+   *  unarchived root run, plus its newest `perProjectLimit` archived root runs. Owned workers are
+   *  never included. Older archived runs are
+   *  reached through `GET /workspace/runs-search`. */
   runs: z.array(runIndexEntrySchema),
   /** Additive: absent statuses mean "nothing warm", never "nothing to show". */
   referenceStatuses: referenceStatusesByProjectSchema,
-  /** The per-project cap that produced this list. */
+  /** How many archived root runs each project contributes at most. Unarchived roots are never cut. */
   perProjectLimit: z.number(),
-  /** Ids of the projects that had more runs than the cap allowed. */
+  /** Ids of the projects that had more archived root runs than `perProjectLimit`. */
   truncated: z.array(z.string()),
 });
 export type RunsIndexResponse = z.infer<typeof runsIndexResponseSchema>;
+
+/** The most matches `GET /workspace/runs-search` answers per project (#864), and its default. */
+export const RUNS_SEARCH_PER_PROJECT_MAX = 50;
+
+/** `GET /workspace/runs-search` (#864): ⌘K's reach past each project's run-list window. */
+export const runsSearchQuerySchema = z.object({
+  /** Every whitespace-separated token must match (`matchesRunQuery`). At least two characters:
+   *  one matches nearly every run. */
+  q: z.string().trim().min(2),
+  limit: z.coerce.number().int().min(1).max(RUNS_SEARCH_PER_PROJECT_MAX).optional(),
+});
+export type RunsSearchQuery = z.infer<typeof runsSearchQuerySchema>;
+
+export const runsSearchResponseSchema = z.object({
+  /** Root runs, archived or not, newest first across every registered project. */
+  runs: z.array(runIndexEntrySchema),
+  /** Ids of the projects that had more matches than `limit`. */
+  truncated: z.array(z.string()),
+});
+export type RunsSearchResponse = z.infer<typeof runsSearchResponseSchema>;
 
 // ---- mutation responses ------------------------------------------------------------------
 

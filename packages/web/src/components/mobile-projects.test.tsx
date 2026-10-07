@@ -52,7 +52,6 @@ const SIGNALS = new Map<string, ProjectSignal>([
 const nav = (overrides: Partial<MobileProjectNav> = {}): MobileProjectNav => ({
   projects: PROJECTS,
   signals: SIGNALS,
-  truncated: new Set(),
   singleProject: false,
   ...overrides,
 })

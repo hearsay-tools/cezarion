@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
-import { runsIndexResponseSchema, type RunsIndexResponse } from '@open-mercato/cezar-contract';
+import { runsIndexResponseSchema, runsSearchResponseSchema, type RunsIndexResponse } from '@open-mercato/cezar-contract';
 import { readPersistedText, seedRuns } from '../runs/run-store.testkit.ts';
 const resolveRepoHandle = vi.hoisted(() => vi.fn());
 vi.mock('./forge/github.ts', async (importOriginal) => ({
@@ -331,17 +331,18 @@ describe('workspace runs index API', () => {
     expect(body.runs.map((run) => run.id)).toEqual(['live', 'filed']);
   });
 
-  it('caps each project and names it in `truncated`, so no cap is silent', async () => {
+  it('caps each project\'s archived roots and names it in `truncated`, so no cap is silent', async () => {
     await registerProject(repoRoot);
     const other = await registerProject(otherRoot);
-    // 210 > the 200 cap. Ids sort with the timestamps so the newest survivors are predictable.
+    // 210 archived roots > the 200 window (#864: unarchived runs are never cut). Ids sort with the
+    // timestamps so the newest survivors are predictable.
     seedColdProject(
       otherRoot,
       Array.from({ length: 210 }, (_, i) => {
         const n = String(i).padStart(3, '0');
         const hour = String(10 + Math.floor(i / 60)).padStart(2, '0');
         const minute = String(i % 60).padStart(2, '0');
-        return storedRun({ id: `r-${n}`, title: `Task ${n}`, createdAt: `2026-07-14T${hour}:${minute}:00Z` });
+        return storedRun({ id: `r-${n}`, title: `Task ${n}`, createdAt: `2026-07-14T${hour}:${minute}:00Z`, archived: true });
       }),
     );
 
@@ -355,7 +356,7 @@ describe('workspace runs index API', () => {
     expect(body.runs.at(-1)?.id).toBe('r-010');
   });
 
-  it('keeps worker labels and wait phases in a slim live/cold index without ownership resources', async () => {
+  it('keeps parent wait phases and leaves workers out of a slim live/cold index without ownership resources', async () => {
     await registerProject(repoRoot); await registerProject(otherRoot);
     const workerId = '10000000-0000-4000-8000-000000000002';
     const live = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });
@@ -364,7 +365,10 @@ describe('workspace runs index API', () => {
     seedColdProject(otherRoot, [storedRun({ id: workerId, title: 'Worker', delegation: { role: 'worker', permissions: [], parentRunId: live.id, wait: { ...wait, workerIds: [], requestIds: [workerId] }, workspace: { kind: 'owned-isolated', ownerRunId: workerId, resourceId: workerId, path: '/managed/worker', branch: 'cez/worker', baselineSha: 'a'.repeat(40) } } }), storedRun({ id: 'ordinary', title: 'Ordinary' })]);
     const body = await getIndex();
     expect(body.runs.find(run => run.id === live.id)).toHaveProperty('delegation', { role: 'root', wait: { phase: 'parked', workerIds: [workerId], outcomes: [] } });
-    expect(body.runs.find(run => run.id === workerId)).toHaveProperty('delegation', { role: 'worker', parentRunId: live.id, wait: { phase: 'parked', requestIds: [workerId] } });
+    // No worker rows at all (#864): no index reader lists workers, and a parent's wait label
+    // comes from its own delegation, carried above.
+    expect(body.runs.find(run => run.id === workerId)).toBeUndefined();
+    expect(body.runs.filter(run => run.delegation?.role === 'worker')).toEqual([]);
     expect(body.runs.find(run => run.id === 'ordinary')).not.toHaveProperty('delegation');
     expect(runsIndexResponseSchema.parse(body)).toEqual(body);
     // Run ids are not ownership resources: since #817 the summary carries a worker's `parentRunId`
@@ -510,6 +514,165 @@ describe('workspace runs index API', () => {
         prs: { 40: 'ready', 42: 'merged' },
         issues: { 12: 'completed' },
       });
+    });
+  });
+  /**
+   * The live incident behind #864: a project's newest 200 rows were mostly archived workers, so
+   * an older waiting root fell out of the index and the rail never said Needs You. The window
+   * carries every unarchived run and leaves archived workers out, for an owned project and a cold
+   * one alike.
+   */
+  describe('the window (#864)', () => {
+    const PARENT = '10000000-0000-4000-8000-0000000000aa';
+    /** Minute `n` after a fixed start, so a larger `n` is newer. */
+    const at = (n: number) => new Date(Date.UTC(2026, 9, 1) + n * 60_000).toISOString();
+    const workerDelegation = (id: string) => ({
+      role: 'worker', parentRunId: PARENT, permissions: [],
+      workspace: { ownerRunId: id, resourceId: id, kind: 'owned-isolated', path: `/managed/${id}`, branch: `cez/${id}`, baselineSha: '0'.repeat(40) },
+    });
+    const incident = () => [
+      storedRun({ id: 'old-waiting', title: 'File an issue', status: 'waiting', hasPendingHumanAsk: true, createdAt: at(0) }),
+      ...Array.from({ length: 250 }, (_, i) => storedRun({ id: `arch-${i}`, title: `Archived ${i}`, archived: true, createdAt: at(10 + i * 2) })),
+      ...Array.from({ length: 300 }, (_, i) => {
+        const id = `10000000-0000-4000-8000-${String(i).padStart(12, '0')}`;
+        return storedRun({ id, title: `Worker ${i}`, archived: true, createdAt: at(11 + i * 2), delegation: workerDelegation(id) });
+      }),
+    ];
+    const expectWindow = (body: RunsIndexResponse, projectId: string) => {
+      const rows = body.runs.filter((run) => run.projectId === projectId);
+      expect(rows.map((run) => run.id)).toContain('old-waiting');
+      expect(rows.filter((run) => run.delegation?.role === 'worker')).toEqual([]);
+      expect(rows.filter((run) => run.archived)).toHaveLength(200);
+      expect(body.truncated).toContain(projectId);
+    };
+
+    it('keeps an old waiting root of a cold project behind newer archived roots and workers', async () => {
+      await registerProject(repoRoot);
+      const other = await registerProject(otherRoot);
+      seedColdProject(otherRoot, incident());
+      expectWindow(await getIndex(), other.id);
+    });
+
+    it('keeps an old waiting root of the owned boot project too', async () => {
+      const boot = await registerProject(repoRoot);
+      store.close();
+      seedRuns(join(repoRoot, '.ai/cezar'), incident());
+      store = RunStore.open(join(repoRoot, '.ai/cezar'));
+      expectWindow(await getIndex(), boot.id);
+    });
+  });
+
+  /**
+   * `GET /api/v1/workspace/runs-search` (#864) — what lets ⌘K reach a run past a project's window.
+   * Same source rule and the same side-effect-free contract as the index.
+   */
+  describe('workspace run search', () => {
+    const search = async (query: string, over: Partial<ServerDeps> = {}) => {
+      const res = await apiRequest(makeApp(over), `/api/v1/workspace/runs-search${query}`);
+      return { status: res.status, body: await res.json() as unknown };
+    };
+    const ids = (body: unknown) => runsSearchResponseSchema.parse(body).runs.map((run) => run.id);
+    const oldAndMany = () => [
+      storedRun({ id: 'oldest', title: 'Bound the run lists', archived: true, createdAt: '2025-01-01T00:00:00Z', prNumber: 870, issueNumber: 864 }),
+      ...Array.from({ length: 205 }, (_, i) => storedRun({ id: `newer-${i}`, title: `Newer ${i}`, archived: true, createdAt: `2026-07-14T10:${String(i % 60).padStart(2, '0')}:${String(Math.floor(i / 60)).padStart(2, '0')}Z` })),
+      storedRun({
+        id: '10000000-0000-4000-8000-0000000000bb', title: 'Bound the run lists, worker', archived: true, createdAt: '2025-01-02T00:00:00Z',
+        delegation: { role: 'worker', parentRunId: '10000000-0000-4000-8000-0000000000aa', permissions: [], workspace: { ownerRunId: '10000000-0000-4000-8000-0000000000bb', resourceId: '10000000-0000-4000-8000-0000000000cc', kind: 'owned-isolated', path: '/m', branch: 'cez/w', baselineSha: '0'.repeat(40) } },
+      }),
+    ];
+
+    it('finds a cold project\'s run older than its newest 200 by title, PR and issue, never a worker', async () => {
+      await registerProject(repoRoot);
+      const other = await registerProject(otherRoot);
+      seedColdProject(otherRoot, oldAndMany());
+      const index = await getIndex();
+      expect(index.runs.map((run) => run.id)).not.toContain('oldest');
+
+      for (const query of ['?q=bound%20lists', '?q=%23870', '?q=864']) {
+        const { status, body } = await search(query);
+        expect(status, query).toBe(200);
+        expect(ids(body), query).toEqual(['oldest']);
+        expect(runsSearchResponseSchema.parse(body).runs[0]?.projectId).toBe(other.id);
+      }
+    });
+
+    it('finds runs in the owned boot project too', async () => {
+      await registerProject(repoRoot);
+      const run = store.createRun({ title: 'Boot needle', workflow: 'build', task: 't', steps: [] });
+      store.setArchived(run.id, true);
+      expect(ids((await search('?q=needle')).body)).toEqual([run.id]);
+    });
+
+    it('caps each project and names it in `truncated`', async () => {
+      await registerProject(repoRoot);
+      const other = await registerProject(otherRoot);
+      seedColdProject(otherRoot, oldAndMany());
+      const { body } = await search('?q=newer&limit=2');
+      expect(runsSearchResponseSchema.parse(body)).toMatchObject({ runs: [{}, {}], truncated: [other.id] });
+    });
+
+    it('refuses a query shorter than two characters and a limit over 50', async () => {
+      for (const query of ['', '?q=a', '?q=%20a%20', '?q=ab&limit=51']) {
+        const { status, body } = await search(query);
+        expect(status, query).toBe(400);
+        expect(body).toHaveProperty('error');
+      }
+    });
+
+    it('degrades an unreadable project to no rows, never a 500', async () => {
+      await registerProject(repoRoot);
+      await registerProject(otherRoot);
+      mkdirSync(join(otherRoot, '.ai/cezar'), { recursive: true });
+      writeFileSync(join(otherRoot, '.ai/cezar/runs.db'), 'not a database');
+      const run = store.createRun({ title: 'Still here', workflow: 'build', task: 't', steps: [] });
+      expect(ids((await search('?q=still')).body)).toEqual([run.id]);
+    });
+
+    it('skips an owned project whose store throws, never a 500 (index and search alike)', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      onTestFinished(() => warn.mockRestore());
+      await registerProject(repoRoot);
+      const other = await registerProject(otherRoot);
+      seedColdProject(otherRoot, [storedRun({ id: 'cold-needle', title: 'Cold needle' })]);
+      vi.spyOn(store, 'searchRunSummaries').mockImplementation(() => { throw new Error('database is locked'); });
+      // Only the windowed read the index makes; the app's own boot lists every run.
+      const list = store.listRunSummaries.bind(store);
+      vi.spyOn(store, 'listRunSummaries').mockImplementation((options) => {
+        if (options?.archivedWindow !== undefined) throw new Error('database is locked');
+        return list(options);
+      });
+      const found = await search('?q=needle');
+      expect(found.status).toBe(200);
+      expect(ids(found.body)).toEqual(['cold-needle']);
+      const index = await getIndex();
+      expect(index.runs.map((run) => run.projectId)).toEqual([other.id]);
+    });
+
+    it('treats a token that names a project as satisfied in that project, as the palette does', async () => {
+      await registerProject(repoRoot);
+      const other = await registerProject(otherRoot);
+      seedColdProject(otherRoot, [storedRun({ id: 'cold-db', title: 'Database migration' })]);
+      const projectToken = other.name.toLowerCase().split(/[^a-z0-9]+/).filter((part) => part.length >= 3).pop()!;
+      const { status, body } = await search(`?q=${encodeURIComponent(`${projectToken} database`)}`);
+      expect(status).toBe(200);
+      expect(ids(body)).toEqual(['cold-db']);
+    });
+
+    it('never builds a project context', async () => {
+      await registerProject(repoRoot);
+      const other = await registerProject(otherRoot);
+      seedColdProject(otherRoot, [storedRun({ id: 'cold-1', title: 'Cold needle' })]);
+      const contexts = new ProjectContexts({ listProjects });
+      expect(ids((await search('?q=needle', { contexts })).body)).toEqual(['cold-1']);
+      expect(contexts.peek(other.id)).toBeUndefined();
+      expect(contexts.ids()).toEqual([]);
+      contexts.disposeAll();
+    });
+
+    it('is workspace-level only: no project-scoped spelling', async () => {
+      await registerProject(repoRoot);
+      const res = await apiRequest(makeApp(), '/api/v1/p/default/workspace/runs-search?q=ab');
+      expect(res.status).toBe(404);
     });
   });
 });

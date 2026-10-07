@@ -398,8 +398,8 @@ export function GlobalTasksRoute() {
 
         {truncated.length > 0 ? (
           <p data-slot="global-tasks-truncated" className="text-[11px] text-soft-foreground">
-            Showing the newest {index.data?.perProjectLimit} tasks per project — older ones in{' '}
-            {truncated.join(', ')} are only in that project&rsquo;s own Tasks page.
+            Showing every active task and the newest {index.data?.perProjectLimit} archived tasks per project — older archived tasks in{' '}
+            {truncated.join(', ')} are in that project&rsquo;s own Tasks page.
           </p>
         ) : null}
 

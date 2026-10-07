@@ -36,6 +36,15 @@ describe('conversation presentation titles', () => {
     expect(taskTitleFor('missing', titles)).toBe('Task')
   })
 
+  it('names a related run the run list no longer carries from the relationships titles (#864)', () => {
+    const parent = run({ id: 'parent', title: 'Parent task' })
+    const titles = titlesFromRuns(parent, [], [{ id: 'old-worker', title: 'raw prompt', titleSummary: 'Old worker' }])
+    expect(taskTitleFor('old-worker', titles)).toBe('Old worker')
+    // The run list's own row wins: it is the one the stream keeps fresh.
+    const fresher = titlesFromRuns(parent, [summaryOf(run({ id: 'old-worker', title: 'Renamed' }))], [{ id: 'old-worker', title: 'Stale' }])
+    expect(taskTitleFor('old-worker', fresher)).toBe('Renamed')
+  })
+
   it('labels direction and kinds without exposing raw identifiers', () => {
     expect(conversationDirection({ senderRunId: 'parent' }, 'parent')).toBe('outbound')
     expect(conversationDirection({ senderRunId: 'alpha' }, 'parent')).toBe('inbound')

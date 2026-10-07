@@ -91,7 +91,8 @@ export function request(cockpit: Cockpit, path: string, init: { method?: string;
   // 32 valid 100k-character tasks exceed the ordinary cap on /runs, and summaries grow with run
   // count. Match the cockpit's list read rather than making list/wait fail as history grows;
   // retain deadlines, error-body caps and every other route's cap.
-  const fullRunList = (path === '/runs' || path === '/run-summaries') && (init.method ?? (init.body === undefined ? 'GET' : 'POST')) === 'GET';
+  const listPath = path.split('?', 1)[0];
+  const fullRunList = (listPath === '/runs' || listPath === '/run-summaries') && (init.method ?? (init.body === undefined ? 'GET' : 'POST')) === 'GET';
   return fetchJson(`${cockpit.api}${path}`, {
     ...init,
     ...(fullRunList ? { responseLimitBytes: Infinity } : {}),

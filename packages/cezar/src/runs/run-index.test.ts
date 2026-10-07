@@ -1,9 +1,10 @@
 import { chmodSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { toRunSummary } from '@open-mercato/cezar-contract';
-import { readRunIndexFromDisk } from './run-index.ts';
+import { readRunIndexFromDisk, searchRunIndexFromDisk } from './run-index.ts';
 import { RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY, RunDatabase } from './run-database.ts';
 import { encodeRunRow } from './run-row.ts';
 import { readPersistedRuns, seedRuns } from './run-store.testkit.ts';
@@ -21,6 +22,17 @@ const record = (over: Record<string, unknown> = {}) => ({
   issueNumber: 43, referencedIssueNumberSeeded: true,
   ...over,
 });
+
+/** A worker's delegation that validates, so the store and the reader both read it as a worker. */
+const workerOf = (parentRunId: string) => {
+  const id = randomUUID();
+  return {
+    role: 'worker', parentRunId: uuidOf(parentRunId), permissions: [],
+    workspace: { ownerRunId: id, resourceId: randomUUID(), kind: 'owned-isolated', path: `/managed/${id}`, branch: `cez/${id}`, baselineSha: '0'.repeat(40) },
+  };
+};
+/** The schema wants a uuid parent; the role and the parent column are all these tests read. */
+const uuidOf = (name: string) => `00000000-0000-4000-8000-${Buffer.from(name).toString('hex').padStart(12, '0').slice(-12)}`;
 
 let dir: string;
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'cez-cold-refs-')); });
@@ -116,11 +128,78 @@ describe.each(Object.entries(sources))('repository scoping of cold disk records 
     expect(first()).not.toHaveProperty('activity');
   });
 
-  it('answers the newest runs first, archived included, and says when older ones were left out', () => {
-    source.put(['a', 'bb', 'ccc', 'dddd'].map((id, i) => record({ id, createdAt: `2026-09-0${i + 1}T00:00:00Z`, archived: i === 3 })));
-    expect(readRunIndexFromDisk(dir, { limit: 3 })).toMatchObject({ runs: [{ id: 'dddd', archived: true }, { id: 'ccc' }, { id: 'bb' }], truncated: true });
-    expect(readRunIndexFromDisk(dir, { limit: 4 }).truncated).toBe(false);
-    expect(readRunIndexFromDisk(dir).runs.map((run) => run.id)).toEqual(['dddd', 'ccc', 'bb', 'a']);
+  it('answers the window newest first: every unarchived run and the newest archived roots', () => {
+    source.put([
+      ...['a', 'bb', 'ccc', 'dddd'].map((id, i) => record({ id, createdAt: `2026-09-0${i + 1}T00:00:00Z`, archived: i > 0 })),
+      record({ id: 'worker', createdAt: '2026-09-09T00:00:00Z', archived: true, delegation: workerOf('dddd') }),
+    ]);
+    expect(readRunIndexFromDisk(dir, { archivedWindow: 2 })).toMatchObject({
+      runs: [{ id: 'dddd', archived: true }, { id: 'ccc' }, { id: 'a', archived: false }], truncated: true,
+    });
+    expect(readRunIndexFromDisk(dir, { archivedWindow: 3 }).truncated).toBe(false);
+    expect(readRunIndexFromDisk(dir).runs.map((run) => run.id)).toEqual(['worker', 'dddd', 'ccc', 'bb', 'a']);
+    // With roots (the runs index), no worker at all, archived or not (#864).
+    expect(readRunIndexFromDisk(dir, { archivedWindow: 3, roots: true }).runs.map((run) => run.id)).toEqual(['dddd', 'ccc', 'bb', 'a']);
+    source.put([record({ id: 'root' }), record({ id: 'w', createdAt: '2026-09-09T00:00:00Z', delegation: workerOf('root') })]);
+    expect(readRunIndexFromDisk(dir, { archivedWindow: 3, roots: true }).runs.map((run) => run.id)).toEqual(['root']);
+    expect(readRunIndexFromDisk(dir, { archivedWindow: 3 }).runs.map((run) => run.id)).toEqual(['w', 'root']);
+  });
+
+  it('finds a root at any age by title or reference number, never a worker', () => {
+    source.put([
+      record({ id: 'oldest', title: 'Bound the lists', createdAt: '2026-01-01T00:00:00Z', archived: true, issueNumber: 864, referencedIssueNumberSeeded: false, referencedIssueUrl: undefined, referencedIssueCandidates: [] }),
+      ...Array.from({ length: 5 }, (_, i) => record({ id: `newer-${i}`, createdAt: `2026-09-0${i + 1}T00:00:00Z`, archived: true })),
+      record({ id: 'worker', title: 'Bound the lists too', createdAt: '2026-09-09T00:00:00Z', archived: true, delegation: workerOf('oldest') }),
+    ]);
+    expect(searchRunIndexFromDisk(dir, 'bound lists', { limit: 50 }).runs.map((run) => run.id)).toEqual(['oldest']);
+    expect(searchRunIndexFromDisk(dir, '#864', { limit: 50 }).runs.map((run) => run.id)).toEqual(['oldest']);
+    expect(searchRunIndexFromDisk(dir, 'research', { limit: 2 })).toMatchObject({ runs: [{ id: 'newer-4' }, { id: 'newer-3' }], truncated: true });
+  });
+});
+
+describe('the cold window agrees with the store', () => {
+  it('lists the same rows in the same order, with the same truncated', () => {
+    const records = [
+      record({ id: 'live-old', status: 'done', createdAt: '2026-01-01T00:00:00Z' }),
+      ...Array.from({ length: 6 }, (_, i) => record({ id: `arch-${i}`, createdAt: `2026-09-0${i + 1}T00:00:00Z`, archived: true })),
+      record({ id: 'w', createdAt: '2026-09-09T00:00:00Z', archived: true, delegation: workerOf('arch-5') }),
+      record({ id: 'w-live', createdAt: '2026-09-10T00:00:00Z', delegation: workerOf('live-old') }),
+    ];
+    seedRuns(dir, records);
+    const cold = readRunIndexFromDisk(dir, { archivedWindow: 4 });
+    const coldRoots = readRunIndexFromDisk(dir, { archivedWindow: 4, roots: true });
+    const store = RunStore.open(dir);
+    try {
+      const owned = store.listRunSummaries({ archivedWindow: 4 });
+      expect(cold.runs.map((run) => run.id)).toEqual(owned.runs.map((run) => run.id));
+      expect(cold.truncated).toBe(owned.truncated);
+      const ownedRoots = store.listRunSummaries({ archivedWindow: 4, roots: true });
+      expect(coldRoots.runs.map((run) => run.id)).toEqual(ownedRoots.runs.map((run) => run.id));
+      expect(coldRoots.runs.map((run) => run.id)).not.toContain('w-live');
+      expect(cold.runs.map((run) => run.id)).toContain('w-live');
+    } finally {
+      store.close();
+    }
+  });
+});
+
+describe('cold search counts matches after projection', () => {
+  it('keeps scanning past candidates that scoping the repository drops', () => {
+    // Three newer runs match `43` only through a foreign issue the handle scopes away; the
+    // oldest matches through its own title. A cap counted before projection returns nothing.
+    seedRuns(dir, [
+      record({ id: 'own', title: 'Fix 43 flaky tests', createdAt: '2026-01-01T00:00:00Z', referencedIssueUrl: undefined, referencedIssueCandidates: [], issueNumber: undefined, referencedIssueNumberSeeded: false, referencedPullRequestUrl: undefined, referencedPrCandidates: [] }),
+      ...['f1', 'f2', 'f3'].map((id, i) => record({ id, createdAt: `2026-09-0${i + 1}T00:00:00Z` })),
+    ]);
+    expect(searchRunIndexFromDisk(dir, '43', { limit: 1 }).runs.map((run) => run.id)).toEqual(['f3']);
+    expect(searchRunIndexFromDisk(dir, '43', { handle, limit: 1 })).toEqual({ runs: [expect.objectContaining({ id: 'own' })], truncated: false });
+  });
+});
+
+describe('cold search of an unreadable project', () => {
+  it('answers nothing and does not throw for a runs.db that is not a database', () => {
+    writeFileSync(join(dir, RUNS_DB_FILE), 'not a database at all, just bytes');
+    expect(searchRunIndexFromDisk(dir, 'anything', { limit: 50 })).toEqual({ runs: [], truncated: false });
   });
 });
 

@@ -37,7 +37,7 @@ const json = (body: unknown, status = 200) =>
 function serve(webhook?: { url: string; tokenSet: boolean }, notifyAnswer: (body: unknown) => Response = (body) => json({ ...run(), notify: (body as { notify: boolean }).notify })) {
   const sent: Array<{ path: string; method: string; body: unknown }> = []
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
-    const path = String(input)
+    const path = String(input).replace('?archived=recent', '')
     const method = init.method ?? 'GET'
     const body = typeof init.body === 'string' ? JSON.parse(init.body) as unknown : undefined
     sent.push({ path, method, body })

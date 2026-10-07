@@ -194,7 +194,7 @@ function stubFetch(
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
-      const path = String(input)
+      const path = String(input).replace('?archived=recent', '')
       const method = init.method ?? 'GET'
       sent.push({ path, method, body: typeof init.body === 'string' ? JSON.parse(init.body) : undefined })
       const override = overrides[`${method} ${path}`]
@@ -227,6 +227,8 @@ function stubFetch(
         return jsonResponse(GITHUB)
       }
       if (method === 'GET' && path === '/api/v1/run-summaries') return jsonResponse([])
+      // An issue's linked tasks also search the archived runs past the list's window (#864).
+      if (method === 'GET' && path.startsWith('/api/v1/run-summaries/archived')) return jsonResponse({ runs: [], nextCursor: null, total: 0 })
       if (method === 'GET' && path === '/api/v1/workflows') return jsonResponse(WORKFLOWS)
       if (method === 'GET' && path === '/api/v1/skills') return jsonResponse(SKILLS)
       if (method === 'GET' && path === '/api/v1/providers/status') {
@@ -562,7 +564,7 @@ describe('the GitHub tab lists', () => {
     stubFetch()
     const origFetch = globalThis.fetch
     vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input)
+      const path = String(input).replace('?archived=recent', '')
       if (path.startsWith('/api/v1/github/comments/')) threadRequests.push(path)
       return (origFetch as typeof fetch)(input, init as RequestInit)
     })
@@ -1068,7 +1070,7 @@ describe('the comment thread', () => {
     stubFetch({ 'GET /api/v1/github?refresh=1': () => jsonResponse(GITHUB) })
     const origFetch = globalThis.fetch
     vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input)
+      const path = String(input).replace('?archived=recent', '')
       if (path.startsWith('/api/v1/github/comments/')) threadRequests.push(path)
       return (origFetch as typeof fetch)(input, init as RequestInit)
     })
@@ -1266,7 +1268,7 @@ describe('the comment thread', () => {
     })
     const origFetch = globalThis.fetch
     vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input)
+      const path = String(input).replace('?archived=recent', '')
       if (path.startsWith('/api/v1/github/comments/')) threadRequests.push(path)
       return (origFetch as typeof fetch)(input, init as RequestInit)
     })

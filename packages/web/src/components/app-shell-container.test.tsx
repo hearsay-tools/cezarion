@@ -76,7 +76,7 @@ const PROVIDERS: ProviderStatusResponse = {
  *  resolving to `{}` and making a broken wiring look fine. */
 function serve(routes: Record<string, unknown>): void {
   fetchMock.mockImplementation(async (input) => {
-    const path = String(input)
+    const path = String(input).replace('?archived=recent', '')
     const response =
       path === '/api/v1/providers/status'
         ? (routes[path] ?? PROVIDERS)
@@ -740,7 +740,7 @@ describe('project rail wiring', () => {
     await waitFor(() => expect(railMark('cezar').querySelector('[data-slot="rail-pill-bottom"]')).toBeNull())
   })
 
-  it('says recent runs only for a project the index truncated', async () => {
+  it('never says recent runs only, even for a project whose archived runs the index capped (#864)', async () => {
     serve({
       '/api/v1/health': HEALTH,
       '/api/v1/todos': [],
@@ -755,7 +755,7 @@ describe('project rail wiring', () => {
 
     await rail()
     await waitFor(() =>
-      expect(within(railMark('shop')).getByRole('link').getAttribute('aria-label')).toBe('shop · idle · recent runs only'),
+      expect(within(railMark('shop')).getByRole('link').getAttribute('aria-label')).toBe('shop · idle'),
     )
     expect(within(railMark('cezar')).getByRole('link').getAttribute('aria-label')).toBe('cezar · idle')
   })
@@ -779,7 +779,7 @@ describe('project rail wiring', () => {
   })
 
   it('refreshes the runs index when a project is registered, so its mark does not stay blank', async () => {
-    const indexCalls = () => fetchMock.mock.calls.filter(([input]) => String(input) === '/api/v1/workspace/runs-index').length
+    const indexCalls = () => fetchMock.mock.calls.filter(([input]) => String(input).replace('?archived=recent', '') === '/api/v1/workspace/runs-index').length
     serve({
       '/api/v1/health': HEALTH,
       '/api/v1/todos': [],
@@ -845,7 +845,7 @@ describe('project rail wiring', () => {
     renderShell('/p/cezar/')
 
     const menu = await screen.findByRole('button', { name: 'Open projects. Elsewhere: 1 needs you, 1 working' })
-    expect(fetchMock.mock.calls.filter(([input]) => String(input) === '/api/v1/workspace/runs-index')).toHaveLength(1)
+    expect(fetchMock.mock.calls.filter(([input]) => String(input).replace('?archived=recent', '') === '/api/v1/workspace/runs-index')).toHaveLength(1)
     // The project button never carries a count: it would read as the current project's.
     const picker = document.querySelector('[data-slot="mobile-project-picker"]') as HTMLElement
     expect(picker.querySelector('[data-segment]')).toBeNull()

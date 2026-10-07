@@ -1,6 +1,6 @@
 import { normalizeSidebarLimits, runnerModelCatalogResponseSchema } from '@open-mercato/cezar-api-client'
 import { toast } from '@/components/ui/toaster'
-import { useMutation, useQueries, useQuery, useQueryClient, type QueryClient, type MutateOptions } from '@tanstack/react-query'
+import { keepPreviousData, useInfiniteQuery, useMutation, useQueries, useQuery, useQueryClient, type QueryClient, type MutateOptions } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo } from 'react'
 
 import { mergeProviderStatusResponse } from '@/lib/provider-status'
@@ -54,6 +54,8 @@ import {
   getRunHandoff,
   getRuns,
   getRunsIndex,
+  getArchivedRuns,
+  searchRuns,
   getImportableSkills,
   getImportableSkillsWhenReady,
   getSkills,
@@ -88,7 +90,7 @@ import {
   putAgentConfigFile,
   retryProviderAuth,
 } from './client'
-import { queryScope, REFERENCE_STATUS_MAX, runnerDiscoversModels } from '@open-mercato/cezar-api-client'
+import { ARCHIVED_RUNS_PAGE_MAX, queryScope, REFERENCE_STATUS_MAX, runnerDiscoversModels } from '@open-mercato/cezar-api-client'
 import { useProjectScope } from './project-scope-context'
 import { isReferenceStatus } from '@/lib/reference-status'
 import { githubRepoBase } from '@/lib/tasks-table'
@@ -146,6 +148,8 @@ export const queryKeys = {
     },
     relationships: (id: string) => [queryScope(), 'runs', 'relationships', id] as const,
     list: (scope = queryScope()) => [scope, 'runs', 'list'] as const,
+    /** Under `all`, so every run mutation's invalidation refreshes the archived pages too. */
+    archived: (q: string) => [queryScope(), 'runs', 'archived', q] as const,
     detail: (id: string, scope = queryScope()) => [scope, 'runs', 'detail', id] as const,
     diff: (id: string) => [queryScope(), 'runs', 'diff', id] as const,
     changes: (id: string) => [queryScope(), 'runs', 'changes', id] as const,
@@ -259,6 +263,7 @@ export const workspaceQueryKeys = {
   /** The cross-project task index behind ⌘K. Workspace-led for the same reason the registry is:
    *  it answers for every project at once, so no scope owns it. */
   runsIndex: ['workspace', 'runs-index'] as const,
+  runsSearch: (q: string) => ['workspace', 'runs-search', q] as const,
   /** `~/.cezar/ui-state.json` via `GET/PUT /api/workspace/ui-state` (step 2.7) — cross-project
    *  GUI prefs, e.g. the sidebar's per-project collapse map (step 3.3), and — since step 3.5 —
    *  appearance + notifications, which describe the user rather than a repo. */
@@ -879,6 +884,41 @@ export function useRuns() {
     queryFn: ({ signal }) => getRuns({ signal }),
   })
 }
+
+/** The archived runs past the run list's window, `ARCHIVED_RUNS_PAGE_MAX` at a time (#864): the
+ *  newest pages, or the matches for `q`. Only while `enabled` — the Archived tab, when the list's
+ *  window is full or there is something to search for. */
+export function useArchivedRuns(q: string, enabled: boolean) {
+  return useInfiniteQuery({
+    queryKey: queryKeys.runs.archived(q),
+    enabled,
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam, signal }) => getArchivedRuns({ before: pageParam, limit: ARCHIVED_RUNS_PAGE_MAX, q }, { signal }),
+    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    // The previous search's pages stay on screen while the next ones load — but only within one
+    // project: another project's archived tasks must never show under this one (#864 review).
+    placeholderData: (previous, previousQuery) => (previousQuery?.queryKey[0] === queryScope() ? previous : undefined),
+  })
+}
+
+/**
+ * Every project's runs matching `q`, at any age (#864) — what ⌘K adds to the runs it already
+ * holds once there is something typed. Off below `MIN_RUNS_SEARCH_LENGTH` characters, which the
+ * server refuses; the previous answer stays on screen while the next one loads.
+ */
+export function useRunsSearch(q: string) {
+  const query = q.trim()
+  return useQuery({
+    queryKey: workspaceQueryKeys.runsSearch(query),
+    queryFn: ({ signal }) => searchRuns(query, { signal }),
+    enabled: query.length >= MIN_RUNS_SEARCH_LENGTH,
+    placeholderData: keepPreviousData,
+    staleTime: 10_000,
+  })
+}
+
+/** The shortest query `GET /workspace/runs-search` accepts. */
+export const MIN_RUNS_SEARCH_LENGTH = 2
 
 /**
  * Every registered project's recent tasks, slim — the ⌘K palette's cross-project finder.

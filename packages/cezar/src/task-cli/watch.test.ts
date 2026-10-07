@@ -302,7 +302,7 @@ describe('cez task watching against a scripted cockpit', () => {
     };
     expect(await run(['list'])).toBe(2);
     expect(JSON.parse(out.at(-1)!)).toMatchObject({ code: 'refused', status: 409, error: 'project root is gone' });
-    expect(seen).toEqual(['/api/v1/p/default/run-summaries']);
+    expect(seen).toEqual(['/api/v1/p/default/run-summaries?archived=recent']);
   });
 
   /** Replay of seq 1..3 with a live `run` frame (already terminal) arriving after seq 1. */

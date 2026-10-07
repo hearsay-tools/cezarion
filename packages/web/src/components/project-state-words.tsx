@@ -20,7 +20,6 @@ export const SIGNAL_WORD_CLASS: Record<SignalTone, string> = {
 export function ProjectStateWords({
   signal,
   known,
-  truncated,
   current,
   maxParts,
   slot,
@@ -29,8 +28,6 @@ export function ProjectStateWords({
   signal: ProjectSignal | undefined
   /** False while the runs index has not loaded: the line says "activity unknown", not "idle". */
   known: boolean
-  /** Adds "recent runs only" when the index capped this project's runs. */
-  truncated: boolean
   /** The current project's row. Its selected fill takes `--soft-foreground` to 4.45:1 (dark) and
    *  4.25:1 (light), so the neutral words (idle, unknown, separators) step up to `--muted-foreground`. */
   current: boolean
@@ -50,7 +47,6 @@ export function ProjectStateWords({
           <span data-tone={part.tone} className={SIGNAL_WORD_CLASS[part.tone]}>{part.text}</span>
         </span>
       ))}
-      {known && truncated ? <span>· recent runs only</span> : null}
     </span>
   )
 }

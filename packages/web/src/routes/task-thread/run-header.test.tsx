@@ -60,7 +60,7 @@ function stubFetch(overrides: Record<string, () => Response> = {}): SentRequest[
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
-      const path = String(input)
+      const path = String(input).replace('?archived=recent', '')
       const method = init.method ?? 'GET'
       sent.push({
         path,
@@ -1548,7 +1548,7 @@ describe('meta line, tabs, pill and resume hint', () => {
       // A fail-open gate would paint the raw id first and drop it once the count arrived — the
       // flash the issue names. A never-resolving profiles query is that pending state, held.
       vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
-        if (String(input) === '/api/v1/workspace/agent-profiles') {
+        if (String(input).replace('?archived=recent', '') === '/api/v1/workspace/agent-profiles') {
           return new Promise<Response>(() => {})
         }
         return jsonResponse({})

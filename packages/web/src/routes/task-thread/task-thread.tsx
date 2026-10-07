@@ -15,6 +15,7 @@ import {
   useRun,
   useProjectRepoBase,
   useRuns,
+  useRunRelationships,
   useSendMessage,
 } from '@/api/queries'
 import { useRunHistory, type RunHistoryState } from '@/api/run-history'
@@ -279,7 +280,12 @@ export function ThreadView({
 
   const sections = useMemo(() => mainTranscriptSections(run, thread), [run, thread])
   const rows = useMemo(() => buildTranscriptRows(sections, run.id), [sections, run.id])
-  const taskTitles = useMemo(() => titlesFromRuns(run, runs.data), [run, runs.data])
+  // A delegated run's conversation names its parent and workers; once archived they may be past
+  // the run list's window (#864), so the relationships answer carries their titles too. The same
+  // cache entry the Workers section reads.
+  const delegated = run.delegation?.role === 'root' || run.delegation?.role === 'worker'
+  const relationships = useRunRelationships(run.id, { enabled: delegated })
+  const taskTitles = useMemo(() => titlesFromRuns(run, runs.data, relationships.data?.titles), [run, runs.data, relationships.data])
   const recipientBackends = useMemo(() => recipientBackendsFromRuns(run, runs.data), [run, runs.data])
   const renderAsk = useCallback((ask: ThreadAsk) => <AskCard ask={ask} run={run} />, [run])
   const messageActions = useMemo<Readonly<Record<string, TranscriptMessageActions>> | undefined>(() => {

@@ -34,7 +34,6 @@ const projects: MobileProjectNav = {
     ['cezarion', { needsYou: 2, failedUnread: 0, inMotion: 1, finishedUnread: 0 }],
     ['other', { needsYou: 7, failedUnread: 0, inMotion: 0, finishedUnread: 0 }],
   ]),
-  truncated: new Set(),
   singleProject: false,
 }
 

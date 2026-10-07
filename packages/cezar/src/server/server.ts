@@ -1,5 +1,6 @@
 import { sidebarLimitsSchema } from '@open-mercato/cezar-contract';
-import type { ApiRun, RunSummary } from '@open-mercato/cezar-contract';
+import type { ApiRun, ArchivedRunsResponse, RunSummary, RunsSearchResponse } from '@open-mercato/cezar-contract';
+import { ARCHIVED_RUNS_PAGE_DEFAULT, RUNS_SEARCH_PER_PROJECT_MAX, archivedRunsQuerySchema, runSummariesQuerySchema, runsSearchQuerySchema } from '@open-mercato/cezar-contract';
 import { automationKindSchema, automationScheduleSchema, localTimeZone, nextOccurrence, type AutomationKind } from '@open-mercato/cezar-contract';
 import { DelegationService } from '../delegation/service.ts';
 import { workerCapacity } from '../delegation/capacity.ts';
@@ -104,7 +105,7 @@ import { SkillsUpdateConflictError, SkillsUpdateCoordinator, SkillsUpdateService
 import { getTeamSkillsCached, refreshTeamSkills, waitForTeamSkills } from '../skills-remote.ts';
 import { appendHandoffHeartbeat, handoffProgressExcerpt, readHandoff } from '../handoff.ts';
 import { markStarted, onTodosChanged, readTodos, removeTodo, todoTaskText, type TodoItem } from '../todos.ts';
-import type { RunEvent, RunRecord, RunStatus, RunStore } from '../runs/store.ts';
+import { ARCHIVED_WINDOW, type RepoHandle, type RunEvent, type RunRecord, type RunStatus, type RunStore } from '../runs/store.ts';
 import {
   HistoryCursorError,
   deriveRunContextEvents,
@@ -112,7 +113,8 @@ import {
   readRunHistoryPage,
   validateLiveCursor,
 } from '../runs/event-history.ts';
-import { readRunIndexFromDisk } from '../runs/run-index.ts';
+import { readRunIndexFromDisk, searchRunIndexFromDisk } from '../runs/run-index.ts';
+import { searchTokens } from '../runs/run-search.ts';
 import { clientRequestHash } from '../runs/client-request.ts';
 import { ColdRepoHandles } from './cold-repo-handles.ts';
 import { isV2WireEventType } from '../runs/ui-event-sink.ts';
@@ -3936,7 +3938,24 @@ export function createApp(deps: ServerDeps) {
     .get('/runs', (c) => c.json(c.get('project').store.listAllRunsForLegacyRoute().map(run => withUsage(run))))
     // The slim list (#817): the same runs in the same order as `GET /runs`, from the stored
     // `toRunSummary` column with memory laid over it (#779), so the list decodes no record.
-    .get('/run-summaries', (c) => c.json(c.get('project').store.listRunSummaries().runs.map(withLiveUsage)))
+    // `?archived=recent` (#864) is the window the cockpit reads: every unarchived run plus the newest
+    // `ARCHIVED_WINDOW` archived roots. The default stays every run, for clients that list them all.
+    .get('/run-summaries', queryZodValidator(runSummariesQuerySchema), (c) => {
+      const archivedWindow = c.req.valid('query').archived === 'recent' ? ARCHIVED_WINDOW : undefined;
+      return c.json(c.get('project').store.listRunSummaries({ archivedWindow }).runs.map(withLiveUsage));
+    })
+    // The archived roots past that window, a page at a time, newest first (#864).
+    .get('/run-summaries/archived', queryZodValidator(archivedRunsQuerySchema), (c) => {
+      const { before, limit, q } = c.req.valid('query');
+      const page = c.get('project').store.listArchivedRuns({
+        limit: limit ?? ARCHIVED_RUNS_PAGE_DEFAULT,
+        ...(before !== undefined ? { before } : {}),
+        ...(q !== undefined ? { q } : {}),
+      });
+      if ('error' in page) return c.json({ error: page.error }, 400);
+      const body: ArchivedRunsResponse = { ...page, runs: page.runs.map(withLiveUsage) };
+      return c.json(body);
+    })
     .get('/runs/:id/relationships', paramZodValidator(runIdParamSchema), queryZodValidator(workerEmptyRequestSchema), (c) => {
       const { store } = c.get('project');
       const run = store.getRun(c.req.valid('param').id);
@@ -3946,7 +3965,8 @@ export function createApp(deps: ServerDeps) {
       // read has to cost O(workers) whatever the store holds — and nothing at all for the
       // ordinary run that owns none, delegation on or off.
       // Human reads use the bound project, never agent credentials or private evidence.
-      const workers = store.listOwnedWorkers(run.id).flatMap(worker => {
+      const ownedWorkers = store.listOwnedWorkers(run.id);
+      const workers = ownedWorkers.flatMap(worker => {
         const owned = worker.delegation;
         if (owned?.role !== 'worker') return [];
         return [{ workerId: worker.id, parentRunId: run.id, status: worker.status, workspace: owned.workspace,
@@ -3955,10 +3975,19 @@ export function createApp(deps: ServerDeps) {
           ...(owned.destroy ? { destroy: owned.destroy } : {}),
         }];
       });
+      // #864: the titles of the runs this answer names, since the cockpit's run list no longer
+      // carries archived workers (or a parent past its archived window).
+      const parent = run.delegation?.role === 'worker' ? store.getRun(run.delegation.parentRunId) : undefined;
+      const titles = [...(parent ? [parent] : []), ...ownedWorkers].map((related) => ({
+        id: related.id, title: related.title,
+        ...(related.titleSummary === undefined ? {} : { titleSummary: related.titleSummary }),
+        ...(related.titleOrigin === undefined ? {} : { titleOrigin: related.titleOrigin }),
+      }));
       // #816: every owned worker, bounded by the 1,024 creation ceiling rather than sliced, and
       // the root's capacity from the same derivation the spawn policy enforces.
       return c.json(runRelationshipsSchema.parse({
         ...(run.delegation?.role === 'worker' ? { parentRunId: run.delegation.parentRunId } : {}), workers,
+        ...(titles.length > 0 ? { titles } : {}),
         ...(run.delegation?.role === 'root' ? { capacity: workerCapacity(run, id => store.getRun(id)) } : {}),
       }));
     })
@@ -6128,13 +6157,14 @@ export function createApp(deps: ServerDeps) {
 
   // ---- chained family: the cross-project run index (workspace-level) -------
   /**
-   * How many runs each project may contribute, newest first. The index is a FINDER, not a
-   * listing: past the newest couple of hundred per project you are looking for something the
-   * project's own Tasks table answers better, and every extra row is a DOM node the palette's
-   * filter walks on each keystroke. `truncated` names the projects this bit, so a consumer never
+   * How many ARCHIVED root runs each project may contribute, newest first (#864). The index is a
+   * FINDER, not a listing: every unarchived ROOT run is in it (so a project's pills miss nothing
+   * live or unread), and older archived runs are reached through `GET /workspace/runs-search` and
+   * the project's own archived pages. Owned workers are never in it: the pills, ⌘K and the global
+   * Tasks page list no workers, and a parent's wait label comes from its own delegation. `truncated` names the projects this bit, so a consumer never
    * has to pretend the list is complete.
    */
-  const RUNS_INDEX_PER_PROJECT = 200;
+  const RUNS_INDEX_PER_PROJECT = ARCHIVED_WINDOW;
 
   /** `RunRecord` → the wire row. Optional keys are spread CONDITIONALLY: writing
    *  `titleSummary: run.titleSummary` types a key as always-present that `JSON.stringify` then
@@ -6171,22 +6201,55 @@ export function createApp(deps: ServerDeps) {
    * search box must not resume work; see `runs/run-index.ts`.
    */
   const coldRepoHandles = new ColdRepoHandles();
+
+  /**
+   * Every registered project whose runs can be read, and its owned store when this process holds
+   * one (`bootContext` for the boot project, `contexts.peek` otherwise) — never a built context.
+   * Without a store, the caller reads the project cold from `dataDir` with `handle`. The source
+   * rule both workspace run routes share, so the index and the search can never disagree on it.
+   */
+  const projectRunSources = async (): Promise<Array<{
+    project: ProjectListEntry; store: RunStore | undefined; dataDir: string; handle: RepoHandle | null | undefined;
+  }>> => {
+    let projects: ProjectListEntry[] = [];
+    try {
+      const selector = capabilities().singleProject
+        ? { projectId: await resolveBootProject() }
+        : undefined;
+      projects = await listProjects(selector);
+    } catch {
+      // unreadable workspace — no rows, never a 500. The palette degrades to the active
+      // project's own run list, which it holds either way.
+    }
+    const bootId = await resolveBootProject(projects);
+    coldRepoHandles.retainRoots(new Set(projects
+      .filter((project) => project.status !== 'missing' && project.id !== bootId && !contexts.peek(project.id))
+      .map((project) => project.root)));
+    // No folder, no runs to read. `not-git` still has an `.ai/cezar` worth indexing.
+    return projects.filter((project) => project.status !== 'missing').map((project) => {
+      const owned = project.id === bootId ? bootContext : contexts.peek(project.id);
+      // A cold project's repository identity only: asking for an owned one starts a discovery
+      // nothing reads.
+      return { project, store: owned?.store, dataDir: join(project.root, '.ai/cezar'), handle: owned ? undefined : coldRepoHandles.get(project.root) };
+    });
+  };
+
+  /**
+   * One project's contribution to a workspace run route. An owned store throws what its database
+   * throws (busy, damaged); like a cold project that cannot be read, it then contributes nothing,
+   * so one project never fails every project's index or search (#864).
+   */
+  const readProjectRuns = (projectId: string, read: () => { runs: RunSummary[]; truncated: boolean }) => {
+    try {
+      return read();
+    } catch (error) {
+      console.warn(`[cez] runs of project ${projectId} could not be read for the workspace run index: ${error instanceof Error ? error.message : String(error)}`);
+      return { runs: [], truncated: false };
+    }
+  };
+
   const runsIndexRoutes = new Hono()
     .get('/workspace/runs-index', async (c) => {
-      let projects: ProjectListEntry[] = [];
-      try {
-        const selector = capabilities().singleProject
-          ? { projectId: await resolveBootProject() }
-          : undefined;
-        projects = await listProjects(selector);
-      } catch {
-        // unreadable workspace — an empty index, never a 500. The palette degrades to the
-        // active project's own run list, which it holds either way.
-      }
-      const bootId = await resolveBootProject(projects);
-      coldRepoHandles.retainRoots(new Set(projects
-        .filter((project) => project.status !== 'missing' && project.id !== bootId && !contexts.peek(project.id))
-        .map((project) => project.root)));
       const runs: RunIndexEntry[] = [];
       const truncated: string[] = [];
       // Statuses the server already holds, shipped WITH the rows that carry the references. The
@@ -6195,29 +6258,20 @@ export function createApp(deps: ServerDeps) {
       // never touches `gh` and never slows the index down; anything cold stays absent and the
       // lazy `/github/ref-status` route fills it in.
       const referenceStatuses: RunsIndexResponse['referenceStatuses'] = {};
-      for (const project of projects) {
-        // No folder, no runs to read. `not-git` still has an `.ai/cezar` worth indexing.
-        if (project.status === 'missing') continue;
-        const owned = project.id === bootId ? bootContext : contexts.peek(project.id);
-        // Both sources answer newest-first. An owned project projects the newest of its held
-        // records; a cold one reads its stored summaries, at most one past the limit.
+      for (const { project, store: owned, dataDir, handle } of await projectRunSources()) {
+        // Both sources answer the same window, newest first: every unarchived run, plus the
+        // newest archived roots (#864). An owned project lays its held records over its rows; a
+        // cold one reads its stored summaries, at most one archived root past the window.
         //
         // Archived runs are INCLUDED. The active project's rows reach the palette through
-        // `GET /runs`, which has always carried them, and excluding them here would mean a task
+        // `GET /run-summaries`, which carries them too, and excluding them here would mean a task
         // is findable while you stand in its project and vanishes the moment you leave — the
         // exact asymmetry a cross-project finder exists to remove.
-        let recent: RunSummary[];
-        if (owned) {
-          const newest = owned.store.listRunSummaries({ limit: RUNS_INDEX_PER_PROJECT });
-          if (newest.truncated) truncated.push(project.id);
-          recent = newest.runs.map(withLiveUsage);
-        } else {
-          const cold = readRunIndexFromDisk(join(project.root, '.ai/cezar'), {
-            handle: coldRepoHandles.get(project.root), limit: RUNS_INDEX_PER_PROJECT,
-          });
-          if (cold.truncated) truncated.push(project.id);
-          recent = cold.runs.map(withLiveUsage);
-        }
+        const window = readProjectRuns(project.id, () => owned
+          ? owned.listRunSummaries({ archivedWindow: RUNS_INDEX_PER_PROJECT, roots: true })
+          : readRunIndexFromDisk(dataDir, { handle, archivedWindow: RUNS_INDEX_PER_PROJECT, roots: true }));
+        if (window.truncated) truncated.push(project.id);
+        const recent = window.runs.map(withLiveUsage);
         const mentioned: number[] = [];
         for (const run of recent) {
           runs.push({ projectId: project.id, ...run });
@@ -6240,6 +6294,32 @@ export function createApp(deps: ServerDeps) {
         truncated,
         referenceStatuses,
       };
+      return c.json(body);
+    })
+    /**
+     * `GET /workspace/runs-search` (#864) — every registered project's ROOT runs, archived or not,
+     * that match `q`, newest first: what lets ⌘K find a run past a project's window. Same source
+     * rule and the same side-effect-free contract as the index above.
+     */
+    .get('/workspace/runs-search', queryZodValidator(runsSearchQuerySchema), async (c) => {
+      const { q, limit = RUNS_SEARCH_PER_PROJECT_MAX } = c.req.valid('query');
+      const runs: RunIndexEntry[] = [];
+      const truncated: string[] = [];
+      const tokens = searchTokens(q);
+      for (const { project, store: owned, dataDir, handle } of await projectRunSources()) {
+        // The palette filters its rows by project name too, so a token naming this project is
+        // already satisfied here: `shop database` searches shop for `database` (#864 review). A
+        // query that only names the project adds nothing past the index's rows for it.
+        const name = project.name.toLowerCase();
+        const rest = tokens.filter((token) => !name.includes(token));
+        if (rest.length === 0) continue;
+        const scoped = rest.join(' ');
+        const found = readProjectRuns(project.id, () => owned ? owned.searchRunSummaries(scoped, limit) : searchRunIndexFromDisk(dataDir, scoped, { handle, limit }));
+        if (found.truncated) truncated.push(project.id);
+        for (const run of found.runs) runs.push({ projectId: project.id, ...withLiveUsage(run) });
+      }
+      runs.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      const body: RunsSearchResponse = { runs, truncated };
       return c.json(body);
     });
 

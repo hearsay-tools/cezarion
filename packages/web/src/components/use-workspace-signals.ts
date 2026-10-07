@@ -10,8 +10,6 @@ export type WorkspaceSignals = {
   projects: readonly ProjectListEntry[]
   /** Null while the runs index has not loaded: activity is then unknown, not idle. */
   signals: ReadonlyMap<string, ProjectSignal> | null
-  /** Ids of the projects whose runs index hit its per-project cap. */
-  truncated: ReadonlySet<string>
   /** `capabilities.singleProject` (`CEZ_SINGLE_PROJECT=1`). Never inferred from the project count. */
   singleProject: boolean
 }
@@ -34,7 +32,6 @@ export function useWorkspaceSignals(): WorkspaceSignals | null {
   const index = useRunsIndex().data
   const singleProject = useHealth().data?.capabilities.singleProject === true
   const signals = React.useMemo(() => (index ? signalsByProject(index.runs) : null), [index])
-  const truncated = React.useMemo(() => new Set(index?.truncated ?? []), [index?.truncated])
 
   // The index is refreshed by run events and reconnects, and none of those fire when the registry
   // changes. A project registered (or cloned, or removed) with runs already on disk would show no
@@ -52,7 +49,7 @@ export function useWorkspaceSignals(): WorkspaceSignals | null {
   }, [queryClient, registry])
 
   return React.useMemo(
-    () => (projects ? { projects, signals, truncated, singleProject } : null),
-    [projects, signals, truncated, singleProject],
+    () => (projects ? { projects, signals, singleProject } : null),
+    [projects, signals, singleProject],
   )
 }

@@ -28,7 +28,6 @@ export type MobileProjectNav = {
   projects: readonly ProjectListEntry[]
   /** Null while the runs index has not loaded: activity is then unknown, not idle. */
   signals: ReadonlyMap<string, ProjectSignal> | null
-  truncated: ReadonlySet<string>
   /** `capabilities.singleProject`: All projects and Add project go, as on the rail. */
   singleProject: boolean
 }
@@ -116,11 +115,10 @@ export function DrawerUpdate({ version, latestVersion, ...update }: Omit<Applica
   )
 }
 
-function DrawerProjectRow({ project, signal, known, truncated, current, onNavigate }: {
+function DrawerProjectRow({ project, signal, known, current, onNavigate }: {
   project: ProjectListEntry
   signal: ProjectSignal | undefined
   known: boolean
-  truncated: boolean
   current: boolean
   onNavigate: () => void
 }) {
@@ -156,7 +154,7 @@ function DrawerProjectRow({ project, signal, known, truncated, current, onNaviga
       </span>
       <span className="flex min-w-0 flex-1 flex-col gap-[2px]">
         <span className="truncate text-[14.5px] leading-tight font-semibold">{project.name}</span>
-        <ProjectStateWords signal={signal} known={known} truncated={truncated} current={current} slot="drawer-project-state" className="flex-wrap gap-x-[6px] text-[11.5px] leading-tight" />
+        <ProjectStateWords signal={signal} known={known} current={current} slot="drawer-project-state" className="flex-wrap gap-x-[6px] text-[11.5px] leading-tight" />
       </span>
       {current ? <CheckIcon aria-hidden="true" className="size-[16px] shrink-0 text-foreground" /> : null}
     </RouterLink>
@@ -195,7 +193,6 @@ export function DrawerProjects({ nav, currentProjectId, onNavigate }: {
             project={project}
             signal={nav.signals?.get(project.id)}
             known={nav.signals !== null}
-            truncated={nav.truncated.has(project.id)}
             current={project.id === currentProjectId}
             onNavigate={onNavigate}
           />
