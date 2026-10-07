@@ -1,5 +1,10 @@
 # Cursor ACP fixtures
 
+Cursor print qualification for fork #590 is recorded in
+[`print-qualification.md`](print-qualification.md). The native-question gate
+is blocked on CLI `2026.10.01-e373342`; no print runner fixture here claims
+that print is ready to replace ACP.
+
 Verified 2026-09-16 against Cursor CLI **2026.09.15-d2fe57e** and:
 
 - [Cursor ACP documentation](https://cursor.com/docs/cli/acp), including
