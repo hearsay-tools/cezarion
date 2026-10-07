@@ -18,6 +18,7 @@ import {
   openSync,
   readdirSync,
   readFileSync,
+  readSync,
   renameSync,
   rmSync,
   statSync,
@@ -44,10 +45,11 @@ const brotliParams = { params: { [zlibConstants.BROTLI_PARAM_QUALITY]: HISTORY_B
 const warnedUndecodable = new Set<string>();
 const warnedOrphaned = new Set<string>();
 
-export function historyPaths(dataDir: string, id: string): { plain: string; compressed: string; orphaned: string } {
+export function historyPaths(dataDir: string, id: string): { plain: string; compressed: string; orphaned: string; facts: string } {
   const plain = join(dataDir, 'runs', `${id}.ndjson`);
   const compressed = `${plain}.br`;
-  return { plain, compressed, orphaned: `${compressed}.orphaned` };
+  // The transcript-facts sidecar (transcript-facts.ts) is a cache of the transcript and goes with it.
+  return { plain, compressed, orphaned: `${compressed}.orphaned`, facts: join(dataDir, 'runs', `${id}.facts.json`) };
 }
 
 export function hasPlainHistory(dataDir: string, id: string): boolean {
@@ -74,6 +76,39 @@ export function readHistoryText(dataDir: string, id: string): string | undefined
     return undefined;
   }
   return decoded.toString('utf8');
+}
+
+/** Which form exists, without reading either: the plain byte length, or the archive's stat. */
+export function historyStat(dataDir: string, id: string): { plainSize?: number; archive?: Stats } {
+  const { plain, compressed } = historyPaths(dataDir, id);
+  try {
+    return { plainSize: statSync(plain).size };
+  } catch (error) {
+    if (!isNotFound(error)) throw error;
+  }
+  try {
+    return { archive: statSync(compressed) };
+  } catch (error) {
+    if (isNotFound(error)) return {};
+    throw error;
+  }
+}
+
+/** Bytes `[from, to)` of the plain transcript; short only if it ends before `to`. */
+export function readPlainHistoryRange(dataDir: string, id: string, from: number, to: number): Buffer {
+  const fd = openSync(historyPaths(dataDir, id).plain, 'r');
+  try {
+    const buffer = Buffer.alloc(Math.max(0, to - from));
+    let offset = 0;
+    while (offset < buffer.length) {
+      const count = readSync(fd, buffer, offset, buffer.length - offset, from + offset);
+      if (count === 0) break;
+      offset += count;
+    }
+    return buffer.subarray(0, offset);
+  } finally {
+    closeSync(fd);
+  }
 }
 
 /** Random-access transcript bytes. `read` is short only at EOF. */
@@ -222,9 +257,10 @@ export function restoreHistory(dataDir: string, id: string): void {
 export function removeHistory(dataDir: string, id: string): void {
   const dir = join(dataDir, 'runs');
   const prefix = `${id}.ndjson`;
+  const facts = `${id}.facts.json`;
   try {
     for (const name of readdirSync(dir)) {
-      if (name === prefix || name.startsWith(`${prefix}.`)) rmSync(join(dir, name), { force: true });
+      if (name === prefix || name.startsWith(`${prefix}.`) || name === facts || name.startsWith(`${facts}.`)) rmSync(join(dir, name), { force: true });
     }
   } catch (error) {
     if (!isNotFound(error)) throw error;
