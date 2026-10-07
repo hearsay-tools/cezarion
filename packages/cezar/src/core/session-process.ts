@@ -10,21 +10,23 @@ import { KILL_GRACE_MS } from './runner-runtime.ts';
  * Signalling a group whose leader already exited is safe: Linux frees a pid number only when no
  * task uses it as a pid, pgid or sid (`__change_pid` → `free_pid`), and XNU skips a candidate pid
  * while `pghash_exists_locked(pid)` (`forkproc`). While any member lives no new process can get
- * the number; once the group is empty `kill(-pgid)` answers ESRCH. An entry is dropped the first
- * time its group is seen empty, so a number freed and reused by a new `setsid` leader is not
- * signalled after that.
+ * the number; once the group is empty `kill(-pgid)` answers ESRCH. After the leader exits, its
+ * entry is watched every `GROUP_WATCH_MS` and dropped the first time the group is seen empty, or
+ * a live process holds the leader's pid: ours was reaped, so that process is a new incarnation
+ * and the number was freed. A freed number reused by a new `setsid` leader is never signalled.
  *
  * win32 has no groups: the leader stays attached to cezar's console and `taskkill /T /F` ends
  * its tree by parent pid at call time.
  */
 
-type Leader = { child: ChildProcess; signalledAt?: number };
+type Leader = { child: ChildProcess; signalledAt?: number; watch?: NodeJS.Timeout };
 /** Grouped leaders this process spawned, keyed by pgid (= the leader's pid). */
 const leaders = new Map<number, Leader>();
 /** Every child `spawnSessionLeader` returned, on any platform: win32's taskkill is for these only. */
 const spawned = new WeakSet<ChildProcess>();
 
 const exited = (child: ChildProcess) => child.exitCode !== null || child.signalCode !== null;
+const GROUP_WATCH_MS = 1_000;
 
 // include/linux/sched.h: set at the top of do_exit(), before exit_files() closes the sockets.
 const PF_EXITING = 0x4;
@@ -64,8 +66,21 @@ export function signalProcessGroup(pgid: number, signal: NodeJS.Signals): void {
   try { process.kill(-pgid, signal); } catch { /* ESRCH: empty; EPERM: no member is ours */ }
 }
 
+/** An exited leader's entry that no longer names our group: the group emptied, or its number was
+ * freed and a new process holds the leader's pid. */
+function stale(pgid: number, leader: Leader): boolean {
+  if (!exited(leader.child)) return false;
+  if (!processGroupAlive(pgid)) return true;
+  try { process.kill(pgid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code === 'EPERM'; }
+}
+
+function drop(pgid: number, leader: Leader): void {
+  if (leader.watch) clearInterval(leader.watch);
+  if (leaders.get(pgid) === leader) leaders.delete(pgid);
+}
+
 function prune(): void {
-  for (const [pgid, leader] of leaders) if (exited(leader.child) && !processGroupAlive(pgid)) leaders.delete(pgid);
+  for (const [pgid, leader] of leaders) if (stale(pgid, leader)) drop(pgid, leader);
 }
 
 /** Spawn an agent session leader. Only a real detached `ChildProcess` with a pid is registered,
@@ -87,10 +102,12 @@ export function spawnSessionLeader(
   // SIGTERM cezar sent outlives it, so the follow-up SIGKILL for the group lives here.
   child.once('exit', () => {
     if (leaders.get(pid) !== leader) return;
-    if (!processGroupAlive(pid)) { leaders.delete(pid); return; }
+    if (stale(pid, leader)) { drop(pid, leader); return; }
+    leader.watch = setInterval(() => { if (stale(pid, leader)) drop(pid, leader); }, GROUP_WATCH_MS);
+    leader.watch.unref?.();
     if (leader.signalledAt === undefined) return;
     const timer = setTimeout(() => {
-      if (leaders.get(pid) === leader && processGroupAlive(pid)) signalProcessGroup(pid, 'SIGKILL');
+      if (leaders.get(pid) === leader && !stale(pid, leader)) signalProcessGroup(pid, 'SIGKILL');
     }, Math.max(0, leader.signalledAt + KILL_GRACE_MS - Date.now()));
     timer.unref?.();
   });
@@ -126,8 +143,8 @@ export function sessionGroupOf(pid: number): number | undefined {
 
 /** cezar's own SIGINT/SIGTERM, passed to every agent group that still has members. */
 export function forwardToSessionGroups(signal: NodeJS.Signals): void {
-  for (const pgid of [...leaders.keys()]) {
-    if (processGroupAlive(pgid)) signalProcessGroup(pgid, signal);
-    else leaders.delete(pgid);
+  for (const [pgid, leader] of [...leaders]) {
+    if (stale(pgid, leader)) drop(pgid, leader);
+    else if (processGroupAlive(pgid)) signalProcessGroup(pgid, signal);
   }
 }

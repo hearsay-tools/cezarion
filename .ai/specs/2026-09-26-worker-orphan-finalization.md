@@ -327,9 +327,10 @@ remain indefinitely.** An unreadable cwd never withholds that proof (hearsay-too
   `/dev/tty`, such as an ssh or gpg prompt, fails instead of prompting on cezar's terminal.
 - Closing the terminal does not signal agents: cezar handles no SIGHUP. SIGKILL or a crash of
   cezar leaves agents running, as before; destroy's reaping covers a worker's.
-- A group number freed and reused by a new `setsid` leader between cezar's last check and its
-  signal would be signalled. cezar drops a group the first time it sees it empty, which keeps
-  that window to one probe.
+- After a leader exits, cezar checks its group every second and drops it once it is empty or a
+  live process holds the leader's pid, so a freed number reused by a new `setsid` leader is never
+  signalled. The one case left needs all of this within that second: our group empties, the
+  number is reused by a new leader, and that leader exits while its own members live.
 - The scan sees only same-user processes in this PID namespace. A process in another
   container that holds the worktree is invisible to it.
 
