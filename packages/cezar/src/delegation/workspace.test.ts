@@ -299,6 +299,12 @@ describe('readOwnedDiff', () => {
   });
 });
 
+// The timeout of a test that runs a dry-run task to completion through finished().
+// The two such tests take 2.4-2.7 s alone and 2.7-2.9 s in an idle full `npm test`
+// (measured 2026-10-07); a loaded full suite pushed them past vitest's 5 s default
+// (hearsay-tools/cezarion#873). Sized to cover the fixture plus finished()'s 10 s wait.
+const RUN_SETTLE_TEST_MS = 20_000;
+
 async function finished(store: RunStore, id: string) {
   await vi.waitFor(() => {
     expect(['done', 'review', 'failed', 'cancelled']).toContain(store.getRun(id)?.status);
@@ -331,7 +337,7 @@ describe('RunManager.enqueueOwnedRun', () => {
     expect(git(parentPath, 'rev-parse', 'HEAD')).toBe(second);
     expect(await readFile(join(parentPath, 'tracked.txt'), 'utf8')).toBe('dirty');
     expect(await readFile(join(workspace.path, 'tracked.txt'), 'utf8')).toBe('committed');
-  });
+  }, RUN_SETTLE_TEST_MS);
 
   it.each(['collision', 'non-git', 'missing-resource', 'invalid-marker'])('fails before any agent starts on %s with no in-place fallback', async (failure) => {
     vi.stubEnv('CEZ_DRY_RUN', '1');
@@ -399,7 +405,7 @@ describe('owned workspace continuation and queued recovery', () => {
     await finished(recoveredStore, run.id);
     expect(['done', 'review']).toContain(recoveredStore.getRun(run.id)?.status);
     expect(recoveredStore.getRun(run.id)).toMatchObject({ worktreePath: workspace.path, baseBranch: second, systemPrompt: 'Recovered inherited instruction', startedAt: '2022-01-01T00:00:00.000Z' });
-  });
+  }, RUN_SETTLE_TEST_MS);
 });
 
 

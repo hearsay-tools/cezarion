@@ -8,6 +8,12 @@ import { handoffPath } from '../handoff.ts';
 import { MAX_AUTO_CONTINUES } from '../workflows/run.ts';
 import { readPersistedRuns } from '../runs/run-store.testkit.ts';
 
+// The settle budget for the row cells below. OpenCode's A5, A11 and A12 cells run
+// MAX_AUTO_CONTINUES turns and take 4.6-4.8 s alone and 5.4-5.9 s in an idle full
+// `npm test` (measured 2026-10-07); a loaded full suite pushed them past waitFor's
+// 10 s default (hearsay-tools/cezarion#873). It stays under the cell's 30 s timeout.
+const ROW_SETTLE_MS = 25_000;
+
 const nudges = (events: readonly Record<string, unknown>[]) => events.filter(e => e.type === 'note' && String(e.message).includes('continuing without pausing'));
 
 describe('autonomous turn-end parity — #426', () => {
@@ -97,9 +103,9 @@ describe('autonomous turn-end parity — #426', () => {
           const handoff = handoffPath(join(repoRoot, '.ai/cezar'), runId);
           if (mode === 'continuation') {
             manager.enqueueOwnedRun(runId);
-            await waitFor(() => store.getRun(runId)?.status === 'waiting');
+            await waitFor(() => store.getRun(runId)?.status === 'waiting', ROW_SETTLE_MS);
             manager.finish(runId);
-            await waitFor(() => !manager.isActive(runId));
+            await waitFor(() => !manager.isActive(runId), ROW_SETTLE_MS);
             writeFileSync(handoff, '# Continuation evidence\n\n## Progress log\n\n## Resume notes\n');
           }
           store.updateRun(runId, { autonomous: row.id !== 'A6' });
@@ -113,7 +119,7 @@ describe('autonomous turn-end parity — #426', () => {
           else manager.enqueueOwnedRun(runId);
           // Assert on the first stable outcome, so a missing nudge fails directly as
           // waiting rather than burning the whole timeout waiting for completion.
-          await waitFor(() => store.getRun(runId)?.status === 'waiting' || ['done', 'review', 'failed'].includes(store.getRun(runId)?.status ?? '') || store.getRun(runId)?.activity === 'monitoring');
+          await waitFor(() => store.getRun(runId)?.status === 'waiting' || ['done', 'review', 'failed'].includes(store.getRun(runId)?.status ?? '') || store.getRun(runId)?.activity === 'monitoring', ROW_SETTLE_MS);
           // A native ask parks mid-turn. Let that wire advance if it incorrectly
           // receives a synthetic answer; no manager-injected normalized event.
           if (row.id === 'A9') await new Promise(resolve => setTimeout(resolve, 150));
