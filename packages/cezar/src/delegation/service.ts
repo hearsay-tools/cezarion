@@ -214,7 +214,9 @@ export class DelegationService {
       const dataDir = join(project.root, '.ai/cezar');
       const unchanged = !!seen && holdersStillHold({ store: project.store, dataDir, workerId, holders: seen.holders }) &&
         seen.key === observeDestroy({ store: project.store, dataDir, commonDir: await this.commonDir(project), workerId });
-      if (!unchanged) await this.destroyAttempt(project, workerId, check, 'scheduled').catch(() => undefined);
+      // One automatic full attempt at a time per project: attempts that coincide (every pending destroy after a
+      // restart) would otherwise contend for the worktree mutation lock and come back lock-busy, never skipped.
+      if (!unchanged) await this.serialized(`destroy-retries:${project.id}`, () => this.destroyAttempt(project, workerId, check, 'scheduled')).catch(() => undefined);
       if (this.projects.get(project.id) !== project) return;
       const current = project.store.getRun(workerId);
       if (current?.delegation?.role !== 'worker' || !current.delegation.destroy || current.delegation.destroy.phase === 'complete') return;
@@ -663,8 +665,11 @@ export class DelegationService {
     assertAttached();
     worker = check();
     if (worker.delegation?.role !== 'worker') throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
-    // What this attempt starts from (hearsay-tools/cezarion#879): a later tick that would see the same skips its work.
-    const key = observeDestroy({ store: project.store, dataDir: join(project.root, '.ai/cezar'), commonDir, workerId });
+    // What this attempt decided on (hearsay-tools/cezarion#879): a later tick that would see the same skips its
+    // work. Retaken where the attempt decides (after termination, at each holder proof), so its own writes up
+    // to there (stopping the worker, the removal's checkpoint) are not a change, and anything later is.
+    const observe = () => observeDestroy({ store: project.store, dataDir: join(project.root, '.ai/cezar'), commonDir, workerId });
+    let key = observe();
     const workspace = worker.delegation.workspace;
     const requestedAt = worker.delegation.destroy?.requestedAt ?? new Date().toISOString();
     const resources = (worker.delegation.destroy?.remaining ?? ['worktree', 'branch']).filter((resource): resource is 'worktree' | 'branch' => resource !== 'process');
@@ -689,6 +694,7 @@ export class DelegationService {
       let result: WorkerDestroyResult;
       const terminated = await project.manager.awaitRunTermination(workerId, this.terminationTimeoutMs, { reapOrphans: true });
       assertAttached();
+      key = observe();
       if (!terminated) {
         // #469: name what blocks a crashed generation; other causes keep the generic message.
         const taken = project.manager.takeWorkerTerminationBlocker(workerId);
@@ -728,6 +734,7 @@ export class DelegationService {
       };
       const assertSafe = () => {
         assertCurrent();
+        key = observe();
         const holders = project.store.workerResourceHolders(workerId, proof.generation, workspace.resourceId);
         if (holders === 'safe') return;
         throw holders.length ? new WorkspaceHeldError(holders) : new Error('Worker resources may still be held; cleanup will retry');

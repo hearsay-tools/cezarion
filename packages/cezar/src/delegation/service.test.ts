@@ -660,22 +660,43 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
     cadence();
     const { workerId } = await settled();
     expect(await f.service.destroy(f.caller, { workerId })).toMatchObject({ state: 'incomplete', remaining: ['worktree', 'branch'] });
-    // The fixture's spawned worker is still in the manager's queue, so that attempt cancelled it
-    // (review -> cancelled): one real change, which the next tick sees and attempts once.
+    // That attempt stopped the fixture's queued worker and wrote the removal's checkpoint before it met
+    // the holder; neither is a change, because the key is taken where the attempt decides.
     const reads = vi.spyOn(f.store, 'readEventsAsync');
-    await vi.waitFor(() => expect(destroyOf(workerId)?.retry?.attempts).toBeGreaterThanOrEqual(1), { timeout: 5_000 });
-    expect(reads.mock.calls.length).toBeLessThanOrEqual(1);
-    reads.mockClear();
     const scans = listings();
     const results = dirname(f.store.workerResultSnapshotPath(f.parent.id, workerId, randomUUID()));
     const snapshots = readdirSync(results).sort();
-    await sleep(400);
-    // After it, no transcript read, no /proc scan, no snapshot written: nothing it could see changed.
+    await vi.waitFor(() => expect(destroyOf(workerId)?.retry?.attempts).toBeGreaterThanOrEqual(4), { timeout: 5_000 });
+    // No transcript read, no /proc scan, no snapshot written: nothing it could see changed.
     expect(reads).not.toHaveBeenCalled();
     expect(listings()).toBe(scans);
     expect(readdirSync(results).sort()).toEqual(snapshots);
-    await vi.waitFor(() => expect(destroyOf(workerId)?.retry?.attempts).toBeGreaterThanOrEqual(4), { timeout: 5_000 });
     expect(destroyOf(workerId)).toMatchObject({ phase: 'incomplete', remaining: ['worktree', 'branch'] });
+  });
+
+  it.runIf(linux)("a project's automatic full attempts run one at a time", async () => {
+    const a = await settled(), b = await settled();
+    for (const run of [a, b]) {
+      const current = f.store.getRun(run.workerId)!;
+      if (current.delegation?.role !== 'worker') throw Error('worker');
+      f.store.commitDelegation([{ id: run.workerId, delegation: { ...current.delegation, destroy: { requestedAt: new Date().toISOString(), phase: 'incomplete', remaining: ['worktree', 'branch'] } } }]);
+    }
+    // After a restart nothing has been observed yet, so both first ticks attempt in full, at the same moment.
+    let inFlight = 0, most = 0;
+    const termination = f.manager.awaitRunTermination.bind(f.manager);
+    vi.spyOn(f.manager, 'awaitRunTermination').mockImplementation(async (...args) => {
+      most = Math.max(most, ++inFlight);
+      try { await sleep(150); return await termination(...args); } finally { inFlight--; }
+    });
+    const restarted = new DelegationService();
+    Object.assign(restarted, { destroyBackoff: { fastMs: 40, fastCount: 3, capMs: 300 }, destroyAttentionAttempts: 5 });
+    const detach = restarted.registerProject({ id: 'project', root: f.root, store: f.store, manager: f.manager });
+    try {
+      restarted.armDestroyRetries('project');
+      await vi.waitFor(() => { for (const { workerId } of [a, b]) expect(destroyOf(workerId)?.retry?.attempts).toBeGreaterThanOrEqual(1); }, { timeout: 10_000 });
+      expect(most).toBe(1);
+      for (const { workerId } of [a, b]) expect(destroyOf(workerId)?.error).not.toBe(WORKTREE_LOCK_BUSY_ERROR);
+    } finally { detach(); }
   });
 
   it.runIf(linux)('asks for attention at the threshold, then waits at least the cap', async () => {
