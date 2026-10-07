@@ -26,20 +26,30 @@ const spawned = new WeakSet<ChildProcess>();
 
 const exited = (child: ChildProcess) => child.exitCode !== null || child.signalCode !== null;
 
-/** Exited, though Node may not have reaped it yet: a zombie still leads its group. OpenCode's SSE
- * closes when the crashed server exits, before Node sees the exit, and its teardown signals then. */
+// include/linux/sched.h: set at the top of do_exit(), before exit_files() closes the sockets.
+const PF_EXITING = 0x4;
+
+/** A `/proc/<pid>/stat` line of a task that is exiting or already a zombie. Field 9 (`flags`)
+ * follows the last `)`, like every field after `comm`. An unparsable line reads as alive. */
+export function procStatExited(stat: string): boolean {
+  const fields = stat.slice(stat.lastIndexOf(')') + 1).trim().split(/\s+/);
+  if (!stat.includes(')') || fields.length < 7 || !/^\d+$/.test(fields[6]!)) return false;
+  return fields[0] === 'Z' || (Number(fields[6]) & PF_EXITING) !== 0;
+}
+
+/** Exiting, exited, or a zombie Node has not reaped yet. A crashed leader closes its sockets
+ * inside do_exit(), before it is a zombie: OpenCode sees its prompt's ACK drop and stops the
+ * session in that window, so a zombie check alone races (harness row S19). */
 function leaderExited(child: ChildProcess): boolean {
   if (exited(child)) return true;
   const pid = child.pid!;
   if (process.platform === 'linux') {
-    try {
-      const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
-      return stat.slice(stat.lastIndexOf(')') + 1).trim()[0] === 'Z';
-    } catch { return true; }
+    try { return procStatExited(readFileSync(`/proc/${pid}/stat`, 'utf8')); } catch { return true; }
   }
   if (process.platform !== 'darwin') return false;
+  // `ps` STAT: Z is a zombie, E a process trying to exit.
   const ps = spawnSync('ps', ['-o', 'stat=', '-p', String(pid)], { encoding: 'utf8', timeout: 2_000 });
-  return ps.status === 0 ? ps.stdout.trim().startsWith('Z') : ps.status === 1;
+  return ps.status === 0 ? /^Z|E/.test(ps.stdout.trim()) : ps.status === 1;
 }
 // -1 and 0 address every process and our own group: never a session.
 const groupId = (pgid: number) => Number.isSafeInteger(pgid) && pgid > 1;

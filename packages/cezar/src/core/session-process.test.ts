@@ -9,7 +9,7 @@ vi.mock('./runner-runtime.ts', async (original) => ({
   KILL_GRACE_MS: 100,
 }));
 
-import { forwardToSessionGroups, sessionGroupOf, signalSession, spawnSessionLeader } from './session-process.ts';
+import { forwardToSessionGroups, procStatExited, sessionGroupOf, signalSession, spawnSessionLeader } from './session-process.ts';
 
 /** A zombie has exited; only its reaper's wait remains. */
 function alive(pid: number): boolean {
@@ -31,6 +31,22 @@ const m = spawn(process.execPath, ['-e', ${JSON.stringify(member)}], { stdio: 'i
 require('fs').writeFileSync('member.pid', String(m.pid));
 ${opts.exit ? 'm.unref(); process.exit(0);' : "console.log('ready'); setTimeout(()=>{},20000);"}`;
 }
+
+// A crashed leader closes its sockets inside do_exit(), before it is a zombie: the runner can
+// see the connection drop and stop the session in that window (OpenCode, harness row S19).
+describe('procStatExited (hearsay-tools/cezarion#890)', () => {
+  const stat = (state: string, flags: number) => `1234 (node (x) y) ${state} 1 1234 1234 0 -1 ${flags} 0 0 0 0 0 0 0 0 20 0 1 0 5555 0 0`;
+  it('reads a zombie, or a task already in do_exit (PF_EXITING), as exited', () => {
+    expect(procStatExited(stat('Z', 0x400100))).toBe(true);
+    expect(procStatExited(stat('S', 0x400104))).toBe(true);
+    expect(procStatExited(stat('D', 0x404044))).toBe(true);
+  });
+  it('reads a running or sleeping task as alive, and an unparsable line as alive', () => {
+    expect(procStatExited(stat('S', 0x400100))).toBe(false);
+    expect(procStatExited(stat('R', 0x400040))).toBe(false);
+    expect(procStatExited('1234 (node) S')).toBe(false);
+  });
+});
 
 describe.skipIf(process.platform === 'win32')('session process groups (hearsay-tools/cezarion#890)', () => {
   const pids: number[] = [];
