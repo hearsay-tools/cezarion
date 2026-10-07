@@ -114,6 +114,7 @@ import {
   validateLiveCursor,
 } from '../runs/event-history.ts';
 import { readRunIndexFromDisk, searchRunIndexFromDisk } from '../runs/run-index.ts';
+import { searchTokens } from '../runs/run-search.ts';
 import { clientRequestHash } from '../runs/client-request.ts';
 import { ColdRepoHandles } from './cold-repo-handles.ts';
 import { isV2WireEventType } from '../runs/ui-event-sink.ts';
@@ -6303,8 +6304,16 @@ export function createApp(deps: ServerDeps) {
       const { q, limit = RUNS_SEARCH_PER_PROJECT_MAX } = c.req.valid('query');
       const runs: RunIndexEntry[] = [];
       const truncated: string[] = [];
+      const tokens = searchTokens(q);
       for (const { project, store: owned, dataDir, handle } of await projectRunSources()) {
-        const found = readProjectRuns(project.id, () => owned ? owned.searchRunSummaries(q, limit) : searchRunIndexFromDisk(dataDir, q, { handle, limit }));
+        // The palette filters its rows by project name too, so a token naming this project is
+        // already satisfied here: `shop database` searches shop for `database` (#864 review). A
+        // query that only names the project adds nothing past the index's rows for it.
+        const name = project.name.toLowerCase();
+        const rest = tokens.filter((token) => !name.includes(token));
+        if (rest.length === 0) continue;
+        const scoped = rest.join(' ');
+        const found = readProjectRuns(project.id, () => owned ? owned.searchRunSummaries(scoped, limit) : searchRunIndexFromDisk(dataDir, scoped, { handle, limit }));
         if (found.truncated) truncated.push(project.id);
         for (const run of found.runs) runs.push({ projectId: project.id, ...withLiveUsage(run) });
       }

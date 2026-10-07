@@ -645,6 +645,16 @@ describe('workspace runs index API', () => {
       expect(index.runs.map((run) => run.projectId)).toEqual([other.id]);
     });
 
+    it('treats a token that names a project as satisfied in that project, as the palette does', async () => {
+      await registerProject(repoRoot);
+      const other = await registerProject(otherRoot);
+      seedColdProject(otherRoot, [storedRun({ id: 'cold-db', title: 'Database migration' })]);
+      const projectToken = other.name.toLowerCase().split(/[^a-z0-9]+/).filter((part) => part.length >= 3).pop()!;
+      const { status, body } = await search(`?q=${encodeURIComponent(`${projectToken} database`)}`);
+      expect(status).toBe(200);
+      expect(ids(body)).toEqual(['cold-db']);
+    });
+
     it('never builds a project context', async () => {
       await registerProject(repoRoot);
       const other = await registerProject(otherRoot);
