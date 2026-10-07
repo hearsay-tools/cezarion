@@ -347,6 +347,27 @@ export const runnerModelsSchema = z.object({
 });
 export type RunnerModels = z.infer<typeof runnerModelsSchema>;
 
+/**
+ * `.ai/cezar/config.json` → `worktreeSetup` (#917, spec `.ai/specs/2026-10-07-worktree-setup.md`):
+ * the commands that prepare a new task or worker worktree before the agent's first turn. Strict, so
+ * a typo such as `command` is reported instead of silently running nothing. The service parses it
+ * apart from the rest of `config.json`, so an invalid value never resets the other keys.
+ */
+export const WORKTREE_SETUP_MAX_COMMANDS = 20;
+export const WORKTREE_SETUP_MAX_COMMAND_LENGTH = 4_000;
+export const WORKTREE_SETUP_DEFAULT_TIMEOUT_SECONDS = 900;
+export const WORKTREE_SETUP_MAX_TIMEOUT_SECONDS = 7_200;
+export const worktreeSetupConfigSchema = z
+  .object({
+    commands: z
+      .array(z.string().trim().min(1).max(WORKTREE_SETUP_MAX_COMMAND_LENGTH))
+      .max(WORKTREE_SETUP_MAX_COMMANDS),
+    /** Per command. Absent = `WORKTREE_SETUP_DEFAULT_TIMEOUT_SECONDS`. */
+    timeoutSeconds: z.number().int().min(1).max(WORKTREE_SETUP_MAX_TIMEOUT_SECONDS).optional(),
+  })
+  .strict();
+export type WorktreeSetupConfig = z.infer<typeof worktreeSetupConfigSchema>;
+
 /** `GET /api/v1/config` — every Settings → Agents knob in one read. */
 export const configResponseSchema = z.object({
   baseBranch: z.string().nullable(),
