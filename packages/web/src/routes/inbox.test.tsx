@@ -252,10 +252,21 @@ describe('the inbox card list', () => {
 
     await waitFor(() => expect(cards()).toHaveLength(2))
     const card = cards()[1]!
-    expect(card.querySelector('[data-slot="todo-source"]')).toBeNull()
-    expect(card.querySelector('[data-slot="todo-source-gone"]')?.textContent).toBe(
+    // Absent from the run list is not proof (#864): the label waits for the run's own 404.
+    await waitFor(() => expect(card.querySelector('[data-slot="todo-source-gone"]')?.textContent).toBe(
       'source task deleted',
-    )
+    ))
+    expect(card.querySelector('[data-slot="todo-source"]')).toBeNull()
+  })
+
+  it('links a source task older than the run list\'s archived window, which still exists (#864)', async () => {
+    stubFetch({ 'GET /api/v1/runs/run-gone': () => jsonResponse({ ...RUN_1, id: 'run-gone', archived: true }) })
+    renderInbox()
+
+    await waitFor(() => expect(cards()).toHaveLength(2))
+    const card = cards()[1]!
+    await waitFor(() => expect(card.querySelector('[data-slot="todo-source"]')?.getAttribute('href')).toBe('/tasks/run-gone'))
+    expect(card.querySelector('[data-slot="todo-source-gone"]')).toBeNull()
   })
 
   it('uses the design’s text-only card heading and retains its actionability label', async () => {
