@@ -3,8 +3,9 @@
  * search and the cold reader's search all ask it, so a run found in one place is found in all.
  *
  * Every whitespace-separated token must match. A token matches a substring of the run's text
- * fields, or — with a leading `#` stripped — EXACTLY one of its reference numbers: `86` finding
- * #864 by number would turn every short query into noise.
+ * fields. A number — with a leading `#` stripped — matches the prose fields as a substring, the
+ * id as a prefix, and the reference numbers EXACTLY, never digits inside a URL: `86` finding
+ * #864 would turn every short query into noise.
  *
  * Pure and dependency-free on purpose: the cold reader imports it, and the cold reader must stay
  * cheap to load.
@@ -55,16 +56,22 @@ function referenceNumbers(run: RunSummary): Set<string> {
 export function matchesRunQuery(run: RunSummary, query: string): boolean {
   const tokens = searchTokens(query);
   if (tokens.length === 0) return false;
-  const text = [
-    run.title, run.titleSummary, run.id, run.branch, run.workflow, run.workflowLabel,
-    run.pullRequestUrl, run.referencedPullRequestUrl, run.referencedIssueUrl,
-  ].filter((field): field is string => typeof field === 'string').map((field) => field.toLowerCase());
+  // The fields a person reads. A number typed is a reference or part of a title, never a digit
+  // run inside a URL or a uuid: `86` must not find #864 through `…/issues/864` (#864 review).
+  const prose = [run.title, run.titleSummary, run.branch, run.workflow, run.workflowLabel]
+    .filter((field): field is string => typeof field === 'string').map((field) => field.toLowerCase());
+  const urls = [run.pullRequestUrl, run.referencedPullRequestUrl, run.referencedIssueUrl]
+    .filter((field): field is string => typeof field === 'string').map((field) => field.toLowerCase());
+  const id = run.id.toLowerCase();
   let numbers: Set<string> | undefined;
   return tokens.every((token) => {
-    if (text.some((field) => field.includes(token))) return true;
+    if (prose.some((field) => field.includes(token))) return true;
     const bare = token.replace(/^#/, '');
-    if (!/^\d+$/.test(bare)) return false;
-    numbers ??= referenceNumbers(run);
-    return numbers.has(String(Number(bare)));
+    if (/^\d+$/.test(bare)) {
+      numbers ??= referenceNumbers(run);
+      // A pasted id starts with digits as often as letters, so a number may still be its prefix.
+      return numbers.has(String(Number(bare))) || id.startsWith(bare);
+    }
+    return id.includes(token) || urls.some((field) => field.includes(token));
   });
 }

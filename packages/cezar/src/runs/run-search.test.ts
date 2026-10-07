@@ -43,6 +43,15 @@ describe('matchesRunQuery', () => {
     expect(matchesRunQuery(summary({ issueNumber: 864, title: 'Ship 86 fixes' }), '86')).toBe(true);
   });
 
+  it('never matches a number inside a reference URL or the middle of an id', () => {
+    const run = summary({ id: 'ab864cd0-0000-4000-8000-000000000000', referencedIssueUrl: 'https://github.com/o/r/issues/864', pullRequestUrl: 'https://github.com/o/r/pull/8641' });
+    expect(matchesRunQuery(run, '86')).toBe(false);
+    expect(matchesRunQuery(run, '#86')).toBe(false);
+    expect(matchesRunQuery(run, '864')).toBe(true);
+    expect(matchesRunQuery(summary({ id: '86400000-0000-4000-8000-000000000000' }), '864')).toBe(true);
+    expect(matchesRunQuery(summary({ branch: 'fix/864-lists' }), '864')).toBe(true);
+  });
+
   it('matches id prefix, branch, workflow label and title summary', () => {
     expect(matchesRunQuery(summary(), '998ad06a')).toBe(true);
     expect(matchesRunQuery(summary({ branch: 'cez/aee1234c' }), 'cez/aee1')).toBe(true);
