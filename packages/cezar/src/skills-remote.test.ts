@@ -5,11 +5,13 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   __holdFetchForTests,
+  __pauseAfterCachedListForTests,
   bareDirFor,
   getTeamSkillsCached,
   isPinnedSha,
   lastFetchStampPath,
   readLastFetchAt,
+  refreshTeamSkills,
   shouldPassiveFetch,
   shouldRecordFetchFailure,
   waitForCachedTeamSkills,
@@ -160,6 +162,30 @@ describe('cached team-skill list before the passive fetch (#859)', () => {
     expect(names(await waitForTeamSkills(repoRoot))).toEqual(['alpha', 'beta']);
     expect(names(getTeamSkillsCached(repoRoot))).toEqual(['alpha', 'beta']);
     expect(names(await waitForCachedTeamSkills(repoRoot))).toEqual(['alpha']);
+  });
+
+  it('a passive load that listed the old clone never overwrites a concurrent refresh', async () => {
+    vi.stubEnv('HOME', scratch('cez-team-home-'));
+    const repoRoot = scratch('cez-team-root-');
+    const repo = `org-${randomUUID().slice(0, 8)}/skills`;
+    writeSkillsReposConfig(repoRoot, [repo]);
+    const clone = await seedTeamSkillsClone(repo, { alpha: 'ALPHA-BODY' });
+    dirs.push(clone.sourceDir);
+    let resume!: () => void;
+    const parked = __pauseAfterCachedListForTests(repoRoot, new Promise<void>((resolve) => { resume = resolve; }));
+    releases.push(resume);
+
+    // The passive load snapshots [alpha], then a refresh fetches beta, stamps
+    // the clone fresh and publishes first; the passive load must not undo it.
+    const passive = waitForTeamSkills(repoRoot);
+    await parked;
+    await clone.addSkill('beta', 'BETA-BODY');
+    expect(names(await refreshTeamSkills(repoRoot))).toEqual(['alpha', 'beta']);
+    resume();
+
+    const passiveList = await passive;
+    expect(names(getTeamSkillsCached(repoRoot))).toEqual(['alpha', 'beta']);
+    expect(names(passiveList)).toEqual(['alpha', 'beta']);
   });
 
   it('resolves empty without waiting on the fetch when no clone exists', async () => {

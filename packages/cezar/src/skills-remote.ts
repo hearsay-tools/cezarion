@@ -508,6 +508,16 @@ export function __holdFetchForTests(repo: string, until: Promise<void>): void {
   fetchInFlight.set(repo, held);
 }
 
+const cachedListPauses = new Map<string, { reached: () => void; until: Promise<void> }>();
+
+/**
+ * Test hook: park this project's next passive load right after its list-only
+ * pass until `until` settles (#859). Resolves once the load has parked there.
+ */
+export function __pauseAfterCachedListForTests(repoRoot: string, until: Promise<void>): Promise<void> {
+  return new Promise((reached) => { cachedListPauses.set(repoRoot, { reached, until }); });
+}
+
 // Both maps are keyed by `repoRoot` (multi-project workspace, step 2.6): each
 // project resolves its own `.ai/cezar/config.json` → `skillsRepos`, so one
 // project's team-skill list must never be served under another project's scope.
@@ -632,6 +642,12 @@ async function loadTeamSkills(
   if (!refresh) {
     const generation = postFetchListsByRoot.get(repoRoot) ?? 0;
     cached = await Promise.all(config.skillsRepos.map((src) => listRemoteSkills(src).catch(() => undefined)));
+    const pause = cachedListPauses.get(repoRoot);
+    if (pause) {
+      cachedListPauses.delete(repoRoot);
+      pause.reached();
+      await pause.until;
+    }
     const listed = mergeSourceLists(cached);
     if ((postFetchListsByRoot.get(repoRoot) ?? 0) === generation) teamSkillsByRoot.set(repoRoot, listed);
     onCachedList?.(listed);
