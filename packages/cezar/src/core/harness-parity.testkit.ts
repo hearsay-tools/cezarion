@@ -69,12 +69,14 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  * | `silent-tail-late-reply` | the same first turn; a final-message nudge is ACKed, then replies after the bound |
  * | `silent-tail-late-turn-start` | the same first turn; after the bound, native turn-start holds before any content |
  * | `silent-tail-slow-done` | the same first turn; a nudge reply starts before the bound and ends after it |
+ * | `serve-start-exit` | the backend server's first start exits before listening; the next start answers `baseline` |
  */
 export const SCENARIOS = [
   'auto-resumed',
   'turn-messages',
   'skill-warning',
   'missing-binary',
+  'serve-start-exit',
   'crash-stderr-pre-ack',
   'crash-stderr-held-pipe',
   'shutdown-stderr',
@@ -349,6 +351,8 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'skill-warning': 'mock:skill-warning mock:done',
       'turn-messages': 'mock:turn-messages',
       'missing-binary': BASELINE_PROMPT,
+      // The failing start is set by driveSeam's env (no prompt exists before listening).
+      'serve-start-exit': BASELINE_PROMPT,
       autonomous: 'mock:autonomous',
       'autonomous-cap': 'mock:autonomous-cap',
       'autonomous-ask-cap': 'mock:autonomous-ask-cap',
@@ -545,6 +549,10 @@ export interface ParityExemption {
  * is the runner, not this table.
  */
 export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
+  ...(['claude', 'codex', 'pi', 'cursor', 'omp'] as const).map(backend => ({
+    criterion: 'S25', backend, kind: 'scenario-unconstructible' as const,
+    reason: 'This runner speaks its native wire over the spawned process\'s stdio, so there is no listen phase between spawn and session: a start that exits before listening cannot be constructed, and an early exit is the crash path (S15–S18). hearsay-tools/cezarion#872 retries only `opencode serve`; other runners\' process starts are out of scope.',
+  })),
   ...(['claude', 'codex', 'opencode', 'pi', 'cursor'] as const).map(backend => ({
     criterion: 'S21', backend, kind: 'scenario-unconstructible' as const,
     reason: 'This native wire has no OMP get_state.messageCount response for an implicit autoResume. Fresh/start and explicit resume remain covered by S1/S3/S14 and spec-support rows.',
@@ -743,6 +751,9 @@ export async function driveSeam(
         // touching a handoff file it does not own.
         env: { CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '', CEZ_MOCK_ARGS_FILE: '',
           ...(scenario === 'auto-resumed' ? { CEZ_MOCK_OMP_AUTO_RESUME: '1' } : {}),
+          ...(scenario === 'serve-start-exit' ? {
+            CEZ_MOCK_OPENCODE_SERVE_FAIL_STARTS: '1', CEZ_MOCK_OPENCODE_SERVE_FAIL_FILE: join(cwd, 'serve-starts'),
+          } : {}),
         },
         ...opts.spec,
       },

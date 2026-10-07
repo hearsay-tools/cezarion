@@ -32,6 +32,23 @@ import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
+// #872: the first N starts die before listening, the way opencode 1.18.33 did
+// when started within ~2 s of SIGTERM to the previous server on the same DB.
+// Starts are counted across processes in a file, so start N+1 listens normally.
+const failStarts = Number(process.env.CEZ_MOCK_OPENCODE_SERVE_FAIL_STARTS ?? 0);
+if (failStarts > 0) {
+  const counter = process.env.CEZ_MOCK_OPENCODE_SERVE_FAIL_FILE
+    || (process.env.CEZ_MOCK_ARGS_FILE ? `${process.env.CEZ_MOCK_ARGS_FILE}.opencode-serve-starts`
+      : join(tmpdir(), `cez-mock-opencode-serve-starts-${createHash('sha256').update(process.cwd()).digest('hex')}`));
+  const start = (sessionStoreExists(counter) ? Number(readFileSync(counter, 'utf8')) || 0 : 0) + 1;
+  sessionStoreWrite(counter, String(start));
+  if (start <= failStarts) {
+    // Pipe writes to stderr are synchronous on POSIX, so exiting right away loses nothing.
+    process.stderr.write(`Error: Unexpected error (start ${start})\nServeError\n`);
+    process.exit(1);
+  }
+}
+
 if (process.env.CEZ_MOCK_ARGS_FILE && process.env.OPENCODE_CONFIG_CONTENT) appendFileSync(process.env.CEZ_MOCK_ARGS_FILE, JSON.stringify({ type: 'runtime-config', config: JSON.parse(process.env.OPENCODE_CONFIG_CONTENT) }) + '\n');
 if (process.env.CEZ_MOCK_CI_PR) { const { probeCiTool } = await import('./mock-ci-tool.mjs'); await probeCiTool('opencode', JSON.parse(process.env.OPENCODE_CONFIG_CONTENT ?? '{}')); }
 import * as parityGateFs from 'node:fs';

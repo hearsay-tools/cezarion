@@ -255,7 +255,8 @@ export interface SessionOptions {
    * once per ID and never from a transport acknowledgement (#505). */
   onAgentInputConsumed?: (inputIds: readonly string[]) => void;
   /** The session's backend process was replaced after `startSession` returned (OMP's R13
-   *  respawn); `AgentSession.pid` already names the new one. Callers that registered the
+   *  respawn, OpenCode's retried `opencode serve` start — #872); `AgentSession.pid` already
+   *  names the new one. Callers that registered the
    *  first pid for telemetry or cleanup register this one instead. */
   onPidChange?: (pid: number) => void;
 }

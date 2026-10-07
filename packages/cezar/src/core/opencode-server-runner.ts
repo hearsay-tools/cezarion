@@ -1,6 +1,7 @@
 import { opencodeSkillWarning } from './opencode-session-error.ts';
 import { summarizeRunnerStderr } from './runner-stderr.ts';
 import { finished } from 'node:stream/promises';
+import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
@@ -39,6 +40,9 @@ export interface OpencodeRunnerOptions {
   bin?: string;
   /** Wall-clock timeout for a run (ms); per-spec `timeoutMs` still wins. */
   timeoutMs?: number;
+  /** Tests only: how long a start may stay silent before the requested port is
+   *  assumed. Production keeps `SERVER_START_TIMEOUT_MS`. */
+  serverStartTimeoutMs?: number;
 }
 
 interface PendingOpencodeQuestion {
@@ -48,6 +52,41 @@ interface PendingOpencodeQuestion {
 }
 
 const SERVER_START_TIMEOUT_MS = 30_000;
+
+/**
+ * Pause before the one retry of a server that exited before listening (#872).
+ * opencode 1.18.33, started within ~2 s of SIGTERM to the previous server on
+ * the same DB, printed `ServeError` and exited; the next start succeeded. The
+ * failing start can die well inside that window, so the pause alone spans it;
+ * it is only ever paid by a start that already failed.
+ */
+export const SERVE_START_RETRY_DELAY_MS = 2_000;
+
+/** One `opencode serve` process — a session has one, or two after a retried start. */
+interface ServeProcess {
+  readonly child: ChildProcessWithoutNullStreams;
+  /** "Has the server actually terminated?" — never `child.killed`, which only
+   *  reports delivery and would disarm the escalation (#844/#858). */
+  readonly hasExited: () => boolean;
+  /** Settles on `exit` or `close`. */
+  readonly exited: Promise<void>;
+  /** Settles once stdout and stderr are drained (bounded after exit). */
+  readonly outputDrained: Promise<unknown>;
+  readonly stderrChunks: string[];
+  /** The port requested on the command line; the fallback when no URL is printed. */
+  readonly port: number;
+  /** ENOENT and friends: the process never ran, so it is never retried. */
+  spawnFailed: Error | null;
+  /** One teardown per process — see `terminate()`. */
+  signalled: boolean;
+}
+
+/** The URL wait saw the process exit before it printed a URL. */
+class ServeExitedBeforeListening extends Error {
+  constructor() {
+    super('opencode serve exited before it started listening');
+  }
+}
 
 /** Grace between the teardown SIGTERM and the SIGKILL that follows it. */
 export const KILL_GRACE_MS = 4_000;
@@ -106,12 +145,14 @@ export class OpencodeServerRunner implements AgentRunner {
 
   private readonly bin: string;
   private readonly timeoutMs: number;
+  private readonly serverStartTimeoutMs: number;
   private lastSession: OpencodeSession | null = null;
 
   constructor(opts: OpencodeRunnerOptions = {}) {
     this.bin = opts.bin ?? process.env.CEZ_OPENCODE_BIN ?? (process.env.CEZ_DRY_RUN === '1'
       ? fileURLToPath(new URL('../../scripts/mock-opencode-serve.mjs', import.meta.url)) : 'opencode');
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS;
+    this.serverStartTimeoutMs = opts.serverStartTimeoutMs ?? SERVER_START_TIMEOUT_MS;
   }
 
   run(spec: AgentRunSpec, onEvent?: (event: AgentEvent) => void): Promise<AgentRunResult> {
@@ -127,7 +168,7 @@ export class OpencodeServerRunner implements AgentRunner {
     onEvent?: (event: AgentEvent) => void,
     opts: SessionOptions = {},
   ): AgentSession {
-    const session = new OpencodeSession(this.bin, this.timeoutMs, spec, onEvent, opts);
+    const session = new OpencodeSession(this.bin, this.timeoutMs, this.serverStartTimeoutMs, spec, onEvent, opts);
     this.lastSession = session;
     return session;
   }
@@ -137,17 +178,22 @@ export class OpencodeServerRunner implements AgentRunner {
 class OpencodeSession implements AgentSession {
   readonly result: Promise<AgentRunResult>;
 
-  private readonly child!: ChildProcessWithoutNullStreams;
-  /** "Has the server actually terminated?" — never `child.killed`, which only
-   *  reports delivery and would disarm the escalation (#844/#858). */
-  private readonly hasExited: () => boolean;
+  /** The live server process. A start retry replaces it (#872), so every
+   *  liveness, pid, signal and stderr read goes through this field. */
+  private serve!: ServeProcess;
+  /** The first start, once the retry spawned for it ALSO exited before
+   *  listening on its own (#872) — the one case that names both attempts. */
+  private failedStart: ServeProcess | undefined;
+  /** The retry's own spawn threw synchronously (EAGAIN, EMFILE…), so no second
+   *  process exists and the first start's exit alone would misname the failure. */
+  private retrySpawnError: Error | undefined;
+  /** Aborted by teardown; cancels a pending start retry. */
+  private readonly startRetry = new AbortController();
   private serverOpen = true;
   private exitFailure: string | undefined;
   private baseUrl: string | undefined;
   private sessionId: string | undefined;
   private ready!: Promise<void>;
-  private resolveExit!: () => void;
-  private exited!: Promise<void>;
   private readonly sse = new AbortController();
   private readonly toolCalls: AgentToolCallRecord[] = [];
   private readonly textChunks: string[] = [];
@@ -211,53 +257,21 @@ class OpencodeSession implements AgentSession {
    * the previous generation returns instead of posting after idle. */
   private queuedPromptGeneration = 0;
   private autoEndTimer: NodeJS.Timeout | undefined;
-  private spawnFailed: Error | null = null;
   private timedOut = false;
   private openingPromptFailed = false;
-  /** One teardown per session — see `terminate()`. */
-  private signalled = false;
 
   constructor(
     private readonly bin: string,
     timeoutMs: number,
+    private readonly serverStartTimeoutMs: number,
     private readonly spec: AgentRunSpec,
     private readonly onEvent: ((event: AgentEvent) => void) | undefined,
     private readonly opts: SessionOptions,
   ) {
-    // Random high port; the actual bound URL is read back from stdout.
-    const port = 40000 + Math.floor(Math.random() * 20000);
-    try {
-      this.child = nodeSpawn(bin, ['serve', '--hostname', '127.0.0.1', '--port', String(port)], {
-        cwd: spec.cwd,
-        env: buildChildEnv({ backend: 'opencode', extraEnv: ciOpenCodeEnv(spec) }),
-      });
-    } catch (err) {
-      throw wrapSpawnError(err, bin);
-    }
-    this.hasExited = trackChildExit(this.child);
-    boundOutputDrainAfterExit(this.child);
-    // `exit` settles process liveness, not its pipes. The shared 250ms drain
-    // bound prevents an inherited descendant pipe from retaining this session.
-    const outputDrained = Promise.all([this.child.stdout, this.child.stderr].map(stream =>
-      finished(stream, { cleanup: true }).catch(() => undefined),
-    ));
-
-    this.child.on('error', (err: NodeJS.ErrnoException) => {
-      this.spawnFailed = wrapSpawnError(err, bin);
-    });
-
-    this.exited = new Promise<void>((resolve) => {
-      this.resolveExit = resolve;
-    });
-    this.child.once('exit', () => this.resolveExit());
-    this.child.once('close', () => this.resolveExit());
-
-    const stderrChunks: string[] = [];
-    this.child.stderr.setEncoding('utf8');
-    this.child.stderr.on('data', (chunk: string) => stderrChunks.push(chunk));
+    this.serve = this.spawnServe();
 
     // The server prints its URL on stdout once listening.
-    const urlReady = this.waitForServerUrl(port);
+    const urlReady = this.startServer();
 
     const limitMs = spec.timeoutMs ?? timeoutMs;
     let deadline: NodeJS.Timeout | undefined;
@@ -278,7 +292,7 @@ class OpencodeSession implements AgentSession {
       try {
         await this.ready;
         // Live for the whole session; the SSE loop runs until end()/interrupt.
-        await this.exited;
+        await this.serve.exited;
       } catch (err) {
         if (!this.timedOut && !this.openingPromptFailed) {
           const message = err instanceof Error ? err.message : String(err);
@@ -293,25 +307,44 @@ class OpencodeSession implements AgentSession {
         this.terminate();
       }
 
-      await this.exited;
-      await outputDrained;
-      if (this.spawnFailed) {
-        this.emit({ type: 'error', message: this.spawnFailed.message });
-        throw this.spawnFailed;
+      const serve = this.serve;
+      await serve.exited;
+      await serve.outputDrained;
+      if (serve.spawnFailed) {
+        this.emit({ type: 'error', message: serve.spawnFailed.message });
+        throw serve.spawnFailed;
       }
 
       // SSE closure can precede the process exit event. Choose one authoritative
       // error after settlement, before the synthetic turn-end, retaining the code.
-      const code = this.child.exitCode;
-      const crashed = code !== null && code !== 0 && !(this.signalled && isSignalTerminationExit(code));
+      const code = serve.child.exitCode;
+      const crashed = code !== null && code !== 0 && !(serve.signalled && isSignalTerminationExit(code));
       if (!this.timedOut && (crashed || this.exitFailure)) {
-        const stderr = stderrChunks.join('');
-        if (stderr.trim()) this.emit({ type: 'note', message: `opencode serve stderr:\n${stderr}` });
+        const stderr = serve.stderrChunks.join('');
         const detail = summarizeRunnerStderr(stderr);
-        const message = crashed
-          ? `opencode serve exited with code ${code}${detail ? ` — ${detail}` : ''}`
-          : this.exitFailure!;
-        this.emit({ type: 'error', message });
+        if (this.retrySpawnError) {
+          if (stderr.trim()) this.emit({ type: 'note', message: `opencode serve stderr:\n${stderr}` });
+          this.emit({
+            type: 'error',
+            message: `opencode serve exited before listening (${describeEarlyExit(serve)}) and its retry could not start: ${this.retrySpawnError.message}`,
+          });
+        } else if (this.failedStart) {
+          // #872: the retry failed too — one error naming both attempts.
+          const attempts = [this.failedStart, serve];
+          const notes = attempts.map((attempt, i) => {
+            const text = attempt.stderrChunks.join('');
+            return text.trim() ? `opencode serve stderr (attempt ${i + 1}):\n${text}` : '';
+          }).filter(Boolean);
+          if (notes.length) this.emit({ type: 'note', message: notes.join('\n') });
+          const described = attempts.map((attempt, i) => `attempt ${i + 1}: ${describeEarlyExit(attempt)}`);
+          this.emit({ type: 'error', message: `opencode serve exited before listening on both attempts — ${described.join('; ')}` });
+        } else {
+          if (stderr.trim()) this.emit({ type: 'note', message: `opencode serve stderr:\n${stderr}` });
+          const message = crashed
+            ? `opencode serve exited with code ${code}${detail ? ` — ${detail}` : ''}`
+            : this.exitFailure!;
+          this.emit({ type: 'error', message });
+        }
       }
 
       // Timeout/interrupt can cut the SSE feed before its `session.idle` —
@@ -342,7 +375,7 @@ class OpencodeSession implements AgentSession {
   }
 
   get pid(): number | undefined {
-    return this.child.pid;
+    return this.serve.child.pid;
   }
 
   sendAgentMessage(content: ContentBlock[], inputIds: readonly string[] = []): false | Promise<void> {
@@ -475,35 +508,130 @@ class OpencodeSession implements AgentSession {
    * server it was written for: one that installs its own SIGTERM handler stayed
    * alive with `killed = true` and `exitCode === null`, outliving the whole
    * window (#858, the same defect #844 fixed for the other two backends). Every
-   * caller here is followed by `await this.exited`, so a server that survived
+   * caller here is followed by `await serve.exited`, so a server that survived
    * SIGTERM did not just leak — it hung the session's result forever.
    *
    * One teardown per session: all three call sites can run for the same session
    * (`interrupt()` on the deadline, then the result promise's `finally`), and
    * once SIGTERM is out with SIGKILL armed there is nothing a second pass adds.
    * The old `!child.killed` test deduplicated this as a side effect of being
-   * wrong; `signalled` keeps that property on purpose.
+   * wrong; `signalled` keeps that property on purpose. It lives on the process,
+   * not the session: only the live one is ever signalled, and a start retry
+   * (#872) replaces it only after the first exited unsignalled.
+   *
+   * Teardown also cancels a pending start retry, so no second server spawns
+   * after `end()`, `interrupt()` or the deadline.
    */
   private terminate(): void {
-    if (this.signalled || this.hasExited()) return;
-    this.signalled = true;
-    this.child.kill('SIGTERM');
+    this.startRetry.abort();
+    const serve = this.serve;
+    if (serve.signalled || serve.hasExited()) return;
+    serve.signalled = true;
+    serve.child.kill('SIGTERM');
     setTimeout(() => {
-      if (this.hasExited()) return;
-      this.child.kill('SIGKILL');
+      if (serve.hasExited()) return;
+      serve.child.kill('SIGKILL');
     }, KILL_GRACE_MS).unref?.();
   }
 
   // ---- server lifecycle ---------------------------------------------------
 
-  private waitForServerUrl(fallbackPort: number): Promise<string> {
+  /** Spawn one `opencode serve` on a random high port and wire its lifecycle.
+   *  A synchronous spawn throw is wrapped; an async spawn error is latched on
+   *  the process record. */
+  private spawnServe(): ServeProcess {
+    // Random high port; the actual bound URL is read back from stdout.
+    const port = 40000 + Math.floor(Math.random() * 20000);
+    let child: ChildProcessWithoutNullStreams;
+    try {
+      child = nodeSpawn(this.bin, ['serve', '--hostname', '127.0.0.1', '--port', String(port)], {
+        cwd: this.spec.cwd,
+        env: buildChildEnv({ backend: 'opencode', extraEnv: ciOpenCodeEnv(this.spec) }),
+      });
+    } catch (err) {
+      throw wrapSpawnError(err, this.bin);
+    }
+    const hasExited = trackChildExit(child);
+    boundOutputDrainAfterExit(child);
+    // `exit` settles process liveness, not its pipes. The shared 250ms drain
+    // bound prevents an inherited descendant pipe from retaining this session.
+    const outputDrained = Promise.all([child.stdout, child.stderr].map(stream =>
+      finished(stream, { cleanup: true }).catch(() => undefined),
+    ));
+    const exited = new Promise<void>((resolve) => {
+      child.once('exit', () => resolve());
+      child.once('close', () => resolve());
+    });
+    const serve: ServeProcess = {
+      child, hasExited, exited, outputDrained, port,
+      stderrChunks: [], spawnFailed: null, signalled: false,
+    };
+    child.on('error', (err: NodeJS.ErrnoException) => {
+      serve.spawnFailed = wrapSpawnError(err, this.bin);
+    });
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (chunk: string) => serve.stderrChunks.push(chunk));
+    return serve;
+  }
+
+  /**
+   * Wait for the server URL, retrying once — after `SERVE_START_RETRY_DELAY_MS`,
+   * on a fresh port — when the process exited before it printed one (#872).
+   * Never retried: a spawn error (the process never ran), the no-URL timeout
+   * (it falls back to the requested port), and a session already torn down.
+   */
+  private async startServer(): Promise<string> {
+    try {
+      return await this.waitForServerUrl(this.serve);
+    } catch (err) {
+      const first = this.serve;
+      if (!(err instanceof ServeExitedBeforeListening)) throw err;
+      // Settle the process first: an ENOENT `error` and late stderr both land
+      // around `exit`, and the retry decision and its note need them.
+      await first.exited;
+      await first.outputDrained;
+      if (first.spawnFailed || first.child.pid === undefined || !this.serverOpen || this.timedOut) throw err;
+      const detail = summarizeRunnerStderr(first.stderrChunks.join(''));
+      this.emit({
+        type: 'note',
+        message: `opencode serve exited before listening (${describeExit(first)}); retrying once${detail ? ` — ${detail}` : ''}`,
+      });
+      try {
+        await delay(SERVE_START_RETRY_DELAY_MS, undefined, { signal: this.startRetry.signal });
+      } catch {
+        // Torn down during the pause: report the first start's failure as before.
+        throw err;
+      }
+      if (this.startRetry.signal.aborted || !this.serverOpen || this.timedOut) throw err;
+      let next: ServeProcess;
+      try {
+        next = this.spawnServe();
+      } catch (spawnErr) {
+        this.retrySpawnError = spawnErr instanceof Error ? spawnErr : new Error(String(spawnErr));
+        throw spawnErr;
+      }
+      this.serve = next;
+      if (next.child.pid !== undefined) this.opts.onPidChange?.(next.child.pid);
+      try {
+        return await this.waitForServerUrl(next);
+      } catch (retryErr) {
+        // Only an unprompted second early exit names both attempts; a retry
+        // torn down by the session reports through the ordinary paths.
+        if (retryErr instanceof ServeExitedBeforeListening && !next.signalled) this.failedStart = first;
+        throw retryErr;
+      }
+    }
+  }
+
+  private waitForServerUrl(serve: ServeProcess): Promise<string> {
+    const { child } = serve;
     return new Promise((resolve, reject) => {
       let buffer = '';
       const timer = setTimeout(() => {
         cleanup();
         // Nothing parsed — try the port we asked for.
-        resolve(`http://127.0.0.1:${fallbackPort}`);
-      }, SERVER_START_TIMEOUT_MS);
+        resolve(`http://127.0.0.1:${serve.port}`);
+      }, this.serverStartTimeoutMs);
       timer.unref?.();
       const onData = (chunk: string) => {
         buffer += chunk;
@@ -515,16 +643,16 @@ class OpencodeSession implements AgentSession {
       };
       const onExit = () => {
         cleanup();
-        reject(new Error('opencode serve exited before it started listening'));
+        reject(new ServeExitedBeforeListening());
       };
       const cleanup = () => {
         clearTimeout(timer);
-        this.child.stdout.off('data', onData);
-        this.child.off('exit', onExit);
+        child.stdout.off('data', onData);
+        child.off('exit', onExit);
       };
-      this.child.stdout.setEncoding('utf8');
-      this.child.stdout.on('data', onData);
-      this.child.once('exit', onExit);
+      child.stdout.setEncoding('utf8');
+      child.stdout.on('data', onData);
+      child.once('exit', onExit);
     });
   }
 
@@ -1313,6 +1441,18 @@ function safeStringify(value: unknown): string {
   } catch {
     return String(value);
   }
+}
+
+/** `code N` or `signal S` for a server process that exited. */
+function describeExit(serve: ServeProcess): string {
+  const { exitCode, signalCode } = serve.child;
+  return exitCode !== null ? `code ${exitCode}` : `signal ${signalCode}`;
+}
+
+/** `code N — <stderr summary>` for one start that exited before listening. */
+function describeEarlyExit(serve: ServeProcess): string {
+  const detail = summarizeRunnerStderr(serve.stderrChunks.join(''));
+  return `${describeExit(serve)}${detail ? ` — ${detail}` : ''}`;
 }
 
 function wrapSpawnError(err: unknown, bin: string): Error {
