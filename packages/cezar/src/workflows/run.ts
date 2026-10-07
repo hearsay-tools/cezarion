@@ -73,6 +73,16 @@ import { readAgentModelSettings, readAgentModelProvider } from '../agent-config/
 import { loadConfig, resolveWorktreeRetention } from '../config.ts';
 import { autosaveCommit, type AutosaveReason, createWorktree, resolveBaseRef, worktreeDiff, worktreeShortstat } from '../git-worktree.ts';
 import { runGroupedCommand } from './grouped-command.ts';
+import {
+  resolveWorktreeSetup,
+  runWorktreeSetup,
+  worktreeSetupAgentNote,
+  worktreeSetupEndNote,
+  worktreeSetupEnv,
+  worktreeSetupRecordError,
+  worktreeSetupStartNote,
+  type WorktreeSetupOutcome,
+} from '../worktree-setup.ts';
 import { getHeadCommit, getRepoInfo } from '../server/git.ts';
 import { ensureOwnedWorkspace, verifyOwnedWorkspace } from '../delegation/workspace.ts';
 import { verifyWorkerContext } from '../delegation/context.ts';
@@ -2582,6 +2592,18 @@ export class RunManager {
       });
       const interruptedIndex = run.workflowDef?.steps.findIndex(step => step.id === interruptedStepId) ?? -1;
       const interruptedDef = interruptedIndex >= 0 ? run.workflowDef?.steps[interruptedIndex] : undefined;
+      const requeueInput = () => ({ task: run.task, runner: run.runner, model: run.model, effort: run.effort,
+        agentProfile: run.agentProfile, systemPrompt: run.systemPrompt, autonomous: run.autonomous,
+        generateFollowups: run.generateFollowups, worktree: run.worktree });
+      // Worktree setup (#917) interrupted before any agent session: there is no session to
+      // continue, so start the workflow over. `execute` sees setup still `running` and reruns it.
+      if (run.workflowDef && run.worktreeSetup?.status === 'running' && !run.steps.some(step => step.sessionId)) {
+        this.store.updateRun(run.id, { status: 'queued', error: undefined, finishedAt: undefined, currentStepId: undefined });
+        this.store.flush();
+        this.pendingJobs.set(run.id, { workflow: run.workflowDef, startAt: 0, input: requeueInput() });
+        this.queue.push(run.id);
+        continue;
+      }
       if (run.workflowDef && interruptedDef && stepKind(interruptedDef) === 'check') {
         this.store.updateStep(run.id, interruptedDef.id, { status: 'pending', error: undefined, finishedAt: undefined });
         this.store.updateRun(run.id, { status: 'queued', error: undefined, finishedAt: undefined, currentStepId: undefined });
@@ -2589,9 +2611,7 @@ export class RunManager {
         this.pendingJobs.set(run.id, {
           workflow: run.workflowDef,
           startAt: interruptedIndex,
-          input: { task: run.task, runner: run.runner, model: run.model, effort: run.effort,
-            agentProfile: run.agentProfile, systemPrompt: run.systemPrompt, autonomous: run.autonomous,
-            generateFollowups: run.generateFollowups, worktree: run.worktree },
+          input: requeueInput(),
         });
         this.queue.push(run.id);
         continue;
@@ -6306,6 +6326,9 @@ export class RunManager {
     // header can name the branch. Idempotent: an existing file stays as-is.
     const seeded = this.store.getRun(runId);
     if (seeded) seedHandoffFile(this.dataDir, seeded);
+    // Worktree setup (#917): before the first step, so the agent starts in a prepared tree. Its
+    // note rides the first agent step's opening message only, like the task's attachments.
+    let startSetupNote = await this.prepareWorktree(runId, state, config.worktreeSetup, emit, 'start');
 
     const skills = await discoverSkills(this.repoRoot);
     // Every ActiveRun construction site must carry the registry — `runContinuation` builds
@@ -6394,9 +6417,11 @@ export class RunManager {
           extraSystemPrompt,
           chainStepNote(workflow.steps, i),
           startAttachments,
+          startSetupNote,
         );
         startImages = undefined;
         startAttachments = [];
+        startSetupNote = undefined;
         checkFailure = null;
         // Stale setup cannot finalize a replacement owner. Disposal also clears
         // active, but must still honor a previously accepted Stop/Finish intent.
@@ -6520,6 +6545,8 @@ export class RunManager {
      *  paths are appended to `userPrompt` so the agent can operate on the
      *  real files, not just view the inline image blocks. */
     attachments: PersistedAttachment[] = [],
+    /** Worktree setup's paragraph for the agent (#917) — appended to the opening message. */
+    openingNote?: string,
   ): Promise<string | null> {
     let systemPrompt: string | undefined;
     if (step.skill) {
@@ -6580,6 +6607,7 @@ export class RunManager {
     // existing is what would leave an agent holding a task about a `.pdf` it was never told the
     // location of.
     if (attachments.length) userPrompt += `\n\n${pastedAttachmentsText(attachments)}`;
+    if (openingNote) userPrompt += `\n\n${openingNote}`;
 
     const sessionId = randomUUID();
     const backend = step.runner ?? taskBackend;
@@ -7794,6 +7822,81 @@ export class RunManager {
       clearInterval(state.autosaveTimer);
       state.autosaveTimer = undefined;
     }
+  }
+
+  /**
+   * Worktree setup (#917, spec `.ai/specs/2026-10-07-worktree-setup.md`): run the project's
+   * `worktreeSetup` commands in this run's isolated worktree when it needs them, and return the
+   * paragraph for the agent's opening message. `start` is a new task or worker, `rematerialized`
+   * a Continue that rebuilt a reclaimed directory, and `resume` any other Continue, which only
+   * finishes a setup a restart interrupted. In-place and non-Git runs never get setup: that tree
+   * is the user's own checkout.
+   */
+  private async prepareWorktree(
+    runId: string,
+    state: ActiveRun,
+    raw: unknown,
+    emit: (event: { type: string; [k: string]: unknown }) => void,
+    trigger: 'start' | 'rematerialized' | 'resume',
+  ): Promise<string | undefined> {
+    const record = this.store.getRun(runId);
+    if (!record || state.cwd === this.repoRoot) return undefined;
+    const plan = resolveWorktreeSetup(raw);
+    const interrupted = record.worktreeSetup?.status === 'running';
+    if (plan.kind === 'none') {
+      // A restart interrupted setup the project has since removed: nothing is left to finish.
+      if (interrupted) this.store.updateRun(runId, { worktreeSetup: undefined });
+      return undefined;
+    }
+    const fresh = trigger === 'start' && record.worktreeSetup === undefined &&
+      !record.steps.some((step) => step.kind === 'agent' && step.iterations > 0);
+    if (!interrupted && !fresh && trigger !== 'rematerialized') return undefined;
+
+    const startedAt = new Date().toISOString();
+    let outcome: WorktreeSetupOutcome;
+    if (plan.kind === 'invalid') {
+      outcome = { status: 'invalid', issue: plan.issue };
+    } else {
+      // Durable before the first command: recovery reads `running` to requeue a run a restart
+      // interrupted here, instead of failing it with no agent session to resume.
+      this.store.updateRun(runId, { worktreeSetup: { status: 'running', startedAt } });
+      this.store.flush();
+      emit({ type: 'note', message: worktreeSetupStartNote(plan.commands.length) });
+      let tmpEnv: Record<string, string> = {};
+      try {
+        tmpEnv = agentTmpEnv(this.dataDir, runId);
+      } catch (err) {
+        if (!(err instanceof AgentTempDirError)) throw err;
+      }
+      outcome = await runWorktreeSetup({
+        plan,
+        cwd: state.cwd,
+        env: worktreeSetupEnv({ projectRoot: this.repoRoot, runId, tmpEnv }),
+        setInterrupt: (stop) => { state.interrupt = stop; },
+        isCancelled: () => state.cancelled,
+        onCommandResult: (result) => emit({
+          type: 'check-output',
+          command: result.command,
+          text: result.output,
+          exitCode: result.exitCode ?? -1,
+        }),
+      });
+    }
+    const finishedAt = new Date().toISOString();
+    const error = worktreeSetupRecordError(outcome);
+    this.store.updateRun(runId, {
+      worktreeSetup: {
+        status: outcome.status === 'done' ? 'done' : 'failed',
+        startedAt,
+        finishedAt,
+        durationMs: 'durationMs' in outcome ? outcome.durationMs : 0,
+        ...(error !== undefined ? { error } : {}),
+      },
+    });
+    const endNote = worktreeSetupEndNote(outcome);
+    emit({ type: 'note', message: endNote });
+    appendHandoffHeartbeat(this.dataDir, runId, endNote);
+    return worktreeSetupAgentNote(outcome);
   }
 
   private async runCheckStep(
