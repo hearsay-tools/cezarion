@@ -286,7 +286,8 @@ function TaskItem({
       keywords={[
         ...(projectName ? [projectName] : []),
         ...referenceKeywords(task),
-        ...[task.branch, task.workflow, task.workflowLabel].filter((field): field is string => !!field),
+        ...[task.branch, task.workflow, task.workflowLabel, task.pullRequestUrl, task.referencedPullRequestUrl, task.referencedIssueUrl]
+          .filter((field): field is string => !!field),
       ]}
       data-slot="palette-task"
       data-run-id={task.id}

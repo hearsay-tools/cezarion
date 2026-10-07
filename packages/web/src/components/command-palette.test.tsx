@@ -1207,4 +1207,19 @@ describe('server search past the window', () => {
     const note = await screen.findByText(/More matches in Shop/)
     expect(note.textContent).toContain('Type more to narrow')
   })
+
+  it('keeps a server hit that matched only on a reference URL\'s text', async () => {
+    renderPalette({
+      projects: [project({ id: 'cezar' })],
+      extraRoutes: {
+        '/api/v1/workspace/runs-search?q=acme-org': {
+          runs: [indexed({ id: 'by-url', projectId: 'cezar', title: 'Unrelated', archived: true, referencedIssueUrl: 'https://github.com/acme-org/demo/issues/9' })],
+          truncated: [],
+        },
+      },
+    })
+    openWith({ metaKey: true })
+    fireEvent.change(await screen.findByRole('combobox'), { target: { value: 'acme-org' } })
+    await waitFor(() => expect(document.querySelector('[data-slot="palette-task"][data-run-id="by-url"]')).not.toBeNull())
+  })
 })
