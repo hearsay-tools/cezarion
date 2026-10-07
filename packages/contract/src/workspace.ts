@@ -388,6 +388,11 @@ export const configResponseSchema = z.object({
   /** Optional review gate (#489): null = no config key, the `CEZ_REVIEW_GATE` env default (OFF)
    *  decides. */
   reviewGate: z.boolean().nullable(),
+  /** Worktree setup (#917): the commands that prepare a new task or worker worktree, with the
+   *  timeout filled in. null = no setup, or an invalid value (then `worktreeSetupIssue` says why). */
+  worktreeSetup: z.object({ commands: z.array(z.string()), timeoutSeconds: z.number() }).nullable(),
+  /** Why `config.json`'s `worktreeSetup` is invalid; null when it is valid or absent. */
+  worktreeSetupIssue: z.string().nullable(),
 });
 export type ConfigResponse = z.infer<typeof configResponseSchema>;
 
@@ -425,6 +430,9 @@ export const setConfigInputSchema = z.object({
   liveTitleUpdates: z.boolean().nullable().optional(),
   /** null clears the key back to the env-default behavior (OFF). */
   reviewGate: z.boolean().nullable().optional(),
+  /** Worktree setup (#917). null or an empty command list deletes the key. Refused with 409 by a
+   *  hosted cockpit: these are commands the host runs. */
+  worktreeSetup: worktreeSetupConfigSchema.nullable().optional(),
 });
 export type SetConfigInput = z.infer<typeof setConfigInputSchema>;
 

