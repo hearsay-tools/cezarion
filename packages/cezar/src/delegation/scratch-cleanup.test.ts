@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import fs from 'node:fs';
 import { once } from 'node:events';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
@@ -288,5 +289,91 @@ describe('durable scratch cleanup evidence', () => {
       await vi.advanceTimersByTimeAsync(60_000);
       expect(existsSync(scratch)).toBe(false);
     } finally { chmodSync(dirname(scratch), 0o700); cleanup.pause(); vi.useRealTimers(); }
+  });
+});
+
+describe('scratch reprobe cadence (hearsay-tools/cezarion#879)', () => {
+  useWorkerWaitFixture();
+  afterEach(() => { vi.restoreAllMocks(); syncBuiltinESMExports(); vi.useRealTimers(); });
+
+  async function completed() {
+    const parent = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });
+    store.updateRun(parent.id, { status: 'waiting', delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
+    const run = await worker(parent.id);
+    const generation = store.commitWorkerExecutionStart(run.id);
+    store.updateRun(run.id, { status: 'cancelled' }); store.commitWorkerExecutionComplete(run.id, generation);
+    manager.pauseWorkerCleanup();
+    const dataDir = join(root, '.ai/cezar'), scratch = agentTmpDir(dataDir, run.id);
+    mkdirSync(scratch, { recursive: true }); writeFileSync(join(scratch, 'keep'), 'durable');
+    return { run, dataDir, scratch };
+  }
+  /** One `/proc` listing is one full holder scan; the fixture's scope spies the listing. */
+  const listings = () => vi.mocked(fs.readdirSync).mock.calls.filter(([path]) => path === '/proc').length;
+  type Due = Map<string, { at: number; attempts: number; generation?: string }>;
+  const dueOf = (cleanup: WorkerScratchCleanup) => (cleanup as unknown as { due: Due }).due;
+
+  it.runIf(process.platform === 'linux')('held dirs due together share one /proc scan per tick', async () => {
+    const held = [await completed(), await completed(), await completed()];
+    const holders = await Promise.all(held.map(({ scratch }) => readableHolder(scratch)));
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const cleanup = new WorkerScratchCleanup(store, held[0]!.dataDir, () => false);
+    try {
+      const before = listings();
+      for (const { run } of held) cleanup.schedule(run.id);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(listings() - before).toBe(1);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(listings() - before).toBe(2);
+      for (const { scratch } of held) expect(readFileSync(join(scratch, 'keep'), 'utf8')).toBe('durable');
+    } finally { cleanup.pause(); vi.useRealTimers(); for (const holder of holders) await holder.close(); }
+  });
+
+  it.runIf(process.platform === 'linux')('a held dir backs off to hourly and is still removed once its holder exits', async () => {
+    const { run, dataDir, scratch } = await completed();
+    const holder = await readableHolder(scratch);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const cleanup = new WorkerScratchCleanup(store, dataDir, () => false);
+    try {
+      const before = listings();
+      cleanup.schedule(run.id);
+      // The fast window: a probe at once, then five a minute apart.
+      await vi.advanceTimersByTimeAsync(300_000);
+      expect(listings() - before).toBe(6);
+      // Then two minutes: nothing at 6 or 6:59, a probe by 7:00.
+      await vi.advanceTimersByTimeAsync(119_000);
+      expect(listings() - before).toBe(6);
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(listings() - before).toBe(7);
+      await vi.advanceTimersByTimeAsync(4 * 3_600_000);
+      expect(dueOf(cleanup).get(run.id)!.at - Date.now()).toBeGreaterThan(3_000_000);
+      expect(readFileSync(join(scratch, 'keep'), 'utf8')).toBe('durable');
+      await holder.close();
+      await vi.advanceTimersByTimeAsync(3_600_000);
+      expect(existsSync(scratch)).toBe(false);
+      expect(dueOf(cleanup).has(run.id)).toBe(false);
+    } finally { cleanup.pause(); vi.useRealTimers(); await holder.close(); }
+  });
+
+  it.runIf(process.platform === 'linux')('keeps a pending id in its backoff, and probes a new generation at once', async () => {
+    const { run, dataDir, scratch } = await completed();
+    const holder = await readableHolder(scratch);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const cleanup = new WorkerScratchCleanup(store, dataDir, () => false);
+    try {
+      cleanup.schedule(run.id);
+      await vi.advanceTimersByTimeAsync(20 * 60_000);
+      const backedOff = dueOf(cleanup).get(run.id)!;
+      expect(backedOff.attempts).toBeGreaterThan(5);
+      // The same generation asking again (any terminal `run` event) keeps its place.
+      cleanup.schedule(run.id);
+      expect(dueOf(cleanup).get(run.id)).toEqual(backedOff);
+      await holder.close();
+      const next = store.commitWorkerExecutionStart(run.id);
+      expect(store.commitWorkerExecutionComplete(run.id, next)).toBe(true);
+      cleanup.schedule(run.id);
+      expect(dueOf(cleanup).get(run.id)).toMatchObject({ attempts: 0, generation: next });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(existsSync(scratch)).toBe(false);
+    } finally { cleanup.pause(); vi.useRealTimers(); await holder.close(); }
   });
 });
