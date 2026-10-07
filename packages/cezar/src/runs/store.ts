@@ -21,7 +21,7 @@ import { hasPlainHistory, historyPaths, readHistoryText, readHistoryTextAsync, r
 import { workerExecutionIdentitySchema, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
 import { reconcileWorkerWait } from '../delegation/wait.ts';
 import { capacityError, workerCapacity } from '../delegation/capacity.ts';
-import { inspectGeneration, isCurrentProcess, recordedProcessLive, processStartToken, type RecordedProcess, type WorkerProcessRecord } from '../delegation/process-liveness.ts';
+import { inspectGeneration, isCurrentProcess, recordedProcessLive, processStartToken, type CwdSource, type RecordedProcess, type WorkerProcessRecord } from '../delegation/process-liveness.ts';
 import { collectSecretValues, redactDeep, redactSecrets } from '../core/secret-redaction.ts';
 // Pure, dependency-free reference helpers — the same sanity bound the marker parser applies.
 import { MAX_REF } from './task-refs.ts';
@@ -3487,7 +3487,7 @@ export class RunStore extends EventEmitter {
 
   /** `workerResourcesSafe` with the refusal's live PIDs (empty when no PID explains it). */
   workerResourceHolders(id: string, generation: string, resourceId: string,
-    opts: { admittingQueued?: boolean } = {}): 'safe' | number[] {
+    opts: { admittingQueued?: boolean; cwds?: CwdSource } = {}): 'safe' | number[] {
     const run = this.peek(id);
     const proof = this.readWorkerExecution(id);
     if (run?.delegation?.role !== 'worker' || run.delegation.workspace.ownerRunId !== id ||
@@ -3504,7 +3504,7 @@ export class RunStore extends EventEmitter {
     });
     if (absent) return record === 'absent' ||
       ((!recordedProcessLive(record.controller) || isCurrentProcess(record.controller)) && !record.processes.some(recordedProcessLive)) ? 'safe' : [];
-    const probe = inspectGeneration({ ...(record === 'absent' ? {} : { record }), paths });
+    const probe = inspectGeneration({ ...(record === 'absent' ? {} : { record }), paths, cwds: opts.cwds });
     return probe.liveness === 'gone' ? 'safe' : probe.controller !== undefined ? [probe.controller] : probe.pids;
   }
 
@@ -3518,20 +3518,21 @@ export class RunStore extends EventEmitter {
     this.writeWorkerExecution(id, { ...proof, scratchCleanup: { resourceId, path } });
   }
 
-  /** Cleanup can outlive its index row, but never its generation or terminal task intent. */
-  workerScratchResourcesSafe(id: string, generation: string, resourceId: string): boolean {
+  /** Cleanup can outlive its index row, but never its generation or terminal task intent.
+   * `cwds` is the scratch reprobe tick's shared `/proc` snapshot (hearsay-tools/cezarion#879). */
+  workerScratchResourcesSafe(id: string, generation: string, resourceId: string, cwds?: CwdSource): boolean {
     const run = this.peek(id), proof = this.readWorkerExecution(id);
     if (proof?.phase !== 'complete' || proof.generation !== generation || proof.scratchCleanup?.resourceId !== resourceId ||
       (run && ['queued', 'running', 'waiting'].includes(run.status))) return false;
     if (run?.delegation?.role === 'worker') return run.delegation.workspace.path === proof.scratchCleanup.path &&
-      this.workerResourcesSafe(id, generation, resourceId);
+      this.workerResourceHolders(id, generation, resourceId, { cwds }) === 'safe';
     // A valid different role contradicts the retained intent. Quarantined/missing metadata
     // supplies no new authority; only the private terminal checkpoint authorizes scratch.
     if (run && run.delegation?.role !== 'invalid') return false;
     const record = this.readWorkerProcesses(id, generation);
     if (record === 'unknown' || !agentTmpDirOwnershipProven(this.dataDir, id)) return false;
     return inspectGeneration({ ...(record === 'absent' ? {} : { record }),
-      paths: [proof.scratchCleanup.path, ...agentTmpDirLocations(this.dataDir, id)] }).liveness === 'gone';
+      paths: [proof.scratchCleanup.path, ...agentTmpDirLocations(this.dataDir, id)], cwds }).liveness === 'gone';
   }
 
   commitWorkerExecutionStart(id: string): string {

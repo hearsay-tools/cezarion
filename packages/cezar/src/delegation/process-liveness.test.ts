@@ -5,13 +5,15 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { nonDumpableHolder, readableHolder } from './non-dumpable.testkit.ts';
-import { inspectExecutionGeneration, inspectGeneration, parseProcStat, probeGeneration, processesWithCwdUnder, processStartToken, recordedGroupSignalable, recordedProcessLive } from './process-liveness.ts';
+import { inspectExecutionGeneration, inspectGeneration, parseProcStat, probeGeneration, processesWithCwdUnder, processStartToken, recordedGroupSignalable, recordedProcessLive, scanProcessCwds, sharedCwdScan } from './process-liveness.ts';
 
 // Scope only enumeration to the processes this fixture owns, so host processes never enter a scan.
 // Keep cwd/stat/token reads real, including ENOENT after our child has exited;
 // the injected-reader cases below cover unreadable cwds separately.
 const procScope = vi.hoisted(() => ({
   entries: undefined as string[] | undefined, boot: undefined as string | null | undefined,
+  /** How many times `/proc` was listed: one listing is one full scan (hearsay-tools/cezarion#879). */
+  listings: 0,
 }));
 vi.mock('node:fs', async importOriginal => {
   const actual = await importOriginal<typeof import('node:fs')>();
@@ -25,6 +27,7 @@ vi.mock('node:fs', async importOriginal => {
       return actual.readFileSync(...args);
     },
     readdirSync: (...args: Parameters<typeof actual.readdirSync>) => {
+      if (args[0] === '/proc') procScope.listings++;
       return args[0] === '/proc' && procScope.entries ? procScope.entries : actual.readdirSync(...args);
     },
   };
@@ -220,6 +223,53 @@ describe('process liveness (#469)', () => {
       expect(probeGeneration({ record: { generation: 'g', controller: { pid: proc.pid!, startToken: token }, processes: [] }, paths: [dir] })).toBe('alive');
     } finally { proc.kill('SIGKILL'); await exited; }
     expect(recordedProcessLive({ pid: proc.pid! })).toBe(false);
+  });
+});
+
+describe('shared cwd snapshot (hearsay-tools/cezarion#879)', () => {
+  it.runIf(linux)('answers exactly as a fresh scan', async () => {
+    const held = mkdtempSync(join(tmpdir(), 'cez-snapshot-held-')); dirs.push(held);
+    const free = mkdtempSync(join(tmpdir(), 'cez-snapshot-free-')); dirs.push(free);
+    const { proc, exited } = await child(held);
+    try {
+      const snapshot = scanProcessCwds();
+      expect(processesWithCwdUnder([held], 'linux', undefined, undefined, snapshot)).toEqual([proc.pid]);
+      expect(processesWithCwdUnder([held], 'linux', undefined, undefined, snapshot)).toEqual(processesWithCwdUnder([held]));
+      expect(inspectGeneration({ paths: [held], cwds: () => snapshot })).toEqual(inspectGeneration({ paths: [held] }));
+      expect(inspectGeneration({ paths: [free], cwds: () => snapshot })).toEqual({ liveness: 'gone', pids: [] });
+    } finally { proc.kill(); await exited; }
+  });
+
+  it.runIf(linux)('many questions in one tick cost one /proc listing, taken only when asked', async () => {
+    const [a, b, c] = ['a', 'b', 'c'].map(name => { const dir = mkdtempSync(join(tmpdir(), `cez-snapshot-${name}-`)); dirs.push(dir); return dir; });
+    const { proc, exited } = await child(a!);
+    try {
+      expect(() => sharedCwdScan(() => { throw Error('scanned before anyone asked'); })).not.toThrow();
+      const before = procScope.listings;
+      const cwds = sharedCwdScan();
+      expect(procScope.listings).toBe(before);
+      expect(inspectGeneration({ paths: [a!], cwds }).pids).toEqual([proc.pid]);
+      expect(inspectGeneration({ paths: [b!], cwds }).liveness).toBe('gone');
+      expect(inspectExecutionGeneration({ paths: [c!], pathsComplete: true, cwds }).liveness).toBe('gone');
+      expect(procScope.listings - before).toBe(1);
+    } finally { proc.kill(); await exited; }
+  });
+
+  it('an unlistable /proc is unknown everywhere', () => {
+    const proc = { readdir: () => { throw Error('unreadable /proc'); }, readlink: () => '/worker' };
+    expect(scanProcessCwds('linux', proc)).toBe('unknown');
+    expect(processesWithCwdUnder('/worker', 'linux', undefined, undefined, 'unknown')).toBe('unknown');
+    expect(inspectGeneration({ paths: ['/worker'], cwds: () => 'unknown' }).liveness).toBe('unknown');
+  });
+
+  it('win32 has an empty snapshot, darwin builds one from a single lsof, and this process is never in it', () => {
+    const unused = () => { throw Error('never read'); };
+    expect(scanProcessCwds('win32', { readdir: unused, readlink: unused }, { lsof: unused })).toEqual(new Map());
+    const darwin = { lsof: () => ({ ok: true, stdout: `p42\nn/tmp/x\np${process.pid}\nn/tmp/x\n` }) };
+    expect(scanProcessCwds('darwin', { readdir: unused, readlink: unused }, darwin)).toEqual(new Map([[42, '/tmp/x']]));
+    const linux = { readdir: () => ['7', String(process.pid), 'self'], readlink: () => '/worker' };
+    expect(scanProcessCwds('linux', linux)).toEqual(new Map([[7, '/worker']]));
+    expect(scanProcessCwds('aix')).toBe('unknown');
   });
 });
 
