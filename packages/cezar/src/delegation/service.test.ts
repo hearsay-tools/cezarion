@@ -636,7 +636,7 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
   afterEach(async () => { await f?.close(); vi.restoreAllMocks(); syncBuiltinESMExports(); vi.unstubAllEnvs(); });
   const linux = process.platform === 'linux';
   const input = () => ({ task: 'do work', baseline: 'parent-head', requestId: randomUUID() });
-  /** Test cadence; the old fixed delay is set too, so the code before #879 visibly loops instead of idling. */
+  /** Test cadence; the old fixed delay is set too, so the code before hearsay-tools/cezarion#879 visibly loops instead of idling. */
   const cadence = (backoff = { fastMs: 40, fastCount: 3, capMs: 300 }, attention = 5) =>
     Object.assign(f.service, { destroyBackoff: backoff, destroyAttentionAttempts: attention, destroyRetryDelayMs: backoff.fastMs });
 
@@ -659,7 +659,8 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
     cadence();
     const { workerId } = await settled();
     expect(await f.service.destroy(f.caller, { workerId })).toMatchObject({ state: 'incomplete', remaining: ['worktree', 'branch'] });
-    // That attempt stopped the worker (review -> cancelled), which the next tick sees as one change.
+    // The fixture's spawned worker is still in the manager's queue, so that attempt cancelled it
+    // (review -> cancelled): one real change, which the next tick sees and attempts once.
     const reads = vi.spyOn(f.store, 'readEventsAsync');
     await vi.waitFor(() => expect(destroyOf(workerId)?.retry?.attempts).toBeGreaterThanOrEqual(1), { timeout: 5_000 });
     expect(reads.mock.calls.length).toBeLessThanOrEqual(1);

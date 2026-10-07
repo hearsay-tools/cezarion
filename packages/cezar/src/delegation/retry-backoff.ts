@@ -8,7 +8,7 @@ export type Backoff = { fastMs: number; fastCount: number; capMs: number };
 
 export const DESTROY_BACKOFF: Backoff = { fastMs: 60_000, fastCount: 5, capMs: 3_600_000 };
 export const SCRATCH_BACKOFF: Backoff = { fastMs: 60_000, fastCount: 5, capMs: 3_600_000 };
-/** The orphan reprobe kept 15 s for its first 15 minutes before #879; that window is unchanged. */
+/** The orphan reprobe kept 15 s for its first 15 minutes before hearsay-tools/cezarion#879; that window is unchanged. */
 export const ORPHAN_BACKOFF: Backoff = { fastMs: 15_000, fastCount: 60, capMs: 3_600_000 };
 /** For the batched reprobes: ids that probe together keep probing together, so they share a scan. */
 export const noJitter = () => 0;

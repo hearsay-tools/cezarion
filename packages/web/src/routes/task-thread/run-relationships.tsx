@@ -251,7 +251,7 @@ function CleanUpWorker({ parentRunId, worker }: { parentRunId: string; worker: W
   const [confirming, setConfirming] = useState(false)
   if (!SETTLED.has(worker.status) || (worker.destroy?.phase === 'complete' && worker.destroy.remaining.length === 0)) return null
   const short = worker.workerId.slice(0, 8)
-  // A destroy already under way retries on its own; this runs one now and restarts its backoff (#879).
+  // A destroy already under way retries on its own; this runs one now and restarts its backoff (hearsay-tools/cezarion#879).
   const retrying = !!worker.destroy && worker.destroy.phase !== 'complete'
   return <div className="flex min-w-0 flex-wrap items-center gap-2 px-1">
     {confirming ? <>
@@ -287,7 +287,7 @@ function CleanUpWorker({ parentRunId, worker }: { parentRunId: string; worker: W
  * information — it just pushed the rows that DO carry some off the first screen.
  *
  * A pending cleanup retries on its own, backing off to hourly; once its retries see nothing
- * change it needs attention (#879). The line says which, when the next check is, and that
+ * change it needs attention (hearsay-tools/cezarion#879). The line says which, when the next check is, and that
  * Retry clean up tries at once.
  */
 function Cleanup({ state }: { state: WorkerDestroy }) {
