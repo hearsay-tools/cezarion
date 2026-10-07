@@ -260,6 +260,10 @@ export async function readOwnedDiff(repoRoot: string, run: RunRecord): Promise<W
   } finally { if (scratch) await rm(scratch, { recursive: true, force: true }); }
 }
 
+/** A removal that could not take the worktree mutation lock in time. Contention clears without
+ * changing anything a destroy can observe, so a retry must not skip it (hearsay-tools/cezarion#879). */
+export const WORKTREE_LOCK_BUSY_ERROR = 'Owned resources retained: worktree mutation lock is busy; retry destroy later';
+
 /** Thrown by a removal's `assertUnheld` when live processes may hold the worker's resources. */
 export class WorkspaceHeldError extends Error {
   constructor(readonly pids: readonly number[]) { super(`Processes ${pids.join(', ')} may still hold the worker's resources`); }
@@ -276,7 +280,7 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
   let provisioned = false; let lockBusy = false; let heldBy: readonly number[] = [];
   let stranded: string | undefined;
   const result = (): WorkerDestroyResult => ({ workerId: value.ownerRunId, state: remaining.length ? 'incomplete' : 'complete', remaining,
-    ...(remaining.length ? { error: lockBusy ? 'Owned resources retained: worktree mutation lock is busy; retry destroy later'
+    ...(remaining.length ? { error: lockBusy ? WORKTREE_LOCK_BUSY_ERROR
       : heldBy.length ? `Owned resources retained: processes ${heldBy.join(', ')} may still hold the worker worktree or scratch; retry destroy after they exit`
       : stranded ? `Owned branch ${value.branch} ${stranded}; keep what you need, delete the branch, then retry destroy`
       : 'Owned resources remain: resource identity or Git cleanup could not be verified. Check the worker worktree, Git lock and ownership receipt, then retry destroy after correcting the blocker' } : {}),

@@ -1,10 +1,10 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { agentTmpDir } from '../runs/agent-tmpdir.ts';
-import { holdersStillLive, observeDestroy, recordHolders } from './destroy-observation.ts';
+import { holdersStillHold, observeDestroy, recordHolders } from './destroy-observation.ts';
 import { scopeFixtureProcesses } from './process-scope.testkit.ts';
 import { fixture } from './service.testkit.ts';
 import { ensureOwnedWorkspace, gitCommonDir } from './workspace.ts';
@@ -48,6 +48,11 @@ describe('destroy observation (hearsay-tools/cezarion#879)', () => {
     ['the branch ref deleted', ({ workspace }: Settled) => { execFileSync('git', ['update-ref', '-d', `refs/heads/${workspace.branch}`], { cwd: f.root }); }],
     ['refs packed', () => { execFileSync('git', ['pack-refs', '--all'], { cwd: f.root }); }],
     ['the worktree locked', ({ workspace }: Settled) => { execFileSync('git', ['worktree', 'lock', workspace.path], { cwd: f.root }); }],
+    ['the ownership marker rewritten in place', ({ workspace }: Settled) => { writeFileSync(join(adminOf(workspace.path), 'cezar-owned-resource'), randomUUID()); }],
+    ['a cleanup checkpoint written', ({ workspace, commonDir }: Settled) => {
+      writeFileSync(join(commonDir, 'cezar-owned-workspaces', `${workspace.resourceId}.cleanup.json`), '{}', { mode: 0o600 });
+    }],
+    ['the worktree permissions changed', ({ workspace }: Settled) => { chmodSync(workspace.path, 0o700); }],
     ['the ownership receipt removed', ({ workspace, commonDir }: Settled) => {
       rmSync(join(commonDir, 'cezar-owned-workspaces', `${workspace.resourceId}.json`), { force: true });
     }],
@@ -75,18 +80,36 @@ describe('destroy observation (hearsay-tools/cezarion#879)', () => {
     expect(key()).not.toBe(locked);
   });
 
-  it('tells a live holder from one that exited or whose pid was reused', async () => {
-    const child = spawn(process.execPath, ['-e', "console.log('ready'); setInterval(() => {}, 1000)"], { stdio: ['ignore', 'pipe', 'ignore'] });
+  it.runIf(process.platform === 'linux')('a holder still holds only while it is the same live process working under the worker', async () => {
+    const { workerId, workspace } = await settled();
+    const child = spawn(process.execPath, ['-e', "console.log('ready'); process.stdin.on('data', () => { process.chdir('/'); console.log('moved'); })"],
+      { cwd: workspace.path, stdio: ['pipe', 'pipe', 'ignore'] });
     const exited = new Promise<void>(resolve => child.once('exit', () => resolve()));
-    await new Promise<void>(resolve => child.stdout!.once('data', () => resolve()));
-    const holders = recordHolders([child.pid!]);
-    expect(holders).toEqual([{ pid: child.pid, startToken: expect.any(String) }]);
-    expect(holdersStillLive(holders)).toBe(true);
-    expect(holdersStillLive([{ pid: child.pid!, startToken: 'another-incarnation' }])).toBe(false);
-    expect(holdersStillLive([])).toBe(true);
-    child.kill('SIGKILL'); await exited;
-    expect(holdersStillLive(holders)).toBe(false);
+    const line = () => new Promise<void>(resolve => child.stdout!.once('data', () => resolve()));
+    await line();
+    const holds = (holders: ReturnType<typeof recordHolders>) => holdersStillHold({ store: f.store, dataDir: join(f.root, '.ai/cezar'), workerId, holders });
+    try {
+      const holders = recordHolders([child.pid!]);
+      expect(holders).toEqual([{ pid: child.pid, startToken: expect.any(String) }]);
+      expect(holds([])).toBe(true);
+      expect(holds(holders)).toBe(true);
+      expect(holds([{ pid: child.pid!, startToken: 'another-incarnation' }])).toBe(false);
+      // Moving away is a change: a fresh attempt would no longer find it.
+      const moved = line(); child.stdin!.write('go\n'); await moved;
+      expect(holds(holders)).toBe(false);
+      // A process of the generation's own record blocks wherever it works.
+      const execution = f.store.readWorkerExecution(workerId)!;
+      expect(f.store.appendWorkerProcess(workerId, execution.generation, child.pid!)).toBe(true);
+      expect(holds(holders)).toBe(true);
+      child.kill('SIGKILL'); await exited;
+      expect(holds(holders)).toBe(false);
+    } finally { child.kill('SIGKILL'); }
   });
 });
+
+/** A linked worktree's own admin dir, as its `.git` file names it. */
+function adminOf(worktree: string): string {
+  return resolve(worktree, /^gitdir: (.+)$/m.exec(readFileSync(join(worktree, '.git'), 'utf8'))![1]!.trim());
+}
 
 type Settled = { workerId: string; workspace: { path: string; branch: string; resourceId: string }; dataDir: string; commonDir: string };

@@ -26,8 +26,8 @@ import { isAuthenticatedCaller } from './credentials.ts';
 import { parseDelegationEffort } from './effort.ts';
 import { authorizeSpawn, authorizeSpawnReplay, authorizeWorker, authorizeCancelWait, authorizeRetainedResult, DelegationPolicyError } from './policy.ts';
 import { releaseThenRemoveOwnedWorkspace } from '../git-worktree-release.ts';
-import { gitCommonDir, planOwnedWorkspace, readOwnedDiff, resolveWorkerBaseline, WorkspaceHeldError } from './workspace.ts';
-import { holdersStillLive, observeDestroy, recordHolders, type DestroyObservation } from './destroy-observation.ts';
+import { gitCommonDir, planOwnedWorkspace, readOwnedDiff, resolveWorkerBaseline, WORKTREE_LOCK_BUSY_ERROR, WorkspaceHeldError } from './workspace.ts';
+import { holdersStillHold, observeDestroy, recordHolders, type DestroyObservation } from './destroy-observation.ts';
 import { DESTROY_ATTENTION_ATTEMPTS, DESTROY_BACKOFF, retryDelayMs, type Backoff } from './retry-backoff.ts';
 
 export type DelegationProject = { id: string; root: string; store: RunStore; manager: RunManager };
@@ -211,8 +211,9 @@ export class DelegationService {
       };
       check();
       const seen = this.destroyObservations.get(project.id)?.get(workerId);
-      const unchanged = !!seen && holdersStillLive(seen.holders) &&
-        seen.key === observeDestroy({ store: project.store, dataDir: join(project.root, '.ai/cezar'), commonDir: await this.commonDir(project), workerId });
+      const dataDir = join(project.root, '.ai/cezar');
+      const unchanged = !!seen && holdersStillHold({ store: project.store, dataDir, workerId, holders: seen.holders }) &&
+        seen.key === observeDestroy({ store: project.store, dataDir, commonDir: await this.commonDir(project), workerId });
       if (!unchanged) await this.destroyAttempt(project, workerId, check, 'scheduled').catch(() => undefined);
       if (this.projects.get(project.id) !== project) return;
       const current = project.store.getRun(workerId);
@@ -675,9 +676,10 @@ export class DelegationService {
       project.store.commitDelegation([{ id: workerId, delegation: { ...worker.delegation, destroy: { requestedAt, phase, remaining,
         ...(error ? { error: error.slice(0, 2_000) } : {}), ...(retry ? { retry } : {}) } } }]);
     };
-    /** Holders the attempt ran into, kept with what it started from; a complete destroy keeps nothing. */
+    /** Holders the attempt ran into, kept with what it started from. A complete destroy keeps nothing,
+     * and neither does lock contention: it clears without changing anything the key can see. */
     const observed = (result: WorkerDestroyResult, holders: readonly number[]) => {
-      this.observeAttempt(project, workerId, result.state === 'complete' ? undefined : { key, holders: recordHolders(holders) });
+      this.observeAttempt(project, workerId, result.state === 'complete' || result.error === WORKTREE_LOCK_BUSY_ERROR ? undefined : { key, holders: recordHolders(holders) });
       return result;
     };
     persist('requested', worker.delegation.destroy?.remaining ?? ['process', 'worktree', 'branch']);

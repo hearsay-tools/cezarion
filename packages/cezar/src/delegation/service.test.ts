@@ -9,7 +9,7 @@ import { workerSpawnRequestSchema } from '@open-mercato/cezar-contract';
 import { DelegationPolicyError } from './policy.ts';
 import { workerWorkflowHash } from './execution-identity.ts';
 import { QUICK_TASK_WORKFLOW, skillTaskSteps } from '../workflows/types.ts';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { RunStore } from '../runs/store.ts';
@@ -18,8 +18,9 @@ import { mergeWriteAgentAccounts } from '../workspace/agent-accounts.ts';
 import type { Caller } from './credentials.ts';
 
 import { fixture } from './service.testkit.ts';
-import { ensureOwnedWorkspace } from './workspace.ts';
+import { ensureOwnedWorkspace, WORKTREE_LOCK_BUSY_ERROR } from './workspace.ts';
 import { DelegationService } from './service.ts';
+import { withWorktreeMutation } from '../git-worktree-lock.ts';
 import { readableHolder } from './non-dumpable.testkit.ts';
 
 describe('delegation service durable authority', () => {
@@ -724,6 +725,53 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
       await explicit.catch(() => undefined);
       expect(armed()).toBe(true);
     } finally { detachReplacement(); replacementManager.dispose(); }
+  });
+
+  it.runIf(linux)('lock contention is retried in full once it clears, never skipped as unchanged', async () => {
+    cadence({ fastMs: 200, fastCount: 10, capMs: 2_000 });
+    const { workerId, workspace } = await settled(false);
+    let unlock!: () => void, locked!: () => void;
+    const held = new Promise<void>(done => { unlock = done; }), ready = new Promise<void>(done => { locked = done; });
+    const keeper = withWorktreeMutation(f.root, async () => { locked(); await held; });
+    await ready;
+    try {
+      expect(await f.service.destroy(f.caller, { workerId })).toMatchObject({ state: 'incomplete', error: WORKTREE_LOCK_BUSY_ERROR });
+      // Past the fixture's one real change, and still contended.
+      await vi.waitFor(() => expect(destroyOf(workerId)?.retry?.attempts).toBeGreaterThanOrEqual(2), { timeout: 10_000 });
+      expect(destroyOf(workerId)).toMatchObject({ phase: 'incomplete', error: WORKTREE_LOCK_BUSY_ERROR });
+    } finally { unlock(); await keeper; }
+    await vi.waitFor(() => expect(destroyOf(workerId)).toMatchObject({ phase: 'complete', remaining: [] }), { timeout: 10_000 });
+    expect(existsSync(workspace.path)).toBe(false);
+  });
+
+  it.runIf(linux)('an in-place repair of the ownership marker ends the skipping', async () => {
+    cadence({ fastMs: 200, fastCount: 10, capMs: 2_000 });
+    const { workerId, workspace } = await settled(false);
+    const admin = resolve(workspace.path, /^gitdir: (.+)$/m.exec(readFileSync(join(workspace.path, '.git'), 'utf8'))![1]!.trim());
+    const marker = join(admin, 'cezar-owned-resource'), original = readFileSync(marker, 'utf8');
+    writeFileSync(marker, randomUUID());
+    expect(await f.service.destroy(f.caller, { workerId })).toMatchObject({ state: 'incomplete' });
+    await vi.waitFor(() => expect(destroyOf(workerId)?.retry?.attempts).toBeGreaterThanOrEqual(2), { timeout: 10_000 });
+    expect(destroyOf(workerId)?.phase).toBe('incomplete');
+    writeFileSync(marker, original);
+    await vi.waitFor(() => expect(destroyOf(workerId)).toMatchObject({ phase: 'complete', remaining: [] }), { timeout: 10_000 });
+    expect(existsSync(workspace.path)).toBe(false);
+  });
+
+  it.runIf(linux)('a holder that moves out of the worktree ends the skipping', async () => {
+    cadence({ fastMs: 200, fastCount: 10, capMs: 2_000 });
+    const { workerId, workspace } = await settled(false);
+    const child = spawn(process.execPath, ['-e', "console.log('ready'); process.stdin.on('data', () => { process.chdir('/'); console.log('moved'); })"],
+      { cwd: workspace.path, stdio: ['pipe', 'pipe', 'ignore'] });
+    onTestFinished(() => { child.kill('SIGKILL'); });
+    const line = () => new Promise<void>(done => child.stdout!.once('data', () => done()));
+    await line();
+    expect(await f.service.destroy(f.caller, { workerId })).toMatchObject({ state: 'incomplete' });
+    await vi.waitFor(() => expect(destroyOf(workerId)?.retry?.attempts).toBeGreaterThanOrEqual(2), { timeout: 10_000 });
+    const moved = line(); child.stdin!.write('go\n'); await moved;
+    // Still running, so only its cwd says it no longer holds anything.
+    await vi.waitFor(() => expect(destroyOf(workerId)).toMatchObject({ phase: 'complete', remaining: [] }), { timeout: 10_000 });
+    expect(child.exitCode).toBeNull();
   });
 
   it.runIf(linux)('Clean up resets the backoff: a full attempt now, and the next tick at the fast cadence', async () => {

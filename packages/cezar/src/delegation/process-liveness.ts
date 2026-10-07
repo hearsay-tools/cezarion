@@ -162,6 +162,17 @@ export function processesWithCwdUnder(dirs: string | readonly string[], platform
   return [...snapshot].filter(([, cwd]) => under(cwd)).map(([pid]) => pid);
 }
 
+/** Whether one process's working directory is still one of `dirs` or beneath it, from a single
+ * `readlink`: `false` when it moved away or cannot be read (no evidence, hearsay-tools/cezarion#889),
+ * `undefined` where only a full scan could say (darwin, win32). */
+export function processCwdUnder(pid: number, dirs: readonly string[], platform: NodeJS.Platform = process.platform, proc: ProcReader = realProc): boolean | undefined {
+  if (platform !== 'linux') return undefined;
+  let cwd: string;
+  try { cwd = proc.readlink(String(pid)); } catch { return false; }
+  const found = processesWithCwdUnder(dirs, platform, proc, undefined, new Map([[pid, cwd]]));
+  return found !== 'unknown' && found.length > 0;
+}
+
 export type GenerationProbe = { liveness: GenerationLiveness; controller?: number; pids: number[] };
 
 /** Fresh resource proof for destroy, reuse, admission, scratch cleanup and history deletion.
