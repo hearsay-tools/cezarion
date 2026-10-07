@@ -13,7 +13,7 @@ import {
   type GlobalEvent,
   type UsageStore,
 } from './events'
-import { healthResponseSchema, runnerModelCatalogResponseSchema, apiPath, getApiScope } from '@open-mercato/cezar-api-client'
+import { healthResponseSchema, runnerModelCatalogResponseSchema, apiPath, getApiScope, toRunSummary } from '@open-mercato/cezar-api-client'
 import { queryKeys, useHealthSubscription, workspaceQueryKeys } from './queries'
 import type {
   ApiRun,
@@ -518,6 +518,38 @@ function createRelationshipsRefresher(queryClient: QueryClient): {
 
 type RelationshipsRefresher = ReturnType<typeof createRelationshipsRefresher>
 
+/** Every cached archived-pages query (#864): the Archived tab's and each issue's linked tasks,
+ *  in any project scope. Run ids are unique across projects, so a patch by id lands only where
+ *  that run is. */
+const ARCHIVED_PAGES = { predicate: (query: { queryKey: readonly unknown[] }) => query.queryKey[1] === 'runs' && query.queryKey[2] === 'archived' }
+
+/**
+ * Keep loaded archived pages in step with a run event (#864). A row the pages hold takes the
+ * event's projection in place; when the run's archived flag no longer matches what the pages
+ * say — unarchived, or newly archived and not yet in them — their totals and cursors are stale,
+ * so the queries are invalidated too (a mounted one refetches, an idle one waits). A worker is
+ * never on an archived page.
+ */
+function syncArchivedPages(queryClient: QueryClient, run: RunRecord): void {
+  if (run.delegation?.role === 'worker') return
+  let stale = false
+  for (const query of queryClient.getQueryCache().findAll(ARCHIVED_PAGES)) {
+    const data = query.state.data as InfiniteData<ArchivedRunsResponse> | undefined
+    if (!data) continue
+    const held = data.pages.some((page) => page.runs.some((row) => row.id === run.id))
+    if (held) {
+      const summary = toRunSummary(run)
+      queryClient.setQueryData<InfiniteData<ArchivedRunsResponse>>(query.queryKey, {
+        ...data, pages: data.pages.map((page) => ({ ...page, runs: page.runs.map((row) => (row.id === run.id ? { ...summary, ...(row.usage ? { usage: row.usage } : {}) } : row)) })),
+      })
+      if (!run.archived) stale = true
+    } else if (run.archived) {
+      stale = true
+    }
+  }
+  if (stale) void queryClient.invalidateQueries(ARCHIVED_PAGES)
+}
+
 /** Fold one stream message into the cache. The reducers it calls are pure and table-tested in
  *  events.ts; this is only the wiring from an event to the cache it belongs in. */
 function applyGlobalEvent(
@@ -529,6 +561,7 @@ function applyGlobalEvent(
 ): void {
   switch (event.type) {
     case 'run': {
+      syncArchivedPages(queryClient, event.run)
       // A changed worker may be absent from the visible list. Refresh this project's mounted
       // relationship readers without discarding their last successful data (#659: only the
       // entries this run can change, only on a change they carry, and debounced).
@@ -580,7 +613,7 @@ function applyGlobalEvent(
       // project's cache and for every search: drop it there too, so a deleted task cannot linger
       // in the Archived tab or an issue's linked tasks until the next refetch.
       queryClient.setQueriesData<InfiniteData<ArchivedRunsResponse>>(
-        { predicate: (query) => query.queryKey[1] === 'runs' && query.queryKey[2] === 'archived' },
+        ARCHIVED_PAGES,
         (data) => (data && data.pages.some((page) => page.runs.some((run) => run.id === event.id))
           ? { ...data, pages: data.pages.map((page) => ({ ...page, runs: page.runs.filter((run) => run.id !== event.id) })) }
           : data),

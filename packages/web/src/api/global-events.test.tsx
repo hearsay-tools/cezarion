@@ -1079,6 +1079,31 @@ describe('useGlobalEvents — run events', () => {
     expect(client.getQueryData(queryKeys.runs.detail('r2'))).toBeUndefined()
   })
 
+  it('keeps loaded archived pages and their total in step with archive changes (#864)', () => {
+    const page = (runs: RunRecord[]) => ({ runs: runs.map((run) => ({ ...run, archived: true })), nextCursor: null, total: runs.length })
+    client.setQueryData(queryKeys.runs.archived(''), { pages: [page([runRecord('r1'), runRecord('r2')])], pageParams: [undefined] })
+    const { source } = mount()
+    const state = () => client.getQueryState(queryKeys.runs.archived(''))
+
+    // A row the pages hold is patched in place: no refetch for a title change.
+    source.emit('run', stampedRun(runRecord('r2', { title: 'Renamed', archived: true })))
+    type Pages = { pages: { runs: { id: string; title: string; archived: boolean }[] }[] }
+    expect(client.getQueryData<Pages>(queryKeys.runs.archived(''))?.pages[0]?.runs.find((r) => r.id === 'r2')?.title).toBe('Renamed')
+    expect(state()?.isInvalidated).toBe(false)
+
+    // Unarchiving one changes the total: patched, and marked stale for a refetch.
+    source.emit('run', stampedRun(runRecord('r1', { archived: false })))
+    expect(client.getQueryData<Pages>(queryKeys.runs.archived(''))?.pages[0]?.runs.find((r) => r.id === 'r1')?.archived).toBe(false)
+    expect(state()?.isInvalidated).toBe(true)
+  })
+
+  it('marks archived pages stale when a run they do not hold is archived (#864)', () => {
+    client.setQueryData(queryKeys.runs.archived(''), { pages: [{ runs: [], nextCursor: null, total: 0 }], pageParams: [undefined] })
+    const { source } = mount()
+    source.emit('run', stampedRun(runRecord('fresh', { archived: true })))
+    expect(client.getQueryState(queryKeys.runs.archived(''))?.isInvalidated).toBe(true)
+  })
+
   it('drops a deleted run from loaded archived pages too, whatever their search (#864)', () => {
     const page = (ids: string[]) => ({ runs: ids.map((id) => runRecord(id)), nextCursor: null, total: ids.length })
     client.setQueryData(queryKeys.runs.archived(''), { pages: [page(['r1', 'r2'])], pageParams: [undefined] })
