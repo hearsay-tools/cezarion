@@ -895,7 +895,9 @@ export function useArchivedRuns(q: string, enabled: boolean) {
     initialPageParam: undefined as string | undefined,
     queryFn: ({ pageParam, signal }) => getArchivedRuns({ before: pageParam, limit: ARCHIVED_RUNS_PAGE_MAX, q }, { signal }),
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
-    placeholderData: keepPreviousData,
+    // The previous search's pages stay on screen while the next ones load — but only within one
+    // project: another project's archived tasks must never show under this one (#864 review).
+    placeholderData: (previous, previousQuery) => (previousQuery?.queryKey[0] === queryScope() ? previous : undefined),
   })
 }
 

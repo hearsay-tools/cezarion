@@ -30,6 +30,7 @@ import {
   useRun,
   useRunChanges,
   useRuns,
+  useArchivedRuns,
   useSkills,
   useSkillsUpdate,
   workspaceQueryKeys,
@@ -1455,5 +1456,31 @@ describe('read receipts keep their invocation scope across navigation', () => {
     expect(client.getQueryData(queryKeys.runs.detail(run.id))).toEqual({ ...run, tokensUsed: 99 })
     expect(client.getQueryData(queryKeys.runs.list())).toEqual([{ ...run, tokensUsed: 99 }])
     if (!failure) expect(client.getQueryState(workspaceQueryKeys.runsIndex)?.isInvalidated).toBe(true)
+  })
+})
+
+describe('useArchivedRuns', () => {
+  afterEach(() => setApiScope(null))
+
+  it('never shows one project\'s archived pages under another (#864)', async () => {
+    setApiScope('proj-a')
+    fetchMock.mockResolvedValue(json({ runs: [{ id: 'a-old', title: 'A', status: 'done', createdAt: '2025-01-01T00:00:00Z', archived: true, workflow: 'quick-task', workflowLabel: 'quick-task', tokensUsed: 0 }], nextCursor: null, total: 1 }))
+    const { result, rerender } = renderHook(({ enabled }) => useArchivedRuns('', enabled), { wrapper: wrapper(), initialProps: { enabled: true } })
+    await waitFor(() => expect(result.current.data?.pages[0]?.runs.map((run) => run.id)).toEqual(['a-old']))
+    // Project B's window is not full, so its archived query stays off.
+    setApiScope('proj-b')
+    rerender({ enabled: false })
+    expect(result.current.data).toBeUndefined()
+  })
+
+  it('keeps the previous search\'s pages while the next one loads, within one project', async () => {
+    setApiScope('proj-a')
+    const page = (id: string) => json({ runs: [{ id, title: id, status: 'done', createdAt: '2025-01-01T00:00:00Z', archived: true, workflow: 'quick-task', workflowLabel: 'quick-task', tokensUsed: 0 }], nextCursor: null, total: 1 })
+    fetchMock.mockResolvedValueOnce(page('first')).mockReturnValueOnce(new Promise(() => {}))
+    const { result, rerender } = renderHook(({ q }) => useArchivedRuns(q, true), { wrapper: wrapper(), initialProps: { q: 'one' } })
+    await waitFor(() => expect(result.current.data?.pages[0]?.runs[0]?.id).toBe('first'))
+    rerender({ q: 'two' })
+    expect(result.current.isPlaceholderData).toBe(true)
+    expect(result.current.data?.pages[0]?.runs[0]?.id).toBe('first')
   })
 })
