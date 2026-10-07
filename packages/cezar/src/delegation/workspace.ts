@@ -256,10 +256,9 @@ export class WorkspaceHeldError extends Error {
  * The private checkpoint survives removal of the linked Git directory and records
  * the exact ref/log identity whose compare-and-swap deletion may be retried.
  * `beforeRemove` runs once every check has passed, right before git removes the checkout: call
- * this through `releaseThenRemoveOwnedWorkspace` so the worker's preview goes first (#781).
- * `holdersSince` (`workerProcessCutoff`) skips unreadable processes older than the worker. */
+ * this through `releaseThenRemoveOwnedWorkspace` so the worker's preview goes first (#781). */
 export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorkspace, neverMaterialized?: WorkerNoMaterializationProof,
-  assertCurrent?: () => void, beforeRemove?: () => Promise<void>, assertUnheld?: () => void, holdersSince?: number): Promise<WorkerDestroyResult> {
+  assertCurrent?: () => void, beforeRemove?: () => Promise<void>, assertUnheld?: () => void): Promise<WorkerDestroyResult> {
   let remaining: Array<'worktree' | 'branch'> = ['worktree', 'branch'];
   let provisioned = false; let lockBusy = false; let heldBy: readonly number[] = [];
   const result = (): WorkerDestroyResult => ({ workerId: value.ownerRunId, state: remaining.length ? 'incomplete' : 'complete', remaining,
@@ -324,7 +323,7 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
         // Preview release may itself terminate a known owned holder. Check unrelated holders
         // only afterwards, immediately before destructive Git; they are never signalled.
         assertUnheld?.();
-        const holders = inspectGeneration({ paths: [workspace.path], ...(holdersSince !== undefined ? { holdersSince } : {}) });
+        const holders = inspectGeneration({ paths: [workspace.path] });
         if (holders.liveness !== 'gone') { heldBy = holders.pids; return result(); }
         const removed = await mutationGit(repoRoot, ['worktree', 'remove', '--force', workspace.path]);
         if (!removed.ok) return result();

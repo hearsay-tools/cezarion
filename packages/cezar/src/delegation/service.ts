@@ -27,7 +27,6 @@ import { parseDelegationEffort } from './effort.ts';
 import { authorizeSpawn, authorizeSpawnReplay, authorizeWorker, authorizeCancelWait, authorizeRetainedResult, DelegationPolicyError } from './policy.ts';
 import { releaseThenRemoveOwnedWorkspace } from '../git-worktree-release.ts';
 import { planOwnedWorkspace, readOwnedDiff, resolveWorkerBaseline, WorkspaceHeldError } from './workspace.ts';
-import { workerProcessCutoff } from './process-liveness.ts';
 
 export type DelegationProject = { id: string; root: string; store: RunStore; manager: RunManager };
 
@@ -616,7 +615,6 @@ export class DelegationService {
         const taken = project.manager.takeWorkerTerminationBlocker(workerId);
         const reason = taken && (taken.blocker.kind === 'unreadable' ? 'worker process record is unreadable; termination cannot be proven'
           : taken.blocker.kind === 'controller' ? `the worker is still controlled by a live cezar (pid ${taken.blocker.pid})`
-          : taken.blocker.candidates?.length ? `process cwd is unreadable (pids ${taken.blocker.candidates.join(', ')}); holder membership is unverified; resources retained`
           : `${taken.blocker.pids.length === 1 ? 'process' : 'processes'} ${taken.blocker.pids.join(', ')} still ${taken.blocker.pids.length === 1 ? 'holds' : 'hold'} the worker's worktree or scratch`);
         if (taken?.changed) project.store.appendEvent(workerId, { type: 'lifecycle', message: `destroy blocked: ${reason}` });
         result = { workerId, state: 'incomplete', remaining: ['process', ...resources], error: !taken ? 'Worker termination is not proven; retry cleanup later'
@@ -648,7 +646,7 @@ export class DelegationService {
         };
         const assertSafe = () => {
           assertCurrent();
-          const holders = project.store.workerResourceHolders(workerId, proof.generation, workspace.resourceId, { deleting: true });
+          const holders = project.store.workerResourceHolders(workerId, proof.generation, workspace.resourceId);
           if (holders === 'safe') return;
           throw holders.length ? new WorkspaceHeldError(holders) : new Error('Worker resources may still be held; cleanup will retry');
         };
@@ -656,7 +654,7 @@ export class DelegationService {
           assertCurrent();
           // #781: release preview before the final fresh proof immediately preceding removal.
           result = await releaseThenRemoveOwnedWorkspace({ previewHost: project.manager.previewHost }, project.root, workspace,
-            project.manager.getWorkerNoMaterializationProof(workerId), assertCurrent, assertSafe, workerProcessCutoff(snapshot.createdAt));
+            project.manager.getWorkerNoMaterializationProof(workerId), assertCurrent, assertSafe);
         } catch {
           result = { workerId, state: 'incomplete', remaining: resources, error: 'Worker resources may still be held; cleanup will retry' };
         } finally { release?.(); }

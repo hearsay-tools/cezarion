@@ -870,11 +870,12 @@ Requested teardown remains successful. The matrix has no wire exemptions.
 `workflows/worker-location-evidence.test.ts`, drives every `RUNNER_IDS`
 backend's `HARNESS_ADAPTERS` native wire through worker cancellation and a successful twin.
 Linux prior-boot controller evidence settles the old execution independently of resource cleanup.
-Both collect-first and destroy-first unblock parent Finish after collection while a real same-user
-`PR_SET_DUMPABLE=0` holder retains scratch/worktree and keeps writing. Fresh holder proof still
-blocks deletion, retention, history removal and reuse, including after a complete checkpoint and
-restart. Production 60-second retries release resources only after real holder exit; a stale retry
-cannot touch a newly admitted native execution. Disposal/detach stops retries; recovery/reattach
+Both collect-first and destroy-first unblock parent Finish after collection. A real same-user
+`PR_SET_DUMPABLE=0` process inside the scratch or worktree is no evidence (hearsay-tools/cezarion#889,
+reversing the #738 rule that it retained both): once location evidence recovers, production
+60-second retries after restart release every resource while it still runs, and nothing signals it.
+A readable holder still blocks history removal after a complete checkpoint, and reuse until it
+exits; a stale retry cannot touch a newly admitted native execution. Disposal/detach stops retries; recovery/reattach
 reconstructs their durable intents from private generation checkpoints even if the run index is
 missing, corrupt, or quarantines the worker. Surviving unknown private evidence protects local
 and fallback scratch from generic sweeping; unreadable discovery retries too. Unknown fallback
@@ -891,24 +892,21 @@ Only prior-boot evidence and process enumeration scope are synthetic; cwd permis
 process exit, native wires, stores and Git remain real. Linux-only OS coverage exempts no runner;
 legacy/unknown-boot and recorded-process guards live in `delegation/process-liveness.test.ts`.
 
-**R47** (hearsay-tools/cezarion#839), in `workflows/worker-restart-parity.test.ts`,
+**R47** (hearsay-tools/cezarion#839, hearsay-tools/cezarion#889), in `workflows/worker-restart-parity.test.ts`,
 drives every `RUNNER_IDS` backend through its native `HARNESS_ADAPTERS` wire,
-cancellation, and same-boot interrupted checkpoint recovery. A valid token ledger
-with dead recorded incarnations and only unverified unreadable cwd candidates
-permits durable cancellation/abandonment, never a fabricated exit proof. Stale
-partial collection cannot authorize parent Finish; latest settled collection can.
-Restart preserves abandonment and the generation; abandoned intent cannot start a
-new generation even after holders clear. Strict fresh resource proof
-still blocks worktree/branch/scratch cleanup, history deletion and reuse. A live
-recorded unreadable process still blocks settlement. Real mutation keepers make
-owned cleanup refuse promptly and withdraw its queued claim, preserving resources
-until an explicit retry after unlock. Linux-only OS coverage exempts no runner.
-Missing/malformed ledgers and incomplete location evidence retain their existing
-conservative settlement guards; candidate-only destruction refusals report
-unverified membership without waiting out the full termination timeout. Mixed
-readable-holder/candidate probes with absent or incomplete ledgers recheck each
-fresh poll: after the verified holder exits, destruction refuses promptly with
-the candidate reason and retains the execution generation, worktree, branch and scratch.
+cancellation, and same-boot interrupted checkpoint recovery. A live recorded
+unreadable process still blocks settlement, and that partial collection cannot
+authorize parent Finish. Once the recorded incarnations exit (a reused PID does
+not attest the old one), restart settles the generation as gone, with no
+abandonment and no new execution revision, although an unrecorded unreadable
+process still runs inside the worktree. Real mutation keepers make owned cleanup
+refuse promptly and withdraw its queued claim, preserving resources until an
+explicit retry after unlock; that retry completes while the unreadable process
+runs, and latest settled collection then authorizes Finish. Mixed probes with
+absent or incomplete ledgers recheck each fresh poll: destroy waits while a
+readable holder runs, then completes even though an unreadable process remains,
+never signalling it. Linux-only OS coverage exempts no runner. Checkpoints an
+older cezar wrote with `abandoned` still parse and still refuse a new generation.
 
 **R48–R52** (hearsay-tools/cezarion#779), in `core/harness-parity.test.ts`, drive every
 `RUNNER_IDS` backend through its native `HARNESS_ADAPTERS` wire against the `runs.db` run

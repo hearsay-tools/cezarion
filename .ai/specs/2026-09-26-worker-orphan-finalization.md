@@ -1,6 +1,7 @@
 # Finalizing a crashed worker's execution proof (hearsay-tools/cezarion#469)
 
-Status: approved design (2026-09-26), revised with human approval for hearsay-tools/cezarion#738 (2026-10-04). Extends
+Status: approved design (2026-09-26), revised with human approval for hearsay-tools/cezarion#738 (2026-10-04) and
+for hearsay-tools/cezarion#889 (2026-10-07), which reverses #738's rule that an unreadable cwd is a possible holder. Extends
 `2026-09-06-owned-workers-isolated-worktrees.md` ("destroy awaits proven termination").
 
 ## Problem
@@ -77,71 +78,60 @@ A synchronous, dependency-free module (a sync probe lets `continueRun` stay sync
 - `processesWithCwdUnder(dirs)`: the worker's worktree and every agent tmp dir location
   (`agentTmpDirLocationEvidence` supplies both candidates and discovery completeness). Independent
   cleanup can delete terminal-task scratch; execution settlement cannot. Live tasks retain
-  scratch across finalized process generations and restart (hearsay-tools/cezarion#515). Linux reads `/proc/*/cwd`,
-  skipping `ENOENT` (the process vanished) and `EACCES` on another user's process. An
-  unreadable process of our own user is non-dumpable (`systemd --user`, `sshd`,
-  `gpg-agent`). It counts as a possible holder, reported by PID and never signalled, unless it
-  started before the worker's record was created (`since`, from `/proc/stat` btime plus
-  starttime ticks) or another user launched it: its parent chain (`/proc/<pid>/stat` field 4,
-  world-readable, so known for non-dumpable processes too) reaches a process of another user
-  before it reaches init or cezar itself (hearsay-tools/cezarion#874). A process that old cannot be the
-  worker's descendant, and every host has some. A process with a foreign ancestor cannot be
-  one either: an unprivileged worker cannot forge a root parent, and that is what every SSH
-  login looks like (`sshd`'s privilege-separated monitor is root's, the user half under it is
-  non-dumpable, `sftp-server` hangs off that), as do cron, `su` and `login`. A name proves
-  nothing and is never consulted. The chain is no evidence when it ends at init (an orphan
-  reparents there or to a same-user subreaper such as `systemd --user`), at cezar's own PID
-  (then the process is ours), at an unreadable parent or owner, or when the parent changes
-  between reads (PID reuse); each of those keeps the process a candidate. The cutoff is the
-  worker's creation, not the current generation's start, because an earlier generation can
-  leave a daemon holding the worktree.
+  scratch across finalized process generations and restart (hearsay-tools/cezarion#515). Linux reads `/proc/*/cwd`.
 
-  **Execution and resource proofs are separate (hearsay-tools/cezarion#738, approved revision).** A valid Linux
-  controller boot UUID different from the current readable boot UUID proves old descendants
-  cannot survive, but only after checking that neither the controller nor any recorded process
-  is live. `inspectExecutionGeneration` uses this fast proof without scanning paths. Unknown,
-  malformed and legacy boot identities retain conservative descendant handling. Unknown scratch
-  locations prevent a clear partial scan from returning `gone`; readable candidates still report
-  their live PIDs. This completeness check follows the known-reboot fast proof, so uncertainty in
-  cleanup metadata cannot reintroduce a holder scan into reboot settlement. This proves
-  execution settlement only; a same-user non-dumpable process can hold persistent paths after
-  reboot and is indistinguishable from an ambient daemon whose cwd cannot be read.
+  **An unreadable cwd is no evidence (hearsay-tools/cezarion#889, approved reversal of the
+  hearsay-tools/cezarion#738 rule that uncertainty never authorizes cleanup).** A cwd that cannot be read, for
+  any reason, is skipped: a process that vanished (`ENOENT`), another user's (`EACCES`), and a
+  non-dumpable process of our own user (`systemd --user`, the login `sshd`, `sd-pam`,
+  `gpg-agent`, which every host has). Under #738 the last kind was a possible holder, and three
+  carve-outs followed, each excusing one member of the same class: an age cutoff
+  (hearsay-tools/cezarion#858), a foreign-ancestor walk (hearsay-tools/cezarion#874) and a proposed third
+  (hearsay-tools/cezarion#877). Workers still sat in destroy's 60-second retry loop (hearsay-tools/cezarion#879), and the
+  same false positive kept interrupted reviewers in `starting` at the wait layer
+  (hearsay-tools/cezarion#855). The cutoff, the ancestry walk, the candidate/uncertain machinery
+  and same-boot abandonment (hearsay-tools/cezarion#839) are gone. A process blocks destroy, reuse,
+  admission, scratch cleanup and history deletion only when one of these holds:
+
+  - its cwd is readable and under the worktree or a scratch location;
+  - it is a live, token-verified recorded process of the generation;
+  - it is a live foreign controller.
+
+  A scan that cannot list processes at all (`/proc` unreadable, `lsof` failing or missing)
+  stays `unknown`. Accepted risk: a worker descendant that made itself non-dumpable (an agent it
+  started, a setuid helper) while working inside the worktree is not seen, and destroy may delete
+  the directory under it; a recorded process still blocks whatever its cwd. Signalling a worker's
+  own leftover children is hearsay-tools/cezarion#890.
+
+  **Execution and resource proofs are separate.** A valid Linux controller boot UUID different
+  from the current readable boot UUID proves old descendants cannot survive, but only after
+  checking that neither the controller nor any recorded process is live.
+  `inspectExecutionGeneration` uses this fast proof without scanning paths. Unknown, malformed
+  and legacy boot identities keep the descendant scan. Unknown scratch locations prevent a clear
+  partial scan from returning `gone`; readable holders still report their live PIDs. This
+  completeness check follows the known-reboot fast proof, so uncertainty in cleanup metadata
+  cannot reintroduce a holder scan into reboot settlement. A same-boot crash whose recorded
+  processes exited settles as `gone`, however many unreadable processes remain: execution is
+  never abandoned. Checkpoints an older cezar wrote with `abandoned: true` still parse, keep the
+  flag and refuse a new generation.
 
   `inspectGeneration` is the independent **resource** proof. It always scans every protected
-  worktree/scratch path with no boot exclusion. EACCES/EPERM (and unknown ownership)
-  remain unresolved candidates; readable holders and live recorded processes remain blockers.
-  **Destroy is the one age exclusion (hearsay-tools/cezarion#858).** Worker destroy passes
-  `holdersSince` (`workerProcessCutoff`: the worker's `createdAt` less 1 s) to the store proof
-  (`workerResourceHolders(..., { deleting: true })`) and to the scan right before
-  `git worktree remove`. An unreadable own-user process that started before the worker is
-  ambient (login `sshd`, `systemd --user`, `gpg-agent`) and no longer blocks deletion; without
-  this, destroy never completed on a normal Linux host. An unreadable process another user
-  launched (the foreign-ancestor rule above) is skipped whatever its age: a later SSH, Ansible
-  or sftp login is ambient on every host, not a descendant, and would otherwise block destroy
-  of every leftover worktree (hearsay-tools/cezarion#874). A later unreadable process with no foreign
-  ancestor, a readable cwd under the path and a live recorded process still block, and the
-  incomplete destroy error names their PIDs. A readable cwd under the path blocks whatever the
-  ancestry. Accepted risk, the same as execution proof's: an unreadable process older than
-  the worker that later changed into its worktree is deleted under, and so is a worker
-  descendant that gained a foreign ancestor through `sudo` or a setuid binary, or was adopted
-  by a root-owned subreaper other than init, while non-dumpable and inside the worktree.
-  Reuse/admission, scratch cleanup, history deletion and reclaim keep the scan with no age
-  exclusion; the foreign-ancestor rule applies to every scan, because it needs no cutoff.
-  Only a fresh clear scan plus generation/resource ownership permits deletion or reuse.
-  A process becoming readable and outside the protected paths, or exiting, may clear the
-  uncertainty; elapsed time or reboot cannot. Unknown evidence is retained, never silently dropped.
+  worktree/scratch path with no boot exclusion and no age exclusion. Readable holders and live
+  recorded processes block, and the incomplete destroy error names their PIDs. Only a fresh clear
+  scan plus generation/resource ownership permits deletion or reuse. A readable holder exiting or
+  leaving the protected paths clears it; elapsed time or reboot cannot. Unknown evidence is
+  retained, never silently dropped.
 
-  macOS uses
-  `lsof -a -d cwd -Fpn` with a bounded timeout. `lsof` silently omits processes it cannot
-  read, so any process of our user missing from its output is judged by the same two rules,
-  age and ancestry, from one process table (`ps -A -o pid=,ppid=,uid=,stat=,lstart=`, minus
-  `ps` itself; other users' rows only serve the parent walk). Without that table the scan is `unknown`.
-  It excludes
-  `process.pid`, compares realpaths, and matches a dir itself or anything beneath it. cezar's own
-  `git` children in the worktree make the scan read `alive` for a moment; that is
-  conservative, and it clears on the next probe. If
-  `/proc` is unreadable, `lsof` is missing, or the platform is anything else, it
-  returns `unknown`.
+  macOS uses `lsof -a -d cwd -Fpn` with a bounded timeout. A process `lsof` cannot read is
+  omitted from its output, and that omission is no evidence either; there is no second process
+  table. It excludes `process.pid`, compares realpaths, and matches a dir itself or anything
+  beneath it. cezar's own `git` children in the worktree make the scan read `alive` for a moment;
+  that is conservative, and it clears on the next probe.
+
+  win32 has no cwd scan and answers no holders. Recorded processes decide, judged by PID alone
+  since win32 has no start token, and the checked `git worktree remove` is the proof: Windows
+  refuses to delete a directory that is a process's current directory, and a failed removal
+  leaves destroy `incomplete` for the next retry. Any other platform returns `unknown`.
 - `inspectGeneration({ record, paths }) → { liveness: 'gone' | 'alive' | 'unknown', controller?, pids }`
   (`probeGeneration` returns only `liveness`):
   - `alive` when the controller is live and is not this process, when any recorded
@@ -275,8 +265,9 @@ evidence still exists, and refuses to forget an intent whose scratch removal fai
 
 The original hearsay-tools/cezarion#738 acceptance criterion that cleanup always succeeds after reboot is explicitly
 narrowed: **execution settlement, collection and parent Finish unblock once execution is proven
-terminated; eventual cleanup requires independent fresh proof that no holder or unresolved
-candidate remains. If that proof never becomes available, files remain indefinitely.**
+terminated; eventual cleanup requires independent fresh proof that no readable holder, live
+recorded process or live foreign controller remains. If that proof never becomes available, files
+remain indefinitely.** An unreadable cwd never withholds that proof (hearsay-tools/cezarion#889).
 
 ## Not changing
 
@@ -291,8 +282,16 @@ candidate remains. If that proof never becomes available, files remain indefinit
 ## Known limitations
 
 - Legacy process records without a controller boot ID, or an unreadable current Linux
-  boot ID, cannot use the hearsay-tools/cezarion#738 reboot proof. Unreadable same-user cwd candidates may
-  still block those generations; uncertainty never authorizes cleanup.
+  boot ID, cannot use the hearsay-tools/cezarion#738 reboot proof. Those generations keep the
+  descendant scan, where only readable cwds and live recorded processes block
+  (hearsay-tools/cezarion#889).
+- A non-dumpable worker descendant inside the worktree is invisible to the scan, and destroy may
+  delete the directory under it (hearsay-tools/cezarion#889).
+- On win32 the recorded processes are the only holder proof (hearsay-tools/cezarion#889). Removal
+  adds the OS refusal to delete a directory a process holds. Reuse has no such backstop: an
+  unrecorded process still working in the worktree does not stop a new generation from starting
+  there. Keeping `unknown` for admission instead refused the next generation of every
+  materialized worker, so Continue never worked on win32 and destroy was the only exit.
 - Reaping signals only the recorded session leader. Runners do not spawn detached, so there
   is no process group to kill. A descendant that survives the leader keeps its cwd in the
   worktree, and the scan keeps destroy `incomplete` (naming the PIDs) until it exits.
@@ -307,20 +306,21 @@ candidate remains. If that proof never becomes available, files remain indefinit
     after it exits;
   - an unsupported platform returns `unknown`;
   - PID reuse (token mismatch) counts as gone.
-  - hearsay-tools/cezarion#738: denied cwd candidates remain possible resource holders even across boots; readable
-    holders and matching live process records also block. Same-boot controllers for
-    old-created workers, legacy/missing tokens, unknown boot IDs and scan errors retain
-    conservative behavior.
+  - hearsay-tools/cezarion#889: an unreadable cwd (`EACCES`, `EPERM`, `ENOENT`, any other error)
+    is no evidence, on Linux and on macOS (`lsof` alone), and a real `PR_SET_DUMPABLE=0`
+    process never blocks either proof; readable holders and matching live process records
+    still block. win32 answers no holders; an unlistable `/proc` is `unknown`. Legacy/missing
+    tokens and unknown boot IDs keep the readable-holder descendant scan.
 - `worker-reboot-parity.test.ts` (registered harness row R43): every `RUNNER_IDS` backend
   launches and exits through its `HARNESS_ADAPTERS` native mock wire. Both collect-first and
   destroy-first restore prior-boot interrupted evidence beside a successful collected twin.
   A real Linux Python process uses `PR_SET_DUMPABLE=0` while holding worktree or scratch;
-  kernel cwd reads are genuinely denied and the process still writes after collection/Finish.
-  Those settlement paths never call the strict resource probe. Restart keeps both resources;
-  automatic production-cadence retries release them after the actual holder exits. Completed
-  cleanup cannot bypass the fresh history-deletion probe. Native continuation tests refuse
-  reuse while uncertain, then admit a new generation on real exit and prove stale retry cannot
-  remove that generation's scratch. Only reboot evidence and enumeration scope are synthetic;
+  kernel cwd reads are genuinely denied. Those settlement paths never call the strict resource
+  probe. Since hearsay-tools/cezarion#889 the process is no evidence: after restart, automatic
+  production-cadence retries release both resources while it still runs, and nothing signals
+  it. Completed cleanup cannot bypass the fresh history-deletion probe over a readable holder.
+  Native continuation tests refuse reuse while a readable holder runs, then admit a new
+  generation on real exit and prove stale retry cannot remove that generation's scratch. Only reboot evidence and enumeration scope are synthetic;
   permissions, tokens, runners, stores, Git and deletion are real.
 - `worker-destroy.test.ts`, with a crash simulated by a dead controller written into the
   record and the `starting` proof restored:

@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { agentTmpDir, agentTmpDirMayExist, agentTmpEnv, removeAgentTmpDir } from '../runs/agent-tmpdir.ts';
 import { manager, store, root, worker, reopenRuntime, useWorkerWaitFixture } from '../workflows/worker-wait.testkit.ts';
-import { nonDumpableHolder } from './non-dumpable.testkit.ts';
+import { nonDumpableHolder, readableHolder } from './non-dumpable.testkit.ts';
 import { WorkerScratchCleanup } from './scratch-cleanup.ts';
 import { readPersistedRuns, seedRuns } from '../runs/run-store.testkit.ts';
 
@@ -141,9 +141,9 @@ describe('durable scratch cleanup evidence', () => {
 
   it.runIf(process.platform === 'linux').each(['corrupt', 'missing', 'quarantined'].flatMap(mode => ['local', 'fallback'].map(location => ({ mode, location }))))('retains held $location scratch across $mode index recovery and retries after the holder exits', async ({ mode, location }) => {
     const { run, dataDir, scratch } = await completed(location);
-    const holder = await nonDumpableHolder(scratch);
+    const holder = await readableHolder(scratch);
     try {
-      // The helper asserts a real kernel EACCES/EPERM; no cwd or liveness read is mocked.
+      // A real readable holder; no cwd or liveness read is mocked.
       await holder.write();
       manager.dispose(); store.close();
       const database = join(dataDir, 'runs.db');
@@ -228,13 +228,14 @@ describe('durable scratch cleanup evidence', () => {
     } finally { vi.useRealTimers(); }
   });
 
-  it.runIf(process.platform === 'linux')('admits fresh absent resources despite ambient denial, but refuses reuse of retained paths', async () => {
+  it.runIf(process.platform === 'linux')('ambient denial never refuses admission or reuse; a readable holder of retained paths does (hearsay-tools/cezarion#889)', async () => {
     const parent = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });
     store.updateRun(parent.id, { status: 'waiting', delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
     const run = await worker(parent.id);
     if (run.delegation?.role !== 'worker') throw Error('missing worker');
     const scratch = agentTmpDir(join(root, '.ai/cezar'), run.id);
-    const holder = await nonDumpableHolder(root); // outside every worker resource, but unreadable
+    const ambient = await nonDumpableHolder(root); // outside every worker resource, and unreadable
+    let retained: Awaited<ReturnType<typeof nonDumpableHolder>> | undefined;
     try {
       expect(existsSync(run.delegation.workspace.path)).toBe(false);
       expect(agentTmpDirMayExist(join(root, '.ai/cezar'), run.id)).toBe(false);
@@ -243,10 +244,18 @@ describe('durable scratch cleanup evidence', () => {
       store.updateRun(run.id, { status: 'cancelled' }); store.commitWorkerExecutionComplete(run.id, generation);
       manager.pauseWorkerCleanup();
       mkdirSync(scratch, { recursive: true }); writeFileSync(join(scratch, 'retained'), 'task files');
-      expect(() => store.commitWorkerExecutionStart(run.id)).toThrow(/resources may still be held/);
-      expect(store.readWorkerExecution(run.id)?.generation).toBe(generation);
-      await holder.write();
-    } finally { await holder.close(); }
+      // An unreadable cwd is no evidence even inside the retained scratch.
+      retained = await nonDumpableHolder(scratch);
+      const reader = await readableHolder(scratch);
+      try {
+        expect(() => store.commitWorkerExecutionStart(run.id)).toThrow(/resources may still be held/);
+        expect(store.readWorkerExecution(run.id)?.generation).toBe(generation);
+        await reader.write();
+      } finally { await reader.close(); }
+      expect(store.commitWorkerExecutionStart(run.id)).not.toBe(generation);
+      expect(readFileSync(join(scratch, 'retained'), 'utf8')).toBe('task files');
+      await ambient.write(); await retained.write();
+    } finally { await ambient.close(); await retained?.close(); }
   });
 
   it.each(['execution', 'processes'])('reconstructs and keeps retrying while the private %s evidence is unreadable', async sidecar => {

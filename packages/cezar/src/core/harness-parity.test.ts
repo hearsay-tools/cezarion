@@ -576,9 +576,10 @@ const CONTROL_CRITERIA = [
   { id: 'R41', scenario: 'done' },
   { id: 'R42', scenario: 'baseline' },
   // workflows/worker-reboot-parity.test.ts and worker-location-evidence.test.ts: native exit/Continue,
-  // independent reboot proof, legacy location uncertainty, real holders, cleanup retries and parent Finish.
+  // independent reboot proof, legacy location uncertainty, readable vs unreadable holders, cleanup retries
+  // and parent Finish.
   { id: 'R43', scenario: 'baseline' },
-  // workflows/worker-restart-parity.test.ts: same-boot abandonment, mixed-holder polling and bounded cleanup locks.
+  // workflows/worker-restart-parity.test.ts: same-boot exit proof, mixed-holder polling and bounded cleanup locks.
   { id: 'R47', scenario: 'baseline' },
   // #779: Continue on a run only runs.db holds, through both ActiveRun construction sites.
   { id: 'R48', scenario: 'done' },

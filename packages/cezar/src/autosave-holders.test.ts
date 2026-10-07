@@ -44,6 +44,22 @@ describe('autosave cwd-holder proof', () => {
     const pending = (await watchAutosaveHolders('/worktree'))!;
     expect(await pending()).toBe(true);
   });
+  it('a Darwin process lsof could not read is no holder (hearsay-tools/cezarion#889)', async () => {
+    vi.stubGlobal('process', { ...process, platform: 'darwin' });
+    const kill = vi.spyOn(process, 'kill').mockReturnValue(true);
+    let scans = 0;
+    vi.mocked(childProcess.execFile).mockImplementation(((command: string, args: string[], _options: unknown, callback: (error: null, stdout: string) => void) => {
+      // 505 appears in ps from the second scan on, but lsof never reports its cwd.
+      const stdout = command === 'lsof' ? 'p404\nn/elsewhere\n'
+        : args.includes('-p') ? 'S Tue Sep 29 10:00:00 2026\n'
+        : `404 Tue Sep 29 09:00:00 2026\n${++scans > 1 ? '505 Tue Sep 29 10:00:00 2026\n' : ''}`;
+      queueMicrotask(() => callback(null, stdout));
+      return { pid: command === 'lsof' ? 801 : 802 };
+    }) as unknown as typeof childProcess.execFile);
+    const pending = (await watchAutosaveHolders('/worktree'))!;
+    expect(await pending()).toBe(false);
+    expect(kill).not.toHaveBeenCalled();
+  });
   it('excludes only the same pre-existing incarnation', async () => {
     const pending = (await watchAutosaveHolders('/worktree'))!;
     expect(await pending()).toBe(false);

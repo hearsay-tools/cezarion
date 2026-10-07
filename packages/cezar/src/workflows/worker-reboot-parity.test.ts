@@ -5,9 +5,8 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RUNNER_IDS } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
-import { nonDumpableHolder } from '../delegation/non-dumpable.testkit.ts';
+import { nonDumpableHolder, readableHolder } from '../delegation/non-dumpable.testkit.ts';
 import { agentTmpDir } from '../runs/agent-tmpdir.ts';
-import { reclaimWorktree } from '../runs/retention.ts';
 import { CredentialRegistry } from '../delegation/credentials.ts';
 import { DelegationService } from '../delegation/service.ts';
 import { manager, store, root, worker, until, semaphore, executions, bookkeeping, reopenRuntime, useWorkerWaitFixture } from './worker-wait.testkit.ts';
@@ -25,7 +24,7 @@ describe.runIf(process.platform === 'linux')('R43 reboot orphan settlement (#738
   useWorkerWaitFixture({ processScope: false }); // Explicit PID scope below includes unreadable holders.
   afterEach(() => { vi.restoreAllMocks(); syncBuiltinESMExports(); });
 
-  for (const settleVia of ['collect', 'destroy'] as const) it.each(RUNNER_IDS)(`%s ${settleVia} settles and clears parent Finish while an unreadable holder retains resources until retry after restart`, async runner => {
+  for (const settleVia of ['collect', 'destroy'] as const) it.each(RUNNER_IDS)(`%s ${settleVia} settles and clears parent Finish; after restart, cleanup completes while an unreadable holder runs`, async runner => {
     // Service collection is opt-in; useWorkerWaitFixture restores the caller's environment.
     process.env.CEZ_DELEGATION = '1';
     const adapter = HARNESS_ADAPTERS[runner];
@@ -62,6 +61,7 @@ describe.runIf(process.platform === 'linux')('R43 reboot orphan settlement (#738
     mkdirSync(scratch, { recursive: true }); writeFileSync(join(scratch, 'retained'), 'scratch');
     // Unknown location evidence blocks legacy settlement, but cannot negate known-reboot
     // execution proof. The independent cleanup still requires this evidence to recover.
+    // The holder's cwd is unreadable, so it is no evidence at all (hearsay-tools/cezarion#889).
     const receipt = join(scratch, '.cez-fallback-removal.json');
     writeFileSync(receipt, '{corrupt', { mode: 0o600 });
     const holder = await nonDumpableHolder(settleVia === 'collect' ? scratch : workspace.path);
@@ -78,6 +78,7 @@ describe.runIf(process.platform === 'linux')('R43 reboot orphan settlement (#738
       expect(manager.finish(p.id)).toBe(false);
       if (settleVia === 'destroy') {
         Object.assign(service, { terminationTimeoutMs: 100 });
+        // The damaged location receipt, not the holder, retains both resources.
         expect(await service.destroyForHuman('project', orphan.id)).toMatchObject({ state: 'incomplete', remaining: ['worktree', 'branch'] });
       }
       const resourceProbe = vi.spyOn(fs, 'readlinkSync'); syncBuiltinESMExports();
@@ -90,38 +91,19 @@ describe.runIf(process.platform === 'linux')('R43 reboot orphan settlement (#738
       expect(manager.finish(p.id)).toBe(true);
       expect(existsSync(scratch)).toBe(true);
       expect(resourceProbe.mock.calls.filter(([path]) => String(path).startsWith('/proc/'))).toHaveLength(0);
-      // Restore metadata before testing holder-only deletion/reuse guards below.
+      // Restoring the location evidence leaves only the holder, which proves nothing.
       rmSync(receipt);
       await until(() => store.getRun(p.id)?.status === 'done');
       expect(semaphore.busy()).toBe(0);
-      await holder.write();
-      expect(existsSync(workspace.path)).toBe(true); expect(existsSync(scratch)).toBe(true);
-      expect(() => store.commitWorkerExecutionStart(orphan.id)).toThrow();
-      // Retention after parent Finish must preserve the same uncertain resources.
-      expect(await reclaimWorktree(root, store, store.getRun(orphan.id)!, { claim: run => manager.claimWorktreeReclaim(run.id) })).toBeNull();
-      await vi.advanceTimersByTimeAsync(0); // first deferred scratch attempt
-      expect(existsSync(scratch)).toBe(true);
-      // Collection alone leaves the worktree; scratch has its own retry even without destroy.
+      // Production 60s timers, no shortened override or manual scratch cleanup call: recovered
+      // cleanup releases every resource on its next wake while the holder still runs.
       detach(); manager.dispose(); store.flush(); reopenRuntime();
       await manager.recover();
       service = new DelegationService(); detach = service.registerProject({ id: 'project', root, store, manager });
       service.armDestroyRetries('project');
       await vi.advanceTimersByTimeAsync(60_000);
-      expect(existsSync(workspace.path)).toBe(true); expect(existsSync(scratch)).toBe(true);
-      await holder.write();
-      expect(semaphore.busy()).toBe(0);
-      expect(manager.continueRun(orphan.id)).toMatchObject({ ok: false });
-      expect(store.readWorkerExecution(orphan.id)?.generation).toBe(proof.generation);
-      if (settleVia === 'destroy') {
-        expect(await service.destroyForHuman('project', orphan.id)).toMatchObject({ state: 'incomplete', remaining: ['worktree', 'branch'] });
-      }
-      expect(store.canDeleteRun(orphan.id)).toBe(false);
-      await holder.close(); holderClosed = true;
-      // Production 60s timers, no shortened override or manual scratch cleanup call: real exit
-      // clears the kernel denial and recovered cleanup finishes on its next wake.
-      await vi.advanceTimersByTimeAsync(60_000);
+      expect(existsSync(scratch)).toBe(false);
       if (settleVia === 'collect') {
-        expect(existsSync(scratch)).toBe(false);
         expect(existsSync(workspace.path)).toBe(true); // collection never requests worktree removal
         expect(await service.destroyForHuman('project', orphan.id)).toMatchObject({ state: 'complete', remaining: [] });
       }
@@ -129,23 +111,30 @@ describe.runIf(process.platform === 'linux')('R43 reboot orphan settlement (#738
       await until(() => !existsSync(workspace.path) && !existsSync(scratch));
       await until(() => store.getRun(orphan.id)?.delegation?.role === 'worker' &&
         (store.getRun(orphan.id)!.delegation as { destroy?: { phase: string } }).destroy?.phase === 'complete');
+      expect(holder.running).toBe(true); // its cwd is gone, but nothing signalled it
       expect(execFileSync('git', ['branch', '--list', workspace.branch], { cwd: root, encoding: 'utf8' }).trim()).toBe('');
       expect(store.readWorkerResult(p.id, orphan.id)).toMatchObject({ settled: true, cleanup: 'complete' });
       expect(store.getRun(p.id)?.status).toBe('done');
       expect(store.canDeleteRun(orphan.id)).toBe(true);
+      await holder.close(); holderClosed = true;
       // With every resource physically absent, an ambient denial cannot strand history.
       const ambient = await nonDumpableHolder(root); scopedPids.push(ambient.pid);
       try { expect(store.canDeleteRun(orphan.id)).toBe(true); } finally { await ambient.close(); }
-      // A completed cleanup/checkpoint cannot authorize later history removal over a new holder.
+      // A completed cleanup/checkpoint cannot authorize later history removal over a new readable holder.
       mkdirSync(scratch, { recursive: true });
-      const later = await nonDumpableHolder(scratch); scopedPids.push(later.pid);
+      const later = await readableHolder(scratch); scopedPids.push(later.pid);
       try {
         expect(store.deleteRun(orphan.id)).toBe(false);
         expect(existsSync(join(files, `${orphan.id}.processes.json`))).toBe(true);
         expect(existsSync(join(files, `${orphan.id}.execution.json`))).toBe(true);
         await later.write();
       } finally { await later.close(); }
-      expect(store.deleteRun(orphan.id)).toBe(true);
+      // An unreadable one does not stop it.
+      const unreadable = await nonDumpableHolder(scratch); scopedPids.push(unreadable.pid);
+      try {
+        expect(store.deleteRun(orphan.id)).toBe(true);
+        expect(unreadable.running).toBe(true);
+      } finally { await unreadable.close(); }
       expect(existsSync(scratch)).toBe(false);
     } finally { detach(); credentials.close(); if (!holderClosed) await holder.close(); vi.useRealTimers(); }
   });
@@ -163,7 +152,8 @@ describe.runIf(process.platform === 'linux')('R43 reboot orphan settlement (#738
     const generation = store.readWorkerExecution(w.id)!.generation;
     const scratch = agentTmpDir(join(root, '.ai/cezar'), w.id);
     mkdirSync(scratch, { recursive: true }); writeFileSync(join(scratch, 'retained'), 'old task scratch');
-    const holder = await nonDumpableHolder(scratch); let closed = false;
+    // A readable holder: an unreadable cwd would be no evidence (hearsay-tools/cezarion#889).
+    const holder = await readableHolder(scratch); let closed = false;
     const scoped = [holder.pid]; scopeProcesses(scoped);
     try {
       manager.pauseWorkerCleanup();

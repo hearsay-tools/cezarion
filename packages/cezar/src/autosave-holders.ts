@@ -18,9 +18,9 @@ function inspect(command: string, args: string[], timeout: number) {
   });
 }
 
-async function snapshot(cwd: string, since: number): Promise<Snapshot> {
+async function snapshot(cwd: string): Promise<Snapshot> {
   if (process.platform === 'linux') {
-    const pids = processesWithCwdUnder(cwd, process.platform, undefined, since);
+    const pids = processesWithCwdUnder(cwd);
     return pids === 'unknown' ? pids : new Map(pids.map(pid => [pid, processStartToken(pid)]));
   }
   // No process-tree proof exists on other platforms. Refuse before spawning,
@@ -35,11 +35,10 @@ async function snapshot(cwd: string, since: number): Promise<Snapshot> {
   if (!ps.ok || !lsof.ok || !lsof.stdout) return 'unknown';
   let root = resolve(cwd);
   try { root = realpathSync(cwd); } catch { /* Git will report an absent directory. */ }
-  const seen = new Set<number>();
   const holders = new Set<number>();
   let pid: number | undefined;
   for (const line of lsof.stdout.split('\n')) {
-    if (line.startsWith('p')) { pid = Number(line.slice(1)); seen.add(pid); }
+    if (line.startsWith('p')) pid = Number(line.slice(1));
     else if (line.startsWith('n') && pid !== undefined) {
       const path = line.slice(1);
       if (path === root || path.startsWith(root + sep)) holders.add(pid);
@@ -51,9 +50,9 @@ async function snapshot(cwd: string, since: number): Promise<Snapshot> {
     if (!match) continue;
     const id = Number(match[1]);
     if (id === process.pid || id === ps.pid || id === lsof.pid) continue;
-    // As in orphan recovery, a missing cwd is uncertainty, not permission.
-    // Record pre-existing uncertain holders in the baseline too.
-    if (holders.has(id) || !seen.has(id)) result.set(id, match[2]);
+    // As in orphan recovery, a process lsof could not read is no evidence (hearsay-tools/cezarion#889);
+    // `ps` only supplies each holder's identity.
+    if (holders.has(id)) result.set(id, match[2]);
   }
   // A holder born between the two snapshots may be absent from ps. Missing
   // identity is uncertainty, never grounds to drop the lsof observation.
@@ -82,12 +81,11 @@ async function live(entry: RecordedProcess): Promise<boolean> {
  * before it can be observed; this is not an OS sandbox.
  */
 export async function watchAutosaveHolders(cwd: string) {
-  const since = Date.now();
-  const baseline = await snapshot(cwd, since);
+  const baseline = await snapshot(cwd);
   if (baseline === 'unknown') return undefined;
   const observed = new Map<number, RecordedProcess>();
   return async () => {
-    const current = await snapshot(cwd, since);
+    const current = await snapshot(cwd);
     if (current === 'unknown') return true;
     for (const [pid, startToken] of current) {
       if (startToken !== undefined && baseline.get(pid) === startToken) continue;
