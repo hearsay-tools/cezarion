@@ -8,7 +8,8 @@ import { resolve, sep } from 'node:path';
  * An unreadable cwd is no evidence (hearsay-tools/cezarion#889); every other uncertainty answers
  * "alive" or "unknown", never "gone".
  */
-export type RecordedProcess = { pid: number; startToken?: string };
+/** `pgid`: the session leader leads its own process group (hearsay-tools/cezarion#890). */
+export type RecordedProcess = { pid: number; startToken?: string; pgid?: number };
 export type WorkerProcessRecord = { generation: string; controller: RecordedProcess; processes: RecordedProcess[] };
 export type GenerationLiveness = 'gone' | 'alive' | 'unknown';
 
@@ -72,6 +73,17 @@ export function recordedProcessLive(entry: RecordedProcess): boolean {
   if (entry.startToken === undefined) return true;
   const current = processStartToken(entry.pid);
   return current === undefined || sameIncarnation(entry.startToken, current);
+}
+
+/** Whether a recorded session leader's group may be signalled (hearsay-tools/cezarion#890). A live
+ * leader must be the exact recorded incarnation; a different one means the group emptied and its
+ * number was reused. A dead leader proves nothing: its number may since have been reused, and a
+ * double-fork daemon leaves exactly a live group with a dead leader. Such a group is signalled
+ * only when it holds the worker's paths: `holderGroups` are the groups of those holders. */
+export function recordedGroupSignalable(entry: RecordedProcess, holderGroups: readonly number[] = []): boolean {
+  if (entry.pgid === undefined || entry.pgid !== entry.pid) return false;
+  if (pidExists(entry.pid)) return entry.startToken !== undefined && processStartToken(entry.pid) === entry.startToken;
+  return holderGroups.includes(entry.pgid);
 }
 
 export function isCurrentProcess(entry: RecordedProcess): boolean {

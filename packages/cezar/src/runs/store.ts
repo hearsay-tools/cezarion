@@ -1199,7 +1199,8 @@ export function parseStoredSummary(text: string): RunSummary | undefined {
 }
 
 const WORKER_PROCESS_CAP = 32;
-const recordedProcessSchema = z.object({ pid: z.number().int().positive(), startToken: z.string().min(1).max(128).optional() }).strict();
+const recordedProcessSchema = z.object({ pid: z.number().int().positive(), startToken: z.string().min(1).max(128).optional(),
+  pgid: z.number().int().positive().optional() }).strict();
 const workerProcessRecordSchema = z.object({ generation: z.string().uuid(), controller: recordedProcessSchema,
   processes: z.array(recordedProcessSchema).max(WORKER_PROCESS_CAP) }).strict();
 const startToken = (pid: number) => { const token = processStartToken(pid); return token === undefined ? {} : { startToken: token }; };
@@ -3585,10 +3586,10 @@ export class RunStore extends EventEmitter {
 
   /** Bound to the current generation. Past the cap the record never drops an entry: the
    * working-directory scan is the remaining evidence. */
-  appendWorkerProcess(id: string, generation: string, pid: number): boolean {
+  appendWorkerProcess(id: string, generation: string, pid: number, pgid?: number): boolean {
     const record = this.readWorkerProcesses(id, generation);
     if (typeof record === 'string' || this.readWorkerExecution(id)?.generation !== generation) return false;
-    const entry: RecordedProcess = { pid, ...startToken(pid) };
+    const entry: RecordedProcess = { pid, ...startToken(pid), ...(pgid === undefined ? {} : { pgid }) };
     if (record.processes.some(known => known.pid === entry.pid && known.startToken === entry.startToken)) return true;
     if (record.processes.length >= WORKER_PROCESS_CAP) return false;
     this.writeWorkerProcesses(id, { ...record, processes: [...record.processes, entry] });

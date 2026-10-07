@@ -21,8 +21,9 @@ import {
 } from '../core/ask.ts';
 import { type AgentSession } from '../core/claude-cli-runner.ts';
 import { hasRegisteredRunProcess, onUsage, registerRunProcess, unregisterRunProcess, type ProcessUsage } from '../core/process-usage.ts';
+import { processGroupAlive, processGroupOf, sessionGroupOf, signalProcessGroup } from '../core/session-process.ts';
 import { WorkerScratchCleanup } from '../delegation/scratch-cleanup.ts';
-import { inspectExecutionGeneration, isCurrentProcess, processStartToken, recordedProcessLive, type GenerationProbe, type WorkerProcessRecord } from '../delegation/process-liveness.ts';
+import { inspectExecutionGeneration, isCurrentProcess, processesWithCwdUnder, processStartToken, recordedGroupSignalable, recordedProcessLive, type GenerationProbe, type RecordedProcess, type WorkerProcessRecord } from '../delegation/process-liveness.ts';
 import { parseUsageLimit } from '../core/usage-limit.ts';
 import { startManagedSession } from '../core/managed-session.ts';
 import { createRunner } from '../core/runner-factory.ts';
@@ -1068,22 +1069,16 @@ export class RunManager {
     // >= 500 ms: every probe may be a synchronous darwin `lsof`.
     const pause = () => new Promise(resolve => setTimeout(resolve, Math.max(0, Math.min(500, deadline - Date.now()))));
     // A live controller is another cezar's: nothing to signal or wait for. Otherwise signal only
-    // recorded, token-verified survivors (none for a legacy record-less generation), then wait
-    // for readable cwd holders until the deadline.
+    // recorded, token-verified survivors and recorded session groups (none for a legacy
+    // record-less generation), then wait for readable cwd holders until the deadline.
     if (!orphan.record || !recordedProcessLive(orphan.record.controller)) {
       if (orphan.record) {
-        const targets = orphan.record.processes.filter(entry => entry.startToken !== undefined && recordedProcessLive(entry));
-        const signal = (name: NodeJS.Signals) => {
-          for (const entry of targets) {
-            if (!same()) return;
-            // Re-verified immediately before every signal, exactly: a reused PID is never touched.
-            if (processStartToken(entry.pid) === entry.startToken) try { process.kill(entry.pid, name); } catch { /* already gone */ }
-          }
-        };
-        signal('SIGTERM');
-        const killAt = Math.min(deadline, Date.now() + this.orphanTermGraceMs);
-        while (Date.now() < killAt && targets.some(recordedProcessLive)) await pause();
-        if (targets.some(recordedProcessLive)) signal('SIGKILL');
+        const { processes } = orphan.record;
+        await this.terminateRecorded({
+          pids: processes.filter(entry => entry.pgid === undefined && entry.startToken !== undefined && recordedProcessLive(entry)),
+          groups: processes.filter(entry => entry.pgid !== undefined),
+          paths: orphan.paths,
+        }, deadline, pause, same);
       }
       while (!this.settleOrphanedWorkerExecution(runId, { fresh: true }) && Date.now() < deadline && same()) await pause();
     }
@@ -1093,11 +1088,58 @@ export class RunManager {
     else if (probe?.pids.length) this.orphanBlockers.set(runId, { kind: 'processes', pids: probe.pids });
   }
 
+  /** Destroy only: SIGTERM recorded survivors, then SIGKILL what outlives `orphanTermGraceMs`.
+   * `pids` are signalled by token-verified pid; `groups` are session leaders whose whole process
+   * group is signalled (hearsay-tools/cezarion#890), so what an agent left behind exits with it. A
+   * dead leader's group counts only while a process holding `paths` is in it. Every signal
+   * re-verifies first: a reused PID or group number is never touched. */
+  private async terminateRecorded(targets: { pids: RecordedProcess[]; groups: RecordedProcess[]; paths: readonly string[] }, deadline: number,
+    pause: () => Promise<unknown>, current: () => boolean = () => true): Promise<void> {
+    const holders = processesWithCwdUnder(targets.paths);
+    const holderGroups = () => (holders === 'unknown' ? [] : holders).map(processGroupOf).filter((pgid): pgid is number => pgid !== undefined);
+    const groups = targets.groups.filter(entry => recordedGroupSignalable(entry, holderGroups()) && processGroupAlive(entry.pgid!));
+    const living = () => targets.pids.some(recordedProcessLive) || groups.some(entry => processGroupAlive(entry.pgid!));
+    const signal = (name: NodeJS.Signals) => {
+      for (const entry of targets.pids) {
+        if (!current()) return;
+        if (processStartToken(entry.pid) === entry.startToken) try { process.kill(entry.pid, name); } catch { /* already gone */ }
+      }
+      const evidence = holderGroups();
+      for (const entry of groups) {
+        if (!current()) return;
+        if (recordedGroupSignalable(entry, evidence)) signalProcessGroup(entry.pgid!, name);
+      }
+    };
+    if (!living()) return;
+    signal('SIGTERM');
+    const killAt = Math.min(deadline, Date.now() + this.orphanTermGraceMs);
+    while (Date.now() < killAt && living()) await pause();
+    if (living()) signal('SIGKILL');
+  }
+
+  /** Destroy of a finished generation (hearsay-tools/cezarion#890): a dev server or watcher its
+   * agent left in its process group holds the worktree, and nothing else ties it to the worker.
+   * A record whose controller is another live cezar is not ours to act on. */
+  private async terminateFinishedWorkerGroups(runId: string, timeoutMs: number): Promise<void> {
+    const proof = this.store.readWorkerExecution(runId);
+    if (proof?.phase !== 'complete') return;
+    const record = this.store.readWorkerProcesses(runId, proof.generation);
+    const run = this.store.getRun(runId);
+    if (typeof record === 'string' || run?.delegation?.role !== 'worker' ||
+      (recordedProcessLive(record.controller) && !isCurrentProcess(record.controller))) return;
+    const groups = record.processes.filter(entry => entry.pgid !== undefined);
+    if (!groups.length) return;
+    const deadline = Date.now() + Math.min(30_000, Math.max(0, Number.isFinite(timeoutMs) ? timeoutMs : 0));
+    const pause = () => new Promise(resolve => setTimeout(resolve, Math.max(0, Math.min(100, deadline - Date.now()))));
+    const paths = [run.delegation.workspace.path, ...agentTmpDirLocationEvidence(this.dataDir, runId).paths];
+    await this.terminateRecorded({ pids: [], groups, paths }, deadline, pause);
+  }
+
   /** Best effort: a failed write leaves the working-directory scan as this process's evidence. */
   private recordWorkerProcess(runId: string, pid: number): void {
     const generation = this.executions.get(runId)?.generation;
     if (!generation) return;
-    try { if (!this.store.appendWorkerProcess(runId, generation, pid)) console.warn(`[cez] worker ${runId} process record unavailable; relying on the working-directory scan`); }
+    try { if (!this.store.appendWorkerProcess(runId, generation, pid, sessionGroupOf(pid))) console.warn(`[cez] worker ${runId} process record unavailable; relying on the working-directory scan`); }
     catch { console.warn(`[cez] worker ${runId} process record write failed; relying on the working-directory scan`); }
   }
 
@@ -1116,6 +1158,12 @@ export class RunManager {
   }
 
   async awaitRunTermination(runId: string, timeoutMs: number, opts: { reapOrphans?: boolean } = {}): Promise<boolean> {
+    const terminated = await this.proveRunTermination(runId, timeoutMs, opts);
+    if (terminated && opts.reapOrphans && !this.disposed) await this.terminateFinishedWorkerGroups(runId, timeoutMs);
+    return terminated;
+  }
+
+  private async proveRunTermination(runId: string, timeoutMs: number, opts: { reapOrphans?: boolean }): Promise<boolean> {
     const execution = this.executions.get(runId);
     if (!execution) {
       const generation = this.finalizedWorkers.get(runId);

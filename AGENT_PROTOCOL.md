@@ -867,6 +867,16 @@ output transport must terminate the live child. OpenCode uses its real HTTP/SSE
 stream for the transport failure, while the other backends use stdout.
 Requested teardown remains successful. The matrix has no wire exemptions.
 
+**S26–S28** (hearsay-tools/cezarion#890), in the same file, start every `RUNNER_IDS` backend's
+native mock with `mock:no-progress-leftover`. The mock leaves two children in its cwd: one in
+the session's process group that ignores SIGTERM, and one that left the group with `setsid`.
+S26: the session leader leads its own process group (`pgid` equals its pid). S27: `interrupt()`
+ends the leader and the in-group child, and the `setsid` child keeps running. S28: `end()` on a
+leader that cannot process EOF or SIGTERM escalates to SIGKILL for the whole group, with the
+same outcome. Every runner spawns and signals through `core/session-process.ts`, which also
+sends the group its SIGKILL when a member outlives a leader cezar stopped. win32 has no process
+groups and skips these rows; it ends the tree with `taskkill /T /F`. No wire exemptions.
+
 **R43** (hearsay-tools/cezarion#738), in `workflows/worker-reboot-parity.test.ts` and
 `workflows/worker-location-evidence.test.ts`, drives every `RUNNER_IDS`
 backend's `HARNESS_ADAPTERS` native wire through worker cancellation and a successful twin.

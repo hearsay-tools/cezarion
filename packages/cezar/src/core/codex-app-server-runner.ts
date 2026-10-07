@@ -15,6 +15,7 @@ import type {
   InputDelivery,
 } from './agent-runner.ts';
 import { isSignalTerminationExit, prependSystemPrompt, trackChildExit } from './agent-runner.ts';
+import { signalSession } from './session-process.ts';
 import {
   AUTO_END_DELAY_MS,
   DEFAULT_RUN_TIMEOUT_MS,
@@ -232,7 +233,7 @@ class CodexSession implements AgentSession {
     private readonly opts: SessionOptions,
   ) {
     try {
-      this.child = spawnCodexAppServer(bin, spec.cwd, spec.env);
+      this.child = spawnCodexAppServer(bin, spec.cwd, spec.env, { session: true });
       this.rpc = new CodexAppServerRpc(this.child, (error) => {
         if (!this.hardStopStarted && !this.hasExited()) this.fail(error);
       });
@@ -595,9 +596,9 @@ class CodexSession implements AgentSession {
     }
     this.closeInput('codex session stopped');
     this.terminatedByCezar = true;
-    this.child.kill('SIGTERM');
+    signalSession(this.child, 'SIGTERM');
     this.stopKillTimer = setTimeout(() => {
-      if (!this.hasExited()) this.child.kill('SIGKILL');
+      if (!this.hasExited()) signalSession(this.child, 'SIGKILL');
     }, KILL_GRACE_MS);
     this.stopKillTimer.unref?.();
   }

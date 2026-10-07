@@ -1,5 +1,5 @@
 import { summarizeRunnerStderr } from './runner-stderr.ts';
-import { spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { parseEffort } from '@open-mercato/cezar-contract';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve as resolvePath } from 'node:path';
@@ -17,6 +17,7 @@ import type {
   SessionOptions,
 } from './agent-runner.js';
 import { isSignalTerminationExit } from './agent-runner.js';
+import { signalSession, spawnSessionLeader } from './session-process.js';
 import { buildChildEnv } from './agent-env.js';
 import { cezarToolNames } from '../ci-wait/tools.js';
 import { readNdjson } from './ndjson.js';
@@ -93,7 +94,7 @@ export class PiRunner implements AgentRunner {
     onEvent?: (event: AgentEvent) => void,
     opts: SessionOptions = {},
   ): AgentSession {
-    const child = nodeSpawn(this.bin, buildPiArgs(spec), {
+    const child = spawnSessionLeader(this.bin, buildPiArgs(spec), {
       cwd: spec.cwd,
       env: buildChildEnv({ backend: this.backend, extraEnv: spec.env }),
     });
@@ -260,11 +261,11 @@ export class PiRunner implements AgentRunner {
       killTimer = setTimeout(() => {
         if (child.exitCode !== null || child.signalCode !== null) return;
         terminatedByCezar = true;
-        child.kill('SIGTERM');
+        signalSession(child, 'SIGTERM');
         // Closing input makes interrupt() a no-op; this watchdog must own
         // escalation even when Pi ignores both EOF and SIGTERM.
         killTimer = setTimeout(() => {
-          if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+          if (child.exitCode === null && child.signalCode === null) signalSession(child, 'SIGKILL');
         }, KILL_GRACE_MS);
         killTimer.unref?.();
       }, KILL_GRACE_MS);
@@ -276,9 +277,9 @@ export class PiRunner implements AgentRunner {
       open = false;
       rejectAgentAck();
       terminatedByCezar = true;
-      child.kill('SIGTERM');
+      signalSession(child, 'SIGTERM');
       interruptKillTimer = setTimeout(() => {
-        if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+        if (child.exitCode === null && child.signalCode === null) signalSession(child, 'SIGKILL');
       }, KILL_GRACE_MS);
       interruptKillTimer.unref?.();
     };
@@ -447,9 +448,9 @@ export class PiRunner implements AgentRunner {
           open = false;
           rejectAgentAck();
           terminatedByCezar = true;
-          child.kill('SIGTERM');
+          signalSession(child, 'SIGTERM');
           const reap = setTimeout(() => {
-            if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+            if (child.exitCode === null && child.signalCode === null) signalSession(child, 'SIGKILL');
           }, KILL_GRACE_MS);
           reap.unref?.();
           await waitForExit(child);
@@ -477,9 +478,9 @@ export class PiRunner implements AgentRunner {
         });
         if (child.exitCode === null && child.signalCode === null) {
           terminatedByCezar = true;
-          child.kill('SIGTERM');
+          signalSession(child, 'SIGTERM');
           const reap = setTimeout(() => {
-            if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+            if (child.exitCode === null && child.signalCode === null) signalSession(child, 'SIGKILL');
           }, KILL_GRACE_MS);
           reap.unref?.();
         }

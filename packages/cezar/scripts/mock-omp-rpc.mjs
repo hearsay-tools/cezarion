@@ -130,6 +130,13 @@ function watchdogStall(message) {
   if (message.includes('held-pipe')) {
     spawn(process.execPath, ['-e', 'setTimeout(() => {}, 5000)'], { stdio: ['ignore', process.stdout, process.stderr] });
   }
+  if (message.includes('leftover')) {
+    // hearsay-tools/cezarion#890: one child stays in the session's process group and ignores
+    // SIGTERM; one leaves the group with setsid. Both exit on their own as a cleanup backstop.
+    const leftover = (file) => `process.on('SIGTERM',()=>{}); require('fs').writeFileSync(${JSON.stringify(file)}, String(process.pid)); setTimeout(()=>{},20000)`;
+    spawn(process.execPath, ['-e', leftover('leftover-group.pid')], { stdio: 'ignore' });
+    spawn(process.execPath, ['-e', leftover('leftover-session.pid')], { stdio: 'ignore', detached: true }).unref();
+  }
 }
 
 /** #401: hold late wire frames until the test has observed the park (as the codex mock). */

@@ -1,4 +1,4 @@
-import { spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { parseEffort } from '@open-mercato/cezar-contract';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve as resolvePath } from 'node:path';
@@ -16,6 +16,7 @@ import type {
   SessionOptions,
 } from './agent-runner.js';
 import { isSignalTerminationExit } from './agent-runner.js';
+import { signalSession, spawnSessionLeader } from './session-process.js';
 import { buildChildEnv } from './agent-env.js';
 import type { UiEvent } from './ui-events.js';
 import { cezarToolNames } from '../ci-wait/tools.js';
@@ -271,7 +272,7 @@ export class OmpRunner implements AgentRunner {
     let spawnError: Error | null = null;
     const stderr: string[] = [];
     const spawnOmp = (args: string[]): ChildProcessWithoutNullStreams => {
-      const spawned = nodeSpawn(this.bin, args, {
+      const spawned = spawnSessionLeader(this.bin, args, {
         cwd: spec.cwd,
         env: buildChildEnv({ backend: this.backend, extraEnv: spec.env }),
       });
@@ -470,11 +471,11 @@ export class OmpRunner implements AgentRunner {
       killTimer = setTimeout(() => {
         if (child.exitCode !== null || child.signalCode !== null) return;
         terminatedByCezar = true;
-        child.kill('SIGTERM');
+        signalSession(child, 'SIGTERM');
         // An OMP that ignores SIGTERM would otherwise hold `result` open forever: the deadline's
         // interrupt() is a no-op once `open` is false.
         killTimer = setTimeout(() => {
-          if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+          if (child.exitCode === null && child.signalCode === null) signalSession(child, 'SIGKILL');
         }, killGraceMs);
         killTimer.unref?.();
       }, killGraceMs);
@@ -487,9 +488,9 @@ export class OmpRunner implements AgentRunner {
       closedByCaller = true;
       rejectAgentAck();
       terminatedByCezar = true;
-      child.kill('SIGTERM');
+      signalSession(child, 'SIGTERM');
       interruptKillTimer = setTimeout(() => {
-        if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+        if (child.exitCode === null && child.signalCode === null) signalSession(child, 'SIGKILL');
       }, killGraceMs);
       interruptKillTimer.unref?.();
     };
@@ -717,9 +718,9 @@ export class OmpRunner implements AgentRunner {
           // The run is reported failed, so the CLI must not keep running tools in the worktree:
           // SIGTERM now, SIGKILL after the grace period (a timer `finally` does not clear).
           terminatedByCezar = true;
-          child.kill('SIGTERM');
+          signalSession(child, 'SIGTERM');
           const reap = setTimeout(() => {
-            if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+            if (child.exitCode === null && child.signalCode === null) signalSession(child, 'SIGKILL');
           }, killGraceMs);
           reap.unref?.();
           throw error;

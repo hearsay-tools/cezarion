@@ -1,7 +1,8 @@
 # Finalizing a crashed worker's execution proof (hearsay-tools/cezarion#469)
 
 Status: approved design (2026-09-26), revised with human approval for hearsay-tools/cezarion#738 (2026-10-04) and
-for hearsay-tools/cezarion#889 (2026-10-07), which reverses #738's rule that an unreadable cwd is a possible holder. Extends
+for hearsay-tools/cezarion#889 (2026-10-07), which reverses #738's rule that an unreadable cwd is a possible holder, and
+for hearsay-tools/cezarion#890 (2026-10-07), which runs each agent session in its own process group. Extends
 `2026-09-06-owned-workers-isolated-worktrees.md` ("destroy awaits proven termination").
 
 ## Problem
@@ -42,8 +43,12 @@ A second private file next to `<id>.execution.json`, written with the same disci
 ```json
 { "generation": "<uuid>",
   "controller": { "pid": 1234, "startToken": "..." },
-  "processes": [{ "pid": 5678, "startToken": "..." }] }
+  "processes": [{ "pid": 5678, "startToken": "...", "pgid": 5678 }] }
 ```
+
+`pgid` (hearsay-tools/cezarion#890) is present when the session leader leads its own process
+group, which every runner's leader does on POSIX (`core/session-process.ts`). It always equals
+the pid. An entry without it (a leader recorded before #890, or on win32) keeps pid-only handling.
 
 - `commitWorkerExecutionStart` writes it fresh with the new generation and the current
   process as `controller`, before it returns.
@@ -210,6 +215,23 @@ signal, so it skips step 1 and still waits in step 3:
 A live controller, or a controller that is this process, is never reaped from. The first
 belongs to another cezar. The second is the ordinary `cancel` path.
 
+**Recorded process groups (hearsay-tools/cezarion#890).** An entry with a `pgid` is signalled as a
+group in step 1, so what the agent left in its group (a dev server, a watcher) exits with it. The
+group may be signalled when its live leader is the exact recorded incarnation. A live pid of
+another incarnation means the group emptied and its number was reused, so it is skipped; so is a
+live leader with no token. A dead leader proves nothing by itself: its number may have been freed
+and reused since, and a double-fork daemon leaves exactly a live group whose leader is gone. So a
+dead leader's group is signalled only while a process that holds the worker's worktree or scratch
+is in it. Linux frees a pid number only when no task uses it as a pid, pgid or sid, and XNU skips
+a candidate pid while a process group holds it, so that holder keeps the number ours.
+
+Destroy also signals the recorded groups of a **finished** generation. Once
+`awaitRunTermination` proves the generation `complete`, it sends SIGTERM to each recorded group
+that still has members, waits up to `orphanTermGraceMs`, then sends SIGKILL. A record whose
+controller is another live cezar is skipped. This covers the agent that exits normally and
+leaves a dev server holding the worktree, which otherwise kept destroy `incomplete` forever.
+Settlement, admission, scratch cleanup and history deletion never signal anything.
+
 ### 5. Durable independent cleanup and admission fencing
 
 The private execution checkpoint records terminal scratch-cleanup intent (resource identity and
@@ -271,8 +293,13 @@ remain indefinitely.** An unreadable cwd never withholds that proof (hearsay-too
 
 ## Not changing
 
-- Shutdown still leaves sessions running (`dispose()` contract); reaping at SIGTERM is out
-  of scope.
+- `dispose()` still leaves sessions running. Since hearsay-tools/cezarion#890, `cez serve`
+  forwards its SIGINT and SIGTERM to every live agent process group as its last step, after the
+  store has closed, so an agent ended that way cannot settle its run and restart recovery resumes
+  it. `cez run` forwards the signal and still ends by it. Before #890 the terminal delivered
+  Ctrl-C to agents through cezar's foreground group, and a `kill <cez pid>` left them running.
+  SIGHUP is not handled, so `nohup` keeps working. The application-update restart
+  (`shutdownForRestart`) signals nothing.
 - `commitWorkerExecutionStart`'s refusal to replace an incomplete generation is unchanged.
   The finalizer completes the old generation first, through the existing
   `commitWorkerExecutionComplete`.
@@ -292,13 +319,41 @@ remain indefinitely.** An unreadable cwd never withholds that proof (hearsay-too
   unrecorded process still working in the worktree does not stop a new generation from starting
   there. Keeping `unknown` for admission instead refused the next generation of every
   materialized worker, so Continue never worked on win32 and destroy was the only exit.
-- Reaping signals only the recorded session leader. Runners do not spawn detached, so there
-  is no process group to kill. A descendant that survives the leader keeps its cwd in the
-  worktree, and the scan keeps destroy `incomplete` (naming the PIDs) until it exits.
+- A descendant that calls `setsid` or `setpgid` leaves its session's process group
+  (hearsay-tools/cezarion#890). It is never signalled, and the scan keeps destroy `incomplete`
+  (naming its PID) until it exits.
+- win32 has no process groups. `taskkill /T /F` walks parent pids at call time and misses a
+  grandchild whose parent already exited. Windows Job Objects would close that gap; Node does not
+  expose them.
+- Agent sessions have no controlling terminal (hearsay-tools/cezarion#890). A tool that opens
+  `/dev/tty`, such as an ssh or gpg prompt, fails instead of prompting on cezar's terminal.
+- Closing the terminal does not signal agents: cezar handles no SIGHUP. SIGKILL or a crash of
+  cezar leaves agents running, as before; destroy's reaping covers a worker's.
+- A leftover whose session leader already exited is reached only while it can be proven ours.
+  Shutdown forwarding signals such a group only while a member recorded at the leader's exit is
+  still the same process in it, and destroy only while a holder of the worker's paths is in it.
+  A leftover that started after its leader exited, or that holds nothing of the worker, can
+  outlive both.
 - The scan sees only same-user processes in this PID namespace. A process in another
   container that holds the worktree is invisible to it.
 
 ## Tests
+
+- hearsay-tools/cezarion#890:
+  - `core/session-process.test.ts`: a leader leads its own group; a signalled session's member
+    that ignores SIGTERM gets SIGKILL after its leader exits; a `setsid` member and the members
+    of a leader that exited on its own are not signalled; a fake child never reaches
+    `process.kill(-pid)`; forwarding reaches a member whose leader exited and stops once the group
+    is empty. `session-process-win32.test.ts` pins `taskkill /T /F /PID`.
+  - Harness rows S26–S28 (`core/runner-shutdown-parity.test.ts`), every `RUNNER_IDS` backend's
+    native mock: own group, Stop and `end()` escalation end the group, a `setsid` child survives.
+  - `worker-destroy.test.ts`: the ledger records `pgid`; destroy ends a finished worker's leftover
+    and a crashed generation's group whose leader already died; a `setsid` child keeps destroy
+    `incomplete` by name and is never signalled. `process-liveness.test.ts` pins
+    `recordedGroupSignalable`, including a reused leader pid.
+  - `session-signal-cli.test.ts`: the real `cez serve` and `cez run`, started as a shell starts a
+    foreground job; Ctrl-C and SIGTERM end the agent, the run stays `running`, and `cez run`
+    still ends by SIGINT.
 
 - `process-liveness.test.ts`:
   - token parsing (a comm with spaces and `)`);

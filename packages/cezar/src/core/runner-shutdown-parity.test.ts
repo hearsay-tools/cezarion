@@ -1,4 +1,4 @@
-import type { ChildProcess } from 'node:child_process';
+import { execFileSync, type ChildProcess } from 'node:child_process';
 import type { IncomingMessage } from 'node:http';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -40,7 +40,27 @@ import { HARNESS_ADAPTERS, SHUTDOWN_CRITERIA, promptFor } from './harness-parity
 
 afterEach(() => vi.unstubAllEnvs());
 
-async function withChild(backend: RunnerId, check: (session: AgentSession, child: ChildProcess, events: AgentEvent[], settled: Promise<unknown>) => Promise<void>) {
+/** A zombie has exited; only its reaper's wait remains. */
+function alive(pid: number): boolean {
+  try { process.kill(pid, 0); } catch { return false; }
+  if (process.platform !== 'linux') return true;
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    return stat.slice(stat.lastIndexOf(')') + 1).trim()[0] !== 'Z';
+  } catch { return false; }
+}
+
+/** The two children the leftover scenario leaves in the session's cwd. */
+async function leftovers(cwd: string): Promise<{ group: number; session: number }> {
+  return vi.waitFor(() => {
+    const [group, session] = ['leftover-group.pid', 'leftover-session.pid'].map(file => Number(readFileSync(join(cwd, file), 'utf8')));
+    expect(group).toBeGreaterThan(0);
+    expect(session).toBeGreaterThan(0);
+    return { group: group!, session: session! };
+  }, { timeout: 5000 });
+}
+
+async function withChild(backend: RunnerId, check: (session: AgentSession, child: ChildProcess, events: AgentEvent[], settled: Promise<unknown>, cwd: string) => Promise<void>, scenario: 'no-progress' | 'no-progress-leftover' = 'no-progress') {
   const adapter = HARNESS_ADAPTERS[backend];
   const cwd = mkdtempSync(join(tmpdir(), `cez-shutdown-${backend}-`));
   vi.stubEnv('CEZ_DRY_RUN', '');
@@ -49,7 +69,7 @@ async function withChild(backend: RunnerId, check: (session: AgentSession, child
   spawned.length = 0;
   eventStreams.length = 0;
   const session = createRunner(backend).startSession({
-    cwd, userPrompt: promptFor(backend, 'no-progress'), timeoutMs: 0,
+    cwd, userPrompt: promptFor(backend, scenario), timeoutMs: 0,
   }, event => events.push(event), { autoEndAfterFirstTurn: false });
   const settled = session.result.catch(error => error);
   try {
@@ -62,11 +82,14 @@ async function withChild(backend: RunnerId, check: (session: AgentSession, child
       expect(accepted).toBeDefined();
       return accepted!;
     }, { timeout: 5000 });
-    await check(session, child, events, settled);
+    await check(session, child, events, settled, cwd);
   } finally {
     session.interrupt();
     for (const child of spawned) {
       if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+    }
+    for (const file of ['leftover-group.pid', 'leftover-session.pid']) {
+      try { process.kill(Number(readFileSync(join(cwd, file), 'utf8')), 'SIGKILL'); } catch { /* none, or gone */ }
     }
     await settled;
     rmSync(cwd, { recursive: true, force: true });
@@ -74,7 +97,7 @@ async function withChild(backend: RunnerId, check: (session: AgentSession, child
 }
 
 describe('runner shutdown parity (hearsay-tools/cezarion#843)', () => {
-  const [outsideSignal, endEscalation, outputFailure] = SHUTDOWN_CRITERIA;
+  const [outsideSignal, endEscalation, outputFailure, ownGroup, stopGroup, endGroup] = SHUTDOWN_CRITERIA;
   for (const backend of RUNNER_IDS) {
     it(`${backend} ${outsideSignal.id} ${outsideSignal.name}`, async () => {
       await withChild(backend, async (_session, child, events, settled) => {
@@ -122,6 +145,36 @@ describe('runner shutdown parity (hearsay-tools/cezarion#843)', () => {
           expect((result as Error).message).toBe('stdout broke');
         }
       });
+    }, 15_000);
+
+    // hearsay-tools/cezarion#890: what the agent leaves in its process group ends with it.
+    it.skipIf(process.platform === 'win32')(`${backend} ${ownGroup.id} ${ownGroup.name}`, async () => {
+      await withChild(backend, async (_session, child, _events, _settled, cwd) => {
+        await leftovers(cwd);
+        expect(execFileSync('ps', ['-o', 'pgid=', '-p', String(child.pid)], { encoding: 'utf8' }).trim()).toBe(String(child.pid));
+      }, 'no-progress-leftover');
+    }, 15_000);
+
+    it.skipIf(process.platform === 'win32')(`${backend} ${stopGroup.id} ${stopGroup.name}`, async () => {
+      await withChild(backend, async (session, _child, _events, settled, cwd) => {
+        const { group, session: setsid } = await leftovers(cwd);
+        session.interrupt();
+        await settled;
+        await vi.waitFor(() => expect(alive(group)).toBe(false), { timeout: 6000 });
+        expect(alive(setsid)).toBe(true);
+      }, 'no-progress-leftover');
+    }, 15_000);
+
+    it.skipIf(process.platform === 'win32')(`${backend} ${endGroup.id} ${endGroup.name}`, async () => {
+      await withChild(backend, async (session, child, _events, settled, cwd) => {
+        const { group, session: setsid } = await leftovers(cwd);
+        child.kill('SIGSTOP');
+        session.end();
+        await vi.waitFor(() => expect(child.signalCode).toBe('SIGKILL'), { timeout: 6000 });
+        await settled;
+        await vi.waitFor(() => expect(alive(group)).toBe(false), { timeout: 6000 });
+        expect(alive(setsid)).toBe(true);
+      }, 'no-progress-leftover');
     }, 15_000);
 
     if (backend === 'pi' || backend === 'claude') {
