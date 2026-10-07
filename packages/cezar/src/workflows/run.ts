@@ -67,7 +67,7 @@ import {
 import type { AgentEvent, ContentBlock, InputDelivery } from '../core/agent-runner.ts';
 import { inputDeliveryOf } from '../core/agent-runner.ts';
 import { discoverSkills, type Skill } from '../skills.ts';
-import { materializeSkillDir, waitForTeamSkills } from '../skills-remote.ts';
+import { materializeSkillDir, waitForCachedTeamSkills, waitForTeamSkills } from '../skills-remote.ts';
 import { seedAgentConfigLocalLayer } from '../agent-config/seed.ts';
 import { readAgentModelSettings, readAgentModelProvider } from '../agent-config/models.ts';
 import { loadConfig, resolveWorktreeRetention } from '../config.ts';
@@ -5841,16 +5841,19 @@ export class RunManager {
       if (!skill) {
         // Boot recovery can outrun the async team-skills cache (`getTeamSkillsCached`
         // returns [] until `initialTeamSkillsLoad` resolves). Wait briefly, then
-        // re-discover; never hang Continue on the network.
+        // re-discover; never hang Continue on the network. The on-disk clone's
+        // list arrives before the passive fetch (#859), so stop as soon as it
+        // names this skill instead of waiting out a slow first fetch of the day.
         try {
-          let timeout: ReturnType<typeof setTimeout> | undefined;
-          await Promise.race([
-            waitForTeamSkills(this.repoRoot).catch(() => undefined),
-            new Promise<void>((resolve) => {
-              timeout = setTimeout(resolve, 1_500);
-              timeout.unref?.();
-            }),
-          ]).finally(() => { if (timeout !== undefined) clearTimeout(timeout); });
+          await new Promise<void>((resolve) => {
+            const timeout = setTimeout(resolve, 1_500);
+            timeout.unref?.();
+            const settle = () => { clearTimeout(timeout); resolve(); };
+            waitForTeamSkills(this.repoRoot).then(settle, settle);
+            waitForCachedTeamSkills(this.repoRoot).then((cached) => {
+              if (cached.some((candidate) => candidate.name === continuedSkillName)) settle();
+            }, () => undefined);
+          });
           state.skills = await discoverSkills(this.repoRoot).catch(() => state.skills ?? []);
           skill = (state.skills ?? []).find((candidate) => candidate.name === continuedSkillName);
         } catch {

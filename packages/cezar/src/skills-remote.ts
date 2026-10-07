@@ -500,16 +500,43 @@ export function __markCloneAttemptedForTests(repo: string): void {
   cloneAttempted.add(repo);
 }
 
+/** Test hook: hold this source's clone/fetch open until `until` settles (#859). */
+export function __holdFetchForTests(repo: string, until: Promise<void>): void {
+  const held = until.finally(() => {
+    if (fetchInFlight.get(repo) === held) fetchInFlight.delete(repo);
+  });
+  fetchInFlight.set(repo, held);
+}
+
+const cachedListPauses = new Map<string, { reached: () => void; until: Promise<void> }>();
+
+/**
+ * Test hook: park this project's next passive load right after its list-only
+ * pass until `until` settles (#859). Resolves once the load has parked there.
+ */
+export function __pauseAfterCachedListForTests(repoRoot: string, until: Promise<void>): Promise<void> {
+  return new Promise((reached) => { cachedListPauses.set(repoRoot, { reached, until }); });
+}
+
 // Both maps are keyed by `repoRoot` (multi-project workspace, step 2.6): each
 // project resolves its own `.ai/cezar/config.json` → `skillsRepos`, so one
 // project's team-skill list must never be served under another project's scope.
 const teamSkillsByRoot = new Map<string, Skill[]>();
 const firstLoadByRoot = new Map<string, Promise<Skill[]>>();
+// The first load's list-only pass over the clones already on disk (#859).
+const cachedListByRoot = new Map<string, Promise<Skill[]>>();
+// Bumped by every post-fetch publication, so a list-only pass that finishes
+// late never replaces a newer list (a concurrent refresh) in `teamSkillsByRoot`.
+const postFetchListsByRoot = new Map<string, number>();
 
 function initialTeamSkillsLoad(repoRoot: string): Promise<Skill[]> {
   const existing = firstLoadByRoot.get(repoRoot);
   if (existing) return existing;
-  const load = loadTeamSkills(repoRoot, false).catch(() => teamSkillsByRoot.get(repoRoot) ?? []);
+  let listed!: (skills: Skill[]) => void;
+  cachedListByRoot.set(repoRoot, new Promise((resolve) => { listed = resolve; }));
+  const load = loadTeamSkills(repoRoot, false, listed).catch(() => teamSkillsByRoot.get(repoRoot) ?? []);
+  // A load that failed before its list-only pass still settles the cached wait.
+  void load.then((skills) => listed(skills));
   firstLoadByRoot.set(repoRoot, load);
   return load;
 }
@@ -532,6 +559,17 @@ export function getTeamSkillsCached(repoRoot: string): Skill[] {
  */
 export function waitForTeamSkills(repoRoot: string): Promise<Skill[]> {
   return initialTeamSkillsLoad(repoRoot);
+}
+
+/**
+ * The first load's list of the bare clones already on disk, published before
+ * any passive fetch (#859). Never waits on the network: no clone yet means an
+ * empty list, not a clone. When a refresh started this project's first load
+ * there is no list-only pass, and this answers with the current list.
+ */
+export function waitForCachedTeamSkills(repoRoot: string): Promise<Skill[]> {
+  void initialTeamSkillsLoad(repoRoot);
+  return cachedListByRoot.get(repoRoot) ?? Promise.resolve(teamSkillsByRoot.get(repoRoot) ?? []);
 }
 
 /** Refresh: clone missing sources, `git fetch` existing ones, reload the list. */
@@ -579,15 +617,57 @@ function fetchBareSource(repo: string): Promise<void> {
   return work;
 }
 
-async function loadTeamSkills(repoRoot: string, refresh: boolean): Promise<Skill[]> {
-  const config = await loadConfig(repoRoot);
+/** First source wins a name, in configured source order. */
+function mergeSourceLists(lists: Array<Skill[] | undefined>): Skill[] {
   const out: Skill[] = [];
   const seen = new Set<string>();
-  for (const src of config.skillsRepos) {
+  for (const skill of lists.flatMap((list) => list ?? [])) {
+    if (seen.has(skill.name)) continue;
+    seen.add(skill.name);
+    out.push(skill);
+  }
+  return out;
+}
+
+async function loadTeamSkills(
+  repoRoot: string,
+  refresh: boolean,
+  onCachedList?: (skills: Skill[]) => void,
+): Promise<Skill[]> {
+  const config = await loadConfig(repoRoot);
+  // Passive loads list the clones already on disk BEFORE any fetch (#859): the
+  // first restart past the TTL otherwise hides every team skill — and starves a
+  // recovered Continue of its playbook — for as long as the fetch takes.
+  let cached: Array<Skill[] | undefined> = [];
+  // Each source's stamp as the snapshot saw it. The bare clone and its stamp
+  // are shared by every project and process, so a fetch made for another
+  // project never bumps this one's generation; a moved stamp is how it shows.
+  let snapshotStamps: Array<number | null> = [];
+  const generation = postFetchListsByRoot.get(repoRoot) ?? 0;
+  // True once another load has published a post-fetch list since this one
+  // started: its snapshot may predate that list, so it must not win (#859).
+  const superseded = () => (postFetchListsByRoot.get(repoRoot) ?? 0) !== generation;
+  if (!refresh) {
+    snapshotStamps = config.skillsRepos.map((src) => readLastFetchAt(bareDirFor(src.repo)));
+    cached = await Promise.all(config.skillsRepos.map((src) => listRemoteSkills(src).catch(() => undefined)));
+    const pause = cachedListPauses.get(repoRoot);
+    if (pause) {
+      cachedListPauses.delete(repoRoot);
+      pause.reached();
+      await pause.until;
+    }
+    const listed = mergeSourceLists(cached);
+    if (!superseded()) teamSkillsByRoot.set(repoRoot, listed);
+    onCachedList?.(listed);
+  }
+  const lists: Array<Skill[] | undefined> = [];
+  for (const [index, src] of config.skillsRepos.entries()) {
     const now = Date.now();
     if (stampIsFresh(src.repo, now)) cloneAttempted.delete(src.repo);
+    let fetched = false;
     try {
       if (refresh) {
+        fetched = true;
         await fetchBareSource(src.repo);
       } else if (
         shouldPassiveFetch({
@@ -597,21 +677,24 @@ async function loadTeamSkills(repoRoot: string, refresh: boolean): Promise<Skill
         }) &&
         !cloneAttempted.has(src.repo)
       ) {
+        fetched = true;
         await fetchBareSource(src.repo);
       }
     } catch {
       // offline / no access — list whatever an older clone has (or nothing)
     }
-    try {
-      for (const skill of await listRemoteSkills(src)) {
-        if (seen.has(skill.name)) continue;
-        seen.add(skill.name);
-        out.push(skill);
-      }
-    } catch {
-      // degrade: this source contributes nothing
-    }
+    // An unfetched source has not moved since the list-only pass unless
+    // another load fetched it meanwhile; reuse the snapshot only then.
+    const unmoved = !superseded() && readLastFetchAt(bareDirFor(src.repo)) === snapshotStamps[index];
+    const listed = fetched || !unmoved ? undefined : cached[index];
+    // degrade: a source that fails to list contributes nothing
+    lists.push(listed ?? (await listRemoteSkills(src).catch(() => undefined)));
   }
+  const out = mergeSourceLists(lists);
+  // A refresh always publishes. A passive load that a newer post-fetch list
+  // overtook defers to it rather than replacing it with an older view.
+  if (!refresh && superseded()) return teamSkillsByRoot.get(repoRoot) ?? out;
+  postFetchListsByRoot.set(repoRoot, (postFetchListsByRoot.get(repoRoot) ?? 0) + 1);
   teamSkillsByRoot.set(repoRoot, out);
   return out;
 }

@@ -21,6 +21,7 @@ import { RunStore } from '../runs/store.ts';
 import * as skills from '../skills.ts';
 import type { Skill } from '../skills.ts';
 import * as skillsRemote from '../skills-remote.ts';
+import { seedTeamSkillsClone, writeSkillsReposConfig } from '../skills-remote.testkit.ts';
 import { RunManager, skillSystemPrompt } from './run.ts';
 import { plannedWorkflow, skillTaskSteps } from './types.ts';
 
@@ -54,6 +55,8 @@ describe('skill resume continuation follow-ups (#790 review)', { timeout: 20_000
   let manager: RunManager;
   let launches: Array<{ spec: AgentRunSpec; inheritedSystemPrompt: string | undefined }>;
   let sessions: Array<{ spec: AgentRunSpec; finish: (text?: string) => void }>;
+  let releases: Array<() => void>;
+  let cleanup: string[];
 
   beforeEach(async () => {
     scopeFixtureProcesses();
@@ -62,6 +65,8 @@ describe('skill resume continuation follow-ups (#790 review)', { timeout: 20_000
     vi.stubEnv('CEZ_DELEGATION', '1');
     launches = [];
     sessions = [];
+    releases = [];
+    cleanup = [];
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-skill-resume-cont-'));
     await execFileAsync('git', ['init', '-q', '-b', 'main'], { cwd: repoRoot });
     await execFileAsync('git', ['config', 'gc.auto', '0'], { cwd: repoRoot });
@@ -105,6 +110,7 @@ describe('skill resume continuation follow-ups (#790 review)', { timeout: 20_000
   });
 
   afterEach(async () => {
+    for (const release of releases) release();
     for (const session of sessions) session.finish();
     await drainFixtureManagers(repoRoot);
     manager.dispose();
@@ -112,6 +118,7 @@ describe('skill resume continuation follow-ups (#790 review)', { timeout: 20_000
     vi.restoreAllMocks();
     vi.unstubAllEnvs();
     rmSync(repoRoot, { recursive: true, force: true });
+    for (const dir of cleanup) rmSync(dir, { recursive: true, force: true });
   });
 
   function terminalSkillRun(skillName: string, extra = EXTRA_PROMPT): string {
@@ -186,6 +193,60 @@ describe('skill resume continuation follow-ups (#790 review)', { timeout: 20_000
     expect(discover).toHaveBeenCalledTimes(2);
     expect(launches[0]!.spec.systemPrompt).toContain(skillSystemPrompt(skill));
     expect(store.readEvents(id).some((event) => event.type === 'lifecycle' && String(event.message).includes('is not in the skill registry'))).toBe(false);
+    sessions[0]!.finish();
+  });
+
+  // #859: the real `loadTeamSkills` path with the passive fetch held open, as on the
+  // first restart of the day — the bare clone on disk already holds the skill.
+  async function heldFetchTeamSource(skillsInClone: Record<string, string> | undefined): Promise<void> {
+    const home = mkdtempSync(join(tmpdir(), 'cez-skill-resume-home-'));
+    cleanup.push(home);
+    vi.stubEnv('HOME', home);
+    const repo = `org-${randomUUID().slice(0, 8)}/skills`;
+    writeSkillsReposConfig(repoRoot, [repo]);
+    if (skillsInClone) cleanup.push((await seedTeamSkillsClone(repo, skillsInClone)).sourceDir);
+    skillsRemote.__holdFetchForTests(repo, new Promise<void>((resolve) => { releases.push(resolve); }));
+  }
+
+  it('recovers a team skill from the on-disk clone while the first fetch still runs (#859)', async () => {
+    await heldFetchTeamSource({ [TEAM_SKILL]: TEAM_SKILL_BODY });
+    const fullLoad = vi.spyOn(skillsRemote, 'waitForTeamSkills');
+    const id = terminalSkillRun(TEAM_SKILL);
+    const started = Date.now();
+
+    expect(manager.continueRun(id, { text: 'keep going' })).toEqual({ ok: true });
+    await vi.waitFor(() => expect(launches.length).toBeGreaterThan(0), { timeout: LAUNCH_WAIT_MS });
+    expect(Date.now() - started).toBeLessThan(4_000);
+    expect(fullLoad).toHaveBeenCalledTimes(1);
+    expect(launches[0]!.spec.systemPrompt).toContain(`Selected skill: /${TEAM_SKILL}`);
+    expect(launches[0]!.spec.systemPrompt).toContain(TEAM_SKILL_BODY);
+    expect(store.readEvents(id).some((event) => event.type === 'lifecycle' && String(event.message).includes('is not in the skill registry'))).toBe(false);
+    sessions[0]!.finish();
+  });
+
+  it('warns once and starts within the bound when no source has the skill while the fetch hangs (#859)', async () => {
+    await heldFetchTeamSource({ 'other-playbook': 'OTHER-BODY' });
+    const id = terminalSkillRun(TEAM_SKILL);
+    const started = Date.now();
+
+    expect(manager.continueRun(id, { text: 'keep going' })).toEqual({ ok: true });
+    await vi.waitFor(() => expect(launches.length).toBeGreaterThan(0), { timeout: 8_000 });
+    expect(Date.now() - started).toBeLessThan(4_000);
+    expect(store.readEvents(id).filter((event) => event.type === 'lifecycle' && event.message === MISSING_SKILL_LIFECYCLE)).toHaveLength(1);
+    expect(launches[0]!.spec.systemPrompt ?? '').not.toContain(`Selected skill: /${TEAM_SKILL}`);
+    sessions[0]!.finish();
+  });
+
+  it('warns once and starts within the bound when no clone exists and the fetch hangs (#859)', async () => {
+    await heldFetchTeamSource(undefined);
+    const id = terminalSkillRun(TEAM_SKILL);
+    const started = Date.now();
+
+    expect(manager.continueRun(id, { text: 'keep going' })).toEqual({ ok: true });
+    await vi.waitFor(() => expect(launches.length).toBeGreaterThan(0), { timeout: 8_000 });
+    expect(Date.now() - started).toBeLessThan(4_000);
+    expect(store.readEvents(id).filter((event) => event.type === 'lifecycle' && event.message === MISSING_SKILL_LIFECYCLE)).toHaveLength(1);
+    expect(launches[0]!.spec.systemPrompt ?? '').not.toContain(TEAM_SKILL_BODY);
     sessions[0]!.finish();
   });
 

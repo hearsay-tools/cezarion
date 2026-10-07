@@ -1,16 +1,24 @@
+import { randomUUID } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  __holdFetchForTests,
+  __pauseAfterCachedListForTests,
   bareDirFor,
+  getTeamSkillsCached,
   isPinnedSha,
   lastFetchStampPath,
   readLastFetchAt,
+  refreshTeamSkills,
   shouldPassiveFetch,
   shouldRecordFetchFailure,
+  waitForCachedTeamSkills,
+  waitForTeamSkills,
   writeLastFetchAt,
 } from './skills-remote.ts';
+import { seedTeamSkillsClone, writeSkillsReposConfig } from './skills-remote.testkit.ts';
 
 const TTL = 6 * 60 * 60 * 1_000;
 
@@ -103,5 +111,112 @@ describe('isPinnedSha', () => {
     expect(isPinnedSha('a'.repeat(40))).toBe(true);
     expect(isPinnedSha('b'.repeat(64))).toBe(true);
     expect(isPinnedSha('main')).toBe(false);
+  });
+});
+
+describe('cached team-skill list before the passive fetch (#859)', () => {
+  const dirs: string[] = [];
+  const releases: Array<() => void> = [];
+  afterEach(async () => {
+    for (const release of releases.splice(0)) release();
+    vi.unstubAllEnvs();
+    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  function scratch(prefix: string): string {
+    const dir = mkdtempSync(join(tmpdir(), prefix));
+    dirs.push(dir);
+    return dir;
+  }
+
+  /** A fresh home + project naming one source whose passive fetch never returns until released. */
+  function heldFetchProject(): { repoRoot: string; repo: string; release: () => void } {
+    vi.stubEnv('HOME', scratch('cez-team-home-'));
+    const repoRoot = scratch('cez-team-root-');
+    const repo = `org-${randomUUID().slice(0, 8)}/skills`;
+    writeSkillsReposConfig(repoRoot, [repo]);
+    let release!: () => void;
+    __holdFetchForTests(repo, new Promise<void>((resolve) => { release = resolve; }));
+    releases.push(release);
+    return { repoRoot, repo, release };
+  }
+
+  const names = (skills: Array<{ name: string }>) => skills.map((skill) => skill.name).sort();
+  const settledWithin = (promise: Promise<unknown>, ms: number) =>
+    Promise.race([promise.then(() => true), new Promise<boolean>((resolve) => setTimeout(() => resolve(false), ms))]);
+
+  it('lists the on-disk clone while the fetch hangs, then the post-fetch list replaces it', async () => {
+    const { repoRoot, repo, release } = heldFetchProject();
+    const clone = await seedTeamSkillsClone(repo, { alpha: 'ALPHA-BODY' });
+    dirs.push(clone.sourceDir);
+
+    expect(getTeamSkillsCached(repoRoot)).toEqual([]);
+    const cached = await waitForCachedTeamSkills(repoRoot);
+    expect(names(cached)).toEqual(['alpha']);
+    expect(cached[0]).toMatchObject({ body: 'ALPHA-BODY', source: 'team', team: { repo, ref: 'main' } });
+    expect(names(getTeamSkillsCached(repoRoot))).toEqual(['alpha']);
+    expect(await settledWithin(waitForTeamSkills(repoRoot), 200)).toBe(false);
+
+    await clone.addSkill('beta', 'BETA-BODY');
+    release();
+    expect(names(await waitForTeamSkills(repoRoot))).toEqual(['alpha', 'beta']);
+    expect(names(getTeamSkillsCached(repoRoot))).toEqual(['alpha', 'beta']);
+    expect(names(await waitForCachedTeamSkills(repoRoot))).toEqual(['alpha']);
+  });
+
+  it('a passive load that listed the old clone never overwrites a concurrent refresh', async () => {
+    vi.stubEnv('HOME', scratch('cez-team-home-'));
+    const repoRoot = scratch('cez-team-root-');
+    const repo = `org-${randomUUID().slice(0, 8)}/skills`;
+    writeSkillsReposConfig(repoRoot, [repo]);
+    const clone = await seedTeamSkillsClone(repo, { alpha: 'ALPHA-BODY' });
+    dirs.push(clone.sourceDir);
+    let resume!: () => void;
+    const parked = __pauseAfterCachedListForTests(repoRoot, new Promise<void>((resolve) => { resume = resolve; }));
+    releases.push(resume);
+
+    // The passive load snapshots [alpha], then a refresh fetches beta, stamps
+    // the clone fresh and publishes first; the passive load must not undo it.
+    const passive = waitForTeamSkills(repoRoot);
+    await parked;
+    await clone.addSkill('beta', 'BETA-BODY');
+    expect(names(await refreshTeamSkills(repoRoot))).toEqual(['alpha', 'beta']);
+    resume();
+
+    const passiveList = await passive;
+    expect(names(getTeamSkillsCached(repoRoot))).toEqual(['alpha', 'beta']);
+    expect(names(passiveList)).toEqual(['alpha', 'beta']);
+  });
+
+  it('a passive load re-lists a shared clone that another project refreshed after its snapshot', async () => {
+    vi.stubEnv('HOME', scratch('cez-team-home-'));
+    const repoRoot = scratch('cez-team-root-');
+    const otherRoot = scratch('cez-team-root-');
+    const repo = `org-${randomUUID().slice(0, 8)}/skills`;
+    writeSkillsReposConfig(repoRoot, [repo]);
+    writeSkillsReposConfig(otherRoot, [repo]);
+    const clone = await seedTeamSkillsClone(repo, { alpha: 'ALPHA-BODY' });
+    dirs.push(clone.sourceDir);
+    let resume!: () => void;
+    const parked = __pauseAfterCachedListForTests(repoRoot, new Promise<void>((resolve) => { resume = resolve; }));
+    releases.push(resume);
+
+    // The bare clone and its stamp are shared by every project (and process);
+    // this project's own publications never see a refresh made from another.
+    const passive = waitForTeamSkills(repoRoot);
+    await parked;
+    await clone.addSkill('beta', 'BETA-BODY');
+    expect(names(await refreshTeamSkills(otherRoot))).toEqual(['alpha', 'beta']);
+    resume();
+
+    expect(names(await passive)).toEqual(['alpha', 'beta']);
+    expect(names(getTeamSkillsCached(repoRoot))).toEqual(['alpha', 'beta']);
+  });
+
+  it('resolves empty without waiting on the fetch when no clone exists', async () => {
+    const { repoRoot } = heldFetchProject();
+
+    expect(await waitForCachedTeamSkills(repoRoot)).toEqual([]);
+    expect(await settledWithin(waitForTeamSkills(repoRoot), 200)).toBe(false);
   });
 });
