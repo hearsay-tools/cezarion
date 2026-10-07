@@ -14,8 +14,8 @@ import {
 } from '@open-mercato/cezar-contract';
 import type { ArchiveFinishedScope, CiWait, ConversationState, AgentInput, InboxClaim, DelegationState, RunSummary, WorkerCollectedResult } from '@open-mercato/cezar-contract';
 import { storedDelegationStateSchema } from './delegation-state.ts';
-import { refreshHumanAskSummary } from './human-ask-summary.ts';
 import { HistoryCompressor } from './history-compressor.ts';
+import { emptyFacts, TranscriptFactsIndex, type TranscriptFacts } from './transcript-facts.ts';
 import { hasPlainHistory, historyPaths, readHistoryText, removeHistory, restoreHistory } from './history-file.ts';
 import { workerExecutionIdentitySchema, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
 import { reconcileWorkerWait } from '../delegation/wait.ts';
@@ -1247,11 +1247,14 @@ export class RunStore extends EventEmitter {
   private readonly unreadable = new Set<string>();
   /** Background one-at-a-time compressor for archived transcripts (#818). */
   private readonly compressor: HistoryCompressor;
+  /** Transcript facts the delegation paths ask about, so they never re-read a transcript (#880). */
+  private readonly facts: TranscriptFactsIndex;
 
   private constructor(private readonly dataDir: string) {
     super();
     this.setMaxListeners(100);
     this.compressor = new HistoryCompressor(dataDir, (id) => this.isHistoryCompressEligible(id));
+    this.facts = new TranscriptFactsIndex(dataDir);
   }
 
   /**
@@ -1381,7 +1384,7 @@ export class RunStore extends EventEmitter {
   private adoptLoadedRun({ run, extras }: DecodedRun, opts: { keepLive?: boolean; onlyIfChanged?: boolean; settle?: boolean; stop?: boolean }, row: RunRow): void {
     const before = loadNormalizedFields(run);
     if (run.delegation?.role === 'root' && (run.status === 'waiting' || run.delegation.wait !== undefined)) {
-      refreshHumanAskSummary(run, this.dataDir);
+      this.syncHumanAskSummary(run);
     }
     if (opts.settle) settleOrphanedRun(run, { stop: opts.stop });
     else reconcileLoadedRun(run, opts);
@@ -2363,7 +2366,7 @@ export class RunStore extends EventEmitter {
     if (run?.delegation?.role !== 'worker') throw new Error('missing worker continuation target');
     const delegation = delegationStateSchema.parse({ ...run.delegation,
       executionRevision: (run.delegation.executionRevision ?? 0) + 1,
-      executionStartSeq: this.readEvents(id).reduce((seq, event) => Math.max(seq, event.seq), 0),
+      executionStartSeq: this.transcriptFacts(id).lastSeq,
     });
     const staged = new Map<string, RunRecord>();
     const next: RunRecord = { ...run, ...this.redactPatch(patch), delegation,
@@ -2992,10 +2995,12 @@ export class RunStore extends EventEmitter {
     // Sync append keeps event order without a write queue; local NDJSON
     // appends at agent-event rates are effectively free.
     if (!hasPlainHistory(this.dataDir, runId)) restoreHistory(this.dataDir, runId);
-    appendFileSync(this.eventsPath(runId), `${JSON.stringify(full)}\n`, 'utf8');
+    const line = `${JSON.stringify(full)}\n`;
+    appendFileSync(this.eventsPath(runId), line, 'utf8');
+    this.facts.append(runId, full, Buffer.byteLength(line));
     this.maybeEnqueueHistoryCompress(run);
     if ((full.type === 'ask.requested' || full.type === 'human-input-delivered') &&
-      refreshHumanAskSummary(run, this.dataDir)) this.touch(run);
+      this.syncHumanAskSummary(run)) this.touch(run);
     this.emit('event', { runId, event: full });
 
     // The janitor trick: agents print the PR URL after `gh pr create` — the
@@ -3211,6 +3216,28 @@ export class RunStore extends EventEmitter {
   private hostSecrets(): readonly string[] {
     if (this.secretValues === null) this.secretValues = collectSecretValues();
     return this.secretValues;
+  }
+
+  /** The run's indexed transcript facts (#880): a read-only view, never a transcript read once
+   *  the run's index is loaded. An unreadable transcript answers as empty, as readEvents does. */
+  transcriptFacts(runId: string): Readonly<TranscriptFacts> {
+    return this.facts.get(runId) ?? emptyFacts();
+  }
+
+  hasProjection(runId: string, projectionId: string): boolean {
+    return this.transcriptFacts(runId).projectionIds.includes(projectionId);
+  }
+
+  /** The owned store's `refreshHumanAskSummary`, from the index, on the same rules: no history
+   *  (legacy runs) keeps the summary, an unreadable one requests attention. True when it changed. */
+  private syncHumanAskSummary(run: RunRecord): boolean {
+    const facts = this.facts.get(run.id);
+    const next = !facts ? true
+      : facts.bytes > 0 || facts.archive !== undefined ? facts.pendingAsk !== undefined
+      : run.hasPendingHumanAsk === true;
+    if (next === run.hasPendingHumanAsk) return false;
+    run.hasPendingHumanAsk = next;
+    return true;
   }
 
   readEvents(runId: string): RunEvent[] {
@@ -3552,6 +3579,7 @@ export class RunStore extends EventEmitter {
     z.uuid().parse(id);
     const dir = join(this.dataDir, 'runs');
     if (realpathSync(dir) !== resolve(dir)) throw new Error('History storage redirected');
+    this.facts.forget(id);
     removeHistory(this.dataDir, id);
     rmSync(this.handoffPath(id), { force: true });
     rmSync(this.imagesDir(id), { recursive: true, force: true });
@@ -3600,11 +3628,7 @@ export class RunStore extends EventEmitter {
    *  resumed event, even across a reload (the frozen-transcript symptom class
    *  of #424). One file read on the first post-restart append per run. */
   private rehydrateSeq(runId: string): number {
-    let max = 0;
-    for (const event of this.readEvents(runId)) {
-      if (typeof event.seq === 'number' && event.seq > max) max = event.seq;
-    }
-    return max;
+    return this.transcriptFacts(runId).lastSeq;
   }
 
   private eventsPath(runId: string): string {
@@ -3652,6 +3676,7 @@ export class RunStore extends EventEmitter {
   private removeOwedHistory(id: string): void {
     if (!this.historyOwed.delete(id)) return;
     try {
+      this.facts.forget(id);
       removeHistory(this.dataDir, id);
       rmSync(this.handoffPath(id), { force: true });
       rmSync(this.imagesDir(id), { recursive: true, force: true });
@@ -3904,6 +3929,7 @@ export class RunStore extends EventEmitter {
    */
   close(): void {
     this.compressor.stop();
+    this.facts.flush();
     if (this.saveTimer) {
       clearTimeout(this.saveTimer);
       this.saveTimer = null;
