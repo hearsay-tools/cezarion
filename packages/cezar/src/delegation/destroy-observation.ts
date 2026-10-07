@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { agentTmpDirLocations } from '../runs/agent-tmpdir.ts';
@@ -17,6 +18,16 @@ export type DestroyObservation = { key: string; holders: RecordedProcess[] };
 function fileSignature(path: string): string {
   try { const info = lstatSync(path); return `${info.ino}:${info.size}:${info.mtimeMs}:${info.ctimeMs}:${info.mode}`; }
   catch (error) { return (error as NodeJS.ErrnoException).code ?? 'error'; }
+}
+/** A small identity file's bytes and permissions. Each removal attempt rewrites its cleanup
+ * checkpoint atomically (a new inode, the same bytes), so only what such a file says, and who may
+ * read it, is a change; an in-place repair or a `chmod` still is. */
+function contentSignature(path: string): string {
+  try {
+    const info = lstatSync(path);
+    if (!info.isFile() || info.size > 65_536) return `${info.ino}:${info.size}:${info.mtimeMs}:${info.ctimeMs}:${info.mode}`;
+    return `${info.mode}:${createHash('sha256').update(readFileSync(path)).digest('hex')}`;
+  } catch (error) { return (error as NodeJS.ErrnoException).code ?? 'error'; }
 }
 /** A directory's identity and permissions only: a holder working inside it changes its times,
  * never whether the directory is there, which one it is, or who may read it. */
@@ -59,10 +70,10 @@ export function observeDestroy({ store, dataDir, commonDir, workerId }: { store:
     processes: execution ? store.readWorkerProcesses(workerId, execution.generation) : 'absent',
     scratch: agentTmpDirLocations(dataDir, workerId).map(dirSignature),
     worktree: dirSignature(path),
-    admin: admin ? [fileSignature(admin), fileSignature(join(admin, 'locked')), fileSignature(join(admin, 'cezar-owned-resource'))] : 'absent',
+    admin: admin ? [fileSignature(admin), fileSignature(join(admin, 'locked')), contentSignature(join(admin, 'cezar-owned-resource'))] : 'absent',
     ...(commonDir ? { git: [
-      fileSignature(join(commonDir, 'cezar-owned-workspaces', `${resourceId}.json`)),
-      fileSignature(join(commonDir, 'cezar-owned-workspaces', `${resourceId}.cleanup.json`)),
+      contentSignature(join(commonDir, 'cezar-owned-workspaces', `${resourceId}.json`)),
+      contentSignature(join(commonDir, 'cezar-owned-workspaces', `${resourceId}.cleanup.json`)),
       fileSignature(join(commonDir, 'refs/heads', branch)),
       fileSignature(join(commonDir, 'packed-refs')),
       fileSignature(join(commonDir, 'logs/refs/heads', branch)),

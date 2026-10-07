@@ -1,6 +1,6 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { agentTmpDir } from '../runs/agent-tmpdir.ts';
@@ -70,6 +70,18 @@ describe('destroy observation (hearsay-tools/cezarion#879)', () => {
     const before = settledWorker.key();
     change(settledWorker);
     expect(settledWorker.key()).not.toBe(before);
+  });
+
+  it('ignores a cleanup checkpoint rewritten with the same bytes, as every removal attempt does', async () => {
+    const { workspace, commonDir, key } = await settled();
+    const checkpoint = join(commonDir, 'cezar-owned-workspaces', `${workspace.resourceId}.cleanup.json`);
+    writeFileSync(checkpoint, '{"phase":"prepared"}', { mode: 0o600 });
+    const before = key();
+    // An atomic rewrite: a new inode and new times, the same content and mode.
+    writeFileSync(`${checkpoint}.tmp`, '{"phase":"prepared"}', { mode: 0o600 }); renameSync(`${checkpoint}.tmp`, checkpoint);
+    expect(key()).toBe(before);
+    writeFileSync(checkpoint, '{"phase":"worktree-removed"}');
+    expect(key()).not.toBe(before);
   });
 
   it('changes when a locked worktree is unlocked', async () => {
