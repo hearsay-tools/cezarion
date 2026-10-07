@@ -10,7 +10,6 @@ import { workerContextHash, workerWorkflowHash, workerStepIdentity, captureWorke
 import { buildChildEnv } from '../core/agent-env.ts';
 import type { DelegationProvisioner } from '../delegation/provision.ts';
 import { randomUUID } from 'node:crypto';
-import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
@@ -73,6 +72,7 @@ import { seedAgentConfigLocalLayer } from '../agent-config/seed.ts';
 import { readAgentModelSettings, readAgentModelProvider } from '../agent-config/models.ts';
 import { loadConfig, resolveWorktreeRetention } from '../config.ts';
 import { autosaveCommit, type AutosaveReason, createWorktree, resolveBaseRef, worktreeDiff, worktreeShortstat } from '../git-worktree.ts';
+import { runGroupedCommand } from './grouped-command.ts';
 import { getHeadCommit, getRepoInfo } from '../server/git.ts';
 import { ensureOwnedWorkspace, verifyOwnedWorkspace } from '../delegation/workspace.ts';
 import { verifyWorkerContext } from '../delegation/context.ts';
@@ -362,10 +362,7 @@ function isSyntheticContinuation(run: RunRecord, step: StepState): boolean {
 /** Periodic "cezar autosave" commit in the task worktree (spec 006). */
 export const AUTOSAVE_INTERVAL_MS = 90_000;
 
-/** Stop on a workflow check: SIGTERM first, SIGKILL to its process group after this grace. */
-export const CHECK_KILL_GRACE_MS = 3_000;
-/** After SIGKILL, how long to wait for the group to disappear before resolving unconfirmed. */
-export const CHECK_TERMINATION_CONFIRM_MS = 5_000;
+export { CHECK_KILL_GRACE_MS, CHECK_TERMINATION_CONFIRM_MS } from './grouped-command.ts';
 
 /** The periodic autosave timer is opt-in (#471): off, a task branch carries only the
  *  agent's own commits plus the turn-end/pre-PR flushes — no mid-run "cezar autosave"
@@ -7799,95 +7796,25 @@ export class RunManager {
     }
   }
 
-  private runCheckStep(
+  private async runCheckStep(
     state: ActiveRun,
     step: WorkflowStepDef,
     emit: (event: { type: string; stepId?: string; [k: string]: unknown }) => void,
   ): Promise<{ ok: boolean; output: string }> {
     const command = step.command as string;
     emit({ type: 'note', stepId: step.id, message: `$ ${command}` });
-    return new Promise((resolve) => {
-      // Check steps run in the same cwd as the agent steps — the worktree.
-      // Own process group (POSIX): Stop signals the group we created, never a
-      // recycled pid or an unrelated process.
-      const grouped = process.platform !== 'win32';
-      const child = spawn('bash', ['-lc', command], { cwd: state.cwd, env: process.env, detached: grouped });
-      const pid = child.pid;
-
-      let output = '';
-      let finished = false;
-      let stopping = false;
-      let killTimer: NodeJS.Timeout | undefined;
-      let stopAt = 0;
-      const signalGroup = (signal: NodeJS.Signals) => {
-        if (finished || !pid) return;
-        try { if (grouped) process.kill(-pid, signal); else child.kill(signal); } catch { /* already gone */ }
-      };
-      const groupAlive = () => {
-        if (!grouped || !pid) return false;
-        try { process.kill(-pid, 0); return true; } catch (err) { return (err as NodeJS.ErrnoException).code === 'EPERM'; }
-      };
-      const finish = (code: number | null) => {
-        if (finished) return;
-        finished = true;
-        if (killTimer) clearTimeout(killTimer);
-        state.interrupt = () => undefined;
-        child.stdout?.destroy();
-        child.stderr?.destroy();
-        const trimmed = output.trim() || '(no output)';
-        emit({ type: 'check-output', stepId: step.id, command, text: trimmed, exitCode: code ?? -1 });
-        resolve({ ok: code === 0, output: trimmed });
-      };
-      // After Stop: the KILL timer escalates; resolve only once the group is
-      // confirmed gone (or the confirmation bound passes, reported honestly).
-      let reaping = false;
-      const confirmTermination = async (code: number | null) => {
-        if (reaping) return;
-        reaping = true;
-        const deadline = stopAt + CHECK_KILL_GRACE_MS + CHECK_TERMINATION_CONFIRM_MS;
-        while (groupAlive() && Date.now() < deadline) await new Promise((r) => setTimeout(r, 25));
-        if (groupAlive()) {
-          output += '\n… (process group did not confirm termination)';
-        }
-        finish(code);
-      };
-      state.interrupt = () => {
-        if (stopping || finished) return;
-        stopping = true;
-        stopAt = Date.now();
-        signalGroup('SIGTERM');
-        killTimer = setTimeout(() => signalGroup('SIGKILL'), CHECK_KILL_GRACE_MS);
-        killTimer.unref?.();
-        // Leader already gone but a descendant holds the pipes: no `exit` will follow.
-        if (child.exitCode !== null || child.signalCode !== null) void confirmTermination(child.exitCode);
-      };
-
-      const collect = (chunk: Buffer) => {
-        if (output.length < CHECK_OUTPUT_CAP) {
-          output += chunk.toString('utf8');
-          if (output.length >= CHECK_OUTPUT_CAP) output += '\n… (output truncated)';
-        }
-      };
-      child.stdout.on('data', collect);
-      child.stderr.on('data', collect);
-      child.on('error', (err) => {
-        finished = true;
-        if (killTimer) clearTimeout(killTimer);
-        state.interrupt = () => undefined;
-        const message = `failed to spawn: ${err.message}`;
-        emit({ type: 'check-output', stepId: step.id, command, text: message, exitCode: -1 });
-        resolve({ ok: false, output: message });
-      });
-      // A descendant can hold the inherited pipes open, so `close` may never
-      // fire after Stop. `exit` of the leader is the signal to reap the group.
-      child.on('exit', (code) => {
-        if (stopping) void confirmTermination(code);
-      });
-      child.on('close', (code) => {
-        if (stopping) void confirmTermination(code);
-        else finish(code);
-      });
+    // Check steps run in the same cwd as the agent steps — the worktree — in their own process
+    // group, shared with worktree setup (#917).
+    const result = await runGroupedCommand({
+      command,
+      cwd: state.cwd,
+      env: process.env,
+      setInterrupt: (stop) => { state.interrupt = stop; },
+      keep: 'head',
+      cap: CHECK_OUTPUT_CAP,
     });
+    emit({ type: 'check-output', stepId: step.id, command, text: result.output, exitCode: result.exitCode ?? -1 });
+    return { ok: result.exitCode === 0, output: result.output };
   }
 
   private finishStep(
