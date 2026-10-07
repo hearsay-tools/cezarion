@@ -1,4 +1,4 @@
-import { useQueryClient, type QueryClient } from '@tanstack/react-query'
+import { useQueryClient, type InfiniteData, type QueryClient } from '@tanstack/react-query'
 import { createContext, useContext, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react'
 
 import { trackSseReconcile } from '@/lib/cez-idle'
@@ -17,6 +17,7 @@ import { healthResponseSchema, runnerModelCatalogResponseSchema, apiPath, getApi
 import { queryKeys, useHealthSubscription, workspaceQueryKeys } from './queries'
 import type {
   ApiRun,
+  ArchivedRunsResponse,
   HealthResponse,
   ProcessUsage,
   ProjectsResponse,
@@ -575,6 +576,15 @@ function applyGlobalEvent(
       // truth — instead of rendering a record that no longer exists.
       queryClient.removeQueries({ queryKey: queryKeys.runs.detail(event.id) })
       queryClient.removeQueries({ queryKey: queryKeys.runs.diff(event.id) })
+      // Archived pages past the list's window (#864) hold their own copy of the row, in every
+      // project's cache and for every search: drop it there too, so a deleted task cannot linger
+      // in the Archived tab or an issue's linked tasks until the next refetch.
+      queryClient.setQueriesData<InfiniteData<ArchivedRunsResponse>>(
+        { predicate: (query) => query.queryKey[1] === 'runs' && query.queryKey[2] === 'archived' },
+        (data) => (data && data.pages.some((page) => page.runs.some((run) => run.id === event.id))
+          ? { ...data, pages: data.pages.map((page) => ({ ...page, runs: page.runs.filter((run) => run.id !== event.id) })) }
+          : data),
+      )
       // Its worktree goes with it — refresh the panel (#483).
       void queryClient.invalidateQueries({ queryKey: queryKeys.worktrees })
       // …and its branch becomes an orphan (issue 08).

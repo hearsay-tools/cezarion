@@ -1078,6 +1078,19 @@ describe('useGlobalEvents — run events', () => {
     expect(client.getQueryData(queryKeys.runs.diff('r1'))).toBeUndefined()
     expect(client.getQueryData(queryKeys.runs.detail('r2'))).toBeUndefined()
   })
+
+  it('drops a deleted run from loaded archived pages too, whatever their search (#864)', () => {
+    const page = (ids: string[]) => ({ runs: ids.map((id) => runRecord(id)), nextCursor: null, total: ids.length })
+    client.setQueryData(queryKeys.runs.archived(''), { pages: [page(['r1', 'r2'])], pageParams: [undefined] })
+    client.setQueryData(queryKeys.runs.archived('#864'), { pages: [page(['r1'])], pageParams: [undefined] })
+    const { source } = mount()
+
+    source.emit('run-deleted', JSON.stringify({ id: 'r1', project: BOOT }))
+
+    type Pages = { pages: { runs: { id: string }[] }[] }
+    expect(client.getQueryData<Pages>(queryKeys.runs.archived(''))?.pages[0]?.runs.map((r) => r.id)).toEqual(['r2'])
+    expect(client.getQueryData<Pages>(queryKeys.runs.archived('#864'))?.pages[0]?.runs).toEqual([])
+  })
 })
 
 describe('useGlobalEvents — todos', () => {
