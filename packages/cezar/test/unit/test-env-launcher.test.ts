@@ -233,7 +233,10 @@ test('health timeout bounds elapsed time even when a real HTTP probe stalls', as
   launchedPids.add(pid);
   assert.equal(result.status, 1, `launcher did not enforce its health deadline (${elapsed}s): ${result.stderr}`);
   assert.ok(elapsed >= 4 && elapsed < 8, `five-second health wait took ${elapsed}s`);
-  assert.match(result.stderr, /health wait timed out after 5s/);
+  // The launcher reports whole elapsed seconds, so a slow runner can print 6s for a 5s
+  // deadline (#856). Bound it like `elapsed`: at least the deadline, never the 180s default.
+  const reported = Number(result.stderr.match(/health wait timed out after (\d+)s/)?.[1]);
+  assert.ok(reported >= 5 && reported < 8, `five-second health wait reported ${reported}s: ${result.stderr}`);
   assert.deepEqual(result.stderr.match(/^boot-line-\d+$/gm),
     Array.from({ length: 20 }, (_, i) => `boot-line-${i + 6}`));
   assert.equal(result.stdout, '', 'a failed boot must not emit running markers');
