@@ -172,6 +172,19 @@ describe('the cold window agrees with the store', () => {
   });
 });
 
+describe('cold search counts matches after projection', () => {
+  it('keeps scanning past candidates that scoping the repository drops', () => {
+    // Three newer runs match `43` only through a foreign issue the handle scopes away; the
+    // oldest matches through its own title. A cap counted before projection returns nothing.
+    seedRuns(dir, [
+      record({ id: 'own', title: 'Fix 43 flaky tests', createdAt: '2026-01-01T00:00:00Z', referencedIssueUrl: undefined, referencedIssueCandidates: [], issueNumber: undefined, referencedIssueNumberSeeded: false, referencedPullRequestUrl: undefined, referencedPrCandidates: [] }),
+      ...['f1', 'f2', 'f3'].map((id, i) => record({ id, createdAt: `2026-09-0${i + 1}T00:00:00Z` })),
+    ]);
+    expect(searchRunIndexFromDisk(dir, '43', { limit: 1 }).runs.map((run) => run.id)).toEqual(['f3']);
+    expect(searchRunIndexFromDisk(dir, '43', { handle, limit: 1 })).toEqual({ runs: [expect.objectContaining({ id: 'own' })], truncated: false });
+  });
+});
+
 describe('cold search of an unreadable project', () => {
   it('answers nothing and does not throw for a runs.db that is not a database', () => {
     writeFileSync(join(dir, RUNS_DB_FILE), 'not a database at all, just bytes');

@@ -113,16 +113,19 @@ function readDatabase(db: RunDatabase, dataDir: string, { handle, archivedWindow
 }
 
 function searchDatabase(db: RunDatabase, dataDir: string, query: string, { handle, limit }: { handle?: RepoHandle | null; limit: number }): ColdRunIndex {
-  // Match on the stored summary first, stopping at one past the limit, so only those candidates
-  // pay for a decode; the projected row is matched again because reading it cold can drop a
-  // foreign reference it matched on.
-  const candidates: RunSummaryRow[] = [];
+  // Match on the stored summary first, so only candidates pay for a decode; each candidate is
+  // projected and matched again as it is read, because reading it cold can drop a foreign
+  // reference it matched on. The scan stops at one match past the limit counted AFTER that, so
+  // dropped candidates can never use up the cap and hide an older real match (#864 review).
+  const matched: RunSummary[] = [];
   db.visitRootSummaries(sqlPrefilterTokens(query), (row) => {
     const summary = parseSummary(row.summary);
-    if (summary === undefined || matchesRunQuery(summary, query)) candidates.push(row);
-    return candidates.length <= limit;
+    if (summary !== undefined && !matchesRunQuery(summary, query)) return true;
+    const [projected] = projectRows(db, [row], dataDir, handle);
+    if (projected && matchesRunQuery(projected, query)) matched.push(projected);
+    return matched.length <= limit;
   });
-  return firstMatches(projectRows(db, candidates, dataDir, handle), query, limit);
+  return matched.length > limit ? { runs: matched.slice(0, limit), truncated: true } : { runs: matched, truncated: false };
 }
 
 /** Rows as list rows: the stored summary when reading cold cannot change it, else the decoded
