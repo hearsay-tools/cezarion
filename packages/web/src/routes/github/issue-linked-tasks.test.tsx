@@ -142,3 +142,34 @@ it('says there are more archived linked tasks and pages them in (#864)', async (
   expect(screen.getByRole('button', { name: 'Linked tasks (2)' })).toBeTruthy()
   expect(screen.queryByRole('button', { name: 'Show older linked tasks' })).toBeNull()
 })
+
+it('says older linked tasks could not load, keeps the count a lower bound, and retries (#864)', async () => {
+  const client = createQueryClient()
+  client.setDefaultOptions({ queries: { retry: false } })
+  let archivedCalls = 0
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input)
+    if (url === '/api/v1/p/second/run-summaries?archived=recent') return new Response('[]', { headers: { 'content-type': 'application/json' } })
+    if (url === '/api/v1/p/second/run-summaries/archived?limit=200&q=%23750') {
+      archivedCalls += 1
+      return archivedCalls === 1
+        ? new Response(JSON.stringify({ error: 'boom' }), { status: 500, headers: { 'content-type': 'application/json' } })
+        : new Response(JSON.stringify({ runs: [], nextCursor: null, total: 0 }), { headers: { 'content-type': 'application/json' } })
+    }
+    throw new Error(`Unexpected request: ${url}`)
+  }))
+  render(
+    <ProjectScopeProvider projectId="second">
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={['/p/second/github/issues/750']}>
+          <IssueLinkedTasks number={750} repo="acme/demo" />
+        </MemoryRouter>
+      </QueryClientProvider>
+    </ProjectScopeProvider>,
+  )
+  fireEvent.click(await screen.findByRole('button', { name: 'Linked tasks (0+)' }))
+  expect(await screen.findByText('Couldn’t load older archived linked tasks.')).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: 'Retry older linked tasks' }))
+  expect(await screen.findByRole('button', { name: 'Linked tasks (0)' })).toBeTruthy()
+  expect(screen.queryByText('Couldn’t load older archived linked tasks.')).toBeNull()
+})
