@@ -2,7 +2,7 @@ import { scopeFixtureProcesses } from './process-scope.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync, rmSync, fsyncSync, fstatSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { onTestFinished, beforeEach, afterEach, describe, it, expect, vi } from 'vitest';
 import { fixture } from './service.testkit.ts';
 import { ensureOwnedWorkspace } from './workspace.ts';
@@ -130,7 +130,9 @@ describe('parent-owned collected worker results', () => {
       throw Error('snapshot write failed');
     });
     else vi.mocked(fsyncSync).mockImplementationOnce(fd => { descriptor = fd; throw Error('snapshot fsync failed'); });
-    expect(() => f.store.commitWorkerResult(f.parent.id, first)).toThrow(`snapshot ${operation} failed`);
+    // New evidence: an identical result is already durable and writes nothing (hearsay-tools/cezarion#879).
+    const changed = { ...first, observedAt: new Date(Date.parse(first.observedAt) + 1).toISOString(), summary: { state: 'unavailable' as const, reason: 'no-assistant-output' as const } };
+    expect(() => f.store.commitWorkerResult(f.parent.id, changed)).toThrow(`snapshot ${operation} failed`);
     expect(descriptor).toBeTypeOf('number');
     expect(() => fstatSync(descriptor!)).toThrow();
     expect(f.store.readWorkerResult(f.parent.id, run.id)).toEqual(first);
@@ -200,4 +202,64 @@ describe('parent-owned collected worker results', () => {
     expect(f.store.readWorkerResultDiff(f.parent.id, run.id)).toBe(original); fault.mockRestore();
   });
 
+});
+
+describe('unchanged worker results (hearsay-tools/cezarion#879)', () => {
+  let f: ReturnType<typeof fixture>;
+  beforeEach(() => { onTestFinished(scopeFixtureProcesses()); vi.stubEnv('CEZ_DELEGATION', '1'); f = fixture(); });
+  afterEach(async () => { await f?.close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
+  async function collected() {
+    const { workerId } = await f.service.spawn(f.caller, { task: 'work', baseline: 'HEAD', requestId: randomUUID() });
+    await ensureOwnedWorkspace(f.root, f.store.getRun(workerId)!);
+    f.store.appendEvent(workerId, { type: 'text', text: 'Done.' });
+    f.store.updateRun(workerId, { status: 'review' });
+    const generation = f.store.commitWorkerExecutionStart(workerId); f.store.commitWorkerExecutionComplete(workerId, generation);
+    const result = await f.service.collect(f.caller, { workerId });
+    const dir = dirname(f.store.workerResultSnapshotPath(f.parent.id, workerId, randomUUID()));
+    return { workerId, result, diff: f.store.readWorkerResultDiff(f.parent.id, workerId), files: () => readdirSync(dir).sort() };
+  }
+  /** The same evidence, observed a minute later under a new snapshot identity. */
+  const later = (result: Awaited<ReturnType<typeof collected>>['result']) => ({ ...result,
+    observedAt: new Date(Date.parse(result.observedAt) + 60_000).toISOString(),
+    diff: result.diff.state === 'available' ? { ...result.diff, snapshotId: randomUUID() } : result.diff });
+
+  it('an unchanged result writes no snapshot, fsyncs nothing and commits no parent', async () => {
+    const { workerId, result, diff, files } = await collected();
+    expect(result.diff.state).toBe('available');
+    const before = files();
+    vi.mocked(fsyncSync).mockClear();
+    const commits = vi.spyOn(f.store, 'commitDelegation');
+    const kept = f.store.commitWorkerResult(f.parent.id, later(result), diff);
+    expect(kept).toEqual(f.store.readWorkerResult(f.parent.id, workerId));
+    expect(kept.observedAt).toBe(result.observedAt);
+    expect(files()).toEqual(before);
+    expect(fsyncSync).not.toHaveBeenCalled();
+    expect(commits).not.toHaveBeenCalled();
+  });
+
+  it('changed diff bytes or a changed field still write a new snapshot', async () => {
+    const { workerId, result, diff, files } = await collected();
+    const before = files();
+    f.store.commitWorkerResult(f.parent.id, later(result), `${diff}\n# changed`);
+    expect(files()).not.toEqual(before);
+    expect(f.store.readWorkerResultDiff(f.parent.id, workerId)).toContain('# changed');
+    const changed = files();
+    const summary = { state: 'unavailable' as const, reason: 'no-assistant-output' as const };
+    const next = later(f.store.readWorkerResult(f.parent.id, workerId)!);
+    f.store.commitWorkerResult(f.parent.id, { ...next, observedAt: new Date(Date.parse(next.observedAt) + 60_000).toISOString(), summary }, `${diff}\n# changed`);
+    expect(files()).not.toEqual(changed);
+    expect(f.store.readWorkerResult(f.parent.id, workerId)?.summary).toEqual(summary);
+  });
+
+  it('ignoreCleanup treats a cleaning and a retained payload as one: it is already durable', async () => {
+    const { result, diff, files } = await collected();
+    const before = files();
+    vi.mocked(fsyncSync).mockClear();
+    f.store.commitWorkerResult(f.parent.id, { ...later(result), cleanup: 'cleaning' }, diff, { ignoreCleanup: true });
+    expect(files()).toEqual(before);
+    expect(fsyncSync).not.toHaveBeenCalled();
+    f.store.commitWorkerResult(f.parent.id, { ...later(result), cleanup: 'cleaning' }, diff);
+    expect(files()).not.toEqual(before);
+    expect(fsyncSync).toHaveBeenCalled();
+  });
 });

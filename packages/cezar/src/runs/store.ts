@@ -1118,6 +1118,17 @@ function isDestroyProgress(before: RunRecord['delegation'], after: DelegationSta
   return isDeepStrictEqual({ ...before, destroy: undefined }, { ...after, destroy: undefined });
 }
 
+/**
+ * Two collected worker results carry the same evidence: equal but for when they were observed and
+ * which snapshot file holds them, and, with `ignoreCleanup`, the cleanup phase. A retried destroy
+ * that observed nothing new then rewrites and fsyncs nothing (hearsay-tools/cezarion#879).
+ */
+function sameWorkerResult(a: WorkerCollectedResult, b: WorkerCollectedResult, opts: { ignoreCleanup?: boolean }): boolean {
+  const comparable = (value: WorkerCollectedResult) => ({ ...value, observedAt: undefined, ...(opts.ignoreCleanup ? { cleanup: undefined } : {}),
+    diff: value.diff.state === 'available' ? { ...value.diff, snapshotId: undefined, path: undefined } : value.diff });
+  return isDeepStrictEqual(comparable(a), comparable(b));
+}
+
 /** NDJSON transcript text to events; a damaged line is skipped, never fatal. */
 function parseEvents(raw: string): RunEvent[] {
   return raw
@@ -2568,8 +2579,10 @@ export class RunStore extends EventEmitter {
     return this.readWorkerResultFile(parentId, workerId)?.diffSnapshot;
   }
 
-  /** Publish a pointer only after its redacted immutable snapshot reaches disk. Failed index writes retain the old evidence. */
-  commitWorkerResult(parentId: string, value: WorkerCollectedResult, diffSnapshot?: string): WorkerCollectedResult {
+  /** Publish a pointer only after its redacted immutable snapshot reaches disk. Failed index writes retain the old evidence.
+   * A result whose evidence is already stored returns the stored one and writes nothing; `ignoreCleanup` is for a
+   * caller that only needs the payload durable, whatever cleanup phase the stored copy names. */
+  commitWorkerResult(parentId: string, value: WorkerCollectedResult, diffSnapshot?: string, opts: { ignoreCleanup?: boolean } = {}): WorkerCollectedResult {
     const result = workerCollectedResultSchema.parse(this.redact({ type: 'worker-result', seq: 0, ts: value.observedAt, result: value }).result);
     const parent = this.peek(parentId);
     const worker = this.peek(result.workerId);
@@ -2578,6 +2591,9 @@ export class RunStore extends EventEmitter {
     if (worker && (worker.delegation?.role !== 'worker' || worker.delegation.parentRunId !== parentId ||
       worker.delegation.workspace.ownerRunId !== worker.id || (worker.delegation.executionRevision ?? 0) !== result.revision || worker.status !== result.status)) throw new Error('worker result revision changed');
     const old = parent.delegation.results?.find(entry => entry.workerId === result.workerId);
+    const stored = old && this.readWorkerResultFile(parentId, result.workerId);
+    if (stored && sameWorkerResult(stored.result, result, opts) &&
+      stored.diffSnapshot === (diffSnapshot === undefined ? undefined : this.redactText(diffSnapshot))) return stored.result;
     if ((!worker && !this.readWorkerResult(parentId, result.workerId)) || (old && (old.revision > result.revision || (old.revision === result.revision && old.observedAt > result.observedAt)))) throw new Error('worker result is obsolete');
     const snapshotId = result.diff.state === 'available' ? result.diff.snapshotId : randomUUID();
     if (result.diff.state === 'available') result.diff.path = this.workerResultSnapshotPath(parentId, result.workerId, snapshotId);
