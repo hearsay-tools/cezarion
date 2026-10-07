@@ -10,6 +10,8 @@ export const DESTROY_BACKOFF: Backoff = { fastMs: 60_000, fastCount: 5, capMs: 3
 export const SCRATCH_BACKOFF: Backoff = { fastMs: 60_000, fastCount: 5, capMs: 3_600_000 };
 /** The orphan reprobe kept 15 s for its first 15 minutes before #879; that window is unchanged. */
 export const ORPHAN_BACKOFF: Backoff = { fastMs: 15_000, fastCount: 60, capMs: 3_600_000 };
+/** For the batched reprobes: ids that probe together keep probing together, so they share a scan. */
+export const noJitter = () => 0;
 /** Scheduled destroy attempts after which the cockpit says the cleanup needs attention: the first capped delay. */
 export const DESTROY_ATTENTION_ATTEMPTS = 10;
 

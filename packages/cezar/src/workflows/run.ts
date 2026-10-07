@@ -23,7 +23,8 @@ import { type AgentSession } from '../core/claude-cli-runner.ts';
 import { hasRegisteredRunProcess, onUsage, registerRunProcess, unregisterRunProcess, type ProcessUsage } from '../core/process-usage.ts';
 import { processGroupAlive, processGroupOf, sessionGroupOf, signalProcessGroup } from '../core/session-process.ts';
 import { WorkerScratchCleanup } from '../delegation/scratch-cleanup.ts';
-import { inspectExecutionGeneration, isCurrentProcess, processesWithCwdUnder, processStartToken, recordedGroupSignalable, recordedProcessLive, type GenerationProbe, type RecordedProcess, type WorkerProcessRecord } from '../delegation/process-liveness.ts';
+import { noJitter, ORPHAN_BACKOFF, retryDelayMs, type Backoff } from '../delegation/retry-backoff.ts';
+import { inspectExecutionGeneration, isCurrentProcess, processesWithCwdUnder, processStartToken, recordedGroupSignalable, recordedProcessLive, sharedCwdScan, type CwdSource, type GenerationProbe, type RecordedProcess, type WorkerProcessRecord } from '../delegation/process-liveness.ts';
 import { parseUsageLimit } from '../core/usage-limit.ts';
 import { startManagedSession } from '../core/managed-session.ts';
 import { createRunner } from '../core/runner-factory.ts';
@@ -978,12 +979,12 @@ export class RunManager {
   /** Settles a crashed generation after exit proof. Sync and signal-free; recovery, resume,
    * delivery, collect and destroy then take their normal paths.
    * A non-gone probe is cached briefly: on darwin the scan is a synchronous `lsof` on the event loop. */
-  settleOrphanedWorkerExecution(runId: string, opts: { admitting?: boolean; fresh?: boolean } = {}): boolean {
+  settleOrphanedWorkerExecution(runId: string, opts: { admitting?: boolean; fresh?: boolean; cwds?: CwdSource } = {}): boolean {
     const orphan = this.orphanedWorkerGeneration(runId, opts.admitting);
     if (!orphan) return false;
     const cached = this.orphanProbes.get(runId);
     if (!opts.fresh && cached?.generation === orphan.generation && Date.now() - cached.at < ORPHAN_PROBE_CACHE_MS) return false;
-    const probe = inspectExecutionGeneration(orphan);
+    const probe = inspectExecutionGeneration({ ...orphan, cwds: opts.cwds });
     if (probe.liveness !== 'gone') { this.orphanProbes.set(runId, { generation: orphan.generation, at: Date.now(), probe }); return false; }
     // A stale `alive` must not outlive a `gone` probe, even when the commit below fails.
     this.orphanProbes.delete(runId);
@@ -997,42 +998,67 @@ export class RunManager {
   }
 
   private readonly orphanProbes = new Map<string, { generation: string; at: number; probe: GenerationProbe }>();
-  private readonly orphanReprobes = new Map<string, NodeJS.Timeout>();
+  /** Pending orphan reprobes by run id. One timer serves them all (hearsay-tools/cezarion#879). */
+  private readonly orphanDue = new Map<string, { generation: string; at: number; attempts: number }>();
+  private orphanTimer?: NodeJS.Timeout;
+  /** The `at` the timer was armed for; with the clock, it decides what a tick takes. */
+  private orphanArmedFor = 0;
   private readonly orphanBlockers = new Map<string, WorkerTerminationBlocker>();
   private readonly reportedOrphanBlockers = new Map<string, string>();
   // Private and overridable so tests need not wait out production cadence.
-  private orphanReprobeMs = 15_000;
-  private orphanReprobeLimitMs = 15 * 60_000;
-  private orphanReprobeSlowMs = 60_000;
+  private orphanBackoff: Backoff = ORPHAN_BACKOFF;
   private orphanTermGraceMs = 10_000;
 
   /** #469: a survivor that dies after recovery has no other wake source (no exit callback for a
    * process another cezar spawned). Unref'd; finalization's `run` event then lets worker waits and
-   * outcomes observe it. Fast for the first window, then slow but uncapped, so a long-lived
-   * survivor is still noticed when it exits. A tick while this manager holds the run is skipped;
-   * only terminal reasons (proof settled, generation changed, run gone, unknown record, dispose)
-   * stop it. */
+   * outcomes observe it. Every 15 s for the first 15 minutes, then backing off to hourly
+   * (hearsay-tools/cezarion#879), so a long-lived survivor is still noticed when it exits. One
+   * timer serves every orphan, and a tick shares one `/proc` scan across them. A tick while this
+   * manager holds the run is skipped; only terminal reasons (proof settled, generation changed,
+   * run gone, unknown record, dispose) stop it. */
   private armOrphanReprobe(runId: string): void {
     const armed = this.orphanedWorkerGeneration(runId);
-    if (this.disposed || this.orphanReprobes.has(runId) || !armed) return;
-    const slowAfter = Date.now() + this.orphanReprobeLimitMs;
-    const schedule = () => {
-      const timer = setTimeout(() => {
-        const orphan = this.orphanState(runId);
-        if (orphan.state === 'busy') return schedule();
-        if (orphan.state !== 'orphan' || orphan.generation !== armed.generation || this.settleOrphanedWorkerExecution(runId)) this.clearOrphanReprobe(runId);
-        else schedule();
-      }, Date.now() < slowAfter ? this.orphanReprobeMs : this.orphanReprobeSlowMs);
-      timer.unref?.();
-      this.orphanReprobes.set(runId, timer);
-    };
-    schedule();
+    if (this.disposed || this.orphanDue.has(runId) || !armed) return;
+    this.orphanDue.set(runId, { generation: armed.generation, at: Date.now() + retryDelayMs(0, this.orphanBackoff, noJitter), attempts: 0 });
+    this.wakeOrphanReprobes();
+  }
+
+  private wakeOrphanReprobes(): void {
+    clearTimeout(this.orphanTimer); this.orphanTimer = undefined;
+    if (this.disposed || !this.orphanDue.size) return;
+    let next = Infinity;
+    for (const { at } of this.orphanDue.values()) next = Math.min(next, at);
+    this.orphanArmedFor = next;
+    this.orphanTimer = setTimeout(() => this.orphanReprobeTick(), Math.max(0, next - Date.now()));
+    this.orphanTimer.unref?.();
+  }
+
+  private orphanReprobeTick(): void {
+    this.orphanTimer = undefined;
+    if (this.disposed) return;
+    // Orphans due within 5 % of the fast cadence ride along, so near neighbours share the scan, and
+    // every orphan this tick keeps is re-armed from the same instant, so they stay together.
+    const now = Date.now();
+    const dueBy = Math.max(this.orphanArmedFor, now) + this.orphanBackoff.fastMs / 20;
+    const cwds = sharedCwdScan();
+    for (const [runId, pending] of [...this.orphanDue]) {
+      if (pending.at > dueBy) continue;
+      this.orphanDue.delete(runId);
+      const orphan = this.orphanState(runId);
+      let attempts = pending.attempts;
+      if (orphan.state !== 'busy') {
+        // Ticks are seconds apart, so the brief probe cache would only skip them: probe fresh.
+        if (orphan.state !== 'orphan' || orphan.generation !== pending.generation ||
+          this.settleOrphanedWorkerExecution(runId, { fresh: true, cwds })) continue;
+        attempts++;
+      }
+      this.orphanDue.set(runId, { ...pending, attempts, at: now + retryDelayMs(attempts, this.orphanBackoff, noJitter) });
+    }
+    this.wakeOrphanReprobes();
   }
 
   private clearOrphanReprobe(runId: string): void {
-    const timer = this.orphanReprobes.get(runId);
-    if (timer) clearTimeout(timer);
-    this.orphanReprobes.delete(runId);
+    this.orphanDue.delete(runId);
   }
 
   /** Why the last destroy could not prove termination (#469), and whether that differs from the
@@ -1395,7 +1421,7 @@ export class RunManager {
     this.ciResources.release();
     this.delegationProvisioner = undefined;
     this.finalizedWorkers.clear();
-    for (const runId of [...this.orphanReprobes.keys()]) this.clearOrphanReprobe(runId);
+    this.orphanDue.clear(); clearTimeout(this.orphanTimer); this.orphanTimer = undefined;
     this.orphanProbes.clear(); this.orphanBlockers.clear(); this.reportedOrphanBlockers.clear();
     for (const settle of this.terminationWaiters) settle();
     this.store.off('run', this.onDelegationRun);

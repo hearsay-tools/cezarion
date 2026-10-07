@@ -2,10 +2,9 @@ import { agentTmpDirMayExist, removeAgentTmpDir, sweepAgentTmpDirs } from '../ru
 import { workerEvidenceRunIds } from '../runs/worker-execution.ts';
 import type { RunStore } from '../runs/store.ts';
 import { sharedCwdScan, type CwdSource } from './process-liveness.ts';
-import { retryDelayMs, SCRATCH_BACKOFF, type Backoff } from './retry-backoff.ts';
+import { noJitter, retryDelayMs, SCRATCH_BACKOFF, type Backoff } from './retry-backoff.ts';
 
 type Pending = { at: number; attempts: number; generation?: string; resourceId?: string };
-const noJitter = () => 0;
 
 /** Terminal intent lives in the generation checkpoint as well as the run index. Unknown
  * evidence is retained and reprobed, including when the index cannot load the worker.
@@ -59,7 +58,7 @@ export class WorkerScratchCleanup {
     this.arm(id, 0, 0);
   }
 
-  private arm(id: string, attempts: number, delay: number): void {
+  private arm(id: string, attempts: number, delay: number, from = Date.now()): void {
     this.due.delete(id);
     if (!this.enabled || this.store.unavailable) return;
     // The scratch check first: most ids have none, and a finished record is decoded to ask (#779).
@@ -74,7 +73,7 @@ export class WorkerScratchCleanup {
     try { this.store.retainWorkerScratchCleanup(id); } catch { /* retry unreadable evidence */ }
     const proof = this.store.readWorkerExecution(id);
     if (run?.delegation?.role === 'worker' && proof && proof.phase !== 'complete') return;
-    this.due.set(id, { at: Date.now() + delay, attempts, generation: proof?.generation, resourceId: proof?.scratchCleanup?.resourceId });
+    this.due.set(id, { at: from + delay, attempts, generation: proof?.generation, resourceId: proof?.scratchCleanup?.resourceId });
     if (!this.ticking) this.wake();
   }
 
@@ -91,17 +90,19 @@ export class WorkerScratchCleanup {
   private tick(): void {
     this.timer = undefined;
     if (!this.enabled) return;
-    // Ids due within 5 % of the fast cadence ride along, so near neighbours share the scan.
-    const dueBy = Math.max(this.armedFor, Date.now()) + this.backoff.fastMs / 20;
+    // Ids due within 5 % of the fast cadence ride along, so near neighbours share the scan, and
+    // every id this tick retains is re-armed from the same instant, so they stay together.
+    const now = Date.now();
+    const dueBy = Math.max(this.armedFor, now) + this.backoff.fastMs / 20;
     const cwds = sharedCwdScan();
     this.ticking = true;
     try {
-      for (const [id, pending] of [...this.due]) if (pending.at <= dueBy) this.probe(id, pending, cwds);
+      for (const [id, pending] of [...this.due]) if (pending.at <= dueBy) this.probe(id, pending, cwds, now);
     } finally { this.ticking = false; }
     this.wake();
   }
 
-  private probe(id: string, { attempts, generation, resourceId }: Pending, cwds: CwdSource): void {
+  private probe(id: string, { attempts, generation, resourceId }: Pending, cwds: CwdSource, now: number): void {
     this.due.delete(id);
     const execution = this.store.readWorkerExecution(id);
     // No await between ownership/generation + holder proof and rm. Admission is synchronous
@@ -112,6 +113,6 @@ export class WorkerScratchCleanup {
         this.store.workerScratchResourcesSafe(id, generation, resourceId, cwds)) removeAgentTmpDir(this.dataDir, id);
     } catch { /* Transient evidence/read failures retain the durable intent for another wake. */ }
     // Uncertainty has no age limit or force-delete exit; it backs off instead.
-    this.arm(id, attempts + 1, retryDelayMs(attempts, this.backoff, noJitter));
+    this.arm(id, attempts + 1, retryDelayMs(attempts, this.backoff, noJitter), now);
   }
 }
