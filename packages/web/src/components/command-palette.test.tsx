@@ -1172,4 +1172,22 @@ describe('server search past the window', () => {
     fireEvent.change(await screen.findByRole('combobox'), { target: { value: 'old' } })
     await waitFor(() => expect(document.querySelector('[data-slot="palette-task"][data-run-id="ancient"]')).not.toBeNull())
   })
+
+  it.each([
+    ['branch', { branch: 'fix/bounded-lists' }, 'bounded'],
+    ['workflow label', { workflowLabel: 'brainstorm' }, 'brainst'],
+  ] as const)('keeps a server hit that matched only on its %s', async (_, over, query) => {
+    renderPalette({
+      projects: [project({ id: 'cezar' })],
+      extraRoutes: {
+        [`/api/v1/workspace/runs-search?q=${query}`]: {
+          runs: [indexed({ id: 'by-field', projectId: 'cezar', title: 'Unrelated title', archived: true, ...over })],
+          truncated: [],
+        },
+      },
+    })
+    openWith({ metaKey: true })
+    fireEvent.change(await screen.findByRole('combobox'), { target: { value: query } })
+    await waitFor(() => expect(document.querySelector('[data-slot="palette-task"][data-run-id="by-field"]')).not.toBeNull())
+  })
 })

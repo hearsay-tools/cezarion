@@ -280,8 +280,14 @@ function TaskItem({
       // auto-summary would surface rows for no visible reason.
       value={`task ${label} ${task.id}`}
       // The project name is filter fodder for the same reason it is rendered: with every
-      // project's tasks in one list, "shop" has to narrow to shop's tasks.
-      keywords={[...(projectName ? [projectName] : []), ...referenceKeywords(task)]}
+      // project's tasks in one list, "shop" has to narrow to shop's tasks. The branch and
+      // workflow are the fields the server's run search also matches (#864), so a hit it found
+      // there survives cmdk's own filter — and the Tasks table's search reads them too.
+      keywords={[
+        ...(projectName ? [projectName] : []),
+        ...referenceKeywords(task),
+        ...[task.branch, task.workflow, task.workflowLabel].filter((field): field is string => !!field),
+      ]}
       data-slot="palette-task"
       data-run-id={task.id}
       data-project-id={task.projectId ?? undefined}
