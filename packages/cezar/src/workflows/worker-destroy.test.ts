@@ -131,7 +131,8 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
       const proof = other.getWorkerNoMaterializationProof(w.id);
       expect(proof).toBeTypeOf('function');
       expect(proof!({ ...workspace(w), resourceId: randomUUID() })).toBe(false);
-      expect(await removeOwnedWorkspace(root, workspace(w))).toMatchObject({ state: 'incomplete' });
+      // #878: absence with no identity marker completes bookkeeping without the proof too.
+      expect(await removeOwnedWorkspace(root, workspace(w))).toMatchObject({ state: 'complete', remaining: [] });
       expect(await removeOwnedWorkspace(root, workspace(w), proof)).toMatchObject({ state: 'complete', remaining: [] });
       expect(await removeOwnedWorkspace(root, workspace(w), proof)).toMatchObject({ state: 'complete', remaining: [] });
       mkdirSync(workspace(w).path, { recursive: true });
@@ -151,7 +152,8 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     expect(proof.neverMaterialized).toBe(true);
     writeFileSync(join(root, '.ai/cezar/runs', `${w.id}.execution.json`), JSON.stringify({ ...proof, abandoned: true }), { mode: 0o600 });
     expect(manager.getWorkerNoMaterializationProof(w.id)).toBeUndefined();
-    expect(await removeOwnedWorkspace(root, workspace(w))).toMatchObject({ state: 'incomplete' });
+    // #878: nothing was materialized, so absence alone still completes bookkeeping.
+    expect(await removeOwnedWorkspace(root, workspace(w))).toMatchObject({ state: 'complete', remaining: [] });
   });
 
   it('a checkpoint an older cezar abandoned still parses, keeps its flag and refuses resume (hearsay-tools/cezarion#889)', async () => {
@@ -180,7 +182,8 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     store.commitWorkerCancellation(w.id); store.commitWorkerExecutionComplete(w.id, next); destroy(w);
     expect(proof(workspace(w))).toBe(false);
     expect(manager.getWorkerNoMaterializationProof(w.id)).toBeUndefined();
-    expect(await removeOwnedWorkspace(root, workspace(w), proof)).toMatchObject({ state: 'incomplete' });
+    // #878: a stale proof grants nothing; absence with no identity marker completes on its own.
+    expect(await removeOwnedWorkspace(root, workspace(w), proof)).toMatchObject({ state: 'complete', remaining: [] });
     writeFileSync(join(root, '.ai/cezar/runs', `${w.id}.execution.json`), JSON.stringify({ generation: next, phase: 'complete' }), { mode: 0o600 });
     expect(manager.getWorkerNoMaterializationProof(w.id)).toBeUndefined();
     writeFileSync(join(root, '.ai/cezar/runs', `${w.id}.execution.json`), JSON.stringify({ generation: next, phase: 'starting', neverMaterialized: true }), { mode: 0o600 });
@@ -196,7 +199,8 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
       if (++calls === 2) rmSync(join(root, '.ai/cezar/runs', `${w.id}.execution.json`));
       return proof(value);
     };
-    expect(await removeOwnedWorkspace(root, workspace(w), invalidated)).toMatchObject({ state: 'incomplete' });
+    // #878: the invalidated proof falls through to the absence check, which completes.
+    expect(await removeOwnedWorkspace(root, workspace(w), invalidated)).toMatchObject({ state: 'complete', remaining: [] });
     expect(calls).toBe(2);
   });
 
