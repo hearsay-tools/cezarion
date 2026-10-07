@@ -774,6 +774,32 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
     expect(child.exitCode).toBeNull();
   });
 
+  it.runIf(linux)("a holder only the removal's own last check saw still ends the skipping when it exits", async () => {
+    cadence({ fastMs: 200, fastCount: 10, capMs: 2_000 });
+    const { workerId, workspace } = await settled(false);
+    // A locked worktree fails Git's removal after both holder checks pass, so ticks settle into skipping.
+    execFileSync('git', ['worktree', 'lock', workspace.path], { cwd: f.root });
+    expect(await f.service.destroy(f.caller, { workerId })).toMatchObject({ state: 'incomplete' });
+    await vi.waitFor(() => expect(destroyOf(workerId)?.retry?.attempts).toBeGreaterThanOrEqual(2), { timeout: 10_000 });
+    // The next full attempt: its own proof answers safe, then a process enters the worktree before the
+    // removal's second check, the real race between the two scans.
+    let late: ReturnType<typeof spawn> | undefined;
+    const proof = f.store.workerResourceHolders.bind(f.store);
+    vi.spyOn(f.store, 'workerResourceHolders').mockImplementation((...args) => {
+      const answer = proof(...args);
+      if (answer === 'safe' && !late) late = spawn('sleep', ['30'], { cwd: workspace.path, stdio: 'ignore' });
+      return answer;
+    });
+    onTestFinished(() => { late?.kill('SIGKILL'); });
+    execFileSync('git', ['worktree', 'unlock', workspace.path], { cwd: f.root });
+    await vi.waitFor(() => expect(late).toBeDefined(), { timeout: 10_000 });
+    await vi.waitFor(() => expect(destroyOf(workerId)?.error).toMatch(new RegExp(`processes ${late!.pid}\\b`)), { timeout: 10_000 });
+    const exited = new Promise<void>(resolve => late!.once('exit', () => resolve()));
+    late!.kill('SIGKILL'); await exited;
+    await vi.waitFor(() => expect(destroyOf(workerId)).toMatchObject({ phase: 'complete', remaining: [] }), { timeout: 10_000 });
+    expect(existsSync(workspace.path)).toBe(false);
+  });
+
   it.runIf(linux)('Clean up resets the backoff: a full attempt now, and the next tick at the fast cadence', async () => {
     cadence({ fastMs: 1_000, fastCount: 0, capMs: 5_000 }, 1);
     const { workerId } = await settled();

@@ -99,7 +99,9 @@ export function holdersStillHold({ store, dataDir, workerId, holders }: { store:
   if (run?.delegation?.role !== 'worker') return false;
   const execution = store.readWorkerExecution(workerId);
   const record = execution ? store.readWorkerProcesses(workerId, execution.generation) : 'absent';
-  const recorded = typeof record === 'string' ? [] : [record.controller.pid, ...record.processes.map(entry => entry.pid)];
+  const recorded = typeof record === 'string' ? [] : [record.controller, ...record.processes];
   const paths = [run.delegation.workspace.path, ...agentTmpDirLocations(dataDir, workerId)];
-  return holders.every(holder => recordedProcessLive(holder) && (recorded.includes(holder.pid) || processCwdUnder(holder.pid, paths) !== false));
+  // A recorded entry speaks for a holder only while it is that same incarnation: a reused PID is not the generation's.
+  const inRecord = (holder: RecordedProcess) => recorded.some(entry => entry.pid === holder.pid && recordedProcessLive(entry));
+  return holders.every(holder => recordedProcessLive(holder) && (inRecord(holder) || processCwdUnder(holder.pid, paths) !== false));
 }

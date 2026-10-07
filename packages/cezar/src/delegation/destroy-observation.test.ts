@@ -92,6 +92,29 @@ describe('destroy observation (hearsay-tools/cezarion#879)', () => {
     expect(key()).not.toBe(locked);
   });
 
+  it.runIf(process.platform === 'linux')('a reused PID left in a stale process record does not count as the generation\'s', async () => {
+    const { workerId, workspace, dataDir } = await settled();
+    const child = spawn(process.execPath, ['-e', "console.log('ready'); process.stdin.on('data', () => { process.chdir('/'); console.log('moved'); })"],
+      { cwd: workspace.path, stdio: ['pipe', 'pipe', 'ignore'] });
+    const exited = new Promise<void>(resolve => child.once('exit', () => resolve()));
+    const line = () => new Promise<void>(resolve => child.stdout!.once('data', () => resolve()));
+    await line();
+    try {
+      // The record names this PID, but as an earlier incarnation: the OS has since reused the number.
+      const execution = f.store.readWorkerExecution(workerId)!;
+      expect(f.store.appendWorkerProcess(workerId, execution.generation, child.pid!)).toBe(true);
+      const path = join(dataDir, 'runs', `${workerId}.processes.json`);
+      const record = JSON.parse(readFileSync(path, 'utf8')) as { processes: { pid: number; startToken?: string }[] };
+      for (const entry of record.processes) if (entry.pid === child.pid) entry.startToken = 'an-earlier-incarnation';
+      writeFileSync(path, JSON.stringify(record));
+      const holders = recordHolders([child.pid!]);
+      const holds = () => holdersStillHold({ store: f.store, dataDir, workerId, holders });
+      expect(holds()).toBe(true);
+      const moved = line(); child.stdin!.write('go\n'); await moved;
+      expect(holds()).toBe(false);
+    } finally { child.kill('SIGKILL'); await exited; }
+  });
+
   it.runIf(process.platform === 'linux')('a holder still holds only while it is the same live process working under the worker', async () => {
     const { workerId, workspace } = await settled();
     const child = spawn(process.execPath, ['-e', "console.log('ready'); process.stdin.on('data', () => { process.chdir('/'); console.log('moved'); })"],

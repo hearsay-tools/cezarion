@@ -726,20 +726,20 @@ export class DelegationService {
           throw new Error('Worker resource ownership changed');
         }
       };
-      // The removal turns a held error into an incomplete result, so the holders are kept here, where they are found.
-      let holders: readonly number[] = [];
       const assertSafe = () => {
         assertCurrent();
-        const found = project.store.workerResourceHolders(workerId, proof.generation, workspace.resourceId);
-        if (found === 'safe') return;
-        holders = found;
-        throw found.length ? new WorkspaceHeldError(found) : new Error('Worker resources may still be held; cleanup will retry');
+        const holders = project.store.workerResourceHolders(workerId, proof.generation, workspace.resourceId);
+        if (holders === 'safe') return;
+        throw holders.length ? new WorkspaceHeldError(holders) : new Error('Worker resources may still be held; cleanup will retry');
       };
+      // The removal turns being held into an incomplete result; it reports the holders of either of
+      // its checks here, so a tick can tell when they exit (hearsay-tools/cezarion#879).
+      let holders: readonly number[] = [];
       try {
         assertCurrent();
         // #781: release preview before the final fresh proof immediately preceding removal.
         result = await releaseThenRemoveOwnedWorkspace({ previewHost: project.manager.previewHost }, project.root, workspace,
-          assertCurrent, assertSafe);
+          assertCurrent, assertSafe, pids => { holders = pids; });
       } catch {
         result = { workerId, state: 'incomplete', remaining: resources, error: 'Worker resources may still be held; cleanup will retry' };
       } finally { release?.(); }
