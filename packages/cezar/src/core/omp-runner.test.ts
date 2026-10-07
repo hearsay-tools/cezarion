@@ -24,6 +24,7 @@ vi.mock('node:child_process', async (importOriginal) => {
 
 import type { AgentEvent, AgentRunSpec, AgentSession } from './agent-runner.js';
 import type { UiEvent } from './ui-events.js';
+import { sessionGroupOf } from './session-process.js';
 import { buildOmpArgs, OMP_BUILTIN_TOOL_NAMES, OMP_SPEC_SUPPORT, OmpRunner, ompTools } from './omp-runner.js';
 import { createRunner } from './runner-factory.js';
 import { allowedToolsForStep, DEFAULT_ALLOWED_TOOLS } from '../workflows/types.js';
@@ -1012,6 +1013,8 @@ await import(${JSON.stringify(MOCK)});
       expect(session.pid).toBe(secondChild);
       expect(session.pid).not.toBe(first);
       expect(changes).toEqual([secondChild]);
+      // hearsay-tools/cezarion#890: the respawned child leads its own process group too.
+      if (process.platform !== 'win32') expect(sessionGroupOf(session.pid!)).toBe(session.pid);
       session.interrupt();
       await session.result.catch(() => undefined);
     });

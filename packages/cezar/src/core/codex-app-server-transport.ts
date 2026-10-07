@@ -1,6 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import { spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { trackChildExit } from './agent-runner.ts';
+import { signalSession, spawnSessionLeader } from './session-process.ts';
 import { buildChildEnv } from './agent-env.ts';
 import { EOF_KILL_GRACE_MS, EOF_TERM_GRACE_MS } from './runner-runtime.ts';
 
@@ -26,17 +27,18 @@ export function buildCodexAppServerEnv(extraEnv?: Record<string, string>): NodeJ
   return buildChildEnv({ backend: 'codex', extraEnv });
 }
 
-/** Spawn the authenticated host's app-server with the same least-privilege env used by runs. */
+/** Spawn the authenticated host's app-server with the same least-privilege env used by runs.
+ *  A run's session leads its own process group (hearsay-tools/cezarion#890); discovery's
+ *  short-lived probe does not. */
 export function spawnCodexAppServer(
   bin: string,
   cwd: string,
   extraEnv?: Record<string, string>,
+  opts: { session?: boolean } = {},
 ): ChildProcessWithoutNullStreams {
   try {
-    return nodeSpawn(bin, ['app-server'], {
-      cwd,
-      env: buildCodexAppServerEnv(extraEnv),
-    });
+    const options = { cwd, env: buildCodexAppServerEnv(extraEnv) };
+    return opts.session ? spawnSessionLeader(bin, ['app-server'], options) : nodeSpawn(bin, ['app-server'], options);
   } catch (error) {
     throw codexSpawnError(error, bin);
   }
@@ -165,12 +167,12 @@ export function endCodexAppServer(
   const termTimer = setTimeout(() => {
     if (!hasExited()) {
       onSignal?.();
-      child.kill('SIGTERM');
+      signalSession(child, 'SIGTERM');
     }
     killTimer = setTimeout(() => {
       if (!hasExited()) {
         onSignal?.();
-        child.kill('SIGKILL');
+        signalSession(child, 'SIGKILL');
       }
     }, EOF_KILL_GRACE_MS);
     killTimer.unref?.();
