@@ -31,6 +31,7 @@
     "install-as-command:global": "node scripts/install-as-command.mjs --mode global",
     "uninstall-as-command": "node scripts/install-as-command.mjs --mode uninstall",
     "bench:run-store": "node --import tsx scripts/benchmark-run-store.ts",
+    "bench:stuck-destroys": "node --import tsx scripts/benchmark-stuck-destroys.ts",
     "server-install": "tsx src/index.ts server-install",
     "server-deploy": "tsx src/index.ts server-deploy",
     "server-uninstall": "tsx src/index.ts server-uninstall",
