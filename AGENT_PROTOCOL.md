@@ -946,6 +946,13 @@ resume channel). A fresh-session continuation on an `in-thread` runner still rec
 skill. OpenCode's lost-session 404 fallback is covered alongside R57: one notice, a new
 session id, skill present in the fresh session's system prompt. No runner is exempt.
 
+**R58** (hearsay-tools/cezarion#917), in `core/worktree-setup-parity.test.ts`, drives every
+`RUNNER_IDS` backend through its native `HARNESS_ADAPTERS` wire on a task in an isolated
+worktree whose project declares `worktreeSetup`. The setup runs before the first turn, the run
+records `worktreeSetup.status === 'done'`, and the paragraph saying what ran reaches the opening
+message on each runner's own wire. The note is appended in `workflows/run.ts` before the
+runner seam, so no runner can lose it on the way. No runner is exempt.
+
 Crash-diagnostic rows **S15–S17** (hearsay-tools/cezarion#499) drive every `RUNNER_IDS` adapter's
 native transport through an uncaught-exception-shaped stderr fixture, a plain
 single-line failure, and a clean/requested shutdown with stderr. RPC mocks send
