@@ -639,11 +639,16 @@ async function loadTeamSkills(
   // first restart past the TTL otherwise hides every team skill — and starves a
   // recovered Continue of its playbook — for as long as the fetch takes.
   let cached: Array<Skill[] | undefined> = [];
+  // Each source's stamp as the snapshot saw it. The bare clone and its stamp
+  // are shared by every project and process, so a fetch made for another
+  // project never bumps this one's generation; a moved stamp is how it shows.
+  let snapshotStamps: Array<number | null> = [];
   const generation = postFetchListsByRoot.get(repoRoot) ?? 0;
   // True once another load has published a post-fetch list since this one
   // started: its snapshot may predate that list, so it must not win (#859).
   const superseded = () => (postFetchListsByRoot.get(repoRoot) ?? 0) !== generation;
   if (!refresh) {
+    snapshotStamps = config.skillsRepos.map((src) => readLastFetchAt(bareDirFor(src.repo)));
     cached = await Promise.all(config.skillsRepos.map((src) => listRemoteSkills(src).catch(() => undefined)));
     const pause = cachedListPauses.get(repoRoot);
     if (pause) {
@@ -680,7 +685,8 @@ async function loadTeamSkills(
     }
     // An unfetched source has not moved since the list-only pass unless
     // another load fetched it meanwhile; reuse the snapshot only then.
-    const listed = fetched || superseded() ? undefined : cached[index];
+    const unmoved = !superseded() && readLastFetchAt(bareDirFor(src.repo)) === snapshotStamps[index];
+    const listed = fetched || !unmoved ? undefined : cached[index];
     // degrade: a source that fails to list contributes nothing
     lists.push(listed ?? (await listRemoteSkills(src).catch(() => undefined)));
   }

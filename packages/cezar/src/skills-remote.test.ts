@@ -188,6 +188,31 @@ describe('cached team-skill list before the passive fetch (#859)', () => {
     expect(names(passiveList)).toEqual(['alpha', 'beta']);
   });
 
+  it('a passive load re-lists a shared clone that another project refreshed after its snapshot', async () => {
+    vi.stubEnv('HOME', scratch('cez-team-home-'));
+    const repoRoot = scratch('cez-team-root-');
+    const otherRoot = scratch('cez-team-root-');
+    const repo = `org-${randomUUID().slice(0, 8)}/skills`;
+    writeSkillsReposConfig(repoRoot, [repo]);
+    writeSkillsReposConfig(otherRoot, [repo]);
+    const clone = await seedTeamSkillsClone(repo, { alpha: 'ALPHA-BODY' });
+    dirs.push(clone.sourceDir);
+    let resume!: () => void;
+    const parked = __pauseAfterCachedListForTests(repoRoot, new Promise<void>((resolve) => { resume = resolve; }));
+    releases.push(resume);
+
+    // The bare clone and its stamp are shared by every project (and process);
+    // this project's own publications never see a refresh made from another.
+    const passive = waitForTeamSkills(repoRoot);
+    await parked;
+    await clone.addSkill('beta', 'BETA-BODY');
+    expect(names(await refreshTeamSkills(otherRoot))).toEqual(['alpha', 'beta']);
+    resume();
+
+    expect(names(await passive)).toEqual(['alpha', 'beta']);
+    expect(names(getTeamSkillsCached(repoRoot))).toEqual(['alpha', 'beta']);
+  });
+
   it('resolves empty without waiting on the fetch when no clone exists', async () => {
     const { repoRoot } = heldFetchProject();
 
