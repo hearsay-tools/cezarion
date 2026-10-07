@@ -8,7 +8,7 @@
     "--force",
     "--trust",
     "--output-format stream-json",
-    "--exclude-tools taskToolCall"
+    "--allowed-tools ask_question_tool_call"
   ],
   "exitCode": 0,
   "timedOut": false,

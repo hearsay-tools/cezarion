@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "case": "plugins",
+  "cliVersion": "2026.10.01-e373342",
+  "model": "gpt-5.4-mini",
+  "invocation": [
+    "-p",
+    "--force",
+    "--trust",
+    "--output-format stream-json",
+    "--allowed-tools <non-agent catalog>",
+    "--plugin-dir <disposable inert plugin>"
+  ],
+  "projectSettings": ".claude/settings.json enabledPlugins=false for known Superpowers IDs in disposable worktree",
+  "globalConfigurationWritten": false,
+  "catalogValidatedBeforeInference": true,
+  "readToolFrames": 2,
+  "marketplaceSkillRead": true,
+  "claudeSkillRead": false,
+  "outcome": "blocked"
+}
