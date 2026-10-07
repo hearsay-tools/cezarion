@@ -1,5 +1,5 @@
 import type { WorkerDestroyResult, WorkerWorkspace } from '@open-mercato/cezar-contract';
-import { removeOwnedWorkspace, type WorkerNoMaterializationProof } from './delegation/workspace.ts';
+import { removeOwnedWorkspace } from './delegation/workspace.ts';
 import { removeWorktree, type RemoveWorktreeOptions } from './git-worktree.ts';
 import type { PreviewHostLike } from './preview/registration.ts';
 
@@ -34,11 +34,10 @@ export async function releaseThenRemoveOwnedWorkspace(
   deps: { previewHost?: Pick<PreviewHostLike, 'release'> },
   repoRoot: string,
   workspace: WorkerWorkspace,
-  neverMaterialized?: WorkerNoMaterializationProof,
   assertCurrent?: () => void,
   assertUnheld?: () => void,
 ): Promise<WorkerDestroyResult> {
-  return removeOwnedWorkspace(repoRoot, workspace, neverMaterialized, assertCurrent, async () => {
+  return removeOwnedWorkspace(repoRoot, workspace, assertCurrent, async () => {
     await deps.previewHost?.release(workspace.ownerRunId).catch(() => undefined);
   }, assertUnheld);
 }

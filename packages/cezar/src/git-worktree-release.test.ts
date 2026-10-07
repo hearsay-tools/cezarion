@@ -7,7 +7,7 @@ const order: string[] = [];
 let declines = false;
 
 vi.mock('./delegation/workspace.ts', () => ({
-  removeOwnedWorkspace: vi.fn(async (repoRoot: string, value: { ownerRunId: string; path: string }, _proof?: unknown, _assert?: unknown, beforeRemove?: () => Promise<void>) => {
+  removeOwnedWorkspace: vi.fn(async (repoRoot: string, value: { ownerRunId: string; path: string }, _assert?: unknown, beforeRemove?: () => Promise<void>) => {
     if (declines) return { workerId: value.ownerRunId, state: 'incomplete', remaining: ['worktree', 'branch'] };
     await beforeRemove?.();
     order.push(`remove owned ${JSON.stringify([repoRoot, value.path])}`);
