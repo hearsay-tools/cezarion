@@ -689,16 +689,41 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
   });
 
   it.runIf(linux)('a holder that exits inside the fast window lets the destroy complete within it', async () => {
-    cadence({ fastMs: 200, fastCount: 3, capMs: 2_000 });
+    cadence({ fastMs: 200, fastCount: 5, capMs: 2_000 });
     const { workerId, workspace, holder } = await settled();
     await f.service.destroy(f.caller, { workerId });
+    // Past the fixture's one real change (review -> cancelled): from here every tick skips, so
+    // only the holder's exit can start the next full attempt.
+    await vi.waitFor(() => expect(destroyOf(workerId)?.retry?.attempts).toBeGreaterThanOrEqual(2), { timeout: 5_000 });
+    const reached = destroyOf(workerId)!.retry!.attempts;
     const writes = vi.spyOn(f.store, 'commitDelegation');
     await holder!.close();
     await vi.waitFor(() => expect(destroyOf(workerId)).toEqual({ requestedAt: expect.any(String), phase: 'complete', remaining: [] }), { timeout: 5_000 });
     const attempts = writes.mock.calls.flatMap(([patches]) => patches)
       .map(patch => (patch.delegation as { destroy?: { retry?: { attempts: number } } }).destroy?.retry?.attempts ?? 0);
-    expect(Math.max(0, ...attempts)).toBeLessThanOrEqual(3);
+    // The next tick after the exit attempts in full and completes, inside the five fast ticks.
+    expect(Math.max(reached, ...attempts)).toBeLessThanOrEqual(Math.min(reached + 1, 5));
     expect(existsSync(workspace.path)).toBe(false);
+  });
+
+  it.runIf(linux)("an explicit destroy cut off by project replacement leaves the replacement's retry armed", async () => {
+    cadence();
+    const { workerId } = await settled();
+    let release!: (value: boolean) => void;
+    const gate = new Promise<boolean>(resolve => { release = resolve; });
+    vi.spyOn(f.manager, 'awaitRunTermination').mockReturnValue(gate);
+    const explicit = f.service.destroy(f.caller, { workerId });
+    await vi.waitFor(() => expect(destroyOf(workerId)?.phase).toBe('terminating'), { timeout: 3_000 });
+    const replacementManager = createFixtureManager(f.store, f.root);
+    const detachReplacement = f.service.registerProject({ id: 'project', root: f.root, store: f.store, manager: replacementManager });
+    const armed = () => (f.service as unknown as { destroyRetryTimers: Map<string, Map<string, unknown>> }).destroyRetryTimers.get('project')?.has(workerId);
+    try {
+      f.service.armDestroyRetries('project');
+      expect(armed()).toBe(true);
+      release(false);
+      await explicit.catch(() => undefined);
+      expect(armed()).toBe(true);
+    } finally { detachReplacement(); replacementManager.dispose(); }
   });
 
   it.runIf(linux)('Clean up resets the backoff: a full attempt now, and the next tick at the fast cadence', async () => {

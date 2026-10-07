@@ -638,6 +638,8 @@ export class DelegationService {
    * backoff, so a timer armed for a later automatic attempt is dropped and re-armed at the fast cadence. */
   private destroySerialized(project: DelegationProject, workerId: string, check: () => RunRecord) {
     return this.serialized(`worker:${project.id}:${workerId}`, () => this.destroyAttempt(project, workerId, check, 'manual')).finally(() => {
+      // A replaced registration owns its own timers under the same project id: leave them alone.
+      if (this.projects.get(project.id) !== project) return;
       const timers = this.destroyRetryTimers.get(project.id);
       clearTimeout(timers?.get(workerId)); timers?.delete(workerId);
       this.scheduleDestroyRetry(project, workerId);
@@ -722,20 +724,21 @@ export class DelegationService {
           throw new Error('Worker resource ownership changed');
         }
       };
+      // The removal turns a held error into an incomplete result, so the holders are kept here, where they are found.
+      let holders: readonly number[] = [];
       const assertSafe = () => {
         assertCurrent();
-        const holders = project.store.workerResourceHolders(workerId, proof.generation, workspace.resourceId);
-        if (holders === 'safe') return;
-        throw holders.length ? new WorkspaceHeldError(holders) : new Error('Worker resources may still be held; cleanup will retry');
+        const found = project.store.workerResourceHolders(workerId, proof.generation, workspace.resourceId);
+        if (found === 'safe') return;
+        holders = found;
+        throw found.length ? new WorkspaceHeldError(found) : new Error('Worker resources may still be held; cleanup will retry');
       };
-      let holders: readonly number[] = [];
       try {
         assertCurrent();
         // #781: release preview before the final fresh proof immediately preceding removal.
         result = await releaseThenRemoveOwnedWorkspace({ previewHost: project.manager.previewHost }, project.root, workspace,
           assertCurrent, assertSafe);
-      } catch (error) {
-        if (error instanceof WorkspaceHeldError) holders = error.pids;
+      } catch {
         result = { workerId, state: 'incomplete', remaining: resources, error: 'Worker resources may still be held; cleanup will retry' };
       } finally { release?.(); }
       // An already-started checked Git operation may finish after detach. Its
