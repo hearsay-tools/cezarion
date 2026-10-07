@@ -274,13 +274,16 @@ export class WorkspaceHeldError extends Error {
  * the exact ref/log identity whose compare-and-swap deletion may be retried.
  * `beforeRemove` runs once every check has passed, right before git removes the checkout: call
  * this through `releaseThenRemoveOwnedWorkspace` so the worker's preview goes first (#781).
- * `onHeld` receives the processes that kept it, from either holder check, so a caller can tell
- * when they exit (hearsay-tools/cezarion#879). */
+ * `report` tells a retrying caller why an incomplete removal stopped (hearsay-tools/cezarion#879):
+ * `held` with the processes either holder check found, so it can tell when they exit, or
+ * `unexplained` when a destructive Git step failed or something threw, a cause no observation
+ * of the inputs can see change (a holder Windows names to no scan, a transient lock). */
+export type RemovalReport = { held?: (pids: readonly number[]) => void; unexplained?: () => void };
 export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorkspace, assertCurrent?: () => void,
-  beforeRemove?: () => Promise<void>, assertUnheld?: () => void, onHeld?: (pids: readonly number[]) => void): Promise<WorkerDestroyResult> {
+  beforeRemove?: () => Promise<void>, assertUnheld?: () => void, report?: RemovalReport): Promise<WorkerDestroyResult> {
   let remaining: Array<'worktree' | 'branch'> = ['worktree', 'branch'];
   let provisioned = false; let lockBusy = false; let heldBy: readonly number[] = [];
-  const held = (pids: readonly number[]) => { heldBy = pids; onHeld?.(pids); };
+  const held = (pids: readonly number[]) => { heldBy = pids; report?.held?.(pids); };
   let stranded: string | undefined;
   const result = (): WorkerDestroyResult => ({ workerId: value.ownerRunId, state: remaining.length ? 'incomplete' : 'complete', remaining,
     ...(remaining.length ? { error: lockBusy ? WORKTREE_LOCK_BUSY_ERROR
@@ -353,7 +356,7 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
         const holders = inspectGeneration({ paths: [workspace.path] });
         if (holders.liveness !== 'gone') { held(holders.pids); return result(); }
         const removed = await mutationGit(repoRoot, ['worktree', 'remove', '--force', workspace.path]);
-        if (!removed.ok) return result();
+        if (!removed.ok) { report?.unexplained?.(); return result(); }
         remaining = ['branch'];
       }
       if (!checkpoint) {
@@ -403,7 +406,7 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
         assertCurrent?.();
         assertUnheld?.();
         const removed = await mutationGit(repoRoot, ['update-ref', '-d', `refs/heads/${workspace.branch}`, checkpoint.sha]);
-        if (!removed.ok || await branchExists()) return result();
+        if (!removed.ok || await branchExists()) { report?.unexplained?.(); return result(); }
       }
       await writeCleanup(checkpointPath, { ...checkpoint, phase: 'complete' }, assertCurrent);
       remaining = [];
@@ -413,6 +416,7 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
     // Ambiguous ownership and every failed Git/filesystem operation fail closed.
     lockBusy = error instanceof WorktreeMutationLockTimeout;
     if (error instanceof WorkspaceHeldError) held(error.pids);
+    else report?.unexplained?.();
   }
   return result();
 }

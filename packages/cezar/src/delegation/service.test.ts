@@ -4,7 +4,7 @@ import { syncBuiltinESMExports } from 'node:module';
 import { createFixtureManager } from '../workflows/fixture-cleanup.testkit.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
-import fs, { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import fs, { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { workerSpawnRequestSchema } from '@open-mercato/cezar-contract';
 import { DelegationPolicyError } from './policy.ts';
 import { workerWorkflowHash } from './execution-identity.ts';
@@ -18,7 +18,7 @@ import { mergeWriteAgentAccounts } from '../workspace/agent-accounts.ts';
 import type { Caller } from './credentials.ts';
 
 import { fixture } from './service.testkit.ts';
-import { ensureOwnedWorkspace, WORKTREE_LOCK_BUSY_ERROR } from './workspace.ts';
+import { ensureOwnedWorkspace, gitCommonDir, WORKTREE_LOCK_BUSY_ERROR } from './workspace.ts';
 import { DelegationService } from './service.ts';
 import { withWorktreeMutation } from '../git-worktree-lock.ts';
 import { readableHolder } from './non-dumpable.testkit.ts';
@@ -847,12 +847,28 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
     expect(Date.now() - reset).toBeLessThan(2_500);
   });
 
-  it('a thrown attempt records why, instead of leaving cleaning with no error', async () => {
+  it('a thrown attempt records why, and the next tick attempts in full', async () => {
     cadence();
     const { workerId } = await settled(false);
     vi.spyOn(f.store, 'readEventsAsync').mockRejectedValueOnce(new Error('transcript unreadable'));
     await expect(f.service.destroy(f.caller, { workerId })).rejects.toThrow('transcript unreadable');
     expect(destroyOf(workerId)).toMatchObject({ phase: 'incomplete', remaining: ['worktree', 'branch'], error: 'transcript unreadable' });
+    // Nothing a tick can observe explains a throw, so it is never skipped: the next tick completes.
+    await vi.waitFor(() => expect(destroyOf(workerId)).toMatchObject({ phase: 'complete', remaining: [] }), { timeout: 5_000 });
+  });
+
+  it.runIf(linux)('a failed Git step with no holder to name is retried in full once it clears, never skipped', async () => {
+    cadence({ fastMs: 200, fastCount: 10, capMs: 2_000 });
+    const { workerId, workspace } = await settled(false);
+    // A stale ref lock: the branch delete fails after every check passed, and nothing the key reads changes when it goes.
+    const lock = join(await gitCommonDir(f.root), 'refs/heads', `${workspace.branch}.lock`);
+    writeFileSync(lock, '');
+    onTestFinished(() => rmSync(lock, { force: true }));
+    expect(await f.service.destroy(f.caller, { workerId })).toMatchObject({ state: 'incomplete', remaining: ['branch'] });
+    await vi.waitFor(() => expect(destroyOf(workerId)?.retry?.attempts).toBeGreaterThanOrEqual(2), { timeout: 10_000 });
+    expect(destroyOf(workerId)).toMatchObject({ phase: 'incomplete', remaining: ['branch'] });
+    rmSync(lock);
+    await vi.waitFor(() => expect(destroyOf(workerId)).toMatchObject({ phase: 'complete', remaining: [] }), { timeout: 10_000 });
   });
 
   it('a restart resumes the backoff from the persisted next attempt (guard)', async () => {

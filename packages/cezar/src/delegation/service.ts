@@ -26,7 +26,7 @@ import { isAuthenticatedCaller } from './credentials.ts';
 import { parseDelegationEffort } from './effort.ts';
 import { authorizeSpawn, authorizeSpawnReplay, authorizeWorker, authorizeCancelWait, authorizeRetainedResult, DelegationPolicyError } from './policy.ts';
 import { releaseThenRemoveOwnedWorkspace } from '../git-worktree-release.ts';
-import { gitCommonDir, planOwnedWorkspace, readOwnedDiff, resolveWorkerBaseline, WORKTREE_LOCK_BUSY_ERROR, WorkspaceHeldError } from './workspace.ts';
+import { gitCommonDir, planOwnedWorkspace, readOwnedDiff, resolveWorkerBaseline, WorkspaceHeldError } from './workspace.ts';
 import { holdersStillHold, observeDestroy, recordHolders, type DestroyObservation } from './destroy-observation.ts';
 import { DESTROY_ATTENTION_ATTEMPTS, DESTROY_BACKOFF, retryDelayMs, type Backoff } from './retry-backoff.ts';
 
@@ -681,10 +681,12 @@ export class DelegationService {
       project.store.commitDelegation([{ id: workerId, delegation: { ...worker.delegation, destroy: { requestedAt, phase, remaining,
         ...(error ? { error: error.slice(0, 2_000) } : {}), ...(retry ? { retry } : {}) } } }]);
     };
-    /** Holders the attempt ran into, kept with what it started from. A complete destroy keeps nothing,
-     * and neither does lock contention: it clears without changing anything the key can see. */
-    const observed = (result: WorkerDestroyResult, holders: readonly number[]) => {
-      this.observeAttempt(project, workerId, result.state === 'complete' || result.error === WORKTREE_LOCK_BUSY_ERROR ? undefined : { key, holders: recordHolders(holders) });
+    /** What the attempt decided on, and the holders it ran into, kept only when that explains the
+     * failure. A complete destroy keeps nothing, and neither does a failure no key input or named
+     * holder accounts for (lock contention, a failed Git step, an unnamed blocker): it can clear
+     * without changing anything a tick could see, so the next tick attempts in full. */
+    const observed = (result: WorkerDestroyResult, holders: readonly number[], explained: boolean) => {
+      this.observeAttempt(project, workerId, result.state === 'complete' || !explained ? undefined : { key, holders: recordHolders(holders) });
       return result;
     };
     persist('requested', worker.delegation.destroy?.remaining ?? ['process', 'worktree', 'branch']);
@@ -705,7 +707,7 @@ export class DelegationService {
         result = { workerId, state: 'incomplete', remaining: ['process', ...resources], error: !taken ? 'Worker termination is not proven; retry cleanup later'
           : taken.blocker.kind === 'unreadable' ? reason! : `Worker termination is not proven: ${reason}; retry cleanup later` };
         persist(result.state, result.remaining, result.error);
-        return observed(result, taken?.blocker.kind === 'processes' ? taken.blocker.pids : taken?.blocker.kind === 'controller' ? [taken.blocker.pid] : []);
+        return observed(result, taken?.blocker.kind === 'processes' ? taken.blocker.pids : taken?.blocker.kind === 'controller' ? [taken.blocker.pid] : [], !!taken);
       }
       persist('cleaning', resources);
       const snapshot = structuredClone(check());
@@ -737,17 +739,20 @@ export class DelegationService {
         key = observe();
         const holders = project.store.workerResourceHolders(workerId, proof.generation, workspace.resourceId);
         if (holders === 'safe') return;
-        throw holders.length ? new WorkspaceHeldError(holders) : new Error('Worker resources may still be held; cleanup will retry');
+        // Held even with no PID to name: what decides it (the process record, scratch, the execution) is in the key.
+        throw new WorkspaceHeldError(holders);
       };
       // The removal turns being held into an incomplete result; it reports the holders of either of
-      // its checks here, so a tick can tell when they exit (hearsay-tools/cezarion#879).
+      // its checks, or that it stopped for a reason no key input explains (hearsay-tools/cezarion#879).
       let holders: readonly number[] = [];
+      let explained = true;
       try {
         assertCurrent();
         // #781: release preview before the final fresh proof immediately preceding removal.
         result = await releaseThenRemoveOwnedWorkspace({ previewHost: project.manager.previewHost }, project.root, workspace,
-          assertCurrent, assertSafe, pids => { holders = pids; });
+          assertCurrent, assertSafe, { held: pids => { holders = pids; }, unexplained: () => { explained = false; } });
       } catch {
+        explained = false;
         result = { workerId, state: 'incomplete', remaining: resources, error: 'Worker resources may still be held; cleanup will retry' };
       } finally { release?.(); }
       // An already-started checked Git operation may finish after detach. Its
@@ -763,11 +768,12 @@ export class DelegationService {
         head: removed ? { state: 'deleted', reason: 'missing', ...('sha' in evidence.result.head ? { sha: evidence.result.head.sha } : {}) } : evidence.result.head,
         diff: evidence.result.diff.state === 'available' ? { ...evidence.result.diff, snapshotId: randomUUID() } : evidence.result.diff,
       }, evidence.diffSnapshot);
-      return observed(result, holders);
+      return observed(result, holders, explained);
     } catch (error) {
       // hearsay-tools/cezarion#879: an attempt that throws says why, instead of leaving an
-      // in-progress phase with no error, as long as this is still the same pending destroy.
-      this.observeAttempt(project, workerId, { key, holders: [] });
+      // in-progress phase with no error, as long as this is still the same pending destroy. A
+      // throw explains nothing a tick could see clear, so the next tick attempts in full.
+      this.observeAttempt(project, workerId, undefined);
       try {
         const current = this.projects.get(project.id) === project ? project.store.getRun(workerId) : undefined;
         if (current?.delegation?.role === 'worker' && current.delegation.destroy?.requestedAt === requestedAt && current.delegation.destroy.phase !== 'complete') {
