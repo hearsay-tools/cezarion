@@ -75,6 +75,15 @@ export function recordedProcessLive(entry: RecordedProcess): boolean {
   return current === undefined || sameIncarnation(entry.startToken, current);
 }
 
+/** Whether a recorded session leader's group may be signalled (hearsay-tools/cezarion#890). A live
+ * leader must be the exact recorded incarnation; a different one means the group emptied and its
+ * number was reused. A dead leader's group is ours while it has members, because no new process
+ * can take the number of a live group, and an empty one answers ESRCH. */
+export function recordedGroupSignalable(entry: RecordedProcess): boolean {
+  if (entry.pgid === undefined || entry.pgid !== entry.pid) return false;
+  return !pidExists(entry.pid) || (entry.startToken !== undefined && processStartToken(entry.pid) === entry.startToken);
+}
+
 export function isCurrentProcess(entry: RecordedProcess): boolean {
   if (entry.pid !== process.pid) return false;
   const own = processStartToken(process.pid);

@@ -1040,5 +1040,49 @@ console.log(String(m.pid)); ${opts.leader === 'exit' ? 'm.unref(); setTimeout(()
       expect(readRecord(w.id)).toMatchObject({ generation: store.readWorkerExecution(w.id)!.generation,
         processes: [{ pid: leader.pid, pgid: leader.pid, ...(process.platform === 'linux' ? { startToken: expect.any(String) } : {}) }] });
     });
+
+    const service = (projectStore: RunStore, projectManager: RunManager) => {
+      (projectManager as unknown as { orphanTermGraceMs: number }).orphanTermGraceMs = 500;
+      const delegation = new DelegationService(); delegation.registerProject({ id: 'p', root, store: projectStore, manager: projectManager });
+      return delegation;
+    };
+
+    it.skipIf(process.platform === 'win32')("destroy ends a finished worker's leftover in its process group", async () => {
+      const { w, member } = await groupedWorker({ member: 'group', leader: 'exit' });
+      await until(() => !manager.isActive(w.id) && store.readWorkerExecution(w.id)?.phase === 'complete');
+      expect(alive(member)).toBe(true);
+      expect(await service(store, manager).destroyForHuman('p', w.id)).toMatchObject({ state: 'complete', remaining: [] });
+      expect(alive(member)).toBe(false);
+      expect(existsSync(workspace(w).path)).toBe(false); expect(branchExists(workspace(w).branch)).toBe(false);
+    });
+
+    it.skipIf(process.platform === 'win32')("destroy reaps a crashed generation's recorded group after its leader died", async () => {
+      const { w, leader, member } = await groupedWorker({ member: 'group', leader: 'stay' });
+      await until(() => existsSync(recordPath(w.id)) && readRecord(w.id).processes.length === 1);
+      manager.dispose(); store.updateRun(w.id, { status: 'failed' }); store.flush();
+      const corpse = spawn(process.execPath, ['-e', '']); await new Promise(resolve => corpse.once('exit', resolve));
+      writeFileSync(recordPath(w.id), JSON.stringify({ ...readRecord(w.id), controller: { pid: corpse.pid!, startToken: '1' } }));
+      // Only the leader dies: its member keeps the group, and the worktree, alive.
+      const gone = new Promise(resolve => leader.once('exit', resolve)); process.kill(leader.pid!, 'SIGKILL'); await gone;
+      expect(alive(member)).toBe(true);
+      store.close(); const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true }); const other = new RunManager(reopened, root);
+      try {
+        expect(await service(reopened, other).destroyForHuman('p', w.id)).toMatchObject({ state: 'complete', remaining: [] });
+        expect(alive(member)).toBe(false);
+        expect(existsSync(workspace(w).path)).toBe(false);
+      } finally { other.dispose(); reopened.flush(); }
+    });
+
+    it.skipIf(process.platform === 'win32')('a setsid child keeps destroy incomplete and is never signalled', async () => {
+      const { w, member } = await groupedWorker({ member: 'setsid', leader: 'exit' });
+      await until(() => !manager.isActive(w.id) && store.readWorkerExecution(w.id)?.phase === 'complete');
+      const kills = vi.spyOn(process, 'kill');
+      const result = await service(store, manager).destroyForHuman('p', w.id);
+      expect(result).toMatchObject({ state: 'incomplete', remaining: ['worktree', 'branch'] });
+      expect(result.error).toContain(String(member));
+      expect(alive(member)).toBe(true);
+      expect(kills.mock.calls.filter(([pid, signal]) => Math.abs(pid) === member && signal !== 0)).toEqual([]);
+      expect(existsSync(workspace(w).path)).toBe(true);
+    });
   });
 });
