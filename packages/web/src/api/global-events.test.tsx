@@ -1097,6 +1097,14 @@ describe('useGlobalEvents — run events', () => {
     expect(state()?.isInvalidated).toBe(true)
   })
 
+  it('marks a search\'s archived pages stale when a row they hold changes (#864)', () => {
+    const page = { runs: [{ ...runRecord('r1'), archived: true }], nextCursor: null, total: 1 }
+    client.setQueryData(queryKeys.runs.archived('needle'), { pages: [page], pageParams: [undefined] })
+    const { source } = mount()
+    source.emit('run', stampedRun(runRecord('r1', { title: 'No longer matches', archived: true })))
+    expect(client.getQueryState(queryKeys.runs.archived('needle'))?.isInvalidated).toBe(true)
+  })
+
   it('marks archived pages stale when a run they do not hold is archived (#864)', () => {
     client.setQueryData(queryKeys.runs.archived(''), { pages: [{ runs: [], nextCursor: null, total: 0 }], pageParams: [undefined] })
     const { source } = mount()
@@ -1115,6 +1123,8 @@ describe('useGlobalEvents — run events', () => {
     type Pages = { pages: { runs: { id: string }[] }[] }
     expect(client.getQueryData<Pages>(queryKeys.runs.archived(''))?.pages[0]?.runs.map((r) => r.id)).toEqual(['r2'])
     expect(client.getQueryData<Pages>(queryKeys.runs.archived('#864'))?.pages[0]?.runs).toEqual([])
+    // Their totals moved too: the pages are stale until they refetch.
+    expect(client.getQueryState(queryKeys.runs.archived(''))?.isInvalidated).toBe(true)
   })
 })
 

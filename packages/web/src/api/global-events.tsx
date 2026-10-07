@@ -542,7 +542,8 @@ function syncArchivedPages(queryClient: QueryClient, run: RunRecord): void {
       queryClient.setQueryData<InfiniteData<ArchivedRunsResponse>>(query.queryKey, {
         ...data, pages: data.pages.map((page) => ({ ...page, runs: page.runs.map((row) => (row.id === run.id ? { ...summary, ...(row.usage ? { usage: row.usage } : {}) } : row)) })),
       })
-      if (!run.archived) stale = true
+      // A search's page matched the row as it was; whether it still matches is the server's call.
+      if (!run.archived || query.queryKey[3] !== '') stale = true
     } else if (run.archived) {
       stale = true
     }
@@ -618,6 +619,8 @@ function applyGlobalEvent(
           ? { ...data, pages: data.pages.map((page) => ({ ...page, runs: page.runs.filter((run) => run.id !== event.id) })) }
           : data),
       )
+      // …and their totals and cursors moved with it, so they refetch where mounted.
+      void queryClient.invalidateQueries(ARCHIVED_PAGES)
       // Its worktree goes with it — refresh the panel (#483).
       void queryClient.invalidateQueries({ queryKey: queryKeys.worktrees })
       // …and its branch becomes an orphan (issue 08).
