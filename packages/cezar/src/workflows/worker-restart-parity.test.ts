@@ -16,11 +16,11 @@ import { manager, store, root, worker, until, executions, bookkeeping, reopenRun
 
 // Only enumeration is synthetic. Native wires, tokens, kernel cwd denial, cancellation,
 // persistence, Git locking, collection and parent Finish are real.
-describe.runIf(process.platform === 'linux')('R47 same-boot interrupted worker abandonment (hearsay-tools/cezarion#839)', { timeout: 30_000 }, () => {
+describe.runIf(process.platform === 'linux')('R47 same-boot interrupted worker settlement (hearsay-tools/cezarion#839, hearsay-tools/cezarion#889)', { timeout: 30_000 }, () => {
   useWorkerWaitFixture({ processScope: false });
   afterEach(() => { vi.restoreAllMocks(); syncBuiltinESMExports(); });
   for (const ledgerKind of ['absent', 'incomplete'] as const) {
-    it.each(RUNNER_IDS)(`%s refuses mixed-holder cleanup promptly after the verified holder exits (${ledgerKind} ledger)`, async runner => {
+    it.each(RUNNER_IDS)(`%s completes destroy once the readable holder exits, while an unreadable process runs (${ledgerKind} ledger)`, async runner => {
       process.env.CEZ_DELEGATION = '1'; process.env.CEZ_DRY_RUN = '0';
       const adapter = HARNESS_ADAPTERS[runner]; process.env[adapter.binEnv] = adapter.mockBin;
       const p = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });
@@ -43,7 +43,7 @@ describe.runIf(process.platform === 'linux')('R47 same-boot interrupted worker a
       if (ledgerKind === 'absent') rmSync(join(files, `${w.id}.processes.json`));
       else {
         const boot = readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim();
-        // Structurally valid legacy evidence with a missing incarnation token cannot abandon.
+        // Structurally valid legacy evidence with a missing incarnation token.
         writeFileSync(join(files, `${w.id}.processes.json`), JSON.stringify({ ...recorded,
           controller: { pid: 2147483001, startToken: `${boot}:100` },
           processes: recorded.processes.map(({ pid }) => ({ pid })) }));
@@ -53,10 +53,10 @@ describe.runIf(process.platform === 'linux')('R47 same-boot interrupted worker a
       let holderClosed = false;
       const exited = once(holder, 'exit').then(() => { holderClosed = true; });
       await Promise.race([once(holder.stdout, 'data'), exited.then(() => { throw Error('readable holder exited before readiness'); })]);
-      const candidate = await nonDumpableHolder(scratch);
+      const unreadable = await nonDumpableHolder(scratch);
       const readdir = fs.readdirSync; const readlink = fs.readlinkSync;
       vi.spyOn(fs, 'readdirSync').mockImplementation(((...args: unknown[]) => String(args[0]) === '/proc'
-        ? [holder.pid!, candidate.pid].map(String) : Reflect.apply(readdir, fs, args)) as typeof fs.readdirSync);
+        ? [holder.pid!, unreadable.pid].map(String) : Reflect.apply(readdir, fs, args)) as typeof fs.readdirSync);
       let destroying = false; let observedHolder = false; let exitTimer: NodeJS.Timeout | undefined;
       vi.spyOn(fs, 'readlinkSync').mockImplementation(((...args: unknown[]) => {
         const cwd = Reflect.apply(readlink, fs, args);
@@ -72,25 +72,21 @@ describe.runIf(process.platform === 'linux')('R47 same-boot interrupted worker a
       const service = new DelegationService(); const detach = service.registerProject({ id: 'project', root, store, manager });
       Object.assign(service, { terminationTimeoutMs: 4_000 });
       try {
-        destroying = true; const began = performance.now();
-        const result = await service.destroyForHuman('project', w.id);
-        const elapsed = performance.now() - began;
+        destroying = true;
+        // Destroy waits on the readable holder through its polls, then the unreadable process is no evidence.
+        expect(await service.destroyForHuman('project', w.id)).toMatchObject({ state: 'complete', remaining: [] });
         expect(observedHolder).toBe(true); expect(holderClosed).toBe(true); expect(holder.exitCode).toBe(0);
-        expect(result).toMatchObject({ state: 'incomplete', remaining: ['process', 'worktree', 'branch'],
-          error: expect.stringMatching(/cwd is unreadable.*membership is unverified.*resources retained/) });
-        expect(result.error).toContain(String(candidate.pid)); expect(result.error).not.toContain(String(holder.pid));
-        expect(store.readWorkerExecution(w.id)).toMatchObject({ generation: proof.generation, phase: 'starting' });
-        expect(store.readWorkerExecution(w.id)?.abandoned).not.toBe(true);
-        expect(existsSync(workspace.path)).toBe(true); expect(readFileSync(join(scratch, 'retained'), 'utf8')).toBe('scratch');
-        expect(execFileSync('git', ['branch', '--list', '--format=%(refname:short)', workspace.branch], { cwd: root, encoding: 'utf8' }).trim()).toBe(workspace.branch);
-        await candidate.write(); // Unknown candidates are still alive and their scratch remains writable.
-        expect(elapsed).toBeLessThan(2_500);
+        expect(store.readWorkerExecution(w.id)).toMatchObject({ generation: proof.generation, phase: 'complete' });
+        expect(store.readWorkerExecution(w.id)?.abandoned).toBeUndefined();
+        expect(existsSync(workspace.path)).toBe(false);
+        expect(execFileSync('git', ['branch', '--list', '--format=%(refname:short)', workspace.branch], { cwd: root, encoding: 'utf8' }).trim()).toBe('');
+        expect(unreadable.running).toBe(true); // never signalled
       } finally {
-        clearTimeout(exitTimer); holder.stdin.end(); await exited; await candidate.close(); detach();
+        clearTimeout(exitTimer); holder.stdin.end(); await exited; await unreadable.close(); detach();
       }
     });
   }
-  it.each(RUNNER_IDS)('%s collects an abandoned execution and finishes its parent while retaining uncertain and locked resources', async runner => {
+  it.each(RUNNER_IDS)('%s settles a same-boot crash as gone once recorded processes exit, whatever unreadable process runs, and keeps cleanup locks bounded', async runner => {
     process.env.CEZ_DELEGATION = '1'; process.env.CEZ_DRY_RUN = '0';
     const adapter = HARNESS_ADAPTERS[runner]; process.env[adapter.binEnv] = adapter.mockBin;
     const p = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [{ id: 'task', kind: 'agent', name: 'Task' }] });
@@ -115,7 +111,8 @@ describe.runIf(process.platform === 'linux')('R47 same-boot interrupted worker a
     // A real unreadable recorded descendant still blocks settlement, regardless of cwd.
     const descendant = await nonDumpableHolder(root);
     let descendantClosed = false;
-    let ambient = await nonDumpableHolder(root); let ambientClosed = false;
+    // An unrecorded unreadable process inside the worktree is no evidence (hearsay-tools/cezarion#889).
+    const ambient = await nonDumpableHolder(workspace.path); let ambientClosed = false;
     const pids = [descendant.pid, ambient.pid];
     const readdir = fs.readdirSync;
     vi.spyOn(fs, 'readdirSync').mockImplementation(((...args: unknown[]) => String(args[0]) === '/proc'
@@ -131,38 +128,19 @@ describe.runIf(process.platform === 'linux')('R47 same-boot interrupted worker a
       const partial = await service.collect(caller, { workerId: w.id });
       expect(partial).toMatchObject({ settled: false });
       expect(manager.finish(p.id)).toBe(false);
+      expect(store.readWorkerExecution(w.id)).toMatchObject({ generation: proof.generation, phase: 'starting' });
       await descendant.write(); await descendant.close(); descendantClosed = true;
       // Include PID reuse: ambient PID cannot attest the exited old incarnation.
       writeFileSync(join(files, `${w.id}.processes.json`), JSON.stringify({ ...ledger,
         processes: [...ledger.processes, { pid: ambient.pid, startToken: `${boot}:1` }] }));
-      detach(); manager.dispose(); store.flush(); reopenRuntime();
-      service = new DelegationService(); detach = service.registerProject({ id: 'project', root, store, manager });
-      expect(await service.inspect(caller, { workerId: w.id })).toMatchObject({ status: 'cancelled' });
-      expect(manager.finish(p.id)).toBe(false); // earlier partial collection cannot authorize Finish
-      const settled = await service.collect(caller, { workerId: w.id });
-      expect(settled).toMatchObject({ settled: true, status: 'cancelled', partial: true });
-      expect(settled.revision).toBe(partial.revision); // abandonment does not invent a new execution revision
-      expect(store.readWorkerResult(p.id, w.id)?.revision).toBe(settled.revision);
-      expect(store.readWorkerExecution(w.id)).toMatchObject({ phase: 'complete', abandoned: true });
-      expect(store.readEvents(w.id).some(e => e.type === 'lifecycle' && /abandoned/.test(String(e.message)))).toBe(true);
-      expect(manager.finishBlockedReason(p.id)).toBeUndefined(); expect(manager.finish(p.id)).toBe(true);
-      await until(() => store.getRun(p.id)?.status === 'done');
       detach(); manager.dispose(); store.flush(); reopenRuntime(); await manager.recover();
       service = new DelegationService(); detach = service.registerProject({ id: 'project', root, store, manager });
-      expect(store.readWorkerExecution(w.id)).toMatchObject({ phase: 'complete', generation: proof.generation, abandoned: true });
-      expect(store.getRun(w.id)?.status).toBe('cancelled'); expect(manager.isActive(w.id)).toBe(false);
-      expect(manager.continueRun(w.id)).toMatchObject({ ok: false });
-      expect(store.readWorkerResult(p.id, w.id)).toMatchObject({ settled: true, revision: settled.revision });
-      expect(store.getRun(p.id)?.status).toBe('done');
-      expect(existsSync(scratch)).toBe(true); expect(existsSync(workspace.path)).toBe(true);
-      expect(() => store.commitWorkerExecutionStart(w.id)).toThrow(); expect(store.canDeleteRun(w.id)).toBe(false);
-      await ambient.close(); ambientClosed = true;
-      expect(() => store.commitWorkerExecutionStart(w.id)).toThrow(/abandoned/); // clear resources cannot revive abandoned task intent
-      ambient = await nonDumpableHolder(root); ambientClosed = false; pids.push(ambient.pid);
-      const began = performance.now();
-      expect(await service.destroyForHuman('project', w.id)).toMatchObject({ state: 'incomplete', remaining: ['worktree', 'branch'], error: expect.stringMatching(/resources|held/i) });
-      expect(performance.now() - began).toBeLessThan(5_000);
-      await ambient.write(); await ambient.close(); ambientClosed = true;
+      // Exit proof, not abandonment: the generation completes and nothing cancels the task.
+      expect(store.readWorkerExecution(w.id)).toMatchObject({ phase: 'complete', generation: proof.generation });
+      expect(store.readWorkerExecution(w.id)?.abandoned).toBeUndefined();
+      expect(store.readEvents(w.id).some(e => e.type === 'lifecycle' && /execution was finalized/.test(String(e.message)))).toBe(true);
+      expect(store.readEvents(w.id).some(e => e.type === 'lifecycle' && /abandoned/.test(String(e.message)))).toBe(false);
+      expect(manager.finish(p.id)).toBe(false); // earlier partial collection cannot authorize Finish
       // A live mutation keeper must not be stolen. Release at 5s also bounds the red test:
       // the old unbounded cleanup then wrongly deletes resources after waiting for the keeper.
       let release!: () => void; let entered!: () => void;
@@ -179,7 +157,15 @@ describe.runIf(process.platform === 'linux')('R47 same-boot interrupted worker a
       } finally { clearTimeout(timer); release(); await held; }
       // Timed-out cleanup must withdraw, so unlocking cannot run it later.
       expect(existsSync(workspace.path)).toBe(true);
+      await ambient.write();
       expect(await service.destroyForHuman('project', w.id)).toMatchObject({ state: 'complete', remaining: [] });
+      expect(existsSync(workspace.path)).toBe(false);
+      expect(ambient.running).toBe(true); // its cwd is gone, but nothing signalled it
+      const settled = await service.collect(caller, { workerId: w.id });
+      expect(settled).toMatchObject({ settled: true });
+      expect(settled.revision).toBe(partial.revision); // settlement does not invent a new execution revision
+      expect(manager.finishBlockedReason(p.id)).toBeUndefined(); expect(manager.finish(p.id)).toBe(true);
+      await until(() => store.getRun(p.id)?.status === 'done');
     } finally {
       detach(); credentials.close();
       if (!descendantClosed) await descendant.close(); if (!ambientClosed) await ambient.close();

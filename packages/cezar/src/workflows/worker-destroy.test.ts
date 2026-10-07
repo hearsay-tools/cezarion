@@ -10,7 +10,7 @@ import { join, sep } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { managerDisposed } from './fixture-cleanup.testkit.ts';
 import { RunStore, type RunRecord } from '../runs/store.ts';
-import { agentTmpDirLocations, resolveAgentTmpDir } from '../runs/agent-tmpdir.ts';
+import { agentTmpDir, agentTmpDirLocations, resolveAgentTmpDir } from '../runs/agent-tmpdir.ts';
 import { ensureOwnedWorkspace, planOwnedWorkspace, removeOwnedWorkspace } from '../delegation/workspace.ts';
 import { isReclaimable, rematerializeReclaimedWorktree } from '../runs/retention.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
@@ -20,7 +20,7 @@ import * as runners from '../core/runner-factory.ts';
 import { CLAUDE_SPEC_SUPPORT } from '../core/claude-cli-runner.ts';
 import { RunManager } from './run.ts';
 import { DelegationService } from '../delegation/service.ts';
-import { parseProcStat, processStartToken } from '../delegation/process-liveness.ts';
+import { processStartToken } from '../delegation/process-liveness.ts';
 import { blockRunWrites } from '../runs/run-store.testkit.ts';
 
 const until = async (predicate: () => boolean) => vi.waitFor(() => expect(predicate()).toBe(true), { timeout: 15_000, interval: 10 });
@@ -152,6 +152,18 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     writeFileSync(join(root, '.ai/cezar/runs', `${w.id}.execution.json`), JSON.stringify({ ...proof, abandoned: true }), { mode: 0o600 });
     expect(manager.getWorkerNoMaterializationProof(w.id)).toBeUndefined();
     expect(await removeOwnedWorkspace(root, workspace(w))).toMatchObject({ state: 'incomplete' });
+  });
+
+  it('a checkpoint an older cezar abandoned still parses, keeps its flag and refuses resume (hearsay-tools/cezarion#889)', async () => {
+    const w = await worker();
+    const generation = store.commitWorkerExecutionStart(w.id);
+    store.updateRun(w.id, { status: 'cancelled' }); expect(store.commitWorkerExecutionComplete(w.id, generation)).toBe(true);
+    const path = join(root, '.ai/cezar/runs', `${w.id}.execution.json`);
+    writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, 'utf8')), abandoned: true }), { mode: 0o600 });
+    expect(store.readWorkerExecution(w.id)).toMatchObject({ generation, phase: 'complete', abandoned: true });
+    expect(() => store.commitWorkerExecutionStart(w.id)).toThrow(/abandoned/);
+    expect(store.commitWorkerExecutionComplete(w.id, generation)).toBe(true);
+    expect(store.readWorkerExecution(w.id)).toMatchObject({ generation, phase: 'complete', abandoned: true });
   });
 
   it('no-materialization proof is generation-bound and cannot survive starting or legacy completion', async () => {
@@ -678,10 +690,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
       store.close(); const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
       const other = new RunManager(reopened, root);
       const service = new DelegationService(); service.registerProject({ id: 'reopened', root, store: reopened, manager: other });
-      const since = Date.parse(w.createdAt) - 1_000;
-      const bootTimeMs = process.platform === 'linux' ? Number(/^btime (\d+)$/m.exec(readFileSync('/proc/stat', 'utf8'))?.[1]) * 1_000 : 0;
-      const clockTicks = process.platform === 'linux' ? Number(execFileSync('getconf', ['CLK_TCK'], { encoding: 'utf8' }).trim()) || 100 : 0;
-      type ScanRead = { cwd?: string; readlinkError?: string; uid?: number; startToken?: string };
+      type ScanRead = { cwd?: string; readlinkError?: string };
       const scanReads = new Map<number, ScanRead>();
       const observed = (pid: number) => {
         let entry = scanReads.get(pid);
@@ -693,8 +702,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
       const realReadlink = fs.readlinkSync;
       vi.spyOn(fs, 'readlinkSync').mockImplementation(((...args: unknown[]) => {
         const pid = /^\/proc\/(\d+)\/cwd$/.exec(String(args[0]))?.[1];
-        // Each cwd read starts a fresh probe for this PID; an earlier pass's uid/start token
-        // must not stand in when the current pass cannot read them.
+        // Each cwd read starts a fresh probe for this PID.
         if (pid) scanReads.set(Number(pid), {});
         try {
           const result = Reflect.apply(realReadlink, fs, args);
@@ -705,20 +713,6 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
           throw error;
         }
       }) as typeof fs.readlinkSync);
-      const realStat = fs.statSync;
-      vi.spyOn(fs, 'statSync').mockImplementation(((...args: unknown[]) => {
-        const result = Reflect.apply(realStat, fs, args);
-        const pid = /^\/proc\/(\d+)$/.exec(String(args[0]))?.[1];
-        if (pid) observed(Number(pid)).uid = result.uid;
-        return result;
-      }) as typeof fs.statSync);
-      const realReadFile = fs.readFileSync;
-      vi.spyOn(fs, 'readFileSync').mockImplementation(((...args: unknown[]) => {
-        const result = Reflect.apply(realReadFile, fs, args);
-        const pid = /^\/proc\/(\d+)\/stat$/.exec(String(args[0]))?.[1];
-        if (pid) observed(Number(pid)).startToken = parseProcStat(String(result))?.startToken;
-        return result;
-      }) as typeof fs.readFileSync);
       syncBuiltinESMExports();
       try {
         const describePid = (pid: number) => {
@@ -761,21 +755,16 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
           const boundedDiagnostics = blockerDiagnostics.slice(0, 8).map(entry => ({ ...entry, cwd: entry.cwd?.slice(0, 160) }));
           expect(reported, JSON.stringify(boundedDiagnostics)).toEqual([...blockerPids].sort((a, b) => a - b));
           for (const pid of expectedPids) expect(reported).toContain(pid);
-          // Every reported PID must have been observed by the real scan as a cwd holder or
-          // under its conservative same-user unreadable-cwd rule.
+          // Every reported PID must have been observed by the real scan as a readable cwd holder:
+          // an unreadable cwd is no evidence (hearsay-tools/cezarion#889).
           if (process.platform === 'linux') {
             const targets = [workspace(w).path, ...agentTmpDirLocations(join(root, '.ai/cezar'), w.id)]
               .map(path => { try { return realpathSync(path); } catch { return path; } });
             for (const entry of blockerDiagnostics) {
               const scan = blockerReads.get(entry.pid);
               expect(scan, JSON.stringify({ ...entry, cwd: entry.cwd?.slice(0, 160) })).toBeDefined();
-              const startTick = Number(scan?.startToken);
-              const eligibleStart = !scan?.startToken || !Number.isFinite(bootTimeMs) ||
-                !Number.isFinite(startTick) || bootTimeMs + startTick / clockTicks * 1_000 >= since;
               const cwd = scan?.cwd?.replace(/ \(deleted\)$/, '');
-              expect(((scan?.readlinkError === 'EACCES' || scan?.readlinkError === 'EPERM') &&
-                scan.uid === process.getuid?.() && eligibleStart) ||
-                (cwd !== undefined && targets.some(target => cwd === target || cwd.startsWith(target + sep))),
+              expect(cwd !== undefined && targets.some(target => cwd === target || cwd.startsWith(target + sep)),
                 JSON.stringify({ pid: entry.pid, ...scan, cwd: cwd?.slice(0, 160) })).toBe(true);
             }
           }
@@ -909,21 +898,20 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
       } finally { other.dispose(); reopened.flush(); }
     });
 
-    it.runIf(process.platform === 'linux')('refuses unreadable unverified candidates promptly without signalling or claiming holder membership (hearsay-tools/cezarion#839)', async () => {
+    it.runIf(process.platform === 'linux')('an unreadable process in the worktree is no evidence: destroy finalizes a legacy generation without signalling it (hearsay-tools/cezarion#889)', async () => {
       const w = await worker(); await ensureOwnedWorkspace(root, w);
       store.commitWorkerExecutionStart(w.id); store.updateRun(w.id, { status: 'failed' }); store.flush();
-      manager.dispose(); store.close(); rmSync(recordPath(w.id)); // absent legacy ledger never authorizes abandonment
-      const holder = await nonDumpableHolder(root);
+      manager.dispose(); store.close(); rmSync(recordPath(w.id)); // an absent legacy ledger leaves the scan as the only evidence
+      const holder = await nonDumpableHolder(workspace(w).path);
       const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true }); const other = new RunManager(reopened, root);
       const service = new DelegationService(); const detach = service.registerProject({ id: 'reopened', root, store: reopened, manager: other });
       Object.assign(service, { terminationTimeoutMs: 1_500 });
       try {
-        const began = performance.now();
-        expect(await service.destroyForHuman('reopened', w.id)).toMatchObject({ state: 'incomplete', remaining: ['process', 'worktree', 'branch'],
-          error: expect.stringMatching(/unverified|unreadable/) });
-        expect(performance.now() - began).toBeLessThan(1_200);
-        expect(reopened.readWorkerExecution(w.id)?.phase).toBe('starting');
-        expect(existsSync(workspace(w).path)).toBe(true); await holder.write();
+        expect(await service.destroyForHuman('reopened', w.id)).toMatchObject({ state: 'complete', remaining: [] });
+        expect(reopened.readWorkerExecution(w.id)).toMatchObject({ phase: 'complete' });
+        expect(reopened.readWorkerExecution(w.id)?.abandoned).toBeUndefined();
+        expect(existsSync(workspace(w).path)).toBe(false);
+        expect(holder.running).toBe(true); // its cwd is gone, but nothing signalled it
       } finally { detach(); other.dispose(); reopened.flush(); await holder.close(); }
     });
 
@@ -940,7 +928,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     });
   });
 
-  describe('ambient unreadable processes at destroy (hearsay-tools/cezarion#858)', () => {
+  describe('unreadable processes at destroy (hearsay-tools/cezarion#889)', () => {
     const branchExists = (branch: string) => execFileSync('git', ['branch', '--list', branch], { cwd: root, encoding: 'utf8' }).includes(branch);
     /** A settled worker with a materialized worktree; the scratch stays unmaterialized. */
     async function settled() {
@@ -953,35 +941,36 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
       return { w, service, detach };
     }
 
-    // Login sshd, systemd --user and gpg-agent are non-dumpable and predate every worker.
-    it.runIf(process.platform === 'linux')('completes when only predating non-dumpable processes have unreadable cwds', async () => {
-      const ambient = await Promise.all([nonDumpableHolder(root), nonDumpableHolder(tmpdir())]);
-      // Start times come from whole-second btime plus ticks; clear the 1 s cutoff slack.
-      await new Promise(resolve => setTimeout(resolve, 2_100));
+    // Login sshd, systemd --user and gpg-agent are non-dumpable, so their cwds are unreadable.
+    // Neither their age nor their parent chain matters any more: an unreadable cwd is no evidence.
+    it.runIf(process.platform === 'linux')('completes when the only unreadable cwds belong to session daemons and a later sshd', async () => {
+      const daemons = [await nonDumpableHolder(root)];
       const { w, service, detach } = await settled();
+      const later = [await nonDumpableHolder(tmpdir()), await nonDumpableHolder(workspace(w).path)];
       try {
         expect(await service.destroyForHuman('p', w.id)).toMatchObject({ state: 'complete', remaining: [] });
         expect(existsSync(workspace(w).path)).toBe(false); expect(branchExists(workspace(w).branch)).toBe(false);
-        for (const holder of ambient) await holder.write(); // never signalled
-      } finally { detach(); for (const holder of ambient) await holder.close(); }
+        for (const holder of [...daemons, later[0]!]) await holder.write(); // never signalled
+        expect(later[1]!.running).toBe(true); // its cwd is gone, so it cannot write; nothing signalled it
+      } finally { detach(); for (const holder of [...daemons, ...later]) await holder.close(); }
     });
 
-    it.runIf(process.platform === 'linux')('retains resources and names the PID of an unreadable process started after the worker', async () => {
+    it('win32 has no cwd scan: destroy removes an unheld worktree instead of staying unknown', async () => {
       const { w, service, detach } = await settled();
-      const late = await nonDumpableHolder(root);
+      const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+      // Windows refuses to delete a directory a process holds, so the checked removal is the proof there.
+      Object.defineProperty(process, 'platform', { ...platform, value: 'win32' });
       try {
-        const result = await service.destroyForHuman('p', w.id);
-        expect(result).toMatchObject({ state: 'incomplete', remaining: ['worktree', 'branch'] });
-        expect(result.error).toContain(String(late.pid));
-        expect(existsSync(workspace(w).path)).toBe(true); expect(branchExists(workspace(w).branch)).toBe(true);
-        await late.write(); await late.close();
         expect(await service.destroyForHuman('p', w.id)).toMatchObject({ state: 'complete', remaining: [] });
-      } finally { detach(); await late.close(); }
+      } finally { Object.defineProperty(process, 'platform', platform); detach(); }
+      expect(existsSync(workspace(w).path)).toBe(false); expect(branchExists(workspace(w).branch)).toBe(false);
     });
 
-    it('retains resources and names the PID of a process whose cwd is in the worktree', async () => {
+    it.each(['worktree', 'scratch'] as const)('retains resources and names the PID of a process whose cwd is in the %s', async location => {
       const { w, service, detach } = await settled();
-      const holder = spawn(process.execPath, ['-e', "console.log('ready'); setInterval(()=>{},1000)"], { cwd: workspace(w).path, stdio: ['ignore', 'pipe', 'ignore'] });
+      const cwd = location === 'worktree' ? workspace(w).path : agentTmpDir(join(root, '.ai/cezar'), w.id);
+      mkdirSync(cwd, { recursive: true });
+      const holder = spawn(process.execPath, ['-e', "console.log('ready'); setInterval(()=>{},1000)"], { cwd, stdio: ['ignore', 'pipe', 'ignore'] });
       const exited = new Promise(resolve => holder.once('exit', resolve));
       releases.push(() => holder.kill('SIGKILL'));
       await new Promise(resolve => holder.stdout!.once('data', resolve));

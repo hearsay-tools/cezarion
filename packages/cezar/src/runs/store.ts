@@ -20,7 +20,7 @@ import { hasPlainHistory, historyPaths, readHistoryText, removeHistory, restoreH
 import { workerExecutionIdentitySchema, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
 import { reconcileWorkerWait } from '../delegation/wait.ts';
 import { capacityError, workerCapacity } from '../delegation/capacity.ts';
-import { inspectGeneration, isCurrentProcess, recordedProcessLive, processStartToken, workerProcessCutoff, type RecordedProcess, type WorkerProcessRecord } from '../delegation/process-liveness.ts';
+import { inspectGeneration, isCurrentProcess, recordedProcessLive, processStartToken, type RecordedProcess, type WorkerProcessRecord } from '../delegation/process-liveness.ts';
 import { collectSecretValues, redactDeep, redactSecrets } from '../core/secret-redaction.ts';
 // Pure, dependency-free reference helpers — the same sanity bound the marker parser applies.
 import { MAX_REF } from './task-refs.ts';
@@ -3295,10 +3295,9 @@ export class RunStore extends EventEmitter {
     return this.workerResourceHolders(id, generation, resourceId, { admittingQueued }) === 'safe';
   }
 
-  /** `workerResourcesSafe` with the refusal's live PIDs (empty when no PID explains it).
-   * `deleting` lets an unreadable process that predates the worker pass (hearsay-tools/cezarion#858). */
+  /** `workerResourcesSafe` with the refusal's live PIDs (empty when no PID explains it). */
   workerResourceHolders(id: string, generation: string, resourceId: string,
-    opts: { admittingQueued?: boolean; deleting?: boolean } = {}): 'safe' | number[] {
+    opts: { admittingQueued?: boolean } = {}): 'safe' | number[] {
     const run = this.peek(id);
     const proof = this.readWorkerExecution(id);
     if (run?.delegation?.role !== 'worker' || run.delegation.workspace.ownerRunId !== id ||
@@ -3315,8 +3314,7 @@ export class RunStore extends EventEmitter {
     });
     if (absent) return record === 'absent' ||
       ((!recordedProcessLive(record.controller) || isCurrentProcess(record.controller)) && !record.processes.some(recordedProcessLive)) ? 'safe' : [];
-    const holdersSince = opts.deleting ? workerProcessCutoff(run.createdAt) : undefined;
-    const probe = inspectGeneration({ ...(record === 'absent' ? {} : { record }), paths, ...(holdersSince !== undefined ? { holdersSince } : {}) });
+    const probe = inspectGeneration({ ...(record === 'absent' ? {} : { record }), paths });
     return probe.liveness === 'gone' ? 'safe' : probe.controller !== undefined ? [probe.controller] : probe.pids;
   }
 
@@ -3408,18 +3406,18 @@ export class RunStore extends EventEmitter {
     return true;
   }
 
-  commitWorkerExecutionComplete(id: string, generation: string, abandoned = false): boolean {
+  commitWorkerExecutionComplete(id: string, generation: string): boolean {
     const proof = this.readWorkerExecution(id);
     if (!proof || proof.generation !== generation) return false;
     if (proof.phase === 'queued' && this.peek(id)?.status !== 'cancelled') return false;
-    if (abandoned && (proof.phase !== 'starting' || this.peek(id)?.status !== 'cancelled')) return false;
     try {
       const run = this.peek(id);
       if (run?.delegation?.role !== 'worker') return false;
       this.commitIndex(new Map([[id, run]]));
       if (this.readWorkerExecution(id)?.generation !== generation) return false;
       this.writeWorkerExecution(id, { generation, phase: 'complete',
-        ...(abandoned || proof.abandoned ? { abandoned: true as const } : {}),
+        // Nothing abandons an execution any more (hearsay-tools/cezarion#889); keep a checkpoint that already was.
+        ...(proof.abandoned ? { abandoned: true as const } : {}),
         ...(proof.phase === 'queued' || proof.neverMaterialized ? { neverMaterialized: true as const } : {}),
         ...(!['queued', 'running', 'waiting'].includes(run.status) ? { scratchCleanup: {
           resourceId: run.delegation.workspace.resourceId, path: run.delegation.workspace.path } } : {}) });

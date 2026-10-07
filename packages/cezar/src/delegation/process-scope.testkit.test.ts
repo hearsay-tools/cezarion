@@ -6,20 +6,19 @@ import fs, { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { nonDumpableHolder } from './non-dumpable.testkit.ts';
+import { readableHolder } from './non-dumpable.testkit.ts';
 import { inspectGeneration, processesWithCwdUnder, processStartToken, recordedProcessLive } from './process-liveness.ts';
 import { scopeFixtureProcesses } from './process-scope.testkit.ts';
 
 describe.runIf(process.platform === 'linux')('fixture process enumeration safety', () => {
-  it('retains real unrecorded non-dumpable holders and independently reads recorded PIDs outside the scope', async () => {
+  it('retains real unrecorded holders and independently reads recorded PIDs outside the scope', async () => {
     const root = mkdtempSync(join(tmpdir(), 'cez-scope-holder-'));
     const original = fs.readdirSync;
     const restore = scopeFixtureProcesses();
-    const holder = await nonDumpableHolder(root);
+    const holder = await readableHolder(root);
     let closed = false;
     try {
-      // No age exclusion, even though the unreadable fixture child is outside this path.
-      expect(inspectGeneration({ paths: [join(root, 'elsewhere')], since: Date.now() + 60_000 })).toMatchObject({ liveness: 'alive', pids: [holder.pid] });
+      expect(inspectGeneration({ paths: [root] })).toMatchObject({ liveness: 'alive', pids: [holder.pid] });
       await holder.write();
       expect(readFileSync(join(root, 'holder-writes'), 'utf8')).toBe('still writable\n');
       await holder.close(); closed = true;
