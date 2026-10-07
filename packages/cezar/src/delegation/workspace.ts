@@ -30,7 +30,7 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 const hash = (content: Buffer) => createHash('sha256').update(content).digest('hex');
 
 async function branchLog(repoRoot: string, workspace: WorkerWorkspace) {
-  const common = await commonDir(repoRoot);
+  const common = await gitCommonDir(repoRoot);
   const path = join(common, 'logs/refs/heads', workspace.branch);
   if (await realpath(path) !== path) throw new Error('Branch reflog redirected');
   const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
@@ -76,7 +76,8 @@ async function checkedGit(cwd: string, args: string[], index?: string): Promise<
   if (!result.ok) throw new Error(`Owned workspace Git ${args[0]} failed`);
   return result.stdout.trim();
 }
-async function commonDir(cwd: string): Promise<string> {
+/** The repository's shared Git directory (where refs, reflogs and linked-worktree admin dirs live), resolved. */
+export async function gitCommonDir(cwd: string): Promise<string> {
   return realpath(await checkedGit(cwd, ['rev-parse', '--path-format=absolute', '--git-common-dir']));
 }
 async function exists(path: string): Promise<boolean> {
@@ -90,7 +91,7 @@ async function exists(path: string): Promise<boolean> {
 export async function resolveWorkerBaseline(repoRoot: string, parentCwd: string, baseline: string): Promise<string> {
   try {
     if (!isSafeGitRef(baseline) || baseline.length > 1024 || /[\0\r\n]/.test(baseline)) throw new Error('Invalid ref');
-    if (await commonDir(repoRoot) !== await commonDir(parentCwd)) throw new Error('Parent is not in this repository');
+    if (await gitCommonDir(repoRoot) !== await gitCommonDir(parentCwd)) throw new Error('Parent is not in this repository');
     const ref = baseline === 'parent-head' ? 'HEAD' : baseline;
     return workerWorkspaceSchema.shape.baselineSha.parse(await checkedGit(
       baseline === 'parent-head' ? parentCwd : repoRoot,
@@ -135,7 +136,7 @@ function workerWorkspace(run: RunRecord): WorkerWorkspace {
 }
 
 async function receiptLocation(repoRoot: string, workspace: WorkerWorkspace, create = false): Promise<string> {
-  const dir = join(await commonDir(repoRoot), 'cezar-owned-workspaces');
+  const dir = join(await gitCommonDir(repoRoot), 'cezar-owned-workspaces');
   if (create) await mkdir(dir, { mode: 0o700 }).catch((error: NodeJS.ErrnoException) => {
     if (error.code !== 'EEXIST') throw error;
   });
@@ -171,7 +172,7 @@ async function readReceipt(path: string): Promise<Receipt | undefined> {
 /** Whether any linked worktree's admin directory still carries this resource's identity marker.
  * An unsafe or unreadable marker throws, so the caller fails closed. */
 async function markerRemains(repoRoot: string, workspace: WorkerWorkspace): Promise<boolean> {
-  const admin = join(await commonDir(repoRoot), 'worktrees');
+  const admin = join(await gitCommonDir(repoRoot), 'worktrees');
   if (!await exists(admin)) return false;
   for (const entry of await readdir(admin)) {
     const marker = join(admin, entry, 'cezar-owned-resource');
@@ -181,8 +182,8 @@ async function markerRemains(repoRoot: string, workspace: WorkerWorkspace): Prom
 }
 async function liveGitDir(repoRoot: string, workspace: WorkerWorkspace): Promise<string> {
   if (await realpath(workspace.path) !== workspace.path) throw new Error('Owned workspace path is redirected');
-  const rootCommon = await commonDir(repoRoot);
-  if (await commonDir(workspace.path) !== rootCommon) throw new Error('Owned workspace repository changed');
+  const rootCommon = await gitCommonDir(repoRoot);
+  if (await gitCommonDir(workspace.path) !== rootCommon) throw new Error('Owned workspace repository changed');
   const top = await realpath(await checkedGit(workspace.path, ['rev-parse', '--show-toplevel']));
   if (top !== workspace.path) throw new Error('Owned workspace is no longer a Git worktree');
   const listed = await checkedGit(repoRoot, ['worktree', 'list', '--porcelain', '-z']);

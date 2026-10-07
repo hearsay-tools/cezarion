@@ -4,13 +4,14 @@ import { syncBuiltinESMExports } from 'node:module';
 import { createFixtureManager } from '../workflows/fixture-cleanup.testkit.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import fs, { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { workerSpawnRequestSchema } from '@open-mercato/cezar-contract';
 import { DelegationPolicyError } from './policy.ts';
 import { workerWorkflowHash } from './execution-identity.ts';
 import { QUICK_TASK_WORKFLOW, skillTaskSteps } from '../workflows/types.ts';
-import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { dirname, join } from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { RunStore } from '../runs/store.ts';
 import type { RunManager } from '../workflows/run.ts';
 import { mergeWriteAgentAccounts } from '../workspace/agent-accounts.ts';
@@ -19,6 +20,7 @@ import type { Caller } from './credentials.ts';
 import { fixture } from './service.testkit.ts';
 import { ensureOwnedWorkspace } from './workspace.ts';
 import { DelegationService } from './service.ts';
+import { readableHolder } from './non-dumpable.testkit.ts';
 
 describe('delegation service durable authority', () => {
   let f: ReturnType<typeof fixture>;
@@ -354,7 +356,7 @@ describe('delegation service durable authority', () => {
   });
 
   it('retries a persisted incomplete destroy after termination becomes proven', async () => {
-    Object.assign(f.service, { destroyRetryDelayMs: 50 });
+    Object.assign(f.service, { destroyBackoff: { fastMs: 50, fastCount: 100, capMs: 50 } });
     const { workerId } = await f.service.spawn(f.caller, input());
     f.store.commitWorkerExecutionStart(workerId);
     const worker = f.store.getRun(workerId)!;
@@ -384,7 +386,7 @@ describe('delegation service durable authority', () => {
     } } }]);
 
     const restarted = new DelegationService();
-    Object.assign(restarted, { destroyRetryDelayMs: 50 });
+    Object.assign(restarted, { destroyBackoff: { fastMs: 50, fastCount: 100, capMs: 50 } });
     const detach = restarted.registerProject({ id: 'project', root: f.root, store: f.store, manager: f.manager });
     restarted.armDestroyRetries('project');
     detach();
@@ -409,7 +411,7 @@ describe('delegation service durable authority', () => {
     attach();
   });
   it.each([false, true])('revokes an in-flight retry after project replacement when termination resolves %s', async terminated => {
-    Object.assign(f.service, { destroyRetryDelayMs: 50 });
+    Object.assign(f.service, { destroyBackoff: { fastMs: 50, fastCount: 100, capMs: 50 } });
     const { workerId } = await f.service.spawn(f.caller, input());
     const worker = f.store.getRun(workerId)!;
     const generation = f.store.commitWorkerExecutionStart(workerId);
@@ -625,4 +627,149 @@ describe('delegation service durable authority', () => {
     expect(f.store.getRun(parent.id)?.delegation).toMatchObject({ wait: next });
   });
 
+});
+
+// Real Git, real holder processes and real retry ticks: waits of a few seconds are the cadence under test.
+describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, () => {
+  let f: ReturnType<typeof fixture>;
+  beforeEach(() => { scopeFixtureProcesses(); vi.stubEnv('CEZ_DELEGATION', '1'); f = fixture(); });
+  afterEach(async () => { await f?.close(); vi.restoreAllMocks(); syncBuiltinESMExports(); vi.unstubAllEnvs(); });
+  const linux = process.platform === 'linux';
+  const input = () => ({ task: 'do work', baseline: 'parent-head', requestId: randomUUID() });
+  /** Test cadence; the old fixed delay is set too, so the code before #879 visibly loops instead of idling. */
+  const cadence = (backoff = { fastMs: 40, fastCount: 3, capMs: 300 }, attention = 5) =>
+    Object.assign(f.service, { destroyBackoff: backoff, destroyAttentionAttempts: attention, destroyRetryDelayMs: backoff.fastMs });
+
+  /** A settled worker with a real worktree and complete execution, optionally held by a real process. */
+  async function settled(hold = true) {
+    const { workerId } = await f.service.spawn(f.caller, input());
+    const generation = f.store.commitWorkerExecutionStart(workerId);
+    const workspace = await ensureOwnedWorkspace(f.root, f.store.getRun(workerId)!);
+    f.store.updateRun(workerId, { status: 'review', worktreePath: workspace.path, branch: workspace.branch });
+    expect(f.store.commitWorkerExecutionComplete(workerId, generation)).toBe(true);
+    const holder = hold ? await readableHolder(workspace.path) : undefined;
+    if (holder) onTestFinished(() => holder.close());
+    return { workerId, workspace, holder };
+  }
+  const destroyOf = (workerId: string) => { const run = f.store.getRun(workerId); return run?.delegation?.role === 'worker' ? run.delegation.destroy : undefined; };
+  /** One `/proc` listing is one full holder scan; the fixture's process scope spies the listing. */
+  const listings = () => vi.mocked(fs.readdirSync).mock.calls.filter(([path]) => path === '/proc').length;
+
+  it.runIf(linux)('a held destroy runs one full attempt, then skips the ticks that would see the same', async () => {
+    cadence();
+    const { workerId } = await settled();
+    expect(await f.service.destroy(f.caller, { workerId })).toMatchObject({ state: 'incomplete', remaining: ['worktree', 'branch'] });
+    // That attempt stopped the worker (review -> cancelled), which the next tick sees as one change.
+    const reads = vi.spyOn(f.store, 'readEventsAsync');
+    await vi.waitFor(() => expect(destroyOf(workerId)?.retry?.attempts).toBeGreaterThanOrEqual(1), { timeout: 5_000 });
+    expect(reads.mock.calls.length).toBeLessThanOrEqual(1);
+    reads.mockClear();
+    const scans = listings();
+    const results = dirname(f.store.workerResultSnapshotPath(f.parent.id, workerId, randomUUID()));
+    const snapshots = readdirSync(results).sort();
+    await sleep(400);
+    // After it, no transcript read, no /proc scan, no snapshot written: nothing it could see changed.
+    expect(reads).not.toHaveBeenCalled();
+    expect(listings()).toBe(scans);
+    expect(readdirSync(results).sort()).toEqual(snapshots);
+    await vi.waitFor(() => expect(destroyOf(workerId)?.retry?.attempts).toBeGreaterThanOrEqual(4), { timeout: 5_000 });
+    expect(destroyOf(workerId)).toMatchObject({ phase: 'incomplete', remaining: ['worktree', 'branch'] });
+  });
+
+  it.runIf(linux)('asks for attention at the threshold, then waits at least the cap', async () => {
+    cadence();
+    const { workerId } = await settled();
+    await f.service.destroy(f.caller, { workerId });
+    await vi.waitFor(() => expect(destroyOf(workerId)?.retry?.needsAttention).toBe(true), { timeout: 5_000 });
+    const destroy = destroyOf(workerId)!;
+    expect(destroy.retry!.attempts).toBe(5);
+    expect(Date.parse(destroy.retry!.nextAt) - Date.now()).toBeGreaterThan(200);
+    expect(destroy).toMatchObject({ phase: 'incomplete', remaining: ['worktree', 'branch'] });
+  });
+
+  it.runIf(linux)('a holder that exits inside the fast window lets the destroy complete within it', async () => {
+    cadence({ fastMs: 200, fastCount: 3, capMs: 2_000 });
+    const { workerId, workspace, holder } = await settled();
+    await f.service.destroy(f.caller, { workerId });
+    const writes = vi.spyOn(f.store, 'commitDelegation');
+    await holder!.close();
+    await vi.waitFor(() => expect(destroyOf(workerId)).toEqual({ requestedAt: expect.any(String), phase: 'complete', remaining: [] }), { timeout: 5_000 });
+    const attempts = writes.mock.calls.flatMap(([patches]) => patches)
+      .map(patch => (patch.delegation as { destroy?: { retry?: { attempts: number } } }).destroy?.retry?.attempts ?? 0);
+    expect(Math.max(0, ...attempts)).toBeLessThanOrEqual(3);
+    expect(existsSync(workspace.path)).toBe(false);
+  });
+
+  it.runIf(linux)('Clean up resets the backoff: a full attempt now, and the next tick at the fast cadence', async () => {
+    cadence({ fastMs: 1_000, fastCount: 0, capMs: 5_000 }, 1);
+    const { workerId } = await settled();
+    await f.service.destroy(f.caller, { workerId });
+    // The first tick reaches attention at once; the next one is four seconds out.
+    await vi.waitFor(() => expect(destroyOf(workerId)?.retry?.needsAttention).toBe(true), { timeout: 5_000 });
+    const reads = vi.spyOn(f.store, 'readEventsAsync');
+    expect(await f.service.destroyForHuman('project', workerId)).toMatchObject({ state: 'incomplete' });
+    expect(reads).toHaveBeenCalledOnce();
+    expect(destroyOf(workerId)?.retry).toBeUndefined();
+    const reset = Date.now();
+    await vi.waitFor(() => expect(destroyOf(workerId)?.retry?.attempts).toBe(1), { timeout: 3_000, interval: 20 });
+    expect(Date.now() - reset).toBeLessThan(2_500);
+  });
+
+  it('a thrown attempt records why, instead of leaving cleaning with no error', async () => {
+    cadence();
+    const { workerId } = await settled(false);
+    vi.spyOn(f.store, 'readEventsAsync').mockRejectedValueOnce(new Error('transcript unreadable'));
+    await expect(f.service.destroy(f.caller, { workerId })).rejects.toThrow('transcript unreadable');
+    expect(destroyOf(workerId)).toMatchObject({ phase: 'incomplete', remaining: ['worktree', 'branch'], error: 'transcript unreadable' });
+  });
+
+  it('a restart resumes the backoff from the persisted next attempt (guard)', async () => {
+    const { workerId, workspace } = await settled(false);
+    const run = f.store.getRun(workerId)!;
+    if (run.delegation?.role !== 'worker') throw Error('worker');
+    f.store.commitDelegation([{ id: workerId, delegation: { ...run.delegation, destroy: { requestedAt: new Date().toISOString(), phase: 'incomplete',
+      remaining: ['worktree', 'branch'], retry: { attempts: 7, nextAt: new Date(Date.now() + 2_000).toISOString() } } } }]);
+    const restarted = new DelegationService();
+    Object.assign(restarted, { destroyBackoff: { fastMs: 40, fastCount: 3, capMs: 5_000 } });
+    const detach = restarted.registerProject({ id: 'project', root: f.root, store: f.store, manager: f.manager });
+    try {
+      restarted.armDestroyRetries('project');
+      await sleep(300);
+      expect(destroyOf(workerId)).toMatchObject({ phase: 'incomplete', retry: { attempts: 7 } });
+      expect(existsSync(workspace.path)).toBe(true);
+    } finally { detach(); }
+  });
+
+  it.runIf(linux)('two stuck workers of one parent keep one result pointer each', async () => {
+    cadence();
+    const a = await settled(), b = await settled();
+    for (const { workerId } of [a, b]) await f.service.destroy(f.caller, { workerId });
+    await vi.waitFor(() => { for (const { workerId } of [a, b]) expect(destroyOf(workerId)?.retry?.attempts).toBeGreaterThanOrEqual(3); }, { timeout: 5_000 });
+    const parent = f.store.getRun(f.parent.id)!;
+    if (parent.delegation?.role !== 'root') throw Error('root');
+    expect(parent.delegation.results?.map(entry => entry.workerId).sort()).toEqual([a.workerId, b.workerId].sort());
+    for (const { workerId } of [a, b]) expect(f.store.readWorkerResult(f.parent.id, workerId)).toMatchObject({ workerId });
+  });
+
+  it.runIf(linux)('a tick cut off by project replacement writes nothing afterwards (guard)', async () => {
+    cadence();
+    const { workerId, holder } = await settled();
+    await f.service.destroy(f.caller, { workerId });
+    let release!: (value: boolean) => void;
+    const gate = new Promise<boolean>(resolve => { release = resolve; });
+    const termination = vi.spyOn(f.manager, 'awaitRunTermination').mockReturnValue(gate);
+    // The holder exits, so the next tick makes a full attempt; hold it inside termination.
+    await holder!.close();
+    await vi.waitFor(() => expect(termination).toHaveBeenCalled(), { timeout: 3_000 });
+    const before = structuredClone(destroyOf(workerId));
+    const replacementManager = createFixtureManager(f.store, f.root);
+    const detachReplacement = f.service.registerProject({ id: 'project', root: f.root, store: f.store, manager: replacementManager });
+    const writes = vi.spyOn(f.store, 'commitDelegation');
+    try {
+      release(true);
+      await sleep(300);
+      expect(writes).not.toHaveBeenCalled();
+      expect(destroyOf(workerId)).toEqual(before);
+    } finally { detachReplacement(); replacementManager.dispose(); }
+  });
 });
