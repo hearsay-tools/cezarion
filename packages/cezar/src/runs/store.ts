@@ -15,8 +15,8 @@ import {
 import type { ArchiveFinishedScope, CiWait, ConversationState, AgentInput, InboxClaim, DelegationState, RunSummary, WorkerCollectedResult } from '@open-mercato/cezar-contract';
 import { storedDelegationStateSchema } from './delegation-state.ts';
 import { HistoryCompressor } from './history-compressor.ts';
-import { emptyFacts, TranscriptFactsIndex, type TranscriptFacts } from './transcript-facts.ts';
-import { hasPlainHistory, historyPaths, readHistoryText, removeHistory, restoreHistory } from './history-file.ts';
+import { emptyFacts, stampOf, TranscriptFactsIndex, type TranscriptFacts } from './transcript-facts.ts';
+import { hasPlainHistory, historyPaths, readHistoryText, readHistoryTextAsync, removeHistory, restoreHistory } from './history-file.ts';
 import { workerExecutionIdentitySchema, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
 import { reconcileWorkerWait } from '../delegation/wait.ts';
 import { capacityError, workerCapacity } from '../delegation/capacity.ts';
@@ -1098,6 +1098,21 @@ interface ListOrder {
 
 /** Newest first, runs created in the same millisecond in insertion order: the order `runs.db`
  *  lists in, and the order every list had while it was a stable sort of the in-memory map. */
+/** NDJSON transcript text to events; a damaged line is skipped, never fatal. */
+function parseEvents(raw: string): RunEvent[] {
+  return raw
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => {
+      try {
+        return JSON.parse(line) as RunEvent;
+      } catch {
+        return null;
+      }
+    })
+    .filter((e): e is RunEvent => e !== null);
+}
+
 function newestFirst(a: ListOrder, b: ListOrder): number {
   if (a.createdAt !== b.createdAt) return a.createdAt < b.createdAt ? 1 : -1;
   return a.seq < b.seq ? -1 : a.seq > b.seq ? 1 : 0;
@@ -1253,8 +1268,9 @@ export class RunStore extends EventEmitter {
   private constructor(private readonly dataDir: string) {
     super();
     this.setMaxListeners(100);
-    this.compressor = new HistoryCompressor(dataDir, (id) => this.isHistoryCompressEligible(id));
     this.facts = new TranscriptFactsIndex(dataDir);
+    this.compressor = new HistoryCompressor(dataDir, (id) => this.isHistoryCompressEligible(id),
+      (id, plain, archive) => this.facts.adoptArchive(id, plain, stampOf(archive)));
   }
 
   /**
@@ -1301,6 +1317,7 @@ export class RunStore extends EventEmitter {
       store.db = db;
       store.owner = openClaimSession();
       store.loadHeldRows();
+      store.warmTranscriptFacts();
     } catch (error) {
       if (store.owner) {
         try { db.releaseClaims(store.owner.session); } catch { /* the session closes below: its claims are provably dead */ }
@@ -3228,6 +3245,34 @@ export class RunStore extends EventEmitter {
     return this.transcriptFacts(runId).projectionIds.includes(projectionId);
   }
 
+  private factsWarming: Promise<void> = Promise.resolve();
+
+  /** After open, build the indexes the delegation reconcile will ask for first, off the request
+   *  path: every member of every family with a conversation (#880). */
+  private warmTranscriptFacts(): void {
+    // A microtask, not a timer: open returns first, and no timer outlives a store that never warms.
+    this.factsWarming = Promise.resolve().then(() => {
+      const ids: string[] = [];
+      for (const rootId of this.listConversationRootIds()) ids.push(rootId, ...(this.db?.listIdsByParent(rootId) ?? []));
+      return this.facts.warm(ids);
+    }).catch(() => undefined);
+  }
+
+  /** Resolves when the open-time warm-up is done (tests). */
+  factsWarmIdle(): Promise<void> {
+    return this.factsWarming;
+  }
+
+  /** `readEvents` off the event loop (async read and async brotli), for collection paths. */
+  async readEventsAsync(runId: string): Promise<RunEvent[]> {
+    try {
+      const raw = await readHistoryTextAsync(this.dataDir, runId);
+      return raw === undefined ? [] : parseEvents(raw);
+    } catch {
+      return [];
+    }
+  }
+
   /** The owned store's `refreshHumanAskSummary`, from the index, on the same rules: no history
    *  (legacy runs) keeps the summary, an unreadable one requests attention. True when it changed. */
   private syncHumanAskSummary(run: RunRecord): boolean {
@@ -3244,17 +3289,7 @@ export class RunStore extends EventEmitter {
     try {
       const raw = readHistoryText(this.dataDir, runId);
       if (raw === undefined) return [];
-      return raw
-        .split('\n')
-        .filter(Boolean)
-        .map((line) => {
-          try {
-            return JSON.parse(line) as RunEvent;
-          } catch {
-            return null;
-          }
-        })
-        .filter((e): e is RunEvent => e !== null);
+      return parseEvents(raw);
     } catch {
       return [];
     }
@@ -3929,6 +3964,7 @@ export class RunStore extends EventEmitter {
    */
   close(): void {
     this.compressor.stop();
+    this.facts.stop();
     this.facts.flush();
     if (this.saveTimer) {
       clearTimeout(this.saveTimer);

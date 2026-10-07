@@ -7,7 +7,7 @@ import { randomBytes } from 'node:crypto';
 import { readFileSync, renameSync, rmSync, writeFileSync, type Stats } from 'node:fs';
 import { z } from 'zod';
 import { advancePendingHumanAsk, type RunEvent } from '@open-mercato/cezar-contract';
-import { historyPaths, historyStat, readHistoryText, readPlainHistoryRange } from './history-file.ts';
+import { historyPaths, historyStat, readHistoryText, readHistoryTextAsync, readPlainHistoryRange } from './history-file.ts';
 
 /** A prose gate a turn ended on without a structured ask; answered like one. */
 export const PROSE_HUMAN_GATE = 'unstructured-human-gate';
@@ -119,7 +119,7 @@ const factsFileSchema = z.object({
 
 interface Entry { facts: TranscriptFacts; written: number }
 
-const stampOf = (st: Stats): ArchiveStamp => ({ size: st.size, mtimeMs: st.mtimeMs, ino: st.ino });
+export const stampOf = (st: Stats): ArchiveStamp => ({ size: st.size, mtimeMs: st.mtimeMs, ino: st.ino });
 const sameStamp = (a: ArchiveStamp | undefined, b: ArchiveStamp) => !!a && a.size === b.size && a.mtimeMs === b.mtimeMs && a.ino === b.ino;
 
 /**
@@ -130,6 +130,7 @@ const sameStamp = (a: ArchiveStamp | undefined, b: ArchiveStamp) => !!a && a.siz
 export class TranscriptFactsIndex {
   private readonly entries = new Map<string, Entry>();
   private readonly warnedWrite = new Set<string>();
+  private stopped = false;
 
   constructor(private readonly dataDir: string) {}
 
@@ -171,7 +172,39 @@ export class TranscriptFactsIndex {
     this.entries.delete(runId);
   }
 
-  async warm(_runIds: Iterable<string>): Promise<void> {}
+  /**
+   * Build, off the event loop, every index a first `get` would have to rebuild from the whole
+   * transcript: one run at a time, async reads and async brotli. A run some reader loaded first,
+   * or whose transcript moved meanwhile, is left to `get`. Never throws.
+   */
+  async warm(runIds: Iterable<string>): Promise<void> {
+    for (const runId of runIds) {
+      if (this.stopped) return;
+      if (this.entries.has(runId)) continue;
+      try {
+        const stored = this.readSidecar(historyPaths(this.dataDir, runId).facts);
+        const before = historyStat(this.dataDir, runId);
+        const current = before.plainSize !== undefined ? !!stored && before.plainSize >= stored.bytes
+          : !before.archive || (!!stored && sameStamp(stored.archive, stampOf(before.archive)));
+        if (current) continue;
+        const text = await readHistoryTextAsync(this.dataDir, runId);
+        if (this.stopped || this.entries.has(runId)) continue;
+        const after = historyStat(this.dataDir, runId);
+        if (after.plainSize !== before.plainSize || (before.archive && (!after.archive || !sameStamp(stampOf(before.archive), stampOf(after.archive))))) continue;
+        const facts = emptyFacts();
+        if (text !== undefined) foldText(facts, text);
+        if (after.archive) facts.archive = stampOf(after.archive);
+        const entry = { facts, written: -1 };
+        this.entries.set(runId, entry);
+        this.persist(runId, entry);
+      } catch { /* the first `get` rebuilds it */ }
+    }
+  }
+
+  /** Stop warming (store close). */
+  stop(): void {
+    this.stopped = true;
+  }
 
   private entry(runId: string): Entry | undefined {
     const cached = this.entries.get(runId);

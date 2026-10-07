@@ -78,6 +78,29 @@ export function readHistoryText(dataDir: string, id: string): string | undefined
   return decoded.toString('utf8');
 }
 
+/** `readHistoryText` off the event loop: async reads and async brotli. */
+export async function readHistoryTextAsync(dataDir: string, id: string): Promise<string | undefined> {
+  const { plain, compressed } = historyPaths(dataDir, id);
+  try {
+    return await readFile(plain, 'utf8');
+  } catch (error) {
+    if (!isNotFound(error)) throw error;
+  }
+  let encoded: Buffer;
+  try {
+    encoded = await readFile(compressed);
+  } catch (error) {
+    if (isNotFound(error)) return undefined;
+    throw error;
+  }
+  try {
+    return (await brotliDecompressAsync(encoded)).toString('utf8');
+  } catch {
+    warnUndecodable(compressed);
+    return undefined;
+  }
+}
+
 /** Which form exists, without reading either: the plain byte length, or the archive's stat. */
 export function historyStat(dataDir: string, id: string): { plainSize?: number; archive?: Stats } {
   const { plain, compressed } = historyPaths(dataDir, id);
@@ -167,6 +190,8 @@ export async function compressHistory(
   dataDir: string,
   id: string,
   stillEligible: () => boolean,
+  /** Called once the archive replaced the plain file, with the bytes archived and its stat. */
+  onCommitted?: (plain: Buffer, archive: Stats) => void,
 ): Promise<'compressed' | 'skipped' | 'changed'> {
   const { plain, compressed, orphaned } = historyPaths(dataDir, id);
   let handle: FileHandle;
@@ -216,6 +241,9 @@ export async function compressHistory(
     }
     renameSync(tmp, compressed);
     unlinkSync(plain);
+    if (onCommitted) {
+      try { onCommitted(bytes, statSync(compressed)); } catch { /* a cache: its next reader rebuilds */ }
+    }
     return 'compressed';
   } catch (error) {
     rmSync(tmp, { force: true });

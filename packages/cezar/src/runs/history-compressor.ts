@@ -16,6 +16,7 @@ export class HistoryCompressor {
   constructor(
     private readonly dataDir: string,
     private readonly isEligible: (id: string) => boolean,
+    private readonly onCompressed?: (id: string, plain: Buffer, archive: import('node:fs').Stats) => void,
   ) {}
 
   /** Dedupes; starts draining if idle. Does no file I/O inline. */
@@ -74,6 +75,7 @@ export class HistoryCompressor {
             this.dataDir,
             id,
             () => !this.stopped && this.isEligible(id),
+            this.onCompressed && ((plain, archive) => this.onCompressed!(id, plain, archive)),
           );
           this.afterJob(id, result);
         } catch {
