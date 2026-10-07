@@ -366,6 +366,10 @@ function PaletteContent({ close }: { close: () => void }) {
   }, [search])
   const serverSearch = useRunsSearch(searched)
   const serverHits = searching ? serverSearch.data?.runs : undefined
+  // Projects whose matches the server capped (#864): said, not silently cut.
+  const cappedProjects = searching && !serverSearch.isPlaceholderData
+    ? (serverSearch.data?.truncated ?? []).map((id) => projectNames.get(id) ?? id)
+    : []
   const tasks = React.useMemo(
     () => mergeTasks(runs.data ?? [], runsProjectId, runsIndex.data?.runs, serverHits),
     [runs.data, runsProjectId, runsIndex.data, serverHits],
@@ -591,6 +595,11 @@ function PaletteContent({ close }: { close: () => void }) {
           </CommandGroup>
         ) : null}
       </CommandList>
+      {cappedProjects.length > 0 ? (
+        <p data-slot="palette-search-truncated" role="status" className="border-t border-border px-3 py-2 text-[11px] text-soft-foreground">
+          More matches in {cappedProjects.join(', ')}. Type more to narrow them.
+        </p>
+      ) : null}
     </>
   )
 }

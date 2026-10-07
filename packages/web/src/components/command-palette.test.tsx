@@ -1190,4 +1190,21 @@ describe('server search past the window', () => {
     fireEvent.change(await screen.findByRole('combobox'), { target: { value: query } })
     await waitFor(() => expect(document.querySelector('[data-slot="palette-task"][data-run-id="by-field"]')).not.toBeNull())
   })
+
+  it('says which projects had more matches than it shows', async () => {
+    renderPalette({
+      projects: [project({ id: 'cezar' }), project({ id: 'shop', name: 'Shop' })],
+      entry: '/p/cezar/',
+      extraRoutes: {
+        '/api/v1/workspace/runs-search?q=fix': {
+          runs: [indexed({ id: 'shop-fix', projectId: 'shop', title: 'Fix one', archived: true })],
+          truncated: ['shop'],
+        },
+      },
+    })
+    openWith({ metaKey: true })
+    fireEvent.change(await screen.findByRole('combobox'), { target: { value: 'fix' } })
+    const note = await screen.findByText(/More matches in Shop/)
+    expect(note.textContent).toContain('Type more to narrow')
+  })
 })
