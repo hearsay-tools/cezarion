@@ -1,5 +1,11 @@
-import { useInfiniteQuery, useQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query'
-import { useCallback, useMemo, useRef } from 'react'
+import {
+  useInfiniteQuery,
+  useQuery,
+  useQueryClient,
+  type InfiniteData,
+  type QueryClient,
+} from '@tanstack/react-query'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import type { RunEvent, RunHistoryPage } from '@open-mercato/cezar-api-client'
 import { queryScope } from '@open-mercato/cezar-api-client'
@@ -16,6 +22,42 @@ function orderedUnique(...groups: readonly RunEvent[][]): RunEvent[] {
     for (const event of group) bySeq.set(event.seq, event)
   }
   return [...bySeq.values()].sort((a, b) => a.seq - b.seq)
+}
+
+type HistoryData = InfiniteData<RunHistoryPage, string | undefined>
+
+/**
+ * Put a freshly read cursorless page in place of the cached newest page. Compaction, the refresh
+ * on entry and the fold on exit all write through here. A page older than the cached newest one
+ * is a response that lost a race with a newer write, and is dropped.
+ */
+function mergeNewestPage(
+  queryClient: QueryClient,
+  key: readonly unknown[],
+  latestPage: RunHistoryPage,
+): void {
+  queryClient.setQueryData<HistoryData>(key, (current) => {
+    if (!current) return { pages: [latestPage], pageParams: [undefined] }
+    const pages = [...current.pages]
+    const pageParams = [...current.pageParams]
+    let latestIndex = -1
+    for (let index = 0; index < pages.length; index += 1) {
+      if (latestIndex === -1 || pages[index]!.asOfSeq > pages[latestIndex]!.asOfSeq) latestIndex = index
+    }
+    if (latestIndex >= 0 && pages[latestIndex]!.asOfSeq > latestPage.asOfSeq) return current
+    if (latestIndex >= 0 && pages[latestIndex]!.newerCursor === undefined) {
+      pages[latestIndex] = latestPage
+      pageParams[latestIndex] = undefined
+    } else {
+      pages.push(latestPage)
+      pageParams.push(undefined)
+    }
+    while (pages.length > MAX_HISTORY_PAGES) {
+      pages.shift()
+      pageParams.shift()
+    }
+    return { pages, pageParams }
+  })
 }
 
 export interface RunHistoryState {
@@ -51,6 +93,9 @@ export function useRunHistory(runId: string | undefined): RunHistoryState {
     getPreviousPageParam: (firstPage) => firstPage.olderCursor,
     getNextPageParam: (lastPage) => lastPage.newerCursor,
     maxPages: MAX_HISTORY_PAGES,
+    // Freshness is the refresh on entry below, which replaces the newest page only. A stale
+    // infinite query would instead refetch every retained page, oldest first, on mount.
+    staleTime: Infinity,
     retry: 1,
   })
   const context = useQuery({
@@ -75,32 +120,7 @@ export function useRunHistory(runId: string | undefined): RunHistoryState {
     if (runId === undefined || compactingLive.current) return
     compactingLive.current = true
     void getRunHistory(runId, undefined)
-      .then((latestPage) => {
-        queryClient.setQueryData<InfiniteData<RunHistoryPage, string | undefined>>(
-          ['run-history', scope, runId],
-          (current) => {
-            if (!current) return { pages: [latestPage], pageParams: [undefined] }
-            const pages = [...current.pages]
-            const pageParams = [...current.pageParams]
-            let latestIndex = -1
-            for (let index = 0; index < pages.length; index += 1) {
-              if (latestIndex === -1 || pages[index]!.asOfSeq > pages[latestIndex]!.asOfSeq) latestIndex = index
-            }
-            if (latestIndex >= 0 && pages[latestIndex]!.newerCursor === undefined) {
-              pages[latestIndex] = latestPage
-              pageParams[latestIndex] = undefined
-            } else {
-              pages.push(latestPage)
-              pageParams.push(undefined)
-            }
-            while (pages.length > MAX_HISTORY_PAGES) {
-              pages.shift()
-              pageParams.shift()
-            }
-            return { pages, pageParams }
-          },
-        )
-      })
+      .then((latestPage) => mergeNewestPage(queryClient, ['run-history', scope, runId], latestPage))
       // Compaction is an optimization, not a load: this call is fire-and-forget (`void`), so a
       // rejection here has no query to reject and would surface as an unhandled rejection. The
       // live buffer still holds every event, and the next `onCompact` retries — so swallowing is
@@ -111,13 +131,51 @@ export function useRunHistory(runId: string | undefined): RunHistoryState {
         compactingLive.current = false
       })
   }, [queryClient, runId, scope])
-  const liveEvents = useRunEvents(!fallback && newestPage ? runId : undefined, {
+
+  // Re-entry (#881): a cached newest page is as old as the last visit, and the stream would
+  // replay everything since from its `asOfSeq`, one frame at a time. Read the newest page again
+  // first, keep the cached one on screen meanwhile, and open the stream from the fresh page.
+  // Decided while rendering, so the stream never opens at the stale cursor before the refresh.
+  const hasCachedHistory = (id: string | undefined) =>
+    id !== undefined && queryClient.getQueryData(['run-history', scope, id]) !== undefined
+  const [refresh, setRefresh] = useState(() => ({ runId, pending: hasCachedHistory(runId) }))
+  let refreshPending = refresh.pending
+  if (refresh.runId !== runId) {
+    refreshPending = hasCachedHistory(runId)
+    setRefresh({ runId, pending: refreshPending })
+  }
+  useEffect(() => {
+    if (!refreshPending || runId === undefined) return
+    let cancelled = false
+    const controller = new AbortController()
+    void getRunHistory(runId, undefined, { signal: controller.signal })
+      .then((latestPage) => mergeNewestPage(queryClient, ['run-history', scope, runId], latestPage))
+      // A failed refresh leaves the cached page, and the stream replays from its cursor as before.
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setRefresh({ runId, pending: false })
+      })
+    return () => {
+      cancelled = true
+      controller.abort()
+    }
+  }, [queryClient, refreshPending, runId, scope])
+
+  const liveEvents = useRunEvents(!fallback && newestPage && !refreshPending ? runId : undefined, {
     cursor: newestPage?.liveCursor,
     afterSeq: newestPage?.asOfSeq,
     maxEvents: MAX_LIVE_EVENTS,
     compactAt: COMPACT_LIVE_AT_EVENTS,
     onCompact: compactLive,
   })
+
+  // Exit (#881): live frames die with this component. Fold them into the cached newest page so
+  // the next entry shows them at once, while its own refresh is in flight.
+  const liveCount = useRef(0)
+  liveCount.current = liveEvents.length
+  useEffect(() => () => {
+    if (liveCount.current > 0) compactLive()
+  }, [compactLive])
 
   const pagedEvents = useMemo(
     () => orderedUnique(...pages.map((page) => page.events as RunEvent[])),

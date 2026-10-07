@@ -2,6 +2,7 @@ import { act, cleanup, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { setApiScope } from '@open-mercato/cezar-api-client'
+import { flushAnimationFrames, installAnimationFrameQueue } from '../test/animation-frames'
 import { parseRunEvent, useRunEvents } from './run-events'
 
 /**
@@ -40,11 +41,17 @@ class FakeEventSource {
     this.closeCount += 1
   }
 
-  /** One `event:`/`data:` frame. */
+  /** One `event:`/`data:` frame, then the animation frame that applies it (#881). */
   emit(name: string, data: string): void {
     act(() => {
-      for (const fn of this.listeners.get(name) ?? []) fn(new MessageEvent(name, { data }))
+      this.deliver(name, data)
+      flushAnimationFrames()
     })
+  }
+
+  /** One frame with no animation frame after it: the list does not change yet. */
+  deliver(name: string, data: string): void {
+    for (const fn of this.listeners.get(name) ?? []) fn(new MessageEvent(name, { data }))
   }
 }
 
@@ -55,6 +62,7 @@ const line = (seq: number, type: string, rest: Record<string, unknown> = {}) =>
 beforeEach(() => {
   FakeEventSource.instances = []
   vi.stubGlobal('EventSource', FakeEventSource)
+  installAnimationFrameQueue()
 })
 
 afterEach(() => {
@@ -261,6 +269,50 @@ describe('useRunEvents — seq dedup uses `>`', () => {
     source.emit('ui-event', line(4, 'stdout', { text: 'late' })) // below — replayed history
 
     expect(result.current).toHaveLength(1)
+  })
+})
+
+describe('useRunEvents — batching (#881)', () => {
+  it('applies every frame that arrived before an animation frame in one update', () => {
+    let renders = 0
+    const { result } = renderHook(() => {
+      renders += 1
+      return useRunEvents('run-1')
+    })
+    const source = FakeEventSource.last
+    const before = renders
+
+    for (let seq = 1; seq <= 100; seq += 1) act(() => source.deliver('run-event', line(seq, 'stdout')))
+    expect(result.current).toEqual([])
+    expect(renders).toBe(before)
+
+    act(() => flushAnimationFrames())
+    expect(result.current.map((event) => event.seq)).toEqual(Array.from({ length: 100 }, (_, i) => i + 1))
+    expect(renders).toBe(before + 1)
+  })
+
+  it('applies a batch after 50 ms when no animation frame runs, as in a hidden tab', () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] })
+    try {
+      const { result } = renderHook(() => useRunEvents('run-1'))
+      const source = FakeEventSource.last
+      act(() => source.deliver('run-event', line(1, 'stdout')))
+      act(() => vi.advanceTimersByTime(49))
+      expect(result.current).toEqual([])
+      act(() => vi.advanceTimersByTime(1))
+      expect(result.current.map((event) => event.seq)).toEqual([1])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('drops a pending batch on unmount', () => {
+    const { result, unmount } = renderHook(() => useRunEvents('run-1'))
+    act(() => FakeEventSource.last.deliver('run-event', line(1, 'stdout')))
+    const shown = result.current
+    unmount()
+    act(() => flushAnimationFrames())
+    expect(shown).toEqual([])
   })
 })
 

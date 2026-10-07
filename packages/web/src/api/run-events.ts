@@ -95,15 +95,25 @@ export function useRunEvents(runId: string | undefined, options: RunEventStreamO
     let lastFrameAt = Date.now()
     let livenessTimer: ReturnType<typeof setInterval> | undefined
 
-    const onFrame = (event: Event) => {
-      // Any frame proves the socket is alive — bump the watchdog before the dedup drop, so a
-      // replayed prefix (which is dropped below) still counts as liveness.
-      lastFrameAt = Date.now()
-      const parsed = parseRunEvent((event as MessageEvent<string>).data)
-      if (!parsed || !(parsed.seq > maxSeq)) return
-      maxSeq = parsed.seq
+    // Frames are batched into one state update per animation frame (#881). Every SSE message is
+    // its own task, so a per-frame `setEvents` re-rendered the whole thread once per frame: a
+    // 1,051-frame replay cost a thousand renders. The 50 ms timer races the animation frame
+    // because a hidden tab never runs one, and a buffer must not wait for the tab to return.
+    const FLUSH_FALLBACK_MS = 50
+    let pending: RunEvent[] = []
+    let flushFrame: number | undefined
+    let flushTimer: ReturnType<typeof setTimeout> | undefined
+
+    const flush = (): void => {
+      if (flushFrame !== undefined) globalThis.cancelAnimationFrame?.(flushFrame)
+      clearTimeout(flushTimer)
+      flushFrame = undefined
+      flushTimer = undefined
+      if (disposed || pending.length === 0) return
+      const batch = pending
+      pending = []
       setEvents((current) => {
-        const next = [...current, parsed]
+        const next = [...current, ...batch]
         if (
           !compactionRequested &&
           compactAt !== undefined &&
@@ -116,6 +126,25 @@ export function useRunEvents(runId: string | undefined, options: RunEventStreamO
         }
         return maxEvents === undefined || next.length <= maxEvents ? next : next.slice(-maxEvents)
       })
+    }
+
+    const scheduleFlush = (): void => {
+      if (flushTimer !== undefined) return
+      flushTimer = setTimeout(flush, FLUSH_FALLBACK_MS)
+      if (typeof globalThis.requestAnimationFrame === 'function') {
+        flushFrame = globalThis.requestAnimationFrame(flush)
+      }
+    }
+
+    const onFrame = (event: Event) => {
+      // Any frame proves the socket is alive — bump the watchdog before the dedup drop, so a
+      // replayed prefix (which is dropped below) still counts as liveness.
+      lastFrameAt = Date.now()
+      const parsed = parseRunEvent((event as MessageEvent<string>).data)
+      if (!parsed || !(parsed.seq > maxSeq)) return
+      maxSeq = parsed.seq
+      pending.push(parsed)
+      scheduleFlush()
     }
 
     // The keepalive carries no payload we accumulate — it exists only to prove the socket is
@@ -203,6 +232,8 @@ export function useRunEvents(runId: string | undefined, options: RunEventStreamO
 
     return () => {
       disposed = true
+      if (flushFrame !== undefined) globalThis.cancelAnimationFrame?.(flushFrame)
+      clearTimeout(flushTimer)
       clearTimeout(reopenTimer)
       clearInterval(livenessTimer)
       document.removeEventListener('visibilitychange', onVisibilityChange)

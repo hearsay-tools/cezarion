@@ -4,6 +4,7 @@ import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { RunHistoryContext, RunHistoryPage } from '@open-mercato/cezar-api-client'
+import { flushAnimationFrames, installAnimationFrameQueue } from '../test/animation-frames'
 import { getRunHistory, getRunHistoryContext } from './client'
 import { useRunHistory } from './run-history'
 
@@ -34,7 +35,14 @@ class FakeEventSource {
     this.readyState = 2
   }
 
+  /** One frame, then the animation frame that applies it (#881). Call inside `act`. */
   emit(name: string, data: string): void {
+    this.deliver(name, data)
+    flushAnimationFrames()
+  }
+
+  /** One frame with no animation frame after it. */
+  deliver(name: string, data: string): void {
     for (const listener of this.listeners.get(name) ?? []) listener(new MessageEvent(name, { data }))
   }
 }
@@ -73,7 +81,23 @@ beforeEach(() => {
   vi.clearAllMocks()
   // jsdom deliberately has no native EventSource; the stream hook degrades to no live frames.
   Reflect.deleteProperty(globalThis, 'EventSource')
+  installAnimationFrameQueue()
 })
+
+const note = (seq: number) =>
+  JSON.stringify({ seq, ts: '2026-07-30T00:00:00.000Z', type: 'note', message: `event-${seq}` })
+
+const tail = (from: number, to: number): RunHistoryPage => ({
+  ...page(to),
+  events: Array.from({ length: to - from + 1 }, (_, index) => JSON.parse(note(from + index))),
+  itemCount: Math.min(100, to - from + 1),
+})
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((settle) => { resolve = settle })
+  return { promise, resolve }
+}
 
 describe('useRunHistory', () => {
   it('hydrates the visible tail and current context independently, then prepends one older page', async () => {
@@ -145,6 +169,135 @@ describe('useRunHistory', () => {
       expect(result.current.currentEvents.map(event => event.seq)).toEqual([1, 2])
     } finally {
       unmount(); client.clear(); vi.unstubAllGlobals()
+    }
+  })
+
+  it('re-entry refreshes the newest page before the stream opens, showing the cached page meanwhile', async () => {
+    FakeEventSource.instances = []
+    vi.stubGlobal('EventSource', FakeEventSource)
+    const refreshed = deferred<RunHistoryPage>()
+    const answers: Array<() => Promise<RunHistoryPage>> = [
+      async () => page(100), // first entry
+      async () => tail(100, 105), // fold on exit
+      () => refreshed.promise, // refresh on re-entry
+    ]
+    mockHistory.mockImplementation(() => answers.shift()!())
+    mockContext.mockResolvedValue(context())
+    const { client, wrapper } = harness()
+    try {
+      const first = renderHook(() => useRunHistory('run-1'), { wrapper })
+      await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1))
+      act(() => {
+        for (let seq = 101; seq <= 105; seq += 1) FakeEventSource.instances[0]!.emit('run-event', note(seq))
+      })
+      expect(first.result.current.visibleEvents.at(-1)?.seq).toBe(105)
+      first.unmount()
+      await waitFor(() => expect(mockHistory).toHaveBeenCalledTimes(2))
+
+      const transitions: Array<{ pending: boolean; seqs: number[] }> = []
+      const second = renderHook(() => {
+        const state = useRunHistory('run-1')
+        transitions.push({ pending: state.isPending, seqs: state.visibleEvents.map(({ seq }) => seq) })
+        return state
+      }, { wrapper })
+      await waitFor(() => expect(mockHistory).toHaveBeenCalledTimes(3))
+      // The previous visit's frames are already in the cached page, and no stream opened yet.
+      expect(second.result.current.visibleEvents.at(-1)?.seq).toBe(105)
+      expect(FakeEventSource.instances).toHaveLength(1)
+
+      await act(async () => refreshed.resolve(tail(101, 150)))
+      await waitFor(() => expect(FakeEventSource.instances).toHaveLength(2))
+      const stream = new URL(FakeEventSource.instances[1]!.url, 'http://localhost')
+      expect(stream.searchParams.get('afterSeq')).toBe('150')
+      expect(stream.searchParams.get('cursor')).toBe('live-150')
+      expect(second.result.current.visibleEvents.at(-1)?.seq).toBe(150)
+      // No flash: every render of the re-entry had the transcript and was never pending.
+      expect(transitions.every(({ pending, seqs }) => !pending && seqs.includes(105))).toBe(true)
+      second.unmount()
+    } finally {
+      client.clear()
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('a failed refresh on re-entry opens the stream from the cached page', async () => {
+    FakeEventSource.instances = []
+    vi.stubGlobal('EventSource', FakeEventSource)
+    mockHistory.mockResolvedValueOnce(page(100)).mockRejectedValue(new Error('offline'))
+    mockContext.mockResolvedValue(context())
+    const { client, wrapper } = harness()
+    try {
+      const first = renderHook(() => useRunHistory('run-1'), { wrapper })
+      await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1))
+      first.unmount()
+
+      const second = renderHook(() => useRunHistory('run-1'), { wrapper })
+      await waitFor(() => expect(FakeEventSource.instances).toHaveLength(2))
+      expect(new URL(FakeEventSource.instances[1]!.url, 'http://localhost').searchParams.get('afterSeq')).toBe('100')
+      expect(second.result.current.fallback).toBe(false)
+      expect(second.result.current.visibleEvents.map(({ seq }) => seq)).toEqual([100])
+      second.unmount()
+    } finally {
+      client.clear()
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('keeps a late refresh from replacing a newer cached page', async () => {
+    FakeEventSource.instances = []
+    vi.stubGlobal('EventSource', FakeEventSource)
+    const late = deferred<RunHistoryPage>()
+    const answers: Array<() => Promise<RunHistoryPage>> = [async () => page(100), () => late.promise]
+    mockHistory.mockImplementation(() => answers.shift()!())
+    mockContext.mockResolvedValue(context())
+    const { client, wrapper } = harness()
+    try {
+      const first = renderHook(() => useRunHistory('run-1'), { wrapper })
+      await waitFor(() => expect(first.result.current.isPending).toBe(false))
+      first.unmount()
+      const second = renderHook(() => useRunHistory('run-1'), { wrapper })
+      await waitFor(() => expect(mockHistory).toHaveBeenCalledTimes(2))
+      // Something newer (jump-to-latest, a compaction) wrote the cache while the refresh was out.
+      act(() => client.setQueryData(['run-history', 'default', 'run-1'], { pages: [page(200)], pageParams: [undefined] }))
+      await act(async () => late.resolve(page(150)))
+      await waitFor(() => expect(FakeEventSource.instances).toHaveLength(2))
+      expect(second.result.current.visibleEvents.map(({ seq }) => seq)).toEqual([200])
+      expect(new URL(FakeEventSource.instances[1]!.url, 'http://localhost').searchParams.get('afterSeq')).toBe('200')
+      second.unmount()
+    } finally {
+      client.clear()
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('renders the thread at most 20 times for 1,000 replayed frames', async () => {
+    FakeEventSource.instances = []
+    vi.stubGlobal('EventSource', FakeEventSource)
+    // Compaction at 200 frames stays in flight, so one socket carries the whole replay.
+    mockHistory.mockResolvedValueOnce(page(0)).mockReturnValue(new Promise(() => {}))
+    mockContext.mockResolvedValue(context())
+    const { client, wrapper } = harness()
+    let renders = 0
+    const { result, unmount } = renderHook(() => {
+      renders += 1
+      return useRunHistory('run-1')
+    }, { wrapper })
+    try {
+      await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1))
+      await waitFor(() => expect(result.current.contextPending).toBe(false))
+      const source = FakeEventSource.instances[0]!
+      renders = 0
+      // Every SSE message is its own task; ten animation frames pass during the replay.
+      for (let seq = 1; seq <= 1_000; seq += 1) {
+        act(() => source.deliver('run-event', note(seq)))
+        if (seq % 100 === 0) act(() => flushAnimationFrames())
+      }
+      expect(result.current.visibleEvents.at(-1)?.seq).toBe(1_000)
+      expect(renders).toBeLessThanOrEqual(20)
+    } finally {
+      unmount()
+      client.clear()
+      vi.unstubAllGlobals()
     }
   })
 
