@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { withOwnedInputRun } from '../core/harness-parity.testkit.ts';
 import { handoffPath } from '../handoff.ts';
+import { reclaimWorktree } from '../runs/retention.ts';
 import { readPersistedRuns, seedRuns } from '../runs/run-store.testkit.ts';
 import { RunStore } from '../runs/store.ts';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
@@ -226,6 +227,40 @@ describe('worktree setup on task start (#917)', () => {
     expect(finished.worktreeSetup).toBeUndefined();
     expect(countLines()).toBe(1);
     expect(finished.steps.find((s) => s.id === 'work')?.sessionId).toBeDefined();
+  }, 90_000);
+});
+
+describe('worktree setup on Continue (#917)', () => {
+  const COMMAND = 'echo again >> "$CEZ_PROJECT_ROOT/.setup-count"';
+  const countLines = (f: Fixture) =>
+    (existsSync(join(f.repoRoot, '.setup-count')) ? readFileSync(join(f.repoRoot, '.setup-count'), 'utf8').split('\n').filter(Boolean).length : 0);
+
+  it('Continue after retention reclaimed the worktree runs setup again', async () => {
+    const f = await fixture({ worktreeSetup: { commands: [COMMAND] } });
+    const id = await runToEnd(f, 'do the thing');
+    expect(countLines(f)).toBe(1);
+    const worktreePath = f.store.getRun(id)!.worktreePath!;
+    await reclaimWorktree(f.repoRoot, f.store, f.store.getRun(id)!);
+    expect(f.store.getRun(id)?.worktreeReclaimedAt).toBeDefined();
+    expect(existsSync(worktreePath)).toBe(false);
+    writeFileSync(f.stdinFile, '');
+    expect(f.manager.continueRun(id, { text: 'go on' }).ok).toBe(true);
+    await waitFor(() => openingMessages(f).length > 0, 'the continuation to open');
+    expect(countLines(f)).toBe(2);
+    expect(existsSync(worktreePath)).toBe(true);
+    expect(openingMessages(f)[0]).toContain('go on');
+    expect(openingMessages(f)[0]).toContain('Cezar prepared this worktree before your session started:');
+    expect(f.store.getRun(id)?.worktreeSetup?.status).toBe('done');
+  }, 90_000);
+
+  it('Continue on a live worktree does not run setup', async () => {
+    const f = await fixture({ worktreeSetup: { commands: [COMMAND] } });
+    const id = await runToEnd(f, 'do the thing');
+    writeFileSync(f.stdinFile, '');
+    expect(f.manager.continueRun(id, { text: 'go on' }).ok).toBe(true);
+    await waitFor(() => openingMessages(f).length > 0, 'the continuation to open');
+    expect(countLines(f)).toBe(1);
+    expect(openingMessages(f)[0]).not.toContain('Cezar prepared');
   }, 90_000);
 });
 

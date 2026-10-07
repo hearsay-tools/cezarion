@@ -5478,6 +5478,8 @@ export class RunManager {
     this.workerIdentity(runId);
     const record = this.store.getRun(runId);
     let cwd: string;
+    // Retention (#483) rebuilt a reclaimed directory: a bare checkout that needs setup again (#917).
+    let rematerialized = false;
     if (record?.delegation?.role === 'worker') {
       try {
         if (record.delegation.destroy) throw new Error('Worker destruction has begun');
@@ -5494,7 +5496,7 @@ export class RunManager {
         return;
       }
     } else {
-      await rematerializeReclaimedWorktree(this.repoRoot, this.store, runId);
+      rematerialized = await rematerializeReclaimedWorktree(this.repoRoot, this.store, runId);
       cwd = record?.worktreePath && existsSync(record.worktreePath) ? record.worktreePath : this.repoRoot;
     }
     if (this.store.getRun(runId)?.stopping) {
@@ -5540,6 +5542,15 @@ export class RunManager {
     }
     this.armAutosave(runId, state);
     if (record) seedHandoffFile(this.dataDir, record); // idempotent — normally already there
+    // Worktree setup (#917) for a directory retention rebuilt, or one a restart interrupted.
+    const setupNote = await this.prepareWorktree(
+      runId,
+      state,
+      (await loadConfig(this.repoRoot)).worktreeSetup,
+      (event) => this.store.appendEvent(runId, event),
+      rematerialized ? 'rematerialized' : 'resume',
+    );
+    // A Stop during setup settles below, at the prelaunch cancellation check before any spawn.
     // Registry snapshot for `/skill` expansion. `execute` loads this for the workflow's own
     // sessions; a continuation builds its OWN ActiveRun, and without this the resumed session
     // expanded against an empty registry and leaked `/om-...` verbatim to the backend, which
@@ -5946,7 +5957,7 @@ export class RunManager {
     // through `deliverMessage`, so it needs the SAME delivery-only `/skill` rewrite the
     // live path applies (#811). Delivery-only: the `user-message` event above already
     // persisted the user's original text, and the transcript must keep showing that.
-    const openingPrompt = expandRegistrySlashSkillText(prompt, state.skills ?? []);
+    const openingPrompt = expandRegistrySlashSkillText(prompt, state.skills ?? []) + (setupNote ? `\n\n${setupNote}` : '');
     state.agentSessionError = undefined;
     let session: AgentSession | undefined;
     if (this.workerExecutionStopped(runId)) { state.cancelled = true; throw new Error('Worker stopped before launch'); }
