@@ -244,3 +244,35 @@ it('names an archived worker the run list no longer carries from the relationshi
   const group = await screen.findByRole('group', { name: 'Task relationships' })
   expect(await within(group).findByText('Fixed the parser')).toBeTruthy()
 })
+
+it('says when a stuck cleanup needs attention, when it checks next, and how to try now (hearsay-tools/cezarion#879)', async () => {
+  const nextAt = new Date(Date.now() + 42 * 60_000 + 30_000).toISOString()
+  const stuck: WorkerInspection = { ...worker, status: 'done', destroy: { requestedAt: at, phase: 'incomplete', remaining: ['worktree', 'branch'],
+    error: "Worker termination is not proven: process 42 still holds the worker's worktree or scratch; retry cleanup later",
+    retry: { attempts: 10, nextAt, needsAttention: true } } }
+  setup(root, async () => json({ workers: [stuck] }))
+  const group = await screen.findByRole('group', { name: 'Task relationships' })
+  const row = await within(group).findByText(/Cleanup needs attention/)
+  expect(row.textContent).toBe("Cleanup needs attention — remaining: worktree, branch — Worker termination is not proven: process 42 still holds the worker's worktree or scratch; retry cleanup later. "
+    + 'Nothing changed after 10 automatic attempts; checking hourly, next check in 42m. Retry clean up to try now.')
+  expect(row.querySelector('time')?.getAttribute('dateTime')).toBe(nextAt)
+})
+it('says an incomplete cleanup is retrying on its own, and when (hearsay-tools/cezarion#879)', async () => {
+  const retrying: WorkerInspection = { ...worker, status: 'done', destroy: { requestedAt: at, phase: 'incomplete', remaining: ['branch'], error: 'Branch is checked out.',
+    retry: { attempts: 2, nextAt: new Date(Date.now() + 3 * 60_000 + 30_000).toISOString() } } }
+  setup(root, async () => json({ workers: [retrying] }))
+  const group = await screen.findByRole('group', { name: 'Task relationships' })
+  const row = await within(group).findByText(/Cleanup incomplete/)
+  expect(row.textContent).toBe('Cleanup incomplete — remaining: branch — Branch is checked out. Retrying automatically, next attempt in 3m.')
+})
+it('offers Retry clean up while a destroy is pending, and plain Clean up otherwise (hearsay-tools/cezarion#879)', async () => {
+  const pending: WorkerInspection = { ...worker, status: 'done', destroy: { requestedAt: at, phase: 'incomplete', remaining: ['branch'] } }
+  const fresh: WorkerInspection = { ...workerAt(3), status: 'done', destroy: undefined }
+  setup(rootOf([pending, fresh]), async () => json({ workers: [pending, fresh], capacity: capacityOf(2) }))
+  const group = await section()
+  const retry = await within(group).findByRole('button', { name: `Retry clean up of worker ${workerId.slice(0, 8)}` })
+  expect(retry.textContent).toBe('Retry clean up')
+  expect(retry.className).toContain('min-h-11')
+  expect(within(group).getByRole('button', cleanUp(fresh.workerId)).textContent).toBe('Clean up')
+})
+
