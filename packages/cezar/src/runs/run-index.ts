@@ -45,7 +45,7 @@ const reportedUnreadable = new Set<string>();
  */
 export function readRunIndexFromDisk(
   dataDir: string,
-  options: { handle?: RepoHandle | null; archivedWindow?: number } = {},
+  options: { handle?: RepoHandle | null; archivedWindow?: number; roots?: boolean } = {},
 ): ColdRunIndex {
   return readCold(dataDir, EMPTY, (db) => readDatabase(db, dataDir, options), () => readLegacyIndex(dataDir, options));
 }
@@ -106,9 +106,9 @@ function applyWindow<T extends { archived: boolean }>(runs: T[], archivedWindow:
   return { runs: kept, truncated: archived > archivedWindow };
 }
 
-function readDatabase(db: RunDatabase, dataDir: string, { handle, archivedWindow }: { handle?: RepoHandle | null; archivedWindow?: number }): ColdRunIndex {
+function readDatabase(db: RunDatabase, dataDir: string, { handle, archivedWindow, roots }: { handle?: RepoHandle | null; archivedWindow?: number; roots?: boolean }): ColdRunIndex {
   // One archived root past the window is how "there are older ones" is known without counting.
-  const rows = archivedWindow === undefined ? db.listSummaries() : db.listWindowSummaries(archivedWindow + 1);
+  const rows = archivedWindow === undefined ? db.listSummaries() : db.listWindowSummaries(archivedWindow + 1, { roots });
   return applyWindow(projectRows(db, rows, dataDir, handle), archivedWindow);
 }
 
@@ -189,7 +189,7 @@ function needsRecord(summary: RunSummary, handle?: RepoHandle | null): boolean {
   return summary.delegation?.role === 'root' && summary.delegation.wait !== undefined;
 }
 
-function readLegacyIndex(dataDir: string, { handle, archivedWindow }: { handle?: RepoHandle | null; archivedWindow?: number }): ColdRunIndex {
+function readLegacyIndex(dataDir: string, { handle, archivedWindow, roots }: { handle?: RepoHandle | null; archivedWindow?: number; roots?: boolean }): ColdRunIndex {
   const indexPath = join(dataDir, LEGACY_INDEX_FILE);
   if (!existsSync(indexPath)) return EMPTY;
   try {
@@ -200,10 +200,11 @@ function readLegacyIndex(dataDir: string, { handle, archivedWindow }: { handle?:
       const parsed = parseRunRecords([entry]);
       return parsed.success ? parsed.data : [];
     });
-    // The window leaves archived workers out, as `RunDatabase.listWindowSummaries` does.
+    // The window leaves archived workers out, as `RunDatabase.listWindowSummaries` does, and
+    // with `roots` every worker.
     const listed = archivedWindow === undefined
       ? records
-      : records.filter((run) => !run.archived || run.delegation?.role !== 'worker');
+      : records.filter((run) => run.delegation?.role !== 'worker' || (!run.archived && !roots));
     // Reconciling never moves `createdAt` or `archived`, so the window is cut before projecting.
     const newest = listed.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     const { runs: kept, truncated } = applyWindow(newest, archivedWindow);

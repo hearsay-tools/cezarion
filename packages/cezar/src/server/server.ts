@@ -6158,9 +6158,10 @@ export function createApp(deps: ServerDeps) {
   // ---- chained family: the cross-project run index (workspace-level) -------
   /**
    * How many ARCHIVED root runs each project may contribute, newest first (#864). The index is a
-   * FINDER, not a listing: every unarchived run is in it (so a project's pills miss nothing live
-   * or unread), and older archived runs are reached through `GET /workspace/runs-search` and the
-   * project's own archived pages. `truncated` names the projects this bit, so a consumer never
+   * FINDER, not a listing: every unarchived ROOT run is in it (so a project's pills miss nothing
+   * live or unread), and older archived runs are reached through `GET /workspace/runs-search` and
+   * the project's own archived pages. Owned workers are never in it: the pills, ⌘K and the global
+   * Tasks page list no workers, and a parent's wait label comes from its own delegation. `truncated` names the projects this bit, so a consumer never
    * has to pretend the list is complete.
    */
   const RUNS_INDEX_PER_PROJECT = ARCHIVED_WINDOW;
@@ -6267,8 +6268,8 @@ export function createApp(deps: ServerDeps) {
         // is findable while you stand in its project and vanishes the moment you leave — the
         // exact asymmetry a cross-project finder exists to remove.
         const window = readProjectRuns(project.id, () => owned
-          ? owned.listRunSummaries({ archivedWindow: RUNS_INDEX_PER_PROJECT })
-          : readRunIndexFromDisk(dataDir, { handle, archivedWindow: RUNS_INDEX_PER_PROJECT }));
+          ? owned.listRunSummaries({ archivedWindow: RUNS_INDEX_PER_PROJECT, roots: true })
+          : readRunIndexFromDisk(dataDir, { handle, archivedWindow: RUNS_INDEX_PER_PROJECT, roots: true }));
         if (window.truncated) truncated.push(project.id);
         const recent = window.runs.map(withLiveUsage);
         const mentioned: number[] = [];

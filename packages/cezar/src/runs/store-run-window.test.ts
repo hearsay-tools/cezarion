@@ -130,6 +130,26 @@ describe('RunStore.listRunSummaries({ archivedWindow })', () => {
     expect(ids(store.listRunSummaries().runs)).toEqual([heldWorker, parent]);
   });
 
+  it('with roots, leaves every worker out, unarchived and held ones too (the runs index)', () => {
+    seedIncident();
+    const store = open();
+    const parent = randomUUID();
+    const heldWorker = randomUUID();
+    store.close();
+    stores.splice(0);
+    seedRuns(dataDir, [
+      root(parent, 20_000, { status: 'running', archived: false, finishedAt: undefined }),
+      worker(heldWorker, parent, 20_001, { status: 'running', archived: false, finishedAt: undefined }),
+      root('active', 1, { archived: false }),
+      worker('w-active', 'active', 2, { archived: false }),
+    ]);
+    const reopened = open();
+    expect(reopened.heldIds()).toContain(heldWorker);
+    expect(ids(reopened.listRunSummaries({ archivedWindow: 200, roots: true }).runs)).toEqual([parent, 'active']);
+    // The cockpit's own list keeps them: a parent's workers are rows there.
+    expect(ids(reopened.listRunSummaries({ archivedWindow: 200 }).runs)).toEqual([heldWorker, parent, 'w-active', 'active']);
+  });
+
   it('still lists every run without the option', () => {
     seedIncident();
     expect(open().listRunSummaries().runs).toHaveLength(1 + 4 + 2 + 250 + 300);

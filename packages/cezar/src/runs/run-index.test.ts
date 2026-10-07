@@ -138,6 +138,11 @@ describe.each(Object.entries(sources))('repository scoping of cold disk records 
     });
     expect(readRunIndexFromDisk(dir, { archivedWindow: 3 }).truncated).toBe(false);
     expect(readRunIndexFromDisk(dir).runs.map((run) => run.id)).toEqual(['worker', 'dddd', 'ccc', 'bb', 'a']);
+    // With roots (the runs index), no worker at all, archived or not (#864).
+    expect(readRunIndexFromDisk(dir, { archivedWindow: 3, roots: true }).runs.map((run) => run.id)).toEqual(['dddd', 'ccc', 'bb', 'a']);
+    source.put([record({ id: 'root' }), record({ id: 'w', createdAt: '2026-09-09T00:00:00Z', delegation: workerOf('root') })]);
+    expect(readRunIndexFromDisk(dir, { archivedWindow: 3, roots: true }).runs.map((run) => run.id)).toEqual(['root']);
+    expect(readRunIndexFromDisk(dir, { archivedWindow: 3 }).runs.map((run) => run.id)).toEqual(['w', 'root']);
   });
 
   it('finds a root at any age by title or reference number, never a worker', () => {
@@ -158,14 +163,20 @@ describe('the cold window agrees with the store', () => {
       record({ id: 'live-old', status: 'done', createdAt: '2026-01-01T00:00:00Z' }),
       ...Array.from({ length: 6 }, (_, i) => record({ id: `arch-${i}`, createdAt: `2026-09-0${i + 1}T00:00:00Z`, archived: true })),
       record({ id: 'w', createdAt: '2026-09-09T00:00:00Z', archived: true, delegation: workerOf('arch-5') }),
+      record({ id: 'w-live', createdAt: '2026-09-10T00:00:00Z', delegation: workerOf('live-old') }),
     ];
     seedRuns(dir, records);
     const cold = readRunIndexFromDisk(dir, { archivedWindow: 4 });
+    const coldRoots = readRunIndexFromDisk(dir, { archivedWindow: 4, roots: true });
     const store = RunStore.open(dir);
     try {
       const owned = store.listRunSummaries({ archivedWindow: 4 });
       expect(cold.runs.map((run) => run.id)).toEqual(owned.runs.map((run) => run.id));
       expect(cold.truncated).toBe(owned.truncated);
+      const ownedRoots = store.listRunSummaries({ archivedWindow: 4, roots: true });
+      expect(coldRoots.runs.map((run) => run.id)).toEqual(ownedRoots.runs.map((run) => run.id));
+      expect(coldRoots.runs.map((run) => run.id)).not.toContain('w-live');
+      expect(cold.runs.map((run) => run.id)).toContain('w-live');
     } finally {
       store.close();
     }

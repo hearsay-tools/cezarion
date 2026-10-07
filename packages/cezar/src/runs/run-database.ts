@@ -513,6 +513,7 @@ export class RunDatabase {
     getMany: StatementSync;
     listSummaries: StatementSync;
     listWindowSummaries: StatementSync;
+    listRootWindowSummaries: StatementSync;
     getSummaries: StatementSync;
     listAll: StatementSync;
     listLive: StatementSync;
@@ -554,6 +555,7 @@ export class RunDatabase {
       listSummaries: db.prepare(`SELECT seq, id, created_at, revision, summary FROM runs ${NEWEST_FIRST} LIMIT ?`),
       getSummaries: db.prepare(`${SUMMARY_SELECT} WHERE id IN (SELECT value FROM json_each(?))`),
       listWindowSummaries: db.prepare(`${SUMMARY_SELECT} WHERE archived = 0 UNION ALL SELECT * FROM (${SUMMARY_SELECT} WHERE ${ARCHIVED_ROOT} ${NEWEST_FIRST} LIMIT ?) ${NEWEST_FIRST}`),
+      listRootWindowSummaries: db.prepare(`${SUMMARY_SELECT} WHERE archived = 0 AND parent_run_id IS NULL UNION ALL SELECT * FROM (${SUMMARY_SELECT} WHERE ${ARCHIVED_ROOT} ${NEWEST_FIRST} LIMIT ?) ${NEWEST_FIRST}`),
       listAll: db.prepare(`SELECT ${ROW_COLUMNS} FROM runs ${NEWEST_FIRST}`),
       listLive: db.prepare(`SELECT ${ROW_COLUMNS} FROM runs WHERE live = 1 ORDER BY seq`),
       listByParent: db.prepare(`SELECT ${ROW_COLUMNS} FROM runs WHERE parent_run_id = ? ${NEWEST_FIRST}`),
@@ -688,8 +690,9 @@ export class RunDatabase {
    * `archivedLimit` archived roots. Archived workers are never in it — no list renders them, and
    * counting them is what let them push an older live root out of a newest-N window.
    */
-  listWindowSummaries(archivedLimit: number): RunSummaryRow[] {
-    return this.run(() => this.statements.listWindowSummaries.all(archivedLimit)).map(toSummaryRow);
+  listWindowSummaries(archivedLimit: number, options: { roots?: boolean } = {}): RunSummaryRow[] {
+    const statement = options.roots ? this.statements.listRootWindowSummaries : this.statements.listWindowSummaries;
+    return this.run(() => statement.all(archivedLimit)).map(toSummaryRow);
   }
 
   /** The summary rows of `ids` that exist, in no particular order. */

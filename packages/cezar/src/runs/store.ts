@@ -1822,20 +1822,21 @@ export class RunStore extends EventEmitter {
    *
    * With `archivedWindow` (#864), the window the cockpit's lists read: every unarchived run, plus
    * the newest `archivedWindow` archived ROOT runs, and whether older archived roots were left
-   * out. Archived workers are never in it (see `RunDatabase.listWindowSummaries`). A held run
+   * out. Archived workers are never in it (see `RunDatabase.listWindowSummaries`); with `roots`,
+   * no worker is — the runs index, whose readers list no workers. A held run
    * lists by its record, so one archived or unarchived since the last save is ranked as it is now.
    *
    * A row this store found unreadable is left out, as the cold reader leaves out a row it had to
    * decode and could not. A finished row nobody has decoded is served from its summary by both,
    * which decodes nothing; reading it is what finds out (`isUnreadable`).
    */
-  listRunSummaries(options: { archivedWindow?: number } = {}): { runs: RunSummary[]; truncated: boolean } {
-    const { archivedWindow } = options;
+  listRunSummaries(options: { archivedWindow?: number; roots?: boolean } = {}): { runs: RunSummary[]; truncated: boolean } {
+    const { archivedWindow, roots = false } = options;
     // Every skipped row may be an archived root, so ask for that many more: one past the window
     // after skipping is how "older ones were left out" is known without counting them.
     const rows = (archivedWindow === undefined
       ? this.db?.listSummaries()
-      : this.db?.listWindowSummaries(archivedWindow + 1 + this.deleted.size + this.unreadable.size + this.held.size)) ?? [];
+      : this.db?.listWindowSummaries(archivedWindow + 1 + this.deleted.size + this.unreadable.size + this.held.size, { roots })) ?? [];
     const summaries = new Map<string, readonly [RunSummary, ListOrder]>();
     for (const row of rows) {
       if (this.deleted.has(row.id) || this.held.has(row.id) || this.unreadable.has(row.id)) continue;
@@ -1843,7 +1844,7 @@ export class RunStore extends EventEmitter {
       if (summary) summaries.set(row.id, [summary, row]);
     }
     for (const [id, run] of this.held) {
-      if (archivedWindow !== undefined && run.archived && run.delegation?.role === 'worker') continue;
+      if (archivedWindow !== undefined && (run.archived || roots) && run.delegation?.role === 'worker') continue;
       summaries.set(id, [toRunSummary(run), this.listOrder(run)]);
     }
     const runs = sortNewestFirst(summaries.values());
