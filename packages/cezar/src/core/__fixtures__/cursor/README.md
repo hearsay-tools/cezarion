@@ -7,9 +7,11 @@ that visible limit and uses Cezar `CEZ:ASK` for its own questions. The
 per-invocation native tool allowlist passed a harmless live control. Other
 mandatory print gates remain unqualified. `print-mcp.json` and
 `print-portable-ask.json` record fresh/resume bindings; `print-plugins.json`
-records the project-scope blocker: a project-local Claude plugin disable
-did not stop Cursor's marketplace copy of Superpowers from loading. No
-fixture here claims print is ready to replace ACP.
+records the accepted project-local limitation: a Claude plugin disable did
+not stop Cursor's marketplace copy of Superpowers. `print-resume-missing.json`
+records the remaining release blocker: a nonexistent `--resume` ID succeeds
+as an empty conversation under the requested ID. No fixture here claims
+print is ready to replace ACP.
 
 Verified 2026-09-16 against Cursor CLI **2026.09.15-d2fe57e** and:
 

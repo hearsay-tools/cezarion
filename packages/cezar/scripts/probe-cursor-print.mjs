@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Opt-in vendor probe. It saves only a small allowlisted summary, never a transcript.
 import { spawn, spawnSync } from 'node:child_process';
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -12,8 +12,8 @@ const { values } = parseArgs({ options: {
   'output-dir': { type: 'string' },
   case: { type: 'string' },
 } });
-if (!values.model || !values['output-dir'] || !['native-question', 'delegation', 'mcp', 'portable-ask', 'plugins'].includes(values.case)) {
-  process.stderr.write('Usage: probe-cursor-print.mjs --model <discovered-id> --output-dir <path> --case native-question|delegation|mcp|portable-ask|plugins\n');
+if (!values.model || !values['output-dir'] || !['native-question', 'delegation', 'mcp', 'portable-ask', 'plugins', 'resume-missing'].includes(values.case)) {
+  process.stderr.write('Usage: probe-cursor-print.mjs --model <discovered-id> --output-dir <path> --case native-question|delegation|mcp|portable-ask|plugins|resume-missing\n');
   process.exit(1);
 }
 
@@ -357,6 +357,29 @@ async function probePlugins(version) {
   };
 }
 
+async function probeResumeMissing(version) {
+  const nonexistentId = randomUUID();
+  const run = await runAgent([
+    '-p', '--force', '--trust', '--output-format', 'stream-json', '--model', values.model,
+    '--resume', nonexistentId, '--allowed-tools', 'read_todos_tool_call',
+    'What exact phrase did I ask you to remember in the previous turn of this chat? If this chat has no previous turn, answer NO_PRIOR_TURN.',
+  ], checkout, 45_000);
+  const frames = framesOf(run.stdout);
+  const result = resultOf(frames);
+  const successWithRequestedId = run.code === 0 && result?.subtype === 'success'
+    && result.session_id === nonexistentId;
+  const noPriorTurn = String(result?.result ?? '').includes('NO_PRIOR_TURN');
+  return {
+    schema: 1, case: 'resume-missing', cliVersion: version, model: values.model,
+    invocation: ['-p', '--force', '--trust', '--output-format stream-json', '--resume <random never-seen UUID>', '--allowed-tools read_todos_tool_call'],
+    exitCode: run.code, timedOut: run.timedOut, outputTruncated: run.truncated,
+    successWithRequestedId, noPriorTurn,
+    missingSessionError: /not found|missing|resume|session/i.test(run.stderr),
+    outcome: !run.timedOut && !run.truncated && successWithRequestedId && noPriorTurn
+      ? 'blocked' : run.code !== 0 && !result ? 'pass' : 'inconclusive',
+  };
+}
+
 let added = false;
 let cleaned = true;
 try {
@@ -365,7 +388,7 @@ try {
   git(['worktree', 'add', '--quiet', '--detach', checkout, 'HEAD']);
   added = true;
 
-  const probes = { 'native-question': probeNativeQuestion, delegation: probeDelegation, mcp: probeMcp, 'portable-ask': probePortableAsk, plugins: probePlugins };
+  const probes = { 'native-question': probeNativeQuestion, delegation: probeDelegation, mcp: probeMcp, 'portable-ask': probePortableAsk, plugins: probePlugins, 'resume-missing': probeResumeMissing };
   const summary = await probes[values.case](version.stdout.trim());
   mkdirSync(outputDir, { recursive: true });
   const output = join(outputDir, `print-${values.case}.json`);

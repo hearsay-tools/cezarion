@@ -76,7 +76,7 @@ native ID. This proves print text and exact resume can carry the marker;
 the full Cezar pause, choice, free-text and decline paths remain Tasks 4/6.
 Native `AskQuestion` still auto-rejects and must appear as a failed tool.
 
-The [`plugins` probe](print-plugins.json) found the remaining blocker. It
+The [`plugins` probe](print-plugins.json) found a project-local limitation. It
 created a disposable task worktree with project-local
 `.claude/settings.json` setting `enabledPlugins=false` for the known
 Superpowers IDs, then ran print with the intended tool restriction and an
@@ -87,12 +87,30 @@ cache. Installed CLI source shows the marketplace loader calls
 project `.claude` setting filters the separate Claude plugin loader. We
 found no per-session print binding to enforce project disablement without
 changing global Cursor state. This does not establish how a future Cursor
-project-specific marketplace toggle behaves. It means the approved
-project-scope gate cannot be proven on this build, so Tasks 2–6 and the
-default switch stop here. The owner of fork #590 must resolve the binding
-or seek a new design decision.
+project-specific marketplace toggle behaves. The human accepted a narrower
+user/team-enabled plugin scope on 2026-10-07. This remains a known limit to
+document; it no longer blocks the default switch by itself.
 
-Other exploratory checks before this blocker: a hidden `--image <path>`
+## Missing-session resume blocker
+
+After that scope revision, the [`resume-missing` probe](print-resume-missing.json)
+used a random never-seen UUID as `--resume <id>`. Cursor exited 0, emitted a
+successful result with **that same ID**, and answered `NO_PRIOR_TURN` when
+asked for history. It gave no missing-session error. Repeated exploratory
+checks showed the same behavior with a fixed obviously invalid ID. Native
+ID equality therefore cannot distinguish exact resume from a silent fresh
+conversation. `agent ls` is an interactive Ink UI with no documented
+noninteractive existence check. No read-only local predicate was
+established: a normal fresh print turn created no new directory under
+`~/.cursor/chats` in the probe.
+
+The revised design still requires exact history and no silent fresh fallback
+for follow-ups and Continue. Until a reliable pre-inference check or a newly
+approved verification-turn design exists, this **resume gate blocks Tasks
+2–6 and the default switch**. No product runner was changed after this
+finding.
+
+Other exploratory checks: a hidden `--image <path>`
 accepted a generated five-stripe PNG, and the model reported the randomized
 left-to-right colors with read tools denied. A synthetic invalid
 `CURSOR_API_KEY` failed authentication instead of falling through to the
@@ -108,8 +126,8 @@ changed by these probes.
 | Cezar MCP tools | Local plugin `mcp.json` with `${NAME}` environment placeholders, `--plugin-dir` on each turn | Strict non-agent tool catalog and bundled controller descriptor | Inert server received the synthetic value on fresh/resume; bundled CI tool discovered on both. No blanket approval or global writes | `print-mcp.json`; separate bounded bundled-controller check | Binding passed; production regression pending |
 | Human questions and plan approval | Trailing `CEZ:ASK` text, explicit `--resume <id>` reply; native `AskQuestion` rejected | CLI version and discovered model | Marker/reply and history passed; native request auto-skipped after 1 ms, with no human answer | `print-portable-ask.json`; `print-native-question.json` | Portable binding passed; native question is accepted visible limit; full Cezar gate pending |
 | Images, model, effort and workspace roots | Hidden `--image <path>` accepted; model variants advertised by `--list-models` | Live account/model | Randomized image recognized without read tools; invalid API key did not fall through. Effort/roots not fully probed | Exploratory task-session checks | Partial; downstream halted |
-| Resume and recovery | Explicit `--resume <id>` from the approved spike | CLI exposes `--resume` | The earlier spike proved native ID/history only; Cezar continuation/recovery was not tested | Issue #590 Plan handoff | Not qualified |
-| Plugin scope and lifecycle | Native marketplace loading; project `.claude` disable does not filter that source | Earlier spike used this CLI version | Project-local `enabledPlugins=false` still allowed Cursor marketplace Superpowers skill read from native cache | `print-plugins.json`; installed `index.js` marketplace loader | **Blocked: project-scope binding unproven** |
+| Resume and recovery | Explicit `--resume <id>` | CLI exposes `--resume` but no noninteractive existence check | A never-seen UUID returned success under the requested ID and had no prior turn; ID equality is not proof of resumed history | `print-resume-missing.json`; exploratory repeats | **Blocked: silent fresh fallback** |
+| Plugin scope and lifecycle | Native marketplace loading; project `.claude` disable does not filter that source | Earlier spike used this CLI version | Project-local `enabledPlugins=false` still allowed Cursor marketplace Superpowers skill read from native cache | `print-plugins.json`; installed `index.js` marketplace loader | Known project-local limit accepted by user; remaining plugin lifecycle unqualified |
 | Process ownership and errors | Bounded print process group | Probe used a 45-second deadline and group termination | The probe completed and its disposable worktree was removed; full runner process/error behavior remains untested | Probe command and cleanup check | Not qualified |
 
 ## Recheck
@@ -132,14 +150,18 @@ node packages/cezar/scripts/probe-cursor-print.mjs \
 node packages/cezar/scripts/probe-cursor-print.mjs \
   --model <discovered-model-id> --output-dir /tmp/cursor-print-check \
   --case plugins
+node packages/cezar/scripts/probe-cursor-print.mjs \
+  --model <discovered-model-id> --output-dir /tmp/cursor-print-check \
+  --case resume-missing
 ```
 
 For `native-question`, exit code `2` means the native question was
 automatically skipped; this is an accepted limit under the revised design.
 For `delegation`, `mcp` and `portable-ask`, exit code `0` means their named
-binding passed. For `plugins`, exit code `2` reproduces the project-scope
-blocker on this installed plugin state. Exit code `1` means a probe is
-inconclusive.
+binding passed. For `plugins`, exit code `2` reproduces the accepted
+project-local limitation on this installed plugin state. For
+`resume-missing`, exit code `2` reproduces the silent fresh fallback and
+blocks this revised design. Exit code `1` means a probe is inconclusive.
 The script saves
 only a bounded, allowlisted JSON summary and removes its temporary worktree.
 A future CLI may change native-question behavior; requalify it before
