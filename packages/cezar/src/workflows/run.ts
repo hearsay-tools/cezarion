@@ -73,7 +73,7 @@ import { readAgentModelSettings, readAgentModelProvider } from '../agent-config/
 import { loadConfig, resolveWorktreeRetention } from '../config.ts';
 import { autosaveCommit, type AutosaveReason, createWorktree, resolveBaseRef, worktreeDiff, worktreeShortstat } from '../git-worktree.ts';
 import { getHeadCommit, getRepoInfo } from '../server/git.ts';
-import { ensureOwnedWorkspace, verifyOwnedWorkspace, type WorkerNoMaterializationProof } from '../delegation/workspace.ts';
+import { ensureOwnedWorkspace, verifyOwnedWorkspace } from '../delegation/workspace.ts';
 import { verifyWorkerContext } from '../delegation/context.ts';
 import { enqueueAgentInput, agentInputBatch, hasLiveInboxClaim } from '../delegation/input.ts';
 import { parseDelegationEffort } from '../delegation/effort.ts';
@@ -1122,26 +1122,6 @@ export class RunManager {
       void execution.promise.then(settle);
     });
     return !this.executions.has(runId) && this.store.readWorkerExecution(runId)?.phase === 'complete';
-  }
-
-  /** Private cleanup capability, never serialized. Obtain after stop/termination
-   * under the service's destroy lock; each invocation rechecks the same generation. */
-  getWorkerNoMaterializationProof(runId: string): WorkerNoMaterializationProof | undefined {
-    const initial = this.store.readWorkerExecution(runId);
-    const recorded = this.store.getRun(runId)?.delegation;
-    if (!initial?.neverMaterialized || initial.phase !== 'complete' || recorded?.role !== 'worker') return undefined;
-    const workspace = { ...recorded.workspace };
-    const verify: WorkerNoMaterializationProof = candidate => {
-      const run = this.store.getRun(runId);
-      const current = this.store.readWorkerExecution(runId);
-      const delegation = run?.delegation;
-      return !this.disposed && !this.isActive(runId) && run?.status === 'cancelled' &&
-        delegation?.role === 'worker' && !!delegation.destroy &&
-        current?.generation === initial.generation && current.phase === 'complete' && current.neverMaterialized === true &&
-        (Object.keys(workspace) as Array<keyof typeof workspace>).every(key =>
-          candidate[key] === workspace[key] && delegation.workspace[key] === workspace[key]);
-    };
-    return verify(workspace) ? verify : undefined;
   }
 
   /** Irreversible history removal is an execution tombstone, including for legacy children. */

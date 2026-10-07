@@ -654,7 +654,7 @@ export class DelegationService {
           assertCurrent();
           // #781: release preview before the final fresh proof immediately preceding removal.
           result = await releaseThenRemoveOwnedWorkspace({ previewHost: project.manager.previewHost }, project.root, workspace,
-            project.manager.getWorkerNoMaterializationProof(workerId), assertCurrent, assertSafe);
+            assertCurrent, assertSafe);
         } catch {
           result = { workerId, state: 'incomplete', remaining: resources, error: 'Worker resources may still be held; cleanup will retry' };
         } finally { release?.(); }

@@ -427,7 +427,7 @@ describe('removeOwnedWorkspace verified retryable destruction', () => {
     const { root, first } = await fixture();
     const workspace = await createOwnedWorkspace(root, randomUUID(), first);
     const seen: boolean[] = [];
-    expect(await removeOwnedWorkspace(root, workspace, undefined, undefined, async () => { seen.push(existsSync(workspace.path)); }))
+    expect(await removeOwnedWorkspace(root, workspace, undefined, async () => { seen.push(existsSync(workspace.path)); }))
       .toMatchObject({ state: 'complete', remaining: [] });
     expect(seen).toEqual([true]);
   });
@@ -439,7 +439,7 @@ describe('removeOwnedWorkspace verified retryable destruction', () => {
     await rm(claims, { recursive: true });
     await writeFile(claims, 'coordination unavailable');
     let calls = 0;
-    expect(await removeOwnedWorkspace(root, workspace, undefined, undefined, async () => { calls += 1; }))
+    expect(await removeOwnedWorkspace(root, workspace, undefined, async () => { calls += 1; }))
       .toMatchObject({ state: 'incomplete', remaining: ['worktree', 'branch'] });
     expect(calls).toBe(0);
     await rm(claims);
@@ -454,7 +454,7 @@ describe('removeOwnedWorkspace verified retryable destruction', () => {
       queueMicrotask(() => { attached = false; });
     };
 
-    expect(await removeOwnedWorkspace(root, workspace, undefined, assertAttached)).toMatchObject({
+    expect(await removeOwnedWorkspace(root, workspace, assertAttached)).toMatchObject({
       state: 'incomplete', remaining: ['worktree', 'branch'],
     });
     expect(existsSync(workspace.path)).toBe(true);
@@ -473,7 +473,7 @@ describe('removeOwnedWorkspace verified retryable destruction', () => {
       }
     };
 
-    expect(await removeOwnedWorkspace(root, workspace, undefined, assertAttached)).toMatchObject({
+    expect(await removeOwnedWorkspace(root, workspace, assertAttached)).toMatchObject({
       state: 'incomplete', remaining: ['branch'],
     });
     expect(revokedAfterRemoval).toBe(true);
@@ -528,7 +528,7 @@ describe('removeOwnedWorkspace verified retryable destruction', () => {
     git(root, 'worktree', 'remove', workspace.path);
     git(root, 'branch', '-D', workspace.branch);
     let calls = 0;
-    expect(await removeOwnedWorkspace(root, workspace, undefined, undefined, async () => { calls += 1; }))
+    expect(await removeOwnedWorkspace(root, workspace, undefined, async () => { calls += 1; }))
       .toMatchObject({ state: 'complete', remaining: [] });
     expect(calls).toBe(1);
   });
@@ -538,7 +538,7 @@ describe('removeOwnedWorkspace verified retryable destruction', () => {
     const workspace = await createOwnedWorkspace(root, randomUUID(), first);
     git(root, 'worktree', 'remove', workspace.path);
     git(root, 'branch', '-D', workspace.branch);
-    expect(await removeOwnedWorkspace(root, workspace, undefined, undefined, async () => {
+    expect(await removeOwnedWorkspace(root, workspace, undefined, async () => {
       git(root, 'branch', workspace.branch, first);
     })).toMatchObject({ state: 'incomplete', remaining: ['worktree', 'branch'] });
     expect(git(root, 'branch', '--list', workspace.branch)).not.toBe('');
@@ -589,7 +589,7 @@ describe('removeOwnedWorkspace verified retryable destruction', () => {
     await rm(receipt);
     expect(existsSync(gitDir)).toBe(false);
     let calls = 0;
-    const result = await removeOwnedWorkspace(root, workspace, undefined, undefined, async () => { calls += 1; });
+    const result = await removeOwnedWorkspace(root, workspace, undefined, async () => { calls += 1; });
     expect(result).toEqual({ workerId: workspace.ownerRunId, state: 'complete', remaining: [] });
     expect(calls).toBe(1);
     // Bookkeeping only: no synthetic receipt or cleanup checkpoint is written.
@@ -614,7 +614,7 @@ describe('removeOwnedWorkspace verified retryable destruction', () => {
     git(root, 'worktree', 'remove', workspace.path);
     git(root, 'branch', '-D', workspace.branch);
     await rm(receiptPath(root, workspace));
-    expect(await removeOwnedWorkspace(root, workspace, undefined, undefined, async () => {
+    expect(await removeOwnedWorkspace(root, workspace, undefined, async () => {
       git(root, 'branch', workspace.branch, first);
     })).toMatchObject({ state: 'incomplete', remaining: ['worktree', 'branch'] });
     expect(git(root, 'rev-parse', workspace.branch)).toBe(first);
