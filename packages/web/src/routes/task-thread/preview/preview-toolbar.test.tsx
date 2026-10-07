@@ -83,6 +83,15 @@ describe('PreviewToolbar', () => {
     expect(screen.queryByText(/fps/)).toBeNull()
   })
 
+  it('leaves idle when frames resume after a quiet stretch (#870)', () => {
+    const { rerender } = render(<PreviewToolbar {...props()} />)
+    act(() => { vi.advanceTimersByTime(5000) })
+    expect(screen.getByText('idle')).toBeTruthy()
+    rerender(<PreviewToolbar {...props({ stats: { fps: 12, kbps: 90, rttMs: 40, lastFrameAt: Date.now() } })} />)
+    expect(screen.queryByText('idle')).toBeNull()
+    expect(screen.getByText('12 fps · 90 KB/s · 40 ms')).toBeTruthy()
+  })
+
   it('keeps the stats slot one width, live or idle, so nothing beside it moves', () => {
     render(<PreviewToolbar {...props()} />)
     const live = screen.getByText('24 fps · 180 KB/s · 38 ms').className
