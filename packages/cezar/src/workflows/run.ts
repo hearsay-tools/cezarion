@@ -129,7 +129,7 @@ export const IDLE_TIMEOUT_MS = 15 * 60_000;
  * Detection runs on the accumulated turn text so delta-streaming backends
  * (codex, opencode) can't split the marker across text events.
  */
-const PROSE_HUMAN_GATE = 'unstructured-human-gate';
+import { PROSE_HUMAN_GATE } from '../runs/transcript-facts.ts';
 /** Classify only active prose: quoted/indented examples and fenced code cannot
  * declare a park or request a human. A standalone monitoring line belongs to
  * this turn even when a later assistant block acknowledges a new instruction. */
