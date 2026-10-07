@@ -966,6 +966,27 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
       expect(existsSync(workspace(w).path)).toBe(false); expect(branchExists(workspace(w).branch)).toBe(false);
     });
 
+    it('win32 admission is judged by recorded processes: a live one refuses reuse, and Continue works once it exits', async () => {
+      const w = await worker();
+      const generation = store.commitWorkerExecutionStart(w.id);
+      await ensureOwnedWorkspace(root, w);
+      const recorded = spawn(process.execPath, ['-e', "console.log('ready'); setInterval(()=>{},1000)"], { cwd: tmpdir(), stdio: ['ignore', 'pipe', 'ignore'] });
+      const exited = new Promise(resolve => recorded.once('exit', resolve));
+      releases.push(() => recorded.kill('SIGKILL'));
+      await new Promise(resolve => recorded.stdout!.once('data', resolve));
+      expect(store.appendWorkerProcess(w.id, generation, recorded.pid!)).toBe(true);
+      store.updateRun(w.id, { status: 'done' }); store.commitWorkerExecutionComplete(w.id, generation); store.flush();
+      const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+      // No cwd scan exists on win32 (hearsay-tools/cezarion#889). Before, an `unknown` scan refused
+      // every materialized worker's next generation, so Continue never worked there.
+      Object.defineProperty(process, 'platform', { ...platform, value: 'win32' });
+      try {
+        expect(() => store.commitWorkerExecutionStart(w.id)).toThrow(/reuse is not proven safe/);
+        recorded.kill('SIGKILL'); await exited;
+        expect(store.commitWorkerExecutionStart(w.id)).not.toBe(generation);
+      } finally { Object.defineProperty(process, 'platform', platform); }
+    });
+
     it.each(['worktree', 'scratch'] as const)('retains resources and names the PID of a process whose cwd is in the %s', async location => {
       const { w, service, detach } = await settled();
       const cwd = location === 'worktree' ? workspace(w).path : agentTmpDir(join(root, '.ai/cezar'), w.id);

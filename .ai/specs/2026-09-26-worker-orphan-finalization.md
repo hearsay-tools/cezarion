@@ -286,8 +286,12 @@ remain indefinitely.** An unreadable cwd never withholds that proof (hearsay-too
   descendant scan, where only readable cwds and live recorded processes block
   (hearsay-tools/cezarion#889).
 - A non-dumpable worker descendant inside the worktree is invisible to the scan, and destroy may
-  delete the directory under it (hearsay-tools/cezarion#889). On win32 the recorded processes and
-  the checked Git removal are the only proof.
+  delete the directory under it (hearsay-tools/cezarion#889).
+- On win32 the recorded processes are the only holder proof (hearsay-tools/cezarion#889). Removal
+  adds the OS refusal to delete a directory a process holds. Reuse has no such backstop: an
+  unrecorded process still working in the worktree does not stop a new generation from starting
+  there. Keeping `unknown` for admission instead refused the next generation of every
+  materialized worker, so Continue never worked on win32 and destroy was the only exit.
 - Reaping signals only the recorded session leader. Runners do not spawn detached, so there
   is no process group to kill. A descendant that survives the leader keeps its cwd in the
   worktree, and the scan keeps destroy `incomplete` (naming the PIDs) until it exits.
