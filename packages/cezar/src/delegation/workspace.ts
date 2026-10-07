@@ -273,9 +273,12 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
   beforeRemove?: () => Promise<void>, assertUnheld?: () => void): Promise<WorkerDestroyResult> {
   let remaining: Array<'worktree' | 'branch'> = ['worktree', 'branch'];
   let provisioned = false; let lockBusy = false; let heldBy: readonly number[] = [];
+  let stranded: { branch: string; commits: number } | undefined;
   const result = (): WorkerDestroyResult => ({ workerId: value.ownerRunId, state: remaining.length ? 'incomplete' : 'complete', remaining,
     ...(remaining.length ? { error: lockBusy ? 'Owned resources retained: worktree mutation lock is busy; retry destroy later'
       : heldBy.length ? `Owned resources retained: processes ${heldBy.join(', ')} may still hold the worker worktree or scratch; retry destroy after they exit`
+      : stranded ? `Owned branch ${stranded.branch} ${stranded.commits ? `holds ${stranded.commits} commit${stranded.commits === 1 ? '' : 's'} beyond`
+        : 'no longer points at'} its worker baseline; keep what you need, delete the branch, then retry destroy`
       : 'Owned resources remain: resource identity or Git cleanup could not be verified. Check the worker worktree, Git lock and ownership receipt, then retry destroy after correcting the blocker' } : {}),
     ...(provisioned ? { deleted: [
       ...(!remaining.includes('worktree') ? [{ kind: 'worktree' as const, path: value.path }] : []),
@@ -347,16 +350,33 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
         remaining = ['branch'];
       }
       if (!checkpoint) {
-        // Recorded identity already gone: finish bookkeeping. Do not delete a leftover path/gitDir/branch.
-        if (!await exists(workspace.path) && !await exists(receipt.gitDir) &&
-            !(await registered()).includes(`worktree ${workspace.path}`) && !await branchExists()) {
+        const worktreeGone = async () => !await exists(workspace.path) && !await exists(receipt.gitDir) &&
+          !(await registered()).includes(`worktree ${workspace.path}`);
+        if (!await worktreeGone()) return result();
+        if (!await branchExists()) {
+          // Recorded identity already gone: finish bookkeeping. Do not delete a leftover path/gitDir/branch.
           assertCurrent?.();
           await beforeRemove?.();
           assertCurrent?.();
-          if (!await exists(workspace.path) && !await exists(receipt.gitDir) &&
-              !(await registered()).includes(`worktree ${workspace.path}`) && !await branchExists()) remaining = [];
+          if (await worktreeGone() && !await branchExists()) remaining = [];
+          return result();
         }
-        return result();
+        // hearsay-tools/cezarion#905: the worktree went away outside cezar and left its branch behind.
+        // While the branch matches the receipt, is checked out nowhere and sits at its baseline, it
+        // holds no work: delete it through the checkpointed compare-and-swap below. Commits on it are
+        // a human's call.
+        remaining = ['branch'];
+        if ((await registered()).includes(`branch refs/heads/${workspace.branch}`)) return result();
+        const current = await verifyBranch(repoRoot, workspace, receipt);
+        if (current.sha !== workspace.baselineSha) {
+          const commits = Number(await checkedGit(repoRoot, ['rev-list', '--count', `${workspace.baselineSha}..${current.sha}`]));
+          stranded = { branch: workspace.branch, commits };
+          return result();
+        }
+        assertCurrent?.();
+        await beforeRemove?.();
+        assertCurrent?.();
+        checkpoint = { workspace, gitDir: receipt.gitDir, sha: current.sha, logFile: current.log.file, logHash: hash(current.log.content), phase: 'prepared' };
       }
       if (await exists(workspace.path) || await exists(receipt.gitDir) || (await registered()).includes(`worktree ${workspace.path}`)) return result();
       remaining = ['branch'];

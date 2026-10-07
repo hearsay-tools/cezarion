@@ -340,6 +340,13 @@ Destroy is serialized per worker and durable:
    and registration absence. Do not follow the legacy unchecked recursive-rm
    fallback. Delete only the original owned branch when it is still verifiably
    owned and not checked out elsewhere; never infer ownership from cwd alone.
+   A worktree can vanish outside cezar, taking its administrative directory and
+   registration with it, before cleanup recorded anything (hearsay-tools/cezarion#905).
+   Its branch is then deleted only when the reflog prefix still matches the
+   receipt, no worktree has it checked out and its tip is still the baseline, so
+   it holds no work. Cleanup records a `worktree-removed` checkpoint at the
+   baseline first and deletes by compare-and-swap on it. A tip anywhere else
+   stays for a human, and the error names the branch and its commit count.
 6. Persist complete or incomplete state and remaining resource details. Repeated
    calls join or retry the same operation. Already absent verified resources
    count as cleaned. Preserve run records and NDJSON events.
@@ -457,7 +464,7 @@ in the accessibility tree. Ordinary runs render as before.
 | One generation/parent-only | Worker credentials cannot spawn or operate on peers; root cannot target another parent's workers; per-parent limits survive destroy/restart. |
 | Committed isolation | Parent HEAD and explicit ref pinning, ref movement while queued, dirty edits excluded/unmodified, non-Git/bad ref rejection, creation collision/failure, worker-only diffs. |
 | Capacity and wake | maxParallel=1 with queued child; terminal-before-register/park races; failed/cancelled/review workers; deadline; scheduler fairness; parent cancellation; shutdown vs terminal; restart and duplicate wake receipts. |
-| Durable safe destroy | Queued/starting/live/parked/terminal paths; slow SIGTERM/kill escalation; repeated/concurrent requests; interrupted cleanup; path/branch ownership mismatch; a branch reflog rewritten by `git gc` before or during cleanup; missing resources; human continuation/deletion and retention races. |
+| Durable safe destroy | Queued/starting/live/parked/terminal paths; slow SIGTERM/kill escalation; repeated/concurrent requests; interrupted cleanup; path/branch ownership mismatch; a branch reflog rewritten by `git gc` before or during cleanup; missing resources; a worktree removed outside cezar that left its branch at or beyond the baseline; human continuation/deletion and retention races. |
 | Human answer separation | All four real runners against offline wire-faithful mocks: native/marker asks, agent steer before/during/after ask, queued restart input, fresh/continuation paths; add harness-parity rows and only genuine wire exemptions. |
 | Cockpit/defaults | Scoped navigation, loading/empty/error/offline context, all run tabs, agent attribution, legacy record parsing, no new metadata/transport when off, unavailable provisioning degradation. |
 
