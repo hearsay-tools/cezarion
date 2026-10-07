@@ -1,6 +1,6 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -15,17 +15,31 @@ import { RunStore } from './runs/store.ts';
  * through cezar's foreground group. `serve` forwards the signal as it exits, after its store has
  * closed, so the run stays `running` for restart recovery; `cez run` forwards it and still ends
  * by it. cezar is started in its own group, as a shell starts a foreground job.
+ *
+ * The agent outlives its stdin: the bundled mock exits when cezar's exit closes its stdin, which
+ * would pass these tests with no forwarding at all. Every probe (`--help`, auth) still goes to
+ * the mock; only a session stalls.
  */
 
 const CLI = fileURLToPath(new URL('./index.ts', import.meta.url));
 const PACKAGE_DIR = fileURLToPath(new URL('../', import.meta.url));
+const MOCK_CLAUDE = fileURLToPath(new URL('../scripts/mock-claude.mjs', import.meta.url));
+const STALLING_AGENT = `#!/usr/bin/env node
+import { spawnSync } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
+const args = process.argv.slice(2);
+if (!args.includes('--input-format')) process.exit(spawnSync(process.execPath, [${JSON.stringify(MOCK_CLAUDE)}, ...args], { stdio: 'inherit' }).status ?? 1);
+writeFileSync('watchdog.pid', String(process.pid));
+setInterval(() => {}, 1000);
+`;
 
 let root: string;
 let cez: ChildProcess | undefined;
 const agents: number[] = [];
 
 const env = () => {
-  const vars: NodeJS.ProcessEnv = { ...process.env, CEZ_DRY_RUN: '1', CEZ_HOME: join(root, 'home'), CEZ_NO_BANNER: '1' };
+  const vars: NodeJS.ProcessEnv = { ...process.env, CEZ_DRY_RUN: '1', CEZ_HOME: join(root, 'home'), CEZ_NO_BANNER: '1',
+    CEZ_CLAUDE_BIN: join(root, 'stalling-agent.mjs') };
   delete vars.CEZ_AUTOMATIONS;
   return vars;
 };
@@ -40,7 +54,7 @@ function alive(pid: number): boolean {
   } catch { return false; }
 }
 
-/** The dry-run agent, once it stalls in its task worktree (`mock:no-progress`). */
+/** The agent, once it stalls in its task worktree. */
 async function agentPid(): Promise<number> {
   return vi.waitFor(() => {
     const worktrees = join(root, '.ai/cezar/worktrees');
@@ -80,6 +94,8 @@ describe.skipIf(process.platform === 'win32')('cezar forwards SIGINT and SIGTERM
     root = mkdtempSync(join(tmpdir(), 'cez-session-signal-'));
     execFileSync('git', ['init', '-q', '-b', 'main', root]);
     execFileSync('git', ['-C', root, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'init']);
+    writeFileSync(join(root, 'stalling-agent.mjs'), STALLING_AGENT);
+    chmodSync(join(root, 'stalling-agent.mjs'), 0o755);
   });
 
   afterEach(() => {
@@ -96,7 +112,8 @@ describe.skipIf(process.platform === 'win32')('cezar forwards SIGINT and SIGTERM
     process.kill(-cez!.pid!, 'SIGINT'); // the terminal signals the foreground job's group
     await exited;
     await vi.waitFor(() => expect(alive(agent)).toBe(false), { timeout: 5_000 });
-    const store = RunStore.open(join(root, '.ai/cezar'));
+    // keepLive: read the run as serve left it, before any reader reconciles a live run as failed.
+    const store = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
     try { expect(store.getRun(id)?.status).toBe('running'); } finally { store.close(); }
   }, 60_000);
 
