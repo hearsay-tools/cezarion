@@ -1,7 +1,7 @@
 import { nonDumpableHolder } from '../delegation/non-dumpable.testkit.ts';
 import { scopeFixtureProcesses } from '../delegation/process-scope.testkit.ts';
 import { randomUUID } from 'node:crypto';
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import fs from 'node:fs';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
@@ -21,6 +21,7 @@ import { CLAUDE_SPEC_SUPPORT } from '../core/claude-cli-runner.ts';
 import { RunManager } from './run.ts';
 import { DelegationService } from '../delegation/service.ts';
 import { processStartToken } from '../delegation/process-liveness.ts';
+import { signalSession, spawnSessionLeader } from '../core/session-process.ts';
 import { blockRunWrites } from '../runs/run-store.testkit.ts';
 
 const until = async (predicate: () => boolean) => vi.waitFor(() => expect(predicate()).toBe(true), { timeout: 15_000, interval: 10 });
@@ -640,6 +641,8 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     it('destroy reaps a recorded child that ignores SIGTERM, then completes', async () => {
       const { w, child, prior, reopened, other, service } = await crashed('failed');
       (other as unknown as { orphanTermGraceMs: number }).orphanTermGraceMs = 500;
+      // A leader spawned outside spawnSessionLeader records no group (hearsay-tools/cezarion#890): pid-only reaping.
+      expect(readRecord(w.id).processes.map(entry => 'pgid' in entry)).toEqual([false]);
       try {
         expect(await service.destroyForHuman('reopened', w.id)).toMatchObject({ state: 'complete', remaining: [] });
         await child.exited;
@@ -989,6 +992,53 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
         holder.kill('SIGKILL'); await exited;
         expect(await service.destroyForHuman('p', w.id)).toMatchObject({ state: 'complete', remaining: [] });
       } finally { holder.kill('SIGKILL'); await exited; detach(); }
+    });
+  });
+
+  // hearsay-tools/cezarion#890: the leader is spawned as a runner spawns it, in its own process
+  // group, and leaves one member working in the worktree.
+  describe('agent session process groups (hearsay-tools/cezarion#890)', () => {
+    type Entry = { pid: number; startToken?: string; pgid?: number };
+    const recordPath = (id: string) => join(root, '.ai/cezar/runs', `${id}.processes.json`);
+    const readRecord = (id: string) => JSON.parse(readFileSync(recordPath(id), 'utf8')) as { generation: string; controller: Entry; processes: Entry[] };
+    const branchExists = (branch: string) => execFileSync('git', ['branch', '--list', branch], { cwd: root, encoding: 'utf8' }).includes(branch);
+    /** A zombie has exited; only its reaper's wait remains. */
+    const alive = (pid: number) => {
+      try { process.kill(pid, 0); } catch { return false; }
+      if (process.platform !== 'linux') return true;
+      try { const stat = readFileSync(`/proc/${pid}/stat`, 'utf8'); return stat.slice(stat.lastIndexOf(')') + 1).trim()[0] !== 'Z'; } catch { return false; }
+    };
+
+    /** `member`: a SIGTERM-ignoring child in the leader's group, or a SIGTERM-sensitive one that
+     * left it with setsid. `leader`: stays up, or exits 0 on its own once the member runs. */
+    async function groupedWorker(opts: { member: 'group' | 'setsid'; leader: 'stay' | 'exit' }) {
+      const w = await worker();
+      const member = opts.member === 'setsid' ? "process.on('SIGTERM',()=>process.exit(42)); setInterval(()=>{},1000)" : "process.on('SIGTERM',()=>{}); setInterval(()=>{},1000)";
+      const script = `const m = require('child_process').spawn(process.execPath, ['-e', ${JSON.stringify(member)}], { stdio: 'ignore', detached: ${opts.member === 'setsid'} });
+console.log(String(m.pid)); ${opts.leader === 'exit' ? 'm.unref(); setTimeout(() => process.exit(0), 50);' : 'setInterval(()=>{},1000);'}`;
+      let leader: ChildProcessWithoutNullStreams | undefined; let ready!: (pid: number) => void;
+      const memberPid = new Promise<number>(resolve => { ready = resolve; });
+      vi.spyOn(runners, 'createRunner').mockReturnValue({ backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT, systemPromptOnResume: 'resent', interrupt: async () => undefined,
+        run: async () => { throw Error('unused'); }, startSession: () => {
+          const proc = spawnSessionLeader(process.execPath, ['-e', script], { cwd: workspace(w).path, env: process.env });
+          leader = proc;
+          releases.push(() => { try { process.kill(-proc.pid!, 'SIGKILL'); } catch { /* gone */ } });
+          proc.stdout.once('data', chunk => ready(Number(String(chunk).trim())));
+          const result = new Promise<{ text: string; toolCalls: []; tokensUsed: number }>(resolve => proc.once('exit', () => resolve({ text: '', toolCalls: [], tokensUsed: 0 })));
+          return { pid: proc.pid, result, open: true, sendMessage: () => true, sendAgentMessage: () => Promise.resolve(), discardQueuedMessages: () => {}, holdsHumanInput: () => false,
+            interrupt: () => signalSession(proc, 'SIGTERM'), end: () => signalSession(proc, 'SIGTERM') };
+        } });
+      manager.enqueueOwnedRun(w.id);
+      const pid = await memberPid;
+      releases.push(() => { try { process.kill(pid, 'SIGKILL'); } catch { /* gone */ } });
+      return { w, leader: leader!, member: pid };
+    }
+
+    it("the ledger records the session leader's process group", async () => {
+      const { w, leader } = await groupedWorker({ member: 'group', leader: 'stay' });
+      await until(() => existsSync(recordPath(w.id)) && readRecord(w.id).processes.length === 1);
+      expect(readRecord(w.id)).toMatchObject({ generation: store.readWorkerExecution(w.id)!.generation,
+        processes: [{ pid: leader.pid, pgid: leader.pid, ...(process.platform === 'linux' ? { startToken: expect.any(String) } : {}) }] });
     });
   });
 });

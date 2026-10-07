@@ -21,6 +21,7 @@ import {
 } from '../core/ask.ts';
 import { type AgentSession } from '../core/claude-cli-runner.ts';
 import { hasRegisteredRunProcess, onUsage, registerRunProcess, unregisterRunProcess, type ProcessUsage } from '../core/process-usage.ts';
+import { sessionGroupOf } from '../core/session-process.ts';
 import { WorkerScratchCleanup } from '../delegation/scratch-cleanup.ts';
 import { inspectExecutionGeneration, isCurrentProcess, processStartToken, recordedProcessLive, type GenerationProbe, type WorkerProcessRecord } from '../delegation/process-liveness.ts';
 import { parseUsageLimit } from '../core/usage-limit.ts';
@@ -1097,7 +1098,7 @@ export class RunManager {
   private recordWorkerProcess(runId: string, pid: number): void {
     const generation = this.executions.get(runId)?.generation;
     if (!generation) return;
-    try { if (!this.store.appendWorkerProcess(runId, generation, pid)) console.warn(`[cez] worker ${runId} process record unavailable; relying on the working-directory scan`); }
+    try { if (!this.store.appendWorkerProcess(runId, generation, pid, sessionGroupOf(pid))) console.warn(`[cez] worker ${runId} process record unavailable; relying on the working-directory scan`); }
     catch { console.warn(`[cez] worker ${runId} process record write failed; relying on the working-directory scan`); }
   }
 

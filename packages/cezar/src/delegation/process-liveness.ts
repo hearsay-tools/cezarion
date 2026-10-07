@@ -8,7 +8,8 @@ import { resolve, sep } from 'node:path';
  * An unreadable cwd is no evidence (hearsay-tools/cezarion#889); every other uncertainty answers
  * "alive" or "unknown", never "gone".
  */
-export type RecordedProcess = { pid: number; startToken?: string };
+/** `pgid`: the session leader leads its own process group (hearsay-tools/cezarion#890). */
+export type RecordedProcess = { pid: number; startToken?: string; pgid?: number };
 export type WorkerProcessRecord = { generation: string; controller: RecordedProcess; processes: RecordedProcess[] };
 export type GenerationLiveness = 'gone' | 'alive' | 'unknown';
 
