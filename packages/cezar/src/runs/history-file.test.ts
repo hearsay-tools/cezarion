@@ -193,6 +193,16 @@ describe('history-file', () => {
     }
   });
 
+  it('removeHistory removes the transcript facts sidecar and its tmp leftovers', () => {
+    const { dataDir, id } = setup();
+    const { facts } = historyPaths(dataDir, id);
+    writeFileSync(facts, '{}');
+    writeFileSync(`${facts}.${process.pid}.abc123.tmp`, '{}');
+    removeHistory(dataDir, id);
+    expect(existsSync(facts)).toBe(false);
+    expect(existsSync(`${facts}.${process.pid}.abc123.tmp`)).toBe(false);
+  });
+
   it('removeHistory removes both forms, orphaned files, and tmp leftovers of any name', () => {
     const { dataDir, id, plain, compressed } = setup();
     writeFileSync(plain, 'plain');

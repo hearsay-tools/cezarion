@@ -60,8 +60,6 @@ import {
   workerWaitRequestSchema,
   attachmentExtension,
   delegationStateSchema,
-  pendingHumanAsk,
-  advancePendingHumanAsk,
   askRequestSchema,
   isImageAttachmentName,
   isImageMediaType,
@@ -86,7 +84,7 @@ import { parentReadiness } from '../delegation/readiness.ts';
 import { answersQuestion, openQuestions, questionMessage } from '../delegation/questions.ts';
 import { workerOutcome } from '../runs/delegation-state.ts';
 import { loadWorkflows } from './load.ts';
-import { RUN_IN_USE_ELSEWHERE, type QueuedMessage, type RunRecord, type RunStore, type StepState } from '../runs/store.ts';
+import { RUN_IN_USE_ELSEWHERE, type CommitSource, type QueuedMessage, type RunRecord, type RunStore, type StepState } from '../runs/store.ts';
 import { isReclaimable, reclaimWorktrees, rematerializeReclaimedWorktree } from '../runs/retention.ts';
 import {
   AgentTempDirError,
@@ -129,7 +127,7 @@ export const IDLE_TIMEOUT_MS = 15 * 60_000;
  * Detection runs on the accumulated turn text so delta-streaming backends
  * (codex, opencode) can't split the marker across text events.
  */
-const PROSE_HUMAN_GATE = 'unstructured-human-gate';
+import { PROSE_HUMAN_GATE, workerOutcomeKey } from '../runs/transcript-facts.ts';
 /** Classify only active prose: quoted/indented examples and fenced code cannot
  * declare a park or request a human. A standalone monitoring line belongs to
  * this turn even when a later assistant block acknowledges a new instruction. */
@@ -1227,14 +1225,16 @@ export class RunManager {
     return record !== undefined && familyOf(record) === scope.family;
   }
 
-  private readonly onDelegationRun = (run: RunRecord, source?: 'delegation-checkpoint'): void => {
+  private readonly onDelegationRun = (run: RunRecord, source?: CommitSource): void => {
     // Delegation metadata checkpoints do not change task status.
-    if (!this.disposed && source !== 'delegation-checkpoint') this.reapTerminalScratch(run.id);
+    if (!this.disposed && source === undefined) this.reapTerminalScratch(run.id);
     if (!this.disposed && !['queued', 'running', 'waiting'].includes(run.status)) this.withdrawCiWait(run.id);
     if (run.delegation && !['queued', 'running', 'waiting'].includes(run.status)) this.active.get(run.id)?.revokeDelegation?.();
     // Cleanup checkpoints emit terminal records too. With delegation disabled,
     // these observations must not replay the project's conversation histories.
     if (this.disposed || this.recoveringRun(run) || (source === 'delegation-checkpoint' && process.env.CEZ_DELEGATION !== '1')) return;
+    // A destroy retry changes nothing the family reconcile reads (#880).
+    if (source === 'delegation-destroy-progress') return;
     if (run.delegation && run.delegation.role !== 'invalid' && !['queued', 'running', 'waiting'].includes(run.status)) {
       this.reconcileWorkerWaits(run.delegation.role === 'root' ? run.id : run.delegation.parentRunId);
     }
@@ -3878,10 +3878,8 @@ export class RunManager {
   private routeWorkerQuestion(workerId: string): void {
     const worker = this.store.getRun(workerId);
     if (worker?.delegation?.role !== 'worker') return;
-    const events = this.store.readEvents(workerId);
-    const ask = pendingHumanAsk(events);
-    if (!ask) return;
-    if (events.some(event => (event.type === 'worker-question-routed' || event.type === 'worker-question-fallback') && event.askSeq === ask.seq)) return;
+    const ask = this.store.transcriptFacts(workerId).pendingAsk;
+    if (!ask || ask.routedMessageId !== undefined || ask.fallback) return;
     const fallback = (reason: string) => { this.store.appendEvent(workerId, { type: 'worker-question-fallback', askSeq: ask.seq, reason }); };
     const request = askRequestSchema.safeParse({ questions: ask.questions });
     if (!request.success) { fallback('the question cannot be carried to the parent'); return; }
@@ -3918,22 +3916,19 @@ export class RunManager {
    * can no longer answer it, so it must not also block the human. */
   private answersFallenBackAsk(runId: string, opts: { text?: string; images?: PastedContent[] }, deferred: boolean): boolean {
     if (deferred || !(opts.text?.trim() || opts.images?.length)) return false;
-    const events = this.store.readEvents(runId);
-    const ask = pendingHumanAsk(events);
-    return !!ask && events.some(event => event.type === 'worker-question-fallback' && event.askSeq === ask.seq);
+    return !!this.store.transcriptFacts(runId).pendingAsk?.fallback;
   }
 
   /** The worker's pending ask when it went to the parent and has not fallen back to a human. */
   private routedAsk(runId: string): { askSeq: number; message: ConversationMessage } | undefined {
     const run = this.store.getRun(runId);
     if (run?.delegation?.role !== 'worker') return undefined;
-    const events = this.store.readEvents(runId);
-    const ask = pendingHumanAsk(events);
-    if (!ask || events.some(event => event.type === 'worker-question-fallback' && event.askSeq === ask.seq)) return undefined;
-    const routed = events.find(event => event.type === 'worker-question-routed' && event.askSeq === ask.seq);
+    // Indexed at append time (#880): the reconcile and every message to a worker ask this.
+    const ask = this.store.transcriptFacts(runId).pendingAsk;
+    if (!ask || ask.fallback || ask.routedMessageId === undefined) return undefined;
     const root = this.store.getRun(run.delegation.parentRunId);
-    const message = routed && root?.delegation?.role === 'root'
-      ? root.delegation.conversation?.messages.find(entry => entry.id === routed.messageId) : undefined;
+    const message = root?.delegation?.role === 'root'
+      ? root.delegation.conversation?.messages.find(entry => entry.id === ask.routedMessageId) : undefined;
     return message ? { askSeq: ask.seq, message } : undefined;
   }
 
@@ -4304,9 +4299,7 @@ export class RunManager {
           } }]);
         }
         for (const outcome of next.outcomes) {
-          if (!this.store.readEvents(parent.id).some(event => event.type === 'worker-outcome' &&
-            event.waitId === wait.id && (event.outcome as { workerId?: string } | undefined)?.workerId === outcome.workerId &&
-            ((event.outcome as { revision?: number } | undefined)?.revision ?? 0) === (outcome.revision ?? 0))) {
+          if (!this.store.transcriptFacts(parent.id).workerOutcomeKeys.includes(workerOutcomeKey(wait.id, outcome.workerId, outcome.revision ?? 0))) {
             this.store.appendEvent(parent.id, { type: 'worker-outcome', waitId: wait.id, outcome });
           }
         }
@@ -4440,14 +4433,9 @@ export class RunManager {
   /** Transcript bubbles include refused sends. Only a successful delivery
    * checkpoint can answer the specific ask observed before that send. */
   private pendingHumanAskSeq(runId: string): number | undefined {
-    let pending: RunEvent | undefined;
-    for (const event of this.store.readEvents(runId)) {
-      // Fallback human gates use the same exact successful-delivery receipt as asks,
-      // without inventing a structured question card or changing its summary.
-      pending = event.type === 'note' && event.code === PROSE_HUMAN_GATE
-        ? event : advancePendingHumanAsk(pending, event);
-    }
-    return pending?.seq;
+    // Fallback human gates use the same exact successful-delivery receipt as asks,
+    // without inventing a structured question card or changing its summary. Indexed (#880).
+    return this.store.transcriptFacts(runId).pendingGateSeq;
   }
 
   private hasPendingHumanAsk(runId: string): boolean {

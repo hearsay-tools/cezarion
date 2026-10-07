@@ -30,13 +30,12 @@ export function reconcileConversationState(root: RunRecord, lookup: (id: string)
 export function projectConversationEvents(store: import('../runs/store.ts').RunStore, root: RunRecord): void {
   if (root.delegation?.role !== 'root' || !root.delegation.conversation) return;
   const state = root.delegation.conversation;
-  const projections = new Map<string, Set<unknown>>();
   const outcomes = new Map(state.outcomes.map(outcome => [outcome.requestId, outcome]));
   for (const message of state.messages) {
     for (const runId of [message.senderRunId, message.recipientRunId]) {
       if (!store.getRun(runId)) continue;
-      let ids = projections.get(runId);
-      if (!ids) { ids = new Set(store.readEvents(runId).map(event => event.projectionId)); projections.set(runId, ids); }
+      // The run's indexed projection ids (#880): appendEvent keeps them, so no transcript read.
+      const ids = { has: (id: string) => store.hasProjection(runId, id) };
       const input = store.getRun(message.recipientRunId)?.agentInputs?.find(input => input.id === message.id);
       const delivery = input?.consumedAt ? 'consumed' : input?.deliveredAt ? 'delivered' : input ? 'queued' : 'not-delivered';
       // A read message was delivered first, even when both landed between two projections;
@@ -47,12 +46,10 @@ export function projectConversationEvents(store: import('../runs/store.ts').RunS
         store.appendEvent(runId, { type: 'conversation-message', projectionId, message, delivery: step,
           ...(input?.deliveredAt ? { deliveredAt: input.deliveredAt } : {}),
           ...(step === 'consumed' && input?.consumedAt ? { consumedAt: input.consumedAt } : {}) });
-        ids.add(projectionId);
       }
       const outcome = outcomes.get(message.id);
       if (outcome && !ids.has(`request-outcome:${outcome.requestId}`)) {
         store.appendEvent(runId, { type: 'request-outcome', projectionId: `request-outcome:${outcome.requestId}`, outcome });
-        ids.add(`request-outcome:${outcome.requestId}`);
       }
     }
   }

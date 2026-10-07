@@ -15,7 +15,9 @@ export async function collectWorkerEvidence(repoRoot: string, store: RunStore, r
   if (run.delegation?.role !== 'worker') throw Error('missing worker ownership');
   const delegation = run.delegation;
   const previous = store.readWorkerResult(delegation.parentRunId, run.id);
-  const events = store.readEvents(run.id).filter(event => event.seq > (delegation.executionStartSeq ?? -1));
+  // One async read (#880): an archived transcript decodes with the async brotli API.
+  const allEvents = await store.readEventsAsync(run.id);
+  const events = allEvents.filter(event => event.seq > (delegation.executionStartSeq ?? -1));
   let summary: WorkerCollectedResult['summary'] = { state: 'unavailable', reason: 'no-assistant-output' };
   for (const event of events) {
     const item = event.item as { kind?: string; role?: string; text?: string; parentItemId?: string } | undefined;
@@ -56,7 +58,7 @@ export async function collectWorkerEvidence(repoRoot: string, store: RunStore, r
   }
   const dataDir = join(repoRoot, '.ai/cezar');
   const ids = new Set<string>();
-  for (const event of store.readEvents(run.id)) {
+  for (const event of allEvents) {
     if (event.type !== 'image' || typeof event.url !== 'string') continue;
     const match = event.url.match(new RegExp(`^/api/(?:v1/)?runs/${run.id}/images/([^/]+)$`));
     if (match && isAttachmentFileName(match[1]!) && match[1]!.length <= 255) ids.add(match[1]!);

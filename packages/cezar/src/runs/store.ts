@@ -14,9 +14,9 @@ import {
 } from '@open-mercato/cezar-contract';
 import type { ArchiveFinishedScope, CiWait, ConversationState, AgentInput, InboxClaim, DelegationState, RunSummary, WorkerCollectedResult } from '@open-mercato/cezar-contract';
 import { storedDelegationStateSchema } from './delegation-state.ts';
-import { refreshHumanAskSummary } from './human-ask-summary.ts';
 import { HistoryCompressor } from './history-compressor.ts';
-import { hasPlainHistory, historyPaths, readHistoryText, removeHistory, restoreHistory } from './history-file.ts';
+import { emptyFacts, stampOf, TranscriptFactsIndex, type TranscriptFacts } from './transcript-facts.ts';
+import { hasPlainHistory, historyPaths, readHistoryText, readHistoryTextAsync, removeHistory, restoreHistory } from './history-file.ts';
 import { workerExecutionIdentitySchema, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
 import { reconcileWorkerWait } from '../delegation/wait.ts';
 import { capacityError, workerCapacity } from '../delegation/capacity.ts';
@@ -1098,6 +1098,35 @@ interface ListOrder {
 
 /** Newest first, runs created in the same millisecond in insertion order: the order `runs.db`
  *  lists in, and the order every list had while it was a stable sort of the in-memory map. */
+/** Why a `run` event fired, when a delegation checkpoint caused it (in-process only). */
+export type CommitSource = 'delegation-checkpoint' | 'delegation-destroy-progress';
+
+/**
+ * A worker's destroy moving between two unfinished phases, and nothing else changing: nothing the
+ * family reconcile reads changed, so it may skip that pass (#880). The first request and the
+ * `complete` phase still reconcile: one changes delivery eligibility, the other settles requests.
+ */
+function isDestroyProgress(before: RunRecord['delegation'], after: DelegationState): boolean {
+  if (before?.role !== 'worker' || after.role !== 'worker' || !before.destroy || !after.destroy) return false;
+  if (before.destroy.phase === 'complete' || after.destroy.phase === 'complete') return false;
+  return isDeepStrictEqual({ ...before, destroy: undefined }, { ...after, destroy: undefined });
+}
+
+/** NDJSON transcript text to events; a damaged line is skipped, never fatal. */
+function parseEvents(raw: string): RunEvent[] {
+  return raw
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => {
+      try {
+        return JSON.parse(line) as RunEvent;
+      } catch {
+        return null;
+      }
+    })
+    .filter((e): e is RunEvent => e !== null);
+}
+
 function newestFirst(a: ListOrder, b: ListOrder): number {
   if (a.createdAt !== b.createdAt) return a.createdAt < b.createdAt ? 1 : -1;
   return a.seq < b.seq ? -1 : a.seq > b.seq ? 1 : 0;
@@ -1247,11 +1276,15 @@ export class RunStore extends EventEmitter {
   private readonly unreadable = new Set<string>();
   /** Background one-at-a-time compressor for archived transcripts (#818). */
   private readonly compressor: HistoryCompressor;
+  /** Transcript facts the delegation paths ask about, so they never re-read a transcript (#880). */
+  private readonly facts: TranscriptFactsIndex;
 
   private constructor(private readonly dataDir: string) {
     super();
     this.setMaxListeners(100);
-    this.compressor = new HistoryCompressor(dataDir, (id) => this.isHistoryCompressEligible(id));
+    this.facts = new TranscriptFactsIndex(dataDir);
+    this.compressor = new HistoryCompressor(dataDir, (id) => this.isHistoryCompressEligible(id),
+      (id, plain, archive) => this.facts.adoptArchive(id, plain, stampOf(archive)));
   }
 
   /**
@@ -1298,6 +1331,7 @@ export class RunStore extends EventEmitter {
       store.db = db;
       store.owner = openClaimSession();
       store.loadHeldRows();
+      store.warmTranscriptFacts();
     } catch (error) {
       if (store.owner) {
         try { db.releaseClaims(store.owner.session); } catch { /* the session closes below: its claims are provably dead */ }
@@ -1381,7 +1415,7 @@ export class RunStore extends EventEmitter {
   private adoptLoadedRun({ run, extras }: DecodedRun, opts: { keepLive?: boolean; onlyIfChanged?: boolean; settle?: boolean; stop?: boolean }, row: RunRow): void {
     const before = loadNormalizedFields(run);
     if (run.delegation?.role === 'root' && (run.status === 'waiting' || run.delegation.wait !== undefined)) {
-      refreshHumanAskSummary(run, this.dataDir);
+      this.syncHumanAskSummary(run);
     }
     if (opts.settle) settleOrphanedRun(run, { stop: opts.stop });
     else reconcileLoadedRun(run, opts);
@@ -2345,15 +2379,17 @@ export class RunStore extends EventEmitter {
   commitDelegation(patches: ReadonlyArray<{ id: string; delegation: DelegationState }>): void {
     if (patches.length === 0) return;
     const staged = new Map<string, RunRecord>();
+    let destroyProgress = true;
     for (const patch of patches) {
       const run = this.peek(patch.id);
       if (!run || staged.has(patch.id)) throw new Error('missing or duplicate delegation patch target');
       const delegation = delegationStateSchema.parse(patch.delegation);
+      if (!isDestroyProgress(run.delegation, delegation)) destroyProgress = false;
       staged.set(patch.id, { ...run, delegation });
     }
     // In-process cause only: consumers can skip metadata replay when delegation
     // is disabled without dropping real status or termination-proof notifications.
-    this.commitIndex(staged, 'delegation-checkpoint');
+    this.commitIndex(staged, destroyProgress ? 'delegation-destroy-progress' : 'delegation-checkpoint');
   }
 
   /** Accepted execution revision is public lifecycle identity, separate from process generations. */
@@ -2363,7 +2399,7 @@ export class RunStore extends EventEmitter {
     if (run?.delegation?.role !== 'worker') throw new Error('missing worker continuation target');
     const delegation = delegationStateSchema.parse({ ...run.delegation,
       executionRevision: (run.delegation.executionRevision ?? 0) + 1,
-      executionStartSeq: this.readEvents(id).reduce((seq, event) => Math.max(seq, event.seq), 0),
+      executionStartSeq: this.transcriptFacts(id).lastSeq,
     });
     const staged = new Map<string, RunRecord>();
     const next: RunRecord = { ...run, ...this.redactPatch(patch), delegation,
@@ -2536,7 +2572,7 @@ export class RunStore extends EventEmitter {
    * nothing changed anywhere: the held records, the database, the pending dirty rows and the
    * subscribers all see the store as it was.
    */
-  private commitIndex(staged: ReadonlyMap<string, RunRecord | null>, source?: 'delegation-checkpoint'): void {
+  private commitIndex(staged: ReadonlyMap<string, RunRecord | null>, source?: CommitSource): void {
     if (!this.db) throw this.openFailure ?? new Error('runs database unavailable: nothing can be saved');
     this.assertWritable(staged);
     this.persist(staged);
@@ -2992,10 +3028,12 @@ export class RunStore extends EventEmitter {
     // Sync append keeps event order without a write queue; local NDJSON
     // appends at agent-event rates are effectively free.
     if (!hasPlainHistory(this.dataDir, runId)) restoreHistory(this.dataDir, runId);
-    appendFileSync(this.eventsPath(runId), `${JSON.stringify(full)}\n`, 'utf8');
+    const line = `${JSON.stringify(full)}\n`;
+    appendFileSync(this.eventsPath(runId), line, 'utf8');
+    this.facts.append(runId, full, Buffer.byteLength(line));
     this.maybeEnqueueHistoryCompress(run);
     if ((full.type === 'ask.requested' || full.type === 'human-input-delivered') &&
-      refreshHumanAskSummary(run, this.dataDir)) this.touch(run);
+      this.syncHumanAskSummary(run)) this.touch(run);
     this.emit('event', { runId, event: full });
 
     // The janitor trick: agents print the PR URL after `gh pr create` — the
@@ -3213,21 +3251,61 @@ export class RunStore extends EventEmitter {
     return this.secretValues;
   }
 
+  /** The run's indexed transcript facts (#880): a read-only view, never a transcript read once
+   *  the run's index is loaded. An unreadable transcript answers as empty, as readEvents does. */
+  transcriptFacts(runId: string): Readonly<TranscriptFacts> {
+    return this.facts.get(runId) ?? emptyFacts();
+  }
+
+  hasProjection(runId: string, projectionId: string): boolean {
+    return this.transcriptFacts(runId).projectionIds.includes(projectionId);
+  }
+
+  private factsWarming: Promise<void> = Promise.resolve();
+
+  /** After open, build the indexes the delegation reconcile will ask for first, off the request
+   *  path: every member of every family with a conversation (#880). */
+  private warmTranscriptFacts(): void {
+    // A microtask, not a timer: open returns first, and no timer outlives a store that never warms.
+    this.factsWarming = Promise.resolve().then(() => {
+      const ids: string[] = [];
+      for (const rootId of this.listConversationRootIds()) ids.push(rootId, ...(this.db?.listIdsByParent(rootId) ?? []));
+      return this.facts.warm(ids);
+    }).catch(() => undefined);
+  }
+
+  /** Resolves when the open-time warm-up is done (tests). */
+  factsWarmIdle(): Promise<void> {
+    return this.factsWarming;
+  }
+
+  /** `readEvents` off the event loop (async read and async brotli), for collection paths. */
+  async readEventsAsync(runId: string): Promise<RunEvent[]> {
+    try {
+      const raw = await readHistoryTextAsync(this.dataDir, runId);
+      return raw === undefined ? [] : parseEvents(raw);
+    } catch {
+      return [];
+    }
+  }
+
+  /** The owned store's `refreshHumanAskSummary`, from the index, on the same rules: no history
+   *  (legacy runs) keeps the summary, an unreadable one requests attention. True when it changed. */
+  private syncHumanAskSummary(run: RunRecord): boolean {
+    const facts = this.facts.get(run.id);
+    const next = !facts ? true
+      : facts.bytes > 0 || facts.archive !== undefined ? facts.pendingAsk !== undefined
+      : run.hasPendingHumanAsk === true;
+    if (next === run.hasPendingHumanAsk) return false;
+    run.hasPendingHumanAsk = next;
+    return true;
+  }
+
   readEvents(runId: string): RunEvent[] {
     try {
       const raw = readHistoryText(this.dataDir, runId);
       if (raw === undefined) return [];
-      return raw
-        .split('\n')
-        .filter(Boolean)
-        .map((line) => {
-          try {
-            return JSON.parse(line) as RunEvent;
-          } catch {
-            return null;
-          }
-        })
-        .filter((e): e is RunEvent => e !== null);
+      return parseEvents(raw);
     } catch {
       return [];
     }
@@ -3550,6 +3628,7 @@ export class RunStore extends EventEmitter {
     z.uuid().parse(id);
     const dir = join(this.dataDir, 'runs');
     if (realpathSync(dir) !== resolve(dir)) throw new Error('History storage redirected');
+    this.facts.forget(id);
     removeHistory(this.dataDir, id);
     rmSync(this.handoffPath(id), { force: true });
     rmSync(this.imagesDir(id), { recursive: true, force: true });
@@ -3598,11 +3677,7 @@ export class RunStore extends EventEmitter {
    *  resumed event, even across a reload (the frozen-transcript symptom class
    *  of #424). One file read on the first post-restart append per run. */
   private rehydrateSeq(runId: string): number {
-    let max = 0;
-    for (const event of this.readEvents(runId)) {
-      if (typeof event.seq === 'number' && event.seq > max) max = event.seq;
-    }
-    return max;
+    return this.transcriptFacts(runId).lastSeq;
   }
 
   private eventsPath(runId: string): string {
@@ -3650,6 +3725,7 @@ export class RunStore extends EventEmitter {
   private removeOwedHistory(id: string): void {
     if (!this.historyOwed.delete(id)) return;
     try {
+      this.facts.forget(id);
       removeHistory(this.dataDir, id);
       rmSync(this.handoffPath(id), { force: true });
       rmSync(this.imagesDir(id), { recursive: true, force: true });
@@ -3902,6 +3978,8 @@ export class RunStore extends EventEmitter {
    */
   close(): void {
     this.compressor.stop();
+    this.facts.stop();
+    this.facts.flush();
     if (this.saveTimer) {
       clearTimeout(this.saveTimer);
       this.saveTimer = null;

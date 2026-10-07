@@ -51,6 +51,7 @@ describe('conversation settlement', () => {
     worker.agentInputs = [{ id: request.id, source: 'agent', parentRunId: root.id, text: request.text, createdAt: now,
       deliveredAt: '2026-09-08T20:00:01.000Z', consumedAt: '2026-09-08T20:00:05.000Z' }];
     const store = { getRun: (id: string) => [root, worker].find(run => run.id === id), readEvents: (id: string) => eventsOf(id),
+      hasProjection: (id: string, projectionId: string) => eventsOf(id).some(event => event.projectionId === projectionId),
       appendEvent: (id: string, event: Record<string, unknown>) => { eventsOf(id).push(event); } } as unknown as import('../runs/store.ts').RunStore;
     projectConversationEvents(store, root); projectConversationEvents(store, root);
     const consumed = [...byRun.values()].flat().filter(event => event.type === 'conversation-message' && event.delivery === 'consumed');
