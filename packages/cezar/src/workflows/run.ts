@@ -84,7 +84,7 @@ import { parentReadiness } from '../delegation/readiness.ts';
 import { answersQuestion, openQuestions, questionMessage } from '../delegation/questions.ts';
 import { workerOutcome } from '../runs/delegation-state.ts';
 import { loadWorkflows } from './load.ts';
-import { RUN_IN_USE_ELSEWHERE, type QueuedMessage, type RunRecord, type RunStore, type StepState } from '../runs/store.ts';
+import { RUN_IN_USE_ELSEWHERE, type CommitSource, type QueuedMessage, type RunRecord, type RunStore, type StepState } from '../runs/store.ts';
 import { isReclaimable, reclaimWorktrees, rematerializeReclaimedWorktree } from '../runs/retention.ts';
 import {
   AgentTempDirError,
@@ -1242,14 +1242,16 @@ export class RunManager {
     return record !== undefined && familyOf(record) === scope.family;
   }
 
-  private readonly onDelegationRun = (run: RunRecord, source?: 'delegation-checkpoint'): void => {
+  private readonly onDelegationRun = (run: RunRecord, source?: CommitSource): void => {
     // Delegation metadata checkpoints do not change task status.
-    if (!this.disposed && source !== 'delegation-checkpoint') this.reapTerminalScratch(run.id);
+    if (!this.disposed && source === undefined) this.reapTerminalScratch(run.id);
     if (!this.disposed && !['queued', 'running', 'waiting'].includes(run.status)) this.withdrawCiWait(run.id);
     if (run.delegation && !['queued', 'running', 'waiting'].includes(run.status)) this.active.get(run.id)?.revokeDelegation?.();
     // Cleanup checkpoints emit terminal records too. With delegation disabled,
     // these observations must not replay the project's conversation histories.
     if (this.disposed || this.recoveringRun(run) || (source === 'delegation-checkpoint' && process.env.CEZ_DELEGATION !== '1')) return;
+    // A destroy retry changes nothing the family reconcile reads (#880).
+    if (source === 'delegation-destroy-progress') return;
     if (run.delegation && run.delegation.role !== 'invalid' && !['queued', 'running', 'waiting'].includes(run.status)) {
       this.reconcileWorkerWaits(run.delegation.role === 'root' ? run.id : run.delegation.parentRunId);
     }

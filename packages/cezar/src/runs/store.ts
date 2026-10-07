@@ -1098,6 +1098,20 @@ interface ListOrder {
 
 /** Newest first, runs created in the same millisecond in insertion order: the order `runs.db`
  *  lists in, and the order every list had while it was a stable sort of the in-memory map. */
+/** Why a `run` event fired, when a delegation checkpoint caused it (in-process only). */
+export type CommitSource = 'delegation-checkpoint' | 'delegation-destroy-progress';
+
+/**
+ * A worker's destroy moving between two unfinished phases, and nothing else changing: nothing the
+ * family reconcile reads changed, so it may skip that pass (#880). The first request and the
+ * `complete` phase still reconcile: one changes delivery eligibility, the other settles requests.
+ */
+function isDestroyProgress(before: RunRecord['delegation'], after: DelegationState): boolean {
+  if (before?.role !== 'worker' || after.role !== 'worker' || !before.destroy || !after.destroy) return false;
+  if (before.destroy.phase === 'complete' || after.destroy.phase === 'complete') return false;
+  return isDeepStrictEqual({ ...before, destroy: undefined }, { ...after, destroy: undefined });
+}
+
 /** NDJSON transcript text to events; a damaged line is skipped, never fatal. */
 function parseEvents(raw: string): RunEvent[] {
   return raw
@@ -2365,15 +2379,17 @@ export class RunStore extends EventEmitter {
   commitDelegation(patches: ReadonlyArray<{ id: string; delegation: DelegationState }>): void {
     if (patches.length === 0) return;
     const staged = new Map<string, RunRecord>();
+    let destroyProgress = true;
     for (const patch of patches) {
       const run = this.peek(patch.id);
       if (!run || staged.has(patch.id)) throw new Error('missing or duplicate delegation patch target');
       const delegation = delegationStateSchema.parse(patch.delegation);
+      if (!isDestroyProgress(run.delegation, delegation)) destroyProgress = false;
       staged.set(patch.id, { ...run, delegation });
     }
     // In-process cause only: consumers can skip metadata replay when delegation
     // is disabled without dropping real status or termination-proof notifications.
-    this.commitIndex(staged, 'delegation-checkpoint');
+    this.commitIndex(staged, destroyProgress ? 'delegation-destroy-progress' : 'delegation-checkpoint');
   }
 
   /** Accepted execution revision is public lifecycle identity, separate from process generations. */
@@ -2556,7 +2572,7 @@ export class RunStore extends EventEmitter {
    * nothing changed anywhere: the held records, the database, the pending dirty rows and the
    * subscribers all see the store as it was.
    */
-  private commitIndex(staged: ReadonlyMap<string, RunRecord | null>, source?: 'delegation-checkpoint'): void {
+  private commitIndex(staged: ReadonlyMap<string, RunRecord | null>, source?: CommitSource): void {
     if (!this.db) throw this.openFailure ?? new Error('runs database unavailable: nothing can be saved');
     this.assertWritable(staged);
     this.persist(staged);

@@ -66,6 +66,29 @@ describe('delegation paths read no transcript (#880)', () => {
     expect(store.readEvents(family.workerId).filter((event) => event.type === 'conversation-message')).toHaveLength(before);
   });
 
+  const destroyPhase = (phase: 'terminating' | 'cleaning' | 'complete') => {
+    const delegation = store.getRun(family.workerId)!.delegation!;
+    if (delegation.role !== 'worker') throw Error('expected worker');
+    store.commitDelegation([{ id: family.workerId, delegation: { ...delegation,
+      destroy: { requestedAt: delegation.destroy?.requestedAt ?? new Date().toISOString(), phase, remaining: phase === 'complete' ? [] : ['worktree', 'branch'] } } }]);
+  };
+
+  it('a destroy-progress checkpoint skips the family reconcile', () => {
+    destroyPhase('terminating');
+    const reconcile = vi.spyOn(manager, 'reconcileWorkerWaits');
+    destroyPhase('cleaning');
+    destroyPhase('cleaning');
+    expect(reconcile).not.toHaveBeenCalled();
+  });
+
+  it('the first destroy request and its completion still reconcile', () => {
+    const reconcile = vi.spyOn(manager, 'reconcileWorkerWaits');
+    destroyPhase('terminating');
+    expect(reconcile).toHaveBeenCalledTimes(1);
+    destroyPhase('complete');
+    expect(reconcile).toHaveBeenCalledTimes(2);
+  });
+
   it('collectWorkerEvidence reads an archived worker asynchronously', async () => {
     store.appendEvent(family.workerId, { type: 'text', text: 'the worker summary' });
     const paths = historyPaths(join(root, '.ai/cezar'), family.workerId);
