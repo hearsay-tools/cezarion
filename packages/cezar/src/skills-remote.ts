@@ -500,6 +500,14 @@ export function __markCloneAttemptedForTests(repo: string): void {
   cloneAttempted.add(repo);
 }
 
+/** Test hook: hold this source's clone/fetch open until `until` settles (#859). */
+export function __holdFetchForTests(repo: string, until: Promise<void>): void {
+  const held = until.finally(() => {
+    if (fetchInFlight.get(repo) === held) fetchInFlight.delete(repo);
+  });
+  fetchInFlight.set(repo, held);
+}
+
 // Both maps are keyed by `repoRoot` (multi-project workspace, step 2.6): each
 // project resolves its own `.ai/cezar/config.json` → `skillsRepos`, so one
 // project's team-skill list must never be served under another project's scope.
