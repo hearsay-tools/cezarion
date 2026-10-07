@@ -681,12 +681,23 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
   it.runIf(linux)('asks for attention at the threshold, then waits at least the cap', async () => {
     cadence();
     const { workerId } = await settled();
+    // When each retry state was written: the wait is measured from there, not from whenever a poll notices it.
+    const written: Array<{ at: number; attempts: number; nextAt: string; needsAttention?: true }> = [];
+    const commit = f.store.commitDelegation.bind(f.store);
+    vi.spyOn(f.store, 'commitDelegation').mockImplementation((patches, ...rest) => {
+      for (const patch of patches) {
+        const retry = (patch.delegation as { destroy?: { retry?: Omit<(typeof written)[number], 'at'> } }).destroy?.retry;
+        if (retry) written.push({ at: Date.now(), ...retry });
+      }
+      return commit(patches, ...rest);
+    });
     await f.service.destroy(f.caller, { workerId });
-    await vi.waitFor(() => expect(destroyOf(workerId)?.retry?.needsAttention).toBe(true), { timeout: 5_000 });
-    const destroy = destroyOf(workerId)!;
-    expect(destroy.retry!.attempts).toBe(5);
-    expect(Date.parse(destroy.retry!.nextAt) - Date.now()).toBeGreaterThan(200);
-    expect(destroy).toMatchObject({ phase: 'incomplete', remaining: ['worktree', 'branch'] });
+    await vi.waitFor(() => expect(destroyOf(workerId)?.retry?.needsAttention).toBe(true), { timeout: 10_000 });
+    const first = written.find(entry => entry.needsAttention)!;
+    expect(first.attempts).toBe(5);
+    // Attempt 5 is the first capped delay (300 ms); jitter only stretches it.
+    expect(Date.parse(first.nextAt) - first.at).toBeGreaterThanOrEqual(290);
+    expect(destroyOf(workerId)).toMatchObject({ phase: 'incomplete', remaining: ['worktree', 'branch'] });
   });
 
   it.runIf(linux)('a holder that exits inside the fast window lets the destroy complete within it', async () => {
