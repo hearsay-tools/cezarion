@@ -3,7 +3,8 @@ import { summarizeRunnerStderr } from './runner-stderr.ts';
 import { finished } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
-import { spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import type { ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawnAgent as nodeSpawn } from './disclaim-spawn.ts';
 import { parseEffort } from '@open-mercato/cezar-contract';
 import { request as httpRequest, type IncomingMessage } from 'node:http';
 import type {

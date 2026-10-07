@@ -844,6 +844,10 @@ Useful environment variables:
 |---|---|
 | `CEZ_DELEGATION=1` | Enable owned workers and the private loopback listener for this controller. Off by default; works with the cockpit and headless `cez run`. When disabled, terminal cleanup checkpoints skip conversation/wait history reconciliation; explicit recovery and cleanup termination safeguards remain active. Session instructions and credentials are automatic. |
 | `CEZ_DELEGATION_URL`, `CEZ_DELEGATION_TOKEN` | Internal generated session values; do not configure or copy them. Tokens rotate on Continue/restart and are revoked when the session/controller closes. |
+| `CEZ_UPDATE_CHANNEL` | Managed desktop channel: stable (default), nightly, or development. The version dialog's saved choice takes precedence. |
+| `CEZ_DESKTOP_ENTRY` / `CEZ_DESKTOP_CWD` / `CEZ_DESKTOP_NODE` | Desktop development overrides for the built entry, boot directory and Node executable; otherwise discovered automatically. |
+| `CEZ_DESKTOP_NO_UPDATE` | Exact `1` disables native shell updates; debug builds already disable them. |
+| `CEZ_DESKTOP_DEBUG_IPC` | Debug-only native title-bar probe. |
 | `CEZ_URL` | Cockpit origin for `cez task` and operator `cez discover` (e.g. a hosted `CEZ_REMOTE` cockpit). Unset, they find the local cockpit serving this checkout on ports 4321–4370. Parent discovery uses its delegation controller instead. |
 | `CEZ_DRY_RUN=1` | Use bundled mocks for all five agent backends — the cockpit works offline for demos and development. Explicit backend binary overrides still win. |
 | `CEZ_AGENT_MODELS_LOCKED=1` | Globally lock each runner to the model configured in its native Claude/Codex/OpenCode settings while keeping runner selection available. Exact `1` also delegates authentication and provider enablement to those native agents, so Cezar skips its credential probes and provider-disable preferences. Existing Cezar presets are preserved but ignored, and an environment change requires a restart. The config-file equivalent is `"modelsLocked": true` in global `~/.cezar/config.json` or one repository's `.ai/cezar/config.json`; config-file locks do not disable provider checks. |
@@ -1039,6 +1043,16 @@ a stream of normalized events. Other CLIs — pi, aider, whatever ships next —
 can slot in the same way.
 
 ---
+
+## Desktop app
+
+Cezarion Desktop is a Tauri 2 app for macOS, Windows and Linux. Start a local cockpit
+or connect to a remote HTTPS cockpit (loopback HTTP supports SSH tunnels). Remote
+windows have no native command permissions and need no local Node or agent install.
+Local mode needs Node.js 20+ and npm, then installs cezarion on first use.
+
+See [desktop installation, development and testing](docs/desktop.md). PR builds
+provide test installers; public releases require platform signing and notarization.
 
 ## Remote access (host cezar on a server)
 

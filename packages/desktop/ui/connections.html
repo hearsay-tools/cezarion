@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Cezarion — Connections</title>
+    <link rel="stylesheet" href="connections.css" />
+  </head>
+  <body data-launcher="false">
+    <div id="connection-shell"></div>
+    <section id="startup" class="hidden" aria-live="polite">
+      <img class="mark" src="icon.svg" alt="" />
+      <h1 id="title">Starting your cockpit</h1>
+      <p id="detail"></p>
+      <div id="spinner" class="spinner"></div>
+      <pre id="log" class="hidden"></pre>
+      <div id="actions" class="hidden">
+        <a
+          href="https://nodejs.org/en/download"
+          target="_blank"
+          rel="noreferrer"
+          >Download Node.js</a
+        >
+        <button id="retry">Try again</button>
+      </div>
+    </section>
+    <script src="connections.js"></script>
+  </body>
+</html>
