@@ -327,11 +327,12 @@ the generation's process record, still working under the worktree or a scratch l
 `readlink` each on Linux; liveness alone elsewhere). Anything else, including a holder exiting or
 moving away, runs it in full. A project's automatic full attempts run one at a time, so the
 attempts that coincide (every pending destroy on the first tick after a restart) do not contend
-for the worktree mutation lock. Lock contention is never skipped: it clears
-without changing anything observable, and every attempt takes that lock itself, so its stamp
-cannot be part of the key. A failure with no visible cause (a transient Git error) is therefore
-not retried until an explicit destroy or a restart: the first tick after boot always attempts in
-full.
+for the worktree mutation lock. A failure that neither the key nor a named holder explains is never
+skipped: a failed Git step (a holder only Windows' checked removal can see, a stale ref lock), lock
+contention (every attempt takes that lock, so its stamp cannot be in the key) or a throw. The removal
+reports it through `RemovalReport.unexplained`, and it retries in full on the backoff. A holder check
+that names no PID stays explained: what decides it (the process record, scratch, the execution) is
+in the key.
 
 **Retry state and attention.** Every tick writes `destroy.retry`
 (`{ attempts, nextAt, needsAttention? }`); the write changes only `destroy`, so it does not
