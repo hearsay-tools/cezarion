@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button'
 import { Link } from '@/lib/project-router'
 import { cn } from '@/lib/utils'
 import { relativeIn } from '@/lib/automation-format'
+import { useNow } from '@/lib/use-now'
 
 import { ActivityRow } from './run-activity-row'
 
@@ -288,13 +289,15 @@ function CleanUpWorker({ parentRunId, worker }: { parentRunId: string; worker: W
  *
  * A pending cleanup retries on its own, backing off to hourly; once its retries see nothing
  * change it needs attention (hearsay-tools/cezarion#879). The line says which, when the next check is, and that
- * Retry clean up tries at once.
+ * Retry clean up tries at once. The countdown re-renders on the slow clock: an hourly retry
+ * writes nothing in between, so no data update would correct it.
  */
 function Cleanup({ state }: { state: WorkerDestroy }) {
+  const now = useNow(30_000)
   const tidy = state.phase === 'complete' && state.remaining.length === 0 && state.error === undefined
   if (tidy) return null
   const retry = state.phase === 'complete' ? undefined : state.retry
-  const next = retry && <time dateTime={retry.nextAt} title={new Date(retry.nextAt).toLocaleString()}>{relativeIn(Date.now(), Date.parse(retry.nextAt))}</time>
+  const next = retry && <time dateTime={retry.nextAt} title={new Date(retry.nextAt).toLocaleString()}>{relativeIn(now, Date.parse(retry.nextAt))}</time>
   return <p className="px-2 pb-2 break-words">
     {retry?.needsAttention ? 'Cleanup needs attention' : state.phase === 'incomplete' ? 'Cleanup incomplete' : state.phase === 'complete' ? 'Cleanup complete' : `Cleanup ${state.phase}`}
     {state.remaining.length ? ` — remaining: ${state.remaining.join(', ')}` : ''}

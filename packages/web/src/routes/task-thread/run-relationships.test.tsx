@@ -265,6 +265,22 @@ it('says an incomplete cleanup is retrying on its own, and when (hearsay-tools/c
   const row = await within(group).findByText(/Cleanup incomplete/)
   expect(row.textContent).toBe('Cleanup incomplete — remaining: branch — Branch is checked out. Retrying automatically, next attempt in 3m.')
 })
+it('keeps the next-check countdown true while the cockpit sits open (hearsay-tools/cezarion#879)', async () => {
+  // Only the clock and intervals are fake: queries and findBy keep their real timeouts.
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'], now: Date.now() })
+  try {
+    const nextAt = new Date(Date.now() + 42 * 60_000 + 30_000).toISOString()
+    const stuck: WorkerInspection = { ...worker, status: 'done', destroy: { requestedAt: at, phase: 'incomplete', remaining: ['worktree'],
+      retry: { attempts: 10, nextAt, needsAttention: true } } }
+    setup(root, async () => json({ workers: [stuck] }))
+    const group = await screen.findByRole('group', { name: 'Task relationships' })
+    const row = await within(group).findByText(/Cleanup needs attention/)
+    expect(row.querySelector('time')?.textContent).toBe('in 42m')
+    // No new data arrives for ten minutes: the countdown still moves.
+    act(() => { vi.advanceTimersByTime(10 * 60_000) })
+    expect(row.querySelector('time')?.textContent).toBe('in 32m')
+  } finally { vi.useRealTimers() }
+})
 it('offers Retry clean up while a destroy is pending, and plain Clean up otherwise (hearsay-tools/cezarion#879)', async () => {
   const pending: WorkerInspection = { ...worker, status: 'done', destroy: { requestedAt: at, phase: 'incomplete', remaining: ['branch'] } }
   const fresh: WorkerInspection = { ...workerAt(3), status: 'done', destroy: undefined }
