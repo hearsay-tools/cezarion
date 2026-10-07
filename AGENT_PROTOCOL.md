@@ -969,6 +969,18 @@ channel. No turn starts. OpenCode's focused spawn test additionally requires
 exactly one wrapped error event with PATH/installation guidance before rejecting
 the result, without a turn-end or done event.
 
+**S25** (hearsay-tools/cezarion#872) starts OpenCode's native mock with its first
+`opencode serve` start exiting before it prints a URL. The runner notes the failure,
+waits `SERVE_START_RETRY_DELAY_MS`, spawns once more on a fresh port, and completes the
+turn with no error; the focused test also pins that the new pid reaches
+`onPidChange`. A second early exit fails with one error naming both attempts' exit
+codes and stderr summaries, and a retry whose spawn throws names that spawn error; a
+retry that instead hangs or is torn down reports through the ordinary paths. A spawn
+error, the 30 s no-URL timeout, and a teardown or deadline before or during the pause
+are never retried (`opencode-serve-retry.test.ts`). The other runners speak over the
+spawned process's stdio, with no listen phase, and carry named
+`scenario-unconstructible` exemptions; retrying their starts is out of scope.
+
 Workflow deadline rows **T1–T6** (hearsay-tools/cezarion#470) live in
 `core/workflow-timeout-parity.test.ts` and are registered in the shared parity
 guard. Each `RUNNER_IDS` backend uses its own `HARNESS_ADAPTERS` native wire:

@@ -111,6 +111,24 @@ const SEAM_CRITERIA: readonly SeamCriterion[] = [
     },
   },
   {
+    // hearsay-tools/cezarion#872: a start racing its predecessor's teardown exits before listening.
+    id: 'S25',
+    name: 'S25 retries a backend server that exits before listening once and completes the turn',
+    scenario: 'serve-start-exit',
+    assert: ({ v1, v2, result, failure }) => {
+      expect(failure).toBeUndefined();
+      expect(v1.filter(event => event.type === 'error')).toEqual([]);
+      const retries = v1.filter(event => event.type === 'note' && /exited before listening .*retrying once/.test(event.message));
+      expect(retries).toHaveLength(1);
+      const retry = v1.indexOf(retries[0]!);
+      expect(v1.findIndex(event => event.type === 'session')).toBeGreaterThan(retry);
+      expect(v1.filter(event => event.type === 'turn-end')).toHaveLength(1);
+      expect(v1.filter(event => event.type === 'done')).toHaveLength(1);
+      expect(result.text).not.toBe('');
+      expect(v2).toContainEqual(expect.objectContaining({ type: 'turn.completed' }));
+    },
+  },
+  {
     id: 'S20',
     name: 'S20 reports missing executables through its existing failure channel without starting a turn',
     scenario: 'missing-binary',
