@@ -884,10 +884,11 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
       }
       type Cadence = { orphanBackoff: Backoff; orphanDue: Map<string, { at: number; attempts: number }>; armOrphanReprobe(id: string): void };
       const cadence = manager as unknown as Cadence;
-      // Wide enough that the 5 % coalescing window (20 ms) covers arming the two orphans one after the other.
       cadence.orphanBackoff = { fastMs: 400, fastCount: 2, capMs: 1_600 };
       const listings = () => vi.mocked(fs.readdirSync).mock.calls.filter(([path]) => path === '/proc').length;
-      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      // The clock is fake too, so arming the two orphans one after the other cannot drift them apart
+      // under load: recovery arms its orphans in one synchronous pass.
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
       try {
         for (const id of ids) cadence.armOrphanReprobe(id);
         const before = listings();
