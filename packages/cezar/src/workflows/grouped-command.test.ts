@@ -44,18 +44,21 @@ describe('runGroupedCommand', () => {
     const dir = scratch();
     const pidFile = join(dir, 'pid');
     const started = Date.now();
-    const pending = runGroupedCommand({
+    // 2 s, not less: a 300 ms timeout fired before `bash -l` had written the pid when the
+    // full suite ran at load ~120 (final gate for #917), and the test then waited for a file
+    // that was never written. The pid is read after the result, from the finished command.
+    const timeoutMs = 2_000;
+    const result = await runGroupedCommand({
       ...base(dir),
       command: `trap '' TERM; echo $$ > ${pidFile}; while true; do sleep 0.1; done`,
-      timeoutMs: 300,
+      timeoutMs,
     });
-    const pid = await waitForFile(pidFile);
-    const result = await pending;
     expect(result.timedOut).toBe(true);
-    expect(result.output.endsWith('(timed out after 0s)')).toBe(true);
-    expect(alive(pid)).toBe(false);
-    expect(Date.now() - started).toBeLessThan(300 + CHECK_KILL_GRACE_MS + CHECK_TERMINATION_CONFIRM_MS + 2_000);
-  }, 20_000);
+    expect(result.output.endsWith('(timed out after 2s)')).toBe(true);
+    expect(existsSync(pidFile)).toBe(true);
+    expect(alive(Number(readFileSync(pidFile, 'utf8').trim()))).toBe(false);
+    expect(Date.now() - started).toBeLessThan(timeoutMs + CHECK_KILL_GRACE_MS + CHECK_TERMINATION_CONFIRM_MS + 2_000);
+  }, 30_000);
 
   it('tail mode keeps the last cap characters', async () => {
     const result = await runGroupedCommand({
