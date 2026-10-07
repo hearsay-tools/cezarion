@@ -2,7 +2,7 @@ import { inspectGeneration } from './process-liveness.ts';
 import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
-import { copyFile, lstat, mkdir, mkdtemp, open, realpath, rename, rm } from 'node:fs/promises';
+import { copyFile, lstat, mkdir, mkdtemp, open, readdir, realpath, rename, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { z } from 'zod';
@@ -164,6 +164,17 @@ async function readReceipt(path: string): Promise<Receipt | undefined> {
   if (!await exists(path)) return undefined;
   return receiptSchema.parse(JSON.parse(await readIdentityFile(path, RECEIPT_CAP)));
 }
+/** Whether any linked worktree's admin directory still carries this resource's identity marker.
+ * An unsafe or unreadable marker throws, so the caller fails closed. */
+async function markerRemains(repoRoot: string, workspace: WorkerWorkspace): Promise<boolean> {
+  const admin = join(await commonDir(repoRoot), 'worktrees');
+  if (!await exists(admin)) return false;
+  for (const entry of await readdir(admin)) {
+    const marker = join(admin, entry, 'cezar-owned-resource');
+    if (await exists(marker) && await readIdentityFile(marker, 36) === workspace.resourceId) return true;
+  }
+  return false;
+}
 async function liveGitDir(repoRoot: string, workspace: WorkerWorkspace): Promise<string> {
   if (await realpath(workspace.path) !== workspace.path) throw new Error('Owned workspace path is redirected');
   const rootCommon = await commonDir(repoRoot);
@@ -289,6 +300,18 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
         if (neverMaterialized?.(workspace) && !await exists(workspace.path) &&
             !(await registered()).includes(`worktree ${workspace.path}`) && !await branchExists() &&
             neverMaterialized(workspace)) remaining = [];
+        if (!remaining.length) return result();
+        // #878: without a receipt, the identity marker in a Git admin directory is the
+        // only trace of a moved worktree. With path, registration, branch and marker all
+        // gone, finish bookkeeping; write no checkpoint and delete nothing.
+        const absent = async () => !await exists(workspace.path) && !(await registered()).includes(`worktree ${workspace.path}`) &&
+          !await branchExists() && !await markerRemains(repoRoot, workspace);
+        if (await absent()) {
+          assertCurrent?.();
+          await beforeRemove?.();
+          assertCurrent?.();
+          if (await absent()) remaining = [];
+        }
         return result();
       }
       if (!same(receipt.workspace, workspace)) return result();
