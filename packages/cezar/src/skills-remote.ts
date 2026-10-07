@@ -639,8 +639,11 @@ async function loadTeamSkills(
   // first restart past the TTL otherwise hides every team skill — and starves a
   // recovered Continue of its playbook — for as long as the fetch takes.
   let cached: Array<Skill[] | undefined> = [];
+  const generation = postFetchListsByRoot.get(repoRoot) ?? 0;
+  // True once another load has published a post-fetch list since this one
+  // started: its snapshot may predate that list, so it must not win (#859).
+  const superseded = () => (postFetchListsByRoot.get(repoRoot) ?? 0) !== generation;
   if (!refresh) {
-    const generation = postFetchListsByRoot.get(repoRoot) ?? 0;
     cached = await Promise.all(config.skillsRepos.map((src) => listRemoteSkills(src).catch(() => undefined)));
     const pause = cachedListPauses.get(repoRoot);
     if (pause) {
@@ -649,7 +652,7 @@ async function loadTeamSkills(
       await pause.until;
     }
     const listed = mergeSourceLists(cached);
-    if ((postFetchListsByRoot.get(repoRoot) ?? 0) === generation) teamSkillsByRoot.set(repoRoot, listed);
+    if (!superseded()) teamSkillsByRoot.set(repoRoot, listed);
     onCachedList?.(listed);
   }
   const lists: Array<Skill[] | undefined> = [];
@@ -675,12 +678,16 @@ async function loadTeamSkills(
     } catch {
       // offline / no access — list whatever an older clone has (or nothing)
     }
-    // An unfetched source has not moved since the list-only pass; reuse it.
-    const listed = fetched ? undefined : cached[index];
+    // An unfetched source has not moved since the list-only pass unless
+    // another load fetched it meanwhile; reuse the snapshot only then.
+    const listed = fetched || superseded() ? undefined : cached[index];
     // degrade: a source that fails to list contributes nothing
     lists.push(listed ?? (await listRemoteSkills(src).catch(() => undefined)));
   }
   const out = mergeSourceLists(lists);
+  // A refresh always publishes. A passive load that a newer post-fetch list
+  // overtook defers to it rather than replacing it with an older view.
+  if (!refresh && superseded()) return teamSkillsByRoot.get(repoRoot) ?? out;
   postFetchListsByRoot.set(repoRoot, (postFetchListsByRoot.get(repoRoot) ?? 0) + 1);
   teamSkillsByRoot.set(repoRoot, out);
   return out;
