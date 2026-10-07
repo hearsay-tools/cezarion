@@ -343,10 +343,12 @@ Destroy is serialized per worker and durable:
    A worktree can vanish outside cezar, taking its administrative directory and
    registration with it, before cleanup recorded anything (hearsay-tools/cezarion#905).
    Its branch is then deleted only when the reflog prefix still matches the
-   receipt, no worktree has it checked out and its tip is still the baseline, so
-   it holds no work. Cleanup records a `worktree-removed` checkpoint at the
-   baseline first and deletes by compare-and-swap on it. A tip anywhere else
-   stays for a human, and the error names the branch and its commit count.
+   receipt, no worktree has it checked out, and its tip and every reflog entry
+   are the baseline, so it holds no work. A branch reset back to its baseline
+   keeps the worker's commits only in that reflog, which the delete would drop.
+   Cleanup records a `worktree-removed` checkpoint at the baseline first and
+   deletes by compare-and-swap on it. Any other branch stays for a human, and
+   the error names the branch and, when its tip moved, its commit count.
 6. Persist complete or incomplete state and remaining resource details. Repeated
    calls join or retry the same operation. Already absent verified resources
    count as cleaned. Preserve run records and NDJSON events.

@@ -273,12 +273,11 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
   beforeRemove?: () => Promise<void>, assertUnheld?: () => void): Promise<WorkerDestroyResult> {
   let remaining: Array<'worktree' | 'branch'> = ['worktree', 'branch'];
   let provisioned = false; let lockBusy = false; let heldBy: readonly number[] = [];
-  let stranded: { branch: string; commits: number } | undefined;
+  let stranded: string | undefined;
   const result = (): WorkerDestroyResult => ({ workerId: value.ownerRunId, state: remaining.length ? 'incomplete' : 'complete', remaining,
     ...(remaining.length ? { error: lockBusy ? 'Owned resources retained: worktree mutation lock is busy; retry destroy later'
       : heldBy.length ? `Owned resources retained: processes ${heldBy.join(', ')} may still hold the worker worktree or scratch; retry destroy after they exit`
-      : stranded ? `Owned branch ${stranded.branch} ${stranded.commits ? `holds ${stranded.commits} commit${stranded.commits === 1 ? '' : 's'} beyond`
-        : 'no longer points at'} its worker baseline; keep what you need, delete the branch, then retry destroy`
+      : stranded ? `Owned branch ${value.branch} ${stranded}; keep what you need, delete the branch, then retry destroy`
       : 'Owned resources remain: resource identity or Git cleanup could not be verified. Check the worker worktree, Git lock and ownership receipt, then retry destroy after correcting the blocker' } : {}),
     ...(provisioned ? { deleted: [
       ...(!remaining.includes('worktree') ? [{ kind: 'worktree' as const, path: value.path }] : []),
@@ -362,15 +361,21 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
           return result();
         }
         // hearsay-tools/cezarion#905: the worktree went away outside cezar and left its branch behind.
-        // While the branch matches the receipt, is checked out nowhere and sits at its baseline, it
-        // holds no work: delete it through the checkpointed compare-and-swap below. Commits on it are
-        // a human's call.
+        // While the branch matches the receipt, is checked out nowhere, and it and every reflog entry
+        // sit at the baseline, it holds no work: delete it through the checkpointed compare-and-swap
+        // below. A branch reset back to its baseline keeps the worker's commits only in the reflog
+        // that the delete would drop. Commits on it are a human's call.
         remaining = ['branch'];
         if ((await registered()).includes(`branch refs/heads/${workspace.branch}`)) return result();
         const current = await verifyBranch(repoRoot, workspace, receipt);
         if (current.sha !== workspace.baselineSha) {
           const commits = Number(await checkedGit(repoRoot, ['rev-list', '--count', `${workspace.baselineSha}..${current.sha}`]));
-          stranded = { branch: workspace.branch, commits };
+          stranded = commits ? `holds ${commits} commit${commits === 1 ? '' : 's'} beyond its worker baseline` : 'no longer points at its worker baseline';
+          return result();
+        }
+        const tips = current.log.content.toString('utf8').split('\n').filter(Boolean).map(entry => entry.split(' ')[1]);
+        if (tips.some(tip => tip !== workspace.baselineSha)) {
+          stranded = 'returned to its worker baseline after holding other commits';
           return result();
         }
         assertCurrent?.();

@@ -552,6 +552,23 @@ describe('removeOwnedWorkspace verified retryable destruction', () => {
     expect(git(root, 'rev-parse', workspace.branch)).toBe(first);
   });
 
+  it('keeps a stranded branch reset to its baseline, whose reflog still records worker commits (hearsay-tools/cezarion#905)', async () => {
+    const { root, first } = await fixture();
+    const workspace = await createOwnedWorkspace(root, randomUUID(), first);
+    await writeFile(join(workspace.path, 'tracked.txt'), 'worker');
+    git(workspace.path, 'commit', '-qam', 'worker');
+    git(workspace.path, 'reset', '-q', '--hard', first);
+    await strand(root, workspace, 'deleted and pruned');
+    const reflog = await readFile(join(root, '.git/logs/refs/heads', workspace.branch), 'utf8');
+    const result = await removeOwnedWorkspace(root, workspace);
+    expect(result).toMatchObject({ state: 'incomplete', remaining: ['branch'] });
+    expect(result.error).toBe(`Owned branch ${workspace.branch} returned to its worker baseline after holding other commits; ` +
+      'keep what you need, delete the branch, then retry destroy');
+    expect(git(root, 'rev-parse', workspace.branch)).toBe(first);
+    expect(await readFile(join(root, '.git/logs/refs/heads', workspace.branch), 'utf8')).toBe(reflog);
+    expect(existsSync(receiptPath(root, workspace).replace(/\.json$/, '.cleanup.json'))).toBe(false);
+  });
+
   it('refuses a stranded branch another worktree has checked out (hearsay-tools/cezarion#905)', async () => {
     const { root, first } = await fixture();
     const workspace = await createOwnedWorkspace(root, randomUUID(), first);
