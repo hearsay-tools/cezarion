@@ -16,6 +16,10 @@ import type { RunRecord } from '../runs/store.ts';
 import { DelegationPolicyError } from './policy.ts';
 
 const RECEIPT_CAP = 16_384;
+// The reflog's content identifies a worker branch: its creation entry from provisioning on,
+// and its full bytes plus the tip from prepare to delete. `git gc` rewrites every reflog as
+// a new file with the same entries (hearsay-tools/cezarion#904), so `file` and `logFile` are
+// never compared. They are still written because an older cezar's strict schemas require them.
 const fileIdentitySchema = z.object({ dev: z.number(), ino: z.number(), birthtimeMs: z.number() }).strict();
 const branchIdentitySchema = z.object({ file: fileIdentitySchema, prefixBytes: z.number().int().min(1).max(4096), prefixHash: z.string().length(64) }).strict();
 const receiptSchema = z.object({ workspace: workerWorkspaceSchema, gitDir: z.string().min(1), branchIdentity: branchIdentitySchema.optional() }).strict();
@@ -42,7 +46,7 @@ async function verifyBranch(repoRoot: string, workspace: WorkerWorkspace, receip
   if (!receipt.branchIdentity) throw new Error('Branch creation identity absent');
   const log = await branchLog(repoRoot, workspace);
   const initial = receipt.branchIdentity;
-  if (!same(log.file, initial.file) || log.content.length < initial.prefixBytes ||
+  if (log.content.length < initial.prefixBytes ||
       hash(log.content.subarray(0, initial.prefixBytes)) !== initial.prefixHash) throw new Error('Branch ownership changed');
   return { sha: await checkedGit(repoRoot, ['rev-parse', '--verify', `refs/heads/${workspace.branch}`]), log };
 }
@@ -327,7 +331,7 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
           if (entry === `branch refs/heads/${workspace.branch}` && registeredPath !== workspace.path) return result();
         }
         const current = await verifyBranch(repoRoot, workspace, receipt);
-        if (checkpoint && (checkpoint.sha !== current.sha || !same(checkpoint.logFile, current.log.file) || checkpoint.logHash !== hash(current.log.content))) return result();
+        if (checkpoint && (checkpoint.sha !== current.sha || checkpoint.logHash !== hash(current.log.content))) return result();
         checkpoint ??= { workspace, gitDir: receipt.gitDir, sha: current.sha, logFile: current.log.file, logHash: hash(current.log.content), phase: 'prepared' };
         await writeCleanup(checkpointPath, checkpoint, assertCurrent);
         assertCurrent?.();
@@ -361,7 +365,7 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
       if (await branchExists()) {
         if ((await registered()).includes(`branch refs/heads/${workspace.branch}`)) return result();
         const current = await verifyBranch(repoRoot, workspace, receipt);
-        if (current.sha !== checkpoint.sha || !same(current.log.file, checkpoint.logFile) || hash(current.log.content) !== checkpoint.logHash) return result();
+        if (current.sha !== checkpoint.sha || hash(current.log.content) !== checkpoint.logHash) return result();
         // Ref CAS: never delete a branch advanced after our verified snapshot.
         assertCurrent?.();
         assertUnheld?.();
