@@ -119,39 +119,39 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     expect(existsSync(workspace(w).path)).toBe(false);
   });
 
-  it('private never-materialized completion authorizes absent resources across restart and repeated destroy', async () => {
-    const w = await worker();
-    expect(manager.getWorkerNoMaterializationProof(w.id)).toBeUndefined();
-    destroy(w); manager.requestWorkerStop(w.id);
+  it('destroy of a never-started queued worker completes with no deletions across restart and repeats (hearsay-tools/cezarion#892)', async () => {
+    const w = await worker(); manager.requestWorkerStop(w.id);
     expect(await manager.awaitRunTermination(w.id, 10)).toBe(true);
     manager.dispose(); store.close(); const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
     const other = new RunManager(reopened, root);
+    const service = new DelegationService(); const detach = service.registerProject({ id: 'reopened', root, store: reopened, manager: other });
     try {
+      // The flag stays in the checkpoint as a record of the queued completion; destroy no longer reads it.
       expect(reopened.readWorkerExecution(w.id)).toMatchObject({ phase: 'complete', neverMaterialized: true });
-      const proof = other.getWorkerNoMaterializationProof(w.id);
-      expect(proof).toBeTypeOf('function');
-      expect(proof!({ ...workspace(w), resourceId: randomUUID() })).toBe(false);
-      // #878: absence with no identity marker completes bookkeeping without the proof too.
-      expect(await removeOwnedWorkspace(root, workspace(w))).toMatchObject({ state: 'complete', remaining: [] });
-      expect(await removeOwnedWorkspace(root, workspace(w), proof)).toMatchObject({ state: 'complete', remaining: [] });
-      expect(await removeOwnedWorkspace(root, workspace(w), proof)).toMatchObject({ state: 'complete', remaining: [] });
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const result = await service.destroyForHuman('reopened', w.id);
+        expect(result).toMatchObject({ state: 'complete', remaining: [] });
+        expect(result).not.toHaveProperty('deleted');
+      }
+      expect(reopened.getRun(w.id)?.delegation).toMatchObject({ destroy: { phase: 'complete', remaining: [] } });
+      expect(JSON.stringify(reopened.getRun(w.id))).not.toMatch(/neverMaterialized|generation/);
+      // #878: absence must be total. A path or branch at the worker's name keeps it unverified.
       mkdirSync(workspace(w).path, { recursive: true });
-      expect(await removeOwnedWorkspace(root, workspace(w), proof)).toMatchObject({ state: 'incomplete' });
+      expect(await removeOwnedWorkspace(root, workspace(w))).toMatchObject({ state: 'incomplete' });
       expect(existsSync(workspace(w).path)).toBe(true);
       rmSync(workspace(w).path, { recursive: true });
       execFileSync('git', ['branch', workspace(w).branch], { cwd: root });
-      expect(await removeOwnedWorkspace(root, workspace(w), proof)).toMatchObject({ state: 'incomplete' });
+      expect(await removeOwnedWorkspace(root, workspace(w))).toMatchObject({ state: 'incomplete' });
       expect(execFileSync('git', ['branch', '--list', workspace(w).branch], { cwd: root, encoding: 'utf8' })).toContain(workspace(w).branch);
-      expect(JSON.stringify(reopened.getRun(w.id))).not.toMatch(/neverMaterialized|generation/);
-    } finally { other.dispose(); reopened.flush(); }
+    } finally { detach(); other.dispose(); reopened.flush(); }
   });
 
-  it('contradictory abandonment cannot authorize no-materialization cleanup (hearsay-tools/cezarion#839)', async () => {
+  it('a checkpoint both abandoned and never-materialized does not parse (hearsay-tools/cezarion#839)', async () => {
     const w = await worker(); destroy(w); manager.requestWorkerStop(w.id);
     const proof = store.readWorkerExecution(w.id)!;
     expect(proof.neverMaterialized).toBe(true);
     writeFileSync(join(root, '.ai/cezar/runs', `${w.id}.execution.json`), JSON.stringify({ ...proof, abandoned: true }), { mode: 0o600 });
-    expect(manager.getWorkerNoMaterializationProof(w.id)).toBeUndefined();
+    expect(store.readWorkerExecution(w.id)).toBeUndefined();
     // #878: nothing was materialized, so absence alone still completes bookkeeping.
     expect(await removeOwnedWorkspace(root, workspace(w))).toMatchObject({ state: 'complete', remaining: [] });
   });
@@ -168,48 +168,30 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     expect(store.readWorkerExecution(w.id)).toMatchObject({ generation, phase: 'complete', abandoned: true });
   });
 
-  it('no-materialization proof is generation-bound and cannot survive starting or legacy completion', async () => {
+  it('destroy stays incomplete when a later starting generation carries the never-materialized flag', async () => {
     const w = await worker(); manager.requestWorkerStop(w.id);
-    const first = store.readWorkerExecution(w.id)!;
-    destroy(w); const proof = manager.getWorkerNoMaterializationProof(w.id)!;
-    expect(proof(workspace(w))).toBe(true);
-    const current = store.getRun(w.id)!;
-    if (current.delegation?.role !== 'worker') throw Error('fixture');
-    const { destroy: _destroy, ...delegation } = current.delegation;
-    store.commitDelegation([{ id: w.id, delegation }]);
-    const next = store.commitWorkerExecutionStart(w.id);
-    expect(next).not.toBe(first.generation);
-    store.commitWorkerCancellation(w.id); store.commitWorkerExecutionComplete(w.id, next); destroy(w);
-    expect(proof(workspace(w))).toBe(false);
-    expect(manager.getWorkerNoMaterializationProof(w.id)).toBeUndefined();
-    // #878: a stale proof grants nothing; absence with no identity marker completes on its own.
-    expect(await removeOwnedWorkspace(root, workspace(w), proof)).toMatchObject({ state: 'complete', remaining: [] });
-    writeFileSync(join(root, '.ai/cezar/runs', `${w.id}.execution.json`), JSON.stringify({ generation: next, phase: 'complete' }), { mode: 0o600 });
-    expect(manager.getWorkerNoMaterializationProof(w.id)).toBeUndefined();
-    writeFileSync(join(root, '.ai/cezar/runs', `${w.id}.execution.json`), JSON.stringify({ generation: next, phase: 'starting', neverMaterialized: true }), { mode: 0o600 });
-    expect(store.readWorkerExecution(w.id)).toBeUndefined();
-    expect(manager.getWorkerNoMaterializationProof(w.id)).toBeUndefined();
+    expect(store.readWorkerExecution(w.id)).toMatchObject({ phase: 'complete', neverMaterialized: true });
+    manager.dispose(); store.close();
+    // The schema refuses the flag outside `complete`, so this generation's termination is never proven.
+    writeFileSync(join(root, '.ai/cezar/runs', `${w.id}.execution.json`), JSON.stringify({ generation: randomUUID(), phase: 'starting', neverMaterialized: true }), { mode: 0o600 });
+    const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true }); const other = new RunManager(reopened, root);
+    const service = new DelegationService(); const detach = service.registerProject({ id: 'reopened', root, store: reopened, manager: other });
+    Object.assign(service, { terminationTimeoutMs: 50 });
+    try {
+      expect(reopened.readWorkerExecution(w.id)).toBeUndefined();
+      expect(await service.destroyForHuman('reopened', w.id)).toMatchObject({ state: 'incomplete', remaining: ['process', 'worktree', 'branch'] });
+    } finally { detach(); other.dispose(); reopened.flush(); }
   });
 
-  it('no-materialization proof is rechecked after asynchronous absence inspection', async () => {
-    const w = await worker(); destroy(w); manager.requestWorkerStop(w.id);
-    const proof = manager.getWorkerNoMaterializationProof(w.id)!;
-    let calls = 0;
-    const invalidated = (value: ReturnType<typeof workspace>) => {
-      if (++calls === 2) rmSync(join(root, '.ai/cezar/runs', `${w.id}.execution.json`));
-      return proof(value);
-    };
-    // #878: the invalidated proof falls through to the absence check, which completes.
-    expect(await removeOwnedWorkspace(root, workspace(w), invalidated)).toMatchObject({ state: 'complete', remaining: [] });
-    expect(calls).toBe(2);
-  });
-
-  it('never-materialized proof cannot override an unreadable creation receipt', async () => {
-    const w = await worker(); destroy(w); manager.requestWorkerStop(w.id);
-    const proof = manager.getWorkerNoMaterializationProof(w.id)!;
+  it('an unreadable creation receipt keeps a never-materialized worker\'s destroy incomplete', async () => {
+    const w = await worker(); manager.requestWorkerStop(w.id);
+    expect(store.readWorkerExecution(w.id)).toMatchObject({ phase: 'complete', neverMaterialized: true });
     const dir = join(root, '.git/cezar-owned-workspaces'); mkdirSync(dir, { recursive: true });
     const receipt = join(dir, `${workspace(w).resourceId}.json`); writeFileSync(receipt, '{broken');
-    expect(await removeOwnedWorkspace(root, workspace(w), proof)).toMatchObject({ state: 'incomplete' });
+    const service = new DelegationService(); const detach = service.registerProject({ id: 'p', root, store, manager });
+    try {
+      expect(await service.destroyForHuman('p', w.id)).toMatchObject({ state: 'incomplete', remaining: ['worktree', 'branch'] });
+    } finally { detach(); }
     expect(readFileSync(receipt, 'utf8')).toBe('{broken');
   });
 

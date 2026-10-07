@@ -255,9 +255,6 @@ export async function readOwnedDiff(repoRoot: string, run: RunRecord): Promise<W
   } finally { if (scratch) await rm(scratch, { recursive: true, force: true }); }
 }
 
-/** Trusted in-process verifier obtained from the manager, never a wire field. */
-export type WorkerNoMaterializationProof = (workspace: WorkerWorkspace) => boolean;
-
 /** Thrown by a removal's `assertUnheld` when live processes may hold the worker's resources. */
 export class WorkspaceHeldError extends Error {
   constructor(readonly pids: readonly number[]) { super(`Processes ${pids.join(', ')} may still hold the worker's resources`); }
@@ -268,8 +265,8 @@ export class WorkspaceHeldError extends Error {
  * the exact ref/log identity whose compare-and-swap deletion may be retried.
  * `beforeRemove` runs once every check has passed, right before git removes the checkout: call
  * this through `releaseThenRemoveOwnedWorkspace` so the worker's preview goes first (#781). */
-export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorkspace, neverMaterialized?: WorkerNoMaterializationProof,
-  assertCurrent?: () => void, beforeRemove?: () => Promise<void>, assertUnheld?: () => void): Promise<WorkerDestroyResult> {
+export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorkspace, assertCurrent?: () => void,
+  beforeRemove?: () => Promise<void>, assertUnheld?: () => void): Promise<WorkerDestroyResult> {
   let remaining: Array<'worktree' | 'branch'> = ['worktree', 'branch'];
   let provisioned = false; let lockBusy = false; let heldBy: readonly number[] = [];
   const result = (): WorkerDestroyResult => ({ workerId: value.ownerRunId, state: remaining.length ? 'incomplete' : 'complete', remaining,
@@ -293,13 +290,6 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
         return refs.split('\n').includes(`refs/heads/${workspace.branch}`);
       };
       if (!receipt) {
-        // Absence alone cannot distinguish moved/rebranched resources. Only a
-        // private exact-generation no-materialization proof permits this no-op.
-        // Revalidate after asynchronous inspection; never delete inferred resources.
-        if (neverMaterialized?.(workspace) && !await exists(workspace.path) &&
-            !(await registered()).includes(`worktree ${workspace.path}`) && !await branchExists() &&
-            neverMaterialized(workspace)) remaining = [];
-        if (!remaining.length) return result();
         // #878: without a receipt, the identity marker in a Git admin directory is the
         // only trace of a moved worktree. With path, registration, branch and marker all
         // gone, finish bookkeeping; write no checkpoint and delete nothing.
