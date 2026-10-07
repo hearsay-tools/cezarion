@@ -325,6 +325,17 @@ Destroy is serialized per worker and durable:
 4. Verify canonical managed path, Git registration, original branch ownership,
    and absence of another user's checkout before deletion. Preserve moved,
    symlink-replaced, repurposed, or otherwise ambiguous resources.
+   The branch's reflog content identifies the original branch, never the reflog
+   file: `git gc` rewrites every reflog as a new file with the same entries
+   (hearsay-tools/cezarion#904). Provisioning records a hash of the reflog's
+   first 4 KiB, which starts with the creation entry, so a branch deleted and
+   recreated under the same name fails. Cleanup records the tip and a hash of the
+   whole reflog before it removes anything, and deletes the branch only while both
+   still match. Two residuals remain. A reflog expiry that drops the creation
+   entry (`gc.reflogExpire`, 90 days, or `gc.reflogExpireUnreachable`, 30 days),
+   or any entry after cleanup recorded its hash, fails closed and leaves the branch
+   for a human. A recreation in the same second, from the same commit, by the same
+   committer writes an identical creation entry and cannot be told apart.
 5. Remove the verified owned worktree with checked Git results; verify directory
    and registration absence. Do not follow the legacy unchecked recursive-rm
    fallback. Delete only the original owned branch when it is still verifiably
@@ -446,7 +457,7 @@ in the accessibility tree. Ordinary runs render as before.
 | One generation/parent-only | Worker credentials cannot spawn or operate on peers; root cannot target another parent's workers; per-parent limits survive destroy/restart. |
 | Committed isolation | Parent HEAD and explicit ref pinning, ref movement while queued, dirty edits excluded/unmodified, non-Git/bad ref rejection, creation collision/failure, worker-only diffs. |
 | Capacity and wake | maxParallel=1 with queued child; terminal-before-register/park races; failed/cancelled/review workers; deadline; scheduler fairness; parent cancellation; shutdown vs terminal; restart and duplicate wake receipts. |
-| Durable safe destroy | Queued/starting/live/parked/terminal paths; slow SIGTERM/kill escalation; repeated/concurrent requests; interrupted cleanup; path/branch ownership mismatch; missing resources; human continuation/deletion and retention races. |
+| Durable safe destroy | Queued/starting/live/parked/terminal paths; slow SIGTERM/kill escalation; repeated/concurrent requests; interrupted cleanup; path/branch ownership mismatch; a branch reflog rewritten by `git gc` before or during cleanup; missing resources; human continuation/deletion and retention races. |
 | Human answer separation | All four real runners against offline wire-faithful mocks: native/marker asks, agent steer before/during/after ask, queued restart input, fresh/continuation paths; add harness-parity rows and only genuine wire exemptions. |
 | Cockpit/defaults | Scoped navigation, loading/empty/error/offline context, all run tabs, agent attribution, legacy record parsing, no new metadata/transport when off, unavailable provisioning degradation. |
 
