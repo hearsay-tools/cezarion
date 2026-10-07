@@ -25,7 +25,7 @@ vi.mock('../core/runner-factory.ts', () => ({
       let release!: () => void;
       const result = new Promise<{ text: string; toolCalls: never[]; tokensUsed: number }>(done => { release = () => done({ text: 'ok', toolCalls: [], tokensUsed: 0 }); });
       sessions.release.push(release);
-      return { result, sendMessage: () => false, discardQueuedMessages: () => {}, end: () => {}, interrupt: () => {}, open: true };
+      return { result, sendMessage: () => false, discardQueuedMessages: () => {}, holdsHumanInput: () => false, end: () => {}, interrupt: () => {}, open: true };
     },
     interrupt: async () => {},
   }),

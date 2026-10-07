@@ -93,6 +93,7 @@ describe('skill resume continuation follow-ups (#790 review)', { timeout: 20_000
           sendMessage: () => open,
           sendAgentMessage: () => open ? Promise.resolve() : false,
           discardQueuedMessages: () => undefined,
+          holdsHumanInput: () => false,
           interrupt: () => finish(''),
           end: () => finish(''),
         };

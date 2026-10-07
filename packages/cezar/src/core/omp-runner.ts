@@ -410,6 +410,10 @@ export class OmpRunner implements AgentRunner {
       } else if (refusedForAck && open && !agentAck && !humanAcks.size && !pendingMarkerAsk) {
         refusedForAck = false;
         opts.onAgentInputReady?.();
+      } else if (open && !ompUi.turnId && !agentAck && !humanAcks.size && !pendingMarkerAsk) {
+        // #486: a human ack drained with no turn open — re-settle the idle boundary.
+        refusedForAck = false;
+        opts.onAgentInputReady?.();
       }
     };
     let pendingMarkerAsk = false;
@@ -825,6 +829,8 @@ export class OmpRunner implements AgentRunner {
         return acknowledged;
       },
       discardQueuedMessages: () => undefined,
+      holdsHumanInput: () => humanAcks.size > 0,
+      heldHumanInputCount: () => humanAcks.size,
       end,
       interrupt,
       // The live child: a Ruling 13 respawn replaces it (`onPidChange` tells the caller who read it).

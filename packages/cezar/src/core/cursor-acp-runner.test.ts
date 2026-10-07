@@ -27,6 +27,35 @@ async function withSession(prompt: string, body: (session: AgentSession, v1: Age
   const session = runner.startSession({ cwd: process.cwd(), userPrompt: prompt, timeoutMs: 5000 }, e => v1.push(e), { onUiEvent: e => v2.push(e) });
   try { await body(session, v1, v2); } finally { session.interrupt(); await session.result.catch(() => {}); vi.unstubAllEnvs(); }
 }
+it('holdsHumanInput is true while a follow-up is queued behind a busy turn (#486)', async () => {
+  await withSession('mock:hold', async (session, v1) => {
+    await new Promise(r => setTimeout(r, 40));
+    expect(session.sendMessage([{ type: 'text', text: 'queued-486-a' }])).toBe(true);
+    expect(session.sendMessage([{ type: 'text', text: 'queued-486-b' }])).toBe(true);
+    expect(session.heldHumanInputCount?.()).toBe(2);
+    expect(session.holdsHumanInput()).toBe(true);
+    expect(session.holdsHumanInput()).toBe((session.heldHumanInputCount?.() ?? 0) > 0);
+    session.discardQueuedMessages();
+    expect(session.holdsHumanInput()).toBe(false);
+    expect(session.heldHumanInputCount?.()).toBe(0);
+    expect(session.holdsHumanInput()).toBe((session.heldHumanInputCount?.() ?? 0) > 0);
+    await waitFor(() => v1.some(e => e.type === 'turn-end'));
+  });
+});
+it('holdsHumanInput is false after the queued turn starts (#486)', async () => {
+  await withSession('mock:hold', async (session, v1) => {
+    await new Promise(r => setTimeout(r, 40));
+    expect(session.sendMessage([{ type: 'text', text: 'queued-then-run-a' }])).toBe(true);
+    expect(session.sendMessage([{ type: 'text', text: 'queued-then-run-b' }])).toBe(true);
+    expect(session.heldHumanInputCount?.()).toBe(2);
+    expect(session.holdsHumanInput()).toBe(true);
+    expect(session.holdsHumanInput()).toBe((session.heldHumanInputCount?.() ?? 0) > 0);
+    await waitFor(() => v1.filter(e => e.type === 'turn-end').length >= 1 && !session.holdsHumanInput());
+    expect(session.holdsHumanInput()).toBe(false);
+    expect(session.heldHumanInputCount?.()).toBe(0);
+    expect(session.holdsHumanInput()).toBe((session.heldHumanInputCount?.() ?? 0) > 0);
+  });
+});
 it('streams tools and complete v1 text, then accepts another turn on the same process', async () => {
   await withSession('inspect', async (session, v1) => {
     await waitFor(() => v1.some(e => e.type === 'turn-end'));

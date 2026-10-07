@@ -71,9 +71,10 @@ export class CodexAppServerRpc {
     return this.nextId++;
   }
 
-  request(method: string, params: unknown): Promise<Record<string, unknown>> {
+  request(method: string, params: unknown, onId?: (id: number) => void): Promise<Record<string, unknown>> {
     if (this.closed) return Promise.reject(this.closed);
     const id = this.allocateId();
+    onId?.(id);
     const promise = new Promise<Record<string, unknown>>((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
     });

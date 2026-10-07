@@ -546,6 +546,29 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
     },
   );
 
+  it('holdsHumanInput tracks humanAcks until the prompt response (#486)', async () => {
+    let held = false;
+    let countWhileHeld = 0;
+    let countAfter = -1;
+    const { events } = await runSession(spec('mock:steer-tool'), (event, session) => {
+      if (event.type === 'tool-call' && event.id === 'tool-steer') {
+        expect(session.sendMessage([{ type: 'text', text: 'human-ack-1' }])).toBe(true);
+        expect(session.sendMessage([{ type: 'text', text: 'human-ack-2' }])).toBe(true);
+        held = session.holdsHumanInput();
+        countWhileHeld = session.heldHumanInputCount?.() ?? 0;
+        expect(held).toBe(countWhileHeld > 0);
+      }
+      if (event.type === 'turn-end') {
+        countAfter = session.heldHumanInputCount?.() ?? 0;
+        expect(session.holdsHumanInput()).toBe(countAfter > 0);
+      }
+    });
+    expect(held).toBe(true);
+    expect(countWhileHeld).toBe(2);
+    expect(countAfter).toBe(0);
+    expect(events.some(e => e.type === 'turn-end')).toBe(true);
+  });
+
   it('a mid-turn agent steer rejected before admission rejects only its submission', async () => {
     let acknowledged: Promise<void> | boolean | undefined;
     const consumed: string[][] = [];

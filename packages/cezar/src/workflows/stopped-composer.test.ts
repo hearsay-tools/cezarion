@@ -16,7 +16,7 @@ vi.mock('../core/runner-factory.ts', () => ({ createRunner: () => ({
   startSession: (spec: AgentRunSpec) => {
     captured.specs.push(spec);
     return { result: new Promise(resolve => { captured.release = () => resolve({ text: 'ok', toolCalls: [], tokensUsed: 0 }); }),
-      sendMessage: () => true, discardQueuedMessages: () => {}, end: () => {}, interrupt: () => {}, open: true };
+      sendMessage: () => true, discardQueuedMessages: () => {}, holdsHumanInput: () => false, end: () => {}, interrupt: () => {}, open: true };
   },
 }) }));
 const workflow = { name: 'original', source: 'built-in' as const, steps: [{ id: 'work', prompt: '{{task}}', allowedTools: ['Read'] }] };

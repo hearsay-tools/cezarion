@@ -78,6 +78,8 @@ export function startManagedSession(
       } catch (error) { rollback(); throw error; }
     },
     discardQueuedMessages: () => live.discardQueuedMessages(),
+    holdsHumanInput: () => live.holdsHumanInput(),
+    ...(live.heldHumanInputCount ? { heldHumanInputCount: () => live.heldHumanInputCount!() } : {}),
     end: () => { stop(); live.end(); },
     interrupt: () => { stop(); live.interrupt(); },
   };
