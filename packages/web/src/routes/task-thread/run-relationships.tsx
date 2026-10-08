@@ -289,15 +289,13 @@ function CleanUpWorker({ parentRunId, worker }: { parentRunId: string; worker: W
  *
  * A pending cleanup retries on its own, backing off to hourly; once its retries see nothing
  * change it needs attention (hearsay-tools/cezarion#879). The line says which, when the next check is, and that
- * Retry clean up tries at once. The countdown re-renders on the slow clock: an hourly retry
- * writes nothing in between, so no data update would correct it.
+ * Retry clean up tries at once.
  */
 function Cleanup({ state }: { state: WorkerDestroyView }) {
-  const now = useNow(30_000)
   const tidy = state.phase === 'complete' && state.remaining.length === 0 && state.error === undefined
   if (tidy) return null
   const retry = state.phase === 'complete' ? undefined : state.retry
-  const next = retry && <time dateTime={retry.nextAt} title={new Date(retry.nextAt).toLocaleString()}>{relativeIn(now, Date.parse(retry.nextAt))}</time>
+  const next = retry && <NextCheck at={retry.nextAt} />
   return <p className="px-2 pb-2 break-words">
     {retry?.needsAttention ? 'Cleanup needs attention' : state.phase === 'incomplete' ? 'Cleanup incomplete' : state.phase === 'complete' ? 'Cleanup complete' : `Cleanup ${state.phase}`}
     {state.remaining.length ? ` — remaining: ${state.remaining.join(', ')}` : ''}
@@ -305,4 +303,11 @@ function Cleanup({ state }: { state: WorkerDestroyView }) {
     {retry?.needsAttention ? <>. Nothing changed after {retry.attempts} automatic attempts; checking hourly, next check {next}. Retry clean up to try now.</>
       : retry ? <>. Retrying automatically, next attempt {next}.</> : null}
   </p>
+}
+
+/** When a retrying cleanup checks next. It re-renders on the slow clock, since an hourly retry writes
+ * nothing in between; only a row with a pending retry mounts one, however large the family. */
+function NextCheck({ at }: { at: string }) {
+  const now = useNow(30_000)
+  return <time dateTime={at} title={new Date(at).toLocaleString()}>{relativeIn(now, Date.parse(at))}</time>
 }

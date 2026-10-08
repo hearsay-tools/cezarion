@@ -281,6 +281,26 @@ it('keeps the next-check countdown true while the cockpit sits open (hearsay-too
     expect(row.querySelector('time')?.textContent).toBe('in 32m')
   } finally { vi.useRealTimers() }
 })
+it('runs a countdown clock only for a cleanup that is retrying (hearsay-tools/cezarion#879)', async () => {
+  const intervals = vi.spyOn(globalThis, 'setInterval')
+  const countdowns = () => intervals.mock.calls.filter(([, ms]) => ms === 30_000).length
+  // A family of finished, tidy and incomplete-without-retry workers: no row has a next check.
+  const quiet = [
+    { ...workerAt(1), status: 'done' as const, destroy: { requestedAt: at, phase: 'complete' as const, remaining: [] } },
+    { ...workerAt(2), status: 'done' as const, destroy: undefined },
+    { ...workerAt(3), status: 'done' as const, destroy: { requestedAt: at, phase: 'incomplete' as const, remaining: ['branch' as const] } },
+  ]
+  setup(rootOf(quiet), async () => json({ workers: quiet, capacity: capacityOf(2, 3) }))
+  await waitFor(async () => expect((await section()).querySelectorAll('[aria-label^="Worker task"]').length).toBe(3))
+  expect(countdowns()).toBe(0)
+  cleanup(); intervals.mockClear()
+  const retrying = { ...workerAt(4), status: 'done' as const, destroy: { requestedAt: at, phase: 'incomplete' as const, remaining: ['branch' as const],
+    retry: { attempts: 2, nextAt: new Date(Date.now() + 120_000).toISOString() } } }
+  setup(rootOf([...quiet, retrying]), async () => json({ workers: [...quiet, retrying], capacity: capacityOf(3, 4) }))
+  await within(await section()).findByText(/Retrying automatically/)
+  expect(countdowns()).toBe(1)
+})
+
 it('offers Retry clean up while a destroy is pending, and plain Clean up otherwise (hearsay-tools/cezarion#879)', async () => {
   const pending: WorkerInspection = { ...worker, status: 'done', destroy: { requestedAt: at, phase: 'incomplete', remaining: ['branch'] } }
   const fresh: WorkerInspection = { ...workerAt(3), status: 'done', destroy: undefined }
