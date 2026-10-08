@@ -399,7 +399,10 @@ describe('conversation message surfaces', () => {
     expect(user?.getAttribute('data-role')).toBe('user')
     expect(agent?.getAttribute('data-role')).toBe('agent')
     expect(user?.querySelector(':scope > p')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('YOUR MESSAGE')
-    expect(agent?.querySelector(':scope > p')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('AGENT RESPONSE')
+    const agentHeader = agent?.querySelector(':scope > p')
+    expect(agentHeader?.textContent).toContain('AGENT RESPONSE')
+    expect(agentHeader?.contains(screen.getByRole('button', { name: 'Copy reply' }))).toBe(true)
+    expect(agentHeader?.contains(screen.getByRole('button', { name: 'Copy reply as markdown' }))).toBe(true)
     expect(document.querySelector('[data-slot="note-line"]')).toBeNull()
     expect(document.querySelector('[data-slot="tool-card"]')).toBeNull()
     expect(document.querySelector('[data-slot="reasoning"]')).toBeNull()
@@ -563,24 +566,33 @@ describe('AssistantMessage copy actions', () => {
     return item
   }
 
-  it('shows Copy and Copy markdown on an agent reply, and neither on a tool-call row', () => {
+  it('shows Copy and Copy markdown in the agent header, always visible, and neither on a tool-call row', () => {
     const item = goldenItem(bashAndScreenshot, 'toolu_mock_1', 'completed')
     render(
       <MemoryRouter>
-        <AssistantMessage text="The answer is 42." />
+        <AssistantMessage text="The answer is 42." ts="2026-07-31T14:32:00.000Z" />
         <ToolCard item={item} />
       </MemoryRouter>,
     )
+    const article = screen.getByRole('article', { name: 'Agent response' })
+    const header = article.querySelector(':scope > p')
     const copy = copyButton()
     const markdown = markdownButton()
+    expect(header).not.toBeNull()
+    expect(header?.contains(copy)).toBe(true)
+    expect(header?.contains(markdown)).toBe(true)
+    expect(header?.querySelector('[data-slot="message-time"]')).not.toBeNull()
     expect(copy.textContent).toContain('Copy')
     expect(markdown.textContent).toContain('Copy markdown')
     expect(copy.getAttribute('tabindex')).not.toBe('-1')
     expect(markdown.getAttribute('tabindex')).not.toBe('-1')
     expect(copy.className).toMatch(/(?:^|[\s:])(?:min-h-11|h-11|size-11)(?:\s|$)/)
     expect(copy.className).toMatch(/(?:^|[\s:])(?:min-w-11|w-11|size-11)(?:\s|$)/)
-    expect(document.querySelector('[data-slot="assistant-message"] [data-slot="bubble-actions"]')?.className)
-      .toContain('no-hover:opacity-100')
+    const actions = header?.querySelector('[data-slot="bubble-actions"]')
+    expect(actions).not.toBeNull()
+    expect(actions?.className).not.toMatch(/(?:^|[\s:])opacity-0(?:\s|$)/)
+    expect(actions?.className).not.toMatch(/group-hover:/)
+    expect(article.querySelector(':scope > div [data-slot="bubble-actions"]')).toBeNull()
     const tool = document.querySelector('[data-slot="tool-card"]')!
     expect(tool.querySelector('[data-slot="bubble-actions"]')).toBeNull()
     expect(screen.queryAllByRole('button', { name: 'Copy reply' })).toHaveLength(1)
