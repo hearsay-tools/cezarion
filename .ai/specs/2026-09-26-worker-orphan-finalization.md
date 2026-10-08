@@ -332,7 +332,10 @@ skipped: a failed Git step (a holder only Windows' checked removal can see, a st
 contention (every attempt takes that lock, so its stamp cannot be in the key) or a throw. The removal
 reports it through `RemovalReport.unexplained`, and it retries in full on the backoff. So is a holder
 check that names no process: what decides it includes scratch ownership evidence (the owner marker,
-the fallback pointer, removal receipts) that the key does not read.
+the fallback pointer, removal receipts) that the key does not read. So is every refusal that rests on
+repository state outside the key: the worktree's HEAD on another branch, the branch checked out by
+another registered worktree, and a receipt-gone destroy refused by an ownership marker in any linked
+admin directory. Each remaining refusal in `removeOwnedWorkspace` reads only keyed inputs.
 
 **Retry state and attention.** Every tick writes the run's top-level `destroyRetry`
 (`{ attempts, nextAt, needsAttention? }`), never the strict worker delegation, so an older cezar

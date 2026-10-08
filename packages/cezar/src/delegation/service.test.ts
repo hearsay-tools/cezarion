@@ -864,6 +864,25 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
     expect(existsSync(workspace.path)).toBe(false);
   });
 
+  it.runIf(linux)('a receipt-gone destroy that a stray admin marker refuses is retried in full once the marker is repaired', async () => {
+    cadence({ fastMs: 200, fastCount: 10, capMs: 2_000 });
+    const { workerId, workspace } = await settled(false);
+    const common = await gitCommonDir(f.root);
+    // #878's shape: worktree, branch and receipt gone, but a leftover admin directory still names this resource.
+    execFileSync('git', ['worktree', 'remove', workspace.path], { cwd: f.root });
+    execFileSync('git', ['branch', '-D', workspace.branch], { cwd: f.root });
+    rmSync(join(common, 'cezar-owned-workspaces', `${workspace.resourceId}.json`));
+    const stray = join(common, 'worktrees', 'stray');
+    mkdirSync(stray, { recursive: true, mode: 0o700 });
+    writeFileSync(join(stray, 'cezar-owned-resource'), workspace.resourceId, { mode: 0o600 });
+    expect(await f.service.destroy(f.caller, { workerId })).toMatchObject({ state: 'incomplete' });
+    await vi.waitFor(() => expect(destroyOf(workerId)?.retry?.attempts).toBeGreaterThanOrEqual(2), { timeout: 10_000 });
+    expect(destroyOf(workerId)?.phase).toBe('incomplete');
+    // Repaired in place: the `worktrees` directory itself does not change.
+    writeFileSync(join(stray, 'cezar-owned-resource'), randomUUID());
+    await vi.waitFor(() => expect(destroyOf(workerId)).toMatchObject({ phase: 'complete', remaining: [] }), { timeout: 10_000 });
+  });
+
   it.runIf(linux)('Clean up resets the backoff: a full attempt now, and the next tick at the fast cadence', async () => {
     cadence({ fastMs: 1_000, fastCount: 0, capMs: 5_000 }, 1);
     const { workerId } = await settled();

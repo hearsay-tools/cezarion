@@ -319,6 +319,9 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
           assertCurrent?.();
           if (await absent()) remaining = [];
         }
+        // Markers in any linked admin directory decide this, and a retrying caller's observation
+        // does not read them all: a refusal here is unexplained (hearsay-tools/cezarion#879).
+        if (remaining.length) report?.unexplained?.();
         return result();
       }
       if (!same(receipt.workspace, workspace)) return result();
