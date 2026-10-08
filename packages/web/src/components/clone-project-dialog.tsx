@@ -105,7 +105,11 @@ export function CloneProjectDialog({
 
   useEffect(() => onLiveReconcile(async signal => {
     if (!isPending) return
-    const { progress: event } = await getCheckoutProgress(checkoutId, { signal })
+    // Progress is optional; the checkout mutation owns success/error reporting. A
+    // failed progress refresh must not hold the document's live restoration gate.
+    const response = await getCheckoutProgress(checkoutId, { signal }).catch(() => null)
+    if (!response) return
+    const { progress: event } = response
     if (signal.aborted || event?.checkoutId !== idRef.current) return
     setProgress(event?.phase === 'cloning' ? event.line ?? null : null)
   }), [isPending, checkoutId])
